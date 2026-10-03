@@ -1202,6 +1202,11 @@ export interface ProContext {
   // PR-detail enrichment seam. The plugin registers an enricher that computes Jira/Linear
   // ticket links (compute-on-read) from a PR's title + head branch; core getPrDetail calls it
   // and sets PrDetail.tickets. Inert in OSS (tickets stays null).
+  // Repo-synced seam: every registered handler is called (fire-and-forget, errors swallowed) after
+  // each COMPLETED repo walk, outside every transaction (sync/repo-synced-hooks.ts). Today: the
+  // plugin's Jira ticket worker kick — Jira is read when a PR is RECEIVED, not when it is viewed.
+  // ⚠ OPTIONAL, SO apiVersion STAYS 22 — a trailing optional member (the narrow additive test).
+  registerRepoSyncedHook?(handler: (args: { accountId: number; repoId: number }) => void | Promise<void>): void;
   registerPrDetailEnricher(e: PrDetailEnricher): void;
   // GitHub reads/writes + the advisor's config-PR primitive (per-account). Inert in OSS.
   github: GithubSeam;

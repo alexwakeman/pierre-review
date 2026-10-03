@@ -30,7 +30,6 @@ import { useFilters } from '../store/filters.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
 import { anyReviewInFlight, resolveListTicket, type ListTicketResult } from '../lib/claudeReviewColumn.js';
 import { anyFixRunning } from '../lib/claudeAutoReview.js';
-import { browserAcMemory } from '../lib/jiraTicket.js';
 import { ticketDraftFromStored, ticketsRequestFromCheck } from '../lib/claudeReviewFollowUp.js';
 
 export function useClaudeReview(prId: number | null) {
@@ -194,7 +193,7 @@ export function useClaudeReviewStates(prIds: readonly number[], enabled: boolean
  * Start a review from the Open PRs table: the default model, no picker, through
  * the SAME start route and queue as the tab. The user story is resolved ON CLICK only
  * (`resolveListTicket`): a re-review reuses the previous run's stored ticket, otherwise the PR's
- * first fillable Jira ticket is fetched and filled the panel's way. The run starts either way; the
+ * first fillable Jira ticket is read from the stored tickets and filled the panel's way. The run starts either way; the
  * returned note says when it went without a story.
  */
 export function useStartReviewFromList(prId: number) {
@@ -224,7 +223,6 @@ export function useStartReviewFromList(prId: number) {
             })
           ).tickets,
         loadDetails: (key) => api.jiraTicket(prId, key),
-        memory: browserAcMemory(),
       });
       await api.generateClaudeReview(
         prId,

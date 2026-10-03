@@ -161,7 +161,11 @@ import type {
   WorkspaceProSettings,
   WorkspaceProSettingsUpdate,
   JiraFieldListResponse,
+  TicketLinksBody,
+  TicketLinksResponse,
   JiraTicketDetails,
+  JiraTicketRefreshBody,
+  JiraAcFieldBody,
   WorkspaceSlackTargetResponse,
   WorkspaceSlackTargetUpdate,
   Repo,
@@ -1161,11 +1165,32 @@ export const api = {
   // The acceptance-criteria field picker; doubles as the Settings connection test. Click-gated.
   jiraFields: (workspaceId: number) =>
     get<JiraFieldListResponse>(withQuery('/api/pro/jira/fields', workspaceParam(workspaceId))),
-  // One ticket's title / description / criteria for Claude Review's panel. The server refuses a
-  // key it did not itself detect on this PR, so this is not a general Jira lookup.
+  // One ticket's STORED title / description / criteria / status / assignee for Claude Review's
+  // panel — read by the plugin's worker when the PR was received, so this makes no Jira call. The
+  // server refuses a key it did not itself detect on this PR, so this is not a general Jira lookup.
   jiraTicket: (prId: number, key: string) =>
     get<JiraTicketDetails>(
       `/api/pro/prs/${prId}/jira-ticket?key=${encodeURIComponent(key)}`,
+    ),
+  // Read ONE detected ticket from Jira again NOW (the plugin's worker path), store it, answer it.
+  refreshJiraTicket: (prId: number, key: string) =>
+    fetch(
+      `/api/pro/prs/${prId}/jira-ticket/refresh`,
+      jsonBody('POST', { key } satisfies JiraTicketRefreshBody),
+    ).then((r) => handle<JiraTicketDetails>(r)),
+  // The acceptance-criteria field for this ticket's ISSUE TYPE in the PR's workspace (null = back
+  // to the default name match). Answers the ticket re-read with it.
+  setJiraAcField: (prId: number, key: string, fieldId: string | null) =>
+    fetch(
+      `/api/pro/prs/${prId}/jira-ticket/ac-field`,
+      jsonBody('PUT', { key, fieldId } satisfies JiraAcFieldBody),
+    ).then((r) => handle<JiraTicketDetails>(r)),
+  // The Open PRs cards' ticket row: every listed PR's detected tickets (+ stored Jira title, status
+  // and assignee) in
+  // ONE request for the whole board. At most TICKET_LINKS_MAX_PRS ids (the route 400s over).
+  ticketLinks: (prIds: number[]) =>
+    fetch('/api/pro/ticket-links', jsonBody('POST', { prIds } satisfies TicketLinksBody)).then((r) =>
+      handle<TicketLinksResponse>(r),
     ),
 
   // ---- The PER-WORKSPACE Slack digest (packages/pro `workspace_slack_targets`) ----

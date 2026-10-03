@@ -152,7 +152,13 @@ export function checkClaudeReviewTickets(
   for (let i = 0; i < list.length; i += 1) {
     const one = checkClaudeReviewTicket(list[i]);
     if (!one.ok) {
-      const message = list.length > 1 ? `Ticket ${i + 1}: ${one.message}` : one.message;
+      // Named as every other surface names it: the Jira key, else "Story N" where N counts the
+      // stories that will be STORED (blank entries are dropped below, so a raw position would
+      // disagree with the panel's tabs and the run's results).
+      const raw = list[i];
+      const key = raw?.source === 'jira' && typeof raw.key === 'string' ? raw.key.trim() : '';
+      const name = storyName({ key: TICKET_KEY_RE.test(key) ? key : null }, tickets.length);
+      const message = list.length > 1 ? `${name}: ${one.message}` : one.message;
       return { ok: false, index: i, field: one.field, message };
     }
     if (one.ticket) tickets.push(one.ticket);

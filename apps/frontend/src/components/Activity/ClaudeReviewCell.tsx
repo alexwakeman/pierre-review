@@ -29,6 +29,7 @@ import {
 import { AUTO_REVIEW_LABEL } from './pendingLabels.js';
 import { fixPillLabel } from '../../lib/claudeAutoReview.js';
 import { unlockReviewSound } from '../../lib/sound.js';
+import { assessedStoryPills } from '../../lib/storyTabs.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { CheckIcon, SparkleIcon } from '../Icons.js';
 
@@ -235,7 +236,7 @@ export function ClaudeReviewPanel({
   const tally = summary != null ? followUpTally(summary.followUp) : null;
   const ciLabel = summary != null ? ciDiagnosisLabel(summary.ci) : null;
   const toFix = summary != null ? threadsToFixLabel(summary) : null;
-  const stories = (summary?.tickets ?? []).filter((t) => t.alignment != null);
+  const stories = assessedStoryPills(summary?.tickets ?? []);
   const posted =
     summary == null
       ? null
@@ -298,13 +299,13 @@ export function ClaudeReviewPanel({
         <>
           <Rule />
           <Group>
-            {stories.map((t, i) => (
+            {stories.map(({ ticket: t, label }) => (
               <span
-                key={i}
+                key={label}
                 className={`${PILL} ${TICKET_ALIGNMENT_CLASS[t.alignment!]}`}
                 title={`${t.title ?? 'User story'}: ${TICKET_ALIGNMENT_LABEL[t.alignment!]}`}
               >
-                {t.key ?? (stories.length > 1 ? `Story ${i + 1}` : 'Story')} · {ALIGNMENT_SHORT[t.alignment!]}
+                {label} · {ALIGNMENT_SHORT[t.alignment!]}
               </span>
             ))}
             {tally != null && (

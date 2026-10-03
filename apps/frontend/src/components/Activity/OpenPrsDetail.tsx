@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react';
 import type { TimelinePr } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
-import { useScopedOpenPrs } from '../../hooks/useTriage.js';
+import { useProCapabilities, useScopedOpenPrs } from '../../hooks/useTriage.js';
+import { useOpenPrsView } from '../../store/openPrsView.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { indexUsers } from '../../lib/ui.js';
 import { RefreshIcon } from '../Icons.js';
 import { MetricRepoFilter } from './MetricRepoFilter.js';
-import { OpenPrsCards, OpenPrsSortMenu } from './OpenPrsCards.js';
+import { OpenPrsCards, OpenPrsSortMenu, OpenPrsViewToggle } from './OpenPrsCards.js';
 import type { OpenPrsSort } from '../../lib/openPrsSort.js';
 
 // The fixed Open PRs tab — one of the three permanent views (Activity · Open PRs · Timeline), so it
@@ -15,6 +16,9 @@ import type { OpenPrsSort } from '../../lib/openPrsSort.js';
 // opener (the tab chip, the Reports → Flow metrics "Open PRs" tile, the per-repo "Show all N open
 // PRs" footer) just reveals it; the footer also pre-selects its repo in the tab's own dropdown.
 // Clicking a card opens the PR's detail tab. The order is the header's Sort menu (no column headings).
+// With the tracker on (Pro `issueLinks`) the header adds "Group by ticket / List" — grouped is the
+// default, remembered per viewer (store/openPrsView.ts); without it the toggle is absent and the
+// page is the list. The header's count is distinct PRs: a PR shown in two ticket stacks is one PR.
 
 export function OpenPrsDetail(): JSX.Element {
   // ALWAYS the workspace-wide key: byte-identical to `useWorkspaceOpenPrs` (the tab chip's count,
@@ -36,6 +40,8 @@ export function OpenPrsDetail(): JSX.Element {
   const prs = useMemo(() => data?.prs ?? [], [data]);
   // null = the default activity order.
   const [sort, setSort] = useState<OpenPrsSort | null>(null);
+  const ticketsOn = useProCapabilities().issueLinks;
+  const view = useOpenPrsView((s) => s.view);
 
   // The repo dropdown narrows the loaded rows client-side (null = all). It lives in the store so
   // the per-repo footer can seed it, but is deliberately NOT `filters.repoIds` (the Timeline
@@ -93,6 +99,7 @@ export function OpenPrsDetail(): JSX.Element {
           {draftCount > 0 && ` · ${draftCount} draft${draftCount === 1 ? '' : 's'}`}
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          {ticketsOn && <OpenPrsViewToggle />}
           <OpenPrsSortMenu sort={sort} onChange={setSort} />
           <MetricRepoFilter repos={repoOptions} selected={repoSel} onChange={setRepoSel} />
           <button
@@ -115,6 +122,7 @@ export function OpenPrsDetail(): JSX.Element {
         isLoading={isLoading}
         isError={isError}
         sort={sort}
+        grouped={ticketsOn && view === 'grouped'}
         onOpenPr={openTab}
         emptyLabel={
           repoSel != null && prs.length > 0

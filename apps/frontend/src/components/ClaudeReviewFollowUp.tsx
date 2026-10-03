@@ -1,6 +1,6 @@
 // The Claude Review tab's follow-up and user-story pieces, kept out of the 2,000-line tab:
 //
-//   ClaudeReviewTicketPanel     — the "User stories (optional)" input, COLLAPSED by default.
+//   ClaudeReviewTicketPanel     — the "User stories (optional)" input: one tab per story.
 //   ClaudeReviewTicketResults   — how the run measured up against ONE user story (read-only; its
 //                                 unmet items are findings, each row links to its card).
 //   ClaudeReviewFollowUpSection — what became of the previous review's comments.
@@ -15,8 +15,8 @@
 //    are shown separately and labelled as Claude's.
 //  - Chips are 11px or larger, sentences 12px or larger, no uppercase-with-tracking labels, and
 //    every muted colour is paired for both themes (`textContrast.test.ts`).
-import { Fragment, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   CLAUDE_REVIEW_MAX_TICKETS,
   FOLLOW_UP_STATUS_LABEL,
@@ -42,19 +42,29 @@ import type {
 import { api } from '../api/client.js';
 import {
   acCandidateLabel,
-  applyAcCandidate,
   browserAcMemory,
-  fillDraftFromJira,
   fillableJiraTickets,
-  jiraProvenance,
   unfillableJiraTickets,
   jiraFillNote,
   jiraSiteOf,
-  readRememberedAcField,
-  rememberAcField,
+  legacyAcFieldToMigrate,
 } from '../lib/jiraTicket.js';
 import {
-  EMPTY_TICKET_DRAFT,
+  acFieldText,
+  addStoryTab,
+  autoPullKeys,
+  clampTab,
+  createStoryPullMemory,
+  jiraKeysToPull,
+  jiraStoryFromDetails,
+  mergePulledStories,
+  pullJiraTickets,
+  pullNote,
+  pulledAcField,
+  removeStoryTab,
+  storyTabLabel,
+} from '../lib/storyTabs.js';
+import {
   FOLLOW_UP_STATUS_CLASS,
   SEVERITY_CLASS,
   TICKET_ALIGNMENT_CLASS,
@@ -70,7 +80,7 @@ import {
   ticketsPanelHint,
   type TicketDraft,
 } from '../lib/claudeReviewFollowUp.js';
-import { CheckIcon, ChevronIcon } from './Icons.js';
+import { CheckIcon, ChevronIcon, CloseIcon, PlusIcon, RefreshIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
 import { JiraStoryView } from './ClaudeReviewTickets.js';
 import { ReviewSection } from './ReviewSection.js';
@@ -168,18 +178,14 @@ function TicketField({
   );
 }
 
-/** One typed or pasted story: three editable fields and Remove. */
+/** One typed or pasted story: three editable fields (its tab carries the name and the remove). */
 function ManualStoryFields({
-  label,
   value,
   onChange,
-  onRemove,
   errorFor,
 }: {
-  label: string;
   value: TicketDraft;
   onChange: (next: TicketDraft) => void;
-  onRemove: () => void;
   errorFor: (f: ClaudeReviewTicketField) => string | null;
 }): JSX.Element {
   const baseId = useId();
@@ -193,13 +199,7 @@ function ManualStoryFields({
   const describedBy = (f: ClaudeReviewTicketField): string | undefined =>
     errorFor(f) != null ? `${ids[f]}-error` : undefined;
   return (
-    <div className="space-y-2 rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800">
-      <div className="flex items-center gap-2">
-        <span className="flex-1 text-xs font-semibold text-gray-700 dark:text-gray-200">{label}</span>
-        <button type="button" onClick={onRemove} className={BTN}>
-          Remove
-        </button>
-      </div>
+    <div className="space-y-2">
       <TicketField id={ids.title} label="Title" field="title" value={value.title} error={errorFor('title')}>
         <input
           id={ids.title}
@@ -249,24 +249,42 @@ function ManualStoryFields({
   );
 }
 
-// A ticket this session fetched, kept for its candidates so the dropdown refills the criteria
-// with NO refetch.
+// A ticket this session fetched, kept for its candidates so the field picker needs no refetch to
+// open.
 interface FetchedJira {
   details: JiraTicketDetails;
   site: string | null;
   chosen: string;
 }
 
-/** The label a story goes by: its Jira key, else "Story N". */
+/** The label a story goes by in a run's results: its Jira key, else "Story N". */
 export function storyLabel(d: { key?: string | null }, index: number): string {
   return d.key != null && d.key !== '' ? d.key : `Story ${index + 1}`;
 }
 
+// The automatic pull's session memory (per PR): which detected-key set it already acted on, and
+// which keys the reader removed — so it runs once and never re-adds a removed story.
+const storyPullMemory = createStoryPullMemory();
+// A pulled ticket is the STORED row the plugin's worker wrote when the PR was received — reading it
+// makes no Jira call. It is reused from the query cache for this long (a remount, a tab switch,
+// "Pull all" after "Clear all"); Refresh and a field change read Jira again, server-side.
+const JIRA_TICKET_STALE_MS = 60_000;
+
+const TAB_ICON_BTN =
+  'rounded p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100';
+const PRIMARY_BTN =
+  'whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-300 dark:hover:bg-blue-900/30';
+const LINK_BTN = 'text-xs text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300';
+const SPINNER =
+  'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500 dark:border-gray-600 dark:border-t-blue-400';
+
 /**
- * The optional user stories — up to CLAUDE_REVIEW_MAX_TICKETS, each assessed on its own. COLLAPSED
- * by default; the header says when it holds something (" · 2 added" / " · needs a fix"), so a
- * closed panel never hides what Run sends. A story read from Jira is READ-ONLY (markdown); a typed
- * one is three editable fields. NO `maxLength` on any input — it would silently cut a paste.
+ * The optional user stories — up to CLAUDE_REVIEW_MAX_TICKETS, ONE TAB EACH (`lib/storyTabs.ts`).
+ * A tab pulled from Jira is READ-ONLY (markdown, ClaudeReviewTickets.tsx) with the field its
+ * criteria came from and Refresh; a typed one is three editable fields. Jira tickets detected on the
+ * PR are pulled AUTOMATICALLY once per PR per detected-key set (never re-adding one the reader
+ * removed); "Pull all from Jira" is the manual action. The header always says what Run sends
+ * (" · 2 stories" / " · needs a fix"). NO `maxLength` on any input — it would silently cut a paste.
  */
 export function ClaudeReviewTicketPanel({
   value,
@@ -275,6 +293,7 @@ export function ClaudeReviewTicketPanel({
   prId,
   tickets,
   prWorkspaceName,
+  autoPullReady,
 }: {
   value: TicketDraft[];
   onChange: (next: TicketDraft[]) => void;
@@ -283,49 +302,298 @@ export function ClaudeReviewTicketPanel({
   tickets: readonly TicketRef[] | null | undefined;
   // The workspace that OWNS this PR's repo — the one whose Jira token is used. null = unknown.
   prWorkspaceName?: string | null;
+  // The stored run has loaded, so the list is settled: the automatic pull waits for it, or the
+  // prefill from the latest run would land on top of (or under) what it pulled.
+  autoPullReady: boolean;
 }): JSX.Element {
+  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const bodyId = useId();
-  const [fetched, setFetched] = useState<{ prId: number; byKey: Record<string, FetchedJira> }>({
-    prId,
-    byKey: {},
-  });
-  const byKey = fetched.prId === prId ? fetched.byKey : {};
+  const tabsId = useId();
+  const [selectedRaw, setSelected] = useState(0);
+  const selected = clampTab(selectedRaw, value.length);
+  const [fetched, setFetchedState] = useState<Record<string, FetchedJira>>({});
+  const fetchedRef = useRef(fetched);
+  const setFetched = (next: Record<string, FetchedJira>): void => {
+    fetchedRef.current = next;
+    setFetchedState(next);
+  };
+  const [pulling, setPulling] = useState<string[]>([]);
+  const [note, setNote] = useState<string | null>(null);
+  const [fieldEditing, setFieldEditing] = useState<string | null>(null);
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   // The list as it is when an answer lands, not when a button was pressed.
   const latest = useRef(value);
   latest.current = value;
+  // An answer that lands after the panel unmounted (the reader opened another PR) is dropped.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  const fillable = useMemo(() => fillableJiraTickets(tickets), [tickets]);
+  const unfillable = unfillableJiraTickets(tickets);
+  const busy = pulling.length > 0;
   const hint = ticketsPanelHint(value, check);
   const full = value.length >= CLAUDE_REVIEW_MAX_TICKETS;
+  const pullable = jiraKeysToPull(fillable, value).keys;
 
+  const refFor = (key: string): TicketRef | null => fillable.find((t) => t.key === key) ?? null;
+  // The ONE way the panel reads a STORED ticket: through the query cache, so a remount or "Pull
+  // all" after "Clear all" reuses the answer.
+  const ticketKey = (key: string) => ['jira-ticket', prId, key] as const;
+  const fetchTicket = (key: string): Promise<JiraTicketDetails> =>
+    qc.fetchQuery({
+      queryKey: ticketKey(key),
+      queryFn: () => api.jiraTicket(prId, key),
+      staleTime: JIRA_TICKET_STALE_MS,
+    });
+  // A stored ticket, with an old per-browser criteria-field choice moved to the server ONCE.
+  const readStored = async (key: string, url: string): Promise<JiraTicketDetails> => {
+    const details = await fetchTicket(key);
+    const legacy = legacyAcFieldToMigrate(browserAcMemory(), url, details);
+    if (legacy == null) return details;
+    try {
+      const moved = await api.setJiraAcField(prId, key, legacy);
+      qc.setQueryData(ticketKey(key), moved);
+      return moved;
+    } catch {
+      return details;
+    }
+  };
+
+  const pull = async (keys: string[], auto: boolean): Promise<void> => {
+    if (keys.length === 0) return;
+    setPulling(keys);
+    setNote(null);
+    const res = await pullJiraTickets(keys, (k) => readStored(k, refFor(k)?.url ?? ''));
+    if (!alive.current) {
+      // Dropped: let the next mount of this PR try again.
+      if (auto) storyPullMemory.clearAutoPull(prId);
+      return;
+    }
+    const stories: TicketDraft[] = [];
+    const nextFetched = { ...fetchedRef.current };
+    for (const { key, details } of res.ok) {
+      const ref = refFor(key);
+      if (ref == null) continue;
+      const site = jiraSiteOf(ref.url);
+      const chosen = pulledAcField(details);
+      stories.push(jiraStoryFromDetails(ref, details, chosen));
+      nextFetched[key] = { details, site, chosen };
+    }
+    const merged = mergePulledStories(latest.current, stories);
+    if (merged.added.length + merged.refreshed.length > 0) onChange(merged.drafts);
+    if (merged.selected != null) setSelected(merged.selected);
+    setFetched(nextFetched);
+    setNote(pullNote(res.failed, merged.overCap));
+    setPulling([]);
+  };
+
+  // Rebuild ONE ticket's tab from what `load` answers (a server-side re-read, or a field change),
+  // with the field the server picked — or `override` ('' = "None of these", this tab only).
+  const refetchOne = async (
+    key: string,
+    load: () => Promise<JiraTicketDetails>,
+    override?: string,
+  ): Promise<JiraTicketDetails | null> => {
+    const ref = refFor(key);
+    if (ref == null) return null;
+    setPulling([key]);
+    setNote(null);
+    try {
+      const details = await load();
+      qc.setQueryData(ticketKey(key), details);
+      if (!alive.current) return details;
+      const site = jiraSiteOf(ref.url);
+      const chosen = override ?? pulledAcField(details);
+      const story = jiraStoryFromDetails(ref, details, chosen);
+      const cur = latest.current;
+      const at = cur.findIndex((d) => isJiraDraft(d) && d.key === key);
+      if (at >= 0) onChange(cur.map((d, j) => (j === at ? story : d)));
+      setFetched({ ...fetchedRef.current, [key]: { details, site, chosen } });
+      return details;
+    } catch (e) {
+      if (alive.current) setNote(pullNote([{ key, message: e instanceof Error ? e.message : String(e) }], []));
+      return null;
+    } finally {
+      if (alive.current) setPulling([]);
+    }
+  };
+
+  // The OTHER tabs of the same issue type: the field choice is per issue type, so their criteria
+  // moved too. Re-read their stored rows (no Jira call) and rebuild them.
+  const refreshSameType = async (key: string, issueTypeId: string | null | undefined): Promise<void> => {
+    if (issueTypeId == null) return;
+    const others = latest.current.filter(
+      (d) => isJiraDraft(d) && d.key != null && d.key !== key && d.issueTypeId === issueTypeId,
+    );
+    for (const d of others) {
+      const k = d.key as string;
+      const ref = refFor(k);
+      if (ref == null) continue;
+      try {
+        await qc.invalidateQueries({ queryKey: ticketKey(k) });
+        const details = await fetchTicket(k);
+        if (!alive.current) return;
+        const story = jiraStoryFromDetails(ref, details, pulledAcField(details));
+        const cur = latest.current;
+        const at = cur.findIndex((x) => isJiraDraft(x) && x.key === k);
+        if (at >= 0) onChange(cur.map((x, j) => (j === at ? story : x)));
+        setFetched({ ...fetchedRef.current, [k]: { details, site: jiraSiteOf(ref.url), chosen: pulledAcField(details) } });
+      } catch {
+        /* that tab keeps what it had; its own Refresh is there */
+      }
+    }
+  };
+
+  // Refresh: Jira is read again NOW, server-side (the worker's path), and the stored row answered.
+  const refresh = (d: TicketDraft): void => {
+    const key = d.key;
+    if (key == null) return;
+    void refetchOne(key, () => api.refreshJiraTicket(prId, key));
+  };
+  // A field picked by hand: saved for this ticket's ISSUE TYPE in the PR's workspace, so the worker,
+  // the auto review and every other ticket of the type use it. "None of these" ('') is this tab only.
+  const changeField = (key: string, id: string): void => {
+    setFieldEditing(null);
+    if (id === '') {
+      const cached = fetchedRef.current[key]?.details;
+      if (cached != null) void refetchOne(key, async () => cached, '');
+      return;
+    }
+    void refetchOne(key, () => api.setJiraAcField(prId, key, id)).then((details) =>
+      refreshSameType(key, details?.issueType?.id),
+    );
+  };
+  // Back to the default: the workspace's choice for the issue type is cleared; the name match decides.
+  const resetField = (d: TicketDraft): void => {
+    const key = d.key;
+    if (key == null) return;
+    setFieldEditing(null);
+    void refetchOne(key, () => api.setJiraAcField(prId, key, null)).then((details) =>
+      refreshSameType(key, details?.issueType?.id),
+    );
+  };
+  // "Change": open the picker, reading the ticket's fields first when this session has not.
+  const openFieldPicker = async (d: TicketDraft): Promise<void> => {
+    const key = d.key;
+    if (key == null) return;
+    if (fieldEditing === key) {
+      setFieldEditing(null);
+      return;
+    }
+    setFieldEditing(key);
+    if (fetchedRef.current[key] != null) return;
+    const ref = refFor(key);
+    if (ref == null) return;
+    try {
+      const details = await fetchTicket(key);
+      if (!alive.current) return;
+      setFetched({
+        ...fetchedRef.current,
+        [key]: { details, site: jiraSiteOf(ref.url), chosen: d.acField?.id ?? '' },
+      });
+    } catch (e) {
+      if (alive.current) {
+        setFieldEditing(null);
+        setNote(pullNote([{ key, message: e instanceof Error ? e.message : String(e) }], []));
+      }
+    }
+  };
+
+  // A removed Jira story: never auto-pulled again this session. (The criteria-field choice is the
+  // workspace's, per issue type — removing one story does not clear it; "Reset to default" does.)
+  const forgetJira = (ds: readonly TicketDraft[]): void => {
+    const keys = ds.filter(isJiraDraft).map((d) => d.key).filter((k): k is string => k != null);
+    if (keys.length === 0) return;
+    storyPullMemory.noteRemoved(prId, keys);
+    const next = { ...fetchedRef.current };
+    for (const k of keys) delete next[k];
+    setFetched(next);
+    if (fieldEditing != null && keys.includes(fieldEditing)) setFieldEditing(null);
+  };
+  const removeAt = (i: number): void => {
+    const d = latest.current[i];
+    if (d == null) return;
+    forgetJira([d]);
+    const r = removeStoryTab(latest.current, i, selected);
+    onChange(r.drafts);
+    setSelected(r.selected);
+    // Keep the keyboard on the strip: the tab that took this one's place.
+    requestAnimationFrame(() => tabRefs.current[r.selected]?.focus());
+  };
+  const clearAll = (): void => {
+    const n = latest.current.length;
+    if (n === 0) return;
+    if (!window.confirm(`Remove ${n === 1 ? 'the story' : `all ${n} stories`} from this review?`)) return;
+    forgetJira(latest.current);
+    onChange([]);
+    setSelected(0);
+    setNote(null);
+  };
+  const addStory = (): void => {
+    const r = addStoryTab(latest.current);
+    if (r == null) return;
+    onChange(r.drafts);
+    setSelected(r.selected);
+    setOpen(true);
+  };
+  const pullKeys = (keys: string[]): void => {
+    storyPullMemory.unremove(prId, keys);
+    setOpen(true);
+    void pull(keys, false);
+  };
   const replaceAt = (i: number, d: TicketDraft): void =>
     onChange(latest.current.map((x, j) => (j === i ? d : x)));
-  const removeAt = (i: number): void => onChange(latest.current.filter((_, j) => j !== i));
-  const onFilled = (ref: TicketRef, details: JiraTicketDetails, site: string | null, chosen: string, draft: TicketDraft): void => {
-    const story: TicketDraft = { ...draft, ...jiraProvenance(ref) };
-    const cur = latest.current;
-    const at = cur.findIndex((d) => d.key === ref.key);
-    if (at >= 0) onChange(cur.map((d, j) => (j === at ? story : d)));
-    else onChange([...cur, story]);
-    setFetched({ prId, byKey: { ...byKey, [ref.key]: { details, site, chosen } } });
-  };
-  const chooseAc = (i: number, key: string, id: string): void => {
-    const f = byKey[key];
-    const d = latest.current[i];
-    if (f == null || d == null) return;
-    // An EXPLICIT choice is remembered for this issue type on this Jira site (blank forgets).
-    rememberAcField(browserAcMemory(), f.site, f.details.issueType?.id, id);
-    replaceAt(i, applyAcCandidate(d, f.details.candidates, id));
-    setFetched({ prId, byKey: { ...byKey, [key]: { ...f, chosen: id } } });
-  };
   const errorAt =
     (i: number) =>
     (f: ClaudeReviewTicketField): string | null =>
       !check.ok && check.index === i && check.field === f ? check.message : null;
-  const addedKeys = new Set(value.map((d) => d.key).filter((k): k is string => k != null));
+
+  // THE AUTOMATIC PULL: once the stored run has loaded, pull every detected ticket not yet a tab
+  // and not removed by the reader — once per PR per detected-key set (`storyPullMemory`), with no
+  // retry: a failure is one line, and "Pull all" is there.
+  useEffect(() => {
+    if (!autoPullReady || pulling.length > 0) return;
+    const detected = fillable.map((t) => t.key);
+    if (!storyPullMemory.shouldAutoPull(prId, detected)) return;
+    const keys = autoPullKeys(storyPullMemory, prId, fillable, latest.current);
+    storyPullMemory.noteAutoPull(prId, detected);
+    if (keys.length === 0) return;
+    setOpen(true);
+    void pull(keys, true);
+    // `pull` reads everything else through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPullReady, prId, fillable]);
+
+  const onTabKeyDown = (e: KeyboardEvent<HTMLButtonElement>, i: number): void => {
+    const n = value.length;
+    let to: number | null = null;
+    if (e.key === 'ArrowRight') to = (i + 1) % n;
+    else if (e.key === 'ArrowLeft') to = (i - 1 + n) % n;
+    else if (e.key === 'Home') to = 0;
+    else if (e.key === 'End') to = n - 1;
+    else if (e.key === 'Delete') {
+      e.preventDefault();
+      removeAt(i);
+      return;
+    }
+    if (to == null) return;
+    e.preventDefault();
+    setSelected(to);
+    tabRefs.current[to]?.focus();
+  };
+
+  const current = value[selected];
+  const pullLabel = pullable.length === 1 ? `Pull ${pullable[0]} from Jira` : `Pull all from Jira (${pullable.length})`;
 
   return (
     <div className="mt-2 rounded border border-gray-200 dark:border-gray-800">
-      <div className="flex items-center gap-1 pr-2">
+      <div className="flex items-center gap-2 pr-2">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
@@ -338,76 +606,196 @@ export function ClaudeReviewTicketPanel({
           {hint !== '' && (
             <span className={`font-normal ${check.ok ? MUTED : ERROR_TEXT}`}>{hint}</span>
           )}
+          {busy && !open && <span className={`font-normal ${MUTED}`}>· pulling from Jira…</span>}
         </button>
+        {pullable.length > 0 && !busy && (
+          <button type="button" onClick={() => pullKeys(pullable)} className={PRIMARY_BTN}>
+            {pullLabel}
+          </button>
+        )}
         <InfoButton title="User stories">
           <p>
             Claude checks the change against each story and lists what is missing or was not asked
-            for. Each story gets its own result, which you can post to the pull request as a comment.
+            for. Up to {CLAUDE_REVIEW_MAX_TICKETS} per review.
           </p>
           <p className="mt-2">
-            Stories read from Jira are shown as they are in the ticket. Up to{' '}
-            {CLAUDE_REVIEW_MAX_TICKETS} per review.
+            Jira tickets named on the pull request are added when you open this tab, as Limn last
+            read them from Jira. Refresh reads one again. A story you remove is not added again unless
+            you ask.
           </p>
         </InfoButton>
       </div>
       {open && (
-        <div id={bodyId} className="space-y-2 border-t border-gray-200 px-2 py-2 dark:border-gray-800">
-          {value.map((d, i) => {
-            if (isJiraDraft(d)) {
-              const f = d.key != null ? byKey[d.key] : undefined;
-              return (
-                <JiraStoryView
-                  key={`jira-${d.key ?? i}`}
-                  draft={d}
-                  onRemove={() => removeAt(i)}
-                  acPicker={
-                    f != null && d.key != null ? (
-                      <AcFieldPicker fetched={f} onChoose={(id) => chooseAc(i, d.key as string, id)} />
-                    ) : undefined
-                  }
-                />
-              );
-            }
-            return (
-              <ManualStoryFields
-                key={`manual-${i}`}
-                label={storyLabel(d, i)}
-                value={d}
-                onChange={(next) => replaceAt(i, next)}
-                onRemove={() => removeAt(i)}
-                errorFor={errorAt(i)}
-              />
-            );
-          })}
-          {!check.ok && check.index == null && (
-            <p className={`text-xs ${ERROR_TEXT}`}>{check.message}</p>
+        <div id={bodyId} className="border-t border-gray-200 px-2 pb-2 pt-1.5 dark:border-gray-800">
+          {pullable.length > 1 && !busy && (
+            <div className="mb-1.5 flex flex-wrap items-center gap-1">
+              <span className={`text-xs ${MUTED}`}>Or pull one:</span>
+              {pullable.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => pullKeys([k])}
+                  aria-label={`Pull ${k} from Jira`}
+                  className={`${BTN} font-mono`}
+                >
+                  {k}
+                </button>
+              ))}
+            </div>
           )}
-          <div className="flex flex-wrap items-center gap-2">
-            <JiraFillButtons
-              prId={prId}
-              tickets={tickets}
-              addedKeys={addedKeys}
-              full={full}
-              onFilled={onFilled}
-              prWorkspaceName={prWorkspaceName ?? null}
-            />
+          {fillable.length === 0 && unfillable.length > 0 && (
+            <p className={`mb-1.5 text-xs ${MUTED}`}>
+              To pull {unfillable.map((t) => t.key).join(', ')}, add a Jira API token in Settings for the{' '}
+              {prWorkspaceName != null ? `${prWorkspaceName} workspace` : 'workspace this repository is in'}.
+            </p>
+          )}
+          <div className="flex flex-wrap items-end gap-x-1 gap-y-1 border-b border-gray-200 dark:border-gray-800">
+            <div role="tablist" aria-label="User stories" className="flex min-w-0 flex-wrap items-end gap-1">
+              {value.map((d, i) => {
+                const label = storyTabLabel(value, i);
+                const active = i === selected;
+                const bad = !check.ok && check.index === i;
+                const jira = isJiraDraft(d) && d.key != null;
+                return (
+                  <div
+                    key={jira ? `jira-${d.key}` : `typed-${i}`}
+                    role="presentation"
+                    className={`-mb-px flex items-center rounded-t border ${
+                      active
+                        ? 'border-gray-200 border-b-white bg-white dark:border-gray-800 dark:border-b-gray-950 dark:bg-gray-950'
+                        : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-900'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      id={`${tabsId}-tab-${i}`}
+                      ref={(el) => {
+                        tabRefs.current[i] = el;
+                      }}
+                      aria-selected={active}
+                      aria-controls={`${tabsId}-panel`}
+                      tabIndex={active ? 0 : -1}
+                      onClick={() => setSelected(i)}
+                      onKeyDown={(e) => onTabKeyDown(e, i)}
+                      className={`py-1 pl-2 pr-1 text-xs font-medium ${jira ? 'font-mono' : ''} ${
+                        bad ? ERROR_TEXT : active ? 'text-gray-900 dark:text-gray-100' : MUTED
+                      }`}
+                    >
+                      {label}
+                      {bad && <span className="sr-only"> (needs a fix)</span>}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeAt(i)}
+                      aria-label={`Remove ${label}`}
+                      title={`Remove ${label}`}
+                      tabIndex={active ? 0 : -1}
+                      className={`mr-1 ${TAB_ICON_BTN}`}
+                    >
+                      <CloseIcon size={10} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            {busy && (
+              <span role="status" className={`flex items-center gap-1.5 px-2 py-1 text-xs ${MUTED}`}>
+                <span className={SPINNER} aria-hidden="true" />
+                Pulling {pulling.join(', ')}…
+              </span>
+            )}
             {!full && (
               <button
                 type="button"
-                onClick={() => onChange([...latest.current, { ...EMPTY_TICKET_DRAFT }])}
-                className={BTN}
+                onClick={addStory}
+                className="flex items-center gap-1 px-2 py-1 text-xs text-blue-700 hover:underline dark:text-blue-300"
               >
-                Add a story
+                <PlusIcon size={11} />
+                Add story
+              </button>
+            )}
+            {value.length > 1 && (
+              <button type="button" onClick={clearAll} className={`ml-auto px-1 py-1 text-xs ${MUTED} hover:underline`}>
+                Clear all
               </button>
             )}
           </div>
+          {note != null && <p className={`mt-1.5 text-xs ${ERROR_TEXT}`}>{note}</p>}
+          {!check.ok && check.index !== selected && (
+            <p className={`mt-1.5 text-xs ${ERROR_TEXT}`}>{check.message}</p>
+          )}
+          {current != null && (
+            <div
+              role="tabpanel"
+              id={`${tabsId}-panel`}
+              aria-labelledby={`${tabsId}-tab-${selected}`}
+              tabIndex={0}
+              className="pt-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              {isJiraDraft(current) ? (
+                <JiraStoryView
+                  draft={current}
+                  actions={
+                    current.key != null && refFor(current.key) != null ? (
+                      <button type="button" onClick={() => refresh(current)} disabled={busy} className={`${BTN} inline-flex items-center gap-1`}>
+                        <RefreshIcon size={11} className={busy && pulling.includes(current.key) ? 'animate-spin' : undefined} />
+                        Refresh
+                      </button>
+                    ) : undefined
+                  }
+                  fieldControl={
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                        <span className={MUTED}>Criteria from:</span>
+                        <span className="font-medium text-gray-800 dark:text-gray-200">{acFieldText(current)}</span>
+                        {current.key != null && refFor(current.key) != null && (
+                          <button
+                            type="button"
+                            onClick={() => void openFieldPicker(current)}
+                            disabled={busy}
+                            aria-expanded={fieldEditing === current.key}
+                            className={LINK_BTN}
+                          >
+                            Change
+                          </button>
+                        )}
+                      </div>
+                      {fieldEditing != null && fieldEditing === current.key && (
+                        fetched[current.key] != null ? (
+                          <div className="rounded border border-gray-200 p-2 dark:border-gray-800">
+                            <AcFieldPicker
+                              fetched={fetched[current.key]!}
+                              onChoose={(id) => changeField(current.key as string, id)}
+                            />
+                            <button type="button" onClick={() => resetField(current)} disabled={busy} className={`mt-1.5 ${BTN}`}>
+                              Reset to default
+                            </button>
+                          </div>
+                        ) : (
+                          <p className={`text-xs ${MUTED}`}>Reading {current.key}…</p>
+                        )
+                      )}
+                    </div>
+                  }
+                />
+              ) : (
+                <ManualStoryFields
+                  key={`typed-${selected}`}
+                  value={current}
+                  onChange={(next) => replaceAt(selected, next)}
+                  errorFor={errorAt(selected)}
+                />
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-/** "Acceptance criteria from" — every custom text field on the fetched ticket. */
+/** "Take the criteria from" — every custom text field on the fetched ticket. */
 function AcFieldPicker({
   fetched,
   onChoose,
@@ -419,12 +807,12 @@ function AcFieldPicker({
   const { details, chosen } = fetched;
   const note = jiraFillNote(details, chosen);
   if (details.candidates.length === 0) {
-    return note != null ? <p className={`mt-1 text-xs ${MUTED}`}>{note}</p> : null;
+    return note != null ? <p className={`text-xs ${MUTED}`}>{note}</p> : null;
   }
   return (
-    <div className="mt-1">
+    <div>
       <label htmlFor={selectId} className="text-xs font-medium text-gray-700 dark:text-gray-200">
-        Acceptance criteria from
+        Take the criteria from
         {details.issueType != null && (
           <span className={`font-normal ${MUTED}`}> ({details.issueType.name})</span>
         )}
@@ -445,83 +833,6 @@ function AcFieldPicker({
       )}
       {note != null && <p className={`mt-0.5 text-xs ${MUTED}`}>{note}</p>}
     </div>
-  );
-}
-
-/**
- * "Add KEY" — one button per Jira ticket DETECTED on this PR whose workspace has a saved token
- * (`TicketRef.canFetchDetails`) and that is not already in the list. CLICK-GATED — nothing is
- * fetched on mount. A fill adds the ticket as a READ-ONLY story (or refreshes it), with the
- * criteria field preselected from the viewer's remembered choice for the issue type, else the
- * best name match, else blank.
- */
-function JiraFillButtons({
-  prId,
-  tickets,
-  addedKeys,
-  full,
-  onFilled,
-  prWorkspaceName,
-}: {
-  prId: number;
-  tickets: readonly TicketRef[] | null | undefined;
-  addedKeys: ReadonlySet<string>;
-  full: boolean;
-  onFilled: (
-    ref: TicketRef,
-    details: JiraTicketDetails,
-    site: string | null,
-    chosen: string,
-    draft: TicketDraft,
-  ) => void;
-  prWorkspaceName: string | null;
-}): JSX.Element | null {
-  const fillable = fillableJiraTickets(tickets);
-  const unfillable = unfillableJiraTickets(tickets);
-  const fill = useMutation<JiraTicketDetails, Error, string>({
-    mutationFn: (key) => api.jiraTicket(prId, key),
-    onSuccess: (details, key) => {
-      const ref = fillable.find((t) => t.key === key);
-      if (ref == null) return;
-      const site = jiraSiteOf(ref.url);
-      const remembered = readRememberedAcField(browserAcMemory(), site, details.issueType?.id);
-      // The same fill the Open PRs table's click-to-review runs (`fillDraftFromJira`).
-      const { draft, chosen } = fillDraftFromJira(EMPTY_TICKET_DRAFT, details, remembered);
-      onFilled(ref, details, site, chosen, draft);
-    },
-  });
-  if (fillable.length === 0) {
-    // A ticket WAS detected but its workspace has no token: say where to add one rather than
-    // render nothing. (The token belongs to the workspace that owns the PR's repo, which need not
-    // be the workspace being viewed.)
-    if (unfillable.length === 0) return null;
-    return (
-      <p className={`w-full text-xs ${MUTED}`}>
-        To add {unfillable.map((t) => t.key).join(', ')}, add a Jira API token in Settings for the{' '}
-        {prWorkspaceName != null ? `${prWorkspaceName} workspace` : 'workspace this repository is in'}.
-      </p>
-    );
-  }
-  return (
-    <>
-      {fillable.map((t) => {
-        const added = addedKeys.has(t.key);
-        if (full && !added) return null;
-        const busy = fill.isPending && fill.variables === t.key;
-        return (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => fill.mutate(t.key)}
-            disabled={fill.isPending}
-            className={BTN}
-          >
-            {busy ? `Reading ${t.key}…` : added ? `Refresh ${t.key}` : `Add ${t.key}`}
-          </button>
-        );
-      })}
-      {fill.isError && <p className={`w-full text-xs ${ERROR_TEXT}`}>{fill.error.message}</p>}
-    </>
   );
 }
 

@@ -288,7 +288,7 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   drafts included with a "· N drafts" callout. ⚠ **IT IS A LIST OF CARDS WITH NO COLUMN HEADINGS**
   (a pseudo-table with headings was tried and did not read; do not bring the shared grid back). One
   card per PR, the Pending card shell's language (`rounded-lg border bg-white px-3.5 py-2`), FOUR
-  layers in order of importance:
+  layers (five with a ticket) in order of importance:
   1. **Title** — the heaviest text on the card (`text-sm font-semibold`), truncating, + a "Draft"
      marker; the **status chips** sit on the RIGHT of the same line (wrapping below on narrow
      screens): CI (`CI_META`; red chip when failing; NOTHING for `unknown`), review standing
@@ -297,9 +297,47 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
      `ThreadStateBar`; nothing with no threads), merge readiness (`mergeVerdict()` through
      `MERGE_TONE_CHIP`; a draft shows only `mergeVerdictWarning`'s branch facts; `unknown` and
      `draft` draw nothing).
-  2. **Meta line** (11px): #number · repo · avatar + author · opened · updated (only when it
+  2. **The ticket row** (Pro `issueLinks`; only when the PR names a ticket — NEVER an empty row):
+     `TicketIcon`, then each ticket as `KEY · title` (key mono, title truncating, the row wraps for
+     several), a link through `safeExternalUrl` or PLAIN TEXT when no link is known (never a
+     guessed one). Below the chips (status is still read first), above the grey meta line (it says
+     what the PR is for). `lib/cardTickets.ts` `cardTickets` merges two batched answers: ONE
+     `POST /api/pro/ticket-links` for the whole board (`useTicketLinks`, capability ANDed into
+     `enabled`; the server's detection + the STORED Jira title / status / assignee — no Jira call
+     on view, plugin 0038 — re-asked every 3s only while `titlesComplete` is false, i.e. while the
+     worker has not read a detected ticket yet) leads in detection order; the latest Claude review's stored Jira
+     stories (`ClaudeReviewPrState.tickets`, already on the states answer) fill a missing title and
+     add a key detection did not find, linked by its stored url, else `jiraBrowsePrefix + key`.
+     ⚠ The Claude panel's story ALIGNMENT pills stay where they are: they are the review's
+     judgement of the story, a different fact from "which ticket is this", so not a duplicate.
+  **GROUPED BY TICKET — the default where the tracker runs** (Pro `issueLinks`; header toggle
+  "Group by ticket / List", `OpenPrsViewToggle`, hidden without the capability). The page becomes
+  one STACK per ticket — a `<section>` landmark with an `h3` header over its cards (which drop to
+  `h4`). Membership and order are the pure `lib/openPrsStacks.ts` `stackOpenPrs` (pinned in
+  `test/openPrsStacks.test.ts`). **Header anatomy**: collapse chevron (the keyboard route —
+  `aria-expanded`/`aria-controls`; a click on the header's empty space toggles too) · ticket KEY
+  (mono, linked through `safeExternalUrl`) · ticket TITLE (`text-base`, the heaviest text on the
+  page) / next line: STATUS pill coloured by `statusCategory` (new grey, indeterminate blue, done
+  green; the site's own status words, else To do / In progress / Done) · issue type (11px) ·
+  assignee as INITIALS + name (Jira avatar URLs are third-party and the CSP blocks them — do not
+  loosen it) or "Unassigned" when the status is known / right: a quiet roll-up over the stack's
+  cards from fields they already carry ("N failing CI · N changes requested · N ready to merge",
+  `stackRollup`, zero parts omitted) · "N PRs". **Rules**: a PR naming two tickets sits in BOTH
+  stacks and each copy says "Also in BMD-1040" — a button that opens and scrolls to that stack and
+  focuses its toggle; the header's "N open" still counts each PR ONCE. PRs with no ticket go in a
+  final dashed "No ticket" stack. Inside a stack the card's own ticket row is GONE (the header says
+  it). **The Sort menu orders the PRs WITHIN each stack** (the list is sorted first, then grouped
+  in that order); **the stacks themselves are in a FIXED order**: open tickets first, then `done`
+  ones; within each, the stack whose latest PR update is most recent leads; ties by key,
+  numerically; an unknown status counts as open. ⚠ **Jira never blocks the board**: until the
+  ticket answer arrives, after a failed one, and whenever no PR names a ticket, the page is the
+  plain list (cards keep their ticket row) — no skeleton, no lone "No ticket" header. The view and
+  the collapsed stacks (ids `ticket:<KEY>` / `none`) are PER-VIEWER conveniences in
+  `store/openPrsView.ts` — localStorage only (try/catch), never the URL and never
+  `FilterDefaults`. List mode is exactly the cards described above.
+  3. **Meta line** (11px): #number · repo · avatar + author · opened · updated (only when it
      differs) · files +/− · `LargePrFlag` · `BlastRadiusChip` — the same pieces `PrMetaRow` uses.
-  3. **The Claude Review panel** (`ClaudeReviewPanel` in `ClaudeReviewCell.tsx`) ONLY where agentic
+  4. **The Claude Review panel** (`ClaudeReviewPanel` in `ClaudeReviewCell.tsx`) ONLY where agentic
      AI runs (`me.ai.enabled`): its own AI surface (`border-ai-border bg-ai-surface`) with a 3px
      LEFT ACCENT coloured by outcome (`reviewTone`: red = request changes / failed, green =
      approve, grey = comment, sky = queued/running, none = not reviewed). Left to right: "Claude" ·
@@ -1095,6 +1133,12 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   shows only where `ai.enabled`. Credits stay on the Pro one-shot Haiku features.
 - **The Pro CI-analysis card is DELETED** (Claude Review diagnoses failing CI). The AI summary inside
   the AI Fix tab stays Pro (`prSummary`) and renders nothing without the plugin.
+- **Claude Review's user-story input is TABS** (`ClaudeReviewTicketPanel`, pure half `lib/storyTabs.ts`):
+  one tab per story, Jira tabs read-only markdown with their criteria field shown and changeable,
+  detected Jira tickets auto-pulled once per PR per key set (never re-adding a removed one). ⚠ "Story
+  N" counts only stories that will be SENT (a blank tab is "New story") — the run, the chips and the
+  GitHub lead number the stored list. The Open PRs strip numbers BEFORE dropping unassessed stories
+  (`assessedStoryPills`). Contract: docs/CLAUDE-REVIEW.md, the "User stories (optional)" bullet.
 - **A user story's results are FINDING CARDS, not a post button — shown INSIDE THEIR STORY.** Every
   not met / partly met criterion and every "Not done" item of a run arrives as an ordinary
   `ClaudeFinding` with `story: {index, ref}` (server-made — docs/CLAUDE-REVIEW.md § User stories).

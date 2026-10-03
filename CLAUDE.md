@@ -841,9 +841,15 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   production and LOGS the entry it bound — check that first when a Pro route unexpectedly 404s.
 - ⚠ **The per-workspace Jira token (plugin 0035) is WRITE-ONLY and sealed via the OPTIONAL
   `host.sealSecret`**; every call to the customer-typed Jira host goes through `jira/fetch.ts`
-  (no redirects, cloud refuses private addresses at connect time) — never a bare `fetch`. The
-  acceptance-criteria field is picked PER TICKET in the panel (a site-wide picker was unusable;
-  `jira_ac_field_*` are dormant). [SECURITY.md](docs/SECURITY.md).
+  (no redirects, cloud refuses private addresses at connect time) — never a bare `fetch`.
+  ⚠ **Jira is read when a PR is RECEIVED, never when it is VIEWED** (plugin 0038,
+  `jira/ticket-sync.ts`): a pull-based worker (a `*/2` tick + a kick after every repo walk via the
+  OPTIONAL `registerRepoSyncedHook`) stores each detected ticket in `pro_pr_jira_tickets`, and the
+  story panel, the Open PRs ticket row and the auto review's fill READ THOSE ROWS — never add a
+  view-time Jira call. The acceptance-criteria field is chosen per (workspace, Jira site, issue
+  type), server-side (`pro_jira_ac_fields`; a site-wide picker was unusable; `jira_ac_field_*` are
+  dormant). [PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § Stored Jira tickets ·
+  [SECURITY.md](docs/SECURITY.md).
 - `ctx.schema` is `Record<string, any>` — a leftover `ctx.schema.teams` type-checks and throws
   only when the query runs. Grep, don't trust the compiler.
 - Tiers — **free gets the per-PR truth, paid gets the cross-team roll-up**: **core** is free

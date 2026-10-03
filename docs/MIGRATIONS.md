@@ -902,6 +902,25 @@ repo removal); the plugin's `pruneProByPrIds` / `eraseProByAccountId` no longer 
 plugin already created both tables (every statement must no-op) and against a fresh one; then run
 plugin `0037` with one ON row and check it lands on the right workspace only.
 
+### Plugin `0038_pr_jira_tickets`
+
+Two new plugin tables, no change to any existing one. `pro_pr_jira_tickets` — the STORED Jira
+tickets, one row per `(account_id, pr_id, issue_key)` (unique index
+`pro_pr_jira_tickets_account_pr_key`, the worker's `onConflictDoUpdate` target), plus a plain index
+on `(account_id, workspace_id, issue_type_id)` for the per-issue-type re-derivation.
+`pro_jira_ac_fields` — the acceptance-criteria field per `(account_id, workspace_id, api_root,
+issue_type_id)` (unique `pro_jira_ac_fields_account_ws_site_type`). No FKs (the plugin family); no
+backfill — the worker fills the table on its first tick, new tickets first, 40 per account per
+pass. Both are in `eraseProByAccountId`; ticket rows are also in `pruneProByPrIds`. Column parity is
+PINNED by `packages/pro/test/jira-ticket-schema-parity.test.ts` (the first plugin twin pair with a
+parity test). `pro_workspace_settings.jira_ac_field_*` (0035) stay dormant. Rationale:
+[PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § Stored Jira tickets.
+✅ **The pg twin WAS replayed** (2026-10-03, a throwaway `postgres:16-alpine`): applied twice (every
+statement no-ops the second time), both unique indexes present, the three time columns are
+`timestamp with time zone`, and both `ON CONFLICT … DO UPDATE` targets the code uses resolved
+against a real row. It was replayed in ISOLATION, not on top of the full plugin chain (it names no
+other table, so the chain cannot change its outcome).
+
 ⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0066` and plugin `0034`–`0037`). The
 standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
 through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —

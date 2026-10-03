@@ -15,6 +15,7 @@ import {
 } from './adaptive.js';
 import { isSeverityApiConfigured } from '../ml/severity-client.js';
 import { runMlEnrichmentTick } from './ml-enrichment.js';
+import { notifyRepoSynced } from './repo-synced-hooks.js';
 import { deleteMlLabelsForRepo } from '../db/ml-labels.js';
 
 const { repos, syncState, accounts } = schema;
@@ -486,6 +487,13 @@ export async function runSyncForRepo(
         log.warn(
           `commit headline backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
         );
+      }
+
+      // "A PR WAS RECEIVED": the plugin's Jira ticket worker reads the tickets new and changed PRs
+      // name (sync/repo-synced-hooks.ts). A fire-and-forget KICK — it never holds this repo's slot
+      // and never fails the sync; inert with no plugin.
+      if (!walk.cancelled && !cancelRequested.has(repoId)) {
+        notifyRepoSynced({ accountId: repo.accountId, repoId }, log);
       }
 
       // The UNSETTLED-PR BACKSTOP (sync/unsettled-prs.ts): re-read merge state stored unknown and

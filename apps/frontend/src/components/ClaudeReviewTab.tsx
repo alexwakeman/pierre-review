@@ -1502,9 +1502,12 @@ export function ClaudeReviewTab({
             )}
           </div>
 
-          {/* The optional user stories — collapsed by default; its header says when it holds
-              something (or needs a fix), so a closed panel never hides what Run sends. */}
+          {/* The optional user stories — one tab each; its header says what Run sends (or that a
+              story needs a fix), so a closed panel never hides it. Keyed by PR: its selection,
+              fetched tickets and in-flight pulls belong to one PR. */}
           <ClaudeReviewTicketPanel
+            key={pr.id}
+            autoPullReady={!isLoading}
             value={ticketDraft}
             onChange={setTicketDraft}
             check={ticketCheck}

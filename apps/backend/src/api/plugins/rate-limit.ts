@@ -455,6 +455,22 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (!mutating && /^\/api\/pro\/prs\/[^/]+\/jira-ticket$/.test(path)) {
     return [TIERS.search, TIERS.read];
   }
+  // The story panel's two writes on a STORED ticket (plugin 0038): `POST …/jira-ticket/refresh` reads
+  // that ticket from Jira again now, and `PUT …/jira-ticket/ac-field` saves the criteria field for
+  // its issue type and re-reads it — one upstream call each, the customer's quota. Spelled by exact
+  // verb + path: without these lines the catch-all parks a mutating /api/pro/ route on `ai`.
+  if (method === 'POST' && /^\/api\/pro\/prs\/[^/]+\/jira-ticket\/refresh$/.test(path)) {
+    return [TIERS.search, TIERS.read];
+  }
+  if (method === 'PUT' && /^\/api\/pro\/prs\/[^/]+\/jira-ticket\/ac-field$/.test(path)) {
+    return [TIERS.search, TIERS.read];
+  }
+  // POST /api/pro/ticket-links — the Open PRs cards' ticket row, ONE request per board: DB-only
+  // detection plus the STORED ticket rows (plugin 0038); a detected ticket with no row kicks the
+  // background worker, which spends the customer's Jira quota — so `search`, not `read`. A POST
+  // only because it carries a list of PR ids; it writes nothing itself. Without this line the catch-all would tier it
+  // on the verb and park a read on the 20/min `ai` bucket.
+  if (path === '/api/pro/ticket-links') return [TIERS.search, TIERS.read];
 
   // ---- AI generation ----
   // ⚠ RE-DECIDED, not inherited: `POST /api/pro/prs/:id/annotations/run` now spends GITHUB quota

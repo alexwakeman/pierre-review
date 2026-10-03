@@ -5,12 +5,14 @@ import type { TicketDraft } from './claudeReviewFollowUp.js';
 // Pure helpers for the Claude Review panel's "Fill from KEY" and its "Acceptance criteria from"
 // dropdown. Kept out of the component so they are testable.
 //
-// ⚠ THE ACCEPTANCE-CRITERIA FIELD IS CHOSEN PER TICKET, HERE — not in Settings. A Jira site can
-// carry several fields named "Acceptance Criteria" and the one in use varies by issue type, so the
-// server returns every custom text field on the ticket (`details.candidates`, strong name matches
-// first) and the reader picks. The choice is remembered PER VIEWER, per Jira site + issue type, in
-// localStorage — a convenience only, so every read and write is wrapped and a missing store simply
-// means "nothing remembered".
+// ⚠ THE ACCEPTANCE-CRITERIA FIELD IS CHOSEN SERVER-SIDE, PER (workspace, Jira site, issue type).
+// A Jira site can carry several fields named "Acceptance Criteria" and the one in use varies by
+// issue type, so the server keeps every custom text field on the stored ticket
+// (`details.candidates`) and names the one it picked (`details.acField`): the workspace's choice for
+// the issue type when the ticket has it, else the strong name match. The panel's "Change" writes
+// that choice (`PUT …/jira-ticket/ac-field`), so the background worker and the auto review use it
+// too. It used to live in this browser's localStorage; `legacyAcFieldToMigrate` moves an old choice
+// to the server ONCE and forgets it.
 
 /**
  * The detected tickets the panel may offer a "Fill from" button for: Jira tickets the server
@@ -59,7 +61,16 @@ export function applyAcCandidate(
   return c ? { ...draft, acceptanceCriteria: c.text } : draft;
 }
 
-// ── the remembered choice (per viewer, per Jira site + issue type) ─────────────────────────────
+// ── the field the SERVER picked, and the one-shot move off localStorage ──────────────────────
+
+/**
+ * The field the criteria come from, as the server picked it ('' = none). An older plugin sends no
+ * `acField`; then the shared default rule decides, exactly as the server would with no setting.
+ */
+export function serverAcField(details: JiraTicketDetails): string {
+  if (details.acField !== undefined) return details.acField?.id ?? '';
+  return defaultAcCandidate(details.candidates, null);
+}
 
 export type AcMemoryStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
@@ -81,57 +92,53 @@ export function jiraSiteOf(ticketUrl: string): string | null {
   }
 }
 
-const memoryKey = (site: string, issueTypeId: string): string =>
+// The RETIRED per-browser key. Read only by the migration below, which deletes it.
+const legacyKey = (site: string, issueTypeId: string): string =>
   `limn:jira-ac-field:v1:${site}:${issueTypeId}`;
 
-export function readRememberedAcField(
+/**
+ * ONE-SHOT MIGRATION of the old per-browser choice: the field to send to the server for this
+ * ticket's issue type, or null. The legacy key is REMOVED whenever it is read, so this answers at
+ * most once per (site, issue type). Only when the server has no choice of its own
+ * (`acFieldSource !== 'setting'`) and the old field is on this ticket and differs from the server's.
+ */
+export function legacyAcFieldToMigrate(
   store: AcMemoryStore | null,
-  site: string | null,
-  issueTypeId: string | null | undefined,
+  ticketUrl: string,
+  details: JiraTicketDetails,
 ): string | null {
-  if (store == null || site == null || issueTypeId == null) return null;
+  const site = jiraSiteOf(ticketUrl);
+  const type = details.issueType?.id;
+  if (store == null || site == null || type == null) return null;
+  let v: string | null = null;
   try {
-    const v = store.getItem(memoryKey(site, issueTypeId));
-    return v != null && v !== '' ? v : null;
+    v = store.getItem(legacyKey(site, type));
+    if (v != null) store.removeItem(legacyKey(site, type));
   } catch {
     return null;
   }
-}
-
-/** Remember an EXPLICIT choice; the blank option forgets, so the name match decides next time. */
-export function rememberAcField(
-  store: AcMemoryStore | null,
-  site: string | null,
-  issueTypeId: string | null | undefined,
-  fieldId: string,
-): void {
-  if (store == null || site == null || issueTypeId == null) return;
-  try {
-    if (fieldId === '') store.removeItem(memoryKey(site, issueTypeId));
-    else store.setItem(memoryKey(site, issueTypeId), fieldId);
-  } catch {
-    /* a convenience: a full or blocked store just means nothing is remembered */
-  }
+  if (v == null || v === '' || details.acFieldSource === 'setting') return null;
+  if (!details.candidates.some((c) => c.id === v)) return null;
+  return v === serverAcField(details) ? null : v;
 }
 
 // ── the default choice ─────────────────────────────────────────────────────────────────────────
 
-// `defaultAcCandidate` lives in shared so the server's auto review picks the field by the SAME
-// rule (with no remembered field). Re-exported for this module's callers and tests.
+// `defaultAcCandidate` lives in shared so the server picks the field by the SAME rule. Re-exported
+// for this module's callers and tests.
 export { defaultAcCandidate };
 
 /**
- * A whole fill, the ONE way both callers do it — the panel's "Fill from KEY" (over the reader's
- * current draft) and the Open PRs table's click-to-review (over an empty one): title and
- * description replaced, then the criteria from the preselected field (`defaultAcCandidate`), or
- * left as they were when nothing is preselected. `chosen` is that field's id, '' for none.
+ * A whole fill, the ONE way both callers do it — the panel and the Open PRs table's
+ * click-to-review (over an empty draft): title and description replaced, then the criteria from
+ * the field the server picked, or left as they were when it picked none. `chosen` is that field's
+ * id, '' for none.
  */
 export function fillDraftFromJira(
   draft: TicketDraft,
   details: JiraTicketDetails,
-  remembered: string | null,
 ): { draft: TicketDraft; chosen: string } {
-  const chosen = defaultAcCandidate(details.candidates, remembered);
+  const chosen = serverAcField(details);
   return { draft: applyAcCandidate(applyJiraTicket(draft, details), details.candidates, chosen), chosen };
 }
 
@@ -155,8 +162,7 @@ export function acCandidateLabel(c: JiraAcCandidate): string {
 
 /** The one short line under the dropdown, or null. */
 export function jiraFillNote(details: JiraTicketDetails, chosenId: string): string | null {
-  if (details.candidates.length === 0)
-    return `${details.key} has no other fields with text, so the acceptance criteria were left as they were.`;
-  if (chosenId === '') return 'Pick the field that holds the acceptance criteria. The box is unchanged until you do.';
+  if (details.candidates.length === 0) return `${details.key} has no other fields with text.`;
+  if (chosenId === '') return 'Pick the field that holds the acceptance criteria.';
   return null;
 }

@@ -40,6 +40,7 @@ import { makeConflictSeam } from '../conflict/seam.js';
 import { registerAgenticProviders } from '../review/plugin-providers.js';
 import { registerScheduledJob } from '../sync/scheduled-jobs.js';
 import { registerPrDetailEnricher } from '../pr/detail-enricher.js';
+import { registerRepoSyncedHook } from '../sync/repo-synced-hooks.js';
 import { cheapComplete } from '../review/llm.js';
 import { detectClaudeAuth } from '../review/auth.js';
 import { getAccessToken, getAccountById } from '../auth/account.js';
@@ -291,6 +292,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
     registerAgenticProviders,
     registerScheduledJob,
     registerPrDetailEnricher,
+    registerRepoSyncedHook,
     // AI Fix infra (per-account, cloud-ready). The host owns the security-sensitive
     // clone/agent/push machinery; the plugin only drives it with prompts/model.
     github: {

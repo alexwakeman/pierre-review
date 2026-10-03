@@ -1410,8 +1410,9 @@ function, `detectPrTickets` (`issue-links/enricher.ts`).
   be made to work. Now the choice is PER TICKET, in the Claude Review panel: the ticket route reads
   the issue with `fields=*all&expand=names,schema` and returns every custom text field on it as a
   ranked, capped (50) `candidates` list (`candidates.ts` — what counts as text, the exclusion list,
-  the ranking), and the SPA preselects (remembered choice per site + issue type, else the best name
-  match, else blank). Contract: [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § User story or task.
+  the ranking). Which one is used is decided SERVER-side since plugin 0038 (the workspace's choice
+  per issue type, else the best name match, else blank — § Stored Jira tickets below). Contract:
+  [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § User story or task.
   ⚠ **`jira_ac_field_id` / `jira_ac_field_name` ARE DORMANT** — added by 0035, still in the table
   (plugin migrations are additive), undeclared in both schema modules, never selected or written.
   A stale client's `acceptanceCriteriaField*` keys are stripped by the PUT schema and still 200.
@@ -1430,13 +1431,79 @@ function, `detectPrTickets` (`issue-links/enricher.ts`).
   true when a token is saved for the PR's workspace — including one that can no longer be opened,
   so the click says "save it again" instead of the button silently vanishing. Saving the `jira`
   section invalidates `['pr']`, like the tracker section.
-- **Gates.** The two Jira-calling routes register with the enricher (`issueLinks`, the summary
+- **Gates.** The Jira-calling routes register with the enricher (`issueLinks`, the summary
   tier) and sit on the `search` rate tier. The Settings block is shown only when the SAVED tracker
   is Jira with a base URL AND `MeResponse.ai.enabled` is on — Claude Review is its only
   consumer and is local-only, so cloud accounts are never asked for a token nothing uses. The
   server half is still cloud-safe (sealed storage, the cloud SSRF rules).
-- **Erasure** needs no new entry (the table is already in `registerAccountErasure`); the core
-  account export never reads plugin tables, so the token cannot reach it.
+- **The Open PRs ticket row** (`POST /api/pro/ticket-links`, `jira/ticket-links.ts`) answers a
+  LIST OF PRs, never keys (still not a proxy), reusing the enricher's detection step
+  (`detectKeysWithAccess`, split out of `detectPrTickets` so both run one rule) batched per
+  workspace. Since plugin 0038 it makes **no Jira call**: title, status, status category, assignee
+  and issue type come from the stored tickets below. Contract: docs/API.md.
+- **Erasure**: `pro_workspace_settings` was already in `registerAccountErasure`; the two 0038
+  tables joined it. The core account export never reads plugin tables, so the token cannot reach it.
+
+### Stored Jira tickets — read when a PR is RECEIVED, not when it is VIEWED (plugin migration 0038)
+
+Every Jira consumer used to call Jira when someone LOOKED: the story panel per ticket on open, the
+Open PRs row per board load (an in-process title cache), the auto review at run time. Now Jira is
+read when a pull request arrives in Limn and the answer is STORED; every consumer reads the row.
+Code: `src/jira/ticket-sync.ts` (the worker), `src/jira/ticket-store.ts` (reads, writes, the
+criteria derivation, the wire), `src/jira/schema.{sqlite,pg}.ts`. No `apiVersion` bump: the one
+seam change is the OPTIONAL `ProContext.registerRepoSyncedHook`.
+
+- **Two tables.** `pro_pr_jira_tickets` — one row per `(account_id, pr_id, issue_key)` (the
+  `onConflictDoUpdate` target): workspace, Jira site (`api_root`), browse URL, `detected_from`
+  (`title`/`branch`) + `detect_order`, title, description and the acceptance criteria (markdown),
+  the field the criteria came from (`ac_field_id`/`_name`/`_source` = `setting`|`default`), issue
+  type, status name + `status_category` (`new`/`indeterminate`/`done`), assignee (name, Jira
+  account id or Server key, https avatar), every candidate text field (`candidates_json`, so the
+  "Change" picker opens with no Jira call), and the read state: `state`
+  (`ok`/`not_found`/`no_access`/`failed`), `error_code`, `fetched_at` (last good read),
+  `checked_at`, `next_check_at`. `pro_jira_ac_fields` — the criteria field per
+  `(account_id, workspace_id, api_root, issue_type_id)`. No FKs; ticket rows pruned per PR in
+  `pruneProByPrIds`, both erased with the account. Column parity: `test/jira-ticket-schema-parity.test.ts`.
+- **The worker is PULL-BASED, like core's ML enrichment.** Each pass re-derives the work: every
+  OPEN PR in a workspace whose tracker is Jira with a saved token → detection (title + head branch;
+  ⚠ the PR body is NOT a detection source — lean storage does not keep it) → a ticket is DUE when it
+  has no row (a new PR, or a title/branch edit that changed the key set), its row came from another
+  Jira site, or `next_check_at` passed. A key the PR no longer names has its row DELETED. A key that
+  only moved (branch → title, reordered) is re-labelled without a call.
+- **TTLs**: 30 min after a good read (so status, assignee and title stay fresh on open PRs), 10 min
+  after a transient failure (the row KEEPS its content and stays `ok`), 6 h after Jira said
+  `not_found` / `no_access` (content cleared — a 404 is a positive statement). Closed PRs are not
+  walked; their rows stay as last read.
+- **Bounds**: at most `TICKET_LINKS_TITLE_LOOKUPS` (40) tickets per account per pass and 200 per
+  tick, new tickets first then the longest overdue, 4 at a time, each key read ONCE per workspace
+  per pass and written to every PR that names it.
+- **Triggers**: a `*/2` cron tick (`jira-tickets`, host `registerScheduledJob`); a kick after
+  every completed repo walk (`registerRepoSyncedHook`, core `sync/repo-synced-hooks.ts`, called from
+  `runSyncForRepo`'s post-walk chain — fire-and-forget, never holds the repo's slot, never inside a
+  transaction); a kick when the workspace's tracker or token is saved; a TARGETED kick from
+  `ticket-links` for the listed PRs that have a detected ticket with no row (so a closed PR, which
+  the open-PR pass never walks, converges too). One pass per account at a time; a kick that lands
+  mid-pass folds into one more pass.
+- ⚠ **Budgets are PRE-EMPTED, never surfaced.** A 401, 403, refused address or redirect backs the
+  WORKSPACE off for 30 min (a 429 for 5), in memory, keyed on a fingerprint of (site, email,
+  token) — saving a new token ends it at once. No row is written for a workspace-wide refusal; a 403
+  also records `no_access` on that ticket. A person pressing Refresh bypasses the backoff. Logs carry
+  account + workspace + the error CODE only.
+- **The criteria field moved SERVER-SIDE.** It was per-browser localStorage (per site + issue
+  type), which the worker and the auto review could not read. `deriveAc` = `defaultAcCandidate(
+  candidates, the workspace's field for the issue type)`: the chosen field when this ticket has it
+  with text, else the strong name match, else none — ONE rule for the worker, the route and the
+  re-derivation. `PUT /api/pro/prs/:id/jira-ticket/ac-field` writes it (a field the ticket does not
+  carry → 400), re-derives EVERY stored ticket of that issue type in the workspace from its stored
+  candidates (no Jira call), marks them due, and re-reads the named ticket; `fieldId: null` is
+  "Reset to default". The SPA moves an old localStorage choice to the server ONCE
+  (`legacyAcFieldToMigrate`) and deletes the key. "None of these" stays a per-tab choice, never
+  stored. `jira_ac_field_*` on `pro_workspace_settings` stay dormant.
+- **Consumers.** `GET /api/pro/prs/:id/jira-ticket` answers the stored row (a ticket the worker
+  never reached is read ONCE through the worker's own body, `syncOnePrNow`); `POST …/refresh`
+  forces a re-read; the Open PRs row reads rows and kicks; the auto review's story fill
+  (`resolveAutoReviewTicket`) reads rows (same once-only fallback). `fetchJiraIssueTitle` is unused
+  and the in-process title cache is gone.
 
 ### The Bots ROI panel is paid — the whole panel, and where the free line falls
 

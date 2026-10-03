@@ -41,7 +41,7 @@ import {
   ciDiagnosisLabel,
   threadsToFixLabel,
 } from '../src/lib/claudeReviewColumn.js';
-import { fillDraftFromJira, type AcMemoryStore } from '../src/lib/jiraTicket.js';
+import { fillDraftFromJira } from '../src/lib/jiraTicket.js';
 import { EMPTY_TICKET_DRAFT } from '../src/lib/claudeReviewFollowUp.js';
 
 const st = (over: Partial<ClaudeReviewPrState> = {}): ClaudeReviewPrState => ({
@@ -232,14 +232,6 @@ const details = (over: Partial<JiraTicketDetails> = {}): JiraTicketDetails => ({
   omittedCandidates: 0,
   ...over,
 });
-const mem = (entries: Record<string, string> = {}): AcMemoryStore => {
-  const m = new Map(Object.entries(entries));
-  return {
-    getItem: (k) => m.get(k) ?? null,
-    setItem: (k, v) => void m.set(k, v),
-    removeItem: (k) => void m.delete(k),
-  };
-};
 const jira = (key: string, canFetchDetails: boolean): TicketRef => ({
   key,
   url: `https://acme.atlassian.net/browse/${key}`,
@@ -249,7 +241,7 @@ const jira = (key: string, canFetchDetails: boolean): TicketRef => ({
 
 describe('fillDraftFromJira — the one fill', () => {
   it('replaces title + description and preselects the best strong match', () => {
-    const r = fillDraftFromJira({ ...EMPTY_TICKET_DRAFT, acceptanceCriteria: 'old' }, details(), null);
+    const r = fillDraftFromJira({ ...EMPTY_TICKET_DRAFT, acceptanceCriteria: 'old' }, details());
     expect(r.chosen).toBe('customfield_1');
     expect(r.draft).toEqual({
       title: 'Reset password',
@@ -257,14 +249,14 @@ describe('fillDraftFromJira — the one fill', () => {
       acceptanceCriteria: 'Given… When… Then…',
     });
   });
-  it('a remembered field wins; nothing preselected leaves the criteria as they were', () => {
-    expect(fillDraftFromJira(EMPTY_TICKET_DRAFT, details(), 'customfield_2').draft.acceptanceCriteria).toBe(
-      'notes',
-    );
+  it("the server's field wins; nothing picked leaves the criteria as they were", () => {
+    expect(
+      fillDraftFromJira(EMPTY_TICKET_DRAFT, details({ acField: { id: 'customfield_2', name: 'Notes' } })).draft
+        .acceptanceCriteria,
+    ).toBe('notes');
     const none = fillDraftFromJira(
       { ...EMPTY_TICKET_DRAFT, acceptanceCriteria: 'kept' },
       details({ candidates: [cand('customfield_2', 'Notes', 'none')] }),
-      null,
     );
     expect(none.chosen).toBe('');
     expect(none.draft.acceptanceCriteria).toBe('kept');
@@ -281,7 +273,6 @@ describe("resolveListTicket — the list's user story", () => {
       previous: { title: 'Stored', description: null, acceptanceCriteria: '- a' },
       loadTickets: never,
       loadDetails: never,
-      memory: null,
     });
     expect(r).toEqual({ ticket: { title: 'Stored', acceptanceCriteria: '- a' }, note: null });
   });
@@ -293,9 +284,9 @@ describe("resolveListTicket — the list's user story", () => {
       loadTickets: async () => [jira('ACME-9', false), jira('ACME-1', true), jira('ACME-2', true)],
       loadDetails: async (key) => {
         asked.push(key);
-        return details({ key });
+        // The stored ticket names the field the workspace chose for its issue type.
+        return details({ key, acField: { id: 'customfield_2', name: 'Notes' }, acFieldSource: 'setting' });
       },
-      memory: mem({ 'limn:jira-ac-field:v1:acme.atlassian.net:10001': 'customfield_2' }),
     });
     expect(asked).toEqual(['ACME-1']);
     expect(r.note).toBeNull();
@@ -309,7 +300,7 @@ describe("resolveListTicket — the list's user story", () => {
   });
 
   it('no ticket, no token, a failed lookup or a failed fetch ⇒ starts without, with a note', async () => {
-    const base = { previous: null, loadDetails: never, memory: null };
+    const base = { previous: null, loadDetails: never };
     expect(await resolveListTicket({ ...base, loadTickets: async () => null })).toEqual({
       ticket: undefined,
       note: NO_STORY_NOTE,
@@ -321,7 +312,6 @@ describe("resolveListTicket — the list's user story", () => {
     expect((await resolveListTicket({ ...base, loadTickets: never })).ticket).toBeUndefined();
     const failed = await resolveListTicket({
       previous: null,
-      memory: null,
       loadTickets: async () => [jira('ACME-1', true)],
       loadDetails: async () => {
         throw new Error('401');
@@ -334,7 +324,6 @@ describe("resolveListTicket — the list's user story", () => {
   it('a Jira ticket over a cap ⇒ starts without it and says why', async () => {
     const r = await resolveListTicket({
       previous: null,
-      memory: null,
       loadTickets: async () => [jira('ACME-1', true)],
       loadDetails: async () => details({ title: 'x'.repeat(CLAUDE_REVIEW_TICKET_LIMITS.titleChars + 1) }),
     });
@@ -349,11 +338,17 @@ describe('the wiring', () => {
   it('the panel and its request are gated on the FREE agentic AI flag (me.ai), never Pro', () => {
     const cards = src('components/Activity/OpenPrsCards.tsx');
     expect(cards).toMatch(/const claudeOn = useAiCapabilities\(\)\.enabled;/);
-    expect(cards).not.toMatch(/useProCapabilities/);
+    // The ONLY Pro read on the cards is the ticket row's `issueLinks` — never the Claude panel's gate.
+    expect(cards.match(/useProCapabilities\(\)\.\w+/g)).toEqual(['useProCapabilities().issueLinks']);
+    expect(cards).toMatch(/const ticketsOn = useProCapabilities\(\)\.issueLinks;/);
+    expect(cards).toMatch(/useTicketLinks\(prIds, ticketsOn\)/);
     expect(cards).toMatch(/useClaudeReviewStates\(prIds, claudeOn\)/);
     expect(cards).toMatch(/claudeOn \? \(\s*<ClaudeReviewPanel/);
     // One batched request for the list — never a states hook inside the card.
     expect(src('components/Activity/ClaudeReviewCell.tsx')).not.toMatch(/useClaudeReviewStates/);
+    // …and one for the ticket row, at list level, never inside a card.
+    expect(cards.match(/useTicketLinks\(/g)).toHaveLength(1);
+    expect(src('components/Activity/ClaudeReviewCell.tsx')).not.toMatch(/useTicketLinks/);
   });
 
   it('no column headings: the order comes from the Sort menu', () => {

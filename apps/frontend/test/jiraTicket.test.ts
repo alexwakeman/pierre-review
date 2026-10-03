@@ -4,12 +4,14 @@
 //      from the server, never inferred from the provider alone (absent reads as false).
 //   2. A FILL REPLACES title + description; the criteria box changes only through a CHOSEN
 //      candidate, and the blank option leaves it as it is.
-//   3. THE DEFAULT CHOICE: the viewer's remembered field for this issue type when THIS ticket has
-//      it; else the best STRONG name match (exact "Acceptance Criteria" first; weak matches never preselect); else
-//      blank.
-//   4. THE MEMORY is per Jira site + issue type, and every storage failure means "nothing
-//      remembered" — never a throw.
-//   5. Click-gated: the panel never calls the ticket route on mount.
+//   3. THE DEFAULT CHOICE (shared, applied SERVER-side now): the workspace's field for this issue
+//      type when THIS ticket has it; else the best STRONG name match (exact "Acceptance Criteria"
+//      first; weak matches never preselect); else blank. The panel uses the field the server names
+//      (`serverAcField`), falling back to that rule for an older plugin that names none.
+//   4. THE OLD PER-BROWSER CHOICE moves to the server ONCE (`legacyAcFieldToMigrate`): read, then
+//      removed; only when the server has no choice of its own; a storage failure is "nothing".
+//   5. ONE door to the ticket route: the panel reads tickets only through the query cache
+//      (`fetchQuery`), never a render-time `useQuery`. The automatic pull is in storyTabs.test.ts.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/jiraTicket.test.ts
 import { describe, expect, it } from 'vitest';
@@ -25,8 +27,8 @@ import {
   fillableJiraTickets,
   jiraFillNote,
   jiraSiteOf,
-  readRememberedAcField,
-  rememberAcField,
+  legacyAcFieldToMigrate,
+  serverAcField,
   type AcMemoryStore,
 } from '../src/lib/jiraTicket.js';
 
@@ -129,32 +131,48 @@ const memory = (): AcMemoryStore & { data: Map<string, string> } => {
   };
 };
 
-describe('the remembered choice', () => {
-  it('is keyed by Jira site AND issue type', () => {
-    const m = memory();
-    rememberAcField(m, 'acme.atlassian.net', '10001', 'customfield_2');
-    expect(readRememberedAcField(m, 'acme.atlassian.net', '10001')).toBe('customfield_2');
-    expect(readRememberedAcField(m, 'acme.atlassian.net', '10004')).toBeNull();
-    expect(readRememberedAcField(m, 'other.atlassian.net', '10001')).toBeNull();
+describe('the field the server picked', () => {
+  it('is the stored acField; null is none; absent (an older plugin) falls back to the shared rule', () => {
+    expect(serverAcField(details({ acField: { id: 'customfield_4', name: 'Notes' } }))).toBe('customfield_4');
+    expect(serverAcField(details({ acField: null }))).toBe('');
+    expect(serverAcField(details())).toBe('customfield_1');
   });
-  it('choosing blank forgets it', () => {
+});
+
+const LEGACY = 'limn:jira-ac-field:v1:acme.atlassian.net:10001';
+const URL1 = 'https://acme.atlassian.net/browse/ENG-1';
+
+describe('the one-shot move of the old per-browser choice', () => {
+  it('answers the old field once and removes the key', () => {
     const m = memory();
-    rememberAcField(m, 'acme.atlassian.net', '10001', 'customfield_2');
-    rememberAcField(m, 'acme.atlassian.net', '10001', '');
-    expect(readRememberedAcField(m, 'acme.atlassian.net', '10001')).toBeNull();
+    m.data.set(LEGACY, 'customfield_2');
+    const d = details({ acField: { id: 'customfield_1', name: 'Acceptance Criteria' }, acFieldSource: 'default' });
+    expect(legacyAcFieldToMigrate(m, URL1, d)).toBe('customfield_2');
+    expect(m.data.has(LEGACY)).toBe(false);
+    expect(legacyAcFieldToMigrate(m, URL1, d)).toBeNull();
   });
-  it('a remembered choice drives the default end to end', () => {
+  it('never overrides a server choice, a field the ticket lacks, or the same field — and still forgets', () => {
+    for (const d of [
+      details({ acField: { id: 'customfield_1', name: 'x' }, acFieldSource: 'setting' }),
+      details({ acField: { id: 'customfield_2', name: 'x' }, acFieldSource: 'default' }),
+    ]) {
+      const m = memory();
+      m.data.set(LEGACY, 'customfield_2');
+      expect(legacyAcFieldToMigrate(m, URL1, d)).toBeNull();
+      expect(m.data.size).toBe(0);
+    }
     const m = memory();
-    rememberAcField(m, jiraSiteOf(jira('ENG-1').url), '10001', 'customfield_2');
-    const remembered = readRememberedAcField(m, 'acme.atlassian.net', '10001');
-    expect(defaultAcCandidate(candidates, remembered)).toBe('customfield_2');
+    m.data.set(LEGACY, 'customfield_999');
+    expect(legacyAcFieldToMigrate(m, URL1, details({ acFieldSource: 'default' }))).toBeNull();
   });
-  it('no store, no site or no issue type → nothing remembered, nothing written', () => {
+  it('keyed by Jira site AND issue type; no store, no site or no issue type → nothing', () => {
     const m = memory();
-    rememberAcField(m, null, '10001', 'x');
-    rememberAcField(m, 'acme.atlassian.net', null, 'x');
-    expect(m.data.size).toBe(0);
-    expect(readRememberedAcField(null, 'acme.atlassian.net', '10001')).toBeNull();
+    m.data.set(LEGACY, 'customfield_2');
+    expect(legacyAcFieldToMigrate(m, 'https://other.atlassian.net/browse/ENG-1', details())).toBeNull();
+    expect(legacyAcFieldToMigrate(m, URL1, details({ issueType: { id: '10004', name: 'Bug' } }))).toBeNull();
+    expect(legacyAcFieldToMigrate(m, URL1, details({ issueType: null }))).toBeNull();
+    expect(legacyAcFieldToMigrate(null, URL1, details())).toBeNull();
+    expect(m.data.has(LEGACY)).toBe(true);
   });
   it('a throwing store (blocked site data) never throws out', () => {
     const broken: AcMemoryStore = {
@@ -168,8 +186,7 @@ describe('the remembered choice', () => {
         throw new Error('SecurityError');
       },
     };
-    expect(readRememberedAcField(broken, 'acme.atlassian.net', '10001')).toBeNull();
-    expect(() => rememberAcField(broken, 'acme.atlassian.net', '10001', 'x')).not.toThrow();
+    expect(legacyAcFieldToMigrate(broken, URL1, details())).toBeNull();
   });
   it('the site is the ticket link’s host', () => {
     expect(jiraSiteOf('https://Acme.Atlassian.net/browse/ENG-1')).toBe('acme.atlassian.net');
@@ -208,12 +225,17 @@ describe('labels and the note', () => {
   });
 });
 
-describe('click-gated: the panel never fetches a ticket on mount', () => {
-  it('the only call site of api.jiraTicket is the mutation behind the button', () => {
+describe('one door: the panel reads a ticket only through the query cache', () => {
+  it('the only call site of api.jiraTicket is the fetchQuery behind fetchTicket', () => {
     const src = readFileSync(join(__dirname, '../src/components/ClaudeReviewFollowUp.tsx'), 'utf8');
     const uses = src.match(/api\.jiraTicket\(/g) ?? [];
     expect(uses).toHaveLength(1);
-    expect(src).toMatch(/useMutation<JiraTicketDetails, Error, string>\(\{\s*mutationFn: \(key\) => api\.jiraTicket\(/);
-    expect(src).not.toMatch(/useQuery[^;]*jiraTicket/);
+    expect(src).toMatch(/const ticketKey = \(key: string\) => \['jira-ticket', prId, key\] as const;/);
+    expect(src).toMatch(/qc\.fetchQuery\(\{\s*queryKey: ticketKey\(key\),\s*queryFn: \(\) => api\.jiraTicket\(prId, key\)/);
+    // The criteria field is the server's now: the panel writes it through the route, never storage.
+    expect(src).toMatch(/api\.setJiraAcField\(/);
+    expect(src).not.toMatch(/setItem\(|rememberAcField/);
+    // Never a render-time query: a ticket is read by the one-shot automatic pull or a click.
+    expect(src).not.toMatch(/useQuery\b/);
   });
 });

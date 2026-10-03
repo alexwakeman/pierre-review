@@ -19,14 +19,7 @@ import {
   ticketDraftHasContent,
   ticketRequestFromCheck,
 } from './claudeReviewFollowUp.js';
-import {
-  fillDraftFromJira,
-  jiraProvenance,
-  fillableJiraTickets,
-  jiraSiteOf,
-  readRememberedAcField,
-  type AcMemoryStore,
-} from './jiraTicket.js';
+import { fillDraftFromJira, jiraProvenance, fillableJiraTickets } from './jiraTicket.js';
 
 // Pure helpers for the Claude Review panel on each Open PRs card (OpenPrsCards → ClaudeReviewCell).
 // The column reads ONE batched `POST /api/claude-review/states` answer and starts runs through the
@@ -281,8 +274,9 @@ export const NO_STORY_NOTE = 'Started without a user story.';
 /**
  * The user story for a run started from the list. A RE-REVIEW reuses the previous run's stored
  * ticket; otherwise (or when that run had none) the first FILLABLE Jira ticket detected on the PR
- * is fetched and filled the panel's way (`fillDraftFromJira`: title + description, the criteria
- * field remembered for this issue type on this site, else the best name match, else none).
+ * is read from the STORED tickets and filled the panel's way (`fillDraftFromJira`: title +
+ * description, the criteria from the field the server picked — the workspace's choice for the
+ * issue type, else the best name match, else none).
  *
  * The review starts EITHER WAY: no ticket, no token, a failed fetch or a draft over a cap all
  * resolve to `ticket: undefined` with a note — this function never throws.
@@ -291,7 +285,6 @@ export async function resolveListTicket(opts: {
   previous: ClaudeReviewTicket | null;
   loadTickets: () => Promise<readonly TicketRef[] | null | undefined>;
   loadDetails: (key: string) => Promise<JiraTicketDetails>;
-  memory: AcMemoryStore | null;
 }): Promise<ListTicketResult> {
   const prev = ticketDraftFromStored(opts.previous);
   if (ticketDraftHasContent(prev)) {
@@ -315,9 +308,8 @@ export async function resolveListTicket(opts: {
   } catch {
     return { ticket: undefined, note: `Started without a user story: ${ref.key} could not be read.` };
   }
-  const remembered = readRememberedAcField(opts.memory, jiraSiteOf(ref.url), details.issueType?.id);
   const draft = {
-    ...fillDraftFromJira(EMPTY_TICKET_DRAFT, details, remembered).draft,
+    ...fillDraftFromJira(EMPTY_TICKET_DRAFT, details).draft,
     ...jiraProvenance(ref),
   };
   const check = checkTicketDraft(draft);

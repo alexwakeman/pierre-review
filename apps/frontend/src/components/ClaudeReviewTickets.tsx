@@ -11,12 +11,11 @@
 import type { ReactNode } from 'react';
 import { safeExternalUrl } from '../lib/ui.js';
 import type { TicketDraft } from '../lib/claudeReviewFollowUp.js';
+import { criteriaHasOwnHeading } from '../lib/storyTabs.js';
 import { Markdown } from './Markdown.js';
 import { ExternalLinkIcon } from './Icons.js';
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
-const BTN =
-  'whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
 
 /** A Jira key as a link to the ticket (plain text when the URL is not http/https). */
 export function JiraKeyLink({ ticketKey, url }: { ticketKey: string; url?: string | null }): JSX.Element {
@@ -37,40 +36,50 @@ export function JiraKeyLink({ ticketKey, url }: { ticketKey: string; url?: strin
   );
 }
 
-/** A Jira-read story: key, title, then description and acceptance criteria as markdown. */
+/**
+ * A Jira-read story's tab body: key (linked) and title, the field its criteria came from, then the
+ * description and acceptance criteria as markdown. Read-only: the tab's × removes it.
+ */
 export function JiraStoryView({
   draft,
-  onRemove,
-  acPicker,
+  actions,
+  fieldControl,
 }: {
   draft: TicketDraft;
-  onRemove: () => void;
-  // The "Acceptance criteria from" dropdown, when this session fetched the ticket.
-  acPicker?: ReactNode;
+  // Refresh, when this session can read the ticket.
+  actions?: ReactNode;
+  // "Criteria from: <field> · Change", and the picker when open.
+  fieldControl?: ReactNode;
 }): JSX.Element {
   return (
-    <div className="rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800">
+    <div className="space-y-2">
       <div className="flex items-start gap-2">
-        {draft.key != null && <JiraKeyLink ticketKey={draft.key} url={draft.url} />}
+        {draft.key != null && (
+          <span className="pt-0.5">
+            <JiraKeyLink ticketKey={draft.key} url={draft.url} />
+          </span>
+        )}
         <span className="min-w-0 flex-1 break-words text-sm font-medium">{draft.title}</span>
-        <button type="button" onClick={onRemove} className={BTN}>
-          Remove
-        </button>
+        {actions}
       </div>
+      {fieldControl}
       {draft.description.trim() !== '' && (
-        <div className="mt-1 max-h-48 overflow-y-auto text-xs">
+        <div className="max-h-56 overflow-y-auto text-xs">
           <Markdown>{draft.description}</Markdown>
         </div>
       )}
-      {acPicker}
-      {draft.acceptanceCriteria.trim() !== '' && (
-        <div className="mt-1">
+      <div>
+        {!criteriaHasOwnHeading(draft.acceptanceCriteria) && (
           <div className={`text-xs font-medium ${MUTED}`}>Acceptance criteria</div>
-          <div className="max-h-48 overflow-y-auto text-xs">
+        )}
+        {draft.acceptanceCriteria.trim() !== '' ? (
+          <div className="max-h-56 overflow-y-auto text-xs">
             <Markdown>{draft.acceptanceCriteria}</Markdown>
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-xs text-gray-700 dark:text-gray-300">None taken from this ticket.</p>
+        )}
+      </div>
     </div>
   );
 }

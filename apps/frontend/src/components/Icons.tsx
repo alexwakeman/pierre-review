@@ -298,6 +298,16 @@ export function UnfoldIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// Add — a "+" beside an "Add …" label (Claude Review's "Add story" tab).
+export function PlusIcon({ size = 12, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={2.2} {...rest}>
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </IconShell>
+  );
+}
+
 // Close / dismiss / clear — every ✕ in the app, and the ✗ that marks a failed check.
 export function CloseIcon({ size = 12, ...rest }: IconProps): JSX.Element {
   return (
@@ -1027,6 +1037,19 @@ export function BranchIcon({ size = 14, ...rest }: IconProps): JSX.Element {
       <circle cx="17.6" cy="6.8" r="2.3" />
       <line x1="6.4" y1="7.1" x2="6.4" y2="16.9" />
       <path d="M17.6 9.1c0 3.4-2.8 4.6-6.2 5.2-2.6.5-5 1.4-5 2.6" />
+    </IconShell>
+  );
+}
+
+// A ticket stub: a card with a notch on each side and a perforation — a Jira/Linear ticket the PR
+// names. Purpose-built so the ticket row never borrows a mark that already means something else.
+export function TicketIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M3.5 7.5a1.5 1.5 0 0 1 1.5-1.5h14a1.5 1.5 0 0 1 1.5 1.5v2a2.5 2.5 0 0 0 0 5v2a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5v-2a2.5 2.5 0 0 0 0-5z" />
+      <line x1="14.5" y1="7.5" x2="14.5" y2="9" />
+      <line x1="14.5" y1="11.25" x2="14.5" y2="12.75" />
+      <line x1="14.5" y1="15" x2="14.5" y2="16.5" />
     </IconShell>
   );
 }

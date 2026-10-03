@@ -216,8 +216,19 @@ describe('checkClaudeReviewTickets — several stories', () => {
       ok: false,
       index: 1,
       field: 'title',
-      message: 'Ticket 2: Title is 301 characters; the limit is 300.',
+      message: 'Story 2: Title is 301 characters; the limit is 300.',
     });
+  });
+
+  it('numbers the failing story as it will be STORED: a blank entry before it does not count', () => {
+    // Regression: the panel showed [ok, (blank), bad] as Story 3 while the run calls it Story 2.
+    const r = checkClaudeReviewTickets([{ title: 'ok' }, { title: '  ' }, { title: 'x'.repeat(301) }]);
+    expect(r).toMatchObject({ ok: false, index: 2, message: 'Story 2: Title is 301 characters; the limit is 300.' });
+    const j = checkClaudeReviewTickets([
+      { title: 'ok' },
+      { title: 'x'.repeat(301), source: 'jira', key: 'BMD-1040' },
+    ]);
+    expect(j).toMatchObject({ ok: false, index: 1, message: 'BMD-1040: Title is 301 characters; the limit is 300.' });
   });
 
   it("keeps a Jira ticket's provenance when well-formed, drops it when not", () => {

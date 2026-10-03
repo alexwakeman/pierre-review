@@ -132,17 +132,40 @@ posts **one** GitHub review (inline + body + verdict).
   - **Model picker** opens on `DEFAULT_CLAUDE_REVIEW_MODEL` and is NEVER re-seeded from the
     stored run (a run stored under a retired id, such as the old Opus 4.8, would otherwise be a
     select value with no option).
-  - **"User stories (optional)"** sits under the Run row, COLLAPSED by default. Its header adds
-    " · N added" / " · needs a fix", so a closed panel never hides what Run will send. ONE SECTION
-    PER STORY, up to `CLAUDE_REVIEW_MAX_TICKETS`: "Add KEY" (one per fillable detected Jira ticket
-    not yet in the list; "Refresh KEY" once it is) adds a READ-ONLY story rendered as markdown with
-    its key linked and the "Acceptance criteria from" dropdown; "Add a story" adds three editable
-    fields. Every story has Remove. It runs the SAME `checkClaudeReviewTickets` the route runs:
-    per-field counter past 80% of the cap, the check's message under the failing story's field
-    (`index`), and Re-review plus "Run anyway" are disabled while it fails. No `maxLength` on any
-    input. The list prefills from the LATEST run's stored stories (`ticketDraftsFromReview`, Jira
-    provenance kept); a list the reader has touched wins, per PR for the session. Only valid,
-    non-empty stories are sent, as `tickets`, with `source`/`key`/`url`/`fetchedAt` for a Jira one.
+  - **"User stories (optional)"** sits under the Run row: ONE TAB PER STORY (`lib/storyTabs.ts`,
+    `role=tablist`, arrow keys / Home / End, Delete removes), up to `CLAUDE_REVIEW_MAX_TICKETS`. Its
+    header says what Run sends (" · 2 stories" / " · needs a fix") open or closed. Each tab has a ×
+    ("Remove BMD-1040"); "Clear all" asks first (`window.confirm`). "+ Add story" (hidden at the cap)
+    adds and selects a typed tab with three editable fields. A tab PULLED FROM JIRA is read-only
+    markdown (`JiraStoryView`): key linked, title, "Criteria from: <field> · Change", Refresh. Jira
+    tickets detected on the PR (`TicketRef.canFetchDetails`) are **pulled automatically when the tab
+    opens**, once the stored run has loaded, ONCE per PR per detected-key set, never re-adding a key the
+    reader removed this session (`createStoryPullMemory`; no retry — a failure is one line). "Pull all
+    from Jira (N)" in the header is the manual action (clears the removed mark), "Or pull one" the
+    per-key one. ⚠ **A PULL READS THE STORED TICKET, NOT JIRA**: the plugin's worker read it when the
+    PR was received (plugin 0038, [PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § Stored
+    Jira tickets), so the auto-pull and "Pull all" are instant. Every read goes through ONE
+    `qc.fetchQuery(['jira-ticket', prId, key])` (1-min stale, not persisted). Refresh is
+    `POST …/jira-ticket/refresh` — Jira is read again server-side, through the worker's path, and
+    the stored row answered. ⚠ **"Story N" is the number the RUN
+    gives the story**: the check drops all-blank stories, so a blank tab is "New story" and does not
+    count (`storyIndexAt`); numbering by raw position made the second story "Story 3". The check's
+    message names a story the same way (key, else "Story N"). It runs the SAME
+    `checkClaudeReviewTickets` the route runs (field errors under the tab's field; Re-review / "Run
+    anyway" disabled while it fails). No `maxLength`. The list prefills from the LATEST run's stored
+    stories; a list the reader has touched wins, per PR for the session.
+  - **The criteria FIELD is the reader's to correct, and the choice is the WORKSPACE's.** The server
+    picks it (`JiraTicketDetails.acField` / `acFieldSource`): the workspace's field for the ticket's
+    issue type on that Jira site when the ticket has it, else the strong name match; the tab shows
+    which (`TicketDraft.acField`, client-only — "not recorded" for a story prefilled from a run).
+    "Change" opens the picker over the stored candidates (no Jira call); a pick is
+    `PUT …/jira-ticket/ac-field`, which saves it for that issue type, re-derives every stored ticket
+    of the type and re-reads this one — other open tabs of the type are rebuilt from their stored
+    rows. "Reset to default" sends `fieldId: null`. "None of these" empties this tab's criteria only
+    and is never saved. Removing a tab does NOT clear the choice (it belongs to the issue type). An
+    old per-browser choice (localStorage `limn:jira-ac-field:v1:…`) is moved to the server ONCE on
+    the next pull and the key deleted (`legacyAcFieldToMigrate`). Candidate text is wiki markup rewritten to markdown by the plugin
+    (`candidateText` → `jiraWikiToMarkdown`), like the description.
   - **In `ClaudesReview`** (latest AND historic runs): the templated `followUpSentence` sits above
     Claude's summary; then **Previous review** — open items first (Not addressed, Partly addressed,
     then Not checked in GREY, never amber: unknown is not "not addressed"), addressed / no longer
@@ -535,9 +558,10 @@ request.
   (already running, queue full) or any error shows under the button and re-enables it.
 - **The user story, on click only** (`resolveListTicket`): a RE-REVIEW reuses the previous run's
   stored ticket; otherwise the PR's first FILLABLE Jira ticket (`PrDetail.tickets`, read through the
-  shared `['pr', id]` cache entry) is fetched and filled exactly as the panel's "Fill from KEY" does —
-  ONE helper, `fillDraftFromJira` (title + description, then the criteria field remembered for this
-  issue type on this site, else the best strong name match, else none). ⚠ **The run starts EITHER
+  shared `['pr', id]` cache entry) is read from the STORED tickets and filled exactly as the panel
+  does — ONE helper, `fillDraftFromJira` (title + description, then the criteria from the field the
+  server picked: the workspace's choice for the issue type, else the best strong name match, else
+  none). ⚠ **The run starts EITHER
   WAY**: no ticket, no token, a Jira error, or a draft over a cap sends no story and the cell says
   so for a few seconds.
 - **Auto review in the column.** The states route folds the manager's live hold over the stored
@@ -659,28 +683,27 @@ and Claude assesses EACH ON ITS OWN**; the screen renders one section per ticket
 - **Fill from Jira** (plugin `jira/`, migration `0035`). When the PR carries a Jira ticket the
   existing detection found AND its workspace has a saved Jira token, `PrDetail.tickets[i]
   .canFetchDetails` is true and the EXPANDED panel shows one "Fill from KEY" button per such
-  ticket. Click-gated (nothing fetches on mount): `GET /api/pro/prs/:id/jira-ticket?key=` reads the
-  issue with every field (REST v2, `fields=*all&expand=names,schema`; the description's wiki markup
-  converted to markdown, ADF flattened) and the panel REPLACES title and description. Manual entry is unchanged and
+  ticket. `GET /api/pro/prs/:id/jira-ticket?key=` answers the STORED row the plugin's worker wrote
+  when the PR was received (the issue read with every field — REST v2,
+  `fields=*all&expand=names,schema`; the description's wiki markup converted to markdown, ADF
+  flattened — plus status and assignee) and the panel REPLACES title and description. Manual entry is unchanged and
   everything stays editable; nothing is truncated on the way in.
 - ⚠ **THE ACCEPTANCE-CRITERIA FIELD IS CHOSEN PER TICKET, IN THE PANEL — not in Settings.** A
   site-wide picker shipped first and was unusable: real sites carry several fields named
-  "Acceptance Criteria" and the one in use varies by issue type. The route returns `candidates` —
+  "Acceptance Criteria" and the one in use varies by issue type. (Since plugin 0038 the CHOICE is
+  stored per workspace + Jira site + issue type, server-side — see "The criteria FIELD" above; the
+  rest of this paragraph is the candidate list and the default rule.) The route returns `candidates` —
   every custom field with text on THIS ticket, strong name matches first (`/acceptance criteria/`),
   then weak ("AC", "definition of done"), then by name, capped at 50 — and the panel shows
   "Acceptance criteria from" (`Name (customfield_123) — preview`, blank first). The DEFAULT
-  (`defaultAcCandidate`, in `packages/shared/src/claude-review.ts` so the server's auto review picks by the SAME rule): the viewer's remembered field for this issue type on
-  this Jira site, when this ticket has it; else the best STRONG name match (an exact
+  (`defaultAcCandidate`, in `packages/shared/src/claude-review.ts`, applied by the plugin's
+  `deriveAc`): the workspace's field for this issue type on this Jira site, when this ticket has it; else the best STRONG name match (an exact
   "Acceptance Criteria" first — a weak "AC" / "Definition of Done" match is listed near the top but
   never preselected, because a wrong prefill is worse than a blank); strong matches carry a ★ in the
-  dropdown; else blank, leaving the box untouched. A preselected field fills the
-  box at once; changing the dropdown refills it client-side with no refetch, and an EXPLICIT choice
-  is remembered (blank forgets). ⚠ **The token that counts is the one on the workspace that OWNS the
+  dropdown; else blank, leaving the box untouched. The chosen field fills the box at once. ⚠ **The token that counts is the one on the workspace that OWNS the
   PR's repo**, not the workspace being viewed (`?workspace=` is only the viewer's scope): when a Jira
   ticket is detected but that workspace has no token, the panel names it ("add a Jira API token in
-  Settings for the BNG workspace") instead of silently showing no button. The memory is per-viewer localStorage keyed
-  `limn:jira-ac-field:v1:<site host>:<issue type id>`, every access wrapped — a convenience, never
-  state anyone else sees. ⚠ The route re-runs detection and refuses a key the PR does not carry,
+  Settings for the BNG workspace") instead of silently showing no button. ⚠ The route re-runs detection and refuses a key the PR does not carry,
   so the saved token can read only tickets this workspace's PRs name. Settings, token storage and
   SSRF rules: [PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § Jira API access and
   [SECURITY.md](SECURITY.md).
@@ -762,9 +785,11 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   so the plugin does the same fill: EVERY detected key, in detection order, up to
   `CLAUDE_REVIEW_MAX_TICKETS` (the one detection path, so the token still reads only tickets this
   workspace's PRs name; one failing key skips that ticket only; a moved key answering twice is kept
-  once; each marked `source:'jira'` with key, browse URL and fetch time), fetched through
-  `jiraCall` → `jira/fetch.ts`, criteria from `defaultAcCandidate(candidates, null)` — a strong name
-  match or none, never a weak one. Each field is CUT to its cap (and unstorable characters dropped)
+  once; each marked `source:'jira'` with key, browse URL and fetch time), READ FROM THE STORED
+  TICKETS (plugin 0038 — no Jira call; a detected ticket the worker has not reached yet is read once
+  through the worker's own path), criteria as stored — the workspace's field for the issue type,
+  else a strong name match, else none, never a weak one. A ticket Jira refused is skipped and its
+  stored error CODE logged. Each field is CUT to its cap (and unstorable characters dropped)
   instead of refused: nobody is there to trim. It NEVER throws — no tracker, no token or a Jira
   error is no ticket and the review runs without a story (the provider answers `tickets[]`, plus
   the first as `ticket` for an older host); a Jira failure logs account,

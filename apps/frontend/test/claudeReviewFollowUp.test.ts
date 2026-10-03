@@ -386,7 +386,8 @@ describe('several user stories', () => {
 
   it('the collapsed header counts the stories', () => {
     expect(ticketsPanelHint([], checkTicketDrafts([]))).toBe('');
-    expect(ticketsPanelHint([jira, manual], checkTicketDrafts([jira, manual]))).toBe(' · 2 added');
+    expect(ticketsPanelHint([jira, manual], checkTicketDrafts([jira, manual]))).toBe(' · 2 stories');
+    expect(ticketsPanelHint([manual], checkTicketDrafts([manual]))).toBe(' · 1 story');
   });
 
   it('prefills from a run\'s entries (provenance kept), else its legacy single ticket', () => {

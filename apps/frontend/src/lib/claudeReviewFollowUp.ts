@@ -353,6 +353,11 @@ export interface TicketDraft {
   key?: string;
   url?: string;
   fetchedAt?: string;
+  // CLIENT-ONLY, never sent (the check builds the request from the fields above): the Jira field
+  // the acceptance criteria were taken from — null = none chosen, undefined = not known (a story
+  // prefilled from a stored run) — and the ticket's issue type, which keys the remembered choice.
+  acField?: { id: string; name: string } | null;
+  issueTypeId?: string | null;
 }
 
 export const EMPTY_TICKET_DRAFT: TicketDraft = { title: '', description: '', acceptanceCriteria: '' };
@@ -436,7 +441,7 @@ export function ticketsRequestFromCheck(
   return check.tickets.map(ticketInputFromStored);
 }
 
-/** The collapsed header's addition for several stories: '', ' · 2 added' or ' · needs a fix'. */
+/** The header's summary of what Run sends: '', ' · 1 story', ' · 2 stories' or ' · needs a fix'. */
 export function ticketsPanelHint(
   drafts: readonly TicketDraft[],
   check: ClaudeReviewTicketsCheck,
@@ -444,7 +449,7 @@ export function ticketsPanelHint(
   const n = drafts.filter(ticketDraftHasContent).length;
   if (n === 0) return '';
   if (!check.ok) return ' · needs a fix';
-  return ` · ${n} added`;
+  return ` · ${n} ${n === 1 ? 'story' : 'stories'}`;
 }
 
 /** The drafts to show: the reader's own (touched) list, else the latest run's stories. */

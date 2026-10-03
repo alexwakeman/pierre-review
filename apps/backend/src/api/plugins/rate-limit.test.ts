@@ -108,6 +108,17 @@ describe('tierFor — Jira API reads', () => {
   it('the field list and the ticket read are on `search`', () => {
     expect(tiers('GET', '/api/pro/jira/fields')).toEqual(['search', 'read']);
     expect(tiers('GET', '/api/pro/prs/42/jira-ticket')).toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/pro/ticket-links')).toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/pro/ticket-links/x')).not.toEqual(['search', 'read']);
+  });
+
+  it('the stored-ticket refresh and the criteria-field write are on `search`, by exact verb + path', () => {
+    expect(tiers('POST', '/api/pro/prs/42/jira-ticket/refresh')).toEqual(['search', 'read']);
+    expect(tiers('PUT', '/api/pro/prs/42/jira-ticket/ac-field')).toEqual(['search', 'read']);
+    // The wrong verb, or a near-miss path, is not swept in.
+    expect(tiers('GET', '/api/pro/prs/42/jira-ticket/refresh')).toEqual(['read']);
+    expect(tiers('POST', '/api/pro/prs/42/jira-ticket/ac-field')).not.toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/pro/prs/42/jira-ticket/refreshes')).not.toEqual(['search', 'read']);
   });
 
   it('the ticket line is anchored — siblings under /api/pro/prs/:id keep their own tiers', () => {

@@ -4753,6 +4753,12 @@ export interface JiraAcCandidate {
 // for it, differing by issue type. So the server does not pick one: it returns every custom field
 // with text on THIS ticket as a `candidates` list — strong name matches first, then weak, then the
 // rest by name — and the reader picks in the panel (the SPA preselects, see lib/jiraTicket.ts).
+//
+// ⚠ IT IS A STORED READ (plugin 0038). Jira is read when the PR is RECEIVED into Limn (first sync,
+// or its detected key set changes) and refreshed on a TTL while it is open, by the plugin's
+// background worker; this route returns that stored row and makes no Jira call — except for a
+// ticket the worker has never read, which it reads once through the same worker path. "Refresh" is
+// `POST …/jira-ticket/refresh`; the criteria field is `PUT …/jira-ticket/ac-field`.
 export interface JiraTicketDetails {
   prId: number;
   key: string;
@@ -4763,6 +4769,42 @@ export interface JiraTicketDetails {
   // cap cut, lowest-ranked first, so the list can say it is not everything.
   candidates: JiraAcCandidate[];
   omittedCandidates: number;
+  // ── stored-row extras (plugin 0038). OPTIONAL so an older plugin's answer still parses. ──
+  /** The criteria the SERVER picked (markdown): the workspace's field for this issue type when the
+   *  ticket has it, else the strong name match, else ''. */
+  acceptanceCriteria?: string;
+  /** The field `acceptanceCriteria` came from; null = none. */
+  acField?: { id: string; name: string } | null;
+  /** 'setting' = the workspace's choice for this issue type; 'default' = the name match. */
+  acFieldSource?: 'setting' | 'default';
+  status?: string | null;
+  statusCategory?: JiraStatusCategory | null;
+  assignee?: TicketAssignee | null;
+  /** ISO time of the last successful read from Jira. */
+  fetchedAt?: string | null;
+}
+
+/** Jira's status category key — the part of a status that means the same on every site. */
+export type JiraStatusCategory = 'new' | 'indeterminate' | 'done';
+
+export interface TicketAssignee {
+  name: string;
+  /** https only; a third-party URL — render through `safeExternalUrl`, and CSP may refuse it. */
+  avatarUrl?: string | null;
+}
+
+// POST /api/pro/prs/:id/jira-ticket/refresh — read ONE detected ticket from Jira again NOW (through
+// the background worker's own path), store it, and answer the stored row.
+export interface JiraTicketRefreshBody {
+  key: string;
+}
+
+// PUT /api/pro/prs/:id/jira-ticket/ac-field — which field holds the acceptance criteria for this
+// ticket's ISSUE TYPE in the PR's workspace (on its Jira site). `fieldId: null` = back to the
+// default name match. Every stored ticket of that type is re-derived and this one is re-read.
+export interface JiraAcFieldBody {
+  key: string;
+  fieldId: string | null;
 }
 
 /**
@@ -5322,6 +5364,56 @@ export interface TicketRef {
   // for the PR's workspace. The Claude Review panel shows its "Fill from KEY" button only then.
   // OPTIONAL so the contract stays additive — absent (an older plugin, or Linear) reads as false.
   canFetchDetails?: boolean;
+}
+
+// ── The Open PRs cards' ticket row (Pro, `issueLinks`) ─────────────────────────────────────────
+// `POST /api/pro/ticket-links` — ONE request for every listed card (never one per card). The
+// server runs the SAME detection the PR-detail chips use (title + head branch, against the PR's
+// own workspace tracker settings) and, for a Jira workspace with a saved token, adds each ticket's
+// title, status and assignee from the STORED rows (plugin 0038) — the route makes NO Jira call; a
+// ticket not read yet kicks the background worker. Over `TICKET_LINKS_MAX_PRS` ids is a 400, never
+// a silent truncation. (`TICKET_LINKS_TITLE_LOOKUPS` is now the worker's per-kick bound.)
+export const TICKET_LINKS_MAX_PRS = 1000;
+export const TICKET_LINKS_TITLE_LOOKUPS = 40;
+
+export interface TicketLinksBody {
+  prIds: number[];
+}
+
+export interface TicketLink {
+  key: string;
+  url: string;
+  provider: IssueProvider;
+  /** The ticket's summary as Jira gives it. null = not read: not Jira, no token, Jira refused,
+   *  or the worker has not read it yet (see `titlesComplete`). */
+  title: string | null;
+  // ── STORED-ROW EXTRAS (plugin 0038), all OPTIONAL: absent = an older plugin; null = not known
+  // (not Jira, no token, not read yet, or Jira sent none). ──
+  /** The workflow status as the site names it ("In Review"). */
+  status?: string | null;
+  /** Its category — 'new' (to do) | 'indeterminate' (in progress) | 'done'. Group on THIS. */
+  statusCategory?: JiraStatusCategory | null;
+  /** null = unassigned (when `status` is known) or not known. */
+  assignee?: TicketAssignee | null;
+  /** The issue type's name ("Story", "Bug"). */
+  issueType?: string | null;
+}
+
+export interface PrTicketLinks {
+  prId: number;
+  /** Detected tickets, in detection order (title first, then branch). May be []. */
+  tickets: TicketLink[];
+  /** `{base}/browse/` for a Jira workspace, so a key known from elsewhere (a stored review's
+   *  story with no link) can still be linked to the right site. null when not Jira. */
+  jiraBrowsePrefix: string | null;
+}
+
+export interface TicketLinksResponse {
+  /** One entry per listed PR whose workspace has a tracker configured; others are absent. */
+  prs: PrTicketLinks[];
+  /** false while a detected Jira ticket (in a workspace with a token) has not been read by the
+   *  background worker yet — the request kicked it; ask again shortly. */
+  titlesComplete: boolean;
 }
 
 // Where ONE reviewer stands on a pull request — the wire shape of the server's canonical fold
