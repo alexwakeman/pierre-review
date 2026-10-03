@@ -10,6 +10,7 @@ import type {
   ClaudeFindingSide,
   ClaudeReviewModel,
   ClaudeFindingLens,
+  ClaudeFindingStory,
   ClaudeReviewVerdict,
   DailyBriefCounts,
   PersonPeriod,
@@ -140,33 +141,20 @@ export interface GenerateFixArgs {
   onProgress: (p: CodingProgress) => void;
 }
 
-// One item's disposition from a LIST-seeded fix run (the "fix from comments" seed). The
-// agent reports these through the core `submit_fix` tool; `ref` is the label the CALLER's
-// prompt assigned, so core never needs to know what the items are. Self-report only —
-// `filesTouched` is advisory and the changeset still comes from git.
-export interface FixItemVerdict {
-  ref: string;
-  verdict:
-    | 'fixed'
-    | 'partially_fixed'
-    | 'already_addressed'
-    | 'invalid'
-    | 'out_of_scope'
-    | 'needs_human';
-  valid: boolean;
-  reasoning: string;
-  pushback?: string;
-  learning?: string;
-  filesTouched?: string[];
+// The fix agent's self-report, as the `submit_fix` tool received it (UNVALIDATED — the AI Fix
+// manager checks refs against the set the run was shown and clips text before storing it). Self-
+// report only: the changeset still comes from git.
+export interface FixAgentReport {
+  changes?: Array<{ path: string; summary: string; refs?: string[] }>;
+  unaddressed?: Array<{ ref: string; reason: string }>;
 }
 
 export interface GenerateFixResult {
   summary: string;
   commitMessage: string;
-  // Per-item dispositions, when the caller's prompt asked for them (apiVersion 19).
-  // `undefined` for a plain/CI-seeded run — the agent had no list to report on, which is
-  // deliberately distinct from an empty array.
-  commentVerdicts?: FixItemVerdict[];
+  // The per-change report and the items deliberately not fixed. Absent when the agent never
+  // called submit_fix (or reported neither list).
+  report?: FixAgentReport;
   // Unified-diff patch (git add -A + git diff --cached --binary — includes new files).
   patch: string;
   filesChanged: string[];
@@ -243,6 +231,9 @@ export interface GithubSeam {
     name: string,
     prNumber: number,
   ): Promise<GithubPrHeadInfo>;
+  // No plugin caller since the Pro CI analysis was retired (Claude Review reads failing CI in core,
+  // review/claude-review/ci-failures.ts). Kept because it is a REQUIRED member: removing it is an
+  // apiVersion bump, which nothing else here needs.
   fetchCheckLogs(
     accountId: number,
     owner: string,
@@ -429,6 +420,9 @@ export interface ReviewFinding {
   // The specialist lens on a deep review (review/claude-review/specialists.ts); null/absent ⇒ a
   // general finding. Core-only (Claude Review left the plugin), so no apiVersion question.
   lens?: ClaudeFindingLens | null;
+  // A STORY FINDING's origin (claude-review/ticket.ts `storyFindingsFrom`) — set by the server,
+  // never by the model. Core-only, optional: no apiVersion question.
+  story?: ClaudeFindingStory | null;
 }
 
 // ---- Follow-up + user-story reports (host→plugin RESULT fields) ----
@@ -451,6 +445,19 @@ export interface ReviewThreadReport {
   addressed: 'addressed' | 'partly_addressed' | 'not_addressed' | 'unclear';
   explanation: string;
   draftReply?: string | null;
+}
+
+// One FAILING CI check, as Claude diagnosed it ('F1'… as the prompt named them). Core-only, passed
+// through VERBATIM; review/claude-review/ci-failures.ts reconciles it (each ref once, unknown refs
+// and malformed entries dropped, missing refs 'not_checked' — never an invented cause).
+export interface ReviewCiFailureReport {
+  ref: string;
+  cause: string;
+  explanation: string;
+  category: 'code' | 'test' | 'flaky_or_infra' | 'config' | 'unclear';
+  step?: string | null;
+  relatedFiles?: Array<{ path: string; line?: number | null }>;
+  fixableInPr: boolean;
 }
 
 export interface ReviewTicketItemReport {
@@ -524,6 +531,8 @@ export interface RunReviewResult {
   ticket?: ReviewTicketReport;
   // Present only when the prompt carried a "Review threads" section and the model reported.
   threads?: ReviewThreadReport[];
+  // Present only when the prompt carried a "CI failures" section and the model reported.
+  ciFailures?: ReviewCiFailureReport[];
 }
 
 // The ticked findings the plugin hands to postReview (the plugin read them from the core
@@ -537,6 +546,9 @@ export interface PostReviewFinding {
   fileInDiff: boolean;
   body: string;
   suggestion: string | null;
+  // A user-story finding's first comment line (shared `storyCommentLead`), added by the comment
+  // builders; absent / null for every other finding. OPTIONAL, so no apiVersion bump.
+  storyLead?: string | null;
 }
 
 export interface PostReviewArgs {
@@ -1175,8 +1187,8 @@ export interface ProContext {
   };
   // apiVersion 22: `reviewEvents` and `registerLearningsProvider` LEFT with Claude Review's memory,
   // and `review` with Claude Review itself (all core now). In their place, OPTIONAL: the plugin
-  // registers its two Pro inputs to the free agentic features — the Jira fill for an AUTO review
-  // and AI Fix's CI-analysis seed (review/plugin-providers.ts). Absent ⇒ both run without them.
+  // registers its Pro input to the free agentic features — the Jira fill for an AUTO review
+  // (review/plugin-providers.ts). Absent ⇒ auto review runs without a story.
   registerAgenticProviders?(p: AgenticProviders): void;
   // Background-job seam (host owns process/scheduler infra). The plugin registers node-cron
   // jobs here during register(); the core scheduler cron.schedule()s them AFTER bind, so they

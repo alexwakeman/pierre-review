@@ -170,3 +170,14 @@ describe('the auto-review lock', () => {
     }
   });
 });
+
+// The per-ticket "Post as comment" is RETIRED: a story's results reach GitHub as findings (Post /
+// Submit review), so the route is gone, not merely refused.
+describe('the retired ticket post route', () => {
+  it('POST /api/claude-reviews/:reviewId/tickets/:index/post ⇒ 404 (no such route)', async () => {
+    const { app } = await build();
+    const res = await app.inject({ method: 'POST', url: '/api/claude-reviews/5/tickets/0/post' });
+    expect(res.statusCode).toBe(404);
+    expect(app.printRoutes()).not.toContain('tickets');
+  });
+});

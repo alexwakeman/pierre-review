@@ -27,6 +27,7 @@ import { safeExternalUrl } from '../lib/ui.js';
 import { CopyButton } from './CopyButton.js';
 import { BotIcon, ChevronIcon, ExternalLinkIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
+import { ReviewSection } from './ReviewSection.js';
 
 const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[11px] font-medium';
 const MUTED = 'text-gray-500 dark:text-gray-400';
@@ -198,14 +199,14 @@ export function ClaudeReviewThreadsSection({
   if (items == null) return null;
   const pills = threadCountPills(counts ?? threadAssessmentCounts(items));
   return (
-    <section aria-label="Review threads" className="space-y-1.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-semibold">Review threads</span>
-        {pills.map((p) => (
-          <span key={p.key} className={`${CHIP} ${p.cls}`}>
-            {p.label}
-          </span>
-        ))}
+    <ReviewSection
+      title="Review threads"
+      pills={pills.map((p) => (
+        <span key={p.key} className={`${CHIP} ${p.cls}`}>
+          {p.label}
+        </span>
+      ))}
+      info={
         <InfoButton title="Review threads">
           <p>
             Open comments from people and other review bots. Claude checks each one against the
@@ -215,7 +216,8 @@ export function ClaudeReviewThreadsSection({
             &ldquo;Generate fix from this review&rdquo; includes the ones still to fix.
           </p>
         </InfoButton>
-      </div>
+      }
+    >
       {items.length === 0 ? (
         <p className={`text-xs ${MUTED}`}>No other review threads.</p>
       ) : (
@@ -249,6 +251,6 @@ export function ClaudeReviewThreadsSection({
           )}
         </>
       )}
-    </section>
+    </ReviewSection>
   );
 }

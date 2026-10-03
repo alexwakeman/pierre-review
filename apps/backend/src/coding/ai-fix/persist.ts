@@ -1,13 +1,15 @@
 import { and, desc, eq } from 'drizzle-orm';
 import type {
-  AiFixCommentTarget,
-  AiFixCommentVerdict,
+  AiFixChangeReport,
+  AiFixReviewItem,
   AiFixSeed,
   AiFixStatus,
+  AiFixStoredSeed,
+  AiFixTrigger,
 } from '@pierre-review/shared';
 import type { GenerateFixResult } from '../../pro/contract.js';
 import type { AgentContext } from '../../review/agent-context.js';
-import { mapCommentVerdicts, type ResolvedCommentTarget } from './comment-seed.js';
+import { normalizeChangeReport } from './review-seed.js';
 
 // DB access for the ai_fixes table (plugin-owned). Writes go through ctx.db with the
 // portable `.execute()` terminal; internal status transitions scope by id (the manager
@@ -22,7 +24,7 @@ export interface AiFixRow {
   baseSha: string;
   status: AiFixStatus;
   model: string;
-  seed: AiFixSeed;
+  seed: AiFixStoredSeed;
   prompt: string | null;
   summary: string | null;
   commitMessage: string | null;
@@ -39,9 +41,13 @@ export interface AiFixRow {
   pushedAt: Date | number | null;
   createdAt: Date | number | null;
   finishedAt: Date | number | null;
-  // JSON, comments-seeded runs only (migration 0024) — see parseCommentTargets/…Verdicts.
-  commentTargets: string | null;
-  commentVerdicts: string | null;
+  // LEGACY JSON, written only by the removed comments seed (plugin migration 0024). Never read.
+  commentTargets?: string | null;
+  commentVerdicts?: string | null;
+  // sqlite 0078 / pg 0065. NULL on older rows.
+  trigger: string | null;
+  reviewItems: string | null;
+  changeReport: string | null;
 }
 
 export async function insertQueuedFix(
@@ -55,13 +61,15 @@ export async function insertQueuedFix(
     seed: AiFixSeed;
     sourceReviewId: number | null;
     prompt: string;
-    // seed === 'comments': the resolved targets, stored BEFORE the agent runs so the row always
-    // knows what it was asked to do (a run that fails or is cancelled still shows its list).
-    commentTargets?: AiFixCommentTarget[] | null;
+    // Omitted ⇒ 'manual'.
+    trigger?: AiFixTrigger;
+    // seed === 'review': the items, stored BEFORE the agent runs so the row always knows what it
+    // was asked to do (a run that fails or is cancelled still shows its list).
+    reviewItems?: AiFixReviewItem[] | null;
   },
 ): Promise<number> {
   const t = ctx.schema.aiFixes;
-  const targets = input.commentTargets;
+  const items = input.reviewItems;
   const rows = (await ctx.db
     .insert(t)
     .values({
@@ -74,11 +82,9 @@ export async function insertQueuedFix(
       seed: input.seed,
       sourceReviewId: input.sourceReviewId,
       prompt: input.prompt,
-      // Omitted (→ NULL) rather than written as `[]` on every other seed: null means "this run had
-      // no comment list", which is what `rowToAiFix` reports to the client.
-      ...(targets != null && targets.length > 0
-        ? { commentTargets: JSON.stringify(targets) }
-        : {}),
+      trigger: input.trigger ?? 'manual',
+      // Omitted (→ NULL) on a plain run: null means "this run had no review items".
+      ...(items != null ? { reviewItems: JSON.stringify(items) } : {}),
     })
     .returning({ id: t.id })
     .execute()) as Array<{ id: number }>;
@@ -96,19 +102,12 @@ export async function saveFixSuccess(
   ctx: AgentContext,
   id: number,
   data: GenerateFixResult,
-  // seed === 'comments': the targets this run was given, so the agent's `ref`-keyed self-report
-  // can be mapped back onto real comments (and every unreported target turned into an explicit
-  // needs_human row). Absent on every other seed, which leaves the column NULL.
-  commentTargets?: ResolvedCommentTarget[],
-  // The refs `buildCommentSeedText` cut for prompt budget. Passed through so an unreported target
-  // we NEVER SHOWED the agent says so, instead of blaming the agent for our own truncation.
-  droppedRefs?: readonly string[],
+  // The refs the run was SHOWN ([] for a plain run) — the set the agent's report is validated
+  // against.
+  sentRefs: readonly string[],
 ): Promise<void> {
   const t = ctx.schema.aiFixes;
-  const verdicts: AiFixCommentVerdict[] | null =
-    commentTargets == null
-      ? null
-      : mapCommentVerdicts(commentTargets, data.commentVerdicts, droppedRefs ?? []);
+  const report: AiFixChangeReport = normalizeChangeReport(data.report, sentRefs, data.filesChanged);
   await ctx.db
     .update(t)
     .set({
@@ -122,9 +121,7 @@ export async function saveFixSuccess(
       outputTokens: data.usage.outputTokens,
       numTurns: data.numTurns,
       finishedAt: new Date(),
-      // Only ever written for a comments run; a non-comments run must not overwrite the column
-      // with a literal null it never owned.
-      ...(verdicts != null ? { commentVerdicts: JSON.stringify(verdicts) } : {}),
+      changeReport: JSON.stringify(report),
     })
     .where(eq(t.id, id))
     .execute();
@@ -282,30 +279,34 @@ export function parseFilesChanged(json: string | null): string[] {
 }
 
 /**
- * The comments-seed JSON columns, parsed DEFENSIVELY.
- *
- * NULL (never `[]`) for a non-comments run, and null again for anything unparseable: these two
- * columns are read by `GET /api/pro/prs/:id/ai-fix`, which is what loads the whole AI Analysis and
- * Fix tab, so a throw here would take the tab down over a malformed blob rather than degrading to
- * "this run has no comment report". Same reason `parseFilesChanged` swallows — but the null/[]
- * distinction matters here, because `[]` is a real state on a comments run (see the shared
- * `AiFix.commentVerdicts` contract) and must not be manufactured from a parse failure.
+ * The report JSON columns, parsed DEFENSIVELY: null for NULL and for anything unparseable. These
+ * are read by `GET /api/pro/prs/:id/ai-fix`, which loads the whole AI Fix tab, so a throw here
+ * would take the tab down over a malformed blob rather than degrading to "no report".
  */
-export function parseCommentTargets(json: string | null): AiFixCommentTarget[] | null {
-  const v = parseJsonArray(json);
-  return v == null ? null : (v as AiFixCommentTarget[]);
+export function parseReviewItems(json: string | null | undefined): AiFixReviewItem[] | null {
+  const v = parseJson(json);
+  return Array.isArray(v) ? (v as AiFixReviewItem[]) : null;
 }
 
-export function parseCommentVerdicts(json: string | null): AiFixCommentVerdict[] | null {
-  const v = parseJsonArray(json);
-  return v == null ? null : (v as AiFixCommentVerdict[]);
+export function parseChangeReport(json: string | null | undefined): AiFixChangeReport | null {
+  const v = parseJson(json);
+  if (v == null || typeof v !== 'object' || Array.isArray(v)) return null;
+  const o = v as Partial<AiFixChangeReport>;
+  return {
+    changes: Array.isArray(o.changes) ? o.changes : [],
+    unaddressed: Array.isArray(o.unaddressed) ? o.unaddressed : [],
+    notReported: Array.isArray(o.notReported) ? o.notReported : [],
+  };
 }
 
-function parseJsonArray(json: string | null): unknown[] | null {
+export function parseTrigger(v: string | null | undefined): AiFixTrigger {
+  return v === 'auto' ? 'auto' : 'manual';
+}
+
+function parseJson(json: string | null | undefined): unknown {
   if (json == null || json === '') return null;
   try {
-    const v: unknown = JSON.parse(json);
-    return Array.isArray(v) ? v : null;
+    return JSON.parse(json) as unknown;
   } catch {
     return null;
   }

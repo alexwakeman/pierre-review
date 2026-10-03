@@ -11,7 +11,9 @@ import type {
   TicketRef,
 } from '@pierre-review/shared';
 import {
+  CLEAN_CLASS,
   EMPTY_TICKET_DRAFT,
+  OUTDATED_CLASS,
   checkTicketDraft,
   ticketDraftFromStored,
   ticketDraftHasContent,
@@ -26,7 +28,7 @@ import {
   type AcMemoryStore,
 } from './jiraTicket.js';
 
-// Pure helpers for the Open PRs table's "Claude review" column (OpenPrsTable → ClaudeReviewCell).
+// Pure helpers for the Claude Review panel on each Open PRs card (OpenPrsCards → ClaudeReviewCell).
 // The column reads ONE batched `POST /api/claude-review/states` answer and starts runs through the
 // SAME `POST /api/prs/:id/claude-review` the Claude Review tab uses — no picker, the defaults.
 
@@ -143,12 +145,47 @@ export function findingTotal(summary: ClaudeReviewStateSummary): number {
   return Object.values(summary.findings).reduce((a, b) => a + b, 0);
 }
 
-/** The "how far behind" words for a review whose PR moved on, or null when it did not. */
-export function outdatedLabel(state: Pick<ClaudeReviewPrState, 'headMoved' | 'commitsSince'>): string | null {
-  if (!state.headMoved) return null;
-  const n = state.commitsSince;
-  if (n == null || n <= 0) return 'Branch changed';
-  return `${n} newer commit${n === 1 ? '' : 's'}`;
+/**
+ * IS THIS REVIEW ON THE PR'S CURRENT COMMIT? The ONE answer the Claude Review pane's header and the
+ * Open PRs card both print, so the two can never disagree.
+ *
+ *   current  -> green "On latest commit" (+ `sha`, the short head, for a caller with room for it)
+ *   behind   -> amber "N newer commits" / "1 newer commit", or "Branch changed" when the newer
+ *               commits cannot be counted (a rewritten history, or the reviewed commit not synced)
+ *
+ * null when either commit is unknown: no reading is never "current" and never "moved".
+ */
+export interface ReviewCurrency {
+  tone: 'current' | 'behind';
+  label: string;
+  /** The PR's current head, shortened (7 chars). */
+  sha: string;
+  /** The chip colour: CLEAN_CLASS when current, OUTDATED_CLASS when behind. */
+  className: string;
+  /** A hover line naming both commits. */
+  title: string;
+}
+
+export function reviewCurrency(r: {
+  reviewedHeadSha: string | null | undefined;
+  currentHeadSha: string | null | undefined;
+  commitsSince?: number | null;
+}): ReviewCurrency | null {
+  const reviewed = r.reviewedHeadSha;
+  const current = r.currentHeadSha;
+  if (!reviewed || !current) return null;
+  const sha = current.slice(0, 7);
+  if (reviewed === current) {
+    return { tone: 'current', label: 'On latest commit', sha, className: CLEAN_CLASS, title: `Reviewed ${sha}, the PR's latest commit` };
+  }
+  const n = r.commitsSince;
+  return {
+    tone: 'behind',
+    label: n == null || n <= 0 ? 'Branch changed' : `${n} newer commit${n === 1 ? '' : 's'}`,
+    sha,
+    className: OUTDATED_CLASS,
+    title: `Reviewed ${reviewed.slice(0, 7)}; the PR is now at ${sha}`,
+  };
 }
 
 /** A story's alignment in a pill's room. */
@@ -170,6 +207,43 @@ export function followUpTally(
   const open = followUp.not_addressed + followUp.partly_addressed;
   if (fixed === 0 && open === 0) return null;
   return { fixed, open };
+}
+
+/**
+ * The Claude Review panel's left accent on an Open PRs card — the run's OUTCOME at a glance.
+ * `none` = never reviewed (or cancelled): no accent, the panel is just an offer to review.
+ */
+export type ReviewTone = 'none' | 'active' | 'bad' | 'ok' | 'neutral';
+
+export function reviewTone(cell: ReviewCell): ReviewTone {
+  switch (cell.kind) {
+    case 'start':
+      return cell.failed ? 'bad' : 'none';
+    case 'starting':
+    case 'queued':
+    case 'running':
+      return 'active';
+    case 'done':
+      if (cell.verdict === 'REQUEST_CHANGES') return 'bad';
+      if (cell.verdict === 'APPROVE') return 'ok';
+      return 'neutral';
+  }
+}
+
+/** The CI half of a finished run: "2 CI failures explained" / "3 CI failures, 1 explained".
+ *  null when the run did not look at CI, or nothing was failing (nothing to say). */
+export function ciDiagnosisLabel(ci: ClaudeReviewStateSummary['ci']): string | null {
+  if (ci == null || ci.failing <= 0) return null;
+  const noun = `CI failure${ci.failing === 1 ? '' : 's'}`;
+  if (ci.diagnosed >= ci.failing) return `${ci.failing} ${noun} explained`;
+  return `${ci.failing} ${noun}, ${ci.diagnosed === 0 ? 'none' : ci.diagnosed} explained`;
+}
+
+/** Other reviewers' threads Claude judged right and not yet dealt with. null when none, or when
+ *  the run did not judge threads (never a fake zero). */
+export function threadsToFixLabel(summary: Pick<ClaudeReviewStateSummary, 'threadAssessments'>): string | null {
+  const n = summary.threadAssessments?.validUnaddressed ?? 0;
+  return n > 0 ? `${n} thread${n === 1 ? '' : 's'} to fix` : null;
 }
 
 /** The Findings sort value: most severe run first under 'desc'. A PR with no finished run sorts

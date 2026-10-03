@@ -5,6 +5,7 @@ import type {
   ClaudeFindingLens,
   ClaudeFindingSeverity,
   ClaudeFindingSide,
+  ClaudeFindingStory,
   ClaudeReview,
   ClaudeReviewFollowUp,
   ClaudeReviewFollowUpRecord,
@@ -18,13 +19,15 @@ import type {
   ClaudeReviewTicket,
   ClaudeReviewTrigger,
   ClaudeReviewVerdict,
+  ClaudeCiFailure,
+  ClaudeCiFailuresRecord,
   ClaudeThreadAssessment,
   ClaudeTicketAssessment,
   ReviewMode,
   ReviewRouteReason,
 } from '@pierre-review/shared';
 import { CLAUDE_FINDING_LENSES, threadAssessmentCounts } from '@pierre-review/shared';
-import { storedList } from '@pierre-review/shared';
+import { storedList, stripStoredStoryLead } from '@pierre-review/shared';
 import type { ReviewFinding } from '../../pro/contract.js';
 import { ticketEntriesOf } from './ticket.js';
 import type { AgentContext } from '../agent-context.js';
@@ -81,6 +84,16 @@ interface FindingRow {
   priorFindingId?: number | null;
   // The specialist lens (migration 0075 / pg 0062). Free text in the column; narrowed on read.
   lens?: string | null;
+  // A story finding's origin (migration 0079 / pg 0066): both set or both null.
+  storyIndex?: number | null;
+  storyRef?: string | null;
+}
+
+// A story finding's origin off its row; null unless BOTH columns hold a value.
+export function storyOf(r: Pick<FindingRow, 'storyIndex' | 'storyRef'>): ClaudeFindingStory | null {
+  return r.storyIndex != null && Number.isInteger(r.storyIndex) && r.storyIndex >= 0 && r.storyRef
+    ? { index: r.storyIndex, ref: r.storyRef }
+    : null;
 }
 
 interface ReviewRow {
@@ -119,6 +132,20 @@ interface ReviewRow {
   // Other reviewers' open threads, judged (migration 0076 / pg 0063). null on older rows.
   threadAssessments?: ClaudeThreadAssessment[] | null;
   commentsThrough?: Date | null;
+  // The head's CI + each failing check, diagnosed (migration 0077 / pg 0064). null on older rows.
+  ciFailures?: ClaudeCiFailuresRecord | null;
+}
+
+// A stored CI record, or null for an older row / anything malformed (never a guessed shape).
+export function ciRecordOf(v: unknown): ClaudeCiFailuresRecord | null {
+  if (v == null || typeof v !== 'object') return null;
+  const r = v as Partial<ClaudeCiFailuresRecord>;
+  if (!Array.isArray(r.failures) || typeof r.state !== 'string') return null;
+  return {
+    state: r.state,
+    checkCount: typeof r.checkCount === 'number' ? r.checkCount : 0,
+    failures: r.failures,
+  };
 }
 
 function mapFinding(r: FindingRow): ClaudeFinding {
@@ -131,7 +158,9 @@ function mapFinding(r: FindingRow): ClaudeFinding {
     diffAnchorId: diffAnchorId(r.path),
     severity: r.severity,
     title: r.title,
-    body: r.body,
+    // A story finding stored before its lead moved to post time began with that lead, which only
+    // repeated the title on screen (shared `stripStoredStoryLead`).
+    body: stripStoredStoryLead(r.body, storyOf(r)),
     editedBody: r.editedBody,
     suggestion: r.suggestion,
     diffHunk: r.diffHunk,
@@ -144,6 +173,7 @@ function mapFinding(r: FindingRow): ClaudeFinding {
     createdAt: isoReq(r.createdAt),
     priorFindingId: r.priorFindingId ?? null,
     lens: asLens(r.lens),
+    story: storyOf(r),
   };
 }
 
@@ -221,7 +251,16 @@ function mapReview(
     threadAssessmentCounts: Array.isArray(r.threadAssessments)
       ? threadAssessmentCounts(r.threadAssessments)
       : null,
+    // null = this run did not look at CI (older row, skip, not succeeded, checks unreadable).
+    ...ciWireOf(r.ciFailures),
   };
+}
+
+function ciWireOf(v: unknown): Pick<ClaudeReview, 'ciFailures' | 'ciState'> {
+  const rec = ciRecordOf(v);
+  return rec
+    ? { ciFailures: rec.failures, ciState: { state: rec.state, checkCount: rec.checkCount } }
+    : { ciFailures: null, ciState: null };
 }
 
 const summaryOf = (r: ReviewRow): ClaudeReviewSummary => ({
@@ -395,6 +434,9 @@ export async function getLatestReviewStates(
   ctx: AgentContext,
   prIds: readonly number[],
   accountId: number,
+  // TRAILING: the AI Fix manager's in-memory claim (`isFixRunning`). When given, each state also
+  // carries `fix` ('running' / 'ready') from ONE batched ai_fixes read. Absent ⇒ no `fix` field.
+  fixRunning?: (prId: number) => boolean,
 ): Promise<ClaudeReviewPrState[]> {
   if (prIds.length === 0) return [];
   const { cr, prs, repos } = tables(ctx);
@@ -441,11 +483,61 @@ export async function getLatestReviewStates(
       ticket: storedList(r.ticket)[0] ?? null,
       tickets: storedList(r.ticket),
       headMoved: r.prHeadSha != null && r.prHeadSha !== r.headSha,
+      currentHeadSha: r.prHeadSha ?? null,
       trigger: r.trigger === 'auto' ? 'auto' : 'manual',
     });
   }
   await foldStateSummaries(ctx, out, latestByPr);
+  if (fixRunning) await foldFixStates(ctx, out, latestByPr, accountId, fixRunning);
   return out;
+}
+
+/**
+ * The Open PRs strip's AI Fix pill, for the listed PRs in ONE read of `ai_fixes`: `'running'` while
+ * the fixer holds a queued / running fix for the PR (the manager's claim is the authority — a row
+ * left `running` by a crash is not), else `'ready'` when a SUCCEEDED fix with a non-empty patch,
+ * never pushed, was built on the PR's CURRENT synced head. Mutates `states` in place.
+ */
+async function foldFixStates(
+  ctx: AgentContext,
+  states: ClaudeReviewPrState[],
+  latestByPr: Map<number, { prHeadSha: string | null }>,
+  accountId: number,
+  fixRunning: (prId: number) => boolean,
+): Promise<void> {
+  if (states.length === 0) return;
+  const af = (ctx.schema as any).aiFixes;
+  const rows = (await ctx.db
+    .select({ prId: af.prId, status: af.status, baseSha: af.baseSha, patch: af.patch, pushedAt: af.pushedAt })
+    .from(af)
+    .where(
+      and(
+        eq(af.accountId, accountId),
+        inArray(
+          af.prId,
+          states.map((s) => s.prId),
+        ),
+      ),
+    )
+    .execute()) as Array<{ prId: number; status: string; baseSha: string; patch: string | null; pushedAt: unknown }>;
+  const running = new Set<number>();
+  const ready = new Set<number>();
+  for (const r of rows) {
+    if ((r.status === 'queued' || r.status === 'running') && fixRunning(r.prId)) running.add(r.prId);
+    const head = latestByPr.get(r.prId)?.prHeadSha ?? null;
+    if (
+      r.status === 'succeeded' &&
+      r.pushedAt == null &&
+      (r.patch ?? '').trim() !== '' &&
+      head != null &&
+      r.baseSha === head
+    )
+      ready.add(r.prId);
+  }
+  for (const s of states) {
+    if (running.has(s.prId)) s.fix = 'running';
+    else if (ready.has(s.prId)) s.fix = 'ready';
+  }
 }
 
 /**
@@ -481,6 +573,7 @@ async function foldStateSummaries(
           followUp: cr.followUp,
           postedAt: cr.postedAt,
           threadAssessments: cr.threadAssessments,
+          ciFailures: cr.ciFailures,
         })
         .from(cr)
         .where(inArray(cr.id, doneIds))
@@ -490,6 +583,7 @@ async function foldStateSummaries(
         followUp: ClaudeReviewFollowUpRecord | null;
         postedAt: unknown;
         threadAssessments: ClaudeThreadAssessment[] | null;
+        ciFailures: unknown;
       }>)
     : [];
   const extrasById = new Map(extras.map((e) => [e.id, e]));
@@ -539,6 +633,14 @@ async function foldStateSummaries(
     // null = the run did not assess threads (an older row): no figure, never zeros.
     if (Array.isArray(extra?.threadAssessments)) {
       summary.threadAssessments = threadAssessmentCounts(extra.threadAssessments);
+    }
+    // null = the run did not look at CI: no figure, never zeros.
+    const ci = ciRecordOf(extra?.ciFailures);
+    if (ci) {
+      summary.ci = {
+        failing: ci.failures.length,
+        diagnosed: ci.failures.filter((f) => f.status === 'diagnosed').length,
+      };
     }
     s.summary = summary;
   }
@@ -782,6 +884,7 @@ export async function loadPriorReviewForFollowUp(
     fileInDiff: f.fileInDiff,
     posted: f.postedAt != null,
     carried,
+    story: storyOf(f),
   });
 
   const own = (await ctx.db
@@ -903,6 +1006,8 @@ export interface ReviewSuccessData {
   ticketAssessment?: ClaudeTicketAssessment[] | null;
   // Other reviewers' open threads, judged. null/absent ⇒ none assessed (stored NULL).
   threadAssessments?: ClaudeThreadAssessment[] | null;
+  // The head's CI and each failing check, diagnosed. null/absent ⇒ CI not looked at (stored NULL).
+  ciFailures?: ClaudeCiFailuresRecord | null;
 }
 
 export async function saveReviewSuccess(
@@ -931,6 +1036,7 @@ export async function saveReviewSuccess(
         followUp: data.followUp ?? null,
         ticketAssessment: data.ticketAssessment ?? null,
         threadAssessments: data.threadAssessments ?? null,
+        ciFailures: data.ciFailures ?? null,
         finishedAt: new Date(),
       })
       .where(eq(cr.id, id))
@@ -957,6 +1063,9 @@ export async function saveReviewSuccess(
           included: f.included ?? true,
           priorFindingId: f.priorFindingId ?? null,
           lens: f.lens ?? null,
+          // Set only on a story finding (ticket.ts `storyFindingsFrom`, or a re-raise of one).
+          storyIndex: f.story?.index ?? null,
+          storyRef: f.story?.ref ?? null,
         })
         .execute();
     }
@@ -1272,6 +1381,7 @@ export async function loadPriorRunForCarry(
   tickets: ClaudeReviewTicket[];
   ticketAssessments: ClaudeTicketAssessment[];
   threadAssessments: ClaudeThreadAssessment[] | null;
+  ciFailures: ClaudeCiFailure[] | null;
 } | null> {
   const { cr } = tables(ctx);
   const rows = (await ctx.db
@@ -1280,6 +1390,7 @@ export async function loadPriorRunForCarry(
       ticket: cr.ticket,
       ticketAssessment: cr.ticketAssessment,
       threadAssessments: cr.threadAssessments,
+      ciFailures: cr.ciFailures,
     })
     .from(cr)
     .where(
@@ -1298,6 +1409,7 @@ export async function loadPriorRunForCarry(
     ticket: ClaudeReviewTicket | ClaudeReviewTicket[] | null;
     ticketAssessment: ClaudeTicketAssessment | ClaudeTicketAssessment[] | null;
     threadAssessments: ClaudeThreadAssessment[] | null;
+    ciFailures: ClaudeCiFailuresRecord | null;
   }>;
   const r = rows[0];
   if (!r) return null;
@@ -1306,6 +1418,7 @@ export async function loadPriorRunForCarry(
     tickets: storedList(r.ticket),
     ticketAssessments: storedList(r.ticketAssessment),
     threadAssessments: Array.isArray(r.threadAssessments) ? r.threadAssessments : null,
+    ciFailures: ciRecordOf(r.ciFailures)?.failures ?? null,
   };
 }
 
@@ -1324,89 +1437,4 @@ export async function getLatestStoredTickets(
     .limit(1)
     .execute()) as Array<{ ticket: ClaudeReviewTicket | ClaudeReviewTicket[] | null }>;
   return storedList(rows[0]?.ticket ?? null);
-}
-
-// ---- Posting one ticket's analysis ----
-
-export interface TicketPostContext {
-  reviewId: number;
-  prId: number;
-  status: ClaudeReview['status'];
-  reviewHeadSha: string;
-  owner: string;
-  name: string;
-  prNumber: number;
-  tickets: ClaudeReviewTicket[];
-  assessments: ClaudeTicketAssessment[];
-}
-
-export async function getTicketPostContext(
-  ctx: AgentContext,
-  reviewId: number,
-  accountId: number,
-): Promise<TicketPostContext | null> {
-  const { cr, prs, repos } = tables(ctx);
-  const rows = (await ctx.db
-    .select({
-      prId: cr.prId,
-      status: cr.status,
-      headSha: cr.headSha,
-      ticket: cr.ticket,
-      ticketAssessment: cr.ticketAssessment,
-      owner: repos.owner,
-      name: repos.name,
-      prNumber: prs.number,
-    })
-    .from(cr)
-    .innerJoin(prs, eq(prs.id, cr.prId))
-    .innerJoin(repos, eq(repos.id, prs.repoId))
-    .where(and(eq(cr.id, reviewId), eq(repos.accountId, accountId)))
-    .limit(1)
-    .execute()) as Array<{
-    prId: number;
-    status: ClaudeReview['status'];
-    headSha: string;
-    ticket: ClaudeReviewTicket | ClaudeReviewTicket[] | null;
-    ticketAssessment: ClaudeTicketAssessment | ClaudeTicketAssessment[] | null;
-    owner: string;
-    name: string;
-    prNumber: number;
-  }>;
-  const r = rows[0];
-  if (!r) return null;
-  return {
-    reviewId,
-    prId: r.prId,
-    status: r.status,
-    reviewHeadSha: r.headSha,
-    owner: r.owner,
-    name: r.name,
-    prNumber: r.prNumber,
-    tickets: storedList(r.ticket),
-    assessments: storedList(r.ticketAssessment),
-  };
-}
-
-/**
- * Record that ticket `index`'s analysis was posted. Rewrites the assessment column as an ARRAY
- * (a legacy single object becomes a one-element list). The caller holds the per-ticket claim.
- */
-export async function markTicketPosted(
-  ctx: AgentContext,
-  reviewId: number,
-  index: number,
-  posted: { githubCommentId: string | null; url: string | null; postedAt: string },
-): Promise<void> {
-  const { cr } = tables(ctx);
-  const rows = (await ctx.db
-    .select({ ticketAssessment: cr.ticketAssessment })
-    .from(cr)
-    .where(eq(cr.id, reviewId))
-    .limit(1)
-    .execute()) as Array<{ ticketAssessment: ClaudeTicketAssessment | ClaudeTicketAssessment[] | null }>;
-  const list = storedList(rows[0]?.ticketAssessment ?? null).map((a) => ({ ...a }));
-  const at = list[index];
-  if (!at) return;
-  at.posted = posted;
-  await ctx.db.update(cr).set({ ticketAssessment: list }).where(eq(cr.id, reviewId)).execute();
 }

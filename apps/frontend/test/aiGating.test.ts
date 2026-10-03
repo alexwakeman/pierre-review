@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { MeResponse } from '@pierre-review/shared';
@@ -109,13 +109,11 @@ describe('the wiring', () => {
   it('every agentic start button sits behind the one gate', () => {
     expect(read(join(root, 'components', 'ClaudeReviewTab.tsx'))).toMatch(/<AiRunGate auth=\{data\?\.auth\}>/);
     expect(read(join(root, 'components', 'AiFixTab.tsx'))).toMatch(/<AiRunGate auth=\{data\?\.auth\}>/);
-    expect(read(join(root, 'components', 'CiAnalysisCard.tsx'))).toMatch(/<AiRunGate>/);
     expect(read(join(root, 'components', 'ClaudeReviewChat.tsx'))).toMatch(/<AiRunGate>/);
   });
 
-  it('the CI-analysis card itself stays on the Pro summary tier', () => {
-    const card = read(join(root, 'components', 'CiAnalysisCard.tsx'));
-    expect(card).toMatch(/const \{ prSummary \} = useProCapabilities\(\);/);
-    expect(card).toMatch(/if \(!prSummary\) return null;/);
+  it('the Pro CI-failure card is gone: Claude Review owns why CI failed', () => {
+    expect(existsSync(join(root, 'components', 'CiAnalysisCard.tsx'))).toBe(false);
+    expect(read(join(root, 'components', 'ChecksTab.tsx'))).not.toMatch(/CiAnalysisCard/);
   });
 });

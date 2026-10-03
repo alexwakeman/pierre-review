@@ -1,31 +1,21 @@
 import { and, desc, eq } from 'drizzle-orm';
-import { CI_ANALYSIS_CONTRACT_EPOCH_MS, isThreadToFix } from '@pierre-review/shared';
 import type {
-  AiFixCommentTargetRef,
   AiFixProgress,
+  AiFixReviewItem,
   AiFixSeed,
   AiFixStatus,
   AiFixStatusResponse,
   AiFixStreamEvent,
+  AiFixTrigger,
+  ClaudeReview,
 } from '@pierre-review/shared';
 import type { CodingProgress } from '../../pro/contract.js';
 import type { AgentContext } from '../../review/agent-context.js';
 import { getFixPrContext } from './pr-context.js';
-import { getAgenticProviders } from '../../review/plugin-providers.js';
 import { getClaudeReviewById } from '../../review/claude-review/persist.js';
 import { pickReviewNonce } from '../../review/claude-review/prompts.js';
-import { threadFixSeedBlock } from '../../review/claude-review/threads.js';
-import {
-  buildCommentSeedText,
-  resolveCommentTargets,
-  type ResolvedCommentTarget,
-} from './comment-seed.js';
-import {
-  buildFixCommentsSystemPrompt,
-  buildFixSystemPrompt,
-  buildFixUserPrompt,
-  type FixSeed,
-} from './prompts.js';
+import { buildReviewSeed, type ReviewSeed } from './review-seed.js';
+import { buildFixSystemPrompt, buildFixUserPrompt, type FixSeed } from './prompts.js';
 import {
   insertQueuedFix,
   markFixCancelled,
@@ -127,26 +117,70 @@ export type StartFixResult =
   | { status: 'no_auth'; message?: string }
   | { status: 'credits_exhausted' }
   | { status: 'no_head' }
-  // seed === 'comments' with nothing resolvable: every id the client sent is gone, forged, or
-  // belongs to another PR. A refusal, not an empty run — a fixer with no task would burn a paid
-  // agent turn and report on nothing.
-  | { status: 'no_targets' }
-  // seed === 'ci_analysis' with no usable diagnosis: either none is stored ('missing'), or the
-  // stored one was written against an earlier head ('stale'). Seeding the agent with a diagnosis
-  // of code that is gone spends a paid agent turn on the wrong commit. The SPA refuses this in
-  // words too; this is the independent server half, because a POST is a POST.
-  | { status: 'stale_seed'; reason: 'stale' | 'missing' };
+  // seed === 'review': the named review is missing, another PR's / account's, or not succeeded.
+  | { status: 'review_unavailable' }
+  // seed === 'review': the review has nothing to fix (no non-praise finding, no open earlier
+  // finding, no thread needing a fix, no story gap, no fixable CI failure). A refusal, not an
+  // empty run — a fixer with no task would burn a paid agent turn and report on nothing.
+  | { status: 'nothing_to_fix' }
+  // seed === 'plain' with a blank instruction.
+  | { status: 'no_instruction' };
 
 export interface StartFixInput {
   accountId: number;
   prId: number;
   model: string;
   seed: AiFixSeed;
+  // seed === 'review': the Claude review to fix from. The seed is built from the STORED run.
   sourceReviewId?: number | null;
-  seedText?: string;
-  // seed === 'comments': the comments the user dragged into the basket, as (kind, id) pairs.
-  // Resolved server-side against THIS PR (see comment-seed.ts) — never trusted beyond that.
-  commentTargets?: AiFixCommentTargetRef[];
+  // seed === 'plain': the reader's instruction.
+  instruction?: string;
+  // Who started it. Omitted ⇒ 'manual'.
+  trigger?: AiFixTrigger;
+}
+
+/**
+ * Load the review a 'review' seed names and render its items. null when the review is missing,
+ * not this account's, not THIS PR's, or did not succeed. Never throws.
+ */
+export async function loadReviewSeed(
+  ctx: AgentContext,
+  input: { accountId: number; prId: number; reviewId: number | null | undefined },
+): Promise<{ review: ClaudeReview; seed: ReviewSeed } | null> {
+  if (input.reviewId == null) return null;
+  try {
+    const review = await getClaudeReviewById(ctx, input.reviewId, input.accountId);
+    if (!review || review.prId !== input.prId || review.status !== 'succeeded') return null;
+    return { review, seed: buildReviewSeed(review, { nonce: pickReviewNonce }) };
+  } catch (err) {
+    ctx.log.warn({ err }, 'ai-fix: loading the review seed failed');
+    return null;
+  }
+}
+
+/**
+ * Start a fix seeded from a Claude review — the ONE entry the auto-review agent calls (it passes
+ * `trigger: 'auto'`); the manual "Fix from review" route goes through the same path. Same queue,
+ * slot, worktree and guards as every fix; nothing is pushed until a person presses Push.
+ */
+export function startReviewFix(
+  ctx: AgentContext,
+  input: {
+    accountId: number;
+    prId: number;
+    reviewId: number;
+    model: string;
+    trigger: AiFixTrigger;
+  },
+): Promise<StartFixResult> {
+  return startFix(ctx, {
+    accountId: input.accountId,
+    prId: input.prId,
+    model: input.model,
+    seed: 'review',
+    sourceReviewId: input.reviewId,
+    trigger: input.trigger,
+  });
 }
 
 export async function startFix(
@@ -162,16 +196,53 @@ export async function startFix(
   // (metered per calendar month; local accounts are unmetered → never blocked).
   if ((await ctx.aiCredits.check(accountId)).agentBlocked) return { status: 'credits_exhausted' };
 
+  const instruction = (input.instruction ?? '').trim();
+  if (input.seed === 'plain' && instruction === '') return { status: 'no_instruction' };
+
   if (claimed.has(prId)) return { status: 'already_running' };
   if (pending.length >= MAX_QUEUED) return { status: 'busy' };
 
-  const pr = await getFixPrContext(ctx, accountId, prId);
-  if (!pr) return { status: 'not_found' };
-
-  // Reserve the PR synchronously BEFORE any await downstream so two concurrent starts
-  // can't both pass the guard.
+  // Reserve the PR SYNCHRONOUSLY, in the same tick as the check above and BEFORE any await, so
+  // two concurrent starts (a manual click and `maybeStartAutoFix`) can't both pass the guard.
+  // ⚠ EVERY bail path below this line releases the claim, or this PR's fixer wedges for the
+  // process's lifetime.
   claimed.add(prId);
   try {
+    const pr = await getFixPrContext(ctx, accountId, prId);
+    if (!pr) {
+      claimed.delete(prId);
+      return { status: 'not_found' };
+    }
+
+    // The review seed is resolved BEFORE GitHub is asked anything: a review with nothing to fix
+    // must not spend two GitHub calls on its way to a refusal.
+    //
+    // ⚠ The rendered prompt is FROZEN HERE, at launch, and the run may start later (one global
+    // slot). That is intended: the stored items must describe what the agent was actually given.
+    let reviewItems: AiFixReviewItem[] | null = null;
+    let sentRefs: string[] = [];
+    let seed: FixSeed;
+    if (input.seed === 'review') {
+      const loaded = await loadReviewSeed(ctx, {
+        accountId,
+        prId,
+        reviewId: input.sourceReviewId,
+      });
+      if (!loaded) {
+        claimed.delete(prId);
+        return { status: 'review_unavailable' };
+      }
+      if (loaded.seed.sentRefs.length === 0) {
+        claimed.delete(prId);
+        return { status: 'nothing_to_fix' };
+      }
+      reviewItems = loaded.seed.items;
+      sentRefs = loaded.seed.sentRefs;
+      seed = { kind: 'review', text: loaded.seed.text };
+    } else {
+      seed = { kind: 'plain', text: instruction };
+    }
+
     const headInfo = await ctx.github.fetchPrHeadInfo(
       accountId,
       pr.owner,
@@ -188,56 +259,9 @@ export async function startFix(
       .fetchPrDiff(accountId, pr.owner, pr.name, pr.number)
       .catch(() => '');
 
-    // The comments seed resolves its basket BEFORE anything is inserted: a run whose every id is
-    // gone, forged, or from another PR has no task, and starting it would spend a paid agent turn
-    // to report on nothing. ⚠ This is a NEW BAIL PATH BELOW `claimed.add(prId)`, so it releases
-    // the claim — a leak here wedges this PR's fixer for the process's lifetime.
-    //
-    // ⚠ It also does NOT consult `input.seedText`, and that is structural rather than tidy:
-    // `resolveSeedText`'s first line returns any client-supplied text verbatim, so routing this
-    // seed through it would prompt the agent with whatever the client sent INSTEAD of the resolved,
-    // capped, server-owned seed — the exact injection this resolver exists to prevent.
-    //
-    // ⚠ The rendered prompt (comment bodies AND anchor hunks) is FROZEN HERE, at launch, and the
-    // run may not start until later — a single global slot is shared by every fix job in the
-    // process. That is intended: the report must describe the text the agent was actually
-    // given. Do NOT add a refresh fetch to the run path to "keep it current"; it would spend GitHub
-    // quota per job and make the stored prompt a lie.
-    let commentTargets: ResolvedCommentTarget[] | undefined;
-    let droppedRefs: string[] = [];
-    let seedText: string;
-    if (input.seed === 'comments') {
-      commentTargets = await resolveCommentTargets(ctx, {
-        accountId,
-        prId,
-        owner: pr.owner,
-        name: pr.name,
-        prNumber: pr.number,
-        refs: input.commentTargets ?? [],
-      });
-      if (commentTargets.length === 0) {
-        claimed.delete(prId);
-        return { status: 'no_targets' };
-      }
-      const built = buildCommentSeedText(commentTargets);
-      seedText = built.text;
-      // Carried to save time so a target cut for prompt budget reports "you were never shown this"
-      // rather than "the fixer said nothing about this" — our decision, not the agent's failure.
-      droppedRefs = built.droppedRefs;
-    } else {
-      const resolved = await resolveSeedText(ctx, input, pr.prId, accountId, baseSha);
-      // ⚠ ANOTHER BAIL PATH BELOW `claimed.add(prId)` — release the claim, or this PR's fixer
-      // wedges for the process's lifetime (same rule as the no_targets bail above).
-      if (!resolved.ok) {
-        claimed.delete(prId);
-        return { status: 'stale_seed', reason: resolved.reason };
-      }
-      seedText = resolved.text;
-    }
-    const seed: FixSeed = { kind: input.seed, text: seedText };
-    const systemPrompt =
-      input.seed === 'comments' ? buildFixCommentsSystemPrompt() : buildFixSystemPrompt();
+    const systemPrompt = buildFixSystemPrompt();
     const prompt = buildFixUserPrompt({ pr, diff, seed });
+    const trigger: AiFixTrigger = input.trigger ?? 'manual';
 
     const fixId = await insertQueuedFix(ctx, {
       accountId,
@@ -246,9 +270,10 @@ export async function startFix(
       baseSha,
       model: input.model,
       seed: input.seed,
-      sourceReviewId: input.sourceReviewId ?? null,
+      sourceReviewId: input.seed === 'review' ? (input.sourceReviewId ?? null) : null,
       prompt,
-      commentTargets: commentTargets?.map((t) => t.wire) ?? null,
+      trigger,
+      reviewItems,
     });
     fixIdByPr.set(prId, fixId);
 
@@ -263,8 +288,7 @@ export async function startFix(
       model: input.model,
       systemPrompt,
       prompt,
-      commentTargets,
-      droppedRefs,
+      sentRefs,
     };
 
     const immediate = enqueue(prId, () => launchFix(ctx, job));
@@ -296,110 +320,8 @@ interface FixJob {
   model: string;
   systemPrompt: string;
   prompt: string;
-  // Carried through the job so the agent's ref-keyed self-report can be mapped back at save time.
-  // Kept in memory (not re-read from the row) because the PROMPT-only halves — the full body and
-  // the anchor hunk — are deliberately never persisted; the mapping only needs `wire`, and this
-  // keeps one source of truth for the ref labels.
-  commentTargets?: ResolvedCommentTarget[];
-  /** Refs the seed builder cut for prompt budget — see the note at the save call. */
-  droppedRefs?: readonly string[];
-}
-
-type SeedTextResult =
-  | { ok: true; text: string }
-  | { ok: false; reason: 'stale' | 'missing' };
-
-/**
- * Is a stored CI diagnosis usable as a fix seed against `liveHeadSha`? Exported for its test —
- * the decision, not the query, is the part that has to be right. See resolveSeedText.
- */
-export function ciSeedDecision(
-  // `summary` is the diagnosis text ALREADY STRIPPED of its confidence footer (the Pro provider
-  // strips it; plugin-providers.ts).
-  row: { summary: string; headSha: string | null; createdAt?: Date | number | null } | undefined | null,
-  liveHeadSha: string,
-): SeedTextResult {
-  if (!row?.summary) return { ok: false, reason: 'missing' };
-  if (row.headSha != null && row.headSha !== liveHeadSha)
-    return { ok: false, reason: 'stale' };
-  // ⚠ AND A ROW WRITTEN UNDER THE OLD CAPABILITY CONTRACT IS STALE TOO. The stored analysis
-  // describes what this fixer can do, the payload hash does not include the prompt, and the
-  // prompt's claims changed: pre-epoch rows tell the agent to "run the repository's linter/build
-  // to validate the fix locally" and to "commit and push", against a run whose tool list denies
-  // Bash outright. Seeding one spends turns and budget reaching for a shell that is not there.
-  // The card reads the SAME constant for its "out of date" chip — see
-  // `CI_ANALYSIS_CONTRACT_EPOCH_MS`.
-  if (predatesCiContract(row.createdAt)) return { ok: false, reason: 'stale' };
-  return { ok: true, text: row.summary };
-}
-
-/** ⚠ AN ABSENT TIMESTAMP IS NOT A CLAIM, exactly as a null `headSha` is not. */
-function predatesCiContract(createdAt: Date | number | null | undefined): boolean {
-  if (createdAt == null) return false;
-  const at = createdAt instanceof Date ? createdAt.getTime() : Number(createdAt);
-  return Number.isFinite(at) && at < CI_ANALYSIS_CONTRACT_EPOCH_MS;
-}
-
-// ⚠ THE CI SEED IS PINNED TO THE HEAD IT DIAGNOSED. The stored analysis names a commit; a push
-// (or a click racing one) makes it a description of code that is gone, and an agent seeded with
-// it fixes the wrong thing at full price. `headSha` is compared against the LIVE head startFix
-// already fetched, and a MISSING row is refused the same way — an empty seed is a plain run
-// wearing the ci_analysis label, which is not what the caller asked for.
-//
-// A stored row with a NULL headSha predates the column and cannot be disproved, so it passes —
-// the same reading the card's "out of date" chip takes.
-async function resolveSeedText(
-  ctx: AgentContext,
-  input: StartFixInput,
-  prId: number,
-  accountId: number,
-  liveHeadSha: string,
-): Promise<SeedTextResult> {
-  if (input.seed === 'review') {
-    // "Fix from review" = ONE comprehensive fix: the review's own findings (the client's text) plus
-    // the other reviewers' threads the review judged right and not yet dealt with (server-built
-    // from the STORED run, fenced — the comment text is other people's).
-    const threads = await reviewThreadSeed(ctx, input.sourceReviewId ?? null, prId, accountId, input.seedText ?? '');
-    return { ok: true, text: [input.seedText ?? '', threads].filter((t) => t.trim()).join('\n\n') };
-  }
-  if (input.seedText) return { ok: true, text: input.seedText };
-  if (input.seed === 'ci_analysis') {
-    // ⚠ THE CI DIAGNOSIS IS A PRO CARD, so it comes through the OPTIONAL plugin provider
-    // (review/plugin-providers.ts) — core cannot name the plugin's `ai_pr_analyses`. No plugin, or
-    // no stored analysis, is `missing`: the seed is refused, never run unseeded under its label.
-    const read = getAgenticProviders().readCiAnalysisSeed;
-    const row = read ? await read(accountId, prId).catch(() => null) : null;
-    return ciSeedDecision(row ? { summary: row.text, headSha: row.headSha, createdAt: row.createdAt } : null, liveHeadSha);
-  }
-  return { ok: true, text: '' };
-}
-
-/**
- * The thread half of a review seed: the named review's thread assessments that still need a fix
- * (`isThreadToFix`: judged valid or partly valid, and not or only partly addressed). '' when the id
- * is absent, not this account's, not THIS PR's review, or has none. Never throws.
- */
-export async function reviewThreadSeed(
-  ctx: AgentContext,
-  reviewId: number | null,
-  prId: number,
-  accountId: number,
-  clientText: string,
-): Promise<string> {
-  if (reviewId == null) return '';
-  try {
-    const review = await getClaudeReviewById(ctx, reviewId, accountId);
-    if (!review || review.prId !== prId) return '';
-    const items = (review.threadAssessments ?? []).filter(isThreadToFix);
-    if (items.length === 0) return '';
-    const nonce = pickReviewNonce([
-      clientText,
-      ...items.flatMap((t) => [t.path, t.excerpt, t.explanation ?? '', t.authorLogin ?? '']),
-    ]);
-    return threadFixSeedBlock(items, nonce, isThreadToFix);
-  } catch {
-    return '';
-  }
+  // The refs the agent was SHOWN — what its report is validated against at save time.
+  sentRefs: readonly string[];
 }
 
 async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {
@@ -452,7 +374,7 @@ async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {
         fixId: job.fixId,
         progress: { phase: 'persisting' },
       });
-      await saveFixSuccess(ctx, job.fixId, result, job.commentTargets, job.droppedRefs);
+      await saveFixSuccess(ctx, job.fixId, result, job.sentRefs);
       finalStatus = 'succeeded';
     }
   } catch (err) {

@@ -1,12 +1,10 @@
-// THE AI FIX PANE'S TWO START BUTTONS OPEN ON ONE MODEL, AND ITS PUSH IS AS-IS.
+// THE AI FIX PANE'S START BUTTONS OPEN ON ONE MODEL, AND ITS PUSH IS AS-IS.
 //
-// The pane starts a fix from two places: the fixer's own picker (AiFixTab) and the CI card's
-// "Fix it" (CiAnalysisCard, also mounted on the Overview). They used to carry their own model-id
-// literals, and the server a third, so the three could drift apart silently. All of them now read
-// ONE constant, `DEFAULT_AI_FIX_MODEL` in packages/shared (Opus 5.5, effort pinned to medium in
-// apps/backend/src/review/model-options.ts); this pins the two SPA halves to it. The server half is
-// pinned by packages/pro/test/ai-fix-routes.test.ts, the constant itself by
-// apps/backend/src/review/claude-review-ticket.test.ts.
+// The pane's two entry points ("Fix from review" and the instruction box) share one model picker,
+// which opens on ONE constant, `DEFAULT_AI_FIX_MODEL` in packages/shared (Opus 5.5, effort pinned
+// to medium in apps/backend/src/review/model-options.ts) — the same constant the start route falls
+// back to (apps/backend/src/coding/ai-fix/routes.test.ts). The CI card's "Fix it" went with the
+// card.
 //
 // It also pins the push body: the rebase / merge / "let Claude resolve conflicts" strategies were
 // removed, so the pane sends only `target` + `branch`.
@@ -27,33 +25,22 @@ const code = (src: string): string =>
 const MODEL_LITERAL = /['"`]claude-[a-z0-9.-]+['"`]/;
 
 const tab = code(read('components/AiFixTab.tsx'));
-const card = code(read('components/CiAnalysisCard.tsx'));
 
 describe('the AI Fix pane starts fixes on the shared default', () => {
   it('the fixer picker opens on DEFAULT_AI_FIX_MODEL', () => {
     expect(tab).toMatch(/useState<AiFixModel>\(DEFAULT_AI_FIX_MODEL\)/);
   });
 
-  it("the CI card's Fix it sends DEFAULT_AI_FIX_MODEL", () => {
-    expect(card).toMatch(/startFix\.mutate\(\{\s*model:\s*DEFAULT_AI_FIX_MODEL\b/);
+  it('imports it from the shared package', () => {
+    expect(tab).toMatch(/DEFAULT_AI_FIX_MODEL[\s\S]*?from '@pierre-review\/shared'/);
   });
 
-  it('both import it from the shared package', () => {
-    for (const src of [tab, card]) {
-      expect(src).toMatch(/DEFAULT_AI_FIX_MODEL[\s\S]*?from '@pierre-review\/shared'/);
-    }
-  });
-
-  it('neither carries a model-id literal of its own', () => {
+  it('carries no model-id literal of its own', () => {
     expect(tab).not.toMatch(MODEL_LITERAL);
-    expect(card).not.toMatch(MODEL_LITERAL);
   });
 
   it('the literal scan is not vacuous', () => {
-    // The pattern must catch the literal the CI card used to hard-code.
-    expect(`startFix.mutate({ model: 'claude-sonnet-5', seed: 'ci_analysis' })`).toMatch(
-      MODEL_LITERAL,
-    );
+    expect(`startFix.mutate({ model: 'claude-sonnet-5', seed: 'plain' })`).toMatch(MODEL_LITERAL);
   });
 });
 

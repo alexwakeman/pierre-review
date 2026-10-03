@@ -264,7 +264,7 @@ import { hubReadingFor, loadRepoCoupling, type RepoCoupling } from './file-coupl
 import { DAYS_PER_MONTH, botWindowMs } from './bot-window.js';
 import { detectChangepoints } from './changepoint.js';
 import { dormantBotUserIds } from './bot-dormancy.js';
-import { newestReviewCommentAt } from './review-threads-for-review.js';
+import { newestReviewCommentAt, type CountsAuthor } from './review-threads-for-review.js';
 import {
   automationVendorUserIds,
   exactAutomationVendorUsers,
@@ -10185,6 +10185,10 @@ export async function getUnactionedClaudeReviews(
 //     person and is skipped;
 //   - with NO `claude_reviews` row at all, whatever its head, status or trigger: ONE review per PR,
 //     ever, from auto. A manual run (or a failed auto one) settles it too.
+// `ci` carries, for every PR offered (first review or re-review), whether the synced CI of its head
+// is still RUNNING (`ci_status` pending / expected) and when that head was first observed
+// (`ci_status_events`, the earliest row for that head; null = no row). The sweeper holds a run
+// while CI runs, for at most AUTO_REVIEW_CI_WAIT_MS from that moment (review/claude-review/auto.ts).
 // `autoToday` counts this workspace's AUTO runs created at or after `dayStartMs`, for the daily cap.
 // Returns null when the workspace is not this account's - never another workspace's answer (the
 // request-side resolver's "fall back to Default" would review the wrong repos here).
@@ -10196,6 +10200,7 @@ export async function getAutoReviewCandidates(
   prIds: number[];
   autoToday: number;
   reReview: AutoReReviewCandidate[];
+  ci: AutoReviewCiState[];
 } | null> {
   const owned = (
     await db
@@ -10207,7 +10212,7 @@ export async function getAutoReviewCandidates(
   )[0];
   if (!owned) return null;
   const repoIds = await getWorkspaceRepoIds(workspaceId, accountId);
-  if (repoIds.length === 0) return { prIds: [], autoToday: 0, reReview: [] };
+  if (repoIds.length === 0) return { prIds: [], autoToday: 0, reReview: [], ci: [] };
 
   const autoRows = await db
     .select({ id: claudeReviews.id })
@@ -10223,7 +10228,7 @@ export async function getAutoReviewCandidates(
     )
     .execute();
   const autoToday = autoRows.length;
-  if (opts.limit <= 0) return { prIds: [], autoToday, reReview: [] };
+  if (opts.limit <= 0) return { prIds: [], autoToday, reReview: [], ci: [] };
 
   const open = await db
     .select({
@@ -10231,6 +10236,7 @@ export async function getAutoReviewCandidates(
       authorId: pullRequests.authorId,
       openedAt: pullRequests.openedAt,
       headSha: pullRequests.headSha,
+      ciStatus: pullRequests.ciStatus,
     })
     .from(pullRequests)
     .where(
@@ -10244,9 +10250,9 @@ export async function getAutoReviewCandidates(
     )
     .orderBy(asc(pullRequests.openedAt), asc(pullRequests.id))
     .execute();
-  if (open.length === 0) return { prIds: [], autoToday, reReview: [] };
+  if (open.length === 0) return { prIds: [], autoToday, reReview: [], ci: [] };
 
-  const [bots, reviewed] = await Promise.all([
+  const [bots, reviewed, reviewerBots] = await Promise.all([
     hiddenBotUserIds(accountId, workspaceId),
     db
       .select({
@@ -10268,6 +10274,7 @@ export async function getAutoReviewCandidates(
         ),
       )
       .execute(),
+    automatedReviewerUserIds(accountId, workspaceId, 'review'),
   ]);
   const botSet = new Set(bots);
   const hasRun = new Set(reviewed.map((r) => r.prId));
@@ -10319,6 +10326,8 @@ export async function getAutoReviewCandidates(
       accountId,
       sameHead.map((p) => p.prId),
       since,
+      // ⚠ Only a PERSON or a REVIEW bot re-triggers (CI / coverage / deploy / dependency bots never).
+      countsAuthorFrom(botSet, new Set(reviewerBots)),
     );
     for (const p of sameHead) {
       const at = newest.get(p.prId);
@@ -10327,7 +10336,94 @@ export async function getAutoReviewCandidates(
       if (reReview.length >= opts.limit) break;
     }
   }
-  return { prIds, autoToday, reReview };
+  const ci = await autoReviewCiStates(
+    accountId,
+    open,
+    new Set([...prIds, ...reReview.map((r) => r.prId)]),
+  );
+  return { prIds, autoToday, reReview, ci };
+}
+
+/** One offered PR's CI reading for the sweeper's CI hold (see `getAutoReviewCandidates`). */
+export interface AutoReviewCiState {
+  prId: number;
+  headSha: string | null;
+  // The synced CI rollup of the head is still running (`pending` / `expected`).
+  running: boolean;
+  // The earliest `ci_status_events` row for this head; null = none recorded.
+  headSeenAtMs: number | null;
+}
+
+async function autoReviewCiStates(
+  accountId: number,
+  open: ReadonlyArray<{ id: number; headSha: string | null; ciStatus: string | null }>,
+  offered: ReadonlySet<number>,
+): Promise<AutoReviewCiState[]> {
+  const rows = open.filter((r) => offered.has(r.id));
+  if (rows.length === 0) return [];
+  const events = (await db
+    .select({
+      prId: ciStatusEvents.prId,
+      headSha: ciStatusEvents.headSha,
+      observedAt: ciStatusEvents.observedAt,
+    })
+    .from(ciStatusEvents)
+    .where(
+      and(
+        eq(ciStatusEvents.accountId, accountId),
+        inArray(
+          ciStatusEvents.prId,
+          rows.map((r) => r.id),
+        ),
+      ),
+    )
+    .execute()) as Array<{ prId: number; headSha: string; observedAt: Date }>;
+  const firstSeen = new Map<string, number>();
+  for (const e of events) {
+    const k = `${e.prId}|${e.headSha}`;
+    const t = e.observedAt.getTime();
+    const prev = firstSeen.get(k);
+    if (prev == null || t < prev) firstSeen.set(k, t);
+  }
+  return rows.map((r) => ({
+    prId: r.id,
+    headSha: r.headSha,
+    running: r.ciStatus === 'pending' || r.ciStatus === 'expected',
+    headSeenAtMs: r.headSha ? (firstSeen.get(`${r.id}|${r.headSha}`) ?? null) : null,
+  }));
+}
+
+// WHO MAY RE-TRIGGER AN AUTO REVIEW BY COMMENTING (the comment half of the re-review key). A
+// PERSON — not in the workspace's bot union `hiddenBotUserIds`, where a manual "this is a human"
+// wins both ways — or a bot whose role in THIS workspace is `'review'` (`automatedReviewerUserIds`
+// with role 'review': the stored role beats the login seed, a vendor with no stored row takes the
+// seed). ⚠ The cohort test is `=== 'review'` (inside that helper), never `!== 'quality_check'`:
+// CI, coverage, deploy, dependency and housekeeping bots never re-trigger. An unknown author
+// (`author_id` NULL — a deleted account) is not known automation and counts.
+function countsAuthorFrom(hidden: ReadonlySet<number>, reviewers: ReadonlySet<number>): CountsAuthor {
+  return (id) => id == null || !hidden.has(id) || reviewers.has(id);
+}
+
+export async function reReviewCommentAuthorFilter(
+  accountId: number,
+  workspaceId: number,
+): Promise<CountsAuthor> {
+  const [hidden, reviewers] = await Promise.all([
+    hiddenBotUserIds(accountId, workspaceId),
+    automatedReviewerUserIds(accountId, workspaceId, 'review'),
+  ]);
+  return countsAuthorFrom(new Set(hidden), new Set(reviewers));
+}
+
+/** The same filter for one PR, resolved through ITS workspace. A foreign / unknown PR ⇒ undefined
+ *  (no filter; such a PR loads no threads anyway). */
+export async function reReviewCommentAuthorFilterForPr(
+  accountId: number,
+  prId: number,
+): Promise<CountsAuthor | undefined> {
+  const scope = await botScopeForPr(accountId, prId);
+  if (!scope) return undefined;
+  return reReviewCommentAuthorFilter(accountId, scope.workspaceId);
 }
 
 /** One auto RE-review candidate. `commentsAtMs` is the newest qualifying review comment when the

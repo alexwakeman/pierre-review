@@ -449,6 +449,27 @@
       "when": 1790474400000,
       "tag": "0063_claude_review_threads",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1790560800000,
+      "tag": "0064_claude_review_ci_failures",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1790647200000,
+      "tag": "0065_ai_fix_change_report",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1790650800000,
+      "tag": "0066_claude_finding_story",
+      "breakpoints": true
     }
   ]
 }

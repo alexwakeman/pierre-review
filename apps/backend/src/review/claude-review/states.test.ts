@@ -36,6 +36,14 @@ vi.mock('./manager.js', () => ({
   subscribeReviewStream: vi.fn(() => () => {}),
 }));
 
+// AI Fix's in-memory claim (the 'Fixing…' pill's authority), per PR id.
+const fixRunning = new Set<number>();
+vi.mock('../../coding/ai-fix/manager.js', () => ({
+  isFixRunning: (prId: number) => fixRunning.has(prId),
+  startReviewFix: vi.fn(),
+  loadReviewSeed: vi.fn(),
+}));
+
 let db: any;
 let schema: any;
 let closeDb: (() => void) | undefined;
@@ -238,6 +246,7 @@ describe('POST /api/claude-review/states', () => {
       verdict: 'APPROVE',
       reviewedHeadSha: HEAD,
       headMoved: false,
+      currentHeadSha: HEAD,
       ticket: { title: 'Reset password', acceptanceCriteria: '- a' },
     });
     expect(typeof byPr.get(current).finishedAt).toBe('string');
@@ -246,6 +255,7 @@ describe('POST /api/claude-review/states', () => {
       verdict: 'REQUEST_CHANGES',
       reviewedHeadSha: OLD,
       headMoved: true,
+      currentHeadSha: HEAD,
       ticket: null,
     });
     // Two runs: the NEWEST wins, even though the older one succeeded.
@@ -340,6 +350,33 @@ describe('POST /api/claude-review/states — the strip summary', () => {
   });
 });
 
+describe('POST /api/claude-review/states — CI failures on the reviewed head', () => {
+  it('counts the failing checks and the diagnosed ones; a run that never looked carries no figure', async () => {
+    const before = ((await states([rich])).json().states as any[])[0];
+    expect(before.summary.ci).toBeUndefined();
+    const f = (status: string) => ({ ref: null, checkName: 'build', jobId: null, step: null, url: null, sent: true, carried: false, status, notCheckedReason: status === 'diagnosed' ? null : 'no_log', cause: null, explanation: null, category: null });
+    await db
+      .update(schema.claudeReviews)
+      .set({ ciFailures: { state: 'failing', checkCount: 4, failures: [f('diagnosed'), f('diagnosed'), f('not_checked')] } as any })
+      .where(eqOp(schema.claudeReviews.id, richReview))
+      .execute();
+    const [s] = (await states([rich])).json().states as any[];
+    expect(s.summary.ci).toEqual({ failing: 3, diagnosed: 2 });
+    await db
+      .update(schema.claudeReviews)
+      .set({ ciFailures: { state: 'passing', checkCount: 4, failures: [] } as any })
+      .where(eqOp(schema.claudeReviews.id, richReview))
+      .execute();
+    const [p] = (await states([rich])).json().states as any[];
+    expect(p.summary.ci).toEqual({ failing: 0, diagnosed: 0 });
+    await db
+      .update(schema.claudeReviews)
+      .set({ ciFailures: null })
+      .where(eqOp(schema.claudeReviews.id, richReview))
+      .execute();
+  });
+});
+
 describe('POST /api/claude-review/states — auto review', () => {
   afterAll(() => holds.clear());
 
@@ -383,5 +420,43 @@ describe('POST /api/claude-review/states — auto review', () => {
     holds.delete(lane);
     const res = await states([lane]);
     expect(res.json().states).toEqual([]);
+  });
+});
+
+describe('POST /api/claude-review/states — the AI Fix pill', () => {
+  const addFix = (prId: number, over: Record<string, unknown>) =>
+    db
+      .insert(schema.aiFixes)
+      .values({
+        accountId: 1,
+        repoId: 1,
+        prId,
+        baseSha: HEAD,
+        status: 'succeeded',
+        model: 'claude-opus-5-5',
+        seed: 'review',
+        patch: 'diff --git a b',
+        ...over,
+      })
+      .execute();
+
+  it('"ready" = a finished, unpushed fix with changes on the CURRENT head; "running" needs the live claim', async () => {
+    await addFix(current, {});
+    await addFix(moved, { baseSha: OLD }); // built on a head the PR has left
+    await addFix(autoDone, { pushedAt: new Date() }); // already pushed
+    await addFix(rich, { status: 'running' }); // a crash leftover: no live claim
+    await addFix(rerun, { status: 'running' });
+    fixRunning.add(rerun);
+    const res = await states([current, moved, autoDone, rich, rerun]);
+    const byPr = new Map((res.json().states as any[]).map((s) => [s.prId, s]));
+    expect(byPr.get(current).fix).toBe('ready');
+    expect(byPr.get(moved).fix).toBeUndefined();
+    expect(byPr.get(autoDone).fix).toBeUndefined();
+    expect(byPr.get(rich).fix).toBeUndefined();
+    expect(byPr.get(rerun).fix).toBe('running');
+    // Another account's view never carries account 1's fixes.
+    const theirs = await states([current], 2);
+    expect(theirs.json().states).toEqual([]);
+    fixRunning.clear();
   });
 });

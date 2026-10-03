@@ -1,7 +1,7 @@
-// Shared bits for the Activity drill-down TABLES (open-PRs, bot-only-PRs, resolvable bot
+// Shared bits for the Activity drill-down TABLES (bot-only-PRs, resolvable bot
 // threads): a clickable column header, the sort-state shape, a compare fn, and the
 // header-click reducer. Each table keeps its OWN column enum + per-column sort values +
-// natural directions — only the generic mechanics live here so the three read identically.
+// natural directions — only the generic mechanics live here so they read identically.
 
 import { CaretIcon } from '../Icons.js';
 
@@ -37,7 +37,6 @@ export function SortHeader<C extends string>({
   sort,
   onSort,
   title,
-  as: Cell = 'th',
   className = 'pb-1 pr-3 font-semibold',
 }: {
   col: C;
@@ -45,15 +44,12 @@ export function SortHeader<C extends string>({
   sort: SortState<C> | null;
   onSort: (col: C) => void;
   title?: string;
-  /** 'div' for a CSS-grid list (the Open PRs cards) — it then carries `role="columnheader"`. */
-  as?: 'th' | 'div';
   className?: string;
 }): JSX.Element {
   const dir = sort != null && sort.col === col ? sort.dir : null;
   return (
-    <Cell
+    <th
       className={className}
-      role={Cell === 'div' ? 'columnheader' : undefined}
       aria-sort={dir != null ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}
     >
       <button
@@ -69,6 +65,6 @@ export function SortHeader<C extends string>({
           <CaretIcon dir={dir === 'asc' ? 'up' : 'down'} />
         </span>
       </button>
-    </Cell>
+    </th>
   );
 }

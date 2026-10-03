@@ -173,16 +173,22 @@ export const FINDING_COMMENT_MARKER = '<!-- pierre:claude-review-finding v=1 -->
 // finding's real line isn't in the diff). Then we (a) append FALLBACK_ANCHOR_NOTE
 // and (b) render any suggestion as a PLAIN code block rather than ```suggestion —
 // an applyable suggestion on the wrong line would offer to corrupt that line.
+//
+// `storyLead` is a USER-STORY finding's first line ("BMD-1040 · AC2 (partly met): <criterion>",
+// shared `storyCommentLead`). It is not stored in the body — on screen the card sits under its
+// story — so it is added HERE, the one place every story comment is built (single post and Submit
+// review alike), and GitHub still names the story.
 export function findingCommentBody(
   f: {
     body: string;
     editedBody: string | null;
     suggestion: string | null;
+    storyLead?: string | null;
   },
   opts?: { fallbackNote?: boolean },
 ): string {
   const body = f.editedBody && f.editedBody.trim() ? f.editedBody : f.body;
-  const parts = [body];
+  const parts = [f.storyLead, body].filter((p): p is string => p != null && p.trim() !== '');
   if (f.suggestion && f.suggestion.trim()) {
     parts.push(
       opts?.fallbackNote
@@ -205,20 +211,28 @@ export const OUTSIDE_DIFF_NOTE =
 // then the finding text (the user's reword if any, else Claude's), and append a note
 // that it's outside the PR's diff. Any suggestion renders as a PLAIN code block — an
 // applyable ```suggestion only makes sense on a real diff line.
+// A finding with NO file (`path` blank — a user-story finding about the whole change, see
+// claude-review/ticket.ts `storyFindingsFrom`) is about the PR, not about a file outside it: it
+// carries neither the file line nor the outside-the-diff note.
 export function prLevelFindingBody(f: {
   path: string;
   line: number | null;
   body: string;
   editedBody: string | null;
   suggestion: string | null;
+  storyLead?: string | null;
 }): string {
-  const ref = f.line != null ? `${f.path}:${f.line}` : f.path;
   const body = f.editedBody && f.editedBody.trim() ? f.editedBody : f.body;
-  const parts = [`**\`${ref}\`**`, body];
+  const hasPath = f.path.trim() !== '';
+  const ref = f.line != null ? `${f.path}:${f.line}` : f.path;
+  // A story finding's lead comes FIRST, so the comment opens on the story it is about.
+  const parts = [f.storyLead, hasPath ? `**\`${ref}\`**` : null, body].filter(
+    (p): p is string => p != null && p.trim() !== '',
+  );
   if (f.suggestion && f.suggestion.trim()) {
     parts.push(`\`\`\`\n${f.suggestion}\n\`\`\``);
   }
-  parts.push(OUTSIDE_DIFF_NOTE);
+  if (hasPath) parts.push(OUTSIDE_DIFF_NOTE);
   parts.push(FINDING_COMMENT_MARKER);
   return parts.join('\n\n');
 }

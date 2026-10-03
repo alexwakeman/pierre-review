@@ -21,6 +21,7 @@ import {
   type PriorFindingForFollowUp,
   type PriorReviewForFollowUp,
 } from './follow-up.js';
+import type { StoryFinding } from './ticket.js';
 
 let nextId = 1;
 function prior(over: Partial<PriorFindingForFollowUp> = {}): PriorFindingForFollowUp {
@@ -413,5 +414,73 @@ describe('same head ⇒ statuses carry forward (the code has not moved)', () => 
     expect(reraise).toBeDefined();
     // Already posted on this same commit: never posted twice.
     expect(reraise.included).toBe(false);
+  });
+});
+
+// A STORY FINDING (ticket.ts `storyFindingsFrom`) re-raises an earlier, still-open story finding
+// for the same criterion / not-done item — one row per story item per review, never two.
+describe('story findings in the follow-up', () => {
+  const HEAD = 'a'.repeat(40);
+  const MOVED = 'b'.repeat(40);
+  const storyPrior = (over: Partial<PriorFindingForFollowUp> = {}) =>
+    prior({ posted: true, title: 'Link expires after 1h', story: { index: 0, ref: 'AC2' }, ...over });
+  const storyNow = (over: Partial<StoryFinding> = {}): StoryFinding => ({
+    ...finding({ title: 'link expires  after 1h', body: 'BMD-1 · AC3 (not met): …', path: '', line: null }),
+    story: { index: 0, ref: 'AC3' },
+    ...over,
+  });
+
+  it('SAME HEAD (assessment carried): the re-created story finding links to the posted one, left out — no synthesized twin', () => {
+    const p = storyPrior();
+    const plan = selectPriorFindings(review([p], HEAD), HEAD);
+    const items = reconcileFollowUp(plan, []);
+    expect(items[0]).toMatchObject({ status: 'not_addressed', statusCarried: true });
+    const out = linkReraisedFindings(plan, items, [], new Set(), [storyNow()]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ priorFindingId: p.id, included: false, story: { index: 0, ref: 'AC3' } });
+  });
+
+  it('a model re-raise of that same earlier story finding is DROPPED in favour of the story finding', () => {
+    const p = storyPrior();
+    const plan = selectPriorFindings(review([p], HEAD), MOVED);
+    const items = reconcileFollowUp(plan, [{ ref: 'P1', status: 'not_addressed', explanation: 'Still no expiry.' }]);
+    const out = linkReraisedFindings(
+      plan,
+      items,
+      [finding({ title: 'model re-raise', priorRef: 'P1' }), finding({ title: 'unrelated' })],
+      new Set(),
+      [storyNow()],
+    );
+    expect(out.map((f) => [f.title, f.priorFindingId])).toEqual([
+      ['unrelated', null],
+      ['link expires  after 1h', p.id],
+    ]);
+    // Moved head ⇒ the reminder stays included.
+    expect(out[1]).not.toHaveProperty('included');
+  });
+
+  it('an ADDRESSED earlier story finding is not linked; the new story finding stands on its own', () => {
+    const p = storyPrior();
+    const plan = selectPriorFindings(review([p], HEAD), MOVED);
+    const items = reconcileFollowUp(plan, [{ ref: 'P1', status: 'addressed', explanation: 'Fixed.' }]);
+    const out = linkReraisedFindings(plan, items, [], new Set(), [storyNow()]);
+    expect(out).toEqual([{ ...storyNow(), priorFindingId: null }]);
+  });
+
+  it('a still-open earlier story finding with NO matching story finding now is synthesized and keeps its story origin', () => {
+    const p = storyPrior();
+    const plan = selectPriorFindings(review([p], HEAD), MOVED);
+    const items = reconcileFollowUp(plan, [{ ref: 'P1', status: 'not_addressed', explanation: 'x' }]);
+    const out = linkReraisedFindings(plan, items, [], new Set(), [storyNow({ title: 'something else' })]);
+    expect(out).toHaveLength(2);
+    expect(out[1]).toMatchObject({ priorFindingId: p.id, story: { index: 0, ref: 'AC2' } });
+  });
+
+  it('a criterion never matches a not-done item with the same text', () => {
+    const p = storyPrior({ story: { index: 0, ref: 'M1' } });
+    const plan = selectPriorFindings(review([p], HEAD), MOVED);
+    const items = reconcileFollowUp(plan, [{ ref: 'P1', status: 'not_addressed', explanation: 'x' }]);
+    const out = linkReraisedFindings(plan, items, [], new Set(), [storyNow()]);
+    expect(out.map((f) => f.priorFindingId)).toEqual([null, p.id]);
   });
 });

@@ -80,6 +80,14 @@ vi.mock('../plugin-providers.js', () => ({
 }));
 let aiReady = true;
 vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => aiReady }));
+// AUTO FIX: the manager hands every SUCCEEDED auto run to auto-fix.ts (which owns the gate).
+const autoFixCalls: Array<{ accountId: number; prId: number; reviewId: number }> = [];
+vi.mock('../../coding/ai-fix/auto-fix.js', () => ({
+  maybeStartAutoFix: async (_ctx: unknown, input: { accountId: number; prId: number; reviewId: number }) => {
+    autoFixCalls.push(input);
+    return { status: 'not_own' };
+  },
+}));
 
 type Manager = typeof import('./manager.js');
 let m: Manager;
@@ -272,5 +280,27 @@ describe('the auto lane', () => {
     await flush();
     expect(inserted.find((r) => r.prId === 71)).toBeUndefined();
     expect(runs).toEqual([]);
+  });
+});
+
+describe('the auto-fix hook', () => {
+  it('a SUCCEEDED auto run is handed to auto fix; a manual or failed one is not', async () => {
+    autoFixCalls.length = 0;
+    // An empty diff routes to 'skip', which saves a succeeded run with no agent turn.
+    (ctx as any).review.prepareReview = async () => ({ fileMetrics: [], changedFiles: [], diffBytes: 0 });
+    await m.startReview(ctx, 1, 80, 'claude-opus-5-5');
+    await flush();
+    expect(autoFixCalls).toEqual([]);
+    expect(m.enqueueAutoReview(ctx, 1, 81)).toBe('queued');
+    await flush();
+    const row = inserted.find((r) => r.prId === 81)!;
+    expect(autoFixCalls).toEqual([{ accountId: 1, prId: 81, reviewId: row.id }]);
+    // A run that fails (prepare throws) never reaches auto fix.
+    (ctx as any).review.prepareReview = async () => {
+      throw new Error('boom');
+    };
+    expect(m.enqueueAutoReview(ctx, 1, 82)).toBe('queued');
+    await flush();
+    expect(autoFixCalls.map((c) => c.prId)).toEqual([81]);
   });
 });

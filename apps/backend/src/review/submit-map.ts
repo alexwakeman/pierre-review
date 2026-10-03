@@ -1,5 +1,6 @@
 import type { ClaudeFindingSide } from '@pierre-review/shared';
 import type {
+  ReviewCiFailureReport,
   ReviewFinding,
   ReviewFollowUpReport,
   ReviewThreadReport,
@@ -19,6 +20,7 @@ export interface MappedReview {
   followUp?: ReviewFollowUpReport[];
   tickets?: ReviewTicketReport[];
   threads?: ReviewThreadReport[];
+  ciFailures?: ReviewCiFailureReport[];
 }
 
 /**
@@ -57,5 +59,6 @@ export function mapSubmittedReview(payload: SubmitReviewPayload, strippedDiff: s
     ...(payload.followUp !== undefined ? { followUp: payload.followUp } : {}),
     ...(payload.tickets !== undefined ? { tickets: payload.tickets } : {}),
     ...(payload.threads !== undefined ? { threads: payload.threads } : {}),
+    ...(payload.ciFailures !== undefined ? { ciFailures: payload.ciFailures } : {}),
   };
 }

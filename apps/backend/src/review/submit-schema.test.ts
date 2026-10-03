@@ -201,4 +201,19 @@ describe('submitReviewSchema — several tickets', () => {
     const p = { ...base, tickets: [{ alignment: 'aligned', summary: 'Yes.' }] };
     expect(submitReviewSchema.safeParse(p).success).toBe(false);
   });
+
+  it('accepts a CI failure report and rejects a server-only or unknown category', () => {
+    const ok = {
+      ...base,
+      ciFailures: [
+        { ref: 'F1', cause: 'Type error', explanation: 'x', category: 'code', fixableInPr: true, relatedFiles: [{ path: 'a.ts', line: 3 }] },
+        { ref: 'F2', cause: 'Runner lost', explanation: 'y', category: 'flaky_or_infra', fixableInPr: false, step: null },
+      ],
+    };
+    expect(submitReviewSchema.safeParse(ok).success).toBe(true);
+    for (const category of ['not_checked', 'build']) {
+      const bad = { ...base, ciFailures: [{ ref: 'F1', cause: 'c', explanation: 'e', category, fixableInPr: true }] };
+      expect(submitReviewSchema.safeParse(bad).success).toBe(false);
+    }
+  });
 });

@@ -1,20 +1,18 @@
-// The two user-story pieces that need MARKDOWN or an HREF, kept out of ClaudeReviewFollowUp.tsx
+// The user-story pieces that need MARKDOWN or an HREF, kept out of ClaudeReviewFollowUp.tsx
 // (whose source guard keeps every model- or reader-typed string there as plain text):
 //
-//   JiraStoryView     — a story Limn READ from Jira, shown read-only. Its text is the plugin's
-//                       markdown conversion of the ticket, through the sanitising <Markdown>.
-//   TicketPostControl — "Post as comment" for ONE ticket's analysis, then its posted link.
+//   JiraStoryView — a story Limn READ from Jira, shown read-only. Its text is the plugin's
+//                   markdown conversion of the ticket, through the sanitising <Markdown>.
+//   JiraKeyLink   — a Jira key linked to its ticket.
 //
-// Every href here goes through `safeExternalUrl` (a Jira browse URL is customer-typed, a comment
-// URL is GitHub's).
+// A story's results reach GitHub as FINDINGS (each with the finding card's own Post / Reword /
+// Ignore); the per-ticket "Post as comment" is retired. Every href here goes through
+// `safeExternalUrl` (a Jira browse URL is customer-typed).
 import type { ReactNode } from 'react';
-import type { ClaudeReviewTicketEntry } from '@pierre-review/shared';
-import { ApiError } from '../api/client.js';
-import { usePostTicketAnalysis, useTicketPostPending } from '../hooks/useClaudeReview.js';
 import { safeExternalUrl } from '../lib/ui.js';
 import type { TicketDraft } from '../lib/claudeReviewFollowUp.js';
 import { Markdown } from './Markdown.js';
-import { CheckIcon, ExternalLinkIcon } from './Icons.js';
+import { ExternalLinkIcon } from './Icons.js';
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const BTN =
@@ -74,67 +72,5 @@ export function JiraStoryView({
         </div>
       )}
     </div>
-  );
-}
-
-/**
- * One ticket's "Post as comment", once. Posted ⇒ only the link. `visible: false` from the route
- * means the comment IS on GitHub: say it will show, and never offer a retry (it would post twice).
- */
-export function TicketPostControl({
-  prId,
-  reviewId,
-  entry,
-  canPost,
-}: {
-  prId: number;
-  reviewId: number;
-  entry: ClaudeReviewTicketEntry;
-  // The latest run only, like every other write on this screen.
-  canPost: boolean;
-}): JSX.Element | null {
-  const post = usePostTicketAnalysis(prId, reviewId, entry.index);
-  const pending = useTicketPostPending(reviewId, entry.index);
-  const posted = entry.posted ?? null;
-  const justPosted = post.data ?? null;
-
-  if (posted != null || justPosted != null) {
-    const url = posted?.url ?? justPosted?.url ?? null;
-    const href = url != null ? safeExternalUrl(url) : undefined;
-    const chip =
-      'inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 dark:text-green-400';
-    return (
-      <span className="inline-flex items-center gap-2">
-        {href != null && href !== '' ? (
-          <a href={href} target="_blank" rel="noreferrer noopener" className={`${chip} hover:underline`}>
-            Posted
-            <CheckIcon size={11} />
-          </a>
-        ) : (
-          <span className={chip}>
-            Posted
-            <CheckIcon size={11} />
-          </span>
-        )}
-        {posted == null && justPosted?.visible === false && (
-          <span className={`text-xs ${MUTED}`}>It will show here shortly.</span>
-        )}
-      </span>
-    );
-  }
-  // A ticket the run did not report on has nothing to post (the route answers NotReady).
-  if (!canPost || entry.assessment == null || entry.assessment.alignment === 'not_checked') return null;
-  // 409 AlreadyPosted re-reads the review (the hook), which then renders the link above.
-  const error =
-    post.error != null && !(post.error instanceof ApiError && post.error.code === 'AlreadyPosted')
-      ? post.error.message
-      : null;
-  return (
-    <span className="inline-flex items-center gap-2">
-      <button type="button" onClick={() => post.mutate()} disabled={pending} className={BTN}>
-        {pending ? 'Posting…' : 'Post as comment'}
-      </button>
-      {error != null && <span className="text-xs text-red-600 dark:text-red-400">{error}</span>}
-    </span>
   );
 }

@@ -31,6 +31,7 @@ import type {
   BranchCheckRun,
   CheckRun,
   ClaudeReviewFollowUpRecord,
+  ClaudeCiFailuresRecord,
   ClaudeThreadAssessment,
   ClaudeReviewTicket,
   ClaudeTicketAssessment,
@@ -866,6 +867,8 @@ export const claudeReviews = pgTable(
     // schema.sqlite.ts. Migration pg 0063 (sqlite 0076).
     threadAssessments: jsonb('thread_assessments').$type<ClaudeThreadAssessment[]>(),
     commentsThrough: timestamp('comments_through', { withTimezone: true, mode: 'date' }),
+    // Failed CI on the reviewed head, diagnosed. Twin of schema.sqlite.ts. Migration pg 0064 (sqlite 0077).
+    ciFailures: jsonb('ci_failures').$type<ClaudeCiFailuresRecord>(),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
@@ -920,6 +923,10 @@ export const claudeReviewFindings = pgTable(
     priorFindingId: integer('prior_finding_id'),
     // The specialist lens (schema.sqlite.ts twin). Migration pg 0062 (sqlite 0075).
     lens: text('lens'),
+    // A story finding's origin (schema.sqlite.ts twin, where the contract lives). Migration pg
+    // 0066 (sqlite 0079).
+    storyIndex: integer('story_index'),
+    storyRef: text('story_ref'),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );
@@ -993,6 +1000,10 @@ export const aiFixes = pgTable(
     finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
     commentTargets: text('comment_targets'),
     commentVerdicts: text('comment_verdicts'),
+    // pg 0065 — see schema.sqlite.ts aiFixes for the contract.
+    trigger: text('trigger'),
+    reviewItems: text('review_items'),
+    changeReport: text('change_report'),
   },
   (t) => ({
     prCreatedIdx: index('af_account_pr_created').on(t.accountId, t.prId, t.createdAt),

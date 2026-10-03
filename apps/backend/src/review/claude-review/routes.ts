@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type {
   ActiveReviewsResponse,
+  ClaudeFindingStory,
   ClaudeReviewListResponse,
   ClaudeReviewPrState,
   ClaudeReviewResponse,
@@ -9,7 +10,6 @@ import type {
   ClaudeReviewStatusResponse,
   GenerateReviewBody,
   PostCommentResult,
-  PostTicketAnalysisResult,
   PostReviewBody,
   PostReviewResult,
   UpdateFindingBody,
@@ -20,9 +20,13 @@ import {
   CLAUDE_REVIEW_STATES_MAX_IDS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
   checkClaudeReviewTickets,
+  storyCommentLead,
+  stripStoredStoryLead,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
-import { ticketAnalysisCommentBody } from './ticket.js';
+import { autoReviewWaiting } from './auto.js';
+import { autoFixOutcomeFor } from '../../coding/ai-fix/auto-fix.js';
+import { isFixRunning } from '../../coding/ai-fix/manager.js';
 import {
   autoReviewHold,
   AGENTIC_AI_ENABLED,
@@ -39,12 +43,11 @@ import {
   getLatestClaudeReview,
   getLatestReviewStates,
   getReviewPostContext,
-  getTicketPostContext,
   listAllClaudeReviews,
   listClaudeReviewHistory,
   markFindingPosted,
   markReviewPosted,
-  markTicketPosted,
+  storyOf,
   updateFinding,
   updateReviewDraft,
 } from './persist.js';
@@ -97,13 +100,6 @@ const generateSchema = {
     },
   },
 };
-const ticketPostParam = {
-  params: {
-    type: 'object',
-    required: ['reviewId', 'index'],
-    properties: { reviewId: { type: 'integer' }, index: { type: 'integer', minimum: 0 } },
-  },
-};
 const updateReviewSchema = {
   ...reviewIdParam,
   body: {
@@ -133,15 +129,6 @@ const postSchema = {
   },
 };
 
-// Ticket posts are SERIALISED PER REVIEW: every ticket of a review shares one stored JSON array,
-// so two posts recording at once would each write back a copy missing the other's stamp (and the
-// lost ticket would offer "Post" again — a double post). The tail is registered SYNCHRONOUSLY,
-// before any await, so a double click queues behind the first and then reads it as posted.
-const ticketPostChains = new Map<number, Promise<void>>();
-// `${reviewId}:${index}` posted on GitHub whose local record failed — refused for the life of the
-// process, so a retry cannot double-post.
-const postedUnrecorded = new Set<string>();
-
 function featureOff(reply: FastifyReply): { error: string; message: string } {
   reply.status(404);
   return {
@@ -150,9 +137,11 @@ function featureOff(reply: FastifyReply): { error: string; message: string } {
   };
 }
 
-// Resolve a finding row's posted body (the user's reword if any, else Claude's wording).
-const resolvedBody = (f: { body: string; editedBody: string | null }): string =>
-  f.editedBody && f.editedBody.trim() ? f.editedBody : f.body;
+// Resolve a finding row's posted body (the user's reword if any, else Claude's wording). A story
+// finding's stored lead (older rows, or a reword started from one) is removed here, because the
+// comment builders add the story line themselves (`storyLead`).
+const resolvedBody = (f: { body: string; editedBody: string | null }, story?: ClaudeFindingStory | null): string =>
+  stripStoredStoryLead(f.editedBody && f.editedBody.trim() ? f.editedBody : f.body, story);
 
 /**
  * Fold the manager's live AUTO-review holds over the stored latest runs, for the Open PRs column.
@@ -209,13 +198,18 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     }
     const accountId = ctx.accountIdOf(req);
     const auth = ctx.llm.detectAuth();
+    const review = await getLatestClaudeReview(ctx, id, accountId);
+    const autoReview = autoReviewHold(id, accountId);
     return {
       enabled: true,
       auth: auth.status,
       authMessage: auth.status === 'none' ? auth.message : undefined,
-      review: await getLatestClaudeReview(ctx, id, accountId),
+      review,
       history: await listClaudeReviewHistory(ctx, id, accountId),
-      autoReview: autoReviewHold(id, accountId),
+      autoReview,
+      // A hold in the lane outranks the sweeper's wait (it is already past it).
+      autoReviewWaiting: autoReview ? null : autoReviewWaiting(id, accountId),
+      autoFix: review ? autoFixOutcomeFor(review.id, accountId) : null,
     };
   });
 
@@ -411,7 +405,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       }
       if (!AGENTIC_AI_ENABLED) return { states: [] };
       const accountId = ctx.accountIdOf(req);
-      const stored = await getLatestReviewStates(ctx, unique, accountId);
+      const stored = await getLatestReviewStates(ctx, unique, accountId, isFixRunning);
       return { states: withAutoHolds(stored, unique, accountId) };
     },
   );
@@ -473,6 +467,9 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       return { error: 'NotFound', message: `Finding ${findingId} not found` };
     }
     const f = fctx.finding;
+    const story = storyOf(f);
+    // A story finding's comment opens on its story line, built from the run's tickets.
+    const storyReview = story ? await getClaudeReviewById(ctx, f.reviewId, accountId) : null;
     try {
       const outcome = await ctx.review.postFinding({
         owner: fctx.owner,
@@ -486,8 +483,9 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
           side: f.side,
           anchored: f.anchored,
           fileInDiff: f.fileInDiff,
-          body: resolvedBody(f),
+          body: resolvedBody(f, story),
           suggestion: f.suggestion,
+          storyLead: story ? storyCommentLead({ title: f.title, story }, storyReview?.tickets ?? []) : null,
         },
       });
       if (outcome.headMoved) {
@@ -553,8 +551,9 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
             side: f.side,
             anchored: f.anchored,
             fileInDiff: f.fileInDiff,
-            body: resolvedBody(f),
+            body: resolvedBody(f, f.story),
             suggestion: f.suggestion,
+            storyLead: f.story ? storyCommentLead({ title: f.title, story: f.story }, review.tickets ?? []) : null,
           })),
         dryRun,
       });
@@ -581,71 +580,4 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
     }
   });
-
-  // Post ONE ticket's analysis as a PR-level comment — once per ticket. A GitHub write: its own
-  // `githubWrite` rate tier (tierFor). Stamped locally + the change signal raised by
-  // `ctx.prWrites.postPrComment`. Not refused on a moved head: an issue comment is pinned to no
-  // commit, and the body names the commit it was checked against.
-  app.post(
-    '/api/claude-reviews/:reviewId/tickets/:index/post',
-    { schema: ticketPostParam },
-    async (req, reply) => {
-      if (!AGENTIC_AI_ENABLED) return featureOff(reply);
-      const { reviewId, index } = req.params as { reviewId: number; index: number };
-      const accountId = ctx.accountIdOf(req);
-      const prev = ticketPostChains.get(reviewId) ?? Promise.resolve();
-      let release!: () => void;
-      const mine = new Promise<void>((r) => (release = r));
-      const tail = prev.then(() => mine);
-      ticketPostChains.set(reviewId, tail);
-      await prev;
-      try {
-        const tctx = await getTicketPostContext(ctx, reviewId, accountId);
-        const ticket = tctx?.tickets[index];
-        if (!tctx || !ticket) {
-          reply.status(404);
-          return { error: 'NotFound', message: `Ticket ${index + 1} of review ${reviewId} not found` };
-        }
-        const assessment = tctx.assessments[index];
-        if (tctx.status !== 'succeeded' || !assessment || assessment.alignment === 'not_checked') {
-          reply.status(409);
-          return { error: 'NotReady', message: 'This ticket has no analysis to post.' };
-        }
-        if (assessment.posted || postedUnrecorded.has(`${reviewId}:${index}`)) {
-          reply.status(409);
-          return { error: 'AlreadyPosted', message: 'Already posted.', posted: assessment.posted ?? null };
-        }
-        let out;
-        try {
-          out = await ctx.prWrites.postPrComment(
-            accountId,
-            tctx.prId,
-            ticketAnalysisCommentBody(ticket, assessment, tctx.reviewHeadSha),
-          );
-        } catch (err) {
-          reply.status(502);
-          return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
-        }
-        if (!out) {
-          reply.status(404);
-          return { error: 'NotFound', message: `Review ${reviewId} not found` };
-        }
-        // ⚠ GitHub has 201'd: the route may not fail from here. A failed record leaves the
-        // comment posted, so it answers visible:false (the SPA never offers a retry) and the
-        // ticket is refused from here on.
-        const posted = { githubCommentId: out.githubCommentId, url: out.url, postedAt: out.createdAt };
-        let recorded = true;
-        await markTicketPosted(ctx, reviewId, index, posted).catch((err) => {
-          recorded = false;
-          postedUnrecorded.add(`${reviewId}:${index}`);
-          ctx.log.warn({ err }, `claude review ${reviewId}: ticket ${index + 1} posted but not recorded`);
-        });
-        const result: PostTicketAnalysisResult = { ...posted, visible: out.visible && recorded };
-        return result;
-      } finally {
-        release();
-        if (ticketPostChains.get(reviewId) === tail) ticketPostChains.delete(reviewId);
-      }
-    },
-  );
 }

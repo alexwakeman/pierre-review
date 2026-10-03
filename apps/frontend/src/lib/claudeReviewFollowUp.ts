@@ -10,16 +10,21 @@ import {
   checkClaudeReviewTickets,
   CLAUDE_REVIEW_TICKET_LIMITS,
   isThreadToFix,
+  storyMissingRef,
+  storyName,
+  TICKET_CRITERION_STATUS_LABEL,
 } from '@pierre-review/shared';
 import type {
   ClaudeFinding,
   ClaudeFindingSeverity,
   ClaudeFindingSide,
+  ClaudeFindingStory,
   ClaudeFollowUpItem,
   ClaudeFollowUpStatus,
   ClaudeReview,
   ClaudeReviewTicket,
   ClaudeReviewTicketCheck,
+  ClaudeReviewTicketEntry,
   ClaudeReviewTicketField,
   ClaudeReviewTicketInput,
   ClaudeReviewTicketsCheck,
@@ -518,4 +523,86 @@ export function resolveTicketDraft(
   latestStored: ClaudeReviewTicket | null | undefined,
 ): TicketDraft {
   return own ?? ticketDraftFromStored(latestStored);
+}
+
+// ---- story findings ----
+// Every unmet / partly met criterion and every "Not done" item of a run is a FINDING of that run
+// (`ClaudeFinding.story`, made server-side). ⚠ EACH ONE IS SHOWN ONCE, IN ITS STORY: the User
+// stories section renders the SAME finding card the Findings list uses, in place of the item's
+// row, and the Findings list leaves it out (`placeStoryFindings`). Older runs (before story
+// findings) have none, so their items fall back to the compact read-only rows. A story finding
+// whose story this run does not list (never expected) stays in the Findings list with its chip.
+
+const storyKey = (index: number, ref: string): string => `${index}:${ref}`;
+
+/** `${ticketIndex}:${ref}` → the id of THIS run's finding for that story item (the first one). */
+export function storyFindingIds(findings: readonly ClaudeFinding[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const f of findings) {
+    if (f.story == null) continue;
+    const k = storyKey(f.story.index, f.story.ref);
+    if (!out.has(k)) out.set(k, f.id);
+  }
+  return out;
+}
+
+/** The finding id for a criterion row (`ref` 'AC2') or a not-done row (0-based `missingIndex`). */
+export function storyFindingIdFor(
+  ids: ReadonlyMap<string, number>,
+  ticketIndex: number,
+  item: { ref: string } | { missingIndex: number },
+): number | null {
+  const ref = 'ref' in item ? item.ref : storyMissingRef(item.missingIndex);
+  return ids.get(storyKey(ticketIndex, ref)) ?? null;
+}
+
+/**
+ * The chip on a story finding's card: "BMD-1040 · AC2", "Story 2 · Not done". The story's name
+ * comes from the run's own ticket list; a ticket missing from it (a re-raise of an older run's
+ * story finding) reads "Story".
+ */
+export function storyChipLabel(
+  story: ClaudeFindingStory,
+  tickets: readonly ClaudeReviewTicketEntry[] | null | undefined,
+): string {
+  const entry = (tickets ?? []).find((t) => t.index === story.index);
+  const name = entry ? storyName(entry.ticket, entry.index) : 'Story';
+  return `${name} · ${/^M\d+$/.test(story.ref) ? 'Not done' : story.ref}`;
+}
+
+/**
+ * Which of this run's findings render INSIDE the User stories section: the one finding per unmet
+ * criterion / "Not done" item that the section has a row for. `placed` is what the Findings list
+ * must leave out, so every finding is on screen exactly once.
+ */
+export function placeStoryFindings(
+  findings: readonly ClaudeFinding[],
+  tickets: readonly ClaudeReviewTicketEntry[] | null | undefined,
+): { byId: Map<number, ClaudeFinding>; ids: Map<string, number>; placed: Set<number> } {
+  const ids = storyFindingIds(findings);
+  const byId = new Map(findings.map((f) => [f.id, f]));
+  const placed = new Set<number>();
+  for (const entry of tickets ?? []) {
+    const a = entry.assessment;
+    if (a == null) continue;
+    for (const c of a.criteria) {
+      if (c.status !== 'not_met' && c.status !== 'partly_met') continue;
+      const id = storyFindingIdFor(ids, entry.index, { ref: c.ref });
+      if (id != null) placed.add(id);
+    }
+    a.missing.forEach((_g, i) => {
+      const id = storyFindingIdFor(ids, entry.index, { missingIndex: i });
+      if (id != null) placed.add(id);
+    });
+  }
+  return { byId, ids, placed };
+}
+
+/** The chip on a story finding's card INSIDE its story: "AC2 · Partly met", or "Not done". */
+export function storyItemChipLabel(
+  ref: string,
+  status: 'not_met' | 'partly_met' | null,
+): string {
+  if (status == null) return 'Not done';
+  return `${ref} · ${TICKET_CRITERION_STATUS_LABEL[status]}`;
 }

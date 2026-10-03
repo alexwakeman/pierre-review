@@ -40,10 +40,31 @@
 // "addressed" / "met" — follow-up.ts, threads.ts, ticket.ts `sameHeadTicketCarry`); the new work is
 // the new and changed threads.
 //
+// WHEN A RUN STARTS — THE ONE RULE (`autoReviewDue`, both re-review reasons and first reviews):
+//
+//     start ⇔ SETTLED AND NOT HELD BY CI
+//     SETTLED          = quiet ≥ AUTO_REREVIEW_SETTLE_MS (5 min since the key last changed)
+//                        OR burst ≥ AUTO_REREVIEW_MAX_WAIT_MS (20 min since the FIRST trigger of
+//                        this burst — a key change resets the 5 min, never the 20)
+//                        (a FIRST review has no settle: it is always settled)
+//     HELD BY CI       = the head's synced CI is still running (pending / expected)
+//                        AND head age < AUTO_REVIEW_CI_WAIT_MS (30 min since the head was first
+//                        seen — the earliest ci_status_events row for it, else first sight here)
+//
+// A burst ends when its run is queued (or when the PR stops being a candidate); the next trigger
+// opens a new one. All of these clocks are in memory: a restart restarts the waits, never skips them. While a
+// PR waits, `autoReviewWaiting` says why ('ci' | 'comments' | 'commits'), for the Claude Review
+// header. ⚠ WHO counts as a trigger is decided in the candidate read: only a person or a REVIEW
+// bot's comment (db/queries.ts `reReviewCommentAuthorFilter`).
+//
+// AUTO FIX. When an auto run succeeds on the reader's OWN PR, manager.ts hands it to
+// coding/ai-fix/auto-fix.ts, which may start a review-seeded fix (never pushed).
+//
 // ⚠ IT NEVER RUNS WHERE CLAUDE REVIEW IS OFF: `autoReviewAvailable` needs the agentic switch
 // (config.aiEnabled) AND a local host — checked separately, so the cloud guarantee does not rest on
 // one flag. It is OFF PER WORKSPACE until someone switches it on: it spends the user's own Claude
 // in the background.
+import type { ClaudeAutoReviewWaiting } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { agenticRunReady } from './ai-ready.js';
 import { AUTO_REVIEW_DAILY_CAP, listAutoReviewWorkspaces } from './auto-settings.js';
@@ -59,14 +80,55 @@ export const AUTO_REVIEW_CRON = '* * * * *';
 
 /** How long a moved head must hold still before its re-review is queued. */
 export const AUTO_REREVIEW_SETTLE_MS = 5 * 60 * 1000;
+/** The settle never delays a run more than this from the FIRST trigger of the burst. */
+export const AUTO_REREVIEW_MAX_WAIT_MS = 20 * 60 * 1000;
+/** How long a run waits for a head's running CI, from when that head was first seen. */
+export const AUTO_REVIEW_CI_WAIT_MS = 30 * 60 * 1000;
 
-// `${accountId}:${prId}` → the re-review KEY last seen — `${headSha}|${commentsAtMs}` — and when it
-// was first seen. Pruned each full tick to the current candidates.
-const headSeen = new Map<string, { key: string; firstSeenMs: number }>();
+// `${accountId}:${prId}` → the re-review KEY last seen — `${headSha}|${commentsAtMs}` — when it was
+// first seen (the quiet clock), and when this burst began (the ceiling's clock, kept across key
+// changes). Pruned each full tick to the current candidates.
+const headSeen = new Map<string, { key: string; firstSeenMs: number; burstStartMs: number }>();
+// `${accountId}:${prId}` → the head we last saw and when we first saw it (the CI wait's fallback
+// clock when no ci_status_events row exists).
+const headFirstSeen = new Map<string, { headSha: string | null; ms: number }>();
+// `${accountId}:${prId}` → why that PR's auto review is waiting right now.
+const waitingNow = new Map<string, ClaudeAutoReviewWaiting>();
 
 /** Test hook. */
 export function _resetAutoReReviewForTest(): void {
   headSeen.clear();
+  headFirstSeen.clear();
+  waitingNow.clear();
+}
+
+/** Why the sweeper is holding this PR's auto review, or null. Account-checked (the key carries it). */
+export function autoReviewWaiting(prId: number, accountId: number): ClaudeAutoReviewWaiting | null {
+  return waitingNow.get(`${accountId}:${prId}`) ?? null;
+}
+
+/**
+ * THE START RULE (see the header). Pure. `settle` is null for a FIRST review (no settle wait);
+ * otherwise the quiet / burst clocks and which kind of trigger it is, for the wait reason.
+ */
+export function autoReviewDue(input: {
+  nowMs: number;
+  settle: { quietSinceMs: number; burstStartMs: number; reason: 'head' | 'comments' } | null;
+  ciRunning: boolean;
+  headSeenMs: number;
+}): { due: true } | { due: false; reason: ClaudeAutoReviewWaiting } {
+  const { nowMs, settle } = input;
+  if (settle) {
+    const quiet = nowMs - settle.quietSinceMs >= AUTO_REREVIEW_SETTLE_MS;
+    const ceiling = nowMs - settle.burstStartMs >= AUTO_REREVIEW_MAX_WAIT_MS;
+    if (!quiet && !ceiling) {
+      return { due: false, reason: settle.reason === 'comments' ? 'comments' : 'commits' };
+    }
+  }
+  if (input.ciRunning && nowMs - input.headSeenMs < AUTO_REVIEW_CI_WAIT_MS) {
+    return { due: false, reason: 'ci' };
+  }
+  return { due: true };
 }
 
 /** Can auto review run in this process at all? The Settings toggle and the sweeper both ask. */
@@ -112,6 +174,7 @@ export async function runAutoReviewSweep(
     const dayStartMs = utcDayStartMs(nowMs);
     const creditsOk = new Map<number, boolean>();
     const liveHeads = new Set<string>();
+    const livePrs = new Set<string>();
     const roster = await listAutoReviewWorkspaces(ctx);
     // A workspace switched off since its items were queued: they wait no longer (the settings
     // PUT drops them at once; this catches any other way the switch went off).
@@ -141,9 +204,33 @@ export async function runAutoReviewSweep(
         (id) => waiting.has(id),
       ).length;
       let budget = AUTO_REVIEW_DAILY_CAP - res.autoToday - waitingHere;
+      const ciByPr = new Map((res.ci ?? []).map((c) => [c.prId, c]));
+      // The CI half of the rule, and the head-first-seen clock it reads (DB first, else memory).
+      const ciOf = (prId: number): { ciRunning: boolean; headSeenMs: number } => {
+        const k = `${ws.accountId}:${prId}`;
+        livePrs.add(k);
+        const c = ciByPr.get(prId);
+        const head = c?.headSha ?? null;
+        let mem = headFirstSeen.get(k);
+        if (!mem || mem.headSha !== head) {
+          mem = { headSha: head, ms: nowMs };
+          headFirstSeen.set(k, mem);
+        }
+        return {
+          ciRunning: c?.running === true,
+          headSeenMs: Math.min(mem.ms, c?.headSeenAtMs ?? Number.POSITIVE_INFINITY),
+        };
+      };
       for (const prId of res.prIds) {
         if (budget <= 0) break;
         if (waiting.has(prId)) continue;
+        const k = `${ws.accountId}:${prId}`;
+        const due = autoReviewDue({ nowMs, settle: null, ...ciOf(prId) });
+        if (!due.due) {
+          waitingNow.set(k, due.reason);
+          continue;
+        }
+        waitingNow.delete(k); // due: from here it is queued, or waits on the daily cap / lane
         const r = enqueueAutoReview(ctx, ws.accountId, prId, ws.workspaceId);
         if (r === 'queued') {
           result.queued += 1;
@@ -162,17 +249,40 @@ export async function runAutoReviewSweep(
       for (const { prId, headSha, commentsAtMs } of res.reReview ?? []) {
         const k = `${ws.accountId}:${prId}`;
         liveHeads.add(k);
+        const ci = ciOf(prId);
         if (waiting.has(prId)) continue;
-        // (head, newest qualifying comment): a new push OR a new comment restarts the wait.
+        // (head, newest qualifying comment): a new push OR a new comment restarts the 5-minute
+        // quiet wait; the burst's start (the 20-minute ceiling's clock) is kept.
         const key = `${headSha}|${commentsAtMs ?? ''}`;
-        const seen = headSeen.get(k);
-        if (!seen || seen.key !== key) {
-          headSeen.set(k, { key, firstSeenMs: nowMs });
+        let seen = headSeen.get(k);
+        if (!seen) {
+          seen = { key, firstSeenMs: nowMs, burstStartMs: nowMs };
+          headSeen.set(k, seen);
+        } else if (seen.key !== key) {
+          seen.key = key;
+          seen.firstSeenMs = nowMs;
+        }
+        const due = autoReviewDue({
+          nowMs,
+          settle: {
+            quietSinceMs: seen.firstSeenMs,
+            burstStartMs: seen.burstStartMs,
+            reason: commentsAtMs != null ? 'comments' : 'head',
+          },
+          ...ci,
+        });
+        if (!due.due) {
+          waitingNow.set(k, due.reason);
           continue;
         }
-        if (nowMs - seen.firstSeenMs < AUTO_REREVIEW_SETTLE_MS) continue;
+        waitingNow.delete(k); // due: from here it is queued, or waits on the daily cap / lane
         if (budget <= 0) continue;
         const r = enqueueAutoReview(ctx, ws.accountId, prId, ws.workspaceId, commentsAtMs ?? null);
+        // Queued (or a person already started it): this burst is covered. Forget its clocks NOW —
+        // the PR can be a candidate again before any full pass prunes it (a comment landing while
+        // the run is in flight), and an inherited burst start would hit the 20-minute ceiling at
+        // once, skipping the next burst's quiet wait.
+        if (r === 'queued' || r === 'already') headSeen.delete(k);
         if (r === 'queued') {
           result.queued += 1;
           result.reQueued += 1;
@@ -190,6 +300,8 @@ export async function runAutoReviewSweep(
     // FULL pass, or a skipped workspace would restart its wait.
     if (!result.stopped) {
       for (const k of headSeen.keys()) if (!liveHeads.has(k)) headSeen.delete(k);
+      for (const k of headFirstSeen.keys()) if (!livePrs.has(k)) headFirstSeen.delete(k);
+      for (const k of waitingNow.keys()) if (!livePrs.has(k)) waitingNow.delete(k);
     }
     if (result.queued > 0) ctx.log.info(`auto claude review: queued ${result.queued} PR(s)`);
     return result;

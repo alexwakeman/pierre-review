@@ -85,25 +85,13 @@ describe('the product name is Limn', () => {
 // ⚠ SKIPPED, NOT SILENTLY PASSED, when the submodule is absent — and every scan inside uses
 // `read()`, which THROWS on a path that has moved. See `hasPlugin`.
 describe.skipIf(!hasPlugin)('no user-visible "Pierre" in the plugin\'s rendered strings', () => {
-  // The Haiku CI-analysis prompt. Its `##` lines are the literal headings the model is told to
-  // emit, and the answer is stored raw and rendered with <Markdown> — so a brand name here lands
-  // on a card verbatim, and stays there until someone regenerates (which costs money).
-  it('the CI-analysis prompt emits no heading naming the old brand', () => {
-    const headings = read('packages/pro/src/ai-fix/prompts.ts')
-      .split('\n')
-      .filter((l) => /^#{1,6}\s/.test(l));
-    expect(headings.length).toBeGreaterThan(0); // the scan found the prompt, not an empty file
-    for (const h of headings) expect(h).not.toMatch(/pierre/i);
-    expect(headings.some((h) => h.startsWith('## Fixability'))).toBe(true);
-  });
-
-  it('the CI-analysis prompt names the product through PRODUCT_NAME', () => {
+  // The plugin's one-shot prompts. (The CI-analysis prompt, whose `##` headings once said
+  // "Fixability by Pierre", is gone: Claude Review diagnoses failing CI in core.)
+  it('the plugin prompts carry no old brand outside comments', () => {
     const src = read('packages/pro/src/ai-fix/prompts.ts');
-    // Every line that is not a `//` comment: the prompt bodies are template literals whose lines
-    // are Markdown, and Markdown has no `//` line form.
     const emitted = src.split('\n').filter((l) => !l.trimStart().startsWith('//'));
+    expect(emitted.length).toBeGreaterThan(0); // the scan found the file, not an empty one
     for (const l of emitted) expect(l).not.toMatch(OLD_BRAND);
-    expect(src).toContain('${PRODUCT_NAME}'); // composed, not typed out
   });
 
   // The Slack digest was the copy that rotted, because a digest bullet is the one place nobody

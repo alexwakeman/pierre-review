@@ -27,10 +27,12 @@
 import type {
   ClaudeFindingSeverity,
   ClaudeFindingSide,
+  ClaudeFindingStory,
   ClaudeFollowUpItemRecord,
   ClaudeFollowUpStatus,
 } from '@pierre-review/shared';
 import type { ReviewFinding, ReviewFollowUpReport } from '../../pro/contract.js';
+import { storyMatchKey, type StoryFinding } from './ticket.js';
 
 // ---- caps (the prompt block's budget) ----
 export const PRIOR_FINDINGS_MAX = 40;
@@ -72,6 +74,8 @@ export interface PriorFindingForFollowUp {
   // A CARRIED, still-open item: the status the previous run gave it (and that run's explanation).
   // Absent for a 'not_checked' carry and for the previous review's own findings.
   priorStatus?: { status: ClaudeFollowUpStatus; explanation: string | null } | null;
+  // A STORY finding's origin (ticket.ts `storyFindingsFrom`); null/absent on an ordinary one.
+  story?: ClaudeFindingStory | null;
 }
 
 export interface PriorReviewForFollowUp {
@@ -323,22 +327,30 @@ export function isAlreadyOnThisCommit(
  * not-addressed / partly-addressed earlier finding is raised again:
  *   - a finding's `priorRef` links only when the ref is known AND its item is not_addressed or
  *     partly_addressed, and only the FIRST finding per ref links; otherwise `priorFindingId` null;
- *   - an open item the model did not raise again gets a SYNTHESIZED finding (prior severity, title,
- *     side, path; a templated first sentence, Claude's explanation, then the earlier body). When
- *     the code has NOT moved since THAT finding was raised the earlier anchor, hunk and suggestion
- *     still describe the same code and are copied; when it moved the line is dropped (posting
- *     re-anchors to the file's first change) rather than asserting a line from an older head.
- *     ⚠ "Moved" is PER FINDING (`findingHeadMoved`): a carried finding was raised at an older head
- *     than the previous review's, and copying its line onto a same-head re-run would offer an
+ *   - ⚠ A STORY FINDING (`storyFindings`, made by the server from this run's story assessment)
+ *     re-raises a still-open earlier STORY finding with the same `storyMatchKey` — the same
+ *     criterion or not-done item. It takes the link FIRST, and a model finding re-raising that same
+ *     earlier finding by `priorRef` is then DROPPED: one story item is one row of one review, never
+ *     the server's row plus the model's. (Same head ⇒ the story assessment is carried and every
+ *     posted story finding is re-created and linked here, saved left out.)
+ *   - an open item nothing raised again gets a SYNTHESIZED finding (prior severity, title, side,
+ *     path, story origin; a templated first sentence, Claude's explanation, then the earlier body).
+ *     When the code has NOT moved since THAT finding was raised the earlier anchor, hunk and
+ *     suggestion still describe the same code and are copied; when it moved the line is dropped
+ *     (posting re-anchors to the file's first change) rather than asserting a line from an older
+ *     head. ⚠ "Moved" is PER FINDING (`findingHeadMoved`): a carried finding was raised at an older
+ *     head than the previous review's, and copying its line onto a same-head re-run would offer an
  *     applyable suggestion on whatever code sits at that line now;
  *   - a re-raise (linked or synthesized) of a comment already posted on this commit is saved with
  *     `included: false` (`isAlreadyOnThisCommit`).
+ * Output order: the model's findings, then the story findings, then the synthesized re-raises.
  */
 export function linkReraisedFindings(
   plan: FollowUpPlan,
   items: ReadonlyArray<ClaudeFollowUpItemRecord>,
   findings: ReadonlyArray<ReviewFinding>,
   changedFiles: ReadonlySet<string>,
+  storyFindings: ReadonlyArray<StoryFinding> = [],
 ): LinkedFinding[] {
   const openByRef = new Map<string, ClaudeFollowUpItemRecord>();
   for (const it of items) if (it.ref && REOPEN.has(it.status)) openByRef.set(it.ref, it);
@@ -348,19 +360,47 @@ export function linkReraisedFindings(
   ]);
   const leftOut = (prior: PriorFindingForFollowUp | undefined): { included?: false } =>
     prior && isAlreadyOnThisCommit(plan, prior) ? { included: false } : {};
+
+  // Story findings first: each still-open earlier story finding → this run's matching one.
+  const storyByKey = new Map<string, number>();
+  storyFindings.forEach((sf, i) => {
+    const k = storyMatchKey(sf);
+    if (k != null && !storyByKey.has(k)) storyByKey.set(k, i);
+  });
+  const storyLink = new Map<number, number>(); // story finding index → earlier finding id
+  for (const it of items) {
+    if (!REOPEN.has(it.status)) continue;
+    const prior = priorById.get(it.priorFindingId);
+    const k = prior ? storyMatchKey(prior) : null;
+    const i = k != null ? storyByKey.get(k) : undefined;
+    if (prior == null || i == null || storyLink.has(i)) continue;
+    storyLink.set(i, prior.id);
+  }
+  const linkedPriorIds = new Set<number>(storyLink.values());
+
   const linkedRefs = new Set<string>();
-  const out: LinkedFinding[] = findings.map((f) => {
+  const out: LinkedFinding[] = [];
+  for (const f of findings) {
     const ref = typeof f.priorRef === 'string' ? f.priorRef.trim().toUpperCase() : '';
     const item = ref ? openByRef.get(ref) : undefined;
     if (item && !linkedRefs.has(ref)) {
       linkedRefs.add(ref);
-      return { ...f, priorFindingId: item.priorFindingId, ...leftOut(priorById.get(item.priorFindingId)) };
+      // A story finding of this run already raises it again: one row per story item.
+      if (linkedPriorIds.has(item.priorFindingId)) continue;
+      linkedPriorIds.add(item.priorFindingId);
+      out.push({ ...f, priorFindingId: item.priorFindingId, ...leftOut(priorById.get(item.priorFindingId)) });
+      continue;
     }
-    return { ...f, priorFindingId: null };
+    out.push({ ...f, priorFindingId: null });
+  }
+  storyFindings.forEach((sf, i) => {
+    const pid = storyLink.get(i);
+    out.push(pid != null ? { ...sf, priorFindingId: pid, ...leftOut(priorById.get(pid)) } : { ...sf, priorFindingId: null });
   });
   for (const it of items) {
     if (!REOPEN.has(it.status)) continue;
-    if (it.ref ? linkedRefs.has(it.ref) : !it.statusCarried) continue;
+    if (linkedPriorIds.has(it.priorFindingId)) continue;
+    if (!it.ref && !it.statusCarried) continue;
     const prior = priorById.get(it.priorFindingId);
     if (!prior) continue;
     const where = prior.carried ? 'an earlier review' : 'the last review';
@@ -392,6 +432,7 @@ export function linkReraisedFindings(
           }),
       priorRef: it.ref,
       priorFindingId: prior.id,
+      ...(prior.story ? { story: prior.story } : {}),
       ...leftOut(prior),
     });
   }

@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0063` and plugin `0034`–`0037` are NOT (written 2026-09-19/24 with the Postgres down; see the
+  ⚠ pg `0052`–`0066` and plugin `0034`–`0037` are NOT (written 2026-09-19/24 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -528,6 +528,9 @@ explicit NULL.
 
 ## Plugin `0024` — `ai_fixes.comment_targets` + `comment_verdicts`
 
+⚠ **DORMANT since core `0078`**: the comments seed was removed; these columns are no longer written
+or read (old rows keep their data).
+
 Two additive nullable `text` columns holding JSON on the plugin's `ai_fixes` table (sqlite + pg
 twins, filename-sorted, NO journal, no `--> statement-breakpoint`; the pg twin is
 `ADD COLUMN IF NOT EXISTS` inside the standard `DO $$ … EXCEPTION WHEN others THEN RAISE WARNING`
@@ -806,6 +809,42 @@ sweeper reviews from. No backfill (NULL = off). ⚠ Like `0035`, every hand-buil
 the store must replay it (the store SELECTs both columns): `workspace-settings.test.ts`,
 `settings-route-schema.test.ts`, `jira-routes.test.ts`. ⚠ **The pg twin is NOT replayed.**
 
+### `0079_claude_finding_story` (pg `0066`)
+
+Two nullable columns on `claude_review_findings`, no backfill: `story_index` (integer — the ticket's
+0-based position on the run) and `story_ref` (text — the criterion's ref `AC2`, or a not-done item's
+`M1`). Set together on a STORY FINDING — the server makes one per not met / partly met criterion and
+per "Not done" item of the run's user-story assessment (`review/claude-review/ticket.ts`
+`storyFindingsFrom`) so a story reaches GitHub the way every finding does; NULL on an ordinary
+finding and on every older row (an older review keeps its story results in the stories section only,
+and the AI Fix seed still builds `S…` items for it). The retired per-ticket "Post as comment" needed
+no migration to remove: its record lived inside the `ticket_assessment` JSON, and an old row's
+`posted` key is ignored on read. Journal `when` `1790650800000` in both folders (one step after
+`0078`/pg `0065`). ⚠ **The pg twin is NOT replayed.**
+
+### `0078_ai_fix_change_report` (pg `0065`)
+
+Three nullable `text` columns on core `ai_fixes`, no backfill (pg twin `ADD COLUMN IF NOT EXISTS`,
+text JSON like the table's other JSON columns). `trigger` — `'manual' | 'auto'` (`'auto'` is the
+auto-review agent calling `startReviewFix`; NULL reads as `'manual'`). `review_items` — the
+`AiFixReviewItem[]` a `'review'` run was given, each with the ref the agent must cite (`F1`, `P1`,
+`T1`, `S1-AC2`, `S1-M1`, `C1`) and `included: false` for the ones left out for the prompt budget;
+written at INSERT, NULL on a plain run. `change_report` — the validated `AiFixChangeReport`
+(per-file summary + refs, the refs it deliberately did not fix, the refs it never mentioned);
+written on SUCCESS. The removed comments seed's `comment_targets` / `comment_verdicts` (plugin
+`0024`, adopted by `0074`) stay in place: old rows keep their data, nothing reads it. Shares `when`
+`1790647200000` across both journals (one step after `0077`/pg `0064`). ⚠ The pg twin is NOT
+replayed.
+
+### `0077_claude_review_ci_failures` (pg `0064`)
+
+One nullable column on `claude_reviews`, no backfill: `ci_failures` (JSON / jsonb), one object
+`{state, checkCount, failures[]}` — the reviewed head's CI as the run saw it and, per failing check,
+Claude's diagnosis or the server's `not_checked` reason (see [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) §
+Failed CI on the reviewed head). NULL on every older row reads on the wire as `ciFailures: null` /
+`ciState: null` ("did not look at CI"). Journal `when` `1790560800000` in both folders. ⚠ **The pg
+twin is NOT replayed.**
+
 ### `0076_claude_review_threads` (pg `0063`)
 
 Two nullable columns on `claude_reviews`, no backfill. `thread_assessments` (JSON / jsonb): every
@@ -863,10 +902,10 @@ repo removal); the plugin's `pruneProByPrIds` / `eraseProByAccountId` no longer 
 plugin already created both tables (every statement must no-op) and against a fresh one; then run
 plugin `0037` with one ON row and check it lands on the right workspace only.
 
-⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0063` and plugin `0034`–`0037`). The
+⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0066` and plugin `0034`–`0037`). The
 standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
 through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —
-core should reach **64 applied = 64 journal entries** (`0000`–`0063`) and the plugin **37** — and check
+core should reach **67 applied = 67 journal entries** (`0000`–`0066`) and the plugin **37** — and check
 `review_request_events` carries both FKs and its unique index, that `workspaces.flow_settings`,
 `pull_requests.advisory_ids` and `accounts.my_turn_settings` are `jsonb`, and that
 `security_checked_at` and `pr_mentions.mentioned_at` are `timestamp with time zone`. ⚠ `0055` is

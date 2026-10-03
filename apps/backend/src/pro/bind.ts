@@ -287,7 +287,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         return aiCreditStatus(account, Date.now());
       },
     },
-    // The Pro inputs to the free agentic features (Jira fill, CI-analysis seed). Optional member.
+    // The Pro input to the free agentic features (the Jira fill). Optional member.
     registerAgenticProviders,
     registerScheduledJob,
     registerPrDetailEnricher,

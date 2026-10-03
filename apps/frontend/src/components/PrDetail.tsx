@@ -949,8 +949,8 @@ export function PrDetail({
   }, [claudeTabFocus, pr, claudeReviewEnabled, consumeClaudeTabFocus, seedTab]);
 
   // "Generate fix from this review" (or any deep link) → open the AI Fix tab for the
-  // matching PR. The signal is NOT consumed here — AiFixTab reads its `reviewText` to
-  // seed the prompt, then consumes it.
+  // matching PR. The signal is NOT consumed here — AiFixTab reads its `reviewId`, then
+  // consumes it.
   useEffect(() => {
     if (aiFixTabEnabled && aiFixTabFocus && pr && aiFixTabFocus.prId === pr.id) {
       seedTab('ai_fix');

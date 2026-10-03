@@ -782,20 +782,28 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   credential swaps the Run button for ONE line, never hides the feature. Auto review is OFF per
   workspace until switched on (`workspaces.auto_review_enabled[_at]`, `GET`/`PUT
   /api/workspaces/:id/auto-review`, the floor moves only on an off → on flip); it re-reviews an
-  already-reviewed PR once per new HEAD or new burst of review comments — never Limn's own posted
-  comments (`isLimnPostedComment`, ONE predicate) — debounced on (head, newest comment time). A run
+  already-reviewed PR once per new HEAD or new burst of review comments — only a PERSON's or a
+  REVIEW bot's (role `=== 'review'`, stored role beats the seed; CI/coverage/dependency bots never),
+  never Limn's own (`isLimnPostedComment`, ONE predicate). ⚠ ONE start rule (`autoReviewDue`):
+  (quiet ≥ 5 min OR burst ≥ 20 min) AND (head CI not running OR head ≥ 30 min old). A SUCCEEDED auto
+  run on the reader's OWN PR may start a review-seeded AUTO FIX (`coding/ai-fix/auto-fix.ts`: ≤ 3
+  per PR per 24h, never while a fix runs or an unpushed one waits on the head, NEVER pushed). A run
   also judges every OTHER open review thread (validity + addressed), and on a same-head run every
   earlier judgement carries forward IN CODE: only new commits change one
   (docs/CLAUDE-REVIEW.md § Other reviewers' threads, § Auto review).
+- **A run also diagnoses FAILED CI on the reviewed head** (`claude-review/ci-failures.ts`,
+  `claude_reviews.ci_failures`): the head's checks by COMMIT OID, then a bounded tail of each failing
+  Actions job's log (≤6 jobs, one 128 KiB ranged read each), excerpted and nonce-fenced. Every
+  failing check gets exactly one entry — Claude's cause or a server `not_checked` reason, never an
+  invented cause. ⚠ The signed log URL never leaves the server; only the check's details page is
+  stored. `ciFailures: null` = did not look, `[]` = nothing failing (§ Failed CI).
 - **The moved modules take ONE context argument, `AgentContext`** (`review/agent-context.ts`),
   built from direct core imports — never `ProContext`. Their tests pass a fake one; the queue
   managers carry it on each item. URL paths did NOT move (the fixer keeps its historical
   `/api/pro/prs/:id/ai-fix*` and `/api/pro/ai-fixes/*`).
-- **Two Pro inputs ride an OPTIONAL plugin seam** (`ProContext.registerAgenticProviders?`,
-  `review/plugin-providers.ts`): the Jira fill for an AUTO review (`resolveReviewTicket`) and AI
-  Fix's `ci_analysis` seed (`readCiAnalysisSeed` — the CI diagnosis is a Pro card). Absent ⇒ auto
-  review runs with no story and the `ci_analysis` seed is refused as `missing`; the `plain`,
-  `review` and `comments` seeds always work free.
+- **One Pro input rides an OPTIONAL plugin seam** (`ProContext.registerAgenticProviders?`,
+  `review/plugin-providers.ts`): the Jira fill for an AUTO review (`resolveReviewTicket`). Absent ⇒
+  auto review runs with no story. Both AI Fix seeds are free.
 - The agent's tools are read-only with **`Bash` denied outright** (the CHAT mirrors the review's
   mode under the same rule and rebuilds its transcript server-side); the fixer edits files, has no
   shell, builds and tests nothing, and nothing is posted or pushed until the reader presses the
@@ -846,8 +854,7 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   keep/tune/noisy verdicts, the Inflation column *counts included*, ML flagging, volume, seat
   prices), `activityDigest`, `periodReports` (period reports + by-workspace axis + the People
   report + **Chronology**), the Jira tracker, and `prSummary` — every ONE-SHOT Haiku feature on
-  the Anthropic API (PR summary, the CI-failure analysis card, comment validity/addressed/simplify
-  annotations, the blast impact note, conflict-assist) plus all reporting narration. There is no
+  the Anthropic API (PR summary, comment validity/addressed/simplify annotations, the blast impact note, conflict-assist) plus all reporting narration. There is no
   "pro+" tier any more (apiVersion 22).
 - ⚠ **Those last SIX surfaces are VISIBLE-BUT-LOCKED, reversing the app's "absent, never upsold"
   posture** (Chronology, period reports, the People report, the by-workspace axis, the ROI panel,
@@ -880,11 +887,14 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   prompt-only rule.
 - ⚠ **A model-derived figure and a code-derived figure must be LABELLED APART** in a panel that
   mixes them.
-- **AI Fix has FOUR seeds** (`AiFixSeed`; the fixer is CORE since apiVersion 22,
-  `src/coding/ai-fix/`): `plain`, `review` and `comments` are free; `ci_analysis` needs the Pro CI
-  diagnosis through the optional `readCiAnalysisSeed` provider and is refused as `missing` without
-  one. ⚠ `'comments'` WIDENS the attacker-authored channel to every comment dragged in (fencing is
-  the mitigation) and must never get its own queue/slot — the worktree is keyed on the SHA alone.
+- **AI Fix has TWO seeds** (`AiFixSeed`; core `src/coding/ai-fix/`): `review` and `plain` (the
+  reader's instruction). The review seed is the WHOLE review except praise, built SERVER-SIDE from
+  the stored run (`review-seed.ts`: findings not ignored, open earlier findings, `isThreadToFix`
+  threads, unmet story criteria + missing pieces, `fixableInPr` CI failures), every item fenced,
+  carrying a stable ref the agent cites in its per-change report (`submit_fix` `changes` +
+  `unaddressed`, validated against the SHOWN refs, stored on `ai_fixes.change_report`). ⚠ The
+  `comments` and `ci_analysis` seeds are REMOVED (`400 SeedRemoved`) but their stored rows still
+  READ as history (`AiFixStoredSeed`). `startReviewFix` is the one entry the auto-review agent calls.
   ⚠ A finished fix PUSHES AS-IS ([docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § AI Fix).
 - ⚠ **THE FIX AGENT HAS NO SHELL** — `FIX_TOOLS` is Read/Glob/Grep + Write/Edit/MultiEdit +
   `submit_fix`, and `DISALLOWED_TOOLS` is `['Bash','NotebookEdit']` (Claude Review denies `Bash`
@@ -896,18 +906,9 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   verification the sentence exists to deny. Why, and the blocklist it replaced:
   [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § The fix agent has no shell.
   ⚠ **The prompt and the tool list change together** — `WORKTREE_RULES` (one constant, both fix
-  prompts, now CORE `coding/ai-fix/prompts.ts`, pinned by `no-shell.test.ts`) and the CI-analysis
-  capability sentence (still the PLUGIN's `CI_ANALYSIS_SYSTEM`), whose answer is stored raw and
-  RENDERED — two repos, change them together. ⚠ **AND THE
-  CAPABILITY SENTENCE IS A TERM OF THE CACHE KEY EVEN THOUGH THE PROMPT IS NOT**: the payload hash
-  is `v3|head|diff|check logs`, so a prompt edit alone leaves every stored row asserting a shell and
-  a push the product does not have — 17 of 19 real rows did, 3 of them still seedable to the agent.
-  `CI_ANALYSIS_CONTRACT_EPOCH_MS` (shared) is what retires them: `ciSeedDecision` refuses a pre-epoch
-  row exactly as it refuses a moved head, and `ciAnalysisStale` marks it out of date on the card.
-  ⚠ The read-time Pierre→Limn patch is bounded to those same pre-epoch rows — the prompt names no
-  brand now, so a `Pierre` in a fresh answer is the REPOSITORY's own content (three people in this
-  account's `users` table are called Pierre) and rewriting it corrupts both the card and the agent's
-  task. Cost accepted: a fix wanting a codegen step, a formatter or `git log` must write the edit
+  prompts, now CORE `coding/ai-fix/prompts.ts`, pinned by `no-shell.test.ts`). (The Pro CI-failure
+  analysis card, whose stored prose also described the fixer, is DELETED — Claude Review diagnoses
+  failing CI now; its `ai_pr_analyses` rows are dormant.) Cost accepted: a fix wanting a codegen step, a formatter or `git log` must write the edit
   by hand or decline.
 - **Bot Tuning Advisor** (Pro, `botAdvisor`): CORE computes the evidence cells, the PLUGIN
   emits. Non-negotiables — recommendation text is TEMPLATED, never model-generated (the ONE LLM
@@ -1385,7 +1386,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0063` and plugin `0034`–`0037` are NOT replayed.
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0066` and plugin `0034`–`0037` are NOT replayed.
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.
   - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence

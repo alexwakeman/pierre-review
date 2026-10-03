@@ -7,8 +7,8 @@
 //   • the auto-review sweeper re-reviews the SAME head when a newer qualifying comment arrives
 //     (`newestReviewCommentAt`, read by `getAutoReviewCandidates`).
 //
-// ⚠ A QUALIFYING COMMENT is a review-thread comment in an UNRESOLVED thread, by anyone — a person
-// or a bot — that Limn did NOT post. Both readers go through `isLimnPostedComment`, so the comment
+// ⚠ A QUALIFYING COMMENT is a review-thread comment in an UNRESOLVED thread that Limn did NOT post,
+// by a person or a review bot (the `countsAuthor` filter below). Both readers go through `isLimnPostedComment`, so the comment
 // the run records as "seen" (`claude_reviews.comments_through`) and the comment the sweeper treats
 // as "new" can never disagree; if they did, a review could re-trigger itself forever.
 //
@@ -20,11 +20,22 @@
 //   B. it carries Limn's provenance — any one of:
 //      1. the hidden `<!-- pierre:claude-review` marker. Every finding comment carries
 //         `<!-- pierre:claude-review-finding v=1 -->` (post-review.ts FINDING_COMMENT_MARKER), review
-//         bodies and ticket comments their own spelling of it. It survives an edit on GitHub;
+//         bodies their own spelling of it. It survives an edit on GitHub. ⚠ The retired per-ticket
+//         "Post as comment" stamped `<!-- pierre:claude-review-ticket v=1 -->`; nothing produces it
+//         now (a story's results post as findings), but comments already on GitHub carry it, so
+//         the match stays a PREFIX — never narrow it to the finding spelling;
 //      2. LEGACY, for comments posted before that marker existed: the comment's GitHub id is a
 //         posted finding's `github_comment_id`, or its text STARTS WITH a posted finding's resolved
 //         body (an edit on GitHub defeats this one — hence the marker).
 // An unknown author (a deleted account, an unsynced user) is never "own".
+//
+// ⚠ ONLY REAL REVIEWERS MOVE THE TRIGGER. The comment-time half (`newestReviewCommentAt`, and the
+// loader's `newestCommentAt` that becomes `comments_through`) also takes a `countsAuthor` filter —
+// built ONCE per workspace by db/queries.ts `reReviewCommentAuthorFilter`: a person, or a bot whose
+// role in this workspace is `'review'`. CI, coverage, deploy and dependency bots never re-trigger a
+// review. Both readers get the SAME filter, so what a run records as seen and what the sweeper
+// calls new still agree. ⚠ The THREADS themselves are not filtered: the review still assesses
+// every open thread, whoever wrote it.
 import { and, eq, gt, inArray, isNotNull } from 'drizzle-orm';
 import { db, schema } from './client.js';
 import { globalAutomationUserIds } from './automation-ids.js';
@@ -37,6 +48,9 @@ export interface OwnPostedComments {
   // GitHub ids stored for findings posted one at a time.
   commentIds: Set<string>;
 }
+
+/** Does a comment by this author move the auto re-review trigger? Absent ⇒ every author does. */
+export type CountsAuthor = (authorId: number | null) => boolean;
 
 const norm = (s: string): string => s.replace(/\r\n?/g, '\n').trim();
 
@@ -110,6 +124,8 @@ export async function newestReviewCommentAt(
   accountId: number,
   prIds: readonly number[],
   since: Date,
+  // TRAILING: only these authors' comments count (see the header). Absent ⇒ every author.
+  countsAuthor?: CountsAuthor,
 ): Promise<Map<number, Date>> {
   const out = new Map<number, Date>();
   if (prIds.length === 0) return out;
@@ -120,6 +136,7 @@ export async function newestReviewCommentAt(
       createdAt: rc.createdAt,
       body: rc.body,
       databaseId: rc.databaseId,
+      authorId: rc.authorId,
       authorLogin: users.githubLogin,
     })
     .from(rc)
@@ -142,6 +159,7 @@ export async function newestReviewCommentAt(
   ]);
   for (const r of rows) {
     if (isLimnPostedComment(r, own.get(r.prId), login)) continue;
+    if (countsAuthor && !countsAuthor(r.authorId ?? null)) continue;
     const prev = out.get(r.prId);
     if (!prev || r.createdAt.getTime() > prev.getTime()) out.set(r.prId, r.createdAt);
   }
@@ -174,7 +192,8 @@ export interface ReviewThreadForReview {
 export interface ReviewThreadsForReview {
   threads: ReviewThreadForReview[];
   // The newest QUALIFYING comment across EVERY unresolved thread — including replies inside a
-  // thread rooted on Limn's own finding, which the sweeper also treats as new. null = none.
+  // thread rooted on Limn's own finding, which the sweeper also treats as new — by an author the
+  // `countsAuthor` filter keeps (a person or a review bot). null = none.
   newestCommentAt: Date | null;
 }
 
@@ -186,6 +205,8 @@ export interface ReviewThreadsForReview {
 export async function loadReviewThreadsForReview(
   accountId: number,
   prId: number,
+  // TRAILING: which authors move `newestCommentAt` (never which threads are sent). Absent ⇒ all.
+  countsAuthor?: CountsAuthor,
 ): Promise<ReviewThreadsForReview> {
   const { reviewComments: rc, reviewThreads: rt, pullRequests: prs, repos, users, commits } = schema;
   const pr = (
@@ -245,7 +266,10 @@ export async function loadReviewThreadsForReview(
     const root = list[0]!;
     const rootIsOwn = isLimnPostedComment(root, own, login);
     const kept = list.filter((c) => !isLimnPostedComment(c, own, login));
-    for (const c of kept) if (!newest || c.createdAt > newest) newest = c.createdAt;
+    for (const c of kept) {
+      if (countsAuthor && !countsAuthor(c.authorId ?? null)) continue;
+      if (!newest || c.createdAt > newest) newest = c.createdAt;
+    }
     // A thread rooted on Limn's own posted finding belongs to the follow-up, not here.
     if (rootIsOwn || kept.length === 0) continue;
     const first = kept[0]!;

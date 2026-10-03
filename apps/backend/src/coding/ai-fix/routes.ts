@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  AI_FIX_MAX_INSTRUCTION_CHARS,
   CLAUDE_REVIEW_MODELS,
   DEFAULT_AI_FIX_MODEL,
   PRODUCT_NAME,
@@ -32,20 +33,20 @@ import {
   getLatestFix,
   listFixHistory,
   markFixPushed,
-  parseCommentTargets,
-  parseCommentVerdicts,
+  parseChangeReport,
   parseFilesChanged,
+  parseReviewItems,
+  parseTrigger,
   type AiFixRow,
 } from './persist.js';
-import { parseCommentTargetRefs } from './comment-seed.js';
 
 // AI Fix's agentic-fixer routes (CORE, free, LOCAL ONLY — the fixer left the plugin with Claude
 // Review). ⚠ THE PATHS KEEP THEIR HISTORICAL `/api/pro/` PREFIX (`/api/pro/prs/:id/ai-fix*`,
 // `/api/pro/ai-fixes/:fixId*`) so the SPA client did not move; nothing about them is paid. They
 // are registered only by `registerAgenticRoutes` (review/agentic.ts), which refuses in cloud and
 // under LIMN_AI_DISABLED — and in cloud the auth plugin's `isProPath` 402 is a second guard on the
-// prefix anyway. The PR summary + CI-failure analysis (`/api/pro/prs/:id/summary*`,
-// `…/ci-analysis`) are Pro and STAYED in the plugin. Every handler resolves accountId =
+// prefix anyway. The PR summary (`/api/pro/prs/:id/summary*`) is Pro and STAYED in the plugin.
+// Every handler resolves accountId =
 // ctx.accountIdOf(req) and verifies PR ownership.
 
 const AIFIX_ENABLED = config.aiEnabled;
@@ -58,7 +59,7 @@ function tsToIso(v: Date | number | null | undefined): string | null {
 
 // The model a fix run uses. Validated HERE, in the handler, and not by an ajv body schema:
 // Fastify's ajv runs with `removeAdditional`, so a schema that did not declare every key would
-// silently strip `seed` / `reviewText` / `commentTargets` (the contact-form honeypot landmine).
+// silently strip `seed` / `instruction` / `sourceReviewId` (the contact-form honeypot landmine).
 // The body has no schema at all, so `model` may be any JSON value — hence the `typeof`.
 //   absent / null            → DEFAULT_AI_FIX_MODEL
 //   a string on the offered list → that model
@@ -83,10 +84,11 @@ function rowToAiFix(row: AiFixRow): AiFix {
     patch: row.patch,
     filesChanged: parseFilesChanged(row.filesChanged),
     baseSha: row.baseSha,
-    // Comments-seeded runs only; null (never []) on every other seed AND on an unparseable blob,
-    // because this getter is what loads the whole AI Analysis and Fix tab and must not throw.
-    commentTargets: parseCommentTargets(row.commentTargets),
-    commentVerdicts: parseCommentVerdicts(row.commentVerdicts),
+    // Null on an unparseable blob too: this getter loads the whole AI Fix tab and must not throw.
+    // A row from a REMOVED seed ('comments' / 'ci_analysis') reads like any other, as history.
+    trigger: parseTrigger(row.trigger),
+    reviewItems: parseReviewItems(row.reviewItems),
+    changeReport: parseChangeReport(row.changeReport),
     sourceReviewId: row.sourceReviewId,
     costUsd: row.costUsd,
     numTurns: row.numTurns,
@@ -208,19 +210,45 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
           message: 'That model is no longer offered.',
         });
       }
-      const seed: AiFixSeed = body.seed ?? 'plain';
-      // Shape-validated here (known kind, positive integer id, de-duplicated, capped);
-      // MEMBERSHIP of this PR is checked in the resolver, which drops anything foreign.
-      const commentTargets = parseCommentTargetRefs(body.commentTargets);
-
-      // An EMPTY basket is refused before `startFix`, which would otherwise spend two GitHub calls
-      // (head info + the PR diff) on its way to the same answer. Same error as the resolver's
-      // no_targets so the client has one shape to handle.
-      if (seed === 'comments' && commentTargets.length === 0) {
+      // Two entry points. The removed ones get a sentence a stale tab can show, not a run.
+      const rawSeed = (body as { seed?: unknown }).seed ?? 'plain';
+      if (rawSeed === 'comments' || rawSeed === 'ci_analysis') {
         return reply.code(400).send({
-          error: 'NoCommentTargets',
-          message: 'Pick at least one comment to fix.',
+          error: 'SeedRemoved',
+          message: 'That kind of fix is no longer offered. Reload the page.',
         });
+      }
+      if (rawSeed !== 'review' && rawSeed !== 'plain') {
+        return reply.code(400).send({ error: 'UnknownSeed', message: 'Unknown fix type.' });
+      }
+      const seed: AiFixSeed = rawSeed;
+
+      let instruction: string | undefined;
+      let sourceReviewId: number | null = null;
+      if (seed === 'plain') {
+        const raw = (body as { instruction?: unknown }).instruction;
+        instruction = typeof raw === 'string' ? raw.trim() : '';
+        if (instruction === '') {
+          return reply.code(400).send({
+            error: 'InstructionRequired',
+            message: 'Say what to fix.',
+          });
+        }
+        if (instruction.length > AI_FIX_MAX_INSTRUCTION_CHARS) {
+          return reply.code(400).send({
+            error: 'InstructionTooLong',
+            message: `Keep the instruction under ${AI_FIX_MAX_INSTRUCTION_CHARS.toLocaleString('en-US')} characters.`,
+          });
+        }
+      } else {
+        const raw = (body as { sourceReviewId?: unknown }).sourceReviewId;
+        if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0) {
+          return reply.code(400).send({
+            error: 'ReviewRequired',
+            message: 'Pick a Claude review to fix from.',
+          });
+        }
+        sourceReviewId = raw;
       }
 
       const res = await startFix(ctx, {
@@ -228,19 +256,11 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
         prId,
         model,
         seed,
-        // NOT forwarded for the comments seed: `resolveSeedText` hands back client text verbatim,
-        // so the ONLY seed text a comments run may ever see is the one comment-seed.ts builds.
-        // (The manager branches before that function is reached — this is the second lock.)
-        seedText: seed === 'comments' ? undefined : body.reviewText,
-        // The Claude review a 'review' seed came from: the server adds its open, valid threads
-        // (manager.ts `reviewThreadSeed`, which also checks it is THIS PR's review).
-        sourceReviewId:
-          seed === 'review' &&
-          Number.isInteger(body.sourceReviewId) &&
-          (body.sourceReviewId as number) > 0
-            ? (body.sourceReviewId as number)
-            : null,
-        commentTargets,
+        instruction,
+        // The SERVER builds the review seed from the stored run (manager.ts `loadReviewSeed`,
+        // which also checks it is THIS PR's succeeded review). No review text travels in the body.
+        sourceReviewId,
+        trigger: 'manual',
       });
 
       switch (res.status) {
@@ -261,27 +281,17 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
           });
         case 'no_head':
           return reply.code(400).send({ error: 'NoHead' });
-        case 'no_targets':
-          // A comments run whose basket resolved to nothing: every id was already gone, or none of
-          // them belong to this PR. 400 with a sentence the UI can show verbatim — the alternative
-          // (start anyway) bills an agent turn to report on an empty list.
-          return reply.code(400).send({
-            error: 'NoCommentTargets',
-            message:
-              'None of the selected comments could be found on this pull request any more — reload the PR and pick them again.',
-          });
-        case 'stale_seed':
-          // The CI diagnosis this run would be seeded with describes an earlier commit, or
-          // there is none. Refused rather than started: an agent seeded with a diagnosis of
-          // code that is gone costs the same as one seeded with the truth. The card refuses
-          // the click too; this is the half a direct POST — or a push racing the click —
-          // still meets.
+        case 'no_instruction':
+          return reply.code(400).send({ error: 'InstructionRequired', message: 'Say what to fix.' });
+        case 'review_unavailable':
           return reply.code(409).send({
-            error: 'StaleCiAnalysis',
-            message:
-              res.reason === 'missing'
-                ? 'Analyze the CI failure first, then fix.'
-                : 'The CI analysis is from an earlier commit. Re-analyze, then fix.',
+            error: 'ReviewUnavailable',
+            message: 'That review is not available. Run a Claude review on this PR first.',
+          });
+        case 'nothing_to_fix':
+          return reply.code(409).send({
+            error: 'NothingToFix',
+            message: 'The review found nothing to fix.',
           });
         default:
           return reply.code(404).send({ error: 'not found' });

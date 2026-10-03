@@ -18,7 +18,6 @@ import type {
   ClaudeReviewStreamEvent,
   ClaudeReviewTicketInput,
   ClaudeReviewVerdict,
-  PostTicketAnalysisResult,
 } from '@pierre-review/shared';
 import {
   CLAUDE_REVIEW_STATES_MAX_IDS,
@@ -30,6 +29,7 @@ import { sseStream } from '../api/sse.js';
 import { useFilters } from '../store/filters.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
 import { anyReviewInFlight, resolveListTicket, type ListTicketResult } from '../lib/claudeReviewColumn.js';
+import { anyFixRunning } from '../lib/claudeAutoReview.js';
 import { browserAcMemory } from '../lib/jiraTicket.js';
 import { ticketDraftFromStored, ticketsRequestFromCheck } from '../lib/claudeReviewFollowUp.js';
 
@@ -41,7 +41,10 @@ export function useClaudeReview(prId: number | null) {
     // While an AUTO review waits in its lane it has no row, so nothing else tells this pane when
     // it starts: re-read until it does (then the row's own running state + the SSE stream take
     // over). Idle otherwise.
-    refetchInterval: (q) => (q.state.data?.autoReview === 'queued' ? 5000 : false),
+    // While the sweeper only HOLDS it (waiting for CI or for activity to settle), a slower re-read
+    // is enough: that wait is minutes long.
+    refetchInterval: (q) =>
+      q.state.data?.autoReview === 'queued' ? 5000 : q.state.data?.autoReviewWaiting != null ? 30_000 : false,
   });
 }
 
@@ -181,7 +184,9 @@ export function useClaudeReviewStates(prIds: readonly number[], enabled: boolean
     queryKey: [...CLAUDE_REVIEW_STATES_KEY, ids.join(',')],
     queryFn: () => api.claudeReviewStates(ids),
     enabled: enabled && ids.length > 0,
-    refetchInterval: (q) => (anyReviewInFlight(q.state.data?.states) ? 5000 : false),
+    // …or while a fix runs, so "Fixing…" turns into "Fix ready" without a reload.
+    refetchInterval: (q) =>
+      anyReviewInFlight(q.state.data?.states) || anyFixRunning(q.state.data?.states) ? 5000 : false,
   });
 }
 
@@ -357,37 +362,4 @@ export function usePostReview(prId: number) {
       }
     },
   });
-}
-
-// ⚠ ONE MUTATION KEY PER (review, ticket): two mounts of one section see the same in-flight post,
-// so a tab switch mid-request cannot re-enable the button and invite a second comment.
-export const ticketPostKey = (reviewId: number, index: number): readonly unknown[] => [
-  'claude-ticket-post',
-  reviewId,
-  index,
-];
-
-/** Post one ticket's analysis as a PR comment (once per ticket). */
-export function usePostTicketAnalysis(prId: number, reviewId: number, index: number) {
-  const qc = useQueryClient();
-  return useMutation<PostTicketAnalysisResult, Error, void>({
-    mutationKey: ticketPostKey(reviewId, index),
-    mutationFn: () => api.postClaudeTicketAnalysis(reviewId, index),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
-      void qc.invalidateQueries({ queryKey: ['claude-review-by-id', reviewId] });
-      // A comment on GitHub like any other: THE ONE WRITE SET (prCacheSync.ts).
-      void invalidateAfterPrWrite(qc, prId);
-    },
-    // 409 AlreadyPosted: someone (another tab) posted it — re-read so the posted link shows.
-    onError: (err) =>
-      err instanceof ApiError && err.status === 409
-        ? qc.invalidateQueries({ queryKey: ['claude-review', prId] })
-        : undefined,
-  });
-}
-
-/** True while this ticket's post is in flight, from ANY mount. */
-export function useTicketPostPending(reviewId: number, index: number): boolean {
-  return useIsMutating({ mutationKey: ticketPostKey(reviewId, index) }) > 0;
 }

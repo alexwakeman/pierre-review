@@ -31,8 +31,15 @@ import {
   SINCE_PATCH_CHARS,
   type FollowUpPlan,
 } from './follow-up.js';
-import { reconcileTicketAssessments, sameHeadTicketCarry } from './ticket.js';
+import { reconcileTicketAssessments, sameHeadTicketCarry, storyFindingsFrom } from './ticket.js';
 import { planThreadReview, reconcileThreads, type ThreadPlan } from './threads.js';
+import {
+  planCiReview,
+  reconcileCiFailures,
+  selectCiFailures,
+  type CiLogRead,
+  type CiPlan,
+} from './ci-failures.js';
 import {
   getLatestClaudeReview,
   getLatestStoredTickets,
@@ -388,6 +395,22 @@ function launch(item: QueueItem): void {
   emit({ phase: 'fetching_diff' });
 
   void runPipeline(item, controller, emit)
+    .then((succeeded) => {
+      // AUTO FIX: a SUCCEEDED auto run may start a review-seeded fix on the reader's OWN PR
+      // (coding/ai-fix/auto-fix.ts decides; nothing is pushed). Fire-and-forget, never awaited and
+      // never thrown into the review: a fix that fails to start costs the fix only.
+      if (succeeded && item.trigger === 'auto') {
+        void import('../../coding/ai-fix/auto-fix.js')
+          .then((m) =>
+            m.maybeStartAutoFix(ctx, { accountId: item.accountId, prId, reviewId }),
+          )
+          .catch((err) =>
+            ctx.log.warn(
+              `auto fix pr ${prId}: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+          );
+      }
+    })
     .catch(async (err) => {
       // Unexpected error in prepare/persist (runReview itself never throws). Record it.
       ctx.log.error(
@@ -417,7 +440,8 @@ async function runPipeline(
   item: QueueItem,
   controller: AbortController,
   emit: (p: ClaudeReviewProgress) => void,
-): Promise<void> {
+): Promise<boolean> {
+  // Resolves true when the run was saved as SUCCEEDED (the auto-fix hook in `launch` reads it).
   const { ctx, reviewId, prCtx, model } = item;
 
   const prep = await ctx.review.prepareReview({
@@ -446,7 +470,7 @@ async function runPipeline(
       excludedFiles: prep.excludedFiles,
       findings: [],
     });
-    return;
+    return true;
   }
 
   const mode = decision.mode; // 'diff_only' | 'worktree'
@@ -505,7 +529,10 @@ async function runPipeline(
     }
   }
 
-  const nonce = pickReviewNonce(untrustedTexts(plan, promptTickets, since, threadPlan));
+  // ---- failed CI on the reviewed head (only when a check failed; never fatal) ----
+  const ciPlan = await planCiForRun(item, prCtx, priorRun?.ciFailures ?? null);
+
+  const nonce = pickReviewNonce(untrustedTexts(plan, promptTickets, since, threadPlan, ciPlan));
 
   // A deep review offers the lead its specialist sub-agents (specialists.ts); a diff-only one none.
   const specialists = mode === 'worktree' ? offeredSpecialists(prep.changedFiles) : [];
@@ -525,6 +552,7 @@ async function runPipeline(
     tickets: promptTickets,
     followUp: plan ? { plan, since } : null,
     threads: threadPlan,
+    ci: ciPlan,
     nonce,
   });
 
@@ -563,6 +591,7 @@ async function runPipeline(
   };
   if (res.aborted) {
     await markReviewCancelled(ctx, reviewId);
+    return false;
   } else if (!res.submitted) {
     await markReviewFailed(ctx, reviewId, res.failureReason ?? 'review failed', {
       ...telemetry,
@@ -573,10 +602,6 @@ async function runPipeline(
     // Server-side validation of the model's follow-up + ticket reports: each ref once, unknown
     // refs dropped, anything unreported 'not_checked' — never an invented 'addressed' / 'met'.
     const items = plan ? reconcileFollowUp(plan, res.followUp) : null;
-    const findings =
-      plan && items
-        ? linkReraisedFindings(plan, items, res.findings, new Set(prep.changedFiles))
-        : res.findings.map((f) => ({ ...f, priorFindingId: null }));
     // One assessment per ticket, index-aligned with the stored `ticket` array; a story already
     // assessed at this head keeps that assessment.
     const ticketAssessment: ClaudeTicketAssessment[] | null =
@@ -587,7 +612,21 @@ async function runPipeline(
           : reconcileTicketAssessments(item.tickets, res.tickets, res.ticket).map(
               (a, i) => carriedTickets[i] ?? a,
             );
+    // Every unmet / partly met criterion and every "Not done" item becomes a FINDING of this run
+    // (deterministic, no model call), anchored against the same diff as the model's findings.
+    // A carried assessment re-creates its findings here; one re-raising an earlier POSTED story
+    // finding is linked to it (never a second row) by linkReraisedFindings.
+    const storyFindings = ticketAssessment
+      ? storyFindingsFrom(item.tickets, ticketAssessment, prep.strippedDiff)
+      : [];
+    const findings =
+      plan && items
+        ? linkReraisedFindings(plan, items, res.findings, new Set(prep.changedFiles), storyFindings)
+        : [...res.findings, ...storyFindings].map((f) => ({ ...f, priorFindingId: null }));
     const threadAssessments = threadPlan ? reconcileThreads(threadPlan, res.threads) : null;
+    // Each failing check exactly once: Claude's first report for its ref, a carried diagnosis, or
+    // 'not_checked' with the server's reason — never an invented cause.
+    const ciFailures = ciPlan ? reconcileCiFailures(ciPlan, res.ciFailures) : null;
     await saveReviewSuccess(ctx, reviewId, {
       scope: res.scope,
       summary: res.summary,
@@ -607,7 +646,62 @@ async function runPipeline(
           : null,
       ticketAssessment,
       threadAssessments,
+      ciFailures,
     });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Read the reviewed head's checks and, for each FAILING GitHub Actions job not already diagnosed
+ * at this head, one tail window of its log plus GitHub's failed-step record — at most
+ * CI_FAILURES_MAX jobs, in parallel. null ⇒ the run does not look at CI (no `ctx.ci`, or the
+ * checks could not be read); that is never fatal to the review. Exported for tests.
+ */
+export async function planCiForRun(
+  item: Pick<QueueItem, 'ctx' | 'accountId' | 'prId' | 'headSha'>,
+  prCtx: Pick<ReviewPrContext, 'owner' | 'name'>,
+  prior: Parameters<typeof selectCiFailures>[3],
+): Promise<CiPlan | null> {
+  const { ctx } = item;
+  const ci = ctx.ci;
+  if (!ci) return null;
+  try {
+    const checks = await ci.readCommitChecks(item.accountId, {
+      owner: prCtx.owner,
+      name: prCtx.name,
+      sha: item.headSha,
+    });
+    if (!checks.ok) {
+      ctx.log.warn(`claude review pr ${item.prId}: CI checks not read (${checks.reason})`);
+      return null;
+    }
+    const sel = selectCiFailures(checks.checks, checks.rollupState, item.headSha, prior);
+    const reads: CiLogRead[] = await Promise.all(
+      sel.toRead.map(async (check): Promise<CiLogRead> => {
+        const jobId = check.jobId as number;
+        const [log, step] = await Promise.all([
+          ci
+            .readJobLog(item.accountId, { owner: prCtx.owner, name: prCtx.name, jobId })
+            .catch(() => null),
+          ci
+            .readFailedStep(item.accountId, { owner: prCtx.owner, name: prCtx.name, jobId })
+            .catch(() => null),
+        ]);
+        return {
+          check,
+          step,
+          log: log?.available ? { text: log.text, windowTruncated: (log.startByte ?? 0) > 0 } : null,
+        };
+      }),
+    );
+    return planCiReview(sel, reads);
+  } catch (err) {
+    ctx.log.warn(
+      `claude review pr ${item.prId}: CI failures not read: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
   }
 }
 

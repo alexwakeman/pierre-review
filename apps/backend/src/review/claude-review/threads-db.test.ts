@@ -13,6 +13,7 @@
 //
 //   pnpm --filter @pierre-review/backend test claude-review/threads-db
 import { rmSync } from 'node:fs';
+import { eq as eqOp } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ClaudeThreadAssessment } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
@@ -223,6 +224,12 @@ beforeAll(async () => {
   await threadWith(pr['finding-marker']!, [
     { authorId: viewerId, at: AFTER, body: 'Edited on GitHub.\n\n<!-- pierre:claude-review-finding v=1 -->' },
   ]);
+  // …and the RETIRED per-ticket "Post as comment" marker: nothing produces it now, but comments
+  // already on GitHub carry it and must still read as Limn's own.
+  await run(await seedPr('ticket-marker'), 'head_ticket-marker');
+  await threadWith(pr['ticket-marker']!, [
+    { authorId: viewerId, at: AFTER, body: '### ENG-7\n\n<!-- pierre:claude-review-ticket v=1 -->' },
+  ]);
   // The marker from SOMEONE ELSE (a teammate's own Limn, or pasted text) is another reviewer's comment.
   await run(await seedPr('foreign-marker'), 'head_foreign-marker');
   await threadWith(pr['foreign-marker']!, [
@@ -254,7 +261,46 @@ beforeAll(async () => {
     ]);
   }
 
+  // ONLY REAL REVIEWERS RE-TRIGGER: a CI bot and a coverage bot commented after the run.
+  const ciBot = await user('github-actions[bot]', true);
+  const coverageBot = await user('codecov[bot]', true);
+  await run(await seedPr('ci-bot'), 'head_ci-bot');
+  await threadWith(pr['ci-bot']!, [{ authorId: ciBot, at: AFTER, body: 'Build failed.' }]);
+  await run(await seedPr('coverage'), 'head_coverage');
+  await threadWith(pr.coverage!, [{ authorId: coverageBot, at: AFTER, body: 'Coverage dropped 0.2%.' }]);
+  // ⚠ STORED ROLE BEATS THE LOGIN SEED, both ways: a review vendor this workspace marked a quality
+  // check, and an unknown bot this workspace marked a reviewer.
+  const demoted = await user('greptile-apps[bot]', true);
+  const promoted = await user('acme-house-reviewer', true);
+  await run(await seedPr('demoted'), 'head_demoted');
+  await threadWith(pr.demoted!, [{ authorId: demoted, at: AFTER, body: 'Style nit.' }]);
+  await run(await seedPr('promoted'), 'head_promoted');
+  await threadWith(pr.promoted!, [{ authorId: promoted, at: AFTER, body: 'This races.' }]);
+  // A person's comment BEFORE the run, then only a CI bot after: nothing new.
+  await run(await seedPr('human-then-ci'), 'head_human-then-ci');
+  await threadWith(pr['human-then-ci']!, [
+    { authorId: bobId, at: BEFORE, body: 'Please rename.' },
+    { authorId: ciBot, at: AFTER, body: 'Lint passed.' },
+  ]);
+
   workspaceId = (await q.resolveWorkspaceScope(1, null)).workspaceId;
+  for (const [authorUserId, role] of [
+    [demoted, 'quality_check'],
+    [promoted, 'review'],
+  ] as const) {
+    await db
+      .insert(schema.workspaceReviewers)
+      .values({
+        accountId: 1,
+        workspaceId,
+        authorUserId,
+        automated: true,
+        role,
+        confidence: 'high',
+        source: 'manual',
+      })
+      .execute();
+  }
 });
 
 afterAll(async () => {
@@ -275,9 +321,82 @@ describe('getAutoReviewCandidates — re-review on new review comments', () => {
     expect(offered.get(pr['late-sync']!)?.commentsAtMs).toBe(BEFORE);
     expect(offered.get(pr['reply-to-own']!)?.commentsAtMs).toBe(AFTER + 60_000);
     expect(offered.get(pr['foreign-marker']!)?.commentsAtMs).toBe(AFTER);
-    for (const k of ['own-body', 'own-id', 'marker', 'finding-marker', 'before', 'covered', 'resolved', 'in-flight']) {
+    for (const k of ['own-body', 'own-id', 'marker', 'finding-marker', 'ticket-marker', 'before', 'covered', 'resolved', 'in-flight']) {
       expect([k, offered.has(pr[k]!)]).toEqual([k, false]);
     }
+  });
+});
+
+describe('getAutoReviewCandidates — only real reviewers re-trigger', () => {
+  const offered = async (): Promise<Set<number>> => {
+    const res = (await q.getAutoReviewCandidates(1, workspaceId, {
+      openedSinceMs: FLOOR,
+      dayStartMs: now - 24 * HOUR,
+      limit: 50,
+    }))!;
+    return new Set(res.reReview.map((r) => r.prId));
+  };
+
+  it('a person and a code-review bot trigger; a CI bot and a coverage bot do not', async () => {
+    const o = await offered();
+    expect(o.has(pr.human!)).toBe(true);
+    expect(o.has(pr.bot!)).toBe(true); // coderabbitai[bot], a review vendor with no stored row
+    expect(o.has(pr['ci-bot']!)).toBe(false);
+    expect(o.has(pr.coverage!)).toBe(false);
+    expect(o.has(pr['human-then-ci']!)).toBe(false);
+  });
+
+  it('⚠ the STORED role beats the login seed, in both directions', async () => {
+    const o = await offered();
+    expect(o.has(pr.demoted!)).toBe(false); // a review vendor marked quality_check here
+    expect(o.has(pr.promoted!)).toBe(true); // an unknown bot marked a reviewer here
+  });
+
+  it('the loader’s newestCommentAt (→ comments_through) uses the same filter', async () => {
+    const filter = await q.reReviewCommentAuthorFilterForPr(1, pr['human-then-ci']!);
+    const loaded = await threadsDb.loadReviewThreadsForReview(1, pr['human-then-ci']!, filter);
+    expect(loaded.newestCommentAt?.getTime()).toBe(BEFORE);
+    // …but the thread itself, CI comment and all, is still sent for assessment.
+    expect(loaded.threads).toHaveLength(1);
+    expect(loaded.threads[0]!.comments).toHaveLength(2);
+    // Another tenant's PR: no filter (and no threads).
+    expect(await q.reReviewCommentAuthorFilterForPr(2, pr['human-then-ci']!)).toBeUndefined();
+  });
+});
+
+describe('getAutoReviewCandidates — the CI reading for the CI hold', () => {
+  it('reports running CI and the earliest observation of THIS head', async () => {
+    const prId = await seedPr('ci-pending');
+    await db
+      .update(schema.pullRequests)
+      .set({ ciStatus: 'pending' })
+      .where(eqOp(schema.pullRequests.id, prId))
+      .execute();
+    for (const [headSha, at] of [
+      ['old_head', RUN - 5 * HOUR],
+      ['head_ci-pending', RUN],
+      ['head_ci-pending', RUN + HOUR],
+    ] as const) {
+      await db
+        .insert(schema.ciStatusEvents)
+        .values({ accountId: 1, repoId, prId, headSha, status: 'pending', observedAt: new Date(at) })
+        .execute();
+    }
+    const res = (await q.getAutoReviewCandidates(1, workspaceId, {
+      openedSinceMs: FLOOR,
+      dayStartMs: now - 24 * HOUR,
+      limit: 100,
+    }))!;
+    expect(res.prIds).toContain(prId);
+    expect(res.ci.find((c) => c.prId === prId)).toEqual({
+      prId,
+      headSha: 'head_ci-pending',
+      running: true,
+      headSeenAtMs: RUN,
+    });
+    // A PR with no CI reading: not running, never seen.
+    const human = res.ci.find((c) => c.prId === pr.human!);
+    expect(human).toMatchObject({ running: false, headSeenAtMs: null });
   });
 });
 
@@ -391,14 +510,17 @@ describe('the ClaudeReview wire + AI Fix seed', () => {
   });
 
   it('the review seed adds ONLY valid, unaddressed threads, fenced — and only for this PR’s review', async () => {
-    const seed = await aiFix.reviewThreadSeed(ctx, reviewId, prId, 1, '- [warning] src/x.ts — t');
-    expect(seed).toContain('This leaks the handle.');
-    expect(seed).toMatch(/---BEGIN REVIEW THREAD 1 [0-9a-f]{16}---/);
-    expect(seed).not.toContain('Use tabs.');
-    expect(seed).not.toContain('Add a test.');
-    expect(seed).not.toContain('Over the cap.');
-    expect(await aiFix.reviewThreadSeed(ctx, reviewId, pr.human!, 1, '')).toBe('');
-    expect(await aiFix.reviewThreadSeed(ctx, reviewId, prId, 2, '')).toBe('');
-    expect(await aiFix.reviewThreadSeed(ctx, null, prId, 1, '')).toBe('');
+    const loaded = await aiFix.loadReviewSeed(ctx, { accountId: 1, prId, reviewId });
+    const seed = loaded!.seed;
+    expect(seed.sentRefs).toEqual(['T1']);
+    expect(seed.items[0]).toMatchObject({ ref: 'T1', kind: 'thread', threadId: 1 });
+    expect(seed.text).toContain('This leaks the handle.');
+    expect(seed.text).toMatch(/---BEGIN ITEM T1 [0-9a-f]{16}---/);
+    expect(seed.text).not.toContain('Use tabs.');
+    expect(seed.text).not.toContain('Add a test.');
+    expect(seed.text).not.toContain('Over the cap.');
+    expect(await aiFix.loadReviewSeed(ctx, { accountId: 1, prId: pr.human!, reviewId })).toBeNull();
+    expect(await aiFix.loadReviewSeed(ctx, { accountId: 2, prId, reviewId })).toBeNull();
+    expect(await aiFix.loadReviewSeed(ctx, { accountId: 1, prId, reviewId: null })).toBeNull();
   });
 });

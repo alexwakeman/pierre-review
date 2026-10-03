@@ -41,9 +41,6 @@ describe('tierFor — AI generation', () => {
   it('bills a Claude Review chat question and reads its history cheaply', () => {
     expect(tiers('POST', '/api/claude-reviews/7/chat')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('GET', '/api/claude-reviews/7/chat')).toEqual(['read']);
-    // A ticket analysis posted as a PR comment is a GitHub write, not a model call.
-    expect(tiers('POST', '/api/claude-reviews/7/tickets/0/post')).toEqual(['github_write']);
-    expect(tiers('POST', '/api/claude-reviews/7/tickets/0/posts')).toEqual(['ai', 'ai_hourly']);
   });
 
   it('treats reads of stored AI results as cheap reads, not generation', () => {

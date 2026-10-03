@@ -8,9 +8,7 @@ import { PHASE_LABEL, fixProgressPct } from '../lib/aiFixProgress.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 
 // Where an agentic AI-Fix run is watched from once the reader has left the pane that started
-// it. It is the missing half of the CI-analysis card's "Fix it" shortcut: before this, a fix
-// started from the Overview tab produced a paid agent run and no visible sign of it, which is
-// why that mount used to hide the button.
+// it — a paid agent run must never be running with no visible sign of it.
 //
 // A plain card for App.tsx's ONE bottom-right column — never its own `fixed bottom-4 right-4`.
 //

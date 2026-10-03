@@ -279,9 +279,9 @@ export async function runCodingAgent(
             captured = {
               summary: p.summary,
               commitMessage: p.commitMessage,
-              // Present only for a list-seeded run (see submitFixShape); passed through
-              // verbatim for the caller to map back to its own items.
-              commentVerdicts: p.commentVerdicts,
+              // Passed through verbatim; the AI Fix manager validates refs + clips text.
+              changes: p.changes,
+              unaddressed: p.unaddressed,
             };
             return { content: [{ type: 'text', text: 'Fix recorded.' }] };
           },
@@ -340,9 +340,11 @@ export async function runCodingAgent(
           ? `Applied changes to ${filesChanged.length} file(s).`
           : 'The agent made no changes.'),
       commitMessage: fix?.commitMessage ?? 'AI fix',
-      // Absent (not []) when the agent reported no per-item dispositions — the caller
-      // distinguishes "this run had no list" from "it reported an empty list".
-      commentVerdicts: fix?.commentVerdicts,
+      // Absent when the agent never called submit_fix (or reported neither list).
+      report:
+        fix && (fix.changes || fix.unaddressed)
+          ? { changes: fix.changes, unaddressed: fix.unaddressed }
+          : undefined,
       patch,
       filesChanged,
       baseSha,

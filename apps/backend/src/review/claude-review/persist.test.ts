@@ -471,7 +471,7 @@ describe('only findings posted to GitHub are followed up', () => {
   });
 });
 
-describe('several tickets, posting one, and the outdated read', () => {
+describe('several tickets, story findings, and the outdated read', () => {
   let n = 0;
   const newPr = async (headSha: string): Promise<number> => {
     const { repos, pullRequests } = schema;
@@ -501,9 +501,9 @@ describe('several tickets, posting one, and the outdated read', () => {
     const id = await persist.insertQueuedReview(ctx, pr, 'h1', 'claude-opus-5-5', 1, [t1, t2]);
     await persist.saveReviewSuccess(ctx, id, success([], { ticketAssessment: [assess('a'), assess('b')] }));
     const r = (await persist.getClaudeReviewById(ctx, id, 1))!;
-    expect(r.tickets?.map((e) => [e.index, e.ref, e.ticket.title, e.assessment?.summary, e.posted])).toEqual([
-      [0, 'T1', 'One', 'a', null],
-      [1, 'T2', 'Two', 'b', null],
+    expect(r.tickets?.map((e) => [e.index, e.ref, e.ticket.title, e.assessment?.summary])).toEqual([
+      [0, 'T1', 'One', 'a'],
+      [1, 'T2', 'Two', 'b'],
     ]);
     expect(r.ticket).toEqual(t1); // deprecated: the first
     expect(await persist.getLatestStoredTickets(ctx, pr, 1)).toEqual([t1, t2]);
@@ -521,14 +521,43 @@ describe('several tickets, posting one, and the outdated read', () => {
       .where(eq(schema.claudeReviews.id, id))
       .execute();
     const r = (await persist.getClaudeReviewById(ctx, id, 1))!;
-    expect(r.tickets).toEqual([{ index: 0, ref: 'T1', ticket: t2, assessment: assess('legacy'), posted: null }]);
-    // Posting rewrites the column as an array.
-    await persist.markTicketPosted(ctx, id, 0, { githubCommentId: '5', url: null, postedAt: '2026-10-01T00:00:00.000Z' });
-    const after = (await persist.getClaudeReviewById(ctx, id, 1))!;
-    expect(after.tickets?.[0]?.posted).toEqual({ githubCommentId: '5', url: null, postedAt: '2026-10-01T00:00:00.000Z' });
-    const pctx = (await persist.getTicketPostContext(ctx, id, 1))!;
-    expect(pctx.assessments[0]?.posted?.githubCommentId).toBe('5');
-    expect(await persist.getTicketPostContext(ctx, id, 2)).toBeNull();
+    expect(r.tickets).toEqual([{ index: 0, ref: 'T1', ticket: t2, assessment: assess('legacy') }]);
+  });
+
+  it('an OLD row carrying the retired per-ticket `posted` record still reads; the record is ignored', async () => {
+    const pr = await newPr('h1');
+    const id = await persist.insertQueuedReview(ctx, pr, 'h1', 'claude-opus-5-5', 1, [t1]);
+    const posted = { githubCommentId: '5', url: null, postedAt: '2026-10-01T00:00:00.000Z' };
+    await db
+      .update(schema.claudeReviews)
+      .set({ ticketAssessment: [{ ...assess('old'), posted }], status: 'succeeded' })
+      .where(eq(schema.claudeReviews.id, id))
+      .execute();
+    const r = (await persist.getClaudeReviewById(ctx, id, 1))!;
+    expect(r.tickets).toEqual([{ index: 0, ref: 'T1', ticket: t1, assessment: assess('old') }]);
+    expect(r.ticketAssessment).toEqual(assess('old'));
+  });
+
+  it('a story finding round-trips its origin; an ordinary one reads story: null', async () => {
+    const pr = await newPr('h1');
+    const id = await persist.insertQueuedReview(ctx, pr, 'h1', 'claude-opus-5-5', 1, [t1]);
+    const base = {
+      path: '', line: null, side: 'RIGHT' as const, title: 'Rate limit', body: 'ENG-1 · Not done: Rate limit',
+      suggestion: null, diffHunk: null, anchored: false, fileInDiff: false,
+    };
+    await persist.saveReviewSuccess(
+      ctx,
+      id,
+      success([
+        { ...base, severity: 'warning', title: 'plain', body: 'plain' },
+        { ...base, severity: 'warning', story: { index: 0, ref: 'M1' } },
+      ]),
+    );
+    const r = (await persist.getClaudeReviewById(ctx, id, 1))!;
+    expect(r.findings.map((f) => [f.title, f.story, f.included])).toEqual([
+      ['plain', null, true],
+      ['Rate limit', { index: 0, ref: 'M1' }, true],
+    ]);
   });
 
   it('head: current ⇒ not outdated; moved ⇒ outdated with the commits since; unknown commit ⇒ null count', async () => {

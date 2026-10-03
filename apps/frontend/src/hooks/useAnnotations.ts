@@ -60,8 +60,7 @@ export function useAnnotationIndex(
 // A run's state lives in the hook instance the BUTTON owns, but the panels that run rewrites are a
 // SIBLING component (ThreadCheckOutput / CommentAnnotations) with nothing between them to carry it
 // — and at two of the three mount sites the button and the output sit inside a `.map()` row, so
-// there is no shared parent to lift it into either. Hence a module-level claim, the same idiom the
-// AI-Fix reply guard uses (CommentFixReport.tsx): the runner claims the anchors it is about to
+// there is no shared parent to lift it into either. Hence a module-level claim: the runner claims the anchors it is about to
 // overwrite, and any panel can ask "is my result about to be replaced?".
 //
 // KEYED ON THE ANCHOR, never on the PR alone: a bot-flooded PR has dozens of these blocks, and a

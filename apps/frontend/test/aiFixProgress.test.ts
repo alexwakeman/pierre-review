@@ -1,20 +1,12 @@
-// The AI Fix shortcut's two pure pieces: the phase ladder both surfaces read, and the
-// staleness predicate that decides whether "Fix it" is offered at all.
-//
-// What this pins:
-//   1. ONE ladder. The AI Fix tab's FixerSection and the bottom-right AiFixBanner render the
-//      same run at the same time the moment the reader switches tabs mid-run; two copies of
-//      `fixProgressPct` would print two percentages for it.
-//   2. The stale gate. `ciAnalysisStale` is read TWICE on one card — by the "out of date" chip
-//      and by the "Fix it" gate. A chip that says the analysis is old beside a button that
-//      seeds a paid agent with it is the defect this exists to make impossible.
+// The AI Fix run's phase ladder — ONE ladder. The AI Fix tab's FixerSection and the bottom-right
+// AiFixBanner render the same run at the same time the moment the reader switches tabs mid-run;
+// two copies of `fixProgressPct` would print two percentages for it.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
 import { describe, expect, it } from 'vitest';
 import type { AiFixStatusResponse } from '@pierre-review/shared';
 import {
   PHASE_LABEL,
-  ciAnalysisStale,
   fixProgressPct,
 } from '../src/lib/aiFixProgress.js';
 
@@ -67,34 +59,5 @@ describe('fixProgressPct', () => {
     // An unknown phase scores, but leaves the label to the caller's fallback.
     expect(fixProgressPct(status('running', 'something_new'))).toBe(20);
     expect(PHASE_LABEL['something_new']).toBeUndefined();
-  });
-});
-
-describe('ciAnalysisStale', () => {
-  it('is stale when the stored analysis names a different head', () => {
-    expect(ciAnalysisStale('diagnosis', 'aaa', 'bbb')).toBe(true);
-  });
-
-  it('is not stale on the same head', () => {
-    expect(ciAnalysisStale('diagnosis', 'aaa', 'aaa')).toBe(false);
-  });
-
-  it('is not stale with no analysis at all — there is nothing to be out of date', () => {
-    expect(ciAnalysisStale(null, 'aaa', 'bbb')).toBe(false);
-  });
-
-  it('is NOT stale when the stored row carries no head sha', () => {
-    // Rows written before the column shipped. We cannot show that they are old, so we do not
-    // claim it — the plugin's ciSeedDecision reads the same null the same way.
-    expect(ciAnalysisStale('diagnosis', null, 'bbb')).toBe(false);
-    expect(ciAnalysisStale('diagnosis', undefined, 'bbb')).toBe(false);
-  });
-
-  it('IS stale when the PR head has not synced but the analysis names one', () => {
-    // Asymmetric with the case above, and deliberately so: there, we hold no sha to disprove;
-    // here we hold one that the PR cannot confirm. The chip has always read it this way, and
-    // the server re-checks against the LIVE head regardless, so the conservative reading costs
-    // a Re-analyze click rather than a paid agent turn on the wrong commit.
-    expect(ciAnalysisStale('diagnosis', 'aaa', null)).toBe(true);
   });
 });

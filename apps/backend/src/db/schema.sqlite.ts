@@ -27,6 +27,7 @@ import type {
   BranchCheckRun,
   CheckRun,
   ClaudeReviewFollowUpRecord,
+  ClaudeCiFailuresRecord,
   ClaudeThreadAssessment,
   ClaudeReviewTicket,
   ClaudeTicketAssessment,
@@ -1138,6 +1139,11 @@ export const claudeReviews = sqliteTable(
     // the same head. Null ⇒ read the row's `created_at` (older rows, or a run that failed before
     // loading threads). Migration 0076 (pg 0063).
     commentsThrough: integer('comments_through', { mode: 'timestamp' }),
+    // FAILED CI ON THE REVIEWED HEAD: the head's CI state when the run looked and, per failing
+    // check, Claude's diagnosis (or the server's 'not_checked' and why). Null on runs from before
+    // the field, a skip, a run that did not succeed, or one whose checks could not be read.
+    // Migration 0077 (pg 0064).
+    ciFailures: text('ci_failures', { mode: 'json' }).$type<ClaudeCiFailuresRecord>(),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
@@ -1205,6 +1211,13 @@ export const claudeReviewFindings = sqliteTable(
     // 'design' | 'tests' | 'impact' | 'accessibility' | 'security' | 'performance'. NULL is a
     // general finding (every diff-only finding and every row before migration 0075 / pg 0062).
     lens: text('lens'),
+    // A STORY FINDING: made by the server from the run's user-story assessment (claude-review/
+    // ticket.ts `storyFindingsFrom`), never by the model. `story_index` is the ticket's 0-based
+    // position on the run; `story_ref` the criterion's ref ('AC2') or a not-done item's ('M1').
+    // Both NULL on an ordinary finding and on every row before migration 0079 / pg 0066. Read
+    // together: a row has both or neither.
+    storyIndex: integer('story_index'),
+    storyRef: text('story_ref'),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );
@@ -1301,11 +1314,18 @@ export const aiFixes = sqliteTable(
       .notNull()
       .default(sql`(unixepoch())`),
     finishedAt: integer('finished_at', { mode: 'timestamp' }),
-    // seed === 'comments' only. JSON, NULL on every other seed: the AiFixCommentTarget[] the run
-    // was given (written at insert, in prompt order) and the AiFixCommentVerdict[] the agent
-    // reported (written on success). `ref` is the join key between the two.
+    // LEGACY: written only by the REMOVED 'comments' seed (the picked-comments basket). Kept so old
+    // rows keep their data; nothing reads or writes them now.
     commentTargets: text('comment_targets'),
     commentVerdicts: text('comment_verdicts'),
+    // 0078. Who started the run ('manual' | 'auto'); NULL on older rows reads as 'manual'.
+    trigger: text('trigger'),
+    // 0078. seed === 'review': JSON AiFixReviewItem[] — the items the run was given, refs and all,
+    // written at insert (`included: false` = left out for the prompt budget). NULL otherwise.
+    reviewItems: text('review_items'),
+    // 0078. JSON AiFixChangeReport — the agent's per-change report, validated (refs checked
+    // against the shown set, text clipped). Written on success; NULL before and on older rows.
+    changeReport: text('change_report'),
   },
   (t) => ({
     prCreatedIdx: index('af_account_pr_created').on(t.accountId, t.prId, t.createdAt),

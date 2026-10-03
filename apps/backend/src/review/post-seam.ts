@@ -46,7 +46,7 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
   const prComments: PostReviewPrComment[] = [];
   const inlineFindingIds: number[] = [];
   for (const f of args.includedFindings) {
-    const shape = { body: f.body, editedBody: null, suggestion: f.suggestion };
+    const shape = { body: f.body, editedBody: null, suggestion: f.suggestion, storyLead: f.storyLead };
     // Anchorable on its own line → inline comment there.
     if (f.line != null && isFindingAnchored(index, f.path, f.line, f.side)) {
       comments.push({ path: f.path, line: f.line, side: f.side, body: findingCommentBody(shape) });
@@ -74,6 +74,7 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
           body: f.body,
           editedBody: null,
           suggestion: f.suggestion,
+          storyLead: f.storyLead,
         }),
       });
     }
@@ -143,7 +144,7 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
   const { owner, name, prNumber, reviewHeadSha, finding: f } = args;
   const currentHead = await fetchCurrentHeadSha(owner, name, prNumber);
   if (currentHead !== reviewHeadSha) return { headMoved: true };
-  const shape = { body: f.body, editedBody: null, suggestion: f.suggestion };
+  const shape = { body: f.body, editedBody: null, suggestion: f.suggestion, storyLead: f.storyLead };
 
   if (f.line != null && f.anchored) {
     const { commentId } = await submitGithubComment({
@@ -185,6 +186,7 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
       body: f.body,
       editedBody: null,
       suggestion: f.suggestion,
+      storyLead: f.storyLead,
     }),
   });
   return { commentId, postedCommentKind: 'pr_comment' };

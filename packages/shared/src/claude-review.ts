@@ -17,6 +17,8 @@
 // figure). Claude's own explanations are shown separately, as Claude's text — CLAUDE.md's rule
 // that a model-derived and a code-derived figure are labelled apart.
 import type {
+  ClaudeFindingSeverity,
+  ClaudeFindingStory,
   ClaudeFollowUpStatus,
   ClaudeThreadAddressed,
   ClaudeThreadAssessmentCounts,
@@ -355,4 +357,69 @@ export function ticketCriteriaSentence(
   const met = a.criteria.filter((c) => c.status === 'met').length;
   const total = a.criteria.length;
   return `${met} of ${total} ${total === 1 ? 'criterion' : 'criteria'} met.`;
+}
+
+// ---- story findings ----
+// Every unmet / partly met acceptance criterion and every "Not done" item of a run's user-story
+// assessment becomes a FINDING of that run, made by the SERVER (review/claude-review/ticket.ts
+// `storyFindingsFrom`) — so a story reaches GitHub exactly the way every other finding does
+// (Post, Reword, Ignore, Submit review). "Not asked for" never becomes a finding: adding something
+// is not a defect. The severity is fixed here, ONCE:
+//   not met  → 'warning'  (should be fixed before it lands)
+//   not done → 'warning'
+//   partly met → 'nit'    (the closest member to "worth finishing, not blocking")
+// 'blocker' is never used: whether a missing piece blocks the change is the reader's call.
+export const STORY_CRITERION_SEVERITY: Record<'not_met' | 'partly_met', ClaudeFindingSeverity> = {
+  not_met: 'warning',
+  partly_met: 'nit',
+};
+export const STORY_MISSING_SEVERITY: ClaudeFindingSeverity = 'warning';
+
+/** The ref of the not-done item at `index` (0-based) in an assessment's `missing` list: 'M1'…. */
+export const storyMissingRef = (index: number): string => `M${index + 1}`;
+
+/** A story's plain-text name: its tracker key, else "Story N" (1-based). */
+export function storyName(ticket: Pick<ClaudeReviewTicket, 'key'>, index: number): string {
+  return ticket.key != null && ticket.key !== '' ? ticket.key : `Story ${index + 1}`;
+}
+
+// The story's own words go into a GitHub comment: one line, and no @-mention ping (a Jira
+// criterion can name people).
+export const storyOneLine = (s: string): string =>
+  s.replace(/\s+/g, ' ').replace(/@(?=[A-Za-z0-9])/g, '@\u200b').trim();
+
+/**
+ * The FIRST LINE of a story finding's GitHub comment — "BMD-1040 · AC2 (partly met): <criterion>"
+ * or "Story 1 · Not done: <title>". ⚠ It is NOT stored in the finding's body: on screen the card
+ * already sits under its story with the criterion as its title, so the line only ever repeated the
+ * title. It is added when the comment is built (post-review.ts `findingCommentBody` /
+ * `prLevelFindingBody`, via the routes), so GitHub — where the card's context is absent — still
+ * names the story. `entries` is the run's ticket list; a story or criterion no longer found falls
+ * back to the finding's own title and ref, never to nothing.
+ */
+export function storyCommentLead(
+  f: { title: string; story: ClaudeFindingStory },
+  entries: ReadonlyArray<{ index: number; ticket: Pick<ClaudeReviewTicket, 'key'>; assessment: Pick<ClaudeTicketAssessment, 'criteria'> | null }>,
+): string {
+  const entry = entries.find((e) => e.index === f.story.index);
+  const name = entry ? storyName(entry.ticket, f.story.index) : `Story ${f.story.index + 1}`;
+  if (/^M\d+$/.test(f.story.ref)) return `${name} · Not done: ${storyOneLine(f.title)}`;
+  const c = entry?.assessment?.criteria.find((x) => x.ref === f.story.ref);
+  if (c && (c.status === 'not_met' || c.status === 'partly_met')) {
+    return `${name} · ${c.ref} (${TICKET_CRITERION_STATUS_LABEL[c.status].toLowerCase()}): ${storyOneLine(c.text)}`;
+  }
+  return `${name} · ${f.story.ref}: ${storyOneLine(f.title)}`;
+}
+
+// A story finding's body as stored before the lead moved out of it began with that lead line.
+const STORED_STORY_LEAD_RE = /^[^\n]* · (?:Not done|[A-Za-z0-9]+ \((?:not met|partly met)\)): [^\n]*(?:\n\n|\n|$)/;
+
+/**
+ * A story finding's body WITHOUT the story lead an older row stored at its start (rows written
+ * before the lead moved to post time). Anything else is returned unchanged — an ordinary finding,
+ * a story finding stored since, or a reworded body.
+ */
+export function stripStoredStoryLead(body: string, story: ClaudeFindingStory | null | undefined): string {
+  if (!story) return body;
+  return body.replace(STORED_STORY_LEAD_RE, '');
 }

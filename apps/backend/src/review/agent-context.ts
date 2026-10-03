@@ -5,11 +5,15 @@ import { db, schema, runTransaction, isPg } from '../db/client.js';
 import * as hostQueries from '../db/queries.js';
 import { recordAiUsage, type AiUsageRecord } from '../db/usage.js';
 import { aiCreditStatus, type AiCreditStatus } from '../db/credits.js';
-import { getAccessToken, getAccountById, getAccountUserId } from '../auth/account.js';
-import { addIssueComment, fetchPrHeadInfo, fetchPrUnifiedDiff } from '../github/mutations.js';
-import { getPrSyncTarget } from '../sync/resync-after-write.js';
-import { notePrChangedForPr } from '../sync/pr-settle.js';
+import { getAccessToken, getAccountById } from '../auth/account.js';
+import { fetchPrHeadInfo, fetchPrUnifiedDiff } from '../github/mutations.js';
 import { fetchCompareDiff } from '../github/compare.js';
+import { fetchActionsJobLog } from '../github/actions-logs.js';
+import {
+  fetchActionsJobFailedStep,
+  fetchCommitChecks,
+  type CommitChecksRead,
+} from '../github/commit-checks.js';
 import { fetchReviewCommentHunks } from '../sync/hydrate-detail.js';
 import { applyAndPush } from '../coding/git-ops.js';
 import { registerScheduledJob } from '../sync/scheduled-jobs.js';
@@ -18,6 +22,7 @@ import {
   loadReviewThreadsForReview,
   type ReviewThreadsForReview,
 } from '../db/review-threads-for-review.js';
+import type { CheckLogsResponse } from '@pierre-review/shared';
 import type {
   ApplyAndPushArgs,
   ApplyAndPushResult,
@@ -69,17 +74,6 @@ export interface AgentContext {
     applyAndPush(args: ApplyAndPushArgs): Promise<ApplyAndPushResult>;
   };
   review: ReviewSeam;
-  // GitHub WRITES that are not part of the review seam. `postPrComment` posts ONE PR-level (issue)
-  // comment, then STAMPS it locally and raises the SPA change signal (the `POST
-  // /api/prs/:id/comment` path). null ⇒ the PR is not this account's (nothing was posted). Once
-  // GitHub has answered it never throws: `visible: false` = posted, but the local stamp failed.
-  prWrites: {
-    postPrComment(
-      accountId: number,
-      prId: number,
-      body: string,
-    ): Promise<{ githubCommentId: string; url: string | null; createdAt: string; visible: boolean } | null>;
-  };
   queries: {
     getAutoReviewCandidates?(
       accountId: number,
@@ -93,10 +87,30 @@ export interface AgentContext {
       // time (null/absent for a moved head); the sweeper settles on (headSha, commentsAtMs).
       // Absent on an older host ⇒ none.
       reReview?: Array<{ prId: number; headSha: string; commentsAtMs?: number | null }>;
+      // Per offered PR: is its head's synced CI still running, and when was that head first
+      // observed (null = no record). Absent on an older host ⇒ never running.
+      ci?: Array<{ prId: number; headSha: string | null; running: boolean; headSeenAtMs: number | null }>;
     } | null>;
     // The OTHER reviewers' open threads on a PR + the newest qualifying comment
     // (db/review-threads-for-review.ts). Absent ⇒ the review assesses no threads.
     loadReviewThreads?(accountId: number, prId: number): Promise<ReviewThreadsForReview>;
+  };
+  // The reviewed head's CI, read LIVE and server-side (review/claude-review/ci-failures.ts). None of
+  // these throws. ⚠ `readJobLog` returns the log TEXT of one ranged window; the signed blob URL it
+  // resolves never leaves github/actions-logs.ts. Absent ⇒ the review does not look at CI.
+  ci?: {
+    readCommitChecks(
+      accountId: number,
+      a: { owner: string; name: string; sha: string },
+    ): Promise<CommitChecksRead>;
+    readJobLog(
+      accountId: number,
+      a: { owner: string; name: string; jobId: number },
+    ): Promise<CheckLogsResponse>;
+    readFailedStep(
+      accountId: number,
+      a: { owner: string; name: string; jobId: number },
+    ): Promise<string | null>;
   };
   registerScheduledJob(cron: string, handler: () => Promise<void> | void, label?: string): void;
 }
@@ -165,38 +179,55 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
       postFinding: async (a) => (await import('./post-seam.js')).postFinding(a),
       chat: async (a) => (await import('./chat-agent.js')).runReviewChat(a),
     },
-    prWrites: {
-      postPrComment: async (accountId, prId, body) => {
-        const target = await getPrSyncTarget(prId, accountId);
-        if (!target) return null;
-        const gh = await addIssueComment(
-          await getAccessToken(accountId),
-          target.owner,
-          target.name,
-          target.number,
-          body,
-        );
-        // ⚠ GitHub has 201'd: from here nothing may throw (a retry would post twice).
-        let visible = true;
-        try {
-          const authorId = await getAccountUserId(accountId);
-          await hostQueries.upsertLocalPrComment(prId, authorId, gh);
-        } catch {
-          visible = false;
-        }
-        await notePrChangedForPr(accountId, prId).catch(() => {});
-        return {
-          githubCommentId: String(gh.databaseId),
-          url: gh.url ?? null,
-          createdAt: new Date(gh.createdAt).toISOString(),
-          visible,
-        };
-      },
-    },
     queries: {
       getAutoReviewCandidates: (accountId, workspaceId, opts) =>
         hostQueries.getAutoReviewCandidates(accountId, workspaceId, opts),
-      loadReviewThreads: (accountId, prId) => loadReviewThreadsForReview(accountId, prId),
+      // `newestCommentAt` (→ comments_through) counts only the authors who may re-trigger an auto
+      // review — the SAME filter the candidate read uses, so seen and new cannot disagree.
+      loadReviewThreads: async (accountId, prId) =>
+        loadReviewThreadsForReview(
+          accountId,
+          prId,
+          await hostQueries.reReviewCommentAuthorFilterForPr(accountId, prId),
+        ),
+    },
+    ci: {
+      readCommitChecks: async (accountId, a) => {
+        try {
+          return await fetchCommitChecks(await getAccessToken(accountId), { ...a, accountId });
+        } catch {
+          return { ok: false, reason: 'error' };
+        }
+      },
+      // The log's TAIL window (DEFAULT_LOG_WINDOW_BYTES, 128 KiB — one ranged GET), never the
+      // whole log.
+      readJobLog: async (accountId, a) => {
+        try {
+          return await fetchActionsJobLog(await getAccessToken(accountId), a.owner, a.name, a.jobId, {}, {
+            accountId,
+          });
+        } catch {
+          return {
+            available: false,
+            reason: 'token',
+            text: '',
+            totalLines: 0,
+            returnedLines: 0,
+            totalBytes: null,
+            startByte: null,
+            endByte: null,
+            hasMore: false,
+            truncated: false,
+          };
+        }
+      },
+      readFailedStep: async (accountId, a) => {
+        try {
+          return await fetchActionsJobFailedStep(await getAccessToken(accountId), { ...a, accountId });
+        } catch {
+          return null;
+        }
+      },
     },
     registerScheduledJob,
   };

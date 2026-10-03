@@ -6316,6 +6316,19 @@ export interface ClaudeFinding {
   // architecture-level comment, the rest a focused pass. null/absent ⇒ a general finding (every
   // diff-only finding, and every run before lenses).
   lens?: ClaudeFindingLens | null;
+  // Set when the SERVER made this finding from the run's user-story assessment (never the model):
+  // an acceptance criterion judged not met / partly met, or something the story asked for that was
+  // not done. null/absent ⇒ an ordinary finding (and every row before migration 0079 / pg 0066).
+  // Otherwise it is a finding like any other — Post, Reword, Ignore, Submit review, follow-up.
+  story?: ClaudeFindingStory | null;
+}
+
+// Which story item a story finding stands for. `index` is the ticket's 0-based position on the run
+// (`ClaudeReviewTicketEntry.index`); `ref` is the criterion's ref ('AC2') or a not-done item's
+// ('M1' — 1-based in the assessment's `missing` list).
+export interface ClaudeFindingStory {
+  index: number;
+  ref: string;
 }
 
 // The specialist lenses a deep review may consult (review/claude-review/specialists.ts). One per
@@ -6395,23 +6408,16 @@ export interface ClaudeReviewTicket {
 }
 
 // One ticket of a review, as served on `ClaudeReview.tickets` — one section per ticket on screen.
-// `index` is its 0-based position (the post route addresses it); `ref` is 'T1'… (what Claude saw).
+// `index` is its 0-based position (a story finding's `story.index`); `ref` is 'T1'… (what Claude
+// saw). Read-only: what reaches GitHub from a story is its FINDINGS (`ClaudeFinding.story`). The
+// per-ticket "Post as comment" and its `posted` record are retired; a stored `posted` on an old
+// row is ignored on read.
 export interface ClaudeReviewTicketEntry {
   index: number;
   ref: string;
   ticket: ClaudeReviewTicket;
   // The server-validated assessment of THIS ticket; null when the run did not succeed.
   assessment: ClaudeTicketAssessment | null;
-  // Set once this ticket's analysis was posted to the PR as a PR-level comment. Posting is once
-  // per ticket: the route answers 409 AlreadyPosted after that.
-  posted: ClaudeTicketPost | null;
-}
-
-export interface ClaudeTicketPost {
-  githubCommentId: string | null;
-  // The comment's GitHub permalink (…#issuecomment-…), when GitHub returned one.
-  url: string | null;
-  postedAt: string; // ISO-8601
 }
 
 // 'not_checked' is written ONLY by the server (Claude never reported on it); the model's own
@@ -6462,9 +6468,6 @@ export interface ClaudeTicketAssessment {
   criteria: ClaudeTicketCriterionResult[];
   missing: ClaudeTicketGap[];
   notRequested: ClaudeTicketGap[];
-  // STORED only (the posted record lives beside the assessment it posted); the wire carries it
-  // as `ClaudeReviewTicketEntry.posted`.
-  posted?: ClaudeTicketPost | null;
 }
 
 // ---- Claude Review: follow-up on the previous review ----
@@ -6590,6 +6593,72 @@ export interface ClaudeThreadAssessmentCounts {
   notChecked: number;
 }
 
+// ---- Claude Review: failed CI on the reviewed head ----
+// A review reads the head commit's checks. For each FAILING one with a readable GitHub Actions log,
+// Claude gets a bounded excerpt of that log and reports the cause. Everything else is listed too,
+// with the reason it was not checked — never a guessed cause.
+export type ClaudeCiFailureCategory = 'code' | 'test' | 'flaky_or_infra' | 'config' | 'unclear';
+export const CLAUDE_CI_FAILURE_CATEGORIES: readonly ClaudeCiFailureCategory[] = [
+  'code',
+  'test',
+  'flaky_or_infra',
+  'config',
+  'unclear',
+];
+// Why a failing check carries no diagnosis. Written ONLY by the server.
+//   no_log          — not a GitHub Actions job (a third-party check): there is no log to read
+//   log_unavailable — an Actions job whose log could not be read (expired, no permission, empty)
+//   over_cap        — more failing checks than one review reads, or the excerpts filled the budget
+//   not_reported    — Claude was shown it and did not report on it
+export type ClaudeCiNotCheckedReason = 'no_log' | 'log_unavailable' | 'over_cap' | 'not_reported';
+// The head's combined CI state when the run looked (GitHub's status rollup).
+//   none    — the commit has no checks at all
+//   unknown — GitHub reported a state this app does not recognise
+export type ClaudeReviewCiStateKind = 'passing' | 'failing' | 'pending' | 'none' | 'unknown';
+
+// One failing check and what the run found about it, as STORED (inside
+// `claude_reviews.ci_failures`) and served verbatim on `ClaudeReview.ciFailures`.
+export interface ClaudeCiFailure {
+  // 'F1'…, the ref Claude saw. null ⇒ not shown to Claude this run.
+  ref: string | null;
+  // The check's display name (workflow job or status context). Plain text, as GitHub gave it.
+  checkName: string;
+  // The GitHub Actions job id; null for a check that is not an Actions job.
+  jobId: number | null;
+  // The failing step: GitHub's own record of the job's steps, else Claude's reading of the log.
+  // null when neither knows.
+  step: string | null;
+  // The check's details page (github.com or the third-party CI). Never a log download URL.
+  url: string | null;
+  // Shown to Claude this run.
+  sent: boolean;
+  // true ⇒ copied from the previous run: same head, same job, already diagnosed.
+  carried: boolean;
+  status: 'diagnosed' | 'not_checked';
+  // Set exactly when status is 'not_checked'.
+  notCheckedReason: ClaudeCiNotCheckedReason | null;
+  // Claude's answer — all null when not_checked.
+  cause: string | null;
+  explanation: string | null;
+  category: ClaudeCiFailureCategory | null;
+  fixableInPr: boolean | null;
+  relatedFiles: Array<{ path: string; line: number | null }>;
+  // The head the diagnosis was made at (a carried item keeps its own).
+  assessedAtHead: string;
+}
+
+// The head's CI as the run saw it.
+export interface ClaudeReviewCiState {
+  state: ClaudeReviewCiStateKind;
+  // How many checks the head carried (after GitHub's re-run duplicates were collapsed).
+  checkCount: number;
+}
+
+// The STORED shape of `claude_reviews.ci_failures` (one JSON object).
+export interface ClaudeCiFailuresRecord extends ClaudeReviewCiState {
+  failures: ClaudeCiFailure[];
+}
+
 // One review run (re-review = a new run; history kept, keyed by head SHA).
 export interface ClaudeReview {
   id: number;
@@ -6652,6 +6721,12 @@ export interface ClaudeReview {
   threadAssessments?: ClaudeThreadAssessment[] | null;
   // Counts over `threadAssessments` (server-folded). null exactly when that is null.
   threadAssessmentCounts?: ClaudeThreadAssessmentCounts | null;
+  // Every check that was FAILING on the reviewed head and what this run found about it. null = the
+  // run did not look at CI (an older run, a skip, not succeeded, or the checks could not be read);
+  // [] = it looked and nothing was failing (read `ciState` for passing vs still running).
+  ciFailures?: ClaudeCiFailure[] | null;
+  // The reviewed head's CI when the run looked. null exactly when `ciFailures` is null.
+  ciState?: ClaudeReviewCiState | null;
 }
 
 // The reviewed commit against the PR's current head (the SYNCED head — DB-only, no GitHub call).
@@ -6733,7 +6808,42 @@ export interface ClaudeReviewResponse {
   // An AUTO review holds this PR: 'queued' (waiting in the auto lane, no row yet) or 'running'.
   // While set, starting a manual review answers 409 AutoReviewInProgress. null/absent = free.
   autoReview?: 'queued' | 'running' | null;
+  // The auto-review sweeper is HOLDING this PR's next auto review, and why (in memory; a manual run
+  // is NOT locked by it). null/absent = not waiting.
+  autoReviewWaiting?: ClaudeAutoReviewWaiting | null;
+  // What happened after the LATEST review if it was an auto review on the reader's own PR: an auto
+  // fix was started, or skipped and why. In memory (a restart forgets it). null/absent = nothing.
+  autoFix?: ClaudeAutoFixOutcome | null;
 }
+
+/** Why an auto review is waiting: the head's CI is still running, or new comments / new pushes are
+ *  still arriving (the 5-minute quiet wait, at most 20 minutes from the first one). */
+export type ClaudeAutoReviewWaiting = 'ci' | 'comments' | 'commits';
+
+/** At most this many AUTO fixes per PR in any rolling 24 hours (coding/ai-fix/auto-fix.ts). Shared
+ *  so the Claude Review tab's skip line prints the same number the gate counts to. */
+export const AUTO_FIX_DAILY_CAP = 3;
+
+/** Why an auto fix was NOT started after an auto review of the reader's own PR. */
+export type ClaudeAutoFixSkipReason =
+  // The review left nothing to fix.
+  | 'nothing_to_fix'
+  // AUTO_FIX_DAILY_CAP auto fixes already started on this PR in the last 24 hours.
+  | 'cap'
+  // A fix for this PR is queued or running.
+  | 'fix_in_progress'
+  // A finished fix for this head is waiting to be pushed.
+  | 'fix_waiting'
+  // A previous auto fix at this head already reported every item as not addressed.
+  | 'already_tried'
+  // The PR moved on after the review; the next review will decide.
+  | 'head_moved'
+  // The fixer refused to start (no Claude credential, busy queue, review gone…).
+  | 'not_started';
+
+export type ClaudeAutoFixOutcome =
+  | { reviewId: number; status: 'started'; fixId: number }
+  | { reviewId: number; status: 'skipped'; reason: ClaudeAutoFixSkipReason };
 
 // ⚠ `SetClaudeKeyBody` / `ClaudeKeyResponse` / `ClaudeKeyStatusResponse` ARE DELETED, along with
 // `GET`/`PUT /api/claude-review/key`. The BYO Anthropic key that lived in
@@ -6858,18 +6968,6 @@ export interface GenerateReviewBody {
   ticket?: ClaudeReviewTicketInput;
 }
 
-// POST /api/claude-reviews/:reviewId/tickets/:index/post — post ONE ticket's analysis as a
-// PR-level comment. No body. 409 AlreadyPosted once posted; 409 NotReady while the review has no
-// assessment for it. Once GitHub has answered, the route does not fail: `visible: false` means the
-// comment IS on GitHub and only the local copy is missing (it shows after the next sync) — never
-// offer a retry, it would post twice.
-export interface PostTicketAnalysisResult {
-  githubCommentId: string | null;
-  url: string | null;
-  postedAt: string;
-  visible: boolean;
-}
-
 // Saves the user's authored draft; never mutates Claude's summary/verdict.
 export interface UpdateReviewBody {
   userBody?: string;
@@ -6931,6 +7029,9 @@ export interface ClaudeReviewPrState {
   /** The PR's synced head is a DIFFERENT commit from `reviewedHeadSha`. False when the synced
    *  head is unknown — no reading is never "moved". */
   headMoved: boolean;
+  /** The PR's head as last synced. null = not synced yet (then nothing says whether the review is
+   *  current). Absent on older servers. */
+  currentHeadSha?: string | null;
   /** Who started that run. `'auto'` on a queued or running entry means an auto review holds the
    *  PR, and a manual start answers 409 AutoReviewInProgress. Absent on older servers = 'manual'. */
   trigger?: ClaudeReviewTrigger;
@@ -6941,6 +7042,9 @@ export interface ClaudeReviewPrState {
   /** What the run found — present ONLY on a `succeeded` run (a queued/failed run has no findings
    *  to count, and a zero there would pretend to know). */
   summary?: ClaudeReviewStateSummary;
+  /** AI Fix on this PR: `'running'` while a fix is queued or running; `'ready'` when a finished,
+   *  unpushed fix with changes exists for the PR's CURRENT synced head. Absent otherwise. DB-only. */
+  fix?: 'running' | 'ready';
 }
 
 /** The Open PRs strip's per-run figures, folded server-side from the stored run (DB-only). */
@@ -6962,6 +7066,10 @@ export interface ClaudeReviewStateSummary {
   /** Other reviewers' open threads this run judged (`threadAssessmentCounts` over the stored
    *  `thread_assessments`). Absent when the run did not assess threads (older run) — never zeros. */
   threadAssessments?: ClaudeThreadAssessmentCounts;
+  /** The checks that were FAILING on the reviewed head (`ci_failures`), and how many of them the
+   *  run diagnosed. Absent when the run did not look at CI (older run, skip, unreadable checks) —
+   *  never zeros. `failing: 0` = it looked and nothing was failing. */
+  ci?: { failing: number; diagnosed: number };
 }
 
 export interface ClaudeReviewStatesResponse {
@@ -7023,11 +7131,10 @@ export interface PostReviewBody {
 export type AiFixModel = ClaudeReviewModel;
 
 // The model an AI Fix run uses when the request names none, and the fixer picker's opening
-// value — ONE spelling, read by the picker (AiFixTab), the CI card's "Fix it" (CiAnalysisCard)
-// and the plugin's start route. Opus 5.5 runs at effort MEDIUM with adaptive thinking on every
+// value — ONE spelling, read by the picker (AiFixTab) and the core start route. Opus 5.5 runs at effort MEDIUM with adaptive thinking on every
 // agentic path, pinned in apps/backend/src/review/model-options.ts (PINNED_EFFORT) — so this
 // constant is "Opus 5.5 on medium" with no effort field of its own. Only the FIXER reads it: the
-// pane's summary and CI analysis are separate, cheap Haiku calls.
+// pane's summary is a separate, cheap Haiku call.
 export const DEFAULT_AI_FIX_MODEL: AiFixModel = 'claude-opus-5-5';
 
 // ---- read-only analyses (aiAnalysis capability) ----
@@ -7046,68 +7153,6 @@ export interface PrSummaryResponse {
   creditsExhausted?: boolean;
 }
 
-// An honesty score: how confident the analysis is (in the root cause, and in whether
-// Pierre's agentic fixer could actually fix it). Drives how much the report elaborates.
-export type AiConfidence = 'high' | 'medium' | 'low';
-
-/**
- * When the CI-analysis prompt last changed WHAT IT CLAIMS THE FIXER CAN DO. An analysis stored
- * before this is read as out of date, exactly as one whose head has moved is.
- *
- * ⚠ IT IS A CONTRACT VERSION WEARING A TIMESTAMP, NOT A FRESHNESS POLICY. The cache key hashes
- * `head|diff|check logs` — the prompt is deliberately not a term — so a prompt edit invalidates
- * nothing already stored, and the rows kept telling readers the fixer would "run the repository's
- * linter/build to validate the fix locally" and "commit and push" long after it had no shell at
- * all. 17 of 19 rows on one dev database said so, 3 of them still seedable to the agent, which
- * would spend turns and budget reaching for a tool that is denied outright. Staleness does not
- * re-bill anybody: the card says the analysis is out of date and offers Analyze, and the seed
- * refuses rather than narrating a capability the product does not have.
- *
- * ⚠ BOTH HALVES READ IT FROM HERE. `ciAnalysisStale` in the SPA and `ciSeedDecision` in the
- * plugin are twins that must never disagree — a chip saying the analysis is old beside a button
- * that seeds an agent with it is the defect that pairing exists to prevent.
- *
- * 2026-09-20T00:00:00Z — the day the prompt stopped offering a shell.
- */
-export const CI_ANALYSIS_CONTRACT_EPOCH_MS = Date.UTC(2026, 8, 20);
-
-export interface CiAnalysisResponse {
-  enabled: boolean;
-  // The root-cause + potential-fixes report (markdown), or null if never generated.
-  analysis: string | null;
-  model: string | null;
-  headSha: string | null;
-  generatedAt: string | null;
-  // Whether the PR currently has failing CI (drives whether the tool is offered).
-  hasFailures: boolean;
-  // How sure the analysis is about the root cause.
-  rootCauseConfidence: AiConfidence | null;
-  // How likely Pierre's agentic fixer (edit repo files + push) could fix it, given the
-  // available context. Low for external/quality-gate/unknown causes.
-  fixability: AiConfidence | null;
-  // Metered (paid cloud) plan out of credits: generation is refused and the last stored
-  // analysis is served unchanged. REQUIRED (unlike PrSummaryResponse's optional twin) because
-  // the CI-analysis tier move makes this a routine state rather than an edge case — a caller
-  // that forgets it renders an enabled Generate button that always 402s.
-  creditsExhausted: boolean;
-}
-
-// One failing check the client asks the analyzer to consider. `jobId` is the GitHub
-// Actions job id (null for external checks like SonarCloud, which carry no Actions
-// log). Passing the NAME too lets the analyzer reason about failing checks it can't
-// fetch logs for (a code-analysis gate) instead of treating them as "no output".
-export interface FailingCheckInput {
-  name: string;
-  jobId: number | null;
-  state: string;
-}
-
-// Body for POST …/ci-analysis — the full set of failing checks from the client
-// (pr.checkRuns), since the checkRuns JSON is lean-gated in the DB.
-export interface GenerateCiAnalysisBody {
-  checks: FailingCheckInput[];
-}
-
 // ---- the agentic fixer (aiFix capability) ----
 
 export type AiFixStatus =
@@ -7117,82 +7162,75 @@ export type AiFixStatus =
   | 'failed'
   | 'cancelled';
 
-// What seeded the fix prompt: the stored CI analysis, the latest Claude review, a
-// user-picked set of the PR's own review comments, or a plain request (summary/description
-// only).
-export type AiFixSeed = 'ci_analysis' | 'review' | 'plain' | 'comments';
+// What seeded the fix prompt. TWO entry points: 'review' (a Claude review, every non-praise item
+// of it — server-built from the STORED run, coding/ai-fix/review-seed.ts) and 'plain' (the
+// reader's own instruction).
+export type AiFixSeed = 'review' | 'plain';
 
-// ---- comment-seeded fixes ("fix from comments") ----
+// What a STORED run may carry. 'comments' (the picked-comments basket) and 'ci_analysis' (the Pro
+// CI diagnosis) were REMOVED as entry points; rows written under them still read and render as
+// history. The start route answers 400 SeedRemoved for either.
+export type AiFixStoredSeed = AiFixSeed | 'comments' | 'ci_analysis';
 
-// Which of the PR's comment id spaces a target lives in. The three are DISTINCT id
-// spaces (review_comments / pr_comments / reviews), exactly as ml_comment_labels keys
-// them — so a bare id is ambiguous and every target carries its kind.
-export type AiFixCommentKind = 'review_comment' | 'pr_comment' | 'review';
+// Who started a fix run: a person pressing a button, or (later) the auto-review agent calling
+// `startReviewFix`. `ai_fixes.trigger`; NULL on older rows reads as 'manual'.
+export type AiFixTrigger = 'manual' | 'auto';
 
-// One comment the user dragged into the fix scope. The client sends only (kind, id); the
-// server resolves the body, author, file anchor and code hunk itself — a client-supplied
-// body would be an unauthenticated way to put arbitrary text in an agent's prompt.
-export interface AiFixCommentTargetRef {
-  kind: AiFixCommentKind;
-  id: number;
-}
+// Which part of the Claude review an item came from — the section label on its chip.
+export type AiFixReviewItemKind =
+  | 'finding' // a finding of the review (F1…)
+  | 'thread' // another reviewer's thread the review judged still needs a fix (T1…)
+  | 'story' // an unmet / partly met acceptance criterion, or a missing piece, of a user story (S1-AC2, S1-M1…)
+  | 'ci_failure' // a CI failure the review judged fixable in this PR (C1…)
+  | 'earlier_finding'; // an earlier review's finding still not (fully) addressed (P1…)
 
-// A resolved target as STORED on the run, so the report renders (and stays honest) long
-// after the PR detail moved on. `ref` is the stable prompt label ("C1", "C2", …) the agent
-// must cite; it is assigned server-side in list order and is what maps a verdict back to
-// its comment.
-export interface AiFixCommentTarget extends AiFixCommentTargetRef {
+export const AI_FIX_REVIEW_ITEM_LABELS: Record<AiFixReviewItemKind, string> = {
+  finding: 'Finding',
+  thread: 'Reviewer thread',
+  story: 'User story',
+  ci_failure: 'CI failure',
+  earlier_finding: 'Earlier finding',
+};
+
+// One review item a 'review' run was given, AS STORED on the run (written at insert, so a failed
+// or cancelled run still shows its list). `ref` is the label the agent must cite. `included`
+// false ⇒ the item did not fit the prompt budget and was NOT shown to the agent (named in the
+// prompt as left out, never silently dropped).
+export interface AiFixReviewItem {
   ref: string;
-  authorId: number | null;
-  authorLogin: string | null;
-  isBot: boolean;
-  // File anchor (review comments only; null for PR-level comments and review bodies).
+  kind: AiFixReviewItemKind;
+  // One line, for the chip and the "not addressed" list. Plain text as written — render as text.
+  title: string;
   path: string | null;
   line: number | null;
-  // The thread this comment belongs to, when it has one — the reply target for a pushback.
+  // The review's finding id (kind 'finding'), the earlier finding's id ('earlier_finding'), the
+  // review thread id ('thread'), the ticket's 0-based index ('story'). null otherwise.
+  findingId: number | null;
   threadId: number | null;
-  url: string | null;
-  // Short preview for the report card; the full body went to the agent, not the wire.
-  excerpt: string;
+  ticketIndex: number | null;
+  included: boolean;
 }
 
-// What the agent concluded about ONE seeded comment. `verdict` is the disposition;
-// `pushback` is set only when the agent is DISAGREEING (invalid / out_of_scope / rejected)
-// and is the argued rebuttal, ready for the user to send as a reply — nothing posts it
-// automatically.
-export type AiFixCommentDisposition =
-  | 'fixed'
-  | 'partially_fixed'
-  | 'already_addressed'
-  | 'invalid'
-  | 'out_of_scope'
-  | 'needs_human';
+// The agent's per-change report, validated server-side: refs not in the set the run was SHOWN are
+// dropped, text is clipped, a change for a file the git diff does not contain is dropped (the diff
+// is authoritative). `notReported` = shown refs the agent neither cited on a change nor listed as
+// unaddressed.
+export interface AiFixChange {
+  path: string;
+  // 1–3 sentences: what changed and why.
+  summary: string;
+  refs: string[];
+}
 
-export interface AiFixCommentVerdict {
-  // The prompt label the agent cited; matched back to AiFixCommentTarget.ref.
+export interface AiFixUnaddressed {
   ref: string;
-  // Null when the agent cited a ref that was not in the seed set (kept, not dropped —
-  // a fabricated ref is information about the run).
-  target: AiFixCommentTarget | null;
-  verdict: AiFixCommentDisposition;
-  // Whether the agent judged the comment technically correct, independent of whether it
-  // fixed anything (a valid comment can still be out of scope).
-  //
-  // ⚠ THREE-STATE, and `null` is load-bearing: it means NOT ASSESSED — the row was synthesized
-  // for a comment the agent never reported on, or one that never fit the prompt at all. A
-  // two-state field forced those rows to `false`, which rendered as a positive claim that a
-  // reviewer's comment was judged WRONG, sitting directly above prose saying nothing is known
-  // about it. On a bot-flooded PR that fired on every skipped comment.
-  valid: boolean | null;
-  // Why — grounded in the code it read.
-  reasoning: string;
-  // The argued rebuttal, for a comment the agent is pushing back on. Null otherwise.
-  pushback: string | null;
-  // A durable takeaway worth remembering about this reviewer/bot's comment, if any.
-  learning: string | null;
-  // Paths the agent says it edited for this comment. Advisory — the authoritative
-  // changeset is still the captured git diff, never the agent's self-report.
-  filesTouched: string[];
+  reason: string;
+}
+
+export interface AiFixChangeReport {
+  changes: AiFixChange[];
+  unaddressed: AiFixUnaddressed[];
+  notReported: string[];
 }
 
 export type AiFixPhase =
@@ -7237,7 +7275,7 @@ export interface AiFix {
   prId: number;
   status: AiFixStatus;
   model: string;
-  seed: AiFixSeed;
+  seed: AiFixStoredSeed;
   // Set once the run succeeds:
   summary: string | null;
   commitMessage: string | null;
@@ -7249,12 +7287,13 @@ export interface AiFix {
   baseSha: string | null;
   // The Claude review this fix was seeded from, if any.
   sourceReviewId: number | null;
-  // seed === 'comments' only: the comments the run was given, in the order the prompt
-  // listed them, and what the agent concluded about each. Both null on every other seed —
-  // and `commentVerdicts` is null (not []) on a comments run whose agent reported nothing,
-  // which is a different fact from "it reported an empty list".
-  commentTargets: AiFixCommentTarget[] | null;
-  commentVerdicts: AiFixCommentVerdict[] | null;
+  // Who started it. Older rows read as 'manual'.
+  trigger: AiFixTrigger;
+  // seed === 'review': the items the run was given (and the ones left out for budget). null on
+  // every other seed and on rows from before the report.
+  reviewItems: AiFixReviewItem[] | null;
+  // The agent's per-change report, validated. null until a run succeeds, and on older rows.
+  changeReport: AiFixChangeReport | null;
   costUsd: number | null;
   numTurns: number | null;
   error: string | null;
@@ -7273,7 +7312,7 @@ export interface AiFixSummary {
   id: number;
   status: AiFixStatus;
   model: string;
-  seed: AiFixSeed;
+  seed: AiFixStoredSeed;
   commitMessage: string | null;
   filesChanged: string[];
   pushedBranch: string | null;
@@ -7313,37 +7352,24 @@ export type AiFixStreamEvent =
     }
   | { type: 'done'; status: AiFixStatus | 'idle'; fixId: number | null };
 
-// Start a fix run.
+// Start a fix run. ⚠ The body has NO ajv schema (Fastify's removeAdditional would strip
+// undeclared keys); every field is validated in the handler.
 export interface GenerateFixBody {
   // One of CLAUDE_REVIEW_MODELS. Omitted ⇒ DEFAULT_AI_FIX_MODEL. Anything else (a retired id
   // such as the old Opus, or a non-string) is a 400 { error: 'ModelNotOffered' }.
   model?: AiFixModel;
+  // Omitted ⇒ 'plain'. 'comments' / 'ci_analysis' ⇒ 400 SeedRemoved; anything else ⇒ 400 UnknownSeed.
   seed?: AiFixSeed;
-  // When seed === 'review', the review text to seed the prompt with.
-  reviewText?: string;
-  // When seed === 'review', the Claude review it came from. The server adds that review's open
-  // review threads judged valid and not yet addressed (fenced, from the stored run), so one fix
-  // covers the findings AND the other reviewers' comments. Ignored unless it is this PR's review.
+  // seed === 'review' (required): the Claude review to fix from. The SERVER builds the whole seed
+  // from the stored run; nothing about the review travels in the body. Not this PR's / account's,
+  // or not succeeded ⇒ 409 ReviewUnavailable; nothing to fix in it ⇒ 409 NothingToFix.
   sourceReviewId?: number;
-  // When seed === 'comments', the comments to work through — (kind, id) pairs only. The
-  // server resolves each one against THIS PR's rows and silently drops anything that
-  // doesn't belong to it, so a forged id is inert rather than an error. Capped
-  // (AI_FIX_MAX_COMMENT_TARGETS) because every target costs prompt budget.
-  commentTargets?: AiFixCommentTargetRef[];
+  // seed === 'plain' (required, non-blank, at most AI_FIX_MAX_INSTRUCTION_CHARS): what to fix.
+  instruction?: string;
 }
 
-// How many comments one comments-seeded run will accept. A 60-thread bot-flooded PR is this app's
-// normal workload, and the whole set would blow the prompt budget the reference diff also has to
-// fit in — so the UI surfaces this cap rather than letting the server truncate a bigger basket.
-//
-// ⚠ The GUARANTEE is narrower than "25 always fit", and saying otherwise was a real bug: the
-// server renders each comment with its body and anchor hunk under its own char budget, and a
-// basket of 25 unusually LONG comments still loses a tail (reported per comment as "did not fit
-// the prompt budget", never silently). The budgets are sized so that a realistically-sized 25 fits;
-// they live in `packages/pro/src/ai-fix/comment-seed.ts` (SEED_CHAR_BUDGET) and `prompts.ts`
-// (FIX_COMMENTS_DIFF_BUDGET) and are ONE decision with this number — change none of the three
-// without re-measuring the other two.
-export const AI_FIX_MAX_COMMENT_TARGETS = 25;
+// The longest plain instruction the start route accepts (400 InstructionTooLong over it).
+export const AI_FIX_MAX_INSTRUCTION_CHARS = 4_000;
 
 // Push a completed fix, as-is: synchronous, never a force push, and no trunk step before it (a
 // fix that conflicts with the trunk pushes as it is and the PR shows as conflicted). `target` is

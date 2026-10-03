@@ -1,7 +1,8 @@
 // The Claude Review tab's follow-up and user-story pieces, kept out of the 2,000-line tab:
 //
 //   ClaudeReviewTicketPanel     — the "User stories (optional)" input, COLLAPSED by default.
-//   ClaudeReviewTicketResults   — how the run measured up against ONE user story.
+//   ClaudeReviewTicketResults   — how the run measured up against ONE user story (read-only; its
+//                                 unmet items are findings, each row links to its card).
 //   ClaudeReviewFollowUpSection — what became of the previous review's comments.
 //
 // Rules for all three:
@@ -14,7 +15,7 @@
 //    are shown separately and labelled as Claude's.
 //  - Chips are 11px or larger, sentences 12px or larger, no uppercase-with-tracking labels, and
 //    every muted colour is paired for both themes (`textContrast.test.ts`).
-import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import {
   CLAUDE_REVIEW_MAX_TICKETS,
@@ -28,6 +29,7 @@ import type {
   ClaudeFindingSeverity,
   ClaudeFindingSide,
   ClaudeFollowUpItem,
+  ClaudeFollowUpStatus,
   ClaudeReviewFollowUp,
   ClaudeReviewTicketEntry,
   ClaudeReviewTicketField,
@@ -63,12 +65,15 @@ import {
   isJiraDraft,
   notCheckedReason,
   partitionFollowUp,
+  storyFindingIdFor,
+  storyItemChipLabel,
   ticketsPanelHint,
   type TicketDraft,
 } from '../lib/claudeReviewFollowUp.js';
-import { ChevronIcon } from './Icons.js';
+import { CheckIcon, ChevronIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
 import { JiraStoryView } from './ClaudeReviewTickets.js';
+import { ReviewSection } from './ReviewSection.js';
 
 type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
 
@@ -79,6 +84,15 @@ const SEVERITY_WORD: Record<ClaudeFindingSeverity, string> = {
   question: 'Question',
   praise: 'Praise',
 };
+
+// The Previous review header's pills: still-open statuses first.
+const FOLLOW_UP_PILL_ORDER: ClaudeFollowUpStatus[] = [
+  'not_addressed',
+  'partly_addressed',
+  'not_checked',
+  'addressed',
+  'no_longer_applies',
+];
 
 const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[11px] font-medium';
 const MUTED = 'text-gray-500 dark:text-gray-400';
@@ -513,6 +527,8 @@ function JiraFillButtons({
 
 // ---- (b) the results against the user story ----
 
+// A criterion row with NO finding card: met, can't tell, not checked — or an unmet one on a run
+// stored before story findings existed (the fallback, so an older run still reads sensibly).
 function CriterionRow({
   c,
   changedPaths,
@@ -522,29 +538,43 @@ function CriterionRow({
   changedPaths: ReadonlySet<string>;
   onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
-  const border =
-    c.status === 'not_met'
-      ? 'border-red-300 dark:border-red-700/60'
-      : c.status === 'partly_met'
-        ? 'border-orange-300 dark:border-orange-700/60'
-        : 'border-gray-200 dark:border-gray-800';
-  return (
-    <li className={`rounded border px-2 py-1.5 ${border}`}>
-      <div className="flex items-start gap-2">
-        <span className={`shrink-0 font-mono text-xs ${MUTED}`}>{c.ref}</span>
-        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-xs text-gray-800 dark:text-gray-200">
-          {c.text}
+  // MET is one compact line: tick, ref, criterion, where. Nothing to act on, so no card.
+  if (c.status === 'met') {
+    return (
+      <li className="flex items-baseline gap-2 px-1 text-xs">
+        <span className="shrink-0 self-center text-green-700 dark:text-green-400" aria-label="Met">
+          <CheckIcon size={12} />
         </span>
+        <span className={`shrink-0 font-mono ${MUTED}`}>{c.ref}</span>
+        <span className="min-w-0 break-words text-gray-800 dark:text-gray-200">
+          {c.text}
+          {c.path != null && c.path !== '' && (
+            <>
+              <span className={MUTED} aria-hidden="true">
+                {' · '}
+              </span>
+              <CodeAnchorRef
+                path={c.path}
+                line={c.line}
+                side="RIGHT"
+                inChangeset={changedPaths.has(c.path)}
+                onOpenInChanges={onOpenInChanges}
+              />
+            </>
+          )}
+        </span>
+      </li>
+    );
+  }
+  return (
+    <li className="rounded border border-gray-200 px-3 py-2 dark:border-gray-800">
+      <div className="flex items-start gap-2">
         <span className={`${CHIP} ${TICKET_CRITERION_STATUS_CLASS[c.status]}`}>
           {TICKET_CRITERION_STATUS_LABEL[c.status]}
         </span>
+        <span className={`shrink-0 font-mono text-xs leading-5 ${MUTED}`}>{c.ref}</span>
+        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm font-medium">{c.text}</span>
       </div>
-      {c.explanation != null && c.explanation !== '' && (
-        <p className="mt-0.5 whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300">
-          <span className="font-medium">Claude: </span>
-          {c.explanation}
-        </p>
-      )}
       {c.path != null && c.path !== '' && (
         <div className="mt-0.5">
           <CodeAnchorRef
@@ -556,139 +586,180 @@ function CriterionRow({
           />
         </div>
       )}
+      {c.explanation != null && c.explanation !== '' && (
+        <p className="mt-1 whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300">
+          <span className="font-medium">Claude: </span>
+          {c.explanation}
+        </p>
+      )}
     </li>
   );
 }
 
-function GapList({
-  heading,
-  gaps,
-  border,
+// A "Not done" item with no finding card (a run stored before story findings) — the fallback.
+function MissingRow({
+  g,
   changedPaths,
   onOpenInChanges,
 }: {
-  heading: string;
-  gaps: ClaudeTicketGap[];
-  border: string;
+  g: ClaudeTicketGap;
   changedPaths: ReadonlySet<string>;
   onOpenInChanges?: OpenInChanges;
-}): JSX.Element | null {
-  if (gaps.length === 0) return null;
+}): JSX.Element {
   return (
-    <div className="mt-2">
-      <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-        {heading} ({gaps.length})
-      </div>
-      <ul className="mt-1 space-y-1">
-        {gaps.map((g, i) => (
-          <li key={i} className={`rounded border px-2 py-1.5 text-xs ${border}`}>
-            <div className="whitespace-pre-wrap break-words font-medium text-gray-800 dark:text-gray-200">
-              {g.title}
-            </div>
-            {g.explanation != null && g.explanation !== '' && (
-              <p className="mt-0.5 whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300">
-                {g.explanation}
-              </p>
-            )}
-            {g.path != null && g.path !== '' && (
-              <div className="mt-0.5">
-                <CodeAnchorRef
-                  path={g.path}
-                  line={g.line}
-                  side="RIGHT"
-                  inChangeset={changedPaths.has(g.path)}
-                  onOpenInChanges={onOpenInChanges}
-                />
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
+    <li className="rounded border border-gray-200 px-3 py-2 dark:border-gray-800">
+      <div className="whitespace-pre-wrap break-words text-sm font-medium">{g.title}</div>
+      {g.path != null && g.path !== '' && (
+        <div className="mt-0.5">
+          <CodeAnchorRef
+            path={g.path}
+            line={g.line}
+            side="RIGHT"
+            inChangeset={changedPaths.has(g.path)}
+            onOpenInChanges={onOpenInChanges}
+          />
+        </div>
+      )}
+      {g.explanation != null && g.explanation !== '' && (
+        <p className="mt-1 whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300">
+          {g.explanation}
+        </p>
+      )}
+    </li>
   );
 }
 
+// A sub-group heading inside one story ("Not done (1)").
+function StoryGroupHeading({ children }: { children: string }): JSX.Element {
+  return <h5 className="text-xs font-semibold text-gray-700 dark:text-gray-200">{children}</h5>;
+}
+
+/**
+ * How the run measured up against ONE user story, inside the User stories section. ⚠ LIKE FOR
+ * LIKE WITH THE FINDINGS LIST: every not met / partly met criterion and every "Not done" item IS a
+ * finding, and renders as THAT finding's card (`renderFinding`, the Findings list's own component,
+ * with its Post / Reword / Copy / Ignore). The Findings list leaves those out, so each is on screen
+ * once. Met criteria are one compact line; "Not asked for" is a compact informational list (adding
+ * something is not a defect, so it is never a finding). A run stored before story findings has no
+ * card to show, so its unmet items fall back to read-only rows.
+ */
 export function ClaudeReviewTicketResults({
   entry,
   label,
-  actions,
+  findingIds,
+  findingsById,
+  renderFinding,
   changedPaths,
   onOpenInChanges,
 }: {
   entry: ClaudeReviewTicketEntry;
-  // "PROJ-12" or "Story 2".
-  label: string;
-  // Rendered at the row's end: the tab's "Post as comment" / posted link. This file carries no
-  // href (its source guard), so anything linked arrives here.
-  actions?: ReactNode;
+  // "PROJ-12" or "Story 2"; null for a lone story with no key (the section title already says
+  // "User story", so the sub-header is just its title).
+  label: string | null;
+  // `storyFindingIds(review.findings)` — this run's story findings by `${index}:${ref}`.
+  findingIds: ReadonlyMap<string, number>;
+  findingsById: ReadonlyMap<number, ClaudeFinding>;
+  // The Findings list's own card, for one story finding; `chip` names the item ("AC2 · Partly met").
+  renderFinding: (f: ClaudeFinding, chip: string) => ReactNode;
   changedPaths: ReadonlySet<string>;
   onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
   const { ticket, assessment } = entry;
   const sentence = ticketCriteriaSentence(assessment);
+  const cardFor = (id: number | null): ClaudeFinding | null => (id != null ? (findingsById.get(id) ?? null) : null);
+  const rowProps = { changedPaths, onOpenInChanges };
   return (
-    <section
-      aria-label={`User story ${label}`}
-      className="rounded border border-gray-200 px-3 py-2 dark:border-gray-800"
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <span
-          className={`text-xs font-semibold text-gray-700 dark:text-gray-200 ${ticket.key != null ? 'font-mono' : ''}`}
-        >
-          {label}
-        </span>
+    <div aria-label={`User story ${label ?? ticket.title ?? ''}`} className="space-y-3">
+      <h4 className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {label != null && (
+          <span
+            className={`text-sm font-semibold text-gray-900 dark:text-gray-100 ${ticket.key != null ? 'font-mono' : ''}`}
+          >
+            {label}
+          </span>
+        )}
         {ticket.title != null && ticket.title !== '' && (
-          <span className="min-w-0 break-words text-sm font-medium">{ticket.title}</span>
+          <span className="min-w-0 break-words text-sm font-medium text-gray-900 dark:text-gray-100">
+            {ticket.title}
+          </span>
         )}
         {assessment != null && (
           <span className={`${CHIP} ${TICKET_ALIGNMENT_CLASS[assessment.alignment]}`}>
             {TICKET_ALIGNMENT_LABEL[assessment.alignment]}
           </span>
         )}
-        {actions != null && <span className="ml-auto">{actions}</span>}
-      </div>
-      {sentence != null && (
-        <div className="mt-0.5 text-xs text-gray-700 dark:text-gray-300">{sentence}</div>
-      )}
+        {sentence != null && <span className={`text-xs font-normal ${MUTED}`}>{sentence.replace(/\.$/, '')}</span>}
+      </h4>
       {assessment == null ? (
-        <p className={`mt-1 text-xs ${MUTED}`}>Not checked in this run.</p>
+        <p className={`text-xs ${MUTED}`}>Not checked in this run.</p>
       ) : (
         <>
           {assessment.summary != null && assessment.summary !== '' && (
-            <p className="mt-1 whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300">
+            <p className="whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300">
               <span className="font-medium">Claude: </span>
               {assessment.summary}
             </p>
           )}
           {assessment.criteria.length > 0 && (
-            <ol className="mt-2 space-y-1.5">
-              {assessment.criteria.map((c) => (
-                <CriterionRow
-                  key={c.ref}
-                  c={c}
-                  changedPaths={changedPaths}
-                  onOpenInChanges={onOpenInChanges}
-                />
-              ))}
-            </ol>
+            <ul className="space-y-1.5">
+              {assessment.criteria.map((c) => {
+                const unmet = c.status === 'not_met' || c.status === 'partly_met';
+                const f = unmet ? cardFor(storyFindingIdFor(findingIds, entry.index, { ref: c.ref })) : null;
+                return f != null && (c.status === 'not_met' || c.status === 'partly_met') ? (
+                  <Fragment key={c.ref}>{renderFinding(f, storyItemChipLabel(c.ref, c.status))}</Fragment>
+                ) : (
+                  <CriterionRow key={c.ref} c={c} {...rowProps} />
+                );
+              })}
+            </ul>
           )}
-          <GapList
-            heading="Asked for but not done"
-            gaps={assessment.missing}
-            border="border-red-300 dark:border-red-700/60"
-            changedPaths={changedPaths}
-            onOpenInChanges={onOpenInChanges}
-          />
-          <GapList
-            heading="Added but not asked for"
-            gaps={assessment.notRequested}
-            border="border-amber-300 dark:border-amber-700/60"
-            changedPaths={changedPaths}
-            onOpenInChanges={onOpenInChanges}
-          />
+          {assessment.missing.length > 0 && (
+            <div className="space-y-1.5">
+              <StoryGroupHeading>{`Not done (${assessment.missing.length})`}</StoryGroupHeading>
+              <ul className="space-y-1.5">
+                {assessment.missing.map((g, i) => {
+                  const f = cardFor(storyFindingIdFor(findingIds, entry.index, { missingIndex: i }));
+                  return f != null ? (
+                    <Fragment key={i}>{renderFinding(f, storyItemChipLabel(f.story?.ref ?? '', null))}</Fragment>
+                  ) : (
+                    <MissingRow key={i} g={g} {...rowProps} />
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+          {assessment.notRequested.length > 0 && (
+            <div className="space-y-1">
+              <StoryGroupHeading>{`Not asked for (${assessment.notRequested.length})`}</StoryGroupHeading>
+              <ul className="space-y-1.5 border-l-2 border-gray-200 pl-3 dark:border-gray-700">
+                {assessment.notRequested.map((g, i) => (
+                  <li key={i} className="text-xs">
+                    <span className="break-words font-medium text-gray-800 dark:text-gray-200">{g.title}</span>
+                    {g.path != null && g.path !== '' && (
+                      <>
+                        <span className={MUTED} aria-hidden="true">
+                          {' · '}
+                        </span>
+                        <CodeAnchorRef
+                          path={g.path}
+                          line={g.line}
+                          side="RIGHT"
+                          inChangeset={changedPaths.has(g.path)}
+                          onOpenInChanges={onOpenInChanges}
+                        />
+                      </>
+                    )}
+                    {g.explanation != null && g.explanation !== '' && (
+                      <p className="whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300">{g.explanation}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -797,16 +868,24 @@ export function ClaudeReviewFollowUpSection({
     onOpenInChanges,
   };
   return (
-    <section aria-label="Previous review" className="space-y-1.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-semibold">Previous review</span>
-        <span className={`font-mono text-xs ${MUTED}`} title={followUp.priorHeadSha}>
-          {followUp.priorHeadSha.slice(0, 7)}
-        </span>
-        {!followUp.headMoved && (
-          <span className={`text-xs ${MUTED}`}>No new commits since that review.</span>
-        )}
-      </div>
+    <ReviewSection
+      title="Previous review"
+      pills={
+        <>
+          <span className={`font-mono text-xs ${MUTED}`} title={followUp.priorHeadSha}>
+            {followUp.priorHeadSha.slice(0, 7)}
+          </span>
+          {FOLLOW_UP_PILL_ORDER.map((st) => {
+            const n = followUp.items.filter((it) => it.status === st).length;
+            return n > 0 ? (
+              <span key={st} className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS[st]}`}>
+                {n} {FOLLOW_UP_STATUS_LABEL[st].toLowerCase()}
+              </span>
+            ) : null;
+          })}
+        </>
+      }
+    >
       {open.length > 0 && (
         <ul className="space-y-1.5">
           {open.map((it) => (
@@ -834,6 +913,6 @@ export function ClaudeReviewFollowUpSection({
           )}
         </div>
       )}
-    </section>
+    </ReviewSection>
   );
 }

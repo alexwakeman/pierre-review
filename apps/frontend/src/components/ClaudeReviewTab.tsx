@@ -48,7 +48,6 @@ import { Markdown } from './Markdown.js';
 import { MentionTextarea } from './MentionTextarea.js';
 import { ReviewChatSection } from './ClaudeReviewChat.js';
 import { InfoButton } from './InfoModal.js';
-import { TicketPostControl } from './ClaudeReviewTickets.js';
 import {
   ArrowIcon,
   CheckIcon,
@@ -67,6 +66,10 @@ import {
   storyLabel,
 } from './ClaudeReviewFollowUp.js';
 import { ClaudeReviewThreadsSection } from './ClaudeReviewThreads.js';
+import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine } from '../lib/claudeAutoReview.js';
+import { ClaudeReviewCiFailuresSection, ClaudeReviewCiStatus } from './ClaudeReviewCiFailures.js';
+import { ReviewSection, SectionCount } from './ReviewSection.js';
+import { reviewCurrency, type ReviewCurrency } from '../lib/claudeReviewColumn.js';
 import {
   ALREADY_POSTED_CHIP,
   RERAISED_CHIP,
@@ -77,6 +80,8 @@ import {
   reraisedStatusByFindingId,
   resolveTicketDrafts,
   sortFindingsForDisplay,
+  placeStoryFindings,
+  storyChipLabel,
   ticketsRequestFromCheck,
   VERDICT_CLASS,
   type ReraisedStatus,
@@ -91,25 +96,6 @@ export type OpenInChanges = (
   line: number | null,
   side: ClaudeFindingSide,
 ) => void;
-
-// A label/body row matching ChecksTab's layout — a fixed-width uppercase caption
-// on the left, content on the right.
-function Row({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}): JSX.Element {
-  return (
-    <div className="flex gap-3 px-4 py-1.5 text-sm">
-      <span className="w-28 shrink-0 text-xs uppercase tracking-wide text-gray-400">
-        {label}
-      </span>
-      <div className="min-w-0 flex-1">{children}</div>
-    </div>
-  );
-}
 
 const shortSha = (sha: string | null): string => (sha ? sha.slice(0, 7) : '—');
 
@@ -156,18 +142,28 @@ function metaLine(review: ClaudeReview): string {
   return parts.join(' · ');
 }
 
-// The reviewed commit against the PR's synced head: null when current, else the short phrase.
-// The server's `head` reading wins; an older server falls back to comparing SHAs.
-function outdatedPhrase(review: ClaudeReview, prHeadSha: string | null): string | null {
-  const h = review.head;
-  if (h != null) {
-    if (!h.outdated) return null;
-    if (h.commitsSince == null) return 'the branch has changed since';
-    if (h.commitsSince === 0) return 'history rewritten since';
-    return `${h.commitsSince} newer commit${h.commitsSince === 1 ? '' : 's'}`;
-  }
-  if (prHeadSha == null || prHeadSha === review.headSha) return null;
-  return 'the branch has changed since';
+// The reviewed commit against the PR's synced head — the ONE helper the Open PRs card reads too.
+// The server's `head` reading wins; an older server (no `head`) falls back to the PR's head.
+function currencyOf(review: ClaudeReview, prHeadSha: string | null): ReviewCurrency | null {
+  return reviewCurrency({
+    reviewedHeadSha: review.headSha,
+    currentHeadSha: review.head?.currentHeadSha ?? prHeadSha,
+    commitsSince: review.head?.commitsSince ?? null,
+  });
+}
+
+// The header pill: green "On latest commit · abc1234", or amber "2 newer commits" / "Branch changed".
+function CurrencyPill({ currency }: { currency: ReviewCurrency }): JSX.Element {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${currency.className}`}
+      title={currency.title}
+    >
+      {currency.tone === 'current' ? <CheckIcon size={12} /> : <WarningIcon size={12} />}
+      {currency.label}
+      {currency.tone === 'current' && <span className="font-mono">· {currency.sha}</span>}
+    </span>
+  );
 }
 
 const PHASE_LABEL: Record<string, string> = {
@@ -484,6 +480,7 @@ function FindingRow({
   inChangeset,
   priorStatus,
   alreadyPosted = false,
+  storyLabel = null,
   onOpenInChanges,
   onToggle,
   onReword,
@@ -510,6 +507,10 @@ function FindingRow({
   // It repeats an earlier comment already posted on this same commit (the server saved it
   // ignored, so Post review does not put it on GitHub twice). The chip says why.
   alreadyPosted?: boolean;
+  // A STORY FINDING (made by the server from the user-story check): the chip naming its story item,
+  // e.g. "BMD-1040 · AC2" (`storyChipLabel`). null ⇒ an ordinary finding. Nothing else about the
+  // card differs: it posts, rewords and ignores like any finding.
+  storyLabel?: string | null;
   onOpenInChanges?: OpenInChanges;
   onToggle: (included: boolean) => void;
   onReword: (editedBody: string) => Promise<unknown>;
@@ -542,6 +543,9 @@ function FindingRow({
 
   const anchorLabel =
     finding.line != null ? `${finding.path}:${finding.line}` : finding.path;
+  // No file at all (a story finding about the whole change): it posts as a PR comment and has no
+  // code anchor to show.
+  const noFile = finding.path === '';
   // Posted singly, or inside a submitted review. ⚠ A POSTED FINDING IS DONE: no Post again, no
   // Reword, no Ignore — only its link (and Copy).
   const isPosted = finding.postedAt != null;
@@ -603,7 +607,7 @@ function FindingRow({
   // (that is theirs, already in their own editor), and never the rendered DOM, so fences,
   // lists and links paste intact. The title goes in bold so the whole paste stays markdown.
   const copy = (): void => {
-    let text = `**${finding.title}**\n\n${finding.body}`;
+    let text = finding.body.trim() !== '' ? `**${finding.title}**\n\n${finding.body}` : `**${finding.title}**`;
     if (finding.suggestion != null && finding.suggestion.trim() !== '') {
       text += `\n\n\`\`\`suggestion\n${finding.suggestion}\n\`\`\``;
     }
@@ -683,6 +687,11 @@ function FindingRow({
                 {CLAUDE_FINDING_LENS_LABELS[finding.lens]}
               </span>
             )}
+            {storyLabel != null && (
+              <span className="rounded bg-sky-500/10 px-1.5 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">
+                {storyLabel}
+              </span>
+            )}
             {priorStatus != null && (
               <span
                 className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${RERAISED_CHIP[priorStatus].cls}`}
@@ -723,7 +732,14 @@ function FindingRow({
               </span>
             )}
             {!finding.anchored && !isPosted &&
-              (finding.fileInDiff ? (
+              (noFile ? (
+                <span
+                  className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] text-gray-600 dark:text-gray-300"
+                  title="Posts as a PR comment"
+                >
+                  PR comment
+                </span>
+              ) : finding.fileInDiff ? (
                 <span
                   className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] text-gray-600 dark:text-gray-300"
                   title="Posts on the file's first change"
@@ -754,6 +770,7 @@ function FindingRow({
               ↗ beside it always exits to the PR diff line on GitHub — today's behaviour,
               kept as an explicit, visually secondary escape. A third "view file" link goes
               to the blob at the reviewed commit for collapsed/outdated diffs. */}
+          {!noFile && (
           <div className="mt-0.5 flex flex-wrap items-center gap-2 font-mono text-xs">
             {canJumpInApp ? (
               <>
@@ -817,16 +834,20 @@ function FindingRow({
               </a>
             )}
           </div>
+          )}
 
           {/* The (collapsible) diff hunk this finding covers. */}
           {finding.diffHunk != null && finding.diffHunk !== '' && (
             <FindingHunk hunk={finding.diffHunk} path={finding.path} />
           )}
 
-          {/* Claude's body (read-only). */}
-          <div className="mt-1">
-            <Markdown>{finding.body}</Markdown>
-          </div>
+          {/* Claude's body (read-only). A story finding with no explanation has none: its
+              title is the criterion. */}
+          {finding.body.trim() !== '' && (
+            <div className="mt-1">
+              <Markdown>{finding.body}</Markdown>
+            </div>
+          )}
           {finding.suggestion != null && finding.suggestion !== '' && (
             <SuggestionBlock suggestion={finding.suggestion} path={finding.path} />
           )}
@@ -995,8 +1016,14 @@ function ClaudesReview({
   onRewordFinding: (findingId: number, editedBody: string) => Promise<unknown>;
   onPostFinding: (findingId: number) => Promise<unknown>;
 }): JSX.Element {
+  // EACH FINDING IS ON SCREEN ONCE: a story finding renders as its card INSIDE its story (User
+  // stories section), and the Findings list leaves it out (`placeStoryFindings`).
+  const placement = useMemo(
+    () => placeStoryFindings(review.findings, review.tickets),
+    [review.findings, review.tickets],
+  );
   // Severity first; within a severity, the findings that raise an earlier comment again lead.
-  const findings = sortFindingsForDisplay(review.findings);
+  const findings = sortFindingsForDisplay(review.findings.filter((f) => !placement.placed.has(f.id)));
   const priorStatusById = reraisedStatusByFindingId(review);
   const alreadyPostedIds = alreadyPostedReraiseIds(review);
   // TEMPLATED from the server-validated statuses (a code-derived figure) — Claude's own
@@ -1008,56 +1035,87 @@ function ClaudesReview({
   // Only a finished review that actually read code can be asked about.
   const chatReviewId =
     review.status === 'succeeded' && review.reviewMode !== 'skip' ? review.id : null;
-  const outdated = outdatedPhrase(review, prHeadSha);
-  // One section per story (a run from before several stories reads as a one-element list).
+  const currency = currencyOf(review, prHeadSha);
+  // One block per story (a run from before several stories reads as a one-element list).
   const ticketEntries = review.tickets ?? [];
+  const storyIds = placement.ids;
+
+  // THE ONE FINDING CARD, for the Findings list and the User stories section alike. `storyLabel`
+  // is the chip naming the story item (null for an ordinary finding).
+  const findingCard = (f: ClaudeFinding, storyLabel: string | null): JSX.Element => (
+    <FindingRow
+      key={f.id}
+      prId={review.prId}
+      finding={f}
+      editable={editable}
+      prUrl={prUrl}
+      repoFullName={repoFullName}
+      headSha={headSha}
+      posting={postingFindingId === f.id}
+      postError={postErrorFindingId === f.id ? postErrorMessage : null}
+      // The changed-file list is authoritative when we have one (it is also what
+      // the Changes tab renders); `fileInDiff` is the review-time answer and the
+      // only signal available when the list is empty or capped away.
+      inChangeset={changedPaths.size > 0 ? changedPaths.has(f.path) : f.fileInDiff}
+      priorStatus={priorStatusById.get(f.id)}
+      alreadyPosted={alreadyPostedIds.has(f.id)}
+      storyLabel={storyLabel}
+      onOpenInChanges={onOpenInChanges}
+      onToggle={(included) => onToggleFinding(f.id, included)}
+      onReword={(editedBody) => onRewordFinding(f.id, editedBody)}
+      onPostComment={() => onPostFinding(f.id)}
+    />
+  );
+  const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
   return (
-    <div className="space-y-2 px-4 py-3">
-      <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-        Claude&apos;s review
-        {review.trigger === 'auto' && (
-          <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs font-normal text-gray-500 dark:text-gray-400">
-            {AUTO_REVIEW_LABEL}
-          </span>
-        )}
-        {review.verdict != null && <VerdictBadge verdict={review.verdict} />}
-        {review.reviewMode != null && (
-          <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs font-normal text-gray-600 dark:text-gray-300">
-            {REVIEW_MODE_LABEL[review.reviewMode]} review
-          </span>
-        )}
-        {outdated != null && (
-          <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-xs font-normal text-amber-700 dark:text-amber-400">
-            <WarningIcon size={12} />
-            Outdated
-          </span>
-        )}
-      </div>
-      <div className="flex flex-wrap items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-        <span>{metaLine(review)}</span>
-        <InfoButton title="This run">
-          <div className="space-y-2">
-            <UsageBreakdown review={review} />
-            {review.numTurns != null && <p>{review.numTurns} turns.</p>}
-            {review.diffCapped && (
-              <p>The diff was too large to send whole, so it was cut to fit.</p>
+    <>
+      <ReviewSection
+        title="Claude's review"
+        pills={
+          <>
+            {currency != null && <CurrencyPill currency={currency} />}
+            {review.verdict != null && <VerdictBadge verdict={review.verdict} />}
+            {review.trigger === 'auto' && (
+              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
+                {AUTO_REVIEW_LABEL}
+              </span>
             )}
-            {review.excludedFiles.length > 0 && (
-              <p>
-                Left out as noise: {review.excludedFiles.length} file
-                {review.excludedFiles.length === 1 ? '' : 's'} (lockfiles, generated code).
-              </p>
+            {review.reviewMode != null && (
+              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
+                {REVIEW_MODE_LABEL[review.reviewMode]} review
+              </span>
             )}
-          </div>
-        </InfoButton>
-      </div>
-      {followUpLine != null && <div className="text-sm font-medium">{followUpLine}</div>}
-      {review.summary != null && review.summary !== '' && (
-        <div className="text-sm">
-          <Markdown>{review.summary}</Markdown>
-        </div>
-      )}
+            <ClaudeReviewCiStatus review={review} />
+          </>
+        }
+        info={
+          <InfoButton title="This run">
+            <div className="space-y-2">
+              <UsageBreakdown review={review} />
+              {review.numTurns != null && <p>{review.numTurns} turns.</p>}
+              {review.diffCapped && (
+                <p>The diff was too large to send whole, so it was cut to fit.</p>
+              )}
+              {review.excludedFiles.length > 0 && (
+                <p>
+                  Left out as noise: {review.excludedFiles.length} file
+                  {review.excludedFiles.length === 1 ? '' : 's'} (lockfiles, generated code).
+                </p>
+              )}
+            </div>
+          </InfoButton>
+        }
+      >
+        <div className="text-xs text-gray-500 dark:text-gray-400">{metaLine(review)}</div>
+        {followUpLine != null && <div className="font-medium">{followUpLine}</div>}
+        {review.summary != null && review.summary !== '' && <Markdown>{review.summary}</Markdown>}
+      </ReviewSection>
+      <ClaudeReviewCiFailuresSection
+        review={review}
+        changedPaths={changedPaths}
+        onOpenInChanges={onOpenInChanges}
+      />
       {review.followUp != null && (
         <ClaudeReviewFollowUpSection
           followUp={review.followUp}
@@ -1071,91 +1129,78 @@ function ClaudesReview({
         counts={review.threadAssessmentCounts}
         onOpenThread={onOpenThread}
       />
-      {ticketEntries.map((entry) => (
-        <ClaudeReviewTicketResults
-          key={entry.index}
-          entry={entry}
-          label={
-            ticketEntries.length === 1 && entry.ticket.key == null
-              ? 'User story'
-              : storyLabel(entry.ticket, entry.index)
+      {ticketEntries.length > 0 && (
+        <ReviewSection
+          title={ticketEntries.length === 1 ? 'User story' : 'User stories'}
+          pills={
+            placement.placed.size > 0 ? (
+              <SectionCount>{plural(placement.placed.size, 'finding', 'findings')}</SectionCount>
+            ) : null
           }
-          actions={
-            <TicketPostControl
-              prId={review.prId}
-              reviewId={review.id}
-              entry={entry}
-              canPost={editable && review.status === 'succeeded'}
-            />
+          info={
+            <InfoButton title="User stories">
+              <p>
+                Each criterion that is not met or only partly met, and each thing asked for but not
+                done, is a finding. Post, reword or ignore it here, like any other finding.
+              </p>
+              <p className="mt-2">Met criteria and changes nobody asked for are listed for reference.</p>
+            </InfoButton>
           }
-          changedPaths={changedPaths}
-          onOpenInChanges={onOpenInChanges}
-        />
-      ))}
-      {findings.length > 0 ? (
-        <ul className="space-y-2">
-          {findings.map((f) => (
-            <FindingRow
-              key={f.id}
-              prId={review.prId}
-              finding={f}
-              editable={editable}
-              prUrl={prUrl}
-              repoFullName={repoFullName}
-              headSha={headSha}
-              posting={postingFindingId === f.id}
-              postError={
-                postErrorFindingId === f.id ? postErrorMessage : null
-              }
-              // The changed-file list is authoritative when we have one (it is also what
-              // the Changes tab renders); `fileInDiff` is the review-time answer and the
-              // only signal available when the list is empty or capped away.
-              inChangeset={
-                changedPaths.size > 0 ? changedPaths.has(f.path) : f.fileInDiff
-              }
-              priorStatus={priorStatusById.get(f.id)}
-              alreadyPosted={alreadyPostedIds.has(f.id)}
-              onOpenInChanges={onOpenInChanges}
-              onToggle={(included) => onToggleFinding(f.id, included)}
-              onReword={(editedBody) => onRewordFinding(f.id, editedBody)}
-              onPostComment={() => onPostFinding(f.id)}
-            />
-          ))}
-        </ul>
-      ) : (
-        <div className="text-xs text-gray-400">No line-level findings.</div>
+        >
+          <div className="divide-y divide-gray-200 dark:divide-gray-800">
+            {ticketEntries.map((entry) => (
+              <div key={entry.index} className="py-4 first:pt-0 last:pb-0">
+                <ClaudeReviewTicketResults
+                  entry={entry}
+                  label={
+                    ticketEntries.length === 1 && entry.ticket.key == null
+                      ? null
+                      : storyLabel(entry.ticket, entry.index)
+                  }
+                  findingIds={storyIds}
+                  findingsById={placement.byId}
+                  renderFinding={findingCard}
+                  changedPaths={changedPaths}
+                  onOpenInChanges={onOpenInChanges}
+                />
+              </div>
+            ))}
+          </div>
+        </ReviewSection>
       )}
+      <ReviewSection
+        title="Findings"
+        pills={
+          <>
+            <SectionCount>{plural(findings.length, 'finding', 'findings')}</SectionCount>
+            {placement.placed.size > 0 && (
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {placement.placed.size} more under {ticketEntries.length === 1 ? 'User story' : 'User stories'}
+              </span>
+            )}
+          </>
+        }
+      >
+        {findings.length > 0 ? (
+          <ul className="space-y-2">
+            {findings.map((f) =>
+              findingCard(f, f.story != null ? storyChipLabel(f.story, review.tickets) : null),
+            )}
+          </ul>
+        ) : (
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            {placement.placed.size > 0 ? 'None outside the user stories.' : 'No line-level findings.'}
+          </div>
+        )}
+      </ReviewSection>
       {chatReviewId != null && <ReviewChatSection reviewId={chatReviewId} />}
-    </div>
+    </>
   );
 }
 
-// Build the seed prompt for the AI fixer from a completed review: the reviewer's own
-// draft body when present, else Claude's summary, plus each ACTIONABLE finding. We
-// only hand the fixer real issues — findings the user IGNORED (included === false) are
-// skipped, and non-actionable severities (praise and open questions) are dropped so
-// the agent doesn't try to "fix" a compliment or a question. blocker/warning/nit stay.
-function buildReviewSeed(review: ClaudeReview): string {
-  const parts: string[] = [];
-  const head = review.userBody?.trim() || review.summary?.trim();
-  if (head) parts.push(head);
-  const findings = (review.findings ?? []).filter(
-    (f) =>
-      f.included !== false &&
-      f.severity !== 'praise' &&
-      f.severity !== 'question',
-  );
-  for (const f of findings) {
-    const loc = f.line != null ? `${f.path}:${f.line}` : f.path;
-    const body = (f.editedBody ?? f.body ?? '').trim();
-    parts.push(`- [${f.severity}] ${loc} — ${f.title}${body ? `\n  ${body}` : ''}`);
-  }
-  return parts.join('\n\n');
-}
-
-// Surface: hand a completed review to the agentic fixer. Opens the AI Fix tab seeded
-// with the review text. Free, local-only (`me.ai`); renders nothing in the cloud or
-// until a review has succeeded.
+// Surface: hand a completed review to the agentic fixer. Opens the AI Fix tab with this review
+// picked; the server builds the seed from the stored run (every item except praise). Free,
+// local-only (`me.ai`); renders nothing in the cloud or until a review has succeeded.
 function GenerateFixFromReview({
   prId,
   review,
@@ -1167,16 +1212,27 @@ function GenerateFixFromReview({
   const openAiFixFromReview = useFilters((s) => s.openAiFixFromReview);
   if (!aiFix || review?.status !== 'succeeded') return null;
   return (
-    <div className="px-4 py-3">
-      <button
-        type="button"
-        onClick={() => openAiFixFromReview(prId, buildReviewSeed(review), review.id)}
-        className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-ai-border px-2.5 py-1 text-xs text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
-      >
-        Generate fix from this review
-        <ArrowIcon dir="right" size={11} />
-      </button>
-    </div>
+    <ReviewSection
+      title="Generate a fix"
+      info={
+        <InfoButton title="Generate a fix">
+          <p>
+            Opens AI Fix with this review picked. Claude edits the code to address the findings and
+            threads still to fix. Nothing is pushed until you press the button there.
+          </p>
+        </InfoButton>
+      }
+      actions={
+        <button
+          type="button"
+          onClick={() => openAiFixFromReview(prId, review.id)}
+          className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-ai-border px-2.5 py-1 text-xs text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
+        >
+          Generate fix from this review
+          <ArrowIcon dir="right" size={11} />
+        </button>
+      }
+    />
   );
 }
 
@@ -1343,8 +1399,8 @@ export function ClaudeReviewTab({
     review?.status === 'succeeded' && review.headSha === pr.headSha;
   // The latest run against the PR's head: shown beside the Re-review button, in amber when newer
   // commits (or a rewritten history) have landed since.
-  const latestOutdated =
-    review?.status === 'succeeded' ? outdatedPhrase(review, pr.headSha) : null;
+  const latestCurrency = review?.status === 'succeeded' ? currencyOf(review, pr.headSha) : null;
+  const latestOutdated = latestCurrency?.tone === 'behind' ? latestCurrency.label : null;
 
   const runGenerate = (): void => {
     // An invalid user story never starts a run — including from the same-commit "Run anyway"
@@ -1397,13 +1453,14 @@ export function ClaudeReviewTab({
   };
 
   return (
-    <div className="divide-y divide-gray-100 py-1 dark:divide-gray-800">
+    <div className="space-y-3 px-4 py-3">
       {/* The run controls are ALWAYS shown; a missing AI runtime or Claude credential replaces
           only the Run button (AiRunGate), so past reviews and the stories stay usable.
           ⚠ THERE IS NOWHERE IN THE APP TO ENTER A KEY, AND THE LINE MUST NOT PRETEND OTHERWISE:
           both credential rungs (an ambient Claude Code session, then ANTHROPIC_API_KEY) live
           outside the SPA. */}
-        <div className="px-4 py-3">
+      <ReviewSection title="Run a review">
+        <div>
           <div className="flex flex-wrap items-center gap-2">
             <select
               value={model}
@@ -1438,21 +1495,11 @@ export function ClaudeReviewTab({
                 {autoHold === 'running' ? 'Auto review running' : 'Auto review queued'}
               </span>
             )}
-            {review?.status === 'succeeded' &&
-              (latestOutdated != null ? (
-                <span
-                  className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400"
-                  title={`Now at ${shortSha(pr.headSha)}`}
-                >
-                  <WarningIcon size={12} />
-                  Reviewed <span className="font-mono">{shortSha(review.headSha)}</span> ·{' '}
-                  {latestOutdated}
-                </span>
-              ) : (
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  Reviewed <span className="font-mono">{shortSha(review.headSha)}</span>
-                </span>
-              ))}
+            {autoHold == null && data?.autoReviewWaiting != null && (
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {AUTO_REVIEW_WAITING_LABEL[data.autoReviewWaiting]}
+              </span>
+            )}
           </div>
 
           {/* The optional user stories — collapsed by default; its header says when it holds
@@ -1489,6 +1536,13 @@ export function ClaudeReviewTab({
             </div>
           )}
 
+          {/* After an auto review of the reader's own PR: the auto fix started, or why not. */}
+          {viewingLatest && autoFixOutcomeLine(data?.autoFix) != null && (
+            <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+              {autoFixOutcomeLine(data?.autoFix)}
+            </div>
+          )}
+
           {/* An auto-review refusal is shown by the "Auto review queued/running" note instead,
               and is history once the hold ends. */}
           {generate.isError && !isAutoReviewHoldError(generate.error) && (
@@ -1501,7 +1555,7 @@ export function ClaudeReviewTab({
       {/* Running progress. The bar is mounted OUTSIDE the isRunning gate so it observes
           the running→done transition and plays its 100%→fade-out completion (it renders
           null when idle, so this adds no chrome otherwise). */}
-      <div className="px-4">
+      <div className="empty:hidden">
         <RegenProgressBar
           active={isRunning}
           label="Running Claude review"
@@ -1510,7 +1564,7 @@ export function ClaudeReviewTab({
         />
       </div>
       {isRunning && (
-        <div className="px-4 py-3">
+        <div>
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500" />
             <span>{phaseLabel}…</span>
@@ -1580,19 +1634,20 @@ export function ClaudeReviewTab({
 
       {/* Failed / cancelled. */}
       {!isRunning && review?.status === 'failed' && (
-        <div className="px-4 py-3">
+        <div>
           <div className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-700/60 dark:bg-red-900/20 dark:text-red-400">
             {review.error ?? 'The review failed.'}
           </div>
         </div>
       )}
       {!isRunning && review?.status === 'cancelled' && (
-        <div className="px-4 py-3 text-sm text-gray-400">Review cancelled.</div>
+        <div className="text-sm text-gray-500 dark:text-gray-400">Review cancelled.</div>
       )}
 
       {/* History selector. */}
       {data != null && data.history.length > 1 && (
-        <Row label="History">
+        <label className="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+          Showing
           <select
             value={selectedReviewId ?? review?.id ?? ''}
             onChange={(e) => {
@@ -1600,7 +1655,7 @@ export function ClaudeReviewTab({
               setPreview(null);
               setPostResult(null);
             }}
-            className="rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900"
+            className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           >
             {data.history.map((h) => (
               <option key={h.id} value={h.id}>
@@ -1613,8 +1668,9 @@ export function ClaudeReviewTab({
               </option>
             ))}
           </select>
-        </Row>
+        </label>
       )}
+      </ReviewSection>
 
       {/* Section A — Claude's read-only review for the shown run. */}
       {shownReview != null && shownReview.status === 'succeeded' && (
@@ -1642,16 +1698,24 @@ export function ClaudeReviewTab({
 
       {/* Section B — the authored review that gets posted (latest run only). */}
       {canEdit && review != null && review.status === 'succeeded' && review.reviewMode !== 'skip' && (
-        <div className="space-y-2 px-4 py-3">
-          <div className="flex items-center gap-1 text-sm font-semibold">
-            Review summary
-            <InfoButton title="Review summary">
+        <ReviewSection
+          title="Post to GitHub"
+          pills={
+            review.postedAt != null ? (
+              <span className="text-xs text-gray-500 dark:text-gray-400">Posted {formatDate(review.postedAt)}</span>
+            ) : null
+          }
+          info={
+            <InfoButton title="Post to GitHub">
               <p>
-                Posted as the review&apos;s top-level comment, with your verdict. The inline
-                comments are the findings above that you have not ignored or already posted.
+                Posts one review: your summary as its top-level comment, with your verdict. Every
+                finding above that you have not ignored or already posted goes with it, story
+                findings included.
               </p>
             </InfoButton>
-          </div>
+          }
+        >
+          <div className="text-xs font-medium text-gray-700 dark:text-gray-300">Summary</div>
           <MentionTextarea
             prId={pr.id}
             value={userBody}
@@ -1671,7 +1735,7 @@ export function ClaudeReviewTab({
               title="Saves the draft. Nothing is posted yet."
               className="rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
             >
-              Save
+              Save draft
             </button>
             <select
               aria-label="Verdict"
@@ -1688,18 +1752,6 @@ export function ClaudeReviewTab({
               <option value="APPROVE">Approve</option>
             </select>
           </div>
-        </div>
-      )}
-
-      {/* Post actions — latest succeeded run only. */}
-      {canEdit && review != null && review.status === 'succeeded' && review.reviewMode !== 'skip' && (
-        <div className="space-y-2 px-4 py-3">
-          <div className="text-sm font-semibold">Post to GitHub</div>
-          {review.postedAt != null && (
-            <div className="text-xs text-gray-500 dark:text-gray-400">
-              Posted {formatDate(review.postedAt)}.
-            </div>
-          )}
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -1757,7 +1809,7 @@ export function ClaudeReviewTab({
                 <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   Plus <strong>{preview.prComments.length}</strong> PR comment
                   {preview.prComments.length === 1 ? '' : 's'}:{' '}
-                  {preview.prComments.map((c) => c.path).join(', ')}
+                  {preview.prComments.map((c) => (c.path !== '' ? c.path : 'the whole change')).join(', ')}
                 </div>
               )}
             </div>
@@ -1786,7 +1838,7 @@ export function ClaudeReviewTab({
                 'Failed to post review to GitHub.'}
             </div>
           )}
-        </div>
+        </ReviewSection>
       )}
 
       {/* Hand the latest succeeded review to the agentic fixer — last, once the reader has

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ReviewSection } from './ReviewSection.js';
 import { CLAUDE_REVIEW_CHAT_MAX_QUESTION_CHARS } from '@pierre-review/shared';
 import {
   useAskClaudeReviewChat,
@@ -132,18 +133,22 @@ export function ReviewChatThread({
 export function ReviewChatSection({ reviewId }: { reviewId: number }): JSX.Element {
   const [open, setOpen] = useState(false);
   return (
-    <div className="border-t border-gray-100 pt-2 dark:border-gray-800">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
-      >
-        <CommentIcon size={13} />
-        Ask Claude about this review
-        <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
-      </button>
+    <ReviewSection
+      title="Review chat"
+      actions={
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+        >
+          <CommentIcon size={13} />
+          {open ? 'Hide' : 'Ask Claude about this review'}
+          <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
+        </button>
+      }
+    >
       {open && <ReviewChatThread reviewId={reviewId} findingId={null} />}
-    </div>
+    </ReviewSection>
   );
 }

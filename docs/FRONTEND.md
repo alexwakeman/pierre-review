@@ -284,29 +284,43 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   query while `workspaceId` is null, or the PREVIOUS workspace's `placeholderData` prints "Open PRs"
   with no figure). It is the same cache entry as the tab body and FeedIsolationBanner, so the chip
   adds an observer, not a request. The view is **THE consolidated open-PR view** — the shared
-  `OpenPrsTable` over `GET /api/open-prs`, ALWAYS workspace-wide:
-  drafts included with a "· N drafts" callout. ⚠ **IT IS A LIST OF NARROW TWO-ROW CARDS ON ONE
-  SHARED CSS GRID**, not a `<table>`: row 1 = the PR's facts (title · repo · author · age · updated ·
-  size — LoC + `BlastRadiusChip`/`LargePrFlag` as icons · untouched threads · CI · approval), row 2 =
-  the **Claude Review strip** (`ClaudeReviewStrip` in `ClaudeReviewCell.tsx`) ONLY where agentic AI
-  runs (`me.ai.enabled`). The column templates are CSS variables set ONCE on the list container
-  (`--opr-cols` / `-xl` / `-2xl` from the `GridCol` table in `OpenPrsTable.tsx`, `--opr-strip` /
-  `-xl` for the strip's five cells: outcome · findings · posted + design · context · action), and
-  every card and the header read the SAME variables — the only flexible track is the title, which
-  is what makes cells line up card to card. Never give one card its own template. Below `xl` the
-  Updated column drops (`base: null`). The cards are `role="row"` + `tabIndex=0` (Enter/Space opens,
-  only when the CARD is the target) inside `role="table"`; headers are `SortHeader as="div"`. The
-  strip has two sorts of its own: Claude review (`reviewCellRank`) and Findings (`findingsRank`, a
-  PR with no finished run BELOW a clean one). Its pills reuse the Claude Review tab's palette
-  (`SEVERITY_CLASS`, `VERDICT_CLASS`, `TICKET_ALIGNMENT_CLASS`, `FOLLOW_UP_STATUS_CLASS`,
-  `CLEAN_CLASS`/`OUTDATED_CLASS` in `lib/claudeReviewFollowUp.ts`) and every figure is the server's
-  `summary` (present only on a succeeded run): severity pills (praise left out; zero found ⇒ green
-  "No issues"), "N newer commits"/"Branch changed", posted, design-lens count, one pill per story
-  with an alignment, "Earlier: N fixed · N still open", and "N reviewer threads still valid" from
-  `summary.threadAssessments.validUnaddressed`. ⚠ **Absent is never zero**: no summary, no story
-  alignment, no follow-up, no thread assessment ⇒ nothing drawn. One batched
+  `OpenPrsCards` (`Activity/OpenPrsCards.tsx`) over `GET /api/open-prs`, ALWAYS workspace-wide:
+  drafts included with a "· N drafts" callout. ⚠ **IT IS A LIST OF CARDS WITH NO COLUMN HEADINGS**
+  (a pseudo-table with headings was tried and did not read; do not bring the shared grid back). One
+  card per PR, the Pending card shell's language (`rounded-lg border bg-white px-3.5 py-2`), FOUR
+  layers in order of importance:
+  1. **Title** — the heaviest text on the card (`text-sm font-semibold`), truncating, + a "Draft"
+     marker; the **status chips** sit on the RIGHT of the same line (wrapping below on narrow
+     screens): CI (`CI_META`; red chip when failing; NOTHING for `unknown`), review standing
+     ("Approved" / "Changes requested"; nothing otherwise), threads (`threadChipLabel`: "N
+     untouched" amber, else "N open threads", else "N resolved", with the compact
+     `ThreadStateBar`; nothing with no threads), merge readiness (`mergeVerdict()` through
+     `MERGE_TONE_CHIP`; a draft shows only `mergeVerdictWarning`'s branch facts; `unknown` and
+     `draft` draw nothing).
+  2. **Meta line** (11px): #number · repo · avatar + author · opened · updated (only when it
+     differs) · files +/− · `LargePrFlag` · `BlastRadiusChip` — the same pieces `PrMetaRow` uses.
+  3. **The Claude Review panel** (`ClaudeReviewPanel` in `ClaudeReviewCell.tsx`) ONLY where agentic
+     AI runs (`me.ai.enabled`): its own AI surface (`border-ai-border bg-ai-surface`) with a 3px
+     LEFT ACCENT coloured by outcome (`reviewTone`: red = request changes / failed, green =
+     approve, grey = comment, sky = queued/running, none = not reviewed). Left to right: "Claude" ·
+     the verdict pill (a size up — the panel's headline) + auto mark + the currency pill | severity
+     pills (praise left out; zero found ⇒ green "No issues") · "N CI failures, M explained"
+     (`ciDiagnosisLabel` over `summary.ci`) · "N threads to fix" (`threadsToFixLabel` over
+     `summary.threadAssessments.validUnaddressed`) | story alignment pills · "Earlier: N fixed / N
+     still open" · posted (muted) · design count … right: the AI Fix button ("Fixing…" / "Fix
+     ready" → `openAiFix`) and the action (**Review** / **Re-review** / **Open review**).
+  ⚠ **Absent is never zero**: no summary, no CI reading, no story alignment, no follow-up, no thread
+  assessment ⇒ nothing drawn. The pills reuse the Claude Review tab's palette
+  (`lib/claudeReviewFollowUp.ts`). **Sorting is ONE "Sort:" menu in the tab header**
+  (`OpenPrsSortMenu`; options, labels and the comparator in `lib/openPrsSort.ts`), state owned by
+  `OpenPrsDetail`: "Recent activity" (null = `sortOpenPrsByActivity`) plus every key the old headers
+  had; a pick lands on the key's natural direction and the arrow button beside it reverses it; the
+  trigger always names the order on screen ("Opened, oldest first"). The Claude keys are offered —
+  and honoured (`effectiveSort`) — only with Claude Review on. Cards are `<li tabIndex=0>` in
+  `<ul aria-label="Open pull requests">`: click or Enter/Space (only when the CARD is the target)
+  opens the PR; a click on any `a`/`button` inside does not. One batched
   `POST /api/claude-review/states` covers every listed card, click-gated starts share the tab's
-  mutation key, every strip control `stopPropagation` ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) §
+  mutation key, every panel control `stopPropagation` ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) §
   Starting from the Open PRs tab). Every opener just REVEALS it (`openOpenPrsDetail(repoId?)` →
   `showOpenPrs`): the chip and the Reports → Flow metrics "Open PRs" tile pass nothing and CLEAR
   the tab's repo dropdown; the per-repo "Show all N open PRs" footer (`RepoOpenPrList`) passes its
@@ -345,7 +359,7 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   `store/filters.ts` (`{fromActivity:true}` stamps the feed card to flash on a Back — the entry
   itself is the URL's, see the Back-button note below), a full-`<main>` overlay
   branch in `App.tsx` (MUST join `overlayActive`), and a compact chip in `PinnedTabsBar`. The
-  drill-down TABLES (the Open PRs view / bot-only-prs / bot-threads, **plus `MetricsDetail`** — now
+  drill-down TABLES (bot-only-prs / bot-threads, **plus `MetricsDetail`** — now
   retrofitted, per-tab `sortByTab` state) share `Activity/sortableTable.tsx`
   (`SortHeader`/`compare`/`nextSort`; numeric columns MUST return a number from `sortValue`, or
   `compare` localeCompares lexicographically). The rail's per-repo console remembers its Activity|Bots sub-tab in
@@ -583,11 +597,9 @@ Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix
   the comment (a judgement read before the thing it judges is backwards; it also matches the
   per-thread block) — but that list is rendered by **`PrDetail` itself**, not `ChecksTab`, which is
   why the per-comment `CommentAnnotations`/`ReviewCheckButton` call sites are there. The **Checks
-  row now also carries the CI-failure diagnosis** (`CiAnalysisCard`, `showFix={false}`) under the
-  checks list + re-run control; its visibility goes through `checksRowVisible(checkCount, ciStatus,
-  prSummary)` — the row opens for a red `ciStatus` with UNhydrated `checkRuns` (lean storage /
-  SAML-SSO) so a stored diagnosis is still reachable, but only with `prSummary`, since the card is
-  that branch's only possible content and `Row` always paints its label.
+  row** lists the checks + re-run control and opens only when there are checks to list
+  (`checksRowVisible` is DELETED with the Pro `CiAnalysisCard`: why CI failed is Claude Review's
+  "CI failures" section now — docs/CLAUDE-REVIEW.md § Failed CI on the reviewed head).
 - **Threads** — `ThreadList`/`ThreadView`: review threads grouped by file, **newest first**
   (files by most-recent thread; within a file by `createdAt` desc), with code anchors +
   new-comment highlights; each has a "Show" link. A sticky header carries **derived-state filter
@@ -1081,8 +1093,38 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
 - **Money, not credits.** Local agent runs show US$ (`formatUsd` in `lib/ui.ts`) — a credit figure
   would invent a Limn price for the reader's own spend. Track usage's agentic row does the same and
   shows only where `ai.enabled`. Credits stay on the Pro one-shot Haiku features.
-- **The CI-analysis CARD stays Pro** (`prSummary`), as does the AI summary inside the AI Fix tab;
-  both gate themselves and render nothing without the plugin. Only the card's "Fix it" is free.
+- **The Pro CI-analysis card is DELETED** (Claude Review diagnoses failing CI). The AI summary inside
+  the AI Fix tab stays Pro (`prSummary`) and renders nothing without the plugin.
+- **A user story's results are FINDING CARDS, not a post button — shown INSIDE THEIR STORY.** Every
+  not met / partly met criterion and every "Not done" item of a run arrives as an ordinary
+  `ClaudeFinding` with `story: {index, ref}` (server-made — docs/CLAUDE-REVIEW.md § User stories).
+  ⚠ **LIKE FOR LIKE, AND ONCE**: the User stories section renders each as THE SAME `FindingRow` the
+  Findings list uses (one `findingCard` builder in `ClaudesReview`, handed to
+  `ClaudeReviewTicketResults` as `renderFinding`; chip `storyItemChipLabel`: "AC2 · Partly met",
+  "Not done"), and the Findings list drops them (`placeStoryFindings(findings, tickets).placed`).
+  Met criteria are a compact line; "Not asked for" a compact list; a run stored before story
+  findings falls back to read-only rows. A story finding no story places stays in the list with
+  `storyChipLabel` ("BMD-1040 · AC2"). One with no file (`path: ''`) shows a "PR comment" chip and
+  no code anchor. "See it below" is DELETED (the card is right there).
+- **Every section of the Claude Review pane is ONE shell, `ReviewSection`** (`ReviewSection.tsx`):
+  bordered rounded box, tinted header band = sentence-case title (one size) + count pills + ⓘ +
+  right-aligned actions; cards inside keep their lighter borders (pane → section → card). Order: Run
+  a review · Claude's review · CI failures · Previous review · Review threads · User stories ·
+  Findings · Review chat · Post to GitHub (summary, verdict, Preview, Post) · Generate a fix. "CI
+  passing" is a pill in Claude's review (`ClaudeReviewCiStatus`), not a section.
+- **Is the review on the PR's current commit? ONE helper, `reviewCurrency()`
+  (`lib/claudeReviewColumn.ts`)**, read by the Claude's review header (first pill; also for a past
+  run picked in "Showing" — always against the PR's CURRENT head) and the Open PRs card's verdict
+  row (finished runs only): green "On latest commit" (the pane adds the short sha), amber "N newer
+  commits" / "1 newer commit", amber "Branch changed" when the count is 0/null (rewritten history,
+  reviewed commit not synced). Either head unknown ⇒ null, no pill. The card reads
+  `ClaudeReviewPrState.currentHeadSha` (the PR's synced head). It replaced the pane's "Outdated"
+  chip and the Previous review header's "No new commits since that review." — do not re-add either.
+  `test/claudeReviewFollowUp.test.ts` pins the section list and that no bare `<section>` remains.
+  ⚠ The per-ticket "Post as comment" (`TicketPostControl`, `usePostTicketAnalysis`,
+  `api.postClaudeTicketAnalysis`) is DELETED, and `test/claudeReviewFollowUp.test.ts` fails if any of
+  them comes back. On the Open PRs panel story findings count in the severity pills like any finding;
+  the story alignment pills are unchanged.
 - **Auto review** is `AutoReviewSection` over the CORE `GET`/`PUT /api/workspaces/:id/auto-review`
   (`hooks/useWorkspaceAutoReview.ts`), mounted on `ai.enabled` and NOT behind the plugin's
   `/api/pro/settings` gate. OFF per workspace until switched on.
@@ -1097,72 +1139,27 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   (PrDetail's `openThreadInThreads`); the GitHub link goes through `safeExternalUrl`; every comment
   and Claude string is plain text. `draftReply` offers Copy only — no route posts it.
 
-### The AI-Fix comment picker + validity report (`components/AiFix/`)
+### The AI Fix tab (`AiFixTab.tsx`, `components/AiFix/FixReport.tsx`)
 
-The `'comments'` AI-Fix seed's two UI halves. Backend contract:
-[docs/PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § "Fix from comments".
+Backend contract: [docs/CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § AI Fix.
 
-- **`CommentPicker`** — the PR's comments on the **left**, the **fix scope** basket on the right,
-  drag either way, plus "Move all" and a per-row `+`/`−`. Reading order matches the movement, and
-  the DOM order matches both, so a keyboard pass walks the list before the basket. The `+`/`−` is a
-  **full-height column down the card's right edge**, not a glyph in the header row: it is the
-  PRIMARY way into the scope (drag is the shortcut, not the reverse), it points the way the comment
-  travels, and an already-added card shows a tick rather than a greyed-out `+` — down a 60-row list
-  "done" and "broken" must not look alike. It renders inside `FixerSection`, which renders whenever
-  the AI Fix tab does (`me.ai.enabled`); a missing runtime or credential replaces only the launch
-  button (`AiRunGate`), so the basket stays usable while the reader sets AI up.
-  `disabled` while a run is in flight rather than hidden — the basket is the record of what that
-  run was given.
-- **`lib/aiFixCommentModel.ts` holds every decision** (grouping, ordering, caps, root/reply) as pure
-  functions, and the component is chrome + drag plumbing. Not a style preference: the frontend
-  vitest config has no React plugin and no jsdom, so logic is only testable at all once it is out
-  of the component.
-- **Selection lives in `store/aiFixComments.ts`** — a standalone, non-persisted, non-URL store keyed
-  by prId. NOT a `FilterDefaults` key (persistence and "Clear filters" share that list, and a
-  URL-serialized basket would let a link seed someone else's paid run), but a store rather than
-  component state because AiFixTab is lazy and its body unmounts on a tab switch. The cap is
-  enforced in the store, not just the UI: the server truncates, and a silently dropped tail means
-  watching a paid run work through a scope missing the comments you cared about.
-- **Drag is POINTER EVENTS** (the tab strip / splitter / marker-popover precedent), for two reasons:
-  one drag model in one codebase, and HTML5 DnD does not work on touch at all. ⚠ Drag is never the
-  ONLY path — the per-row `+`/`−` buttons carry `aria-label`s and are what a keyboard reaches.
-- **Ordering is imposed here, not inherited.** `getPrDetail`'s thread select has no `orderBy`, so
-  wire order is heap order and flips after any UPDATE on Postgres. Bots sort worst-finding-first
-  with **unlabelled last**, humans newest-first, and both tiebreak on the key so the result never
-  depends on input order. `praise`/`isSummary` rows are NON-findings and SINK (a walkthrough scored
-  `major` would otherwise outrank every real finding), and when there is no label data at all the
-  model reports `botsSortedBySeverity: false` so the UI can stop claiming a severity ranking —
-  ML labels exist only for bot text and only when `SEVERITY_API_URL` is set.
-- **Honesty about what the list is not**: bodies may be a ~160-char excerpt (`body ?? excerpt ?? ''`
-  with no flag), the list is capped at GitHub's page size per kind (so "Move all" ≠ everything —
-  `capNotice`), and a review comment's line is NULL for most outdated threads, in which case the
-  anchor renders as `~<line>` reconstructed from the hunk and says so. Replies are hidden behind one
-  toggle and render subordinate to their root; the basket renders from `byKey` (all comments) so a
-  deliberately-dragged reply does not vanish when replies are collapsed.
-- ⚠ The bot listing is fetched for the **PR's OWN workspace** (`useRepos()` + `pr.repoId`),
-  unnarrowed — never `filters.workspaceId`. A PR tab can hold a PR from any workspace via `?pr=`, a
-  restored tab or a search hit, and the wrong workspace's judgements are the pinned dead-control
-  regression (`test/resolvableBotThreads.test.ts`).
-- **`CommentFixReport`** — the per-comment verdicts under the fix summary, mounted ABOVE the "no
-  changes" branch because a run that correctly judged every comment invalid produces no diff at all,
-  and that is the run whose report matters most. It has NO hooks in the exported component (`seed` /
-  `commentVerdicts` are row fields, so a re-run flips the early returns and a `useMemo` above them
-  would change the hook count mid-life), issues zero requests, and returns `null` when there is
-  nothing to report. `valid` renders as its own pill next to the disposition because the two
-  diverge. Disagreement is purple, never red — the agent arguing back is a legitimate outcome.
-- ⚠ **A pushback never posts itself**: it renders as text with an editable prefilled composer and an
-  explicit Send, through core's existing thread-reply / PR-comment routes. Because a double-post is
-  not undoable, the sent claim is keyed `${fixId}|${ref}` in module state (those write hooks declare
-  no `mutationKey`, so `useIsMutating` is not reachable), claimed on click, promoted on success and
-  RELEASED on failure, and settlement chains on the `mutateAsync` promise — React Query drops
-  per-call callbacks when the component unmounts, which is exactly the tab-switch-mid-request case.
-- **The AI Fix tab carries almost no prose** (2026-10 noise sweep). How the fixer works (no shell,
-  per-comment checks, nothing pushed until Push) lives in ONE `InfoButton` beside the "AI Fix"
-  section title; the roll-up line IS the report's heading; the review handoff names itself on the
-  launch button ("Fix from review") and only the basket-outranks-review fact is a sentence.
-  "Not built or tested here." stays ON SCREEN, folded into the diff header beside the file count —
-  never moved into the popover. `verdict.learning` is on the wire but NOT rendered (it fed the
-  retired review memory).
+- **Two entry points, one model picker.** "Fix from review" uses the review handed over from the
+  Claude Review tab (`aiFixTabFocus.reviewId`, consumed into local state) or else the PR's latest
+  review when it succeeded (`useClaudeReview` — the DB-only read that tab already makes). It sends
+  ONLY `sourceReviewId`; the server builds the seed. Below it, a text box ("Or say what to fix…")
+  starts a `plain` run; its Fix button appears once there is text. The comment picker, its basket
+  store and the per-comment verdict report were DELETED with the `comments` seed.
+- **`FixReport`** renders the validated `changeReport` under the summary and ABOVE the "no
+  changes" branch (a run that judged every item wrong produces no diff, and that is the run whose
+  "Not addressed" list matters most): per changed file the summary and ref chips labelled with the
+  section (`AI_FIX_REVIEW_ITEM_LABELS`) and the item's title; then Not addressed (reason), No report,
+  and Left out (items over the prompt budget). A Finding chip is a button that opens the Claude
+  Review tab and scrolls to `claude-finding-<id>` once it renders (gives up after ~3s — an older
+  review's finding is not on screen). A file in the diff with no entry says "No summary reported."
+- **The tab carries almost no prose.** How the fixer works lives in ONE `InfoButton` beside the "AI
+  Fix" title, and one more on Changes / Left out. "Not built or tested here." stays ON SCREEN,
+  folded into the diff header beside the file count — never moved into a popover. A row from a
+  removed seed prints one source line ("Fix from picked comments (no longer offered).") and its diff.
 
 ---
 
@@ -2977,7 +2974,6 @@ migration".
 | `ChecksTab` / `AttentionCards` "Assign" buttons | suggested reviewers are deterministic CORE (CODEOWNERS + inference) — no model, so not an AI marker |
 | `MetricsDetail` / `PinnedTabsBar`'s `violet` tone (Flow metrics) | core deterministic drill-down; a generic active accent |
 | `index.css` `.tl-repo-tint-1`, the cross-person chips | timeline layout encoding |
-| `AiFix/CommentFixReport`'s `DISAGREE_COLOR` (`#8957e5`) | its own comment pins "deliberately NOT red — red would read as the fix failed"; vermilion is red-adjacent and would recreate exactly that bug |
 
 The documented split is **controls join the family, data keeps the chart palette**: the Inflation
 column's under-call COUNTS stay violet while the chip the click opens is vermilion, and the

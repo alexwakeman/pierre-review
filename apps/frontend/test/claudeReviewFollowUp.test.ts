@@ -48,6 +48,11 @@ import {
   resolveTicketDraft,
   resolveTicketDrafts,
   sortFindingsForDisplay,
+  placeStoryFindings,
+  storyChipLabel,
+  storyFindingIdFor,
+  storyFindingIds,
+  storyItemChipLabel,
   ticketDraftFromStored,
   ticketDraftsFromReview,
   ticketPanelHint,
@@ -390,7 +395,6 @@ describe('several user stories', () => {
       ref: `T${index + 1}`,
       ticket: { title: null, description: null, acceptanceCriteria: null, ...ticket },
       assessment: null,
-      posted: null,
     });
     const drafts = ticketDraftsFromReview({ tickets: [entry(jira, 0), entry({ title: 'B' }, 1)] });
     expect(drafts.map((d) => [d.title, d.source, d.key])).toEqual([
@@ -402,6 +406,76 @@ describe('several user stories', () => {
     ).toHaveLength(1);
     expect(resolveTicketDrafts([manual], { tickets: [entry(jira, 0)] })).toEqual([manual]);
     expect(resolveTicketDrafts(undefined, null)).toEqual([]);
+  });
+});
+
+// ---- story findings ----
+
+describe('story findings — each unmet story item is a finding; the section links to it', () => {
+  const findings = [
+    finding(1, 'warning'),
+    finding(2, 'warning', { story: { index: 0, ref: 'AC2' } }),
+    finding(3, 'nit', { story: { index: 0, ref: 'AC3' } }),
+    finding(4, 'warning', { path: '', line: null, story: { index: 0, ref: 'M1' } }),
+    finding(5, 'warning', { story: { index: 1, ref: 'AC2' } }),
+    // A second row for one item never happens server-side; the first one wins if it ever did.
+    finding(6, 'warning', { story: { index: 0, ref: 'AC2' } }),
+  ];
+  const ids = storyFindingIds(findings);
+
+  it('indexes this run\'s story findings by (story, item); ordinary findings are not in it', () => {
+    expect([...ids.entries()]).toEqual([
+      ['0:AC2', 2],
+      ['0:AC3', 3],
+      ['0:M1', 4],
+      ['1:AC2', 5],
+    ]);
+  });
+
+  it('a criterion row finds its card by ref, a not-done row by position; an older run finds none', () => {
+    expect(storyFindingIdFor(ids, 0, { ref: 'AC2' })).toBe(2);
+    expect(storyFindingIdFor(ids, 1, { ref: 'AC2' })).toBe(5);
+    expect(storyFindingIdFor(ids, 0, { missingIndex: 0 })).toBe(4);
+    expect(storyFindingIdFor(ids, 0, { missingIndex: 1 })).toBeNull();
+    expect(storyFindingIdFor(storyFindingIds([finding(1, 'warning')]), 0, { ref: 'AC2' })).toBeNull();
+  });
+
+  it('places each unmet item\'s finding inside its story; the rest stay in the Findings list', () => {
+    const crit = (ref: string, status: 'met' | 'not_met' | 'partly_met' | 'unclear') => ({
+      ref, text: ref, status, explanation: null, path: null, line: null,
+    });
+    const tickets = [
+      {
+        index: 0, ref: 'T1', ticket: { title: 'A', description: null, acceptanceCriteria: null, key: 'BMD-1040' },
+        assessment: {
+          alignment: 'partly_aligned' as const, summary: null,
+          criteria: [crit('AC1', 'met'), crit('AC2', 'not_met'), crit('AC3', 'partly_met')],
+          missing: [{ title: 'M', explanation: null, path: null, line: null }],
+          notRequested: [],
+        },
+      },
+      // Not checked: nothing to place.
+      { index: 1, ref: 'T2', ticket: { title: 'B', description: null, acceptanceCriteria: null }, assessment: null },
+    ];
+    const { placed } = placeStoryFindings(findings, tickets as never);
+    // 1 is ordinary, 5 belongs to a story with no assessment, 6 is a duplicate of 2.
+    expect([...placed].sort()).toEqual([2, 3, 4]);
+    // A run stored before story findings: nothing placed, every row falls back.
+    expect([...placeStoryFindings([finding(1, 'warning')], tickets as never).placed]).toEqual([]);
+    expect(storyItemChipLabel('AC2', 'partly_met')).toBe('AC2 · Partly met');
+    expect(storyItemChipLabel('M1', null)).toBe('Not done');
+  });
+
+  it('the card chip names the story item: key, else "Story N"; a not-done item says so', () => {
+    const tickets = [
+      { index: 0, ref: 'T1', ticket: { title: 'A', description: null, acceptanceCriteria: null, key: 'BMD-1040' }, assessment: null },
+      { index: 1, ref: 'T2', ticket: { title: 'B', description: null, acceptanceCriteria: null }, assessment: null },
+    ];
+    expect(storyChipLabel({ index: 0, ref: 'AC2' }, tickets)).toBe('BMD-1040 · AC2');
+    expect(storyChipLabel({ index: 0, ref: 'M1' }, tickets)).toBe('BMD-1040 · Not done');
+    expect(storyChipLabel({ index: 1, ref: 'AC1' }, tickets)).toBe('Story 2 · AC1');
+    // A re-raise of an older run's story finding whose ticket this run does not carry.
+    expect(storyChipLabel({ index: 4, ref: 'AC1' }, tickets)).toBe('Story · AC1');
   });
 });
 
@@ -434,6 +508,62 @@ describe('source guards', () => {
       const mounts = all.match(new RegExp(`<${name}\\b`, 'g')) ?? [];
       expect(mounts.length, name).toBe(1);
     }
+  });
+
+  it('the per-ticket "Post as comment" is gone: no post control, no hook, no client call', () => {
+    const all = walk(SRC)
+      .map((f) => code(readFileSync(f, 'utf8')))
+      .join('\n');
+    expect(all).not.toMatch(/TicketPostControl|usePostTicketAnalysis|useTicketPostPending/);
+    expect(code(readFileSync(join(SRC, 'api/client.ts'), 'utf8'))).not.toMatch(/tickets\/\$\{index\}\/post|postClaudeTicketAnalysis/);
+  });
+
+  it('like for like: a story finding renders as THE finding card inside its story, and once', () => {
+    const tab = code(read('components/ClaudeReviewTab.tsx'));
+    // ONE card builder, used by the Findings list AND passed to the story block.
+    expect(tab.match(/<FindingRow\b/g) ?? []).toHaveLength(1);
+    expect(tab).toMatch(/renderFinding=\{findingCard\}/);
+    expect(tab).toMatch(/findingIds=\{storyIds\}/);
+    // The Findings list leaves out every finding the stories section shows.
+    expect(tab).toMatch(/review\.findings\.filter\(\(f\) => !placement\.placed\.has\(f\.id\)\)/);
+    // A story finding the stories cannot place keeps its chip in the list.
+    expect(tab).toMatch(/f\.story != null \? storyChipLabel\(f\.story, review\.tickets\) : null/);
+    const fu = code(read('components/ClaudeReviewFollowUp.tsx'));
+    expect(fu).toMatch(/storyFindingIdFor\(findingIds, entry\.index, \{ ref: c\.ref \}\)/);
+    expect(fu).toMatch(/storyFindingIdFor\(findingIds, entry\.index, \{ missingIndex: i \}\)/);
+    expect(fu).toMatch(/renderFinding\(f, storyItemChipLabel\(/);
+    // No "See it below" jump any more: the card is right there.
+    expect(fu).not.toMatch(/See it below|StoryFindingJump/);
+  });
+
+  it('every section of the Claude Review pane renders through the ONE ReviewSection shell', () => {
+    const files = [
+      'components/ClaudeReviewTab.tsx',
+      'components/ClaudeReviewFollowUp.tsx',
+      'components/ClaudeReviewThreads.tsx',
+      'components/ClaudeReviewCiFailures.tsx',
+      'components/ClaudeReviewChat.tsx',
+    ];
+    const titles = files.flatMap((f) => [...code(read(f)).matchAll(/<ReviewSection\s+title="([^"]+)"/g)].map((m) => m[1]));
+    expect(titles.sort()).toEqual(
+      [
+        'CI failures',
+        "Claude's review",
+        'Findings',
+        'Generate a fix',
+        'Post to GitHub',
+        'Previous review',
+        'Review chat',
+        'Review threads',
+        'Run a review',
+      ].sort(),
+    );
+    // The stories section's title is singular or plural; it is a ReviewSection too.
+    expect(code(read('components/ClaudeReviewTab.tsx'))).toMatch(
+      /<ReviewSection\s+title=\{ticketEntries\.length === 1 \? 'User story' : 'User stories'\}/,
+    );
+    // No hand-rolled <section> left in the pane's components.
+    for (const f of files) expect(code(read(f)), f).not.toMatch(/<section\b/);
   });
 
   it('the "Already posted" chip is wired into the findings list', () => {

@@ -1,4 +1,4 @@
-// THE OPEN PRs TABLE'S "Claude review" COLUMN — the pure half.
+// THE OPEN PRs CARDS' CLAUDE REVIEW PANEL — the pure half.
 //
 //   1. THE CELL: no run → Review; a start in flight → disabled "Starting…"; queued / running →
 //      disabled; succeeded → the verdict as a link, plus Re-review only when the head moved;
@@ -7,7 +7,9 @@
 //   3. THE FILL: one helper (`fillDraftFromJira`) for the panel and the list.
 //   4. THE LIST'S USER STORY: a re-review reuses the stored ticket; else the first FILLABLE Jira
 //      ticket is filled the panel's way; the run starts EITHER WAY, with a note, never a throw.
-//   5. THE WIRING: the column is capability-gated and every cell control stops propagation.
+//   5. THE WIRING: the panel is capability-gated and every panel control stops propagation.
+//   7. THE PANEL: its outcome accent, the CI-failure line and the threads-to-fix line, each null
+//      (render nothing) where the run did not look.
 //   6. AUTO REVIEW: a queued (in its lane, no row) or running auto review HOLDS the PR — no button,
 //      even over a start in flight — the column keeps polling while one is queued, every auto run
 //      carries the "Auto review" marker, and a 409 AutoReviewInProgress keeps the button shut.
@@ -28,13 +30,16 @@ import {
   findingTotal,
   findingsRank,
   followUpTally,
-  outdatedLabel,
+  reviewCurrency,
   severityPills,
   anyReviewInFlight,
   heldByAutoReview,
   resolveListTicket,
   reviewCellFor,
   reviewCellRank,
+  reviewTone,
+  ciDiagnosisLabel,
+  threadsToFixLabel,
 } from '../src/lib/claudeReviewColumn.js';
 import { fillDraftFromJira, type AcMemoryStore } from '../src/lib/jiraTicket.js';
 import { EMPTY_TICKET_DRAFT } from '../src/lib/claudeReviewFollowUp.js';
@@ -100,12 +105,27 @@ describe('the strip figures', () => {
     expect(severityPills(clean)).toEqual([]);
   });
 
-  it('outdated says how far behind, or only that the branch changed', () => {
-    expect(outdatedLabel({ headMoved: false, commitsSince: 3 })).toBeNull();
-    expect(outdatedLabel({ headMoved: true, commitsSince: 1 })).toBe('1 newer commit');
-    expect(outdatedLabel({ headMoved: true, commitsSince: 4 })).toBe('4 newer commits');
-    expect(outdatedLabel({ headMoved: true, commitsSince: null })).toBe('Branch changed');
-    expect(outdatedLabel({ headMoved: true })).toBe('Branch changed');
+  it('currency: on the latest commit, N newer, 1 newer, branch changed, or nothing when unknown', () => {
+    const A = 'a'.repeat(40);
+    const B = 'b'.repeat(40);
+    const cur = reviewCurrency({ reviewedHeadSha: A, currentHeadSha: A, commitsSince: 0 });
+    expect(cur).toMatchObject({ tone: 'current', label: 'On latest commit', sha: 'aaaaaaa' });
+    expect(cur!.className).toContain('green');
+    // A stray count never makes a current review "behind".
+    expect(reviewCurrency({ reviewedHeadSha: A, currentHeadSha: A, commitsSince: 3 })!.tone).toBe('current');
+
+    const many = reviewCurrency({ reviewedHeadSha: A, currentHeadSha: B, commitsSince: 4 });
+    expect(many).toMatchObject({ tone: 'behind', label: '4 newer commits', sha: 'bbbbbbb' });
+    expect(many!.className).toContain('orange');
+    expect(reviewCurrency({ reviewedHeadSha: A, currentHeadSha: B, commitsSince: 1 })!.label).toBe('1 newer commit');
+    expect(reviewCurrency({ reviewedHeadSha: A, currentHeadSha: B, commitsSince: 0 })!.label).toBe('Branch changed');
+    expect(reviewCurrency({ reviewedHeadSha: A, currentHeadSha: B, commitsSince: null })!.label).toBe('Branch changed');
+    expect(reviewCurrency({ reviewedHeadSha: A, currentHeadSha: B })!.label).toBe('Branch changed');
+
+    // Unknown either side: say nothing (no reading is never "current").
+    expect(reviewCurrency({ reviewedHeadSha: A, currentHeadSha: null })).toBeNull();
+    expect(reviewCurrency({ reviewedHeadSha: A, currentHeadSha: undefined })).toBeNull();
+    expect(reviewCurrency({ reviewedHeadSha: null, currentHeadSha: A })).toBeNull();
   });
 
   it('follow-up folds to fixed / still open; nothing to say is null, never zeros', () => {
@@ -326,21 +346,38 @@ describe("resolveListTicket — the list's user story", () => {
 describe('the wiring', () => {
   const src = (p: string) => readFileSync(join(__dirname, '..', 'src', p), 'utf8');
 
-  it('the column and its request are gated on the FREE agentic AI flag (me.ai), never Pro', () => {
-    const table = src('components/Activity/OpenPrsTable.tsx');
-    expect(table).toMatch(/const claudeOn = useAiCapabilities\(\)\.enabled;/);
-    expect(table).not.toMatch(/useProCapabilities/);
-    expect(table).toMatch(/useClaudeReviewStates\(prIds, claudeOn\)/);
-    expect(table).toMatch(/\{claudeOn && \(\s*<div className="grid[^"]*--opr-strip[^"]*">\s*<SortHeader as="div" col="claude"/);
-    expect(table).toMatch(/\{claudeOn && \(\s*<div[^>]*>\s*<ClaudeReviewStrip/);
+  it('the panel and its request are gated on the FREE agentic AI flag (me.ai), never Pro', () => {
+    const cards = src('components/Activity/OpenPrsCards.tsx');
+    expect(cards).toMatch(/const claudeOn = useAiCapabilities\(\)\.enabled;/);
+    expect(cards).not.toMatch(/useProCapabilities/);
+    expect(cards).toMatch(/useClaudeReviewStates\(prIds, claudeOn\)/);
+    expect(cards).toMatch(/claudeOn \? \(\s*<ClaudeReviewPanel/);
+    // One batched request for the list — never a states hook inside the card.
+    expect(src('components/Activity/ClaudeReviewCell.tsx')).not.toMatch(/useClaudeReviewStates/);
+  });
+
+  it('no column headings: the order comes from the Sort menu', () => {
+    const cards = src('components/Activity/OpenPrsCards.tsx');
+    expect(cards).not.toMatch(/SortHeader|columnheader|role="table"/);
+    expect(src('components/Activity/OpenPrsDetail.tsx')).toMatch(/<OpenPrsSortMenu sort=\{sort\} onChange=\{setSort\} \/>/);
   });
 
   it('every cell control stops propagation (the row opens the PR)', () => {
     const cell = src('components/Activity/ClaudeReviewCell.tsx');
     const onClicks = cell.match(/onClick=\{[^}]*\}?/g) ?? [];
     expect(onClicks.length).toBeGreaterThan(0);
-    for (const c of onClicks) expect(c).toMatch(/onClick=\{(run|stop|\(e\) => \{)/);
+    for (const c of onClicks) expect(c).toMatch(/onClick=\{(run|stop|open|\(e\) => \{)/);
+    // Every inline handler starts by stopping propagation.
+    expect(cell.match(/onClick=\{\(e\) => \{\s*e\.stopPropagation\(\);/g)?.length).toBe(
+      cell.match(/onClick=\{\(e\) => \{/g)?.length,
+    );
     expect(cell).toMatch(/const run = \(e: MouseEvent\): void => \{\s*e\.stopPropagation\(\);/);
+    expect(cell).toMatch(/const open = \(e: MouseEvent\): void => \{\s*e\.stopPropagation\(\);/);
+  });
+
+  it('the outcome pill opens the review (done, running and failed)', () => {
+    const cell = src('components/Activity/ClaudeReviewCell.tsx');
+    expect((cell.match(/onClick=\{open\}/g) ?? []).length).toBe(3);
   });
 
   it('the cell marks auto runs and shows a 409 AutoReviewInProgress only while the hold lasts', () => {
@@ -364,5 +401,35 @@ describe('the wiring', () => {
     const hooks = src('hooks/useClaudeReview.ts');
     expect(hooks.match(/mutationKey: claudeReviewStartKey\(prId\),\n/g)).toHaveLength(2);
     expect(src('components/ClaudeReviewTab.tsx')).toMatch(/disabled=\{isRunning \|\| starting/);
+  });
+});
+
+describe('the panel', () => {
+  it('the accent follows the outcome', () => {
+    expect(reviewTone({ kind: 'start' })).toBe('none');
+    expect(reviewTone({ kind: 'start', failed: true })).toBe('bad');
+    expect(reviewTone({ kind: 'running' })).toBe('active');
+    expect(reviewTone({ kind: 'queued', auto: true })).toBe('active');
+    expect(reviewTone(reviewCellFor(st({ verdict: 'REQUEST_CHANGES' }), false))).toBe('bad');
+    expect(reviewTone(reviewCellFor(st({ verdict: 'APPROVE' }), false))).toBe('ok');
+    expect(reviewTone(reviewCellFor(st({ verdict: 'COMMENT' }), false))).toBe('neutral');
+    expect(reviewTone(reviewCellFor(st({ verdict: null }), false))).toBe('neutral');
+  });
+
+  it('CI failures: nothing when the run did not look or nothing failed', () => {
+    expect(ciDiagnosisLabel(undefined)).toBeNull();
+    expect(ciDiagnosisLabel({ failing: 0, diagnosed: 0 })).toBeNull();
+    expect(ciDiagnosisLabel({ failing: 1, diagnosed: 1 })).toBe('1 CI failure explained');
+    expect(ciDiagnosisLabel({ failing: 3, diagnosed: 3 })).toBe('3 CI failures explained');
+    expect(ciDiagnosisLabel({ failing: 3, diagnosed: 1 })).toBe('3 CI failures, 1 explained');
+    expect(ciDiagnosisLabel({ failing: 2, diagnosed: 0 })).toBe('2 CI failures, none explained');
+  });
+
+  it('threads to fix: nothing when none, or when the run did not judge threads', () => {
+    expect(threadsToFixLabel({})).toBeNull();
+    const counts = { total: 3, assessed: 3, validUnaddressed: 0, notValid: 1, addressed: 2, notChecked: 0 };
+    expect(threadsToFixLabel({ threadAssessments: counts })).toBeNull();
+    expect(threadsToFixLabel({ threadAssessments: { ...counts, validUnaddressed: 1 } })).toBe('1 thread to fix');
+    expect(threadsToFixLabel({ threadAssessments: { ...counts, validUnaddressed: 2 } })).toBe('2 threads to fix');
   });
 });

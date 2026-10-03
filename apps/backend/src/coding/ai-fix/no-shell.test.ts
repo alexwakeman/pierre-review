@@ -5,16 +5,13 @@
 // Bash; DISALLOWED_TOOLS denies it outright), pinned by that repo's coding/tool-surface.test.ts.
 // This file pins the text, because the two failing apart is expensive in a specific way: a prompt
 // that still offers a shell spends a refused tool call — one of the 40 turns and a slice of the $3
-// budget — every time the model reaches for one, and the CI-analysis prompt's answer is stored raw
-// and RENDERED to the reader, so a stale capability sentence is a false claim on screen, not just
-// a wasted turn.
+// budget — every time the model reaches for one.
 import { describe, expect, it } from 'vitest';
-import { buildFixSystemPrompt, buildFixCommentsSystemPrompt } from './prompts.js';
+import { buildFixSystemPrompt } from './prompts.js';
 
 describe('the fix prompts offer no shell', () => {
-  // WORKTREE_RULES is interpolated into BOTH fix prompts, so one edit reaches both — that is the
-  // point of the constant. Asserting over both is what makes a drift between them fail here.
-  const both = [buildFixSystemPrompt(), buildFixCommentsSystemPrompt()];
+  // ONE fix system prompt now (both seeds share it); WORKTREE_RULES is the constant it carries.
+  const both = [buildFixSystemPrompt()];
 
   it('never names Bash or offers to run a command', () => {
     for (const p of both) {
@@ -45,6 +42,3 @@ describe('the fix prompts offer no shell', () => {
   });
 });
 
-// (The CI-analysis prompt's half — it DESCRIBES this fixer, and is stored raw and rendered — is
-// Pro and stayed with the prompt: packages/pro/test/ai-fix-no-shell.test.ts. Change the two
-// together.)

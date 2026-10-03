@@ -1,9 +1,10 @@
 import type { CheckLogsResponse } from '@pierre-review/shared';
-import { ghRestGetRaw } from './client.js';
+import { ghRestGetRaw, isRateLimitError } from './client.js';
+import { isLimited, noteLimited } from './rate-budget.js';
 
 // Fetch a WINDOW of a GitHub Actions job's log, live (never stored). Extracted from the
-// /api/prs/:id/checks/:jobId/logs route so both that route and the Pro CI-analysis seam
-// share one implementation. Takes an explicit account token as its first arg (so it works
+// /api/prs/:id/checks/:jobId/logs route so that route and Claude Review's CI-failure reads
+// (review/claude-review/ci-failures.ts, through AgentContext.ci) share one implementation. Takes an explicit account token as its first arg (so it works
 // in cloud too). Degrades to { available:false, reason } on any GitHub error (expired
 // logs / re-run / no actions:read / network) instead of throwing.
 //
@@ -19,8 +20,8 @@ import { ghRestGetRaw } from './client.js';
 // MEMORY BOUND: every path is capped at MAX_LOG_BYTES. Even when the source ignores our
 // Range header and streams the whole log back, we read through a rolling buffer that
 // keeps at most ~2×cap in memory and reports `truncated:true`. (The previous
-// implementation did a bare `await res.text()` on the WHOLE log — and the Pro CI-analysis
-// path calls it with tail=0, i.e. the whole thing — so a big log was an unbounded
+// implementation did a bare `await res.text()` on the WHOLE log — and the since-retired Pro
+// CI-analysis path called it with tail=0, i.e. the whole thing — so a big log was an unbounded
 // allocation on the shared event loop.)
 //
 // BYTE OFFSETS ARE IN SOURCE-BYTE SPACE. The returned `text` is line-ending-normalised for
@@ -63,6 +64,27 @@ function unavailable(reason: string): CheckLogsResponse {
     hasMore: false,
     truncated: false,
   };
+}
+
+const RATE_LIMITED_REASON = 'GitHub rate limit reached. Try again shortly.';
+
+/**
+ * A 403/429 from api.github.com that is a RATE LIMIT (the shared `isRateLimitError` classifier,
+ * fed the status, headers and the small JSON error body). Reads the body; never throws.
+ */
+async function rateLimitOf(res: Response): Promise<{ limited: boolean; resumeAt: Date | null }> {
+  if (res.status !== 403 && res.status !== 429) return { limited: false, resumeAt: null };
+  let message = '';
+  try {
+    message = (await res.text()).slice(0, 2000);
+  } catch {
+    /* no body — the status and headers decide */
+  }
+  const headers: Record<string, string> = {};
+  res.headers?.forEach((v, k) => {
+    headers[k] = v;
+  });
+  return isRateLimitError({ status: res.status, headers, message });
 }
 
 function reasonForStatus(status: number): string {
@@ -203,8 +225,12 @@ export async function fetchActionsJobLog(
   name: string,
   jobId: number,
   opts: number | JobLogWindow = {},
+  // The account whose token this is. Given ⇒ a known hard limit skips the read, and a
+  // rate-limited reply is fed to its budget (the commit-checks.ts / compare.ts rule).
+  meta: { accountId?: number } = {},
 ): Promise<CheckLogsResponse> {
   const w: JobLogWindow = typeof opts === 'number' ? { tail: opts } : (opts ?? {});
+  if (meta.accountId != null && isLimited(meta.accountId)) return unavailable(RATE_LIMITED_REASON);
 
   // ---- decide the window we want, in bytes ----
   const explicit = w.startByte != null || w.endByte != null;
@@ -263,7 +289,12 @@ export async function fetchActionsJobLog(
       // Some responses hand back the log inline instead of redirecting.
       res = redirect;
     } else {
+      const rl = await rateLimitOf(redirect);
       await redirect.body?.cancel().catch(() => {});
+      if (rl.limited) {
+        if (meta.accountId != null) noteLimited(meta.accountId, rl.resumeAt);
+        return unavailable(RATE_LIMITED_REASON);
+      }
       return unavailable(reasonForStatus(redirect.status));
     }
 

@@ -26,10 +26,8 @@ import type {
   RequestChangesBody,
   RequestChangesResult,
   CheckLogsResponse,
-  CiAnalysisResponse,
   CiRerunBody,
   CiRerunResult,
-  FailingCheckInput,
   GenerateFixBody,
   GenerateReviewBody,
   PrSummaryResponse,
@@ -139,7 +137,6 @@ import type {
   OpenPrsResponse,
   PostCommentResult,
   PostReviewPreview,
-  PostTicketAnalysisResult,
   PostReviewResult,
   PrDetail,
   PrFilesResponse,
@@ -1266,12 +1263,6 @@ export const api = {
         ...(tickets != null && tickets.length > 0 ? { tickets } : {}),
       } satisfies GenerateReviewBody),
     ).then((r) => handle<{ reviewId: number; status: string }>(r)),
-  // Post ONE ticket's analysis as a PR-level comment, once. `visible: false` = it IS on GitHub,
-  // only the local copy is missing: never offer a retry (it would post twice).
-  postClaudeTicketAnalysis: (reviewId: number, index: number) =>
-    fetch(`/api/claude-reviews/${reviewId}/tickets/${index}/post`, jsonBody('POST')).then((r) =>
-      handle<PostTicketAnalysisResult>(r),
-    ),
   // The Open PRs table's "Claude review" column: the LATEST run for each listed PR, ONE request
   // for the whole table. DB-only; at most CLAUDE_REVIEW_STATES_MAX_IDS ids (the route 400s over).
   claudeReviewStates: (prIds: number[]) =>
@@ -1337,12 +1328,6 @@ export const api = {
   refreshAiFixSummary: (prId: number) =>
     fetch(`/api/pro/prs/${prId}/summary/refresh`, jsonBody('POST')).then((r) =>
       handle<PrSummaryResponse>(r),
-    ),
-  aiFixCiAnalysis: (prId: number) =>
-    get<CiAnalysisResponse>(`/api/pro/prs/${prId}/ci-analysis`),
-  refreshAiFixCiAnalysis: (prId: number, checks: FailingCheckInput[]) =>
-    fetch(`/api/pro/prs/${prId}/ci-analysis`, jsonBody('POST', { checks })).then(
-      (r) => handle<CiAnalysisResponse>(r),
     ),
   aiFix: (prId: number) => get<AiFixResponse>(`/api/pro/prs/${prId}/ai-fix`),
   aiFixStatus: (prId: number) =>

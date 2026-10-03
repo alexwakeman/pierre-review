@@ -16,35 +16,25 @@ export function buildSubmitFixShape(z: ZodNs) {
     summary: z.string(),
     // A conventional-commit-style message for the commit the host will create.
     commitMessage: z.string(),
-    // OPTIONAL per-item dispositions, for a run that was seeded with a LIST of things to work
-    // through (today: the "fix from comments" seed, where each entry is one review comment the
-    // user picked). The caller's prompt is what assigns the `ref` labels and asks for these; a
-    // plain / CI-seeded run leaves this absent, which is why it must stay optional — an agent
-    // that has no list to report on should not be made to invent one.
-    //
-    // As with `summary`, this is the agent's SELF-REPORT and is stored as commentary, never as
-    // the changeset: `filesTouched` is advisory and the authoritative diff still comes from git.
-    commentVerdicts: z
+    // The per-change report: ONE entry per file the agent changed — what changed and why, and the
+    // refs of the task items (F3, T1, S1-AC2, C1, P2 …) that change addresses. Optional at the
+    // schema level so a run that changed nothing is not made to invent one; the prompt asks for it.
+    // As with `summary`, this is a SELF-REPORT stored as commentary: the authoritative changeset
+    // still comes from git, and the manager drops any ref the run was not shown.
+    changes: z
       .array(
         z.object({
-          // The label from the prompt (e.g. "C3"). The caller maps it back to a real comment.
-          ref: z.string(),
-          verdict: z.enum([
-            "fixed",
-            "partially_fixed",
-            "already_addressed",
-            "invalid",
-            "out_of_scope",
-            "needs_human",
-          ]),
-          // Whether the comment was technically correct, independent of whether it was acted on.
-          valid: z.boolean(),
-          reasoning: z.string(),
-          // An argued rebuttal — set ONLY when disagreeing with the comment.
-          pushback: z.string().optional(),
-          filesTouched: z.array(z.string()).optional(),
+          path: z.string(),
+          // 1–3 sentences: what changed and why.
+          summary: z.string(),
+          refs: z.array(z.string()).optional(),
         }),
       )
+      .optional(),
+    // Items the agent deliberately did NOT fix, each with the reason (wrong, out of scope, needs
+    // a person, already done …).
+    unaddressed: z
+      .array(z.object({ ref: z.string(), reason: z.string() }))
       .optional(),
   };
 }

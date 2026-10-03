@@ -8,7 +8,7 @@
 //
 // ⚠ A REAL Fastify with its DEFAULT ajv (so `removeAdditional` is in the path). The start route
 // validates `model` in the HANDLER, not with a body schema, precisely so ajv cannot silently strip
-// `seed` / `reviewText` / `commentTargets` — "the seed fields still reach startFix" is the
+// `seed` / `instruction` / `sourceReviewId` — "the seed fields still reach startFix" is the
 // assertion that would catch a schema added later without every key declared. The manager, the
 // persistence layer and the PR lookups are mocked: no queue, no DB, no model, no git.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,18 +36,30 @@ const SUCCEEDED_FIX = {
   commitMessage: 'fix: the thing',
   summary: 'Fixed the thing.',
   model: 'claude-opus-5-5',
+  // A row from the REMOVED comments seed, with its legacy JSON still on it.
+  seed: 'comments',
+  commentTargets: '[{"ref":"C1"}]',
+  commentVerdicts: 'not json',
+  trigger: null,
+  reviewItems: null,
+  changeReport: null,
 };
 const markFixPushed = vi.fn(async () => {});
 
-vi.mock('./persist.js', () => ({
-  getFixById: vi.fn(async () => SUCCEEDED_FIX),
-  getLatestFix: vi.fn(async () => null),
-  listFixHistory: vi.fn(async () => []),
-  markFixPushed: (...args: unknown[]) => (markFixPushed as (...a: unknown[]) => unknown)(...args),
-  parseCommentTargets: vi.fn(() => null),
-  parseCommentVerdicts: vi.fn(() => null),
-  parseFilesChanged: vi.fn(() => []),
-}));
+vi.mock('./persist.js', async (importOriginal) => {
+  // The REAL parsers: "a row from a removed seed still reads" is a claim about them.
+  const real = await importOriginal<typeof import('./persist.js')>();
+  return {
+    getFixById: vi.fn(async () => SUCCEEDED_FIX),
+    getLatestFix: vi.fn(async () => null),
+    listFixHistory: vi.fn(async () => []),
+    markFixPushed: (...args: unknown[]) => (markFixPushed as (...a: unknown[]) => unknown)(...args),
+    parseReviewItems: real.parseReviewItems,
+    parseChangeReport: real.parseChangeReport,
+    parseTrigger: real.parseTrigger,
+    parseFilesChanged: real.parseFilesChanged,
+  };
+});
 
 vi.mock('./pr-context.js', () => ({
   getFixPrContext: vi.fn(async () => ({
@@ -116,7 +128,7 @@ describe('POST /api/pro/prs/:id/ai-fix — the model', () => {
 
   it('no model ⇒ the default', async () => {
     const app = await build();
-    const res = await start(app, { seed: 'plain' });
+    const res = await start(app, { seed: 'plain', instruction: 'Fix the typo.' });
     expect(res.statusCode).toBe(202);
     expect(startFix).toHaveBeenCalledTimes(1);
     expect(startArg().model).toBe(DEFAULT_AI_FIX_MODEL);
@@ -125,7 +137,7 @@ describe('POST /api/pro/prs/:id/ai-fix — the model', () => {
 
   it('an explicit null model ⇒ the default', async () => {
     const app = await build();
-    const res = await start(app, { model: null });
+    const res = await start(app, { model: null, instruction: 'Fix the typo.' });
     expect(res.statusCode).toBe(202);
     expect(startArg().model).toBe(DEFAULT_AI_FIX_MODEL);
     await app.close();
@@ -133,7 +145,7 @@ describe('POST /api/pro/prs/:id/ai-fix — the model', () => {
 
   it('an offered model ⇒ that model', async () => {
     const app = await build();
-    const res = await start(app, { model: 'claude-sonnet-5' });
+    const res = await start(app, { model: 'claude-sonnet-5', instruction: 'Fix the typo.' });
     expect(res.statusCode).toBe(202);
     expect(startArg().model).toBe('claude-sonnet-5');
     await app.close();
@@ -163,34 +175,111 @@ describe('POST /api/pro/prs/:id/ai-fix — the model', () => {
 
   it('the seed fields still reach startFix (nothing stripped them)', async () => {
     const app = await build();
-    const review = await start(app, { seed: 'review', reviewText: 'Rename the helper.' });
+    const review = await start(app, { seed: 'review', sourceReviewId: 41, reviewText: 'ignored' });
     expect(review.statusCode).toBe(202);
     expect(startArg()).toMatchObject({
       seed: 'review',
-      seedText: 'Rename the helper.',
+      sourceReviewId: 41,
+      trigger: 'manual',
       model: DEFAULT_AI_FIX_MODEL,
     });
+    // The review seed is built server-side from the stored run: no client text reaches it.
+    expect(startArg().instruction).toBeUndefined();
 
     startFix.mockClear();
-    const comments = await start(app, {
-      model: 'claude-sonnet-5',
-      seed: 'comments',
-      reviewText: 'must not be forwarded for the comments seed',
-      commentTargets: [
-        { kind: 'review_comment', id: 101 },
-        { kind: 'pr_comment', id: 202 },
-      ],
-    });
-    expect(comments.statusCode).toBe(202);
+    const plain = await start(app, { model: 'claude-sonnet-5', instruction: '  Rename the helper. ' });
+    expect(plain.statusCode).toBe(202);
     expect(startArg()).toMatchObject({
-      seed: 'comments',
+      seed: 'plain',
       model: 'claude-sonnet-5',
-      commentTargets: [
-        { kind: 'review_comment', id: 101 },
-        { kind: 'pr_comment', id: 202 },
-      ],
+      instruction: 'Rename the helper.',
+      sourceReviewId: null,
     });
-    expect(startArg().seedText).toBeUndefined();
+    await app.close();
+  });
+});
+
+describe('POST /api/pro/prs/:id/ai-fix — the two entry points', () => {
+  it("the removed seeds ('comments', 'ci_analysis') ⇒ 400 SeedRemoved, no run", async () => {
+    const app = await build();
+    for (const seed of ['comments', 'ci_analysis']) {
+      const res = await start(app, {
+        seed,
+        instruction: 'x',
+        commentTargets: [{ kind: 'review_comment', id: 1 }],
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toEqual({
+        error: 'SeedRemoved',
+        message: 'That kind of fix is no longer offered. Reload the page.',
+      });
+    }
+    expect(startFix).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('an unknown seed ⇒ 400 UnknownSeed', async () => {
+    const app = await build();
+    for (const seed of ['everything', 5, null]) {
+      const res = await start(app, { seed, instruction: 'x' });
+      // null reads as "omitted" ⇒ plain, which is fine with an instruction.
+      if (seed === null) expect(res.statusCode).toBe(202);
+      else expect(res.json()).toMatchObject({ error: 'UnknownSeed' });
+    }
+    await app.close();
+  });
+
+  it('plain needs a non-blank instruction under the cap', async () => {
+    const app = await build();
+    for (const instruction of [undefined, '', '   ', 7]) {
+      const res = await start(app, { seed: 'plain', instruction });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: 'InstructionRequired' });
+    }
+    const long = await start(app, { seed: 'plain', instruction: 'x'.repeat(4001) });
+    expect(long.json()).toMatchObject({ error: 'InstructionTooLong' });
+    expect(startFix).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('review needs a positive integer review id', async () => {
+    const app = await build();
+    for (const sourceReviewId of [undefined, 0, -3, 1.5, '41']) {
+      const res = await start(app, { seed: 'review', sourceReviewId });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: 'ReviewRequired' });
+    }
+    expect(startFix).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('maps the manager refusals', async () => {
+    const app = await build();
+    startFix.mockResolvedValueOnce({ status: 'review_unavailable' } as never);
+    expect((await start(app, { seed: 'review', sourceReviewId: 41 })).json()).toMatchObject({
+      error: 'ReviewUnavailable',
+    });
+    startFix.mockResolvedValueOnce({ status: 'nothing_to_fix' } as never);
+    const r = await start(app, { seed: 'review', sourceReviewId: 41 });
+    expect(r.statusCode).toBe(409);
+    expect(r.json()).toMatchObject({ error: 'NothingToFix' });
+    await app.close();
+  });
+});
+
+describe('GET /api/pro/ai-fixes/:fixId — rows from removed seeds still read', () => {
+  it('a comments-seeded row answers 200 with the history fields, never 500', async () => {
+    const app = await build();
+    const res = await app.inject({ method: 'GET', url: '/api/pro/ai-fixes/9' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      id: 9,
+      seed: 'comments',
+      trigger: 'manual',
+      reviewItems: null,
+      changeReport: null,
+    });
+    expect(res.json()).not.toHaveProperty('commentVerdicts');
     await app.close();
   });
 });

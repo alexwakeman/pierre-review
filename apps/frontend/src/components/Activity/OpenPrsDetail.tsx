@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { TimelinePr } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useScopedOpenPrs } from '../../hooks/useTriage.js';
@@ -7,13 +7,14 @@ import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { indexUsers } from '../../lib/ui.js';
 import { RefreshIcon } from '../Icons.js';
 import { MetricRepoFilter } from './MetricRepoFilter.js';
-import { OpenPrsTable } from './OpenPrsTable.js';
+import { OpenPrsCards, OpenPrsSortMenu } from './OpenPrsCards.js';
+import type { OpenPrsSort } from '../../lib/openPrsSort.js';
 
 // The fixed Open PRs tab — one of the three permanent views (Activity · Open PRs · Timeline), so it
-// is always the WHOLE active workspace: the shared sortable OpenPrsTable over /api/open-prs. Every
+// is always the WHOLE active workspace: one card per open PR (OpenPrsCards) over /api/open-prs. Every
 // opener (the tab chip, the Reports → Flow metrics "Open PRs" tile, the per-repo "Show all N open
 // PRs" footer) just reveals it; the footer also pre-selects its repo in the tab's own dropdown.
-// Clicking a row opens the PR's detail tab.
+// Clicking a card opens the PR's detail tab. The order is the header's Sort menu (no column headings).
 
 export function OpenPrsDetail(): JSX.Element {
   // ALWAYS the workspace-wide key: byte-identical to `useWorkspaceOpenPrs` (the tab chip's count,
@@ -33,6 +34,8 @@ export function OpenPrsDetail(): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
 
   const prs = useMemo(() => data?.prs ?? [], [data]);
+  // null = the default activity order.
+  const [sort, setSort] = useState<OpenPrsSort | null>(null);
 
   // The repo dropdown narrows the loaded rows client-side (null = all). It lives in the store so
   // the per-repo footer can seed it, but is deliberately NOT `filters.repoIds` (the Timeline
@@ -87,10 +90,10 @@ export function OpenPrsDetail(): JSX.Element {
               and this header must reconcile with the number the user just clicked (the
               RepoOpenPrList convention), not contradict it. */}
           {scopeLabel} · {rows.length - draftCount} open
-          {draftCount > 0 && ` · ${draftCount} draft${draftCount === 1 ? '' : 's'}`} · click a
-          column to sort · click a row to open it
+          {draftCount > 0 && ` · ${draftCount} draft${draftCount === 1 ? '' : 's'}`}
         </span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <OpenPrsSortMenu sort={sort} onChange={setSort} />
           <MetricRepoFilter repos={repoOptions} selected={repoSel} onChange={setRepoSel} />
           <button
             type="button"
@@ -107,11 +110,11 @@ export function OpenPrsDetail(): JSX.Element {
         </div>
       </div>
 
-      <OpenPrsTable
+      <OpenPrsCards
         prs={rows}
         isLoading={isLoading}
         isError={isError}
-        showRepoColumn
+        sort={sort}
         onOpenPr={openTab}
         emptyLabel={
           repoSel != null && prs.length > 0

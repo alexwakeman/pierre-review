@@ -17,6 +17,7 @@ import type { CompareDiffResult } from '../../github/compare.js';
 import { specialistsPromptSection } from './specialists.js';
 import { pushTicketsSection, ticketTexts } from './ticket.js';
 import { pushReviewThreadsSection, threadTexts, type ThreadPlan } from './threads.js';
+import { ciTexts, pushCiFailuresSection, type CiPlan } from './ci-failures.js';
 import {
   PRIOR_BODY_CHARS,
   PRIOR_HUNK_CHARS,
@@ -64,7 +65,7 @@ When you are done, call the submit_review tool EXACTLY ONCE with:
 - 'verdict' — your suggested overall outcome: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'.
 - 'scopeUsed' — 'diff_only' or 'worktree', set per the guidance above.
 - 'findings' — the array described above (may be empty).
-Add \`followUp\` when the user message has a "Previous review" section, \`tickets\` when it has a "User stories" section, and \`threads\` when it has a "Review threads" section. Leave each out otherwise.
+Add \`followUp\` when the user message has a "Previous review" section, \`tickets\` when it has a "User stories" section, \`threads\` when it has a "Review threads" section, and \`ciFailures\` when it has a "CI failures" section. Leave each out otherwise.
 Do not call any other terminal action, and do not write prose outside the submit_review tool call. Call submit_review once and only once.`;
 
 /**
@@ -165,9 +166,12 @@ export function untrustedTexts(
   since: CompareDiffResult | null | undefined,
   // TRAILING: the other reviewers' threads sent this run.
   threads: ThreadPlan | null | undefined = null,
+  // TRAILING: the failing CI checks sent this run.
+  ci: CiPlan | null | undefined = null,
 ): string[] {
   const out: string[] = [];
   out.push(...threadTexts(threads));
+  out.push(...ciTexts(ci));
   for (const { finding: f } of plan?.sent ?? []) {
     out.push(f.path, f.title, f.body);
     if (f.diffHunk) out.push(f.diffHunk);
@@ -348,8 +352,10 @@ export function buildUserPrompt(input: {
   followUp?: { plan: FollowUpPlan; since: CompareDiffResult | null } | null;
   // The other reviewers' open threads to judge (threads.ts). Absent/empty ⇒ no section.
   threads?: ThreadPlan | null;
-  // The per-run fence tag. REQUIRED when `tickets`, `followUp` or `threads` is present (throws
-  // otherwise).
+  // The failing CI checks to diagnose (ci-failures.ts). Absent/empty ⇒ no section.
+  ci?: CiPlan | null;
+  // The per-run fence tag. REQUIRED when `tickets`, `followUp`, `threads` or `ci` is present
+  // (throws otherwise).
   nonce?: string;
 }): string {
   const {
@@ -367,12 +373,14 @@ export function buildUserPrompt(input: {
     tickets = null,
     followUp = null,
     threads = null,
+    ci = null,
     nonce,
   } = input;
   const hasFollowUp = followUp != null && followUp.plan.sent.length > 0;
   const hasTickets = tickets != null && tickets.length > 0;
   const hasThreads = threads != null && threads.sent.length > 0;
-  if ((hasTickets || hasFollowUp || hasThreads) && !nonce) {
+  const hasCi = ci != null && ci.sent.length > 0;
+  if ((hasTickets || hasFollowUp || hasThreads || hasCi) && !nonce) {
     throw new Error('buildUserPrompt: a fenced block needs a nonce');
   }
 
@@ -442,7 +450,9 @@ export function buildUserPrompt(input: {
 
   if (hasThreads && threads && nonce) pushReviewThreadsSection(lines, threads, mode, nonce);
 
-  const fields = `{ summary, verdict, scopeUsed, findings${hasFollowUp ? ', followUp' : ''}${hasTickets ? ', tickets' : ''}${hasThreads ? ', threads' : ''} }`;
+  if (hasCi && ci && nonce) pushCiFailuresSection(lines, ci, mode, nonce);
+
+  const fields = `{ summary, verdict, scopeUsed, findings${hasFollowUp ? ', followUp' : ''}${hasTickets ? ', tickets' : ''}${hasThreads ? ', threads' : ''}${hasCi ? ', ciFailures' : ''} }`;
   lines.push(
     mode === 'diff_only'
       ? `Review the diff and call submit_review EXACTLY ONCE with your ${fields}. Set scopeUsed: 'diff_only' if the diff sufficed; set it to 'worktree' to flag that this change really needs a deeper, cross-file review you can't perform from the diff alone.`

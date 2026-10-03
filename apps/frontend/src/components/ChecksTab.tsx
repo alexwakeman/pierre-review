@@ -14,7 +14,6 @@ import {
   automatedReviewerMeta,
   BOT_VENDOR_META,
   botVendorMeta,
-  checksRowVisible,
   CI_META,
   conflictsRowVisible,
   dateTime,
@@ -44,13 +43,11 @@ import { ClosePrControl } from './ClosePrControl.js';
 import { ReopenPrControl } from './ReopenPrControl.js';
 import { ChecksList, CiRerunControl } from './CheckList.js';
 import { AiSummary } from './AiSummary.js';
-import { CiAnalysisCard } from './CiAnalysisCard.js';
 import { useRequestReviewers } from '../hooks/usePrWrites.js';
 import { TERMINAL_LABEL } from './AutoMergeBanner.js';
 import { usePrArmedIntent, usePrStoppedIntent } from '../hooks/useAutoMerge.js';
 import { useSuggestedReviewers } from '../hooks/usePr.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
-import { useProCapabilities } from '../hooks/useTriage.js';
 import {
   BotIcon,
   CheckIcon,
@@ -431,9 +428,6 @@ export function ChecksTab({
   // When THIS PR row was read — the merge controls weigh its synced queue membership against their
   // live merge-options answer by age (`mergeQueueStatus`). A cache read, not a second observer.
   const prSyncedAt = useQueryDataUpdatedAt(['pr', pr.id]);
-  // The Checks row's fallback branch (red ciStatus, no hydrated checkRuns) has no content
-  // without the Pro CI-failure card — see checksRowVisible.
-  const prSummary = useProCapabilities().prSummary;
   // Per-PR bot behaviour — only fetched for bot PRs (onShowBotActivity set). Powers the
   // "slower than typical" caution that opens the Bot activity tab.
   const { data: prBots } = usePrBotBehaviour(pr.id, onShowBotActivity != null);
@@ -1140,33 +1134,12 @@ export function ChecksTab({
 
       <AiSummary pr={pr} />
 
-      {/* The Checks row also carries the CI-failure diagnosis ("Why did CI fail?"), directly
-          under the checks list + re-run control — the same ordering the AI Fix tab's CI-status
-          section uses. The card self-gates (prSummary capability) and presence-gates (renders
-          NOTHING unless something is red or an analysis is already stored), so a green PR is
-          unchanged. It carries the agentic "Fix it" button too: the run is watchable from the
-          bottom-right AiFixBanner without leaving this tab, and clicking that row lands on the
-          AI Fix tab with the result.
-
-          The row gate is widened past `checks.length > 0` so a PR whose ciStatus is red but
-          whose checkRuns did not hydrate (the lean-storage / SAML-SSO case handled at the
-          authNotice above) can still reach a STORED diagnosis; the list + re-run control stay
-          inner-gated on there actually being checks to render. The widened branch is ALSO gated
-          on the capability (see checksRowVisible) — the card is its only possible content, and
-          without prSummary it renders null, leaving an empty labelled row. */}
-      {checksRowVisible(checks.length, pr.ciStatus, prSummary) && (
+      {/* Why CI failed is Claude Review's job now (its "CI failures" section); this row only
+          lists the checks. */}
+      {checks.length > 0 && (
         <Row label="Checks">
-          {checks.length > 0 && (
-            <>
-              <ChecksList prId={pr.id} prGithubUrl={pr.githubUrl} checks={checks} />
-              <CiRerunControl
-                prId={pr.id}
-                checks={checks}
-                viewerCanPush={pr.viewerCanPush}
-              />
-            </>
-          )}
-          <CiAnalysisCard pr={pr} />
+          <ChecksList prId={pr.id} prGithubUrl={pr.githubUrl} checks={checks} />
+          <CiRerunControl prId={pr.id} checks={checks} viewerCanPush={pr.viewerCanPush} />
         </Row>
       )}
 

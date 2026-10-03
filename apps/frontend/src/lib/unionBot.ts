@@ -20,7 +20,7 @@ import type { User, WorkspaceReviewer } from '@pierre-review/shared';
 //
 // Pure and exported so the rule is a test, not a comment (test/isolateFilter.test.ts). It is
 // BotTriageCard's `isUnionBot`, lifted out. ⚠ That copy and the other inline ones (FeedView,
-// PeriodPeopleSection, AiFix/CommentPicker) still exist and should import this instead — five
+// PeriodPeopleSection) still exist and should import this instead — four
 // spellings of one rule can drift, and a drifted one hides different actors from the server.
 
 /** The union verdict for one actor id. */

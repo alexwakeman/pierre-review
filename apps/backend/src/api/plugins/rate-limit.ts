@@ -477,12 +477,6 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (/^\/api\/claude-reviews\/[^/]+\/chat$/.test(path)) {
     return mutating ? [TIERS.ai, TIERS.aiHourly] : [TIERS.read];
   }
-  // Posting ONE ticket's analysis as a PR comment (`/api/claude-reviews/:reviewId/tickets/:index/
-  // post`): a GitHub REST write, no model — `githubWrite`, matched EXACTLY before the family rule
-  // below would put it on `ai`.
-  if (/^\/api\/claude-reviews\/[^/]+\/tickets\/[^/]+\/post$/.test(path)) {
-    return mutating ? [TIERS.githubWrite] : [TIERS.read];
-  }
   const isClaudeReviewPath =
     path.includes('/claude-review') ||
     path.startsWith('/api/claude-reviews') ||
