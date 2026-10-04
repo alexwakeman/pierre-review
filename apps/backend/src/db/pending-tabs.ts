@@ -46,6 +46,7 @@ import {
   resolveWorkspaceScope,
   suggestRoutingReviewers,
   type BotScope,
+  type BoardFactsSink,
 } from './queries.js';
 import { scoreCards, type ScoredCard } from './work-plan.js';
 import { getMyTurnSettings, rankRulesOf } from './my-turn-settings.js';
@@ -275,17 +276,31 @@ export async function buildPendingBoard(
   // ⚠ THE UNCAPPED FOLD — the board ranks every card by its Do next score and THEN lists the top
   // of each kind, so it must see the whole population. `kindTotals` is the same either way, which
   // keeps each tab's count and the daily brief's line for it one number.
+  const boardFacts: BoardFactsSink = { run: null };
   const insights = await getWorkspaceInsights(accountId, undefined, scope, {
     uncapped: true,
     withFailingChecks: live,
+    ...(live ? { boardFacts } : {}),
   });
   const board = await rankPendingTabs(accountId, scope, insights, opts.now ?? Date.now(), {
     suggestReviewers: live,
   });
+  // THE HEADING FACTS, read only for the cards just LISTED — the uncapped fold holds every card,
+  // and reading comment bodies for the ones no tab shows was most of the cost of a board load.
+  const factUserIds =
+    boardFacts.run != null ? await boardFacts.run(new Set(board.cards.map((c) => c.id))) : [];
+  const known = new Set([...insights.users, ...board.extraUsers].map((u) => u.id));
+  const missing = [...new Set(factUserIds)].filter((id) => !known.has(id));
+  const factUsers =
+    missing.length > 0
+      ? (await db.select().from(schema.users).where(inArray(schema.users.id, missing)).execute()).map(
+          mapUser,
+        )
+      : [];
   return {
     workspaceId: scope.workspaceId,
     cards: board.cards,
-    users: [...insights.users, ...board.extraUsers],
+    users: [...insights.users, ...board.extraUsers, ...factUsers],
     tabs: board.tabs,
     scores: board.scores,
     // The weights and My turn type order the scores and the order above were built with — what

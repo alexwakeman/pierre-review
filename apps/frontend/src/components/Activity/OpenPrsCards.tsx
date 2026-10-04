@@ -1,16 +1,17 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import type { TimelinePr, User } from '@pierre-review/shared';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import type { TicketMergedPr, TicketReviewState, TimelinePr, User } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useClaudeReviewStates } from '../../hooks/useClaudeReview.js';
 import { useTicketLinks } from '../../hooks/useTicketLinks.js';
+import { useMergedPanelOpen, useTicketMergedPrs } from '../../hooks/useTicketMergedPrs.js';
+import { useStartTicketReview, useTicketReviewStarting, useTicketReviewStates } from '../../hooks/useTicketReview.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
 import { useFilters } from '../../store/filters.js';
-import type { TabMeta } from '../../store/pinnedTabs.js';
+import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import {
-  CI_META,
   MERGE_TONE_CHIP,
   dateTime,
   indexUsers,
@@ -31,10 +32,20 @@ import {
   type OpenPrsSort,
 } from '../../lib/openPrsSort.js';
 import { Avatar } from '../CommentCard.js';
-import { ArrowIcon, CaretIcon, CheckCircleIcon, CheckIcon, ChevronIcon, TicketIcon } from '../Icons.js';
+import { ArrowIcon, CaretIcon, CheckCircleIcon, CheckIcon, ChevronIcon, MergeIcon, TicketIcon } from '../Icons.js';
 import { cardTicketLabel, cardTickets, type CardTicket } from '../../lib/cardTickets.js';
+import { TicketStoryModal } from '../TicketStory.js';
+import {
+  cardTicketPills,
+  refusalSentence,
+  ticketCoverage,
+  ticketCurrency,
+  type CoverageTone,
+} from '../../lib/ticketReview.js';
 import {
   initialsOf,
+  mergedByStack,
+  mergedPanelKeys,
   prCountLabel,
   stackDomId,
   stackOpenPrs,
@@ -50,6 +61,19 @@ import { ThreadStateBar } from './ThreadStateBar.js';
 import { ClaudeReviewPanel } from './ClaudeReviewCell.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { LargePrFlag } from './LargePrFlag.js';
+import {
+  CARD_CHIP,
+  CARD_NEUTRAL_CHIP,
+  CARD_TONE_CHIP,
+  CardSep,
+  CiChip,
+  LineDelta,
+  PrCardChips,
+  PrCardFrame,
+  PrCardMeta,
+  PrCardTitle,
+  filesLabel,
+} from './PrCardShell.js';
 
 // THE OPEN PRs CARDS — the Open PRs tab's list (OpenPrsDetail), one card per open PR over
 // TimelinePr rows from /api/open-prs; drafts are included and marked. No column headings: the
@@ -61,52 +85,42 @@ import { LargePrFlag } from './LargePrFlag.js';
 //   2. the status chips, LEFT-aligned under the title (right-aligned they read as a separate
 //      column, which the user found harder to scan) — CI, review standing, threads, merge
 //      readiness. Each renders only when it has something true to say (no "no checks", no "—").
-//   3. the TICKET ROW (only when the PR names a ticket): each Jira/Linear ticket as a link,
-//      "BMD-1043 · <its title>", wrapping when there are several. Below the chips so status is
+//   3. the TICKET ROW (only when the PR names a ticket): each ticket, "BMD-1043 · <its title>",
+//      wrapping when there are several. A Jira ticket opens its story in a MODAL (read on the
+//      click, `TicketKeyButton`), with "Open in Jira" inside; a Linear ticket is a link. Below the chips so status is
 //      still the first thing read, above the grey meta line because it says what the PR is FOR.
 //      Data: ONE batched `POST /api/pro/ticket-links` (Pro `issueLinks`; detection + cached Jira
-//      titles) merged with the latest Claude review's stored stories (`lib/cardTickets.ts`).
+//      titles), folded by `lib/cardTickets.ts`.
 //   4. the meta line: #number · repo · author · opened · updated · size, blast radius, large-PR.
 //   5. the Claude Review panel (ClaudeReviewCell.tsx) on the AI surface, accented by outcome —
 //      ONLY where agentic AI runs (`me.ai.enabled`: local, free). With it, ONE batched states
 //      request covers every listed card (never one per card); without it, no panel and no request.
+//
+// The frame, title, chips row and meta line are the SHARED PR card shell (PrCardShell.tsx), which the
+// Pending board's cards are built on too — change the look there, once, for both lists.
 //
 // The card is WHOLE-CARD clickable and keyboard-focusable (Enter / Space opens the PR); every
 // control inside it stops propagation, so a click there never opens the PR.
 //
 // GROUPED BY TICKET (the default where the tracker runs — Pro `issueLinks`): the same cards, in
 // one STACK per ticket (`lib/openPrsStacks.ts` decides membership and order). The stack header
-// carries the ticket — key, title, status, type, assignee, PR count, a quiet roll-up — so a
+// carries the ticket — key (the same modal), title, status, type, assignee, PR count, a quiet roll-up, and (where
+// agentic AI runs) the TICKET REVIEW's coverage pill + Re-check — so a
 // card inside a stack drops its own ticket row and keeps only "Also in <other ticket>" when the
 // PR names two. Until the ticket answer arrives, and whenever no PR names a ticket, the page is
-// the plain list: Jira never blocks the board.
+// the plain list: Jira never blocks the board. Under a stack's open cards, a collapsed
+// "Merged (n)" panel lists every MERGED PR linked to the same ticket (any repo, same Jira site),
+// from ONE batched `GET /api/pro/ticket-merged-prs` for the whole board; it never makes a stack of
+// its own, and the header's "n PRs" stays the open count.
 
-const CHIP =
-  'inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-px text-[11px] font-medium';
-const NEUTRAL_CHIP = `${CHIP} border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300`;
-const TONE_CHIP = `${CHIP} border-transparent`;
+// The chip classes and the CI chip are the shared card shell's (PrCardShell.tsx), so the Pending
+// board's cards wear the same chips.
+const CHIP = CARD_CHIP;
+const NEUTRAL_CHIP = CARD_NEUTRAL_CHIP;
+const TONE_CHIP = CARD_TONE_CHIP;
+const Sep = CardSep;
 
-function Sep(): JSX.Element {
-  return (
-    <span aria-hidden className="decorative-mark text-gray-300 dark:text-gray-600">
-      ·
-    </span>
-  );
-}
-
-// ---- the status chips (line 1, right) ----
-
-function CiChip({ ci }: { ci: TimelinePr['ciStatus'] }): JSX.Element | null {
-  const meta = CI_META[ci];
-  if (meta == null) return null; // no checks reading — nothing to claim
-  const red = ci === 'failure' || ci === 'error';
-  return (
-    <span className={red ? `${TONE_CHIP} bg-red-500/10 text-red-700 dark:text-red-400` : NEUTRAL_CHIP}>
-      <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ background: meta.color }} />
-      {meta.label}
-    </span>
-  );
-}
+// ---- the status chips (line 2) ----
 
 function ReviewChip({ pr }: { pr: TimelinePr }): JSX.Element | null {
   if (pr.isChangesRequested) {
@@ -342,6 +356,18 @@ export function OpenPrsCards({
     () => new Map((ticketData?.prs ?? []).map((t) => [t.prId, t])),
     [ticketData],
   );
+  // The TICKET review's reading of every listed ticket: ONE batched request (never one per stack),
+  // only where agentic AI runs AND the tracker does. It feeds the stack headers and the card pills.
+  const ticketReviewOn = claudeOn && ticketsOn;
+  const ticketIdents = useMemo(
+    () => (ticketData?.prs ?? []).flatMap((p) => cardTickets(p).map((t) => t.ident)),
+    [ticketData],
+  );
+  const { data: ticketStatesData } = useTicketReviewStates(ticketIdents, ticketReviewOn);
+  const ticketStates = useMemo(
+    () => new Map((ticketStatesData?.states ?? []).map((st) => [st.ident, st])),
+    [ticketStatesData],
+  );
   const openClaudeReview = useFilters((s) => s.openClaudeReview);
   const openAiFix = useFilters((s) => s.openAiFix);
   const metaOf = (pr: TimelinePr): TabMeta => {
@@ -368,6 +394,42 @@ export function OpenPrsCards({
     return sortOpenPrs(prs, shownSort, { usersById, repoNameById, claudeStates });
   }, [prs, shownSort, maintainersByRepo, usersById, repoNameById, claudeStates]);
 
+  // GROUPED only once the ticket answer is HERE: before it, the plain list (no skeleton, no wait
+  // on Jira); after it, the list again if no PR names a ticket (a lone "No ticket" header says
+  // nothing). A failed ticket request is the list too. Folded ABOVE the early returns because the
+  // merged panel's ONE batched request (below) reads its keys.
+  const stacked = useMemo(
+    () =>
+      grouped && ticketsOn && ticketData != null
+        ? stackOpenPrs(rows, (pr) => cardTickets(detectedTickets.get(pr.id)))
+        : null,
+    [grouped, ticketsOn, ticketData, rows, detectedTickets],
+  );
+  const showStacks = stacked != null && stacksWorthShowing(stacked);
+  // Each stack's "Merged (n)" panel: ONE request for every stack on the board, only while the
+  // stacks are on screen.
+  const workspaceId = useFilters((s) => s.workspaceId);
+  const mergedKeys = useMemo(() => (showStacks && stacked != null ? mergedPanelKeys(stacked.stacks) : []), [showStacks, stacked]);
+  const { data: mergedData } = useTicketMergedPrs(workspaceId, mergedKeys, ticketsOn && showStacks);
+  const mergedStacks = useMemo(
+    () => (stacked != null ? mergedByStack(stacked.stacks, mergedData) : new Map<string, TicketMergedPr[]>()),
+    [stacked, mergedData],
+  );
+  const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
+  const openMerged = (m: TicketMergedPr): void =>
+    openPrDetailTab(
+      {
+        id: m.prId,
+        number: m.number,
+        title: m.title,
+        repoFullName: m.repoFullName,
+        authorLogin: m.authorLogin,
+        authorDisplayName: m.authorDisplayName,
+        authorAvatarUrl: m.authorAvatarUrl,
+      },
+      { fromActivity: true },
+    );
+
   if (isLoading) {
     return (
       <div className="space-y-2">
@@ -388,10 +450,12 @@ export function OpenPrsCards({
     );
   }
 
-  const ticketsOf = (pr: TimelinePr): CardTicket[] =>
-    cardTickets(detectedTickets.get(pr.id), claudeStates.get(pr.id)?.tickets);
+  const ticketsOf = (pr: TimelinePr): CardTicket[] => cardTickets(detectedTickets.get(pr.id));
 
-  const renderCard = (pr: TimelinePr, opts: { inStack?: { alsoIn: CardTicket[] }; keyPrefix?: string } = {}) => (
+  const renderCard = (
+    pr: TimelinePr,
+    opts: { inStack?: { alsoIn: CardTicket[]; key: string | null }; keyPrefix?: string } = {},
+  ) => (
     <OpenPrCard
       key={`${opts.keyPrefix ?? ''}${pr.id}`}
       pr={pr}
@@ -408,24 +472,38 @@ export function OpenPrsCards({
             state={claudeStates.get(pr.id)}
             onOpenReview={() => openClaudeReview(metaOf(pr), { fromActivity: true })}
             onOpenFix={() => openAiFix(metaOf(pr))}
+            // The ticket review's reading of this PR's tickets — not the stack's own (its header
+            // says that once).
+            ticketPills={
+              ticketReviewOn ? cardTicketPills(ticketsOf(pr), ticketStates, opts.inStack?.key ?? null) : []
+            }
           />
         ) : null
       }
     />
   );
 
-  // GROUPED only once the ticket answer is HERE: before it, the plain list (no skeleton, no wait
-  // on Jira); after it, the list again if no PR names a ticket (a lone "No ticket" header says
-  // nothing). A failed ticket request is the list too.
-  const stacked =
-    grouped && ticketsOn && ticketData != null ? stackOpenPrs(rows, ticketsOf) : null;
-
-  if (stacked != null && stacksWorthShowing(stacked)) {
+  if (showStacks && stacked != null) {
     return (
       <div className="space-y-5">
         {stacked.stacks.map((stack) => (
-          <TicketStack key={stack.id} stack={stack}>
-            {stack.rows.map((r) => renderCard(r.pr, { inStack: { alsoIn: r.alsoIn }, keyPrefix: `${stack.id}:` }))}
+          <TicketStack
+            key={stack.id}
+            stack={stack}
+            merged={mergedStacks.get(stack.id) ?? []}
+            onOpenMerged={openMerged}
+            review={
+              ticketReviewOn && stack.ticket?.ident != null && stack.rows[0] != null
+                ? { ident: stack.ticket.ident, state: ticketStates.get(stack.ticket.ident), prId: stack.rows[0].pr.id }
+                : null
+            }
+          >
+            {stack.rows.map((r) =>
+              renderCard(r.pr, {
+                inStack: { alsoIn: r.alsoIn, key: stack.ticket?.key ?? null },
+                keyPrefix: `${stack.id}:`,
+              }),
+            )}
           </TicketStack>
         ))}
       </div>
@@ -436,6 +514,56 @@ export function OpenPrsCards({
     <ul aria-label="Open pull requests" className="space-y-2">
       {rows.map((pr) => renderCard(pr))}
     </ul>
+  );
+}
+
+// ---- a ticket key that opens the ticket's story in a modal ----
+
+/**
+ * A Jira ticket's key (and title): a click opens its STORY in a modal (TicketStory.tsx) instead of
+ * leaving for Jira — "Open in Jira" is inside it. The modal is MOUNTED ONLY WHILE OPEN, so the
+ * stored row is read on the click, never on the card's mount. ⚠ The modal is portalled but its
+ * React events still bubble to the card / stack header (which open the PR / toggle), so the
+ * wrapper stops them.
+ */
+function TicketKeyButton({
+  ticket,
+  prId,
+  className,
+  children,
+}: {
+  ticket: CardTicket;
+  prId: number;
+  className: string;
+  children: ReactNode;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  return (
+    <>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={`Show ${cardTicketLabel(ticket)}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(true);
+        }}
+        className={`${className} rounded text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500`}
+      >
+        {children}
+      </button>
+      {open && (
+        <span
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          className="contents"
+        >
+          <TicketStoryModal ticket={ticket} prId={prId} onClose={close} />
+        </span>
+      )}
+    </>
   );
 }
 
@@ -462,7 +590,80 @@ function jumpToStack(stackId: string): void {
   });
 }
 
-function TicketStack({ stack, children }: { stack: OpenPrsStack; children: ReactNode }): JSX.Element {
+const COVERAGE_TONE: Record<CoverageTone, string> = {
+  ok: 'bg-green-500/15 text-green-700 dark:text-green-400',
+  partial: 'bg-amber-500/15 text-amber-800 dark:text-amber-300',
+  bad: 'bg-red-500/10 text-red-700 dark:text-red-400',
+  muted: 'bg-gray-500/10 text-gray-700 dark:text-gray-300',
+};
+
+/**
+ * The stack header's TICKET REVIEW reading: one pill ("4 of 6 met", amber marker when something
+ * moved since) and Check / Re-check. The start shares its mutation key with the PR pane's block.
+ */
+function StackCoverage({
+  ident,
+  state,
+  prId,
+}: {
+  ident: string;
+  state: TicketReviewState | undefined;
+  prId: number;
+}): JSX.Element | null {
+  const ready = useAiCapabilities().ready;
+  const start = useStartTicketReview(ident);
+  const starting = useTicketReviewStarting(ident);
+  const cov = ticketCoverage(state);
+  const currency = state != null ? ticketCurrency(state) : null;
+  const running = state?.status === 'running';
+  const refused = start.data?.runs.find((r) => r.ident === ident)?.refused ?? null;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      {cov != null && (
+        <span className={`${CHIP} border-transparent ${COVERAGE_TONE[cov.tone]}`} title={cov.title}>
+          {cov.running && <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" />}
+          {cov.label}
+        </span>
+      )}
+      {cov != null && cov.stale && currency != null && (
+        <span className="text-[11px] text-amber-800 dark:text-amber-300" title={currency.title}>
+          {currency.label}
+        </span>
+      )}
+      {ready && !running && (
+        <button
+          type="button"
+          disabled={starting}
+          onClick={() => start.mutate({ prId, ident })}
+          title="Check this ticket against all its PRs"
+          className="whitespace-nowrap rounded border border-ai-border bg-white/70 px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60 dark:bg-gray-900/50"
+        >
+          {starting ? 'Starting…' : cov == null ? 'Check story' : 'Re-check'}
+        </button>
+      )}
+      {refused != null && (
+        <span className="text-xs text-red-700 dark:text-red-400">{refusalSentence(refused)}</span>
+      )}
+      {start.isError && <span className="text-xs text-red-700 dark:text-red-400">Could not start the check.</span>}
+    </span>
+  );
+}
+
+function TicketStack({
+  stack,
+  review,
+  merged,
+  onOpenMerged,
+  children,
+}: {
+  stack: OpenPrsStack;
+  /** Every merged PR linked to this ticket (the "Merged (n)" panel); [] = no panel. */
+  merged: readonly TicketMergedPr[];
+  onOpenMerged: (pr: TicketMergedPr) => void;
+  // The ticket review's reading + who starts it (any PR on the ticket); null = not offered here.
+  review: { ident: string; state: TicketReviewState | undefined; prId: number } | null;
+  children: ReactNode;
+}): JSX.Element {
   const collapsed = useOpenPrsView((s) => s.collapsed.includes(stack.id));
   const toggle = useOpenPrsView((s) => s.toggleCollapsed);
   const headingId = useId();
@@ -472,6 +673,8 @@ function TicketStack({ stack, children }: { stack: OpenPrsStack; children: React
   const href = t != null ? safeExternalUrl(t.url) : null;
   const rollup = stackRollupParts(stackRollup(stack.rows));
   const name = t != null ? t.key : 'No ticket';
+  // Any PR on the ticket reads its stored row; only a Jira ticket (it has an ident) has one.
+  const storyPrId = t?.ident != null ? (stack.rows[0]?.pr.id ?? null) : null;
 
   // A click on the header's empty space toggles too (the chevron button is the keyboard route).
   const onHeaderClick = (e: MouseEvent<HTMLDivElement>): void => {
@@ -505,7 +708,17 @@ function TicketStack({ stack, children }: { stack: OpenPrsStack; children: React
               <span className="text-base font-semibold text-gray-700 dark:text-gray-200">No ticket</span>
             ) : (
               <>
-                {href != null ? (
+                {storyPrId != null ? (
+                  <TicketKeyButton
+                    ticket={t}
+                    prId={storyPrId}
+                    className="inline-flex shrink-0 items-center gap-1 font-mono text-[13px] font-semibold text-sky-700 hover:underline dark:text-sky-300"
+                  >
+                    <TicketIcon size={13} className="shrink-0" />
+                    {t.key}
+                    <span className="sr-only">:</span>
+                  </TicketKeyButton>
+                ) : href != null ? (
                   <a
                     href={href}
                     target="_blank"
@@ -555,6 +768,7 @@ function TicketStack({ stack, children }: { stack: OpenPrsStack; children: React
           </div>
         </div>
         <div className="ml-7 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 sm:ml-0 sm:mt-0.5">
+          {review != null && <StackCoverage ident={review.ident} state={review.state} prId={review.prId} />}
           {rollup.length > 0 && (
             <span className="inline-flex flex-wrap items-center gap-x-1.5 text-xs">
               {rollup.map((p, i) => (
@@ -580,7 +794,74 @@ function TicketStack({ stack, children }: { stack: OpenPrsStack; children: React
       >
         {children}
       </ul>
+      {merged.length > 0 && !collapsed && <MergedPanel stackId={stack.id} prs={merged} onOpen={onOpenMerged} />}
     </section>
+  );
+}
+
+// ---- a stack's "Merged (n)" panel ----
+
+/**
+ * Under a stack's open PRs: every MERGED PR linked to the same ticket, COLLAPSED by default (the
+ * open state is per session, store in hooks/useTicketMergedPrs.ts). A compact row per PR — title,
+ * repo#number, author, merged date — and a click opens it in Limn like an open card.
+ */
+function MergedPanel({
+  stackId,
+  prs,
+  onOpen,
+}: {
+  stackId: string;
+  prs: readonly TicketMergedPr[];
+  onOpen: (pr: TicketMergedPr) => void;
+}): JSX.Element {
+  const open = useMergedPanelOpen((s) => s.open.has(stackId));
+  const toggle = useMergedPanelOpen((s) => s.toggle);
+  const listId = useId();
+  return (
+    <div className="px-3 pb-3">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={() => toggle(stackId)}
+        className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-xs font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-50"
+      >
+        <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
+        Merged ({prs.length})
+      </button>
+      <ul id={listId} hidden={!open} aria-label="Merged pull requests" className="mt-1.5 space-y-1">
+        {prs.map((m) => (
+          <li key={m.prId}>
+            <button
+              type="button"
+              onClick={() => onOpen(m)}
+              className="block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-left transition-colors hover:border-gray-300 hover:bg-gray-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-800 dark:bg-gray-950 dark:hover:border-gray-700 dark:hover:bg-gray-900"
+            >
+              <span className="flex min-w-0 items-center gap-1.5">
+                <MergeIcon size={13} className="shrink-0 text-gray-500 dark:text-gray-400" aria-hidden />
+                <span className="min-w-0 truncate text-[13px] font-medium text-gray-800 dark:text-gray-100" title={m.title}>
+                  {m.title}
+                </span>
+              </span>
+              <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-[19px] text-[11px] text-gray-500 dark:text-gray-400">
+                <span className="max-w-[18rem] truncate font-mono" title={`${m.repoFullName}#${m.number}`}>
+                  {m.repoFullName}#{m.number}
+                </span>
+                {m.authorLogin != null && (
+                  <>
+                    <Sep />
+                    <span className="truncate text-gray-600 dark:text-gray-300">{m.authorDisplayName ?? m.authorLogin}</span>
+                  </>
+                )}
+                <Sep />
+                <span title={`Merged ${dateTime(m.mergedAt)}`}>merged {relativeTime(m.mergedAt)}</span>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -606,50 +887,30 @@ function OpenPrCard({
   claude: ReactNode;
 }): JSX.Element {
   const titleId = useId();
-  const Heading = headingLevel === 4 ? 'h4' : 'h3';
-  const onKey = (e: KeyboardEvent<HTMLLIElement>): void => {
-    // Only the card itself: a key on a control inside belongs to that control.
-    if (e.target !== e.currentTarget) return;
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      onOpen();
-    }
-  };
-  const onClick = (e: MouseEvent<HTMLLIElement>): void => {
-    if ((e.target as HTMLElement).closest('a,button,[data-noactivate]')) return;
-    onOpen();
-  };
   return (
-    <li
-      tabIndex={0}
-      aria-labelledby={titleId}
-      onClick={onClick}
-      onKeyDown={onKey}
-      className={`cursor-pointer rounded-lg border border-gray-200 bg-white px-3.5 py-2 transition-colors hover:border-gray-300 hover:bg-gray-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-800 dark:hover:border-gray-700 ${
-        // Inside a stack the card sits on the stack's tray, so in dark mode it takes the PAGE
-        // ground to stay distinct from it; on its own it keeps the list's lifted surface.
-        headingLevel === 4 ? 'dark:bg-gray-950 dark:hover:bg-gray-900' : 'dark:bg-gray-900/40 dark:hover:bg-gray-900/70'
-      }`}
-    >
+    <PrCardFrame labelledBy={titleId} onOpen={onOpen} nested={headingLevel === 4}>
       {/* 1 — the title. */}
-      <Heading id={titleId} className="flex min-w-0 items-center gap-2">
-        <span className="min-w-0 truncate text-sm font-semibold text-gray-900 dark:text-gray-50" title={pr.title}>
-          {pr.title}
-        </span>
-        {pr.isDraft && (
-          <span className="shrink-0 rounded border border-gray-300 px-1.5 text-[11px] font-medium text-gray-600 dark:border-gray-600 dark:text-gray-300">
-            Draft
-          </span>
-        )}
-      </Heading>
+      <PrCardTitle
+        id={titleId}
+        level={headingLevel}
+        after={
+          pr.isDraft ? (
+            <span className="shrink-0 rounded border border-gray-300 px-1.5 text-[11px] font-medium text-gray-600 dark:border-gray-600 dark:text-gray-300">
+              Draft
+            </span>
+          ) : null
+        }
+      >
+        {pr.title}
+      </PrCardTitle>
 
       {/* 2 — the PR's status chips, left-aligned under the title so they read with it. */}
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 empty:hidden">
+      <PrCardChips>
         <CiChip ci={pr.ciStatus} />
         <ReviewChip pr={pr} />
         <ThreadsChip pr={pr} />
         <MergeChip pr={pr} />
-      </div>
+      </PrCardChips>
 
       {/* 3 — the ticket row: absent when the PR names no ticket (never an empty row). */}
       {tickets.length > 0 && (
@@ -669,7 +930,16 @@ function OpenPrCard({
                 )}
               </>
             );
-            return href != null ? (
+            return t.ident != null ? (
+              <TicketKeyButton
+                key={t.key}
+                ticket={t}
+                prId={pr.id}
+                className="inline-flex min-w-0 max-w-full items-center gap-1 text-sky-700 hover:underline dark:text-sky-300 sm:max-w-[32rem]"
+              >
+                {body}
+              </TicketKeyButton>
+            ) : href != null ? (
               <a
                 key={t.key}
                 href={href}
@@ -716,39 +986,33 @@ function OpenPrCard({
       )}
 
       {/* 4 — the meta line. */}
-      <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
-        <span className="font-mono">#{pr.number}</span>
-        <Sep />
-        <span className="max-w-[18rem] truncate" title={repoName}>
-          {repoName}
-        </span>
-        <Sep />
-        <span className="inline-flex min-w-0 items-center gap-1 text-gray-600 dark:text-gray-300">
-          <Avatar user={author} size={14} />
-          <span className="truncate">{userLabel(author, pr.authorId)}</span>
-        </span>
-        <Sep />
-        <span title={`Opened ${dateTime(pr.openedAt)}`}>opened {relativeTime(pr.openedAt)}</span>
-        {pr.updatedAt !== pr.openedAt && (
-          <>
-            <Sep />
+      <PrCardMeta
+        parts={[
+          <span className="font-mono">#{pr.number}</span>,
+          <span className="max-w-[18rem] truncate" title={repoName}>
+            {repoName}
+          </span>,
+          <span className="inline-flex min-w-0 items-center gap-1 text-gray-600 dark:text-gray-300">
+            <Avatar user={author} size={14} />
+            <span className="truncate">{userLabel(author, pr.authorId)}</span>
+          </span>,
+          <span title={`Opened ${dateTime(pr.openedAt)}`}>opened {relativeTime(pr.openedAt)}</span>,
+          pr.updatedAt !== pr.openedAt && (
             <span title={`Updated ${dateTime(pr.updatedAt)}`}>updated {relativeTime(pr.updatedAt)}</span>
+          ),
+          <span>{filesLabel(pr.changedFiles)}</span>,
+        ]}
+        trailing={
+          <>
+            <LineDelta additions={pr.additions} deletions={pr.deletions} />
+            <LargePrFlag pr={pr} />
+            <BlastRadiusChip pr={pr} />
           </>
-        )}
-        <Sep />
-        <span>
-          {pr.changedFiles} file{pr.changedFiles === 1 ? '' : 's'}
-        </span>
-        <span className="font-mono">
-          <span className="text-green-600 dark:text-green-400">+{pr.additions}</span>{' '}
-          <span className="text-red-500 dark:text-red-400">−{pr.deletions}</span>
-        </span>
-        <LargePrFlag pr={pr} />
-        <BlastRadiusChip pr={pr} />
-      </div>
+        }
+      />
 
       {/* 5 — Claude Review (only where agentic AI runs). */}
       {claude}
-    </li>
+    </PrCardFrame>
   );
 }

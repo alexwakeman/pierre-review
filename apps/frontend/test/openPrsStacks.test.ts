@@ -4,12 +4,14 @@
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/openPrsStacks.test.ts
 import { describe, expect, it } from 'vitest';
-import type { ClaudeReviewPrState, TimelinePr, User } from '@pierre-review/shared';
+import type { ClaudeReviewPrState, TicketMergedPr, TimelinePr, User } from '@pierre-review/shared';
 import type { CardTicket } from '../src/lib/cardTickets.js';
 import { pickSort, sortOpenPrs } from '../src/lib/openPrsSort.js';
 import {
   NO_TICKET_STACK_ID,
   initialsOf,
+  mergedByStack,
+  mergedPanelKeys,
   prCountLabel,
   stackDomId,
   stackOpenPrs,
@@ -236,5 +238,62 @@ describe('the header bits', () => {
   it('a DOM id safe for any key', () => {
     expect(stackDomId('ticket:BMD-1040')).toBe('open-prs-stack-ticket-BMD-1040');
     expect(stackDomId(NO_TICKET_STACK_ID)).toBe('open-prs-stack-none');
+  });
+});
+
+describe('the "Merged (n)" panel', () => {
+  const ACME = 'https://acme.atlassian.net';
+  const m = (prId: number, mergedAt: string): TicketMergedPr => ({
+    prId,
+    repoId: 1,
+    repoFullName: 'acme/engine',
+    number: prId,
+    title: `merged ${prId}`,
+    authorLogin: 'ada',
+    authorDisplayName: null,
+    authorAvatarUrl: null,
+    mergedAt,
+  });
+  const stacked = stackOpenPrs([pr({ id: 1 }), pr({ id: 2 }), pr({ id: 3 })], by({
+    1: [tk('ENG-7', { ident: `jira:${ACME}#ENG-7` })],
+    2: [tk('ENG-8', { ident: `jira:${ACME}#ENG-8` })],
+  }));
+
+  it('asks once per ticket stack, never for the no-ticket stack', () => {
+    expect(mergedPanelKeys(stacked.stacks)).toEqual(['ENG-7', 'ENG-8']);
+  });
+
+  it('attaches each ticket’s merged PRs to its stack, newest first; an open card wins over its merged copy', () => {
+    const map = mergedByStack(stacked.stacks, {
+      workspaceId: 1,
+      tickets: [
+        { key: 'ENG-7', ident: `jira:${ACME}#ENG-7`, prs: [m(10, day(3)), m(11, day(9)), m(1, day(5)), m(11, day(9))] },
+        { key: 'ENG-9', ident: `jira:${ACME}#ENG-9`, prs: [m(12, day(1))] },
+      ],
+    });
+    expect([...map.keys()]).toEqual(['ticket:ENG-7']);
+    expect(map.get('ticket:ENG-7')?.map((p) => p.prId)).toEqual([11, 10]);
+  });
+
+  it('a ticket with only merged PRs makes no stack; the open count is untouched', () => {
+    const map = mergedByStack(stacked.stacks, {
+      workspaceId: 1,
+      tickets: [{ key: 'ENG-9', ident: `jira:${ACME}#ENG-9`, prs: [m(12, day(1))] }],
+    });
+    expect(map.size).toBe(0);
+    expect(stacked.stacks.map((st) => st.ticket?.key ?? 'none')).toEqual(['ENG-7', 'ENG-8', 'none']);
+    expect(stacked.prCount).toBe(3);
+  });
+
+  it('a same-key ticket on another Jira site is not shown under this one', () => {
+    const map = mergedByStack(stacked.stacks, {
+      workspaceId: 1,
+      tickets: [{ key: 'ENG-8', ident: 'jira:https://other.atlassian.net#ENG-8', prs: [m(13, day(2))] }],
+    });
+    expect(map.size).toBe(0);
+  });
+
+  it('no answer yet → nothing', () => {
+    expect(mergedByStack(stacked.stacks, undefined).size).toBe(0);
   });
 });

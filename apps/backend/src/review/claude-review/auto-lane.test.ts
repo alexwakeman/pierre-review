@@ -50,9 +50,7 @@ vi.mock('./persist.js', () => ({
     return id;
   },
   getLatestClaudeReview: async () => null,
-  // PR 70 was reviewed before with a story: a re-review carries it. PR 71 already has a run at
-  // its head (a person reviewed it while the auto item waited).
-  getLatestStoredTickets: async (_ctx: unknown, prId: number) => (prId === 70 ? [PRIOR_TICKET] : []),
+  // PR 71 already has a run at its head (a person reviewed it while the auto item waited).
   isAutoReReviewSettled: async (_ctx: unknown, prId: number) => prId === 71,
   loadPriorReviewForFollowUp: async () => null,
   loadPriorRunForCarry: async () => null,
@@ -63,19 +61,17 @@ vi.mock('./persist.js', () => ({
   reconcileOrphanedReviews: async () => 0,
   saveReviewSuccess: async () => {},
 }));
-// The server-side Jira fill for auto runs — the OPTIONAL Pro provider (plugin-providers.ts): PR 60
-// carries a ticket, every other PR has none.
+// The OPTIONAL Pro Jira provider (plugin-providers.ts) DOES offer PR 60 a ticket — and the auto
+// run must not ask for it: stories are the ticket review's (review/ticket-review/), never the PR
+// review's. A call here is recorded so the test can say so.
 const AUTO_TICKET = { title: 'Reset password', description: null, acceptanceCriteria: '* Link is emailed' };
-const AUTO_TICKET_2 = { title: 'Audit log', description: null, acceptanceCriteria: null };
-const PRIOR_TICKET = { title: 'Typed by a person', description: 'x', acceptanceCriteria: null };
+const resolveCalls: number[] = [];
 vi.mock('../plugin-providers.js', () => ({
   getAgenticProviders: () => ({
-    resolveReviewTicket: async (_account: number, prId: number) =>
-      prId === 60
-        ? { ticket: AUTO_TICKET, key: 'ENG-7' }
-        : prId === 62
-          ? { ticket: AUTO_TICKET, key: 'ENG-7', tickets: [AUTO_TICKET, AUTO_TICKET_2] }
-          : { ticket: null, key: null },
+    resolveReviewTicket: async (_account: number, prId: number) => {
+      resolveCalls.push(prId);
+      return prId === 60 ? { ticket: AUTO_TICKET, key: 'ENG-7' } : { ticket: null, key: null };
+    },
   }),
 }));
 let aiReady = true;
@@ -236,14 +232,11 @@ describe('the auto lane', () => {
     expect(m.autoPendingPrIds().size).toBe(0);
   });
 
-  it('⚠ an auto run stores the ticket the server fetched from Jira', async () => {
+  it('⚠ an auto run stores NO story, even where Jira has one, and never asks for it', async () => {
     m.enqueueAutoReview(ctx, 1, 60);
     await flush();
-    expect(inserted.find((r) => r.prId === 60)).toMatchObject({ trigger: 'auto', ticket: [AUTO_TICKET] });
-    await releaseFirst();
-    m.enqueueAutoReview(ctx, 1, 61);
-    await flush();
-    expect(inserted.find((r) => r.prId === 61)).toMatchObject({ trigger: 'auto', ticket: [] });
+    expect(inserted.find((r) => r.prId === 60)).toMatchObject({ trigger: 'auto', ticket: [] });
+    expect(resolveCalls).toEqual([]);
   });
 
   it('reports an auto run as auto in the active list', async () => {
@@ -263,16 +256,6 @@ describe('the auto lane', () => {
 
     await releaseFirst();
     expect(inserted.map((r) => r.prId)).toEqual([10, 21]); // 20 never got a row
-  });
-
-  it('an auto run takes EVERY ticket the provider read; a re-review carries the previous stories', async () => {
-    expect(m.enqueueAutoReview(ctx, 1, 62)).toBe('queued');
-    await flush();
-    expect(inserted.find((r) => r.prId === 62)?.ticket).toEqual([AUTO_TICKET, AUTO_TICKET_2]);
-    await releaseFirst();
-    expect(m.enqueueAutoReview(ctx, 1, 70)).toBe('queued');
-    await flush();
-    expect(inserted.find((r) => r.prId === 70)?.ticket).toEqual([PRIOR_TICKET]);
   });
 
   it('⚠ ONE RUN PER HEAD: an item whose head already has a run writes no row', async () => {

@@ -76,6 +76,9 @@ const SEEDED_TABLES = [
   'prMentions',
   'claudeReviews',
   'claudeReviewChatMessages',
+  'ticketReviews',
+  'ticketReviewMembers',
+  'ticketReviewItems',
 ];
 
 /**
@@ -318,6 +321,32 @@ async function seedAccount(accountId: number, login: string): Promise<void> {
       { accountId, reviewId: review.id, findingId: null, role: 'user', content: 'Why?' },
       { accountId, reviewId: review.id, findingId: finding.id, role: 'assistant', content: 'Because.' },
     ])
+    .execute();
+  // A ticket review (migration 0080 / pg 0067): a run with this PR as a member and one item, plus a
+  // refused run with NO members — the one the repo loop cannot reach through a member row.
+  const [ticketRun] = (await db
+    .insert(s.ticketReviews)
+    .values({
+      accountId,
+      workspaceId: 1,
+      ticketIdent: `jira:https://x.atlassian.net/rest/api/3#T-${accountId}`,
+      status: 'succeeded',
+      model: 'm',
+      originPrId: pr.id,
+    })
+    .returning()
+    .execute()) as any[];
+  await db
+    .insert(s.ticketReviewMembers)
+    .values({ ticketReviewId: ticketRun.id, accountId, prId: pr.id, repoId: pr.repoId, headSha: 'h', prState: 'open' })
+    .execute();
+  await db
+    .insert(s.ticketReviewItems)
+    .values({ ticketReviewId: ticketRun.id, accountId, ref: 'AC1', status: 'not_met', title: 't', body: '' })
+    .execute();
+  await db
+    .insert(s.ticketReviews)
+    .values({ accountId, workspaceId: 1, ticketIdent: `manual:${pr.id}:abcdef12`, status: 'failed', model: 'm', refused: 'no_ticket' })
     .execute();
 }
 

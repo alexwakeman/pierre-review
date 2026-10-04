@@ -9,7 +9,6 @@ import { CLAUDE_REVIEW_TICKET_MAX_CRITERIA, storyCommentLead, stripStoredStoryLe
 import {
   reconcileTicketAssessment,
   reconcileTicketAssessments,
-  storyFindingsFrom,
   storyMatchKey,
   ticketEntriesOf,
 } from './ticket.js';
@@ -154,70 +153,32 @@ describe('ticketEntriesOf — the stored pair → the wire list', () => {
   });
 });
 
-// A diff touching src/mail.ts lines 1-6 (all added) — the anchoring input.
-const DIFF = [
-  'diff --git a/src/mail.ts b/src/mail.ts',
-  '--- a/src/mail.ts',
-  '+++ b/src/mail.ts',
-  '@@ -0,0 +1,6 @@',
-  '+a',
-  '+b',
-  '+c',
-  '+d',
-  '+e',
-  '+f',
-].join('\n');
-
-describe('storyFindingsFrom — a story\'s unmet results become findings (no model call)', () => {
+// LEGACY story findings. A PR review makes none any more (stories went to the ticket review), but
+// rows written before still read, still render their story line and can still be posted.
+describe('legacy story findings — reading and posting', () => {
   const jira: ClaudeReviewTicket = { ...ticket, key: 'BMD-1040', source: 'jira', url: null, fetchedAt: null };
-  const manual: ClaudeReviewTicket = { title: 'Audit log', description: 'Log it.', acceptanceCriteria: '* logged' };
   const a1 = reconcileTicketAssessment(jira, {
     alignment: 'partly_aligned',
     summary: 's',
     criteria: [
-      { text: 'A link is sent', status: 'met', explanation: 'ok', path: 'src/mail.ts', line: 2 },
-      { text: 'Link expires after 1h', status: 'not_met', explanation: 'No expiry is set.', path: 'src/mail.ts', line: 4 },
+      { text: 'A link is sent', status: 'met', explanation: 'ok' },
+      { text: 'Link expires after 1h', status: 'not_met', explanation: 'No expiry is set.' },
       { text: 'Ping @alice on reset', status: 'partly_met', explanation: 'Only on success.', path: 'src/other.ts', line: 9 },
-      { text: 'Hard to say', status: 'unclear', explanation: 'x' },
     ],
     missing: [{ title: 'Rate limit resets', explanation: 'Nothing limits it.' }],
-    notRequested: [{ title: 'A new banner', explanation: 'Not asked.', path: 'src/mail.ts', line: 1 }],
   });
-  const a2 = reconcileTicketAssessment(manual, {
-    alignment: 'not_aligned',
-    summary: 's',
-    criteria: [{ text: 'Every reset is logged', status: 'not_met', explanation: null as never, path: 'src/mail.ts' }],
+  const entries = [{ index: 0, ref: 'BMD-1040', ticket: jira, assessment: a1 }];
+  const stored = (over: { path: string; line: number | null; title: string; body: string; story: { index: number; ref: string } }) => ({
+    side: 'RIGHT' as const,
+    suggestion: null,
+    anchored: false,
+    fileInDiff: false,
+    ...over,
   });
+  const missing = stored({ path: '', line: null, title: 'Rate limit resets', body: 'Nothing limits it.', story: { index: 0, ref: 'M1' } });
+  const partly = stored({ path: 'src/other.ts', line: 9, title: 'Ping @alice on reset', body: 'Only on success.', story: { index: 0, ref: 'AC3' } });
 
-  it('maps not met → warning, partly met → nit, not done → warning; never met/unclear/notRequested', () => {
-    const out = storyFindingsFrom([jira, manual], [a1, a2], DIFF);
-    expect(out.map((f) => [f.story, f.severity, f.title])).toEqual([
-      [{ index: 0, ref: 'AC2' }, 'warning', 'Link expires after 1h'],
-      [{ index: 0, ref: 'AC3' }, 'nit', 'Ping @alice on reset'],
-      [{ index: 0, ref: 'M1' }, 'warning', 'Rate limit resets'],
-      [{ index: 1, ref: 'AC1' }, 'warning', 'Every reset is logged'],
-    ]);
-  });
-
-  it('the body is Claude\'s explanation alone; the story line is built for GitHub, with no mention ping', () => {
-    const out = storyFindingsFrom([jira, manual], [a1, a2], DIFF);
-    expect(out.map((f) => f.body)).toEqual(['No expiry is set.', 'Only on success.', 'Nothing limits it.', '']);
-    const entries = [
-      { index: 0, ref: 'BMD-1040', ticket: jira, assessment: a1 },
-      { index: 1, ref: 'Story 2', ticket: manual, assessment: a2 },
-    ];
-    expect(out.map((f) => storyCommentLead(f, entries))).toEqual([
-      'BMD-1040 · AC2 (not met): Link expires after 1h',
-      'BMD-1040 · AC3 (partly met): Ping @\u200balice on reset',
-      'BMD-1040 · Not done: Rate limit resets',
-      // A story with no key is "Story N".
-      'Story 2 · AC1 (not met): Every reset is logged',
-    ]);
-    // A story the run no longer lists still names itself.
-    expect(storyCommentLead(out[0]!, [])).toBe('Story 1 · AC2: Link expires after 1h');
-  });
-
-  it('an older row\'s stored lead is stripped on read; other bodies are untouched', () => {
+  it("an older row's stored lead is stripped on read; other bodies are untouched", () => {
     const story = { index: 0, ref: 'AC2' };
     expect(stripStoredStoryLead('BMD-1040 · AC2 (partly met): X\n\nWhy.', story)).toBe('Why.');
     expect(stripStoredStoryLead('Story 1 · Not done: X', { index: 0, ref: 'M1' })).toBe('');
@@ -225,41 +186,27 @@ describe('storyFindingsFrom — a story\'s unmet results become findings (no mod
     expect(stripStoredStoryLead('BMD-1040 · AC2 (partly met): X\n\nWhy.', null)).toBe('BMD-1040 · AC2 (partly met): X\n\nWhy.');
   });
 
-  it('anchors exactly like a model finding: on-line inline, in-diff file re-anchors, off-diff PR-level, no path PR-level', () => {
-    const out = storyFindingsFrom([jira, manual], [a1, a2], DIFF);
-    // On an addable line of a changed file.
-    expect(out[0]).toMatchObject({ path: 'src/mail.ts', line: 4, side: 'RIGHT', anchored: true, fileInDiff: true });
-    expect(out[0]!.diffHunk).toContain('+d');
-    // A file outside the diff → PR-level.
-    expect(out[1]).toMatchObject({ path: 'src/other.ts', line: 9, anchored: false, fileInDiff: false, diffHunk: null });
-    // No path at all → a PR-level comment about the change.
-    expect(out[2]).toMatchObject({ path: '', line: null, anchored: false, fileInDiff: false, diffHunk: null });
-    // A changed file but no line → posts on the file's first change.
-    expect(out[3]).toMatchObject({ path: 'src/mail.ts', line: null, anchored: false, fileInDiff: true });
+  it('the story line is built for GitHub, with no mention ping', () => {
+    expect(storyCommentLead(partly, entries)).toBe('BMD-1040 · AC3 (partly met): Ping @\u200balice on reset');
+    expect(storyCommentLead(missing, entries)).toBe('BMD-1040 · Not done: Rate limit resets');
+    // A story the run no longer lists still names itself.
+    expect(storyCommentLead(partly, [])).toBe('Story 1 · AC3: Ping @\u200balice on reset');
   });
 
   it('a path-less story finding posts PR-level without a file line or the outside-the-diff note', () => {
-    const [, , missing] = storyFindingsFrom([jira], [a1], DIFF);
-    const entries = [{ index: 0, ref: 'BMD-1040', ticket: jira, assessment: a1 }];
-    const body = prLevelFindingBody({ ...missing!, editedBody: null, storyLead: storyCommentLead(missing!, entries) });
+    const body = prLevelFindingBody({ ...missing, editedBody: null, storyLead: storyCommentLead(missing, entries) });
     expect(body).toBe(`BMD-1040 · Not done: Rate limit resets\n\nNothing limits it.\n\n${FINDING_COMMENT_MARKER}`);
     // The off-diff one keeps the file line and the note, after the story line.
-    const [, partly] = storyFindingsFrom([jira], [a1], DIFF);
-    const off = prLevelFindingBody({ ...partly!, editedBody: null, storyLead: storyCommentLead(partly!, entries) });
+    const off = prLevelFindingBody({ ...partly, editedBody: null, storyLead: storyCommentLead(partly, entries) });
     expect(off.startsWith('BMD-1040 · AC3 (partly met): Ping @\u200balice on reset\n\n**`src/other.ts:9`**\n\nOnly on success.')).toBe(true);
     // Inline: the story line, then the body (or the reword), then the marker.
-    expect(
-      findingCommentBody({ ...partly!, editedBody: 'Mine', storyLead: storyCommentLead(partly!, entries) }),
-    ).toBe(`BMD-1040 · AC3 (partly met): Ping @\u200balice on reset\n\nMine\n\n${FINDING_COMMENT_MARKER}`);
+    expect(findingCommentBody({ ...partly, editedBody: 'Mine', storyLead: storyCommentLead(partly, entries) })).toBe(
+      `BMD-1040 · AC3 (partly met): Ping @\u200balice on reset\n\nMine\n\n${FINDING_COMMENT_MARKER}`,
+    );
     // An explanation-less finding posts the story line alone.
     expect(findingCommentBody({ body: '', editedBody: null, suggestion: null, storyLead: 'Story 2 · AC1 (not met): X' })).toBe(
       `Story 2 · AC1 (not met): X\n\n${FINDING_COMMENT_MARKER}`,
     );
-  });
-
-  it('nothing to report ⇒ no findings; a null assessment (run not finished) is skipped', () => {
-    expect(storyFindingsFrom([jira], [null], DIFF)).toEqual([]);
-    expect(storyFindingsFrom([ticket], [reconcileTicketAssessment(ticket, undefined)], DIFF)).toEqual([]);
   });
 
   it('storyMatchKey: kind + folded text; ordinary findings have none', () => {
@@ -270,36 +217,5 @@ describe('storyFindingsFrom — a story\'s unmet results become findings (no mod
       storyMatchKey({ title: 'x', story: { index: 0, ref: 'M1' } }),
     );
     expect(storyMatchKey({ title: 'x' })).toBeNull();
-  });
-});
-
-describe('sameHeadTicketCarry — only new commits may change a criterion', () => {
-  const story = { title: 'Reset', description: 'd', acceptanceCriteria: '* emailed' };
-  const assessed = {
-    alignment: 'partly_aligned' as const,
-    summary: 's',
-    criteria: [{ index: 1, text: 'emailed', status: 'not_met' as const, explanation: 'e' }],
-    missing: [],
-    notRequested: [],
-    posted: { githubCommentId: '1', url: null, postedAt: '2026-09-01T00:00:00.000Z' },
-  };
-
-  it('carries an unchanged story\'s assessment (without the posted record) and skips edited ones', async () => {
-    const { sameHeadTicketCarry } = await import('./ticket.js');
-    const out = sameHeadTicketCarry(
-      [story, { ...story, acceptanceCriteria: '* emailed\n* logged' }],
-      { tickets: [story], ticketAssessments: [assessed as never] },
-    );
-    expect(out[0]).toMatchObject({ alignment: 'partly_aligned' });
-    expect((out[0] as { posted?: unknown }).posted).toBeUndefined();
-    expect(out[1]).toBeNull();
-  });
-
-  it('carries nothing without a same-head prior, or for a not_checked assessment', async () => {
-    const { sameHeadTicketCarry } = await import('./ticket.js');
-    expect(sameHeadTicketCarry([story], null)).toEqual([null]);
-    expect(
-      sameHeadTicketCarry([story], { tickets: [story], ticketAssessments: [{ ...assessed, alignment: 'not_checked' } as never] }),
-    ).toEqual([null]);
   });
 });

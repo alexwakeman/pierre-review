@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { ClaudeFindingLens } from '@pierre-review/shared';
+import { TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW, type ClaudeFindingLens } from '@pierre-review/shared';
 import { claudeExecutableOptions, loadAgentSdk } from '../ai/runtime.js';
 import type { RunReviewArgs, RunReviewResult } from '../pro/contract.js';
 import { config } from '../config.js';
@@ -10,9 +10,12 @@ import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
 import { applyClaudeReviewAuth } from './auth.js';
 import {
   cleanupCloneCache,
+  prepPeerWorktrees,
   prepWorktree,
   removeWorktreeLocked,
 } from './clone-manager.js';
+import { createPathGuard, pathGuardHook } from './path-guard.js';
+import { relatedCheckoutsSection } from './claude-review/prompts.js';
 import { sdkModelOptions } from './model-options.js';
 import { estimateCostUsd } from './pricing.js';
 import { mapSubmittedReview } from './submit-map.js';
@@ -120,6 +123,8 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
   let worktreePath: string | null = null;
   let repoCloneDir: string | null = null;
   let tempCwd: string | null = null;
+  // The ticket peers' read-only checkouts (deep runs only); `cleanup` removes them in finally.
+  let peerCleanup: (() => Promise<void>) | null = null;
   let result: SDKResultMessage | null = null;
   let restoreEnv: (() => void) | null = null;
   // Per-message usage keyed by message UUID (latest-wins): the SDK re-emits a message per
@@ -158,6 +163,9 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     // throwaway cwd and NO clone (the dominant per-run cost) — the whole change is in its prompt.
     let cwd: string;
     let maxTurns: number;
+    let prompt = args.prompt;
+    // The ticket peers' checkouts, readable beside cwd (empty unless a deep run was handed peers).
+    const peerDirs: string[] = [];
     const policy = reviewToolPolicy(mode, args.specialists);
     if (mode === 'worktree') {
       onProgress({ phase: 'cloning', reviewMode: mode });
@@ -169,6 +177,19 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       ));
       cwd = worktreePath;
       maxTurns = config.reviewMaxTurns;
+      // OTHER PRs ON THE SAME TICKET, read-only, for cross-repo interactions (claude-review/
+      // prompts.ts "Related PRs"). A peer that fails to check out is said so in the prompt and the
+      // review goes on: peer context is optional, the review of THIS PR is not.
+      const peers = (args.peers ?? []).slice(0, TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW);
+      if (peers.length > 0) {
+        const prepared = await prepPeerWorktrees(
+          peers.map((p) => ({ owner: p.owner, name: p.name, number: p.prNumber, headSha: p.headSha })),
+        );
+        peerCleanup = prepared.cleanup;
+        const checkouts = peers.map((p, i) => ({ ref: p.ref, path: prepared.peers[i]?.path ?? null }));
+        for (const c of checkouts) if (c.path) peerDirs.push(c.path);
+        prompt = `${prompt}\n${relatedCheckoutsSection(checkouts)}`;
+      }
     } else {
       tempCwd = mkdtempSync(join(tmpdir(), 'pierre-review-'));
       cwd = tempCwd;
@@ -208,9 +229,14 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     // Deep review: the specialist catalogue + the dispatch guard (a fresh count per run).
     const guard: DispatchGuard | null =
       policy.specialists.length > 0 ? createDispatchGuard(policy.specialists) : null;
+    // ⚠ THE PATH GUARD, on EVERY run (review/path-guard.ts): under bypassPermissions nothing else
+    // confines an absolute path, and the prompt is attacker-authored. The file tools may read cwd
+    // and the peers' checkouts, nothing else. (A diff-only run has no file tools; it is guarded
+    // anyway, so a future tool is never unconfined by default.)
+    const pathGuard = createPathGuard(cwd, peerDirs);
 
     const q = query({
-      prompt: args.prompt,
+      prompt,
       options: {
         model,
         ...modelOptions,
@@ -220,25 +246,28 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
         allowedTools: policy.allowedTools,
         disallowedTools: policy.disallowedTools,
         maxTurns,
-        ...(guard
-          ? {
-              agents: specialistAgents(policy.specialists),
-              // ⚠ THE CAP LIVES HERE, not in the prompt: a PreToolUse hook runs before the tool,
-              // and its deny holds under bypassPermissions (canUseTool would never be asked).
-              hooks: {
-                PreToolUse: [
+        ...(peerDirs.length > 0 ? { additionalDirectories: peerDirs } : {}),
+        ...(guard ? { agents: specialistAgents(policy.specialists) } : {}),
+        // PreToolUse hooks run before the tool, and their deny holds under bypassPermissions
+        // (canUseTool would never be asked). Every hook must allow a call for it to run.
+        hooks: {
+          PreToolUse: [
+            pathGuardHook(pathGuard),
+            // ⚠ THE SPECIALIST CAP LIVES HERE, not in the prompt.
+            ...(guard
+              ? [
                   {
                     hooks: [
-                      async (input) =>
+                      async (input: { hook_event_name: string; tool_name?: string; tool_input?: unknown }) =>
                         input.hook_event_name === 'PreToolUse'
-                          ? guard.decide(input.tool_name, input.tool_input)
+                          ? guard.decide(input.tool_name ?? '', input.tool_input)
                           : { continue: true },
                     ],
                   },
-                ],
-              },
-            }
-          : {}),
+                ]
+              : []),
+          ],
+        },
         // User-set per-review cap (local settings) when present, else the operator default —
         // plus headroom for each specialist a deep run is offered (they share this one budget).
         maxBudgetUsd: config.reviewBudgetUsd,
@@ -314,6 +343,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     return fail(errorMessage(err), false);
   } finally {
     restoreEnv?.();
+    if (peerCleanup) await peerCleanup().catch(() => {});
     if (repoCloneDir && worktreePath) {
       await removeWorktreeLocked(args.owner, args.name, repoCloneDir, worktreePath).catch(
         () => {},

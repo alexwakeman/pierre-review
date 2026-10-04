@@ -26,7 +26,6 @@ import {
 import {
   acFieldText,
   addStoryTab,
-  assessedStoryPills,
   criteriaHasOwnHeading,
   autoPullKeys,
   createStoryPullMemory,
@@ -110,16 +109,6 @@ describe('numbering: "Story N" is the number the run gives the story', () => {
   it('a typed story never borrows a key', () => {
     const drafts = [{ ...typed('A'), key: 'BMD-9' }];
     expect(storyTabLabel(drafts, 0)).toBe('Story 1');
-  });
-
-  it("the Open PRs strip numbers before it drops unassessed stories", () => {
-    const pills = assessedStoryPills([
-      { key: null, alignment: null },
-      { key: null, alignment: 'aligned' },
-      { key: 'BMD-1', alignment: 'not_aligned' },
-    ]);
-    expect(pills.map((p) => p.label)).toEqual(['Story 2', 'BMD-1']);
-    expect(assessedStoryPills([{ key: null, alignment: 'aligned' }]).map((p) => p.label)).toEqual(['Story']);
   });
 });
 

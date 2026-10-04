@@ -8,7 +8,6 @@
 //   pnpm --filter @pierre-review/backend test claude-review-routes
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { CLAUDE_REVIEW_TICKET_LIMITS } from '@pierre-review/shared';
 import type { AgentContext as ProContext } from '../agent-context.js';
 
 const startReview = vi.fn(async () => ({ ok: true as const, reviewId: 123, queued: false }));
@@ -67,7 +66,7 @@ describe('the model', () => {
       expect(res.statusCode).toBe(202);
       const call = startReview.mock.calls[0] as unknown[];
       expect(call[3]).toBe(model);
-      expect(call[4]).toEqual([]);
+      expect(call).toHaveLength(4);
     }
   });
 
@@ -84,70 +83,25 @@ describe('the model', () => {
     const res = await post(app, { mode: 'worktree' });
     expect(res.statusCode).toBe(202);
     const call = startReview.mock.calls[0] as unknown[];
-    expect(call).toHaveLength(5);
-    expect(call[4]).toEqual([]);
+    expect(call).toHaveLength(4);
   });
 });
 
-describe('the user story', () => {
-  const L = CLAUDE_REVIEW_TICKET_LIMITS;
-
-  it('title over the cap ⇒ 400 TicketInvalid naming the field, no run', async () => {
+// A PR review checks no story any more (the ticket review does). A stale `ticket`/`tickets` key
+// from an older SPA is stripped by the schema, never validated, never passed to the run.
+describe('a legacy user story on the PR review route', () => {
+  it('is stripped: 202 and the run gets no story, even over the old caps', async () => {
     const { app } = await build();
-    const res = await post(app, { ticket: { title: 'x'.repeat(L.titleChars + 1) } });
-    expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ error: 'TicketInvalid', field: 'title' });
-    expect(res.json().message).toBe('Title is 301 characters; the limit is 300.');
-    expect(startReview).not.toHaveBeenCalled();
-  });
-
-  it('criteria text over the character cap ⇒ 400; any number of lines is fine', async () => {
-    const { app } = await build();
-    const over = await post(app, { ticket: { acceptanceCriteria: 'x'.repeat(L.acceptanceCriteriaChars + 1) } });
-    expect(over.statusCode).toBe(400);
-    expect(over.json()).toMatchObject({ error: 'TicketInvalid', field: 'acceptanceCriteria' });
-    expect(startReview).not.toHaveBeenCalled();
-    const many = Array.from({ length: 80 }, (_, i) => `- c${i}`).join('\n');
-    expect((await post(app, { ticket: { acceptanceCriteria: many } })).statusCode).toBe(202);
-  });
-
-  it('a ticket exactly at every cap ⇒ 202, normalised, criteria stored unsplit', async () => {
-    const { app } = await build();
-    const criteria = 'c'.repeat(L.acceptanceCriteriaChars);
-    const res = await post(app, {
-      ticket: {
-        title: ` ${'t'.repeat(L.titleChars)} `,
-        description: 'd'.repeat(L.descriptionChars),
-        acceptanceCriteria: criteria,
-      },
-    });
-    expect(res.statusCode).toBe(202);
-    const t = ((startReview.mock.calls[0] as unknown[])[4] as Array<{ title: string; acceptanceCriteria: string }>)[0]!;
-    expect(t.title).toBe('t'.repeat(L.titleChars));
-    expect(t.acceptanceCriteria).toBe(criteria);
-  });
-
-  it('an all-empty ticket ⇒ no ticket', async () => {
-    const { app } = await build();
-    const res = await post(app, { ticket: { title: '  ', description: '', acceptanceCriteria: '\n' } });
-    expect(res.statusCode).toBe(202);
-    expect((startReview.mock.calls[0] as unknown[])[4]).toEqual([]);
-  });
-
-  it('a sent ticket reaches startReview (ajv did not strip it)', async () => {
-    const { app } = await build();
-    const res = await post(app, {
-      model: 'claude-sonnet-5',
-      ticket: { title: 'Reset password', acceptanceCriteria: '- link sent\n- link expires' },
-    });
-    expect(res.statusCode).toBe(202);
-    expect((startReview.mock.calls[0] as unknown[])[4]).toEqual([
-      {
-        title: 'Reset password',
-        description: null,
-        acceptanceCriteria: '- link sent\n- link expires',
-      },
-    ]);
+    for (const payload of [
+      { ticket: { title: 'Reset password', acceptanceCriteria: '- link sent\n- link expires' } },
+      { tickets: [{ title: 'A' }, { title: 'B' }] },
+      { ticket: { title: 'x'.repeat(5000) } },
+    ]) {
+      startReview.mockClear();
+      const res = await post(app, payload);
+      expect(res.statusCode).toBe(202);
+      expect(startReview.mock.calls[0] as unknown[]).toHaveLength(4);
+    }
   });
 });
 

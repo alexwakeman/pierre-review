@@ -3,6 +3,7 @@ import { claudeExecutableOptions, loadAgentSdk, type AgentSdk } from '../ai/runt
 import { config } from '../config.js';
 import { getAccessToken } from '../auth/account.js';
 import { applyClaudeReviewAuth } from '../review/auth.js';
+import { createPathGuard, pathGuardHook } from '../review/path-guard.js';
 import {
   cleanupCloneCache,
   prepWorktree,
@@ -168,6 +169,12 @@ export async function runAgentInWorktree(
       settingSources: [],
       mcpServers: opts.mcpServers,
       abortController: opts.abortController,
+      // ⚠ THE PATH GUARD (review/path-guard.ts): file tools stay inside the worktree. Under
+      // bypassPermissions nothing else confines an ABSOLUTE path, and this agent WRITES — a seed
+      // item (PR text, review threads, a ticket review's items) saying "also add this to
+      // ~/.zshrc" would otherwise write outside the worktree, where captureWorktreeDiff never
+      // shows it to the reader.
+      hooks: { PreToolUse: [pathGuardHook(createPathGuard(opts.worktreePath))] },
       // LIMN_CLAUDE_PATH → the user's own `claude` instead of the SDK's bundled binary.
       ...claudeExecutableOptions(),
     },

@@ -472,6 +472,40 @@ active first, 40 per run in `nodes(ids:)` batches of 20 (`commits(last: 100) { o
 returned, so each PR is asked at most once per PROCESS (an in-memory set) — budget-aware and strictly
 non-fatal like its siblings.
 
+### Heading facts (board only, display only)
+
+The Pending cards lead with what happened ("@alice mentioned you: …"). The server's `detail`
+strings stay as they are (Slack and notifications print them), so the SPA builds the headings from
+optional facts that `db/my-turn-card-facts.ts` adds to the cards:
+
+| Field | Card | From (synced rows only) |
+|---|---|---|
+| `mentionedById`, `mentionExcerpt` | `mention` | the `pr_mentions` author; their comment in `pr_comments` / `review_comments` / `reviews` that matches `mentionsLogin` on the TYPED lines (quote-replies do not count), at the stamped time, else their newest match |
+| `threadPath`, `threadLine` | `thread`, `thread_reply`, `own_thread` | the thread row the section already carries |
+| `committerId` | `thread` with a `likely_addressed` ball | the author of the FIRST commit after your comment whose `commit_files` list holds the path (the `derive-thread-state.ts` predicate), passing over bots (`globalAutomationUserIds`), you and unattributed commits — the ball rule's exclusions |
+| `firstComment` | `own_thread`, `untouched_thread` (+ `line`) | the thread's oldest stored review comment (one body read per thread; a blank one moves on to the next) |
+| `newActorIds`, `newActorTotal` | `your_pr` | the events `newSinceLastViewed` counts, actors other than you, newest first, capped at `YOUR_PR_NEW_ACTORS_SHOWN` (3) with an uncapped total |
+| `requesterId` | `review_request` | `review_request_events.requester_user_id` of the NEWEST stored event naming you, when it is a `requested` one (`reviewRequesters`). Absent when that newest event is a withdrawal, the requester is NULL (pre-`0081` row, ghost) or is you, or the PR's history is at the selection's 25-event cap (the real newest request may be past it). The card qualifies only on a personal request (`review_requests.user_id`), so team requests are not read. The SPA heads the card "<name> asked you to review" and drops the action line's "by <author>" when the author asked |
+
+Quotes are `CardExcerpt`s: plain text (markdown and HTML stripped), at most
+`CARD_EXCERPT_MAX_CHARS` (200), cut on a word, `truncated` when cut. A mention deep in a long
+comment is brought into view with a leading "…".
+
+- ⚠ **They ride `withFailingChecks`** — only `GET /api/attention` asks (`withBoardFacts` in
+  `getWorkspaceInsights`). The brief, the work plan and every Pro payload never pay for these reads.
+- ⚠ **Read AFTER the board LISTS, for the listed cards only.** The board folds UNCAPPED, so reading
+  over every built card read ~1,600 comment bodies per load on a real workspace to decorate ~50.
+  `buildPendingBoard` passes a `BoardFactsSink`; the fold registers its jobs and the board runs them
+  with the ids `rankPendingTabs` listed. With no sink (a capped caller, the tests) they run inside
+  `finish()` over every built card. Either way they cannot add, drop or re-count a
+  card (`my-turn-card-facts.test.ts` pins ids, details and totals as the same with or without them).
+  Never in a `detail`, a payload hash, the work-plan hash or a model payload.
+- ⚠ **Absent is "not known"**: no excerpt found, no stored touching commit (the heuristic also fires
+  on an outdated thread or a bot marker), an unmapped author. The SPA drops that clause.
+- **No `requesterId` for `review_request`.** The review-request history stores who was ASKED, not
+  who asked: `REVIEW_REQUEST_HISTORY_NODE` selects no `actor`. Adding it needs the selection, a
+  column on `review_request_events` (both dialects) and a backfill.
+
 ### Settings: gates and promotions
 
 The reader decides which types exist, how My turn orders them and how Pending ranks cards

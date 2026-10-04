@@ -355,6 +355,86 @@ export async function removeWorktreeLocked(
   await withRepoLock(`${owner}/${name}`, () => removeWorktree(repoCloneDir, worktreePath));
 }
 
+export interface PeerCheckoutRequest {
+  owner: string;
+  name: string;
+  number: number;
+  // The head to check out (a merged PR: its final head, still reachable as `pull/N/head`).
+  headSha: string;
+}
+
+export interface PeerCheckout extends PeerCheckoutRequest {
+  // The per-run worktree, or null when it could not be prepared.
+  path: string | null;
+  repoCloneDir: string | null;
+  // Why not, credential-free (git's message can carry the tokenized URL). null on success.
+  error: string | null;
+}
+
+/** git's error text without any credential, first line, bounded. */
+export function scrubGitError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  return raw
+    .replace(/x-access-token:[^@\s]*@/g, 'x-access-token:***@')
+    .replace(/\b(gh[opsu]_|github_pat_)[A-Za-z0-9_]+/g, '***')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)[0]
+    ?.slice(0, 300) ?? 'checkout failed';
+}
+
+/**
+ * Prepare a read-only checkout of several PRs at once (a ticket review's members, a deep PR review's
+ * peers). Each gets its OWN per-run worktree via `prepWorktree`:
+ *   • different repositories prepare IN PARALLEL (each takes its own repo lock);
+ *   • two PRs of the SAME repository prepare one after the other under that repo's lock, into two
+ *     distinct paths (`addWorktree` paths are per run, never per sha);
+ *   • a failure is PER PEER — `path: null` and a scrubbed `error`; the others still prepare.
+ * Commits are fetched by `pull/N/head` and then by sha into the shared clone's object store — never
+ * through FETCH_HEAD, which is one file per repository and would race between concurrent jobs.
+ * Results are in request order. `cleanup()` removes every worktree that was made (idempotent, never
+ * throws); the caller still runs `cleanupCloneCache` afterwards, as a single review does.
+ */
+export async function prepPeerWorktrees(
+  peers: readonly PeerCheckoutRequest[],
+  token: string = getGithubToken(),
+): Promise<{ peers: PeerCheckout[]; cleanup: () => Promise<void> }> {
+  const out: PeerCheckout[] = peers.map((p) => ({ ...p, path: null, repoCloneDir: null, error: null }));
+  const groups = new Map<string, number[]>();
+  peers.forEach((p, i) => {
+    const key = `${p.owner}/${p.name}`;
+    const list = groups.get(key) ?? [];
+    list.push(i);
+    groups.set(key, list);
+  });
+  await Promise.all(
+    [...groups.values()].map(async (indexes) => {
+      for (const i of indexes) {
+        const p = peers[i]!;
+        try {
+          const wt = await prepWorktree(p.owner, p.name, p.number, p.headSha, token);
+          out[i] = { ...out[i]!, path: wt.worktreePath, repoCloneDir: wt.repoCloneDir };
+        } catch (err) {
+          out[i] = { ...out[i]!, error: scrubGitError(err) };
+        }
+      }
+    }),
+  );
+  let cleaned = false;
+  const cleanup = async (): Promise<void> => {
+    if (cleaned) return;
+    cleaned = true;
+    await Promise.all(
+      out
+        .filter((c) => c.path != null && c.repoCloneDir != null)
+        .map((c) =>
+          removeWorktreeLocked(c.owner, c.name, c.repoCloneDir!, c.path!).catch(() => {}),
+        ),
+    );
+  };
+  return { peers: out, cleanup };
+}
+
 /** Recursively sum file sizes and track the most-recent mtime under `dir`. */
 function walkSize(dir: string): { bytes: number; mtimeMs: number } {
   let bytes = 0;

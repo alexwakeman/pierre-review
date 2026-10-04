@@ -6,8 +6,9 @@
 // Chronology's "asked to first look" would describe only the newest slice of the window — the
 // retroactive-coverage trap in a new place.
 //
-// So after each walk this re-reads, by node id, up to REVIEW_REQUEST_BACKFILL_PER_RUN merged PRs
-// in the trailing Chronology window whose `review_requests_synced_at` is still NULL. Each PR is
+// So after each walk this re-reads, by node id, up to REVIEW_REQUEST_BACKFILL_PER_RUN PRs whose
+// `review_requests_synced_at` is still NULL — OPEN ones first (migration 0081 un-stamps open PRs so
+// their requests gain a requester), then merged PRs in the trailing Chronology window. Each PR is
 // stamped when its history is written, so it is fetched ONCE; a PR GitHub will not return is left
 // NULL and re-tried on a later walk (bounded by the per-run cap, never a loop).
 //
@@ -53,7 +54,25 @@ export async function backfillReviewRequestHistory(
 ): Promise<number> {
   if (isLimited(accountId)) return 0;
   const since = new Date(Date.now() - BACKFILL_WINDOW_DAYS * 24 * 3_600_000);
-  const rows = await db
+  // OPEN PRs first: a NULL stamp on an open PR is either one the walk has not touched since this
+  // feature shipped, or one migration 0081 un-stamped so its requests gain a requester (the
+  // Pending review_request card's "<name> asked you to review"). Re-stamped on receipt, so each is
+  // read ONCE; the shared per-run cap bounds both halves together.
+  const open = await db
+    .select({ id: pullRequests.id, nodeId: pullRequests.githubNodeId })
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(pullRequests.repoId, repoId),
+        eq(pullRequests.state, 'open'),
+        isNull(pullRequests.reviewRequestsSyncedAt),
+      ),
+    )
+    .limit(REVIEW_REQUEST_BACKFILL_PER_RUN)
+    .execute();
+  const room = REVIEW_REQUEST_BACKFILL_PER_RUN - open.length;
+  const merged = room <= 0 ? [] : await db
     .select({ id: pullRequests.id, nodeId: pullRequests.githubNodeId })
     .from(pullRequests)
     .where(
@@ -66,8 +85,9 @@ export async function backfillReviewRequestHistory(
         isNull(pullRequests.reviewRequestsSyncedAt),
       ),
     )
-    .limit(REVIEW_REQUEST_BACKFILL_PER_RUN)
+    .limit(room)
     .execute();
+  const rows = [...open, ...merged];
   if (rows.length === 0) return 0;
 
   const token = await getAccessToken(accountId);

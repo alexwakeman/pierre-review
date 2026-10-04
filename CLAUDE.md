@@ -767,8 +767,8 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 ## Claude Review, AI Fix + the Pro plugin
 
 **The agentic features are CORE, FREE and LOCAL-ONLY** (apiVersion 22 moved them out of the
-plugin): Claude Review (run, follow-up, ticket check against a PASTED story, auto review, the review
-chat; a DEEP review consults up to five specialist sub-agents, the cap a PreToolUse hook, never
+plugin): Claude Review (run, follow-up, auto review, the review chat, and the separate per-ticket TICKET
+review; a DEEP review consults up to five specialist sub-agents, the cap a PreToolUse hook, never
 the prompt) in `src/review/claude-review/`, AI Fix's agentic fixer + push in `src/coding/ai-fix/`.
 Review memory is DELETED (`review_learnings` dropped by sqlite `0075` / pg `0062`); the depth is
 always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
@@ -797,6 +797,18 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   failing check gets exactly one entry — Claude's cause or a server `not_checked` reason, never an
   invented cause. ⚠ The signed log URL never leaves the server; only the check's details page is
   stored. `ciFailures: null` = did not look, `[]` = nothing failing (§ Failed CI).
+- **STORIES ARE A SEPARATE PROCESS, THE TICKET REVIEW** (`src/review/ticket-review/`; sqlite `0080`
+  / pg `0067`, plugin `0039`): ONE review per TICKET across its open + merged PRs (≤ 8, else REFUSED
+  with the count), never inside a PR review — new PR-review runs store no story, and their old
+  stories read as history only. Currency is a server FINGERPRINT (story hash + members' heads/state),
+  never a client guess. It shares the PR review's concurrency pool (a PR-review click goes first),
+  cascades ONE HOP on a member's change under `autoReviewDue` with its OWN
+  `TICKET_REVIEW_DAILY_CAP`, never auto-posts, and the agent reads member worktrees only behind the
+  PreToolUse PATH GUARD (`review/path-guard.ts`, now on every agent run). ⚠ The Jira apiRoot fold is
+  ONE shared function (`jiraApiRoot`) — a second copy splits one ticket into two idents. ⚠ ONE
+  story per ticket for every caller (`jiraStoryFor` → the plugin's `ticketStory`, the freshest stored
+  row), and the seam reads STORED rows only — no Jira call on a view.
+  [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Ticket review.
 - **The moved modules take ONE context argument, `AgentContext`** (`review/agent-context.ts`),
   built from direct core imports — never `ProContext`. Their tests pass a fake one; the queue
   managers carry it on each item. URL paths did NOT move (the fixer keeps its historical
@@ -1392,7 +1404,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0066` and plugin `0034`–`0037` are NOT replayed.
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0068` and plugin `0034`–`0037` + `0039` are NOT replayed.
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.
   - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence

@@ -15,11 +15,20 @@ const prCommentBodyField = '\n              body';
 // One review-request timeline event as the SYNC path needs it, shared by the fat PR selection and
 // by the backfill's nodes() query so the two can never drift. `Bot` is selected alongside `User`
 // because a Copilot review request is a Bot; who counts as a PERSON is decided on read.
+// `actor` on a REQUEST is who ASKED (review_request_events.requester_user_id) — what a Pending
+// review_request card names. Selected on the requested event only: the withdrawal's actor is not
+// read anywhere. Like `requestedReviewer` it is an OBJECT, not a connection, so the measured cost
+// note on `reviewRequestHistory` below still holds.
 const REVIEW_REQUEST_HISTORY_NODE = `nodes {
       __typename
       ... on ReviewRequestedEvent {
         id
         createdAt
+        actor {
+          __typename
+          ... on User { id login }
+          ... on Bot { id login }
+        }
         requestedReviewer {
           __typename
           ... on User { id login }
@@ -207,7 +216,8 @@ const PR_NODE_FIELDS = /* GraphQL */ `
   # COST — MEASURED FREE: \`rateLimit(dryRun: true)\` on REPO_ACTIVITY_QUERY read 15 points/page
   # both without and with this selection. A LEAF connection (no connection beneath it) adds no
   # nodes to the price; its own \`first:\` would only matter to a child connection, and it has
-  # none — \`requestedReviewer\` is an object. Do not add a connection under it.
+  # none — \`requestedReviewer\` and \`actor\` (who asked) are objects. Do not add a connection
+  # under it.
   reviewRequestHistory: timelineItems(
     itemTypes: [REVIEW_REQUESTED_EVENT, REVIEW_REQUEST_REMOVED_EVENT]
     first: 25
@@ -804,6 +814,9 @@ export interface GqlReviewRequestEvent {
   __typename?: string;
   id?: string | null;
   createdAt?: string | null;
+  /** Who made the request (ReviewRequestedEvent only). ABSENT = the selection did not arrive
+   *  (an older fixture, a removal event) — never "nobody"; `null` = GitHub's ghost/deleted actor. */
+  actor?: { __typename: 'User' | 'Bot'; id: string; login: string } | { __typename: string } | null;
   requestedReviewer?:
     | { __typename: 'User' | 'Bot'; id: string; login: string }
     | { __typename: 'Team'; id: string; slug: string | null }

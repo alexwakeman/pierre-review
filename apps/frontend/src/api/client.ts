@@ -41,7 +41,6 @@ import type {
   ClaudeReviewChatBody,
   ClaudeReviewChatResponse,
   ClaudeReviewStatusResponse,
-  ClaudeReviewTicketInput,
   ClaudeReviewVerdict,
   CreatePrCommentBody,
   CreatePrCommentResult,
@@ -163,6 +162,7 @@ import type {
   JiraFieldListResponse,
   TicketLinksBody,
   TicketLinksResponse,
+  TicketMergedPrsResponse,
   JiraTicketDetails,
   JiraTicketRefreshBody,
   JiraAcFieldBody,
@@ -198,6 +198,17 @@ import type {
   WorkPlanResponse,
   SetWorkspaceAutoReviewBody,
   WorkspaceAutoReviewResponse,
+  PostTicketItemBody,
+  PostTicketItemResponse,
+  PrTicketReviewsResponse,
+  StartTicketReviewBody,
+  StartTicketReviewResponse,
+  TicketReview,
+  TicketReviewStatesBody,
+  PrRefQuery,
+  ResolvePrRefsBody,
+  ResolvePrRefsResponse,
+  TicketReviewStatesResponse,
 } from '@pierre-review/shared';
 
 class ApiError extends Error {
@@ -1192,6 +1203,13 @@ export const api = {
     fetch('/api/pro/ticket-links', jsonBody('POST', { prIds } satisfies TicketLinksBody)).then((r) =>
       handle<TicketLinksResponse>(r),
     ),
+  // The Open PRs ticket stacks' "Merged (n)" panel: every merged PR linked to each listed ticket
+  // key, ONE request for the whole board, DB-only. Keys are read on the WORKSPACE's Jira site.
+  // A GET (read tier); at most TICKET_MERGED_PRS_MAX_KEYS keys (the route 400s over).
+  ticketMergedPrs: (workspaceId: number, keys: string[]) =>
+    fetch(
+      `/api/pro/ticket-merged-prs?${workspaceParam(workspaceId)}&keys=${encodeURIComponent(keys.join(','))}`,
+    ).then((r) => handle<TicketMergedPrsResponse>(r)),
 
   // ---- The PER-WORKSPACE Slack digest (packages/pro `workspace_slack_targets`) ----
   // ⚠ ONE WORKSPACE PER CALL — THE ONE IN `?workspace=`. The plural list endpoints
@@ -1273,20 +1291,12 @@ export const api = {
   // is a write path back to a secret nothing consumes.
   claudeReviewById: (reviewId: number) =>
     get<ClaudeReview>(`/api/claude-reviews/${reviewId}`),
-  // `tickets` are the optional user stories, already checked by `checkClaudeReviewTickets` (the
-  // route runs the same check and 400s `TicketInvalid` over a cap). Omitted when there are none.
-  // No depth: the router always decides.
-  generateClaudeReview: (
-    prId: number,
-    model: ClaudeReviewModel,
-    tickets?: ClaudeReviewTicketInput[],
-  ) =>
+  // No user story and no depth: the router decides the depth, and stories are the ticket review's
+  // (`startTicketReview`), a separate run.
+  generateClaudeReview: (prId: number, model: ClaudeReviewModel) =>
     fetch(
       `/api/prs/${prId}/claude-review`,
-      jsonBody('POST', {
-        model,
-        ...(tickets != null && tickets.length > 0 ? { tickets } : {}),
-      } satisfies GenerateReviewBody),
+      jsonBody('POST', { model } satisfies GenerateReviewBody),
     ).then((r) => handle<{ reviewId: number; status: string }>(r)),
   // The Open PRs table's "Claude review" column: the LATEST run for each listed PR, ONE request
   // for the whole table. DB-only; at most CLAUDE_REVIEW_STATES_MAX_IDS ids (the route 400s over).
@@ -1346,6 +1356,41 @@ export const api = {
     fetch(`/api/claude-reviews/${reviewId}/chat`, jsonBody('POST', body)).then((r) =>
       handle<ClaudeReviewChatAnswer>(r),
     ),
+
+  // ---- Ticket review (CORE, local-only): one review per TICKET across every PR on it ----
+  // docs/API.md § Ticket review. The live progress is an SSE GET at
+  // `/api/ticket-reviews/:id/stream`, read through `sseStream` (hooks/useTicketReview.ts).
+  // Start: `{prId}` (every ticket the PR is on), `{prId, ident}` (one), or `{prId, tickets}` (pasted
+  // stories, already checked by `checkClaudeReviewTickets`). 202 with one outcome per ticket.
+  startTicketReview: (body: StartTicketReviewBody) =>
+    fetch('/api/ticket-reviews', jsonBody('POST', body)).then((r) =>
+      handle<StartTicketReviewResponse>(r),
+    ),
+  // Every ticket the PR is on, each with its latest run and whether that run is current.
+  prTicketReviews: (prId: number) =>
+    get<PrTicketReviewsResponse>(`/api/prs/${prId}/ticket-reviews`),
+  ticketReview: (id: number) => get<TicketReview>(`/api/ticket-reviews/${id}`),
+  // Batched currency for the Open PRs ticket stacks: ONE request for the board, at most
+  // TICKET_REVIEW_STATES_MAX idents (the route 400s over, never truncates). DB-only.
+  // PR references in the Review tab's prose → local PR ids. ONE batch per pane, only the refs the
+  // pane could not resolve from data already on screen; at most PR_REF_RESOLVE_MAX (400 over). DB-only.
+  resolvePrRefs: (refs: PrRefQuery[]) =>
+    fetch('/api/prs/resolve', jsonBody('POST', { refs } satisfies ResolvePrRefsBody)).then((r) =>
+      handle<ResolvePrRefsResponse>(r),
+    ),
+  ticketReviewStates: (idents: string[]) =>
+    fetch(
+      '/api/ticket-reviews/states',
+      jsonBody('POST', { idents } satisfies TicketReviewStatesBody),
+    ).then((r) => handle<TicketReviewStatesResponse>(r)),
+  // Post ONE item as a PR comment, on its owner PR (else the PR being viewed). ⚠ A response with
+  // `visible: false` and a non-null `commentId` IS on GitHub: never retry it (a retry
+  // double-posts); a second post of the same item is a 409 AlreadyPosted.
+  postTicketItem: (ticketReviewId: number, itemId: number, viewedPrId: number) =>
+    fetch(
+      `/api/ticket-reviews/${ticketReviewId}/items/${itemId}/post`,
+      jsonBody('POST', { viewedPrId } satisfies PostTicketItemBody),
+    ).then((r) => handle<PostTicketItemResponse>(r)),
 
   // ---- AI Fix (Pro) ----
   aiFixSummary: (prId: number) =>

@@ -72,6 +72,7 @@ import {
   asCiFailingCard,
   asConflictsCard,
   asForwardCard,
+  checksPageHref,
   authorByline,
   authorSourceLabel,
   bylineParts,
@@ -2100,5 +2101,15 @@ describe('mergeRowCardOf — which cards carry a merge row', () => {
 
   it('every other kind carries none', () => {
     expect(mergeRowCardOf(conflictsCard())).toBeNull();
+  });
+});
+
+describe('a red build opens its checks, not the PR', () => {
+  it('appends /checks to a PR or a commit URL, and refuses any other shape', () => {
+    expect(checksPageHref('https://github.com/o/r/pull/352')).toBe('https://github.com/o/r/pull/352/checks');
+    expect(checksPageHref('https://github.com/o/r/commit/f48aec5d1')).toBe('https://github.com/o/r/commit/f48aec5d1/checks');
+    expect(checksPageHref('https://github.com/o/r')).toBeNull();
+    expect(checksPageHref('javascript:alert(1)//github.com/o/r/pull/1')).toBeNull();
+    expect(checksPageHref(null)).toBeNull();
   });
 });

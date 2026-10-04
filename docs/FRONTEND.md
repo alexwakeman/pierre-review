@@ -1133,6 +1133,57 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   shows only where `ai.enabled`. Credits stay on the Pro one-shot Haiku features.
 - **The Pro CI-analysis card is DELETED** (Claude Review diagnoses failing CI). The AI summary inside
   the AI Fix tab stays Pro (`prSummary`) and renders nothing without the plugin.
+- **STORIES ARE THE TICKET REVIEW'S NOW, in its own "Story check" section** (`TicketCoverage.tsx`,
+  pure half `lib/ticketReview.ts`, hooks `hooks/useTicketReview.ts`; contract docs/CLAUDE-REVIEW.md
+  § Ticket review). "Run a review" sends `{model}` only. One block per ticket the PR is on: key,
+  title, "N of M met", the server's currency pill ("2 PRs changed since"), Check / Re-check behind
+  `AiRunGate`, criteria with "Done in web#412" / "Belongs in api#88", and ONE Post button per unmet
+  item (target named on the button; once posted, never offered again; `visible:false` = "It will
+  show up here shortly", no retry). It shows the latest SUCCEEDED run; a newer running or failed one
+  is a line above it. The story-tab panel moved here as "Add a story" (pasted stories become
+  `manual:` ticket reviews; auto-pull is off — detected tickets are already blocks). ⚠ **Open PRs
+  reads ticket coverage through ONE batched `useTicketReviewStates(idents)`** (`POST
+  /api/ticket-reviews/states`), never per card; it polls only while a state is `running`. The ident
+  is built client-side with shared `jiraApiRoot` on the browse link — the plugin's own fold. Card
+  pills ("BMD-1 · 4 of 6 met") come from those states, not from PR-review rows, and a card inside a
+  ticket stack skips the stack's own ticket. The start mutation key is `['ticket-review-start',
+  ident]`, shared by the pane and the stack.
+  - ⚠ **ONE STORY SECTION.** The old "User stories" section is DELETED: an older PR review's story
+    verdicts render INSIDE Story check, and only for a story NO ticket review covers
+    (`legacyOnlyEntries`, `lib/ticketStory.ts`: same key, or same title when keyless), as its own
+    block under a muted "Checked on this PR only" with a Check (a `planStoryStart` of that stored
+    ticket). `ClaudesReview` places only THOSE stories' findings (`placeStoryFindings(findings,
+    legacyEntries)`) and hands the cards to Story check through its `storyCheck` render prop; a
+    story hidden because a ticket review covers it places nothing, so its findings stay in the
+    Findings list with their chip. Every finding is still on screen once.
+  - **Each block has a collapsible "Story"** (`StoryDisclosure`, `TicketStory.tsx`): key linked to
+    Jira, title, description + criteria as markdown (`StoryText`). Source in order: the STORED Jira
+    row (`GET /api/pro/prs/:id/jira-ticket?key=`, ⚠ fetched only once opened — the worker read Jira
+    on receipt) when `canFetchDetails`, else the latest ticket review's `ticket` snapshot, else the
+    older run's ticket. A Jira story carries the criteria-field picker (`useSetJiraAcField`, no
+    "None of these"); a change invalidates `['ticket-reviews']` + the states so the block shows
+    "Story edited since". "Add a story" is only for pasting: a ticket already listed as a block is
+    not offered as "Pull KEY from Jira".
+  - **Open PRs: a Jira ticket key opens a MODAL, not Jira** (`TicketKeyButton` → `TicketStoryModal`
+    on the `InfoModal` shell): status, type, assignee, the story as markdown, "Open in Jira" inside.
+    Mounted only while open, so the stored row is read on the click (any PR of the stack). ⚠ The
+    modal is portalled but its React events bubble to the card / stack header, so the wrapper stops
+    them. Linear tickets stay links.
+  - **No "Claude: " lead** on generated text anywhere in the pane — it is all Claude's.
+  - **The stack pill** (`StackCoverage`, `OpenPrsCards.tsx`): ONE chip in the `TicketStack` header —
+    "4 of 6 met" toned by alignment (a pulse while running) — then the currency words when stale
+    ("#412 pushed since"), then Check story / Re-check (hidden while running, absent without a
+    ready AI runtime) and the refusal sentence ("12 PRs are on this ticket; the most is 8"). It
+    starts the run with the stack's FIRST row as `prId`.
+  - ⚠ **A START REFRESHES EVERY PANE, not just the starter's PR**: `useStartTicketReview` /
+    `useStartStoryCheck` invalidate the `['ticket-reviews']` PREFIX plus the states. The run belongs
+    to every PR on the ticket and the starter knows only its own; a pane open on another member
+    showed the old verdict as current, with no stream and no poll, until a remount. `done` still
+    invalidates each member by id.
+  - ⚠ **"Already posted" is ONE error code** (`ApiError.code === 'AlreadyPosted'`). The post route
+    also 409s `HeadMoved` and `Superseded`, where nothing reached GitHub: those keep the button and
+    print the server's sentence. Reading every 409 as posted told the reader not to post a comment
+    that did not exist.
 - **Claude Review's user-story input is TABS** (`ClaudeReviewTicketPanel`, pure half `lib/storyTabs.ts`):
   one tab per story, Jira tabs read-only markdown with their criteria field shown and changeable,
   detected Jira tickets auto-pulled once per PR per key set (never re-adding a removed one). ⚠ "Story
@@ -1142,7 +1193,7 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
 - **A user story's results are FINDING CARDS, not a post button — shown INSIDE THEIR STORY.** Every
   not met / partly met criterion and every "Not done" item of a run arrives as an ordinary
   `ClaudeFinding` with `story: {index, ref}` (server-made — docs/CLAUDE-REVIEW.md § User stories).
-  ⚠ **LIKE FOR LIKE, AND ONCE**: the User stories section renders each as THE SAME `FindingRow` the
+  ⚠ **LIKE FOR LIKE, AND ONCE**: Story check's older-story blocks render each as THE SAME `FindingRow` the
   Findings list uses (one `findingCard` builder in `ClaudesReview`, handed to
   `ClaudeReviewTicketResults` as `renderFinding`; chip `storyItemChipLabel`: "AC2 · Partly met",
   "Not done"), and the Findings list drops them (`placeStoryFindings(findings, tickets).placed`).
@@ -1153,9 +1204,29 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
 - **Every section of the Claude Review pane is ONE shell, `ReviewSection`** (`ReviewSection.tsx`):
   bordered rounded box, tinted header band = sentence-case title (one size) + count pills + ⓘ +
   right-aligned actions; cards inside keep their lighter borders (pane → section → card). Order: Run
-  a review · Claude's review · CI failures · Previous review · Review threads · User stories ·
-  Findings · Review chat · Post to GitHub (summary, verdict, Preview, Post) · Generate a fix. "CI
-  passing" is a pill in Claude's review (`ClaudeReviewCiStatus`), not a section.
+  a review · Claude's review · CI failures · Previous review · Review threads · Findings · Story
+  check · Review chat (OPEN by default, so its one DB read runs on mount; Hide collapses it) · Post
+  to GitHub (summary, verdict, Preview, Post) · Generate a fix. "CI passing" is a pill in Claude's
+  review (`ClaudeReviewCiStatus`), not a section.
+- **ONE TYPE SCALE for every section, and the reference is the FINDINGS card**
+  (`lib/reviewStyles.ts`): `REVIEW_ITEM_CARD` / `REVIEW_ITEM_TITLE` / `REVIEW_PROSE` (Claude's words,
+  13px = `.md-body`, page colour) / `REVIEW_META` / `REVIEW_CHIP` / `REVIEW_ANCHOR(_MUTED)` /
+  `REVIEW_SUBHEAD`. Story check once set its prose at 12px grey beside Findings' 13px; do not hand-roll
+  a size in a section — import the constant. Muted pairings stay under `test/textContrast.test.ts`.
+- **Claude's summary (and a ticket review's) is MARKDOWN** — the prompts ask for one lead sentence
+  then a "- " bullet per main issue, only when there are issues. Rendered through `<Markdown prRefs>`,
+  so an older plain-prose summary renders as one paragraph, unchanged.
+- **EVERY PR REFERENCE IN THE REVIEW TAB OPENS THAT PR IN LIMN** (pure `lib/reviewPrRefs.ts`, React
+  `components/ReviewPrRefs.tsx`). "owner/repo#N", "repo#N" and a bare "#N" (= the viewed PR's repo)
+  in model prose (summary, findings, threads, CI, follow-up, story check, chat) and in the ticket
+  review's member labels ("Done in api#88", "Belongs in", evidence, "Post on") become a button calling
+  `openPrDetailTab`. Resolution: data already on screen first (the viewed PR, the ticket reviews'
+  members — the same cached query Story check reads), then ONE batched DB-only `POST
+  /api/prs/resolve` per pane (`ReviewPrRefsProvider`, keyed on the sorted ref set, `staleTime:
+  Infinity`, at most `PR_REF_RESOLVE_MAX`). ⚠ A qualified ref never falls back to a bare-number match
+  in another repo, and a bare "repo#N" resolves server-side only when exactly ONE of the account's
+  repos has that name. Unresolved refs, refs inside links or code, and the viewed PR itself stay plain
+  text. Markdown gets it via the `rehypeReviewPrRefs` plugin, which runs AFTER the sanitizer.
 - **Is the review on the PR's current commit? ONE helper, `reviewCurrency()`
   (`lib/claudeReviewColumn.ts`)**, read by the Claude's review header (first pill; also for a past
   run picked in "Showing" — always against the PR's CURRENT head) and the Open PRs card's verdict
@@ -2048,9 +2119,9 @@ and after a reload. The PR pane keeps position and time (its answer is live).
   from here.") and the row ("In the merge queue · awaiting checks"). Now: ONE word table
   (`QUEUE_STATE_WORDS` → `QUEUE_STATE_LABEL`, so on the board the row's line IS the chip's label);
   the sentence is left off the card (`pendingCardDetail` / `depStateSentence` — the server keeps it
-  for the Do next `reason`, the `ci_red` precedent); and the header chip (`PendingQueueChip`) steps
-  aside where the card's merge row prints the line (`useMergeRowStatesQueue`, the row's OWN read via
-  `useMergeRowQueued`). It stays for a reader without push access (no row) and while an armed intent
+  for the Do next `reason`, the `ci_red` precedent); and (layout B) the header chip is gone: a queued
+  merge-row card's HEADING is the line (`useMergeRowQueueLine`, the same newer-wins read as
+  `useMergeRowQueued`) and the row passes `queueLine={false}`, keeping only "Remove from queue". It stays for a reader without push access (no row) and while an armed intent
   owns the row. `mergeRowCardOf` names the card whose row a card renders and MUST mirror the
   renderers (pinned in `pendingCardControls.test.ts`), or the chip would vanish over a row that says
   nothing. The type/state chips are suppressed on a queued card (`forwardStateChip`,
@@ -2090,7 +2161,7 @@ The rest of the row, queued or not:
 - ⚠ The buttons must not filter, reorder or drop a card: each tab's order and count are the
   server's, and a local edit would make a tab list fewer cards than its count claims
   (`apps/frontend/test/pendingTabs.test.ts`).
-- `CardShell`'s `onActivate` skips `a`/`button`/`textarea`/`input`/`[data-noactivate]`, so the
+- `PrCardFrame`'s `onOpen` skips `a`/`button`/`textarea`/`input`/`[data-noactivate]`, so the
   controls do not also open the PR.
 - **MID-MERGE IS THREE LAYERS, CHECKED MOST-IMMEDIATE FIRST.** (1) a MANUAL merge or branch update
   the reader started, read off the SHARED mutation keys `mergePrMutationKey(prId)` /
@@ -2221,7 +2292,7 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   pill (the tab replaces it), `AttentionIsolationBanner` (the selected tab and chip say the same
   thing on the board itself) and the spread/superseded explanations. The Pro plan still picks its
   rows across kinds; its headline and `parked` line sit above the tabs and each `why` lands on its
-  card in whichever tab — `CardShell` reads it from `PendingBoardContext` for EVERY kind (before,
+  card in whichever tab — `PendingCard` reads it from `PendingBoardContext` for EVERY kind (before,
   only three kinds were passed a `why`, so most narrated rows never showed theirs).
 - **Liveness** sweeps merge-state cards first (ready to merge, behind trunk, conflicts, every
   dependency update, which carries its own merge row, and a My Turn `own_ready` / `own_conflicts`
@@ -2331,11 +2402,97 @@ modal (tabs, inside a tab, the score, colours, when it is your turn).
   `pendingLabels.ts` (importing them from `AttentionCards` would be a cycle); `AttentionCards`
   re-exports them.
 
+### One PR card shell — Open PRs and Pending
+
+`Activity/PrCardShell.tsx` is the card layout BOTH lists render: `PrCardFrame` (the bordered `<li>`;
+whole-card click + Enter/Space ONLY with `onOpen`, a click on `a`/`button`/`textarea`/`input`/`select`/
+`[data-noactivate]` left to that control), `PrCardTitle` (title first; an end slot OUTSIDE the
+heading), `PrCardChips` (left-aligned under the title, `empty:hidden`), `PrCardMeta` ("·"-separated
+parts, empty ones skipped, then a trailing delta + flags) and the shared `CiChip`/chip classes. It
+owns the frame and the type, never the content, and fetches nothing.
+
+- **Open PRs** (`OpenPrCard`) is unchanged on screen: title + Draft, CI/review/threads/merge chips,
+  ticket row, meta line, Claude panel.
+- **Pending** (`PendingCard` in `AttentionCards.tsx`) uses the shell's optional EVENT-HEADING slot
+  (`PrCardEventHeading`) instead of `PrCardTitle` — layout B, below.
+- ⚠ **Claude on Pending is ONE batched `useClaudeReviewStates` for the board's PR cards**, gated on
+  `me.ai.enabled` like Open PRs — never one request per card (`test/prCardShell.test.ts`).
+
+### The Pending card — layout B, event first (`lib/pendingHeadings.ts`, `PendingCard`)
+
+Every Pending card, on all six tabs, reads top to bottom in one order, everything LEFT-aligned:
+
+1. **The heading — what happened.** "David Buckley replied: “…” · 2d", "Your build failed:
+   SonarCloud · 2h", "main is red in bng-metric-frontend: Run Journey Tests · 14m", "Waiting 4d on
+   Priya Shah". Actor by DISPLAY name (never @login), the quote as plain text (markdown/HTML and
+   quote-reply lines stripped, cut at ~120 chars on a word boundary), the time ONCE at the end.
+   ⚠ NO CSS line clamp — it hid the age whenever the heading wrapped to a third line; the quote's
+   character cap is the bound, and it is what `replyBlockShown` reads.
+2. **The action line — what to do, and where.** `[In your repos] [muted]` **verb** · where (path,
+   sha) · on <PR title> (a button → Overview) · `repo#N` (org dropped when every card on the board
+   shares it) · ↗ · ⓘ. Inside My turn "Your turn" is NOT printed (the tab says it); "In your repos"
+   and the neutral label stay, and an ABSENT `relevance` is neutral.
+3. **The Pro `why` line** (model prose, labelled apart), directly under it.
+4. **The event's own content** — the attributed reply (only when the heading's quote was cut), up
+   to 3 pushed commits, the failing checks the heading did not name, suggested reviewers, the
+   advisory, a thread's opening comment (`firstComment`), the trunk card's "Last landed: #354 … by
+   Dependabot, merged by … — not necessarily the cause".
+5. **ONE fact line chosen by the card's job** (`pendingFactPlan`): people/own-PR cards → CI +
+   standing; review cards → CI · standing · "High reach" · code lines; merge/deps → CI · standing ·
+   reach; CI and trunk cards → nothing. "GitHub: no review required" is never printed. A fact the
+   heading already states is not repeated: no standing under "approved your PR" or "needs an
+   approving review", no "No reviews yet" under "Nobody was asked to review this", and on a red
+   Dependencies card the CI label goes without names (the heading and the red line list them).
+6. **Claude as one line** (`PendingClaude.tsx`: verdict + counts; on a red-build card the diagnosis
+   INSTEAD of the verdict) — nothing when Claude has not looked. Threads-to-fix and the CI-diagnosis
+   pill live in Details.
+7. **The buttons, left:** primary · secondaries (merge row / resolver / Resolve / Open review / AI Fix
+   / Open #N) · Details · Dismiss (quiet, My turn only). Resolve conflicts IS the primary on a
+   conflicts card. A red build's primary is "Open checks" — the PR's or the commit's `/checks` page
+   (`checksPageHref`), never Overview. The CI card's AI Fix is gated on `board.claudeOn` like every
+   agentic control. Resolve on a thread card resolves by thread id on the CLICK; nothing mounts that
+   fetches.
+   ⚠ **No imperative without its button**: a merge / update-branch / ready-bump card the viewer
+   cannot push to (row hidden by `pendingMergeGate`) carries NO verb on its action line.
+
+**Details** (per-card local state) holds the reviewer chips, byline · opened · files · +/− · the
+reach PHRASE, Claude's other pills, the thread's conversation and the PR summary. ⚠ **The last two
+FETCH, so they mount only while Details is open** — the untouched-thread card used to fetch its
+thread on mount, which broke the board's no-fetch rule (`e2e/pending-cards.spec.ts` pins it).
+
+**Whole-card click opens the EVENT** (`pendingCardEvent`): a thread card its thread, pushed
+commits / a comment / a mention / your PR's new activity the PR's Activity tab, a Claude card the
+review, a red trunk its checks page on GitHub (the "at <sha>" link is the commit itself); the title
+always opens Overview (it seats `prDetailTab` explicitly). A red build on YOUR PR (`ci_failing`'s
+`your_pr` arm, no `InsightPrRef`) still prints "on <title> · repo#N" from its own fields.
+
+What went, deliberately: the type chip (`MY_TURN_REASON_LABEL` survives for the filter chips), the
+KIND chip, the header queue chip (a queued merge-row card's HEADING is the queue line, from the same
+newer-wins answer — `useMergeRowQueueLine`; `MergeControl` gets `queueLine={false}` and keeps only
+"Remove from queue"), the second and third clocks, repeated red-CI statements and everything on the
+right edge.
+
+- ⚠ **The server's `detail` is never printed whole and never rewritten** — Slack, notifications and
+  the work plan print it. The heading lib lifts ONE fact from it where that is the only place it
+  lives (the base branch, "N others also requested", the trunk branch, the Claude verdict).
+- ⚠ **Absent heading facts drop their clause** (`mentionExcerpt`, `threadPath`, `committerId`,
+  `firstComment`, `newActorIds`); an unknown actor is "Someone". A `likely_addressed` card says "A
+  commit changed <path> after your comment" — never "addressed".
+- ⚠ **A repo-grained card is not drawn as a PR.** `ci_failing`'s trunk arm and a promoted
+  `trunk_red` head with the branch and repo, print no PR title, and link the sha to the commit;
+  `reviewer_load` heads with the PERSON. `pendingCardPrId` gives neither a PR.
+- Pinned by `test/pendingHeadings.test.ts` (every card type, the fallbacks, the relevance labels).
+
 ### "opened 3d" — the PR's own age on a Pending card
+
+> **Layout B:** the age now sits in the card's DETAILS meta line (`PrDetails`), and the per-card
+> clocks below (`right` / `clockAt` / `clockSaysMore`) are replaced by the heading's ONE time. The
+> pure helpers stay exported and pinned; the history below is kept for the reasoning.
 
 `openedAgeLabel(iso)` (exported from `AttentionCards.tsx`) turns `InsightPrRef.openedAt` into
 "opened 3d". It is passed to `CardShell` as `openedAt` and **appended** to whatever `right` already
-holds; the "·" separator, the absolute `dateTime` tooltip and the null degradation live in the shell,
+holds, both in the card's META LINE between "#N · repo · author" and the file count; the "·"
+separator (`PrCardMeta`), the absolute `dateTime` tooltip and the null degradation live in the shell,
 once, so a kind that opts in cannot forget or double them.
 
 ⚠ **AND `right` IS DROPPED WHEN IT SAYS THE SAME THING — `clockSaysMore(clockAt, openedAt)`.** A kind
@@ -2383,7 +2540,7 @@ nobody has touched a PR since it appeared, because the ball arrived when it open
   carries no `openedAt`: on the `trunk` arm the subject is a REPOSITORY and the PR it names is the
   MERGED landing PR of the red head. `reviewer_load`'s subject is a PERSON — `pendingPrs[]` is a list,
   so there is no single PR to date.
-- ⚠ **It goes in `CardShell`'s right slot, NEVER in `PrMetaRow`.** `PrMetaRow` is exported and mounted
+- ⚠ **It goes in `CardShell`'s clock parts, NEVER in `PrMetaRow`.** `PrMetaRow` is exported and mounted
   by a second surface (`Search/SearchResultsTab.tsx`) off a hand-adapted `PrMetaFields`; putting the
   age there paints "opened 3d" on every cross-repo search result.
 - The `·` carries `decorative-mark` + `aria-hidden`. That is the ONLY sanctioned opt-out from

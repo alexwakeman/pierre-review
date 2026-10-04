@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type {
   ClaudeFinding,
@@ -27,7 +27,6 @@ import { unlockReviewSound } from '../lib/sound.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { AiCloudNote, AiRunGate } from './AiSetup.js';
 import { useFilters } from '../store/filters.js';
-import { useWorkspaces } from '../hooks/useWorkspaces.js';
 import {
   useCancelReview,
   useClaudeReview,
@@ -59,33 +58,30 @@ import {
 } from './Icons.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { AUTO_REVIEW_LABEL } from './Activity/pendingLabels.js';
-import {
-  ClaudeReviewFollowUpSection,
-  ClaudeReviewTicketPanel,
-  ClaudeReviewTicketResults,
-  storyLabel,
-} from './ClaudeReviewFollowUp.js';
+import { ClaudeReviewFollowUpSection } from './ClaudeReviewFollowUp.js';
 import { ClaudeReviewThreadsSection } from './ClaudeReviewThreads.js';
 import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine } from '../lib/claudeAutoReview.js';
 import { ClaudeReviewCiFailuresSection, ClaudeReviewCiStatus } from './ClaudeReviewCiFailures.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
+import { PrRefText, ReviewPrRefsProvider } from './ReviewPrRefs.js';
+import { REVIEW_ITEM_CARD, REVIEW_ITEM_TITLE, REVIEW_META } from '../lib/reviewStyles.js';
+import { reviewTexts, type KnownPr } from '../lib/reviewPrRefs.js';
+import { TicketCoverageSection, type LegacyStories } from './TicketCoverage.js';
+import { useTicketReviews } from '../hooks/useTicketReview.js';
+import { useClaudeReviewChat } from '../hooks/useClaudeReviewChat.js';
+import { legacyOnlyEntries } from '../lib/ticketStory.js';
 import { reviewCurrency, type ReviewCurrency } from '../lib/claudeReviewColumn.js';
 import {
   ALREADY_POSTED_CHIP,
   RERAISED_CHIP,
   SEVERITY_CLASS,
   alreadyPostedReraiseIds,
-  checkTicketDrafts,
-  createTicketDraftStore,
   reraisedStatusByFindingId,
-  resolveTicketDrafts,
   sortFindingsForDisplay,
   placeStoryFindings,
   storyChipLabel,
-  ticketsRequestFromCheck,
   VERDICT_CLASS,
   type ReraisedStatus,
-  type TicketDraft,
 } from '../lib/claudeReviewFollowUp.js';
 
 // "Show this finding in the Changes tab" — supplied by PrDetail, which owns the tab state.
@@ -669,9 +665,7 @@ function FindingRow({
     <li
       // The previous-review list's "Raised again below" scrolls to this id.
       id={`claude-finding-${finding.id}`}
-      className={`rounded border border-gray-100 px-3 py-2 text-sm dark:border-gray-800 ${
-        ignored ? 'opacity-50' : ''
-      }`}
+      className={`${REVIEW_ITEM_CARD} ${ignored ? 'opacity-50' : ''}`}
     >
       <div className="flex items-start gap-2">
         <span
@@ -681,7 +675,9 @@ function FindingRow({
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold">{finding.title}</span>
+            <span className={REVIEW_ITEM_TITLE}>
+              <PrRefText text={finding.title} />
+            </span>
             {finding.lens != null && (
               <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] text-gray-600 dark:text-gray-300">
                 {CLAUDE_FINDING_LENS_LABELS[finding.lens]}
@@ -845,7 +841,7 @@ function FindingRow({
               title is the criterion. */}
           {finding.body.trim() !== '' && (
             <div className="mt-1">
-              <Markdown>{finding.body}</Markdown>
+              <Markdown prRefs>{finding.body}</Markdown>
             </div>
           )}
           {finding.suggestion != null && finding.suggestion !== '' && (
@@ -996,6 +992,7 @@ function ClaudesReview({
   onToggleFinding,
   onRewordFinding,
   onPostFinding,
+  storyCheck,
 }: {
   review: ClaudeReview;
   editable: boolean;
@@ -1015,19 +1012,34 @@ function ClaudesReview({
   onToggleFinding: (findingId: number, included: boolean) => void;
   onRewordFinding: (findingId: number, editedBody: string) => Promise<unknown>;
   onPostFinding: (findingId: number) => Promise<unknown>;
+  // The Story check section, handed this run's stories that no ticket review covers.
+  storyCheck: (legacy: LegacyStories) => ReactNode;
 }): JSX.Element {
-  // EACH FINDING IS ON SCREEN ONCE: a story finding renders as its card INSIDE its story (User
-  // stories section), and the Findings list leaves it out (`placeStoryFindings`).
+  // ONE STORY SECTION. This run's stories (an older PR review judged them against this PR alone)
+  // show in Story check only where NO ticket review covers the ticket; a covered ticket shows its
+  // ticket review instead. Until the ticket reviews load, every story shows (as before).
+  const ai = useAiCapabilities();
+  const { data: ticketReviews } = useTicketReviews(review.prId, ai.enabled);
+  const legacyEntries = useMemo(
+    () =>
+      !ai.enabled
+        ? []
+        : legacyOnlyEntries(review.tickets ?? [], ticketReviews?.tickets ?? []),
+    [ai.enabled, review.tickets, ticketReviews],
+  );
+  // EACH FINDING IS ON SCREEN ONCE: a shown story's finding renders as its card INSIDE that story
+  // (Story check), and the Findings list leaves it out (`placeStoryFindings`). A story NOT shown
+  // places nothing, so its findings stay in the Findings list with their chip.
   const placement = useMemo(
-    () => placeStoryFindings(review.findings, review.tickets),
-    [review.findings, review.tickets],
+    () => placeStoryFindings(review.findings, legacyEntries),
+    [review.findings, legacyEntries],
   );
   // Severity first; within a severity, the findings that raise an earlier comment again lead.
   const findings = sortFindingsForDisplay(review.findings.filter((f) => !placement.placed.has(f.id)));
   const priorStatusById = reraisedStatusByFindingId(review);
   const alreadyPostedIds = alreadyPostedReraiseIds(review);
   // TEMPLATED from the server-validated statuses (a code-derived figure) — Claude's own
-  // explanations are shown per comment in the Previous review section, labelled as Claude's.
+  // explanations are shown per comment in the Previous review section.
   const followUpLine = followUpSentence(review.followUp);
   // Pin blob links to the reviewed commit so line numbers stay correct; fall back
   // to the PR's current head when the run didn't record a SHA.
@@ -1036,11 +1048,9 @@ function ClaudesReview({
   const chatReviewId =
     review.status === 'succeeded' && review.reviewMode !== 'skip' ? review.id : null;
   const currency = currencyOf(review, prHeadSha);
-  // One block per story (a run from before several stories reads as a one-element list).
-  const ticketEntries = review.tickets ?? [];
   const storyIds = placement.ids;
 
-  // THE ONE FINDING CARD, for the Findings list and the User stories section alike. `storyLabel`
+  // THE ONE FINDING CARD, for the Findings list and the Story check's older stories alike. `storyLabel`
   // is the chip naming the story item (null for an ordinary finding).
   const findingCard = (f: ClaudeFinding, storyLabel: string | null): JSX.Element => (
     <FindingRow
@@ -1109,7 +1119,7 @@ function ClaudesReview({
       >
         <div className="text-xs text-gray-500 dark:text-gray-400">{metaLine(review)}</div>
         {followUpLine != null && <div className="font-medium">{followUpLine}</div>}
-        {review.summary != null && review.summary !== '' && <Markdown>{review.summary}</Markdown>}
+        {review.summary != null && review.summary !== '' && <Markdown prRefs>{review.summary}</Markdown>}
       </ReviewSection>
       <ClaudeReviewCiFailuresSection
         review={review}
@@ -1129,45 +1139,6 @@ function ClaudesReview({
         counts={review.threadAssessmentCounts}
         onOpenThread={onOpenThread}
       />
-      {ticketEntries.length > 0 && (
-        <ReviewSection
-          title={ticketEntries.length === 1 ? 'User story' : 'User stories'}
-          pills={
-            placement.placed.size > 0 ? (
-              <SectionCount>{plural(placement.placed.size, 'finding', 'findings')}</SectionCount>
-            ) : null
-          }
-          info={
-            <InfoButton title="User stories">
-              <p>
-                Each criterion that is not met or only partly met, and each thing asked for but not
-                done, is a finding. Post, reword or ignore it here, like any other finding.
-              </p>
-              <p className="mt-2">Met criteria and changes nobody asked for are listed for reference.</p>
-            </InfoButton>
-          }
-        >
-          <div className="divide-y divide-gray-200 dark:divide-gray-800">
-            {ticketEntries.map((entry) => (
-              <div key={entry.index} className="py-4 first:pt-0 last:pb-0">
-                <ClaudeReviewTicketResults
-                  entry={entry}
-                  label={
-                    ticketEntries.length === 1 && entry.ticket.key == null
-                      ? null
-                      : storyLabel(entry.ticket, entry.index)
-                  }
-                  findingIds={storyIds}
-                  findingsById={placement.byId}
-                  renderFinding={findingCard}
-                  changedPaths={changedPaths}
-                  onOpenInChanges={onOpenInChanges}
-                />
-              </div>
-            ))}
-          </div>
-        </ReviewSection>
-      )}
       <ReviewSection
         title="Findings"
         pills={
@@ -1175,7 +1146,7 @@ function ClaudesReview({
             <SectionCount>{plural(findings.length, 'finding', 'findings')}</SectionCount>
             {placement.placed.size > 0 && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
-                {placement.placed.size} more under {ticketEntries.length === 1 ? 'User story' : 'User stories'}
+                {placement.placed.size} more under Story check
               </span>
             )}
           </>
@@ -1189,12 +1160,74 @@ function ClaudesReview({
           </ul>
         ) : (
           <div className="text-xs text-gray-500 dark:text-gray-400">
-            {placement.placed.size > 0 ? 'None outside the user stories.' : 'No line-level findings.'}
+            {placement.placed.size > 0 ? 'None outside Story check.' : 'No line-level findings.'}
           </div>
         )}
       </ReviewSection>
+      {storyCheck({
+        entries: legacyEntries,
+        findingIds: storyIds,
+        findingsById: placement.byId,
+        renderFinding: findingCard,
+      })}
+      {/* The chat sits UNDER Story check and opens expanded, so a question about the review or
+          the story is one click from both. */}
       {chatReviewId != null && <ReviewChatSection reviewId={chatReviewId} />}
     </>
+  );
+}
+
+// PR REFERENCES across the whole tab ("bng-library#66", "#352") link to that PR in Limn. Known PRs
+// come from what is on screen (the ticket reviews' members — the same cached query Story check
+// reads — and this PR); the rest go in ONE batched lookup (ReviewPrRefsProvider).
+function ReviewTabPrRefs({
+  pr,
+  review,
+  children,
+}: {
+  pr: PrDetail;
+  review: ClaudeReview | null;
+  children: ReactNode;
+}): JSX.Element {
+  const ai = useAiCapabilities();
+  const tickets = useTicketReviews(pr.id, ai.enabled);
+  const ticketReviews = tickets.data;
+  // The review chat's answers are linked too. This OBSERVES the thread the chat section reads
+  // (same key, `enabled: false`), so it adds no request; the section itself fetches it on mount.
+  const chatId = review?.status === 'succeeded' && review.reviewMode !== 'skip' ? review.id : null;
+  const chat = useClaudeReviewChat(chatId ?? -1, null, false);
+  const chatMessages = chatId != null ? chat.data?.messages : undefined;
+  const known = useMemo<KnownPr[]>(() => {
+    const out: KnownPr[] = [{ prId: pr.id, repoFullName: pr.repoFullName, number: pr.number, title: pr.title }];
+    for (const t of ticketReviews?.tickets ?? []) {
+      for (const m of t.review?.members ?? []) {
+        out.push({ prId: m.prId, repoFullName: m.repo, number: m.number, title: m.title });
+      }
+    }
+    return out;
+  }, [pr.id, pr.repoFullName, pr.number, pr.title, ticketReviews]);
+  const texts = useMemo(
+    () => [
+      ...reviewTexts(review, (ticketReviews?.tickets ?? []).map((t) => t.review)),
+      ...(chatMessages ?? []).filter((m) => m.role === 'assistant' && m.content.includes('#')).map((m) => m.content),
+    ],
+    [review, ticketReviews, chatMessages],
+  );
+  // ONE batch: wait for the ticket reviews (their members are resolved on screen, so the batch
+  // must not ask for them) and for the chat thread, when either is coming.
+  const ready =
+    (!ai.enabled || tickets.data !== undefined || tickets.isError) &&
+    (chatId == null || chat.data !== undefined || chat.isError);
+  return (
+    <ReviewPrRefsProvider
+      currentPrId={pr.id}
+      currentRepoFullName={pr.repoFullName}
+      known={known}
+      texts={texts}
+      ready={ready}
+    >
+      {children}
+    </ReviewPrRefsProvider>
   );
 }
 
@@ -1235,10 +1268,6 @@ function GenerateFixFromReview({
     />
   );
 }
-
-// The reader's half-typed user stories, per PR, for this session (survives a tab switch or a PR
-// change). A PR with an entry was TOUCHED, and a stored ticket never overwrites it.
-const ticketDrafts = createTicketDraftStore<TicketDraft[]>();
 
 export function ClaudeReviewTab({
   pr,
@@ -1282,32 +1311,6 @@ export function ClaudeReviewTab({
   // under a retired id (the old Opus 4.8) would become a select value with no option. A pick
   // stays until remount.
   const [model, setModel] = useState<ClaudeReviewModel>(DEFAULT_CLAUDE_REVIEW_MODEL);
-
-  // The optional user stories. The reader's own list wins; otherwise it prefills from the LATEST
-  // run's stored stories — stored at queue time, so a failed or cancelled run still prefills the
-  // re-run. Checked by the SAME shared function the route runs (caps, count).
-  const [ticketDraft, setTicketDraftState] = useState<TicketDraft[]>(() =>
-    resolveTicketDrafts(ticketDrafts.get(pr.id), review),
-  );
-  const ticketSeedKey = useRef<string | null>(null);
-  useEffect(() => {
-    const key = `${pr.id}:${review?.id ?? 'none'}`;
-    if (ticketSeedKey.current === key) return;
-    ticketSeedKey.current = key;
-    setTicketDraftState(resolveTicketDrafts(ticketDrafts.get(pr.id), review));
-  }, [pr.id, review]);
-  const setTicketDraft = (d: TicketDraft[]): void => {
-    ticketDrafts.set(pr.id, d);
-    setTicketDraftState(d);
-  };
-  const ticketCheck = useMemo(() => checkTicketDrafts(ticketDraft), [ticketDraft]);
-  // The workspace that OWNS this PR's repo — its Jira token is the one "Fill from KEY" uses, which
-  // need not be the workspace being viewed. Named in the panel when that workspace has no token.
-  const { data: workspaces } = useWorkspaces();
-  const prWorkspaceName = workspaces?.find((w) => w.repoIds.includes(pr.repoId))?.name ?? null;
-  const ticketBlockedTitle = ticketCheck.ok
-    ? undefined
-    : `Fix the user story first: ${ticketCheck.message}`;
 
   // Same-SHA re-run confirmation (warn-but-allow).
   const [confirmRerun, setConfirmRerun] = useState(false);
@@ -1403,9 +1406,6 @@ export function ClaudeReviewTab({
   const latestOutdated = latestCurrency?.tone === 'behind' ? latestCurrency.label : null;
 
   const runGenerate = (): void => {
-    // An invalid user story never starts a run — including from the same-commit "Run anyway"
-    // path, which lands here too. The route would 400 it anyway; this says why before a request.
-    if (!ticketCheck.ok) return;
     // Create/resume the AudioContext now, during this user gesture, so the
     // completion chime can play later without one (browsers gate WebAudio behind
     // a gesture). No-op / swallowed if WebAudio is unavailable.
@@ -1413,7 +1413,8 @@ export function ClaudeReviewTab({
     setConfirmRerun(false);
     setPreview(null);
     setPostResult(null);
-    generate.mutate({ model, tickets: ticketsRequestFromCheck(ticketCheck) });
+    // No story: the PR review looks at the code. Stories are the Story check section below.
+    generate.mutate({ model });
   };
 
   const onRunClick = (): void => {
@@ -1453,6 +1454,7 @@ export function ClaudeReviewTab({
   };
 
   return (
+    <ReviewTabPrRefs pr={pr} review={shownReview}>
     <div className="space-y-3 px-4 py-3">
       {/* The run controls are ALWAYS shown; a missing AI runtime or Claude credential replaces
           only the Run button (AiRunGate), so past reviews and the stories stay usable.
@@ -1479,8 +1481,7 @@ export function ClaudeReviewTab({
             <button
               type="button"
               onClick={onRunClick}
-              disabled={isRunning || starting || autoHold != null || !ticketCheck.ok}
-              title={ticketBlockedTitle}
+              disabled={isRunning || starting || autoHold != null}
               className={
                 latestOutdated != null
                   ? 'rounded border border-blue-400 px-2 py-1 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30'
@@ -1502,20 +1503,6 @@ export function ClaudeReviewTab({
             )}
           </div>
 
-          {/* The optional user stories — one tab each; its header says what Run sends (or that a
-              story needs a fix), so a closed panel never hides it. Keyed by PR: its selection,
-              fetched tickets and in-flight pulls belong to one PR. */}
-          <ClaudeReviewTicketPanel
-            key={pr.id}
-            autoPullReady={!isLoading}
-            value={ticketDraft}
-            onChange={setTicketDraft}
-            check={ticketCheck}
-            prId={pr.id}
-            tickets={pr.tickets}
-            prWorkspaceName={prWorkspaceName}
-          />
-
           {/* Same-SHA warn-but-allow confirmation. */}
           {confirmRerun && (
             <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-300">
@@ -1523,8 +1510,7 @@ export function ClaudeReviewTab({
               <button
                 type="button"
                 onClick={runGenerate}
-                disabled={!ticketCheck.ok || autoHold != null}
-                title={ticketBlockedTitle}
+                disabled={autoHold != null}
                 className="rounded border border-amber-400 px-2 py-0.5 text-xs hover:bg-amber-100 disabled:opacity-50 dark:border-amber-600 dark:hover:bg-amber-900/40"
               >
                 Run anyway
@@ -1696,7 +1682,21 @@ export function ClaudeReviewTab({
             updateFinding.mutateAsync({ findingId, editedBody })
           }
           onPostFinding={(findingId) => postFinding.mutateAsync({ findingId })}
+          // The ticket review: one check per TICKET across every PR on it — a separate run from
+          // the PR review above, with its own Check button. It also carries this run's stories
+          // that no ticket review covers, so there is ONE story section.
+          storyCheck={(legacy) => (
+            <TicketCoverageSection
+              pr={pr}
+              changedPaths={changedPaths}
+              onOpenInChanges={onOpenInChanges}
+              legacy={legacy}
+            />
+          )}
         />
+      )}
+      {!(shownReview != null && shownReview.status === 'succeeded') && (
+        <TicketCoverageSection pr={pr} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
       )}
 
       {/* Section B — the authored review that gets posted (latest run only). */}
@@ -1712,8 +1712,9 @@ export function ClaudeReviewTab({
             <InfoButton title="Post to GitHub">
               <p>
                 Posts one review: your summary as its top-level comment, with your verdict. Every
-                finding above that you have not ignored or already posted goes with it, story
-                findings included.
+                finding above that you have not ignored or already posted goes with it, including a
+                story marked “Checked on this PR only”. Other Story check items are posted on their
+                own.
               </p>
             </InfoButton>
           }
@@ -1848,5 +1849,6 @@ export function ClaudeReviewTab({
           decided what in it is worth fixing. */}
       {canEdit && <GenerateFixFromReview prId={pr.id} review={review} />}
     </div>
+    </ReviewTabPrRefs>
   );
 }

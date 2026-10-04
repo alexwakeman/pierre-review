@@ -73,6 +73,27 @@ describe('tierFor — AI generation', () => {
   });
 });
 
+// The ticket review: one family, three costs. Only the start spends model money; the batched
+// states read is a POST only because it carries a list; posting an item is one GitHub write.
+describe('tierFor — ticket review', () => {
+  it('bills only the start as AI generation', () => {
+    expect(tiers('POST', '/api/ticket-reviews')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/ticket-reviews/states')).toEqual(['read']);
+  });
+  it('puts posting an item on the GitHub-write bucket', () => {
+    expect(tiers('POST', '/api/ticket-reviews/7/items/12/post')).toEqual(['github_write']);
+  });
+  it('keeps the PR-reference resolver on read (DB-only batch)', () => {
+    expect(tiers('POST', '/api/prs/resolve')).toEqual(['read']);
+  });
+
+  it('keeps every read on read', () => {
+    expect(tiers('GET', '/api/ticket-reviews/7')).toEqual(['read']);
+    expect(tiers('GET', '/api/ticket-reviews/7/stream')).toEqual(['read']);
+    expect(tiers('GET', '/api/prs/42/ticket-reviews')).toEqual(['read']);
+  });
+});
+
 // The Slack digest family: TWO paths under one prefix with OPPOSITE costs. The `/api/pro/`
 // catch-all tiers on the VERB, so both are mutating and both would land on the 20/min AI bucket —
 // right for exactly one of them.

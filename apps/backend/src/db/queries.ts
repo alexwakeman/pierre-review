@@ -36,6 +36,8 @@ import type {
   InsightReviewer,
   InsightSeverity,
   MergeReadyCard,
+  CardThreadComment,
+  UntouchedThreadCard,
   MyTurnCard,
   MyTurnCardReason,
   ReviewerSuggestion,
@@ -287,6 +289,7 @@ import {
   type AuthorAutomationInputs,
 } from './dependency-cards.js';
 import { deriveSecurityAlerts } from './security-alerts.js';
+import { pruneTicketReviewsForPrs } from './ticket-review-prune.js';
 import {
   failingChecksFields,
   prFailingChecks,
@@ -295,6 +298,13 @@ import {
   type FailingChecksSummary,
   type PrFailingChecks,
 } from './failing-checks.js';
+import {
+  addressedCommitAuthors,
+  mentionExcerpts,
+  reviewRequesters,
+  threadFirstComments,
+  yourPrNewActors,
+} from './my-turn-card-facts.js';
 
 // Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
 // timestamptz (drizzle binds the Date through the codec), whereas SQLite columns
@@ -4637,6 +4647,14 @@ export async function getWorkspaceMetricsDetail(
 // It takes a full `BotScope` rather than a repo list because its `bot_signal` and
 // `bot_only_review` cards need the WORKSPACE to know who counts as an automated reviewer;
 // `scope.repoIds` only narrows the data.
+/** The deferred HEADING FACTS of one board fold (`getWorkspaceInsights`' `boardFacts` option).
+ *  `run(listed)` reads the facts for the cards whose ids are in `listed`, writes them onto those
+ *  card objects, and returns the user ids they name (to resolve for the client). Set by the fold;
+ *  null until it runs, or when the fold built no card that carries facts. */
+export interface BoardFactsSink {
+  run: ((listed: ReadonlySet<string>) => Promise<number[]>) | null;
+}
+
 export async function getWorkspaceInsights(
   accountId: number,
   window: MetricsWindow | undefined,
@@ -4655,10 +4673,20 @@ export async function getWorkspaceInsights(
   // that the daily brief (×12 under `?rollup=1`), the work plan and every Pro payload would pay for
   // and never render. The names are display-only third-party text — never in a `detail`, a
   // work-plan fact or a hash.
-  opts: { uncapped?: boolean; withFailingChecks?: boolean } = {},
+  //
+  // `boardFacts` DEFERS the heading facts (below) to the caller: the fold fills in `run`, and the
+  // board calls it with the ids it actually LISTED. Absent, the facts are read for every built card
+  // inside `finish()`.
+  opts: { uncapped?: boolean; withFailingChecks?: boolean; boardFacts?: BoardFactsSink } = {},
 ): Promise<WorkspaceInsightsResponse> {
   const uncapped = opts.uncapped === true;
   const withFailingChecks = opts.withFailingChecks === true;
+  // THE BOARD'S OTHER DISPLAY EXTRAS ride the same flag: the HEADING FACTS on my_turn and
+  // untouched_thread cards (db/my-turn-card-facts.ts — who mentioned you and what they wrote, the
+  // thread's file, who changed it, who did the new things on your PR, a thread's opening comment).
+  // Same argument as the failing checks: batched reads of synced rows that only the board renders,
+  // folded AFTER the cards are chosen, so no count or card can move with them.
+  const withBoardFacts = withFailingChecks;
   const now = Date.now();
   const generatedAt = new Date(now);
   // The Insights window: the configured SPRINT when provided (its `to` may be in the future for
@@ -4710,6 +4738,16 @@ export async function getWorkspaceInsights(
   const addUser = (id: number | null): void => {
     if (id != null) userIdSet.add(id);
   };
+  // The deferred heading-fact readers (see `boardFacts` above). Each fills in the cards it
+  // registered — only those in `listed`, or every one when `listed` is null.
+  const factJobs: ((listed: ReadonlySet<string> | null) => Promise<number[]>)[] = [];
+  if (opts.boardFacts != null) {
+    opts.boardFacts.run = async (listed) => {
+      const ids: number[] = [];
+      for (const job of factJobs) ids.push(...(await job(listed)));
+      return ids;
+    };
+  }
 
   const scopedRepos =
     scope.repoIds.length === 0
@@ -4743,6 +4781,10 @@ export async function getWorkspaceInsights(
     `https://github.com/${repoName.get(repoId)}/pull/${number}`;
 
   const finish = async (): Promise<WorkspaceInsightsResponse> => {
+    // No sink: the heading facts are read now, for every built card (a capped fold is bounded).
+    if (withBoardFacts && opts.boardFacts == null) {
+      for (const job of factJobs) for (const id of await job(null)) addUser(id);
+    }
     // The ORDER WITHIN ONE COLOUR, read from `shared` (PENDING_KIND_RANK) because the board's
     // "How Pending works" copy prints it. The rationale, kept here beside the sort it governs:
     //   • my_turn leads every severity tier: it is the ONLY kind that is about the VIEWER
@@ -5137,6 +5179,18 @@ export async function getWorkspaceInsights(
       muted?: true;
       /** actors to resolve for the client beyond the PR author (prRef's authorId) */
       extraActorIds: (number | null)[];
+      /** What the HEADING FACTS need (db/my-turn-card-facts.ts), read only under `withBoardFacts`
+       *  and only for the cards actually built. Never on the wire as-is. */
+      facts?: {
+        threadPath?: string;
+        threadLine?: number | null;
+        /** `likely_addressed`: the viewer's comment the touching commit must follow. */
+        addressedAfter?: Date;
+        mention?: { byId: number | null; at: Date };
+        yourPr?: true;
+        /** `review_request`: read who asked (`requesterId`). */
+        reviewRequest?: true;
+      };
     };
     const seeds: Seed[] = [];
 
@@ -5184,6 +5238,7 @@ export async function getWorkspaceInsights(
         relevance: relevanceOf(i),
         muted: mutedOf(i),
         extraActorIds: [],
+        facts: { reviewRequest: true },
       });
     }
     // The reply a thread card shows inline: the stored body (else the excerpt), capped. Undefined
@@ -5217,6 +5272,11 @@ export async function getWorkspaceInsights(
         reply: addressed ? undefined : threadReplyOf(i),
         // Naming yourself as an actor on your own thread adds nothing to render.
         extraActorIds: addressed ? [] : [i.lastReplyAuthorId],
+        facts: {
+          threadPath: i.path,
+          threadLine: i.line,
+          addressedAfter: addressed ? at : undefined,
+        },
       });
     }
     for (const i of mt.approvedPrs) {
@@ -5248,6 +5308,7 @@ export async function getWorkspaceInsights(
         relevance: relevanceOf(i),
         muted: mutedOf(i),
         extraActorIds: [],
+        facts: { yourPr: true },
       });
     }
     // S3(c) — a PERSON pushed after your last review or comment. WHY THE BALL IS YOURS, in the
@@ -5308,6 +5369,7 @@ export async function getWorkspaceInsights(
         relevance: relevanceOf(i),
         muted: mutedOf(i),
         extraActorIds: [i.mentionedById],
+        facts: { mention: { byId: i.mentionedById, at } },
       });
     }
     // S3(d) — a PERSON answered your comment in a thread somebody else started.
@@ -5325,6 +5387,7 @@ export async function getWorkspaceInsights(
         muted: mutedOf(i),
         reply: i.awaitingKind === 'likely_addressed' ? undefined : threadReplyOf(i),
         extraActorIds: [i.lastReplyAuthorId],
+        facts: { threadPath: i.path, threadLine: i.line },
       });
     }
     // S5 — a PERSON commented on the PR right after your PR comment.
@@ -5423,6 +5486,7 @@ export async function getWorkspaceInsights(
         relevance: relevanceOf(i),
         muted: mutedOf(i),
         extraActorIds: [i.originalCommenterId],
+        facts: { threadPath: i.path, threadLine: i.line },
         own: {
           kind: 'thread',
           path: i.path,
@@ -5604,6 +5668,116 @@ export async function getWorkspaceInsights(
       kindTotals.my_turn = ranked.length;
       const built = uncapped ? ranked : ranked.slice(0, MY_TURN_CARD_CAP);
 
+      // ── THE HEADING FACTS (db/my-turn-card-facts.ts) — DEFERRED until the board has LISTED its
+      // cards. Every total above is already taken, so a fact can describe a card and never decide
+      // one. ⚠ The board folds UNCAPPED and then lists only the top `boardListCap` per list group:
+      // reading facts here, over every built card, read ~1,600 comment bodies on a real workspace
+      // to decorate ~50. So the cards register a job (`factTargets`) and `runBoardFacts` reads only
+      // for the ids the caller says it listed (`buildPendingBoard`), or — with no sink — for every
+      // built card inside `finish()` (the bounded, capped callers and the tests). Board only.
+      const factTargets: { card: MyTurnCard; s: Seed }[] = [];
+      if (withBoardFacts) {
+        factJobs.push(async (listed) => {
+          const targets = factTargets.filter((t) => listed == null || listed.has(t.card.id));
+          if (targets.length === 0) return [];
+          const seeds = targets.map((t) => t.s);
+          const mentionSeeds = seeds.filter((s) => s.facts!.mention != null);
+          const mentionLogin =
+            mentionSeeds.length > 0
+              ? ((await getAccountById(accountId))?.githubLogin ?? '').toLowerCase()
+              : '';
+          const mentionFacts = await mentionExcerpts(
+            mentionSeeds.map((s) => ({ prId: s.prId, ...s.facts!.mention! })),
+            mentionLogin,
+          );
+          const addressed = seeds.flatMap((s) =>
+            s.facts!.addressedAfter != null && s.threadId != null && s.facts!.threadPath != null
+              ? [
+                  {
+                    threadId: s.threadId,
+                    prId: s.prId,
+                    path: s.facts!.threadPath,
+                    after: s.facts!.addressedAfter,
+                  },
+                ]
+              : [],
+          );
+          // The ball rule's own exclusions: a bot's commit never returns the ball, and your own
+          // commit is not something that happened TO you — neither may be named as the reason.
+          const viewerUserId =
+            addressed.length > 0 || seeds.some((s) => s.facts!.yourPr || s.facts!.reviewRequest)
+              ? await getAccountUserId(accountId)
+              : null;
+          const committerFacts =
+            addressed.length > 0
+              ? await addressedCommitAuthors(addressed, {
+                  skipAuthorIds: new Set([
+                    ...(await globalAutomationUserIds()),
+                    ...(viewerUserId != null ? [viewerUserId] : []),
+                  ]),
+                })
+              : new Map<number, number>();
+          const ownThreadIds = seeds.flatMap((s) =>
+            s.reason === 'own_thread' && s.threadId != null ? [s.threadId] : [],
+          );
+          const firstCommentFacts =
+            ownThreadIds.length > 0
+              ? await threadFirstComments(ownThreadIds)
+              : new Map<number, CardThreadComment>();
+          const yourPrSeedIds = seeds.flatMap((s) => (s.facts!.yourPr ? [s.prId] : []));
+          const newActorFacts =
+            yourPrSeedIds.length > 0
+              ? await yourPrNewActors(accountId, yourPrSeedIds, viewerUserId)
+              : new Map<number, { ids: number[]; total: number }>();
+          const reviewRequestPrIds = seeds.flatMap((s) => (s.facts!.reviewRequest ? [s.prId] : []));
+          const requesterFacts =
+            reviewRequestPrIds.length > 0
+              ? await reviewRequesters(reviewRequestPrIds, viewerUserId)
+              : new Map<number, number>();
+          const userIdsOut: number[] = [];
+          for (const { card, s } of targets) {
+            const f = s.facts!;
+            if (f.threadPath != null) card.threadPath = f.threadPath;
+            if (f.threadLine != null) card.threadLine = f.threadLine;
+            if (f.mention != null) {
+              if (f.mention.byId != null) card.mentionedById = f.mention.byId;
+              const ex = mentionFacts.get(s.prId);
+              if (ex != null) card.mentionExcerpt = ex;
+            }
+            if (s.threadId != null) {
+              const by = committerFacts.get(s.threadId);
+              if (by != null) {
+                card.committerId = by;
+                userIdsOut.push(by);
+              }
+              if (s.reason === 'own_thread') {
+                const fc = firstCommentFacts.get(s.threadId);
+                if (fc != null) {
+                  card.firstComment = fc;
+                  if (fc.authorId != null) userIdsOut.push(fc.authorId);
+                }
+              }
+            }
+            if (f.yourPr) {
+              const na = newActorFacts.get(s.prId);
+              if (na != null) {
+                card.newActorIds = na.ids;
+                card.newActorTotal = na.total;
+                userIdsOut.push(...na.ids);
+              }
+            }
+            if (f.reviewRequest) {
+              const by = requesterFacts.get(s.prId);
+              if (by != null) {
+                card.requesterId = by;
+                userIdsOut.push(by);
+              }
+            }
+          }
+          return userIdsOut;
+        });
+      }
+
       for (const r of built) {
         if (r.type === 'trunk') {
           const t = r.t;
@@ -5678,6 +5852,8 @@ export async function getWorkspaceInsights(
           // ranker, all of which read `relevance`.
           muted: s.muted,
         };
+        // DISPLAY ONLY — the heading facts, filled in later (board only; see `factTargets`).
+        if (withBoardFacts && s.facts != null) factTargets.push({ card, s });
         cards.push(card);
       }
     }
@@ -6572,6 +6748,7 @@ export async function getWorkspaceInsights(
     .select({
       threadId: reviewThreads.id,
       path: reviewThreads.path,
+      line: reviewThreads.line,
       createdAt: reviewThreads.createdAt,
       originalCommenterId: reviewThreads.originalCommenterId,
       prId: pullRequests.id,
@@ -6625,12 +6802,31 @@ export async function getWorkspaceInsights(
   // Same workspace as the bot_signal card above — these cards are drawn from that workspace's
   // threads, so the judgement that tags them must come from that workspace's rows.
   const untouchedKindMap = await classificationKindForUser(accountId, scope.workspaceId);
+  // The opening comment each card quotes (db/my-turn-card-facts.ts) — board only, and DEFERRED
+  // like the my_turn facts: read for the cards the board lists, never the uncapped population, so
+  // the card no longer fetches its thread on mount.
+  const untouchedTargets: UntouchedThreadCard[] = [];
+  if (withBoardFacts) {
+    factJobs.push(async (listed) => {
+      const targets = untouchedTargets.filter((c) => listed == null || listed.has(c.id));
+      if (targets.length === 0) return [];
+      const firsts = await threadFirstComments(targets.map((c) => c.threadId));
+      const ids: number[] = [];
+      for (const c of targets) {
+        const fc = firsts.get(c.threadId);
+        if (fc == null) continue;
+        c.firstComment = fc;
+        if (fc.authorId != null) ids.push(fc.authorId);
+      }
+      return ids;
+    });
+  }
   for (const { t, ageHours } of threads) {
     addUser(t.originalCommenterId);
     addUser(t.authorId);
     const botKind =
       t.originalCommenterId != null ? untouchedKindMap.get(t.originalCommenterId) ?? null : null;
-    cards.push({
+    const card: UntouchedThreadCard = {
       id: `thread:${t.threadId}`,
       kind: 'untouched_thread',
       severity:
@@ -6649,7 +6845,10 @@ export async function getWorkspaceInsights(
       originalCommenterId: t.originalCommenterId,
       botKind,
       botLabel: botKind ? labelForKind(botKind) : null,
-    });
+      ...(t.line != null ? { line: t.line } : {}),
+    };
+    if (withBoardFacts) untouchedTargets.push(card);
+    cards.push(card);
   }
 
   // (3) REVIEWER LOAD — ranked by pending-queue depth, with sprint load alongside.
@@ -9921,6 +10120,9 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
           .execute();
       }
       await tx.delete(claudeReviews).where(inArray(claudeReviews.prId, prIds)).execute();
+      // Ticket reviews (migration 0080 / pg 0067): this repo's member rows, then any run left with
+      // no members — a run whose other PRs live in another repo keeps its history.
+      await pruneTicketReviewsForPrs(tx, prIds);
       // The agentic table core ADOPTED from the plugin (migration 0074 / pg 0061): AI Fix runs
       // (~MiB patches). No FKs, so nothing would cascade; before this the plugin had no deleteRepo
       // hook at all and they were orphaned on a repo removal.

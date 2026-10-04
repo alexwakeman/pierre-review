@@ -57,15 +57,18 @@ describe('mapSubmittedReview', () => {
     expect(out.findings.map((f) => f.priorRef)).toEqual([null, 'P2', null, null]);
   });
 
-  it('passes followUp and tickets through verbatim, and omits them when absent', () => {
+  it('passes followUp through verbatim, omits it when absent, and never carries a story report', () => {
     const followUp = [{ ref: 'P1', status: 'addressed' as const, explanation: 'Fixed.' }];
-    const tickets = [{ ref: 'T1', alignment: 'aligned' as const, summary: 'Matches.', criteria: [] }];
-    const withBoth = mapSubmittedReview(payload({ followUp, tickets }), DIFF);
-    expect(withBoth.followUp).toEqual(followUp);
-    expect(withBoth.tickets).toEqual(tickets);
+    const withFollowUp = mapSubmittedReview(payload({ followUp }), DIFF);
+    expect(withFollowUp.followUp).toEqual(followUp);
+    // Stories left the PR review: a stray `tickets` key from an older prompt is not passed on.
+    const stray = mapSubmittedReview(
+      { ...payload(), tickets: [{ ref: 'T1', alignment: 'aligned', summary: 'Matches.' }] } as never,
+      DIFF,
+    );
+    expect('tickets' in stray).toBe(false);
     const without = mapSubmittedReview(payload(), DIFF);
     expect('followUp' in without).toBe(false);
-    expect('tickets' in without).toBe(false);
     expect(without).toMatchObject({ scope: 'diff_only', summary: 'sum', verdict: 'COMMENT' });
   });
 });

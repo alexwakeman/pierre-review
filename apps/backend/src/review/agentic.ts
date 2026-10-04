@@ -6,11 +6,15 @@ import { registerClaudeReviewChatRoutes } from './claude-review/chat.js';
 import { registerAutoReviewSettingsRoutes } from './claude-review/auto-settings.js';
 import { registerAutoReview } from './claude-review/auto.js';
 import { reconcileReviewsOnStartup } from './claude-review/manager.js';
+import { registerTicketReviewRoutes } from './ticket-review/routes.js';
+import { reconcileTicketReviewsOnStartup } from './ticket-review/manager.js';
+import { registerTicketReviewSweep } from './ticket-review/sweep.js';
 import { registerAiFixRoutes } from '../coding/ai-fix/routes.js';
 import { reconcileFixesOnStartup } from '../coding/ai-fix/manager.js';
 
-// THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, ticket check, the
-// chat, auto review) and AI Fix's fixer. CORE and FREE since apiVersion 22 (they
+// THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, the chat, auto
+// review), the ticket review (one run per ticket across its PRs, + its cascade sweeper) and AI
+// Fix's fixer. CORE and FREE since apiVersion 22 (they
 // were the plugin's "pro+" tier); they run on the user's OWN Claude Code session or
 // ANTHROPIC_API_KEY (review/auth.ts), and Limn stores no key and charges nothing for them.
 //
@@ -35,6 +39,7 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   registerClaudeReviewRoutes(app, ctx);
   registerClaudeReviewChatRoutes(app, ctx);
   registerAutoReviewSettingsRoutes(app, ctx);
+  registerTicketReviewRoutes(app, ctx);
   registerAiFixRoutes(app, ctx);
   return ctx;
 }
@@ -51,10 +56,18 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
   backgroundStarted = true;
   const ctx = buildAgentContext(app.log);
   registerAutoReview(ctx);
+  // The ticket review's cascade sweeper rides the same per-workspace auto-review switch; it
+  // registers only where auto review can run (`autoReviewAvailable`).
+  registerTicketReviewSweep(ctx);
   try {
     await reconcileReviewsOnStartup(ctx);
   } catch (err) {
     app.log.warn({ err }, 'claude review: startup reconcile failed');
+  }
+  try {
+    await reconcileTicketReviewsOnStartup(ctx);
+  } catch (err) {
+    app.log.warn({ err }, 'ticket review: startup reconcile failed');
   }
   await reconcileFixesOnStartup(ctx);
 }

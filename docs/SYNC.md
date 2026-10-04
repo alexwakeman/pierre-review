@@ -117,8 +117,9 @@ writes nothing, since a partial log would be indistinguishable from a complete o
 The fat walk carries each PR's request history (`reviewRequestHistory`, first 25 requested/removed
 events — measured at 0 extra points per page), but only for PRs it touches. Merged PRs from before
 that selection existed would stay "not known" forever, so after every walk
-`sync/backfill-review-requests.ts` re-reads up to 100 merged PRs per repo from the trailing 90 days
-whose `review_requests_synced_at` is NULL, in `nodes(ids:)` batches of 50 (~1 point each). Unlike
+`sync/backfill-review-requests.ts` re-reads up to 100 PRs per repo whose `review_requests_synced_at`
+is NULL — OPEN ones first (any age; migration `0081` un-stamps open PRs whose requests lack a
+requester, so the Pending card can name who asked), then merged ones from the trailing 90 days — in `nodes(ids:)` batches of 50 (~1 point each). Unlike
 the other post-walk tails this one ALSO runs on the SCHEDULED path — that path has no tail of its
 own, and without it the history would converge only when somebody pressed Sync. Budget-aware
 (`isLimited` / `noteLimited` / `noteBudget`), stamped once per PR, strictly non-fatal. Measured on a

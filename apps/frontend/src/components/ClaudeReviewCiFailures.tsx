@@ -24,8 +24,10 @@ import { safeExternalUrl } from '../lib/ui.js';
 import { CheckIcon, ChevronIcon, ExternalLinkIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection } from './ReviewSection.js';
+import { PrRefText } from './ReviewPrRefs.js';
+import { REVIEW_CHIP, REVIEW_ITEM_TITLE, REVIEW_PROSE } from '../lib/reviewStyles.js';
 
-const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[11px] font-medium';
+const CHIP = REVIEW_CHIP;
 const MUTED = 'text-gray-500 dark:text-gray-400';
 
 type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
@@ -74,7 +76,7 @@ function CiFailureRow({
   return (
     <li
       className={`rounded border px-3 py-2 text-sm ${
-        fixable ? 'border-amber-300 dark:border-amber-700/60' : 'border-gray-200 dark:border-gray-800'
+        fixable ? 'border-amber-300 dark:border-amber-700/60' : 'border-gray-100 dark:border-gray-800'
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -85,7 +87,7 @@ function CiFailureRow({
         ) : (
           <span className={`${CHIP} ${CI_CATEGORY_CLASS.unclear}`}>Not checked</span>
         )}
-        <span className="break-all font-medium">{f.checkName}</span>
+        <span className={`break-all ${REVIEW_ITEM_TITLE}`}>{f.checkName}</span>
         {f.step != null && <span className={`break-all text-xs ${MUTED}`}>Step: {f.step}</span>}
         {diagnosed && f.fixableInPr === false && (
           <span className={`text-xs ${MUTED}`}>Not from this change</span>
@@ -110,9 +112,8 @@ function CiFailureRow({
       {diagnosed ? (
         <>
           {f.cause != null && (
-            <p className="mt-1 whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300">
-              <span className="font-medium">Claude: </span>
-              {f.cause}
+            <p className={`mt-1 ${REVIEW_PROSE}`}>
+              <PrRefText text={f.cause} />
             </p>
           )}
           {f.explanation != null && f.explanation !== '' && (
@@ -128,11 +129,8 @@ function CiFailureRow({
                 Why
               </button>
               {open && (
-                <p
-                  id={explanationId}
-                  className="mt-0.5 whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300"
-                >
-                  {f.explanation}
+                <p id={explanationId} className={`mt-0.5 ${REVIEW_PROSE}`}>
+                  <PrRefText text={f.explanation} />
                 </p>
               )}
             </div>

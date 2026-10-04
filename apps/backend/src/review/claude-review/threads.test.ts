@@ -197,7 +197,7 @@ describe('the prompt block', () => {
     expect(p).toContain('@coderabbitai[bot] (bot)');
     expect(p).toContain('You have only the diff.');
     expect(p).toContain('findings, threads }');
-    expect(untrustedTexts(null, null, null, plan)).toContain(forged);
+    expect(untrustedTexts(null, null, plan)).toContain(forged);
   });
 
   it('a deep review may open files; an empty plan adds nothing and needs no nonce', () => {

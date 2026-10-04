@@ -36,6 +36,7 @@ import type {
   MyTurnSettings,
   ReviewRouteReason,
   StoredPrFile,
+  TicketAssessment,
 } from '@pierre-review/shared';
 
 // A tenant. Local mode synthesizes exactly one row (id 1, isLocal=true) from
@@ -429,6 +430,12 @@ export const reviewRequestEvents = sqliteTable(
     reviewerKind: text('reviewer_kind', { enum: ['user', 'team', 'unknown'] }).notNull(),
     reviewerUserId: integer('reviewer_user_id').references(() => users.id),
     teamSlug: text('team_slug'),
+    // WHO ASKED (migration 0081 / pg 0068) — the request event's `actor`, set on 'requested' rows
+    // only. NULL = not known: a row written before 0081, a ghost actor, or a removal. Filled in
+    // place on a later read that CARRIED the selection (the one column that is not immutable-once-
+    // written, because it arrived after the rows did). Read by the my_turn review_request card's
+    // heading fact ("Robin asked you to review").
+    requesterUserId: integer('requester_user_id').references(() => users.id),
   },
   (t) => ({
     prNodeUx: uniqueIndex('review_request_events_pr_node').on(t.prId, t.githubNodeId),
@@ -1211,8 +1218,9 @@ export const claudeReviewFindings = sqliteTable(
     // 'design' | 'tests' | 'impact' | 'accessibility' | 'security' | 'performance'. NULL is a
     // general finding (every diff-only finding and every row before migration 0075 / pg 0062).
     lens: text('lens'),
-    // A STORY FINDING: made by the server from the run's user-story assessment (claude-review/
-    // ticket.ts `storyFindingsFrom`), never by the model. `story_index` is the ticket's 0-based
+    // A LEGACY STORY FINDING: made by the server from the run's user-story assessment, never by the
+    // model — and no longer written at all (stories moved to the ticket review, review/ticket-review/;
+    // these rows are read-only history). `story_index` is the ticket's 0-based
     // position on the run; `story_ref` the criterion's ref ('AC2') or a not-done item's ('M1').
     // Both NULL on an ordinary finding and on every row before migration 0079 / pg 0066. Read
     // together: a row has both or neither.
@@ -1262,6 +1270,156 @@ export const claudeReviewChatMessages = sqliteTable(
       name: 'crcm_review_account_fk',
       columns: [t.reviewId, t.accountId],
       foreignColumns: [claudeReviews.id, claudeReviews.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- Ticket review (CORE, local-only like the rest of Claude Review) ----
+// One review per TICKET, across every pull request that names it — the user-story half Claude
+// Review used to do inside each PR's own run (`claude_reviews.ticket` / `ticket_assessment` / the
+// `story_*` finding columns, now LEGACY and read-only). Three tables, migration 0080 (pg 0067):
+//
+//   ticket_reviews         one row per run, history kept (no unique on the ident). `fingerprint`
+//                          is what the run judged — sha256 over the version, the story's hash and
+//                          every member's (pr, head, state) — and "is it current?" compares it with
+//                          one rebuilt from the synced heads (review/ticket-review/fingerprint.ts).
+//   ticket_review_members  the EXACT PR set a run judged. Drives currency and "which runs is this
+//                          PR on" (index (account_id, pr_id)).
+//   ticket_review_items    one row per unmet / partly met criterion or missing item — what can be
+//                          posted. `prior_item_id` links a re-raise to the previous run's item so
+//                          it is never posted twice.
+//
+// `workspace_id` is the workspace of the PR that STARTED the run (the daily cap counts against it).
+// No FK on it: a deleted workspace re-homes its repos, and its old runs simply stop counting.
+// `origin_pr_id`, `owner_pr_id`, `posted_pr_id` and `prior_item_id` are SOFT references (no FK) —
+// the delete paths null `owner_pr_id` for a deleted PR and leave history otherwise intact.
+//
+// Run and item ids arrive in request PATHS, so the children's tenancy is STRUCTURAL: composite FKs
+// against ticket_reviews(id, account_id); a member's PR likewise against pull_requests(id,
+// account_id). ⚠ BOTH DELETE PATHS (deleteRepo, retention's deletePrSubtree) clear member rows for
+// the deleted PRs and then any run left with no members (db/ticket-review-prune.ts), plus
+// eraseAccountData + accountScopedTables(). Twin: schema.pg.ts.
+export const ticketReviews = sqliteTable(
+  'ticket_reviews',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    // 'jira:<apiRoot>#<KEY>' | 'manual:<prId>:<sha8>' (shared `parseTicketIdent`).
+    ticketIdent: text('ticket_ident').notNull(),
+    // Display only.
+    ticketKey: text('ticket_key'),
+    ticketTitle: text('ticket_title'),
+    // The story exactly as judged (fenced into the prompt). Null on a run refused before reading it.
+    ticketSnapshot: text('ticket_snapshot', { mode: 'json' }).$type<ClaudeReviewTicket>(),
+    // sha256(title | description | acceptance criteria) of the snapshot.
+    ticketHash: text('ticket_hash'),
+    // sha256(TICKET_REVIEW_VERSION | ticket_hash | sorted "prId:headSha:state"). Null until prepared.
+    fingerprint: text('fingerprint'),
+    // How many open + merged PRs named the ticket when the run was prepared (a `too_many_prs`
+    // refusal states it).
+    prCount: integer('pr_count'),
+    originPrId: integer('origin_pr_id'),
+    trigger: text('trigger', { enum: ['manual', 'auto', 'cascade'] }).notNull().default('manual'),
+    status: text('status', {
+      enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
+    }).notNull(),
+    // Stored model id. No drizzle `enum:` for the same reason as claude_reviews.model.
+    model: text('model').notNull(),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    error: text('error'),
+    // TicketReviewRefusal — server-written, never the model's.
+    refused: text('refused'),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    alignment: text('alignment'),
+    summary: text('summary'),
+    // The server-validated TicketAssessment. Null unless the run succeeded.
+    assessment: text('assessment', { mode: 'json' }).$type<TicketAssessment>(),
+  },
+  (t) => ({
+    accountIdentIdx: index('tr_account_ident_created_idx').on(t.accountId, t.ticketIdent, t.createdAt),
+    // The per-workspace daily cap on automatic runs.
+    accountWsIdx: index('tr_account_ws_created_idx').on(t.accountId, t.workspaceId, t.createdAt),
+    // Parent key of the two children's composite tenancy FKs (`id` is the PK — never a lookup).
+    idAccountUx: uniqueIndex('ticket_reviews_id_account').on(t.id, t.accountId),
+  }),
+);
+
+export const ticketReviewMembers = sqliteTable(
+  'ticket_review_members',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    ticketReviewId: integer('ticket_review_id').notNull(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // Composite FK below (no single-column one).
+    prId: integer('pr_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    headSha: text('head_sha').notNull(),
+    prState: text('pr_state', { enum: ['open', 'merged'] }).notNull(),
+    // false = the server could not prepare a checkout (its criteria read `unclear`, never `not_met`).
+    checkedOut: integer('checked_out', { mode: 'boolean' }).notNull().default(false),
+  },
+  (t) => ({
+    accountPrIdx: index('trm_account_pr_idx').on(t.accountId, t.prId),
+    reviewIdx: index('trm_review_idx').on(t.ticketReviewId),
+    reviewAccountFk: foreignKey({
+      name: 'trm_review_account_fk',
+      columns: [t.ticketReviewId, t.accountId],
+      foreignColumns: [ticketReviews.id, ticketReviews.accountId],
+    }).onDelete('cascade'),
+    prAccountFk: foreignKey({
+      name: 'trm_pr_account_fk',
+      columns: [t.prId, t.accountId],
+      foreignColumns: [pullRequests.id, pullRequests.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+export const ticketReviewItems = sqliteTable(
+  'ticket_review_items',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    ticketReviewId: integer('ticket_review_id').notNull(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // 'AC3' | 'M1'
+    ref: text('ref').notNull(),
+    status: text('status', { enum: ['not_met', 'partly_met', 'missing'] }).notNull(),
+    // The criterion's text / the missing item's title.
+    title: text('title').notNull(),
+    // Claude's explanation ('' when none).
+    body: text('body').notNull(),
+    ownerPrId: integer('owner_pr_id'),
+    path: text('path'),
+    line: integer('line'),
+    postedPrId: integer('posted_pr_id'),
+    postedCommentId: text('posted_comment_id'),
+    postedAt: integer('posted_at', { mode: 'timestamp' }),
+    priorItemId: integer('prior_item_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    reviewIdx: index('tri_review_idx').on(t.ticketReviewId),
+    // AI Fix's "ticket items this PR owns".
+    accountOwnerIdx: index('tri_account_owner_idx').on(t.accountId, t.ownerPrId),
+    reviewAccountFk: foreignKey({
+      name: 'tri_review_account_fk',
+      columns: [t.ticketReviewId, t.accountId],
+      foreignColumns: [ticketReviews.id, ticketReviews.accountId],
     }).onDelete('cascade'),
   }),
 );

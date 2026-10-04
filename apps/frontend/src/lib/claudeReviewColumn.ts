@@ -3,23 +3,9 @@ import type {
   ClaudeFollowUpStatus,
   ClaudeReviewPrState,
   ClaudeReviewStateSummary,
-  ClaudeTicketAlignment,
-  ClaudeReviewTicket,
-  ClaudeReviewTicketInput,
   ClaudeReviewVerdict,
-  JiraTicketDetails,
-  TicketRef,
 } from '@pierre-review/shared';
-import {
-  CLEAN_CLASS,
-  EMPTY_TICKET_DRAFT,
-  OUTDATED_CLASS,
-  checkTicketDraft,
-  ticketDraftFromStored,
-  ticketDraftHasContent,
-  ticketRequestFromCheck,
-} from './claudeReviewFollowUp.js';
-import { fillDraftFromJira, jiraProvenance, fillableJiraTickets } from './jiraTicket.js';
+import { CLEAN_CLASS, OUTDATED_CLASS } from './claudeReviewFollowUp.js';
 
 // Pure helpers for the Claude Review panel on each Open PRs card (OpenPrsCards → ClaudeReviewCell).
 // The column reads ONE batched `POST /api/claude-review/states` answer and starts runs through the
@@ -181,15 +167,6 @@ export function reviewCurrency(r: {
   };
 }
 
-/** A story's alignment in a pill's room. */
-export const ALIGNMENT_SHORT: Record<ClaudeTicketAlignment, string> = {
-  aligned: 'Matches',
-  partly_aligned: 'Partly',
-  not_aligned: "Doesn't match",
-  unclear: "Can't tell",
-  not_checked: 'Not checked',
-};
-
 /** The previous review's findings, in two figures: fixed, and still open (not or partly fixed).
  *  `not_checked` / `no_longer_applies` are neither. null when there was nothing to follow up. */
 export function followUpTally(
@@ -261,61 +238,3 @@ export function anyReviewInFlight(states: readonly ClaudeReviewPrState[] | undef
   return (states ?? []).some((s) => s.status === 'queued' || s.status === 'running');
 }
 
-// ---- the user story a list-started run sends ----
-
-export interface ListTicketResult {
-  ticket: ClaudeReviewTicketInput | undefined;
-  /** A short note for the cell after starting, or null when the story went with it. */
-  note: string | null;
-}
-
-export const NO_STORY_NOTE = 'Started without a user story.';
-
-/**
- * The user story for a run started from the list. A RE-REVIEW reuses the previous run's stored
- * ticket; otherwise (or when that run had none) the first FILLABLE Jira ticket detected on the PR
- * is read from the STORED tickets and filled the panel's way (`fillDraftFromJira`: title +
- * description, the criteria from the field the server picked — the workspace's choice for the
- * issue type, else the best name match, else none).
- *
- * The review starts EITHER WAY: no ticket, no token, a failed fetch or a draft over a cap all
- * resolve to `ticket: undefined` with a note — this function never throws.
- */
-export async function resolveListTicket(opts: {
-  previous: ClaudeReviewTicket | null;
-  loadTickets: () => Promise<readonly TicketRef[] | null | undefined>;
-  loadDetails: (key: string) => Promise<JiraTicketDetails>;
-}): Promise<ListTicketResult> {
-  const prev = ticketDraftFromStored(opts.previous);
-  if (ticketDraftHasContent(prev)) {
-    const check = checkTicketDraft(prev);
-    if (check.ok) return { ticket: ticketRequestFromCheck(check), note: null };
-    return { ticket: undefined, note: `Started without the user story: ${check.message}` };
-  }
-
-  let refs: readonly TicketRef[] | null | undefined;
-  try {
-    refs = await opts.loadTickets();
-  } catch {
-    return { ticket: undefined, note: NO_STORY_NOTE };
-  }
-  const ref = fillableJiraTickets(refs)[0];
-  if (ref == null) return { ticket: undefined, note: NO_STORY_NOTE };
-
-  let details: JiraTicketDetails;
-  try {
-    details = await opts.loadDetails(ref.key);
-  } catch {
-    return { ticket: undefined, note: `Started without a user story: ${ref.key} could not be read.` };
-  }
-  const draft = {
-    ...fillDraftFromJira(EMPTY_TICKET_DRAFT, details).draft,
-    ...jiraProvenance(ref),
-  };
-  const check = checkTicketDraft(draft);
-  if (!check.ok) {
-    return { ticket: undefined, note: `Started without ${ref.key}: ${check.message}` };
-  }
-  const ticket = ticketRequestFromCheck(check);
-  return ticket != null ? { ticket, note: null } : { ticket: undefined, note: NO_STORY_NOTE };
-}

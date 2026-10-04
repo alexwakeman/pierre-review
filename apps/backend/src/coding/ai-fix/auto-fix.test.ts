@@ -5,7 +5,9 @@
 //      waiting unpushed on this head, the 3-per-24h cap, and a re-try of items the last auto fix at
 //      this head already reported as not addressed;
 //   3. a start passes the review's model and `trigger: 'auto'`, and records the outcome for the
-//      Claude Review tab (owner-scoped).
+//      Claude Review tab (owner-scoped);
+//   4. ⚠ TICKET ITEMS: the auto path never asks for them; a MANUAL seed (`withTicketItems`) gets the
+//      ticket review's items THIS PR owns, from each ticket's latest run only.
 //
 //   pnpm --filter @pierre-review/backend test ai-fix/auto-fix
 import { rmSync } from 'node:fs';
@@ -109,14 +111,17 @@ let seed: { headSha: string; model: string; items: AiFixReviewItem[] } | null;
 let running = false;
 let started: any[];
 let startAnswer: any;
+const loadInputs: any[] = [];
 const deps = () => ({
-  loadReviewSeed: (async () =>
-    seed
+  loadReviewSeed: (async (_ctx: unknown, input: any) => {
+    loadInputs.push(input);
+    return seed
       ? {
           review: { headSha: seed.headSha, model: seed.model } as any,
           seed: { items: seed.items, sentRefs: seed.items.filter((i) => i.included).map((i) => i.ref), text: 'x' },
         }
-      : null) as any,
+      : null;
+  }) as any,
   isFixRunning: () => running,
   startReviewFix: (async (_ctx: unknown, input: any) => {
     started.push(input);
@@ -309,5 +314,60 @@ describe('maybeStartAutoFix — the skips', () => {
     expect(await go(await seedPr(viewerId))).toMatchObject({ reason: 'not_started' });
     startAnswer = { status: 'already_running' };
     expect(await go(await seedPr(viewerId))).toMatchObject({ reason: 'fix_in_progress' });
+  });
+});
+
+describe('ticket items in the review seed', () => {
+  it('⚠ the auto path never asks for ticket items', async () => {
+    loadInputs.length = 0;
+    await go(await seedPr(viewerId));
+    expect(loadInputs.length).toBeGreaterThan(0);
+    for (const input of loadInputs) expect(input.withTicketItems).toBeFalsy();
+  });
+
+  it('a MANUAL seed adds the items this PR owns, from the latest run of each ticket only', async () => {
+    const { loadReviewSeed } = await import('./manager.js');
+    const prId = await seedPr(viewerId);
+    const other = await seedPr(viewerId);
+    const [rv] = await db
+      .insert(schema.claudeReviews)
+      .values({ accountId: 1, prId, headSha: 'h1', status: 'succeeded', model: 'claude-opus-5-5', summary: 's' })
+      .returning()
+      .execute();
+    const run = async (createdAt: number): Promise<number> =>
+      (
+        await db
+          .insert(schema.ticketReviews)
+          .values({
+            accountId: 1, workspaceId: 1, ticketIdent: 'jira:https://x#ENG-1', ticketKey: 'ENG-1', ticketTitle: 'Export',
+            status: 'succeeded', model: 'claude-opus-5-5', createdAt: new Date(createdAt),
+          })
+          .returning()
+          .execute()
+      )[0].id as number;
+    const item = async (runId: number, ref: string, title: string, ownerPrId: number): Promise<void> => {
+      await db
+        .insert(schema.ticketReviewItems)
+        .values({ ticketReviewId: runId, accountId: 1, ref, status: 'not_met', title, body: 'why', ownerPrId, createdAt: new Date(NOW) })
+        .execute();
+    };
+    const old = await run(NOW - 2 * HOUR);
+    await item(old, 'AC9', 'Superseded', prId);
+    const latest = await run(NOW - HOUR);
+    for (const id of [old, latest]) {
+      await db
+        .insert(schema.ticketReviewMembers)
+        .values({ ticketReviewId: id, accountId: 1, prId, repoId, headSha: 'h1', prState: 'open', checkedOut: true })
+        .execute();
+    }
+    await item(latest, 'AC2', 'Escapes commas', prId);
+    await item(latest, 'M1', 'Belongs to the other PR', other);
+
+    const manual = await loadReviewSeed(ctx, { accountId: 1, prId, reviewId: rv.id, withTicketItems: true });
+    expect(manual?.seed.items.map((i) => `${i.ref}:${i.title}`)).toEqual(['S1-AC2:Escapes commas']);
+    const auto = await loadReviewSeed(ctx, { accountId: 1, prId, reviewId: rv.id });
+    expect(auto?.seed.items).toEqual([]);
+    // Another account sees none of it.
+    expect(await loadReviewSeed(ctx, { accountId: 2, prId, reviewId: rv.id, withTicketItems: true })).toBeNull();
   });
 });

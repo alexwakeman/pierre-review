@@ -28,8 +28,10 @@ import { CopyButton } from './CopyButton.js';
 import { BotIcon, ChevronIcon, ExternalLinkIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection } from './ReviewSection.js';
+import { PrRefText } from './ReviewPrRefs.js';
+import { REVIEW_CHIP, REVIEW_PROSE } from '../lib/reviewStyles.js';
 
-const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[11px] font-medium';
+const CHIP = REVIEW_CHIP;
 const MUTED = 'text-gray-500 dark:text-gray-400';
 
 function ThreadRow({
@@ -58,7 +60,7 @@ function ThreadRow({
   return (
     <li
       className={`rounded border px-3 py-2 text-sm ${
-        toFix ? 'border-amber-300 dark:border-amber-700/60' : 'border-gray-200 dark:border-gray-800'
+        toFix ? 'border-amber-300 dark:border-amber-700/60' : 'border-gray-100 dark:border-gray-800'
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -125,11 +127,9 @@ function ThreadRow({
         <div className="mt-1">
           <p
             ref={excerptRef}
-            className={`whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300 ${
-              expanded ? '' : 'line-clamp-3'
-            }`}
+            className={`${REVIEW_PROSE} ${expanded ? '' : 'line-clamp-3'}`}
           >
-            {t.excerpt}
+            <PrRefText text={t.excerpt} />
           </p>
           {(clamped || expanded) && (
             <button
@@ -144,9 +144,8 @@ function ThreadRow({
         </div>
       )}
       {t.explanation != null && t.explanation !== '' ? (
-        <p className="mt-1 whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300">
-          <span className="font-medium">Claude: </span>
-          {t.explanation}
+        <p className={`mt-1 ${REVIEW_PROSE}`}>
+          <PrRefText text={t.explanation} />
         </p>
       ) : !judged ? (
         <p className={`mt-1 text-xs ${MUTED}`}>{threadNotCheckedReason(t)}</p>
@@ -169,7 +168,7 @@ function ThreadRow({
           {replyOpen && (
             <p
               id={replyId}
-              className="mt-0.5 whitespace-pre-wrap break-words rounded bg-gray-500/5 px-2 py-1 text-xs text-gray-700 dark:text-gray-300"
+              className={`mt-0.5 rounded bg-gray-500/5 px-2 py-1 ${REVIEW_PROSE}`}
             >
               {t.draftReply}
             </p>

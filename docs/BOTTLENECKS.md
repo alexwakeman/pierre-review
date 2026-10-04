@@ -219,8 +219,9 @@ and without it; a leaf connection adds nothing).
 - ⚠ **NOT RECEIVED IS NOT "NOBODY".** `pull_requests.review_requests_synced_at` is stamped only from
   a response that carried the selection (an empty list is a positive statement and IS stamped). A
   PR without the stamp is "not known" and counted apart; the panel states the coverage.
-- **The backfill** (`sync/backfill-review-requests.ts`) re-reads merged PRs in the trailing 90 days
-  with no stamp, 100 per repo per walk in `nodes(ids:)` batches of 50, after EVERY walk — user and
+- **The backfill** (`sync/backfill-review-requests.ts`) re-reads un-stamped OPEN PRs first (migration
+  `0081` un-stamps those whose requests lack a requester), then merged PRs in the trailing 90 days
+  with no stamp, 100 per repo per walk together in `nodes(ids:)` batches of 50, after EVERY walk — user and
   scheduled (the scheduled path has no other post-walk tail). Budget-aware (`isLimited` /
   `noteLimited` / `noteBudget`), strictly non-fatal. Measured: 769 PRs in 26 seconds.
 - **Who counts.** The first MOMENT decides; a person and a team asked together is "a named person".

@@ -62,6 +62,14 @@ describe('the coding agent runs without a shell', () => {
   });
 });
 
+describe('the fixer is confined to its worktree', () => {
+  // The fixer WRITES under bypassPermissions; without this hook an absolute path (~/.zshrc) in a
+  // seed item would be written outside the worktree. Behaviour: review/path-guard.test.ts.
+  it('runs behind the path guard rooted at the worktree', () => {
+    expect(SRC).toContain('hooks: { PreToolUse: [pathGuardHook(createPathGuard(opts.worktreePath))] }');
+  });
+});
+
 describe('the scan actually catches the shell coming back', () => {
   const reAdd = (name: string, entry: string): string => {
     const at = SRC.indexOf(`const ${name} = [`);

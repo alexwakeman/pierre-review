@@ -14,7 +14,8 @@ import { AiRunGate } from './AiSetup.js';
 // Claude Review chat: ONE thread per review, about the whole review and any of its findings. The
 // per-finding "Ask Claude" threads were removed from the screen (the review thread covers them);
 // `findingId` stays on the component because the route still serves those older threads.
-// Nothing is fetched until the thread is opened.
+// The review's thread opens EXPANDED (it sits under Story check), so its one DB read runs on mount;
+// Hide collapses it and nothing more is fetched while it is shut.
 
 export const CHAT_HEAD_MOVED_LINE = 'Answers are about the reviewed commit; the PR has moved on.';
 
@@ -76,7 +77,7 @@ export function ReviewChatThread({
               {m.role === 'user' ? (
                 <div className="whitespace-pre-wrap">{m.content}</div>
               ) : (
-                <Markdown>{m.content}</Markdown>
+                <Markdown prRefs>{m.content}</Markdown>
               )}
             </li>
           ))}
@@ -129,9 +130,9 @@ export function ReviewChatThread({
   );
 }
 
-/** The whole review's thread, collapsed until opened. */
+/** The whole review's thread, open by default. */
 export function ReviewChatSection({ reviewId }: { reviewId: number }): JSX.Element {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   return (
     <ReviewSection
       title="Review chat"

@@ -3148,6 +3148,96 @@ check(
   );
 }
 
+// ── TICKET REVIEW (migration 0080 / pg 0067) ─────────────────────────────────────────────────────
+// Runs, their member PRs and their items. Run and item ids arrive in request PATHS, so every
+// id-addressed getter must answer null for the other account; the batched state read and the PR
+// lists must never surface the other account's runs. Both accounts review the SAME ident, so a
+// dropped account predicate would have something to leak — the MUTATION check proves it.
+{
+  const { buildAgentContext } = await import('../src/review/agent-context.js');
+  const tr = await import('../src/review/ticket-review/persist.js');
+  const silent = { info() {}, warn() {}, error() {}, debug() {}, child() { return silent; } };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tctx = buildAgentContext(silent as any);
+  const IDENT = 'jira:https://acme.atlassian.net/rest/api/3#ISO-1';
+  const runFor = async (accountId: number, workspaceId: number, prId: number, repoId: number) => {
+    const id = await tr.insertQueuedTicketReview(tctx, {
+      accountId,
+      workspaceId,
+      ident: IDENT,
+      ticketKey: 'ISO-1',
+      ticketTitle: 't',
+      ticket: null,
+      originPrId: prId,
+      trigger: 'cascade',
+      model: 'm',
+    });
+    await tr.markTicketReviewRunning(tctx, accountId, id, {
+      ticket: { title: 't', description: null, acceptanceCriteria: 'a' },
+      ticketHash: 'h',
+      fingerprint: 'f',
+      prCount: 1,
+      members: [{ prId, repoId, headSha: 's', state: 'open', checkedOut: true }],
+    });
+    await tr.saveTicketReviewSuccess(tctx, accountId, id, {
+      alignment: 'partly_aligned',
+      summary: 's',
+      assessment: { alignment: 'partly_aligned', summary: 's', criteria: [], missing: [], notRequested: [] },
+      costUsd: null,
+      inputTokens: null,
+      outputTokens: null,
+      numTurns: 1,
+      items: [{ ref: 'M1', status: 'missing', title: 'x', body: '', ownerPrId: prId, path: null, line: null }],
+    });
+    return id;
+  };
+  const trA = await runFor(1, defaultA, A.prId, A.repoId);
+  const trB = await runFor(2, defaultB, B.prId, B.repoId);
+  const itemB = (await tr.getTicketReviewById(tctx, 2, trB))!.items[0]!.id;
+  check("getTicketReviewById(A's run, A) returns it", (await tr.getTicketReviewById(tctx, 1, trA))?.id === trA);
+  check("getTicketReviewById(B's run, A) returns null (IDOR blocked)", (await tr.getTicketReviewById(tctx, 1, trB)) === null);
+  check(
+    "getTicketItemPostContext(B's run+item, A) returns null",
+    (await tr.getTicketItemPostContext(tctx, 1, trB, itemB)) === null,
+  );
+  check(
+    "markTicketItemPosted(B's item, A) is refused",
+    (await tr.markTicketItemPosted(tctx, 1, itemB, { prId: A.prId, commentId: 'x' })) === false,
+  );
+  check(
+    "B's item stays unposted after A's attempt",
+    (await tr.getTicketReviewById(tctx, 2, trB))!.items[0]!.posted === null,
+  );
+  const latestA = await tr.getLatestTicketReview(tctx, 1, IDENT);
+  check('getLatestTicketReview(A, shared ident) is A\'s run', latestA?.id === trA);
+  const statesA = await tr.getTicketStateInputs(tctx, 1, [IDENT]);
+  check("getTicketStateInputs(A) sees only A's run", statesA.get(IDENT)?.latest?.id === trA);
+  check("listLatestTicketReviewsForPr(A, B.pr) is empty", (await tr.listLatestTicketReviewsForPr(tctx, 1, B.prId)).length === 0);
+  check("getOwnedTicketItemsForPr(A, B.pr) is empty", (await tr.getOwnedTicketItemsForPr(tctx, 1, B.prId)).length === 0);
+  check(
+    "countAutoTicketReviewsSince(A, B's workspace) is 0",
+    (await tr.countAutoTicketReviewsSince(tctx, 1, defaultB, 0)) === 0,
+  );
+  check(
+    "countAutoTicketReviewsSince(A, A's workspace) counts A's cascade run",
+    (await tr.countAutoTicketReviewsSince(tctx, 1, defaultA, 0)) === 1,
+  );
+  const t = schema.ticketReviews;
+  const both = await db.select().from(t).where(eq(t.ticketIdent, IDENT)).execute();
+  check('MUTATION: without the account predicate both runs share the ident', both.length === 2);
+  // STRUCTURAL: a member row pairing A's run with B's PR fails in the database.
+  let crossRefused = false;
+  try {
+    await db
+      .insert(schema.ticketReviewMembers)
+      .values({ ticketReviewId: trA, accountId: 1, prId: B.prId, repoId: B.repoId, headSha: 's', prState: 'open' })
+      .execute();
+  } catch {
+    crossRefused = true;
+  }
+  check("a member row naming B's PR under A's run is refused by the composite FK", crossRefused);
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

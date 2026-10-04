@@ -1,9 +1,11 @@
 import { memo, type CSSProperties } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Options as MarkdownOptions } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+import { rehypeReviewPrRefs } from '../lib/reviewPrRefs.js';
+import { PrRefLink } from './ReviewPrRefs.js';
 
 /**
  * HAST property names React refuses — subtracted from every allowlist below.
@@ -125,24 +127,43 @@ function declaredSizeVars(width: unknown, height: unknown): CSSProperties | unde
 // and this component renders in hot, frequently-re-rendering places (the Feed's rows, PR
 // comments, thread bodies, Insights). With a stable body string, a parent re-render (e.g. a
 // Back-flash highlight on the Feed) no longer re-parses every visible markdown body.
+//
+// `prRefs` (the Claude Review tab only): PR references in the text ("api#12", "#3") become in-app
+// links through the nearest <ReviewPrRefsProvider>. The plugin runs AFTER the sanitizer and marks
+// refs outside links and code; an unresolved ref renders as its plain text.
+type RehypePlugins = NonNullable<MarkdownOptions['rehypePlugins']>;
+const BASE_REHYPE: RehypePlugins = [
+  rehypeRaw,
+  [rehypeSanitize, sanitizeSchema],
+  [rehypeHighlight, { detect: true, ignoreMissing: true }],
+];
+const WITH_PR_REFS: RehypePlugins = [...BASE_REHYPE, rehypeReviewPrRefs];
+
 export const Markdown = memo(function Markdown({
   children,
+  prRefs = false,
 }: {
   children: string;
+  prRefs?: boolean;
 }): JSX.Element {
   return (
     <div className="md-body">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[
-          rehypeRaw,
-          [rehypeSanitize, sanitizeSchema],
-          [rehypeHighlight, { detect: true, ignoreMissing: true }],
-        ]}
+        rehypePlugins={prRefs ? WITH_PR_REFS : BASE_REHYPE}
         components={{
-          a: ({ node, ...props }) => (
-            <a {...props} target="_blank" rel="noreferrer noopener" />
-          ),
+          a: ({ node, ...props }) => {
+            const num = node?.properties?.dataPrNumber;
+            if (prRefs && typeof num === 'string' && num !== '') {
+              const repo = node?.properties?.dataPrRepo;
+              return (
+                <PrRefLink repo={typeof repo === 'string' && repo !== '' ? repo : null} number={Number(num)}>
+                  {props.children}
+                </PrRefLink>
+              );
+            }
+            return <a {...props} target="_blank" rel="noreferrer noopener" />;
+          },
           // `width`/`height` stay ON the element as well as feeding the CSS bounds: they are
           // what gives the browser an aspect ratio before the bytes arrive, which is what
           // reserves the right box and keeps the surrounding text from reflowing on load.

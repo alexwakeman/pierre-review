@@ -563,6 +563,15 @@ export const config = {
   reviewChatBudgetUsd: floatFromEnv('REVIEW_CHAT_BUDGET_USD', 1),
   reviewChatMaxTurns: intFromEnv('REVIEW_CHAT_MAX_TURNS', 8),
   reviewChatDiffOnlyMaxTurns: intFromEnv('REVIEW_CHAT_DIFF_ONLY_MAX_TURNS', 2),
+  // ---- Ticket review (one run per TICKET, across every PR on it — review/ticket-review/) ----
+  // Its OWN spend cap, separate from REVIEW_BUDGET_USD: a ticket run reads several repositories but
+  // has no specialists. Env only — no route sets it. The turn cap bounds the exploration across
+  // every member's worktree.
+  ticketReviewBudgetUsd: floatFromEnv('TICKET_REVIEW_BUDGET_USD', 4),
+  ticketReviewMaxTurns: intFromEnv('TICKET_REVIEW_MAX_TURNS', 40),
+  // AUTOMATIC ticket reviews (trigger 'auto' / 'cascade') per workspace per UTC day. Not shared with
+  // the PR review's own auto cap. Manual runs never count. Default = shared TICKET_REVIEW_DAILY_CAP.
+  ticketReviewDailyCap: intFromEnv('TICKET_REVIEW_DAILY_CAP', 20),
 
   // ---- Diff-size cap ----
   // A very large inlined diff is the dominant cost on a big PR (it's the cached

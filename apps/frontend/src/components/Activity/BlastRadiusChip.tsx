@@ -90,11 +90,15 @@ export function BlastRadiusChip({
    *  must NOT be expandable — the card is a link to the pull request, and a second interactive
    *  target inside it competes with that. */
   expandable = false,
+  /** The level as one phrase, "High reach" — a Pending card's fact line, where the reasons live
+   *  behind Details. The reasons still ride the title and the accessible name. */
+  wordOnly = false,
 }: {
   pr: BlastPrFields;
   className?: string;
   iconOnly?: boolean;
   expandable?: boolean;
+  wordOnly?: boolean;
 }): JSX.Element | null {
   const config = useBlastConfig();
   const [open, setOpen] = useState(false);
@@ -105,7 +109,9 @@ export function BlastRadiusChip({
   // ⚠ THE ANTI-DOUBLE-COUNT RULE, rendered. When SIZE is the only reason this is high, the
   // large-PR flag sitting inches away already carries the number — so the chip shows its level
   // and stops. See `BlastVerdict.volumeOnly`.
-  const summary = verdict.volumeOnly
+  const summary = wordOnly
+    ? `${meta.word} reach`
+    : verdict.volumeOnly
     ? meta.word
     : `${meta.word} · ${verdict.reasons[0]!.text.replace(/^Touches /, '').replace(/^Spans /, '')}`;
 

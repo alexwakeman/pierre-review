@@ -260,21 +260,6 @@ export function acFieldText(d: Pick<TicketDraft, 'acField'>): string {
   return d.acField.name;
 }
 
-// ---- the Open PRs strip's story pills ----
-
-/**
- * The stories a run assessed, each with the name every other surface gives it. ⚠ NUMBERED BEFORE
- * FILTERING: the strip drops a story with no assessment, and numbering the filtered list renamed
- * the run's Story 2 to "Story 1" whenever Story 1 had none. A lone story is just "Story".
- */
-export function assessedStoryPills<T extends { key: string | null; alignment: unknown }>(
-  tickets: readonly T[],
-): { ticket: T; label: string }[] {
-  return tickets
-    .map((t, i) => ({ ticket: t, label: t.key ?? (tickets.length > 1 ? storyName({ key: null }, i) : 'Story') }))
-    .filter((p) => p.ticket.alignment != null);
-}
-
 /**
  * Whether a story's criteria markdown OPENS with its own "Acceptance criteria" heading (Jira fields
  * often do: `h1. *ACCEPTANCE CRITERIA*`), so the tab does not print the label above it twice.

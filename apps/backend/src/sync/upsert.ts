@@ -614,7 +614,8 @@ export function nextResolvedAt(
  * stamping them would tell Chronology "never requested" about PRs we simply could not see. An
  * EMPTY array is a positive statement (no request ever made) and IS stamped.
  *
- * Events are immutable on GitHub, so each is inserted DO NOTHING on (pr_id, node id).
+ * Events are immutable on GitHub, so each is inserted DO NOTHING on (pr_id, node id) — except
+ * `requester_user_id`, which a response carrying the `actor` selection fills in place.
  */
 export async function persistReviewRequestHistory(
   exec: Executor,
@@ -650,19 +651,35 @@ export async function persistReviewRequestHistory(
       reviewerKind = 'team';
       teamSlug = r.slug ?? null;
     }
-    await exec
-      .insert(reviewRequestEvents)
-      .values({
-        prId,
-        githubNodeId: n.id,
-        kind,
-        occurredAt: new Date(n.createdAt),
-        reviewerKind,
-        reviewerUserId,
-        teamSlug,
-      })
-      .onConflictDoNothing({ target: [reviewRequestEvents.prId, reviewRequestEvents.githubNodeId] })
-      .execute();
+    // WHO ASKED (migration 0081). Partial-response rule: an ABSENT `actor` key is "not received"
+    // and the column is OMITTED from both halves; a received `null` (GitHub's ghost) or an actor
+    // that is neither a User nor a Bot is a positive "no nameable requester" and writes NULL.
+    // Only a request carries one — a removal's actor is not who asked.
+    let requesterUserId: number | null | undefined;
+    if (kind === 'requested' && n.actor !== undefined) {
+      const a = n.actor as { __typename: string; id?: string; login?: string } | null;
+      requesterUserId =
+        a && (a.__typename === 'User' || a.__typename === 'Bot') && a.login
+          ? await resolver.resolve(exec, { login: a.login, id: a.id, __typename: a.__typename } as GqlActor)
+          : null;
+    }
+    const insert = exec.insert(reviewRequestEvents).values({
+      prId,
+      githubNodeId: n.id,
+      kind,
+      occurredAt: new Date(n.createdAt),
+      reviewerKind,
+      reviewerUserId,
+      teamSlug,
+      ...(requesterUserId !== undefined ? { requesterUserId } : {}),
+    });
+    const target = [reviewRequestEvents.prId, reviewRequestEvents.githubNodeId];
+    // The event itself is immutable (DO NOTHING); the requester is the one column filled IN PLACE,
+    // because rows written before 0081 exist without it and the backfill re-reads them.
+    await (requesterUserId !== undefined
+      ? insert.onConflictDoUpdate({ target, set: { requesterUserId } })
+      : insert.onConflictDoNothing({ target })
+    ).execute();
   }
   await exec
     .update(pullRequests)

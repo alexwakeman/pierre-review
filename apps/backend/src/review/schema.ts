@@ -11,29 +11,17 @@ type ZodNs = typeof Zod;
 // Exported as a raw zod shape (what `tool()` wants) plus an assembled object
 // schema (for validation in tests / belt-and-suspenders parsing).
 //
-// ⚠ EVERY FOLLOW-UP / USER-STORY / REVIEW-THREAD FIELD IS OPTIONAL, so a run with none of those
-// sections submits exactly the old shape and validates exactly as before. The prompt — not this
-// schema — requires `followUp` / `tickets` when the user message carries those sections, and the
-// plugin reconciles whatever arrives (missing refs become 'not_checked'). 'not_checked' is in NO
-// enum here: only the server writes it.
+// ⚠ EVERY FOLLOW-UP / REVIEW-THREAD / CI FIELD IS OPTIONAL, so a run with none of those sections
+// submits exactly the old shape and validates exactly as before. The prompt — not this schema —
+// requires `followUp` / `threads` / `ciFailures` when the user message carries those sections, and
+// the server reconciles whatever arrives (missing refs become 'not_checked'). 'not_checked' is in
+// NO enum here: only the server writes it.
+//
+// There is NO `tickets` field: user stories left the PR review for the ticket review
+// (review/ticket-review/, its own `submit_ticket_review`). A stray `tickets` key is stripped by
+// zod's default object parsing, so nothing a model sends here can become a story verdict.
 
 export function buildSubmitReviewShape(z: ZodNs) {
-  const ticketGap = z.object({
-    title: z.string().describe("A short name for the gap."),
-    explanation: z.string().describe("One or two sentences."),
-    path: z
-      .string()
-      .nullable()
-      .optional()
-      .describe("The file that shows it, if any."),
-    line: z
-      .number()
-      .int()
-      .nullable()
-      .optional()
-      .describe("The line that shows it, if any."),
-  });
-
   return {
     summary: z.string(),
     verdict: z.enum(["COMMENT", "REQUEST_CHANGES", "APPROVE"]),
@@ -84,59 +72,6 @@ export function buildSubmitReviewShape(z: ZodNs) {
       .optional()
       .describe(
         "One entry per finding in the 'Previous review' section, each ref at most once. Leave out a ref whose code you cannot see rather than guess. Leave the whole field out when there is no such section.",
-      ),
-    tickets: z
-      .array(
-      z.object({
-        ref: z
-          .string()
-          .describe("The ticket's ref from the 'User stories' section, e.g. 'T1'."),
-        alignment: z.enum([
-          "aligned",
-          "partly_aligned",
-          "not_aligned",
-          "unclear",
-        ]),
-        summary: z
-          .string()
-          .describe(
-            "One or two sentences on how well the change matches the user story.",
-          ),
-        criteria: z
-          .array(
-            z.object({
-              text: z
-                .string()
-                .describe(
-                  "The criterion in one short sentence, as you read it from the acceptance criteria.",
-                ),
-              status: z.enum(["met", "partly_met", "not_met", "unclear"]),
-              explanation: z.string(),
-              path: z.string().nullable().optional(),
-              line: z.number().int().nullable().optional(),
-            }),
-          )
-          .optional()
-          .describe(
-            "Every distinct acceptance criterion you find in the acceptance-criteria text, in the order it appears, each once. Leave it out when there is no acceptance-criteria text.",
-          ),
-        missing: z
-          .array(ticketGap)
-          .optional()
-          .describe(
-            "What the user story asks for that the change does not do and no criterion covers.",
-          ),
-        notRequested: z
-          .array(ticketGap)
-          .optional()
-          .describe(
-            "What the change adds that the user story did not ask for.",
-          ),
-      }),
-      )
-      .optional()
-      .describe(
-        "Only when the user message has a 'User stories' section: one entry per ticket there, each ref once. Leave it out otherwise.",
       ),
     threads: z
       .array(

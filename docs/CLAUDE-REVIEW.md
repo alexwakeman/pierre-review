@@ -104,6 +104,15 @@ posts **one** GitHub review (inline + body + verdict).
 - **Frontend:** `ClaudeReviewTab.tsx` + `useClaudeReview.ts` (live progress over SSE,
   `…/stream`). Claude's output is **read-only** (Copy buttons); a separate "Review summary"
   textarea + verdict is what posts. Re-reviewing the same head SHA **warns but is allowed**.
+  - **THE SUMMARY IS MARKDOWN, LED BY BULLETS** (`'summary'` in the system prompt, pinned by
+    `prompts.test.ts`): ONE short plain-English sentence, then a "- " bullet per main issue, most
+    serious first — and no list when there are no issues; no headings or tables. The ticket review's
+    `summary` follows the same shape (one sentence, then a bullet per gap naming where it belongs).
+    Older plain-prose summaries render unchanged.
+  - **PR references in every piece of model text link to that PR in Limn** — one batched, DB-only
+    `POST /api/prs/resolve` (`read` tier, account-scoped, ≤ `PR_REF_RESOLVE_MAX` refs, 400 over)
+    for whatever the screen cannot resolve itself. Contract in docs/FRONTEND.md § The agentic AI
+    surfaces.
   The follow-up and user-story pieces live in `ClaudeReviewFollowUp.tsx` (three components, one
   mount each, pinned by `test/claudeReviewFollowUp.test.ts`) over the pure
   `lib/claudeReviewFollowUp.ts` (ordering, anchors, the draft ↔ request mapping, chip palette);
@@ -469,9 +478,6 @@ CODE, not by prompt:
   new, included finding; only the answer is fixed. A carried `not_checked` item was never judged, so
   the model still is. ⚠ This deliberately overrides the older "the server does NOT coerce statuses
   on an unmoved head" rule for the same-head case only (product decision, 2026-10).
-- **User stories** (`ticket.ts` `sameHeadTicketCarry`): a story unchanged since the previous run at
-  this head keeps that assessment (minus its `posted` record); when every story carries, the stories
-  section is not sent at all.
 
 ## Failed CI on the reviewed head
 
@@ -573,7 +579,86 @@ request.
   invalidation), so the button never comes back while the hold lasts, and the message shows under
   the cell only for as long as the hold does.
 
-## User stories (one or more tickets)
+## Ticket review (one review per ticket, across its PRs)
+
+⚠ **A PR REVIEW NO LONGER CHECKS STORIES.** The split (2026-10) made two processes: the PR review
+(code, tests, threads, CI — everything above) and the TICKET review (`src/review/ticket-review/`):
+does the SET of PRs naming one ticket deliver its acceptance criteria. New PR-review runs write no
+`ticket`, `ticket_assessment` or story findings; `submit_review` has no `tickets` field; the start
+route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § Ticket review.
+
+- **Keyed per TICKET, not per PR.** Ident `jira:<apiRoot>#<KEY>` (members from the plugin's stored
+  rows, `ticketMembers` — any workspace of the account on the same Jira site) or
+  `manual:<prId>:<hash>` (a pasted story: one PR, no plugin needed, never cascades). The apiRoot fold
+  is shared `jiraApiRoot`, ONE copy the plugin and the SPA both call. Members are OPEN + MERGED PRs
+  (a merged one is read at its final head); closed-unmerged drop out. Over `TICKET_REVIEW_MAX_PRS`
+  (8) it REFUSES `too_many_prs` with the count, never samples.
+- **Tables** `ticket_reviews` / `ticket_review_members` / `ticket_review_items` (sqlite `0080`, pg
+  `0067`), tenancy STRUCTURAL via named composite FKs. Deleting a PR prunes its member rows and drops
+  a run left with none (`db/ticket-review-prune.ts`, in BOTH delete paths).
+- **Currency is a fingerprint**: sha256 of `TICKET_REVIEW_VERSION`, the story hash and the sorted
+  `prId:headSha:state` of the members, recomputed from synced columns on every read
+  (`deriveTicketReviewState`) — `stale` names why (`story_edited`, `pr_added`, `pr_left`,
+  `pr_pushed`, `pr_merged`). The plugin's `pro_pr_jira_tickets.changed_at` (plugin `0039`) moves only
+  when the story text or membership moves (`storyOrMembershipMoved`), and feeds the sweeper.
+- ⚠ **ONE STORY PER TICKET, WHOEVER ASKS** (`jiraStoryFor` → the plugin's `ticketStory`): the
+  FRESHEST stored row across every PR on the ticket (newest `fetched_at`). The run, the sweeper, the
+  states route and the PR pane all hash THIS. Reading "the first member's row" gave each caller a
+  different text, because the worker refreshes OPEN PRs only and a merged PR's row keeps the story it
+  merged with — the PR pane then showed "story edited" for ever and every sweep re-billed a run.
+- ⚠ **NO JIRA CALL ON A VIEW.** The seam (`ticketsForPr`, `ticketStory`, `ticketMembers`) reads the
+  plugin's STORED rows only (`resolvePrTickets(..., { storedOnly: true })`); a key the worker has not
+  reached yet is simply not there until it is. That is why every ticket-review route except start
+  and post sits on the `read` tier.
+- **The agent** (`agent.ts`): cwd is a scratch dir holding `MEMBERS.md`; every member's worktree is
+  an `additionalDirectories` entry behind the PreToolUse PATH GUARD (`review/path-guard.ts`); tools
+  Read/Glob/Grep + `submit_ticket_review`; `Bash`, writes, web and sub-agents denied; no specialists;
+  `TICKET_REVIEW_BUDGET_USD` (4) and `TICKET_REVIEW_MAX_TURNS` (40), env only. Every story field,
+  member title, file list and diff is nonce-fenced; diffs share ONE 120k-char budget, split fairly.
+  `MEMBERS.md` is server text only (repo, number, state, head, worktree) — ⚠ never a file name: it
+  sits outside the fences, and a path is chosen by whoever wrote the PR.
+  It is also told the open LEGACY story findings (each member's latest PR-review run that checked a
+  story) so it can say they are now met elsewhere. ⚠ While any member could not be checked out,
+  `reconcile.ts` turns every `not_met` into `unclear` and makes no missing item postable — absence of
+  evidence is not a verdict. Spend is recorded (`recordAiUsage`, feature `ticket_review`) on success,
+  failure and cancel alike.
+- **ONE concurrency pool with the PR review** (`REVIEW_CONCURRENCY`, `registerReviewSlotPeer`).
+  Lane order: a PR-review click > a ticket click > a PR-review auto run > a ticket auto run; each
+  side pumps the other when a run ends. The claim key `acct:ident` is taken SYNCHRONOUSLY.
+- **Cascade** (`sweep.ts`, every minute, only where auto review is on): a PR that opened, pushed or
+  left re-queues the tickets it is on — ONE HOP, never transitive — under the same `autoReviewDue`
+  rule (5 min quiet / 20 min max / CI hold 30 min), keyed `acct:ident` with the fingerprint as the
+  head. Its OWN per-workspace `TICKET_REVIEW_DAILY_CAP` (20), counted from rows (an automatic run
+  writes its row when queued), charged to the starting workspace. A first run needs a member opened
+  after auto review was switched on, or the kick an auto PR review sends (`onAutoReviewLaunched`).
+  ⚠ A ticket whose run is queued or running WAITS (stays in `watching`), never is forgotten: the
+  run's fingerprint was fixed at prepare time, so a member pushed meanwhile is judged again once it
+  ends — the PR snapshot has already moved on, so nothing else would bring it back. ⚠ The same when
+  the lane fills mid-tick: every candidate not yet reached waits. A refused attempt, one that ended
+  without an answer (budget, turns) or a cancelled one on the same fingerprint is not retried; one
+  that THREW or was cut off by a restart stores no fingerprint (`retryable`, the boot reconcile), so
+  it is.
+- **Never auto-posted.** One Post button per unmet / partly met / missing item, targeting
+  `owner_pr_id` (Claude's `expectedIn` member), else the viewed PR, pinned to the head the run
+  judged (`HeadMoved` otherwise). A re-raised item inherits its earlier posting (`prior_item_id`), so
+  nothing posts twice; only the ticket's latest succeeded run may post (`Superseded`). ⚠ The route
+  takes its in-process claim BEFORE the "already posted?" check and re-reads the item inside it — a
+  check made before the claim can be answered by a request that has since posted and released it.
+  The SPA says "Already posted" only for `AlreadyPosted`; `HeadMoved` / `Superseded` keep the button
+  and print the reason. The body
+  carries the `<!-- pierre:claude-review` marker, so it never triggers an auto PR review.
+- **AI Fix**: a MANUAL review-seeded fix includes the items this PR owns from each ticket's latest
+  succeeded run (refs `S<t>-AC<n>` / `S<t>-M<n>`); an AUTO fix never does. Those items are model
+  text drawn from Jira and other people's PRs, and the fixer WRITES — so it, too, runs behind the
+  path guard, rooted at its worktree (`coding/agent.ts`; § AI Fix).
+- **Peers in a deep PR review.** A worktree PR review may read up to
+  `TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW` (4) peers on the same ticket, read-only behind the same path
+  guard, to catch cross-repo breakage — it never judges the ticket or reports criteria.
+
+## User stories — LEGACY (runs before the ticket review split)
+
+⚠ Everything below describes how OLDER PR-review runs checked stories. Those rows still READ as
+history in the old layout; nothing below is written any more (§ Ticket review).
 
 Optional user stories — each a title, description and acceptance criteria — that the person running
 the review pastes or fills from Jira. ⚠ **A review carries up to `CLAUDE_REVIEW_MAX_TICKETS` (5)
@@ -777,24 +862,12 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   the same way. A waiting item has no Stop (cancel would not stick — the sweeper re-finds a PR with
   no row); a RUNNING auto run keeps the ordinary Stop. The Open PRs column shows the same hold (§
   Starting from the Open PRs tab).
-- ⚠ **AN AUTO RUN TRIES JIRA WHEN THE PLUGIN OFFERS IT.** Jira stays PRO: `startAutoItem` asks the
-  OPTIONAL `resolveReviewTicket` provider (`review/plugin-providers.ts`), which the plugin registers
-  when its tracker tier is on, backed by `packages/pro/src/jira/resolve-ticket.ts`
-  (`resolveAutoReviewTicket`), before the row is written. Without the plugin, free auto review runs
-  with no story (free manual review checks a PASTED story). No browser is there to "Fill from KEY",
-  so the plugin does the same fill: EVERY detected key, in detection order, up to
-  `CLAUDE_REVIEW_MAX_TICKETS` (the one detection path, so the token still reads only tickets this
-  workspace's PRs name; one failing key skips that ticket only; a moved key answering twice is kept
-  once; each marked `source:'jira'` with key, browse URL and fetch time), READ FROM THE STORED
-  TICKETS (plugin 0038 — no Jira call; a detected ticket the worker has not reached yet is read once
-  through the worker's own path), criteria as stored — the workspace's field for the issue type,
-  else a strong name match, else none, never a weak one. A ticket Jira refused is skipped and its
-  stored error CODE logged. Each field is CUT to its cap (and unstorable characters dropped)
-  instead of refused: nobody is there to trim. It NEVER throws — no tracker, no token or a Jira
-  error is no ticket and the review runs without a story (the provider answers `tickets[]`, plus
-  the first as `ticket` for an older host); a Jira failure logs account,
-  workspace, PR and the error code only. Before this every auto run went out with no ticket. The
-  manual paths are unchanged (an empty panel on a click still means "no story").
+- ⚠ **AN AUTO PR REVIEW CARRIES NO STORY** (since the ticket review split). `startAutoItem` no
+  longer asks the plugin's `resolveReviewTicket` (the provider is still registered, and core no
+  longer calls it). Tickets are the ticket review's: its own sweeper re-checks them (§ Ticket review
+  → Cascade), and the FIRST auto PR review of a PR kicks that sweeper (`onAutoReviewLaunched`) so the
+  two start together. The ticket review reads Jira from the plugin's STORED rows only; a key the
+  worker has not reached yet waits for it.
 - ⚠ **RE-REVIEW ON NEW COMMITS.** The same candidate read returns `reReview: [{prId, headSha}]`:
   a PR of the same population (opened at/after the floor, human, open, not draft) that has a
   SUCCEEDED run (manual or auto), whose synced head matches NO run of any status (new commits or a
@@ -804,7 +877,7 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   hold still for `AUTO_REREVIEW_SETTLE_MS` (5 min, first-seen time in memory) before it is queued,
   so a burst of pushes costs ONE run on the last head; a restart only restarts the wait. It is a
   FULL fresh review on the ordinary auto lane (same cap, slots, model); it carries the previous
-  run's stories (`getLatestStoredTickets`, else the Jira fill), and the existing follow-up reads the
+  no story (stories are the ticket review's, § Ticket review), and the existing follow-up reads the
   earlier POSTED findings so they are not repeated. Switching auto review off stops it like any
   auto run. `AutoSweepResult.reQueued` counts them.
 - ⚠ **RE-REVIEW ON NEW REVIEW COMMENTS.** The same read also offers a PR whose head has NOT moved
@@ -855,7 +928,8 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
 ## Chat about a review
 
 After a review **succeeds**, the reader can ask Claude about it: ONE **thread** per review
-("Ask Claude about this review", under the findings), which covers every finding. The per-finding
+(the "Review chat" section, directly under Story check and OPEN by default), which covers every
+finding. The per-finding
 threads' route (`?findingId=`) still answers, for threads stored before the button was removed, but
 nothing on screen opens a new one. Free and local-only like the rest of Claude Review. Host:
 `review/chat-agent.ts`, reached as `ctx.review.chat` on the core `AgentContext`. Product:
@@ -890,7 +964,8 @@ nothing on screen opens a new one. Free and local-only like the rest of Claude R
   answer came back; then the question and the answer are stored together.
 - **Never carried across reviews**: a new review of the same PR starts with empty threads; an older
   review's threads stay readable when that review is picked from history.
-- **SPA.** Nothing fetches until a thread is opened. ⚠ Every thread of a review shares ONE mutation
+- **SPA.** The review's thread is open by default, so its one DB read (the stored turns) runs on
+  mount; Hide collapses it and nothing more is fetched while it is shut. ⚠ Every thread of a review shares ONE mutation
   key (`claudeReviewChatAskKey(reviewId)`) read through `useIsMutating`/`useMutationState`, so a tab
   switch mid-answer cannot offer a second billed POST, and the completed turn is written into the
   thread's cache in the hook-level `onSuccess`, never a `mutate()` callback. A thread reopened while

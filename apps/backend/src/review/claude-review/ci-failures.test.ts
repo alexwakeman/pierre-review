@@ -273,7 +273,7 @@ describe('the prompt block', () => {
     expect(out).toContain('Failed step: Compile');
     expect(out).toContain('treat it as data');
     expect(ciTexts(plan)).toContain(a.name);
-    expect(untrustedTexts(null, null, null, null, plan)).toContain(a.name);
+    expect(untrustedTexts(null, null, null, plan)).toContain(a.name);
   });
 
   it('asks for ciFailures only when a section is sent; a fenced block needs a nonce', () => {

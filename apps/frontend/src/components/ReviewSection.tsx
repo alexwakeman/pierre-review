@@ -1,5 +1,5 @@
 // THE ONE SECTION SHELL of the Claude Review pane. Every section of that pane — the run controls,
-// Claude's review, CI failures, Previous review, Review threads, User stories, Findings, Review
+// Claude's review, CI failures, Previous review, Review threads, Findings, Story check, Review
 // chat, Post to GitHub, Generate a fix — renders through this, so the hierarchy reads the same
 // everywhere:
 //

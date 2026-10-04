@@ -211,8 +211,8 @@ export const OUTSIDE_DIFF_NOTE =
 // then the finding text (the user's reword if any, else Claude's), and append a note
 // that it's outside the PR's diff. Any suggestion renders as a PLAIN code block — an
 // applyable ```suggestion only makes sense on a real diff line.
-// A finding with NO file (`path` blank — a user-story finding about the whole change, see
-// claude-review/ticket.ts `storyFindingsFrom`) is about the PR, not about a file outside it: it
+// A finding with NO file (`path` blank — a LEGACY user-story finding about the whole change, made
+// by PR reviews before the ticket review split off) is about the PR, not about a file outside it: it
 // carries neither the file line nor the outside-the-diff note.
 export function prLevelFindingBody(f: {
   path: string;

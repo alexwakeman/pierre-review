@@ -490,6 +490,16 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // Claude Review CHAT (`/api/claude-reviews/:reviewId/chat`), matched EXPLICITLY so a later edit
   // to the family rules below cannot quietly move it: every POST is one billed agent turn (`ai`),
   // the GET is a stored-history read.
+  // TICKET REVIEW (review/ticket-review/routes.ts), matched EXPLICITLY by exact path — it sits
+  // outside both families above and below, so the verb alone would park its reads on `ai`:
+  //   POST /api/ticket-reviews                          starts agent runs        → ai + ai_hourly
+  //   POST /api/ticket-reviews/states                   batched DB + plugin rows → read
+  //   POST /api/ticket-reviews/:id/items/:itemId/post   one GitHub comment       → github_write
+  //   GET  …/:id, …/:id/stream, /api/prs/:id/ticket-reviews                      → read
+  if (path === '/api/ticket-reviews' && mutating) return [TIERS.ai, TIERS.aiHourly];
+  if (path === '/api/ticket-reviews/states') return [TIERS.read];
+  if (mutating && /^\/api\/ticket-reviews\/\d+\/items\/\d+\/post$/.test(path)) return [TIERS.githubWrite];
+  if (path.startsWith('/api/ticket-reviews')) return [TIERS.read];
   if (/^\/api\/claude-reviews\/[^/]+\/chat$/.test(path)) {
     return mutating ? [TIERS.ai, TIERS.aiHourly] : [TIERS.read];
   }
@@ -680,6 +690,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // NOT `githubWrite` (it writes nothing to GitHub) and NOT the blanket `read` (it can
   // spend a GraphQL walk per call) — spelled EXACTLY, per this file's twice-documented
   // failure mode of a tier inherited instead of decided.
+  // POST /api/prs/resolve — the Review tab's PR references → local ids. DB-only (two
+  // account-scoped reads, no GitHub, no model), one batch per pane: `read`, DECIDED rather than
+  // inherited. EXACT `===` so no future `/api/prs/resolve-*` sibling can ride it.
+  if (mutating && path === '/api/prs/resolve') return [TIERS.read];
   if (mutating && /^\/api\/prs\/\d+\/refresh$/.test(path)) {
     return [TIERS.prDetail, TIERS.read];
   }

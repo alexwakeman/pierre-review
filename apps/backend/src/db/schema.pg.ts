@@ -40,6 +40,7 @@ import type {
   MyTurnSettings,
   ReviewRouteReason,
   StoredPrFile,
+  TicketAssessment,
 } from '@pierre-review/shared';
 
 export const accounts = pgTable('accounts', {
@@ -317,6 +318,8 @@ export const reviewRequestEvents = pgTable(
     reviewerKind: text('reviewer_kind', { enum: ['user', 'team', 'unknown'] }).notNull(),
     reviewerUserId: integer('reviewer_user_id').references(() => users.id),
     teamSlug: text('team_slug'),
+    // Who asked (migration 0068) — see the sqlite twin.
+    requesterUserId: integer('requester_user_id').references(() => users.id),
   },
   (t) => ({
     prNodeUx: uniqueIndex('review_request_events_pr_node').on(t.prId, t.githubNodeId),
@@ -961,6 +964,134 @@ export const claudeReviewChatMessages = pgTable(
       name: 'crcm_review_account_fk',
       columns: [t.reviewId, t.accountId],
       foreignColumns: [claudeReviews.id, claudeReviews.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- Ticket review (CORE; pg 0067 / sqlite 0080) ----
+// Twin of schema.sqlite.ts ticketReviews / ticketReviewMembers / ticketReviewItems, where the
+// contract lives.
+export const ticketReviews = pgTable(
+  'ticket_reviews',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    // 'jira:<apiRoot>#<KEY>' | 'manual:<prId>:<sha8>' (shared `parseTicketIdent`).
+    ticketIdent: text('ticket_ident').notNull(),
+    // Display only.
+    ticketKey: text('ticket_key'),
+    ticketTitle: text('ticket_title'),
+    // The story exactly as judged (fenced into the prompt). Null on a run refused before reading it.
+    ticketSnapshot: jsonb('ticket_snapshot').$type<ClaudeReviewTicket>(),
+    // sha256(title | description | acceptance criteria) of the snapshot.
+    ticketHash: text('ticket_hash'),
+    // sha256(TICKET_REVIEW_VERSION | ticket_hash | sorted "prId:headSha:state"). Null until prepared.
+    fingerprint: text('fingerprint'),
+    // How many open + merged PRs named the ticket when the run was prepared (a `too_many_prs`
+    // refusal states it).
+    prCount: integer('pr_count'),
+    originPrId: integer('origin_pr_id'),
+    trigger: text('trigger', { enum: ['manual', 'auto', 'cascade'] }).notNull().default('manual'),
+    status: text('status', {
+      enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
+    }).notNull(),
+    // Stored model id. No drizzle `enum:` for the same reason as claude_reviews.model.
+    model: text('model').notNull(),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    error: text('error'),
+    // TicketReviewRefusal — server-written, never the model's.
+    refused: text('refused'),
+    startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }),
+    completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    alignment: text('alignment'),
+    summary: text('summary'),
+    // The server-validated TicketAssessment. Null unless the run succeeded.
+    assessment: jsonb('assessment').$type<TicketAssessment>(),
+  },
+  (t) => ({
+    accountIdentIdx: index('tr_account_ident_created_idx').on(t.accountId, t.ticketIdent, t.createdAt),
+    // The per-workspace daily cap on automatic runs.
+    accountWsIdx: index('tr_account_ws_created_idx').on(t.accountId, t.workspaceId, t.createdAt),
+    // Parent key of the two children's composite tenancy FKs (`id` is the PK — never a lookup).
+    idAccountUx: uniqueIndex('ticket_reviews_id_account').on(t.id, t.accountId),
+  }),
+);
+
+export const ticketReviewMembers = pgTable(
+  'ticket_review_members',
+  {
+    id: serial('id').primaryKey(),
+    ticketReviewId: integer('ticket_review_id').notNull(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // Composite FK below (no single-column one).
+    prId: integer('pr_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    headSha: text('head_sha').notNull(),
+    prState: text('pr_state', { enum: ['open', 'merged'] }).notNull(),
+    // false = the server could not prepare a checkout (its criteria read `unclear`, never `not_met`).
+    checkedOut: boolean('checked_out').notNull().default(false),
+  },
+  (t) => ({
+    accountPrIdx: index('trm_account_pr_idx').on(t.accountId, t.prId),
+    reviewIdx: index('trm_review_idx').on(t.ticketReviewId),
+    reviewAccountFk: foreignKey({
+      name: 'trm_review_account_fk',
+      columns: [t.ticketReviewId, t.accountId],
+      foreignColumns: [ticketReviews.id, ticketReviews.accountId],
+    }).onDelete('cascade'),
+    prAccountFk: foreignKey({
+      name: 'trm_pr_account_fk',
+      columns: [t.prId, t.accountId],
+      foreignColumns: [pullRequests.id, pullRequests.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+export const ticketReviewItems = pgTable(
+  'ticket_review_items',
+  {
+    id: serial('id').primaryKey(),
+    ticketReviewId: integer('ticket_review_id').notNull(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // 'AC3' | 'M1'
+    ref: text('ref').notNull(),
+    status: text('status', { enum: ['not_met', 'partly_met', 'missing'] }).notNull(),
+    // The criterion's text / the missing item's title.
+    title: text('title').notNull(),
+    // Claude's explanation ('' when none).
+    body: text('body').notNull(),
+    ownerPrId: integer('owner_pr_id'),
+    path: text('path'),
+    line: integer('line'),
+    postedPrId: integer('posted_pr_id'),
+    postedCommentId: text('posted_comment_id'),
+    postedAt: timestamp('posted_at', { withTimezone: true, mode: 'date' }),
+    priorItemId: integer('prior_item_id'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    reviewIdx: index('tri_review_idx').on(t.ticketReviewId),
+    // AI Fix's "ticket items this PR owns".
+    accountOwnerIdx: index('tri_account_owner_idx').on(t.accountId, t.ownerPrId),
+    reviewAccountFk: foreignKey({
+      name: 'tri_review_account_fk',
+      columns: [t.ticketReviewId, t.accountId],
+      foreignColumns: [ticketReviews.id, ticketReviews.accountId],
     }).onDelete('cascade'),
   }),
 );

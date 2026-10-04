@@ -11,26 +11,19 @@ import type {
   ClaudeReview,
   ClaudeReviewListResponse,
   ClaudeReviewModel,
-  ClaudeReviewPrState,
   ClaudeReviewResponse,
   ClaudeReviewStatesResponse,
   ClaudeReviewStatusResponse,
   ClaudeReviewStreamEvent,
-  ClaudeReviewTicketInput,
   ClaudeReviewVerdict,
 } from '@pierre-review/shared';
-import {
-  CLAUDE_REVIEW_STATES_MAX_IDS,
-  DEFAULT_CLAUDE_REVIEW_MODEL,
-  checkClaudeReviewTickets,
-} from '@pierre-review/shared';
+import { CLAUDE_REVIEW_STATES_MAX_IDS, DEFAULT_CLAUDE_REVIEW_MODEL } from '@pierre-review/shared';
 import { api, ApiError } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
 import { useFilters } from '../store/filters.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
-import { anyReviewInFlight, resolveListTicket, type ListTicketResult } from '../lib/claudeReviewColumn.js';
+import { anyReviewInFlight } from '../lib/claudeReviewColumn.js';
 import { anyFixRunning } from '../lib/claudeAutoReview.js';
-import { ticketDraftFromStored, ticketsRequestFromCheck } from '../lib/claudeReviewFollowUp.js';
 
 export function useClaudeReview(prId: number | null) {
   return useQuery<ClaudeReviewResponse>({
@@ -152,11 +145,9 @@ export function useGenerateReview(prId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationKey: claudeReviewStartKey(prId),
-    mutationFn: (vars: {
-      model: ClaudeReviewModel;
-      // The optional user stories; undefined sends none.
-      tickets?: ClaudeReviewTicketInput[];
-    }) => api.generateClaudeReview(prId, vars.model, vars.tickets),
+    // No user story: the PR review looks at the code. Stories are the ticket review's
+    // (hooks/useTicketReview.ts), a separate run.
+    mutationFn: (vars: { model: ClaudeReviewModel }) => api.generateClaudeReview(prId, vars.model),
     onSuccess: () => afterReviewStarted(qc, prId),
     // 409 AutoReviewInProgress: the pane's reading was stale (it polls only while it already
     // knows of a queued hold). Re-read it, so the hold shows and its 5s poll starts — otherwise
@@ -190,47 +181,14 @@ export function useClaudeReviewStates(prIds: readonly number[], enabled: boolean
 }
 
 /**
- * Start a review from the Open PRs table: the default model, no picker, through
- * the SAME start route and queue as the tab. The user story is resolved ON CLICK only
- * (`resolveListTicket`): a re-review reuses the previous run's stored ticket, otherwise the PR's
- * first fillable Jira ticket is read from the stored tickets and filled the panel's way. The run starts either way; the
- * returned note says when it went without a story.
+ * Start a review from the Open PRs table: the default model, no picker, through the SAME start
+ * route and queue as the tab. No user story: stories are the ticket review's, a separate run.
  */
 export function useStartReviewFromList(prId: number) {
   const qc = useQueryClient();
-  return useMutation<ListTicketResult, Error, { previous: ClaudeReviewPrState | undefined }>({
+  return useMutation<unknown, Error, void>({
     mutationKey: claudeReviewStartKey(prId),
-    mutationFn: async ({ previous }) => {
-      // A re-review of a run that carried SEVERAL stories reuses them all, unchanged.
-      const prevTickets = previous?.tickets ?? [];
-      if (prevTickets.length > 1) {
-        const check = checkClaudeReviewTickets(prevTickets.map(ticketDraftFromStored));
-        const tickets = ticketsRequestFromCheck(check);
-        if (tickets != null) {
-          await api.generateClaudeReview(prId, DEFAULT_CLAUDE_REVIEW_MODEL, tickets);
-          return { ticket: tickets[0], note: null };
-        }
-      }
-      const story = await resolveListTicket({
-        previous: previous?.ticket ?? null,
-        // PrDetail carries the detected tickets; the SAME cache entry the PR pane reads.
-        loadTickets: async () =>
-          (
-            await qc.fetchQuery({
-              queryKey: ['pr', prId],
-              queryFn: () => api.pr(prId),
-              staleTime: Infinity,
-            })
-          ).tickets,
-        loadDetails: (key) => api.jiraTicket(prId, key),
-      });
-      await api.generateClaudeReview(
-        prId,
-        DEFAULT_CLAUDE_REVIEW_MODEL,
-        story.ticket != null ? [story.ticket] : undefined,
-      );
-      return story;
-    },
+    mutationFn: () => api.generateClaudeReview(prId, DEFAULT_CLAUDE_REVIEW_MODEL),
     onSuccess: () => afterReviewStarted(qc, prId),
     // 409 AutoReviewInProgress: the table's reading was stale (an auto review took the PR since
     // the last poll). RETURNED, so the mutation stays pending until the column re-reads and shows

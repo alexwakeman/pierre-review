@@ -149,6 +149,21 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .delete(schema.claudeReviewChatMessages)
       .where(eq(schema.claudeReviewChatMessages.accountId, accountId))
       .execute();
+    // Ticket reviews (migration 0080 / pg 0067), children first. The repo loop has normally taken
+    // the member rows (and with them every run that only those repos' PRs held); a run with a PR in
+    // a repo the loop could not reach, or one refused before it had members, is still here.
+    await tx
+      .delete(schema.ticketReviewItems)
+      .where(eq(schema.ticketReviewItems.accountId, accountId))
+      .execute();
+    await tx
+      .delete(schema.ticketReviewMembers)
+      .where(eq(schema.ticketReviewMembers.accountId, accountId))
+      .execute();
+    await tx
+      .delete(schema.ticketReviews)
+      .where(eq(schema.ticketReviews.accountId, accountId))
+      .execute();
     // AI Fix runs (patches of the user's code + the prompts they were built from). Core since
     // migration 0074 / pg 0061 — the plugin's erasure hook used to own them.
     await tx.delete(schema.aiFixes).where(eq(schema.aiFixes.accountId, accountId)).execute();
@@ -224,6 +239,19 @@ export function accountScopedTables(): {
       name: 'claudeReviewChatMessages',
       col: schema.claudeReviewChatMessages.accountId,
       table: schema.claudeReviewChatMessages,
+    },
+    // Ticket reviews (migration 0080 / pg 0067) — the runs, the PR sets they judged and the items
+    // a person may post. Each carries its own accountId; all three are erased explicitly above.
+    { name: 'ticketReviews', col: schema.ticketReviews.accountId, table: schema.ticketReviews },
+    {
+      name: 'ticketReviewMembers',
+      col: schema.ticketReviewMembers.accountId,
+      table: schema.ticketReviewMembers,
+    },
+    {
+      name: 'ticketReviewItems',
+      col: schema.ticketReviewItems.accountId,
+      table: schema.ticketReviewItems,
     },
     { name: 'aiUsage', col: aiUsage.accountId, table: aiUsage },
     // Adopted from the plugin (migration 0074 / pg 0061) with AI Fix's fixer. No FKs, so nothing

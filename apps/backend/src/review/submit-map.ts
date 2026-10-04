@@ -4,7 +4,6 @@ import type {
   ReviewFinding,
   ReviewFollowUpReport,
   ReviewThreadReport,
-  ReviewTicketReport,
 } from '../pro/contract.js';
 // ⚠ `import type` ONLY — the payload type is zod-inferred, and a value import would pull zod in
 // wherever this module is loaded. It is reached only from the dynamically imported agent anyway.
@@ -18,7 +17,6 @@ export interface MappedReview {
   findings: ReviewFinding[];
   // Passed through VERBATIM; the plugin validates coverage against what it sent.
   followUp?: ReviewFollowUpReport[];
-  tickets?: ReviewTicketReport[];
   threads?: ReviewThreadReport[];
   ciFailures?: ReviewCiFailureReport[];
 }
@@ -26,7 +24,7 @@ export interface MappedReview {
 /**
  * Turn the model's `submit_review` payload into the seam's result half: anchor every finding
  * against the noise-stripped diff (`anchored` / `fileInDiff` / `diffHunk`, the load-bearing
- * posting inputs) and carry the model's `priorRef`, `followUp` and `tickets` through untouched.
+ * posting inputs) and carry the model's `priorRef`, `followUp`, `threads` and `ciFailures` through untouched.
  * Pure — split out of agent.ts so it can be tested without the SDK.
  */
 export function mapSubmittedReview(payload: SubmitReviewPayload, strippedDiff: string): MappedReview {
@@ -57,7 +55,6 @@ export function mapSubmittedReview(payload: SubmitReviewPayload, strippedDiff: s
     verdict: payload.verdict,
     findings,
     ...(payload.followUp !== undefined ? { followUp: payload.followUp } : {}),
-    ...(payload.tickets !== undefined ? { tickets: payload.tickets } : {}),
     ...(payload.threads !== undefined ? { threads: payload.threads } : {}),
     ...(payload.ciFailures !== undefined ? { ciFailures: payload.ciFailures } : {}),
   };

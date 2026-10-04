@@ -5,8 +5,8 @@
 //      failed / cancelled → Review again.
 //   2. THE SORT RANK leads with the rows that still need a review.
 //   3. THE FILL: one helper (`fillDraftFromJira`) for the panel and the list.
-//   4. THE LIST'S USER STORY: a re-review reuses the stored ticket; else the first FILLABLE Jira
-//      ticket is filled the panel's way; the run starts EITHER WAY, with a note, never a throw.
+//   4. (retired) the list's user story: a PR review carries none now — stories are the ticket
+//      review's (lib/ticketReview.ts).
 //   5. THE WIRING: the panel is capability-gated and every panel control stops propagation.
 //   7. THE PANEL: its outcome accent, the CI-failure line and the threads-to-fix line, each null
 //      (render nothing) where the run did not look.
@@ -19,14 +19,11 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  CLAUDE_REVIEW_TICKET_LIMITS,
   type ClaudeReviewPrState,
   type JiraAcCandidate,
   type JiraTicketDetails,
-  type TicketRef,
 } from '@pierre-review/shared';
 import {
-  NO_STORY_NOTE,
   findingTotal,
   findingsRank,
   followUpTally,
@@ -34,7 +31,6 @@ import {
   severityPills,
   anyReviewInFlight,
   heldByAutoReview,
-  resolveListTicket,
   reviewCellFor,
   reviewCellRank,
   reviewTone,
@@ -232,13 +228,6 @@ const details = (over: Partial<JiraTicketDetails> = {}): JiraTicketDetails => ({
   omittedCandidates: 0,
   ...over,
 });
-const jira = (key: string, canFetchDetails: boolean): TicketRef => ({
-  key,
-  url: `https://acme.atlassian.net/browse/${key}`,
-  provider: 'jira',
-  canFetchDetails,
-});
-
 describe('fillDraftFromJira — the one fill', () => {
   it('replaces title + description and preselects the best strong match', () => {
     const r = fillDraftFromJira({ ...EMPTY_TICKET_DRAFT, acceptanceCriteria: 'old' }, details());
@@ -260,75 +249,6 @@ describe('fillDraftFromJira — the one fill', () => {
     );
     expect(none.chosen).toBe('');
     expect(none.draft.acceptanceCriteria).toBe('kept');
-  });
-});
-
-describe("resolveListTicket — the list's user story", () => {
-  const never = async (): Promise<never> => {
-    throw new Error('must not be called');
-  };
-
-  it('a re-review reuses the stored ticket and fetches nothing', async () => {
-    const r = await resolveListTicket({
-      previous: { title: 'Stored', description: null, acceptanceCriteria: '- a' },
-      loadTickets: never,
-      loadDetails: never,
-    });
-    expect(r).toEqual({ ticket: { title: 'Stored', acceptanceCriteria: '- a' }, note: null });
-  });
-
-  it('no stored ticket ⇒ the first FILLABLE Jira ticket, filled the panel way', async () => {
-    const asked: string[] = [];
-    const r = await resolveListTicket({
-      previous: { title: null, description: null, acceptanceCriteria: null },
-      loadTickets: async () => [jira('ACME-9', false), jira('ACME-1', true), jira('ACME-2', true)],
-      loadDetails: async (key) => {
-        asked.push(key);
-        // The stored ticket names the field the workspace chose for its issue type.
-        return details({ key, acField: { id: 'customfield_2', name: 'Notes' }, acFieldSource: 'setting' });
-      },
-    });
-    expect(asked).toEqual(['ACME-1']);
-    expect(r.note).toBeNull();
-    expect(r.ticket).toMatchObject({
-      title: 'Reset password',
-      description: 'As a user…',
-      acceptanceCriteria: 'notes',
-      source: 'jira',
-      key: 'ACME-1',
-    });
-  });
-
-  it('no ticket, no token, a failed lookup or a failed fetch ⇒ starts without, with a note', async () => {
-    const base = { previous: null, loadDetails: never };
-    expect(await resolveListTicket({ ...base, loadTickets: async () => null })).toEqual({
-      ticket: undefined,
-      note: NO_STORY_NOTE,
-    });
-    expect(await resolveListTicket({ ...base, loadTickets: async () => [jira('ACME-1', false)] })).toEqual({
-      ticket: undefined,
-      note: NO_STORY_NOTE,
-    });
-    expect((await resolveListTicket({ ...base, loadTickets: never })).ticket).toBeUndefined();
-    const failed = await resolveListTicket({
-      previous: null,
-      loadTickets: async () => [jira('ACME-1', true)],
-      loadDetails: async () => {
-        throw new Error('401');
-      },
-    });
-    expect(failed.ticket).toBeUndefined();
-    expect(failed.note).toContain('without a user story');
-  });
-
-  it('a Jira ticket over a cap ⇒ starts without it and says why', async () => {
-    const r = await resolveListTicket({
-      previous: null,
-      loadTickets: async () => [jira('ACME-1', true)],
-      loadDetails: async () => details({ title: 'x'.repeat(CLAUDE_REVIEW_TICKET_LIMITS.titleChars + 1) }),
-    });
-    expect(r.ticket).toBeUndefined();
-    expect(r.note).toMatch(/^Started without ACME-1: Title is/);
   });
 });
 

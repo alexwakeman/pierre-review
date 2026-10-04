@@ -77,6 +77,21 @@ export const PUSHED_COMMITS_SHOWN = 5;
 export const MY_TURN_REPLY_MAX_CHARS = 1500;
 
 /**
+ * The longest QUOTE a Pending card carries for its heading (`CardExcerpt.text`), in characters —
+ * the comment that @-mentioned you (`MyTurnCard.mentionExcerpt`) and the opening comment of an
+ * unanswered thread (`firstComment` on `own_thread` and `untouched_thread` cards). Plain text, cut
+ * on a word boundary and flagged `truncated`. The card clamps it further on screen; this bounds
+ * the wire, not the layout.
+ */
+export const CARD_EXCERPT_MAX_CHARS = 200;
+
+/**
+ * How many people a "new activity on your PR" card names (`MyTurnCard.newActorIds`), newest
+ * activity first. `newActorTotal` counts all of them, so "and N others" has its own denominator.
+ */
+export const YOUR_PR_NEW_ACTORS_SHOWN = 3;
+
+/**
  * THE ONE SENTENCE a Pending card's detail says while GitHub's merge queue holds its PR — on a
  * `merge` / `update_branch` card and your own ready PR in My turn (`mergeCardDetail`), on a
  * Dependencies card (`dependencyStateDetail`), and as the Do next row's `reason`, which the same

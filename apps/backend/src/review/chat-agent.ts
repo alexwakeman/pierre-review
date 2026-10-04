@@ -7,6 +7,7 @@ import type { ReviewChatArgs, ReviewChatResult } from '../pro/contract.js';
 import { config } from '../config.js';
 import { applyClaudeReviewAuth } from './auth.js';
 import { cleanupCloneCache, prepWorktree, removeWorktreeLocked } from './clone-manager.js';
+import { createPathGuard, pathGuardHook } from './path-guard.js';
 import { sdkModelOptions } from './model-options.js';
 import { estimateCostUsd } from './pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from './usage.js';
@@ -118,6 +119,10 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
         maxTurns,
         maxBudgetUsd: config.reviewChatBudgetUsd,
         settingSources: [],
+        // ⚠ The same PATH GUARD the review runs under (review/path-guard.ts): under
+        // bypassPermissions nothing else confines an absolute path, so the file tools may read
+        // cwd and nothing else.
+        hooks: { PreToolUse: [pathGuardHook(createPathGuard(cwd, []))] },
         abortController,
         ...claudeExecutableOptions(),
       },

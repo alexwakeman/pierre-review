@@ -1,4 +1,4 @@
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import type {
   AutomatedReviewerKind,
@@ -28,14 +28,47 @@ import type {
   UpdateBranchCard,
   User,
 } from '@pierre-review/shared';
-import type { MergeVerdictInfo, MyTurnDismissTarget } from '@pierre-review/shared';
+import type {
+  CardThreadComment,
+  ClaudeReviewPrState,
+  MergeVerdictInfo,
+  MyTurnDismissTarget,
+} from '@pierre-review/shared';
+import { useMe } from '../../hooks/useTriage.js';
+import { useBlastConfig } from '../../hooks/useBlastRadius.js';
+import { useLargePrThreshold } from '../../hooks/useLargePr.js';
+import type { PrDetailTab } from '../../store/filters.js';
+import {
+  compactAge,
+  factDropsNoReviews,
+  factShowsStanding,
+  isLikelyAddressed,
+  lastLandedLine,
+  pendingActionLine,
+  pendingCardEvent,
+  pendingCardPrLabel,
+  pendingFactPlan,
+  pendingHeading,
+  queueFact,
+  replyBlockShown,
+  repoRef,
+  restOfFailingChecks,
+  sharedRepoOwner,
+  type HeadingContext,
+  type NameOf,
+  type PendingActionLine,
+  type PendingFactPlan,
+} from '../../lib/pendingHeadings.js';
 import { usePr, useThread } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { useClaudeReviewStates } from '../../hooks/useClaudeReview.js';
 import {
   mergePrMutationKey,
   updateBranchMutationKey,
   useMergeOptions,
   useRequestReviewers,
+  useResolveThread,
   useReviewerRequestState,
 } from '../../hooks/usePrWrites.js';
 import { useQueryDataUpdatedAt } from '../../hooks/useMergeQueueStatus.js';
@@ -52,10 +85,12 @@ import { useFilters } from '../../store/filters.js';
 import {
   advisoryUrl,
   automatedReviewerMeta,
+  blastRadius,
   CHECK_STATE_META,
   CI_META,
   dateTime,
   indexUsers,
+  largePrFlag,
   MERGE_TONE_CLASS,
   mergeVerdict,
   relativeTime,
@@ -103,6 +138,25 @@ import {
   type PendingQueueBadge,
 } from './pendingLabels.js';
 import { CardPlacementInfo, PendingBoardContext, type PendingBoardInfo } from './PendingInfo.js';
+import {
+  ClaudeReviewActions,
+  ClaudeReviewExtras,
+  ClaudeReviewLine,
+  PENDING_AI_BUTTON,
+} from './PendingClaude.js';
+import {
+  CARD_CHIP,
+  CARD_NEUTRAL_CHIP,
+  CARD_PRIMARY_BUTTON,
+  CARD_QUIET_BUTTON,
+  CARD_SECONDARY_BUTTON,
+  CardSep,
+  LineDelta,
+  PrCardEventHeading,
+  PrCardFrame,
+  PrCardMeta,
+  filesLabel,
+} from './PrCardShell.js';
 
 // The attention-card list — the stalled-review / untouched-thread / reviewer-load / needs-a-reviewer
 // cards, with the full drill-down behaviour (click a card to open the PR / thread, inline thread
@@ -406,7 +460,7 @@ function BotVendorPill({
   // have no brand.
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium${
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium${
         meta == null ? ' bg-gray-500/10 text-gray-600 dark:text-gray-300' : ''
       }`}
       style={meta != null ? { ...vendorInk(meta.color), background: `${meta.color}1a` } : undefined}
@@ -680,11 +734,15 @@ function FailingCheckNames({ parts }: { parts: FailingChecksParts }): JSX.Elemen
  *  the server sends names — the failing checks: "CI failing: build, clippy, lint and 2 more". */
 export function CiStatusWithChecks({
   pr,
+  withNames = true,
 }: {
   pr: Pick<PrMetaFields, 'ciStatus' | 'failingChecks' | 'failingCheckTotal'>;
+  /** False where the card already lists the failing checks elsewhere (its heading and the red
+   *  names line under it) — the label alone, so no name is printed twice. */
+  withNames?: boolean;
 }): JSX.Element {
   const ci = pr.ciStatus ? CI_META[pr.ciStatus] : null;
-  const failing = isRedCi(pr.ciStatus)
+  const failing = withNames && isRedCi(pr.ciStatus)
     ? failingChecksParts(pr.failingChecks, pr.failingCheckTotal)
     : null;
   return (
@@ -708,13 +766,20 @@ export function CiStatusWithChecks({
   );
 }
 
-/** The `ci_failing` body's names line (a promoted red trunk reaches it through `asCiFailingCard`):
+/** The failing-check names line, under the chips of every card with a red CI reading (a promoted
+ *  red trunk reaches it through `asCiFailingCard`):
  *  the PR checks UI's failure mark (aria-hidden — the words carry it) and the names in red ink,
  *  12px. Nothing at all when no names are known — never "0 failing". */
 export function FailingChecksLine({
   card,
 }: {
-  card: Pick<CiFailingCard, 'ciStatus' | 'failingChecks' | 'failingCheckTotal'>;
+  // Any card with a CI reading: the `ci_failing` body and every PR card (whose `ciStatus` may be
+  // null — no checks — and then this renders nothing).
+  card: {
+    ciStatus: PrMetaFields['ciStatus'];
+    failingChecks?: readonly string[] | null;
+    failingCheckTotal?: number | null;
+  };
 }): JSX.Element | null {
   const failing = isRedCi(card.ciStatus)
     ? failingChecksParts(card.failingChecks, card.failingCheckTotal)
@@ -1005,10 +1070,13 @@ function MyTurnReplyBody({
   reply,
   openLabel,
   onOpen,
+  byline,
 }: {
   reply: MyTurnReply;
   openLabel: string;
   onOpen: () => void;
+  /** "David Buckley · 2 days ago" — who wrote it, above the words. */
+  byline?: ReactNode;
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
@@ -1019,6 +1087,7 @@ function MyTurnReplyBody({
   }, [reply.body, expanded]);
   return (
     <div className="mt-1.5 border-l-2 border-gray-300 pl-2 dark:border-gray-600" data-noactivate>
+      {byline != null && <div className="mb-0.5 text-[11px] text-gray-500 dark:text-gray-400">{byline}</div>}
       <div
         ref={boxRef}
         className={`text-[12px] text-gray-700 dark:text-gray-300 ${
@@ -1102,92 +1171,15 @@ function PushedCommitList({
   );
 }
 
-/**
- * THE REVIEW ROW — the standing on one line, the reviewers on the next, and NOTHING when the PR
- * has no review situation to report. Mounted on every PR-bearing card so a reader never has to
- * wonder whether a card is silent because nobody reviewed or because this kind doesn't say.
- *
- * ⚠ A standing carries a MARK as well as ink. Colour is never the only channel: the red and the
- * green are the same shape to about one reader in twelve.
- */
-function PrReviewRow({
-  pr,
-  usersById,
-}: {
-  pr: PrReviewFields;
-  usersById: Map<number, User>;
-}): JSX.Element | null {
-  const lead = pendingReviewLead(pr);
-  const chips = pendingReviewerChips(pr);
-  const showMore = !chips.complete && chips.moreCount > 0;
-  const hasChips = chips.humans.length > 0 || chips.bots != null || showMore;
-  if (lead == null && !hasChips) return null;
-  const leadMeta = lead?.standing != null ? REVIEW_STATE_META[lead.standing] : null;
-  const LeadMark = leadMeta?.icon ?? null;
-  return (
-    <>
-      {lead != null && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
-          <span
-            className={`inline-flex items-center gap-1 font-medium ${
-              leadMeta?.ink ?? 'text-gray-500 dark:text-gray-400'
-            }`}
-          >
-            {LeadMark != null && <LeadMark size={11} />}
-            {lead.ours}
-          </span>
-          {lead.github != null && (
-            <span
-              className="text-gray-500 dark:text-gray-400"
-              title="GitHub’s own review decision — what this repository’s rules say about the merge, which is a different question from who has reviewed."
-            >
-              {lead.github}
-            </span>
-          )}
-        </div>
-      )}
-      {hasChips && (
-        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
-          {chips.humans.map((r) => (
-            <ReviewerChip key={r.userId} reviewer={r} usersById={usersById} />
-          ))}
-          {chips.bots != null && (
-            <span
-              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium ${
-                REVIEW_STATE_META[chips.bots.standing].cls
-              }`}
-              title={chips.bots.title}
-            >
-              <BotIcon size={11} />
-              {chips.bots.label}
-            </span>
-          )}
-          {showMore && (
-            <span
-              className="text-gray-500 dark:text-gray-400"
-              title={`${chips.total} reviewers have a standing on this pull request. The other ${chips.moreCount} are past the cap, or have no GitHub account left to name.`}
-            >
-              {/* "+N more" only reads as an overflow when something precedes it. With every
-                  reviewer unnameable (deleted accounts — counted, and rightly so) the same number
-                  has to stand on its own feet. */}
-              {chips.humans.length > 0 || chips.bots != null
-                ? `+${chips.moreCount} more`
-                : `${chips.moreCount} reviewer${chips.moreCount === 1 ? '' : 's'}`}
-            </span>
-          )}
-        </div>
-      )}
-    </>
-  );
-}
-
 // Collapsible PR summary: the plain description (markdown) + the Pro AI summary with its own inline
 // Generate/Regenerate action (AiSummary self-gates on the prSummary capability). Lazy: the PR detail
 // is fetched only when expanded.
 export function InsightPrSummary({ prId }: { prId: number }): JSX.Element {
   const [open, setOpen] = useState(false);
   return (
-    <div className="mt-2">
+    // data-noactivate: on a Pending card the whole card opens the PR, and reading the summary must
+    // not navigate away.
+    <div className="mt-2" data-noactivate>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -1222,19 +1214,6 @@ function InsightPrSummaryBody({ prId }: { prId: number }): JSX.Element {
       <AiSummary pr={pr} />
     </div>
   );
-}
-
-// The untouched review thread rendered in full, exactly as the Feed does it — code anchor, every
-// reply, and the inline Reply + Resolve controls (ThreadCard). Fetched on demand by thread id.
-function InsightThread({ card }: { card: UntouchedThreadCard }): JSX.Element {
-  const { data: thread, isLoading } = useThread(card.threadId);
-  const { data: users } = useUsers();
-  const usersById = useMemo(() => indexUsers(users), [users]);
-  const prUrl = `https://github.com/${card.repoFullName}/pull/${card.prNumber}`;
-  if (isLoading) return <div className="px-1 py-2 text-xs text-gray-400">Loading conversation…</div>;
-  if (!thread)
-    return <div className="px-1 py-2 text-xs text-gray-400">Couldn’t load this conversation.</div>;
-  return <ThreadCard thread={thread} usersById={usersById} prUrl={prUrl} repoId={card.repoId} />;
 }
 
 // Suggested reviewers + rationale, each row with its OWN Assign that requests just that reviewer (the
@@ -1303,6 +1282,27 @@ function RoutingReviewerRow({
       data-testid="suggested-reviewer"
       className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400"
     >
+      {/* Assign FIRST, so the buttons stand in one column whatever each reason's length. */}
+      {body != null &&
+        (state.status === 'success' ? (
+          <span
+            role="status"
+            className="inline-flex min-w-[4.75rem] items-center gap-1 font-medium text-green-700 dark:text-green-400"
+          >
+            <CheckIcon size={11} className="inline-block align-[-0.1em]" /> Requested
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => request.mutate(body)}
+            disabled={state.status === 'pending'}
+            aria-label={state.status === 'pending' ? `Assigning ${who}` : `Assign ${who}`}
+            title={`Ask ${who} to review this PR on GitHub`}
+            className="min-w-[4.75rem] rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
+          >
+            {state.status === 'pending' ? 'Assigning…' : 'Assign'}
+          </button>
+        ))}
       {s.kind === 'team' ? (
         <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-medium">
           @{s.teamName}
@@ -1315,26 +1315,6 @@ function RoutingReviewerRow({
         </span>
       )}
       <span>{s.reason}</span>
-      {body != null &&
-        (state.status === 'success' ? (
-          <span
-            role="status"
-            className="inline-flex items-center gap-1 font-medium text-green-700 dark:text-green-400"
-          >
-            <CheckIcon size={11} className="inline-block align-[-0.1em]" /> Requested
-          </span>
-        ) : (
-          <button
-            type="button"
-            onClick={() => request.mutate(body)}
-            disabled={state.status === 'pending'}
-            aria-label={state.status === 'pending' ? `Assigning ${who}` : `Assign ${who}`}
-            title={`Ask ${who} to review this PR on GitHub`}
-            className="rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
-          >
-            {state.status === 'pending' ? 'Assigning…' : 'Assign'}
-          </button>
-        ))}
       {body != null && state.status === 'error' && (
         <span role="alert" className="basis-full text-[12px] text-red-600 dark:text-red-400">
           {state.error}
@@ -1344,8 +1324,8 @@ function RoutingReviewerRow({
   );
 }
 
-// The actions row of a my_turn card: the 'your_pr' hint (the one section whose clearing rule is not
-// "act on the PR"), then Dismiss.
+// Dismiss — the LAST item in a my_turn card's left-aligned action row, as quiet text. (The 'your_pr'
+// clearing rule, "clears when you open it", is a clause of that card's action line now.)
 //
 // ⚠ DISMISS IS NOT THE "Done" BUTTON THAT USED TO LIVE HERE. That one stored an acknowledgement
 // that never expired, so it hid work that had come back. This one sets the entry down only until
@@ -1354,36 +1334,74 @@ function RoutingReviewerRow({
 // you cannot act on now — or ever. It is keyed on the SUBJECT (the PR, or a red branch's repo),
 // never the card: the board lists one card per PR, and dismissing it must not surface the next.
 //
-// The 'your_pr' copy promises "as soon as you come back", not "on the next refresh", because
+// The 'your_pr' clause promises the card clears when you open the PR, not "on the next refresh", because
 // `markViewed.onSuccess` invalidates ['attention-cards'] + ['daily-brief'] at the prefix — the
 // board is already refetching while the user is still in the PR. If that invalidation is ever
 // dropped, this sentence becomes a lie with a 60s staleTime behind it.
-function MyTurnActions({ card }: { card: MyTurnCard | MyTurnTrunkCard }): JSX.Element {
+/**
+ * RESOLVE, ON THE CARD — the second half of "Reply or resolve". It resolves BY THREAD ID on the
+ * click and mounts nothing that fetches (the thread's conversation stays behind Details). Always
+ * offered, like the thread view's own Resolve: GitHub decides who may resolve, and a refusal is
+ * printed beside the button. On success the board refetches through `invalidateAfterPrWrite`, and
+ * the card leaves with the thread.
+ */
+function ResolveThreadButton({ prId, threadId }: { prId: number; threadId: number }): JSX.Element {
+  const resolve = useResolveThread();
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          resolve.mutate({ prId, threadId, resolved: true });
+        }}
+        disabled={resolve.isPending || resolve.isSuccess}
+        title="Mark this thread resolved on GitHub"
+        className={CARD_SECONDARY_BUTTON}
+      >
+        {resolve.isPending ? 'Resolving…' : resolve.isSuccess ? 'Resolved' : 'Resolve'}
+      </button>
+      {resolve.isError && (
+        <span className="text-[12px] text-red-600 dark:text-red-400">
+          {resolve.error instanceof Error && resolve.error.message !== ''
+            ? resolve.error.message
+            : 'Couldn’t resolve it.'}
+        </span>
+      )}
+    </>
+  );
+}
+
+/** GitHub's checks page for a pull request or a commit URL — the failing jobs, not the PR's
+ *  Overview. null for any other URL shape (the caller falls back to opening the PR). */
+export function checksPageHref(url: string | null | undefined): string | null {
+  if (url == null) return null;
+  const trimmed = url.trim().replace(/\/+$/, '');
+  if (!/^https:\/\/github\.com\/[^/]+\/[^/]+\/(?:pull\/\d+|commit\/[0-9a-f]{7,40})$/i.test(trimmed)) return null;
+  return safeExternalUrl(`${trimmed}/checks`) ?? null;
+}
+
+function DismissButton({ card }: { card: MyTurnCard | MyTurnTrunkCard }): JSX.Element {
   const target: MyTurnDismissTarget =
     card.reason === 'trunk_red' ? { kind: 'repo', id: card.repoId } : { kind: 'pr', id: card.prId };
   const label =
     card.reason === 'trunk_red' ? card.repoFullName : `${card.repoFullName} #${card.prNumber}`;
   const dismiss = useDismissMyTurn(target, label);
   return (
-    <div className="mt-2 flex flex-wrap items-baseline gap-2">
-      {card.reason === 'your_pr' && (
-        <span className="text-[11px] italic text-gray-500 dark:text-gray-400">
-          Opening the PR marks it seen — this card clears as soon as you come back.
-        </span>
-      )}
+    <>
       <button
         type="button"
         onClick={() => dismiss.mutate()}
         disabled={dismiss.isPending}
         title="Take this off My turn until something new happens on it"
-        className="ml-auto rounded px-1.5 py-0.5 text-[12px] text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:opacity-60 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+        className={CARD_QUIET_BUTTON}
       >
         {dismiss.isPending ? 'Dismissing…' : 'Dismiss'}
       </button>
       {dismiss.isError && (
         <span className="text-[12px] text-red-600 dark:text-red-400">Couldn’t dismiss it.</span>
       )}
-    </div>
+    </>
   );
 }
 
@@ -1500,9 +1518,10 @@ type MergeRowCard = MergeReadyCard | UpdateBranchCard | SecurityCard | Dependenc
  * THE CARD WHOSE MERGE ROW THIS CARD RENDERS, or null when it renders none. Pure, and it MIRRORS
  * the renderers below — `merge`/`update_branch` mount `PendingMergeActions` on themselves,
  * `DependencyActions` mounts it except on a person's flagged PR and on a conflict (the resolver
- * entry instead), and a My turn card mounts it on `asForwardCard` for your own ready PR. The header
- * chip reads it to know whether the row below will state the queue; were the two to disagree the
- * chip would be hidden over a row that says nothing, so `pendingCardControls.test.ts` pins it.
+ * entry instead), and a My turn card mounts it on `asForwardCard` for your own ready PR. The card's
+ * HEADING reads it to know whether its queue line comes from the row's newer-wins answer
+ * (`useMergeRowQueueLine`); were the two to disagree the heading and the row would describe two
+ * queues, so `pendingCardControls.test.ts` pins it.
  */
 export function mergeRowCardOf(card: InsightCard): MergeRowCard | null {
   switch (card.kind) {
@@ -1525,8 +1544,8 @@ export function mergeRowCardOf(card: InsightCard): MergeRowCard | null {
  * IS THE QUEUE HOLDING THIS CARD'S PR, as its merge row decides it: the card's synced word against a
  * live answer somebody already paid for (a click on this card, or the PR pane), NEWER WINS. Both
  * reads are the cache's: `false` keeps the merge-options query disabled, and the board's own
- * timestamp is read, not observed. ONE hook for the row and the header chip, so the two cannot
- * reach different answers from the same cache.
+ * timestamp is read, not observed. The row reads this and the card's heading reads the same
+ * resolution (`useMergeRowQueueLine`), so the two cannot reach different answers from one cache.
  */
 function useMergeRowQueued(card: MergeRowCard): { queued: boolean; cardsAt: number } {
   const workspaceId = useFilters((s) => s.workspaceId);
@@ -1544,69 +1563,6 @@ function useMergeRowQueued(card: MergeRowCard): { queued: boolean; cardsAt: numb
   return { queued, cardsAt };
 }
 
-/** Does this card's merge row print the queue's status line? Exactly when `PendingMergeActions`
- *  mounts `MergeControl` on a queued PR: the row shows at all, and no armed intent owns it. */
-function useMergeRowStatesQueue(card: MergeRowCard): boolean {
-  const gate = pendingMergeGate(card);
-  const armed = usePrArmedIntent(card.prId);
-  const { queued } = useMergeRowQueued(card);
-  return gate.show && armed == null && queued;
-}
-
-/** The queue chip's look — see `PendingQueueChip`. */
-function QueueChip({ queue }: { queue: PendingQueueBadge }): JSX.Element {
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium normal-case tracking-normal ${
-        queue.tone === 'bad'
-          ? 'bg-red-500/10 text-red-700 dark:text-red-300'
-          : 'bg-gray-500/10 text-gray-600 dark:text-gray-300'
-      }`}
-      title={queue.title}
-    >
-      {queue.tone === 'bad' ? <WarningIcon size={11} /> : <MergeIcon size={11} />}
-      {queue.label}
-    </span>
-  );
-}
-
-/**
- * GITHUB'S MERGE QUEUE, in the card's header — IDENTITY, not an action. It stays there for a
- * reader without push access (the merge row is hidden outright for them, and "it is already
- * landing" is if anything MORE useful to someone who has no button either way) and while an armed
- * intent owns the row.
- *
- * ⚠ BUT NOT TWICE. Where the card's merge row prints the queue's status line — the words that
- * replace the Merge button — this chip would say the same thing a few lines up, in the same words
- * (`QUEUE_STATE_LABEL` IS that line on the board). The row wins, because it is where the reader
- * looks for "can I merge this?" and it carries "Remove from queue". Decided by
- * `useMergeRowStatesQueue`, the row's own read, never a second guess.
- */
-function PendingQueueChip({ card }: { card: InsightCard }): JSX.Element | null {
-  // ⚠ PURE, AND OFF THE CARD'S OWN FIELDS. A `ci_failing` card does not extend `InsightPrRef` at
-  // all — its subject can be a repo's TRUNK, which is not a pull request and must never be
-  // described as one — and neither does `reviewer_load`. The `in` test is what keeps this a
-  // compiler-checked narrowing rather than a cast that would let one through.
-  const queue = 'inMergeQueue' in card ? pendingQueueBadge(card) : null;
-  if (queue == null) return null;
-  const rowCard = mergeRowCardOf(card);
-  return rowCard == null ? (
-    <QueueChip queue={queue} />
-  ) : (
-    <QueueChipBesideMergeRow card={rowCard} queue={queue} />
-  );
-}
-
-function QueueChipBesideMergeRow({
-  card,
-  queue,
-}: {
-  card: MergeRowCard;
-  queue: PendingQueueBadge;
-}): JSX.Element | null {
-  return useMergeRowStatesQueue(card) ? null : <QueueChip queue={queue} />;
-}
-
 /**
  * MERGE ACTIONS ON A PENDING CARD — the two FORWARD kinds and a dependency update, because those
  * are exactly the rows where the thing to do is "land it" — and your own ready PR moved into My
@@ -1619,8 +1575,9 @@ function QueueChipBesideMergeRow({
  *   • `MergeControl` is collapsed and its `useMergeOptions(prId, open)` is disabled until the
  *     reader opens it. This row's own `useMergeOptions(prId, false)` is a CACHE READ, never a
  *     fetch, and so is the board's `dataUpdatedAt` (`useQueryDataUpdatedAt`).
- *   • While GitHub's merge queue holds the PR, `MergeControl` IS the queue's status line and
- *     "Remove from queue", collapsed — the card's synced `inMergeQueue` says so with no request.
+ *   • While GitHub's merge queue holds the PR, `MergeControl` is "Remove from queue", collapsed,
+ *     and the card's HEADING is the queue's line — the card's synced `inMergeQueue` (or a newer
+ *     cached answer) says so with no request.
  *   • `MergeWhenReadyControl` is mounted with `eager={false}`, which is what that prop exists
  *     for: the armed chip + Cancel stay free, and the GitHub call waits for a click. (Its query
  *     key is shared with MergeControl's, so opening either warms the other for nothing.)
@@ -1663,16 +1620,16 @@ function PendingMergeActions({
   //
   // ⚠ STILL NOTHING FETCHES ON MOUNT. Both reads are cache reads. GitHub's native merge-queue
   // MEMBERSHIP and entry state now ride the card itself (`inMergeQueue` / `mergeQueueEntryState`,
-  // drawn by `PendingQueueChip` in the header and read by the gate below); its POSITION still
+  // stated by the card's heading and read by the gate below); its POSITION still
   // does not, because it is volatile and unsynced and the only route to it is the click-gated
   // merge-options call — fifty cards making that call is the ~200-upstream-calls-to-paint-a-board
   // failure this row is built to avoid.
   const merging = useIsMutating({ mutationKey: mergePrMutationKey(card.prId) }) > 0;
   const updating = useIsMutating({ mutationKey: updateBranchMutationKey(card.prId) }) > 0;
   const inFlight = merging ? 'Merging…' : updating ? 'Updating the branch…' : null;
-  // IS THE QUEUE HOLDING IT — `useMergeRowQueued`, the same read the card's header chip makes to
-  // decide whether this row already says so. The SAME three facts go to the two controls below,
-  // which resolve them the same way.
+  // IS THE QUEUE HOLDING IT — `useMergeRowQueued`, the same resolution the card's heading reads
+  // for its queue line. The SAME three facts go to the two controls below, which resolve them the
+  // same way.
   const { queued, cardsAt } = useMergeRowQueued(card);
   // ⚠ THE VERB AND THE VERDICT FOLLOW THE RESOLVED MEMBERSHIP, NOT THE CARD'S. When a NEWER cached
   // answer overrules the card (it says queued, the answer says it has left), `gate` was computed
@@ -1687,7 +1644,7 @@ function PendingMergeActions({
     // landed inside a/button/textarea/input/[data-noactivate] — a `<select>` (the merge-method
     // picker) is in none of those, so without this, choosing "Squash and merge" would navigate
     // away mid-choice.
-    <div className="mt-2 flex flex-wrap items-center gap-2" data-noactivate>
+    <div className="flex flex-wrap items-center gap-2" data-noactivate>
       {inFlight != null ? (
         // A write the reader started, still open. It OUTRANKS the armed headline: an armed intent
         // describes what will happen later, a live POST describes what is happening now, and the
@@ -1696,7 +1653,7 @@ function PendingMergeActions({
         <span className="text-[11px] font-medium text-gray-600 dark:text-gray-300">{inFlight}</span>
       ) : armed != null ? (
         // ONE SPELLING of where a live intent stands, shared with the AutoMergeBanner stack. The
-        // repo is not named because `PrLine` above already prints `owner/name #number`.
+        // repo is not named because the card's meta line already prints `#number · owner/name`.
         //
         // ⚠ EXCEPT ONCE THE WATCHER HAS QUEUED IT. The headline would read "In the merge queue"
         // beside the armed chip below, which says exactly that (with "Cancel & dequeue"), under a
@@ -1719,7 +1676,8 @@ function PendingMergeActions({
           {stopped.lastReason != null && <span className="ml-1">— {stopped.lastReason}</span>}
         </span>
       ) : queued ? (
-        // NOTHING HERE: `MergeControl` below IS the queue's status line while the queue holds it.
+        // NOTHING HERE: the card's heading is the queue's line, and `MergeControl` below is
+        // "Remove from queue".
         null
       ) : row.action == null && row.verdictLine ? (
         // No button, but never a silent row: the verdict IS the answer to "why can't I merge
@@ -1740,8 +1698,8 @@ function PendingMergeActions({
           ⚠ A QUEUED CARD STILL MOUNTS IT, AND IT IS NO LONGER A MERGE TRIGGER. While the queue
           holds the PR the control renders the queue's status line ("In the merge queue ·
           running checks") and "Remove from queue" — the PR pane's row without its live position,
-          from the card's own synced fields, with no click and no fetch (and the header chip steps
-          aside, `PendingQueueChip`). It used to mount a "Merge queue ▾"
+          from the card's own synced fields, with no click and no fetch (the line itself is the card's
+          heading, so the row passes `queueLine={false}`). It used to mount a "Merge queue ▾"
           trigger whose status text lived only in the expanded panel, so a reader who queued a PR
           and came back found a Merge button. Mounted on the RESOLVED word — the card's, or a newer
           cached answer's — so a queue the card has not heard about yet still gets its row, and a
@@ -1757,6 +1715,9 @@ function PendingMergeActions({
           // The board never refetches the merge-options answer, so its position would be an old
           // click's; the row says the chip's words, the same every time. The PR pane has it live.
           showQueuePosition={false}
+          // ⚠ The card's HEADING is the queue's line (`useMergeRowQueueLine`, the same newer-wins
+          // answer), so the row keeps only "Remove from queue" — one statement of one fact.
+          queueLine={false}
         />
       )}
       {/* ⚠ HIDDEN WHILE QUEUED, AND ONLY THEN — except when something is already armed, because
@@ -1831,7 +1792,7 @@ function PendingConflictActions({
   return (
     // `data-noactivate` for the same reason PendingMergeActions carries it: CardShell.onActivate
     // opens the PR unless the click landed in a/button/textarea/input/[data-noactivate].
-    <div className="mt-2 flex flex-wrap items-center gap-2" data-noactivate>
+    <div className="flex flex-wrap items-center gap-2" data-noactivate>
       <ResolveConflictsButton
         // A card only ever describes an OPEN pull request, and its kind is minted from the same
         // two columns `mergeVerdict` reads — so the verdict is a literal here rather than a second
@@ -1839,6 +1800,8 @@ function PendingConflictActions({
         state="open"
         verdict="conflicts"
         viewerCanPush={viewerCanPush}
+        // The card's ONE action, so it wears the card's primary style (layout B).
+        buttonClass={CARD_PRIMARY_BUTTON}
         target={{
           prId: card.prId,
           repoId: card.repoId,
@@ -2057,201 +2020,59 @@ function SecurityDetail({
   );
 }
 
-function CardShell({
-  card,
-  right,
-  openedAt,
-  clockAt,
-  onActivate,
-  children,
-  innerRef,
-  flash = false,
-  why,
-}: {
-  card: InsightCard;
-  right?: React.ReactNode;
-  /**
-   * THE PR'S OWN AGE, appended to `right` as "opened 3d". OPT-IN, one line per kind, and the two
-   * omissions are decisions:
-   *   • `stalled_review` already says "waiting 4d", and its server `ageHours` is computed from
-   *     `pull_requests.opened_at` — the SAME number. Passing this would print one figure twice
-   *     under two names.
-   *   • `untouched_thread` says "6h old" about the THREAD, which is the subject of that card.
-   * Derived, not passed pre-formatted, so the null degradation and the tooltip live in one place.
-   */
-  openedAt?: string | null;
-  /**
-   * THE INSTANT `right` MEASURES, when `right` is a clock — a my_turn card's `since`, a forward
-   * card's `lastCommitAt`. Passed so this shell can drop `right` on the rows where it and the age
-   * are THE SAME NUMBER; see `clockSaysMore` for the measurement and the argument.
-   *
-   * Omit it when `right` is not a clock (`reviewer_routing`'s "unassigned") — then `right` always
-   * renders and the age is simply appended.
-   */
-  clockAt?: string | null;
-  onActivate?: () => void;
-  children: React.ReactNode;
-  innerRef?: (el: HTMLLIElement | null) => void;
-  flash?: boolean;
-  /**
-   * ONE SENTENCE OF MODEL PROSE about why this row is worth doing now (Pro `workPlan`), or
-   * undefined on every free account and every un-narrated row.
-   *
-   * ⚠ THE LABELLED-APART RULE. A model-derived line and a code-derived figure may never share a
-   * line. Everything in `children` — chips, counts, `detail` — is DATA in neutral ink and renders
-   * whether or not anything was ever generated; this gets its own line, its own palette
-   * (`--ai-*`), its own type style and a SparkleIcon. The board is fully usable with every one of
-   * these absent, which is what makes the narration safe to sell separately.
-   */
-  why?: string;
-}): JSX.Element {
-  const sev = SEV[card.severity];
-  const personal = pendingCardIsPersonal(card);
-  // The Pro plan's line for this card, wherever the card sits — read from the board once rather
-  // than threaded through every kind's case (which is how most kinds ended up never showing it).
-  const board = useContext(PendingBoardContext);
-  const whyLine = why ?? board?.whyById?.get(card.id);
-  // "opened 3d", or null when this kind has no single open PR to date (ci_failing's trunk arm,
-  // reviewer_load) or the value is unreadable. See `openedAgeLabel`.
-  const age = openedAgeLabel(openedAt);
-  // ⚠ A CLOCK THAT AGREES WITH THE AGE IS THE AGE, SAID WORSE. When the caller named the instant
-  // `right` measures and it rounds to the same label as `openedAt`, the bare relative time is
-  // dropped and the NAMED age stands alone. `clockAt` absent ⇒ `right` is not a clock and always
-  // renders. See `clockSaysMore`.
-  const showRight = age == null || clockAt === undefined || clockSaysMore(clockAt, openedAt);
-  const onClick = onActivate
-    ? (e: React.MouseEvent): void => {
-        if ((e.target as HTMLElement).closest('a,button,textarea,input,[data-noactivate]')) return;
-        onActivate();
-      }
-    : undefined;
+/** The open-on-GitHub link, inline at the end of a card's action line. */
+function ExternalCardLink({ href, title }: { href: string | null; title: string }): JSX.Element | null {
+  const safe = href != null ? safeExternalUrl(href) : null;
+  if (safe == null) return null;
   return (
-    <li
-      ref={innerRef}
-      onClick={onClick}
-      className={`rounded-lg border border-l-4 border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900/40 ${sev.border}${
-        flash ? ' ring-2 ring-sky-400/70' : ''
-      }${onActivate ? ' cursor-pointer hover:bg-gray-50/70 dark:hover:bg-gray-900/60' : ''}`}
+    <a
+      href={safe}
+      target="_blank"
+      rel="noreferrer noopener"
+      onClick={(e) => e.stopPropagation()}
+      className="inline-flex shrink-0 items-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+      title={title}
+      aria-label={title}
     >
-      <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[11px]">
-        <span className={`inline-block h-1.5 w-1.5 rounded-full ${sev.dot}`} aria-hidden />
-        {/* ⚠ THE OWNERSHIP CLAIM, IN WORDS AND IN WEIGHT. `cardKindLabel` writes "Your turn" /
-            "In your repos" / the neutral kind; `pendingCardIsPersonal` decides whether the row is
-            drawn to outrank its neighbours. ONE resolver behind both, so a heavy label and a
-            neutral word can never end up on the same card. */}
-        <span
-          className={`uppercase tracking-wide ${
-            personal
-              ? 'font-bold text-gray-700 dark:text-gray-200'
-              : 'font-semibold text-gray-500 dark:text-gray-400'
-          }`}
-        >
-          {cardKindLabel(card)}
-        </span>
-        {/* GitHub's merge queue — IDENTITY, not an action; left to the merge row where that row
-            already prints it. See `PendingQueueChip`. */}
-        <PendingQueueChip card={card} />
-        {/* ⚠ EXPLANATION, NOT ARITHMETIC. `muted` says WHY this card carries the neutral label
-            instead of "Your turn" — the reader muted this repo (or its workspace) in Settings, and
-            a card that silently demoted itself is a smaller version of the "where did my work go"
-            failure the filtered empty state exists to prevent. Nothing counts it: every figure on
-            this board is folded from `relevance`, which has already absorbed the mute. */}
-        {card.kind === 'my_turn' && card.muted === true && (
-          <span
-            className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium normal-case tracking-normal text-gray-500 dark:text-gray-400"
-            title="Pending items from this repository are muted — they still appear here, but they don’t claim your turn and don’t notify you. Change it in Settings → Workspace."
-          >
-            muted
-          </span>
-        )}
-        {/* THE RIGHT-HAND META. `right` is the kind's OWN clock or status; the PR's age is
-            APPENDED after it, never in place of it. The separator lives HERE, not at the call
-            sites, so a kind that opts in cannot forget it and cannot double it. */}
-        <span className="ml-auto flex items-baseline gap-1.5 text-gray-400">
-          {showRight && right}
-          {age != null && (
-            <>
-              {showRight && right != null && (
-                <span aria-hidden className="decorative-mark text-gray-300 dark:text-gray-600">
-                  ·
-                </span>
-              )}
-              <span
-                className="whitespace-nowrap"
-                title={openedAt != null ? `Opened ${dateTime(openedAt)}` : undefined}
-              >
-                {age}
-              </span>
-            </>
-          )}
-        </span>
-        {/* WHY IS THIS CARD HERE, AND WHY HERE — the Pending board's per-card explanation. It
-            reads the board from context and renders nothing outside the Pending board. */}
-        <CardPlacementInfo card={card} />
-      </div>
-      {children}
-      {/* GENERATED. Its own line, never mixed with a chip — see the `why` prop's contract. */}
-      {whyLine != null && whyLine.trim() !== '' && (
-        <p className="mt-1.5 flex items-start gap-1 text-[11px] italic text-ai-ink">
-          <SparkleIcon size={11} className="mt-0.5 shrink-0 not-italic text-ai-signal" />
-          <span className="min-w-0">{whyLine}</span>
-        </p>
-      )}
-    </li>
+      <ExternalLinkIcon size={12} />
+    </a>
   );
 }
 
-function PrLine({
-  card,
-  onOpen,
-}: {
-  card:
-    | MyTurnCard
-    | StalledReviewCard
-    | UntouchedThreadCard
-    | ReviewerRoutingCard
-    | MergeReadyCard
-    | UpdateBranchCard
-    | SecurityCard
-    | DependencyBumpCard
-    // ⚠ NARROW ON PURPOSE — do not "simplify" this to `InsightCard`. `ci_failing` and
-    // `reviewer_load` do not carry the four fields this reads, and the narrow union is what keeps
-    // that a compile error rather than a blank row.
-    | ConflictsCard;
-  onOpen: () => void;
-}): JSX.Element {
-  return (
-    <div className="flex min-w-0 items-baseline gap-1.5 text-sm">
-      <button
-        type="button"
-        onClick={onOpen}
-        className="min-w-0 truncate text-left font-medium text-gray-800 hover:underline dark:text-gray-100"
-        title="Open this PR on its Overview tab"
-      >
-        <span className="text-gray-400">
-          {card.repoFullName} #{card.prNumber}
-        </span>{' '}
-        {card.prTitle}
-      </button>
-      <a
-        href={card.githubUrl}
-        target="_blank"
-        rel="noreferrer noopener"
-        onClick={(e) => e.stopPropagation()}
-        className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-        title="Open on GitHub"
-      >
-        <ExternalLinkIcon />
-      </a>
-    </div>
-  );
+/** The fields a PR card's title, action line and Details read. */
+type PrCardRef = Pick<
+  InsightPrRef,
+  | 'prId'
+  | 'prNumber'
+  | 'prTitle'
+  | 'repoId'
+  | 'repoFullName'
+  | 'githubUrl'
+  | 'authorId'
+  | 'automation'
+  | 'changedFiles'
+  | 'additions'
+  | 'deletions'
+  | 'codeLoc'
+  | 'codeLocIsLowerBound'
+  | 'blast'
+>;
+
+/**
+ * The state chip's text, or null when it would only repeat the kind label beside it — an
+ * `update_branch` card's kind label and its merge state are both "Behind trunk". Pure, so the test
+ * pins it. (The board no longer draws state chips; the rule stays for the label it guarded.)
+ */
+export function stateChipBesideKind(state: string | null, kindLabel: string): string | null {
+  if (state == null) return null;
+  return state.trim().toLowerCase() === kindLabel.trim().toLowerCase() ? null : state;
 }
 
 /**
  * THE LANDING PR'S BYLINE INPUT on a trunk card, or null when there is nothing to name: the
- * 'your_pr' arm (its "Your PR" chip already says whose it is) and a red head no PR resolved to (a
- * direct push — there is no PR, so there is no author to name, and "Deleted account" would be
- * false). Pure, so the card's one byline decision is pinned by a test.
+ * 'your_pr' arm (the heading already says it is yours) and a red head no PR resolved to (a direct
+ * push — there is no PR, so there is no author to name, and "Deleted account" would be false).
+ * Pure, so the card's one byline decision is pinned by a test.
  */
 export function landingPrByline(
   card: CiFailingCard,
@@ -2260,127 +2081,13 @@ export function landingPrByline(
   return { authorId: card.authorId, automation: card.automation };
 }
 
-// The body of a `ci_failing` card. The REPO is the subject on both arms (it is the one thing that
-// is always there), the PR is an optional second line, and the external link goes wherever the
-// server pointed it — the PR page on 'your_pr', the COMMIT page on 'trunk', where a trunk run's
-// checks actually live.
-function CiFailingBody({
-  card,
-  usersById,
-  onOpenPr,
-  chip,
-}: {
-  card: CiFailingCard;
-  usersById: Map<number, User>;
-  onOpenPr: (meta: PinnedPr, returnItemId?: string) => void;
-  /** The chip before the detail. Defaults to whose it is ("Your PR" / "Your repo"); a red default
-   *  branch promoted into My turn passes its type chip instead, because it may be a repo the reader
-   *  does not maintain — "Your repo" there would be false. */
-  chip?: string;
-}): JSX.Element {
-  const ci = CI_META[card.ciStatus] ?? null;
-  const href = safeExternalUrl(card.githubUrl);
-  const hasPr = card.prId != null && card.prNumber != null && card.prTitle != null;
-  const byline = landingPrByline(card);
-  return (
-    <>
-      <div className="flex min-w-0 items-baseline gap-1.5 text-sm">
-        <span className="min-w-0 truncate font-medium text-gray-800 dark:text-gray-100">
-          <span className="text-gray-400">{card.repoFullName}</span>{' '}
-          {card.arm === 'trunk' ? 'trunk is red' : 'your PR is red'}
-        </span>
-        {href != null && (
-          <a
-            href={href}
-            target="_blank"
-            rel="noreferrer noopener"
-            onClick={(e) => e.stopPropagation()}
-            className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-            title={card.arm === 'trunk' ? 'Open the commit on GitHub' : 'Open the PR on GitHub'}
-          >
-            <ExternalLinkIcon />
-          </a>
-        )}
-      </div>
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
-        <span className="inline-flex items-center gap-1" title={ci?.label ?? card.ciStatus}>
-          <span
-            className="inline-block h-2 w-2 rounded-full"
-            style={ci ? { background: ci.color } : { boxShadow: 'inset 0 0 0 1px #9ca3af' }}
-            aria-hidden
-          />
-          {ci?.label ?? card.ciStatus}
-        </span>
-        {card.headSha != null && <span className="font-mono">{card.headSha.slice(0, 7)}</span>}
-      </div>
-      {/* WHICH CHECKS FAILED — renders nothing when the server knows none (never "0 failing"). */}
-      <FailingChecksLine card={card} />
-      {hasPr && (
-        // ⚠ RENDERED ONLY WHEN THERE IS ONE. On the 'trunk' arm a missing PR is ORDINARY — ~11% of
-        // red heads are direct pushes to the default branch — so the card says trunk is red and
-        // simply names no PR, rather than showing an empty "landed by" row.
-        // ⚠ ON 'trunk', WHO OPENED THE LANDING PR AND WHO LANDED IT ARE TWO PEOPLE, so the row
-        // reads "#12 title · (opened by) Alice · landed by Bob" — the byline sits against the PR it
-        // names, and "landed by" introduces only the merger. (A red head after a Dependabot bump
-        // reads as exactly that.)
-        <div className="mt-1 flex min-w-0 flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-          {card.arm === 'your_pr' && <span>PR</span>}
-          <button
-            type="button"
-            onClick={() =>
-              onOpenPr(
-                metaFor(
-                  {
-                    prId: card.prId as number,
-                    prNumber: card.prNumber as number,
-                    prTitle: card.prTitle as string,
-                    repoFullName: card.repoFullName,
-                  },
-                  usersById,
-                ),
-                card.id,
-              )
-            }
-            className="min-w-0 truncate text-left hover:underline"
-            title="Open this PR on its Overview tab"
-          >
-            <span className="text-gray-400">#{card.prNumber}</span> {card.prTitle}
-          </button>
-          {byline != null && <PrByline pr={byline} usersById={usersById} repoId={card.repoId} />}
-          {card.arm === 'trunk' && card.mergedById != null && (
-            <>
-              <span>landed by</span>
-              <UserChip id={card.mergedById} usersById={usersById} />
-            </>
-          )}
-        </div>
-      )}
-      <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-        <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
-          {chip ?? (card.arm === 'your_pr' ? 'Your PR' : 'Your repo')}
-        </span>
-        <span className="min-w-0">{card.detail}</span>
-      </div>
-      {card.arm === 'trunk' && (
-        // ⚠ THE HONEST CAVEAT, ON THE CARD ITSELF. `viewerMerged` says the viewer LANDED the commit
-        // trunk is currently red at — it is NOT a claim that they broke the build. Trunk CI is
-        // non-monotone and we store no per-commit transition history, so nothing here can name the
-        // commit that turned it red; saying so on the card is cheaper than being asked.
-        <div className="mt-1 text-[11px] italic text-gray-400">
-          Trunk is red at this commit — not necessarily because of it.
-        </div>
-      )}
-    </>
-  );
-}
-
 // ── A PROMOTED CARD KEEPS ITS CONTROLS ────────────────────────────────────────────────────────
 //
 // Settings → My Turn can MOVE the reader's own work into My turn — a red build, a conflict, a PR
 // ready to land, an unanswered thread, a red default branch. The card moves; its actions must not
 // be lost on the way. So a promoted card carries its home kind's fields (`MyTurnCard.own`, or the
 // trunk card's own), and these adapters rebuild the home card's shape so the SAME components render
-// its controls: `PendingMergeActions`, `PendingConflictActions`, `CiFailingBody`. Nothing is
+// its controls: `PendingMergeActions`, `PendingConflictActions`, the trunk card's body. Nothing is
 // re-spelled, and nothing fetches on mount — those components' own click-gated rule holds.
 //
 // Pure, so `test/pendingCardControls.test.ts` pins them.
@@ -2445,7 +2152,7 @@ export function asCiFailingCard(t: MyTurnTrunkCard): CiFailingCard {
 }
 
 /** Opens the PR a card names, when it names one — the ci_failing card's rule (a trunk with no
- *  landing PR has nothing to open, and a click that does nothing is an inert card). */
+ *  landing PR has nothing to open). */
 function landingPrMeta(
   c: Pick<CiFailingCard, 'prId' | 'prNumber' | 'prTitle' | 'repoFullName'>,
   usersById: Map<number, User>,
@@ -2458,6 +2165,16 @@ function landingPrMeta(
 }
 
 /**
+ * The PR a Pending card is ABOUT, for the board's one batched Claude Review states request — or null
+ * when its subject is not a pull request: a red build (`ci_failing`, and a promoted red default
+ * branch — a REPOSITORY on the trunk arm) and a reviewer's load (a PERSON). `inMergeQueue` is an
+ * `InsightPrRef`-only field, so the `in` test is a compiler-checked narrowing.
+ */
+export function pendingCardPrId(card: InsightCard): number | null {
+  return 'inMergeQueue' in card ? card.prId : null;
+}
+
+/**
  * Does the "Everything else" divider render? Only when Do next holds some of the list but not all
  * of it — a tab whose every card is Do next has no "everything else" to introduce.
  *
@@ -2465,6 +2182,849 @@ function landingPrMeta(
  */
 export function shouldShowDivider(doNextCount: number | undefined, total: number): boolean {
   return doNextCount != null && doNextCount > 0 && doNextCount < total;
+}
+
+// ── LAYOUT B ("Balanced") ─────────────────────────────────────────────────────────────────────
+//
+// Every Pending card reads top to bottom in one order, everything LEFT-aligned:
+//
+//   1. THE HEADING — what happened, who did it, the quote, the time once (`pendingHeading`).
+//   2. THE ACTION LINE — [In your repos] [muted] **what to do** · where · on <PR title> ·
+//      repo#N ↗ ⓘ (`pendingActionLine`). The title opens the PR on Overview.
+//   3. THE PRO "why" LINE — model prose, labelled apart, directly under the action line.
+//   4. THE EVENT'S OWN CONTENT — the attributed reply, the pushed commits, the failing checks, the
+//      suggested reviewers, the advisory, the thread's opening comment, the last-landed PR.
+//   5. ONE FACT LINE chosen by the card's job (`pendingFactPlan`).
+//   6. CLAUDE AS ONE LINE — the verdict and counts, or on a red-build card the diagnosis.
+//   7. THE BUTTONS — primary · secondaries · Details · Dismiss, on the left.
+//
+// DETAILS (click, per-card local state) holds the rest: who reviewed, files and +/−, when it was
+// opened, the reach phrase, Claude's other pills, the PR summary and the thread's conversation —
+// the last two FETCHED ON EXPAND, which is why they live behind a click: NOTHING ON THE BOARD MAY
+// FETCH ON MOUNT.
+//
+// What is GONE, deliberately: the type chip (the heading says it), "Your turn" inside My turn (the
+// tab says it), the second and third clocks, the repeated red-CI statements, "GitHub: no review
+// required", and everything that sat on the right edge.
+
+/** What every card needs from the board — built once per render in `AttentionCards`. */
+interface PendingBoardApi {
+  usersById: Map<number, User>;
+  ctx: Omit<HeadingContext, 'queueLine'>;
+  /** Open the PR on one of its tabs (`overview` for the title). */
+  openPr: (card: PrCardRef & { id: string }, tab?: PrDetailTab) => void;
+  openMeta: (meta: PinnedPr, returnItemId?: string) => void;
+  openThreadOn: (card: InsightPrRef & { id: string }, threadId: number) => void;
+  openReview: (card: PrCardRef) => void;
+  openFix: (meta: PinnedPr) => void;
+  claudeOn: boolean;
+  claudeStates: Map<number, ClaudeReviewPrState>;
+  setCardRef: (id: string, el: HTMLLIElement | null) => void;
+  flashId: string | null;
+}
+
+/** "·" between action-line and fact-line items. */
+function joinWithSeps(items: ReactNode[]): ReactNode[] {
+  const shown = items.filter((p) => p != null && p !== false && p !== '');
+  return shown.flatMap((p, i) => (i === 0 ? [<Fragment key={i}>{p}</Fragment>] : [<CardSep key={`s${i}`} />, <Fragment key={i}>{p}</Fragment>]));
+}
+
+/** Line 2: what to do, and where. */
+function ActionLine({
+  card,
+  line,
+  pr,
+  external,
+}: {
+  card: InsightCard;
+  line: PendingActionLine;
+  pr: { title: string; ref: string; open: () => void } | null;
+  external?: { href: string | null; title: string };
+}): JSX.Element {
+  const items: ReactNode[] = [];
+  if (line.label != null) items.push(<span className="text-gray-600 dark:text-gray-400">{line.label}</span>);
+  if (line.muted) {
+    items.push(
+      // EXPLANATION, NOT ARITHMETIC — why this card carries the neutral label. Nothing counts it.
+      <span
+        className="text-gray-600 dark:text-gray-400"
+        title="Pending items from this repository are muted — they still appear here, but they don’t claim your turn and don’t notify you. Change it in Settings → Workspace."
+      >
+        muted
+      </span>,
+    );
+  }
+  if (line.verb != null) {
+    items.push(<span className="font-semibold text-gray-900 dark:text-gray-50">{line.verb}</span>);
+  }
+  for (const w of line.where) {
+    const href = w.href != null ? safeExternalUrl(w.href) : null;
+    const text = w.mono ? <span className="break-all font-mono text-[11px]">{w.text}</span> : w.text;
+    items.push(
+      href != null ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer noopener"
+          onClick={(e) => e.stopPropagation()}
+          className="text-gray-800 underline decoration-dotted underline-offset-2 hover:decoration-solid dark:text-gray-200"
+          title="Open the commit on GitHub"
+        >
+          {text}
+        </a>
+      ) : (
+        <span>{text}</span>
+      ),
+    );
+  }
+  if (pr != null && line.showTitle) {
+    items.push(
+      <span className="inline-flex min-w-0 max-w-full items-baseline gap-1">
+        {line.titleOn && <span className="shrink-0">on</span>}
+        <button
+          type="button"
+          onClick={pr.open}
+          className="min-w-0 truncate text-left text-gray-800 underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-200"
+          title={`${pr.title} — open the PR`}
+        >
+          {pr.title}
+        </button>
+      </span>,
+    );
+    items.push(<span className="font-mono text-[11px] text-gray-600 dark:text-gray-400">{pr.ref}</span>);
+  }
+  if (line.by != null) items.push(<span>by {line.by}</span>);
+  for (const a of line.after) items.push(<span>{a.text}</span>);
+  return (
+    <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] text-gray-700 dark:text-gray-300">
+      {joinWithSeps(items)}
+      <span className="inline-flex items-center gap-1">
+        {external != null && <ExternalCardLink href={external.href} title={external.title} />}
+        {/* WHY IS THIS CARD HERE — renders nothing outside the Pending board. */}
+        <CardPlacementInfo card={card} />
+      </span>
+    </div>
+  );
+}
+
+/** Line 5: the ONE fact line, chosen by the card's job. Nothing here fetches; the reach and size
+ *  verdicts come from the card's own signals through the one resolver each. */
+function FactLine({
+  card,
+  plan,
+  merging,
+  checksListed = false,
+}: {
+  card: InsightPrRef & InsightCard;
+  plan: PendingFactPlan;
+  /** The card's merge row states the queue (its heading does) — no queue word here. */
+  merging: boolean;
+  /** The heading and the red names line already list the failing checks: the CI label alone. */
+  checksListed?: boolean;
+}): JSX.Element | null {
+  const blastConfig = useBlastConfig();
+  const threshold = useLargePrThreshold();
+  if (plan === 'none') return null;
+  const items: ReactNode[] = [];
+  if (card.ciStatus != null) items.push(<CiStatusWithChecks pr={card} withNames={!checksListed} />);
+  const queue = !merging ? queueFact(card) : null;
+  if (queue != null) items.push(<span>{queue}</span>);
+  if (factShowsStanding(card)) {
+    const lead = pendingReviewLead(card);
+    if (lead != null) {
+      const meta = lead.standing != null ? REVIEW_STATE_META[lead.standing] : null;
+      const Mark = meta?.icon ?? null;
+      // "Nobody was asked to review this" already says nobody has reviewed it.
+      if (!(factDropsNoReviews(card) && lead.ours === 'No reviews yet')) {
+        items.push(
+          <span className={`inline-flex items-center gap-1 ${meta?.ink ?? ''}`}>
+            {Mark != null && <Mark size={11} />}
+            {lead.ours}
+          </span>,
+        );
+      }
+      // ⚠ "GitHub: no review required" is dropped — it is the ~90% case and says nothing to act on.
+      if (lead.github != null && lead.github !== 'GitHub: no review required') {
+        items.push(
+          <span title="GitHub’s own review decision — what this repository’s rules say about the merge.">
+            {lead.github}
+          </span>,
+        );
+      }
+    }
+  }
+  if (plan === 'review' || plan === 'merge') {
+    if (blastRadius(card, blastConfig) != null) items.push(<BlastRadiusChip pr={card} wordOnly className="text-[12px]" />);
+  }
+  if (plan === 'review' || plan === 'merge') {
+    if (largePrFlag(card, threshold) != null) items.push(<LargePrFlag pr={card} className="text-[12px]" />);
+  }
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] text-gray-600 dark:text-gray-400">
+      {joinWithSeps(items)}
+    </div>
+  );
+}
+
+/** The opening comment of a thread nobody answered, attributed — plain text, clamped. */
+function ThreadOpenerBlock({
+  comment,
+  name,
+}: {
+  comment: CardThreadComment;
+  name: string | null;
+}): JSX.Element {
+  return (
+    <div className="mt-1.5 border-l-2 border-gray-300 pl-2 dark:border-gray-600">
+      <div className="mb-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+        {name ?? 'Someone'} · <span title={dateTime(comment.at)}>{relativeTime(comment.at)}</span>
+      </div>
+      <p className="line-clamp-3 text-[12px] text-gray-700 [overflow-wrap:anywhere] dark:text-gray-300">
+        {comment.text}
+      </p>
+    </div>
+  );
+}
+
+/** The failing checks the heading did not already name — red mark, names, "and N more". */
+function MoreFailingChecks({
+  card,
+  headingNamedFirst = true,
+}: {
+  card: { failingChecks?: readonly string[] | null; failingCheckTotal?: number | null };
+  /** False where the heading names no check (a security card): every name goes here. */
+  headingNamedFirst?: boolean;
+}): JSX.Element | null {
+  const rest = restOfFailingChecks(card, { headingNamedFirst });
+  if (rest.names.length === 0 && rest.more === 0) return null;
+  const FailedIcon = CHECK_STATE_META.failure.icon;
+  return (
+    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px] text-red-700 dark:text-red-400">
+      <span className="sr-only">Also failing: </span>
+      {rest.names.map((n) => (
+        <span key={n} className="inline-flex min-w-0 items-center gap-1">
+          <FailedIcon size={12} className="shrink-0" />
+          <span className="min-w-0 truncate" title={n}>
+            {n}
+          </span>
+        </span>
+      ))}
+      {rest.more > 0 && <span className="text-gray-600 dark:text-gray-400">and {rest.more} more</span>}
+    </div>
+  );
+}
+
+/** The trunk card's lead: who landed the commit trunk is red at — and the caveat, inline. */
+function LastLandedLine({
+  card,
+  board,
+}: {
+  card: CiFailingCard;
+  board: PendingBoardApi;
+}): JSX.Element | null {
+  const line = lastLandedLine(card, board.ctx.nameOf);
+  const meta = landingPrMeta(card, board.usersById);
+  if (line == null || meta == null) return null;
+  return (
+    <p className="mt-1.5 min-w-0 text-[12px] text-gray-700 dark:text-gray-300">
+      Last landed:{' '}
+      <button
+        type="button"
+        onClick={() => board.openMeta(meta, card.id)}
+        className="text-left text-gray-900 underline-offset-2 hover:underline dark:text-gray-100"
+        title="Open this PR on its Overview tab"
+      >
+        {line.pr}
+      </button>
+      {line.by != null && <> by {line.by}</>}
+      {line.mergedBy != null && <>, merged by {line.mergedBy}</>}
+      {/* ⚠ THE HONEST CAVEAT. Trunk CI is non-monotone and nothing stored names the commit that
+          turned it red, so landing it is never a claim of breaking it. */}
+      <span className="text-gray-600 dark:text-gray-400"> — not necessarily the cause</span>
+    </p>
+  );
+}
+
+/** The reviewer chips, for Details: humans named with their standing, bots collapsed. */
+function ReviewerChipsRow({
+  pr,
+  usersById,
+}: {
+  pr: PrReviewFields;
+  usersById: Map<number, User>;
+}): JSX.Element | null {
+  const chips = pendingReviewerChips(pr);
+  const showMore = !chips.complete && chips.moreCount > 0;
+  if (chips.humans.length === 0 && chips.bots == null && !showMore) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+      {chips.humans.map((r) => (
+        <ReviewerChip key={r.userId} reviewer={r} usersById={usersById} />
+      ))}
+      {chips.bots != null && (
+        <span
+          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium ${
+            REVIEW_STATE_META[chips.bots.standing].cls
+          }`}
+          title={chips.bots.title}
+        >
+          <BotIcon size={11} />
+          {chips.bots.label}
+        </span>
+      )}
+      {showMore && (
+        <span
+          className="text-gray-500 dark:text-gray-400"
+          title={`${chips.total} reviewers have a standing on this pull request. The other ${chips.moreCount} are past the cap, or have no GitHub account left to name.`}
+        >
+          {chips.humans.length > 0 || chips.bots != null
+            ? `+${chips.moreCount} more`
+            : `${chips.moreCount} reviewer${chips.moreCount === 1 ? '' : 's'}`}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * DETAILS for a PR card — everything the first glance leaves out. Rendered ONLY while open, so the
+ * two parts that fetch (the PR summary, the thread's conversation) fetch on the CLICK, never on
+ * mount.
+ */
+function PrDetails({
+  card,
+  plan,
+  board,
+  threadId,
+}: {
+  card: InsightPrRef & InsightCard;
+  plan: PendingFactPlan;
+  board: PendingBoardApi;
+  threadId: number | null;
+}): JSX.Element {
+  const age = openedAgeLabel(card.openedAt);
+  const lead = pendingReviewLead(card);
+  // The standing goes here only where the fact line did not say it.
+  const standingHere = lead != null && (plan === 'none' || !factShowsStanding(card));
+  const leadMeta = lead?.standing != null ? REVIEW_STATE_META[lead.standing] : null;
+  const LeadMark = leadMeta?.icon ?? null;
+  return (
+    <div
+      className="mt-2 space-y-1.5 rounded-md border border-gray-200 bg-gray-50/70 p-2 dark:border-gray-800 dark:bg-gray-900/60"
+      data-noactivate
+    >
+      {standingHere && lead != null && (
+        <div className={`inline-flex items-center gap-1 text-[12px] font-medium ${leadMeta?.ink ?? 'text-gray-600 dark:text-gray-400'}`}>
+          {LeadMark != null && <LeadMark size={11} />}
+          {lead.ours}
+          {lead.github != null && lead.github !== 'GitHub: no review required' && (
+            <span className="ml-1 font-normal text-gray-600 dark:text-gray-400">{lead.github}</span>
+          )}
+        </div>
+      )}
+      <ReviewerChipsRow pr={card} usersById={board.usersById} />
+      <PrCardMeta
+        parts={[
+          <PrByline pr={{ authorId: card.authorId, automation: card.automation }} usersById={board.usersById} repoId={card.repoId} />,
+          age != null ? <span title={`Opened ${dateTime(card.openedAt)}`}>{age}</span> : null,
+          <span>{filesLabel(card.changedFiles)}</span>,
+        ]}
+        trailing={
+          <>
+            <LineDelta additions={card.additions} deletions={card.deletions} />
+            {plan !== 'review' && plan !== 'merge' && <LargePrFlag pr={card} />}
+            {/* The reach PHRASE — the fact line carries only the word. */}
+            <BlastRadiusChip pr={card} />
+          </>
+        }
+      />
+      {board.claudeOn && <ClaudeReviewExtras state={board.claudeStates.get(card.prId)} />}
+      {threadId != null && <InsightThreadById threadId={threadId} card={card} />}
+      <InsightPrSummaryBody prId={card.prId} />
+    </div>
+  );
+}
+
+/** A thread rendered in full (code anchor, replies, inline Reply + Resolve) — fetched on demand. */
+function InsightThreadById({
+  threadId,
+  card,
+}: {
+  threadId: number;
+  card: Pick<InsightPrRef, 'repoFullName' | 'prNumber' | 'repoId'>;
+}): JSX.Element {
+  const { data: thread, isLoading } = useThread(threadId);
+  const { data: users } = useUsers();
+  const usersById = useMemo(() => indexUsers(users), [users]);
+  const prUrl = `https://github.com/${card.repoFullName}/pull/${card.prNumber}`;
+  if (isLoading) return <div className="px-1 py-1 text-[12px] text-gray-500 dark:text-gray-400">Loading conversation…</div>;
+  if (!thread)
+    return <div className="px-1 py-1 text-[12px] text-gray-500 dark:text-gray-400">Couldn’t load this conversation.</div>;
+  return <ThreadCard thread={thread} usersById={usersById} prUrl={prUrl} repoId={card.repoId} />;
+}
+
+/** The merge row's queue line for the heading — the SAME newer-wins answer the row reads
+ *  (`useMergeRowQueued`), or undefined for a card with no merge row (its own synced field then
+ *  decides). Unconditional hooks: a card with no row reads a disabled, empty cache key. */
+function useMergeRowQueueLine(card: MergeRowCard | null): string | null | undefined {
+  const workspaceId = useFilters((s) => s.workspaceId);
+  const cardsAt = useQueryDataUpdatedAt(['attention-cards', workspaceKey(workspaceId)]);
+  const { data: cachedOptions, dataUpdatedAt: optionsAt } = useMergeOptions(card?.prId ?? 0, false);
+  if (card == null) return undefined;
+  const status = mergeQueueStatus(
+    { inMergeQueue: card.inMergeQueue, mergeQueueEntryState: card.mergeQueueEntryState, observedAt: cardsAt },
+    { info: cachedOptions?.mergeQueue, observedAt: optionsAt },
+    { withPosition: false },
+  );
+  return status?.line ?? null;
+}
+
+/** Is this card one of the review-group jobs, where "Review with Claude" is worth offering? */
+function offersClaudeStart(card: InsightCard): boolean {
+  if (card.kind === 'stalled_review' || card.kind === 'reviewer_routing') return true;
+  return (
+    card.kind === 'my_turn' &&
+    (card.reason === 'review_request' || card.reason === 'pushed_since' || card.reason === 'watched_repo_pr')
+  );
+}
+
+/** One Pending card, layout B. */
+function PendingCard({ card, board }: { card: InsightCard; board: PendingBoardApi }): JSX.Element {
+  const titleId = useId();
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const boardInfo = useContext(PendingBoardContext);
+  const whyLine = boardInfo?.whyById?.get(card.id);
+  const rowCard = mergeRowCardOf(card);
+  const queueLine = useMergeRowQueueLine(rowCard);
+  const ctx: HeadingContext = { ...board.ctx, ...(queueLine !== undefined ? { queueLine } : {}) };
+  const heading = pendingHeading(card, ctx);
+  const line = pendingActionLine(card, ctx);
+  const plan = pendingFactPlan(card);
+  const event = pendingCardEvent(card);
+  const ageText = heading.at != null ? compactAge(heading.at, ctx.now) : null;
+  const age = ageText != null ? (heading.atPrefix != null ? `${heading.atPrefix} ${ageText}` : ageText) : null;
+
+  // The PR the card is about (null for a repository or a person).
+  const prRef: (PrCardRef & InsightPrRef & { id: string }) | null =
+    'inMergeQueue' in card ? (card as PrCardRef & InsightPrRef & { id: string }) : null;
+  const trunk: CiFailingCard | null =
+    card.kind === 'ci_failing' ? card : card.kind === 'my_turn' && card.reason === 'trunk_red' ? asCiFailingCard(card) : null;
+  const landing = trunk != null ? landingPrMeta(trunk, board.usersById) : null;
+  // A red build on YOUR PR is a PR card even though it carries no `InsightPrRef`: its own fields
+  // name the PR, so the action line still says which one ("Fix the build · on <title> · repo#N").
+  const prLabel = pendingCardPrLabel(card, ctx.sharedOwner);
+  const prOpen =
+    prRef != null
+      ? () => board.openPr(prRef, 'overview')
+      : trunk?.arm === 'your_pr' && landing != null
+        ? () => board.openMeta(landing, card.id)
+        : null;
+  const prLine = prLabel != null && prOpen != null ? { ...prLabel, open: prOpen } : null;
+
+  // ── what a whole-card click opens: the EVENT ──
+  const externalHref = trunk != null ? safeExternalUrl(trunk.githubUrl) : null;
+  const activate = ((): (() => void) | undefined => {
+    switch (event.kind) {
+      case 'thread':
+        return prRef != null ? () => board.openThreadOn(prRef, event.threadId) : undefined;
+      case 'pr':
+        return prRef != null ? () => board.openPr(prRef, event.tab) : undefined;
+      case 'claude_review':
+        return prRef != null ? () => board.openReview(prRef) : undefined;
+      case 'landing_pr':
+        return landing != null ? () => board.openMeta(landing, card.id) : undefined;
+      case 'external': {
+        // The failing jobs (the checks page) when the URL has one, else the commit itself.
+        const href = (trunk != null ? checksPageHref(trunk.githubUrl) : null) ?? externalHref;
+        return href != null
+          ? () => {
+              window.open(href, '_blank', 'noopener,noreferrer');
+            }
+          : landing != null
+            ? () => board.openMeta(landing, card.id)
+            : undefined;
+      }
+      default:
+        return undefined;
+    }
+  })();
+
+  // ── the event's own content, and the action row ──
+  const content: ReactNode[] = [];
+  const buttons: ReactNode[] = [];
+  const primary = (label: string, onClick: (() => void) | undefined): void => {
+    if (onClick == null) return;
+    buttons.push(
+      <button
+        key="primary"
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
+        className={CARD_PRIMARY_BUTTON}
+      >
+        {label}
+      </button>,
+    );
+  };
+  // The primary as a link out — a red build's checks page, where the failing jobs are.
+  const primaryLink = (label: string, href: string): void => {
+    buttons.push(
+      <a
+        key="primary"
+        href={href}
+        target="_blank"
+        rel="noreferrer noopener"
+        onClick={(e) => e.stopPropagation()}
+        className={CARD_PRIMARY_BUTTON}
+      >
+        {label}
+        <ExternalLinkIcon size={11} />
+      </a>,
+    );
+  };
+  const resolveButton = (threadId: number | null | undefined): void => {
+    if (threadId == null || prRef == null) return;
+    buttons.push(<ResolveThreadButton key="resolve" prId={prRef.prId} threadId={threadId} />);
+  };
+  const nameOf = board.ctx.nameOf;
+  const replyByline = (reply: MyTurnReply): ReactNode => (
+    <>
+      {nameOf(reply.authorId) ?? 'Someone'} · <span title={dateTime(reply.at)}>{relativeTime(reply.at)}</span>
+    </>
+  );
+
+  switch (card.kind) {
+    case 'my_turn': {
+      if (card.reason === 'trunk_red') break;
+      const threadOpen =
+        card.threadId != null ? () => board.openThreadOn(card, card.threadId as number) : undefined;
+      if (card.reply != null && replyBlockShown(heading, card.reply)) {
+        content.push(
+          <MyTurnReplyBody
+            key="reply"
+            reply={card.reply}
+            byline={replyByline(card.reply)}
+            openLabel={card.threadId != null ? 'Open thread' : 'Open PR'}
+            onOpen={threadOpen ?? (() => board.openPr(card, 'activity'))}
+          />,
+        );
+      }
+      if (card.reason === 'pushed_since' && card.ball != null) {
+        content.push(<PushedCommitList key="commits" ball={card.ball} usersById={board.usersById} />);
+      }
+      if (card.reason === 'own_thread' && card.firstComment != null) {
+        content.push(
+          <ThreadOpenerBlock key="opener" comment={card.firstComment} name={nameOf(card.firstComment.authorId)} />,
+        );
+      }
+      if (card.reason === 'own_ci_red') content.push(<MoreFailingChecks key="ci" card={card} />);
+      switch (card.reason) {
+        case 'thread':
+          primary(isLikelyAddressed(card) ? 'Open thread' : 'Reply', threadOpen);
+          resolveButton(card.threadId);
+          break;
+        case 'thread_reply':
+        case 'own_thread':
+          primary('Reply', threadOpen);
+          resolveButton(card.threadId);
+          break;
+        case 'comment_reply':
+          primary('Answer', () => board.openPr(card, 'activity'));
+          break;
+        case 'mention':
+          primary('Read it', () => board.openPr(card, 'activity'));
+          break;
+        case 'review_request':
+          primary('Start review', () => board.openPr(card, 'changes'));
+          break;
+        case 'pushed_since':
+          primary('See the commits', () => board.openPr(card, 'activity'));
+          break;
+        case 'own_ci_red': {
+          const checks = checksPageHref(card.githubUrl);
+          if (checks != null) primaryLink('Open checks', checks);
+          else primary('Open PR', () => board.openPr(card, 'overview'));
+          break;
+        }
+        case 'claude_review':
+          primary('Read the review', () => board.openReview(card));
+          break;
+        case 'own_ready':
+          if (card.own?.kind === 'ready') {
+            buttons.push(<PendingMergeActions key="merge" card={asForwardCard(card, card.own)} />);
+          }
+          break;
+        case 'own_conflicts':
+          if (card.own?.kind === 'conflicts') {
+            buttons.push(<PendingConflictActions key="resolve" card={asConflictsCard(card, card.own)} />);
+          }
+          break;
+        case 'pr_approved':
+          primary('Open to merge', () => board.openPr(card, 'overview'));
+          break;
+        default:
+          primary('Open PR', () => board.openPr(card, 'overview'));
+      }
+      break;
+    }
+    case 'ci_failing':
+      break;
+    case 'stalled_review':
+      primary('Open PR', () => board.openPr(card, 'overview'));
+      break;
+    case 'reviewer_routing':
+      content.push(<RoutingReviewers key="routing" card={card} usersById={board.usersById} />);
+      primary('Open PR', () => board.openPr(card, 'overview'));
+      break;
+    case 'untouched_thread':
+      if (card.firstComment != null) {
+        content.push(
+          <ThreadOpenerBlock key="opener" comment={card.firstComment} name={nameOf(card.firstComment.authorId)} />,
+        );
+      }
+      primary('Reply', () => board.openThreadOn(card, card.threadId));
+      resolveButton(card.threadId);
+      break;
+    case 'merge':
+    case 'update_branch':
+      // ⚠ ONLY THE FORWARD KINDS (and your own ready PR above) get a merge row. Nothing in it
+      // fetches on mount — see `PendingMergeActions`.
+      buttons.push(<PendingMergeActions key="merge" card={card} />);
+      break;
+    case 'conflicts':
+      buttons.push(<PendingConflictActions key="resolve" card={card} />);
+      break;
+    case 'security':
+    case 'dependency_bump':
+      if (card.kind === 'security') {
+        content.push(
+          <SecurityDetail
+            key="security"
+            card={card}
+            usersById={board.usersById}
+            onOpenThread={(threadId) => board.openThreadOn(card, threadId)}
+          />,
+        );
+      }
+      if (card.depState === 'ci_red') {
+        // A security heading names no check, so every name goes here; a bump's heading names one.
+        content.push(<MoreFailingChecks key="ci" card={card} headingNamedFirst={card.kind !== 'security'} />);
+      }
+      if (card.kind === 'security' && !card.dependencyUpdate) {
+        primary('Open PR', () => board.openPr(card, 'overview'));
+      } else {
+        // The verb's own button where the merge row has none to give: "Review it" opens the
+        // changes; a red, blocked or unknown bump opens the PR. Merge when ready stays beside it.
+        if (card.depState === 'needs_review') primary('Start review', () => board.openPr(card, 'changes'));
+        else if (card.depState === 'ci_red') {
+          const checks = checksPageHref(card.githubUrl);
+          if (checks != null) primaryLink('Open checks', checks);
+          else primary('Open PR', () => board.openPr(card, 'overview'));
+        } else if (card.depState === 'blocked' || card.depState === 'unknown' || card.depState == null) {
+          primary('Open PR', () => board.openPr(card, 'overview'));
+        }
+        buttons.push(<DependencyActions key="deps" card={card} />);
+      }
+      break;
+    case 'reviewer_load':
+      if (card.pendingPrs.length > 0) {
+        content.push(
+          <ul key="prs" className="mt-1.5 space-y-0.5">
+            {card.pendingPrs.map((p) => (
+              <li key={p.prId} className="truncate text-[12px]">
+                <button
+                  type="button"
+                  onClick={() =>
+                    board.openMeta(
+                      {
+                        id: p.prId,
+                        number: p.prNumber,
+                        title: p.prTitle,
+                        repoFullName: p.repoFullName,
+                        authorLogin: null,
+                        authorDisplayName: null,
+                        authorAvatarUrl: null,
+                      },
+                      card.id,
+                    )
+                  }
+                  className="text-left text-gray-800 hover:underline dark:text-gray-200"
+                >
+                  {p.prTitle}{' '}
+                  <span className="font-mono text-[11px] text-gray-600 dark:text-gray-400">
+                    {repoRef(p.repoFullName, p.prNumber, ctx.sharedOwner)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>,
+        );
+      }
+      break;
+    default:
+      break;
+  }
+
+  // A red build: the rest of the failing checks, the landing PR, and its two buttons.
+  if (trunk != null) {
+    content.push(<MoreFailingChecks key="ci" card={trunk} />);
+    if (trunk.arm === 'trunk') {
+      content.push(<LastLandedLine key="landed" card={trunk} board={board} />);
+      // The commit's CHECKS page — the "at <sha>" link on the action line is the commit itself.
+      const checks = checksPageHref(trunk.githubUrl);
+      if (checks != null) primaryLink('Open checks', checks);
+      else if (externalHref != null) primaryLink('Open the commit', externalHref);
+      if (landing != null && trunk.prNumber != null) {
+        buttons.push(
+          <button
+            key="landing"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              board.openMeta(landing, card.id);
+            }}
+            className={CARD_SECONDARY_BUTTON}
+          >
+            Open #{trunk.prNumber}
+          </button>,
+        );
+      }
+    } else if (landing != null) {
+      const checks = checksPageHref(trunk.githubUrl);
+      if (checks != null) primaryLink('Open checks', checks);
+      else primary('Open PR', () => board.openMeta(landing, card.id));
+      // ⚠ AGENTIC, SO GATED ON `me.ai` (`board.claudeOn`) like every other Claude control: in cloud
+      // or with LIMN_AI_DISABLED the AI Fix routes do not exist.
+      if (board.claudeOn) {
+        buttons.push(
+          <button
+            key="fix"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              board.openFix(landing);
+            }}
+            className={PENDING_AI_BUTTON}
+          >
+            AI Fix
+          </button>,
+        );
+      }
+    }
+  }
+
+  // Claude: one line, its buttons in the row. Only on a PR card, only where agentic AI runs.
+  const claudeState = prRef != null ? board.claudeStates.get(prRef.prId) : undefined;
+  const isCiCard = card.kind === 'my_turn' && card.reason === 'own_ci_red';
+  const claudeLine =
+    board.claudeOn && prRef != null ? (
+      <ClaudeReviewLine
+        prId={prRef.prId}
+        state={claudeState}
+        omitVerdict={card.kind === 'my_turn' && card.reason === 'claude_review'}
+        ci={isCiCard}
+        onOpenReview={() => board.openReview(prRef)}
+      />
+    ) : null;
+  if (board.claudeOn && prRef != null) {
+    const claudeButtons = (
+      <ClaudeReviewActions
+        key="claude"
+        prId={prRef.prId}
+        state={claudeState}
+        onOpenReview={() => board.openReview(prRef)}
+        onOpenFix={() => board.openFix(metaFor(prRef, board.usersById))}
+        offerStart={offersClaudeStart(card)}
+        offerFix={isCiCard}
+        withOpen={!(card.kind === 'my_turn' && card.reason === 'claude_review')}
+        buttonClass={CARD_SECONDARY_BUTTON}
+      />
+    );
+    buttons.push(claudeButtons);
+  }
+
+  const hasDetails = prRef != null;
+  const threadIdForDetails =
+    card.kind === 'untouched_thread'
+      ? card.threadId
+      : card.kind === 'my_turn' && card.reason !== 'trunk_red'
+        ? card.threadId
+        : null;
+
+  return (
+    <PrCardFrame
+      innerRef={(el) => board.setCardRef(card.id, el)}
+      labelledBy={titleId}
+      onOpen={activate}
+      accentClass={`border-l-4 ${SEV[card.severity].border}`}
+      flash={board.flashId === card.id}
+    >
+      <PrCardEventHeading
+        id={titleId}
+        lead={heading.lead}
+        quote={heading.quote?.text ?? null}
+        age={age}
+        ageTitle={heading.at != null ? dateTime(heading.at) : undefined}
+      />
+      <ActionLine
+        card={card}
+        line={line}
+        pr={prLine}
+        external={
+          trunk != null
+            ? trunk.arm === 'trunk'
+              ? undefined
+              : { href: trunk.githubUrl, title: 'Open the PR on GitHub' }
+            : prRef != null
+              ? { href: prRef.githubUrl, title: 'Open on GitHub' }
+              : undefined
+        }
+      />
+      {/* GENERATED (Pro work plan) — its own line, palette and mark, never mixed with a fact. */}
+      {whyLine != null && whyLine.trim() !== '' && (
+        <p className="mt-1 flex items-start gap-1 text-[12px] italic text-ai-ink">
+          <SparkleIcon size={11} className="mt-0.5 shrink-0 not-italic text-ai-signal" />
+          <span className="min-w-0">{whyLine}</span>
+        </p>
+      )}
+      {content}
+      {prRef != null && (
+        <FactLine
+          card={prRef as InsightPrRef & InsightCard}
+          plan={plan}
+          merging={rowCard != null}
+          checksListed={
+            (card.kind === 'security' || card.kind === 'dependency_bump') && card.depState === 'ci_red'
+          }
+        />
+      )}
+      {claudeLine}
+      <div className="mt-2 flex flex-wrap items-center gap-2" data-noactivate>
+        {buttons}
+        {hasDetails && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setDetailsOpen((v) => !v);
+            }}
+            aria-expanded={detailsOpen}
+            className={CARD_QUIET_BUTTON}
+          >
+            Details
+            <ChevronIcon dir={detailsOpen ? 'down' : 'right'} size={10} />
+          </button>
+        )}
+        {card.kind === 'my_turn' && <DismissButton card={card} />}
+      </div>
+      {hasDetails && detailsOpen && prRef != null && (
+        <PrDetails card={prRef as InsightPrRef & InsightCard} plan={plan} board={board} threadId={threadIdForDetails} />
+      )}
+    </PrCardFrame>
+  );
 }
 
 export function AttentionCards({
@@ -2493,6 +3053,7 @@ export function AttentionCards({
 }): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const selectThread = useFilters((s) => s.selectThread);
+  const setPrDetailTab = useFilters((s) => s.setPrDetailTab);
   const usersById = useMemo(() => indexUsers(users), [users]);
 
   // Back-from-a-click flash — EXACT parity with the Feed (FeedView): a real browser Back pops a
@@ -2522,507 +3083,89 @@ export function AttentionCards({
     else rowRefs.current.delete(id);
   };
 
-  // The PR title opens the PR detail on its Overview tab; the card body opens "the event in
-  // question". For a thread that event is the thread itself — the PR detail opens on its Threads
-  // tab, deep-linked to the thread.
+  // The PR title opens the PR on its Overview tab; the card body opens "the event in question" —
+  // the thread, the commits, the review, the failing job.
   const open = (meta: PinnedPr, returnItemId?: string): void =>
     openPrDetailTab(meta, { fromActivity: true, returnItemId });
-  // Thread-shaped navigation, shared by the untouched-thread card and the thread-grained my_turn
-  // types — 'thread', 'thread_reply', 'own_thread' (the thread id is on a different field on each,
-  // so it's a parameter).
+  const openPr = (card: PrCardRef & { id: string }, tab: PrDetailTab = 'overview'): void => {
+    open(metaFor(card, usersById), card.id);
+    setPrDetailTab(card.prId, tab);
+  };
   const openThreadOn = (card: InsightPrRef & { id: string }, threadId: number): void => {
     openPrDetailTab(metaFor(card, usersById), { fromActivity: true, returnItemId: card.id });
     selectThread(card.prId, threadId);
   };
-  const openThread = (card: UntouchedThreadCard): void => openThreadOn(card, card.threadId);
 
-  // The VIEWER'S OWN inbox as cards — the same population GET /api/my-turn serves, and the list the
-  // daily brief's "N need your review or reply" line counts. Clicking opens the PR (or, for a
-  // thread-grained type, the thread on the PR's Threads tab); ACTING on the PR is what clears it.
-  // "Dismiss" (`MyTurnActions`) sets one down until something new happens on it — never a
-  // "mark as seen". ONE card per PR: the server's `onePerPr` already chose it.
-  //
-  // ⚠ Deliberately LEANER than the untouched-thread card: no embedded ThreadCard and no
-  // InsightPrSummary. This kind carries its own much larger cap (MY_TURN_CARD_CAP = 50 vs 15 for the
-  // survey kinds), so a per-card thread fetch would be up to 50 requests to paint one board — the
-  // `ThreadAssessment` failure mode. A thread card navigates to the thread instead.
-  //
-  // A PROMOTED card (`own`) adds its home kind's controls through the adapters above: the merge row
-  // for a PR ready to land, the resolver entry for a conflict, the bot pill on an unanswered thread.
-  const renderMyTurnPr = (card: MyTurnCard): JSX.Element => {
-    const own = card.own;
-    // Null on your own ready PR while GitHub's queue holds it — "Ready to merge" beside "In the
-    // merge queue…" is the contradiction the other two ready cards already drop.
-    const typeChip = myTurnTypeChip(card);
-    // Null for your own queued PR's "In the merge queue…" sentence — the queue chip or the merge
-    // row says it (`pendingCardDetail`).
-    const detail = pendingCardDetail(card);
-    const botPill = own?.kind === 'thread' && own.botKind != null ? own.botKind : null;
-    return (
-      <CardShell
-        key={card.id}
-        card={card}
-        innerRef={(el) => setCardRef(card.id, el)}
-        flash={flashId === card.id}
-        right={<span title={dateTime(card.since)}>{relativeTime(card.since)}</span>}
-        openedAt={card.openedAt}
-        // The ball's clock. It IS the open date on a PR nobody has touched since it appeared,
-        // which is most new review requests — see `clockSaysMore`.
-        clockAt={card.since}
-        onActivate={() =>
-          card.threadId != null &&
-          (card.reason === 'thread' || card.reason === 'thread_reply' || card.reason === 'own_thread')
-            ? openThreadOn(card, card.threadId)
-            : open(metaFor(card, usersById), card.id)
-        }
-      >
-        <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-        <PrMetaRow pr={card} usersById={usersById} />
-        <PrReviewRow pr={card} usersById={usersById} />
-        {(typeChip != null || detail != null || botPill != null) && (
-          <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-            {typeChip != null && (
-              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
-                {typeChip}
-              </span>
-            )}
-            {detail != null && <span className="min-w-0">{detail}</span>}
-            {botPill != null && <BotVendorPill kind={botPill} />}
-          </div>
-        )}
-        {/* DISPLAY ONLY, and both ride the attention payload — nothing here fetches. */}
-        {card.reply != null && (
-          <MyTurnReplyBody
-            reply={card.reply}
-            openLabel={card.threadId != null ? 'Open thread' : 'Open PR'}
-            onOpen={() =>
-              card.threadId != null
-                ? openThreadOn(card, card.threadId)
-                : open(metaFor(card, usersById), card.id)
-            }
-          />
-        )}
-        {card.reason === 'pushed_since' && card.ball != null && (
-          <PushedCommitList ball={card.ball} usersById={usersById} />
-        )}
-        {own?.kind === 'ready' && <PendingMergeActions card={asForwardCard(card, own)} />}
-        {own?.kind === 'conflicts' && <PendingConflictActions card={asConflictsCard(card, own)} />}
-        <MyTurnActions card={card} />
-      </CardShell>
+  // CLAUDE — ONLY where agentic AI runs (`me.ai.enabled`), and fed by ONE batched states request
+  // for every PR card on the board, never one per card. Without it: no line and no request.
+  const claudeOn = useAiCapabilities().enabled;
+  const openClaudeReview = useFilters((s) => s.openClaudeReview);
+  const openAiFix = useFilters((s) => s.openAiFix);
+  const claudePrIds = useMemo(
+    () =>
+      [...(people ?? []), ...cards]
+        .map(pendingCardPrId)
+        .filter((id): id is number => id != null),
+    [cards, people],
+  );
+  const { data: claudeData } = useClaudeReviewStates(claudePrIds, claudeOn);
+  const claudeStates = useMemo(
+    () => new Map((claudeData?.states ?? []).map((st) => [st.prId, st])),
+    [claudeData],
+  );
+
+  // Who the viewer is, for "Your PR" on a conflicts card — the App-root `['me']` cache, no fetch.
+  const myLogin = useMe().data?.user?.login ?? null;
+  const viewerId = useMemo(
+    () => (myLogin == null ? null : ((users ?? []).find((u) => u.githubLogin === myLogin)?.id ?? null)),
+    [users, myLogin],
+  );
+  // Drop the org from `repo#N` when every card on the board shares it.
+  const sharedOwner = useMemo(
+    () =>
+      sharedRepoOwner(
+        [...(people ?? []), ...cards].flatMap((c) =>
+          'repoFullName' in c ? [c.repoFullName] : c.kind === 'reviewer_load' ? c.pendingPrs.map((p) => p.repoFullName) : [],
+        ),
+      ),
+    [cards, people],
+  );
+  const nameOf = useMemo<NameOf>(
+    () => (id) => {
+      if (id == null) return null;
+      const u = usersById.get(id);
+      return u == null ? null : u.displayName || u.githubLogin;
+    },
+    [usersById],
+  );
+
+  const board: PendingBoardApi = {
+    usersById,
+    ctx: { nameOf, tab: explain?.tab ?? null, viewerId, sharedOwner },
+    openPr,
+    openMeta: open,
+    openThreadOn,
+    openReview: (pr) => openClaudeReview(metaFor(pr, usersById), { fromActivity: true }),
+    openFix: (meta) => openAiFix(meta),
+    claudeOn,
+    claudeStates,
+    setCardRef,
+    flashId,
+  };
+
+  // ⚠ The two bot kinds are filtered out upstream (they live in the free Bots console). A NEW
+  // InsightKind lands in `PendingCard`'s default arms and still renders a heading off its kind
+  // label — never nothing, which is how `my_turn` once shipped invisible while still counted.
+  const renderCard = (card: InsightCard): JSX.Element | null =>
+    card.kind === 'bot_signal' || card.kind === 'bot_only_review' ? null : (
+      <PendingCard key={card.id} card={card} board={board} />
     );
-  };
-
-  // A red default branch the reader added to My Turn. Its subject is a REPOSITORY, so it renders as
-  // the ci_failing trunk card it moved out of — the same body, the same landing-PR line — with its
-  // type chip where that card says whose it is.
-  const renderMyTurnTrunk = (card: MyTurnTrunkCard): JSX.Element => {
-    const landing = landingPrMeta(card, usersById);
-    return (
-      <CardShell
-        key={card.id}
-        card={card}
-        innerRef={(el) => setCardRef(card.id, el)}
-        flash={flashId === card.id}
-        // No "opened Nd": the subject is a branch, and the PR it names is the MERGED landing PR.
-        right={
-          card.observedAt != null ? (
-            <span title={dateTime(card.observedAt)}>{relativeTime(card.observedAt)}</span>
-          ) : undefined
-        }
-        onActivate={landing != null ? (): void => open(landing, card.id) : undefined}
-      >
-        <CiFailingBody
-          card={asCiFailingCard(card)}
-          usersById={usersById}
-          onOpenPr={open}
-          chip={myTurnReasonLabel(card)}
-        />
-        <MyTurnActions card={card} />
-      </CardShell>
-    );
-  };
-
-  const renderCard = (card: InsightCard): JSX.Element | null => {
-    switch (card.kind) {
-      // The VIEWER'S OWN inbox as cards — the same population GET /api/my-turn serves, and the
-      // list the daily brief's "N need your review or reply" line counts. Clicking opens the PR
-      // (or, for a thread, the thread on the PR's Threads tab); ACTING on the PR is what clears
-      // it, and "Dismiss" sets one down until something new happens on it.
-      //
-      // ⚠ Deliberately LEANER than the untouched-thread card: no embedded ThreadCard and no
-      // InsightPrSummary. This kind carries its own much larger cap (MY_TURN_CARD_CAP = 50 vs 15
-      // for the survey kinds), so a per-card thread fetch would be up to 50 requests to paint one
-      // board — the `ThreadAssessment` failure mode. A thread-reason card navigates to the thread
-      // instead.
-      case 'my_turn':
-        // ⚠ AN EXHAUSTIVE INNER SWITCH, ending in `never`. The outer `default: return null` below
-        // swallows a missing case in silence — the card vanishes while the tab still counts it,
-        // which is exactly how `my_turn` shipped invisible once. A new type fails to compile here.
-        switch (card.reason) {
-          case 'trunk_red':
-            return renderMyTurnTrunk(card);
-          case 'review_request':
-          case 'mention':
-          case 'thread':
-          case 'thread_reply':
-          case 'comment_reply':
-          case 'pushed_since':
-          case 'own_ci_red':
-          case 'own_conflicts':
-          case 'pr_approved':
-          case 'own_ready':
-          case 'your_pr':
-          case 'own_thread':
-          case 'claude_review':
-          case 'watched_repo_pr':
-            return renderMyTurnPr(card);
-          default: {
-            const _x: never = card;
-            return null;
-          }
-        }
-      // A red build the viewer is on the hook for. TWO ARMS on one kind, and every PR field is
-      // NULLABLE because the 'trunk' arm often has no PR at all (a direct push to the default
-      // branch, an association not observed yet) — so this renders the REPO as the subject and the
-      // PR as an optional line under it, rather than reusing PrLine (which requires all four).
-      case 'ci_failing': {
-        const landing = landingPrMeta(card, usersById);
-        return (
-          <CardShell
-            key={card.id}
-            card={card}
-            innerRef={(el) => setCardRef(card.id, el)}
-            flash={flashId === card.id}
-            // ⚠ NO "opened Nd" HERE, AND IT IS NOT AN OVERSIGHT. `CiFailingCard` deliberately does
-            // NOT extend `InsightPrRef` and carries no `openedAt`: on the 'trunk' arm the subject
-            // is a REPOSITORY, and the PR it names is the MERGED landing PR of the red head — its
-            // open date answers nothing anyone can act on. `observedAt` is the honest clock for
-            // both arms and the type comment says so.
-            right={
-              card.observedAt != null ? (
-                <span title={dateTime(card.observedAt)}>{relativeTime(card.observedAt)}</span>
-              ) : undefined
-            }
-            // Only the 'your_pr' arm has a PR to open by construction; a 'trunk' card without a
-            // landing PR has nothing to activate, and a whole-card click that did nothing would be
-            // the inert card this board exists to remove.
-            onActivate={landing != null ? (): void => open(landing, card.id) : undefined}
-          >
-            <CiFailingBody card={card} usersById={usersById} onOpenPr={open} />
-          </CardShell>
-        );
-      }
-      case 'stalled_review':
-        return (
-          <CardShell
-            key={card.id}
-            card={card}
-            innerRef={(el) => setCardRef(card.id, el)}
-            flash={flashId === card.id}
-            // ⚠ THIS IS ALREADY THE PR'S AGE. The server computes `ageHours` as
-            // `Math.round((now - pull_requests.opened_at) / 3_600_000)` (db/queries.ts, the
-            // stalled-review fold), so "waiting 3d" and "opened 3d" are the SAME number under two
-            // names. Adding the age here prints one figure twice.
-            right={`waiting ${ageLabel(card.ageHours)}`}
-            onActivate={() => open(metaFor(card, usersById), card.id)}
-          >
-            <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-            <PrMetaRow pr={card} usersById={usersById} />
-            <PrReviewRow pr={card} usersById={usersById} />
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-              <span>waiting on</span>
-              {card.requestedReviewerIds.length > 0 || card.requestedTeamNames.length > 0 ? (
-                <>
-                  {card.requestedReviewerIds.map((id) => (
-                    <UserChip key={id} id={id} usersById={usersById} />
-                  ))}
-                  {/* GitHub's own teams (display names), same chip grammar as RoutingReviewers */}
-                  {card.requestedTeamNames.map((name) => (
-                    <span
-                      key={`team:${name}`}
-                      className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-medium"
-                    >
-                      @{name}
-                    </span>
-                  ))}
-                </>
-              ) : (
-                <span className="italic">no reviewer requested</span>
-              )}
-            </div>
-            <InsightPrSummary prId={card.prId} />
-          </CardShell>
-        );
-      case 'untouched_thread':
-        return (
-          <CardShell
-            key={card.id}
-            card={card}
-            innerRef={(el) => setCardRef(card.id, el)}
-            flash={flashId === card.id}
-            // ⚠ A DIFFERENT CLOCK, AND THE RIGHT ONE. This card's `ageHours` is the THREAD's
-            // `created_at` age, not the PR's — the thread is the subject, and "6h old" is what the
-            // reader is being asked about. No PR age here.
-            right={`${ageLabel(card.ageHours)} old`}
-          >
-            {/* Only this header chrome navigates (→ the thread on the PR's Threads tab). The
-                embedded conversation + PR summary below are for reading/replying in place. */}
-            <div
-              className="-m-1 cursor-pointer rounded p-1 hover:bg-gray-50/70 dark:hover:bg-gray-900/60"
-              onClick={(e) => {
-                if ((e.target as HTMLElement).closest('a,button')) return;
-                openThread(card);
-              }}
-            >
-              <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-              <PrMetaRow pr={card} usersById={usersById} />
-              <PrReviewRow pr={card} usersById={usersById} />
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-mono">{card.path}</span>
-                <span>· no reply since</span>
-                {card.originalCommenterId != null && (
-                  <UserChip id={card.originalCommenterId} usersById={usersById} />
-                )}
-                {card.botKind != null && <BotVendorPill kind={card.botKind} />}
-              </div>
-            </div>
-            <div className="mt-2">
-              <InsightThread card={card} />
-            </div>
-            <InsightPrSummary prId={card.prId} />
-          </CardShell>
-        );
-      case 'reviewer_routing':
-        return (
-          <CardShell
-            key={card.id}
-            card={card}
-            innerRef={(el) => setCardRef(card.id, el)}
-            flash={flashId === card.id}
-            right="unassigned"
-            openedAt={card.openedAt}
-            onActivate={() => open(metaFor(card, usersById), card.id)}
-          >
-            <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-            <PrMetaRow pr={card} usersById={usersById} />
-            <PrReviewRow pr={card} usersById={usersById} />
-            {card.topPaths.length > 0 && (
-              <div className="mt-1 truncate text-[11px] text-gray-400">
-                touches <span className="font-mono">{card.topPaths.slice(0, 3).join(', ')}</span>
-              </div>
-            )}
-            <RoutingReviewers card={card} usersById={usersById} />
-            <InsightPrSummary prId={card.prId} />
-          </CardShell>
-        );
-      // ── the two FORWARD kinds, sharing one case ─────────────────────────────────────────
-      // ⚠ THIS CASE IS NOT OPTIONAL AND tsc DOES NOT DEMAND IT. The union widening forces
-      // `KIND_LABEL` and the server's `kindRank`, but the `default: return null` below swallows a
-      // missing case in silence — the card vanishes while the ranked head still names its id and
-      // the board comes up a row short. That is exactly how `my_turn` shipped invisible.
-      //
-      // These two are SELF-CLEARING: the card is gone the moment the PR merges or falls behind.
-      // No card kind on this board carries a "mark as seen" control any more — the dismissal
-      // table is deleted — but these two never should have, for a second reason: hiding a fact
-      // about GitHub's merge state would be hiding the world, not an item.
-      case 'merge':
-      case 'update_branch': {
-        const state = forwardStateChip(card);
-        // Null for "In the merge queue…" — the queue chip or the merge row says it.
-        const detail = pendingCardDetail(card);
-        return (
-          <CardShell
-            key={card.id}
-            card={card}
-            innerRef={(el) => setCardRef(card.id, el)}
-            flash={flashId === card.id}
-            right={
-              card.lastCommitAt != null ? (
-                <span title={dateTime(card.lastCommitAt)}>{relativeTime(card.lastCommitAt)}</span>
-              ) : undefined
-            }
-            openedAt={card.openedAt}
-            // The head commit's clock — the code that would land. 55% of open PRs have no commit
-            // after the one they opened with, so on those it IS the open date: see `clockSaysMore`.
-            clockAt={card.lastCommitAt}
-            onActivate={() => open(metaFor(card, usersById), card.id)}
-          >
-            <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-            <PrMetaRow pr={card} usersById={usersById} />
-            <PrReviewRow pr={card} usersById={usersById} />
-            {(state != null || detail != null) && (
-              <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                {state != null && (
-                  <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
-                    {state}
-                  </span>
-                )}
-                {/* CODE-WRITTEN, and the ONE spelling — `mergeCardDetail` on the server also writes
-                    the ranked row's `reason`. */}
-                {detail != null && <span className="min-w-0">{detail}</span>}
-              </div>
-            )}
-            {/* ⚠ ONLY THE TWO FORWARD KINDS GET THESE. They are the rows where the work IS the
-                landing; a "review or reply" card is not one click from merged and must not
-                pretend to be. Nothing here fetches on mount — see `PendingMergeActions`. */}
-            <PendingMergeActions card={card} />
-          </CardShell>
-        );
-      }
-      // A branch GitHub says conflicts with its base. ⚠ NOT A FORWARD KIND: it is something that is
-      // WRONG, it carries no merge affordance (see `PendingConflictActions`), and it must NOT be
-      // added to `onlyForward` in AttentionView — a conflicting PR IS waiting on someone.
-      //
-      // ⚠ AND, LIKE THE CASE ABOVE, tsc DOES NOT DEMAND IT. `default: return null` swallows a
-      // missing case: the card vanishes while the server still counts it.
-      case 'conflicts': {
-        const state = conflictsStateChip(card);
-        return (
-          <CardShell
-            key={card.id}
-            card={card}
-            innerRef={(el) => setCardRef(card.id, el)}
-            flash={flashId === card.id}
-            // ⚠ NO `right` OF ITS OWN, AND THE AGE IS THE WHOLE CLOCK. There is no stored
-            // "conflicting since", and `lastCommitAt` — the forward cards' clock — is not on this
-            // kind precisely because rendering it here would read as one. The shell's `right !=
-            // null` guard drops the separator, so the row reads a bare "opened 3d".
-            openedAt={card.openedAt}
-            onActivate={() => open(metaFor(card, usersById), card.id)}
-          >
-            <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-            <PrMetaRow pr={card} usersById={usersById} />
-            <PrReviewRow pr={card} usersById={usersById} />
-            <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-              {state != null && (
-                <span className="rounded bg-gray-500/10 px-1.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
-                  {state}
-                </span>
-              )}
-              <span className="min-w-0">{card.detail}</span>
-            </div>
-            <PendingConflictActions card={card} />
-          </CardShell>
-        );
-      }
-      // ── the Dependencies tab: a dependency-automation PR (ONE card, its merge actions on it) and
-      // a person's PR a security tool flagged for a known advisory ───────────────────────────
-      // ⚠ LIKE EVERY CASE HERE, tsc DOES NOT DEMAND IT: `default: return null` would swallow the
-      // kind, and the tab would count cards it never paints.
-      case 'security':
-      case 'dependency_bump': {
-        // Nothing while GitHub's queue holds it — the queue chip or the merge row says that
-        // (and `depStateSentence` leaves the server's queue sentence off for the same reason).
-        const stateChip = depStateChip(card);
-        const stateSentence = depStateSentence(card);
-        return (
-          <CardShell
-            key={card.id}
-            card={card}
-            innerRef={(el) => setCardRef(card.id, el)}
-            flash={flashId === card.id}
-            right={
-              card.lastCommitAt != null ? (
-                <span title={dateTime(card.lastCommitAt)}>{relativeTime(card.lastCommitAt)}</span>
-              ) : undefined
-            }
-            openedAt={card.openedAt}
-            // The head commit's clock, as on the forward cards: most bumps have no commit after
-            // the one they opened with, and then it IS the open date — see `clockSaysMore`.
-            clockAt={card.lastCommitAt}
-            onActivate={() => open(metaFor(card, usersById), card.id)}
-          >
-            <PrLine card={card} onOpen={() => open(metaFor(card, usersById), card.id)} />
-            <PrMetaRow pr={card} usersById={usersById} />
-            <PrReviewRow pr={card} usersById={usersById} />
-            {(stateChip != null || stateSentence != null) && (
-              <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-[12px] text-gray-600 dark:text-gray-300">
-                {stateChip != null && (
-                  <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 dark:text-gray-300">
-                    {stateChip}
-                  </span>
-                )}
-                {/* CODE-WRITTEN, time-free — the server's one spelling of the state. */}
-                {stateSentence != null && <span className="min-w-0">{stateSentence}</span>}
-              </div>
-            )}
-            {card.kind === 'security' && (
-              <SecurityDetail
-                card={card}
-                usersById={usersById}
-                onOpenThread={(threadId) => openThreadOn(card, threadId)}
-              />
-            )}
-            {/* Nothing here fetches on mount — see `DependencyActions`. */}
-            <DependencyActions card={card} />
-          </CardShell>
-        );
-      }
-      case 'reviewer_load':
-        return (
-          <CardShell
-            key={card.id}
-            card={card}
-            innerRef={(el) => setCardRef(card.id, el)}
-            flash={flashId === card.id}
-            // ⚠ NO "opened Nd". `ReviewerLoadCard` does not extend `InsightPrRef`: the subject is a
-            // PERSON, and `pendingPrs[]` is a LIST. There is no single PR to date.
-            right={`${card.reviewsThisSprint} review${card.reviewsThisSprint === 1 ? '' : 's'} this sprint`}
-          >
-            <div className="flex items-center gap-2 text-sm">
-              <UserChip id={card.reviewerId} usersById={usersById} />
-              <span className="font-semibold text-gray-800 dark:text-gray-100">
-                {card.pendingCount} pending review{card.pendingCount === 1 ? '' : 's'}
-              </span>
-            </div>
-            {card.pendingPrs.length > 0 && (
-              <ul className="mt-1.5 space-y-0.5">
-                {card.pendingPrs.map((p) => (
-                  <li key={p.prId} className="truncate text-[11px]">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        open(
-                          {
-                            id: p.prId,
-                            number: p.prNumber,
-                            title: p.prTitle,
-                            repoFullName: p.repoFullName,
-                            authorLogin: null,
-                            authorDisplayName: null,
-                            authorAvatarUrl: null,
-                          },
-                          card.id,
-                        )
-                      }
-                      className="text-left text-gray-500 hover:underline dark:text-gray-400"
-                    >
-                      <span className="text-gray-400">
-                        {p.repoFullName} #{p.prNumber}
-                      </span>{' '}
-                      {p.prTitle}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardShell>
-        );
-      // ⚠ The two bot kinds are filtered out upstream (they live in the free Bots console), so
-      // this arm is unreachable for them. It is ALSO where a NEW InsightKind lands, and it
-      // renders NOTHING and throws NOTHING — a kind the server emits and this switch has no case
-      // for simply vanishes, while the brief line that counts it keeps its number. That is
-      // exactly how `my_turn` shipped invisible; add a case whenever the union grows.
-      default:
-        return null;
-    }
-  };
 
   const split = doNextCount ?? 0;
   const showDivider = shouldShowDivider(split, cards.length);
   // Everything a card needs to explain its own position — built once per render, from the SAME
   // ordered array the list paints, so "3rd of 12" is the row the reader is on.
-  const board = useMemo<PendingBoardInfo | null>(() => {
+  const boardInfo = useMemo<PendingBoardInfo | null>(() => {
     if (explain == null) return null;
     const indexById = new Map(cards.map((c, i) => [c.id, i]));
     for (const c of people ?? []) indexById.set(c.id, -1);
@@ -3044,7 +3187,7 @@ export function AttentionCards({
   // `clearFlash()` unconditionally, so whichever ran second would clear a flash the first had
   // just claimed. So the people strip, Do next and Everything else are sections of ONE list.
   return (
-    <PendingBoardContext.Provider value={board}>
+    <PendingBoardContext.Provider value={boardInfo}>
       <ul className="space-y-2">
         {people != null && people.length > 0 && [
           heading('__people', 'Reviews waiting on people', 'not ranked'),

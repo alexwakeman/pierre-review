@@ -1,14 +1,13 @@
 import {
   CLAUDE_REVIEW_MAX_TICKETS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
+  TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW,
   type ActiveReview,
   type ClaudeReviewModel,
   type ClaudeReviewProgress,
   type ClaudeReviewStatusResponse,
   type ClaudeReviewStreamEvent,
-  type ClaudeReviewTicket,
   type ClaudeReviewTrigger,
-  type ClaudeTicketAssessment,
 } from '@pierre-review/shared';
 import type { CompareDiffResult } from '../../github/compare.js';
 import { config } from '../../config.js';
@@ -19,10 +18,12 @@ import { decideReviewMode } from './routing.js';
 import { offeredSpecialists } from './specialists.js';
 import {
   buildUserPrompt,
+  peerRef,
   pickReviewNonce,
   skipSummary,
   systemPromptForMode,
   untrustedTexts,
+  type PromptPeer,
 } from './prompts.js';
 import {
   linkReraisedFindings,
@@ -31,7 +32,6 @@ import {
   SINCE_PATCH_CHARS,
   type FollowUpPlan,
 } from './follow-up.js';
-import { reconcileTicketAssessments, sameHeadTicketCarry, storyFindingsFrom } from './ticket.js';
 import { planThreadReview, reconcileThreads, type ThreadPlan } from './threads.js';
 import {
   planCiReview,
@@ -42,7 +42,7 @@ import {
 } from './ci-failures.js';
 import {
   getLatestClaudeReview,
-  getLatestStoredTickets,
+  getReviewPeerContexts,
   getReviewPrContext,
   insertQueuedReview,
   isAutoReReviewSettled,
@@ -89,8 +89,6 @@ interface QueueItem {
   model: ClaudeReviewModel;
   headSha: string;
   prCtx: ReviewPrContext;
-  // The validated user stories (stored on the row at queue time); [] when none.
-  tickets: ClaudeReviewTicket[];
   trigger: ClaudeReviewTrigger;
 }
 
@@ -119,7 +117,40 @@ const autoPending: AutoItem[] = [];
 // against the ONE shared REVIEW_CONCURRENCY so the lane cannot overshoot it while its row is being
 // written. Still "queued" as far as the lock is concerned.
 const startingAuto = new Map<number, AutoItem>();
-const inFlight = (): number => runningItems.size + startingAuto.size;
+const inFlight = (): number => runningItems.size + startingAuto.size + slotPeer.inFlight();
+
+// ---- THE ONE CONCURRENCY BUDGET, shared with the TICKET review (ticket-review/manager.ts) ----
+// REVIEW_CONCURRENCY bounds PR reviews and ticket reviews TOGETHER: both are agent runs on the same
+// Claude credential and clone cache. The ticket lane registers its own in-flight count and pump
+// here; each side claims a slot SYNCHRONOUSLY (before its first await) and, when a run ends, pumps
+// the other side too. PR-review manual items go first; the ticket lane reads `reviewLaneWaiting`.
+let slotPeer: { inFlight: () => number; pump: () => void } = { inFlight: () => 0, pump: () => {} };
+export function registerReviewSlotPeer(peer: { inFlight: () => number; pump: () => void }): void {
+  slotPeer = peer;
+}
+/** Is a shared review slot free right now (PR reviews + ticket reviews in flight)? */
+export function reviewSlotFree(): boolean {
+  return inFlight() < REVIEW_CONCURRENCY;
+}
+/** What the PR-review lanes hold that has not started yet. */
+export function reviewLaneWaiting(): { manual: boolean; auto: boolean } {
+  return { manual: pending.length > 0, auto: autoPending.length > 0 };
+}
+/** Fill free slots from the PR-review lanes (the ticket lane calls this when one of its runs ends). */
+export function pumpReviewLane(): void {
+  pump();
+}
+/** May a run mutate process.env for the auth policy? Only at concurrency 1 (see APPLY_AUTH_ENV). */
+export const REVIEW_APPLY_AUTH_ENV = APPLY_AUTH_ENV;
+
+// An AUTO PR review just launched: the ticket review's sweeper wants to know, so a PR's tickets are
+// checked alongside its first auto review (ticket-review/sweep.ts). Fire-and-forget, never thrown.
+let autoLaunchHook: ((ctx: AgentContext, accountId: number, prId: number) => void) | null = null;
+export function onAutoReviewLaunched(
+  fn: ((ctx: AgentContext, accountId: number, prId: number) => void) | null,
+): void {
+  autoLaunchHook = fn;
+}
 
 /**
  * May a Claude Review CHAT turn mutate process.env for the auth policy right now? Only under the
@@ -192,9 +223,9 @@ export async function startReview(
   accountId: number,
   prId: number,
   model: ClaudeReviewModel,
-  // TRAILING optional: the route's `checkClaudeReviewTickets` result (already normalised).
-  tickets: ClaudeReviewTicket[] = [],
 ): Promise<StartReviewResult> {
+  // ⚠ NO STORIES. A PR review judges code, tests, threads and CI; a story is checked by the ticket
+  // review (review/ticket-review/), a separate run with its own row, claim and lane.
   if (!AGENTIC_AI_ENABLED) return { ok: false, reason: 'disabled' };
   // Hard agentic cap: refuse a run once the account's monthly agent credit allowance is spent
   // (metered per calendar month; local accounts are unmetered → never blocked).
@@ -220,7 +251,7 @@ export async function startReview(
       claimed.delete(prId);
       return { ok: false, reason: 'no_head' };
     }
-    reviewId = await insertQueuedReview(ctx, prId, prCtx.headSha, model, accountId, tickets, 'manual');
+    reviewId = await insertQueuedReview(ctx, prId, prCtx.headSha, model, accountId, [], 'manual');
   } catch (err) {
     claimed.delete(prId);
     throw err;
@@ -234,7 +265,6 @@ export async function startReview(
     model,
     headSha: prCtx.headSha,
     prCtx,
-    tickets,
     trigger: 'manual',
   };
   reviewIdByPr.set(prId, reviewId);
@@ -303,20 +333,6 @@ export function _autoLaneForTest(): Array<{ accountId: number; prId: number }> {
   return autoPending.map((a) => ({ accountId: a.accountId, prId: a.prId }));
 }
 
-// The auto run's user stories, from the optional Pro Jira provider (every detected ticket, up to
-// the cap; an older plugin answers one). Never throws.
-async function autoTicketsFor(accountId: number, prId: number): Promise<ClaudeReviewTicket[]> {
-  const resolve = getAgenticProviders().resolveReviewTicket;
-  if (!resolve) return [];
-  try {
-    const r = await resolve(accountId, prId);
-    const list = r.tickets ?? (r.ticket ? [r.ticket] : []);
-    return list.slice(0, CLAUDE_REVIEW_MAX_TICKETS);
-  } catch {
-    return [];
-  }
-}
-
 // A slot opened and the manual queue is empty: write the auto run's row and launch it. Mirrors
 // `startReview` step for step (credits → claim → PR context → row → launch), with the
 // trigger stamped 'auto'. Any refusal simply drops the item: the PR has no row, so the next tick
@@ -336,23 +352,8 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     // re-review, seen those comments) while the item waited.
     if (await isAutoReReviewSettled(ctx, prId, accountId, prCtx.headSha, a.commentsAtMs ?? null)) return;
     const model = DEFAULT_CLAUDE_REVIEW_MODEL;
-    // A RE-REVIEW (the PR was reviewed before, at an older head) reuses the stories that review
-    // carried — a reader may have typed them. Otherwise ⚠ TRY JIRA WHEN THE PLUGIN OFFERS IT: the
-    // browser fills the stories for a click; nobody is here to, so the Pro Jira provider
-    // (plugin-providers.ts) fetches the PR's detected tickets. Absent (no plugin, no tracker) or
-    // failing, the review runs without a story. The item is already `claimed`, so these awaits
-    // cannot double-start.
-    const prior = await getLatestStoredTickets(ctx, prId, accountId);
-    const tickets = prior.length > 0 ? prior : await autoTicketsFor(accountId, prId);
-    const reviewId = await insertQueuedReview(
-      ctx,
-      prId,
-      prCtx.headSha,
-      model,
-      accountId,
-      tickets,
-      'auto',
-    );
+    // No stories: the PR's tickets are checked by the ticket review's own sweep, never here.
+    const reviewId = await insertQueuedReview(ctx, prId, prCtx.headSha, model, accountId, [], 'auto');
     reviewIdByPr.set(prId, reviewId);
     startingAuto.delete(prId);
     launched = true;
@@ -364,9 +365,13 @@ async function startAutoItem(a: AutoItem): Promise<void> {
       model,
       headSha: prCtx.headSha,
       prCtx,
-      tickets,
       trigger: 'auto',
     });
+    try {
+      autoLaunchHook?.(ctx, accountId, prId);
+    } catch {
+      /* the ticket sweep's kick must never break the PR review */
+    }
   } catch (err) {
     ctx.log.error(
       { err },
@@ -377,6 +382,7 @@ async function startAutoItem(a: AutoItem): Promise<void> {
       startingAuto.delete(prId);
       claimed.delete(prId);
       pump();
+      slotPeer.pump();
     }
   }
 }
@@ -433,6 +439,7 @@ function launch(item: QueueItem): void {
         )
         .catch(() => emitReviewStream(prId, { type: 'done', status: 'failed', reviewId }));
       pump();
+      slotPeer.pump();
     });
 }
 
@@ -503,13 +510,8 @@ async function runPipeline(
     }
   }
 
-  // ---- what an earlier run already decided AT THIS HEAD (only new commits change it) ----
+  // ---- what an earlier run already decided (threads + CI; only new commits change them) ----
   const priorRun = await loadPriorRunForCarry(ctx, item.prId, item.accountId, reviewId);
-  const sameHeadPrior = priorRun && priorRun.headSha === item.headSha ? priorRun : null;
-  const carriedTickets = sameHeadTicketCarry(item.tickets, sameHeadPrior);
-  const allTicketsCarried = item.tickets.length > 0 && carriedTickets.every((a) => a != null);
-  // Every story already assessed at this head ⇒ none is sent: nothing in the code could change it.
-  const promptTickets = allTicketsCarried ? [] : item.tickets;
 
   // ---- the OTHER reviewers' open threads (people and review bots; never Limn's own) ----
   // A failure here costs the thread block only, never the review.
@@ -532,7 +534,10 @@ async function runPipeline(
   // ---- failed CI on the reviewed head (only when a check failed; never fatal) ----
   const ciPlan = await planCiForRun(item, prCtx, priorRun?.ciFailures ?? null);
 
-  const nonce = pickReviewNonce(untrustedTexts(plan, promptTickets, since, threadPlan, ciPlan));
+  // ---- other PRs on the same ticket (a DEEP review only; read-only, for cross-repo interactions) ----
+  const peers = mode === 'worktree' ? await reviewPeersFor(item) : [];
+
+  const nonce = pickReviewNonce(untrustedTexts(plan, since, threadPlan, ciPlan, peers));
 
   // A deep review offers the lead its specialist sub-agents (specialists.ts); a diff-only one none.
   const specialists = mode === 'worktree' ? offeredSpecialists(prep.changedFiles) : [];
@@ -549,10 +554,10 @@ async function runPipeline(
     diff: prep.promptDiff,
     mode,
     omittedFiles: prep.omittedFiles,
-    tickets: promptTickets,
     followUp: plan ? { plan, since } : null,
     threads: threadPlan,
     ci: ciPlan,
+    peers,
     nonce,
   });
 
@@ -567,6 +572,13 @@ async function runPipeline(
     prompt,
     strippedDiff: prep.strippedDiff,
     specialists,
+    peers: peers.map((p) => ({
+      ref: p.ref,
+      owner: p.owner,
+      name: p.name,
+      prNumber: p.number,
+      headSha: p.headSha,
+    })),
     applyAuthEnv: APPLY_AUTH_ENV,
     abortController: controller,
     onProgress: (p) =>
@@ -599,30 +611,13 @@ async function runPipeline(
       excludedFiles: prep.excludedFiles,
     });
   } else {
-    // Server-side validation of the model's follow-up + ticket reports: each ref once, unknown
-    // refs dropped, anything unreported 'not_checked' — never an invented 'addressed' / 'met'.
+    // Server-side validation of the model's follow-up report: each ref once, unknown refs
+    // dropped, anything unreported 'not_checked' — never an invented 'addressed'.
     const items = plan ? reconcileFollowUp(plan, res.followUp) : null;
-    // One assessment per ticket, index-aligned with the stored `ticket` array; a story already
-    // assessed at this head keeps that assessment.
-    const ticketAssessment: ClaudeTicketAssessment[] | null =
-      item.tickets.length === 0
-        ? null
-        : allTicketsCarried
-          ? carriedTickets.filter((a): a is ClaudeTicketAssessment => a != null)
-          : reconcileTicketAssessments(item.tickets, res.tickets, res.ticket).map(
-              (a, i) => carriedTickets[i] ?? a,
-            );
-    // Every unmet / partly met criterion and every "Not done" item becomes a FINDING of this run
-    // (deterministic, no model call), anchored against the same diff as the model's findings.
-    // A carried assessment re-creates its findings here; one re-raising an earlier POSTED story
-    // finding is linked to it (never a second row) by linkReraisedFindings.
-    const storyFindings = ticketAssessment
-      ? storyFindingsFrom(item.tickets, ticketAssessment, prep.strippedDiff)
-      : [];
     const findings =
       plan && items
-        ? linkReraisedFindings(plan, items, res.findings, new Set(prep.changedFiles), storyFindings)
-        : [...res.findings, ...storyFindings].map((f) => ({ ...f, priorFindingId: null }));
+        ? linkReraisedFindings(plan, items, res.findings, new Set(prep.changedFiles))
+        : res.findings.map((f) => ({ ...f, priorFindingId: null }));
     const threadAssessments = threadPlan ? reconcileThreads(threadPlan, res.threads) : null;
     // Each failing check exactly once: Claude's first report for its ref, a carried diagnosis, or
     // 'not_checked' with the server's reason — never an invented cause.
@@ -644,13 +639,71 @@ async function runPipeline(
               items,
             }
           : null,
-      ticketAssessment,
       threadAssessments,
       ciFailures,
     });
     return true;
   }
   return false;
+}
+
+/** A ticket peer ready for the prompt (`PromptPeer`) and for its checkout. */
+export type ReviewPeer = PromptPeer & { owner: string; name: string; headSha: string };
+
+/**
+ * The OTHER PRs on this PR's tickets, for a deep review's "Related PRs" block — via the optional
+ * Pro seam (`ticketsForPr` + `ticketMembers`; absent ⇒ none). Account-scoped and open-or-merged
+ * (`getReviewPeerContexts`); members may sit in another workspace on the same Jira site. Ranked
+ * open first, then the most tickets shared, then the newest; at most
+ * TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW. Never throws: peer context is optional, so a failure costs
+ * the block only. Exported for tests.
+ */
+export async function reviewPeersFor(
+  item: Pick<QueueItem, 'ctx' | 'accountId' | 'prId'>,
+): Promise<ReviewPeer[]> {
+  const { ctx, accountId, prId } = item;
+  const { ticketsForPr, ticketMembers } = getAgenticProviders();
+  if (!ticketsForPr || !ticketMembers) return [];
+  try {
+    const tickets = (await ticketsForPr(accountId, prId)).slice(0, CLAUDE_REVIEW_MAX_TICKETS);
+    const keysByPr = new Map<number, string[]>();
+    for (const t of tickets) {
+      const members = await ticketMembers(accountId, t.ident);
+      const key = t.ticket.key?.trim() || null;
+      for (const m of members) {
+        if (m.prId === prId) continue;
+        const keys = keysByPr.get(m.prId) ?? [];
+        if (key && !keys.includes(key)) keys.push(key);
+        keysByPr.set(m.prId, keys);
+      }
+    }
+    if (keysByPr.size === 0) return [];
+    const ctxs = await getReviewPeerContexts(ctx, accountId, [...keysByPr.keys()]);
+    const shared = (id: number): number => keysByPr.get(id)?.length ?? 0;
+    ctxs.sort(
+      (a, b) =>
+        Number(b.state === 'open') - Number(a.state === 'open') ||
+        shared(b.prId) - shared(a.prId) ||
+        b.prId - a.prId,
+    );
+    return ctxs.slice(0, TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW).map((p, i) => ({
+      ref: peerRef(i),
+      repoFullName: p.repoFullName,
+      number: p.number,
+      title: p.title,
+      state: p.state,
+      ticketKeys: keysByPr.get(p.prId) ?? [],
+      files: p.files,
+      owner: p.owner,
+      name: p.name,
+      headSha: p.headSha,
+    }));
+  } catch (err) {
+    ctx.log.warn(
+      `claude review pr ${prId}: related PRs not read: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return [];
+  }
 }
 
 /**

@@ -156,6 +156,46 @@ describe('deleteRepo', () => {
     });
   });
 
+  it('a ticket review spanning two repos loses only the deleted repo\'s member', async () => {
+    const t = await seedRepo('ticket');
+    const { ticketReviews: tr, ticketReviewMembers: trm, ticketReviewItems: tri } = schema;
+    const [run] = await db
+      .insert(tr)
+      .values({ accountId: 1, workspaceId: 1, ticketIdent: 'jira:x#T-1', status: 'succeeded', model: 'm' })
+      .returning()
+      .execute();
+    const [solo] = await db
+      .insert(tr)
+      .values({ accountId: 1, workspaceId: 1, ticketIdent: 'jira:x#T-2', status: 'succeeded', model: 'm' })
+      .returning()
+      .execute();
+    for (const [id, m] of [
+      [run.id, t],
+      [run.id, keep],
+      [solo.id, t],
+    ] as const) {
+      await db
+        .insert(trm)
+        .values({ ticketReviewId: id, accountId: 1, prId: m.prId, repoId: m.repoId, headSha: 'h', prState: 'open' })
+        .execute();
+    }
+    await db
+      .insert(tri)
+      .values({ ticketReviewId: run.id, accountId: 1, ref: 'M1', status: 'missing', title: 'x', body: '', ownerPrId: t.prId })
+      .execute();
+    await db
+      .insert(tri)
+      .values({ ticketReviewId: solo.id, accountId: 1, ref: 'M1', status: 'missing', title: 'x', body: '' })
+      .execute();
+    await expect(deleteRepo(t.repoId, 1)).resolves.toBe(true);
+    const members = await db.select().from(trm).where(eq(trm.ticketReviewId, run.id)).execute();
+    expect(members.map((m: any) => m.prId)).toEqual([keep.prId]);
+    const item = await db.select().from(tri).where(eq(tri.ticketReviewId, run.id)).execute();
+    expect(item[0].ownerPrId).toBeNull();
+    expect(await db.select().from(tr).where(eq(tr.id, solo.id)).execute()).toEqual([]);
+    expect(await db.select().from(tri).where(eq(tri.ticketReviewId, solo.id)).execute()).toEqual([]);
+  });
+
   it('returns false for a repo owned by a different account', async () => {
     expect(await deleteRepo(keep.repoId, 999)).toBe(false);
     expect((await counts(keep.repoId, keep.prId)).repos).toBe(1);

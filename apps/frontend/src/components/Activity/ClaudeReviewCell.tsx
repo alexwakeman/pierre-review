@@ -1,12 +1,11 @@
-import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
-import { TICKET_ALIGNMENT_LABEL, type ClaudeReviewPrState } from '@pierre-review/shared';
+import type { MouseEvent, ReactNode } from 'react';
+import type { ClaudeReviewPrState } from '@pierre-review/shared';
 import {
   isAutoReviewHoldError,
   useClaudeReviewStarting,
   useStartReviewFromList,
 } from '../../hooks/useClaudeReview.js';
 import {
-  ALIGNMENT_SHORT,
   ciDiagnosisLabel,
   findingTotal,
   followUpTally,
@@ -23,15 +22,14 @@ import {
   FOLLOW_UP_STATUS_CLASS,
   OUTDATED_CLASS,
   SEVERITY_CLASS,
-  TICKET_ALIGNMENT_CLASS,
   VERDICT_CLASS,
 } from '../../lib/claudeReviewFollowUp.js';
 import { AUTO_REVIEW_LABEL } from './pendingLabels.js';
 import { fixPillLabel } from '../../lib/claudeAutoReview.js';
 import { unlockReviewSound } from '../../lib/sound.js';
-import { assessedStoryPills } from '../../lib/storyTabs.js';
+import type { CardTicketPill, CoverageTone } from '../../lib/ticketReview.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
-import { CheckIcon, SparkleIcon } from '../Icons.js';
+import { CheckIcon, SparkleIcon, WarningIcon } from '../Icons.js';
 
 // One Open PRs card's CLAUDE REVIEW PANEL — the card's last block, on the AI surface (`--ai-*`),
 // with a left accent coloured by the run's outcome (`reviewTone`). Rendered ONLY when agentic AI
@@ -41,25 +39,33 @@ import { CheckIcon, SparkleIcon } from '../Icons.js';
 // Reading order, left to right, most important first:
 //   "Claude" · the outcome (verdict / in flight / not reviewed, auto mark, on the latest commit or
 //   how far behind) ·
-//   findings by severity · CI failures explained · reviewer threads to fix · user stories ·
+//   findings by severity · CI failures explained · reviewer threads to fix · the PR's tickets (the
+//   TICKET review's coverage, from the board's ONE batched states answer) ·
 //   the previous review's findings · posted + design (muted) … right: AI Fix state + the action.
 // Every figure comes from the server's `summary`, present only on a finished run — nothing here
 // prints a zero it does not know.
 //
 // ⚠ The card is WHOLE-CARD clickable (it opens the PR), so every control here stops propagation.
 
-const PILL = 'inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-px text-[11px] font-medium';
-const GREY_PILL = `${PILL} bg-gray-500/10 text-gray-600 dark:text-gray-300`;
+export const PILL = 'inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-px text-[11px] font-medium';
+export const GREY_PILL = `${PILL} bg-gray-500/10 text-gray-600 dark:text-gray-300`;
 // The verdict is the panel's headline: a size up from the pills beside it.
 const VERDICT_PILL =
   'inline-flex items-center gap-1 whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold';
-const MUTED = 'text-[11px] text-ai-muted';
+export const MUTED = 'text-[11px] text-ai-muted';
 // The AI surface's own button (the Claude Review tab's Run button idiom).
 const AI_BUTTON =
   'whitespace-nowrap rounded border border-ai-border bg-white/70 px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:cursor-default disabled:opacity-60 dark:bg-gray-900/50';
 const PLAIN_BUTTON =
   'whitespace-nowrap rounded border border-ai-border bg-white/70 px-2 py-0.5 text-[11px] font-medium text-gray-700 hover:border-gray-400 dark:bg-gray-900/50 dark:text-gray-200 dark:hover:border-gray-500';
-const NOTE_MS = 6000;
+
+// A ticket pill's colour by coverage (all met / some partly or can't tell / some not met).
+const TICKET_TONE: Record<CoverageTone, string> = {
+  ok: CLEAN_CLASS,
+  partial: OUTDATED_CLASS,
+  bad: SEVERITY_CLASS.blocker,
+  muted: 'bg-gray-500/10 text-gray-600 dark:text-gray-300',
+};
 
 // The panel's left accent, by outcome. `none` keeps the plain AI border (an offer, not a result).
 const ACCENT: Record<ReviewTone, string> = {
@@ -71,7 +77,7 @@ const ACCENT: Record<ReviewTone, string> = {
 };
 
 // The small marker on a run the workspace's auto review started (queued, running or finished).
-function AutoMark(): JSX.Element {
+export function AutoMark(): JSX.Element {
   return <span className={MUTED}>{AUTO_REVIEW_LABEL}</span>;
 }
 
@@ -89,11 +95,14 @@ export function ClaudeReviewPanel({
   state,
   onOpenReview,
   onOpenFix,
+  ticketPills = [],
 }: {
   prId: number;
   state: ClaudeReviewPrState | undefined;
   onOpenReview: () => void;
   onOpenFix: () => void;
+  // The ticket review's reading of this PR's tickets ("BMD-1 · 4 of 6 met"); [] = none to show.
+  ticketPills?: readonly CardTicketPill[];
 }): JSX.Element {
   const start = useStartReviewFromList(prId);
   // Shared with the PR's own Claude Review tab: a start from either surface disables both.
@@ -103,14 +112,6 @@ export function ClaudeReviewPanel({
   // A 409 AutoReviewInProgress says so only while the hold lasts; after it, the Review button is
   // back and the refusal is history.
   const showError = start.isError && !starting && (held || !isAutoReviewHoldError(start.error));
-
-  // The short "without a user story" note, shown for a few seconds after a start.
-  const [note, setNote] = useState<string | null>(null);
-  useEffect(() => {
-    if (note == null) return;
-    const t = setTimeout(() => setNote(null), NOTE_MS);
-    return () => clearTimeout(t);
-  }, [note]);
 
   // Not set up yet (no AI runtime, or no Claude credential detected): Review opens the PR's
   // Claude Review tab, which says what is missing in place of its own Run button. The panel has
@@ -124,8 +125,7 @@ export function ClaudeReviewPanel({
     }
     // Gesture-gated WebAudio: unlock now so the completion chime can play later.
     unlockReviewSound();
-    setNote(null);
-    start.mutate({ previous: state }, { onSuccess: (r) => setNote(r.note) });
+    start.mutate();
   };
 
   const stop = (e: MouseEvent): void => e.stopPropagation();
@@ -236,7 +236,6 @@ export function ClaudeReviewPanel({
   const tally = summary != null ? followUpTally(summary.followUp) : null;
   const ciLabel = summary != null ? ciDiagnosisLabel(summary.ci) : null;
   const toFix = summary != null ? threadsToFixLabel(summary) : null;
-  const stories = assessedStoryPills(summary?.tickets ?? []);
   const posted =
     summary == null
       ? null
@@ -295,17 +294,20 @@ export function ClaudeReviewPanel({
         </>
       )}
 
-      {(stories.length > 0 || tally != null) && (
+      {(ticketPills.length > 0 || tally != null) && (
         <>
           <Rule />
           <Group>
-            {stories.map(({ ticket: t, label }) => (
-              <span
-                key={label}
-                className={`${PILL} ${TICKET_ALIGNMENT_CLASS[t.alignment!]}`}
-                title={`${t.title ?? 'User story'}: ${TICKET_ALIGNMENT_LABEL[t.alignment!]}`}
-              >
-                {label} · {ALIGNMENT_SHORT[t.alignment!]}
+            {ticketPills.map((t) => (
+              <span key={t.key} className={`${PILL} ${TICKET_TONE[t.tone]}`} title={t.title}>
+                {t.running && <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ai-signal-fill" />}
+                {t.key} · {t.label}
+                {t.stale && (
+                  <>
+                    <WarningIcon size={10} />
+                    <span className="sr-only">(changed since)</span>
+                  </>
+                )}
               </span>
             ))}
             {tally != null && (
@@ -345,7 +347,6 @@ export function ClaudeReviewPanel({
           {start.error.message || 'Could not start the review.'}
         </span>
       )}
-      {note != null && !start.isError && <span className={MUTED}>{note}</span>}
 
       <span className="ml-auto inline-flex shrink-0 items-center gap-1.5">
         {/* AI Fix on this PR (from the same batched answer): a run in flight, or a finished fix
@@ -371,3 +372,4 @@ export function ClaudeReviewPanel({
     </div>
   );
 }
+

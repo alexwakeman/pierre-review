@@ -10,7 +10,6 @@ import type {
   ClaudeFindingSide,
   ClaudeReviewModel,
   ClaudeFindingLens,
-  ClaudeFindingStory,
   ClaudeReviewVerdict,
   DailyBriefCounts,
   PersonPeriod,
@@ -420,9 +419,8 @@ export interface ReviewFinding {
   // The specialist lens on a deep review (review/claude-review/specialists.ts); null/absent ⇒ a
   // general finding. Core-only (Claude Review left the plugin), so no apiVersion question.
   lens?: ClaudeFindingLens | null;
-  // A STORY FINDING's origin (claude-review/ticket.ts `storyFindingsFrom`) — set by the server,
-  // never by the model. Core-only, optional: no apiVersion question.
-  story?: ClaudeFindingStory | null;
+  // (A STORY FINDING's origin used to ride here. Stories left the PR review for the ticket review
+  // (review/ticket-review/), so a run makes none; old rows keep theirs in the story_* columns.)
 }
 
 // ---- Follow-up + user-story reports (host→plugin RESULT fields) ----
@@ -460,6 +458,9 @@ export interface ReviewCiFailureReport {
   fixableInPr: boolean;
 }
 
+// The story-report shapes (one ticket's criteria / gaps as the model reports them). No longer a
+// RunReviewResult field — stories left the PR review for the ticket review — but still the input
+// shape of claude-review/ticket.ts's reconcile.
 export interface ReviewTicketItemReport {
   // The criterion as Claude read it from the acceptance-criteria text (Claude enumerates them).
   text: string;
@@ -507,6 +508,12 @@ export interface RunReviewArgs {
   // `offeredSpecialists`). Honoured ONLY when `mode === 'worktree'`; a diff-only run gets none
   // whatever is passed. The lead picks among them, at most CLAUDE_REVIEW_MAX_SPECIALISTS.
   specialists?: ClaudeFindingLens[];
+  // OTHER PRs on the same ticket(s), checked out READ-ONLY beside the PR so a deep review can check
+  // cross-repo interactions (an API this PR changes against a consumer in a peer). Honoured ONLY
+  // when `mode === 'worktree'`; at most TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW. `ref` ('X1'…) is the
+  // name the prompt's "Related PRs" block gives it; core appends where each one sits on disk (or
+  // that it could not be checked out). Core-only, so no apiVersion question.
+  peers?: Array<{ ref: string; owner: string; name: string; prNumber: number; headSha: string }>;
 }
 
 export interface RunReviewResult {
@@ -524,11 +531,8 @@ export interface RunReviewResult {
   numTurns: number | null;
   aborted: boolean;
   // ⚠ OPTIONAL, SO apiVersion STAYS 21 (see ReviewFollowUpReport). Present only when the model
-  // reported them — i.e. when the prompt carried a "Previous review" / "User story or task" block.
+  // reported them — i.e. when the prompt carried a "Previous review" block.
   followUp?: ReviewFollowUpReport[];
-  // One report per ticket, keyed by `ref`. `ticket` is the legacy single report (read as T1).
-  tickets?: ReviewTicketReport[];
-  ticket?: ReviewTicketReport;
   // Present only when the prompt carried a "Review threads" section and the model reported.
   threads?: ReviewThreadReport[];
   // Present only when the prompt carried a "CI failures" section and the model reported.

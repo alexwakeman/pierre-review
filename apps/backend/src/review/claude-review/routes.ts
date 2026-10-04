@@ -19,7 +19,6 @@ import {
   CLAUDE_REVIEW_MODELS,
   CLAUDE_REVIEW_STATES_MAX_IDS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
-  checkClaudeReviewTickets,
   storyCommentLead,
   stripStoredStoryLead,
 } from '@pierre-review/shared';
@@ -71,22 +70,6 @@ const findingIdParam = {
 };
 // ⚠ `model` is the OFFERED list (shared CLAUDE_REVIEW_MODELS), so a retired id (the old Opus 4.8)
 // is a 400 here while its old runs still render, their id printed raw. Omitted ⇒ the default.
-// ⚠ `ticket` MUST be declared: Fastify's ajv runs with `removeAdditional`, which would strip an
-// undeclared key SILENTLY (the contact-form honeypot landmine). No `maxLength` on its fields on
-// purpose — the caps answer with our own message from checkClaudeReviewTicket, never ajv's.
-const TICKET_INPUT_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    title: { type: 'string' },
-    description: { type: 'string' },
-    acceptanceCriteria: { type: 'string' },
-    source: { type: 'string', enum: ['jira', 'manual'] },
-    key: { type: 'string' },
-    url: { type: 'string' },
-    fetchedAt: { type: 'string' },
-  },
-} as const;
 const generateSchema = {
   ...idParam,
   body: {
@@ -94,9 +77,9 @@ const generateSchema = {
     additionalProperties: false,
     properties: {
       model: { type: 'string', enum: [...CLAUDE_REVIEW_MODELS] },
-      ticket: TICKET_INPUT_SCHEMA,
-      // No maxItems: the count answers with our own message (checkClaudeReviewTickets).
-      tickets: { type: 'array', items: TICKET_INPUT_SCHEMA },
+      // No `ticket`/`tickets`: a PR review checks no story (the ticket review does, `POST
+      // /api/ticket-reviews`). Fastify's ajv runs with `removeAdditional`, so a stale key from an
+      // older SPA is stripped, exactly like the retired `mode`.
     },
   },
 };
@@ -235,20 +218,6 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     const model = body.model ?? DEFAULT_CLAUDE_REVIEW_MODEL;
     if (!AGENTIC_AI_ENABLED) return featureOff(reply);
 
-    // The user story: over a cap ⇒ 400 with the field and a plain message, and NO run. Never
-    // truncated. The same check runs in the SPA, from the same shared module.
-    // `tickets` wins; the legacy single `ticket` is read only when it is absent.
-    const checked = checkClaudeReviewTickets(body.tickets ?? (body.ticket ? [body.ticket] : []));
-    if (!checked.ok) {
-      reply.status(400);
-      return {
-        error: 'TicketInvalid',
-        index: checked.index,
-        field: checked.field,
-        message: checked.message,
-      };
-    }
-
     const auth = ctx.llm.detectAuth();
     if (auth.status === 'none') {
       reply.status(400);
@@ -256,7 +225,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     }
 
     const accountId = ctx.accountIdOf(req);
-    const result = await startReview(ctx, accountId, id, model, checked.tickets);
+    const result = await startReview(ctx, accountId, id, model);
     if (!result.ok) {
       if (result.reason === 'not_found') {
         reply.status(404);

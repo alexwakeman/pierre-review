@@ -1441,6 +1441,17 @@ function, `detectPrTickets` (`issue-links/enricher.ts`).
   (`detectKeysWithAccess`, split out of `detectPrTickets` so both run one rule) batched per
   workspace. Since plugin 0038 it makes **no Jira call**: title, status, status category, assignee
   and issue type come from the stored tickets below. Contract: docs/API.md.
+- **The Open PRs stacks' "Merged (n)" panel** (`GET /api/pro/ticket-merged-prs?workspace=&keys=`,
+  `jira/ticket-merged.ts`): under each ticket stack's open cards, every MERGED PR Limn has linked
+  to that ticket — ONE request for the whole grouped board, DB-only (the stored rows below, state
+  `ok`, joined to `pull_requests.state = 'merged'`; closed-unmerged excluded). Membership is the
+  ticket review's (`ticketMembers`): ANY repo and ANY workspace of the account, on the SAME Jira
+  site — and the site is the requested WORKSPACE's own, so the keys cannot reach another site's
+  rows (a non-Jira workspace answers `tickets: []`). The panel never creates a stack: a ticket with
+  only merged PRs is not open work. The stack's "n PRs" stays the open count; the panel header
+  carries the merged count. Collapsed by default, its open state per session (memory only). Fold:
+  `lib/openPrsStacks.ts` `mergedByStack` (an open card wins over its merged copy; an ident from
+  another site is not matched). A GET, so the `/api/pro/` catch-all puts it on `read`.
 - **Erasure**: `pro_workspace_settings` was already in `registerAccountErasure`; the two 0038
   tables joined it. The core account export never reads plugin tables, so the token cannot reach it.
 
@@ -1472,8 +1483,30 @@ seam change is the OPTIONAL `ProContext.registerRepoSyncedHook`.
   only moved (branch → title, reordered) is re-labelled without a call.
 - **TTLs**: 30 min after a good read (so status, assignee and title stay fresh on open PRs), 10 min
   after a transient failure (the row KEEPS its content and stays `ok`), 6 h after Jira said
-  `not_found` / `no_access` (content cleared — a 404 is a positive statement). Closed PRs are not
-  walked; their rows stay as last read.
+  `not_found` / `no_access` (content cleared — a 404 is a positive statement). Closed and merged
+  PRs are not walked by the open-PR pass; their rows stay as last read.
+- **MERGED PRs get the rows they never had** (no migration). A PR that was open when seen KEEPS its
+  rows after it merges — never TTL-refreshed, re-labelled or pruned. A PR that merged BEFORE the
+  worker saw it (it predates the worker, merged between passes, or the deep backfill brought it in
+  already merged) used to have no row, so core's ticket review never counted it (BMD-1040 saw 2 of
+  its 6 PRs). Each pass now also takes MERGED PRs — never closed-unmerged — merged in the last 90
+  days with no row (or only a `failed` one), in MISSING-ONLY mode: a key with no row or a row from
+  another site is read, a `failed` row is retried on its TTL, nothing else.
+  - **One-time per repo.** A repo's 90-day window is scanned ONCE; after that only PRs merged in
+    the last 24 h, and rows newer than the repo's highest PR id at the scan (what the deep backfill
+    inserts), are looked at. A PR still owed a row (budget, backoff, no token, a transient failure)
+    is remembered BY ID and revisited each pass, so it never forces a rescan of its repo. A
+    repo-walk kick re-opens that repo's window at most every 30 min (`FULL_RESCAN_MS`); a settings
+    kick re-opens the account's. A PR is settled only when its rows sit on its workspace's CURRENT
+    site, so a site move reads it again. The markers are in memory, so a restart scans again —
+    database reads only.
+  - ⚠ **One Jira read per ticket, never per PR.** A merged-only ticket already stored on the same
+    site in the same account is COPIED from its freshest row, criteria re-derived with the PR's own
+    workspace field, with NO call (`stats.copied`); the rest join the pass's per-(workspace, key)
+    dedup. Merged-only tickets queue after new open tickets and before TTL refreshes, inside the
+    same 40 / 200 budgets, behind the same workspace token gate and backoff.
+  - A new or copied row sets `changed_at`, so `listChangedTicketIdents` hands the ticket to core's
+    sweeper; `ticketMembers` returns merged members (core takes state from `pull_requests`).
 - **Bounds**: at most `TICKET_LINKS_TITLE_LOOKUPS` (40) tickets per account per pass and 200 per
   tick, new tickets first then the longest overdue, 4 at a time, each key read ONCE per workspace
   per pass and written to every PR that names it.
@@ -1504,6 +1537,23 @@ seam change is the OPTIONAL `ProContext.registerRepoSyncedHook`.
   forces a re-read; the Open PRs row reads rows and kicks; the auto review's story fill
   (`resolveAutoReviewTicket`) reads rows (same once-only fallback). `fetchJiraIssueTitle` is unused
   and the in-process title cache is gone.
+- **The ticket review's peers seam (plugin migration 0039, `src/jira/ticket-peers.ts`).** Core's
+  TICKET review (one review per ticket across every PR on it; docs/CLAUDE-REVIEW.md § Ticket review)
+  reads membership from these rows through FOUR OPTIONAL agentic-seam members, registered beside
+  `resolveReviewTicket` in `src/index.ts` — no `apiVersion` bump:
+  `ticketsForPr(account, pr)` (the PR's detected tickets as review stories, ident
+  `jira:<apiRoot>#<KEY>`), `ticketMembers(account, ident)` (every PR on that ticket: this account,
+  the same `api_root`, ANY workspace, `state = 'ok'`; merged PRs stay — core decides open / merged /
+  closed), `ticketStory(account, ident)` (THE story: the freshest `ok` row by `fetched_at`, then id)
+  and `listChangedTicketIdents(account, since)` (rows whose `changed_at` moved). Plugin 0039 adds
+  `changed_at` and the `(account_id, api_root, issue_key)` / `(account_id, changed_at)` indexes;
+  `changed_at` is written ONLY by `ticket-store.ts`, and only when membership or story TEXT moves
+  (`storyOrMembershipMoved` — a status or assignee change is not a change).
+  ⚠ **The seam reads STORED rows only** (`resolvePrTickets(..., { storedOnly: true })`): core calls
+  it from VIEW paths (the PR pane, Open PRs' polled states, the sweeper's 100-PR tick), so the
+  fetch-on-miss the auto fill keeps would put Jira calls on the `read` tier. ⚠ **ONE story per
+  ticket**: never "the first member's row" — the worker refreshes OPEN PRs only, so a merged PR's row
+  keeps the text it merged with, and two callers reading two rows hashed two stories.
 
 ### The Bots ROI panel is paid — the whole panel, and where the free line falls
 

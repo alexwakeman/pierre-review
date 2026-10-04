@@ -4,6 +4,8 @@
 //   JiraStoryView — a story Limn READ from Jira, shown read-only. Its text is the plugin's
 //                   markdown conversion of the ticket, through the sanitising <Markdown>.
 //   JiraKeyLink   — a Jira key linked to its ticket.
+//   StoryText     — a story's description + acceptance criteria as markdown (the Story check's
+//                   "Story" disclosure and the Open PRs ticket modal render through it too).
 //
 // A story's results reach GitHub as FINDINGS (each with the finding card's own Post / Reword /
 // Ignore); the per-ticket "Post as comment" is retired. Every href here goes through
@@ -44,8 +46,11 @@ export function JiraStoryView({
   draft,
   actions,
   fieldControl,
+  capHeight = true,
 }: {
   draft: TicketDraft;
+  // false inside a disclosure the reader opened: show the whole story, no inner scroll box.
+  capHeight?: boolean;
   // Refresh, when this session can read the ticket.
   actions?: ReactNode;
   // "Criteria from: <field> · Change", and the picker when open.
@@ -63,23 +68,44 @@ export function JiraStoryView({
         {actions}
       </div>
       {fieldControl}
-      {draft.description.trim() !== '' && (
-        <div className="max-h-56 overflow-y-auto text-xs">
-          <Markdown>{draft.description}</Markdown>
+      <StoryText description={draft.description} acceptanceCriteria={draft.acceptanceCriteria} capHeight={capHeight} />
+    </div>
+  );
+}
+
+/**
+ * A story's description and acceptance criteria as markdown (through the sanitising <Markdown>).
+ * `capHeight` scrolls each part inside a short box (a pane); a modal lets them run.
+ */
+export function StoryText({
+  description,
+  acceptanceCriteria,
+  capHeight = true,
+}: {
+  description: string;
+  acceptanceCriteria: string;
+  capHeight?: boolean;
+}): JSX.Element {
+  const box = capHeight ? 'max-h-56 overflow-y-auto text-xs' : 'text-sm';
+  return (
+    <>
+      {description.trim() !== '' && (
+        <div className={box}>
+          <Markdown>{description}</Markdown>
         </div>
       )}
       <div>
-        {!criteriaHasOwnHeading(draft.acceptanceCriteria) && (
+        {!criteriaHasOwnHeading(acceptanceCriteria) && (
           <div className={`text-xs font-medium ${MUTED}`}>Acceptance criteria</div>
         )}
-        {draft.acceptanceCriteria.trim() !== '' ? (
-          <div className="max-h-56 overflow-y-auto text-xs">
-            <Markdown>{draft.acceptanceCriteria}</Markdown>
+        {acceptanceCriteria.trim() !== '' ? (
+          <div className={box}>
+            <Markdown>{acceptanceCriteria}</Markdown>
           </div>
         ) : (
           <p className="text-xs text-gray-700 dark:text-gray-300">None taken from this ticket.</p>
         )}
       </div>
-    </div>
+    </>
   );
 }

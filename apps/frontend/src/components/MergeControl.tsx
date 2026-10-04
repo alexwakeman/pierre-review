@@ -66,6 +66,7 @@ export function MergeControl({
   mergeQueueEntryState,
   syncedAt,
   showQueuePosition = true,
+  queueLine = true,
 }: {
   prId: number;
   githubUrl: string;
@@ -119,6 +120,11 @@ export function MergeControl({
    * depend on whether one happened to be cached. See `mergeQueueStatus`.
    */
   showQueuePosition?: boolean;
+  /**
+   * Print the queue's status line beside "Remove from queue". The Pending board passes false: its
+   * card HEADING is that line (from the same newer-wins answer), so the row keeps only the verb.
+   */
+  queueLine?: boolean;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   // ⚠ STILL `open`-GATED. A disabled query returns whatever is CACHED — which is why the board
@@ -177,6 +183,7 @@ export function MergeControl({
     return (
       <QueuedRow
         status={queueStatus}
+        showLine={queueLine}
         busy={queueBusy}
         removing={removing}
         error={queueError}
@@ -474,12 +481,14 @@ export function MergeControl({
  */
 function QueuedRow({
   status,
+  showLine = true,
   busy,
   removing,
   error,
   onRemove,
 }: {
   status: MergeQueueStatus;
+  showLine?: boolean;
   busy: boolean;
   removing: boolean;
   error: string | null;
@@ -487,6 +496,7 @@ function QueuedRow({
 }): JSX.Element {
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {showLine && (
       <span
         className={`text-xs ${
           status.tone === 'bad' ? 'text-red-700 dark:text-red-300' : 'text-gray-600 dark:text-gray-300'
@@ -499,10 +509,12 @@ function QueuedRow({
         )}
         {status.line}
       </span>
+      )}
       <button
         type="button"
         onClick={onRemove}
         disabled={busy}
+        title={showLine ? undefined : status.title}
         className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
       >
         {removing ? 'Removing…' : 'Remove from queue'}

@@ -297,6 +297,9 @@ export function buildChatPrompt(input: ChatPromptInput): string {
   }
   lines.push('');
 
+  // ⚠ LEGACY ONLY. Reviews from before the ticket review split carry their stories and verdicts,
+  // and a chat about one must still see them. A new review checks no story (the ticket review
+  // does, review/ticket-review/), so this section is simply absent for it.
   if (review.tickets?.length || review.ticket) {
     lines.push('## User stories the review checked against');
     fence(

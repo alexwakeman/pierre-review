@@ -576,7 +576,7 @@ export function storyChipLabel(
 }
 
 /**
- * Which of this run's findings render INSIDE the User stories section: the one finding per unmet
+ * Which of this run's findings render INSIDE the Story check section: the one finding per unmet
  * criterion / "Not done" item that the section has a row for. `placed` is what the Findings list
  * must leave out, so every finding is on screen exactly once.
  */

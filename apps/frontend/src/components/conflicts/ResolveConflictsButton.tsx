@@ -45,6 +45,7 @@ export function ResolveConflictsButton({
   viewerCanPush,
   target,
   className,
+  buttonClass,
 }: {
   state: PrState;
   /** The RESOLVED verdict from `mergeVerdict`, never a re-reading of the raw columns. */
@@ -54,6 +55,9 @@ export function ResolveConflictsButton({
    *  that mounted this button. */
   target: ResolverTarget;
   className?: string;
+  /** REPLACES the default button style (a host with its own button scale, e.g. the Pending card's
+   *  primary). `className` is appended to the default instead. */
+  buttonClass?: string;
 }): JSX.Element | null {
   const show = useConflictResolverEntry({ state, verdict, viewerCanPush });
   if (!show) return null;
@@ -61,7 +65,10 @@ export function ResolveConflictsButton({
     <button
       type="button"
       onClick={() => openConflictResolver(target)}
-      className={`inline-flex items-center gap-1 rounded border border-gray-300 px-1.5 py-0.5 text-xs font-medium text-gray-700 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-600 dark:hover:bg-gray-800 ${className ?? ''}`}
+      className={
+        buttonClass ??
+        `inline-flex items-center gap-1 rounded border border-gray-300 px-1.5 py-0.5 text-xs font-medium text-gray-700 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-600 dark:hover:bg-gray-800 ${className ?? ''}`
+      }
       title={`Resolve the conflicts in ${target.repoFullName} #${target.prNumber}`}
     >
       <ConflictIcon size={12} />

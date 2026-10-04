@@ -1,4 +1,4 @@
-import type { TimelinePr } from '@pierre-review/shared';
+import type { TicketMergedPr, TicketMergedPrsResponse, TimelinePr } from '@pierre-review/shared';
 import type { CardTicket } from './cardTickets.js';
 import { mergeVerdict } from './ui.js';
 
@@ -64,6 +64,7 @@ const KEY_COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base
 function fillGaps(into: CardTicket, from: CardTicket): void {
   into.title ??= from.title;
   into.url ??= from.url;
+  if (into.ident == null && from.ident != null) into.ident = from.ident;
   if (into.status == null && from.status != null) into.status = from.status;
   if (into.statusCategory == null && from.statusCategory != null) into.statusCategory = from.statusCategory;
   if (into.assignee == null && from.assignee != null) into.assignee = from.assignee;
@@ -123,6 +124,47 @@ export function stackOpenPrs(
   );
   if (none.rows.length > 0) stacks.push(none);
   return { stacks, prCount: seen.size, ticketedPrCount: ticketed };
+}
+
+// ── THE "MERGED (n)" PANEL ───────────────────────────────────────────────────────────────────
+// Under a stack's open PRs, every MERGED PR Limn has linked to the same ticket (any repo of the
+// account on the workspace's Jira site; ONE batched `GET /api/pro/ticket-merged-prs`). It never
+// creates a stack: a ticket with only merged PRs is not open work, so it is not on this page. The
+// stack's "n PRs" count stays the OPEN count; the panel header carries the merged count.
+
+/** The ticket keys to ask about — one per ticket stack, in page order (the no-ticket stack has none). */
+export function mergedPanelKeys(stacks: readonly OpenPrsStack[]): string[] {
+  const out: string[] = [];
+  for (const s of stacks) if (s.ticket != null && !out.includes(s.ticket.key)) out.push(s.ticket.key);
+  return out;
+}
+
+/**
+ * Stack id → its merged PRs, newest merge first. Only stacks that HAVE merged PRs are present.
+ * Matched on the key; when both sides carry an ident (the Jira site) they must agree, so a key on
+ * another site is never shown under this one. A PR already listed open in the stack is dropped
+ * (the open card wins), and a PR is listed once per stack.
+ */
+export function mergedByStack(
+  stacks: readonly OpenPrsStack[],
+  data: TicketMergedPrsResponse | undefined,
+): Map<string, TicketMergedPr[]> {
+  const out = new Map<string, TicketMergedPr[]>();
+  if (data == null) return out;
+  const byKey = new Map(data.tickets.map((t) => [t.key.trim().toUpperCase(), t]));
+  for (const s of stacks) {
+    if (s.ticket == null) continue;
+    const t = byKey.get(s.ticket.key.trim().toUpperCase());
+    if (t == null) continue;
+    if (s.ticket.ident != null && t.ident !== s.ticket.ident) continue;
+    const openIds = new Set(s.rows.map((r) => r.pr.id));
+    const seen = new Set<number>();
+    const prs = t.prs
+      .filter((p) => !openIds.has(p.prId) && (seen.has(p.prId) ? false : (seen.add(p.prId), true)))
+      .sort((a, b) => (a.mergedAt < b.mergedAt ? 1 : a.mergedAt > b.mergedAt ? -1 : a.prId - b.prId));
+    if (prs.length > 0) out.set(s.id, prs);
+  }
+  return out;
 }
 
 /** Grouping says something only when at least one PR names a ticket; otherwise the page would be

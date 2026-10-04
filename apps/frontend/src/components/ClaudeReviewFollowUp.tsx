@@ -1,18 +1,23 @@
 // The Claude Review tab's follow-up and user-story pieces, kept out of the 2,000-line tab:
 //
-//   ClaudeReviewTicketPanel     — the "User stories (optional)" input: one tab per story.
-//   ClaudeReviewTicketResults   — how the run measured up against ONE user story (read-only; its
-//                                 unmet items are findings, each row links to its card).
+//   ClaudeReviewTicketPanel     — the story input of the Story check section (TicketCoverage.tsx):
+//                                 pasted stories + the Jira picker, one tab per story.
+//   ClaudeReviewTicketResults   — HISTORY: how an older PR review measured up against ONE user
+//                                 story (read-only; its unmet items are findings). Shown INSIDE the
+//                                 Story check section (TicketCoverage.tsx), and only for a story no
+//                                 ticket review covers. New PR reviews carry no story.
 //   ClaudeReviewFollowUpSection — what became of the previous review's comments.
 //
 // Rules for all three:
 //  - Every string from Claude or from a pasted user story renders as PLAIN TEXT: no Markdown,
-//    and no href built from it. A story READ FROM JIRA is the one exception, and it renders in
+//    and no href built from it — except a story's SUMMARY (markdown, so its bullets read as a list,
+//    through the sanitizing <Markdown>), and PR references ("api#12"), which become in-app buttons
+//    via <PrRefText> (ReviewPrRefs.tsx) when they name a known PR. A story READ FROM JIRA is the one exception, and it renders in
 //    ClaudeReviewTickets.tsx (JiraStoryView), never here. A code anchor is a <button> into the Changes tab when the file is
 //    in the PR, otherwise plain mono text.
 //  - Statuses and counts come from the server's reconcile step, which never invents "addressed".
 //    The sentences are templated in `@pierre-review/shared` (code-derived); Claude's explanations
-//    are shown separately and labelled as Claude's.
+//    are shown separately, unlabelled (everything here is Claude's).
 //  - Chips are 11px or larger, sentences 12px or larger, no uppercase-with-tracking labels, and
 //    every muted colour is paired for both themes (`textContrast.test.ts`).
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
@@ -84,6 +89,9 @@ import { CheckIcon, ChevronIcon, CloseIcon, PlusIcon, RefreshIcon } from './Icon
 import { InfoButton } from './InfoModal.js';
 import { JiraStoryView } from './ClaudeReviewTickets.js';
 import { ReviewSection } from './ReviewSection.js';
+import { PrRefText } from './ReviewPrRefs.js';
+import { Markdown } from './Markdown.js';
+import { REVIEW_CHIP, REVIEW_ITEM_CARD, REVIEW_ITEM_TITLE, REVIEW_PROSE, REVIEW_SUBHEAD } from '../lib/reviewStyles.js';
 
 type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
 
@@ -104,7 +112,7 @@ const FOLLOW_UP_PILL_ORDER: ClaudeFollowUpStatus[] = [
   'no_longer_applies',
 ];
 
-const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[11px] font-medium';
+const CHIP = REVIEW_CHIP;
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const ERROR_TEXT = 'text-red-600 dark:text-red-400';
 const BTN =
@@ -251,7 +259,7 @@ function ManualStoryFields({
 
 // A ticket this session fetched, kept for its candidates so the field picker needs no refetch to
 // open.
-interface FetchedJira {
+export interface FetchedJira {
   details: JiraTicketDetails;
   site: string | null;
   chosen: string;
@@ -283,8 +291,10 @@ const SPINNER =
  * A tab pulled from Jira is READ-ONLY (markdown, ClaudeReviewTickets.tsx) with the field its
  * criteria came from and Refresh; a typed one is three editable fields. Jira tickets detected on the
  * PR are pulled AUTOMATICALLY once per PR per detected-key set (never re-adding one the reader
- * removed); "Pull all from Jira" is the manual action. The header always says what Run sends
- * (" · 2 stories" / " · needs a fix"). NO `maxLength` on any input — it would silently cut a paste.
+ * removed); "Pull all from Jira" is the manual action. The Story check section passes
+ * `autoPullReady={false}`: the detected tickets are its blocks already, so it pulls only on request.
+ * The header always says what Check sends (" · 2 stories" / " · needs a fix"). NO `maxLength` on
+ * any input — it would silently cut a paste.
  */
 export function ClaudeReviewTicketPanel({
   value,
@@ -294,6 +304,7 @@ export function ClaudeReviewTicketPanel({
   tickets,
   prWorkspaceName,
   autoPullReady,
+  label = 'User stories (optional)',
 }: {
   value: TicketDraft[];
   onChange: (next: TicketDraft[]) => void;
@@ -305,6 +316,8 @@ export function ClaudeReviewTicketPanel({
   // The stored run has loaded, so the list is settled: the automatic pull waits for it, or the
   // prefill from the latest run would land on top of (or under) what it pulled.
   autoPullReady: boolean;
+  // The collapsed header's words.
+  label?: string;
 }): JSX.Element {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -602,7 +615,7 @@ export function ClaudeReviewTicketPanel({
           className="flex flex-1 items-center gap-1.5 px-2 py-1.5 text-left text-xs font-medium text-gray-700 dark:text-gray-200"
         >
           <ChevronIcon dir={open ? 'down' : 'right'} className="shrink-0" />
-          <span>User stories (optional)</span>
+          <span>{label}</span>
           {hint !== '' && (
             <span className={`font-normal ${check.ok ? MUTED : ERROR_TEXT}`}>{hint}</span>
           )}
@@ -615,13 +628,12 @@ export function ClaudeReviewTicketPanel({
         )}
         <InfoButton title="User stories">
           <p>
-            Claude checks the change against each story and lists what is missing or was not asked
-            for. Up to {CLAUDE_REVIEW_MAX_TICKETS} per review.
+            Paste a story to check this pull request against it, or pull a Jira ticket named on the
+            pull request to read its story and pick the field its criteria come from. Up to{' '}
+            {CLAUDE_REVIEW_MAX_TICKETS} at a time.
           </p>
           <p className="mt-2">
-            Jira tickets named on the pull request are added when you open this tab, as Limn last
-            read them from Jira. Refresh reads one again. A story you remove is not added again unless
-            you ask.
+            A pulled ticket is shown as Limn last read it from Jira. Refresh reads it again.
           </p>
         </InfoButton>
       </div>
@@ -795,13 +807,21 @@ export function ClaudeReviewTicketPanel({
   );
 }
 
-/** "Take the criteria from" — every custom text field on the fetched ticket. */
-function AcFieldPicker({
+/**
+ * "Take the criteria from" — every custom text field on the fetched ticket. `allowNone` offers
+ * "None of these" (the story panel's one-tab override); the Story check's disclosure saves the
+ * workspace's choice, so it does not.
+ */
+export function AcFieldPicker({
   fetched,
   onChoose,
+  allowNone = true,
+  disabled = false,
 }: {
   fetched: FetchedJira;
   onChoose: (id: string) => void;
+  allowNone?: boolean;
+  disabled?: boolean;
 }): JSX.Element | null {
   const selectId = useId();
   const { details, chosen } = fetched;
@@ -817,8 +837,14 @@ function AcFieldPicker({
           <span className={`font-normal ${MUTED}`}> ({details.issueType.name})</span>
         )}
       </label>
-      <select id={selectId} value={chosen} onChange={(e) => onChoose(e.target.value)} className={INPUT}>
-        <option value="">None of these</option>
+      <select
+        id={selectId}
+        value={chosen}
+        disabled={disabled}
+        onChange={(e) => onChoose(e.target.value)}
+        className={INPUT}
+      >
+        {(allowNone || chosen === '') && <option value="">None of these</option>}
         {details.candidates.map((c) => (
           <option key={c.id} value={c.id}>
             {acCandidateLabel(c)}
@@ -852,11 +878,11 @@ function CriterionRow({
   // MET is one compact line: tick, ref, criterion, where. Nothing to act on, so no card.
   if (c.status === 'met') {
     return (
-      <li className="flex items-baseline gap-2 px-1 text-xs">
+      <li className="flex items-baseline gap-2 px-1 text-[13px]">
         <span className="shrink-0 self-center text-green-700 dark:text-green-400" aria-label="Met">
           <CheckIcon size={12} />
         </span>
-        <span className={`shrink-0 font-mono ${MUTED}`}>{c.ref}</span>
+        <span className={`shrink-0 font-mono text-xs ${MUTED}`}>{c.ref}</span>
         <span className="min-w-0 break-words text-gray-800 dark:text-gray-200">
           {c.text}
           {c.path != null && c.path !== '' && (
@@ -878,13 +904,13 @@ function CriterionRow({
     );
   }
   return (
-    <li className="rounded border border-gray-200 px-3 py-2 dark:border-gray-800">
+    <li className={REVIEW_ITEM_CARD}>
       <div className="flex items-start gap-2">
         <span className={`${CHIP} ${TICKET_CRITERION_STATUS_CLASS[c.status]}`}>
           {TICKET_CRITERION_STATUS_LABEL[c.status]}
         </span>
         <span className={`shrink-0 font-mono text-xs leading-5 ${MUTED}`}>{c.ref}</span>
-        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm font-medium">{c.text}</span>
+        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{c.text}</span>
       </div>
       {c.path != null && c.path !== '' && (
         <div className="mt-0.5">
@@ -898,9 +924,8 @@ function CriterionRow({
         </div>
       )}
       {c.explanation != null && c.explanation !== '' && (
-        <p className="mt-1 whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300">
-          <span className="font-medium">Claude: </span>
-          {c.explanation}
+        <p className={`mt-1 ${REVIEW_PROSE}`}>
+          <PrRefText text={c.explanation} />
         </p>
       )}
     </li>
@@ -918,8 +943,10 @@ function MissingRow({
   onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
   return (
-    <li className="rounded border border-gray-200 px-3 py-2 dark:border-gray-800">
-      <div className="whitespace-pre-wrap break-words text-sm font-medium">{g.title}</div>
+    <li className={REVIEW_ITEM_CARD}>
+      <div className={`whitespace-pre-wrap break-words ${REVIEW_ITEM_TITLE}`}>
+        <PrRefText text={g.title} />
+      </div>
       {g.path != null && g.path !== '' && (
         <div className="mt-0.5">
           <CodeAnchorRef
@@ -932,8 +959,8 @@ function MissingRow({
         </div>
       )}
       {g.explanation != null && g.explanation !== '' && (
-        <p className="mt-1 whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300">
-          {g.explanation}
+        <p className={`mt-1 ${REVIEW_PROSE}`}>
+          <PrRefText text={g.explanation} />
         </p>
       )}
     </li>
@@ -942,11 +969,11 @@ function MissingRow({
 
 // A sub-group heading inside one story ("Not done (1)").
 function StoryGroupHeading({ children }: { children: string }): JSX.Element {
-  return <h5 className="text-xs font-semibold text-gray-700 dark:text-gray-200">{children}</h5>;
+  return <h5 className={REVIEW_SUBHEAD}>{children}</h5>;
 }
 
 /**
- * How the run measured up against ONE user story, inside the User stories section. ⚠ LIKE FOR
+ * How the run measured up against ONE user story, inside the Story check section. ⚠ LIKE FOR
  * LIKE WITH THE FINDINGS LIST: every not met / partly met criterion and every "Not done" item IS a
  * finding, and renders as THAT finding's card (`renderFinding`, the Findings list's own component,
  * with its Post / Reword / Copy / Ignore). The Findings list leaves those out, so each is on screen
@@ -962,6 +989,8 @@ export function ClaudeReviewTicketResults({
   renderFinding,
   changedPaths,
   onOpenInChanges,
+  aside,
+  below,
 }: {
   entry: ClaudeReviewTicketEntry;
   // "PROJ-12" or "Story 2"; null for a lone story with no key (the section title already says
@@ -974,42 +1003,47 @@ export function ClaudeReviewTicketResults({
   renderFinding: (f: ClaudeFinding, chip: string) => ReactNode;
   changedPaths: ReadonlySet<string>;
   onOpenInChanges?: OpenInChanges;
+  // Story check: the muted provenance label + Check, at the end of the header row.
+  aside?: ReactNode;
+  // Story check: the "Story" disclosure, under the header.
+  below?: ReactNode;
 }): JSX.Element {
   const { ticket, assessment } = entry;
   const sentence = ticketCriteriaSentence(assessment);
   const cardFor = (id: number | null): ClaudeFinding | null => (id != null ? (findingsById.get(id) ?? null) : null);
   const rowProps = { changedPaths, onOpenInChanges };
   return (
-    <div aria-label={`User story ${label ?? ticket.title ?? ''}`} className="space-y-3">
-      <h4 className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        {label != null && (
-          <span
-            className={`text-sm font-semibold text-gray-900 dark:text-gray-100 ${ticket.key != null ? 'font-mono' : ''}`}
-          >
-            {label}
-          </span>
-        )}
-        {ticket.title != null && ticket.title !== '' && (
-          <span className="min-w-0 break-words text-sm font-medium text-gray-900 dark:text-gray-100">
-            {ticket.title}
-          </span>
-        )}
-        {assessment != null && (
-          <span className={`${CHIP} ${TICKET_ALIGNMENT_CLASS[assessment.alignment]}`}>
-            {TICKET_ALIGNMENT_LABEL[assessment.alignment]}
-          </span>
-        )}
-        {sentence != null && <span className={`text-xs font-normal ${MUTED}`}>{sentence.replace(/\.$/, '')}</span>}
-      </h4>
+    <div aria-label={`Story ${label ?? ticket.title ?? ''}`} className="space-y-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <h4 className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          {label != null && (
+            <span
+              className={`text-sm font-semibold text-gray-900 dark:text-gray-100 ${ticket.key != null ? 'font-mono' : ''}`}
+            >
+              {label}
+            </span>
+          )}
+          {ticket.title != null && ticket.title !== '' && (
+            <span className="min-w-0 break-words text-sm font-semibold text-gray-900 dark:text-gray-100">
+              {ticket.title}
+            </span>
+          )}
+          {assessment != null && (
+            <span className={`${CHIP} ${TICKET_ALIGNMENT_CLASS[assessment.alignment]}`}>
+              {TICKET_ALIGNMENT_LABEL[assessment.alignment]}
+            </span>
+          )}
+          {sentence != null && <span className={`text-xs font-normal ${MUTED}`}>{sentence.replace(/\.$/, '')}</span>}
+        </h4>
+        {aside}
+      </div>
+      {below}
       {assessment == null ? (
         <p className={`text-xs ${MUTED}`}>Not checked in this run.</p>
       ) : (
         <>
           {assessment.summary != null && assessment.summary !== '' && (
-            <p className="whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300">
-              <span className="font-medium">Claude: </span>
-              {assessment.summary}
-            </p>
+            <Markdown prRefs>{assessment.summary}</Markdown>
           )}
           {assessment.criteria.length > 0 && (
             <ul className="space-y-1.5">
@@ -1042,10 +1076,12 @@ export function ClaudeReviewTicketResults({
           {assessment.notRequested.length > 0 && (
             <div className="space-y-1">
               <StoryGroupHeading>{`Not asked for (${assessment.notRequested.length})`}</StoryGroupHeading>
-              <ul className="space-y-1.5 border-l-2 border-gray-200 pl-3 dark:border-gray-700">
+              <ul className="space-y-1.5">
                 {assessment.notRequested.map((g, i) => (
-                  <li key={i} className="text-xs">
-                    <span className="break-words font-medium text-gray-800 dark:text-gray-200">{g.title}</span>
+                  <li key={i} className={REVIEW_ITEM_CARD}>
+                    <span className={`break-words ${REVIEW_ITEM_TITLE}`}>
+                      <PrRefText text={g.title} />
+                    </span>
                     {g.path != null && g.path !== '' && (
                       <>
                         <span className={MUTED} aria-hidden="true">
@@ -1061,7 +1097,9 @@ export function ClaudeReviewTicketResults({
                       </>
                     )}
                     {g.explanation != null && g.explanation !== '' && (
-                      <p className="whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300">{g.explanation}</p>
+                      <p className={`mt-1 ${REVIEW_PROSE}`}>
+                        <PrRefText text={g.explanation} />
+                      </p>
                     )}
                   </li>
                 ))}
@@ -1095,7 +1133,7 @@ function FollowUpRow({
   const border =
     item.status === 'not_addressed' || item.status === 'partly_addressed'
       ? 'border-amber-300 dark:border-amber-700/60'
-      : 'border-gray-200 dark:border-gray-800';
+      : 'border-gray-100 dark:border-gray-800';
   const reraised =
     item.reraisedFindingId != null && findingsById.has(item.reraisedFindingId)
       ? item.reraisedFindingId
@@ -1110,9 +1148,9 @@ function FollowUpRow({
           {SEVERITY_WORD[item.severity]}
         </span>
         <span
-          className={`min-w-0 break-words ${muted ? 'text-gray-600 dark:text-gray-400' : 'font-medium'}`}
+          className={`min-w-0 break-words ${muted ? 'text-gray-600 dark:text-gray-400' : REVIEW_ITEM_TITLE}`}
         >
-          {item.title}
+          <PrRefText text={item.title} />
         </span>
         {item.carried && <span className={`text-xs ${MUTED}`}>from an earlier review</span>}
       </div>
@@ -1126,9 +1164,8 @@ function FollowUpRow({
         />
       </div>
       {item.explanation != null && item.explanation !== '' ? (
-        <p className="mt-1 whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300">
-          <span className="font-medium">Claude: </span>
-          {item.explanation}
+        <p className={`mt-1 ${REVIEW_PROSE}`}>
+          <PrRefText text={item.explanation} />
         </p>
       ) : item.status === 'not_checked' ? (
         <p className={`mt-1 text-xs ${MUTED}`}>{notCheckedReason(item)}</p>

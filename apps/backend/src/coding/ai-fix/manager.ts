@@ -14,7 +14,8 @@ import type { AgentContext } from '../../review/agent-context.js';
 import { getFixPrContext } from './pr-context.js';
 import { getClaudeReviewById } from '../../review/claude-review/persist.js';
 import { pickReviewNonce } from '../../review/claude-review/prompts.js';
-import { buildReviewSeed, type ReviewSeed } from './review-seed.js';
+import { buildReviewSeed, type ReviewSeed, type SeedTicketItem } from './review-seed.js';
+import { getOwnedTicketItemsForPr } from '../../review/ticket-review/persist.js';
 import { buildFixSystemPrompt, buildFixUserPrompt, type FixSeed } from './prompts.js';
 import {
   insertQueuedFix,
@@ -142,16 +143,31 @@ export interface StartFixInput {
 /**
  * Load the review a 'review' seed names and render its items. null when the review is missing,
  * not this account's, not THIS PR's, or did not succeed. Never throws.
+ *
+ * `withTicketItems` adds the TICKET review's items this PR owns (review-seed.ts header) — set by a
+ * MANUAL fix only. ⚠ An auto fix never sets it: fixing a ticket's gap is a person's call.
  */
 export async function loadReviewSeed(
   ctx: AgentContext,
-  input: { accountId: number; prId: number; reviewId: number | null | undefined },
+  input: {
+    accountId: number;
+    prId: number;
+    reviewId: number | null | undefined;
+    withTicketItems?: boolean;
+  },
 ): Promise<{ review: ClaudeReview; seed: ReviewSeed } | null> {
   if (input.reviewId == null) return null;
   try {
     const review = await getClaudeReviewById(ctx, input.reviewId, input.accountId);
     if (!review || review.prId !== input.prId || review.status !== 'succeeded') return null;
-    return { review, seed: buildReviewSeed(review, { nonce: pickReviewNonce }) };
+    // A failed ticket read costs the ticket items only, never the fix.
+    const ticketItems: SeedTicketItem[] = input.withTicketItems
+      ? await getOwnedTicketItemsForPr(ctx, input.accountId, input.prId).catch((err: unknown) => {
+          ctx.log.warn({ err }, 'ai-fix: loading ticket items failed');
+          return [];
+        })
+      : [];
+    return { review, seed: buildReviewSeed(review, { nonce: pickReviewNonce, ticketItems }) };
   } catch (err) {
     ctx.log.warn({ err }, 'ai-fix: loading the review seed failed');
     return null;
@@ -227,6 +243,7 @@ export async function startFix(
         accountId,
         prId,
         reviewId: input.sourceReviewId,
+        withTicketItems: (input.trigger ?? 'manual') === 'manual',
       });
       if (!loaded) {
         claimed.delete(prId);

@@ -436,6 +436,14 @@ look" was unanswerable for a merged PR. Read by Chronology (docs/BOTTLENECKS.md 
   response that carried the selection; an EMPTY list is a positive statement and is stamped, a
   missing or nulled selection writes nothing. NULL is "not known", never "nobody was asked", and it
   is the backfill's worklist.
+- **`requester_user_id` — WHO ASKED** (migration `0081` / pg `0068`): the request event's `actor`
+  (users AND bots), set on `requested` rows only (a withdrawal's actor is not stored). NULL = not
+  known: a row written before `0081`, GitHub's ghost actor, or a removal. ⚠ **The one column that is
+  NOT immutable-once-written**: it arrived after the rows did, so a response that CARRIED the
+  `actor` selection fills it in place (`onConflictDoUpdate` on that column alone); a response
+  without the key omits it (partial-response rule), and a received `null` writes NULL. Read by the
+  Pending `review_request` card's `requesterId` heading fact (docs/BACKEND.md § Heading facts).
+  `0081` un-stamps OPEN PRs whose requests lack it, so the backfill re-reads each once.
 
 ## `workspaces.flow_settings` (CORE, free — Chronology's working hours and budgets)
 
@@ -733,7 +741,7 @@ check every hit against its table's declared unique.**
 | `workspaces` | the `workspaces` uniques (incl. the **partial** one-`isDefault`-per-account index that lives in the `.sql` migrations — drizzle index predicates are inert metadata) | `ensureDefaultWorkspace` (`onConflictDoNothing`) |
 | `repos` | `[accountId, githubNodeId]` | `upsertRepo` |
 | `pull_requests` / `events` / children | `(accountId, githubNodeId)` · `(accountId, dedupeKey)` · child `(prId, githubNodeId)` | `sync/upsert.ts` (the whole PR subtree) |
-| `review_request_events` | `[prId, githubNodeId]` — **`onConflictDoNothing`** (events are immutable) | `sync/upsert.ts` `persistReviewRequestHistory` (persistPr + the backfill) |
+| `review_request_events` | `[prId, githubNodeId]` — **`onConflictDoNothing`** (events are immutable), **`onConflictDoUpdate` of `requesterUserId` ALONE** when the `actor` selection arrived | `sync/upsert.ts` `persistReviewRequestHistory` (persistPr + the backfill) |
 | `review_comments` / `pr_comments` / `reviews` | `[prId, githubNodeId]` | `sync/upsert.ts` + the post-write local stamps in `queries.ts` (~7897 / ~7931 / ~7979) |
 | `commit_files` | `sha` (immutable content — a single-column target) | `sync/commit-files.ts` |
 | `pr_views` | `prId` | `markPrViewed` (~5416), the bulk mark-all (~5447) |

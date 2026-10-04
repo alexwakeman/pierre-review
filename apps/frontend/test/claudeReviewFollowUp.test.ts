@@ -521,11 +521,16 @@ describe('source guards', () => {
 
   it('like for like: a story finding renders as THE finding card inside its story, and once', () => {
     const tab = code(read('components/ClaudeReviewTab.tsx'));
-    // ONE card builder, used by the Findings list AND passed to the story block.
+    // ONE card builder, used by the Findings list AND handed to Story check's older stories.
     expect(tab.match(/<FindingRow\b/g) ?? []).toHaveLength(1);
-    expect(tab).toMatch(/renderFinding=\{findingCard\}/);
-    expect(tab).toMatch(/findingIds=\{storyIds\}/);
-    // The Findings list leaves out every finding the stories section shows.
+    expect(tab).toMatch(/renderFinding: findingCard/);
+    expect(tab).toMatch(/findingIds: storyIds/);
+    const cov = code(read('components/TicketCoverage.tsx'));
+    expect(cov).toMatch(/renderFinding=\{legacy\.renderFinding\}/);
+    expect(cov).toMatch(/findingIds=\{legacy\.findingIds\}/);
+    // Only the stories Story check SHOWS are placed; the Findings list leaves out exactly those.
+    expect(tab).toMatch(/placeStoryFindings\(review\.findings, legacyEntries\)/);
+    expect(tab).toMatch(/legacyOnlyEntries\(review\.tickets \?\? \[\], ticketReviews\?\.tickets \?\? \[\]\)/);
     expect(tab).toMatch(/review\.findings\.filter\(\(f\) => !placement\.placed\.has\(f\.id\)\)/);
     // A story finding the stories cannot place keeps its chip in the list.
     expect(tab).toMatch(/f\.story != null \? storyChipLabel\(f\.story, review\.tickets\) : null/);
@@ -559,10 +564,9 @@ describe('source guards', () => {
         'Run a review',
       ].sort(),
     );
-    // The stories section's title is singular or plural; it is a ReviewSection too.
-    expect(code(read('components/ClaudeReviewTab.tsx'))).toMatch(
-      /<ReviewSection\s+title=\{ticketEntries\.length === 1 \? 'User story' : 'User stories'\}/,
-    );
+    // ONE story section: Story check (TicketCoverage.tsx). The old "User stories" one is gone.
+    expect(code(read('components/ClaudeReviewTab.tsx'))).not.toMatch(/'User stor(y|ies)'/);
+    expect(code(read('components/TicketCoverage.tsx'))).toMatch(/<ReviewSection\s+title="Story check"/);
     // No hand-rolled <section> left in the pane's components.
     for (const f of files) expect(code(read(f)), f).not.toMatch(/<section\b/);
   });
@@ -596,9 +600,24 @@ describe('source guards', () => {
     expect(tab).not.toMatch(/setModel\(\s*review/);
   });
 
+  it('no "Claude: " lead on generated text — it is all Claude\'s', () => {
+    for (const f of [
+      'components/ClaudeReviewFollowUp.tsx',
+      'components/TicketCoverage.tsx',
+      'components/ClaudeReviewCiFailures.tsx',
+      'components/ClaudeReviewThreads.tsx',
+      'components/ClaudeReviewTab.tsx',
+    ]) {
+      expect(code(read(f)), f).not.toMatch(/>\s*Claude:\s*</);
+    }
+  });
+
   it('renders model and user-story text as plain text: no Markdown, no href, no maxLength', () => {
     const src = code(read('components/ClaudeReviewFollowUp.tsx'));
-    expect(src).not.toMatch(/Markdown/);
+    // ONE deliberate exception: a story's SUMMARY is markdown (a lead sentence + a bullet per gap),
+    // through the sanitizing <Markdown>. Everything else stays plain text.
+    expect(src.match(/<Markdown\b[^>]*>/g)).toEqual(['<Markdown prRefs>']);
+    expect(src).toContain('<Markdown prRefs>{assessment.summary}</Markdown>');
     expect(src).not.toMatch(/\bhref=/);
     expect(src).not.toMatch(/dangerouslySetInnerHTML/);
     // maxLength would silently cut a paste; the counter and the check's message say what is over.

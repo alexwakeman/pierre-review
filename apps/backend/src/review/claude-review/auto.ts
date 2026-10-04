@@ -37,7 +37,7 @@
 // run's start). THE SETTLE KEY IS (head, newest qualifying comment time): any change restarts the
 // AUTO_REREVIEW_SETTLE_MS wait, so a burst of comments (or of pushes, or both) costs ONE run. On such
 // a same-head run, every earlier judgement carries forward unchanged (only new commits can change
-// "addressed" / "met" — follow-up.ts, threads.ts, ticket.ts `sameHeadTicketCarry`); the new work is
+// "addressed" — follow-up.ts, threads.ts); the new work is
 // the new and changed threads.
 //
 // WHEN A RUN STARTS — THE ONE RULE (`autoReviewDue`, both re-review reasons and first reviews):

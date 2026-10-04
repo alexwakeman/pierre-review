@@ -25,6 +25,7 @@ import type {
   ClaudeTicketAssessment,
   ReviewMode,
   ReviewRouteReason,
+  StoredPrFile,
 } from '@pierre-review/shared';
 import { CLAUDE_FINDING_LENSES, threadAssessmentCounts } from '@pierre-review/shared';
 import { storedList, stripStoredStoryLead } from '@pierre-review/shared';
@@ -813,6 +814,77 @@ export async function getReviewPrContext(
   };
 }
 
+/** A ticket peer of the reviewed PR, as a deep review's "Related PRs" block needs it. */
+export interface ReviewPeerContext {
+  prId: number;
+  owner: string;
+  name: string;
+  repoFullName: string;
+  number: number;
+  title: string;
+  headSha: string;
+  state: 'open' | 'merged';
+  // The synced changed-file paths (the `files` column, capped at 100 by sync); [] when not synced.
+  files: string[];
+}
+
+/**
+ * The given PRs as ticket peers, account-scoped: open or merged with a head to check out (a closed,
+ * unmerged PR is no longer part of the ticket — the ticket review drops it the same way). Rows
+ * another account owns are simply absent. Order is NOT meaningful; the caller ranks.
+ */
+export async function getReviewPeerContexts(
+  ctx: AgentContext,
+  accountId: number,
+  prIds: readonly number[],
+): Promise<ReviewPeerContext[]> {
+  const ids = [...new Set(prIds)];
+  if (ids.length === 0) return [];
+  const { prs, repos } = tables(ctx);
+  const rows = (await ctx.db
+    .select({
+      prId: prs.id,
+      owner: repos.owner,
+      name: repos.name,
+      number: prs.number,
+      title: prs.title,
+      headSha: prs.headSha,
+      state: prs.state,
+      files: prs.files,
+    })
+    .from(prs)
+    .innerJoin(repos, eq(repos.id, prs.repoId))
+    .where(and(inArray(prs.id, ids), eq(repos.accountId, accountId)))
+    .execute()) as Array<{
+    prId: number;
+    owner: string;
+    name: string;
+    number: number;
+    title: string;
+    headSha: string | null;
+    state: string;
+    files: StoredPrFile[] | null;
+  }>;
+  const out: ReviewPeerContext[] = [];
+  for (const r of rows) {
+    if ((r.state !== 'open' && r.state !== 'merged') || !r.headSha) continue;
+    out.push({
+      prId: r.prId,
+      owner: r.owner,
+      name: r.name,
+      repoFullName: `${r.owner}/${r.name}`,
+      number: r.number,
+      title: r.title,
+      headSha: r.headSha,
+      state: r.state,
+      files: Array.isArray(r.files)
+        ? r.files.map((f) => f?.path).filter((x): x is string => typeof x === 'string' && x !== '')
+        : [],
+    });
+  }
+  return out;
+}
+
 // ---- The previous review, for the follow-up ----
 
 /**
@@ -884,7 +956,6 @@ export async function loadPriorReviewForFollowUp(
     fileInDiff: f.fileInDiff,
     posted: f.postedAt != null,
     carried,
-    story: storyOf(f),
   });
 
   const own = (await ctx.db
@@ -940,8 +1011,10 @@ export async function loadPriorReviewForFollowUp(
 
 // ---- Writers ----
 
-// The tickets are stored at QUEUE time (not on success), so a failed or cancelled run still
-// prefills the SPA's panel for the re-run. Stored as an ARRAY (null when none).
+// ⚠ LEGACY `tickets`. Runs from before the ticket review stored their stories here at QUEUE time.
+// Stories left the PR review (review/ticket-review/), so no live caller passes any and a new run's
+// `ticket` is NULL; the parameter stays only so tests can seed the history rows the SPA still
+// renders in the old layout. Stored as an ARRAY (null when none).
 export async function insertQueuedReview(
   ctx: AgentContext,
   prId: number,
@@ -1002,8 +1075,8 @@ export interface ReviewSuccessData {
   // only on a re-raise of a comment already posted on this commit (absent ⇒ included).
   findings: Array<ReviewFinding & { priorFindingId?: number | null; included?: boolean }>;
   followUp?: ClaudeReviewFollowUpRecord | null;
-  // One per ticket, index-aligned with the stored tickets.
-  ticketAssessment?: ClaudeTicketAssessment[] | null;
+  // (No story assessment: stories left the PR review, so `ticket_assessment` and the findings'
+  // story_* columns stay NULL on every new run. Old rows keep theirs as read-only history.)
   // Other reviewers' open threads, judged. null/absent ⇒ none assessed (stored NULL).
   threadAssessments?: ClaudeThreadAssessment[] | null;
   // The head's CI and each failing check, diagnosed. null/absent ⇒ CI not looked at (stored NULL).
@@ -1034,7 +1107,6 @@ export async function saveReviewSuccess(
         diffCapped: data.diffCapped ?? null,
         excludedFiles: data.excludedFiles,
         followUp: data.followUp ?? null,
-        ticketAssessment: data.ticketAssessment ?? null,
         threadAssessments: data.threadAssessments ?? null,
         ciFailures: data.ciFailures ?? null,
         finishedAt: new Date(),
@@ -1063,9 +1135,6 @@ export async function saveReviewSuccess(
           included: f.included ?? true,
           priorFindingId: f.priorFindingId ?? null,
           lens: f.lens ?? null,
-          // Set only on a story finding (ticket.ts `storyFindingsFrom`, or a re-raise of one).
-          storyIndex: f.story?.index ?? null,
-          storyRef: f.story?.ref ?? null,
         })
         .execute();
     }
@@ -1369,7 +1438,8 @@ export async function markReviewCommentsSeen(
 
 /**
  * The previous SUCCEEDED run (non-skip, id below this one) — what a same-head run carries forward:
- * its head, its stories + their assessments, and its thread assessments. null when none.
+ * its head, its thread assessments and its CI diagnoses. null when none. (Its stories are no longer
+ * read: the PR review stopped judging them.)
  */
 export async function loadPriorRunForCarry(
   ctx: AgentContext,
@@ -1378,8 +1448,6 @@ export async function loadPriorRunForCarry(
   beforeReviewId: number,
 ): Promise<{
   headSha: string;
-  tickets: ClaudeReviewTicket[];
-  ticketAssessments: ClaudeTicketAssessment[];
   threadAssessments: ClaudeThreadAssessment[] | null;
   ciFailures: ClaudeCiFailure[] | null;
 } | null> {
@@ -1387,8 +1455,6 @@ export async function loadPriorRunForCarry(
   const rows = (await ctx.db
     .select({
       headSha: cr.headSha,
-      ticket: cr.ticket,
-      ticketAssessment: cr.ticketAssessment,
       threadAssessments: cr.threadAssessments,
       ciFailures: cr.ciFailures,
     })
@@ -1406,8 +1472,6 @@ export async function loadPriorRunForCarry(
     .limit(1)
     .execute()) as Array<{
     headSha: string;
-    ticket: ClaudeReviewTicket | ClaudeReviewTicket[] | null;
-    ticketAssessment: ClaudeTicketAssessment | ClaudeTicketAssessment[] | null;
     threadAssessments: ClaudeThreadAssessment[] | null;
     ciFailures: ClaudeCiFailuresRecord | null;
   }>;
@@ -1415,26 +1479,7 @@ export async function loadPriorRunForCarry(
   if (!r) return null;
   return {
     headSha: r.headSha,
-    tickets: storedList(r.ticket),
-    ticketAssessments: storedList(r.ticketAssessment),
     threadAssessments: Array.isArray(r.threadAssessments) ? r.threadAssessments : null,
     ciFailures: ciRecordOf(r.ciFailures)?.failures ?? null,
   };
-}
-
-/** The stories stored on the PR's latest run ([] when none) — what a re-review carries forward. */
-export async function getLatestStoredTickets(
-  ctx: AgentContext,
-  prId: number,
-  accountId: number,
-): Promise<ClaudeReviewTicket[]> {
-  const { cr } = tables(ctx);
-  const rows = (await ctx.db
-    .select({ ticket: cr.ticket })
-    .from(cr)
-    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId)))
-    .orderBy(desc(cr.id))
-    .limit(1)
-    .execute()) as Array<{ ticket: ClaudeReviewTicket | ClaudeReviewTicket[] | null }>;
-  return storedList(rows[0]?.ticket ?? null);
 }

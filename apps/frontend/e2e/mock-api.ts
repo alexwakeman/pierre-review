@@ -13,6 +13,8 @@ import type {
   MyTurnResponse,
   OpenPrsResponse,
   ClaudeReviewStatesResponse,
+  PrTicketReviewsResponse,
+  TicketReviewStatesResponse,
   PrDetail,
   Repo,
   ThreadDetail,
@@ -34,6 +36,7 @@ import type {
   PendingAuthorSplit,
   PendingTab,
   SecurityCard,
+  TicketMergedPrsResponse,
 } from '@pierre-review/shared';
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
 // build the Pending tabs from the shipped list rather than re-typing it.
@@ -209,6 +212,10 @@ const OPEN_PRS: OpenPrsResponse = { prs: PRS };
 // The Open PRs Claude Review strip's ONE batched read. Never requested while `ai.enabled` is false
 // (below); typed and served so a spec that flips it gets the real shape, not the `{}` catch-all.
 const CLAUDE_REVIEW_STATES: ClaudeReviewStatesResponse = { states: [] };
+// The ticket review's two boot-time reads (the PR pane's Story check, the Open PRs stack pills).
+// Both gate on `ai.enabled` like the strip above; typed so a spec that flips it gets real shapes.
+const TICKET_REVIEW_STATES: TicketReviewStatesResponse = { states: [] };
+const prTicketReviewsFor = (prId: number): PrTicketReviewsResponse => ({ prId, tickets: [] });
 
 const ME_RESPONSE: MeResponse = {
   user: {
@@ -812,9 +819,17 @@ export async function installMockApi(page: Page): Promise<void> {
       if (path.includes('/api/timeline')) return json(route, TIMELINE);
       if (path.includes('/api/open-prs')) return json(route, OPEN_PRS);
       if (path.endsWith('/api/claude-review/states')) return json(route, CLAUDE_REVIEW_STATES);
+      if (path.endsWith('/api/ticket-reviews/states')) return json(route, TICKET_REVIEW_STATES);
+      const ticketReviewsMatch = path.match(/\/api\/prs\/(\d+)\/ticket-reviews$/);
+      if (ticketReviewsMatch) return json(route, prTicketReviewsFor(Number(ticketReviewsMatch[1])));
       if (path.endsWith('/api/users')) return json(route, USERS);
       if (path.endsWith('/api/repos')) return json(route, [REPO]);
       if (path.endsWith('/api/mergers')) return json(route, []);
+      // The Open PRs stacks' "Merged (n)" panel (Pro `issueLinks`, off in e2e). Typed and served
+      // so a spec that flips the capability gets the real shape, not the digest stub below.
+      if (path.endsWith('/api/pro/ticket-merged-prs')) {
+        return json(route, { workspaceId: WORKSPACE.id, tickets: [] } satisfies TicketMergedPrsResponse);
+      }
       // Pro digest endpoints — disabled in e2e (pro:{activityDigest:false}); harmless stub.
       if (path.includes('/api/pro/')) {
         return json(route, { enabled: false, model: 'claude-haiku-4-5', digests: [], digest: null, generatedAt: iso(0) });

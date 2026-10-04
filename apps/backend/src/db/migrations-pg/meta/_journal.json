@@ -470,6 +470,20 @@
       "when": 1790650800000,
       "tag": "0066_claude_finding_story",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1790654400000,
+      "tag": "0067_ticket_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1790658000000,
+      "tag": "0068_review_request_requester",
+      "breakpoints": true
     }
   ]
 }

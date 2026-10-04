@@ -5416,6 +5416,43 @@ export interface TicketLinksResponse {
   titlesComplete: boolean;
 }
 
+// ── The Open PRs ticket stacks' MERGED panel (Pro, `issueLinks`) ───────────────────────────────
+// `GET /api/pro/ticket-merged-prs?workspace=<id>&keys=ENG-7,ENG-8` — ONE request for the whole
+// grouped board (never one per stack). For each key, every MERGED pull request Limn has linked to
+// that ticket: the stored ticket rows (plugin 0038, state 'ok') of this account on the WORKSPACE'S
+// Jira site, in any repo of the account. Closed-unmerged PRs are excluded. DB-only — no Jira call.
+// A workspace whose tracker is not Jira answers `tickets: []`. Over `TICKET_MERGED_PRS_MAX_KEYS`
+// keys is a 400, never a silent truncation.
+export const TICKET_MERGED_PRS_MAX_KEYS = 200;
+
+export interface TicketMergedPr {
+  prId: number;
+  repoId: number;
+  /** owner/name */
+  repoFullName: string;
+  number: number;
+  title: string;
+  authorLogin: string | null;
+  authorDisplayName: string | null;
+  authorAvatarUrl: string | null;
+  /** ISO-8601. */
+  mergedAt: string;
+}
+
+export interface TicketMergedPrs {
+  /** The key as asked, upper-cased. */
+  key: string;
+  /** 'jira:<apiRoot>#<KEY>' — the same ident the ticket review uses. */
+  ident: string;
+  /** Newest merge first. Never empty: a key with no merged PR is absent. */
+  prs: TicketMergedPr[];
+}
+
+export interface TicketMergedPrsResponse {
+  workspaceId: number;
+  tickets: TicketMergedPrs[];
+}
+
 // Where ONE reviewer stands on a pull request — the wire shape of the server's canonical fold
 // (`computeReviewStandingsByPr`, apps/backend/src/db/triage.ts): a reviewer's latest VERDICT
 // (approved / changes_requested) if they ever filed one, else their latest dismissal, else their
@@ -5762,6 +5799,25 @@ export interface MyTurnReply {
   at: string;
   /** The stored body was longer than the cap and was cut. */
   truncated: boolean;
+}
+
+/** A comment quoted in a Pending card's HEADING — plain text, not markdown.
+ *  Built server-side from stored bodies (no GitHub call): markdown and HTML stripped, whitespace
+ *  collapsed, at most `CARD_EXCERPT_MAX_CHARS`, cut on a word boundary. ⚠ Third-party text:
+ *  render as a text node. ⚠ DISPLAY ONLY — never in a `detail`, a payload hash or a model payload. */
+export interface CardExcerpt {
+  text: string;
+  /** The comment was longer than the excerpt (or the excerpt starts mid-comment, "…" marked). */
+  truncated: boolean;
+}
+
+/** The OPENING comment of a review thread — what an unanswered thread is asking. See
+ *  `MyTurnCard.firstComment` / `UntouchedThreadCard.firstComment`. */
+export interface CardThreadComment extends CardExcerpt {
+  /** The comment's author (usually the thread's `originalCommenterId`); null when unmapped. */
+  authorId: number | null;
+  /** ISO */
+  at: string;
 }
 
 // A new open PR (by someone other than you, non-draft) in one of the account's repos,
@@ -6463,8 +6519,9 @@ export const CLAUDE_REVIEW_MAX_SPECIALISTS = 3;
 // (Gherkin, nested bullets, tables, prose), so Claude reads the text and enumerates the criteria
 // itself, best effort.
 
-// What the SPA sends (every field optional; all blank ⇒ no ticket). A review carries up to
-// CLAUDE_REVIEW_MAX_TICKETS of these (`GenerateReviewBody.tickets`), each assessed on its own.
+// What the SPA sends (every field optional; all blank ⇒ no ticket). A pasted-story ticket review
+// carries up to CLAUDE_REVIEW_MAX_TICKETS of these (`StartTicketReviewBody.tickets`), each checked
+// as its own one-PR ticket.
 export interface ClaudeReviewTicketInput {
   title?: string;
   description?: string;
@@ -7052,12 +7109,8 @@ export interface GenerateReviewBody {
   // A model that is not offered (e.g. a retired id) is a 400.
   model?: ClaudeReviewModel;
   // (No depth: the router always decides. A stale `mode` key is stripped by the route schema.)
-  // The optional user stories, at most CLAUDE_REVIEW_MAX_TICKETS. Over a cap in
-  // CLAUDE_REVIEW_TICKET_LIMITS ⇒ 400 { error: 'TicketInvalid', index, field, message } — never
-  // truncated. An all-blank entry is dropped.
-  tickets?: ClaudeReviewTicketInput[];
-  // @deprecated one story; read only when `tickets` is absent.
-  ticket?: ClaudeReviewTicketInput;
+  // (No stories either: a PR review checks none — the ticket review does, StartTicketReviewBody.
+  // A stale `ticket`/`tickets` key is stripped by the route schema.)
 }
 
 // Saves the user's authored draft; never mutates Claude's summary/verdict.
@@ -7166,6 +7219,291 @@ export interface ClaudeReviewStateSummary {
 
 export interface ClaudeReviewStatesResponse {
   states: ClaudeReviewPrState[];
+}
+
+// ---- Ticket review: one review per TICKET, across every PR on it ----
+// Claude Review is split in two. The PR review (above) looks for code defects in ONE pull request.
+// The TICKET review judges a user story's acceptance criteria against EVERY pull request that names
+// the ticket, together — one run per ticket, never one per PR — with a read-only checkout of each.
+// Tables: `ticket_reviews` (one row per run, history kept), `ticket_review_members` (the exact PR
+// set a run judged) and `ticket_review_items` (one row per unmet / partly met criterion or missing
+// item — what can be posted to GitHub). Routes: docs/API.md § Ticket review.
+//
+// IDENT. A ticket is named by a stable string:
+//   'jira:<apiRoot>#<KEY>'               a Jira ticket the plugin detected (same site ⇒ same ticket,
+//                                        across workspaces of the account)
+//   'manual:<prId>:<first 8 hex of sha256(title|acceptance criteria)>'
+//                                        a pasted story: a one-PR ticket review, never shared
+// Shared helpers: `jiraTicketIdent` / `parseTicketIdent` (claude-review.ts).
+
+// The most member PRs one ticket review takes. Over it, the run REFUSES (`too_many_prs`) and says
+// the count, rather than judging a sample.
+export const TICKET_REVIEW_MAX_PRS = 8;
+// Default per-WORKSPACE daily cap on AUTOMATIC ticket reviews (trigger 'auto' or 'cascade'), counted
+// from `ticket_reviews` rows of the workspace that started them. Separate from the PR review's own
+// auto cap. The backend's `TICKET_REVIEW_DAILY_CAP` env var overrides it.
+export const TICKET_REVIEW_DAILY_CAP = 20;
+// The most peer PRs (other PRs on the same tickets) a DEEP PR review may read, read-only.
+export const TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW = 4;
+
+export type TicketReviewStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+// 'manual' = a click ("Check story", or Re-check on Open PRs); 'auto' = the sweeper found a ticket
+// whose PR set changed; 'cascade' = a PR on the ticket was pushed, joined or left. Both automatic
+// kinds count against TICKET_REVIEW_DAILY_CAP.
+export type TicketReviewTrigger = 'manual' | 'auto' | 'cascade';
+
+// Why the server declined to run (written by the server, never the model).
+//   too_many_prs     more than TICKET_REVIEW_MAX_PRS open or merged PRs name the ticket
+//   no_members       no open or merged PR names the ticket any more
+//   no_ticket        the ticket could not be read (no plugin answer, no pasted text)
+//   peer_unreadable  no member PR could be checked out at all
+export type TicketReviewRefusal = 'too_many_prs' | 'no_members' | 'no_ticket' | 'peer_unreadable';
+
+// A member's state at the time of the run. A closed-but-unmerged PR is never a member.
+export type TicketReviewPrState = 'open' | 'merged';
+
+// One PR a run judged.
+export interface TicketReviewMember {
+  prId: number;
+  repoId: number;
+  // 'owner/name'
+  repo: string;
+  number: number;
+  title: string | null;
+  // The head the run read (a merged PR: its final head).
+  headSha: string;
+  state: TicketReviewPrState;
+  // false = the server could not prepare a checkout of it; criteria it might deliver are then
+  // `unclear`, never `not_met`.
+  checkedOut: boolean;
+}
+
+// Where in a member PR a criterion is shown to be done.
+export interface TicketEvidence {
+  prId: number;
+  path: string;
+  line: number | null;
+}
+
+// Where unmet work belongs, as Claude named it: a member PR, or a repository (no PR yet). At least
+// one field is set.
+export interface TicketExpectedIn {
+  prId: number | null;
+  repoId: number | null;
+}
+
+// One acceptance criterion's verdict across every member. `ref` is 'AC1'…, `index` 0-based in
+// Claude's order. `deliveredBy` lists the member PRs that deliver it (server-checked: only member
+// ids survive, and a `met` left with no evidence is demoted to `unclear`).
+export interface TicketCriterion {
+  ref: string;
+  index: number;
+  text: string;
+  status: ClaudeTicketCriterionStatus;
+  explanation: string | null;
+  deliveredBy: number[];
+  evidence: TicketEvidence[];
+  expectedIn: TicketExpectedIn | null;
+}
+
+// Something the ticket asks for that no member does. `ref` is 'M1'….
+export interface TicketMissingItem {
+  ref: string;
+  title: string;
+  explanation: string | null;
+  expectedIn: TicketExpectedIn | null;
+}
+
+// Something a member does that the ticket did not ask for.
+export interface TicketNotRequestedItem {
+  title: string;
+  explanation: string | null;
+  prId: number | null;
+  path: string | null;
+  line: number | null;
+}
+
+// The server-validated assessment one run stored (`ticket_reviews.assessment`).
+export interface TicketAssessment {
+  alignment: ClaudeTicketAlignment;
+  summary: string | null;
+  criteria: TicketCriterion[];
+  missing: TicketMissingItem[];
+  notRequested: TicketNotRequestedItem[];
+}
+
+// One unmet / partly met criterion or missing item — the thing that can be posted to GitHub.
+// `ownerPrId` is where it belongs (Claude's `expectedIn` member, else null = the PR being viewed).
+export interface TicketReviewItem {
+  id: number;
+  ticketReviewId: number;
+  // 'AC3' or 'M1'
+  ref: string;
+  // A criterion's status, or 'missing' for an M item.
+  status: 'not_met' | 'partly_met' | 'missing';
+  title: string;
+  // Claude's explanation ('' when none).
+  body: string;
+  ownerPrId: number | null;
+  path: string | null;
+  line: number | null;
+  // The same item on the previous run of this ticket (matched by kind + folded text), else null.
+  priorItemId: number | null;
+  // Set once posted. A re-raised item inherits its earlier posting (`carried: true`) and is never
+  // posted twice.
+  posted: {
+    prId: number;
+    commentId: string;
+    postedAt: string; // ISO-8601
+    carried: boolean;
+  } | null;
+}
+
+// Why a ticket's latest run no longer describes its PRs, in this order (all that apply are listed):
+//   story_edited  the ticket's title, description or acceptance criteria changed
+//   pr_added      a PR now names the ticket that the run did not judge
+//   pr_left       a PR the run judged no longer names it, or was closed without merging
+//   pr_pushed     a member's head moved
+//   pr_merged     a member merged (its head did not move)
+export type TicketReviewStaleReason = 'story_edited' | 'pr_added' | 'pr_left' | 'pr_pushed' | 'pr_merged';
+
+// Is a ticket's latest run still true? SERVER-COMPUTED: the stored fingerprint against one built
+// from the synced heads now — never the model's call.
+//   current  the latest succeeded run judged exactly today's PRs, heads and story
+//   stale    something moved since (`staleBecause`, `changedPrIds`)
+//   running  a run is queued or running (the last succeeded run, if any, is still described)
+//   none     no succeeded run yet
+export interface TicketReviewState {
+  ident: string;
+  status: 'current' | 'stale' | 'running' | 'none';
+  staleBecause: TicketReviewStaleReason[];
+  // Member PRs behind `staleBecause` (pushed, joined or left). [] when not stale.
+  changedPrIds: number[];
+  // The latest SUCCEEDED run, and the in-flight one.
+  latestRunId: number | null;
+  runningRunId: number | null;
+  alignment: ClaudeTicketAlignment | null;
+  // Criteria counts of the latest succeeded run; null without one.
+  counts: {
+    met: number;
+    partlyMet: number;
+    notMet: number;
+    unclear: number;
+    notChecked: number;
+    total: number;
+  } | null;
+  // How many PRs that run judged.
+  memberCount: number;
+  // When the latest succeeded run finished.
+  checkedAt: string | null; // ISO-8601
+}
+
+// One run, in full.
+export interface TicketReview {
+  id: number;
+  ident: string;
+  ticketKey: string | null;
+  ticketTitle: string | null;
+  // The story exactly as judged; null on a run that refused before reading it.
+  ticket: ClaudeReviewTicket | null;
+  workspaceId: number;
+  // The PR whose button (or auto run) started it.
+  originPrId: number | null;
+  trigger: TicketReviewTrigger;
+  status: TicketReviewStatus;
+  // Stored model id (display only).
+  model: string;
+  costUsd: number | null;
+  error: string | null;
+  refused: { reason: TicketReviewRefusal; prCount: number | null } | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  alignment: ClaudeTicketAlignment | null;
+  summary: string | null;
+  assessment: TicketAssessment | null;
+  members: TicketReviewMember[];
+  items: TicketReviewItem[];
+}
+
+// POST /api/ticket-reviews — start a ticket review from a PR.
+//   { prId }               every ticket the PR is on (the plugin's detection)
+//   { prId, ident }        one of them
+//   { prId, tickets }      pasted stories: one one-PR ticket review each (no plugin needed)
+export type StartTicketReviewBody =
+  | { prId: number; ident?: string }
+  | { prId: number; tickets: ClaudeReviewTicketInput[] };
+
+export interface StartTicketReviewResponse {
+  runs: Array<{
+    ident: string;
+    // null when refused before a row was written.
+    ticketReviewId: number | null;
+    // 'already_running' = a run of this ticket is queued or running; its id is returned.
+    outcome: 'queued' | 'already_running' | 'refused';
+    refused: { reason: TicketReviewRefusal; prCount: number | null } | null;
+  }>;
+}
+
+// GET /api/prs/:id/ticket-reviews — one entry per ticket the PR is on (detected or reviewed),
+// with its latest run and whether that run is current.
+export interface PrTicketReviewsResponse {
+  prId: number;
+  tickets: Array<{
+    ident: string;
+    ticketKey: string | null;
+    ticketTitle: string | null;
+    // The latest run of this ticket (any status), null when never run.
+    review: TicketReview | null;
+    state: TicketReviewState;
+  }>;
+}
+
+// POST /api/ticket-reviews/states — batched currency for the Open PRs ticket stacks. At most
+// TICKET_REVIEW_STATES_MAX idents per request (400 over, never truncated).
+export const TICKET_REVIEW_STATES_MAX = 100;
+export interface TicketReviewStatesBody {
+  idents: string[];
+}
+export interface TicketReviewStatesResponse {
+  // One per requested ident, in request order (unknown ⇒ status 'none').
+  states: TicketReviewState[];
+}
+
+// GET /api/ticket-reviews/:id/stream — Server-Sent Events, same shape as the PR review's stream.
+export interface TicketReviewProgress {
+  phase: 'queued' | 'preparing' | 'reviewing' | 'saving';
+  message?: string;
+  recentActivity?: string[];
+  usage?: { inputTokens: number; outputTokens: number; costUsd: number };
+}
+export type TicketReviewStreamEvent =
+  | {
+      type: 'snapshot' | 'progress';
+      status: TicketReviewStatus;
+      ticketReviewId: number;
+      progress: TicketReviewProgress | null;
+    }
+  | {
+      type: 'done';
+      status: TicketReviewStatus;
+      ticketReviewId: number;
+      // Every member PR id — the SPA invalidates ['ticket-reviews', prId] for each.
+      memberPrIds: number[];
+    };
+
+// POST /api/ticket-reviews/:id/items/:itemId/post — post one item as a PR comment. The target is
+// the item's `ownerPrId`, else `viewedPrId` (which must be a member of that run).
+export interface PostTicketItemBody {
+  viewedPrId: number;
+}
+export interface PostTicketItemResponse {
+  item: TicketReviewItem;
+  // false with a non-null commentId = the comment IS on GitHub and only local confirmation lagged.
+  // Never retry: a retry double-posts.
+  visible: boolean;
+  commentId: string | null;
 }
 
 // ---- Claude Review chat (Pro+, local-only like the rest of Claude Review) ----
@@ -8345,6 +8683,44 @@ export interface MyTurnCard extends InsightCardBase, InsightPrRef {
    *  ⚠ DISPLAY ONLY — never in `detail` (Slack prints it), a payload hash or a model payload.
    *  Trailing optional; absent = nothing to show. */
   reply?: MyTurnReply;
+  // ── HEADING FACTS — what the SPA composes an event-first heading from ─────────────────────────
+  //
+  // Every field below is TRAILING OPTIONAL, folded from SYNCED rows only (no GitHub call, so the
+  // board still fetches nothing on mount), and set only by `GET /api/attention`'s fold (the board's
+  // display extras, beside `failingChecks`). ⚠ DISPLAY ONLY: none of them is in `detail` (Slack and
+  // notifications print that, unchanged), in a payload hash, the work-plan hash or a model payload,
+  // and none changes which cards exist or any count. ABSENT IS "NOT KNOWN" — drop the clause that
+  // needed it, never print a placeholder.
+  /** `mention` only: who @-mentioned you (the `pr_mentions` row's author). */
+  mentionedById?: number;
+  /** `mention` only: the comment that mentioned you, as typed (quoted lines dropped), centred on
+   *  the mention when it sits deep in a long comment. Absent when the comment cannot be found. */
+  mentionExcerpt?: CardExcerpt;
+  /** Thread-grained reasons (`thread` — a reply or `likely_addressed` — `thread_reply`,
+   *  `own_thread`): the file the thread is on. */
+  threadPath?: string;
+  /** With `threadPath`: the line, when GitHub still anchors the thread to one. */
+  threadLine?: number;
+  /** `thread` with a `likely_addressed` ball only: who wrote the FIRST commit after your comment
+   *  that changed `threadPath` (`commits.author_id`). ⚠ Absent is ordinary — the heuristic also
+   *  fires on an outdated thread or a bot's marker with no such commit, the commit's file list may
+   *  not be synced, or its author is unmapped. Never word it as "addressed": a commit touched it. */
+  committerId?: number;
+  /** `own_thread` only: the thread's opening comment, so the card can quote it without fetching
+   *  the thread. */
+  firstComment?: CardThreadComment;
+  /** `your_pr` only: who did the new things (comments, reviews, commits since you last opened the
+   *  PR — the events `detail` counts), newest activity first, you excluded, at most
+   *  `YOUR_PR_NEW_ACTORS_SHOWN`. Bots included: a CodeRabbit comment is news on your PR. */
+  newActorIds?: number[];
+  /** With `newActorIds`: how many distinct people that is, uncapped — "and N others" is
+   *  `newActorTotal - newActorIds.length`, computed here, never by the client. */
+  newActorTotal?: number;  /** `review_request` only: who ASKED you to review — the requester (`review_request_events
+   *  .requester_user_id`, the event's `actor`) of the NEWEST synced request naming you, when no
+   *  later withdrawal of you follows it. ⚠ Absent is ordinary: history synced before the column
+   *  existed (filled by a one-time re-read), a ghost actor, a history at its 25-event cap (the
+   *  newest request may be past it), or a self-request. */
+  requesterId?: number;
 }
 
 /** The home-kind facts a promoted My Turn card carries — see `MyTurnCard.own`. */
@@ -8513,6 +8889,11 @@ export interface UntouchedThreadCard extends InsightCardBase, InsightPrRef {
   // (so the card can show a bot pill). Undefined/null when a human opened the thread.
   botKind?: AutomatedReviewerKind | null;
   botLabel?: string | null;
+  /** The thread's opening comment — see `MyTurnCard.firstComment`, same fold, same rules (board
+   *  only, display only, absent = not known). The card quotes it instead of fetching the thread. */
+  firstComment?: CardThreadComment;
+  /** The line the thread anchors to; absent when GitHub no longer anchors it to one. */
+  line?: number;
 }
 
 export interface ReviewerLoadCard extends InsightCardBase {
@@ -13179,3 +13560,38 @@ export interface BotBenchmarkPlacementResponse {
  *  ⚠ NEVER A SILENT TRUNCATION. Over the cap the response sets `truncated: true` and the caller
  *  narrows with `?repoIds=`; the omitted repositories are not "no data". */
 export const BOT_BENCHMARK_MAX_PLACEMENT_REPOS = 12;
+
+// ---- POST /api/prs/resolve — PR references in the Review tab's prose → local PR ids ----
+//
+// The Review tab links every PR reference it can ("bng-library#66", "acme/api#12", "#352") to that
+// PR IN LIMN. Refs it can resolve from data already on screen never reach this route; the rest go
+// in ONE batched, DB-only request per pane. Account-scoped: a ref names a PR only within the
+// caller's own repos, so another tenant's PR resolves to null exactly like a PR never synced.
+
+/** One reference. `repo` is "owner/name", or a bare repository name (resolved only when exactly
+ *  one of the account's repositories carries it). */
+export interface PrRefQuery {
+  repo: string;
+  number: number;
+}
+
+export interface ResolvePrRefsBody {
+  refs: PrRefQuery[];
+}
+
+export interface ResolvedPrRef {
+  // Echoed exactly as sent, so the client can key the answer.
+  repo: string;
+  number: number;
+  // null ⇒ no PR of the account's matches (unknown repo, ambiguous bare name, or not synced).
+  prId: number | null;
+  repoFullName: string | null;
+  title: string | null;
+}
+
+export interface ResolvePrRefsResponse {
+  refs: ResolvedPrRef[];
+}
+
+/** Over this many refs the route answers 400 rather than truncating. */
+export const PR_REF_RESOLVE_MAX = 100;

@@ -429,3 +429,58 @@ export function stripStoredStoryLead(body: string, story: ClaudeFindingStory | n
   if (!story) return body;
   return body.replace(STORED_STORY_LEAD_RE, '');
 }
+
+// ---- ticket review idents ----
+// A ticket review is keyed by an IDENT (types.ts § Ticket review). The manual form's hash is
+// computed on the server (it needs sha256); the SPA only ever echoes idents it was given.
+
+const JIRA_IDENT_RE = /^jira:(.+)#([A-Z][A-Z0-9_]{0,19}-\d{1,9})$/;
+const MANUAL_IDENT_RE = /^manual:(\d{1,12}):([0-9a-f]{8})$/;
+// An ident is bounded so a request body can never carry an unbounded key.
+export const TICKET_IDENT_MAX_CHARS = 600;
+
+/**
+ * ⚠ THE ONE DERIVATION OF A JIRA API ROOT — the plugin runs it on the workspace's tracker base URL
+ * (what it stores as `api_root` and builds every ident on), the SPA on a ticket's browse link
+ * (`<base>/browse/<KEY>`), so both land on the same root. Scheme + host + port + the context path,
+ * with everything from a `browse` / `rest` / `secure` segment onwards, the query, the hash and
+ * trailing slashes removed. null for anything that is not an absolute http(s) URL. It lives here,
+ * not in either caller, because a second copy that drifts by one character splits one ticket into
+ * two idents.
+ */
+// `shared` compiles with no DOM or Node lib, so the WHATWG `URL` both runtimes provide is declared
+// here, module-scoped, with only the members this fold reads.
+declare const URL: new (input: string) => { protocol: string; host: string; pathname: string };
+
+export function jiraApiRoot(baseUrl: string | null | undefined): string | null {
+  if (baseUrl == null) return null;
+  let url: InstanceType<typeof URL>;
+  try {
+    url = new URL(baseUrl.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  const segments = url.pathname.split('/').filter((s: string) => s !== '');
+  const cut = segments.findIndex((s: string) => /^(browse|rest|secure)$/i.test(s));
+  const kept = cut === -1 ? segments : segments.slice(0, cut);
+  const path = kept.length > 0 ? `/${kept.join('/')}` : '';
+  return `${url.protocol}//${url.host}${path}`;
+}
+
+/** 'jira:<apiRoot>#<KEY>' — the same Jira site and key are the same ticket across workspaces. */
+export const jiraTicketIdent = (apiRoot: string, key: string): string => `jira:${apiRoot}#${key}`;
+
+export type ParsedTicketIdent =
+  | { kind: 'jira'; apiRoot: string; key: string }
+  | { kind: 'manual'; prId: number; hash: string };
+
+/** null for anything that is not a well-formed ident. */
+export function parseTicketIdent(ident: string): ParsedTicketIdent | null {
+  if (typeof ident !== 'string' || ident.length === 0 || ident.length > TICKET_IDENT_MAX_CHARS) return null;
+  const j = JIRA_IDENT_RE.exec(ident);
+  if (j) return { kind: 'jira', apiRoot: j[1]!, key: j[2]! };
+  const m = MANUAL_IDENT_RE.exec(ident);
+  if (m) return { kind: 'manual', prId: Number(m[1]), hash: m[2]! };
+  return null;
+}

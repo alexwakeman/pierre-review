@@ -11,7 +11,7 @@
 //   pnpm --filter @pierre-review/backend test claude-review-persist
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type {
   ClaudeReviewFollowUpRecord,
   ClaudeReviewModel,
@@ -153,7 +153,7 @@ describe('ticket + follow-up persistence', () => {
     expect(latest?.ticketAssessment).toBeNull();
   });
 
-  it('saveReviewSuccess writes followUp, ticketAssessment and priorFindingId; reraisedFindingId is derived', async () => {
+  it('saveReviewSuccess writes followUp and priorFindingId (never a story); reraisedFindingId is derived', async () => {
     const first = await persist.insertQueuedReview(ctx, prId, 'a'.repeat(40), 'claude-sonnet-5', 1);
     await persist.markReviewRouted(ctx, first, 'diff_only', {} as any);
     await persist.saveReviewSuccess(
@@ -174,17 +174,7 @@ describe('ticket + follow-up persistence', () => {
     // `kept` reaches GitHub as an inline comment of a posted REVIEW (no per-comment id).
     await persist.markReviewPosted(ctx, first, 'rv1', [kept!.id]);
 
-    const second = await persist.insertQueuedReview(ctx, prId, 'b'.repeat(40), 'claude-opus-5-5', 1, [ticket]);
-    const assessment: ClaudeTicketAssessment = {
-      alignment: 'aligned',
-      summary: 'ok',
-      criteria: [
-        { ref: 'AC1', index: 0, text: 'a', status: 'met', explanation: null, path: null, line: null },
-        { ref: 'AC2', index: 1, text: 'b', status: 'not_checked', explanation: null, path: null, line: null },
-      ],
-      missing: [],
-      notRequested: [],
-    };
+    const second = await persist.insertQueuedReview(ctx, prId, 'b'.repeat(40), 'claude-opus-5-5', 1);
     const followUp: ClaudeReviewFollowUpRecord = {
       priorReviewId: first,
       priorHeadSha: 'a'.repeat(40),
@@ -200,12 +190,12 @@ describe('ticket + follow-up persistence', () => {
       second,
       success(
         [finding({ title: 'ordinary' }), finding({ title: 're-raise', priorFindingId: kept!.id })],
-        { followUp, ticketAssessment: [assessment] },
+        { followUp },
       ),
     );
     const r = (await persist.getClaudeReviewById(ctx, second, 1))!;
-    expect(r.ticket).toEqual(ticket);
-    expect(r.ticketAssessment).toEqual(assessment);
+    expect(r.ticket).toBeNull();
+    expect(r.ticketAssessment).toBeNull();
     expect(r.findings.map((f) => [f.title, f.priorFindingId])).toEqual([
       ['ordinary', null],
       ['re-raise', kept!.id],
@@ -496,18 +486,22 @@ describe('several tickets, story findings, and the outdated read', () => {
     alignment: 'aligned', summary, criteria: [], missing: [], notRequested: [],
   });
 
-  it('stores N tickets + N assessments; the read is one entry per ticket', async () => {
+  it('HISTORY: a stored run with N tickets + N assessments reads one entry per ticket', async () => {
     const pr = await newPr('h1');
     const id = await persist.insertQueuedReview(ctx, pr, 'h1', 'claude-opus-5-5', 1, [t1, t2]);
-    await persist.saveReviewSuccess(ctx, id, success([], { ticketAssessment: [assess('a'), assess('b')] }));
+    await persist.saveReviewSuccess(ctx, id, success([]));
+    // A run from before the ticket review wrote its assessments itself; seed them as it did.
+    await db
+      .update(schema.claudeReviews)
+      .set({ ticketAssessment: [assess('a'), assess('b')] })
+      .where(eq(schema.claudeReviews.id, id))
+      .execute();
     const r = (await persist.getClaudeReviewById(ctx, id, 1))!;
     expect(r.tickets?.map((e) => [e.index, e.ref, e.ticket.title, e.assessment?.summary])).toEqual([
       [0, 'T1', 'One', 'a'],
       [1, 'T2', 'Two', 'b'],
     ]);
     expect(r.ticket).toEqual(t1); // deprecated: the first
-    expect(await persist.getLatestStoredTickets(ctx, pr, 1)).toEqual([t1, t2]);
-    expect(await persist.getLatestStoredTickets(ctx, pr, 2)).toEqual([]); // another account
     expect(await persist.hasReviewAtHead(ctx, pr, 1, 'h1')).toBe(true);
     expect(await persist.hasReviewAtHead(ctx, pr, 1, 'h2')).toBe(false);
   });
@@ -538,7 +532,25 @@ describe('several tickets, story findings, and the outdated read', () => {
     expect(r.ticketAssessment).toEqual(assess('old'));
   });
 
-  it('a story finding round-trips its origin; an ordinary one reads story: null', async () => {
+  it('a NEW run writes no story: no ticket, no assessment, no story origin on its findings', async () => {
+    const pr = await newPr('h1');
+    const id = await persist.insertQueuedReview(ctx, pr, 'h1', 'claude-opus-5-5', 1);
+    await persist.saveReviewSuccess(
+      ctx,
+      id,
+      // A stray `ticketAssessment` from an old caller is not a field any more and is not written.
+      success([], { ticketAssessment: [assess('stray')] }),
+    );
+    const row = (await db
+      .select({ ticket: schema.claudeReviews.ticket, ticketAssessment: schema.claudeReviews.ticketAssessment })
+      .from(schema.claudeReviews)
+      .where(eq(schema.claudeReviews.id, id))
+      .execute()) as Array<{ ticket: unknown; ticketAssessment: unknown }>;
+    expect(row[0]).toEqual({ ticket: null, ticketAssessment: null });
+    expect((await persist.getClaudeReviewById(ctx, id, 1))!.tickets).toEqual([]);
+  });
+
+  it('HISTORY: a legacy story finding round-trips its origin; an ordinary one reads story: null', async () => {
     const pr = await newPr('h1');
     const id = await persist.insertQueuedReview(ctx, pr, 'h1', 'claude-opus-5-5', 1, [t1]);
     const base = {
@@ -550,9 +562,15 @@ describe('several tickets, story findings, and the outdated read', () => {
       id,
       success([
         { ...base, severity: 'warning', title: 'plain', body: 'plain' },
-        { ...base, severity: 'warning', story: { index: 0, ref: 'M1' } },
+        { ...base, severity: 'warning' },
       ]),
     );
+    // Story findings were written by runs before the ticket review; seed the origin as they did.
+    await db
+      .update(schema.claudeReviewFindings)
+      .set({ storyIndex: 0, storyRef: 'M1' })
+      .where(and(eq(schema.claudeReviewFindings.reviewId, id), eq(schema.claudeReviewFindings.title, 'Rate limit')))
+      .execute();
     const r = (await persist.getClaudeReviewById(ctx, id, 1))!;
     expect(r.findings.map((f) => [f.title, f.story, f.included])).toEqual([
       ['plain', null, true],

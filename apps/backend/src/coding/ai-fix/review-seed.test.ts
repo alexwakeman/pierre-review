@@ -15,6 +15,7 @@ import {
   collectReviewItems,
   normalizeChangeReport,
   REVIEW_ITEM_BODY_MAX,
+  type SeedTicketItem,
 } from './review-seed.js';
 
 const NONCE = 'abcdef0123456789';
@@ -150,7 +151,7 @@ describe('collectReviewItems — what the fixer is given', () => {
     expect(items.every((i) => i.kind === 'finding' && i.findingId != null)).toBe(true);
   });
 
-  it('adds open earlier findings (not re-raised), threads to fix, story gaps and fixable CI', () => {
+  it('adds open earlier findings (not re-raised), threads to fix and fixable CI — never a legacy story', () => {
     const items = collectReviewItems(
       review({
         findings: [finding()],
@@ -176,48 +177,68 @@ describe('collectReviewItems — what the fixer is given', () => {
         ],
       }),
     ).map((s) => s.item);
+    // The stored story assessment (`tickets`) is a legacy single-PR verdict: never seeded.
     expect(items.map((i) => `${i.ref}:${i.kind}`)).toEqual([
       'F1:finding',
       'P1:earlier_finding',
       'P2:earlier_finding',
       'T1:thread',
-      'S1-AC2:story',
-      'S1-AC3:story',
-      'S1-M1:story',
       'C1:ci_failure',
     ]);
     expect(items.find((i) => i.ref === 'T1')).toMatchObject({ threadId: 7, path: 'src/b.ts' });
     expect(items.find((i) => i.ref === 'P1')).toMatchObject({ findingId: 55 });
-    expect(items.find((i) => i.ref === 'S1-M1')).toMatchObject({ ticketIndex: 0 });
     expect(items.find((i) => i.ref === 'C1')?.title).toContain('test (node 20)');
   });
 
-  it('a story result the review made a FINDING of arrives once, as F — its S item is dropped', () => {
+  it('a LEGACY story finding is not seeded, ignored or not — the ticket review owns that verdict', () => {
     const items = collectReviewItems(
       review({
         findings: [
           finding({ title: 'Escapes commas', story: { index: 0, ref: 'AC2' } }),
-          finding({ title: 'No download filename', path: '', line: null, story: { index: 0, ref: 'M1' } }),
+          finding({ title: 'No download filename', path: '', line: null, included: false, story: { index: 0, ref: 'M1' } }),
+          finding({ title: 'ordinary' }),
         ],
         tickets: [ticket()],
       }),
-    ).map((s) => s.item);
-    // AC3 (partly met) has no finding here (an older review): it keeps its own, stable ref.
-    expect(items.map((i) => `${i.ref}:${i.kind}:${i.title}`)).toEqual([
-      'F1:finding:Escapes commas',
-      'F2:finding:No download filename',
-      'S1-AC3:story:Has a header',
-    ]);
+    ).map((s) => `${s.item.ref}:${s.item.title}`);
+    expect(items).toEqual(['F1:ordinary']);
   });
 
-  it('a story finding the reader IGNORED reaches the fixer neither as F nor as S', () => {
-    const items = collectReviewItems(
-      review({
-        findings: [finding({ title: 'Escapes commas', included: false, story: { index: 0, ref: 'AC2' } })],
-        tickets: [ticket()],
-      }),
-    ).map((s) => s.item.ref);
-    expect(items).toEqual(['S1-AC3', 'S1-M1']);
+  it("a MANUAL fix's ticket items (this PR owns them) arrive as S<t>-<ref>, one S per ticket run", () => {
+    const tItem = (ticketReviewId: number, ref: string, status: 'not_met' | 'partly_met' | 'missing', title: string): SeedTicketItem => ({
+      ticketKey: ticketReviewId === 4 ? 'ENG-1' : null,
+      ticketTitle: 'Export CSV',
+      ticketReviewId,
+      item: { ref, status, title, body: status === 'missing' ? '' : 'Why it is open.', path: ref === 'AC2' ? 'src/csv.ts' : null, line: ref === 'AC2' ? 2 : null },
+    });
+    const seeded = collectReviewItems(review({ findings: [finding()] }), [
+      tItem(4, 'AC2', 'not_met', 'Escapes commas'),
+      tItem(4, 'M1', 'missing', 'No download filename'),
+      tItem(9, 'AC1', 'partly_met', 'Has a header'),
+    ]);
+    expect(seeded.map((s) => `${s.item.ref}:${s.item.kind}:${s.item.ticketIndex}`)).toEqual([
+      'F1:finding:null',
+      'S1-AC2:story:0',
+      'S1-M1:story:0',
+      'S2-AC1:story:1',
+    ]);
+    expect(seeded[1]!.item).toMatchObject({ path: 'src/csv.ts', line: 2 });
+    expect(seeded[1]!.body).toContain('Ticket: ENG-1 Export CSV');
+    expect(seeded[1]!.body).toContain('Status: not met');
+    expect(seeded[2]!.body).toContain('Missing: No download filename');
+    // Without ticket items (an auto fix), the same review seeds the PR review alone.
+    expect(collectReviewItems(review({ findings: [finding()] })).map((s) => s.item.ref)).toEqual(['F1']);
+  });
+
+  it('buildReviewSeed fences ticket items like every other item', () => {
+    const s = buildReviewSeed(review({ findings: [] }), {
+      nonce,
+      ticketItems: [
+        { ticketKey: 'ENG-1', ticketTitle: null, ticketReviewId: 4, item: { ref: 'AC2', status: 'not_met', title: 'Escapes commas', body: 'x', path: null, line: null } },
+      ],
+    });
+    expect(s.sentRefs).toEqual(['S1-AC2']);
+    expect(s.text).toContain(`---BEGIN ITEM S1-AC2 ${NONCE}---`);
   });
 
   it('a re-raise saved left out on an unchanged head still reaches the fixer, exactly once', () => {

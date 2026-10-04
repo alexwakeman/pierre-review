@@ -18,11 +18,14 @@
 // Then `startReviewFix(…, trigger: 'auto')` — the same queue, slot and worktree as the button.
 //
 // ⚠ NOTHING IS PUSHED. A fix waits for a person's Push like any other.
+// ⚠ NO TICKET ITEMS, EVER. The seed here is the PR review's alone (`loadReviewSeed` without
+// `withTicketItems`, and `startReviewFix` with trigger 'auto' does the same): whether a ticket's
+// unmet criterion belongs in this PR is a person's call, made with the manual "Fix from review".
 // ⚠ LOOP SAFETY. A pushed fix makes a new head, which earns an auto re-review, which may earn
 // another fix. The chain needs a PERSON pressing Push at every turn (an unpushed fix blocks the next
 // one, rule 4), and is bounded anyway by rule 5. Rule 6 stops the one loop that needs no push: a
 // fix that changed nothing, re-tried at the same head on every comment-triggered review. Item
-// identity across reviews is (kind, thread / story index, path, title) — a finding re-worded by a
+// identity across reviews is (kind, thread / ticket index, path, title) — a finding re-worded by a
 // later review counts as new, so rule 6 can miss it; rule 5 still bounds it.
 // ⚠ Never throws: an auto fix failing must never touch the review.
 import { and, desc, eq, gte } from 'drizzle-orm';

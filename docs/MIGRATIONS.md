@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0066` and plugin `0034`–`0037` are NOT (written 2026-09-19/24 with the Postgres down; see the
+  ⚠ pg `0052`–`0068` and plugin `0034`–`0037` + `0039` are NOT (written 2026-09-19/10-04 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -809,6 +809,38 @@ sweeper reviews from. No backfill (NULL = off). ⚠ Like `0035`, every hand-buil
 the store must replay it (the store SELECTs both columns): `workspace-settings.test.ts`,
 `settings-route-schema.test.ts`, `jira-routes.test.ts`. ⚠ **The pg twin is NOT replayed.**
 
+### `0081_review_request_requester` (pg `0068`)
+
+One nullable column, `review_request_events.requester_user_id` (FK `users.id`) — who asked for the
+review, from the ReviewRequestedEvent's `actor` (docs/DATA-MODEL.md § `review_request_events`). Plus
+ONE DATA STEP: `review_requests_synced_at` is set back to NULL on every OPEN PR that has a
+`requested` row with no requester (i.e. every open PR with any stored request, at migration time).
+That puts them on the EXISTING history backfill's worklist (`sync/backfill-review-requests.ts`,
+which now takes un-stamped OPEN PRs first, then in-window merged ones, under the same 100-per-repo
+cap and budget contract) so each is re-read once and re-stamped — no new fetch path. Merged and
+closed PRs are left alone: no card reads their requester. Until the re-read lands, Chronology
+counts those open PRs as "not known". sqlite `ALTER TABLE … ADD … REFERENCES` + the `UPDATE` behind
+a breakpoint; pg `ADD COLUMN IF NOT EXISTS … REFERENCES` + the same `UPDATE`. Journal `when`
+`1790658000000` in both folders. ⚠ **The pg twin is NOT replayed** — worth
+one step: seed an open PR with a stamped request row, migrate, and check the stamp is NULL and a
+merged PR's is untouched.
+
+### `0080_ticket_reviews` (pg `0067`) + plugin `0039_jira_ticket_peers`
+
+Three new core tables for the TICKET review (docs/CLAUDE-REVIEW.md § Ticket review), no change to
+any existing core table. `ticket_reviews` (one run per ticket ident; `account_id` denormalised, a
+unique `(id, account_id)` for the children's composite FKs), `ticket_review_members` (one row per
+member PR at the head the run read; `trm_review_account_fk` and `trm_pr_account_fk`, both `ON DELETE
+cascade`) and `ticket_review_items` (`tri_review_account_fk`). `workspace_id`, `origin_pr_id`,
+`owner_pr_id`, `posted_pr_id` and `prior_item_id` are SOFT references — a PR delete prunes through
+`db/ticket-review-prune.ts` in BOTH `deleteRepo` and `deletePrSubtree`, and all three tables are in
+`accountScopedTables()` + `eraseAccountData`. The plugin half adds `pro_pr_jira_tickets.changed_at`
+(moves only when story text or membership moves) and two indexes, `(account_id, api_root,
+issue_key)` for the members read and `(account_id, changed_at)` for the sweeper. Not fixed in the
+unreleased `0079`: its story columns are now LEGACY (no new run writes them). ⚠ **Neither pg twin
+is replayed** — worth one step: insert a member whose `account_id` does not own its `pr_id` and
+check it raises `trm_pr_account_fk`.
+
 ### `0079_claude_finding_story` (pg `0066`)
 
 Two nullable columns on `claude_review_findings`, no backfill: `story_index` (integer — the ticket's
@@ -921,10 +953,10 @@ statement no-ops the second time), both unique indexes present, the three time c
 against a real row. It was replayed in ISOLATION, not on top of the full plugin chain (it names no
 other table, so the chain cannot change its outcome).
 
-⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0066` and plugin `0034`–`0037`). The
+⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0068` and plugin `0034`–`0037`, `0039`). The
 standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
 through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —
-core should reach **67 applied = 67 journal entries** (`0000`–`0066`) and the plugin **37** — and check
+core should reach **68 applied = 68 journal entries** (`0000`–`0067`) and the plugin **39** — and check
 `review_request_events` carries both FKs and its unique index, that `workspaces.flow_settings`,
 `pull_requests.advisory_ids` and `accounts.my_turn_settings` are `jsonb`, and that
 `security_checked_at` and `pr_mentions.mentioned_at` are `timestamp with time zone`. ⚠ `0055` is
