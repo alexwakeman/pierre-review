@@ -342,9 +342,10 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
      LEFT ACCENT coloured by outcome (`reviewTone`: red = request changes / failed, green =
      approve, grey = comment, sky = queued/running, none = not reviewed). Left to right: "Claude" ·
      the verdict pill (a size up — the panel's headline) + auto mark + the currency pill | severity
-     pills (praise left out; zero found ⇒ green "No issues") · "N CI failures, M explained"
-     (`ciDiagnosisLabel` over `summary.ci`) · "N threads to fix" (`threadsToFixLabel` over
-     `summary.threadAssessments.validUnaddressed`) | story alignment pills · "Earlier: N fixed / N
+     pills (praise left out; zero found ⇒ green "No issues") · "N threads to fix" (`threadsToFixLabel` over
+     `summary.threadAssessments.validUnaddressed`) | the CI REVIEW's pill ("N CI failures, M
+     explained" / "Checking CI…", `ciCardPill` over the ONE batched `useCiReviewStates` answer —
+     CURRENT runs and runs in flight only; a stale diagnosis says nothing) | story alignment pills · "Earlier: N fixed / N
      still open" · posted (muted) · design count … right: the AI Fix button ("Fixing…" / "Fix
      ready" → `openAiFix`) and the action (**Review** / **Re-review** / **Open review**).
   ⚠ **Absent is never zero**: no summary, no CI reading, no story alignment, no follow-up, no thread
@@ -636,8 +637,8 @@ Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix
   per-thread block) — but that list is rendered by **`PrDetail` itself**, not `ChecksTab`, which is
   why the per-comment `CommentAnnotations`/`ReviewCheckButton` call sites are there. The **Checks
   row** lists the checks + re-run control and opens only when there are checks to list
-  (`checksRowVisible` is DELETED with the Pro `CiAnalysisCard`: why CI failed is Claude Review's
-  "CI failures" section now — docs/CLAUDE-REVIEW.md § Failed CI on the reviewed head).
+  (`checksRowVisible` is DELETED with the Pro `CiAnalysisCard`: why CI failed is the CI review's
+  job now — docs/CLAUDE-REVIEW.md § CI review).
 - **Threads** — `ThreadList`/`ThreadView`: review threads grouped by file, **newest first**
   (files by most-recent thread; within a file by `createdAt` desc), with code anchors +
   new-comment highlights; each has a "Show" link. A sticky header carries **derived-state filter
@@ -1140,7 +1141,10 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   `AiRunGate`, criteria with "Done in web#412" / "Belongs in api#88", and ONE Post button per unmet
   item (target named on the button; once posted, never offered again; `visible:false` = "It will
   show up here shortly", no retry). It shows the latest SUCCEEDED run; a newer running or failed one
-  is a line above it. The story-tab panel moved here as "Add a story" (pasted stories become
+  is a line above it; each block's header says how long ago the shown run finished (`ReviewedAgo` on
+  `completedAt`). The story-tab panel moved here behind a plain **"+ Add story" link** — no
+  disclosure box: the link reveals the tabs with a blank story (`storiesOnOpen`), and Close hides
+  them and drops blank typed tabs (`storiesOnClose`, `lib/storyTabs.ts`) (pasted stories become
   `manual:` ticket reviews; auto-pull is off — detected tickets are already blocks). ⚠ **Open PRs
   reads ticket coverage through ONE batched `useTicketReviewStates(idents)`** (`POST
   /api/ticket-reviews/states`), never per card; it polls only while a state is `running`. The ident
@@ -1162,7 +1166,7 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
     on receipt) when `canFetchDetails`, else the latest ticket review's `ticket` snapshot, else the
     older run's ticket. A Jira story carries the criteria-field picker (`useSetJiraAcField`, no
     "None of these"); a change invalidates `['ticket-reviews']` + the states so the block shows
-    "Story edited since". "Add a story" is only for pasting: a ticket already listed as a block is
+    "Story edited since". "+ Add story" is only for pasting: a ticket already listed as a block is
     not offered as "Pull KEY from Jira".
   - **Open PRs: a Jira ticket key opens a MODAL, not Jira** (`TicketKeyButton` → `TicketStoryModal`
     on the `InfoModal` shell): status, type, assignee, the story as markdown, "Open in Jira" inside.
@@ -1204,10 +1208,35 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
 - **Every section of the Claude Review pane is ONE shell, `ReviewSection`** (`ReviewSection.tsx`):
   bordered rounded box, tinted header band = sentence-case title (one size) + count pills + ⓘ +
   right-aligned actions; cards inside keep their lighter borders (pane → section → card). Order: Run
-  a review · Claude's review · CI failures · Previous review · Review threads · Findings · Story
-  check · Review chat (OPEN by default, so its one DB read runs on mount; Hide collapses it) · Post
-  to GitHub (summary, verdict, Preview, Post) · Generate a fix. "CI passing" is a pill in Claude's
-  review (`ClaudeReviewCiStatus`), not a section.
+  a review · Claude's review · Previous review · Review threads · Findings · Story check · CI check
+  · Review chat (OPEN by default, so its one DB read runs on mount; Hide collapses it) · Post to
+  GitHub (summary, verdict, Preview, Post) · Generate a fix. The code review draws NO CI any more.
+- **CI check is the CI REVIEW** (`CiCheckSection.tsx`, `hooks/useCiReview.ts`, pure half
+  `lib/ciReview.ts`; docs/CLAUDE-REVIEW.md § CI review) — its own run, not part of Claude's review.
+  `GET /api/prs/:id/ci-review` (polls only while `running`); it shows the latest SUCCEEDED run (read
+  by id while a newer one runs, failed or was refused), the currency pill ("On latest commit" /
+  "Pushed since" / "Other checks failing now" / "Passing now"), "reviewed X ago" on `completedAt`,
+  Check CI / Re-check (mutation key `['ci-review-start', prId]`), SSE progress, the refusal sentence
+  (`ciRefusalSentence`), the summary (markdown) and one plain-text `CiFailureRow` per failing check
+  (cause, "Fix:" suggestion, Why, path links into Changes, the check's details page — never a log
+  URL). `ciSectionShow`: a CI review → it; else an older code review's stored `ciFailures` as
+  HISTORY ("From an earlier Claude review of abc1234"); else, on red CI, just the button; else
+  nothing. Open PRs and Pending read CI through ONE batched `POST /api/ci-reviews/states` per board.
+- **Praise is not a finding.** New reviews raise none (the summary carries one praise line,
+  rendered as part of its markdown). An older run's stored praise is HIDDEN, never deleted:
+  `withoutPraise` (`lib/claudeReviewFollowUp.ts`) is applied ONCE where `ClaudesReview` takes the
+  run (findings list, counts, story placement, the Previous review list), and `findingTotal` leaves
+  it out of the cards' "N of M posted".
+- **Findings' "Copy all"** (`CopyAllFindingsButton`, left in the header beside the count; pure half
+  `lib/findingsMarkdown.ts`, `test/findingsMarkdown.test.ts`) copies the Findings LIST only — never
+  Story check's placed findings or CI — as one markdown string for the reader's own coding agent:
+  per finding `### <Severity>: <title>`, `` `path:line` `` (`path` alone with no line, "Whole PR"
+  when `path === ''`), the body, a ```` ```suggestion ```` fence; blocks separated by a `---` line;
+  then "Copied N" for 1.5s. ⚠ **THE REWORD WINS HERE, unlike the per-card Copy** (which stays
+  Claude's original): this is a hand-off of what the reader decided to say. ⚠ **IGNORED IS THE CARD'S
+  OWN RULE**, `isIgnoredFinding` = editable run && unposted && `!included` — a stored `included:
+  false` on an older run or a posted finding shows no Ignore state, so it must not vanish from the
+  copy. Praise is excluded again in the lib. Absent (not disabled) when nothing is copyable.
 - **ONE TYPE SCALE for every section, and the reference is the FINDINGS card**
   (`lib/reviewStyles.ts`): `REVIEW_ITEM_CARD` / `REVIEW_ITEM_TITLE` / `REVIEW_PROSE` (Claude's words,
   13px = `.md-body`, page colour) / `REVIEW_META` / `REVIEW_CHIP` / `REVIEW_ANCHOR(_MUTED)` /
@@ -1227,6 +1256,13 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   in another repo, and a bare "repo#N" resolves server-side only when exactly ONE of the account's
   repos has that name. Unresolved refs, refs inside links or code, and the viewed PR itself stay plain
   text. Markdown gets it via the `rehypeReviewPrRefs` plugin, which runs AFTER the sanitizer.
+- **When did the review run? ONE component, `ReviewedAgo` (`components/ReviewedAgo.tsx`)** over
+  `reviewedAgoLabel()` (`lib/claudeReviewColumn.ts`): muted "reviewed 2 days ago" (past a month,
+  "reviewed on <date>"), the exact `dateTime()` on hover. Mounted beside the currency pill on the
+  Open PRs panel and the Claude's review header (the shown run's `finishedAt`), and at the end of
+  a Pending card's one-line Claude summary on a finished run (`ClaudeReviewPrState.finishedAt`,
+  falling back to a `claude_review` My Turn card's `since`). The "Showing" list prints each run's
+  date AND time of day via `reviewRunWhen()` (`finishedAt ?? createdAt`), plus the age while recent.
 - **Is the review on the PR's current commit? ONE helper, `reviewCurrency()`
   (`lib/claudeReviewColumn.ts`)**, read by the Claude's review header (first pill; also for a past
   run picked in "Showing" — always against the PR's CURRENT head) and the Open PRs card's verdict

@@ -86,10 +86,12 @@ export interface AgentContext {
       // newer qualifying review comment arrived (auto RE-review). `commentsAtMs` is that comment's
       // time (null/absent for a moved head); the sweeper settles on (headSha, commentsAtMs).
       // Absent on an older host ⇒ none.
-      reReview?: Array<{ prId: number; headSha: string; commentsAtMs?: number | null }>;
-      // Per offered PR: is its head's synced CI still running, and when was that head first
-      // observed (null = no record). Absent on an older host ⇒ never running.
-      ci?: Array<{ prId: number; headSha: string | null; running: boolean; headSeenAtMs: number | null }>;
+      // `lastRunAtMs` is the latest start or finish of any run of the PR (the "immediately on
+      // receipt" test; absent ⇒ treated as none).
+      reReview?: Array<{ prId: number; headSha: string; commentsAtMs?: number | null; lastRunAtMs?: number | null }>;
+      // PRs whose run is queued or running while their synced head has moved past it: never
+      // cancelled — the sweeper only starts the new head's settle clock. Absent ⇒ none.
+      inFlightMoved?: Array<{ prId: number; headSha: string }>;
     } | null>;
     // The OTHER reviewers' open threads on a PR + the newest qualifying comment
     // (db/review-threads-for-review.ts). Absent ⇒ the review assesses no threads.

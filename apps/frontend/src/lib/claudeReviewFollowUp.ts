@@ -56,6 +56,29 @@ export const SEVERITY_CLASS: Record<ClaudeFindingSeverity, string> = {
   praise: 'bg-green-500/10 text-green-700 dark:text-green-400',
 };
 
+// ---- praise: not a finding ----
+//
+// A review no longer raises praise as a finding (the summary carries one plain line of it). Older
+// runs stored some: they are HIDDEN everywhere — the findings list, its counts, the follow-up of an
+// earlier praise item — and nothing is deleted. Applied ONCE, where the tab takes the run.
+
+export const isPraise = (f: { severity: ClaudeFindingSeverity }): boolean => f.severity === 'praise';
+
+/** The run with stored praise findings, and follow-up items about earlier praise, left out. */
+export function withoutPraise<T extends Pick<ClaudeReview, 'findings' | 'followUp'>>(review: T): T {
+  const hasPraise =
+    review.findings.some(isPraise) || (review.followUp?.items.some(isPraise) ?? false);
+  if (!hasPraise) return review;
+  return {
+    ...review,
+    findings: review.findings.filter((f) => !isPraise(f)),
+    followUp:
+      review.followUp == null
+        ? review.followUp
+        : { ...review.followUp, items: review.followUp.items.filter((it) => !isPraise(it)) },
+  };
+}
+
 /**
  * The findings list order: severity first (as before), and within one severity the findings that
  * RAISE AN EARLIER COMMENT AGAIN come first — they are the "still not fixed" ones the reader came

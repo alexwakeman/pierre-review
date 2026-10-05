@@ -67,6 +67,8 @@ import {
   pullNote,
   pulledAcField,
   removeStoryTab,
+  storiesOnClose,
+  storiesOnOpen,
   storyTabLabel,
 } from '../lib/storyTabs.js';
 import {
@@ -293,8 +295,9 @@ const SPINNER =
  * PR are pulled AUTOMATICALLY once per PR per detected-key set (never re-adding one the reader
  * removed); "Pull all from Jira" is the manual action. The Story check section passes
  * `autoPullReady={false}`: the detected tickets are its blocks already, so it pulls only on request.
- * The header always says what Check sends (" · 2 stories" / " · needs a fix"). NO `maxLength` on
- * any input — it would silently cut a paste.
+ * CLOSED it is a plain "+ Add story" link (no disclosure box), which reveals the tabs with a blank
+ * story ready; Close hides them again and drops blank tabs. Either way the row says what Check
+ * sends ("2 stories" / "needs a fix"). NO `maxLength` on any input — it would silently cut a paste.
  */
 export function ClaudeReviewTicketPanel({
   value,
@@ -304,7 +307,6 @@ export function ClaudeReviewTicketPanel({
   tickets,
   prWorkspaceName,
   autoPullReady,
-  label = 'User stories (optional)',
 }: {
   value: TicketDraft[];
   onChange: (next: TicketDraft[]) => void;
@@ -316,12 +318,9 @@ export function ClaudeReviewTicketPanel({
   // The stored run has loaded, so the list is settled: the automatic pull waits for it, or the
   // prefill from the latest run would land on top of (or under) what it pulled.
   autoPullReady: boolean;
-  // The collapsed header's words.
-  label?: string;
 }): JSX.Element {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const bodyId = useId();
   const tabsId = useId();
   const [selectedRaw, setSelected] = useState(0);
   const selected = clampTab(selectedRaw, value.length);
@@ -604,41 +603,80 @@ export function ClaudeReviewTicketPanel({
   const current = value[selected];
   const pullLabel = pullable.length === 1 ? `Pull ${pullable[0]} from Jira` : `Pull all from Jira (${pullable.length})`;
 
-  return (
-    <div className="mt-2 rounded border border-gray-200 dark:border-gray-800">
-      <div className="flex items-center gap-2 pr-2">
+  // "+ Add story": reveal the tabs, with a blank story when there is none yet.
+  const reveal = (): void => {
+    const next = storiesOnOpen(latest.current);
+    if (next !== latest.current) {
+      onChange(next);
+      setSelected(next.length - 1);
+    }
+    setOpen(true);
+  };
+  // Close: hide the tabs; blank typed tabs go, stories with content stay for next time.
+  const close = (): void => {
+    const next = storiesOnClose(latest.current);
+    if (next !== latest.current) {
+      onChange(next);
+      setSelected(clampTab(selected, next.length));
+    }
+    setFieldEditing(null);
+    setOpen(false);
+  };
+  const hintText = hint.replace(/^ · /, '');
+  const pullButton =
+    pullable.length > 0 && !busy ? (
+      <button type="button" onClick={() => pullKeys(pullable)} className={PRIMARY_BTN}>
+        {pullLabel}
+      </button>
+    ) : null;
+  const info = (
+    <InfoButton title="Add a story">
+      <p>
+        Paste a story to check this pull request against it, or pull a Jira ticket named on the pull
+        request to read its story and pick the field its criteria come from. Up to{' '}
+        {CLAUDE_REVIEW_MAX_TICKETS} at a time.
+      </p>
+      <p className="mt-2">A pulled ticket is shown as Limn last read it from Jira. Refresh reads it again.</p>
+    </InfoButton>
+  );
+
+  if (!open) {
+    return (
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          aria-controls={bodyId}
-          className="flex flex-1 items-center gap-1.5 px-2 py-1.5 text-left text-xs font-medium text-gray-700 dark:text-gray-200"
+          onClick={reveal}
+          className={`inline-flex items-center gap-1 ${LINK_BTN}`}
         >
-          <ChevronIcon dir={open ? 'down' : 'right'} className="shrink-0" />
-          <span>{label}</span>
-          {hint !== '' && (
-            <span className={`font-normal ${check.ok ? MUTED : ERROR_TEXT}`}>{hint}</span>
-          )}
-          {busy && !open && <span className={`font-normal ${MUTED}`}>· pulling from Jira…</span>}
+          <PlusIcon size={11} />
+          Add story
         </button>
-        {pullable.length > 0 && !busy && (
-          <button type="button" onClick={() => pullKeys(pullable)} className={PRIMARY_BTN}>
-            {pullLabel}
-          </button>
-        )}
-        <InfoButton title="User stories">
-          <p>
-            Paste a story to check this pull request against it, or pull a Jira ticket named on the
-            pull request to read its story and pick the field its criteria come from. Up to{' '}
-            {CLAUDE_REVIEW_MAX_TICKETS} at a time.
-          </p>
-          <p className="mt-2">
-            A pulled ticket is shown as Limn last read it from Jira. Refresh reads it again.
-          </p>
-        </InfoButton>
+        {hintText !== '' && <span className={`text-xs ${check.ok ? MUTED : ERROR_TEXT}`}>{hintText}</span>}
+        {busy && <span className={`text-xs ${MUTED}`}>Pulling from Jira…</span>}
+        {pullButton}
+        {info}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded border border-gray-200 dark:border-gray-800">
+      <div className="flex flex-wrap items-center gap-2 px-2 py-1.5">
+        <span className="text-xs font-medium text-gray-700 dark:text-gray-200">Stories to check</span>
+        {hintText !== '' && <span className={`text-xs ${check.ok ? MUTED : ERROR_TEXT}`}>{hintText}</span>}
+        {pullButton}
+        {info}
+        <button
+          type="button"
+          onClick={close}
+          className={`ml-auto inline-flex items-center gap-1 text-xs ${MUTED} hover:text-gray-800 hover:underline dark:hover:text-gray-100`}
+        >
+          <CloseIcon size={10} />
+          Close
+        </button>
       </div>
       {open && (
-        <div id={bodyId} className="border-t border-gray-200 px-2 pb-2 pt-1.5 dark:border-gray-800">
+        <div className="border-t border-gray-200 px-2 pb-2 pt-1.5 dark:border-gray-800">
           {pullable.length > 1 && !busy && (
             <div className="mb-1.5 flex flex-wrap items-center gap-1">
               <span className={`text-xs ${MUTED}`}>Or pull one:</span>

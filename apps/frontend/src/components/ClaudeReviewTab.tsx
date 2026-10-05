@@ -43,6 +43,7 @@ import {
 import { highlightBlock, languageForPath } from '../lib/hljsLines.js';
 import { hunkLineMarker, useHunkHighlight } from './DiffHunk.js';
 import { writeClipboard } from './CopyButton.js';
+import { copyableFindings, findingsMarkdown } from '../lib/findingsMarkdown.js';
 import { Markdown } from './Markdown.js';
 import { MentionTextarea } from './MentionTextarea.js';
 import { ReviewChatSection } from './ClaudeReviewChat.js';
@@ -58,19 +59,21 @@ import {
 } from './Icons.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { AUTO_REVIEW_LABEL } from './Activity/pendingLabels.js';
+import { ReviewedAgo } from './ReviewedAgo.js';
 import { ClaudeReviewFollowUpSection } from './ClaudeReviewFollowUp.js';
 import { ClaudeReviewThreadsSection } from './ClaudeReviewThreads.js';
 import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine } from '../lib/claudeAutoReview.js';
-import { ClaudeReviewCiFailuresSection, ClaudeReviewCiStatus } from './ClaudeReviewCiFailures.js';
+import { CiCheckSection } from './CiCheckSection.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
 import { PrRefText, ReviewPrRefsProvider } from './ReviewPrRefs.js';
 import { REVIEW_ITEM_CARD, REVIEW_ITEM_TITLE, REVIEW_META } from '../lib/reviewStyles.js';
 import { reviewTexts, type KnownPr } from '../lib/reviewPrRefs.js';
 import { TicketCoverageSection, type LegacyStories } from './TicketCoverage.js';
 import { useTicketReviews } from '../hooks/useTicketReview.js';
+import { useCiReview } from '../hooks/useCiReview.js';
 import { useClaudeReviewChat } from '../hooks/useClaudeReviewChat.js';
 import { legacyOnlyEntries } from '../lib/ticketStory.js';
-import { reviewCurrency, type ReviewCurrency } from '../lib/claudeReviewColumn.js';
+import { reviewCurrency, reviewRunWhen, type ReviewCurrency } from '../lib/claudeReviewColumn.js';
 import {
   ALREADY_POSTED_CHIP,
   RERAISED_CHIP,
@@ -81,6 +84,7 @@ import {
   placeStoryFindings,
   storyChipLabel,
   VERDICT_CLASS,
+  withoutPraise,
   type ReraisedStatus,
 } from '../lib/claudeReviewFollowUp.js';
 
@@ -124,7 +128,6 @@ const SEVERITY_ORDER: ClaudeFindingSeverity[] = [
   'warning',
   'nit',
   'question',
-  'praise',
 ];
 
 // The rank + pill palette live in lib/claudeReviewFollowUp.ts, shared with the previous-review
@@ -325,6 +328,42 @@ const BTN_PRIMARY =
   'whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
 const BTN_SECONDARY =
   'whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
+
+// "Copy all" in the Findings header: every finding on screen there that the reader has not
+// ignored (praise is already gone), as ONE markdown string for the reader's own coding agent —
+// built by `lib/findingsMarkdown.ts`, where the reword-wins and `---` separator rules live. Absent
+// when nothing would be copied (an offer to copy nothing is a no-op). "Copied N" names how many.
+function CopyAllFindingsButton({
+  findings,
+  editable,
+}: {
+  findings: readonly ClaudeFinding[];
+  editable: boolean;
+}): JSX.Element | null {
+  const [copiedCount, setCopiedCount] = useState<number | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current != null) clearTimeout(timer.current);
+    },
+    [],
+  );
+  const count = copyableFindings(findings, editable).length;
+  if (count === 0) return null;
+  const copyAll = (): void => {
+    void writeClipboard(findingsMarkdown(findings, editable)).then((ok) => {
+      if (!ok) return;
+      setCopiedCount(count);
+      if (timer.current != null) clearTimeout(timer.current);
+      timer.current = setTimeout(() => setCopiedCount(null), 1500);
+    });
+  };
+  return (
+    <button type="button" onClick={copyAll} className={BTN_SECONDARY}>
+      {copiedCount != null ? `Copied ${copiedCount}` : 'Copy all'}
+    </button>
+  );
+}
 
 // The diff hunk a finding covers, COLLAPSED by default. Clicking the collapsed
 // preview expands it (a convenience); the expanded hunk collapses via the dedicated
@@ -978,7 +1017,7 @@ function FindingRow({
 // for both the latest run and a selected past run; `editable` gates the per-finding
 // actions — Reword / Ignore / post (only the latest run can be edited).
 function ClaudesReview({
-  review,
+  review: storedReview,
   editable,
   prUrl,
   repoFullName,
@@ -993,6 +1032,7 @@ function ClaudesReview({
   onRewordFinding,
   onPostFinding,
   storyCheck,
+  ciCheck,
 }: {
   review: ClaudeReview;
   editable: boolean;
@@ -1014,7 +1054,12 @@ function ClaudesReview({
   onPostFinding: (findingId: number) => Promise<unknown>;
   // The Story check section, handed this run's stories that no ticket review covers.
   storyCheck: (legacy: LegacyStories) => ReactNode;
+  // The CI check section (its own run), after Story check and before the chat.
+  ciCheck: ReactNode;
 }): JSX.Element {
+  // Praise is not a finding: an older run's stored praise is hidden everywhere below (counts,
+  // list, follow-up), nothing deleted. The summary carries the one praise line now.
+  const review = useMemo(() => withoutPraise(storedReview), [storedReview]);
   // ONE STORY SECTION. This run's stories (an older PR review judged them against this PR alone)
   // show in Story check only where NO ticket review covers the ticket; a covered ticket shows its
   // ticket review instead. Until the ticket reviews load, every story shows (as before).
@@ -1085,6 +1130,7 @@ function ClaudesReview({
         pills={
           <>
             {currency != null && <CurrencyPill currency={currency} />}
+            <ReviewedAgo at={review.finishedAt} />
             {review.verdict != null && <VerdictBadge verdict={review.verdict} />}
             {review.trigger === 'auto' && (
               <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
@@ -1096,7 +1142,6 @@ function ClaudesReview({
                 {REVIEW_MODE_LABEL[review.reviewMode]} review
               </span>
             )}
-            <ClaudeReviewCiStatus review={review} />
           </>
         }
         info={
@@ -1121,11 +1166,6 @@ function ClaudesReview({
         {followUpLine != null && <div className="font-medium">{followUpLine}</div>}
         {review.summary != null && review.summary !== '' && <Markdown prRefs>{review.summary}</Markdown>}
       </ReviewSection>
-      <ClaudeReviewCiFailuresSection
-        review={review}
-        changedPaths={changedPaths}
-        onOpenInChanges={onOpenInChanges}
-      />
       {review.followUp != null && (
         <ClaudeReviewFollowUpSection
           followUp={review.followUp}
@@ -1144,6 +1184,7 @@ function ClaudesReview({
         pills={
           <>
             <SectionCount>{plural(findings.length, 'finding', 'findings')}</SectionCount>
+            <CopyAllFindingsButton findings={findings} editable={editable} />
             {placement.placed.size > 0 && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 {placement.placed.size} more under Story check
@@ -1169,9 +1210,11 @@ function ClaudesReview({
         findingIds: storyIds,
         findingsById: placement.byId,
         renderFinding: findingCard,
+        finishedAt: review.finishedAt,
       })}
-      {/* The chat sits UNDER Story check and opens expanded, so a question about the review or
-          the story is one click from both. */}
+      {ciCheck}
+      {/* The chat sits UNDER Story check and CI check and opens expanded, so a question about the
+          review or the story is one click from both. */}
       {chatReviewId != null && <ReviewChatSection reviewId={chatReviewId} />}
     </>
   );
@@ -1192,6 +1235,9 @@ function ReviewTabPrRefs({
   const ai = useAiCapabilities();
   const tickets = useTicketReviews(pr.id, ai.enabled);
   const ticketReviews = tickets.data;
+  // The CI check's prose too — the same cached query the section reads (no extra request).
+  const ci = useCiReview(pr.id, ai.enabled);
+  const ciReview = ci.data?.review;
   // The review chat's answers are linked too. This OBSERVES the thread the chat section reads
   // (same key, `enabled: false`), so it adds no request; the section itself fetches it on mount.
   const chatId = review?.status === 'succeeded' && review.reviewMode !== 'skip' ? review.id : null;
@@ -1210,13 +1256,19 @@ function ReviewTabPrRefs({
     () => [
       ...reviewTexts(review, (ticketReviews?.tickets ?? []).map((t) => t.review)),
       ...(chatMessages ?? []).filter((m) => m.role === 'assistant' && m.content.includes('#')).map((m) => m.content),
+      ...(ciReview != null
+        ? [ciReview.summary, ...ciReview.items.flatMap((i) => [i.cause, i.explanation, i.suggestion])].filter(
+            (t): t is string => t != null && t.includes('#'),
+          )
+        : []),
     ],
-    [review, ticketReviews, chatMessages],
+    [review, ticketReviews, chatMessages, ciReview],
   );
   // ONE batch: wait for the ticket reviews (their members are resolved on screen, so the batch
   // must not ask for them) and for the chat thread, when either is coming.
   const ready =
     (!ai.enabled || tickets.data !== undefined || tickets.isError) &&
+    (!ai.enabled || ci.data !== undefined || ci.isError) &&
     (chatId == null || chat.data !== undefined || chat.isError);
   return (
     <ReviewPrRefsProvider
@@ -1232,7 +1284,7 @@ function ReviewTabPrRefs({
 }
 
 // Surface: hand a completed review to the agentic fixer. Opens the AI Fix tab with this review
-// picked; the server builds the seed from the stored run (every item except praise). Free,
+// picked; the server builds the seed from the stored run and the latest CI check. Free,
 // local-only (`me.ai`); renders nothing in the cloud or until a review has succeeded.
 function GenerateFixFromReview({
   prId,
@@ -1651,7 +1703,7 @@ export function ClaudeReviewTab({
                 {shortSha(h.headSha)} ·{' '}
                 {(CLAUDE_REVIEW_MODEL_LABELS as Record<string, string>)[h.model] ?? h.model} ·{' '}
                 {h.status} ·{' '}
-                {formatDate(h.createdAt)}
+                {reviewRunWhen(h.finishedAt ?? h.createdAt)}
                 {h.trigger === 'auto' ? ` · ${AUTO_REVIEW_LABEL}` : ''}
                 {h.id === review?.id ? ' (latest)' : ''}
               </option>
@@ -1693,10 +1745,23 @@ export function ClaudeReviewTab({
               legacy={legacy}
             />
           )}
+          // The CI review: its own run with its own Check button. This run's CI diagnosis (an
+          // older code review's) is shown there as history only while no CI review exists.
+          ciCheck={
+            <CiCheckSection
+              pr={pr}
+              legacy={shownReview}
+              changedPaths={changedPaths}
+              onOpenInChanges={onOpenInChanges}
+            />
+          }
         />
       )}
       {!(shownReview != null && shownReview.status === 'succeeded') && (
-        <TicketCoverageSection pr={pr} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
+        <>
+          <TicketCoverageSection pr={pr} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
+          <CiCheckSection pr={pr} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
+        </>
       )}
 
       {/* Section B — the authored review that gets posted (latest run only). */}

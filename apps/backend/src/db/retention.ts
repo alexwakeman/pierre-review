@@ -3,6 +3,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import { db, runTransaction, schema } from './client.js';
 import { config } from '../config.js';
 import { pruneTicketReviewsForPrs } from './ticket-review-prune.js';
+import { pruneCiReviewsForPrs } from './ci-review-prune.js';
 
 // Time-based retention sweep. Per-account server data (events, PRs + their whole subtree)
 // accumulates forever otherwise; this prunes anything past the retention window so the DB
@@ -110,6 +111,8 @@ async function deletePrSubtree(
   // Ticket reviews (migration 0080 / pg 0067): these PRs' member rows, then any run left with no
   // members. A run spanning PRs that survive keeps its history (db/ticket-review-prune.ts).
   await pruneTicketReviewsForPrs(tx, prIds);
+  // CI reviews (migration 0082 / pg 0069): one PR each, so its runs and items go with it.
+  await pruneCiReviewsForPrs(tx, prIds);
   // AI Fix runs (core since migration 0074 / pg 0061; the plugin's retention hook used to prune
   // them). No FKs — explicit, pr-keyed.
   await tx.delete(schema.aiFixes).where(inArray(schema.aiFixes.prId, prIds)).execute();

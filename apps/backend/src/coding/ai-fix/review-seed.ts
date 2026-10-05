@@ -3,7 +3,7 @@ import type {
   AiFixChangeReport,
   AiFixReviewItem,
   AiFixReviewItemKind,
-  ClaudeCiFailure,
+  CiReviewItem,
   ClaudeFindingSeverity,
   ClaudeReview,
   TicketReviewItem,
@@ -26,7 +26,9 @@ import type { FixAgentReport } from '../../pro/contract.js';
 //               addressed — unless this run re-raised it as a finding (then F covers it).
 //   T<n>        another reviewer's thread the review judged still needs a fix (shared
 //               `isThreadToFix`: valid / partly valid AND not / partly addressed).
-//   C<n>        a CI failure the review judged fixable in this PR (`ciFailures`, when present).
+//   C<n>        a CI failure the CI REVIEW (review/ci-review/) explained and judged fixable in this PR —
+//               from its latest succeeded run AT THE PR'S CURRENT HEAD (`ciItems`, the caller's
+//               `getFixableCiItemsForPr`), never from the code review's own (legacy) `ciFailures`.
 //   S<t>-AC<n>  an acceptance criterion of ticket t judged not met or partly met, and
 //   S<t>-M<n>   something ticket t asked for that is missing — BOTH from the TICKET review
 //               (review/ticket-review/), never from the PR review, and ONLY the items whose owner is
@@ -123,13 +125,12 @@ function mkItem(
   };
 }
 
-// ---- CI failures (the review's `ciFailures`, from the Claude Review CI diagnosis) ----
-// Only a DIAGNOSED failure the review judged fixable in this PR (`fixableInPr === true`). Anything
-// else — infrastructure, flaky, unclear, not checked — is not the fixer's. Older rows carry none.
-export function readFixableCiFailures(review: ClaudeReview): ClaudeCiFailure[] {
-  const raw = review.ciFailures;
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((f) => f != null && f.status === 'diagnosed' && f.fixableInPr === true);
+// ---- CI failures (the CI review's items) ----
+// Only a DIAGNOSED failure judged fixable in this PR (`fixableInPr === true`). Anything else —
+// infrastructure, flaky, unclear, not checked — is not the fixer's. The code review's own legacy
+// `ciFailures` are NEVER read: the CI review replaced them, and they describe an older head.
+export function fixableCiItems(items: readonly CiReviewItem[]): CiReviewItem[] {
+  return items.filter((f) => f != null && f.status === 'diagnosed' && f.fixableInPr === true);
 }
 
 /**
@@ -139,6 +140,8 @@ export function collectReviewItems(
   review: ClaudeReview,
   // The ticket review's items THIS PR owns. A MANUAL fix only; absent/[] ⇒ none (an auto fix).
   ticketItems: readonly SeedTicketItem[] = [],
+  // The CI review's items at the PR's current head (both manual and auto fixes); absent/[] ⇒ none.
+  ciItems: readonly CiReviewItem[] = [],
 ): ReviewSeedItem[] {
   const out: ReviewSeedItem[] = [];
 
@@ -226,13 +229,15 @@ export function collectReviewItems(
   });
 
   // C — CI failures fixable in this PR.
-  readFixableCiFailures(review).forEach((f, i) => {
+  fixableCiItems(ciItems).forEach((f, i) => {
     const ref = `C${i + 1}`;
-    const first = f.relatedFiles?.[0] ?? null;
+    const first = f.path ? { path: f.path, line: f.line } : (f.relatedFiles?.[0] ?? null);
     const body = [
       `Check: ${f.checkName}${f.step ? ` (step: ${f.step})` : ''}`,
       f.cause ? `Cause: ${f.cause}` : '',
       f.explanation ? `Detail: ${f.explanation}` : '',
+      f.path ? `Where: ${where(f.path, f.line)}` : '',
+      f.suggestion ? `Suggested change: ${f.suggestion}` : '',
       f.relatedFiles?.length
         ? `Related files: ${f.relatedFiles.map((r) => where(r.path, r.line)).join(', ')}`
         : '',
@@ -299,10 +304,12 @@ export function buildReviewSeed(
     budgetChars?: number;
     // The ticket review's items this PR owns — a MANUAL fix only (see the header).
     ticketItems?: readonly SeedTicketItem[];
+    // The CI review's items at the PR's current head (see the header).
+    ciItems?: readonly CiReviewItem[];
   },
 ): ReviewSeed {
   const budget = opts.budgetChars ?? REVIEW_SEED_CHAR_BUDGET;
-  const all = collectReviewItems(review, opts.ticketItems ?? []);
+  const all = collectReviewItems(review, opts.ticketItems ?? [], opts.ciItems ?? []);
   if (all.length === 0) return { items: [], sentRefs: [], text: '' };
 
   const summary = clip(review.userBody?.trim() || review.summary?.trim() || '', SUMMARY_MAX);

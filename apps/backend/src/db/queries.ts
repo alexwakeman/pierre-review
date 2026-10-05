@@ -290,6 +290,7 @@ import {
 } from './dependency-cards.js';
 import { deriveSecurityAlerts } from './security-alerts.js';
 import { pruneTicketReviewsForPrs } from './ticket-review-prune.js';
+import { pruneCiReviewsForPrs } from './ci-review-prune.js';
 import {
   failingChecksFields,
   prFailingChecks,
@@ -10123,6 +10124,8 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       // Ticket reviews (migration 0080 / pg 0067): this repo's member rows, then any run left with
       // no members — a run whose other PRs live in another repo keeps its history.
       await pruneTicketReviewsForPrs(tx, prIds);
+      // CI reviews (migration 0082 / pg 0069): one PR each, so its runs and items go with it.
+      await pruneCiReviewsForPrs(tx, prIds);
       // The agentic table core ADOPTED from the plugin (migration 0074 / pg 0061): AI Fix runs
       // (~MiB patches). No FKs, so nothing would cascade; before this the plugin had no deleteRepo
       // hook at all and they were orphaned on a repo removal.
@@ -10378,19 +10381,21 @@ export async function getUnactionedClaudeReviews(
 // based: every tick it asks this read which PRs qualify, so the DATABASE is the queue and a restart
 // loses nothing. A PR qualifies when it is, in ONE workspace:
 //   - OPEN and NOT A DRAFT (a draft qualifies once it is marked ready, if it was opened late enough);
-//   - OPENED at or after `openedSinceMs` - the moment the workspace switched the feature on. That
-//     floor is what makes a first sync, a 90-day backfill or adding a repo safe: none of them can
-//     make an OLD PR look new;
+//   - for a FIRST review: OPENED at or after `openedSinceMs` - the moment the workspace switched the
+//     feature on. That floor is what makes a first sync, a 90-day backfill or adding a repo safe:
+//     none of them can make an OLD PR look new. A RE-review also qualifies an older PR once it has a
+//     succeeded run created at or after the floor (someone chose to review it since the switch);
 //   - by a PERSON. The workspace-aware resolver `hiddenBotUserIds` - the SAME set that decides
 //     `InsightPrRef.authorIsBot` and the "hide bots" lens, a manual workspace judgement winning both
 //     ways - never the global set alone. An unmapped author (`author_id` NULL) is not a proven
 //     person and is skipped;
 //   - with NO `claude_reviews` row at all, whatever its head, status or trigger: ONE review per PR,
 //     ever, from auto. A manual run (or a failed auto one) settles it too.
-// `ci` carries, for every PR offered (first review or re-review), whether the synced CI of its head
-// is still RUNNING (`ci_status` pending / expected) and when that head was first observed
-// (`ci_status_events`, the earliest row for that head; null = no row). The sweeper holds a run
-// while CI runs, for at most AUTO_REVIEW_CI_WAIT_MS from that moment (review/claude-review/auto.ts).
+// Each re-review carries `lastRunAtMs` (the latest start or finish of any run of the PR) for the
+// sweeper's "start a new head on receipt unless a run was within 5 minutes" test, and
+// `inFlightMoved` lists PRs whose run is queued or running while their head moved past it (never
+// cancelled; the sweeper only starts that head's settle clock). There is NO CI reading: auto review
+// does not wait for CI (review/claude-review/auto.ts).
 // `autoToday` counts this workspace's AUTO runs created at or after `dayStartMs`, for the daily cap.
 // Returns null when the workspace is not this account's - never another workspace's answer (the
 // request-side resolver's "fall back to Default" would review the wrong repos here).
@@ -10402,7 +10407,7 @@ export async function getAutoReviewCandidates(
   prIds: number[];
   autoToday: number;
   reReview: AutoReReviewCandidate[];
-  ci: AutoReviewCiState[];
+  inFlightMoved: Array<{ prId: number; headSha: string }>;
 } | null> {
   const owned = (
     await db
@@ -10414,7 +10419,7 @@ export async function getAutoReviewCandidates(
   )[0];
   if (!owned) return null;
   const repoIds = await getWorkspaceRepoIds(workspaceId, accountId);
-  if (repoIds.length === 0) return { prIds: [], autoToday: 0, reReview: [], ci: [] };
+  if (repoIds.length === 0) return { prIds: [], autoToday: 0, reReview: [], inFlightMoved: [] };
 
   const autoRows = await db
     .select({ id: claudeReviews.id })
@@ -10430,7 +10435,7 @@ export async function getAutoReviewCandidates(
     )
     .execute();
   const autoToday = autoRows.length;
-  if (opts.limit <= 0) return { prIds: [], autoToday, reReview: [], ci: [] };
+  if (opts.limit <= 0) return { prIds: [], autoToday, reReview: [], inFlightMoved: [] };
 
   const open = await db
     .select({
@@ -10438,7 +10443,6 @@ export async function getAutoReviewCandidates(
       authorId: pullRequests.authorId,
       openedAt: pullRequests.openedAt,
       headSha: pullRequests.headSha,
-      ciStatus: pullRequests.ciStatus,
     })
     .from(pullRequests)
     .where(
@@ -10447,12 +10451,11 @@ export async function getAutoReviewCandidates(
         inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, 'open'),
         eq(pullRequests.isDraft, false),
-        gte(pullRequests.openedAt, new Date(opts.openedSinceMs)),
       ),
     )
     .orderBy(asc(pullRequests.openedAt), asc(pullRequests.id))
     .execute();
-  if (open.length === 0) return { prIds: [], autoToday, reReview: [], ci: [] };
+  if (open.length === 0) return { prIds: [], autoToday, reReview: [], inFlightMoved: [] };
 
   const [bots, reviewed, reviewerBots] = await Promise.all([
     hiddenBotUserIds(accountId, workspaceId),
@@ -10463,6 +10466,7 @@ export async function getAutoReviewCandidates(
         headSha: claudeReviews.headSha,
         status: claudeReviews.status,
         createdAt: claudeReviews.createdAt,
+        finishedAt: claudeReviews.finishedAt,
         commentsThrough: claudeReviews.commentsThrough,
       })
       .from(claudeReviews)
@@ -10481,8 +10485,14 @@ export async function getAutoReviewCandidates(
   const botSet = new Set(bots);
   const hasRun = new Set(reviewed.map((r) => r.prId));
   const human = open.filter((r) => r.authorId != null && !botSet.has(r.authorId));
+  // ⚠ THE ONBOARDING FLOOR GATES FIRST REVIEWS ONLY. A PR opened before the switch is never
+  // reviewed unasked (switching on must not bill a backlog), but once someone has run a review on
+  // it SINCE the switch, it is followed like any other: a manual run on an older PR used to leave
+  // its later pushes un-re-reviewed for ever, because the floor filtered the whole candidate read.
+  const afterFloor = (r: (typeof open)[number]): boolean =>
+    r.openedAt != null && r.openedAt.getTime() >= opts.openedSinceMs;
   const prIds = human
-    .filter((r) => !hasRun.has(r.id))
+    .filter((r) => afterFloor(r) && !hasRun.has(r.id))
     .slice(0, opts.limit)
     .map((r) => r.id);
   // RE-REVIEW: a PR already reviewed (a SUCCEEDED run, manual or auto) whose synced head has
@@ -10496,17 +10506,34 @@ export async function getAutoReviewCandidates(
     runsByPr.set(r.prId, list);
   }
   const reReview: AutoReReviewCandidate[] = [];
+  const inFlightMoved: Array<{ prId: number; headSha: string }> = [];
   // Same head, but maybe NEW REVIEW COMMENTS: the PR's runs at its head and how far they saw.
   const sameHead: Array<{ prId: number; headSha: string; coveredMs: number }> = [];
   for (const pr of human) {
     const runs = runsByPr.get(pr.id);
     if (!runs || !pr.headSha) continue;
+    const newest = runs.reduce((a, b) => (b.id > a.id ? b : a));
+    if (
+      (newest.status === 'queued' || newest.status === 'running') &&
+      !runs.some((r) => r.headSha === pr.headSha)
+    ) {
+      inFlightMoved.push({ prId: pr.id, headSha: pr.headSha });
+      continue;
+    }
     if (!runs.some((r) => r.status === 'succeeded')) continue;
+    if (
+      !afterFloor(pr) &&
+      !runs.some((r) => r.status === 'succeeded' && r.createdAt.getTime() >= opts.openedSinceMs)
+    )
+      continue;
     const latest = runs.reduce((a, b) => (b.id > a.id ? b : a));
     if (latest.status === 'queued' || latest.status === 'running') continue;
     const atHead = runs.filter((r) => r.headSha === pr.headSha);
     if (atHead.length === 0) {
-      reReview.push({ prId: pr.id, headSha: pr.headSha, commentsAtMs: null, reason: 'head' });
+      const lastRunAtMs = Math.max(
+        ...runs.map((r) => Math.max(r.createdAt.getTime(), r.finishedAt?.getTime() ?? 0)),
+      );
+      reReview.push({ prId: pr.id, headSha: pr.headSha, commentsAtMs: null, reason: 'head', lastRunAtMs });
       if (reReview.length >= opts.limit) break;
       continue;
     }
@@ -10534,65 +10561,17 @@ export async function getAutoReviewCandidates(
     for (const p of sameHead) {
       const at = newest.get(p.prId);
       if (!at || at.getTime() <= p.coveredMs) continue;
-      reReview.push({ prId: p.prId, headSha: p.headSha, commentsAtMs: at.getTime(), reason: 'comments' });
+      reReview.push({
+        prId: p.prId,
+        headSha: p.headSha,
+        commentsAtMs: at.getTime(),
+        reason: 'comments',
+        lastRunAtMs: null,
+      });
       if (reReview.length >= opts.limit) break;
     }
   }
-  const ci = await autoReviewCiStates(
-    accountId,
-    open,
-    new Set([...prIds, ...reReview.map((r) => r.prId)]),
-  );
-  return { prIds, autoToday, reReview, ci };
-}
-
-/** One offered PR's CI reading for the sweeper's CI hold (see `getAutoReviewCandidates`). */
-export interface AutoReviewCiState {
-  prId: number;
-  headSha: string | null;
-  // The synced CI rollup of the head is still running (`pending` / `expected`).
-  running: boolean;
-  // The earliest `ci_status_events` row for this head; null = none recorded.
-  headSeenAtMs: number | null;
-}
-
-async function autoReviewCiStates(
-  accountId: number,
-  open: ReadonlyArray<{ id: number; headSha: string | null; ciStatus: string | null }>,
-  offered: ReadonlySet<number>,
-): Promise<AutoReviewCiState[]> {
-  const rows = open.filter((r) => offered.has(r.id));
-  if (rows.length === 0) return [];
-  const events = (await db
-    .select({
-      prId: ciStatusEvents.prId,
-      headSha: ciStatusEvents.headSha,
-      observedAt: ciStatusEvents.observedAt,
-    })
-    .from(ciStatusEvents)
-    .where(
-      and(
-        eq(ciStatusEvents.accountId, accountId),
-        inArray(
-          ciStatusEvents.prId,
-          rows.map((r) => r.id),
-        ),
-      ),
-    )
-    .execute()) as Array<{ prId: number; headSha: string; observedAt: Date }>;
-  const firstSeen = new Map<string, number>();
-  for (const e of events) {
-    const k = `${e.prId}|${e.headSha}`;
-    const t = e.observedAt.getTime();
-    const prev = firstSeen.get(k);
-    if (prev == null || t < prev) firstSeen.set(k, t);
-  }
-  return rows.map((r) => ({
-    prId: r.id,
-    headSha: r.headSha,
-    running: r.ciStatus === 'pending' || r.ciStatus === 'expected',
-    headSeenAtMs: r.headSha ? (firstSeen.get(`${r.id}|${r.headSha}`) ?? null) : null,
-  }));
+  return { prIds, autoToday, reReview, inFlightMoved };
 }
 
 // WHO MAY RE-TRIGGER AN AUTO REVIEW BY COMMENTING (the comment half of the re-review key). A
@@ -10636,6 +10615,8 @@ export interface AutoReReviewCandidate {
   headSha: string;
   commentsAtMs: number | null;
   reason: 'head' | 'comments';
+  // The latest start or finish of any run of this PR (head re-reviews; null for comments).
+  lastRunAtMs: number | null;
 }
 
 // ---- PR write-action contexts (reply / resolve / comment / approve / inline) ----

@@ -147,6 +147,9 @@ describe('specialists only on the deep route', () => {
     expect(deep).toContain('# Specialists');
     expect(deep).toContain(`At most ${CLAUDE_REVIEW_MAX_SPECIALISTS} per review`);
     expect(deep).toContain("lens 'design'");
+    // A sound design is the summary's "Good:" line, never a praise finding.
+    expect(deep).toContain('"Good:" line');
+    expect(deep).not.toContain("'praise'");
     expect(deep).not.toContain('- accessibility:');
     expect(specialistsPromptSection([])).toBe('');
   });

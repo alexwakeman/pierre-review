@@ -37,6 +37,9 @@ describe('autoFixOutcomeLine', () => {
     expect(autoFixOutcomeLine({ reviewId: 1, status: 'skipped', reason: 'nothing_to_fix' })).toBe(
       'No auto fix: the review found nothing to fix.',
     );
+    expect(autoFixOutcomeLine({ reviewId: 1, status: 'skipped', reason: 'off' })).toBe(
+      'No auto fix: auto AI Fix is off for this workspace.',
+    );
   });
 });
 

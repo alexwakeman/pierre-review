@@ -11,15 +11,18 @@ type ZodNs = typeof Zod;
 // Exported as a raw zod shape (what `tool()` wants) plus an assembled object
 // schema (for validation in tests / belt-and-suspenders parsing).
 //
-// ⚠ EVERY FOLLOW-UP / REVIEW-THREAD / CI FIELD IS OPTIONAL, so a run with none of those sections
+// ⚠ EVERY FOLLOW-UP / REVIEW-THREAD FIELD IS OPTIONAL, so a run with none of those sections
 // submits exactly the old shape and validates exactly as before. The prompt — not this schema —
-// requires `followUp` / `threads` / `ciFailures` when the user message carries those sections, and
+// requires `followUp` / `threads` when the user message carries those sections, and
 // the server reconciles whatever arrives (missing refs become 'not_checked'). 'not_checked' is in
 // NO enum here: only the server writes it.
 //
 // There is NO `tickets` field: user stories left the PR review for the ticket review
 // (review/ticket-review/, its own `submit_ticket_review`). A stray `tickets` key is stripped by
 // zod's default object parsing, so nothing a model sends here can become a story verdict.
+//
+// There is NO `ciFailures` field either: failing CI left the PR review for the CI review
+// (review/ci-review/, its own `submit_ci_review`). A stray `ciFailures` key is stripped the same way.
 
 export function buildSubmitReviewShape(z: ZodNs) {
   return {
@@ -32,7 +35,10 @@ export function buildSubmitReviewShape(z: ZodNs) {
         // null/omitted ⇒ file-level / unanchored finding.
         line: z.number().int().nullable().optional(),
         side: z.enum(["LEFT", "RIGHT"]).optional(),
-        severity: z.enum(["blocker", "warning", "nit", "question", "praise"]),
+        // No 'praise': a review posts only what needs the author's attention. What is good goes in
+        // ONE "Good:" line of the summary instead. Stored praise rows on older runs stay readable
+        // (the shared ClaudeFindingSeverity keeps the member) and are hidden on every read.
+        severity: z.enum(["blocker", "warning", "nit", "question"]),
         title: z.string(),
         body: z.string(),
         suggestion: z.string().nullable().optional(),
@@ -92,38 +98,6 @@ export function buildSubmitReviewShape(z: ZodNs) {
       .optional()
       .describe(
         "Only when the user message has a 'Review threads' section: one entry per thread there, each ref once. Leave out a ref whose code you cannot see rather than guess. Leave the whole field out otherwise.",
-      ),
-    ciFailures: z
-      .array(
-        z.object({
-          ref: z.string().describe("The failure's ref from the 'CI failures' section, e.g. 'F1'."),
-          cause: z.string().describe("The cause in a few words."),
-          explanation: z
-            .string()
-            .describe("One to three sentences that name the log lines and the code you checked."),
-          category: z.enum(["code", "test", "flaky_or_infra", "config", "unclear"]),
-          step: z
-            .string()
-            .nullable()
-            .optional()
-            .describe("The failing step, only when the section does not name it and the log shows it."),
-          relatedFiles: z
-            .array(
-              z.object({
-                path: z.string(),
-                line: z.number().int().nullable().optional(),
-              }),
-            )
-            .optional()
-            .describe("Files in this repository the failure points at, with a line when known."),
-          fixableInPr: z
-            .boolean()
-            .describe("true when a change to this pull request would make the check pass."),
-        }),
-      )
-      .optional()
-      .describe(
-        "Only when the user message has a 'CI failures' section: one entry per failure there, each ref once. Leave out a ref you cannot judge rather than guess. Leave the whole field out otherwise.",
       ),
   };
 }

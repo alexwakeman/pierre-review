@@ -3134,13 +3134,39 @@ check(
   );
   check(
     "setWorkspaceAutoReview(A, B's workspace) is refused (→ 404)",
-    (await autoSettings.setWorkspaceAutoReview(actx, 1, defaultB, true)) === null,
+    (await autoSettings.setWorkspaceAutoReview(actx, 1, defaultB, { enabled: true })) === null,
   );
   check(
     "B's workspace stays OFF after A's attempt",
     (await autoSettings.readWorkspaceAutoReview(actx, 2, defaultB))?.enabled === false,
   );
-  await autoSettings.setWorkspaceAutoReview(actx, 1, defaultA, true);
+  // The auto AI Fix switch (workspaces.auto_fix_enabled, migration 0083) rides the same writer.
+  check(
+    "setWorkspaceAutoReview(A, B's workspace, autoFixEnabled) is refused (→ 404)",
+    (await autoSettings.setWorkspaceAutoReview(actx, 1, defaultB, { autoFixEnabled: false })) === null,
+  );
+  check(
+    "B's auto fix stays ON (the default) after A's attempt",
+    (await autoSettings.readWorkspaceAutoReview(actx, 2, defaultB))?.autoFixEnabled === true,
+  );
+  // The workspace holding B's repo NOW (earlier sections move repos off the Default one).
+  const [holdB] = (await db
+    .select({ workspaceId: schema.workspaceRepos.workspaceId })
+    .from(schema.workspaceRepos)
+    .where(and(eq(schema.workspaceRepos.accountId, 2), eq(schema.workspaceRepos.repoId, B.repoId)))
+    .execute()) as Array<{ workspaceId: number }>;
+  const wsHoldingB = holdB?.workspaceId ?? defaultB;
+  await autoSettings.setWorkspaceAutoReview(actx, 2, wsHoldingB, { autoFixEnabled: false });
+  check(
+    "MUTATION: B's own read of its PR sees B's switch OFF (the check below is not vacuous)",
+    (await autoSettings.readWorkspaceAutoFixForPr(actx, 2, B.prId)) === false,
+  );
+  check(
+    "readWorkspaceAutoFixForPr(A, B.pr) never reads B's workspace switch",
+    (await autoSettings.readWorkspaceAutoFixForPr(actx, 1, B.prId)) === true,
+  );
+  await autoSettings.setWorkspaceAutoReview(actx, 2, wsHoldingB, { autoFixEnabled: true });
+  await autoSettings.setWorkspaceAutoReview(actx, 1, defaultA, { enabled: true });
   const roster = await autoSettings.listAutoReviewWorkspaces(actx);
   check(
     'the auto-review roster carries each row with its OWN account',
@@ -3236,6 +3262,102 @@ check(
     crossRefused = true;
   }
   check("a member row naming B's PR under A's run is refused by the composite FK", crossRefused);
+}
+
+// ── CI REVIEW (migration 0082 / pg 0069) ─────────────────────────────────────────────────────────
+// Runs and their per-check items. Run ids arrive in request PATHS, so every id-addressed getter must
+// answer null for the other account; the batched state read, the synced CI read and AI Fix's CI half
+// must never surface the other account's rows. Both accounts' runs share a head sha, so a dropped
+// account predicate would have something to leak — the MUTATION check proves it.
+{
+  const { buildAgentContext } = await import('../src/review/agent-context.js');
+  const cr = await import('../src/review/ci-review/persist.js');
+  const { ciStatesFor } = await import('../src/review/ci-review/routes.js');
+  const silent = { info() {}, warn() {}, error() {}, debug() {}, child() { return silent; } };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cctx = buildAgentContext(silent as any);
+  const SHA = 'f'.repeat(40);
+  const runFor = async (accountId: number, workspaceId: number, prId: number, repoId: number) => {
+    const id = await cr.insertQueuedCiReview(cctx, {
+      accountId,
+      workspaceId,
+      prId,
+      repoId,
+      headSha: SHA,
+      triggerKey: null,
+      trigger: 'auto',
+      model: 'm',
+    });
+    await cr.markCiReviewRunning(cctx, accountId, id, { headSha: SHA, failingChecks: ['test'], ciState: { state: 'failing', checkCount: 1 } });
+    await cr.saveCiReviewSuccess(cctx, accountId, id, {
+      summary: 's',
+      numTurns: 1,
+      items: [
+        {
+          ref: 'F1',
+          checkName: 'test',
+          jobId: 1,
+          step: null,
+          url: null,
+          sent: true,
+          carried: false,
+          status: 'diagnosed',
+          notCheckedReason: null,
+          cause: 'c',
+          explanation: 'e',
+          category: 'test',
+          fixableInPr: true,
+          relatedFiles: [],
+          assessedAtHead: SHA,
+          path: null,
+          line: null,
+          suggestion: null,
+        },
+      ],
+    });
+    return id;
+  };
+  const crA = await runFor(1, defaultA, A.prId, A.repoId);
+  const crB = await runFor(2, defaultB, B.prId, B.repoId);
+  check("getCiReviewById(A's run, A) returns it", (await cr.getCiReviewById(cctx, 1, crA))?.id === crA);
+  check("getCiReviewById(B's run, A) returns null (IDOR blocked)", (await cr.getCiReviewById(cctx, 1, crB)) === null);
+  check("getCiReviewRow(B's run, A) returns null", (await cr.getCiReviewRow(cctx, 1, crB)) === null);
+  check("getLatestCiReviewForPr(A, B.pr) is null", (await cr.getLatestCiReviewForPr(cctx, 1, B.prId)) === null);
+  check("getCiPrContext(A, B.pr) is null (→ 404 on start)", (await cr.getCiPrContext(cctx, 1, B.prId)) === null);
+  check("getCiStateInputs(A, B.pr) carries no run", (await cr.getCiStateInputs(cctx, 1, [B.prId])).get(B.prId)?.latest == null);
+  check("readSyncedCi(A, B.pr) is empty", (await cr.readSyncedCi(cctx, 1, [B.prId])).size === 0);
+  check("ciStatesFor(A, B.pr) reads none", (await ciStatesFor(cctx, 1, [B.prId])).get(B.prId)?.status === 'none');
+  check("getLatestSucceededCiReviewAtHead(A, B.pr) is null", (await cr.getLatestSucceededCiReviewAtHead(cctx, 1, B.prId, SHA)) === null);
+  check("getFixableCiItemsForPr(A, B.pr) is empty", (await cr.getFixableCiItemsForPr(cctx, 1, B.prId)).length === 0);
+  check("countAutoCiReviewsSince(A, B's workspace) is 0", (await cr.countAutoCiReviewsSince(cctx, 1, defaultB, 0)) === 0);
+  check("countAutoCiReviewsSince(A, A's workspace) counts A's run", (await cr.countAutoCiReviewsSince(cctx, 1, defaultA, 0)) === 1);
+  await cr.markCiReviewFailed(cctx, 1, crB, 'hijack');
+  check("markCiReviewFailed(B's run, A) leaves it succeeded", (await cr.getCiReviewById(cctx, 2, crB))?.status === 'succeeded');
+  const t = schema.ciReviews;
+  const both = await db.select().from(t).where(eq(t.headSha, SHA)).execute();
+  check('MUTATION: without the account predicate both runs share the head', both.length === 2);
+  // STRUCTURAL: an item pairing B's run with account A, and a run pairing A with B's PR, fail in the
+  // database.
+  let itemRefused = false;
+  try {
+    await db
+      .insert(schema.ciReviewItems)
+      .values({ ciReviewId: crB, accountId: 1, checkName: 'x', status: 'not_checked', assessedAtHead: SHA })
+      .execute();
+  } catch {
+    itemRefused = true;
+  }
+  check("an item naming B's run under account A is refused by the composite FK", itemRefused);
+  let runRefused = false;
+  try {
+    await db
+      .insert(schema.ciReviews)
+      .values({ accountId: 1, workspaceId: defaultA, prId: B.prId, repoId: B.repoId, headSha: SHA, status: 'queued', model: 'm' })
+      .execute();
+  } catch {
+    runRefused = true;
+  }
+  check("a run naming B's PR under account A is refused by the composite FK", runRefused);
 }
 
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);

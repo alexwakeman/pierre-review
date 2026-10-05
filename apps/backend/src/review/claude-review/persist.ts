@@ -31,6 +31,14 @@ import { CLAUDE_FINDING_LENSES, threadAssessmentCounts } from '@pierre-review/sh
 import { storedList, stripStoredStoryLead } from '@pierre-review/shared';
 import type { ReviewFinding } from '../../pro/contract.js';
 import { ticketEntriesOf } from './ticket.js';
+import {
+  settledFindings,
+  type SettleCommit,
+  type SettledFinding,
+  type SettleFinding,
+  type SettleThread,
+} from './settled-by-reply.js';
+import { automationVendorFor, isLikelyBot } from '../../sync/bot-detection.js';
 import type { AgentContext } from '../agent-context.js';
 import {
   isFollowUpEligible,
@@ -147,6 +155,16 @@ export function ciRecordOf(v: unknown): ClaudeCiFailuresRecord | null {
     checkCount: typeof r.checkCount === 'number' ? r.checkCount : 0,
     failures: r.failures,
   };
+}
+
+/**
+ * Whether a stored finding is SHOWN. Praise is no longer a finding (new runs cannot submit one), and
+ * an older run's stored praise rows are hidden on every read the SPA, the chat, posting and the
+ * counts go through — never deleted. ⚠ Not applied to `ownPostedCommentsForPrs`: a praise comment
+ * already on GitHub is still Limn's own comment.
+ */
+export function isShownFinding(f: { severity: ClaudeFindingSeverity }): boolean {
+  return f.severity !== 'praise';
 }
 
 function mapFinding(r: FindingRow): ClaudeFinding {
@@ -298,12 +316,12 @@ export async function getClaudeReviewById(
     .execute()) as Array<{ review: ReviewRow; prHeadSha: string | null }>;
   const row = rows[0]?.review ?? null;
   if (!row) return null;
-  const findings = (await ctx.db
+  const findings = ((await ctx.db
     .select()
     .from(crf)
     .where(eq(crf.reviewId, reviewId))
     .orderBy(asc(crf.id))
-    .execute()) as FindingRow[];
+    .execute()) as FindingRow[]).filter(isShownFinding);
   const head = await reviewHeadState(ctx, row.prId, row.headSha, rows[0]!.prHeadSha);
   return mapReview(row, findings, head);
 }
@@ -602,6 +620,8 @@ async function foldStateSummaries(
     const lenses: ClaudeReviewStateSummary['lenses'] = {};
     let postedFindings = 0;
     for (const f of findingsById.get(id) ?? []) {
+      // Stored praise (older runs) is hidden: no count, no lens, no posted figure. `praise` stays 0.
+      if (!isShownFinding(f)) continue;
       if (f.severity in counts) counts[f.severity] += 1;
       const lens = (CLAUDE_FINDING_LENSES as string[]).includes(f.lens ?? '') ? (f.lens as ClaudeFindingLens) : null;
       if (lens) lenses[lens] = (lenses[lens] ?? 0) + 1;
@@ -618,7 +638,8 @@ async function foldStateSummaries(
       alignment: e.assessment?.alignment ?? null,
     }));
     let followUp: ClaudeReviewStateSummary['followUp'] = null;
-    const items = extra?.followUp?.items;
+    // Praise is hidden everywhere, so an earlier praise item never counts in "Earlier: …".
+    const items = extra?.followUp?.items?.filter((it) => it.severity !== 'praise');
     if (Array.isArray(items) && items.length > 0) {
       followUp = { addressed: 0, partly_addressed: 0, not_addressed: 0, no_longer_applies: 0, not_checked: 0 };
       for (const it of items) if (it.status in followUp) followUp[it.status] += 1;
@@ -751,7 +772,8 @@ export async function getFindingPostContext(
     prNumber: number;
   }>;
   const row = rows[0];
-  if (!row) return null;
+  // A hidden (praise) finding is not addressable: it 404s exactly like a missing one.
+  if (!row || !isShownFinding(row.finding)) return null;
   return { finding: row.finding, reviewHeadSha: row.reviewHeadSha, owner: row.owner, name: row.name, prNumber: row.prNumber };
 }
 
@@ -896,6 +918,8 @@ export async function getReviewPeerContexts(
  * load-bearing — pre-routing rows have no mode, and a bare `<>` drops NULL rows in SQL.
  *
  * Its findings are kept when eligible (`isFollowUpEligible`: POSTED to GitHub and not praise),
+ * and not SETTLED BY A REPLY (`settledIds`, settled-by-reply.ts — answered on GitHub by someone
+ * else and resolved with no code change),
  * with the body the user saw. A finding that was ignored, left unposted or only copied never enters
  * the follow-up — not the prompt, not the stored record, not the counts. CARRY-FORWARD re-loads two kinds of OLDER finding named by
  * that run's follow-up items — the ids come only from our own stored JSON and are re-scoped to this
@@ -915,6 +939,9 @@ export async function loadPriorReviewForFollowUp(
   prId: number,
   accountId: number,
   beforeReviewId: number,
+  // TRAILING: earlier findings SETTLED BY A REPLY (`loadSettledByReplyFindings`) — left out of the
+  // follow-up entirely, own and carried alike. Absent ⇒ none.
+  settledIds: ReadonlySet<number> = new Set(),
 ): Promise<PriorReviewForFollowUp | null> {
   const { cr, crf, prs, repos } = tables(ctx);
   const rows = (await ctx.db
@@ -1006,7 +1033,162 @@ export async function loadPriorReviewForFollowUp(
       findings.push({ ...toPrior(finding, headSha, true), priorStatus: openNotReraised.get(finding.id) ?? null });
     }
   }
-  return { reviewId: row.id, headSha: row.headSha, findings };
+  // ⚠ Filtered AFTER the carry bookkeeping above, so a settled finding still counts as "seen" and
+  // a re-raise of it still marks it followed-through — it is simply never asked about.
+  return {
+    reviewId: row.id,
+    headSha: row.headSha,
+    findings: settledIds.size > 0 ? findings.filter((f) => !settledIds.has(f.id)) : findings,
+  };
+}
+
+// ---- Earlier findings settled by a reply (settled-by-reply.ts) ----
+
+/**
+ * Every posted finding of an EARLIER succeeded review of this PR (id below `beforeReviewId`) that
+ * someone answered on GitHub and that was resolved without a code change — the pure rule is
+ * settled-by-reply.ts `settledFindings`; this only reads the synced rows it needs. Account-scoped
+ * through the repos join (a foreign PR reads as none). EVERY earlier review, not only the previous
+ * one: a settled finding leaves the follow-up chain, so a later run would otherwise never hear of
+ * it again and could raise it as new.
+ */
+export async function loadSettledByReplyFindings(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+  beforeReviewId: number,
+): Promise<SettledFinding[]> {
+  const { cr, crf, prs, repos } = tables(ctx);
+  const s = ctx.schema as any;
+  const rows = (await ctx.db
+    .select({ finding: crf })
+    .from(crf)
+    .innerJoin(cr, eq(cr.id, crf.reviewId))
+    .innerJoin(prs, eq(prs.id, cr.prId))
+    .innerJoin(repos, eq(repos.id, prs.repoId))
+    .where(
+      and(
+        eq(cr.prId, prId),
+        eq(repos.accountId, accountId),
+        eq(cr.status, 'succeeded'),
+        lt(cr.id, beforeReviewId),
+      ),
+    )
+    .orderBy(asc(crf.id))
+    .execute()) as Array<{ finding: FindingRow }>;
+  const findings: SettleFinding[] = rows
+    .map((r) => r.finding)
+    .filter(isFollowUpEligible)
+    .map((f) => ({
+      id: f.id,
+      path: f.path,
+      title: f.title,
+      body: resolveFindingBody(f),
+      githubCommentId: f.githubCommentId,
+    }));
+  if (findings.length === 0) return [];
+
+  const { reviewThreads: rt, reviewComments: rc, users, commits, commitFiles, accounts } = s;
+  const [commentRows, commitRows, accountRows] = await Promise.all([
+    ctx.db
+      .select({
+        threadId: rt.id,
+        path: rt.path,
+        isResolved: rt.isResolved,
+        derivedState: rt.derivedState,
+        isOutdated: rt.isOutdated,
+        commentId: rc.id,
+        body: rc.body,
+        excerpt: rc.excerpt,
+        databaseId: rc.databaseId,
+        createdAt: rc.createdAt,
+        authorLogin: users.githubLogin,
+        authorIsBot: users.isBot,
+        authorType: users.githubType,
+      })
+      .from(rt)
+      .innerJoin(rc, eq(rc.threadId, rt.id))
+      .leftJoin(users, eq(users.id, rc.authorId))
+      .where(eq(rt.prId, prId))
+      .execute() as Promise<
+      Array<{
+        threadId: number;
+        path: string;
+        isResolved: boolean;
+        derivedState: string;
+        isOutdated: boolean;
+        commentId: number;
+        body: string | null;
+        excerpt: string | null;
+        databaseId: string | null;
+        createdAt: Date;
+        authorLogin: string | null;
+        authorIsBot: boolean | null;
+        authorType: string | null;
+      }>
+    >,
+    ctx.db
+      .select({ sha: commits.sha, committedAt: commits.committedAt })
+      .from(commits)
+      .where(eq(commits.prId, prId))
+      .execute() as Promise<Array<{ sha: string; committedAt: Date }>>,
+    ctx.db
+      .select({ login: accounts.githubLogin })
+      .from(accounts)
+      .where(eq(accounts.id, accountId))
+      .limit(1)
+      .execute() as Promise<Array<{ login: string | null }>>,
+  ]);
+  const accountLogin = accountRows[0]?.login ?? null;
+  if (!accountLogin || commentRows.length === 0) return [];
+
+  const shas = [...new Set(commitRows.map((c) => c.sha))];
+  const files = new Map<string, string[]>();
+  if (shas.length > 0) {
+    const fileRows = (await ctx.db
+      .select({ sha: commitFiles.sha, paths: commitFiles.paths })
+      .from(commitFiles)
+      .where(inArray(commitFiles.sha, shas))
+      .execute()) as Array<{ sha: string; paths: string[] | null }>;
+    for (const f of fileRows) if (Array.isArray(f.paths)) files.set(f.sha, f.paths);
+  }
+  const settleCommits: SettleCommit[] = commitRows.map((c) => ({
+    committedAt: c.committedAt,
+    paths: files.get(c.sha) ?? null,
+  }));
+
+  const byThread = new Map<number, SettleThread>();
+  const sorted = [...commentRows].sort(
+    (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.commentId - b.commentId,
+  );
+  for (const r of sorted) {
+    let t = byThread.get(r.threadId);
+    if (!t) {
+      t = {
+        path: r.path,
+        isResolved: !!r.isResolved,
+        derivedState: r.derivedState,
+        isOutdated: !!r.isOutdated,
+        comments: [],
+      };
+      byThread.set(r.threadId, t);
+    }
+    // Automation never settles a finding: the stored flags, plus the login seeds for a row synced
+    // before its login joined them (the global set's per-row half; no workspace here).
+    const login = r.authorLogin ?? null;
+    const isBot =
+      !!r.authorIsBot ||
+      r.authorType === 'Bot' ||
+      (login != null && (isLikelyBot(login) || automationVendorFor(login) != null));
+    t.comments.push({
+      databaseId: r.databaseId ?? null,
+      authorLogin: login,
+      authorIsBot: isBot,
+      body: (r.body ?? r.excerpt ?? '').trim(),
+      createdAt: r.createdAt,
+    });
+  }
+  return settledFindings(findings, [...byThread.values()], settleCommits, accountLogin);
 }
 
 // ---- Writers ----

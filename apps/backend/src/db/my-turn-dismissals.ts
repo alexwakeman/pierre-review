@@ -30,6 +30,12 @@
 // clock scores higher and wins `compareScored`'s age tie-break). Ties beyond that break on the
 // item's own id, so two reads of unchanged data keep the same card.
 //
+// ⚠ A CLAUDE REVIEW IS EXEMPT: it never competes for the PR's one card and is never removed by
+// it. A finished run, and above all an auto RE-review on a PR that already holds another job (a
+// reply in your thread), is new work of its own; folding it under that job hid every re-review on
+// a busy PR. Each run is its own item (its own id and `finishedAt` clock), so a newer run shows
+// even after an older one's card was dismissed.
+//
 // ⚠ IT IS A BOARD RULE, NOT A NOTIFICATION RULE. `getWorkspaceInsights` asks for it; the
 // account-wide `GET /api/my-turn` does not, because the browser-notification watcher diffs item
 // ids — a deduplicated list would flip the winner whenever the top job cleared and announce the
@@ -353,15 +359,6 @@ export function onePerPr(
       ref: `${i.threadId}`,
     }),
   };
-  const claude = {
-    of: (i: MyTurnSections['claudeReviewsToAction'][number]): Candidate => ({
-      prId: i.prId,
-      reason: 'claude_review',
-      clockMs: clockMsOf(i.finishedAt),
-      ref: `${i.reviewId}`,
-    }),
-  };
-
   for (const i of mt.awaitingReview) offer(S.awaitingReview.of(i));
   for (const i of mt.mentions) offer(S.mentions.of(i));
   for (const i of mt.commentReplies) offer(S.commentReplies.of(i));
@@ -375,7 +372,6 @@ export function onePerPr(
   for (const i of mt.threadsAwaiting) offer(threadsAwaiting.of(i));
   for (const i of mt.threadReplies) offer(threadReplies.of(i));
   for (const i of mt.ownThreads) offer(ownThreads.of(i));
-  for (const i of mt.claudeReviewsToAction) offer(claude.of(i));
 
   return {
     awaitingReview: mt.awaitingReview.filter((i) => winnerIs(S.awaitingReview.of(i))),
@@ -391,7 +387,8 @@ export function onePerPr(
     threadsAwaiting: mt.threadsAwaiting.filter((i) => winnerIs(threadsAwaiting.of(i))),
     threadReplies: mt.threadReplies.filter((i) => winnerIs(threadReplies.of(i))),
     ownThreads: mt.ownThreads.filter((i) => winnerIs(ownThreads.of(i))),
-    claudeReviewsToAction: mt.claudeReviewsToAction.filter((i) => winnerIs(claude.of(i))),
+    // Exempt (header, rule 2): every Claude review keeps its own card.
+    claudeReviewsToAction: mt.claudeReviewsToAction,
     // Repo-grained: a branch is not a pull request, and never shares a key with one.
     redTrunks: mt.redTrunks,
   };

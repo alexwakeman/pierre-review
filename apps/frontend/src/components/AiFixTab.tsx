@@ -190,10 +190,10 @@ function FixerSection({
               installs, builds and tests nothing.
             </p>
             <p>
-              Fix from review works through everything the Claude review found except praise:
-              findings you have not ignored, earlier findings still open, other reviewers' threads
-              that still need a fix, user-story gaps and CI failures the review says this PR can
-              fix. Or type your own instruction.
+              Fix from review works through everything the Claude review found: findings you have
+              not ignored, earlier findings still open, other reviewers' threads that still need a
+              fix, user-story gaps, and CI failures the CI check says this PR can fix. Or type your
+              own instruction.
             </p>
             <p>Claude reports what it changed in each file and what it left alone, and why.</p>
             <p>Nothing is pushed until you press Push.</p>

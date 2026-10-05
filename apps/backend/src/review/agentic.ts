@@ -9,12 +9,15 @@ import { reconcileReviewsOnStartup } from './claude-review/manager.js';
 import { registerTicketReviewRoutes } from './ticket-review/routes.js';
 import { reconcileTicketReviewsOnStartup } from './ticket-review/manager.js';
 import { registerTicketReviewSweep } from './ticket-review/sweep.js';
+import { registerCiReviewRoutes } from './ci-review/routes.js';
+import { reconcileCiReviewsOnStartup } from './ci-review/manager.js';
+import { registerCiReviewSweep } from './ci-review/sweep.js';
 import { registerAiFixRoutes } from '../coding/ai-fix/routes.js';
 import { reconcileFixesOnStartup } from '../coding/ai-fix/manager.js';
 
 // THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, the chat, auto
-// review), the ticket review (one run per ticket across its PRs, + its cascade sweeper) and AI
-// Fix's fixer. CORE and FREE since apiVersion 22 (they
+// review), the ticket review (one run per ticket across its PRs, + its cascade sweeper), the CI
+// review (why checks failed on a PR's head, + its sweeper) and AI Fix's fixer. CORE and FREE since apiVersion 22 (they
 // were the plugin's "pro+" tier); they run on the user's OWN Claude Code session or
 // ANTHROPIC_API_KEY (review/auth.ts), and Limn stores no key and charges nothing for them.
 //
@@ -40,6 +43,7 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   registerClaudeReviewChatRoutes(app, ctx);
   registerAutoReviewSettingsRoutes(app, ctx);
   registerTicketReviewRoutes(app, ctx);
+  registerCiReviewRoutes(app, ctx);
   registerAiFixRoutes(app, ctx);
   return ctx;
 }
@@ -59,6 +63,9 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
   // The ticket review's cascade sweeper rides the same per-workspace auto-review switch; it
   // registers only where auto review can run (`autoReviewAvailable`).
   registerTicketReviewSweep(ctx);
+  // The CI review's sweeper rides the same switch: a check that fails on a PR's head is explained
+  // at once (no settle, no CI hold — a failing check is final).
+  registerCiReviewSweep(ctx);
   try {
     await reconcileReviewsOnStartup(ctx);
   } catch (err) {
@@ -68,6 +75,11 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
     await reconcileTicketReviewsOnStartup(ctx);
   } catch (err) {
     app.log.warn({ err }, 'ticket review: startup reconcile failed');
+  }
+  try {
+    await reconcileCiReviewsOnStartup(ctx);
+  } catch (err) {
+    app.log.warn({ err }, 'ci review: startup reconcile failed');
   }
   await reconcileFixesOnStartup(ctx);
 }

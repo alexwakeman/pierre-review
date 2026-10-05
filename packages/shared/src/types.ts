@@ -4689,8 +4689,12 @@ export interface WorkspaceAutoReviewResponse {
   workspaceId: number;
   autoReview: WorkspaceAutoReviewSettings;
 }
+// Either field may be sent alone (at least one is required — an empty `{}` is a 400, never a
+// switch); a field left out keeps its stored value.
 export interface SetWorkspaceAutoReviewBody {
-  enabled: boolean;
+  enabled?: boolean;
+  // The auto AI Fix switch (`WorkspaceAutoReviewSettings.autoFixEnabled`).
+  autoFixEnabled?: boolean;
 }
 
 // Auto Claude review, per workspace (CORE, `workspaces.auto_review_enabled[_at]`, migration 0074 /
@@ -4704,6 +4708,11 @@ export interface WorkspaceAutoReviewSettings {
   enabledAt: string | null;
   // Auto reviews started per workspace per UTC day; later PRs wait for the next day.
   dailyCap: number;
+  // AUTO AI FIX (`workspaces.auto_fix_enabled`, migration 0083 / pg 0070). After a succeeded auto
+  // review of the reader's OWN PR, prepare one review-seeded AI Fix (never pushed). ON by default;
+  // stored independently of `enabled` (switching auto review off keeps it), but it only runs after
+  // an auto review, so it does nothing while `enabled` is false.
+  autoFixEnabled: boolean;
 }
 
 // ⚠ THE TOKEN IS NEVER ON THE WIRE. A Jira token reads the team's whole tracker, so no route
@@ -6407,6 +6416,10 @@ export interface ReviewRouteReason {
 
 export type ClaudeReviewVerdict = 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE';
 
+// `praise` is READ-ONLY HISTORY: new runs cannot submit it (what is good is one "Good:" line in the
+// summary), and an older run's stored praise rows are hidden by the server on every read, so the
+// SPA never receives one and `ClaudeReviewStateSummary.findings.praise` is always 0. The member
+// stays so stored rows and the counts record keep their shape.
 export type ClaudeFindingSeverity =
   | 'blocker'
   | 'warning'
@@ -6988,7 +7001,9 @@ export type ClaudeAutoFixSkipReason =
   // The PR moved on after the review; the next review will decide.
   | 'head_moved'
   // The fixer refused to start (no Claude credential, busy queue, review gone…).
-  | 'not_started';
+  | 'not_started'
+  // Auto AI Fix is switched off for this PR's workspace (`WorkspaceAutoReviewSettings.autoFixEnabled`).
+  | 'off';
 
 export type ClaudeAutoFixOutcome =
   | { reviewId: number; status: 'started'; fixId: number }
@@ -7505,6 +7520,161 @@ export interface PostTicketItemResponse {
   visible: boolean;
   commentId: string | null;
 }
+
+// ---- CI review (CORE, free, LOCAL ONLY — review/ci-review/, docs/CLAUDE-REVIEW.md § CI review) ----
+// A separate Claude run that explains why checks FAILED on a PR's head, beside (never inside) the
+// code review. One run per (PR, head commit, sorted set of failing check names); history kept.
+// Every failing check gets exactly ONE item: Claude's cause, or a server `not_checked` reason —
+// never an invented cause. Only GitHub Actions jobs have logs; the signed log URL never leaves the
+// server (only the check's details page is stored). Routes: docs/API.md § CI review.
+
+// Default per-WORKSPACE daily cap on AUTOMATIC CI reviews, counted from `ci_reviews` rows of the
+// workspace that started them. Separate from the PR and ticket review caps. The backend's
+// `CI_REVIEW_DAILY_CAP` env var overrides it.
+export const CI_REVIEW_DAILY_CAP = 20;
+
+export type CiReviewStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+// 'manual' = a click ("Check CI" / "Re-check"); 'auto' = the sweeper saw a check fail on the head.
+export type CiReviewTrigger = 'manual' | 'auto';
+
+// Why the server declined to run Claude (written by the server, never the model). Stored on a
+// `failed` row, so the sweeper does not try the same head and failing set again.
+//   no_failures        nothing is failing on the head any more (a re-run passed)
+//   no_logs            every failing check is outside GitHub Actions: there is no log to read
+//   logs_unavailable   no failing Actions job's log could be read (expired, no permission, empty)
+//   checks_unreadable  the head's checks could not be read from GitHub
+//   head_unreadable    the head commit could not be checked out
+export type CiReviewRefusal = 'no_failures' | 'no_logs' | 'logs_unavailable' | 'checks_unreadable' | 'head_unreadable';
+
+// One failing check and what the run found. The `ClaudeCiFailure` shape plus where to fix it.
+//   path / line   the one place Claude points at (also the first of `relatedFiles`); null when none
+//   suggestion    a short description of the fix, when Claude has one; null otherwise
+export interface CiReviewItem extends ClaudeCiFailure {
+  id: number;
+  ciReviewId: number;
+  path: string | null;
+  line: number | null;
+  suggestion: string | null;
+}
+
+// Counts over a run's items (server-folded).
+//   failing      every failing check on the head (= items)
+//   explained    items with a cause ('diagnosed')
+//   fixableInPr  explained items a change to this PR would fix
+//   notChecked   items with no cause (see `notCheckedReason`)
+export interface CiReviewCounts {
+  failing: number;
+  explained: number;
+  fixableInPr: number;
+  notChecked: number;
+}
+
+// One run, in full.
+export interface CiReview {
+  id: number;
+  prId: number;
+  workspaceId: number;
+  // The head the run read.
+  headSha: string;
+  // The failing check names it judged, sorted. [] on a run refused before it read the checks.
+  failingChecks: string[];
+  trigger: CiReviewTrigger;
+  status: CiReviewStatus;
+  // Stored model id (display only).
+  model: string;
+  costUsd: number | null;
+  error: string | null;
+  refused: CiReviewRefusal | null;
+  createdAt: string; // ISO-8601
+  startedAt: string | null;
+  completedAt: string | null;
+  // The head's CI when the run read it. null before it read the checks.
+  ciState: ClaudeReviewCiState | null;
+  // Claude's one-paragraph overview (markdown). null without a model answer.
+  summary: string | null;
+  items: CiReviewItem[];
+  // null unless the run succeeded.
+  counts: CiReviewCounts | null;
+}
+
+// Why a PR's latest CI review no longer describes its CI:
+//   pushed          the PR's head moved
+//   checks_changed  a different set of checks is failing on the same head
+//   now_passing     nothing is failing on the head any more
+export type CiReviewStaleReason = 'pushed' | 'checks_changed' | 'now_passing';
+
+// Is a PR's latest CI review still true? SERVER-COMPUTED from the SYNCED head and its synced failing
+// checks — no GitHub call.
+//   current  the latest succeeded run read this head and these failing checks
+//   stale    something moved since (`staleBecause`)
+//   running  a run is queued or running (the last succeeded run, if any, is still described)
+//   none     no succeeded run yet
+export interface CiReviewState {
+  prId: number;
+  status: 'current' | 'stale' | 'running' | 'none';
+  staleBecause: CiReviewStaleReason | null;
+  // The latest SUCCEEDED run, and the in-flight one.
+  latestRunId: number | null;
+  runningRunId: number | null;
+  // The head the latest succeeded run read.
+  headSha: string | null;
+  counts: CiReviewCounts | null;
+  // The newest attempt AT THE PR'S CURRENT HEAD was refused (no model ran): why. null otherwise.
+  refused: CiReviewRefusal | null;
+  // When the latest succeeded run finished.
+  checkedAt: string | null; // ISO-8601
+}
+
+// POST /api/ci-reviews — start (or re-run) a CI review of a PR's current head.
+export interface StartCiReviewBody {
+  prId: number;
+}
+export interface StartCiReviewResponse {
+  // 'already_running' = a CI review of this PR is queued or running; its id is returned.
+  outcome: 'queued' | 'already_running';
+  ciReviewId: number | null;
+}
+
+// GET /api/prs/:id/ci-review — the PR's latest CI review (any status) and whether it is current.
+export interface PrCiReviewResponse {
+  prId: number;
+  review: CiReview | null;
+  state: CiReviewState;
+}
+
+// POST /api/ci-reviews/states — batched currency for Open PRs and the Pending cards. At most
+// CI_REVIEW_STATES_MAX PR ids per request (400 over, never truncated).
+export const CI_REVIEW_STATES_MAX = 200;
+export interface CiReviewStatesBody {
+  prIds: number[];
+}
+export interface CiReviewStatesResponse {
+  // One per requested PR, in request order (unknown or another account's PR ⇒ status 'none').
+  states: CiReviewState[];
+}
+
+// GET /api/ci-reviews/:id/stream — Server-Sent Events, same shape as the ticket review's stream.
+export interface CiReviewProgress {
+  phase: 'queued' | 'reading_logs' | 'reviewing' | 'saving';
+  message?: string;
+  recentActivity?: string[];
+  usage?: { inputTokens: number; outputTokens: number; costUsd: number };
+}
+export type CiReviewStreamEvent =
+  | {
+      type: 'snapshot' | 'progress';
+      status: CiReviewStatus;
+      ciReviewId: number;
+      progress: CiReviewProgress | null;
+    }
+  | {
+      type: 'done';
+      status: CiReviewStatus;
+      ciReviewId: number;
+      // The SPA invalidates ['ci-review', prId] and the states query.
+      prId: number;
+    };
 
 // ---- Claude Review chat (Pro+, local-only like the rest of Claude Review) ----
 // Questions about ONE succeeded review: a general thread (`findingId: null`) and one thread per

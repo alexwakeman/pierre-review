@@ -1,17 +1,15 @@
-// The Claude Review tab's "CI failures" section — the pure half: what the section shows at all,
-// the order of the rows, the count pills, the labels and the not-checked sentences. Rendered by
-// components/ClaudeReviewCiFailures.tsx. Every figure here is counted from the server's
+// The Claude Review tab's "CI check" rows — the pure half: the order of the rows, the count pills,
+// the labels and the not-checked sentences. Rendered by components/CiCheckSection.tsx and
+// components/ClaudeReviewCiFailures.tsx (the row). Every figure here is counted from the server's
 // reconciled list, which never invents a cause.
 import type {
   ClaudeCiFailure,
   ClaudeCiFailureCategory,
   ClaudeCiNotCheckedReason,
-  ClaudeReview,
 } from '@pierre-review/shared';
 
 const CHIP_RED = 'bg-red-500/10 text-red-700 dark:text-red-400';
 const CHIP_ORANGE = 'bg-orange-500/10 text-orange-700 dark:text-orange-400';
-const CHIP_GREEN = 'bg-green-500/10 text-green-700 dark:text-green-400';
 const CHIP_GREY = 'bg-gray-500/10 text-gray-600 dark:text-gray-300';
 
 export const CI_CATEGORY_LABEL: Record<ClaudeCiFailureCategory, string> = {
@@ -30,31 +28,12 @@ export const CI_CATEGORY_CLASS: Record<ClaudeCiFailureCategory, string> = {
   unclear: CHIP_GREY,
 };
 
-/**
- * What the section renders:
- *   hidden  — the run did not look at CI (null), or it looked and found no checks at all
- *   passing — nothing failing and the head was green
- *   pending — nothing failing yet, but checks were still running
- *   list    — at least one failing check
- */
-export type CiSectionMode = 'hidden' | 'passing' | 'pending' | 'list';
-
-export function ciSectionMode(review: Pick<ClaudeReview, 'ciFailures' | 'ciState'>): CiSectionMode {
-  const failures = review.ciFailures;
-  if (failures == null) return 'hidden';
-  if (failures.length > 0) return 'list';
-  const state = review.ciState?.state;
-  if (state === 'passing') return 'passing';
-  if (state === 'pending') return 'pending';
-  return 'hidden';
-}
-
 /** A failure this pull request can fix: diagnosed, and Claude said a change here would fix it. */
 export const isCiFixableHere = (f: ClaudeCiFailure): boolean =>
   f.status === 'diagnosed' && f.fixableInPr === true;
 
 /** Fixable here first, then the other diagnosed ones, then the unchecked — stable within each. */
-export function orderCiFailures(items: readonly ClaudeCiFailure[]): ClaudeCiFailure[] {
+export function orderCiFailures<T extends ClaudeCiFailure>(items: readonly T[]): T[] {
   const rank = (f: ClaudeCiFailure): number =>
     isCiFixableHere(f) ? 0 : f.status === 'diagnosed' ? 1 : 2;
   return items
@@ -86,8 +65,6 @@ export function ciCountPills(items: readonly ClaudeCiFailure[]): CiCountPill[] {
   ];
   return pills.filter((p) => p.n > 0).map(({ key, label, cls }) => ({ key, label, cls }));
 }
-
-export const CI_PASSING_CLASS = CHIP_GREEN;
 
 /** Why a failing check carries no diagnosis. One sentence per reason. */
 export function ciNotCheckedSentence(reason: ClaudeCiNotCheckedReason | null): string {

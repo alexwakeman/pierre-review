@@ -22,6 +22,12 @@ import { dropAutoReviews } from './manager.js';
 // ⚠ THE FLOOR MOVES ONLY ON AN OFF → ON FLIP. Re-sending `enabled: true` keeps the stored moment
 // (or every PR opened in between would silently be skipped); switching off clears it, so the next
 // switch-on starts from then. `setWorkspaceAutoReview` is the ONE writer.
+//
+// AUTO AI FIX rides the same route as a THIRD column, `auto_fix_enabled` (migration 0083 / pg
+// 0070): may a succeeded auto review of the reader's OWN PR prepare a fix (never pushed)? ⚠ ON BY
+// DEFAULT (NOT NULL DEFAULT true) — it ran unconditionally before the column existed. Stored
+// independently of `auto_review_enabled` (switching auto review off and on keeps it), read by
+// `maybeStartAutoFix` (coding/ai-fix/auto-fix.ts) through `readWorkspaceAutoFixForPr`.
 
 /** Auto Claude reviews started per workspace per UTC day. Past it, PRs wait for the next day. */
 export const AUTO_REVIEW_DAILY_CAP = 20;
@@ -32,9 +38,10 @@ const toMs = (v: Date | number | null | undefined): number | null =>
 interface AutoRow {
   enabled: boolean | null;
   enabledAt: Date | number | null;
+  autoFixEnabled: boolean | null;
 }
 
-/** The stored pair → the wire shape. Off ⇒ `enabledAt: null`. */
+/** The stored row → the wire shape. Off ⇒ `enabledAt: null`. Auto fix: only an explicit false is off. */
 export function autoReviewOf(row: AutoRow | null): WorkspaceAutoReviewSettings {
   const enabled = row?.enabled === true;
   const atMs = enabled ? toMs(row?.enabledAt ?? null) : null;
@@ -42,8 +49,37 @@ export function autoReviewOf(row: AutoRow | null): WorkspaceAutoReviewSettings {
     enabled,
     enabledAt: atMs == null ? null : new Date(atMs).toISOString(),
     dailyCap: AUTO_REVIEW_DAILY_CAP,
+    autoFixEnabled: row?.autoFixEnabled !== false,
   };
 }
+
+/**
+ * Is auto AI Fix on for the workspace holding this PR's repo? Read by `maybeStartAutoFix`. A repo
+ * with no membership row (or an unknown PR) answers the column's default, ON — this switch only
+ * ever turns the step OFF, it never gates a workspace it cannot find.
+ */
+export async function readWorkspaceAutoFixForPr(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+): Promise<boolean> {
+  const { workspaces: w, workspaceRepos: wr, pullRequests: prs } = ctx.schema;
+  const rows = (await ctx.db
+    .select({ on: w.autoFixEnabled })
+    .from(prs)
+    .innerJoin(wr, and(eq(wr.repoId, prs.repoId), eq(wr.accountId, accountId)))
+    .innerJoin(w, and(eq(w.id, wr.workspaceId), eq(w.accountId, accountId)))
+    .where(and(eq(prs.id, prId), eq(prs.accountId, accountId)))
+    .limit(1)
+    .execute()) as Array<{ on: boolean | null }>;
+  return rows[0]?.on !== false;
+}
+
+const autoCols = (w: AgentContext['schema'][string]) => ({
+  enabled: w.autoReviewEnabled,
+  enabledAt: w.autoReviewEnabledAt,
+  autoFixEnabled: w.autoFixEnabled,
+});
 
 /** One workspace's switch, or null when the workspace is not this account's. */
 export async function readWorkspaceAutoReview(
@@ -53,7 +89,7 @@ export async function readWorkspaceAutoReview(
 ): Promise<WorkspaceAutoReviewSettings | null> {
   const w = ctx.schema.workspaces;
   const rows = (await ctx.db
-    .select({ enabled: w.autoReviewEnabled, enabledAt: w.autoReviewEnabledAt })
+    .select(autoCols(w))
     .from(w)
     .where(and(eq(w.id, workspaceId), eq(w.accountId, accountId)))
     .limit(1)
@@ -63,41 +99,54 @@ export async function readWorkspaceAutoReview(
 }
 
 /**
- * The ONE writer. null when the workspace is not this account's (→ 404). Switching OFF also drops
- * this workspace's items still WAITING in the auto lane (no row yet, so nothing is lost) — they
- * are not reviewed, and not billed, after the switch. A run already started keeps its Stop.
+ * The ONE writer. null when the workspace is not this account's (→ 404). Each of `enabled` /
+ * `autoFixEnabled` is optional and a field left out keeps its stored value. Switching auto review
+ * OFF also drops this workspace's items still WAITING in the auto lane (no row yet, so nothing is
+ * lost) — they are not reviewed, and not billed, after the switch. A run already started keeps
+ * its Stop. Switching auto fix off stops only FUTURE auto fixes; one already started keeps going.
  */
 export async function setWorkspaceAutoReview(
   ctx: AgentContext,
   accountId: number,
   workspaceId: number,
-  enabled: boolean,
+  change: SetWorkspaceAutoReviewBody,
   nowMs: number = Date.now(),
 ): Promise<WorkspaceAutoReviewSettings | null> {
   const w = ctx.schema.workspaces;
   const rows = (await ctx.db
-    .select({ enabled: w.autoReviewEnabled, enabledAt: w.autoReviewEnabledAt })
+    .select(autoCols(w))
     .from(w)
     .where(and(eq(w.id, workspaceId), eq(w.accountId, accountId)))
     .limit(1)
     .execute()) as AutoRow[];
   const existing = rows[0];
   if (!existing) return null;
+  const { enabled, autoFixEnabled } = change;
   const wasOn = existing.enabled === true && toMs(existing.enabledAt) != null;
-  let next: AutoRow;
-  if (!enabled) next = { enabled: false, enabledAt: null };
-  else if (wasOn) next = existing;
+  let review: Pick<AutoRow, 'enabled' | 'enabledAt'>;
+  if (enabled === undefined || (enabled && wasOn)) review = existing;
+  else if (!enabled) review = { enabled: false, enabledAt: null };
   // Whole seconds: SQLite stores this column in seconds, so an un-truncated stamp would make the
   // PUT's echo disagree with every later read by the milliseconds the column dropped.
-  else next = { enabled: true, enabledAt: new Date(Math.floor(nowMs / 1000) * 1000) };
-  if (next !== existing) {
+  else review = { enabled: true, enabledAt: new Date(Math.floor(nowMs / 1000) * 1000) };
+  const fix = autoFixEnabled ?? existing.autoFixEnabled !== false;
+  const next: AutoRow = { enabled: review.enabled, enabledAt: review.enabledAt, autoFixEnabled: fix };
+  const set: Record<string, unknown> = {};
+  if (review !== existing) {
+    set.autoReviewEnabled = review.enabled;
+    set.autoReviewEnabledAt = review.enabledAt;
+  }
+  if (autoFixEnabled !== undefined && autoFixEnabled !== (existing.autoFixEnabled !== false)) {
+    set.autoFixEnabled = autoFixEnabled;
+  }
+  if (Object.keys(set).length > 0) {
     await ctx.db
       .update(w)
-      .set({ autoReviewEnabled: next.enabled, autoReviewEnabledAt: next.enabledAt })
+      .set(set)
       .where(and(eq(w.id, workspaceId), eq(w.accountId, accountId)))
       .execute();
   }
-  if (!enabled) dropAutoReviews((a, ws) => !(a === accountId && ws === workspaceId));
+  if (enabled === false) dropAutoReviews((a, ws) => !(a === accountId && ws === workspaceId));
   return autoReviewOf(next);
 }
 
@@ -147,19 +196,19 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
     {
       schema: {
         ...idParam,
-        // ⚠ `enabled` REQUIRED so an empty `{}` cannot read as a switch.
+        // ⚠ AT LEAST ONE FIELD, so an empty `{}` cannot read as a switch.
         body: {
           type: 'object',
-          required: ['enabled'],
+          minProperties: 1,
           additionalProperties: false,
-          properties: { enabled: { type: 'boolean' } },
+          properties: { enabled: { type: 'boolean' }, autoFixEnabled: { type: 'boolean' } },
         },
       },
     },
     async (req, reply) => {
       const { id } = req.params as { id: number };
-      const { enabled } = req.body as SetWorkspaceAutoReviewBody;
-      const autoReview = await setWorkspaceAutoReview(ctx, ctx.accountIdOf(req), id, enabled);
+      const body = req.body as SetWorkspaceAutoReviewBody;
+      const autoReview = await setWorkspaceAutoReview(ctx, ctx.accountIdOf(req), id, body);
       if (!autoReview) {
         reply.status(404);
         return { error: 'NotFound', message: `Workspace ${id} not found` };

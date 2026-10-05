@@ -10,7 +10,6 @@ import {
   ciCountPills,
   ciFailingLabel,
   ciNotCheckedSentence,
-  ciSectionMode,
   orderCiFailures,
 } from '../src/lib/claudeReviewCi.js';
 
@@ -41,21 +40,6 @@ function failure(extra: Partial<ClaudeCiFailure> = {}): ClaudeCiFailure {
 }
 const notChecked = (reason: ClaudeCiFailure['notCheckedReason']): ClaudeCiFailure =>
   failure({ status: 'not_checked', notCheckedReason: reason, cause: null, explanation: null, category: null, fixableInPr: null });
-
-describe('ciSectionMode', () => {
-  it('null = did not look: nothing renders', () => {
-    expect(ciSectionMode({ ciFailures: null, ciState: null })).toBe('hidden');
-    expect(ciSectionMode({})).toBe('hidden');
-  });
-  it('[] on a green head says CI passing; on a running head says so; no checks says nothing', () => {
-    expect(ciSectionMode({ ciFailures: [], ciState: { state: 'passing', checkCount: 4 } })).toBe('passing');
-    expect(ciSectionMode({ ciFailures: [], ciState: { state: 'pending', checkCount: 4 } })).toBe('pending');
-    expect(ciSectionMode({ ciFailures: [], ciState: { state: 'none', checkCount: 0 } })).toBe('hidden');
-  });
-  it('any failure lists', () => {
-    expect(ciSectionMode({ ciFailures: [failure()], ciState: { state: 'failing', checkCount: 1 } })).toBe('list');
-  });
-});
 
 describe('order, pills and sentences', () => {
   it('fixable here first, then other diagnoses, then the unchecked — stable', () => {
@@ -96,8 +80,9 @@ describe('source guards', () => {
     expect(src).toMatch(/const href = safeExternalUrl\(f\.url\)/);
     expect(src).not.toMatch(/logs?Url|blob/i);
   });
-  it('is mounted exactly once, in the review tab', () => {
+  it('the CI check section is mounted in the review tab, and the code review draws no CI', () => {
     const tab = read('components/ClaudeReviewTab.tsx');
-    expect(tab.match(/<ClaudeReviewCiFailuresSection/g)?.length).toBe(1);
+    expect(tab).toMatch(/<CiCheckSection/);
+    expect(tab).not.toMatch(/ClaudeReviewCiFailuresSection|ClaudeReviewCiStatus/);
   });
 });

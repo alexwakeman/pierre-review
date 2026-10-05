@@ -209,6 +209,12 @@ import type {
   ResolvePrRefsBody,
   ResolvePrRefsResponse,
   TicketReviewStatesResponse,
+  CiReview,
+  CiReviewStatesBody,
+  CiReviewStatesResponse,
+  PrCiReviewResponse,
+  StartCiReviewBody,
+  StartCiReviewResponse,
 } from '@pierre-review/shared';
 
 class ApiError extends Error {
@@ -1391,6 +1397,20 @@ export const api = {
       `/api/ticket-reviews/${ticketReviewId}/items/${itemId}/post`,
       jsonBody('POST', { viewedPrId } satisfies PostTicketItemBody),
     ).then((r) => handle<PostTicketItemResponse>(r)),
+
+  // ---- CI review (CORE, local-only): why checks failed on a PR's head, a run of its own ----
+  // docs/API.md § CI review. Live progress is an SSE GET at `/api/ci-reviews/:id/stream`, read
+  // through `sseStream` (hooks/useCiReview.ts). DB-only reads except the start.
+  startCiReview: (body: StartCiReviewBody) =>
+    fetch('/api/ci-reviews', jsonBody('POST', body)).then((r) => handle<StartCiReviewResponse>(r)),
+  prCiReview: (prId: number) => get<PrCiReviewResponse>(`/api/prs/${prId}/ci-review`),
+  ciReview: (id: number) => get<CiReview>(`/api/ci-reviews/${id}`),
+  // Batched currency for Open PRs and the Pending cards: ONE request per board, at most
+  // CI_REVIEW_STATES_MAX ids (the route 400s over, never truncates).
+  ciReviewStates: (prIds: number[]) =>
+    fetch('/api/ci-reviews/states', jsonBody('POST', { prIds } satisfies CiReviewStatesBody)).then((r) =>
+      handle<CiReviewStatesResponse>(r),
+    ),
 
   // ---- AI Fix (Pro) ----
   aiFixSummary: (prId: number) =>

@@ -16,6 +16,7 @@ import { getClaudeReviewById } from '../../review/claude-review/persist.js';
 import { pickReviewNonce } from '../../review/claude-review/prompts.js';
 import { buildReviewSeed, type ReviewSeed, type SeedTicketItem } from './review-seed.js';
 import { getOwnedTicketItemsForPr } from '../../review/ticket-review/persist.js';
+import { getFixableCiItemsForPr } from '../../review/ci-review/persist.js';
 import { buildFixSystemPrompt, buildFixUserPrompt, type FixSeed } from './prompts.js';
 import {
   insertQueuedFix,
@@ -167,7 +168,13 @@ export async function loadReviewSeed(
           return [];
         })
       : [];
-    return { review, seed: buildReviewSeed(review, { nonce: pickReviewNonce, ticketItems }) };
+    // The CI review's fixable items at the PR's CURRENT head (manual and auto fixes alike). A failed
+    // read costs the CI items only.
+    const ciItems = await getFixableCiItemsForPr(ctx, input.accountId, input.prId).catch((err: unknown) => {
+      ctx.log.warn({ err }, 'ai-fix: loading CI review items failed');
+      return [];
+    });
+    return { review, seed: buildReviewSeed(review, { nonce: pickReviewNonce, ticketItems, ciItems }) };
   } catch (err) {
     ctx.log.warn({ err }, 'ai-fix: loading the review seed failed');
     return null;

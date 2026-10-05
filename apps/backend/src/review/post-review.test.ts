@@ -512,3 +512,19 @@ describe('extractHunk', () => {
     expect(extractHunk(FOO_DIFF, 'src/nope.ts', 11, 'RIGHT')).toBeNull();
   });
 });
+
+describe('isDiffTooLarge', () => {
+  it("recognises GitHub's 20,000-line refusal as gh reports it, and nothing else", async () => {
+    const { isDiffTooLarge } = await import('./post-review.js');
+    expect(
+      isDiffTooLarge(
+        new Error(
+          'Command failed: gh pr diff 131 --repo DEFRA/bng-metric-harness\ncould not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum number of lines (20000) PullRequest.diff too_large',
+        ),
+      ),
+    ).toBe(true);
+    expect(isDiffTooLarge({ stderr: 'HTTP 406: PullRequest.diff too_large' })).toBe(true);
+    expect(isDiffTooLarge(new Error('HTTP 404: Not Found'))).toBe(false);
+    expect(isDiffTooLarge(null)).toBe(false);
+  });
+});

@@ -388,10 +388,18 @@ describe('getAutoReviewCandidates — re-review of a moved head', () => {
   const FLOOR = OPENED + 20 * DAY;
   const late = FLOOR + HOUR;
   const r: Record<string, number> = {};
-  const run = async (prId: number, headSha: string, status: string) =>
+  const run = async (prId: number, headSha: string, status: string, createdAtMs?: number) =>
     db
       .insert(schema.claudeReviews)
-      .values({ accountId: 1, prId, headSha, status, model: 'm', trigger: 'auto' })
+      .values({
+        accountId: 1,
+        prId,
+        headSha,
+        status,
+        model: 'm',
+        trigger: 'auto',
+        ...(createdAtMs != null ? { createdAt: new Date(createdAtMs) } : {}),
+      })
       .execute();
 
   beforeAll(async () => {
@@ -407,8 +415,12 @@ describe('getAutoReviewCandidates — re-review of a moved head', () => {
     r.inFlight = await seedPr('rr-in-flight', { openedAt: late });
     await run(r.inFlight, 'old_sha', 'succeeded');
     await run(r.inFlight, 'older_sha', 'running');
+    // Opened before the switch, reviewed only before it: never followed.
     r.beforeFloor = await seedPr('rr-before-floor', { openedAt: FLOOR - HOUR });
-    await run(r.beforeFloor, 'old_sha', 'succeeded');
+    await run(r.beforeFloor, 'old_sha', 'succeeded', FLOOR - HOUR / 2);
+    // Opened before the switch but reviewed SINCE it: followed like any other PR.
+    r.beforeFloorReviewedSince = await seedPr('rr-before-floor-since', { openedAt: FLOOR - HOUR });
+    await run(r.beforeFloorReviewedSince, 'old_sha', 'succeeded', FLOOR + HOUR);
     r.bot = await seedPr('rr-bot', { openedAt: late, authorId: botId });
     await run(r.bot, 'old_sha', 'succeeded');
   });
@@ -421,6 +433,9 @@ describe('getAutoReviewCandidates — re-review of a moved head', () => {
     });
     const offered = new Map(res.reReview.map((x: any) => [x.prId, x.headSha]));
     expect(offered.get(r.moved)).toBe('head_rr-moved');
+    expect(offered.get(r.beforeFloorReviewedSince)).toBe('head_rr-before-floor-since');
+    // Still never a FIRST review: the floor gates those.
+    expect(res.prIds).not.toContain(r.beforeFloorReviewedSince);
     for (const k of ['same', 'onlyFailed', 'headHasRun', 'inFlight', 'beforeFloor', 'bot'])
       expect([k, offered.has(r[k])]).toEqual([k, false]);
     // A reviewed PR is never a FIRST-review candidate.

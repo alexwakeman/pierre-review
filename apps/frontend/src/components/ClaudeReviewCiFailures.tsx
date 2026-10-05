@@ -1,5 +1,6 @@
-// The Claude Review tab's "CI failures" section: what the run found about every check that was
-// failing on the reviewed commit.
+// ONE failing check and what Claude found about it — the row of the Claude Review tab's "CI check"
+// section (CiCheckSection.tsx). It renders a CI review's item and, as history, an older code
+// review's stored CI diagnosis (the same `ClaudeCiFailure` shape).
 //
 // Rules (same as ClaudeReviewThreads.tsx):
 //  - Every string from a check or from Claude renders as PLAIN TEXT: no Markdown. The one href is
@@ -7,23 +8,12 @@
 //    never sends one).
 //  - Causes come from the server's reconcile step, which never invents one; ordering, pills and
 //    sentences live in lib/claudeReviewCi.ts.
-import { useId, useMemo, useState } from 'react';
-import type { ClaudeCiFailure, ClaudeFindingSide, ClaudeReview } from '@pierre-review/shared';
-import {
-  CI_CATEGORY_CLASS,
-  CI_CATEGORY_LABEL,
-  CI_PASSING_CLASS,
-  ciCountPills,
-  ciFailingLabel,
-  ciNotCheckedSentence,
-  ciSectionMode,
-  orderCiFailures,
-} from '../lib/claudeReviewCi.js';
+import { useId, useState } from 'react';
+import type { ClaudeCiFailure, ClaudeFindingSide } from '@pierre-review/shared';
+import { CI_CATEGORY_CLASS, CI_CATEGORY_LABEL, ciNotCheckedSentence } from '../lib/claudeReviewCi.js';
 import { anchorLabel } from '../lib/claudeReviewFollowUp.js';
 import { safeExternalUrl } from '../lib/ui.js';
-import { CheckIcon, ChevronIcon, ExternalLinkIcon } from './Icons.js';
-import { InfoButton } from './InfoModal.js';
-import { ReviewSection } from './ReviewSection.js';
+import { ChevronIcon, ExternalLinkIcon } from './Icons.js';
 import { PrRefText } from './ReviewPrRefs.js';
 import { REVIEW_CHIP, REVIEW_ITEM_TITLE, REVIEW_PROSE } from '../lib/reviewStyles.js';
 
@@ -59,12 +49,15 @@ function FileRef({
   return <span className={`break-all font-mono text-xs ${MUTED}`}>{label}</span>;
 }
 
-function CiFailureRow({
+export function CiFailureRow({
   f,
+  suggestion = null,
   changedPaths,
   onOpenInChanges,
 }: {
   f: ClaudeCiFailure;
+  // A CI review item's short description of the fix (null on history rows and when Claude has none).
+  suggestion?: string | null;
   changedPaths: ReadonlySet<string>;
   onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
@@ -116,6 +109,12 @@ function CiFailureRow({
               <PrRefText text={f.cause} />
             </p>
           )}
+          {suggestion != null && suggestion !== '' && (
+            <p className={`mt-1 ${REVIEW_PROSE}`}>
+              <span className="font-medium">Fix: </span>
+              <PrRefText text={suggestion} />
+            </p>
+          )}
           {f.explanation != null && f.explanation !== '' && (
             <div className="mt-0.5">
               <button
@@ -153,85 +152,5 @@ function CiFailureRow({
         <p className={`mt-1 text-xs ${MUTED}`}>{ciNotCheckedSentence(f.notCheckedReason)}</p>
       )}
     </li>
-  );
-}
-
-/**
- * CI on the reviewed commit when nothing failed: a "CI passing" pill, or a line saying it was still
- * running. null when CI failed (the CI failures section says so) or the run did not look.
- */
-export function ClaudeReviewCiStatus({
-  review,
-}: {
-  review: Pick<ClaudeReview, 'ciFailures' | 'ciState'>;
-}): JSX.Element | null {
-  const mode = ciSectionMode(review);
-  if (mode === 'passing') {
-    return (
-      <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${CI_PASSING_CLASS}`}>
-        <CheckIcon size={12} />
-        CI passing
-      </span>
-    );
-  }
-  if (mode === 'pending') {
-    return <span className={`text-xs ${MUTED}`}>CI was still running when Claude reviewed.</span>;
-  }
-  return null;
-}
-
-/**
- * The checks that were failing on the reviewed commit and what Claude found. null (the run did not
- * look at CI) → nothing; nothing failing on a green head → one short line.
- */
-export function ClaudeReviewCiFailuresSection({
-  review,
-  changedPaths,
-  onOpenInChanges,
-}: {
-  review: Pick<ClaudeReview, 'ciFailures' | 'ciState'>;
-  changedPaths: ReadonlySet<string>;
-  onOpenInChanges?: OpenInChanges;
-}): JSX.Element | null {
-  const mode = ciSectionMode(review);
-  const items = useMemo(() => orderCiFailures(review.ciFailures ?? []), [review.ciFailures]);
-  // Passing / still running is a one-line fact, not a section: `ClaudeReviewCiStatus` prints it in
-  // Claude's review section instead.
-  if (mode !== 'list') return null;
-  const pills = ciCountPills(items);
-  return (
-    <ReviewSection
-      title="CI failures"
-      pills={
-        <>
-          <span className={`text-xs ${MUTED}`}>{ciFailingLabel(items.length)}</span>
-          {pills.map((p) => (
-            <span key={p.key} className={`${CHIP} ${p.cls}`}>
-              {p.label}
-            </span>
-          ))}
-        </>
-      }
-      info={
-        <InfoButton title="CI failures">
-          <p>
-            Checks that failed on the reviewed commit. Claude reads the end of each GitHub Actions
-            log and the code, and says why it failed.
-          </p>
-          <p className="mt-2">Checks outside GitHub Actions have no log to read, so they are listed only.</p>
-        </InfoButton>
-      }
-    >
-      <ul className="space-y-1.5">
-        {items.map((f) => (
-          <CiFailureRow
-            key={`${f.checkName}:${f.jobId ?? ''}`}
-            f={f}
-            changedPaths={changedPaths}
-            onOpenInChanges={onOpenInChanges}
-          />
-        ))}
-      </ul>
-    </ReviewSection>
   );
 }

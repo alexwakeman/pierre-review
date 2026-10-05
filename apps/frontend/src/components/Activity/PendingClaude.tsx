@@ -1,12 +1,11 @@
 import type { MouseEvent, ReactNode } from 'react';
-import type { ClaudeReviewPrState } from '@pierre-review/shared';
+import type { CiReviewState, ClaudeReviewPrState } from '@pierre-review/shared';
 import {
   isAutoReviewHoldError,
   useClaudeReviewStarting,
   useStartReviewFromList,
 } from '../../hooks/useClaudeReview.js';
 import {
-  ciDiagnosisLabel,
   findingTotal,
   followUpTally,
   heldByAutoReview,
@@ -27,6 +26,8 @@ import { unlockReviewSound } from '../../lib/sound.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { CheckIcon, SparkleIcon } from '../Icons.js';
 import { AutoMark, GREY_PILL, MUTED, PILL } from './ClaudeReviewCell.js';
+import { ReviewedAgo } from '../ReviewedAgo.js';
+import { ciCardPill } from '../../lib/ciReview.js';
 
 // ── THE PENDING CARD'S CLAUDE: ONE LINE, ITS BUTTONS IN THE CARD'S ACTION ROW, THE REST IN DETAILS ──
 //
@@ -34,28 +35,38 @@ import { AutoMark, GREY_PILL, MUTED, PILL } from './ClaudeReviewCell.js';
 // the verdict and the finding counts, or on a red-build card (instead of the verdict) how many
 // failures Claude explained — puts Claude's buttons in the card's own left-aligned action row, and
 // leaves the currency, "Earlier", threads-to-fix, CI-diagnosis, posted and design pills to the
-// card's Details. All three read the board's ONE batched states answer: nothing here fetches on
-// mount, and the only request is a click on "Review".
+// card's Details. All three read the board's ONE batched states answers (the code review's and the
+// CI review's — a separate run): nothing here fetches on mount, and the only request is a click on
+// "Review".
 
 /** One Pending card's Claude line, or nothing when Claude has not looked (an offer is a button in
  *  the action row, not a line). `omitVerdict` on a card whose heading already names the verdict;
- *  `ci` on a red-build card, where the diagnosis is what matters. */
+ *  `ci` on a red-build card, where the diagnosis is what matters. A finished run always says how
+ *  long ago it ran; `reviewedAt` is the card's own copy of that time (a `claude_review` My Turn
+ *  card's `since`), used only when the batched state carries none. */
 export function ClaudeReviewLine({
   prId,
   state,
   omitVerdict = false,
   ci = false,
+  ciState,
+  reviewedAt = null,
   onOpenReview,
 }: {
   prId: number;
   state: ClaudeReviewPrState | undefined;
   omitVerdict?: boolean;
   ci?: boolean;
+  // The CI review's state for this PR (its own run), from the board's batched CI states.
+  ciState?: CiReviewState;
+  reviewedAt?: string | null;
   onOpenReview: () => void;
 }): JSX.Element | null {
   const starting = useClaudeReviewStarting(prId);
   const cell = reviewCellFor(state, starting);
-  if (cell.kind === 'start' && !cell.failed) return null;
+  // On a red-build card the CI review IS the line, whether or not the code was reviewed.
+  const ciPill = ci ? ciCardPill(ciState) : null;
+  if (cell.kind === 'start' && !cell.failed && ciPill == null) return null;
   const open = (e: MouseEvent): void => {
     e.stopPropagation();
     onOpenReview();
@@ -108,13 +119,13 @@ export function ClaudeReviewLine({
       break;
   }
   const summary = cell.kind === 'done' ? state?.summary : undefined;
-  // On a red-build card the diagnosis IS the line, so the verdict pill steps aside. Everywhere else
+  // On a red-build card the diagnosis IS the line, so the VERDICT pill steps aside — only the verdict:
+  // a queued, running or failed code review keeps its lead beside the CI pill. Everywhere else
   // the line is the verdict and its finding counts only — the threads-to-fix and CI-diagnosis pills
   // live in Details (`ClaudeReviewExtras`), so a card whose fact line already says CI is red does
   // not say it again here.
-  const ciLabel = ci && summary != null ? ciDiagnosisLabel(summary.ci) : null;
   const pills = summary != null ? severityPills(summary) : [];
-  if (ciLabel != null) lead = null;
+  if (ciPill != null && cell.kind === 'done') lead = null;
   return (
     <div
       className="mt-1.5 flex min-w-0 cursor-default flex-wrap items-center gap-1.5 text-[12px]"
@@ -127,10 +138,12 @@ export function ClaudeReviewLine({
         Claude
       </span>
       {lead}
-      {summary != null &&
-        (ciLabel != null ? (
-          <span className="text-gray-700 dark:text-gray-300">{ciLabel}</span>
-        ) : (
+      {ciPill != null ? (
+        <button type="button" onClick={open} title="Open the CI check" className={`text-gray-700 dark:text-gray-300 ${LINK}`}>
+          {ciPill.label}
+        </button>
+      ) : (
+        summary != null && (
           <>
             {pills.length > 0 ? (
               pills.map((p) => (
@@ -145,7 +158,11 @@ export function ClaudeReviewLine({
               </span>
             )}
           </>
-        ))}
+        )
+      )}
+      {ciPill != null
+        ? !ciPill.running && <ReviewedAgo at={ciState?.checkedAt} className="text-[12px]" />
+        : cell.kind === 'done' && <ReviewedAgo at={state?.finishedAt ?? reviewedAt} className="text-[12px]" />}
     </div>
   );
 }
@@ -255,17 +272,29 @@ export function ClaudeReviewActions({
 
 /** What the one-line Claude summary leaves out, for the card's Details: is the review on the
  *  latest commit, what happened to the previous review's findings, what was posted, design. */
-export function ClaudeReviewExtras({ state }: { state: ClaudeReviewPrState | undefined }): JSX.Element | null {
-  if (state == null || state.status !== 'succeeded') return null;
-  const summary = state.summary;
-  const currency = reviewCurrency({
-    reviewedHeadSha: state.reviewedHeadSha,
-    currentHeadSha: state.currentHeadSha,
-    commitsSince: state.commitsSince,
-  });
+export function ClaudeReviewExtras({
+  state: reviewState,
+  ciState,
+}: {
+  state: ClaudeReviewPrState | undefined;
+  // The CI review's state (its own run): the CI-diagnosis pill reads it, not the code review.
+  ciState?: CiReviewState;
+}): JSX.Element | null {
+  const ciPill = ciCardPill(ciState);
+  const state = reviewState?.status === 'succeeded' ? reviewState : null;
+  if (state == null && ciPill == null) return null;
+  const summary = state?.summary;
+  const currency =
+    state != null
+      ? reviewCurrency({
+          reviewedHeadSha: state.reviewedHeadSha,
+          currentHeadSha: state.currentHeadSha,
+          commitsSince: state.commitsSince,
+        })
+      : null;
   const tally = summary != null ? followUpTally(summary.followUp) : null;
   const toFix = summary != null ? threadsToFixLabel(summary) : null;
-  const ciLabel = summary != null ? ciDiagnosisLabel(summary.ci) : null;
+  const ciLabel = ciPill?.label ?? null;
   const total = summary != null ? findingTotal(summary) : 0;
   const design = summary?.lenses.design ?? 0;
   const posted =

@@ -63,7 +63,6 @@ const {
   utcDayStartMs,
   AUTO_REREVIEW_SETTLE_MS,
   AUTO_REREVIEW_MAX_WAIT_MS,
-  AUTO_REVIEW_CI_WAIT_MS,
   autoReviewDue,
   autoReviewWaiting,
   _resetAutoReReviewForTest,
@@ -79,8 +78,8 @@ let answers: Map<
   {
     prIds: number[];
     autoToday: number;
-    reReview?: Array<{ prId: number; headSha: string; commentsAtMs?: number | null }>;
-    ci?: Array<{ prId: number; headSha: string | null; running: boolean; headSeenAtMs: number | null }>;
+    reReview?: Array<{ prId: number; headSha: string; commentsAtMs?: number | null; lastRunAtMs?: number | null }>;
+    inFlightMoved?: Array<{ prId: number; headSha: string }>;
   }
 >;
 let blocked: Set<number>;
@@ -227,9 +226,42 @@ describe('runAutoReviewSweep', () => {
 
 describe('runAutoReviewSweep — re-review on a moved head', () => {
   const SETTLE = AUTO_REREVIEW_SETTLE_MS;
-  const moved = (sha: string) => answers.set(7, { prIds: [], autoToday: 0, reReview: [{ prId: 30, headSha: sha }] });
+  // A run finished a minute before NOW: pushes in this window are debounced.
+  const moved = (sha: string) =>
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [{ prId: 30, headSha: sha, lastRunAtMs: NOW - 60_000 }] });
 
-  it('a new head is queued ONCE, after it has held still for the settle time', async () => {
+  it('⚠ a new head after a quiet spell (no run in the last 5 minutes) starts ON RECEIPT', async () => {
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [{ prId: 31, headSha: 'q1', lastRunAtMs: NOW - SETTLE }] });
+    const r = await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued).toEqual([[1, 31]]);
+    expect(r.reQueued).toBe(1);
+  });
+
+  it('a new head with no recorded run time also starts on receipt', async () => {
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [{ prId: 32, headSha: 'q2' }] });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued).toEqual([[1, 32]]);
+  });
+
+  it('⚠ a push DURING a run never cancels it; the clock starts at first sight, not at the run’s end', async () => {
+    // Pushed while the run is in flight: only the clock starts.
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [], inFlightMoved: [{ prId: 33, headSha: 'r2' }] });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued).toEqual([]);
+    expect(autoReviewWaiting(33, 1)).toBe('commits');
+    // The run finishes at NOW + 4 min; the push is now 5 quiet minutes old ⇒ due at once.
+    answers.set(7, {
+      prIds: [],
+      autoToday: 0,
+      reReview: [{ prId: 33, headSha: 'r2', lastRunAtMs: NOW + 4 * 60_000 }],
+    });
+    await runAutoReviewSweep(makeCtx(), NOW + SETTLE - 1);
+    expect(enqueued).toEqual([]);
+    await runAutoReviewSweep(makeCtx(), NOW + SETTLE);
+    expect(enqueued).toEqual([[1, 33]]);
+  });
+
+  it('a new head within 5 minutes of a run is queued ONCE, after it has held still', async () => {
     moved('b1');
     await runAutoReviewSweep(makeCtx(), NOW);
     expect(enqueued).toEqual([]); // first sight starts the wait
@@ -281,7 +313,7 @@ describe('runAutoReviewSweep — re-review on a moved head', () => {
   });
 
   it('the daily cap applies to re-reviews too', async () => {
-    answers.set(7, { prIds: [], autoToday: 20, reReview: [{ prId: 30, headSha: 'f1' }] });
+    answers.set(7, { prIds: [], autoToday: 20, reReview: [{ prId: 30, headSha: 'f1', lastRunAtMs: null }] });
     await runAutoReviewSweep(makeCtx(), NOW);
     await runAutoReviewSweep(makeCtx(), NOW + SETTLE);
     expect(enqueued).toEqual([]);
@@ -329,7 +361,11 @@ describe('runAutoReviewSweep — re-review on new review comments', () => {
   it('a push after a comment restarts the wait too (the key is head AND comment time)', async () => {
     commented(C1, 'h1');
     await runAutoReviewSweep(makeCtx(), NOW);
-    answers.set(7, { prIds: [], autoToday: 0, reReview: [{ prId: 40, headSha: 'h2', commentsAtMs: null }] });
+    answers.set(7, {
+      prIds: [],
+      autoToday: 0,
+      reReview: [{ prId: 40, headSha: 'h2', commentsAtMs: null, lastRunAtMs: NOW - 60_000 }],
+    });
     await runAutoReviewSweep(makeCtx(), NOW + SETTLE);
     expect(enqueued).toEqual([]);
     await runAutoReviewSweep(makeCtx(), NOW + 2 * SETTLE);
@@ -353,7 +389,9 @@ describe('runAutoReviewSweep — re-review on new review comments', () => {
   });
 });
 
-// THE START RULE: start ⇔ (quiet ≥ 5 min OR burst ≥ 20 min) AND (CI not running OR head age ≥ 30 min).
+// THE START RULE: a first review at once; a moved head at once unless a run is in flight or one
+// started/finished in the last 5 minutes; otherwise (and for comments) quiet ≥ 5 min OR burst ≥ 20.
+// NO CI hold.
 describe('autoReviewDue — the one start rule', () => {
   const MIN = 60_000;
   const T = 1_000_000_000;
@@ -362,91 +400,58 @@ describe('autoReviewDue — the one start rule', () => {
     burstStartMs: T - burstMin * MIN,
     reason,
   });
+  it('a first review is always due', () => {
+    expect(autoReviewDue({ nowMs: T, settle: null }).due).toBe(true);
+  });
   it('waits for quiet, says which kind of activity', () => {
-    expect(autoReviewDue({ nowMs: T, settle: settle(4, 4), ciRunning: false, headSeenMs: T - 99 * MIN })).toEqual({
-      due: false,
-      reason: 'comments',
-    });
-    expect(autoReviewDue({ nowMs: T, settle: settle(4, 4, 'head'), ciRunning: false, headSeenMs: T })).toEqual({
+    expect(autoReviewDue({ nowMs: T, settle: settle(4, 4) })).toEqual({ due: false, reason: 'comments' });
+    expect(autoReviewDue({ nowMs: T, settle: settle(4, 4, 'head'), lastRunAtMs: T - 2 * MIN })).toEqual({
       due: false,
       reason: 'commits',
     });
-    expect(autoReviewDue({ nowMs: T, settle: settle(5, 5), ciRunning: false, headSeenMs: T }).due).toBe(true);
+    expect(autoReviewDue({ nowMs: T, settle: settle(5, 5) }).due).toBe(true);
+  });
+  it('⚠ a moved head with no run in the last 5 minutes is due on receipt', () => {
+    expect(autoReviewDue({ nowMs: T, settle: settle(0, 0, 'head'), lastRunAtMs: null }).due).toBe(true);
+    expect(autoReviewDue({ nowMs: T, settle: settle(0, 0, 'head'), lastRunAtMs: T - 5 * MIN }).due).toBe(true);
+    expect(autoReviewDue({ nowMs: T, settle: settle(0, 0, 'head'), lastRunAtMs: T - 5 * MIN + 1 }).due).toBe(false);
+    // ⚠ Judged at the burst's FIRST push, not now: a burst that began 1 min after a run still
+    // settles 4 minutes later, though that run is now more than 5 minutes old.
+    expect(autoReviewDue({ nowMs: T, settle: settle(1, 4, 'head'), lastRunAtMs: T - 5 * MIN })).toEqual({
+      due: false,
+      reason: 'commits',
+    });
+    // Comments keep their quiet wait however old the last run.
+    expect(autoReviewDue({ nowMs: T, settle: settle(0, 0), lastRunAtMs: null }).due).toBe(false);
+  });
+  it('⚠ a run in flight holds the head (never cancelled), even past the ceiling', () => {
+    expect(autoReviewDue({ nowMs: T, settle: settle(30, 30, 'head'), inFlight: true })).toEqual({
+      due: false,
+      reason: 'commits',
+    });
   });
   it('⚠ the 20-minute ceiling beats a quiet clock that keeps restarting', () => {
-    expect(autoReviewDue({ nowMs: T, settle: settle(1, 19), ciRunning: false, headSeenMs: T }).due).toBe(false);
-    expect(autoReviewDue({ nowMs: T, settle: settle(1, 20), ciRunning: false, headSeenMs: T }).due).toBe(true);
-  });
-  it('holds for running CI until the head is 30 minutes old — settled or not, CI is checked after', () => {
-    expect(autoReviewDue({ nowMs: T, settle: settle(6, 6), ciRunning: true, headSeenMs: T - 29 * MIN })).toEqual({
-      due: false,
-      reason: 'ci',
-    });
-    expect(autoReviewDue({ nowMs: T, settle: settle(6, 6), ciRunning: true, headSeenMs: T - 30 * MIN }).due).toBe(true);
-    // A first review (no settle) waits on CI alone.
-    expect(autoReviewDue({ nowMs: T, settle: null, ciRunning: true, headSeenMs: T })).toEqual({ due: false, reason: 'ci' });
-    expect(autoReviewDue({ nowMs: T, settle: null, ciRunning: false, headSeenMs: T }).due).toBe(true);
+    expect(autoReviewDue({ nowMs: T, settle: settle(1, 19) }).due).toBe(false);
+    expect(autoReviewDue({ nowMs: T, settle: settle(1, 20) }).due).toBe(true);
   });
 });
 
-describe('runAutoReviewSweep — WAIT FOR CI', () => {
-  const SETTLE = AUTO_REREVIEW_SETTLE_MS;
-  const CI_WAIT = AUTO_REVIEW_CI_WAIT_MS;
-
-  it('a first review waits while its head’s CI runs, then starts when CI finishes', async () => {
-    answers.set(7, { prIds: [50], autoToday: 0, ci: [{ prId: 50, headSha: 'a', running: true, headSeenAtMs: NOW }] });
+describe('runAutoReviewSweep — does not wait for CI', () => {
+  it('a first review starts on the first tick, whatever its CI is doing', async () => {
+    answers.set(7, { prIds: [50], autoToday: 0 });
     await runAutoReviewSweep(makeCtx(), NOW);
-    expect(enqueued).toEqual([]);
-    expect(autoReviewWaiting(50, 1)).toBe('ci');
-    expect(autoReviewWaiting(50, 2)).toBeNull(); // another account never sees it
-    answers.set(7, { prIds: [50], autoToday: 0, ci: [{ prId: 50, headSha: 'a', running: false, headSeenAtMs: NOW }] });
-    await runAutoReviewSweep(makeCtx(), NOW + 60_000);
     expect(enqueued).toEqual([[1, 50]]);
     expect(autoReviewWaiting(50, 1)).toBeNull();
   });
 
-  it('⚠ gives up waiting 30 minutes after the head was first seen, and reviews anyway', async () => {
-    answers.set(7, { prIds: [51], autoToday: 0, ci: [{ prId: 51, headSha: 'a', running: true, headSeenAtMs: null }] });
-    await runAutoReviewSweep(makeCtx(), NOW);
-    await runAutoReviewSweep(makeCtx(), NOW + CI_WAIT - 1);
-    expect(enqueued).toEqual([]);
-    await runAutoReviewSweep(makeCtx(), NOW + CI_WAIT);
-    expect(enqueued).toEqual([[1, 51]]);
-  });
-
-  it('the head’s first observation in the DB starts the 30 minutes, not first sight here', async () => {
-    answers.set(7, {
-      prIds: [52],
-      autoToday: 0,
-      ci: [{ prId: 52, headSha: 'a', running: true, headSeenAtMs: NOW - CI_WAIT }],
-    });
-    await runAutoReviewSweep(makeCtx(), NOW);
-    expect(enqueued).toEqual([[1, 52]]);
-  });
-
-  it('a re-review that has settled still waits for CI, and says so', async () => {
-    const reReview = [{ prId: 53, headSha: 'h', commentsAtMs: null }];
-    answers.set(7, { prIds: [], autoToday: 0, reReview, ci: [{ prId: 53, headSha: 'h', running: true, headSeenAtMs: null }] });
+  it('a settled re-review is queued at once — no CI reason is ever reported', async () => {
+    const reReview = [{ prId: 53, headSha: 'h', commentsAtMs: null, lastRunAtMs: NOW - 60_000 }];
+    answers.set(7, { prIds: [], autoToday: 0, reReview });
     await runAutoReviewSweep(makeCtx(), NOW);
     expect(autoReviewWaiting(53, 1)).toBe('commits');
-    await runAutoReviewSweep(makeCtx(), NOW + SETTLE);
-    expect(enqueued).toEqual([]);
-    expect(autoReviewWaiting(53, 1)).toBe('ci');
-    await runAutoReviewSweep(makeCtx(), NOW + CI_WAIT);
+    expect(autoReviewWaiting(53, 2)).toBeNull(); // another account never sees it
+    await runAutoReviewSweep(makeCtx(), NOW + AUTO_REREVIEW_SETTLE_MS);
     expect(enqueued).toEqual([[1, 53]]);
-  });
-
-  it('a new head restarts the CI clock (first sight of THAT head)', async () => {
-    const at = (headSha: string) =>
-      answers.set(7, { prIds: [54], autoToday: 0, ci: [{ prId: 54, headSha, running: true, headSeenAtMs: null }] });
-    at('a');
-    await runAutoReviewSweep(makeCtx(), NOW);
-    at('b');
-    await runAutoReviewSweep(makeCtx(), NOW + CI_WAIT - 60_000);
-    await runAutoReviewSweep(makeCtx(), NOW + CI_WAIT);
-    expect(enqueued).toEqual([]);
-    await runAutoReviewSweep(makeCtx(), NOW + 2 * CI_WAIT - 60_000);
-    expect(enqueued).toEqual([[1, 54]]);
   });
 });
 

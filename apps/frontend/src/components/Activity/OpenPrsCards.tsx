@@ -4,6 +4,7 @@ import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useClaudeReviewStates } from '../../hooks/useClaudeReview.js';
+import { useCiReviewStates } from '../../hooks/useCiReview.js';
 import { useTicketLinks } from '../../hooks/useTicketLinks.js';
 import { useMergedPanelOpen, useTicketMergedPrs } from '../../hooks/useTicketMergedPrs.js';
 import { useStartTicketReview, useTicketReviewStarting, useTicketReviewStates } from '../../hooks/useTicketReview.js';
@@ -349,6 +350,9 @@ export function OpenPrsCards({
     () => new Map((claudeData?.states ?? []).map((st) => [st.prId, st])),
     [claudeData],
   );
+  // The CI review (its own run): ONE batched request for every listed PR, like the states above.
+  const { data: ciData } = useCiReviewStates(prIds, claudeOn);
+  const ciStates = useMemo(() => new Map((ciData?.states ?? []).map((st) => [st.prId, st])), [ciData]);
   // The ticket row: Pro `issueLinks`, ONE request for every listed PR.
   const ticketsOn = useProCapabilities().issueLinks;
   const { data: ticketData } = useTicketLinks(prIds, ticketsOn);
@@ -470,6 +474,7 @@ export function OpenPrsCards({
           <ClaudeReviewPanel
             prId={pr.id}
             state={claudeStates.get(pr.id)}
+            ciState={ciStates.get(pr.id)}
             onOpenReview={() => openClaudeReview(metaOf(pr), { fromActivity: true })}
             onOpenFix={() => openAiFix(metaOf(pr))}
             // The ticket review's reading of this PR's tickets — not the stack's own (its header

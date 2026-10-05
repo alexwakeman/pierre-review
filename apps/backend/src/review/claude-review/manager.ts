@@ -33,13 +33,7 @@ import {
   type FollowUpPlan,
 } from './follow-up.js';
 import { planThreadReview, reconcileThreads, type ThreadPlan } from './threads.js';
-import {
-  planCiReview,
-  reconcileCiFailures,
-  selectCiFailures,
-  type CiLogRead,
-  type CiPlan,
-} from './ci-failures.js';
+import { dropSettledReraises } from './settled-by-reply.js';
 import {
   getLatestClaudeReview,
   getReviewPeerContexts,
@@ -47,6 +41,7 @@ import {
   insertQueuedReview,
   isAutoReReviewSettled,
   loadPriorReviewForFollowUp,
+  loadSettledByReplyFindings,
   loadPriorRunForCarry,
   markReviewCommentsSeen,
   markReviewCancelled,
@@ -117,16 +112,21 @@ const autoPending: AutoItem[] = [];
 // against the ONE shared REVIEW_CONCURRENCY so the lane cannot overshoot it while its row is being
 // written. Still "queued" as far as the lock is concerned.
 const startingAuto = new Map<number, AutoItem>();
-const inFlight = (): number => runningItems.size + startingAuto.size + slotPeer.inFlight();
+const inFlight = (): number =>
+  runningItems.size + startingAuto.size + slotPeers.reduce((n, p) => n + p.inFlight(), 0);
 
-// ---- THE ONE CONCURRENCY BUDGET, shared with the TICKET review (ticket-review/manager.ts) ----
-// REVIEW_CONCURRENCY bounds PR reviews and ticket reviews TOGETHER: both are agent runs on the same
-// Claude credential and clone cache. The ticket lane registers its own in-flight count and pump
-// here; each side claims a slot SYNCHRONOUSLY (before its first await) and, when a run ends, pumps
-// the other side too. PR-review manual items go first; the ticket lane reads `reviewLaneWaiting`.
-let slotPeer: { inFlight: () => number; pump: () => void } = { inFlight: () => 0, pump: () => {} };
+// ---- THE ONE CONCURRENCY BUDGET, shared with the TICKET review (ticket-review/manager.ts) and the
+// CI review (ci-review/manager.ts) ----
+// REVIEW_CONCURRENCY bounds PR reviews, ticket reviews and CI reviews TOGETHER: all are agent runs on
+// the same Claude credential and clone cache. Each peer lane registers its own in-flight count and
+// pump here; each side claims a slot SYNCHRONOUSLY (before its first await) and, when a run ends,
+// pumps the others too. PR-review manual items go first; the peer lanes read `reviewLaneWaiting`.
+const slotPeers: Array<{ inFlight: () => number; pump: () => void }> = [];
 export function registerReviewSlotPeer(peer: { inFlight: () => number; pump: () => void }): void {
-  slotPeer = peer;
+  slotPeers.push(peer);
+}
+function pumpPeers(): void {
+  for (const p of slotPeers) p.pump();
 }
 /** Is a shared review slot free right now (PR reviews + ticket reviews in flight)? */
 export function reviewSlotFree(): boolean {
@@ -136,9 +136,13 @@ export function reviewSlotFree(): boolean {
 export function reviewLaneWaiting(): { manual: boolean; auto: boolean } {
   return { manual: pending.length > 0, auto: autoPending.length > 0 };
 }
-/** Fill free slots from the PR-review lanes (the ticket lane calls this when one of its runs ends). */
+/**
+ * Fill free slots from the PR-review lanes, then from every peer lane (a peer calls this when one of
+ * its runs ends, so a slot it frees reaches the OTHER peers too).
+ */
 export function pumpReviewLane(): void {
   pump();
+  pumpPeers();
 }
 /** May a run mutate process.env for the auth policy? Only at concurrency 1 (see APPLY_AUTH_ENV). */
 export const REVIEW_APPLY_AUTH_ENV = APPLY_AUTH_ENV;
@@ -224,7 +228,7 @@ export async function startReview(
   prId: number,
   model: ClaudeReviewModel,
 ): Promise<StartReviewResult> {
-  // ⚠ NO STORIES. A PR review judges code, tests, threads and CI; a story is checked by the ticket
+  // ⚠ NO STORIES. A PR review judges code, tests and threads; a story is checked by the ticket
   // review (review/ticket-review/), a separate run with its own row, claim and lane.
   if (!AGENTIC_AI_ENABLED) return { ok: false, reason: 'disabled' };
   // Hard agentic cap: refuse a run once the account's monthly agent credit allowance is spent
@@ -382,7 +386,7 @@ async function startAutoItem(a: AutoItem): Promise<void> {
       startingAuto.delete(prId);
       claimed.delete(prId);
       pump();
-      slotPeer.pump();
+      pumpPeers();
     }
   }
 }
@@ -439,7 +443,7 @@ function launch(item: QueueItem): void {
         )
         .catch(() => emitReviewStream(prId, { type: 'done', status: 'failed', reviewId }));
       pump();
-      slotPeer.pump();
+      pumpPeers();
     });
 }
 
@@ -484,7 +488,17 @@ async function runPipeline(
 
   // ---- follow-up on the previous review ----
   // A DB error here throws on purpose: it fails before any model spend and the error shows.
-  const prior = await loadPriorReviewForFollowUp(ctx, item.prId, item.accountId, reviewId);
+  // Earlier findings SETTLED BY A REPLY (settled-by-reply.ts): answered on GitHub by someone else
+  // and resolved with no code change. They leave the follow-up, the prompt tells the model not to
+  // raise them again, and a new finding repeating one is dropped below.
+  const settled = await loadSettledByReplyFindings(ctx, item.prId, item.accountId, reviewId);
+  const prior = await loadPriorReviewForFollowUp(
+    ctx,
+    item.prId,
+    item.accountId,
+    reviewId,
+    new Set(settled.map((f) => f.id)),
+  );
   const plan: FollowUpPlan | null =
     prior && prior.findings.length > 0 ? selectPriorFindings(prior, item.headSha) : null;
   // "What changed since that review" — ONE compare call (never throws; wrapped anyway, the
@@ -510,7 +524,7 @@ async function runPipeline(
     }
   }
 
-  // ---- what an earlier run already decided (threads + CI; only new commits change them) ----
+  // ---- what an earlier run already decided (threads; only new commits change them) ----
   const priorRun = await loadPriorRunForCarry(ctx, item.prId, item.accountId, reviewId);
 
   // ---- the OTHER reviewers' open threads (people and review bots; never Limn's own) ----
@@ -531,13 +545,13 @@ async function runPipeline(
     }
   }
 
-  // ---- failed CI on the reviewed head (only when a check failed; never fatal) ----
-  const ciPlan = await planCiForRun(item, prCtx, priorRun?.ciFailures ?? null);
+  // ⚠ NO CI. Failing checks are explained by the CI review, its own process (review/ci-review/);
+  // this run neither reads logs nor stores `ci_failures` (older rows keep theirs as history).
 
   // ---- other PRs on the same ticket (a DEEP review only; read-only, for cross-repo interactions) ----
   const peers = mode === 'worktree' ? await reviewPeersFor(item) : [];
 
-  const nonce = pickReviewNonce(untrustedTexts(plan, since, threadPlan, ciPlan, peers));
+  const nonce = pickReviewNonce(untrustedTexts(plan, since, threadPlan, peers, settled));
 
   // A deep review offers the lead its specialist sub-agents (specialists.ts); a diff-only one none.
   const specialists = mode === 'worktree' ? offeredSpecialists(prep.changedFiles) : [];
@@ -556,8 +570,8 @@ async function runPipeline(
     omittedFiles: prep.omittedFiles,
     followUp: plan ? { plan, since } : null,
     threads: threadPlan,
-    ci: ciPlan,
     peers,
+    settled,
     nonce,
   });
 
@@ -614,14 +628,19 @@ async function runPipeline(
     // Server-side validation of the model's follow-up report: each ref once, unknown refs
     // dropped, anything unreported 'not_checked' — never an invented 'addressed'.
     const items = plan ? reconcileFollowUp(plan, res.followUp) : null;
-    const findings =
+    const linked =
       plan && items
         ? linkReraisedFindings(plan, items, res.findings, new Set(prep.changedFiles))
         : res.findings.map((f) => ({ ...f, priorFindingId: null }));
+    // ⚠ ENFORCED IN CODE, not only asked of the model: a new finding repeating a settled one (same
+    // path, similar title) is dropped. A finding linked to a still-open earlier one is kept.
+    const { kept: findings, dropped } = dropSettledReraises(linked, settled);
+    if (dropped.length > 0) {
+      ctx.log.info(
+        `claude review pr ${item.prId}: dropped ${dropped.length} finding(s) repeating a comment settled by a reply`,
+      );
+    }
     const threadAssessments = threadPlan ? reconcileThreads(threadPlan, res.threads) : null;
-    // Each failing check exactly once: Claude's first report for its ref, a carried diagnosis, or
-    // 'not_checked' with the server's reason — never an invented cause.
-    const ciFailures = ciPlan ? reconcileCiFailures(ciPlan, res.ciFailures) : null;
     await saveReviewSuccess(ctx, reviewId, {
       scope: res.scope,
       summary: res.summary,
@@ -640,7 +659,6 @@ async function runPipeline(
             }
           : null,
       threadAssessments,
-      ciFailures,
     });
     return true;
   }
@@ -703,58 +721,6 @@ export async function reviewPeersFor(
       `claude review pr ${prId}: related PRs not read: ${err instanceof Error ? err.message : String(err)}`,
     );
     return [];
-  }
-}
-
-/**
- * Read the reviewed head's checks and, for each FAILING GitHub Actions job not already diagnosed
- * at this head, one tail window of its log plus GitHub's failed-step record — at most
- * CI_FAILURES_MAX jobs, in parallel. null ⇒ the run does not look at CI (no `ctx.ci`, or the
- * checks could not be read); that is never fatal to the review. Exported for tests.
- */
-export async function planCiForRun(
-  item: Pick<QueueItem, 'ctx' | 'accountId' | 'prId' | 'headSha'>,
-  prCtx: Pick<ReviewPrContext, 'owner' | 'name'>,
-  prior: Parameters<typeof selectCiFailures>[3],
-): Promise<CiPlan | null> {
-  const { ctx } = item;
-  const ci = ctx.ci;
-  if (!ci) return null;
-  try {
-    const checks = await ci.readCommitChecks(item.accountId, {
-      owner: prCtx.owner,
-      name: prCtx.name,
-      sha: item.headSha,
-    });
-    if (!checks.ok) {
-      ctx.log.warn(`claude review pr ${item.prId}: CI checks not read (${checks.reason})`);
-      return null;
-    }
-    const sel = selectCiFailures(checks.checks, checks.rollupState, item.headSha, prior);
-    const reads: CiLogRead[] = await Promise.all(
-      sel.toRead.map(async (check): Promise<CiLogRead> => {
-        const jobId = check.jobId as number;
-        const [log, step] = await Promise.all([
-          ci
-            .readJobLog(item.accountId, { owner: prCtx.owner, name: prCtx.name, jobId })
-            .catch(() => null),
-          ci
-            .readFailedStep(item.accountId, { owner: prCtx.owner, name: prCtx.name, jobId })
-            .catch(() => null),
-        ]);
-        return {
-          check,
-          step,
-          log: log?.available ? { text: log.text, windowTruncated: (log.startByte ?? 0) > 0 } : null,
-        };
-      }),
-    );
-    return planCiReview(sel, reads);
-  } catch (err) {
-    ctx.log.warn(
-      `claude review pr ${item.prId}: CI failures not read: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return null;
   }
 }
 

@@ -276,6 +276,8 @@ cannot act on now, or ever. It is built so that it cannot repeat the retired Don
   exists; it is only off the reader's plate. `MyTurnResponse.dismissed` lists subjects wholly hidden
   by a live dismissal (a subject with a newer item showing is back on the plate, and is not listed).
 
+**A Claude review is exempt from one card per PR.** Every succeeded run that survives the ball rule keeps its own card, even when the PR already holds another job. Folding it under that job hid every auto re-review on a busy PR. Each run has its own id and `finishedAt` clock, so a newer run shows even after an older card was dismissed.
+
 **One card per PR, on the board only** (`onePerPr`, `getMyTurn(…, { onePerPr: true })`, passed only
 by `getWorkspaceInsights`). With it the fixed claim is skipped, every section is built in full, and
 each PR keeps ONE item: the lowest index in the reader's type order, then the OLDEST clock (the

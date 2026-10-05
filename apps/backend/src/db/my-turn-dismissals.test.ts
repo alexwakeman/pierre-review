@@ -373,4 +373,22 @@ describe('the pure fold', () => {
     );
     expect(out.threadsAwaiting.map((x: any) => x.threadId)).toEqual([2]);
   });
+
+  it('never folds a Claude review under another job on the same PR (auto re-reviews stay visible)', () => {
+    const empty = {
+      awaitingReview: [], mentions: [], commentReplies: [], pushedSince: [], ownCiRed: [],
+      ownConflicts: [], approvedPrs: [], ownReady: [], yourPrs: [], watchedRepoPrs: [],
+      threadReplies: [], ownThreads: [], claudeReviewsToAction: [], redTrunks: [],
+    };
+    const out = dz.onePerPr(
+      {
+        ...empty,
+        threadsAwaiting: [{ threadId: 1, prId: 5, lastReplyAt: new Date(now - DAY).toISOString() } as any],
+        claudeReviewsToAction: [{ reviewId: 9, prId: 5, finishedAt: new Date(now - HOUR).toISOString(), trigger: 'auto' } as any],
+      },
+      ['thread', 'claude_review'],
+    );
+    expect(out.threadsAwaiting.map((x: any) => x.threadId)).toEqual([1]);
+    expect(out.claudeReviewsToAction.map((x: any) => x.reviewId)).toEqual([9]);
+  });
 });

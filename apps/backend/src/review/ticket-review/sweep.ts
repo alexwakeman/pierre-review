@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { TICKET_REVIEW_MAX_PRS, parseTicketIdent } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
@@ -38,9 +38,11 @@ import {
 //      (persist.ts), so it stays retryable. A ticket whose run is queued or running WAITS, and is
 //      judged again once the run has stored its fingerprint.
 //   4. THE PR REVIEW'S START RULE, reused as is (`autoReviewDue`), keyed `account:ident` with the
-//      fingerprint as the "head": 5 minutes quiet or a 20-minute ceiling for a re-run, no settle
-//      for a first run, and a CI hold while any open member's CI is running on a head younger
-//      than 30 minutes.
+//      fingerprint as the "head": a first run starts at once; a re-run starts at once when no run
+//      of the ticket is in flight and none started or finished in the last 5 minutes, else after 5
+//      quiet minutes (20-minute ceiling from the burst's first change). A run in flight is never
+//      cancelled: the ticket WAITS, its clock running from the first change seen. NO CI hold — a
+//      member's running CI does not delay the check.
 //   5. ITS OWN DAILY CAP, `TICKET_REVIEW_DAILY_CAP` automatic runs ('auto' and 'cascade') per
 //      workspace per UTC day — counted from rows, which an automatic run writes when it is QUEUED.
 //      Never shared with the PR review's cap.
@@ -77,8 +79,8 @@ const kicked = new Map<number, Set<number>>();
 // `${accountId}:${ident}` → still waiting (settle, CI or the daily cap). Re-checked every tick.
 const watching = new Map<string, { accountId: number; ident: string; kicked: boolean; viaPrId: number | null }>();
 const settleSeen = new Map<string, Settle>();
-// `${accountId}:${prId}` → the head we last saw and when (the CI hold's fallback clock).
-const headFirstSeen = new Map<string, { headSha: string; ms: number }>();
+// The settle key recorded while a run is in flight (its fingerprint is not read until it finishes).
+const HELD = '\u0000held';
 
 export function _resetTicketSweepForTest(): void {
   prSnap.clear();
@@ -86,7 +88,6 @@ export function _resetTicketSweepForTest(): void {
   kicked.clear();
   watching.clear();
   settleSeen.clear();
-  headFirstSeen.clear();
   sweeping = false;
 }
 
@@ -154,40 +155,38 @@ async function openPrsIn(
   return rows.map((r) => ({ ...r, headSha: r.headSha ?? '' }));
 }
 
-/** Per member: synced CI state and when its head was first observed, plus when it was opened. */
-async function memberFacts(
+/** Per member: when it was opened (the onboarding floor). */
+async function memberOpenedAt(
   ctx: AgentContext,
   accountId: number,
   prIds: readonly number[],
-): Promise<Map<number, { openedAtMs: number; ciRunning: boolean; headSeenAtMs: number | null }>> {
-  const out = new Map<number, { openedAtMs: number; ciRunning: boolean; headSeenAtMs: number | null }>();
+): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
   if (prIds.length === 0) return out;
-  const { pullRequests: pr, ciStatusEvents: ce } = s(ctx);
+  const { pullRequests: pr } = s(ctx);
   const rows = (await ctx.db
-    .select({ id: pr.id, openedAt: pr.openedAt, ciStatus: pr.ciStatus, headSha: pr.headSha })
+    .select({ id: pr.id, openedAt: pr.openedAt })
     .from(pr)
     .where(and(eq(pr.accountId, accountId), inArray(pr.id, [...prIds])))
-    .execute()) as Array<{ id: number; openedAt: Date; ciStatus: string | null; headSha: string | null }>;
-  const events = (await ctx.db
-    .select({ prId: ce.prId, headSha: ce.headSha, observedAt: ce.observedAt })
-    .from(ce)
-    .where(and(eq(ce.accountId, accountId), inArray(ce.prId, [...prIds])))
-    .execute()) as Array<{ prId: number; headSha: string; observedAt: Date }>;
-  const first = new Map<string, number>();
-  for (const e of events) {
-    const k = `${e.prId}|${e.headSha}`;
-    const t = new Date(e.observedAt).getTime();
-    const prev = first.get(k);
-    if (prev == null || t < prev) first.set(k, t);
-  }
-  for (const r of rows) {
-    out.set(r.id, {
-      openedAtMs: new Date(r.openedAt).getTime(),
-      ciRunning: r.ciStatus === 'pending' || r.ciStatus === 'expected',
-      headSeenAtMs: r.headSha ? (first.get(`${r.id}|${r.headSha}`) ?? null) : null,
-    });
-  }
+    .execute()) as Array<{ id: number; openedAt: Date }>;
+  for (const r of rows) out.set(r.id, new Date(r.openedAt).getTime());
   return out;
+}
+
+/** The latest start or finish of any run of this ticket (null = none) — the "on receipt" test. */
+async function lastTicketRunAtMs(ctx: AgentContext, accountId: number, ident: string): Promise<number | null> {
+  const { ticketReviews: tr } = s(ctx);
+  const rows = (await ctx.db
+    .select({ createdAt: tr.createdAt, startedAt: tr.startedAt, completedAt: tr.completedAt })
+    .from(tr)
+    .where(and(eq(tr.accountId, accountId), eq(tr.ticketIdent, ident)))
+    .orderBy(desc(tr.id))
+    .limit(1)
+    .execute()) as Array<{ createdAt: Date | null; startedAt: Date | null; completedAt: Date | null }>;
+  const r = rows[0];
+  if (!r) return null;
+  const t = (d: Date | null): number => (d ? new Date(d).getTime() : 0);
+  return Math.max(t(r.createdAt), t(r.startedAt), t(r.completedAt)) || null;
 }
 
 let sweeping = false;
@@ -251,10 +250,12 @@ export async function runTicketReviewSweep(
         for (const i of await getTicketIdentsForPr(ctx, accountId, prId)) idents.add(i);
         ticketsOf.set(prId, [...idents].filter((i) => parseTicketIdent(i)?.kind === 'jira'));
       }
-      const candidates = new Map<string, { kicked: boolean; viaPrId: number | null }>();
+      // `fromChange`: named by something that happened THIS tick (a moved/kicked PR, an edited story),
+      // as opposed to only being carried in from `watching` — a held burst's quiet clock restarts on it.
+      const candidates = new Map<string, { kicked: boolean; viaPrId: number | null; fromChange: boolean }>();
       for (const ident of oneHopIdents(toRead, ticketsOf)) {
         const via = toRead.find((p) => ticketsOf.get(p)?.includes(ident)) ?? null;
-        candidates.set(ident, { kicked: via != null && kickedHere.has(via), viaPrId: via });
+        candidates.set(ident, { kicked: via != null && kickedHere.has(via), viaPrId: via, fromChange: true });
       }
       // A kicked PR's tickets count as kicked even when another changed PR named them first.
       for (const prId of kickedHere) {
@@ -267,7 +268,7 @@ export async function runTicketReviewSweep(
       try {
         for (const ident of (await providers.listChangedTicketIdents?.(accountId, since)) ?? []) {
           if (!candidates.has(ident) && parseTicketIdent(ident)?.kind === 'jira') {
-            candidates.set(ident, { kicked: false, viaPrId: null });
+            candidates.set(ident, { kicked: false, viaPrId: null, fromChange: true });
           }
         }
       } catch {
@@ -277,7 +278,7 @@ export async function runTicketReviewSweep(
         if (w.accountId !== accountId) continue;
         const c = candidates.get(w.ident);
         if (c) c.kicked ||= w.kicked;
-        else candidates.set(w.ident, { kicked: w.kicked, viaPrId: w.viaPrId });
+        else candidates.set(w.ident, { kicked: w.kicked, viaPrId: w.viaPrId, fromChange: false });
       }
 
       // ---- 2–5. per ticket ----
@@ -300,11 +301,24 @@ export async function runTicketReviewSweep(
             watching.set(`${accountId}:${i}`, { accountId, ident: i, kicked: c.kicked, viaPrId: c.viaPrId });
           }
         };
+        // A change seen while a run is in flight opens the burst; every LATER change restarts its
+        // quiet clock (spec: 5 quiet minutes since the LAST push), and the burst start never moves.
+        const holdSettle = (): void => {
+          const prev = settleSeen.get(key);
+          settleSeen.set(key, {
+            key: HELD,
+            firstSeenMs: cand.fromChange || prev == null ? nowMs : prev.firstSeenMs,
+            burstStartMs: prev?.burstStartMs ?? nowMs,
+          });
+        };
         result.considered.push(ident);
         // ⚠ Queued or running: WAIT, never forget. The run's fingerprint was fixed when it was
         // prepared, so a member that moves while it runs is a change the run never saw — and the PR
         // snapshot advances this tick, so nothing else would bring the ticket back.
         if (deps.held(accountId, ident)) {
+          // A change seen while a run is in flight opens the burst NOW (never cancelled; the run
+          // finishes, then the new fingerprint settles from this moment, not from the run's end).
+          holdSettle();
           wait();
           continue;
         }
@@ -336,6 +350,7 @@ export async function runTicketReviewSweep(
         const fp = fingerprint(ticketHash(ticket), live);
         const st = (await getTicketStateInputs(ctx, accountId, [ident])).get(ident);
         if (st?.runningRunId != null) {
+          holdSettle();
           wait();
           continue;
         }
@@ -349,45 +364,29 @@ export async function runTicketReviewSweep(
           continue;
         }
         const first = st?.latest == null;
-        const facts = await memberFacts(ctx, accountId, live.map((m) => m.prId));
         if (first && !cand.kicked) {
+          const opened = await memberOpenedAt(ctx, accountId, live.map((m) => m.prId));
           const floor = enabled.get(workspaceId)!;
-          const fresh = live.some((m) => m.state === 'open' && (facts.get(m.prId)?.openedAtMs ?? 0) >= floor);
+          const fresh = live.some((m) => m.state === 'open' && (opened.get(m.prId) ?? 0) >= floor);
           if (!fresh) {
             forget();
             continue;
           }
         }
 
-        // ---- the settle + CI rule, the PR review's own ----
+        // ---- the settle rule, the PR review's own (no CI hold) ----
         let settle: Settle | null = null;
         if (!first) {
           settle = settleSeen.get(key) ?? { key: fp, firstSeenMs: nowMs, burstStartMs: nowMs };
-          if (settle.key !== fp) settle = { ...settle, key: fp, firstSeenMs: nowMs };
-          settleSeen.set(key, settle);
-        }
-        let ciRunning = false;
-        let headSeenMs = nowMs;
-        for (const m of live) {
-          if (m.state !== 'open') continue;
-          const f = facts.get(m.prId);
-          if (!f?.ciRunning) continue;
-          const hk = `${accountId}:${m.prId}`;
-          let mem = headFirstSeen.get(hk);
-          if (!mem || mem.headSha !== m.headSha) {
-            mem = { headSha: m.headSha, ms: nowMs };
-            headFirstSeen.set(hk, mem);
+          if (settle.key !== fp) {
+            settle = { ...settle, key: fp, firstSeenMs: settle.key === HELD ? settle.firstSeenMs : nowMs };
           }
-          const seen = Math.min(mem.ms, f.headSeenAtMs ?? Number.POSITIVE_INFINITY);
-          // The YOUNGEST running head decides how long the hold can last.
-          headSeenMs = ciRunning ? Math.max(headSeenMs, seen) : seen;
-          ciRunning = true;
+          settleSeen.set(key, settle);
         }
         const due = autoReviewDue({
           nowMs,
           settle: settle ? { quietSinceMs: settle.firstSeenMs, burstStartMs: settle.burstStartMs, reason: 'head' } : null,
-          ciRunning,
-          headSeenMs,
+          lastRunAtMs: first ? null : await lastTicketRunAtMs(ctx, accountId, ident),
         });
         if (!due.due) {
           wait();
@@ -443,10 +442,6 @@ export async function runTicketReviewSweep(
       if (!result.stopped) lastTick.set(accountId, nowMs);
     }
     for (const accountId of kicked.keys()) if (!byAccount.has(accountId)) kicked.delete(accountId);
-    for (const k of headFirstSeen.keys()) {
-      const accountId = Number(k.split(':')[0]);
-      if (!byAccount.has(accountId)) headFirstSeen.delete(k);
-    }
     if (result.queued.length > 0) ctx.log.info(`ticket review sweep: queued ${result.queued.length} ticket(s)`);
     return result;
   } catch (err) {

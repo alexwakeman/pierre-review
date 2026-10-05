@@ -66,6 +66,16 @@ describe('submitReviewSchema', () => {
     expect(submitReviewSchema.safeParse(p).success).toBe(false);
   });
 
+  it("rejects 'praise': a new review submits no praise findings", () => {
+    const p = {
+      summary: 'ok',
+      verdict: 'COMMENT',
+      scopeUsed: 'diff_only',
+      findings: [{ path: 'a.ts', severity: 'praise', title: 't', body: 'b' }],
+    };
+    expect(submitReviewSchema.safeParse(p).success).toBe(false);
+  });
+
   it('rejects a payload missing the required summary', () => {
     const p = {
       verdict: 'COMMENT',
@@ -146,21 +156,16 @@ describe('submitReviewSchema — follow-up fields', () => {
   });
 });
 
-describe('submitReviewSchema — CI failures', () => {
+describe('submitReviewSchema — no CI failures (the CI review owns them)', () => {
   const base = { summary: 'ok', verdict: 'COMMENT', scopeUsed: 'diff_only', findings: [] } as const;
 
-  it('accepts a CI failure report and rejects a server-only or unknown category', () => {
-    const ok = {
+  it('a stray ciFailures key is stripped, never carried', () => {
+    const p = {
       ...base,
-      ciFailures: [
-        { ref: 'F1', cause: 'Type error', explanation: 'x', category: 'code', fixableInPr: true, relatedFiles: [{ path: 'a.ts', line: 3 }] },
-        { ref: 'F2', cause: 'Runner lost', explanation: 'y', category: 'flaky_or_infra', fixableInPr: false, step: null },
-      ],
+      ciFailures: [{ ref: 'F1', cause: 'Type error', explanation: 'x', category: 'code', fixableInPr: true }],
     };
-    expect(submitReviewSchema.safeParse(ok).success).toBe(true);
-    for (const category of ['not_checked', 'build']) {
-      const bad = { ...base, ciFailures: [{ ref: 'F1', cause: 'c', explanation: 'e', category, fixableInPr: true }] };
-      expect(submitReviewSchema.safeParse(bad).success).toBe(false);
-    }
+    const r = submitReviewSchema.safeParse(p);
+    expect(r.success).toBe(true);
+    expect(r.success && 'ciFailures' in r.data).toBe(false);
   });
 });

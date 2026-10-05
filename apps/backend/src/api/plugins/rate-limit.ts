@@ -500,6 +500,13 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (path === '/api/ticket-reviews/states') return [TIERS.read];
   if (mutating && /^\/api\/ticket-reviews\/\d+\/items\/\d+\/post$/.test(path)) return [TIERS.githubWrite];
   if (path.startsWith('/api/ticket-reviews')) return [TIERS.read];
+  // CI REVIEW (review/ci-review/routes.ts), matched EXPLICITLY by exact path for the same reason:
+  //   POST /api/ci-reviews          starts an agent run (reads the head's checks + logs) → ai + ai_hourly
+  //   POST /api/ci-reviews/states   batched DB read of the SYNCED head + failing names   → read
+  //   GET  …/:id, …/:id/stream, /api/prs/:id/ci-review                                  → read
+  if (path === '/api/ci-reviews' && mutating) return [TIERS.ai, TIERS.aiHourly];
+  if (path === '/api/ci-reviews/states') return [TIERS.read];
+  if (path.startsWith('/api/ci-reviews')) return [TIERS.read];
   if (/^\/api\/claude-reviews\/[^/]+\/chat$/.test(path)) {
     return mutating ? [TIERS.ai, TIERS.aiHourly] : [TIERS.read];
   }

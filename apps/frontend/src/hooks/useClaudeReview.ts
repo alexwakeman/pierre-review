@@ -33,7 +33,7 @@ export function useClaudeReview(prId: number | null) {
     // While an AUTO review waits in its lane it has no row, so nothing else tells this pane when
     // it starts: re-read until it does (then the row's own running state + the SSE stream take
     // over). Idle otherwise.
-    // While the sweeper only HOLDS it (waiting for CI or for activity to settle), a slower re-read
+    // While the sweeper only HOLDS it (waiting for activity to settle), a slower re-read
     // is enough: that wait is minutes long.
     refetchInterval: (q) =>
       q.state.data?.autoReview === 'queued' ? 5000 : q.state.data?.autoReviewWaiting != null ? 30_000 : false,

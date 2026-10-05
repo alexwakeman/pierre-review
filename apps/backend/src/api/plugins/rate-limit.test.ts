@@ -94,6 +94,20 @@ describe('tierFor — ticket review', () => {
   });
 });
 
+// The CI review: only the start spends model money (and reads the head's checks and logs); the
+// batched states read is DB-only and a POST only because it carries a list.
+describe('tierFor — CI review', () => {
+  it('bills only the start as AI generation', () => {
+    expect(tiers('POST', '/api/ci-reviews')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/ci-reviews/states')).toEqual(['read']);
+  });
+  it('keeps every read on read', () => {
+    expect(tiers('GET', '/api/ci-reviews/7')).toEqual(['read']);
+    expect(tiers('GET', '/api/ci-reviews/7/stream')).toEqual(['read']);
+    expect(tiers('GET', '/api/prs/42/ci-review')).toEqual(['read']);
+  });
+});
+
 // The Slack digest family: TWO paths under one prefix with OPPOSITE costs. The `/api/pro/`
 // catch-all tiers on the VERB, so both are mutating and both would land on the 20/min AI bucket —
 // right for exactly one of them.

@@ -1,6 +1,5 @@
 import type { ClaudeFindingSide } from '@pierre-review/shared';
 import type {
-  ReviewCiFailureReport,
   ReviewFinding,
   ReviewFollowUpReport,
   ReviewThreadReport,
@@ -18,18 +17,20 @@ export interface MappedReview {
   // Passed through VERBATIM; the plugin validates coverage against what it sent.
   followUp?: ReviewFollowUpReport[];
   threads?: ReviewThreadReport[];
-  ciFailures?: ReviewCiFailureReport[];
 }
 
 /**
  * Turn the model's `submit_review` payload into the seam's result half: anchor every finding
  * against the noise-stripped diff (`anchored` / `fileInDiff` / `diffHunk`, the load-bearing
- * posting inputs) and carry the model's `priorRef`, `followUp`, `threads` and `ciFailures` through untouched.
+ * posting inputs) and carry the model's `priorRef`, `followUp` and `threads` through untouched.
  * Pure — split out of agent.ts so it can be tested without the SDK.
  */
 export function mapSubmittedReview(payload: SubmitReviewPayload, strippedDiff: string): MappedReview {
   const index = buildAnchorIndex(strippedDiff);
-  const findings: ReviewFinding[] = payload.findings.map((f) => {
+  // Praise is never a finding (the schema no longer offers it). Drop any that arrives anyway — a
+  // laxer parse, a replayed payload — so nothing praise-shaped is stored, counted or posted.
+  const submitted = payload.findings.filter((f) => (f.severity as string) !== 'praise');
+  const findings: ReviewFinding[] = submitted.map((f) => {
     const side: ClaudeFindingSide = f.side === 'LEFT' ? 'LEFT' : 'RIGHT';
     const line = f.line ?? null;
     return {
@@ -56,6 +57,5 @@ export function mapSubmittedReview(payload: SubmitReviewPayload, strippedDiff: s
     findings,
     ...(payload.followUp !== undefined ? { followUp: payload.followUp } : {}),
     ...(payload.threads !== undefined ? { threads: payload.threads } : {}),
-    ...(payload.ciFailures !== undefined ? { ciFailures: payload.ciFailures } : {}),
   };
 }

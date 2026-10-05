@@ -14,6 +14,7 @@ import {
   assertCleanOrigin,
   cloneArgv,
   hasFreshWorktrees,
+  insteadOfArgs,
   liveWorktrees,
   tightenCloneRoot,
   tightenClonePerms,
@@ -306,6 +307,41 @@ export async function prepWorktree(
     await fetchPrHead(dir, owner, name, prNumber, sha, token);
     const worktreePath = await addWorktree(dir, sha);
     return { repoCloneDir: dir, worktreePath };
+  });
+}
+
+/**
+ * A PR's diff computed LOCALLY, for when GitHub refuses to serve it (HTTP 406 `too_large`: more
+ * than 20,000 lines). Same view as GitHub's: three-dot, i.e. from the merge base of the base
+ * branch and the head. The base branch is fetched into a NAMESPACED ref (never FETCH_HEAD — the
+ * clone is shared). The clone is blobless, so `git diff` lazily fetches the blobs it needs; the
+ * token reaches that fetch only through the process-scoped `insteadOf`, never the clone's config.
+ */
+export async function localPrDiff(
+  owner: string,
+  name: string,
+  prNumber: number,
+  baseRef: string,
+  headSha: string,
+  token: string = getGithubToken(),
+): Promise<string> {
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = await ensureClone(owner, name, token);
+    await fetchPrHead(dir, owner, name, prNumber, headSha, token);
+    const baseSha = await fetchRefIntoClone({
+      cloneDir: dir,
+      owner,
+      name,
+      token,
+      remoteRef: `refs/heads/${baseRef}`,
+      destRef: `refs/pierre/review-base/${prNumber}`,
+    });
+    const { stdout } = await execFileAsync(
+      'git',
+      [...insteadOfArgs(token), '-C', dir, 'diff', '--no-color', '--no-ext-diff', `${baseSha}...${headSha}`],
+      { timeout: 300_000, maxBuffer: 512 * 1024 * 1024 },
+    );
+    return stdout;
   });
 }
 

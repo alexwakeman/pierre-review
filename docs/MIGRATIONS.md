@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0068` and plugin `0034`–`0037` + `0039` are NOT (written 2026-09-19/10-04 with the Postgres down; see the
+  ⚠ pg `0052`–`0070` and plugin `0034`–`0037` + `0039` are NOT (written 2026-09-19/10-05 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -809,6 +809,32 @@ sweeper reviews from. No backfill (NULL = off). ⚠ Like `0035`, every hand-buil
 the store must replay it (the store SELECTs both columns): `workspace-settings.test.ts`,
 `settings-route-schema.test.ts`, `jira-routes.test.ts`. ⚠ **The pg twin is NOT replayed.**
 
+### `0083_workspace_auto_fix` (pg `0070`)
+
+One column, `workspaces.auto_fix_enabled` (sqlite `integer DEFAULT 1 NOT NULL` / pg `boolean DEFAULT
+true NOT NULL`) — the per-workspace auto AI Fix switch (docs/CLAUDE-REVIEW.md § AI Fix → AUTO FIX).
+⚠ **DEFAULT TRUE on purpose**: auto fix ran unconditionally before this column, so every existing
+workspace keeps that until someone switches it off; no backfill. Written only by
+`setWorkspaceAutoReview`, read by `maybeStartAutoFix` via `readWorkspaceAutoFixForPr`. Journal `when`
+`1790665200000` in both folders. ⚠ **The pg twin is NOT replayed** (`ADD COLUMN IF NOT EXISTS`, so a
+re-run no-ops).
+
+### `0082_ci_reviews` (pg `0069`)
+
+Two new core tables for the CI REVIEW (docs/CLAUDE-REVIEW.md § CI review), no change to any existing
+core table. `ci_reviews` (one run per (PR, head, failing check set); `account_id` denormalised, a
+unique `(id, account_id)` — `ci_reviews_id_account` — for the child's composite FK, and
+`cir_pr_account_fk` `(pr_id, account_id)` → `pull_requests` `ON DELETE cascade`) and
+`ci_review_items` (one per failing check; `ciri_review_account_fk`). `workspace_id` is a SOFT
+reference like `ticket_reviews.workspace_id`. ⚠ `ci_review_items.job_id` is `bigint` on pg (GitHub
+Actions job ids are past 2^31; sqlite's `integer` is already 64-bit) — the parity test reads both as
+`number:int`. A PR delete prunes through `db/ci-review-prune.ts` in BOTH `deleteRepo` and
+`deletePrSubtree`; both tables are in `accountScopedTables()` + `eraseAccountData`.
+`claude_reviews.ci_failures` (`0077`) becomes LEGACY (no new run writes it). Journal `when`
+`1790661600000` in both folders. ⚠ **The pg twin is NOT replayed** — worth one step: insert a run
+whose `account_id` does not own its `pr_id` and check it raises `cir_pr_account_fk`, and store a
+`job_id` above 2^31.
+
 ### `0081_review_request_requester` (pg `0068`)
 
 One nullable column, `review_request_events.requester_user_id` (FK `users.id`) — who asked for the
@@ -953,10 +979,10 @@ statement no-ops the second time), both unique indexes present, the three time c
 against a real row. It was replayed in ISOLATION, not on top of the full plugin chain (it names no
 other table, so the chain cannot change its outcome).
 
-⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0068` and plugin `0034`–`0037`, `0039`). The
+⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0070` and plugin `0034`–`0037`, `0039`). The
 standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
 through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —
-core should reach **68 applied = 68 journal entries** (`0000`–`0067`) and the plugin **39** — and check
+core should reach **71 applied = 71 journal entries** (`0000`–`0070`) and the plugin **39** — and check
 `review_request_events` carries both FKs and its unique index, that `workspaces.flow_settings`,
 `pull_requests.advisory_ids` and `accounts.my_turn_settings` are `jsonb`, and that
 `security_checked_at` and `pr_mentions.mentioned_at` are `timestamp with time zone`. ⚠ `0055` is

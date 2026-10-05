@@ -15,7 +15,7 @@
 //      carries the "Auto review" marker, and a 409 AutoReviewInProgress keeps the button shut.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/claudeReviewColumn.test.ts
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -34,9 +34,11 @@ import {
   reviewCellFor,
   reviewCellRank,
   reviewTone,
-  ciDiagnosisLabel,
   threadsToFixLabel,
+  reviewedAgoLabel,
+  reviewRunWhen,
 } from '../src/lib/claudeReviewColumn.js';
+import { dateTime, formatDate } from '../src/lib/ui.js';
 import { fillDraftFromJira } from '../src/lib/jiraTicket.js';
 import { EMPTY_TICKET_DRAFT } from '../src/lib/claudeReviewFollowUp.js';
 
@@ -96,9 +98,11 @@ describe('the strip figures', () => {
 
   it('one pill per severity found, most pressing first, praise left out', () => {
     expect(severityPills(summary).map((p) => p.label)).toEqual(['1 blocker', '3 warnings', '2 questions']);
-    expect(findingTotal(summary)).toBe(7);
+    // Praise is not a finding: an older run's stored praise is not counted.
+    expect(findingTotal(summary)).toBe(6);
     const clean = { ...summary, findings: { blocker: 0, warning: 0, nit: 0, question: 0, praise: 2 } };
     expect(severityPills(clean)).toEqual([]);
+    expect(findingTotal(clean)).toBe(0);
   });
 
   it('currency: on the latest commit, N newer, 1 newer, branch changed, or nothing when unknown', () => {
@@ -331,20 +335,44 @@ describe('the panel', () => {
     expect(reviewTone(reviewCellFor(st({ verdict: null }), false))).toBe('neutral');
   });
 
-  it('CI failures: nothing when the run did not look or nothing failed', () => {
-    expect(ciDiagnosisLabel(undefined)).toBeNull();
-    expect(ciDiagnosisLabel({ failing: 0, diagnosed: 0 })).toBeNull();
-    expect(ciDiagnosisLabel({ failing: 1, diagnosed: 1 })).toBe('1 CI failure explained');
-    expect(ciDiagnosisLabel({ failing: 3, diagnosed: 3 })).toBe('3 CI failures explained');
-    expect(ciDiagnosisLabel({ failing: 3, diagnosed: 1 })).toBe('3 CI failures, 1 explained');
-    expect(ciDiagnosisLabel({ failing: 2, diagnosed: 0 })).toBe('2 CI failures, none explained');
-  });
-
   it('threads to fix: nothing when none, or when the run did not judge threads', () => {
     expect(threadsToFixLabel({})).toBeNull();
     const counts = { total: 3, assessed: 3, validUnaddressed: 0, notValid: 1, addressed: 2, notChecked: 0 };
     expect(threadsToFixLabel({ threadAssessments: counts })).toBeNull();
     expect(threadsToFixLabel({ threadAssessments: { ...counts, validUnaddressed: 1 } })).toBe('1 thread to fix');
     expect(threadsToFixLabel({ threadAssessments: { ...counts, validUnaddressed: 2 } })).toBe('2 threads to fix');
+  });
+});
+
+// ── WHEN THE REVIEW RAN: "reviewed 2 days ago" and the Showing list's date + time ──
+describe('reviewedAgoLabel / reviewRunWhen', () => {
+  const NOW = new Date('2026-10-05T12:00:00Z');
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const ago = (ms: number): string => new Date(NOW.getTime() - ms).toISOString();
+  const DAY = 86_400_000;
+
+  it('says how long ago a recent run finished', () => {
+    expect(reviewedAgoLabel(ago(2 * DAY))).toBe('reviewed 2 days ago');
+    expect(reviewedAgoLabel(ago(3 * 3_600_000))).toBe('reviewed 3 hours ago');
+    expect(reviewedAgoLabel(ago(10_000))).toBe('reviewed just now');
+  });
+
+  it('past a month names the date, with "on" so the sentence still reads', () => {
+    const iso = ago(45 * DAY);
+    expect(reviewedAgoLabel(iso)).toBe(`reviewed on ${formatDate(iso)}`);
+  });
+
+  it('a Showing option carries the date AND the time of day, plus the age while recent', () => {
+    const iso = ago(DAY);
+    expect(reviewRunWhen(iso)).toBe(`${dateTime(iso)} (1 day ago)`);
+    expect(dateTime(iso)).toMatch(/\d{2}:\d{2}/);
+    const old = ago(60 * DAY);
+    expect(reviewRunWhen(old)).toBe(dateTime(old));
   });
 });

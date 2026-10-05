@@ -6,6 +6,9 @@
 //      this head already reported as not addressed;
 //   3. a start passes the review's model and `trigger: 'auto'`, and records the outcome for the
 //      Claude Review tab (owner-scoped);
+//   3½. ⚠ THE WORKSPACE SWITCH (`workspaces.auto_fix_enabled`): ON by default (a fresh workspace and a
+//      repo with no membership both start fixes); switched off, an own PR is skipped with 'off'
+//      before the seed is even loaded;
 //   4. ⚠ TICKET ITEMS: the auto path never asks for them; a MANUAL seed (`withTicketItems`) gets the
 //      ticket review's items THIS PR owns, from each ticket's latest run only.
 //
@@ -205,6 +208,56 @@ describe('maybeStartAutoFix — the author gate', () => {
     seed!.model = 'claude-opus-4-1';
     await go(await seedPr(viewerId));
     expect(started[0].model).toBe('claude-opus-5-5');
+  });
+});
+
+describe('maybeStartAutoFix — the workspace switch', () => {
+  it('⚠ default ON; switched off ⇒ skipped "off", seed never loaded; back on ⇒ starts', async () => {
+    const q = await import('../../db/queries.js');
+    const wsId = await q.ensureDefaultWorkspace(1);
+    const [r] = await db
+      .insert(schema.repos)
+      .values({ accountId: 1, owner: 'acme', name: 'web', githubNodeId: 'R_af_ws', createdAt: new Date(NOW - 99 * HOUR) })
+      .returning()
+      .execute();
+    await db
+      .insert(schema.workspaceRepos)
+      .values({ accountId: 1, workspaceId: wsId, repoId: r.id })
+      .onConflictDoNothing()
+      .execute();
+    const prId = (
+      await db
+        .insert(schema.pullRequests)
+        .values({
+          githubNodeId: `PR_af_ws_${n}`,
+          accountId: 1,
+          repoId: r.id,
+          number: n++,
+          title: 't',
+          state: 'open',
+          isDraft: false,
+          authorId: viewerId,
+          headSha: 'h1',
+          openedAt: new Date(NOW - 10 * HOUR),
+          updatedAt: new Date(NOW - 10 * HOUR),
+        })
+        .returning()
+        .execute()
+    )[0].id;
+    const ws = schema.workspaces;
+    const { eq } = await import('drizzle-orm');
+    const [row] = await db.select({ on: ws.autoFixEnabled }).from(ws).where(eq(ws.id, wsId)).execute();
+    expect(row.on).toBe(true); // the column default
+
+    await db.update(ws).set({ autoFixEnabled: false }).where(eq(ws.id, wsId)).execute();
+    const before = loadInputs.length;
+    expect(await go(prId, 520)).toEqual({ reviewId: 520, status: 'skipped', reason: 'off' });
+    expect(loadInputs.length).toBe(before);
+    expect(started).toEqual([]);
+    expect(mod.autoFixOutcomeFor(520, 1)).toMatchObject({ reason: 'off' });
+
+    await db.update(ws).set({ autoFixEnabled: true }).where(eq(ws.id, wsId)).execute();
+    expect(await go(prId, 521)).toEqual({ reviewId: 521, status: 'started', fixId: 77 });
   });
 });
 

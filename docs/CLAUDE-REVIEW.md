@@ -207,6 +207,18 @@ posts **one** GitHub review (inline + body + verdict).
   `apps/backend/src/ai/runtime.ts`, value-imports them. [PACKAGING.md](PACKAGING.md) owns the
   details and the guardrail. The product modules import no SDK themselves.
 
+## No praise findings
+
+A review posts only what the author should act on or answer. `praise` is OUT of `submit_review`'s
+severity enum (`review/schema.ts`) and `mapSubmittedReview` drops any that arrives anyway. What is
+good is ONE line of the summary: the lead sentence, the issue bullets (if any), then exactly one
+`- Good: …` bullet. ⚠ `ClaudeFindingSeverity` KEEPS the `praise` member — older runs stored praise
+rows and they are never deleted — but every read the SPA, the chat, posting and the counts go
+through HIDES them (`isShownFinding` in `claude-review/persist.ts`: `getClaudeReviewById`, the
+states fold, `getFindingPostContext` 404s one). Follow-up and the AI Fix seed already excluded
+praise; My Turn's "unposted finding" test skips it. NOT applied to `ownPostedCommentsForPrs`: a
+praise comment already on GitHub is still Limn's own comment. The ticket review never had praise.
+
 ## Models
 
 - **Claude Opus 5.5 (`claude-opus-5-5`) is the DEFAULT and the first offered model**
@@ -298,10 +310,11 @@ and decides which are worth consulting for THIS change:
   finding's optional `lens` set. `lens` is stored on `claude_review_findings.lens` (sqlite `0075` /
   pg `0062`, nullable, no backfill; a stored value outside `CLAUDE_FINDING_LENSES` reads as null)
   and rides `ClaudeFinding.lens` (labels: `CLAUDE_FINDING_LENS_LABELS`). null = a general finding.
-- **A deep review always carries design comments**: the worktree system prompt (`systemPromptForMode(
-  'worktree', offered)` appends the catalogue section) requires at least one `lens: 'design'`
-  finding about the change as a whole, file-level when it is about the file, `praise` when the
-  design is sound — alongside the usual line-level findings. With no specialists offered the
+- **A deep review always looks at the design**: the worktree system prompt (`systemPromptForMode(
+  'worktree', offered)` appends the catalogue section) asks for a `lens: 'design'` finding for
+  each design problem in the change as a whole, file-level when it is about the file — and NO
+  finding when the design is sound (that goes in the summary's one "Good:" line, § No praise
+  findings) — alongside the usual line-level findings. With no specialists offered the
   worktree prompt is byte-identical to before.
 - Progress: a dispatch shows as "Asking the <lens> specialist", and a specialist's own steps are
   prefixed with its name (`describeAssistantBlocks` maps `parent_tool_use_id` → lens).
@@ -333,6 +346,30 @@ review, with no "Previous review" prompt section, no `follow_up` record and no f
   user saw: `editedBody` when non-blank, else `body` (the routes' `resolvedBody` rule). Follow-up
   records stored before this rule may still name unposted findings; they are not rewritten, and
   the next run's carry-forward re-checks every id through the same rule.
+- ⚠ **SETTLED BY A REPLY ⇒ OUT OF THE FOLLOW-UP, AND NEVER RAISED AGAIN** (`settled-by-reply.ts`,
+  pure; loader `persist.ts` `loadSettledByReplyFindings`, over EVERY earlier succeeded review of the
+  PR, account-scoped). A posted finding is settled when, on SYNCED data only: (1) its inline
+  comment's thread is found — the thread's first comment is by the account's own login and is the
+  finding's `githubCommentId`, or (Post review stores no id) on the finding's path with a body that
+  STARTS WITH the finding's resolved body; a PR-level comment has no thread and is never settled;
+  (2) the thread is resolved; (3) a LATER comment in it is by a known login that is NOT the
+  account's own and NOT automation (`users.isBot`, `github_type='Bot'`, the login seeds) — Limn
+  posts AS the reader, so every comment under that login, every `isLimnPostedComment` one included,
+  is ours and never settles anything; (4) the code did not move under it — the thread is not
+  outdated and no synced commit dated after the finding's comment touched its file (a commit whose
+  files were never synced counts as touching it). Then: the finding is filtered out of
+  `loadPriorReviewForFollowUp` (own AND carried, after the carry bookkeeping), so it is never a P
+  item, never on the stored `follow_up` record, never in the pane's "Previous review" list and never
+  an AI Fix `P` seed item; the prompt lists it (up to 30) under **Settled in an earlier review**, one
+  `---BEGIN SETTLED FINDING S<n> <nonce>---` fence each carrying the path, title and the reply as
+  data (in the nonce-collision scan), telling the model not to raise it again; and the manager
+  DROPS, in code, any new finding that repeats one (`dropSettledReraises`: same path, title equal
+  once folded or word overlap ≥ `SETTLED_TITLE_SIMILARITY` 0.6). A finding LINKED to a still-open
+  earlier one (`priorFindingId` set) is that one's re-raise and is kept. ⚠ **A thread resolved with
+  NO reply is NOT settled** — resolving is a click, not evidence, so it is followed up and re-raised
+  as before. ⚠ A finding fixed in code fails rule (4) and stays on the follow-up's own "addressed"
+  path. Pinned by `settled-by-reply.test.ts` (the rule) and `settled-by-reply-pipeline.test.ts`
+  (end to end through the manager).
 - **CARRY-FORWARD.** Every item the previous run recorded as `not_checked` names an older finding;
   those are re-loaded (ids from our own stored JSON, re-scoped to this PR + account by the query),
   re-checked for eligibility (so an unposted one drops out) and marked `carried`. Without it, a comment Claude skipped — or one
@@ -479,60 +516,80 @@ CODE, not by prompt:
   the model still is. ⚠ This deliberately overrides the older "the server does NOT coerce statuses
   on an unmoved head" rule for the same-head case only (product decision, 2026-10).
 
-## Failed CI on the reviewed head
+## CI review (why checks failed — its own process)
 
-Every run that reads code (diff-only or deep) also looks at the reviewed commit's CI. For each
-FAILING check with a readable GitHub Actions log, Claude gets a bounded excerpt of that log and
-reports the cause. This replaced the Pro "CI failure analysis" card (deleted with its plugin routes,
-prompt and `readCiAnalysisSeed` provider): the review is now the one place that reasons about CI.
+⚠ **THE PR REVIEW NO LONGER DIAGNOSES CI.** The split (2026-10) made the CI review its own Claude
+process (`src/review/ci-review/`), modelled on the ticket review: own tables, own claim, own lane,
+own cap, own budget. New PR-review runs read no logs, carry no "CI failures" prompt section, and
+`submit_review` has no `ciFailures` field (a stray one is stripped). `claude_reviews.ci_failures`
+(sqlite `0077` / pg `0064`) stays as READ-ONLY history: the SPA shows an old run's diagnosis only
+when the PR has no CI review. Wire contract: [API.md](API.md) § CI review.
 
-- **Reads (CORE, server-side, `AgentContext.ci`, all never-throw):** `readCommitChecks` —
-  `github/commit-checks.ts`, ONE GraphQL read of the checks on the reviewed head **by commit oid**
-  (not the PR's latest commit: the PR may have moved while the run waited), mapped through the ONE
-  `checkRunsFrom` so "failing" (`failure` | `error`) means what the Checks tab means; then, only for
-  failing Actions jobs, `readJobLog` (`github/actions-logs.ts`, the viewer's default TAIL window,
-  128 KiB, one ranged GET) and `readFailedStep` (REST `actions/jobs/{id}`, the first failed step by
-  GitHub's own record). ⚠ The signed log blob URL never leaves `actions-logs.ts`: only excerpt TEXT
-  enters the prompt, and only the check's details page (`CheckRun.url`) is stored. A partial GraphQL
-  answer (a token without checks access) is `no_check_access`, never "no checks". Any read failure
-  costs the CI section only (`ciFailures: null`), never the review. ⚠ **All three respect the
-  account's rate budget**: while `isLimited(accountId)` none asks GitHub (checks → `rate_limited`,
-  so no CI section; a job's log / step → unreadable), and a rate-limited reply to ANY of them —
-  the job-log read included — is fed to `noteLimited`.
-- **Caps** (`claude-review/ci-failures.ts`): at most `CI_FAILURES_MAX` = 6 jobs read per run; the
-  excerpt is the lines around the FIRST error marker (8 before, 20 after — a specific error beats the
-  runner's "Process completed with exit code N") plus the window's last 30 lines, timestamps and ANSI
-  stripped, each line ≤ 400 chars, ≤ 6,000 chars per check and ≤ 24,000 for the block. No error
-  marker ⇒ the tail alone.
-- **Prompt:** a "CI failures" section after the review threads, one
-  `---BEGIN CI FAILURE Fn <nonce>---` fence per failure carrying the check name (set by the PR's own
-  workflow file), the failed step and the excerpt — all in the nonce-collision scan. The model
-  reports `ciFailures: [{ref, cause, explanation, category, step?, relatedFiles?, fixableInPr}]`,
-  category `code | test | flaky_or_infra | config | unclear`. It is told to say `unclear` when the
-  excerpt does not show why, to leave out a ref it cannot judge, and not to raise a finding for a
-  flaky or infrastructure failure. The deep route may Read the files the log points at.
-- **Reconcile — NEVER INVENT A CAUSE** (`reconcileCiFailures`): refs upper-cased, unknown refs and
-  malformed entries (blank cause, unknown category) dropped, first report per ref wins; cause ≤ 160,
-  explanation ≤ 1,000, ≤ 5 related files (blank paths dropped, a non-positive line → null). EVERY
-  failing check gets exactly one entry: `diagnosed`, or `not_checked` with a server reason —
-  `not_reported`, `log_unavailable`, `over_cap`, or `no_log` (not an Actions job: listed with its
-  name, nothing read). GitHub's failed-step record beats the model's `step`.
-- **Carry-forward:** a failure diagnosed at THIS head for the SAME job id (`selectCiFailures`) is
-  carried — no log read, not re-sent. A workflow re-run is a new job id, so it is read again; a
-  `not_checked` never carries.
-- **Stored** on `claude_reviews.ci_failures` (sqlite `0077` / pg `0064`, one nullable JSON object
-  `{state, checkCount, failures}`, no backfill); served as `ClaudeReview.ciFailures`
-  (`ClaudeCiFailure[]`) + `ClaudeReview.ciState` (`{state: passing|failing|pending|none|unknown,
-  checkCount}`). **null = the run did not look at CI** (an older row, a skip, a failed run, unreadable
-  checks); `[]` = it looked and nothing was failing.
-- **SPA:** `ClaudeReviewCiFailures.tsx` over the pure `lib/claudeReviewCi.ts`, mounted once in
-  `ClaudesReview` right after Claude's summary. Nothing for null; a green "CI passing" for `[]` on a
-  passing head, one grey line on a still-running one; otherwise a count-pill header and one row per
-  check (category, name, step, cause, a collapsible "Why", related `file:line` buttons into the
-  Changes tab for files in the PR, and the check's details link through `safeExternalUrl`). Fixable
-  here first, then other diagnoses, then the unchecked. All model text is plain text.
-- **AI Fix:** the review seed's `C<n>` items are this list's `diagnosed` + `fixableInPr` failures
-  (§ AI Fix).
+- **Keyed per (PR, head commit, sorted failing check names).** `ci_reviews` (one row per run,
+  history kept) + `ci_review_items` (one row per failing check), sqlite `0082` / pg `0069`. Two keys
+  per run (`currency.ts`): `failing_key` = sha256 of the names the run READ live; `trigger_key` = the
+  SYNCED names that started an automatic run. Currency and "is it due?" accept EITHER, so a lagging
+  sync never re-runs the same failures nor reads a fresh run as stale. `job_id` is BIGINT on pg
+  (Actions job ids are past 2^31). Tenancy is structural: composite FKs `(pr_id, account_id)` →
+  `pull_requests` and `(ci_review_id, account_id)` → `ci_reviews`; both delete paths call
+  `db/ci-review-prune.ts`; erasure + `accountScopedTables()` + `verify:isolation` cover both tables.
+- **Reads (CORE, server-side, `AgentContext.ci`, all never-throw)** — `prepare.ts`
+  `readCiInputs`: `readCommitChecks` (`github/commit-checks.ts`, ONE GraphQL read of the head's checks
+  **by commit oid**, mapped through the ONE `checkRunsFrom`), then, only for failing Actions jobs,
+  `readJobLog` (the viewer's TAIL window, 128 KiB, one ranged GET) and `readFailedStep` (GitHub's own
+  first failed step). ⚠ The signed log blob URL never leaves `actions-logs.ts`: only excerpt TEXT
+  enters the prompt, and only the check's details page (`CheckRun.url`) is stored. All three respect
+  the account's rate budget (`isLimited` / `noteLimited`).
+- **Refusals — no model runs, stored as `failed` + `refused`** (with the keys, so the sweeper does
+  not try the same inputs again): `no_failures` (a re-run passed), `no_logs` (every failing check is
+  outside GitHub Actions), `logs_unavailable` (no failing job's log could be read),
+  `checks_unreadable`, `head_unreadable` (the checkout failed). A THROWN run clears both keys and
+  stays retryable; a restart orphan likewise. ⚠ A `no_failures` refusal judged nothing, so it keeps
+  NO `trigger_key` (a check re-running at the live read fails again under the same name and must
+  still be explained); `ciReviewDue` holds it only until the sync observes the failure AFTER the
+  refusal finished, and the state stops saying "nothing is failing" at that point too. ⚠ A run whose
+  PR head moved between queue and start drops its `trigger_key` (it was the OLD head's synced set).
+- **Caps** (the ONE implementation, `claude-review/ci-failures.ts`): at most `CI_FAILURES_MAX` = 6 jobs
+  read per run; the excerpt is the lines around the FIRST error marker (8 before, 20 after) plus the
+  window's last 30 lines, timestamps and ANSI stripped, each line ≤ 400 chars, ≤ 6,000 chars per
+  check and ≤ 24,000 for the block.
+- **The run** (`manager.ts`, `agent.ts`): a read-only worktree of the PR head (`prepareMemberWorktrees`,
+  the path guard confines Read/Glob/Grep to it and the scratch cwd), the noise-stripped diff capped at
+  `CI_REVIEW_DIFF_CHARS` (60,000), and one `---BEGIN CI FAILURE Fn <nonce>---` fence per failure
+  carrying the check name (set by the PR's workflow file), the failed step and the excerpt — the
+  title, diff, file names, names, steps and excerpts all in the nonce-collision scan. ⚠ **Bash is
+  denied** outright (`ciToolPolicy`: the PR review's `DISALLOWED_TOOLS` + the dispatch tools). Its own
+  `CI_REVIEW_BUDGET_USD` (default $2) and `CI_REVIEW_MAX_TURNS` (25), env only; the model is the
+  default review model. The model calls `submit_ci_review` once with `{ summary, failures: [{ref,
+  cause, explanation, category, fixableInPr, step?, path?, line?, suggestion?, relatedFiles?}] }`.
+- **Reconcile — NEVER INVENT A CAUSE** (`reconcile.ts` over `reconcileCiFailures`): every failing
+  check gets exactly ONE item — `diagnosed`, or `not_checked` with a server reason (`not_reported`,
+  `log_unavailable`, `over_cap`, `no_log`). Unknown refs and malformed entries dropped, the first
+  VALID report per ref wins (the same test both folds apply). `path` is repository-relative or nothing
+  (absolute, `..` and URLs refused; falls back to the first safe related file); a `not_checked` item
+  carries no path, line or suggestion.
+- **Carry-forward (automatic runs only):** an item explained at THIS head for the SAME job id by the
+  previous succeeded run is copied with its path and suggestion — no log read, not re-sent. A set
+  that GREW therefore costs one read and one diagnosis; with nothing new to read the run saves with
+  NO model (`numTurns: 0`, the earlier summary). A click ("Check CI" / "Re-check") carries nothing.
+- **Concurrency.** Claim `${accountId}:${prId}` taken SYNCHRONOUSLY; one FIFO lane (a click ahead of
+  every automatic item; 20 automatic / 50 manual waiting at most); the ONE shared
+  `REVIEW_CONCURRENCY` slot with PR and ticket reviews (`registerReviewSlotPeer` now takes any
+  number of peers; `pumpReviewLane` pumps them all). A run in flight is never cancelled by a push.
+- **The sweeper** (`sweep.ts`, a `* * * * *` pull, only where auto review can run): open, non-draft,
+  RED PRs a PERSON opened (the global automation set) in auto-enabled workspaces; the failing set is
+  the newest `ci_status_events` row AT the synced head. ⚠ **NO SETTLE AND NO CI HOLD** — a failing
+  check is final, so a run is queued on the first tick that sees it; a set that grows later is a new
+  key. The onboarding floor: only a failure OBSERVED at or after the workspace switched auto review
+  on. Its own `CI_REVIEW_DAILY_CAP` (default 20) automatic runs per workspace per UTC day, counted
+  from rows (written when QUEUED); manual runs and server REFUSALS (no model ran) never count.
+- **Currency** (`deriveCiReviewState`, DB-only — the synced head and failing names): `current`,
+  `stale` (`pushed` | `checks_changed` | `now_passing`), `running`, `none`; plus `refused` when the
+  newest attempt AT THE CURRENT HEAD refused. Served per PR and batched (`POST
+  /api/ci-reviews/states`, one request per board — nothing fetches per card).
+- **AI Fix:** the review seed's `C<n>` items are the `diagnosed` + `fixableInPr` items of the latest
+  succeeded CI review AT THE PR'S CURRENT SYNCED HEAD (`getFixableCiItemsForPr`), manual and auto
+  fixes alike — never the code review's legacy `ciFailures` (§ AI Fix).
 
 ## Starting from the Open PRs tab
 
@@ -582,7 +639,7 @@ request.
 ## Ticket review (one review per ticket, across its PRs)
 
 ⚠ **A PR REVIEW NO LONGER CHECKS STORIES.** The split (2026-10) made two processes: the PR review
-(code, tests, threads, CI — everything above) and the TICKET review (`src/review/ticket-review/`):
+(code, tests, threads — everything above) and the TICKET review (`src/review/ticket-review/`):
 does the SET of PRs naming one ticket deliver its acceptance criteria. New PR-review runs write no
 `ticket`, `ticket_assessment` or story findings; `submit_review` has no `tickets` field; the start
 route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § Ticket review.
@@ -627,8 +684,10 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   side pumps the other when a run ends. The claim key `acct:ident` is taken SYNCHRONOUSLY.
 - **Cascade** (`sweep.ts`, every minute, only where auto review is on): a PR that opened, pushed or
   left re-queues the tickets it is on — ONE HOP, never transitive — under the same `autoReviewDue`
-  rule (5 min quiet / 20 min max / CI hold 30 min), keyed `acct:ident` with the fingerprint as the
-  head. Its OWN per-workspace `TICKET_REVIEW_DAILY_CAP` (20), counted from rows (an automatic run
+  rule (first run at once; a re-run at once when no run of the ticket started or finished in the 5
+  min before the change, else 5 min quiet / 20 min max; NO CI hold), keyed `acct:ident` with the
+  fingerprint as the head. A change seen while the ticket's run is in flight never cancels it — it
+  opens the burst then (`HELD` key), so the 5 quiet minutes count from the LAST change seen while held (each one restarts the quiet clock; the burst start, and so the 20-minute ceiling, never moves), not the run's end. Its OWN per-workspace `TICKET_REVIEW_DAILY_CAP` (20), counted from rows (an automatic run
   writes its row when queued), charged to the starting workspace. A first run needs a member opened
   after auto review was switched on, or the kick an auto PR review sends (`onAutoReviewLaunched`).
   ⚠ A ticket whose run is queued or running WAITS (stays in `watching`), never is forgotten: the
@@ -810,7 +869,8 @@ per-review budget as the Review button. Storage: CORE `workspaces.auto_review_en
 `pro_workspace_settings` (plugin `0036`) until Claude Review left the plugin, and plugin `0037`
 copied each ON switch across once — those plugin columns are dormant). Read and written through
 `GET`/`PUT /api/workspaces/:id/auto-review` (`claude-review/auto-settings.ts`, 404 for another
-account's workspace, `enabled` required); `setWorkspaceAutoReview` is the ONE writer. `enabled_at`
+account's workspace; the PUT body takes `enabled` and/or `autoFixEnabled`, at least one, a field
+left out keeps its stored value); `setWorkspaceAutoReview` is the ONE writer of both switches. `enabled_at`
 is re-stamped on every off → on (whole seconds, so the echo matches what SQLite stores), KEPT on a
 repeated on, and cleared on off, so nothing opened while it was off is picked up. Runs carry `claude_reviews.trigger = 'auto'`
 (core `0071` / pg `0058`; `'manual'` is the default).
@@ -819,18 +879,22 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   reviews, and re-reviews of a moved head or of new comments). A candidate is:
   1. **TRIGGERED** — a first review, a new head, or a new review-thread comment by a PERSON or a
      REVIEW bot (below);
-  2. **WAITING** until `autoReviewDue` (`auto.ts`, pure) says
-     `(quiet ≥ 5 min OR burst ≥ 20 min) AND (CI not running OR head age ≥ 30 min)`.
+  2. **WAITING** until `autoReviewDue` (`auto.ts`, pure) says go. A FIRST review: at once. A
+     MOVED HEAD: at once ("on receipt", the next tick) when no run is in flight and none started or
+     finished in the 5 min before this burst's first push was seen (`lastRunAtMs` on the candidate);
+     otherwise, and always for NEW COMMENTS, `quiet ≥ 5 min OR burst ≥ 20 min`.
      *Quiet* = since the key (head, newest qualifying comment) last changed — every push or comment
      resets it (`AUTO_REREVIEW_SETTLE_MS`). *Burst* = since the FIRST trigger of this burst; a key
      change never resets it (`AUTO_REREVIEW_MAX_WAIT_MS`), and the burst ends when its run is
      QUEUED (the clocks are forgotten at enqueue — a comment landing while that run is in flight
      opens a NEW burst with its own 5-minute quiet, never inherits the old 20-minute clock) or when
-     the PR stops being a candidate. A FIRST review has no settle (always "settled"). *CI running* = the PR's synced
-     `ci_status` is `pending`/`expected`; *head age* = since the earliest `ci_status_events` row for
-     that head, else since the sweeper first saw it (`AUTO_REVIEW_CI_WAIT_MS`). While waiting,
-     `autoReviewWaiting` says why (`ci` / `comments` / `commits`) and the Claude Review header
-     prints "Auto review waiting for CI" / "…for comments to settle" / "…for pushes to settle".
+     the PR stops being a candidate. ⚠ **A run in flight is NEVER cancelled**: a push made during it
+     arrives as `inFlightMoved` (the candidate read), which only starts that head's clock, so once
+     the run ends the head settles 5 quiet minutes after the PUSH, not after the run.
+     ⚠ **NO CI HOLD** — the old "CI running and head < 30 min" wait (`AUTO_REVIEW_CI_WAIT_MS`) is
+     gone, for code AND ticket reviews, and the candidate read carries no CI reading. While waiting,
+     `autoReviewWaiting` says why (`comments` / `commits`; `ci` is never produced now) and the Claude
+     Review header prints "…for comments to settle" / "…for pushes to settle".
      All clocks are in memory: a restart restarts a wait, never skips one;
   3. **QUEUED → RUNNING** on the auto lane (daily cap, lane cap, lock — below);
   4. on SUCCESS, **AUTO FIX** when the PR is the reader's OWN (§ AI Fix → Auto fix).
@@ -1006,7 +1070,8 @@ Haiku, `prSummary`).
     older review, from before story findings). A story finding arrives as an `F` item and its `S`
     item is dropped, so each issue appears once; one the reader IGNORED is in neither. Refs keep
     their own numbering (the criterion's ref, the gap's position), so a dropped item moves no other.
-  - `C<n>` the review's `ciFailures` that are `diagnosed` with `fixableInPr === true`.
+  - `C<n>` the CI REVIEW's items (§ CI review) that are `diagnosed` with `fixableInPr === true`, from
+    its latest succeeded run at the PR's current head — never the code review's legacy `ciFailures`.
   Every item is nonce-fenced (`pickReviewNonce`, re-rolled against all fenced text), its body
   clipped to 3,000 chars. A 40,000-char budget decides what is SHOWN, in priority order (CI and
   blockers first, nits last; the first item always); the rest are NAMED in the prompt as left out
@@ -1030,7 +1095,13 @@ Haiku, `prSummary`).
   review manager after an AUTO run is saved as succeeded — a failure here never touches the
   review). ⚠ **ONLY THE READER'S OWN PR**: `pull_requests.author_id → users.github_login` equals
   `accounts.github_login` (case-insensitive), local and cloud alike; anyone else's PR gets nothing
-  and records nothing. Then the first of these that holds SKIPS it, logged and kept in memory per
+  and records nothing. ⚠ **THE WORKSPACE SWITCH**: `workspaces.auto_fix_enabled` (core `0083` / pg
+  `0070`, NOT NULL **DEFAULT TRUE** — auto fix ran unconditionally before it existed), edited in
+  Settings → Workspace → Auto Claude review as a second checkbox, "Auto AI Fix on your own PRs"
+  (dimmed and inert while auto review is off; its value is kept), and carried on the same
+  `GET`/`PUT /api/workspaces/:id/auto-review` as `autoReview.autoFixEnabled`. Read by
+  `readWorkspaceAutoFixForPr` through the PR's repo membership (no membership row ⇒ the default, ON);
+  OFF skips with reason **`off`** before the seed is loaded. Then the first of these that holds SKIPS it, logged and kept in memory per
   review (`autoFixOutcomeFor` → `ClaudeReviewResponse.autoFix`, one line in the Claude Review tab):
   `nothing_to_fix` (empty seed), `head_moved` (synced head ≠ reviewed head), `fix_in_progress`
   (the fixer's claim — auto or manual; `startFix` takes it SYNCHRONOUSLY right after the check, so

@@ -31,6 +31,7 @@ import type {
 import type {
   CardThreadComment,
   ClaudeReviewPrState,
+  CiReviewState,
   MergeVerdictInfo,
   MyTurnDismissTarget,
 } from '@pierre-review/shared';
@@ -63,6 +64,7 @@ import { usePr, useThread } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useClaudeReviewStates } from '../../hooks/useClaudeReview.js';
+import { useCiReviewStates } from '../../hooks/useCiReview.js';
 import {
   mergePrMutationKey,
   updateBranchMutationKey,
@@ -2219,6 +2221,8 @@ interface PendingBoardApi {
   openFix: (meta: PinnedPr) => void;
   claudeOn: boolean;
   claudeStates: Map<number, ClaudeReviewPrState>;
+  // The CI review's states (its own run), from ONE batched request for the board.
+  ciStates: Map<number, CiReviewState>;
   setCardRef: (id: string, el: HTMLLIElement | null) => void;
   flashId: string | null;
 }
@@ -2539,7 +2543,9 @@ function PrDetails({
           </>
         }
       />
-      {board.claudeOn && <ClaudeReviewExtras state={board.claudeStates.get(card.prId)} />}
+      {board.claudeOn && (
+        <ClaudeReviewExtras state={board.claudeStates.get(card.prId)} ciState={board.ciStates.get(card.prId)} />
+      )}
       {threadId != null && <InsightThreadById threadId={threadId} card={card} />}
       <InsightPrSummaryBody prId={card.prId} />
     </div>
@@ -2926,6 +2932,8 @@ function PendingCard({ card, board }: { card: InsightCard; board: PendingBoardAp
         state={claudeState}
         omitVerdict={card.kind === 'my_turn' && card.reason === 'claude_review'}
         ci={isCiCard}
+        ciState={board.ciStates.get(prRef.prId)}
+        reviewedAt={card.kind === 'my_turn' && card.reason === 'claude_review' ? (card.since ?? null) : null}
         onOpenReview={() => board.openReview(prRef)}
       />
     ) : null;
@@ -3113,6 +3121,8 @@ export function AttentionCards({
     () => new Map((claudeData?.states ?? []).map((st) => [st.prId, st])),
     [claudeData],
   );
+  const { data: ciData } = useCiReviewStates(claudePrIds, claudeOn);
+  const ciStates = useMemo(() => new Map((ciData?.states ?? []).map((st) => [st.prId, st])), [ciData]);
 
   // Who the viewer is, for "Your PR" on a conflicts card — the App-root `['me']` cache, no fetch.
   const myLogin = useMe().data?.user?.login ?? null;
@@ -3149,6 +3159,7 @@ export function AttentionCards({
     openFix: (meta) => openAiFix(meta),
     claudeOn,
     claudeStates,
+    ciStates,
     setCardRef,
     flashId,
   };

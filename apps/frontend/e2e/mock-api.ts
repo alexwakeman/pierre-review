@@ -15,6 +15,8 @@ import type {
   ClaudeReviewStatesResponse,
   PrTicketReviewsResponse,
   TicketReviewStatesResponse,
+  CiReviewStatesResponse,
+  PrCiReviewResponse,
   PrDetail,
   Repo,
   ThreadDetail,
@@ -216,6 +218,24 @@ const CLAUDE_REVIEW_STATES: ClaudeReviewStatesResponse = { states: [] };
 // Both gate on `ai.enabled` like the strip above; typed so a spec that flips it gets real shapes.
 const TICKET_REVIEW_STATES: TicketReviewStatesResponse = { states: [] };
 const prTicketReviewsFor = (prId: number): PrTicketReviewsResponse => ({ prId, tickets: [] });
+// The CI review's two boot-time reads (the PR pane's CI check, the Open PRs / Pending CI pill).
+// Both gate on `ai.enabled` like the strip above; typed so a spec that flips it gets real shapes.
+const CI_REVIEW_STATES: CiReviewStatesResponse = { states: [] };
+const prCiReviewFor = (prId: number): PrCiReviewResponse => ({
+  prId,
+  review: null,
+  state: {
+    prId,
+    status: 'none',
+    staleBecause: null,
+    latestRunId: null,
+    runningRunId: null,
+    headSha: null,
+    counts: null,
+    refused: null,
+    checkedAt: null,
+  },
+});
 
 const ME_RESPONSE: MeResponse = {
   user: {
@@ -822,6 +842,9 @@ export async function installMockApi(page: Page): Promise<void> {
       if (path.endsWith('/api/ticket-reviews/states')) return json(route, TICKET_REVIEW_STATES);
       const ticketReviewsMatch = path.match(/\/api\/prs\/(\d+)\/ticket-reviews$/);
       if (ticketReviewsMatch) return json(route, prTicketReviewsFor(Number(ticketReviewsMatch[1])));
+      if (path.endsWith('/api/ci-reviews/states')) return json(route, CI_REVIEW_STATES);
+      const ciReviewMatch = path.match(/\/api\/prs\/(\d+)\/ci-review$/);
+      if (ciReviewMatch) return json(route, prCiReviewFor(Number(ciReviewMatch[1])));
       if (path.endsWith('/api/users')) return json(route, USERS);
       if (path.endsWith('/api/repos')) return json(route, [REPO]);
       if (path.endsWith('/api/mergers')) return json(route, []);

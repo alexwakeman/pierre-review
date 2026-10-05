@@ -3,7 +3,7 @@
 //   pnpm --filter @pierre-review/backend test review-seed
 import { describe, expect, it } from 'vitest';
 import type {
-  ClaudeCiFailure,
+  CiReviewItem,
   ClaudeFinding,
   ClaudeFollowUpItem,
   ClaudeReview,
@@ -99,7 +99,12 @@ const ticket = (): ClaudeReviewTicketEntry => ({
   },
 });
 
-const ci = (over: Partial<ClaudeCiFailure> = {}): ClaudeCiFailure => ({
+const ci = (over: Partial<CiReviewItem> = {}): CiReviewItem => ({
+  id: 1,
+  ciReviewId: 1,
+  path: null,
+  line: null,
+  suggestion: null,
   ref: 'F1',
   checkName: 'test (node 20)',
   jobId: 1,
@@ -170,12 +175,13 @@ describe('collectReviewItems — what the fixer is given', () => {
         },
         threadAssessments: [thread(), thread({ threadId: 8, validity: 'not_valid' })],
         tickets: [ticket()],
-        ciFailures: [
-          ci(),
-          ci({ checkName: 'infra', fixableInPr: false }),
-          ci({ checkName: 'unread', status: 'not_checked', fixableInPr: null }),
-        ],
       }),
+      [],
+      [
+        ci(),
+        ci({ checkName: 'infra', fixableInPr: false }),
+        ci({ checkName: 'unread', status: 'not_checked', fixableInPr: null }),
+      ],
     ).map((s) => s.item);
     // The stored story assessment (`tickets`) is a legacy single-PR verdict: never seeded.
     expect(items.map((i) => `${i.ref}:${i.kind}`)).toEqual([
@@ -188,6 +194,15 @@ describe('collectReviewItems — what the fixer is given', () => {
     expect(items.find((i) => i.ref === 'T1')).toMatchObject({ threadId: 7, path: 'src/b.ts' });
     expect(items.find((i) => i.ref === 'P1')).toMatchObject({ findingId: 55 });
     expect(items.find((i) => i.ref === 'C1')?.title).toContain('test (node 20)');
+  });
+
+  it("never seeds the code review's own legacy ciFailures — only the CI review's items", () => {
+    const legacy = review({ findings: [], ciFailures: [ci()] });
+    expect(collectReviewItems(legacy)).toEqual([]);
+    const withCi = collectReviewItems(legacy, [], [ci({ path: 'src/x.ts', line: 4, suggestion: 'Update the snapshot.' })]);
+    expect(withCi.map((s) => s.item.ref)).toEqual(['C1']);
+    expect(withCi[0]!.item).toMatchObject({ path: 'src/x.ts', line: 4 });
+    expect(withCi[0]!.body).toContain('Suggested change: Update the snapshot.');
   });
 
   it('a LEGACY story finding is not seeded, ignored or not — the ticket review owns that verdict', () => {

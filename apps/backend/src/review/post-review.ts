@@ -8,6 +8,7 @@ import type {
   PostReviewPreview,
 } from '@pierre-review/shared';
 import { ghRestGet, ghRestPost } from '../github/client.js';
+import { localPrDiff } from './clone-manager.js';
 import {
   type AnchorIndex,
   buildAnchorIndex,
@@ -239,6 +240,7 @@ export function prLevelFindingBody(f: {
 
 interface GhPull {
   head: { sha: string };
+  base: { ref: string };
 }
 
 // The PR's current head SHA (to detect head-moved before posting).
@@ -258,12 +260,27 @@ export async function fetchPrDiff(
   name: string,
   prNumber: number,
 ): Promise<string> {
-  const { stdout } = await execFileAsync(
-    'gh',
-    ['pr', 'diff', String(prNumber), '--repo', `${owner}/${name}`],
-    { maxBuffer: 64 * 1024 * 1024, timeout: 60_000 },
-  );
-  return stdout;
+  try {
+    const { stdout } = await execFileAsync(
+      'gh',
+      ['pr', 'diff', String(prNumber), '--repo', `${owner}/${name}`],
+      { maxBuffer: 64 * 1024 * 1024, timeout: 60_000 },
+    );
+    return stdout;
+  } catch (err) {
+    // GitHub will not serve a diff over 20,000 lines (HTTP 406 `too_large`). Compute the same
+    // diff from the local clone instead; a diff that size takes the deep (checkout) route anyway.
+    if (!isDiffTooLarge(err)) throw err;
+    const pull = await ghRestGet<GhPull>(`/repos/${owner}/${name}/pulls/${prNumber}`);
+    return localPrDiff(owner, name, prNumber, pull.base.ref, pull.head.sha);
+  }
+}
+
+/** GitHub's "the diff exceeded the maximum number of lines" refusal, as `gh` reports it. */
+export function isDiffTooLarge(err: unknown): boolean {
+  const e = err as { message?: unknown; stderr?: unknown } | null;
+  const text = `${String(e?.message ?? '')}\n${String(e?.stderr ?? '')}`;
+  return /too_large|exceeded the maximum number of lines|HTTP 406/i.test(text);
 }
 
 interface GhReviewResponse {

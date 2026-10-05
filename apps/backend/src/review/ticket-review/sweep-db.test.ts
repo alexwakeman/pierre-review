@@ -8,6 +8,7 @@
 //   5. ⚠ More than TICKET_REVIEW_MAX_PRS members refuses `too_many_prs` with the count.
 //   6. ⚠ A ticket whose run is queued or running WAITS (a member that moves meanwhile is re-judged
 //      once the run ends), and a full lane keeps EVERY unreached candidate waiting.
+//   8. ⚠ NO CI hold: a member's running CI never delays a re-run.
 //   7. ⚠ ONE story per ticket, whoever asks: the freshest stored row, never "the first member's".
 //
 //   pnpm --filter @pierre-review/backend test ticket-review/sweep-db
@@ -277,11 +278,15 @@ describe('ticket review sweep', () => {
     const held = await sweep.runTicketReviewSweep(ctx, T0 + 30 * 60_000, { ...deps(), held: (_a, i) => i === T1 || i === T3 });
     expect(held.considered).toEqual([T1, T3]);
     expect(held.queued).toEqual([]);
-    // Y did not move again: only waiting brings T1 and T3 back — through the settle, then queued.
+    // Y did not move again: only waiting brings T1 and T3 back. Once the run is gone they queue —
+    // at once when no run of theirs started or finished in the last 5 minutes, else after 5 quiet
+    // minutes counted from the change seen WHILE held (T0+30), never from the run's end. (Rows are
+    // stamped with the real clock, so which tick it is depends on the time of day; the pair is
+    // queued exactly once by T0+35 either way.)
     const back = await sweep.runTicketReviewSweep(ctx, T0 + 31 * 60_000, deps());
     expect(back.considered).toEqual([T1, T3]);
-    const after = await sweep.runTicketReviewSweep(ctx, T0 + 37 * 60_000, deps());
-    expect(after.queued.map((q) => q.ident)).toEqual([T1, T3]);
+    const after = await sweep.runTicketReviewSweep(ctx, T0 + 35 * 60_000, deps());
+    expect([...back.queued, ...after.queued].map((q) => q.ident)).toEqual([T1, T3]);
   });
 
   it('⚠ a full lane keeps every candidate it did not reach waiting', async () => {
@@ -298,6 +303,61 @@ describe('ticket review sweep', () => {
     expect(room.queued.map((q) => [q.ident, q.trigger])).toEqual([
       [T5, 'auto'],
       [T6, 'auto'],
+    ]);
+  });
+
+  it('⚠ does not wait for CI: a member whose CI is still running re-runs on the settle rule alone', async () => {
+    await endQueuedRuns();
+    const { eq } = await import('drizzle-orm');
+    await db
+      .update(schema.pullRequests)
+      .set({ headSha: 'h_z3', ciStatus: 'pending' })
+      .where(eq(schema.pullRequests.id, pr.z!))
+      .execute();
+    // The old CI hold would wait until this head was 30 minutes old (T0+90).
+    const first = await sweep.runTicketReviewSweep(ctx, T0 + 60 * 60_000, deps());
+    const later = await sweep.runTicketReviewSweep(ctx, T0 + 66 * 60_000, deps());
+    expect([...first.queued, ...later.queued].map((q) => [q.ident, q.trigger])).toEqual([[T3, 'cascade']]);
+  });
+
+  it('⚠ pushes during a run: the quiet clock counts from the LAST push, not the first', async () => {
+    await endQueuedRuns();
+    const { and, eq, desc } = await import('drizzle-orm');
+    const B = T0 + 70 * 60_000;
+    const min = (n: number): number => B + n * 60_000;
+    const heldX = { ...deps(), held: (_a: number, i: string) => i === T1 || i === T2 };
+    // A run of T1 and T2 is in flight from B to B+15; X is pushed at +1, +8 and +14.
+    await push('x', 'h_x_r1');
+    await sweep.runTicketReviewSweep(ctx, min(1), heldX);
+    await push('x', 'h_x_r2');
+    await sweep.runTicketReviewSweep(ctx, min(8), heldX);
+    await push('x', 'h_x_r3');
+    const held = await sweep.runTicketReviewSweep(ctx, min(14), heldX);
+    expect(held.queued).toEqual([]);
+    // The run ends at B+15: stamp each ticket's newest row so the "on receipt" test sees it.
+    for (const ident of [T1, T2]) {
+      const [row] = await db
+        .select({ id: schema.ticketReviews.id })
+        .from(schema.ticketReviews)
+        .where(and(eq(schema.ticketReviews.accountId, 1), eq(schema.ticketReviews.ticketIdent, ident)))
+        .orderBy(desc(schema.ticketReviews.id))
+        .limit(1)
+        .execute();
+      await db
+        .update(schema.ticketReviews)
+        .set({ createdAt: new Date(min(0)), startedAt: new Date(min(0)), completedAt: new Date(min(15)) })
+        .where(eq(schema.ticketReviews.id, row!.id))
+        .execute();
+    }
+    // Counting from the first push (+1) would start at +16, two minutes after the last push.
+    for (const t of [16, 17, 18]) {
+      const early = await sweep.runTicketReviewSweep(ctx, min(t), deps());
+      expect(early.queued).toEqual([]);
+    }
+    const due = await sweep.runTicketReviewSweep(ctx, min(19), deps());
+    expect(due.queued.map((q) => [q.ident, q.trigger])).toEqual([
+      [T1, 'cascade'],
+      [T2, 'cascade'],
     ]);
   });
 

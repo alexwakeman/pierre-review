@@ -28,6 +28,7 @@ import type {
   CheckRun,
   ClaudeReviewFollowUpRecord,
   ClaudeCiFailuresRecord,
+  ClaudeReviewCiState,
   ClaudeThreadAssessment,
   ClaudeReviewTicket,
   ClaudeTicketAssessment,
@@ -1424,6 +1425,121 @@ export const ticketReviewItems = sqliteTable(
   }),
 );
 
+// ---- CI review (CORE, local-only like the rest of Claude Review) ----
+// A separate Claude run that explains why checks FAILED on a PR's head — split out of the PR review's
+// own run (`claude_reviews.ci_failures`, now LEGACY and read-only). Two tables, migration 0082
+// (pg 0069):
+//
+//   ci_reviews       one row per run, history kept. A run is keyed by (pr, head, sorted failing
+//                    check names): `failing_key` is the set the run READ live from GitHub,
+//                    `trigger_key` the SYNCED set that started it (they differ only while the sync
+//                    lags) — "is it current?" and "is it due?" accept either
+//                    (review/ci-review/currency.ts).
+//   ci_review_items  one row per failing check: Claude's cause, or the server's not-checked reason.
+//
+// `workspace_id` is the workspace of the PR's repo when the run started (the daily cap counts
+// against it). No FK on it, like ticket_reviews.
+//
+// Run ids arrive in request PATHS, so the child's tenancy is STRUCTURAL: a composite FK against
+// ci_reviews(id, account_id); the run's PR likewise against pull_requests(id, account_id).
+// ⚠ BOTH DELETE PATHS (deleteRepo, retention's deletePrSubtree) clear these rows for the deleted PRs
+// (db/ci-review-prune.ts), plus eraseAccountData + accountScopedTables(). Twin: schema.pg.ts.
+export const ciReviews = sqliteTable(
+  'ci_reviews',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    // Composite FK below (no single-column one).
+    prId: integer('pr_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    headSha: text('head_sha').notNull(),
+    // sha256 of the sorted failing check names the run read (null until read).
+    failingKey: text('failing_key'),
+    // The same over the SYNCED names that started it (null on a manual run).
+    triggerKey: text('trigger_key'),
+    // The sorted failing check names the run read.
+    failingChecks: text('failing_checks', { mode: 'json' }).$type<string[]>(),
+    trigger: text('trigger', { enum: ['manual', 'auto'] }).notNull().default('manual'),
+    status: text('status', {
+      enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
+    }).notNull(),
+    // Stored model id. No drizzle `enum:` for the same reason as claude_reviews.model.
+    model: text('model').notNull(),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    error: text('error'),
+    // CiReviewRefusal — server-written, never the model's.
+    refused: text('refused'),
+    // The head's CI as the run read it.
+    ciState: text('ci_state', { mode: 'json' }).$type<ClaudeReviewCiState>(),
+    summary: text('summary'),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountPrIdx: index('cir_account_pr_created_idx').on(t.accountId, t.prId, t.createdAt),
+    // The per-workspace daily cap on automatic runs.
+    accountWsIdx: index('cir_account_ws_created_idx').on(t.accountId, t.workspaceId, t.createdAt),
+    // Parent key of the item table's composite tenancy FK (`id` is the PK — never a lookup).
+    idAccountUx: uniqueIndex('ci_reviews_id_account').on(t.id, t.accountId),
+    prAccountFk: foreignKey({
+      name: 'cir_pr_account_fk',
+      columns: [t.prId, t.accountId],
+      foreignColumns: [pullRequests.id, pullRequests.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+export const ciReviewItems = sqliteTable(
+  'ci_review_items',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    ciReviewId: integer('ci_review_id').notNull(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // 'F1'… — the ref Claude saw; null when not shown to Claude.
+    ref: text('ref'),
+    checkName: text('check_name').notNull(),
+    jobId: integer('job_id'),
+    step: text('step'),
+    // The check's details page. NEVER a log download URL.
+    url: text('url'),
+    sent: integer('sent', { mode: 'boolean' }).notNull().default(false),
+    carried: integer('carried', { mode: 'boolean' }).notNull().default(false),
+    status: text('status', { enum: ['diagnosed', 'not_checked'] }).notNull(),
+    notCheckedReason: text('not_checked_reason'),
+    cause: text('cause'),
+    explanation: text('explanation'),
+    category: text('category'),
+    fixableInPr: integer('fixable_in_pr', { mode: 'boolean' }),
+    path: text('path'),
+    line: integer('line'),
+    suggestion: text('suggestion'),
+    relatedFiles: text('related_files', { mode: 'json' }).$type<Array<{ path: string; line: number | null }>>(),
+    assessedAtHead: text('assessed_at_head').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    reviewIdx: index('ciri_review_idx').on(t.ciReviewId),
+    reviewAccountFk: foreignKey({
+      name: 'ciri_review_account_fk',
+      columns: [t.ciReviewId, t.accountId],
+      foreignColumns: [ciReviews.id, ciReviews.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
 // ---- AI Fix (CORE since migration 0074 / pg 0061) ----
 // Created by the private plugin (plugin migrations 0002 / 0003 / 0024) and ADOPTED IN PLACE by
 // 0074's CREATE … IF NOT EXISTS — same name, same columns, same index names, and NO foreign keys
@@ -1543,6 +1659,12 @@ export const workspaces = sqliteTable(
     // ONE writer is `setWorkspaceAutoReview` (review/claude-review/auto-settings.ts).
     autoReviewEnabled: integer('auto_review_enabled', { mode: 'boolean' }),
     autoReviewEnabledAt: integer('auto_review_enabled_at', { mode: 'timestamp' }),
+    // AUTO AI FIX (migration 0083 / pg 0070): may a succeeded AUTO review of the reader's OWN PR
+    // prepare a review-seeded fix (never pushed)? DEFAULT TRUE — it ran unconditionally before this
+    // column, so existing workspaces keep that until switched off. Read by `maybeStartAutoFix`
+    // (coding/ai-fix/auto-fix.ts); the ONE writer is `setWorkspaceAutoReview`. It only matters
+    // while auto review is on.
+    autoFixEnabled: integer('auto_fix_enabled', { mode: 'boolean' }).notNull().default(true),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

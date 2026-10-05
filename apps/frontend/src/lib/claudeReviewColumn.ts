@@ -6,6 +6,7 @@ import type {
   ClaudeReviewVerdict,
 } from '@pierre-review/shared';
 import { CLEAN_CLASS, OUTDATED_CLASS } from './claudeReviewFollowUp.js';
+import { dateTime, relativeTime } from './ui.js';
 
 // Pure helpers for the Claude Review panel on each Open PRs card (OpenPrsCards → ClaudeReviewCell).
 // The column reads ONE batched `POST /api/claude-review/states` answer and starts runs through the
@@ -119,9 +120,12 @@ export function severityPills(summary: ClaudeReviewStateSummary): SeverityPill[]
   });
 }
 
-/** Every finding the run raised, praise included (the posted denominator). */
+/** Every finding the run raised (the posted denominator). Praise is not a finding: an older run's
+ *  stored praise is left out. */
 export function findingTotal(summary: ClaudeReviewStateSummary): number {
-  return Object.values(summary.findings).reduce((a, b) => a + b, 0);
+  return (Object.entries(summary.findings) as Array<[ClaudeFindingSeverity, number]>)
+    .filter(([sev]) => sev !== 'praise')
+    .reduce((a, [, n]) => a + n, 0);
 }
 
 /**
@@ -200,15 +204,6 @@ export function reviewTone(cell: ReviewCell): ReviewTone {
   }
 }
 
-/** The CI half of a finished run: "2 CI failures explained" / "3 CI failures, 1 explained".
- *  null when the run did not look at CI, or nothing was failing (nothing to say). */
-export function ciDiagnosisLabel(ci: ClaudeReviewStateSummary['ci']): string | null {
-  if (ci == null || ci.failing <= 0) return null;
-  const noun = `CI failure${ci.failing === 1 ? '' : 's'}`;
-  if (ci.diagnosed >= ci.failing) return `${ci.failing} ${noun} explained`;
-  return `${ci.failing} ${noun}, ${ci.diagnosed === 0 ? 'none' : ci.diagnosed} explained`;
-}
-
 /** Other reviewers' threads Claude judged right and not yet dealt with. null when none, or when
  *  the run did not judge threads (never a fake zero). */
 export function threadsToFixLabel(summary: Pick<ClaudeReviewStateSummary, 'threadAssessments'>): string | null {
@@ -238,3 +233,25 @@ export function anyReviewInFlight(states: readonly ClaudeReviewPrState[] | undef
   return (states ?? []).some((s) => s.status === 'queued' || s.status === 'running');
 }
 
+
+// ── WHEN THE REVIEW RAN ──
+//
+// Every surface that shows a finished review says how long ago it ran: the Open PRs panel, the
+// Pending card's Claude line, the Claude Review tab's header. `relativeTime` turns into a bare date
+// past a month, so the words follow it ("reviewed on 03/04/2026", never "reviewed 03/04/2026").
+
+const isRelative = (rel: string): boolean => rel === 'just now' || rel.endsWith(' ago');
+
+/** "reviewed 2 days ago", or "reviewed on <date>" for a run older than a month. */
+export function reviewedAgoLabel(iso: string): string {
+  const rel = relativeTime(iso);
+  return isRelative(rel) ? `reviewed ${rel}` : `reviewed on ${rel}`;
+}
+
+/** A run in the Claude Review tab's "Showing" list: its date and time of day, plus how long ago
+ *  while that is still a relative phrase. */
+export function reviewRunWhen(iso: string): string {
+  const rel = relativeTime(iso);
+  const at = dateTime(iso);
+  return isRelative(rel) ? `${at} (${rel})` : at;
+}

@@ -39,7 +39,7 @@ export function plainUrl(owner: string, name: string): string {
  * exactly the defect this replaces: a `remote set-url` afterwards is a repair, and a repair
  * that runs in a `.catch(() => {})` is not a guarantee.
  */
-function insteadOfArgs(token: string): string[] {
+export function insteadOfArgs(token: string): string[] {
   return [
     '-c',
     `url.https://x-access-token:${token}@github.com/.insteadOf=https://github.com/`,

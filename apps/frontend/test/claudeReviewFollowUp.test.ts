@@ -548,12 +548,13 @@ describe('source guards', () => {
       'components/ClaudeReviewFollowUp.tsx',
       'components/ClaudeReviewThreads.tsx',
       'components/ClaudeReviewCiFailures.tsx',
+      'components/CiCheckSection.tsx',
       'components/ClaudeReviewChat.tsx',
     ];
     const titles = files.flatMap((f) => [...code(read(f)).matchAll(/<ReviewSection\s+title="([^"]+)"/g)].map((m) => m[1]));
     expect(titles.sort()).toEqual(
       [
-        'CI failures',
+        'CI check',
         "Claude's review",
         'Findings',
         'Generate a fix',

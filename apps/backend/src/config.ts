@@ -572,6 +572,14 @@ export const config = {
   // AUTOMATIC ticket reviews (trigger 'auto' / 'cascade') per workspace per UTC day. Not shared with
   // the PR review's own auto cap. Manual runs never count. Default = shared TICKET_REVIEW_DAILY_CAP.
   ticketReviewDailyCap: intFromEnv('TICKET_REVIEW_DAILY_CAP', 20),
+  // ---- CI review (one run per (PR, head, failing-check set) — review/ci-review/) ----
+  // Its OWN spend cap and turn cap: a CI run reads log excerpts and the files they point at, nothing
+  // more. Env only — no route sets it.
+  ciReviewBudgetUsd: floatFromEnv('CI_REVIEW_BUDGET_USD', 2),
+  ciReviewMaxTurns: intFromEnv('CI_REVIEW_MAX_TURNS', 25),
+  // AUTOMATIC CI reviews per workspace per UTC day. Not shared with the PR or ticket review caps.
+  // Manual runs never count. Default = shared CI_REVIEW_DAILY_CAP.
+  ciReviewDailyCap: intFromEnv('CI_REVIEW_DAILY_CAP', 20),
 
   // ---- Diff-size cap ----
   // A very large inlined diff is the dominant cost on a big PR (it's the cached

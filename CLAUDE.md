@@ -504,7 +504,8 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   that item), and a subject with no item left DISCHARGES its row — so it can never outlive the thing
   it dismissed, which is what got 0060's table deleted. ⚠ **The board lists ONE card per PR**
   (`getMyTurn(…, { onePerPr: true })`, passed only by `getWorkspaceInsights`): the reader's highest
-  type, then the longest wait. `GET /api/my-turn` keeps every item and its fixed-precedence claim,
+  type, then the longest wait — EXCEPT a Claude review, which always keeps its own card (an auto
+  re-review must not hide under a reply card). `GET /api/my-turn` keeps every item and its fixed-precedence claim,
   because the notification watcher diffs ids. Per-account settings
   (`accounts.my_turn_settings`, overrides only) switch whole types off INSIDE `getMyTurn`, and a
   promoted card MOVES (the home builders drop its id). Full contract:
@@ -785,18 +786,27 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   already-reviewed PR once per new HEAD or new burst of review comments — only a PERSON's or a
   REVIEW bot's (role `=== 'review'`, stored role beats the seed; CI/coverage/dependency bots never),
   never Limn's own (`isLimnPostedComment`, ONE predicate). ⚠ ONE start rule (`autoReviewDue`):
-  (quiet ≥ 5 min OR burst ≥ 20 min) AND (head CI not running OR head ≥ 30 min old). A SUCCEEDED auto
+  a first review or a new head after a quiet spell starts ON RECEIPT; a push during a run (never
+  cancelled) or within 5 min of one, and every comment burst, waits quiet ≥ 5 min OR burst ≥ 20 min.
+  NO CI hold (code or ticket review). A SUCCEEDED auto
   run on the reader's OWN PR may start a review-seeded AUTO FIX (`coding/ai-fix/auto-fix.ts`: ≤ 3
-  per PR per 24h, never while a fix runs or an unpushed one waits on the head, NEVER pushed). A run
+  per PR per 24h, never while a fix runs or an unpushed one waits on the head, NEVER pushed), unless
+  the workspace switched it off (`workspaces.auto_fix_enabled`, DEFAULT TRUE, the second switch on
+  the same auto-review route + Settings section; skip reason `off`). A run
   also judges every OTHER open review thread (validity + addressed), and on a same-head run every
   earlier judgement carries forward IN CODE: only new commits change one
   (docs/CLAUDE-REVIEW.md § Other reviewers' threads, § Auto review).
-- **A run also diagnoses FAILED CI on the reviewed head** (`claude-review/ci-failures.ts`,
-  `claude_reviews.ci_failures`): the head's checks by COMMIT OID, then a bounded tail of each failing
-  Actions job's log (≤6 jobs, one 128 KiB ranged read each), excerpted and nonce-fenced. Every
-  failing check gets exactly one entry — Claude's cause or a server `not_checked` reason, never an
-  invented cause. ⚠ The signed log URL never leaves the server; only the check's details page is
-  stored. `ciFailures: null` = did not look, `[]` = nothing failing (§ Failed CI).
+- **FAILED CI IS A SEPARATE PROCESS, THE CI REVIEW** (`src/review/ci-review/`; sqlite `0082` / pg
+  `0069`): one run per (PR, head, sorted failing check names), never inside a PR review — new PR-review
+  runs read no logs and store no `ci_failures` (old rows read as history). The head's checks by COMMIT
+  OID, then a bounded tail of each failing Actions job's log (≤6 jobs, one 128 KiB ranged read each,
+  the ONE `claude-review/ci-failures.ts`), nonce-fenced, a read-only worktree, Bash denied. Every
+  failing check gets exactly one item — Claude's cause or a server `not_checked` reason, never an
+  invented cause; no Actions log at all REFUSES with no model. ⚠ The signed log URL never leaves the
+  server. Its sweeper fires on the first tick a check is red on a human PR's synced head (a failing
+  check is final: NO settle, NO CI hold), own `CI_REVIEW_DAILY_CAP` / `CI_REVIEW_BUDGET_USD`, the shared
+  `REVIEW_CONCURRENCY` slot (`registerReviewSlotPeer` takes many peers). AI Fix's `C<n>` items come from
+  its latest run AT THE CURRENT HEAD (docs/CLAUDE-REVIEW.md § CI review).
 - **STORIES ARE A SEPARATE PROCESS, THE TICKET REVIEW** (`src/review/ticket-review/`; sqlite `0080`
   / pg `0067`, plugin `0039`): ONE review per TICKET across its open + merged PRs (≤ 8, else REFUSED
   with the count), never inside a PR review — new PR-review runs store no story, and their old
@@ -1404,7 +1414,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0068` and plugin `0034`–`0037` + `0039` are NOT replayed.
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0070` and plugin `0034`–`0037` + `0039` are NOT replayed.
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.
   - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence

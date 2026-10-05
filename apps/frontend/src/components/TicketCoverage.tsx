@@ -7,13 +7,15 @@
 //
 //   - one block per ticket the PR is on (`GET /api/prs/:id/ticket-reviews`), each with its own
 //     Check / Re-check (mutation key `['ticket-review-start', ident]`, shared with Open PRs);
-//   - a currency pill the SERVER computed ("Checked against 3 PRs", "web#412 pushed since");
+//   - a currency pill the SERVER computed ("Checked against 3 PRs", "web#412 pushed since"), and
+//     how long ago the shown run finished ("reviewed 2 hours ago");
 //   - criteria with status and attribution; one Post per unmet item, on the PR it belongs to;
 //   - a collapsible "Story" per block (TicketStory.tsx): the ticket as markdown, read on open;
 //   - an older PR review's stories that no ticket review covers, as blocks of their own marked
 //     "Checked on this PR only" (ONE story section; the old "User stories" section is gone);
-//   - the story panel (pasted stories + the Jira picker), whose Check starts a one-PR check per
-//     pasted story. The PR review's Run button no longer takes a story.
+//   - the story panel (pasted stories + the Jira picker) behind a plain "+ Add story" link, whose
+//     Check starts a one-PR check per pasted story. The PR review's Run button no longer takes a
+//     story.
 //
 // Rules: every string from Claude renders as PLAIN TEXT (no href built from it), except the run's
 // summary, which is markdown (one lead sentence + a bullet per gap) through the sanitizing
@@ -99,6 +101,7 @@ import {
   REVIEW_SUBHEAD,
 } from '../lib/reviewStyles.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
+import { ReviewedAgo } from './ReviewedAgo.js';
 
 type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
 
@@ -502,6 +505,7 @@ function TicketBlock({
         )}
         {counts != null && <span className={`text-xs ${MUTED}`}>{counts}</span>}
         {currency != null && <CurrencyPill currency={currency} />}
+        {shown != null && <ReviewedAgo at={shown.completedAt} />}
         <span className="ml-auto">
           {!running && (
             <AiRunGate>
@@ -553,6 +557,8 @@ export interface LegacyStories {
   findingIds: ReadonlyMap<string, number>;
   findingsById: ReadonlyMap<number, ClaudeFinding>;
   renderFinding: (f: ClaudeFinding, chip: string) => ReactNode;
+  // When that older PR review finished — its "reviewed X ago", beside the label.
+  finishedAt?: string | null;
 }
 
 function LegacyBlock({
@@ -588,6 +594,7 @@ function LegacyBlock({
       aside={
         <span className="ml-auto inline-flex flex-wrap items-center gap-2">
           <span className={`text-xs ${MUTED}`}>Checked on this PR only</span>
+          <ReviewedAgo at={legacy.finishedAt} />
           <AiRunGate>
             <button
               type="button"
@@ -639,7 +646,6 @@ function StoryInput({ pr, entries }: { pr: PrDetail; entries: readonly TicketEnt
     <div>
       <ClaudeReviewTicketPanel
         key={pr.id}
-        label="Add a story"
         // Detected Jira tickets are blocks above already; the panel pulls one only when asked.
         autoPullReady={false}
         value={drafts}

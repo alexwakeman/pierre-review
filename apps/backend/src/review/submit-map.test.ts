@@ -32,6 +32,19 @@ const payload = (over: Partial<SubmitReviewPayload> = {}): SubmitReviewPayload =
 });
 
 describe('mapSubmittedReview', () => {
+  it('drops a praise finding that arrives anyway (the schema no longer offers it)', () => {
+    const base = payload();
+    const withPraise = {
+      ...base,
+      findings: [
+        ...base.findings,
+        { path: 'src/foo.ts', severity: 'praise', title: 'nice', body: 'b' },
+      ],
+    } as unknown as SubmitReviewPayload;
+    const out = mapSubmittedReview(withPraise, DIFF);
+    expect(out.findings.map((f) => f.title)).toEqual(['anchored', 'off the diff', 'outside', 'left']);
+  });
+
   it('anchors exactly as the old inline loop did', () => {
     const out = mapSubmittedReview(payload(), DIFF);
     const index = buildAnchorIndex(DIFF);

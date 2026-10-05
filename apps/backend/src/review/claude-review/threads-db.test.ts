@@ -316,7 +316,7 @@ describe('getAutoReviewCandidates — re-review on new review comments', () => {
       limit: 50,
     }))!;
     const offered = new Map(res.reReview.map((r) => [r.prId, r]));
-    expect(offered.get(pr.human!)).toEqual({ prId: pr.human, headSha: 'head_human', commentsAtMs: AFTER, reason: 'comments' });
+    expect(offered.get(pr.human!)).toEqual({ prId: pr.human, headSha: 'head_human', commentsAtMs: AFTER, reason: 'comments', lastRunAtMs: null });
     expect(offered.get(pr.bot!)?.commentsAtMs).toBe(AFTER);
     expect(offered.get(pr['late-sync']!)?.commentsAtMs).toBe(BEFORE);
     expect(offered.get(pr['reply-to-own']!)?.commentsAtMs).toBe(AFTER + 60_000);
@@ -364,39 +364,36 @@ describe('getAutoReviewCandidates — only real reviewers re-trigger', () => {
   });
 });
 
-describe('getAutoReviewCandidates — the CI reading for the CI hold', () => {
-  it('reports running CI and the earliest observation of THIS head', async () => {
-    const prId = await seedPr('ci-pending');
+describe('getAutoReviewCandidates — the timing facts (no CI reading)', () => {
+  it('a moved head carries its PR’s latest run start/finish; a run in flight is never offered', async () => {
+    const moved = await seedPr('timing-moved');
+    const r1 = await run(moved, 'old_head', { createdAt: RUN });
     await db
-      .update(schema.pullRequests)
-      .set({ ciStatus: 'pending' })
-      .where(eqOp(schema.pullRequests.id, prId))
+      .update(schema.claudeReviews)
+      .set({ finishedAt: new Date(RUN + HOUR) })
+      .where(eqOp(schema.claudeReviews.id, r1))
       .execute();
-    for (const [headSha, at] of [
-      ['old_head', RUN - 5 * HOUR],
-      ['head_ci-pending', RUN],
-      ['head_ci-pending', RUN + HOUR],
-    ] as const) {
-      await db
-        .insert(schema.ciStatusEvents)
-        .values({ accountId: 1, repoId, prId, headSha, status: 'pending', observedAt: new Date(at) })
-        .execute();
-    }
+    // In flight, and the head moved past it: only the clock may start.
+    const flying = await seedPr('timing-flying');
+    await run(flying, 'old_head', { createdAt: RUN - HOUR });
+    await run(flying, 'older_head', { createdAt: RUN, status: 'running' });
+    // In flight AT the head: nothing at all.
+    const atHead = await seedPr('timing-at-head');
+    await run(atHead, 'old_head', { createdAt: RUN - HOUR });
+    await run(atHead, 'head_timing-at-head', { createdAt: RUN, status: 'queued' });
+
     const res = (await q.getAutoReviewCandidates(1, workspaceId, {
       openedSinceMs: FLOOR,
       dayStartMs: now - 24 * HOUR,
       limit: 100,
     }))!;
-    expect(res.prIds).toContain(prId);
-    expect(res.ci.find((c) => c.prId === prId)).toEqual({
-      prId,
-      headSha: 'head_ci-pending',
-      running: true,
-      headSeenAtMs: RUN,
-    });
-    // A PR with no CI reading: not running, never seen.
-    const human = res.ci.find((c) => c.prId === pr.human!);
-    expect(human).toMatchObject({ running: false, headSeenAtMs: null });
+    expect(res).not.toHaveProperty('ci');
+    const m = res.reReview.find((r) => r.prId === moved)!;
+    expect(m.reason).toBe('head');
+    expect(Math.abs(m.lastRunAtMs! - (RUN + HOUR))).toBeLessThan(1000);
+    expect(res.reReview.some((r) => r.prId === flying || r.prId === atHead)).toBe(false);
+    expect(res.inFlightMoved).toContainEqual({ prId: flying, headSha: 'head_timing-flying' });
+    expect(res.inFlightMoved.some((r) => r.prId === atHead)).toBe(false);
   });
 });
 

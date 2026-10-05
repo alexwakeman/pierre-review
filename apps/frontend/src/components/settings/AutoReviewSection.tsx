@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { AUTO_FIX_DAILY_CAP } from '@pierre-review/shared';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { AiAuthLine, AiRuntimeSetup } from '../AiSetup.js';
+import { InfoButton } from '../InfoModal.js';
 import {
   useSetWorkspaceAutoReview,
   useWorkspaceAutoReview,
@@ -22,6 +24,11 @@ import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
  * ⚠ While AI is not set up (no runtime, or no Claude credential) the sweeper queues nothing — a
  * failed run would use up the PR's one automatic review — so the section says so and offers the
  * same setup control as a Run button. The switch stays usable: turning it on early is fine.
+ *
+ * AUTO AI FIX is the second switch (`autoFixEnabled`, `workspaces.auto_fix_enabled`, migration
+ * 0083 / pg 0070) — ON by default. It only runs after an auto review of the reader's own PR, so
+ * it is DIMMED and inert while auto review is off; its value is kept, never cleared, so turning
+ * auto review back on restores it. One Save writes both.
  */
 export function AutoReviewSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
@@ -32,12 +39,17 @@ export function AutoReviewSection(): JSX.Element {
 
   const stored = settings.data?.autoReview ?? null;
   const storedOn = stored?.enabled === true;
+  const storedFix = stored?.autoFixEnabled !== false;
   const [on, setOn] = useState(storedOn);
+  const [fixOn, setFixOn] = useState(storedFix);
   // Re-seed on the stored VALUE (not the response object — a background refetch hands back a new
   // identity and would undo a half-made edit).
   useEffect(() => {
     setOn(storedOn);
   }, [workspaceId, storedOn]);
+  useEffect(() => {
+    setFixOn(storedFix);
+  }, [workspaceId, storedFix]);
 
   if (workspaceId == null || settings.data == null) {
     return <ScopePendingSection title="Auto Claude review" failed={settings.isError} />;
@@ -67,6 +79,37 @@ export function AutoReviewSection(): JSX.Element {
           </span>
         </span>
       </label>
+      <div className={`flex items-start gap-1 pl-5 text-xs ${on ? '' : 'opacity-60'}`}>
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={fixOn}
+            disabled={!on}
+            onChange={(e) => setFixOn(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium text-gray-700 dark:text-gray-200">
+              Auto AI Fix on your own PRs
+            </span>
+            <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+              {on
+                ? 'After an auto review of a PR you opened, prepare a fix. Nothing is pushed.'
+                : 'Runs only after an auto review, so it is off while auto review is off.'}
+            </span>
+          </span>
+        </label>
+        <InfoButton title="Auto AI Fix">
+          <p>
+            When an auto review of a PR you opened finishes, Limn prepares one AI Fix from that
+            review. It never pushes: the fix waits in the AI Fix tab until you press Push.
+          </p>
+          <p>
+            Other people’s PRs are never fixed automatically. At most {AUTO_FIX_DAILY_CAP} auto fixes per PR a day,
+            and none while a fix is running or waiting to be pushed.
+          </p>
+        </InfoButton>
+      </div>
       {!aiReady && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
           <span>Nothing is reviewed until AI is set up.</span>
@@ -79,9 +122,9 @@ export function AutoReviewSection(): JSX.Element {
         </p>
       )}
       <SaveButton
-        dirty={on !== storedOn}
+        dirty={on !== storedOn || fixOn !== storedFix}
         saving={update.isPending}
-        onClick={() => update.mutate({ enabled: on })}
+        onClick={() => update.mutate({ enabled: on, autoFixEnabled: fixOn })}
       />
       {update.isError && (
         <div className="text-xs text-red-500">

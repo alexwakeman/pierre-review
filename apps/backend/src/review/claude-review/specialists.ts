@@ -184,7 +184,7 @@ ${list}
 - Submit their findings yourself in submit_review, with 'lens' set to the specialist's name. Leave 'lens' out for your own general findings.
 
 # Design comments
-A deep review always includes design comments: at least one finding with lens 'design' about the change as a whole — where the code lives, who owns what, coupling, and fit with the codebase's existing patterns. Anchor it to the file that shows it best and leave out 'line' when it is about the file or the change as a whole. When the design is sound, make it a short 'praise' finding. Line-level findings are still required as usual.`;
+A deep review always looks at the design of the change as a whole — where the code lives, who owns what, coupling, and fit with the codebase's existing patterns. Report each design problem as a finding with lens 'design'. Anchor it to the file that shows it best and leave out 'line' when it is about the file or the change as a whole. When the design is sound, submit no design finding: say so in the summary's "Good:" line instead. Line-level findings are still required as usual.`;
 }
 
 // ---- The dispatch guard (wired as a PreToolUse hook in agent.ts) ----

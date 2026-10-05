@@ -11,6 +11,7 @@ import {
 // AI Fix pill. Pure, so they are tested without a DOM.
 
 export const AUTO_REVIEW_WAITING_LABEL: Record<ClaudeAutoReviewWaiting, string> = {
+  // Never produced any more (auto review no longer waits for CI); kept while the shared type has it.
   ci: 'Auto review waiting for CI',
   comments: 'Auto review waiting for comments to settle',
   commits: 'Auto review waiting for pushes to settle',
@@ -24,6 +25,7 @@ const SKIP_TEXT: Record<ClaudeAutoFixSkipReason, string> = {
   already_tried: 'the last auto fix could not address these items',
   head_moved: 'the PR has new commits since this review',
   not_started: 'the fixer could not start',
+  off: 'auto AI Fix is off for this workspace',
 };
 
 /** One line for the Claude Review tab, or null when there is nothing to say. */

@@ -181,6 +181,8 @@ beforeAll(async () => {
       finding('warning', { lens: 'security' }),
       finding('nit'),
       finding('question', { lens: 'not-a-lens' }),
+      // An older run's stored praise: HIDDEN from every figure (no count, lens or posted), never deleted.
+      finding('praise', { lens: 'design', postedAt: new Date() }),
     ])
     .execute();
   await db

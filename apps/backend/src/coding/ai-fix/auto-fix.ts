@@ -6,6 +6,9 @@
 //   0. the PR's author IS the account's own GitHub user (pull_requests.author_id → users.github_login
 //      vs accounts.github_login, case-insensitive). Anyone else's PR: nothing happens and nothing is
 //      recorded — fixing someone else's branch is never automatic;
+//   ½. `off`             — auto AI Fix is switched off for the workspace holding the PR's repo
+//                          (`workspaces.auto_fix_enabled`, migration 0083 / pg 0070, Settings →
+//                          Auto review). ON by default; a repo with no membership row reads ON;
 //   1. `nothing_to_fix`  — the review's seed is empty (the same refusal as the button's NothingToFix);
 //   2. `head_moved`      — the PR's synced head is no longer the reviewed one (the next review decides);
 //   3. `fix_in_progress` — a fix for this PR (auto or manual) is queued or running;
@@ -42,6 +45,7 @@ import type { AgentContext } from '../../review/agent-context.js';
 import { isFixRunning, loadReviewSeed, startReviewFix } from './manager.js';
 import { parseChangeReport, parseReviewItems } from './persist.js';
 import { getFixPrContext } from './pr-context.js';
+import { readWorkspaceAutoFixForPr } from '../../review/claude-review/auto-settings.js';
 
 // At most AUTO_FIX_DAILY_CAP (shared) AUTO fixes per PR in any rolling AUTO_FIX_WINDOW_MS.
 export { AUTO_FIX_DAILY_CAP };
@@ -167,6 +171,7 @@ export async function maybeStartAutoFix(
   };
   try {
     if (!(await prAuthorIsAccount(ctx, accountId, prId))) return { status: 'not_own' };
+    if (!(await readWorkspaceAutoFixForPr(ctx, accountId, prId))) return skip('off');
 
     const loaded = await deps.loadReviewSeed(ctx, { accountId, prId, reviewId });
     if (!loaded) return skip('not_started');

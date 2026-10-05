@@ -1,12 +1,11 @@
 import type { MouseEvent, ReactNode } from 'react';
-import type { ClaudeReviewPrState } from '@pierre-review/shared';
+import type { CiReviewState, ClaudeReviewPrState } from '@pierre-review/shared';
 import {
   isAutoReviewHoldError,
   useClaudeReviewStarting,
   useStartReviewFromList,
 } from '../../hooks/useClaudeReview.js';
 import {
-  ciDiagnosisLabel,
   findingTotal,
   followUpTally,
   heldByAutoReview,
@@ -25,6 +24,8 @@ import {
   VERDICT_CLASS,
 } from '../../lib/claudeReviewFollowUp.js';
 import { AUTO_REVIEW_LABEL } from './pendingLabels.js';
+import { ReviewedAgo } from '../ReviewedAgo.js';
+import { ciCardPill } from '../../lib/ciReview.js';
 import { fixPillLabel } from '../../lib/claudeAutoReview.js';
 import { unlockReviewSound } from '../../lib/sound.js';
 import type { CardTicketPill, CoverageTone } from '../../lib/ticketReview.js';
@@ -39,7 +40,8 @@ import { CheckIcon, SparkleIcon, WarningIcon } from '../Icons.js';
 // Reading order, left to right, most important first:
 //   "Claude" · the outcome (verdict / in flight / not reviewed, auto mark, on the latest commit or
 //   how far behind) ·
-//   findings by severity · CI failures explained · reviewer threads to fix · the PR's tickets (the
+//   findings by severity · reviewer threads to fix · CI failures explained (the CI REVIEW's state —
+//   its own run, from the list's ONE batched CI states answer) · the PR's tickets (the
 //   TICKET review's coverage, from the board's ONE batched states answer) ·
 //   the previous review's findings · posted + design (muted) … right: AI Fix state + the action.
 // Every figure comes from the server's `summary`, present only on a finished run — nothing here
@@ -96,9 +98,12 @@ export function ClaudeReviewPanel({
   onOpenReview,
   onOpenFix,
   ticketPills = [],
+  ciState,
 }: {
   prId: number;
   state: ClaudeReviewPrState | undefined;
+  // The CI review's state for this PR: "2 CI failures explained" while current, "Checking CI…".
+  ciState?: CiReviewState;
   onOpenReview: () => void;
   onOpenFix: () => void;
   // The ticket review's reading of this PR's tickets ("BMD-1 · 4 of 6 met"); [] = none to show.
@@ -206,6 +211,7 @@ export function ClaudeReviewPanel({
               {currency.label}
             </span>
           )}
+          <ReviewedAgo at={state?.finishedAt} />
         </>
       );
       action = cell.headMoved ? (
@@ -234,7 +240,7 @@ export function ClaudeReviewPanel({
   const total = summary != null ? findingTotal(summary) : 0;
   const design = summary?.lenses.design ?? 0;
   const tally = summary != null ? followUpTally(summary.followUp) : null;
-  const ciLabel = summary != null ? ciDiagnosisLabel(summary.ci) : null;
+  const ciPill = ciCardPill(ciState);
   const toFix = summary != null ? threadsToFixLabel(summary) : null;
   const posted =
     summary == null
@@ -277,11 +283,6 @@ export function ClaudeReviewPanel({
                 No issues
               </span>
             )}
-            {ciLabel != null && (
-              <span className={`${PILL} ${OUTDATED_CLASS}`} title="Failing checks on the reviewed commit">
-                {ciLabel}
-              </span>
-            )}
             {toFix != null && (
               <span
                 className={`${PILL} ${OUTDATED_CLASS}`}
@@ -290,6 +291,23 @@ export function ClaudeReviewPanel({
                 {toFix}
               </span>
             )}
+          </Group>
+        </>
+      )}
+
+      {ciPill != null && (
+        <>
+          <Rule />
+          <Group>
+            <span
+              className={ciPill.running ? GREY_PILL : `${PILL} ${OUTDATED_CLASS}`}
+              title="Claude's check of the failing CI on the PR's latest commit"
+            >
+              {ciPill.running && (
+                <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ai-signal-fill" />
+              )}
+              {ciPill.label}
+            </span>
           </Group>
         </>
       )}

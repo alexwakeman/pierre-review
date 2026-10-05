@@ -167,7 +167,9 @@ describe('ticket + follow-up persistence', () => {
       ]),
     );
     const firstReview = (await persist.getClaudeReviewById(ctx, first, 1))!;
-    const [kept, , toIgnore, posted] = firstReview.findings;
+    // The stored praise row (an older run's) is HIDDEN on read, never deleted.
+    expect(firstReview.findings.map((f) => f.title)).toEqual(['kept', 'to ignore', 'ignored but posted']);
+    const [kept, toIgnore, posted] = firstReview.findings;
     await persist.updateFinding(ctx, toIgnore!.id, { included: false, editedBody: 'unused' });
     await persist.updateFinding(ctx, posted!.id, { included: false, editedBody: 'My wording.' });
     await persist.markFindingPosted(ctx, posted!.id, 'c1', 'inline');

@@ -45,6 +45,21 @@ export function storyTabLabel(drafts: readonly TicketDraft[], i: number): string
 export const clampTab = (selected: number, length: number): number =>
   length === 0 ? 0 : Math.min(Math.max(selected, 0), length - 1);
 
+/**
+ * "+ Add story" on the closed panel: reveal it with a blank story to type into, or with the stories
+ * the reader already has this session. The same array when nothing needs adding.
+ */
+export function storiesOnOpen(drafts: TicketDraft[]): TicketDraft[] {
+  return drafts.length === 0 ? [{ ...EMPTY_TICKET_DRAFT }] : drafts;
+}
+
+/** Close: blank typed tabs go (they carry nothing); every story with content stays for next time.
+ *  The same array when nothing is dropped. */
+export function storiesOnClose(drafts: TicketDraft[]): TicketDraft[] {
+  const kept = drafts.filter((d) => isJiraDraft(d) || ticketDraftHasContent(d));
+  return kept.length === drafts.length ? drafts : kept;
+}
+
 /** A new blank typed story at the end, selected. null at the cap (the Add control is hidden). */
 export function addStoryTab(
   drafts: readonly TicketDraft[],
