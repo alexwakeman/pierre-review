@@ -6,7 +6,6 @@
 // state or items, which never invent a cause; nothing here decides whether a run is current.
 import {
   CI_REVIEW_STATES_MAX,
-  type CiReview,
   type CiReviewCounts,
   type CiReviewProgress,
   type CiReviewRefusal,
@@ -141,24 +140,39 @@ export function ciProgressPct(p: CiReviewProgress | null | undefined): number | 
 }
 
 /**
+ * ONLY THE PR'S CURRENT HEAD. A CI diagnosis of an earlier commit describes CI the PR no longer has:
+ * once the head is green it is noise, and while the head is red it is the wrong commit's story. So a
+ * run (a CI review, or an older code review's stored CI diagnosis) shows only when it read the PR's
+ * current head. An unknown head (`prHeadSha` null) hides nothing — there is nothing to compare.
+ */
+export function ciRunAtCurrentHead(
+  runHeadSha: string | null | undefined,
+  prHeadSha: string | null | undefined,
+): boolean {
+  if (prHeadSha == null || prHeadSha === '') return true;
+  return runHeadSha === prHeadSha;
+}
+
+/**
  * What the section shows:
- *   ci      — a CI review (the latest SUCCEEDED run, or a refusal / failure / run in flight)
- *   legacy  — no CI review exists, but an older CODE review diagnosed CI: shown as history
+ *   ci      — a CI review at the current head (its latest succeeded run, a refusal, a failure, or a
+ *             run in flight)
+ *   legacy  — no such CI review, but an older CODE review of the current head diagnosed CI: history
  *   offer   — nothing yet, and CI is failing on the PR: just the Check CI button
- *   hidden  — nothing to say (no CI review, no history, CI not failing)
+ *   hidden  — nothing to say (nothing at the current head, CI not failing)
+ * The caller filters to the current head first (`ciRunAtCurrentHead`).
  */
 export type CiSectionShow = 'ci' | 'legacy' | 'offer' | 'hidden';
 
 export function ciSectionShow(input: {
-  review: Pick<CiReview, 'id'> | null | undefined;
-  state: Pick<CiReviewState, 'status' | 'latestRunId' | 'runningRunId'> | null | undefined;
+  // Something at the current head to show: a succeeded run, a refusal or a failed run.
+  hasCurrentRun: boolean;
+  running: boolean;
   legacyFailures: readonly ClaudeCiFailure[] | null | undefined;
   prCiStatus: CiStatus | null | undefined;
 }): CiSectionShow {
-  const { review, state, legacyFailures, prCiStatus } = input;
-  if (review != null || state?.latestRunId != null || state?.runningRunId != null || state?.status === 'running') {
-    return 'ci';
-  }
+  const { hasCurrentRun, running, legacyFailures, prCiStatus } = input;
+  if (hasCurrentRun || running) return 'ci';
   if (legacyFailures != null && legacyFailures.length > 0) return 'legacy';
   if (prCiStatus === 'failure') return 'offer';
   return 'hidden';

@@ -170,6 +170,12 @@ beforeAll(async () => {
     .returning()
     .execute();
   repoId = repo.id;
+  // Auto AI Fix is OFF by default (0084): the gate tests below run in a workspace switched on.
+  const q = await import('../../db/queries.js');
+  const wsOn = await q.ensureDefaultWorkspace(1);
+  await db.insert(schema.workspaceRepos).values({ accountId: 1, workspaceId: wsOn, repoId }).execute();
+  const { eq } = await import('drizzle-orm');
+  await db.update(schema.workspaces).set({ autoFixEnabled: true }).where(eq(schema.workspaces.id, wsOn)).execute();
 });
 
 afterAll(async () => {
@@ -212,7 +218,7 @@ describe('maybeStartAutoFix — the author gate', () => {
 });
 
 describe('maybeStartAutoFix — the workspace switch', () => {
-  it('⚠ default ON; switched off ⇒ skipped "off", seed never loaded; back on ⇒ starts', async () => {
+  it('⚠ default OFF for a new workspace; switched off ⇒ skipped "off", seed never loaded; back on ⇒ starts', async () => {
     const q = await import('../../db/queries.js');
     const wsId = await q.ensureDefaultWorkspace(1);
     const [r] = await db
@@ -247,7 +253,10 @@ describe('maybeStartAutoFix — the workspace switch', () => {
     const ws = schema.workspaces;
     const { eq } = await import('drizzle-orm');
     const [row] = await db.select({ on: ws.autoFixEnabled }).from(ws).where(eq(ws.id, wsId)).execute();
-    expect(row.on).toBe(true); // the column default
+    expect(row.on).toBe(true); // switched on in beforeAll
+    const fresh = await q.createWorkspace(1, 'fresh-ws');
+    const [freshRow] = await db.select({ on: ws.autoFixEnabled }).from(ws).where(eq(ws.id, fresh.id)).execute();
+    expect(freshRow.on).toBe(false); // a new workspace starts OFF (0084)
 
     await db.update(ws).set({ autoFixEnabled: false }).where(eq(ws.id, wsId)).execute();
     const before = loadInputs.length;

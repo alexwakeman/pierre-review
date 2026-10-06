@@ -164,6 +164,12 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .delete(schema.ticketReviews)
       .where(eq(schema.ticketReviews.accountId, accountId))
       .execute();
+    // Ticket review contribution cards (migration 0086 / pg 0073): model text describing the user's
+    // PRs. The repo loop has normally taken them with their PRs; explicit, like every agentic table.
+    await tx
+      .delete(schema.ticketReviewPrCards)
+      .where(eq(schema.ticketReviewPrCards.accountId, accountId))
+      .execute();
     // CI reviews (migration 0082 / pg 0069), items first. The repo loop has normally taken them with
     // their PRs; explicit, like every agentic table.
     await tx
@@ -259,6 +265,12 @@ export function accountScopedTables(): {
       name: 'ticketReviewItems',
       col: schema.ticketReviewItems.accountId,
       table: schema.ticketReviewItems,
+    },
+    // Contribution cards (migration 0086 / pg 0073) — one per (PR, head); erased explicitly above.
+    {
+      name: 'ticketReviewPrCards',
+      col: schema.ticketReviewPrCards.accountId,
+      table: schema.ticketReviewPrCards,
     },
     // CI reviews (migration 0082 / pg 0069) — the runs and their per-check items. Both carry their
     // own accountId; both are erased explicitly above.

@@ -16,6 +16,9 @@ import { usePrLiveRefresh } from '../hooks/usePrLiveRefresh.js';
 import { usePrArmedIntent } from '../hooks/useAutoMerge.js';
 import { useMe } from '../hooks/useTriage.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
+import { useClaudeReviewTabPill } from '../hooks/useClaudeReview.js';
+import { SEVERITY_CLASS, VERDICT_CLASS } from '../lib/claudeReviewFollowUp.js';
+import type { ReviewTabPill } from '../lib/claudeReviewColumn.js';
 import { AiCloudNote } from './AiSetup.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
@@ -49,6 +52,7 @@ import {
   TimerIcon,
   WarningIcon,
 } from './Icons.js';
+import { VerdictIcon } from './VerdictIcon.js';
 import { ThreadList } from './ThreadList/index.js';
 import { BotTriageCard } from './BotTriageCard.js';
 import { LargePrFlag } from './Activity/LargePrFlag.js';
@@ -119,6 +123,30 @@ const TAB_LABELS: Record<Tab, string> = {
   claude_review: 'Claude Review',
   ai_fix: 'AI Analysis and Fix',
 };
+
+// The Claude Review tab label's outcome pill: the verdict in its VERDICT_CLASS colour, or the run
+// in flight / failed. 11px, the label floor.
+const TAB_PILL = 'ml-1.5 inline-flex items-center gap-1 rounded px-1.5 py-px text-[11px] font-medium';
+function ReviewTabOutcome({ pill }: { pill: ReviewTabPill }): JSX.Element {
+  const tone =
+    pill.kind === 'verdict'
+      ? VERDICT_CLASS[pill.verdict]
+      : pill.kind === 'failed'
+        ? SEVERITY_CLASS.blocker
+        : pill.kind === 'running'
+          ? 'bg-ai-signal/10 text-ai-signal'
+          : 'bg-gray-500/10 text-gray-600 dark:text-gray-300';
+  return (
+    <span className={`${TAB_PILL} ${tone}`}>
+      {pill.kind === 'running' && (
+        <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ai-signal-fill" />
+      )}
+      {pill.kind === 'verdict' && <VerdictIcon verdict={pill.verdict} size={11} />}
+      {pill.kind === 'failed' && <WarningIcon size={11} aria-hidden />}
+      {pill.label}
+    </span>
+  );
+}
 
 interface ActivityRow {
   key: string;
@@ -699,6 +727,8 @@ export function PrDetail({
   // always list; a missing runtime or credential is handled INSIDE the tab, in place of Run.
   const aiEnabled = useAiCapabilities().enabled;
   const claudeReviewEnabled = aiEnabled;
+  // The review's outcome on the tab label ("Claude Review [Approve]"): the tab's own cached read.
+  const reviewPill = useClaudeReviewTabPill(prId, claudeReviewEnabled);
   const aiFixTabEnabled = aiEnabled;
   // The inner tab is STORE state, paired with the PR it belongs to (see `prDetailTab`), so the
   // URL can name it. Read through the pair — a tab seated for ANOTHER PR is not ours, exactly
@@ -1380,6 +1410,7 @@ export function PrDetail({
                   {pr.changedFilesCount}
                 </span>
               )}
+              {t === 'claude_review' && reviewPill != null && <ReviewTabOutcome pill={reviewPill} />}
               {t === 'bot_activity' && botTtfrAnomalies > 0 && (
                 <span
                   className="ml-1 text-red-500"

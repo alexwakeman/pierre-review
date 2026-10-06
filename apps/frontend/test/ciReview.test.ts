@@ -20,6 +20,7 @@ import {
   ciCurrency,
   ciProgressPct,
   ciRefusalSentence,
+  ciRunAtCurrentHead,
   ciSectionShow,
   ciStatesRequestIds,
 } from '../src/lib/ciReview.js';
@@ -102,15 +103,32 @@ describe('the section', () => {
     expect(ciProgressPct({ phase: 'saving' })).toBe(95);
   });
   it('what shows: the CI review, else old history, else an offer on red CI, else nothing', () => {
-    const none = state({ status: 'none', latestRunId: null, counts: null });
-    expect(ciSectionShow({ review: { id: 1 }, state: none, legacyFailures: null, prCiStatus: 'success' })).toBe('ci');
-    expect(ciSectionShow({ review: null, state: { ...none, status: 'running', runningRunId: 4 }, legacyFailures: null, prCiStatus: null })).toBe('ci');
+    expect(ciSectionShow({ hasCurrentRun: true, running: false, legacyFailures: null, prCiStatus: 'success' })).toBe('ci');
+    expect(ciSectionShow({ hasCurrentRun: false, running: true, legacyFailures: null, prCiStatus: null })).toBe('ci');
     const legacy = [{ checkName: 'x' }] as never;
     // A CI review beats history: the old diagnosis shows only when no CI review exists.
-    expect(ciSectionShow({ review: { id: 1 }, state: none, legacyFailures: legacy, prCiStatus: 'failure' })).toBe('ci');
-    expect(ciSectionShow({ review: null, state: none, legacyFailures: legacy, prCiStatus: 'failure' })).toBe('legacy');
-    expect(ciSectionShow({ review: null, state: none, legacyFailures: [], prCiStatus: 'failure' })).toBe('offer');
-    expect(ciSectionShow({ review: null, state: none, legacyFailures: null, prCiStatus: 'success' })).toBe('hidden');
+    expect(ciSectionShow({ hasCurrentRun: true, running: false, legacyFailures: legacy, prCiStatus: 'failure' })).toBe('ci');
+    expect(ciSectionShow({ hasCurrentRun: false, running: false, legacyFailures: legacy, prCiStatus: 'failure' })).toBe('legacy');
+    expect(ciSectionShow({ hasCurrentRun: false, running: false, legacyFailures: [], prCiStatus: 'failure' })).toBe('offer');
+    expect(ciSectionShow({ hasCurrentRun: false, running: false, legacyFailures: null, prCiStatus: 'success' })).toBe('hidden');
+  });
+  it('only the current head: a run of an earlier commit never shows', () => {
+    const head = 'b'.repeat(40);
+    expect(ciRunAtCurrentHead(head, head)).toBe(true);
+    expect(ciRunAtCurrentHead('a'.repeat(40), head)).toBe(false);
+    expect(ciRunAtCurrentHead(null, head)).toBe(false);
+    // An unknown PR head hides nothing.
+    expect(ciRunAtCurrentHead('a'.repeat(40), null)).toBe(true);
+    // Green head + only an earlier commit's run: nothing to say.
+    const old = ciRunAtCurrentHead('a'.repeat(40), head);
+    expect(ciSectionShow({ hasCurrentRun: old, running: false, legacyFailures: null, prCiStatus: 'success' })).toBe('hidden');
+    // Red head + only an earlier commit's run: just the offer, never the old diagnosis.
+    expect(ciSectionShow({ hasCurrentRun: old, running: false, legacyFailures: null, prCiStatus: 'failure' })).toBe('offer');
+  });
+  it('the section filters by head before deciding what shows', () => {
+    const src = code('components/CiCheckSection.tsx');
+    expect(src).toMatch(/ciRunAtCurrentHead\(shownAny\.headSha, pr\.headSha\)/);
+    expect(src).toMatch(/ciRunAtCurrentHead\(legacy\.headSha, pr\.headSha\)/);
   });
   it('the button', () => {
     expect(ciCheckButtonLabel(false, false)).toBe('Check CI');

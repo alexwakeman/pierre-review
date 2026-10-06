@@ -185,12 +185,33 @@ fixture tests (see Conventions).
   `model` is plain `text` with NO drizzle `enum:` in either schema, so a run from a retired model
   (the old Opus 4.8) reads back with its id intact; the offered list lives only in `packages/shared`
   `CLAUDE_REVIEW_MODELS`. Contracts: docs/CLAUDE-REVIEW.md.
+- **AUTO-POSTING columns** (migration `0087` / pg `0074`, all nullable, no defaults, no new table —
+  docs/CLAUDE-REVIEW.md § Auto-posting): `workspaces.autoPostEnabled` (NULL/false = OFF, for every
+  workspace until switched on) + `workspaces.autoPostSettings` (JSON `StoredAutoPostSettings`,
+  OVERRIDES ONLY — `{scope?, kinds?}`, folded by `resolveAutoPostSettings`; the ONE writer is
+  `setWorkspaceAutoReview`); `claudeReviews.autoPost` / `ticketReviews.autoPost` (JSON
+  `ClaudeAutoPostRecord` / `TicketAutoPostRecord` — what auto-posting did with that run; written by a
+  compare-and-set from NULL BEFORE any GitHub call, so a run is claimed exactly once; a record left at
+  `posting` counts its ids as possibly posted for every later run; the ticket record also holds the
+  posted "Not asked for" entries, which have no item row); `claudeReviewFindings.postedAuto` /
+  `ticketReviewItems.postedAuto` (true = posted automatically — display only; a ticket item's flag is
+  carried with its inherited posting). A person's post never writes the flag.
 - **`claudeReviewChatMessages`** — the Claude Review CHAT (migration `0073` / pg `0060`): one row
   per message about ONE succeeded run, `role` `'user' | 'assistant'`, `findingId` NULL for the run's
   general thread or a finding OF THAT RUN. Carries `accountId`, with a composite FK
   `(reviewId, accountId) → claudeReviews(id, accountId)`. Assistant rows record `model`, `costUsd`
   and tokens. Never carried across runs. Joins BOTH delete paths, ahead of the findings it FKs.
   Contract: docs/CLAUDE-REVIEW.md § Chat about a review.
+- **`ticketReviewPrCards`** — ticket review CONTRIBUTION CARDS (migration `0086` / pg `0073`): one row
+  per `(accountId, prId, headSha)` (unique `trpc_account_pr_head_ux`, the `saveCards` upsert target —
+  a re-write of the same head REPLACES the card). `card` is JSON `StoredTicketPrCard`: the model-written,
+  verdict-free body (`summary`, `interfaces`, `criteria`, `looseEnds`) plus `changedFiles` (server-
+  written, storage only — not on the wire). `source` `'story_check' | 'prepass'`, `model` plain text,
+  `cost_usd` set only for a pre-pass card (a story-check card's cost is its run's). Currency is
+  `head_sha` = the PR's synced head (a merged PR's card holds for good); ⚠ it never enters the ticket
+  fingerprint. Tenancy: composite FK `trpc_pr_account_fk (pr_id, account_id) → pull_requests`. Joins BOTH
+  delete paths (via `db/ticket-review-prune.ts`), `eraseAccountData` and `accountScopedTables()`.
+  Contract: docs/CLAUDE-REVIEW.md § Ticket review.
 - **`autoMergeRequests`** — one standing "merge when ready" intent per `(accountId, prId)`
   (that pair is the unique/upsert target, so re-arming OVERWRITES — this is current state, not a
   log; disarm DELETEs rather than adding a "cancelled" state). Carries `mergeMethod`,
@@ -749,6 +770,7 @@ check every hit against its table's declared unique.**
 | `benchmark_contributions` | `[accountId, vendorKind, weekStart]` | the benchmark rollup (~13444) |
 | `ml_comment_labels` | `(account_id, target_kind, target_id)` (`mcl_account_target`) | `db/ml-labels.ts` (the enrichment worker's ONLY writer) |
 | `pr_mentions` | `(account_id, pr_id)` (`prm_account_pr`), `onConflictDoUpdate` (restamps `login`, `repo_id`, `mentioned_at`, `mentioned_by_user_id`) | `db/pr-mentions.ts` `syncAccountMentions` (the mention scanner's ONLY writer) |
+| `ticket_review_pr_cards` | `[accountId, prId, headSha]` (`trpc_account_pr_head_ux`), `onConflictDoUpdate` (replaces `card`, `source`, `model`, `cost_usd`, `created_at`) | `review/ticket-review/cards.ts` `saveCards` (the ONLY writer: pre-pass + story-check cards) |
 | `accounts` | the account uniques | `auth/account.ts` (`ensureLocalAccount`, `upsertCloudAccount`) |
 | `repos` head/trunk columns | `[accountId, githubNodeId]` / `branch_commits` composite | `sync/branch-status.ts`, `sync/sync-repo.ts` |
 

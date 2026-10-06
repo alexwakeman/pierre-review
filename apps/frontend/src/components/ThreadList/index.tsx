@@ -123,6 +123,24 @@ export function ThreadList({
   const resolveBotThreads = useResolveBotThreads();
   const [confirming, setConfirming] = useState(false);
 
+  // Resolved threads the reader has opened, by thread id. LOCAL to this PR view on purpose — not
+  // the store, not remembered across PRs. Reset when the PR changes so a reused mount (tab switch
+  // between PR views) starts every resolved thread collapsed again.
+  const [expandedResolved, setExpandedResolved] = useState<ReadonlySet<number>>(
+    () => new Set<number>(),
+  );
+  useEffect(() => {
+    setExpandedResolved(new Set<number>());
+  }, [prId]);
+  const toggleResolved = useCallback((threadId: number): void => {
+    setExpandedResolved((cur) => {
+      const next = new Set(cur);
+      if (next.has(threadId)) next.delete(threadId);
+      else next.add(threadId);
+      return next;
+    });
+  }, []);
+
   // Cross-bot dedup: (path, ±3-line) spots where ≥2 DISTINCT automated reviewers both left a
   // thread — the backend clusters + flags consensus/conflict; we surface a compact rollup so
   // the reader sees "CodeRabbit + Copilot both flagged line 42" without scanning the whole
@@ -521,6 +539,8 @@ export function ThreadList({
               else rowRefs.current.delete(id);
             }}
             openInChangesFor={openInChangesFor}
+            expandedResolved={expandedResolved}
+            onToggleResolved={toggleResolved}
           />
         ))
       )}

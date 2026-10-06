@@ -498,6 +498,34 @@
       "when": 1790665200000,
       "tag": "0070_workspace_auto_fix",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1790751600000,
+      "tag": "0071_auto_fix_off_by_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1790838000000,
+      "tag": "0072_auto_review_daily_cap",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1790841600000,
+      "tag": "0073_ticket_review_pr_cards",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1790928000000,
+      "tag": "0074_auto_post",
+      "breakpoints": true
     }
   ]
 }

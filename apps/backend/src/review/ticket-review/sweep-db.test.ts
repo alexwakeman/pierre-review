@@ -5,7 +5,7 @@
 //   2. A re-run waits for the settle (5 minutes quiet), then queues as 'cascade'.
 //   3. ⚠ The per-workspace daily cap counts cascade runs (rows written when queued).
 //   4. A FIRST automatic run needs a member opened after the switch-on, or the kick.
-//   5. ⚠ More than TICKET_REVIEW_MAX_PRS members refuses `too_many_prs` with the count.
+//   5. ⚠ More than TICKET_REVIEW_MAX_PRS (30) members refuses `too_many_prs` with the count; 30 runs.
 //   6. ⚠ A ticket whose run is queued or running WAITS (a member that moves meanwhile is re-judged
 //      once the run ends), and a full lane keeps EVERY unreached candidate waiting.
 //   8. ⚠ NO CI hold: a member's running CI never delays a re-run.
@@ -14,7 +14,7 @@
 //   pnpm --filter @pierre-review/backend test ticket-review/sweep-db
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ClaudeReviewTicket } from '@pierre-review/shared';
+import { TICKET_REVIEW_MAX_PRS, type ClaudeReviewTicket } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
 const DB_PATH = '/tmp/pierre-ticket-review-sweep-db.sqlite';
@@ -43,6 +43,7 @@ const T2 = 'jira:https://acme.atlassian.net/rest/api/3#BMD-2';
 const T3 = 'jira:https://acme.atlassian.net/rest/api/3#BMD-3';
 const T4 = 'jira:https://acme.atlassian.net/rest/api/3#BMD-4';
 const BIG = 'jira:https://acme.atlassian.net/rest/api/3#BMD-9';
+const AT_CAP = 'jira:https://acme.atlassian.net/rest/api/3#BMD-30';
 const T5 = 'jira:https://acme.atlassian.net/rest/api/3#BMD-5';
 const T6 = 'jira:https://acme.atlassian.net/rest/api/3#BMD-6';
 const story = (key: string): ClaudeReviewTicket => ({
@@ -58,7 +59,9 @@ const membership: Record<string, string[]> = {
   [T2]: ['x'],
   [T3]: ['y', 'z'],
   [T4]: ['old'],
-  [BIG]: ['b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b9'],
+  // One more than the cap (TICKET_REVIEW_MAX_PRS, 30), and exactly the cap.
+  [BIG]: Array.from({ length: TICKET_REVIEW_MAX_PRS + 1 }, (_, i) => `b${i + 1}`),
+  [AT_CAP]: Array.from({ length: TICKET_REVIEW_MAX_PRS }, (_, i) => `b${i + 1}`),
 };
 const keyOf = (ident: string): string => ident.split('#')[1]!;
 
@@ -200,7 +203,7 @@ beforeAll(async () => {
   await addPr('y', repoIds[1]!, fresh);
   await addPr('z', repoIds[2]!, fresh);
   await addPr('old', repoIds[2]!, new Date(ENABLED_AT - 3_600_000));
-  for (let i = 1; i <= 9; i += 1) await addPr(`b${i}`, repoIds[3]!, new Date(ENABLED_AT - 3_600_000));
+  for (let i = 1; i <= TICKET_REVIEW_MAX_PRS + 1; i += 1) await addPr(`b${i}`, repoIds[3]!, new Date(ENABLED_AT - 3_600_000));
 
   const idOf = (tag: string): number => pr[tag]!;
   providers.registerAgenticProviders({
@@ -373,7 +376,14 @@ describe('ticket review sweep', () => {
 describe('member refusal', () => {
   it(`⚠ refuses too_many_prs with the count`, async () => {
     const r = await prep.resolveTicketInputs(ctx, 1, BIG, { originPrId: pr.b1!, manualTicket: null });
-    expect(r).toMatchObject({ ok: false, reason: 'too_many_prs', prCount: 9 });
+    expect(TICKET_REVIEW_MAX_PRS).toBe(30);
+    expect(r).toMatchObject({ ok: false, reason: 'too_many_prs', prCount: TICKET_REVIEW_MAX_PRS + 1 });
+  });
+
+  it('exactly TICKET_REVIEW_MAX_PRS members is accepted', async () => {
+    const r = await prep.resolveTicketInputs(ctx, 1, AT_CAP, { originPrId: pr.b1!, manualTicket: null });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.members).toHaveLength(TICKET_REVIEW_MAX_PRS);
   });
 
   it('a pasted story is a one-member ticket; no story refuses no_ticket', async () => {

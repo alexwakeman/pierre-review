@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ClaudeFinding } from '@pierre-review/shared';
 import {
+  copyFindingsLabel,
   copyableFindings,
   findingMarkdownBlock,
   findingsMarkdown,
@@ -107,6 +108,22 @@ describe('findingsMarkdown', () => {
 
   it('is empty when nothing is copyable', () => {
     expect(findingsMarkdown([finding({ included: false })], true)).toBe('');
+  });
+});
+
+describe('copyFindingsLabel', () => {
+  it('"Copy all" only when nothing is ignored, else the count; nothing at 0', () => {
+    expect(copyFindingsLabel(5, 5)).toBe('Copy all');
+    expect(copyFindingsLabel(4, 5)).toBe('Copy 4');
+    expect(copyFindingsLabel(1, 5)).toBe('Copy 1');
+    expect(copyFindingsLabel(0, 5)).toBeNull();
+    expect(copyFindingsLabel(0, 0)).toBeNull();
+  });
+  it('counts by the same ignore rule the copy uses', () => {
+    const fs = [finding(), finding({ included: false }), finding()];
+    expect(copyFindingsLabel(copyableFindings(fs, true).length, fs.length)).toBe('Copy 2');
+    // An older (read-only) run shows no Ignore state, so everything goes.
+    expect(copyFindingsLabel(copyableFindings(fs, false).length, fs.length)).toBe('Copy all');
   });
 });
 

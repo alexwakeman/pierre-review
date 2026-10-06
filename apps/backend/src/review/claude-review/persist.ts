@@ -21,6 +21,8 @@ import type {
   ClaudeReviewVerdict,
   ClaudeCiFailure,
   ClaudeCiFailuresRecord,
+  ClaudeAutoPostRecord,
+  ClaudeAutoPostWire,
   ClaudeThreadAssessment,
   ClaudeTicketAssessment,
   ReviewMode,
@@ -96,6 +98,8 @@ interface FindingRow {
   // A story finding's origin (migration 0079 / pg 0066): both set or both null.
   storyIndex?: number | null;
   storyRef?: string | null;
+  // Posted by auto-posting (migration 0087 / pg 0074).
+  postedAuto?: boolean | null;
 }
 
 // A story finding's origin off its row; null unless BOTH columns hold a value.
@@ -143,6 +147,22 @@ interface ReviewRow {
   commentsThrough?: Date | null;
   // The head's CI + each failing check, diagnosed (migration 0077 / pg 0064). null on older rows.
   ciFailures?: ClaudeCiFailuresRecord | null;
+  // What auto-posting did with this run (migration 0087 / pg 0074). null on every other row.
+  autoPost?: ClaudeAutoPostRecord | null;
+}
+
+/** The stored auto-post record → the wire (ids dropped). null for anything malformed. */
+export function autoPostWireOf(v: unknown): ClaudeAutoPostWire | null {
+  if (v == null || typeof v !== 'object') return null;
+  const r = v as Partial<ClaudeAutoPostRecord>;
+  if (typeof r.status !== 'string' || typeof r.at !== 'string') return null;
+  return {
+    status: r.status,
+    at: r.at,
+    reason: r.reason ?? null,
+    error: r.error ?? null,
+    postedCount: Array.isArray(r.postedFindingIds) ? r.postedFindingIds.length : 0,
+  };
 }
 
 // A stored CI record, or null for an older row / anything malformed (never a guessed shape).
@@ -189,6 +209,7 @@ function mapFinding(r: FindingRow): ClaudeFinding {
     postedAt: iso(r.postedAt),
     githubCommentId: r.githubCommentId,
     postedCommentKind: r.postedCommentKind,
+    postedAuto: r.postedAuto === true && r.postedAt != null,
     createdAt: isoReq(r.createdAt),
     priorFindingId: r.priorFindingId ?? null,
     lens: asLens(r.lens),
@@ -272,6 +293,7 @@ function mapReview(
       : null,
     // null = this run did not look at CI (older row, skip, not succeeded, checks unreadable).
     ...ciWireOf(r.ciFailures),
+    autoPost: autoPostWireOf(r.autoPost),
   };
 }
 
@@ -1423,22 +1445,25 @@ export async function markReviewPosted(
   postedReviewId: string,
   inlineFindingIds: number[],
   prComments: { findingId: number; commentId: string }[] = [],
+  opts: { auto?: boolean } = {},
 ): Promise<void> {
   const { cr, crf } = tables(ctx);
   const now = new Date();
+  // Only an auto post writes the flag; a person's post leaves it NULL.
+  const auto = opts.auto === true ? { postedAuto: true } : {};
   await ctx.runTransaction(async (tx) => {
     await tx.update(cr).set({ postedReviewId, postedAt: now }).where(eq(cr.id, id)).execute();
     if (inlineFindingIds.length > 0) {
       await tx
         .update(crf)
-        .set({ postedAt: now, postedCommentKind: 'inline' })
+        .set({ postedAt: now, postedCommentKind: 'inline', ...auto })
         .where(inArray(crf.id, inlineFindingIds))
         .execute();
     }
     for (const pc of prComments) {
       await tx
         .update(crf)
-        .set({ postedAt: now, githubCommentId: pc.commentId, postedCommentKind: 'pr_comment' })
+        .set({ postedAt: now, githubCommentId: pc.commentId, postedCommentKind: 'pr_comment', ...auto })
         .where(eq(crf.id, pc.findingId))
         .execute();
     }
@@ -1450,11 +1475,17 @@ export async function markFindingPosted(
   findingId: number,
   githubCommentId: string,
   kind: 'inline' | 'pr_comment' = 'inline',
+  opts: { auto?: boolean } = {},
 ): Promise<void> {
   const { crf } = tables(ctx);
   await ctx.db
     .update(crf)
-    .set({ postedAt: new Date(), githubCommentId, postedCommentKind: kind })
+    .set({
+      postedAt: new Date(),
+      githubCommentId,
+      postedCommentKind: kind,
+      ...(opts.auto === true ? { postedAuto: true } : {}),
+    })
     .where(eq(crf.id, findingId))
     .execute();
 }

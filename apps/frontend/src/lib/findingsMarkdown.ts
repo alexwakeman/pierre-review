@@ -52,3 +52,12 @@ export function findingMarkdownBlock(f: CopyableFinding): string {
 export function findingsMarkdown(findings: readonly CopyableFinding[], editable: boolean): string {
   return copyableFindings(findings, editable).map(findingMarkdownBlock).join('\n\n---\n\n');
 }
+
+/**
+ * The copy button's word, stating what it will copy: "Copy all" only when every finding on screen
+ * goes (nothing ignored), else "Copy 4". null at 0 — an offer to copy nothing is not shown.
+ */
+export function copyFindingsLabel(count: number, total: number): string | null {
+  if (count <= 0) return null;
+  return count >= total ? 'Copy all' : `Copy ${count}`;
+}

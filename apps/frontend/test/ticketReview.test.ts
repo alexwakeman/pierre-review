@@ -12,9 +12,13 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { TicketReviewItem, TicketReviewMember, TicketReviewState } from '@pierre-review/shared';
+import { TICKET_REVIEW_MAX_PRS, type TicketReviewItem, type TicketReviewMember, type TicketReviewState } from '@pierre-review/shared';
 import {
+  TICKET_PR_CARD_CHANGE_LABEL,
+  TICKET_PR_CARD_KIND_LABEL,
+  cardHasDetail,
   cardTicketPills,
+  membersWithCards,
   coverageLabel,
   coverageTone,
   deliveredByLabel,
@@ -191,8 +195,10 @@ describe('attribution and posting', () => {
   });
 
   it('refusals are one sentence with the count', () => {
-    expect(refusalSentence({ reason: 'too_many_prs', prCount: 12 })).toBe(
-      '12 PRs name this ticket. One check covers at most 8.',
+    // The cap is read from the shared constant (TICKET_REVIEW_MAX_PRS = 30), never retyped.
+    expect(TICKET_REVIEW_MAX_PRS).toBe(30);
+    expect(refusalSentence({ reason: 'too_many_prs', prCount: 40 })).toBe(
+      '40 PRs name this ticket. One check covers at most 30.',
     );
     expect(refusalSentence({ reason: 'no_members', prCount: null })).toMatch(/No open or merged PR/);
   });
@@ -259,5 +265,28 @@ describe('ticketCoverage with no acceptance criteria', () => {
       ticketCoverage(state({ status: 'current', counts: zero, latestRunId: 1, alignment: 'partly_aligned' })),
     ).toMatchObject({ label: 'Partly matches', tone: 'partial' });
     expect(ticketCoverage(state({ status: 'none', counts: null, latestRunId: null, alignment: null }))).toBeNull();
+  });
+});
+
+describe('contribution cards ("What this PR adds")', () => {
+  const card = {
+    headSha: 'abc',
+    source: 'prepass' as const,
+    createdAt: '2026-10-01T00:00:00Z',
+    summary: 'Adds export.',
+    interfaces: [{ kind: 'config' as const, name: 'EXPORT_ON', change: 'added' as const, note: null }],
+    criteria: [],
+    looseEnds: [],
+  };
+  it('lists only members with a card, in member order — a member with none shows nothing', () => {
+    const ms = [member(1, 'acme/api', 1, { card }), member(2, 'acme/web', 2), member(3, 'acme/web', 3, { card: null })];
+    expect(membersWithCards(ms).map((x) => x.member.prId)).toEqual([1]);
+    expect(membersWithCards([member(2, 'acme/web', 2)])).toEqual([]);
+  });
+  it('labels every kind and change in plain words', () => {
+    expect(TICKET_PR_CARD_KIND_LABEL.config).toBe('Setting');
+    expect(TICKET_PR_CARD_CHANGE_LABEL.removed).toBe('Removed');
+    expect(cardHasDetail(card)).toBe(true);
+    expect(cardHasDetail({ interfaces: [], looseEnds: [] })).toBe(false);
   });
 });

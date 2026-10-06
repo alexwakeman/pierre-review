@@ -58,6 +58,9 @@ import {
   type OpenPrsView,
 } from '../../lib/openPrsStacks.js';
 import { useOpenPrsView } from '../../store/openPrsView.js';
+import { useStackStoryCheck } from '../../store/stackStoryCheck.js';
+import { ReviewedAgo } from '../ReviewedAgo.js';
+import { StackStoryCheck } from './StackStoryCheck.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { ClaudeReviewPanel } from './ClaudeReviewCell.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
@@ -113,6 +116,9 @@ import {
 // "Merged (n)" panel lists every MERGED PR linked to the same ticket (any repo, same Jira site),
 // from ONE batched `GET /api/pro/ticket-merged-prs` for the whole board; it never makes a stack of
 // its own, and the header's "n PRs" stays the open count.
+// Between the header and the cards, a collapsed "Story check" panel (StackStoryCheck.tsx) holds the
+// ticket review's WHOLE story — read by `latestRunId` only once expanded; the header adds
+// "reviewed X ago" from the batched states. The PR pane shows only its own share and jumps here.
 
 // The chip classes and the CI chip are the shared card shell's (PrCardShell.tsx), so the Pending
 // board's cards wear the same chips.
@@ -419,6 +425,20 @@ export function OpenPrsCards({
     () => (stacked != null ? mergedByStack(stacked.stacks, mergedData) : new Map<string, TicketMergedPr[]>()),
     [stacked, mergedData],
   );
+  // "See the whole story in Open PRs" from a PR pane: once that ticket's stack is on the page,
+  // open its Story check panel and scroll to it (store/stackStoryCheck.ts). The store opens the
+  // panel; the jump helper expanded the stack before switching tabs.
+  const storyTarget = useStackStoryCheck((s) => s.target);
+  const takeStoryTarget = useStackStoryCheck((s) => s.takeTarget);
+  useEffect(() => {
+    if (storyTarget == null || !showStacks || stacked == null) return;
+    const hit = takeStoryTarget(stacked.stacks.map((st) => st.id));
+    if (hit == null) return;
+    useOpenPrsView.getState().expand(hit);
+    requestAnimationFrame(() => {
+      document.getElementById(stackDomId(hit))?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+  }, [storyTarget, showStacks, stacked, takeStoryTarget]);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const openMerged = (m: TicketMergedPr): void =>
     openPrDetailTab(
@@ -635,6 +655,7 @@ function StackCoverage({
           {currency.label}
         </span>
       )}
+      {state?.checkedAt != null && <ReviewedAgo at={state.checkedAt} className="text-[11px]" />}
       {ready && !running && (
         <button
           type="button"
@@ -791,6 +812,9 @@ function TicketStack({
           </span>
         </div>
       </div>
+      {t != null && review?.state != null && !collapsed && (
+        <StackStoryCheck stackId={stack.id} ticket={t} state={review.state} storyPrId={review.prId} />
+      )}
       <ul
         id={listId}
         aria-label={t != null ? `Pull requests for ${t.key}` : 'Pull requests with no ticket'}

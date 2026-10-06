@@ -641,7 +641,11 @@ Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix
   job now — docs/CLAUDE-REVIEW.md § CI review).
 - **Threads** — `ThreadList`/`ThreadView`: review threads grouped by file, **newest first**
   (files by most-recent thread; within a file by `createdAt` desc), with code anchors +
-  new-comment highlights; each has a "Show" link. A sticky header carries **derived-state filter
+  new-comment highlights; each has a "Show" link. **Collapse is per THREAD, never per file**: a
+  resolved thread is one line (line, author, first words, "Resolved") until clicked; every other
+  state stays open; the file header is a label only. The open set is LOCAL `ThreadList` state keyed
+  by thread id and reset on a PR change — the old global `expandedFileGroups`/`collapsedFileGroups`
+  slice (by path, across every PR) is DELETED. A selected thread is always open. A sticky header carries **derived-state filter
   pills** (Untouched/Replied/Likely-addressed/Resolved, `store.threadStateFilter: Set<DerivedState>`)
   ANDed with the vendor `threadBotFilter`; the pills' badge counts come from the full loaded set
   (stable), and the bulk "Resolve N addressed" set is derived from the full list (independent of
@@ -752,9 +756,8 @@ the header and the rail can never disagree about what "R" means.
   stored value, down to nothing; `clampPaneWidth` is the ONE place that decides, and on a
   container too narrow for both minimums the FLOOR wins (the rail overflows) rather than the
   bounds inverting. Keyboard: ←/→ (×4 with Shift), Home/End, Enter; double-click resets.
-- **Directory collapse is EPHEMERAL local state** in `FileTree`, deliberately not the global
-  `expandedFileGroups`/`collapsedFileGroups` slice — those are unkeyed by PR, and directory paths
-  collide across repos far more than file paths do. Default: everything open.
+- **Directory collapse is EPHEMERAL local state** in `FileTree`, never a global store slice — a
+  store slice is unkeyed by PR, and directory paths collide across repos. Default: everything open.
 - **The truncation disclosure lives INSIDE the tree** (the `note` prop: "Showing N of M files.
   All on GitHub ↗", rendered when `data.truncated`), because a tree implies a completeness a
   scrolling list does not. The pre-existing "Large diff — not all files are shown" line under the
@@ -1168,6 +1171,31 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
     "None of these"); a change invalidates `['ticket-reviews']` + the states so the block shows
     "Story edited since". "+ Add story" is only for pasting: a ticket already listed as a block is
     not offered as "Pull KEY from Jira".
+  - **THE WHOLE STORY LIVES ONCE, IN THE OPEN PRs STACK; the pane shows its own share.** The stack
+    header carries the coverage pill, "reviewed X ago" (`state.checkedAt`) and Re-check; below it a
+    "Story check" disclosure (`Activity/StackStoryCheck.tsx`), COLLAPSED by default (per-session
+    open set, `store/stackStoryCheck.ts`), whose body reads the run by the states' `latestRunId`
+    ONLY once expanded: summary, every criterion with "Done in api#88" / "Belongs in …", missing and
+    not-asked-for items, currency pill, the Story — and NO Post buttons (`viewedPrId: null` in the
+    shared `TicketReviewParts.tsx`). The pane's block goes SLIM where such a stack exists
+    (`slimStoryCheck`, `lib/ticketShare.ts`: a tracker ident, `issueLinks`, an open PR on the
+    ticket): alignment + currency + reviewed-ago + Re-check, then only `prTicketShare` — criteria
+    this PR delivers, unmet criteria / missing items owned by it (item `ownerPrId`, else
+    `expectedIn.prId`, else `expectedIn.repoId` against its repo; an item naming NO owner stays here,
+    since its Post lands on the viewed PR and the stack has none), its not-asked-for work — a count
+    of the rest (`shareRestLine`) and "See the whole story in Open PRs". ⚠ That link is a TRANSIENT
+    target (`showStoryInOpenPrs`: grouped view, stack expanded, Open PRs repo filter cleared, tab
+    shown); the list answers it ONCE when the stack is on the page (`takeTarget`, case-insensitive
+    on `ticket:<KEY>`) and it expires after `STORY_TARGET_TTL_MS` so a later visit never jumps. A
+    pasted `manual:` story keeps the full view in the pane.
+  - **"What this PR adds" — each member's CONTRIBUTION CARD** (`TicketReviewMember.card`, the card at
+    the PR's CURRENT synced head; docs/CLAUDE-REVIEW.md § Ticket review). The stack's body lists
+    "What each PR adds" (`MemberCards`): one collapsed `PrCardDisclosure` per member that HAS a card —
+    summary, interfaces (Added/Changed/Removed chip, kind word, the exact name, its note), loose ends.
+    The slim pane shows THIS PR's card only (`prCardOf`, `lib/ticketShare.ts`) above the rest line.
+    ⚠ A member with no card renders NOTHING (`membersWithCards` drops it) — never a placeholder claim.
+    Both ride the review already loaded: no request of their own, and the stack still fetches nothing
+    until expanded. Card text is model prose about untrusted input: PLAIN TEXT through `PrRefText`.
   - **Open PRs: a Jira ticket key opens a MODAL, not Jira** (`TicketKeyButton` → `TicketStoryModal`
     on the `InfoModal` shell): status, type, assignee, the story as markdown, "Open in Jira" inside.
     Mounted only while open, so the stored row is read on the click (any PR of the stack). ⚠ The
@@ -1219,9 +1247,13 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   Check CI / Re-check (mutation key `['ci-review-start', prId]`), SSE progress, the refusal sentence
   (`ciRefusalSentence`), the summary (markdown) and one plain-text `CiFailureRow` per failing check
   (cause, "Fix:" suggestion, Why, path links into Changes, the check's details page — never a log
-  URL). `ciSectionShow`: a CI review → it; else an older code review's stored `ciFailures` as
-  HISTORY ("From an earlier Claude review of abc1234"); else, on red CI, just the button; else
-  nothing. Open PRs and Pending read CI through ONE batched `POST /api/ci-reviews/states` per board.
+  URL). ⚠ **ONLY THE PR'S CURRENT HEAD** (`ciRunAtCurrentHead`): a CI review run — succeeded or
+  failed — or an old code review's `ciFailures` that read an EARLIER commit is never shown, whether
+  the head is green (noise) or red (the wrong commit's story; only the current head's run, else the
+  offer). An unknown `pr.headSha` hides nothing. The by-id read of the last succeeded run is skipped
+  when `state.headSha` is an earlier commit. `ciSectionShow`: a run at the current head → it; else
+  an older code review's stored `ciFailures` of THIS commit as HISTORY ("From an earlier Claude
+  review of this commit"); else, on red CI, just the button; else nothing. Open PRs and Pending read CI through ONE batched `POST /api/ci-reviews/states` per board.
 - **Praise is not a finding.** New reviews raise none (the summary carries one praise line,
   rendered as part of its markdown). An older run's stored praise is HIDDEN, never deleted:
   `withoutPraise` (`lib/claudeReviewFollowUp.ts`) is applied ONCE where `ClaudesReview` takes the
@@ -1236,7 +1268,21 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   Claude's original): this is a hand-off of what the reader decided to say. ⚠ **IGNORED IS THE CARD'S
   OWN RULE**, `isIgnoredFinding` = editable run && unposted && `!included` — a stored `included:
   false` on an older run or a posted finding shows no Ignore state, so it must not vanish from the
-  copy. Praise is excluded again in the lib. Absent (not disabled) when nothing is copyable.
+  copy. Praise is excluded again in the lib. Absent (not disabled) when nothing is copyable. ⚠ **The
+  label STATES THE COUNT** (`copyFindingsLabel`): "Copy all" only when every listed finding goes,
+  "Copy 4" once any is ignored.
+- **The verdict LEADS the Claude's review header** (`VerdictBadge`, the Open PRs panel's exported
+  `VERDICT_PILL` size), then currency, "reviewed X ago", auto mark, mode. The PR pane's **tab label**
+  carries the same outcome ("Claude Review [Approve]", `VERDICT_CLASS`; "Reviewing…" / "Queued" /
+  "Failed"; nothing with no run) — `useClaudeReviewTabPill` OBSERVES the tab's own
+  `['claude-review', prId]` query (DB-only, no second request when the tab opens) and alone re-reads
+  every 5s while a run is in flight, because a shut tab has no SSE stream; pure half `reviewTabPill`.
+- **Preview (Post to GitHub) renders the WHOLE dry-run payload** (`PostReviewPreviewPanel`): the
+  verdict, the summary as markdown (the hidden `<!-- pierre:claude-review -->` marker dropped by
+  `visibleReviewBody`), each inline comment as `path:line` + markdown body, and each off-diff PR
+  comment. It used to print only the counts although the server always sent the bodies. ⚠ Preview
+  and Post SAVE THE DRAFT FIRST (`saveDraftThen`): the server reads the STORED body, and the box's
+  blur-save raced the dry run. Editing the summary or verdict clears a shown preview.
 - **ONE TYPE SCALE for every section, and the reference is the FINDINGS card**
   (`lib/reviewStyles.ts`): `REVIEW_ITEM_CARD` / `REVIEW_ITEM_TITLE` / `REVIEW_PROSE` (Claude's words,
   13px = `.md-body`, page colour) / `REVIEW_META` / `REVIEW_CHIP` / `REVIEW_ANCHOR(_MUTED)` /
@@ -1264,7 +1310,7 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   falling back to a `claude_review` My Turn card's `since`). The "Showing" list prints each run's
   date AND time of day via `reviewRunWhen()` (`finishedAt ?? createdAt`), plus the age while recent.
 - **Is the review on the PR's current commit? ONE helper, `reviewCurrency()`
-  (`lib/claudeReviewColumn.ts`)**, read by the Claude's review header (first pill; also for a past
+  (`lib/claudeReviewColumn.ts`)**, read by the Claude's review header (second pill, after the verdict; also for a past
   run picked in "Showing" — always against the PR's CURRENT head) and the Open PRs card's verdict
   row (finished runs only): green "On latest commit" (the pane adds the short sha), amber "N newer
   commits" / "1 newer commit", amber "Branch changed" when the count is 0/null (rewritten history,
@@ -1279,6 +1325,22 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
 - **Auto review** is `AutoReviewSection` over the CORE `GET`/`PUT /api/workspaces/:id/auto-review`
   (`hooks/useWorkspaceAutoReview.ts`), mounted on `ai.enabled` and NOT behind the plugin's
   `/api/pro/settings` gate. OFF per workspace until switched on.
+  - **Auto-posting** lives in the SAME section and the SAME Save (`autoPost` on the auto-review route;
+    only a changed `autoPost` is sent): the master switch "Post Claude reviews to GitHub
+    automatically", a "Which PRs" radio pair (`'mine'` — "PRs you are asked to review, and your own"
+    — or `'all'`) and one checkbox per kind (`KIND_ROWS`). ⚠ DIMMED, NEVER DISABLED: the scope and
+    kinds dim (`opacity-60`) while the master switch is off and stay editable, and the whole block dims
+    while auto review is off (it acts on auto runs only, which the hint line says). The facts (posts as
+    you, COMMENT only, counts as your review, never twice, never on merged/closed/draft/bot PRs, team
+    requests do not count, failures stay visible) sit behind one `InfoButton`, not in the copy.
+  - What it did is shown where the posts are: `lib/autoPost.ts` `postedChipLabel` turns a finding's
+    "Posted" chip into "Posted automatically · <time ago>" (`ClaudeFinding.postedAuto`), the Post to
+    GitHub pill does the same off `ClaudeReview.autoPost`, and `autoPostFailureLine` prints ONE amber
+    "Couldn’t post automatically: …" line above the summary box for a `failed` / `partial` record
+    (the Post button stays — a skip prints nothing). Story check: `postedLabel` reads
+    `TicketReviewItem.posted.auto`, `notRequestedPostedLabel` marks a "Not asked for" row from the
+    run's `autoPost.notRequested` by index, and `TicketResults` carries the same failure line. Pinned
+    by `test/autoPost.test.ts` (copy + the mounts).
 - **"Review threads"** (`ClaudeReviewThreads.tsx`, mounted once in `ClaudesReview` after the
   follow-up) renders `ClaudeReview.threadAssessments` — other reviewers' open threads the run judged
   ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Other reviewers' threads). `null` renders NOTHING (the run

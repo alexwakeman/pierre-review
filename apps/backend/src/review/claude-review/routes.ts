@@ -24,6 +24,7 @@ import {
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { autoReviewWaiting } from './auto.js';
+import { isAutoPostingNow } from './auto-post.js';
 import { autoFixOutcomeFor } from '../../coding/ai-fix/auto-fix.js';
 import { isFixRunning } from '../../coding/ai-fix/manager.js';
 import {
@@ -436,6 +437,10 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       return { error: 'NotFound', message: `Finding ${findingId} not found` };
     }
     const f = fctx.finding;
+    if (await isAutoPostingNow(ctx, f.reviewId)) {
+      reply.status(409);
+      return { error: 'AutoPostInProgress', message: 'Posting automatically. Try again in a moment.' };
+    }
     const story = storyOf(f);
     // A story finding's comment opens on its story line, built from the run's tickets.
     const storyReview = story ? await getClaudeReviewById(ctx, f.reviewId, accountId) : null;
@@ -489,6 +494,10 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     if (!pctx || !review) {
       reply.status(404);
       return { error: 'NotFound', message: `Review ${reviewId} not found` };
+    }
+    if (!dryRun && (await isAutoPostingNow(ctx, reviewId))) {
+      reply.status(409);
+      return { error: 'AutoPostInProgress', message: 'Posting automatically. Try again in a moment.' };
     }
 
     // (Provenance stamping is no longer read from settings. The hidden

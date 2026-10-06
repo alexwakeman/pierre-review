@@ -569,6 +569,9 @@ export const config = {
   // every member's worktree.
   ticketReviewBudgetUsd: floatFromEnv('TICKET_REVIEW_BUDGET_USD', 4),
   ticketReviewMaxTurns: intFromEnv('TICKET_REVIEW_MAX_TURNS', 40),
+  // The per-card spend cap of the ticket review's CARD PRE-PASS (Sonnet 5, diff-only, one tool —
+  // review/ticket-review/prepass.ts). Its spend is added to the ticket run's cost. Env only.
+  ticketCardBudgetUsd: floatFromEnv('TICKET_CARD_BUDGET_USD', 0.4),
   // AUTOMATIC ticket reviews (trigger 'auto' / 'cascade') per workspace per UTC day. Not shared with
   // the PR review's own auto cap. Manual runs never count. Default = shared TICKET_REVIEW_DAILY_CAP.
   ticketReviewDailyCap: intFromEnv('TICKET_REVIEW_DAILY_CAP', 20),

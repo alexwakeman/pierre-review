@@ -3,6 +3,8 @@ import type {
   ClaudeReviewTicket,
   ClaudeTicketAlignment,
   TicketAssessment,
+  TicketAutoPostRecord,
+  TicketAutoPostWire,
   TicketReview,
   TicketReviewItem,
   TicketReviewMember,
@@ -13,6 +15,7 @@ import type {
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { storyMatchKey } from '../claude-review/ticket.js';
+import { readCardsAt, toWireCard } from './cards.js';
 import type { FingerprintMember } from './fingerprint.js';
 
 // THE TICKET REVIEW PERSISTENCE LAYER — reads and writes `ticket_reviews`, `ticket_review_members`
@@ -80,6 +83,26 @@ export interface TicketReviewRow {
   alignment: string | null;
   summary: string | null;
   assessment: TicketAssessment | null;
+  // What auto-posting did with this run (migration 0087 / pg 0074). Absent on older reads.
+  autoPost?: TicketAutoPostRecord | null;
+}
+
+/** The stored auto-post record → the wire. null for anything malformed. */
+export function ticketAutoPostWireOf(v: unknown): TicketAutoPostWire | null {
+  if (v == null || typeof v !== 'object') return null;
+  const r = v as Partial<TicketAutoPostRecord>;
+  if (typeof r.status !== 'string' || typeof r.at !== 'string') return null;
+  const nr = Array.isArray(r.notRequested) ? r.notRequested : [];
+  return {
+    status: r.status,
+    at: r.at,
+    reason: r.reason ?? null,
+    error: r.error ?? null,
+    postedCount: (Array.isArray(r.postedItemIds) ? r.postedItemIds.length : 0) + nr.filter((n) => n.commentId != null && !n.carried).length,
+    notRequested: nr
+      .filter((n) => n.commentId != null && n.postedAt != null)
+      .map((n) => ({ index: n.index, prId: n.prId, postedAt: n.postedAt!, carried: n.carried === true })),
+  };
 }
 
 export interface TicketMemberRow {
@@ -107,6 +130,8 @@ export interface TicketItemRow {
   postedPrId: number | null;
   postedCommentId: string | null;
   postedAt: Date | null;
+  // Posted by auto-posting (migration 0087 / pg 0074).
+  postedAuto?: boolean | null;
   priorItemId: number | null;
   createdAt: Date;
 }
@@ -240,6 +265,8 @@ export async function markTicketReviewRefused(
     prCount?: number | null;
     ticketHash?: string | null;
     fingerprint?: string | null;
+    // Spend before the refusal (the card pre-pass runs before the checkouts are judged).
+    costUsd?: number | null;
   },
 ): Promise<void> {
   const { tr } = tables(ctx);
@@ -252,9 +279,13 @@ export async function markTicketReviewRefused(
       ticketHash: r.ticketHash ?? null,
       fingerprint: r.fingerprint ?? null,
       completedAt: new Date(),
+      ...(r.costUsd != null ? { costUsd: r.costUsd } : {}),
     })
     .where(and(eq(tr.id, id), eq(tr.accountId, accountId)))
     .execute();
+  if (r.costUsd != null) {
+    await recordTicketReviewUsage(ctx, accountId, await getTicketReviewRow(ctx, accountId, id), { costUsd: r.costUsd });
+  }
 }
 
 export interface TicketItemWrite {
@@ -341,6 +372,7 @@ export async function saveTicketReviewSuccess(
           postedPrId: prev?.postedCommentId != null ? prev.postedPrId : null,
           postedCommentId: prev?.postedCommentId ?? null,
           postedAt: prev?.postedCommentId != null ? prev.postedAt : null,
+          postedAuto: prev?.postedCommentId != null && prev.postedAuto === true ? true : null,
         })
         .execute();
     }
@@ -451,12 +483,17 @@ export async function markTicketItemPosted(
   ctx: AgentContext,
   accountId: number,
   itemId: number,
-  p: { prId: number; commentId: string; postedAt?: Date },
+  p: { prId: number; commentId: string; postedAt?: Date; auto?: boolean },
 ): Promise<boolean> {
   const { tri } = tables(ctx);
   const rows = (await ctx.db
     .update(tri)
-    .set({ postedPrId: p.prId, postedCommentId: p.commentId, postedAt: p.postedAt ?? new Date() })
+    .set({
+      postedPrId: p.prId,
+      postedCommentId: p.commentId,
+      postedAt: p.postedAt ?? new Date(),
+      ...(p.auto === true ? { postedAuto: true } : {}),
+    })
     .where(and(eq(tri.id, itemId), eq(tri.accountId, accountId), isNull(tri.postedCommentId)))
     .returning({ id: tri.id })
     .execute()) as Array<{ id: number }>;
@@ -542,12 +579,25 @@ async function displayMembers(
   const { prs, repos } = tables(ctx);
   const prIds = [...new Set(rows.map((r) => r.prId))];
   const info = (await ctx.db
-    .select({ id: prs.id, number: prs.number, title: prs.title, owner: repos.owner, name: repos.name })
+    .select({
+      id: prs.id,
+      number: prs.number,
+      title: prs.title,
+      headSha: prs.headSha,
+      owner: repos.owner,
+      name: repos.name,
+    })
     .from(prs)
     .innerJoin(repos, eq(repos.id, prs.repoId))
     .where(and(eq(prs.accountId, accountId), inArray(prs.id, prIds)))
-    .execute()) as Array<{ id: number; number: number; title: string; owner: string; name: string }>;
+    .execute()) as Array<{ id: number; number: number; title: string; headSha: string | null; owner: string; name: string }>;
   const byPr = new Map(info.map((i) => [i.id, i]));
+  // Each member's card at its CURRENT synced head (cards.ts currency) — not the head the run read.
+  const cards = await readCardsAt(
+    ctx,
+    accountId,
+    info.map((i) => ({ prId: i.id, headSha: i.headSha ?? '' })),
+  );
   for (const r of rows) {
     const i = byPr.get(r.prId);
     const list = out.get(r.ticketReviewId) ?? [];
@@ -560,6 +610,7 @@ async function displayMembers(
       headSha: r.headSha,
       state: r.prState,
       checkedOut: r.checkedOut,
+      card: cards.has(r.prId) ? toWireCard(cards.get(r.prId)!) : null,
     });
     out.set(r.ticketReviewId, list);
   }
@@ -587,6 +638,7 @@ export function toItem(r: TicketItemRow, runCreatedAt: Date | null): TicketRevie
             postedAt: postedAt.toISOString(),
             // Inherited from an earlier run: posted before this run existed.
             carried: r.priorItemId != null && runCreatedAt != null && postedAt.getTime() < runCreatedAt.getTime(),
+            ...(r.postedAuto === true ? { auto: true } : {}),
           }
         : null,
   };
@@ -623,6 +675,7 @@ function toWire(
     assessment: r.status === 'succeeded' ? (r.assessment ?? null) : null,
     members,
     items: items.map((i) => toItem(i, created)),
+    autoPost: ticketAutoPostWireOf(r.autoPost),
   };
 }
 

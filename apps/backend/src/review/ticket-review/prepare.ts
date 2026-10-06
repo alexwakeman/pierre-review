@@ -120,25 +120,50 @@ export async function resolveTicketInputs(
   return { ok: true, ticket, ticketHash: ticketHash(ticket), members };
 }
 
-/** owner/name per member (this account's repos only), keyed by prId. */
+export interface MemberRepo {
+  owner: string;
+  name: string;
+  // The repo's default branch (synced), or null = the remote's HEAD.
+  defaultBranch: string | null;
+}
+
+/** owner/name (+ default branch) per member (this account's repos only), keyed by prId. */
 export async function memberRepos(
   ctx: AgentContext,
   accountId: number,
   members: readonly LiveMember[],
-): Promise<Map<number, { owner: string; name: string }>> {
-  const out = new Map<number, { owner: string; name: string }>();
+): Promise<Map<number, MemberRepo>> {
+  const out = new Map<number, MemberRepo>();
   const repoIds = [...new Set(members.map((m) => m.repoId))];
   if (repoIds.length === 0) return out;
   const r = s(ctx).repos;
   const rows = (await ctx.db
-    .select({ id: r.id, owner: r.owner, name: r.name })
+    .select({
+      id: r.id,
+      owner: r.owner,
+      name: r.name,
+      defaultBranch: r.defaultBranch,
+      defaultBranchName: r.defaultBranchName,
+    })
     .from(r)
     .where(and(eq(r.accountId, accountId), inArray(r.id, repoIds)))
-    .execute()) as Array<{ id: number; owner: string; name: string }>;
+    .execute()) as Array<{
+    id: number;
+    owner: string;
+    name: string;
+    defaultBranch: string | null;
+    defaultBranchName: string | null;
+  }>;
   const byRepo = new Map(rows.map((x) => [x.id, x]));
   for (const m of members) {
     const repo = byRepo.get(m.repoId);
-    if (repo) out.set(m.prId, { owner: repo.owner, name: repo.name });
+    if (repo) {
+      out.set(m.prId, {
+        owner: repo.owner,
+        name: repo.name,
+        defaultBranch: repo.defaultBranch || repo.defaultBranchName || null,
+      });
+    }
   }
   return out;
 }
@@ -160,6 +185,8 @@ export interface MemberDiff {
   // Noise-stripped; null when it could not be read.
   diff: string | null;
   changedFiles: string[];
+  // The lock / generated files the strip removed ([] when unread).
+  noiseFiles: string[];
 }
 
 /** Each member's diff via the gh CLI, noise-stripped, in parallel. A failure costs that diff only. */
@@ -171,10 +198,10 @@ export async function fetchMemberDiffs(
   await Promise.all(
     members.map(async (m) => {
       try {
-        const { diff } = stripNoiseFromDiff(await fetchDiff(m.owner, m.name, m.number), isNoiseFile);
-        out.set(m.prId, { diff, changedFiles: splitDiffByFile(diff).map((f) => f.path) });
+        const { diff, excluded } = stripNoiseFromDiff(await fetchDiff(m.owner, m.name, m.number), isNoiseFile);
+        out.set(m.prId, { diff, changedFiles: splitDiffByFile(diff).map((f) => f.path), noiseFiles: excluded });
       } catch {
-        out.set(m.prId, { diff: null, changedFiles: [] });
+        out.set(m.prId, { diff: null, changedFiles: [], noiseFiles: [] });
       }
     }),
   );

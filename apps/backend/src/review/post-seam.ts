@@ -47,9 +47,10 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
   const inlineFindingIds: number[] = [];
   for (const f of args.includedFindings) {
     const shape = { body: f.body, editedBody: null, suggestion: f.suggestion, storyLead: f.storyLead };
+    const footer = f.footer ?? null;
     // Anchorable on its own line → inline comment there.
     if (f.line != null && isFindingAnchored(index, f.path, f.line, f.side)) {
-      comments.push({ path: f.path, line: f.line, side: f.side, body: findingCommentBody(shape) });
+      comments.push({ path: f.path, line: f.line, side: f.side, body: findingCommentBody(shape, { footer }) });
       inlineFindingIds.push(f.id);
       continue;
     }
@@ -61,21 +62,24 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
         path: f.path,
         line: fb.line,
         side: fb.side,
-        body: findingCommentBody(shape, { fallbackNote: true }),
+        body: findingCommentBody(shape, { fallbackNote: true, footer }),
       });
       inlineFindingIds.push(f.id);
     } else {
       prComments.push({
         findingId: f.id,
         path: f.path,
-        body: prLevelFindingBody({
-          path: f.path,
-          line: f.line,
-          body: f.body,
-          editedBody: null,
-          suggestion: f.suggestion,
-          storyLead: f.storyLead,
-        }),
+        body: prLevelFindingBody(
+          {
+            path: f.path,
+            line: f.line,
+            body: f.body,
+            editedBody: null,
+            suggestion: f.suggestion,
+            storyLead: f.storyLead,
+          },
+          { footer },
+        ),
       });
     }
   }
@@ -145,6 +149,26 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
   const currentHead = await fetchCurrentHeadSha(owner, name, prNumber);
   if (currentHead !== reviewHeadSha) return { headMoved: true };
   const shape = { body: f.body, editedBody: null, suggestion: f.suggestion, storyLead: f.storyLead };
+  const footer = f.footer ?? null;
+  const prLevelBody = (outsideDiffNote: boolean): string =>
+    prLevelFindingBody(
+      {
+        path: f.path,
+        line: f.line,
+        body: f.body,
+        editedBody: null,
+        suggestion: f.suggestion,
+        storyLead: f.storyLead,
+      },
+      { outsideDiffNote, footer },
+    );
+
+  // A forced PR-level comment (auto-posting's questions): never inline, and the file it names IS
+  // in the diff, so no "outside the diff" note.
+  if (args.prLevel) {
+    const { commentId } = await submitGithubIssueComment({ owner, name, prNumber, body: prLevelBody(false) });
+    return { commentId, postedCommentKind: 'pr_comment' };
+  }
 
   if (f.line != null && f.anchored) {
     const { commentId } = await submitGithubComment({
@@ -155,7 +179,7 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
       path: f.path,
       line: f.line,
       side: f.side,
-      body: findingCommentBody(shape),
+      body: findingCommentBody(shape, { footer }),
     });
     return { commentId, postedCommentKind: 'inline' };
   }
@@ -171,7 +195,7 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
       path: f.path,
       line: fb.line,
       side: fb.side,
-      body: findingCommentBody(shape, { fallbackNote: true }),
+      body: findingCommentBody(shape, { fallbackNote: true, footer }),
     });
     return { commentId, postedCommentKind: 'inline' };
   }
@@ -180,14 +204,7 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
     owner,
     name,
     prNumber,
-    body: prLevelFindingBody({
-      path: f.path,
-      line: f.line,
-      body: f.body,
-      editedBody: null,
-      suggestion: f.suggestion,
-      storyLead: f.storyLead,
-    }),
+    body: prLevelBody(true),
   });
   return { commentId, postedCommentKind: 'pr_comment' };
 }

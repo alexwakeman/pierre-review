@@ -553,7 +553,7 @@ export async function ensureDefaultWorkspace(accountId: number): Promise<number>
 
   await db
     .insert(workspaces)
-    .values({ accountId, name, isDefault: true })
+    .values({ accountId, name, isDefault: true, autoFixEnabled: false })
     .onConflictDoNothing()
     .execute();
 
@@ -642,7 +642,7 @@ export async function listWorkspaces(accountId: number): Promise<Workspace[]> {
 export async function createWorkspace(accountId: number, name: string): Promise<Workspace> {
   const [row] = await db
     .insert(workspaces)
-    .values({ accountId, name, isDefault: false })
+    .values({ accountId, name, isDefault: false, autoFixEnabled: false })
     .returning()
     .execute();
   // No repos yet, so no repo-grained mutes to intersect — and `pending_muted` defaults to false.
@@ -17956,4 +17956,19 @@ export async function updateAutoMergeState(
     })
     .where(eq(autoMergeRequests.id, id))
     .execute();
+}
+
+/**
+ * Is this user automation IN THIS WORKSPACE — the same union `hiddenBotUserIds` hides (a manual
+ * "this is a human" wins both directions)? Read by auto-posting (review/claude-review/auto-post.ts),
+ * which never posts on a bot-authored PR. A null user (an unmapped author) answers TRUE: a PR whose
+ * author we cannot place is not one we write on.
+ */
+export async function isWorkspaceAutomationUser(
+  accountId: number,
+  workspaceId: number,
+  userId: number | null,
+): Promise<boolean> {
+  if (userId == null) return true;
+  return (await hiddenBotUserIds(accountId, workspaceId)).includes(userId);
 }

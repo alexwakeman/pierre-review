@@ -79,6 +79,7 @@ const SEEDED_TABLES = [
   'ticketReviews',
   'ticketReviewMembers',
   'ticketReviewItems',
+  'ticketReviewPrCards',
 ];
 
 /**
@@ -343,6 +344,17 @@ async function seedAccount(accountId: number, login: string): Promise<void> {
   await db
     .insert(s.ticketReviewItems)
     .values({ ticketReviewId: ticketRun.id, accountId, ref: 'AC1', status: 'not_met', title: 't', body: '' })
+    .execute();
+  await db
+    .insert(s.ticketReviewPrCards)
+    .values({
+      accountId,
+      prId: pr.id,
+      headSha: 'h',
+      card: { summary: 's', interfaces: [], criteria: [], looseEnds: [], changedFiles: [] },
+      source: 'prepass',
+      model: 'm',
+    })
     .execute();
   await db
     .insert(s.ticketReviews)

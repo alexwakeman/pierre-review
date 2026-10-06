@@ -10,6 +10,13 @@
 //   - a currency pill the SERVER computed ("Checked against 3 PRs", "web#412 pushed since"), and
 //     how long ago the shown run finished ("reviewed 2 hours ago");
 //   - criteria with status and attribution; one Post per unmet item, on the PR it belongs to;
+//   - SLIM where an Open PRs ticket stack holds the whole story (`slimStoryCheck`: a tracker ticket,
+//     `issueLinks`, an open PR on it): only THIS PR's share (`prTicketShare`, lib/ticketShare.ts) —
+//     what it delivers, what belongs in it, each with its Post — "What this PR adds" (its contribution
+//     card at its current head, when it has one), a count of the rest, and "See the
+//     whole story in Open PRs" (`showStoryInOpenPrs`). A pasted (`manual:`) story keeps the full
+//     view: no stack exists for it. The result pieces are shared with the stack
+//     (TicketReviewParts.tsx);
 //   - a collapsible "Story" per block (TicketStory.tsx): the ticket as markdown, read on open;
 //   - an older PR review's stories that no ticket review covers, as blocks of their own marked
 //     "Checked on this PR only" (ONE story section; the old "User stories" section is gone);
@@ -28,36 +35,25 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
   TICKET_ALIGNMENT_LABEL,
-  TICKET_CRITERION_STATUS_LABEL,
   type ClaudeFinding,
-  type ClaudeFindingSide,
   type ClaudeReviewTicketEntry,
   type PrDetail,
   type PrTicketReviewsResponse,
-  type TicketCriterion,
-  type TicketEvidence,
   type TicketReview,
-  type TicketReviewItem,
-  type TicketReviewMember,
 } from '@pierre-review/shared';
-import { ApiError } from '../api/client.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
+import { useProCapabilities } from '../hooks/useTriage.js';
 import { useWorkspaces } from '../hooks/useWorkspaces.js';
 import {
   useStartStoryCheck,
   useStartTicketReview,
-  usePostTicketItem,
   useTicketReviewById,
   useTicketReviewStarting,
   useTicketReviewStream,
   useTicketReviews,
 } from '../hooks/useTicketReview.js';
 import {
-  CLEAN_CLASS,
-  OUTDATED_CLASS,
   TICKET_ALIGNMENT_CLASS,
-  TICKET_CRITERION_STATUS_CLASS,
-  anchorLabel,
   checkTicketDrafts,
   createTicketDraftStore,
   ticketInputFromStored,
@@ -67,43 +63,35 @@ import {
 import {
   TICKET_PHASE_LABEL,
   coverageLabel,
-  deliveredByLabel,
-  expectedInLabel,
   itemsByRef,
   memberLabel,
-  memberPrIdsOf,
-  missingItems,
   planStoryStart,
-  postButtonLabel,
-  postTargetOf,
-  postedLabel,
   recheckBody,
   refusalSentence,
   ticketCurrency,
   ticketProgressPct,
-  type TicketCurrency,
 } from '../lib/ticketReview.js';
+import { prCardOf, prTicketShare, shareRestLine, slimStoryCheck } from '../lib/ticketShare.js';
 import { jiraRefFor, storyUrlOf } from '../lib/ticketStory.js';
+import { showStoryInOpenPrs } from '../store/stackStoryCheck.js';
 import { AiRunGate } from './AiSetup.js';
 import { ClaudeReviewTicketPanel, ClaudeReviewTicketResults, storyLabel } from './ClaudeReviewFollowUp.js';
 import { JiraKeyLink } from './ClaudeReviewTickets.js';
 import { StoryDisclosure } from './TicketStory.js';
-import { CheckIcon, WarningIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
-import { Markdown } from './Markdown.js';
-import { MemberPrLink, PrRefText } from './ReviewPrRefs.js';
-import {
-  REVIEW_CHIP,
-  REVIEW_ITEM_CARD,
-  REVIEW_ITEM_TITLE,
-  REVIEW_PROSE,
-  REVIEW_SUBHEAD,
-} from '../lib/reviewStyles.js';
+import { REVIEW_CHIP } from '../lib/reviewStyles.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { ReviewedAgo } from './ReviewedAgo.js';
-
-type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
+import {
+  CriterionRow,
+  CurrencyPill,
+  MissingList,
+  NotRequestedList,
+  PrCardDisclosure,
+  TicketResults,
+  type OpenInChanges,
+} from './TicketReviewParts.js';
 
 const CHIP = REVIEW_CHIP;
 const MUTED = 'text-gray-500 dark:text-gray-400';
@@ -112,332 +100,62 @@ const BTN =
   'whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
 const BTN_PRIMARY =
   'whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
-const RUNNING_CLASS = 'bg-sky-500/10 text-sky-700 dark:text-sky-300';
-
-const CURRENCY_CLASS: Record<TicketCurrency['tone'], string> = {
-  current: CLEAN_CLASS,
-  stale: OUTDATED_CLASS,
-  running: RUNNING_CLASS,
-};
 
 // The reader's half-typed stories, per PR, for this session (survives a tab switch or a PR change).
 const storyDrafts = createTicketDraftStore<TicketDraft[]>();
 
-function CurrencyPill({ currency }: { currency: TicketCurrency }): JSX.Element {
-  return (
-    <span className={`${CHIP} ${CURRENCY_CLASS[currency.tone]}`} title={currency.title}>
-      {currency.tone === 'current' ? (
-        <CheckIcon size={11} />
-      ) : currency.tone === 'stale' ? (
-        <WarningIcon size={11} />
-      ) : (
-        <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" />
-      )}
-      {currency.label}
-    </span>
-  );
-}
-
-/** A code location: into the Changes tab when it is this PR's file, else plain text. */
-function EvidenceRef({
-  ev,
-  viewedPrId,
-  members,
-  changedPaths,
-  onOpenInChanges,
-}: {
-  ev: Pick<TicketEvidence, 'path' | 'line'> & { prId: number | null };
-  viewedPrId: number;
-  members: readonly TicketReviewMember[];
-  changedPaths: ReadonlySet<string>;
-  onOpenInChanges?: OpenInChanges;
-}): JSX.Element {
-  const label = anchorLabel(ev.path, ev.line);
-  if (ev.prId === viewedPrId && onOpenInChanges != null && changedPaths.has(ev.path)) {
-    return (
-      <button
-        type="button"
-        onClick={() => onOpenInChanges(ev.path, ev.line, 'RIGHT')}
-        className="break-all text-left font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
-      >
-        {label}
-      </button>
-    );
-  }
-  const m = ev.prId != null && ev.prId !== viewedPrId ? members.find((x) => x.prId === ev.prId) : undefined;
-  return (
-    <span className={`break-all font-mono text-xs ${MUTED}`}>
-      {m != null && (
-        <>
-          <MemberPrLink member={{ repo: m.repo, number: m.number, label: memberLabel(m) }} />
-          {' · '}
-        </>
-      )}
-      {label}
-    </span>
-  );
-}
-
-/** Post ONE item, on the PR it belongs to. Gone for good once GitHub gave a comment id. */
-function ItemPost({
-  item,
+/**
+ * THIS PR's share of a ticket review (the slim block): the criteria it delivers, the unmet
+ * criteria and missing items that belong in it (each with its Post), what it does that was not
+ * asked for, a count of the rest, and the jump to the whole story in Open PRs.
+ */
+function TicketShare({
   review,
-  viewedPrId,
-}: {
-  item: TicketReviewItem;
-  review: TicketReview;
-  viewedPrId: number;
-}): JSX.Element | null {
-  const post = usePostTicketItem(viewedPrId);
-  const target = postTargetOf(item, viewedPrId, review.members);
-  const posted = postedLabel(item, review.members, viewedPrId);
-  if (posted != null)
-    return (
-      <span className={`text-xs ${MUTED}`}>
-        <PrRefText text={posted} />
-      </span>
-    );
-  if (post.isSuccess) {
-    return (
-      <span className={`text-xs ${MUTED}`}>
-        {post.data.visible ? 'Posted' : 'Posted. It will show up here shortly.'}
-      </span>
-    );
-  }
-  // ⚠ Only 'AlreadyPosted' means a comment exists. The route also 409s 'HeadMoved' and
-  // 'Superseded', where nothing was posted: those keep the button and print the server's reason.
-  const already = post.error instanceof ApiError && post.error.status === 409 && post.error.code === 'AlreadyPosted';
-  if (already) return <span className={`text-xs ${MUTED}`}>Already posted</span>;
-  return (
-    <span className="inline-flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        disabled={post.isPending}
-        onClick={() =>
-          post.mutate({
-            ticketReviewId: review.id,
-            itemId: item.id,
-            targetPrId: target.prId,
-            memberPrIds: memberPrIdsOf(review),
-          })
-        }
-        className={BTN_PRIMARY}
-      >
-        {post.isPending ? 'Posting…' : postButtonLabel(target, viewedPrId)}
-      </button>
-      {post.isError && <span className={`text-xs ${ERROR_TEXT}`}>{post.error.message || 'Could not post.'}</span>}
-    </span>
-  );
-}
-
-function CriterionRow({
-  c,
-  item,
-  review,
-  viewedPrId,
-  changedPaths,
-  onOpenInChanges,
-}: {
-  c: TicketCriterion;
-  item: TicketReviewItem | undefined;
-  review: TicketReview;
-  viewedPrId: number;
-  changedPaths: ReadonlySet<string>;
-  onOpenInChanges?: OpenInChanges;
-}): JSX.Element {
-  const done = deliveredByLabel(c, review.members);
-  const belongs = expectedInLabel(c.expectedIn, review.members);
-  const refProps = { viewedPrId, members: review.members, changedPaths, onOpenInChanges };
-  // MET is one compact line: tick, ref, criterion, who delivered it.
-  if (c.status === 'met') {
-    return (
-      <li className="flex items-baseline gap-2 px-1 text-[13px]">
-        <span className="shrink-0 self-center text-green-700 dark:text-green-400" aria-label="Met">
-          <CheckIcon size={12} />
-        </span>
-        <span className={`shrink-0 font-mono text-xs ${MUTED}`}>{c.ref}</span>
-        <span className="min-w-0 break-words">
-          {c.text}
-          {done != null && (
-            <span className={`text-xs ${MUTED}`}>
-              {' · '}
-              <PrRefText text={done} />
-            </span>
-          )}
-        </span>
-      </li>
-    );
-  }
-  return (
-    <li className={REVIEW_ITEM_CARD}>
-      <div className="flex items-start gap-2">
-        <span className={`${CHIP} ${TICKET_CRITERION_STATUS_CLASS[c.status]}`}>
-          {TICKET_CRITERION_STATUS_LABEL[c.status]}
-        </span>
-        <span className={`shrink-0 font-mono text-xs leading-5 ${MUTED}`}>{c.ref}</span>
-        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{c.text}</span>
-      </div>
-      {(done != null || belongs != null) && (
-        <div className={`mt-0.5 text-xs ${MUTED}`}>
-          <PrRefText text={[done, belongs].filter(Boolean).join(' · ')} />
-        </div>
-      )}
-      {c.evidence.length > 0 && (
-        <div className="mt-0.5 flex flex-wrap gap-x-3">
-          {c.evidence.map((ev, i) => (
-            <EvidenceRef key={i} ev={ev} {...refProps} />
-          ))}
-        </div>
-      )}
-      {c.explanation != null && c.explanation !== '' && (
-        <p className={`mt-1 ${REVIEW_PROSE}`}>
-          <PrRefText text={c.explanation} />
-        </p>
-      )}
-      {item != null && (
-        <div className="mt-1.5">
-          <ItemPost item={item} review={review} viewedPrId={viewedPrId} />
-        </div>
-      )}
-    </li>
-  );
-}
-
-function MissingRow({
-  item,
-  review,
-  viewedPrId,
-  changedPaths,
-  onOpenInChanges,
-}: {
-  item: TicketReviewItem;
-  review: TicketReview;
-  viewedPrId: number;
-  changedPaths: ReadonlySet<string>;
-  onOpenInChanges?: OpenInChanges;
-}): JSX.Element {
-  const owner = item.ownerPrId != null ? review.members.find((m) => m.prId === item.ownerPrId) : undefined;
-  return (
-    <li className={REVIEW_ITEM_CARD}>
-      <div className="flex items-start gap-2">
-        <span className={`${CHIP} ${TICKET_CRITERION_STATUS_CLASS.not_met}`}>Not done</span>
-        <span className={`shrink-0 font-mono text-xs leading-5 ${MUTED}`}>{item.ref}</span>
-        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{item.title}</span>
-      </div>
-      {owner != null && (
-        <div className={`mt-0.5 text-xs ${MUTED}`}>
-          Belongs in <MemberPrLink member={{ repo: owner.repo, number: owner.number, label: memberLabel(owner) }} />
-        </div>
-      )}
-      {item.path != null && item.path !== '' && (
-        <div className="mt-0.5">
-          <EvidenceRef
-            ev={{ prId: item.ownerPrId ?? viewedPrId, path: item.path, line: item.line }}
-            viewedPrId={viewedPrId}
-            members={review.members}
-            changedPaths={changedPaths}
-            onOpenInChanges={onOpenInChanges}
-          />
-        </div>
-      )}
-      {item.body !== '' && (
-        <p className={`mt-1 ${REVIEW_PROSE}`}>
-          <PrRefText text={item.body} />
-        </p>
-      )}
-      <div className="mt-1.5">
-        <ItemPost item={item} review={review} viewedPrId={viewedPrId} />
-      </div>
-    </li>
-  );
-}
-
-/** What one SUCCEEDED run found for the ticket. */
-function TicketResults({
-  review,
-  viewedPrId,
+  pr,
+  ticketKey,
   changedPaths,
   onOpenInChanges,
 }: {
   review: TicketReview;
-  viewedPrId: number;
+  pr: PrDetail;
+  ticketKey: string;
   changedPaths: ReadonlySet<string>;
   onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
   const a = review.assessment;
+  const share = useMemo(
+    () => (a != null ? prTicketShare(a, review.items, { id: pr.id, repoId: pr.repoId }) : null),
+    [a, review.items, pr.id, pr.repoId],
+  );
   const byRef = useMemo(() => itemsByRef(review.items), [review.items]);
-  const missing = useMemo(() => missingItems(review.items), [review.items]);
-  if (a == null) return <p className={`text-xs ${MUTED}`}>No result stored.</p>;
-  const rowProps = { review, viewedPrId, changedPaths, onOpenInChanges };
+  const card = prCardOf(review.members, pr.id);
+  if (share == null) return <p className={`text-xs ${MUTED}`}>No result stored.</p>;
+  const ctx = { review, viewedPrId: pr.id, changedPaths, onOpenInChanges };
+  const rest = shareRestLine(share);
+  const empty = share.criteria.length === 0 && share.missing.length === 0 && share.notRequested.length === 0;
   return (
     <div className="space-y-3">
-      {a.summary != null && a.summary !== '' && (
-        <Markdown prRefs>{a.summary}</Markdown>
-      )}
-      {a.criteria.length > 0 && (
+      {empty && <p className={`text-xs ${MUTED}`}>No criteria are this PR’s.</p>}
+      {share.criteria.length > 0 && (
         <ul className="space-y-1.5">
-          {a.criteria.map((c) => (
-            <CriterionRow key={c.ref} c={c} item={byRef.get(c.ref)} {...rowProps} />
+          {share.criteria.map((c) => (
+            <CriterionRow key={c.ref} c={c} item={byRef.get(c.ref)} {...ctx} />
           ))}
         </ul>
       )}
-      {missing.length > 0 && (
-        <div className="space-y-1.5">
-          <h5 className={REVIEW_SUBHEAD}>{`Not done (${missing.length})`}</h5>
-          <ul className="space-y-1.5">
-            {missing.map((item) => (
-              <MissingRow key={item.id} item={item} {...rowProps} />
-            ))}
-          </ul>
-        </div>
-      )}
-      {a.notRequested.length > 0 && (
-        <div className="space-y-1">
-          <h5 className={REVIEW_SUBHEAD}>
-            {`Not asked for (${a.notRequested.length})`}
-          </h5>
-          <ul className="space-y-1.5">
-            {a.notRequested.map((g, i) => (
-              <li key={i} className={REVIEW_ITEM_CARD}>
-                <span className={`break-words ${REVIEW_ITEM_TITLE}`}>
-                  <PrRefText text={g.title} />
-                </span>
-                {g.path != null && g.path !== '' && (
-                  <>
-                    <span className={`decorative-mark ${MUTED}`} aria-hidden="true">
-                      {' · '}
-                    </span>
-                    <EvidenceRef
-                      ev={{ prId: g.prId, path: g.path, line: g.line }}
-                      viewedPrId={viewedPrId}
-                      members={review.members}
-                      changedPaths={changedPaths}
-                      onOpenInChanges={onOpenInChanges}
-                    />
-                  </>
-                )}
-                {g.explanation != null && g.explanation !== '' && (
-                  <p className={`mt-1 ${REVIEW_PROSE}`}>
-                    <PrRefText text={g.explanation} />
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {review.members.some((m) => !m.checkedOut) && (
-        <p className={`text-xs ${MUTED}`}>
-          Not checked out:{' '}
-          <PrRefText
-            text={review.members
-              .filter((m) => !m.checkedOut)
-              .map(memberLabel)
-              .join(', ')}
-          />
-          .
-        </p>
-      )}
+      <MissingList items={share.missing} {...ctx} />
+      <NotRequestedList items={share.notRequested} {...ctx} />
+      {card != null && <PrCardDisclosure card={card} />}
+      <p className={`text-xs ${MUTED}`}>
+        {rest != null && <>{rest} </>}
+        <button
+          type="button"
+          onClick={() => showStoryInOpenPrs(ticketKey)}
+          className="text-blue-600 hover:underline dark:text-blue-400"
+        >
+          See the whole story in Open PRs
+        </button>
+      </p>
     </div>
   );
 }
@@ -483,6 +201,15 @@ function TicketBlock({
   const snapshot = shown?.ticket ?? review?.ticket ?? null;
   const jiraRef = jiraRefFor(pr.tickets, entry.ticketKey);
   const url = storyUrlOf(jiraRef, [snapshot]);
+  // Where the Open PRs stack holds the whole story, the pane shows only THIS PR's share of it.
+  const issueLinks = useProCapabilities().issueLinks;
+  const slim = slimStoryCheck({
+    ident,
+    ticketKey: entry.ticketKey,
+    issueLinks,
+    prOpen: pr.state === 'open',
+    members,
+  });
 
   return (
     <div aria-label={`Story ${entry.ticketKey ?? title ?? ''}`} className="space-y-2">
@@ -503,7 +230,7 @@ function TicketBlock({
             {TICKET_ALIGNMENT_LABEL[state.alignment]}
           </span>
         )}
-        {counts != null && <span className={`text-xs ${MUTED}`}>{counts}</span>}
+        {!slim && counts != null && <span className={`text-xs ${MUTED}`}>{counts}</span>}
         {currency != null && <CurrencyPill currency={currency} />}
         {shown != null && <ReviewedAgo at={shown.completedAt} />}
         <span className="ml-auto">
@@ -539,7 +266,17 @@ function TicketBlock({
       {refused != null && <p className={`text-xs ${ERROR_TEXT}`}>{refusalSentence(refused)}</p>}
       {failed != null && <p className={`text-xs ${ERROR_TEXT}`}>{failed}</p>}
       {shown != null ? (
-        <TicketResults review={shown} viewedPrId={pr.id} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
+        slim && entry.ticketKey != null ? (
+          <TicketShare
+            review={shown}
+            pr={pr}
+            ticketKey={entry.ticketKey}
+            changedPaths={changedPaths}
+            onOpenInChanges={onOpenInChanges}
+          />
+        ) : (
+          <TicketResults review={shown} viewedPrId={pr.id} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
+        )
       ) : (
         !running && refused == null && failed == null && <p className={`text-xs ${MUTED}`}>Not checked yet.</p>
       )}

@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0070` and plugin `0034`–`0037` + `0039` are NOT (written 2026-09-19/10-05 with the Postgres down; see the
+  ⚠ pg `0052`–`0074` and plugin `0034`–`0037` + `0039` are NOT (written 2026-09-19/10-06 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -809,6 +809,55 @@ sweeper reviews from. No backfill (NULL = off). ⚠ Like `0035`, every hand-buil
 the store must replay it (the store SELECTs both columns): `workspace-settings.test.ts`,
 `settings-route-schema.test.ts`, `jira-routes.test.ts`. ⚠ **The pg twin is NOT replayed.**
 
+### `0087_auto_post` (pg `0074`)
+
+AUTO-POSTING of Claude review output (docs/CLAUDE-REVIEW.md § Auto-posting). Six nullable columns,
+no defaults, no backfill — so no insert path has to name any of them (deliberately NOT the 0083/0084
+`NOT NULL DEFAULT` shape, whose SQLite DDL default could not be changed later):
+`workspaces.auto_post_enabled` (sqlite `integer` / pg `boolean`; NULL/false = OFF for every workspace,
+existing and new), `workspaces.auto_post_settings` (sqlite `text` JSON / pg `jsonb`; OVERRIDES ONLY
+`{ scope?, kinds? }`, resolved through `resolveAutoPostSettings`), `claude_reviews.auto_post` and
+`ticket_reviews.auto_post` (JSON: what auto-posting did with that run — the claim is a compare-and-set
+from NULL), and `claude_review_findings.posted_auto` / `ticket_review_items.posted_auto` (sqlite
+`integer` / pg `boolean`; true = "Posted automatically"). Every column sits on an existing table, so
+neither delete path, erasure nor `accountScopedTables()` changes. Journal `when` `1790928000000` in
+both folders. ⚠ **The pg twin is NOT replayed** (`ADD COLUMN IF NOT EXISTS`, so a re-run no-ops).
+
+### `0086_ticket_review_pr_cards` (pg `0073`)
+
+One new table, `ticket_review_pr_cards` — the ticket review's CONTRIBUTION CARDS (docs/CLAUDE-REVIEW.md
+§ Ticket review; contract in schema.sqlite.ts): one row per `(account_id, pr_id, head_sha)` (unique
+`trpc_account_pr_head_ux`, `saveCards`' upsert target), `card` JSON (sqlite `text` / pg `jsonb`),
+`source` (`story_check` | `prepass`), `model`, nullable `cost_usd` (sqlite `real` / pg `double
+precision`), `created_at`. Tenancy is STRUCTURAL: the named composite FK `trpc_pr_account_fk (pr_id,
+account_id) → pull_requests(id, account_id)` ON DELETE cascade (plus the usual `account_id` FK). No
+backfill: cards appear as ticket reviews run. Both delete paths clear it through
+`db/ticket-review-prune.ts`; `eraseAccountData` + `accountScopedTables()` own it. Journal `when`
+`1790841600000` in both folders. ⚠ **The pg twin is NOT replayed** — worth one step: insert a card
+whose `account_id` does not own its `pr_id` and check it raises `trpc_pr_account_fk`, then upsert the
+same `(account_id, pr_id, head_sha)` twice and check one row remains.
+
+### `0085_auto_review_daily_cap` (pg `0072`)
+
+One nullable column, `workspaces.auto_review_daily_cap` (sqlite `integer` / pg `integer`, no
+default) — the per-workspace auto Claude review daily cap (docs/CLAUDE-REVIEW.md § Auto review).
+OVERRIDES ONLY: NULL means the product default `AUTO_REVIEW_DAILY_CAP` (20), resolved through
+`resolveAutoReviewDailyCap`; a PUT of exactly 20 stores NULL. No backfill, and no workspace insert
+has to name it. Written only by `setWorkspaceAutoReview` (the route bounds it 1..500), read by the
+sweeper's roster (`listAutoReviewWorkspaces`) and the wire shape. Journal `when` `1790838000000` in
+both folders. ⚠ **The pg twin is NOT replayed** (`ADD COLUMN IF NOT EXISTS`, so a re-run no-ops).
+
+### `0084_auto_fix_off_by_default` (pg `0071`)
+
+Auto AI Fix is OFF by default. It runs one `UPDATE` switching every workspace off; the switch
+shipped one release earlier, so nobody had time to choose it. pg also runs
+`ALTER COLUMN … SET DEFAULT false`. ⚠ **SQLite cannot change a column default in place**, so
+0083's DDL default (1) stays. Both workspace inserts in `db/queries.ts` (`ensureDefaultWorkspace`,
+`createWorkspace`) therefore write `autoFixEnabled: false` explicitly, and the read side treats only
+an explicit `true` as on. A raw insert that omits the column on SQLite still gets 1, so never add a
+third insert path without the value. Journal `when` is `1790751600000`. ⚠ **The pg twin is NOT
+replayed.**
+
 ### `0083_workspace_auto_fix` (pg `0070`)
 
 One column, `workspaces.auto_fix_enabled` (sqlite `integer DEFAULT 1 NOT NULL` / pg `boolean DEFAULT
@@ -979,7 +1028,7 @@ statement no-ops the second time), both unique indexes present, the three time c
 against a real row. It was replayed in ISOLATION, not on top of the full plugin chain (it names no
 other table, so the chain cannot change its outcome).
 
-⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0070` and plugin `0034`–`0037`, `0039`). The
+⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0074` and plugin `0034`–`0037`, `0039`). The
 standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
 through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —
 core should reach **71 applied = 71 journal entries** (`0000`–`0070`) and the plugin **39** — and check

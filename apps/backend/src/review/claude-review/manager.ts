@@ -410,6 +410,13 @@ function launch(item: QueueItem): void {
       // (coding/ai-fix/auto-fix.ts decides; nothing is pushed). Fire-and-forget, never awaited and
       // never thrown into the review: a fix that fails to start costs the fix only.
       if (succeeded && item.trigger === 'auto') {
+        // AUTO-POSTING: post the run's findings to GitHub when the workspace switched it on
+        // (./auto-post.ts decides; it never throws and never retries). Independent of the fix.
+        void import('./auto-post.js')
+          .then((m) => m.maybeAutoPostReview(ctx, { accountId: item.accountId, prId, reviewId }))
+          .catch((err) =>
+            ctx.log.warn(`auto post pr ${prId}: ${err instanceof Error ? err.message : String(err)}`),
+          );
         void import('../../coding/ai-fix/auto-fix.js')
           .then((m) =>
             m.maybeStartAutoFix(ctx, { accountId: item.accountId, prId, reviewId }),

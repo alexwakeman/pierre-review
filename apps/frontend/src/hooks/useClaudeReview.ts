@@ -22,7 +22,7 @@ import { api, ApiError } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
 import { useFilters } from '../store/filters.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
-import { anyReviewInFlight } from '../lib/claudeReviewColumn.js';
+import { anyReviewInFlight, reviewTabPill, type ReviewTabPill } from '../lib/claudeReviewColumn.js';
 import { anyFixRunning } from '../lib/claudeAutoReview.js';
 
 export function useClaudeReview(prId: number | null) {
@@ -38,6 +38,29 @@ export function useClaudeReview(prId: number | null) {
     refetchInterval: (q) =>
       q.state.data?.autoReview === 'queued' ? 5000 : q.state.data?.autoReviewWaiting != null ? 30_000 : false,
   });
+}
+
+/**
+ * The outcome pill on the PR pane's "Claude Review" tab label. The SAME query as the tab
+ * (`['claude-review', prId]`, DB-only), so opening the tab reads the cache and this adds no second
+ * request. This observer alone also re-reads every 5s while a run is in flight: with the tab shut
+ * there is no SSE stream to say the run ended.
+ */
+export function useClaudeReviewTabPill(prId: number, enabled: boolean): ReviewTabPill | null {
+  const starting = useClaudeReviewStarting(prId);
+  const { data } = useQuery<ClaudeReviewResponse>({
+    queryKey: ['claude-review', prId],
+    queryFn: () => api.claudeReview(prId),
+    enabled,
+    refetchInterval: (q) => {
+      const d = q.state.data;
+      if (d == null) return false;
+      const inFlight =
+        d.review?.status === 'running' || d.review?.status === 'queued' || d.autoReview != null;
+      return inFlight ? 5000 : d.autoReviewWaiting != null ? 30_000 : false;
+    },
+  });
+  return enabled ? reviewTabPill(data, starting) : null;
 }
 
 // Fetch a specific past run by id (for the history selector when viewing a run

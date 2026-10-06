@@ -16,7 +16,8 @@
 // item is waiting and has its OWN queue cap, so auto work can never make a click answer 'busy'.
 // PRO_REVIEW_CONCURRENCY is unchanged and shared.
 //
-// THE COST GUARD is `AUTO_REVIEW_DAILY_CAP` auto runs per workspace per UTC day, counting rows
+// THE COST GUARD is the workspace's daily cap (`workspaces.auto_review_daily_cap`, default
+// `AUTO_REVIEW_DAILY_CAP` = 20, set in Settings) auto runs per workspace per UTC day, counting rows
 // already started today plus items still waiting in the lane. Past it, PRs wait for tomorrow. An
 // account whose agent credits are spent is skipped for the rest of the tick.
 //
@@ -72,7 +73,7 @@
 import type { ClaudeAutoReviewWaiting } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { agenticRunReady } from './ai-ready.js';
-import { AUTO_REVIEW_DAILY_CAP, listAutoReviewWorkspaces } from './auto-settings.js';
+import { listAutoReviewWorkspaces } from './auto-settings.js';
 import {
   autoLaneRoom,
   autoPendingPrIds,
@@ -202,13 +203,13 @@ export async function runAutoReviewSweep(
         openedSinceMs: ws.enabledAtMs,
         dayStartMs,
         // Enough to see every waiting item of ours plus a full day's worth of new ones.
-        limit: AUTO_REVIEW_DAILY_CAP + waiting.size,
+        limit: ws.dailyCap + waiting.size,
       });
       if (!res) continue; // the workspace is gone
       const waitingHere = [...new Set([...res.prIds, ...(res.reReview ?? []).map((r) => r.prId)])].filter(
         (id) => waiting.has(id),
       ).length;
-      let budget = AUTO_REVIEW_DAILY_CAP - res.autoToday - waitingHere;
+      let budget = ws.dailyCap - res.autoToday - waitingHere;
       for (const prId of res.prIds) {
         if (budget <= 0) break;
         if (waiting.has(prId)) continue;

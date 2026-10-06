@@ -6,13 +6,14 @@ import {
   parseTicketIdent,
   type ClaudeReviewModel,
   type ClaudeReviewTicket,
+  type TicketPrCardBody,
   type TicketReviewProgress,
   type TicketReviewStatus,
   type TicketReviewStreamEvent,
   type TicketReviewTrigger,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
-import { cleanupCloneCache } from '../clone-manager.js';
+import { cleanupCloneCache, prepDefaultBranchCheckouts } from '../clone-manager.js';
 import {
   AGENTIC_AI_ENABLED,
   REVIEW_APPLY_AUTH_ENV,
@@ -22,7 +23,16 @@ import {
   reviewSlotFree,
 } from '../claude-review/manager.js';
 import { pickReviewNonce } from '../claude-review/prompts.js';
+import {
+  partitionMembers,
+  placePrepassFailures,
+  readCardsAt,
+  saveCards,
+  validateRunCards,
+  type StoredCardRow,
+} from './cards.js';
 import { fingerprint, staleReasons } from './fingerprint.js';
+import { TICKET_CARD_MODEL, prepassCost, runCardPrepass, type PrepassResult } from './prepass.js';
 import {
   getTicketReviewById,
   getTicketReviewRow,
@@ -38,6 +48,7 @@ import {
 } from './persist.js';
 import {
   fetchMemberDiffs,
+  type MemberDiff,
   loadLegacyStoryFindings,
   memberRepos,
   prepareMemberWorktrees,
@@ -49,6 +60,7 @@ import {
   capMemberDiffs,
   membersIndex,
   ticketReviewUntrustedTexts,
+  type PromptDefaultBranch,
   type PromptMember,
   type PromptPrior,
 } from './prompts.js';
@@ -72,11 +84,15 @@ import { reconcileTicketReview, type TicketReport } from './reconcile.js';
 //            run ends.
 //
 // THE PIPELINE (`runPipeline`): resolve the story and members (prepare.ts; refusals are stored,
-// never sampled) → write the members and fingerprint (running) → per member, in parallel, its diff
-// and a read-only worktree → the prompt (nonce-fenced) in a scratch working directory holding
-// MEMBERS.md → the agent (agent.ts: Read/Glob/Grep behind the path guard) → the server reconcile
-// (reconcile.ts) → persist. The `finally` removes every worktree and the scratch directory, then
-// runs a deferred clone-cache eviction.
+// never sampled) → write the members and fingerprint (running) → partition the members (cards.ts):
+// a member with a CONTRIBUTION CARD at its current head is read as the card, at most
+// TICKET_REVIEW_MAX_DIFFS of the rest as diffs, and any beyond that get a card from the per-PR
+// PRE-PASS first (prepass.ts; its cost joins the run's) → in parallel: those diffs (+ the pre-pass),
+// a read-only worktree per OPEN member and ONE default-branch checkout per repo with a MERGED member
+// → the prompt (nonce-fenced) in a scratch working directory holding MEMBERS.md → the agent
+// (agent.ts: Read/Glob/Grep behind the path guard, every checkout a root) → the run's cards for its
+// diff members (validated, stored) → the server reconcile (reconcile.ts) → persist. The `finally`
+// removes every checkout and the scratch directory, then runs a deferred clone-cache eviction.
 //
 // In-memory state is a process singleton; the boot reconcile fails any run a restart orphaned.
 
@@ -94,6 +110,9 @@ export interface TicketJob {
   // A pasted story's text (the run's snapshot); null for a Jira ticket (read at prepare time).
   manualTicket: ClaudeReviewTicket | null;
   model: ClaudeReviewModel;
+  // Spent before the agent's own run (the card pre-pass), so every terminal write — including the
+  // launch catch's — carries it into the run's cost.
+  spentUsd: number;
 }
 
 // `${accountId}:${ident}` → the run id holding it (-1 while its row is being written).
@@ -199,6 +218,7 @@ export async function startTicketReview(ctx: AgentContext, a: StartTicketArgs): 
     trigger: a.trigger,
     manualTicket: a.manualTicket,
     model: DEFAULT_CLAUDE_REVIEW_MODEL,
+    spentUsd: 0,
   };
   // A manual item goes ahead of every automatic one; FIFO within each.
   const firstAuto = lane.findIndex(isAuto);
@@ -247,15 +267,30 @@ function launch(job: TicketJob): void {
   progress({ phase: 'preparing' });
 
   void runPipeline(job, controller, progress)
+    .then(() => {
+      // AUTO-POSTING: an AUTOMATIC run that succeeded may post its story gaps on their owner PRs
+      // (./auto-post.ts decides, reads the run's status itself, never throws, never retries).
+      if (!isAuto(job)) return;
+      void import('./auto-post.js')
+        .then((m) => m.maybeAutoPostTicketReview(ctx, { accountId: job.accountId, runId }))
+        .catch((err) =>
+          ctx.log.warn(`auto post ticket review ${runId}: ${err instanceof Error ? err.message : String(err)}`),
+        );
+    })
     .catch(async (err) => {
       ctx.log.error(
         { err },
         `ticket review ${runId} failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       // A throw (network, git, database) says nothing about the inputs: retryable.
-      await markTicketReviewFailed(ctx, job.accountId, runId, err instanceof Error ? err.message : String(err), {}, {
-        retryable: true,
-      }).catch(() => {});
+      await markTicketReviewFailed(
+        ctx,
+        job.accountId,
+        runId,
+        err instanceof Error ? err.message : String(err),
+        job.spentUsd > 0 ? { costUsd: job.spentUsd } : {},
+        { retryable: true },
+      ).catch(() => {});
     })
     .finally(() => {
       running.delete(runId);
@@ -312,15 +347,72 @@ async function runPipeline(
   });
 
   const located = members
-    .map((m) => ({ ...m, ...(repos.get(m.prId) ?? { owner: '', name: '' }) }))
+    .map((m) => ({ ...m, ...(repos.get(m.prId) ?? { owner: '', name: '', defaultBranch: null }) }))
     .filter((m) => m.owner !== '');
+  const locatedById = new Map(located.map((m) => [m.prId, m]));
+  const repoName = (prId: number): string => {
+    const r = repos.get(prId);
+    return r ? `${r.owner}/${r.name}` : 'unknown';
+  };
   let cleanupWorktrees: (() => Promise<void>) | null = null;
+  let cleanupDefaults: (() => Promise<void>) | null = null;
   let scratch: string | null = null;
+  // Everything spent before the agent's own run (the card pre-pass) — added to the run's cost.
+  const spent = (): number | null => (job.spentUsd > 0 ? job.spentUsd : null);
   try {
-    // ---- per member, in parallel: diff + read-only worktree; plus the context ----
-    const [diffs, worktrees, legacy, prior] = await Promise.all([
-      fetchMemberDiffs(located),
-      prepareMemberWorktrees(located),
+    // ---- how each member is read: as its stored card, as a diff, or via the pre-pass ----
+    const stored = await readCardsAt(
+      ctx,
+      accountId,
+      members.map((m) => ({ prId: m.prId, headSha: m.headSha })),
+    ).catch(() => new Map<number, StoredCardRow>());
+    const plan = partitionMembers(members, new Set(stored.keys()));
+    const needDiff = [...plan.diffs, ...plan.prepass]
+      .map((id) => locatedById.get(id))
+      .filter((m): m is (typeof located)[number] => m != null);
+    if (plan.prepass.length > 0) {
+      progress({
+        phase: 'preparing',
+        message: `Describing ${plan.prepass.length} PR${plan.prepass.length === 1 ? '' : 's'} first`,
+      });
+    }
+    const diffsThenCards = (async () => {
+      const diffs = await fetchMemberDiffs(needDiff);
+      const results =
+        plan.prepass.length === 0
+          ? []
+          : await runCardPrepass({
+              inputs: plan.prepass.map((id) => {
+                const m = members.find((x) => x.prId === id)!;
+                return {
+                  prId: id,
+                  repo: repoName(id),
+                  number: m.number,
+                  title: m.title,
+                  diff: diffs.get(id)?.diff ?? null,
+                  noiseFiles: diffs.get(id)?.noiseFiles ?? [],
+                };
+              }),
+              ticket,
+              pickNonce: pickReviewNonce,
+              signal: controller.signal,
+              applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
+            });
+      return { diffs, results };
+    })();
+
+    // ---- in parallel: diffs (+ pre-pass), checkouts, and the context ----
+    // An OPEN member gets its own read-only worktree (whether shown as a card or a diff — the agent
+    // may verify a card); a MERGED member is read through ONE default-branch checkout per repo.
+    const [{ diffs, results }, worktrees, defaults, legacy, prior] = await Promise.all([
+      // Caught like the reads below: a rejection would skip the cleanup assignments and leak.
+      diffsThenCards.catch(() => ({ diffs: new Map<number, MemberDiff>(), results: [] as PrepassResult[] })),
+      prepareMemberWorktrees(located.filter((m) => m.state === 'open')),
+      prepDefaultBranchCheckouts(
+        located
+          .filter((m) => m.state === 'merged')
+          .map((m) => ({ owner: m.owner, name: m.name, branch: m.defaultBranch })),
+      ),
       loadLegacyStoryFindings(ctx, accountId, members.map((m) => m.prId), ticket).catch(() => []),
       // Caught, like the legacy read: a rejection here would skip the assignment below and leak the
       // worktrees the parallel branch prepared.
@@ -329,7 +421,51 @@ async function runPipeline(
         .catch(() => null),
     ]);
     cleanupWorktrees = worktrees.cleanup;
-    const checkedOut = new Map(members.map((m) => [m.prId, worktrees.byPr.get(m.prId)?.path != null]));
+    cleanupDefaults = defaults.cleanup;
+    job.spentUsd += prepassCost(results);
+
+    const headOf = new Map(members.map((m) => [m.prId, m.headSha]));
+    const prepassCards = new Map<number, TicketPrCardBody>();
+    for (const r of results) if (r.card != null) prepassCards.set(r.prId, r.card);
+    for (const r of results) {
+      if (r.card == null) ctx.log.warn(`ticket review ${runId}: no card for PR ${r.prId} (${r.failure ?? 'unknown'})`);
+    }
+    await saveCards(
+      ctx,
+      accountId,
+      results
+        .filter((r) => r.card != null)
+        .map((r) => ({
+          prId: r.prId,
+          headSha: headOf.get(r.prId) ?? '',
+          card: r.card!,
+          changedFiles: diffs.get(r.prId)?.changedFiles ?? [],
+          source: 'prepass' as const,
+          model: r.model ?? TICKET_CARD_MODEL,
+          costUsd: r.costUsd,
+        })),
+    ).catch((err) => ctx.log.warn({ err }, `ticket review ${runId}: could not store pre-pass cards`));
+    const { fallbackDiffs, unread } = placePrepassFailures(plan.prepass, new Set(prepassCards.keys()));
+    const diffSet = new Set([...plan.diffs, ...fallbackDiffs]);
+    const unreadSet = new Set(unread);
+    const cardOf = (prId: number): { body: TicketPrCardBody; changedFiles: string[] } | null => {
+      const s1 = stored.get(prId);
+      if (s1 != null) return { body: s1.card, changedFiles: s1.card.changedFiles };
+      const p1 = prepassCards.get(prId);
+      return p1 != null ? { body: p1, changedFiles: diffs.get(prId)?.changedFiles ?? [] } : null;
+    };
+
+    const defaultByRepo = new Map(defaults.checkouts.map((c) => [`${c.owner}/${c.name}`.toLowerCase(), c]));
+    const defaultCheckoutOf = (prId: number) => {
+      const m = locatedById.get(prId);
+      return m != null && m.state === 'merged' ? (defaultByRepo.get(`${m.owner}/${m.name}`.toLowerCase()) ?? null) : null;
+    };
+    const checkedOut = new Map(
+      members.map((m) => [
+        m.prId,
+        m.state === 'merged' ? defaultCheckoutOf(m.prId)?.path != null : worktrees.byPr.get(m.prId)?.path != null,
+      ]),
+    );
     await setTicketMemberCheckouts(ctx, accountId, runId, checkedOut);
     if (![...checkedOut.values()].some(Boolean)) {
       await markTicketReviewRefused(ctx, accountId, runId, {
@@ -337,33 +473,45 @@ async function runPipeline(
         prCount: members.length,
         ticketHash: hash,
         fingerprint: fp,
+        costUsd: spent(),
       });
       return;
     }
     if (controller.signal.aborted) {
-      await markTicketReviewCancelled(ctx, accountId, runId);
+      await markTicketReviewCancelled(ctx, accountId, runId, { costUsd: spent() });
       return;
     }
 
     // ---- the prompt ----
-    const capped = capMemberDiffs(members.map((m) => diffs.get(m.prId)?.diff ?? null));
+    const diffMembers = members.filter((m) => diffSet.has(m.prId));
+    const capped = capMemberDiffs(diffMembers.map((m) => diffs.get(m.prId)?.diff ?? null));
+    const cappedOf = new Map(diffMembers.map((m, i) => [m.prId, capped[i]!]));
     const promptMembers: PromptMember[] = members.map((m, i) => {
-      const repo = repos.get(m.prId);
+      const card = diffSet.has(m.prId) || unreadSet.has(m.prId) ? null : cardOf(m.prId);
+      const given: 'card' | 'diff' | 'unread' = diffSet.has(m.prId) ? 'diff' : card != null ? 'card' : 'unread';
+      const c = cappedOf.get(m.prId);
       return {
         ref: `PR${i + 1}`,
         prId: m.prId,
-        repo: repo ? `${repo.owner}/${repo.name}` : 'unknown',
+        repo: repoName(m.prId),
         number: m.number,
         title: m.title,
         state: m.state,
         headSha: m.headSha,
         checkedOut: checkedOut.get(m.prId) === true,
-        worktreePath: worktrees.byPr.get(m.prId)?.path ?? null,
-        changedFiles: diffs.get(m.prId)?.changedFiles ?? [],
-        diff: capped[i]!.diff,
-        omittedFiles: capped[i]!.omittedFiles,
+        worktreePath: m.state === 'open' ? (worktrees.byPr.get(m.prId)?.path ?? null) : null,
+        defaultBranchPath: defaultCheckoutOf(m.prId)?.path ?? null,
+        given,
+        card: card?.body ?? null,
+        changedFiles: given === 'card' ? card!.changedFiles : (diffs.get(m.prId)?.changedFiles ?? []),
+        diff: given === 'diff' ? (c?.diff ?? null) : null,
+        noiseFiles: given === 'diff' ? (diffs.get(m.prId)?.noiseFiles ?? []) : [],
+        omittedFiles: given === 'diff' ? (c?.omittedFiles ?? []) : [],
       };
     });
+    const defaultBranches: PromptDefaultBranch[] = defaults.checkouts
+      .filter((c) => c.path != null)
+      .map((c) => ({ repo: `${c.owner}/${c.name}`, branch: c.branch, sha: c.sha, path: c.path! }));
     const promptPrior: PromptPrior | null =
       prior?.assessment != null
         ? (() => {
@@ -376,7 +524,14 @@ async function runPipeline(
           })()
         : null;
     const nonce = pickReviewNonce(ticketReviewUntrustedTexts(ticket, promptMembers, promptPrior, legacy));
-    const prompt = buildTicketReviewPrompt({ ticket, members: promptMembers, prior: promptPrior, legacy, nonce });
+    const prompt = buildTicketReviewPrompt({
+      ticket,
+      members: promptMembers,
+      prior: promptPrior,
+      legacy,
+      nonce,
+      defaultBranches,
+    });
     scratch = mkdtempSync(join(tmpdir(), 'pierre-ticket-review-'));
     writeFileSync(join(scratch, 'MEMBERS.md'), membersIndex(promptMembers), 'utf8');
 
@@ -386,7 +541,11 @@ async function runPipeline(
     const res = await runTicketReviewAgent({
       model: job.model,
       cwd: scratch,
-      worktrees: promptMembers.map((m) => m.worktreePath).filter((p): p is string => p != null),
+      // Every checkout is a root of the path guard; nothing else on disk can be read.
+      worktrees: [
+        ...promptMembers.map((m) => m.worktreePath).filter((p): p is string => p != null),
+        ...defaultBranches.map((b) => b.path),
+      ],
       systemPrompt: TICKET_REVIEW_SYSTEM_PROMPT,
       prompt,
       applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
@@ -395,8 +554,10 @@ async function runPipeline(
     });
 
     progress({ phase: 'saving' });
+    const agentCost = res.costUsd ?? 0;
+    const total = agentCost + job.spentUsd;
     const telemetry = {
-      costUsd: res.costUsd,
+      costUsd: res.costUsd == null && job.spentUsd <= 0 ? null : total,
       inputTokens: res.inputTokens,
       outputTokens: res.outputTokens,
       numTurns: res.numTurns,
@@ -409,6 +570,26 @@ async function runPipeline(
       await markTicketReviewFailed(ctx, accountId, runId, res.failureReason ?? 'ticket review failed', telemetry);
       return;
     }
+    // The run's cards: one per member it was SHOWN AS A DIFF (an unread diff shows nothing to
+    // describe), validated against exactly those refs.
+    const runCards = validateRunCards(
+      (res.payload as { cards?: unknown } | null)?.cards,
+      promptMembers.filter((m) => m.given === 'diff' && m.diff != null && m.diff !== ''),
+      new Map(promptMembers.map((m) => [m.ref, `${m.repo.split('/').pop() ?? m.repo}#${m.number}`])),
+    );
+    await saveCards(
+      ctx,
+      accountId,
+      [...runCards].map(([prId, card]) => ({
+        prId,
+        headSha: headOf.get(prId) ?? '',
+        card,
+        changedFiles: diffs.get(prId)?.changedFiles ?? [],
+        source: 'story_check' as const,
+        model: job.model,
+        costUsd: null,
+      })),
+    ).catch((err) => ctx.log.warn({ err }, `ticket review ${runId}: could not store its cards`));
     const { assessment, items } = reconcileTicketReview(
       ticket,
       promptMembers.map((m) => ({
@@ -430,6 +611,7 @@ async function runPipeline(
     });
   } finally {
     await cleanupWorktrees?.().catch(() => {});
+    await cleanupDefaults?.().catch(() => {});
     if (scratch) {
       try {
         rmSync(scratch, { recursive: true, force: true });

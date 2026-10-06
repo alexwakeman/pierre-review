@@ -6,7 +6,8 @@
 // SUCCEEDED run (read by id while a newer one runs, failed or was refused), its currency, how long
 // ago it ran, Check CI / Re-check (mutation key `['ci-review-start', prId]`), live progress, and one
 // row per failing check. With no CI review at all, an older code review's stored CI diagnosis is
-// shown as history.
+// shown as history. ONLY THE PR'S CURRENT HEAD is ever shown (`ciRunAtCurrentHead`): a run of an
+// earlier commit is hidden whether the head is green or red.
 //
 // Rules: every string from a check or from Claude in a ROW renders as plain text (CiFailureRow);
 // the run's summary is markdown through the sanitizing <Markdown>. The one href per row is the
@@ -28,6 +29,7 @@ import {
   ciCurrency,
   ciProgressPct,
   ciRefusalSentence,
+  ciRunAtCurrentHead,
   ciSectionShow,
   type CiCurrency,
 } from '../lib/ciReview.js';
@@ -90,25 +92,43 @@ export function CiCheckSection({
   const stream = useCiReviewStream(state?.runningRunId ?? null, running);
   // The result shown is the latest SUCCEEDED run: `review` when it is that run, else read by id.
   const latestOk = review?.status === 'succeeded' ? review : null;
+  // (Not fetched when that run read an earlier commit — it would not be shown.)
   const { data: earlier } = useCiReviewById(
-    latestOk == null && state?.latestRunId != null ? state.latestRunId : null,
+    latestOk == null && state?.latestRunId != null && ciRunAtCurrentHead(state.headSha, pr.headSha)
+      ? state.latestRunId
+      : null,
   );
-  const shown = latestOk ?? (earlier?.status === 'succeeded' ? earlier : null);
+  // ONLY THE CURRENT HEAD (`ciRunAtCurrentHead`): a run, or an older code review's CI diagnosis, of
+  // an earlier commit is not shown — green CI makes it noise, red CI on this head makes it the
+  // wrong commit's story.
+  const shownAny = latestOk ?? (earlier?.status === 'succeeded' ? earlier : null);
+  const shown = shownAny != null && ciRunAtCurrentHead(shownAny.headSha, pr.headSha) ? shownAny : null;
+  const legacyFailures = legacy != null && ciRunAtCurrentHead(legacy.headSha, pr.headSha) ? legacy.ciFailures : null;
   const items = useMemo(() => orderCiFailures(shown?.items ?? []), [shown]);
-  const legacyItems = useMemo(() => orderCiFailures(legacy?.ciFailures ?? []), [legacy]);
+  const legacyItems = useMemo(() => orderCiFailures(legacyFailures ?? []), [legacyFailures]);
 
   if (!ai.enabled || isLoading) return null;
+  // A refusal of the newest attempt at the PR's current head (the server says which), and a run
+  // that failed outright — only while it is the latest, and only at the current head.
+  const refused = !running ? (state?.refused ?? null) : null;
+  const failed =
+    !running &&
+    review?.status === 'failed' &&
+    review.refused == null &&
+    ciRunAtCurrentHead(review.headSha, pr.headSha)
+      ? (review.error ?? 'The check failed.')
+      : null;
   const show = isError
     ? 'offer'
-    : ciSectionShow({ review, state, legacyFailures: legacy?.ciFailures, prCiStatus: pr.ciStatus });
+    : ciSectionShow({
+        hasCurrentRun: shown != null || refused != null || failed != null,
+        running,
+        legacyFailures,
+        prCiStatus: pr.ciStatus,
+      });
   if (show === 'hidden') return null;
 
   const currency = state != null && (shown != null || running) ? ciCurrency(state) : null;
-  // A refusal of the newest attempt at the PR's current head (the server says which), and a run
-  // that failed outright — only while it is the latest.
-  const refused = !running ? (state?.refused ?? null) : null;
-  const failed =
-    !running && review?.status === 'failed' && review.refused == null ? (review.error ?? 'The check failed.') : null;
   const rows = show === 'legacy' ? legacyItems : items;
   const countPills = ciCountPills(rows);
 
@@ -175,15 +195,7 @@ export function CiCheckSection({
       {refused != null && <p className={`text-xs ${MUTED}`}>{ciRefusalSentence(refused)}</p>}
       {failed != null && <p className={`text-xs ${ERROR_TEXT}`}>{failed}</p>}
       {show === 'legacy' && (
-        <p className={REVIEW_META}>
-          From an earlier Claude review
-          {legacy?.headSha != null && legacy.headSha !== '' ? (
-            <>
-              {' '}of <span className="font-mono">{legacy.headSha.slice(0, 7)}</span>
-            </>
-          ) : null}
-          .
-        </p>
+        <p className={REVIEW_META}>From an earlier Claude review of this commit.</p>
       )}
       {show === 'ci' && shown?.summary != null && shown.summary !== '' && <Markdown prRefs>{shown.summary}</Markdown>}
       {rows.length > 0 && (

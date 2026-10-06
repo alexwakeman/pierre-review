@@ -25,6 +25,7 @@ import { fixPillLabel } from '../../lib/claudeAutoReview.js';
 import { unlockReviewSound } from '../../lib/sound.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { CheckIcon, SparkleIcon } from '../Icons.js';
+import { VerdictIcon } from '../VerdictIcon.js';
 import { AutoMark, GREY_PILL, MUTED, PILL } from './ClaudeReviewCell.js';
 import { ReviewedAgo } from '../ReviewedAgo.js';
 import { ciCardPill } from '../../lib/ciReview.js';
@@ -113,7 +114,8 @@ export function ClaudeReviewLine({
             cell.verdict != null ? VERDICT_CLASS[cell.verdict] : 'bg-gray-500/10 text-gray-600 dark:text-gray-300'
           } ${LINK}`}
         >
-          {cell.verdictLabel}
+          {cell.verdict != null && <VerdictIcon verdict={cell.verdict} size={11} />}
+            {cell.verdictLabel}
         </button>
       );
       break;

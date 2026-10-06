@@ -22,7 +22,8 @@ import {
   DEFAULT_CLAUDE_REVIEW_MODEL,
   followUpSentence,
 } from '@pierre-review/shared';
-import { formatDate, formatUsd, safeExternalUrl } from '../lib/ui.js';
+import { formatDate, formatUsd, relativeTime, safeExternalUrl } from '../lib/ui.js';
+import { autoPostFailureLine, postedChipLabel } from '../lib/autoPost.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { AiCloudNote, AiRunGate } from './AiSetup.js';
@@ -43,7 +44,7 @@ import {
 import { highlightBlock, languageForPath } from '../lib/hljsLines.js';
 import { hunkLineMarker, useHunkHighlight } from './DiffHunk.js';
 import { writeClipboard } from './CopyButton.js';
-import { copyableFindings, findingsMarkdown } from '../lib/findingsMarkdown.js';
+import { copyFindingsLabel, copyableFindings, findingsMarkdown } from '../lib/findingsMarkdown.js';
 import { Markdown } from './Markdown.js';
 import { MentionTextarea } from './MentionTextarea.js';
 import { ReviewChatSection } from './ClaudeReviewChat.js';
@@ -57,8 +58,10 @@ import {
   RefreshIcon,
   WarningIcon,
 } from './Icons.js';
+import { VerdictIcon } from './VerdictIcon.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { AUTO_REVIEW_LABEL } from './Activity/pendingLabels.js';
+import { VERDICT_PILL } from './Activity/ClaudeReviewCell.js';
 import { ReviewedAgo } from './ReviewedAgo.js';
 import { ClaudeReviewFollowUpSection } from './ClaudeReviewFollowUp.js';
 import { ClaudeReviewThreadsSection } from './ClaudeReviewThreads.js';
@@ -73,7 +76,7 @@ import { useTicketReviews } from '../hooks/useTicketReview.js';
 import { useCiReview } from '../hooks/useCiReview.js';
 import { useClaudeReviewChat } from '../hooks/useClaudeReviewChat.js';
 import { legacyOnlyEntries } from '../lib/ticketStory.js';
-import { reviewCurrency, reviewRunWhen, type ReviewCurrency } from '../lib/claudeReviewColumn.js';
+import { reviewCurrency, reviewRunWhen, visibleReviewBody, type ReviewCurrency } from '../lib/claudeReviewColumn.js';
 import {
   ALREADY_POSTED_CHIP,
   RERAISED_CHIP,
@@ -112,11 +115,11 @@ const VERDICT_LABEL: Record<ClaudeReviewVerdict, string> = {
   APPROVE: 'Approve',
 };
 
+// The run's OUTCOME — the header's first pill, the same size as the Open PRs panel's headline.
 function VerdictBadge({ verdict }: { verdict: ClaudeReviewVerdict }): JSX.Element {
   return (
-    <span
-      className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${VERDICT_CLASS[verdict]}`}
-    >
+    <span className={`${VERDICT_PILL} ${VERDICT_CLASS[verdict]}`}>
+      <VerdictIcon verdict={verdict} size={13} />
       {VERDICT_LABEL[verdict]}
     </span>
   );
@@ -329,10 +332,65 @@ const BTN_PRIMARY =
 const BTN_SECONDARY =
   'whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
 
-// "Copy all" in the Findings header: every finding on screen there that the reader has not
-// ignored (praise is already gone), as ONE markdown string for the reader's own coding agent —
-// built by `lib/findingsMarkdown.ts`, where the reword-wins and `---` separator rules live. Absent
-// when nothing would be copied (an offer to copy nothing is a no-op). "Copied N" names how many.
+// THE REVIEW PREVIEW (Preview, a dry run): exactly what Post will send — the verdict, the
+// top-level summary, each inline comment at its file and line, and any finding that goes as its own
+// PR comment (its file is not in the diff). Bodies render as markdown, as on GitHub.
+function PostReviewPreviewPanel({ preview }: { preview: PostReviewPreview }): JSX.Element {
+  const body = visibleReviewBody(preview.body);
+  const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`;
+  return (
+    <div className="space-y-2 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800/50">
+      <div className="flex flex-wrap items-center gap-2">
+        <VerdictBadge verdict={preview.event} />
+        <span className={REVIEW_META}>
+          {plural(preview.comments.length, 'inline comment')}
+          {preview.prComments.length > 0 ? ` · ${plural(preview.prComments.length, 'PR comment')}` : ''}
+        </span>
+      </div>
+      {body !== '' ? (
+        <Markdown>{body}</Markdown>
+      ) : (
+        <p className={REVIEW_META}>No summary.</p>
+      )}
+      {preview.comments.length > 0 && (
+        <ul className="space-y-2">
+          {preview.comments.map((c, i) => (
+            <li key={`${c.path}:${c.line}:${i}`} className={`${REVIEW_ITEM_CARD} bg-white dark:bg-gray-900`}>
+              <div className="mb-1 break-all font-mono text-xs text-gray-600 dark:text-gray-300">
+                {c.path}:{c.line}
+              </div>
+              <Markdown>{c.body}</Markdown>
+            </li>
+          ))}
+        </ul>
+      )}
+      {preview.prComments.length > 0 && (
+        <ul className="space-y-2">
+          {preview.prComments.map((c) => (
+            <li key={c.findingId} className={`${REVIEW_ITEM_CARD} bg-white dark:bg-gray-900`}>
+              <div className="mb-1 text-xs text-gray-600 dark:text-gray-300">
+                PR comment
+                {c.path !== '' ? (
+                  <>
+                    {' · '}
+                    <span className="break-all font-mono">{c.path}</span>
+                  </>
+                ) : null}
+              </div>
+              <Markdown>{c.body}</Markdown>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// "Copy all" / "Copy 4" in the Findings header: every finding on screen there that the reader has
+// not ignored (praise is already gone), as ONE markdown string for the reader's own coding agent —
+// built by `lib/findingsMarkdown.ts`, where the reword-wins and `---` separator rules live. The
+// label states the count once anything is ignored (`copyFindingsLabel`). Absent when nothing would
+// be copied (an offer to copy nothing is a no-op). "Copied N" names how many.
 function CopyAllFindingsButton({
   findings,
   editable,
@@ -349,7 +407,8 @@ function CopyAllFindingsButton({
     [],
   );
   const count = copyableFindings(findings, editable).length;
-  if (count === 0) return null;
+  const label = copyFindingsLabel(count, findings.length);
+  if (label == null) return null;
   const copyAll = (): void => {
     void writeClipboard(findingsMarkdown(findings, editable)).then((ok) => {
       if (!ok) return;
@@ -360,7 +419,7 @@ function CopyAllFindingsButton({
   };
   return (
     <button type="button" onClick={copyAll} className={BTN_SECONDARY}>
-      {copiedCount != null ? `Copied ${copiedCount}` : 'Copy all'}
+      {copiedCount != null ? `Copied ${copiedCount}` : label}
     </button>
   );
 }
@@ -752,12 +811,12 @@ function FindingRow({
                   className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 hover:underline dark:text-green-400"
                   title="View this comment on GitHub"
                 >
-                  Posted
+                  {postedChipLabel(finding)}
                   <CheckIcon size={11} />
                 </a>
               ) : (
                 <span className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 dark:text-green-400">
-                  Posted
+                  {postedChipLabel(finding)}
                   <CheckIcon size={11} />
                 </span>
               ))}
@@ -1129,9 +1188,10 @@ function ClaudesReview({
         title="Claude's review"
         pills={
           <>
+            {/* The outcome leads; everything after it is about the run. */}
+            {review.verdict != null && <VerdictBadge verdict={review.verdict} />}
             {currency != null && <CurrencyPill currency={currency} />}
             <ReviewedAgo at={review.finishedAt} />
-            {review.verdict != null && <VerdictBadge verdict={review.verdict} />}
             {review.trigger === 'auto' && (
               <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
                 {AUTO_REVIEW_LABEL}
@@ -1487,21 +1547,35 @@ export function ClaudeReviewTab({
   const phase = status?.progress?.phase ?? null;
   const phaseLabel = phase != null ? (PHASE_LABEL[phase] ?? phase) : 'Starting…';
 
+  // ⚠ The server posts the STORED draft body. Clicking Preview blurs the summary box, whose save
+  // then races the dry run — so the preview showed the previous body. Save first, then ask.
+  const saveDraftThen = (then: () => void): void => {
+    if (review == null) return;
+    updateReview.mutateAsync({ reviewId: review.id, userBody }).then(then, () => {
+      /* the save's own error state shows; nothing is previewed or posted on a failed save */
+    });
+  };
+
   const runPreview = (): void => {
     if (review == null) return;
     setPostResult(null);
-    postReview.mutate(
-      { reviewId: review.id, userVerdict, dryRun: true },
-      { onSuccess: (res) => setPreview(res as PostReviewPreview) },
+    setPreview(null);
+    saveDraftThen(() =>
+      postReview.mutate(
+        { reviewId: review.id, userVerdict, dryRun: true },
+        { onSuccess: (res) => setPreview(res as PostReviewPreview) },
+      ),
     );
   };
 
   const runPost = (): void => {
     if (review == null) return;
     setConfirmPost(false);
-    postReview.mutate(
-      { reviewId: review.id, userVerdict },
-      { onSuccess: (res) => setPostResult(res as PostReviewResult) },
+    saveDraftThen(() =>
+      postReview.mutate(
+        { reviewId: review.id, userVerdict },
+        { onSuccess: (res) => setPostResult(res as PostReviewResult) },
+      ),
     );
   };
 
@@ -1770,7 +1844,11 @@ export function ClaudeReviewTab({
           title="Post to GitHub"
           pills={
             review.postedAt != null ? (
-              <span className="text-xs text-gray-500 dark:text-gray-400">Posted {formatDate(review.postedAt)}</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {review.autoPost?.status === 'posted' || review.autoPost?.status === 'partial'
+                  ? `Posted automatically · ${relativeTime(review.autoPost.at)}`
+                  : `Posted ${formatDate(review.postedAt)}`}
+              </span>
             ) : null
           }
           info={
@@ -1785,10 +1863,16 @@ export function ClaudeReviewTab({
           }
         >
           <div className="text-xs font-medium text-gray-700 dark:text-gray-300">Summary</div>
+          {autoPostFailureLine(review.autoPost) != null && (
+            <p className="text-xs text-amber-700 dark:text-amber-300">{autoPostFailureLine(review.autoPost)}</p>
+          )}
           <MentionTextarea
             prId={pr.id}
             value={userBody}
-            onChange={setUserBody}
+            onChange={(v) => {
+              setUserBody(v);
+              setPreview(null);
+            }}
             onBlur={() => updateReview.mutate({ reviewId: review.id, userBody })}
             rows={6}
             placeholder="Summary (markdown, @ to mention). Optional."
@@ -1812,6 +1896,7 @@ export function ClaudeReviewTab({
               onChange={(e) => {
                 const v = e.target.value as ClaudeReviewVerdict;
                 setUserVerdict(v);
+                setPreview(null);
                 updateReview.mutate({ reviewId: review.id, userVerdict: v });
               }}
               className="rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900"
@@ -1866,23 +1951,8 @@ export function ClaudeReviewTab({
             )}
           </div>
 
-          {/* Dry-run preview summary. */}
-          {preview != null && (
-            <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800/50">
-              <div>
-                Will post <strong>{preview.comments.length}</strong> inline
-                comment{preview.comments.length === 1 ? '' : 's'} as{' '}
-                <strong>{VERDICT_LABEL[preview.event]}</strong>.
-              </div>
-              {preview.prComments.length > 0 && (
-                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Plus <strong>{preview.prComments.length}</strong> PR comment
-                  {preview.prComments.length === 1 ? '' : 's'}:{' '}
-                  {preview.prComments.map((c) => (c.path !== '' ? c.path : 'the whole change')).join(', ')}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Dry-run preview: exactly what Post will send. */}
+          {preview != null && <PostReviewPreviewPanel preview={preview} />}
 
           {/* Post result. */}
           {postResult != null && (

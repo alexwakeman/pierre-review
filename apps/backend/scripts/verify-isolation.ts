@@ -3140,14 +3140,14 @@ check(
     "B's workspace stays OFF after A's attempt",
     (await autoSettings.readWorkspaceAutoReview(actx, 2, defaultB))?.enabled === false,
   );
-  // The auto AI Fix switch (workspaces.auto_fix_enabled, migration 0083) rides the same writer.
+  // The auto AI Fix switch (workspaces.auto_fix_enabled, migration 0083, OFF by default since 0084) rides the same writer.
   check(
     "setWorkspaceAutoReview(A, B's workspace, autoFixEnabled) is refused (→ 404)",
-    (await autoSettings.setWorkspaceAutoReview(actx, 1, defaultB, { autoFixEnabled: false })) === null,
+    (await autoSettings.setWorkspaceAutoReview(actx, 1, defaultB, { autoFixEnabled: true })) === null,
   );
   check(
-    "B's auto fix stays ON (the default) after A's attempt",
-    (await autoSettings.readWorkspaceAutoReview(actx, 2, defaultB))?.autoFixEnabled === true,
+    "B's auto fix stays OFF (the default) after A's attempt",
+    (await autoSettings.readWorkspaceAutoReview(actx, 2, defaultB))?.autoFixEnabled === false,
   );
   // The workspace holding B's repo NOW (earlier sections move repos off the Default one).
   const [holdB] = (await db
@@ -3156,16 +3156,37 @@ check(
     .where(and(eq(schema.workspaceRepos.accountId, 2), eq(schema.workspaceRepos.repoId, B.repoId)))
     .execute()) as Array<{ workspaceId: number }>;
   const wsHoldingB = holdB?.workspaceId ?? defaultB;
-  await autoSettings.setWorkspaceAutoReview(actx, 2, wsHoldingB, { autoFixEnabled: false });
+  await autoSettings.setWorkspaceAutoReview(actx, 2, wsHoldingB, { autoFixEnabled: true });
   check(
-    "MUTATION: B's own read of its PR sees B's switch OFF (the check below is not vacuous)",
-    (await autoSettings.readWorkspaceAutoFixForPr(actx, 2, B.prId)) === false,
+    "MUTATION: B's own read of its PR sees B's switch ON (the check below is not vacuous)",
+    (await autoSettings.readWorkspaceAutoFixForPr(actx, 2, B.prId)) === true,
   );
   check(
     "readWorkspaceAutoFixForPr(A, B.pr) never reads B's workspace switch",
-    (await autoSettings.readWorkspaceAutoFixForPr(actx, 1, B.prId)) === true,
+    (await autoSettings.readWorkspaceAutoFixForPr(actx, 1, B.prId)) === false,
   );
-  await autoSettings.setWorkspaceAutoReview(actx, 2, wsHoldingB, { autoFixEnabled: true });
+  await autoSettings.setWorkspaceAutoReview(actx, 2, wsHoldingB, { autoFixEnabled: false });
+  // AUTO-POSTING (workspaces.auto_post_enabled + auto_post_settings, migration 0087): the same
+  // writer, and the per-PR read auto-posting gates on. It WRITES TO GITHUB as the reader, so a
+  // cross-account read answering "on" would post on another tenant's PR.
+  check(
+    "setWorkspaceAutoReview(A, B's workspace, autoPost) is refused (→ 404)",
+    (await autoSettings.setWorkspaceAutoReview(actx, 1, defaultB, { autoPost: { enabled: true } })) === null,
+  );
+  check(
+    "B's auto-posting stays OFF (the default) after A's attempt",
+    (await autoSettings.readWorkspaceAutoReview(actx, 2, defaultB))?.autoPost.enabled === false,
+  );
+  await autoSettings.setWorkspaceAutoReview(actx, 2, wsHoldingB, { autoPost: { enabled: true } });
+  check(
+    "MUTATION: B's own read of its PR sees B's auto-posting ON (the check below is not vacuous)",
+    (await autoSettings.readWorkspaceAutoPostForPr(actx, 2, B.prId))?.settings.enabled === true,
+  );
+  check(
+    "readWorkspaceAutoPostForPr(A, B.pr) is null — never B's workspace switch",
+    (await autoSettings.readWorkspaceAutoPostForPr(actx, 1, B.prId)) === null,
+  );
+  await autoSettings.setWorkspaceAutoReview(actx, 2, wsHoldingB, { autoPost: { enabled: false } });
   await autoSettings.setWorkspaceAutoReview(actx, 1, defaultA, { enabled: true });
   const roster = await autoSettings.listAutoReviewWorkspaces(actx);
   check(
@@ -3262,6 +3283,42 @@ check(
     crossRefused = true;
   }
   check("a member row naming B's PR under A's run is refused by the composite FK", crossRefused);
+
+  // CONTRIBUTION CARDS (migration 0086 / pg 0073): one per (account, PR, head). Both accounts store
+  // a card at the SAME head, so a dropped account predicate would have something to leak.
+  const cards = await import('../src/review/ticket-review/cards.js');
+  const card = (summary: string) => ({ summary, interfaces: [], criteria: [], looseEnds: [] });
+  const CARD_HEAD = 'c'.repeat(40);
+  await cards.saveCards(tctx, 1, [
+    { prId: A.prId, headSha: CARD_HEAD, card: card('A'), changedFiles: [], source: 'prepass', model: 'm', costUsd: null },
+  ]);
+  await cards.saveCards(tctx, 2, [
+    { prId: B.prId, headSha: CARD_HEAD, card: card('B'), changedFiles: [], source: 'prepass', model: 'm', costUsd: null },
+  ]);
+  check(
+    "readCardsAt(A, A's PR) returns A's card",
+    (await cards.readCardsAt(tctx, 1, [{ prId: A.prId, headSha: CARD_HEAD }])).get(A.prId)?.card.summary === 'A',
+  );
+  check(
+    "readCardsAt(A, B's PR) returns nothing (IDOR blocked)",
+    (await cards.readCardsAt(tctx, 1, [{ prId: B.prId, headSha: CARD_HEAD }])).size === 0,
+  );
+  const sameHead = await db
+    .select()
+    .from(schema.ticketReviewPrCards)
+    .where(eq(schema.ticketReviewPrCards.headSha, CARD_HEAD))
+    .execute();
+  check('MUTATION: without the account predicate both cards share the head', sameHead.length === 2);
+  let crossCard = false;
+  try {
+    await db
+      .insert(schema.ticketReviewPrCards)
+      .values({ accountId: 1, prId: B.prId, headSha: 'x', card: { ...card('x'), changedFiles: [] }, source: 'prepass', model: 'm' })
+      .execute();
+  } catch {
+    crossCard = true;
+  }
+  check("a card naming B's PR under account A is refused by the composite FK", crossCard);
 }
 
 // ── CI REVIEW (migration 0082 / pg 0069) ─────────────────────────────────────────────────────────

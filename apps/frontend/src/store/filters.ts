@@ -844,9 +844,8 @@ export interface FilterState {
   // setActivityRepo — surviving rail switches is the point.
   repoConsoleTabs: Record<number, RepoConsoleTab>;
 
-  // file groups + diff hunks (PR detail thread view)
-  expandedFileGroups: string[]; // paths explicitly toggled by the user
-  collapsedFileGroups: string[]; // paths explicitly collapsed by the user
+  // diff hunks (PR detail thread view). Thread collapse is NOT here: a resolved thread's
+  // open/closed state is local component state in ThreadList, scoped to one PR view.
   expandedDiffHunks: number[]; // thread ids with the full hunk shown
 
   // transient: request the timeline to scroll/focus a PR (cleared after use)
@@ -1269,7 +1268,6 @@ export interface FilterState {
   // period on the calendar grid (and vice versa), so carrying it across would leave the panel
   // asking for a document that cannot exist and rendering "not generated yet" for it.
   setInsightsReportGrain: (grain: PeriodGrain) => void;
-  toggleFileGroup: (path: string, defaultExpanded: boolean) => void;
   toggleDiffHunk: (threadId: number) => void;
   // Reset every user-set FILTER (repos, members, range, categories, PR statuses,
   // derived states, search, excludeBots, excludeStale, strip filter) back to its
@@ -1547,8 +1545,6 @@ function freshDefaults(): FilterData {
     activityRepoId: 'attention',
     activityThreadFilter: null,
     repoConsoleTabs: {},
-    expandedFileGroups: [],
-    collapsedFileGroups: [],
     expandedDiffHunks: [],
     timelineFocusPr: null,
     timelineFocusAt: null,
@@ -2129,25 +2125,6 @@ export const useFilters = create<FilterState>((set, get) => ({
     set((s) =>
       s.insightsReportGrain === grain ? {} : { insightsReportGrain: grain, insightsReportKey: null },
     ),
-  toggleFileGroup: (path, defaultExpanded) =>
-    set((s) => {
-      // Track explicit user intent against the default so re-renders are stable.
-      const isExpanded = defaultExpanded
-        ? !s.collapsedFileGroups.includes(path)
-        : s.expandedFileGroups.includes(path);
-      if (defaultExpanded) {
-        return {
-          collapsedFileGroups: isExpanded
-            ? [...s.collapsedFileGroups, path]
-            : s.collapsedFileGroups.filter((p) => p !== path),
-        };
-      }
-      return {
-        expandedFileGroups: isExpanded
-          ? s.expandedFileGroups.filter((p) => p !== path)
-          : [...s.expandedFileGroups, path],
-      };
-    }),
   toggleDiffHunk: (threadId) =>
     set((s) => ({ expandedDiffHunks: toggle(s.expandedDiffHunks, threadId) })),
   resetAllFilters: () =>

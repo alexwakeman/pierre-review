@@ -7,7 +7,9 @@ import { schema, type Executor } from './client.js';
 //   • a run left with NO members is deleted with its items — it describes nothing any more. That
 //     includes a run refused before it had members, which only its starting PR anchors;
 //   • an item whose owner was a deleted PR keeps its history but loses the owner (`owner_pr_id`
-//     null), so a Post can never target a PR that is gone.
+//     null), so a Post can never target a PR that is gone;
+//   • the deleted PRs' contribution cards (`ticket_review_pr_cards`, migration 0086 / pg 0073) go
+//     with them — a card describes one PR's head and nothing else.
 // Children before parents, explicitly — the composite FKs cascade, but these paths run parent-last
 // by hand on both dialects. Runs inside the caller's transaction.
 export async function pruneTicketReviewsForPrs(tx: Executor, prIds: readonly number[]): Promise<void> {
@@ -29,6 +31,7 @@ export async function pruneTicketReviewsForPrs(tx: Executor, prIds: readonly num
     .where(inArray(tr.originPrId, ids))
     .execute()) as Array<{ id: number }>;
   await tx.delete(m).where(inArray(m.prId, ids)).execute();
+  await tx.delete(schema.ticketReviewPrCards).where(inArray(schema.ticketReviewPrCards.prId, ids)).execute();
   await tx.update(items).set({ ownerPrId: null }).where(inArray(items.ownerPrId, ids)).execute();
   const runIds = [...new Set([...touched, ...started].map((r) => r.id))];
   if (runIds.length === 0) return;

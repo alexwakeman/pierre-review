@@ -186,7 +186,7 @@ export function findingCommentBody(
     suggestion: string | null;
     storyLead?: string | null;
   },
-  opts?: { fallbackNote?: boolean },
+  opts?: { fallbackNote?: boolean; footer?: string | null },
 ): string {
   const body = f.editedBody && f.editedBody.trim() ? f.editedBody : f.body;
   const parts = [f.storyLead, body].filter((p): p is string => p != null && p.trim() !== '');
@@ -198,6 +198,7 @@ export function findingCommentBody(
     );
   }
   if (opts?.fallbackNote) parts.push(FALLBACK_ANCHOR_NOTE);
+  if (opts?.footer) parts.push(opts.footer);
   parts.push(FINDING_COMMENT_MARKER);
   return parts.join('\n\n');
 }
@@ -222,7 +223,7 @@ export function prLevelFindingBody(f: {
   editedBody: string | null;
   suggestion: string | null;
   storyLead?: string | null;
-}): string {
+}, opts?: { outsideDiffNote?: boolean; footer?: string | null }): string {
   const body = f.editedBody && f.editedBody.trim() ? f.editedBody : f.body;
   const hasPath = f.path.trim() !== '';
   const ref = f.line != null ? `${f.path}:${f.line}` : f.path;
@@ -233,7 +234,8 @@ export function prLevelFindingBody(f: {
   if (f.suggestion && f.suggestion.trim()) {
     parts.push(`\`\`\`\n${f.suggestion}\n\`\`\``);
   }
-  if (hasPath) parts.push(OUTSIDE_DIFF_NOTE);
+  if (hasPath && opts?.outsideDiffNote !== false) parts.push(OUTSIDE_DIFF_NOTE);
+  if (opts?.footer) parts.push(opts.footer);
   parts.push(FINDING_COMMENT_MARKER);
   return parts.join('\n\n');
 }

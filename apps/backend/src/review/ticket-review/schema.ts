@@ -11,6 +11,53 @@ import { loadZod } from '../../ai/runtime.js';
 
 type ZodNs = typeof Zod;
 
+/**
+ * The fields of one CONTRIBUTION CARD (cards.ts) — what one PR's head does, never a verdict. Shared
+ * by the ticket review's `cards` and the pre-pass's `submit_pr_card`. The server re-checks every
+ * field (`normaliseCard`).
+ */
+export function buildCardFields(z: ZodNs) {
+  return {
+    summary: z
+      .string()
+      .describe('What this pull request does: its features and behaviour, in two to five plain sentences. Facts only, no verdict.'),
+    interfaces: z
+      .array(
+        z.object({
+          kind: z.enum(['endpoint', 'field', 'event', 'config', 'export', 'schema', 'other']),
+          name: z.string().describe('The exact name: a route ("POST /api/x"), a field ("Order.total"), an event, a setting, an exported symbol, a table or column.'),
+          change: z.enum(['added', 'changed', 'removed']),
+          note: z.string().nullable().optional().describe('One short line: its shape or meaning, when it matters to a caller.'),
+        }),
+      )
+      .describe('Every contract point another pull request might depend on or provide. The most important part: be exact.'),
+    criteria: z
+      .array(
+        z.object({
+          criterion: z.string().describe("The story criterion's text (short), or its ref."),
+          how: z.string().describe('How this pull request moves it forward, in one sentence.'),
+          files: z.array(z.string()).optional(),
+        }),
+      )
+      .optional()
+      .describe('The story criteria this pull request moves forward, if any. Do not judge whether they are met.'),
+    looseEnds: z
+      .array(z.string())
+      .optional()
+      .describe("TODOs, stubs, placeholders, code behind a flag that is off — judged against this pull request's OWN aim, not the whole story."),
+  };
+}
+
+export function buildSubmitPrCardShape(z: ZodNs) {
+  return buildCardFields(z);
+}
+export type SubmitPrCardShape = ReturnType<typeof buildSubmitPrCardShape>;
+
+/** The pre-pass tool's raw shape, built from the runtime's zod. */
+export async function submitPrCardShape(): Promise<SubmitPrCardShape> {
+  return buildSubmitPrCardShape(await loadZod());
+}
+
 export function buildSubmitTicketReviewShape(z: ZodNs) {
   const memberRef = z.string().describe("A pull request's ref from the 'Pull requests' section, e.g. 'PR2'.");
   const expectedIn = z
@@ -77,6 +124,10 @@ export function buildSubmitTicketReviewShape(z: ZodNs) {
       )
       .optional()
       .describe('What the PRs add that the ticket did not ask for.'),
+    cards: z
+      .array(z.object({ pr: memberRef, ...buildCardFields(z) }))
+      .optional()
+      .describe("One contribution card for EVERY pull request shown to you as a DIFF (never one shown as a description): what its head does, for later checks of this ticket."),
   };
 }
 

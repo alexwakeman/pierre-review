@@ -27,7 +27,10 @@ import type {
   BranchCheckRun,
   CheckRun,
   ClaudeReviewFollowUpRecord,
+  ClaudeAutoPostRecord,
   ClaudeCiFailuresRecord,
+  StoredAutoPostSettings,
+  TicketAutoPostRecord,
   ClaudeReviewCiState,
   ClaudeThreadAssessment,
   ClaudeReviewTicket,
@@ -37,6 +40,7 @@ import type {
   MyTurnSettings,
   ReviewRouteReason,
   StoredPrFile,
+  StoredTicketPrCard,
   TicketAssessment,
 } from '@pierre-review/shared';
 
@@ -1152,6 +1156,11 @@ export const claudeReviews = sqliteTable(
     // the field, a skip, a run that did not succeed, or one whose checks could not be read.
     // Migration 0077 (pg 0064).
     ciFailures: text('ci_failures', { mode: 'json' }).$type<ClaudeCiFailuresRecord>(),
+    // WHAT AUTO-POSTING DID WITH THIS RUN (migration 0087 / pg 0074): written once, by the claim in
+    // review/claude-review/auto-post.ts (`status: 'posting'` BEFORE any GitHub call, so a crash
+    // mid-post can never lead to a retry), then settled to posted / partial / failed / skipped.
+    // NULL = auto-posting never looked at this run (a manual run, or the switch was off).
+    autoPost: text('auto_post', { mode: 'json' }).$type<ClaudeAutoPostRecord>(),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
@@ -1227,6 +1236,9 @@ export const claudeReviewFindings = sqliteTable(
     // together: a row has both or neither.
     storyIndex: integer('story_index'),
     storyRef: text('story_ref'),
+    // true = auto-posting put this finding on GitHub (migration 0087 / pg 0074); NULL/false = a
+    // person did, or it is not posted. Display only ("Posted automatically").
+    postedAuto: integer('posted_auto', { mode: 'boolean' }),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );
@@ -1345,6 +1357,9 @@ export const ticketReviews = sqliteTable(
     summary: text('summary'),
     // The server-validated TicketAssessment. Null unless the run succeeded.
     assessment: text('assessment', { mode: 'json' }).$type<TicketAssessment>(),
+    // What auto-posting did with this run (migration 0087 / pg 0074) — review/ticket-review/
+    // auto-post.ts. Also holds the posted "Not asked for" entries, which have no item row.
+    autoPost: text('auto_post', { mode: 'json' }).$type<TicketAutoPostRecord>(),
   },
   (t) => ({
     accountIdentIdx: index('tr_account_ident_created_idx').on(t.accountId, t.ticketIdent, t.createdAt),
@@ -1408,6 +1423,8 @@ export const ticketReviewItems = sqliteTable(
     postedPrId: integer('posted_pr_id'),
     postedCommentId: text('posted_comment_id'),
     postedAt: integer('posted_at', { mode: 'timestamp' }),
+    // true = auto-posting posted it (migration 0087 / pg 0074); carried with the posting.
+    postedAuto: integer('posted_auto', { mode: 'boolean' }),
     priorItemId: integer('prior_item_id'),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
@@ -1421,6 +1438,50 @@ export const ticketReviewItems = sqliteTable(
       name: 'tri_review_account_fk',
       columns: [t.ticketReviewId, t.accountId],
       foreignColumns: [ticketReviews.id, ticketReviews.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- Ticket review CONTRIBUTION CARDS (migration 0086, pg 0073) ----
+// One row per (account, PR, head commit): a model-written, verdict-free description of what that
+// PR's head does (shared `TicketPrCard`: summary, interfaces, criteria it moves forward, loose
+// ends) plus the changed files at that head (server-written). Written by a ticket review — its own
+// run for every member it read as a diff (`source = 'story_check'`), or the cheap per-PR pre-pass
+// for the overflow beyond TICKET_REVIEW_MAX_DIFFS (`'prepass'`, with that card's own cost). A later
+// run reads a member whose current head has a card AS THE CARD. Currency is `head_sha` equality
+// with the PR's synced head: a merged PR's head never moves, so its card holds for good.
+// ⚠ Card availability NEVER enters the ticket fingerprint (review/ticket-review/fingerprint.ts).
+// Re-writing the same head replaces the card (upsert on the unique below).
+// Tenancy: a composite FK against pull_requests(id, account_id). ⚠ BOTH DELETE PATHS clear rows for
+// the deleted PRs (db/ticket-review-prune.ts), plus eraseAccountData + accountScopedTables().
+// Twin: schema.pg.ts.
+export const ticketReviewPrCards = sqliteTable(
+  'ticket_review_pr_cards',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // Composite FK below (no single-column one).
+    prId: integer('pr_id').notNull(),
+    headSha: text('head_sha').notNull(),
+    card: text('card', { mode: 'json' }).$type<StoredTicketPrCard>().notNull(),
+    source: text('source', { enum: ['story_check', 'prepass'] }).notNull(),
+    // Stored model id (no drizzle `enum:`, like ticket_reviews.model).
+    model: text('model').notNull(),
+    // A pre-pass card's own spend; null for a card written inside a ticket review's run (that run's
+    // cost holds it).
+    costUsd: real('cost_usd'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountPrHeadUx: uniqueIndex('trpc_account_pr_head_ux').on(t.accountId, t.prId, t.headSha),
+    prAccountFk: foreignKey({
+      name: 'trpc_pr_account_fk',
+      columns: [t.prId, t.accountId],
+      foreignColumns: [pullRequests.id, pullRequests.accountId],
     }).onDelete('cascade'),
   }),
 );
@@ -1664,7 +1725,20 @@ export const workspaces = sqliteTable(
     // column, so existing workspaces keep that until switched off. Read by `maybeStartAutoFix`
     // (coding/ai-fix/auto-fix.ts); the ONE writer is `setWorkspaceAutoReview`. It only matters
     // while auto review is on.
-    autoFixEnabled: integer('auto_fix_enabled', { mode: 'boolean' }).notNull().default(true),
+    autoFixEnabled: integer('auto_fix_enabled', { mode: 'boolean' }).notNull().default(false),
+    // AUTO REVIEW DAILY CAP (migration 0085 / pg 0072): auto runs this workspace may start per UTC
+    // day. OVERRIDES ONLY — NULL = the default `AUTO_REVIEW_DAILY_CAP` (20), resolved through
+    // `resolveAutoReviewDailyCap`; the route bounds it 1..500. The ONE writer is
+    // `setWorkspaceAutoReview`, the reader the sweeper's roster (`listAutoReviewWorkspaces`).
+    autoReviewDailyCap: integer('auto_review_daily_cap'),
+    // AUTO-POSTING (migration 0087 / pg 0074): may a SUCCEEDED AUTO review (and an auto ticket
+    // review) post its output to GitHub without a click? NULL/false = OFF — the default for every
+    // workspace, existing and new; nullable with no default, so no workspace insert has to name it.
+    // `autoPostSettings` is OVERRIDES ONLY ({ scope?, kinds? }) — NULL = the product defaults,
+    // resolved through `resolveAutoPostSettings` (review/claude-review/auto-settings.ts). The ONE
+    // writer is `setWorkspaceAutoReview`; the reader is review/claude-review/auto-post.ts.
+    autoPostEnabled: integer('auto_post_enabled', { mode: 'boolean' }),
+    autoPostSettings: text('auto_post_settings', { mode: 'json' }).$type<StoredAutoPostSettings>(),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

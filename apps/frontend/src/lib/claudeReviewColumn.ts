@@ -255,3 +255,39 @@ export function reviewRunWhen(iso: string): string {
   const at = dateTime(iso);
   return isRelative(rel) ? `${at} (${rel})` : at;
 }
+
+/**
+ * The outcome pill on the PR pane's "Claude Review" TAB LABEL, from the tab's own cached read
+ * (`['claude-review', prId]`, DB-only). The latest run's verdict once it succeeded; "Reviewing…" /
+ * "Queued" while one is in flight (a start from any surface counts); "Failed" when the latest run
+ * failed. null = say nothing (never reviewed, cancelled, a finished run with no verdict, or the
+ * read not back yet).
+ */
+export type ReviewTabPill =
+  | { kind: 'verdict'; verdict: ClaudeReviewVerdict; label: string }
+  | { kind: 'running' | 'queued' | 'failed'; label: string };
+
+export function reviewTabPill(
+  data: { review: { status: string; verdict: ClaudeReviewVerdict | null } | null; autoReview?: 'queued' | 'running' | null } | undefined,
+  starting: boolean,
+): ReviewTabPill | null {
+  if (data == null) return null;
+  const r = data.review;
+  if (r?.status === 'running' || data.autoReview === 'running') return { kind: 'running', label: 'Reviewing…' };
+  if (starting || r?.status === 'queued' || data.autoReview === 'queued') return { kind: 'queued', label: 'Queued' };
+  if (r == null) return null;
+  if (r.status === 'failed') return { kind: 'failed', label: 'Failed' };
+  if (r.status === 'succeeded' && r.verdict != null) {
+    return { kind: 'verdict', verdict: r.verdict, label: CLAUDE_VERDICT_LABEL[r.verdict] };
+  }
+  return null;
+}
+
+/**
+ * The review preview's top-level body as the reader will SEE it on GitHub: the server appends a
+ * hidden provenance marker (`<!-- pierre:claude-review v=1 -->`, review/post-seam.ts) that GitHub
+ * does not render, so the preview drops it too. '' = no summary.
+ */
+export function visibleReviewBody(body: string): string {
+  return body.replace(/<!--\s*pierre:claude-review[^>]*-->/g, '').trim();
+}

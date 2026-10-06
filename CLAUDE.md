@@ -790,12 +790,22 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   cancelled) or within 5 min of one, and every comment burst, waits quiet ≥ 5 min OR burst ≥ 20 min.
   NO CI hold (code or ticket review). A SUCCEEDED auto
   run on the reader's OWN PR may start a review-seeded AUTO FIX (`coding/ai-fix/auto-fix.ts`: ≤ 3
-  per PR per 24h, never while a fix runs or an unpushed one waits on the head, NEVER pushed), unless
-  the workspace switched it off (`workspaces.auto_fix_enabled`, DEFAULT TRUE, the second switch on
+  per PR per 24h, never while a fix runs or an unpushed one waits on the head, NEVER pushed), only
+  when the workspace switched it ON (`workspaces.auto_fix_enabled`, OFF by default since 0084 / pg
+  0071 — SQLite's DDL default is still 1, so both workspace inserts write false), the second switch on
   the same auto-review route + Settings section; skip reason `off`). A run
   also judges every OTHER open review thread (validity + addressed), and on a same-head run every
   earlier judgement carries forward IN CODE: only new commits change one
   (docs/CLAUDE-REVIEW.md § Other reviewers' threads, § Auto review).
+- **AUTO-POSTING IS OFF BY DEFAULT, AUTO RUNS ONLY, COMMENT ONLY, NEVER TWICE** (`claude-review/
+  auto-post.ts`, `ticket-review/auto-post.ts`; sqlite `0087` / pg `0074`): a per-workspace switch
+  (`workspaces.auto_post_enabled`, NULL = off) + overrides-only scope/kinds on the auto-review route.
+  It posts UNDER THE READER'S OWN GITHUB ACCOUNT, event ALWAYS `COMMENT`, footer + the hidden marker on
+  every body (so `isLimnPostedComment` holds and it never re-triggers a review). ⚠ The run's
+  `auto_post` record is CLAIMED (compare-and-set from NULL, `status:'posting'`) BEFORE any GitHub
+  write; a failure is recorded and shown, NEVER retried, and a run cut off mid-post counts as
+  possibly posted forever. Dedupe is the follow-up chain + `similarTitles` over every earlier run;
+  story gaps post only on the owner PR (no owner ⇒ not posted). § Auto-posting.
 - **FAILED CI IS A SEPARATE PROCESS, THE CI REVIEW** (`src/review/ci-review/`; sqlite `0082` / pg
   `0069`): one run per (PR, head, sorted failing check names), never inside a PR review — new PR-review
   runs read no logs and store no `ci_failures` (old rows read as history). The head's checks by COMMIT
@@ -808,10 +818,14 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   `REVIEW_CONCURRENCY` slot (`registerReviewSlotPeer` takes many peers). AI Fix's `C<n>` items come from
   its latest run AT THE CURRENT HEAD (docs/CLAUDE-REVIEW.md § CI review).
 - **STORIES ARE A SEPARATE PROCESS, THE TICKET REVIEW** (`src/review/ticket-review/`; sqlite `0080`
-  / pg `0067`, plugin `0039`): ONE review per TICKET across its open + merged PRs (≤ 8, else REFUSED
+  / pg `0067`, plugin `0039`): ONE review per TICKET across its open + merged PRs (≤ 30, else REFUSED
   with the count), never inside a PR review — new PR-review runs store no story, and their old
   stories read as history only. Currency is a server FINGERPRINT (story hash + members' heads/state),
-  never a client guess. It shares the PR review's concurrency pool (a PR-review click goes first),
+  never a client guess. A member with a CONTRIBUTION CARD at its head (`ticket_review_pr_cards`, sqlite
+  `0086` / pg `0073`: a verdict-free, model-written description, fenced and verified when in doubt) is
+  read as the card; at most 4 others as diffs (the run writes their cards), any overflow first through
+  a Sonnet 5 diff-only PRE-PASS whose cost joins the run's; merged members are read on ONE default-branch
+  checkout per repo. ⚠ Card availability never enters the fingerprint. It shares the PR review's concurrency pool (a PR-review click goes first),
   cascades ONE HOP on a member's change under `autoReviewDue` with its OWN
   `TICKET_REVIEW_DAILY_CAP`, never auto-posts, and the agent reads member worktrees only behind the
   PreToolUse PATH GUARD (`review/path-guard.ts`, now on every agent run). ⚠ The Jira apiRoot fold is
@@ -1414,7 +1428,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0070` and plugin `0034`–`0037` + `0039` are NOT replayed.
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0074` and plugin `0034`–`0037` + `0039` are NOT replayed.
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.
   - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence

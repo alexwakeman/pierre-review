@@ -104,6 +104,7 @@ const CHIP_RED = 'bg-red-500/10 text-red-700 dark:text-red-400';
 const CHIP_ORANGE = 'bg-orange-500/10 text-orange-700 dark:text-orange-400';
 const CHIP_GREEN = 'bg-green-500/10 text-green-700 dark:text-green-400';
 const CHIP_GREY = 'bg-gray-500/10 text-gray-600 dark:text-gray-300';
+const CHIP_SKY = 'bg-sky-500/15 text-sky-700 dark:text-sky-300';
 
 // ⚠ `not_checked` is GREY, never amber: it is unknown, not "not addressed".
 export const FOLLOW_UP_STATUS_CLASS: Record<ClaudeFollowUpStatus, string> = {
@@ -130,7 +131,7 @@ export const OUTDATED_CLASS = CHIP_ORANGE;
 export const VERDICT_CLASS: Record<ClaudeReviewVerdict, string> = {
   APPROVE: CHIP_GREEN,
   REQUEST_CHANGES: CHIP_RED,
-  COMMENT: CHIP_GREY,
+  COMMENT: CHIP_SKY,
 };
 
 export const TICKET_ALIGNMENT_CLASS: Record<ClaudeTicketAlignment, string> = {

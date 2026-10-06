@@ -33,7 +33,8 @@ posts **one** GitHub review (inline + body + verdict).
     feature. The run itself is the authoritative check.
   - Safety facts the copy may state, and nothing more: the reviewer reads code and cannot edit
     files, run commands or reach the web; the fixer edits files, has no shell, builds and tests
-    nothing; nothing is posted or pushed until the reader presses the button. Never promise
+    nothing; nothing is posted or pushed until the reader presses the button — EXCEPT what a
+    workspace has switched AUTO-POSTING on for (§ Auto-posting; off by default). Never promise
     subscription billing.
 - **Auth is a TWO-RUNG ladder and there is no stored key** (`review/auth.ts`,
   `applyClaudeReviewAuth`): an **ambient Claude session** (`CLAUDE_CODE_OAUTH_TOKEN` or a
@@ -523,7 +524,9 @@ process (`src/review/ci-review/`), modelled on the ticket review: own tables, ow
 own cap, own budget. New PR-review runs read no logs, carry no "CI failures" prompt section, and
 `submit_review` has no `ciFailures` field (a stray one is stripped). `claude_reviews.ci_failures`
 (sqlite `0077` / pg `0064`) stays as READ-ONLY history: the SPA shows an old run's diagnosis only
-when the PR has no CI review. Wire contract: [API.md](API.md) § CI review.
+when the PR has no CI review. ⚠ The SPA shows a CI diagnosis (either kind) ONLY for the PR's
+CURRENT head — an earlier commit's is hidden whether the head is green or red
+(`ciRunAtCurrentHead`, docs/FRONTEND.md). Wire contract: [API.md](API.md) § CI review.
 
 - **Keyed per (PR, head commit, sorted failing check names).** `ci_reviews` (one row per run,
   history kept) + `ci_review_items` (one row per failing check), sqlite `0082` / pg `0069`. Two keys
@@ -649,7 +652,7 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   `manual:<prId>:<hash>` (a pasted story: one PR, no plugin needed, never cascades). The apiRoot fold
   is shared `jiraApiRoot`, ONE copy the plugin and the SPA both call. Members are OPEN + MERGED PRs
   (a merged one is read at its final head); closed-unmerged drop out. Over `TICKET_REVIEW_MAX_PRS`
-  (8) it REFUSES `too_many_prs` with the count, never samples.
+  (30; it was 8 before contribution cards) it REFUSES `too_many_prs` with the count, never samples.
 - **Tables** `ticket_reviews` / `ticket_review_members` / `ticket_review_items` (sqlite `0080`, pg
   `0067`), tenancy STRUCTURAL via named composite FKs. Deleting a PR prunes its member rows and drops
   a run left with none (`db/ticket-review-prune.ts`, in BOTH delete paths).
@@ -667,12 +670,47 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   plugin's STORED rows only (`resolvePrTickets(..., { storedOnly: true })`); a key the worker has not
   reached yet is simply not there until it is. That is why every ticket-review route except start
   and post sits on the `read` tier.
-- **The agent** (`agent.ts`): cwd is a scratch dir holding `MEMBERS.md`; every member's worktree is
+- **CONTRIBUTION CARDS** (`cards.ts`, table `ticket_review_pr_cards`, sqlite `0086` / pg `0073`): a
+  factual, VERDICT-FREE description of what ONE PR's head does — `summary`, `interfaces` (endpoint /
+  field / event / config / export / schema / other, added / changed / removed — the cross-PR contract,
+  the part that matters most), `criteria` it moves forward (how, files) and `looseEnds` (TODOs, stubs,
+  flag-off code, against the PR's OWN aim) — plus the changed files at that head (server-written).
+  One row per (account, PR, head); re-writing a head replaces it. A card is current while its head is
+  the PR's synced head: a MERGED PR's head never moves, so its card holds for good; an OPEN PR's lapses
+  on the next push. ⚠ **Card availability never enters the fingerprint** — how a member was read says
+  nothing about whether the ticket's PRs moved.
+  - **Per run** (`partitionMembers`): a member with a current card is shown AS THE CARD (fenced as
+    `PRn DESCRIPTION`, labelled a model-written description to verify when in doubt, never ground
+    truth — the agent judges every criterion afresh). Of the rest, the `TICKET_REVIEW_MAX_DIFFS` (4)
+    most recently updated (ties by prId) are shown AS DIFFS, and `submit_ticket_review` returns one
+    card per diff member in `cards` — validated server-side against exactly the diff members shown
+    (`validateRunCards`: unknown refs, card members, repeats and empty cards dropped) and stored with
+    `source 'story_check'`.
+  - **The PRE-PASS** (`prepass.ts`): when more than 4 members lack a card (the first run on a big
+    ticket), the overflow gets a card BEFORE the main run — Sonnet 5, diff-only (only
+    `submit_pr_card`; Read/Glob/Grep, `Bash`, writes, web and dispatch denied; the path guard pinned to
+    an empty scratch dir), nonce-fenced title/diff/criteria, diff capped at 60k chars,
+    `TICKET_CARD_BUDGET_USD` ($0.40) per card, 3 at a time, `source 'prepass'` with its own `cost_usd`.
+    A PR whose diff is EMPTY after the noise strip (only lock / generated files) gets a SERVER-written
+    card naming those files (`noiseOnlyCard`, model `server`, no model call), so it never burns a
+    fallback slot again. Its spend is ADDED TO THE RUN'S COST (one ledger entry, the run's — on success, failure, cancel,
+    refusal and a thrown pipeline alike, via `job.spentUsd`). A PR whose card fails falls back to a
+    capped diff while `TICKET_REVIEW_MAX_FALLBACK_DIFFS` (2) allows, else it is shown as "not read" —
+    named in the prompt, never silently dropped.
+  - Diffs and the pre-pass reuse `fetchPrDiff` (with its `localPrDiff` fallback), the noise strip and
+    `capDiff`; the 120k shared diff budget now covers at most 4 (+2) members.
+- **Checkouts.** An OPEN member gets its own read-only worktree at its head (card or diff — the agent
+  may verify a card). A MERGED member gets no worktree of its own: ONE read-only checkout of its
+  repository's DEFAULT BRANCH, deduplicated per repo (`prepDefaultBranchCheckouts`: fetched into a
+  namespaced ref under the repo lock, never FETCH_HEAD), where its work has landed. A merged member is
+  `checkedOut` when that checkout exists. Every checkout is a path-guard root and is removed in the
+  pipeline's `finally`.
+- **The agent** (`agent.ts`): cwd is a scratch dir holding `MEMBERS.md`; every checkout is
   an `additionalDirectories` entry behind the PreToolUse PATH GUARD (`review/path-guard.ts`); tools
   Read/Glob/Grep + `submit_ticket_review`; `Bash`, writes, web and sub-agents denied; no specialists;
   `TICKET_REVIEW_BUDGET_USD` (4) and `TICKET_REVIEW_MAX_TURNS` (40), env only. Every story field,
-  member title, file list and diff is nonce-fenced; diffs share ONE 120k-char budget, split fairly.
-  `MEMBERS.md` is server text only (repo, number, state, head, worktree) — ⚠ never a file name: it
+  member title, file list, card and diff is nonce-fenced; diffs share ONE 120k-char budget, split fairly.
+  `MEMBERS.md` is server text only (repo, number, state, head, how it is shown, checkout) — ⚠ never a file name or card text: it
   sits outside the fences, and a path is chosen by whoever wrote the PR.
   It is also told the open LEGACY story findings (each member's latest PR-review run that checked a
   story) so it can say they are now met elsewhere. ⚠ While any member could not be checked out,
@@ -697,7 +735,8 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   without an answer (budget, turns) or a cancelled one on the same fingerprint is not retried; one
   that THREW or was cut off by a restart stores no fingerprint (`retryable`, the boot reconcile), so
   it is.
-- **Never auto-posted.** One Post button per unmet / partly met / missing item, targeting
+- **Posted by a click, or by AUTO-POSTING when the owner PR's workspace switched it on** (§
+  Auto-posting — automatic runs only, owner PR only). One Post button per unmet / partly met / missing item, targeting
   `owner_pr_id` (Claude's `expectedIn` member), else the viewed PR, pinned to the head the run
   judged (`HeadMoved` otherwise). A re-raised item inherits its earlier posting (`prior_item_id`), so
   nothing posts twice; only the ticket's latest succeeded run may post (`Superseded`). ⚠ The route
@@ -972,8 +1011,12 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   commits newer (by commit time) than the reviewed one; null when the reviewed commit is not among
   them (a force-push can drop it) — never a guess; `0` with `outdated` = a rewrite added no commit.
   `head` is null when the PR's head is unknown.
-- **THE COST GUARD**: `AUTO_REVIEW_DAILY_CAP` = 20 auto runs per workspace per **UTC** day, counting
-  today's auto rows plus items still waiting in the lane. Past it, PRs wait for the next day. An
+- **THE COST GUARD**: a daily cap of auto runs per workspace per **UTC** day, counting
+  today's auto rows plus items still waiting in the lane. The cap is SET PER WORKSPACE in Settings
+  ("Up to N auto reviews a day", `workspaces.auto_review_daily_cap`, migration 0085 / pg 0072):
+  OVERRIDES ONLY — NULL is the default `AUTO_REVIEW_DAILY_CAP` = 20, folded by
+  `resolveAutoReviewDailyCap` for both the wire and the sweeper's roster; the PUT bounds it 1..500.
+  First reviews and re-reviews share it (one busy PR's pushes can use most of it). Past it, PRs wait for the next day. An
   account whose agent credits are spent sits the tick out.
 - ⚠ **IT NEVER RUNS WHERE CLAUDE REVIEW IS OFF.** `autoReviewAvailable` = `config.aiEnabled` AND a
   local host, checked separately; in cloud (and under LIMN_AI_DISABLED) neither the job nor the
@@ -988,6 +1031,81 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   (`pending-blocks.ts`), the Open PRs column's marker (`ClaudeReviewPrState.trigger`), and in the
   Claude Review tab's header, running row and History options
   (`ClaudeReview`/`ClaudeReviewSummary.trigger`). The Feed's Claude item is not labelled.
+
+## Auto-posting (per workspace)
+
+Settings → Workspace → Auto Claude review → **Post Claude reviews to GitHub automatically**. OFF for
+every workspace, existing and new, until someone switches it on (`workspaces.auto_post_enabled`,
+NULL/false = off; `auto_post_settings` is OVERRIDES ONLY `{ scope?, kinds? }`, folded by
+`resolveAutoPostSettings`; sqlite `0087` / pg `0074`). Read and written through the auto-review route
+(`autoPost` on `WorkspaceAutoReviewSettings` / `SetWorkspaceAutoReviewBody`; `setWorkspaceAutoReview`
+is still the ONE writer). Local-only like every agentic feature: the route and both hooks exist only
+where `config.aiEnabled` registers them.
+
+- **AUTO RUNS ONLY, AT ONCE.** `manager.ts` calls `maybeAutoPostReview` (`claude-review/auto-post.ts`)
+  when an AUTO PR review SUCCEEDS, beside (not instead of) the auto fix; `ticket-review/manager.ts`
+  calls `maybeAutoPostTicketReview` after an AUTOMATIC ticket review (`trigger` `auto` / `cascade`).
+  No hold window. A run a person started is never auto-posted — it keeps the Post button (the
+  Settings copy says so). The switch only matters while auto review is on, and is stored
+  independently of it.
+- **WHICH PRs** (`autoPostEligibility`, pure): open, not a draft, not bot-authored (the workspace's
+  bot union, `isWorkspaceAutomationUser` over `hiddenBotUserIds`; an unmapped author counts as a bot),
+  and under the DEFAULT scope `'mine'` the PR is the reader's own OR the reader is — or WAS — a
+  requested reviewer: a `review_requests` row for the account's user, or a `requested` row in
+  `review_request_events`. ⚠ The history arm is load-bearing: GitHub REMOVES a request the moment
+  any review lands — our own COMMENT review included — so the outstanding row alone would make every
+  re-run of an auto-posted PR ineligible. ⚠ TEAM requests do not count: nothing models which teams the
+  reader is in (My Turn's `reviewRequestedFromMe` is user-only too). `'all'` = every PR auto review
+  covers. The LIVE PR is re-read before the claim (`deps.livePr`): merged / closed / draft there
+  skips too.
+- **WHICH KINDS** (`AutoPostKinds`, defaults `AUTO_POST_DEFAULT_KINDS`): blockers ON, warnings ON,
+  nits OFF → inline comments in ONE GitHub review; questions ON → one PR-LEVEL comment each
+  (`PostFindingArgs.prLevel`, never inline, naming `path:line` without the outside-the-diff note);
+  story gaps ON (a ticket review's unmet / partly met criteria and missing pieces); "Not asked for"
+  OFF. Praise never; a legacy story finding never (stories are the ticket review's).
+- **THE REVIEW.** Event ALWAYS `'COMMENT'` — never APPROVE or REQUEST_CHANGES. Body = the summary's
+  first plain sentence (else "N comments from Claude.") + `AUTO_POST_FOOTER` ("_Posted automatically
+  by Limn’s Claude review._"); every comment ends with the same footer (`PostReviewFinding.footer`),
+  then the hidden `<!-- pierre:claude-review` marker, so `isLimnPostedComment` classifies it as ours
+  and an auto re-review is NOT triggered by it. It reuses `ctx.review.postReview` / `postFinding`
+  (`post-seam.ts`): the same head pin, anchoring and off-diff fallback as the button. Only questions
+  ⇒ no review is submitted, just the comments.
+- ⚠ **NEVER TWICE** (`selectFindingsToPost` + `alreadyOnGithub`, pure): a finding posts only when
+  INCLUDED (an ignored one never does), not already posted, and not on GitHub from ANY earlier run of
+  the PR (manual or auto) — through the follow-up chain (`prior_finding_id`, walked back) or by
+  fingerprint (same path, `similarTitles` — the settled-by-reply identity; it can over-match a new
+  point with a similar title on the same file, which is the safe direction). An earlier run whose
+  record is still `posting` (cut off by a restart) counts everything it tried as POSSIBLY POSTED,
+  for good. Nothing left ⇒ `skipped` / `nothing_new` and no GitHub call.
+- ⚠ **THE CLAIM BEFORE ANY WRITE, AND NO RETRY.** `claude_reviews.auto_post` is written by a
+  compare-and-set from NULL (`status:'posting'`, the finding ids it will try) before GitHub is
+  touched, so a second call or a restart can never post the run twice. After a 201 nothing throws:
+  findings are stamped through `markReviewPosted` / `markFindingPosted` with `posted_auto = true`
+  (so the existing Post buttons read "Posted" and the manual route's `postedAt == null` filter never
+  re-sends them), the record settles to `posted` / `partial` / `failed` + the FIRST error, then
+  `settlePrAfterWrite` (no expectation — a comment changes no PR state). A failure is never retried:
+  the Claude Review tab prints "Couldn’t post automatically: …" above the summary box and the Post
+  button stays. While a run is `posting` (≤ `AUTO_POST_LOCK_MS`, 10 min, so a crash cannot lock it
+  for good) both manual post routes answer `409 AutoPostInProgress`. A skip is recorded but shown
+  nowhere.
+- **STORY GAPS** (`ticket-review/auto-post.ts`): posted ONLY on the member PR the run names as the
+  owner (`owner_pr_id`, Claude's `expectedIn` — the manual button's target); NO owner ⇒ not posted.
+  The owner's OWN workspace decides (switch, kind, scope) and it must pass the same PR rules. Each
+  item goes through `postTicketItem` (`ticket-review/post-item.ts`, extracted from the route): the
+  SAME synchronous claim, the same in-claim re-read, `postedInChain` and the Superseded check, so a
+  click and an auto post cannot both land. Never twice across runs: the item's own / inherited
+  posting (`prior_item_id`), plus any earlier run's item with the same `ticketItemMatchKey`. Only
+  the ticket's LATEST succeeded run posts (`not_latest`). "Not asked for" items have no row: they post
+  on the member that did them (`prId`), and their postings live on `ticket_reviews.auto_post.
+  notRequested` keyed `prId|folded title`; an earlier run's entry is CARRIED onto the newer record,
+  never re-posted. Story check shows "Posted automatically · 2 hours ago" and the failure line.
+- **On screen.** A finding's / item's posted chip reads "Posted automatically · <time ago>"
+  (`lib/autoPost.ts` `postedChipLabel`, `lib/ticketReview.ts` `postedLabel`); the Post to GitHub
+  pill says "Posted automatically · …". Pinned by `claude-review/auto-post.test.ts`,
+  `ticket-review/auto-post.test.ts`, `auto-settings.test.ts` and the SPA's `test/autoPost.test.ts`.
+- ⚠ **Side effects worth knowing** (by design, not fixed here): the review is the reader's, so GitHub
+  clears the reader's outstanding review request on that PR, and the reader's own comments count as
+  the reader acting for My Turn's ball rule.
 
 ## Chat about a review
 
@@ -1096,7 +1214,8 @@ Haiku, `prSummary`).
   review). ⚠ **ONLY THE READER'S OWN PR**: `pull_requests.author_id → users.github_login` equals
   `accounts.github_login` (case-insensitive), local and cloud alike; anyone else's PR gets nothing
   and records nothing. ⚠ **THE WORKSPACE SWITCH**: `workspaces.auto_fix_enabled` (core `0083` / pg
-  `0070`, NOT NULL **DEFAULT TRUE** — auto fix ran unconditionally before it existed), edited in
+  `0070`), **OFF by default** since core `0084` / pg `0071` (which switched every existing workspace
+  off; SQLite keeps 0083's DDL default of 1, so both workspace inserts write `false`), edited in
   Settings → Workspace → Auto Claude review as a second checkbox, "Auto AI Fix on your own PRs"
   (dimmed and inert while auto review is off; its value is kept), and carried on the same
   `GET`/`PUT /api/workspaces/:id/auto-review` as `autoReview.autoFixEnabled`. Read by

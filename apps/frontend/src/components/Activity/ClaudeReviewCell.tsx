@@ -31,6 +31,7 @@ import { unlockReviewSound } from '../../lib/sound.js';
 import type { CardTicketPill, CoverageTone } from '../../lib/ticketReview.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { CheckIcon, SparkleIcon, WarningIcon } from '../Icons.js';
+import { VerdictIcon } from '../VerdictIcon.js';
 
 // One Open PRs card's CLAUDE REVIEW PANEL — the card's last block, on the AI surface (`--ai-*`),
 // with a left accent coloured by the run's outcome (`reviewTone`). Rendered ONLY when agentic AI
@@ -43,7 +44,7 @@ import { CheckIcon, SparkleIcon, WarningIcon } from '../Icons.js';
 //   findings by severity · reviewer threads to fix · CI failures explained (the CI REVIEW's state —
 //   its own run, from the list's ONE batched CI states answer) · the PR's tickets (the
 //   TICKET review's coverage, from the board's ONE batched states answer) ·
-//   the previous review's findings · posted + design (muted) … right: AI Fix state + the action.
+//   the previous review's findings · posted (muted) … right: AI Fix state + the action.
 // Every figure comes from the server's `summary`, present only on a finished run — nothing here
 // prints a zero it does not know.
 //
@@ -51,8 +52,9 @@ import { CheckIcon, SparkleIcon, WarningIcon } from '../Icons.js';
 
 export const PILL = 'inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-px text-[11px] font-medium';
 export const GREY_PILL = `${PILL} bg-gray-500/10 text-gray-600 dark:text-gray-300`;
-// The verdict is the panel's headline: a size up from the pills beside it.
-const VERDICT_PILL =
+// The verdict is the panel's headline: a size up from the pills beside it. Shared with the Claude
+// Review tab's header, which leads with the same pill.
+export const VERDICT_PILL =
   'inline-flex items-center gap-1 whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold';
 export const MUTED = 'text-[11px] text-ai-muted';
 // The AI surface's own button (the Claude Review tab's Run button idiom).
@@ -203,6 +205,7 @@ export function ClaudeReviewPanel({
               cell.verdict != null ? VERDICT_CLASS[cell.verdict] : 'bg-gray-500/10 text-gray-600 dark:text-gray-300'
             } ${OUTCOME_LINK}`}
           >
+            {cell.verdict != null && <VerdictIcon verdict={cell.verdict} size={13} />}
             {cell.verdictLabel}
           </button>
           {cell.auto && <AutoMark />}
@@ -238,7 +241,6 @@ export function ClaudeReviewPanel({
   const summary = cell.kind === 'done' ? state?.summary : undefined;
   const pills = summary != null ? severityPills(summary) : [];
   const total = summary != null ? findingTotal(summary) : 0;
-  const design = summary?.lenses.design ?? 0;
   const tally = summary != null ? followUpTally(summary.followUp) : null;
   const ciPill = ciCardPill(ciState);
   const toFix = summary != null ? threadsToFixLabel(summary) : null;
@@ -345,18 +347,11 @@ export function ClaudeReviewPanel({
         </>
       )}
 
-      {(posted != null || design > 0) && (
+      {posted != null && (
         <Group>
-          {posted != null && (
-            <span className={MUTED} title="Findings posted to GitHub">
-              {posted}
-            </span>
-          )}
-          {design > 0 && (
-            <span className={GREY_PILL} title="Findings about the design, from a deep review">
-              {design} design
-            </span>
-          )}
+          <span className={MUTED} title="Findings posted to GitHub">
+            {posted}
+          </span>
         </Group>
       )}
 

@@ -9,6 +9,9 @@ import {
   type StartTicketReviewBody,
   type TicketCriterion,
   type TicketExpectedIn,
+  type TicketPrCard,
+  type TicketPrCardChange,
+  type TicketPrCardInterfaceKind,
   type TicketReview,
   type TicketReviewItem,
   type TicketReviewMember,
@@ -18,6 +21,7 @@ import {
   type TicketReviewState,
 } from '@pierre-review/shared';
 import { ticketInputFromStored } from './claudeReviewFollowUp.js';
+import { relativeTime } from './ui.js';
 
 // THE TICKET REVIEW — the pure half of the PR pane's "User stories" section (TicketCoverage.tsx)
 // and the Open PRs ticket stacks / card pills. One review per TICKET across every PR that names
@@ -298,7 +302,21 @@ export function postedLabel(
   if (p == null) return null;
   const m = p.prId !== viewedPrId ? members.find((x) => x.prId === p.prId) : undefined;
   const where = m != null ? ` on ${memberLabel(m)}` : '';
-  return p.carried ? `Posted${where} on an earlier check` : `Posted${where}`;
+  if (p.carried) return `Posted${where} on an earlier check`;
+  return p.auto === true ? `Posted automatically${where} · ${relativeTime(p.postedAt)}` : `Posted${where}`;
+}
+
+/**
+ * A "Not asked for" item auto-posting put on GitHub (it has no item row; the run's `autoPost` record
+ * names it by index), else null.
+ */
+export function notRequestedPostedLabel(
+  review: Pick<TicketReview, 'autoPost'>,
+  index: number,
+): string | null {
+  const p = review.autoPost?.notRequested.find((n) => n.index === index);
+  if (p == null) return null;
+  return p.carried ? 'Posted on an earlier check' : `Posted automatically · ${relativeTime(p.postedAt)}`;
 }
 
 // ---- starting ----
@@ -369,4 +387,39 @@ export function memberPrIdsOf(review: Pick<TicketReview, 'members' | 'originPrId
   const ids = new Set(review.members.map((m) => m.prId));
   if (review.originPrId != null) ids.add(review.originPrId);
   return [...ids];
+}
+
+// ---- contribution cards ("What this PR adds") ----
+
+export const TICKET_PR_CARD_KIND_LABEL: Record<TicketPrCardInterfaceKind, string> = {
+  endpoint: 'Endpoint',
+  field: 'Field',
+  event: 'Event',
+  config: 'Setting',
+  export: 'Export',
+  schema: 'Schema',
+  other: 'Other',
+};
+
+export const TICKET_PR_CARD_CHANGE_LABEL: Record<TicketPrCardChange, string> = {
+  added: 'Added',
+  changed: 'Changed',
+  removed: 'Removed',
+};
+
+/**
+ * The members that HAVE a card at their current head, in the run's member order. A member with no
+ * card is left out: nothing is shown for it (never a placeholder claim).
+ */
+export function membersWithCards(
+  members: readonly TicketReviewMember[],
+): Array<{ member: TicketReviewMember; card: TicketPrCard }> {
+  const out: Array<{ member: TicketReviewMember; card: TicketPrCard }> = [];
+  for (const m of members) if (m.card != null) out.push({ member: m, card: m.card });
+  return out;
+}
+
+/** True when a card has anything beyond its summary to expand into. */
+export function cardHasDetail(card: Pick<TicketPrCard, 'interfaces' | 'looseEnds'>): boolean {
+  return card.interfaces.length > 0 || card.looseEnds.length > 0;
 }

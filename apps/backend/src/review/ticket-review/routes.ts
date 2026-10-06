@@ -6,7 +6,6 @@ import {
   TICKET_REVIEW_STATES_MAX,
   checkClaudeReviewTickets,
   parseTicketIdent,
-  storyOneLine,
   type ClaudeReviewTicket,
   type PostTicketItemBody,
   type PostTicketItemResponse,
@@ -18,11 +17,9 @@ import {
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { AGENTIC_AI_ENABLED } from '../claude-review/manager.js';
-import { getReviewPrContext } from '../claude-review/persist.js';
-import { buildAnchorIndex, fetchPrDiff, isFindingAnchored, stripNoiseFromDiff } from '../post-review.js';
-import { isNoiseFile } from '../prepare.js';
 import { getAgenticProviders } from '../plugin-providers.js';
-import { settlePrAfterWrite } from '../../sync/resync-after-write.js';
+import { getReviewPrContext } from '../claude-review/persist.js';
+import { postTicketItem } from './post-item.js';
 import { deriveTicketReviewState, manualTicketIdent, readLiveMembers, ticketHash } from './fingerprint.js';
 import {
   getLatestTicketReview,
@@ -31,10 +28,8 @@ import {
   getTicketReviewById,
   getTicketReviewRow,
   getTicketStateInputs,
-  markTicketItemPosted,
 } from './persist.js';
 import { jiraMemberIds, jiraStoryFor, workspaceOfPr } from './prepare.js';
-import { statusWords } from './prompts.js';
 import { getTicketRunStatus, startTicketReview, subscribeTicketReviewStream } from './manager.js';
 
 // THE TICKET REVIEW API (CORE, free, LOCAL ONLY) — docs/API.md § Ticket review. Registered by
@@ -166,35 +161,6 @@ async function statesFor(
     );
   }
   return out;
-}
-
-// Items being posted right now, by id — the synchronous claim that keeps two clicks from both
-// passing the "already posted?" check and posting twice. ⚠ Claimed BEFORE that check, and the item
-// is re-read inside the claim: a check made before the claim can be answered by a request that has
-// since posted and released it.
-const posting = new Set<number>();
-
-/**
- * Has this item, or any earlier item it re-raises (`prior_item_id`, followed back), reached GitHub?
- * A re-raise inherits the posting when its run is saved; this also covers an older item posted
- * AFTER that.
- */
-async function postedInChain(ctx: AgentContext, accountId: number, priorItemId: number | null): Promise<boolean> {
-  const tri = s(ctx).ticketReviewItems;
-  let next = priorItemId;
-  for (let hops = 0; next != null && hops < 50; hops += 1) {
-    const rows = (await ctx.db
-      .select({ priorItemId: tri.priorItemId, postedCommentId: tri.postedCommentId })
-      .from(tri)
-      .where(and(eq(tri.id, next), eq(tri.accountId, accountId)))
-      .limit(1)
-      .execute()) as Array<{ priorItemId: number | null; postedCommentId: string | null }>;
-    const row = rows[0];
-    if (!row) return false;
-    if (row.postedCommentId != null) return true;
-    next = row.priorItemId;
-  }
-  return false;
 }
 
 export function registerTicketReviewRoutes(app: FastifyInstance, ctx: AgentContext): void {
@@ -417,126 +383,36 @@ export function registerTicketReviewRoutes(app: FastifyInstance, ctx: AgentConte
     const { id, itemId } = req.params as { id: number; itemId: number };
     const { viewedPrId } = req.body as PostTicketItemBody;
     const accountId = ctx.accountIdOf(req);
-    // Ownership first (an id is only claimed for its own account), then the claim, synchronously.
+    // Ownership first (an id is only claimed for its own account), then the claim, synchronously
+    // (inside `postTicketItem`, shared with auto-posting).
     if (!(await getTicketItemPostContext(ctx, accountId, id, itemId))) {
       reply.status(404);
       return { error: 'NotFound', message: 'Item not found' };
     }
-    if (posting.has(itemId)) {
-      reply.status(409);
-      return { error: 'AlreadyPosted', message: 'Already being posted.' };
-    }
-    posting.add(itemId);
-    try {
-      return await postItem(ctx, reply, accountId, id, itemId, viewedPrId);
-    } finally {
-      posting.delete(itemId);
+    const out = await postTicketItem(ctx, { accountId, runId: id, itemId, viewedPrId });
+    switch (out.kind) {
+      case 'not_found':
+        reply.status(404);
+        return { error: 'NotFound', message: out.message };
+      case 'superseded':
+        reply.status(409);
+        return { error: 'Superseded', message: 'A newer story check replaced this one.' };
+      case 'already_posted':
+        reply.status(409);
+        return { error: 'AlreadyPosted', message: 'Already posted to GitHub.' };
+      case 'not_a_member':
+        reply.status(400);
+        return { error: 'NotAMember', message: 'That PR is not on this ticket.' };
+      case 'github_error':
+        reply.status(502);
+        return { error: 'GitHubError', message: out.message };
+      case 'head_moved':
+        reply.status(409);
+        return { error: 'HeadMoved', message: 'This PR changed since the story check. Check the story again first.' };
+      case 'posted': {
+        const res: PostTicketItemResponse = { item: out.item, visible: out.visible, commentId: out.commentId };
+        return res;
+      }
     }
   });
-}
-
-/** The post route's body, run inside the item's claim. */
-async function postItem(
-  ctx: AgentContext,
-  reply: FastifyReply,
-  accountId: number,
-  id: number,
-  itemId: number,
-  viewedPrId: number,
-): Promise<unknown> {
-  // Re-read INSIDE the claim: this is the read the "already posted?" check trusts.
-  const pctx = await getTicketItemPostContext(ctx, accountId, id, itemId);
-  if (!pctx) {
-    reply.status(404);
-    return { error: 'NotFound', message: 'Item not found' };
-  }
-  const { run, item } = pctx;
-  // Only the ticket's LATEST check speaks for it: posting an older run's item could repeat what
-  // the newer run's copy already posted.
-  const latest = (await getTicketStateInputs(ctx, accountId, [run.ident])).get(run.ident)?.latest;
-  if (run.status !== 'succeeded' || latest?.id !== run.id) {
-    reply.status(409);
-    return { error: 'Superseded', message: 'A newer story check replaced this one.' };
-  }
-  if (item.posted != null || (await postedInChain(ctx, accountId, item.priorItemId))) {
-    reply.status(409);
-    return { error: 'AlreadyPosted', message: 'Already posted to GitHub.' };
-  }
-  const targetPrId = item.ownerPrId ?? viewedPrId;
-  const member = run.members.find((m) => m.prId === targetPrId);
-  if (!member) {
-    reply.status(400);
-    return { error: 'NotAMember', message: 'That PR is not on this ticket.' };
-  }
-  const pr = await getReviewPrContext(ctx, targetPrId, accountId);
-  if (!pr) {
-    reply.status(404);
-    return { error: 'NotFound', message: `PR ${targetPrId} not found` };
-  }
-  const name = run.ticketKey ?? 'Story';
-  const lead = `${name} · ${item.ref} (${statusWords(item.status)}): ${storyOneLine(item.title)}`;
-  const path = item.ownerPrId === targetPrId && item.path ? item.path : '';
-  const line = path ? item.line : null;
-  let anchored = false;
-  let fileInDiff = false;
-  if (path) {
-    try {
-      const { diff } = stripNoiseFromDiff(await fetchPrDiff(pr.owner, pr.name, pr.number), isNoiseFile);
-      const index = buildAnchorIndex(diff);
-      fileInDiff = index.has(path);
-      anchored = line != null && isFindingAnchored(index, path, line, 'RIGHT');
-    } catch {
-      /* postFinding re-reads the diff itself when not anchored */
-    }
-  }
-  let outcome;
-  try {
-    outcome = await ctx.review.postFinding({
-      owner: pr.owner,
-      name: pr.name,
-      prNumber: pr.number,
-      // The head this run judged: a PR pushed since gets 409, so a stale verdict is never posted.
-      reviewHeadSha: member.headSha,
-      finding: {
-        id: item.id,
-        path,
-        line,
-        side: 'RIGHT',
-        anchored,
-        fileInDiff,
-        body: item.body,
-        suggestion: null,
-        // Carries the finding marker `<!-- pierre:claude-review-finding v=1 -->`, so
-        // `isLimnPostedComment` never lets it trigger an auto PR review.
-        storyLead: lead,
-      },
-    });
-  } catch (err) {
-    reply.status(502);
-    return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
-  }
-  if (outcome.headMoved) {
-    reply.status(409);
-    return { error: 'HeadMoved', message: 'This PR changed since the story check. Check the story again first.' };
-  }
-  // GitHub has 201'd: from here the route may not fail.
-  await markTicketItemPosted(ctx, accountId, item.id, { prId: targetPrId, commentId: outcome.commentId }).catch(
-    () => false,
-  );
-  let visible = false;
-  try {
-    visible = (await settlePrAfterWrite({ accountId, prId: targetPrId, log: ctx.log })).visible;
-  } catch {
-    visible = false;
-  }
-  const fresh = await getTicketItemPostContext(ctx, accountId, id, itemId).catch(() => null);
-  const res: PostTicketItemResponse = {
-    item: fresh?.item ?? {
-      ...item,
-      posted: { prId: targetPrId, commentId: outcome.commentId, postedAt: new Date().toISOString(), carried: false },
-    },
-    visible,
-    commentId: outcome.commentId,
-  };
-  return res;
 }

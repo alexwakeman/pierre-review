@@ -8,7 +8,7 @@ import type { DispatchDecision } from './claude-review/specialists.js';
 //
 // WHY A HOOK. Review runs use `permissionMode: 'bypassPermissions'`, under which nothing confines
 // an ABSOLUTE path: `Read /Users/me/.ssh/id_rsa` or `Grep path=/` simply runs. With one worktree on
-// disk that was a theoretical gap; a ticket review checks out up to eight repositories (and a deep
+// disk that was a theoretical gap; a ticket review checks out up to thirty PRs across several repositories (and a deep
 // PR review its peers), and the prompt it reads is attacker-authored. A PreToolUse deny holds under
 // bypassPermissions (the specialist cap relies on the same property).
 //

@@ -195,9 +195,8 @@ export function FileTree({
   // list does not.
   note?: JSX.Element | null;
 }): JSX.Element {
-  // Directory collapse is EPHEMERAL local state, deliberately not the global
-  // expandedFileGroups/collapsedFileGroups slice: those are unkeyed by PR, and directory
-  // paths collide across repos far more than file paths do. Default: everything open.
+  // Directory collapse is EPHEMERAL local state, never the global store: a store slice is
+  // unkeyed by PR, and directory paths collide across repos. Default: everything open.
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set<string>());
   const toggleDir = (path: string): void => {
     setCollapsed((cur) => {

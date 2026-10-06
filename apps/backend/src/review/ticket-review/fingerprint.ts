@@ -63,6 +63,9 @@ export interface LiveMember extends FingerprintMember {
   repoId: number;
   number: number;
   title: string;
+  // The synced last-activity time. Orders which card-less members a run reads as diffs
+  // (cards.ts `partitionMembers`); ⚠ never part of the fingerprint.
+  updatedAt: Date | null;
 }
 
 /**
@@ -86,6 +89,7 @@ export async function readLiveMembers(
       title: pr.title,
       headSha: pr.headSha,
       state: pr.state,
+      updatedAt: pr.updatedAt,
     })
     .from(pr)
     .where(and(eq(pr.accountId, accountId), inArray(pr.id, ids)))
@@ -96,6 +100,7 @@ export async function readLiveMembers(
     title: string;
     headSha: string | null;
     state: string;
+    updatedAt: Date | number | null;
   }>;
   const out: LiveMember[] = [];
   for (const r of rows) {
@@ -108,6 +113,7 @@ export async function readLiveMembers(
       title: r.title,
       headSha: r.headSha ?? '',
       state,
+      updatedAt: r.updatedAt == null ? null : r.updatedAt instanceof Date ? r.updatedAt : new Date(r.updatedAt),
     });
   }
   return out.sort((a, b) => a.prId - b.prId);

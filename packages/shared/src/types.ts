@@ -4689,12 +4689,21 @@ export interface WorkspaceAutoReviewResponse {
   workspaceId: number;
   autoReview: WorkspaceAutoReviewSettings;
 }
-// Either field may be sent alone (at least one is required — an empty `{}` is a 400, never a
+// Any field may be sent alone (at least one is required — an empty `{}` is a 400, never a
 // switch); a field left out keeps its stored value.
 export interface SetWorkspaceAutoReviewBody {
   enabled?: boolean;
   // The auto AI Fix switch (`WorkspaceAutoReviewSettings.autoFixEnabled`).
   autoFixEnabled?: boolean;
+  // The daily cap (`WorkspaceAutoReviewSettings.dailyCap`): an integer 1..500, else a 400.
+  dailyCap?: number;
+  // Auto-posting (`WorkspaceAutoReviewSettings.autoPost`). Each field optional; a kind left out
+  // keeps its stored value.
+  autoPost?: {
+    enabled?: boolean;
+    scope?: AutoPostScope;
+    kinds?: Partial<AutoPostKinds>;
+  };
 }
 
 // Auto Claude review, per workspace (CORE, `workspaces.auto_review_enabled[_at]`, migration 0074 /
@@ -4706,13 +4715,132 @@ export interface WorkspaceAutoReviewSettings {
   enabled: boolean;
   // ISO; when it was last switched on. null while off (or never on).
   enabledAt: string | null;
-  // Auto reviews started per workspace per UTC day; later PRs wait for the next day.
+  // Auto reviews started per workspace per UTC day; later PRs wait for the next day. The cap in
+  // force: the workspace's stored `auto_review_daily_cap` (migration 0085 / pg 0072, 1..500), else
+  // the default 20.
   dailyCap: number;
   // AUTO AI FIX (`workspaces.auto_fix_enabled`, migration 0083 / pg 0070). After a succeeded auto
   // review of the reader's OWN PR, prepare one review-seeded AI Fix (never pushed). ON by default;
   // stored independently of `enabled` (switching auto review off keeps it), but it only runs after
   // an auto review, so it does nothing while `enabled` is false.
   autoFixEnabled: boolean;
+  // AUTO-POSTING (`workspaces.auto_post_enabled` + `auto_post_settings`, migration 0087 / pg 0074):
+  // may a SUCCEEDED AUTO review post to GitHub without a click? OFF for every workspace until
+  // switched on. AUTO runs only — a review you start yourself keeps the Post button.
+  autoPost: WorkspaceAutoPostSettings;
+}
+
+// WHICH PRs auto-posting may post on:
+//   'mine' (default)  PRs you opened, and PRs where you are (or were) asked to review — a review
+//                     request naming YOU, now or in the PR's request history. Team requests do not
+//                     count: Limn does not know which teams you are in.
+//   'all'             every PR auto review covers (human-authored, opened after it was switched on).
+// Either way: never a merged, closed or draft PR, and never a bot-authored one.
+export type AutoPostScope = 'mine' | 'all';
+
+// WHAT is posted. Findings go in ONE GitHub review (event COMMENT, never APPROVE / REQUEST_CHANGES);
+// each question is its own PR comment; story items are PR comments on the PR the ticket review
+// names as the owner. Praise is never posted.
+export interface AutoPostKinds {
+  blockers: boolean;
+  warnings: boolean;
+  nits: boolean;
+  questions: boolean;
+  // A ticket review's unmet / partly met criteria and missing pieces.
+  storyGaps: boolean;
+  // A ticket review's "Not asked for" items.
+  notAskedFor: boolean;
+}
+export const AUTO_POST_DEFAULT_KINDS: AutoPostKinds = {
+  blockers: true,
+  warnings: true,
+  nits: false,
+  questions: true,
+  storyGaps: true,
+  notAskedFor: false,
+};
+export const AUTO_POST_DEFAULT_SCOPE: AutoPostScope = 'mine';
+
+export interface WorkspaceAutoPostSettings {
+  enabled: boolean;
+  scope: AutoPostScope;
+  kinds: AutoPostKinds;
+}
+
+// What `workspaces.auto_post_settings` stores: OVERRIDES ONLY (NULL / a missing field = the default).
+export interface StoredAutoPostSettings {
+  scope?: AutoPostScope;
+  kinds?: Partial<AutoPostKinds>;
+}
+
+// The visible last line of every auto-posted comment and review body (the hidden
+// `<!-- pierre:claude-review` marker still follows it, so `isLimnPostedComment` knows it).
+export const AUTO_POST_FOOTER = '_Posted automatically by Limn’s Claude review._';
+
+// What auto-posting did with ONE run (`claude_reviews.auto_post`, migration 0087 / pg 0074).
+//   posting   claimed; GitHub calls in flight (or cut off by a restart — never retried: the
+//             findings listed in `findingIds` count as possibly posted for every later run)
+//   posted    everything it tried is on GitHub
+//   partial   some of it is on GitHub; `error` says what failed
+//   failed    nothing was posted; `error` says why
+//   skipped   nothing to do; `reason` says why (not shown on screen)
+export type AutoPostStatus = 'posting' | 'posted' | 'partial' | 'failed' | 'skipped';
+export type AutoPostSkipReason =
+  | 'not_open'
+  | 'draft'
+  | 'bot_author'
+  | 'not_yours'
+  | 'nothing_new'
+  | 'no_owner'
+  | 'not_latest';
+export interface ClaudeAutoPostRecord {
+  status: AutoPostStatus;
+  at: string; // ISO-8601
+  reason: AutoPostSkipReason | null;
+  error: string | null;
+  // Every finding it tried to post, and those GitHub took.
+  findingIds: number[];
+  postedFindingIds: number[];
+  githubReviewId: string | null;
+}
+// On the wire (`ClaudeReview.autoPost`): the record without the id lists.
+export interface ClaudeAutoPostWire {
+  status: AutoPostStatus;
+  at: string;
+  reason: AutoPostSkipReason | null;
+  error: string | null;
+  postedCount: number;
+}
+
+// One "Not asked for" item auto-posting handled (it has no item row of its own). `key` is the
+// cross-run identity (the PR + the folded title). `commentId` null with the run still `posting` =
+// possibly posted, never retried. `carried` = posted by an earlier run of the ticket.
+export interface TicketAutoPostNotRequested {
+  index: number;
+  key: string;
+  prId: number;
+  commentId: string | null;
+  postedAt: string | null;
+  carried: boolean;
+}
+// What auto-posting did with ONE ticket review run (`ticket_reviews.auto_post`).
+export interface TicketAutoPostRecord {
+  status: AutoPostStatus;
+  at: string;
+  reason: AutoPostSkipReason | null;
+  error: string | null;
+  itemIds: number[];
+  postedItemIds: number[];
+  notRequested: TicketAutoPostNotRequested[];
+}
+export interface TicketAutoPostWire {
+  status: AutoPostStatus;
+  at: string;
+  reason: AutoPostSkipReason | null;
+  error: string | null;
+  postedCount: number;
+  // The "Not asked for" items that are on GitHub, by their index in `assessment.notRequested`.
+  notRequested: Array<{ index: number; prId: number; postedAt: string; carried: boolean }>;
 }
 
 // ⚠ THE TOKEN IS NEVER ON THE WIRE. A Jira token reads the team's whole tracker, so no route
@@ -6467,6 +6595,8 @@ export interface ClaudeFinding {
   // posted individually). null until posted; drives the GitHub permalink scheme
   // (#discussion_r vs #issuecomment).
   postedCommentKind: 'inline' | 'pr_comment' | null;
+  // true = auto-posting put it on GitHub ("Posted automatically"); absent/false = a person did.
+  postedAuto?: boolean;
   createdAt: string;
   // Set when this finding RE-RAISES a finding from the previous review that is still not (or
   // only partly) addressed: that earlier finding's id. A soft reference (same PR, no FK). The SPA
@@ -6889,6 +7019,9 @@ export interface ClaudeReview {
   ciFailures?: ClaudeCiFailure[] | null;
   // The reviewed head's CI when the run looked. null exactly when `ciFailures` is null.
   ciState?: ClaudeReviewCiState | null;
+  // What auto-posting did with this run (migration 0087 / pg 0074). null/absent = it never looked
+  // (a manual run, or auto-posting was off).
+  autoPost?: ClaudeAutoPostWire | null;
 }
 
 // The reviewed commit against the PR's current head (the SYNCED head — DB-only, no GitHub call).
@@ -7252,8 +7385,13 @@ export interface ClaudeReviewStatesResponse {
 // Shared helpers: `jiraTicketIdent` / `parseTicketIdent` (claude-review.ts).
 
 // The most member PRs one ticket review takes. Over it, the run REFUSES (`too_many_prs`) and says
-// the count, rather than judging a sample.
-export const TICKET_REVIEW_MAX_PRS = 8;
+// the count, rather than judging a sample. (8 until contribution cards: a member with a card at its
+// head is read as that card, not as a diff, so a big ticket no longer means a big prompt.)
+export const TICKET_REVIEW_MAX_PRS = 30;
+// The most members one ticket review reads AS DIFFS. Every other member is read as its CONTRIBUTION
+// CARD (below); a member with no card at its head beyond this cap gets one from a cheap per-PR
+// pre-pass before the run (docs/CLAUDE-REVIEW.md § Ticket review).
+export const TICKET_REVIEW_MAX_DIFFS = 4;
 // Default per-WORKSPACE daily cap on AUTOMATIC ticket reviews (trigger 'auto' or 'cascade'), counted
 // from `ticket_reviews` rows of the workspace that started them. Separate from the PR review's own
 // auto cap. The backend's `TICKET_REVIEW_DAILY_CAP` env var overrides it.
@@ -7269,7 +7407,7 @@ export type TicketReviewStatus = 'queued' | 'running' | 'succeeded' | 'failed' |
 export type TicketReviewTrigger = 'manual' | 'auto' | 'cascade';
 
 // Why the server declined to run (written by the server, never the model).
-//   too_many_prs     more than TICKET_REVIEW_MAX_PRS open or merged PRs name the ticket
+//   too_many_prs     more than TICKET_REVIEW_MAX_PRS (30) open or merged PRs name the ticket
 //   no_members       no open or merged PR names the ticket any more
 //   no_ticket        the ticket could not be read (no plugin answer, no pasted text)
 //   peer_unreadable  no member PR could be checked out at all
@@ -7289,9 +7427,74 @@ export interface TicketReviewMember {
   // The head the run read (a merged PR: its final head).
   headSha: string;
   state: TicketReviewPrState;
-  // false = the server could not prepare a checkout of it; criteria it might deliver are then
-  // `unclear`, never `not_met`.
+  // false = the server could not prepare a checkout of it (an open PR: its own worktree; a merged
+  // PR: its repository's default branch); criteria it might deliver are then `unclear`, never
+  // `not_met`.
   checkedOut: boolean;
+  // What this PR adds, at its CURRENT synced head (not necessarily the head this run read) — a
+  // model-written description, never a verdict. Absent / null = no card at that head: show nothing.
+  card?: TicketPrCard | null;
+}
+
+// ---- Contribution cards: what ONE PR's head does, for the ticket review ----
+// A factual, verdict-free description of one PR at one head commit, written by a model reading that
+// PR's diff (the ticket review's own run, or a cheap per-PR pre-pass). Stored once per
+// (account, PR, head) in `ticket_review_pr_cards`; a later ticket review reads a member that has a
+// card at its current head AS THE CARD instead of its diff. A merged PR's head never moves, so its
+// card holds for good; an open PR's only while its head is the card's.
+export type TicketPrCardInterfaceKind = 'endpoint' | 'field' | 'event' | 'config' | 'export' | 'schema' | 'other';
+export const TICKET_PR_CARD_INTERFACE_KINDS: readonly TicketPrCardInterfaceKind[] = [
+  'endpoint',
+  'field',
+  'event',
+  'config',
+  'export',
+  'schema',
+  'other',
+];
+export type TicketPrCardChange = 'added' | 'changed' | 'removed';
+export const TICKET_PR_CARD_CHANGES: readonly TicketPrCardChange[] = ['added', 'changed', 'removed'];
+
+// One contract point another PR may depend on: an API route, a field, an event, a setting, an
+// exported symbol, a table or column.
+export interface TicketPrCardInterface {
+  kind: TicketPrCardInterfaceKind;
+  name: string;
+  change: TicketPrCardChange;
+  note: string | null;
+}
+
+// A story criterion this PR moves forward, and how. `criterion` is the criterion's text (or its ref).
+export interface TicketPrCardCriterion {
+  criterion: string;
+  how: string;
+  files: string[];
+}
+
+export type TicketPrCardSource = 'story_check' | 'prepass';
+
+// The model-written half of a card.
+export interface TicketPrCardBody {
+  summary: string;
+  interfaces: TicketPrCardInterface[];
+  criteria: TicketPrCardCriterion[];
+  looseEnds: string[];
+}
+
+// What `ticket_review_pr_cards.card` stores: the body plus the PR's changed files at that head
+// (SERVER-written from the diff the card was made from, so a later run can list them without the
+// diff). Storage only — `changedFiles` is not on the wire.
+export interface StoredTicketPrCard extends TicketPrCardBody {
+  changedFiles: string[];
+}
+
+// `summary`: what the PR does, in a few sentences. `looseEnds`: TODOs, stubs, code behind a flag
+// that is off — against the PR's OWN aim, not gaps against the whole story.
+export interface TicketPrCard extends TicketPrCardBody {
+  // The head commit the card describes.
+  headSha: string;
+  source: TicketPrCardSource;
+  createdAt: string; // ISO-8601
 }
 
 // Where in a member PR a criterion is shown to be done.
@@ -7372,6 +7575,8 @@ export interface TicketReviewItem {
     commentId: string;
     postedAt: string; // ISO-8601
     carried: boolean;
+    // true = auto-posting posted it ("Posted automatically").
+    auto?: boolean;
   } | null;
 }
 
@@ -7440,6 +7645,8 @@ export interface TicketReview {
   assessment: TicketAssessment | null;
   members: TicketReviewMember[];
   items: TicketReviewItem[];
+  // What auto-posting did with this run (migration 0087 / pg 0074). null/absent = it never looked.
+  autoPost?: TicketAutoPostWire | null;
 }
 
 // POST /api/ticket-reviews — start a ticket review from a PR.

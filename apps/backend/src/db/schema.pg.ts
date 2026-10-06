@@ -32,7 +32,10 @@ import type {
   BranchCheckRun,
   CheckRun,
   ClaudeReviewFollowUpRecord,
+  ClaudeAutoPostRecord,
   ClaudeCiFailuresRecord,
+  StoredAutoPostSettings,
+  TicketAutoPostRecord,
   ClaudeReviewCiState,
   ClaudeThreadAssessment,
   ClaudeReviewTicket,
@@ -42,6 +45,7 @@ import type {
   MyTurnSettings,
   ReviewRouteReason,
   StoredPrFile,
+  StoredTicketPrCard,
   TicketAssessment,
 } from '@pierre-review/shared';
 
@@ -874,6 +878,8 @@ export const claudeReviews = pgTable(
     commentsThrough: timestamp('comments_through', { withTimezone: true, mode: 'date' }),
     // Failed CI on the reviewed head, diagnosed. Twin of schema.sqlite.ts. Migration pg 0064 (sqlite 0077).
     ciFailures: jsonb('ci_failures').$type<ClaudeCiFailuresRecord>(),
+    // What auto-posting did with this run (migration 0087 / pg 0074). Twin of schema.sqlite.ts.
+    autoPost: jsonb('auto_post').$type<ClaudeAutoPostRecord>(),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
@@ -932,6 +938,8 @@ export const claudeReviewFindings = pgTable(
     // 0066 (sqlite 0079).
     storyIndex: integer('story_index'),
     storyRef: text('story_ref'),
+    // Posted by auto-posting (migration 0087 / pg 0074). Twin of schema.sqlite.ts.
+    postedAuto: boolean('posted_auto'),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );
@@ -1018,6 +1026,8 @@ export const ticketReviews = pgTable(
     summary: text('summary'),
     // The server-validated TicketAssessment. Null unless the run succeeded.
     assessment: jsonb('assessment').$type<TicketAssessment>(),
+    // What auto-posting did with this run (migration 0087 / pg 0074). Twin of schema.sqlite.ts.
+    autoPost: jsonb('auto_post').$type<TicketAutoPostRecord>(),
   },
   (t) => ({
     accountIdentIdx: index('tr_account_ident_created_idx').on(t.accountId, t.ticketIdent, t.createdAt),
@@ -1081,6 +1091,8 @@ export const ticketReviewItems = pgTable(
     postedPrId: integer('posted_pr_id'),
     postedCommentId: text('posted_comment_id'),
     postedAt: timestamp('posted_at', { withTimezone: true, mode: 'date' }),
+    // Posted by auto-posting (migration 0087 / pg 0074). Twin of schema.sqlite.ts.
+    postedAuto: boolean('posted_auto'),
     priorItemId: integer('prior_item_id'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
@@ -1094,6 +1106,35 @@ export const ticketReviewItems = pgTable(
       name: 'tri_review_account_fk',
       columns: [t.ticketReviewId, t.accountId],
       foreignColumns: [ticketReviews.id, ticketReviews.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- Ticket review contribution cards (CORE; pg 0073 / sqlite 0086) ----
+// Twin of schema.sqlite.ts ticketReviewPrCards, where the contract lives.
+export const ticketReviewPrCards = pgTable(
+  'ticket_review_pr_cards',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    prId: integer('pr_id').notNull(),
+    headSha: text('head_sha').notNull(),
+    card: jsonb('card').$type<StoredTicketPrCard>().notNull(),
+    source: text('source', { enum: ['story_check', 'prepass'] }).notNull(),
+    model: text('model').notNull(),
+    costUsd: doublePrecision('cost_usd'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    accountPrHeadUx: uniqueIndex('trpc_account_pr_head_ux').on(t.accountId, t.prId, t.headSha),
+    prAccountFk: foreignKey({
+      name: 'trpc_pr_account_fk',
+      columns: [t.prId, t.accountId],
+      foreignColumns: [pullRequests.id, pullRequests.accountId],
     }).onDelete('cascade'),
   }),
 );
@@ -1274,7 +1315,13 @@ export const workspaces = pgTable(
     autoReviewEnabled: boolean('auto_review_enabled'),
     autoReviewEnabledAt: timestamp('auto_review_enabled_at', { withTimezone: true, mode: 'date' }),
     // Auto AI Fix (migration 0083 / pg 0070) — the pg twin. DEFAULT true. Rationale in the sqlite twin.
-    autoFixEnabled: boolean('auto_fix_enabled').notNull().default(true),
+    autoFixEnabled: boolean('auto_fix_enabled').notNull().default(false),
+    // Auto review daily cap (migration 0085 / pg 0072) — the pg twin. NULL = the default 20.
+    autoReviewDailyCap: integer('auto_review_daily_cap'),
+    // Auto-posting (migration 0087 / pg 0074) — the pg twin. NULL/false = off; settings are
+    // overrides only. Rationale in the sqlite twin.
+    autoPostEnabled: boolean('auto_post_enabled'),
+    autoPostSettings: jsonb('auto_post_settings').$type<StoredAutoPostSettings>(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),

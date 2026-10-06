@@ -553,6 +553,9 @@ export interface PostReviewFinding {
   // A user-story finding's first comment line (shared `storyCommentLead`), added by the comment
   // builders; absent / null for every other finding. OPTIONAL, so no apiVersion bump.
   storyLead?: string | null;
+  // A visible last line (shared `AUTO_POST_FOOTER`), set only by auto-posting; it sits just above
+  // the hidden marker. OPTIONAL, so no apiVersion bump.
+  footer?: string | null;
 }
 
 export interface PostReviewArgs {
@@ -604,6 +607,9 @@ export interface PostFindingArgs {
   prNumber: number;
   reviewHeadSha: string;
   finding: PostReviewFinding;
+  // true = always a PR-level comment, never inline (auto-posting's questions), naming the file
+  // without the "outside the diff" note. OPTIONAL, so no apiVersion bump.
+  prLevel?: boolean;
 }
 
 export type PostFindingOutcome =

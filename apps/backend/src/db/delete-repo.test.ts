@@ -187,7 +187,23 @@ describe('deleteRepo', () => {
       .insert(tri)
       .values({ ticketReviewId: solo.id, accountId: 1, ref: 'M1', status: 'missing', title: 'x', body: '' })
       .execute();
+    // Each member's contribution card (migration 0086): the deleted repo's goes, the kept one stays.
+    const cards = schema.ticketReviewPrCards;
+    for (const m of [t, keep]) {
+      await db
+        .insert(cards)
+        .values({
+          accountId: 1,
+          prId: m.prId,
+          headSha: 'h',
+          card: { summary: 's', interfaces: [], criteria: [], looseEnds: [], changedFiles: [] },
+          source: 'story_check',
+          model: 'm',
+        })
+        .execute();
+    }
     await expect(deleteRepo(t.repoId, 1)).resolves.toBe(true);
+    expect((await db.select().from(cards).execute()).map((c: any) => c.prId)).toEqual([keep.prId]);
     const members = await db.select().from(trm).where(eq(trm.ticketReviewId, run.id)).execute();
     expect(members.map((m: any) => m.prId)).toEqual([keep.prId]);
     const item = await db.select().from(tri).where(eq(tri.ticketReviewId, run.id)).execute();

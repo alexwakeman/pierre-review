@@ -115,6 +115,19 @@ async function seedPr(tag: string, updatedAt: Date): Promise<number> {
     .insert(schema.claudeReviewChatMessages)
     .values({ accountId: 1, reviewId: review.id, findingId: finding.id, role: 'user', content: 'q' })
     .execute();
+  // A ticket review contribution card (migration 0086 / pg 0073): the sweep's deletePrSubtree must
+  // take it with the PR (db/ticket-review-prune.ts).
+  await db
+    .insert(schema.ticketReviewPrCards)
+    .values({
+      accountId: 1,
+      prId: pr.id,
+      headSha: `sha_${tag}`,
+      card: { summary: 's', interfaces: [], criteria: [], looseEnds: [], changedFiles: [] },
+      source: 'prepass',
+      model: 'claude-sonnet-5',
+    })
+    .execute();
   return pr.id;
 }
 
@@ -125,6 +138,7 @@ async function countFor(prId: number): Promise<{
   comments: number;
   ciEvents: number;
   chat: number;
+  cards: number;
 }> {
   const { pullRequests, events, reviewThreads, reviewComments, ciStatusEvents } = schema;
   const c = async (t: any, col: any) =>
@@ -143,6 +157,7 @@ async function countFor(prId: number): Promise<{
         .where(eq(schema.claudeReviews.prId, prId))
         .execute()
     ).length,
+    cards: await c(schema.ticketReviewPrCards, schema.ticketReviewPrCards.prId),
   };
 }
 
@@ -169,7 +184,7 @@ afterAll(() => closeDb?.());
 describe('pruneOldData', () => {
   it('prunes the old PR + its whole subtree, keeps the recent one', async () => {
     const before = { old: await countFor(oldPrId), recent: await countFor(recentPrId) };
-    expect(before.old).toEqual({ prs: 1, events: 1, threads: 1, comments: 1, ciEvents: 1, chat: 1 });
+    expect(before.old).toEqual({ prs: 1, events: 1, threads: 1, comments: 1, ciEvents: 1, chat: 1, cards: 1 });
 
     const pruned = await pruneOldData(log, 180);
     expect(pruned).toBe(1);
@@ -182,6 +197,7 @@ describe('pruneOldData', () => {
       comments: 0,
       ciEvents: 0,
       chat: 0,
+      cards: 0,
     });
     // Recent PR fully intact.
     expect(await countFor(recentPrId)).toEqual({
@@ -191,6 +207,7 @@ describe('pruneOldData', () => {
       comments: 1,
       ciEvents: 1,
       chat: 1,
+      cards: 1,
     });
   });
 

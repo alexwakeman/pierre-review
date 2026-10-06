@@ -52,9 +52,8 @@ vi.mock('./manager.js', () => ({
 let aiReady = true;
 vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => aiReady }));
 
-let roster: Array<{ accountId: number; workspaceId: number; enabledAtMs: number }> = [];
+let roster: Array<{ accountId: number; workspaceId: number; enabledAtMs: number; dailyCap: number }> = [];
 vi.mock('./auto-settings.js', () => ({
-  AUTO_REVIEW_DAILY_CAP: 20,
   listAutoReviewWorkspaces: async () => roster,
 }));
 
@@ -108,7 +107,7 @@ beforeEach(() => {
   calls = [];
   answers = new Map();
   blocked = new Set();
-  roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: NOW - 3_600_000 }];
+  roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: NOW - 3_600_000, dailyCap: 20 }];
   _resetAutoReReviewForTest();
 });
 
@@ -144,10 +143,25 @@ describe('runAutoReviewSweep', () => {
     expect(enqueued).toEqual([]);
   });
 
+  it('⚠ each workspace uses its OWN stored cap — in the budget and in the candidate limit', async () => {
+    roster = [
+      { accountId: 1, workspaceId: 7, enabledAtMs: 0, dailyCap: 3 },
+      { accountId: 1, workspaceId: 9, enabledAtMs: 0, dailyCap: 60 },
+    ];
+    answers.set(7, { prIds: ids(10), autoToday: 1 }); // room for 2 under a cap of 3
+    answers.set(9, { prIds: ids(5, 100), autoToday: 30 }); // 30 today is under 60
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(calls.map((c) => [c.workspaceId, c.limit])).toEqual([
+      [7, 3],
+      [9, 60],
+    ]);
+    expect(enqueued.map(([, p]) => p)).toEqual([1, 2, 100, 101, 102, 103, 104]);
+  });
+
   it('skips an account whose credits are spent, without reading its candidates', async () => {
     roster = [
-      { accountId: 1, workspaceId: 7, enabledAtMs: 0 },
-      { accountId: 2, workspaceId: 8, enabledAtMs: 0 },
+      { accountId: 1, workspaceId: 7, enabledAtMs: 0, dailyCap: 20 },
+      { accountId: 2, workspaceId: 8, enabledAtMs: 0, dailyCap: 20 },
     ];
     blocked = new Set([1]);
     answers.set(7, { prIds: [1], autoToday: 0 });
@@ -160,8 +174,8 @@ describe('runAutoReviewSweep', () => {
   it('a full lane stops the tick', async () => {
     laneRoom = 1;
     roster = [
-      { accountId: 1, workspaceId: 7, enabledAtMs: 0 },
-      { accountId: 1, workspaceId: 9, enabledAtMs: 0 },
+      { accountId: 1, workspaceId: 7, enabledAtMs: 0, dailyCap: 20 },
+      { accountId: 1, workspaceId: 9, enabledAtMs: 0, dailyCap: 20 },
     ];
     answers.set(7, { prIds: [1, 2, 3], autoToday: 0 });
     answers.set(9, { prIds: [4], autoToday: 0 });
@@ -204,7 +218,7 @@ describe('runAutoReviewSweep', () => {
   });
 
   it('⚠ drops waiting items of a workspace switched off since they were queued', async () => {
-    roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: 0 }];
+    roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: 0, dailyCap: 20 }];
     answers.set(7, { prIds: [], autoToday: 0 });
     await runAutoReviewSweep(makeCtx(), NOW);
     expect(dropKeep).not.toBeNull();
@@ -215,8 +229,8 @@ describe('runAutoReviewSweep', () => {
 
   it('skips a workspace that is gone (null) and carries on', async () => {
     roster = [
-      { accountId: 1, workspaceId: 404, enabledAtMs: 0 },
-      { accountId: 1, workspaceId: 7, enabledAtMs: 0 },
+      { accountId: 1, workspaceId: 404, enabledAtMs: 0, dailyCap: 20 },
+      { accountId: 1, workspaceId: 7, enabledAtMs: 0, dailyCap: 20 },
     ];
     answers.set(7, { prIds: [5], autoToday: 0 });
     await runAutoReviewSweep(makeCtx(), NOW);

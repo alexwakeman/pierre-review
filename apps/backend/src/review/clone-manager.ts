@@ -471,6 +471,74 @@ export async function prepPeerWorktrees(
   return { peers: out, cleanup };
 }
 
+export interface DefaultBranchRequest {
+  owner: string;
+  name: string;
+  // The repo's default branch name; null = the remote's HEAD.
+  branch: string | null;
+}
+
+export interface DefaultBranchCheckout extends DefaultBranchRequest {
+  path: string | null;
+  repoCloneDir: string | null;
+  // The commit checked out, or null.
+  sha: string | null;
+  error: string | null;
+}
+
+/**
+ * A read-only checkout of each repository's DEFAULT BRANCH tip — a ticket review's view of what its
+ * MERGED members landed. One per repository (deduplicated by owner/name, case-insensitively), in
+ * parallel across repositories, each under its own repo lock. The branch is fetched into a
+ * NAMESPACED ref resolved inside the lock (never FETCH_HEAD, which is one file per repository), then
+ * a per-run worktree is added at that commit. A failure is per repository. `cleanup()` removes every
+ * worktree made (idempotent, never throws).
+ */
+export async function prepDefaultBranchCheckouts(
+  repos: readonly DefaultBranchRequest[],
+  token: string = getGithubToken(),
+): Promise<{ checkouts: DefaultBranchCheckout[]; cleanup: () => Promise<void> }> {
+  const seen = new Set<string>();
+  const uniq = repos.filter((r) => {
+    const k = `${r.owner}/${r.name}`.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  const checkouts: DefaultBranchCheckout[] = await Promise.all(
+    uniq.map(async (r): Promise<DefaultBranchCheckout> => {
+      try {
+        return await withRepoLock(`${r.owner}/${r.name}`, async () => {
+          const dir = await ensureClone(r.owner, r.name, token);
+          const sha = await fetchRefIntoClone({
+            cloneDir: dir,
+            owner: r.owner,
+            name: r.name,
+            token,
+            remoteRef: r.branch ? `refs/heads/${r.branch}` : 'HEAD',
+            destRef: 'refs/pierre/ticket-default-branch',
+          });
+          const path = await addWorktree(dir, sha);
+          return { ...r, path, repoCloneDir: dir, sha, error: null };
+        });
+      } catch (err) {
+        return { ...r, path: null, repoCloneDir: null, sha: null, error: scrubGitError(err) };
+      }
+    }),
+  );
+  let cleaned = false;
+  const cleanup = async (): Promise<void> => {
+    if (cleaned) return;
+    cleaned = true;
+    await Promise.all(
+      checkouts
+        .filter((c) => c.path != null && c.repoCloneDir != null)
+        .map((c) => removeWorktreeLocked(c.owner, c.name, c.repoCloneDir!, c.path!).catch(() => {})),
+    );
+  };
+  return { checkouts, cleanup };
+}
+
 /** Recursively sum file sizes and track the most-recent mtime under `dir`. */
 function walkSize(dir: string): { bytes: number; mtimeMs: number } {
   let bytes = 0;
