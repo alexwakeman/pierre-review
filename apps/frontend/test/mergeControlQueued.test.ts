@@ -142,8 +142,11 @@ function mounts(src: string, name: string): string[] {
 const QUEUE_PROPS = ['inMergeQueue=', 'mergeQueueEntryState=', 'syncedAt='];
 
 describe('every merge-row mount passes its synced queue facts', () => {
-  it('the PR pane (ChecksTab) — both controls', () => {
-    const src = source('ChecksTab.tsx');
+  it('the PR pane (ChecksTab + Claude Review, via the shared PrActionsRow) — both controls', () => {
+    // The Overview and the Claude Review tab both render PrActionControls, which owns the mounts.
+    expect(source('ChecksTab.tsx')).toMatch(/<PrActionControls\b/);
+    expect(source('ClaudeReviewTab.tsx')).toMatch(/PrActionControls|PrReviewActionsSection/);
+    const src = source('pr/PrActionsRow.tsx');
     const all = [...mounts(src, 'MergeControl'), ...mounts(src, 'MergeWhenReadyControl')];
     expect(all.length).toBe(2);
     for (const block of all) {

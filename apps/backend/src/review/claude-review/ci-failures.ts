@@ -11,10 +11,12 @@
 // reported. A check Claude was never shown is never given a cause.
 //
 // ⚠ BOUNDED, AND ONLY WHEN SOMETHING FAILED. The log reads happen only for a FAILING Actions job on
-// the reviewed head, at most CI_FAILURES_MAX of them, each a single tail window of
-// CI_LOG_WINDOW_BYTES (github/actions-logs.ts — a ranged read, never the whole log). The excerpt is
-// cut to CI_EXCERPT_CHARS per check and CI_BLOCK_CHARS in total. The signed log URL never leaves
-// the server: only the excerpt text enters the prompt, and only the check's details page is stored.
+// the reviewed head, at most CI_FAILURES_MAX of them, each the WHOLE log up to CI_LOG_READ_BYTES
+// (github/actions-logs.ts `tail: 0`, capped at its MAX_LOG_BYTES and anchored at the end). The
+// whole log is PRE-SCANNED for culprit lines (`extractFailureExcerpt`) — an npm audit report names
+// the offending package in the MIDDLE of a long log, where a tail window never reached — and only
+// the excerpt, cut to CI_EXCERPT_CHARS per check and CI_BLOCK_CHARS in total, enters the prompt.
+// The signed log URL never leaves the server, and only the check's details page is stored.
 //
 // ⚠ ONLY A NEW RUN CHANGES A DIAGNOSIS. On a run at the same head, a failure already diagnosed at
 // this head for the SAME job is CARRIED — no log read, not re-sent. A re-run of the workflow is a
@@ -37,14 +39,15 @@ import type { ReviewCiFailureReport } from '../../pro/contract.js';
 // ---- caps ----
 // Failing checks whose logs one review reads (and shows Claude). The rest are 'over_cap'.
 export const CI_FAILURES_MAX = 6;
-// The tail window read from each job's log (one ranged GET).
-export const CI_LOG_WINDOW_BYTES = 128 * 1024;
+// How much of each job's log is read: the whole log, up to github/actions-logs.ts MAX_LOG_BYTES
+// (a longer log is read from its end). Only the excerpt below leaves this module.
+export const CI_LOG_READ_BYTES = 8 * 1024 * 1024;
 // One check's excerpt in the prompt, and every excerpt together.
-export const CI_EXCERPT_CHARS = 6_000;
-export const CI_BLOCK_CHARS = 24_000;
+export const CI_EXCERPT_CHARS = 8_000;
+export const CI_BLOCK_CHARS = 32_000;
 // One log line (minified output and base64 blobs make single lines enormous).
 export const CI_LINE_CHARS = 400;
-// Excerpt shape: context around the first error, the log's last lines.
+// Excerpt shape: context around the primary culprit, the log's last lines.
 export const CI_CONTEXT_BEFORE = 8;
 export const CI_CONTEXT_AFTER = 20;
 export const CI_TAIL_LINES = 30;
@@ -85,43 +88,79 @@ const failureKey = (checkName: string, jobId: number | null): string => `${check
 const TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s?/;
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\u001b\[[0-9;?]*[A-Za-z]/g;
-// The strongest marker: the runner's own error annotation.
+// The runner's own error annotation.
 const RUNNER_ERROR_RE = /##\[error\]/;
-// Weaker markers that usually sit at the failure.
-const ERROR_RE =
-  /npm ERR!|ELIFECYCLE|Traceback \(most recent call last\)|error TS\d|\b[Ee]rror(\[E\d+\])?:|\bERROR\b|\bFAILED\b|\bFAIL\b|AssertionError|panicked at|exit code [1-9]|✕|✗|\bnot ok\b/;
 // A runner error that only reports the exit code points at the step's end, not its cause.
 const EXIT_ONLY_RE = /##\[error\]\s*Process completed with exit code \d+\.?\s*$/;
+// A step's header in an Actions log ("##[group]Run npm audit").
+const STEP_HEADER_RE = /^##\[group\]/;
+
+// THE PRE-SCAN'S MARKERS, three classes (all case-insensitive). A line can be a "culprit" at
+// several places in one log — an npm audit report names each offending package on its own short
+// block in the MIDDLE of a long log — so the excerpt anchors a window on EVERY distinct culprit line
+// the budget holds, specific errors first, then generic ones, then warnings.
+//   specific  a marker that names the failure itself
+//   generic   words that usually sit at a failure
+//   warning   worth showing only when the budget has room
+const SPECIFIC_RE =
+  /npm ERR!|\bERR!|\b\w+(Error|Exception):|ELIFECYCLE|Traceback \(most recent call last\)|\berror TS\d|AssertionError|panicked at|\bpanic:|found [1-9]\d* vulnerabilit|[1-9]\d* (critical|high) severity vulnerabilit|severity: (critical|high)\b|^\s*(FAIL|FAILED)\b|✕|✗|✘|\bnot ok\b/i;
+// A word, not part of a path or a name ("src/error.ts", "error-ex", "on-failure").
+const GENERIC_RE =
+  /(?<![\w/.-])(errors?|fail|failed|failures?|failing|assert|assertion|panic|fatal|exception|critical)(?![\w/-])(?!\.\w)|exit (code|status) [1-9]|vulnerab|\bhigh severity\b/i;
+const WARNING_RE = /\bwarn(ing)?\b|severity: (moderate|low)\b|\bdeprecated\b/i;
+// A summary line that reports ZERO of something ("0 failed", "found 0 vulnerabilities") is not a
+// culprit, whatever words it contains.
+const ZERO_RE = /\b(found )?0 (errors?|failed|failures?|failing|vulnerabilit\w*|warnings?|critical|high)\b/i;
+
+// Window shapes: the primary culprit (the first specific error, else the first generic one) gets the
+// wide window the excerpt always had; every other culprit a short one.
+const ANCHOR_BEFORE = 3;
+const ANCHOR_AFTER = 6;
+// How many culprit lines the pre-scan considers, and how many misses in a row end the greedy fill.
+const MAX_ANCHORS_CONSIDERED = 400;
+const MAX_MISSES_IN_A_ROW = 25;
 
 function cleanLine(line: string): string {
   const s = line.replace(TIMESTAMP_RE, '').replace(ANSI_RE, '').replace(/\s+$/, '');
   return s.length > CI_LINE_CHARS ? `${s.slice(0, CI_LINE_CHARS)}…(line shortened)` : s;
 }
 
-/** The index of the line to centre the excerpt on, or -1 when nothing looks like an error. */
-function firstErrorIndex(lines: string[]): number {
-  // A specific error first; the runner's "Process completed with exit code N" only when nothing
-  // else is marked (it sits at the step's end, after the real cause).
-  const specific = lines.findIndex((l) => ERROR_RE.test(l) || (RUNNER_ERROR_RE.test(l) && !EXIT_ONLY_RE.test(l)));
-  if (specific >= 0) return specific;
-  return lines.findIndex((l) => RUNNER_ERROR_RE.test(l));
+/** A line's culprit class: 0 specific, 1 generic, 2 warning, -1 none. Exported for the tests. */
+export function culpritClass(line: string): 0 | 1 | 2 | -1 {
+  if (line.trim() === '' || ZERO_RE.test(line)) return -1;
+  // The runner's "Process completed with exit code N" sits at the step's end, after the real cause:
+  // the tail always shows it.
+  if (EXIT_ONLY_RE.test(line)) return -1;
+  if (RUNNER_ERROR_RE.test(line) || SPECIFIC_RE.test(line)) return 0;
+  if (GENERIC_RE.test(line)) return 1;
+  if (WARNING_RE.test(line)) return 2;
+  return -1;
 }
 
 export interface CiExcerpt {
   text: string;
-  // Lines of the read window shown, and lines in it.
+  // Lines of the read log shown, and lines in it.
   shownLines: number;
   windowLines: number;
-  // The window did not start at the log's first byte (earlier output exists and was not read).
+  // The read did not start at the log's first byte (earlier output exists and was not read).
   windowTruncated: boolean;
+  // Culprit lines the excerpt anchored a window on (the primary included).
+  anchors: number;
 }
 
 /**
- * The excerpt of one job's log that Claude is shown: the lines around the FIRST error in the read
- * window (CI_CONTEXT_BEFORE before, CI_CONTEXT_AFTER after) and the window's last CI_TAIL_LINES
- * lines, in log order, with "… N lines not shown …" between gaps; timestamps and colour codes
- * stripped; each line ≤ CI_LINE_CHARS; the whole ≤ `maxChars` (the tail is shortened first, then
- * the error block from its end). No error marker ⇒ the tail alone. Pure.
+ * The excerpt of one job's log that Claude is shown, built by a PRE-SCAN of the whole read log:
+ *   1. the window's last CI_TAIL_LINES lines (always);
+ *   2. the PRIMARY culprit — the first specific error, else the first generic one, else the first
+ *      runner error — with CI_CONTEXT_BEFORE / CI_CONTEXT_AFTER lines around it, and the header of
+ *      the step it sits in;
+ *   3. then, while the budget holds, a short window (ANCHOR_BEFORE / ANCHOR_AFTER) on every other
+ *      DISTINCT culprit line — specific errors first, then generic ones, then warnings, each class
+ *      in log order — plus each error's step header. Overlapping windows merge.
+ * In log order, with "… N lines not shown …" between gaps; timestamps and colour codes stripped;
+ * each line ≤ CI_LINE_CHARS; the whole ≤ `maxChars` (the tail is shortened first, then the primary
+ * window from its end; a later window that does not fit is skipped). No culprit ⇒ the tail alone.
+ * Pure.
  */
 export function extractFailureExcerpt(
   raw: string,
@@ -131,20 +170,53 @@ export function extractFailureExcerpt(
   const lines = raw.replace(/\r\n/g, '\n').split('\n').map(cleanLine);
   while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
   const n = lines.length;
-  const keep = new Set<number>();
-  const err = firstErrorIndex(lines);
+
+  // ---- the pre-scan ----
+  const byClass: [number[], number[], number[]] = [[], [], []];
+  const seen = new Set<string>();
+  let firstRunnerError = -1;
+  for (let i = 0; i < n; i++) {
+    const l = lines[i]!;
+    if (firstRunnerError < 0 && RUNNER_ERROR_RE.test(l)) firstRunnerError = i;
+    const c = culpritClass(l);
+    if (c < 0) continue;
+    // One window per distinct message: a warning repeated 500 times is anchored once.
+    const key = l.trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    byClass[c as 0 | 1 | 2].push(i);
+  }
+  const primary = byClass[0][0] ?? byClass[1][0] ?? firstRunnerError;
+  const stepHeaderBefore = (i: number): number => {
+    for (let j = i; j >= 0; j--) if (STEP_HEADER_RE.test(lines[j]!)) return j;
+    return -1;
+  };
+
+  // ---- rendering ----
+  const tailFloor = Math.max(0, n - CI_TAIL_LINES);
+  let tailFrom = tailFloor;
   let errFrom = -1;
   let errTo = -1;
-  if (err >= 0) {
-    errFrom = Math.max(0, err - CI_CONTEXT_BEFORE);
-    errTo = Math.min(n - 1, err + CI_CONTEXT_AFTER);
+  let primaryHeader = -1;
+  if (primary >= 0) {
+    errFrom = Math.max(0, primary - CI_CONTEXT_BEFORE);
+    errTo = Math.min(n - 1, primary + CI_CONTEXT_AFTER);
+    primaryHeader = stepHeaderBefore(primary);
   }
-  let tailFrom = Math.max(0, n - CI_TAIL_LINES);
+  // Lines added by the later windows (never shrunk: a window that does not fit is not added).
+  const extra = new Set<number>();
+  let anchors = primary >= 0 ? 1 : 0;
 
-  const render = (): string => {
-    keep.clear();
-    if (err >= 0) for (let i = errFrom; i <= errTo; i++) keep.add(i);
+  const keptSet = (): Set<number> => {
+    const keep = new Set<number>(extra);
+    if (primary >= 0) {
+      for (let i = errFrom; i <= errTo; i++) keep.add(i);
+      if (primaryHeader >= 0) keep.add(primaryHeader);
+    }
     for (let i = tailFrom; i < n; i++) keep.add(i);
+    return keep;
+  };
+  const render = (keep: Set<number>): string => {
     const idx = [...keep].sort((a, b) => a - b);
     const out: string[] = [];
     let prev = -1;
@@ -157,23 +229,60 @@ export function extractFailureExcerpt(
     return out.join('\n');
   };
 
-  let text = render();
+  let keep = keptSet();
+  let text = render(keep);
   // Over budget: shorten the tail first (the error block is the point), then the error block.
   // Each loop is bounded by its own line count (≤ CI_TAIL_LINES, ≤ CI_CONTEXT_AFTER).
   while (text.length > maxChars && tailFrom < n - 1) {
     tailFrom += 1;
-    text = render();
+    keep = keptSet();
+    text = render(keep);
   }
-  while (text.length > maxChars && err >= 0 && errTo > err) {
+  while (text.length > maxChars && primary >= 0 && errTo > primary) {
     errTo -= 1;
-    text = render();
+    keep = keptSet();
+    text = render(keep);
   }
+
+  // ---- the other culprits, greedily, while the budget holds ----
+  if (text.length <= maxChars) {
+    const order = [...byClass[0], ...byClass[1], ...byClass[2]].filter((i) => i !== primary).slice(0, MAX_ANCHORS_CONSIDERED);
+    let misses = 0;
+    for (const at of order) {
+      if (misses >= MAX_MISSES_IN_A_ROW) break;
+      const add: number[] = [];
+      for (let i = Math.max(0, at - ANCHOR_BEFORE); i <= Math.min(n - 1, at + ANCHOR_AFTER); i++) add.push(i);
+      if (culpritClass(lines[at]!) !== 2) {
+        const h = stepHeaderBefore(at);
+        if (h >= 0) add.push(h);
+      }
+      const fresh = add.filter((i) => !keep.has(i));
+      if (fresh.length === 0) {
+        anchors += 1;
+        continue;
+      }
+      const trial = new Set(keep);
+      for (const i of fresh) trial.add(i);
+      const t = render(trial);
+      if (t.length > maxChars) {
+        misses += 1;
+        continue;
+      }
+      misses = 0;
+      for (const i of fresh) extra.add(i);
+      keep = trial;
+      text = t;
+      anchors += 1;
+    }
+  }
+
   if (text.length > maxChars) text = `${text.slice(0, maxChars)}\n…(shortened)`;
   return {
     text,
     shownLines: keep.size,
     windowLines: n,
     windowTruncated: opts.windowTruncated ?? false,
+    anchors,
   };
 }
 
@@ -354,7 +463,14 @@ function notChecked(
     fixableInPr: null,
     relatedFiles: [],
     assessedAtHead: plan.headSha,
+    confidence: null,
   };
+}
+
+/** Claude's 0-100 confidence, rounded and clamped; null when absent or not a number. */
+export function confidenceOf(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  return Math.max(0, Math.min(100, Math.round(v)));
 }
 
 /**
@@ -399,6 +515,7 @@ export function reconcileCiFailures(
       fixableInPr: typeof hit.fixableInPr === 'boolean' ? hit.fixableInPr : null,
       relatedFiles: relatedFilesOf(hit.relatedFiles),
       assessedAtHead: plan.headSha,
+      confidence: confidenceOf(hit.confidence),
     });
   }
   failures.push(...plan.carried);

@@ -76,8 +76,8 @@ export interface Tab {
   botMeta?: TabBotMeta | null; // label meta for bot-detail tabs
 }
 
-// Which "tab" the main area is showing: one of the three FIXED views (the Activity console, the
-// workspace's Open PRs table, the timeline board) or one of the dynamic tabs identified by its
+// Which "tab" the main area is showing: one of the three FIXED views (the workspace's Open PRs
+// cards — the default view —, the Activity console, the timeline board) or one of the dynamic tabs identified by its
 // `Tab.key`. These are ONE axis — only one renders at a time.
 export type FixedView = 'activity' | 'open-prs' | 'timeline';
 export type ActiveTab = FixedView | string;
@@ -85,7 +85,7 @@ export type ActiveTab = FixedView | string;
 // The fixed views, in tab-strip order. ⚠ Every "is this a fixed view?" test goes through
 // `isFixedView`, never a literal pair — a third view was added once already and a hard-coded
 // `'timeline' || 'activity'` is exactly the check that forgets it.
-export const FIXED_VIEWS: readonly FixedView[] = ['activity', 'open-prs', 'timeline'];
+export const FIXED_VIEWS: readonly FixedView[] = ['open-prs', 'activity', 'timeline'];
 export function isFixedView(tab: ActiveTab): tab is FixedView {
   return (FIXED_VIEWS as readonly string[]).includes(tab);
 }

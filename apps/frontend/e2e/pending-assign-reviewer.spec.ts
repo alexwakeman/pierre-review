@@ -150,7 +150,7 @@ async function openWaitingOnReview(page: Page): Promise<Harness> {
     });
   });
 
-  await page.goto('/app/');
+  await page.goto('/app/?view=activity');
   await expect(page.getByTestId('attention-view')).toBeVisible();
   await page
     .getByRole('tablist', { name: 'Pending', exact: true })

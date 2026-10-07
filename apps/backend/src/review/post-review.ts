@@ -318,6 +318,78 @@ export async function submitGithubReview(input: {
   return { reviewId: String(res.id) };
 }
 
+// One inline comment of a submitted review, as GitHub's
+// `GET /repos/{o}/{r}/pulls/{n}/reviews/{review_id}/comments` returns it (the fields we match on).
+export interface SubmittedReviewComment {
+  id: number;
+  path: string;
+  line: number | null;
+  original_line?: number | null;
+  side?: 'LEFT' | 'RIGHT' | null;
+  body: string;
+}
+
+// The inline comments GitHub created for ONE submitted review, oldest first. Paged (100 a page,
+// bounded), under the same token the review was posted with.
+export async function fetchReviewComments(
+  owner: string,
+  name: string,
+  prNumber: number,
+  reviewId: string,
+): Promise<SubmittedReviewComment[]> {
+  const out: SubmittedReviewComment[] = [];
+  for (let page = 1; page <= 10; page += 1) {
+    const rows = await ghRestGet<SubmittedReviewComment[]>(
+      `/repos/${owner}/${name}/pulls/${prNumber}/reviews/${encodeURIComponent(reviewId)}/comments?per_page=100&page=${page}`,
+    );
+    out.push(...rows);
+    if (rows.length < 100) break;
+  }
+  return out;
+}
+
+const normBody = (t: string): string => t.replace(/\r\n?/g, '\n').trim();
+
+/**
+ * Pair each comment we SENT in a review with the comment GitHub CREATED for it. Pure and
+ * deterministic: a returned comment pairs only when its file AND its body (line endings and outer
+ * whitespace aside) are the sent one's — Limn's bodies carry the finding text and the marker, so
+ * that is nearly always unique. Line + side break a tie first; then GitHub's creation order (its
+ * ids ascend in submission order) pairs identical comments in the order they were sent. A sent
+ * comment with no such partner is left out (no id is ever guessed).
+ */
+export function matchReviewComments(
+  sent: ReadonlyArray<{ findingId: number; path: string; line: number; side: 'LEFT' | 'RIGHT'; body: string }>,
+  returned: readonly SubmittedReviewComment[],
+): { findingId: number; commentId: string }[] {
+  const pool = [...returned].sort((a, b) => a.id - b.id);
+  const used = new Set<number>();
+  const pick = (i: number, exact: boolean): SubmittedReviewComment | undefined => {
+    const c = sent[i]!;
+    const body = normBody(c.body);
+    return pool.find(
+      (r) =>
+        !used.has(r.id) &&
+        r.path === c.path &&
+        normBody(r.body ?? '') === body &&
+        (!exact || ((r.line === c.line || r.original_line === c.line) && (r.side == null || r.side === c.side))),
+    );
+  };
+  const out = new Map<number, string>();
+  // Pass 1: file + body + line/side. Pass 2: file + body alone (GitHub may report a moved line).
+  for (const exact of [true, false]) {
+    for (let i = 0; i < sent.length; i += 1) {
+      if (out.has(i)) continue;
+      const r = pick(i, exact);
+      if (r) {
+        used.add(r.id);
+        out.set(i, String(r.id));
+      }
+    }
+  }
+  return [...out.entries()].sort((a, b) => a[0] - b[0]).map(([i, commentId]) => ({ findingId: sent[i]!.findingId, commentId }));
+}
+
 interface GhCommentResponse {
   id: number;
   html_url?: string;

@@ -37,8 +37,8 @@ describe('Open PRs is a fixed view', () => {
     useFilters.setState({ workspaceId: 5, openPrsRepoFilter: null });
   });
 
-  it('sits between Activity and Timeline, and is the only new fixed view', () => {
-    expect(FIXED_VIEWS).toEqual(['activity', 'open-prs', 'timeline']);
+  it('comes FIRST (the default view), before Activity and Timeline', () => {
+    expect(FIXED_VIEWS).toEqual(['open-prs', 'activity', 'timeline']);
     expect(isFixedView('open-prs')).toBe(true);
     expect(isFixedView(prDetailKey(1))).toBe(false);
   });

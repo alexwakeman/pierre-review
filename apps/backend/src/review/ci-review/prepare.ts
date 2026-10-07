@@ -12,11 +12,12 @@ import {
 //
 //   checks   the head commit's checks (`ctx.ci.readCommitChecks`, one GraphQL read). The failing
 //            set the run judges is THIS read's, never the synced one (which may lag).
-//   logs     for each FAILING GitHub Actions job not already explained at this head, ONE tail
-//            window of its log (`ctx.ci.readJobLog` — CI_LOG_WINDOW_BYTES, a ranged read) and
-//            GitHub's failed-step record, at most CI_FAILURES_MAX jobs, in parallel. ⚠ The signed
-//            log URL never leaves github/actions-logs.ts: only the text comes back, and only the
-//            check's details page is ever stored.
+//   logs     for each FAILING GitHub Actions job not already explained at this head, its WHOLE
+//            log (`ctx.ci.readJobLog` with `full` — up to CI_LOG_READ_BYTES, read from the end when
+//            longer), pre-scanned into an excerpt by ci-failures.ts, and GitHub's failed-step
+//            record, at most CI_FAILURES_MAX jobs, in parallel. ⚠ The signed log URL never leaves
+//            github/actions-logs.ts: only the text comes back, and only the check's details page is
+//            ever stored.
 //
 // The selection, excerpting and budget are claude-review/ci-failures.ts's (one implementation, the
 // one the PR review used before this process existed). Refusals — nothing failing, no Actions log
@@ -81,7 +82,7 @@ export async function readCiInputs(
     sel.toRead.map(async (check): Promise<CiLogRead> => {
       const jobId = check.jobId as number;
       const [log, step] = await Promise.all([
-        ci.readJobLog(a.accountId, { owner: a.owner, name: a.name, jobId }).catch(() => null),
+        ci.readJobLog(a.accountId, { owner: a.owner, name: a.name, jobId, full: true }).catch(() => null),
         ci.readFailedStep(a.accountId, { owner: a.owner, name: a.name, jobId }).catch(() => null),
       ]);
       return {

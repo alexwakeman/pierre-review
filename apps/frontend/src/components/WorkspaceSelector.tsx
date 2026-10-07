@@ -202,7 +202,7 @@ function orderWorkspaces(workspaces: Workspace[]): Workspace[] {
  */
 export function WorkspaceSelector(): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
-  const switchWorkspaceToPending = useFilters((s) => s.switchWorkspaceToPending);
+  const switchWorkspaceToOpenPrs = useFilters((s) => s.switchWorkspaceToOpenPrs);
   const { data: workspaces } = useWorkspaces();
   const [open, setOpen] = useState(false);
   // Repo/workspace management lives INSIDE this dropdown (no separate rail button) — an entry at
@@ -243,7 +243,7 @@ export function WorkspaceSelector(): JSX.Element {
   // work is real, it is just not yours. (See useMyTurnByWorkspace.)
   //
   // ⚠ The BADGE is informational; the ROW is a navigation. Picking a workspace (the current one
-  // included) takes you to Activity → Pending → My turn for it (`switchWorkspaceToPending`),
+  // included) takes you to its Open PRs tab (`switchWorkspaceToOpenPrs`),
   // clears the Timeline's selected PR and leaves pinned tabs alone. Someone who only wanted the
   // Timeline re-scoped is one Back away. Only this picker navigates: `setWorkspace` itself stays
   // a pure scope write for deep links, Back/Forward and the corrections below.
@@ -259,9 +259,9 @@ export function WorkspaceSelector(): JSX.Element {
   const badge = activeWorkspaceBadge(activeMyTurn);
 
   // Switching workspace shows all of it — a subset the user picked in the workspace they are
-  // leaving is not a narrowing of the one they are entering — and lands on Pending (see above).
+  // leaving is not a narrowing of the one they are entering — and lands on Open PRs (see above).
   const select = (id: number): void => {
-    switchWorkspaceToPending(id);
+    switchWorkspaceToOpenPrs(id);
     setOpen(false);
   };
 

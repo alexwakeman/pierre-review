@@ -35,6 +35,8 @@ import {
   reviewCellRank,
   reviewTone,
   threadsToFixLabel,
+  ignoredLabel,
+  reviewWorkInProgress,
   reviewedAgoLabel,
   reviewRunWhen,
 } from '../src/lib/claudeReviewColumn.js';
@@ -295,9 +297,17 @@ describe('the wiring', () => {
     expect(cell).toMatch(/const open = \(e: MouseEvent\): void => \{\s*e\.stopPropagation\(\);/);
   });
 
-  it('the outcome pill opens the review (done, running and failed)', () => {
+  it('the outcome pill opens the review (done, running and failed), and so does the WHOLE panel', () => {
     const cell = src('components/Activity/ClaudeReviewCell.tsx');
-    expect((cell.match(/onClick=\{open\}/g) ?? []).length).toBe(3);
+    // 3 outcome pills + the panel itself (mouse) + the "Claude" button (keyboard).
+    expect((cell.match(/onClick=\{open\}/g) ?? []).length).toBe(5);
+    expect(cell).not.toMatch(/role="button"/);
+  });
+
+  it('the card header carries the work-in-progress chip, read off the batched answers', () => {
+    const cards = src('components/Activity/OpenPrsCards.tsx');
+    expect(cards).toMatch(/end=\{working\}/);
+    expect(cards).toMatch(/<ClaudeWorkChip/);
   });
 
   it('the cell marks auto runs and shows a 409 AutoReviewInProgress only while the hold lasts', () => {
@@ -325,6 +335,31 @@ describe('the wiring', () => {
 });
 
 describe('the panel', () => {
+  it('ignored findings: "N ignored", nothing when none or on an older server', () => {
+    expect(ignoredLabel({})).toBeNull();
+    expect(ignoredLabel({ ignoredCount: 0 })).toBeNull();
+    expect(ignoredLabel({ ignoredCount: 2 })).toBe('2 ignored');
+  });
+
+  it('work in progress: every kind of Claude work on the PR, in one fixed order', () => {
+    const none = { ciRunning: false, ticketRunning: false };
+    expect(reviewWorkInProgress({ review: undefined, ...none })).toEqual([]);
+    expect(reviewWorkInProgress({ review: st(), ...none })).toEqual([]);
+    expect(reviewWorkInProgress({ review: st({ status: 'queued', trigger: 'auto' }), ...none })).toEqual([
+      'Review queued',
+    ]);
+    expect(reviewWorkInProgress({ review: undefined, starting: true, ...none })).toEqual(['Review queued']);
+    expect(
+      reviewWorkInProgress({
+        review: st({ status: 'running', fix: 'running' }),
+        ciRunning: true,
+        ticketRunning: true,
+      }),
+    ).toEqual(['Reviewing', 'Checking story', 'Checking CI', 'Fixing']);
+    // A ready (finished) fix is not work in progress.
+    expect(reviewWorkInProgress({ review: st({ fix: 'ready' }), ...none })).toEqual([]);
+  });
+
   it('the accent follows the outcome', () => {
     expect(reviewTone({ kind: 'start' })).toBe('none');
     expect(reviewTone({ kind: 'start', failed: true })).toBe('bad');

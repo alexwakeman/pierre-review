@@ -1,5 +1,7 @@
 import { and, desc, eq, gte, inArray, isNull } from 'drizzle-orm';
 import type {
+  CiAutoPostRecord,
+  CiAutoPostWire,
   ClaudeCiFailure,
   ClaudeCiFailureCategory,
   ClaudeCiNotCheckedReason,
@@ -69,6 +71,7 @@ export interface CiReviewRow {
   refused: string | null;
   ciState: ClaudeReviewCiState | null;
   summary: string | null;
+  autoPost: CiAutoPostRecord | null;
   startedAt: Date | null;
   completedAt: Date | null;
   createdAt: Date;
@@ -95,6 +98,7 @@ export interface CiItemRow {
   line: number | null;
   suggestion: string | null;
   relatedFiles: Array<{ path: string; line: number | null }> | null;
+  confidence: number | null;
   assessedAtHead: string;
   createdAt: Date;
 }
@@ -298,6 +302,7 @@ export async function saveCiReviewSuccess(
           line: it.line,
           suggestion: it.suggestion,
           relatedFiles: it.relatedFiles,
+          confidence: it.confidence ?? null,
           assessedAtHead: it.assessedAtHead,
         })
         .execute();
@@ -439,6 +444,7 @@ export function toItem(r: CiItemRow): CiReviewItem {
     fixableInPr: r.fixableInPr == null ? null : !!r.fixableInPr,
     relatedFiles: Array.isArray(r.relatedFiles) ? r.relatedFiles : [],
     assessedAtHead: r.assessedAtHead,
+    confidence: r.confidence == null ? null : Number(r.confidence),
     path: r.path,
     line: r.line,
     suggestion: r.suggestion,
@@ -466,6 +472,19 @@ function toWire(r: CiReviewRow, items: readonly CiItemRow[]): CiReview {
     summary: r.summary,
     items: wireItems,
     counts: r.status === 'succeeded' ? countItems(wireItems) : null,
+    autoPost: autoPostWire(r.autoPost),
+  };
+}
+
+/** The stored CI auto-post record → its wire half (no ids). */
+export function autoPostWire(rec: CiAutoPostRecord | null | undefined): CiAutoPostWire | null {
+  if (rec == null) return null;
+  return {
+    status: rec.status,
+    at: rec.at,
+    reason: rec.reason ?? null,
+    error: rec.error ?? null,
+    postedCount: rec.status === 'posted' ? (rec.itemIds ?? []).length : 0,
   };
 }
 

@@ -230,9 +230,9 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
 - **DetailPane** — resizable bottom pane (height persisted) under the board slot. **Hidden
   until a PR is selected** (`selectedPrId != null && !overlayActive`); no selection → the
   Timeline takes the full height (App fires a synthetic `resize` on the transition so vis
-  refits). Shows **PrDetail** for the selected PR. **App lands on the Activity console by
-  default, on its Pending board** (Activity-first; a bare load → `?view=activity`, deep links keep
-  timeline).
+  refits). Shows **PrDetail** for the selected PR. **App lands on the Open PRs tab by
+  default** (a bare load → `?view=open-prs`; Activity, on its Pending board, is `?view=activity`;
+  `?pr=`/`?thread=` deep links keep the timeline).
 - **`AutoMergeBanner`** — the armed-merge PROGRESS STACK, a bottom-right card (same shape as
   `ClaudeReviewBanner`) fed by `GET /api/auto-merge`. One row per armed PR from the click that
   arms, through the watcher's `phase`, to the outcome — see "The armed-merge progress stack"
@@ -275,8 +275,11 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   per-kind branches collapsed to a config switch, which is what made the drag/menu handlers a
   one-place change; the e2e selectors (`data-testid="pinned-tabs"`, `role="tab"` names, ✕
   aria-labels) are load-bearing and survived.
-  **Open PRs is a THIRD FIXED VIEW** (`activeTab === 'open-prs'`, chip between Activity and
-  Timeline, no ✕, `view=open-prs` in the URL so it is bookmarkable and Back works). Every "is this
+  **Open PRs is the FIRST FIXED VIEW AND THE DEFAULT** (`activeTab === 'open-prs'`, chip before
+  Activity and Timeline, no ✕). Since 2026-10-07 a URL with NO `view=` lands here
+  (`landingTabFromUrl`); `writeToUrl` still emits `view=open-prs` (old links keep working) and
+  Activity always carries `view=activity`, so a stale or seed-backed drill-down URL resolves to
+  Open PRs too. Every "is this
   a fixed view?" test goes through `isFixedView` / `FIXED_VIEWS` (`store/pinnedTabs.ts`) — never a
   `'timeline' || 'activity'` literal pair, which is exactly what forgets a third. The chip reads
   **"Open PRs · N"**, N = the workspace's NON-DRAFT open PRs off `useWorkspaceOpenPrs`
@@ -344,12 +347,23 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
      LEFT ACCENT coloured by outcome (`reviewTone`: red = request changes / failed, green =
      approve, grey = comment, sky = queued/running, none = not reviewed). Left to right: "Claude" ·
      the verdict pill (a size up — the panel's headline) + auto mark + the currency pill | severity
-     pills (praise left out; zero found ⇒ green "No issues") · "N threads to fix" (`threadsToFixLabel` over
+     pills (praise left out; IGNORED findings — `included = false` — left out of the pills and
+     the "of M posted" total and shown as a grey "N ignored" from `summary.ignoredCount`; zero
+     found and none ignored ⇒ green "No issues") · "N threads to fix" (`threadsToFixLabel` over
      `summary.threadAssessments.validUnaddressed`) | the CI REVIEW's pill ("N CI failures, M
      explained" / "Checking CI…", `ciCardPill` over the ONE batched `useCiReviewStates` answer —
      CURRENT runs and runs in flight only; a stale diagnosis says nothing) | story alignment pills · "Earlier: N fixed / N
      still open" · posted (muted) · design count … right: the AI Fix button ("Fixing…" / "Fix
      ready" → `openAiFix`) and the action (**Review** / **Re-review** / **Open review**).
+  ⚠ **The WHOLE panel opens the PR's Claude Review tab** (a click anywhere that is not one of its
+  controls; the keyboard route is the "Claude" label, a real button — never a `role=button`
+  wrapper around buttons). **The card HEADER carries a work chip** (`ClaudeWorkChip`,
+  `reviewWorkInProgress`): "Reviewing · Checking story · Checking CI · Fixing" with a pulsing dot
+  while ANY of the code review (queued/running, auto lane included), the ticket review, the CI
+  review or AI Fix is in flight — read off the same batched answers, no request of its own. **The
+  tab header prints "7 of 20 auto reviews today · resets in 3h 12m"** (`AutoReviewUsageLine`,
+  `usage` on `GET /api/workspaces/:id/auto-review`, present only while auto review is on; code
+  reviews only, the calendar UTC day the sweeper caps on; re-read once a minute while mounted).
   ⚠ **Absent is never zero**: no summary, no CI reading, no story alignment, no follow-up, no thread
   assessment ⇒ nothing drawn. The pills reuse the Claude Review tab's palette
   (`lib/claudeReviewFollowUp.ts`). **Sorting is ONE "Sort:" menu in the tab header**
@@ -776,7 +790,7 @@ Review finding deep-link. Do not add a third.
 - `ChangesTab` owns the live target: the rail's clicks and the `focus` prop feed the same state,
   which is **STICKY** (never cleared once shown — it doubles as the rail's selected row; the
   highlight fades on its own timer). `PrDetail` owns `changesFocus` as **LOCAL** state and
-  `openInChanges(path, line, side)` sets it + switches to the Changes tab — local because both
+  `openInChanges(path, line, side, threadId?)` sets it + switches to the Changes tab — local because both
   tabs live in this one `PrDetail` instance, so unlike `threadStateFilter` there is no global
   field to leak across PRs and no `selectedPrId === prId` guard to remember. Picking a tab BY
   HAND clears the pending target, so opening Changes to browse doesn't re-jump to the last
@@ -1137,8 +1151,8 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
 - **Money, not credits.** Local agent runs show US$ (`formatUsd` in `lib/ui.ts`) — a credit figure
   would invent a Limn price for the reader's own spend. Track usage's agentic row does the same and
   shows only where `ai.enabled`. Credits stay on the Pro one-shot Haiku features.
-- **The Pro CI-analysis card is DELETED** (Claude Review diagnoses failing CI). The AI summary inside
-  the AI Fix tab stays Pro (`prSummary`) and renders nothing without the plugin.
+- **The Pro CI-analysis card is DELETED** (Claude Review diagnoses failing CI). The AI summary, the
+  CI list and the instruction box LEFT the AI Fix tab; the tab is the fixer and its picker only.
 - **STORIES ARE THE TICKET REVIEW'S NOW, in its own "Story check" section** (`TicketCoverage.tsx`,
   pure half `lib/ticketReview.ts`, hooks `hooks/useTicketReview.ts`; contract docs/CLAUDE-REVIEW.md
   § Ticket review). "Run a review" sends `{model}` only. One block per ticket the PR is on: key,
@@ -1237,10 +1251,11 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   no code anchor. "See it below" is DELETED (the card is right there).
 - **Every section of the Claude Review pane is ONE shell, `ReviewSection`** (`ReviewSection.tsx`):
   bordered rounded box, tinted header band = sentence-case title (one size) + count pills + ⓘ +
-  right-aligned actions; cards inside keep their lighter borders (pane → section → card). Order: Run
-  a review · Claude's review · Previous review · Review threads · Findings · Story check · CI check
+  right-aligned actions; cards inside keep their lighter borders (pane → section → card). Order:
+  Reviews and actions (the Overview's Reviews + Actions rows, shared via `components/pr/`, plus the
+  left-aligned Generate fix button) · Run a review · Claude's review · Previous review · Review threads · Findings · Story check · CI check
   · Review chat (OPEN by default, so its one DB read runs on mount; Hide collapses it) · Post to
-  GitHub (summary, verdict, Preview, Post) · Generate a fix. The code review draws NO CI any more.
+  GitHub (summary, verdict, Preview, Post). The code review draws NO CI any more.
 - **CI check is the CI REVIEW** (`CiCheckSection.tsx`, `hooks/useCiReview.ts`, pure half
   `lib/ciReview.ts`; docs/CLAUDE-REVIEW.md § CI review) — its own run, not part of Claude's review.
   `GET /api/prs/:id/ci-review` (polls only while `running`); it shows the latest SUCCEEDED run (read
@@ -1354,16 +1369,22 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   (PrDetail's `openThreadInThreads`); the GitHub link goes through `safeExternalUrl`; every comment
   and Claude string is plain text. `draftReply` offers Copy only — no route posts it.
 
-### The AI Fix tab (`AiFixTab.tsx`, `components/AiFix/FixReport.tsx`)
+### The AI Fix tab (`AiFixTab.tsx`, `components/AiFix/FixPicker.tsx`, `components/AiFix/FixReport.tsx`)
 
 Backend contract: [docs/CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § AI Fix.
 
-- **Two entry points, one model picker.** "Fix from review" uses the review handed over from the
-  Claude Review tab (`aiFixTabFocus.reviewId`, consumed into local state) or else the PR's latest
-  review when it succeeded (`useClaudeReview` — the DB-only read that tab already makes). It sends
-  ONLY `sourceReviewId`; the server builds the seed. Below it, a text box ("Or say what to fix…")
-  starts a `plain` run; its Fix button appears once there is text. The comment picker, its basket
-  store and the per-comment verdict report were DELETED with the `comments` seed.
+- **One entry point: the FIX PICKER.** The review is the one handed over from the Claude Review tab
+  (`aiFixTabFocus.reviewId`, consumed into local state) or else the PR's latest review when it
+  succeeded (`useClaudeReview`). No succeeded review ⇒ one line + "Open Claude Review"
+  (`setPrDetailTab(pr.id, 'claude_review')`). Otherwise `useAiFixPreview` (`['ai-fix-preview', prId,
+  reviewId]`, invalidated by a start) lists the server's items as toggleable cards grouped by
+  section; the reader's ticks are OVERRIDES over each item's `defaultIncluded` (reset when the
+  review changes), and Start sends `{seed:'review', sourceReviewId, include: pickedKeys(…)}`.
+  `budgetCutKeys` re-folds the server's budget over the ticked items in the preview's order and marks
+  the cut ones "Won't fit". With a finished fix on screen the picker folds behind "New fix". The CI
+  list, the AI summary and the "Or say what to fix…" box are GONE (the route still takes `plain`).
+- **An automatic push that failed** shows the succeeded row's `error` ("Automatic push failed: …")
+  in an amber line above the summary; Push still works and clears it.
 - **`FixReport`** renders the validated `changeReport` under the summary and ABOVE the "no
   changes" branch (a run that judged every item wrong produces no diff, and that is the run whose
   "Not addressed" list matters most): per changed file the summary and ref chips labelled with the
@@ -2379,7 +2400,7 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   and cards. No other tab renders it. It REPLACED My turn's second view ("Default branches and open
   PRs", `attentionMyTurnView` / `effectiveMyTurnView` / `MY_TURN_VIEWS` — all DELETED, 2026-10-01).
   The "Open PRs · N" button that used to sit above the strip is DELETED: Open PRs is a fixed tab
-  between Activity and Timeline and its chip carries the count (see the tab strip above). ⚠ **NO
+  (the first, and the default view) and its chip carries the count (see the tab strip above). ⚠ **NO
   NEW REQUEST**: the strip's argument-less `useBranchStatus()` is the SAME cache entry the rail
   reads at boot; it mounts once per board, never per card, and trends stay lazy per row. ⚠ **COUNT-FREE**: nothing it reads reaches a badge, `myTurn`,
   the scorer, the liveness sweep or a notification. The strip's slot is a placeholder while pending
@@ -3702,15 +3723,14 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   side) surfaces as `uncounted`: those rows render a dim "—" rather than a zero, plus a footer
   line in the dropdown and a line in the banner. ⚠ **Absence is not zero** — do not "tidy" a
   missing line into a 0.
-- ⚠ **The dropdown badge is INFORMATIONAL; the ROW is a navigation** (reversed 2026-09-30). A pick
-  — the current workspace included — runs `useFilters.switchWorkspaceToPending(id)`:
-  `setWorkspace(id, null)` → `showActivity()` → `setActivityRepo('attention')` → seat
-  `attentionTab: null` (My turn) EXPLICITLY (the rail setter
-  no-ops on an unchanged rail) → `clearSelection()` (the Timeline's selected PR belonged to the
-  workspace left). Pinned PR / Focus tabs stay. All writes are synchronous in one handler, so
-  `useUrlState` pushes ONE history entry. ⚠ `setWorkspace` itself NEVER navigates — URL hydrate,
-  Back/Forward, `useWorkspaceSync`'s corrections, PrDetail's "Show in Activity feed" and the
-  `WorkspaceManager` call it and must stay put. Pinned in `test/switchWorkspaceToPending.test.ts`.
+- ⚠ **The dropdown badge is INFORMATIONAL; the ROW is a navigation** (reversed 2026-09-30; lands
+  on Open PRs since 2026-10-07). A pick — the current workspace included — runs
+  `useFilters.switchWorkspaceToOpenPrs(id)`: `setWorkspace(id, null)` → `showOpenPrs()` →
+  `clearSelection()` (the Timeline's selected PR belonged to the workspace left). Pinned PR / Focus
+  tabs stay. All writes are synchronous in one handler, so `useUrlState` pushes ONE history entry.
+  ⚠ `setWorkspace` itself NEVER navigates — URL hydrate, Back/Forward, `useWorkspaceSync`'s
+  corrections, PrDetail's "Show in Activity feed" and the `WorkspaceManager` call it and must stay
+  put. Pinned in `test/switchWorkspaceToOpenPrs.test.ts`.
 - ⚠ **COST.** The hook rides the EXISTING daily-brief key (the one key the banner and badges
   share), but mounting it in the always-visible FilterBar and banner
   means the Timeline now pays one `search`-tier request per stale window where it paid none.
@@ -3752,16 +3772,10 @@ that boolean un-collapsed: `'direct'` · `'maintained'` · `'none'`. Wire contra
   The only way to see it is a server too old to send the field, where the neutral label is true.
 - The brief's two my-turn lines went with the strip; the wire still carries both halves
   (`myTurnPersonal`/`myTurnOther` + totals) and both lenses stay seatable (`?attnRel=`).
-- **THE WELCOME-BACK BANNER HEADLINE SHOWS THE SPLIT** — "2 yours · 3 in your repos" instead of a
-  bare 5 (`useMyTurnByWorkspace.totalSplit`). ⚠ **The POPULATION is unchanged**: the chips, the
-  dropdown badges and `useMyTurnNotifications` all still count the sum, and the click still opens
-  the whole `'mine'` board. Only the headline says which half is which — splitting the chips would
-  cost a second number per workspace on a row whose one-line guarantee is why the component exists.
-  ⚠ `relevanceSplit` takes **both fields or neither** (never `count - direct`, which would absorb
-  a future third relevance into "in your repos"), and `sumRelevanceSplit` **refuses whenever ANY
-  contributing line lacks the split** — mixed responses are real (the active workspace is computed
-  fresh while the roll-up rides a 5-min cache), and summing halves over some lines and wholes over
-  others prints two numbers that do not add up to the total beside them.
+- **THE WELCOME-BACK BANNER HEADLINE IS ONE FIGURE** — "Welcome back · 5 need you" (+ the "+" cap
+  disclosure). The "2 yours · 3 in your repos" split it printed was DROPPED 2026-10-07; the hook's
+  `totalSplit` / `relevanceSplit` and the server's split fields remain (the dropdown tooltip still
+  reads them) but the banner no longer does.
 - The dropdown badge keeps the summed figure and carries the split in its **tooltip only**, where
   it costs no layout.
 - ⚠ **`relevance` IS ALSO THE CARRIER OF THE PENDING MUTE.** Muting a workspace or a repo

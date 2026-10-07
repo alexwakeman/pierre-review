@@ -23,11 +23,19 @@ import {
   followUpSentence,
 } from '@pierre-review/shared';
 import { formatDate, formatUsd, relativeTime, safeExternalUrl } from '../lib/ui.js';
-import { autoPostFailureLine, postedChipLabel } from '../lib/autoPost.js';
+import {
+  autoPostFailureLine,
+  autoPostSkipLine,
+  autoResolveLabel,
+  autoVerdictLine,
+  postedChipLabel,
+} from '../lib/autoPost.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { AiCloudNote, AiRunGate } from './AiSetup.js';
 import { useFilters } from '../store/filters.js';
+import { PrActionControls, usePrActionsVisible } from './pr/PrActionsRow.js';
+import { ReviewsChips, reviewsRowVisible } from './pr/ReviewsRow.js';
 import {
   useCancelReview,
   useClaudeReview,
@@ -98,6 +106,9 @@ export type OpenInChanges = (
   path: string,
   line: number | null,
   side: ClaudeFindingSide,
+  // A POSTED inline finding's thread (computed on read): the jump then opens and flashes that
+  // thread's inline pill. Absent ⇒ a plain path/line jump.
+  threadId?: number,
 ) => void;
 
 const shortSha = (sha: string | null): string => (sha ? sha.slice(0, 7) : '—');
@@ -820,6 +831,17 @@ function FindingRow({
                   <CheckIcon size={11} />
                 </span>
               ))}
+            {autoResolveLabel(finding.autoResolve) != null && (
+              <span
+                className={`rounded px-1.5 py-0.5 text-[11px] ${
+                  finding.autoResolve?.status === 'failed'
+                    ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                    : 'bg-green-500/10 text-green-700 dark:text-green-400'
+                }`}
+              >
+                {autoResolveLabel(finding.autoResolve)}
+              </span>
+            )}
             {hasReword && !isPosted && (
               <span className="rounded bg-blue-500/10 px-1.5 py-0.5 text-[11px] text-blue-600 dark:text-blue-400">
                 Your wording
@@ -873,13 +895,20 @@ function FindingRow({
                 <button
                   type="button"
                   onClick={() =>
-                    onOpenInChanges(finding.path, finding.line, finding.side)
+                    onOpenInChanges(
+                      finding.path,
+                      finding.line,
+                      finding.side,
+                      finding.threadId ?? undefined,
+                    )
                   }
                   className="text-left text-blue-600 hover:underline dark:text-blue-400"
                   title={
-                    finding.line != null
-                      ? 'Show this line in the Changes tab'
-                      : 'Show this file in the Changes tab'
+                    finding.threadId != null
+                      ? 'Show this comment in the Changes tab'
+                      : finding.line != null
+                        ? 'Show this line in the Changes tab'
+                        : 'Show this file in the Changes tab'
                   }
                 >
                   {anchorLabel}
@@ -1344,46 +1373,94 @@ function ReviewTabPrRefs({
 }
 
 // Surface: hand a completed review to the agentic fixer. Opens the AI Fix tab with this review
-// picked; the server builds the seed from the stored run and the latest CI check. Free,
-// local-only (`me.ai`); renders nothing in the cloud or until a review has succeeded.
-function GenerateFixFromReview({
+// picked; the server builds the seed from the stored run. Free, local-only (`me.ai`); renders
+// nothing in the cloud or until a review has succeeded.
+// ⚠ LEFT-ALIGNED AND NEAR THE TOP, ON PURPOSE: at the foot of the pane, right-aligned, it sat
+// under the bottom-right toast column (App.tsx), which is fixed and covers whatever scrolls under.
+function GenerateFixButton({
   prId,
   review,
 }: {
   prId: number;
-  review: ClaudeReview | null;
+  review: ClaudeReview;
+}): JSX.Element {
+  const openAiFixFromReview = useFilters((s) => s.openAiFixFromReview);
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        onClick={() => openAiFixFromReview(prId, review.id)}
+        className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-ai-border px-2.5 py-1 text-xs text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
+      >
+        Generate fix from this review
+        <ArrowIcon dir="right" size={11} />
+      </button>
+      <InfoButton title="Generate a fix">
+        <p>
+          Opens AI Fix with this review picked. Claude edits the code to address the findings and
+          threads still to fix. Nothing is pushed until you press the button there.
+        </p>
+      </InfoButton>
+    </div>
+  );
+}
+
+// One labelled line of the top section — the Overview's label column, at this pane's sizes.
+function TopRow({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+  return (
+    <div className="flex gap-3">
+      <span className="w-16 shrink-0 pt-0.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+        {label}
+      </span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * THE TOP OF THE PANE: the Overview's Reviews and Actions rows (the SAME components,
+ * components/pr/), plus the hand-off to AI Fix. Here so the reader can act on the review without
+ * leaving it. A new Approve / Request changes from the reader simply replaces Claude's earlier
+ * auto verdict on GitHub (a reviewer's latest verdict is the one that counts); nothing else is
+ * dismissed. Renders nothing when no row has anything to show.
+ */
+function PrReviewActionsSection({
+  pr,
+  usersById,
+  fixReview,
+}: {
+  pr: PrDetail;
+  usersById: Map<number, User>;
+  fixReview: ClaudeReview | null;
 }): JSX.Element | null {
   const aiFix = useAiCapabilities().enabled;
-  const openAiFixFromReview = useFilters((s) => s.openAiFixFromReview);
-  if (!aiFix || review?.status !== 'succeeded') return null;
+  const showReviews = reviewsRowVisible(pr);
+  const showActions = usePrActionsVisible(pr);
+  const showFix = aiFix && fixReview?.status === 'succeeded';
+  if (!showReviews && !showActions && !showFix) return null;
   return (
-    <ReviewSection
-      title="Generate a fix"
-      info={
-        <InfoButton title="Generate a fix">
-          <p>
-            Opens AI Fix with this review picked. Claude edits the code to address the findings and
-            threads still to fix. Nothing is pushed until you press the button there.
-          </p>
-        </InfoButton>
-      }
-      actions={
-        <button
-          type="button"
-          onClick={() => openAiFixFromReview(prId, review.id)}
-          className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-ai-border px-2.5 py-1 text-xs text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
-        >
-          Generate fix from this review
-          <ArrowIcon dir="right" size={11} />
-        </button>
-      }
-    />
+    <ReviewSection title="Reviews and actions">
+      {showReviews && (
+        <TopRow label="Reviews">
+          <ReviewsChips pr={pr} usersById={usersById} />
+        </TopRow>
+      )}
+      {showActions && (
+        <TopRow label="Actions">
+          <PrActionControls pr={pr} />
+        </TopRow>
+      )}
+      {showFix && fixReview != null && (
+        <TopRow label="Fix">
+          <GenerateFixButton prId={pr.id} review={fixReview} />
+        </TopRow>
+      )}
+    </ReviewSection>
   );
 }
 
 export function ClaudeReviewTab({
   pr,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   usersById,
   onOpenInChanges,
   onOpenThread,
@@ -1582,6 +1659,8 @@ export function ClaudeReviewTab({
   return (
     <ReviewTabPrRefs pr={pr} review={shownReview}>
     <div className="space-y-3 px-4 py-3">
+      {/* Reviews, Actions and the AI Fix hand-off (latest succeeded run only), above everything. */}
+      <PrReviewActionsSection pr={pr} usersById={usersById} fixReview={canEdit ? review : null} />
       {/* The run controls are ALWAYS shown; a missing AI runtime or Claude credential replaces
           only the Run button (AiRunGate), so past reviews and the stories stay usable.
           ⚠ THERE IS NOWHERE IN THE APP TO ENTER A KEY, AND THE LINE MUST NOT PRETEND OTHERWISE:
@@ -1866,6 +1945,12 @@ export function ClaudeReviewTab({
           {autoPostFailureLine(review.autoPost) != null && (
             <p className="text-xs text-amber-700 dark:text-amber-300">{autoPostFailureLine(review.autoPost)}</p>
           )}
+          {autoPostSkipLine(review.autoPost) != null && (
+            <p className="text-xs text-gray-600 dark:text-gray-300">{autoPostSkipLine(review.autoPost)}</p>
+          )}
+          {autoVerdictLine(review.autoPost) != null && (
+            <p className="text-xs text-gray-600 dark:text-gray-300">{autoVerdictLine(review.autoPost)}</p>
+          )}
           <MentionTextarea
             prId={pr.id}
             value={userBody}
@@ -1980,9 +2065,6 @@ export function ClaudeReviewTab({
         </ReviewSection>
       )}
 
-      {/* Hand the latest succeeded review to the agentic fixer — last, once the reader has
-          decided what in it is worth fixing. */}
-      {canEdit && <GenerateFixFromReview prId={pr.id} review={review} />}
     </div>
     </ReviewTabPrRefs>
   );

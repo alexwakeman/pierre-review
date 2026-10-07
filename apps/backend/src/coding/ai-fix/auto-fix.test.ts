@@ -6,16 +6,16 @@
 //      this head already reported as not addressed;
 //   3. a start passes the review's model and `trigger: 'auto'`, and records the outcome for the
 //      Claude Review tab (owner-scoped);
-//   3½. ⚠ THE WORKSPACE SWITCH (`workspaces.auto_fix_enabled`): ON by default (a fresh workspace and a
-//      repo with no membership both start fixes); switched off, an own PR is skipped with 'off'
-//      before the seed is even loaded;
+//   3½. ⚠ THE WORKSPACE SWITCH (`workspaces.auto_fix_enabled`): OFF by default (0084); switched
+//      off, an own PR is skipped with 'off' before the seed is even loaded; the workspace's
+//      "Always include" sections (`auto_fix_settings`) select the seed and reach the start;
 //   4. ⚠ TICKET ITEMS: the auto path never asks for them; a MANUAL seed (`withTicketItems`) gets the
 //      ticket review's items THIS PR owns, from each ticket's latest run only.
 //
 //   pnpm --filter @pierre-review/backend test ai-fix/auto-fix
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { AiFixReviewItem } from '@pierre-review/shared';
+import { AUTO_FIX_DEFAULT_INCLUDE, type AiFixReviewItem } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
 
 const DB_PATH = '/tmp/pierre-auto-fix-db.sqlite';
@@ -197,7 +197,15 @@ describe('maybeStartAutoFix — the author gate', () => {
     const r = await go(prId, 501);
     expect(r).toEqual({ reviewId: 501, status: 'started', fixId: 77 });
     expect(started).toEqual([
-      { accountId: 1, prId, reviewId: 501, model: 'claude-sonnet-5', trigger: 'auto' },
+      {
+        accountId: 1,
+        prId,
+        reviewId: 501,
+        model: 'claude-sonnet-5',
+        trigger: 'auto',
+        // The workspace's "Always include" sections — the defaults here (style bots off).
+        include: AUTO_FIX_DEFAULT_INCLUDE,
+      },
     ]);
     expect(mod.autoFixOutcomeFor(501, 1)).toEqual(r);
     expect(mod.autoFixOutcomeFor(501, 2)).toBeNull(); // owner-scoped
@@ -267,6 +275,28 @@ describe('maybeStartAutoFix — the workspace switch', () => {
 
     await db.update(ws).set({ autoFixEnabled: true }).where(eq(ws.id, wsId)).execute();
     expect(await go(prId, 521)).toEqual({ reviewId: 521, status: 'started', fixId: 77 });
+  });
+});
+
+describe('maybeStartAutoFix — the workspace’s "Always include" sections', () => {
+  it('⚠ the stored sections select the seed and reach the start (overrides over the defaults)', async () => {
+    const { eq } = await import('drizzle-orm');
+    const prId = await seedPr(viewerId);
+    const wsRow = (await db.select({ ws: schema.workspaceRepos.workspaceId }).from(schema.workspaceRepos).where(eq(schema.workspaceRepos.repoId, repoId)).execute())[0];
+    await db
+      .update(schema.workspaces)
+      .set({ autoFixSettings: { include: { styleBots: true, untouchedThreads: false } } })
+      .where(eq(schema.workspaces.id, wsRow.ws))
+      .execute();
+    loadInputs.length = 0;
+    try {
+      await go(prId, 530);
+      const want = { ...AUTO_FIX_DEFAULT_INCLUDE, styleBots: true, untouchedThreads: false };
+      expect(loadInputs[0].selection).toEqual({ kind: 'sections', include: want });
+      expect(started[0].include).toEqual(want);
+    } finally {
+      await db.update(schema.workspaces).set({ autoFixSettings: null }).where(eq(schema.workspaces.id, wsRow.ws)).execute();
+    }
   });
 });
 

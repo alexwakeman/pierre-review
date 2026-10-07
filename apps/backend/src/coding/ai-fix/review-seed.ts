@@ -1,11 +1,16 @@
 import { isThreadToFix } from '@pierre-review/shared';
 import type {
   AiFixChangeReport,
+  AiFixPickerItem,
+  AiFixPickerPreview,
+  AiFixPickerSection,
   AiFixReviewItem,
   AiFixReviewItemKind,
+  AutoFixInclude,
   CiReviewItem,
   ClaudeFindingSeverity,
   ClaudeReview,
+  ClaudeThreadAssessment,
   TicketReviewItem,
 } from '@pierre-review/shared';
 import type { FixAgentReport } from '../../pro/contract.js';
@@ -24,8 +29,11 @@ import type { FixAgentReport } from '../../pro/contract.js';
 //               this unchanged commit) stays — it is still open, and P skips its earlier twin.
 //   P<n>        an earlier review's finding (not praise/question) the follow-up found still not (or only partly)
 //               addressed — unless this run re-raised it as a finding (then F covers it).
-//   T<n>        another reviewer's thread the review judged still needs a fix (shared
-//               `isThreadToFix`: valid / partly valid AND not / partly addressed).
+//   T<n>        a review thread: another reviewer's thread the review judged still needs a fix (shared
+//               `isThreadToFix`), then — from the PR's OPEN threads (`threads`, the caller's
+//               `loadSeedThreads`) — an UNTOUCHED thread (no reply, no later commit; judged or not)
+//               and a thread a STYLE BOT opened (role quality_check in the PR's workspace). A thread
+//               sits in exactly ONE section: judged first, then style bot, then untouched.
 //   C<n>        a CI failure the CI REVIEW (review/ci-review/) explained and judged fixable in this PR —
 //               from its latest succeeded run AT THE PR'S CURRENT HEAD (`ciItems`, the caller's
 //               `getFixableCiItemsForPr`), never from the code review's own (legacy) `ciFailures`.
@@ -34,22 +42,31 @@ import type { FixAgentReport } from '../../pro/contract.js';
 //               (review/ticket-review/), never from the PR review, and ONLY the items whose owner is
 //               THIS PR (`ticketItems`, the caller's `getOwnedTicketItemsForPr`).
 //
+// ⚠ SELECTION KEYS ON STABLE IDS, NEVER ON REFS. Every candidate carries a picker KEY
+// ('finding:<id>', 'thread:<id>', 'ci:<ciReviewItemId>', 'story:<ticketIndex>:<ref>') and a picker
+// SECTION. The fix picker (`buildPickerPreview`) lists them; the start route's `include` names keys;
+// an auto fix picks by section (`AutoFixInclude`). Refs are numbered AFTER selection, positionally,
+// so a prompt always reads F1, F2… with no holes. With no selection the section defaults decide —
+// everything except style-bot threads.
+//
 // ⚠ STORIES ARE NOT THE PR REVIEW'S ANY MORE. A PR review checks no story, so its own row carries no
 // story verdict to fix — and a LEGACY row's (its `tickets` assessments, its story findings) is a
 // single-PR verdict the ticket review has replaced, so it is never seeded either. Ticket items arrive
 // only through `ticketItems`, which the MANUAL "Fix from review" passes; an AUTO fix passes none
 // (auto-fix.ts): fixing a ticket's gap is a person's call, never automatic.
 //
-// Refs are numbered in the review's own order, so the same stored review always yields the same
-// refs. EVERY item's text is fenced (it is review/PR text — other people's comments, ticket text,
-// CI output) with a per-run nonce. A char budget decides what is shown; whatever does not fit is
-// NAMED in the prompt as left out and stored with `included: false` — never silently truncated.
+// EVERY item's text is fenced (it is review/PR text — other people's comments, ticket text, CI
+// output) with a per-run nonce. A char budget decides what is shown — applied AFTER selection;
+// whatever does not fit is NAMED in the prompt as left out and stored with `included: false` — never
+// silently truncated.
 
 /** The prompt budget for the item blocks (chars). The reference diff has its own budget. */
 export const REVIEW_SEED_CHAR_BUDGET = 40_000;
 /** One item's fenced body is clipped to this (the item stays; its tail is marked as cut). */
 export const REVIEW_ITEM_BODY_MAX = 3_000;
 const SUMMARY_MAX = 1_500;
+// The nonce `pickReviewNonce` rolls is 16 hex chars; the preview charges a block of the same length.
+const PREVIEW_NONCE = '0000000000000000';
 
 export interface ReviewSeedItem {
   item: AiFixReviewItem;
@@ -61,8 +78,31 @@ export interface ReviewSeedItem {
   label: string;
 }
 
+/** One candidate before selection: no ref yet. */
+export interface SeedCandidate {
+  key: string;
+  section: AiFixPickerSection;
+  defaultIncluded: boolean;
+  kind: AiFixReviewItemKind;
+  // 'F' | 'P' | 'T' | 'C', numbered after selection; a story item keeps its own fixed ref.
+  refPrefix: 'F' | 'P' | 'T' | 'C' | null;
+  fixedRef: string | null;
+  title: string;
+  detail: string | null;
+  path: string | null;
+  line: number | null;
+  severity: ClaudeFindingSeverity | null;
+  findingId: number | null;
+  threadId: number | null;
+  ticketIndex: number | null;
+  priority: number;
+  /** The label line, given the ref. Our own vocabulary only. */
+  label: (ref: string) => string;
+  body: string;
+}
+
 export interface ReviewSeed {
-  /** Every item, in ref order, `included` set by the budget. */
+  /** Every SELECTED item, in ref order, `included` set by the budget. */
   items: AiFixReviewItem[];
   /** Refs actually shown to the agent — the set its report is validated against. */
   sentRefs: string[];
@@ -78,6 +118,28 @@ export interface SeedTicketItem {
   ticketReviewId: number;
   item: Pick<TicketReviewItem, 'ref' | 'status' | 'title' | 'body' | 'path' | 'line'>;
 }
+
+/** One OPEN review thread on the PR, as the untouched / style-bot sections need it (thread-candidates.ts). */
+export interface SeedThread {
+  threadId: number;
+  path: string;
+  line: number | null;
+  // review_threads.derived_state ('untouched' | 'replied_unresolved' | 'likely_addressed').
+  derivedState: string;
+  // The thread's first comment's author.
+  rootAuthorLogin: string | null;
+  rootAuthorIsBot: boolean;
+  // The root author's role in the PR's workspace is quality_check (stored role beats the login seed).
+  rootIsStyleBot: boolean;
+  // Oldest first, Limn's own posted comments left out.
+  comments: Array<{ authorLogin: string | null; body: string }>;
+}
+
+/** Which selection decides: the reader's keys, an auto fix's sections, or the defaults. */
+export type SeedSelection =
+  | { kind: 'keys'; keys: readonly string[] }
+  | { kind: 'sections'; include: AutoFixInclude }
+  | { kind: 'default' };
 
 /** Severities never handed to the fixer: nothing to change (praise) or a question for the author. */
 export const NOT_FOR_FIX: ReadonlySet<ClaudeFindingSeverity> = new Set<ClaudeFindingSeverity>(['praise', 'question']);
@@ -105,26 +167,6 @@ function where(path: string | null, line: number | null): string {
   return line != null ? `${path}:${line}` : path;
 }
 
-function mkItem(
-  ref: string,
-  kind: AiFixReviewItemKind,
-  title: string,
-  over: Partial<AiFixReviewItem> = {},
-): AiFixReviewItem {
-  return {
-    ref,
-    kind,
-    title: oneLine(title) || ref,
-    path: null,
-    line: null,
-    findingId: null,
-    threadId: null,
-    ticketIndex: null,
-    included: true,
-    ...over,
-  };
-}
-
 // ---- CI failures (the CI review's items) ----
 // Only a DIAGNOSED failure judged fixable in this PR (`fixableInPr === true`). Anything else —
 // infrastructure, flaky, unclear, not checked — is not the fixer's. The code review's own legacy
@@ -133,17 +175,45 @@ export function fixableCiItems(items: readonly CiReviewItem[]): CiReviewItem[] {
   return items.filter((f) => f != null && f.status === 'diagnosed' && f.fixableInPr === true);
 }
 
+/** Which `AutoFixInclude` switch governs a picker section (story: never in an auto fix). */
+const SECTION_SWITCH: Record<AiFixPickerSection, keyof AutoFixInclude | null> = {
+  findings: 'findings',
+  earlier_findings: 'earlierFindings',
+  judged_threads: 'judgedThreads',
+  untouched_threads: 'untouchedThreads',
+  ci_failures: 'ciFailures',
+  style_bots: 'styleBots',
+  story: null,
+};
+
+const who = (login: string | null, isBot: boolean): string =>
+  login ? `@${login}${isBot ? ' (bot)' : ''}` : 'a reviewer';
+
 /**
- * Collect every fixable item of a review, refs assigned. Pure — the review is the stored run.
+ * Every candidate of a review, in section order, with its stable key and section — no refs yet.
+ * Pure — the review is the stored run.
  */
-export function collectReviewItems(
+export function collectSeedCandidates(
   review: ClaudeReview,
   // The ticket review's items THIS PR owns. A MANUAL fix only; absent/[] ⇒ none (an auto fix).
   ticketItems: readonly SeedTicketItem[] = [],
   // The CI review's items at the PR's current head (both manual and auto fixes); absent/[] ⇒ none.
   ciItems: readonly CiReviewItem[] = [],
-): ReviewSeedItem[] {
-  const out: ReviewSeedItem[] = [];
+  // The PR's open review threads (the untouched and style-bot sections); absent/[] ⇒ none.
+  threads: readonly SeedThread[] = [],
+): SeedCandidate[] {
+  const out: SeedCandidate[] = [];
+  const base = {
+    fixedRef: null,
+    detail: null,
+    path: null,
+    line: null,
+    severity: null,
+    findingId: null,
+    threadId: null,
+    ticketIndex: null,
+    defaultIncluded: true,
+  } as const;
 
   // F — the review's findings. A RE-RAISE (`priorFindingId` set) left out only because the same
   // comment is already on this commit (follow-up.ts `isAlreadyOnThisCommit`) is NOT a reader's
@@ -156,24 +226,32 @@ export function collectReviewItems(
       f.story == null &&
       !(f.included === false && f.postedAt == null && f.priorFindingId == null),
   );
-  findings.forEach((f, i) => {
-    const ref = `F${i + 1}`;
+  for (const f of findings) {
     const text = (f.editedBody ?? f.body ?? '').trim();
-    const body = [
-      `Where: ${where(f.path, f.line) || '(no file)'}`,
-      `Title: ${f.title}`,
-      text ? `Detail:\n${text}` : '',
-      f.suggestion ? `Suggested change:\n${f.suggestion}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
     out.push({
-      item: mkItem(ref, 'finding', f.title, { path: f.path, line: f.line, findingId: f.id }),
+      ...base,
+      key: `finding:${f.id}`,
+      section: 'findings',
+      kind: 'finding',
+      refPrefix: 'F',
+      title: oneLine(f.title),
+      detail: text ? oneLine(text, 240) : null,
+      path: f.path,
+      line: f.line,
+      severity: f.severity,
+      findingId: f.id,
       priority: SEVERITY_PRIORITY[f.severity] ?? 4,
-      label: `Finding ${ref} (${f.severity})`,
-      body,
+      label: (ref) => `Finding ${ref} (${f.severity})`,
+      body: [
+        `Where: ${where(f.path, f.line) || '(no file)'}`,
+        `Title: ${f.title}`,
+        text ? `Detail:\n${text}` : '',
+        f.suggestion ? `Suggested change:\n${f.suggestion}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
     });
-  });
+  }
 
   // P — earlier findings the follow-up found still open, unless re-raised above.
   const open = (review.followUp?.items ?? []).filter(
@@ -182,78 +260,139 @@ export function collectReviewItems(
       !NOT_FOR_FIX.has(p.severity) &&
       p.reraisedFindingId == null,
   );
-  open.forEach((p, i) => {
-    const ref = `P${i + 1}`;
-    const body = [
-      `Where: ${where(p.path, p.line) || '(no file)'}`,
-      `Title: ${p.title}`,
-      `Status at this review: ${p.status === 'partly_addressed' ? 'partly addressed' : 'not addressed'}`,
-      p.explanation ? `Why: ${p.explanation}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
+  for (const p of open) {
     out.push({
-      item: mkItem(ref, 'earlier_finding', p.title, {
-        path: p.path,
-        line: p.line,
-        findingId: p.priorFindingId,
-      }),
+      ...base,
+      key: `finding:${p.priorFindingId}`,
+      section: 'earlier_findings',
+      kind: 'earlier_finding',
+      refPrefix: 'P',
+      title: oneLine(p.title),
+      detail: p.explanation ? oneLine(p.explanation, 240) : null,
+      path: p.path,
+      line: p.line,
+      severity: p.severity,
+      findingId: p.priorFindingId,
       priority: p.severity === 'blocker' ? 1 : 3,
-      label: `Earlier finding ${ref} (${p.severity})`,
-      body,
+      label: (ref) => `Earlier finding ${ref} (${p.severity})`,
+      body: [
+        `Where: ${where(p.path, p.line) || '(no file)'}`,
+        `Title: ${p.title}`,
+        `Status at this review: ${p.status === 'partly_addressed' ? 'partly addressed' : 'not addressed'}`,
+        p.explanation ? `Why: ${p.explanation}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
     });
-  });
+  }
 
-  // T — other reviewers' threads that still need a fix.
-  const threads = (review.threadAssessments ?? []).filter(isThreadToFix);
-  threads.forEach((t, i) => {
-    const ref = `T${i + 1}`;
-    const who = t.authorLogin ? `@${t.authorLogin}${t.authorIsBot ? ' (bot)' : ''}` : 'a reviewer';
-    const body = [
-      `Where: ${where(t.path, t.line) || '(no file)'}`,
-      `From ${who}: ${t.excerpt}`,
-      `The review's judgement (${t.validity === 'partly_valid' ? 'partly right' : 'right'}, ${
-        t.addressed === 'partly_addressed' ? 'partly addressed' : 'not addressed'
-      }): ${t.explanation ?? ''}`.trimEnd(),
-    ].join('\n');
+  // T — threads. Judged-to-fix first; then the open threads, each in ONE section.
+  const assessments = review.threadAssessments ?? [];
+  const judged = assessments.filter(isThreadToFix);
+  const judgedIds = new Set(judged.map((t) => t.threadId));
+  for (const t of judged) {
+    const by = who(t.authorLogin, t.authorIsBot);
     out.push({
-      item: mkItem(ref, 'thread', `${who}: ${t.excerpt}`, {
-        path: t.path,
-        line: t.line,
-        threadId: t.threadId,
-      }),
+      ...base,
+      key: `thread:${t.threadId}`,
+      section: 'judged_threads',
+      kind: 'thread',
+      refPrefix: 'T',
+      title: oneLine(`${by}: ${t.excerpt}`),
+      detail: t.explanation ? oneLine(t.explanation, 240) : null,
+      path: t.path,
+      line: t.line,
+      threadId: t.threadId,
       priority: 3,
-      label: `Reviewer thread ${ref}`,
-      body,
+      label: (ref) => `Reviewer thread ${ref}`,
+      body: [
+        `Where: ${where(t.path, t.line) || '(no file)'}`,
+        `From ${by}: ${t.excerpt}`,
+        `The review's judgement (${t.validity === 'partly_valid' ? 'partly right' : 'right'}, ${
+          t.addressed === 'partly_addressed' ? 'partly addressed' : 'not addressed'
+        }): ${t.explanation ?? ''}`.trimEnd(),
+      ].join('\n'),
     });
-  });
+  }
+  const assessmentById = new Map<number, ClaudeThreadAssessment>(assessments.map((a) => [a.threadId, a]));
+  const styleThreads: SeedThread[] = [];
+  const untouched: SeedThread[] = [];
+  for (const t of threads) {
+    if (judgedIds.has(t.threadId) || t.comments.length === 0) continue;
+    if (t.rootIsStyleBot) {
+      // A style bot's thread that a later commit likely dealt with is not offered.
+      if (t.derivedState !== 'likely_addressed') styleThreads.push(t);
+    } else if (t.derivedState === 'untouched') {
+      untouched.push(t);
+    }
+  }
+  const threadCandidate = (t: SeedThread, section: 'untouched_threads' | 'style_bots'): SeedCandidate => {
+    const by = who(t.rootAuthorLogin, t.rootAuthorIsBot);
+    const root = t.comments[0]!;
+    const judgement = assessmentById.get(t.threadId);
+    const replies = t.comments.slice(1);
+    const judgementLine = judgement
+      ? `The review's judgement (${judgement.validity.replace(/_/g, ' ')}, ${judgement.addressed.replace(/_/g, ' ')}): ${
+          judgement.explanation ?? ''
+        }`.trimEnd()
+      : '';
+    return {
+      ...base,
+      key: `thread:${t.threadId}`,
+      section,
+      kind: 'thread',
+      refPrefix: 'T',
+      defaultIncluded: section !== 'style_bots',
+      title: oneLine(`${by}: ${root.body}`),
+      detail: judgement?.explanation ? oneLine(judgement.explanation, 240) : null,
+      path: t.path,
+      line: t.line,
+      threadId: t.threadId,
+      priority: section === 'style_bots' ? 6 : 4,
+      label: (ref) => (section === 'style_bots' ? `Style bot thread ${ref}` : `Unanswered thread ${ref}`),
+      body: [
+        `Where: ${where(t.path, t.line) || '(no file)'}`,
+        `From ${by}: ${root.body}`,
+        ...replies.map((c) => `Reply from ${who(c.authorLogin, false)}: ${c.body}`),
+        section === 'untouched_threads' ? 'Nobody has replied and no later commit touched the file.' : '',
+        judgementLine,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    };
+  };
+  for (const t of untouched) out.push(threadCandidate(t, 'untouched_threads'));
+  for (const t of styleThreads) out.push(threadCandidate(t, 'style_bots'));
 
   // C — CI failures fixable in this PR.
-  fixableCiItems(ciItems).forEach((f, i) => {
-    const ref = `C${i + 1}`;
+  for (const f of fixableCiItems(ciItems)) {
     const first = f.path ? { path: f.path, line: f.line } : (f.relatedFiles?.[0] ?? null);
-    const body = [
-      `Check: ${f.checkName}${f.step ? ` (step: ${f.step})` : ''}`,
-      f.cause ? `Cause: ${f.cause}` : '',
-      f.explanation ? `Detail: ${f.explanation}` : '',
-      f.path ? `Where: ${where(f.path, f.line)}` : '',
-      f.suggestion ? `Suggested change: ${f.suggestion}` : '',
-      f.relatedFiles?.length
-        ? `Related files: ${f.relatedFiles.map((r) => where(r.path, r.line)).join(', ')}`
-        : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
     out.push({
-      item: mkItem(ref, 'ci_failure', f.cause ? `${f.checkName}: ${f.cause}` : f.checkName, {
-        path: first?.path ?? null,
-        line: first?.line ?? null,
-      }),
+      ...base,
+      key: `ci:${f.id}`,
+      section: 'ci_failures',
+      kind: 'ci_failure',
+      refPrefix: 'C',
+      title: oneLine(f.cause ? `${f.checkName}: ${f.cause}` : f.checkName),
+      detail: f.explanation ? oneLine(f.explanation, 240) : null,
+      path: first?.path ?? null,
+      line: first?.line ?? null,
       priority: 0,
-      label: `CI failure ${ref}`,
-      body,
+      label: (ref) => `CI failure ${ref}`,
+      body: [
+        `Check: ${f.checkName}${f.step ? ` (step: ${f.step})` : ''}`,
+        f.cause ? `Cause: ${f.cause}` : '',
+        f.explanation ? `Detail: ${f.explanation}` : '',
+        f.path ? `Where: ${where(f.path, f.line)}` : '',
+        f.suggestion ? `Suggested change: ${f.suggestion}` : '',
+        f.relatedFiles?.length
+          ? `Related files: ${f.relatedFiles.map((r) => where(r.path, r.line)).join(', ')}`
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
     });
-  });
+  }
 
   // S — the TICKET review's unmet / partly met criteria and missing pieces this PR owns. One S<t>
   // per ticket review run, in the order given; the item keeps its own ref (AC3, M1).
@@ -266,26 +405,84 @@ export function collectReviewItems(
     perRun.set(t.ticketReviewId, n);
     const { item } = t;
     // The server writes 'AC<n>' / 'M<n>'; anything else gets its position, so a ref never repeats.
-    const ref = `S${ti + 1}-${/^(AC|M)\d+$/.test(item.ref) ? item.ref : `I${n}`}`;
+    const local = /^(AC|M)\d+$/.test(item.ref) ? item.ref : `I${n}`;
+    const ref = `S${ti + 1}-${local}`;
     const story = [t.ticketKey, t.ticketTitle].filter(Boolean).join(' ');
-    const body = [
-      story ? `Ticket: ${story}` : '',
-      item.status === 'missing' ? `Missing: ${item.title}` : `Acceptance criterion: ${item.title}`,
-      item.status === 'missing' ? '' : `Status: ${item.status === 'partly_met' ? 'partly met' : 'not met'}`,
-      item.body.trim() ? `Why: ${item.body.trim()}` : '',
-      item.path ? `Where: ${where(item.path, item.line)}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
     out.push({
-      item: mkItem(ref, 'story', item.title, { path: item.path, line: item.line, ticketIndex: ti }),
+      ...base,
+      key: `story:${ti}:${local}`,
+      section: 'story',
+      kind: 'story',
+      refPrefix: null,
+      fixedRef: ref,
+      title: oneLine(item.title),
+      detail: story ? oneLine(story) : null,
+      path: item.path,
+      line: item.line,
+      ticketIndex: ti,
       priority: 2,
-      label: `Ticket item ${ref}`,
-      body,
+      label: (r) => `Ticket item ${r}`,
+      body: [
+        story ? `Ticket: ${story}` : '',
+        item.status === 'missing' ? `Missing: ${item.title}` : `Acceptance criterion: ${item.title}`,
+        item.status === 'missing' ? '' : `Status: ${item.status === 'partly_met' ? 'partly met' : 'not met'}`,
+        item.body.trim() ? `Why: ${item.body.trim()}` : '',
+        item.path ? `Where: ${where(item.path, item.line)}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
     });
   }
 
   return out;
+}
+
+/** Is a candidate selected? */
+export function isSelected(c: SeedCandidate, sel: SeedSelection): boolean {
+  if (sel.kind === 'keys') return sel.keys.includes(c.key);
+  if (sel.kind === 'sections') {
+    const sw = SECTION_SWITCH[c.section];
+    return sw == null ? false : sel.include[sw];
+  }
+  return c.defaultIncluded;
+}
+
+/** Number the selected candidates' refs positionally (F1, F2…; story refs are fixed). */
+export function assignRefs(cands: readonly SeedCandidate[]): ReviewSeedItem[] {
+  const counters = { F: 0, P: 0, T: 0, C: 0 };
+  return cands.map((c) => {
+    let ref: string;
+    if (c.refPrefix) {
+      counters[c.refPrefix] += 1;
+      ref = `${c.refPrefix}${counters[c.refPrefix]}`;
+    } else {
+      ref = c.fixedRef ?? 'S1';
+    }
+    const item: AiFixReviewItem = {
+      ref,
+      kind: c.kind,
+      title: c.title || ref,
+      path: c.path,
+      line: c.line,
+      findingId: c.findingId,
+      threadId: c.threadId,
+      ticketIndex: c.ticketIndex,
+      included: true,
+    };
+    return { item, priority: c.priority, body: c.body, label: c.label(ref) };
+  });
+}
+
+/**
+ * Collect every fixable item of a review (no selection), refs assigned. Pure.
+ */
+export function collectReviewItems(
+  review: ClaudeReview,
+  ticketItems: readonly SeedTicketItem[] = [],
+  ciItems: readonly CiReviewItem[] = [],
+  threads: readonly SeedThread[] = [],
+): ReviewSeedItem[] {
+  return assignRefs(collectSeedCandidates(review, ticketItems, ciItems, threads));
 }
 
 /** Every string that will sit inside a fence — the nonce-collision scan's input. */
@@ -293,9 +490,36 @@ function fencedTexts(items: readonly ReviewSeedItem[], summary: string): string[
   return [summary, ...items.map((i) => i.body)];
 }
 
+const renderBlock = (s: { label: string; ref: string; body: string }, nonce: string): string =>
+  `${s.label}\n---BEGIN ITEM ${s.ref} ${nonce}---\n${s.body}\n---END ITEM ${s.ref} ${nonce}---`;
+
 /**
- * Render the review seed under a char budget. Items are SHOWN in priority order until the budget
- * is spent (the first one always), then listed in ref order; the rest are named as left out.
+ * The budget fold: in priority order (stable on input order), charge each block; the first one is
+ * always shown. Returns the indexes left out. ONE fold for the seed and the preview.
+ */
+export function budgetCut(
+  costs: ReadonlyArray<{ priority: number; cost: number }>,
+  budget: number,
+): Set<number> {
+  const order = costs
+    .map((c, idx) => ({ c, idx }))
+    .sort((a, b) => a.c.priority - b.c.priority || a.idx - b.idx);
+  const cut = new Set<number>();
+  let used = 0;
+  for (const { c, idx } of order) {
+    if (used > 0 && used + c.cost > budget) {
+      cut.add(idx);
+      continue;
+    }
+    used += c.cost;
+  }
+  return cut;
+}
+
+/**
+ * Render the review seed under a char budget, AFTER selection. Items are SHOWN in priority order
+ * until the budget is spent (the first one always), then listed in ref order; the rest are named as
+ * left out.
  */
 export function buildReviewSeed(
   review: ClaudeReview,
@@ -306,31 +530,32 @@ export function buildReviewSeed(
     ticketItems?: readonly SeedTicketItem[];
     // The CI review's items at the PR's current head (see the header).
     ciItems?: readonly CiReviewItem[];
+    // The PR's open review threads (untouched / style-bot sections).
+    threads?: readonly SeedThread[];
+    // Absent ⇒ the section defaults.
+    selection?: SeedSelection;
   },
 ): ReviewSeed {
   const budget = opts.budgetChars ?? REVIEW_SEED_CHAR_BUDGET;
-  const all = collectReviewItems(review, opts.ticketItems ?? [], opts.ciItems ?? []);
+  const sel = opts.selection ?? { kind: 'default' };
+  const cands = collectSeedCandidates(review, opts.ticketItems ?? [], opts.ciItems ?? [], opts.threads ?? []).filter(
+    (c) => isSelected(c, sel),
+  );
+  const all = assignRefs(cands);
   if (all.length === 0) return { items: [], sentRefs: [], text: '' };
 
   const summary = clip(review.userBody?.trim() || review.summary?.trim() || '', SUMMARY_MAX);
   for (const s of all) s.body = clip(s.body, REVIEW_ITEM_BODY_MAX);
   const nonce = opts.nonce(fencedTexts(all, summary));
-  const block = (s: ReviewSeedItem): string =>
-    `${s.label}\n---BEGIN ITEM ${s.item.ref} ${nonce}---\n${s.body}\n---END ITEM ${s.item.ref} ${nonce}---`;
+  const block = (s: ReviewSeedItem): string => renderBlock({ label: s.label, ref: s.item.ref, body: s.body }, nonce);
 
-  // Decide inclusion by priority (stable on ref order), charging each block to the budget.
-  const order = all
-    .map((s, idx) => ({ s, idx }))
-    .sort((a, b) => a.s.priority - b.s.priority || a.idx - b.idx);
-  let used = 0;
-  for (const { s } of order) {
-    const cost = block(s).length + 2;
-    if (used > 0 && used + cost > budget) {
-      s.item.included = false;
-      continue;
-    }
-    used += cost;
-  }
+  const cut = budgetCut(
+    all.map((s) => ({ priority: s.priority, cost: block(s).length + 2 })),
+    budget,
+  );
+  all.forEach((s, i) => {
+    if (cut.has(i)) s.item.included = false;
+  });
 
   const shown = all.filter((s) => s.item.included);
   const left = all.filter((s) => !s.item.included);
@@ -354,6 +579,55 @@ export function buildReviewSeed(
     items: all.map((s) => s.item),
     sentRefs: shown.map((s) => s.item.ref),
     text: parts.join('\n\n'),
+  };
+}
+
+/**
+ * The fix picker's preview: every candidate (selected or not), in PRIORITY order (so the SPA's
+ * in-order budget fold over `chars` matches `budgetCut`), with the keys the budget would cut from
+ * the DEFAULT selection. `chars` is the block the item would add, charged as if its ref were the one
+ * the default selection gives it (a ref differs by a digit at most).
+ */
+export function buildPickerPreview(
+  review: ClaudeReview,
+  opts: {
+    budgetChars?: number;
+    ticketItems?: readonly SeedTicketItem[];
+    ciItems?: readonly CiReviewItem[];
+    threads?: readonly SeedThread[];
+  },
+): AiFixPickerPreview {
+  const budget = opts.budgetChars ?? REVIEW_SEED_CHAR_BUDGET;
+  const cands = collectSeedCandidates(review, opts.ticketItems ?? [], opts.ciItems ?? [], opts.threads ?? []);
+  const withRefs = assignRefs(cands);
+  const rows = cands.map((c, i) => {
+    const s = withRefs[i]!;
+    const chars =
+      renderBlock({ label: s.label, ref: s.item.ref, body: clip(s.body, REVIEW_ITEM_BODY_MAX) }, PREVIEW_NONCE).length + 2;
+    return { c, chars, idx: i };
+  });
+  rows.sort((a, b) => a.c.priority - b.c.priority || a.idx - b.idx);
+  const items: AiFixPickerItem[] = rows.map(({ c, chars }) => ({
+    key: c.key,
+    section: c.section,
+    label: c.title || c.key,
+    detail: c.detail,
+    path: c.path,
+    line: c.line,
+    severity: c.severity,
+    defaultIncluded: c.defaultIncluded,
+    chars,
+  }));
+  const defaults = items.filter((i) => i.defaultIncluded);
+  const cut = budgetCut(
+    defaults.map((i) => ({ priority: 0, cost: i.chars })),
+    budget,
+  );
+  return {
+    sourceReviewId: review.id,
+    items,
+    budgetChars: budget,
+    cutByBudget: defaults.filter((_, i) => cut.has(i)).map((i) => i.key),
   };
 }
 

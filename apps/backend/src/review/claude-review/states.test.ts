@@ -170,6 +170,9 @@ beforeAll(async () => {
     severity,
     title: severity,
     body: 'b',
+    // The writer stores true (persist.ts); the column's DB default is false, which would read as
+    // "ignored".
+    included: true,
     ...extra,
   });
   await db
@@ -183,6 +186,13 @@ beforeAll(async () => {
       finding('question', { lens: 'not-a-lens' }),
       // An older run's stored praise: HIDDEN from every figure (no count, lens or posted), never deleted.
       finding('praise', { lens: 'design', postedAt: new Date() }),
+      // IGNORED by the reader (`included = false`): out of the pills, the lenses and the posted
+      // total — even one that was posted — and counted as `ignoredCount` instead.
+      finding('warning', { lens: 'security', included: false }),
+      finding('nit', { included: false, postedAt: new Date() }),
+      // The SERVER'S left-out re-raise (`included: false` + a prior, unposted): NOT an ignore — it
+      // stays in the pills and counts as posted (its comment is already on this commit).
+      finding('blocker', { included: false, priorFindingId: 999 }),
     ])
     .execute();
   await db
@@ -297,9 +307,10 @@ describe('POST /api/claude-review/states — the strip summary', () => {
     const [s] = (await states([rich])).json().states as any[];
     expect(s).toMatchObject({ prId: rich, status: 'succeeded', headMoved: true, commitsSince: 2 });
     expect(s.summary).toEqual({
-      findings: { blocker: 2, warning: 2, nit: 1, question: 1, praise: 0 },
+      findings: { blocker: 3, warning: 2, nit: 1, question: 1, praise: 0 },
       lenses: { design: 2, security: 1 },
-      postedFindings: 1,
+      postedFindings: 2,
+      ignoredCount: 2,
       reviewPosted: false,
       tickets: [
         { key: 'BMD-1', title: 'Reset password', alignment: 'partly_aligned' },
@@ -315,6 +326,7 @@ describe('POST /api/claude-review/states — the strip summary', () => {
       findings: { blocker: 0, warning: 0, nit: 0, question: 0, praise: 0 },
       lenses: {},
       postedFindings: 0,
+      ignoredCount: 0,
       tickets: [{ title: 'Reset password', alignment: null }],
       followUp: null,
     });

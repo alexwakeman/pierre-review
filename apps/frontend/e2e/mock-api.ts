@@ -71,7 +71,7 @@ const USERS: User[] = [ME, ALICE, BOB];
 // A workspace is the app's ONLY scope. The store starts with `workspaceId: null` and NOTHING
 // workspace-scoped renders or fetches until `GET /api/workspaces` lands and the sync effect fills
 // it in (every scoped hook holds itself idle with `skipToken`). So this fixture is not decoration:
-// without it the Activity console — the default landing view — stays permanently empty and every
+// without it the Open PRs tab — the default landing view — and the Activity console stay empty and every
 // spec in this directory fails with no useful message.
 //
 // One workspace, `isDefault: true`, owning the single repo. That mirrors a real fresh account:
@@ -821,7 +821,7 @@ export async function installMockApi(page: Page): Promise<void> {
         });
       // ⚠ MUST BE SERVED, not left to the catch-all. `workspaceId` starts null in the store and
       // every workspace-scoped query holds itself idle until this response resolves it — a `{}`
-      // here leaves the Activity console (the default landing view) permanently blank.
+      // here leaves the Open PRs tab (the default landing view) permanently blank.
       if (path.endsWith('/api/workspaces')) return json(route, WORKSPACES);
       // The workspace's bot listing. Shape matters even while empty: consumers read `.reviewers`
       // and `.repoIds` off it.

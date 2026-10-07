@@ -746,9 +746,9 @@ describe('tabs are views: opening one is a navigation', () => {
     expect(useFilters.getState().activityRepoId).toBe('bots');
 
     // Forward onto the drill-down's own entry: it must land somewhere coherent, never crash or
-    // strand the reader on an empty tab.
+    // strand the reader on an empty tab — the default view, Open PRs (no `view=`).
     forward();
-    expect(usePinnedTabs.getState().activeTab).toBe('activity');
+    expect(usePinnedTabs.getState().activeTab).toBe('open-prs');
   });
 
   // ⚠ A POP MUST RECONCILE THE ADDRESS BAR, exactly as the cold load does. A seed-backed
@@ -768,8 +768,9 @@ describe('tabs are views: opening one is a navigation', () => {
     usePinnedTabs.setState({ activeTab: prDetailKey(4123) });
 
     back();
-    expect(usePinnedTabs.getState().activeTab).toBe('activity');
-    expect(location.search).toContain('view=activity');
+    // No `view` = the default view, Open PRs (since 2026-10-07).
+    expect(usePinnedTabs.getState().activeTab).toBe('open-prs');
+    expect(location.search).toContain('view=open-prs');
     // A REPLACE, so the forward entry is still there.
     expect(entries).toHaveLength(3);
     expect(cursor).toBe(1);

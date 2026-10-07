@@ -31,8 +31,10 @@ import type {
 } from '@pierre-review/shared';
 import { CLAUDE_FINDING_LENSES, threadAssessmentCounts } from '@pierre-review/shared';
 import { storedList, stripStoredStoryLead } from '@pierre-review/shared';
+import type { FindingAutoResolveRecord } from '@pierre-review/shared';
 import type { ReviewFinding } from '../../pro/contract.js';
 import { ticketEntriesOf } from './ticket.js';
+import { findFindingThread, type ThreadComment } from './finding-thread.js';
 import {
   settledFindings,
   type SettleCommit,
@@ -100,6 +102,8 @@ interface FindingRow {
   storyRef?: string | null;
   // Posted by auto-posting (migration 0087 / pg 0074).
   postedAuto?: boolean | null;
+  // Auto resolve's record on this finding's thread (migration 0091 / pg 0078).
+  autoResolve?: FindingAutoResolveRecord | null;
 }
 
 // A story finding's origin off its row; null unless BOTH columns hold a value.
@@ -162,6 +166,10 @@ export function autoPostWireOf(v: unknown): ClaudeAutoPostWire | null {
     reason: r.reason ?? null,
     error: r.error ?? null,
     postedCount: Array.isArray(r.postedFindingIds) ? r.postedFindingIds.length : 0,
+    ...(r.reason === 'already_posted'
+      ? { alreadyPostedCount: Array.isArray(r.alreadyPostedFindingIds) ? r.alreadyPostedFindingIds.length : 0 }
+      : {}),
+    ...(r.verdict != null && typeof r.verdict === 'object' ? { verdict: r.verdict } : {}),
   };
 }
 
@@ -187,7 +195,26 @@ export function isShownFinding(f: { severity: ClaudeFindingSeverity }): boolean 
   return f.severity !== 'praise';
 }
 
-function mapFinding(r: FindingRow): ClaudeFinding {
+type IncludedFacts = { included?: boolean | null; postedAt?: unknown; priorFindingId?: number | null };
+
+/**
+ * The server's own left-out re-raise: `included: false` stored on a RE-RAISE (a `priorFindingId`)
+ * of a comment already posted on this same commit (follow-up.ts `isAlreadyOnThisCommit`, written
+ * below) — an issue still OPEN, just not posted twice.
+ */
+export function isAlreadyPostedReraise(f: IncludedFacts): boolean {
+  return f.included === false && f.postedAt == null && f.priorFindingId != null;
+}
+
+/**
+ * `included = false` is TWO facts, and only one is a READER'S IGNORE — every reader of the flag
+ * meaning "the reader ignored it" goes through this, never a bare `included === false`.
+ */
+export function isReaderIgnoredFinding(f: IncludedFacts): boolean {
+  return f.included === false && !isAlreadyPostedReraise(f);
+}
+
+function mapFinding(r: FindingRow, threadIds?: ReadonlyMap<number, number>): ClaudeFinding {
   return {
     id: r.id,
     reviewId: r.reviewId,
@@ -214,6 +241,12 @@ function mapFinding(r: FindingRow): ClaudeFinding {
     priorFindingId: r.priorFindingId ?? null,
     lens: asLens(r.lens),
     story: storyOf(r),
+    autoResolve: r.autoResolve ?? null,
+    // COMPUTED ON READ, never stored: a posted INLINE finding's comment is a synced review comment
+    // (`review_comments.database_id`), whose thread is the Changes tab's jump target. A finding
+    // posted inside a review before its comment id was read back matches by its root comment
+    // (`postedFindingThreadIds`).
+    threadId: r.postedCommentKind === 'inline' ? (threadIds?.get(r.id) ?? null) : null,
   };
 }
 
@@ -250,6 +283,7 @@ function mapReview(
   r: ReviewRow,
   findings: FindingRow[],
   head: ClaudeReviewHeadState | null = null,
+  threadIds?: ReadonlyMap<number, number>,
 ): ClaudeReview {
   const tickets = ticketEntriesOf(r.ticket, r.ticketAssessment);
   return {
@@ -279,7 +313,7 @@ function mapReview(
     postedAt: iso(r.postedAt),
     createdAt: isoReq(r.createdAt),
     finishedAt: iso(r.finishedAt),
-    findings: findings.map(mapFinding),
+    findings: findings.map((f) => mapFinding(f, threadIds)),
     tickets,
     ticket: tickets[0]?.ticket ?? null,
     ticketAssessment: tickets[0]?.assessment ?? null,
@@ -345,7 +379,87 @@ export async function getClaudeReviewById(
     .orderBy(asc(crf.id))
     .execute()) as FindingRow[]).filter(isShownFinding);
   const head = await reviewHeadState(ctx, row.prId, row.headSha, rows[0]!.prHeadSha);
-  return mapReview(row, findings, head);
+  const threadIds = await postedFindingThreadIds(ctx, row.prId, accountId, findings);
+  return mapReview(row, findings, head, threadIds);
+}
+
+/**
+ * Finding id → local review-thread id, for this run's POSTED INLINE findings. Scoped to the
+ * review's own PR (already ownership-checked by the caller), so a comment can only resolve to a
+ * thread on that PR. By the stored GitHub comment id first; a finding with none (posted inside a
+ * review before the comment ids were read back) — or whose id is not synced — falls back to the
+ * ONE shared matcher (`findFindingThread`: the root comment is the account's own, on the same file,
+ * carries Limn's marker and starts with the finding's text). That fallback reads the PR's threads
+ * only when some posted inline finding is still unmatched. Nothing matching = no entry (the finding
+ * keeps its path/line link).
+ */
+async function postedFindingThreadIds(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+  findings: FindingRow[],
+): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  const posted = findings.filter((f) => f.postedCommentKind === 'inline' && f.postedAt != null);
+  if (posted.length === 0) return out;
+  const { reviewThreads: rt, reviewComments: rc, users, accounts } = ctx.schema as any;
+  const ids = [...new Set(posted.map((f) => f.githubCommentId).filter((x): x is string => x != null))];
+  const taken = new Set<number>();
+  if (ids.length > 0) {
+    const rows = (await ctx.db
+      .select({ databaseId: rc.databaseId, threadId: rt.id })
+      .from(rc)
+      .innerJoin(rt, eq(rt.id, rc.threadId))
+      .where(and(eq(rt.prId, prId), inArray(rc.databaseId, ids)))
+      .execute()) as Array<{ databaseId: string | null; threadId: number }>;
+    const byComment = new Map<string, number>();
+    for (const r of rows) if (r.databaseId != null) byComment.set(r.databaseId, r.threadId);
+    for (const f of posted) {
+      const t = f.githubCommentId != null ? byComment.get(f.githubCommentId) : undefined;
+      if (t != null && !taken.has(t)) {
+        out.set(f.id, t);
+        taken.add(t);
+      }
+    }
+  }
+  const rest = posted.filter((f) => !out.has(f.id));
+  if (rest.length === 0) return out;
+  const paths = [...new Set(rest.map((f) => f.path))];
+  const threads = (await ctx.db
+    .select({ id: rt.id, path: rt.path })
+    .from(rt)
+    .where(and(eq(rt.prId, prId), inArray(rt.path, paths)))
+    .execute()) as Array<{ id: number; path: string }>;
+  if (threads.length === 0) return out;
+  const commentRows = (await ctx.db
+    .select({
+      threadId: rc.threadId,
+      databaseId: rc.databaseId,
+      body: rc.body,
+      authorLogin: users.githubLogin,
+      createdAt: rc.createdAt,
+    })
+    .from(rc)
+    .leftJoin(users, eq(users.id, rc.authorId))
+    .where(inArray(rc.threadId, threads.map((t) => t.id)))
+    .execute()) as Array<Omit<ThreadComment, 'createdAt'> & { createdAt: Date | null }>;
+  const comments: ThreadComment[] = commentRows.map((c) => ({ ...c, createdAt: c.createdAt?.getTime?.() ?? 0 }));
+  const login = (
+    (await ctx.db
+      .select({ login: accounts.githubLogin })
+      .from(accounts)
+      .where(eq(accounts.id, accountId))
+      .limit(1)
+      .execute()) as Array<{ login: string | null }>
+  )[0]?.login ?? null;
+  for (const f of rest) {
+    const t = findFindingThread(f, threads, comments, login, taken);
+    if (t) {
+      out.set(f.id, t.id);
+      taken.add(t.id);
+    }
+  }
+  return out;
 }
 
 export async function getLatestClaudeReview(
@@ -366,6 +480,28 @@ export async function getLatestClaudeReview(
   const row = rows[0] ?? null;
   if (!row) return null;
   return getClaudeReviewById(ctx, row.id, accountId);
+}
+
+/**
+ * The id of the PR's newest SUCCEEDED run, or null when none succeeded. What AI Fix builds from: a
+ * failed (or still running) latest run must not hide an older finished one.
+ */
+export async function getLatestSucceededReviewId(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+): Promise<number | null> {
+  const { cr, prs, repos } = tables(ctx);
+  const rows = (await ctx.db
+    .select({ id: cr.id })
+    .from(cr)
+    .innerJoin(prs, eq(prs.id, cr.prId))
+    .innerJoin(repos, eq(repos.id, prs.repoId))
+    .where(and(eq(cr.prId, prId), eq(repos.accountId, accountId), eq(cr.status, 'succeeded')))
+    .orderBy(desc(cr.id))
+    .limit(1)
+    .execute()) as Array<{ id: number }>;
+  return rows[0]?.id ?? null;
 }
 
 export async function listClaudeReviewHistory(
@@ -599,10 +735,24 @@ async function foldStateSummaries(
   // 1. Every finding of the finished runs — the columns the fold needs, nothing else.
   const findings = doneIds.length
     ? ((await ctx.db
-        .select({ reviewId: crf.reviewId, severity: crf.severity, lens: crf.lens, postedAt: crf.postedAt })
+        .select({
+          reviewId: crf.reviewId,
+          severity: crf.severity,
+          lens: crf.lens,
+          postedAt: crf.postedAt,
+          included: crf.included,
+          priorFindingId: crf.priorFindingId,
+        })
         .from(crf)
         .where(inArray(crf.reviewId, doneIds))
-        .execute()) as Array<{ reviewId: number; severity: ClaudeFindingSeverity; lens: string | null; postedAt: unknown }>)
+        .execute()) as Array<{
+        reviewId: number;
+        severity: ClaudeFindingSeverity;
+        lens: string | null;
+        postedAt: unknown;
+        included: boolean | null;
+        priorFindingId: number | null;
+      }>)
     : [];
 
   // 2. The finished runs' stored assessments (JSON) — read for the LATEST runs only, never history.
@@ -641,13 +791,22 @@ async function foldStateSummaries(
     const counts: Record<ClaudeFindingSeverity, number> = { blocker: 0, warning: 0, nit: 0, question: 0, praise: 0 };
     const lenses: ClaudeReviewStateSummary['lenses'] = {};
     let postedFindings = 0;
+    let ignoredCount = 0;
     for (const f of findingsById.get(id) ?? []) {
       // Stored praise (older runs) is hidden: no count, no lens, no posted figure. `praise` stays 0.
       if (!isShownFinding(f)) continue;
+      // A READER'S ignore leaves the pills and the posted total; the card says "N ignored"
+      // instead. ⚠ The server's own left-out re-raise (`included: false` with a prior) is NOT an
+      // ignore: the issue is still open and its comment is already on GitHub at this commit, so it
+      // counts in the pills AND as posted.
+      if (isReaderIgnoredFinding(f)) {
+        ignoredCount += 1;
+        continue;
+      }
       if (f.severity in counts) counts[f.severity] += 1;
       const lens = (CLAUDE_FINDING_LENSES as string[]).includes(f.lens ?? '') ? (f.lens as ClaudeFindingLens) : null;
       if (lens) lenses[lens] = (lenses[lens] ?? 0) + 1;
-      if (f.postedAt != null) postedFindings += 1;
+      if (f.postedAt != null || isAlreadyPostedReraise(f)) postedFindings += 1;
     }
     const extra = extrasById.get(id);
     const latest = latestByPr.get(s.prId);
@@ -670,6 +829,7 @@ async function foldStateSummaries(
       findings: counts,
       lenses,
       postedFindings,
+      ignoredCount,
       reviewPosted: extra?.postedAt != null,
       tickets,
       followUp,
@@ -1445,19 +1605,33 @@ export async function markReviewPosted(
   postedReviewId: string,
   inlineFindingIds: number[],
   prComments: { findingId: number; commentId: string }[] = [],
-  opts: { auto?: boolean } = {},
+  // `inlineComments`: the GitHub comment id read back for each inline finding (post-seam.ts). A
+  // finding with none is still stamped posted, with a NULL id (the read falls back to the thread's
+  // root comment); an id for a finding outside `inlineFindingIds` is ignored.
+  opts: { auto?: boolean; inlineComments?: { findingId: number; commentId: string }[] } = {},
 ): Promise<void> {
   const { cr, crf } = tables(ctx);
   const now = new Date();
   // Only an auto post writes the flag; a person's post leaves it NULL.
   const auto = opts.auto === true ? { postedAuto: true } : {};
+  const inline = new Set(inlineFindingIds);
+  const commentIds = new Map<number, string>();
+  for (const c of opts.inlineComments ?? []) if (inline.has(c.findingId)) commentIds.set(c.findingId, c.commentId);
   await ctx.runTransaction(async (tx) => {
     await tx.update(cr).set({ postedReviewId, postedAt: now }).where(eq(cr.id, id)).execute();
-    if (inlineFindingIds.length > 0) {
+    const bare = inlineFindingIds.filter((fid) => !commentIds.has(fid));
+    if (bare.length > 0) {
       await tx
         .update(crf)
         .set({ postedAt: now, postedCommentKind: 'inline', ...auto })
-        .where(inArray(crf.id, inlineFindingIds))
+        .where(inArray(crf.id, bare))
+        .execute();
+    }
+    for (const [findingId, commentId] of commentIds) {
+      await tx
+        .update(crf)
+        .set({ postedAt: now, githubCommentId: commentId, postedCommentKind: 'inline', ...auto })
+        .where(eq(crf.id, findingId))
         .execute();
     }
     for (const pc of prComments) {

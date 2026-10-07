@@ -138,7 +138,15 @@ posts **one** GitHub review (inline + body + verdict).
     (`post-review-skips-posted.test.ts`). There is NO per-finding "Ask Claude" — the review's one
     chat thread covers every finding. A finding from a deep-review specialist wears a small lens chip
     (`CLAUDE_FINDING_LENS_LABELS`).
-  - **"Generate fix from this review" is the LAST thing on the screen**, under Post to GitHub.
+  - **The pane OPENS on "Reviews and actions"**: the Overview's Reviews and Actions rows (the SAME
+    components, `components/pr/ReviewsRow.tsx` + `PrActionsRow.tsx`) and, once a review has
+    succeeded, "Generate fix from this review" — LEFT-aligned and at the top, because at the foot of
+    the pane it sat under the fixed bottom-right toast column. A reader's own Approve / Request
+    changes there simply replaces Claude's earlier auto verdict on GitHub; nothing else is dismissed.
+  - **A posted inline finding links to its thread**: `ClaudeFinding.threadId` is computed on read
+    (`github_comment_id = review_comments.database_id`, scoped to the review's PR; null until the
+    comment syncs), and the jump opens and flashes that thread's pill in Changes. Others keep the
+    path/line jump.
   - **Model picker** opens on `DEFAULT_CLAUDE_REVIEW_MODEL` and is NEVER re-seeded from the
     stored run (a run stored under a retired id, such as the old Opus 4.8, would otherwise be a
     select value with no option).
@@ -539,7 +547,8 @@ CURRENT head — an earlier commit's is hidden whether the head is green or red
 - **Reads (CORE, server-side, `AgentContext.ci`, all never-throw)** — `prepare.ts`
   `readCiInputs`: `readCommitChecks` (`github/commit-checks.ts`, ONE GraphQL read of the head's checks
   **by commit oid**, mapped through the ONE `checkRunsFrom`), then, only for failing Actions jobs,
-  `readJobLog` (the viewer's TAIL window, 128 KiB, one ranged GET) and `readFailedStep` (GitHub's own
+  `readJobLog` with `full` (the WHOLE log, `tail: 0`, up to `MAX_LOG_BYTES` 8 MiB, read from the end
+  when longer — the viewer still reads its 128 KiB tail page) and `readFailedStep` (GitHub's own
   first failed step). ⚠ The signed log blob URL never leaves `actions-logs.ts`: only excerpt TEXT
   enters the prompt, and only the check's details page (`CheckRun.url`) is stored. All three respect
   the account's rate budget (`isLimited` / `noteLimited`).
@@ -552,10 +561,20 @@ CURRENT head — an earlier commit's is hidden whether the head is green or red
   still be explained); `ciReviewDue` holds it only until the sync observes the failure AFTER the
   refusal finished, and the state stops saying "nothing is failing" at that point too. ⚠ A run whose
   PR head moved between queue and start drops its `trigger_key` (it was the OLD head's synced set).
-- **Caps** (the ONE implementation, `claude-review/ci-failures.ts`): at most `CI_FAILURES_MAX` = 6 jobs
-  read per run; the excerpt is the lines around the FIRST error marker (8 before, 20 after) plus the
-  window's last 30 lines, timestamps and ANSI stripped, each line ≤ 400 chars, ≤ 6,000 chars per
-  check and ≤ 24,000 for the block.
+- **The log PRE-SCAN and caps** (the ONE implementation, `claude-review/ci-failures.ts`
+  `extractFailureExcerpt`): at most `CI_FAILURES_MAX` = 6 jobs read per run. The whole read log is
+  scanned for CULPRIT lines in three classes (`culpritClass`, case-insensitive): SPECIFIC (`npm ERR!`,
+  `error TS…`, `…Error:`, Traceback, `panicked at`, `found N vulnerabilities`, `Severity:
+  high|critical`, a leading `FAIL`, ✕/✗, `not ok`, a non-exit-code `##[error]`), GENERIC (the words
+  error / failed / assert / panic / fatal / critical / vulnerab / `exit code N` — as WORDS, never
+  inside a path or name like `error-ex`) and WARNING. A "0 failed" / "found 0 vulnerabilities" line
+  is no culprit; a line repeated verbatim is anchored once. The excerpt = the last 30 lines + the
+  PRIMARY culprit (the first specific, else generic) with 8 before / 20 after and its step's
+  `##[group]` header, then a 3-before / 6-after window on every other culprit — specific, generic,
+  then warnings, each in log order — while the budget holds (overlaps merge; a window that does not
+  fit is skipped). So an npm audit failure isolates its package and advisory from the middle of a long
+  install log (fixtures: `claude-review/__fixtures__/ci-logs/`). Timestamps and ANSI stripped, each
+  line ≤ 400 chars, ≤ 8,000 chars per check and ≤ 32,000 for the block.
 - **The run** (`manager.ts`, `agent.ts`): a read-only worktree of the PR head (`prepareMemberWorktrees`,
   the path guard confines Read/Glob/Grep to it and the scratch cwd), the noise-stripped diff capped at
   `CI_REVIEW_DIFF_CHARS` (60,000), and one `---BEGIN CI FAILURE Fn <nonce>---` fence per failure
@@ -564,7 +583,10 @@ CURRENT head — an earlier commit's is hidden whether the head is green or red
   denied** outright (`ciToolPolicy`: the PR review's `DISALLOWED_TOOLS` + the dispatch tools). Its own
   `CI_REVIEW_BUDGET_USD` (default $2) and `CI_REVIEW_MAX_TURNS` (25), env only; the model is the
   default review model. The model calls `submit_ci_review` once with `{ summary, failures: [{ref,
-  cause, explanation, category, fixableInPr, step?, path?, line?, suggestion?, relatedFiles?}] }`.
+  cause, explanation, category, fixableInPr, confidence, step?, path?, line?, suggestion?,
+  relatedFiles?}] }`. `confidence` (0-100, "above 50 only when the log lines you cite show it") is
+  rounded and clamped by `confidenceOf` and stored on `ci_review_items.confidence`; the CI check
+  section prints it beside the check name; a carried item keeps its own.
 - **Reconcile — NEVER INVENT A CAUSE** (`reconcile.ts` over `reconcileCiFailures`): every failing
   check gets exactly ONE item — `diagnosed`, or `not_checked` with a server reason (`not_reported`,
   `log_unavailable`, `over_cap`, `no_log`). Unknown refs and malformed entries dropped, the first
@@ -590,6 +612,20 @@ CURRENT head — an earlier commit's is hidden whether the head is green or red
   `stale` (`pushed` | `checks_changed` | `now_passing`), `running`, `none`; plus `refused` when the
   newest attempt AT THE CURRENT HEAD refused. Served per PR and batched (`POST
   /api/ci-reviews/states`, one request per board — nothing fetches per card).
+- **CI auto-posting** (`ci-review/auto-post.ts`, called by `manager.ts` when an AUTOMATIC CI run
+  ends; it reads the status itself, never throws, never retries): only when the workspace's
+  auto-posting is ON and its `ciFailures` kind on (default on); the PR passes the PR review's ONE
+  `autoPostEligibility` (open, not draft, not a bot's, scope); the items are `diagnosed` with
+  `confidence > 50` (null never posts), flaky/infra ones labelled "Likely flaky or an infrastructure
+  problem"; ONE PR-level comment per (PR, head, `failing_key`) — an earlier run at the same head and
+  key whose record is `posting`/`posted`/`partial`/`failed` makes this one `skipped` /
+  `already_posted`, a changed set posts again. The live PR must be open, not draft, at the run's
+  head (moved ⇒ `failed`, no post). ⚠ `ci_reviews.auto_post` is CLAIMED (CAS NULL → `posting`) BEFORE
+  the write; then `posted` + `commentId`, or `failed` + the error; `settlePrAfterWrite` after a post.
+  The body neutralises @-mentions and `<!--` in model/check text and ends with `AUTO_POST_FOOTER` +
+  `<!-- pierre:claude-review-ci v=1 -->`, so `isLimnPostedComment` holds. The wire carries
+  `CiReview.autoPost` (`CiAutoPostWire`); the CI check section says "Posted to the PR automatically."
+  or "Couldn’t post automatically: …".
 - **AI Fix:** the review seed's `C<n>` items are the `diagnosed` + `fixableInPr` items of the latest
   succeeded CI review AT THE PR'S CURRENT SYNCED HEAD (`getFixableCiItemsForPr`), manual and auto
   fixes alike — never the code review's legacy `ciFailures` (§ AI Fix).
@@ -1042,6 +1078,18 @@ NULL/false = off; `auto_post_settings` is OVERRIDES ONLY `{ scope?, kinds? }`, f
 is still the ONE writer). Local-only like every agentic feature: the route and both hooks exist only
 where `config.aiEnabled` registers them.
 
+**Migration 0091 / pg 0078 — the shared contract for the next batch** (types in `packages/shared`):
+`AutoPostKinds.ciFailures` (default ON; record `ci_reviews.auto_post` = `CiAutoPostRecord`, one PR
+comment per (PR, head, failing set)); `WorkspaceAutoPostSettings.autoVerdict` / `.autoResolve`
+(default OFF, inside `auto_post_settings`; records `ClaudeAutoPostRecord.verdict` =
+`ClaudeAutoVerdictRecord`, and per finding `claude_review_findings.auto_resolve` =
+`FindingAutoResolveRecord` + `auto_resolved_at`); skip reason `'already_posted'`
+(`alreadyPostedFindingIds`); `ci_review_items.confidence` (`ClaudeCiFailure.confidence`, 0-100);
+`workspaces.auto_fix_settings` (`StoredAutoFixSettings` → `resolveAutoFixSettings` →
+`AutoFixSettings {include, autoPush}`). `auto_fix_enabled` is OFF unless a stored true, in every
+reader AND the writer. The verdict, resolve and push switches are under ⚠ the same rules as
+auto-posting: claim before any GitHub write, never retried.
+
 - **AUTO RUNS ONLY, AT ONCE.** `manager.ts` calls `maybeAutoPostReview` (`claude-review/auto-post.ts`)
   when an AUTO PR review SUCCEEDS, beside (not instead of) the auto fix; `ticket-review/manager.ts`
   calls `maybeAutoPostTicketReview` after an AUTOMATIC ticket review (`trigger` `auto` / `cascade`).
@@ -1054,40 +1102,69 @@ where `config.aiEnabled` registers them.
   requested reviewer: a `review_requests` row for the account's user, or a `requested` row in
   `review_request_events`. ⚠ The history arm is load-bearing: GitHub REMOVES a request the moment
   any review lands — our own COMMENT review included — so the outstanding row alone would make every
-  re-run of an auto-posted PR ineligible. ⚠ TEAM requests do not count: nothing models which teams the
+  re-run of an auto-posted PR ineligible. ALSO a PR the reader has reviewed or commented on (any
+  synced `reviews`, `review_comments` or `pr_comments` row they wrote). ⚠ TEAM requests do not count: nothing models which teams the
   reader is in (My Turn's `reviewRequestedFromMe` is user-only too). `'all'` = every PR auto review
   covers. The LIVE PR is re-read before the claim (`deps.livePr`): merged / closed / draft there
   skips too.
 - **WHICH KINDS** (`AutoPostKinds`, defaults `AUTO_POST_DEFAULT_KINDS`): blockers ON, warnings ON,
-  nits OFF → inline comments in ONE GitHub review; questions ON → one PR-LEVEL comment each
-  (`PostFindingArgs.prLevel`, never inline, naming `path:line` without the outside-the-diff note);
+  nits OFF, questions ON → all in ONE GitHub review, questions included: `post-seam.ts` puts each on
+  its line, else on its file's first change with the fallback note, else as a PR comment;
   story gaps ON (a ticket review's unmet / partly met criteria and missing pieces); "Not asked for"
   OFF. Praise never; a legacy story finding never (stories are the ticket review's).
-- **THE REVIEW.** Event ALWAYS `'COMMENT'` — never APPROVE or REQUEST_CHANGES. Body = the summary's
-  first plain sentence (else "N comments from Claude.") + `AUTO_POST_FOOTER` ("_Posted automatically
+- **THE REVIEW.** Event `'COMMENT'` unless AUTO VERDICT (below) lets a verdict through. Body = the
+  summary's first plain sentence (else "N comments from Claude.") + `AUTO_POST_FOOTER` ("_Posted automatically
   by Limn’s Claude review._"); every comment ends with the same footer (`PostReviewFinding.footer`),
   then the hidden `<!-- pierre:claude-review` marker, so `isLimnPostedComment` classifies it as ours
   and an auto re-review is NOT triggered by it. It reuses `ctx.review.postReview` / `postFinding`
-  (`post-seam.ts`): the same head pin, anchoring and off-diff fallback as the button. Only questions
-  ⇒ no review is submitted, just the comments.
+  (`post-seam.ts`): the same head pin, anchoring and off-diff fallback as the button.
+- **AUTO VERDICT** (`autoVerdict`, OFF by default; `autoVerdictFor` + `verdictGate`, pure). Stricter
+  than Claude, over the run's NON-STORY findings the reader did not ignore (`isReaderIgnoredFinding` —
+  ⚠ a re-raise the server stored `included: false` because its comment is already on this commit
+  still COUNTS), whatever the kind toggles say: any blocker ⇒
+  REQUEST_CHANGES; APPROVE only when Claude approved AND there is no blocker and no warning; else
+  COMMENT. A non-COMMENT verdict is sent only (a) off the reader's own PR (GitHub refuses
+  self-approval → `own_pr`) and (b) when the reader's own latest review — read LIVE
+  (`GET …/pulls/:n/reviews`, the synced table can lag) — is none or COMMENTED (`prior_review`; a failed
+  read is `reviews_unreadable`, never a guess). Held ⇒ COMMENT. A sendable APPROVE / REQUEST_CHANGES
+  goes out even with no new comment (body only); a held one with nothing to post is a skip. Recorded
+  on `ClaudeAutoPostRecord.verdict`; the tab prints "Approved automatically." / "Not approved: …".
+  ⚠ The verdict and the comments are ONE submission, so a verdict GitHub refuses (repo policy,
+  permissions) loses that run's comments too — recorded `failed`, never retried.
+- **AUTO RESOLVE** (`autoResolve`, OFF by default; `claude-review/auto-resolve.ts`, called from
+  `maybeAutoPostReview` after the post, whatever it did). ⚠ The ONE automatic resolve, a deliberate
+  exception to bot-triage's "user-initiated only", scoped to LIMN'S OWN threads: an earlier finding
+  posted INLINE whose thread root is by the account's login AND carries the marker (found by the stored
+  comment id, else by path + the finding's text — a finding posted inside a review keeps no comment
+  id), which THIS run's follow-up judged `addressed` / `no_longer_applies`, on an eligible PR. ⚠ The
+  follow-up names the LATEST raise, and a re-raise is never posted itself, so the id is walked back
+  along `prior_finding_id` (cycle-guarded) to the first inline-posted ancestor, whose row and thread
+  are the ones claimed and resolved. Claim
+  `claude_review_findings.auto_resolve` from NULL, reply "Addressed in abc1234." / "No longer applies
+  as of abc1234." (footer + finding marker), THEN `setReviewThreadResolved` + `stampThreadResolved` +
+  the PR change signal + settle. `auto_resolved_at` on success; a failure (reply or resolve) is
+  recorded with GitHub's error and shown on the finding ("Couldn’t resolve automatically: …"), never
+  retried. A thread not synced yet, or already resolved, records nothing.
 - ⚠ **NEVER TWICE** (`selectFindingsToPost` + `alreadyOnGithub`, pure): a finding posts only when
-  INCLUDED (an ignored one never does), not already posted, and not on GitHub from ANY earlier run of
+  INCLUDED (an ignored one never does; the server's own `included: false` re-raise counts as
+  `already_posted`), not already posted, and not on GitHub from ANY earlier run of
   the PR (manual or auto) — through the follow-up chain (`prior_finding_id`, walked back) or by
   fingerprint (same path, `similarTitles` — the settled-by-reply identity; it can over-match a new
   point with a similar title on the same file, which is the safe direction). An earlier run whose
   record is still `posting` (cut off by a restart) counts everything it tried as POSSIBLY POSTED,
-  for good. Nothing left ⇒ `skipped` / `nothing_new` and no GitHub call.
+  for good. Nothing left ⇒ `skipped` and no GitHub call: `already_posted` (+ `alreadyPostedFindingIds`,
+  wire `alreadyPostedCount`) when the dedupe alone emptied it — shown as "Not posted automatically:
+  all N comments are already on GitHub." — else `nothing_new`, shown nowhere.
 - ⚠ **THE CLAIM BEFORE ANY WRITE, AND NO RETRY.** `claude_reviews.auto_post` is written by a
   compare-and-set from NULL (`status:'posting'`, the finding ids it will try) before GitHub is
   touched, so a second call or a restart can never post the run twice. After a 201 nothing throws:
-  findings are stamped through `markReviewPosted` / `markFindingPosted` with `posted_auto = true`
+  findings are stamped through `markReviewPosted` with `posted_auto = true`
   (so the existing Post buttons read "Posted" and the manual route's `postedAt == null` filter never
   re-sends them), the record settles to `posted` / `partial` / `failed` + the FIRST error, then
   `settlePrAfterWrite` (no expectation — a comment changes no PR state). A failure is never retried:
   the Claude Review tab prints "Couldn’t post automatically: …" above the summary box and the Post
   button stays. While a run is `posting` (≤ `AUTO_POST_LOCK_MS`, 10 min, so a crash cannot lock it
-  for good) both manual post routes answer `409 AutoPostInProgress`. A skip is recorded but shown
-  nowhere.
+  for good) both manual post routes answer `409 AutoPostInProgress`.
 - **STORY GAPS** (`ticket-review/auto-post.ts`): posted ONLY on the member PR the run names as the
   owner (`owner_pr_id`, Claude's `expectedIn` — the manual button's target); NO owner ⇒ not posted.
   The owner's OWN workspace decides (switch, kind, scope) and it must pass the same PR rules. Each
@@ -1165,11 +1242,28 @@ Haiku, `prSummary`).
   `…/ai-fix/status`, `…/ai-fix/stream`, `…/ai-fix/cancel`, `GET /api/pro/ai-fixes/:fixId`,
   `POST /api/pro/ai-fixes/:fixId/push` — so the SPA client did not move. Nothing about them is
   paid; they register only through `registerAgenticRoutes`.
-- **TWO ENTRY POINTS** (`AiFixSeed`): `review` ("Fix from review", in the AI Fix tab and from the
-  Claude Review tab) and `plain` (the reader's instruction, a text box). ⚠ The picked-comments
+- **ONE ENTRY POINT IN THE SPA, TWO ON THE ROUTE** (`AiFixSeed`): `review` (the FIX PICKER in the
+  AI Fix tab, reached also from the Claude Review tab) and `plain` (an instruction — the route still
+  accepts it, the SPA no longer offers it; the tab's CI list, AI summary and text box are gone). With
+  no succeeded Claude review the tab says so and offers "Open Claude Review". ⚠ The picked-comments
   basket (`comments`) and the Pro CI diagnosis (`ci_analysis`) were REMOVED as seeds: the route
   answers `400 SeedRemoved`, but rows stored under them still READ (`AiFixStoredSeed`) and render
   as history ("no longer offered"). Their `comment_targets` / `comment_verdicts` columns are dormant.
+- **THE FIX PICKER** (`components/AiFix/FixPicker.tsx`, `GET /api/pro/prs/:id/ai-fix/preview
+  ?sourceReviewId=` → `AiFixPickerPreview`, DB-only). The server lists every candidate (`buildPickerPreview`)
+  with a STABLE key (`finding:<id>`, `thread:<id>`, `ci:<ciReviewItemId>`, `story:<ticketIndex>:<ref>`),
+  its section and its default; the reader ticks cards; Start sends `include: <keys>` and the server
+  builds the seed from exactly those (`SeedSelection`). Sections: Claude's findings (never an
+  ignored one), earlier findings still open, threads Claude judged to fix, UNANSWERED threads
+  (`derived_state = 'untouched'`, judged or not), CI failures, STYLE BOT threads (root author's
+  role `quality_check` in the PR's workspace — the stored `workspace_reviewers` row first, then the
+  login seed; `thread-candidates.ts`) and ticket gaps. Everything is ticked except style bots. A
+  thread sits in ONE section: judged first, then style bot, then unanswered. ⚠ **Selection keys on
+  the stable ids, never on refs** — refs are numbered AFTER selection, so a prompt reads F1, F2…
+  with no holes. ⚠ **The budget is applied AFTER selection**: the preview's items come in priority
+  order and `cutByBudget` names what the default selection loses; the SPA re-folds the same rule
+  for the reader's ticks ("Won't fit"). An unknown key selects nothing; an empty list ⇒ `409
+  NothingToFix` ("Nothing is ticked.").
 - **THE REVIEW SEED IS THE WHOLE REVIEW EXCEPT PRAISE AND QUESTIONS, BUILT SERVER-SIDE** from the STORED run
   (`review-seed.ts`; the body carries only `sourceReviewId`, so the auto agent can use it with no
   browser). Items and their refs, numbered in the review's own order so one stored review always
@@ -1182,7 +1276,8 @@ Haiku, `prSummary`).
     by the fixer; the two cases share one stored shape.
   - `P<n>` the follow-up's earlier findings still `not_addressed` / `partly_addressed`, unless this
     run re-raised it (`reraisedFindingId`) — then `F` covers it.
-  - `T<n>` other reviewers' threads `isThreadToFix` keeps.
+  - `T<n>` other reviewers' threads `isThreadToFix` keeps, then (picker sections) unanswered and
+    style-bot threads from the PR's open threads.
   - `S<t>-AC<n>` / `S<t>-M<n>` per user story: criteria `not_met` / `partly_met`, and `missing`
     pieces (`notRequested` is not a fix) — ⚠ ONLY those the review did NOT make a finding of (an
     older review, from before story findings). A story finding arrives as an `F` item and its `S`
@@ -1205,10 +1300,11 @@ Haiku, `prSummary`).
   with the section they came from (a Finding chip jumps to `claude-finding-<id>` in the Claude
   Review tab), then Not addressed with reasons, No report, and Left out — above the diff and its
   "Not built or tested here."
-- **`startReviewFix(ctx, { accountId, prId, reviewId, model, trigger })`** (`manager.ts`) is THE
-  entry the auto-review agent calls (`trigger: 'auto'`); the manual route goes through the same
-  `startFix` — same single slot, claim, queue and worktree, and `trigger` is recorded on the row.
-  Nothing is pushed until a person presses Push.
+- **`startReviewFix(ctx, { accountId, prId, reviewId, model, trigger, include? })`** (`manager.ts`) is THE
+  entry the auto-review agent calls (`trigger: 'auto'`, `include` = the workspace's sections); the
+  manual route goes through the same `startFix` — same single slot, claim, queue and worktree, and
+  `trigger` is recorded on the row. Nothing is pushed until a person presses Push, except an AUTO
+  fix under "Push automatically" (below).
 - **AUTO FIX** (`coding/ai-fix/auto-fix.ts` `maybeStartAutoFix`, called fire-and-forget by the
   review manager after an AUTO run is saved as succeeded — a failure here never touches the
   review). ⚠ **ONLY THE READER'S OWN PR**: `pull_requests.author_id → users.github_login` equals
@@ -1231,10 +1327,21 @@ Haiku, `prSummary`).
   for the PR created in the last 24h, shared constant), `already_tried` (the latest auto fix AT THIS
   HEAD listed every item this review would send under `unaddressed`). Otherwise
   `startReviewFix(…, {model: the review's model (a retired one → DEFAULT_AI_FIX_MODEL), trigger:
-  'auto'})` — the same queue, slot and worktree. ⚠ **NEVER PUSHED**: it waits for Push.
+  'auto', include})` — the same queue, slot and worktree. ⚠ **WHAT IT CARRIES** is the workspace's
+  "Always include" sections (`workspaces.auto_fix_settings.include`, overrides only, resolved by
+  `resolveAutoFixSettings`; default every section but style bots; never ticket items) — the same
+  selection reaches the rule-6 seed and the start. ⚠ **PUSHED ONLY UNDER "PUSH AUTOMATICALLY"**
+  (`auto_fix_settings.autoPush`, OFF by default): `coding/ai-fix/auto-push.ts` runs after an AUTO
+  fix SUCCEEDS (off the fixer's slot) and re-checks at push time — auto + succeeded + non-empty +
+  unpushed, auto fix and autoPush still on, the reader's OWN PR — then pushes through the Push
+  button's own path (`push.ts` `pushFix`, target `'existing'`, never forced, HEAD_MOVED refused,
+  write access re-checked, the PR settled). A failure is written to the succeeded row's `error`
+  ("Automatic push failed: …", shown in the AI Fix tab) and NEVER retried; a later manual push
+  clears it. Otherwise it waits for Push.
   ⚠ **LOOP SAFETY.** A pushed fix makes a new head → an auto re-review (which verifies it) → maybe
-  another fix. Every turn of that chain needs a PERSON pressing Push (an unpushed fix blocks the
-  next one), and the cap bounds it anyway. `already_tried` stops the push-free loop (a fix that
+  another fix. Without Push automatically every turn needs a PERSON pressing Push (an unpushed fix
+  blocks the next one); with it the bound is the cap (3 per PR per 24h) plus the auto-review daily
+  cap. `already_tried` stops the push-free loop (a fix that
   changed nothing, retried on every comment-triggered review). Items match across reviews by
   (kind, thread id, story index, path, title) — refs and finding ids are per review — so a finding
   a later review RE-WORDS counts as new and only the cap stops it. There is no "discard" for a fix,
@@ -1245,4 +1352,5 @@ Haiku, `prSummary`).
   fix: <why>" under the Claude Review controls.
 - **No shell.** `WORKTREE_RULES` (the one fix system prompt) and the tool list change together
   (`coding/ai-fix/no-shell.test.ts`).
-- A finished fix PUSHES AS-IS (no trunk step) and only when the reader presses Push.
+- A finished fix PUSHES AS-IS (no trunk step) and only when the reader presses Push — or, for an
+  auto fix, under "Push automatically".

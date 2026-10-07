@@ -16,7 +16,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { TicketReviewItem, TicketReviewMember } from '@pierre-review/shared';
-import { autoPostFailureLine, postedChipLabel } from '../src/lib/autoPost.js';
+import {
+  autoPostFailureLine,
+  autoPostSkipLine,
+  autoResolveLabel,
+  autoVerdictLine,
+  postedChipLabel,
+} from '../src/lib/autoPost.js';
 import { notRequestedPostedLabel, postedLabel } from '../src/lib/ticketReview.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -57,6 +63,39 @@ describe('the failure line', () => {
   });
 });
 
+describe('skips, verdicts and resolves', () => {
+  it('only an already_posted skip speaks, with its count', () => {
+    expect(autoPostSkipLine({ status: 'skipped', reason: 'already_posted', alreadyPostedCount: 3 })).toBe(
+      'Not posted automatically: all 3 comments are already on GitHub.',
+    );
+    expect(autoPostSkipLine({ status: 'skipped', reason: 'already_posted', alreadyPostedCount: 1 })).toBe(
+      'Not posted automatically: its one comment is already on GitHub.',
+    );
+    expect(autoPostSkipLine({ status: 'skipped', reason: 'nothing_new' })).toBeNull();
+    expect(autoPostSkipLine({ status: 'posted', reason: null })).toBeNull();
+  });
+
+  it('the verdict: what was sent, or why it was held; a plain comment says nothing', () => {
+    const v = (wanted: any, submitted: any, heldReason: any) => ({ wanted, submitted, heldReason });
+    expect(autoVerdictLine({ status: 'posted', verdict: v('APPROVE', 'APPROVE', null) })).toBe('Approved automatically.');
+    expect(autoVerdictLine({ status: 'posted', verdict: v('REQUEST_CHANGES', 'REQUEST_CHANGES', null) })).toBe('Requested changes automatically.');
+    expect(autoVerdictLine({ status: 'failed', verdict: v('APPROVE', 'APPROVE', null) })).toBeNull();
+    expect(autoVerdictLine({ status: 'posted', verdict: v('APPROVE', 'COMMENT', 'own_pr') })).toBe('Not approved: this is your own PR.');
+    expect(autoVerdictLine({ status: 'skipped', verdict: v('REQUEST_CHANGES', 'COMMENT', 'prior_review') })).toBe(
+      'Changes not requested: your last review on GitHub still stands.',
+    );
+    expect(autoVerdictLine({ status: 'posted', verdict: v('COMMENT', 'COMMENT', null) })).toBeNull();
+    expect(autoVerdictLine({ status: 'posted' })).toBeNull();
+  });
+
+  it('auto resolve: resolved, or the error', () => {
+    const r = { at: minsAgo(1), outcome: 'addressed' as const, byReviewId: 2, headSha: 'abc', replyCommentId: null };
+    expect(autoResolveLabel({ ...r, status: 'resolved', error: null })).toBe('Resolved automatically');
+    expect(autoResolveLabel({ ...r, status: 'failed', error: '403' })).toBe('Couldn’t resolve automatically: 403');
+    expect(autoResolveLabel(null)).toBeNull();
+  });
+});
+
 describe('"Not asked for" postings', () => {
   it('are read off the run record by index', () => {
     const review = {
@@ -83,7 +122,10 @@ describe('the mounts', () => {
   it('Settings carries the master switch, the scope and every kind', () => {
     const s = src('components/settings/AutoReviewSection.tsx');
     expect(s).toContain('Post Claude reviews to GitHub automatically');
-    expect(s).toContain('PRs you are asked to review, and your own');
+    expect(s).toContain('Your own PRs, and PRs you are asked to review or have reviewed or commented on');
+    expect(s).toContain('Approve or request changes for me');
+    expect(s).toContain('Resolve Limn’s threads once fixed');
+    expect(s).toContain('Push automatically');
     expect(s).toContain('Every PR auto review covers');
     for (const k of ['blockers', 'warnings', 'nits', 'questions', 'storyGaps', 'notAskedFor']) {
       expect(s).toContain(`key: '${k}'`);
@@ -96,6 +138,9 @@ describe('the mounts', () => {
     const tab = src('components/ClaudeReviewTab.tsx');
     expect(tab).toContain('postedChipLabel(finding)');
     expect(tab).toContain('autoPostFailureLine(review.autoPost)');
+    expect(tab).toContain('autoPostSkipLine(review.autoPost)');
+    expect(tab).toContain('autoVerdictLine(review.autoPost)');
+    expect(tab).toContain('autoResolveLabel(finding.autoResolve)');
     const parts = src('components/TicketReviewParts.tsx');
     expect(parts).toContain('autoPostFailureLine(review.autoPost)');
     expect(parts).toContain('notRequestedPostedLabel(review, i)');

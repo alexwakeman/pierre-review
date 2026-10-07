@@ -34,6 +34,9 @@ import type {
   ClaudeReviewFollowUpRecord,
   ClaudeAutoPostRecord,
   ClaudeCiFailuresRecord,
+  CiAutoPostRecord,
+  FindingAutoResolveRecord,
+  StoredAutoFixSettings,
   StoredAutoPostSettings,
   TicketAutoPostRecord,
   ClaudeReviewCiState,
@@ -951,6 +954,9 @@ export const claudeReviewFindings = pgTable(
     storyRef: text('story_ref'),
     // Posted by auto-posting (migration 0087 / pg 0074). Twin of schema.sqlite.ts.
     postedAuto: boolean('posted_auto'),
+    // Auto-resolve (migration 0091 / pg 0078). Twin of schema.sqlite.ts, where the contract lives.
+    autoResolvedAt: timestamp('auto_resolved_at', { withTimezone: true, mode: 'date' }),
+    autoResolve: jsonb('auto_resolve').$type<FindingAutoResolveRecord>(),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );
@@ -1186,6 +1192,8 @@ export const ciReviews = pgTable(
     // The head's CI as the run read it.
     ciState: jsonb('ci_state').$type<ClaudeReviewCiState>(),
     summary: text('summary'),
+    // CI auto-posting (migration 0091 / pg 0078). Twin of schema.sqlite.ts.
+    autoPost: jsonb('auto_post').$type<CiAutoPostRecord>(),
     startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }),
     completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
@@ -1233,6 +1241,8 @@ export const ciReviewItems = pgTable(
     line: integer('line'),
     suggestion: text('suggestion'),
     relatedFiles: jsonb('related_files').$type<Array<{ path: string; line: number | null }>>(),
+    // Claude's 0-100 confidence in `cause` (migration 0091 / pg 0078). NULL = not reported.
+    confidence: integer('confidence'),
     assessedAtHead: text('assessed_at_head').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
@@ -1325,7 +1335,7 @@ export const workspaces = pgTable(
     // Auto Claude review (migration 0074 / pg 0061) — the pg twin. Full rationale in the sqlite twin.
     autoReviewEnabled: boolean('auto_review_enabled'),
     autoReviewEnabledAt: timestamp('auto_review_enabled_at', { withTimezone: true, mode: 'date' }),
-    // Auto AI Fix (migration 0083 / pg 0070) — the pg twin. DEFAULT true. Rationale in the sqlite twin.
+    // Auto AI Fix (migration 0083 / pg 0070) — the pg twin. OFF by default. Rationale in the sqlite twin.
     autoFixEnabled: boolean('auto_fix_enabled').notNull().default(false),
     // Auto review daily cap (migration 0085 / pg 0072) — the pg twin. NULL = the default 20.
     autoReviewDailyCap: integer('auto_review_daily_cap'),
@@ -1333,6 +1343,8 @@ export const workspaces = pgTable(
     // overrides only. Rationale in the sqlite twin.
     autoPostEnabled: boolean('auto_post_enabled'),
     autoPostSettings: jsonb('auto_post_settings').$type<StoredAutoPostSettings>(),
+    // Auto fix settings (migration 0091 / pg 0078), overrides only. Rationale in the sqlite twin.
+    autoFixSettings: jsonb('auto_fix_settings').$type<StoredAutoFixSettings>(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),

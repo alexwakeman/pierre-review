@@ -276,7 +276,7 @@ export function CheckRow({
   );
 }
 
-// The list of checks (used on the Overview tab and the AI Analysis and Fix tab).
+// The list of checks (used on the Overview tab).
 // `prGithubUrl` is `pr.githubUrl` — it is the FALLBACK link target for a check that reports
 // no url of its own (see checkHref), so it is required rather than optional: an absent one
 // would silently reinstate the unopenable row.

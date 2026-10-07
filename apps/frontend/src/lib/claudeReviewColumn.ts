@@ -121,7 +121,8 @@ export function severityPills(summary: ClaudeReviewStateSummary): SeverityPill[]
 }
 
 /** Every finding the run raised (the posted denominator). Praise is not a finding: an older run's
- *  stored praise is left out. */
+ *  stored praise is left out, and so is every finding the reader IGNORED — the server folds those
+ *  out of `findings` into `ignoredCount`. */
 export function findingTotal(summary: ClaudeReviewStateSummary): number {
   return (Object.entries(summary.findings) as Array<[ClaudeFindingSeverity, number]>)
     .filter(([sev]) => sev !== 'praise')
@@ -204,6 +205,13 @@ export function reviewTone(cell: ReviewCell): ReviewTone {
   }
 }
 
+/** "2 ignored" — the findings the reader ignored, which the pills and the posted total leave out.
+ *  null when none (or an older server that does not send the count). */
+export function ignoredLabel(summary: Pick<ClaudeReviewStateSummary, 'ignoredCount'>): string | null {
+  const n = summary.ignoredCount ?? 0;
+  return n > 0 ? `${n} ignored` : null;
+}
+
 /** Other reviewers' threads Claude judged right and not yet dealt with. null when none, or when
  *  the run did not judge threads (never a fake zero). */
 export function threadsToFixLabel(summary: Pick<ClaudeReviewStateSummary, 'threadAssessments'>): string | null {
@@ -225,6 +233,28 @@ export function heldByAutoReview(state: ClaudeReviewPrState | undefined): boolea
   return (
     state?.trigger === 'auto' && (state.status === 'queued' || state.status === 'running')
   );
+}
+
+/**
+ * Every piece of Claude work in progress on ONE PR, in a fixed order, for the Open PRs card's
+ * header chip: the code review (queued or running, the auto lane included), the ticket review, the
+ * CI review and AI Fix. [] = nothing running. Read off the list's batched answers only.
+ */
+export function reviewWorkInProgress(i: {
+  review: ClaudeReviewPrState | undefined;
+  /** This PR's review start is in flight from this list or the PR's tab (shared mutation key). */
+  starting?: boolean;
+  ticketRunning: boolean;
+  ciRunning: boolean;
+}): string[] {
+  const out: string[] = [];
+  const status = i.review?.status;
+  if (status === 'running') out.push('Reviewing');
+  else if (status === 'queued' || i.starting) out.push('Review queued');
+  if (i.ticketRunning) out.push('Checking story');
+  if (i.ciRunning) out.push('Checking CI');
+  if (i.review?.fix === 'running') out.push('Fixing');
+  return out;
 }
 
 /** Does any listed PR have a run in flight? The column polls only while one does — which

@@ -190,8 +190,24 @@ export async function markFixPushed(
       pushedPrNumber: input.pushedPrNumber ?? null,
       pushedPrUrl: input.pushedPrUrl ?? null,
       pushedAt: new Date(),
+      // A push that lands clears an earlier AUTOMATIC push's failure (`markFixPushFailed`).
+      error: null,
     })
     .where(eq(t.id, id))
+    .execute();
+}
+
+/**
+ * An AUTOMATIC push of a succeeded fix failed (auto-push.ts): the reason goes on the row's `error`
+ * (a succeeded row has none of its own), so the AI Fix tab can say so. Never retried — the reader
+ * can still press Push.
+ */
+export async function markFixPushFailed(ctx: AgentContext, id: number, message: string): Promise<void> {
+  const t = ctx.schema.aiFixes;
+  await ctx.db
+    .update(t)
+    .set({ error: `Automatic push failed: ${message}`.slice(0, 1_000) })
+    .where(and(eq(t.id, id), eq(t.status, 'succeeded')))
     .execute();
 }
 

@@ -17,6 +17,7 @@ import type {
   AddReviewCommentResult,
   RequestReviewersBody,
   RequestReviewersResult,
+  AiFixPickerPreview,
   AiFixPushBody,
   AiFixPushResult,
   AiFixResponse,
@@ -1436,6 +1437,9 @@ export const api = {
   aiFix: (prId: number) => get<AiFixResponse>(`/api/pro/prs/${prId}/ai-fix`),
   aiFixStatus: (prId: number) =>
     get<AiFixStatusResponse>(`/api/pro/prs/${prId}/ai-fix/status`),
+  // The fix picker: every item a review-seeded fix would include, with stable keys + defaults.
+  aiFixPreview: (prId: number, sourceReviewId: number) =>
+    get<AiFixPickerPreview>(`/api/pro/prs/${prId}/ai-fix/preview?sourceReviewId=${sourceReviewId}`),
   startAiFix: (prId: number, body: GenerateFixBody) =>
     fetch(`/api/pro/prs/${prId}/ai-fix`, jsonBody('POST', body)).then((r) =>
       handle<{ fixId: number; status: string }>(r),

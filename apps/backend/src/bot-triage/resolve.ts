@@ -9,7 +9,9 @@ import { notePrChangedForPrs } from '../sync/pr-settle.js';
 // bot-thread triage — shared verbatim by the manual per-PR `POST /api/prs/:id/resolve-bot-
 // threads` route and the workspace-wide `POST /api/bot-threads/resolve`, so their behaviour
 // can't drift. Both are strictly user-initiated + confirm-gated — there is no automatic/cron
-// resolve.
+// resolve of BOT threads. The ONE automatic resolve anywhere is review/claude-review/
+// auto-resolve.ts, a deliberate exception scoped to LIMN'S OWN finding threads (posted by the
+// reader through Limn, marker-stamped), behind a per-workspace switch that is OFF by default.
 //
 // Callers own eligibility: `getResolvableBotThreads` (per-PR — the workspace comes from the PR's
 // own repo, via `botScopeForPr`) / `getResolvableBotThreadsForScope` (workspace-wide — takes the

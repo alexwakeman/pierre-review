@@ -170,9 +170,9 @@ function namesId(p: URLSearchParams, key: string): boolean {
 /**
  * WHICH BOARD does this URL land on? — the ONE tab decision, made on every load.
  *
- * The rule: **always Activity, unless the URL EXPLICITLY names a board destination.** Activity is
- * the relevance-ranked state of play and the app's front door; the timeline is the secondary
- * surface you navigate TO.
+ * The rule: **always Open PRs, unless the URL EXPLICITLY names a destination.** Open PRs (one card
+ * per open PR, with its Claude review) is the app's front door since 2026-10-07; Activity and the
+ * timeline are surfaces you navigate TO, each with its own affirmative `view=`.
  *
  * ⚠ `?workspace=<id>` IS NOT A DEEP LINK, and structurally never can be: `writeToUrl` stamps it
  * onto the address bar itself as soon as the scope resolves — within ~1s of every load — so its
@@ -202,7 +202,8 @@ function namesId(p: URLSearchParams, key: string): boolean {
  * Testing `pr` first would refresh exactly those users onto the board.
  *
  * Anything else in `view=` — a stale spelling, a hand-edited value — falls through to the
- * inference and then to Activity, the right normalization for a destination that no longer exists.
+ * inference and then to Open PRs (the default view, since 2026-10-07), the right normalization for
+ * a destination that no longer exists.
  *
  * `view=` NAMES TABS TOO, not just the two boards, and the spelling is the `Tab.key` VERBATIM
  * (`pr-detail:123`, `pr-focus:123`, `user-activity:45`, `bot-detail:45`) — one vocabulary, not a
@@ -211,7 +212,7 @@ function namesId(p: URLSearchParams, key: string): boolean {
  * (`applyUrlTab` re-creates it). The seed-backed drill-downs (`bot-flagging`, `people-report`,
  * `search`, …) are NOT named by any URL: their identity lives in transient in-memory seeds, and a
  * restored seed could name a tile the strip no longer shows or people this workspace no longer
- * has. They stay ephemeral, and a URL landing on one resolves to Activity — which is exactly what
+ * has. They stay ephemeral, and a URL landing on one resolves to Open PRs — which is exactly what
  * the unknown-value rule below already does.
  *
  * Exported for its unit test — see test/landingTab.test.ts.
@@ -221,8 +222,8 @@ export function landingTabFromUrl(search: string): ActiveTab {
   const view = p.get('view');
   if (view === 'timeline') return 'timeline';
   if (view === 'activity') return 'activity';
-  // The third FIXED view (Activity · Open PRs · Timeline). Its repo dropdown is transient and
-  // stays out of the URL: a link to it opens on every repo.
+  // The DEFAULT fixed view (Open PRs · Activity · Timeline) — also what silence means, below. Its
+  // repo dropdown is transient and stays out of the URL: a link to it opens on every repo.
   if (view === 'open-prs') return 'open-prs';
   if (
     view != null &&
@@ -233,7 +234,8 @@ export function landingTabFromUrl(search: string): ActiveTab {
     return view;
   }
   if (namesId(p, 'pr') || namesId(p, 'thread')) return 'timeline';
-  return 'activity';
+  // Silence means Open PRs, the app's default view (Activity has its own affirmative `view=`).
+  return 'open-prs';
 }
 
 /** Exported for its unit test only — see test/feedCiFailuresToggle.test.ts. */
@@ -579,9 +581,9 @@ export function writeToUrl(s: FilterState): void {
   // store than this subscriber's, so useUrlState also subscribes to it. `activityRepo`
   // is emitted for every console except Pending, the default.
   //
-  // ⚠ BOTH boards are emitted AFFIRMATIVELY, and the timeline half is not optional. Silence
-  // now MEANS Activity (`landingTabFromUrl`), so leaving the board implicit would bounce a
-  // user who deliberately switched to the timeline straight back to Activity on the next F5 —
+  // ⚠ EVERY fixed view is emitted AFFIRMATIVELY, and the timeline and activity halves are not
+  // optional. Silence now MEANS Open PRs (`landingTabFromUrl`), so leaving a board implicit would
+  // bounce a user who deliberately switched to it straight back to Open PRs on the next F5 —
   // the write half and the read half of a URL rule always move together.
   const activeTab = usePinnedTabs.getState().activeTab;
   if (activeTab === 'timeline') {

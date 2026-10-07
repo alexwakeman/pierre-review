@@ -455,6 +455,8 @@ export interface ReviewCiFailureReport {
   step?: string | null;
   relatedFiles?: Array<{ path: string; line?: number | null }>;
   fixableInPr: boolean;
+  // 0-100, how sure Claude is of `cause` (the CI review's submit tool). Absent ⇒ null.
+  confidence?: number | null;
 }
 
 // The story-report shapes (one ticket's criteria / gaps as the model reports them). No longer a
@@ -595,6 +597,9 @@ export type PostReviewOutcome =
       headMoved?: false;
       postedReviewId: string;
       inlineFindingIds: number[];
+      // The GitHub comment id of each inline finding, read back after the submit (best-effort: a
+      // finding missing here is still posted). OPTIONAL, so no apiVersion bump.
+      inlineComments?: { findingId: number; commentId: string }[];
       prComments: { findingId: number; commentId: string }[];
       commentCount: number;
       prCommentCount: number;

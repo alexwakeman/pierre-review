@@ -5,7 +5,7 @@
 // A finding counts as settled when ALL of these hold, on SYNCED data only:
 //   1. it was posted as an inline comment and we can find that comment's thread
 //      (`findingThread`): the thread's FIRST comment is by the account's own login and is either
-//      the finding's stored `githubCommentId`, or (Post review stores no per-comment id) on the
+//      the finding's stored `githubCommentId`, or (a Post review whose ids were not read back) on the
 //      finding's path with a body that STARTS WITH the finding's resolved body — the body
 //      post-review.ts `findingCommentBody` puts first. A PR-level comment has no thread and is
 //      never settled by this rule;

@@ -1,5 +1,6 @@
 import { and, desc, eq } from 'drizzle-orm';
 import type {
+  AiFixPickerPreview,
   AiFixProgress,
   AiFixReviewItem,
   AiFixSeed,
@@ -7,6 +8,7 @@ import type {
   AiFixStatusResponse,
   AiFixStreamEvent,
   AiFixTrigger,
+  AutoFixInclude,
   ClaudeReview,
 } from '@pierre-review/shared';
 import type { CodingProgress } from '../../pro/contract.js';
@@ -14,7 +16,15 @@ import type { AgentContext } from '../../review/agent-context.js';
 import { getFixPrContext } from './pr-context.js';
 import { getClaudeReviewById } from '../../review/claude-review/persist.js';
 import { pickReviewNonce } from '../../review/claude-review/prompts.js';
-import { buildReviewSeed, type ReviewSeed, type SeedTicketItem } from './review-seed.js';
+import {
+  buildPickerPreview,
+  buildReviewSeed,
+  type ReviewSeed,
+  type SeedSelection,
+  type SeedTicketItem,
+} from './review-seed.js';
+import { loadSeedThreads } from './thread-candidates.js';
+import { maybeAutoPushFix } from './auto-push.js';
 import { getOwnedTicketItemsForPr } from '../../review/ticket-review/persist.js';
 import { getFixableCiItemsForPr } from '../../review/ci-review/persist.js';
 import { buildFixSystemPrompt, buildFixUserPrompt, type FixSeed } from './prompts.js';
@@ -139,6 +149,46 @@ export interface StartFixInput {
   instruction?: string;
   // Who started it. Omitted ⇒ 'manual'.
   trigger?: AiFixTrigger;
+  // seed === 'review': which items. Absent ⇒ the section defaults (every section but style bots).
+  selection?: SeedSelection;
+}
+
+/** The stored review a seed names, checked to be THIS PR's succeeded run. null otherwise. */
+async function loadSourceReview(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  reviewId: number | null | undefined,
+): Promise<ClaudeReview | null> {
+  if (reviewId == null) return null;
+  const review = await getClaudeReviewById(ctx, reviewId, accountId);
+  if (!review || review.prId !== prId || review.status !== 'succeeded') return null;
+  return review;
+}
+
+/** Everything a seed is built from besides the review. Each read fails soft (costs its items only). */
+async function loadSeedInputs(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  withTicketItems: boolean,
+) {
+  const [ticketItems, ciItems, threads] = await Promise.all([
+    withTicketItems
+      ? getOwnedTicketItemsForPr(ctx, accountId, prId).catch((err: unknown): SeedTicketItem[] => {
+          ctx.log.warn({ err }, 'ai-fix: loading ticket items failed');
+          return [];
+        })
+      : Promise.resolve<SeedTicketItem[]>([]),
+    // The CI review's fixable items at the PR's CURRENT head (manual and auto fixes alike).
+    getFixableCiItemsForPr(ctx, accountId, prId).catch((err: unknown) => {
+      ctx.log.warn({ err }, 'ai-fix: loading CI review items failed');
+      return [];
+    }),
+    // The PR's open threads (untouched + style-bot sections). Never throws.
+    loadSeedThreads(ctx, accountId, prId),
+  ]);
+  return { ticketItems, ciItems, threads };
 }
 
 /**
@@ -147,6 +197,7 @@ export interface StartFixInput {
  *
  * `withTicketItems` adds the TICKET review's items this PR owns (review-seed.ts header) — set by a
  * MANUAL fix only. ⚠ An auto fix never sets it: fixing a ticket's gap is a person's call.
+ * `selection` picks the items (the reader's keys, an auto fix's sections); absent ⇒ the defaults.
  */
 export async function loadReviewSeed(
   ctx: AgentContext,
@@ -155,26 +206,17 @@ export async function loadReviewSeed(
     prId: number;
     reviewId: number | null | undefined;
     withTicketItems?: boolean;
+    selection?: SeedSelection;
   },
 ): Promise<{ review: ClaudeReview; seed: ReviewSeed } | null> {
-  if (input.reviewId == null) return null;
   try {
-    const review = await getClaudeReviewById(ctx, input.reviewId, input.accountId);
-    if (!review || review.prId !== input.prId || review.status !== 'succeeded') return null;
-    // A failed ticket read costs the ticket items only, never the fix.
-    const ticketItems: SeedTicketItem[] = input.withTicketItems
-      ? await getOwnedTicketItemsForPr(ctx, input.accountId, input.prId).catch((err: unknown) => {
-          ctx.log.warn({ err }, 'ai-fix: loading ticket items failed');
-          return [];
-        })
-      : [];
-    // The CI review's fixable items at the PR's CURRENT head (manual and auto fixes alike). A failed
-    // read costs the CI items only.
-    const ciItems = await getFixableCiItemsForPr(ctx, input.accountId, input.prId).catch((err: unknown) => {
-      ctx.log.warn({ err }, 'ai-fix: loading CI review items failed');
-      return [];
-    });
-    return { review, seed: buildReviewSeed(review, { nonce: pickReviewNonce, ticketItems, ciItems }) };
+    const review = await loadSourceReview(ctx, input.accountId, input.prId, input.reviewId);
+    if (!review) return null;
+    const inputs = await loadSeedInputs(ctx, input.accountId, input.prId, input.withTicketItems === true);
+    return {
+      review,
+      seed: buildReviewSeed(review, { nonce: pickReviewNonce, ...inputs, selection: input.selection }),
+    };
   } catch (err) {
     ctx.log.warn({ err }, 'ai-fix: loading the review seed failed');
     return null;
@@ -182,9 +224,29 @@ export async function loadReviewSeed(
 }
 
 /**
+ * The fix picker's preview for a MANUAL fix (ticket items included, like the manual start). null
+ * when the review is not this PR's succeeded run. Never throws.
+ */
+export async function loadFixPreview(
+  ctx: AgentContext,
+  input: { accountId: number; prId: number; reviewId: number },
+): Promise<AiFixPickerPreview | null> {
+  try {
+    const review = await loadSourceReview(ctx, input.accountId, input.prId, input.reviewId);
+    if (!review) return null;
+    const inputs = await loadSeedInputs(ctx, input.accountId, input.prId, true);
+    return buildPickerPreview(review, inputs);
+  } catch (err) {
+    ctx.log.warn({ err }, 'ai-fix: building the fix preview failed');
+    return null;
+  }
+}
+
+/**
  * Start a fix seeded from a Claude review — the ONE entry the auto-review agent calls (it passes
  * `trigger: 'auto'`); the manual "Fix from review" route goes through the same path. Same queue,
- * slot, worktree and guards as every fix; nothing is pushed until a person presses Push.
+ * slot, worktree and guards as every fix; nothing is pushed until a person presses Push — unless
+ * the fix is AUTO and its workspace switched "Push automatically" on (auto-push.ts).
  */
 export function startReviewFix(
   ctx: AgentContext,
@@ -194,6 +256,8 @@ export function startReviewFix(
     reviewId: number;
     model: string;
     trigger: AiFixTrigger;
+    // An auto fix's sections (Settings → Auto review → Always include). Absent ⇒ the defaults.
+    include?: AutoFixInclude;
   },
 ): Promise<StartFixResult> {
   return startFix(ctx, {
@@ -203,6 +267,7 @@ export function startReviewFix(
     seed: 'review',
     sourceReviewId: input.reviewId,
     trigger: input.trigger,
+    selection: input.include ? { kind: 'sections', include: input.include } : undefined,
   });
 }
 
@@ -251,6 +316,7 @@ export async function startFix(
         prId,
         reviewId: input.sourceReviewId,
         withTicketItems: (input.trigger ?? 'manual') === 'manual',
+        selection: input.selection,
       });
       if (!loaded) {
         claimed.delete(prId);
@@ -313,6 +379,7 @@ export async function startFix(
       systemPrompt,
       prompt,
       sentRefs,
+      trigger,
     };
 
     const immediate = enqueue(prId, () => launchFix(ctx, job));
@@ -346,6 +413,7 @@ interface FixJob {
   prompt: string;
   // The refs the agent was SHOWN — what its report is validated against at save time.
   sentRefs: readonly string[];
+  trigger: AiFixTrigger;
 }
 
 async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {
@@ -421,6 +489,11 @@ async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {
       status: finalStatus,
       fixId: job.fixId,
     });
+  }
+  // An AUTO fix that succeeded may be pushed automatically (auto-push.ts decides: the workspace's
+  // "Push automatically", own PR only, never forced). Off the slot: a push is not a fix run.
+  if (finalStatus === 'succeeded' && job.trigger === 'auto') {
+    void maybeAutoPushFix(ctx, { accountId: job.accountId, fixId: job.fixId });
   }
 }
 

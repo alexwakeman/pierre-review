@@ -10,9 +10,12 @@ import type {
   ClaudeReviewTicketEntry,
   ClaudeThreadAssessment,
 } from '@pierre-review/shared';
+import { AUTO_FIX_DEFAULT_INCLUDE } from '@pierre-review/shared';
 import {
+  buildPickerPreview,
   buildReviewSeed,
   collectReviewItems,
+  type SeedThread,
   normalizeChangeReport,
   REVIEW_ITEM_BODY_MAX,
   type SeedTicketItem,
@@ -424,5 +427,122 @@ describe('normalizeChangeReport — the agent self-report, validated', () => {
       files,
     );
     expect(r.changes).toEqual([{ path: 'src/a.ts', summary: 'Fixed the typo.', refs: [] }]);
+  });
+});
+
+const openThread = (over: Partial<SeedThread> = {}): SeedThread => ({
+  threadId: 70,
+  path: 'src/d.ts',
+  line: 5,
+  derivedState: 'untouched',
+  rootAuthorLogin: 'carol',
+  rootAuthorIsBot: false,
+  rootIsStyleBot: false,
+  comments: [{ authorLogin: 'carol', body: 'Why is this mutable?' }],
+  ...over,
+});
+
+describe('the fix picker — sections, stable keys, defaults, selection, budget', () => {
+  const rich = (): ClaudeReview =>
+    review({
+      findings: [
+        finding({ id: 31, severity: 'warning', title: 'W' }),
+        finding({ id: 32, severity: 'blocker', title: 'B' }),
+        finding({ id: 33, severity: 'nit', title: 'Ignored', included: false }),
+      ],
+      followUp: { items: [prior({ priorFindingId: 55 })] } as ClaudeReview['followUp'],
+      threadAssessments: [
+        thread({ threadId: 7 }),
+        // Judged NOT right: stays out of the judged section, but is still an untouched thread.
+        thread({ threadId: 70, validity: 'not_valid', addressed: 'not_addressed', explanation: 'Not a bug.' }),
+      ],
+    });
+  const threads = (): SeedThread[] => [
+    openThread({ threadId: 7 }), // judged to fix ⇒ only in the judged section
+    openThread({ threadId: 70 }),
+    openThread({ threadId: 71, derivedState: 'replied_unresolved' }), // not untouched ⇒ not offered
+    openThread({ threadId: 72, rootAuthorLogin: 'sonarcloud', rootAuthorIsBot: true, rootIsStyleBot: true, derivedState: 'replied_unresolved' }),
+    openThread({ threadId: 73, rootIsStyleBot: true, derivedState: 'likely_addressed' }), // dealt with ⇒ not offered
+  ];
+  const ciItem = ci({ id: 900 });
+
+  it('⚠ every item carries a STABLE key and its section; ignored findings are not offered; style bots default off', () => {
+    const p = buildPickerPreview(rich(), { ciItems: [ciItem], threads: threads() });
+    const byKey = Object.fromEntries(p.items.map((i) => [i.key, [i.section, i.defaultIncluded]]));
+    expect(byKey).toEqual({
+      'finding:31': ['findings', true],
+      'finding:32': ['findings', true],
+      'finding:55': ['earlier_findings', true],
+      'thread:7': ['judged_threads', true],
+      'thread:70': ['untouched_threads', true],
+      'thread:72': ['style_bots', false],
+      'ci:900': ['ci_failures', true],
+    });
+    expect(p.sourceReviewId).toBe(1);
+    expect(p.cutByBudget).toEqual([]);
+    // PRIORITY order (the SPA's in-order budget fold matches the server's): CI + blocker first.
+    expect(p.items.slice(0, 2).map((i) => i.key)).toEqual(['finding:32', 'ci:900']);
+    expect(p.items.every((i) => i.chars > 0)).toBe(true);
+    // Keys survive a second read.
+    expect(buildPickerPreview(rich(), { ciItems: [ciItem], threads: threads() }).items.map((i) => i.key)).toEqual(
+      p.items.map((i) => i.key),
+    );
+  });
+
+  it('the default seed is the default selection: style-bot threads left out, refs positional', () => {
+    const s = buildReviewSeed(rich(), { nonce, ciItems: [ciItem], threads: threads() });
+    expect(s.items.map((i) => `${i.ref}:${i.kind}:${i.threadId ?? i.findingId ?? ''}`)).toEqual([
+      'F1:finding:31',
+      'F2:finding:32',
+      'P1:earlier_finding:55',
+      'T1:thread:7',
+      'T2:thread:70',
+      'C1:ci_failure:',
+    ]);
+    // An untouched thread's block names Claude's judgement, fenced like everything else.
+    expect(s.text).toContain('Unanswered thread T2');
+    expect(s.text).toContain('Not a bug.');
+  });
+
+  it('⚠ the reader’s keys decide — refs renumber with no holes; an unknown key selects nothing', () => {
+    const s = buildReviewSeed(rich(), {
+      nonce,
+      ciItems: [ciItem],
+      threads: threads(),
+      selection: { kind: 'keys', keys: ['finding:32', 'thread:72', 'nope:1'] },
+    });
+    expect(s.items.map((i) => i.ref)).toEqual(['F1', 'T1']);
+    expect(s.items[0]!.findingId).toBe(32);
+    expect(s.items[1]!.threadId).toBe(72);
+    expect(s.text).toContain('Style bot thread T1');
+    expect(buildReviewSeed(rich(), { nonce, selection: { kind: 'keys', keys: [] } }).sentRefs).toEqual([]);
+  });
+
+  it('an auto fix picks by section (AutoFixInclude)', () => {
+    const s = buildReviewSeed(rich(), {
+      nonce,
+      ciItems: [ciItem],
+      threads: threads(),
+      selection: { kind: 'sections', include: { ...AUTO_FIX_DEFAULT_INCLUDE, findings: false, styleBots: true, ciFailures: false } },
+    });
+    expect(s.items.map((i) => i.kind)).toEqual(['earlier_finding', 'thread', 'thread', 'thread']);
+    expect(s.items.map((i) => i.threadId).filter(Boolean)).toEqual([7, 70, 72]);
+  });
+
+  it('⚠ the budget is applied AFTER selection: an item the defaults would cut fits once others are unticked', () => {
+    const big = (id: number, severity: 'blocker' | 'nit') =>
+      finding({ id, severity, title: `t${id}`, body: 'x'.repeat(2_000) });
+    const r = review({ findings: [big(1, 'blocker'), big(2, 'blocker'), big(3, 'nit')] });
+    const budget = 4_500;
+    const p = buildPickerPreview(r, { budgetChars: budget });
+    expect(p.budgetChars).toBe(budget);
+    expect(p.cutByBudget).toEqual(['finding:3']);
+    const dflt = buildReviewSeed(r, { nonce, budgetChars: budget });
+    expect(dflt.items.filter((i) => !i.included).map((i) => i.findingId)).toEqual([3]);
+    const picked = buildReviewSeed(r, { nonce, budgetChars: budget, selection: { kind: 'keys', keys: ['finding:1', 'finding:3'] } });
+    expect(picked.items.map((i) => [i.ref, i.findingId, i.included])).toEqual([
+      ['F1', 1, true],
+      ['F2', 3, true],
+    ]);
   });
 });

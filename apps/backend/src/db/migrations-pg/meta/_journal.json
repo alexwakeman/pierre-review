@@ -547,6 +547,13 @@
       "when": 1791187200000,
       "tag": "0077_linear_links",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1791273600000,
+      "tag": "0078_auto_post_verdict_resolve_fix",
+      "breakpoints": true
     }
   ]
 }

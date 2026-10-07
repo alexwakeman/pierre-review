@@ -29,6 +29,9 @@ import type {
   ClaudeReviewFollowUpRecord,
   ClaudeAutoPostRecord,
   ClaudeCiFailuresRecord,
+  CiAutoPostRecord,
+  FindingAutoResolveRecord,
+  StoredAutoFixSettings,
   StoredAutoPostSettings,
   TicketAutoPostRecord,
   ClaudeReviewCiState,
@@ -1259,6 +1262,12 @@ export const claudeReviewFindings = sqliteTable(
     // true = auto-posting put this finding on GitHub (migration 0087 / pg 0074); NULL/false = a
     // person did, or it is not posted. Display only ("Posted automatically").
     postedAuto: integer('posted_auto', { mode: 'boolean' }),
+    // AUTO RESOLVE (migration 0091 / pg 0078): a Limn-posted inline finding whose thread a later
+    // review's follow-up judged addressed / no longer applies is replied to and resolved, ONCE.
+    // `autoResolve` is the FindingAutoResolveRecord, claimed by compare-and-set from NULL before
+    // any GitHub write and never retried; `autoResolvedAt` is set when the resolve went through.
+    autoResolvedAt: integer('auto_resolved_at', { mode: 'timestamp' }),
+    autoResolve: text('auto_resolve', { mode: 'json' }).$type<FindingAutoResolveRecord>(),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );
@@ -1559,6 +1568,10 @@ export const ciReviews = sqliteTable(
     // The head's CI as the run read it.
     ciState: text('ci_state', { mode: 'json' }).$type<ClaudeReviewCiState>(),
     summary: text('summary'),
+    // CI AUTO-POSTING (migration 0091 / pg 0078): what posting this AUTO run's causes did —
+    // CiAutoPostRecord. NULL = never claimed; claimed by compare-and-set from NULL to 'posting'
+    // BEFORE any GitHub write, never retried.
+    autoPost: text('auto_post', { mode: 'json' }).$type<CiAutoPostRecord>(),
     startedAt: integer('started_at', { mode: 'timestamp' }),
     completedAt: integer('completed_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' })
@@ -1606,6 +1619,8 @@ export const ciReviewItems = sqliteTable(
     line: integer('line'),
     suggestion: text('suggestion'),
     relatedFiles: text('related_files', { mode: 'json' }).$type<Array<{ path: string; line: number | null }>>(),
+    // Claude's 0-100 confidence in `cause` (migration 0091 / pg 0078). NULL = not reported.
+    confidence: integer('confidence'),
     assessedAtHead: text('assessed_at_head').notNull(),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
@@ -1741,8 +1756,8 @@ export const workspaces = sqliteTable(
     autoReviewEnabled: integer('auto_review_enabled', { mode: 'boolean' }),
     autoReviewEnabledAt: integer('auto_review_enabled_at', { mode: 'timestamp' }),
     // AUTO AI FIX (migration 0083 / pg 0070): may a succeeded AUTO review of the reader's OWN PR
-    // prepare a review-seeded fix (never pushed)? DEFAULT TRUE — it ran unconditionally before this
-    // column, so existing workspaces keep that until switched off. Read by `maybeStartAutoFix`
+    // prepare a review-seeded fix? OFF by default since 0084 / pg 0071 (only a stored true is on;
+    // pushed only when `autoFixSettings.autoPush` is on). Read by `maybeStartAutoFix`
     // (coding/ai-fix/auto-fix.ts); the ONE writer is `setWorkspaceAutoReview`. It only matters
     // while auto review is on.
     autoFixEnabled: integer('auto_fix_enabled', { mode: 'boolean' }).notNull().default(false),
@@ -1759,6 +1774,11 @@ export const workspaces = sqliteTable(
     // writer is `setWorkspaceAutoReview`; the reader is review/claude-review/auto-post.ts.
     autoPostEnabled: integer('auto_post_enabled', { mode: 'boolean' }),
     autoPostSettings: text('auto_post_settings', { mode: 'json' }).$type<StoredAutoPostSettings>(),
+    // AUTO FIX SETTINGS (migration 0091 / pg 0078): what an auto fix always includes and whether a
+    // succeeded one is pushed. OVERRIDES ONLY ({ include?, autoPush? }) — NULL = the defaults,
+    // resolved through `resolveAutoFixSettings` (review/claude-review/auto-settings.ts), whose
+    // `setWorkspaceAutoReview` is the ONE writer.
+    autoFixSettings: text('auto_fix_settings', { mode: 'json' }).$type<StoredAutoFixSettings>(),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

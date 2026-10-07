@@ -49,22 +49,22 @@ function state(over: Partial<FilterState>): FilterState {
 
 describe('landingTabFromUrl — the decision table', () => {
   // A cold start / "open the app": nothing to honour, so the front door.
-  it('bare URL → activity', () => {
-    expect(landingTabFromUrl('')).toBe('activity');
-    expect(landingTabFromUrl('?')).toBe('activity');
+  it('bare URL → open-prs', () => {
+    expect(landingTabFromUrl('')).toBe('open-prs');
+    expect(landingTabFromUrl('?')).toBe('open-prs');
   });
 
   // ⚠ THE REGRESSION. `?workspace=` is stamped by the app itself on every load, so it can never
   // mean "the user asked for the board". This is the case that made the feature look broken.
-  it('?workspace=5 → activity (the app stamped that param, the user did not)', () => {
-    expect(landingTabFromUrl('?workspace=5')).toBe('activity');
+  it('?workspace=5 → open-prs (the app stamped that param, the user did not)', () => {
+    expect(landingTabFromUrl('?workspace=5')).toBe('open-prs');
   });
 
   // Same reasoning one step further: the whole self-stamped filter-bar tail is not a destination.
-  it('?workspace=5&repos=1,2 → activity', () => {
-    expect(landingTabFromUrl('?workspace=5&repos=1,2')).toBe('activity');
+  it('?workspace=5&repos=1,2 → open-prs', () => {
+    expect(landingTabFromUrl('?workspace=5&repos=1,2')).toBe('open-prs');
     expect(landingTabFromUrl('?workspace=5&repos=1,2&cats=review&status=open&ci=only')).toBe(
-      'activity',
+      'open-prs',
     );
   });
 
@@ -114,9 +114,9 @@ describe('landingTabFromUrl — the decision table', () => {
   // The URL is hand-editable and links outlive spellings: an unknown value is normalized to the
   // default rather than treated as an unknown board.
   it('ignores a `view` value that names no board', () => {
-    expect(landingTabFromUrl('?view=bogus')).toBe('activity');
-    expect(landingTabFromUrl('?view=')).toBe('activity');
-    expect(landingTabFromUrl('?view=insights')).toBe('activity');
+    expect(landingTabFromUrl('?view=bogus')).toBe('open-prs');
+    expect(landingTabFromUrl('?view=')).toBe('open-prs');
+    expect(landingTabFromUrl('?view=insights')).toBe('open-prs');
   });
 
   // ── `view=` NAMES TABS TOO, spelled as the Tab.key verbatim ───────────────────────────────
@@ -135,22 +135,22 @@ describe('landingTabFromUrl — the decision table', () => {
   // ⚠ THE SEED-BACKED DRILL-DOWNS STAY EPHEMERAL. Their identity is an in-memory seed that is
   // deliberately never persisted (a restored one could name a tile the strip no longer shows), so
   // no URL ever names them — and a hand-written or stale one resolves to the launching console
-  // rather than to a broken drill-down.
+  // rather than to a broken drill-down: to the default view, Open PRs.
   it('does NOT honour a seed-backed drill-down key', () => {
-    expect(landingTabFromUrl('?view=bot-flagging')).toBe('activity');
-    expect(landingTabFromUrl('?view=people-report')).toBe('activity');
-    expect(landingTabFromUrl('?view=search')).toBe('activity');
+    expect(landingTabFromUrl('?view=bot-flagging')).toBe('open-prs');
+    expect(landingTabFromUrl('?view=people-report')).toBe('open-prs');
+    expect(landingTabFromUrl('?view=search')).toBe('open-prs');
     // Nor a malformed one that merely looks like a tab key.
-    expect(landingTabFromUrl('?view=pr-detail:')).toBe('activity');
-    expect(landingTabFromUrl('?view=pr-detail:abc')).toBe('activity');
+    expect(landingTabFromUrl('?view=pr-detail:')).toBe('open-prs');
+    expect(landingTabFromUrl('?view=pr-detail:abc')).toBe('open-prs');
   });
 
   // The predicate must mirror `readFromUrl`'s own parse (truthy raw, finite parseInt). A `?pr=`
   // that seats no selection is not a destination — honouring it would open an empty board.
   it('ignores a pr/thread param that names no id', () => {
-    expect(landingTabFromUrl('?pr=')).toBe('activity');
-    expect(landingTabFromUrl('?pr=nonsense')).toBe('activity');
-    expect(landingTabFromUrl('?thread=')).toBe('activity');
+    expect(landingTabFromUrl('?pr=')).toBe('open-prs');
+    expect(landingTabFromUrl('?pr=nonsense')).toBe('open-prs');
+    expect(landingTabFromUrl('?thread=')).toBe('open-prs');
   });
 });
 
@@ -194,12 +194,12 @@ describe('writeToUrl emits the board affirmatively (the round trip)', () => {
   });
 
   // The seed-backed drill-downs are the exception, and it is a deliberate one: no `view` at all,
-  // so a refresh (or a Forward onto that entry) resolves to Activity rather than to a drill-down
+  // so a refresh (or a Forward onto that entry) resolves to Open PRs (the default) rather than to a drill-down
   // whose seed died with the session.
-  it('emits no view for a seed-backed drill-down, so a refresh from one lands on Activity', () => {
+  it('emits no view for a seed-backed drill-down, so a refresh from one lands on Open PRs', () => {
     usePinnedTabs.setState({ activeTab: 'bot-flagging' });
     writeToUrl(state({ workspaceId: 5 }));
     expect(location.search).not.toContain('view=');
-    expect(landingTabFromUrl(location.search)).toBe('activity');
+    expect(landingTabFromUrl(location.search)).toBe('open-prs');
   });
 });

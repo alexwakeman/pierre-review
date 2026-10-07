@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  AiFixPickerPreview,
   AiFixPushBody,
   AiFixResponse,
   AiFixStatusResponse,
@@ -20,6 +21,17 @@ export function useAiFix(prId: number | null, enabled: boolean) {
     queryKey: ['ai-fix', prId],
     queryFn: () => api.aiFix(prId as number),
     enabled: prId != null && enabled,
+  });
+}
+
+// The fix picker's items for one review (DB-only on the server). Refetched after a fix finishes
+// (the ['ai-fix', prId] prefix is NOT shared, so it is keyed on its own and invalidated by the
+// start/push hooks below).
+export function useAiFixPreview(prId: number, reviewId: number | null, enabled: boolean) {
+  return useQuery<AiFixPickerPreview>({
+    queryKey: ['ai-fix-preview', prId, reviewId],
+    queryFn: () => api.aiFixPreview(prId, reviewId as number),
+    enabled: enabled && reviewId != null,
   });
 }
 
@@ -51,7 +63,10 @@ export function useStartFix(prId: number) {
   return useMutation({
     mutationKey: aiFixStartMutationKey(prId),
     mutationFn: (body: GenerateFixBody) => api.startAiFix(prId, body),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ai-fix', prId] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['ai-fix', prId] });
+      void qc.invalidateQueries({ queryKey: ['ai-fix-preview', prId] });
+    },
   });
 }
 

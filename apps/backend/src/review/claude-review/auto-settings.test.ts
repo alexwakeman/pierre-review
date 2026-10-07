@@ -8,7 +8,7 @@
 //   3. Another account's workspace id is refused (→ 404) and not written.
 //   4. The sweeper's roster lists only switched-on workspaces, each with its own account.
 //   5. The routes: GET/PUT shape, an empty body refused, 404 for a foreign id.
-//   6. AUTO AI FIX (`auto_fix_enabled`, migration 0083): ON by default, switched on its own (a body
+//   6. AUTO AI FIX (`auto_fix_enabled`, migration 0083): OFF by default (0084), switched on its own (a body
 //      with only `autoFixEnabled` leaves auto review and its floor alone), survives an auto-review
 //      off → on, and `readWorkspaceAutoFixForPr` reads it through the PR's repo membership.
 //   7. THE DAILY CAP (`auto_review_daily_cap`, migration 0085): NULL reads as the default 20, a set
@@ -20,11 +20,15 @@
 //      and story gaps on; nits and not-asked-for off); overrides-only storage; a partial kinds write
 //      keeps the rest; written alone without touching the other switches; route validation.
 //
+//   9. AUTO VERDICT / AUTO RESOLVE (inside `auto_post_settings`) and AUTO FIX SETTINGS
+//      (`auto_fix_settings`, migration 0091): OFF / the defaults, overrides only, written alone,
+//      validated at the route; GET carries `usage` only while auto review is on.
+//
 //   pnpm --filter @pierre-review/backend test auto-settings
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { AUTO_POST_DEFAULT_KINDS } from '@pierre-review/shared';
+import { AUTO_FIX_DEFAULT_INCLUDE, AUTO_POST_DEFAULT_KINDS } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -82,7 +86,8 @@ describe('the switch and its floor', () => {
       enabledAt: null,
       dailyCap: s.AUTO_REVIEW_DAILY_CAP,
       autoFixEnabled: false,
-      autoPost: { enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS },
+      autoPost: { enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false },
+      autoFix: { include: AUTO_FIX_DEFAULT_INCLUDE, autoPush: false },
     });
   });
 
@@ -339,13 +344,14 @@ describe('auto-posting — off by default, overrides only', () => {
       .execute();
     for (const id of [wsA, wsA2, fresh.id]) {
       const r = await s.readWorkspaceAutoReview(ctx, 1, id);
-      expect(r?.autoPost).toEqual({ enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS });
+      expect(r?.autoPost).toEqual({ enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false });
     }
     expect(AUTO_POST_DEFAULT_KINDS).toEqual({
       blockers: true,
       warnings: true,
       nits: false,
       questions: true,
+      ciFailures: true,
       storyGaps: true,
       notAskedFor: false,
     });
@@ -358,11 +364,11 @@ describe('auto-posting — off by default, overrides only', () => {
   });
 
   it('resolves malformed or partial overrides to the defaults', () => {
-    expect(s.resolveAutoPostSettings(null, null)).toEqual({ enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS });
+    expect(s.resolveAutoPostSettings(null, null)).toEqual({ enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false });
     expect(
       s.resolveAutoPostSettings(true, { scope: 'bogus' as any, kinds: { nits: true, blockers: 'yes' as any } }),
-    ).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true } });
-    expect(s.autoPostOverrides({ scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS })).toBeNull();
+    ).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false });
+    expect(s.autoPostOverrides({ scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false })).toBeNull();
     expect(s.autoPostOverrides({ scope: 'all', kinds: { ...AUTO_POST_DEFAULT_KINDS, questions: false } })).toEqual({
       scope: 'all',
       kinds: { questions: false },
@@ -372,11 +378,11 @@ describe('auto-posting — off by default, overrides only', () => {
   it('writes alone, keeps unsent kinds, stores overrides only, and leaves auto review alone', async () => {
     const before = await s.readWorkspaceAutoReview(ctx, 1, wsA2);
     const on = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoPost: { enabled: true, kinds: { nits: true } } });
-    expect(on?.autoPost).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true } });
+    expect(on?.autoPost).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false });
     expect(on?.enabled).toBe(before?.enabled);
     expect(on?.enabledAt).toBe(before?.enabledAt);
     const scoped = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoPost: { scope: 'all' } });
-    expect(scoped?.autoPost).toEqual({ enabled: true, scope: 'all', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true } });
+    expect(scoped?.autoPost).toEqual({ enabled: true, scope: 'all', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false });
     const [row] = await (ctx.db as any)
       .select({ st: (ctx.schema as any).workspaces.autoPostSettings })
       .from((ctx.schema as any).workspaces)
@@ -421,9 +427,101 @@ describe('auto-posting — off by default, overrides only', () => {
       enabled: true,
       scope: 'all',
       kinds: { ...AUTO_POST_DEFAULT_KINDS, questions: false },
+      autoVerdict: false,
+      autoResolve: false,
     });
     expect((await app.inject({ method: 'GET', url })).json()).toEqual(ok.json());
     await app.inject({ method: 'PUT', url, payload: { autoPost: { enabled: false, scope: 'mine', kinds: { questions: true } } } });
+    await app.close();
+  });
+});
+
+describe('auto verdict, auto resolve and auto fix settings (0091)', () => {
+  it('default OFF / defaults; overrides only; written alone', async () => {
+    const before = await s.readWorkspaceAutoReview(ctx, 1, wsA2);
+    expect(before?.autoPost.autoVerdict).toBe(false);
+    expect(before?.autoPost.autoResolve).toBe(false);
+    expect(before?.autoFix).toEqual({ include: AUTO_FIX_DEFAULT_INCLUDE, autoPush: false });
+    expect(AUTO_FIX_DEFAULT_INCLUDE).toEqual({
+      findings: true,
+      earlierFindings: true,
+      judgedThreads: true,
+      untouchedThreads: true,
+      ciFailures: true,
+      styleBots: false,
+    });
+    const on = await s.setWorkspaceAutoReview(ctx, 1, wsA2, {
+      autoPost: { autoVerdict: true, autoResolve: true, kinds: { ciFailures: false } },
+      autoFix: { include: { styleBots: true, untouchedThreads: false }, autoPush: true },
+    });
+    expect(on?.autoPost).toMatchObject({ autoVerdict: true, autoResolve: true, enabled: before?.autoPost.enabled });
+    expect(on?.autoPost.kinds.ciFailures).toBe(false);
+    expect(on?.autoFix).toEqual({
+      include: { ...AUTO_FIX_DEFAULT_INCLUDE, styleBots: true, untouchedThreads: false },
+      autoPush: true,
+    });
+    expect(on?.autoFixEnabled).toBe(before?.autoFixEnabled);
+    expect(await s.readWorkspaceAutoReview(ctx, 1, wsA2)).toEqual(on);
+    const [row] = await (ctx.db as any)
+      .select({ p: (ctx.schema as any).workspaces.autoPostSettings, f: (ctx.schema as any).workspaces.autoFixSettings })
+      .from((ctx.schema as any).workspaces)
+      .where(eq((ctx.schema as any).workspaces.id, wsA2))
+      .execute();
+    expect(row.p).toEqual({ kinds: { ciFailures: false }, autoVerdict: true, autoResolve: true });
+    expect(row.f).toEqual({ include: { untouchedThreads: false, styleBots: true }, autoPush: true });
+    // Back to the defaults ⇒ NULL.
+    await s.setWorkspaceAutoReview(ctx, 1, wsA2, {
+      autoPost: { autoVerdict: false, autoResolve: false, kinds: { ciFailures: true } },
+      autoFix: { include: { styleBots: false, untouchedThreads: true }, autoPush: false },
+    });
+    const [row2] = await (ctx.db as any)
+      .select({ p: (ctx.schema as any).workspaces.autoPostSettings, f: (ctx.schema as any).workspaces.autoFixSettings })
+      .from((ctx.schema as any).workspaces)
+      .where(eq((ctx.schema as any).workspaces.id, wsA2))
+      .execute();
+    expect(row2.f).toBeNull();
+    expect(row2.p).toBeNull();
+  });
+
+  it('resolveAutoFixSettings reads malformed overrides as the defaults', () => {
+    expect(s.resolveAutoFixSettings(null)).toEqual({ include: AUTO_FIX_DEFAULT_INCLUDE, autoPush: false });
+    expect(s.resolveAutoFixSettings({ include: { findings: 'no' as any, styleBots: true }, autoPush: 1 as any })).toEqual({
+      include: { ...AUTO_FIX_DEFAULT_INCLUDE, styleBots: true },
+      autoPush: false,
+    });
+  });
+
+  it('the PUT validates autoVerdict / autoResolve / autoFix; GET has usage only while on', async () => {
+    const { default: Fastify } = await import('fastify');
+    const usageCtx = {
+      ...ctx,
+      queries: { getAutoReviewCandidates: async () => ({ prIds: [], autoToday: 7, reReview: [], inFlightMoved: [] }) },
+    } as any as AgentContext;
+    const app = Fastify({ logger: false });
+    s.registerAutoReviewSettingsRoutes(app, usageCtx);
+    await app.ready();
+    const url = `/api/workspaces/${wsA2}/auto-review`;
+    for (const bad of [
+      { autoPost: { autoVerdict: 'yes' } },
+      { autoPost: { autoResolve: 1 } },
+      { autoFix: {} },
+      { autoFix: { autoPush: 'true' } },
+      { autoFix: { include: {} } },
+      { autoFix: { include: { styleBots: 0 } } },
+    ]) {
+      const res = await app.inject({ method: 'PUT', url, payload: bad });
+      expect(res.statusCode, JSON.stringify(bad)).toBe(400);
+    }
+    await app.inject({ method: 'PUT', url, payload: { enabled: false } });
+    expect((await app.inject({ method: 'GET', url })).json().usage).toBeUndefined();
+    await app.inject({ method: 'PUT', url, payload: { enabled: true } });
+    const got = (await app.inject({ method: 'GET', url })).json();
+    expect(got.usage.used).toBe(7);
+    expect(got.usage.cap).toBe(got.autoReview.dailyCap);
+    const reset = Date.parse(got.usage.resetsAt);
+    expect(new Date(reset).getUTCHours()).toBe(0);
+    expect(reset).toBeGreaterThan(Date.now());
+    expect(reset - Date.now()).toBeLessThanOrEqual(86_400_000);
     await app.close();
   });
 });

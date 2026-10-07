@@ -35,8 +35,8 @@ describe('reconcileCiReview', () => {
       {
         summary: '  The test fails on the new default. ',
         failures: [
-          { ref: 'f1', cause: 'Snapshot out of date', explanation: 'x', category: 'test', fixableInPr: true, path: 'src/a.test.ts', line: 9, suggestion: 'Update the snapshot.' },
-          { ref: 'F9', cause: 'invented', explanation: 'y', category: 'code', fixableInPr: true },
+          { ref: 'f1', cause: 'Snapshot out of date', explanation: 'x', category: 'test', fixableInPr: true, confidence: 80, path: 'src/a.test.ts', line: 9, suggestion: 'Update the snapshot.' },
+          { ref: 'F9', cause: 'invented', explanation: 'y', category: 'code', fixableInPr: true, confidence: 80 },
         ],
       },
       new Map(),
@@ -47,7 +47,7 @@ describe('reconcileCiReview', () => {
       ['lint', 'not_checked', 'not_reported'],
       ['sonar', 'not_checked', 'no_log'],
     ]);
-    expect(r.items[0]).toMatchObject({ path: 'src/a.test.ts', line: 9, suggestion: 'Update the snapshot.', fixableInPr: true });
+    expect(r.items[0]).toMatchObject({ path: 'src/a.test.ts', line: 9, suggestion: 'Update the snapshot.', fixableInPr: true, confidence: 80 });
     expect(r.items[1]).toMatchObject({ path: null, line: null, suggestion: null });
   });
 
@@ -67,7 +67,7 @@ describe('reconcileCiReview', () => {
             cause: 'c',
             explanation: 'e',
             category: 'code',
-            fixableInPr: true,
+            fixableInPr: true, confidence: 80,
             path: '/etc/passwd',
             line: 3,
             relatedFiles: [{ path: '../up', line: 1 }, { path: 'src/b.ts', line: 7 }],
@@ -85,8 +85,8 @@ describe('reconcileCiReview', () => {
       {
         summary: 's',
         failures: [
-          { ref: 'F1', cause: '', explanation: 'e', category: 'code', fixableInPr: true, suggestion: 'bad' },
-          { ref: 'F1', cause: 'real', explanation: 'e', category: 'code', fixableInPr: true, suggestion: 'good' },
+          { ref: 'F1', cause: '', explanation: 'e', category: 'code', fixableInPr: true, confidence: 80, suggestion: 'bad' },
+          { ref: 'F1', cause: 'real', explanation: 'e', category: 'code', fixableInPr: true, confidence: 80, suggestion: 'good' },
         ],
       },
       new Map(),

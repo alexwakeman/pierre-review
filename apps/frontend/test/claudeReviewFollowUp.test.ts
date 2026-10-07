@@ -557,11 +557,11 @@ describe('source guards', () => {
         'CI check',
         "Claude's review",
         'Findings',
-        'Generate a fix',
         'Post to GitHub',
         'Previous review',
         'Review chat',
         'Review threads',
+        'Reviews and actions',
         'Run a review',
       ].sort(),
     );

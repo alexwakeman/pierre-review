@@ -70,7 +70,7 @@ describe('readCiInputs', () => {
     const r = await readCiInputs(ctx, args());
     if (!r.ok) throw new Error('expected inputs');
     expect(readJobLog).toHaveBeenCalledTimes(1);
-    expect(readJobLog).toHaveBeenCalledWith(1, { owner: 'o', name: 'r', jobId: 2 });
+    expect(readJobLog).toHaveBeenCalledWith(1, { owner: 'o', name: 'r', jobId: 2, full: true });
     expect(readFailedStep).toHaveBeenCalledTimes(1);
     expect(r.failingChecks).toEqual(['bad', 'ext']);
     expect(r.ciState).toEqual({ state: 'failing', checkCount: 3 });

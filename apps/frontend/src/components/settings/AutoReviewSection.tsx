@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
   AUTO_FIX_DAILY_CAP,
+  AUTO_FIX_DEFAULT_INCLUDE,
   AUTO_POST_DEFAULT_KINDS,
   AUTO_POST_DEFAULT_SCOPE,
+  type AutoFixInclude,
   type AutoPostKinds,
   type AutoPostScope,
 } from '@pierre-review/shared';
@@ -56,19 +58,38 @@ import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
  * Every control under the master switch is DIMMED, never disabled, while it is off (the reader can
  * set it up first), and the whole block is dimmed while auto review is off (it acts on auto runs
  * only). Same Save as the rest; only what changed is sent.
+ *
+ * Under it, two more switches ride the same `autoPost` object (both OFF by default, migration 0091 /
+ * pg 0078): `autoVerdict` (the review's event becomes Claude's stricter verdict — only when the
+ * reader's own last review was a comment, never on their own PR) and `autoResolve` (Limn's own
+ * threads, once a later review finds them fixed). AUTO FIX gains "Always include" (one checkbox per
+ * fix-picker section; style bots off by default) and "Push automatically" (OFF) — `autoFix` on the
+ * same route, dimmed while auto fix is off.
  */
 
 const KIND_ROWS: Array<{ key: keyof AutoPostKinds; label: string }> = [
   { key: 'blockers', label: 'Blockers' },
   { key: 'warnings', label: 'Warnings' },
   { key: 'nits', label: 'Nits' },
-  { key: 'questions', label: 'Questions, each as its own PR comment' },
+  { key: 'questions', label: 'Questions, on the line they ask about where possible' },
+  { key: 'ciFailures', label: 'CI failure reasons, in one PR comment' },
   { key: 'storyGaps', label: 'Story gaps, on the PR they belong to' },
   { key: 'notAskedFor', label: 'Work the story did not ask for' },
 ];
 
 const sameKinds = (a: AutoPostKinds, b: AutoPostKinds): boolean =>
   KIND_ROWS.every(({ key }) => a[key] === b[key]);
+
+const FIX_ROWS: Array<{ key: keyof AutoFixInclude; label: string }> = [
+  { key: 'findings', label: 'Claude’s findings' },
+  { key: 'earlierFindings', label: 'Earlier findings not fixed yet' },
+  { key: 'judgedThreads', label: 'Threads Claude says to fix' },
+  { key: 'untouchedThreads', label: 'Threads nobody has answered' },
+  { key: 'ciFailures', label: 'CI failure reasons' },
+  { key: 'styleBots', label: 'Style bot comments (SonarCloud, Codecov…)' },
+];
+const sameInclude = (a: AutoFixInclude, b: AutoFixInclude): boolean =>
+  FIX_ROWS.every(({ key }) => a[key] === b[key]);
 export function AutoReviewSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
   const settings = useWorkspaceAutoReview(true, workspaceId);
@@ -91,6 +112,15 @@ export function AutoReviewSection(): JSX.Element {
   const [postOn, setPostOn] = useState(storedPostOn);
   const [scope, setScope] = useState<AutoPostScope>(storedScope);
   const [kinds, setKinds] = useState<AutoPostKinds>(storedKinds);
+  const storedVerdict = storedPost?.autoVerdict === true;
+  const storedResolve = storedPost?.autoResolve === true;
+  const [verdict, setVerdict] = useState(storedVerdict);
+  const [resolve, setResolve] = useState(storedResolve);
+  const storedInclude: AutoFixInclude = stored?.autoFix?.include ?? AUTO_FIX_DEFAULT_INCLUDE;
+  const storedIncludeKey = FIX_ROWS.map(({ key }) => (storedInclude[key] ? '1' : '0')).join('');
+  const storedPush = stored?.autoFix?.autoPush === true;
+  const [include, setInclude] = useState<AutoFixInclude>(storedInclude);
+  const [autoPush, setAutoPush] = useState(storedPush);
   // Re-seed on the stored VALUE (not the response object — a background refetch hands back a new
   // identity and would undo a half-made edit).
   useEffect(() => {
@@ -113,13 +143,32 @@ export function AutoReviewSection(): JSX.Element {
     // Keyed on the VALUES, not the object (a refetch hands back a new one).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, storedKindsKey]);
+  useEffect(() => {
+    setVerdict(storedVerdict);
+  }, [workspaceId, storedVerdict]);
+  useEffect(() => {
+    setResolve(storedResolve);
+  }, [workspaceId, storedResolve]);
+  useEffect(() => {
+    setInclude(storedInclude);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, storedIncludeKey]);
+  useEffect(() => {
+    setAutoPush(storedPush);
+  }, [workspaceId, storedPush]);
 
   if (workspaceId == null || settings.data == null) {
     return <ScopePendingSection title="Auto Claude review" failed={settings.isError} />;
   }
   const cap = parseCap(capText);
   const capDirty = cap != null && cap !== storedCap;
-  const postDirty = postOn !== storedPostOn || scope !== storedScope || !sameKinds(kinds, storedKinds);
+  const postDirty =
+    postOn !== storedPostOn ||
+    scope !== storedScope ||
+    !sameKinds(kinds, storedKinds) ||
+    verdict !== storedVerdict ||
+    resolve !== storedResolve;
+  const fixSettingsDirty = autoPush !== storedPush || !sameInclude(include, storedInclude);
 
   return (
     <SectionShell
@@ -180,22 +229,55 @@ export function AutoReviewSection(): JSX.Element {
               Auto AI Fix on your own PRs
             </span>
             <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
-              {on
-                ? 'After an auto review of a PR you opened, prepare a fix. Nothing is pushed.'
-                : 'Runs only after an auto review, so it is off while auto review is off.'}
+              {!on
+                ? 'Runs only after an auto review, so it is off while auto review is off.'
+                : autoPush
+                  ? 'After an auto review of a PR you opened, prepare a fix and push it.'
+                  : 'After an auto review of a PR you opened, prepare a fix. Nothing is pushed.'}
             </span>
           </span>
         </label>
         <InfoButton title="Auto AI Fix">
           <p>
             When an auto review of a PR you opened finishes, Limn prepares one AI Fix from that
-            review. It never pushes: the fix waits in the AI Fix tab until you press Push.
+            review. Unless you turn on Push automatically, the fix waits in the AI Fix tab until
+            you press Push. A push is never forced; if it fails, the AI Fix tab says so.
           </p>
           <p>
             Other people’s PRs are never fixed automatically. At most {AUTO_FIX_DAILY_CAP} auto fixes per PR a day,
             and none while a fix is running or waiting to be pushed.
           </p>
         </InfoButton>
+      </div>
+      <div className={`space-y-1 pl-10 text-xs ${on && fixOn ? '' : 'opacity-60'}`}>
+        <fieldset className="space-y-1">
+          <legend className="font-medium text-gray-700 dark:text-gray-200">Always include</legend>
+          {FIX_ROWS.map(({ key, label }) => (
+            <label key={key} className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={include[key]}
+                onChange={(e) => setInclude((v) => ({ ...v, [key]: e.target.checked }))}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </fieldset>
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={autoPush}
+            onChange={(e) => setAutoPush(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium text-gray-700 dark:text-gray-200">Push automatically</span>
+            <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+              Pushes a finished fix to the PR’s branch. Not built or tested first.
+            </span>
+          </span>
+        </label>
       </div>
       {!aiReady && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
@@ -230,9 +312,9 @@ export function AutoReviewSection(): JSX.Element {
           </label>
           <InfoButton title="Posting automatically">
             <p>
-              Limn posts as you, with your GitHub account. Findings go in one review that only
-              comments: it never approves and never requests changes. On GitHub that counts as your
-              review.
+              Limn posts as you, with your GitHub account. Findings go in one review, with
+              questions on the lines they ask about. The review only comments unless you turn on
+              Approve or request changes. On GitHub it counts as your review.
             </p>
             <p>
               Nothing is posted twice: a comment already on the PR, from any earlier review, is
@@ -254,7 +336,7 @@ export function AutoReviewSection(): JSX.Element {
                 checked={scope === 'mine'}
                 onChange={() => setScope('mine')}
               />
-              <span>PRs you are asked to review, and your own</span>
+              <span>Your own PRs, and PRs you are asked to review or have reviewed or commented on</span>
             </label>
             <label className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
               <input
@@ -281,17 +363,53 @@ export function AutoReviewSection(): JSX.Element {
               </label>
             ))}
           </fieldset>
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={verdict}
+              onChange={(e) => setVerdict(e.target.checked)}
+            />
+            <span>
+              <span className="font-medium text-gray-700 dark:text-gray-200">
+                Approve or request changes for me
+              </span>
+              <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                Approves only with no blockers or warnings. Only when your last review was a
+                comment, never on your own PRs.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={resolve}
+              onChange={(e) => setResolve(e.target.checked)}
+            />
+            <span>
+              <span className="font-medium text-gray-700 dark:text-gray-200">
+                Resolve Limn’s threads once fixed
+              </span>
+              <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                When a later review finds a posted comment fixed, Limn replies and resolves it.
+              </span>
+            </span>
+          </label>
         </div>
       </div>
       <SaveButton
-        dirty={cap != null && (on !== storedOn || fixOn !== storedFix || capDirty || postDirty)}
+        dirty={cap != null && (on !== storedOn || fixOn !== storedFix || capDirty || postDirty || fixSettingsDirty)}
         saving={update.isPending}
         onClick={() =>
           update.mutate({
             enabled: on,
             autoFixEnabled: fixOn,
             ...(capDirty && cap != null ? { dailyCap: cap } : {}),
-            ...(postDirty ? { autoPost: { enabled: postOn, scope, kinds } } : {}),
+            ...(postDirty
+              ? { autoPost: { enabled: postOn, scope, kinds, autoVerdict: verdict, autoResolve: resolve } }
+              : {}),
+            ...(fixSettingsDirty ? { autoFix: { include, autoPush } } : {}),
           })
         }
       />

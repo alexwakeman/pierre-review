@@ -4742,6 +4742,20 @@ export interface WorkspaceProSettings {
 export interface WorkspaceAutoReviewResponse {
   workspaceId: number;
   autoReview: WorkspaceAutoReviewSettings;
+  // Today's auto CODE reviews against the cap (ticket and CI reviews have caps of their own and are
+  // not counted). Present only on the GET, and only while auto review is ON for the workspace;
+  // absent/null otherwise (nothing to count against). Read by the Open PRs tab's counter.
+  usage?: AutoReviewUsage | null;
+}
+
+// The daily auto-review cap in use: `used` auto code-review runs created since 00:00 UTC in this
+// workspace's repos (the same count the sweeper budgets with), `cap` the cap in force
+// (`WorkspaceAutoReviewSettings.dailyCap`), and `resetsAt` the next 00:00 UTC (ISO-8601). `used`
+// can exceed `cap` (a cap lowered mid-day).
+export interface AutoReviewUsage {
+  used: number;
+  cap: number;
+  resetsAt: string;
 }
 // Any field may be sent alone (at least one is required — an empty `{}` is a 400, never a
 // switch); a field left out keeps its stored value.
@@ -4757,6 +4771,15 @@ export interface SetWorkspaceAutoReviewBody {
     enabled?: boolean;
     scope?: AutoPostScope;
     kinds?: Partial<AutoPostKinds>;
+    // `WorkspaceAutoPostSettings.autoVerdict` / `.autoResolve`.
+    autoVerdict?: boolean;
+    autoResolve?: boolean;
+  };
+  // Auto AI Fix's contents + push switch (`WorkspaceAutoReviewSettings.autoFix`). Each field
+  // optional; an `include` section left out keeps its stored value.
+  autoFix?: {
+    include?: Partial<AutoFixInclude>;
+    autoPush?: boolean;
   };
 }
 
@@ -4774,10 +4797,15 @@ export interface WorkspaceAutoReviewSettings {
   // the default 20.
   dailyCap: number;
   // AUTO AI FIX (`workspaces.auto_fix_enabled`, migration 0083 / pg 0070). After a succeeded auto
-  // review of the reader's OWN PR, prepare one review-seeded AI Fix (never pushed). ON by default;
-  // stored independently of `enabled` (switching auto review off keeps it), but it only runs after
-  // an auto review, so it does nothing while `enabled` is false.
+  // review of the reader's OWN PR, prepare one review-seeded AI Fix. OFF by default (since 0084 /
+  // pg 0071; anything but a stored true reads OFF); stored independently of `enabled` (switching
+  // auto review off keeps it), but it only runs after an auto review, so it does nothing while
+  // `enabled` is false. Pushed only when `autoFix.autoPush` is on.
   autoFixEnabled: boolean;
+  // What an auto fix always includes, and whether a succeeded one is pushed
+  // (`workspaces.auto_fix_settings`, migration 0091 / pg 0078, OVERRIDES ONLY). Always a full
+  // resolved value — `resolveAutoFixSettings` (auto-settings.ts) is the ONE fold.
+  autoFix: AutoFixSettings;
   // AUTO-POSTING (`workspaces.auto_post_enabled` + `auto_post_settings`, migration 0087 / pg 0074):
   // may a SUCCEEDED AUTO review post to GitHub without a click? OFF for every workspace until
   // switched on. AUTO runs only — a review you start yourself keeps the Post button.
@@ -4792,14 +4820,19 @@ export interface WorkspaceAutoReviewSettings {
 // Either way: never a merged, closed or draft PR, and never a bot-authored one.
 export type AutoPostScope = 'mine' | 'all';
 
-// WHAT is posted. Findings go in ONE GitHub review (event COMMENT, never APPROVE / REQUEST_CHANGES);
-// each question is its own PR comment; story items are PR comments on the PR the ticket review
-// names as the owner. Praise is never posted.
+// WHAT is posted. Findings go in ONE GitHub review (event COMMENT, unless `autoVerdict` is on —
+// then the event is the verdict); questions go INLINE in that same review where they can be
+// anchored, else as a PR comment; story items are PR comments on the PR the ticket review names as
+// the owner. Praise is never posted.
 export interface AutoPostKinds {
   blockers: boolean;
   warnings: boolean;
   nits: boolean;
   questions: boolean;
+  // An AUTO CI review's diagnosed causes (confidence > 50, flaky/infra ones labelled as such), as
+  // ONE PR comment per (PR, head, failing check set). Default ON — inside auto-posting, which is
+  // itself OFF until switched on. Stored record: `ci_reviews.auto_post` (`CiAutoPostRecord`).
+  ciFailures: boolean;
   // A ticket review's unmet / partly met criteria and missing pieces.
   storyGaps: boolean;
   // A ticket review's "Not asked for" items.
@@ -4810,6 +4843,7 @@ export const AUTO_POST_DEFAULT_KINDS: AutoPostKinds = {
   warnings: true,
   nits: false,
   questions: true,
+  ciFailures: true,
   storyGaps: true,
   notAskedFor: false,
 };
@@ -4819,12 +4853,60 @@ export interface WorkspaceAutoPostSettings {
   enabled: boolean;
   scope: AutoPostScope;
   kinds: AutoPostKinds;
+  // AUTO VERDICT (default OFF): the auto-posted review's event is Claude's verdict, stricter —
+  // APPROVE only with zero blocker and zero warning findings (non-ignored, non-story), any blocker
+  // → REQUEST_CHANGES, else COMMENT. Submitted only when the reader's OWN latest review on the PR
+  // (read LIVE from GitHub) is none or COMMENTED, and never on the reader's own PR (always
+  // COMMENT). What was done is recorded on `ClaudeAutoPostRecord.verdict`.
+  autoVerdict: boolean;
+  // AUTO RESOLVE (default OFF): a Limn-posted inline finding thread that a later review's
+  // follow-up judges 'addressed' / 'no_longer_applies' gets a short reply and is resolved. ONLY
+  // Limn's own threads; once per finding (`claude_review_findings.auto_resolved_at` +
+  // `auto_resolve`, `FindingAutoResolveRecord`), never retried.
+  autoResolve: boolean;
 }
+export const AUTO_POST_DEFAULT_AUTO_VERDICT = false;
+export const AUTO_POST_DEFAULT_AUTO_RESOLVE = false;
 
 // What `workspaces.auto_post_settings` stores: OVERRIDES ONLY (NULL / a missing field = the default).
 export interface StoredAutoPostSettings {
   scope?: AutoPostScope;
   kinds?: Partial<AutoPostKinds>;
+  autoVerdict?: boolean;
+  autoResolve?: boolean;
+}
+
+// ---- Auto AI Fix contents + push (workspaces.auto_fix_settings, migration 0091 / pg 0078) ----
+// WHICH sections of a review-seeded fix an AUTO fix always includes — the same sections as the
+// manual fix picker (`AiFixPickerSection`, minus 'story': an auto fix never carried story items).
+export interface AutoFixInclude {
+  findings: boolean;          // this run's Claude findings (never ignored ones)
+  earlierFindings: boolean;   // earlier findings not yet addressed
+  judgedThreads: boolean;     // other reviewers' threads Claude judged to fix
+  untouchedThreads: boolean;  // unresolved threads nobody has answered (derived_state 'untouched')
+  ciFailures: boolean;        // the latest CI review's causes at the current head
+  styleBots: boolean;         // threads opened by style / quality bots (role quality_check)
+}
+export interface AutoFixSettings {
+  include: AutoFixInclude;
+  // PUSH AUTOMATICALLY (default OFF): a SUCCEEDED auto fix is pushed onto the PR's existing branch
+  // (target 'existing', the manual push path, never forced), only on the reader's own PR. A failed
+  // push is recorded and shown, never retried.
+  autoPush: boolean;
+}
+export const AUTO_FIX_DEFAULT_INCLUDE: AutoFixInclude = {
+  findings: true,
+  earlierFindings: true,
+  judgedThreads: true,
+  untouchedThreads: true,
+  ciFailures: true,
+  styleBots: false,
+};
+export const AUTO_FIX_DEFAULT_AUTO_PUSH = false;
+// What `workspaces.auto_fix_settings` stores: OVERRIDES ONLY (NULL / a missing field = the default).
+export interface StoredAutoFixSettings {
+  include?: Partial<AutoFixInclude>;
+  autoPush?: boolean;
 }
 
 // The visible last line of every auto-posted comment and review body (the hidden
@@ -4837,16 +4919,32 @@ export const AUTO_POST_FOOTER = '_Posted automatically by Limn’s Claude review
 //   posted    everything it tried is on GitHub
 //   partial   some of it is on GitHub; `error` says what failed
 //   failed    nothing was posted; `error` says why
-//   skipped   nothing to do; `reason` says why (not shown on screen)
+//   skipped   nothing to do; `reason` says why ('already_posted' is shown on screen)
 export type AutoPostStatus = 'posting' | 'posted' | 'partial' | 'failed' | 'skipped';
+//   already_posted  there WAS something to post, but every item had already been posted by an
+//                   earlier run (manual or auto) — the dedupe alone left nothing. The record's
+//                   `alreadyPostedFindingIds` names them. 'nothing_new' stays for "nothing to post".
 export type AutoPostSkipReason =
   | 'not_open'
   | 'draft'
   | 'bot_author'
   | 'not_yours'
   | 'nothing_new'
+  | 'already_posted'
   | 'no_owner'
   | 'not_latest';
+// What the auto VERDICT did on a run (`WorkspaceAutoPostSettings.autoVerdict`).
+//   wanted     the verdict the findings gave (APPROVE / REQUEST_CHANGES / COMMENT)
+//   submitted  the event actually sent — COMMENT whenever `heldReason` is set
+//   heldReason why `wanted` was not sent: 'own_pr' (GitHub refuses self-approval), 'prior_review'
+//              (the reader's own latest review is APPROVED / CHANGES_REQUESTED / DISMISSED),
+//              'reviews_unreadable' (the live read failed — never guess), null when sent as wanted.
+export type AutoVerdictEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
+export interface ClaudeAutoVerdictRecord {
+  wanted: AutoVerdictEvent;
+  submitted: AutoVerdictEvent;
+  heldReason: 'own_pr' | 'prior_review' | 'reviews_unreadable' | null;
+}
 export interface ClaudeAutoPostRecord {
   status: AutoPostStatus;
   at: string; // ISO-8601
@@ -4856,6 +4954,11 @@ export interface ClaudeAutoPostRecord {
   findingIds: number[];
   postedFindingIds: number[];
   githubReviewId: string | null;
+  // With reason 'already_posted': the findings an earlier post already covered. Absent otherwise
+  // (and on every record from before it existed).
+  alreadyPostedFindingIds?: number[];
+  // Set when auto verdict was on for the run (absent = off, or an older record).
+  verdict?: ClaudeAutoVerdictRecord | null;
 }
 // On the wire (`ClaudeReview.autoPost`): the record without the id lists.
 export interface ClaudeAutoPostWire {
@@ -4864,6 +4967,51 @@ export interface ClaudeAutoPostWire {
   reason: AutoPostSkipReason | null;
   error: string | null;
   postedCount: number;
+  // With reason 'already_posted': how many findings an earlier post already covered.
+  alreadyPostedCount?: number;
+  verdict?: ClaudeAutoVerdictRecord | null;
+}
+
+// What CI auto-posting did with ONE auto CI review run (`ci_reviews.auto_post`, migration 0091 /
+// pg 0078). Claimed (compare-and-set from NULL to status 'posting') BEFORE any GitHub write, never
+// retried. ONE PR comment per (PR, head, failing check set): `failingKey` is the run's
+// `ci_reviews.failing_key`, so a later run with the same key dedupes against this one.
+export interface CiAutoPostRecord {
+  status: AutoPostStatus;
+  at: string; // ISO-8601
+  reason: AutoPostSkipReason | null;
+  error: string | null;
+  headSha: string;
+  failingKey: string | null;
+  // The items it put in the comment (diagnosed, confidence > 50).
+  itemIds: number[];
+  // The PR comment's id once GitHub took it; null while posting / on failure.
+  commentId: string | null;
+}
+export interface CiAutoPostWire {
+  status: AutoPostStatus;
+  at: string;
+  reason: AutoPostSkipReason | null;
+  error: string | null;
+  postedCount: number;
+}
+
+// Auto-resolve's record on ONE finding (`claude_review_findings.auto_resolve`, migration 0091 /
+// pg 0078; `auto_resolved_at` is set when it is resolved). Written once — never retried.
+//   resolving  claimed; GitHub calls in flight (or cut off — counts as attempted forever)
+//   resolved   reply posted and thread resolved
+//   failed     `error` says what GitHub refused (permission, gone…); `replyCommentId` set when
+//              the reply went through but the resolve did not
+export interface FindingAutoResolveRecord {
+  status: 'resolving' | 'resolved' | 'failed';
+  at: string; // ISO-8601
+  // The follow-up judgement that triggered it, and the run that made it.
+  outcome: 'addressed' | 'no_longer_applies';
+  byReviewId: number;
+  // The head the judgement was made at (the reply names its short sha).
+  headSha: string;
+  replyCommentId: string | null;
+  error: string | null;
 }
 
 // One "Not asked for" item auto-posting handled (it has no item row of its own). `key` is the
@@ -6650,6 +6798,12 @@ export interface ClaudeFinding {
   postedCommentKind: 'inline' | 'pr_comment' | null;
   // true = auto-posting put it on GitHub ("Posted automatically"); absent/false = a person did.
   postedAuto?: boolean;
+  // The local review THREAD this posted inline finding became (`github_comment_id` =
+  // `review_comments.database_id` → its thread), computed on read; null when not posted inline or
+  // the thread is not synced yet. Lets the SPA open that thread in the Changes tab.
+  threadId?: number | null;
+  // Auto-resolve on this finding's thread (absent = never attempted).
+  autoResolve?: FindingAutoResolveRecord | null;
   createdAt: string;
   // Set when this finding RE-RAISES a finding from the previous review that is still not (or
   // only partly) addressed: that earlier finding's id. A soft reference (same PR, no FK). The SPA
@@ -6990,6 +7144,10 @@ export interface ClaudeCiFailure {
   relatedFiles: Array<{ path: string; line: number | null }>;
   // The head the diagnosis was made at (a carried item keeps its own).
   assessedAtHead: string;
+  // Claude's own confidence in `cause`, 0-100 (the submit tool's field; `ci_review_items.confidence`,
+  // migration 0091 / pg 0078). null when not_checked or not reported; absent on older runs.
+  // Auto-posting posts only a cause above 50.
+  confidence?: number | null;
 }
 
 // The head's CI as the run saw it.
@@ -7401,6 +7559,9 @@ export interface ClaudeReviewStateSummary {
   lenses: Partial<Record<ClaudeFindingLens, number>>;
   /** Findings already posted to GitHub (inline or as a PR comment). */
   postedFindings: number;
+  /** Findings the reader ignored (`claude_review_findings.included = false`). They are NOT in
+   *  `findings` or the posted total — the card prints "N ignored" instead. Absent on older servers. */
+  ignoredCount?: number;
   /** The review itself was posted (`postedAt` set). */
   reviewPosted: boolean;
   /** One entry per user story the run was given, in order. [] when none. `alignment` null = the
@@ -7856,6 +8017,8 @@ export interface CiReview {
   items: CiReviewItem[];
   // null unless the run succeeded.
   counts: CiReviewCounts | null;
+  // What CI auto-posting did with this run (`ci_reviews.auto_post`); null when it never ran.
+  autoPost?: CiAutoPostWire | null;
 }
 
 // Why a PR's latest CI review no longer describes its CI:
@@ -8225,7 +8388,59 @@ export interface GenerateFixBody {
   // or not succeeded ⇒ 409 ReviewUnavailable; nothing to fix in it ⇒ 409 NothingToFix.
   sourceReviewId?: number;
   // seed === 'plain' (required, non-blank, at most AI_FIX_MAX_INSTRUCTION_CHARS): what to fix.
+  // (The SPA no longer offers a plain fix; the route still accepts it.)
   instruction?: string;
+  // seed === 'review' only: the reader's selection from the fix picker — `AiFixPickerItem.key`s to
+  // include. Absent ⇒ the server's defaults (`defaultIncluded`). An unknown key is ignored; a list
+  // selecting nothing ⇒ 409 NothingToFix. The budget is applied AFTER selection.
+  include?: string[];
+}
+
+// ---- The fix picker: what a review-seeded fix would include (before a manual fix starts) ----
+// `GET /api/pro/prs/:id/ai-fix/preview?sourceReviewId=<id>` answers `AiFixPickerPreview`: every
+// item the server would build, grouped by section, each with a STABLE key the start route's
+// `include` names. Refs (F1, T3…) stay positional in the prompt; selection never keys on them.
+//   findings          this run's findings (non-ignored), by severity
+//   earlier_findings  earlier findings not yet addressed
+//   judged_threads    other reviewers' threads Claude judged to fix
+//   untouched_threads unresolved threads nobody answered (derived_state 'untouched'), judged or not
+//   ci_failures       the latest CI review's causes at the current head
+//   style_bots        threads opened by style / quality bots (role quality_check) — default OFF
+//   story             story items, when the run has any
+export type AiFixPickerSection =
+  | 'findings'
+  | 'earlier_findings'
+  | 'judged_threads'
+  | 'untouched_threads'
+  | 'ci_failures'
+  | 'style_bots'
+  | 'story';
+export interface AiFixPickerItem {
+  // Stable across reads: 'finding:<findingId>' | 'thread:<threadId>' | 'ci:<ciReviewItemId>' |
+  // 'story:<ticketIndex>:<ref>'.
+  key: string;
+  section: AiFixPickerSection;
+  // One line: the finding's title, the thread's first line, the check name + cause.
+  label: string;
+  // Second line, plain text (may be empty).
+  detail: string | null;
+  path: string | null;
+  line: number | null;
+  // 'blocker' | 'warning' | 'nit' | 'question' for a finding; null otherwise.
+  severity: ClaudeFindingSeverity | null;
+  // Ticked on open.
+  defaultIncluded: boolean;
+  // Characters it adds to the prompt (for the budget preview).
+  chars: number;
+}
+export interface AiFixPickerPreview {
+  sourceReviewId: number;
+  items: AiFixPickerItem[];
+  // The prompt budget in characters, and the keys the budget would cut from the DEFAULT selection
+  // (the SPA re-folds the cut for the reader's own selection with `chars` and this budget, in
+  // `items` order).
+  budgetChars: number;
+  cutByBudget: string[];
 }
 
 // The longest plain instruction the start route accepts (400 InstructionTooLong over it).

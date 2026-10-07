@@ -19,11 +19,39 @@ import type { AgentContext as ProContext } from '../../review/agent-context.js';
 
 const startFix = vi.fn(async (..._args: unknown[]) => ({ status: 'queued' as const, fixId: 55 }));
 
+const PREVIEW = {
+  sourceReviewId: 4,
+  items: [
+    {
+      key: 'finding:31',
+      section: 'findings',
+      label: 'Null deref',
+      detail: null,
+      path: 'a.ts',
+      line: 1,
+      severity: 'blocker',
+      defaultIncluded: true,
+      chars: 120,
+    },
+  ],
+  budgetChars: 40_000,
+  cutByBudget: [],
+};
+const loadFixPreview = vi.fn(async (..._args: unknown[]): Promise<typeof PREVIEW | null> => PREVIEW);
+
 vi.mock('./manager.js', () => ({
   startFix: (...args: unknown[]) => startFix(...args),
+  loadFixPreview: (...args: unknown[]) => loadFixPreview(...args),
   getFixStatus: vi.fn(),
   requestFixCancel: vi.fn(() => false),
   subscribeFixStream: vi.fn(() => () => {}),
+}));
+
+// The PR's newest SUCCEEDED review (the preview's default when no id is sent).
+const getLatestSucceededReviewId = vi.fn(async (..._args: unknown[]): Promise<number | null> => 4);
+vi.mock('../../review/claude-review/persist.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../review/claude-review/persist.js')>()),
+  getLatestSucceededReviewId: (...args: unknown[]) => getLatestSucceededReviewId(...args),
 }));
 
 const SUCCEEDED_FIX = {
@@ -350,6 +378,75 @@ describe('POST /api/pro/ai-fixes/:fixId/push — as-is, no trunk step', () => {
     for (const url of ['/api/pro/ai-fixes/9/rebase/stream', '/api/pro/ai-fixes/9/push/stream']) {
       expect((await app.inject({ method: 'GET', url })).statusCode).toBe(404);
     }
+    await app.close();
+  });
+});
+
+describe('the fix picker — preview and selection', () => {
+  it('GET …/ai-fix/preview answers the manager’s preview for this PR’s review', async () => {
+    const app = await build();
+    loadFixPreview.mockClear();
+    const res = await app.inject({ method: 'GET', url: '/api/pro/prs/7/ai-fix/preview?sourceReviewId=4' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual(PREVIEW);
+    expect(loadFixPreview.mock.calls[0]?.[1]).toEqual({ accountId: 1, prId: 7, reviewId: 4 });
+    await app.close();
+  });
+
+  it('no review id ⇒ the latest SUCCEEDED review (a failed newer run does not hide it)', async () => {
+    const app = await build();
+    loadFixPreview.mockClear();
+    getLatestSucceededReviewId.mockClear();
+    getLatestSucceededReviewId.mockResolvedValueOnce(4);
+    const res = await app.inject({ method: 'GET', url: '/api/pro/prs/7/ai-fix/preview' });
+    expect(res.statusCode).toBe(200);
+    expect(getLatestSucceededReviewId.mock.calls[0]?.slice(1)).toEqual([7, 1]);
+    expect(loadFixPreview.mock.calls[0]?.[1]).toEqual({ accountId: 1, prId: 7, reviewId: 4 });
+    getLatestSucceededReviewId.mockResolvedValueOnce(null);
+    const none = await app.inject({ method: 'GET', url: '/api/pro/prs/7/ai-fix/preview' });
+    expect(none.statusCode).toBe(409);
+    expect(none.json()).toMatchObject({ error: 'ReviewUnavailable', message: 'Run a Claude review on this PR first.' });
+    await app.close();
+  });
+
+  it('a malformed review id ⇒ 400; a review that is not this PR’s ⇒ 409 ReviewUnavailable', async () => {
+    const app = await build();
+    expect((await app.inject({ method: 'GET', url: '/api/pro/prs/7/ai-fix/preview?sourceReviewId=x' })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/api/pro/prs/7/ai-fix/preview?sourceReviewId=0' })).statusCode).toBe(400);
+    loadFixPreview.mockResolvedValueOnce(null);
+    const res = await app.inject({ method: 'GET', url: '/api/pro/prs/7/ai-fix/preview?sourceReviewId=99' });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('ReviewUnavailable');
+    await app.close();
+  });
+
+  it('⚠ the reader’s `include` keys reach startFix as the selection (nothing stripped them)', async () => {
+    const app = await build();
+    const res = await start(app, { seed: 'review', sourceReviewId: 4, include: ['finding:31', 'thread:8'] });
+    expect(res.statusCode).toBe(202);
+    expect(startArg().selection).toEqual({ kind: 'keys', keys: ['finding:31', 'thread:8'] });
+    await app.close();
+  });
+
+  it('no `include` ⇒ the defaults (no selection); a malformed one ⇒ 400 BadSelection, no run', async () => {
+    const app = await build();
+    await start(app, { seed: 'review', sourceReviewId: 4 });
+    expect(startArg().selection).toBeUndefined();
+    startFix.mockClear();
+    for (const include of ['finding:31', [1, 2], [''], 'x'.repeat(3)]) {
+      const res = await start(app, { seed: 'review', sourceReviewId: 4, include });
+      expect(res.statusCode).toBe(400);
+    }
+    expect(startFix).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('an empty selection ⇒ the manager’s NothingToFix, worded for the picker', async () => {
+    const app = await build();
+    startFix.mockResolvedValueOnce({ status: 'nothing_to_fix' } as never);
+    const res = await start(app, { seed: 'review', sourceReviewId: 4, include: [] });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: 'NothingToFix', message: 'Nothing is ticked.' });
     await app.close();
   });
 });

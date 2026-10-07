@@ -9,14 +9,16 @@
 //   pnpm --filter @pierre-review/backend test claude-review/ci-failures
 import { describe, expect, it } from 'vitest';
 import type { CheckRun, ClaudeCiFailure } from '@pierre-review/shared';
-import { DEFAULT_LOG_WINDOW_BYTES } from '../../github/actions-logs.js';
+import { MAX_LOG_BYTES } from '../../github/actions-logs.js';
 import { failedStepName } from '../../github/commit-checks.js';
 import {
   CI_BLOCK_CHARS,
   CI_EXCERPT_CHARS,
   CI_FAILURES_MAX,
   CI_LINE_CHARS,
-  CI_LOG_WINDOW_BYTES,
+  CI_LOG_READ_BYTES,
+  confidenceOf,
+  culpritClass,
   ciStateKind,
   extractFailureExcerpt,
   planCiReview,
@@ -185,8 +187,8 @@ describe('selectCiFailures / planCiReview — what is read and sent', () => {
     expect(ciStateKind('WEIRD')).toBe('unknown');
   });
 
-  it('the read window is the viewer\'s one tail page', () => {
-    expect(CI_LOG_WINDOW_BYTES).toBe(DEFAULT_LOG_WINDOW_BYTES);
+  it('the read is the whole log, up to the log reader\'s hard cap', () => {
+    expect(CI_LOG_READ_BYTES).toBe(MAX_LOG_BYTES);
   });
 });
 

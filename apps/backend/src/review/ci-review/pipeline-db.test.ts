@@ -28,7 +28,7 @@ vi.mock('./agent.js', () => ({
       payload: {
         summary: 'The snapshot test fails.',
         failures: [
-          { ref: 'F1', cause: 'Snapshot out of date', explanation: 'e', category: 'test', fixableInPr: true, path: 'src/a.test.ts', line: 4, suggestion: 'Update it.' },
+          { ref: 'F1', cause: 'Snapshot out of date', explanation: 'e', category: 'test', fixableInPr: true, confidence: 88, path: 'src/a.test.ts', line: 4, suggestion: 'Update it.' },
         ],
       },
       costUsd: 0.4,
@@ -182,7 +182,8 @@ describe('the CI review pipeline', () => {
       ['test', 'diagnosed', null],
       ['sonar', 'not_checked', 'no_log'],
     ]);
-    expect(run.items[0]).toMatchObject({ path: 'src/a.test.ts', line: 4, suggestion: 'Update it.', fixableInPr: true });
+    expect(run.items[0]).toMatchObject({ path: 'src/a.test.ts', line: 4, suggestion: 'Update it.', fixableInPr: true, confidence: 88 });
+    expect(run.items[1]!.confidence).toBeNull();
     expect(run.counts).toEqual({ failing: 2, explained: 1, fixableInPr: 1, notChecked: 1 });
     expect(JSON.stringify(run)).not.toContain('githubusercontent');
   });
@@ -194,7 +195,7 @@ describe('the CI review pipeline', () => {
     expect(agentCalls).toHaveLength(0);
     expect(logReads).toHaveLength(0);
     const run = (await persist.getCiReviewById(ctx, 1, id))!;
-    expect(run.items[0]).toMatchObject({ checkName: 'test', carried: true, path: 'src/a.test.ts', suggestion: 'Update it.' });
+    expect(run.items[0]).toMatchObject({ checkName: 'test', carried: true, path: 'src/a.test.ts', suggestion: 'Update it.', confidence: 88 });
     expect(run.summary).toBe('The snapshot test fails.');
   });
 

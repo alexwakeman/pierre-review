@@ -110,7 +110,7 @@ export const UNCHANGED_HEAD_EXPLANATION = 'The code has not changed since this w
  * something nobody told them. `postedAt` is the signal because it is the one column BOTH posting
  * paths stamp: the single-comment route (`markFindingPosted`, which also stores a
  * `githubCommentId`) and Post review (`markReviewPosted`, whose inline comments ride the GitHub
- * review and get NO per-comment id). The `included` tick is not consulted at all: it says what the
+ * review and get their id only from a best-effort read-back, so it may be NULL). The `included` tick is not consulted at all: it says what the
  * reader meant to send, never what was sent, and an ignored-after-posting comment is still on the
  * pull request. Praise is never followed up: there is nothing to address.
  *

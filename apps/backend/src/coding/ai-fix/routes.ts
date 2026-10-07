@@ -3,11 +3,11 @@ import {
   AI_FIX_MAX_INSTRUCTION_CHARS,
   CLAUDE_REVIEW_MODELS,
   DEFAULT_AI_FIX_MODEL,
-  PRODUCT_NAME,
 } from '@pierre-review/shared';
 import type {
   AiFix,
   AiFixModel,
+  AiFixPickerPreview,
   AiFixPushBody,
   AiFixPushResult,
   AiFixResponse,
@@ -18,21 +18,22 @@ import type {
   GenerateFixBody,
   PrHeadInfo,
 } from '@pierre-review/shared';
-import type { ApplyAndPushTarget } from '../../pro/contract.js';
 import type { AgentContext } from '../../review/agent-context.js';
 import { config } from '../../config.js';
 import { getFixPrContext, getViewerCanPush } from './pr-context.js';
 import {
   getFixStatus,
+  loadFixPreview,
   requestFixCancel,
   startFix,
   subscribeFixStream,
 } from './manager.js';
+import { pushFix } from './push.js';
+import { getLatestSucceededReviewId } from '../../review/claude-review/persist.js';
 import {
   getFixById,
   getLatestFix,
   listFixHistory,
-  markFixPushed,
   parseChangeReport,
   parseFilesChanged,
   parseReviewItems,
@@ -50,6 +51,8 @@ import {
 // ctx.accountIdOf(req) and verifies PR ownership.
 
 const AIFIX_ENABLED = config.aiEnabled;
+// The longest `include` list the start route takes (far above any real review's item count).
+const MAX_INCLUDE_KEYS = 500;
 
 function tsToIso(v: Date | number | null | undefined): string | null {
   if (v == null) return null;
@@ -225,6 +228,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
 
       let instruction: string | undefined;
       let sourceReviewId: number | null = null;
+      let include: string[] | null = null;
       if (seed === 'plain') {
         const raw = (body as { instruction?: unknown }).instruction;
         instruction = typeof raw === 'string' ? raw.trim() : '';
@@ -249,6 +253,19 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
           });
         }
         sourceReviewId = raw;
+        // The fix picker's selection: picker keys. Absent ⇒ the server's defaults. Anything but an
+        // array of short strings is a 400; an unknown key is ignored (it selects nothing).
+        const inc = (body as { include?: unknown }).include;
+        if (inc !== undefined) {
+          if (
+            !Array.isArray(inc) ||
+            inc.length > MAX_INCLUDE_KEYS ||
+            !inc.every((k) => typeof k === 'string' && k.length > 0 && k.length <= 200)
+          ) {
+            return reply.code(400).send({ error: 'BadSelection', message: 'Pick what to fix again.' });
+          }
+          include = inc as string[];
+        }
       }
 
       const res = await startFix(ctx, {
@@ -261,6 +278,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
         // which also checks it is THIS PR's succeeded review). No review text travels in the body.
         sourceReviewId,
         trigger: 'manual',
+        selection: include ? { kind: 'keys', keys: include } : undefined,
       });
 
       switch (res.status) {
@@ -291,11 +309,46 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
         case 'nothing_to_fix':
           return reply.code(409).send({
             error: 'NothingToFix',
-            message: 'The review found nothing to fix.',
+            message: include ? 'Nothing is ticked.' : 'The review found nothing to fix.',
           });
         default:
           return reply.code(404).send({ error: 'not found' });
       }
+    },
+  );
+
+  // The fix picker: every item a review-seeded fix would include, with stable keys and defaults.
+  // DB-only (no GitHub call, no model).
+  app.get<{ Params: { id: string }; Querystring: { sourceReviewId?: string } }>(
+    '/api/pro/prs/:id/ai-fix/preview',
+    async (req, reply) => {
+      const accountId = ctx.accountIdOf(req);
+      const prId = parseId(req.params.id);
+      if (prId == null) return reply.code(404).send({ error: 'not found' });
+      if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
+      // No id ⇒ the PR's latest SUCCEEDED review (a failed newer run never hides it); a malformed
+      // id is still a 400.
+      const raw = req.query.sourceReviewId;
+      const given = raw != null && raw !== '';
+      const picked = given ? parseId(raw) : null;
+      if (given && (picked == null || picked <= 0))
+        return reply.code(400).send({ error: 'ReviewRequired', message: 'Pick a Claude review to fix from.' });
+      const pr = await getFixPrContext(ctx, accountId, prId);
+      if (!pr) return reply.code(404).send({ error: 'not found' });
+      const reviewId = picked ?? (await getLatestSucceededReviewId(ctx, prId, accountId));
+      if (reviewId == null)
+        return reply.code(409).send({
+          error: 'ReviewUnavailable',
+          message: 'Run a Claude review on this PR first.',
+        });
+      const preview = await loadFixPreview(ctx, { accountId, prId, reviewId });
+      if (!preview)
+        return reply.code(409).send({
+          error: 'ReviewUnavailable',
+          message: 'That review is not available. Run a Claude review on this PR first.',
+        });
+      const resp: AiFixPickerPreview = preview;
+      return reply.send(resp);
     },
   );
 
@@ -424,71 +477,34 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
         });
       }
 
-      const row = await getFixById(ctx, accountId, fixId);
-      if (!row) return reply.code(404).send({ error: 'not found' });
-      if (row.status !== 'succeeded' || !row.patch || !row.baseSha)
-        return reply.code(409).send({ error: 'NotPushable' });
-
-      const pr = await getFixPrContext(ctx, accountId, row.prId);
-      if (!pr) return reply.code(404).send({ error: 'not found' });
-
-      const viewerCanPush = await getViewerCanPush(ctx, accountId, pr.repoId);
-      if (!viewerCanPush)
-        return reply.code(403).send({ error: 'NoWriteAccess' });
-
-      const commitMessage = row.commitMessage ?? 'AI fix';
-
-      // Build the push target (the PR's head branch, or a new branch + PR).
-      let target: ApplyAndPushTarget;
-      if (body.target === 'existing') {
-        const head = await ctx.github
-          .fetchPrHeadInfo(accountId, pr.owner, pr.name, pr.number)
-          .catch(() => null);
-        if (!head) return reply.code(400).send({ error: 'HeadUnavailable' });
-        target = { kind: 'existing', headRef: head.headRef };
-      } else {
-        const branch = (body.branch ?? '').trim();
-        if (!branch) return reply.code(400).send({ error: 'BranchRequired' });
-        // This body lands on GitHub, where it is read by people who have never seen this app —
-        // so it names the PRODUCT, not the npm package. Nothing detects on this string (the
-        // provenance marker is `review/post-seam.ts`'s hidden comment, on reviews, not PRs).
-        const prBody = `${row.summary ?? ''}\n\n---\nAutomated fix for #${pr.number}, generated by ${PRODUCT_NAME} AI Fix.`;
-        target = {
-          kind: 'new',
-          branch,
-          base: pr.baseRefName ?? pr.defaultBranch ?? 'main',
-          title: commitMessage,
-          body: prBody,
-        };
-      }
-
-      try {
-        const result = await ctx.coding.applyAndPush({
-          accountId,
-          owner: pr.owner,
-          name: pr.name,
-          prNumber: pr.number,
-          baseSha: row.baseSha,
-          patch: row.patch,
-          commitMessage,
-          target,
-        });
-        await markFixPushed(ctx, fixId, {
-          pushedBranch: result.pushedBranch,
-          pushedPrNumber: result.prNumber,
-          pushedPrUrl: result.prUrl,
-        });
-        const resp: AiFixPushResult = result;
+      const out = await pushFix(ctx, {
+        accountId,
+        fixId,
+        target: body.target === 'existing' ? 'existing' : 'new',
+        branch: body.branch,
+      });
+      if (out.ok) {
+        const resp: AiFixPushResult = out.result;
         return reply.send(resp);
-      } catch (err) {
-        const code = (err as { code?: string })?.code;
-        const message = err instanceof Error ? err.message : String(err);
-        if (code === 'HEAD_MOVED')
-          return reply.code(409).send({ error: 'HeadMoved', message });
-        if (code === 'PUSH_DENIED' || code === 'APPLY_FAILED')
-          return reply.code(422).send({ error: code, message });
-        ctx.log.warn({ err }, 'ai-fix push failed');
-        return reply.code(500).send({ error: 'PushFailed', message });
+      }
+      switch (out.code) {
+        case 'not_found':
+          return reply.code(404).send({ error: 'not found' });
+        case 'not_pushable':
+          return reply.code(409).send({ error: 'NotPushable' });
+        case 'no_write':
+          return reply.code(403).send({ error: 'NoWriteAccess' });
+        case 'head_unavailable':
+          return reply.code(400).send({ error: 'HeadUnavailable' });
+        case 'branch_required':
+          return reply.code(400).send({ error: 'BranchRequired' });
+        case 'HEAD_MOVED':
+          return reply.code(409).send({ error: 'HeadMoved', message: out.message });
+        case 'PUSH_DENIED':
+        case 'APPLY_FAILED':
+          return reply.code(422).send({ error: out.code, message: out.message });
+        default:
+          return reply.code(500).send({ error: 'PushFailed', message: out.message });
       }
     },
   );

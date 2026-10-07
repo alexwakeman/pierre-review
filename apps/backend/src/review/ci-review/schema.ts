@@ -26,6 +26,12 @@ export function buildSubmitCiReviewShape(z: ZodNs) {
             .describe('One to three sentences that name the log lines and the code you checked.'),
           category: z.enum(['code', 'test', 'flaky_or_infra', 'config', 'unclear']),
           fixableInPr: z.boolean().describe('true when a change to this pull request would make the check pass.'),
+          confidence: z
+            .number()
+            .int()
+            .min(0)
+            .max(100)
+            .describe('How sure you are of the cause, 0-100. Above 50 only when the log lines you name show it.'),
           step: z
             .string()
             .nullable()

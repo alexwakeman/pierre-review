@@ -11,7 +11,7 @@ import {
   splitDiffByFile,
   stripNoiseFromDiff,
 } from './post-review.js';
-import { FINDING_COMMENT_MARKER, prLevelFindingBody } from './post-review.js';
+import { FINDING_COMMENT_MARKER, matchReviewComments, prLevelFindingBody } from './post-review.js';
 
 const M = `\n\n${FINDING_COMMENT_MARKER}`;
 
@@ -526,5 +526,43 @@ describe('isDiffTooLarge', () => {
     expect(isDiffTooLarge({ stderr: 'HTTP 406: PullRequest.diff too_large' })).toBe(true);
     expect(isDiffTooLarge(new Error('HTTP 404: Not Found'))).toBe(false);
     expect(isDiffTooLarge(null)).toBe(false);
+  });
+});
+
+describe('matchReviewComments — a submitted review’s comments back to their findings', () => {
+  const sent = (findingId: number, line: number, body: string, path = 'a.ts') => ({
+    findingId,
+    path,
+    line,
+    side: 'RIGHT' as const,
+    body,
+  });
+  const got = (id: number, line: number | null, body: string, path = 'a.ts') => ({ id, path, line, side: 'RIGHT' as const, body });
+
+  it('pairs by file + body, whatever order GitHub answers in', () => {
+    expect(
+      matchReviewComments([sent(1, 3, 'one'), sent(2, 9, 'two')], [got(20, 9, 'two'), got(10, 3, 'one\r\n')]),
+    ).toEqual([
+      { findingId: 1, commentId: '10' },
+      { findingId: 2, commentId: '20' },
+    ]);
+  });
+
+  it('identical comments pair in submission order (GitHub ids ascend), line first', () => {
+    expect(
+      matchReviewComments(
+        [sent(1, 5, 'same'), sent(2, 5, 'same'), sent(3, 7, 'same')],
+        [got(31, 5, 'same'), got(30, 5, 'same'), got(32, 7, 'same')],
+      ),
+    ).toEqual([
+      { findingId: 1, commentId: '30' },
+      { findingId: 2, commentId: '31' },
+      { findingId: 3, commentId: '32' },
+    ]);
+  });
+
+  it('a moved line still pairs on file + body; a different body or file never does', () => {
+    expect(matchReviewComments([sent(1, 5, 'x')], [got(9, null, 'x')])).toEqual([{ findingId: 1, commentId: '9' }]);
+    expect(matchReviewComments([sent(1, 5, 'x')], [got(9, 5, 'y'), got(10, 5, 'x', 'b.ts')])).toEqual([]);
   });
 });

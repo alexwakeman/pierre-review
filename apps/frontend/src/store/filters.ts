@@ -1023,18 +1023,16 @@ export interface FilterState {
    */
   openMyTurnInWorkspace: (workspaceId: number) => void;
   /**
-   * A pick in the WorkspaceSelector dropdown: switch to `workspaceId` AND go to Activity → Pending,
-   * landing on My turn. Clears the Timeline's selected PR (it belongs to the workspace
+   * A pick in the WorkspaceSelector dropdown: switch to `workspaceId` AND go to the fixed Open PRs
+   * tab (the app's default view). Clears the Timeline's selected PR (it belongs to the workspace
    * being left); pinned PR / Focus tabs stay. Re-picking the current workspace navigates too.
    *
    * ⚠ ONLY the dropdown calls this. `setWorkspace` itself must never navigate: URL hydrate,
    * Back/Forward, `useWorkspaceSync`'s corrections, PrDetail's "Show in Activity feed" and the
    * WorkspaceManager all call it and must stay where they are.
    * ⚠ Every write is synchronous in this one call, so useUrlState pushes ONE history entry.
-   * ⚠ The tab is seated EXPLICITLY: `setActivityRepo` is a no-op when the rail is already
-   * Pending, which would let "Needs fixing" survive.
    */
-  switchWorkspaceToPending: (workspaceId: number) => void;
+  switchWorkspaceToOpenPrs: (workspaceId: number) => void;
   /**
    * Record ONE auto-inserted batch of feed items as a "new" cohort, under `scopeKey`.
    *
@@ -1735,14 +1733,14 @@ export const useFilters = create<FilterState>((set, get) => ({
   },
   // See the declaration. Public setters, like openMyTurnInWorkspace, so what a workspace switch
   // clears stays defined once (in setWorkspace).
-  switchWorkspaceToPending: (workspaceId) => {
+  switchWorkspaceToOpenPrs: (workspaceId) => {
     const s = get();
     s.setWorkspace(workspaceId, null);
-    usePinnedTabs.getState().showActivity();
-    s.setActivityRepo('attention');
-    // null = My turn (the board's default tab), the same value a rail change seats.
-    set({ attentionTab: null });
+    usePinnedTabs.getState().showOpenPrs();
     s.clearSelection();
+    // A switch shows the WHOLE workspace — even a re-pick of the current one, where the filter's
+    // workspace stamp would otherwise keep a repo narrowing from a "Show all N open PRs" footer.
+    s.setOpenPrsRepoFilter(null);
   },
   pushFeedNewCohort: (scopeKey, ids, atTop) =>
     set((s) => {

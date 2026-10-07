@@ -8,7 +8,8 @@
 //      recorded — fixing someone else's branch is never automatic;
 //   ½. `off`             — auto AI Fix is switched off for the workspace holding the PR's repo
 //                          (`workspaces.auto_fix_enabled`, migration 0083 / pg 0070, Settings →
-//                          Auto review). ON by default; a repo with no membership row reads ON;
+//                          Auto review). OFF by default (since 0084 / pg 0071): only a stored
+//                          true is on, and a repo with no membership row reads OFF;
 //   1. `nothing_to_fix`  — the review's seed is empty (the same refusal as the button's NothingToFix);
 //   2. `head_moved`      — the PR's synced head is no longer the reviewed one (the next review decides);
 //   3. `fix_in_progress` — a fix for this PR (auto or manual) is queued or running;
@@ -20,13 +21,19 @@
 //                          send as not addressed (nobody has pushed since, so nothing changed).
 // Then `startReviewFix(…, trigger: 'auto')` — the same queue, slot and worktree as the button.
 //
-// ⚠ NOTHING IS PUSHED. A fix waits for a person's Push like any other.
+// ⚠ WHAT IT CARRIES is the workspace's "Always include" sections (`workspaces.auto_fix_settings`,
+// `resolveAutoFixSettings`; default every section but style-bot threads) — the same sections as the
+// manual fix picker, minus story items.
+// ⚠ NOTHING IS PUSHED unless the workspace switched "Push automatically" on (`autoPush`, default
+// OFF): then a SUCCEEDED auto fix is pushed onto the PR's existing branch by auto-push.ts (own PR
+// only, never forced, a failure recorded and never retried). Otherwise it waits for a person's Push.
 // ⚠ NO TICKET ITEMS, EVER. The seed here is the PR review's alone (`loadReviewSeed` without
 // `withTicketItems`, and `startReviewFix` with trigger 'auto' does the same): whether a ticket's
 // unmet criterion belongs in this PR is a person's call, made with the manual "Fix from review".
 // ⚠ LOOP SAFETY. A pushed fix makes a new head, which earns an auto re-review, which may earn
-// another fix. The chain needs a PERSON pressing Push at every turn (an unpushed fix blocks the next
-// one, rule 4), and is bounded anyway by rule 5. Rule 6 stops the one loop that needs no push: a
+// another fix. Without "Push automatically" the chain needs a PERSON pressing Push at every turn (an
+// unpushed fix blocks the next one, rule 4); with it, rule 5 is the bound (≤ AUTO_FIX_DAILY_CAP per
+// PR per 24h), plus the auto-review daily cap upstream. Rule 6 stops the one loop that needs no push: a
 // fix that changed nothing, re-tried at the same head on every comment-triggered review. Item
 // identity across reviews is (kind, thread / ticket index, path, title) — a finding re-worded by a
 // later review counts as new, so rule 6 can miss it; rule 5 still bounds it.
@@ -45,7 +52,7 @@ import type { AgentContext } from '../../review/agent-context.js';
 import { isFixRunning, loadReviewSeed, startReviewFix } from './manager.js';
 import { parseChangeReport, parseReviewItems } from './persist.js';
 import { getFixPrContext } from './pr-context.js';
-import { readWorkspaceAutoFixForPr } from '../../review/claude-review/auto-settings.js';
+import { readWorkspaceAutoFixSettingsForPr } from '../../review/claude-review/auto-settings.js';
 
 // At most AUTO_FIX_DAILY_CAP (shared) AUTO fixes per PR in any rolling AUTO_FIX_WINDOW_MS.
 export { AUTO_FIX_DAILY_CAP };
@@ -171,9 +178,17 @@ export async function maybeStartAutoFix(
   };
   try {
     if (!(await prAuthorIsAccount(ctx, accountId, prId))) return { status: 'not_own' };
-    if (!(await readWorkspaceAutoFixForPr(ctx, accountId, prId))) return skip('off');
+    const ws = await readWorkspaceAutoFixSettingsForPr(ctx, accountId, prId);
+    if (!ws?.enabled) return skip('off');
+    // WHAT an auto fix carries is the workspace's "Always include" sections (AutoFixSettings).
+    const include = ws.settings.include;
 
-    const loaded = await deps.loadReviewSeed(ctx, { accountId, prId, reviewId });
+    const loaded = await deps.loadReviewSeed(ctx, {
+      accountId,
+      prId,
+      reviewId,
+      selection: { kind: 'sections', include },
+    });
     if (!loaded) return skip('not_started');
     if (loaded.seed.sentRefs.length === 0) return skip('nothing_to_fix');
 
@@ -250,7 +265,7 @@ export async function maybeStartAutoFix(
     const model: AiFixModel = (CLAUDE_REVIEW_MODELS as readonly string[]).includes(loaded.review.model)
       ? (loaded.review.model as AiFixModel)
       : DEFAULT_AI_FIX_MODEL;
-    const r = await deps.startReviewFix(ctx, { accountId, prId, reviewId, model, trigger: 'auto' });
+    const r = await deps.startReviewFix(ctx, { accountId, prId, reviewId, model, trigger: 'auto', include });
     if (r.status === 'queued') {
       const outcome: ClaudeAutoFixOutcome = { reviewId, status: 'started', fixId: r.fixId };
       record(accountId, outcome);

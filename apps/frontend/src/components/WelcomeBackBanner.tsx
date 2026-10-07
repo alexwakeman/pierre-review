@@ -45,11 +45,9 @@ import { CloseIcon } from './Icons.js';
 // the active workspace's own figure now (`activeWorkspaceBadge`), which is this banner's chip for
 // that same workspace: one fold, one population, three places.
 //
-// ⚠ THE HEADLINE SPLITS THAT POPULATION IN TWO, the chips do not. "2 yours · 3 in your repos"
-// (`totalSplit`, off `MyTurnCard.relevance`) says which half is which without changing WHAT is
-// counted — the chips, the dropdown badges and the OS notification all still count the sum, and
-// the click still opens the whole 'mine' board. Splitting the chips as well would cost a second
-// number per workspace on a row whose one-line guarantee is the reason this component exists.
+// ⚠ THE HEADLINE IS ONE FIGURE — "Welcome back · 5 need you" — the sum the chips, the dropdown
+// badges and the OS notification count. It used to split it ("2 yours · 3 in your repos"); that
+// split was dropped (2026-10-07) as more words than the line needed.
 //
 // ── THE CLICK ────────────────────────────────────────────────────────────────────────────────
 // Each line goes through `openMyTurnInWorkspace`, the ONE store action that switches scope and
@@ -74,7 +72,7 @@ const MAX_INLINE_WORKSPACES = 4;
 export function WelcomeBackBanner(): JSX.Element | null {
   const { data: me } = useMe();
   const openMyTurnInWorkspace = useFilters((s) => s.openMyTurnInWorkspace);
-  const { lines, total, totalSplit, anyCapped, uncounted } = useMyTurnByWorkspace();
+  const { lines, total, anyCapped, uncounted } = useMyTurnByWorkspace();
   const [dismissed, setDismissed] = useState(false);
 
   if (dismissed || !me?.user) return null;
@@ -125,26 +123,10 @@ export function WelcomeBackBanner(): JSX.Element | null {
       <span className="shrink-0 text-amber-700/80 dark:text-amber-300/80">
         {/* The headline sums CAPPED card counts, so it says "N+" the moment any line is
             capped — the summed figure is a floor, and saying so is cheaper than a wrong
-            total. The per-chip tooltips carry the exact pairs.
-
-            ⚠ AND IT SHOWS THE SPLIT WHEN IT HAS ONE. A bare "5 items need you" is the conflation
-            this batch exists to undo: two of those may be PRs you wrote and three may be other
-            people's PRs in repos you happen to maintain, which is orbit rather than ownership.
-            The POPULATION is unchanged — the chips, the badges and the OS notification still
-            count the sum — this only says which half is which. Absent split ⇒ the old single
-            figure, never a half rendered as if it were the whole. */}
-        {totalSplit != null ? (
-          <>
-            · {totalSplit.direct}
-            {anyCapped ? '+' : ''} yours · {totalSplit.maintained}
-            {anyCapped ? '+' : ''} in your repos
-          </>
-        ) : (
-          <>
-            · {total}
-            {anyCapped ? '+' : ''} item{singular ? '' : 's'} need{singular ? 's' : ''} you
-          </>
-        )}
+            total. The per-chip tooltips carry the exact pairs. ONE figure: the "yours · in your
+            repos" split it used to print is gone (the server's `totalSplit` is simply unread). */}
+        · {total}
+        {anyCapped ? '+' : ''} need{singular ? 's' : ''} you
       </span>
       <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
         {shown.map((l) => (
@@ -196,7 +178,7 @@ export function WelcomeBackBanner(): JSX.Element | null {
           // A banner whose purpose is "work you cannot see from here" does not get to omit
           // workspaces quietly — even when the reason is only that the row ran out of room.
           <span
-            className="shrink-0 px-1 text-[10px] text-amber-700/70 dark:text-amber-300/70"
+            className="shrink-0 px-1 text-[11px] text-amber-700/70 dark:text-amber-300/70"
             title={restTitle}
           >
             +{restCount} more

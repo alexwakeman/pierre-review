@@ -545,7 +545,9 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       }
       if ('preview' in outcome) return outcome.preview;
 
-      await markReviewPosted(ctx, reviewId, outcome.postedReviewId, outcome.inlineFindingIds, outcome.prComments);
+      await markReviewPosted(ctx, reviewId, outcome.postedReviewId, outcome.inlineFindingIds, outcome.prComments, {
+        inlineComments: outcome.inlineComments,
+      });
       const result: PostReviewResult = {
         postedReviewId: outcome.postedReviewId,
         postedAt: new Date().toISOString(),

@@ -121,7 +121,7 @@ const TAB_LABELS: Record<Tab, string> = {
   changes: 'Changes',
   bot_activity: 'Bot activity',
   claude_review: 'Claude Review',
-  ai_fix: 'AI Analysis and Fix',
+  ai_fix: 'AI Fix',
 };
 
 // The Claude Review tab label's outcome pill: the verdict in its VERDICT_CLASS colour, or the run

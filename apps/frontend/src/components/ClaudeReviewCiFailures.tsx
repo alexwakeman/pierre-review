@@ -81,6 +81,9 @@ export function CiFailureRow({
           <span className={`${CHIP} ${CI_CATEGORY_CLASS.unclear}`}>Not checked</span>
         )}
         <span className={`break-all ${REVIEW_ITEM_TITLE}`}>{f.checkName}</span>
+        {diagnosed && typeof f.confidence === 'number' && (
+          <span className={`text-xs ${MUTED}`}>Confidence {f.confidence}%</span>
+        )}
         {f.step != null && <span className={`break-all text-xs ${MUTED}`}>Step: {f.step}</span>}
         {diagnosed && f.fixableInPr === false && (
           <span className={`text-xs ${MUTED}`}>Not from this change</span>

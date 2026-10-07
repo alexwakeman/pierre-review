@@ -1,9 +1,7 @@
-// A pick in the WorkspaceSelector dropdown is a NAVIGATION: switch workspace, bring Activity
-// forward, land on Pending → My turn (Cards), and drop the Timeline's selected PR. Pinned tabs stay.
+// A pick in the WorkspaceSelector dropdown is a NAVIGATION: switch workspace, land on the fixed
+// Open PRs tab, and drop the Timeline's selected PR. Pinned tabs stay.
 //
 // What this pins, each of which has a quiet way to regress:
-//   - the tab and My turn's view are seated EXPLICITLY — `setActivityRepo` no-ops when the rail is
-//     already Pending, so a switch from "Needs fixing" or the branches view would keep it;
 //   - `setWorkspace` itself does NOT navigate (URL hydrate, Back/Forward and useWorkspaceSync's
 //     corrections all call it);
 //   - the selector's row click goes through the new action.
@@ -20,7 +18,7 @@ const pinned = [
   { key: 'pr-focus:12', kind: 'pr-focus' as const, prId: 12, meta: null },
 ];
 
-describe('switchWorkspaceToPending', () => {
+describe('switchWorkspaceToOpenPrs', () => {
   beforeEach(() => {
     useFilters.setState({
       workspaceId: 3,
@@ -36,34 +34,31 @@ describe('switchWorkspaceToPending', () => {
     usePinnedTabs.setState({ activeTab: 'timeline', tabs: [...pinned] as never });
   });
 
-  it('from the Timeline: switches, opens Activity → Pending → My turn, clears the selected PR', () => {
-    useFilters.getState().switchWorkspaceToPending(5);
+  it('from the Timeline: switches, opens Open PRs, clears the selected PR', () => {
+    useFilters.getState().switchWorkspaceToOpenPrs(5);
     const f = useFilters.getState();
     expect(f.workspaceId).toBe(5);
     expect(f.repoIds).toBeNull();
-    expect(f.activityRepoId).toBe('attention');
-    expect(f.attentionTab).toBeNull();
     expect(f.selectedPrId).toBeNull();
     expect(f.selectedThreadId).toBeNull();
-    expect(usePinnedTabs.getState().activeTab).toBe('activity');
+    expect(usePinnedTabs.getState().activeTab).toBe('open-prs');
   });
 
-  it('already on Pending with another tab: lands on My turn', () => {
-    useFilters.setState({ activityRepoId: 'attention', attentionTab: 'fixing' });
-    useFilters.getState().switchWorkspaceToPending(5);
-    expect(useFilters.getState().attentionTab).toBeNull();
+  it('from Activity: lands on Open PRs too', () => {
+    usePinnedTabs.setState({ activeTab: 'activity' });
+    useFilters.getState().switchWorkspaceToOpenPrs(5);
+    expect(usePinnedTabs.getState().activeTab).toBe('open-prs');
   });
 
   it('re-picking the current workspace navigates too', () => {
-    useFilters.getState().switchWorkspaceToPending(3);
+    useFilters.getState().switchWorkspaceToOpenPrs(3);
     expect(useFilters.getState().workspaceId).toBe(3);
-    expect(useFilters.getState().activityRepoId).toBe('attention');
-    expect(usePinnedTabs.getState().activeTab).toBe('activity');
+    expect(usePinnedTabs.getState().activeTab).toBe('open-prs');
     expect(useFilters.getState().selectedPrId).toBeNull();
   });
 
   it('leaves pinned PR / Focus tabs in the strip', () => {
-    useFilters.getState().switchWorkspaceToPending(5);
+    useFilters.getState().switchWorkspaceToOpenPrs(5);
     expect(usePinnedTabs.getState().tabs.map((t) => t.key)).toEqual(['pr-detail:11', 'pr-focus:12']);
   });
 
@@ -80,6 +75,6 @@ describe('switchWorkspaceToPending', () => {
       'utf8',
     );
     const select = src.slice(src.indexOf('const select = (id: number)'));
-    expect(select.slice(0, select.indexOf('};'))).toContain('switchWorkspaceToPending(id)');
+    expect(select.slice(0, select.indexOf('};'))).toContain('switchWorkspaceToOpenPrs(id)');
   });
 });

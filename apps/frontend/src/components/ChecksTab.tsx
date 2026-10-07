@@ -1,18 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type {
-  AutomatedReviewerKind,
   MergeBlockFacts,
   PrDetail as PrDetailT,
   RequestReviewersBody,
   ReviewBotKind,
   ReviewerSuggestion,
-  ReviewProvenance,
   SuggestedReviewersResponse,
   User,
 } from '@pierre-review/shared';
 import { TRACKER_PROVIDER_LABEL } from '@pierre-review/shared';
 import {
-  automatedReviewerMeta,
   BOT_VENDOR_META,
   botVendorMeta,
   CI_META,
@@ -21,27 +18,21 @@ import {
   MERGE_TONE_CLASS,
   mergeVerdict,
   relativeTime,
-  REVIEW_STATE_META,
   safeExternalUrl,
-  vendorInk,
 } from '../lib/ui.js';
 // The queue chip's wording, IMPORTED from the Pending board's labels rather than re-spelled here.
 // The board and this pane describe one PR's queue entry, and "Leaving the merge queue" is the whole
 // point of the field — a second copy of those five sentences is how one surface ends up calling
 // an ejection "in the merge queue".
 import { pendingQueueBadge } from './Activity/pendingLabels.js';
-import { useQueryDataUpdatedAt } from '../hooks/useMergeQueueStatus.js';
 import { useFilters } from '../store/filters.js';
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
 import { CopyButton } from './CopyButton.js';
 import { Markdown } from './Markdown.js';
-import { ApproveControl } from './ApproveControl.js';
-import { MergeControl } from './MergeControl.js';
 import { ResolveConflictsButton } from './conflicts/ResolveConflictsButton.js';
-import { MergeWhenReadyControl } from './MergeWhenReadyControl.js';
-import { ClosePrControl } from './ClosePrControl.js';
-import { ReopenPrControl } from './ReopenPrControl.js';
+import { PrActionControls, prActionsVisible, prBlockFacts } from './pr/PrActionsRow.js';
+import { ReviewsChips, reviewsRowVisible } from './pr/ReviewsRow.js';
 import { ChecksList, CiRerunControl } from './CheckList.js';
 import { AiSummary } from './AiSummary.js';
 import { useRequestReviewers } from '../hooks/usePrWrites.js';
@@ -93,40 +84,6 @@ export function PrBranchLine({
       </span>
       <CopyButton text={headRefName} what="branch name" />
     </div>
-  );
-}
-
-// WS2 provenance badge — a small "🤖 {label}" tag next to a reviewer/approver whose review is
-// classified automated (compute-on-read via ReviewDetail.automatedKind on the PR-detail payload).
-// For the Pierre kind we additionally surface how the posted review was authored:
-// "Pierre · Claude · verbatim" (ai_verbatim, Claude's summary posted as-is) vs "· curated" (a
-// human materially edited it). The kind is in hand, so we look it up via automatedReviewerMeta
-// (which covers vendors + in_house + pierre — botVendorMeta only maps a login→ReviewBotKind).
-function AutomatedReviewerBadge({
-  kind,
-  provenance,
-}: {
-  kind: AutomatedReviewerKind;
-  provenance: ReviewProvenance | null;
-}): JSX.Element {
-  const meta = automatedReviewerMeta(kind);
-  const prov =
-    kind === 'pierre' && provenance
-      ? provenance === 'ai_verbatim'
-        ? ' · verbatim'
-        : ' · curated'
-      : '';
-  return (
-    <span
-      data-testid="reviewer-provenance"
-      className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium"
-      style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
-      title={`Automated reviewer — ${meta.label}${prov}`}
-    >
-      <BotIcon size={10} />
-      {meta.label}
-      {prov}
-    </span>
   );
 }
 
@@ -426,9 +383,6 @@ export function ChecksTab({
   // they empty the instant a reviewer is requested. Merge any CODEOWNERS-resolved users the
   // detail didn't carry into the lookup map so their avatars/links render.
   const { data: sugg } = useSuggestedReviewers(pr.id);
-  // When THIS PR row was read — the merge controls weigh its synced queue membership against their
-  // live merge-options answer by age (`mergeQueueStatus`). A cache read, not a second observer.
-  const prSyncedAt = useQueryDataUpdatedAt(['pr', pr.id]);
   // Per-PR bot behaviour — only fetched for bot PRs (onShowBotActivity set). Powers the
   // "slower than typical" caution that opens the Bot activity tab.
   const { data: prBots } = usePrBotBehaviour(pr.id, onShowBotActivity != null);
@@ -476,21 +430,8 @@ export function ChecksTab({
   // still holding?"). Two populations, one screen, so each names itself: this one says "not
   // resolved on GitHub" and carries the likely-addressed subset in the same sentence; the Bots
   // chips say "need a look".
-  const unresolvedThreads = pr.threads.filter((t) => !t.isResolved).length;
-  const likelyAddressedThreads = pr.threads.filter(
-    (t) => !t.isResolved && t.derivedState === 'likely_addressed',
-  ).length;
-  // The facts the blocked-reason derivation reads, built ONCE and shared with the two merge
-  // controls in the Actions row below — before this they built their verdict from the live
-  // merge-options ALONE and so rendered a strictly worse reason than the line directly above
-  // them. They are fresh: usePrLiveRefresh forces a full walk of THIS PR on pane mount.
-  const blockFacts: MergeBlockFacts = {
-    reviewDecision: pr.reviewDecision,
-    ciStatus: pr.ciStatus,
-    unresolvedThreads,
-    likelyAddressedThreads,
-    requestedReviewers: pr.requestedReviewers.length,
-  };
+  // Built by the ONE helper the Actions row's merge controls read too (components/pr/PrActionsRow).
+  const blockFacts: MergeBlockFacts = prBlockFacts(pr);
   const verdict = mergeVerdict({
     mergeable: pr.mergeable,
     mergeStateStatus: pr.mergeStateStatus,
@@ -523,50 +464,8 @@ export function ChecksTab({
     return acc;
   }, {});
 
-  // Everyone who has SUBMITTED a review, and where they stand — the Reviews row. An approval
-  // reads as a green check (REVIEW_STATE_META.approved), so a separate Approvers row is redundant.
-  //
-  // ⚠ THE SERVER DECIDES THIS NOW. `pr.reviewStandings` is `computeReviewStandingsByPr`, the same
-  // fold the Pending card's reviewer chips and the approval COUNT come from. The rule it applies:
-  // a reviewer's latest VERDICT (approved / changes_requested) if they ever filed one, else their
-  // latest dismissal, else their latest comment.
-  //
-  // The fold that used to live here — "the last non-pending review per author wins" — read
-  // `pr.reviews` straight through, so a reviewer who approved and later left a bare comment was
-  // silently DEMOTED to `commented`. Measured against the server's rule: 59 disagreeing
-  // reviewer-PR pairs on this account's live open PRs, each one a screen saying "commented" one
-  // click away from a card saying "approved". There is no client rule left to disagree with.
-  const reviewerIds = pr.reviewStandings.map((r) => r.userId);
-  // Reviewers whose GitHub account is gone: counted by the server, unnameable here. Stated
-  // below rather than dropped — the row would otherwise understate how many people have looked.
-  const unnamedReviewers = pr.reviewerCount - pr.reviewStandings.length;
-
-  // WS2 automated-reviewer provenance, folded per author. A ReviewDetail carries an
-  // `automatedKind` when its author is classified automated (vendor / in_house), and 'pierre'
-  // (with `provenance`) on a review POSTED via Pierre — note that Pierre review is authored by a
-  // human token, so the SAME author can have both a plain human review and a Pierre-stamped one.
-  // We therefore track, per author: their automated marker (latest wins) AND whether they ALSO
-  // filed a genuine human review. "Only bots reviewed" then means every reviewer is
-  // automated-only (has an automated review, no human one).
-  const automatedByAuthor = new Map<
-    number,
-    { kind: AutomatedReviewerKind; provenance: ReviewProvenance | null }
-  >();
-  const humanReviewAuthors = new Set<number>();
-  for (const r of pr.reviews) {
-    if (r.authorId == null || r.state === 'pending') continue;
-    if (r.automatedKind != null) {
-      automatedByAuthor.set(r.authorId, {
-        kind: r.automatedKind,
-        provenance: r.provenance ?? null,
-      });
-    } else {
-      humanReviewAuthors.add(r.authorId);
-    }
-  }
-  const onlyBotsReviewed =
-    reviewerIds.length > 0 &&
-    reviewerIds.every((uid) => automatedByAuthor.has(uid) && !humanReviewAuthors.has(uid));
+  // Everyone who has SUBMITTED a review, and where they stand — the Reviews row, shared with the
+  // Claude Review tab (components/pr/ReviewsRow.tsx, which owns the fold and why it is the server's).
 
   // Review-BOT thread rollup — "the calm layer above your review bot." Group this PR's
   // threads by the vendor that opened them (originalCommenter → reviewBotKind), counting
@@ -904,56 +803,9 @@ export function ChecksTab({
             "only bots reviewed" coverage chip. UNCAPPED — the pane has the room the card does
             not, so there is no "+N" here and the only gap between the chips and `reviewerCount`
             is the reviewers GitHub can no longer name. */}
-      {(pr.reviewStandings.length > 0 || unnamedReviewers > 0) && (
+      {reviewsRowVisible(pr) && (
         <Row label="Reviews">
-          <div className="flex flex-wrap gap-2 text-xs">
-            {pr.reviewStandings.map((r) => {
-              const u = usersById.get(r.userId);
-              // ⚠ ONE table, shared with the Pending board's chips (lib/ui.ts). It replaced a
-              // private copy here whose `dismissed` and `pending` inks were a bare gray-400 —
-              // 2.54:1 on white, so the one state that means "this no longer counts" was also
-              // the one nobody could read. `icon` is a COMPONENT reference, not an element.
-              const meta = REVIEW_STATE_META[r.standing];
-              const auto = automatedByAuthor.get(r.userId);
-              return (
-                <span
-                  key={r.userId}
-                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 ${meta.cls}`}
-                  title={`${meta.title} · ${dateTime(r.standingAt)}`}
-                >
-                  {meta.icon && <meta.icon size={12} />}
-                  <Avatar user={u} size={14} />
-                  <UserName user={u} fallbackId={r.userId} repoId={pr.repoId} />
-                  {auto && (
-                    <AutomatedReviewerBadge kind={auto.kind} provenance={auto.provenance} />
-                  )}
-                </span>
-              );
-            })}
-            {/* Counted by the server, unnameable here: GitHub gave the review no account. Never
-                seen on this account's data, and stating it is still cheaper than a row that
-                quietly says fewer people looked than did. */}
-            {unnamedReviewers > 0 && (
-              <span
-                className="inline-flex items-center rounded bg-gray-500/10 px-1.5 py-0.5 text-gray-500 dark:text-gray-400"
-                title="GitHub no longer has an account for these reviews, so they cannot be named here."
-              >
-                {unnamedReviewers === 1
-                  ? '1 review from a deleted account'
-                  : `${unnamedReviewers} reviews from deleted accounts`}
-              </span>
-            )}
-            {onlyBotsReviewed && (
-              <span
-                data-testid="only-bots-reviewed"
-                className="inline-flex items-center gap-1 rounded bg-amber-400/10 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-300"
-                title="Every review on this PR came from an automated reviewer — no human has reviewed it yet."
-              >
-                <BotIcon size={12} />
-                only bots reviewed
-              </span>
-            )}
-          </div>
+          <ReviewsChips pr={pr} usersById={usersById} />
         </Row>
       )}
 
@@ -1029,49 +881,9 @@ export function ChecksTab({
           reopen branch: an armed auto-merge intent and a closed PR are not a live combination
           (the runner resolves an intent whose PR closed), and the guard would hide the button
           for the wrong reason. */}
-      {(pr.viewerCanApprove ||
-        (pr.viewerCanPush && pr.state === 'open' && !pr.isDraft) ||
-        (pr.viewerCanClose && pr.state === 'open' && armedIntent == null) ||
-        (pr.viewerCanReopen && pr.state === 'closed')) && (
+      {prActionsVisible(pr, armedIntent != null) && (
         <Row label="Actions">
-          <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-            {pr.viewerCanApprove && (
-              <ApproveControl prId={pr.id} standing={pr.viewerReviewStanding} />
-            )}
-            {pr.viewerCanPush && pr.state === 'open' && !pr.isDraft && (
-              <>
-                <MergeControl
-                  prId={pr.id}
-                  githubUrl={pr.githubUrl}
-                  blockFacts={blockFacts}
-                  // The synced queue facts, so a queued PR's control is the queue status line +
-                  // "Remove from queue" from the first paint, collapsed or not — never "Merge ▾".
-                  inMergeQueue={pr.inMergeQueue}
-                  mergeQueueEntryState={pr.mergeQueueEntryState}
-                  syncedAt={prSyncedAt}
-                  resolverTarget={{
-                    prId: pr.id,
-                    repoId: pr.repoId,
-                    repoFullName: pr.repoFullName,
-                    prNumber: pr.number,
-                    prTitle: pr.title,
-                    githubUrl: pr.githubUrl,
-                  }}
-                />
-                <MergeWhenReadyControl
-                  prId={pr.id}
-                  blockFacts={blockFacts}
-                  inMergeQueue={pr.inMergeQueue}
-                  mergeQueueEntryState={pr.mergeQueueEntryState}
-                  syncedAt={prSyncedAt}
-                />
-              </>
-            )}
-            {pr.viewerCanClose && pr.state === 'open' && armedIntent == null && (
-              <ClosePrControl prId={pr.id} />
-            )}
-            {pr.viewerCanReopen && pr.state === 'closed' && <ReopenPrControl prId={pr.id} />}
-          </div>
+          <PrActionControls pr={pr} blockFacts={blockFacts} />
         </Row>
       )}
 

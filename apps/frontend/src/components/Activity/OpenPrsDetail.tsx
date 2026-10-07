@@ -3,16 +3,19 @@ import type { TimelinePr } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useScopedOpenPrs } from '../../hooks/useTriage.js';
 import { useTrackerOn } from '../../hooks/useWorkspaceTracker.js';
+import { useWorkspaces } from '../../hooks/useWorkspaces.js';
 import { useOpenPrsView } from '../../store/openPrsView.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { indexUsers } from '../../lib/ui.js';
 import { RefreshIcon } from '../Icons.js';
 import { MetricRepoFilter } from './MetricRepoFilter.js';
-import { OpenPrsCards, OpenPrsSortMenu, OpenPrsViewToggle } from './OpenPrsCards.js';
+import { FirstRunOnboarding } from './FirstRunOnboarding.js';
+import { AutoReviewUsageLine, OpenPrsCards, OpenPrsSortMenu, OpenPrsViewToggle } from './OpenPrsCards.js';
 import type { OpenPrsSort } from '../../lib/openPrsSort.js';
 
-// The fixed Open PRs tab — one of the three permanent views (Activity · Open PRs · Timeline), so it
+// The fixed Open PRs tab — the FIRST of the three permanent views (Open PRs · Activity · Timeline)
+// and the app's default (a URL with no `view=`), so it
 // is always the WHOLE active workspace: one card per open PR (OpenPrsCards) over /api/open-prs. Every
 // opener (the tab chip, the Reports → Flow metrics "Open PRs" tile, the per-repo "Show all N open
 // PRs" footer) just reveals it; the footer also pre-selects its repo in the tab's own dropdown.
@@ -89,6 +92,15 @@ export function OpenPrsDetail(): JSX.Element {
         : `${repoSel.length} repos`;
   const draftCount = rows.reduce((n, p) => n + (p.isDraft ? 1 : 0), 0);
 
+  // This tab is where the app OPENS, so it owns the two empty-workspace states Activity used to:
+  // an account with no repos at all gets first-run onboarding, and a workspace with none of them
+  // gets the "move some in" guidance — never a bare "No open PRs here.".
+  const { data: workspaces } = useWorkspaces();
+  const ws = workspaces?.find((w) => w.id === workspaceId);
+  const noReposAtAll = repos != null && repos.length === 0;
+  const emptyWorkspace = ws != null && ws.repoIds.length === 0;
+  if (noReposAtAll) return <FirstRunOnboarding />;
+
   return (
     <div className="mx-auto max-w-[100rem] space-y-4 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
@@ -100,6 +112,8 @@ export function OpenPrsDetail(): JSX.Element {
           {scopeLabel} · {rows.length - draftCount} open
           {draftCount > 0 && ` · ${draftCount} draft${draftCount === 1 ? '' : 's'}`}
         </span>
+        {/* Today's auto code reviews against the workspace's daily cap — only while auto review is on. */}
+        <AutoReviewUsageLine />
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {ticketsOn && <OpenPrsViewToggle />}
           <OpenPrsSortMenu sort={sort} onChange={setSort} />
@@ -127,9 +141,11 @@ export function OpenPrsDetail(): JSX.Element {
         grouped={ticketsOn && view === 'grouped'}
         onOpenPr={openTab}
         emptyLabel={
-          repoSel != null && prs.length > 0
-            ? 'No open PRs for the selected repos — adjust the repo filter.'
-            : undefined
+          emptyWorkspace
+            ? 'No repos in this workspace yet. Open "Manage repos & workspaces" in the header to move some in.'
+            : repoSel != null && prs.length > 0
+              ? 'No open PRs for the selected repos — adjust the repo filter.'
+              : undefined
         }
       />
     </div>

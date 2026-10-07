@@ -345,8 +345,10 @@ Four deliberately-separated state layers: **server state** in TanStack Query (PR
 on demand, IndexedDB-persisted at `staleTime: Infinity`), **filter/selection** in Zustand
 `store/filters.ts` (`workspaceId` is the scope), **tabs** in `store/pinnedTabs.ts` (exactly one
 board mounts at a time), **URL** mirrored by `useUrlState.ts` (serializer diffs against
-defaults). App lands on the **Pending** board (default `activityRepoId: 'attention'`, the one rail
-value left out of the URL; a Feed link carries `?activityRepo=feed`); the Insights rail entry is
+defaults). App lands on the **Open PRs** tab (the first fixed tab; a URL with no `?view=` means it,
+Activity carries `?view=activity`); Activity opens on the **Pending** board (default
+`activityRepoId: 'attention'`, the one rail value left out of the URL; a Feed link carries
+`?activityRepo=feed`); the Insights rail entry is
 labelled **"Reports"** (LABEL-ONLY — the store/URL value stays `'insights'`). Cloud renders
 `<SignInGate>` on a 401.
 
@@ -474,7 +476,7 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   ALLOW-LIST** — a new `InsightKind` with no tab is folded, counted and never listed (a
   compiler-checked test in work-plan.test.ts fails first). ⚠ The visible tab is DERIVED
   (`effectivePendingTab`: a seated kind names its tab, else the picked `attentionTab`, else My
-  turn; My turn ALONE is headed by the trunk strip, count-free; Open PRs is a permanent tab between Activity and Timeline). ⚠ "Pending" is a LABEL-ONLY
+  turn; My turn ALONE is headed by the trunk strip, count-free; Open PRs is the first permanent tab and the default view). ⚠ "Pending" is a LABEL-ONLY
   rename of "Needs attention" — the store/URL literal stays
   `'attention'`. ⚠ **The board EXPLAINS its own order** (header + per-card info popovers, "How
   Pending works" modal), so every admission floor, cap, colour threshold and Do next preset lives
@@ -791,18 +793,24 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   cancelled) or within 5 min of one, and every comment burst, waits quiet ≥ 5 min OR burst ≥ 20 min.
   NO CI hold (code or ticket review). A SUCCEEDED auto
   run on the reader's OWN PR may start a review-seeded AUTO FIX (`coding/ai-fix/auto-fix.ts`: ≤ 3
-  per PR per 24h, never while a fix runs or an unpushed one waits on the head, NEVER pushed), only
+  per PR per 24h, never while a fix runs or an unpushed one waits on the head, never pushed unless
+  the workspace switched Push automatically on — then onto the existing branch, never forced,
+  a failure recorded and never retried; its contents are the workspace's "Always include" sections), only
   when the workspace switched it ON (`workspaces.auto_fix_enabled`, OFF by default since 0084 / pg
   0071 — SQLite's DDL default is still 1, so both workspace inserts write false), the second switch on
   the same auto-review route + Settings section; skip reason `off`). A run
   also judges every OTHER open review thread (validity + addressed), and on a same-head run every
   earlier judgement carries forward IN CODE: only new commits change one
   (docs/CLAUDE-REVIEW.md § Other reviewers' threads, § Auto review).
-- **AUTO-POSTING IS OFF BY DEFAULT, AUTO RUNS ONLY, COMMENT ONLY, NEVER TWICE** (`claude-review/
+- **AUTO-POSTING IS OFF BY DEFAULT, AUTO RUNS ONLY, NEVER TWICE** (`claude-review/
   auto-post.ts`, `ticket-review/auto-post.ts`; sqlite `0087` / pg `0074`): a per-workspace switch
   (`workspaces.auto_post_enabled`, NULL = off) + overrides-only scope/kinds on the auto-review route.
-  It posts UNDER THE READER'S OWN GITHUB ACCOUNT, event ALWAYS `COMMENT`, footer + the hidden marker on
-  every body (so `isLimnPostedComment` holds and it never re-triggers a review). ⚠ The run's
+  It posts UNDER THE READER'S OWN GITHUB ACCOUNT, ONE review (questions inline too), event `COMMENT`
+  unless the OFF-by-default `autoVerdict` lets a STRICTER verdict through (never on the reader's own
+  PR, never over their standing APPROVED/CHANGES_REQUESTED, read LIVE), footer + the hidden marker on
+  every body (so `isLimnPostedComment` holds and it never re-triggers a review). The OFF-by-default
+  `autoResolve` (`claude-review/auto-resolve.ts`) replies on and resolves LIMN'S OWN finding threads a
+  later run judged fixed — the one automatic resolve, claimed per finding, never retried. ⚠ The run's
   `auto_post` record is CLAIMED (compare-and-set from NULL, `status:'posting'`) BEFORE any GitHub
   write; a failure is recorded and shown, NEVER retried, and a run cut off mid-post counts as
   possibly posted forever. Dedupe is the follow-up chain + `similarTitles` over every earlier run;
@@ -810,14 +818,17 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
 - **FAILED CI IS A SEPARATE PROCESS, THE CI REVIEW** (`src/review/ci-review/`; sqlite `0082` / pg
   `0069`): one run per (PR, head, sorted failing check names), never inside a PR review — new PR-review
   runs read no logs and store no `ci_failures` (old rows read as history). The head's checks by COMMIT
-  OID, then a bounded tail of each failing Actions job's log (≤6 jobs, one 128 KiB ranged read each,
-  the ONE `claude-review/ci-failures.ts`), nonce-fenced, a read-only worktree, Bash denied. Every
+  OID, then each failing Actions job's WHOLE log (≤6 jobs, ≤8 MiB each) PRE-SCANNED into windows on
+  its culprit lines (the ONE `claude-review/ci-failures.ts`), nonce-fenced, a read-only worktree,
+  Bash denied. Every
   failing check gets exactly one item — Claude's cause or a server `not_checked` reason, never an
   invented cause; no Actions log at all REFUSES with no model. ⚠ The signed log URL never leaves the
   server. Its sweeper fires on the first tick a check is red on a human PR's synced head (a failing
   check is final: NO settle, NO CI hold), own `CI_REVIEW_DAILY_CAP` / `CI_REVIEW_BUDGET_USD`, the shared
   `REVIEW_CONCURRENCY` slot (`registerReviewSlotPeer` takes many peers). AI Fix's `C<n>` items come from
-  its latest run AT THE CURRENT HEAD (docs/CLAUDE-REVIEW.md § CI review).
+  its latest run AT THE CURRENT HEAD. An AUTO run may auto-post its causes Claude is >50% sure of as
+  ONE PR comment per (PR, head, failing set), claimed before the write, never retried
+  (`ci-review/auto-post.ts`; docs/CLAUDE-REVIEW.md § CI review).
 - **STORIES ARE A SEPARATE PROCESS, THE TICKET REVIEW** (`src/review/ticket-review/`; sqlite `0080`
   / pg `0067`, plugin `0039`): ONE review per TICKET across its open + merged PRs (≤ 30, else REFUSED
   with the count), never inside a PR review — new PR-review runs store no story, and their old
@@ -844,7 +855,8 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
 - The agent's tools are read-only with **`Bash` denied outright** (the CHAT mirrors the review's
   mode under the same rule and rebuilds its transcript server-side); the fixer edits files, has no
   shell, builds and tests nothing, and nothing is posted or pushed until the reader presses the
-  button. **No AI SDK is in the npm manifest** — they are downloaded on first use and value-imported
+  button (the per-workspace auto-post / Push automatically switches, both OFF by default, are the
+  only exceptions). **No AI SDK is in the npm manifest** — they are downloaded on first use and value-imported
   ONLY by `ai/runtime.ts`, which `build-release.mjs` asserts (see *Packaging & publishing*).
   ⚠ **The credential ladder is TWO RUNGS and there is NO stored key**: an ambient Claude session
   (the run STRIPS `ANTHROPIC_API_KEY`), else the environment's `ANTHROPIC_API_KEY`, untouched.
@@ -943,9 +955,11 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
 - ⚠ **A model-derived figure and a code-derived figure must be LABELLED APART** in a panel that
   mixes them.
 - **AI Fix has TWO seeds** (`AiFixSeed`; core `src/coding/ai-fix/`): `review` and `plain` (the
-  reader's instruction). The review seed is the WHOLE review except praise, built SERVER-SIDE from
+  reader's instruction — route only; the SPA offers just the FIX PICKER, which selects review items
+  by STABLE key, `include`, with the budget applied after selection). The review seed is the WHOLE review except praise, built SERVER-SIDE from
   the stored run (`review-seed.ts`: findings not ignored, open earlier findings, `isThreadToFix`
-  threads, unmet story criteria + missing pieces, `fixableInPr` CI failures), every item fenced,
+  threads, untouched threads, style-bot threads (default off), owned ticket gaps, `fixableInPr` CI
+  failures), every item fenced,
   carrying a stable ref the agent cites in its per-change report (`submit_fix` `changes` +
   `unaddressed`, validated against the SHOWN refs, stored on `ai_fixes.change_report`). ⚠ The
   `comments` and `ci_analysis` seeds are REMOVED (`400 SeedRemoved`) but their stored rows still

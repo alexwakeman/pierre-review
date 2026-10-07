@@ -9,6 +9,7 @@ import {
   findingTotal,
   followUpTally,
   heldByAutoReview,
+  ignoredLabel,
   reviewCurrency,
   reviewCellFor,
   reviewTone,
@@ -48,7 +49,10 @@ import { VerdictIcon } from '../VerdictIcon.js';
 // Every figure comes from the server's `summary`, present only on a finished run — nothing here
 // prints a zero it does not know.
 //
-// ⚠ The card is WHOLE-CARD clickable (it opens the PR), so every control here stops propagation.
+// ⚠ The card is WHOLE-CARD clickable (it opens the PR), and so is THIS PANEL: a click anywhere on
+// it that is not one of its own controls opens the PR's Claude Review tab. Every control here
+// stops propagation (so a button does its own job, never also opening the tab), and the keyboard
+// route is the "Claude" label, a real button — never a role=button wrapper around buttons.
 
 export const PILL = 'inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-px text-[11px] font-medium';
 export const GREY_PILL = `${PILL} bg-gray-500/10 text-gray-600 dark:text-gray-300`;
@@ -134,8 +138,6 @@ export function ClaudeReviewPanel({
     unlockReviewSound();
     start.mutate();
   };
-
-  const stop = (e: MouseEvent): void => e.stopPropagation();
 
   // The outcome pill IS a link to the review: the reader's eye lands on it first.
   const open = (e: MouseEvent): void => {
@@ -244,6 +246,8 @@ export function ClaudeReviewPanel({
   const tally = summary != null ? followUpTally(summary.followUp) : null;
   const ciPill = ciCardPill(ciState);
   const toFix = summary != null ? threadsToFixLabel(summary) : null;
+  // Ignored findings are out of the pills and the posted total; the panel says how many instead.
+  const ignored = summary != null ? ignoredLabel(summary) : null;
   const posted =
     summary == null
       ? null
@@ -258,15 +262,22 @@ export function ClaudeReviewPanel({
 
   return (
     <div
-      className={`mt-1.5 flex cursor-default flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-md border border-l-[3px] border-ai-border bg-ai-surface px-2.5 py-1.5 ${ACCENT[reviewTone(cell)]}`}
-      onClick={stop}
+      className={`mt-1.5 flex cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-md border border-l-[3px] border-ai-border bg-ai-surface px-2.5 py-1.5 hover:bg-ai-surface-2 ${ACCENT[reviewTone(cell)]}`}
+      // The whole panel opens the Claude Review tab (mouse); the "Claude" button below is the
+      // keyboard route. Inner controls stop propagation, so they never also land here.
+      onClick={open}
       role="group"
       aria-label="Claude review"
     >
-      <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-ai-ink">
+      <button
+        type="button"
+        onClick={open}
+        title="Open the Claude review"
+        className="inline-flex shrink-0 items-center gap-1 rounded text-[11px] font-semibold text-ai-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+      >
         <SparkleIcon size={12} className="text-ai-signal" />
         Claude
-      </span>
+      </button>
       <Group>{outcome}</Group>
 
       {summary != null && (
@@ -279,10 +290,15 @@ export function ClaudeReviewPanel({
                   {p.label}
                 </span>
               ))
-            ) : (
+            ) : ignored == null ? (
               <span className={`${PILL} ${CLEAN_CLASS}`}>
                 <CheckIcon size={11} />
                 No issues
+              </span>
+            ) : null}
+            {ignored != null && (
+              <span className={GREY_PILL} title="Findings you chose to ignore">
+                {ignored}
               </span>
             )}
             {toFix != null && (

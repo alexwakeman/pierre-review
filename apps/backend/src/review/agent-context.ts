@@ -105,9 +105,11 @@ export interface AgentContext {
       accountId: number,
       a: { owner: string; name: string; sha: string },
     ): Promise<CommitChecksRead>;
+    // `full`: the WHOLE log up to actions-logs.ts MAX_LOG_BYTES (anchored at its end), for the CI
+    // review's pre-scan; absent ⇒ the viewer's one tail page.
     readJobLog(
       accountId: number,
-      a: { owner: string; name: string; jobId: number },
+      a: { owner: string; name: string; jobId: number; full?: boolean },
     ): Promise<CheckLogsResponse>;
     readFailedStep(
       accountId: number,
@@ -201,11 +203,11 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
           return { ok: false, reason: 'error' };
         }
       },
-      // The log's TAIL window (DEFAULT_LOG_WINDOW_BYTES, 128 KiB — one ranged GET), never the
-      // whole log.
+      // The log's TAIL window (DEFAULT_LOG_WINDOW_BYTES, 128 KiB — one ranged GET), or with `full`
+      // the whole log (`tail: 0`, capped at MAX_LOG_BYTES and anchored at its end).
       readJobLog: async (accountId, a) => {
         try {
-          return await fetchActionsJobLog(await getAccessToken(accountId), a.owner, a.name, a.jobId, {}, {
+          return await fetchActionsJobLog(await getAccessToken(accountId), a.owner, a.name, a.jobId, a.full ? { tail: 0 } : {}, {
             accountId,
           });
         } catch {

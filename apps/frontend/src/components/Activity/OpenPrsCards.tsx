@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import type { TicketMergedPr, TicketReviewState, TimelinePr, User } from '@pierre-review/shared';
+import type { ClaudeReviewPrState, TicketMergedPr, TicketReviewState, TimelinePr, User } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
-import { useClaudeReviewStates } from '../../hooks/useClaudeReview.js';
+import { useClaudeReviewStarting, useClaudeReviewStates } from '../../hooks/useClaudeReview.js';
+import { useWorkspaceAutoReview } from '../../hooks/useWorkspaceAutoReview.js';
+import { reviewWorkInProgress } from '../../lib/claudeReviewColumn.js';
 import { useCiReviewStates } from '../../hooks/useCiReview.js';
 import { useTicketLinks } from '../../hooks/useTicketLinks.js';
 import { useMergedPanelOpen, useTicketMergedPrs } from '../../hooks/useTicketMergedPrs.js';
@@ -490,6 +492,19 @@ export function OpenPrsCards({
       tickets={opts.inStack == null ? ticketsOf(pr) : []}
       alsoIn={opts.inStack?.alsoIn ?? []}
       headingLevel={opts.inStack != null ? 4 : 3}
+      working={
+        claudeOn ? (
+          <ClaudeWorkChip
+            prId={pr.id}
+            state={claudeStates.get(pr.id)}
+            ciRunning={ciStates.get(pr.id)?.status === 'running'}
+            ticketRunning={
+              ticketReviewOn &&
+              ticketsOf(pr).some((t) => t.ident != null && ticketStates.get(t.ident)?.status === 'running')
+            }
+          />
+        ) : null
+      }
       claude={
         claudeOn ? (
           <ClaudeReviewPanel
@@ -895,6 +910,81 @@ function MergedPanel({
   );
 }
 
+// ---- Claude work in progress on one PR (the card header's chip) ----
+
+/**
+ * "Reviewing · Checking CI" with a pulsing dot, in the card's HEADER, whenever ANY Claude work is in
+ * flight for the PR: the code review (queued or running, the auto lane included), the ticket
+ * review, the CI review, AI Fix. Renders nothing otherwise. Reads the list's batched answers only.
+ */
+function ClaudeWorkChip({
+  prId,
+  state,
+  ciRunning,
+  ticketRunning,
+}: {
+  prId: number;
+  state: ClaudeReviewPrState | undefined;
+  ciRunning: boolean;
+  ticketRunning: boolean;
+}): JSX.Element | null {
+  const starting = useClaudeReviewStarting(prId);
+  const work = reviewWorkInProgress({ review: state, starting, ciRunning, ticketRunning });
+  if (work.length === 0) return null;
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded bg-ai-signal/10 px-1.5 py-px text-[11px] font-medium text-ai-signal"
+      title="Claude is working on this PR"
+    >
+      <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ai-signal-fill" />
+      {work.join(' · ')}
+    </span>
+  );
+}
+
+// ---- today's auto reviews against the cap (the tab header) ----
+
+/** "3h 12m" / "12m" until `iso`; "under a minute" at the end. */
+export function resetsInLabel(iso: string, nowMs: number): string {
+  const mins = Math.ceil((Date.parse(iso) - nowMs) / 60_000);
+  if (!Number.isFinite(mins) || mins <= 1) return 'under a minute';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+/**
+ * "7 of 20 auto reviews today · resets in 3h 12m" — this workspace's auto CODE reviews against its
+ * daily cap (a calendar UTC day). Shown only while auto review is on (the GET sends `usage` only
+ * then) and agentic AI runs here. Re-reads the count once a minute while mounted.
+ */
+export function AutoReviewUsageLine(): JSX.Element | null {
+  const aiOn = useAiCapabilities().enabled;
+  const workspaceId = useFilters((s) => s.workspaceId);
+  const { data, refetch } = useWorkspaceAutoReview(aiOn, workspaceId);
+  const [now, setNow] = useState(() => Date.now());
+  const usage = data?.usage ?? null;
+  const live = usage != null;
+  useEffect(() => {
+    if (!live) return;
+    const t = window.setInterval(() => {
+      setNow(Date.now());
+      void refetch();
+    }, 60_000);
+    return () => window.clearInterval(t);
+  }, [live, refetch]);
+  if (usage == null) return null;
+  const full = usage.used >= usage.cap;
+  return (
+    <span
+      className={`text-[11px] ${full ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500 dark:text-gray-400'}`}
+      title="Auto code reviews started today in this Workspace (the day is counted in UTC)"
+    >
+      {usage.used} of {usage.cap} auto reviews today · resets in {resetsInLabel(usage.resetsAt, now)}
+    </span>
+  );
+}
+
 function OpenPrCard({
   pr,
   author,
@@ -903,6 +993,7 @@ function OpenPrCard({
   tickets,
   alsoIn,
   headingLevel,
+  working,
   claude,
 }: {
   pr: TimelinePr;
@@ -914,6 +1005,8 @@ function OpenPrCard({
   /** Inside a stack: the PR's OTHER tickets, each a stack of its own. */
   alsoIn: CardTicket[];
   headingLevel: 3 | 4;
+  /** The header's "Claude is working on this" chip (ClaudeWorkChip); null where AI is off. */
+  working?: ReactNode;
   claude: ReactNode;
 }): JSX.Element {
   const titleId = useId();
@@ -923,6 +1016,7 @@ function OpenPrCard({
       <PrCardTitle
         id={titleId}
         level={headingLevel}
+        end={working}
         after={
           pr.isDraft ? (
             <span className="shrink-0 rounded border border-gray-300 px-1.5 text-[11px] font-medium text-gray-600 dark:border-gray-600 dark:text-gray-300">

@@ -102,7 +102,7 @@ async function openMyTurn(page: Page): Promise<{ threadHits: () => number }> {
   page.on('request', (r) => {
     if (/\/api\/threads\/\d+$/.test(new URL(r.url()).pathname)) threads += 1;
   });
-  await page.goto('/app/');
+  await page.goto('/app/?view=activity');
   await expect(page.getByTestId('attention-view')).toBeVisible();
   return { threadHits: () => threads };
 }

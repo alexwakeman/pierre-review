@@ -984,14 +984,7 @@ export function PinnedTabsBar(): JSX.Element {
       // height with vertically-centred content — no ragged tops or misaligned text.
       className="tab-scrollbar flex min-h-[42px] shrink-0 items-stretch gap-1 overflow-x-auto bg-gray-100 px-2 pt-1 dark:bg-gray-900"
     >
-      <FixedChip
-        active={activeTab === 'activity'}
-        onClick={() => setActiveTab('activity')}
-        onContextMenu={(e) => openMenu(e, null)}
-        icon={ActivityIcon}
-        label="Activity"
-        title="Activity — per-repo triage console"
-      />
+      {/* Open PRs FIRST: it is the app's default view (a URL with no `view=`). */}
       <FixedChip
         active={activeTab === 'open-prs'}
         // Clicking the chip shows every repo: it clears a repo the "Show all N open PRs" footer
@@ -1001,6 +994,14 @@ export function PinnedTabsBar(): JSX.Element {
         icon={<PullRequestIcon />}
         label={openPrsTabLabel(openPrsCount)}
         title="Open PRs — every open pull request in this Workspace"
+      />
+      <FixedChip
+        active={activeTab === 'activity'}
+        onClick={() => setActiveTab('activity')}
+        onContextMenu={(e) => openMenu(e, null)}
+        icon={ActivityIcon}
+        label="Activity"
+        title="Activity — per-repo triage console"
       />
       <FixedChip
         active={activeTab === 'timeline'}

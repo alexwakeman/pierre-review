@@ -2,8 +2,8 @@ import { test, expect, type Page } from '@playwright/test';
 import { fixtures, installMockApi } from './mock-api.js';
 
 // Regression gates for the consolidated Activity Feed + click-to-detail UX (see CLAUDE.md):
-//   • the app lands on the ACTIVITY console, on the Pending rail entry (timeline is secondary);
-//     an empty workspace lands on the guidance to move repos in
+//   • a bare URL lands on the OPEN PRS tab (the default view); Activity opens on its Pending rail
+//     entry; an empty workspace lands on the guidance to move repos in
 //   • the rail reads Pending, Feed, Bots, Reports
 //   • a Feed link names `?activityRepo=feed`, and the consolidated stream renders there, flat —
 //     the stream ALONE (no daily brief, no trunk strip, no open-PR panel)
@@ -13,15 +13,16 @@ import { fixtures, installMockApi } from './mock-api.js';
 //     get a yellow-bordered card + badge; there is no "seen/Done" control
 //   • clicking ANY feed item opens the full-height PR DETAIL tab (an overlay + a closable
 //     PR tab), NOT an isolated timeline — Show/Focus in the detail then drive the timeline
-//   • Activity, Open PRs and Timeline are permanent, non-closable TABS in the tab strip
+//   • Open PRs, Activity and Timeline are permanent, non-closable TABS in the tab strip
 
 const overlay = (p: Page) => p.getByTestId('activity-overlay');
 const tabs = (p: Page) => p.getByTestId('pinned-tabs');
 
 async function gotoActivity(page: Page, query = ''): Promise<void> {
   await installMockApi(page);
-  await page.goto('/app/' + query);
-  // Every load lands on the Activity console overlay (Activity-first).
+  // A bare URL lands on Open PRs (the default view), so Activity is named — the link the app emits.
+  const extra = query.replace(/^\?/, '');
+  await page.goto('/app/' + (/(^|[?&])view=/.test(query) ? query : `?view=activity${extra ? `&${extra}` : ''}`));
   await expect(overlay(page)).toBeVisible();
 }
 
@@ -57,7 +58,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
         await route.fallback();
       },
     );
-    await page.goto('/app/');
+    await page.goto('/app/?view=activity');
     const board = page.getByTestId('attention-view');
     await expect(board).toBeVisible();
     // Unknown is never zero: the badges wait, and the board does not say My turn is empty.
@@ -78,7 +79,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
       (url) => url.pathname.endsWith('/api/activity'),
       (route) => route.fulfill({ json: { ...fixtures.ACTIVITY, repos: [] } }),
     );
-    await page.goto('/app/');
+    await page.goto('/app/?view=activity');
     await expect(overlay(page).getByText(/No repos in this workspace yet/)).toBeVisible();
     await expect(page.getByTestId('attention-view')).toHaveCount(0);
     // Still the Pending entry: the guidance replaces the board, not the selection.
@@ -181,7 +182,14 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(board.getByTestId('branch-status-panel')).toHaveCount(0);
   });
 
-  test('Open PRs is a permanent tab between Activity and Timeline', async ({ page }) => {
+  test('a bare URL lands on Open PRs', async ({ page }) => {
+    await installMockApi(page);
+    await page.goto('/app/');
+    await expect(page.getByTestId('open-prs-overlay')).toBeVisible();
+    await expect(overlay(page)).toBeHidden();
+  });
+
+  test('Open PRs is the first permanent tab, before Activity and Timeline', async ({ page }) => {
     await gotoActivity(page);
     const strip = tabs(page);
     const nonDraft = fixtures.PRS.filter((p) => !p.isDraft).length;
@@ -190,8 +198,8 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(strip.getByRole('tab', { name: `Open PRs · ${nonDraft}`, exact: true })).toBeVisible();
     const names = await strip.getByRole('tab').allTextContents();
     expect(names.slice(0, 3).map((n) => n.trim())).toEqual([
-      'Activity',
       `Open PRs · ${nonDraft}`,
+      'Activity',
       'Timeline',
     ]);
     // It has no close button: a fixed view is never closed.
@@ -239,7 +247,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     // strip renders and the open-PR count has landed (the brief is read at boot by the header),
     // THEN open the Feed: every read is cached, so a panel still mounted there would paint in the
     // Feed's first render.
-    await page.goto('/app/');
+    await page.goto('/app/?view=activity');
     const board = page.getByTestId('attention-view');
     await expect(board.getByTestId('branch-status-panel')).toBeVisible();
     await expect(tabs(page).getByRole('tab', { name: /^Open PRs · \d/ })).toBeVisible();
@@ -255,7 +263,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
 
   test('the Activity | Timeline tabs toggle the board', async ({ page }) => {
     await gotoActivity(page);
-    // Activity, Open PRs and Timeline are permanent tabs (role=tab) in the tab strip, not a header pill.
+    // Open PRs, Activity and Timeline are permanent tabs (role=tab) in the tab strip, not a header pill.
     await tabs(page).getByRole('tab', { name: 'Timeline' }).click();
     await expect(overlay(page)).toBeHidden();
     await expect(page.locator('.vis-timeline')).toBeVisible();

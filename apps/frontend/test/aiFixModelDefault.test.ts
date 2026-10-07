@@ -1,7 +1,7 @@
 // THE AI FIX PANE'S START BUTTONS OPEN ON ONE MODEL, AND ITS PUSH IS AS-IS.
 //
-// The pane's two entry points ("Fix from review" and the instruction box) share one model picker,
-// which opens on ONE constant, `DEFAULT_AI_FIX_MODEL` in packages/shared (Opus 5.5, effort pinned
+// The pane's one entry point (the fix picker's "Start fix"; the instruction box was removed) has
+// one model picker, which opens on ONE constant, `DEFAULT_AI_FIX_MODEL` in packages/shared (Opus 5.5, effort pinned
 // to medium in apps/backend/src/review/model-options.ts) — the same constant the start route falls
 // back to (apps/backend/src/coding/ai-fix/routes.test.ts). The CI card's "Fix it" went with the
 // card.

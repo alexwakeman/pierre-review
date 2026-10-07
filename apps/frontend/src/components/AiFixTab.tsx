@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import {
-  AI_FIX_MAX_INSTRUCTION_CHARS,
   CLAUDE_REVIEW_MODELS,
   CLAUDE_REVIEW_MODEL_LABELS,
   DEFAULT_AI_FIX_MODEL,
@@ -22,20 +21,21 @@ import { useFilters } from '../store/filters.js';
 import {
   aiFixStartMutationKey,
   useAiFix,
+  useAiFixPreview,
   useAiFixStream,
   useCancelFix,
   usePushFix,
   useStartFix,
 } from '../hooks/useAiFix.js';
 import { useClaudeReview } from '../hooks/useClaudeReview.js';
+import { fixSourceReviewId, olderSourceNote } from '../lib/aiFixSource.js';
 import { ApiError } from '../api/client.js';
 import { FixReport, fixSourceLine } from './AiFix/FixReport.js';
+import { FixPicker, budgetCutKeys, pickedKeys, type PickerOverrides } from './AiFix/FixPicker.js';
 import { Markdown } from './Markdown.js';
 import { DiffWrapToggle, FileDiffView, type DiffFile } from './diff/FileDiffView.js';
 import { parseGitPatch } from '../lib/diff.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
-import { ChecksList, CiRerunControl } from './CheckList.js';
-import { AiSummary } from './AiSummary.js';
 import { InfoButton } from './InfoModal.js';
 
 const BTN_PRIMARY =
@@ -64,9 +64,13 @@ function SectionTitle({
   );
 }
 
+// THE AI FIX TAB is the fixer and nothing else: the CI list, the AI summary and the free-text
+// instruction box left it (the start route still accepts a plain seed, for history; the SPA no
+// longer offers one). A fix is always seeded from a SUCCEEDED Claude review, through the FIX PICKER
+// (AiFix/FixPicker.tsx): the server lists every item with a stable key and its default, the reader
+// ticks, Start sends the ticked keys.
 export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
-  // FREE and local-only (`me.ai`). The AI summary is Pro and gates itself on `prSummary`, so it
-  // renders nothing here without the plugin.
+  // FREE and local-only (`me.ai`).
   const aiFix = useAiCapabilities().enabled;
   const aiFixTabFocus = useFilters((s) => s.aiFixTabFocus);
   const consumeAiFixTabFocus = useFilters((s) => s.consumeAiFixTabFocus);
@@ -91,27 +95,7 @@ export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
 
   return (
     <div className="pb-6">
-      <div className="border-b border-gray-200 empty:hidden dark:border-gray-800">
-        <AiSummary pr={pr} />
-      </div>
-      <CiStatusSection pr={pr} />
       <FixerSection pr={pr} handoffReviewId={handoffReviewId} />
-    </div>
-  );
-}
-
-// ---- CI status (the same checks list as the Overview tab, plus re-trigger) ----
-
-function CiStatusSection({ pr }: { pr: PrDetail }): JSX.Element | null {
-  const checks = pr.checkRuns;
-  if (checks.length === 0) return null;
-  return (
-    <div className="border-b border-gray-200 dark:border-gray-800">
-      <SectionTitle>CI status</SectionTitle>
-      <div className="px-4 pb-3">
-        <ChecksList prId={pr.id} prGithubUrl={pr.githubUrl} checks={checks} />
-        <CiRerunControl prId={pr.id} checks={checks} viewerCanPush={pr.viewerCanPush} />
-      </div>
     </div>
   );
 }
@@ -126,18 +110,18 @@ function FixerSection({
   handoffReviewId: number | null;
 }): JSX.Element {
   const { data, isLoading } = useAiFix(pr.id, true);
-  // The review "Fix from review" uses: the one handed over from the Claude Review tab, else the
-  // PR's latest review if it succeeded. A DB-only read the Claude Review tab already makes.
-  const { data: reviewData } = useClaudeReview(pr.id);
+  // The review the fix is built from: the one handed over from the Claude Review tab, else the
+  // PR's newest SUCCEEDED review (a failed newer run never hides it). A DB-only read the Claude
+  // Review tab already makes.
+  const { data: reviewData, isLoading: reviewLoading } = useClaudeReview(pr.id);
   const latest = reviewData?.review ?? null;
-  const reviewId =
-    handoffReviewId ?? (latest?.status === 'succeeded' ? latest.id : null);
-  const fromOlderReview = handoffReviewId != null && latest != null && handoffReviewId !== latest.id;
+  const reviewId = fixSourceReviewId(handoffReviewId, latest, reviewData?.history ?? []);
+  const olderNote = olderSourceNote(handoffReviewId, reviewId, latest);
+  const setPrDetailTab = useFilters((s) => s.setPrDetailTab);
 
   // Opens on the shared default (Opus 5.5, effort pinned to medium server-side) — the same
   // constant the start route falls back to.
   const [model, setModel] = useState<AiFixModel>(DEFAULT_AI_FIX_MODEL);
-  const [instruction, setInstruction] = useState('');
   const startFix = useStartFix(pr.id);
   const cancelFix = useCancelFix(pr.id);
 
@@ -154,7 +138,22 @@ function FixerSection({
     liveStatus?.status ?? dbStatus ?? 'idle';
   const isRunning = displayStatus === 'running' || displayStatus === 'queued';
 
-  const noteRun = (): void =>
+  const fix = data?.fix ?? null;
+
+  // The picker: the server's items for this review, the reader's ticks on top. A new review (or a
+  // hand-over) starts from the defaults again.
+  const preview = useAiFixPreview(pr.id, reviewId, data?.enabled !== false);
+  const [overrides, setOverrides] = useState<PickerOverrides>({});
+  useEffect(() => setOverrides({}), [reviewId]);
+  // With a finished fix on screen the picker folds away behind "New fix"; it is open otherwise.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const showPicker = pickerOpen || !fix || fix.status !== 'succeeded';
+
+  const picked = preview.data ? pickedKeys(preview.data, overrides) : [];
+  const cutCount = preview.data ? budgetCutKeys(preview.data, overrides).size : 0;
+
+  const startFromReview = (): void => {
+    if (reviewId == null || !preview.data || picked.length === 0) return;
     // The bottom-right AiFixBanner follows the run once the reader leaves this tab.
     noteAiFixRun({
       prId: pr.id,
@@ -162,23 +161,11 @@ function FixerSection({
       prNumber: pr.number,
       prTitle: pr.title,
     });
-  const startFromReview = (): void => {
-    if (reviewId == null) return;
-    noteRun();
-    startFix.mutate({ model, seed: 'review', sourceReviewId: reviewId });
-  };
-  const trimmed = instruction.trim();
-  const tooLong = trimmed.length > AI_FIX_MAX_INSTRUCTION_CHARS;
-  const startFromInstruction = (): void => {
-    if (trimmed === '' || tooLong) return;
-    noteRun();
     startFix.mutate(
-      { model, seed: 'plain', instruction: trimmed },
-      { onSuccess: () => setInstruction('') },
+      { model, seed: 'review', sourceReviewId: reviewId, include: picked },
+      { onSuccess: () => setPickerOpen(false) },
     );
   };
-
-  const fix = data?.fix ?? null;
 
   return (
     <div>
@@ -190,13 +177,15 @@ function FixerSection({
               installs, builds and tests nothing.
             </p>
             <p>
-              Fix from review works through everything the Claude review found: findings you have
-              not ignored, earlier findings still open, other reviewers' threads that still need a
-              fix, user-story gaps, and CI failures the CI check says this PR can fix. Or type your
-              own instruction.
+              A fix starts from a Claude review. Pick what it should work on: Claude's findings,
+              earlier findings still open, threads Claude says need a fix, unanswered threads, CI
+              failures and ticket gaps are ticked; style bot comments are not.
             </p>
             <p>Claude reports what it changed in each file and what it left alone, and why.</p>
-            <p>Nothing is pushed until you press Push.</p>
+            <p>
+              Nothing is pushed until you press Push. An automatic fix on your own PR is pushed for
+              you only when Push automatically is on in Settings.
+            </p>
           </InfoButton>
         }
       >
@@ -209,84 +198,97 @@ function FixerSection({
           </p>
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                aria-label="Model"
-                className="rounded border border-gray-300 bg-transparent px-2 py-1 text-xs dark:border-gray-700"
-                value={model}
-                onChange={(e) => setModel(e.target.value as AiFixModel)}
-                disabled={isRunning}
-              >
-                {CLAUDE_REVIEW_MODELS.map((m) => (
-                  <option key={m} value={m}>
-                    {CLAUDE_REVIEW_MODEL_LABELS[m]}
-                  </option>
-                ))}
-              </select>
-              {isRunning ? (
+            {!isRunning && reviewId == null && !reviewLoading && (
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs text-gray-600 dark:text-gray-300">
+                  {latest?.status === 'running' || latest?.status === 'queued'
+                    ? 'A fix starts from a Claude review. One is running.'
+                    : 'A fix starts from a finished Claude review.'}
+                </p>
                 <button
                   type="button"
-                  className={BTN_SECONDARY}
-                  onClick={() => cancelFix.mutate()}
+                  className={BTN_PRIMARY}
+                  onClick={() => setPrDetailTab(pr.id, 'claude_review')}
                 >
-                  Cancel
+                  Open Claude Review
                 </button>
-              ) : (
-                reviewId != null && (
-                  // No AI runtime or no Claude credential: one line (or the one-time setup) in
-                  // place of the start button.
-                  <AiRunGate auth={data?.auth}>
-                    <button
-                      type="button"
-                      className={BTN_PRIMARY}
-                      disabled={fixStarting}
-                      onClick={startFromReview}
-                    >
-                      Fix from review
-                    </button>
-                  </AiRunGate>
-                )
-              )}
-              {!isRunning && fromOlderReview && (
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  Uses the review you picked, not the latest.
-                </span>
-              )}
-            </div>
+              </div>
+            )}
 
-            {!isRunning && (
-              <div className="mt-2">
-                <textarea
-                  aria-label="What to fix"
-                  className="w-full rounded border border-gray-300 bg-transparent px-2 py-1 text-xs dark:border-gray-700"
-                  rows={2}
-                  value={instruction}
-                  placeholder="Or say what to fix…"
-                  onChange={(e) => setInstruction(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) startFromInstruction();
-                  }}
-                />
-                {trimmed !== '' && (
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
+            {!isRunning && reviewId != null && !showPicker && (
+              <button type="button" className={BTN_SECONDARY} onClick={() => setPickerOpen(true)}>
+                New fix
+              </button>
+            )}
+
+            {!isRunning && reviewId != null && showPicker && (
+              <div>
+                {olderNote && (
+                  <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">{olderNote}</p>
+                )}
+                {preview.isLoading && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Loading…</p>
+                )}
+                {preview.isError && (
+                  <p className="text-xs text-red-600 dark:text-red-400">{errText(preview.error)}</p>
+                )}
+                {preview.data && (
+                  <FixPicker
+                    preview={preview.data}
+                    overrides={overrides}
+                    onChange={setOverrides}
+                    disabled={fixStarting}
+                  />
+                )}
+                {preview.data && preview.data.items.length > 0 && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <select
+                      aria-label="Model"
+                      className="rounded border border-gray-300 bg-transparent px-2 py-1 text-xs dark:border-gray-700"
+                      value={model}
+                      onChange={(e) => setModel(e.target.value as AiFixModel)}
+                    >
+                      {CLAUDE_REVIEW_MODELS.map((m) => (
+                        <option key={m} value={m}>
+                          {CLAUDE_REVIEW_MODEL_LABELS[m]}
+                        </option>
+                      ))}
+                    </select>
+                    {/* No AI runtime or no Claude credential: one line (or the one-time setup) in
+                        place of the start button. */}
                     <AiRunGate auth={data?.auth}>
                       <button
                         type="button"
                         className={BTN_PRIMARY}
-                        disabled={fixStarting || tooLong}
-                        onClick={startFromInstruction}
+                        disabled={fixStarting || picked.length === 0}
+                        onClick={startFromReview}
                       >
-                        Fix
+                        Start fix
                       </button>
                     </AiRunGate>
-                    {tooLong && (
-                      <span className="text-[11px] text-red-600 dark:text-red-400">
-                        Keep it under {AI_FIX_MAX_INSTRUCTION_CHARS.toLocaleString('en-US')} characters.
-                      </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {picked.length === 0
+                        ? 'Nothing ticked.'
+                        : `${picked.length - cutCount} item${picked.length - cutCount === 1 ? '' : 's'}`}
+                    </span>
+                    {fix?.status === 'succeeded' && (
+                      <button type="button" className={BTN_SECONDARY} onClick={() => setPickerOpen(false)}>
+                        Close
+                      </button>
                     )}
                   </div>
                 )}
               </div>
+            )}
+
+            {isRunning && (
+              <button
+                type="button"
+                className={BTN_SECONDARY}
+                onClick={() => cancelFix.mutate()}
+              >
+                Cancel
+              </button>
             )}
             {startFix.isError && (
               <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">
@@ -337,8 +339,8 @@ function FixerSection({
   );
 }
 
-// A fix the auto review started (after an auto review of the reader's own PR). Never pushed by
-// itself: it waits for Push like any other.
+// A fix the auto review started (after an auto review of the reader's own PR). It waits for Push
+// like any other, unless the workspace switched "Push automatically" on.
 function AutoFixChip(): JSX.Element {
   return (
     <span className="inline-flex items-center rounded bg-gray-500/10 px-1.5 py-px text-[11px] font-medium text-gray-600 dark:text-gray-300">
@@ -390,6 +392,13 @@ function FixResult({
         {fixSourceLine(fix)}
         {fix.finishedAt && <> · {relativeTime(fix.finishedAt)}</>}
       </p>
+      {/* An AUTOMATIC push that failed (auto-push.ts): recorded on the succeeded row's `error`,
+          never retried — Push below still works. */}
+      {fix.pushedAt == null && fix.error && (
+        <p className="mb-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+          {fix.error}
+        </p>
+      )}
       {fix.summary && (
         <div className="prose prose-sm max-w-none dark:prose-invert">
           <Markdown>{fix.summary}</Markdown>

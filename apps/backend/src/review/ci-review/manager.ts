@@ -61,7 +61,8 @@ import type { SubmitCiReviewPayload } from './schema.js';
 // ⇒ saved with no model) → the diff and a read-only worktree → the prompt (nonce-fenced) in a
 // scratch working directory → the agent (agent.ts: Read/Glob/Grep behind the path guard, Bash
 // denied) → the server reconcile (reconcile.ts) → persist. The `finally` removes the worktree and
-// the scratch directory, then runs a deferred clone-cache eviction.
+// the scratch directory, then runs a deferred clone-cache eviction. An AUTOMATIC run that succeeded
+// is then handed to ./auto-post.ts (one PR comment, when the workspace switched auto-posting on).
 //
 // In-memory state is a process singleton; the boot reconcile fails any run a restart orphaned.
 
@@ -225,6 +226,15 @@ function launch(job: CiJob): void {
   progress({ phase: 'reading_logs' });
 
   void runPipeline(job, controller, progress)
+    .then(() => {
+      // CI AUTO-POSTING: an AUTOMATIC run may post its diagnosed causes as one PR comment when the
+      // workspace switched auto-posting on (./auto-post.ts decides, reads the run's status itself,
+      // never throws, never retries).
+      if (!isAuto(job)) return;
+      void import('./auto-post.js')
+        .then((m) => m.maybeAutoPostCiReview(ctx, { accountId: job.accountId, prId: job.prId, runId }))
+        .catch((err) => ctx.log.warn(`ci auto post ${runId}: ${err instanceof Error ? err.message : String(err)}`));
+    })
     .catch(async (err) => {
       ctx.log.error({ err }, `ci review ${runId} failed: ${err instanceof Error ? err.message : String(err)}`);
       // A throw (network, git, database) says nothing about the inputs: retryable.

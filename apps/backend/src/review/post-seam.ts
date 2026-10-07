@@ -15,8 +15,10 @@ import {
   fallbackAnchor,
   fetchCurrentHeadSha,
   fetchPrDiff,
+  fetchReviewComments,
   findingCommentBody,
   isFindingAnchored,
+  matchReviewComments,
   prLevelFindingBody,
   stripNoiseFromDiff,
   submitGithubComment,
@@ -114,6 +116,23 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
     comments,
   });
 
+  // Read back the inline comments GitHub just created and pair each with its finding, so the finding
+  // keeps its GitHub comment id (→ its Changes-tab thread). ⚠ BEST-EFFORT AND NEVER RETRIED: GitHub
+  // has already 201'd the review, so a failed read may not fail the post — the review read falls
+  // back to matching the thread's root comment.
+  let inlineComments: { findingId: number; commentId: string }[] = [];
+  if (comments.length > 0) {
+    try {
+      const got = await fetchReviewComments(args.owner, args.name, args.prNumber, ghReviewId);
+      inlineComments = matchReviewComments(
+        comments.map((c, i) => ({ ...c, findingId: inlineFindingIds[i]! })),
+        got,
+      );
+    } catch {
+      /* best-effort — the finding stays posted without a comment id */
+    }
+  }
+
   // Off-diff findings post as standalone PR-level comments alongside the review. Each is
   // best-effort: a single failed comment must NOT strand the already-posted (irreversible)
   // review — collect what lands; the caller stamps only those.
@@ -135,6 +154,7 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
   return {
     postedReviewId: ghReviewId,
     inlineFindingIds,
+    inlineComments,
     prComments: prCommentResults,
     commentCount: comments.length,
     prCommentCount: prCommentResults.length,
