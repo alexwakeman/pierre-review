@@ -80,6 +80,9 @@ const SEEDED_TABLES = [
   'ticketReviewMembers',
   'ticketReviewItems',
   'ticketReviewPrCards',
+  'trackerTickets',
+  'jiraAcFields',
+  'workspaceTrackers',
 ];
 
 /**
@@ -360,6 +363,36 @@ async function seedAccount(accountId: number, login: string): Promise<void> {
     .insert(s.ticketReviews)
     .values({ accountId, workspaceId: 1, ticketIdent: `manual:${pr.id}:abcdef12`, status: 'failed', model: 'm', refused: 'no_ticket' })
     .execute();
+  // THE ISSUE TRACKER (migration 0088 / pg 0075): a stored ticket, a criteria-field choice, and the
+  // workspace's tracker row WITH a token — the credential is the reason this entry matters.
+  const now = new Date();
+  await db
+    .insert(s.trackerTickets)
+    .values({
+      accountId,
+      workspaceId: defaultWorkspaceId,
+      prId: pr.id,
+      provider: 'jira',
+      issueKey: `T-${accountId}`,
+      detectedFrom: 'title',
+      detectOrder: 0,
+      apiRoot: 'https://x.atlassian.net',
+      url: `https://x.atlassian.net/browse/T-${accountId}`,
+      state: 'ok',
+      title: 'story',
+      checkedAt: now,
+      nextCheckAt: now,
+      fetchedAt: now,
+    })
+    .execute();
+  await db
+    .insert(s.jiraAcFields)
+    .values({ accountId, workspaceId: defaultWorkspaceId, apiRoot: 'https://x.atlassian.net', issueTypeId: '1', fieldId: 'customfield_1', fieldName: 'AC', updatedAt: now })
+    .execute();
+  await db
+    .insert(s.workspaceTrackers)
+    .values({ accountId, workspaceId: defaultWorkspaceId, provider: 'jira', baseUrl: 'https://x.atlassian.net', authToken: 'plain:secret' })
+    .execute();
 }
 
 beforeAll(async () => {
@@ -497,6 +530,9 @@ describe('exportAccountData', () => {
     const out = await exportAccountData(DOOMED);
     const serialized = JSON.stringify(out);
     expect(serialized).not.toContain('sealed-token-blob');
+    // The tracker token (workspace_trackers.auth_token) is withheld the same way: presence only.
+    expect(serialized).not.toContain('plain:secret');
+    expect(out.workspaceTrackers).toEqual([expect.objectContaining({ provider: 'jira', hasToken: true })]);
     expect(serialized).not.toContain('accessTokenEnc');
     // It reports only that a token EXISTS.
     expect(out.account.hasStoredGithubToken).toBe(true);

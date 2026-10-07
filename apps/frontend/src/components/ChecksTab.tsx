@@ -10,6 +10,7 @@ import type {
   SuggestedReviewersResponse,
   User,
 } from '@pierre-review/shared';
+import { TRACKER_PROVIDER_LABEL } from '@pierre-review/shared';
 import {
   automatedReviewerMeta,
   BOT_VENDOR_META,
@@ -1105,7 +1106,7 @@ export function ChecksTab({
         </Row>
       )}
 
-      {/* Jira/Linear ticket links (Pro, compute-on-read). tri-state: null → hidden; [] → a muted
+      {/* Jira/Linear ticket links (core tracker, compute-on-read). tri-state: null → hidden; [] → a muted
           "No ticket found"; non-empty → one link chip per detected ticket. */}
       {pr.tickets != null && (
         <Row label="Ticket">
@@ -1120,7 +1121,7 @@ export function ChecksTab({
                   target="_blank"
                   rel="noreferrer noopener"
                   className="inline-flex items-center rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-100 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-300"
-                  title={`Open ${t.key} in ${t.provider === 'jira' ? 'Jira' : 'Linear'}`}
+                  title={`Open ${t.key} in ${TRACKER_PROVIDER_LABEL[t.provider]}`}
                 >
                   {t.key}
                 </a>

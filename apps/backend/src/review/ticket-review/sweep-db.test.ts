@@ -32,7 +32,7 @@ let persist: typeof import('./persist.js');
 let fp: typeof import('./fingerprint.js');
 let sweep: typeof import('./sweep.js');
 let prep: typeof import('./prepare.js');
-let providers: typeof import('../plugin-providers.js');
+let providers: typeof import('../../tracker/ticket-source.js');
 let ctx: AgentContext;
 let ws = 0;
 const pr: Record<string, number> = {};
@@ -178,7 +178,7 @@ beforeAll(async () => {
   fp = await import('./fingerprint.js');
   sweep = await import('./sweep.js');
   prep = await import('./prepare.js');
-  providers = await import('../plugin-providers.js');
+  providers = await import('../../tracker/ticket-source.js');
   ctx = {
     db,
     schema,
@@ -206,19 +206,21 @@ beforeAll(async () => {
   for (let i = 1; i <= TICKET_REVIEW_MAX_PRS + 1; i += 1) await addPr(`b${i}`, repoIds[3]!, new Date(ENABLED_AT - 3_600_000));
 
   const idOf = (tag: string): number => pr[tag]!;
-  providers.registerAgenticProviders({
+  providers._overrideTicketSourceForTest({
     ticketsForPr: async (_a, prId) =>
       Object.entries(membership)
         .filter(([, tags]) => tags.some((t) => idOf(t) === prId))
         .map(([ident]) => ({ ident, ticket: story(keyOf(ident)), ticketHash: '' })),
     ticketMembers: async (_a, ident) => (membership[ident] ?? []).map((t) => ({ prId: idOf(t), workspaceId: ws })),
+    // THE story of a ticket (core's is the freshest stored row; there are no stored rows here).
+    ticketStory: async (_a, ident) => (membership[ident] ? story(keyOf(ident)) : null),
     listChangedTicketIdents: async () => [],
   });
   for (const t of [T1, T2, T3]) await seedCurrentRun(t);
 });
 
 afterAll(async () => {
-  providers._resetAgenticProvidersForTest();
+  providers._resetTicketSourceForTest();
   await closeDb?.();
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
 });
@@ -401,29 +403,14 @@ describe('member refusal', () => {
 describe('the story of a ticket', () => {
   const at = (key: string, iso: string): ClaudeReviewTicket => ({ ...story(key), title: `as of ${iso}`, fetchedAt: iso });
 
-  it('⚠ without ticketStory: the freshest fetchedAt across members, whatever order they are passed in', async () => {
-    const saved = providers.getAgenticProviders().ticketsForPr!;
-    // PR x merged with the old text; PR y is open and was re-read since.
-    providers.registerAgenticProviders({
-      ticketsForPr: async (_a, prId) => [
-        { ident: T1, ticket: at('BMD-1', prId === pr.x ? '2026-01-01T00:00:00.000Z' : '2026-06-01T00:00:00.000Z'), ticketHash: '' },
-      ],
-    });
-    try {
-      expect((await prep.jiraStoryFor(1, T1, [pr.x!, pr.y!]))?.title).toBe('as of 2026-06-01T00:00:00.000Z');
-      expect((await prep.jiraStoryFor(1, T1, [pr.y!, pr.x!]))?.title).toBe('as of 2026-06-01T00:00:00.000Z');
-    } finally {
-      providers.registerAgenticProviders({ ticketsForPr: saved });
-    }
-  });
-
-  it("the plugin's ticketStory answers for every caller when present", async () => {
-    providers.registerAgenticProviders({ ticketStory: async () => at('BMD-1', 'canonical') });
+  it("the tracker's ticketStory answers for every caller", async () => {
+    const saved = providers.getTicketSource().ticketStory;
+    providers._overrideTicketSourceForTest({ ticketStory: async () => at('BMD-1', 'canonical') });
     try {
       expect((await prep.jiraStoryFor(1, T1, [pr.y!]))?.title).toBe('as of canonical');
       expect((await prep.jiraStoryFor(1, T1, [pr.x!]))?.title).toBe('as of canonical');
     } finally {
-      providers.registerAgenticProviders({ ticketStory: undefined });
+      providers._overrideTicketSourceForTest({ ticketStory: saved });
     }
   });
 });

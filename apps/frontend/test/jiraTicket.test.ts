@@ -47,14 +47,14 @@ const cand = (id: string, name: string, match: JiraAcCandidate['match'], text = 
 });
 
 describe('fillableJiraTickets', () => {
-  it('keeps only Jira tickets the server marked fetchable', () => {
+  it('keeps only reading-tracker tickets the server marked fetchable (Jira, Linear with a key)', () => {
     const tickets: TicketRef[] = [
       jira('ENG-1', true),
       jira('ENG-2', false),
       jira('ENG-3'),
       { key: 'OPS-4', url: 'https://linear.app/x/issue/OPS-4', provider: 'linear', canFetchDetails: true },
     ];
-    expect(fillableJiraTickets(tickets).map((t) => t.key)).toEqual(['ENG-1']);
+    expect(fillableJiraTickets(tickets).map((t) => t.key)).toEqual(['ENG-1', 'OPS-4']);
   });
   it('nothing detected → no button', () => {
     expect(fillableJiraTickets(null)).toEqual([]);
@@ -215,7 +215,8 @@ describe('labels and the note', () => {
       { key: 'BMD-2', url: 'https://x.atlassian.net/browse/BMD-2', provider: 'jira' as const, canFetchDetails: true },
       { key: 'ENG-3', url: 'https://linear.app/x/issue/ENG-3', provider: 'linear' as const },
     ];
-    expect(unfillableJiraTickets(t).map((r) => r.key)).toEqual(['BMD-1']);
+    // A Linear ticket with no API key saved is unfillable too.
+    expect(unfillableJiraTickets(t).map((r) => r.key)).toEqual(['BMD-1', 'ENG-3']);
     expect(fillableJiraTickets(t).map((r) => r.key)).toEqual(['BMD-2']);
   });
   it('says so when there are no candidates, and asks for a pick when nothing is chosen', () => {

@@ -11,7 +11,7 @@
 //     how long ago the shown run finished ("reviewed 2 hours ago");
 //   - criteria with status and attribution; one Post per unmet item, on the PR it belongs to;
 //   - SLIM where an Open PRs ticket stack holds the whole story (`slimStoryCheck`: a tracker ticket,
-//     `issueLinks`, an open PR on it): only THIS PR's share (`prTicketShare`, lib/ticketShare.ts) —
+//     tracker on, an open PR on it): only THIS PR's share (`prTicketShare`, lib/ticketShare.ts) —
 //     what it delivers, what belongs in it, each with its Post — "What this PR adds" (its contribution
 //     card at its current head, when it has one), a count of the rest, and "See the
 //     whole story in Open PRs" (`showStoryInOpenPrs`). A pasted (`manual:`) story keeps the full
@@ -42,7 +42,6 @@ import {
   type TicketReview,
 } from '@pierre-review/shared';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
-import { useProCapabilities } from '../hooks/useTriage.js';
 import { useWorkspaces } from '../hooks/useWorkspaces.js';
 import {
   useStartStoryCheck,
@@ -202,11 +201,12 @@ function TicketBlock({
   const jiraRef = jiraRefFor(pr.tickets, entry.ticketKey);
   const url = storyUrlOf(jiraRef, [snapshot]);
   // Where the Open PRs stack holds the whole story, the pane shows only THIS PR's share of it.
-  const issueLinks = useProCapabilities().issueLinks;
+  // `pr.tickets` is null exactly when the PR's workspace has no tracker (core, free since
+  // apiVersion 23) — the same fact the Open PRs stacks need, with no extra request.
   const slim = slimStoryCheck({
     ident,
     ticketKey: entry.ticketKey,
-    issueLinks,
+    trackerOn: pr.tickets != null,
     prOpen: pr.state === 'open',
     members,
   });

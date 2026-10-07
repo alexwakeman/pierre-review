@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   DEFAULT_CLAUDE_REVIEW_MODEL,
+  isTrackerIdent,
+  trackerTicketRow,
   parseTicketIdent,
   type ClaudeReviewModel,
   type ClaudeReviewTicket,
@@ -196,7 +198,7 @@ export async function startTicketReview(ctx: AgentContext, a: StartTicketArgs): 
       accountId: a.accountId,
       workspaceId: a.workspaceId,
       ident: a.ident,
-      ticketKey: a.ticketKey ?? (parsed?.kind === 'jira' ? parsed.key : null),
+      ticketKey: a.ticketKey ?? (isTrackerIdent(parsed) ? trackerTicketRow(parsed).issueKey : null),
       ticketTitle: a.ticketTitle,
       ticket: a.manualTicket,
       originPrId: a.originPrId,

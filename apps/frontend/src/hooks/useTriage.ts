@@ -153,7 +153,6 @@ export function useProCapabilities(): ProCapabilities {
       prSummary: false,
       workspaceInsights: false,
       slackDigest: false,
-      issueLinks: false,
       botTriage: false,
       botAdvisor: false,
       periodReports: false,

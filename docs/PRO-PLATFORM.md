@@ -21,7 +21,8 @@
 >   `insights/scope.ts` became `insights/workspace-scope.ts` and the persisted `scope_key`
 >   **vocabulary** — not the column name — moved to `ws:<workspaceId>` (plugin migration `0020`).
 > - The current Pro capability set is `activityDigest, reviewMemory, aiAnalysis, prSummary, aiFix,
->   workspaceInsights, claudeReview, slackDigest, issueLinks` (+ `botTriage`).
+>   workspaceInsights, claudeReview, slackDigest, issueLinks` (+ `botTriage`). (Since superseded:
+>   the agentic four left at apiVersion 22 and `issueLinks` at 23 — the tracker is core.)
 > - **The "watched" concept is GONE.** `repos.inbox_watch` / `inbox_watch_started_at` were dropped
 >   (migration `0046`, pg `0033`), along with `WatchedBadge`, the per-repo watch toggle and
 >   `setRepoInboxWatch`. Everything below that reads "watched repos" — the digest scope, the Inbox

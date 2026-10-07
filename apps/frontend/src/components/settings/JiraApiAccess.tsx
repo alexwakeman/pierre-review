@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import type { JiraFieldListResponse, WorkspaceJiraApiSettings } from '@pierre-review/shared';
 import { api } from '../../api/client.js';
-import { useUpdateWorkspaceProSettings } from '../../hooks/useWorkspaceProSettings.js';
+import { useUpdateWorkspaceTracker } from '../../hooks/useWorkspaceTracker.js';
 import { Field, SaveButton, inputCls } from './ui.js';
 
 const SECONDARY_BTN =
@@ -10,8 +10,9 @@ const SECONDARY_BTN =
 
 /**
  * "Jira API access (optional)" for ONE workspace — mounted by IssueLinksSection only when that
- * workspace's SAVED tracker is Jira. It lets Claude Review fill a detected ticket's title,
- * description and acceptance criteria.
+ * workspace's SAVED tracker is Jira. It lets Limn read each detected ticket when its PR arrives —
+ * title, status and assignee on the Open PRs cards, and the story (description + acceptance
+ * criteria) the ticket review and Claude Review read. CORE and free, in both modes.
  *
  * ⚠ THERE IS NO ACCEPTANCE-CRITERIA FIELD PICKER HERE ANY MORE. A site can carry several fields
  * named "Acceptance Criteria" and the one in use varies by issue type, so the field is chosen per
@@ -31,7 +32,7 @@ export function JiraApiAccess({
   workspaceId: number;
   jira: WorkspaceJiraApiSettings;
 }): JSX.Element {
-  const mutation = useUpdateWorkspaceProSettings(workspaceId);
+  const mutation = useUpdateWorkspaceTracker(workspaceId);
   const fields = useMutation<JiraFieldListResponse, Error, void>({
     mutationFn: () => api.jiraFields(workspaceId),
   });
@@ -71,9 +72,8 @@ export function JiraApiAccess({
           Jira API access (optional)
         </h4>
         <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-          Lets Claude Review fill in a detected ticket’s title, description and acceptance
-          criteria. You pick the criteria field per ticket there. A saved token is never shown
-          again.
+          Lets Limn read each ticket a PR names: its title, status and assignee, its description
+          and acceptance criteria. A saved token is never shown again.
         </p>
       </div>
       <Field

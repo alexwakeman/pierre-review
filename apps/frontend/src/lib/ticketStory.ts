@@ -15,6 +15,7 @@ import type {
   TicketAssignee,
   TicketRef,
 } from '@pierre-review/shared';
+import { isReadingTrackerProvider } from '@pierre-review/shared';
 
 const normKey = (k: string | null | undefined): string | null => {
   const s = k?.trim().toUpperCase() ?? '';
@@ -61,14 +62,15 @@ export function legacyOnlyEntries(
   });
 }
 
-/** The PR's detected Jira link for a key, or null (Linear, not detected, no key). */
+/** The PR's detected tracker link for a key, or null (not detected, no key). */
 export function jiraRefFor(
   tickets: readonly TicketRef[] | null | undefined,
   key: string | null | undefined,
 ): TicketRef | null {
   const k = normKey(key);
   if (k == null) return null;
-  return (tickets ?? []).find((t) => t.provider === 'jira' && normKey(t.key) === k) ?? null;
+  // Any READING tracker's link (Jira, GitHub Issues, Linear).
+  return (tickets ?? []).find((t) => isReadingTrackerProvider(t.provider) && normKey(t.key) === k) ?? null;
 }
 
 export type StorySource =

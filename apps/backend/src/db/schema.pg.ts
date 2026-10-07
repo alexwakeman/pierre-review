@@ -271,6 +271,17 @@ export const pullRequests = pgTable(
     securityFix: text('security_fix', { enum: ['proven', 'inferred'] }),
     advisoryIds: jsonb('advisory_ids').$type<string[]>(),
     securityCheckedAt: timestamp('security_checked_at', { withTimezone: true, mode: 'date' }),
+    // GITHUB ISSUES LINKS (migration pg 0076). See the sqlite twin: lower-cased `owner/repo#12`
+    // keys from GitHub's `closingIssuesReferences`, read only for GitHub Issues workspaces; NULL is
+    // "never read", never "closes nothing". Kept in sync by hand.
+    closingIssues: jsonb('closing_issues').$type<string[]>(),
+    closingIssuesCheckedAt: timestamp('closing_issues_checked_at', { withTimezone: true, mode: 'date' }),
+    // LINEAR LINKS (migration pg 0077). See the sqlite twin: upper-cased `ENG-123` keys Linear's
+    // GitHub integration attached this PR to, and the Linear workspace root they were read against;
+    // NULL is "never read". Kept in sync by hand.
+    linearLinks: jsonb('linear_links').$type<string[]>(),
+    linearLinksRoot: text('linear_links_root'),
+    linearLinksCheckedAt: timestamp('linear_links_checked_at', { withTimezone: true, mode: 'date' }),
   },
   (t) => ({
     repoIdx: index('pr_repo_idx').on(t.repoId),
@@ -1726,5 +1737,105 @@ export const prMentions = pgTable(
     accountPrUx: uniqueIndex('prm_account_pr').on(t.accountId, t.prId),
     accountRepoIdx: index('prm_account_repo_idx').on(t.accountId, t.repoId),
     prIdx: index('prm_pr_idx').on(t.prId),
+  }),
+);
+
+// ════════════════════════════════════ THE ISSUE TRACKER (CORE) ════════════════════════════════════
+// Twins of the sqlite tables (migration pg 0075); the rationale lives there and in docs/TRACKERS.md.
+export const workspaceTrackers = pgTable(
+  'workspace_trackers',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    provider: text('provider'),
+    baseUrl: text('base_url'),
+    projectKeys: text('project_keys'),
+    matchScope: text('match_scope'),
+    authEmail: text('auth_email'),
+    authToken: text('auth_token'),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (t) => ({
+    accountWorkspaceUx: uniqueIndex('workspace_trackers_account_workspace').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_trackers_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+export const trackerTickets = pgTable(
+  'tracker_tickets',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id').notNull(),
+    workspaceId: integer('workspace_id').notNull(),
+    prId: integer('pr_id').notNull(),
+    provider: text('provider').notNull().default('jira'),
+    issueKey: text('issue_key').notNull(),
+    detectedFrom: text('detected_from').notNull(),
+    detectOrder: integer('detect_order').notNull(),
+    apiRoot: text('api_root').notNull(),
+    url: text('url').notNull(),
+    state: text('state').notNull(),
+    errorCode: text('error_code'),
+    title: text('title'),
+    description: text('description'),
+    acceptanceCriteria: text('acceptance_criteria'),
+    acFieldId: text('ac_field_id'),
+    acFieldName: text('ac_field_name'),
+    acFieldSource: text('ac_field_source'),
+    issueTypeId: text('issue_type_id'),
+    issueTypeName: text('issue_type_name'),
+    statusName: text('status_name'),
+    statusCategory: text('status_category'),
+    assigneeName: text('assignee_name'),
+    assigneeAccountId: text('assignee_account_id'),
+    assigneeAvatarUrl: text('assignee_avatar_url'),
+    candidatesJson: text('candidates_json'),
+    omittedCandidates: integer('omitted_candidates').notNull().default(0),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true, mode: 'date' }),
+    checkedAt: timestamp('checked_at', { withTimezone: true, mode: 'date' }).notNull(),
+    nextCheckAt: timestamp('next_check_at', { withTimezone: true, mode: 'date' }).notNull(),
+    changedAt: timestamp('changed_at', { withTimezone: true, mode: 'date' }),
+  },
+  (t) => ({
+    accountPrKeyUx: uniqueIndex('tracker_tickets_account_pr_key').on(t.accountId, t.prId, t.issueKey),
+    accountWsTypeIdx: index('tracker_tickets_account_ws_type').on(t.accountId, t.workspaceId, t.issueTypeId),
+    accountSiteKeyIdx: index('tracker_tickets_account_site_key').on(
+      t.accountId,
+      t.provider,
+      t.apiRoot,
+      t.issueKey,
+    ),
+    accountChangedIdx: index('tracker_tickets_account_changed').on(t.accountId, t.changedAt),
+    prIdx: index('tracker_tickets_pr').on(t.prId),
+  }),
+);
+
+// ADOPTED IN PLACE from the plugin (its pg migration 0038) — see the sqlite twin.
+export const jiraAcFields = pgTable(
+  'pro_jira_ac_fields',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id').notNull(),
+    workspaceId: integer('workspace_id').notNull(),
+    apiRoot: text('api_root').notNull(),
+    issueTypeId: text('issue_type_id').notNull(),
+    fieldId: text('field_id').notNull(),
+    fieldName: text('field_name').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (t) => ({
+    accountWsSiteTypeUx: uniqueIndex('pro_jira_ac_fields_account_ws_site_type').on(
+      t.accountId,
+      t.workspaceId,
+      t.apiRoot,
+      t.issueTypeId,
+    ),
   }),
 );

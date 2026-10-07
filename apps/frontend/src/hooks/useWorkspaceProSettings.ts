@@ -5,8 +5,8 @@ import { workspaceKey } from './useActivity.js';
 import { periodReportsListKey } from './usePeriodReports.js';
 
 // The PER-WORKSPACE Pro config (Pro `pro_workspace_settings`; /api/pro/settings/workspace) —
-// ONE row holding THREE settings: the sprint cadence + phase anchor, the comparison-window MODE,
-// and the Jira/Linear tracker.
+// ONE row holding the sprint cadence + phase anchor and the comparison-window MODE. (The Jira/Linear
+// tracker left it for CORE at apiVersion 23 — hooks/useWorkspaceTracker.ts.)
 //
 // ⚠ NONE OF THEM HAS AN ACCOUNT-LEVEL DEFAULT UNDERNEATH IT ANY MORE (plugin migrations 0031 and,
 // for the mode, 0032). The response is what THIS workspace runs, full stop — two states, no
@@ -71,16 +71,7 @@ export function useUpdateWorkspaceProSettings(workspaceId: number | null) {
         void qc.invalidateQueries({ queryKey: ['workspace-insights'] });
         void qc.invalidateQueries({ queryKey: ['workspace-metrics-detail'] });
       }
-      // Jira/Linear ticket links are computed on read into the PR-detail payload. PR/thread detail
-      // is IndexedDB-persisted with staleTime:Infinity, so a provider / base-URL / key-list /
-      // match-scope change would NOT appear on already-viewed PRs without an explicit
-      // invalidation. (It moved here with the setting, from the retired account-patch hook.)
-      // `patch.jira` too: a saved or removed token flips each Jira ticket's `canFetchDetails`,
-      // which is what shows Claude Review's "Fill from" button.
-      if (patch.issue || patch.jira) {
-        void qc.invalidateQueries({ queryKey: ['pr'] });
-        void qc.invalidateQueries({ queryKey: ['thread'] });
-      }
+      // (The tracker's invalidations moved with it: hooks/useWorkspaceTracker.ts.)
     },
   });
 }

@@ -82,6 +82,14 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
     await bindProPlugin(app);
   }
 
+  // The issue tracker's process half (CORE, both modes): the one-time move of the plugin-era tracker
+  // data into core — AFTER the plugin's own migrations ran — then the ticket worker and its
+  // post-walk kick. Its `*/2` tick is scheduled with every other job below.
+  {
+    const { startTracker } = await import('./tracker/index.js');
+    await startTracker(app);
+  }
+
   // Scheduler is wired in Phase 3; guarded so the skeleton runs without it.
   if (!config.disableScheduler) {
     try {

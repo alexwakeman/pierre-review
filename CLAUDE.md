@@ -30,6 +30,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 | [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) | the agentic PR-review feature |
 | [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports -> "Chronology", its working-hours budgets, request history and Pro pointers |
 | [BLAST-RADIUS](docs/BLAST-RADIUS.md) | how far a PR can REACH — the Low/Medium/High chip, the co-change index, the Pro impact note |
+| [TRACKERS](docs/TRACKERS.md) | the issue tracker (CORE, free): the adapter seam, Jira, GitHub Issues, Linear, stored tickets + worker, idents, the sealed token |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) | ML severity/category of bot comments (`packages/ml`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
 | [PRO-PLUGIN-AND-ACTIVITY](docs/PRO-PLUGIN-AND-ACTIVITY.md) | plugin seam/apiVersion, Activity, Feed, the bot platform, annotations, digests, the work plan |
@@ -830,16 +831,16 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   `TICKET_REVIEW_DAILY_CAP`, never auto-posts, and the agent reads member worktrees only behind the
   PreToolUse PATH GUARD (`review/path-guard.ts`, now on every agent run). ⚠ The Jira apiRoot fold is
   ONE shared function (`jiraApiRoot`) — a second copy splits one ticket into two idents. ⚠ ONE
-  story per ticket for every caller (`jiraStoryFor` → the plugin's `ticketStory`, the freshest stored
-  row), and the seam reads STORED rows only — no Jira call on a view.
+  story per ticket for every caller (`jiraStoryFor` → core's `ticketStory`, the freshest stored
+  row), and the source (`tracker/ticket-source.ts`) reads STORED rows only — no tracker call on a view.
   [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Ticket review.
 - **The moved modules take ONE context argument, `AgentContext`** (`review/agent-context.ts`),
   built from direct core imports — never `ProContext`. Their tests pass a fake one; the queue
   managers carry it on each item. URL paths did NOT move (the fixer keeps its historical
   `/api/pro/prs/:id/ai-fix*` and `/api/pro/ai-fixes/*`).
-- **One Pro input rides an OPTIONAL plugin seam** (`ProContext.registerAgenticProviders?`,
-  `review/plugin-providers.ts`): the Jira fill for an AUTO review (`resolveReviewTicket`). Absent ⇒
-  auto review runs with no story. Both AI Fix seeds are free.
+- **No Pro input any more**: the ticket review's members and story come from CORE's tracker
+  (`tracker/ticket-source.ts`; `registerAgenticProviders` left the contract at apiVersion 23). Both AI
+  Fix seeds are free.
 - The agent's tools are read-only with **`Bash` denied outright** (the CHAT mirrors the review's
   mode under the same rule and rebuilds its transcript server-side); the fixer edits files, has no
   shell, builds and tests nothing, and nothing is posted or pushed until the reader presses the
@@ -865,7 +866,7 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
 [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) +
 [docs/PRO-PLATFORM.md](docs/PRO-PLATFORM.md). What bites:
 
-- **`apiVersion` is 22 and FOUR literals must agree**: host `contract.ts`, plugin `index.ts`,
+- **`apiVersion` is 23 and FOUR literals must agree**: host `contract.ts`, plugin `index.ts`,
   plugin `contract-types.ts`, and `bind.ts`'s runtime gate — **the actual enforcer**. A
   half-bump silently degrades the ENTIRE plugin to OSS mode: capabilities dark, every
   `/api/pro/*` 404, nothing thrown. No test pins it; detection is `tsc` + a boot check of
@@ -875,17 +876,28 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   SPA↔plugin WIRE type is not `ProContext` at all.
 - **A stale `packages/pro/dist` shadows `src` in dev.** `bind.ts` prefers `src/index.ts` outside
   production and LOGS the entry it bound — check that first when a Pro route unexpectedly 404s.
-- ⚠ **The per-workspace Jira token (plugin 0035) is WRITE-ONLY and sealed via the OPTIONAL
-  `host.sealSecret`**; every call to the customer-typed Jira host goes through `jira/fetch.ts`
-  (no redirects, cloud refuses private addresses at connect time) — never a bare `fetch`.
-  ⚠ **Jira is read when a PR is RECEIVED, never when it is VIEWED** (plugin 0038,
-  `jira/ticket-sync.ts`): a pull-based worker (a `*/2` tick + a kick after every repo walk via the
-  OPTIONAL `registerRepoSyncedHook`) stores each detected ticket in `pro_pr_jira_tickets`, and the
-  story panel, the Open PRs ticket row and the auto review's fill READ THOSE ROWS — never add a
-  view-time Jira call. The acceptance-criteria field is chosen per (workspace, Jira site, issue
-  type), server-side (`pro_jira_ac_fields`; a site-wide picker was unusable; `jira_ac_field_*` are
-  dormant). [PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § Stored Jira tickets ·
-  [SECURITY.md](docs/SECURITY.md).
+- ⚠ **THE ISSUE TRACKER IS CORE, NOT PRO (apiVersion 23)** — free on every tier, both modes, the
+  public install: `apps/backend/src/tracker/`, [docs/TRACKERS.md](docs/TRACKERS.md). ONE tracker per
+  workspace (`workspace_trackers`), ONE adapter per provider (Jira, GitHub Issues and Linear all read). ⚠ **GitHub Issues links EXACTLY** — a PR's tickets are GitHub's
+  `closingIssuesReferences`, read by the worker's targeted `nodes(ids:)` step ONLY for GitHub Issues
+  workspaces and stored on `pull_requests.closing_issues` (NULL = never read: no prune, no read, no
+  "No ticket found") — never a field on the repo walk, so other workspaces pay nothing. Its key is
+  `owner/repo#12` on ONE site (`https://github.com`); ident ↔ row only through shared
+  `trackerTicketIdent`/`trackerTicketRow`. ⚠ **Linear links BEST FIRST**: the issues Linear's GitHub
+  integration ATTACHED the PR to (`attachmentsForURL`, batched, stored on `pull_requests.linear_links`
+  + the Linear workspace root they were read against) UNION title/branch key detection — NULL is
+  "never read" but never hides a detected key (`linker.required` false). Root
+  `https://linear.app/<urlKey>` (shared `linearSiteRoot`, the ONE fold); the API host is FIXED
+  (`api.linear.app`), the personal API key rides the same sealed write-only slot, and a key for
+  another Linear workspace is refused (`bad_url`), never stored under this one. The Jira token is WRITE-ONLY and SEALED by core
+  (`tracker/secret.ts`); every call to a customer-typed host goes through `tracker/jira/fetch.ts` (no
+  redirects, cloud refuses private addresses at connect time) — never a bare `fetch`. ⚠ **A tracker
+  is read when a PR is RECEIVED, never when it is VIEWED**: the pull-based worker stores tickets in
+  `tracker_tickets` and every surface reads the rows. ⚠ The plugin-era data was MOVED by a guarded
+  boot step (`tracker/legacy-import.ts`), not a migration; plugin `0038`/`0039` are `SELECT 1;`
+  stubs and the `issue_*`/`jira_*` columns on `pro_workspace_settings` are dormant — never re-declare
+  them. ⚠ `tracker/runtime.ts` opens the DB at import: keep the review-side imports LAZY
+  (`tracker/ticket-source.ts`), or a test writes into the real database.
 - `ctx.schema` is `Record<string, any>` — a leftover `ctx.schema.teams` type-checks and throws
   only when the query runs. Grep, don't trust the compiler.
 - Tiers — **free gets the per-PR truth, paid gets the cross-team roll-up**: **core** is free
@@ -895,9 +907,10 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   **pro** adds `botDepth` (NON-AI depth **and the WHOLE Bots → ROI panel** — vendor table,
   keep/tune/noisy verdicts, the Inflation column *counts included*, ML flagging, volume, seat
   prices), `activityDigest`, `periodReports` (period reports + by-workspace axis + the People
-  report + **Chronology**), the Jira tracker, and `prSummary` — every ONE-SHOT Haiku feature on
+  report + **Chronology**), and `prSummary` — every ONE-SHOT Haiku feature on
   the Anthropic API (PR summary, comment validity/addressed/simplify annotations, the blast impact note, conflict-assist) plus all reporting narration. There is no
-  "pro+" tier any more (apiVersion 22).
+  "pro+" tier any more (apiVersion 22). The issue tracker (ticket links, stored tickets, the Open PRs
+  ticket stacks) is FREE CORE since apiVersion 23.
 - ⚠ **Those last SIX surfaces are VISIBLE-BUT-LOCKED, reversing the app's "absent, never upsold"
   posture** (Chronology, period reports, the People report, the by-workspace axis, the ROI panel,
   and the Bots → **Benchmark** tab): tab listed, `ProBadge` on it, body renders `ProLockPanel` — all
@@ -1046,8 +1059,9 @@ a refusable forecast. **Metrics are CORE** (`db/period-metrics.ts`, `db/forecast
 **Full contract: [docs/PERIOD-REPORTING.md](docs/PERIOD-REPORTING.md)**. The invariants:
 
 - **EVERY Pro reading setting on this surface IS PER-WORKSPACE, with the product default beneath it
-  and NO inheritance chain** — the sprint cadence + phase anchor, the Jira/Linear tracker and, since
-  plugin migration 0032, the **comparison mode**, all on one `pro_workspace_settings` row.
+  and NO inheritance chain** — the sprint cadence + phase anchor and, since plugin migration 0032,
+  the **comparison mode**, on one `pro_workspace_settings` row (the tracker left it for core
+  `workspace_trackers` at apiVersion 23).
   ⚠ The mode moved because the claim keeping it account-wide was FALSE: it COMPOSES with the
   cadence, so `'sprint'` is a sprint-position window on a workspace that has one and a rolling
   fortnight on one that does not — one account setting, two window SHAPES, nothing on screen saying
@@ -1428,7 +1442,8 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0074` and plugin `0034`–`0037` + `0039` are NOT replayed.
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0077` and plugin `0034`–`0037` are NOT replayed
+  (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.
   - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence

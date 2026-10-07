@@ -28,13 +28,14 @@ and AI Fix's fixer (review memory went with them and was later deleted). They LE
 the top-level `MeResponse.ai` and off in cloud by an explicit `isCloud` check. **pro** = every
 ONE-SHOT Haiku feature on the Anthropic API (PR summary, comment
 validity / addressed / simplify annotations, the blast impact note, conflict-assist — the
-`prSummary` capability), the Jira tracker, Insights and all the reporting. The old **pro+** tier and
+`prSummary` capability), Insights and all the reporting. (The issue tracker — Jira/Linear links,
+the stored tickets, the Open PRs ticket stacks — is FREE CORE since apiVersion 23:
+[TRACKERS.md](TRACKERS.md).) The old **pro+** tier and
 its flag `PRO_ADVANCED_AI_ENABLED` (alias `PRO_CLAUDE_REVIEW_ENABLED`, `src/tier.ts`) are DELETED.
 
-**The free features' one Pro input** rides the OPTIONAL `ctx.registerAgenticProviders` (core
-`review/plugin-providers.ts`), registered in `index.ts`: `resolveReviewTicket` — the Jira fill for
-an AUTO Claude review (`jira/resolve-ticket.ts`, on the tracker tier). Without it, auto review runs
-with no story; nothing else degrades.
+**The free features take NO Pro input any more.** The one they had — `ctx.registerAgenticProviders`
+(the Jira fill and the ticket review's members/story) — left the contract at apiVersion 23 with the
+tracker; core answers it itself (`tracker/ticket-source.ts`).
 
 ⚠ **THE CI-FAILURE ANALYSIS IS DELETED** — the Pro card (`CiAnalysisCard`), its
 `GET`/`POST /api/pro/prs/:id/ci-analysis` routes, `CI_ANALYSIS_SYSTEM` + `buildCiAnalysisPrompt`,
@@ -43,15 +44,15 @@ optional member, so apiVersion stays 22). Claude Review diagnoses failing CI its
 ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Failed CI on the reviewed head). The plugin's
 `ai_pr_analyses` rows of kind `ci_analysis` are DORMANT, not dropped: nothing reads or writes them,
 and `eraseProByAccountId` still removes them. `ProContext.github.fetchCheckLogs` has no plugin
-caller now but stays, because it is a REQUIRED member (removing it would be an apiVersion bump). The manual "Fill from KEY" path is
-the plugin's own `/api/pro/jira/*` routes, unchanged.
+caller now but stays, because it is a REQUIRED member (removing it would be an apiVersion bump). The "Fill from KEY" path is core's
+`/api/prs/:id/tracker-ticket` since apiVersion 23.
 
 **The plugin boundary.** `src/pro/contract.ts` defines `ProContext` (the host hands the
 plugin `db`/`schema`/`runTransaction`/`isPg`/`accountIdOf`/`llm.complete`/`queries`/
-`registerAgenticProviders?`/`registerScheduledJob`/`registerPrDetailEnricher`/`registerMigrations`/`aiCredits`), `ProPlugin
+`registerScheduledJob`/`registerMigrations`/`aiCredits`), `ProPlugin
 {apiVersion, register()}`, and a `getProCapabilities()` singleton mirrored to the SPA via
-`/api/me` (`pro:{activityDigest,prSummary,workspaceInsights,slackDigest,issueLinks,…}` —
-`reviewMemory`/`aiAnalysis`/`aiFix`/`claudeReview` left at apiVersion 22). `src/pro/bind.ts`
+`/api/me` (`pro:{activityDigest,prSummary,workspaceInsights,slackDigest,…}` —
+`reviewMemory`/`aiAnalysis`/`aiFix`/`claudeReview` left at apiVersion 22, `issueLinks` at 23). `src/pro/bind.ts`
 runs in `index.ts` between `buildApp()` and `listen()`: gated on **`config.proEnabled`** — now
 `PRO_DISABLED!=='true' && (!isCloud || PRO_CLOUD_ENABLED==='true')`, so Pro is on locally by default
 AND can run the **paid summary-AI tier in cloud** behind `PRO_CLOUD_ENABLED=true` (agentic AI is
@@ -74,7 +75,10 @@ later DROPPED `review_learnings`), migrations
 (`packages/pro/migrations{,-pg}/*.sql` run via `ctx.registerMigrations` → `src/pro/migrate.ts`,
 the one sanctioned raw-`$client` DDL site + `pro_migrations` bookkeeping), and isolation test.
 
-**`apiVersion` is 22** — the agentic features moved to core: `ProCapabilities` lost
+**`apiVersion` is 23** — the issue tracker moved to core: `ProCapabilities` lost `issueLinks`;
+`ProContext` lost `registerPrDetailEnricher` (REQUIRED — its removal alone forces the bump),
+`registerAgenticProviders`, `registerRepoSyncedHook` and `host.sealSecret`/`openSecret`
+([TRACKERS.md](TRACKERS.md)). 21 → 22 moved the agentic features to core: `ProCapabilities` lost
 `reviewMemory`/`aiAnalysis`/`aiFix`/`claudeReview`; `ProContext` lost `review`, `reviewEvents` and
 `registerLearningsProvider`, and `CodingSeam` lost `generateFix`/`applyAndPush` (it keeps
 `commitFilesAndOpenPr` for the advisor); it gained the OPTIONAL `registerAgenticProviders`. Removals
@@ -1327,6 +1331,11 @@ PLAINTEXT — the decision was RE-MADE when the count went from one to N; see
 
 ### The issue tracker is PER-WORKSPACE too (plugin migration 0031) — and the comparison MODE (0032)
 
+> ⚠ **HISTORY for the tracker half.** The Jira/Linear tracker left this row for CORE at apiVersion 23
+> (`workspace_trackers`, `GET`/`PUT /api/workspaces/:id/tracker` — [TRACKERS.md](TRACKERS.md)); a
+> boot-time move copied each workspace's values out and NULLed these columns. What follows about
+> the tracker records why it became per-workspace; the comparison-mode half is still current.
+
 The Jira/Linear settings left `pro_settings` and joined the sprint cadence on
 `pro_workspace_settings` — same table, same `(account_id, workspace_id)` key, same named composite
 FK. **Plugin 0032 added the third and last one: `comparison_mode`.** Control surface: `GET`/`PUT
@@ -1392,168 +1401,17 @@ are pinned in `packages/pro/test/workspace-settings.test.ts`.
 `0031` added no entry — which is exactly why it is easy to stop thinking about. The row now carries
 a customer's internal tracker hostname: infrastructure disclosure, not just a number.
 
-### Jira API access, per workspace (plugin migration 0035)
+### Jira API access and the stored Jira tickets — MOVED TO CORE (apiVersion 23)
 
-Lets Claude Review fill its user story from a ticket the detection above already found. Two LIVE
-nullable columns on the same `pro_workspace_settings` row — `jira_email`, `jira_token` — written
-through the same partial patch
-(`WorkspaceProSettingsUpdate.jira`) and seeded in `mergeWorkspace` like every neighbour, so an
-unrelated cadence Save cannot wipe a credential. `apiVersion` **STAYS 21**: the only seam change is
-the OPTIONAL `host.sealSecret` / `host.openSecret` pair. Code: `src/jira/` (`client.ts`,
-`candidates.ts`, `fetch.ts`, `text.ts`, `secret.ts`, `routes.ts`); detection is shared with the enricher through ONE
-function, `detectPrTickets` (`issue-links/enricher.ts`).
-
-- **The fields are not all static, and ONE WORKSPACE ANSWER WAS UNUSABLE.** `summary` and
-  `description` are system fields. Acceptance criteria is NOT: it is a custom field whose id
-  differs per site — and a real site carried SEVERAL fields named "Acceptance Criteria", the one in
-  use varying by issue type. The first cut chose one field per workspace in Settings; it could not
-  be made to work. Now the choice is PER TICKET, in the Claude Review panel: the ticket route reads
-  the issue with `fields=*all&expand=names,schema` and returns every custom text field on it as a
-  ranked, capped (50) `candidates` list (`candidates.ts` — what counts as text, the exclusion list,
-  the ranking). Which one is used is decided SERVER-side since plugin 0038 (the workspace's choice
-  per issue type, else the best name match, else blank — § Stored Jira tickets below). Contract:
-  [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § User story or task.
-  ⚠ **`jira_ac_field_id` / `jira_ac_field_name` ARE DORMANT** — added by 0035, still in the table
-  (plugin migrations are additive), undeclared in both schema modules, never selected or written.
-  A stale client's `acceptanceCriteriaField*` keys are stripped by the PUT schema and still 200.
-  `GET /api/pro/jira/fields` survives as the Settings CONNECTION CHECK only.
-- **Auth follows the email.** Email set → HTTP Basic `email:apiToken` (Jira Cloud). No email →
-  `Bearer <personal access token>` (Server / Data Center). REST **v2** everywhere, because it works
-  on both and returns `description` as a wiki-markup string; ADF values are still flattened.
-- **The API root has ONE derivation**, `jiraApiRoot(issue_base_url)`: scheme + host + port + the
-  context path, with everything from `/browse`, `/rest` or `/secure` onwards stripped.
-- ⚠ **THE TOKEN IS WRITE-ONLY AND BELONGS TO ONE SITE.** No route returns it (`hasToken` only);
-  saving without a token keeps it; `clearToken` removes it; and changing the tracker's base URL to a
-  different HOST removes it (`jiraSiteOf` in `mergeWorkspace`), so a token typed for one Jira is
-  never sent to whatever the URL says next. Storage format and the SSRF guard:
-  [SECURITY.md](SECURITY.md).
-- **`TicketRef.canFetchDetails`** (optional, additive) is set by the enricher on Jira tickets:
-  true when a token is saved for the PR's workspace — including one that can no longer be opened,
-  so the click says "save it again" instead of the button silently vanishing. Saving the `jira`
-  section invalidates `['pr']`, like the tracker section.
-- **Gates.** The Jira-calling routes register with the enricher (`issueLinks`, the summary
-  tier) and sit on the `search` rate tier. The Settings block is shown only when the SAVED tracker
-  is Jira with a base URL AND `MeResponse.ai.enabled` is on — Claude Review is its only
-  consumer and is local-only, so cloud accounts are never asked for a token nothing uses. The
-  server half is still cloud-safe (sealed storage, the cloud SSRF rules).
-- **The Open PRs ticket row** (`POST /api/pro/ticket-links`, `jira/ticket-links.ts`) answers a
-  LIST OF PRs, never keys (still not a proxy), reusing the enricher's detection step
-  (`detectKeysWithAccess`, split out of `detectPrTickets` so both run one rule) batched per
-  workspace. Since plugin 0038 it makes **no Jira call**: title, status, status category, assignee
-  and issue type come from the stored tickets below. Contract: docs/API.md.
-- **The Open PRs stacks' "Merged (n)" panel** (`GET /api/pro/ticket-merged-prs?workspace=&keys=`,
-  `jira/ticket-merged.ts`): under each ticket stack's open cards, every MERGED PR Limn has linked
-  to that ticket — ONE request for the whole grouped board, DB-only (the stored rows below, state
-  `ok`, joined to `pull_requests.state = 'merged'`; closed-unmerged excluded). Membership is the
-  ticket review's (`ticketMembers`): ANY repo and ANY workspace of the account, on the SAME Jira
-  site — and the site is the requested WORKSPACE's own, so the keys cannot reach another site's
-  rows (a non-Jira workspace answers `tickets: []`). The panel never creates a stack: a ticket with
-  only merged PRs is not open work. The stack's "n PRs" stays the open count; the panel header
-  carries the merged count. Collapsed by default, its open state per session (memory only). Fold:
-  `lib/openPrsStacks.ts` `mergedByStack` (an open card wins over its merged copy; an ident from
-  another site is not matched). A GET, so the `/api/pro/` catch-all puts it on `read`.
-- **Erasure**: `pro_workspace_settings` was already in `registerAccountErasure`; the two 0038
-  tables joined it. The core account export never reads plugin tables, so the token cannot reach it.
-
-### Stored Jira tickets — read when a PR is RECEIVED, not when it is VIEWED (plugin migration 0038)
-
-Every Jira consumer used to call Jira when someone LOOKED: the story panel per ticket on open, the
-Open PRs row per board load (an in-process title cache), the auto review at run time. Now Jira is
-read when a pull request arrives in Limn and the answer is STORED; every consumer reads the row.
-Code: `src/jira/ticket-sync.ts` (the worker), `src/jira/ticket-store.ts` (reads, writes, the
-criteria derivation, the wire), `src/jira/schema.{sqlite,pg}.ts`. No `apiVersion` bump: the one
-seam change is the OPTIONAL `ProContext.registerRepoSyncedHook`.
-
-- **Two tables.** `pro_pr_jira_tickets` — one row per `(account_id, pr_id, issue_key)` (the
-  `onConflictDoUpdate` target): workspace, Jira site (`api_root`), browse URL, `detected_from`
-  (`title`/`branch`) + `detect_order`, title, description and the acceptance criteria (markdown),
-  the field the criteria came from (`ac_field_id`/`_name`/`_source` = `setting`|`default`), issue
-  type, status name + `status_category` (`new`/`indeterminate`/`done`), assignee (name, Jira
-  account id or Server key, https avatar), every candidate text field (`candidates_json`, so the
-  "Change" picker opens with no Jira call), and the read state: `state`
-  (`ok`/`not_found`/`no_access`/`failed`), `error_code`, `fetched_at` (last good read),
-  `checked_at`, `next_check_at`. `pro_jira_ac_fields` — the criteria field per
-  `(account_id, workspace_id, api_root, issue_type_id)`. No FKs; ticket rows pruned per PR in
-  `pruneProByPrIds`, both erased with the account. Column parity: `test/jira-ticket-schema-parity.test.ts`.
-- **The worker is PULL-BASED, like core's ML enrichment.** Each pass re-derives the work: every
-  OPEN PR in a workspace whose tracker is Jira with a saved token → detection (title + head branch;
-  ⚠ the PR body is NOT a detection source — lean storage does not keep it) → a ticket is DUE when it
-  has no row (a new PR, or a title/branch edit that changed the key set), its row came from another
-  Jira site, or `next_check_at` passed. A key the PR no longer names has its row DELETED. A key that
-  only moved (branch → title, reordered) is re-labelled without a call.
-- **TTLs**: 30 min after a good read (so status, assignee and title stay fresh on open PRs), 10 min
-  after a transient failure (the row KEEPS its content and stays `ok`), 6 h after Jira said
-  `not_found` / `no_access` (content cleared — a 404 is a positive statement). Closed and merged
-  PRs are not walked by the open-PR pass; their rows stay as last read.
-- **MERGED PRs get the rows they never had** (no migration). A PR that was open when seen KEEPS its
-  rows after it merges — never TTL-refreshed, re-labelled or pruned. A PR that merged BEFORE the
-  worker saw it (it predates the worker, merged between passes, or the deep backfill brought it in
-  already merged) used to have no row, so core's ticket review never counted it (BMD-1040 saw 2 of
-  its 6 PRs). Each pass now also takes MERGED PRs — never closed-unmerged — merged in the last 90
-  days with no row (or only a `failed` one), in MISSING-ONLY mode: a key with no row or a row from
-  another site is read, a `failed` row is retried on its TTL, nothing else.
-  - **One-time per repo.** A repo's 90-day window is scanned ONCE; after that only PRs merged in
-    the last 24 h, and rows newer than the repo's highest PR id at the scan (what the deep backfill
-    inserts), are looked at. A PR still owed a row (budget, backoff, no token, a transient failure)
-    is remembered BY ID and revisited each pass, so it never forces a rescan of its repo. A
-    repo-walk kick re-opens that repo's window at most every 30 min (`FULL_RESCAN_MS`); a settings
-    kick re-opens the account's. A PR is settled only when its rows sit on its workspace's CURRENT
-    site, so a site move reads it again. The markers are in memory, so a restart scans again —
-    database reads only.
-  - ⚠ **One Jira read per ticket, never per PR.** A merged-only ticket already stored on the same
-    site in the same account is COPIED from its freshest row, criteria re-derived with the PR's own
-    workspace field, with NO call (`stats.copied`); the rest join the pass's per-(workspace, key)
-    dedup. Merged-only tickets queue after new open tickets and before TTL refreshes, inside the
-    same 40 / 200 budgets, behind the same workspace token gate and backoff.
-  - A new or copied row sets `changed_at`, so `listChangedTicketIdents` hands the ticket to core's
-    sweeper; `ticketMembers` returns merged members (core takes state from `pull_requests`).
-- **Bounds**: at most `TICKET_LINKS_TITLE_LOOKUPS` (40) tickets per account per pass and 200 per
-  tick, new tickets first then the longest overdue, 4 at a time, each key read ONCE per workspace
-  per pass and written to every PR that names it.
-- **Triggers**: a `*/2` cron tick (`jira-tickets`, host `registerScheduledJob`); a kick after
-  every completed repo walk (`registerRepoSyncedHook`, core `sync/repo-synced-hooks.ts`, called from
-  `runSyncForRepo`'s post-walk chain — fire-and-forget, never holds the repo's slot, never inside a
-  transaction); a kick when the workspace's tracker or token is saved; a TARGETED kick from
-  `ticket-links` for the listed PRs that have a detected ticket with no row (so a closed PR, which
-  the open-PR pass never walks, converges too). One pass per account at a time; a kick that lands
-  mid-pass folds into one more pass.
-- ⚠ **Budgets are PRE-EMPTED, never surfaced.** A 401, 403, refused address or redirect backs the
-  WORKSPACE off for 30 min (a 429 for 5), in memory, keyed on a fingerprint of (site, email,
-  token) — saving a new token ends it at once. No row is written for a workspace-wide refusal; a 403
-  also records `no_access` on that ticket. A person pressing Refresh bypasses the backoff. Logs carry
-  account + workspace + the error CODE only.
-- **The criteria field moved SERVER-SIDE.** It was per-browser localStorage (per site + issue
-  type), which the worker and the auto review could not read. `deriveAc` = `defaultAcCandidate(
-  candidates, the workspace's field for the issue type)`: the chosen field when this ticket has it
-  with text, else the strong name match, else none — ONE rule for the worker, the route and the
-  re-derivation. `PUT /api/pro/prs/:id/jira-ticket/ac-field` writes it (a field the ticket does not
-  carry → 400), re-derives EVERY stored ticket of that issue type in the workspace from its stored
-  candidates (no Jira call), marks them due, and re-reads the named ticket; `fieldId: null` is
-  "Reset to default". The SPA moves an old localStorage choice to the server ONCE
-  (`legacyAcFieldToMigrate`) and deletes the key. "None of these" stays a per-tab choice, never
-  stored. `jira_ac_field_*` on `pro_workspace_settings` stay dormant.
-- **Consumers.** `GET /api/pro/prs/:id/jira-ticket` answers the stored row (a ticket the worker
-  never reached is read ONCE through the worker's own body, `syncOnePrNow`); `POST …/refresh`
-  forces a re-read; the Open PRs row reads rows and kicks; the auto review's story fill
-  (`resolveAutoReviewTicket`) reads rows (same once-only fallback). `fetchJiraIssueTitle` is unused
-  and the in-process title cache is gone.
-- **The ticket review's peers seam (plugin migration 0039, `src/jira/ticket-peers.ts`).** Core's
-  TICKET review (one review per ticket across every PR on it; docs/CLAUDE-REVIEW.md § Ticket review)
-  reads membership from these rows through FOUR OPTIONAL agentic-seam members, registered beside
-  `resolveReviewTicket` in `src/index.ts` — no `apiVersion` bump:
-  `ticketsForPr(account, pr)` (the PR's detected tickets as review stories, ident
-  `jira:<apiRoot>#<KEY>`), `ticketMembers(account, ident)` (every PR on that ticket: this account,
-  the same `api_root`, ANY workspace, `state = 'ok'`; merged PRs stay — core decides open / merged /
-  closed), `ticketStory(account, ident)` (THE story: the freshest `ok` row by `fetched_at`, then id)
-  and `listChangedTicketIdents(account, since)` (rows whose `changed_at` moved). Plugin 0039 adds
-  `changed_at` and the `(account_id, api_root, issue_key)` / `(account_id, changed_at)` indexes;
-  `changed_at` is written ONLY by `ticket-store.ts`, and only when membership or story TEXT moves
-  (`storyOrMembershipMoved` — a status or assignee change is not a change).
-  ⚠ **The seam reads STORED rows only** (`resolvePrTickets(..., { storedOnly: true })`): core calls
-  it from VIEW paths (the PR pane, Open PRs' polled states, the sweeper's 100-PR tick), so the
-  fetch-on-miss the auto fill keeps would put Jira calls on the `read` tier. ⚠ **ONE story per
-  ticket**: never "the first member's row" — the worker refreshes OPEN PRs only, so a merged PR's row
-  keeps the text it merged with, and two callers reading two rows hashed two stories.
+These two sections (plugin migrations 0035 and 0038/0039: the sealed per-workspace Jira token, the
+`pro_pr_jira_tickets` worker, the acceptance-criteria field choice, the Open PRs ticket row and
+stacks, the ticket review's peers seam) now describe CORE code. The whole contract — the tracker
+seam, the worker, the idents, the credential, the routes and how the plugin-era data was moved — is
+**[TRACKERS.md](TRACKERS.md)**. The plugin keeps none of it: `src/jira/` and `src/issue-links/` are
+deleted, plugin `0038`/`0039` are `SELECT 1;` stubs, the `issue_*` / `jira_*` columns on
+`pro_workspace_settings` are dormant, and `ProContext` lost `registerPrDetailEnricher`,
+`registerAgenticProviders`, `registerRepoSyncedHook` and `host.sealSecret` / `openSecret`
+(apiVersion 22 → 23).
 
 ### The Bots ROI panel is paid — the whole panel, and where the free line falls
 

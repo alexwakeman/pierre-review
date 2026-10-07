@@ -49,6 +49,7 @@ import {
   acCandidateLabel,
   browserAcMemory,
   fillableJiraTickets,
+  trackerNameOf,
   unfillableJiraTickets,
   jiraFillNote,
   jiraSiteOf,
@@ -601,7 +602,9 @@ export function ClaudeReviewTicketPanel({
   };
 
   const current = value[selected];
-  const pullLabel = pullable.length === 1 ? `Pull ${pullable[0]} from Jira` : `Pull all from Jira (${pullable.length})`;
+  const tracker = trackerNameOf(fillable);
+  const pullLabel =
+    pullable.length === 1 ? `Pull ${pullable[0]} from ${tracker}` : `Pull all from ${tracker} (${pullable.length})`;
 
   // "+ Add story": reveal the tabs, with a blank story when there is none yet.
   const reveal = (): void => {
@@ -632,11 +635,11 @@ export function ClaudeReviewTicketPanel({
   const info = (
     <InfoButton title="Add a story">
       <p>
-        Paste a story to check this pull request against it, or pull a Jira ticket named on the pull
+        Paste a story to check this pull request against it, or pull a ticket named on the pull
         request to read its story and pick the field its criteria come from. Up to{' '}
         {CLAUDE_REVIEW_MAX_TICKETS} at a time.
       </p>
-      <p className="mt-2">A pulled ticket is shown as Limn last read it from Jira. Refresh reads it again.</p>
+      <p className="mt-2">A pulled ticket is shown as Limn last read it from {tracker}. Refresh reads it again.</p>
     </InfoButton>
   );
 
@@ -652,7 +655,7 @@ export function ClaudeReviewTicketPanel({
           Add story
         </button>
         {hintText !== '' && <span className={`text-xs ${check.ok ? MUTED : ERROR_TEXT}`}>{hintText}</span>}
-        {busy && <span className={`text-xs ${MUTED}`}>Pulling from Jira…</span>}
+        {busy && <span className={`text-xs ${MUTED}`}>Pulling from {tracker}…</span>}
         {pullButton}
         {info}
       </div>
@@ -685,7 +688,7 @@ export function ClaudeReviewTicketPanel({
                   key={k}
                   type="button"
                   onClick={() => pullKeys([k])}
-                  aria-label={`Pull ${k} from Jira`}
+                  aria-label={`Pull ${k} from ${tracker}`}
                   className={`${BTN} font-mono`}
                 >
                   {k}
@@ -695,7 +698,8 @@ export function ClaudeReviewTicketPanel({
           )}
           {fillable.length === 0 && unfillable.length > 0 && (
             <p className={`mb-1.5 text-xs ${MUTED}`}>
-              To pull {unfillable.map((t) => t.key).join(', ')}, add a Jira API token in Settings for the{' '}
+              To pull {unfillable.map((t) => t.key).join(', ')}, add{' '}
+              {unfillable.every((t) => t.provider === 'linear') ? 'a Linear API key' : 'a Jira API token'} in Settings for the{' '}
               {prWorkspaceName != null ? `${prWorkspaceName} workspace` : 'workspace this repository is in'}.
             </p>
           )}

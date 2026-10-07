@@ -88,6 +88,20 @@ export function isLimited(accountId: number): boolean {
 }
 
 /**
+ * The CHEAP-CONSUMER pre-emption test: true while the account is hard-limited, or while its last
+ * observed primary budget is under `floor` and that window has not reset yet. A background reader
+ * that must never surface a limit (the tracker's GitHub Issues adapter) skips its turn on this
+ * rather than waiting in `gateBudget` — the floor leaves the headroom for the walks and the user.
+ */
+export function isBudgetLow(accountId: number, floor: number = RATE_BUDGET_FLOOR): boolean {
+  const b = budgets.get(accountId);
+  if (!b) return false;
+  const now = Date.now();
+  if (b.limitedUntil != null && b.limitedUntil.getTime() > now) return true;
+  return b.remaining != null && b.remaining < floor && (b.resetAt == null || b.resetAt.getTime() > now);
+}
+
+/**
  * Wait out the account's budget window, if any. Returns 'ok' immediately when the budget
  * is healthy (the overwhelmingly common case — no timers, no allocation). Otherwise:
  *

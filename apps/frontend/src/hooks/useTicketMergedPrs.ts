@@ -4,8 +4,8 @@ import { TICKET_MERGED_PRS_MAX_KEYS, type TicketMergedPrsResponse } from '@pierr
 import { api } from '../api/client.js';
 
 // The Open PRs ticket stacks' "Merged (n)" panel: ONE request for every stack on the board (never
-// one per stack), Pro `issueLinks` only — the caller ANDs the capability into `enabled`, so an
-// unentitled account never asks (the route would 404). DB-only on the server: the stored ticket
+// one per stack), only where the workspace has a tracker (core, free — the caller passes
+// `useTrackerOn`). DB-only on the server: the stored ticket
 // rows joined to `pull_requests`, read on the workspace's Jira site.
 //
 // ⚠ `workspaceId === null` is "not resolved yet": no request until it is, and the key carries the

@@ -249,19 +249,38 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   apply are enforced in code and must stay: **never returned by any route** (`configured` only),
   **never logged** (the cron and the test route log account + workspace ids), and every write
   through the allowlist. REVISIT if core grows a mode-independent secret-sealing seam.
-- **The per-workspace Jira token (plugin 0035) IS SEALED, unlike the Slack webhook** — different
-  in KIND: it READS the team's whole tracker. Core now offers the "mode-independent sealing seam"
-  the webhook note asks for, as far as it can: the OPTIONAL `host.sealSecret` / `host.openSecret`
-  (core `auth/crypto.ts` AES-256-GCM), present whenever `ENCRYPTION_KEY` is a valid 32-byte key —
-  always in cloud, locally only if the operator set one. Stored as `sealed:v1:<iv:tag:ct>`, or
+- **The per-workspace tracker token (`workspace_trackers.auth_token`, CORE since apiVersion 23 —
+  it was the plugin's `pro_workspace_settings.jira_token`, plugin 0035, and was MOVED in its stored
+  form) IS SEALED, unlike the Slack webhook** — different in KIND: it READS the team's whole tracker.
+  Core seals it itself (`tracker/secret.ts` over `auth/crypto.ts` AES-256-GCM, wired in
+  `tracker/runtime.ts`), whenever `ENCRYPTION_KEY` is a valid 32-byte key — always in cloud, locally
+  only if the operator set one. Stored as `sealed:v1:<iv:tag:ct>`, or
   `plain:<token>` on a local install with no key (the same trust as that machine's `gh` token and
   SQLite file). This ACCEPTS the two-format cost the webhook note rejected, because a read
   credential is worth it and the prefix makes both forms readable: a `sealed:` value the host cannot
   open (key removed or rotated) reads as UNREADABLE, is never sent, and the SPA says "save it again". **Never returned by any route** (`hasToken` only), **never
-  logged** (the Jira routes log account, workspace and an error CODE — not the error object), and
-  **not in the account export** (core's export never reads plugin tables). Changing the tracker's
-  base URL to another host REMOVES the saved token, so it cannot be redirected to a new site.
-- **Jira SSRF (plugin `jira/fetch.ts`) — the base URL is customer-typed, so every Jira call is a
+  logged** (the tracker routes and worker log account, workspace and an error CODE — not the error
+  object), and **not in the account export** (`db/export-account.ts` exports the tracker row with
+  the token reduced to `hasToken`; pinned in `db/erase-account.test.ts`). Changing the tracker's
+  base URL to another SITE REMOVES the saved token, so it cannot be redirected to a new site.
+- **The Linear personal API key** (CORE, phase 3 — docs/TRACKERS.md § Linear) lives in the SAME
+  slot under the SAME rules: sealed, write-only (`hasToken`), never logged, never exported, removed
+  by `clearToken`. Its "site" is the Linear WORKSPACE, not the host: every Linear workspace is on
+  linear.app, so moving the URL from `linear.app/acme` to `linear.app/other` removes it. There is
+  **no SSRF surface**: the workspace URL is an identity, never fetched, and every call goes to the
+  FIXED `https://api.linear.app/graphql` — still through the tracker transport (no redirects, so the
+  key is never forwarded; 10 s timeout; 5 MB cap; https + public addresses in cloud). The key is sent
+  as `Authorization: <key>` (never `Bearer`). The PUT refuses a value not shaped like a personal key
+  (`lin_api_…`), so a GitHub or Jira token pasted into the wrong box is never stored or sent to
+  Linear. A key belonging to another Linear workspace than the saved URL is refused on read
+  (`bad_url`, workspace backoff) rather than storing that workspace's tickets under this one's
+  idents. Linear's rate limits are pre-empted from its `x-ratelimit-*` headers per key (in memory)
+  and a `RATELIMITED` answer is a quiet 5-minute workspace backoff. The connection check
+  (`GET …/tracker/linear-check`) is on `search` in `tierFor`. ⚠ OAuth for cloud is NOT built: a cloud
+  user pastes a personal key, which reads everything that user can see in Linear — the same scope a
+  Jira API token has.
+- **Jira SSRF (core `tracker/jira/fetch.ts`, moved intact from the plugin at apiVersion 23) — the
+  base URL is customer-typed, so every Jira call is a
   server-side request to a place they chose.** ONE helper, `jiraGetJson`, makes every call: GET
   only, 10s timeout, 5 MB body cap, JSON only, and **NO REDIRECTS** — any 3xx is an error, so the
   Authorization header is never forwarded to a host nobody chose. In CLOUD additionally: https
@@ -272,8 +291,10 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   rebinding to exploit. LOCAL allows http and LAN hosts (on-prem Jira; the operator is the only
   caller). A failure answers `502` with a sentence we wrote — never Jira's body. The ticket route
   additionally refuses any key the PR's own detection did not find, so the saved token cannot be
-  used as a general Jira reader. Pinned in `packages/pro/test/jira-fetch.test.ts` (real sockets)
-  and `jira-routes.test.ts`.
+  used as a general Jira reader. Pinned in `apps/backend/src/tracker/jira/fetch.test.ts` (real
+  sockets) and `tracker/routes.test.ts`. Rate tiers: every route that can reach the customer's Jira
+  (the ticket GET/refresh/ac-field, the connection check, the tracker PUT and `POST
+  /api/ticket-links`, whose kicks spend it) is on `search`, by exact path in `tierFor`.
 - **`resolution-check` fan-out (plugin)**: `MAX_TARGETS_PER_BATCH` 50 + per-account in-flight set
   + 30s interval + abort wiring on the JSON twin. One billed LLM call per thread, uncapped, on an
   app built for bot-flooded PRs.

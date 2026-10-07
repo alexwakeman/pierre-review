@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import type { TimelinePr } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
-import { useProCapabilities, useScopedOpenPrs } from '../../hooks/useTriage.js';
+import { useScopedOpenPrs } from '../../hooks/useTriage.js';
+import { useTrackerOn } from '../../hooks/useWorkspaceTracker.js';
 import { useOpenPrsView } from '../../store/openPrsView.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
@@ -16,7 +17,7 @@ import type { OpenPrsSort } from '../../lib/openPrsSort.js';
 // opener (the tab chip, the Reports → Flow metrics "Open PRs" tile, the per-repo "Show all N open
 // PRs" footer) just reveals it; the footer also pre-selects its repo in the tab's own dropdown.
 // Clicking a card opens the PR's detail tab. The order is the header's Sort menu (no column headings).
-// With the tracker on (Pro `issueLinks`) the header adds "Group by ticket / List" — grouped is the
+// With a tracker configured for the workspace (core, free) the header adds "Group by ticket / List" — grouped is the
 // default, remembered per viewer (store/openPrsView.ts); without it the toggle is absent and the
 // page is the list. The header's count is distinct PRs: a PR shown in two ticket stacks is one PR.
 
@@ -40,7 +41,6 @@ export function OpenPrsDetail(): JSX.Element {
   const prs = useMemo(() => data?.prs ?? [], [data]);
   // null = the default activity order.
   const [sort, setSort] = useState<OpenPrsSort | null>(null);
-  const ticketsOn = useProCapabilities().issueLinks;
   const view = useOpenPrsView((s) => s.view);
 
   // The repo dropdown narrows the loaded rows client-side (null = all). It lives in the store so
@@ -48,6 +48,8 @@ export function OpenPrsDetail(): JSX.Element {
   // picker) and not a refetch: the workspace's list is already here. A filter chosen in another
   // workspace is ignored — derived here, so there is no reset effect to race the seed.
   const workspaceId = useFilters((s) => s.workspaceId);
+  // The tracker is CORE and free (apiVersion 23): the toggle shows wherever THIS workspace has one.
+  const ticketsOn = useTrackerOn(workspaceId);
   const filter = useFilters((s) => s.openPrsRepoFilter);
   const setRepoSel = useFilters((s) => s.setOpenPrsRepoFilter);
   const repoSel = filter != null && filter.workspaceId === workspaceId ? filter.repoIds : null;

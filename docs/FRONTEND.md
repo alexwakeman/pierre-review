@@ -297,21 +297,23 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
      `ThreadStateBar`; nothing with no threads), merge readiness (`mergeVerdict()` through
      `MERGE_TONE_CHIP`; a draft shows only `mergeVerdictWarning`'s branch facts; `unknown` and
      `draft` draw nothing).
-  2. **The ticket row** (Pro `issueLinks`; only when the PR names a ticket — NEVER an empty row):
+  2. **The ticket row** (CORE tracker, free — shown where the workspace has one, `useTrackerOn`; only
+     when the PR names a ticket — NEVER an empty row):
      `TicketIcon`, then each ticket as `KEY · title` (key mono, title truncating, the row wraps for
      several), a link through `safeExternalUrl` or PLAIN TEXT when no link is known (never a
      guessed one). Below the chips (status is still read first), above the grey meta line (it says
      what the PR is for). `lib/cardTickets.ts` `cardTickets` merges two batched answers: ONE
-     `POST /api/pro/ticket-links` for the whole board (`useTicketLinks`, capability ANDed into
+     `POST /api/ticket-links` for the whole board (`useTicketLinks`, the tracker gate ANDed into
      `enabled`; the server's detection + the STORED Jira title / status / assignee — no Jira call
-     on view, plugin 0038 — re-asked every 3s only while `titlesComplete` is false, i.e. while the
+     on view, core `tracker_tickets` — re-asked every 3s only while `titlesComplete` is false, i.e. while the
      worker has not read a detected ticket yet) leads in detection order; the latest Claude review's stored Jira
      stories (`ClaudeReviewPrState.tickets`, already on the states answer) fill a missing title and
      add a key detection did not find, linked by its stored url, else `jiraBrowsePrefix + key`.
      ⚠ The Claude panel's story ALIGNMENT pills stay where they are: they are the review's
      judgement of the story, a different fact from "which ticket is this", so not a duplicate.
-  **GROUPED BY TICKET — the default where the tracker runs** (Pro `issueLinks`; header toggle
-  "Group by ticket / List", `OpenPrsViewToggle`, hidden without the capability). The page becomes
+  **GROUPED BY TICKET — the default where the tracker runs** (CORE, free — `useTrackerOn(workspaceId)`,
+  i.e. THIS workspace has a provider and a base URL (it replaced the Pro `issueLinks` capability at
+  apiVersion 23); header toggle "Group by ticket / List", `OpenPrsViewToggle`, hidden without one). The page becomes
   one STACK per ticket — a `<section>` landmark with an `h3` header over its cards (which drop to
   `h4`). Membership and order are the pure `lib/openPrsStacks.ts` `stackOpenPrs` (pinned in
   `test/openPrsStacks.test.ts`). **Header anatomy**: collapse chevron (the keyboard route —
@@ -1165,7 +1167,7 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
     Findings list with their chip. Every finding is still on screen once.
   - **Each block has a collapsible "Story"** (`StoryDisclosure`, `TicketStory.tsx`): key linked to
     Jira, title, description + criteria as markdown (`StoryText`). Source in order: the STORED Jira
-    row (`GET /api/pro/prs/:id/jira-ticket?key=`, ⚠ fetched only once opened — the worker read Jira
+    row (`GET /api/prs/:id/tracker-ticket?key=`, ⚠ fetched only once opened — the worker read Jira
     on receipt) when `canFetchDetails`, else the latest ticket review's `ticket` snapshot, else the
     older run's ticket. A Jira story carries the criteria-field picker (`useSetJiraAcField`, no
     "None of these"); a change invalidates `['ticket-reviews']` + the states so the block shows
@@ -1178,8 +1180,8 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
     ONLY once expanded: summary, every criterion with "Done in api#88" / "Belongs in …", missing and
     not-asked-for items, currency pill, the Story — and NO Post buttons (`viewedPrId: null` in the
     shared `TicketReviewParts.tsx`). The pane's block goes SLIM where such a stack exists
-    (`slimStoryCheck`, `lib/ticketShare.ts`: a tracker ident, `issueLinks`, an open PR on the
-    ticket): alignment + currency + reviewed-ago + Re-check, then only `prTicketShare` — criteria
+    (`slimStoryCheck`, `lib/ticketShare.ts`: a tracker ident, `trackerOn` — `PrDetail.tickets !=
+    null`, the PR's own workspace has a tracker, no extra request — an open PR on the ticket): alignment + currency + reviewed-ago + Re-check, then only `prTicketShare` — criteria
     this PR delivers, unmet criteria / missing items owned by it (item `ownerPrId`, else
     `expectedIn.prId`, else `expectedIn.repoId` against its repo; an item naming NO owner stays here,
     since its Post lands on the viewed PR and the stack has none), its not-asked-for work — a count
@@ -3109,7 +3111,7 @@ that carried no suffix.
 | 8 | `FlowSettingsSection` (working hours and budgets) | workspace | none — CORE/free, both modes, every tier |
 | 9 | `SprintSection` (cadence + comparison window) | workspace | `caps.workspaceInsights` + `proReady` |
 | 10 | `SlackSection` (schedule + the bot block) | workspace | `caps.slackDigest` + `proReady` |
-| 11 | `IssueLinksSection` | workspace | `caps.issueLinks` + `proReady` |
+| 9b | `IssueLinksSection` (the issue tracker + Jira API access) | workspace | none — CORE/free, both modes, every tier (apiVersion 23); renders above the pro-settings gate, after `FlowSettingsSection`. The Jira API access block shows whenever the SAVED tracker is Jira with a base URL — no longer behind `me.ai.enabled` (the token feeds free surfaces) |
 
 - ⚠ **THE HEADING IS THE NAMING RULE NOW, AND IT IS STILL LOAD-BEARING.** There is no workspace
   picker in Settings — the rail's selection is the scope — so a screen that does not say which team

@@ -14,7 +14,7 @@ import { eq } from 'drizzle-orm';
 import { TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW, type ClaudeReview } from '@pierre-review/shared';
 import type { RunReviewArgs, RunReviewResult } from '../../pro/contract.js';
 import type { AgentContext } from '../agent-context.js';
-import { _resetAgenticProvidersForTest, registerAgenticProviders } from '../plugin-providers.js';
+import { _resetTicketSourceForTest, _overrideTicketSourceForTest } from '../../tracker/ticket-source.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -151,7 +151,7 @@ afterAll(async () => {
 });
 
 afterEach(() => {
-  _resetAgenticProvidersForTest();
+  _resetTicketSourceForTest();
   deep = false;
 });
 
@@ -215,14 +215,14 @@ describe('the PR review checks no story', () => {
 
 describe('ticket peers on a deep review', () => {
   const providers = (members: number[]) =>
-    registerAgenticProviders({
+    _overrideTicketSourceForTest({
       ticketsForPr: async () => [
         { ident: 'jira:https://x#ENG-1', ticket: { title: 'Reset', description: null, acceptanceCriteria: null, key: 'ENG-1' }, ticketHash: 'h' },
       ],
       ticketMembers: async () => members.map((id) => ({ prId: id, workspaceId: 1 })),
     });
 
-  it('no seam ⇒ no peers', async () => {
+  it('no tickets ⇒ no peers', async () => {
     expect(await manager.reviewPeersFor({ ctx, accountId: 1, prId })).toEqual([]);
   });
 
@@ -237,7 +237,7 @@ describe('ticket peers on a deep review', () => {
 
   it('caps the peers, and a failing seam costs the block only', async () => {
     expect(TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW).toBeLessThan(6);
-    registerAgenticProviders({
+    _overrideTicketSourceForTest({
       ticketsForPr: async () => {
         throw new Error('jira down');
       },

@@ -116,6 +116,9 @@ async function deletePrSubtree(
   // AI Fix runs (core since migration 0074 / pg 0061; the plugin's retention hook used to prune
   // them). No FKs — explicit, pr-keyed.
   await tx.delete(schema.aiFixes).where(inArray(schema.aiFixes.prId, prIds)).execute();
+  // Stored tracker tickets (core since migration 0088 / pg 0075; the plugin's `pruneProByPrIds`
+  // used to take them). No FKs — explicit, pr-keyed.
+  await tx.delete(schema.trackerTickets).where(inArray(schema.trackerTickets.prId, prIds)).execute();
   await tx.delete(pullRequests).where(inArray(pullRequests.id, prIds)).execute();
   // NB: commitFiles is GLOBAL (sha-keyed, shared across PRs/tenants) — deliberately NOT
   // pruned here. users + syncState are likewise out of scope.

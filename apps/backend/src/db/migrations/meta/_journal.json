@@ -617,6 +617,27 @@
       "when": 1790928000000,
       "tag": "0087_auto_post",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "6",
+      "when": 1791014400000,
+      "tag": "0088_issue_tracker",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "6",
+      "when": 1791100800000,
+      "tag": "0089_github_issue_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "6",
+      "when": 1791187200000,
+      "tag": "0090_linear_links",
+      "breakpoints": true
     }
   ]
 }

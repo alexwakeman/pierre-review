@@ -45,8 +45,10 @@ export const CLAUDE_REVIEW_TICKET_MAX_CRITERIA = 40;
 // The most user stories one review carries (each is assessed on its own).
 export const CLAUDE_REVIEW_MAX_TICKETS = 5;
 
-/** A tracker key as detection emits it (`PROJ-123`). */
-export const TICKET_KEY_RE = /^[A-Z][A-Z0-9_]{0,19}-\d{1,9}$/;
+/** A tracker key as detection emits it: Jira/Linear `PROJ-123`, or a GitHub issue `owner/repo#12`
+ *  (lower-cased — see `githubIssueKey`). */
+export const TICKET_KEY_RE =
+  /^(?:[A-Z][A-Z0-9_]{0,19}-\d{1,9}|[a-z0-9][a-z0-9-]{0,38}\/[a-z0-9._-]{1,100}#\d{1,9})$/;
 const TICKET_URL_MAX = 2000;
 
 /** 'T1'… — the ref of the ticket at `index` (0-based), as Claude sees it. */
@@ -434,19 +436,37 @@ export function stripStoredStoryLead(body: string, story: ClaudeFindingStory | n
 // A ticket review is keyed by an IDENT (types.ts § Ticket review). The manual form's hash is
 // computed on the server (it needs sha256); the SPA only ever echoes idents it was given.
 
-const JIRA_IDENT_RE = /^jira:(.+)#([A-Z][A-Z0-9_]{0,19}-\d{1,9})$/;
+// THE TICKET IDENT — `<provider>:<root>#<KEY>`, one string per ticket whoever names it (docs/TRACKERS.md
+// § Identity). `root` is the provider's CANONICAL site root (Jira: `jiraApiRoot` below), so the same
+// site and key are the same ticket across workspaces, repos and callers. Jira idents are unchanged
+// from before the tracker seam (`jira:<apiRoot>#<KEY>`), so every stored ticket review keeps its key.
+//
+// ⚠ ONE KEY SHAPE PER PROVIDER, AND A PROVIDER WITH NO SHAPE DOES NOT PARSE (a request body cannot
+// smuggle an ident in for a provider no adapter reads). Jira, GitHub Issues and Linear all read now.
+const TICKET_KEY_SHAPE: Record<'jira' | 'github' | 'linear', RegExp | null> = {
+  jira: /^[A-Z][A-Z0-9_]{0,19}-\d{1,9}$/,
+  // A GitHub ident's key is the issue NUMBER; its root names the repository (below).
+  github: /^\d{1,9}$/,
+  // A Linear key is the team key and the issue number, upper-cased: `ENG-123`.
+  linear: /^[A-Z][A-Z0-9_]{0,19}-\d{1,9}$/,
+};
+// A GitHub ident's root: `https://github.com/<owner>/<repo>`, lower-cased.
+const GITHUB_IDENT_ROOT_RE = /^https:\/\/github\.com\/[a-z0-9][a-z0-9-]{0,38}\/[a-z0-9._-]{1,100}$/;
+// A Linear ident's root: `https://linear.app/<workspace url key>`, lower-cased (`linearSiteRoot`).
+const LINEAR_IDENT_ROOT_RE = /^https:\/\/linear\.app\/[a-z0-9][a-z0-9_-]{0,63}$/;
+const TRACKER_IDENT_RE = /^(jira|github|linear):(.+)#([^#]+)$/;
 const MANUAL_IDENT_RE = /^manual:(\d{1,12}):([0-9a-f]{8})$/;
 // An ident is bounded so a request body can never carry an unbounded key.
 export const TICKET_IDENT_MAX_CHARS = 600;
 
 /**
- * ⚠ THE ONE DERIVATION OF A JIRA API ROOT — the plugin runs it on the workspace's tracker base URL
- * (what it stores as `api_root` and builds every ident on), the SPA on a ticket's browse link
+ * ⚠ THE ONE DERIVATION OF A JIRA API ROOT — core's tracker runs it on the workspace's tracker base
+ * URL (what it stores as `api_root` and builds every ident on), the SPA on a ticket's browse link
  * (`<base>/browse/<KEY>`), so both land on the same root. Scheme + host + port + the context path,
  * with everything from a `browse` / `rest` / `secure` segment onwards, the query, the hash and
  * trailing slashes removed. null for anything that is not an absolute http(s) URL. It lives here,
  * not in either caller, because a second copy that drifts by one character splits one ticket into
- * two idents.
+ * two idents. (The Jira adapter's `siteRoot` IS this function.)
  */
 // `shared` compiles with no DOM or Node lib, so the WHATWG `URL` both runtimes provide is declared
 // here, module-scoped, with only the members this fold reads.
@@ -468,19 +488,180 @@ export function jiraApiRoot(baseUrl: string | null | undefined): string | null {
   return `${url.protocol}//${url.host}${path}`;
 }
 
-/** 'jira:<apiRoot>#<KEY>' — the same Jira site and key are the same ticket across workspaces. */
-export const jiraTicketIdent = (apiRoot: string, key: string): string => `jira:${apiRoot}#${key}`;
+/** `<provider>:<root>#<KEY>` — THE ident builder. `root` must already be the canonical root. */
+export const ticketIdent = (provider: 'jira' | 'github' | 'linear', root: string, key: string): string =>
+  `${provider}:${root}#${key}`;
 
-export type ParsedTicketIdent =
-  | { kind: 'jira'; apiRoot: string; key: string }
-  | { kind: 'manual'; prId: number; hash: string };
+/** 'jira:<apiRoot>#<KEY>' — the same Jira site and key are the same ticket across workspaces. */
+export const jiraTicketIdent = (apiRoot: string, key: string): string => ticketIdent('jira', apiRoot, key);
+
+/** A tracker ticket's parsed ident. `apiRoot` is `root` under its historical (Jira) name. */
+export interface ParsedTrackerIdent {
+  kind: 'jira' | 'github' | 'linear';
+  provider: 'jira' | 'github' | 'linear';
+  root: string;
+  apiRoot: string;
+  key: string;
+}
+
+export type ParsedTicketIdent = ParsedTrackerIdent | { kind: 'manual'; prId: number; hash: string };
+
+/** A ticket that lives in a TRACKER (members from the stored tickets), as opposed to a pasted story. */
+export function isTrackerIdent(p: ParsedTicketIdent | null | undefined): p is ParsedTrackerIdent {
+  return p != null && p.kind !== 'manual';
+}
 
 /** null for anything that is not a well-formed ident. */
 export function parseTicketIdent(ident: string): ParsedTicketIdent | null {
   if (typeof ident !== 'string' || ident.length === 0 || ident.length > TICKET_IDENT_MAX_CHARS) return null;
-  const j = JIRA_IDENT_RE.exec(ident);
-  if (j) return { kind: 'jira', apiRoot: j[1]!, key: j[2]! };
+  const t = TRACKER_IDENT_RE.exec(ident);
+  if (t) {
+    const provider = t[1] as ParsedTrackerIdent['provider'];
+    const shape = TICKET_KEY_SHAPE[provider];
+    const key = t[3]!;
+    if (shape == null || !shape.test(key)) return null;
+    if (provider === 'github' && !GITHUB_IDENT_ROOT_RE.test(t[2]!)) return null;
+    if (provider === 'linear' && !LINEAR_IDENT_ROOT_RE.test(t[2]!)) return null;
+    return { kind: provider, provider, root: t[2]!, apiRoot: t[2]!, key };
+  }
   const m = MANUAL_IDENT_RE.exec(ident);
   if (m) return { kind: 'manual', prId: Number(m[1]), hash: m[2]! };
   return null;
 }
+
+// ---- GitHub Issues keys (docs/TRACKERS.md § GitHub Issues) ----
+//
+// A GitHub issue is named by its repository AND its number, and one pull request may close issues
+// in several repositories, so the KEY a PR's ticket is stored and shown under is `owner/repo#12`
+// (lower-cased: GitHub names are case-insensitive, and the same issue must be one key whoever
+// wrote it). Every GitHub row is stored on ONE site, `GITHUB_TRACKER_ROOT`, so every "same site"
+// comparison the tracker makes holds unchanged.
+//
+// The IDENT names the repository in its ROOT and the number as its key —
+// `github:https://github.com/owner/repo#12`. `trackerTicketIdent` / `trackerTicketRow` are the two
+// directions between a stored row (provider, api_root, issue_key) and that ident, and they are the
+// ONLY place the two spellings meet: for Jira and Linear both are the identity.
+
+/** The site every GitHub Issues row is stored on (`tracker_tickets.api_root`). */
+export const GITHUB_TRACKER_ROOT = 'https://github.com';
+
+const GITHUB_ISSUE_KEY_RE = /^([a-z0-9][a-z0-9-]{0,38})\/([a-z0-9._-]{1,100})#(\d{1,9})$/;
+
+/** `owner/repo#12` from GitHub's `nameWithOwner` and an issue number; null if malformed. */
+export function githubIssueKey(nameWithOwner: string, issueNumber: number): string | null {
+  if (!Number.isInteger(issueNumber) || issueNumber <= 0) return null;
+  const key = `${nameWithOwner.trim().toLowerCase()}#${issueNumber}`;
+  return GITHUB_ISSUE_KEY_RE.test(key) ? key : null;
+}
+
+// ---- Linear (docs/TRACKERS.md § Linear) ----
+//
+// A Linear ticket lives in ONE Linear workspace (Linear calls it an organisation) and is named by
+// its team key and number, `ENG-123`. Its site ROOT is `https://linear.app/<urlKey>` — the
+// organisation's URL key, lower-cased, exactly the prefix of every issue URL Linear gives out
+// (`https://linear.app/acme/issue/ENG-123/some-slug`). The API host is fixed and never part of it.
+
+/** The host every Linear workspace URL lives on. */
+export const LINEAR_APP_ORIGIN = 'https://linear.app';
+
+/**
+ * ⚠ THE ONE DERIVATION OF A LINEAR ROOT — from the workspace URL typed in Settings, from an issue
+ * URL Linear returned, or from a chip's browse link: `https://linear.app/<urlKey>`, lower-cased.
+ * null for anything that is not a linear.app URL with a workspace segment.
+ */
+export function linearSiteRoot(url: string | null | undefined): string | null {
+  if (url == null) return null;
+  let u: InstanceType<typeof URL>;
+  try {
+    u = new URL(url.trim());
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  const host = u.host.toLowerCase();
+  if (host !== 'linear.app' && host !== 'www.linear.app') return null;
+  const first = (u.pathname.split('/').find((s: string) => s !== '') ?? '').toLowerCase();
+  const root = `${LINEAR_APP_ORIGIN}/${first}`;
+  return LINEAR_IDENT_ROOT_RE.test(root) ? root : null;
+}
+
+/** The parts of a GitHub issue key (case-insensitive input), or null. */
+export function parseGithubIssueKey(key: string): { owner: string; repo: string; number: number } | null {
+  const m = GITHUB_ISSUE_KEY_RE.exec(key.trim().toLowerCase());
+  if (m == null) return null;
+  return { owner: m[1]!, repo: m[2]!, number: Number(m[3]) };
+}
+
+/** True for a GitHub issue key (`owner/repo#12`, any case). */
+export const isGithubIssueKey = (key: string): boolean => parseGithubIssueKey(key) != null;
+
+/**
+ * A key as every surface compares it: a Jira/Linear key UPPER-cased, a GitHub key lower-cased; null
+ * for anything that is neither. The server runs it on every key a request carries.
+ */
+export function canonicalTicketKey(raw: string | null | undefined): string | null {
+  const s = (raw ?? '').trim();
+  if (s === '') return null;
+  const gh = parseGithubIssueKey(s);
+  if (gh != null) return `${gh.owner}/${gh.repo}#${gh.number}`;
+  const up = s.toUpperCase();
+  return /^[A-Z][A-Z0-9_]{0,19}-\d{1,9}$/.test(up) ? up : null;
+}
+
+/** The ident of a stored ticket row. ⚠ The ONE way a row becomes an ident. */
+export function trackerTicketIdent(provider: 'jira' | 'github' | 'linear', apiRoot: string, issueKey: string): string {
+  if (provider === 'github') {
+    const gh = parseGithubIssueKey(issueKey);
+    if (gh != null) return ticketIdent('github', `${GITHUB_TRACKER_ROOT}/${gh.owner}/${gh.repo}`, String(gh.number));
+  }
+  return ticketIdent(provider, apiRoot, issueKey);
+}
+
+/** The stored row identity of a parsed tracker ident — the inverse of `trackerTicketIdent`. */
+export function trackerTicketRow(parsed: ParsedTrackerIdent): {
+  provider: 'jira' | 'github' | 'linear';
+  apiRoot: string;
+  issueKey: string;
+} {
+  if (parsed.provider === 'github') {
+    const repoPath = parsed.root.slice(GITHUB_TRACKER_ROOT.length + 1);
+    return { provider: 'github', apiRoot: GITHUB_TRACKER_ROOT, issueKey: `${repoPath}#${parsed.key}` };
+  }
+  return { provider: parsed.provider, apiRoot: parsed.root, issueKey: parsed.key };
+}
+
+/**
+ * A detected ticket link's ident, from what a PR's chip carries (key, browse URL, provider) — the
+ * SPA's half of the same rule. Jira folds the browse link onto its API root (`jiraApiRoot`); GitHub
+ * needs only the key; Linear folds the link onto its workspace root (`linearSiteRoot`). null for an
+ * unusable link.
+ */
+export function ticketIdentForLink(link: { key: string; url: string | null; provider?: string | null }): string | null {
+  const provider = link.provider ?? 'jira';
+  let ident: string | null = null;
+  if (provider === 'github') {
+    const key = canonicalTicketKey(link.key);
+    if (key != null && isGithubIssueKey(key)) ident = trackerTicketIdent('github', GITHUB_TRACKER_ROOT, key);
+  } else if (provider === 'jira') {
+    const key = link.key.trim().toUpperCase();
+    const root = jiraApiRoot(link.url);
+    if (key !== '' && root != null) ident = jiraTicketIdent(root, key);
+  } else if (provider === 'linear') {
+    const key = link.key.trim().toUpperCase();
+    const root = linearSiteRoot(link.url);
+    if (key !== '' && root != null) ident = ticketIdent('linear', root, key);
+  }
+  return ident != null && parseTicketIdent(ident) != null ? ident : null;
+}
+
+/** Providers whose tickets Limn READS (title, story, criteria) — every provider since Linear's reader
+ *  (phase 3). Whether THIS workspace can read is `TicketRef.canFetchDetails` (a token saved). */
+export const isReadingTrackerProvider = (p: string | null | undefined): boolean =>
+  p === 'jira' || p === 'github' || p === 'linear';
+
+/** The product's own name for a provider, for "Open in …" copy. */
+export const TRACKER_PROVIDER_LABEL: Record<'jira' | 'github' | 'linear', string> = {
+  jira: 'Jira',
+  github: 'GitHub',
+  linear: 'Linear',
+};

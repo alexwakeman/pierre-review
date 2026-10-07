@@ -27,6 +27,7 @@ import { authRoutes } from './api/routes/auth.js';
 import { healthRoutes } from './api/routes/health.js';
 import { aiRuntimeRoutes } from './api/routes/ai-runtime.js';
 import { registerAgenticRoutes } from './review/agentic.js';
+import { registerTracker } from './tracker/index.js';
 import { repoRoutes } from './api/routes/repos.js';
 import { workspaceRoutes } from './api/routes/workspaces.js';
 import { userRoutes } from './api/routes/users.js';
@@ -297,6 +298,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   // memory and AI Fix's fixer. CORE and FREE, LOCAL ONLY: `registerAgenticRoutes` registers
   // NOTHING in cloud (an explicit `isCloud` check) or under LIMN_AI_DISABLED. review/agentic.ts.
   registerAgenticRoutes(app);
+  // THE ISSUE TRACKER (CORE, FREE, BOTH MODES — apiVersion 23; docs/TRACKERS.md): the workspace's
+  // tracker settings, the stored-ticket routes behind the PR pane's story panel, the Open PRs ticket
+  // row and stacks. Unconditional: no capability, no plugin.
+  registerTracker(app);
 
   return app;
 }

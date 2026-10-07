@@ -1,11 +1,9 @@
 import type { TicketRef } from '@pierre-review/shared';
 
-// PR-detail enrichment seam. Core `getPrDetail` builds the base PrDetail; the private @pierre/pro
-// plugin registers an enricher here (bind.ts wires registerPrDetailEnricher into the ProContext)
-// that computes Jira/Linear ticket links COMPUTE-ON-READ from the PR title + head branch against
-// the account's configured provider/base URL. A single nullable provider: null ⇒ inert ⇒
-// PrDetail.tickets stays null (no ticket UI, free tier). accountId scopes every read the
-// enricher does.
+// PrDetail.tickets — the PR's tracker tickets, compute-on-read from the PR title + head branch
+// against its WORKSPACE's tracker. Until apiVersion 23 this was a plugin seam
+// (`registerPrDetailEnricher`, inert in OSS); the tracker is CORE now (tracker/enricher.ts), so
+// `getPrDetail` answers it in every install, plugin or not.
 export interface PrEnrichInput {
   accountId: number;
   prId: number;
@@ -15,41 +13,16 @@ export interface PrEnrichInput {
   headRefName: string | null;
 }
 
-export interface PrTicketEnrichment {
-  // Whether a ticket provider (Jira/Linear) is configured for this account. When true and
-  // `tickets` is empty, core renders a muted "No ticket found"; when false core renders nothing
-  // (PrDetail.tickets → null).
-  configured: boolean;
-  tickets: TicketRef[];
-}
-
-export type PrDetailEnricher = (
-  input: PrEnrichInput,
-) => Promise<PrTicketEnrichment | null> | PrTicketEnrichment | null;
-
-// Process-local singleton, registered once at boot inside the plugin's register(). Inert in OSS.
-let enricher: PrDetailEnricher | null = null;
-
-export function registerPrDetailEnricher(e: PrDetailEnricher): void {
-  enricher = e;
-}
-
-export function getPrDetailEnricher(): PrDetailEnricher | null {
-  return enricher;
-}
-
-// Resolve the tri-state PrDetail.tickets value via the registered enricher (if any), so
-// getPrDetail calls exactly one helper. null = feature off / no provider configured; [] = a
-// provider is configured but no ticket key was found; [..] = detected tickets. Never throws.
-export async function resolvePrTickets(
-  input: PrEnrichInput,
-): Promise<TicketRef[] | null> {
-  const e = enricher;
-  if (!e) return null;
+// The tri-state PrDetail.tickets value: null = no tracker for this PR's workspace; [] = a tracker
+// is configured but no ticket key was found; [..] = detected tickets. Never throws.
+export async function resolvePrTickets(input: PrEnrichInput): Promise<TicketRef[] | null> {
   try {
-    const res = await e(input);
-    if (!res || !res.configured) return null;
-    return res.tickets;
+    // Lazy: tracker/runtime.ts opens the database client at import time (see tracker/ticket-source.ts).
+    const [{ prTicketRefs }, { trackerContext }] = await Promise.all([
+      import('../tracker/enricher.js'),
+      import('../tracker/runtime.js'),
+    ]);
+    return await prTicketRefs(trackerContext(), input);
   } catch {
     return null; // enrichment is best-effort; never fail the PR-detail read
   }

@@ -1,5 +1,5 @@
 import type { JiraAcCandidate, JiraTicketDetails, TicketRef } from '@pierre-review/shared';
-import { defaultAcCandidate } from '@pierre-review/shared';
+import { TRACKER_PROVIDER_LABEL, defaultAcCandidate, isReadingTrackerProvider } from '@pierre-review/shared';
 import type { TicketDraft } from './claudeReviewFollowUp.js';
 
 // Pure helpers for the Claude Review panel's "Fill from KEY" and its "Acceptance criteria from"
@@ -21,17 +21,29 @@ import type { TicketDraft } from './claudeReviewFollowUp.js';
  */
 export function fillableJiraTickets(tickets: readonly TicketRef[] | null | undefined): TicketRef[] {
   if (!tickets) return [];
-  return tickets.filter((t) => t.provider === 'jira' && t.canFetchDetails === true);
+  // Every READING tracker (Jira, GitHub Issues), not only Jira.
+  return tickets.filter((t) => isReadingTrackerProvider(t.provider) && t.canFetchDetails === true);
 }
 
+/** The tracker these tickets come from, by name ("Jira", "GitHub"), or "the tracker" when mixed. */
+export function trackerNameOf(tickets: readonly Pick<TicketRef, 'provider'>[] | null | undefined): string {
+  const providers = [...new Set((tickets ?? []).map((t) => t.provider))];
+  return providers.length === 1 && providers[0] != null ? TRACKER_PROVIDER_LABEL[providers[0]] : 'the tracker';
+}
+
+/** A ticket whose criteria SOURCE is fixed by its tracker (GitHub Issues, Linear: sub-issues, a task
+ *  list or an "Acceptance criteria" section), so there is no field to pick. */
+export const hasFixedAcSource = (ref: Pick<TicketRef, 'provider'> | null | undefined): boolean =>
+  ref?.provider === 'github' || ref?.provider === 'linear';
+
 /**
- * Jira tickets detected on the PR that CANNOT be filled — the PR's own workspace (the one that
- * owns its repo, not the workspace being viewed) has no Jira token. The panel names that
- * workspace instead of silently showing no button.
+ * Jira or Linear tickets detected on the PR that CANNOT be filled — the PR's own workspace (the one
+ * that owns its repo, not the workspace being viewed) has no saved token / API key. The panel names
+ * that workspace instead of silently showing no button. (GitHub Issues needs no token.)
  */
 export function unfillableJiraTickets(tickets: readonly TicketRef[] | null | undefined): TicketRef[] {
   if (!tickets) return [];
-  return tickets.filter((t) => t.provider === 'jira' && t.canFetchDetails !== true);
+  return tickets.filter((t) => (t.provider === 'jira' || t.provider === 'linear') && t.canFetchDetails !== true);
 }
 
 /** The draft after a fill: title and description REPLACED; the criteria are left for the picker. */

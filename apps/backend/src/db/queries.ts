@@ -10130,6 +10130,9 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       // (~MiB patches). No FKs, so nothing would cascade; before this the plugin had no deleteRepo
       // hook at all and they were orphaned on a repo removal.
       await tx.delete(schema.aiFixes).where(inArray(schema.aiFixes.prId, prIds)).execute();
+      // Stored tracker tickets (core since migration 0088 / pg 0075; the plugin used to prune them
+      // per PR). No FKs, so nothing would cascade.
+      await tx.delete(schema.trackerTickets).where(inArray(schema.trackerTickets.prId, prIds)).execute();
       await tx.delete(pullRequests).where(eq(pullRequests.repoId, id)).execute();
     }
     // The workspace membership row references this repo (the composite FK is ON DELETE cascade,

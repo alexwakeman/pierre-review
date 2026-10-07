@@ -23,8 +23,6 @@ import type {
 } from '@pierre-review/shared';
 import type { CompareDiffResult } from '../github/compare.js';
 import type { PrReviewCommentHunks } from '../sync/hydrate-detail.js';
-import type { AgenticProviders } from '../review/plugin-providers.js';
-import type { PrDetailEnricher } from '../pr/detail-enricher.js';
 import type { AiUsageRecord } from '../db/usage.js';
 import type { AiCreditStatus } from '../db/credits.js';
 import type { ConflictSeam } from '../conflict/seam.js';
@@ -44,7 +42,8 @@ export interface ProCapabilities {
   prSummary: boolean; // per-PR AI summary + CI-failure analysis (Haiku, read-only) — Pro SUMMARY tier
   workspaceInsights: boolean; // workspace review-intelligence "Insights" (no AI; pure reads)
   slackDigest: boolean; // Slack webhook delivery of the sprint + repo digest (Pro; mirrors activityDigest)
-  issueLinks: boolean; // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI)
+  // apiVersion 23: `issueLinks` LEFT this object. The issue tracker is CORE and free
+  // (apps/backend/src/tracker/, docs/TRACKERS.md) — nothing about it is a capability any more.
   botTriage: boolean; // Review-bot triage tier — CORE/FREE, but its advanced settings are
   // pro_settings-backed, so this flag is true whenever the plugin is loaded (regardless of the
   // paid PRO_* flags). It gates the free bot Settings section + overlays, NOT the Bots rail view
@@ -1120,15 +1119,9 @@ export interface ProContext {
     // that demands a bump, and a bump is four literals across TWO REPOS whose half-application
     // degrades the ENTIRE plugin to OSS mode with nothing thrown.
     appWebUrl?: string;
-    // SEAL / OPEN a secret the plugin stores at rest (AES-256-GCM, core `auth/crypto.ts`). Present
-    // ONLY when the host has a valid ENCRYPTION_KEY — always in cloud, locally only if the operator
-    // set one. The plugin must work without them (it stores the secret plain, prefixed so both
-    // forms stay readable) and must NEVER log, return or export either form.
-    //
-    // ⚠ OPTIONAL, SO apiVersion STAYS 21 — the same narrow "additive" test as `appWebUrl` above: a
-    // trailing optional field. An older host simply has no sealing, which is the no-key case.
-    sealSecret?: (plain: string) => string;
-    openSecret?: (sealed: string) => string;
+    // (apiVersion 23: `sealSecret` / `openSecret` LEFT with the per-workspace Jira token — the
+    // tracker is core, and seals its own secret with auth/crypto.ts directly. Nothing in the
+    // plugin stores a secret any more.)
   };
   accountIdOf(req: FastifyRequest): number; // the single scoping seam
   // node-postgres-TYPED drizzle instance → a stray .get()/.all()/.run() is a
@@ -1196,10 +1189,9 @@ export interface ProContext {
     check(accountId: number): Promise<AiCreditStatus>;
   };
   // apiVersion 22: `reviewEvents` and `registerLearningsProvider` LEFT with Claude Review's memory,
-  // and `review` with Claude Review itself (all core now). In their place, OPTIONAL: the plugin
-  // registers its Pro input to the free agentic features — the Jira fill for an AUTO review
-  // (review/plugin-providers.ts). Absent ⇒ auto review runs without a story.
-  registerAgenticProviders?(p: AgenticProviders): void;
+  // and `review` with Claude Review itself (all core now). apiVersion 23: `registerAgenticProviders`
+  // LEFT too — its only members were the tracker's (the Jira fill and the ticket review's
+  // membership/story), and the tracker is core (tracker/ticket-source.ts).
   // Background-job seam (host owns process/scheduler infra). The plugin registers node-cron
   // jobs here during register(); the core scheduler cron.schedule()s them AFTER bind, so they
   // ride the config.disableScheduler gate and are torn down with the app. Used by the Slack
@@ -1209,15 +1201,9 @@ export interface ProContext {
     handler: () => Promise<void> | void,
     label?: string,
   ): void;
-  // PR-detail enrichment seam. The plugin registers an enricher that computes Jira/Linear
-  // ticket links (compute-on-read) from a PR's title + head branch; core getPrDetail calls it
-  // and sets PrDetail.tickets. Inert in OSS (tickets stays null).
-  // Repo-synced seam: every registered handler is called (fire-and-forget, errors swallowed) after
-  // each COMPLETED repo walk, outside every transaction (sync/repo-synced-hooks.ts). Today: the
-  // plugin's Jira ticket worker kick — Jira is read when a PR is RECEIVED, not when it is viewed.
-  // ⚠ OPTIONAL, SO apiVersion STAYS 22 — a trailing optional member (the narrow additive test).
-  registerRepoSyncedHook?(handler: (args: { accountId: number; repoId: number }) => void | Promise<void>): void;
-  registerPrDetailEnricher(e: PrDetailEnricher): void;
+  // (apiVersion 23: `registerPrDetailEnricher` and `registerRepoSyncedHook` LEFT. Both existed only
+  // for the plugin's Jira/Linear ticket links and its ticket worker; core's tracker computes
+  // PrDetail.tickets itself (tracker/enricher.ts) and registers its own post-walk kick.)
   // GitHub reads/writes + the advisor's config-PR primitive (per-account). Inert in OSS.
   github: GithubSeam;
   coding: CodingSeam;
@@ -1292,13 +1278,19 @@ export interface ProPlugin {
   // `registerLearningsProvider`, and `CodingSeam` loses `generateFix` / `applyAndPush`. It gains the
   // OPTIONAL `registerAgenticProviders`. Removals are not "narrow additive", hence the bump.
   //
+  // 22 → 23: THE ISSUE TRACKER MOVED TO CORE (free, both modes, public install). `ProCapabilities`
+  // loses `issueLinks`; `ProContext` loses `registerPrDetailEnricher` (REQUIRED, so its removal alone
+  // forces the bump), `registerAgenticProviders`, `registerRepoSyncedHook` and `host.sealSecret` /
+  // `openSecret`. A 22 plugin would also run its own Jira worker and routes against tables core now
+  // owns, so the runtime gate refusing it (OSS mode) is the safe outcome, not a regression.
+  //
   // ⚠ THIS LITERAL HAS A TWIN IN bind.ts (its `plugin?.apiVersion !==` runtime gate — THE only
   // enforcer) and two more in the plugin (packages/pro/src/index.ts,
   // packages/pro/src/contract-types.ts). Bump ALL FOUR or the plugin log-and-degrades to OSS mode
   // against a version that is actually correct: capabilities go dark, every /api/pro/* route
   // 404s, and nothing throws. ⚠ The plugin's half lives in a SUBMODULE, so "all four" spans TWO
   // repos — the gitlink committed here must point at a plugin commit carrying the same number.
-  apiVersion: 22;
+  apiVersion: 23;
   register(app: FastifyInstance, ctx: ProContext): Promise<ProCapabilities>;
 }
 
@@ -1310,7 +1302,6 @@ export const EMPTY_CAPABILITIES: ProCapabilities = {
   prSummary: false,
   workspaceInsights: false,
   slackDigest: false,
-  issueLinks: false,
   botTriage: false,
   botAdvisor: false,
   periodReports: false,

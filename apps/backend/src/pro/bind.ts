@@ -37,14 +37,10 @@ import { forecastNext } from '../db/forecast.js';
 import { recordAiUsage, getAiUsageSummary } from '../db/usage.js';
 import { aiCreditStatus } from '../db/credits.js';
 import { makeConflictSeam } from '../conflict/seam.js';
-import { registerAgenticProviders } from '../review/plugin-providers.js';
 import { registerScheduledJob } from '../sync/scheduled-jobs.js';
-import { registerPrDetailEnricher } from '../pr/detail-enricher.js';
-import { registerRepoSyncedHook } from '../sync/repo-synced-hooks.js';
 import { cheapComplete } from '../review/llm.js';
 import { detectClaudeAuth } from '../review/auth.js';
 import { getAccessToken, getAccountById } from '../auth/account.js';
-import { decryptToken, encryptToken, sealingAvailable } from '../auth/crypto.js';
 import {
   createIssue,
   createPullRequest,
@@ -110,7 +106,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
   // ⚠ THE RUNTIME GATE. This literal is the twin of `ProPlugin['apiVersion']` in contract.ts —
   // bump them together. A half-bump here silently degrades a CORRECT plugin to OSS mode (the warn
   // below is the only trace; capabilities go dark and every /api/pro/* route 404s).
-  if (plugin?.apiVersion !== 22 || typeof plugin.register !== 'function') {
+  if (plugin?.apiVersion !== 23 || typeof plugin.register !== 'function') {
     app.log.warn(
       { apiVersion: plugin?.apiVersion },
       'pro contract mismatch — skipped',
@@ -131,11 +127,8 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       // Vite serves it on :5173. Handing the plugin `appBaseUrl` here is what made the Slack
       // digest's deep links 404 locally.
       appWebUrl: config.appWebUrl,
-      // AES-256-GCM sealing for a secret the PLUGIN stores (today: the per-workspace Jira token).
-      // Present only when ENCRYPTION_KEY is a valid 32-byte key — always in cloud, and locally when
-      // the operator set one. Absent, the plugin stores the secret plain and says so; that is the
-      // same trust as the local `gh` token on the same machine.
-      ...(sealingAvailable() ? { sealSecret: encryptToken, openSecret: decryptToken } : {}),
+      // (No `sealSecret` / `openSecret` since apiVersion 23: their only user, the per-workspace Jira
+      // token, moved to core with the tracker — tracker/runtime.ts wires auth/crypto.ts directly.)
     },
     accountIdOf,
     db,
@@ -288,11 +281,7 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
         return aiCreditStatus(account, Date.now());
       },
     },
-    // The Pro input to the free agentic features (the Jira fill). Optional member.
-    registerAgenticProviders,
     registerScheduledJob,
-    registerPrDetailEnricher,
-    registerRepoSyncedHook,
     // AI Fix infra (per-account, cloud-ready). The host owns the security-sensitive
     // clone/agent/push machinery; the plugin only drives it with prompts/model.
     github: {

@@ -38,7 +38,9 @@ import type {
   PendingAuthorSplit,
   PendingTab,
   SecurityCard,
+  TicketLinksResponse,
   TicketMergedPrsResponse,
+  WorkspaceTrackerSettings,
 } from '@pierre-review/shared';
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
 // build the Pending tabs from the shipped list rather than re-typing it.
@@ -279,7 +281,6 @@ const ME_RESPONSE: MeResponse = {
     prSummary: false,
     workspaceInsights: false,
     slackDigest: false,
-    issueLinks: false,
     botTriage: false,
   },
   benchmarkOptIn: false,
@@ -848,9 +849,20 @@ export async function installMockApi(page: Page): Promise<void> {
       if (path.endsWith('/api/users')) return json(route, USERS);
       if (path.endsWith('/api/repos')) return json(route, [REPO]);
       if (path.endsWith('/api/mergers')) return json(route, []);
-      // The Open PRs stacks' "Merged (n)" panel (Pro `issueLinks`, off in e2e). Typed and served
-      // so a spec that flips the capability gets the real shape, not the digest stub below.
-      if (path.endsWith('/api/pro/ticket-merged-prs')) {
+      // THE ISSUE TRACKER (core, free — apiVersion 23). No tracker in e2e: the workspace answers
+      // "none", so the Open PRs board is the plain list and no ticket row is requested. Typed, so a
+      // spec that configures one gets the real shapes rather than the untyped catch-all `{}`.
+      if (/\/api\/workspaces\/\d+\/tracker$/.test(path)) {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          issue: { provider: null, baseUrl: null, projectKeys: [], matchScope: 'title_branch' },
+          jira: { email: null, hasToken: false },
+        } satisfies WorkspaceTrackerSettings);
+      }
+      if (path.endsWith('/api/ticket-links')) {
+        return json(route, { prs: [], titlesComplete: true } satisfies TicketLinksResponse);
+      }
+      if (path.endsWith('/api/ticket-merged-prs')) {
         return json(route, { workspaceId: WORKSPACE.id, tickets: [] } satisfies TicketMergedPrsResponse);
       }
       // Pro digest endpoints — disabled in e2e (pro:{activityDigest:false}); harmless stub.

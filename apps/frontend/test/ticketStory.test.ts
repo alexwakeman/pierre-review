@@ -76,10 +76,11 @@ describe('storySourceOf', () => {
     expect(storySourceOf(null, [null, empty, snap])).toEqual({ kind: 'stored', ticket: snap });
   });
 
-  it('finds the detected Jira link by key, case-insensitive; never a Linear one', () => {
+  it('finds the detected tracker link by key, case-insensitive (Linear included since phase 3)', () => {
     const tickets: TicketRef[] = [ref({ key: 'LIN-1', provider: 'linear' }), ref()];
     expect(jiraRefFor(tickets, ' bmd-1 ')?.key).toBe('BMD-1');
-    expect(jiraRefFor(tickets, 'LIN-1')).toBeNull();
+    expect(jiraRefFor(tickets, 'LIN-1')?.provider).toBe('linear');
+    expect(jiraRefFor(tickets, 'NOPE-1')).toBeNull();
     expect(jiraRefFor(tickets, null)).toBeNull();
     expect(storyUrlOf(null, [ticket(), ticket({ url: 'https://j/browse/A-1' })])).toBe('https://j/browse/A-1');
   });

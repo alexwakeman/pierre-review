@@ -3,7 +3,7 @@ import type { JiraTicketDetails } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { TICKET_REVIEW_STATES_KEY } from './useTicketReview.js';
 
-// ONE STORED JIRA TICKET (`GET /api/pro/prs/:id/jira-ticket?key=`): the row the plugin's worker
+// ONE STORED JIRA TICKET (`GET /api/prs/:id/tracker-ticket?key=`): the row core's tracker worker
 // wrote when the PR was RECEIVED — reading it makes no Jira call. ⚠ CLICK-GATED: the callers
 // enable it only once the reader opens a Story disclosure or a ticket modal, so nothing on a list
 // or a card fetches on mount. Same key as the story panel's reads (ClaudeReviewFollowUp.tsx), so
@@ -24,7 +24,7 @@ export function useStoredJiraTicket(prId: number | null, key: string | null, ena
 
 /**
  * Which field holds the criteria for this ticket's ISSUE TYPE in the PR's workspace (null = back
- * to the default). The plugin re-derives every stored ticket of that type, so the ticket reviews
+ * to the default). The server re-derives every stored ticket of that type, so the ticket reviews
  * reading them may now be out of date ("Story edited since"): re-read those too.
  */
 export function useSetJiraAcField(prId: number, key: string) {

@@ -10,6 +10,8 @@ import { runMlEnrichmentTick } from './ml-enrichment.js';
 import { MENTION_SCAN_CRON, runMentionScanTick } from './mention-scan.js';
 import { isSeverityApiConfigured } from '../ml/severity-client.js';
 import { runConflictJanitorTick } from '../conflict/janitor.js';
+import { TRACKER_TICKET_CRON, runTrackerTick } from '../tracker/worker.js';
+import { trackerContext } from '../tracker/runtime.js';
 import type { Logger } from './sync-repo.js';
 
 let task: ScheduledTask | null = null;
@@ -19,6 +21,7 @@ let autoMergeTask: ScheduledTask | null = null;
 let mlEnrichmentTask: ScheduledTask | null = null;
 let mentionScanTask: ScheduledTask | null = null;
 let conflictJanitorTask: ScheduledTask | null = null;
+let trackerTask: ScheduledTask | null = null;
 // node-cron handles for plugin-registered background jobs (Slack digest cron, AI update policy).
 let proJobTasks: ScheduledTask[] = [];
 
@@ -141,6 +144,17 @@ export function startScheduler(log: FastifyBaseLogger): void {
     );
   }
 
+  // The issue tracker's ticket worker (CORE, free, BOTH modes — tracker/worker.ts). Pull-based like
+  // ML enrichment: each tick re-derives "open PRs in a workspace whose tracker READS tickets, with a
+  // ticket due", bounded per account and in total, and never throws. Inert for an account with no
+  // reading tracker. It was the plugin's `jira-tickets` job until apiVersion 23.
+  if (cron.validate(TRACKER_TICKET_CRON)) {
+    trackerTask = cron.schedule(TRACKER_TICKET_CRON, () => {
+      void runTrackerTick(trackerContext(log));
+    });
+    log.info(`tracker worker started (cron "${TRACKER_TICKET_CRON}")`);
+  }
+
   // Plugin-registered background jobs (the @pierre/pro Slack digest cron + AI update policy).
   // Registered during bindProPlugin (which runs BEFORE startScheduler), so the registry is
   // populated here. Each rides the same disableScheduler gate as sync/retention and is torn
@@ -176,6 +190,8 @@ export function stopScheduler(): void {
   mentionScanTask = null;
   conflictJanitorTask?.stop();
   conflictJanitorTask = null;
+  trackerTask?.stop();
+  trackerTask = null;
   for (const t of proJobTasks) t.stop();
   proJobTasks = [];
 }

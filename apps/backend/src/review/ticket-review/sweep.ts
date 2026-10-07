@@ -1,8 +1,8 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
-import { TICKET_REVIEW_MAX_PRS, parseTicketIdent } from '@pierre-review/shared';
+import { TICKET_REVIEW_MAX_PRS, isTrackerIdent, parseTicketIdent } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
-import { getAgenticProviders } from '../plugin-providers.js';
+import { getTicketSource } from '../../tracker/ticket-source.js';
 import { agenticRunReady } from '../claude-review/ai-ready.js';
 import { autoReviewAvailable, autoReviewDue, utcDayStartMs } from '../claude-review/auto.js';
 import { listAutoReviewWorkspaces } from '../claude-review/auto-settings.js';
@@ -21,11 +21,11 @@ import {
 // THE TICKET REVIEW SWEEPER — re-checks a ticket when the PRs on it move, where auto review is on.
 //
 // A PULL, like the PR review's sweeper (claude-review/auto.ts): every tick re-derives what is due
-// from the database and the plugin's stored ticket rows, so a restart loses nothing.
+// from the database and the tracker's stored ticket rows, so a restart loses nothing.
 //
 //   1. CANDIDATES. The tickets of PRs that CHANGED since the last tick — a new head, a new open PR,
-//      or a PR that stopped being open (merged or closed) — read through the plugin's
-//      `ticketsForPr` plus the tickets this PR was already judged on; the plugin's
+//      or a PR that stopped being open (merged or closed) — read through the tracker's
+//      `ticketsForPr` plus the tickets this PR was already judged on; the tracker's
 //      `listChangedTicketIdents` (a PR joined or left, the story was edited); the tickets of a PR
 //      whose auto PR review just launched (the kick — claude-review/manager.ts
 //      `onAutoReviewLaunched` — so a PR's first auto review and its tickets' check start together);
@@ -54,12 +54,12 @@ import {
 // or the kick (an auto review of one of its PRs launched) — so switching auto review on never reviews
 // every old ticket at once.
 //
-// Pasted ('manual:') tickets never cascade: they have one PR and no plugin membership.
+// Pasted ('manual:') tickets never cascade: they have one PR and no tracker membership.
 
 export const TICKET_SWEEP_CRON = '* * * * *';
 // The most changed PRs whose tickets are read in one tick; the rest stay "changed" for the next.
 const MAX_CHANGED_PRS_PER_TICK = 100;
-// The first tick after boot asks the plugin for tickets changed in this window.
+// The first tick after boot asks the tracker for tickets changed in this window.
 const FIRST_TICK_LOOKBACK_MS = 60 * 60 * 1000;
 // listChangedTicketIdents overlap, so a row stamped while a tick ran is never missed.
 const CHANGED_SLACK_MS = 60 * 1000;
@@ -198,9 +198,9 @@ export async function runTicketReviewSweep(
   deps: TicketSweepDeps = defaultDeps,
 ): Promise<TicketSweepResult> {
   const result: TicketSweepResult = { considered: [], queued: [], stopped: null };
-  const providers = getAgenticProviders();
+  const providers = getTicketSource();
   const ticketsForPr = providers.ticketsForPr;
-  if (!autoReviewAvailable(ctx) || !ticketsForPr || !providers.ticketMembers) return result;
+  if (!autoReviewAvailable(ctx)) return result;
   if (sweeping) return result;
   if (!agenticRunReady(ctx)) {
     result.stopped = 'ai_not_ready';
@@ -248,7 +248,7 @@ export async function runTicketReviewSweep(
           /* "nothing known" for this PR */
         }
         for (const i of await getTicketIdentsForPr(ctx, accountId, prId)) idents.add(i);
-        ticketsOf.set(prId, [...idents].filter((i) => parseTicketIdent(i)?.kind === 'jira'));
+        ticketsOf.set(prId, [...idents].filter((i) => isTrackerIdent(parseTicketIdent(i))));
       }
       // `fromChange`: named by something that happened THIS tick (a moved/kicked PR, an edited story),
       // as opposed to only being carried in from `watching` — a held burst's quiet clock restarts on it.
@@ -266,8 +266,8 @@ export async function runTicketReviewSweep(
       }
       const since = (lastTick.get(accountId) ?? nowMs - FIRST_TICK_LOOKBACK_MS) - CHANGED_SLACK_MS;
       try {
-        for (const ident of (await providers.listChangedTicketIdents?.(accountId, since)) ?? []) {
-          if (!candidates.has(ident) && parseTicketIdent(ident)?.kind === 'jira') {
+        for (const ident of await providers.listChangedTicketIdents(accountId, since)) {
+          if (!candidates.has(ident) && isTrackerIdent(parseTicketIdent(ident))) {
             candidates.set(ident, { kicked: false, viaPrId: null, fromChange: true });
           }
         }

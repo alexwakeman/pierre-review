@@ -2,9 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { TICKET_LINKS_MAX_PRS, type TicketLinksResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 
-// The Open PRs cards' ticket row: ONE request for every listed card (never one per card), Pro
-// `issueLinks` only — the caller ANDs the capability into `enabled`, so an unentitled account never
-// asks (the route would 402 / 404). The server caches Jira titles; while it reports
+// The Open PRs cards' ticket row: ONE request for every listed card (never one per card), only where
+// the workspace has a tracker (core, free — the caller passes `useTrackerOn`). The server caches Jira titles; while it reports
 // `titlesComplete: false` (its per-request Jira budget ran out) this asks again until it is done.
 export const TICKET_LINKS_KEY = ['ticket-links'] as const;
 

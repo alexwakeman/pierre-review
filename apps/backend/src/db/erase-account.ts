@@ -180,6 +180,14 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // AI Fix runs (patches of the user's code + the prompts they were built from). Core since
     // migration 0074 / pg 0061 — the plugin's erasure hook used to own them.
     await tx.delete(schema.aiFixes).where(eq(schema.aiFixes.accountId, accountId)).execute();
+    // THE ISSUE TRACKER (core since migration 0088 / pg 0075 — the plugin's erasure hook used to own
+    // these): the stored tickets (story text from the customer's tracker), the acceptance-criteria
+    // field choices, and the workspace tracker rows — which hold the customer's internal tracker
+    // hostname AND the sealed API token. No FKs on the first two, so the explicit deletes are the
+    // whole guarantee; workspace_trackers cascades from workspaces too, and is explicit anyway.
+    await tx.delete(schema.trackerTickets).where(eq(schema.trackerTickets.accountId, accountId)).execute();
+    await tx.delete(schema.jiraAcFields).where(eq(schema.jiraAcFields.accountId, accountId)).execute();
+    await tx.delete(schema.workspaceTrackers).where(eq(schema.workspaceTrackers.accountId, accountId)).execute();
     // The AI spend ledger (token/credit counts — no prompt text).
     await tx.delete(aiUsage).where(eq(aiUsage.accountId, accountId)).execute();
     // Any aggregate rows contributed to the cross-org benchmark. Consent was the basis for
@@ -281,6 +289,11 @@ export function accountScopedTables(): {
     // cascades: the explicit delete above is the whole guarantee. (`reviewLearnings`, review
     // memory's table, sat here until migration 0075 / pg 0062 DROPPED it.)
     { name: 'aiFixes', col: schema.aiFixes.accountId, table: schema.aiFixes },
+    // The issue tracker (migration 0088 / pg 0075). All three carry their own accountId and are
+    // erased explicitly above; `workspaceTrackers` holds a credential.
+    { name: 'trackerTickets', col: schema.trackerTickets.accountId, table: schema.trackerTickets },
+    { name: 'jiraAcFields', col: schema.jiraAcFields.accountId, table: schema.jiraAcFields },
+    { name: 'workspaceTrackers', col: schema.workspaceTrackers.accountId, table: schema.workspaceTrackers },
     // `myTurnDismissals` sat here until migration 0060 / pg 0047 DROPPED the table. It is named
     // rather than silently absent because this list is a checklist, and a checklist that shortens
     // with no explanation reads as an omission — the exact failure this function guards against.

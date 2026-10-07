@@ -158,6 +158,20 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // `startsWith('/api/workspaces')` and emphatically not `startsWith('/api/workspace')`:
   // the `/api/workspace-metrics` family is a SIBLING vocabulary, and a loose prefix over two
   // sibling vocabularies is precisely how one silently swallows the other.
+  // ⚠ THREE WORKSPACE ROUTES SPEND THE CUSTOMER'S TRACKER QUOTA, so they are decided ABOVE the
+  // `read` line below, by exact shape (tracker/routes.ts):
+  //   PUT /api/workspaces/:id/tracker              saving a tracker or token KICKS the ticket
+  //                                                worker for the account (up to 40 reads);
+  //   GET /api/workspaces/:id/tracker/jira-fields  the Settings connection check — one call to
+  //                                                the customer's Jira with the saved token.
+  //   GET /api/workspaces/:id/tracker/linear-check the Linear connection check — one call to
+  //                                                Linear with the saved key.
+  // All three take the 60/min `search` bucket, the "one upstream call per request" tier. The plain
+  // `GET …/tracker` is DB-only and stays on `read` with the rest of the family.
+  if (method === 'PUT' && /^\/api\/workspaces\/\d+\/tracker$/.test(path)) return [TIERS.search, TIERS.read];
+  if (!mutating && /^\/api\/workspaces\/\d+\/tracker\/(jira-fields|linear-check)$/.test(path)) {
+    return [TIERS.search, TIERS.read];
+  }
   if (path === '/api/workspaces' || path.startsWith('/api/workspaces/')) return [TIERS.read];
 
   // ---- Per-account settings writes: `read`, RECORDED rather than inherited ----
@@ -444,33 +458,29 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (path === '/api/pro/slack/target') return [TIERS.read];
   if (mutating && path === '/api/pro/slack/test') return [TIERS.ai, TIERS.aiHourly];
 
-  // ---- Jira API reads (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
-  // GET /api/pro/jira/fields and GET /api/pro/prs/:id/jira-ticket each make ONE outbound call to
-  // the customer's own Jira with the workspace's saved token — a THIRD-PARTY quota (Jira Cloud rate
-  // limits per user) and up to a 10s wait on this process. Following the token: it is theirs, not
-  // ours, so the catch-all's 600/min GET→read branch is wrong; they take the 60/min `search`
-  // bucket, the "one upstream call per request" tier. Anchored on exact paths (the ticket route by
-  // a both-ends regex), so a sibling `/api/pro/prs/:id/*` route is not swept in.
-  if (!mutating && path === '/api/pro/jira/fields') return [TIERS.search, TIERS.read];
-  if (!mutating && /^\/api\/pro\/prs\/[^/]+\/jira-ticket$/.test(path)) {
+  // ---- The issue tracker's PR routes (CORE since apiVersion 23 — tracker/routes.ts) ----
+  // GET /api/prs/:id/tracker-ticket answers a STORED row, but a ticket the worker never reached is
+  // read ONCE from the customer's tracker with the workspace's saved token — a THIRD-PARTY quota
+  // (Jira Cloud rate limits per user) and up to a 10s wait. `POST …/refresh` re-reads it now and
+  // `PUT …/ac-field` saves the criteria field and re-reads it: one upstream call each. Following
+  // the token: theirs, not ours, so the 60/min `search` bucket. Anchored at BOTH ends, so a sibling
+  // `/api/prs/:id/*` route is not swept in — and the segment is `tracker-ticket`, never a prefix of
+  // `ticket-reviews` (the ticket review's own, `read`-tier family below).
+  if (!mutating && /^\/api\/prs\/\d+\/tracker-ticket$/.test(path)) return [TIERS.search, TIERS.read];
+  if (method === 'POST' && /^\/api\/prs\/\d+\/tracker-ticket\/refresh$/.test(path)) {
     return [TIERS.search, TIERS.read];
   }
-  // The story panel's two writes on a STORED ticket (plugin 0038): `POST …/jira-ticket/refresh` reads
-  // that ticket from Jira again now, and `PUT …/jira-ticket/ac-field` saves the criteria field for
-  // its issue type and re-reads it — one upstream call each, the customer's quota. Spelled by exact
-  // verb + path: without these lines the catch-all parks a mutating /api/pro/ route on `ai`.
-  if (method === 'POST' && /^\/api\/pro\/prs\/[^/]+\/jira-ticket\/refresh$/.test(path)) {
+  if (method === 'PUT' && /^\/api\/prs\/\d+\/tracker-ticket\/ac-field$/.test(path)) {
     return [TIERS.search, TIERS.read];
   }
-  if (method === 'PUT' && /^\/api\/pro\/prs\/[^/]+\/jira-ticket\/ac-field$/.test(path)) {
-    return [TIERS.search, TIERS.read];
-  }
-  // POST /api/pro/ticket-links — the Open PRs cards' ticket row, ONE request per board: DB-only
-  // detection plus the STORED ticket rows (plugin 0038); a detected ticket with no row kicks the
-  // background worker, which spends the customer's Jira quota — so `search`, not `read`. A POST
-  // only because it carries a list of PR ids; it writes nothing itself. Without this line the catch-all would tier it
-  // on the verb and park a read on the 20/min `ai` bucket.
-  if (path === '/api/pro/ticket-links') return [TIERS.search, TIERS.read];
+  // POST /api/ticket-links — the Open PRs cards' ticket row, ONE request per board: DB-only
+  // detection plus the STORED ticket rows; a detected ticket with no row kicks the background
+  // worker, which spends the customer's tracker quota — so `search`, not `read`. A POST only
+  // because it carries a list of PR ids. EXACT `===`.
+  if (path === '/api/ticket-links') return [TIERS.search, TIERS.read];
+  // GET /api/ticket-merged-prs — the stacks' "Merged (n)" panel: DB-only (stored rows joined to
+  // pull_requests), no tracker call. `read`, DECIDED rather than inherited.
+  if (!mutating && path === '/api/ticket-merged-prs') return [TIERS.read];
 
   // ---- AI generation ----
   // ⚠ RE-DECIDED, not inherited: `POST /api/pro/prs/:id/annotations/run` now spends GITHUB quota

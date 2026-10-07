@@ -1,4 +1,5 @@
 import type { TicketMergedPr, TicketMergedPrsResponse, TimelinePr } from '@pierre-review/shared';
+import { canonicalTicketKey } from '@pierre-review/shared';
 import type { CardTicket } from './cardTickets.js';
 import { mergeVerdict } from './ui.js';
 
@@ -91,7 +92,8 @@ export function stackOpenPrs(
     const tickets: CardTicket[] = [];
     const keys = new Set<string>();
     for (const t of ticketsOf(pr)) {
-      const key = t.key.trim().toUpperCase();
+      // Jira/Linear keys upper-cased; a GitHub issue key (`owner/repo#12`) lower-cased.
+      const key = canonicalTicketKey(t.key) ?? t.key.trim().toUpperCase();
       if (key === '' || keys.has(key)) continue;
       keys.add(key);
       tickets.push(t.key === key ? t : { ...t, key });
@@ -128,7 +130,7 @@ export function stackOpenPrs(
 
 // ── THE "MERGED (n)" PANEL ───────────────────────────────────────────────────────────────────
 // Under a stack's open PRs, every MERGED PR Limn has linked to the same ticket (any repo of the
-// account on the workspace's Jira site; ONE batched `GET /api/pro/ticket-merged-prs`). It never
+// account on the workspace's Jira site; ONE batched `GET /api/ticket-merged-prs`). It never
 // creates a stack: a ticket with only merged PRs is not open work, so it is not on this page. The
 // stack's "n PRs" count stays the OPEN count; the panel header carries the merged count.
 

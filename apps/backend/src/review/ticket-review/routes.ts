@@ -5,6 +5,8 @@ import {
   TICKET_REVIEW_MAX_PRS,
   TICKET_REVIEW_STATES_MAX,
   checkClaudeReviewTickets,
+  isTrackerIdent,
+  trackerTicketRow,
   parseTicketIdent,
   type ClaudeReviewTicket,
   type PostTicketItemBody,
@@ -17,7 +19,7 @@ import {
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { AGENTIC_AI_ENABLED } from '../claude-review/manager.js';
-import { getAgenticProviders } from '../plugin-providers.js';
+import { getTicketSource } from '../../tracker/ticket-source.js';
 import { getReviewPrContext } from '../claude-review/persist.js';
 import { postTicketItem } from './post-item.js';
 import { deriveTicketReviewState, manualTicketIdent, readLiveMembers, ticketHash } from './fingerprint.js';
@@ -37,7 +39,7 @@ import { getTicketRunStatus, startTicketReview, subscribeTicketReviewStream } fr
 // AGENTIC_AI_ENABLED checks are the second guard. Every id-addressed route answers 404 for another
 // account's id. Rate-limit tiers: the start route is `ai` + `ai_hourly`, the post route
 // `github_write`, everything else `read` (api/plugins/rate-limit.ts) — which holds because no
-// route here reads Jira: the plugin's seam answers from its STORED rows only (Jira is read when a
+// route here reads a tracker: core's ticket source answers from STORED rows only (a tracker is read when a
 // PR is received, never when it is viewed).
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -111,15 +113,13 @@ async function defaultWorkspaceId(ctx: AgentContext, accountId: number): Promise
   return rows[0]?.id ?? null;
 }
 
-/** The plugin's detected tickets of one PR, from its stored rows ([] with no plugin). Never throws. */
+/** The tracker's detected tickets of one PR, from its stored rows. Never throws. */
 async function detectedTickets(
   accountId: number,
   prId: number,
 ): Promise<Array<{ ident: string; ticket: ClaudeReviewTicket }>> {
-  const f = getAgenticProviders().ticketsForPr;
-  if (!f) return [];
   try {
-    return (await f(accountId, prId)).map((t) => ({ ident: t.ident, ticket: t.ticket }));
+    return (await getTicketSource().ticketsForPr(accountId, prId)).map((t) => ({ ident: t.ident, ticket: t.ticket }));
   } catch {
     return [];
   }
@@ -128,7 +128,7 @@ async function detectedTickets(
 /**
  * Server-computed currency per ident (fingerprint.ts `deriveTicketReviewState`). The live story is
  * `jiraStoryFor`'s — the SAME text the run and the sweeper hash, whichever PR is being viewed. With
- * no answer for the live half (no plugin, no stored story) the latest run reads as current —
+ * no answer for the live half (no stored story) the latest run reads as current —
  * nothing shows it moved.
  */
 async function statesFor(
@@ -138,14 +138,13 @@ async function statesFor(
 ): Promise<Map<string, TicketReviewState>> {
   const inputs = await getTicketStateInputs(ctx, accountId, idents);
   const out = new Map<string, TicketReviewState>();
-  const hasPlugin = getAgenticProviders().ticketMembers != null;
   for (const ident of idents) {
     const inp = inputs.get(ident);
     const parsed = parseTicketIdent(ident);
     let live: { ticketHash: string; members: Awaited<ReturnType<typeof readLiveMembers>> } | null = null;
     if (parsed?.kind === 'manual' && inp?.latest?.ticketHash) {
       live = { ticketHash: inp.latest.ticketHash, members: await readLiveMembers(ctx, accountId, [parsed.prId]) };
-    } else if (parsed?.kind === 'jira' && hasPlugin) {
+    } else if (isTrackerIdent(parsed)) {
       const memberIds = await jiraMemberIds(accountId, ident);
       const story = await jiraStoryFor(accountId, ident, memberIds);
       if (story) live = { ticketHash: ticketHash(story), members: await readLiveMembers(ctx, accountId, memberIds) };
@@ -287,7 +286,7 @@ export function registerTicketReviewRoutes(app: FastifyInstance, ctx: AgentConte
       const parsed = parseTicketIdent(ident);
       tickets.push({
         ident,
-        ticketKey: story?.key ?? review?.ticketKey ?? (parsed?.kind === 'jira' ? parsed.key : null),
+        ticketKey: story?.key ?? review?.ticketKey ?? (isTrackerIdent(parsed) ? trackerTicketRow(parsed).issueKey : null),
         ticketTitle: story?.title ?? review?.ticketTitle ?? null,
         review,
         state: states.get(ident)!,

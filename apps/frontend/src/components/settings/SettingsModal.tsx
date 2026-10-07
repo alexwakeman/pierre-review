@@ -42,8 +42,9 @@ import type { SettingsFocus } from '../../store/settingsModal.js';
 // ⚠ THE ORDER IS THE GRAIN, BUT THE GATES ARE UNCHANGED — a reorder that quietly widened one would
 // be a much worse bug than the confusion it fixed. Global half: GitHub App / benchmark consent /
 // your data stay CLOUD-ONLY; the large-PR threshold stays ungated in both modes on every tier.
-// Workspace half: the Pending mute is CORE/free, then `workspaceInsights` / `slackDigest` /
-// `issueLinks` exactly as before.
+// Workspace half: the Pending mute, Chronology's hours and the Issue tracker are CORE/free, then
+// `workspaceInsights` / `slackDigest` exactly as before. (The tracker was behind `issueLinks` until
+// apiVersion 23 moved it into core — it no longer waits on the plugin at all.)
 //
 // ⚠ THE GLOBAL HALF SITS ABOVE THE pro_settings LOADING GATE AND MUST STAY THERE. Every section in
 // it reads /api/me or /api/auth/providers, never `pro_settings` — which 404s with no plugin — so an
@@ -251,6 +252,10 @@ export function SettingsModal({
                 {/* Chronology's working hours and budgets — CORE, free to set, and read from the
                     workspace row, so it too sits above the pro-settings gate. */}
                 <FlowSettingsSection />
+                {/* The issue tracker for THIS workspace — CORE and free on every tier, in both
+                    modes, read from core's `workspace_trackers` row (apiVersion 23), so it sits
+                    above the pro-settings gate with the other free sections. */}
+                <IssueLinksSection />
                 {/* ⚠ ONLY THE PAID SECTIONS WAIT ON THE PLUGIN, and this line speaks for them
                     alone — it used to speak for the whole half, which is precisely why a free
                     section could not live here. */}
@@ -274,11 +279,6 @@ export function SettingsModal({
                     screen listing every delivery, and each one is a billed report on every
                     send. */}
                 {proReady && caps.slackDigest && <SlackSection />}
-                {/* The Jira/Linear tracker for THIS workspace, on the same row as the cadence.
-                    It was an ACCOUNT setting until plugin migration 0031, which never matched the
-                    feature: the enricher's input is a PR, and a PR's repo belongs to exactly one
-                    workspace. */}
-                {proReady && caps.issueLinks && <IssueLinksSection />}
                 {/* Auto Claude review of new human PRs in THIS workspace — CORE/free, read from
                     the workspace row (core migration 0074), so it does NOT wait on the plugin
                     gate. Claude Review is local-only, so this appears only where it can run. */}

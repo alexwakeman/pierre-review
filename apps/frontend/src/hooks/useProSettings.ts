@@ -26,7 +26,6 @@ export function useHasProSettings(): boolean {
   return (
     caps.workspaceInsights ||
     caps.slackDigest ||
-    caps.issueLinks ||
     caps.botTriage
   );
 }
@@ -57,7 +56,9 @@ export function useHasProWorkspaceSettings(): boolean {
   const caps = useProCapabilities();
   // (`claudeReview` came off when Claude Review went free: the Auto Claude review switch moved to
   // the CORE workspace row and no longer waits on this plugin gate.)
-  return caps.workspaceInsights || caps.slackDigest || caps.issueLinks;
+  // (`issueLinks` came off with the tracker at apiVersion 23: the Issue tracker section is CORE and
+  // ungated, mounted beside the Pending mute, never under this gate.)
+  return caps.workspaceInsights || caps.slackDigest;
 }
 
 // Per-account Pro settings. ⚠ WHAT IS LEFT ON THIS ROUTE IS THE COMPARISON-WINDOW MODE AND THE BOT

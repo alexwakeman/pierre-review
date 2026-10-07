@@ -1,6 +1,7 @@
-// Host-owned "a repo walk completed" seam — the plugin's Jira ticket worker registers a kick here
-// (ProContext.registerRepoSyncedHook, OPTIONAL) so a PR's tickets are read when the PR is RECEIVED,
-// not when somebody opens it. Inert in OSS (nothing registered → nothing called).
+// Core's "a repo walk completed" seam — the tracker's ticket worker registers a kick here
+// (tracker/index.ts `startTracker`) so a PR's tickets are read when the PR is RECEIVED, not when
+// somebody opens it. (It was a plugin seam, `ProContext.registerRepoSyncedHook`, until apiVersion 23
+// moved the tracker into core; nothing outside core registers here any more.)
 //
 // ⚠ A KICK, NEVER A STEP: `notifyRepoSynced` is called from `runSyncForRepo`'s post-walk chain,
 // outside every transaction, and does not await the handlers — a slow or failing handler can

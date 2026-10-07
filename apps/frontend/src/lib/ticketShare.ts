@@ -104,16 +104,17 @@ export function shareRestLine(share: Pick<PrTicketShare, 'metElsewhere' | 'todoE
 /**
  * Does the PR pane show the SLIM block (this PR's share + a link to Open PRs)? Only where the Open
  * PRs stack exists to hold the whole story: a tracker ticket (never a pasted `manual:` story), the
- * tracker on (stacks need Pro `issueLinks`), a key to find the stack by, and an open PR on it.
+ * tracker on for the PR's workspace (`PrDetail.tickets != null`; stacks need one), a key to find the
+ * stack by, and an open PR on it.
  */
 export function slimStoryCheck(o: {
   ident: string;
   ticketKey: string | null;
-  issueLinks: boolean;
+  trackerOn: boolean;
   prOpen: boolean;
   members: readonly Pick<TicketReviewMember, 'state'>[];
 }): boolean {
-  if (!o.issueLinks || o.ident.startsWith('manual:')) return false;
+  if (!o.trackerOn || o.ident.startsWith('manual:')) return false;
   if (o.ticketKey == null || o.ticketKey.trim() === '') return false;
   return o.prOpen || o.members.some((m) => m.state === 'open');
 }

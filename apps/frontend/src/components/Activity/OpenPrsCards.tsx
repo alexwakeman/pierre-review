@@ -8,7 +8,7 @@ import { useCiReviewStates } from '../../hooks/useCiReview.js';
 import { useTicketLinks } from '../../hooks/useTicketLinks.js';
 import { useMergedPanelOpen, useTicketMergedPrs } from '../../hooks/useTicketMergedPrs.js';
 import { useStartTicketReview, useTicketReviewStarting, useTicketReviewStates } from '../../hooks/useTicketReview.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useTrackerOn } from '../../hooks/useWorkspaceTracker.js';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
@@ -91,9 +91,9 @@ import {
 //      readiness. Each renders only when it has something true to say (no "no checks", no "—").
 //   3. the TICKET ROW (only when the PR names a ticket): each ticket, "BMD-1043 · <its title>",
 //      wrapping when there are several. A Jira ticket opens its story in a MODAL (read on the
-//      click, `TicketKeyButton`), with "Open in Jira" inside; a Linear ticket is a link. Below the chips so status is
+//      click, `TicketKeyButton`), with "Open in Jira" inside (any ticket with an ident — Jira, GitHub Issues, Linear). Below the chips so status is
 //      still the first thing read, above the grey meta line because it says what the PR is FOR.
-//      Data: ONE batched `POST /api/pro/ticket-links` (Pro `issueLinks`; detection + cached Jira
+//      Data: ONE batched `POST /api/ticket-links` (core, free; detection + stored Jira
 //      titles), folded by `lib/cardTickets.ts`.
 //   4. the meta line: #number · repo · author · opened · updated · size, blast radius, large-PR.
 //   5. the Claude Review panel (ClaudeReviewCell.tsx) on the AI surface, accented by outcome —
@@ -106,7 +106,7 @@ import {
 // The card is WHOLE-CARD clickable and keyboard-focusable (Enter / Space opens the PR); every
 // control inside it stops propagation, so a click there never opens the PR.
 //
-// GROUPED BY TICKET (the default where the tracker runs — Pro `issueLinks`): the same cards, in
+// GROUPED BY TICKET (the default where the workspace has a tracker — core, free): the same cards, in
 // one STACK per ticket (`lib/openPrsStacks.ts` decides membership and order). The stack header
 // carries the ticket — key (the same modal), title, status, type, assignee, PR count, a quiet roll-up, and (where
 // agentic AI runs) the TICKET REVIEW's coverage pill + Re-check — so a
@@ -114,7 +114,7 @@ import {
 // PR names two. Until the ticket answer arrives, and whenever no PR names a ticket, the page is
 // the plain list: Jira never blocks the board. Under a stack's open cards, a collapsed
 // "Merged (n)" panel lists every MERGED PR linked to the same ticket (any repo, same Jira site),
-// from ONE batched `GET /api/pro/ticket-merged-prs` for the whole board; it never makes a stack of
+// from ONE batched `GET /api/ticket-merged-prs` for the whole board; it never makes a stack of
 // its own, and the header's "n PRs" stays the open count.
 // Between the header and the cards, a collapsed "Story check" panel (StackStoryCheck.tsx) holds the
 // ticket review's WHOLE story — read by `latestRunId` only once expanded; the header adds
@@ -282,7 +282,7 @@ export function OpenPrsSortMenu({
   );
 }
 
-// ---- the "Group by ticket / List" toggle (the tab's header; shown only with `issueLinks`) ----
+// ---- the "Group by ticket / List" toggle (the tab's header; shown only where a tracker is set) ----
 
 export function OpenPrsViewToggle(): JSX.Element {
   const view = useOpenPrsView((s) => s.view);
@@ -359,8 +359,9 @@ export function OpenPrsCards({
   // The CI review (its own run): ONE batched request for every listed PR, like the states above.
   const { data: ciData } = useCiReviewStates(prIds, claudeOn);
   const ciStates = useMemo(() => new Map((ciData?.states ?? []).map((st) => [st.prId, st])), [ciData]);
-  // The ticket row: Pro `issueLinks`, ONE request for every listed PR.
-  const ticketsOn = useProCapabilities().issueLinks;
+  // The ticket row: wherever THIS workspace has a tracker (core, free — apiVersion 23), ONE request
+  // for every listed PR.
+  const ticketsOn = useTrackerOn(useFilters((s) => s.workspaceId));
   const { data: ticketData } = useTicketLinks(prIds, ticketsOn);
   const detectedTickets = useMemo(
     () => new Map((ticketData?.prs ?? []).map((t) => [t.prId, t])),

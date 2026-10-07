@@ -89,6 +89,14 @@ export interface AccountExport {
   benchmarkContributions: Record<string, unknown>[];
   /** Armed / recently-resolved "merge when ready" intents (auto_merge_requests). */
   autoMergeRequests: Record<string, unknown>[];
+  /**
+   * Each workspace's issue tracker (core `workspace_trackers`, migration 0088 / pg 0075) — the
+   * provider, base URL, project keys and match scope the user TYPED, and the Jira email. ⚠ The API
+   * TOKEN IS WITHHELD (`hasToken` only), exactly like the GitHub token on `account`: a credential,
+   * sealed or not, never leaves in an export. The stored tickets are not exported: they are a cache
+   * of the customer's tracker, regenerable from it.
+   */
+  workspaceTrackers: Record<string, unknown>[];
 }
 
 /** Build the full export document for one account. Returns null if the account is gone. */
@@ -147,6 +155,22 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
   const childRows = async <T>(
     fn: (ids: number[]) => Promise<T[]>,
   ): Promise<T[]> => (prIds.length === 0 ? [] : fn(prIds));
+
+  // The tracker rows — explicit columns, the token reduced to its presence below.
+  const trackerRows = await db
+    .select({
+      workspaceId: schema.workspaceTrackers.workspaceId,
+      provider: schema.workspaceTrackers.provider,
+      baseUrl: schema.workspaceTrackers.baseUrl,
+      projectKeys: schema.workspaceTrackers.projectKeys,
+      matchScope: schema.workspaceTrackers.matchScope,
+      email: schema.workspaceTrackers.authEmail,
+      hasToken: schema.workspaceTrackers.authToken,
+      updatedAt: schema.workspaceTrackers.updatedAt,
+    })
+    .from(schema.workspaceTrackers)
+    .where(eq(schema.workspaceTrackers.accountId, accountId))
+    .execute();
 
   const [
     reviewRows,
@@ -279,5 +303,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     workspaceReviewers: workspaceReviewerRows,
     benchmarkContributions: benchmarkRows,
     autoMergeRequests: autoMergeRows,
+    // ⚠ PRESENCE ONLY — never the stored token, in any form.
+    workspaceTrackers: trackerRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
   };
 }

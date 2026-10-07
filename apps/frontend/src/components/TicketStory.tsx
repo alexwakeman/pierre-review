@@ -6,13 +6,14 @@
 //   TicketStoryModal — the Open PRs ticket key's modal: status, type, assignee, the story, and a
 //                      small "Open in Jira".
 //
-// ⚠ CLICK-GATED. The stored Jira row (`GET /api/pro/prs/:id/jira-ticket?key=`, written by the
+// ⚠ CLICK-GATED. The stored Jira row (`GET /api/prs/:id/tracker-ticket?key=`, written by the
 // plugin's worker when the PR was received — no Jira call) is fetched only once the disclosure is
 // opened or the modal is mounted. Nothing here fetches on a list's or a card's mount. Pure half:
 // lib/ticketStory.ts. Every href goes through `safeExternalUrl`.
 import { useId, useState } from 'react';
 import type { ClaudeReviewTicket, TicketRef } from '@pierre-review/shared';
-import { jiraSiteOf } from '../lib/jiraTicket.js';
+import { TRACKER_PROVIDER_LABEL } from '@pierre-review/shared';
+import { hasFixedAcSource, jiraSiteOf } from '../lib/jiraTicket.js';
 import { pulledAcField, jiraStoryFromDetails, acFieldText } from '../lib/storyTabs.js';
 import { ticketDraftFromStored } from '../lib/claudeReviewFollowUp.js';
 import {
@@ -45,14 +46,19 @@ function JiraStory({
   jiraRef: TicketRef;
   fallback: ClaudeReviewTicket | null;
 }): JSX.Element {
-  const { data, isLoading, isError } = useStoredJiraTicket(prId, jiraRef.key, true);
+  const { data, isLoading, isError, error } = useStoredJiraTicket(prId, jiraRef.key, true);
   const setField = useSetJiraAcField(prId, jiraRef.key);
   const [picking, setPicking] = useState(false);
+  // GitHub Issues: the criteria come from a fixed place (sub-issues, a task list, a section), so
+  // there is no field to change.
+  const fixedSource = hasFixedAcSource(jiraRef);
   if (isLoading) return <p className={`text-xs ${MUTED}`}>Reading {jiraRef.key}…</p>;
   if (isError || data == null) {
     return (
       <div className="space-y-2">
-        <p className={`text-xs ${ERROR_TEXT}`}>Could not read {jiraRef.key}.</p>
+        <p className={`text-xs ${ERROR_TEXT}`}>
+          {fixedSource && error instanceof Error && error.message !== '' ? error.message : `Could not read ${jiraRef.key}.`}
+        </p>
         {fallback != null && <StoredStory ticket={fallback} url={jiraRef.url} />}
       </div>
     );
@@ -68,6 +74,7 @@ function JiraStory({
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
             <span className={MUTED}>Criteria from:</span>
             <span className="font-medium text-gray-800 dark:text-gray-200">{acFieldText(draft)}</span>
+            {!fixedSource && (
             <button
               type="button"
               onClick={() => setPicking((p) => !p)}
@@ -77,6 +84,7 @@ function JiraStory({
             >
               Change
             </button>
+            )}
             {setField.isPending && <span className={MUTED}>Saving…</span>}
           </div>
           {picking && (
@@ -180,7 +188,7 @@ const STATUS_PILL: Record<'new' | 'indeterminate' | 'done', string> = {
 };
 const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[11px] font-medium';
 
-function FactsRow({ f, href }: { f: TicketModalFacts; href: string | null }): JSX.Element {
+function FactsRow({ f, href, tracker }: { f: TicketModalFacts; href: string | null; tracker: string }): JSX.Element {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
       {f.status != null && (
@@ -197,7 +205,7 @@ function FactsRow({ f, href }: { f: TicketModalFacts; href: string | null }): JS
           rel="noreferrer noopener"
           className="ml-auto inline-flex items-center gap-1 text-xs text-blue-700 hover:underline dark:text-blue-300"
         >
-          Open in Jira
+          Open in {tracker}
           <ExternalLinkIcon size={11} />
         </a>
       )}
@@ -218,16 +226,22 @@ export function TicketStoryModal({
   prId: number;
   onClose: () => void;
 }): JSX.Element {
-  const { data, isLoading, isError } = useStoredJiraTicket(prId, ticket.key, true);
+  const { data, isLoading, isError, error } = useStoredJiraTicket(prId, ticket.key, true);
   const facts = ticketModalFacts(ticket, data);
   const href = safeExternalUrl(ticket.url) ?? null;
+  const tracker = ticket.provider != null ? TRACKER_PROVIDER_LABEL[ticket.provider] : 'Jira';
   return (
     <InfoModal title={ticketModalTitle(facts)} onClose={onClose} width="lg">
-      <FactsRow f={facts} href={href} />
+      <FactsRow f={facts} href={href} tracker={tracker} />
       {isLoading ? (
         <p className={`text-xs ${MUTED}`}>Reading {ticket.key}…</p>
       ) : isError || data == null ? (
-        <p className={`text-xs ${MUTED}`}>Limn has not read this ticket from Jira.</p>
+        // GitHub Issues / Linear: the server's own sentence ("Can't read this issue…") — never "no story".
+        <p className={`text-xs ${MUTED}`}>
+          {(ticket.provider === 'github' || ticket.provider === 'linear') && error instanceof Error && error.message !== ''
+            ? error.message
+            : `Limn has not read this ticket from ${tracker}.`}
+        </p>
       ) : (
         <div className="space-y-3">
           <StoryText description={data.description} acceptanceCriteria={data.acceptanceCriteria ?? ''} capHeight={false} />

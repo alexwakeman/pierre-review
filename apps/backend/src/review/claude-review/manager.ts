@@ -12,7 +12,7 @@ import {
 import type { CompareDiffResult } from '../../github/compare.js';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
-import { getAgenticProviders } from '../plugin-providers.js';
+import { getTicketSource } from '../../tracker/ticket-source.js';
 import { agenticRunReady } from './ai-ready.js';
 import { decideReviewMode } from './routing.js';
 import { offeredSpecialists } from './specialists.js';
@@ -687,8 +687,7 @@ export async function reviewPeersFor(
   item: Pick<QueueItem, 'ctx' | 'accountId' | 'prId'>,
 ): Promise<ReviewPeer[]> {
   const { ctx, accountId, prId } = item;
-  const { ticketsForPr, ticketMembers } = getAgenticProviders();
-  if (!ticketsForPr || !ticketMembers) return [];
+  const { ticketsForPr, ticketMembers } = getTicketSource();
   try {
     const tickets = (await ticketsForPr(accountId, prId)).slice(0, CLAUDE_REVIEW_MAX_TICKETS);
     const keysByPr = new Map<number, string[]>();

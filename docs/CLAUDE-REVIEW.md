@@ -81,10 +81,10 @@ posts **one** GitHub review (inline + body + verdict).
   - Registration: routes in `buildApp` via `registerAgenticRoutes`; the process-level half
     (the auto-review sweeper, the crash-orphan reconciles) once at boot via
     `startAgenticBackground` (index.ts).
-  - **One Pro input rides an OPTIONAL plugin seam**, `ProContext.registerAgenticProviders?`
-    (`review/plugin-providers.ts`): `resolveReviewTicket` (the Jira fill for an AUTO review — see
-    § Auto review). Absent, the feature runs without it. (AI Fix's `readCiAnalysisSeed` went with
-    its `ci_analysis` seed.)
+  - **No Pro input.** The OPTIONAL plugin seam `ProContext.registerAgenticProviders?`
+    (`review/plugin-providers.ts`) is GONE since apiVersion 23: the ticket review's members and
+    story, and a deep review's "Related PRs", come from core's tracker through
+    `tracker/ticket-source.ts` ([TRACKERS.md](TRACKERS.md) § Peers).
   - The URL paths never moved: the SPA client calls exactly what it called before.
 - **Deterministic routing** (`claude-review/routing.ts`, tested): BEFORE the agent runs, a pure
   diff-metrics gate (`config.reviewRouting`) picks a `reviewMode` — `skip` / `diff_only`
@@ -152,11 +152,11 @@ posts **one** GitHub review (inline + body + verdict).
     opens**, once the stored run has loaded, ONCE per PR per detected-key set, never re-adding a key the
     reader removed this session (`createStoryPullMemory`; no retry — a failure is one line). "Pull all
     from Jira (N)" in the header is the manual action (clears the removed mark), "Or pull one" the
-    per-key one. ⚠ **A PULL READS THE STORED TICKET, NOT JIRA**: the plugin's worker read it when the
-    PR was received (plugin 0038, [PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § Stored
-    Jira tickets), so the auto-pull and "Pull all" are instant. Every read goes through ONE
+    per-key one. ⚠ **A PULL READS THE STORED TICKET, NOT JIRA**: core's tracker worker read it when the
+    PR was received ([TRACKERS.md](TRACKERS.md) § Fetch on receipt), so the auto-pull and "Pull all"
+    are instant. Every read goes through ONE
     `qc.fetchQuery(['jira-ticket', prId, key])` (1-min stale, not persisted). Refresh is
-    `POST …/jira-ticket/refresh` — Jira is read again server-side, through the worker's path, and
+    `POST /api/prs/:id/tracker-ticket/refresh` — Jira is read again server-side, through the worker's path, and
     the stored row answered. ⚠ **"Story N" is the number the RUN
     gives the story**: the check drops all-blank stories, so a blank tab is "New story" and does not
     count (`storyIndexAt`); numbering by raw position made the second story "Story 3". The check's
@@ -169,7 +169,7 @@ posts **one** GitHub review (inline + body + verdict).
     issue type on that Jira site when the ticket has it, else the strong name match; the tab shows
     which (`TicketDraft.acField`, client-only — "not recorded" for a story prefilled from a run).
     "Change" opens the picker over the stored candidates (no Jira call); a pick is
-    `PUT …/jira-ticket/ac-field`, which saves it for that issue type, re-derives every stored ticket
+    `PUT /api/prs/:id/tracker-ticket/ac-field`, which saves it for that issue type, re-derives every stored ticket
     of the type and re-reads this one — other open tabs of the type are rebuilt from their stored
     rows. "Reset to default" sends `fieldId: null`. "None of these" empties this tab's criteria only
     and is never saved. Removing a tab does NOT clear the choice (it belongs to the issue type). An
@@ -647,10 +647,11 @@ does the SET of PRs naming one ticket deliver its acceptance criteria. New PR-re
 `ticket`, `ticket_assessment` or story findings; `submit_review` has no `tickets` field; the start
 route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § Ticket review.
 
-- **Keyed per TICKET, not per PR.** Ident `jira:<apiRoot>#<KEY>` (members from the plugin's stored
-  rows, `ticketMembers` — any workspace of the account on the same Jira site) or
+- **Keyed per TICKET, not per PR.** Ident `<provider>:<root>#<KEY>` — `jira:<apiRoot>#<KEY>` today,
+  unchanged since the plugin era (members from core's stored tickets, `ticketMembers` — any workspace
+  of the account on the same site; [TRACKERS.md](TRACKERS.md) § Peers) or
   `manual:<prId>:<hash>` (a pasted story: one PR, no plugin needed, never cascades). The apiRoot fold
-  is shared `jiraApiRoot`, ONE copy the plugin and the SPA both call. Members are OPEN + MERGED PRs
+  is shared `jiraApiRoot`, ONE copy the server and the SPA both call. Members are OPEN + MERGED PRs
   (a merged one is read at its final head); closed-unmerged drop out. Over `TICKET_REVIEW_MAX_PRS`
   (30; it was 8 before contribution cards) it REFUSES `too_many_prs` with the count, never samples.
 - **Tables** `ticket_reviews` / `ticket_review_members` / `ticket_review_items` (sqlite `0080`, pg
@@ -659,15 +660,15 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
 - **Currency is a fingerprint**: sha256 of `TICKET_REVIEW_VERSION`, the story hash and the sorted
   `prId:headSha:state` of the members, recomputed from synced columns on every read
   (`deriveTicketReviewState`) — `stale` names why (`story_edited`, `pr_added`, `pr_left`,
-  `pr_pushed`, `pr_merged`). The plugin's `pro_pr_jira_tickets.changed_at` (plugin `0039`) moves only
+  `pr_pushed`, `pr_merged`). Core's `tracker_tickets.changed_at` (migration `0088`; plugin `0039` before apiVersion 23) moves only
   when the story text or membership moves (`storyOrMembershipMoved`), and feeds the sweeper.
-- ⚠ **ONE STORY PER TICKET, WHOEVER ASKS** (`jiraStoryFor` → the plugin's `ticketStory`): the
+- ⚠ **ONE STORY PER TICKET, WHOEVER ASKS** (`jiraStoryFor` → core's `ticketStory`, `tracker/peers.ts`): the
   FRESHEST stored row across every PR on the ticket (newest `fetched_at`). The run, the sweeper, the
   states route and the PR pane all hash THIS. Reading "the first member's row" gave each caller a
   different text, because the worker refreshes OPEN PRs only and a merged PR's row keeps the story it
   merged with — the PR pane then showed "story edited" for ever and every sweep re-billed a run.
-- ⚠ **NO JIRA CALL ON A VIEW.** The seam (`ticketsForPr`, `ticketStory`, `ticketMembers`) reads the
-  plugin's STORED rows only (`resolvePrTickets(..., { storedOnly: true })`); a key the worker has not
+- ⚠ **NO TRACKER CALL ON A VIEW.** The source (`tracker/ticket-source.ts`: `ticketsForPr`,
+  `ticketStory`, `ticketMembers`) reads the STORED rows only (`resolvePrTickets(..., { storedOnly: true })`); a key the worker has not
   reached yet is simply not there until it is. That is why every ticket-review route except start
   and post sits on the `read` tier.
 - **CONTRIBUTION CARDS** (`cards.ts`, table `ticket_review_pr_cards`, sqlite `0086` / pg `0073`): a
@@ -768,7 +769,7 @@ and Claude assesses EACH ON ITS OWN**; the screen renders one section per ticket
   {error:'TicketInvalid', index, field, message}`, `index` null for the count; never truncated. A
   ticket may carry `source: 'jira' | 'manual'` and, for Jira only, `key`, `url` (http/https) and
   `fetchedAt` — provenance, dropped when malformed, never a reason to refuse. A Jira ticket's
-  `description` is MARKDOWN (the plugin converts Jira's wiki markup, `jiraWikiToMarkdown`), so the
+  `description` is MARKDOWN (the tracker converts Jira's wiki markup, `jiraWikiToMarkdown`), so the
   SPA renders it read-only as markdown; a manual one is shown as typed.
 - **Stored MIGRATION-FREE.** `claude_reviews.ticket` holds an ARRAY of tickets and
   `ticket_assessment` an index-aligned ARRAY of assessments; a run from before stored ONE object in
@@ -863,10 +864,10 @@ and Claude assesses EACH ON ITS OWN**; the screen renders one section per ticket
   nothing. Gap lists ("Asked for but
   not done", "Added but not asked for") are capped at 20 and clipped. Stored on
   `claude_reviews.ticket_assessment`.
-- **Fill from Jira** (plugin `jira/`, migration `0035`). When the PR carries a Jira ticket the
+- **Fill from Jira** (core `tracker/` since apiVersion 23; it was plugin `jira/`, migration `0035`). When the PR carries a Jira ticket the
   existing detection found AND its workspace has a saved Jira token, `PrDetail.tickets[i]
   .canFetchDetails` is true and the EXPANDED panel shows one "Fill from KEY" button per such
-  ticket. `GET /api/pro/prs/:id/jira-ticket?key=` answers the STORED row the plugin's worker wrote
+  ticket. `GET /api/prs/:id/tracker-ticket?key=` answers the STORED row the tracker's worker wrote
   when the PR was received (the issue read with every field — REST v2,
   `fields=*all&expand=names,schema`; the description's wiki markup converted to markdown, ADF
   flattened — plus status and assignee) and the panel REPLACES title and description. Manual entry is unchanged and
@@ -879,7 +880,7 @@ and Claude assesses EACH ON ITS OWN**; the screen renders one section per ticket
   every custom field with text on THIS ticket, strong name matches first (`/acceptance criteria/`),
   then weak ("AC", "definition of done"), then by name, capped at 50 — and the panel shows
   "Acceptance criteria from" (`Name (customfield_123) — preview`, blank first). The DEFAULT
-  (`defaultAcCandidate`, in `packages/shared/src/claude-review.ts`, applied by the plugin's
+  (`defaultAcCandidate`, in `packages/shared/src/claude-review.ts`, applied by the tracker's
   `deriveAc`): the workspace's field for this issue type on this Jira site, when this ticket has it; else the best STRONG name match (an exact
   "Acceptance Criteria" first — a weak "AC" / "Definition of Done" match is listed near the top but
   never preselected, because a wrong prefill is worse than a blank); strong matches carry a ★ in the
@@ -888,8 +889,7 @@ and Claude assesses EACH ON ITS OWN**; the screen renders one section per ticket
   ticket is detected but that workspace has no token, the panel names it ("add a Jira API token in
   Settings for the BNG workspace") instead of silently showing no button. ⚠ The route re-runs detection and refuses a key the PR does not carry,
   so the saved token can read only tickets this workspace's PRs name. Settings, token storage and
-  SSRF rules: [PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § Jira API access and
-  [SECURITY.md](SECURITY.md).
+  SSRF rules: [TRACKERS.md](TRACKERS.md) and [SECURITY.md](SECURITY.md).
 - **Posted only on request**, as findings (above): nothing reaches GitHub until the reader posts a
   finding or submits the review.
 - **Vocabularies** (shared): criteria Met / Partly met / Not met / Can't tell from the code /
@@ -966,10 +966,10 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   no row); a RUNNING auto run keeps the ordinary Stop. The Open PRs column shows the same hold (§
   Starting from the Open PRs tab).
 - ⚠ **AN AUTO PR REVIEW CARRIES NO STORY** (since the ticket review split). `startAutoItem` no
-  longer asks the plugin's `resolveReviewTicket` (the provider is still registered, and core no
-  longer calls it). Tickets are the ticket review's: its own sweeper re-checks them (§ Ticket review
+  longer asks for a story (the plugin's `resolveReviewTicket` provider is gone — `registerAgenticProviders`
+  left the contract at apiVersion 23). Tickets are the ticket review's: its own sweeper re-checks them (§ Ticket review
   → Cascade), and the FIRST auto PR review of a PR kicks that sweeper (`onAutoReviewLaunched`) so the
-  two start together. The ticket review reads Jira from the plugin's STORED rows only; a key the
+  two start together. The ticket review reads Jira from core's STORED tickets only; a key the
   worker has not reached yet waits for it.
 - ⚠ **RE-REVIEW ON NEW COMMITS.** The same candidate read returns `reReview: [{prId, headSha}]`:
   a PR of the same population (opened at/after the floor, human, open, not draft) that has a

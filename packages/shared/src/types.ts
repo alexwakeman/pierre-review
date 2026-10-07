@@ -3963,9 +3963,9 @@ export interface ProCapabilities {
   // Slack digest delivery (Pro): a per-account webhook receives the freshly-generated sprint +
   // repo digest on a cadence. The report is AI-generated (Haiku), so this mirrors activityDigest.
   slackDigest: boolean;
-  // Jira/Linear ticket-link enrichment in PR detail (Pro; no AI). Gated (like workspaceInsights) on
-  // PRO_DIGEST_ENABLED. Config (provider + base URL) is PER WORKSPACE, in pro_workspace_settings.
-  issueLinks: boolean;
+  // (apiVersion 23: `issueLinks` LEFT this map. The issue tracker — ticket links, the stored tickets,
+  // the story panel, the Open PRs ticket stacks — is CORE and FREE on every tier and in both modes
+  // (apps/backend/src/tracker/, docs/TRACKERS.md). Nothing gates it on `pro`.)
   // Review-bot triage tier — CORE/FREE. The Bots rail view reads the core bot routes and shows
   // regardless; this flag is true whenever the plugin is LOADED (independent of the paid PRO_*
   // flags) so the free bot Settings section (pro_settings-backed) stays reachable. All-false only
@@ -4441,7 +4441,33 @@ export interface MyTurnSettingsResponse {
 
 // ---- Pro per-account settings (packages/pro `pro_settings`; via GET/PUT /api/pro/settings) ----
 export type SlackDigestCadence = 'off' | 'daily' | 'twice_daily';
-export type IssueProvider = 'jira' | 'linear';
+// The issue trackers a workspace can link (CORE since apiVersion 23 — docs/TRACKERS.md). ONE per
+// workspace. `jira` reads tickets (title, description, acceptance criteria, status, assignee) with a
+// saved token; `github` (GitHub Issues) links the issues a PR closes and reads them with the
+// account's own GitHub token; `linear` links the issues Linear attached the PR to (plus the keys
+// detection finds) and reads them with a saved Linear personal API key.
+// `TRACKER_PROVIDERS_AVAILABLE` is the list the route and the Settings picker both read.
+export type TrackerProvider = 'jira' | 'github' | 'linear';
+/** @deprecated The old name. Same union. */
+export type IssueProvider = TrackerProvider;
+/** The providers a workspace may choose today, in picker order. */
+export const TRACKER_PROVIDERS_AVAILABLE: readonly TrackerProvider[] = ['jira', 'github', 'linear'];
+
+/**
+ * What a provider's Settings section asks for. GitHub Issues asks for NOTHING: it links the issues a
+ * pull request CLOSES (GitHub's own `closingIssuesReferences`) and reads them with the account's
+ * GitHub sign-in, so there is no base URL, project-key allowlist, match scope or token.
+ */
+export const TRACKER_PROVIDER_FIELDS: Record<
+  TrackerProvider,
+  { baseUrl: boolean; projectKeys: boolean; matchScope: boolean; token: boolean }
+> = {
+  jira: { baseUrl: true, projectKeys: true, matchScope: true, token: true },
+  github: { baseUrl: false, projectKeys: false, matchScope: false, token: false },
+  // Linear: the workspace URL (`https://linear.app/<org>` — the ticket root and the link base), the
+  // team-key allowlist and scope for detection, and a personal API key (write-only, sealed).
+  linear: { baseUrl: true, projectKeys: true, matchScope: true, token: true },
+};
 
 // Read shape (GET /api/pro/settings). ⚠ The Slack config left this type in plugin migration 0030 —
 // it is per-WORKSPACE now; see `SlackTargetsResponse` below.
@@ -4657,12 +4683,44 @@ export interface WorkspaceIssueSettings {
   matchScope: IssueMatchScope;
 }
 
+// ── THE WORKSPACE'S ISSUE TRACKER (CORE, free, both modes — apiVersion 23; docs/TRACKERS.md) ─────
+// `GET` / `PUT /api/workspaces/:id/tracker` (404 for a workspace that is not the caller's). ONE
+// tracker per workspace, on the core `workspace_trackers` row. The field names `issue` / `jira` are
+// the ones the plugin's `WorkspaceProSettings` used, so the Settings section reads the same shape.
+export interface WorkspaceTrackerSettings {
+  workspaceId: number;
+  issue: WorkspaceIssueSettings;
+  // Jira API access. Present whatever the provider (both fields are then empty) so the reader never
+  // has to ask whether the block exists. ⚠ `hasToken` only — the token never reaches the wire.
+  jira: WorkspaceJiraApiSettings;
+}
+
+// The PUT body: a PARTIAL patch. An omitted section is untouched; an omitted key inside one is too.
+export interface WorkspaceTrackerUpdate {
+  issue?: {
+    provider?: TrackerProvider | null;
+    baseUrl?: string | null;
+    // [] / null clears the allowlist (→ heuristic, title-only detection).
+    projectKeys?: string[] | null;
+    matchScope?: IssueMatchScope;
+  };
+  jira?: {
+    // '' or null clears it (→ Bearer auth).
+    email?: string | null;
+    // WRITE-ONLY. Omitted keeps the saved token; there is no way to read it back.
+    token?: string;
+    // true removes the saved token (ignored when `token` is sent in the same patch).
+    clearToken?: boolean;
+  };
+}
+
 export interface WorkspaceProSettings {
   workspaceId: number;
   // The sprint pair — what every window on this workspace is framed by. Both null = no sprint.
   cadenceDays: number | null;
   startDate: string | null;      // ISO (date @ UTC midnight); null = no phase anchor set
-  issue: WorkspaceIssueSettings;
+  // (NO `issue` / `jira` any more: the issue tracker moved to CORE in apiVersion 23 —
+  // `GET`/`PUT /api/workspaces/:id/tracker`, `WorkspaceTrackerSettings` below.)
   // How this workspace's Insights / flow-metrics comparison window is framed (plugin migration
   // 0032). ALWAYS a value — an unset workspace reads the product default `'rolling_14'`, which is
   // the ONLY default there is; nothing inherits from the account.
@@ -4672,10 +4730,6 @@ export interface WorkspaceProSettings {
   // sprint-position comparison. Reading the two off different grains is how one setting produced
   // two window shapes with nothing on screen saying which you got.
   comparisonMode: SprintComparisonMode;
-  // Jira API access for this workspace (plugin migration 0035), used to fill Claude Review's user
-  // story from a detected ticket. OPTIONAL on the wire so an older plugin still type-checks here;
-  // the current plugin always sends it.
-  jira?: WorkspaceJiraApiSettings;
   // RETIRED: auto Claude review moved to core with Claude Review (`GET`/`PUT
   // /api/workspaces/:id/auto-review`, `WorkspaceAutoReviewResponse`). The plugin no longer sends
   // this; it stays OPTIONAL so an older plugin still type-checks. Never read it.
@@ -4845,6 +4899,9 @@ export interface TicketAutoPostWire {
 
 // ⚠ THE TOKEN IS NEVER ON THE WIRE. A Jira token reads the team's whole tracker, so no route
 // returns it — not sealed, not masked, not its length. `hasToken` is the only trace of it.
+// ⚠ THE BLOCK IS NAMED FOR ITS FIRST PROVIDER, NOT ONLY FOR JIRA: it is the workspace's ONE tracker
+// credential (`workspace_trackers.auth_token`). A Linear workspace saves its personal API key here
+// too (`jira.token` in the PUT; `email` unused), and reads `hasToken` from it.
 export interface WorkspaceJiraApiSettings {
   // Jira Cloud signs in with email + API token (HTTP Basic). null = no email, so the token is
   // sent as a Bearer personal access token (Jira Server / Data Center).
@@ -4864,7 +4921,20 @@ export interface JiraFieldOption {
   type: string | null;
 }
 
-// GET /api/pro/jira/fields?workspace=<id> — the Settings CONNECTION CHECK: uses the SAVED token
+// GET /api/workspaces/:id/tracker/linear-check — the Linear Settings CONNECTION CHECK: one Linear
+// call with the SAVED key (`viewer` + `organization`). `matchesBaseUrl` is false when the key belongs
+// to a different Linear workspace than the URL saved above it — every ticket would then be read
+// from, and keyed on, the wrong workspace, so the reader refuses until they agree.
+export interface LinearConnectionCheck {
+  workspaceId: number;
+  viewerName: string;
+  organizationName: string;
+  // `https://linear.app/<urlKey>` — what the saved workspace URL should be.
+  organizationUrl: string;
+  matchesBaseUrl: boolean;
+}
+
+// GET /api/workspaces/:id/tracker/jira-fields — the Settings CONNECTION CHECK: uses the SAVED token
 // and lists the site's custom fields, sorted by name.
 export interface JiraFieldListResponse {
   workspaceId: number;
@@ -4883,7 +4953,7 @@ export interface JiraAcCandidate {
   match: JiraAcMatch;
 }
 
-// GET /api/pro/prs/:id/jira-ticket?key=<KEY> — one detected ticket, as plain strings, NEVER
+// GET /api/prs/:id/tracker-ticket?key=<KEY> — one detected ticket, as plain strings, NEVER
 // truncated (the panel's own `checkClaudeReviewTicket` flags anything over the caps).
 //
 // Acceptance criteria is not a standard Jira field, and one site can carry several fields named
@@ -4891,7 +4961,7 @@ export interface JiraAcCandidate {
 // with text on THIS ticket as a `candidates` list — strong name matches first, then weak, then the
 // rest by name — and the reader picks in the panel (the SPA preselects, see lib/jiraTicket.ts).
 //
-// ⚠ IT IS A STORED READ (plugin 0038). Jira is read when the PR is RECEIVED into Limn (first sync,
+// ⚠ IT IS A STORED READ (core `tracker_tickets`). Jira is read when the PR is RECEIVED into Limn (first sync,
 // or its detected key set changes) and refreshed on a TTL while it is open, by the plugin's
 // background worker; this route returns that stored row and makes no Jira call — except for a
 // ticket the worker has never read, which it reads once through the same worker path. "Refresh" is
@@ -4906,7 +4976,7 @@ export interface JiraTicketDetails {
   // cap cut, lowest-ranked first, so the list can say it is not everything.
   candidates: JiraAcCandidate[];
   omittedCandidates: number;
-  // ── stored-row extras (plugin 0038). OPTIONAL so an older plugin's answer still parses. ──
+  // ── stored-row extras (core `tracker_tickets`). OPTIONAL so an older plugin's answer still parses. ──
   /** The criteria the SERVER picked (markdown): the workspace's field for this issue type when the
    *  ticket has it, else the strong name match, else ''. */
   acceptanceCriteria?: string;
@@ -4930,13 +5000,13 @@ export interface TicketAssignee {
   avatarUrl?: string | null;
 }
 
-// POST /api/pro/prs/:id/jira-ticket/refresh — read ONE detected ticket from Jira again NOW (through
+// POST /api/prs/:id/tracker-ticket/refresh — read ONE detected ticket from Jira again NOW (through
 // the background worker's own path), store it, and answer the stored row.
 export interface JiraTicketRefreshBody {
   key: string;
 }
 
-// PUT /api/pro/prs/:id/jira-ticket/ac-field — which field holds the acceptance criteria for this
+// PUT /api/prs/:id/tracker-ticket/ac-field — which field holds the acceptance criteria for this
 // ticket's ISSUE TYPE in the PR's workspace (on its Jira site). `fieldId: null` = back to the
 // default name match. Every stored ticket of that type is re-derived and this one is re-read.
 export interface JiraAcFieldBody {
@@ -4976,32 +5046,15 @@ export interface WorkspaceProSettingsUpdate {
     // grid; sent as null clears it.
     startDate?: string | null;
   };
-  issue?: {
-    provider?: IssueProvider | null;
-    baseUrl?: string | null;
-    // [] / null clears the allowlist (→ heuristic, title-only detection).
-    projectKeys?: string[] | null;
-    matchScope?: IssueMatchScope;
-  };
+  // (NO `issue` section: the tracker moved to CORE in apiVersion 23 — `PUT
+  // /api/workspaces/:id/tracker` with a `WorkspaceTrackerUpdate`. The plugin's schema STRIPS a stale
+  // client's key and still answers 200.)
   // The comparison-window mode for THIS workspace (plugin migration 0032). TOP-LEVEL, not inside
   // `sprint`: that section declares `cadenceDays` REQUIRED so that clearing a cadence is always an
   // explicit ask, which would make a mode-only patch impossible to express. Omitted = unchanged;
   // there is no "clear" — the mode always has a value, and writing `'rolling_14'` IS the default.
   comparisonMode?: SprintComparisonMode;
-  // Jira API access (plugin migration 0035). Every key is optional: an omitted key is unchanged.
-  jira?: {
-    // '' or null clears it (→ Bearer auth).
-    email?: string | null;
-    // WRITE-ONLY. Omitted keeps the saved token; there is no way to read it back.
-    token?: string;
-    // true removes the saved token (ignored when `token` is sent in the same patch).
-    clearToken?: boolean;
-    // (No acceptance-criteria field — chosen per ticket in the Claude Review panel now. A stale
-    // client still sending `acceptanceCriteriaFieldId` has it stripped by the PUT schema, 200.)
-  };
-  // Auto Claude review (plugin migration 0036). Switching it on (off -> on) stamps `enabledAt` =
-  // now; sending `enabled: true` while already on keeps the stored moment.
-  autoReview?: { enabled: boolean };
+  // (NO `jira` section either — same move, same route.)
 }
 
 /**
@@ -5490,24 +5543,24 @@ export interface CommitDetail {
   committedAt: string;
 }
 
-// A Jira/Linear ticket reference detected in a PR (compute-on-read by the Pro enricher, from
+// A Jira/Linear ticket reference detected in a PR (compute-on-read by core's tracker, from
 // the PR title + head branch). Rendered as a link chip in the PR-detail Overview.
 export interface TicketRef {
   key: string; // e.g. "PROJ-123"
   url: string; // deep link into the configured Jira/Linear workspace
   provider: IssueProvider;
   // True when Limn can read this ticket's title, description and acceptance criteria through the
-  // Jira API (`GET /api/pro/prs/:id/jira-ticket?key=`): the provider is Jira AND a token is saved
+  // Jira API (`GET /api/prs/:id/tracker-ticket?key=`): the provider is Jira AND a token is saved
   // for the PR's workspace. The Claude Review panel shows its "Fill from KEY" button only then.
   // OPTIONAL so the contract stays additive — absent (an older plugin, or Linear) reads as false.
   canFetchDetails?: boolean;
 }
 
-// ── The Open PRs cards' ticket row (Pro, `issueLinks`) ─────────────────────────────────────────
-// `POST /api/pro/ticket-links` — ONE request for every listed card (never one per card). The
+// ── The Open PRs cards' ticket row (CORE, free) ─────────────────────────────────────────────────
+// `POST /api/ticket-links` — ONE request for every listed card (never one per card). The
 // server runs the SAME detection the PR-detail chips use (title + head branch, against the PR's
 // own workspace tracker settings) and, for a Jira workspace with a saved token, adds each ticket's
-// title, status and assignee from the STORED rows (plugin 0038) — the route makes NO Jira call; a
+// title, status and assignee from the STORED rows (core `tracker_tickets`) — the route makes NO Jira call; a
 // ticket not read yet kicks the background worker. Over `TICKET_LINKS_MAX_PRS` ids is a 400, never
 // a silent truncation. (`TICKET_LINKS_TITLE_LOOKUPS` is now the worker's per-kick bound.)
 export const TICKET_LINKS_MAX_PRS = 1000;
@@ -5524,7 +5577,7 @@ export interface TicketLink {
   /** The ticket's summary as Jira gives it. null = not read: not Jira, no token, Jira refused,
    *  or the worker has not read it yet (see `titlesComplete`). */
   title: string | null;
-  // ── STORED-ROW EXTRAS (plugin 0038), all OPTIONAL: absent = an older plugin; null = not known
+  // ── STORED-ROW EXTRAS (core `tracker_tickets`), all OPTIONAL: absent = an older plugin; null = not known
   // (not Jira, no token, not read yet, or Jira sent none). ──
   /** The workflow status as the site names it ("In Review"). */
   status?: string | null;
@@ -5553,10 +5606,10 @@ export interface TicketLinksResponse {
   titlesComplete: boolean;
 }
 
-// ── The Open PRs ticket stacks' MERGED panel (Pro, `issueLinks`) ───────────────────────────────
-// `GET /api/pro/ticket-merged-prs?workspace=<id>&keys=ENG-7,ENG-8` — ONE request for the whole
+// ── The Open PRs ticket stacks' MERGED panel (CORE, free) ──────────────────────────────────────
+// `GET /api/ticket-merged-prs?workspace=<id>&keys=ENG-7,ENG-8` — ONE request for the whole
 // grouped board (never one per stack). For each key, every MERGED pull request Limn has linked to
-// that ticket: the stored ticket rows (plugin 0038, state 'ok') of this account on the WORKSPACE'S
+// that ticket: the stored ticket rows (core `tracker_tickets`, state 'ok') of this account on the WORKSPACE'S
 // Jira site, in any repo of the account. Closed-unmerged PRs are excluded. DB-only — no Jira call.
 // A workspace whose tracker is not Jira answers `tickets: []`. Over `TICKET_MERGED_PRS_MAX_KEYS`
 // keys is a 400, never a silent truncation.
@@ -5619,7 +5672,7 @@ export interface PrDetail {
   number: number;
   title: string;
   body: string | null;
-  // Jira/Linear ticket links (Pro, compute-on-read via registerPrDetailEnricher). Tri-state:
+  // Jira/Linear ticket links (CORE, compute-on-read by tracker/enricher.ts). Tri-state:
   //   null → feature off or no provider configured (render nothing)
   //   []   → provider configured but no ticket key found (render a muted "No ticket found")
   //   [..] → render a link chip per detected ticket
@@ -7650,7 +7703,7 @@ export interface TicketReview {
 }
 
 // POST /api/ticket-reviews — start a ticket review from a PR.
-//   { prId }               every ticket the PR is on (the plugin's detection)
+//   { prId }               every ticket the PR is on (the tracker's detection)
 //   { prId, ident }        one of them
 //   { prId, tickets }      pasted stories: one one-PR ticket review each (no plugin needed)
 export type StartTicketReviewBody =

@@ -1,11 +1,11 @@
-import type { JiraStatusCategory, PrTicketLinks, TicketAssignee } from '@pierre-review/shared';
+import { canonicalTicketKey, type JiraStatusCategory, type PrTicketLinks, type TicketAssignee, type TrackerProvider } from '@pierre-review/shared';
 import { ticketIdentOf } from './ticketReview.js';
 
 // THE OPEN PRs CARD'S TICKET ROW — which tickets a card names, in what order, with what words and
 // what link. Pure, so the merge is testable; the component only renders it.
 //
 // ONE source, already on the board (never a per-card fetch): `detected` — the batched
-// `POST /api/pro/ticket-links` answer for this PR (Pro `issueLinks`): the SAME detection the
+// `POST /api/ticket-links` answer for this PR (core tracker, free): the SAME detection the
 // PR-detail chips use, the tracker's own link, and the Jira title when the workspace has a token.
 // Its order (title first, then branch) leads.
 //
@@ -19,8 +19,11 @@ export interface CardTicket {
   title: string | null;
   /** null = no link known; the row prints the key as plain text. */
   url: string | null;
-  /** The ticket review's ident ('jira:<apiRoot>#<KEY>'); absent for Linear or no usable link. */
+  /** The ticket review's ident ('jira:<apiRoot>#<KEY>', 'github:https://github.com/<owner>/<repo>#<n>',
+   *  'linear:https://linear.app/<org>#<KEY>'); absent with no usable link. */
   ident?: string;
+  /** Which tracker the ticket lives in (for "Open in GitHub" copy). */
+  provider?: TrackerProvider;
   // ── The tracker's STORED extras, carried only when KNOWN (absent otherwise). The Open PRs stack
   // header reads them. ──
   status?: string;
@@ -38,9 +41,10 @@ export function cardTickets(detected: PrTicketLinks | null | undefined): CardTic
   const out: CardTicket[] = [];
   const seen = new Set<string>();
   for (const t of detected?.tickets ?? []) {
-    const key = t.key.trim().toUpperCase();
+    // A Jira/Linear key upper-cased, a GitHub issue key (`owner/repo#12`) lower-cased.
+    const key = canonicalTicketKey(t.key) ?? t.key.trim().toUpperCase();
     if (key === '' || seen.has(key)) continue;
-    const row: CardTicket = { key, title: cleanTitle(t.title), url: t.url || null };
+    const row: CardTicket = { key, title: cleanTitle(t.title), url: t.url || null, provider: t.provider };
     const ident = ticketIdentOf({ key, url: t.url || null, provider: t.provider });
     if (ident != null) row.ident = ident;
     const status = cleanTitle(t.status);

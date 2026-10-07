@@ -159,7 +159,10 @@ import type {
   ProSettings,
   WorkspaceProSettings,
   WorkspaceProSettingsUpdate,
+  WorkspaceTrackerSettings,
+  WorkspaceTrackerUpdate,
   JiraFieldListResponse,
+  LinearConnectionCheck,
   TicketLinksBody,
   TicketLinksResponse,
   TicketMergedPrsResponse,
@@ -1159,14 +1162,13 @@ export const api = {
   // alongside a field the account grain genuinely owns.
 
   // ---- The PER-WORKSPACE Pro config (packages/pro `pro_workspace_settings`) ----
-  // ONE route, ONE row, TWO sections: the sprint cadence + phase anchor, and the Jira/Linear
-  // tracker. Both are properties of the TEAM — a sprint length is what one team runs, and a PR's
-  // repo belongs to exactly one workspace — so both are scoped by `?workspace=` like every other
+  // ONE route, ONE row: the sprint cadence + phase anchor and the comparison mode. (The Jira/Linear
+  // tracker left it for CORE at apiVersion 23 — `workspaceTracker` below.) Properties of the
+  // TEAM, so scoped by `?workspace=` like every other
   // scoped route (absent / unknown / another tenant's id all degrade to the account's Default,
   // never a 404). The PUT is a PARTIAL, SECTIONED patch: an omitted section is untouched, which is
   // what lets the two Settings sections keep their own Save buttons without clobbering each other.
-  // `sprint.cadenceDays: null` CLEARS the cadence (it nulls the pair, the row survives because it
-  // also holds the tracker); an OMITTED `sprint.startDate` keeps the stored anchor, so a
+  // `sprint.cadenceDays: null` CLEARS the cadence (it nulls the pair, the row survives); an OMITTED `sprint.startDate` keeps the stored anchor, so a
   // cadence-only edit does not silently re-phase the grid.
   workspaceProSettings: (workspaceId: number) =>
     get<WorkspaceProSettings>(
@@ -1178,43 +1180,55 @@ export const api = {
       jsonBody('PUT', patch),
     ).then((r) => handle<WorkspaceProSettings>(r)),
 
-  // ---- Jira API reads (Pro, `issueLinks`) — both use the workspace's SAVED token ----
-  // The acceptance-criteria field picker; doubles as the Settings connection test. Click-gated.
-  jiraFields: (workspaceId: number) =>
-    get<JiraFieldListResponse>(withQuery('/api/pro/jira/fields', workspaceParam(workspaceId))),
-  // One ticket's STORED title / description / criteria / status / assignee for Claude Review's
-  // panel — read by the plugin's worker when the PR was received, so this makes no Jira call. The
-  // server refuses a key it did not itself detect on this PR, so this is not a general Jira lookup.
-  jiraTicket: (prId: number, key: string) =>
-    get<JiraTicketDetails>(
-      `/api/pro/prs/${prId}/jira-ticket?key=${encodeURIComponent(key)}`,
+  // ---- THE ISSUE TRACKER (CORE, free — apiVersion 23; docs/TRACKERS.md) ----
+  // The workspace's tracker: provider, base URL, project keys, match scope, and the Jira email +
+  // whether a token is saved (`hasToken` — the token is WRITE-ONLY and never comes back). Addressed
+  // by PATH id, so another tenant's id is a 404 (like every `/api/workspaces/:id/*` route). The PUT
+  // is a PARTIAL patch: an omitted section or key is untouched.
+  workspaceTracker: (workspaceId: number) =>
+    get<WorkspaceTrackerSettings>(`/api/workspaces/${workspaceId}/tracker`),
+  updateWorkspaceTracker: (workspaceId: number, patch: WorkspaceTrackerUpdate) =>
+    fetch(`/api/workspaces/${workspaceId}/tracker`, jsonBody('PUT', patch)).then((r) =>
+      handle<WorkspaceTrackerSettings>(r),
     ),
-  // Read ONE detected ticket from Jira again NOW (the plugin's worker path), store it, answer it.
+  // The Settings connection check: lists the Jira site's custom fields with the SAVED token.
+  // Click-gated (one call to the customer's Jira).
+  jiraFields: (workspaceId: number) =>
+    get<JiraFieldListResponse>(`/api/workspaces/${workspaceId}/tracker/jira-fields`),
+  // The Linear connection check: who the SAVED key is, and which Linear workspace it belongs to.
+  // Click-gated (one call to Linear).
+  linearCheck: (workspaceId: number) =>
+    get<LinearConnectionCheck>(`/api/workspaces/${workspaceId}/tracker/linear-check`),
+  // One ticket's STORED title / description / criteria / status / assignee — read by the tracker's
+  // worker when the PR was received, so this makes no tracker call. The server refuses a key it did
+  // not itself detect on this PR, so this is not a general tracker lookup.
+  jiraTicket: (prId: number, key: string) =>
+    get<JiraTicketDetails>(`/api/prs/${prId}/tracker-ticket?key=${encodeURIComponent(key)}`),
+  // Read ONE detected ticket from the tracker again NOW (the worker's path), store it, answer it.
   refreshJiraTicket: (prId: number, key: string) =>
     fetch(
-      `/api/pro/prs/${prId}/jira-ticket/refresh`,
+      `/api/prs/${prId}/tracker-ticket/refresh`,
       jsonBody('POST', { key } satisfies JiraTicketRefreshBody),
     ).then((r) => handle<JiraTicketDetails>(r)),
   // The acceptance-criteria field for this ticket's ISSUE TYPE in the PR's workspace (null = back
   // to the default name match). Answers the ticket re-read with it.
   setJiraAcField: (prId: number, key: string, fieldId: string | null) =>
     fetch(
-      `/api/pro/prs/${prId}/jira-ticket/ac-field`,
+      `/api/prs/${prId}/tracker-ticket/ac-field`,
       jsonBody('PUT', { key, fieldId } satisfies JiraAcFieldBody),
     ).then((r) => handle<JiraTicketDetails>(r)),
-  // The Open PRs cards' ticket row: every listed PR's detected tickets (+ stored Jira title, status
-  // and assignee) in
-  // ONE request for the whole board. At most TICKET_LINKS_MAX_PRS ids (the route 400s over).
+  // The Open PRs cards' ticket row: every listed PR's detected tickets (+ stored title, status and
+  // assignee) in ONE request for the whole board. At most TICKET_LINKS_MAX_PRS ids (400 over).
   ticketLinks: (prIds: number[]) =>
-    fetch('/api/pro/ticket-links', jsonBody('POST', { prIds } satisfies TicketLinksBody)).then((r) =>
+    fetch('/api/ticket-links', jsonBody('POST', { prIds } satisfies TicketLinksBody)).then((r) =>
       handle<TicketLinksResponse>(r),
     ),
   // The Open PRs ticket stacks' "Merged (n)" panel: every merged PR linked to each listed ticket
-  // key, ONE request for the whole board, DB-only. Keys are read on the WORKSPACE's Jira site.
-  // A GET (read tier); at most TICKET_MERGED_PRS_MAX_KEYS keys (the route 400s over).
+  // key, ONE request for the whole board, DB-only. Keys are read on the WORKSPACE's tracker site.
+  // At most TICKET_MERGED_PRS_MAX_KEYS keys (the route 400s over).
   ticketMergedPrs: (workspaceId: number, keys: string[]) =>
     fetch(
-      `/api/pro/ticket-merged-prs?${workspaceParam(workspaceId)}&keys=${encodeURIComponent(keys.join(','))}`,
+      `/api/ticket-merged-prs?${workspaceParam(workspaceId)}&keys=${encodeURIComponent(keys.join(','))}`,
     ).then((r) => handle<TicketMergedPrsResponse>(r)),
 
   // ---- The PER-WORKSPACE Slack digest (packages/pro `workspace_slack_targets`) ----

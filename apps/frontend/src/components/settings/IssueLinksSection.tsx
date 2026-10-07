@@ -1,26 +1,32 @@
 import { useEffect, useState } from 'react';
-import type { IssueMatchScope, IssueProvider } from '@pierre-review/shared';
 import {
-  useUpdateWorkspaceProSettings,
-  useWorkspaceProSettings,
-} from '../../hooks/useWorkspaceProSettings.js';
-import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+  TRACKER_PROVIDERS_AVAILABLE,
+  TRACKER_PROVIDER_FIELDS,
+  type IssueMatchScope,
+  type TrackerProvider,
+  type WorkspaceTrackerUpdate,
+} from '@pierre-review/shared';
+import { useUpdateWorkspaceTracker, useWorkspaceTracker } from '../../hooks/useWorkspaceTracker.js';
 import { JiraApiAccess } from './JiraApiAccess.js';
+import { LinearApiAccess } from './LinearApiAccess.js';
 import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
-const PLACEHOLDER: Record<IssueProvider, string> = {
+const PLACEHOLDER: Record<TrackerProvider, string> = {
   jira: 'https://your-org.atlassian.net',
   linear: 'https://linear.app/your-workspace',
+  github: 'https://github.com/your-org/your-repo',
 };
+const LABEL: Record<TrackerProvider, string> = { jira: 'Jira', linear: 'Linear', github: 'GitHub Issues' };
 
 /**
- * Jira / Linear provider + base URL for the CURRENTLY-SELECTED workspace. When set, PR detail
+ * The issue tracker (provider + base URL) for the CURRENTLY-SELECTED workspace. When set, PR detail
  * shows deep links for any ticket key (e.g. PROJ-123) found in the PR title or head branch — and
- * flags when none is found. Detection is compute-on-read (no backfill); see the Pro ticket
- * enricher.
+ * flags when none is found. CORE and FREE on every tier and in both modes since apiVersion 23
+ * (`GET`/`PUT /api/workspaces/:id/tracker`, docs/TRACKERS.md); the provider list is the shared
+ * `TRACKER_PROVIDERS_AVAILABLE` — only providers an adapter implements are offered.
  *
- * ⚠ IT IS PER-WORKSPACE (plugin migration 0031), not per-account. The enricher's input is a PR,
+ * ⚠ IT IS PER-WORKSPACE, not per-account. The enricher's input is a PR,
  * and a PR's repo belongs to exactly ONE workspace, so there was never a reason for one tracker to
  * govern every team's PRs. There is no account-level default beneath this: two states, no chain.
  *
@@ -40,18 +46,16 @@ const PLACEHOLDER: Record<IssueProvider, string> = {
  */
 export function IssueLinksSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
-  const query = useWorkspaceProSettings(workspaceId != null, workspaceId);
-  const mutation = useUpdateWorkspaceProSettings(workspaceId);
+  const query = useWorkspaceTracker(workspaceId != null, workspaceId);
+  const mutation = useUpdateWorkspaceTracker(workspaceId);
   const data = query.data;
-  // Jira API access feeds Claude Review only, so it is offered only where Claude Review runs.
-  const claudeReview = useAiCapabilities().enabled;
 
   // Re-seeded on the resolved workspace / STORED VALUE: an uncontrolled seed would leave the
   // previous workspace's tracker in the inputs after a switch, and Save would write it here.
   //
   // ⚠ KEYED ON THE VALUES, NOT ON THE RESPONSE OBJECT — a `[data]` dependency re-seeds on every
   // background refetch (a window focus past the 60s staleTime), reverting a half-typed base URL.
-  const [provider, setProvider] = useState<IssueProvider | ''>('');
+  const [provider, setProvider] = useState<TrackerProvider | ''>('');
   const [baseUrl, setBaseUrl] = useState('');
   const [projectKeys, setProjectKeys] = useState('');
   const [matchScope, setMatchScope] = useState<IssueMatchScope>('title_branch');
@@ -82,49 +86,76 @@ export function IssueLinksSection(): JSX.Element {
     .filter((k) => k !== '');
   const hasKeys = parsedKeys.length > 0;
 
+  // What this provider asks for. GitHub Issues asks for nothing: only a change of provider is a
+  // change, and its Save sends ONLY the provider — the stored Jira URL and token are kept for a
+  // switch back (a token is dropped only when the URL itself moves).
+  const fields = provider === '' ? null : TRACKER_PROVIDER_FIELDS[provider];
   const dirty =
     (provider || null) !== saved.provider ||
-    baseUrl.trim() !== (saved.baseUrl ?? '') ||
-    parsedKeys.join(',') !== saved.projectKeys.join(',') ||
-    matchScope !== saved.matchScope;
+    (fields?.baseUrl === true && baseUrl.trim() !== (saved.baseUrl ?? '')) ||
+    (fields?.projectKeys === true && parsedKeys.join(',') !== saved.projectKeys.join(',')) ||
+    (fields?.matchScope === true && matchScope !== saved.matchScope);
+  const patch: WorkspaceTrackerUpdate['issue'] =
+    provider === ''
+      ? { provider: null }
+      : {
+          provider,
+          ...(fields?.baseUrl ? { baseUrl: baseUrl.trim() === '' ? null : baseUrl.trim() } : {}),
+          ...(fields?.projectKeys ? { projectKeys: parsedKeys } : {}),
+          ...(fields?.matchScope ? { matchScope } : {}),
+        };
 
   return (
     <SectionShell
       title="Issue tracker"
-      desc="Link Jira/Linear tickets detected in a PR’s title or branch into the PR details, for this workspace’s repos only. Other workspaces are unaffected — each one points at its own tracker, or none."
+      desc="Link each PR to its tickets, for this workspace’s repos only. Other workspaces are unaffected — each one points at its own tracker, or none."
     >
       <Field label="Provider">
         <select
           className={inputCls}
           value={provider}
-          onChange={(e) => setProvider(e.target.value as IssueProvider | '')}
+          onChange={(e) => setProvider(e.target.value as TrackerProvider | '')}
         >
           <option value="">None</option>
-          <option value="jira">Jira</option>
-          <option value="linear">Linear</option>
+          {TRACKER_PROVIDERS_AVAILABLE.map((p) => (
+            <option key={p} value={p}>
+              {LABEL[p]}
+            </option>
+          ))}
         </select>
       </Field>
-      {provider !== '' && (
+      {provider === 'github' && (
+        <p className="text-xs text-gray-600 dark:text-gray-300">
+          A PR’s tickets are the issues it closes — “Fixes #12”, “Closes owner/repo#12”, or an issue
+          linked in the PR’s Development panel. Limn reads them with your GitHub sign-in. Nothing to
+          set up.
+        </p>
+      )}
+      {fields?.baseUrl === true && (
         <>
           <Field
-            label="Base URL"
+            label={provider === 'linear' ? 'Workspace URL' : 'Base URL'}
             hint={
               provider === 'jira'
-                ? `Tickets link to {base}/browse/KEY-123.${data.jira?.hasToken ? ' Moving to a different Jira site removes the saved API token.' : ''}`
-                : 'Tickets link to {base}/issue/KEY-123.'
+                ? `Tickets link to {base}/browse/KEY-123.${data.jira.hasToken ? ' Moving to a different Jira site removes the saved API token.' : ''}`
+                : `Your Linear workspace’s address. Tickets link to {base}/issue/KEY-123.${data.jira.hasToken ? ' Moving to a different Linear workspace removes the saved API key.' : ''}`
             }
           >
             <input
               type="url"
               className={inputCls}
-              placeholder={PLACEHOLDER[provider]}
+              placeholder={PLACEHOLDER[provider as TrackerProvider]}
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
             />
           </Field>
           <Field
-            label="Project keys"
-            hint="Optional, comma-separated (e.g. ENG, PROJ). When set, a ticket is only detected if its prefix is on this list — the most reliable way to avoid false matches like GPT-4 or node-18. Leave blank to fall back to detecting uppercase keys in the PR title."
+            label={provider === 'linear' ? 'Team keys' : 'Project keys'}
+            hint={
+              provider === 'linear'
+                ? 'Optional, comma-separated (e.g. ENG, OPS). Issues Linear’s GitHub integration linked to a PR are always found. Beyond those, a key in the PR title or branch counts only if its team is on this list. Leave blank to look for uppercase keys in the PR title only.'
+                : 'Optional, comma-separated (e.g. ENG, PROJ). When set, a ticket is only detected if its prefix is on this list — the most reliable way to avoid false matches like GPT-4 or node-18. Leave blank to fall back to detecting uppercase keys in the PR title.'
+            }
           >
             <input
               type="text"
@@ -161,27 +192,23 @@ export function IssueLinksSection(): JSX.Element {
       <SaveButton
         dirty={dirty}
         saving={mutation.isPending}
-        onClick={() =>
-          mutation.mutate({
-            issue: {
-              provider: provider === '' ? null : provider,
-              baseUrl: baseUrl.trim() === '' ? null : baseUrl.trim(),
-              projectKeys: parsedKeys,
-              matchScope,
-            },
-          })
-        }
+        onClick={() => mutation.mutate({ issue: patch })}
       />
       {mutation.isError && (
         <p className="text-[11px] text-red-500">{(mutation.error as Error).message}</p>
       )}
       {/* Offered once Jira is the SAVED tracker with a base URL — the field list and the ticket
-          reads call the saved site, so an unsaved URL in the box above would be the wrong one. */}
-      {claudeReview &&
-        saved.provider === 'jira' &&
+          reads call the saved site, so an unsaved URL in the box above would be the wrong one.
+          ⚠ NO LONGER BEHIND `me.ai.enabled`: the token feeds the stored tickets every free surface
+          reads (the Open PRs ticket row and stacks, the ticket modal), in both modes, not only
+          Claude Review. */}
+      {saved.provider === 'jira' &&
         provider === 'jira' &&
-        (saved.baseUrl ?? '') !== '' &&
-        data.jira != null && <JiraApiAccess workspaceId={workspaceId} jira={data.jira} />}
+        (saved.baseUrl ?? '') !== '' && <JiraApiAccess workspaceId={workspaceId} jira={data.jira} />}
+      {/* The same rule for Linear: the key belongs to the SAVED workspace URL. */}
+      {saved.provider === 'linear' && provider === 'linear' && (saved.baseUrl ?? '') !== '' && (
+        <LinearApiAccess workspaceId={workspaceId} jira={data.jira} baseUrl={saved.baseUrl ?? ''} />
+      )}
     </SectionShell>
   );
 }

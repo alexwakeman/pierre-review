@@ -526,6 +526,27 @@
       "when": 1790928000000,
       "tag": "0074_auto_post",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1791014400000,
+      "tag": "0075_issue_tracker",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1791100800000,
+      "tag": "0076_github_issue_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1791187200000,
+      "tag": "0077_linear_links",
+      "breakpoints": true
     }
   ]
 }

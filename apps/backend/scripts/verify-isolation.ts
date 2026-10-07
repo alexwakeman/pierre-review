@@ -3417,6 +3417,273 @@ check(
   check("a run naming B's PR under account A is refused by the composite FK", runRefused);
 }
 
+// ── THE ISSUE TRACKER (tracker/, CORE since apiVersion 23) ─────────────────────────────────────
+// `workspace_trackers` (a credential per workspace), `tracker_tickets` (stored stories) and
+// `pro_jira_ac_fields`. BOTH accounts point at the SAME Jira site and name the SAME key, so the
+// ticket ident is identical across tenants — every membership / story read must still answer only
+// for the caller (the MUTATION check proves there is something to leak). Workspace ids arrive in a
+// request PATH (→ 404) and the composite FK refuses a cross-account pair in the database; PR ids
+// arrive in paths and bodies (→ 404 / absent).
+{
+  const { buildTrackerContext } = await import('../src/tracker/runtime.js');
+  const ts = await import('../src/tracker/settings.js');
+  const { ownedWorkspaceId } = await import('../src/tracker/context.js');
+  const store = await import('../src/tracker/store.js');
+  const peers = await import('../src/tracker/peers.js');
+  const { ticketLinksForPrs } = await import('../src/tracker/links.js');
+  const { ticketMergedPrs } = await import('../src/tracker/merged.js');
+  const { detectPrTickets, prTicketRefs } = await import('../src/tracker/enricher.js');
+  const { registerTrackerRoutes } = await import('../src/tracker/routes.js');
+  const silentLog = { info() {}, warn() {}, error() {} };
+  const tctx = buildTrackerContext(silentLog);
+  const SITE = 'https://acme.atlassian.net';
+  for (const [acct, ws] of [
+    [1, defaultA],
+    [2, defaultB],
+  ] as const) {
+    await ts.writeWorkspaceTracker(tctx, acct, ws, {
+      issue: { provider: 'jira', baseUrl: SITE, projectKeys: ['ENG'] },
+      jira: { token: `token-of-${acct}` },
+    });
+  }
+  // Both PRs name ENG-1 (a title the detection will find), and each account has a stored row.
+  await db.update(pullRequests).set({ title: 'ENG-1 shared key' }).where(inArray(pullRequests.id, [A.prId, B.prId])).execute();
+  const at = new Date();
+  for (const [acct, ws, prId, title] of [
+    [1, defaultA, A.prId, 'A story'],
+    [2, defaultB, B.prId, 'B story'],
+  ] as const) {
+    await store.upsertTicketRow(tctx, acct, prId, 'ENG-1', {
+      workspaceId: ws,
+      provider: 'jira',
+      detectedFrom: 'title',
+      detectOrder: 0,
+      apiRoot: SITE,
+      url: `${SITE}/browse/ENG-1`,
+      state: 'ok',
+      errorCode: null,
+      title,
+      description: `${title} text`,
+      acceptanceCriteria: '',
+      acFieldId: null,
+      acFieldName: null,
+      acFieldSource: 'default',
+      issueTypeId: '1',
+      issueTypeName: 'Story',
+      statusName: 'To Do',
+      statusCategory: 'new',
+      assigneeName: null,
+      assigneeAccountId: null,
+      assigneeAvatarUrl: null,
+      candidatesJson: '[]',
+      omittedCandidates: 0,
+      fetchedAt: at,
+      checkedAt: at,
+      nextCheckAt: at,
+    });
+  }
+  await store.writeAcFieldSetting(tctx, 2, defaultB, SITE, '1', { id: 'customfield_9', name: 'B field' }, at);
+  const IDENT = `jira:${SITE}#ENG-1`;
+
+  check("ownedWorkspaceId(A, B's workspace) is null", (await ownedWorkspaceId(tctx, 1, defaultB)) === null);
+  const crossRead = await ts.readWorkspaceTracker(tctx, 1, defaultB);
+  check("readWorkspaceTracker(A, B's workspace) sees no tracker and no token", crossRead.issue.provider === null && !crossRead.jira.hasToken);
+  let trackerRefused = false;
+  try {
+    await ts.writeWorkspaceTracker(tctx, 1, defaultB, { issue: { provider: 'jira', baseUrl: 'https://evil.example' } });
+  } catch {
+    trackerRefused = true;
+  }
+  check("a tracker row naming B's workspace under account A is refused by the composite FK", trackerRefused);
+  const bAccess = await ts.readWorkspaceTrackerAccess(tctx, 2, defaultB);
+  check("B's own token still opens as B's (A's write did not touch it)", bAccess.token.state === 'ok' && bAccess.token.token === 'token-of-2');
+  check("readStoredTickets(A, [B.pr]) is empty", (await store.readStoredTickets(tctx, 1, [B.prId])).length === 0);
+  check("readAcFieldSettings(A, [B's workspace]) is empty", (await store.readAcFieldSettings(tctx, 1, [defaultB])).size === 0);
+  const membersA = await peers.ticketMembers(tctx, 1, IDENT);
+  check("ticketMembers(A, shared ident) lists only A's PR", membersA.length === 1 && membersA[0]!.prId === A.prId);
+  check("ticketStory(A, shared ident) is A's text, never B's", (await peers.ticketStory(tctx, 1, IDENT))?.title === 'A story');
+  check("ticketsForPr(A, B.pr) is empty", (await peers.ticketsForPr(tctx, 1, B.prId)).length === 0);
+  check("listChangedTicketIdents(A) names the ticket once (A's row only)", (await peers.listChangedTicketIdents(tctx, 1, 0)).length === 1);
+  check("detectPrTickets(A, B's repo) is null (no membership in A)", (await detectPrTickets(tctx, 1, { repoId: B.repoId, title: 'ENG-1', headRefName: null })) === null);
+  check("prTicketRefs(A, B's repo) is null", (await prTicketRefs(tctx, { accountId: 1, repoId: B.repoId, title: 'ENG-1', headRefName: null })) === null);
+  check("ticketLinksForPrs(A, [B.pr]) answers nothing", (await ticketLinksForPrs(tctx, 1, [B.prId])).prs.length === 0);
+  check("ticketMergedPrs(A, B's workspace id) is empty", (await ticketMergedPrs(tctx, 1, defaultB, ['ENG-1'])).tickets.length === 0);
+  const tt = schema.trackerTickets;
+  const shared = await db.select().from(tt).where(and(eq(tt.apiRoot, SITE), eq(tt.issueKey, 'ENG-1'))).execute();
+  check('MUTATION: without the account predicate both accounts share the ticket', shared.length === 2);
+
+  // The HTTP layer: path ids → 404, never another tenant's data.
+  const Fastify = (await import('fastify')).default;
+  const app = Fastify({ logger: false });
+  registerTrackerRoutes(app, { ...tctx, accountIdOf: () => 1 });
+  await app.ready();
+  check("GET /api/workspaces/<B's>/tracker as A → 404", (await app.inject({ method: 'GET', url: `/api/workspaces/${defaultB}/tracker` })).statusCode === 404);
+  check(
+    "PUT /api/workspaces/<B's>/tracker as A → 404",
+    (await app.inject({ method: 'PUT', url: `/api/workspaces/${defaultB}/tracker`, payload: { jira: { clearToken: true } } })).statusCode === 404,
+  );
+  check(
+    "B's token survives A's PUT",
+    (await ts.readWorkspaceTrackerAccess(tctx, 2, defaultB)).token.state === 'ok',
+  );
+  check("GET /api/workspaces/<B's>/tracker/jira-fields as A → 404", (await app.inject({ method: 'GET', url: `/api/workspaces/${defaultB}/tracker/jira-fields` })).statusCode === 404);
+  check("GET /api/prs/<B's>/tracker-ticket as A → 404", (await app.inject({ method: 'GET', url: `/api/prs/${B.prId}/tracker-ticket?key=ENG-1` })).statusCode === 404);
+  check(
+    "POST /api/prs/<B's>/tracker-ticket/refresh as A → 404",
+    (await app.inject({ method: 'POST', url: `/api/prs/${B.prId}/tracker-ticket/refresh`, payload: { key: 'ENG-1' } })).statusCode === 404,
+  );
+  check(
+    "PUT /api/prs/<B's>/tracker-ticket/ac-field as A → 404",
+    (await app.inject({ method: 'PUT', url: `/api/prs/${B.prId}/tracker-ticket/ac-field`, payload: { key: 'ENG-1', fieldId: null } })).statusCode === 404,
+  );
+  const links = await app.inject({ method: 'POST', url: '/api/ticket-links', payload: { prIds: [B.prId] } });
+  check("POST /api/ticket-links with B's PR as A answers nothing", links.statusCode === 200 && links.json().prs.length === 0);
+  const own = await app.inject({ method: 'GET', url: `/api/prs/${A.prId}/tracker-ticket?key=ENG-1` });
+  check("GET /api/prs/<A's>/tracker-ticket as A → A's story", own.statusCode === 200 && own.json().title === 'A story');
+
+  // GITHUB ISSUES (docs/TRACKERS.md § GitHub Issues): both accounts' PRs CLOSE the same issue, and
+  // each has a stored row — so a dropped account predicate on the stored links, the peers or the
+  // ticket route has something to leak. No GitHub call is made: every read here is a stored row.
+  const GH_KEY = 'acme/web#7';
+  const GH_IDENT = 'github:https://github.com/acme/web#7';
+  for (const [acct, ws, prId, title] of [
+    [1, defaultA, A.prId, 'A issue'],
+    [2, defaultB, B.prId, 'B issue'],
+  ] as const) {
+    await ts.writeWorkspaceTracker(tctx, acct, ws, { issue: { provider: 'github' } });
+    await db
+      .update(pullRequests)
+      .set({ closingIssues: [GH_KEY], closingIssuesCheckedAt: at })
+      .where(and(eq(pullRequests.accountId, acct), eq(pullRequests.id, prId)))
+      .execute();
+    await store.upsertTicketRow(tctx, acct, prId, GH_KEY, {
+      workspaceId: ws,
+      provider: 'github',
+      detectedFrom: 'link',
+      detectOrder: 0,
+      apiRoot: 'https://github.com',
+      url: 'https://github.com/acme/web/issues/7',
+      state: 'ok',
+      errorCode: null,
+      title,
+      description: `${title} body`,
+      acceptanceCriteria: '',
+      acFieldId: null,
+      acFieldName: null,
+      acFieldSource: 'default',
+      issueTypeId: null,
+      issueTypeName: null,
+      statusName: 'Open',
+      statusCategory: 'new',
+      assigneeName: null,
+      assigneeAccountId: null,
+      assigneeAvatarUrl: null,
+      candidatesJson: '[]',
+      omittedCandidates: 0,
+      fetchedAt: at,
+      checkedAt: at,
+      nextCheckAt: new Date(at.getTime() + 3600_000),
+    });
+  }
+  const { storedClosingIssues } = await import('../src/tracker/enricher.js');
+  check("storedClosingIssues(A, B.pr) is null (B's links never reach A)", (await storedClosingIssues(tctx, 1, B.prId)) === null);
+  const ghMembersA = await peers.ticketMembers(tctx, 1, GH_IDENT);
+  check('ticketMembers(A, shared GitHub ident) lists only A’s PR', ghMembersA.length === 1 && ghMembersA[0]!.prId === A.prId);
+  check('ticketStory(A, shared GitHub ident) is A’s text, never B’s', (await peers.ticketStory(tctx, 1, GH_IDENT))?.title === 'A issue');
+  check(
+    "ticketMergedPrs(A, B's workspace, GitHub key) is empty",
+    (await ticketMergedPrs(tctx, 1, defaultB, [GH_KEY])).tickets.length === 0,
+  );
+  const ghLinks = await ticketLinksForPrs(tctx, 1, [A.prId, B.prId]);
+  check(
+    "ticketLinksForPrs(A, [A.pr, B.pr]) answers A's PR only, with A's title",
+    ghLinks.prs.length === 1 && ghLinks.prs[0]!.prId === A.prId && ghLinks.prs[0]!.tickets[0]?.title === 'A issue',
+  );
+  check(
+    "GET /api/prs/<B's>/tracker-ticket?key=<GitHub key> as A → 404",
+    (await app.inject({ method: 'GET', url: `/api/prs/${B.prId}/tracker-ticket?key=${encodeURIComponent(GH_KEY)}` })).statusCode === 404,
+  );
+  const ghOwn = await app.inject({ method: 'GET', url: `/api/prs/${A.prId}/tracker-ticket?key=${encodeURIComponent(GH_KEY)}` });
+  check("GET /api/prs/<A's>/tracker-ticket?key=<GitHub key> as A → A's issue", ghOwn.statusCode === 200 && ghOwn.json().title === 'A issue');
+  const ghShared = await db.select().from(tt).where(and(eq(tt.provider, 'github'), eq(tt.issueKey, GH_KEY))).execute();
+  check('MUTATION: without the account predicate both accounts share the GitHub issue', ghShared.length === 2);
+
+  // LINEAR (docs/TRACKERS.md § Linear): both accounts point at the SAME Linear workspace, both PRs are
+  // attached to the same issue (stored links), and each has a stored row — so a dropped account
+  // predicate on the links, the peers, the ticket route or the connection check has something to
+  // leak. No Linear call is made: every read here is a stored row, and B's check 404s first.
+  const LIN_ROOT = 'https://linear.app/acme';
+  const LIN_KEY = 'ENG-9';
+  const LIN_IDENT = `linear:${LIN_ROOT}#${LIN_KEY}`;
+  for (const [acct, ws, prId, title] of [
+    [1, defaultA, A.prId, 'A linear issue'],
+    [2, defaultB, B.prId, 'B linear issue'],
+  ] as const) {
+    await ts.writeWorkspaceTracker(tctx, acct, ws, {
+      issue: { provider: 'linear', baseUrl: LIN_ROOT },
+      jira: { token: `lin_api_tokenof${acct}xxxxxxxx` },
+    });
+    await db
+      .update(pullRequests)
+      .set({ linearLinks: [LIN_KEY], linearLinksRoot: LIN_ROOT, linearLinksCheckedAt: at })
+      .where(and(eq(pullRequests.accountId, acct), eq(pullRequests.id, prId)))
+      .execute();
+    await store.upsertTicketRow(tctx, acct, prId, LIN_KEY, {
+      workspaceId: ws,
+      provider: 'linear',
+      detectedFrom: 'link',
+      detectOrder: 0,
+      apiRoot: LIN_ROOT,
+      url: `${LIN_ROOT}/issue/${LIN_KEY}/some-slug`,
+      state: 'ok',
+      errorCode: null,
+      title,
+      description: `${title} body`,
+      acceptanceCriteria: '',
+      acFieldId: null,
+      acFieldName: null,
+      acFieldSource: 'default',
+      issueTypeId: null,
+      issueTypeName: null,
+      statusName: 'Todo',
+      statusCategory: 'new',
+      assigneeName: null,
+      assigneeAccountId: null,
+      assigneeAvatarUrl: null,
+      candidatesJson: '[]',
+      omittedCandidates: 0,
+      fetchedAt: at,
+      checkedAt: at,
+      nextCheckAt: new Date(at.getTime() + 3600_000),
+    });
+  }
+  const { storedLinks } = await import('../src/tracker/enricher.js');
+  check("storedLinks(A, B.pr) has no Linear links (B's links never reach A)", (await storedLinks(tctx, 1, B.prId)).linearLinks === null);
+  const linMembersA = await peers.ticketMembers(tctx, 1, LIN_IDENT);
+  check('ticketMembers(A, shared Linear ident) lists only A’s PR', linMembersA.length === 1 && linMembersA[0]!.prId === A.prId);
+  check('ticketStory(A, shared Linear ident) is A’s text, never B’s', (await peers.ticketStory(tctx, 1, LIN_IDENT))?.title === 'A linear issue');
+  const linLinks = await ticketLinksForPrs(tctx, 1, [A.prId, B.prId]);
+  check(
+    "ticketLinksForPrs(A, [A.pr, B.pr]) answers A's PR only, with A's Linear title",
+    linLinks.prs.length === 1 && linLinks.prs[0]!.prId === A.prId && linLinks.prs[0]!.tickets[0]?.title === 'A linear issue',
+  );
+  check(
+    "GET /api/workspaces/<B's>/tracker/linear-check as A → 404",
+    (await app.inject({ method: 'GET', url: `/api/workspaces/${defaultB}/tracker/linear-check` })).statusCode === 404,
+  );
+  const linCross = await app.inject({ method: 'GET', url: `/api/workspaces/${defaultB}/tracker` });
+  check("GET /api/workspaces/<B's>/tracker as A never shows B's Linear key", linCross.statusCode === 404 && !linCross.body.includes('lin_api_'));
+  check(
+    "GET /api/prs/<B's>/tracker-ticket?key=<Linear key> as A → 404",
+    (await app.inject({ method: 'GET', url: `/api/prs/${B.prId}/tracker-ticket?key=${LIN_KEY}` })).statusCode === 404,
+  );
+  const linOwn = await app.inject({ method: 'GET', url: `/api/prs/${A.prId}/tracker-ticket?key=${LIN_KEY}` });
+  check("GET /api/prs/<A's>/tracker-ticket?key=<Linear key> as A → A's issue", linOwn.statusCode === 200 && linOwn.json().title === 'A linear issue');
+  const linShared = await db.select().from(tt).where(and(eq(tt.provider, 'linear'), eq(tt.issueKey, LIN_KEY))).execute();
+  check('MUTATION: without the account predicate both accounts share the Linear issue', linShared.length === 2);
+  await app.close();
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

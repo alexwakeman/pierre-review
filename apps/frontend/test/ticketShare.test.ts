@@ -144,13 +144,13 @@ describe('shareRestLine', () => {
 });
 
 describe('slimStoryCheck', () => {
-  const base = { ident: 'jira:https://x.atlassian.net#BMD-1', ticketKey: 'BMD-1', issueLinks: true, prOpen: true, members: [] };
+  const base = { ident: 'jira:https://x.atlassian.net#BMD-1', ticketKey: 'BMD-1', trackerOn: true, prOpen: true, members: [] };
   it('is slim for a tracker ticket with a stack to link to', () => {
     expect(slimStoryCheck(base)).toBe(true);
   });
   it('keeps the full view for a pasted story, no tracker, no key, or no open PR', () => {
     expect(slimStoryCheck({ ...base, ident: 'manual:10:abc' })).toBe(false);
-    expect(slimStoryCheck({ ...base, issueLinks: false })).toBe(false);
+    expect(slimStoryCheck({ ...base, trackerOn: false })).toBe(false);
     expect(slimStoryCheck({ ...base, ticketKey: null })).toBe(false);
     expect(slimStoryCheck({ ...base, prOpen: false })).toBe(false);
     expect(slimStoryCheck({ ...base, prOpen: false, members: [{ state: 'merged' }] })).toBe(false);

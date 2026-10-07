@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0074` and plugin `0034`–`0037` + `0039` are NOT (written 2026-09-19/10-06 with the Postgres down; see the
+  ⚠ pg `0052`–`0077` and plugin `0034`–`0037` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -1028,10 +1028,11 @@ statement no-ops the second time), both unique indexes present, the three time c
 against a real row. It was replayed in ISOLATION, not on top of the full plugin chain (it names no
 other table, so the chain cannot change its outcome).
 
-⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0074` and plugin `0034`–`0037`, `0039`). The
+⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0077` and plugin `0034`–`0037`; plugin
+`0038`/`0039` are `SELECT 1;` stubs since apiVersion 23). The
 standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
 through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —
-core should reach **71 applied = 71 journal entries** (`0000`–`0070`) and the plugin **39** — and check
+core should reach **78 applied = 78 journal entries** (`0000`–`0077`) and the plugin **39** — and check
 `review_request_events` carries both FKs and its unique index, that `workspaces.flow_settings`,
 `pull_requests.advisory_ids` and `accounts.my_turn_settings` are `jsonb`, and that
 `security_checked_at` and `pr_mentions.mentioned_at` are `timestamp with time zone`. ⚠ `0055` is
@@ -1040,3 +1041,61 @@ existing row and check the row was restamped, not duplicated. `0056` is worth on
 same PR twice through `dismissMyTurn` (`ON CONFLICT (account_id, pr_id) DO UPDATE`) and check one row
 survives with the second timestamp, and that inserting a pair whose `pr_id` belongs to another
 account raises `my_turn_dismissals_pr_account_fk`.
+
+### `0088_issue_tracker` (pg `0075`) — the issue tracker moves to CORE (apiVersion 23)
+
+Three tables, no data. `workspace_trackers` — ONE tracker per workspace (provider, base URL, project
+keys, match scope, `auth_email` + the SEALED `auth_token`), unique `(account_id, workspace_id)`
+(`workspace_trackers_account_workspace`, the writer's conflict target), the named composite FK
+`workspace_trackers_workspace_account_fk` → `workspaces (id, account_id)` ON DELETE cascade (the id
+arrives in a request PATH). `tracker_tickets` — the provider-aware successor of the plugin's
+`pro_pr_jira_tickets`: the same columns plus `provider` (NOT NULL DEFAULT `'jira'`), unique
+`(account_id, pr_id, issue_key)`, indexes `(account_id, workspace_id, issue_type_id)`,
+`(account_id, provider, api_root, issue_key)`, `(account_id, changed_at)` and `(pr_id)`; no FKs.
+`pro_jira_ac_fields` — ADOPTED IN PLACE (plugin `0038`'s DDL verbatim, `CREATE … IF NOT EXISTS`, the
+same index name), the `0074` / ai_fixes precedent.
+
+- ⚠ **NO DATA IS COPIED HERE.** The sources are plugin tables, absent on a fresh or plugin-less
+  install, and SQLite cannot test for a table in SQL. The values are MOVED at boot by
+  `src/tracker/legacy-import.ts` (after the plugin binds): each source table and column is tested
+  first, the copy is `ON CONFLICT DO NOTHING`, and in the same transaction the source is CLEARED
+  (`pro_workspace_settings.issue_*` / `jira_email` / `jira_token` NULLed — the cadence on the same
+  row untouched — and `pro_pr_jira_tickets` emptied). A move, not a copy, so it is safe on every
+  boot with no marker and a token is never at rest twice. The token moves in its stored form
+  (`plain:` / `sealed:v1:`), so nothing is re-entered. Pinned: `src/tracker/legacy-import.test.ts`.
+- ⚠ **Why a NEW tickets table, not `ADD COLUMN provider` on the adopted one**: the adopted table may
+  or may not carry plugin `0039`'s `changed_at`, and SQLite has no `ADD COLUMN IF NOT EXISTS` — one
+  of the two install shapes would fail the boot. A new table has one shape everywhere.
+- **Plugin `0038`/`0039` were stripped to `SELECT 1;`** in the same change: a fresh install no longer
+  grows `pro_pr_jira_tickets`, and `0039`'s bare `ALTER TABLE` on a table that no longer exists would
+  throw and drop the WHOLE plugin to OSS mode. An install that already ran them keeps what they made
+  (recorded in `pro_migrations`); the move empties it.
+- Ownership: both delete paths (`deleteRepo`, retention's `deletePrSubtree`) prune `tracker_tickets`
+  by PR; `eraseAccountData` and `accountScopedTables()` cover all three; the account export carries
+  `workspace_trackers` with the token reduced to `hasToken`.
+
+### `0089_github_issue_links` (pg `0076`) — the issues a PR closes (GitHub Issues adapter)
+
+Two additive columns on `pull_requests`: `closing_issues` (sqlite JSON text / pg `jsonb`, lower-cased
+`owner/repo#12` keys in GitHub's order) and `closing_issues_checked_at`. Written ONLY by the tracker
+worker's targeted `nodes(ids:)` step (`tracker/github/links.ts`), and only for PRs in a workspace
+whose tracker is GitHub Issues — the repo walk's query is unchanged. ⚠ NULL is "never read", never
+"closes nothing" (`[]` is the positive statement); the worker neither prunes nor reads a PR whose
+links are NULL. No data to move, no index (every read is by PR id). Journal `when` `1791100800000` in
+both folders. ⚠ **The pg twin is NOT replayed** (`ADD COLUMN IF NOT EXISTS`, so a re-run no-ops).
+- ⚠ **The pg twin is NOT replayed.** Worth a WITH-DATA step: create the plugin's pg tables with a
+  row each, boot, and check the move ran (rows in core, source NULLed/empty) and that a cross-account
+  `(workspace_id, account_id)` insert raises `workspace_trackers_workspace_account_fk`.
+
+### `0090_linear_links` (pg `0077`) — the Linear issues a PR is attached to (Linear adapter)
+
+Three additive columns on `pull_requests`: `linear_links` (sqlite JSON text / pg `jsonb`, upper-cased
+`ENG-123` keys in Linear's order), `linear_links_root` (the Linear workspace, `https://linear.app/<key>`,
+the read was made against) and `linear_links_checked_at`. Written ONLY by the tracker worker's Linear
+linker (`tracker/linear/links.ts`, batched `attachmentsForURL`), only for PRs in a workspace whose
+tracker is Linear with a saved key — the repo walk's query is unchanged. ⚠ NULL is "never read", and a
+root other than the workspace's current one counts as never read; unlike GitHub's `closing_issues`
+the links ADD to key detection, so NULL never hides a detected ticket. No data to move, no index
+(every read is by PR id). Journal `when` `1791187200000` in both folders. ⚠ **The pg twin is NOT
+replayed** (`ADD COLUMN IF NOT EXISTS`, so a re-run no-ops).
+

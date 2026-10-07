@@ -450,3 +450,11 @@ colleague's second "@you?" on the same PR never brings it back. The tick logs `+
 Absence never widens: a row with a NULL `mentioned_at` (every row, between migration `0068` and the
 first tick after it) shows no card, and with no rows at all there are simply no mention cards, which
 is why the feature needs no enable flag.
+
+## GitHub Issues links are not part of the walk
+
+A workspace whose tracker is GitHub Issues needs each PR's `closingIssuesReferences`. That is NOT a
+field on the repo walk's query — the walk is shared by every workspace, and the connection would
+charge Jira and tracker-less workspaces for a GitHub-only fact. The tracker worker reads it instead,
+kicked after each completed walk, for that workspace's PRs only (`nodes(ids:)`, ≤ 50 PRs and 1 point
+per batch, budget-pre-empted). See [TRACKERS.md](TRACKERS.md) § GitHub Issues.

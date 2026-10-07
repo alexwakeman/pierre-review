@@ -13,7 +13,6 @@ const FULL: ProCapabilities = {
   prSummary: true,
   workspaceInsights: true,
   slackDigest: true,
-  issueLinks: true,
   botTriage: true,
   botAdvisor: true,
   periodReports: true,

@@ -137,33 +137,45 @@ describe('tierFor — Slack digest', () => {
   });
 });
 
-// The Jira API reads spend the CUSTOMER'S Jira quota (one outbound call each, up to a 10s wait),
-// so they take `search`, not the catch-all's 600/min GET→read branch.
-describe('tierFor — Jira API reads', () => {
-  it('the field list and the ticket read are on `search`', () => {
-    expect(tiers('GET', '/api/pro/jira/fields')).toEqual(['search', 'read']);
-    expect(tiers('GET', '/api/pro/prs/42/jira-ticket')).toEqual(['search', 'read']);
-    expect(tiers('POST', '/api/pro/ticket-links')).toEqual(['search', 'read']);
-    expect(tiers('POST', '/api/pro/ticket-links/x')).not.toEqual(['search', 'read']);
-  });
-
-  it('the stored-ticket refresh and the criteria-field write are on `search`, by exact verb + path', () => {
-    expect(tiers('POST', '/api/pro/prs/42/jira-ticket/refresh')).toEqual(['search', 'read']);
-    expect(tiers('PUT', '/api/pro/prs/42/jira-ticket/ac-field')).toEqual(['search', 'read']);
+// The issue tracker (CORE since apiVersion 23). The routes that can read the CUSTOMER'S tracker
+// (one outbound call each, up to a 10s wait) take `search`, not the blanket 600/min `read`.
+describe('tierFor — the issue tracker', () => {
+  it('the stored-ticket read, refresh and criteria-field write are on `search`, by exact verb + path', () => {
+    expect(tiers('GET', '/api/prs/42/tracker-ticket')).toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/prs/42/tracker-ticket/refresh')).toEqual(['search', 'read']);
+    expect(tiers('PUT', '/api/prs/42/tracker-ticket/ac-field')).toEqual(['search', 'read']);
     // The wrong verb, or a near-miss path, is not swept in.
-    expect(tiers('GET', '/api/pro/prs/42/jira-ticket/refresh')).toEqual(['read']);
-    expect(tiers('POST', '/api/pro/prs/42/jira-ticket/ac-field')).not.toEqual(['search', 'read']);
-    expect(tiers('POST', '/api/pro/prs/42/jira-ticket/refreshes')).not.toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/prs/42/tracker-ticket/refresh')).not.toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/prs/42/tracker-ticket/ac-field')).not.toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/prs/42/tracker-ticket/refreshes')).not.toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/prs/42/tracker-ticket/extra')).not.toEqual(['search', 'read']);
   });
 
-  it('the ticket line is anchored — siblings under /api/pro/prs/:id keep their own tiers', () => {
-    expect(tiers('GET', '/api/pro/prs/42/annotations')).toEqual(['read']);
-    expect(tiers('GET', '/api/pro/prs/42/jira-ticket/extra')).toEqual(['read']);
-    expect(tiers('GET', '/api/pro/jira/fields-export')).toEqual(['read']);
+  it('the Open PRs ticket row kicks the worker (`search`); the merged panel is DB-only (`read`)', () => {
+    expect(tiers('POST', '/api/ticket-links')).toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/ticket-links/x')).not.toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/ticket-merged-prs')).toEqual(['read']);
   });
 
-  it('saving the token is a settings write, not generation', () => {
-    expect(tiers('PUT', '/api/pro/settings/workspace')).toEqual(['read']);
+  it('the workspace tracker: the PUT kicks the worker and the connection check calls Jira; the GET is a read', () => {
+    expect(tiers('PUT', '/api/workspaces/3/tracker')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/workspaces/3/tracker/jira-fields')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/workspaces/3/tracker/linear-check')).toEqual(['search', 'read']);
+    // A near-miss spelling is NOT the Linear check.
+    expect(tiers('GET', '/api/workspaces/3/tracker/linear-checks')).toEqual(['read']);
+    expect(tiers('GET', '/api/workspaces/3/tracker')).toEqual(['read']);
+    // The rest of the workspace family is untouched.
+    expect(tiers('PUT', '/api/workspaces/3/pending-mute')).toEqual(['read']);
+    expect(tiers('PUT', '/api/workspaces/3/trackers')).toEqual(['read']);
+  });
+
+  it('the ticket review family keeps its own tiers (the segment is not a prefix match)', () => {
+    expect(tiers('GET', '/api/prs/42/ticket-reviews')).toEqual(['read']);
+  });
+
+  it('the retired plugin paths are not on `search` any more', () => {
+    expect(tiers('GET', '/api/pro/jira/fields')).not.toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/pro/ticket-links')).not.toEqual(['search', 'read']);
   });
 });
 

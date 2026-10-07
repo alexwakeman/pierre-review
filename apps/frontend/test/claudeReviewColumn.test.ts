@@ -262,9 +262,10 @@ describe('the wiring', () => {
   it('the panel and its request are gated on the FREE agentic AI flag (me.ai), never Pro', () => {
     const cards = src('components/Activity/OpenPrsCards.tsx');
     expect(cards).toMatch(/const claudeOn = useAiCapabilities\(\)\.enabled;/);
-    // The ONLY Pro read on the cards is the ticket row's `issueLinks` — never the Claude panel's gate.
-    expect(cards.match(/useProCapabilities\(\)\.\w+/g)).toEqual(['useProCapabilities().issueLinks']);
-    expect(cards).toMatch(/const ticketsOn = useProCapabilities\(\)\.issueLinks;/);
+    // NO Pro read on the cards at all: the ticket row is the CORE tracker's (apiVersion 23), gated
+    // on whether THIS workspace has one — never the Claude panel's gate.
+    expect(cards).not.toMatch(/useProCapabilities\(/);
+    expect(cards).toMatch(/const ticketsOn = useTrackerOn\(/);
     expect(cards).toMatch(/useTicketLinks\(prIds, ticketsOn\)/);
     expect(cards).toMatch(/useClaudeReviewStates\(prIds, claudeOn\)/);
     expect(cards).toMatch(/claudeOn \? \(\s*<ClaudeReviewPanel/);

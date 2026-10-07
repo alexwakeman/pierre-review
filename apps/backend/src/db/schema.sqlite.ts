@@ -361,6 +361,26 @@ export const pullRequests = sqliteTable(
     // Canonical advisory ids named by the vendor-selected fields; NULL when there are none.
     advisoryIds: text('advisory_ids', { mode: 'json' }).$type<string[]>(),
     securityCheckedAt: integer('security_checked_at', { mode: 'timestamp' }),
+    // ---- GITHUB ISSUES LINKS (migration 0089; docs/TRACKERS.md § GitHub Issues) ----
+    // The issues this PR CLOSES, as GitHub states them (`closingIssuesReferences`: "Fixes #12",
+    // "Closes owner/repo#12", or a Development-panel link), as lower-cased `owner/repo#12` keys in
+    // GitHub's order. Read ONLY for PRs in a workspace whose tracker is GitHub Issues, by the tracker
+    // worker's targeted `nodes(ids:)` step (tracker/github/links.ts) — never by the repo walk, so a
+    // workspace on any other tracker pays nothing. ⚠ NULL is "never read", NOT "closes nothing":
+    // `[]` is GitHub's positive statement, and the worker neither prunes nor reads a PR whose links
+    // are NULL. Written only from a response that carried the selection.
+    closingIssues: text('closing_issues', { mode: 'json' }).$type<string[]>(),
+    closingIssuesCheckedAt: integer('closing_issues_checked_at', { mode: 'timestamp' }),
+    // ---- LINEAR LINKS (migration 0090; docs/TRACKERS.md § Linear) ----
+    // The Linear issues this PR is ATTACHED to (Linear's GitHub integration, read with
+    // `attachmentsForURL` on the PR's URL), as upper-cased `ENG-123` keys in Linear's order, and the
+    // Linear workspace root they were read against. Read ONLY for PRs in a workspace whose tracker is
+    // Linear with a saved key (tracker/linear/links.ts). ⚠ NULL is "never read" — and, unlike GitHub's
+    // closing issues, an addition to key detection, so an unread PR still shows detected tickets. A
+    // root that is not the workspace's current one is "never read" too.
+    linearLinks: text('linear_links', { mode: 'json' }).$type<string[]>(),
+    linearLinksRoot: text('linear_links_root'),
+    linearLinksCheckedAt: integer('linear_links_checked_at', { mode: 'timestamp' }),
   },
   (t) => ({
     repoIdx: index('pr_repo_idx').on(t.repoId),
@@ -2380,5 +2400,171 @@ export const prMentions = sqliteTable(
     // is NOT a prefix of the unique above.
     accountRepoIdx: index('prm_account_repo_idx').on(t.accountId, t.repoId),
     prIdx: index('prm_pr_idx').on(t.prId),
+  }),
+);
+
+// ════════════════════════════════════ THE ISSUE TRACKER (CORE) ════════════════════════════════════
+// Moved out of the private plugin at apiVersion 23 (migration 0088 / pg 0075) — the tracker is FREE
+// and runs in the public `npx limn-review` install. Contract: docs/TRACKERS.md.
+
+// ── workspace_trackers: ONE tracker per workspace ─────────────────────────────────────────────────
+// provider ('jira' | 'github' | 'linear'), the base URL links are built on, the project-key
+// allowlist, the match scope, and — for Jira and Linear — the API credential.
+//
+// ⚠ `auth_token` IS A CREDENTIAL — the provider's API token (Jira: an API token with `auth_email`,
+// or a Server / Data Center personal access token without; Linear: a personal API key). ONE slot per
+// workspace because there is ONE tracker per workspace; it belongs to ONE site and is cleared when
+// the base URL's site changes (a Jira host; a Linear workspace, `linear.app/<key>`).
+// Stored `sealed:v1:<iv:tag:ct>` when the process can seal (ENCRYPTION_KEY — always in cloud),
+// `plain:<token>` on a local install without a key (the same trust as that machine's `gh` token). NEVER on the wire (`hasToken` only), never logged, NEVER in
+// the account export (export-account.ts names this table's columns, never `select()`).
+//
+// Tenancy is STRUCTURAL: `workspace_id` arrives in a request PATH, so the named composite FK makes
+// the (workspace, account) PAIR the thing that must exist, exactly like workspace_reviewers.
+// Deleting the workspace deletes its tracker (cascade) — a tracker is a fact about that team.
+//
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId].
+export const workspaceTrackers = sqliteTable(
+  'workspace_trackers',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // The composite FK below, not a `.references()`.
+    workspaceId: integer('workspace_id').notNull(),
+    // TrackerProvider | null. null = no tracker (the row may still hold a dormant token's absence).
+    provider: text('provider'),
+    baseUrl: text('base_url'),
+    // Comma-joined, normalised project prefixes; null = no allowlist (heuristic detection).
+    projectKeys: text('project_keys'),
+    // 'title' | 'title_branch'; null reads as 'title_branch' (the behaviour before the setting).
+    matchScope: text('match_scope'),
+    // Jira Cloud signs in with email + API token (HTTP Basic); null = Bearer (Server / Data Center).
+    authEmail: text('auth_email'),
+    authToken: text('auth_token'),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountWorkspaceUx: uniqueIndex('workspace_trackers_account_workspace').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_trackers_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ── tracker_tickets: ONE ROW PER (account, pull request, detected key) ───────────────────────────
+// The tracker is read when a pull request is RECEIVED into Limn — first synced, or its title / head
+// branch changes so the detected key set changes — and refreshed on a TTL while the PR is open, by
+// the pull-based worker in tracker/worker.ts. Every consumer (the PR pane's story panel, the Open
+// PRs ticket row and stacks, the ticket review) reads these rows and makes NO tracker call.
+//
+//   • `provider` + `api_root` + `issue_key` ARE THE TICKET'S IDENTITY — the ident
+//     `<provider>:<api_root>#<issue_key>`. `api_root` is the provider's CANONICAL site root (Jira:
+//     shared `jiraApiRoot`); a row whose root no longer matches the workspace's tracker is treated
+//     as never read.
+//   • `state` remembers a refusal (`not_found` / `no_access` / `failed`) so it is not hammered;
+//     `next_check_at` is when the worker may ask again. A transient failure on a row that once read
+//     keeps its content (state stays `ok`) and only moves `next_check_at`.
+//   • `candidates_json` is every custom text field on the ticket (Jira), so the story panel's
+//     "Criteria from → Change" picker opens with no call, and a field-setting change re-derives
+//     `acceptance_criteria` for every stored ticket of that issue type at once.
+//   • `changed_at` moves ONLY when MEMBERSHIP or STORY TEXT moves (tracker/store.ts
+//     `storyOrMembershipMoved`) and feeds the ticket review's sweeper.
+//
+// This is the generalisation of the plugin's `pro_pr_jira_tickets` (plugin 0038/0039), whose rows a
+// boot-time MOVE copies here once (tracker/legacy-import.ts). No FKs, like the table it replaces:
+// pruned in BOTH delete paths, listed in `accountScopedTables()`.
+//
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, prId, issueKey].
+export const trackerTickets = sqliteTable(
+  'tracker_tickets',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    workspaceId: integer('workspace_id').notNull(),
+    prId: integer('pr_id').notNull(),
+    // TrackerProvider. 'jira' for every row the plugin wrote.
+    provider: text('provider').notNull().default('jira'),
+    issueKey: text('issue_key').notNull(),
+    // Where detection found it ('title' | 'branch') and its position in detection order.
+    detectedFrom: text('detected_from').notNull(),
+    detectOrder: integer('detect_order').notNull(),
+    apiRoot: text('api_root').notNull(),
+    url: text('url').notNull(),
+    // 'ok' | 'not_found' | 'no_access' | 'failed'
+    state: text('state').notNull(),
+    errorCode: text('error_code'),
+    title: text('title'),
+    description: text('description'),
+    acceptanceCriteria: text('acceptance_criteria'),
+    acFieldId: text('ac_field_id'),
+    acFieldName: text('ac_field_name'),
+    // 'setting' | 'default' — whether the workspace's field choice or the name match picked it.
+    acFieldSource: text('ac_field_source'),
+    issueTypeId: text('issue_type_id'),
+    issueTypeName: text('issue_type_name'),
+    statusName: text('status_name'),
+    // 'new' | 'indeterminate' | 'done', null when the tracker sent another.
+    statusCategory: text('status_category'),
+    assigneeName: text('assignee_name'),
+    assigneeAccountId: text('assignee_account_id'),
+    assigneeAvatarUrl: text('assignee_avatar_url'),
+    candidatesJson: text('candidates_json'),
+    omittedCandidates: integer('omitted_candidates').notNull().default(0),
+    // Last SUCCESSFUL read; null until one.
+    fetchedAt: integer('fetched_at', { mode: 'timestamp' }),
+    // Last attempt, successful or not.
+    checkedAt: integer('checked_at', { mode: 'timestamp' }).notNull(),
+    // When the worker may read it again. Epoch 0 = due now (a forced refresh / field change).
+    nextCheckAt: integer('next_check_at', { mode: 'timestamp' }).notNull(),
+    changedAt: integer('changed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    accountPrKeyUx: uniqueIndex('tracker_tickets_account_pr_key').on(t.accountId, t.prId, t.issueKey),
+    accountWsTypeIdx: index('tracker_tickets_account_ws_type').on(t.accountId, t.workspaceId, t.issueTypeId),
+    // Every PR on one ticket (one site), and the "changed since" read.
+    accountSiteKeyIdx: index('tracker_tickets_account_site_key').on(
+      t.accountId,
+      t.provider,
+      t.apiRoot,
+      t.issueKey,
+    ),
+    accountChangedIdx: index('tracker_tickets_account_changed').on(t.accountId, t.changedAt),
+    prIdx: index('tracker_tickets_pr').on(t.prId),
+  }),
+);
+
+// ── pro_jira_ac_fields: WHICH JIRA FIELD HOLDS THE ACCEPTANCE CRITERIA ───────────────────────────
+// ADOPTED IN PLACE from the plugin (its migration 0038) — same name, same columns, same index name,
+// so an install where the plugin created it keeps its rows untouched (the ai_fixes precedent). One
+// row per (account, workspace, Jira site, issue type): the reader's choice from the story panel's
+// "Change" control. No row = the default rule (`defaultAcCandidate`). Jira-specific by nature.
+//
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId, apiRoot,
+// issueTypeId].
+export const jiraAcFields = sqliteTable(
+  'pro_jira_ac_fields',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    workspaceId: integer('workspace_id').notNull(),
+    apiRoot: text('api_root').notNull(),
+    issueTypeId: text('issue_type_id').notNull(),
+    fieldId: text('field_id').notNull(),
+    fieldName: text('field_name').notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    accountWsSiteTypeUx: uniqueIndex('pro_jira_ac_fields_account_ws_site_type').on(
+      t.accountId,
+      t.workspaceId,
+      t.apiRoot,
+      t.issueTypeId,
+    ),
   }),
 );

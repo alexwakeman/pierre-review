@@ -2,7 +2,8 @@ import {
   TICKET_REVIEW_MAX_PRS,
   TICKET_REVIEW_STATES_MAX,
   jiraApiRoot,
-  jiraTicketIdent,
+  isTrackerIdent,
+  ticketIdentForLink,
   parseTicketIdent,
   type ClaudeReviewTicketInput,
   type ClaudeTicketAlignment,
@@ -37,14 +38,11 @@ import { relativeTime } from './ui.js';
  */
 export const jiraApiRootOf = (url: string | null | undefined): string | null => jiraApiRoot(url);
 
-/** A detected Jira ticket's ident ('jira:<apiRoot>#<KEY>'); null for Linear or no usable link. */
+/** A detected ticket's ident — 'jira:<apiRoot>#<KEY>', 'github:https://github.com/<owner>/<repo>#<n>'
+ *  or 'linear:https://linear.app/<org>#<KEY>' (shared `ticketIdentForLink`, the same rule the server's
+ *  rows follow); null with no usable link. */
 export function ticketIdentOf(link: { key: string; url: string | null; provider?: string }): string | null {
-  if (link.provider != null && link.provider !== 'jira') return null;
-  const key = link.key.trim().toUpperCase();
-  const root = jiraApiRootOf(link.url);
-  if (key === '' || root == null) return null;
-  const ident = jiraTicketIdent(root, key);
-  return parseTicketIdent(ident) != null ? ident : null;
+  return ticketIdentForLink(link);
 }
 
 /** The batched states request's ident list: de-duplicated, sorted (a stable query key), capped. */
@@ -343,7 +341,7 @@ export function planStoryStart(
 ): { idents: string[]; pasted: ClaudeReviewTicketInput[] } {
   const identByKey = new Map<string, string>();
   for (const k of known) {
-    if (k.ticketKey == null || parseTicketIdent(k.ident)?.kind !== 'jira') continue;
+    if (k.ticketKey == null || !isTrackerIdent(parseTicketIdent(k.ident))) continue;
     identByKey.set(k.ticketKey.trim().toUpperCase(), k.ident);
   }
   const idents: string[] = [];

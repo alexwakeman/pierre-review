@@ -212,6 +212,33 @@ describe('deleteRepo', () => {
     expect(await db.select().from(tri).where(eq(tri.ticketReviewId, solo.id)).execute()).toEqual([]);
   });
 
+  it("a stored tracker ticket goes with its PR's repo; another repo's stays (migration 0088)", async () => {
+    const t = await seedRepo('tracker');
+    const tt = schema.trackerTickets;
+    const now = new Date();
+    for (const m of [t, keep]) {
+      await db
+        .insert(tt)
+        .values({
+          accountId: 1,
+          workspaceId: 1,
+          prId: m.prId,
+          provider: 'jira',
+          issueKey: 'ENG-1',
+          detectedFrom: 'title',
+          detectOrder: 0,
+          apiRoot: 'https://x.atlassian.net',
+          url: 'https://x.atlassian.net/browse/ENG-1',
+          state: 'ok',
+          checkedAt: now,
+          nextCheckAt: now,
+        })
+        .execute();
+    }
+    await expect(deleteRepo(t.repoId, 1)).resolves.toBe(true);
+    expect((await db.select().from(tt).execute()).map((r: any) => r.prId)).toEqual([keep.prId]);
+  });
+
   it('returns false for a repo owned by a different account', async () => {
     expect(await deleteRepo(keep.repoId, 999)).toBe(false);
     expect((await counts(keep.repoId, keep.prId)).repos).toBe(1);

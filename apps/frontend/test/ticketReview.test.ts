@@ -89,11 +89,13 @@ describe('idents', () => {
     expect(jiraApiRootOf('not a url')).toBeNull();
   });
 
-  it('builds jira:<root>#<KEY>; Linear and a link-less ticket have none', () => {
+  it('builds jira:<root>#<KEY> and linear:<root>#<KEY>; a link-less ticket has none', () => {
     expect(ticketIdentOf({ key: 'bmd-1', url: 'https://acme.atlassian.net/browse/BMD-1', provider: 'jira' })).toBe(
       'jira:https://acme.atlassian.net#BMD-1',
     );
-    expect(ticketIdentOf({ key: 'ENG-1', url: 'https://linear.app/a/issue/ENG-1', provider: 'linear' })).toBeNull();
+    expect(ticketIdentOf({ key: 'ENG-1', url: 'https://linear.app/a/issue/ENG-1', provider: 'linear' })).toBe(
+      'linear:https://linear.app/a#ENG-1',
+    );
     expect(ticketIdentOf({ key: 'BMD-1', url: null })).toBeNull();
   });
 

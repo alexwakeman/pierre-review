@@ -585,6 +585,32 @@ Four small DERIVED columns (migration `0067` / pg `0054`), read at sync by
   footer is a positive statement that the group is a version update.
 - No new table, so erasure, both delete paths and the account export already cover the columns.
 
+## The issue tracker — `workspace_trackers`, `tracker_tickets`, `pro_jira_ac_fields` (CORE, free)
+
+Core since apiVersion 23 (migration `0088` / pg `0075`); the contract is [TRACKERS.md](TRACKERS.md).
+
+- **`workspace_trackers`** — ONE row per `(account_id, workspace_id)`: `provider` (a
+  `TrackerProvider`; a value with no adapter reads as none), `base_url`, `project_keys`
+  (comma-joined, normalised), `match_scope` (NULL = `title_branch`), `auth_email`, and the
+  CREDENTIAL `auth_token` (`sealed:v1:` / `plain:` — never on the wire, never logged, exported as
+  `hasToken` only). Named composite FK `workspace_trackers_workspace_account_fk` (the id arrives in a
+  request PATH) ON DELETE cascade — a tracker is a fact about that workspace.
+- **`tracker_tickets`** — ONE row per `(account_id, pr_id, issue_key)`: the ticket as the worker last
+  read it (provider, site `api_root`, title, description, criteria + its field, issue type, status +
+  category, assignee, candidate fields, read state and TTL, `changed_at`). The ticket's IDENTITY is
+  `(provider, api_root, issue_key)` → the ident `<provider>:<api_root>#<KEY>`. No FKs: BOTH delete
+  paths prune it by PR, and it is in `accountScopedTables()`. ⚠ A GitHub Issues row is
+  `api_root = 'https://github.com'`, `issue_key = 'owner/repo#12'`, and its ident names the repo in
+  the root (`github:https://github.com/owner/repo#12`) — convert ONLY through shared
+  `trackerTicketIdent` / `trackerTicketRow`.
+- **`pull_requests.closing_issues` / `closing_issues_checked_at`** (sqlite `0089` / pg `0076`) — the
+  issues a PR closes, as GitHub states them (`owner/repo#12` keys), read only for GitHub Issues
+  workspaces by the tracker worker. ⚠ NULL = never read, `[]` = closes nothing.
+- **`pro_jira_ac_fields`** — ADOPTED from the plugin (name kept): the criteria field per
+  `(account_id, workspace_id, api_root, issue_type_id)`. Erased with the account.
+- ⚠ The plugin-era copies (`pro_workspace_settings.issue_*`/`jira_*`, `pro_pr_jira_tickets`) are
+  MOVED and cleared at boot, never read again; the columns are dormant.
+
 ## The automation vocabulary — `AUTOMATION_VENDORS`, `ReviewerRole`, `AutomatedReviewerKind`
 
 Three vocabularies describe an automated actor, and they are **orthogonal axes, not one enum**:
@@ -770,6 +796,9 @@ check every hit against its table's declared unique.**
 | `benchmark_contributions` | `[accountId, vendorKind, weekStart]` | the benchmark rollup (~13444) |
 | `ml_comment_labels` | `(account_id, target_kind, target_id)` (`mcl_account_target`) | `db/ml-labels.ts` (the enrichment worker's ONLY writer) |
 | `pr_mentions` | `(account_id, pr_id)` (`prm_account_pr`), `onConflictDoUpdate` (restamps `login`, `repo_id`, `mentioned_at`, `mentioned_by_user_id`) | `db/pr-mentions.ts` `syncAccountMentions` (the mention scanner's ONLY writer) |
+| `workspace_trackers` | `[accountId, workspaceId]` (`workspace_trackers_account_workspace`) | `tracker/settings.ts` `writeWorkspaceTracker` (the ONLY writer; seeds every column from the stored row, never deletes) + the boot-time move (`tracker/legacy-import.ts`, raw `ON CONFLICT DO NOTHING`) |
+| `tracker_tickets` | `[accountId, prId, issueKey]` (`tracker_tickets_account_pr_key`) | `tracker/store.ts` `upsertTicketRow` (the worker's ONLY write; owns `changed_at`) + the boot-time move |
+| `pro_jira_ac_fields` | `[accountId, workspaceId, apiRoot, issueTypeId]` (`pro_jira_ac_fields_account_ws_site_type`) | `tracker/store.ts` `writeAcFieldSetting` |
 | `ticket_review_pr_cards` | `[accountId, prId, headSha]` (`trpc_account_pr_head_ux`), `onConflictDoUpdate` (replaces `card`, `source`, `model`, `cost_usd`, `created_at`) | `review/ticket-review/cards.ts` `saveCards` (the ONLY writer: pre-pass + story-check cards) |
 | `accounts` | the account uniques | `auth/account.ts` (`ensureLocalAccount`, `upsertCloudAccount`) |
 | `repos` head/trunk columns | `[accountId, githubNodeId]` / `branch_commits` composite | `sync/branch-status.ts`, `sync/sync-repo.ts` |

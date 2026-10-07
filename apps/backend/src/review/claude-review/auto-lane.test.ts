@@ -61,17 +61,21 @@ vi.mock('./persist.js', () => ({
   reconcileOrphanedReviews: async () => 0,
   saveReviewSuccess: async () => {},
 }));
-// The OPTIONAL Pro Jira provider (plugin-providers.ts) DOES offer PR 60 a ticket — and the auto
-// run must not ask for it: stories are the ticket review's (review/ticket-review/), never the PR
-// review's. A call here is recorded so the test can say so.
+// The tracker DOES offer PR 60 a ticket (tracker/ticket-source.ts) — and the auto run must not ask
+// for its STORY: stories are the ticket review's (review/ticket-review/), never the PR review's. A
+// story read here is recorded so the test can say so. (A deep run's "Related PRs" may list tickets;
+// that is membership, not a story.)
 const AUTO_TICKET = { title: 'Reset password', description: null, acceptanceCriteria: '* Link is emailed' };
 const resolveCalls: number[] = [];
-vi.mock('../plugin-providers.js', () => ({
-  getAgenticProviders: () => ({
-    resolveReviewTicket: async (_account: number, prId: number) => {
-      resolveCalls.push(prId);
-      return prId === 60 ? { ticket: AUTO_TICKET, key: 'ENG-7' } : { ticket: null, key: null };
+vi.mock('../../tracker/ticket-source.js', () => ({
+  getTicketSource: () => ({
+    ticketsForPr: async () => [],
+    ticketMembers: async () => [],
+    ticketStory: async (_account: number, ident: string) => {
+      resolveCalls.push(Number(ident.length));
+      return ident.endsWith('#ENG-7') ? AUTO_TICKET : null;
     },
+    listChangedTicketIdents: async () => [],
   }),
 }));
 let aiReady = true;

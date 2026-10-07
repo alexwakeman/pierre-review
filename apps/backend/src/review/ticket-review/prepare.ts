@@ -7,7 +7,7 @@ import {
   type TicketReviewRefusal,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
-import { getAgenticProviders } from '../plugin-providers.js';
+import { getTicketSource } from '../../tracker/ticket-source.js';
 import { fetchPrDiff, stripNoiseFromDiff, splitDiffByFile } from '../post-review.js';
 import { isNoiseFile } from '../prepare.js';
 import { prepPeerWorktrees, type PeerCheckout } from '../clone-manager.js';
@@ -17,10 +17,10 @@ import type { LegacyStoryFinding } from './prompts.js';
 // THE TICKET REVIEW'S INPUTS — who is on the ticket, what the ticket says, and what each member
 // changed. Everything here is the SERVER's answer, read before any model runs:
 //
-//   members   the plugin's `ticketMembers` (a Jira ticket: any workspace of the account, the same
-//             site) or the one PR of a pasted ('manual:') story; then the synced `pull_requests`
+//   members   the tracker's `ticketMembers` (a tracker ticket: any workspace of the account, the
+//             same site) or the one PR of a pasted ('manual:') story; then the synced `pull_requests`
 //             decide open / merged, and a closed-but-unmerged PR is dropped (readLiveMembers).
-//   story     a Jira ticket's text: the freshest stored row across the members (`jiraStoryFor`,
+//   story     a tracker ticket's text: the freshest stored row across the members (`jiraStoryFor`,
 //             the ONE story every caller hashes); a pasted story's from the run's own snapshot.
 //   refusals  no story → no_ticket; no open or merged PR → no_members; more than
 //             TICKET_REVIEW_MAX_PRS → too_many_prs (the count is stored and shown, never sampled).
@@ -39,52 +39,29 @@ export type TicketInputs =
   | { ok: false; reason: TicketReviewRefusal; prCount: number | null; ticket: ClaudeReviewTicket | null };
 
 /**
- * THE story of a Jira ident — ONE answer whoever asks (the run, the sweeper, the states routes), so
- * a stored fingerprint and a live one hash the same text. The plugin's `ticketStory` (the freshest
- * stored row across every PR on the ticket); an older plugin without it: the newest `fetchedAt`
- * among the members' `ticketsForPr` answers, ties to the lowest prId. ⚠ Never "the first member
- * that has it": the worker refreshes OPEN PRs only, so a merged member keeps the text it merged
- * with, and callers passing members in different orders hashed different stories.
+ * THE story of a tracker ident — ONE answer whoever asks (the run, the sweeper, the states routes),
+ * so a stored fingerprint and a live one hash the same text: core's `ticketStory` (the freshest
+ * stored row across every PR on the ticket, tracker/peers.ts). ⚠ Never "the first member that has
+ * it": the worker refreshes OPEN PRs only, so a merged member keeps the text it merged with, and
+ * callers passing members in different orders hashed different stories. (`prIds` is unused since
+ * the tracker moved to core — the story is always read whole — and kept so callers stay put.)
  */
 export async function jiraStoryFor(
   accountId: number,
   ident: string,
-  prIds: readonly number[],
+  _prIds: readonly number[] = [],
 ): Promise<ClaudeReviewTicket | null> {
-  const { ticketStory, ticketsForPr } = getAgenticProviders();
-  if (ticketStory) {
-    try {
-      return await ticketStory(accountId, ident);
-    } catch {
-      return null;
-    }
+  try {
+    return await getTicketSource().ticketStory(accountId, ident);
+  } catch {
+    return null;
   }
-  if (!ticketsForPr) return null;
-  let best: ClaudeReviewTicket | null = null;
-  let bestMs = Number.NEGATIVE_INFINITY;
-  for (const prId of [...new Set(prIds)].sort((a, b) => a - b)) {
-    try {
-      const hit = (await ticketsForPr(accountId, prId)).find((t) => t.ident === ident);
-      if (!hit) continue;
-      const ms = hit.ticket.fetchedAt ? Date.parse(hit.ticket.fetchedAt) : Number.NaN;
-      const at = Number.isFinite(ms) ? ms : Number.NEGATIVE_INFINITY;
-      if (best == null || at > bestMs) {
-        best = hit.ticket;
-        bestMs = at;
-      }
-    } catch {
-      /* "nothing known" — try the next PR */
-    }
-  }
-  return best;
 }
 
-/** The PR ids the plugin lists on a Jira ticket ([] when unknown or no plugin). */
+/** The PR ids the tracker's stored rows list on a ticket ([] when unknown). */
 export async function jiraMemberIds(accountId: number, ident: string): Promise<number[]> {
-  const ticketMembers = getAgenticProviders().ticketMembers;
-  if (!ticketMembers) return [];
   try {
-    return [...new Set((await ticketMembers(accountId, ident)).map((m) => m.prId))];
+    return [...new Set((await getTicketSource().ticketMembers(accountId, ident)).map((m) => m.prId))];
   } catch {
     return [];
   }
