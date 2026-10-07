@@ -84,6 +84,10 @@ describe('skips, verdicts and resolves', () => {
     expect(autoVerdictLine({ status: 'skipped', verdict: v('REQUEST_CHANGES', 'COMMENT', 'prior_review') })).toBe(
       'Changes not requested: your last review on GitHub still stands.',
     );
+    expect(autoVerdictLine({ status: 'posted', verdict: v('REQUEST_CHANGES', 'COMMENT', 'refused') })).toBe(
+      'Changes not requested: GitHub refused it, so the comments were posted on their own.',
+    );
+    expect(autoVerdictLine({ status: 'failed', verdict: v('APPROVE', 'COMMENT', 'refused') })).toBe('Not approved: GitHub refused it.');
     expect(autoVerdictLine({ status: 'posted', verdict: v('COMMENT', 'COMMENT', null) })).toBeNull();
     expect(autoVerdictLine({ status: 'posted' })).toBeNull();
   });

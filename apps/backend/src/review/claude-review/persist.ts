@@ -31,11 +31,12 @@ import type {
 } from '@pierre-review/shared';
 import { CLAUDE_FINDING_LENSES, threadAssessmentCounts } from '@pierre-review/shared';
 import { storedList, stripStoredStoryLead } from '@pierre-review/shared';
-import type { FindingAutoResolveRecord } from '@pierre-review/shared';
+import type { FindingAutoResolveRecord, FindingPushbackRecord } from '@pierre-review/shared';
 import type { ReviewFinding } from '../../pro/contract.js';
 import { ticketEntriesOf } from './ticket.js';
 import { findFindingThread, type ThreadComment } from './finding-thread.js';
 import {
+  acceptedReplyFindings,
   settledFindings,
   type SettleCommit,
   type SettledFinding,
@@ -104,6 +105,8 @@ interface FindingRow {
   postedAuto?: boolean | null;
   // Auto resolve's record on this finding's thread (migration 0091 / pg 0078).
   autoResolve?: FindingAutoResolveRecord | null;
+  // The one pushback reply on this finding's thread (migration 0092 / pg 0079).
+  pushback?: FindingPushbackRecord | null;
 }
 
 // A story finding's origin off its row; null unless BOTH columns hold a value.
@@ -380,7 +383,59 @@ export async function getClaudeReviewById(
     .execute()) as FindingRow[]).filter(isShownFinding);
   const head = await reviewHeadState(ctx, row.prId, row.headSha, rows[0]!.prHeadSha);
   const threadIds = await postedFindingThreadIds(ctx, row.prId, accountId, findings);
-  return mapReview(row, findings, head, threadIds);
+  const review = mapReview(row, findings, head, threadIds);
+  if (review.followUp) review.followUp = await withThreadState(ctx, row.prId, review.followUp);
+  return review;
+}
+
+/**
+ * DERIVED on read, for follow-up items whose thread was found at run time (`threadFindingId`): is
+ * the thread resolved NOW, and what auto resolve / the pushback did on it (both are recorded on the
+ * thread's OWNER finding row, which may belong to an older run). Scoped to this PR, which the
+ * caller already ownership-checked.
+ */
+async function withThreadState(
+  ctx: AgentContext,
+  prId: number,
+  fu: ClaudeReviewFollowUp,
+): Promise<ClaudeReviewFollowUp> {
+  const ownerIds = [...new Set(fu.items.map((it) => it.threadFindingId).filter((x): x is number => x != null))];
+  const threadIds = [...new Set(fu.items.map((it) => it.threadId).filter((x): x is number => x != null))];
+  if (ownerIds.length === 0 && threadIds.length === 0) return fu;
+  const { cr, crf } = tables(ctx);
+  const rt = (ctx.schema as any).reviewThreads;
+  const [owners, threads] = await Promise.all([
+    ownerIds.length === 0
+      ? Promise.resolve([] as Array<{ id: number; autoResolve: FindingAutoResolveRecord | null; pushback: FindingPushbackRecord | null }>)
+      : (ctx.db
+          .select({ id: crf.id, autoResolve: crf.autoResolve, pushback: crf.pushback })
+          .from(crf)
+          .innerJoin(cr, eq(cr.id, crf.reviewId))
+          .where(and(inArray(crf.id, ownerIds), eq(cr.prId, prId)))
+          .execute() as Promise<Array<{ id: number; autoResolve: FindingAutoResolveRecord | null; pushback: FindingPushbackRecord | null }>>),
+    threadIds.length === 0
+      ? Promise.resolve([] as Array<{ id: number; isResolved: boolean }>)
+      : (ctx.db
+          .select({ id: rt.id, isResolved: rt.isResolved })
+          .from(rt)
+          .where(and(inArray(rt.id, threadIds), eq(rt.prId, prId)))
+          .execute() as Promise<Array<{ id: number; isResolved: boolean }>>),
+  ]);
+  const ownerById = new Map(owners.map((o) => [o.id, o]));
+  const resolvedById = new Map(threads.map((t) => [t.id, !!t.isResolved]));
+  return {
+    ...fu,
+    items: fu.items.map((it) => {
+      if (it.threadFindingId == null && it.threadId == null) return it;
+      const o = it.threadFindingId != null ? ownerById.get(it.threadFindingId) : undefined;
+      return {
+        ...it,
+        threadResolved: it.threadId != null ? (resolvedById.get(it.threadId) ?? null) : null,
+        autoResolve: o?.autoResolve ?? null,
+        pushback: o?.pushback ?? null,
+      };
+    }),
+  };
 }
 
 /**
@@ -822,7 +877,15 @@ async function foldStateSummaries(
     // Praise is hidden everywhere, so an earlier praise item never counts in "Earlier: …".
     const items = extra?.followUp?.items?.filter((it) => it.severity !== 'praise');
     if (Array.isArray(items) && items.length > 0) {
-      followUp = { addressed: 0, partly_addressed: 0, not_addressed: 0, no_longer_applies: 0, not_checked: 0 };
+      followUp = {
+        addressed: 0,
+        partly_addressed: 0,
+        not_addressed: 0,
+        no_longer_applies: 0,
+        reply_accepted: 0,
+        reply_disputed: 0,
+        not_checked: 0,
+      };
       for (const it of items) if (it.status in followUp) followUp[it.status] += 1;
     }
     const summary: ClaudeReviewStateSummary = {
@@ -1188,7 +1251,7 @@ export async function loadPriorReviewForFollowUp(
     if (!Number.isInteger(it.priorFindingId) || seen.has(it.priorFindingId)) continue;
     if (it.status === 'not_checked') notChecked.add(it.priorFindingId);
     else if (
-      (it.status === 'not_addressed' || it.status === 'partly_addressed') &&
+      (it.status === 'not_addressed' || it.status === 'partly_addressed' || it.status === 'reply_disputed') &&
       !reraisedByEligible.has(it.priorFindingId)
     ) {
       // Kept with the answer that run gave: on a same-head re-run it stands (follow-up.ts).
@@ -1258,9 +1321,25 @@ export async function loadSettledByReplyFindings(
     )
     .orderBy(asc(crf.id))
     .execute()) as Array<{ finding: FindingRow }>;
-  const findings: SettleFinding[] = rows
-    .map((r) => r.finding)
-    .filter(isFollowUpEligible)
+  const eligible = rows.map((r) => r.finding).filter(isFollowUpEligible);
+  // The SECOND rule: an earlier review accepted a person's reply on the finding's thread.
+  const followUpRows = (await ctx.db
+    .select({ followUp: cr.followUp })
+    .from(cr)
+    .innerJoin(prs, eq(prs.id, cr.prId))
+    .innerJoin(repos, eq(repos.id, prs.repoId))
+    .where(and(eq(cr.prId, prId), eq(repos.accountId, accountId), eq(cr.status, 'succeeded'), lt(cr.id, beforeReviewId)))
+    .orderBy(asc(cr.id))
+    .execute()) as Array<{ followUp: ClaudeReviewFollowUpRecord | null }>;
+  const accepted = acceptedReplyFindings(
+    followUpRows.flatMap((r) => r.followUp?.items ?? []),
+    new Set(eligible.map((f) => f.id)),
+  );
+  const withAccepted = (byRule: SettledFinding[]): SettledFinding[] => {
+    const ids = new Set(byRule.map((f) => f.id));
+    return [...byRule, ...accepted.filter((f) => !ids.has(f.id))];
+  };
+  const findings: SettleFinding[] = eligible
     .map((f) => ({
       id: f.id,
       path: f.path,
@@ -1271,6 +1350,17 @@ export async function loadSettledByReplyFindings(
   if (findings.length === 0) return [];
 
   const { reviewThreads: rt, reviewComments: rc, users, commits, commitFiles, accounts } = s;
+  return withAccepted(await settledByResolvedReply(ctx, prId, accountId, findings, { rt, rc, users, commits, commitFiles, accounts }));
+}
+
+async function settledByResolvedReply(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+  findings: SettleFinding[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  { rt, rc, users, commits, commitFiles, accounts }: Record<string, any>,
+): Promise<SettledFinding[]> {
   const [commentRows, commitRows, accountRows] = await Promise.all([
     ctx.db
       .select({

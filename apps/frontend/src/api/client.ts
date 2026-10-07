@@ -136,6 +136,7 @@ import type {
   RepoDigestsResponse,
   OpenPrsResponse,
   PostCommentResult,
+  FollowUpReplyResult,
   PostReviewPreview,
   PostReviewResult,
   PrDetail,
@@ -1349,6 +1350,12 @@ export const api = {
   postClaudeFinding: (findingId: number) =>
     fetch(`/api/claude-findings/${findingId}/post`, jsonBody('POST')).then((r) =>
       handle<PostCommentResult>(r),
+    ),
+  // "Post reply" on a previous-review reply status. The server builds the body and claims the
+  // record first, so a second click answers 409, never a second reply.
+  postFollowUpReply: (reviewId: number, priorFindingId: number) =>
+    fetch(`/api/claude-reviews/${reviewId}/follow-up/${priorFindingId}/reply`, jsonBody('POST')).then((r) =>
+      handle<FollowUpReplyResult>(r),
     ),
   activeClaudeReviews: () =>
     get<ActiveReviewsResponse>('/api/claude-reviews/active'),

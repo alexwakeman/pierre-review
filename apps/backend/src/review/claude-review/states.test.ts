@@ -316,7 +316,7 @@ describe('POST /api/claude-review/states — the strip summary', () => {
         { key: 'BMD-1', title: 'Reset password', alignment: 'partly_aligned' },
         { key: null, title: 'Second story', alignment: null },
       ],
-      followUp: { addressed: 2, partly_addressed: 0, not_addressed: 1, no_longer_applies: 0, not_checked: 1 },
+      followUp: { addressed: 2, partly_addressed: 0, not_addressed: 1, no_longer_applies: 0, reply_accepted: 0, reply_disputed: 0, not_checked: 1 },
     });
   });
 

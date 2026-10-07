@@ -256,7 +256,7 @@ export function collectSeedCandidates(
   // P — earlier findings the follow-up found still open, unless re-raised above.
   const open = (review.followUp?.items ?? []).filter(
     (p) =>
-      (p.status === 'not_addressed' || p.status === 'partly_addressed') &&
+      (p.status === 'not_addressed' || p.status === 'partly_addressed' || p.status === 'reply_disputed') &&
       !NOT_FOR_FIX.has(p.severity) &&
       p.reraisedFindingId == null,
   );
@@ -278,7 +278,13 @@ export function collectSeedCandidates(
       body: [
         `Where: ${where(p.path, p.line) || '(no file)'}`,
         `Title: ${p.title}`,
-        `Status at this review: ${p.status === 'partly_addressed' ? 'partly addressed' : 'not addressed'}`,
+        `Status at this review: ${
+          p.status === 'partly_addressed'
+            ? 'partly addressed'
+            : p.status === 'reply_disputed'
+              ? 'not addressed (a reply on GitHub did not settle it)'
+              : 'not addressed'
+        }`,
         p.explanation ? `Why: ${p.explanation}` : '',
       ]
         .filter(Boolean)

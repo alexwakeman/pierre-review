@@ -481,6 +481,42 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     }
   });
 
+  // "Post reply" on a reply status of the previous review (manual-reply.ts): claims the thread
+  // owner's pushback / auto-resolve record before writing, so it can never post twice — a second
+  // click, a remount or an auto run that got there first answers 409.
+  app.post(
+    '/api/claude-reviews/:reviewId/follow-up/:priorFindingId/reply',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['reviewId', 'priorFindingId'],
+          properties: { reviewId: { type: 'integer' }, priorFindingId: { type: 'integer' } },
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!AGENTIC_AI_ENABLED) return featureOff(reply);
+      const { reviewId, priorFindingId } = req.params as { reviewId: number; priorFindingId: number };
+      const accountId = ctx.accountIdOf(req);
+      const { postFollowUpReply } = await import('./manual-reply.js');
+      const out = await postFollowUpReply(ctx, { accountId, reviewId, priorFindingId });
+      if (out.kind === 'not_found') {
+        reply.status(404);
+        return { error: 'NotFound', message: `Review ${reviewId} has no reply to post for ${priorFindingId}` };
+      }
+      if (out.kind === 'conflict') {
+        reply.status(409);
+        return { error: out.code, message: out.message };
+      }
+      if (out.result.status === 'failed') {
+        reply.status(502);
+        return { error: 'GitHubError', message: out.result.error ?? 'GitHub did not accept the reply.' };
+      }
+      return out.result;
+    },
+  );
+
   // Post a single GitHub review (or, with ?dryRun=true, the exact payload without posting).
   app.post('/api/claude-reviews/:reviewId/post', { schema: postSchema }, async (req, reply) => {
     if (!AGENTIC_AI_ENABLED) return featureOff(reply);

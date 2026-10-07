@@ -82,6 +82,8 @@ describe('tierFor — ticket review', () => {
   });
   it('puts posting an item on the GitHub-write bucket', () => {
     expect(tiers('POST', '/api/ticket-reviews/7/items/12/post')).toEqual(['github_write']);
+    // "Post reply" on a follow-up reply status: one thread reply, no model.
+    expect(tiers('POST', '/api/claude-reviews/7/follow-up/12/reply')).toEqual(['github_write']);
   });
   it('keeps the PR-reference resolver on read (DB-only batch)', () => {
     expect(tiers('POST', '/api/prs/resolve')).toEqual(['read']);

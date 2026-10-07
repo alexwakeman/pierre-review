@@ -725,6 +725,60 @@ describe('auto verdict', () => {
     expect(postReview.mock.calls[0]![0].verdict).toBe('COMMENT');
     expect((await persist.getClaudeReviewById(ctx, id, 1))?.autoPost?.verdict?.heldReason).toBe('reviews_unreadable');
   });
+  const refusal = () => Object.assign(new Error('GitHub REST POST /reviews -> 422: Review cannot be submitted'), { status: 422 });
+
+  it('GitHub refuses the verdict ⇒ the same review goes once more as a COMMENT, recorded as refused', async () => {
+    await setPost(true, { scope: 'all', autoVerdict: true });
+    const pr = await makePr({ author: 'alice' });
+    const id = await run(pr, [{ severity: 'blocker', title: 'Bug' }]);
+    const fallback = postReview.getMockImplementation()!;
+    postReview.mockImplementationOnce(async () => {
+      throw refusal();
+    });
+    postReview.mockImplementation(fallback);
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps());
+    expect(postReview).toHaveBeenCalledTimes(2);
+    expect(postReview.mock.calls.map((c) => c[0].verdict)).toEqual(['REQUEST_CHANGES', 'COMMENT']);
+    expect(postReview.mock.calls[1]![0].includedFindings).toEqual(postReview.mock.calls[0]![0].includedFindings);
+    expect((await persist.getClaudeReviewById(ctx, id, 1))?.autoPost).toMatchObject({
+      status: 'posted',
+      verdict: { wanted: 'REQUEST_CHANGES', submitted: 'COMMENT', heldReason: 'refused' },
+    });
+  });
+
+  it('an ambiguous failure (5xx) is never retried', async () => {
+    await setPost(true, { scope: 'all', autoVerdict: true });
+    const pr = await makePr({ author: 'alice' });
+    const id = await run(pr, [{ severity: 'blocker', title: 'Bug' }]);
+    postReview.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('GitHub REST POST -> 502'), { status: 502 });
+    });
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps());
+    expect(postReview).toHaveBeenCalledTimes(1);
+    expect((await persist.getClaudeReviewById(ctx, id, 1))?.autoPost?.status).toBe('failed');
+  });
+
+  it('a refused bare APPROVE with nothing to post posts nothing more', async () => {
+    await setPost(true, { scope: 'all', autoVerdict: true });
+    const pr = await makePr({ author: 'alice' });
+    const id = await run(pr, [], 'auto', 'APPROVE');
+    postReview.mockImplementationOnce(async () => {
+      throw refusal();
+    });
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps());
+    expect(postReview).toHaveBeenCalledTimes(1);
+    expect((await persist.getClaudeReviewById(ctx, id, 1))?.autoPost).toMatchObject({
+      status: 'failed',
+      verdict: { submitted: 'COMMENT', heldReason: 'refused' },
+    });
+  });
+
+  it('isVerdictRefusal: a 4xx refusal only', () => {
+    expect(ap.isVerdictRefusal(refusal())).toBe(true);
+    expect(ap.isVerdictRefusal(Object.assign(new Error('x'), { status: 403 }))).toBe(true);
+    for (const status of [401, 429, 500, 502]) expect(ap.isVerdictRefusal(Object.assign(new Error('x'), { status }))).toBe(false);
+    expect(ap.isVerdictRefusal(new Error('network'))).toBe(false);
+  });
 });
 
 describe('auto resolve', () => {
@@ -905,5 +959,251 @@ describe('auto resolve', () => {
       const [row] = (await findingsOf(x.first)).filter((r: any) => r.id === x.finding.id);
       expect(row.autoResolve).toBeNull();
     }
+  });
+
+  // ---- replies to Limn's findings: accepted ⇒ acknowledge + resolve; disputed ⇒ ONE pushback ----
+
+  async function replyRun(
+    pr: number,
+    first: number,
+    priorFindingId: number,
+    status: 'reply_accepted' | 'reply_disputed',
+    o: { response?: string; acceptKind?: 'not_valid' | 'deferred'; trigger?: 'auto' | 'manual'; threadId?: number } = {},
+  ) {
+    const id = await persist.insertQueuedReview(ctx, pr, 'abcdef1234567', 'claude-opus-5-5' as any, 1, [], o.trigger ?? 'auto');
+    await persist.saveReviewSuccess(ctx, id, {
+      scope: 'diff_only', summary: 'ok', verdict: 'COMMENT', costUsd: null, inputTokens: null, outputTokens: null,
+      numTurns: 1, excludedFiles: [], findings: [],
+      followUp: {
+        priorReviewId: first, priorHeadSha: 'HEAD', headMoved: true, changesSinceShown: true,
+        items: [
+          {
+            ref: 'P1', priorFindingId, sent: true, carried: false, status, explanation: null, path: 'src/p.ts', line: 10,
+            side: 'RIGHT', severity: 'warning', title: 'Null deref',
+            response: o.response ?? (status === 'reply_accepted' ? 'Fair, a follow-up PR works.' : 'This still drops the error on line 10.'),
+            ...(status === 'reply_accepted' ? { acceptKind: o.acceptKind ?? 'deferred' } : {}),
+            reply: { author: 'alice', excerpt: 'Will do it in a follow-up.' },
+            ...(o.threadId != null ? { threadId: o.threadId, threadFindingId: priorFindingId } : {}),
+          },
+        ],
+      },
+    } as any);
+    return id;
+  }
+
+  it('reply accepted: posts the acknowledgement, THEN resolves — once only', async () => {
+    await setPost(true, { autoResolve: true });
+    const { pr, first, finding, thread } = await postedFinding();
+    const order: string[] = [];
+    reply.mockImplementation(async () => {
+      order.push('reply');
+      return { commentId: 'RPL1' };
+    });
+    resolve.mockImplementation(async () => {
+      order.push('resolve');
+    });
+    const id = await replyRun(pr, first, finding.id, 'reply_accepted', { threadId: thread.id });
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps(), rdeps());
+    expect(order).toEqual(['reply', 'resolve']);
+    const body = String(reply.mock.calls[0]![2]);
+    expect(body.startsWith('Fair, a follow-up PR works.')).toBe(true);
+    expect(body).toContain(AUTO_POST_FOOTER);
+    const [row] = (await findingsOf(first)).filter((r: any) => r.id === finding.id);
+    expect(row.autoResolve).toMatchObject({ status: 'resolved', outcome: 'reply_accepted', acceptKind: 'deferred', byReviewId: id });
+    // The pane reads the owner's record through the item.
+    const item = (await persist.getClaudeReviewById(ctx, id, 1))!.followUp!.items[0]!;
+    expect(item.autoResolve?.status).toBe('resolved');
+    expect(item.threadResolved).toBe(false); // the stub resolve does not touch the local row
+    const again = await replyRun(pr, id, finding.id, 'reply_accepted');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: again }, deps(), rdeps());
+    expect(reply).toHaveBeenCalledTimes(1);
+  });
+
+  it('reply accepted on an already-resolved thread: nothing posted', async () => {
+    await setPost(true, { autoResolve: true });
+    const { pr, first, finding, thread } = await postedFinding();
+    const { eq } = await import('drizzle-orm');
+    await db.update(schema.reviewThreads).set({ isResolved: true }).where((await import('drizzle-orm')).eq(schema.reviewThreads.id, thread.id)).execute();
+    const id = await replyRun(pr, first, finding.id, 'reply_accepted');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps(), rdeps());
+    expect(reply).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('reply disputed: ONE pushback per thread, ever — never resolved, auto-post switch alone', async () => {
+    await setPost(true, { autoResolve: false });
+    const { pr, first, finding, thread } = await postedFinding();
+    reply.mockImplementation(async () => ({ commentId: 'PB1' }));
+    const id = await replyRun(pr, first, finding.id, 'reply_disputed', { threadId: thread.id });
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps(), rdeps());
+    expect(reply).toHaveBeenCalledTimes(1);
+    expect(resolve).not.toHaveBeenCalled();
+    const body = String(reply.mock.calls[0]![2]);
+    expect(body.startsWith('This still drops the error on line 10.')).toBe(true);
+    expect(body).toContain('<!-- pierre:claude-review-pushback v=1 -->');
+    const { isLimnPostedComment } = await import('../../db/review-threads-for-review.js');
+    expect(isLimnPostedComment({ body, databaseId: null, authorLogin: 'me' }, undefined, 'me')).toBe(true);
+    const [row] = (await findingsOf(first)).filter((r: any) => r.id === finding.id);
+    expect(row.pushback).toMatchObject({ status: 'posted', byReviewId: id, commentId: 'PB1', error: null });
+    expect((await persist.getClaudeReviewById(ctx, id, 1))!.followUp!.items[0]!.pushback?.status).toBe('posted');
+    // A later run disputing it again never posts a second one.
+    const again = await replyRun(pr, id, finding.id, 'reply_disputed', { response: 'Still wrong.' });
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: again }, deps(), rdeps());
+    expect(reply).toHaveBeenCalledTimes(1);
+  });
+
+  it('a pushback already on the thread (posted by hand) blocks the automatic one', async () => {
+    const { pr, first, finding, thread } = await postedFinding();
+    await db
+      .insert(schema.reviewComments)
+      .values({
+        prId: pr, threadId: thread.id, githubNodeId: `RC_pb${pr}`, databaseId: `8${pr}`, authorId: users.me,
+        body: 'I still think so.\n\n<!-- pierre:claude-review-pushback v=1 -->', createdAt: new Date(),
+      })
+      .execute();
+    const id = await replyRun(pr, first, finding.id, 'reply_disputed');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps(), rdeps());
+    expect(reply).not.toHaveBeenCalled();
+  });
+
+  it('a RESOLVED thread gets no automatic pushback, and nothing is claimed', async () => {
+    const { pr, first, finding, thread } = await postedFinding();
+    await db.update(schema.reviewThreads).set({ isResolved: true }).where((await import('drizzle-orm')).eq(schema.reviewThreads.id, thread.id)).execute();
+    const id = await replyRun(pr, first, finding.id, 'reply_disputed');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps(), rdeps());
+    expect(reply).not.toHaveBeenCalled();
+    const [row] = (await findingsOf(first)).filter((r: any) => r.id === finding.id);
+    expect(row.pushback ?? null).toBeNull();
+  });
+
+  // ---- "Post reply" from the tab (manual-reply.ts): the same record, claimed first ----
+
+  function mdeps() {
+    return {
+      reply: vi.fn(async (_a: number, _t: { id: number; nodeId: string; prId: number }, _b: string) => ({ commentId: 'MAN1' as string | null })),
+      resolve: vi.fn(async () => {}),
+      stamp: vi.fn(async () => {}),
+      notePrChanged: vi.fn(async () => {}),
+    };
+  }
+
+  it('Post reply (disputed) claims the pushback record: a second click, a remount or a later run never posts again', async () => {
+    const { postFollowUpReply } = await import('./manual-reply.js');
+    const { pr, first, finding } = await postedFinding();
+    const id = await replyRun(pr, first, finding.id, 'reply_disputed', { trigger: 'manual' });
+    const m = mdeps();
+    const out = await postFollowUpReply(ctx, { accountId: 1, reviewId: id, priorFindingId: finding.id }, m);
+    expect(out).toMatchObject({ kind: 'done', result: { status: 'posted', commentId: 'MAN1' } });
+    expect(String(m.reply.mock.calls[0]![2])).toBe('This still drops the error on line 10.\n\n<!-- pierre:claude-review-pushback v=1 -->');
+    const [row] = (await findingsOf(first)).filter((r: any) => r.id === finding.id);
+    expect(row.pushback).toMatchObject({ status: 'posted', byReviewId: id, manual: true });
+    // A second click (the button came back after a remount): refused, nothing posted.
+    expect(await postFollowUpReply(ctx, { accountId: 1, reviewId: id, priorFindingId: finding.id }, m)).toMatchObject({ kind: 'conflict', code: 'AlreadyPosted' });
+    // A LATER run disputing the same thread: still one pushback ever.
+    const again = await replyRun(pr, id, finding.id, 'reply_disputed', { trigger: 'manual', response: 'Still wrong.' });
+    expect(await postFollowUpReply(ctx, { accountId: 1, reviewId: again, priorFindingId: finding.id }, m)).toMatchObject({ kind: 'conflict' });
+    // And the auto run sees the record and skips.
+    await setPost(true, { autoResolve: false });
+    const auto = await replyRun(pr, id, finding.id, 'reply_disputed');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: auto }, deps(), rdeps());
+    expect(m.reply).toHaveBeenCalledTimes(1);
+    expect(reply).not.toHaveBeenCalled();
+  });
+
+  it('two clicks at once post one reply', async () => {
+    const { postFollowUpReply } = await import('./manual-reply.js');
+    const { pr, first, finding } = await postedFinding();
+    const id = await replyRun(pr, first, finding.id, 'reply_disputed', { trigger: 'manual' });
+    const m = mdeps();
+    const [a, b] = await Promise.all([
+      postFollowUpReply(ctx, { accountId: 1, reviewId: id, priorFindingId: finding.id }, m),
+      postFollowUpReply(ctx, { accountId: 1, reviewId: id, priorFindingId: finding.id }, m),
+    ]);
+    expect([a.kind, b.kind].sort()).toEqual(['conflict', 'done']);
+    expect(m.reply).toHaveBeenCalledTimes(1);
+  });
+
+  it('after an auto pushback claimed the thread, Post reply is refused', async () => {
+    const { postFollowUpReply } = await import('./manual-reply.js');
+    await setPost(true, { autoResolve: false });
+    const { pr, first, finding } = await postedFinding();
+    reply.mockImplementation(async () => ({ commentId: 'PB1' }));
+    const id = await replyRun(pr, first, finding.id, 'reply_disputed');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps(), rdeps());
+    expect(reply).toHaveBeenCalledTimes(1);
+    const m = mdeps();
+    expect(await postFollowUpReply(ctx, { accountId: 1, reviewId: id, priorFindingId: finding.id }, m)).toMatchObject({ kind: 'conflict', code: 'AlreadyPosted' });
+    expect(m.reply).not.toHaveBeenCalled();
+  });
+
+  it('an UNCLEAR failure is never offered again; a clear refusal may be retried by hand (never by the auto run)', async () => {
+    const { postFollowUpReply } = await import('./manual-reply.js');
+    await setPost(true, { autoResolve: false });
+    // Unclear (a 502): the reply may be on GitHub.
+    const a = await postedFinding();
+    reply.mockImplementation(async () => {
+      throw Object.assign(new Error('Bad gateway'), { status: 502 });
+    });
+    const ida = await replyRun(a.pr, a.first, a.finding.id, 'reply_disputed');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: a.pr, reviewId: ida }, deps(), rdeps());
+    const [rowA] = (await findingsOf(a.first)).filter((r: any) => r.id === a.finding.id);
+    expect(rowA.pushback).toMatchObject({ status: 'failed', refused: false });
+    expect(await postFollowUpReply(ctx, { accountId: 1, reviewId: ida, priorFindingId: a.finding.id }, mdeps())).toMatchObject({ kind: 'conflict' });
+    // Clear (a GraphQL refusal): nothing was created, so the reader may try again.
+    const b = await postedFinding();
+    reply.mockImplementation(async () => {
+      throw Object.assign(new Error('Resource not accessible'), { name: 'GraphqlResponseError', errors: [{ type: 'FORBIDDEN' }] });
+    });
+    const idb = await replyRun(b.pr, b.first, b.finding.id, 'reply_disputed');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: b.pr, reviewId: idb }, deps(), rdeps());
+    const [rowB] = (await findingsOf(b.first)).filter((r: any) => r.id === b.finding.id);
+    expect(rowB.pushback).toMatchObject({ status: 'failed', refused: true });
+    const m = mdeps();
+    expect(await postFollowUpReply(ctx, { accountId: 1, reviewId: idb, priorFindingId: b.finding.id }, m)).toMatchObject({ kind: 'done', result: { status: 'posted' } });
+    expect(m.reply).toHaveBeenCalledTimes(1);
+  });
+
+  it('Post reply (accepted) answers AND resolves, and blocks auto resolve', async () => {
+    const { postFollowUpReply } = await import('./manual-reply.js');
+    const { pr, first, finding } = await postedFinding();
+    const id = await replyRun(pr, first, finding.id, 'reply_accepted', { trigger: 'manual' });
+    const m = mdeps();
+    const order: string[] = [];
+    m.reply.mockImplementation(async () => (order.push('reply'), { commentId: 'MAN2' }));
+    m.resolve.mockImplementation(async () => void order.push('resolve'));
+    const out = await postFollowUpReply(ctx, { accountId: 1, reviewId: id, priorFindingId: finding.id }, m);
+    expect(out).toMatchObject({ kind: 'done', result: { status: 'resolved', commentId: 'MAN2' } });
+    expect(order).toEqual(['reply', 'resolve']);
+    expect(String(m.reply.mock.calls[0]![2])).toBe('Fair, a follow-up PR works.\n\n<!-- pierre:claude-review-finding v=1 -->');
+    const [row] = (await findingsOf(first)).filter((r: any) => r.id === finding.id);
+    expect(row.autoResolve).toMatchObject({ status: 'resolved', outcome: 'reply_accepted', manual: true, byReviewId: id });
+    expect(await postFollowUpReply(ctx, { accountId: 1, reviewId: id, priorFindingId: finding.id }, m)).toMatchObject({ kind: 'conflict' });
+    await setPost(true, { autoResolve: true });
+    const auto = await replyRun(pr, id, finding.id, 'reply_accepted');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: auto }, deps(), rdeps());
+    expect(reply).not.toHaveBeenCalled();
+    expect(m.reply).toHaveBeenCalledTimes(1);
+  });
+
+  it('Post reply needs a reply status of this account\'s review', async () => {
+    const { postFollowUpReply } = await import('./manual-reply.js');
+    const { pr, first, finding } = await postedFinding();
+    const id = await followUpRun(pr, first, finding.id, 'not_addressed');
+    expect(await postFollowUpReply(ctx, { accountId: 1, reviewId: id, priorFindingId: finding.id }, mdeps())).toEqual({ kind: 'not_found' });
+    const id2 = await replyRun(pr, first, finding.id, 'reply_disputed', { trigger: 'manual' });
+    expect(await postFollowUpReply(ctx, { accountId: 2, reviewId: id2, priorFindingId: finding.id }, mdeps())).toEqual({ kind: 'not_found' });
+  });
+
+  it('manual runs and the switch off write nothing', async () => {
+    await setPost(true, { autoResolve: true });
+    const a = await postedFinding();
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: a.pr, reviewId: await replyRun(a.pr, a.first, a.finding.id, 'reply_accepted', { trigger: 'manual' }) }, deps(), rdeps());
+    const b = await postedFinding();
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: b.pr, reviewId: await replyRun(b.pr, b.first, b.finding.id, 'reply_disputed', { trigger: 'manual' }) }, deps(), rdeps());
+    const c = await postedFinding();
+    await setPost(false);
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: c.pr, reviewId: await replyRun(c.pr, c.first, c.finding.id, 'reply_disputed') }, deps(), rdeps());
+    expect(reply).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
   });
 });

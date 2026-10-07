@@ -429,8 +429,20 @@ export interface ReviewFinding {
 // dropped, missing refs 'not_checked', never an invented 'addressed').
 export interface ReviewFollowUpReport {
   ref: string;
-  status: 'addressed' | 'partly_addressed' | 'not_addressed' | 'no_longer_applies';
+  // The two reply statuses are core-only (Claude Review left the plugin) and valid only on a ref
+  // whose thread had a person's reply; follow-up.ts `reconcileFollowUp` enforces both.
+  status:
+    | 'addressed'
+    | 'partly_addressed'
+    | 'not_addressed'
+    | 'no_longer_applies'
+    | 'reply_accepted'
+    | 'reply_disputed';
   explanation: string;
+  // 'reply_accepted' only: how the reply settled it.
+  acceptKind?: 'not_valid' | 'deferred' | null;
+  // The reply-status text: the one-sentence acknowledgement, or the pushback.
+  reply?: string | null;
 }
 
 // One OTHER reviewer's open thread, as Claude judged it ('R1'… as the prompt named them). Core-only

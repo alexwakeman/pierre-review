@@ -517,6 +517,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (path === '/api/ci-reviews' && mutating) return [TIERS.ai, TIERS.aiHourly];
   if (path === '/api/ci-reviews/states') return [TIERS.read];
   if (path.startsWith('/api/ci-reviews')) return [TIERS.read];
+  // "Post reply" on a follow-up reply status: ONE GitHub thread reply (+ a resolve), no model.
+  if (mutating && /^\/api\/claude-reviews\/\d+\/follow-up\/\d+\/reply$/.test(path)) return [TIERS.githubWrite];
   if (/^\/api\/claude-reviews\/[^/]+\/chat$/.test(path)) {
     return mutating ? [TIERS.ai, TIERS.aiHourly] : [TIERS.read];
   }

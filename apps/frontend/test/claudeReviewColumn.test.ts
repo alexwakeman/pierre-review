@@ -134,7 +134,12 @@ describe('the strip figures', () => {
     expect(followUpTally(null)).toBeNull();
     const none = { addressed: 0, partly_addressed: 0, not_addressed: 0, no_longer_applies: 1, not_checked: 2 };
     expect(followUpTally(none)).toBeNull();
-    expect(followUpTally({ ...none, addressed: 2, partly_addressed: 1, not_addressed: 1 })).toEqual({ fixed: 2, open: 2 });
+    expect(followUpTally({ ...none, addressed: 2, partly_addressed: 1, not_addressed: 1 })).toEqual({ fixed: 2, settled: 0, open: 2 });
+  });
+
+  it('a reply accepted counts as settled, a pushback as still open', () => {
+    const none = { addressed: 0, partly_addressed: 0, not_addressed: 0, no_longer_applies: 0, not_checked: 0 };
+    expect(followUpTally({ ...none, reply_accepted: 2, reply_disputed: 1 })).toEqual({ fixed: 0, settled: 2, open: 1 });
   });
 
   it('the findings sort puts a PR with no finished run below a clean one', () => {

@@ -352,6 +352,9 @@ export function ClaudeReviewPanel({
                 {tally.fixed > 0 && (
                   <span className={`${PILL} ${FOLLOW_UP_STATUS_CLASS.addressed}`}>{tally.fixed} fixed</span>
                 )}
+                {tally.settled > 0 && (
+                  <span className={`${PILL} ${FOLLOW_UP_STATUS_CLASS.reply_accepted}`}>{tally.settled} settled</span>
+                )}
                 {tally.open > 0 && (
                   <span className={`${PILL} ${FOLLOW_UP_STATUS_CLASS.not_addressed}`}>
                     {tally.open} still open

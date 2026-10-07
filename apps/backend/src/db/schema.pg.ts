@@ -36,6 +36,7 @@ import type {
   ClaudeCiFailuresRecord,
   CiAutoPostRecord,
   FindingAutoResolveRecord,
+  FindingPushbackRecord,
   StoredAutoFixSettings,
   StoredAutoPostSettings,
   TicketAutoPostRecord,
@@ -957,6 +958,8 @@ export const claudeReviewFindings = pgTable(
     // Auto-resolve (migration 0091 / pg 0078). Twin of schema.sqlite.ts, where the contract lives.
     autoResolvedAt: timestamp('auto_resolved_at', { withTimezone: true, mode: 'date' }),
     autoResolve: jsonb('auto_resolve').$type<FindingAutoResolveRecord>(),
+    // Pushback (migration 0092 / pg 0079). Twin of schema.sqlite.ts, where the contract lives.
+    pushback: jsonb('pushback').$type<FindingPushbackRecord>(),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );

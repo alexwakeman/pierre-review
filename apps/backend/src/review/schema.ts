@@ -67,11 +67,27 @@ export function buildSubmitReviewShape(z: ZodNs) {
             "partly_addressed",
             "not_addressed",
             "no_longer_applies",
+            "reply_accepted",
+            "reply_disputed",
           ]),
           explanation: z
             .string()
             .describe(
               "One or two sentences naming what changed, or saying that nothing did.",
+            ),
+          acceptKind: z
+            .enum(["not_valid", "deferred"])
+            .nullable()
+            .optional()
+            .describe(
+              "Only with status 'reply_accepted': 'not_valid' when the reply shows the finding was wrong or does not apply, 'deferred' when it promises a reasonable later fix.",
+            ),
+          reply: z
+            .string()
+            .nullable()
+            .optional()
+            .describe(
+              "Only with a reply_ status: the short reply to post on the thread. For reply_accepted one sentence acknowledging it; for reply_disputed a short, polite, specific pushback.",
             ),
         }),
       )

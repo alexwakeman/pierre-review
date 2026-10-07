@@ -327,6 +327,9 @@ export function ClaudeReviewExtras({
         <span className="inline-flex items-center gap-1" title="Findings from the previous review">
           <span className={MUTED}>Earlier:</span>
           {tally.fixed > 0 && <span className={`${PILL} ${FOLLOW_UP_STATUS_CLASS.addressed}`}>{tally.fixed} fixed</span>}
+          {tally.settled > 0 && (
+            <span className={`${PILL} ${FOLLOW_UP_STATUS_CLASS.reply_accepted}`}>{tally.settled} settled</span>
+          )}
           {tally.open > 0 && (
             <span className={`${PILL} ${FOLLOW_UP_STATUS_CLASS.not_addressed}`}>{tally.open} still open</span>
           )}

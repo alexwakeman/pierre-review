@@ -448,6 +448,75 @@ review, with no "Previous review" prompt section, no `follow_up` record and no f
   each follow-up item carries a DERIVED `reraisedFindingId` (the finding whose `priorFindingId`
   matches), and findings carry `priorFindingId`.
 
+### Replies to Limn's findings (accept, or push back once)
+
+When someone REPLIES on the GitHub thread of one of Limn's own posted findings and the thread is
+still open, the re-review judges the reply instead of re-raising the finding blind. Other
+reviewers' threads are unchanged (next section). Code: `claude-review/finding-replies.ts` (loader +
+which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resolve.ts` +
+`auto-pushback.ts` (the GitHub writes).
+
+- **Which replies.** The finding's thread is found through its first INLINE-posted ancestor along
+  `prior_finding_id` (`loadThreadOwners`, shared with auto resolve) and the ONE matcher
+  (`finding-thread.ts`). Every comment after the root counts when it has text and its author is a
+  known login that is NOT automation (`users.is_bot`, `github_type='Bot'`, the login seeds). A
+  Limn-posted reply (the account's login AND the `<!-- pierre:claude-review` marker — a "Post reply"
+  from the tab or an earlier auto reply) is KEPT as context, marker stripped and labelled "posted
+  from Limn", so the conversation reads whole; only the OTHER replies can be judged
+  (`judgeableReplies`, which gates both statuses and picks the quoted reply). The reader's OWN
+  unmarked replies count. The last 5, each clipped to 1,500 characters, ride INSIDE that finding's
+  nonce fence as data (and in the collision scan). A read failure costs the replies only.
+  ⚠ An automatic pushback SKIPS a RESOLVED thread (nothing claimed); a manual "Post reply" may still
+  post there.
+- **Two statuses, only on an item that had replies**: `reply_accepted` (+ `acceptKind`
+  `not_valid` — the reply shows the finding was wrong — or `deferred` — a reasonable promise to fix
+  it later, a follow-up PR or a ticket — and a one-sentence acknowledgement) and `reply_disputed`
+  (+ a short, specific pushback). The prompt says a deferral is reasonable only for a non-critical
+  issue, never for a real bug, security or data-loss problem.
+- ⚠ **THE GATE IS IN CODE** (`judgeReplyReport`): a reply status on an item with no replies, or an
+  acceptance with no valid kind, is treated as unreported (`not_checked`, or the same-head lock); a
+  `deferred` acceptance of a BLOCKER becomes `reply_disputed` with a templated pushback
+  (`deferralRefused: true`); `not_valid` is accepted at any severity; empty text gets a templated
+  one (≤ 600 chars). A reply status MAY override the same-head lock — a reply is new evidence even
+  when the code has not moved. A carried `reply_disputed` locks as `not_addressed`.
+- **Accepted ⇒ settled from then on** — the SECOND rule feeding `loadSettledByReplyFindings`
+  (`acceptedReplyFindings`, over every earlier succeeded run's `follow_up`): out of later
+  follow-ups, listed under "Settled in an earlier review" ("Accepted: …"), and a re-raise is
+  dropped in code — in the same run too (`dropAcceptedReraises`: its `priorRef`, or same path +
+  similar title). ⚠ A NEW reply or new commits do NOT unsettle it (kept simple: the author was told
+  it was accepted).
+- **Disputed stays OPEN** exactly like `not_addressed`: raised again (synthesized lead "the reply on
+  GitHub did not settle it"), carried, counted in the auto verdict at its severity (a disputed
+  blocker ⇒ `REQUEST_CHANGES`), and an AI Fix `P` seed item.
+- **GitHub writes — AUTO runs only**, same claim-before-write / never-retry / footer + marker rules:
+  accepted + `autoResolve` on ⇒ auto resolve posts the acknowledgement, then resolves (outcome
+  `reply_accepted` + `acceptKind`; an already-resolved thread is a no-op). Disputed + auto-posting on
+  ⇒ `auto-pushback.ts` posts ONE reply (footer + `PUSHBACK_REPLY_MARKER`), never resolves, recorded
+  on the owner row's `claude_review_findings.pushback` (`FindingPushbackRecord`, sqlite `0092` / pg
+  `0079`). ⚠ **AT MOST ONE PUSHBACK PER THREAD, EVER**: the record is claimed from NULL, and a
+  pushback marker already on the thread (posted by hand) blocks it too. A later run may still accept.
+- **Manual runs (or the switches off)** post nothing: the "Previous review" row shows the reply's
+  author + excerpt and the text as a draft, with "Post reply" ("Reply and resolve" for an accepted
+  one; plus "Resolve" through the ordinary `/resolve` route). ⚠ **"Post reply" goes through ITS OWN
+  ROUTE, `POST /api/claude-reviews/:reviewId/follow-up/:priorFindingId/reply`
+  (`manual-reply.ts`, `github_write` tier), never the plain thread-reply route** — it builds the
+  body (text + Limn's marker, the pushback one for a pushback; no auto footer) and CLAIMS the same
+  owner-row record the auto run claims (`pushback`, or `auto_resolve` with `manual: true`) BEFORE
+  writing, under a synchronous in-process slot. So a second click, a remount, a later run
+  disputing the same thread, or an auto run racing it can never post twice: whoever claims first
+  writes, the other gets a 409 (the auto run skips). An accepted reply is answered AND resolved.
+- ⚠ **An unclear failure is never offered again.** Every writer stores `refused: true` only when
+  GitHub CLEARLY turned the reply down (a GraphQL error answer, or a 4xx other than 401/429 —
+  `isClearReplyRefusal`); a 5xx / network error may have posted, so the row says "Couldn't confirm
+  the reply posted" and offers nothing. Only a clearly refused record may be re-claimed, and only
+  by hand. The prompt's "already pushed back" line uses the same rule (`pushbackMayBePosted`).
+- The row reads the thread OWNER's record, which an earlier run may have written: a record whose
+  `byReviewId` is another review says "Limn already pushed back / replied on this thread earlier"
+  and hides this run's (never posted) text. The wire carries `threadId` / `threadFindingId` on the
+  item (stored at run time) and, derived on read, `threadResolved`, `autoResolve`, `pushback`.
+- Open PRs cards: "Earlier: N fixed · N settled · N still open" — accepted is settled, disputed is
+  open.
+
 ## Other reviewers' threads (people and review bots)
 
 Every run that reads code (diff-only or deep) also judges **every unresolved review thread on the
@@ -1129,8 +1198,15 @@ auto-posting: claim before any GitHub write, never retried.
   read is `reviews_unreadable`, never a guess). Held ⇒ COMMENT. A sendable APPROVE / REQUEST_CHANGES
   goes out even with no new comment (body only); a held one with nothing to post is a skip. Recorded
   on `ClaudeAutoPostRecord.verdict`; the tab prints "Approved automatically." / "Not approved: …".
-  ⚠ The verdict and the comments are ONE submission, so a verdict GitHub refuses (repo policy,
-  permissions) loses that run's comments too — recorded `failed`, never retried.
+  ⚠ The verdict and the comments are ONE submission. A verdict GitHub REFUSES (a 4xx on the review
+  POST other than 401/429 — repo policy, permissions; `isVerdictRefusal`) gets the ONE retry: the
+  same review again as a COMMENT, leaving just the comments, recorded `heldReason: 'refused'` +
+  `refusedError` ("Not approved: GitHub refused it, so the comments were posted on their own.").
+  Safe because a refused POST created nothing (the seam posts PR-level comments only after the review
+  lands). A 5xx / network / rate-limit failure is ambiguous and is NEVER retried; a refused bare
+  verdict with no comments posts nothing more (`failed`).
+- **AUTO RESOLVE** also answers an accepted REPLY (`reply_accepted`: the acknowledgement, then the
+  resolve) and **AUTO PUSHBACK** posts one reply on a disputed one — § Replies to Limn's findings.
 - **AUTO RESOLVE** (`autoResolve`, OFF by default; `claude-review/auto-resolve.ts`, called from
   `maybeAutoPostReview` after the post, whatever it did). ⚠ The ONE automatic resolve, a deliberate
   exception to bot-triage's "user-initiated only", scoped to LIMN'S OWN threads: an earlier finding

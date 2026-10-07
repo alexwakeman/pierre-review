@@ -37,7 +37,8 @@
 //      never re-trigger an auto review;
 //   8. stamp what GitHub took (`markReviewPosted` with `auto`), settle the record (posted / partial
 //      / failed + the first error), then `settlePrAfterWrite`;
-//   9. AUTO RESOLVE (`./auto-resolve.ts`, only with `autoResolve` on) runs after, on its own rules.
+//   9. AUTO RESOLVE (`./auto-resolve.ts`, only with `autoResolve` on) runs after, on its own rules,
+//      then AUTO PUSHBACK (`./auto-pushback.ts`: one reply per thread, ever, on a disputed reply).
 //
 // ⚠ ONCE GITHUB 201s THERE IS NO RETRY, EVER. A failure is RECORDED (the Claude Review tab prints
 // "Couldn't post automatically: …" and keeps the Post button), never swallowed and never retried.
@@ -467,6 +468,14 @@ export async function maybeAutoPostReview(
   } catch (err) {
     ctx.log.warn(`auto resolve review ${a.reviewId}: ${errText(err)}`);
   }
+  // AUTO PUSHBACK (./auto-pushback.ts): one reply per thread, ever, where this run disagreed with a
+  // person's reply on Limn's own finding. Rides the auto-post switch alone. Never throws.
+  try {
+    const { maybeAutoPushback } = await import('./auto-pushback.js');
+    await maybeAutoPushback(ctx, a, deps, resolveDeps);
+  } catch (err) {
+    ctx.log.warn(`auto pushback review ${a.reviewId}: ${errText(err)}`);
+  }
   return out;
 }
 
@@ -561,19 +570,37 @@ async function autoPostReview(
   const posted = new Set<number>();
   const errors: string[] = [];
 
-  try {
-    const outcome = await ctx.review.postReview({
+  const submit = (ev: AutoVerdictEvent) =>
+    ctx.review.postReview({
       owner: pctx.owner,
       name: pctx.name,
       prNumber: pctx.prNumber,
       reviewHeadSha: pctx.reviewHeadSha,
       body: autoReviewBody(review.summary, picked.toPost.length),
       // COMMENT unless auto verdict is on AND its gate let the verdict through.
-      verdict: event,
+      verdict: ev,
       // Questions ride the same review: the seam anchors each inline, else falls back.
       includedFindings: picked.toPost.map(toPostFinding),
       dryRun: false,
     });
+
+  try {
+    let outcome;
+    try {
+      outcome = await submit(event);
+    } catch (err) {
+      // ⚠ THE ONE RETRY: GitHub REFUSED the verdict (a 4xx on the review POST — branch rules,
+      // permissions). A refused POST created nothing (the seam posts PR-level comments only after
+      // the review lands), so sending the same review once more as a COMMENT cannot double-post.
+      // Never on a COMMENT, never on an ambiguous failure (5xx, network, rate limit), never twice.
+      if (event === 'COMMENT' || !isVerdictRefusal(err)) throw err;
+      verdict = { ...(verdict as ClaudeAutoVerdictRecord), submitted: 'COMMENT', heldReason: 'refused', refusedError: errText(err).slice(0, 300) };
+      record.verdict = verdict;
+      // A bare verdict with no comments behind it: nothing is left to post.
+      if (picked.toPost.length === 0) throw err;
+      ctx.log.warn(`auto post review ${reviewId}: GitHub refused ${event}; posting the comments alone`);
+      outcome = await submit('COMMENT');
+    }
     if (outcome.headMoved) {
       errors.push('The PR changed since this review.');
     } else if ('postedReviewId' in outcome) {
@@ -606,6 +633,15 @@ async function autoPostReview(
     await deps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
   }
   return { kind: 'done', record: final };
+}
+
+/**
+ * Did GitHub turn the review POST down outright (so nothing was created)? A 4xx other than a rate
+ * limit. 5xx, network errors and rate limits are ambiguous or transient — never retried.
+ */
+export function isVerdictRefusal(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500 && status !== 429 && status !== 401;
 }
 
 /** How long a `posting` record holds the manual Post buttons shut (a crash must not lock them for good). */

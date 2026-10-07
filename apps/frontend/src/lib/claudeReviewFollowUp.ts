@@ -113,6 +113,10 @@ export const FOLLOW_UP_STATUS_CLASS: Record<ClaudeFollowUpStatus, string> = {
   not_checked: CHIP_GREY,
   addressed: CHIP_GREEN,
   no_longer_applies: CHIP_GREY,
+  // A reply settled it: nothing left to fix, so green like addressed.
+  reply_accepted: CHIP_GREEN,
+  // Claude disagreed with a reply: still open, so amber like partly addressed.
+  reply_disputed: CHIP_ORANGE,
 };
 
 export const TICKET_CRITERION_STATUS_CLASS: Record<ClaudeTicketCriterionStatus, string> = {
@@ -145,11 +149,13 @@ export const TICKET_ALIGNMENT_CLASS: Record<ClaudeTicketAlignment, string> = {
 // ---- the previous-review list ----
 
 // Open = the reader still has something to look at. Not addressed first (the headline), then
-// partly addressed, then the ones nobody checked. Closed = addressed or no longer applies.
+// pushed back (a reply Claude disagreed with), partly addressed, then the ones nobody checked.
+// Closed = addressed, settled by a reply, or no longer applies.
 const OPEN_ORDER: Partial<Record<ClaudeFollowUpStatus, number>> = {
   not_addressed: 0,
-  partly_addressed: 1,
-  not_checked: 2,
+  reply_disputed: 1,
+  partly_addressed: 2,
+  not_checked: 3,
 };
 
 export function partitionFollowUp(items: readonly ClaudeFollowUpItem[]): {
@@ -309,7 +315,7 @@ export function threadNotCheckedReason(t: Pick<ClaudeThreadAssessment, 'sent'>):
   return t.sent ? "Claude didn't report on this one." : 'Not sent to Claude: too many open threads.';
 }
 
-export type ReraisedStatus = 'not_addressed' | 'partly_addressed';
+export type ReraisedStatus = 'not_addressed' | 'partly_addressed' | 'reply_disputed';
 
 /**
  * finding id -> the status of the earlier comment it raises again. Only the two OPEN statuses:
@@ -326,7 +332,7 @@ export function reraisedStatusByFindingId(
   for (const f of review.findings) {
     if (f.priorFindingId == null) continue;
     const s = byPrior.get(f.priorFindingId);
-    if (s === 'not_addressed' || s === 'partly_addressed') out.set(f.id, s);
+    if (s === 'not_addressed' || s === 'partly_addressed' || s === 'reply_disputed') out.set(f.id, s);
   }
   return out;
 }
@@ -334,7 +340,83 @@ export function reraisedStatusByFindingId(
 export const RERAISED_CHIP: Record<ReraisedStatus, { label: string; cls: string }> = {
   not_addressed: { label: 'Not addressed since last review', cls: CHIP_RED },
   partly_addressed: { label: 'Partly addressed since last review', cls: CHIP_ORANGE },
+  reply_disputed: { label: 'Reply did not settle it', cls: CHIP_ORANGE },
 };
+
+// ---- replies on Limn's own findings (reply_accepted / reply_disputed) ----
+
+/** The row's heading for a reply status; null for every other status. */
+export function replyStatusHeading(item: Pick<ClaudeFollowUpItem, 'status' | 'acceptKind'>): string | null {
+  if (item.status === 'reply_disputed') return 'Pushed back';
+  if (item.status !== 'reply_accepted') return null;
+  return item.acceptKind === 'deferred' ? 'Reply accepted: to be handled later' : 'Reply accepted: not an issue';
+}
+
+/**
+ * What became of the reply Limn would post (the acknowledgement or the pushback): a note about the
+ * write, whether to show the drafted text, and which buttons the row offers. Reads the thread
+ * OWNER's record, which an EARLIER run may have written:
+ *   - ⚠ "Post reply" is offered only when no reply of Limn's can be on the thread already — any
+ *     record except a CLEAR refusal (`refused: true`) shuts it, including a `posting` one and an
+ *     unclear failure (a 5xx may have posted). The server claims the same record before it writes,
+ *     so this is the screen agreeing with it, not the only guard.
+ *   - A record from ANOTHER review is not this run's write: the row says Limn already replied
+ *     earlier and hides this run's text (it was never posted).
+ */
+export function replyActions(
+  item: Pick<ClaudeFollowUpItem, 'status' | 'response' | 'threadId' | 'threadResolved' | 'autoResolve' | 'pushback'>,
+  reviewId: number,
+): { note: string | null; showText: boolean; canPost: boolean; canResolve: boolean } {
+  const text = (item.response ?? '').trim();
+  const hasThread = item.threadId != null;
+  const UNCLEAR = 'Couldn’t confirm the reply posted. Check the thread on GitHub.';
+  if (item.status === 'reply_accepted') {
+    const ar = item.autoResolve ?? null;
+    const mine = ar != null && ar.byReviewId === reviewId;
+    const how = ar?.manual ? '' : ' automatically';
+    const replyMayBeOn = ar != null && !(ar.status === 'failed' && ar.replyCommentId == null && ar.refused === true);
+    const resolved = item.threadResolved === true || ar?.status === 'resolved';
+    let note: string | null = null;
+    if (ar != null && !mine) {
+      if (replyMayBeOn) note = 'Limn already replied on this thread earlier.';
+    } else if (ar != null) {
+      if (ar.status === 'resolved') note = `Replied and resolved${how}.`;
+      else if (ar.status === 'resolving') note = `Replying${how}…`;
+      else if (ar.replyCommentId != null) note = `Replied${how}, but couldn’t resolve: ${ar.error?.trim() || 'GitHub did not accept it.'}`;
+      else if (ar.refused === true) note = `Couldn’t reply${how}: ${ar.error?.trim() || 'GitHub did not accept it.'}`;
+      else note = UNCLEAR;
+    }
+    if (note == null && resolved) note = 'The thread is resolved.';
+    return {
+      note,
+      showText: !(ar != null && !mine && replyMayBeOn),
+      canPost: hasThread && text !== '' && !replyMayBeOn && !resolved,
+      canResolve: hasThread && !resolved && (ar == null || ar.status === 'failed'),
+    };
+  }
+  if (item.status === 'reply_disputed') {
+    const pb = item.pushback ?? null;
+    const mine = pb != null && pb.byReviewId === reviewId;
+    const how = pb?.manual ? '' : ' automatically';
+    const mayBeOn = pb != null && !(pb.status === 'failed' && pb.refused === true);
+    let note: string | null = null;
+    if (pb != null && !mine) {
+      if (mayBeOn) note = 'Limn already pushed back on this thread earlier.';
+    } else if (pb != null) {
+      if (pb.status === 'posted') note = `Posted${how}.`;
+      else if (pb.status === 'posting') note = `Posting${how}…`;
+      else if (pb.refused === true) note = `Couldn’t post${how}: ${pb.error?.trim() || 'GitHub did not accept it.'}`;
+      else note = UNCLEAR;
+    }
+    return {
+      note,
+      showText: !(pb != null && !mine && mayBeOn),
+      canPost: hasThread && text !== '' && !mayBeOn,
+      canResolve: false,
+    };
+  }
+  return { note: null, showText: true, canPost: false, canResolve: false };
+}
 
 /**
  * The findings that repeat a comment ALREADY POSTED ON THIS SAME COMMIT: the earlier comment was

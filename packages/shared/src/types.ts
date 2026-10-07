@@ -4913,6 +4913,12 @@ export interface StoredAutoFixSettings {
 // `<!-- pierre:claude-review` marker still follows it, so `isLimnPostedComment` knows it).
 export const AUTO_POST_FOOTER = '_Posted automatically by Limn’s Claude review._';
 
+// Hidden markers on Limn's replies in its own finding threads. Both start with Limn's
+// `<!-- pierre:claude-review` prefix, so `isLimnPostedComment` knows them. The PUSHBACK one also
+// says "a pushback is already on this thread": at most one per thread, ever, by hand or automatic.
+export const FINDING_REPLY_MARKER = '<!-- pierre:claude-review-finding v=1 -->';
+export const PUSHBACK_REPLY_MARKER = '<!-- pierre:claude-review-pushback v=1 -->';
+
 // What auto-posting did with ONE run (`claude_reviews.auto_post`, migration 0087 / pg 0074).
 //   posting   claimed; GitHub calls in flight (or cut off by a restart — never retried: the
 //             findings listed in `findingIds` count as possibly posted for every later run)
@@ -4938,12 +4944,16 @@ export type AutoPostSkipReason =
 //   submitted  the event actually sent — COMMENT whenever `heldReason` is set
 //   heldReason why `wanted` was not sent: 'own_pr' (GitHub refuses self-approval), 'prior_review'
 //              (the reader's own latest review is APPROVED / CHANGES_REQUESTED / DISMISSED),
-//              'reviews_unreadable' (the live read failed — never guess), null when sent as wanted.
+//              'reviews_unreadable' (the live read failed — never guess), 'refused' (GitHub turned
+//              the verdict down — branch rules, permissions — so the same review went again as a
+//              COMMENT, leaving just the comments), null when sent as wanted.
 export type AutoVerdictEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
 export interface ClaudeAutoVerdictRecord {
   wanted: AutoVerdictEvent;
   submitted: AutoVerdictEvent;
-  heldReason: 'own_pr' | 'prior_review' | 'reviews_unreadable' | null;
+  heldReason: 'own_pr' | 'prior_review' | 'reviews_unreadable' | 'refused' | null;
+  // GitHub's answer when heldReason is 'refused'.
+  refusedError?: string | null;
 }
 export interface ClaudeAutoPostRecord {
   status: AutoPostStatus;
@@ -5005,12 +5015,49 @@ export interface CiAutoPostWire {
 export interface FindingAutoResolveRecord {
   status: 'resolving' | 'resolved' | 'failed';
   at: string; // ISO-8601
-  // The follow-up judgement that triggered it, and the run that made it.
-  outcome: 'addressed' | 'no_longer_applies';
+  // The follow-up judgement that triggered it, and the run that made it. 'reply_accepted' = a
+  // person's reply settled it (the reply posted is the acknowledgement; `acceptKind` says how).
+  outcome: 'addressed' | 'no_longer_applies' | 'reply_accepted';
+  acceptKind?: ClaudeReplyAcceptKind | null;
   byReviewId: number;
   // The head the judgement was made at (the reply names its short sha).
   headSha: string;
   replyCommentId: string | null;
+  error: string | null;
+  // `failed` before any reply landed (`replyCommentId` null): true ONLY when GitHub clearly turned
+  // the reply down (a GraphQL error, or a 4xx other than 401/429), so nothing was created. Absent /
+  // false = unclear (a 5xx, a network error): the reply may be on GitHub, so it is never offered again.
+  refused?: boolean;
+  // Written by "Post reply" in the tab (POST /api/claude-reviews/:reviewId/follow-up/:priorFindingId/reply)
+  // rather than by an auto run.
+  manual?: boolean;
+}
+
+// The ONE pushback reply an auto run posted on a finding's thread
+// (`claude_review_findings.pushback`, migration 0092 / pg 0079). Claimed from NULL before the
+// write, at most one per thread ever, never retried.
+//   posting  claimed; the reply is in flight (or was cut off — counts as posted forever)
+//   posted   GitHub took it (`commentId`)
+//   failed   `error` says what GitHub refused
+export interface FindingPushbackRecord {
+  status: 'posting' | 'posted' | 'failed';
+  at: string; // ISO-8601
+  byReviewId: number;
+  commentId: string | null;
+  error: string | null;
+  // `failed` only: GitHub clearly refused it, so nothing was created (see FindingAutoResolveRecord).
+  refused?: boolean;
+  // Posted from the tab ("Post reply"), not by an auto run.
+  manual?: boolean;
+}
+
+// POST /api/claude-reviews/:reviewId/follow-up/:priorFindingId/reply — "Post reply" on a reply
+// status. The server claims the thread owner's record (`pushback` for a disputed reply,
+// `autoResolve` for an accepted one) BEFORE writing, exactly like the auto run does, so a click
+// can never post twice. An accepted reply is answered AND resolved.
+export interface FollowUpReplyResult {
+  status: 'posted' | 'resolved' | 'failed';
+  commentId: string | null;
   error: string | null;
 }
 
@@ -6972,12 +7019,22 @@ export interface ClaudeTicketAssessment {
 // ---- Claude Review: follow-up on the previous review ----
 // 'not_checked' is written ONLY by the server — Claude never reported on it, or it was over the
 // cap and never sent. The server NEVER invents 'addressed'.
+// The two REPLY statuses exist only for an earlier finding whose GitHub thread has a person's reply
+// (docs/CLAUDE-REVIEW.md § Replies to Limn's findings): 'reply_accepted' — the reply settles it
+// (`acceptKind` says how), 'reply_disputed' — Claude still thinks it should change here. A blocker
+// may never be accepted as "later": the server turns that into 'reply_disputed'.
 export type ClaudeFollowUpStatus =
   | 'addressed'
   | 'partly_addressed'
   | 'not_addressed'
   | 'no_longer_applies'
+  | 'reply_accepted'
+  | 'reply_disputed'
   | 'not_checked';
+
+// How a reply settled an earlier finding: it showed the finding was wrong or does not apply, or it
+// promised a reasonable later fix (a follow-up PR, a ticket).
+export type ClaudeReplyAcceptKind = 'not_valid' | 'deferred';
 
 // One earlier finding and what this run found about it, as STORED (`claude_reviews.follow_up`).
 export interface ClaudeFollowUpItemRecord {
@@ -7010,12 +7067,33 @@ export interface ClaudeFollowUpItemRecord {
   // earlier status, and a finding raised at this very head is still not addressed. Only new
   // commits can change it. Absent ⇒ false.
   statusCarried?: boolean;
+  // ---- replies on the finding's GitHub thread (reply_accepted / reply_disputed only) ----
+  // 'reply_accepted' only: how the reply settled it.
+  acceptKind?: ClaudeReplyAcceptKind | null;
+  // The text Limn would post on the thread: the short acknowledgement (accepted) or the pushback
+  // (disputed). Posted automatically on an auto run when the workspace allows it, else a draft.
+  response?: string | null;
+  // The latest person's reply Claude judged (author login + a short excerpt).
+  reply?: { author: string; excerpt: string } | null;
+  // true ⇒ Claude accepted a "fix it later" on a BLOCKER and the server refused it (a blocker is
+  // fixed in this PR). `response` is then the server's templated pushback.
+  deferralRefused?: boolean;
+  // The local review thread the finding's comment started (review_threads.id), and the finding row
+  // that owns it (the first inline-posted one up the re-raise chain). Set whenever a thread was
+  // found at run time, whatever the status.
+  threadId?: number | null;
+  threadFindingId?: number | null;
 }
 
 // The wire shape adds `reraisedFindingId`, DERIVED on read: the id of this run's finding that
 // raises the earlier one again (its `priorFindingId` matches), else null.
 export interface ClaudeFollowUpItem extends ClaudeFollowUpItemRecord {
   reraisedFindingId: number | null;
+  // DERIVED on read, only for an item with a `threadFindingId`: whether its thread is resolved
+  // now (null = not synced), and what auto resolve / the pushback did on it.
+  threadResolved?: boolean | null;
+  autoResolve?: FindingAutoResolveRecord | null;
+  pushback?: FindingPushbackRecord | null;
 }
 
 export interface ClaudeReviewFollowUpRecord {

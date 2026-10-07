@@ -1261,6 +1261,8 @@ function ClaudesReview({
           findings={review.findings}
           changedPaths={changedPaths}
           onOpenInChanges={onOpenInChanges}
+          prId={review.prId}
+          reviewId={review.id}
         />
       )}
       <ClaudeReviewThreadsSection

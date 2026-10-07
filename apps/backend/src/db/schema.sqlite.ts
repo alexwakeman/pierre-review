@@ -31,6 +31,7 @@ import type {
   ClaudeCiFailuresRecord,
   CiAutoPostRecord,
   FindingAutoResolveRecord,
+  FindingPushbackRecord,
   StoredAutoFixSettings,
   StoredAutoPostSettings,
   TicketAutoPostRecord,
@@ -1268,6 +1269,10 @@ export const claudeReviewFindings = sqliteTable(
     // any GitHub write and never retried; `autoResolvedAt` is set when the resolve went through.
     autoResolvedAt: integer('auto_resolved_at', { mode: 'timestamp' }),
     autoResolve: text('auto_resolve', { mode: 'json' }).$type<FindingAutoResolveRecord>(),
+    // PUSHBACK (migration 0092 / pg 0079): when a later AUTO review disagrees with a person's reply
+    // on this finding's thread, the ONE reply it posted there. FindingPushbackRecord, claimed by
+    // compare-and-set from NULL before any GitHub write — at most one per thread, ever, never retried.
+    pushback: text('pushback', { mode: 'json' }).$type<FindingPushbackRecord>(),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );

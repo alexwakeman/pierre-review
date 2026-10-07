@@ -11,7 +11,9 @@
 //   0. auto-posting is ON for the PR's workspace AND its `autoResolve` switch is on (both OFF by
 //      default); the run is a SUCCEEDED AUTO run; the PR passes `autoPostEligibility` (open, not a
 //      draft, not bot-authored, in scope);
-//   1. each follow-up item of THIS run whose status is 'addressed' or 'no_longer_applies', whose
+//   1. each follow-up item of THIS run whose status is 'addressed', 'no_longer_applies' or
+//      'reply_accepted' (a person's reply settled it — the reply posted is Claude's one-sentence
+//      acknowledgement, finding-replies.ts / docs § Replies to Limn's findings), whose
 //      earlier finding — or, when that one is an unposted RE-RAISE, its first inline-posted
 //      ancestor along `prior_finding_id` — was POSTED INLINE and has no auto-resolve record yet;
 //   2. its thread is found locally (the stored comment id, else the root comment's body + path +
@@ -24,17 +26,19 @@
 //   5. the record settles `resolved` (+ `auto_resolved_at`) or `failed` with GitHub's error (a
 //      permission refusal, a deleted thread…). A failure is shown, never retried.
 // ⚠ Never throws.
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import {
   AUTO_POST_FOOTER,
   type ClaudeFollowUpStatus,
+  type ClaudeReplyAcceptKind,
   type FindingAutoResolveRecord,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { readWorkspaceAutoPostForPr } from './auto-settings.js';
 import { autoPostEligibility, defaultAutoPostDeps, readAutoPostPrFacts, type AutoPostDeps } from './auto-post.js';
 import { getClaudeReviewById } from './persist.js';
-import { findFindingThread, type ThreadComment, type ThreadRow } from './finding-thread.js';
+import { findFindingThread } from './finding-thread.js';
+import { isClearReplyRefusal, loadPrThreads, loadThreadOwners } from './finding-replies.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const s = (ctx: AgentContext): any => ctx.schema as any;
@@ -50,13 +54,21 @@ export type AutoResolveOutcome = FindingAutoResolveRecord['outcome'];
 
 /** Which follow-up statuses close a thread. */
 export function resolvableStatus(status: ClaudeFollowUpStatus): AutoResolveOutcome | null {
-  return status === 'addressed' || status === 'no_longer_applies' ? status : null;
+  return status === 'addressed' || status === 'no_longer_applies' || status === 'reply_accepted' ? status : null;
 }
 
-/** The reply posted on the thread before it is resolved. */
-export function autoResolveReplyBody(outcome: AutoResolveOutcome, headSha: string): string {
+/** The reply posted on the thread before it is resolved. An accepted reply gets Claude's
+ *  acknowledgement (`response`) instead of the templated lead. */
+export function autoResolveReplyBody(outcome: AutoResolveOutcome, headSha: string, response: string | null = null): string {
   const short = headSha.slice(0, 7);
-  const lead = outcome === 'addressed' ? `Addressed in ${short}.` : `No longer applies as of ${short}.`;
+  const lead =
+    outcome === 'reply_accepted' && response && response.trim()
+      ? response.trim()
+      : outcome === 'addressed'
+        ? `Addressed in ${short}.`
+        : outcome === 'reply_accepted'
+          ? 'Thanks, that settles it.'
+          : `No longer applies as of ${short}.`;
   return `${lead}\n\n${AUTO_POST_FOOTER}\n\n${FINDING_MARKER}`;
 }
 
@@ -130,105 +142,39 @@ async function autoResolve(
   if (!ws || !ws.settings.enabled || !ws.settings.autoResolve) return null;
   const review = await getClaudeReviewById(ctx, reviewId, accountId);
   if (!review || review.prId !== prId || review.status !== 'succeeded' || review.trigger !== 'auto') return null;
-  const wanted = new Map<number, AutoResolveOutcome>();
+  type Wanted = { outcome: AutoResolveOutcome; acceptKind: ClaudeReplyAcceptKind | null; response: string | null };
+  const wanted = new Map<number, Wanted>();
   for (const it of review.followUp?.items ?? []) {
     const outcome = resolvableStatus(it.status);
-    if (outcome) wanted.set(it.priorFindingId, outcome);
+    if (!outcome) continue;
+    // An accepted reply is answered with its acknowledgement; with none there is nothing to say.
+    if (outcome === 'reply_accepted' && !(it.response ?? '').trim()) continue;
+    wanted.set(it.priorFindingId, { outcome, acceptKind: it.acceptKind ?? null, response: it.response ?? null });
   }
   if (wanted.size === 0) return null;
 
   const facts = await readAutoPostPrFacts(ctx, postDeps, accountId, ws.workspaceId, prId);
   if (!facts || autoPostEligibility(facts, ws.settings.scope) != null) return null;
 
-  const t = s(ctx);
-  const cr = t.claudeReviews;
-  const crf = t.claudeReviewFindings;
   // The earlier findings, owned by this account and this PR (the follow-up ids are soft refs).
   // ⚠ A follow-up names the LATEST raise of an issue, and a re-raise over an already-posted
-  // comment is never posted itself (the dedupe), so the thread on GitHub belongs to an ANCESTOR.
-  // Walk `prior_finding_id` back (cycle-guarded) to the first inline-posted ancestor and resolve
-  // THAT row's thread.
-  type FindingRowAR = {
-    id: number;
-    path: string;
-    body: string;
-    editedBody: string | null;
-    githubCommentId: string | null;
-    postedAt: unknown;
-    postedCommentKind: 'inline' | 'pr_comment' | null;
-    autoResolve: FindingAutoResolveRecord | null;
-    priorFindingId: number | null;
-  };
-  const loadRows = async (ids: number[]): Promise<FindingRowAR[]> =>
-    ids.length === 0
-      ? []
-      : ((await ctx.db
-          .select({
-            id: crf.id,
-            path: crf.path,
-            body: crf.body,
-            editedBody: crf.editedBody,
-            githubCommentId: crf.githubCommentId,
-            postedAt: crf.postedAt,
-            postedCommentKind: crf.postedCommentKind,
-            autoResolve: crf.autoResolve,
-            priorFindingId: crf.priorFindingId,
-          })
-          .from(crf)
-          .innerJoin(cr, eq(cr.id, crf.reviewId))
-          .where(and(inArray(crf.id, ids), eq(cr.accountId, accountId), eq(cr.prId, prId)))
-          .execute()) as FindingRowAR[]);
-  const isInlinePosted = (f: FindingRowAR): boolean => f.postedAt != null && f.postedCommentKind === 'inline';
-  const byId = new Map<number, FindingRowAR>();
-  // wanted id → the row currently examined on its chain.
-  const cursor = new Map<number, number>([...wanted.keys()].map((id) => [id, id]));
-  const visited = new Map<number, Set<number>>([...wanted.keys()].map((id) => [id, new Set<number>()]));
-  const target = new Map<number, AutoResolveOutcome>(); // ancestor id → outcome (first wins)
-  for (let hop = 0; hop < 50 && cursor.size > 0; hop += 1) {
-    const need = [...new Set(cursor.values())].filter((id) => !byId.has(id));
-    for (const r of await loadRows(need)) byId.set(r.id, r);
-    for (const [wantedId, at] of [...cursor]) {
-      const row = byId.get(at);
-      const seen = visited.get(wantedId)!;
-      if (!row || seen.has(at)) {
-        cursor.delete(wantedId);
-        continue;
-      }
-      seen.add(at);
-      if (isInlinePosted(row)) {
-        if (!target.has(row.id)) target.set(row.id, wanted.get(wantedId)!);
-        cursor.delete(wantedId);
-      } else if (row.priorFindingId != null) {
-        cursor.set(wantedId, row.priorFindingId);
-      } else {
-        cursor.delete(wantedId);
-      }
-    }
+  // comment is never posted itself (the dedupe), so the thread on GitHub belongs to an ANCESTOR:
+  // `loadThreadOwners` walks `prior_finding_id` back to the first inline-posted one.
+  const owners = await loadThreadOwners(ctx, accountId, prId, [...wanted.keys()]);
+  const target = new Map<number, Wanted>(); // owner id → what to do (first wins)
+  for (const [wantedId, want] of wanted) {
+    const row = owners.get(wantedId);
+    if (row && !target.has(row.id)) target.set(row.id, want);
   }
+  const byId = new Map([...owners.values()].map((r) => [r.id, r]));
   const candidates = [...target.keys()]
     .map((id) => byId.get(id)!)
     .filter((f) => f.autoResolve == null);
   if (candidates.length === 0) return null;
 
-  const threads = (await ctx.db
-    .select({ id: t.reviewThreads.id, githubNodeId: t.reviewThreads.githubNodeId, path: t.reviewThreads.path, isResolved: t.reviewThreads.isResolved })
-    .from(t.reviewThreads)
-    .where(eq(t.reviewThreads.prId, prId))
-    .execute()) as ThreadRow[];
-  const commentRows = (await ctx.db
-    .select({
-      threadId: t.reviewComments.threadId,
-      databaseId: t.reviewComments.databaseId,
-      body: t.reviewComments.body,
-      authorLogin: t.users.githubLogin,
-      createdAt: t.reviewComments.createdAt,
-    })
-    .from(t.reviewComments)
-    .leftJoin(t.users, eq(t.users.id, t.reviewComments.authorId))
-    .where(eq(t.reviewComments.prId, prId))
-    .orderBy(asc(t.reviewComments.createdAt))
-    .execute()) as Array<Omit<ThreadComment, 'createdAt'> & { createdAt: Date | null }>;
-  const comments: ThreadComment[] = commentRows.map((c) => ({ ...c, createdAt: c.createdAt?.getTime?.() ?? 0 }));
+  const t = s(ctx);
+  const crf = t.claudeReviewFindings;
+  const { threads, comments } = await loadPrThreads(ctx, prId);
   const accountLogin = await postDeps.accountLogin(accountId);
 
   const result: AutoResolveResult = { resolved: [], failed: [] };
@@ -238,11 +184,13 @@ async function autoResolve(
     const thread = findFindingThread(f, threads, comments, accountLogin, taken);
     if (!thread || thread.isResolved) continue;
     taken.add(thread.id);
-    const outcome = target.get(f.id)!;
+    const want = target.get(f.id)!;
+    const outcome = want.outcome;
     const rec: FindingAutoResolveRecord = {
       status: 'resolving',
       at: nowIso(),
       outcome,
+      ...(outcome === 'reply_accepted' ? { acceptKind: want.acceptKind } : {}),
       byReviewId: reviewId,
       headSha: review.headSha,
       replyCommentId: null,
@@ -260,7 +208,11 @@ async function autoResolve(
     let final: FindingAutoResolveRecord = rec;
     let resolvedAt: Date | null = null;
     try {
-      const { commentId } = await deps.reply(accountId, thread.githubNodeId, autoResolveReplyBody(outcome, review.headSha));
+      const { commentId } = await deps.reply(
+        accountId,
+        thread.githubNodeId,
+        autoResolveReplyBody(outcome, review.headSha, want.response),
+      );
       wroteAny = true;
       final = { ...final, replyCommentId: commentId };
       try {
@@ -274,7 +226,8 @@ async function autoResolve(
         final = { ...final, status: 'failed', at: nowIso(), error: errText(err) };
       }
     } catch (err) {
-      final = { ...final, status: 'failed', at: nowIso(), error: errText(err) };
+      // No reply id: whether one landed depends on how GitHub failed (`refused` = clearly not).
+      final = { ...final, status: 'failed', at: nowIso(), error: errText(err), refused: isClearReplyRefusal(err) };
     }
     (final.status === 'resolved' ? result.resolved : result.failed).push(f.id);
     await ctx.db

@@ -218,6 +218,8 @@ export const FOLLOW_UP_STATUS_LABEL: Record<ClaudeFollowUpStatus, string> = {
   partly_addressed: 'Partly addressed',
   not_addressed: 'Not addressed',
   no_longer_applies: 'No longer applies',
+  reply_accepted: 'Reply accepted',
+  reply_disputed: 'Pushed back',
   not_checked: 'Not checked',
 };
 
@@ -298,6 +300,9 @@ export interface ClaudeFollowUpCounts {
   partly: number;
   notAddressed: number;
   noLongerApplies: number;
+  // A person's reply on GitHub settled it (accepted) / Claude still disagrees (disputed).
+  replyAccepted: number;
+  replyDisputed: number;
   notChecked: number;
 }
 
@@ -310,6 +315,8 @@ export function followUpCounts(
     partly: 0,
     notAddressed: 0,
     noLongerApplies: 0,
+    replyAccepted: 0,
+    replyDisputed: 0,
     notChecked: 0,
   };
   for (const it of items) {
@@ -317,6 +324,8 @@ export function followUpCounts(
     else if (it.status === 'partly_addressed') c.partly += 1;
     else if (it.status === 'not_addressed') c.notAddressed += 1;
     else if (it.status === 'no_longer_applies') c.noLongerApplies += 1;
+    else if (it.status === 'reply_accepted') c.replyAccepted += 1;
+    else if (it.status === 'reply_disputed') c.replyDisputed += 1;
     else c.notChecked += 1;
   }
   return c;
@@ -344,6 +353,8 @@ export function followUpSentence(
   if (c.noLongerApplies > 0) {
     parts.push(`${c.noLongerApplies} no longer ${c.noLongerApplies === 1 ? 'applies' : 'apply'}`);
   }
+  if (c.replyAccepted > 0) parts.push(`${c.replyAccepted} settled by a reply`);
+  if (c.replyDisputed > 0) parts.push(`${c.replyDisputed} pushed back on`);
   if (c.notChecked > 0) parts.push(`${c.notChecked} not checked`);
   const older = fu.items.filter((it) => it.carried === true).length;
   const own = c.total - older;

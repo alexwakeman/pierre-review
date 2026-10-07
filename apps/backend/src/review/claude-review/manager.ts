@@ -28,12 +28,14 @@ import {
 import {
   linkReraisedFindings,
   reconcileFollowUp,
+  dropAcceptedReraises,
   selectPriorFindings,
   SINCE_PATCH_CHARS,
   type FollowUpPlan,
 } from './follow-up.js';
 import { planThreadReview, reconcileThreads, type ThreadPlan } from './threads.js';
-import { dropSettledReraises } from './settled-by-reply.js';
+import { dropSettledReraises, similarTitles } from './settled-by-reply.js';
+import { attachFindingThreads } from './finding-replies.js';
 import {
   getLatestClaudeReview,
   getReviewPeerContexts,
@@ -506,6 +508,11 @@ async function runPipeline(
     reviewId,
     new Set(settled.map((f) => f.id)),
   );
+  // People's replies on the earlier findings' threads (finding-replies.ts): Claude may accept a
+  // reasonable one or push back once. A failure costs the replies only.
+  if (prior && prior.findings.length > 0) {
+    prior.findings = await attachFindingThreads(ctx, item.accountId, item.prId, prior.findings);
+  }
   const plan: FollowUpPlan | null =
     prior && prior.findings.length > 0 ? selectPriorFindings(prior, item.headSha) : null;
   // "What changed since that review" — ONE compare call (never throws; wrapped anyway, the
@@ -641,7 +648,12 @@ async function runPipeline(
         : res.findings.map((f) => ({ ...f, priorFindingId: null }));
     // ⚠ ENFORCED IN CODE, not only asked of the model: a new finding repeating a settled one (same
     // path, similar title) is dropped. A finding linked to a still-open earlier one is kept.
-    const { kept: findings, dropped } = dropSettledReraises(linked, settled);
+    // …and a finding repeating one whose reply THIS run accepted (follow-up.ts).
+    const { kept: notAccepted, dropped: droppedAccepted } = items
+      ? dropAcceptedReraises(linked, items, similarTitles)
+      : { kept: linked, dropped: [] };
+    const { kept: findings, dropped: droppedSettled } = dropSettledReraises(notAccepted, settled);
+    const dropped = [...droppedAccepted, ...droppedSettled];
     if (dropped.length > 0) {
       ctx.log.info(
         `claude review pr ${item.prId}: dropped ${dropped.length} finding(s) repeating a comment settled by a reply`,

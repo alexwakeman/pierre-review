@@ -800,8 +800,11 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   0071 — SQLite's DDL default is still 1, so both workspace inserts write false), the second switch on
   the same auto-review route + Settings section; skip reason `off`). A run
   also judges every OTHER open review thread (validity + addressed), and on a same-head run every
-  earlier judgement carries forward IN CODE: only new commits change one
-  (docs/CLAUDE-REVIEW.md § Other reviewers' threads, § Auto review).
+  earlier judgement carries forward IN CODE: only new commits change one. A person's REPLY on one of
+  Limn's own posted findings is judged too — accepted (settled from then on; a deferral is never
+  accepted for a blocker, enforced in code) or disputed (stays open; an auto run pushes back ONCE per
+  thread, ever) (docs/CLAUDE-REVIEW.md § Other reviewers' threads, § Replies to Limn's findings,
+  § Auto review).
 - **AUTO-POSTING IS OFF BY DEFAULT, AUTO RUNS ONLY, NEVER TWICE** (`claude-review/
   auto-post.ts`, `ticket-review/auto-post.ts`; sqlite `0087` / pg `0074`): a per-workspace switch
   (`workspaces.auto_post_enabled`, NULL = off) + overrides-only scope/kinds on the auto-review route.
@@ -1456,7 +1459,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0077` and plugin `0034`–`0037` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0079` and plugin `0034`–`0037` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

@@ -64,6 +64,10 @@ export function autoVerdictLine(
       return `${verb}: your last review on GitHub still stands.`;
     case 'reviews_unreadable':
       return `${verb}: couldn’t read your earlier reviews on GitHub.`;
+    case 'refused':
+      return a.status === 'posted' || a.status === 'partial'
+        ? `${verb}: GitHub refused it, so the comments were posted on their own.`
+        : `${verb}: GitHub refused it.`;
     default:
       return null;
   }

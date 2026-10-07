@@ -172,16 +172,20 @@ export function reviewCurrency(r: {
   };
 }
 
-/** The previous review's findings, in two figures: fixed, and still open (not or partly fixed).
- *  `not_checked` / `no_longer_applies` are neither. null when there was nothing to follow up. */
+/** The previous review's findings, in three figures: fixed, settled by a reply (accepted), and
+ *  still open (not or partly fixed, or pushed back on a reply). `not_checked` / `no_longer_applies`
+ *  are none of them. null when there was nothing to follow up. A count missing from an older
+ *  server reads as 0. */
 export function followUpTally(
-  followUp: Record<ClaudeFollowUpStatus, number> | null,
-): { fixed: number; open: number } | null {
+  followUp: Partial<Record<ClaudeFollowUpStatus, number>> | null,
+): { fixed: number; settled: number; open: number } | null {
   if (followUp == null) return null;
-  const fixed = followUp.addressed;
-  const open = followUp.not_addressed + followUp.partly_addressed;
-  if (fixed === 0 && open === 0) return null;
-  return { fixed, open };
+  const n = (k: ClaudeFollowUpStatus): number => followUp[k] ?? 0;
+  const fixed = n('addressed');
+  const settled = n('reply_accepted');
+  const open = n('not_addressed') + n('partly_addressed') + n('reply_disputed');
+  if (fixed === 0 && settled === 0 && open === 0) return null;
+  return { fixed, settled, open };
 }
 
 /**

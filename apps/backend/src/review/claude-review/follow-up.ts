@@ -24,6 +24,16 @@
 //
 // The earlier findings' text was written by an earlier model run over the same attacker-influenced
 // pull request, so prompts.ts fences it with the run's nonce like every other untrusted block.
+//
+// ⚠ REPLIES ON THE FINDING'S THREAD (finding-replies.ts). A finding whose GitHub thread has a
+// person's reply carries it (`thread.replies`), and only such a finding may get one of the two
+// REPLY statuses: 'reply_accepted' (with `acceptKind` 'not_valid' | 'deferred' and a one-sentence
+// acknowledgement) or 'reply_disputed' (with a short pushback). Enforced in CODE in
+// `reconcileFollowUp`: a reply status on a finding with no replies is treated as unreported, and a
+// 'deferred' acceptance of a BLOCKER becomes 'reply_disputed' with a templated pushback (a blocker
+// is fixed in this PR). A reply status may override a same-head lock — a reply is new evidence even
+// when the code has not moved. 'reply_disputed' is OPEN (raised again like 'not_addressed');
+// 'reply_accepted' is settled from then on (persist.ts `loadSettledByReplyFindings`).
 import type {
   ClaudeFindingSeverity,
   ClaudeFindingSide,
@@ -31,6 +41,7 @@ import type {
   ClaudeFollowUpStatus,
 } from '@pierre-review/shared';
 import type { ReviewFinding, ReviewFollowUpReport } from '../../pro/contract.js';
+import { RESPONSE_CHARS, judgeableReplies, replyExcerpt, type FindingReply } from './reply-text.js';
 
 // ---- caps (the prompt block's budget) ----
 export const PRIOR_FINDINGS_MAX = 40;
@@ -72,6 +83,20 @@ export interface PriorFindingForFollowUp {
   // A CARRIED, still-open item: the status the previous run gave it (and that run's explanation).
   // Absent for a 'not_checked' carry and for the previous review's own findings.
   priorStatus?: { status: ClaudeFollowUpStatus; explanation: string | null } | null;
+  // Its GitHub thread (finding-replies.ts), attached before selection. `replies` = the people's
+  // replies after the root (never automation, never Limn's own). Absent ⇒ no thread was found.
+  thread?: {
+    threadId: number;
+    threadFindingId: number;
+    replies: FindingReply[];
+    // Limn already posted its one pushback there.
+    pushedBack: boolean;
+  } | null;
+}
+
+/** Does this earlier finding have a person's reply to judge? */
+export function hasReplies(f: Pick<PriorFindingForFollowUp, 'thread'>): boolean {
+  return judgeableReplies(f.thread?.replies).length > 0;
 }
 
 export interface PriorReviewForFollowUp {
@@ -152,6 +177,7 @@ function promptSize(f: PriorFindingForFollowUp): number {
     Math.min(f.body.length, PRIOR_BODY_CHARS) +
     Math.min(f.diffHunk?.length ?? 0, PRIOR_HUNK_CHARS) +
     Math.min(f.suggestion?.length ?? 0, PRIOR_SUGGESTION_CHARS) +
+    (f.thread?.replies ?? []).reduce((n, r) => n + r.body.length + r.author.length + 40, 0) +
     200
   );
 }
@@ -189,7 +215,14 @@ export function selectPriorFindings(prior: PriorReviewForFollowUp, headSha: stri
       if (!f.carried && !findingHeadMoved({ headSha }, f)) {
         locked.set(f.id, { status: 'not_addressed', explanation: UNCHANGED_HEAD_EXPLANATION });
       } else if (f.carried && f.priorStatus) {
-        locked.set(f.id, { ...f.priorStatus });
+        // A carried pushback locks as plain "not addressed": its reply text is not carried, and a
+        // reply status is only ever Claude's answer about the replies in front of it.
+        locked.set(
+          f.id,
+          f.priorStatus.status === 'reply_disputed'
+            ? { status: 'not_addressed', explanation: f.priorStatus.explanation }
+            : { ...f.priorStatus },
+        );
       }
     }
   }
@@ -221,7 +254,57 @@ const REPORTABLE: ReadonlySet<ClaudeFollowUpStatus> = new Set([
   'partly_addressed',
   'not_addressed',
   'no_longer_applies',
+  'reply_accepted',
+  'reply_disputed',
 ]);
+
+export const isReplyStatus = (s: ClaudeFollowUpStatus): boolean => s === 'reply_accepted' || s === 'reply_disputed';
+
+// Templated texts, used when Claude gave none (or the server overruled it).
+export const ACCEPT_NOT_VALID_TEXT = 'Thanks for explaining. That makes sense.';
+export const ACCEPT_DEFERRED_TEXT = 'Thanks. Handling this in a follow-up works.';
+export const DISPUTE_TEXT = 'Thanks for the reply. I still think this needs changing in this pull request.';
+export const BLOCKER_DEFERRAL_TEXT =
+  'Thanks for the reply. This one is a blocker, so it should be fixed in this pull request rather than later.';
+
+function clipResponse(s: unknown): string | null {
+  if (typeof s !== 'string') return null;
+  const t = s.replace(/\s+/g, ' ').trim();
+  if (!t) return null;
+  return t.length > RESPONSE_CHARS ? `${t.slice(0, RESPONSE_CHARS)}…` : t;
+}
+
+/**
+ * THE SERVER GATE over a reply status (the model is never trusted with it). null ⇒ treat as
+ * unreported: the finding has no reply to judge, or an acceptance named no valid kind.
+ *   - 'reply_accepted' + 'deferred' on a BLOCKER ⇒ 'reply_disputed' with BLOCKER_DEFERRAL_TEXT;
+ *   - 'reply_accepted' + 'not_valid' is accepted at any severity;
+ *   - the posted text is Claude's, clipped, else a templated one.
+ */
+export function judgeReplyReport(
+  f: Pick<PriorFindingForFollowUp, 'severity' | 'thread'>,
+  r: Pick<ReviewFollowUpReport, 'status' | 'acceptKind' | 'reply'>,
+): Pick<ClaudeFollowUpItemRecord, 'status' | 'acceptKind' | 'response' | 'reply' | 'deferralRefused'> | null {
+  if (!isReplyStatus(r.status) || !hasReplies(f)) return null;
+  const people = judgeableReplies(f.thread!.replies);
+  const last = people[people.length - 1]!;
+  const reply = replyExcerpt(last);
+  const text = clipResponse(r.reply);
+  if (r.status === 'reply_accepted') {
+    const kind = r.acceptKind === 'not_valid' || r.acceptKind === 'deferred' ? r.acceptKind : null;
+    if (kind == null) return null;
+    if (kind === 'deferred' && f.severity === 'blocker') {
+      return { status: 'reply_disputed', acceptKind: null, response: BLOCKER_DEFERRAL_TEXT, reply, deferralRefused: true };
+    }
+    return {
+      status: 'reply_accepted',
+      acceptKind: kind,
+      response: text ?? (kind === 'deferred' ? ACCEPT_DEFERRED_TEXT : ACCEPT_NOT_VALID_TEXT),
+      reply,
+    };
+  }
+  return { status: 'reply_disputed', acceptKind: null, response: text ?? DISPUTE_TEXT, reply };
+}
 
 function clipExplanation(s: unknown): string | null {
   if (typeof s !== 'string') return null;
@@ -238,8 +321,10 @@ function recordFor(
   status: ClaudeFollowUpStatus,
   explanation: string | null,
   statusCarried = false,
+  extra: Partial<ClaudeFollowUpItemRecord> = {},
 ): ClaudeFollowUpItemRecord {
   return {
+    ...extra,
     ref,
     priorFindingId: f.id,
     sent,
@@ -254,6 +339,7 @@ function recordFor(
     headMoved: findingHeadMoved(plan, f),
     priorPosted: f.posted,
     ...(statusCarried ? { statusCarried: true } : {}),
+    ...(f.thread ? { threadId: f.thread.threadId, threadFindingId: f.thread.threadFindingId } : {}),
   };
 }
 
@@ -268,19 +354,36 @@ export function reconcileFollowUp(
   reported: ReadonlyArray<ReviewFollowUpReport> | undefined,
 ): ClaudeFollowUpItemRecord[] {
   const known = new Set(plan.sent.map((s) => s.ref));
-  const byRef = new Map<string, { status: ClaudeFollowUpStatus; explanation: string | null }>();
+  const byRef = new Map<string, { status: ClaudeFollowUpStatus; explanation: string | null; raw: ReviewFollowUpReport }>();
   for (const r of reported ?? []) {
     if (!r || typeof r.ref !== 'string') continue;
     const ref = r.ref.trim().toUpperCase();
     if (!known.has(ref) || byRef.has(ref)) continue;
     if (!REPORTABLE.has(r.status)) continue;
-    byRef.set(ref, { status: r.status, explanation: clipExplanation(r.explanation) });
+    byRef.set(ref, { status: r.status, explanation: clipExplanation(r.explanation), raw: r });
   }
   const locked = plan.locked ?? new Map();
   const out: ClaudeFollowUpItemRecord[] = [];
   for (const { ref, finding } of plan.sent) {
-    const hit = byRef.get(ref);
+    let hit = byRef.get(ref);
     const lock = locked.get(finding.id);
+    // ⚠ THE REPLY GATE (in code): a reply status is Claude's answer about the replies shown, so it
+    // stands only on a finding that had some, and may override a same-head lock.
+    if (hit && isReplyStatus(hit.status)) {
+      const judged = judgeReplyReport(finding, hit.raw);
+      if (judged) {
+        out.push(
+          recordFor(plan, finding, ref, true, judged.status, hit.explanation, false, {
+            ...(judged.acceptKind ? { acceptKind: judged.acceptKind } : {}),
+            response: judged.response ?? null,
+            reply: judged.reply ?? null,
+            ...(judged.deferralRefused ? { deferralRefused: true } : {}),
+          }),
+        );
+        continue;
+      }
+      hit = undefined;
+    }
     if (lock) {
       // The code decides; Claude's words are kept only when it agreed.
       const explanation = hit && hit.status === lock.status && hit.explanation ? hit.explanation : lock.explanation;
@@ -311,7 +414,34 @@ export type LinkedFinding = ReviewFinding & {
   included?: boolean;
 };
 
-const REOPEN: ReadonlySet<ClaudeFollowUpStatus> = new Set(['not_addressed', 'partly_addressed']);
+// A pushback ('reply_disputed') is open exactly like 'not_addressed': raised again, counted in the
+// auto verdict at its severity.
+const REOPEN: ReadonlySet<ClaudeFollowUpStatus> = new Set(['not_addressed', 'partly_addressed', 'reply_disputed']);
+
+/**
+ * Drop this run's findings that repeat an earlier finding this SAME run accepted a reply on: one
+ * whose `priorRef` names it, or (unlinked) the same path with a similar title. Later runs drop them
+ * through the settled list (persist.ts `loadSettledByReplyFindings`).
+ */
+export function dropAcceptedReraises<F extends { path: string; title: string; priorRef?: string | null; priorFindingId?: number | null }>(
+  findings: readonly F[],
+  items: ReadonlyArray<ClaudeFollowUpItemRecord>,
+  similar: (a: string, b: string) => boolean,
+): { kept: F[]; dropped: F[] } {
+  const accepted = items.filter((it) => it.status === 'reply_accepted');
+  if (accepted.length === 0) return { kept: [...findings], dropped: [] };
+  const refs = new Set(accepted.map((it) => it.ref).filter((r): r is string => r != null));
+  const kept: F[] = [];
+  const dropped: F[] = [];
+  for (const f of findings) {
+    const ref = typeof f.priorRef === 'string' ? f.priorRef.trim().toUpperCase() : '';
+    const repeats =
+      f.priorFindingId == null &&
+      ((ref !== '' && refs.has(ref)) || accepted.some((it) => it.path === f.path && similar(it.title, f.title)));
+    (repeats ? dropped : kept).push(f);
+  }
+  return { kept, dropped };
+}
 
 /**
  * A re-raise of this earlier finding would repeat a comment ALREADY ON THIS COMMIT: it was posted,
@@ -384,7 +514,9 @@ export function linkReraisedFindings(
     const lead =
       it.status === 'partly_addressed'
         ? `Raised in ${where} and only partly addressed.`
-        : `Raised in ${where} and not addressed yet.`;
+        : it.status === 'reply_disputed'
+          ? `Raised in ${where}; the reply on GitHub did not settle it.`
+          : `Raised in ${where} and not addressed yet.`;
     const body = `${lead}${it.explanation ? ` ${it.explanation}` : ''}\n\n${prior.body}`;
     out.push({
       path: prior.path,

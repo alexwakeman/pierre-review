@@ -139,8 +139,18 @@ describe('templated sentences', () => {
       partly: 1,
       notAddressed: 0,
       noLongerApplies: 0,
+      replyAccepted: 0,
+      replyDisputed: 0,
       notChecked: 1,
     });
+  });
+
+  it('followUpCounts + followUpSentence count the reply statuses', () => {
+    const fu = items('addressed', 'reply_accepted', 'reply_disputed');
+    expect(followUpCounts(fu.items)).toMatchObject({ replyAccepted: 1, replyDisputed: 1, notChecked: 0 });
+    expect(followUpSentence(fu)).toBe(
+      "Last review's 3 comments: 1 addressed, 1 settled by a reply, 1 pushed back on.",
+    );
   });
 
   it('ticketCriteriaSentence', () => {

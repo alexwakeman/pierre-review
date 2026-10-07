@@ -247,6 +247,29 @@ export function usePostFinding(prId: number) {
   });
 }
 
+// "Post reply" on a previous-review reply status (an accepted reply is answered AND resolved). The
+// mutation key is per (review, item) and SHARED, so a remount mid-post still reads it as pending;
+// a 409 (already posted, by a click or an auto run) refetches the review so the row says so.
+export const followUpReplyMutationKey = (reviewId: number, priorFindingId: number) =>
+  ['follow-up-reply', reviewId, priorFindingId] as const;
+
+export function usePostFollowUpReply(prId: number, reviewId: number, priorFindingId: number) {
+  const qc = useQueryClient();
+  const refresh = (): void => {
+    void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
+    void qc.invalidateQueries({ queryKey: ['claude-review-by-id', reviewId] });
+  };
+  return useMutation({
+    mutationKey: followUpReplyMutationKey(reviewId, priorFindingId),
+    mutationFn: () => api.postFollowUpReply(reviewId, priorFindingId),
+    onSuccess: () => {
+      refresh();
+      void invalidateAfterPrWrite(qc, prId);
+    },
+    onError: refresh,
+  });
+}
+
 export function useCancelReview(prId: number) {
   const qc = useQueryClient();
   return useMutation({

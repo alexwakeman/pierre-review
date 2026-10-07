@@ -23,6 +23,10 @@
 // ⚠ A FINDING FIXED IN CODE IS NOT SETTLED EITHER — rule 4 hands it to the follow-up, whose
 // "addressed" verdict is the existing path.
 //
+// ⚠ A SECOND RULE settles a finding too: an earlier review ACCEPTED a reply on its thread
+// (`acceptedReplyFindings`, follow-up status 'reply_accepted' — the thread may still be open). Both
+// feed the SAME list, so everything below applies to it unchanged.
+//
 // What happens to a settled finding: it leaves the follow-up (never sent as a P item, never stored
 // on the follow-up record, never in the pane's "Previous review" list), the prompt lists it in a
 // fenced block the model is told not to raise again, and a new finding that repeats it
@@ -68,6 +72,46 @@ export interface SettledFinding {
   title: string;
   replyAuthor: string;
   reply: string;
+  // Set when a REVIEW accepted the reply (follow-up status 'reply_accepted'), not the
+  // resolved-with-no-code-change rule: how it was accepted.
+  acceptKind?: 'not_valid' | 'deferred' | null;
+}
+
+/** An earlier run's follow-up item, as `acceptedReplyFindings` reads it. */
+export interface AcceptedItemLike {
+  priorFindingId: number;
+  status: string;
+  path: string;
+  title: string;
+  acceptKind?: 'not_valid' | 'deferred' | null;
+  reply?: { author: string; excerpt: string } | null;
+}
+
+/**
+ * The SECOND way a finding is settled: an earlier review ACCEPTED a person's reply on its thread
+ * (`reply_accepted`). Only for findings in `eligibleIds` (this PR's own, posted). Settled from then
+ * on — ⚠ a NEW reply or new commits do NOT unsettle it (kept simple on purpose: the author was told
+ * it was accepted, and re-opening it would contradict the acknowledgement on GitHub).
+ */
+export function acceptedReplyFindings(
+  items: readonly AcceptedItemLike[],
+  eligibleIds: ReadonlySet<number>,
+): SettledFinding[] {
+  const out: SettledFinding[] = [];
+  const seen = new Set<number>();
+  for (const it of items) {
+    if (it.status !== 'reply_accepted' || !eligibleIds.has(it.priorFindingId) || seen.has(it.priorFindingId)) continue;
+    seen.add(it.priorFindingId);
+    out.push({
+      id: it.priorFindingId,
+      path: it.path,
+      title: it.title,
+      replyAuthor: it.reply?.author ?? 'unknown',
+      reply: it.reply?.excerpt ?? '',
+      acceptKind: it.acceptKind ?? null,
+    });
+  }
+  return out;
 }
 
 const norm = (s: string): string => s.replace(/\r\n?/g, '\n').trim();

@@ -21,7 +21,7 @@
 //  - Chips are 11px or larger, sentences 12px or larger, no uppercase-with-tracking labels, and
 //    every muted colour is paired for both themes (`textContrast.test.ts`).
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useIsMutating, useQueryClient } from '@tanstack/react-query';
 import {
   CLAUDE_REVIEW_MAX_TICKETS,
   FOLLOW_UP_STATUS_LABEL,
@@ -45,6 +45,8 @@ import type {
   TicketRef,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+import { useResolveThread } from '../hooks/usePrWrites.js';
+import { followUpReplyMutationKey, usePostFollowUpReply } from '../hooks/useClaudeReview.js';
 import {
   acCandidateLabel,
   browserAcMemory,
@@ -83,6 +85,8 @@ import {
   isJiraDraft,
   notCheckedReason,
   partitionFollowUp,
+  replyActions,
+  replyStatusHeading,
   storyFindingIdFor,
   storyItemChipLabel,
   ticketsPanelHint,
@@ -109,9 +113,11 @@ const SEVERITY_WORD: Record<ClaudeFindingSeverity, string> = {
 // The Previous review header's pills: still-open statuses first.
 const FOLLOW_UP_PILL_ORDER: ClaudeFollowUpStatus[] = [
   'not_addressed',
+  'reply_disputed',
   'partly_addressed',
   'not_checked',
   'addressed',
+  'reply_accepted',
   'no_longer_applies',
 ];
 
@@ -1156,6 +1162,83 @@ export function ClaudeReviewTicketResults({
 
 // ---- (c) the previous review ----
 
+/**
+ * A reply status's block: who replied (a short excerpt, plain text), what Limn says back, and what
+ * was posted — or, when nothing was, the text as a draft with "Post reply" ("Reply and resolve" for
+ * an accepted reply). The server builds the body and claims the thread's record before writing, so
+ * a second click, a remount or an auto run that got there first can never post it twice.
+ */
+function ReplyBlock({
+  item,
+  prId,
+  reviewId,
+}: {
+  item: ClaudeFollowUpItem;
+  prId?: number;
+  reviewId?: number;
+}): JSX.Element | null {
+  const post = usePostFollowUpReply(prId ?? 0, reviewId ?? 0, item.priorFindingId);
+  // Shared key: a remount mid-post still sees the post in flight.
+  const posting = useIsMutating({ mutationKey: followUpReplyMutationKey(reviewId ?? 0, item.priorFindingId) }) > 0;
+  const resolve = useResolveThread();
+  const heading = replyStatusHeading(item);
+  if (heading == null) return null;
+  const actions = replyActions(item, reviewId ?? 0);
+  const threadId = item.threadId ?? null;
+  const posted = post.isSuccess;
+  const resolved = resolve.isSuccess;
+  const canWrite = prId != null && reviewId != null && threadId != null;
+  const error = post.error ?? resolve.error;
+  const accepted = item.status === 'reply_accepted';
+  return (
+    <div className="mt-1 space-y-1">
+      {item.reply != null && (
+        <p className={`text-xs ${MUTED}`}>
+          @{item.reply.author} replied: “{item.reply.excerpt}”
+        </p>
+      )}
+      {item.deferralRefused === true && (
+        <p className={`text-xs ${MUTED}`}>A blocker can’t wait for a later change.</p>
+      )}
+      {actions.showText && item.response != null && item.response !== '' && (
+        <p className={REVIEW_PROSE}>
+          <span className={MUTED}>{actions.note == null && !posted ? 'Draft reply: ' : 'Reply: '}</span>
+          {item.response}
+        </p>
+      )}
+      {actions.note != null && !posted && <p className={`text-xs ${MUTED}`}>{actions.note}</p>}
+      {canWrite && (actions.canPost || actions.canResolve || posted) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {actions.canPost && !posted && (
+            <button type="button" className={BTN} disabled={posting} onClick={() => post.mutate()}>
+              {posting ? 'Posting…' : accepted ? 'Reply and resolve' : 'Post reply'}
+            </button>
+          )}
+          {posted && (
+            <span className={`text-xs ${MUTED}`}>
+              {post.data?.status === 'resolved' ? 'Replied and resolved.' : 'Reply posted.'}
+            </span>
+          )}
+          {actions.canResolve && !resolved && !posted && (
+            <button
+              type="button"
+              className={BTN}
+              disabled={resolve.isPending || posting}
+              onClick={() => resolve.mutate({ prId: prId!, threadId: threadId!, resolved: true })}
+            >
+              {resolve.isPending ? 'Resolving…' : 'Resolve'}
+            </button>
+          )}
+          {resolved && <span className={`text-xs ${MUTED}`}>Resolved.</span>}
+        </div>
+      )}
+      {error != null && (
+        <p className={`text-xs ${ERROR_TEXT}`}>{error instanceof Error ? error.message : String(error)}</p>
+      )}
+    </div>
+  );
+}
+
 function FollowUpRow({
   item,
   muted,
@@ -1163,6 +1246,8 @@ function FollowUpRow({
   headMoved,
   changedPaths,
   onOpenInChanges,
+  prId,
+  reviewId,
 }: {
   item: ClaudeFollowUpItem;
   muted: boolean;
@@ -1170,10 +1255,13 @@ function FollowUpRow({
   headMoved: boolean;
   changedPaths: ReadonlySet<string>;
   onOpenInChanges?: OpenInChanges;
+  prId?: number;
+  reviewId?: number;
 }): JSX.Element {
+  const replyHeading = replyStatusHeading(item);
   const anchor = followUpAnchor(item, findingsById, headMoved, changedPaths);
   const border =
-    item.status === 'not_addressed' || item.status === 'partly_addressed'
+    item.status === 'not_addressed' || item.status === 'partly_addressed' || item.status === 'reply_disputed'
       ? 'border-amber-300 dark:border-amber-700/60'
       : 'border-gray-100 dark:border-gray-800';
   const reraised =
@@ -1184,7 +1272,7 @@ function FollowUpRow({
     <li className={`rounded border px-3 py-2 text-sm ${border}`}>
       <div className="flex flex-wrap items-center gap-2">
         <span className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS[item.status]}`}>
-          {FOLLOW_UP_STATUS_LABEL[item.status]}
+          {replyHeading ?? FOLLOW_UP_STATUS_LABEL[item.status]}
         </span>
         <span className={`${CHIP} ${SEVERITY_CLASS[item.severity]}`}>
           {SEVERITY_WORD[item.severity]}
@@ -1212,6 +1300,7 @@ function FollowUpRow({
       ) : item.status === 'not_checked' ? (
         <p className={`mt-1 text-xs ${MUTED}`}>{notCheckedReason(item)}</p>
       ) : null}
+      <ReplyBlock item={item} prId={prId} reviewId={reviewId} />
       {reraised != null && (
         <button
           type="button"
@@ -1240,12 +1329,17 @@ export function ClaudeReviewFollowUpSection({
   findings,
   changedPaths,
   onOpenInChanges,
+  prId,
+  reviewId,
 }: {
   followUp: ClaudeReviewFollowUp;
   // This run's findings, to resolve each re-raised comment's CURRENT anchor.
   findings: readonly ClaudeFinding[];
   changedPaths: ReadonlySet<string>;
   onOpenInChanges?: OpenInChanges;
+  // The PR and the review, for "Post reply" / "Resolve" on a reply status (absent ⇒ no buttons).
+  prId?: number;
+  reviewId?: number;
 }): JSX.Element | null {
   const [closedOpen, setClosedOpen] = useState(false);
   const findingsById = useMemo(() => new Map(findings.map((f) => [f.id, f])), [findings]);
@@ -1256,6 +1350,8 @@ export function ClaudeReviewFollowUpSection({
     headMoved: followUp.headMoved,
     changedPaths,
     onOpenInChanges,
+    prId,
+    reviewId,
   };
   return (
     <ReviewSection
@@ -1292,7 +1388,7 @@ export function ClaudeReviewFollowUpSection({
             className={`inline-flex items-center gap-1 text-xs ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
           >
             <ChevronIcon dir={closedOpen ? 'down' : 'right'} size={11} />
-            Addressed or no longer applies ({closed.length})
+            Addressed, settled or no longer applies ({closed.length})
           </button>
           {closedOpen && (
             <ul className="mt-1.5 space-y-1.5">
