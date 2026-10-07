@@ -223,6 +223,7 @@ export async function loadPrThreads(
       githubNodeId: t.reviewThreads.githubNodeId,
       path: t.reviewThreads.path,
       isResolved: t.reviewThreads.isResolved,
+      resolvedByLogin: t.reviewThreads.resolvedByLogin,
     })
     .from(t.reviewThreads)
     .where(eq(t.reviewThreads.prId, prId))
@@ -272,6 +273,8 @@ export interface FindingThreadContext {
   // The finding row that owns the thread (where auto resolve / the pushback are recorded).
   threadFindingId: number;
   isResolved: boolean;
+  // Who resolved it, when the sync recorded it (null = unresolved or not known).
+  resolvedBy: string | null;
   replies: FindingReply[];
   // Limn already posted its one pushback here (a record on the owner row, or the marker on GitHub).
   pushedBack: boolean;
@@ -317,6 +320,7 @@ export async function loadFindingThreadContexts(
           threadNodeId: (thread as ThreadRow).githubNodeId,
           threadFindingId: owner.id,
           isResolved: !!thread.isResolved,
+          resolvedBy: thread.isResolved ? (thread.resolvedByLogin ?? null) : null,
           replies: humanReplies(list, accountLogin),
           pushedBack: pushbackMayBePosted(owner.pushback) || threadHasPushback(list, accountLogin),
         });
@@ -345,7 +349,17 @@ export async function accountLoginOf(ctx: AgentContext, accountId: number): Prom
  * costs the replies only, never the review: the findings are then followed up as before.
  */
 export async function attachFindingThreads<
-  F extends { id: number; thread?: { threadId: number; threadFindingId: number; replies: FindingReply[]; pushedBack: boolean } | null },
+  F extends {
+    id: number;
+    thread?: {
+      threadId: number;
+      threadFindingId: number;
+      replies: FindingReply[];
+      pushedBack: boolean;
+      isResolved?: boolean;
+      resolvedBy?: string | null;
+    } | null;
+  },
 >(ctx: AgentContext, accountId: number, prId: number, findings: F[]): Promise<F[]> {
   if (findings.length === 0) return findings;
   try {
@@ -360,7 +374,17 @@ export async function attachFindingThreads<
     return findings.map((f) => {
       const t = byId.get(f.id);
       return t
-        ? { ...f, thread: { threadId: t.threadId, threadFindingId: t.threadFindingId, replies: t.replies, pushedBack: t.pushedBack } }
+        ? {
+            ...f,
+            thread: {
+              threadId: t.threadId,
+              threadFindingId: t.threadFindingId,
+              replies: t.replies,
+              pushedBack: t.pushedBack,
+              isResolved: t.isResolved,
+              resolvedBy: t.resolvedBy,
+            },
+          }
         : f;
     });
   } catch (err) {

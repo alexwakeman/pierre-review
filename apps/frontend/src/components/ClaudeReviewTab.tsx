@@ -96,6 +96,7 @@ import {
   storyChipLabel,
   VERDICT_CLASS,
   withoutPraise,
+  settledEarlierRows,
   type ReraisedStatus,
 } from '../lib/claudeReviewFollowUp.js';
 
@@ -1174,6 +1175,9 @@ function ClaudesReview({
   // TEMPLATED from the server-validated statuses (a code-derived figure) — Claude's own
   // explanations are shown per comment in the Previous review section.
   const followUpLine = followUpSentence(review.followUp);
+  // Findings an EARLIER review settled by accepting a reply (server-derived): shown in the closed
+  // group of Previous review, so the reader sees what was dismissed and by whom.
+  const settledEarlier = useMemo(() => settledEarlierRows(review), [review]);
   // Pin blob links to the reviewed commit so line numbers stay correct; fall back
   // to the PR's current head when the run didn't record a SHA.
   const headSha = review.headSha ?? prHeadSha;
@@ -1255,9 +1259,10 @@ function ClaudesReview({
         {followUpLine != null && <div className="font-medium">{followUpLine}</div>}
         {review.summary != null && review.summary !== '' && <Markdown prRefs>{review.summary}</Markdown>}
       </ReviewSection>
-      {review.followUp != null && (
+      {(review.followUp != null || settledEarlier.length > 0) && (
         <ClaudeReviewFollowUpSection
-          followUp={review.followUp}
+          followUp={review.followUp ?? null}
+          settledEarlier={settledEarlier}
           findings={review.findings}
           changedPaths={changedPaths}
           onOpenInChanges={onOpenInChanges}

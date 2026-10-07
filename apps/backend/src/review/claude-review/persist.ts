@@ -31,19 +31,16 @@ import type {
 } from '@pierre-review/shared';
 import { CLAUDE_FINDING_LENSES, threadAssessmentCounts } from '@pierre-review/shared';
 import { storedList, stripStoredStoryLead } from '@pierre-review/shared';
-import type { FindingAutoResolveRecord, FindingPushbackRecord } from '@pierre-review/shared';
+import type { ClaudeSettledFinding, FindingAutoResolveRecord, FindingPushbackRecord } from '@pierre-review/shared';
 import type { ReviewFinding } from '../../pro/contract.js';
 import { ticketEntriesOf } from './ticket.js';
 import { findFindingThread, type ThreadComment } from './finding-thread.js';
 import {
   acceptedReplyFindings,
-  settledFindings,
-  type SettleCommit,
+  unjudgedReplyCandidateIds,
+  type AcceptedItemLike,
   type SettledFinding,
-  type SettleFinding,
-  type SettleThread,
 } from './settled-by-reply.js';
-import { automationVendorFor, isLikelyBot } from '../../sync/bot-detection.js';
 import type { AgentContext } from '../agent-context.js';
 import {
   isFollowUpEligible,
@@ -385,7 +382,38 @@ export async function getClaudeReviewById(
   const threadIds = await postedFindingThreadIds(ctx, row.prId, accountId, findings);
   const review = mapReview(row, findings, head, threadIds);
   if (review.followUp) review.followUp = await withThreadState(ctx, row.prId, review.followUp);
+  if (row.status === 'succeeded') review.settledEarlier = await settledEarlierFor(ctx, row.prId, accountId, row.id, review.followUp ?? null);
   return review;
+}
+
+/**
+ * DERIVED on read: the findings an EARLIER review settled by accepting a reply, which therefore
+ * left this run's follow-up (`ClaudeReview.settledEarlier`). The same loader the run uses
+ * (`loadSettledByReplyFindings`), so the pane and the prompt name the same findings. DB-only, no
+ * model call. An id this run's own follow-up still lists is left out (it shows there).
+ */
+async function settledEarlierFor(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+  reviewId: number,
+  fu: ClaudeReviewFollowUp | null,
+): Promise<ClaudeSettledFinding[]> {
+  const settled = await loadSettledByReplyFindings(ctx, prId, accountId, reviewId);
+  const listed = new Set((fu?.items ?? []).map((it) => it.priorFindingId));
+  return settled
+    .filter((f) => !listed.has(f.id) && f.severity !== 'praise')
+    .map((f) => ({
+      priorFindingId: f.id,
+      path: f.path,
+      line: f.line ?? null,
+      ...(f.side ? { side: f.side } : {}),
+      ...(f.severity ? { severity: f.severity } : {}),
+      title: f.title,
+      acceptKind: f.acceptKind ?? null,
+      reply: f.replyAuthor !== 'unknown' || f.reply !== '' ? { author: f.replyAuthor, excerpt: f.reply } : null,
+      acceptedInReviewId: f.acceptedInReviewId ?? null,
+    }));
 }
 
 /**
@@ -1163,8 +1191,8 @@ export async function getReviewPeerContexts(
  * load-bearing — pre-routing rows have no mode, and a bare `<>` drops NULL rows in SQL.
  *
  * Its findings are kept when eligible (`isFollowUpEligible`: POSTED to GitHub and not praise),
- * and not SETTLED BY A REPLY (`settledIds`, settled-by-reply.ts — answered on GitHub by someone
- * else and resolved with no code change),
+ * and not SETTLED BY A REPLY (`settledIds`, settled-by-reply.ts — an earlier review accepted a
+ * person's reply on its thread),
  * with the body the user saw. A finding that was ignored, left unposted or only copied never enters
  * the follow-up — not the prompt, not the stored record, not the counts. CARRY-FORWARD re-loads two kinds of OLDER finding named by
  * that run's follow-up items — the ids come only from our own stored JSON and are re-scoped to this
@@ -1289,13 +1317,71 @@ export async function loadPriorReviewForFollowUp(
 
 // ---- Earlier findings settled by a reply (settled-by-reply.ts) ----
 
+type EarlierFindingRow = Pick<FindingRow, 'id' | 'postedAt' | 'severity'> & {
+  priorFindingId: number | null;
+  storyRef: string | null;
+};
+
+/** Every earlier succeeded run of this PR (id below `beforeReviewId`): its findings + follow-up. */
+async function loadEarlierRuns(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+  beforeReviewId: number,
+): Promise<{
+  findings: EarlierFindingRow[];
+  items: AcceptedItemLike[];
+}> {
+  const { cr, crf, prs, repos } = tables(ctx);
+  const scope = and(
+    eq(cr.prId, prId),
+    eq(repos.accountId, accountId),
+    eq(cr.status, 'succeeded'),
+    lt(cr.id, beforeReviewId),
+  );
+  const [rows, followUpRows] = await Promise.all([
+    // Only what eligibility and the chain need — this runs on every review read.
+    ctx.db
+      .select({
+        id: crf.id,
+        priorFindingId: crf.priorFindingId,
+        postedAt: crf.postedAt,
+        severity: crf.severity,
+        storyRef: crf.storyRef,
+      })
+      .from(crf)
+      .innerJoin(cr, eq(cr.id, crf.reviewId))
+      .innerJoin(prs, eq(prs.id, cr.prId))
+      .innerJoin(repos, eq(repos.id, prs.repoId))
+      .where(scope)
+      .orderBy(asc(crf.id))
+      .execute() as Promise<EarlierFindingRow[]>,
+    ctx.db
+      .select({ id: cr.id, followUp: cr.followUp })
+      .from(cr)
+      .innerJoin(prs, eq(prs.id, cr.prId))
+      .innerJoin(repos, eq(repos.id, prs.repoId))
+      .where(scope)
+      .orderBy(asc(cr.id))
+      .execute() as Promise<Array<{ id: number; followUp: ClaudeReviewFollowUpRecord | null }>>,
+  ]);
+  return {
+    findings: rows,
+    // Oldest run first; each item tagged with the run whose follow-up it is.
+    items: followUpRows.flatMap((r) => (r.followUp?.items ?? []).map((it) => ({ ...it, reviewId: r.id }))),
+  };
+}
+
 /**
- * Every posted finding of an EARLIER succeeded review of this PR (id below `beforeReviewId`) that
- * someone answered on GitHub and that was resolved without a code change — the pure rule is
- * settled-by-reply.ts `settledFindings`; this only reads the synced rows it needs. Account-scoped
- * through the repos join (a foreign PR reads as none). EVERY earlier review, not only the previous
- * one: a settled finding leaves the follow-up chain, so a later run would otherwise never hear of
- * it again and could raise it as new.
+ * Every posted finding of an EARLIER succeeded review of this PR (id below `beforeReviewId`) that a
+ * review SETTLED by accepting a person's reply on its thread (follow-up status 'reply_accepted') —
+ * the pure rule is settled-by-reply.ts `acceptedReplyFindings`. Account-scoped through the repos
+ * join (a foreign PR reads as none). EVERY earlier review, not only the previous one: a settled
+ * finding leaves the follow-up chain, so a later run would otherwise never hear of it again and
+ * could raise it as new.
+ * ⚠ The retired "resolved after a reply ⇒ settled on sight" rule is GONE: such a thread is judged
+ * (settled-by-reply.ts header). Read by the run (manager.ts) AND by the review read
+ * (`ClaudeReview.settledEarlier`).
  */
 export async function loadSettledByReplyFindings(
   ctx: AgentContext,
@@ -1303,164 +1389,61 @@ export async function loadSettledByReplyFindings(
   accountId: number,
   beforeReviewId: number,
 ): Promise<SettledFinding[]> {
+  const { findings, items } = await loadEarlierRuns(ctx, prId, accountId, beforeReviewId);
+  const eligible = new Set(findings.filter(isFollowUpEligible).map((f) => f.id));
+  if (eligible.size === 0) return [];
+  return acceptedReplyFindings(items, eligible);
+}
+
+/**
+ * BACKWARD COMPATIBILITY for the retired settle-on-sight rule: earlier posted findings that left
+ * the follow-up chain without a closing status (settled-by-reply.ts `unjudgedReplyCandidateIds`),
+ * loaded as CARRIED follow-up findings (each with the head of the review that raised it). The
+ * manager attaches their threads and keeps only the ones RESOLVED WITH A REPLY, so they are judged
+ * once like any other; the rest are dropped. `exclude` = what this run's follow-up already holds,
+ * plus the settled ones. Account-scoped like the loaders above.
+ */
+export async function loadUnjudgedReplyFindings(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+  beforeReviewId: number,
+  exclude: ReadonlySet<number>,
+): Promise<PriorFindingForFollowUp[]> {
   const { cr, crf, prs, repos } = tables(ctx);
-  const s = ctx.schema as any;
+  const { findings, items } = await loadEarlierRuns(ctx, prId, accountId, beforeReviewId);
+  const ids = unjudgedReplyCandidateIds(
+    findings.map((f) => ({ id: f.id, priorFindingId: f.priorFindingId ?? null, eligible: isFollowUpEligible(f) })),
+    items,
+    exclude,
+  );
+  if (ids.length === 0) return [];
   const rows = (await ctx.db
-    .select({ finding: crf })
+    .select({ finding: crf, headSha: cr.headSha })
     .from(crf)
     .innerJoin(cr, eq(cr.id, crf.reviewId))
     .innerJoin(prs, eq(prs.id, cr.prId))
     .innerJoin(repos, eq(repos.id, prs.repoId))
-    .where(
-      and(
-        eq(cr.prId, prId),
-        eq(repos.accountId, accountId),
-        eq(cr.status, 'succeeded'),
-        lt(cr.id, beforeReviewId),
-      ),
-    )
+    .where(and(inArray(crf.id, ids), eq(cr.prId, prId), eq(repos.accountId, accountId)))
     .orderBy(asc(crf.id))
-    .execute()) as Array<{ finding: FindingRow }>;
-  const eligible = rows.map((r) => r.finding).filter(isFollowUpEligible);
-  // The SECOND rule: an earlier review accepted a person's reply on the finding's thread.
-  const followUpRows = (await ctx.db
-    .select({ followUp: cr.followUp })
-    .from(cr)
-    .innerJoin(prs, eq(prs.id, cr.prId))
-    .innerJoin(repos, eq(repos.id, prs.repoId))
-    .where(and(eq(cr.prId, prId), eq(repos.accountId, accountId), eq(cr.status, 'succeeded'), lt(cr.id, beforeReviewId)))
-    .orderBy(asc(cr.id))
-    .execute()) as Array<{ followUp: ClaudeReviewFollowUpRecord | null }>;
-  const accepted = acceptedReplyFindings(
-    followUpRows.flatMap((r) => r.followUp?.items ?? []),
-    new Set(eligible.map((f) => f.id)),
-  );
-  const withAccepted = (byRule: SettledFinding[]): SettledFinding[] => {
-    const ids = new Set(byRule.map((f) => f.id));
-    return [...byRule, ...accepted.filter((f) => !ids.has(f.id))];
-  };
-  const findings: SettleFinding[] = eligible
-    .map((f) => ({
-      id: f.id,
-      path: f.path,
-      title: f.title,
-      body: resolveFindingBody(f),
-      githubCommentId: f.githubCommentId,
-    }));
-  if (findings.length === 0) return [];
-
-  const { reviewThreads: rt, reviewComments: rc, users, commits, commitFiles, accounts } = s;
-  return withAccepted(await settledByResolvedReply(ctx, prId, accountId, findings, { rt, rc, users, commits, commitFiles, accounts }));
-}
-
-async function settledByResolvedReply(
-  ctx: AgentContext,
-  prId: number,
-  accountId: number,
-  findings: SettleFinding[],
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  { rt, rc, users, commits, commitFiles, accounts }: Record<string, any>,
-): Promise<SettledFinding[]> {
-  const [commentRows, commitRows, accountRows] = await Promise.all([
-    ctx.db
-      .select({
-        threadId: rt.id,
-        path: rt.path,
-        isResolved: rt.isResolved,
-        derivedState: rt.derivedState,
-        isOutdated: rt.isOutdated,
-        commentId: rc.id,
-        body: rc.body,
-        excerpt: rc.excerpt,
-        databaseId: rc.databaseId,
-        createdAt: rc.createdAt,
-        authorLogin: users.githubLogin,
-        authorIsBot: users.isBot,
-        authorType: users.githubType,
-      })
-      .from(rt)
-      .innerJoin(rc, eq(rc.threadId, rt.id))
-      .leftJoin(users, eq(users.id, rc.authorId))
-      .where(eq(rt.prId, prId))
-      .execute() as Promise<
-      Array<{
-        threadId: number;
-        path: string;
-        isResolved: boolean;
-        derivedState: string;
-        isOutdated: boolean;
-        commentId: number;
-        body: string | null;
-        excerpt: string | null;
-        databaseId: string | null;
-        createdAt: Date;
-        authorLogin: string | null;
-        authorIsBot: boolean | null;
-        authorType: string | null;
-      }>
-    >,
-    ctx.db
-      .select({ sha: commits.sha, committedAt: commits.committedAt })
-      .from(commits)
-      .where(eq(commits.prId, prId))
-      .execute() as Promise<Array<{ sha: string; committedAt: Date }>>,
-    ctx.db
-      .select({ login: accounts.githubLogin })
-      .from(accounts)
-      .where(eq(accounts.id, accountId))
-      .limit(1)
-      .execute() as Promise<Array<{ login: string | null }>>,
-  ]);
-  const accountLogin = accountRows[0]?.login ?? null;
-  if (!accountLogin || commentRows.length === 0) return [];
-
-  const shas = [...new Set(commitRows.map((c) => c.sha))];
-  const files = new Map<string, string[]>();
-  if (shas.length > 0) {
-    const fileRows = (await ctx.db
-      .select({ sha: commitFiles.sha, paths: commitFiles.paths })
-      .from(commitFiles)
-      .where(inArray(commitFiles.sha, shas))
-      .execute()) as Array<{ sha: string; paths: string[] | null }>;
-    for (const f of fileRows) if (Array.isArray(f.paths)) files.set(f.sha, f.paths);
-  }
-  const settleCommits: SettleCommit[] = commitRows.map((c) => ({
-    committedAt: c.committedAt,
-    paths: files.get(c.sha) ?? null,
+    .execute()) as Array<{ finding: FindingRow; headSha: string }>;
+  return rows.map(({ finding: f, headSha }) => ({
+    id: f.id,
+    headSha,
+    path: f.path,
+    line: f.line,
+    side: f.side,
+    severity: f.severity,
+    title: f.title,
+    body: resolveFindingBody(f),
+    suggestion: f.suggestion,
+    diffHunk: f.diffHunk,
+    anchored: f.anchored,
+    fileInDiff: f.fileInDiff,
+    posted: f.postedAt != null,
+    carried: true,
+    priorStatus: null,
   }));
-
-  const byThread = new Map<number, SettleThread>();
-  const sorted = [...commentRows].sort(
-    (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.commentId - b.commentId,
-  );
-  for (const r of sorted) {
-    let t = byThread.get(r.threadId);
-    if (!t) {
-      t = {
-        path: r.path,
-        isResolved: !!r.isResolved,
-        derivedState: r.derivedState,
-        isOutdated: !!r.isOutdated,
-        comments: [],
-      };
-      byThread.set(r.threadId, t);
-    }
-    // Automation never settles a finding: the stored flags, plus the login seeds for a row synced
-    // before its login joined them (the global set's per-row half; no workspace here).
-    const login = r.authorLogin ?? null;
-    const isBot =
-      !!r.authorIsBot ||
-      r.authorType === 'Bot' ||
-      (login != null && (isLikelyBot(login) || automationVendorFor(login) != null));
-    t.comments.push({
-      databaseId: r.databaseId ?? null,
-      authorLogin: login,
-      authorIsBot: isBot,
-      body: (r.body ?? r.excerpt ?? '').trim(),
-      createdAt: r.createdAt,
-    });
-  }
-  return settledFindings(findings, [...byThread.values()], settleCommits, accountLogin);
 }
 
 // ---- Writers ----

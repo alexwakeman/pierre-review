@@ -1087,6 +1087,18 @@ describe('auto resolve', () => {
     };
   }
 
+  it('Post reply (disputed) on a RESOLVED thread still posts by hand (only the automatic pushback skips it)', async () => {
+    const { postFollowUpReply } = await import('./manual-reply.js');
+    const { pr, first, finding, thread } = await postedFinding();
+    await db.update(schema.reviewThreads).set({ isResolved: true }).where((await import('drizzle-orm')).eq(schema.reviewThreads.id, thread.id)).execute();
+    const id = await replyRun(pr, first, finding.id, 'reply_disputed', { trigger: 'manual' });
+    const m = mdeps();
+    const out = await postFollowUpReply(ctx, { accountId: 1, reviewId: id, priorFindingId: finding.id }, m);
+    expect(out).toMatchObject({ kind: 'done', result: { status: 'posted' } });
+    expect(m.reply).toHaveBeenCalledTimes(1);
+    expect(m.resolve).not.toHaveBeenCalled();
+  });
+
   it('Post reply (disputed) claims the pushback record: a second click, a remount or a later run never posts again', async () => {
     const { postFollowUpReply } = await import('./manual-reply.js');
     const { pr, first, finding } = await postedFinding();

@@ -29,6 +29,7 @@ import {
   linkReraisedFindings,
   reconcileFollowUp,
   dropAcceptedReraises,
+  isResolvedWithReplies,
   selectPriorFindings,
   SINCE_PATCH_CHARS,
   type FollowUpPlan,
@@ -44,6 +45,7 @@ import {
   isAutoReReviewSettled,
   loadPriorReviewForFollowUp,
   loadSettledByReplyFindings,
+  loadUnjudgedReplyFindings,
   loadPriorRunForCarry,
   markReviewCommentsSeen,
   markReviewCancelled,
@@ -497,21 +499,35 @@ async function runPipeline(
 
   // ---- follow-up on the previous review ----
   // A DB error here throws on purpose: it fails before any model spend and the error shows.
-  // Earlier findings SETTLED BY A REPLY (settled-by-reply.ts): answered on GitHub by someone else
-  // and resolved with no code change. They leave the follow-up, the prompt tells the model not to
-  // raise them again, and a new finding repeating one is dropped below.
+  // Earlier findings SETTLED BY A REPLY (settled-by-reply.ts): an earlier review ACCEPTED a
+  // person's reply on the thread. They leave the follow-up, the prompt tells the model not to raise
+  // them again, and a new finding repeating one is dropped below. ⚠ A thread merely RESOLVED after a
+  // reply is no longer settled on sight: it is judged like an open one (follow-up.ts).
   const settled = await loadSettledByReplyFindings(ctx, item.prId, item.accountId, reviewId);
-  const prior = await loadPriorReviewForFollowUp(
-    ctx,
-    item.prId,
-    item.accountId,
-    reviewId,
-    new Set(settled.map((f) => f.id)),
-  );
+  const settledIds = new Set(settled.map((f) => f.id));
+  const prior = await loadPriorReviewForFollowUp(ctx, item.prId, item.accountId, reviewId, settledIds);
+  // BACKWARD COMPATIBILITY: findings the RETIRED settle-on-sight rule took out of the chain were
+  // never judged. Load them as carried items; only the ones whose thread is resolved WITH a
+  // person's reply are kept (below), so they are judged once like any other.
+  const unjudged = prior
+    ? await loadUnjudgedReplyFindings(
+        ctx,
+        item.prId,
+        item.accountId,
+        reviewId,
+        new Set([...settledIds, ...prior.findings.map((f) => f.id)]),
+      )
+    : [];
   // People's replies on the earlier findings' threads (finding-replies.ts): Claude may accept a
-  // reasonable one or push back once. A failure costs the replies only.
-  if (prior && prior.findings.length > 0) {
-    prior.findings = await attachFindingThreads(ctx, item.accountId, item.prId, prior.findings);
+  // reasonable one or push back once. A failure costs the replies only (and the unjudged ones,
+  // which need a resolved thread with a reply to be sent at all).
+  if (prior && prior.findings.length + unjudged.length > 0) {
+    const attached = await attachFindingThreads(ctx, item.accountId, item.prId, [...prior.findings, ...unjudged]);
+    const own = new Set(prior.findings.map((f) => f.id));
+    prior.findings = [
+      ...attached.filter((f) => own.has(f.id)),
+      ...attached.filter((f) => !own.has(f.id) && isResolvedWithReplies(f)),
+    ];
   }
   const plan: FollowUpPlan | null =
     prior && prior.findings.length > 0 ? selectPriorFindings(prior, item.headSha) : null;

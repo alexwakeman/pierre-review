@@ -25,6 +25,8 @@ export interface ThreadRow {
   githubNodeId: string;
   path: string;
   isResolved: boolean;
+  // Who resolved it (review_threads.resolved_by_login); absent when the loader did not read it.
+  resolvedByLogin?: string | null;
 }
 
 /**

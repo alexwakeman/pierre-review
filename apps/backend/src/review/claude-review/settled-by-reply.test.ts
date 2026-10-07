@@ -1,141 +1,181 @@
-// SETTLED BY A REPLY — the pure rule (settled-by-reply.ts). What this pins:
-//   1. a posted finding whose thread was RESOLVED after someone else REPLIED, with no code change
-//      under it, is settled — matched by stored comment id or by its body (Post review stores none);
-//   2. ⚠ resolved WITHOUT a reply is NOT settled (resolving is a click, not evidence);
-//   3. ⚠ a reply by the account's own login (Limn posts AS the reader) or by a bot does not count;
-//   4. a commit touching the file after the comment, an outdated thread, or a commit whose files
-//      were never synced all leave the finding on the old (follow-up) path;
-//   5. a new finding repeating a settled one (same path, similar title) is dropped; one linked to a
+// SETTLED BY A REPLY — the pure rules (settled-by-reply.ts + follow-up.ts). What this pins:
+//   1. ⚠ a thread RESOLVED after a person's reply is NO LONGER settled on sight: it is a finding
+//      to JUDGE (`isResolvedWithReplies`), selected AFTER the open ones so its replies cannot crowd
+//      an open finding out of the cap; resolved with NO reply is an ordinary finding, as before;
+//   2. only an ACCEPTED reply ('reply_accepted') settles a finding, the first acceptance wins, and
+//      the read path's fields (severity, anchor, accepting run) ride along;
+//   3. BACKWARD COMPATIBILITY: a finding the retired rule took out of the chain (posted, no closing
+//      status, not continued by a posted re-raise, not already in this run) is a candidate again;
+//   4. a new finding repeating a settled one (same path, similar title) is dropped; one linked to a
 //      still-open earlier finding is kept.
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from 'vitest';
 import {
+  acceptedReplyFindings,
   dropSettledReraises,
-  findingThread,
-  settledFindings,
   similarTitles,
-  type SettleCommit,
-  type SettleFinding,
-  type SettleThread,
-  type SettleThreadComment,
+  unjudgedReplyCandidateIds,
+  UNJUDGED_REPLY_MAX,
 } from './settled-by-reply.js';
+import {
+  isResolvedWithReplies,
+  reconcileFollowUp,
+  selectPriorFindings,
+  PRIOR_FINDINGS_MAX,
+  type PriorFindingForFollowUp,
+} from './follow-up.js';
 
-const ME = 'viewer-me';
-const T0 = Date.UTC(2026, 9, 1, 10);
-const at = (h: number): Date => new Date(T0 + h * 3600_000);
+const HEAD = 'a'.repeat(40);
+const REPLY = { author: 'alice-dev', body: 'Intentional: `user` is validated upstream.', at: '2026-10-01T10:00:00.000Z' };
 
-const finding = (over: Partial<SettleFinding> = {}): SettleFinding => ({
-  id: 7,
+const prior = (over: Partial<PriorFindingForFollowUp> = {}): PriorFindingForFollowUp => ({
+  id: 1,
+  headSha: HEAD,
   path: 'src/a.ts',
-  title: 'Null dereference of `user` in loadUser',
-  body: 'This dereferences `user` before the null check.',
-  githubCommentId: null,
+  line: 3,
+  side: 'RIGHT',
+  severity: 'warning',
+  title: 'Null dereference',
+  body: 'body',
+  suggestion: null,
+  diffHunk: null,
+  anchored: true,
+  fileInDiff: true,
+  posted: true,
+  carried: false,
+  ...over,
+});
+const thread = (over: Partial<NonNullable<PriorFindingForFollowUp['thread']>> = {}) => ({
+  threadId: 9,
+  threadFindingId: 1,
+  replies: [REPLY],
+  pushedBack: false,
+  isResolved: true,
+  resolvedBy: 'alice-dev',
   ...over,
 });
 
-const comment = (over: Partial<SettleThreadComment> = {}): SettleThreadComment => ({
-  databaseId: null,
-  authorLogin: 'alice-dev',
-  authorIsBot: false,
-  body: 'text',
-  createdAt: at(1),
-  ...over,
+describe('a resolved thread with a reply is judged, not settled', () => {
+  it('resolved + a person\'s reply ⇒ judged; no reply, an open thread or only Limn\'s reply ⇒ not this path', () => {
+    expect(isResolvedWithReplies(prior({ thread: thread() }))).toBe(true);
+    expect(isResolvedWithReplies(prior({ thread: thread({ replies: [] }) }))).toBe(false);
+    expect(isResolvedWithReplies(prior({ thread: thread({ isResolved: false }) }))).toBe(false);
+    expect(isResolvedWithReplies(prior({ thread: thread({ replies: [{ ...REPLY, fromLimn: true }] }) }))).toBe(false);
+    expect(isResolvedWithReplies(prior({ thread: null }))).toBe(false);
+  });
+
+  it('is SENT (not dropped), after every open finding — own, then carried', () => {
+    const resolvedBlocker = prior({ id: 1, severity: 'blocker', thread: thread() });
+    const openNit = prior({ id: 2, severity: 'nit' });
+    const carriedOpen = prior({ id: 3, carried: true });
+    const carriedResolved = prior({ id: 4, carried: true, severity: 'blocker', thread: thread({ threadId: 10 }) });
+    const resolvedNoReply = prior({ id: 5, severity: 'question', thread: thread({ threadId: 11, replies: [] }) });
+    const plan = selectPriorFindings(
+      { reviewId: 1, headSha: 'b'.repeat(40), findings: [resolvedBlocker, openNit, carriedOpen, carriedResolved, resolvedNoReply] },
+      HEAD,
+    );
+    // A thread resolved with NO reply keeps its ordinary place (a question before a nit).
+    expect(plan.sent.map((s) => s.finding.id)).toEqual([5, 2, 3, 1, 4]);
+    expect(plan.omitted).toEqual([]);
+  });
+
+  it('under the cap, the resolved-with-reply ones are the ones left out (not checked, carried)', () => {
+    const open = Array.from({ length: PRIOR_FINDINGS_MAX }, (_, i) => prior({ id: 100 + i, severity: 'nit' }));
+    const resolved = prior({ id: 1, severity: 'blocker', thread: thread() });
+    const plan = selectPriorFindings({ reviewId: 1, headSha: HEAD, findings: [resolved, ...open] }, HEAD);
+    expect(plan.sent).toHaveLength(PRIOR_FINDINGS_MAX);
+    expect(plan.omitted.map((f) => f.id)).toEqual([1]);
+  });
 });
 
-const rootFor = (f: SettleFinding, over: Partial<SettleThreadComment> = {}): SettleThreadComment =>
-  comment({
-    authorLogin: ME,
-    body: `${f.body}\n\n<!-- pierre:claude-review-finding v=1 -->`,
-    createdAt: at(0),
+describe('the same-head lock never decides an unjudged resolved reply', () => {
+  it("unreported ⇒ 'not_checked' (carried, not counted), not the lock's 'not_addressed'; a reported code status is still locked", () => {
+    const resolved = prior({ id: 1, thread: thread() });
+    const open = prior({ id: 2 });
+    const plan = selectPriorFindings({ reviewId: 1, headSha: HEAD, findings: [resolved, open] }, HEAD);
+    const quiet = reconcileFollowUp(plan, []);
+    expect(quiet.map((it) => [it.priorFindingId, it.status])).toEqual([
+      [2, 'not_addressed'],
+      [1, 'not_checked'],
+    ]);
+    const ref = plan.sent.find((s) => s.finding.id === 1)!.ref;
+    const said = reconcileFollowUp(plan, [{ ref, status: 'addressed', explanation: 'x' } as any]);
+    expect(said.find((it) => it.priorFindingId === 1)).toMatchObject({ status: 'not_addressed', statusCarried: true });
+    const judged = reconcileFollowUp(plan, [{ ref, status: 'reply_disputed', reply: 'No.' } as any]);
+    expect(judged.find((it) => it.priorFindingId === 1)).toMatchObject({ status: 'reply_disputed' });
+  });
+});
+
+describe('acceptedReplyFindings — only an accepted reply settles', () => {
+  const item = (over: object = {}) => ({
+    priorFindingId: 7,
+    status: 'reply_accepted',
+    path: 'src/a.ts',
+    title: 'Null deref',
+    acceptKind: 'deferred' as const,
+    reply: { author: 'alice-dev', excerpt: 'Follow-up PR.' },
+    line: 3,
+    side: 'RIGHT' as const,
+    severity: 'warning' as const,
+    reviewId: 5,
     ...over,
   });
 
-const thread = (comments: SettleThreadComment[], over: Partial<SettleThread> = {}): SettleThread => ({
-  path: 'src/a.ts',
-  isResolved: true,
-  derivedState: 'resolved',
-  isOutdated: false,
-  comments,
-  ...over,
-});
-
-const REPLY = comment({ body: 'Intentional: `user` is validated by the middleware upstream.' });
-
-describe('settledFindings', () => {
-  it('settles a finding resolved after another person replied, with no code change', () => {
-    const f = finding();
-    const out = settledFindings([f], [thread([rootFor(f), REPLY])], [], ME);
+  it('settles the accepted one with what the read path shows; the first acceptance wins', () => {
+    const out = acceptedReplyFindings(
+      [item(), item({ acceptKind: 'not_valid', reviewId: 6 }), item({ priorFindingId: 8, status: 'reply_disputed' })],
+      new Set([7, 8]),
+    );
     expect(out).toEqual([
       {
         id: 7,
         path: 'src/a.ts',
-        title: f.title,
+        title: 'Null deref',
         replyAuthor: 'alice-dev',
-        reply: 'Intentional: `user` is validated by the middleware upstream.',
+        reply: 'Follow-up PR.',
+        acceptKind: 'deferred',
+        line: 3,
+        side: 'RIGHT',
+        severity: 'warning',
+        acceptedInReviewId: 5,
       },
     ]);
   });
 
-  it('matches the thread by stored GitHub id even when the comment was edited on GitHub', () => {
-    const f = finding({ githubCommentId: '555' });
-    const root = rootFor(f, { databaseId: '555', body: 'Reworded on GitHub.' });
-    expect(settledFindings([f], [thread([root, REPLY])], [], ME).map((s) => s.id)).toEqual([7]);
+  it('a finding outside the eligible set (another PR, unposted) is never settled', () => {
+    expect(acceptedReplyFindings([item()], new Set([99]))).toEqual([]);
+  });
+});
+
+describe('findings the retired rule took out of the chain', () => {
+  const f = (id: number, over: object = {}) => ({ id, priorFindingId: null as number | null, eligible: true, ...over });
+
+  it('a posted finding with no closing status, not continued and not already loaded, is a candidate again', () => {
+    expect(unjudgedReplyCandidateIds([f(1)], [], new Set())).toEqual([1]);
+    // Its last word was still open ⇒ still a candidate.
+    expect(unjudgedReplyCandidateIds([f(1)], [{ priorFindingId: 1, status: 'not_addressed' }], new Set())).toEqual([1]);
   });
 
-  it('⚠ resolved with NO reply is not settled (resolving is a click)', () => {
-    const f = finding();
-    expect(settledFindings([f], [thread([rootFor(f)])], [], ME)).toEqual([]);
-  });
-
-  it('an unresolved thread is not settled, reply or not', () => {
-    const f = finding();
-    expect(
-      settledFindings([f], [thread([rootFor(f), REPLY], { isResolved: false, derivedState: 'replied_unresolved' })], [], ME),
-    ).toEqual([]);
-  });
-
-  it("⚠ a reply by Limn itself (the account's own login) does not count", () => {
-    const f = finding();
-    const ownReply = comment({ authorLogin: 'Viewer-Me', body: 'Follow-up from Limn.\n\n<!-- pierre:claude-review-finding v=1 -->' });
-    expect(settledFindings([f], [thread([rootFor(f), ownReply])], [], ME)).toEqual([]);
-    // …nor a plain reply under that login: Limn posts AS the reader, so the login is ours.
-    const plain = comment({ authorLogin: ME, body: 'Intentional.' });
-    expect(settledFindings([f], [thread([rootFor(f), plain])], [], ME)).toEqual([]);
-  });
-
-  it('a bot reply, an unknown author or a blank reply does not count', () => {
-    const f = finding();
-    const bot = comment({ authorLogin: 'coderabbitai[bot]', authorIsBot: true });
-    const unknown = comment({ authorLogin: null });
-    const blank = comment({ body: '   ' });
-    for (const r of [bot, unknown, blank]) {
-      expect(settledFindings([f], [thread([rootFor(f), r])], [], ME)).toEqual([]);
+  it('closed by a follow-up, already in this run, settled, unposted or continued by a posted re-raise ⇒ not', () => {
+    for (const st of ['addressed', 'no_longer_applies', 'reply_accepted']) {
+      expect(unjudgedReplyCandidateIds([f(1)], [{ priorFindingId: 1, status: st }], new Set())).toEqual([]);
     }
+    // The NEWEST item decides: closed, then re-opened later.
+    expect(
+      unjudgedReplyCandidateIds([f(1)], [{ priorFindingId: 1, status: 'addressed' }, { priorFindingId: 1, status: 'not_addressed' }], new Set()),
+    ).toEqual([1]);
+    expect(unjudgedReplyCandidateIds([f(1)], [], new Set([1]))).toEqual([]);
+    expect(unjudgedReplyCandidateIds([f(1, { eligible: false })], [], new Set())).toEqual([]);
+    expect(unjudgedReplyCandidateIds([f(1), f(2, { priorFindingId: 1 })], [], new Set([2]))).toEqual([]);
+    // …but an UNPOSTED re-raise does not continue the chain.
+    expect(unjudgedReplyCandidateIds([f(1), f(2, { priorFindingId: 1, eligible: false })], [], new Set())).toEqual([1]);
   });
 
-  it('a commit touching the file after the comment hands it to the follow-up (the "fixed" path)', () => {
-    const f = finding();
-    const t = thread([rootFor(f), REPLY]);
-    const touching: SettleCommit = { committedAt: at(2), paths: ['src/a.ts'] };
-    expect(settledFindings([f], [t], [touching], ME)).toEqual([]);
-    // A commit BEFORE the comment, or on another file, changes nothing.
-    const before: SettleCommit = { committedAt: at(-1), paths: ['src/a.ts'] };
-    const other: SettleCommit = { committedAt: at(2), paths: ['src/b.ts'] };
-    expect(settledFindings([f], [t], [before, other], ME).map((s) => s.id)).toEqual([7]);
-    // Files never synced ⇒ we do not know ⇒ not settled.
-    const unknown: SettleCommit = { committedAt: at(2), paths: null };
-    expect(settledFindings([f], [t], [unknown], ME)).toEqual([]);
-  });
-
-  it('an outdated thread (the code under it changed) is not settled', () => {
-    const f = finding();
-    expect(settledFindings([f], [thread([rootFor(f), REPLY], { isOutdated: true })], [], ME)).toEqual([]);
-  });
-
-  it("a thread opened by someone else, or on another path, is not the finding's", () => {
-    const f = finding();
-    expect(findingThread(f, [thread([rootFor(f, { authorLogin: 'bob' }), REPLY])], ME)).toBeNull();
-    expect(findingThread(f, [thread([rootFor(f), REPLY], { path: 'src/b.ts' })], ME)).toBeNull();
-    expect(findingThread(f, [thread([rootFor(f), REPLY])], null)).toBeNull();
+  it('oldest first, capped', () => {
+    const many = Array.from({ length: UNJUDGED_REPLY_MAX + 5 }, (_, i) => f(500 - i));
+    const out = unjudgedReplyCandidateIds(many, [], new Set());
+    expect(out).toHaveLength(UNJUDGED_REPLY_MAX);
+    expect(out[0]).toBe(500 - (UNJUDGED_REPLY_MAX + 4));
   });
 });
 

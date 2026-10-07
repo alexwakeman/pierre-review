@@ -1,80 +1,45 @@
-// SETTLED BY A REPLY — an earlier Claude Review finding that was posted to GitHub, answered there
-// by someone else, and resolved WITHOUT a code change. The pure half: which findings count, and
-// which new findings repeat one. The DB loader is persist.ts `loadSettledByReplyFindings`.
-//
-// A finding counts as settled when ALL of these hold, on SYNCED data only:
-//   1. it was posted as an inline comment and we can find that comment's thread
-//      (`findingThread`): the thread's FIRST comment is by the account's own login and is either
-//      the finding's stored `githubCommentId`, or (a Post review whose ids were not read back) on the
-//      finding's path with a body that STARTS WITH the finding's resolved body — the body
-//      post-review.ts `findingCommentBody` puts first. A PR-level comment has no thread and is
-//      never settled by this rule;
-//   2. the thread is RESOLVED on GitHub;
-//   3. someone else REPLIED in it: a later comment whose author is a known login that is NOT the
-//      account's own (Limn posts AS the reader, so every comment by that login — every
-//      `isLimnPostedComment` one included — is ours) and NOT automation (a bot's auto-reply is not
-//      a justification);
-//   4. the code did NOT move under it: GitHub does not mark the thread outdated, and no synced
-//      commit dated after the finding's comment touched its file. A commit whose files were never
-//      synced counts as touching it — we do not know, so the finding stays on the old path.
-//
-// ⚠ A THREAD RESOLVED WITH NO REPLY IS NOT SETTLED. Resolving is a click, not evidence; it keeps
-// the old behaviour (followed up and re-raised while the code says it is open).
-// ⚠ A FINDING FIXED IN CODE IS NOT SETTLED EITHER — rule 4 hands it to the follow-up, whose
-// "addressed" verdict is the existing path.
-//
-// ⚠ A SECOND RULE settles a finding too: an earlier review ACCEPTED a reply on its thread
-// (`acceptedReplyFindings`, follow-up status 'reply_accepted' — the thread may still be open). Both
-// feed the SAME list, so everything below applies to it unchanged.
+// SETTLED BY A REPLY — an earlier Claude Review finding a later review SETTLED because it ACCEPTED a
+// person's reply on its GitHub thread (follow-up status 'reply_accepted', `acceptKind` 'not_valid'
+// or 'deferred'). The pure half: which findings count, which new findings repeat one, and which
+// findings the RETIRED rule below left out of the chain. The DB loader is persist.ts
+// `loadSettledByReplyFindings`.
 //
 // What happens to a settled finding: it leaves the follow-up (never sent as a P item, never stored
-// on the follow-up record, never in the pane's "Previous review" list), the prompt lists it in a
-// fenced block the model is told not to raise again, and a new finding that repeats it
+// on the follow-up record, never in the pane's open "Previous review" list — the read path lists it
+// in the closed group instead, `ClaudeReview.settledEarlier`), the prompt lists it in a fenced
+// block the model is told not to raise again, and a new finding that repeats it
 // (`isReraiseOfSettled`: same path, similar title) is dropped in code.
+// ⚠ A NEW reply or new commits do NOT unsettle it (kept simple: the author was told it was
+// accepted, and re-opening it would contradict the acknowledgement on GitHub).
+//
+// ⚠ RETIRED (2026-10): "resolved on GitHub + someone else replied + code unchanged ⇒ settled on
+// sight, before Claude sees it". Resolving is a click, so a resolved thread with a reply now goes
+// through the SAME reply judgement as an open one (follow-up.ts `isResolvedWithReplies`): accepted ⇒
+// settled through this file from then on; disputed ⇒ open (raised again, counted in the auto verdict,
+// an AI Fix item), with no automatic pushback on the resolved thread. A thread resolved with NO
+// reply is still followed up on the code, as before.
+// BACKWARD COMPATIBILITY: a finding the retired rule settled in an earlier run left the follow-up
+// chain without ever being judged, so the chain alone would never bring it back.
+// `unjudgedReplyCandidateIds` finds those (posted, never closed by a follow-up status, not continued
+// by a later posted re-raise, not already in this run's follow-up); the manager keeps the ones whose
+// thread is resolved with a reply and sends them as CARRIED items, so they are judged once, on the
+// next run, like any other.
 
-/** One synced comment of a review thread. */
-export interface SettleThreadComment {
-  databaseId: string | null;
-  authorLogin: string | null;
-  authorIsBot: boolean;
-  body: string;
-  createdAt: Date;
-}
-
-/** One synced review thread, comments oldest first. */
-export interface SettleThread {
-  path: string;
-  isResolved: boolean;
-  derivedState: string;
-  isOutdated: boolean;
-  comments: SettleThreadComment[];
-}
-
-/** One synced commit of the PR. `paths` null = its file list was never synced. */
-export interface SettleCommit {
-  committedAt: Date;
-  paths: readonly string[] | null;
-}
-
-/** A posted earlier finding, as the predicate needs it. `body` is the resolved body. */
-export interface SettleFinding {
-  id: number;
-  path: string;
-  title: string;
-  body: string;
-  githubCommentId: string | null;
-}
-
-/** A finding the rule settled, with the reply that settled it (shown to the model as data). */
+/** A finding settled by an accepted reply, with the reply (shown to the model as data). */
 export interface SettledFinding {
   id: number;
   path: string;
   title: string;
   replyAuthor: string;
   reply: string;
-  // Set when a REVIEW accepted the reply (follow-up status 'reply_accepted'), not the
-  // resolved-with-no-code-change rule: how it was accepted.
+  // How it was accepted.
   acceptKind?: 'not_valid' | 'deferred' | null;
+  // For the read path (`ClaudeReview.settledEarlier`): the finding's anchor and severity, and the
+  // review whose follow-up accepted the reply. Absent on items stored before the fields existed.
+  line?: number | null;
+  side?: 'LEFT' | 'RIGHT';
+  severity?: 'blocker' | 'warning' | 'question' | 'nit' | 'praise';
+  acceptedInReviewId?: number;
 }
 
 /** An earlier run's follow-up item, as `acceptedReplyFindings` reads it. */
@@ -85,13 +50,16 @@ export interface AcceptedItemLike {
   title: string;
   acceptKind?: 'not_valid' | 'deferred' | null;
   reply?: { author: string; excerpt: string } | null;
+  line?: number | null;
+  side?: 'LEFT' | 'RIGHT';
+  severity?: 'blocker' | 'warning' | 'question' | 'nit' | 'praise';
+  // The review whose follow-up this item is (set by the loader).
+  reviewId?: number;
 }
 
 /**
- * The SECOND way a finding is settled: an earlier review ACCEPTED a person's reply on its thread
- * (`reply_accepted`). Only for findings in `eligibleIds` (this PR's own, posted). Settled from then
- * on — ⚠ a NEW reply or new commits do NOT unsettle it (kept simple on purpose: the author was told
- * it was accepted, and re-opening it would contradict the acknowledgement on GitHub).
+ * The findings an earlier review ACCEPTED a person's reply on (`reply_accepted`). Only for findings
+ * in `eligibleIds` (this PR's own, posted). The FIRST acceptance wins (items oldest run first).
  */
 export function acceptedReplyFindings(
   items: readonly AcceptedItemLike[],
@@ -109,81 +77,52 @@ export function acceptedReplyFindings(
       replyAuthor: it.reply?.author ?? 'unknown',
       reply: it.reply?.excerpt ?? '',
       acceptKind: it.acceptKind ?? null,
+      ...(it.line !== undefined ? { line: it.line } : {}),
+      ...(it.side ? { side: it.side } : {}),
+      ...(it.severity ? { severity: it.severity } : {}),
+      ...(it.reviewId != null ? { acceptedInReviewId: it.reviewId } : {}),
     });
   }
   return out;
 }
 
-const norm = (s: string): string => s.replace(/\r\n?/g, '\n').trim();
-const sameLogin = (a: string | null, b: string | null): boolean =>
-  !!a && !!b && a.toLowerCase() === b.toLowerCase();
+// ---- findings the retired rule left out of the chain (backward compatibility) ----
 
-/** The thread a posted finding opened, or null (rule 1). */
-export function findingThread(
-  f: SettleFinding,
-  threads: readonly SettleThread[],
-  accountLogin: string | null,
-): SettleThread | null {
-  if (!accountLogin) return null;
-  const body = norm(f.body);
-  let byBody: SettleThread | null = null;
-  for (const t of threads) {
-    const root = t.comments[0];
-    if (!root || !sameLogin(root.authorLogin, accountLogin)) continue;
-    if (f.githubCommentId && root.databaseId === f.githubCommentId) return t;
-    if (!byBody && body && t.path === f.path && norm(root.body).startsWith(body)) byBody = t;
-  }
-  return byBody;
-}
+// A follow-up status after which a finding legitimately leaves the chain.
+const CLOSED_STATUSES: ReadonlySet<string> = new Set(['addressed', 'no_longer_applies', 'reply_accepted']);
+
+/** At most this many are re-judged per run (oldest first); the rest wait for a later run. */
+export const UNJUDGED_REPLY_MAX = 20;
 
 /**
- * The reply that settles this thread, or null (rules 2–4). Exported for tests; the finding-level
- * entry point is `settledFindings`.
+ * Earlier findings that dropped out of the follow-up chain WITHOUT a closing status — what the
+ * retired "resolved after a reply ⇒ settled" rule did. A candidate is:
+ *   - eligible (posted, not praise, not a legacy story finding — the caller decides);
+ *   - not in `exclude` (this run's follow-up already holds it, or it is settled);
+ *   - not re-raised by a later ELIGIBLE finding (the chain continues through that one);
+ *   - its NEWEST follow-up item (any earlier run) is not a closing status.
+ * The caller keeps only those whose thread is resolved with a person's reply. Oldest first, capped.
  */
-export function settlingReply(
-  t: SettleThread,
-  accountLogin: string | null,
-  commits: readonly SettleCommit[],
-  // The finding's own path (the thread's is normally the same; both are checked).
-  findingPath: string = t.path,
-): SettleThreadComment | null {
-  if (!accountLogin) return null;
-  if (!t.isResolved && t.derivedState !== 'resolved') return null;
-  if (t.isOutdated) return null;
-  const root = t.comments[0];
-  if (!root) return null;
-  const since = root.createdAt.getTime();
-  const touched = commits.some(
-    (c) =>
-      c.committedAt.getTime() > since &&
-      (c.paths == null || c.paths.includes(t.path) || c.paths.includes(findingPath)),
-  );
-  if (touched) return null;
-  for (const c of t.comments.slice(1)) {
-    if (!c.authorLogin || c.authorIsBot) continue;
-    if (sameLogin(c.authorLogin, accountLogin)) continue;
-    if (!norm(c.body)) continue;
-    return c;
-  }
-  return null;
-}
-
-/** Every finding the rule settles, in input order. */
-export function settledFindings(
-  findings: readonly SettleFinding[],
-  threads: readonly SettleThread[],
-  commits: readonly SettleCommit[],
-  accountLogin: string | null,
-): SettledFinding[] {
-  const out: SettledFinding[] = [];
-  for (const f of findings) {
-    const t = findingThread(f, threads, accountLogin);
-    if (!t) continue;
-    const reply = settlingReply(t, accountLogin, commits, f.path);
-    if (!reply) continue;
-    out.push({ id: f.id, path: f.path, title: f.title, replyAuthor: reply.authorLogin!, reply: norm(reply.body) });
-  }
-  return out;
+export function unjudgedReplyCandidateIds(
+  earlier: ReadonlyArray<{ id: number; priorFindingId: number | null; eligible: boolean }>,
+  // Every earlier run's follow-up items, OLDEST RUN FIRST.
+  itemsOldestFirst: ReadonlyArray<{ priorFindingId: number; status: string }>,
+  exclude: ReadonlySet<number>,
+  max: number = UNJUDGED_REPLY_MAX,
+): number[] {
+  const latest = new Map<number, string>();
+  for (const it of itemsOldestFirst) latest.set(it.priorFindingId, it.status);
+  const reraised = new Set<number>();
+  for (const f of earlier) if (f.eligible && f.priorFindingId != null) reraised.add(f.priorFindingId);
+  return earlier
+    .filter((f) => f.eligible && !exclude.has(f.id) && !reraised.has(f.id))
+    .filter((f) => {
+      const st = latest.get(f.id);
+      return st == null || !CLOSED_STATUSES.has(st);
+    })
+    .map((f) => f.id)
+    .sort((a, b) => a - b)
+    .slice(0, max);
 }
 
 // ---- the re-raise match ----

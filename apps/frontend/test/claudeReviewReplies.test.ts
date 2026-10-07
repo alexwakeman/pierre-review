@@ -6,12 +6,15 @@
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
 import { describe, expect, it } from 'vitest';
-import type { ClaudeFollowUpItem } from '@pierre-review/shared';
+import type { ClaudeFollowUpItem, ClaudeReviewFollowUp, ClaudeSettledFinding } from '@pierre-review/shared';
 import {
   FOLLOW_UP_STATUS_CLASS,
+  isResolvedPushback,
   partitionFollowUp,
   replyActions,
   replyStatusHeading,
+  settledEarlierHeading,
+  settledEarlierRows,
 } from '../src/lib/claudeReviewFollowUp.js';
 
 const item = (o: Partial<ClaudeFollowUpItem>): ClaudeFollowUpItem => ({
@@ -100,5 +103,54 @@ describe('reply statuses', () => {
     });
     const ar = { at: '', outcome: 'addressed' as const, byReviewId: 1, headSha: 'h', error: 'x', status: 'failed' as const, replyCommentId: 'C1' };
     expect(replyActions(item({ autoResolve: ar }), R)).toMatchObject({ note: 'Limn already replied on this thread earlier.', showText: false, canPost: false });
+  });
+});
+
+describe('a reply on a RESOLVED thread', () => {
+  const R = 7;
+  it('a pushback on a resolved thread stays OPEN, wears "Resolved on GitHub", and can still be posted by hand', () => {
+    const it0 = item({ status: 'reply_disputed', response: 'Still unchecked on the API path.', threadId: 4, threadResolved: true });
+    expect(isResolvedPushback(it0)).toBe(true);
+    expect(partitionFollowUp([it0]).open).toEqual([it0]);
+    expect(replyStatusHeading(it0)).toBe('Pushed back');
+    expect(replyActions(it0, R)).toMatchObject({ canPost: true, canResolve: false });
+    expect(isResolvedPushback(item({ status: 'reply_disputed', threadResolved: false }))).toBe(false);
+    expect(isResolvedPushback(item({ status: 'reply_accepted', threadResolved: true }))).toBe(false);
+  });
+});
+
+describe('settled in an earlier review', () => {
+  const s = (o: Partial<ClaudeSettledFinding>): ClaudeSettledFinding => ({
+    priorFindingId: 9,
+    path: 'src/a.ts',
+    line: 3,
+    side: 'RIGHT',
+    severity: 'warning',
+    title: 'Null deref',
+    acceptKind: 'not_valid',
+    reply: { author: 'alice-dev', excerpt: 'Validated upstream.' },
+    acceptedInReviewId: 5,
+    ...o,
+  });
+  const fu = (items: ClaudeFollowUpItem[]): ClaudeReviewFollowUp => ({
+    priorReviewId: 1,
+    priorHeadSha: 'h',
+    headMoved: false,
+    changesSinceShown: false,
+    items,
+  });
+
+  it('says how it was accepted', () => {
+    expect(settledEarlierHeading(s({}))).toBe('Reply accepted: not an issue');
+    expect(settledEarlierHeading(s({ acceptKind: 'deferred' }))).toBe('Reply accepted: to be handled later');
+  });
+
+  it('lists every one, minus praise and anything this run still lists — with or without a follow-up', () => {
+    const a = s({});
+    const b = s({ priorFindingId: 10 });
+    const praise = s({ priorFindingId: 11, severity: 'praise' });
+    expect(settledEarlierRows({ followUp: null, settledEarlier: [a, b, praise] })).toEqual([a, b]);
+    expect(settledEarlierRows({ followUp: fu([item({ priorFindingId: 10 })]), settledEarlier: [a, b] })).toEqual([a]);
+    expect(settledEarlierRows({ followUp: null, settledEarlier: undefined })).toEqual([]);
   });
 });

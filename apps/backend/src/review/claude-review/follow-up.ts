@@ -34,6 +34,9 @@
 // is fixed in this PR). A reply status may override a same-head lock — a reply is new evidence even
 // when the code has not moved. 'reply_disputed' is OPEN (raised again like 'not_addressed');
 // 'reply_accepted' is settled from then on (persist.ts `loadSettledByReplyFindings`).
+// ⚠ A RESOLVED thread with a reply is judged the SAME way (it is no longer settled on sight): the
+// prompt says it was resolved and by whom, it is selected last, and auto-pushback.ts never posts on
+// it (a manual "Post reply" still may).
 import type {
   ClaudeFindingSeverity,
   ClaudeFindingSide,
@@ -91,12 +94,26 @@ export interface PriorFindingForFollowUp {
     replies: FindingReply[];
     // Limn already posted its one pushback there.
     pushedBack: boolean;
+    // The thread is RESOLVED on GitHub (synced), and by whom when the sync recorded it. A resolved
+    // thread with a reply is JUDGED like an open one (no longer settled on sight); it only goes
+    // last in the selection order (`selectPriorFindings`) and gets no automatic pushback.
+    isResolved?: boolean;
+    resolvedBy?: string | null;
   } | null;
 }
 
 /** Does this earlier finding have a person's reply to judge? */
 export function hasReplies(f: Pick<PriorFindingForFollowUp, 'thread'>): boolean {
   return judgeableReplies(f.thread?.replies).length > 0;
+}
+
+/**
+ * Was this earlier finding's thread RESOLVED on GitHub after a person replied? Such a finding is
+ * judged on its reply like an open thread (it used to be settled on sight — settled-by-reply.ts).
+ * A thread resolved with NO reply is not this: it is followed up on the code as before.
+ */
+export function isResolvedWithReplies(f: Pick<PriorFindingForFollowUp, 'thread'>): boolean {
+  return f.thread?.isResolved === true && hasReplies(f);
 }
 
 export interface PriorReviewForFollowUp {
@@ -187,11 +204,22 @@ function promptSize(f: PriorFindingForFollowUp): number {
  * warning, question, nit, then id), then the carried ones in the same order. Refs P1.. are handed
  * out while fewer than PRIOR_FINDINGS_MAX are sent and the running size stays within
  * PRIOR_BLOCK_CHARS; at the first one that does not fit, it and everything after it is omitted.
+ * ⚠ A finding whose thread was RESOLVED after a reply (`isResolvedWithReplies`) goes LAST (own,
+ * then carried, same order inside): someone closed it, and its replies (up to 5 × 1,500
+ * characters) must not crowd an open finding out of the cap. One that does not fit is
+ * 'not_checked' and carried, like any other.
  */
 export function selectPriorFindings(prior: PriorReviewForFollowUp, headSha: string): FollowUpPlan {
-  const own = prior.findings.filter((f) => !f.carried).sort(bySeverityThenId);
-  const carried = prior.findings.filter((f) => f.carried).sort(bySeverityThenId);
-  const ordered = [...own, ...carried];
+  const live = prior.findings.filter((f) => !isResolvedWithReplies(f));
+  const closedByReply = prior.findings.filter(isResolvedWithReplies);
+  const own = live.filter((f) => !f.carried).sort(bySeverityThenId);
+  const carried = live.filter((f) => f.carried).sort(bySeverityThenId);
+  const ordered = [
+    ...own,
+    ...carried,
+    ...closedByReply.filter((f) => !f.carried).sort(bySeverityThenId),
+    ...closedByReply.filter((f) => f.carried).sort(bySeverityThenId),
+  ];
   const sent: FollowUpPlan['sent'] = [];
   const omitted: PriorFindingForFollowUp[] = [];
   let size = 0;
@@ -344,6 +372,22 @@ function recordFor(
 }
 
 /**
+ * The same-head lock for one finding — EXCEPT a thread RESOLVED after a reply that no run has judged
+ * yet (no carried status). Its question is the reply, not the code: the lock would call it
+ * 'not_addressed' (raised again, counted in the verdict) without anyone reading the reply. Unjudged,
+ * it stays 'not_checked' and is carried to the next run instead. Only when NOTHING was reported: a
+ * reply status is judged as usual, and a code status is still overruled by the lock.
+ */
+function lockFor(
+  locked: FollowUpPlan['locked'],
+  f: PriorFindingForFollowUp,
+): { status: ClaudeFollowUpStatus; explanation: string | null } | undefined {
+  const lock = locked.get(f.id);
+  if (lock && !f.priorStatus && isResolvedWithReplies(f)) return undefined;
+  return lock;
+}
+
+/**
  * Reconcile the model's follow-up report against what was sent. Unknown refs are dropped; a
  * duplicate ref keeps its FIRST report; a sent ref never reported is 'not_checked' (`sent:true`);
  * an omitted finding is 'not_checked' (`sent:false`, `ref:null`). Output: sent order, then omitted.
@@ -366,7 +410,8 @@ export function reconcileFollowUp(
   const out: ClaudeFollowUpItemRecord[] = [];
   for (const { ref, finding } of plan.sent) {
     let hit = byRef.get(ref);
-    const lock = locked.get(finding.id);
+    // (`hit` is re-read below: a reply status that fails the gate is cleared first.)
+    const lockIfReported = locked.get(finding.id);
     // ⚠ THE REPLY GATE (in code): a reply status is Claude's answer about the replies shown, so it
     // stands only on a finding that had some, and may override a same-head lock.
     if (hit && isReplyStatus(hit.status)) {
@@ -384,6 +429,7 @@ export function reconcileFollowUp(
       }
       hit = undefined;
     }
+    const lock = hit ? lockIfReported : lockFor(locked, finding);
     if (lock) {
       // The code decides; Claude's words are kept only when it agreed.
       const explanation = hit && hit.status === lock.status && hit.explanation ? hit.explanation : lock.explanation;
@@ -397,7 +443,7 @@ export function reconcileFollowUp(
     );
   }
   for (const finding of plan.omitted) {
-    const lock = locked.get(finding.id);
+    const lock = lockFor(locked, finding);
     out.push(
       lock
         ? recordFor(plan, finding, null, false, lock.status, lock.explanation, true)

@@ -357,27 +357,32 @@ review, with no "Previous review" prompt section, no `follow_up` record and no f
   the next run's carry-forward re-checks every id through the same rule.
 - ⚠ **SETTLED BY A REPLY ⇒ OUT OF THE FOLLOW-UP, AND NEVER RAISED AGAIN** (`settled-by-reply.ts`,
   pure; loader `persist.ts` `loadSettledByReplyFindings`, over EVERY earlier succeeded review of the
-  PR, account-scoped). A posted finding is settled when, on SYNCED data only: (1) its inline
-  comment's thread is found — the thread's first comment is by the account's own login and is the
-  finding's `githubCommentId`, or (Post review stores no id) on the finding's path with a body that
-  STARTS WITH the finding's resolved body; a PR-level comment has no thread and is never settled;
-  (2) the thread is resolved; (3) a LATER comment in it is by a known login that is NOT the
-  account's own and NOT automation (`users.isBot`, `github_type='Bot'`, the login seeds) — Limn
-  posts AS the reader, so every comment under that login, every `isLimnPostedComment` one included,
-  is ours and never settles anything; (4) the code did not move under it — the thread is not
-  outdated and no synced commit dated after the finding's comment touched its file (a commit whose
-  files were never synced counts as touching it). Then: the finding is filtered out of
+  PR, account-scoped). A posted finding is settled ONLY when an earlier review ACCEPTED a person's
+  reply on its thread (`reply_accepted`, § Replies to Limn's findings). Then: it is filtered out of
   `loadPriorReviewForFollowUp` (own AND carried, after the carry bookkeeping), so it is never a P
-  item, never on the stored `follow_up` record, never in the pane's "Previous review" list and never
-  an AI Fix `P` seed item; the prompt lists it (up to 30) under **Settled in an earlier review**, one
-  `---BEGIN SETTLED FINDING S<n> <nonce>---` fence each carrying the path, title and the reply as
-  data (in the nonce-collision scan), telling the model not to raise it again; and the manager
-  DROPS, in code, any new finding that repeats one (`dropSettledReraises`: same path, title equal
-  once folded or word overlap ≥ `SETTLED_TITLE_SIMILARITY` 0.6). A finding LINKED to a still-open
-  earlier one (`priorFindingId` set) is that one's re-raise and is kept. ⚠ **A thread resolved with
-  NO reply is NOT settled** — resolving is a click, not evidence, so it is followed up and re-raised
-  as before. ⚠ A finding fixed in code fails rule (4) and stays on the follow-up's own "addressed"
-  path. Pinned by `settled-by-reply.test.ts` (the rule) and `settled-by-reply-pipeline.test.ts`
+  item, never on the stored `follow_up` record, never in the pane's open "Previous review" list and
+  never an AI Fix `P` seed item; the prompt lists it (up to 30) under **Settled in an earlier
+  review**, one `---BEGIN SETTLED FINDING S<n> <nonce>---` fence each carrying the path, title and the
+  reply as data (in the nonce-collision scan), telling the model not to raise it again; and the
+  manager DROPS, in code, any new finding that repeats one (`dropSettledReraises`: same path, title
+  equal once folded or word overlap ≥ `SETTLED_TITLE_SIMILARITY` 0.6). A finding LINKED to a
+  still-open earlier one (`priorFindingId` set) is that one's re-raise and is kept. The review READ
+  carries the same list as `ClaudeReview.settledEarlier` (succeeded runs only, DB-only, minus any id
+  the run's own follow-up still lists), and the tab shows it in the closed "Addressed, settled or no
+  longer applies" group: the reply's author + excerpt and how it was accepted ("not an issue" / "to
+  be handled later"), marked "settled in an earlier review".
+  ⚠ **RETIRED (2026-10): "resolved + someone else replied + code unchanged ⇒ settled on sight".**
+  Resolving is a click, so a RESOLVED thread with a person's reply is now JUDGED exactly like an open
+  one (§ Replies to Limn's findings). ⚠ **A thread resolved with NO reply is unchanged** — followed up
+  on the code and re-raised as before. ⚠ **Backward compatibility:** a finding the retired rule
+  settled in an earlier run left the chain WITHOUT being judged, and nothing would bring it back.
+  `persist.ts` `loadUnjudgedReplyFindings` (pure rule `unjudgedReplyCandidateIds`) finds earlier
+  posted findings with no closing follow-up status (`addressed`, `no_longer_applies`,
+  `reply_accepted`) as their NEWEST item, not continued by a later POSTED re-raise and not already in
+  this run's follow-up or settled — oldest first, at most `UNJUDGED_REPLY_MAX` (20). The manager
+  attaches their threads and keeps only those RESOLVED WITH A REPLY, as CARRIED items, so each is
+  judged once on the next run and then follows the ordinary chain. Old runs' stored records are not
+  rewritten. Pinned by `settled-by-reply.test.ts` (the rules) and `settled-by-reply-pipeline.test.ts`
   (end to end through the manager).
 - **CARRY-FORWARD.** Every item the previous run recorded as `not_checked` names an older finding;
   those are re-loaded (ids from our own stored JSON, re-scoped to this PR + account by the query),
@@ -450,8 +455,9 @@ review, with no "Previous review" prompt section, no `follow_up` record and no f
 
 ### Replies to Limn's findings (accept, or push back once)
 
-When someone REPLIES on the GitHub thread of one of Limn's own posted findings and the thread is
-still open, the re-review judges the reply instead of re-raising the finding blind. Other
+When someone REPLIES on the GitHub thread of one of Limn's own posted findings — whether the
+thread is still open OR was resolved after the reply — the re-review judges the reply instead of
+re-raising the finding blind. Other
 reviewers' threads are unchanged (next section). Code: `claude-review/finding-replies.ts` (loader +
 which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resolve.ts` +
 `auto-pushback.ts` (the GitHub writes).
@@ -468,6 +474,22 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
   nonce fence as data (and in the collision scan). A read failure costs the replies only.
   ⚠ An automatic pushback SKIPS a RESOLVED thread (nothing claimed); a manual "Post reply" may still
   post there.
+- ⚠ **A RESOLVED thread with a reply is judged, not settled on sight** (it used to be — § Follow-up,
+  SETTLED BY A REPLY). `PriorFindingForFollowUp.thread` carries `isResolved` + `resolvedBy`
+  (`review_threads.resolved_by_login`, null when not synced); the finding's fence says "The thread was
+  resolved on GitHub by @who." (or without the name), and the prompt says resolving alone does not
+  settle it. ⚠ **COST: such a finding goes LAST in `selectPriorFindings`** (after every open one, own
+  then carried; `isResolvedWithReplies`), so its replies (up to 5 × 1,500 characters) never crowd an
+  open finding out of the 40-item / 24k cap; one that does not fit is `not_checked` and carried like
+  any other. ⚠ **The same-head lock never decides one nobody has judged** (`lockFor`, follow-up.ts):
+  unreported, an un-judged resolved-with-reply finding is `not_checked` (carried, not raised again,
+  not counted) rather than the lock's `not_addressed`, which would count it in the verdict without
+  anyone reading the reply; a reported code status is still overruled by the lock, and a carried one
+  with an earlier judgement locks as before. Outcomes: `reply_accepted` ⇒ settled from then on (no reply is posted: auto resolve skips
+  a resolved thread, and "Reply and resolve" is not offered); `reply_disputed` ⇒ OPEN like any
+  pushback — raised again, carried, counted in the auto verdict at its severity, an AI Fix `P` item —
+  and the row wears **"Resolved on GitHub"** beside "Pushed back"; NO automatic pushback, a manual
+  "Post reply" still posts.
 - **Two statuses, only on an item that had replies**: `reply_accepted` (+ `acceptKind`
   `not_valid` — the reply shows the finding was wrong — or `deferred` — a reasonable promise to fix
   it later, a follow-up PR or a ticket — and a one-sentence acknowledgement) and `reply_disputed`
@@ -479,9 +501,10 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
   (`deferralRefused: true`); `not_valid` is accepted at any severity; empty text gets a templated
   one (≤ 600 chars). A reply status MAY override the same-head lock — a reply is new evidence even
   when the code has not moved. A carried `reply_disputed` locks as `not_addressed`.
-- **Accepted ⇒ settled from then on** — the SECOND rule feeding `loadSettledByReplyFindings`
+- **Accepted ⇒ settled from then on** — the ONLY rule feeding `loadSettledByReplyFindings`
   (`acceptedReplyFindings`, over every earlier succeeded run's `follow_up`): out of later
-  follow-ups, listed under "Settled in an earlier review" ("Accepted: …"), and a re-raise is
+  follow-ups, listed under "Settled in an earlier review" ("Accepted: …") in the prompt and in the
+  tab's closed group (`settledEarlier`, who replied + excerpt + how), and a re-raise is
   dropped in code — in the same run too (`dropAcceptedReraises`: its `priorRef`, or same path +
   similar title). ⚠ A NEW reply or new commits do NOT unsettle it (kept simple: the author was told
   it was accepted).

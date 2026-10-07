@@ -7085,6 +7085,25 @@ export interface ClaudeFollowUpItemRecord {
   threadFindingId?: number | null;
 }
 
+// An earlier finding a review SETTLED by accepting a person's reply on its GitHub thread. Read-only
+// history: who replied, an excerpt, and how it was accepted. Nothing here is model text except the
+// finding's own title (and the reply, which a person wrote).
+export interface ClaudeSettledFinding {
+  // The earlier finding (claude_review_findings.id, same PR).
+  priorFindingId: number;
+  path: string;
+  // From the head of the review that raised it. null / absent = whole file or not recorded.
+  line?: number | null;
+  side?: ClaudeFindingSide;
+  severity?: ClaudeFindingSeverity;
+  title: string;
+  acceptKind: ClaudeReplyAcceptKind | null;
+  // The person's reply that was accepted (author login + a short excerpt). null when not recorded.
+  reply: { author: string; excerpt: string } | null;
+  // The review whose follow-up accepted it.
+  acceptedInReviewId: number | null;
+}
+
 // The wire shape adds `reraisedFindingId`, DERIVED on read: the id of this run's finding that
 // raises the earlier one again (its `priorFindingId` matches), else null.
 export interface ClaudeFollowUpItem extends ClaudeFollowUpItemRecord {
@@ -7294,6 +7313,10 @@ export interface ClaudeReview {
   // What this run found about the PREVIOUS succeeded review's findings; null when there was no
   // earlier review with findings to check (or this run skipped).
   followUp?: ClaudeReviewFollowUp | null;
+  // DERIVED on read (succeeded runs only): earlier findings an EARLIER review settled by accepting
+  // a person's reply on GitHub ('reply_accepted'), which therefore left this run's follow-up. Shown
+  // in the "Addressed, settled or no longer applies" group. Absent on older servers ⇒ none.
+  settledEarlier?: ClaudeSettledFinding[] | null;
   // Who started the run. Absent on older servers = 'manual'.
   trigger?: ClaudeReviewTrigger;
   // Every other open review thread on the PR (people and other review bots) and what this run

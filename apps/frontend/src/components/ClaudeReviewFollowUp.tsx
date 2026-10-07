@@ -36,6 +36,7 @@ import type {
   ClaudeFollowUpItem,
   ClaudeFollowUpStatus,
   ClaudeReviewFollowUp,
+  ClaudeSettledFinding,
   ClaudeReviewTicketEntry,
   ClaudeReviewTicketField,
   ClaudeReviewTicketsCheck,
@@ -85,8 +86,11 @@ import {
   isJiraDraft,
   notCheckedReason,
   partitionFollowUp,
+  RESOLVED_ON_GITHUB_CHIP,
+  isResolvedPushback,
   replyActions,
   replyStatusHeading,
+  settledEarlierHeading,
   storyFindingIdFor,
   storyItemChipLabel,
   ticketsPanelHint,
@@ -1282,6 +1286,9 @@ function FollowUpRow({
         >
           <PrRefText text={item.title} />
         </span>
+        {isResolvedPushback(item) && (
+          <span className={`${CHIP} ${RESOLVED_ON_GITHUB_CHIP.cls}`}>{RESOLVED_ON_GITHUB_CHIP.label}</span>
+        )}
         {item.carried && <span className={`text-xs ${MUTED}`}>from an earlier review</span>}
       </div>
       <div className="mt-0.5">
@@ -1320,19 +1327,68 @@ function FollowUpRow({
 }
 
 /**
+ * A finding an EARLIER review settled by accepting a person's reply (read-only history): who
+ * replied, an excerpt, and how it was accepted. It left the follow-up, so it has no status of this
+ * run's and no buttons.
+ */
+function SettledEarlierRow({
+  item,
+  changedPaths,
+  onOpenInChanges,
+}: {
+  item: ClaudeSettledFinding;
+  changedPaths: ReadonlySet<string>;
+  onOpenInChanges?: OpenInChanges;
+}): JSX.Element {
+  return (
+    <li className="rounded border border-gray-100 px-3 py-2 text-sm dark:border-gray-800">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS.reply_accepted}`}>{settledEarlierHeading(item)}</span>
+        {item.severity != null && (
+          <span className={`${CHIP} ${SEVERITY_CLASS[item.severity]}`}>{SEVERITY_WORD[item.severity]}</span>
+        )}
+        <span className="min-w-0 break-words text-gray-600 dark:text-gray-400">
+          <PrRefText text={item.title} />
+        </span>
+        <span className={`text-xs ${MUTED}`}>settled in an earlier review</span>
+      </div>
+      <div className="mt-0.5">
+        <CodeAnchorRef
+          path={item.path}
+          line={null}
+          side={item.side ?? 'RIGHT'}
+          inChangeset={changedPaths.has(item.path)}
+          onOpenInChanges={onOpenInChanges}
+        />
+      </div>
+      {item.reply != null && (
+        <p className={`mt-1 text-xs ${MUTED}`}>
+          @{item.reply.author} replied: “{item.reply.excerpt}”
+        </p>
+      )}
+    </li>
+  );
+}
+
+/**
  * What became of the previous review's comments. Still-open ones first and prominent (not
- * addressed, then partly addressed, then not checked); addressed and no-longer-applies ones sit
- * in a disclosure, collapsed by default.
+ * addressed, then partly addressed, then not checked); addressed, settled and no-longer-applies
+ * ones sit in a disclosure, collapsed by default — with the findings an EARLIER review settled by
+ * accepting a reply (`settledEarlier`), so the reader can see what was dismissed and by whom.
  */
 export function ClaudeReviewFollowUpSection({
   followUp,
+  settledEarlier = [],
   findings,
   changedPaths,
   onOpenInChanges,
   prId,
   reviewId,
 }: {
-  followUp: ClaudeReviewFollowUp;
+  // null when this run followed nothing up (then only `settledEarlier` can show).
+  followUp: ClaudeReviewFollowUp | null;
+  // From `settledEarlierRows` (already filtered).
+  settledEarlier?: readonly ClaudeSettledFinding[];
   // This run's findings, to resolve each re-raised comment's CURRENT anchor.
   findings: readonly ClaudeFinding[];
   changedPaths: ReadonlySet<string>;
@@ -1343,32 +1399,41 @@ export function ClaudeReviewFollowUpSection({
 }): JSX.Element | null {
   const [closedOpen, setClosedOpen] = useState(false);
   const findingsById = useMemo(() => new Map(findings.map((f) => [f.id, f])), [findings]);
-  const { open, closed } = useMemo(() => partitionFollowUp(followUp.items), [followUp.items]);
-  if (followUp.items.length === 0) return null;
+  const items = followUp?.items ?? [];
+  const { open, closed } = useMemo(() => partitionFollowUp(items), [items]);
+  if (items.length === 0 && settledEarlier.length === 0) return null;
   const rowProps = {
     findingsById,
-    headMoved: followUp.headMoved,
+    headMoved: followUp?.headMoved ?? false,
     changedPaths,
     onOpenInChanges,
     prId,
     reviewId,
   };
+  const closedCount = closed.length + settledEarlier.length;
   return (
     <ReviewSection
       title="Previous review"
       pills={
         <>
-          <span className={`font-mono text-xs ${MUTED}`} title={followUp.priorHeadSha}>
-            {followUp.priorHeadSha.slice(0, 7)}
-          </span>
+          {followUp != null && (
+            <span className={`font-mono text-xs ${MUTED}`} title={followUp.priorHeadSha}>
+              {followUp.priorHeadSha.slice(0, 7)}
+            </span>
+          )}
           {FOLLOW_UP_PILL_ORDER.map((st) => {
-            const n = followUp.items.filter((it) => it.status === st).length;
+            const n = items.filter((it) => it.status === st).length;
             return n > 0 ? (
               <span key={st} className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS[st]}`}>
                 {n} {FOLLOW_UP_STATUS_LABEL[st].toLowerCase()}
               </span>
             ) : null;
           })}
+          {settledEarlier.length > 0 && (
+            <span className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS.reply_accepted}`}>
+              {settledEarlier.length} settled earlier
+            </span>
+          )}
         </>
       }
     >
@@ -1379,7 +1444,7 @@ export function ClaudeReviewFollowUpSection({
           ))}
         </ul>
       )}
-      {closed.length > 0 && (
+      {closedCount > 0 && (
         <div>
           <button
             type="button"
@@ -1388,12 +1453,20 @@ export function ClaudeReviewFollowUpSection({
             className={`inline-flex items-center gap-1 text-xs ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
           >
             <ChevronIcon dir={closedOpen ? 'down' : 'right'} size={11} />
-            Addressed, settled or no longer applies ({closed.length})
+            Addressed, settled or no longer applies ({closedCount})
           </button>
           {closedOpen && (
             <ul className="mt-1.5 space-y-1.5">
               {closed.map((it) => (
                 <FollowUpRow key={it.priorFindingId} item={it} muted {...rowProps} />
+              ))}
+              {settledEarlier.map((it) => (
+                <SettledEarlierRow
+                  key={`settled-${it.priorFindingId}`}
+                  item={it}
+                  changedPaths={changedPaths}
+                  onOpenInChanges={onOpenInChanges}
+                />
               ))}
             </ul>
           )}

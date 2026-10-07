@@ -207,5 +207,9 @@ describe('a re-review reads the replies on its own findings', () => {
     expect(lastArgs!.prompt).toContain('## Settled in an earlier review');
     expect(lastArgs!.prompt).toContain('(Accepted: the finding did not apply.)');
     expect(r.findings.map((f) => f.title)).not.toContain('Unchecked input in sendMail');
+    // …and the pane lists it in the closed group: who replied, what they said, how it was accepted.
+    expect(r.settledEarlier).toEqual([
+      expect.objectContaining({ title: 'Unchecked input in sendMail', acceptKind: 'not_valid', reply: { author: 'alice-dev', excerpt: EXPLAIN } }),
+    ]);
   });
 });

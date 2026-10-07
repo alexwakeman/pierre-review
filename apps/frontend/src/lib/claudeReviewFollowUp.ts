@@ -30,6 +30,7 @@ import type {
   ClaudeReviewTicketsCheck,
   ClaudeReviewTicketSource,
   ClaudeReviewVerdict,
+  ClaudeSettledFinding,
   ClaudeTicketAlignment,
   ClaudeTicketCriterionStatus,
   ClaudeThreadAddressed,
@@ -350,6 +351,32 @@ export function replyStatusHeading(item: Pick<ClaudeFollowUpItem, 'status' | 'ac
   if (item.status === 'reply_disputed') return 'Pushed back';
   if (item.status !== 'reply_accepted') return null;
   return item.acceptKind === 'deferred' ? 'Reply accepted: to be handled later' : 'Reply accepted: not an issue';
+}
+
+/**
+ * A pushback on a thread someone RESOLVED on GitHub: still open here (it counts and is raised
+ * again), so the row says the thread was closed. Limn never pushes back there on its own.
+ */
+export function isResolvedPushback(item: Pick<ClaudeFollowUpItem, 'status' | 'threadResolved'>): boolean {
+  return item.status === 'reply_disputed' && item.threadResolved === true;
+}
+
+export const RESOLVED_ON_GITHUB_CHIP = { label: 'Resolved on GitHub', cls: CHIP_GREY };
+
+/** The heading of a finding an EARLIER review settled by accepting a reply. */
+export function settledEarlierHeading(s: Pick<ClaudeSettledFinding, 'acceptKind'>): string {
+  return replyStatusHeading({ status: 'reply_accepted', acceptKind: s.acceptKind })!;
+}
+
+/**
+ * The settled-earlier rows to show beside this run's closed follow-up items: praise left out, and
+ * an id the follow-up still lists left out (it shows there). Stable (the server's order).
+ */
+export function settledEarlierRows(
+  review: Pick<ClaudeReview, 'followUp' | 'settledEarlier'>,
+): ClaudeSettledFinding[] {
+  const listed = new Set((review.followUp?.items ?? []).map((it) => it.priorFindingId));
+  return (review.settledEarlier ?? []).filter((s) => s.severity !== 'praise' && !listed.has(s.priorFindingId));
 }
 
 /**
