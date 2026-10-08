@@ -23,6 +23,7 @@ import {
 import { reportModelLabel } from '../../hooks/usePeriodReports.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { MentionTextarea } from '../MentionTextarea.js';
+import { InfoButton } from '../InfoModal.js';
 import {
   BotIcon,
   ChartIcon,
@@ -154,11 +155,11 @@ function TranscriptTurn({
             <AdHocChart spec={r.chart} />
           </div>
         )}
-        {caption !== '' && <div className="mt-1.5 text-[10px] text-gray-400">{caption}</div>}
+        {caption !== '' && <div className="mt-1.5 text-[11px] text-gray-400">{caption}</div>}
         {/* The server dropped prior turns (depth cap and/or token budget) for THIS answer — say
             so, or a reference the model visibly missed reads as a model failure. */}
         {trimmed > 0 && (
-          <div className="mt-0.5 text-[10px] italic text-gray-400">
+          <div className="mt-0.5 text-[11px] italic text-gray-400">
             The model couldn&apos;t see the {trimmed} earliest turn{trimmed === 1 ? '' : 's'} for
             this answer.
           </div>
@@ -209,14 +210,14 @@ function HistoryRow({
             without it. Rows stored before ranges shipped carry no window and show nothing. */}
         {item.window && (
           <span
-            className="shrink-0 rounded bg-gray-100 px-1 text-[10px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+            className="shrink-0 rounded bg-gray-100 px-1 text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
             title={describeAnswerWindow(item.window) ?? undefined}
           >
             {INSIGHTS_RANGE_LABEL[item.window.kind]}
           </span>
         )}
         <span
-          className="shrink-0 text-[10px] text-gray-400"
+          className="shrink-0 text-[11px] text-gray-400"
           title={new Date(item.createdAt).toLocaleString()}
         >
           {new Date(item.createdAt).toLocaleDateString()}
@@ -228,7 +229,7 @@ function HistoryRow({
           e.stopPropagation();
           onReuse();
         }}
-        className="shrink-0 border-l border-gray-200 px-2 text-[10px] font-medium text-ai-signal hover:bg-ai-signal/10 hover:underline dark:border-gray-800"
+        className="shrink-0 border-l border-gray-200 px-2 text-[11px] font-medium text-ai-signal hover:bg-ai-signal/10 hover:underline dark:border-gray-800"
         title="Load this question back into the box to edit or re-ask"
       >
         <RefreshIcon size={10} className="mr-1 inline-block align-[-0.1em]" />
@@ -447,7 +448,21 @@ export function AdHocChatPanel({
           <CommentIcon size={15} className="inline-block align-[-0.1em]" />{' '}
           {periodLabel != null ? 'Ask about this period' : 'Ask about the sprint'}
         </span>
-        <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal">
+        <InfoButton title={periodLabel != null ? 'Ask about this period' : 'Ask about the sprint'}>
+          <p>
+            Pick a question or type your own. Answers come from this workspace’s data for{' '}
+            {periodLabel != null ? 'the period shown above' : 'the sprint'}, written by your
+            configured report model.
+          </p>
+          <p>
+            Follow-up questions continue the conversation, up to {SPRINT_CHAT_MAX_TURNS} questions.
+            Then start a new one.
+          </p>
+          <p>
+            Type <span className="font-mono">@</span> to mention someone.
+          </p>
+        </InfoButton>
+        <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-ai-signal">
           Pro
         </span>
         {thread.length > 0 && (
@@ -464,17 +479,10 @@ export function AdHocChatPanel({
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
         {periodLabel != null ? (
           <>
-            Pick a question below or type your own — answered from this Workspace&apos;s data over{' '}
-            <span className="font-medium">{periodLabel}</span>, the period shown above (runs your
-            configured report model). Follow-ups continue the conversation. Type{' '}
-            <span className="font-mono">@</span> to mention someone.
+            Answers use <span className="font-medium">{periodLabel}</span>, the period shown above.
           </>
         ) : (
-          <>
-            Pick a question below or type your own — answered from this Workspace&apos;s sprint
-            data (runs your configured report model). Follow-ups continue the conversation. Type{' '}
-            <span className="font-mono">@</span> to mention someone.
-          </>
+          'Pick a question below or type your own.'
         )}
       </p>
 
@@ -512,7 +520,7 @@ export function AdHocChatPanel({
               they are asks about a conversation state that is being superseded. */}
           {!chat.isPending && followUps.length > 0 && (
             <div data-testid="chat-follow-ups">
-              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                 Follow up
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -555,14 +563,14 @@ export function AdHocChatPanel({
               <button
                 type="button"
                 onClick={() => setBuiltinsOpen((o) => !o)}
-                className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                className="mb-1 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                 aria-expanded={open}
               >
                 <ChevronIcon dir={open ? 'down' : 'right'} size={10} />
                 {g.title}
               </button>
             ) : (
-              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                 {g.title}
               </div>
             )}
@@ -697,7 +705,7 @@ export function AdHocChatPanel({
       {/* Saved prompts — click a chip to re-run it; ✕ removes it. */}
       {pins.length > 0 && (
         <div className="mt-3">
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
             Pinned
           </div>
           <div className="flex flex-wrap gap-1.5">

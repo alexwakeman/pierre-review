@@ -14,6 +14,7 @@ import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { ChartCard, PALETTE } from '../charts/common.js';
 import { DayStrip } from '../charts/DayStrip.js';
 import { ChevronIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import { CiDot } from './BranchStatusChip.js';
 
 // The GitHub URL for a PR: every segment is data, encoded, and run through safeExternalUrl
@@ -151,7 +152,7 @@ function PrRow({
               })
             }
             title={`Open #${pr.prNumber} in this app`}
-            className="shrink-0 rounded bg-sky-500/10 px-1 font-mono text-[10px] text-sky-700 hover:bg-sky-500/20 dark:text-sky-300"
+            className="shrink-0 rounded bg-sky-500/10 px-1 font-mono text-[11px] text-sky-700 hover:bg-sky-500/20 dark:text-sky-300"
           >
             #{pr.prNumber}
           </button>
@@ -164,12 +165,12 @@ function PrRow({
             target="_blank"
             rel="noreferrer noopener"
             title={`#${pr.prNumber} on GitHub — not synced here`}
-            className="shrink-0 rounded bg-gray-500/10 px-1 font-mono text-[10px] text-gray-500 hover:text-sky-600 dark:text-gray-400 dark:hover:text-sky-400"
+            className="shrink-0 rounded bg-gray-500/10 px-1 font-mono text-[11px] text-gray-500 hover:text-sky-600 dark:text-gray-400 dark:hover:text-sky-400"
           >
             #{pr.prNumber}
           </a>
         ) : (
-          <span className="shrink-0 font-mono text-[10px] text-gray-400">#{pr.prNumber}</span>
+          <span className="shrink-0 font-mono text-[11px] text-gray-400">#{pr.prNumber}</span>
         )}
         {/* UNTRUSTED text (a PR title / commit message) — a plain text node, never markdown. */}
         <span className="min-w-0 flex-1 truncate text-gray-700 dark:text-gray-200">
@@ -223,7 +224,7 @@ function BranchTrends({
   const daily = data?.daily ?? [];
   const hasData = daily.length > 0;
   const placeholder = (label: string): JSX.Element => (
-    <div className="flex h-full items-center justify-center text-[10px] text-gray-400">
+    <div className="flex h-full items-center justify-center text-[11px] text-gray-400">
       {label}
     </div>
   );
@@ -254,6 +255,19 @@ function BranchTrends({
     />
   );
 
+  // How to read the strip — one modal for both mounts. Count-free and informational (trunk raises
+  // no badge or attention item), so this explains the picture and asserts nothing about the repo.
+  const legend = (title: string): JSX.Element => (
+    <InfoButton title={title}>
+      <p>
+        One cell per day (UTC) on the default branch: red for failing commits, green for passing
+        ones, split by their share of the day. A darker cell had more commits.
+      </p>
+      <p>The line above the cells is pull requests merged that day.</p>
+      <p>It covers the days Limn keeps history for. Hover a cell for its counts.</p>
+    </InfoButton>
+  );
+
   if (full) {
     // The per-repo console: the ChartCard composition, exactly as BotDetailPanel's
     // "Daily coverage" card.
@@ -261,7 +275,8 @@ function BranchTrends({
       <div className="mb-2">
         <ChartCard
           title="Trunk health & throughput"
-          note="one cell / day · red = failing, green = passing commits · line = PRs merged · retained window (UTC)"
+          note="daily · retained window (UTC)"
+          info={legend('Trunk health & throughput')}
         >
           <div style={{ height: STRIP_H }}>{strip}</div>
         </ChartCard>
@@ -273,8 +288,9 @@ function BranchTrends({
   // caption instead of a card.
   return (
     <div className="mb-1 border-b border-gray-100 pb-1 dark:border-gray-800/60">
-      <div className="text-[10px] text-gray-400">
-        Trunk CI · red = failing, green = passing · line = PRs merged · retained window
+      <div className="flex items-center gap-1 text-[11px] text-gray-400">
+        <span>Trunk CI · daily</span>
+        {legend('Trunk CI')}
       </div>
       <div style={{ height: STRIP_H }}>{strip}</div>
     </div>
@@ -325,7 +341,7 @@ function BranchRow({
         >
           <span
             aria-hidden="true"
-            className={`w-2 shrink-0 text-[9px] text-gray-400 ${hasHistory ? '' : 'opacity-0'}`}
+            className={`w-2 shrink-0 text-[11px] text-gray-400 ${hasHistory ? '' : 'opacity-0'}`}
           >
             <ChevronIcon dir={open ? 'down' : 'right'} size={10} />
           </span>

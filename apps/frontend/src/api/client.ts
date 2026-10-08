@@ -296,6 +296,11 @@ function workspaceParam(workspaceId: number): string {
   return `workspace=${workspaceId}`;
 }
 
+/** Chronology's window on the wire: the workspace's reporting window, or a fixed number of days. */
+function flowWindowParam(window: number | 'reporting'): string {
+  return window === 'reporting' ? 'window=reporting' : `days=${window}`;
+}
+
 // `repoIds=<csv>` — a NARROWING WITHIN the workspace, never a scope in its own right. The server
 // intersects it with the workspace's membership (`membership ∩ (repoIds ?? membership)`), so it
 // can no longer reach outside the scope and can no longer disagree with it about the verdict:
@@ -897,13 +902,11 @@ export const api = {
   // ⚠ `useFlowFindings` gates its `enabled` on the same capability, so an unentitled SPA never
   // calls this. It polls on a 5-minute interval — an ungated hook would be a 402 on a timer, per
   // mounted pane, and the panel would report a paywall as "Could not load this workspace's flow."
-  flowFindings: (workspaceId: number, days?: number) =>
+  // `'reporting'` (the panel's default) is the workspace's REPORTING WINDOW, resolved server-side;
+  // a number is the fixed 30/60/90-day view.
+  flowFindings: (workspaceId: number, window: number | 'reporting' = 'reporting') =>
     get<FlowResponse>(
-      withQuery(
-        '/api/flow-findings',
-        workspaceParam(workspaceId),
-        days != null ? `days=${days}` : undefined,
-      ),
+      withQuery('/api/flow-findings', workspaceParam(workspaceId), flowWindowParam(window)),
     ),
   // The per-metric PR drill-down behind the flow-metric tiles (loaded on tile click) — CORE/free
   // too, so a Feed tile opens the drill-down for everyone.
@@ -1842,13 +1845,13 @@ export const api = {
   // Chronology's pointers (Pro, `periodReports`). ONE builder for both verbs so the POST writes the
   // row the GET reads: the workspace and the Chronology window. The GET never generates; the POST
   // is the only billing path.
-  flowPointers: (workspaceId: number, days: number) =>
+  flowPointers: (workspaceId: number, window: number | 'reporting') =>
     get<FlowPointersResponse>(
-      withQuery('/api/pro/flow-pointers', workspaceParam(workspaceId), `days=${days}`),
+      withQuery('/api/pro/flow-pointers', workspaceParam(workspaceId), flowWindowParam(window)),
     ),
-  flowPointersGenerate: (workspaceId: number, days: number) =>
+  flowPointersGenerate: (workspaceId: number, window: number | 'reporting') =>
     fetch(
-      withQuery('/api/pro/flow-pointers', workspaceParam(workspaceId), `days=${days}`),
+      withQuery('/api/pro/flow-pointers', workspaceParam(workspaceId), flowWindowParam(window)),
       jsonBody('POST'),
     ).then((r) => handle<FlowPointersResponse>(r)),
   // The exact PR list behind the analytics `totals.botOnlyPrs` count — "only a bot reviewed these".

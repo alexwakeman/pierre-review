@@ -4,6 +4,7 @@ import {
   useUpdateWorkspaceProSettings,
   useWorkspaceProSettings,
 } from '../../hooks/useWorkspaceProSettings.js';
+import { InfoButton } from '../InfoModal.js';
 import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
@@ -158,7 +159,25 @@ export function SprintSection(): JSX.Element {
   return (
     <SectionShell
       title="Sprint cadence and comparison window"
-      desc="The sprint length that frames this workspace’s Reports periods and its “Sprint to date” range, and how its Insights compare one stretch of time against another. Both apply to this workspace only — every other workspace sets its own."
+      desc="Applies to this workspace only. Every other workspace sets its own."
+      info={
+        <InfoButton title="Sprint cadence and comparison window">
+          <p>
+            The sprint length sets this workspace’s Reports periods and its “Sprint to date”
+            range.
+          </p>
+          <p>
+            The comparison window is the window Reports measures: the flow metrics, Activity and
+            Reach by repository, and Chronology&rsquo;s first option. Open pull requests and Red
+            checks now count what is open right now, so the window does not change them.
+          </p>
+          <p>
+            Changing the sprint length moves the period boundaries. Reports already generated are
+            kept unchanged and stay readable under Earlier cadences at the bottom of the Reports
+            pane.
+          </p>
+        </InfoButton>
+      }
     >
       <Field
         label="Sprint length"
@@ -243,20 +262,15 @@ export function SprintSection(): JSX.Element {
           ))}
         </select>
       </Field>
-      <p className="text-[11px] text-gray-400">
-        How this workspace’s Insights flow-metrics compare over time. Open PRs always count,
-        regardless of the window.
-      </p>
 
       {/* ⚠ THE DISCLOSURE. Stated BEFORE the Save, and only when the edit would actually regrid —
           so a mode-only change never raises it. */}
       {cadenceDirty && (
         <p className="rounded border border-amber-300/60 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-200">
-          Changing the cadence moves this workspace’s period boundaries. Reports already generated
-          under the old cadence are <span className="font-medium">kept exactly as they are</span> —
-          nothing is deleted or rewritten — but they stop appearing in the period picker, because
-          they measure a different number of days. They stay readable under{' '}
-          <span className="font-medium">Earlier cadences</span> at the bottom of the Reports pane.
+          Saving moves this workspace’s period boundaries. Reports already generated are{' '}
+          <span className="font-medium">kept unchanged</span> but leave the period picker; they
+          stay readable under <span className="font-medium">Earlier cadences</span> at the bottom
+          of the Reports pane.
         </p>
       )}
 

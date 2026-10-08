@@ -41,6 +41,7 @@ import {
 import { AdHocChatPanel } from './AdHocChatPanel.js';
 import { PeriodPeopleSection } from './PeriodPeopleSection.js';
 import { CopyButton } from '../CopyButton.js';
+import { InfoButton } from '../InfoModal.js';
 import {
   CaretIcon,
   ChevronIcon,
@@ -211,7 +212,7 @@ function ChangeCell({
         title="Below the sample or size floor for this metric — the figures are real, but the change is not distinguishable from noise, so no percentage is quoted"
       >
         {signed(delta.absoluteChange, format)}
-        <span className="ml-1 text-[10px]">· not significant</span>
+        <span className="ml-1 text-[11px]">· not significant</span>
       </span>
     );
   }
@@ -312,7 +313,7 @@ const LANE_META: Record<ActorLane, { label: string; note: string; hex: string }>
   },
   housekeeping: {
     label: 'Housekeeping',
-    note: 'CLA, triage, labels, stale, size reports — noise in every review metric',
+    note: 'CLA, triage, labels, stale, size reports',
     hex: PALETTE.slate,
   },
 };
@@ -356,6 +357,37 @@ function LaneBar({
   );
 }
 
+/** The "i" beside "Effort vs automation": what each lane holds. Touch readers cannot reach the
+ *  legend chips' `title=`, so the lane meanings are spelled out here too. */
+function LanesInfo(): JSX.Element {
+  return (
+    <>
+      <p>
+        Who did the work this period: merged pull requests, review comments and approvals, split by
+        who did each one.
+      </p>
+      <dl className="space-y-1.5">
+        {ACTOR_LANES.map((lane) => (
+          <div key={lane}>
+            <dt className="font-medium text-gray-900 dark:text-gray-50">{LANE_META[lane].label}</dt>
+            <dd>{LANE_META[lane].note}.</dd>
+          </div>
+        ))}
+      </dl>
+      <p>
+        The line under the bars groups merges three ways: by people, by automation that writes code
+        (code agents, dependency bots, release automation), and by automation that only responds
+        (AI review, quality gates, housekeeping). A group with no merges is left out.
+      </p>
+      <p>The legend lists only lanes that did something this period.</p>
+      <p>
+        “First review by a person” is the same figure as the table’s “Time to first review by a
+        person” row. Bot approvals do not count.
+      </p>
+    </>
+  );
+}
+
 function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
   const byLane = new Map(lanes.lanes.map((l) => [l.lane, l]));
   const order: ActorLane[] = ACTOR_LANES;
@@ -387,8 +419,13 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
   return (
     <div className="space-y-2 rounded-md border border-gray-200 px-3 py-2.5 dark:border-gray-800">
       <div className="flex flex-wrap items-baseline gap-x-2">
-        <span className="text-[12px] font-medium text-gray-700 dark:text-gray-200">
-          Effort vs automation
+        <span className="flex items-center gap-1">
+          <span className="text-[12px] font-medium text-gray-700 dark:text-gray-200">
+            Effort vs automation
+          </span>
+          <InfoButton title="Effort vs automation">
+            <LanesInfo />
+          </InfoButton>
         </span>
         {lanes.automationMergeSharePct != null && (
           <span className="text-[11px] text-gray-500 dark:text-gray-400">
@@ -417,7 +454,7 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
           write it, or did a machine only comment on it". Rendered only when something merged;
           a share of nothing is not 0%. */}
       {mergeTotal > 0 && (
-        <div className="flex flex-wrap gap-x-3 gap-y-0.5 pt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 pt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
           {(['people', 'authors', 'responds'] as ActorLaneBand[]).map((band) => {
             const n = bandMerges(band);
             // `responds` is ~always 0 merges by construction (a reviewer does not author), so it
@@ -441,7 +478,7 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
           <span
             key={lane}
             title={LANE_META[lane].note}
-            className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400"
+            className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400"
           >
             <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: LANE_META[lane].hex }} />
             {LANE_META[lane].label}
@@ -455,17 +492,16 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
           90 days. Only stated when automation is otherwise present, so a team that has genuinely
           not bought an AI reviewer is not nagged about it. */}
       {ai != null && ai.comments === 0 && lanes.silentAutomation.length > 0 && (
-        <div className="text-[10px] text-amber-600 dark:text-amber-400">
-          No AI-review activity this period, though automation is configured — worth checking it is
-          still running.
+        <div className="text-[12px] text-amber-600 dark:text-amber-400">
+          No AI review comments this period, though automation is set up. Check it is still running.
         </div>
       )}
 
       {/* The human figures the blended table above cannot show. `fmtDuration`, not a raw number:
           an unformatted 5.484166666666667h is how a panel about honesty starts looking careless. */}
       {human != null && (human.medianPrSizeLines != null || human.medianLeadTimeHours != null) && (
-        <div className="text-[10px] text-gray-400">
-          Human PRs
+        <div className="text-[12px] text-gray-400">
+          Pull requests by people
           {human.medianPrSizeLines != null && ` ran ${human.medianPrSizeLines} lines at the median`}
           {human.medianLeadTimeHours != null &&
             `${human.medianPrSizeLines != null ? ' and' : ''} merged in ${fmtDuration(human.medianLeadTimeHours)}`}
@@ -483,10 +519,9 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
           `getPeriodLanes`, so they cannot disagree — and saying so is what stops the next reader
           assuming one of the two screens is stale. */}
       {lanes.medianTimeToFirstHumanReviewHours != null && (
-        <div className="text-[10px] text-gray-400">
+        <div className="text-[12px] text-gray-400">
           First review by a person: {fmtDuration(lanes.medianTimeToFirstHumanReviewHours)} at the
-          median — the same measurement as the row above, which counts people only and excludes
-          bot approvals.
+          median.
         </div>
       )}
     </div>
@@ -564,7 +599,7 @@ function WorkspaceAxis({
   const changeFmt = changeFmtFor(meta);
   return (
     <div className="space-y-0.5">
-      <div className="grid grid-cols-[minmax(8rem,16rem)_5.5rem_5.5rem_1fr] items-baseline gap-2 text-[9px] uppercase tracking-wide text-gray-400">
+      <div className="grid grid-cols-[minmax(8rem,16rem)_5.5rem_5.5rem_1fr] items-baseline gap-2 text-[11px] uppercase tracking-wide text-gray-400">
         <span>Workspace</span>
         <span className="text-right">This period</span>
         <span className="text-right">Prior</span>
@@ -599,7 +634,7 @@ function WorkspaceAxis({
           >
             <span className="flex min-w-0 items-baseline gap-1">
               <span className="truncate text-gray-600 dark:text-gray-300">{row.name}</span>
-              {row.isDefault && <span className="shrink-0 text-[9px] text-gray-400">default</span>}
+              {row.isDefault && <span className="shrink-0 text-[11px] text-gray-400">default</span>}
               {/* Per-workspace coverage honesty — the same disclosure the headline report makes,
                   where THIS workspace's repos onboarded mid-window. Without it a freshly-onboarded
                   workspace's small figures read as a quiet team rather than a short observation.
@@ -619,7 +654,7 @@ function WorkspaceAxis({
               {value == null ? '—' : meta.format(value)}
               {cur?.lowSample && value != null && (
                 <span
-                  className="ml-0.5 align-super text-[9px] text-amber-600 dark:text-amber-400"
+                  className="ml-0.5 align-super text-[11px] text-amber-600 dark:text-amber-400"
                   title={`Thin sample — ${cur.sampleSize} item${cur.sampleSize === 1 ? '' : 's'} behind this figure.`}
                   aria-label="thin sample"
                 >
@@ -631,21 +666,21 @@ function WorkspaceAxis({
               {priorValue == null ? '—' : meta.format(priorValue)}
             </span>
             {axis.prior == null ? (
-              <span className={`text-[10px] ${MUTED}`} title="Nothing exists for the period before this one on the cadence grid">
+              <span className={`text-[11px] ${MUTED}`} title="Nothing exists for the period before this one on the cadence grid">
                 no prior period
               </span>
             ) : priorValue == null || value == null ? (
               <span
-                className={`text-[10px] ${MUTED}`}
+                className={`text-[11px] ${MUTED}`}
                 title="One side has no figure for this metric in this workspace, so there is nothing to subtract"
               >
                 {value == null && priorValue == null ? '—' : 'no prior figure'}
               </span>
             ) : delta === 0 ? (
-              <span className={`text-[10px] ${MUTED}`}>no change</span>
+              <span className={`text-[11px] ${MUTED}`}>no change</span>
             ) : (
               <span
-                className={`text-[10px] ${MUTED}`}
+                className={`text-[11px] ${MUTED}`}
                 title={
                   coveragePartial
                     ? 'Raw change — coverage-biased: one window was only partially tracked (see the amber partial-coverage marker beside the workspace name), so this difference mixes memberships. No significance test is run at workspace grain, so no percentage and no verdict colour.'
@@ -731,7 +766,7 @@ function MetricTable({
     <div className="overflow-x-auto">
       <table className="w-full min-w-[46rem] text-left text-xs">
         <thead>
-          <tr className="border-b border-gray-200 text-[10px] uppercase tracking-wide text-gray-400 dark:border-gray-800">
+          <tr className="border-b border-gray-200 text-[11px] uppercase tracking-wide text-gray-400 dark:border-gray-800">
             <th className="py-1 pr-3 font-medium">Metric</th>
             <th className="py-1 pr-3 text-right font-medium">This period</th>
             <th className="py-1 pr-3 text-right font-medium">Prior</th>
@@ -759,7 +794,7 @@ function MetricTable({
               <tr className="border-b border-gray-100 last:border-0 dark:border-gray-900">
                 <td className="py-1.5 pr-3 align-top">
                   <div className="font-medium text-gray-700 dark:text-gray-200">{meta.label}</div>
-                  {meta.note && <div className="text-[10px] text-gray-400">{meta.note}</div>}
+                  {meta.note && <div className="text-[11px] text-gray-400">{meta.note}</div>}
                   {/* The C4 expander. Only rendered when the response carries the axis — the
                       server already omits it for single-workspace accounts, older plugins send
                       nothing, and in both cases this row is byte-identical to the pre-axis one.
@@ -777,7 +812,7 @@ function MetricTable({
                       type="button"
                       onClick={() => toggleExpanded(key)}
                       aria-expanded={wsOpen}
-                      className="mt-0.5 text-[10px] text-sky-600 hover:underline dark:text-sky-400"
+                      className="mt-0.5 text-[11px] text-sky-600 hover:underline dark:text-sky-400"
                       title="This metric, per workspace, for this period and the prior one"
                     >
                       <ChevronIcon
@@ -812,7 +847,7 @@ function MetricTable({
                       stronger statement. */}
                   {lowSample && value != null && (
                     <span
-                      className="ml-1 align-super text-[9px] font-normal text-amber-600 dark:text-amber-400"
+                      className="ml-1 align-super text-[11px] font-normal text-amber-600 dark:text-amber-400"
                       title={
                         mv
                           ? `Thin sample — ${mv.sampleSize} item${mv.sampleSize === 1 ? '' : 's'} behind this figure. It is what was observed, but it moves easily.`
@@ -825,7 +860,7 @@ function MetricTable({
                   )}
                   {headline != null && (
                     <div
-                      className="text-[10px] text-gray-400"
+                      className="text-[11px] text-gray-400"
                       title={`The comparison covers the ${subsetCovers} repo${subsetCovers === 1 ? '' : 's'} tracked across both periods. This is the figure for all ${report.coverage.totalRepos}.`}
                     >
                       all repos: {meta.format(headline)}
@@ -913,7 +948,7 @@ function Movements({
   const directionOf = new Map(deltas.map((d) => [d.key, d.direction]));
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
         Biggest movers
       </span>
       {top.map((m) => {
@@ -1121,10 +1156,10 @@ function ReportBody({
           about the DATA rather than about what was run — and it invited the reader to press
           Generate on eight periods to fix something that was never broken. */}
       {isFiguresOnly && (
-        <div className="rounded-md border border-gray-200 px-2 py-1.5 text-[11px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
-          <span className="font-medium">Figures only.</span> This period was filled in
-          automatically to give the forecast some history — no comparison, forecast or write-up was
-          computed for it. Generate it to compare it with the period before.
+        <div className="rounded-md border border-gray-200 px-2 py-1.5 text-[12px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
+          <span className="font-medium">Figures only.</span> Filled in automatically as forecast
+          history, with no comparison, forecast or write-up. Generate it to compare it with the period
+          before.
         </div>
       )}
 
@@ -1165,9 +1200,8 @@ function ReportBody({
           <SummaryMarkdown markdown={report.narrative} prRefs={[]} onOpenPr={() => {}} />
         </div>
       ) : (
-        <div className="rounded-md border border-dashed border-gray-200 px-2 py-1.5 text-[11px] text-gray-400 dark:border-gray-800">
-          Figures only — this period has not been written up. Generating a report adds the
-          narrative; the numbers above are already final.
+        <div className="rounded-md border border-dashed border-gray-200 px-2 py-1.5 text-[12px] text-gray-400 dark:border-gray-800">
+          Not written up yet. Generating adds a write-up; the figures above are final.
         </div>
       )}
 
@@ -1344,6 +1378,40 @@ function GenerateControls({
   );
 }
 
+// ── The "i" beside the period title ──────────────────────────────────────────────────────────
+// How a period report is cut and what its chips mean. The chips keep their `title=`, but a touch
+// reader cannot reach a title, so their meanings are restated here.
+function PeriodReportsInfo(): JSX.Element {
+  return (
+    <>
+      <p>
+        A report covers one completed period: a sprint, at this workspace’s sprint length, or a
+        calendar month from the 1st (UTC). Choose with Grain.
+      </p>
+      <p>
+        Months run 28 to 31 days, so a month report has no forecast: the difference in length would
+        read as a trend.
+      </p>
+      <p>
+        The current month shows <span className="font-medium">in progress</span>. Its figures are
+        worked out live each time you open it, nothing is stored or written up, and it is compared
+        with the same days of the month before.
+      </p>
+      <p>
+        <span className="font-medium">Stale</span>: the data changed after the report was written.
+        The report is kept as generated, so a copy already sent stays comparable. Regenerate for the
+        newer figures.
+      </p>
+      <p>
+        <span className="font-medium">Archived</span>, and Earlier cadences: reports written under a
+        sprint length this workspace no longer uses, or older than the current periods reach. They
+        are kept as written and cannot be regenerated, because their dates no longer line up with
+        the current periods.
+      </p>
+    </>
+  );
+}
+
 // ── Empty / setup states ─────────────────────────────────────────────────────────────────────
 function SetupPrompt(): JSX.Element {
   return (
@@ -1351,16 +1419,9 @@ function SetupPrompt(): JSX.Element {
       <div className="mb-1 font-medium text-gray-700 dark:text-gray-200">
         Set a sprint cadence first
       </div>
-      Reports are cut on your sprint boundary, so there is nothing to report until one is set. Open
-      the header menu → <span className="font-medium">Settings</span> and give this workspace a
-      sprint length and a start date — either under{' '}
-      <span className="font-medium">Sprint cadence</span> for this workspace alone, or under{' '}
-      <span className="font-medium">Sprint (account default)</span> for every workspace that has
-      not set its own.
-      <div className="mt-1.5 text-[11px] text-gray-400">
-        There is deliberately no fallback to a rolling two weeks: a period you did not choose is
-        not an artifact you would forward to anyone.
-      </div>
+      Sprint reports follow this workspace’s sprints. Set a sprint length and start date in{' '}
+      <span className="font-medium">Settings → Sprint cadence and comparison window</span>, or
+      switch to <span className="font-medium">Month</span>, which needs no setting.
     </div>
   );
 }
@@ -1533,7 +1594,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
           the loading branches so the control never disappears while a list reloads (switching
           grain is exactly when that reload happens). */}
       <div className="flex flex-wrap items-center gap-1.5 print:hidden">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
           Grain
         </span>
         {(
@@ -1577,7 +1638,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
           {/* Period picker. Newest first; the label IS the date range, which is also the title
               below — the reader never has to decode a key to know what they are looking at. */}
           <div className="flex flex-wrap items-center gap-1.5 print:hidden">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
               Period
             </span>
             {periods.slice(0, 8).map((p) => {
@@ -1638,21 +1699,24 @@ export function PeriodReportsPanel(): JSX.Element | null {
               that wording would be plainly false. */}
           {selected && (
             <div className="flex flex-wrap items-baseline gap-2">
-              <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                {periodTitle(
-                  selected.periodStart,
-                  selected.periodEnd,
-                  selected.grain ?? current?.grain ?? 'sprint',
-                )}
-              </h3>
+              <span className="flex items-center gap-1 self-center">
+                <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                  {periodTitle(
+                    selected.periodStart,
+                    selected.periodEnd,
+                    selected.grain ?? current?.grain ?? 'sprint',
+                  )}
+                </h3>
+                <InfoButton title="Period reports" className="print:hidden text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100">
+                  <PeriodReportsInfo />
+                </InfoButton>
+              </span>
               <span
                 className="text-[11px] text-gray-400"
                 title={
                   (selected.grain ?? current?.grain ?? 'sprint') === 'month'
-                    ? 'A real calendar month, aligned to the 1st (UTC). Months are 28–31 days long, so their lengths are not comparable — which is why no forecast is offered at this grain.'
-                    : list.data?.cadenceSource === 'workspace'
-                      ? 'This workspace runs its own sprint length'
-                      : 'This workspace follows the account-default sprint length'
+                    ? 'A calendar month, from the 1st (UTC)'
+                    : 'This workspace’s sprint length'
                 }
               >
                 {grainCaption(
@@ -1669,7 +1733,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
                   !current?.archived && <span className="ml-1">· this workspace</span>}
               </span>
               {current && !current.inProgress && (
-                <span className="text-[10px] text-gray-400" title={current.periodKey}>
+                <span className="text-[11px] text-gray-400" title={current.periodKey}>
                   {current.model ? `${current.model} · ` : ''}
                   generated {new Date(current.generatedAt).toLocaleString()}
                 </span>
@@ -1679,7 +1743,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
                   nothing to generate, nothing to go stale, and nothing written up. */}
               {current?.inProgress && (
                 <span
-                  className="rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal"
+                  className="rounded bg-ai-signal/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-ai-signal"
                   title="This month is still running. The figures are recomputed live on every read — nothing is stored, nothing is written up, and there is nothing to regenerate. The comparison is against the SAME stretch of the previous month, not against the whole of it."
                 >
                   in progress · {current.elapsedDays ?? 0} day
@@ -1688,7 +1752,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
               )}
               {current?.archived && (
                 <span
-                  className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300"
+                  className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300"
                   title="Generated under a sprint cadence this workspace no longer runs. It is kept exactly as it was written and cannot be regenerated — its window is not on the current period grid."
                 >
                   archived · {current.cadenceDays}-day cadence
@@ -1696,7 +1760,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
               )}
               {current?.stale && (
                 <span
-                  className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"
+                  className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"
                   title="The underlying data changed after this report was written. It is kept exactly as generated — a copy someone has already forwarded has to stay comparable — so regenerate if you want the newer figures."
                 >
                   stale
@@ -1748,10 +1812,10 @@ export function PeriodReportsPanel(): JSX.Element | null {
           ) : (
             <div className="rounded-lg border border-dashed border-gray-300 p-4 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
               {isMonthToDate
-                ? 'Month-to-date figures could not be read just now. This view is computed live — nothing is stored for an open month — so retrying is the whole recovery.'
+                ? 'Couldn’t read the month-to-date figures. Try again.'
                 : grain === 'month'
-                  ? 'This month has not been generated yet. Use Generate above — the first run also backfills earlier months with figures only.'
-                  : 'This period has not been generated yet. Use Generate above — the first run also backfills earlier periods with figures only, so the forecast has something to fit.'}
+                  ? 'This month has not been generated yet. The first Generate also fills in earlier months, figures only.'
+                  : 'This period has not been generated yet. The first Generate also fills in earlier periods, figures only, so the forecast has history.'}
             </div>
           )}
 
@@ -1779,10 +1843,8 @@ export function PeriodReportsPanel(): JSX.Element | null {
                 Earlier cadences ({archived.length})
               </summary>
               <div className="mt-1.5 space-y-1 border-l border-gray-200 pl-2 dark:border-gray-800">
-                <p className="text-[10px] text-gray-400">
-                  Generated under a sprint length this workspace no longer runs, or older than the
-                  grid reaches. Kept exactly as written — they cannot be regenerated, because their
-                  windows are not on the current grid.
+                <p className="text-[12px] text-gray-400">
+                  Kept as written. They cannot be regenerated.
                 </p>
                 {archived.map((a) => (
                   <button

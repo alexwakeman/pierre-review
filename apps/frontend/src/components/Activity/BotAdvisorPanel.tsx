@@ -18,6 +18,7 @@ import type {
   Repo,
 } from '@pierre-review/shared';
 import { useFilters } from '../../store/filters.js';
+import { InfoButton } from '../InfoModal.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import {
@@ -80,12 +81,12 @@ function IntentCard({
           disabled={rec?.status === 'dismissed'}
           title="Include this recommendation in the output"
         />
-        <span className="inline-block rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+        <span className="inline-block rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
           {INTENT_LABEL[intent.kind] ?? intent.kind}
         </span>
         <code className="text-[11px] text-gray-600 dark:text-gray-300">{intent.targetKey}</code>
         {status && (
-          <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${status.className}`}>
+          <span className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${status.className}`}>
             {status.label}
           </span>
         )}
@@ -112,7 +113,7 @@ function IntentCard({
         <button
           type="button"
           onClick={onDismiss}
-          className="ml-auto rounded border border-gray-300 px-1.5 py-0.5 text-[10px] text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-900/60"
+          className="ml-auto rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-900/60"
           title="Record a dismissal — the recommendation stops resurfacing as new"
         >
           Dismiss
@@ -123,7 +124,7 @@ function IntentCard({
         Evidence: {e.volume} {intent.kind === 'SUPPRESS_CATEGORY' || intent.kind === 'ESCALATE' ? 'findings' : 'threads'} ·{' '}
         {e.actedOn} acted on{e.threadLinked != null ? ` (of ${e.threadLinked} thread-linked)` : ''} · {e.untouched} untouched
         {(e.mergedUntouched ?? 0) > 0 ? ` (${e.mergedUntouched} merged past)` : ''} ·{' '}
-        {e.overdueUntouched} overdue{e.dissent > 0 ? ` · ${e.dissent} pushback` : ''}
+        {e.overdueUntouched} unanswered past grace{e.dissent > 0 ? ` · ${e.dissent} pushback` : ''}
       </div>
       {intent.retro.applicable && (
         <div
@@ -151,7 +152,7 @@ function EffectSection({ botUserId }: { botUserId: number }): JSX.Element {
       {panel.anchor && panel.before && panel.after ? (
         <table className="border-collapse">
           <thead>
-            <tr className="text-left text-[10px] uppercase tracking-wide text-gray-400">
+            <tr className="text-left text-[11px] uppercase tracking-wide text-gray-400">
               <th className="pr-3" />
               <th className="pr-3">Before</th>
               <th>After</th>
@@ -181,7 +182,7 @@ function EffectSection({ botUserId }: { botUserId: number }): JSX.Element {
         </div>
       )}
       {anchors.length > 0 && (
-        <div className="text-[10px] text-gray-400">
+        <div className="text-[11px] text-gray-400">
           Anchors: {anchors.map((a) => `${new Date(a.ms).toISOString().slice(0, 10)} (${a.source})`).join(' · ')}
         </div>
       )}
@@ -205,10 +206,21 @@ function ProfileSection({
   if (workspaceId == null) return <div />;
   return (
     <div className="space-y-1.5 text-[11px]">
-      <div className="text-gray-500 dark:text-gray-400">
-        Asked once, kept forever: where {bot.label} is configured and who owns it. The config
-        path unlocks prose tuning for bots with no known adapter; the owner repo is where
-        “File issue” sends the brief.
+      <div className="flex items-center gap-1 text-gray-500 dark:text-gray-400">
+        Where {bot.label} is configured and who owns it
+        <InfoButton title={`${bot.label} profile`}>
+          <p>Saved for this bot until you change it.</p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <span className="font-medium">Config file path</span> lets the advisor suggest
+              wording changes for a bot it has no built-in support for.
+            </li>
+            <li>
+              <span className="font-medium">Bot’s own repo</span> is where “File issue” sends the
+              brief.
+            </li>
+          </ul>
+        </InfoButton>
       </div>
       <label className="block">
         <span className="text-gray-500 dark:text-gray-400">Config file path (in your repo)</span>
@@ -356,7 +368,7 @@ function BotSection({
         </span>
         {bot.pathCoveragePct != null && (
           <span
-            className="text-[10px] text-gray-400"
+            className="text-[11px] text-gray-400"
             title="Only review-comment labels can carry a file path; path-keyed findings describe only this share of the bot's scored output."
           >
             path coverage {bot.pathCoveragePct}%
@@ -531,7 +543,7 @@ function BotSection({
               <span
                 key={`${a.intentKind}-${a.targetKey}-${i}`}
                 title={a.note}
-                className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${
                   a.status === 'applied'
                     ? 'bg-green-500/10 text-green-700 dark:text-green-300'
                     : a.status === 'degraded'
@@ -549,7 +561,7 @@ function BotSection({
                 <code className="text-[11px] font-medium text-gray-700 dark:text-gray-200">
                   {f.path}
                 </code>
-                <span className="text-[10px] text-gray-400">
+                <span className="text-[11px] text-gray-400">
                   {f.before == null
                     ? 'new file'
                     : 'edits the existing file — additive; nothing outside our entries changes'}
@@ -558,7 +570,7 @@ function BotSection({
                   type="button"
                   onClick={() => void navigator.clipboard.writeText(f.after)}
                   title="Copy the generated file content"
-                  className="rounded border border-gray-300 px-1.5 py-0.5 text-[10px] text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-900/60"
+                  className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-900/60"
                 >
                   Copy
                 </button>
@@ -590,14 +602,14 @@ function BotSection({
       {output === 'brief' && briefOpen && brief.data && (
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
               Brief (markdown)
             </span>
             <button
               type="button"
               onClick={() => void navigator.clipboard.writeText(brief.data?.markdown ?? '')}
               title="Copy the markdown — paste it into a doc, a Slack thread, or the bot vendor's support form"
-              className="rounded border border-gray-300 px-1.5 py-0.5 text-[10px] text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-900/60"
+              className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-900/60"
             >
               Copy
             </button>
@@ -675,10 +687,15 @@ export function BotAdvisorPanel(): JSX.Element {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="text-xs text-gray-500 dark:text-gray-400">
-          Evidence-backed configuration changes per bot — deterministic findings over{' '}
-          {data.payload.window.kind === 'rolling_30' ? 'the trailing 30 days' : 'the window'}.
-          Nothing auto-applies.
+        <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+          <InfoButton title="How the advisor works">
+            <p>
+              Suggested configuration changes for each bot, worked out from its comments and what
+              your team did with them. No AI writes the findings.
+            </p>
+            <p>Nothing changes until you act on a suggestion.</p>
+          </InfoButton>
+          {data.payload.window.kind === 'rolling_30' ? 'Last 30 days' : 'This window'}
         </div>
         <div className="ml-auto flex flex-wrap gap-1">
           <button
@@ -719,7 +736,7 @@ export function BotAdvisorPanel(): JSX.Element {
         <div className="rounded-lg border border-red-300/60 bg-red-50/50 p-2.5 text-[11px] text-red-800 dark:border-red-800/60 dark:bg-red-950/20 dark:text-red-300">
           Considering dropping {focusBot.label}? Over this window: {focusBot.threads} threads,{' '}
           {focusBot.actedOn} acted on, {focusBot.untouched} untouched (
-          {focusBot.overdueUntouched} overdue). The suppress and overlap findings below are
+          {focusBot.overdueUntouched} unanswered past grace). The suppress and overlap findings below are
           the evidence — the brief is the deliverable to bring to that discussion.
         </div>
       )}

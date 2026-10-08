@@ -1,5 +1,6 @@
 import { useAuthProviders } from '../../hooks/useAuthProviders.js';
 import { ExternalLinkIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import { SectionShell } from './ui.js';
 
 // GitHub App INSTALL (cloud-only, CORE/free). Signing in via the App uses GitHub's
@@ -27,7 +28,26 @@ export function GithubAppInstallSection(): JSX.Element | null {
   return (
     <SectionShell
       title="GitHub App"
-      desc="Signing in with GitHub doesn’t install the app. Installing it is a separate, one-time step per account or org — and it’s what unlocks private repos and real-time sync."
+      desc="Signing in with GitHub doesn’t install the app. Installing it is a separate, one-time step per account or org, and it is what unlocks private repos and real-time sync."
+      info={
+        <InfoButton title="GitHub App">
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <strong>Private repos</strong> are readable only in orgs where the app is installed.
+              An org owner may need to approve the install.
+            </li>
+            <li>
+              <strong>Real-time sync:</strong> installed repos send changes to Limn as they happen,
+              instead of waiting for the next scheduled check. One install covers everyone watching
+              that repo.
+            </li>
+            <li>
+              <strong>Not installed?</strong> Nothing breaks. Those repos are checked on the
+              schedule, which runs either way. Public repos work with no install.
+            </li>
+          </ul>
+        </InfoButton>
+      }
     >
       <div className="flex flex-wrap gap-2">
         <a className={linkCls} href={installUrl} target="_blank" rel="noreferrer">
@@ -44,24 +64,6 @@ export function GithubAppInstallSection(): JSX.Element | null {
           <ExternalLinkIcon size={11} />
         </a>
       </div>
-
-      <ul className="mt-1 space-y-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
-        <li>
-          <span className="font-medium text-gray-600 dark:text-gray-300">Private repos:</span>{' '}
-          only readable in orgs where the app is installed. An org owner may need to approve.
-        </li>
-        <li>
-          <span className="font-medium text-gray-600 dark:text-gray-300">Real-time sync:</span>{' '}
-          installed repos push changes to Limn as they happen, instead of waiting for the next
-          scheduled poll. Coverage is per <em>repo</em>, not per person — one install covers
-          everyone watching that repo.
-        </li>
-        <li>
-          <span className="font-medium text-gray-600 dark:text-gray-300">Not installed?</span>{' '}
-          Nothing breaks — those repos just stay on the scheduled poll, which keeps running as the
-          backstop either way. Public repos work with no install at all.
-        </li>
-      </ul>
     </SectionShell>
   );
 }

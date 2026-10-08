@@ -26,6 +26,7 @@ import {
   type SeverityPick,
 } from '../../lib/severityAgreement.js';
 import { BotIcon, CloseIcon, ScalesIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import {
   BotClusterCard,
   BotCommentCard,
@@ -504,10 +505,22 @@ export function BotFlaggingDetail(): JSX.Element {
         {/* The BARE tile name — `selectorLabel` returns it unprefixed and PinnedTabsBar adds its
             own "Flagged ·", so the tab chip and this heading always name the same population. */}
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">{title}</h2>
+        {/* ⚠ On the overlap selector the grid folds the CLUSTERS' member comments, not the
+            clusters — a cluster is not an ML row. Its total is unrelated to the list's count and
+            must never be read as its denominator; the modal says so. */}
+        {isClusters && (
+          <InfoButton title={title}>
+            <p>
+              The severity grid counts the bot comments inside these line areas, not the areas.
+              One area where three bots commented adds three rows to the grid, so the grid’s total
+              is not the number of areas listed.
+            </p>
+          </InfoButton>
+        )}
         <span className="text-[11px] text-gray-400">What the bots are flagging</span>
         {repoName && (
           <span
-            className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+            className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
             title="This drill-down was opened from a single repo’s Bots tab, so it measures that repo — the same narrowing the tile you clicked was computed at."
           >
             {repoName}
@@ -589,15 +602,6 @@ export function BotFlaggingDetail(): JSX.Element {
           {/* Pre-refine facets: the grid describes the whole selector population, so clicking a
               cell never zeroes the cell it was clicked on. */}
           <SeverityAgreementMatrixView matrix={matrix} cell={cell} onSelectCell={setCell} />
-          {isClusters && matrix != null && matrix.total > 0 && (
-            // ⚠ On the overlap selector the grid folds the CLUSTERS' member comments, not the
-            // clusters — a cluster is not an ML row. Its total is therefore unrelated to the list's
-            // count and must never be read as its denominator.
-            <p className="text-[11px] text-gray-400">
-              Those counts are the bot comments inside these line areas, not the areas themselves —
-              one overlap contributes a row per bot.
-            </p>
-          )}
 
           {/* Controls. The disagreement filter hides itself when the population carries no vendor
               badge at all: a control whose only possible answer is an empty list reads as broken,

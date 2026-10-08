@@ -223,5 +223,5 @@ export const FLOW_BUDGET_LABEL: Record<FlowBudgetMeasure, string> = {
   firstLook: 'First look',
   reply: 'Reply to review',
   land: 'Approved to merged',
-  lead: 'Whole pull request',
+  lead: 'Opened to merged',
 };

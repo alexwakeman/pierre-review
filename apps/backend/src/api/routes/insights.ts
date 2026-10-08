@@ -16,6 +16,8 @@ import {
   resolveWorkspaceScope,
 } from '../../db/queries.js';
 import { getWorkspaceRepoActivity } from '../../db/repo-activity.js';
+import { getWorkspaceMergedReach } from '../../db/merged-reach.js';
+import { getReportingWindow, reportingWindowInfo } from '../../db/reporting-window.js';
 import { buildPendingBoard } from '../../db/pending-tabs.js';
 import {
   PR_LIVENESS_MAX_IDS,
@@ -80,20 +82,28 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
   // NO `narrow` is passed: Reports covers every repo in the workspace (the repo picker is
   // Timeline-only), so this route takes no `?repoIds=` and must not gain one.
   //
-  // It also carries `repoActivity` — the "where is the work happening?" per-repo breakdown under
-  // the same heading. RIDING THIS RESPONSE RATHER THAN A ROUTE OF ITS OWN IS THE DECISION: it is
-  // the same scope resolved once, the same 14-day window, painted in the same section by the same
-  // component, and it multiplies by nothing (two indexed scans plus the lane resolver's fixed
-  // handful), so `/api/workspace-metrics` keeps the `read` fall-through that api/plugins/
-  // rate-limit.ts records for it. A second route would have re-resolved the scope, doubled the
-  // round trips for one panel, and needed a tier decision to say the same thing.
+  // THE REPORTING WINDOW (db/reporting-window.ts) is resolved ONCE here and handed to every fold
+  // below — the tiles, the per-repo activity and the merged-in-window reach — and echoed as
+  // `window`, so every card in the section measures and names the same window: this sprint so far
+  // when the workspace has a sprint cadence, else the trailing 7/14 days. The "Right now" tiles
+  // (open PRs, red checks) and the 12-week trend band are the labelled exceptions.
+  //
+  // It also carries `repoActivity` and `reach` — the "where is the work happening?" pair under the
+  // same heading. RIDING THIS RESPONSE RATHER THAN A ROUTE OF ITS OWN IS THE DECISION: the same
+  // scope and window resolved once, painted in the same section, and neither multiplies by
+  // anything (indexed window scans, the lane resolver's fixed handful, one co-change lookup), so
+  // `/api/workspace-metrics` keeps the `read` fall-through that api/plugins/rate-limit.ts records
+  // for it.
   app.get('/api/workspace-metrics', async (req): Promise<WorkspaceMetricsResponse> => {
     const q = req.query as { workspace?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
-    const [metrics, repoActivity] = await Promise.all([
-      getWorkspaceMetricsForScope(accountId, scope.repoIds),
-      getWorkspaceRepoActivity(accountId, scope, Date.now()),
+    const nowMs = Date.now();
+    const window = await getReportingWindow(accountId, scope.workspaceId, nowMs);
+    const [metrics, repoActivity, reach] = await Promise.all([
+      getWorkspaceMetricsForScope(accountId, scope.repoIds, window),
+      getWorkspaceRepoActivity(accountId, scope, nowMs, window),
+      getWorkspaceMergedReach(accountId, scope, nowMs, window),
     ]);
     // `workspaceId` is the scope echo every scoped response owes the client (docs/API.md) — this
     // route was the one that never sent it, so a SPA holding a stale `?workspace=` had no way to
@@ -101,7 +111,9 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
     return {
       metrics,
       workspaceId: scope.workspaceId,
+      window: reportingWindowInfo(window, nowMs),
       ...(repoActivity != null ? { repoActivity } : {}),
+      ...(reach != null ? { reach } : {}),
     };
   });
 
@@ -112,7 +124,10 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
     const q = req.query as { workspace?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
-    const detail = await getWorkspaceMetricsDetail(accountId, undefined, scope.repoIds);
+    // The SAME reporting window the tiles were measured over, or a tile and its drill-down would
+    // list two different windows' pull requests.
+    const window = await getReportingWindow(accountId, scope.workspaceId);
+    const detail = await getWorkspaceMetricsDetail(accountId, window, scope.repoIds);
     return { enabled: true, detail };
   });
 

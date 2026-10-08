@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { FlowResponse } from '@pierre-review/shared';
 import { FLOW_DEFAULT_WINDOW_DAYS, getFlowCourts } from '../../db/pr-intervals.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
+import { getReportingWindow } from '../../db/reporting-window.js';
 import { accountIdOf } from '../plugins/auth.js';
 import { entitledProCapabilities } from '../../pro/contract.js';
 
@@ -35,7 +36,13 @@ import { entitledProCapabilities } from '../../pro/contract.js';
 // never a 404, so the route is not an existence oracle. The resolved id is echoed on the response
 // so a client can correct a stale bookmark.
 //
-// `?days=<int>` is the window, default 30. The engine CLAMPS it to [7, 90] rather than trusting
+// `?window=reporting` (THE DEFAULT — also what an absent `?days=` means) measures the workspace's
+// REPORTING WINDOW: this sprint so far when the workspace has a sprint cadence, else the trailing
+// 7/14 days — resolved here through the ONE resolver (`getReportingWindow`), the same window the
+// free flow tiles use, and echoed as `reportingWindow`. The panel's 30/60/90 options are the longer
+// views, sent as `?days=`.
+//
+// `?days=<int>` is the fixed trailing window. The engine CLAMPS it to [7, 90] rather than trusting
 // it: below seven days a median rests on three observations, and above ninety the retroactive
 // COVERAGE BIAS dominates (docs/PERIOD-REPORTING.md — a workspace that onboarded repos over the
 // span shows a "trend" that is entirely onboarding). `coverage` rides every response for the same
@@ -61,13 +68,20 @@ export async function flowRoutes(app: FastifyInstance): Promise<void> {
       reply.status(402);
       return { error: 'pro required' };
     }
-    const q = req.query as { workspace?: string; days?: string };
+    const q = req.query as { workspace?: string; days?: string; window?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
-    // A garbage `?days=` is the DEFAULT, not a 400: this is a dashboard parameter carried in a
-    // bookmark, and the same "never an error out of a scope hint" rule `?workspace=` follows.
-    const parsed = q.days == null ? Number.NaN : Number.parseInt(q.days, 10);
-    const days = Number.isInteger(parsed) && parsed > 0 ? parsed : FLOW_DEFAULT_WINDOW_DAYS;
-    return getFlowCourts(accountId, scope, days);
+    // A garbage `?days=` is the DEFAULT — the reporting window — not a 400: this is a dashboard
+    // parameter carried in a bookmark, and the same "never an error out of a scope hint" rule
+    // `?workspace=` follows. Only a positive integer picks a fixed span; anything else (absent,
+    // `abc`, `0`, an unknown `?window=`) is the reporting window.
+    const parsed = q.days == null ? Number.NaN : Number(q.days);
+    const hasDays = Number.isInteger(parsed) && parsed > 0;
+    if (q.window === 'reporting' || !hasDays) {
+      const nowMs = Date.now();
+      const reporting = await getReportingWindow(accountId, scope.workspaceId, nowMs);
+      return getFlowCourts(accountId, scope, FLOW_DEFAULT_WINDOW_DAYS, { reporting, nowMs });
+    }
+    return getFlowCourts(accountId, scope, parsed);
   });
 }

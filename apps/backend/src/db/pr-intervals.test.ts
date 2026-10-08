@@ -226,7 +226,7 @@ describe('the one-line advice', () => {
       'At least 50% of the time here is spent waiting for the author. Fewer, clearer review rounds will help more than speed.',
     );
     expect(directiveSummaryFor('landing')).toBe(
-      'At least 50% of the time here is spent approved and waiting to merge. Arm “merge when ready” to land these.',
+      'At least 50% of the time here is spent approved and waiting to merge. Arm “merge when ready” to merge these as soon as they can.',
     );
   });
 
@@ -276,18 +276,22 @@ describe('the refusals state one fact each', () => {
   const NO_PERSON = /\b(who|whose|somebody's|their name)\b/i;
 
   it('says exactly what was found', () => {
-    expect(noHumanReviewReason(30)).toBe(
+    expect(noHumanReviewReason('in the last 30 days')).toBe(
       'No pull request merged in the last 30 days had a human review or comment on it.',
     );
-    expect(noneStandsOutReason(7, 30)).toBe('Measured 7 repositories in the last 30 days. None stands out.');
-    expect(noneStandsOutReason(1, 90)).toBe('Measured 1 repository in the last 90 days. None stands out.');
+    expect(noneStandsOutReason(7, 'in the last 30 days')).toBe('Measured 7 repositories in the last 30 days. None stands out.');
+    expect(noneStandsOutReason(1, 'in the last 90 days')).toBe('Measured 1 repository in the last 90 days. None stands out.');
     expect(unreviewedUnderFloorReason()).toBe(
       'No repository merged enough pull requests without a human review to name.',
+    );
+    // The reporting window names itself the way the panel's picker does.
+    expect(noHumanReviewReason('so far this sprint')).toBe(
+      'No pull request merged so far this sprint had a human review or comment on it.',
     );
   });
 
   it('names no one', () => {
-    for (const s of [noHumanReviewReason(30), noneStandsOutReason(3, 30), unreviewedUnderFloorReason()]) {
+    for (const s of [noHumanReviewReason('in the last 30 days'), noneStandsOutReason(3, 'in the last 30 days'), unreviewedUnderFloorReason()]) {
       expect(s).not.toMatch(NO_PERSON);
     }
   });
@@ -297,8 +301,8 @@ describe('the refusals state one fact each', () => {
     // one guarantee reachable from here is that it calls these helpers and carries no copy of the
     // old explanations.
     const src = readFileSync(new URL('./pr-intervals.ts', import.meta.url), 'utf8');
-    expect(src).toContain("refuse('courts', noHumanReviewReason(windowDays))");
-    expect(src).toContain("refuse('courts', noneStandsOutReason(clearedFloor, windowDays), 'measured_clean')");
+    expect(src).toContain("refuse('courts', noHumanReviewReason(phrase))");
+    expect(src).toContain("refuse('courts', noneStandsOutReason(clearedFloor, phrase), 'measured_clean')");
     expect(src).toContain(': unreviewedUnderFloorReason()');
     expect(src).not.toMatch(/no waiting time to attribute|lopsided towards one court|worth naming \(the floor/);
   });

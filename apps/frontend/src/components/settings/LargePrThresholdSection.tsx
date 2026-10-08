@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
 import { useMe } from '../../hooks/useTriage.js';
 import { useSetLargePrThreshold } from '../../hooks/useLargePr.js';
+import { InfoButton } from '../InfoModal.js';
 import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 
 // The large-PR threshold — CORE / free, both deployment modes, every tier. A pull request whose
@@ -54,7 +55,15 @@ export function LargePrThresholdSection(): JSX.Element {
   return (
     <SectionShell
       title="Large pull requests"
-      desc="Flag a pull request once its code churn passes this many lines. Documentation, config, lockfiles and generated or vendored files don’t count — a 4,000-line lockfile bump is not a large PR."
+      desc="Flag a pull request that changes at least this many lines of code."
+      info={
+        <InfoButton title="Large pull requests">
+          <p>
+            Only lines of code count. Documentation, config, lockfiles and generated or vendored
+            files are left out, so a 4,000-line lockfile bump is not a large PR.
+          </p>
+        </InfoButton>
+      }
     >
       <Field
         label="Threshold (lines of code changed)"

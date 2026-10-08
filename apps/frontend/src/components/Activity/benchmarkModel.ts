@@ -951,6 +951,16 @@ export interface CostHeadline {
 }
 
 /**
+ * The share of the monthly price that goes to comments the team used — the positive side of
+ * `unactedUsd` (= price × (1 − acted-on rate)), so it is price × acted-on rate. Stated as this,
+ * not the unacted figure, by product choice; the arithmetic is the same fact. Clamped at zero so a
+ * rounding hair never prints a negative sum.
+ */
+function usedUsd(monthlyUsd: number, unactedUsd: number): number {
+  return Math.max(0, monthlyUsd - unactedUsd);
+}
+
+/**
  * THE MONEY — what this block leads with, in TWO sentences carrying TWO different figures.
  *
  * ⚠ BOTH SENTENCES STATE A RATE, NEVER A HISTORY. They name `monthlyUsd × (1 − yourRate)` and
@@ -997,11 +1007,14 @@ export function costHeadline(cost: BotBenchmarkPlacementCost): CostHeadline | nu
   // ⚠ THE MEASUREMENT WINDOW FOR THE WORK, NOT A BILLING PERIOD — the words have to say which, or
   // this sentence is back to claiming a spend over the span.
   const measured = `measured over the ${formatSpanDays(span.days)} its comments span here`;
+  // ⚠ TWO SENTENCES, ONE FACT EACH: the count (with its own denominator, so the rate beside it is
+  // checkable), then the money. "Settled" is said as what it means — old enough to judge.
   const spend =
-    `Your team used ${formatMetricValue(unacted.actedOnRate, 'rate')} of the ` +
-    `${formatCount(unacted.settledThreads)} comments this bot finished here — so ` +
-    `${formatUsd(unacted.unactedUsd)} of its ${formatUsd(cost.monthlyUsd)} a month is paying for ` +
-    `comments nobody used, ${measured}.`;
+    `Your team used ${formatCount(unacted.actedThreads)} of this bot's ` +
+    `${formatCount(unacted.settledThreads)} comments old enough to judge ` +
+    `(${formatMetricValue(unacted.actedOnRate, 'rate')}), ${measured}. That is ` +
+    `${formatUsd(usedUsd(cost.monthlyUsd, unacted.unactedUsd))} of its ${formatUsd(cost.monthlyUsd)} ` +
+    'a month going to comments your team used.';
 
   const peer = cost.atPeerEngagement;
   if (peer.status !== 'value') return { tone: 'measured', spend, comparison: null };
@@ -1096,7 +1109,7 @@ export const ROLLUP_REFUSAL_HEADLINE: Record<BotBenchmarkRollupRefusalReason, st
   // ⚠ `COST_REFUSAL_HEADLINE.cohort_rate_unfitted`'s noun, one grain up — the counterfactual row's
   // own words ("At the peer median rate"), because this is the sentence that stands in its place.
   no_fitted_cohort_rate: 'No typical team to compare these repos with',
-  no_settled_threads: 'No finished comment threads to measure',
+  no_settled_threads: 'No comment threads old enough to judge yet',
   // ⚠ THE SAME WORDS THE PLACEMENT REFUSAL USES ONE GRAIN DOWN, for the one fact both refuse on —
   // `COST_REFUSAL_HEADLINE`'s rule. Two sentences for one cause on one screen is how a reader stops
   // believing either.
@@ -1473,10 +1486,11 @@ export function workspaceCostHeadline(
   // disagree about whether the count was worth saying.
   const scopeClause = cost.coveredRepos === 1 ? '' : `across the ${scope} it is live in `;
   const spend =
-    `Your team used ${formatMetricValue(unacted.actedOnRate, 'rate')} of the ` +
-    `${formatCount(unacted.settledThreads)} comments this bot finished ${scopeClause}— so ` +
-    `${formatUsd(unacted.unactedUsd)} of its ${formatUsd(cost.monthlyUsd)} a month is paying for ` +
-    'comments nobody used.';
+    `Your team used ${formatCount(unacted.actedThreads)} of this bot's ` +
+    `${formatCount(unacted.settledThreads)} comments old enough to judge ${scopeClause}` +
+    `(${formatMetricValue(unacted.actedOnRate, 'rate')}). That is ` +
+    `${formatUsd(usedUsd(cost.monthlyUsd, unacted.unactedUsd))} of its ${formatUsd(cost.monthlyUsd)} ` +
+    'a month going to comments your team used.';
 
   if (expectation.status !== 'value' || expectation.conversionGapUsd == null) {
     return { tone: 'measured', spend, comparison: null };

@@ -1,5 +1,6 @@
 import { useMe } from '../../hooks/useTriage.js';
 import { useSetBenchmarkConsent } from '../../hooks/useBenchmark.js';
+import { InfoButton } from '../InfoModal.js';
 import { SectionShell } from './ui.js';
 
 // Cross-org benchmark consent (CLOUD-ONLY, CORE/free). Lets an account opt in to contributing
@@ -17,7 +18,16 @@ export function BenchmarkConsentSection(): JSX.Element {
   return (
     <SectionShell
       title="Contribute to the bot benchmark"
-      desc="Opt in to share anonymous, aggregate stats about how your review bots perform, so we can build a neutral cross-organisation benchmark — e.g. “your CodeRabbit is 38% acted-on vs a 45% peer median”. Off by default."
+      desc="Opt in to share anonymous, combined stats about how your review bots perform, to build a benchmark across organisations. Off by default."
+      info={
+        <InfoButton title="Bot benchmark">
+          <p>
+            The benchmark compares your review bots with the same bots at other organisations, for
+            example “your team used 38% of CodeRabbit’s comments; the typical organisation used
+            45%”.
+          </p>
+        </InfoButton>
+      }
     >
       <label className="flex cursor-pointer items-start gap-2">
         <input
@@ -37,8 +47,9 @@ export function BenchmarkConsentSection(): JSX.Element {
       <ul className="mt-1 space-y-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
         <li>
           <span className="font-medium text-gray-600 dark:text-gray-300">What&rsquo;s shared:</span>{' '}
-          per-vendor weekly counts only — threads, comments, acted-on, untouched, and your
-          org-size band. Known vendors only (CodeRabbit, Copilot, …).
+          weekly counts per vendor: threads, comments, how many your team used, how many were left
+          untouched, and your organisation’s size band. Known vendors only (CodeRabbit, Copilot,
+          …).
         </li>
         <li>
           <span className="font-medium text-gray-600 dark:text-gray-300">What&rsquo;s never shared:</span>{' '}
@@ -47,8 +58,8 @@ export function BenchmarkConsentSection(): JSX.Element {
         </li>
         <li>
           <span className="font-medium text-gray-600 dark:text-gray-300">Reversible:</span> turning
-          this off immediately deletes everything you&rsquo;ve contributed. Aggregates are only
-          ever shown across many organisations (k-anonymised).
+          this off immediately deletes everything you&rsquo;ve contributed. Figures are only ever
+          shown combined across many organisations.
         </li>
       </ul>
 

@@ -98,7 +98,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             because it is where the Feed&rsquo;s own bot judgement is made: who counts as a review
             bot <em>in this Workspace</em> (under <strong>Settings</strong>) is exactly what the
             Feed and the Timeline hide by default. The rest of the strip measures them:
-            per-vendor keep / tune / noisy verdicts, cost and severity inflation
+            per-vendor keep / tune / rarely used verdicts, cost and severity inflation
             (<strong>ROI</strong>), what they keep flagging (<strong>Themes</strong>) and how your
             bots compare with the same vendor elsewhere (<strong>Benchmark</strong>).
             A bot is <em>one row per Workspace</em>, merged by GitHub handle however many repos it

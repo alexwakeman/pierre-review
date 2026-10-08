@@ -30,10 +30,13 @@ import { WorkspaceRepoActivityCharts } from './WorkspaceRepoActivityCharts.js';
 // it, so there is no second request and the two halves can never be a refresh apart.
 //
 // ⚠ `WorkspaceRepoActivityCharts` NOW OWNS A SECOND CARD BESIDE ITS OWN — `WorkspaceReachCard`,
-// which folds the workspace's open pull requests through the ONE `blastRadius()` resolver. That
-// one DOES fetch (`/api/open-prs`, the list the Feed has usually already loaded), because the
-// levels are decided client-side so the sensitivity dial stays a render-time comparison. It is
-// CORE/free like everything else here — no capability read anywhere in this subtree.
+// which folds the pull requests MERGED in the reporting window (`reach` on this SAME response)
+// through the ONE `blastRadius()` resolver; the levels are decided client-side so the sensitivity
+// dial stays a render-time comparison. CORE/free like everything else here.
+//
+// ⚠ EVERY CARD HERE IS TIED TO ONE REPORTING WINDOW (`data.window`: this sprint so far, or the last
+// 7/14 days), resolved once on the server. The labelled exceptions are the "Right now" tiles and
+// the 12-week trend band.
 export function WorkspaceFlowMetrics(): JSX.Element | null {
   const workspaceId = useFilters((s) => s.workspaceId);
   const openMetricsDetail = useFilters((s) => s.openMetricsDetail);
@@ -51,7 +54,9 @@ export function WorkspaceFlowMetrics(): JSX.Element | null {
       />
       {/* Absent on a response that predates the field, and the component self-hides when nothing
           was opened in the window. */}
-      {data.repoActivity && <WorkspaceRepoActivityCharts activity={data.repoActivity} />}
+      {data.repoActivity && (
+        <WorkspaceRepoActivityCharts activity={data.repoActivity} window={data.window} />
+      )}
     </div>
   );
 }

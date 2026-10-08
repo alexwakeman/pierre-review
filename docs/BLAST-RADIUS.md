@@ -218,42 +218,44 @@ below — the same fact twice on one card is the double-count the large-PR flag 
 
 ## The per-repository card (Reports → Flow metrics)
 
-**"Reach by repository"** — one row per repository, its currently-open pull requests split
-Low/Medium/High. It sits beside "Activity by repository" in the "Where the work is happening"
-section (`WorkspaceReachCard`, folded by `useWorkspaceReach` in `hooks/useBlastRadius.ts`), and it
-is the only AGGREGATE view of the level in the product.
+**"Reach by repository"** — one row per repository, the pull requests it MERGED in the workspace's
+REPORTING WINDOW split Low/Medium/High. It sits beside "Activity by repository" in the "Where the
+work is happening" section (`WorkspaceReachCard`, folded by `foldWorkspaceReach` in
+`Activity/reachModel.ts` via `useWorkspaceReach` in `hooks/useBlastRadius.ts`), and it is the only
+AGGREGATE view of the level in the product.
 
-**It is a client-side fold, and that is the design.** `useWorkspaceOpenPrs()` already returns every
-open pull request in the workspace carrying `blast`, `codeLoc` and `codeLocIsLowerBound` — i.e.
-`BlastPrFields` plus `repoId` — and the card calls `blastRadius()` on each row with the account's
-resolved config. Three consequences, each of which is why it is not a server field:
+**The window is the Reports rule.** Every Reports figure is tied to the workspace's reporting window
+(this sprint so far when it has a sprint cadence, else the trailing 7/14 days), resolved once on the
+server by core `db/reporting-window.ts` — which asks the plugin's `resolveComparisonWindow`. The card
+used to be a snapshot of the pull requests open at that moment: it read as a sprint figure beside the
+tiles, and it emptied whenever nothing happened to be open. It now rides `reach` on the free
+`/api/workspace-metrics` response (`db/merged-reach.ts`), measured over the same window as the tiles
+beside it, and names that window in its note and its "i". An empty window prints "No pull requests
+merged in this window." rather than hiding the card.
+
+**The server sends SIGNALS, the client decides the level, and that is the design.** Each `reach.prs`
+row carries `blast`, `codeLoc` and `codeLocIsLowerBound` — the same three fields, from the same folds
+(`codeLocFor`, `blastSignalsFor` + the co-change hub reading), that the open-PR rows carry — plus
+`repoId`; the card calls `blastRadius()` on each row with the account's resolved config. Two
+consequences, each of which is why there is no server-side level:
 
 - **The level stays decided in exactly one place.** A per-repo `{low, medium, high}` on the wire
   would be the product's first server-decided level, and the card could then disagree with the chip
   on the same pull request, silently, per row.
 - **The dial stays a render-time comparison.** `useSetBlastConfig` invalidates `['me']` and nothing
-  else; moving the sensitivity dial re-runs a fold over rows already in memory. A server count
-  would have to invalidate `['workspace-metrics']` too, and a stale cached response would draw one
-  distribution while every chip on screen drew another.
-- **It shares a cache entry, and it is now always warm.** The fixed Open PRs tab's chip
-  ("Open PRs · N", mounted with the tab strip), `FeedIsolationBanner`, the People report's picker
-  and the Open PRs view itself (`OpenPrsDetail`) read the same `useWorkspaceOpenPrs` entry, so the
-  card normally rides a read the tab strip already made.
+  else; moving the sensitivity dial re-runs a fold over rows already in memory.
 
-⚠ **IT READS `useWorkspaceOpenPrs`, NEVER `useSearchOpenPrs`.** The latter narrows by
-`filters.repoIds`, the TIMELINE board's picker, which is not mounted on Reports.
+`reach` is capped at `MERGED_REACH_CAP` (3,000) rows as a payload guard; `truncated` is disclosed.
 
 ⚠ **UNKNOWN IS NOT A FOURTH SEGMENT AND NOT A ZERO.** A `null` verdict — never measured, or
 truncated-and-not-high — is not drawn. A fourth band would make "we don't know" look like a level
 and would inflate the bar so it no longer means "pull requests with a reading". The consequence is
-that **the bars do not total the open-PR count the list is ranked by**, so the count is stated in
+that **the bars do not total the merged count the list is ranked by**, so the count is stated in
 words under the card and beside the name of any repository it applies to. (Measured 10.0% of open
 PRs before the file backfill; 1 of 1,562 after it — the disclosure exists for both.)
 
-⚠ **THE POPULATION IS OPEN RIGHT NOW** — a snapshot, not a window, and the fourth framing on that
-panel, so the card says so. It also includes DRAFTS, which the "Open PRs" flow tile above it
-excludes (`state === 'open' && !isDraft`); on a real workspace that is 210 against 204, so the
-draft count is disclosed rather than reconciled by dropping the drafts.
+Drafts do not apply to merged pull requests, so the old draft disclosure is gone with the open-now
+population.
 
 ⚠ **THE THREE FILL COLOURS ARE MEASURED, AND TWO OBVIOUS CHOICES FAILED.** A fill must clear 3:1
 against BOTH page grounds, which admits only luminance 0.107–0.300 — so a light-to-dark ramp of one

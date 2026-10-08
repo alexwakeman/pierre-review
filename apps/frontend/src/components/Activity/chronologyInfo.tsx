@@ -47,8 +47,10 @@ export function ChronologyAboutInfo({
         Chronology adds up those hours.
       </p>
       <p>
-        It measures pull requests a person wrote and a person reviewed or commented on. Pull
-        requests opened by automation are measured on the Bots rail.
+        It measures pull requests a person wrote and a person reviewed or commented on, merged in
+        the window you pick. The first option is the same window as the rest of Reports: this
+        sprint so far, or the last 7 or 14 days, as set for the workspace in Settings. 30, 60 and
+        90 days are longer views. Pull requests opened by automation are measured on the Bots rail.
       </p>
       <p>
         The charts count working hours only{calendar}. Nights, weekends and days off do not count.
@@ -94,12 +96,12 @@ export function BudgetsInfo(): JSX.Element {
         ))}
       </dl>
       <p>
-        Each bar ends where three in four pull requests had finished that wait. The dot is the
-        median, and the thin line runs on to nine in ten. The dashed line is the budget.
+        Each bar ends where three in four pull requests had finished that wait. The dot is where
+        half had, and the thin line runs on to nine in ten. The dashed line is the time budget.
       </p>
       <p>
         Within budget: three in four finished inside the budget. Acceptable: inside the acceptable
-        limit. Slow: past it. Too few: fewer than {FLOW_RULES.budgetMinPrs} pull requests, so no
+        limit. Past limit: past it. Too few: fewer than {FLOW_RULES.budgetMinPrs} pull requests, so no
         verdict.
       </p>
       <p>
@@ -119,28 +121,33 @@ export function ScatterInfo(): JSX.Element {
         One dot per merged pull request: the day it merged, and how many working hours it was open,
         on a log scale.
       </p>
+      <p>
+        The two figures above the chart count every measured pull request: how many merged within
+        one working day, and how the waiting time (working hours from opening to merge) splits
+        between the quickest nine in ten and the slowest tenth.
+      </p>
       <p>Colour shows which wait took most of its working time. Bigger dots changed more lines.</p>
       <p>
-        Point at a dot for its breakdown, and click to open it. The table of the slowest lists the
-        same pull requests for keyboard and screen readers.
+        Point at a dot for its breakdown, and click to open it. The table lists the same pull requests,
+        longest first, for keyboard and screen readers.
       </p>
     </>
   );
 }
 
-/** M4 — what the slow ones have in common. */
+/** M4 — what the quick ones do differently. */
 export function ContrastInfo(): JSX.Element {
   return (
     <>
       <p>
-        Pull requests are ranked by working-hour lead time and split into quarters. The table
-        compares the slowest quarter with the fastest, and needs {FLOW_RULES.contrastMinQuartile} in
+        Pull requests are ranked by working hours from opening to merge. The table compares the
+        quickest quarter with the slowest quarter, and needs {FLOW_RULES.contrastMinQuartile} in
         each.
       </p>
       <p>
-        “Separates” means the slow quarter’s figure is at least {FLOW_RULES.separatesRatio} times
-        the fast one’s. “Weakly” means at least {FLOW_RULES.weakRatio} times. A very small gap
-        counts as “No”.
+        “Clear difference?” says “Yes” when the slowest group’s figure is at least{' '}
+        {FLOW_RULES.separatesRatio} times the quickest group’s, and “Slight” when it is at least{' '}
+        {FLOW_RULES.weakRatio} times. A very small gap counts as “No”.
       </p>
       <p>By size: median working hours from opened to merged, by lines added plus removed.</p>
       <p>
@@ -159,8 +166,8 @@ export function LandingInfo({ dayHours }: { dayHours: number }): JSX.Element {
   return (
     <>
       <p>
-        Pull requests that sat approved for more than one working day ({formatWorkHours(dayHours)})
-        before they merged. The {FLOW_RULES.landingRows} slowest are listed.
+        Pull requests that waited more than one working day ({formatWorkHours(dayHours)}) to merge
+        after they were approved. The {FLOW_RULES.landingRows} longest-held are listed, longest first.
       </p>
       <p>
         “Merged alongside” lists pull requests in other repositories with the same ticket key that
@@ -254,8 +261,8 @@ export function ByRepositoryInfo({ sections }: { sections: readonly CourtSection
       <p>
         A repository needs {FLOW_RULES.minRepoPrs} merged pull requests to be measured. It is called
         out only when one wait holds at least {formatShare(FLOW_RULES.dominantShare)} of its time and
-        its slowest quarter took {FLOW_RULES.slowP75ClockHours} clock hours or more. The rest are
-        under “Nothing stands out”.
+        at least one in four of its pull requests took {FLOW_RULES.slowP75ClockHours} clock hours or
+        more to merge. The rest are under “Nothing stands out”.
       </p>
       {sections
         .filter((s) => s.directive !== '')

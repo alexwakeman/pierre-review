@@ -13,11 +13,11 @@ import { useProCapabilities } from './useTriage.js';
 // whether the evidence has moved. The POST is the only billing path, and every mount of one scope
 // shares its MUTATION KEY, so a tab switch mid-run cannot offer a second, billed "Generate".
 
-export function flowPointersKeySlots(workspaceId: number | null, days: number): (string | number)[] {
+export function flowPointersKeySlots(workspaceId: number | null, days: number | 'reporting'): (string | number)[] {
   return [workspaceKey(workspaceId), days];
 }
 
-export function useFlowPointers(workspaceId: number | null, days: number) {
+export function useFlowPointers(workspaceId: number | null, days: number | 'reporting') {
   const { periodReports } = useProCapabilities();
   return useQuery<FlowPointersResponse>({
     queryKey: ['flow-pointers', ...flowPointersKeySlots(workspaceId, days)],
@@ -30,7 +30,7 @@ export function useFlowPointers(workspaceId: number | null, days: number) {
   });
 }
 
-export function useGenerateFlowPointers(workspaceId: number | null, days: number) {
+export function useGenerateFlowPointers(workspaceId: number | null, days: number | 'reporting') {
   const qc = useQueryClient();
   const slots = flowPointersKeySlots(workspaceId, days);
   return useMutation<FlowPointersResponse>({
@@ -52,6 +52,6 @@ export function useGenerateFlowPointers(workspaceId: number | null, days: number
 }
 
 /** In flight for this scope on ANY mount — never a per-mount `isPending` alone. */
-export function useFlowPointersGenerating(workspaceId: number | null, days: number): boolean {
+export function useFlowPointersGenerating(workspaceId: number | null, days: number | 'reporting'): boolean {
   return useIsMutating({ mutationKey: ['flow-pointers-generate', ...flowPointersKeySlots(workspaceId, days)] }) > 0;
 }

@@ -8,6 +8,7 @@ import { indexUsers, relativeTime, userLabel } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { BotIcon, CheckCircleIcon, ExternalLinkIcon, RefreshIcon } from '../Icons.js';
 import { SortHeader, type SortState, compare, nextSort } from './sortableTable.js';
+import { InfoButton } from '../InfoModal.js';
 
 // The bot-only-PRs DRILL-DOWN — a persistent, singleton tab opened by the amber "only a bot
 // reviewed these" caption in BotsView. Shows currently-OPEN bot-only PRs by DEFAULT (the
@@ -97,12 +98,12 @@ function Row({
         </td>
       )}
       <td className="py-1.5 pr-3">
-        <span className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-100/70 px-1.5 py-px text-[10px] font-medium text-amber-700 dark:border-amber-700/60 dark:bg-amber-900/30 dark:text-amber-300">
+        <span className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-100/70 px-1.5 py-px text-[11px] font-medium text-amber-700 dark:border-amber-700/60 dark:bg-amber-900/30 dark:text-amber-300">
           <BotIcon size={10} />
           {pr.botLabel}
         </span>
       </td>
-      <td className="py-1.5 pr-3 text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+      <td className="py-1.5 pr-3 text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
         {pr.state}
       </td>
       <td className="py-1.5 pr-3">
@@ -136,7 +137,7 @@ function Row({
           // bot-ACTOR events — isolating it in the bot feed would show nothing. Explain
           // instead of offering a dead-end button.
           <span
-            className="cursor-help rounded border border-amber-300/60 px-1.5 py-0.5 text-[10px] text-amber-500 dark:border-amber-700/50 dark:text-amber-400/70"
+            className="cursor-help rounded border border-amber-300/60 px-1.5 py-0.5 text-[11px] text-amber-500 dark:border-amber-700/50 dark:text-amber-400/70"
             title="This review was posted via Limn with your token, so it has no bot activity to show in the bot feed — open it on GitHub instead."
           >
             via Limn
@@ -146,7 +147,7 @@ function Row({
             type="button"
             onClick={() => onShowInFeed(pr)}
             aria-pressed={isolated}
-            className="rounded border border-amber-400 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-600/70 dark:text-amber-300 dark:hover:bg-amber-900/30"
+            className="rounded border border-amber-400 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-600/70 dark:text-amber-300 dark:hover:bg-amber-900/30"
             title="Return to the Bots console with this PR isolated in the bot feed (bypasses the feed window)"
           >
             Show in feed
@@ -263,8 +264,14 @@ export function BotOnlyPrsDetail(): JSX.Element {
     <div className="mx-auto max-w-[100rem] space-y-4 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Bot-only PRs</h2>
+        <InfoButton title="Bot-only PRs">
+          <p>
+            Pull requests that only a bot has reviewed: no person has left a review or a comment.
+            Open ones are listed only while they have no merge conflict; merged ones only if they
+            merged in this window.
+          </p>
+        </InfoButton>
         <span className="text-[11px] text-gray-400">
-          only a bot reviewed these — no human review or comment.{' '}
           <span className="text-amber-600 dark:text-amber-400">
             {showMerged ? `${openCount} open · ${mergedCount} merged` : `${openCount} open`}
           </span>{' '}
@@ -356,7 +363,7 @@ export function BotOnlyPrsDetail(): JSX.Element {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] border-collapse text-sm">
             <thead>
-              <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+              <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                 <SortHeader col="pr" label="Pull request" sort={sort} onSort={onSort} />
                 {showRepoCol && <SortHeader col="repo" label="Repo" sort={sort} onSort={onSort} />}
                 <SortHeader col="bot" label="Bot" sort={sort} onSort={onSort} />

@@ -133,11 +133,12 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
     <div className="space-y-3" data-testid="bots-view">
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Review bots</h2>
-        <span className="text-[11px] text-gray-400">
-          {repoId != null
-            ? 'The calm layer above your review bots — this Workspace’s bots, measured on this repo.'
-            : 'The calm layer above your review bots — detect, measure, and triage the automated reviewers in this Workspace.'}
-        </span>
+        {/* The per-repo mount says what it is scoped to; the rail needs no tagline. */}
+        {repoId != null && (
+          <span className="text-[12px] text-gray-500 dark:text-gray-400">
+            This Workspace’s bots, measured on this repo.
+          </span>
+        )}
       </div>
 
       {/* Inner sub-tab bar. Shows in BOTH the cross-repo rail Bots view and the per-repo

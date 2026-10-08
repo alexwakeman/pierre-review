@@ -41,7 +41,7 @@ export function FlowPointersPanel({
   days,
 }: {
   workspaceId: number | null;
-  days: number;
+  days: number | 'reporting';
 }): JSX.Element | null {
   const q = useFlowPointers(workspaceId, days);
   const generate = useGenerateFlowPointers(workspaceId, days);

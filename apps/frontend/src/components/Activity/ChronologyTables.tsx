@@ -80,8 +80,8 @@ function contrastValue(row: FlowContrastRow, v: number): string {
 }
 
 const CONTRAST_VERDICT: Record<FlowContrastRow['verdict'], string> = {
-  separates: 'Separates',
-  weak: 'Weakly',
+  separates: 'Yes',
+  weak: 'Slight',
   none: 'No',
 };
 
@@ -93,17 +93,17 @@ export function ContrastTable({ contrast }: { contrast: FlowContrast }): JSX.Ele
           <thead>
             <tr className="border-b border-gray-200 dark:border-gray-800">
               <th className={TH}>Median, or share of pull requests</th>
-              <th className={`${TH} ${NUM}`}>Fastest quarter</th>
-              <th className={`${TH} ${NUM}`}>Slowest quarter</th>
-              <th className={`${TH} ${NUM}`}>Sets them apart?</th>
+              <th className={`${TH} ${NUM}`}>Quickest {formatCount(contrast.quartilePrs)}</th>
+              <th className={`${TH} ${NUM}`}>Slowest {formatCount(contrast.quartilePrs)}</th>
+              <th className={`${TH} ${NUM}`}>Clear difference?</th>
             </tr>
           </thead>
           <tbody>
             {contrast.rows.map((r) => (
               <tr key={r.signal} className="border-b border-gray-100 last:border-b-0 dark:border-gray-800/70">
                 <td className={TD}>{r.label}</td>
-                <td className={`${TD} ${NUM}`}>{contrastValue(r, r.fast)}</td>
-                <td className={`${TD} ${NUM} font-semibold`}>{contrastValue(r, r.slow)}</td>
+                <td className={`${TD} ${NUM} font-semibold`}>{contrastValue(r, r.fast)}</td>
+                <td className={`${TD} ${NUM}`}>{contrastValue(r, r.slow)}</td>
                 <td
                   className={`${TD} ${NUM} ${
                     r.verdict === 'separates'
@@ -118,7 +118,6 @@ export function ContrastTable({ contrast }: { contrast: FlowContrast }): JSX.Ele
           </tbody>
         </table>
       </div>
-      <p className={NOTE}>{formatCount(contrast.quartilePrs)} pull requests in each quarter.</p>
     </div>
   );
 }
@@ -147,10 +146,11 @@ export function SizeBandsChart({ bands }: { bands: FlowSizeBand[] }): JSX.Elemen
                 b.prs === 0 ? 'none' : `${b.prs} — too few for a median`
               ) : (
                 <>
+                  median{' '}
                   <span className="font-semibold text-gray-800 dark:text-gray-100">
                     {formatWorkHours(b.medianLeadWorkHours)}
                   </span>{' '}
-                  · first look {formatWorkHours(b.medianFirstLookWorkHours ?? 0)} ·{' '}
+                  to merge · first look {formatWorkHours(b.medianFirstLookWorkHours ?? 0)} ·{' '}
                   {formatCount(b.prs)} PRs
                 </>
               )}
@@ -190,11 +190,11 @@ export function WeekdayChart({ days }: { days: FlowWeekdayRow[] }): JSX.Element 
                 d.prs === 0 ? 'none' : `${d.prs} — too few for a median`
               ) : (
                 <>
-                  {formatWorkHours(d.medianLeadHours ?? 0)} ·{' '}
+                  median {formatWorkHours(d.medianLeadHours ?? 0)} on the clock ·{' '}
                   <span className="font-semibold text-gray-800 dark:text-gray-100">
                     {formatWorkHours(d.medianLeadWorkHours)}
                   </span>{' '}
-                  · {formatCount(d.prs)} PRs
+                  working · {formatCount(d.prs)} PRs
                 </>
               )}
             </span>
@@ -221,8 +221,14 @@ export function LandingTailList({ tail }: { tail: FlowLandingTail }): JSX.Elemen
   return (
     <div>
       <div className="flex flex-wrap gap-x-8 gap-y-2">
-        <Figure value={formatCount(tail.prsOver)} label="sat approved over a working day" />
-        <Figure value={formatShare(tail.shareOfLanding)} label="of all time spent approved" />
+        <Figure
+          value={formatCount(tail.prsOver)}
+          label="waited more than a working day to merge after approval"
+        />
+        <Figure
+          value={formatShare(tail.shareOfLanding)}
+          label="of all the time spent waiting to merge after approval was in these"
+        />
         {tail.selfMergedOver > 0 && (
           <Figure value={formatCount(tail.selfMergedOver)} label="merged by their own author" />
         )}
@@ -268,7 +274,7 @@ export function LandingTailList({ tail }: { tail: FlowLandingTail }): JSX.Elemen
       )}
       {tail.prsOver > tail.rows.length && (
         <p className={NOTE}>
-          Showing the {formatCount(tail.rows.length)} slowest of {formatCount(tail.prsOver)}.
+          Showing {formatCount(tail.rows.length)} of {formatCount(tail.prsOver)}, longest first.
         </p>
       )}
     </div>
@@ -286,9 +292,9 @@ export function ConcentrationTable({ rows }: { rows: FlowConcentrationRow[] }): 
             <tr className="border-b border-gray-200 dark:border-gray-800">
               <th className={TH}>Repository</th>
               <th className={`${TH} ${NUM}`}>People giving first reviews</th>
-              <th className={`${TH} ${NUM}`}>Busiest one’s share</th>
-              <th className={`${TH} ${NUM}`}>Their first look</th>
-              <th className={`${TH} ${NUM}`}>Everyone else’s</th>
+              <th className={`${TH} ${NUM}`}>Share done by the busiest</th>
+              <th className={`${TH} ${NUM}`}>First look: busiest</th>
+              <th className={`${TH} ${NUM}`}>First look: everyone else</th>
             </tr>
           </thead>
           <tbody>
@@ -328,7 +334,7 @@ export function SlowestTable({ prs }: { prs: FlowPrRow[] }): JSX.Element {
         <thead>
           <tr className="border-b border-gray-200 dark:border-gray-800">
             <th className={TH}>Pull request</th>
-            <th className={`${TH} ${NUM}`}>Working</th>
+            <th className={`${TH} ${NUM}`}>Open, working hours</th>
             <th className={`${TH} ${NUM}`}>{COURT_SHORT.reviewer}</th>
             <th className={`${TH} ${NUM}`}>{COURT_SHORT.author}</th>
             <th className={`${TH} ${NUM}`}>{COURT_SHORT.landing}</th>

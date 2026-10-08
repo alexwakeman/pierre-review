@@ -13,6 +13,7 @@ import {
   vendorKindsForRole,
 } from '@pierre-review/shared';
 import { automatedReviewerMeta, vendorInk } from '../../lib/ui.js';
+import { InfoButton } from '../InfoModal.js';
 import {
   costEditOutcome,
   costStateOf,
@@ -64,17 +65,17 @@ const FIELD_CLS =
 // and not five ways of saying "ignore this".
 const ROLE_HELP: Record<ReviewerRole, string> = {
   review:
-    'A real AI code reviewer. The only role counted in the ROI, behaviour and dedup metrics; its comments read as review substance.',
+    'An AI code reviewer. The only role counted in the review-bot figures: ROI, behaviour, duplicates and the benchmark.',
   quality_check:
-    'Static analysis, coverage, scanners, CI. Posts verdicts rather than findings — visible in the feed, excluded from the review-bot metrics.',
+    'Static analysis, coverage, scanners, CI. Posts pass/fail verdicts rather than findings. Shown in the feed, left out of the review-bot figures.',
   dependency:
-    'Version bumps (Dependabot, Renovate). Authors PRs and never reviews, so its merges are reported as overhead rather than as team throughput.',
+    'Version bumps (Dependabot, Renovate). Opens PRs and never reviews; its merges are reported as overhead, not team throughput.',
   code_agent:
-    'Writes code that is not a bump — agents, autofix, generated-content sync. Its merged PRs are reported as delivered work that no person typed.',
+    'Writes code that is not a version bump: coding agents, autofix, generated-content sync. Its merged PRs are reported as work no person typed.',
   release:
-    'Merge queues, release trains, changelogs, backports. Moves code without writing or judging any; its approvals are governance, not review.',
+    'Merge queues, release trains, changelogs, backports. Moves code without writing or judging it; its approvals do not count as review.',
   housekeeping:
-    'CLA/DCO, triage, labels, stale-closers, size and preview reports. Its volume is noise in every review metric.',
+    'CLA/DCO checks, triage, labels, stale-closers, size and preview reports. Left out of every review figure.',
 };
 
 /** Everything a card can write, minus the key the parent already holds. */
@@ -208,8 +209,32 @@ export function DetectedReviewersTable({
   const title = 'Review bots';
   // The cost clause only when the cost surfaces actually render (`botDepth`).
   const desc = showCost
-    ? 'Who counts as an automated reviewer in this Workspace, who each bot is, and what it costs here. Every setting below applies to the whole Workspace.'
-    : 'Who counts as an automated reviewer in this Workspace and who each bot is. Every setting below applies to the whole Workspace.';
+    ? 'Who counts as an automated reviewer in this Workspace, who each bot is, and what it costs here.'
+    : 'Who counts as an automated reviewer in this Workspace and who each bot is.';
+  // The six roles, reachable by touch and keyboard. The role picker's `title` carries the same
+  // text, but a hover tooltip is not an explanation anyone on a phone can read.
+  const info = (
+    <InfoButton title="Review bots">
+      <p>Each bot has one role in this Workspace. The role decides which figures count it:</p>
+      <ul className="list-disc space-y-1 pl-5">
+        {REVIEWER_ROLES.map((k) => (
+          <li key={k}>
+            <strong>{REVIEWER_ROLE_LABEL[k]}:</strong> {ROLE_HELP[k]}
+          </li>
+        ))}
+      </ul>
+      <p>
+        A change here reaches every repo in this Workspace, including repos not listed on a card.
+        The repo chips on each card show where that bot is active.
+      </p>
+      {showCost && (
+        <p>
+          Prices are set per Workspace and are never added up across Workspaces: the same bot can
+          have a different price in each.
+        </p>
+      )}
+    </InfoButton>
+  );
 
   // `workspaceId` is null only while the store resolves its Default. The listing hook holds the
   // query idle in that state (skipToken), so `isLoading` is false and the empty-state branch would
@@ -217,7 +242,7 @@ export function DetectedReviewersTable({
   // the rest of the component can treat the id as a number.
   if (workspaceId == null) {
     return (
-      <SectionShell title={title} desc={desc}>
+      <SectionShell title={title} desc={desc} info={info}>
         <p className="py-3 text-center text-[11px] text-gray-400">Loading…</p>
       </SectionShell>
     );
@@ -228,7 +253,7 @@ export function DetectedReviewersTable({
   };
 
   return (
-    <SectionShell title={title} desc={desc}>
+    <SectionShell title={title} desc={desc} info={info}>
       {q.isLoading ? (
         <p className="py-3 text-center text-[11px] text-gray-400">Loading…</p>
       ) : q.isError ? (
@@ -243,12 +268,10 @@ export function DetectedReviewersTable({
               said edits apply "everywhere", which was true of an account-wide identity table and
               is now wrong in both directions: a change here reaches every repo in this Workspace
               (wider than the repo you may be looking at) and reaches no other Workspace at all. */}
-          <p className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+          <p className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
             Everything here applies to{' '}
-            <span className="font-semibold">this Workspace</span> — all {listRepoIds.length} of its
-            repo{listRepoIds.length === 1 ? '' : 's'}, including any not listed on a card. It does
-            not reach your other Workspaces: the same bot can be classified, named and priced
-            differently in each.
+            <span className="font-semibold">this Workspace</span>: all {listRepoIds.length} of its
+            repo{listRepoIds.length === 1 ? '' : 's'}, and none of your other Workspaces.
           </p>
 
           {/* ⚠ NO SECOND "this write is Workspace-wide" BANNER FOR THE `repoId` CASE. The banner
@@ -257,18 +280,18 @@ export function DetectedReviewersTable({
               makes all three read as boilerplate. What this component owes the repo case instead is
               EVIDENCE, and it has it: every card lists the repos it is active in. */}
           {repoId != null && (
-            <p className="text-[10px] text-gray-400">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
               Filtered to the bots active in{' '}
-              <span className="font-medium text-gray-500 dark:text-gray-300">
+              <span className="font-medium text-gray-600 dark:text-gray-300">
                 {repoName.get(repoId) ?? `repo #${repoId}`}
               </span>
-              . The repo chips on each card are the real reach of an edit.
+              .
             </p>
           )}
 
           <ReviewerList
             heading="Review bots"
-            note="Counted in the ROI, behaviour and dedup metrics."
+            note="Counted in the review-bot figures."
             reviewers={buckets.reviewBots}
             workspaceSeatCount={workspaceSeatCount}
             showCost={showCost}
@@ -290,7 +313,7 @@ export function DetectedReviewersTable({
               automation and housekeeping. */}
           <ReviewerList
             heading="Other automation"
-            note="Quality gates, dependency bots, code agents, release and housekeeping automation — still visible in the feed, excluded from the review-bot metrics."
+            note="Shown in the feed, left out of the review-bot figures."
             reviewers={buckets.qualityChecks}
             workspaceSeatCount={workspaceSeatCount}
             showCost={showCost}
@@ -349,18 +372,17 @@ export function DetectedReviewersTable({
               the reader came here to use, not a view they navigated to and found closed. One badge,
               one sentence, no button. */}
           {!showCost ? (
-            <p className="text-[10px] text-gray-400">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
               <ProBadge className="mr-1" title="Per-bot pricing is part of Pro." />
-              Per-bot pricing and the ROI table it feeds are part of Pro: put a monthly cost against
-              each bot in this Workspace and read what each acted-on comment cost, beside what every
-              bot actually produced. Classifying bots here is free.
+              Per-bot prices and the cost per used comment are part of Pro. Classifying bots here
+              is free.
             </p>
           ) : (
-          <p className="text-[10px] text-gray-400">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
             {costTotal.totalUsd == null ? (
               <>
-                No monthly prices set yet — add one per bot above to get $/acted-on in the ROI
-                table.
+                No monthly prices set yet. Add one per bot above to see $ per used thread in the
+                ROI table.
               </>
             ) : (
               <>
@@ -372,12 +394,9 @@ export function DetectedReviewersTable({
                 {costTotal.unpricedActors > 0 && (
                   <> · {costTotal.unpricedActors} with no price set</>
                 )}
-                .{' '}
-                {/* Stated, not implied: prices in other Workspaces are separate figures, and
-                    adding them up would assert a number of subscriptions nobody told us. */}
-                <span className="text-gray-400">
-                  Prices are per Workspace and are never added across Workspaces.
-                </span>
+                .
+                {/* "Never added across Workspaces" lives in the section's info modal; the amber
+                    banner above already says this screen is this Workspace only. */}
               </>
             )}
           </p>
@@ -398,13 +417,13 @@ export function DetectedReviewersTable({
               />
             </label>
             {query.trim() === '' ? (
-              <p className="text-[10px] text-gray-400">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
                 Type a reviewer&apos;s name to treat them as an automated reviewer in this
                 Workspace. They join the <span className="font-medium">Review bots</span> list
                 above, where you set the vendor and the price.
               </p>
             ) : matches.length === 0 ? (
-              <p className="text-[10px] text-gray-400">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
                 No matching reviewers this Workspace currently treats as human.
               </p>
             ) : (
@@ -483,7 +502,7 @@ function ReviewerList({
         <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
           {heading} ({reviewers.length})
         </h4>
-        <span className="text-[10px] text-gray-400">{note}</span>
+        <span className="text-[11px] text-gray-500 dark:text-gray-400">{note}</span>
       </div>
       <ul className="divide-y divide-gray-100 rounded border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
         {reviewers.map((r) => (
@@ -598,31 +617,31 @@ function ReviewerCard({
           )}
         </span>
         <span
-          className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+          className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-medium"
           style={{ ...vendorInk(color), backgroundColor: `${color}1a` }}
         >
           <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
           {automatedReviewerMeta(serverKind).label}
         </span>
         {r.identitySource === 'manual' && (
-          <span className="shrink-0 rounded bg-sky-50 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-sky-600 dark:bg-sky-950 dark:text-sky-300">
+          <span className="shrink-0 rounded bg-sky-50 px-1 py-0.5 text-[11px] font-medium uppercase tracking-wide text-sky-600 dark:bg-sky-950 dark:text-sky-300">
             named by you
           </span>
         )}
         {r.isManualOverride ? (
-          <span className="shrink-0 rounded bg-sky-50 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-sky-600 dark:bg-sky-950 dark:text-sky-300">
+          <span className="shrink-0 rounded bg-sky-50 px-1 py-0.5 text-[11px] font-medium uppercase tracking-wide text-sky-600 dark:bg-sky-950 dark:text-sky-300">
             set by you
           </span>
         ) : (
           <span
-            className="shrink-0 text-[9px] uppercase tracking-wide text-gray-500 dark:text-gray-400"
+            className="shrink-0 text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400"
             title={r.reasons.join(' · ')}
           >
             {r.source.replace(/_/g, ' ')}
           </span>
         )}
         {r.automated && r.confidence !== 'high' && !r.isManualOverride && (
-          <span className="shrink-0 text-[10px] text-amber-500" title={r.reasons.join(' · ')}>
+          <span className="shrink-0 text-[11px] text-amber-500" title={r.reasons.join(' · ')}>
             likely ({r.confidence})
           </span>
         )}
@@ -630,7 +649,7 @@ function ReviewerCard({
             all-zero counts mean "a judgement recorded for a Workspace this reviewer no longer
             touches", which used to need a `dormantInScope` boolean. */}
         <span
-          className="ml-auto shrink-0 text-[10px] text-gray-400"
+          className="ml-auto shrink-0 text-[11px] text-gray-400"
           title="Reviews / inline threads / PR comments across this Workspace over the last 90 days"
         >
           {f.reviews}r · {f.threads}t · {f.comments}c
@@ -642,18 +661,18 @@ function ReviewerCard({
           judges, names and prices this bot in all of these repos at once. */}
       {footprints.length > 0 && (
         <div className="flex flex-wrap items-center gap-1" title={allRepoNames}>
-          <span className="text-[9px] uppercase tracking-wide text-gray-400">Active in</span>
+          <span className="text-[11px] uppercase tracking-wide text-gray-400">Active in</span>
           {shownRepos.map((e) => (
             <span
               key={e.repoId}
-              className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+              className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-300"
               title={`${e.reviews}r · ${e.threads}t · ${e.comments}c here over the last 90 days`}
             >
               {repoName.get(e.repoId) ?? `repo #${e.repoId}`}
             </span>
           ))}
           {hiddenRepos > 0 && (
-            <span className="text-[10px] text-gray-400">+{hiddenRepos} more</span>
+            <span className="text-[11px] text-gray-400">+{hiddenRepos} more</span>
           )}
         </div>
       )}
@@ -756,7 +775,7 @@ function ReviewerCard({
       {/* On screen rather than only on hover: the reset is the half of the model that is not
           guessable from the buttons. */}
       {r.isManualOverride && (
-        <p className="text-[10px] text-gray-400">
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">
           Set by you — detection will not change it in this Workspace until you reset. Resetting
           keeps the bot&apos;s{' '}
           <span className="font-medium text-gray-500 dark:text-gray-300">name and price</span>.
@@ -832,7 +851,7 @@ function ReviewerCard({
       {/* Stated on screen, not only in a tooltip: "reset" reads as "delete everything", and the
           one thing a user is afraid of losing here is the number they typed into the box below. */}
       {r.identitySource === 'manual' && (
-        <p className="text-[10px] text-gray-400">
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">
           Reset hands the vendor and label back to detection for this Workspace —{' '}
           <span className="font-medium text-gray-500 dark:text-gray-300">the price is kept</span>,
           and the bot / not-a-bot verdict does not change.
@@ -947,7 +966,7 @@ function CostEditor({
     }
 
   const modeBtnCls = (active: boolean): string =>
-    `px-1.5 py-0.5 text-[10px] font-medium ${
+    `px-1.5 py-0.5 text-[11px] font-medium ${
       active
         ? 'bg-sky-600 text-white'
         : 'bg-white text-gray-500 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
@@ -955,7 +974,7 @@ function CostEditor({
 
   return (
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-      <span className="text-[10px] uppercase tracking-wide text-gray-400">
+      <span className="text-[11px] uppercase tracking-wide text-gray-400">
         Price for this Workspace
       </span>
       <span className="text-[11px] text-gray-400">$</span>
@@ -1003,7 +1022,7 @@ function CostEditor({
           for a saved figure. */}
       {mode === 'per_seat' && parsed.ok && parsed.value != null && (
         <span
-          className="text-[10px] tabular-nums text-gray-400"
+          className="text-[11px] tabular-nums text-gray-400"
           title="Seats are the distinct humans who opened a PR in this Workspace’s repos over the last 30 days. The monthly figure is derived at read time and moves with the team."
         >
           × {workspaceSeatCount} seat{workspaceSeatCount === 1 ? '' : 's'} ≈ $
@@ -1023,7 +1042,7 @@ function CostEditor({
         {outcome?.kind === 'clear' ? 'Clear' : 'Save price'}
       </button>
 
-      <span className={`text-[10px] ${parsed.ok ? 'text-gray-400' : 'text-red-500'}`}>{hint}</span>
+      <span className={`text-[11px] ${parsed.ok ? 'text-gray-400' : 'text-red-500'}`}>{hint}</span>
     </div>
   );
 }

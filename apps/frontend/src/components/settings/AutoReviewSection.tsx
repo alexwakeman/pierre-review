@@ -173,7 +173,26 @@ export function AutoReviewSection(): JSX.Element {
   return (
     <SectionShell
       title="Auto Claude review"
-      desc="Claude reviews each new PR a person opens in this workspace, once, with the same model and budget as the Review button. It runs on your own Claude Code or Anthropic API key."
+      desc="Claude reviews each new PR a person opens in this workspace, with the same model and budget as the Review button. It runs on your own Claude Code or Anthropic API key."
+      info={
+        <InfoButton title="Auto Claude review">
+          <p>
+            Only PRs a person opens after you turn this on are reviewed. Drafts wait until they are
+            marked ready. PRs opened by bots are skipped.
+          </p>
+          <p>
+            A reviewed PR is reviewed again when new commits are pushed, or when a person or a
+            review bot adds review comments. A first push after a quiet spell starts a review at
+            once. Pushes during a review or within 5 minutes of one, and new comments, wait until
+            the PR has been quiet for 5 minutes, or 20 minutes at most. Limn’s own comments never
+            start a review.
+          </p>
+          <p>
+            These re-reviews count towards the daily limit. Reviews you start yourself always go
+            first.
+          </p>
+        </InfoButton>
+      }
     >
       <label className="flex items-start gap-2 text-xs">
         <input
@@ -187,8 +206,7 @@ export function AutoReviewSection(): JSX.Element {
             Review new PRs automatically
           </span>
           <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
-            Only PRs opened after you turn this on. Drafts wait until they are ready. Bots are
-            skipped. Reviews you start yourself always go first.
+            Only PRs opened after you turn this on.
           </span>
         </span>
       </label>
@@ -206,9 +224,6 @@ export function AutoReviewSection(): JSX.Element {
           />
           <span>auto reviews a day (UTC). The rest wait for the next day.</span>
         </label>
-        <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
-          New pushes and review comments on a PR that was already reviewed count too.
-        </span>
         {cap == null && (
           <span className="mt-0.5 block text-xs text-red-500">
             Enter a whole number from {CAP_MIN} to {CAP_MAX}.

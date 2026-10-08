@@ -7,6 +7,7 @@ import type {
 import { ML_SEVERITIES, ML_SEVERITY_ORD } from '@pierre-review/shared';
 import { matrixCell } from '../../lib/severityAgreement.js';
 import { ML_SEVERITY_META, vendorInk } from '../../lib/ui.js';
+import { InfoButton } from '../InfoModal.js';
 
 // The ours-vs-vendor confusion matrix on the "what the bots are flagging" drill-down: for every
 // row in the selected population, what OUR model scored it against what the BOT badged it itself.
@@ -35,7 +36,7 @@ const VENDOR_AXIS: VendorSeverityAxis[] = ['critical', 'major', 'minor', 'nit', 
 // screen lies — an over-call renders as an under-call — with nothing to catch it. So: worst-first
 // on BOTH axes (`ML_SEVERITIES` for ours, `VENDOR_AXIS` for theirs), which also makes the
 // agreement diagonal a true top-left → bottom-right diagonal, and gives the triangles a fixed
-// meaning that is stated in the legend under the grid:
+// meaning that is stated in the InfoButton beside the heading:
 //   • UPPER RIGHT  — vendor ordinal > ours ⇒ the bot called it worse than we did (over-call)
 //   • LOWER LEFT   — vendor ordinal < ours ⇒ the bot called it milder (under-call)
 const OURS_AXIS: MlSeverity[] = ML_SEVERITIES;
@@ -89,9 +90,7 @@ export function SeverityAgreementMatrixView({
     return (
       <div className="rounded-lg border border-gray-200 p-3 text-xs text-gray-500 dark:border-gray-800 dark:text-gray-400">
         None of the {matrix.total.toLocaleString()} scored comments here carry a severity badge from
-        the bot itself, so there is nothing to compare our ratings against.{' '}
-        <span className="font-semibold">Severity only.</span> Vendors declare no machine-readable
-        category, so category is our model’s alone and cannot be compared.
+        the bot itself, so there is nothing to compare our ratings against.
       </div>
     );
   }
@@ -119,11 +118,28 @@ export function SeverityAgreementMatrixView({
     <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
       <div className="mb-2 flex flex-wrap items-baseline gap-2">
         <h3 className="text-sm font-semibold">Our severity vs the bot’s own badge</h3>
-        <span
-          className="text-[11px] text-gray-400"
-          title="A comparison, not a correction. Our rating agrees with human adjudication on 70% of a held-out sample against the bot badge's 47% — nothing here changes our severity, and there is no disagreement to 'resolve'."
-        >
-          click a cell to narrow the list · advisory
+        <InfoButton title="Our severity vs the bot’s own badge">
+          <p>
+            Each row is the severity the bot put on its own comment; each column is the severity
+            our model gave the same comment. Rows and columns run worst first; the last row is
+            comments the bot did not badge.
+          </p>
+          <p>
+            Upper right: the bot called it <span className="font-semibold">worse</span> than we did.
+            Lower left: <span className="font-semibold">milder</span>. The diagonal is agreement.
+          </p>
+          <p>
+            This is a comparison, not a correction: nothing here changes our score. On 300
+            comments graded by hand, our score matched the human grade 70% of the time.
+            CodeRabbit’s own badge matched 47% of the 228 it had badged.
+          </p>
+          <p>
+            Severity only. Bots do not label a category in a form we can read, so there is no
+            category to compare.
+          </p>
+        </InfoButton>
+        <span className="text-[11px] text-gray-500 dark:text-gray-400">
+          click a cell to narrow the list
         </span>
       </div>
 
@@ -133,7 +149,7 @@ export function SeverityAgreementMatrixView({
             <tr>
               {/* Both axes are named in the corner. Without this the grid is a 20-number square
                   whose orientation the reader has to guess — and guessing wrong inverts it. */}
-              <th className="px-2 py-1 text-left align-bottom text-[10px] font-medium leading-tight text-gray-400">
+              <th className="px-2 py-1 text-left align-bottom text-[11px] font-medium leading-tight text-gray-400">
                 <div>we scored →</div>
                 <div>bot badged ↓</div>
               </th>
@@ -279,15 +295,9 @@ export function SeverityAgreementMatrixView({
         </table>
       </div>
 
-      {/* The triangles' meaning, spelled out — it is a consequence of the worst-first axes above
-          and is not guessable from the grid alone. */}
-      <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
-        Upper right: the bot called it <span className="font-medium">worse</span> than we did. Lower
-        left: <span className="font-medium">milder</span>. The diagonal is agreement.
-      </div>
-
-      {/* Read straight off the wire — never re-derived from `cells` (see the header). */}
-      <div className="mt-1 text-[11px] text-gray-500 tabular-nums dark:text-gray-400">
+      {/* The triangles' meaning lives in the InfoButton beside the heading; the axes are named in
+          the grid's corner cell. Read straight off the wire — never re-derived from `cells`. */}
+      <div className="mt-2 text-[11px] text-gray-500 tabular-nums dark:text-gray-400">
         Of the {matrix.declared.toLocaleString()} badged: {matrix.agree.toLocaleString()} agree ·{' '}
         {matrix.overCall.toLocaleString()} the bot called worse ·{' '}
         {matrix.underCall.toLocaleString()} milder
@@ -322,11 +332,6 @@ export function SeverityAgreementMatrixView({
       <div className="mt-1 text-[11px] text-gray-400 tabular-nums">
         {matrix.declared.toLocaleString()} of {matrix.total.toLocaleString()} rows carry a badge from
         the bot; the rest ({matrix.undeclared.toLocaleString()}) declared nothing.
-      </div>
-
-      <div className="mt-1 text-[11px] text-gray-400">
-        <span className="font-semibold">Severity only.</span> Vendors declare no machine-readable
-        category, so category is our model’s alone and cannot be compared.
       </div>
     </div>
   );

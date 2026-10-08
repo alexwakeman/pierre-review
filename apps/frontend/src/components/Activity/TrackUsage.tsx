@@ -2,6 +2,7 @@ import { AI_CREDITS_PER_USD } from '@pierre-review/shared';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { formatUsd } from '../../lib/ui.js';
+import { InfoButton } from '../InfoModal.js';
 
 // AI usage, month-to-date. The two seams are metered DIFFERENTLY (see AiUsageResponse):
 //  - SUMMARIES (cheap one-shot Haiku completions — digests, sprint report, insights chat, PR
@@ -51,7 +52,7 @@ function SeamMeter({
       <div className="flex items-baseline justify-between gap-3">
         <div>
           <div className="text-[12px] font-medium text-gray-700 dark:text-gray-200">{label}</div>
-          <div className="text-[10px] text-gray-400">{hint}</div>
+          <div className="text-[11px] text-gray-400">{hint}</div>
         </div>
         <div className="whitespace-nowrap text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
           {format ? (
@@ -60,7 +61,7 @@ function SeamMeter({
             <>
               {used.toLocaleString()}
               {metered && <span className="text-gray-400"> / {limit.toLocaleString()}</span>}{' '}
-              <span className="text-[10px] font-normal text-gray-400">{unit}</span>
+              <span className="text-[11px] font-normal text-gray-400">{unit}</span>
             </>
           )}
         </div>
@@ -74,7 +75,7 @@ function SeamMeter({
             />
           </div>
           <div
-            className={`mt-1 text-[10px] tabular-nums ${exhausted ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-gray-400'}`}
+            className={`mt-1 text-[11px] tabular-nums ${exhausted ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-gray-400'}`}
           >
             {exhausted
               ? `None left — resets ${resetOn}.`
@@ -99,6 +100,15 @@ export function TrackUsage(): JSX.Element {
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-300">
           AI usage
         </h3>
+        <InfoButton title="AI usage">
+          <p>Summaries are counted per calendar month and reset on the 1st (UTC).</p>
+          {agentic && (
+            <p>
+              Claude Review and AI Fix run on your own Claude Code or Anthropic API key. The figure is
+              what those runs cost there; Limn charges nothing for them.
+            </p>
+          )}
+        </InfoButton>
         <span className="text-[11px] text-gray-400">
           {monthLabel ? `${monthLabel} to date` : 'month to date'}
         </span>
@@ -131,10 +141,6 @@ export function TrackUsage(): JSX.Element {
                 format={(credits) => formatUsd(credits / AI_CREDITS_PER_USD)}
               />
             )}
-          </div>
-          <div className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-            Summaries are counted per month and reset on the 1st.
-            {agentic && ' Limn charges nothing for Claude Review or AI Fix.'}
           </div>
         </>
       )}

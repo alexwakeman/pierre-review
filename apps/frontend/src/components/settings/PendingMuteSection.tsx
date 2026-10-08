@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { WorkspacePendingMuteUpdate } from '@pierre-review/shared';
 import { useWorkspaces, useWorkspaceMutations } from '../../hooks/useWorkspaces.js';
 import { useRepos } from '../../hooks/useTimeline.js';
+import { InfoButton } from '../InfoModal.js';
 import { SaveButton, SectionShell } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
@@ -132,12 +133,28 @@ export function PendingMuteSection(): JSX.Element {
       title="Pending mute"
       desc={
         <>
-          Muted items <span className="font-medium">stay on the Pending board</span> — they just
-          stop being flagged as your turn. They no longer trigger notifications and no longer
-          count towards “needs your attention”; they move into the broader “review or reply”
-          list. Red builds and stalled PRs in their own tabs are not affected; types you added to
-          My Turn are muted like the rest.
+          Muted items <span className="font-medium">stay on the board</span> but stop claiming
+          your turn and notifying you.
         </>
+      }
+      info={
+        <InfoButton title="Pending mute">
+          <p>A muted repository’s My turn cards stay in the My turn tab. Each one:</p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>reads “Review or reply” instead of “Your turn” or “In your repos”;</li>
+            <li>leaves the “Only yours” view and stops sending browser notifications;</li>
+            <li>ranks lower in its tab.</li>
+          </ul>
+          <p>
+            The other tabs (Needs fixing, Waiting on review, Unanswered threads, Ready to land,
+            Dependencies) are not affected. Types you moved into My turn in Settings are muted
+            like the rest.
+          </p>
+          <p>
+            A muted repository is still shown everywhere else. Muting a repository follows the
+            repository, so it keeps its setting if you move it to another workspace.
+          </p>
+        </InfoButton>
       }
     >
       <label className="flex items-start gap-2 text-xs">
@@ -203,8 +220,7 @@ export function PendingMuteSection(): JSX.Element {
         }
       />
       <p className="text-[11px] text-gray-400">
-        Applies to this workspace only. Muting a repository follows the repository, so it keeps
-        its setting if you move it to another workspace.
+        Applies to this workspace only.
       </p>
 
       {setWorkspacePendingMute.isError && (

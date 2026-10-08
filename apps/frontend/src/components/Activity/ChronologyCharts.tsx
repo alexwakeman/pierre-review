@@ -323,23 +323,23 @@ export function BudgetChart({
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-2.5 w-4 rounded-sm bg-rose-500/15 dark:bg-rose-400/20" />
-          slow
+          past limit
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-0 w-4 border-t-[1.5px] border-dashed border-gray-800 dark:border-gray-100" />
-          budget
+          time budget
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-2 w-4 rounded-sm bg-gray-800 dark:bg-gray-100" />
-          three in four
+          three in four finished
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-0 w-4 border-t-[1.5px] border-gray-500 dark:border-gray-400" />
-          to nine in ten
+          nine in ten finished
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-full border-2 border-gray-800 dark:border-gray-100" />
-          median
+          half finished
         </span>
         {anyClipped && (
           <span className="inline-flex items-center gap-1.5">
@@ -409,7 +409,7 @@ function PrTip({ p, width }: { p: Placed; width: number }): JSX.Element {
       </div>
       <div className="mt-1 grid grid-cols-2 gap-x-3 tabular-nums">
         <span>
-          <span className="font-semibold">{formatWorkHours(pr.leadWorkHours)}</span> working
+          <span className="font-semibold">{formatWorkHours(pr.leadWorkHours)}</span> in working hours
         </span>
         <span className="text-gray-500 dark:text-gray-400">{formatWorkHours(pr.leadHours)} on the clock</span>
         {COURT_ORDER.map((c) => (
@@ -419,7 +419,9 @@ function PrTip({ p, width }: { p: Placed; width: number }): JSX.Element {
         ))}
         <span>First look {pr.firstLookWorkHours == null ? '—' : formatWorkHours(pr.firstLookWorkHours)}</span>
         <span>
-          {pr.rounds} {pr.rounds === 1 ? 'round' : 'rounds'} back
+          {pr.rounds === 0
+            ? 'Never back to author'
+            : `Back to author ${pr.rounds === 1 ? 'once' : `${pr.rounds} times`}`}
         </span>
         <span>{pr.lines == null ? 'Size unknown' : `${formatCount(pr.lines)} lines`}</span>
         {pr.ciRedHours > 0 && <span>Checks red {formatWorkHours(pr.ciRedHours)} (clock)</span>}
@@ -492,13 +494,13 @@ export function LeadScatter({
         <CourtLegend prefix="mostly " />
         <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
           <span className="h-0 w-4 border-t-[1.5px] border-dashed border-gray-800 dark:border-gray-100" />
-          whole-PR budget
+          time budget, opened to merged
         </span>
         <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
           <span className="h-0 w-4 border-t border-dotted border-gray-500 dark:border-gray-400" />
-          three in four
+          three in four merged within
         </span>
-        <span className="text-[11px] text-gray-500 dark:text-gray-400">size = lines changed</span>
+        <span className="text-[11px] text-gray-500 dark:text-gray-400">bigger dot = more lines changed</span>
       </div>
       <div ref={ref} className="relative" style={{ height: H }}>
         {geometry != null && (
@@ -507,7 +509,7 @@ export function LeadScatter({
             height={H}
             className="block"
             role="img"
-            aria-label={`Every merged pull request by the day it merged and its working-hour lead time, on a log scale. ${prs.length} pull requests; the table below lists the slowest.`}
+            aria-label={`Every merged pull request by the day it merged and its working-hour lead time, on a log scale. ${prs.length} pull requests; the table below lists them longest first.`}
           >
             {geometry.yTicks.map((t) => (
               <g key={t.hours}>
@@ -556,7 +558,7 @@ export function LeadScatter({
         {hover != null && w > 0 && <PrTip p={hover} width={w} />}
       </div>
       <div className="text-xs text-gray-500 dark:text-gray-400">
-        Lead time in working hours, log scale · by the day it merged
+        Working hours to merge (log scale), by day merged
       </div>
     </div>
   );
@@ -629,7 +631,7 @@ export function CourtTriangle({
             height={H}
             className="block"
             role="img"
-            aria-label="Each pull request placed by its share of working time waiting for a reviewer (top), for its author (bottom left) and to land (bottom right)."
+            aria-label="Each pull request placed by its share of working time waiting for a reviewer (top), for its author (bottom left) and to merge after approval (bottom right)."
           >
             {grid.map((f) => {
               const lines = [
@@ -649,7 +651,7 @@ export function CourtTriangle({
               All with the author
             </text>
             <text x={C.x} y={C.y + 18} textAnchor="end" className={AXIS_TEXT}>
-              All waiting to land
+              All waiting to merge
             </text>
             {placed.map((p) => (
               <circle

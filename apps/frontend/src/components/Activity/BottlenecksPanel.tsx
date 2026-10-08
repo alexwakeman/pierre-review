@@ -1,6 +1,12 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import type { CourtEvidencePr, PrCourt, RepoCourtProfile } from '@pierre-review/shared';
+import type {
+  CourtEvidencePr,
+  PrCourt,
+  ReportingWindowInfo,
+  RepoCourtProfile,
+} from '@pierre-review/shared';
 import { useFlowFindings } from '../../hooks/useFlowFindings.js';
+import { useWorkspaceMetrics } from '../../hooks/useWorkspaceInsights.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { safeExternalUrl } from '../../lib/ui.js';
@@ -50,9 +56,9 @@ import {
 import {
   calendarLine,
   CHRONOLOGY_WINDOWS,
+  chronologyWindowLabel,
   effectiveChronologyWindow,
   formatCount,
-  formatShare,
   hasWorkingHours,
   prFiguresOf,
   slowestPrs,
@@ -153,8 +159,8 @@ function EvidenceRow({ pr, court }: { pr: CourtEvidencePr; court: PrCourt | null
             <span className={`font-semibold ${COURT_TEXT[court]}`}>
               {formatHours(pr.hoursInCourt)}
             </span>
-            {' of '}
-            {formatHours(pr.leadHours)}
+            {' waiting of '}
+            {formatHours(pr.leadHours)} open
           </>
         ) : (
           <>merged in {formatHours(pr.leadHours)}</>
@@ -189,7 +195,7 @@ function RepoRow({ repo }: { repo: RepoCourtProfile }): JSX.Element {
           {repo.repoFullName}
         </span>
         <span className="whitespace-nowrap text-xs tabular-nums text-gray-500 dark:text-gray-400">
-          {formatCount(repo.prs)} PRs · median {formatHours(repo.medianLeadHours)} · three in four{' '}
+          {formatCount(repo.prs)} PRs · half merged within {formatHours(repo.medianLeadHours)} · three in four within{' '}
           <span className="font-semibold text-gray-700 dark:text-gray-200">
             {formatHours(repo.p75LeadHours)}
           </span>
@@ -201,7 +207,7 @@ function RepoRow({ repo }: { repo: RepoCourtProfile }): JSX.Element {
       {repo.evidence.length > 0 && court != null && (
         <div className="mt-2 border-t border-gray-100 pt-1.5 dark:border-gray-800/70">
           <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
-            Longest in this court
+            Longest waits
           </div>
           <ul>
             {repo.evidence.map((pr) => (
@@ -216,17 +222,22 @@ function RepoRow({ repo }: { repo: RepoCourtProfile }): JSX.Element {
 
 /**
  * The window the reader last picked, remembered for the session so leaving the tab and coming back
- * does not snap it to 30 days. Not in the URL or the persisted filters: it is a reading choice on
- * one pane, and "Clear filters" must not be what resets it.
+ * does not snap it back to the default. Not in the URL or the persisted filters: it is a reading
+ * choice on one pane, and "Clear filters" must not be what resets it.
+ *
+ * ⚠ THE DEFAULT IS THE WORKSPACE'S REPORTING WINDOW — the window every other Reports figure is
+ * tied to (this sprint so far, or the last 7/14 days). 30/60/90 days are the longer views.
  */
-let rememberedWindow: ChronologyWindow = 30;
+let rememberedWindow: ChronologyWindow = 'reporting';
 
 function WindowPicker({
   value,
   onChange,
+  reporting,
 }: {
   value: ChronologyWindow;
   onChange: (w: ChronologyWindow) => void;
+  reporting: ReportingWindowInfo | null;
 }): JSX.Element {
   return (
     <div role="group" aria-label="Window" className="inline-flex rounded-md border border-gray-200 p-0.5 dark:border-gray-700">
@@ -242,7 +253,7 @@ function WindowPicker({
               : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
           }`}
         >
-          {w} days
+          {chronologyWindowLabel(w, reporting)}
         </button>
       ))}
     </div>
@@ -289,7 +300,7 @@ function Block({
 function CappedLine({ shown, measured }: { shown: number; measured: number }): JSX.Element {
   return (
     <p className={`mt-1 ${NOTE}`}>
-      Showing {formatCount(shown)} of {formatCount(measured)}: every slow pull request, and an even
+      Showing {formatCount(shown)} of {formatCount(measured)}: the longest-held, and an even
       sample of the rest.
     </p>
   );
@@ -331,6 +342,11 @@ export function BottlenecksPanel(): JSX.Element {
   // ⚠ `workspaceId === null` means "not resolved yet" — the hook holds itself idle on skipToken,
   // so nothing here renders another workspace's numbers during the gap.
   const q = useFlowFindings(workspaceId, windowDays);
+  // The reporting window's NAME for the picker, whichever option is showing: the free workspace
+  // metrics echo it (the same cache entry the Overview tab reads), and a reporting-window answer
+  // carries its own.
+  const metricsWindow = useWorkspaceMetrics(workspaceId).data?.window ?? null;
+  const reportingInfo = q.data?.reportingWindow ?? metricsWindow;
   const model = useMemo(() => buildBottlenecksModel(q.data), [q.data]);
   const resp = q.data;
   const working = hasWorkingHours(resp);
@@ -363,7 +379,7 @@ export function BottlenecksPanel(): JSX.Element {
               <ChronologyAboutInfo settings={resp.settings ?? null} />
             </InfoButton>
           </div>
-          <WindowPicker value={windowDays} onChange={setWindowDays} />
+          <WindowPicker value={windowDays} onChange={setWindowDays} reporting={reportingInfo} />
         </div>
         {/* ⚠ THE DISCLOSURES STAY ON THE PAGE, one line each. Retroactive history is coverage-
             biased, and what was set aside changes every share below — a reader who has to open a
@@ -372,7 +388,9 @@ export function BottlenecksPanel(): JSX.Element {
           {resp.settings != null && (
             <p className={NOTE}>{calendarLine(resp.settings)} Set per workspace in Settings.</p>
           )}
-          <p className={NOTE}>{coverageLineFor(model.coverage, model.windowDays)}</p>
+          <p className={NOTE}>
+            {coverageLineFor(model.coverage, model.windowDays, resp.reportingWindow)}
+          </p>
           {exclusions != null && <p className={NOTE}>{exclusions}</p>}
           {truncation != null && (
             <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
@@ -401,14 +419,14 @@ export function BottlenecksPanel(): JSX.Element {
           {working && resp.settings != null ? (
             <>
               <Block
-                title="Who was holding it, in working hours"
+                title="Where the working hours went"
                 info={<SplitInfo />}
                 testId="chronology-split"
               >
                 <CourtSplit courts={resp.courtsWork ?? []} size="lg" />
               </Block>
 
-              <Block title="Each wait against its budget" info={<BudgetsInfo />} testId="chronology-budgets">
+              <Block title="Each wait against its time budget" info={<BudgetsInfo />} testId="chronology-budgets">
                 <BudgetChart rows={resp.budgets ?? []} dayHours={dayHours} />
               </Block>
 
@@ -417,13 +435,25 @@ export function BottlenecksPanel(): JSX.Element {
                   {figures != null && (
                     <div className="mb-3 flex flex-wrap gap-x-8 gap-y-2">
                       <Figure
-                        value={formatCount(figures.overWorkingDay)}
-                        label="took more than a working day"
+                        value={`${formatCount(model.measuredPrs - figures.overWorkingDay)} of ${formatCount(model.measuredPrs)}`}
+                        label="merged within a working day"
                       />
-                      <Figure
-                        value={formatShare(figures.slowestTenthShare)}
-                        label={`of all working-hour waiting sits in the slowest ${formatCount(figures.slowestTenthCount)}`}
-                      />
+                      {/* BOTH HALVES, quick side first: the quickest n − K hold 1 − P, the slowest
+                          K (ceil(n/10), off the top) hold P. One half alone ("46% is in the
+                          quickest 124 of 138") read as a riddle. The two shares are printed from
+                          ONE rounding so they always add to 100. Hidden when nobody is left over
+                          (n = 1) or nothing waited (share 0 ⇔ total 0), where the quick half would
+                          claim a 100% that is really 0 of 0. */}
+                      {model.measuredPrs > figures.slowestTenthCount && figures.slowestTenthShare > 0 && (
+                        <Figure
+                          value={`${100 - Math.round(figures.slowestTenthShare * 100)}%`}
+                          label={`of the waiting time went to the quickest ${formatCount(
+                            model.measuredPrs - figures.slowestTenthCount,
+                          )} of ${formatCount(model.measuredPrs)} pull requests. The slowest ${
+                            figures.slowestTenthCount === 1 ? 'one' : formatCount(figures.slowestTenthCount)
+                          } took ${Math.round(figures.slowestTenthShare * 100)}%.`}
+                        />
+                      )}
                     </div>
                   )}
                   <LeadScatter
@@ -438,7 +468,7 @@ export function BottlenecksPanel(): JSX.Element {
                     aria-expanded={showSlowest}
                     className="mt-2 text-xs font-medium text-sky-700 hover:underline dark:text-sky-400"
                   >
-                    {showSlowest ? 'Hide' : 'Show'} the {slowest.length} slowest as a table
+                    {showSlowest ? 'Hide' : 'Show'} as a table, longest first
                   </button>
                   {showSlowest && (
                     <div className="mt-2">
@@ -450,7 +480,7 @@ export function BottlenecksPanel(): JSX.Element {
 
               {(resp.contrast != null || (resp.sizeBands?.length ?? 0) > 0) && (
                 <Block
-                  title="What the slow ones have in common"
+                  title="What the quick ones do differently"
                   info={<ContrastInfo />}
                   testId="chronology-contrast"
                 >
@@ -459,17 +489,17 @@ export function BottlenecksPanel(): JSX.Element {
                       <ContrastTable contrast={resp.contrast} />
                     ) : (
                       <p className={NOTE}>
-                        Too few pull requests to compare the fastest quarter with the slowest.
+                        Too few pull requests to compare the quickest with the slowest.
                       </p>
                     )}
                     <div className="grid gap-5 md:grid-cols-2">
                       <div>
-                        <h5 className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-200">By size</h5>
+                        <h5 className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-200">Time to merge, by size</h5>
                         <SizeBandsChart bands={resp.sizeBands ?? []} />
                       </div>
                       <div>
                         <h5 className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-200">
-                          By the day it opened
+                          Time to merge, by the day it opened
                         </h5>
                         <WeekdayChart days={resp.weekdays ?? []} />
                       </div>
@@ -480,7 +510,7 @@ export function BottlenecksPanel(): JSX.Element {
 
               {resp.landingTail != null && (
                 <Block
-                  title="Approved and waiting"
+                  title="Approved, waiting to merge"
                   info={<LandingInfo dayHours={dayHours} />}
                   testId="chronology-landing"
                 >
@@ -517,7 +547,7 @@ export function BottlenecksPanel(): JSX.Element {
                     <div className="mb-2">
                       <Figure
                         value={`${formatCount(figures.neverWentBack)} of ${formatCount(model.measuredPrs)}`}
-                        label="never went back to their author"
+                        label="never went back to their author for changes"
                       />
                     </div>
                   )}
@@ -528,7 +558,7 @@ export function BottlenecksPanel(): JSX.Element {
             </>
           ) : (
             // An older server: no working hours, so the page still opens on a split — in clock hours.
-            <Block title="Who was holding it, in clock hours" testId="chronology-split">
+            <Block title="Where the time went, in clock hours" testId="chronology-split">
               <CourtSplit courts={model.courts} size="lg" />
             </Block>
           )}
@@ -584,7 +614,7 @@ export function BottlenecksPanel(): JSX.Element {
                             <CourtSplit courts={r.courts} size="bar" />
                           </span>
                           <span className="ml-auto text-xs tabular-nums text-gray-500 dark:text-gray-400">
-                            {formatCount(r.prs)} PRs · three in four {formatHours(r.p75LeadHours)}
+                            {formatCount(r.prs)} PRs · three in four merged within {formatHours(r.p75LeadHours)}
                           </span>
                         </li>
                       ))}

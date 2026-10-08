@@ -1,10 +1,13 @@
-import type {
-  CourtDirective,
-  CourtShare,
-  FlowCoverage,
-  FlowResponse,
-  PrCourt,
-  RepoCourtProfile,
+import {
+  reportingWindowCaption,
+  reportingWindowTitle,
+  type CourtDirective,
+  type CourtShare,
+  type FlowCoverage,
+  type FlowResponse,
+  type PrCourt,
+  type ReportingWindowInfo,
+  type RepoCourtProfile,
 } from '@pierre-review/shared';
 import type { InsightsInnerTab } from '../../store/filters.js';
 
@@ -28,14 +31,14 @@ export const COURT_ORDER: readonly PrCourt[] = ['reviewer', 'author', 'landing']
 export const COURT_LABEL: Record<PrCourt, string> = {
   reviewer: 'Waiting for a reviewer',
   author: 'Waiting for the author',
-  landing: 'Approved, waiting to land',
+  landing: 'Approved, waiting to merge',
 };
 
 /** The compact form, for a legend or a chip where the full label will not fit. */
 export const COURT_SHORT: Record<PrCourt, string> = {
-  reviewer: 'Reviewer',
-  author: 'Author',
-  landing: 'Landing',
+  reviewer: 'With reviewer',
+  author: 'With author',
+  landing: 'Waiting to merge',
 };
 
 /**
@@ -159,12 +162,24 @@ export function buildBottlenecksModel(resp: FlowResponse | undefined): Bottlenec
  * across the window produces figures that are partly onboarding, and `reposWithData` is the only
  * defence a reader has against believing otherwise.
  */
-export function coverageLineFor(c: FlowCoverage, windowDays: number): string {
+export function coverageLineFor(
+  c: FlowCoverage,
+  windowDays: number,
+  /** Set when the panel measured the workspace's REPORTING WINDOW: the line names it the way the
+   *  flow tiles do ("This sprint so far (day 4 of 14)", "Last 14 days"). */
+  reporting?: ReportingWindowInfo | null,
+): string {
   const repos = `${c.reposWithData} of ${c.reposInWorkspace} ${
     c.reposInWorkspace === 1 ? 'repository' : 'repositories'
   }`;
   const prs = `${c.prsScanned} merged pull ${c.prsScanned === 1 ? 'request' : 'requests'}`;
-  return `Measured ${repos} · ${prs} · last ${windowDays} days.`;
+  // The shared caption, sentence-cased: the same words the flow tiles and cards print.
+  const caption =
+    reporting == null
+      ? reportingWindowTitle({ mode: 'rolling_14', days: windowDays })
+      : reportingWindowCaption(reporting);
+  const span = caption.charAt(0).toLowerCase() + caption.slice(1);
+  return `Measured ${repos} · ${prs} · ${span}.`;
 }
 
 /**

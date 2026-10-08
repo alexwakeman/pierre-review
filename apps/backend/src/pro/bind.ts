@@ -54,6 +54,7 @@ import { fetchActionsJobLog } from '../github/actions-logs.js';
 import { commitFilesAndOpenPr } from '../coding/git-ops.js';
 import { registerRetentionHandler } from '../db/retention.js';
 import { registerAccountErasureHandler } from '../db/erase-account.js';
+import { registerReportingWindowResolver } from '../db/reporting-window.js';
 import { runPluginMigrations } from './migrate.js';
 import { setProCapabilities } from './contract.js';
 import type { ProContext, ProPlugin } from './contract.js';
@@ -139,6 +140,8 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       runPluginMigrations(sqliteFolder, pgFolder),
     registerRetention: (handler) => registerRetentionHandler(handler),
     registerAccountErasure: (handler) => registerAccountErasureHandler(handler),
+    // The plugin's comparison-window resolver becomes core's reporting window (db/reporting-window.ts).
+    registerReportingWindow: (resolver) => registerReportingWindowResolver(resolver),
     llm: {
       complete: cheapComplete,
       detectAuth: () => {
@@ -231,8 +234,8 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       getWorkPlan: (accountId, scope) => getWorkPlan(accountId, scope),
       // Chronology's pointer evidence (core db/flow-pointers.ts) — deterministic, person-free.
       // Optional on the contract; THIS host implements it, so it is always present here.
-      getFlowPointerEvidence: (accountId, scope, windowDays) =>
-        getFlowPointerEvidence(accountId, scope, windowDays),
+      getFlowPointerEvidence: (accountId, scope, windowDays, opts) =>
+        getFlowPointerEvidence(accountId, scope, windowDays, opts),
       // Blast radius for one PR — the deterministic evidence the `impact` annotation narrates.
       getBlastSignals: (accountId, prId) => getBlastSignalsForPr(accountId, prId),
       // The workspace's derived human seat count — the ONE multiplier a `per_seat` price is read

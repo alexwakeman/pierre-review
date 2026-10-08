@@ -11,6 +11,7 @@ import { useProCapabilities } from '../../hooks/useTriage.js';
 import { usePeriodReportsList } from '../../hooks/usePeriodReports.js';
 import { usePersonPeriod } from '../../hooks/usePersonPeriod.js';
 import { useAutoNarration, type SynthesisDescriptor } from '../../hooks/useSynthesis.js';
+import { InfoButton } from '../InfoModal.js';
 import { ProBadge, ProLockPanel, useProGateState } from '../ProGate.js';
 import { periodTitle } from './periodReportMarkdown.js';
 
@@ -205,17 +206,20 @@ export function PersonPeriodSection({ userId }: { userId: number }): JSX.Element
       className="rounded-lg border border-gray-200 bg-white p-3 text-xs dark:border-gray-800 dark:bg-gray-950"
     >
       <div className="mb-1.5 flex flex-wrap items-baseline gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-ai-ink">
-          1:1 prep
+        <span className="flex items-center gap-1 self-center">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-ai-ink">
+            1:1 prep
+          </span>
+          <InfoButton title="1:1 prep" className="text-ai-ink">
+            <p>This person’s figures for the period you pick, to prepare for a 1:1.</p>
+            <p>It is not a scorecard: it covers one person and ranks nobody.</p>
+          </InfoButton>
         </span>
         {/* The Pro mark, rendered for the ENTITLED reader — the locked pane above says it with a
             padlock and a sentence, and once that is gone this chip is the only thing left saying
             which plan pays for the table below it. */}
         <ProBadge variant="heading" title="The People report is part of Pro." />
-        {/* The design rule, in the UI's own words — one quiet line, always rendered. */}
-        <span className={`text-[11px] ${MUTED}`}>
-          prep for a 1:1, not a scorecard — one person, no rankings
-        </span>
+        {/* The design rule, in the UI's own words — behind the "i" beside the heading. */}
         {periods.length > 0 && (
           <select
             value={effectiveKey ?? ''}
@@ -274,7 +278,7 @@ export function PersonPeriodSection({ userId }: { userId: number }): JSX.Element
                     {KEY_LABEL[m.key]}
                     {m.basis === 'live' && (
                       <span
-                        className={`ml-1.5 rounded border border-gray-300 px-1 text-[9px] uppercase tracking-wide ${MUTED} dark:border-gray-700`}
+                        className={`ml-1.5 rounded border border-gray-300 px-1 text-[11px] uppercase tracking-wide ${MUTED} dark:border-gray-700`}
                         title="A live reading — today’s state, not a period figure; it keeps moving after the period closes"
                       >
                         now
@@ -286,7 +290,7 @@ export function PersonPeriodSection({ userId }: { userId: number }): JSX.Element
                     {fmtValue(m)}
                     {m.lowSample && m.value != null && (
                       <span
-                        className={`ml-1 text-[10px] font-normal ${MUTED}`}
+                        className={`ml-1 text-[11px] font-normal ${MUTED}`}
                         title="Below this metric’s sample floor — the figure is real, but thin"
                       >
                         · thin

@@ -1,5 +1,6 @@
 import { useFilters } from '../../store/filters.js';
 import { DetectedReviewersTable } from '../settings/DetectedReviewersTable.js';
+import { InfoButton } from '../InfoModal.js';
 
 // The Bots rail's "Settings" sub-tab — **who counts as a review bot in this Workspace, who each
 // bot IS, and what it costs here**.
@@ -34,15 +35,19 @@ export function BotSettingsPanel({ repoId }: { repoId?: number } = {}): JSX.Elem
 
   return (
     <div className="space-y-3" data-testid="bot-settings-panel">
-      <div className="flex flex-wrap items-baseline gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
           Who counts as a review bot in this Workspace
         </h3>
-        <span className="text-[11px] text-gray-400">
-          {repoId != null
-            ? 'This Workspace’s bots, filtered to the ones active in this repo — edits still apply Workspace-wide.'
-            : 'One card per bot — its verdict, its name and its price in this Workspace.'}
-        </span>
+        <InfoButton title="Review bots in this Workspace">
+          <p>One card per bot, with its verdict, its name and its price in this Workspace.</p>
+          <p>Bots are detected automatically. Limn always marks its own reviews.</p>
+        </InfoButton>
+        {repoId != null && (
+          <span className="text-[12px] text-gray-500 dark:text-gray-400">
+            Bots active in this repo. Edits apply to the whole Workspace.
+          </span>
+        )}
       </div>
 
       {/* `repoId` is a DISPLAY filter only — the table fetches the whole Workspace's listing and
@@ -57,10 +62,8 @@ export function BotSettingsPanel({ repoId }: { repoId?: number } = {}): JSX.Elem
           and the Slack bot block became a field on the DELIVERY row (plugin migration 0033) — a
           checkbox inside the per-workspace Slack section. A pointer to a deleted screen is worse
           than no pointer: it sends a reader looking for a control that was never coming back. */}
-      <p className="border-t border-gray-200 pt-2.5 text-[11px] text-gray-400 dark:border-gray-800">
-        Bot <span className="font-medium">detection</span> needs no configuration, and Limn stamps
-        its own review marker unconditionally. To put a review-bot summary into a Slack digest,
-        turn it on for that workspace&apos;s delivery in{' '}
+      <p className="border-t border-gray-200 pt-2.5 text-[12px] text-gray-500 dark:text-gray-400 dark:border-gray-800">
+        To add a review-bot summary to a Slack digest, turn it on in{' '}
         <span className="font-medium">Settings → Workspace → Slack digest</span>.
       </p>
     </div>

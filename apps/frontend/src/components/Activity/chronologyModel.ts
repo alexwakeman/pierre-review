@@ -1,5 +1,8 @@
 import {
   FLOW_BUDGET_LABEL,
+  REPORTING_DEFAULT_DAYS,
+  reportingWindowShortTitle,
+  type ReportingWindowInfo,
   type FlowBudgetRow,
   type FlowPrFigures,
   type FlowPrRow,
@@ -19,15 +22,30 @@ import {
 //
 // ⚠ NO PERSON. The server sends no actor on any of these rows, and nothing here may add one.
 
-/** The windows the panel offers. The server clamps to [7, 90]; these three are the useful ones. */
-export const CHRONOLOGY_WINDOWS = [30, 60, 90] as const;
+/** The windows the panel offers. ⚠ THE DEFAULT IS THE WORKSPACE'S REPORTING WINDOW ('reporting':
+ *  this sprint so far, or the last 7/14 days), the window every other Reports figure is tied to —
+ *  resolved server-side by the one resolver. 30/60/90 days are the longer views (the server clamps
+ *  a `?days=` to [7, 90]). */
+export const CHRONOLOGY_WINDOWS = ['reporting', 30, 60, 90] as const;
 export type ChronologyWindow = (typeof CHRONOLOGY_WINDOWS)[number];
 
-/** A bookmarked or hand-typed window that is not one of the three reads as the default. */
-export function effectiveChronologyWindow(raw: number | null | undefined): ChronologyWindow {
-  return (CHRONOLOGY_WINDOWS as readonly number[]).includes(raw ?? -1)
+/** Anything that is not one of the four reads as the default, the reporting window. */
+export function effectiveChronologyWindow(
+  raw: number | string | null | undefined,
+): ChronologyWindow {
+  return (CHRONOLOGY_WINDOWS as readonly (number | string)[]).includes(raw ?? -1)
     ? (raw as ChronologyWindow)
-    : 30;
+    : 'reporting';
+}
+
+/** The picker's words for one option. The reporting window is named by what it IS for this
+ *  workspace ("This sprint" / "Last 14 days"), never by an abstraction like "reporting window". */
+export function chronologyWindowLabel(
+  w: ChronologyWindow,
+  reporting: ReportingWindowInfo | null | undefined,
+): string {
+  if (w !== 'reporting') return `${w} days`;
+  return reportingWindowShortTitle(reporting ?? { mode: 'rolling_14', days: REPORTING_DEFAULT_DAYS });
 }
 
 const DAY_LONG = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -113,13 +131,13 @@ export function formatShare(share: number): string {
 export const VERDICT_LABEL: Record<NonNullable<FlowBudgetRow['verdict']>, string> = {
   good: 'Within budget',
   ok: 'Acceptable',
-  slow: 'Slow',
+  slow: 'Past limit',
 };
 
 /** What each wait measures, in words — the popover's second line and the "i" modal's list. */
 export const BUDGET_SUB: Record<FlowBudgetRow['measure'], string> = {
   firstLook: 'Opened to the first human review or comment',
-  reply: 'The slowest reply on each pull request that went back to its author',
+  reply: 'Review to the author’s answer, on pull requests that went back to their author (each counted by its longest reply)',
   land: 'Approved to merged, for pull requests that were approved',
   lead: 'Opened to merged',
 };

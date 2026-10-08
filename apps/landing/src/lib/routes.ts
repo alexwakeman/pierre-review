@@ -62,7 +62,7 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   },
   '/for-managers': {
     title: 'For engineering managers — see the whole review loop, people and bots',
-    description: `Throughput, lead time and where the waiting happens across every repository you own, with people counted apart from automation — free. Then a forwardable report per sprint, an hour-by-hour account of who was holding each pull request, and a keep / tune / noisy verdict on every review bot you pay for.`,
+    description: `Throughput, lead time and where the waiting happens across every repository you own, with people counted apart from automation — free. Then a forwardable report per sprint, an hour-by-hour account of who was holding each pull request, and a keep / tune / rarely used verdict on every review bot you pay for.`,
   },
   '/contact': {
     title: `Contact — a free month of Pro, for asking`,

@@ -2324,7 +2324,12 @@ export interface FlowPrFigures {
 
 export interface FlowResponse {
   workspaceId: number;
+  /** Days covered. For the reporting window this is the days elapsed so far, rounded up. */
   windowDays: number;
+  /** Set when the request asked for the workspace's REPORTING WINDOW (`?window=reporting`, the
+   *  default): the window that was measured, so the panel names it ("This sprint so far", "Last 14
+   *  days"). Absent for the 30/60/90-day options. */
+  reportingWindow?: ReportingWindowInfo;
   /** Human-touched merged pull requests behind every figure below. */
   measuredPrs: number;
   /** Workspace-wide, always three. */
@@ -2597,6 +2602,9 @@ export interface FlowPointerExemplar {
 export interface FlowPointerEvidence {
   workspaceId: number;
   windowDays: number;
+  /** Set when the evidence covers the workspace's reporting window rather than a fixed 30/60/90
+   *  days. The plugin keys its cache on it and names it in the prompt. */
+  reportingWindow?: ReportingWindowInfo;
   measuredPrs: number;
   settings: ResolvedFlowSettings;
   budgets: FlowBudgetRow[];
@@ -10383,7 +10391,10 @@ export interface WorkspaceRepoActivityRow {
 }
 
 export interface WorkspaceRepoActivity {
-  windowDays: number; // always 14 — see `from`/`to`
+  /** Days the window has covered so far (`to - from`, rounded up, at least 1). It follows the
+   *  workspace's REPORTING WINDOW (`WorkspaceMetricsResponse.window`), so mid-sprint it is the
+   *  sprint's elapsed days, not its length. Label the card from `window`, not from this. */
+  windowDays: number;
   from: string; // ISO-8601, inclusive
   to: string; // ISO-8601, exclusive
   /** The repositories that saw at least one PR opened in the window, DESC by `prsOpenedHuman +
@@ -10396,6 +10407,50 @@ export interface WorkspaceRepoActivity {
    *  ranked by PRs opened can drop the repository that leads on lines changed, and a note that
    *  says only "top 12" gives the reader no way to know that happened. */
   omitted: { repos: number; prsOpened: number; linesChanged: number | null };
+}
+
+// ── THE REPORTING WINDOW ────────────────────────────────────────────────────────────────────
+//
+// THE RULE FOR REPORTS: every figure is tied to the workspace's reporting window unless it is a
+// clearly-labelled exception ("Right now" snapshots, the 12-week trend band, completed periods).
+// The window is the workspace's comparison window — this sprint so far when the workspace has a
+// sprint cadence and its mode is 'sprint', else the trailing 7 or 14 days. It is resolved ONCE,
+// server-side (core `db/reporting-window.ts`, which asks the plugin's `resolveComparisonWindow`
+// when it is bound and falls back to the trailing 14 days when it is not), and echoed here so every
+// card in the section can name the same window in the same words.
+export interface ReportingWindowInfo {
+  /** The mode that was USED. 'sprint' only when a sprint grid exists; a 'sprint' setting on a
+   *  workspace with no cadence resolves to 'rolling_14' and says so. */
+  mode: SprintComparisonMode;
+  /** The measured span, half-open `[from, to)`. `to` is `min(end, now)`. */
+  from: string;
+  to: string;
+  /** The window's own end. Later than `to` while a sprint is running. */
+  end: string;
+  /** The window's full length in days (the sprint length, or 7/14). */
+  days: number;
+  /** Days elapsed so far, one decimal. Equal to `days` for a rolling window. */
+  elapsedDays: number;
+}
+
+/** One pull request MERGED in the reporting window, with the signals `blastRadius()` reads. The
+ *  wire carries SIGNALS, never a level, so the Settings dial repaints with no cache invalidation —
+ *  the same contract the open-PR rows keep. `blast: null` is "not measured", never "low". */
+export interface WorkspaceReachPr {
+  id: number;
+  repoId: number;
+  blast: BlastSignals | null;
+  codeLoc: number | null;
+  codeLocIsLowerBound: boolean;
+}
+
+/** "Reach by repository": the pull requests merged in the reporting window. */
+export interface WorkspaceMergedReach {
+  from: string; // ISO-8601, inclusive
+  to: string; // ISO-8601, exclusive
+  prs: WorkspaceReachPr[];
+  /** The scan hit its row cap; the list is a subset and the card says so. */
+  truncated: boolean;
 }
 
 // The workspace flow-metric header (DORA-ish tiles + trend charts) as a standalone CORE/free
@@ -10411,6 +10466,11 @@ export interface WorkspaceMetricsResponse {
    *  for the same reason the fields on `WorkspaceMetrics` are: SPA and server deploy
    *  independently. */
   repoActivity?: WorkspaceRepoActivity;
+  /** The reporting window every windowed figure in this response was measured over. */
+  window?: ReportingWindowInfo;
+  /** Pull requests merged in `window`, with their reach signals. Absent when the workspace has no
+   *  repos. */
+  reach?: WorkspaceMergedReach;
 }
 
 // (The "Compare workspaces" surface — `WorkspaceComparisonRow`/`WorkspaceComparisonResponse` and

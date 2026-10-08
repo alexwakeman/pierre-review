@@ -16,6 +16,7 @@ import { type TabMeta } from '../../store/pinnedTabs.js';
 import { CI_META, CONFIDENCE_META, indexUsers, relativeTime, userLabel, vendorInk } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import { CheckCircleIcon, ChevronIcon, RefreshIcon, ResolveIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import { ThreadCountChips } from '../ThreadList/ThreadCountChips.js';
 import { SortHeader, type SortState, compare, nextSort } from './sortableTable.js';
 import {
@@ -84,7 +85,7 @@ function ConfidenceMix({ counts }: { counts: AddressedConfidenceCounts }): JSX.E
           <span
             key={l}
             title={`${counts[l]} ${meta.label}-confidence thread${counts[l] === 1 ? '' : 's'} — ${meta.description}`}
-            className="inline-flex items-center gap-0.5 rounded px-1.5 py-px text-[10px] font-semibold tabular-nums"
+            className="inline-flex items-center gap-0.5 rounded px-1.5 py-px text-[11px] font-semibold tabular-nums"
             style={{ ...vendorInk(meta.color), background: `${meta.color}1f` }}
           >
             {counts[l]}
@@ -320,9 +321,18 @@ export function BotThreadsDetail(): JSX.Element {
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
           <ResolveIcon size={15} className="inline-block align-[-0.1em]" /> Resolve bot threads
         </h2>
-        <span className="text-[11px] text-gray-400">
-          PRs with likely-addressed automated-reviewer threads — a later commit touched their
-          file, so they only LOOK resolved. Review, then resolve on GitHub. Click a PR to inspect.
+        <InfoButton title="Resolve bot threads">
+          <p>
+            Lists pull requests with unresolved review-bot threads where a later commit touched the
+            thread’s file. That makes them <span className="font-semibold">likely addressed</span>,
+            not resolved: the commit may have changed something else.
+          </p>
+          <p>
+            Check each thread before you resolve it. Resolving here resolves the thread on GitHub.
+          </p>
+        </InfoButton>
+        <span className="text-[11px] text-gray-500 dark:text-gray-400">
+          Review, then resolve on GitHub. Click a PR to inspect.
         </span>
         {/* Cross-repo repo filter (single-repo tabs omit it). */}
         {isCrossRepo && repoOptions.length > 1 && (
@@ -518,7 +528,7 @@ export function BotThreadsDetail(): JSX.Element {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[940px] border-collapse text-sm">
               <thead>
-                <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                   <th className="pb-1 pr-2">
                     <input
                       type="checkbox"

@@ -8,6 +8,7 @@ import { useFilters } from '../../store/filters.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { ML_CATEGORY_COLOR, ML_CATEGORY_LABEL, automatedReviewerMeta, vendorInk } from '../../lib/ui.js';
 import { BotIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
 import { Heatmap } from '../charts/Heatmap.js';
@@ -140,7 +141,7 @@ function BotCard({
           {bot.label}
         </span>
         <span
-          className="rounded px-1.5 py-0.5 text-[10px] font-medium"
+          className="rounded px-1.5 py-0.5 text-[11px] font-medium"
           style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
         >
           {meta.label}
@@ -212,11 +213,19 @@ function BotCard({
           anomaly colour. The "gaps in reviews" made visible. */}
       <ChartCard
         title="Daily coverage"
-        note={
-          silenceNote(bot) ??
-          (prsOpenedPerDay != null
-            ? 'one cell / day · line = PRs opened · last 12 weeks (UTC)'
-            : 'one cell / day · last 12 weeks (UTC)')
+        note={silenceNote(bot) ?? 'last 12 weeks (UTC)'}
+        info={
+          <InfoButton title="Daily coverage">
+            <p>
+              One cell per day over the last 12 weeks, in UTC. A stronger cell means more reviews and
+              comments from this bot that day.
+            </p>
+            {prsOpenedPerDay != null && <p>The line is pull requests opened each day.</p>}
+            <p>
+              An underline marks a quiet spell that is long for this bot, given how often it
+              usually posts.
+            </p>
+          </InfoButton>
         }
       >
         <DayStrip
@@ -345,8 +354,8 @@ export function BotDetailPanel(): JSX.Element {
     body = (
       <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
         No activity for this bot in this window.
-        <div className="mt-1 text-[11px]">
-          A bot that was active earlier may just be quiet — try widening the window above.
+        <div className="mt-1 text-[12px]">
+          A bot that was active earlier may just be quiet. Try a wider window above.
         </div>
       </div>
     );
@@ -362,19 +371,28 @@ export function BotDetailPanel(): JSX.Element {
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <ChartCard
               title="Severity over time"
-              note="weekly mean severity · findings only · hover for the week’s counts"
+              note="weekly mean · findings only · hover for counts"
             >
               <MlSeverityTrendChart views={mlViews} subset={subset} botColor={botColor} />
             </ChartCard>
-            <ChartCard title="Category mix" note={`what this bot talks about · ${windowLabel}`}>
+            <ChartCard
+              title="Category mix"
+              note={`what this bot talks about · ${windowLabel}`}
+              info={
+                <InfoButton title="Category mix">
+                  <p>
+                    One comment can carry several categories, so the bars count mentions (
+                    {fmtNum(mlBot.byCategory.reduce((n, c) => n + c.count, 0))}), not findings (
+                    {fmtNum(mlBot.findings)}).
+                  </p>
+                  <p>
+                    Walkthrough summaries are left out, since their categories describe the
+                    template rather than a finding. Acknowledgements count as “Praise”.
+                  </p>
+                </InfoButton>
+              }
+            >
               <CategoryMixChart ml={mlBot} />
-              <div className="mt-1 text-[10px] text-gray-400">
-                Multi-label: one comment can count under several categories, so the category total
-                ({fmtNum(mlBot.byCategory.reduce((n, c) => n + c.count, 0))}) exceeds the finding
-                count ({fmtNum(mlBot.findings)}) — bars are mentions, not findings. Walkthrough
-                summaries are excluded (their categories are a read of the template, not of a
-                finding); acknowledgments appear as “Praise”.
-              </div>
             </ChartCard>
           </div>
         )}
@@ -390,12 +408,18 @@ export function BotDetailPanel(): JSX.Element {
           {label}
           <span className="font-normal text-gray-400"> · depth</span>
         </h2>
-        <span className="text-[11px] text-gray-400">
-          Deterministic, no AI. Red rings & underlines mark where this bot diverged from its{' '}
-          <span className="font-medium">own</span> typical (a self-baseline). Times are UTC;
-          activity gaps are inferred (not a direct rate-limit signal).
-          {botMeta?.repoId != null && ' Measured on the repo the pill was opened from.'}
-        </span>
+        <InfoButton title={`${label}: depth`}>
+          <p>How this bot behaves over time. No AI is involved.</p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>A red ring or underline marks where it differed from its own usual behaviour.</li>
+            <li>Times are UTC. Gaps in activity are inferred, not a direct rate-limit signal.</li>
+          </ul>
+        </InfoButton>
+        {botMeta?.repoId != null && (
+          <span className="text-[12px] text-gray-500 dark:text-gray-400">
+            Measured on the repo the pill was opened from.
+          </span>
+        )}
         <div className="ml-auto inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
           {WINDOWS.map((wOpt) => (
             <button

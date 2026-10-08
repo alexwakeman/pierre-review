@@ -70,6 +70,12 @@ export function useUpdateWorkspaceProSettings(workspaceId: number | null) {
       if (patch.sprint || patch.comparisonMode != null) {
         void qc.invalidateQueries({ queryKey: ['workspace-insights'] });
         void qc.invalidateQueries({ queryKey: ['workspace-metrics-detail'] });
+        // The FREE Reports surfaces follow the same window now (core db/reporting-window.ts asks
+        // the plugin's resolver): the tiles, Activity and Reach by repository ride
+        // ['workspace-metrics'], and Chronology's default option is the reporting window.
+        void qc.invalidateQueries({ queryKey: ['workspace-metrics'] });
+        void qc.invalidateQueries({ queryKey: ['flow-findings'] });
+        void qc.invalidateQueries({ queryKey: ['flow-pointers'] });
       }
       // (The tracker's invalidations moved with it: hooks/useWorkspaceTracker.ts.)
     },

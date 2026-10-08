@@ -6,6 +6,7 @@ import { useRepos } from '../hooks/useTimeline.js';
 import { automatedReviewerMeta, dateTime, relativeTime, vendorInk } from '../lib/ui.js';
 import { fmtDuration } from './charts/common.js';
 import { CommentIcon, ReviewIcon, WarningIcon } from './Icons.js';
+import { InfoButton } from './InfoModal.js';
 
 // The PrDetail "Bot activity" tab (EXPERIMENTAL, CORE, deterministic) — the per-PR view of the
 // aggregate Behaviour tab. For each automated reviewer that touched THIS PR: its on-PR timeline
@@ -281,10 +282,18 @@ export function PrBotBehaviourTab({ pr }: { pr: PrDetail }): JSX.Element {
         {/* Said ONCE for the whole tab, not per card and never per chip: "touch" is the unit of
             both the Touches stat and the timeline chips, and a reader who does not know a review
             and its inline comments are separate rows cannot check either number. */}
+        <InfoButton title="Bot activity">
+          <p>
+            How each review bot behaved on this pull request, compared with its own usual over the
+            last 84 days. No AI is involved.
+          </p>
+          <p>
+            A touch is one review or one comment, so a review submitted with three inline comments
+            counts as four.
+          </p>
+        </InfoButton>
         <span className="text-[12px] text-gray-500 dark:text-gray-400">
-          How each review bot behaved on THIS PR vs its <span className="font-medium">own</span>{' '}
-          typical (84-day baseline). Deterministic, no AI. A touch is one review or one comment, so
-          a review submitted with three inline comments counts as four.
+          Each bot against its own usual
         </span>
       </div>
 

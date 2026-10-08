@@ -1,4 +1,4 @@
-// WHERE IS THE WORK HAPPENING — per-repository activity over a rolling 14 days.
+// WHERE IS THE WORK HAPPENING — per-repository activity over the workspace's REPORTING WINDOW.
 //
 // The flow-metric tiles beside this on Reports → Overview answer "how much" and "how fast" for the
 // whole workspace. They cannot answer "which repository", because a workspace-wide figure is one
@@ -6,21 +6,19 @@
 // corpus one fortnight held 147 PRs / 1.4k lines in a config repo and 71 PRs / 141.7k lines in an
 // application repo. Both are "activity"; they are not the same activity.
 //
+// ── THE WINDOW IS THE TILES' WINDOW, HANDED IN ───────────────────────────────────────────────
+//
+// Reports' rule: every figure is tied to the workspace's reporting window (this sprint so far when
+// the workspace has a sprint cadence, else the trailing 7/14 days). This fold does NOT resolve it:
+// the route resolves it ONCE (`getReportingWindow`, db/reporting-window.ts — the plugin's
+// `resolveComparisonWindow` when bound) and hands the same object to the tiles and to this, so the
+// card and the tiles above it measure one window by construction. A running sprint is measured up
+// to now (`measuredTo`), never into the future.
+//
 // ── WHY THIS IS A SEPARATE MODULE AND NOT A FIELD ON getWorkspaceMetrics ─────────────────────
 //
-// Two reasons, and the second is the load-bearing one:
-//
-//  1. `getWorkspaceMetrics` is a 400-line fold whose PR SELECT carries none of the five columns
-//     this needs (repoId, authorId, additions, deletions, changedFiles).
-//  2. It honours an ARBITRARY comparison window handed in by the Pro layer (the workspace sprint
-//     cadence). This surface is FREE and cannot read that cadence — `resolveComparisonWindow` /
-//     `getComparisonWindow` live in the private plugin over `pro_workspace_settings`, and CORE has
-//     zero references to them. So the window here is the same trailing 14 days
-//     (`INSIGHT_SPRINT_DAYS`) the free tiles already use, which is what makes the chart and the
-//     tiles beside it agree BY CONSTRUCTION rather than by coincidence. Folding this into
-//     `getWorkspaceMetrics` would silently hand it the plugin's cadence window on the one call
-//     path that has one, and the panel would then carry two 14-day-labelled things measuring
-//     different fortnights.
+// `getWorkspaceMetrics` is a 400-line fold whose PR SELECT carries none of the five columns this
+// needs (repoId, authorId, additions, deletions, changedFiles).
 //
 // It also cannot live in `queries.ts`: it needs `resolveActorLanes`, and `actor-lanes.ts` imports
 // FROM `queries.ts`. Every other lane-consuming fold (`period-metrics.ts`, `pr-intervals.ts`,
@@ -34,15 +32,9 @@ import type { WorkspaceRepoActivity, WorkspaceRepoActivityRow } from '@pierre-re
 import { db, schema } from './client.js';
 import { resolveActorLanes } from './actor-lanes.js';
 import type { BotScope } from './queries.js';
+import { measuredTo, type ReportingWindow } from './reporting-window.js';
 
 const { pullRequests, repos } = schema;
-
-/** The window. MIRRORS `INSIGHT_SPRINT_DAYS` in queries.ts, which is what the free flow-metric
- *  tiles use — the two are read side by side and a divergence would be invisible. Deliberately a
- *  constant and not a parameter: this is a FREE surface and the sprint cadence is plugin-owned, so
- *  there is no setting that could legitimately move it. The label on screen must say "rolling 14
- *  days", never "this sprint". */
-export const REPO_ACTIVITY_WINDOW_DAYS = 14;
 
 /** Top-N by PRs opened. Beyond about a dozen bands the bars are unreadable even rotated (the dev
  *  workspace has 19 active repositories in a typical fortnight). NEVER a silent truncation — the
@@ -51,7 +43,7 @@ export const REPO_ACTIVITY_WINDOW_DAYS = 14;
 export const REPO_ACTIVITY_MAX_REPOS = 12;
 
 /**
- * Per-repository PR and line counts over the trailing `REPO_ACTIVITY_WINDOW_DAYS`.
+ * Per-repository PR and line counts over `window` (the workspace's reporting window).
  *
  * ⚠ `scope.repoIds` IS REQUIRED AND CONCRETE, and `[]` returns null — the same contract
  * `getWorkspaceMetricsForScope` states at length. A nullable "means every repo" parameter would
@@ -63,6 +55,7 @@ export async function getWorkspaceRepoActivity(
   accountId: number,
   scope: BotScope,
   nowMs: number,
+  window: ReportingWindow,
 ): Promise<WorkspaceRepoActivity | null> {
   if (scope.repoIds.length === 0) return null;
 
@@ -77,8 +70,8 @@ export async function getWorkspaceRepoActivity(
   if (ownedRepos.length === 0) return null;
   const ownedIds = ownedRepos.map((r) => r.id);
 
-  const toMs = nowMs;
-  const fromMs = toMs - REPO_ACTIVITY_WINDOW_DAYS * 86_400_000;
+  const fromMs = window.fromMs;
+  const toMs = Math.max(fromMs, measuredTo(window, nowMs));
 
   // ⚠ TWO-SIDED AND HALF-OPEN, `[fromMs, toMs)`. `gte`/`lt`, never `lte` on the upper bound: a PR
   // opened at exactly `toMs` belongs to the next read of this window, not to both.
@@ -185,7 +178,7 @@ export async function getWorkspaceRepoActivity(
   // reason a row's own figure is: unknown is not zero.
   const cutSized = cut.reduce((n, r) => n + r.sizedPrs, 0);
   return {
-    windowDays: REPO_ACTIVITY_WINDOW_DAYS,
+    windowDays: Math.max(1, Math.ceil((toMs - fromMs) / 86_400_000)),
     from: new Date(fromMs).toISOString(),
     to: new Date(toMs).toISOString(),
     repos: shown,

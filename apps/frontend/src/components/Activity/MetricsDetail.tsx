@@ -11,6 +11,7 @@ import { Avatar } from '../CommentCard.js';
 import { CheckCircleIcon, RefreshIcon } from '../Icons.js';
 import { UserName } from '../UserName.js';
 import { MetricRepoFilter } from './MetricRepoFilter.js';
+import { InfoButton } from '../InfoModal.js';
 import { SortHeader, type SortDir, type SortState, compare, nextSort } from './sortableTable.js';
 
 // The flow-metric DRILL-DOWN — a persistent tab opened by clicking a metric tile on the Feed's
@@ -20,14 +21,59 @@ import { SortHeader, type SortDir, type SortState, compare, nextSort } from './s
 
 // (No 'open_prs' sub-tab: the "Open PRs" tile reveals the fixed Open PRs tab —
 // the ONE open-PR list — not here.)
+// `blurb` names the list's POPULATION (what is in it, and its order) and stays on screen: the
+// Time to merge list holds open pull requests as well as merged ones, which the tile does not, so
+// hiding that would make the list look like the tile's evidence when it is wider. How each figure
+// is MEASURED lives in the "Flow metrics" info modal (`MetricsInfo` below).
 const METRIC_META: Record<WorkspaceMetricKey, { label: string; blurb: string }> = {
-  merges: { label: 'Merges', blurb: 'Merged this sprint · most-recently-updated first' },
-  lead_time: { label: 'Lead time', blurb: 'Open → merge (merged + open) · longest first' },
-  review_latency: { label: 'Review latency', blurb: 'Open → first review · longest first' },
-  merge_ci: { label: 'Merge CI', blurb: 'Merged PRs · CI-failed-at-merge first' },
-  ci_recovery: { label: 'CI recovery', blurb: 'Red → green · slowest first' },
-  ci_red: { label: 'CI red now', blurb: 'Currently-failing branches · longest red first' },
+  merges: { label: 'Merged', blurb: 'Merged in this window · most recently updated first' },
+  lead_time: {
+    label: 'Time to merge',
+    blurb: 'Merged in this window, plus pull requests still open · longest first',
+  },
+  review_latency: {
+    label: 'Time to first review',
+    blurb: 'Opened in this window and reviewed · longest first',
+  },
+  merge_ci: { label: 'Checks green at merge', blurb: 'Merged in this window · failed first' },
+  ci_recovery: { label: 'Time to fix red checks', blurb: 'Went red to green in this window · longest first' },
+  ci_red: { label: 'Red checks now', blurb: 'Open pull requests with failing checks · longest first' },
 };
+
+// The definitions behind every sub-tab, checked against `getWorkspaceMetricsDetail`'s fold.
+function MetricsInfo(): JSX.Element {
+  return (
+    <InfoButton title="Flow metrics">
+      <ul className="list-disc space-y-1.5 pl-5">
+        <li>
+          <strong>Merged</strong>: pull requests merged in the window.
+        </li>
+        <li>
+          <strong>Time to merge</strong>: opened to merged. The list also shows pull requests still
+          open (drafts not counted), timed from opening to now, so a stuck one is visible. The
+          tile&rsquo;s median counts merged pull requests only.
+        </li>
+        <li>
+          <strong>Time to first review</strong>: opened to first review, for pull requests opened in
+          the window that have been reviewed.
+        </li>
+        <li>
+          <strong>Checks green at merge</strong>: merged pull requests and the state of their checks
+          when they merged. Failed ones are listed first.
+        </li>
+        <li>
+          <strong>Time to fix red checks</strong>: for each pull request whose checks went from red
+          to green in the window, its longest red stretch. A stretch over several commits counts
+          once, until the checks pass.
+        </li>
+        <li>
+          <strong>Red checks now</strong>: open pull requests (drafts not counted) whose checks are
+          failing. The age runs from the last commit.
+        </li>
+      </ul>
+    </InfoButton>
+  );
+}
 
 // ── Sortable-table wiring (shared mechanics from ./sortableTable) ─────────────────────────
 // The drill-down is a single table whose "value" + last columns are metric-specific, so the
@@ -57,6 +103,50 @@ const DEFAULT_SORT: Record<WorkspaceMetricKey, SortState<SortCol> | null> = {
   ci_recovery: { col: 'value', dir: 'desc' },
   ci_red: { col: 'value', dir: 'desc' },
 };
+
+// The duration tabs, whose default order is the metric, longest first. Each offers a "Fastest
+// first" / "Longest first" toggle that reverses it — remembered per viewer (localStorage, best
+// effort: a blocked store just means the default every time). Merges (recency) and Merge CI
+// (failed first) are not durations and offer none.
+const DURATION_TABS: ReadonlySet<WorkspaceMetricKey> = new Set<WorkspaceMetricKey>([
+  'lead_time',
+  'review_latency',
+  'ci_recovery',
+  'ci_red',
+]);
+const FAST_FIRST_KEY = 'pierre:metricsFastestFirst';
+
+function readFastFirst(): boolean {
+  try {
+    return window.localStorage.getItem(FAST_FIRST_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeFastFirst(on: boolean): void {
+  try {
+    if (on) window.localStorage.setItem(FAST_FIRST_KEY, '1');
+    else window.localStorage.removeItem(FAST_FIRST_KEY);
+  } catch {
+    /* storage blocked — the choice lasts for this view only */
+  }
+}
+
+/** The seeded per-tab sort, with the duration tabs turned round when the viewer chose fastest first. */
+function seedSort(fastFirst: boolean): Record<WorkspaceMetricKey, SortState<SortCol> | null> {
+  const out = { ...DEFAULT_SORT };
+  if (fastFirst) for (const m of DURATION_TABS) out[m] = { col: 'value', dir: 'asc' };
+  return out;
+}
+
+/** The window's ends as "24 Sep" — the dates the lists cover, read off the response. */
+function windowDate(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
 
 // CI rollup → a sortable rank (failing first under 'asc'; null/no-checks last).
 const CI_RANK: Record<string, number> = {
@@ -203,7 +293,7 @@ function Reviewers({
         return (
           <span
             key={id}
-            className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1 py-0.5 text-[10px]"
+            className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1 py-0.5 text-[11px]"
           >
             <Avatar user={u} size={11} />
             <UserName user={u} fallbackId={id} />
@@ -219,13 +309,13 @@ function valueHeader(m: WorkspaceMetricKey): string {
   switch (m) {
     case 'merges':
     case 'lead_time':
-      return 'Lead time';
+      return 'Opened to merged';
     case 'review_latency':
-      return 'Latency';
+      return 'To first review';
     case 'merge_ci':
-      return 'CI @ merge';
+      return 'Checks at merge';
     case 'ci_recovery':
-      return 'Recovery';
+      return 'Red to green';
     case 'ci_red':
       return 'Red for';
   }
@@ -334,10 +424,10 @@ function Table({
     <div className="overflow-x-auto">
       <table className="w-full min-w-[760px] border-collapse text-sm">
         <thead>
-          <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+          <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400">
             <SortHeader col="pr" label="Pull request" sort={sort} onSort={onSort} />
             <SortHeader col="value" label={valueHeader(m)} sort={sort} onSort={onSort} />
-            <SortHeader col="ci" label="CI" sort={sort} onSort={onSort} />
+            <SortHeader col="ci" label="Checks" sort={sort} onSort={onSort} />
             <SortHeader col="diff" label="Diff" sort={sort} onSort={onSort} title="Diff size (added + deleted lines)" />
             <SortHeader col="author" label="Author" sort={sort} onSort={onSort} />
             <SortHeader col="last" label={lastCol} sort={sort} onSort={onSort} />
@@ -382,9 +472,21 @@ export function MetricsDetail(): JSX.Element {
   // Sort is PER-TAB (each metric keeps its own column + direction), seeded from DEFAULT_SORT —
   // recency for merges, metric magnitude for the duration/CI tabs. Header clicks toggle.
   const [sortByTab, setSortByTab] = useState<Record<WorkspaceMetricKey, SortState<SortCol> | null>>(
-    () => ({ ...DEFAULT_SORT }),
+    () => seedSort(readFastFirst()),
   );
   const sort = sortByTab[active];
+  const isDuration = DURATION_TABS.has(active);
+  // The toggle reads the active tab's OWN sort, so a header click on the value column moves it too.
+  const fastFirst = isDuration && sort?.col === 'value' && sort.dir === 'asc';
+  const longestFirst = isDuration && sort?.col === 'value' && sort.dir === 'desc';
+  const setOrder = (fast: boolean): void => {
+    writeFastFirst(fast);
+    setSortByTab((prev) => {
+      const next = { ...prev };
+      for (const m of DURATION_TABS) next[m] = { col: 'value', dir: fast ? 'asc' : 'desc' };
+      return next;
+    });
+  };
   const onSort = (col: SortCol): void =>
     setSortByTab((prev) => ({ ...prev, [active]: nextSort(prev[active], col, DEFAULT_DIR) }));
 
@@ -417,11 +519,15 @@ export function MetricsDetail(): JSX.Element {
     const filtered = activeSel == null ? allRows : allRows.filter((r) => activeSel.includes(r.repoId));
     if (sort == null) return filtered;
     const mul = sort.dir === 'asc' ? 1 : -1;
-    return [...filtered].sort(
-      (a, b) =>
-        mul * compare(sortValue(a, active, sort.col, usersById), sortValue(b, active, sort.col, usersById)) ||
-        b.prNumber - a.prNumber, // stable final tiebreak
-    );
+    // A duration with no value yet (sorted as -1) goes LAST either way — "fastest first" must not
+    // open on the rows that have no figure at all.
+    const missingLast = DURATION_TABS.has(active) && sort.col === 'value';
+    return [...filtered].sort((a, b) => {
+      const va = sortValue(a, active, sort.col, usersById);
+      const vb = sortValue(b, active, sort.col, usersById);
+      if (missingLast && (va === -1) !== (vb === -1)) return va === -1 ? 1 : -1;
+      return mul * compare(va, vb) || b.prNumber - a.prNumber; // stable final tiebreak
+    });
   }, [allRows, activeSel, sort, active, usersById]);
   const openPr = (pr: MetricPr): void => {
     const u = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
@@ -440,10 +546,13 @@ export function MetricsDetail(): JSX.Element {
   return (
     <div className="mx-auto max-w-[100rem] space-y-4 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Flow metrics</h2>
+        <div className="flex items-center gap-1">
+          <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Flow metrics</h2>
+          <MetricsInfo />
+        </div>
         {detail && (
           <span className="text-[11px] text-gray-400">
-            sprint: last 2 weeks · where issues cluster
+            {windowDate(detail.sprint.from)} to {windowDate(detail.sprint.to)}
           </span>
         )}
         <button
@@ -487,8 +596,32 @@ export function MetricsDetail(): JSX.Element {
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="text-[11px] text-gray-400">
-          {METRIC_META[active].blurb} · click a column to sort
+          {isDuration ? METRIC_META[active].blurb.replace(/ · longest first$/, '') : METRIC_META[active].blurb}
+          {isDuration && fastFirst ? ' · fastest first' : isDuration && longestFirst ? ' · longest first' : ''}
+          {' '}· click a column to sort
         </div>
+        {isDuration && (
+          <div role="group" aria-label="Order" className="inline-flex overflow-hidden rounded border border-gray-300 text-[11px] dark:border-gray-700">
+            {([
+              [false, 'Longest first', longestFirst],
+              [true, 'Fastest first', fastFirst],
+            ] as const).map(([fast, label, on]) => (
+              <button
+                key={label}
+                type="button"
+                aria-pressed={on}
+                onClick={() => setOrder(fast)}
+                className={`px-1.5 py-0.5 font-medium ${
+                  on
+                    ? 'bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900'
+                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-900/60'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         {rows.length !== allRows.length && (
           <span className="text-[11px] text-gray-400">
             · {rows.length} of {allRows.length}
@@ -515,10 +648,10 @@ export function MetricsDetail(): JSX.Element {
           {allRows.length === 0 ? (
             <>
               <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] decorative-mark text-gray-300 dark:text-gray-600" />
-              Nothing to show for this metric in the current sprint.
+              Nothing to show for this figure in this window.
             </>
           ) : (
-            'No PRs for the selected repos — adjust the repo filter.'
+            'No pull requests in the selected repositories. Change the repository filter.'
           )}
         </div>
       ) : (

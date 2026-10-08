@@ -1,6 +1,6 @@
 // "Where the work is happening" — the two per-repository cards under Flow metrics on Reports →
-// Overview: `WorkspaceRepoActivityCharts` (what was opened in the last 14 days) and
-// `WorkspaceReachCard` (how far the pull requests open right now could reach).
+// Overview: `WorkspaceRepoActivityCharts` (what was opened in the reporting window) and
+// `WorkspaceReachCard` (how far the pull requests merged in that same window could reach).
 //
 // These are SOURCE guards. Everything pinned here is load-bearing and invisible in the rendered
 // JSX, and each failure mode is a plausible-LOOKING card rather than a broken one:
@@ -16,7 +16,7 @@
 //      touch and to a keyboard), so neither the truncation nor a tooltip may come back.
 //
 //   3. UNKNOWN IS NOT ZERO, ON BOTH CARDS. An ALL-unsized repository prints "size unknown" in its
-//      own row and a PARTIALLY-sized one prints how much of it the bar covers; an open pull request
+//      own row and a PARTIALLY-sized one prints how much of it the bar covers; a merged pull request
 //      with no reach reading is not drawn at all and is counted in words. A missing bar is not a
 //      disclosure, and neither is a full-looking bar over 43 of 45 pull requests.
 //
@@ -36,7 +36,8 @@ const read = (rel: string): string =>
 const ACTIVITY = read('components/Activity/WorkspaceRepoActivityCharts.tsx');
 const REACH = read('components/Activity/WorkspaceReachCard.tsx');
 const ROWS = read('components/charts/RepoRows.tsx');
-const FOLD = read('hooks/useBlastRadius.ts');
+const HOOK = read('hooks/useBlastRadius.ts');
+const FOLD = read('components/Activity/reachModel.ts');
 
 describe('the row list, by source guard', () => {
   it('scales each column against its OWN maximum, and nothing against a shared one', () => {
@@ -86,12 +87,22 @@ describe('the row list, by source guard', () => {
     }
   });
 
-  it('states each card its own window, and says the comparison is absent', () => {
-    // Four framings live on this one panel — the tiles' rolling 14-vs-prior-14, the 12-week trend
-    // band, the activity card's 14 days with no comparison, and the reach card's snapshot. "14
-    // days" alone still lets a reader assume the comparison the tiles have.
-    expect(ACTIVITY).toMatch(/no prior-period comparison/);
-    expect(REACH).toMatch(/a snapshot, not a window/);
+  it('ties both cards to the ONE reporting window, named in the same words', () => {
+    // Reports' rule: every figure is tied to the workspace's reporting window (this sprint so far,
+    // or the last 7/14 days). Both cards name it through the shared spelling in their note and
+    // their "i" — never a constant "14 days" of their own, and never "a snapshot".
+    for (const src of [ACTIVITY, REACH]) {
+      expect(src).toMatch(/reportingWindowTitle\(window\)/);
+      expect(src).toMatch(/reportingWindowPhrase\(window\)/);
+      expect(src).toMatch(/windowDates\(window\)/);
+      expect(src).not.toMatch(/A snapshot, not a window|open now|right now/);
+    }
+    // The activity card still says its comparison is absent (the tiles have one).
+    expect(ACTIVITY).toMatch(/[Nn]o\s+comparison with an\s*\n?\s*earlier period/);
+    expect(ACTIVITY).toMatch(/<InfoButton title="Activity by repository">/);
+    expect(REACH).toMatch(/<InfoButton title="Reach by repository">/);
+    // No hard-coded day count left in the activity card's copy.
+    expect(ACTIVITY).not.toMatch(/last \{activity\.windowDays\} days|less than\{' '\}/);
   });
 
   it('discloses the cap, the unsized PRs and the partial-window repos', () => {
@@ -130,11 +141,14 @@ describe('the reach card, by source guard', () => {
     expect(REACH).not.toMatch(/blastRadius\([a-zA-Z]/);
   });
 
-  it('reads the WORKSPACE open-PR list, never the Timeline board one', () => {
-    // ⚠ `useSearchOpenPrs` carries `filters.repoIds`, whose picker is not mounted on Reports — a
-    // card scoped by it would be silently short with no visible control to widen it.
-    expect(FOLD).toMatch(/useWorkspaceOpenPrs\(\)/);
-    expect(FOLD).not.toMatch(/useSearchOpenPrs\(|useSearchTimeline\(|[^e]useOpenPrs\(/);
+  it('reads the merged-in-window rows off the WORKSPACE metrics response, never an open-PR list', () => {
+    // The population is the pull requests MERGED in the reporting window, riding the free
+    // `/api/workspace-metrics` response beside the tiles. ⚠ Never a Timeline-board list:
+    // `useSearchOpenPrs` carries `filters.repoIds`, whose picker is not mounted on Reports.
+    expect(HOOK).toMatch(/useWorkspaceMetrics\(workspaceId\)/);
+    expect(HOOK).toMatch(/foldWorkspaceReach\(reach, repos, workspaceId, config\)/);
+    expect(HOOK).not.toMatch(/useWorkspaceOpenPrs\(|useSearchOpenPrs\(|useSearchTimeline\(/);
+    expect(ACTIVITY).not.toMatch(/useWorkspaceOpenPrs\(/);
   });
 
   it('never draws an unknown reading, and counts it in words instead', () => {
@@ -144,14 +158,14 @@ describe('the reach card, by source guard', () => {
     // is ranked by.
     expect(REACH.match(/key: '(?:low|medium|high)'/g)).toHaveLength(3);
     expect(REACH).not.toMatch(/key: 'unknown'|label: 'Unknown'/);
-    expect(REACH).toMatch(/no reading and/);
-    expect(REACH).toMatch(/with no reading/);
+    expect(REACH).toMatch(/no reach level yet and/);
+    expect(REACH).toMatch(/with reach unknown/);
   });
 
   it('is free on every tier', () => {
     // No ProGate, no capability read, no 402: blast radius is CORE and so is its home. The Reports
     // rail entry is ungated precisely because these free metrics live there.
-    for (const src of [REACH, FOLD, ACTIVITY]) {
+    for (const src of [REACH, FOLD, HOOK, ACTIVITY]) {
       expect(src).not.toMatch(/^import .*ProGate/m);
       expect(src).not.toMatch(/<ProGate|<ProLockPanel|useProCapabilities\(|useProGateState\(/);
     }
@@ -175,34 +189,37 @@ describe('the reach card, by source guard', () => {
     // anything open in the busiest workspace) and live on the 19-repository estate the fold's own
     // comments cite.
     expect(FOLD).toMatch(/const shown = all\.slice\(0, REACH_MAX_REPOS\)/);
-    for (const key of ['openPrs', 'read', 'unread', 'drafts']) {
+    for (const key of ['merged', 'read', 'unread']) {
       expect(FOLD).toMatch(new RegExp(`${key}: total\\(shown,`));
     }
-    expect(FOLD).not.toMatch(/openPrs: all\.reduce|unread: all\.reduce/);
-    // The drafts count used to be a fold over the RAW list, which no slice could ever narrow.
+    expect(FOLD).not.toMatch(/merged: all\.reduce|unread: all\.reduce/);
     expect(FOLD).not.toMatch(/prs\.reduce/);
+    // Drafts do not apply to merged pull requests: no draft fold, no draft sentence.
+    expect(FOLD).not.toMatch(/drafts/);
+    expect(REACH).not.toMatch(/reach\.drafts|are drafts/);
     // The two counts that are deliberately NOT the drawn subset, and say so on screen: how many
     // repositories hold anything open at all, and how many the workspace holds.
     expect(FOLD).toMatch(/repoCount: all\.length/);
     expect(FOLD).toMatch(/workspaceRepos: repos\.reduce/);
   });
 
-  it('accounts for the repositories that hold nothing open', () => {
-    // MEASURED on workspace 1: 8 member repositories, 7 with a PR opened in the fortnight, 4 with
-    // anything open right now — so this card reads "4 repositories" beside a neighbour reading
-    // "7 repositories", and without this sentence nothing accounts for the difference. The
-    // neighbour states its own version of exactly this.
-    expect(REACH).toMatch(/nothing open right now/);
+  it('accounts for the repositories that merged nothing in the window', () => {
+    // A repository with no merge gets no row, which on its own reads as "this workspace has N
+    // repositories" beside a neighbour counting a different N.
+    expect(REACH).toMatch(/merged\s*\n?\s*nothing in this window/);
     expect(REACH).toMatch(/reach\.workspaceRepos > reach\.repoCount/);
   });
 
+  it('says an empty window in words instead of vanishing', () => {
+    // A vanished card read as a removed feature. Once loaded, the card always renders.
+    expect(REACH).toMatch(/No pull requests merged in this window\./);
+    expect(REACH).toMatch(/merged in\s*\n?\s*this window, none with a reach level yet/);
+    expect(ACTIVITY).toMatch(/\{reach != null && <WorkspaceReachCard reach=\{reach\} window=\{window\} \/>\}/);
+  });
+
   it('gives every prose fraction its own denominator, in full', () => {
-    // ⚠ THE DRAFTS SENTENCE CARRIES ITS OWN POPULATION. "N of them are drafts" printed the total
-    // nowhere at all whenever the unread sentence was absent — which it is on a fully-read corpus —
-    // and when that sentence WAS present, "them" read as the unread subset, which drafts is not
-    // counted over.
-    expect(REACH).toMatch(/\{count\(reach\.drafts\)\} of the \{count\(reach\.openPrs\)\}/);
-    expect(REACH).not.toMatch(/of them\{' '\}\s*\n?\s*\{plural\(reach\.drafts/);
+    // The unread sentence prints both halves, so the subtraction is checkable.
+    expect(REACH).toMatch(/\{count\(reach\.unread\)\} of the \{count\(reach\.merged\)\} merged/);
     // ⚠ AND IN FULL. `fmtNum` collapses anything over 999 to one decimal of thousands, so "156 of
     // the 1.6k open pull requests" is not a subtraction a reader can perform. It stays inside the
     // table, where a cell shares its formatter with the column maximum printed under it.
@@ -213,7 +230,7 @@ describe('the reach card, by source guard', () => {
   it('names the neighbouring card rather than pointing at it', () => {
     // The grid is two columns only at `lg` and above; below it the cards STACK, and "the card
     // beside it" is then the card ABOVE. A name survives the reflow.
-    expect(REACH).toMatch(/Activity by repository covers the last \{neighbourWindowDays\} days/);
+    expect(REACH).toMatch(/same window as the flow\s*\n?\s*metrics and Activity by repository/);
     expect(REACH).not.toMatch(/beside it covers/);
   });
 });

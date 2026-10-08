@@ -5,6 +5,7 @@ import type {
   BotVendorInflation,
 } from '@pierre-review/shared';
 import { ArrowIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import { LineChart } from '../charts/LineChart.js';
 import { ChartCard, ChartEmpty, PALETTE, type Series } from '../charts/common.js';
 
@@ -159,7 +160,7 @@ export function inflationHistory(rows: InflationHistoryRow[]): InflationHistory 
 // would quietly make them two encodings of one fact.
 function DirectionKey(): JSX.Element {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px]">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
       <span className="flex items-center gap-1" style={{ color: OVER_COLOR }}>
         <ArrowIcon dir="up" size={10} />
         Bot graded it worse (inflation)
@@ -200,7 +201,7 @@ function InflationPanelChart({
         {/* Both 12-week totals, so the panel's own span is stated as a number and not only as a
             shape. These are 84-day figures and deliberately do NOT match the table's Inflation
             counts, which are the selected window — the caption above says so. */}
-        <span className="shrink-0 tabular-nums text-[10px] text-gray-400">
+        <span className="shrink-0 tabular-nums text-[11px] text-gray-400">
           <span style={{ color: OVER_COLOR }}>{panel.overTotal}</span>
           {' · '}
           <span style={{ color: UNDER_COLOR }}>{panel.underTotal}</span>
@@ -251,19 +252,37 @@ export function InflationHistoryChart({
   if (panels.length === 0 && unbadged.length === 0 && quiet.length === 0) return null;
 
   return (
-    <ChartCard title="Severity inflation" note="weekly counts · last 12 weeks" className="lg:col-span-3">
+    // ⚠ THE TWO GRAINS ON THIS PANEL. The weekly series is anchored at `min(window start, now −
+    // 84d)`, so it is a FIXED twelve weeks whatever the picker says, while the Inflation counts in
+    // the table above follow the selected window. The fixed span stays VISIBLE in the note ("fixed
+    // 12 weeks"); the modal says why the two spans never match.
+    <ChartCard
+      title="Severity inflation"
+      note="weekly counts · fixed 12 weeks"
+      className="lg:col-span-3"
+      info={
+        <InfoButton title="Severity inflation">
+          <p>
+            Each week counts the bot’s badged findings where its own severity badge disagreed with
+            our score: <span className="font-semibold">bot graded it worse</span> (inflation) or{' '}
+            <span className="font-semibold">we graded it worse</span>. These are counts, not a rate.
+          </p>
+          <p>
+            The span is always the last 12 weeks, whatever window is picked above. The table’s
+            Inflation column uses the {windowLabel} window, so the two will not match.
+          </p>
+          <p>
+            Each bot has its own vertical scale. Compare a line with itself over time, not with
+            another bot’s.
+          </p>
+          <p>
+            A bot that never badges its comments is not charted: no badge tells us nothing, and a
+            flat line would wrongly read as “never inflates”.
+          </p>
+        </InfoButton>
+      }
+    >
       <DirectionKey />
-      {/* ⚠ THE TWO GRAINS ON THIS PANEL, SAID OUT LOUD. The weekly series is anchored at
-          `min(window start, now − 84d)`, so it is a FIXED twelve weeks whatever the picker says,
-          while the Inflation counts in the table above follow the selected window. One surface
-          quoting two spans without naming them is the defect this codebase has shipped three
-          times; the sparkline could hide it only because it had no axis. */}
-      <div className="mt-1 text-[10px] leading-snug text-gray-400">
-        A fixed 12 weeks (84 days), whatever window is selected above — the table's Inflation counts
-        are the {windowLabel} window, so the two are different spans and are never subtracted. Each
-        bot has its own y-scale, as its sparkline did: read a line's height against itself, never
-        against another bot's.
-      </div>
       {panels.length === 0 ? (
         <div className="mt-2">
           <ChartEmpty label="No badge disagreements in the last 12 weeks" />
@@ -276,12 +295,11 @@ export function InflationHistoryChart({
         </div>
       )}
       {(unbadged.length > 0 || quiet.length > 0) && (
-        <div className="mt-2 space-y-0.5 text-[10px] leading-snug text-gray-400">
+        <div className="mt-2 space-y-0.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
           {unbadged.length > 0 && (
             <div>
               Not charted: {unbadged.join(', ')} — {unbadged.length === 1 ? 'it badges' : 'they badge'}{' '}
-              nothing, and no badge is silence, not agreement. A flat zero would read “never
-              inflates”, which is the opposite of what we know.
+              nothing.
             </div>
           )}
           {quiet.length > 0 && (

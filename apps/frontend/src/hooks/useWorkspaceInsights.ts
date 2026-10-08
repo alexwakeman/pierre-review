@@ -24,7 +24,7 @@ import { api } from '../api/client.js';
 export function useWorkspaceMetrics(workspaceId: number | null) {
   const id = workspaceId;
   return useQuery<WorkspaceMetricsResponse>({
-    queryKey: ['workspace-metrics', id],
+    queryKey: ['workspace-metrics', `ws:${id}`],
     queryFn: id == null ? skipToken : () => api.workspaceMetrics(id),
     refetchInterval: 5 * 60_000, // main sync cadence
     refetchIntervalInBackground: false,

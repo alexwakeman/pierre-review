@@ -12,6 +12,7 @@ import { useBotBenchmarkPlacement, useBotBenchmarkSpecs } from '../../hooks/useB
 import { useFilters } from '../../store/filters.js';
 import { PALETTE, useChartWidth } from '../charts/common.js';
 import { SkeletonBlock } from '../Skeleton.js';
+import { InfoButton } from '../InfoModal.js';
 import {
   BotIcon,
   ChartIcon,
@@ -315,7 +316,7 @@ function RefusalNote({
 function BasisChip({ basis }: { basis: CostBasis }): JSX.Element {
   return (
     <span
-      className="rounded bg-gray-500/10 px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300"
+      className="rounded bg-gray-500/10 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300"
       data-testid={`benchmark-cost-basis-${basis}`}
     >
       {COST_BASIS_LABEL[basis]}
@@ -372,7 +373,7 @@ function CostValueRow({
       <span className="shrink-0 text-[11px] font-semibold tabular-nums text-gray-800 dark:text-gray-100">
         {figure}
       </span>
-      <span className="text-[10px] tabular-nums text-gray-400">{detail}</span>
+      <span className="text-[11px] tabular-nums text-gray-400">{detail}</span>
       <BasisChip basis={basis} />
     </div>
   );
@@ -404,9 +405,8 @@ function FindingsSection({
           headline={FINDINGS_EMPTY_HEADLINE.nothing_comparable}
           message={
             `None of your ${formatCount(tally.units)} reviewer${tally.units === 1 ? '' : 's'} ` +
-            'produced a single metric this corpus could rank — every one was withheld, and the ' +
-            'reason is on each row below. That is a refusal, not a clean result: nothing here ' +
-            'says your reviewers are behaving normally, only that there was not enough to compare.'
+            'had enough activity to rank on any figure; the reason is on each row below. This ' +
+            'is not a clean result, only too little to compare.'
           }
         />
       );
@@ -676,12 +676,12 @@ function UnitCard({
                       placement.status === 'placed' ? placement.bandLabel : '',
                   })}
                 </span>
-                <span className="text-[10px] tabular-nums text-gray-400">
+                <span className="text-[11px] tabular-nums text-gray-400">
                   over {formatCount(m.units)} of yours
                 </span>
               </div>
               <div className="mt-1 flex items-center gap-2">
-                <span className="w-52 shrink-0 text-[10px] tabular-nums text-gray-400">
+                <span className="w-52 shrink-0 text-[11px] tabular-nums text-gray-400">
                   peer median {formatMetricValue(m.cohort.quantiles['p50'] ?? 0, m.cohort.unit)}
                   {m.cohort.ciMedian95 != null && (
                     <>
@@ -795,18 +795,18 @@ function WorkspaceCostBlock({
           a price that could not be STATED: this sentence points at a figure, and there is none. */}
       {cost.monthlyUsd != null && (
         <p
-          className="mt-1 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400"
+          className="mt-1 text-[12px] leading-relaxed text-gray-500 dark:text-gray-400"
           data-testid="benchmark-workspace-cost-coverage"
         >
           {coverage}
         </p>
       )}
       {summed != null && (
-        <p className="mt-0.5 text-[10px] leading-relaxed text-gray-400">{summed}</p>
+        <p className="mt-0.5 text-[12px] leading-relaxed text-gray-400">{summed}</p>
       )}
       {seatNote != null && (
         <p
-          className="mt-0.5 text-[10px] leading-relaxed text-amber-700 dark:text-amber-400"
+          className="mt-0.5 text-[12px] leading-relaxed text-amber-700 dark:text-amber-400"
           data-testid="benchmark-cost-seat-unresolved"
         >
           {seatNote}
@@ -817,7 +817,7 @@ function WorkspaceCostBlock({
           by 0 is what put "Recorded as free" on a reviewer somebody priced. */}
       {seatZeroNote != null && (
         <p
-          className="mt-0.5 text-[10px] leading-relaxed text-amber-700 dark:text-amber-400"
+          className="mt-0.5 text-[12px] leading-relaxed text-amber-700 dark:text-amber-400"
           data-testid="benchmark-cost-seat-zero"
         >
           {seatZeroNote}
@@ -915,7 +915,7 @@ function WorkspaceCostBlock({
           figure was on screen; there are no span-anchored figures left, and the sentence a reader
           uses to check the arithmetic must be there whenever the arithmetic is. */}
       {collapsed == null && (
-        <p className="mt-1 text-[10px] leading-relaxed text-gray-400">{cost.basisNote}</p>
+        <p className="mt-1 text-[12px] leading-relaxed text-gray-400">{cost.basisNote}</p>
       )}
 
       {/* ⚠ TWO DISCLOSURES WITH TWO CAUSES AND TWO SENTENCES, and neither is optional chrome: a
@@ -926,7 +926,7 @@ function WorkspaceCostBlock({
           number, one line quieter. */}
       {spanUnobserved != null && (
         <p
-          className="mt-0.5 text-[10px] leading-relaxed text-gray-400"
+          className="mt-0.5 text-[12px] leading-relaxed text-gray-400"
           data-testid="benchmark-workspace-cost-span-unobserved"
         >
           {spanUnobserved}
@@ -934,7 +934,7 @@ function WorkspaceCostBlock({
       )}
       {partialWindow != null && (
         <p
-          className="mt-0.5 text-[10px] leading-relaxed text-gray-400"
+          className="mt-0.5 text-[12px] leading-relaxed text-gray-400"
           data-testid="benchmark-workspace-cost-partial-window"
         >
           {partialWindow}
@@ -946,7 +946,7 @@ function WorkspaceCostBlock({
           and for how long. */}
       {windowIncomplete != null && (
         <p
-          className="mt-0.5 text-[10px] leading-relaxed text-amber-700 dark:text-amber-400"
+          className="mt-0.5 text-[12px] leading-relaxed text-amber-700 dark:text-amber-400"
           data-testid="benchmark-workspace-cost-window-incomplete"
         >
           {windowIncomplete}
@@ -1122,7 +1122,7 @@ function PooledCounters({ counters }: { counters: BotBenchmarkPlacementCounters 
           const meta = COUNTER_GROUP_LABEL[group];
           return (
             <div key={group}>
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                 {meta.label}{' '}
                 <span className="font-normal normal-case tracking-normal text-gray-400/80">
                   · {meta.population}
@@ -1131,10 +1131,10 @@ function PooledCounters({ counters }: { counters: BotBenchmarkPlacementCounters 
               <dl className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
                 {entries.map(([key, value]) => (
                   <div key={key} className="flex items-baseline gap-1">
-                    <dt className="text-[10px] text-gray-500 dark:text-gray-400">
+                    <dt className="text-[11px] text-gray-500 dark:text-gray-400">
                       {counterLabel(key, group)}
                     </dt>
-                    <dd className="text-[10px] font-semibold tabular-nums text-gray-700 dark:text-gray-200">
+                    <dd className="text-[11px] font-semibold tabular-nums text-gray-700 dark:text-gray-200">
                       {formatCount(value)}
                     </dd>
                   </div>
@@ -1176,13 +1176,26 @@ function EvidenceTable({
       <div className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
         <WorkspaceIcon size={12} className="text-gray-400" />
         Where these numbers come from
+        <InfoButton title="Where these numbers come from">
+          <p>One row per repository this bot works in.</p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              A dash means the repository had too little to measure, never that the answer was
+              zero. Its counts are still in the card’s totals.
+            </li>
+            <li>
+              Each rank is against repositories of the same size, so ranks in different rows are
+              not comparable.
+            </li>
+          </ul>
+        </InfoButton>
       </div>
       {/* ⚠ THE TABLE SCROLLS INSIDE ITS OWN BOX. The panel's body must never scroll horizontally —
           the rail is a narrow column on a laptop and five columns do not fit it. */}
       <div className="mt-1 overflow-x-auto">
         <table className="w-full min-w-[32rem] border-collapse text-[11px]">
           <thead>
-            <tr className="border-b border-gray-200 text-left text-[10px] uppercase tracking-wide text-gray-400 dark:border-gray-800">
+            <tr className="border-b border-gray-200 text-left text-[11px] uppercase tracking-wide text-gray-400 dark:border-gray-800">
               <th scope="col" className="py-1 pr-3 font-semibold">
                 Repository
               </th>
@@ -1230,11 +1243,6 @@ function EvidenceTable({
           </tbody>
         </table>
       </div>
-      <p className="mt-1 text-[10px] leading-relaxed text-gray-400">
-        A dash means this repo had too little to measure — never that the answer was zero. Its
-        counts are still included in the totals above. Each rank is against other repos of that
-        repo’s own size, so the ranks in this column are not comparable with each other.
-      </p>
     </div>
   );
 }
@@ -1368,7 +1376,7 @@ function RollupCard({ row }: { row: RollupRow }): JSX.Element {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────
-   The definitions disclosure — CLICK-GATED
+   "How Benchmark works" — the panel's one InfoButton
    ───────────────────────────────────────────────────────────────────────────────────────── */
 
 /**
@@ -1376,62 +1384,111 @@ function RollupCard({ row }: { row: RollupRow }): JSX.Element {
  * said. `getBotAnalytics`' acted-on rate folds the `likely_addressed` COMMIT HEURISTIC into its
  * numerator and divides by every in-window thread; the corpus's `acted_on_rate` divides by SETTLED,
  * fully-read threads. Six of the thirteen have no app counterpart at all. The definitions are
- * SERVED (`metricSpecs`, shipped in full on the cohort route) rather than re-typed here, and the
- * fetch does not happen until this is opened.
+ * SERVED (`metricSpecs`, shipped in full on the cohort route) rather than re-typed here.
+ *
+ * ⚠ STILL LAZY: InfoButton mounts its children only while the modal is open, so this component —
+ * and with it the specs fetch — does not exist until the reader presses the "i".
  */
-function MeasuredDisclosure(): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const { data, isLoading } = useBotBenchmarkSpecs(open);
+function MeasuredDefinitions(): JSX.Element {
+  const { data, isLoading } = useBotBenchmarkSpecs(true);
   const specs = data?.manifest?.metricSpecs ?? [];
   const populations = data?.manifest?.populations ?? {};
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-800">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        data-testid="benchmark-specs-toggle"
-        className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-[11px] font-medium text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-900/60"
-      >
-        <ChevronIcon dir={open ? 'down' : 'right'} />
-        How these are measured
-        <span className="font-normal text-gray-400">
-          — the peer corpus counts these differently from this app’s own bot columns
-        </span>
-      </button>
-      {open && (
-        <div className="border-t border-gray-200 px-3 py-2 dark:border-gray-800">
-          {isLoading && <SkeletonBlock className="h-16" />}
-          {!isLoading && specs.length === 0 && (
-            <p className="text-[11px] text-gray-400">
-              No metric definitions are available in this build.
-            </p>
-          )}
-          {specs.length > 0 && (
-            <dl className="space-y-2">
-              {specs.map((s) => (
-                <div key={s.name}>
-                  <dt className="text-[11px] font-medium text-gray-700 dark:text-gray-200">
-                    {metricLabel(s.name)}{' '}
-                    <span className="font-normal text-gray-400">
-                      {DERIVATION_LABEL[s.derivation]} · {DIRECTION_LABEL[s.direction]} · needs at
-                      least {formatCount(s.minUnits)}
-                    </span>
-                  </dt>
-                  <dd className="text-[12px] leading-relaxed text-gray-500 dark:text-gray-400">
-                    {s.definition}
-                    <br />
-                    <span className="text-gray-400">
-                      {s.numerator} ÷ {s.denominator} · over {populations[s.population] ?? s.population}
-                    </span>
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          )}
-        </div>
+    <div data-testid="benchmark-specs">
+      {isLoading && <SkeletonBlock className="h-16" />}
+      {!isLoading && specs.length === 0 && (
+        <p className="text-gray-500 dark:text-gray-400">
+          No metric definitions are available in this build.
+        </p>
+      )}
+      {specs.length > 0 && (
+        <dl className="space-y-2">
+          {specs.map((s) => (
+            <div key={s.name}>
+              <dt className="font-medium text-gray-800 dark:text-gray-100">
+                {metricLabel(s.name)}{' '}
+                <span className="text-xs font-normal text-gray-500 dark:text-gray-400">
+                  {DERIVATION_LABEL[s.derivation]} · {DIRECTION_LABEL[s.direction]} · needs at
+                  least {formatCount(s.minUnits)}
+                </span>
+              </dt>
+              <dd className="text-gray-600 dark:text-gray-300">
+                {s.definition}
+                <br />
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {s.numerator} ÷ {s.denominator} · over {populations[s.population] ?? s.population}
+                </span>
+              </dd>
+            </div>
+          ))}
+        </dl>
       )}
     </div>
+  );
+}
+
+/**
+ * Everything that applies to EVERY reading on the panel: what is compared with what, the metrics
+ * the corpus does not hold, how each metric is measured, and the server's caveats (verbatim).
+ * Refusals are NOT in here — they qualify the figure on screen and stay on the page.
+ */
+function BenchmarkInfo({
+  absent,
+  disclosures,
+}: {
+  absent: ReturnType<typeof absentMetricRows>;
+  disclosures: readonly string[] | null | undefined;
+}): JSX.Element {
+  return (
+    <InfoButton title="How Benchmark works" width="lg">
+      <p>
+        Each bot is compared with the same bot running in other teams’ repositories of a similar
+        size.
+      </p>
+      {/* ⚠ STRUCTURALLY ABSENT, NOT EMPTY AND NOT ZERO. Severity and category are MODEL-DERIVED
+          and the corpus is unscored, so no cell holds these keys. The host already HAS these
+          numbers — ML severity is a shipped free feature — which is exactly why the temptation is
+          to render the customer's severity distribution against nothing. */}
+      {absent.length > 0 && (
+        <div data-testid="benchmark-absent-metrics">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-50">Not compared yet</h3>
+          <ul className="mt-1 list-disc space-y-1 pl-5">
+            {absent.map((m) => (
+              <li key={m.name}>
+                <span className="font-medium">{m.label}</span>: {m.note}
+                {Object.entries(m.requires).length > 0 && (
+                  <span className="text-gray-500 dark:text-gray-400">
+                    {' '}
+                    ({Object.entries(m.requires)
+                      .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`)
+                      .join('; ')})
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div>
+        <h3 className="font-semibold text-gray-900 dark:text-gray-50">How each figure is measured</h3>
+        <p className="mb-2 text-gray-600 dark:text-gray-300">
+          The other teams’ data counts these differently from this app’s own bot columns.
+        </p>
+        <MeasuredDefinitions />
+      </div>
+      {/* Caveats that are NOT refusals — every one is a limit of the comparison, disclosed rather
+          than used to withhold it. Server-authored, rendered verbatim. */}
+      {disclosures != null && disclosures.length > 0 && (
+        <div>
+          <h3 className="font-semibold text-gray-900 dark:text-gray-50">Limits</h3>
+          <ul className="mt-1 list-disc space-y-1 pl-5">
+            {disclosures.map((d) => (
+              <li key={d}>{d}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </InfoButton>
   );
 }
 
@@ -1523,8 +1580,8 @@ function Body({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-600 dark:text-gray-300">
         <span className="inline-flex items-center gap-1">
           <ChartIcon size={12} />
-          Every bot here is compared with the same bot running in other teams’ repos of a similar
-          size.
+          Each bot against the same bot in similar-sized repos
+          <BenchmarkInfo absent={absent} disclosures={data.disclosures} />
         </span>
         {data.staleness != null && (
           <span title={`The newest measurement in the comparison data is ${Math.round(data.staleness.corpusAgeDays)} days old.`}>
@@ -1623,15 +1680,10 @@ function Body({
                 testId="benchmark-no-live-reviewers"
                 headline="No reviewer commented on the pull requests we read"
                 message={
-                  'The rollup ran and found no automated reviewer that has commented in the pull ' +
-                  'requests read here, so there is nothing to place, pool or price — every card ' +
-                  'would be a column of zeros about a reviewer that has not been given the chance ' +
-                  'to do anything. That is a statement about this sample, not about your ' +
-                  'reviewers: the walk is capped at each repository’s most recently updated pull ' +
-                  'requests, so a reviewer that is busy outside that window is absent here and ' +
-                  'still working. A reviewer classified in Bots → Settings appears once it has ' +
-                  'commented on a pull request in range; each repository’s own Bots tab says the ' +
-                  'same thing per repository.'
+                  'No automated reviewer has commented on the pull requests read here, so there is ' +
+                  'nothing to compare or price. Only each repository’s most recently updated pull ' +
+                  'requests are read, so a bot busy elsewhere can still be working. A bot ' +
+                  'classified in Bots → Settings appears once it comments on one of them.'
                 }
               />
             )
@@ -1645,52 +1697,6 @@ function Body({
         </>
       )}
 
-      {/* ⚠ STRUCTURALLY ABSENT, NOT EMPTY AND NOT ZERO. Severity and category are MODEL-DERIVED and
-          the corpus is unscored, so no cell holds these keys. The host already HAS these numbers —
-          ML severity is a shipped free feature — which is exactly why the temptation is to render
-          the customer's severity distribution against nothing. */}
-      {absent.length > 0 && (
-        <div
-          className="rounded-lg border border-dashed border-gray-300 px-3 py-2 dark:border-gray-700"
-          data-testid="benchmark-absent-metrics"
-        >
-          <div className="flex items-center gap-1.5 text-[11px] font-medium text-gray-600 dark:text-gray-300">
-            <InfoIcon className="text-gray-400" />
-            Not in this corpus yet
-            <span className="rounded bg-gray-500/10 px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">
-              {DERIVATION_LABEL.model}
-            </span>
-          </div>
-          <ul className="mt-1 space-y-1">
-            {absent.map((m) => (
-              <li key={m.name} className="text-[12px] leading-relaxed text-gray-500 dark:text-gray-400">
-                <span className="font-medium text-gray-600 dark:text-gray-300">{m.label}</span> —{' '}
-                {m.note}
-                {Object.entries(m.requires).length > 0 && (
-                  <span className="text-gray-400">
-                    {' '}
-                    ({Object.entries(m.requires)
-                      .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`)
-                      .join('; ')})
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <MeasuredDisclosure />
-
-      {/* Caveats that are NOT refusals — every one is a limit of the comparison, disclosed rather
-          than used to withhold it. Server-authored, rendered verbatim. */}
-      {data.disclosures != null && data.disclosures.length > 0 && (
-        <ul className="space-y-1 text-[10px] leading-relaxed text-gray-400">
-          {data.disclosures.map((d) => (
-            <li key={d}>· {d}</li>
-          ))}
-        </ul>
-      )}
     </>
   );
 }

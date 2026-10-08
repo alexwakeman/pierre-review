@@ -15,15 +15,23 @@ import type { ReactNode } from 'react';
 export function SectionShell({
   title,
   desc,
+  info,
   children,
 }: {
   title: string;
+  // The control's own one-line consequence. Stays visible.
   desc?: ReactNode;
+  // An <InfoButton> beside the title: how the setting works, examples, caveats that apply to every
+  // reading. Multi-sentence methodology goes here, never in `desc`.
+  info?: ReactNode;
   children: ReactNode;
 }): JSX.Element {
   return (
     <section className="border-b border-gray-100 pb-4 last:border-b-0 dark:border-gray-800">
-      <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">{title}</h3>
+      <div className="flex items-center gap-1">
+        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">{title}</h3>
+        {info}
+      </div>
       {desc != null && (
         <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{desc}</p>
       )}

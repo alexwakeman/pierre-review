@@ -21,6 +21,7 @@ import {
   type SynthesisDescriptor,
 } from '../../hooks/useSynthesis.js';
 import { BotIcon, CloseIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import { SynthesisCard } from './SynthesisCard.js';
 
 // BOT COMMENTS PER MERGED PR — the drill-down behind the ROI table's "Comments/PR" column. Click a
@@ -79,19 +80,19 @@ function Row({
     <tr className="border-b border-gray-100 last:border-0 dark:border-gray-800/60">
       <td className="px-2 py-1.5">
         <div className="flex flex-wrap items-baseline gap-1.5">
-          <span className="font-mono text-[10px] text-gray-400">{row.repoFullName}</span>
+          <span className="font-mono text-[11px] text-gray-400">{row.repoFullName}</span>
           {href ? (
             <a
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="font-mono text-[10px] text-gray-500 hover:underline dark:text-gray-400"
+              className="font-mono text-[11px] text-gray-500 hover:underline dark:text-gray-400"
               title="Open on GitHub"
             >
               #{row.prNumber}
             </a>
           ) : (
-            <span className="font-mono text-[10px] text-gray-500 dark:text-gray-400">#{row.prNumber}</span>
+            <span className="font-mono text-[11px] text-gray-500 dark:text-gray-400">#{row.prNumber}</span>
           )}
           <button
             type="button"
@@ -111,7 +112,7 @@ function Row({
             {row.byBot.map((b) => (
               <span
                 key={b.key}
-                className="rounded bg-gray-100 px-1 py-px text-[10px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                className="rounded bg-gray-100 px-1 py-px text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
               >
                 {b.label} <span className="tabular-nums">{b.comments}</span>
               </span>
@@ -148,7 +149,7 @@ function Row({
           {formatRatio(row.ratio, row.baseline)}
         </span>
         {detail && (
-          <div className="text-[10px] tabular-nums text-gray-400">
+          <div className="text-[11px] tabular-nums text-gray-400">
             {detail}
             {row.baseline === 'repo' && ' · repo avg, not size-matched'}
             {row.baseline === 'low_expectation' && ' · too few expected to compare'}
@@ -282,12 +283,22 @@ export function BotVolumeDetail(): JSX.Element {
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
           Bot comments per merged PR
         </h2>
+        <InfoButton title="Bot comments per merged PR">
+          <p>
+            Lists every pull request merged in this window that drew at least one bot comment.
+            Inline review comments, PR comments and review bodies all count.
+          </p>
+          <p>
+            Open pull requests are left out because they are still collecting comments. The window
+            is keyed on the merge date, so a quiet window can simply mean little was merged.
+          </p>
+        </InfoButton>
         <span className="text-[11px] text-gray-400">
           {bots ? `${botNarrowLabel(bots)}’s comments` : 'every bot in this workspace'}
         </span>
         {repoName && (
           <span
-            className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+            className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
             title="This drill-down was opened from a single repo’s Bots tab, so it measures that repo — the same narrowing the column you clicked was computed at."
           >
             {repoName}
@@ -313,11 +324,6 @@ export function BotVolumeDetail(): JSX.Element {
           </div>
         </div>
       </div>
-      <p className="max-w-4xl text-[11px] text-gray-500 dark:text-gray-400">
-        Every PR <span className="font-medium">merged</span> in this window that drew at least one
-        bot comment — inline review comments, PR comments and review bodies alike. Open PRs are not
-        counted.
-      </p>
     </>
   );
 
@@ -424,11 +430,7 @@ export function BotVolumeDetail(): JSX.Element {
                   {total === 0
                     ? 'Nothing merged in this window.'
                     : `No bot commented on any of the ${total.toLocaleString()} PRs merged in this window.`}
-                  <div className="mt-1 text-[11px]">
-                    Bot comments are counted against the PR they landed on and the window is keyed
-                    on the merge, so a quiet window here can simply mean little shipped — try
-                    widening it above.
-                  </div>
+                  <div className="mt-1 text-[12px]">Try a wider window above.</div>
                 </>
               )}
             </div>

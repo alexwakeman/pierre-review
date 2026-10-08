@@ -48,6 +48,7 @@ import {
   relativeTime,
 } from '../../lib/ui.js';
 import { ArrowIcon, PersonIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import { Markdown } from '../Markdown.js';
 import { MetaChip } from '../MetaChip.js';
 import { MlSeverityBadge } from '../MlSeverityBadge.js';
@@ -245,7 +246,7 @@ function EvidenceCommentCard({
       className="rounded-md border border-gray-200 bg-white p-2 text-sm dark:border-gray-800 dark:bg-gray-950"
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
-        <span className="shrink-0 text-[10px] uppercase tracking-wide text-gray-400">
+        <span className="shrink-0 text-[11px] uppercase tracking-wide text-gray-400">
           {TARGET_KIND_LABEL[c.targetKind]}
         </span>
         <button
@@ -467,16 +468,26 @@ function NarrativePanel({
   return (
     <div className="rounded-lg border border-ai-border bg-ai-surface p-3">
       <div className="mb-1.5 flex flex-wrap items-baseline gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-ai-ink">
-          Claude’s read
+        <span className="flex items-center gap-1 self-center">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-ai-ink">
+            Claude’s read
+          </span>
+          <InfoButton title="Claude’s read" className="text-ai-ink">
+            <p>
+              Claude writes this part from the figures and evidence above, and cites that evidence.
+            </p>
+            <p>
+              It contains no numbers. Every figure on this page is calculated from the data, not
+              written by Claude.
+            </p>
+          </InfoButton>
         </span>
         {/* D4, said where the prose is: the model writes digit-free sections; every number on
-            this page is computed from the vector/evidence wire fields. */}
-        <span className={`text-[11px] ${MUTED}`}>
-          evidence-cited prose — every figure on this page is computed, not written
-        </span>
+            this page is computed from the vector/evidence wire fields. A model-written block and
+            the computed figures are LABELLED APART, so the label stays visible. */}
+        <span className={`text-[11px] ${MUTED}`}>written by Claude</span>
         {data?.stale === true && synth != null && (
-          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
             stale
           </span>
         )}
@@ -494,7 +505,7 @@ function NarrativePanel({
         // A stored-[] row is a real state (unparseable generation, stored so a click never
         // loop-bills) — the deterministic surface above stays primary.
         <div className={`text-[11px] ${MUTED}`}>
-          No narrative for this period — the figures and evidence above are the surface.
+          No write-up for this period.
         </div>
       ) : (
         <div className="space-y-2">
@@ -508,7 +519,7 @@ function NarrativePanel({
                 <div className="mt-0.5 flex flex-wrap items-center gap-1">
                   {/* The citation chips — count computed (refs.length), each scrolls to /
                       flashes the cited evidence card. */}
-                  <span className={`text-[10px] ${MUTED}`}>
+                  <span className={`text-[11px] ${MUTED}`}>
                     {s.refs.length} citation{s.refs.length === 1 ? '' : 's'}:
                   </span>
                   {s.refs.map((ref, i) => (
@@ -517,7 +528,7 @@ function NarrativePanel({
                       type="button"
                       onClick={() => onRefClick(ref)}
                       title={ref}
-                      className="rounded border border-ai-border px-1 text-[10px] tabular-nums text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
+                      className="rounded border border-ai-border px-1 text-[11px] tabular-nums text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
                     >
                       {i + 1}
                     </button>
@@ -691,7 +702,7 @@ function HumanSection({
                     {KEY_LABEL[m.key]}
                     {m.basis === 'live' && (
                       <span
-                        className={`ml-1.5 rounded border border-gray-300 px-1 text-[9px] uppercase tracking-wide ${MUTED} dark:border-gray-700`}
+                        className={`ml-1.5 rounded border border-gray-300 px-1 text-[11px] uppercase tracking-wide ${MUTED} dark:border-gray-700`}
                         title="A live reading — today’s state, not a period figure; it keeps moving after the period closes"
                       >
                         now
@@ -703,7 +714,7 @@ function HumanSection({
                     {fmtValue(m)}
                     {m.lowSample && m.value != null && (
                       <span
-                        className={`ml-1 text-[10px] font-normal ${MUTED}`}
+                        className={`ml-1 text-[11px] font-normal ${MUTED}`}
                         title="Below this metric’s sample floor — the figure is real, but thin"
                       >
                         · thin
@@ -734,7 +745,7 @@ function HumanSection({
             <div className="space-y-3">
               {prGroups.map((g) => (
                 <div key={g.key}>
-                  <div className={`mb-1 text-[10px] font-semibold uppercase tracking-wide ${MUTED}`}>
+                  <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wide ${MUTED}`}>
                     {KEY_LABEL[g.key]}
                   </div>
                   {/* Rows are DigestPrRefs — the digest table idiom, newest-first as served.
@@ -759,7 +770,7 @@ function HumanSection({
                       comments — so the heading says so. Every other group on this page matches
                       its figure exactly; an undisclosed wider population would read as one of
                       those and quietly contradict the number. */}
-                  <div className={`mb-1 text-[10px] font-semibold uppercase tracking-wide ${MUTED}`}>
+                  <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wide ${MUTED}`}>
                     Their review comments{' '}
                     <span className="font-normal normal-case tracking-normal">
                       (inline + PR comments — wider than the inline-only figure above)
@@ -783,7 +794,7 @@ function HumanSection({
 
               {evidence.threads.rows.length > 0 && (
                 <div>
-                  <div className={`mb-1 text-[10px] font-semibold uppercase tracking-wide ${MUTED}`}>
+                  <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wide ${MUTED}`}>
                     Threads opened on their PRs
                   </div>
                   <div className="space-y-1.5">
@@ -801,7 +812,7 @@ function HumanSection({
 
               {evidence.pathAreas.length > 0 && (
                 <div>
-                  <div className={`mb-1 text-[10px] font-semibold uppercase tracking-wide ${MUTED}`}>
+                  <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wide ${MUTED}`}>
                     Where they worked
                   </div>
                   <div className="flex flex-wrap gap-1.5">
@@ -847,7 +858,7 @@ function PrRowAnchors({ rows }: { rows: DigestPrRef[] }): JSX.Element {
 const VERDICT_META: Record<BotVerdict, { label: string; cls: string }> = {
   keep: { label: 'keep', cls: 'bg-green-500/10 text-green-700 dark:text-green-300' },
   tune: { label: 'tune', cls: 'bg-amber-500/10 text-amber-700 dark:text-amber-300' },
-  noisy: { label: 'noisy', cls: 'bg-red-500/10 text-red-700 dark:text-red-300' },
+  noisy: { label: 'rarely used', cls: 'bg-red-500/10 text-red-700 dark:text-red-300' },
 };
 
 function Stat({
@@ -862,7 +873,7 @@ function Stat({
 }): JSX.Element {
   return (
     <div title={title}>
-      <div className={`text-[10px] uppercase tracking-wide ${MUTED}`}>{label}</div>
+      <div className={`text-[11px] uppercase tracking-wide ${MUTED}`}>{label}</div>
       <div className="text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
         {value}
       </div>
@@ -991,11 +1002,11 @@ function AuthoringPanel({
       </div>
       {output.repos.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className={`text-[10px] uppercase tracking-wide ${MUTED}`}>Where</span>
+          <span className={`text-[11px] uppercase tracking-wide ${MUTED}`}>Where</span>
           {output.repos.map((r) => (
             <span
               key={r.repoId}
-              className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600 dark:bg-gray-900 dark:text-gray-300"
+              className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-900 dark:text-gray-300"
             >
               {r.repoFullName.split('/')[1] ?? r.repoFullName} · {r.prs}
             </span>
@@ -1005,7 +1016,7 @@ function AuthoringPanel({
       {groups.map((g) => (
         <div key={g.label}>
           <div
-            className={`mb-1 text-[10px] font-semibold uppercase tracking-wide ${MUTED}`}
+            className={`mb-1 text-[11px] font-semibold uppercase tracking-wide ${MUTED}`}
             title={g.title}
           >
             {g.label}
@@ -1114,14 +1125,14 @@ function BotSection({
         )}
         {row != null && (
           <span
-            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${VERDICT_META[row.verdict].cls}`}
-            title="The ROI table's keep/tune/noisy verdict over this period's thread math"
+            className={`rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${VERDICT_META[row.verdict].cls}`}
+            title="The ROI table's keep / tune / rarely used verdict over this period's thread math"
           >
             {VERDICT_META[row.verdict].label}
           </span>
         )}
         {row?.dormant === true && (
-          <span className={`text-[10px] uppercase tracking-wide ${MUTED}`}>dormant</span>
+          <span className={`text-[11px] uppercase tracking-wide ${MUTED}`}>dormant</span>
         )}
         {/* The design, said where a reader will look for the missing prose — and the SCOPE
             said with it: every figure below is review output (threads, comments, what humans
@@ -1179,8 +1190,8 @@ function BotSection({
             />
             <Stat
               label="Untouched"
-              value={`${row.untouched}${row.overdueUntouched > 0 ? ` · ${row.overdueUntouched} overdue` : ''}`}
-              title="Not-addressed threads; 'overdue' = older than the grace window (genuinely ignored)"
+              value={`${row.untouched}${row.overdueUntouched > 0 ? ` · ${row.overdueUntouched} unanswered past grace` : ''}`}
+              title="Not-addressed threads; 'unanswered past grace' = older than the grace window (genuinely ignored)"
             />
             <Stat
               label="Median addressed"
@@ -1241,7 +1252,7 @@ function BotSection({
               figure. */}
           {rows.length > 0 && (
             <div>
-              <div className={`mb-1 text-[10px] font-semibold uppercase tracking-wide ${MUTED}`}>
+              <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wide ${MUTED}`}>
                 Where it works{' '}
                 <span className="font-normal normal-case">
                   — across the {where.sampleSize} most recent comments below
@@ -1274,7 +1285,7 @@ function BotSection({
             <div className={`text-[11px] ${MUTED}`}>Loading comments…</div>
           ) : rows.length > 0 ? (
             <div>
-              <div className={`mb-1 text-[10px] font-semibold uppercase tracking-wide ${MUTED}`}>
+              <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wide ${MUTED}`}>
                 What it said
               </div>
               <div className="space-y-1.5">
@@ -1402,14 +1413,20 @@ export function PeopleReportDetail(): JSX.Element {
         </h2>
         {/* The Pro mark on the artifact itself — rendered for the entitled reader, who is the
             only one who gets this far. Unentitled readers met the locked pane above. */}
+        <span className="self-center">
+          <InfoButton title="People report">
+            <p>Built for 1:1 prep.</p>
+            <p>
+              One section per person or bot you picked, in alphabetical order. Nobody is ranked or
+              compared with anyone else.
+            </p>
+          </InfoButton>
+        </span>
         <ProBadge variant="heading" title="The People report is part of Pro." />
         <span className="text-[11px] text-gray-400">
           {ordered.length} section{ordered.length === 1 ? '' : 's'}
         </span>
-        {/* The standing caption — the §6 posture, said on the artifact itself. */}
-        <span className="text-[11px] text-gray-400">
-          one section per person or bot, alphabetical — not a leaderboard
-        </span>
+        {/* The standing caption — the §6 posture — now behind the "i" beside the title. */}
       </div>
 
       {!seedInScope ? (

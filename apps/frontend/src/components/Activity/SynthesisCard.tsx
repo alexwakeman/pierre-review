@@ -100,12 +100,11 @@ export function SynthesisCard({
     if (!isCloud) return children == null ? null : <>{children}</>;
     return (
       <>
-        <p className="mb-2 text-[10px] text-gray-400">
-          <span className="mr-1 rounded bg-ai-signal/15 px-1 text-[10px] font-semibold text-ai-signal">
+        <p className="mb-2 text-[12px] text-gray-500 dark:text-gray-400">
+          <span className="mr-1 rounded bg-ai-signal/15 px-1 text-[11px] font-semibold text-ai-signal">
             Pro
           </span>
-          Summaries of what this list adds up to are part of Pro — upgrade to get a clustered
-          verdict above the receipts.
+          A summary of what this list adds up to is part of Pro.
         </p>
         {children}
       </>
@@ -193,9 +192,9 @@ export function SynthesisCard({
         ) : busy ? (
           <div className="mt-2 h-12 animate-pulse rounded bg-ai-surface-2" />
         ) : (
-          <p className="mt-1 text-[11px] text-gray-400">
-            No summary yet — Summarise groups this list into recurring clusters, with every count
-            computed from the items themselves.
+          <p className="mt-1 text-[12px] text-gray-500 dark:text-gray-400">
+            No summary yet. Summarise groups this list into recurring themes; every count comes
+            from the items themselves.
           </p>
         )}
       </div>

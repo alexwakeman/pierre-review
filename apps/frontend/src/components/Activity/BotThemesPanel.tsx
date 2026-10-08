@@ -5,6 +5,7 @@ import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { useBotThemes, useRefreshBotThemes } from '../../hooks/useBotThemes.js';
 import { BotIcon, MagnifierIcon, RefreshIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import { ThemesReportBody, ThemesSkeleton } from './ThemesReportView.js';
 import { prRefToMeta } from './ThemeThreadsDetail.js';
 
@@ -63,7 +64,7 @@ function BotRollup({ result }: { result: BotThemesResult }): JSX.Element | null 
 function BotCoverageLine({ result }: { result: BotThemesResult }): JSX.Element {
   const c = result.coverage;
   return (
-    <div className="mt-3 border-t border-ai-hairline pt-2 text-[10px] text-gray-400">
+    <div className="mt-3 border-t border-ai-hairline pt-2 text-[11px] text-gray-400">
       Summarised {c.deduped.toLocaleString()} distinct {c.deduped === 1 ? 'point' : 'points'} from{' '}
       {c.totalComments.toLocaleString()} bot comment{c.totalComments === 1 ? '' : 's'}
       {c.analyzed < c.deduped ? ` (top ${c.analyzed.toLocaleString()} analysed)` : ''}
@@ -121,7 +122,18 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
         <span className="text-base font-semibold text-gray-800 dark:text-gray-100">
           <MagnifierIcon size={15} className="inline-block align-[-0.1em]" /> What they’re flagging
         </span>
-        <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal">
+        <InfoButton title="What they’re flagging" className="text-ai-ink">
+          <p>
+            A summary of what your review bots keep raising: the recurring themes, how serious they
+            are, and where in the code they cluster.
+          </p>
+          <p>
+            The themes and their wording are written by an AI model and are approximate. The comment
+            counts, the per-theme counts and the “where” lists are counted exactly.
+          </p>
+        </InfoButton>
+        <span className="text-[11px] text-gray-500 dark:text-gray-400">AI read</span>
+        <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-ai-signal">
           Pro
         </span>
         <button
@@ -147,11 +159,6 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
           )}
         </button>
       </div>
-      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        A qualitative read of what your automated reviewers keep flagging — the recurring themes, how
-        critical they are, and where they cluster. Themes are an AI read (approximate); the volumes,
-        per-theme comment counts and “where” are exact.
-      </p>
 
       {refresh.isError && (
         <div className="mt-2 text-[11px] text-red-500">

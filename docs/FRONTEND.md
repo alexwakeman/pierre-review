@@ -415,7 +415,10 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   itself is the URL's, see the Back-button note below), a full-`<main>` overlay
   branch in `App.tsx` (MUST join `overlayActive`), and a compact chip in `PinnedTabsBar`. The
   drill-down TABLES (bot-only-prs / bot-threads, **plus `MetricsDetail`** — now
-  retrofitted, per-tab `sortByTab` state) share `Activity/sortableTable.tsx`
+  retrofitted, per-tab `sortByTab` state; its four DURATION tabs add a "Longest first" / "Fastest
+  first" toggle that only re-seeds the value-column sort — remembered per viewer in localStorage
+  `pierre:metricsFastestFirst`, try/catch-wrapped — and a duration with no figure sorts LAST either
+  way) share `Activity/sortableTable.tsx`
   (`SortHeader`/`compare`/`nextSort`; numeric columns MUST return a number from `sortValue`, or
   `compare` localeCompares lexicographically). The rail's per-repo console remembers its Activity|Bots sub-tab in
   `filters.repoConsoleTabs` (`insightsSubTab` is GONE — the Insights pane is Reports-first, no sub-tabs) — surviving rail
@@ -1449,7 +1452,7 @@ but broken deep links).
   unconditional `ProBadge variant="tab"`, and the BODY renders `ProLockPanel`
   (`testId="bot-roi-locked"`, distinct from the entitled `bot-roi-panel` so the screenshot pipeline
   can never photograph the lock). Inside the panel and therefore paid: the vendor table, its
-  keep/tune/noisy verdicts, the **Inflation column INCLUDING its current-window counts** (the
+  keep / tune / rarely used verdicts (the label for the `noisy` verdict id), the **Inflation column INCLUDING its current-window counts** (the
   weekly sparkline stays separately conditional on `mlInflation.weekly`, an extra scan width — as
   does `InflationHistoryChart`, the enlarged twin of that sparkline in this panel's chart row, on
   the same field and the same `showMlColumns` gate; contract in docs/ML-SEVERITY.md § The enlarged
@@ -2053,13 +2056,15 @@ convention this file has to remember.
   five-minute timer).
 - **The panel is two halves, WORKING hours above and CLOCK hours below** (docs/BOTTLENECKS.md), and
   every panel is a `Block`: a title, its "i", the body. The header holds "Chronology", its "i"
-  ("How Chronology works") and a 30/60/90 window picker (React state remembered for the session —
+  ("How Chronology works") and a window picker — the workspace's reporting window ("This sprint" / "Last 14 days", the shared
+  `reportingWindowShortTitle`) by default, then 30/60/90 days as longer views (React state remembered for the session —
   not a URL key and not a persisted filter, so "Clear filters" cannot reset it), then the one-line
   disclosures: the calendar, coverage, what was set aside, truncation. The working-hours half, top
-  to bottom: **Who was holding it, in working hours** (`CourtSplit` over `courtsWork`: a stacked
-  bar and three large percentages), **Each wait against its budget**, **Every pull request** (the
-  scatter + the "20 slowest" table that is its keyboard view), **What the slow ones have in
-  common**, **Approved and waiting**, **Who gives the first review**, **Asking for a review**,
+  to bottom: **Where the working hours went** (`CourtSplit` over `courtsWork`: a stacked
+  bar and three large percentages), **Each wait against its time budget**, **Every pull request** (the
+  scatter + its "Show as a table, longest first" keyboard view), **What the quick ones do
+  differently** (the contrast table — columns "Quickest N" / "Slowest N" / "Clear difference?", emphasis
+  on the Quickest column), **Approved, waiting to merge**, **Who gives the first review**, **Asking for a review**,
   **Pointers** and **Where each pull request sits** (the triangle, labelled context). The clock-hours
   half: **By repository, in clock hours** — the original court ledger, whose call-out rule stays
   calibrated on clock hours; each court prints the server's one-line `summary` above its repository
@@ -2106,10 +2111,21 @@ convention this file has to remember.
 it, `WorkspaceRepoActivityCharts` — which owns a section holding TWO CARDS side by side, both
 answering the question the workspace-wide tiles cannot: *which* repository.
 
+**ONE REPORTING WINDOW FOR THE WHOLE SECTION.** Every Reports figure is tied to the workspace's
+reporting window — this sprint so far when it has a sprint cadence, else the trailing 7/14 days —
+resolved ONCE per request on the server (core `db/reporting-window.ts`, asking the plugin's
+`resolveComparisonWindow`; trailing 14 days in OSS) and echoed as `window` on
+`/api/workspace-metrics`. The windowed tiles sit under a heading naming it ("This sprint so far" /
+"Last 14 days"); **Open pull requests** and **Red checks now** are SNAPSHOTS and sit apart under
+**"Right now"**; the trend band is labelled **"Last 12 weeks"**. Those two groups are the labelled
+exceptions. Both cards name the window through `Activity/reportingWindowText.ts` (the shared
+spelling in `packages/shared/src/reporting-window.ts`). Changing the cadence or the comparison mode
+invalidates `['workspace-metrics']`, `['flow-findings']` and `['flow-pointers']` too.
+
 | Card | Population | Source |
 |---|---|---|
-| **Activity by repository** | PRs opened in a rolling 14 days, and their lines changed | `repoActivity` on the ONE `/api/workspace-metrics` response — it can never be a refresh apart from the tiles above |
-| **Reach by repository** | every pull request OPEN RIGHT NOW, at Low/Medium/High blast radius | `WorkspaceReachCard` + `useWorkspaceReach`, a CLIENT fold over `useWorkspaceOpenPrs` |
+| **Activity by repository** | PRs opened in the reporting window, and their lines changed | `repoActivity` on the ONE `/api/workspace-metrics` response — it can never be a refresh apart from the tiles above |
+| **Reach by repository** | every pull request MERGED in the reporting window, at Low/Medium/High blast radius | `reach` on the same response (per-PR SIGNALS), folded by `foldWorkspaceReach` (`Activity/reachModel.ts`) through `useWorkspaceReach` |
 
 Both are horizontal ROW LISTS drawn by `components/charts/RepoRows.tsx` (a `<table>`, not SVG):
 repository name written out in full on the left, a stacked bar per measure, every figure printed.
@@ -2138,17 +2154,15 @@ repository name written out in full on the left, a stacked bar per measure, ever
   contrast obliges (2.80:1 on the light ground; the lines teal is 2.49:1). `RepoRows` renders the
   same shared `Legend` from every column's segments, so dropping it is a colour regression, not a
   tidy-up.
-- ⚠ **FOUR FRAMINGS ON ONE PANEL, SO EACH SAYS ITS OWN.** The tiles compare a rolling 14 days
-  against the prior 14; the trend band is a fixed 12 weeks; the activity card is 14 days with NO
-  comparison; the reach card is a SNAPSHOT with no window at all. The activity card cannot follow
-  the team's SPRINT CADENCE: that setting is plugin-owned and this surface is free, so it uses
-  `INSIGHT_SPRINT_DAYS`, which is what the tiles beside it already use.
+- ⚠ **ONE WINDOW, NAMED ON EVERY CARD.** The tiles compare the reporting window against the same
+  point of the one before; both cards measure the SAME window with no comparison (the activity
+  card's "i" says so). The window is HANDED IN by the route — neither fold resolves it.
 - ⚠ **UNKNOWN IS NEVER ZERO, ON EITHER CARD.** `linesChanged: null` prints the words "size unknown"
   in that repository's OWN row — a zero-length bar and an absent one are the same pixels — and the
   unsized PULL REQUEST count is still stated in words below, because the row marks repositories and
   the sentence counts pull requests. On the reach card a null `blastRadius()` verdict (never
   measured, or truncated-and-not-high) is NOT DRAWN and is NOT a fourth segment, so the bars do not
-  total the open-PR count the list is ranked by; that difference is disclosed in words and beside
+  total the merged count the list is ranked by; that difference is disclosed in words and beside
   the name of any repository it applies to.
   - ⚠ **"SIZE UNKNOWN" IS THE ALL-UNSIZED CASE ONLY, SO A PARTIALLY-SIZED REPOSITORY MARKS ITSELF
     TOO.** The fold nulls `linesChanged` when `sizedPrs === 0` and no sooner, so a repository with
@@ -2158,20 +2172,14 @@ repository name written out in full on the left, a stacked bar per measure, ever
     43 of 45 PRs"** under that repository's name. The aggregate sentence stays the COUNT ("2 pull
     requests have no recorded size"); it never says where they are, which is what the row is for.
 - ⚠ **THE REACH CARD IS FREE, AND ITS LEVEL COMES FROM THE ONE RESOLVER.** No `ProGate`, no
-  capability read, no 402. `useWorkspaceReach` calls `blastRadius()` — the same function the chip
-  calls, on the same rows, with the same config — so a bar and a chip can never disagree, and the
-  Settings sensitivity dial repaints it with no cache invalidation (`['me']` only). ⚠ It reads
-  `useWorkspaceOpenPrs`, NEVER `useSearchOpenPrs`: that one carries the Timeline board's
-  `filters.repoIds`, whose picker is not mounted on Reports.
-- ⚠ **THE REACH CARD INCLUDES DRAFTS AND THE "OPEN PRS" TILE DOES NOT** (`state === 'open' &&
-  !isDraft`), so on a real workspace they read 210 and 204. The draft count is stated in words
-  rather than reconciled by dropping the drafts: a draft touching a migration is reach sitting in
-  the repository. ⚠ **THAT SENTENCE CARRIES ITS OWN DENOMINATOR AND ITS OWN NOUN** — "6 of the 210
-  open pull requests are drafts". It used to read "6 of them", which printed 210 NOWHERE whenever
-  the unread sentence above it was absent (it is, on a fully-read corpus), leaving the one
-  reconciliation this card exists to make missing half its arithmetic; and when that sentence WAS
-  present, "them" read as the unread subset, which drafts is not counted over.
-- ⚠ **EVERY PRINTED TOTAL ON THE REACH CARD IS FOLDED OVER THE SHOWN ROWS** (`useWorkspaceReach`).
+  capability read, no 402. The server sends SIGNALS per merged PR (`blast`, `codeLoc`,
+  `codeLocIsLowerBound` — the open-PR rows' folds, `db/merged-reach.ts`), never a level, and
+  `foldWorkspaceReach` calls `blastRadius()` — the same function the chip calls, with the same
+  config — so a bar and a chip can never disagree, and the Settings sensitivity dial repaints it
+  with no cache invalidation (`['me']` only). Drafts do not apply to merged pull requests, so the
+  old draft sentence is gone. An empty window prints "No pull requests merged in this window." —
+  the card never vanishes (a vanished card read as a removed feature).
+- ⚠ **EVERY PRINTED TOTAL ON THE REACH CARD IS FOLDED OVER THE SHOWN ROWS** (`foldWorkspaceReach`).
   `repos` is sliced to 12 while `openPrs`/`unread`/`drafts` used to fold over every repository in
   the workspace, so past the cap the card printed an unread count and a draft count covering
   repositories whose bars are not on screen, beside bars that are — the headline-vs-subset defect,
@@ -2179,23 +2187,22 @@ repository name written out in full on the left, a stacked bar per measure, ever
   subtracted against them. `repoCount` and `workspaceRepos` are deliberately NOT the subset, and
   each says so where it is printed.
 - ⚠ **EACH CAP DISCLOSES WHAT IT CUT, ON THE DRAWN MEASURE AS WELL AS THE RANKING ONE.** Both lists
-  are ranked by PRs (opened / open now) while the second column draws something else, so the leader
+  are ranked by PRs (opened / merged) while the second column draws something else, so the leader
   on that other measure can sit below the fold: the activity card names both ("N more repositories
-  saw … pull requests and … lines changed"), and the reach card names the repositories, their open
+  saw … pull requests and … lines changed"), and the reach card names the repositories, their merged
   pull requests and **how many of those were high reach** ("…, 12 of them high reach, and are not
   shown"; `none` when the cut held none). Repositories added mid-window are MARKED, never pro-rated
   — scaling one up fabricates PRs nobody opened.
-- ⚠ **THE REACH CARD ACCOUNTS FOR THE REPOSITORIES HOLDING NOTHING OPEN**, or its repository count
-  silently disagrees with its neighbour's. MEASURED on workspace 1: 8 member repositories, 7 saw a
-  PR opened in the fortnight, 4 hold anything open right now — "Activity by repository · 7
-  repositories" beside "Reach by repository · 4 repositories". So it prints "4 of the 8 repositories
-  in this workspace have nothing open right now", the mirror of the neighbour's own sentence, with
-  the membership count folded from `useRepos()` narrowed by `Repo.workspaceId`.
+- ⚠ **THE REACH CARD ACCOUNTS FOR THE REPOSITORIES THAT MERGED NOTHING IN THE WINDOW**, or its
+  repository count silently disagrees with its neighbour's ("4 of the 8 repositories in this
+  workspace merged nothing in this window"), with the membership count folded from `useRepos()`
+  narrowed by `Repo.workspaceId`.
 - ⚠ **THE NEIGHBOUR IS NAMED, NEVER POSITIONED, AND PROSE COUNTS ARE PRINTED IN FULL.** The grid is
   two columns only at `lg` and above — below it the cards STACK and "the card beside it" is the card
-  ABOVE — so the reach card says "Activity by repository covers the last 14 days". And every
-  sentence under it is a fraction meant to be checked, so the counts go through `toLocaleString()`,
-  never `fmtNum`: "156 of the 1.6k open pull requests" is not an arithmetic a reader can perform.
+  ABOVE — so the reach card's "i" says it is "the same window as the flow metrics and Activity by
+  repository". And every sentence under it is a fraction meant to be checked, so the counts go
+  through `toLocaleString()`, never `fmtNum`: "156 of the 1.6k merged pull requests" is not an
+  arithmetic a reader can perform.
   `fmtNum` stays INSIDE the table, where a cell shares its formatter with the column maximum printed
   under it.
 - **Not clickable.** No row is a button and no cell carries a handler, so a decorative table adds

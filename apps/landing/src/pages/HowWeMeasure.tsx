@@ -44,7 +44,7 @@ import { TierTable } from '../components/feint/TierTable';
 const GRADER_USES = [
   'The severity badge on every bot comment, wherever you read it.',
   'The “needs a look” counts on a pull request, so a wall of forty threads has a top.',
-  'The keep / tune / noisy verdict on each vendor, and the over-calling line beside it.',
+  'The keep / tune / rarely used verdict on each vendor, and the over-calling line beside it.',
 ];
 
 const BENCHMARK_USES = [

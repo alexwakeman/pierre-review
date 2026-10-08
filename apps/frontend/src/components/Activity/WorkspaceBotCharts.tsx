@@ -25,6 +25,7 @@ import {
   unsizedNote,
 } from '../../lib/botVolumeSize.js';
 import { ChevronIcon, WarningIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
 import {
@@ -78,9 +79,9 @@ const densAxis = (n: number): string => (n >= 10 ? String(Math.round(n)) : Strin
 export function Stat({ label, value, sub }: { label: string; value: string; sub?: string }): JSX.Element {
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-800 dark:bg-gray-900/40">
-      <div className="text-[9px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
       <div className="text-base font-semibold text-gray-800 dark:text-gray-100">{value}</div>
-      {sub && <div className="text-[10px] text-gray-400">{sub}</div>}
+      {sub && <div className="text-[11px] text-gray-400">{sub}</div>}
     </div>
   );
 }
@@ -151,7 +152,7 @@ function BotSubsetLegend({
             key={b.key}
             type="button"
             onClick={() => subset.toggle(b.key)}
-            className={`flex items-center gap-1 text-[10px] ${
+            className={`flex items-center gap-1 text-[11px] ${
               on ? 'text-gray-600 dark:text-gray-300' : 'text-gray-400 line-through opacity-60'
             }`}
           >
@@ -167,7 +168,7 @@ function BotSubsetLegend({
         <button
           type="button"
           onClick={subset.reset}
-          className="text-[10px] text-sky-600 hover:underline dark:text-sky-400"
+          className="text-[11px] text-sky-600 hover:underline dark:text-sky-400"
         >
           all
         </button>
@@ -316,7 +317,7 @@ function DensityTrendChart({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-[10px]">
+        <div className="flex items-center gap-2 text-[11px]">
           <button
             type="button"
             onClick={() => setShowTrend((s) => !s)}
@@ -334,7 +335,7 @@ function DensityTrendChart({
           </button>
           {showTrend && trendChip && <span className={`font-medium ${trendChip.cls}`}>{trendChip.text}</span>}
         </div>
-        <div className="inline-flex overflow-hidden rounded border border-gray-300 text-[10px] dark:border-gray-700">
+        <div className="inline-flex overflow-hidden rounded border border-gray-300 text-[11px] dark:border-gray-700">
           {([
             ['kloc', 'per KLoC'],
             ['pr', 'per PR'],
@@ -478,9 +479,12 @@ function BotOverlapSection({ overlap, color }: { overlap: BotOverlapStats; color
     <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-800">
       <div className="flex flex-wrap items-baseline gap-2">
         <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Bot overlap</span>
-        <span className="text-[11px] text-gray-400">
-          where more than one bot reviews the same PR or line — distinct bot accounts, this window
-        </span>
+        <InfoButton title="Bot overlap">
+          <p>
+            Where more than one bot reviewed the same pull request, or commented on the same line,
+            in this window. Each bot account counts once.
+          </p>
+        </InfoButton>
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat
@@ -731,7 +735,7 @@ function BotRepoWorkChart({
       </div>
       <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
         {legend.map((l) => (
-          <span key={l.dir} className="flex items-center gap-1 text-[9px] text-gray-500 dark:text-gray-400">
+          <span key={l.dir} className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
             <span className="inline-block h-2 w-2 rounded-[2px]" style={{ background: l.color }} />
             {areaLabel(l.dir)}
           </span>
@@ -845,14 +849,33 @@ function BotVolumeSizeChart({
   return (
     <ChartCard
       title="PR size vs bot comment volume"
-      note={`merged PRs only · ${windowLabel} · by lines changed (added + deleted)${scanNote}`}
+      note={`merged PRs only · ${windowLabel}${scanNote}`}
+      info={
+        <InfoButton title="PR size vs bot comment volume">
+          <p>
+            Pull requests that merged in this window, grouped by lines changed (added plus
+            deleted). Every review comment, PR comment and review body an automated reviewer wrote
+            counts, which is wider than the ROI table’s “Comments”.
+          </p>
+          <p>
+            The link between size and comments depends on the repo. On five repos we measured,
+            the correlation between log lines changed and bot comments was 0.62 and 0.54 on two
+            heavily configured repos and 0.15, 0.13 and 0.03 on the other three. A lightly
+            configured bot says about the same whatever the size.
+          </p>
+          <p>
+            This card pools every repo and bot in scope, so repos configured differently blend
+            into one curve.
+          </p>
+        </InfoButton>
+      }
     >
       {!model.hasComments ? (
         <ChartEmpty label="No bot comments on the PRs that merged in this window" />
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <div>
-            <div className="mb-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">
+            <div className="mb-0.5 text-[11px] font-medium text-gray-600 dark:text-gray-300">
               Per merged PR <span className="font-normal text-gray-400">— rises with size</span>
             </div>
             <BarChart
@@ -864,7 +887,7 @@ function BotVolumeSizeChart({
             />
           </div>
           <div>
-            <div className="mb-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">
+            <div className="mb-0.5 text-[11px] font-medium text-gray-600 dark:text-gray-300">
               Per 100 lines{' '}
               <span className="font-normal text-gray-400">— falls, usually by a lot</span>
             </div>
@@ -881,7 +904,7 @@ function BotVolumeSizeChart({
 
       {/* The support behind each bar. A mean over 3 PRs and a mean over 268 draw at identical
           visual weight, so the counts have to be on screen next to them, not in a tooltip. */}
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-gray-500 dark:text-gray-400">
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-gray-500 dark:text-gray-400">
         <span className="text-gray-400">Merged PRs behind each bar:</span>
         {model.rows.map((r) => (
           // The interpunct is not decoration: without it "<50 268 PRs 50–200 12 PRs" runs two
@@ -896,26 +919,16 @@ function BotVolumeSizeChart({
           cannot be read as "PRs this big are not measured here". Distinct from a band that IS on
           the axis with no bar, which is the real finding "PRs this size merged and drew nothing". */}
       {model.emptyLabels.length > 0 && (
-        <div className="mt-1 text-[10px] text-gray-400">
-          No merged PR of this size in this window: {model.emptyLabels.join(', ')} — those bands are
-          left off the axis rather than drawn as a zero.
+        <div className="mt-1 text-[12px] text-gray-400">
+          No merged PR of this size in this window: {model.emptyLabels.join(', ')}. Left off the axis,
+          not drawn as zero.
         </div>
       )}
-      {unsized && <div className="mt-1 text-[10px] text-gray-400">{unsized}</div>}
+      {unsized && <div className="mt-1 text-[12px] text-gray-400">{unsized}</div>}
 
-      <div className="mt-1 text-[10px] text-gray-400">
-        <span className="font-medium text-amber-600 dark:text-amber-400">
-          <WarningIcon size={10} className="mr-0.5 inline-block align-[-0.1em]" />A correlation, not
-          a rule — and it is repo-dependent.
-        </span>{' '}
-        Across the five repos we measured this on, log-LOC against bot-comment count ran 0.62 and
-        0.54 on two heavily-configured repos, then 0.15, 0.13 and 0.03 on three others: where a bot
-        is lightly configured it says roughly the same amount whatever the diff size, and size
-        predicts nothing at all. Read this as the shape of <em>this</em> scope in{' '}
-        <em>this</em> window — several repos and every bot in the workspace are pooled here, so a
-        workspace whose repos are configured differently blends them into one curve. Counts every
-        review comment, PR comment and review body an automated reviewer wrote (a wider definition
-        than the ROI table&rsquo;s “Comments”), on PRs that <em>merged</em> in the window.
+      <div className="mt-1 text-[12px] font-medium text-amber-600 dark:text-amber-400">
+        <WarningIcon size={11} className="mr-0.5 inline-block align-[-0.1em]" />A correlation, not
+        a rule, and it varies by repo.
       </div>
     </ChartCard>
   );
@@ -941,6 +954,7 @@ export function WorkspaceBotCharts({ repoId }: { repoId?: number } = {}): JSX.El
 
   return (
     <div className="space-y-3" data-testid="workspace-bot-charts">
+      <div className="flex items-center gap-1">
       <button
         type="button"
         onClick={() => setOpen((s) => !s)}
@@ -950,15 +964,21 @@ export function WorkspaceBotCharts({ repoId }: { repoId?: number } = {}): JSX.El
         <ChevronIcon dir={open ? 'down' : 'right'} size={11} />
         Workspace charts — cross-bot trends, overlap and coverage
       </button>
+      <InfoButton title="Workspace charts">
+        <p>How your review bots behave over time. No AI is involved.</p>
+        <ul className="list-disc space-y-1 pl-5">
+          <li>
+            A red ring or underline marks where a bot differed from its own usual behaviour.
+          </li>
+          <li>Times are UTC. Gaps in activity are inferred, not a direct rate-limit signal.</li>
+          <li>The window is the one picked above the ROI table.</li>
+          <li>Each bot’s own charts open from “Depth →” on its ROI table row.</li>
+        </ul>
+      </InfoButton>
+      {open && <span className="text-[11px] text-gray-400">· {windowLabel}</span>}
+      </div>
       {open && (
         <>
-          <div className="text-[11px] text-gray-400">
-            How your review bots behave over time — deterministic, no AI. Red rings & underlines
-            mark where a bot diverged from its <span className="font-medium">own</span> typical (a
-            self-baseline). Times are UTC; activity gaps are inferred (not a direct rate-limit
-            signal). Per-bot depth lives on each bot&rsquo;s own tab — the “Depth →” pill on the
-            ROI table. Window: the ROI picker&rsquo;s ({windowLabel}).
-          </div>
           {isLoading ? (
             <div className="h-40 animate-pulse rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40" />
           ) : isError ? (
@@ -966,17 +986,24 @@ export function WorkspaceBotCharts({ repoId }: { repoId?: number } = {}): JSX.El
           ) : bots.length === 0 ? (
             <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
               No automated-reviewer activity in this window.
-              <div className="mt-1 text-[11px]">
-                When review bots (CodeRabbit, Copilot, in-house AI…) review your PRs, their latency
-                and cadence land here. A bot that was active earlier may just be quiet — try
-                widening the window above.
+              <div className="mt-1 text-[12px]">
+                A bot that was active earlier may just be quiet. Try a wider window above.
               </div>
             </div>
           ) : (
             <>
               <ChartCard
                 title="Findings density"
-                note="threads a bot opens per PR / KLoC · weekly · log scale · lower = cleaner · hover a ring for why"
+                note="weekly"
+                info={
+                  <InfoButton title="Findings density">
+                    <p>
+                      Threads each bot opens per pull request, or per 1,000 lines changed, by week.
+                      Lower is cleaner. The axis is logarithmic.
+                    </p>
+                    <p>Hover a red ring to see how that week differed from the bot’s usual.</p>
+                  </InfoButton>
+                }
               >
                 <DensityTrendChart bots={bots} botColor={botColor} />
               </ChartCard>

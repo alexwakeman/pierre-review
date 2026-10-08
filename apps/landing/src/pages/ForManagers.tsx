@@ -316,7 +316,7 @@ export default function ForManagers(): JSX.Element {
         height={660}
       >
         <p className="mb-6">
-          A keep, tune or noisy verdict per vendor, built from how much of what it said your
+          A keep, tune or rarely used verdict per vendor, built from how much of what it said your
           team acted on — and dollars per acted-on comment, divided by one stated calendar
           month at both ends, with both halves of the division printed on the card.
         </p>

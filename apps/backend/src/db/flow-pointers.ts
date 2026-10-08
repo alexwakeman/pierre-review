@@ -27,6 +27,7 @@ import type {
 import { db, schema } from './client.js';
 import { resolveActorLanes } from './actor-lanes.js';
 import { getFlowCourts } from './pr-intervals.js';
+import { getReportingWindow } from './reporting-window.js';
 import { getResolvedFlowSettings } from './flow-settings.js';
 import type { BotScope } from './queries.js';
 
@@ -84,8 +85,15 @@ export async function getFlowPointerEvidence(
   accountId: number,
   scope: BotScope,
   windowDaysRaw: number,
+  // `reporting`: the workspace's REPORTING WINDOW (Chronology's default), resolved here through the
+  // ONE resolver so the pointers describe exactly the window the panel renders.
+  opts: { reporting?: boolean } = {},
 ): Promise<FlowPointerEvidence> {
-  const flow = await getFlowCourts(accountId, scope, windowDaysRaw);
+  const flow = opts.reporting
+    ? await getFlowCourts(accountId, scope, windowDaysRaw, {
+        reporting: await getReportingWindow(accountId, scope.workspaceId),
+      })
+    : await getFlowCourts(accountId, scope, windowDaysRaw);
   const settings = flow.settings ?? (await getResolvedFlowSettings(accountId, scope.workspaceId));
   const all = [...(flow.prs ?? [])].sort((a, b) => a.leadWorkHours - b.leadWorkHours || a.prId - b.prId);
   const q = Math.floor(all.length / 4);
@@ -189,6 +197,7 @@ export async function getFlowPointerEvidence(
   return {
     workspaceId: flow.workspaceId,
     windowDays: flow.windowDays,
+    ...(flow.reportingWindow ? { reportingWindow: flow.reportingWindow } : {}),
     measuredPrs: flow.measuredPrs,
     settings,
     budgets: flow.budgets ?? [],

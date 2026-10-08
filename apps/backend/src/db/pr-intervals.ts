@@ -51,6 +51,7 @@
 import { and, eq, gte, inArray, lt } from 'drizzle-orm';
 import {
   FLOW_RULES,
+  reportingWindowPhrase,
   type CourtEvidencePr,
   type CourtShare,
   type FlowCoverage,
@@ -64,6 +65,7 @@ import {
 import { db, schema } from './client.js';
 import { resolveActorLanes, type ActorLanes } from './actor-lanes.js';
 import type { BotScope } from './queries.js';
+import { measuredTo, reportingWindowInfo, type ReportingWindow } from './reporting-window.js';
 import { surfacesForPath } from './blast-radius.js';
 import { getResolvedFlowSettings } from './flow-settings.js';
 import { buildWorkingCalendar } from './working-hours.js';
@@ -319,8 +321,8 @@ function narrate(
 ): string {
   return (
     `${pct(share)} of open time is spent ${COURT_WAIT[court]}. ` +
-    `Across ${prs} merged pull ${plural(prs, 'request', 'requests')}, half cleared in ` +
-    `${fmtHours(medianLeadHours)} and the slowest quarter took ${fmtHours(p75LeadHours)} or more.`
+    `Across ${prs} merged pull ${plural(prs, 'request', 'requests')}, half merged within ` +
+    `${fmtHours(medianLeadHours)} and three in four within ${fmtHours(p75LeadHours)}.`
   );
 }
 
@@ -365,7 +367,7 @@ function directiveFor(court: PrCourt, repos: number, namedBeatsTeam: boolean | n
       return (
         `${where} spending most of a pull request's life approved and waiting to merge. The ` +
         `review is already done, so this is the merge step and not a people problem. Arming ` +
-        `"merge when ready" lands these without anyone watching them.`
+        `"merge when ready" merges these without anyone watching them.`
       );
   }
 }
@@ -388,7 +390,7 @@ function directiveSummaryFor(court: PrCourt, namedBeatsTeam: boolean | null = nu
     case 'author':
       return `${lead}waiting for the author. Fewer, clearer review rounds will help more than speed.`;
     case 'landing':
-      return `${lead}approved and waiting to merge. Arm “merge when ready” to land these.`;
+      return `${lead}approved and waiting to merge. Arm “merge when ready” to merge these as soon as they can.`;
   }
 }
 
@@ -398,12 +400,12 @@ function directiveSummaryFor(court: PrCourt, namedBeatsTeam: boolean | null = nu
 // unreviewed-merge floor) is explained behind that section's "i" on the page, quoting FLOW_RULES;
 // repeating it inside the refusal put the same explanation on screen twice.
 
-function noHumanReviewReason(windowDays: number): string {
-  return `No pull request merged in the last ${windowDays} days had a human review or comment on it.`;
+function noHumanReviewReason(phrase: string): string {
+  return `No pull request merged ${phrase} had a human review or comment on it.`;
 }
 
-function noneStandsOutReason(measured: number, windowDays: number): string {
-  return `Measured ${measured} ${plural(measured, 'repository', 'repositories')} in the last ${windowDays} days. None stands out.`;
+function noneStandsOutReason(measured: number, phrase: string): string {
+  return `Measured ${measured} ${plural(measured, 'repository', 'repositories')} ${phrase}. None stands out.`;
 }
 
 function unreviewedUnderFloorReason(): string {
@@ -414,14 +416,14 @@ function headlineFor(courts: CourtShare[], medianLead: number, p75Lead: number, 
   const by = new Map(courts.map((c) => [c.court, c.share]));
   const top = [...courts].sort((a, b) => b.share - a.share)[0];
   const lead =
-    `Half of pull requests cleared in ${fmtHours(medianLead)}; the slowest quarter took ` +
-    `${fmtHours(p75Lead)} or more.`;
+    `Half of pull requests merged within ${fmtHours(medianLead)}; three in four within ` +
+    `${fmtHours(p75Lead)}.`;
   return (
     `Across ${prs} merged pull requests a person actually worked on, time split ` +
     `${pct(by.get('reviewer') ?? 0)} waiting for a reviewer, ` +
     `${pct(by.get('author') ?? 0)} waiting for the author, and ` +
-    `${pct(by.get('landing') ?? 0)} approved and waiting to land. ` +
-    `${lead}${top && top.share >= FLOW_DOMINANT_SHARE ? '' : ' No single court dominates here.'}`
+    `${pct(by.get('landing') ?? 0)} approved and waiting to merge. ` +
+    `${lead}${top && top.share >= FLOW_DOMINANT_SHARE ? '' : ' No single wait dominates here.'}`
   );
 }
 
@@ -467,18 +469,42 @@ function linesOf(pr: PrRow): number | null {
   return fromFiles > 0 ? fromFiles : null;
 }
 
+/**
+ * The court ledger for a workspace.
+ *
+ * Two window shapes. `windowDaysRaw` is the fixed trailing-N-days option (30/60/90 on the panel),
+ * CLAMPED to [7, 90]. `opts.reporting` is the workspace's REPORTING WINDOW (the panel's default —
+ * this sprint so far, or the trailing 7/14 days), resolved by the caller through the ONE resolver
+ * (`getReportingWindow`, db/reporting-window.ts) and handed in. It is NOT floored at seven days:
+ * early in a sprint the window is short by definition, and the too-few-PRs refusals below are what
+ * stop a thin sample being read as a finding. It is still capped at 90 days for the coverage-bias
+ * reason the clamp states.
+ */
 export async function getFlowCourts(
   accountId: number,
   scope: BotScope,
   windowDaysRaw: number,
+  opts: { reporting?: ReportingWindow; nowMs?: number } = {},
 ): Promise<FlowResponse> {
-  const windowDays = Math.min(
-    FLOW_MAX_WINDOW_DAYS,
-    Math.max(FLOW_MIN_WINDOW_DAYS, Math.round(windowDaysRaw)),
-  );
-  const toMs = Date.now();
+  const toMs = opts.reporting
+    ? Math.max(opts.reporting.fromMs, measuredTo(opts.reporting, opts.nowMs ?? Date.now()))
+    : (opts.nowMs ?? Date.now());
+  const fromMs = opts.reporting
+    ? Math.max(opts.reporting.fromMs, toMs - FLOW_MAX_WINDOW_DAYS * 24 * HOUR_MS)
+    : toMs -
+      Math.min(FLOW_MAX_WINDOW_DAYS, Math.max(FLOW_MIN_WINDOW_DAYS, Math.round(windowDaysRaw))) *
+        24 *
+        HOUR_MS;
+  const windowDays = Math.max(1, Math.ceil((toMs - fromMs) / (24 * HOUR_MS)));
+  const reportingWindow = opts.reporting
+    ? reportingWindowInfo(opts.reporting, opts.nowMs ?? Date.now())
+    : undefined;
+  // Every templated sentence names the window the same way the panel's picker does.
+  const phrase = reportingWindow
+    ? reportingWindowPhrase(reportingWindow)
+    : `in the last ${windowDays} days`;
   const to = new Date(toMs);
-  const from = new Date(toMs - windowDays * 24 * HOUR_MS);
+  const from = new Date(fromMs);
 
   const refusals: FlowRefusal[] = [];
   const refuse = (
@@ -494,6 +520,7 @@ export async function getFlowCourts(
   const empty = (coverage: FlowCoverage): FlowResponse => ({
     workspaceId: scope.workspaceId,
     windowDays,
+    ...(reportingWindow ? { reportingWindow } : {}),
     measuredPrs: 0,
     courts: sharesOf({ reviewer: 0, author: 0, landing: 0 }),
     medianLeadHours: 0,
@@ -605,7 +632,7 @@ export async function getFlowCourts(
 
   if (prs.length === 0) {
     for (const k of ['courts', 'unreviewed'] as const) {
-      refuse(k, `No pull request merged in the last ${windowDays} days.`);
+      refuse(k, `No pull request merged ${phrase}.`);
     }
     return empty({
       reposInWorkspace: scope.repoIds.length,
@@ -828,7 +855,7 @@ export async function getFlowCourts(
   };
 
   if (measured.length === 0) {
-    refuse('courts', noHumanReviewReason(windowDays));
+    refuse('courts', noHumanReviewReason(phrase));
   }
 
   // ── Workspace-wide ─────────────────────────────────────────────────────────────────────────
@@ -932,10 +959,10 @@ export async function getFlowCourts(
   if (measured.length > 0 && clearedFloor === 0) {
     refuse(
       'courts',
-      `No repository reached ${FLOW_MIN_REPO_PRS} merged pull requests with a human review in the last ${windowDays} days.`,
+      `No repository reached ${FLOW_MIN_REPO_PRS} merged pull requests with a human review ${phrase}.`,
     );
   } else if (shownRepos.length > 0 && shownRepos.every((p) => p.dominant == null)) {
-    refuse('courts', noneStandsOutReason(clearedFloor, windowDays), 'measured_clean');
+    refuse('courts', noneStandsOutReason(clearedFloor, phrase), 'measured_clean');
   }
 
   // ── Merged without a human review ──────────────────────────────────────────────────────────
@@ -972,7 +999,7 @@ export async function getFlowCourts(
     refuse(
       'unreviewed',
       excludedNoHumanTouch === 0
-        ? `Every pull request merged in the last ${windowDays} days had a human review or comment on it.`
+        ? `Every pull request merged ${phrase} had a human review or comment on it.`
         : unreviewedUnderFloorReason(),
       'measured_clean',
     );
@@ -1026,6 +1053,7 @@ export async function getFlowCourts(
   return {
     workspaceId: scope.workspaceId,
     windowDays,
+    ...(reportingWindow ? { reportingWindow } : {}),
     measuredPrs: measured.length,
     courts: wsCourts,
     medianLeadHours: wsMedian,

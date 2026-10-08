@@ -23,6 +23,7 @@ import {
   budgetScale,
   calendarLine,
   dotRadius,
+  chronologyWindowLabel,
   effectiveChronologyWindow,
   formatWorkHours,
   lookedBeforeAskedLine,
@@ -90,10 +91,20 @@ describe('figures', () => {
     expect(formatWorkHours(130)).toBe('130h');
   });
 
-  it('reads an unknown window as the default', () => {
+  it('reads an unknown window as the default — the reporting window', () => {
     expect(effectiveChronologyWindow(60)).toBe(60);
-    expect(effectiveChronologyWindow(45)).toBe(30);
-    expect(effectiveChronologyWindow(null)).toBe(30);
+    expect(effectiveChronologyWindow('reporting')).toBe('reporting');
+    expect(effectiveChronologyWindow(45)).toBe('reporting');
+    expect(effectiveChronologyWindow(null)).toBe('reporting');
+  });
+
+  it('names the reporting window by what it is for this workspace', () => {
+    const sprint = { mode: 'sprint' as const, from: '', to: '', end: '', days: 14, elapsedDays: 3 };
+    const rolling = { ...sprint, mode: 'rolling_7' as const, days: 7, elapsedDays: 7 };
+    expect(chronologyWindowLabel('reporting', sprint)).toBe('This sprint');
+    expect(chronologyWindowLabel('reporting', rolling)).toBe('Last 7 days');
+    expect(chronologyWindowLabel('reporting', null)).toBe('Last 14 days');
+    expect(chronologyWindowLabel(60, sprint)).toBe('60 days');
   });
 });
 

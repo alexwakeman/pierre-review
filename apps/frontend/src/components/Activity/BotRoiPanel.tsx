@@ -42,6 +42,7 @@ import { useBotVolume } from '../../hooks/useBotVolume.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { ArrowIcon, BotIcon, ResolveIcon } from '../Icons.js';
 import { ProLockPanel, useProGateState } from '../ProGate.js';
+import { InfoButton } from '../InfoModal.js';
 import { SeverityBar } from '../MlSeverityBadge.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
@@ -115,13 +116,13 @@ const VERDICT_META: Record<BotVerdict, { label: string; className: string; title
     // unaddressed, OR a bot whose scored findings are overwhelmingly nits (the same gates as the
     // nit tuning suggestion, so the reason is spelled out in the list below the table).
     title:
-      'Either a lot of comments go unaddressed, or nearly everything it flags scores as a nit — consider tuning the noisy paths/severities on the bot.',
+      'Either a lot of comments go unaddressed, or nearly everything it flags scores as a nit — consider tuning which paths and severities the bot comments on.',
   },
   noisy: {
-    label: 'Noisy',
+    label: 'Rarely used',
     className: 'bg-red-500/10 text-red-700 dark:text-red-300 border border-red-500/30',
     title:
-      'High volume, low acted-on, and many threads left unaddressed past your normal response window — probably not paying for itself.',
+      'High volume, few comments used, and many threads left unanswered past your normal response window — probably not paying for itself.',
   },
 };
 
@@ -230,8 +231,8 @@ function VendorTrendChart({
 function ActedVsUntouchedChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Element {
   const labels = vendors.map((v) => v.label);
   const series: Series[] = [
-    { key: 'acted', label: 'Acted on', color: PALETTE.green, values: vendors.map((v) => v.actedOn) },
-    { key: 'untouched', label: 'Untouched', color: PALETTE.amber, values: vendors.map((v) => v.untouched) },
+    { key: 'acted', label: 'Used', color: PALETTE.green, values: vendors.map((v) => v.actedOn) },
+    { key: 'untouched', label: 'Not addressed', color: PALETTE.amber, values: vendors.map((v) => v.untouched) },
   ];
   if (labels.length === 0 || vendors.every((v) => v.actedOn + v.untouched === 0)) {
     return <ChartEmpty />;
@@ -249,7 +250,7 @@ function EffectivenessChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX
   const series: Series[] = [
     {
       key: 'acted',
-      label: 'Acted-on %',
+      label: 'Used %',
       color: PALETTE.slate,
       values: rated.map((v) => v.actedOnPct ?? 0),
       colors: rated.map((v) => VERDICT_COLOR[v.verdict]),
@@ -269,7 +270,7 @@ function EffectivenessChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX
         {(['keep', 'tune', 'noisy'] as BotVerdict[]).map((v) => (
           <span
             key={v}
-            className="flex items-center gap-1 text-[10px] capitalize text-gray-500 dark:text-gray-400"
+            className="flex items-center gap-1 text-[11px] capitalize text-gray-500 dark:text-gray-400"
           >
             <span
               className="inline-block h-2 w-2 rounded-[2px]"
@@ -446,17 +447,31 @@ function MlTotalsStrip({
     <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
       <div className="mb-2 flex flex-wrap items-baseline gap-2">
         <h3 className="text-sm font-semibold">What the bots are flagging</h3>
-        <span
-          className="text-[11px] text-gray-400"
-          title="Severity and category are predicted by a small local model, not an LLM. Advisory — treat major+critical together as 'high' rather than trusting critical alone."
-        >
-          model-scored · advisory · over the selected window
-        </span>
+        <InfoButton title="What the bots are flagging">
+          <p>
+            Each bot comment is given a severity (nit, minor, major, critical) and up to eight
+            categories by a small model that runs on our side. It is not an LLM, and it never reads
+            the bot’s own severity badge.
+          </p>
+          <p>
+            Treat major and critical together as “high”. The model rarely calls something critical,
+            so critical on its own undercounts.
+          </p>
+          <p>
+            Severity shares count findings only. Walkthrough summaries and praise are left out.
+          </p>
+          <p>Every figure covers the window picked above.</p>
+          <p>
+            Some older comments can never be scored: their text was not stored when they synced and
+            GitHub no longer has it. They are left out of every figure here.
+          </p>
+        </InfoButton>
+        <span className="text-[11px] text-gray-500 dark:text-gray-400">model-scored</span>
         {ml.pending > 0 && (
           <span className="ml-auto text-[11px] text-gray-400 tabular-nums">
             {ml.labelled.toLocaleString()} of {(ml.labelled + ml.pending).toLocaleString()} bot
-            comments in this window scored ({Math.round(coverage * 100)}%) — the rest are still
-            being processed
+            comments in this window scored ({Math.round(coverage * 100)}%), the rest still
+            in progress
           </span>
         )}
         {/* The honesty channel: without it, pending 0 reads as 100% coverage while badges are
@@ -465,7 +480,6 @@ function MlTotalsStrip({
         {ml.unscorable > 0 && (
           <span
             className={`text-[11px] text-gray-400 tabular-nums${ml.pending > 0 ? '' : ' ml-auto'}`}
-            title="Comments synced during an old lean-storage window whose text GitHub no longer has (deleted-and-reposted bot comments). They can never be scored and are excluded from every coverage figure."
           >
             {ml.unscorable.toLocaleString()} older comment{ml.unscorable === 1 ? '' : 's'} can’t
             be scored
@@ -482,8 +496,8 @@ function MlTotalsStrip({
 
       {fallbackOnly && (
         <div className="mb-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
-          The scoring service is running its heuristic fallback, not the trained model — these
-          severities are low quality. See docs/ML-SEVERITY.md.
+          The scoring service is running a simple fallback, not the trained model, so these
+          severities are much less reliable.
         </div>
       )}
 
@@ -505,14 +519,14 @@ function MlTotalsStrip({
               title="Show the findings behind this number"
               className="block w-full text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
             >
-              <div className="text-[10px] uppercase tracking-wide text-gray-400">Findings</div>
+              <div className="text-[11px] uppercase tracking-wide text-gray-400">Findings</div>
               <div className="text-lg font-semibold tabular-nums">
                 {ml.findings.toLocaleString()}
               </div>
             </button>
           ) : (
             <>
-              <div className="text-[10px] uppercase tracking-wide text-gray-400">Findings</div>
+              <div className="text-[11px] uppercase tracking-wide text-gray-400">Findings</div>
               <div className="text-lg font-semibold tabular-nums">
                 {ml.findings.toLocaleString()}
               </div>
@@ -523,12 +537,12 @@ function MlTotalsStrip({
               type="button"
               onClick={() => onOpen({ kind: 'summaries' })}
               title="Show the walkthroughs and summaries — a separate population, not counted as findings"
-              className="block w-full text-left text-[10px] text-gray-400 hover:text-gray-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400 dark:hover:text-gray-200"
+              className="block w-full text-left text-[11px] text-gray-400 hover:text-gray-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400 dark:hover:text-gray-200"
             >
               + {ml.summaries.toLocaleString()} walkthrough/summary
             </button>
           ) : (
-            <div className="text-[10px] text-gray-400">
+            <div className="text-[11px] text-gray-400">
               + {ml.summaries.toLocaleString()} walkthrough/summary
             </div>
           )}
@@ -537,14 +551,14 @@ function MlTotalsStrip({
           openLabel="Show the major and critical findings behind this share"
           onClick={open({ kind: 'severity', severities: ['major', 'critical'] })}
         >
-          <div className="text-[10px] uppercase tracking-wide text-gray-400">High severity</div>
+          <div className="text-[11px] uppercase tracking-wide text-gray-400">High severity</div>
           <div
             className="text-lg font-semibold tabular-nums"
             style={{ color: ML_SEVERITY_META.major.color }}
           >
             {Math.round(highShare * 100)}%
           </div>
-          <div className="text-[10px] text-gray-400">
+          <div className="text-[11px] text-gray-400">
             {highFindings.toLocaleString()} major or critical
           </div>
         </Tile>
@@ -552,14 +566,14 @@ function MlTotalsStrip({
           openLabel="Show the findings scored as nits"
           onClick={open({ kind: 'severity', severities: ['nit'] })}
         >
-          <div className="text-[10px] uppercase tracking-wide text-gray-400">Nits</div>
+          <div className="text-[11px] uppercase tracking-wide text-gray-400">Nits</div>
           <div
             className="text-lg font-semibold tabular-nums"
             style={{ color: ML_SEVERITY_META.nit.color }}
           >
             {Math.round(nitShare * 100)}%
           </div>
-          <div className="text-[10px] text-gray-400">
+          <div className="text-[11px] text-gray-400">
             {ml.bySeverity.nit.toLocaleString()} trivial or optional
           </div>
         </Tile>
@@ -571,11 +585,11 @@ function MlTotalsStrip({
             topCategory ? open({ kind: 'category', category: topCategory.category }) : undefined
           }
         >
-          <div className="text-[10px] uppercase tracking-wide text-gray-400">Top topic</div>
+          <div className="text-[11px] uppercase tracking-wide text-gray-400">Top topic</div>
           <div className="truncate text-lg font-semibold">
             {topCategory ? (ML_CATEGORY_LABEL[topCategory.category] ?? topCategory.category) : '—'}
           </div>
-          <div className="text-[10px] text-gray-400">
+          <div className="text-[11px] text-gray-400">
             {topCategory
               ? `${topCategory.count.toLocaleString()} findings`
               : 'no categorised findings yet'}
@@ -586,13 +600,13 @@ function MlTotalsStrip({
           openLabel="Show the line areas more than one bot flagged"
           onClick={open({ kind: 'overlap' })}
         >
-          <div className="text-[10px] uppercase tracking-wide text-gray-400">
+          <div className="text-[11px] uppercase tracking-wide text-gray-400">
             Same-line overlap
           </div>
           <div className="text-lg font-semibold tabular-nums">
             {overlapClusters.toLocaleString()}
           </div>
-          <div className="text-[10px] text-gray-400">
+          <div className="text-[11px] text-gray-400">
             line area{overlapClusters === 1 ? '' : 's'} flagged by &gt;1 bot · window
           </div>
         </Tile>
@@ -600,7 +614,7 @@ function MlTotalsStrip({
 
       {/* Top-category chips (rehomed from the old per-bot table's column) + the severity legend,
           which doubles as the vocabulary key for the per-bot mix bars below. */}
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-gray-400">
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-gray-400">
         {/* Chip 1 and the "Top topic" tile deliberately emit the IDENTICAL selector — they are
             the same `ml.byCategory[0]` object, so they open the same tab. That is correct, not a
             duplicate control: the tile names the topic, the chip sits in the ranked row. */}
@@ -634,7 +648,6 @@ function MlTotalsStrip({
               {ML_SEVERITY_META[s].label}
             </span>
           ))}
-          <span>Summaries and praise are excluded from severity shares.</span>
         </span>
       </div>
     </div>
@@ -690,11 +703,23 @@ function QualityCheckSection({
         </span>
       </summary>
       <div className="border-t border-gray-200 px-3 py-2 dark:border-gray-800">
-        <div className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
-          Coverage and quality gates, not code reviewers. Their volume and untouched threads are
-          left out of the verdicts and totals above — an unread coverage report is the norm, not
-          noise. Re-role one in <span className="font-medium">Settings</span> if it belongs in the
-          ROI table.
+        {/* The InfoButton sits in the BODY, not the <summary>: a button inside a summary toggles
+            the disclosure in some browsers as well as opening the modal. */}
+        <div className="mb-2 flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+          <span>
+            Belongs in the ROI table? Change its role in{' '}
+            <span className="font-medium">Settings</span>.
+          </span>
+          <InfoButton title="Why quality checks are left out">
+            <p>
+              Coverage and quality gates (SonarQube, Codecov and similar) post reports, not code
+              review. Nobody is expected to answer a coverage report, so an unanswered one is normal.
+            </p>
+            <p>
+              Their threads and comments are left out of the totals, verdicts and charts above. They
+              are listed here so you can see they are still running and spot one with the wrong role.
+            </p>
+          </InfoButton>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[380px] border-collapse text-[11px]">
@@ -719,7 +744,7 @@ function QualityCheckSection({
                       {/* A dormant gate is the interesting case here: it usually means the
                           integration broke, not that the bot got quieter. */}
                       {v.dormant && (
-                        <span className="rounded bg-gray-500/10 px-1 py-px text-[10px] text-gray-500 dark:text-gray-400">
+                        <span className="rounded bg-gray-500/10 px-1 py-px text-[11px] text-gray-500 dark:text-gray-400">
                           dormant
                         </span>
                       )}
@@ -1048,7 +1073,7 @@ function VendorTable({
       >
         <thead>
           <tr className={`text-left text-gray-500 dark:text-gray-400${showMl ? '' : ' border-b border-gray-200 dark:border-gray-800'}`}>
-            <th rowSpan={headSpan} className="px-2 py-1.5 font-medium">Vendor</th>
+            <th rowSpan={headSpan} className="px-2 py-1.5 font-medium">Bot</th>
             <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium">Threads</th>
             {/* ⚠ THIS COLUMN AND THE ONE BESIDE IT ARE NOT A NUMERATOR AND A RATIO, and their
                 adjacency invites exactly that reading. They disagree on BOTH axes:
@@ -1085,9 +1110,9 @@ function VendorTable({
             <th
               rowSpan={headSpan}
               className="px-2 py-1.5 text-right font-medium"
-              title="A later commit likely addressed the thread, it was resolved, or a human replied/resolved after the bot"
+              title="Threads the team used: a later commit likely addressed the thread, it was resolved, or a person replied after the bot"
             >
-              Acted on
+              Used
             </th>
             <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="Threads with no reply and no follow-up commit — the total not-addressed">
               Not addressed
@@ -1097,25 +1122,25 @@ function VendorTable({
               className="px-2 py-1.5 text-right font-medium"
               title={`Not-addressed threads older than the ${Math.round(
                 overdueGraceMs / 3_600_000,
-              )}h grace window — the genuinely-ignored ones that drive the 'noisy' verdict`}
+              )}h grace window — the genuinely-ignored ones that drive the 'Rarely used' verdict`}
             >
-              Overdue
+              Unanswered after {Math.round(overdueGraceMs / 3_600_000)}h
             </th>
             <th
               rowSpan={headSpan}
               className="px-2 py-1.5 text-right font-medium"
               title="PRs merged inside the window that still carried at least one not-addressed thread by this bot at merge — the team's final answer was to ship anyway. The threads themselves may be older than the window."
             >
-              Merged past
+              Merged anyway
             </th>
             <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="This bot's median time from opening a thread to it being addressed — a human reply, a resolve, or an addressing commit">
               Time to address
             </th>
-            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="Not-addressed threads' oldest age">
-              Oldest
+            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="How long the oldest not-addressed thread has been waiting">
+              Oldest not addressed
             </th>
-            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="Low-value / untouched share — the noise floor">
-              Noise
+            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="Not-addressed threads as a share of all this bot's threads">
+              % not addressed
             </th>
             <th
               rowSpan={headSpan}
@@ -1186,9 +1211,9 @@ function VendorTable({
                 // the two figures differ only by the stretch each was measured over — which both
                 // surfaces state. Benchmark measures the reviewer's whole observed span; this
                 // measures the window in the picker, so a bot busier lately reads cheaper here.
-                title="Monthly cost ÷ acted-on threads a month, both over this whole Workspace — the acted-on count is scaled from the selected window to a month, so the price and the work are on the same time base. Bots → Benchmark measures the same fraction over each reviewer's whole observed span instead, so the two answer different questions and need not match. The price is this bot's price FOR THIS WORKSPACE — set it on the bot's card in Bots → Settings. Another Workspace may hold a different figure for the same bot; the two are never added together."
+                title="Monthly cost ÷ used threads a month, both over this whole Workspace — the used count is scaled from the selected window to a month, so the price and the work are on the same time base. Bots → Benchmark measures the same fraction over each reviewer's whole observed span instead, so the two answer different questions and need not match. The price is this bot's price FOR THIS WORKSPACE — set it on the bot's card in Bots → Settings. Another Workspace may hold a different figure for the same bot; the two are never added together."
               >
-                $/acted-on
+                $ per used thread
               </th>
             )}
             <th rowSpan={headSpan} className="px-2 py-1.5 text-center font-medium">Verdict</th>
@@ -1216,7 +1241,7 @@ function VendorTable({
               {SEVERITY_COLUMNS.map((s, i) => (
                 <th
                   key={s}
-                  className={`px-1.5 pb-1.5 text-right text-[10px] font-medium${i === 0 ? ' border-l border-gray-200 dark:border-gray-800' : ''}`}
+                  className={`px-1.5 pb-1.5 text-right text-[11px] font-medium${i === 0 ? ' border-l border-gray-200 dark:border-gray-800' : ''}`}
                   style={{ color: ML_SEVERITY_META[s].color }}
                   title={`Not-addressed threads whose opening finding scored ${ML_SEVERITY_META[s].label.toLowerCase()}`}
                 >
@@ -1255,7 +1280,7 @@ function VendorTable({
                   )}
                   {v.dormant && (
                     <span
-                      className="ml-1.5 inline-block rounded border border-gray-300 px-1 py-px text-[10px] text-gray-500 dark:border-gray-700 dark:text-gray-400"
+                      className="ml-1.5 inline-block rounded border border-gray-300 px-1 py-px text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400"
                       title="No activity in the selected window — the trend below still shows its earlier threads. Widen the window to see them counted."
                     >
                       dormant
@@ -1478,7 +1503,7 @@ function VendorTable({
                     dash
                   ) : (
                     <span
-                      className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${verdict.className}`}
+                      className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${verdict.className}`}
                       title={verdict.title}
                     >
                       {verdict.label}
@@ -1505,7 +1530,7 @@ function VendorTable({
                             })
                           }
                           title="Open this bot's depth tab — latency, cadence, coverage and consistency, plus its severity-over-time and category mix"
-                          className="rounded border border-sky-400 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 hover:bg-sky-50 dark:border-sky-600/70 dark:text-sky-300 dark:hover:bg-sky-950/40"
+                          className="rounded border border-sky-400 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 hover:bg-sky-50 dark:border-sky-600/70 dark:text-sky-300 dark:hover:bg-sky-950/40"
                         >
                           Depth →
                         </button>
@@ -1521,7 +1546,7 @@ function VendorTable({
                           type="button"
                           onClick={() => onTune(v.key)}
                           title="Open the Advisor on this bot's tuning findings — evidence-backed config changes, retro-checked before any PR"
-                          className="rounded border border-amber-400 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-600/70 dark:text-amber-300 dark:hover:bg-amber-950/40"
+                          className="rounded border border-amber-400 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-600/70 dark:text-amber-300 dark:hover:bg-amber-950/40"
                         >
                           Tune
                         </button>
@@ -1531,7 +1556,7 @@ function VendorTable({
                           type="button"
                           onClick={() => onDrop(v.key)}
                           title="Open the Advisor with the case for dropping this bot — its acted-on rate, overlap and suppression evidence in one brief"
-                          className="rounded border border-red-400 px-1.5 py-0.5 text-[10px] font-medium text-red-700 hover:bg-red-50 dark:border-red-600/70 dark:text-red-300 dark:hover:bg-red-950/40"
+                          className="rounded border border-red-400 px-1.5 py-0.5 text-[11px] font-medium text-red-700 hover:bg-red-50 dark:border-red-600/70 dark:text-red-300 dark:hover:bg-red-950/40"
                         >
                           Drop
                         </button>
@@ -1584,7 +1609,7 @@ export function ResolveBacklogBanner({
         thread{totalThreads === 1 ? '' : 's'} look resolved by later commits — review before
         resolving on GitHub.
       </span>
-      <span className="shrink-0 self-center rounded border border-sky-400 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:border-sky-600/70 dark:text-sky-300">
+      <span className="shrink-0 self-center rounded border border-sky-400 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 dark:border-sky-600/70 dark:text-sky-300">
         Show list →
       </span>
     </button>
@@ -1745,10 +1770,10 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
     // questions, so the locked pane keeps doing its job on both mounts.
     return (
       <ProLockPanel heading="Bot ROI" testId="bot-roi-locked">
-        What each review bot actually produced this window: threads raised, how many were acted on,
+        What each review bot actually produced this window: threads raised, how many your team used,
         how long they sat, how much repeated another bot
         {showCost ? (
-          <> — and what that works out to per acted-on comment against the price of the seat.</>
+          <> — and what that works out to per used comment against the price of the seat.</>
         ) : (
           <>.</>
         )}
@@ -1765,6 +1790,50 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   // conjunct is live: the $/acted-on column really does disappear on the per-repo mount, for the
   // grain reason written where `showCost` is declared. Do not "simplify" it back to `botDepth`.
 
+  // The panel's one explanation. The grace figure is the server's constant (`overdueGraceMs`), read
+  // off the response rather than retyped; it is absent only before the first response lands.
+  const graceHours =
+    data?.totals.overdueGraceMs != null ? Math.round(data.totals.overdueGraceMs / 3_600_000) : null;
+  const roiInfo = (
+    <>
+      <p>
+        <span className="font-semibold">Used</span>: a thread counts as used if it was resolved, a
+        person replied after the bot’s last comment, or a later commit touched the file it is on.
+        The commit test is a guess: the commit may have changed something else.
+      </p>
+      <p>
+        <span className="font-semibold">Not addressed</span>: still unresolved, nobody replied and
+        no later commit touched the file. “% not addressed” is that share of the bot’s threads.
+      </p>
+      <p>
+        A not-addressed thread counts as <span className="font-semibold">unanswered</span> only once
+        it is older than {graceHours != null ? `${graceHours} hours` : 'a fixed grace period'}, so a
+        bot is not marked down for threads nobody has reached yet.
+      </p>
+      <p className="font-semibold">Verdicts</p>
+      <ul className="list-disc space-y-1 pl-5">
+        <li>
+          <span className="font-semibold">Rarely used</span>: at least 10 threads, under 30% used,
+          and at least half unanswered.
+        </li>
+        <li>
+          <span className="font-semibold">Tune</span>: at least 5 threads and under 60% used, or at
+          least 20 scored findings of which 70% or more are nits.
+        </li>
+        <li>
+          <span className="font-semibold">Keep</span>: everything else.
+        </li>
+      </ul>
+      <p>
+        <span className="font-semibold">$ per used thread</span>: the bot’s monthly price divided
+        by the used threads it produces in a month at this window’s rate. A price is set per
+        Workspace, so another Workspace can hold a different price for the same bot, and the two
+        are never added together. It is shown only on the Bots rail: one repository’s share of a
+        Workspace-wide price is not a real cost.
+      </p>
+    </>
+  );
+
   const header = (
     // The "Review-bot ROI" heading was dropped (the rail line already has a header); just the
     // window/date-range picker remains, right-aligned.
@@ -1777,6 +1846,10 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
     // locked panel in the free area; labelling the free surfaces with a window they cannot change
     // would be worse still.
     <div className="flex flex-wrap items-center gap-2">
+      <span className="inline-flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+        How this is measured
+        <InfoButton title="How Bot ROI is measured">{roiInfo}</InfoButton>
+      </span>
       <div className="ml-auto inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
         {WINDOWS.map((wOpt) => (
           <button
@@ -1812,11 +1885,9 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
       <div className="space-y-3">
         <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
           No review-bot activity in this window.
-          <div className="mt-1 text-[11px]">
-            When review bots (CodeRabbit, Copilot, in-house AI…) comment on your PRs, their
-            signal-to-noise lands here. A bot that was active earlier may just be quiet — try
-            widening the window above.
-            {qualityChecks.length > 0 && ' Quality checks are listed separately below.'}
+          <div className="mt-1 text-[12px]">
+            Try a wider window above.
+            {qualityChecks.length > 0 && ' Quality checks are listed below.'}
           </div>
         </div>
         <QualityCheckSection rows={qualityChecks} botColor={botColor} />
@@ -1853,17 +1924,14 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           </span>{' '}
           bot thread{t.threads === 1 ? '' : 's'} · {t.comments} comment
           {t.comments === 1 ? '' : 's'} ·{' '}
-          <span className="tabular-nums">{pct(t.actedOnPct)}</span> acted on ·{' '}
+          <span className="tabular-nums">{pct(t.actedOnPct)}</span> used ·{' '}
           <span className="tabular-nums text-amber-600 dark:text-amber-400">
             {t.untouched}
           </span>{' '}
           not addressed
           {' · '}
-          <span
-            className="tabular-nums"
-            title="Not-addressed threads count as overdue (and feed the 'noisy' verdict) once they're older than this fixed grace window."
-          >
-            overdue after {Math.round(t.overdueGraceMs / 3_600_000)}h
+          <span className="tabular-nums">
+            counted unanswered after {Math.round(t.overdueGraceMs / 3_600_000)}h
           </span>
           {' · '}
           <button
@@ -1932,10 +2000,10 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           <ChartCard title="Thread volume" note="weekly · last 12">
             <VendorTrendChart vendors={vendors} value={threadsVal} botColor={botColor} />
           </ChartCard>
-          <ChartCard title="Bot effectiveness" note="acted-on % · keep / tune / noisy">
+          <ChartCard title="Bot effectiveness" note="% of threads used · keep / tune / rarely used">
             <EffectivenessChart vendors={vendors} />
           </ChartCard>
-          <ChartCard title="Acted-on vs untouched" note="by bot · current window">
+          <ChartCard title="Used vs not addressed" note="threads, by bot · this window">
             <ActedVsUntouchedChart vendors={vendors} />
           </ChartCard>
           {/* The Inflation column's sparkline, enlarged — same response, same field
@@ -1970,24 +2038,15 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
             sentence because there the instruction is true and the figure it produces is exact.
             The per-repo mount says instead where the money does live, so the absence reads as a
             grain decision rather than as a missing column. */}
-        <div className="text-[11px] text-gray-400">
-          “Acted on” = a later commit likely addressed the thread, it was resolved, or a human
-          replied/resolved after the bot (approximate). Noise ratio = the untouched share of a
-          bot's threads.{' '}
+        <div className="text-[11px] text-gray-500 dark:text-gray-400">
           {showCost ? (
             <>
-              Set a bot's monthly price in <span className="font-medium">Bots → Settings</span> to
-              see $/acted-on — the price is per <span className="font-medium">Workspace</span>, so
-              another Workspace may hold a different figure for the same bot and the two are never
-              added together.
+              Set a bot’s monthly price in <span className="font-medium">Bots → Settings</span> to
+              see $ per used thread.
             </>
           ) : (
             <>
-              Cost is not shown per repository: a bot's price is per{' '}
-              <span className="font-medium">Workspace</span>, so dividing a whole month of it by
-              one repo's work would read as spend and could not be added up across repos. The
-              $/acted-on figures are on the cross-repo{' '}
-              <span className="font-medium">Bots</span> rail.
+              Cost is on the <span className="font-medium">Bots</span> rail.
             </>
           )}
         </div>

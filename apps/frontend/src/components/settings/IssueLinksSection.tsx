@@ -9,6 +9,7 @@ import {
 import { useUpdateWorkspaceTracker, useWorkspaceTracker } from '../../hooks/useWorkspaceTracker.js';
 import { JiraApiAccess } from './JiraApiAccess.js';
 import { LinearApiAccess } from './LinearApiAccess.js';
+import { InfoButton } from '../InfoModal.js';
 import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
@@ -108,7 +109,28 @@ export function IssueLinksSection(): JSX.Element {
   return (
     <SectionShell
       title="Issue tracker"
-      desc="Link each PR to its tickets, for this workspace’s repos only. Other workspaces are unaffected — each one points at its own tracker, or none."
+      desc="Links each PR to its tickets. This workspace only: each workspace has its own tracker, or none."
+      info={
+        <InfoButton title="Issue tracker">
+          <p>
+            <strong>GitHub Issues:</strong> a PR’s tickets are the issues it closes (“Fixes #12”,
+            “Closes owner/repo#12”) or an issue linked in the PR’s Development panel. Limn reads
+            them with your GitHub sign-in.
+          </p>
+          <p>
+            <strong>Jira:</strong> a ticket key such as ENG-123 is found in the PR title, and in
+            the branch name if you choose to look there. Project keys stop false matches like
+            GPT-4 or node-18. Without them the branch is never read, because a lowercase eng-123
+            looks the same as node-18 or release-2.
+          </p>
+          <p>
+            <strong>Linear:</strong> issues that Linear’s GitHub integration attached to the PR are
+            always found. Beyond those, a key in the PR title or branch counts only if its team is
+            on your list.
+          </p>
+          <p>Commit messages are never read.</p>
+        </InfoButton>
+      }
     >
       <Field label="Provider">
         <select
@@ -126,9 +148,7 @@ export function IssueLinksSection(): JSX.Element {
       </Field>
       {provider === 'github' && (
         <p className="text-xs text-gray-600 dark:text-gray-300">
-          A PR’s tickets are the issues it closes — “Fixes #12”, “Closes owner/repo#12”, or an issue
-          linked in the PR’s Development panel. Limn reads them with your GitHub sign-in. Nothing to
-          set up.
+          Uses the issues each PR closes or links. Nothing to set up.
         </p>
       )}
       {fields?.baseUrl === true && (
@@ -153,8 +173,8 @@ export function IssueLinksSection(): JSX.Element {
             label={provider === 'linear' ? 'Team keys' : 'Project keys'}
             hint={
               provider === 'linear'
-                ? 'Optional, comma-separated (e.g. ENG, OPS). Issues Linear’s GitHub integration linked to a PR are always found. Beyond those, a key in the PR title or branch counts only if its team is on this list. Leave blank to look for uppercase keys in the PR title only.'
-                : 'Optional, comma-separated (e.g. ENG, PROJ). When set, a ticket is only detected if its prefix is on this list — the most reliable way to avoid false matches like GPT-4 or node-18. Leave blank to fall back to detecting uppercase keys in the PR title.'
+                ? 'Optional, comma-separated (e.g. ENG, OPS). Leave blank to look for keys in the PR title only.'
+                : 'Optional, comma-separated (e.g. ENG, PROJ). Only keys with these prefixes count. Leave blank to look for keys in the PR title only.'
             }
           >
             <input
@@ -173,8 +193,8 @@ export function IssueLinksSection(): JSX.Element {
             label="Where to look"
             hint={
               hasKeys
-                ? 'Detection never reads commit messages — only the PR title and, in the second mode, the head branch name.'
-                : 'Only has an effect when project keys are set above: without them the branch is never scanned, because a lowercase eng-123 is indistinguishable from node-18 or release-2. Detection never reads commit messages.'
+                ? undefined
+                : `Set ${provider === 'linear' ? 'team' : 'project'} keys above first. Without them only the PR title is searched for keys.`
             }
           >
             <select

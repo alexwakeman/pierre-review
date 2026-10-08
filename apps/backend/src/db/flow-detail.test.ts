@@ -168,7 +168,7 @@ describe('the fast-versus-slow contrast', () => {
     expect(detail(facts).contrast).toBeNull();
   });
 
-  it('says what separates the slowest quarter, and only what does', () => {
+  it('says what sets the fastest quarter apart, and only what does', () => {
     const fast = Array.from({ length: 10 }, () => pr([['reviewer', 0.5], ['landing', 1]], { lines: 40, files: 2 }));
     const middle = Array.from({ length: 20 }, () => pr([['reviewer', 3], ['landing', 1]], { lines: 100, files: 3 }));
     const slow = Array.from({ length: 10 }, () =>
@@ -184,20 +184,20 @@ describe('the fast-versus-slow contrast', () => {
     expect(byKey.wentBack!.verdict).toBe('separates');
     expect(byKey.reach!.verdict).toBe('none');
     expect(c.sentence).toBe(
-      'Against the fastest quarter, the slowest quarter had a longer wait for a first look, more lines changed and more trips back to the author.',
+      'The fastest quarter had a shorter wait for a first look, fewer lines changed and fewer trips back to the author than the slowest.',
     );
   });
 
   it('folds lines and files into one phrase when both separate', () => {
     const fast = Array.from({ length: 10 }, () => pr([['reviewer', 0.5], ['landing', 0.2]], { lines: 40, files: 2 }));
     const slow = Array.from({ length: 30 }, () => pr([['reviewer', 20], ['landing', 0.2]], { lines: 900, files: 12 }));
-    expect(detail([...fast, ...slow]).contrast!.sentence).toContain('more lines and files changed');
+    expect(detail([...fast, ...slow]).contrast!.sentence).toContain('fewer lines and files changed');
   });
 
   it('says so plainly when nothing separates them', () => {
     const facts = Array.from({ length: 40 }, (_, i) => pr([['reviewer', 1 + (i % 3) * 0.1], ['landing', 0.2]]));
     expect(detail(facts).contrast!.sentence).toBe(
-      'Nothing measured here separates the slowest quarter from the fastest.',
+      'Nothing measured here sets the fastest quarter apart.',
     );
   });
 

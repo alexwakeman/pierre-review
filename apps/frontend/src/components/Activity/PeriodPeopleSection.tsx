@@ -13,6 +13,7 @@ import { usePeriodReportsList } from '../../hooks/usePeriodReports.js';
 import { beginDisabledReason, orderSelections } from '../../lib/peopleReport.js';
 import { automatedReviewerMeta, userLabel } from '../../lib/ui.js';
 import { CloseIcon, PersonIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import { MaintainerShield, MemberSectionList } from '../UserSelectPanel.js';
 
 // The Reports "People" section (plan P4.2, reworked for the People report): a PICKER — a text
@@ -376,11 +377,20 @@ export function PeriodPeopleSection(): JSX.Element | null {
     // Screen affordance, not part of the forwardable/printed artifact.
     <section aria-label="People" data-testid="people-picker" className="print:hidden" ref={rootRef}>
       <div className="mb-1 flex flex-wrap items-baseline gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-          People
-        </span>
-        <span className="text-[11px] text-gray-400">
-          prep for 1:1s, not a scorecard — sections alphabetical, no rankings
+        <span className="flex items-center gap-1 self-center">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+            People
+          </span>
+          <InfoButton title="People">
+            <p>
+              Pick people and bots from this workspace, then Begin report. The People report opens
+              for the period selected above, with one section for each pick.
+            </p>
+            <p>
+              It is for 1:1 prep, not a scorecard. Sections are in alphabetical order and nobody is
+              ranked.
+            </p>
+          </InfoButton>
         </span>
       </div>
 
@@ -525,7 +535,7 @@ export function PeriodPeopleSection(): JSX.Element | null {
                     <MaintainerShield />
                     <span className="font-medium">Maintainers</span>
                     <span className="text-gray-400">({ids.length})</span>
-                    <span className="ml-auto text-[10px] text-gray-400">
+                    <span className="ml-auto text-[11px] text-gray-400">
                       {allChecked ? 'clear' : 'select all'}
                     </span>
                   </button>
@@ -559,7 +569,7 @@ export function PeriodPeopleSection(): JSX.Element | null {
                   that excluded bots above: the two cohorts partition. */}
               {visibleBotRows.length > 0 && (
                 <div className="mt-1 border-t border-gray-200 pt-1 dark:border-gray-700">
-                  <div className="sticky top-0 z-10 border-b border-gray-100 bg-white px-1 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-800 dark:bg-gray-900">
+                  <div className="sticky top-0 z-10 border-b border-gray-100 bg-white px-1 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-800 dark:bg-gray-900">
                     Bots
                   </div>
                   {visibleBotRows.map((r) => {
@@ -590,7 +600,7 @@ export function PeriodPeopleSection(): JSX.Element | null {
                           {r.label}
                         </span>
                         {suffix && (
-                          <span className="ml-auto shrink-0 text-[10px] text-gray-400">
+                          <span className="ml-auto shrink-0 text-[11px] text-gray-400">
                             {suffix}
                           </span>
                         )}

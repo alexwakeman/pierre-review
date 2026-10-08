@@ -75,7 +75,7 @@ const ROWS: Row[] = [
   {
     q: 'Which review bots are worth their seat?',
     free: 'Detect every bot, name it, set its role and record what it costs — and an independent severity grade on every comment it leaves.',
-    pro: 'The per-bot scoreboard: keep / tune / noisy, dollars per comment your team acted on, over-calling as a weekly line.',
+    pro: 'The per-bot scoreboard: keep / tune / rarely used, dollars per comment your team acted on, over-calling as a weekly line.',
   },
   {
     q: 'How does that compare to other teams?',

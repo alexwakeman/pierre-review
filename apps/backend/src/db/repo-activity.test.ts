@@ -35,6 +35,8 @@ const HOUR = 3_600_000;
 // Second-aligned by construction: sqlite stores `mode: 'timestamp'` as epoch SECONDS.
 const NOW = Date.UTC(2026, 7, 1); // 2026-08-01T00:00:00Z
 const FROM = NOW - 14 * DAY; // 2026-07-18T00:00:00Z
+// The rolling-14 reporting window (what `getReportingWindow` answers with no sprint cadence).
+const ROLLING = { fromMs: FROM, toMs: NOW, mode: 'rolling_14' as const };
 
 let mainScope: { workspaceId: number; repoIds: number[] };
 let wideScope: { workspaceId: number; repoIds: number[] };
@@ -188,7 +190,7 @@ afterAll(() => closeDb?.());
 
 describe('getWorkspaceRepoActivity', () => {
   it('is window-pure on a HALF-OPEN [from, to) boundary', async () => {
-    const out = await ra.getWorkspaceRepoActivity(1, mainScope, NOW);
+    const out = await ra.getWorkspaceRepoActivity(1, mainScope, NOW, ROLLING);
     const a = out.repos.find((r: any) => r.repoFullName === 'acme/alpha');
     // The PR at exactly `fromMs` is IN; the one 1s earlier and the one at exactly `toMs` are OUT.
     // Both excluded PRs carry huge line counts, so a leak moves `linesChanged` by three orders of
@@ -201,7 +203,7 @@ describe('getWorkspaceRepoActivity', () => {
   });
 
   it('splits human vs automation on the LANE UNION, not users.isBot alone', async () => {
-    const out = await ra.getWorkspaceRepoActivity(1, mainScope, NOW);
+    const out = await ra.getWorkspaceRepoActivity(1, mainScope, NOW, ROLLING);
     const a = out.repos.find((r: any) => r.repoFullName === 'acme/alpha');
     // `ci-runner-9000` is in no vocabulary and has no workspace_reviewers row: only `users.isBot`
     // knows. `automatedReviewerUserIds` alone scores this bar 2 human / 0 automation.
@@ -215,7 +217,7 @@ describe('getWorkspaceRepoActivity', () => {
   });
 
   it('reports an unsized PR as unknown, NEVER as zero lines', async () => {
-    const out = await ra.getWorkspaceRepoActivity(1, mainScope, NOW);
+    const out = await ra.getWorkspaceRepoActivity(1, mainScope, NOW, ROLLING);
     const a = out.repos.find((r: any) => r.repoFullName === 'acme/alpha');
     // Mixed: one sized, one not. The line total covers only the sized one, and the shortfall is
     // COUNTED so the two charts' different populations can be stated on screen.
@@ -232,7 +234,7 @@ describe('getWorkspaceRepoActivity', () => {
   });
 
   it('marks a repo added part-way through the window, and does not pro-rate it', async () => {
-    const out = await ra.getWorkspaceRepoActivity(1, mainScope, NOW);
+    const out = await ra.getWorkspaceRepoActivity(1, mainScope, NOW, ROLLING);
     const g = out.repos.find((r: any) => r.repoFullName === 'acme/gamma');
     expect(g.addedDuringWindow).toBe(true);
     // One PR observed, one PR reported — no scaling up to a notional full fortnight.
@@ -243,7 +245,7 @@ describe('getWorkspaceRepoActivity', () => {
   });
 
   it('orders by total PRs opened, breaking ties on the repo name', async () => {
-    const out = await ra.getWorkspaceRepoActivity(1, mainScope, NOW);
+    const out = await ra.getWorkspaceRepoActivity(1, mainScope, NOW, ROLLING);
     // beta 3 · alpha 2 · zeta 2 · gamma 1 — alpha before zeta alphabetically at the tie. A
     // Map-iteration or heap order would be stable on sqlite and flip on Postgres after any UPDATE.
     expect(out.repos.map((r: any) => r.repoFullName)).toEqual([
@@ -255,7 +257,7 @@ describe('getWorkspaceRepoActivity', () => {
   });
 
   it('counts a silent repo in the membership but draws no band for it', async () => {
-    const out = await ra.getWorkspaceRepoActivity(1, mainScope, NOW);
+    const out = await ra.getWorkspaceRepoActivity(1, mainScope, NOW, ROLLING);
     expect(out.repos.some((r: any) => r.repoFullName === 'acme/epsilon')).toBe(false);
     expect(out.activeRepos).toBe(4);
     expect(out.workspaceRepos).toBe(5);
@@ -263,7 +265,7 @@ describe('getWorkspaceRepoActivity', () => {
   });
 
   it('caps at REPO_ACTIVITY_MAX_REPOS and STATES what the cap cut', async () => {
-    const out = await ra.getWorkspaceRepoActivity(1, wideScope, NOW);
+    const out = await ra.getWorkspaceRepoActivity(1, wideScope, NOW, ROLLING);
     expect(ra.REPO_ACTIVITY_MAX_REPOS).toBe(12);
     expect(out.repos).toHaveLength(12);
     expect(out.activeRepos).toBe(14);
@@ -277,15 +279,29 @@ describe('getWorkspaceRepoActivity', () => {
 
   it('never crosses an account boundary, even when handed a foreign repo id', async () => {
     const probe = { workspaceId: mainScope.workspaceId, repoIds: [alpha, foreign] };
-    const out = await ra.getWorkspaceRepoActivity(1, probe, NOW);
+    const out = await ra.getWorkspaceRepoActivity(1, probe, NOW, ROLLING);
     expect(out.repos.map((r: any) => r.repoFullName)).toEqual(['acme/alpha']);
     expect(out.workspaceRepos).toBe(1);
     // …and from the other side: account 2 asking for account 1's repos gets nothing.
-    expect(await ra.getWorkspaceRepoActivity(2, { workspaceId: mainScope.workspaceId, repoIds: [alpha, beta] }, NOW)).toBeNull();
+    expect(await ra.getWorkspaceRepoActivity(2, { workspaceId: mainScope.workspaceId, repoIds: [alpha, beta] }, NOW, ROLLING)).toBeNull();
+  });
+
+  it('follows a SPRINT reporting window: sprint start to now, never into the future', async () => {
+    // Day 11 of a 14-day sprint that started 4 days into the fixture fortnight. The window's own
+    // end is in the future; the measured span stops at now.
+    const sprint = { fromMs: FROM + 4 * DAY, toMs: FROM + 18 * DAY, mode: 'sprint' as const };
+    const out = await ra.getWorkspaceRepoActivity(1, mainScope, NOW, sprint);
+    expect(out.from).toBe(new Date(FROM + 4 * DAY).toISOString());
+    expect(out.to).toBe(new Date(NOW).toISOString());
+    expect(out.windowDays).toBe(10);
+    // beta's three PRs (days 1-3) are before the sprint started; alpha keeps only its bot PR.
+    expect(out.repos.map((r: any) => r.repoFullName)).toEqual(['acme/zeta', 'acme/alpha', 'acme/gamma']);
+    // gamma was added on day 3, BEFORE this window opened, so it is no longer marked.
+    expect(out.repos.find((r: any) => r.repoFullName === 'acme/gamma').addedDuringWindow).toBe(false);
   });
 
   it('returns null for an empty scope rather than widening to the account', async () => {
     // ⚠ `[]` IS A LEGAL STATE (a workspace with no repos) and it means EMPTY, never "every repo".
-    expect(await ra.getWorkspaceRepoActivity(1, { workspaceId: mainScope.workspaceId, repoIds: [] }, NOW)).toBeNull();
+    expect(await ra.getWorkspaceRepoActivity(1, { workspaceId: mainScope.workspaceId, repoIds: [] }, NOW, ROLLING)).toBeNull();
   });
 });

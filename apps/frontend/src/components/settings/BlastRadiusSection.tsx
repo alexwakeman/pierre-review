@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BLAST_HIGH_SURFACES, type BlastSensitivity, type BlastSurface } from '@pierre-review/shared';
 import { useMe } from '../../hooks/useTriage.js';
 import { useBlastConfig, useSetBlastConfig } from '../../hooks/useBlastRadius.js';
+import { InfoButton } from '../InfoModal.js';
 import { Field, SaveButton, SectionShell } from './ui.js';
 
 // BLAST RADIUS — CORE / free, both deployment modes, every tier. The sibling of
@@ -81,7 +82,23 @@ export function BlastRadiusSection(): JSX.Element {
   return (
     <SectionShell
       title="Blast radius"
-      desc="How far a pull request can reach — shown beside each one as Low, Medium or High, so you can tell at a glance which need a real review and which just need a look. It reads what a change touches, not how big it is: a four-line database migration is high, a 2,000-line documentation update is low."
+      desc="How far a pull request can reach, shown beside each one as Low, Medium or High."
+      info={
+        <InfoButton title="Blast radius">
+          <p>
+            The level reads what a change touches, not how big it is. A four-line database
+            migration is high; a 2,000-line documentation update is low.
+          </p>
+          <p>
+            Switch an area off if it is simply what your repository is made of: a project whose
+            product <em>is</em> a database schema would otherwise see almost every change called
+            high.
+          </p>
+          <p>
+            A change that only edits comments or formatting is capped at Medium, never Low.
+          </p>
+        </InfoButton>
+      }
     >
       <Field
         label="Sensitivity"
@@ -115,13 +132,7 @@ export function BlastRadiusSection(): JSX.Element {
       <Field
         label="Ignore these when judging reach"
         htmlFor="blast-surfaces"
-        hint={
-          <>
-            Touching one of these normally makes a pull request high, however small it is. Switch
-            one off if it is simply what your repository is made of — a project whose product{' '}
-            <em>is</em> a database schema would otherwise see almost every change called high.
-          </>
-        }
+        hint="Touching one of these makes a pull request high, however small it is."
       >
         <div id="blast-surfaces" className="flex flex-col gap-1">
           {BLAST_HIGH_SURFACES.map((s) => (

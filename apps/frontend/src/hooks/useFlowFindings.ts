@@ -36,9 +36,10 @@ import { workspaceKey } from './useActivity.js';
 /** The canonical key segments for one Bottlenecks scope. Every scoped key carries `ws:<id>`. */
 export function flowFindingsQueryKey(
   workspaceId: number | null,
-  days: number,
+  days: number | 'reporting',
 ): (string | number)[] {
-  // `days` is its own slot: the server CLAMPS it to [7, 90], so two windows are two genuinely
+  // `days` is its own slot ('reporting' = the workspace's reporting window; a number is clamped to
+  // [7, 90] server-side), so two windows are two genuinely
   // different answers over the same workspace and must not share a cache entry.
   return ['flow-findings', workspaceKey(workspaceId), days];
 }
@@ -51,7 +52,7 @@ export function flowFindingsQueryKey(
 // and nothing else on screen
 // claims to describe the same population. The 5-minute interval below already tracks the sync
 // cadence; adding it to the sweep would spend that fold again on every repo edit.
-export function useFlowFindings(workspaceId: number | null, days: number) {
+export function useFlowFindings(workspaceId: number | null, days: number | 'reporting') {
   const { periodReports } = useProCapabilities();
   return useQuery<FlowResponse>({
     queryKey: flowFindingsQueryKey(workspaceId, days),

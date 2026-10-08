@@ -92,7 +92,7 @@ const RULE_POINTS = [
 const EM_POINTS = [
   'Throughput, lead time and reach per repository, with people counted apart from automation. Free.',
   'A forwardable report per sprint, and an hour-by-hour account of who was holding each pull request.',
-  'And a keep / tune / noisy verdict on every review bot you pay for, priced per comment your team used.',
+  'And a keep / tune / rarely used verdict on every review bot you pay for, priced per comment your team used.',
 ];
 
 export default function Home(): JSX.Element {

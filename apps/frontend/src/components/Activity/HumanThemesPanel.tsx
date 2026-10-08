@@ -5,6 +5,7 @@ import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { useHumanThemes, useRefreshHumanThemes } from '../../hooks/useHumanThemes.js';
 import { CommentIcon, RefreshIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import { ThemesReportBody, ThemesSkeleton } from './ThemesReportView.js';
 import { prRefToMeta } from './ThemeThreadsDetail.js';
 
@@ -42,7 +43,7 @@ function ParticipantRollup({ result }: { result: HumanThemesResult }): JSX.Eleme
 function HumanCoverageLine({ result }: { result: HumanThemesResult }): JSX.Element {
   const c = result.coverage;
   return (
-    <div className="mt-3 border-t border-ai-hairline pt-2 text-[10px] text-gray-400">
+    <div className="mt-3 border-t border-ai-hairline pt-2 text-[11px] text-gray-400">
       Summarised the top {c.analyzed.toLocaleString()} of {c.totalComments.toLocaleString()} review
       comment{c.totalComments === 1 ? '' : 's'} (prioritised by PR-level comments, then active
       threads, then recency){c.truncated ? ' · older comments beyond the cap were excluded' : ''}.
@@ -78,7 +79,19 @@ export function HumanThemesPanel(): JSX.Element | null {
           <CommentIcon size={15} className="inline-block align-[-0.1em]" /> What people are
           discussing
         </span>
-        <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal">
+        <InfoButton title="What people are discussing" className="text-ai-ink">
+          <p>
+            A summary of what people keep raising in review across this Workspace: recurring
+            concerns, debates, decisions and questions. It reads human review comments, including
+            replies on bot threads.
+          </p>
+          <p>
+            The themes and their wording are written by an AI model and are approximate. The comment
+            counts and the “where” lists are counted exactly.
+          </p>
+        </InfoButton>
+        <span className="text-[11px] text-gray-500 dark:text-gray-400">AI read</span>
+        <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-ai-signal">
           Pro
         </span>
         <button
@@ -105,11 +118,6 @@ export function HumanThemesPanel(): JSX.Element | null {
           )}
         </button>
       </div>
-      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        A read of what your reviewers keep raising — recurring concerns, debates, decisions, and
-        questions across this Workspace’s human review comments (including replies on bot threads). Themes
-        are an AI read (approximate); the volumes and “where” are exact.
-      </p>
 
       {refresh.isError && (
         <div className="mt-2 text-[11px] text-red-500">

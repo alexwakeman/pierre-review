@@ -14,7 +14,7 @@ import { api } from '../api/client.js';
 export function useWorkspaceMetricsDetail(enabled: boolean, workspaceId: number | null) {
   const id = workspaceId;
   return useQuery<WorkspaceMetricsDetailResponse>({
-    queryKey: ['workspace-metrics-detail', id],
+    queryKey: ['workspace-metrics-detail', `ws:${id}`],
     queryFn: id == null ? skipToken : () => api.workspaceMetricsDetail(id),
     enabled,
     refetchInterval: 5 * 60_000,

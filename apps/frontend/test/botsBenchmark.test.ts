@@ -1127,9 +1127,9 @@ describe('the retired per-repository cost model', () => {
     // which name the ABSOLUTE unacted figure. The two differ by a factor of the cohort's rate.
     const head = costHeadline(costBlock());
     expect(head?.tone).toBe('behind');
-    // Sentence one is the MEASURED figure, and it is the one the "nobody acts on" words sit on.
-    expect(head?.spend).toContain('US$96.00');
-    expect(head?.spend).toMatch(/paying for comments nobody used/);
+    // Sentence one is the MEASURED figure, and it is the one the "comments your team used" words sit on (price × acted-on rate).
+    expect(head?.spend).toContain('US$24.00');
+    expect(head?.spend).toMatch(/US\$24\.00 of its US\$120\.00 a month going to comments your team used/);
     // ⚠ A RATE AT THE MONTHLY PRICE, NEVER A SPEND OVER THE SPAN. The sentence shipped as
     // "US$189.22 of this reviewer's US$236.53 over the 8.6 weeks its comments span here bought
     // feedback nobody acted on" — a claim about money already spent, which today's price and a
@@ -1202,9 +1202,9 @@ describe('the retired per-repository cost model', () => {
     // on" is a sentence that means nothing.
     expect(head?.comparison).not.toContain('-US$');
     expect(head?.comparison).not.toMatch(/nobody acts on/);
-    // …and the measured sentence still stands, saying what the price still buys unacted at that
+    // …and the measured sentence still stands, saying what of the price goes to used comments at that
     // better rate.
-    expect(head?.spend).toContain('US$14.40');
+    expect(head?.spend).toContain('US$105.60');
   });
 
   it('never renders an AHEAD figure larger than the monthly price it is a share of', () => {
@@ -1252,7 +1252,7 @@ describe('the retired per-repository cost model', () => {
     // null here, which threw away the only sentence on this card that is purely measured.
     const head = costHeadline(costBlock({ atPeerEngagement: refused('cohort_rate_unfitted') }));
     expect(head?.tone).toBe('measured');
-    expect(head?.spend).toContain('US$96.00');
+    expect(head?.spend).toContain('US$24.00');
     expect(head?.comparison).toBeNull();
     // …and with the MEASURED arm refused there is no headline at all: sentence one is the
     // precondition, not the comparison.
@@ -1588,8 +1588,8 @@ describe('the Workspace cost block', () => {
     expect(head?.tone).toBe('behind');
 
     // Sentence one: the POOLED rate, its own repository count, its own thread count, its own money.
-    expect(head?.spend).toContain('US$88.80');
-    expect(head?.spend).toMatch(/paying for comments nobody used/);
+    expect(head?.spend).toContain('US$31.20');
+    expect(head?.spend).toMatch(/US\$31\.20 of its US\$120\.00 a month going to comments your team used/);
     expect(head?.spend).toContain('4 repositories');
     expect(head?.spend).toContain('26%');
     expect(head?.spend).toContain('100 comments');
@@ -1606,7 +1606,7 @@ describe('the Workspace cost block', () => {
     expect(cmp).toContain('58%');
     expect(cmp).toContain('US$20.40');
     expect(cmp).not.toContain('26%');
-    expect(cmp).not.toContain('US$88.80');
+    expect(cmp).not.toContain('US$31.20');
     expect(cmp).not.toContain('4 repositories');
 
     // ⚠ AND THE TWO RATES ARE NAMED SIDE BY SIDE, NEVER SUBTRACTED. "17 points behind" is a derived
@@ -1634,8 +1634,8 @@ describe('the Workspace cost block', () => {
     expect(head?.comparison).not.toContain('-US$');
     expect(head?.comparison).not.toMatch(/nobody acts on/);
     expect(72).toBeLessThanOrEqual(120);
-    // …and the measured sentence still stands, saying what the price still buys unacted.
-    expect(head?.spend).toContain('US$88.80');
+    // …and the measured sentence still stands, saying what of the price goes to comments the team used.
+    expect(head?.spend).toContain('US$31.20');
   });
 
   it('has a third tone for an estate sitting exactly at its cohorts’ medians', () => {
@@ -1655,7 +1655,7 @@ describe('the Workspace cost block', () => {
     // customer's own money figure, which needs nothing but their data.
     const head = workspaceCostHeadline(workspaceCost(), rollupRefused('vendor_not_in_corpus'));
     expect(head?.tone).toBe('measured');
-    expect(head?.spend).toContain('US$88.80');
+    expect(head?.spend).toContain('US$31.20');
     expect(head?.comparison).toBeNull();
 
     // ⚠ AND THE SAME WHEN THE RATES SURVIVE BUT THE MONEY HALVES WENT QUIET — a truncated estate,
@@ -1672,7 +1672,7 @@ describe('the Workspace cost block', () => {
     );
     expect(noMoney?.tone).toBe('measured');
     expect(noMoney?.comparison).toBeNull();
-    expect(noMoney?.spend).toContain('US$88.80');
+    expect(noMoney?.spend).toContain('US$31.20');
   });
 
   it('has no headline at all when the MEASURED half itself cannot be written', () => {

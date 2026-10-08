@@ -192,6 +192,7 @@ import {
   PUSHED_COMMITS_SHOWN,
   PENDING_LIMITS,
   PENDING_SEVERITY,
+  REPORTING_DEFAULT_DAYS,
 } from '@pierre-review/shared';
 
 // Local copy of the shared `REASON_PRIORITY` value constant. `@pierre-review/shared`
@@ -3790,7 +3791,9 @@ export async function markFeedSeen(accountId: number): Promise<Date> {
 
 const INSIGHT_STALLED_REVIEW_HOURS = PENDING_LIMITS.stalledReviewMinHours;
 const INSIGHT_UNTOUCHED_THREAD_HOURS = PENDING_LIMITS.untouchedThreadMinHours; // "> 1 day"
-const INSIGHT_SPRINT_DAYS = 14; // trailing 2 weeks
+// The product default window when none is handed in: the reporting window's own default (shared
+// `REPORTING_DEFAULT_DAYS`), never a second copy of the number.
+const INSIGHT_SPRINT_DAYS = REPORTING_DEFAULT_DAYS; // trailing 2 weeks
 const INSIGHT_ROUTING_MIN_AGE_HOURS = PENDING_LIMITS.routingMinAgeHours; // ignore brand-new PRs
 // A PR with NO activity (GitHub updatedAt) in this many days is "ultra-stale": effectively
 // abandoned-but-unclosed, no longer being looked at. Insight cards (and, downstream, the AI
@@ -4336,6 +4339,9 @@ export async function getWorkspaceMetrics(
 export async function getWorkspaceMetricsForScope(
   accountId: number,
   repoIds: number[],
+  // The workspace's REPORTING WINDOW (db/reporting-window.ts), so the free tiles compare this
+  // sprint so far when the workspace has a cadence. Undefined keeps the trailing-14-day default.
+  window?: MetricsWindow,
 ): Promise<WorkspaceMetrics | null> {
   if (repoIds.length === 0) return null;
   const owned = await db
@@ -4347,7 +4353,7 @@ export async function getWorkspaceMetricsForScope(
     accountId,
     owned.map((r) => r.id),
     Date.now(),
-    undefined,
+    window,
   );
 }
 

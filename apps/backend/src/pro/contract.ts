@@ -19,6 +19,7 @@ import type {
   BlastSignals,
   FlowPointerEvidence,
   PendingBoardSnapshot,
+  SprintComparisonMode,
   WorkPlanEvidence,
 } from '@pierre-review/shared';
 import type { CompareDiffResult } from '../github/compare.js';
@@ -1001,10 +1002,13 @@ export interface ProHostQueries {
   // ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21, the `getWorkPlan` precedent verbatim. A newer
   // plugin against an older host finds it `undefined` and reports `enabled:false` for the pointers
   // alone.
+  // `opts.reporting` (trailing optional, no bump): measure the workspace's REPORTING WINDOW instead
+  // of `windowDays` — the Chronology default. The evidence then carries `reportingWindow`.
   getFlowPointerEvidence?(
     accountId: number,
     scope: BotScopeWire,
     windowDays: number,
+    opts?: { reporting?: boolean },
   ): Promise<FlowPointerEvidence>;
 
   // BLAST RADIUS: the signal vector for ONE pull request — how far it can reach, folded by core's
@@ -1166,6 +1170,19 @@ export interface ProContext {
   // (purely additive — an older plugin simply never registers one).
   registerAccountErasure?(
     handler: (args: { accountId: number }) => Promise<void> | void,
+  ): void;
+  // THE REPORTING WINDOW. The plugin registers its comparison-window resolver (the workspace's
+  // mode + cadence → this sprint so far, or the trailing 7/14 days) so CORE's free Reports surfaces
+  // (the flow tiles, Activity by repository, Reach by repository, Chronology) are tied to the same
+  // window the Pro surfaces use, without core re-deriving a cadence it cannot read
+  // (db/reporting-window.ts). OPTIONAL, apiVersion unchanged: an older plugin never registers one
+  // and core falls back to the trailing 14 days.
+  registerReportingWindow?(
+    resolver: (args: {
+      accountId: number;
+      workspaceId: number;
+      nowMs: number;
+    }) => Promise<{ fromMs: number; toMs: number; mode: SprintComparisonMode }>,
   ): void;
   // The cheap-tier completion seam (review/llm.ts) — so the plugin adds no new
   // Anthropic dependency.

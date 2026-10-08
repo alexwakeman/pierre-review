@@ -1,8 +1,14 @@
 import { useState } from 'react';
-import type { WorkspaceMetrics, WorkspaceMetricStat, WorkspaceMetricKey } from '@pierre-review/shared';
+import {
+  reportingWindowTitle,
+  type WorkspaceMetrics,
+  type WorkspaceMetricStat,
+  type WorkspaceMetricKey,
+} from '@pierre-review/shared';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
 import { CaretIcon, ChevronIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import {
   ChartCard,
   ChartEmpty,
@@ -54,7 +60,7 @@ function Stat({
   const showDelta = delta != null && delta !== 0 && !lowConfidence;
   return (
     <TileShell onActivate={onActivate}>
-      <div className="text-[10px] font-medium uppercase tracking-wide text-gray-400">{label}</div>
+      <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">{label}</div>
       <div className="text-lg font-semibold text-gray-800 dark:text-gray-100">
         {v == null ? '—' : format(v)}
       </div>
@@ -65,19 +71,18 @@ function Stat({
           }`}
         >
           <CaretIcon dir={delta > 0 ? 'up' : 'down'} className="inline-block align-[-0.1em]" />{' '}
-          {format(Math.abs(delta))} <span className="text-gray-400">vs last</span>
+          {format(Math.abs(delta))} <span className="text-gray-400">vs before</span>
         </div>
       ) : lowConfidence ? (
-        <div
-          className="text-[11px] text-gray-400"
-          title="Too few data points to read a trend yet (small sample)"
-        >
-          {p == null ? 'building baseline' : `was ${format(p)}`}
+        // Why there is no arrow is in the "Flow metrics" info modal; a title= alone is out of reach
+        // on touch and keyboard.
+        <div className="text-[11px] text-gray-400">
+          {p == null ? 'nothing to compare yet' : `was ${format(p)}`}
         </div>
       ) : (
-        <div className="text-[11px] text-gray-400">{p == null ? sub : 'no change'}</div>
+        <div className="text-[11px] text-gray-400">{p == null ? 'nothing to compare yet' : 'no change'}</div>
       )}
-      <div className="mt-0.5 text-[10px] text-gray-400">{sub}</div>
+      <div className="mt-0.5 text-[11px] text-gray-400">{sub}</div>
     </TileShell>
   );
 }
@@ -97,7 +102,7 @@ function TileShell({
     <button
       type="button"
       onClick={onActivate}
-      title="Inspect the PRs behind this metric"
+      title="Show the pull requests behind this figure"
       className={`${base} cursor-pointer transition hover:border-gray-300 hover:bg-gray-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 dark:hover:border-gray-600 dark:hover:bg-gray-900/60`}
     >
       {children}
@@ -137,10 +142,13 @@ export function WorkspaceMetricsPanel({
     1,
     Math.min(metrics.sprintDays, Math.ceil(metrics.elapsedDays ?? metrics.sprintDays)),
   );
+  // The group heading over the windowed tiles — the shared spelling ("This sprint so far" / "Last
+  // 14 days"), the same words the cards below use for the same window.
+  const windowGroupLabel = reportingWindowTitle({ mode: cmp, days: metrics.sprintDays });
   const windowLabel =
     cmp === 'sprint'
-      ? `day ${dayN} of ${metrics.sprintDays} · vs same point last sprint`
-      : `rolling ${metrics.sprintDays} days · vs prior ${metrics.sprintDays} days`;
+      ? `Day ${dayN} of ${metrics.sprintDays} of this sprint, compared with the same point last sprint`
+      : `Last ${metrics.sprintDays} days, compared with the ${metrics.sprintDays} days before`;
   const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
   const open = (m: WorkspaceMetricKey): (() => void) | undefined =>
     onOpenMetric ? () => onOpenMetric(m) : undefined;
@@ -150,13 +158,13 @@ export function WorkspaceMetricsPanel({
     { key: 'merged', label: 'Merged', color: PALETTE.green, values: metrics.throughput.merged },
   ];
   const leadSeries: Series[] = [
-    { key: 'lead', label: 'Lead time', color: PALETTE.purple, values: metrics.leadTimeTrend },
+    { key: 'lead', label: 'Time to merge', color: PALETTE.purple, values: metrics.leadTimeTrend },
   ];
   const ciSeries: Series[] = [
-    { key: 'ci', label: 'Merge CI success', color: PALETTE.green, values: metrics.ciSuccessTrend },
+    { key: 'ci', label: 'Green at merge', color: PALETTE.green, values: metrics.ciSuccessTrend },
   ];
   const recoverySeries: Series[] = [
-    { key: 'recovery', label: 'CI recovery', color: PALETTE.orange, values: metrics.ciRecoveryTrend },
+    { key: 'recovery', label: 'Red to green', color: PALETTE.orange, values: metrics.ciRecoveryTrend },
   ];
   const reasonSeries: Series[] = [
     {
@@ -174,8 +182,8 @@ export function WorkspaceMetricsPanel({
   const reviewLoad = metrics.reviewLoad;
   const reviewLoadSeries: Series[] = reviewLoad
     ? [
-        { key: 'human', label: 'Human', color: PALETTE.blue, values: reviewLoad.human },
-        { key: 'bot', label: 'Bot', color: PALETTE.orange, values: reviewLoad.bot },
+        { key: 'human', label: 'People', color: PALETTE.blue, values: reviewLoad.human },
+        { key: 'bot', label: 'Bots', color: PALETTE.orange, values: reviewLoad.bot },
       ]
     : [];
   const reviewLoadEmpty =
@@ -229,7 +237,7 @@ export function WorkspaceMetricsPanel({
   // slot's grid omits its own per-repo CI-failures twin (Charts omitPrimaries) so the folded
   // section never shows the same concept twice from two data sources.
   const ciFailuresCard = (
-    <ChartCard title="CI failures by stage" note="which checks fail · window">
+    <ChartCard title="Failing checks" note="times each check was seen failing · last 12 weeks">
       {reasonLabels.length === 0 ? (
         <ChartEmpty label="No CI failures recorded yet" />
       ) : (
@@ -244,86 +252,133 @@ export function WorkspaceMetricsPanel({
       data-testid="flow-metrics"
     >
       <div className="flex flex-wrap items-baseline gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-300">
-          Flow metrics
-        </h3>
+        <div className="flex items-center gap-1">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-300">
+            Flow metrics
+          </h3>
+          <InfoButton title="Flow metrics">
+            <p>
+              Each tile compares this window with the earlier one named beside the heading. Times
+              are medians. Time to
+              merge and Checks green at merge cover pull requests merged in the window; Time to
+              first review covers pull requests opened in it that have been reviewed.
+            </p>
+            <p>
+              When either window has fewer than 3 pull requests (or, for Time to fix red checks,
+              fewer than 3 fixes) behind a figure, the tile shows the earlier value (&ldquo;was
+              …&rdquo;) instead of an up or down arrow.
+            </p>
+            <p>
+              The tiles under &ldquo;Right now&rdquo; are not tied to the window: Open pull requests
+              and Red checks now count what is open at this moment, drafts not counted. A red
+              check&rsquo;s age runs from the pull request&rsquo;s last commit.
+            </p>
+            <p>
+              The charts under &ldquo;Last 12 weeks&rdquo; are weekly trends over 12 weeks, so they
+              always cover more than one window.
+            </p>
+          </InfoButton>
+        </div>
         <span className="text-[11px] text-gray-400">
-          DORA-ish · {windowLabel}
-          {onOpenMetric ? ' · tap a tile to drill in' : ''}
+          {windowLabel}
+          {onOpenMetric ? ' · click a tile for the pull requests behind it' : ''}
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
-        <TileShell onActivate={onOpenOpenPrs}>
-          <div className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
-            Open PRs
+      {/* ⚠ TWO GROUPS, AND THE SPLIT IS THE RULE MADE VISIBLE. Every Reports figure is tied to the
+          workspace's reporting window — the five tiles on the left. "Open pull requests" and "Red
+          checks now" are SNAPSHOTS of what is open at this moment, the labelled exception, so they
+          sit apart under their own "Right now" heading where nobody reads them as sprint figures. */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,5fr)_minmax(0,2fr)]">
+        <div role="group" aria-label={windowGroupLabel}>
+          <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            {windowGroupLabel}
+          </h4>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            <Stat
+              label="Merged"
+              stat={metrics.merges}
+              format={countFmt}
+              betterWhen="up"
+              sub="pull requests"
+              onActivate={open('merges')}
+            />
+            <Stat
+              label="Time to merge"
+              stat={metrics.leadTimeHours}
+              format={fmtDuration}
+              betterWhen="down"
+              sub="median, opened to merged"
+              onActivate={open('lead_time')}
+            />
+            <Stat
+              label="Time to first review"
+              stat={metrics.timeToFirstReviewHours}
+              format={fmtDuration}
+              betterWhen="down"
+              sub="median, opened to first review"
+              onActivate={open('review_latency')}
+            />
+            <Stat
+              label="Checks green at merge"
+              stat={metrics.mergeCiSuccessPct}
+              format={pctFmt}
+              betterWhen="up"
+              sub="share of merged pull requests"
+              onActivate={open('merge_ci')}
+            />
+            <Stat
+              label="Time to fix red checks"
+              stat={metrics.ciRecoveryHours}
+              format={fmtDuration}
+              betterWhen="down"
+              sub="median, red to green"
+              onActivate={open('ci_recovery')}
+            />
           </div>
-          <div className="text-lg font-semibold text-gray-800 dark:text-gray-100">
-            {metrics.openPrs}
+        </div>
+        <div
+          role="group"
+          aria-label="Right now"
+          className="border-gray-200 lg:border-l lg:pl-3 dark:border-gray-800"
+          data-testid="flow-metrics-right-now"
+        >
+          <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            Right now
+          </h4>
+          <div className="grid grid-cols-2 gap-2">
+            <TileShell onActivate={onOpenOpenPrs}>
+              <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                Open pull requests
+              </div>
+              <div className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+                {metrics.openPrs}
+              </div>
+              <div className="text-[11px] text-gray-400">{openPrsSubtitle}</div>
+              <div className="mt-0.5 text-[11px] text-gray-400">open now, drafts not counted</div>
+            </TileShell>
+            <TileShell onActivate={open('ci_red')}>
+              <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                Red checks now
+              </div>
+              <div
+                className={`text-lg font-semibold ${
+                  metrics.ciFailingNow > 0
+                    ? 'text-red-500 dark:text-red-400'
+                    : 'text-gray-800 dark:text-gray-100'
+                }`}
+              >
+                {metrics.ciFailingNow}
+              </div>
+              <div className="text-[11px] text-gray-400">
+                {metrics.ciFailingNow > 0 && metrics.ciFailingMedianAgeHours != null
+                  ? `red for ~${fmtDuration(metrics.ciFailingMedianAgeHours)} (median)`
+                  : 'all green'}
+              </div>
+              <div className="mt-0.5 text-[11px] text-gray-400">open pull requests</div>
+            </TileShell>
           </div>
-          <div className="text-[11px] text-gray-400">{openPrsSubtitle}</div>
-          <div className="mt-0.5 text-[10px] text-gray-400">currently open</div>
-        </TileShell>
-        <Stat
-          label="Merges"
-          stat={metrics.merges}
-          format={countFmt}
-          betterWhen="up"
-          sub="deploy frequency"
-          onActivate={open('merges')}
-        />
-        <Stat
-          label="Lead time"
-          stat={metrics.leadTimeHours}
-          format={fmtDuration}
-          betterWhen="down"
-          sub="open → merge"
-          onActivate={open('lead_time')}
-        />
-        <Stat
-          label="Review latency"
-          stat={metrics.timeToFirstReviewHours}
-          format={fmtDuration}
-          betterWhen="down"
-          sub="to first review"
-          onActivate={open('review_latency')}
-        />
-        <Stat
-          label="Merge CI"
-          stat={metrics.mergeCiSuccessPct}
-          format={pctFmt}
-          betterWhen="up"
-          sub="green at merge"
-          onActivate={open('merge_ci')}
-        />
-        <Stat
-          label="CI recovery"
-          stat={metrics.ciRecoveryHours}
-          format={fmtDuration}
-          betterWhen="down"
-          sub="red → green"
-          onActivate={open('ci_recovery')}
-        />
-        <TileShell onActivate={open('ci_red')}>
-          <div className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
-            CI red now
-          </div>
-          <div
-            className={`text-lg font-semibold ${
-              metrics.ciFailingNow > 0
-                ? 'text-red-500 dark:text-red-400'
-                : 'text-gray-800 dark:text-gray-100'
-            }`}
-          >
-            {metrics.ciFailingNow}
-          </div>
-          <div className="text-[11px] text-gray-400">
-            {metrics.ciFailingNow > 0 && metrics.ciFailingMedianAgeHours != null
-              ? `~${fmtDuration(metrics.ciFailingMedianAgeHours)} unresolved`
-              : 'all green'}
-          </div>
-          <div className="mt-0.5 text-[10px] text-gray-400">recovery pressure</div>
-        </TileShell>
+        </div>
       </div>
 
       {/* Primary trends — throughput + the two operationally-urgent CI views up front. The
@@ -331,24 +386,27 @@ export function WorkspaceMetricsPanel({
           where it read as part of the comparison-window scope — the tiles compare over the
           window, but these weekly series span 12 weeks (per-chart notes say "weekly"/"window"). */}
       <h4 className="pt-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-        12-week trend
+        Last 12 weeks
       </h4>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <ChartCard title="Review load per PR" note="human vs bot touches per shipped PR · weekly">
+        <ChartCard
+          title="Reviews and comments per merged pull request"
+          note="people vs bots · weekly"
+        >
           {reviewLoadEmpty ? (
             <ChartEmpty label="No merged-PR review activity yet" />
           ) : (
             <LineChart labels={labels} series={reviewLoadSeries} area curved formatY={loadFmt} />
           )}
         </ChartCard>
-        <ChartCard title="Throughput" note="opened vs merged · weekly">
+        <ChartCard title="Pull requests opened and merged" note="weekly">
           {sum(metrics.throughput.opened) + sum(metrics.throughput.merged) === 0 ? (
             <ChartEmpty />
           ) : (
             <LineChart labels={labels} series={throughputSeries} area curved />
           )}
         </ChartCard>
-        <ChartCard title="CI recovery time" note="median red→green · weekly">
+        <ChartCard title="Time to fix red checks" note="median, red to green · weekly">
           {metrics.ciRecoveryTrend.every((v) => v == null) ? (
             <ChartEmpty label="No CI recoveries yet — accrues from sync" />
           ) : (
@@ -368,7 +426,7 @@ export function WorkspaceMetricsPanel({
         >
           <ChevronIcon dir={showMore ? 'down' : 'right'} className="inline-block align-[-0.1em]" />{' '}
           More charts
-          {moreChartsSlot == null ? ' — lead time · CI · review depth' : ''}
+          {moreChartsSlot == null ? ' — time to merge, checks, review depth' : ''}
         </button>
         {showMore &&
           (moreChartsSlot != null ? (
@@ -379,14 +437,14 @@ export function WorkspaceMetricsPanel({
           ) : (
             <div className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-2">
               {ciFailuresCard}
-              <ChartCard title="Lead time for changes" note="median open→merge · weekly">
+              <ChartCard title="Time to merge" note="median, opened to merged · weekly">
                 {metrics.leadTimeTrend.every((v) => v == null) ? (
                   <ChartEmpty />
                 ) : (
                   <LineChart labels={labels} series={leadSeries} area curved formatY={fmtDuration} />
                 )}
               </ChartCard>
-              <ChartCard title="Merge CI success" note="% green at merge · weekly">
+              <ChartCard title="Checks green at merge" note="% of merged pull requests · weekly">
                 {metrics.ciSuccessTrend.every((v) => v == null) ? (
                   <ChartEmpty />
                 ) : (
@@ -394,8 +452,8 @@ export function WorkspaceMetricsPanel({
                 )}
               </ChartCard>
               <ChartCard
-                title="Changes-requested rate"
-                note="% merged PRs sent back · weekly · lower = cleaner drafts"
+                title="Changes requested"
+                note="% of merged pull requests sent back for changes · weekly"
               >
                 {nullEvery(crTrend) ? (
                   <ChartEmpty />
@@ -405,7 +463,7 @@ export function WorkspaceMetricsPanel({
               </ChartCard>
               <ChartCard
                 title="Review coverage"
-                note="merged PRs by who reviewed · weekly"
+                note="merged pull requests by who reviewed them · weekly"
               >
                 {coverageEmpty ? (
                   <ChartEmpty label="No merged PRs yet" />
@@ -420,7 +478,16 @@ export function WorkspaceMetricsPanel({
               </ChartCard>
               <ChartCard
                 title="Rework after review"
-                note="median % of commits pushed after first review · weekly"
+                note="median · weekly"
+                info={
+                  <InfoButton title="Rework after review">
+                    <p>
+                      For each reviewed pull request merged that week, the share of its commits made
+                      after its first review. The line is the median of those shares.
+                    </p>
+                    <p>Pull requests that were never reviewed are left out.</p>
+                  </InfoButton>
+                }
               >
                 {nullEvery(reworkTrend) ? (
                   <ChartEmpty label="No reviewed merges yet" />
@@ -430,7 +497,19 @@ export function WorkspaceMetricsPanel({
               </ChartCard>
               <ChartCard
                 title="Time to resolve threads"
-                note="median open→resolved · human vs bot self-resolve · weekly"
+                note="median · people vs bots · weekly"
+                info={
+                  <InfoButton title="Time to resolve threads">
+                    <p>
+                      Median time from a review thread being opened to being resolved, by the week it
+                      was resolved. Split by who clicked resolve: a person or a bot.
+                    </p>
+                    <p>
+                      Only resolutions Limn saw happen are counted. A thread that was already
+                      resolved when its repository was first synced has no known resolve time.
+                    </p>
+                  </InfoButton>
+                }
               >
                 {resolutionEmpty ? (
                   <ChartEmpty label="No resolutions observed yet — accrues from sync" />
@@ -443,7 +522,7 @@ export function WorkspaceMetricsPanel({
                   />
                 )}
               </ChartCard>
-              <ChartCard title="Review pickup time" note="median requested→first review · weekly">
+              <ChartCard title="Time from review request to first review" note="median · weekly">
                 {nullEvery(pickupTrend) ? (
                   <ChartEmpty label="No review requests recorded yet — accrues from sync" />
                 ) : (

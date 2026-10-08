@@ -17,7 +17,7 @@ Three courts, and they partition the open life of a pull request:
 | Settings | `packages/shared/src/flow-settings.ts` · `workspaces.flow_settings` · `PUT /api/workspaces/:id/flow-settings` · `components/settings/FlowSettingsSection.tsx` |
 | Request history | `review_request_events` · `sync/upsert.ts` `persistReviewRequestHistory` · `sync/backfill-review-requests.ts` |
 | Pointers (Pro, model) | core `db/flow-pointers.ts` (evidence) · `packages/pro/src/flow-pointers/` · `GET`/`POST /api/pro/flow-pointers` · `Activity/FlowPointersPanel.tsx` |
-| The route | `apps/backend/src/api/routes/flow.ts` — `GET /api/flow-findings?workspace&days` |
+| The route | `apps/backend/src/api/routes/flow.ts` — `GET /api/flow-findings?workspace&window=reporting|days` (default: the reporting window) |
 | The contract | `FlowResponse` and friends in `packages/shared/src/types.ts` |
 | The panel | `apps/frontend/src/components/Activity/BottlenecksPanel.tsx` + `bottlenecksModel.ts` + `ChronologyCharts.tsx` / `ChronologyTables.tsx` / `chronologyModel.ts` + `chronologyInfo.tsx` (the modal copy) · `components/InfoModal.tsx` · `components/charts/ChartPopover.tsx` |
 | Tests | `db/pr-intervals.test.ts` · `db/flow-detail.test.ts` · `db/working-hours.test.ts` · `sync/review-request-history.test.ts` · `api/routes/workspace-flow-settings.test.ts` · the `getFlowCourts` block in `verify-isolation.ts` · `packages/pro/test/flow-pointers.test.ts` · `apps/frontend/test/chronologyModel.test.ts` + `flowSettingsForm.test.ts` |
@@ -144,8 +144,22 @@ test that pins it.
 
 ## Window
 
-`?days` clamps to `[7, 90]` and the CLAMPED value is echoed as `windowDays`, because every sentence
-on screen names it. The window is on `mergedAt`, two-sided and half-open `[from, to)` — a cycle-time
+**The DEFAULT is the workspace's REPORTING WINDOW** — the window every Reports figure is tied to:
+this sprint so far when the workspace has a sprint cadence, else the trailing 7/14 days.
+`?window=reporting` (also what a request with neither `?window` nor `?days` means) resolves it on the
+route through the ONE resolver, core `db/reporting-window.ts` `getReportingWindow` (the plugin's
+`resolveComparisonWindow` when bound), and hands it to `getFlowCourts(…, { reporting })`; the response
+echoes it as `reportingWindow`, every templated sentence names it ("merged so far this sprint" /
+"in the last 14 days"), and the panel's picker labels it "This sprint" / "Last 14 days". It is NOT
+floored at seven days — early in a sprint the window is short by definition, and the too-few-PRs
+refusals are what keep a thin sample from reading as a finding — but it is still capped at 90 days.
+The pointers follow it (`getFlowPointerEvidence(…, { reporting: true })`; the plugin keys a sprint's
+cache row on the sprint start and a rolling window's on its mode).
+
+The 30/60/90-day options are the longer views: `?days` clamps to `[7, 90]` and the CLAMPED value is
+echoed as `windowDays`; only a positive integer `?days=` picks a fixed span — absent, garbage or an
+unknown `?window=` is the reporting window (core route and plugin pointers route alike), because every sentence on screen names it. The picker's choice is remembered
+for the session only (a module variable), as before. The window is on `mergedAt`, two-sided and half-open `[from, to)` — a cycle-time
 figure belongs to the period the work COMPLETED in, matching `db/period-metrics.ts`.
 
 ## Working hours and budgets
@@ -188,14 +202,26 @@ Settings → Workspace → "Working hours and budgets"; CORE and free to set).
 
 `FlowResponse.prs` carries one row per measured PR (capped at 1,000: every slow PR, then an even
 stride — `prsCapped` says so) with no actor on it. The panel draws it as a log-scale scatter (hover
-for the breakdown, click opens the PR; the "20 slowest" table is its keyboard and screen-reader
-view), then: the fastest-vs-slowest-quarter contrast (a row "separates" at 2× with an absolute
+for the breakdown, click opens the PR; the "longest first" table is its keyboard and screen-reader
+view), then: the fastest-vs-slowest-quarter contrast (titled "What the quick ones do differently",
+its sentence led by the fastest quarter) (a row "separates" at 2× with an absolute
 floor, so ten times six minutes is not a finding), lead time by size and by weekday (clock beside
 working), the landing tail, and first-review concentration.
 
 `prFigures` carries the scatter's and triangle's headline figures over EVERY measured PR — the
 per-PR rows are capped at 1,000, and a figure counted over a sample was wrong exactly when
 `prsCapped`.
+
+- **Positive framing, same facts.** Every figure is stated from the side of what good looks like:
+  the p75 reads "three in four within X" (never "the slowest quarter took X or more"), the scatter
+  tiles read "M of N merged within a working day" (`measuredPrs − overWorkingDay`) and BOTH halves
+  of the slowest tenth's share, quick side first — "{100 − P}% of the waiting time went to the
+  quickest {N − K} of N pull requests. The slowest K took P%." (K = ceil(N/10); the two percentages
+  come from ONE rounding so they add to 100; hidden when N − K is 0 or nothing waited). One half
+  alone ("46% … is in the quickest 124 of 138") was reported as unreadable. A budget verdict past
+  its limit is labelled "Past limit". The wire keys keep their old names
+  (`slowestTenthCount`, `slowestTenthShare`, verdict `'slow'`). ⚠ The warnings stay warnings: the
+  lopsided-and-slow call-out, the landing tail and red regression deltas are not reworded away.
 
 - **Landing tail.** PRs approved for more than a working day. A ticket key (title, else branch)
   offers SIBLINGS — PRs in another repository under the same ticket that merged between this one's
@@ -260,4 +286,7 @@ $0 cache and `recordAiUsage` on spend. Rate tiers: POST `ai`+`ai_hourly`, GET `s
 - Prompt history (`FLOW_POINTERS_PROMPT_VERSION`, folded into the hash so a bump flips every row
   stale): v1 restated the charts and lost three of five pointers to ticket keys (digits); v2 points
   at content and shape, bans numbers and keys by name and asks for one of each kind; v3 adds who was
-  asked first. Measured on real data at v2: five of five survived, under forty words each.
+  asked first. Measured on real data at v2: five of five survived, under forty words each. A later
+  copy steer (lead with what the quickest pull requests did that others could copy; `example` is
+  asked for first) did NOT bump the version: the stored pointers do not contradict it, and a bump
+  would mark every workspace's paid pointers out of date for a change of emphasis.

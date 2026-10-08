@@ -388,12 +388,24 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   and the `roi` and `benchmark` BODIES lock. ⚠ **A gated sub-tab must still be SELECTABLE** — `effectiveInsightsTab`
   normalises an out-of-union value and nothing else, never a capability fallback, or an unentitled
   `?insightsTab=bottlenecks` from a bookmark silently lands on Overview explaining nothing.
+- **REPORTS IS TIED TO ONE REPORTING WINDOW** — the workspace's comparison window (this sprint so
+  far when it has a sprint cadence and mode `'sprint'`, else the trailing 7/14 days), resolved ONCE
+  per request by core `db/reporting-window.ts` `getReportingWindow`, which asks the PLUGIN's
+  `resolveComparisonWindow` (registered via the optional `ProContext.registerReportingWindow`, no
+  apiVersion bump) and falls back to the trailing 14 days in OSS. Never re-derive a cadence in core
+  and never add a second resolver. `/api/workspace-metrics` hands that one window to the tiles,
+  `repoActivity` and `reach` and echoes it as `window`; the drill-down and Chronology's DEFAULT
+  option (`?window=reporting`) use it too. Name it through the shared spelling
+  (`packages/shared/src/reporting-window.ts`). ⚠ **EXCEPTIONS ARE LABELLED, NEVER IMPLIED**: the
+  "Right now" tile group (Open pull requests, Red checks now), the "Last 12 weeks" trend band,
+  completed period reports / month to date, and Chronology's 30/60/90-day options.
 - **"Where the work is happening" is TWO CARDS under Flow metrics, both horizontal ROW LISTS
-  (`charts/RepoRows`), neither carrying a blended score.** LEFT — `WorkspaceRepoActivityCharts`,
-  riding `repoActivity` on the SAME free `/api/workspace-metrics` response: PRs opened (STACKED
-  people vs automation) beside lines changed, ranked by PRs opened, rolling 14 days
-  (`INSIGHT_SPRINT_DAYS`; it CANNOT be the sprint cadence — plugin-owned, this is free). RIGHT —
-  `WorkspaceReachCard` + `useWorkspaceReach`: open PRs per repo at Low/Medium/High reach.
+  (`charts/RepoRows`), neither carrying a blended score, both over the REPORTING WINDOW.** LEFT —
+  `WorkspaceRepoActivityCharts`, riding `repoActivity` on the SAME free `/api/workspace-metrics`
+  response: PRs opened (STACKED people vs automation) beside lines changed, ranked by PRs opened,
+  over the window the tiles use (it follows the sprint now — the window is handed in, the fold
+  resolves nothing). RIGHT — `WorkspaceReachCard`: pull requests MERGED in that window per repo at
+  Low/Medium/High reach.
   ⚠ **TWO COLUMNS, TWO SCALES, TWO ORIGINS** — `RepoRows` divides by ITS OWN column max, so a bar
   length is a ratio WITHIN one column, never a cross-measure number and NOT the banned normalised
   index (nothing is z-scored, weighted or summed across measures). A GROUPED `BarChart` was never
@@ -404,14 +416,14 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   replace them (no touch, no keyboard). ⚠ **Unknown is never zero on either card**: `linesChanged:
   null` prints "size unknown" in that repo's OWN row (the unsized-PR count is still disclosed in
   words), and a null `blastRadius()` verdict is NOT a fourth segment — undrawn, so the reach bars do
-  NOT total the open-PR count the list is ranked by, and that count is stated in words + per repo.
+  NOT total the merged count the list is ranked by, and that count is stated in words + per repo.
   A repo added mid-window is MARKED, never pro-rated; each top-12 cap states what it cut.
-  ⚠ The reach card is a CLIENT FOLD over `useWorkspaceOpenPrs` (never `useSearchOpenPrs` — Timeline
-  `repoIds`) through the ONE `blastRadius()` resolver, so the Settings dial repaints it with NO
-  cache invalidation; a per-repo level on the wire would be the first server-decided level.
-  ⚠ Its population is OPEN RIGHT NOW — a snapshot, the FOURTH framing on that panel, so it says so —
-  and includes DRAFTS, which the "Open PRs" tile excludes (210 vs 204 on real data), so the draft
-  count is disclosed. FREE on every tier, no ProGate. ⚠ Both mount in `WorkspaceFlowMetrics`,
+  ⚠ The reach rows ride `reach` on the same response (`db/merged-reach.ts`) as SIGNALS per PR
+  (`blast` + `codeLoc` + `codeLocIsLowerBound`, the open-PR rows' folds), and the SPA folds them
+  through the ONE `blastRadius()` resolver (`Activity/reachModel.ts`), so the Settings dial repaints
+  it with NO cache invalidation; a per-repo level on the wire would be the first server-decided
+  level. An empty window renders "No pull requests merged in this window." — the card never
+  vanishes. FREE on every tier, no ProGate. ⚠ Both mount in `WorkspaceFlowMetrics`,
   **never inside `WorkspaceMetricsPanel`** — that panel ALSO mounts per-repo behind a Pro gate,
   where a per-repo breakdown is one row for paying accounts only.
 - **Pending cards carry MERGE-RELATED ACTIONS, on the two FORWARD kinds only** (`merge`,
@@ -920,7 +932,7 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   caution + `TuningSuggestions`, the `BotTriageCard` grade) **and, locally, the agentic features —
   Claude Review, AI Fix — on the user's own Claude** (`MeResponse.ai`, above);
   **pro** adds `botDepth` (NON-AI depth **and the WHOLE Bots → ROI panel** — vendor table,
-  keep/tune/noisy verdicts, the Inflation column *counts included*, ML flagging, volume, seat
+  keep / tune / rarely used verdicts, the Inflation column *counts included*, ML flagging, volume, seat
   prices), `activityDigest`, `periodReports` (period reports + by-workspace axis + the People
   report + **Chronology**), and `prSummary` — every ONE-SHOT Haiku feature on
   the Anthropic API (PR summary, comment validity/addressed/simplify annotations, the blast impact note, conflict-assist) plus all reporting narration. There is no
@@ -1146,7 +1158,7 @@ with a SECTION per pick; contract in
 ## Chronology — the court ledger (Insights -> Reports)
 
 Every hour a pull request is open, somebody is holding the ball: a **reviewer** who has not looked,
-an **author** who owes a response, or nobody - approved and waiting to land. **PRO on
+an **author** who owes a response, or nobody - approved and waiting to merge. **PRO on
 `periodReports`** (no new capability, no apiVersion bump), deterministic — no model anywhere in
 it except the opt-in Pointers block (plugin `flow-pointers/`, optional host seam). `db/pr-intervals.ts` + `api/routes/flow.ts` + `Activity/BottlenecksPanel.tsx`. Full contract:
 **[docs/BOTTLENECKS.md](docs/BOTTLENECKS.md)**. ⚠ The 402 lives on the ROUTE; `getFlowCourts` stays

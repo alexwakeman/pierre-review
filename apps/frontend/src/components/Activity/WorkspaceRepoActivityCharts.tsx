@@ -1,8 +1,15 @@
-import type { WorkspaceRepoActivity } from '@pierre-review/shared';
+import type { ReportingWindowInfo, WorkspaceRepoActivity } from '@pierre-review/shared';
 import { RepoRows, type RepoRowColumn } from '../charts/RepoRows.js';
 import { ChartCard, PALETTE, fmtNum } from '../charts/common.js';
+import { InfoButton } from '../InfoModal.js';
 import { useWorkspaceReach } from '../../hooks/useBlastRadius.js';
 import { WorkspaceReachCard } from './WorkspaceReachCard.js';
+import {
+  reportingWindowPhrase,
+  reportingWindowTitle,
+  windowDates,
+  windowOrDefault,
+} from './reportingWindowText.js';
 
 // WHERE IS THE WORK HAPPENING — the per-repository half of Flow metrics.
 //
@@ -11,9 +18,10 @@ import { WorkspaceReachCard } from './WorkspaceReachCard.js';
 // of magnitude: one fortnight held 147 PRs / 1.4k lines in a config repo and 71 PRs / 141.7k lines
 // in an application repo. Both are activity; they are not the same activity.
 //
-// The section holds TWO CARDS side by side: this one (what was opened in the last 14 days) and
-// `WorkspaceReachCard` (how far the pull requests open RIGHT NOW could reach). Two questions, two
-// populations, two windows — so each card states its own beneath itself.
+// The section holds TWO CARDS side by side: this one (what was opened in the reporting window) and
+// `WorkspaceReachCard` (how far the pull requests merged in that same window could reach). Two
+// questions, two populations, ONE window — the workspace's reporting window, which the tiles above
+// use too, and which each card names in its note.
 //
 // ── TWO MEASURES, TWO SCALES, NOT ONE SCORE ──────────────────────────────────────────────────
 //
@@ -40,14 +48,14 @@ import { WorkspaceReachCard } from './WorkspaceReachCard.js';
 // that said so. The row label wraps instead. `axisLabels()`, `MAX_LABEL_CHARS` and the "In order:"
 // recovery line under the pair are all deleted with it: there is nothing left to recover.
 //
-// ── THE WINDOW IS A ROLLING 14 DAYS, AND THAT IS THE THIRD WINDOW ON THIS PANEL ───────────────
+// ── THE WINDOW IS THE REPORTING WINDOW, THE SAME ONE THE TILES USE ───────────────────────────
 //
-// The tiles above compare a rolling 14 days against the prior 14; the trend band above is a fixed
-// 12 weeks; this is 14 days with NO comparison at all, and the reach card beside it is a snapshot
-// with no window. Four framings on one screen is more than a reader will infer, so each card says
-// its own. This one CANNOT follow the team's sprint cadence: that setting lives in the private
-// plugin and this surface is free — using `INSIGHT_SPRINT_DAYS` is what makes it agree with the
-// tiles beside it by construction rather than by luck.
+// Reports' rule: every figure is tied to the workspace's reporting window — this sprint so far when
+// the workspace has a sprint cadence, else the last 7/14 days. The server resolves it ONCE per
+// request (core db/reporting-window.ts, which asks the plugin's comparison-window resolver when it
+// is bound) and hands the same window to the tiles and to this card, so they agree by construction.
+// This card has NO prior-period comparison (the tiles do), and its "i" says so. The 12-week trend
+// band above is the one labelled exception on this panel, along with the "Right now" tiles.
 //
 // ── NOT CLICKABLE, ON PURPOSE ────────────────────────────────────────────────────────────────
 //
@@ -74,13 +82,19 @@ function plural(n: number, one: string, many: string): string {
 
 export function WorkspaceRepoActivityCharts({
   activity,
+  window: windowInfo,
 }: {
   activity: WorkspaceRepoActivity;
+  /** The reporting window the whole section was measured over (absent on an older server). */
+  window?: ReportingWindowInfo;
 }): JSX.Element | null {
-  // The reach card folds its own data (every open PR in the workspace, through the ONE
+  const window = windowOrDefault(windowInfo, activity.from, activity.to);
+  // The reach card folds the pull requests MERGED in the same window (through the ONE
   // `blastRadius()` resolver) and answers a different question on a different population, so it is
   // NOT gated on this card's two conditions — three of the dev DB's eight workspaces hold a single
-  // repository, where "which repository" is unanswerable but "what mix of reach" is not.
+  // repository, where "which repository" is unanswerable but "what mix of reach" is not. It always
+  // renders once loaded: an empty window says so in its own words rather than vanishing (a reader
+  // took a vanished card for a removed feature).
   const reach = useWorkspaceReach();
 
   const rows = activity.repos;
@@ -101,7 +115,7 @@ export function WorkspaceRepoActivityCharts({
   const columns: RepoRowColumn[] = [
     {
       key: 'prs',
-      header: 'PRs opened',
+      header: 'Pull requests opened',
       segments: [
         { key: 'human', label: 'People', color: HUMAN_COLOR },
         { key: 'automation', label: 'Automation', color: AUTOMATION_COLOR },
@@ -163,8 +177,26 @@ export function WorkspaceRepoActivityCharts({
         {showActivity && (
           <ChartCard
             title="Activity by repository"
-            note={`${activity.windowDays} days · ${capNote}`}
+            note={`${reportingWindowTitle(window)} · ${capNote}`}
             className="h-full"
+            info={
+              <InfoButton title="Activity by repository">
+                <p>
+                  Pull requests opened {reportingWindowPhrase(window)} ({windowDates(window)}), by
+                  repository: the same window as the flow metrics. There is no comparison with an
+                  earlier period.
+                </p>
+                <p>
+                  Repositories are ranked by pull requests opened, split into those opened by people
+                  and by automation. Lines changed is added plus deleted lines on the same pull
+                  requests.
+                </p>
+                <p>
+                  Each column has its own scale, so a bar compares repositories within its column,
+                  never across the two.
+                </p>
+              </InfoButton>
+            }
           >
               <RepoRows
                 labels={labels}
@@ -181,22 +213,12 @@ export function WorkspaceRepoActivityCharts({
                   )} PRs`;
                 }}
               />
-              <p className="mt-1 text-[12px] text-gray-500 dark:text-gray-400">
-                Each column has its own scale, so a bar compares repositories within its column and
-                never across the two.
-              </p>
 
             {/* The disclosures. Each one exists because the alternative is a list that quietly
                 asserts something false; none of them is decoration. */}
             <div className="mt-2 space-y-1 text-[12px] text-gray-500 dark:text-gray-400">
-              {/* The window, stated once. It differs from BOTH windows above it — the tiles compare
-                  against a prior fortnight and the trend band spans 12 weeks — so saying "rolling
-                  14 days" alone would still leave a reader assuming a comparison that is not
-                  there. */}
-              <p>
-                Pull requests opened in the last {activity.windowDays} days, by repository — the
-                same window as the tiles above, with no prior-period comparison.
-              </p>
+              {/* The window is in the note ("This sprint so far" / "Last 14 days"); that it has NO
+                  prior-period comparison — unlike the tiles above — is in the card's info modal. */}
               {activity.omitted.repos > 0 && (
                 // NO SILENT CAPS. The list is ranked by PRs opened, so the repository that leads on
                 // lines changed can sit below the fold — naming what the cut was worth on both
@@ -232,8 +254,8 @@ export function WorkspaceRepoActivityCharts({
                 // (nothing in it was ever sized) or as "lines cover 43 of 45 PRs" (some of it was).
                 <p>
                   {fmtNum(unsized)} {plural(unsized, 'pull request has', 'pull requests have')} no
-                  recorded size and {plural(unsized, 'is', 'are')} counted in PRs opened but not in
-                  lines changed.
+                  recorded size and {plural(unsized, 'is', 'are')} counted in pull requests opened but
+                  not in lines changed.
                 </p>
               )}
               {partial.length > 0 && (
@@ -243,19 +265,14 @@ export function WorkspaceRepoActivityCharts({
                 <p>
                   {partial.map((r) => r.repoFullName).join(', ')}{' '}
                   {plural(partial.length, 'was', 'were')} added to this workspace during the window,
-                  so {plural(partial.length, 'its bars cover', 'their bars cover')} less than{' '}
-                  {activity.windowDays} days.
+                  so {plural(partial.length, 'its bars cover', 'their bars cover')} only part of
+                  it.
                 </p>
               )}
             </div>
           </ChartCard>
         )}
-        {reach != null && (
-          <WorkspaceReachCard
-            reach={reach}
-            neighbourWindowDays={showActivity ? activity.windowDays : null}
-          />
-        )}
+        {reach != null && <WorkspaceReachCard reach={reach} window={window} />}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-// ── CHRONOLOGY, PR BY PR: working hours, budgets, and what the slow ones have in common ──────
+// ── CHRONOLOGY, PR BY PR: working hours, budgets, and what the quick ones do differently ──────
 //
 // `db/pr-intervals.ts` replays each merged pull request's life and charges every interval to a
 // court. This module takes those replays — one `FlowPrFacts` per measured pull request — and
@@ -294,7 +294,7 @@ interface SignalSpec {
   signal: FlowContrastSignal;
   label: string;
   unit: FlowContrastRow['unit'];
-  /** The phrase in "The slowest quarter had …". */
+  /** The phrase in "The fastest quarter had … than the slowest." */
   phrase: string;
   /** The smallest difference worth calling a difference, in the row's own unit. */
   floor: number;
@@ -309,7 +309,7 @@ const SIGNALS: SignalSpec[] = [
     signal: 'firstLook',
     label: 'Wait for a first look',
     unit: 'workHours',
-    phrase: 'a longer wait for a first look',
+    phrase: 'a shorter wait for a first look',
     floor: 0.5,
     value: (rows) => median(rows.map((w) => w.firstLookWork).filter((v): v is number => v != null)),
   },
@@ -317,7 +317,7 @@ const SIGNALS: SignalSpec[] = [
     signal: 'lines',
     label: 'Lines changed',
     unit: 'count',
-    phrase: 'more lines changed',
+    phrase: 'fewer lines changed',
     floor: 20,
     value: (rows) => median(rows.map((w) => w.f.lines).filter((v): v is number => v != null)),
   },
@@ -325,7 +325,7 @@ const SIGNALS: SignalSpec[] = [
     signal: 'files',
     label: 'Files changed',
     unit: 'count',
-    phrase: 'more files changed',
+    phrase: 'fewer files changed',
     floor: 2,
     value: (rows) => median(rows.map((w) => w.f.files).filter((v): v is number => v != null)),
   },
@@ -333,7 +333,7 @@ const SIGNALS: SignalSpec[] = [
     signal: 'wentBack',
     label: 'Went back to the author',
     unit: 'percent',
-    phrase: 'more trips back to the author',
+    phrase: 'fewer trips back to the author',
     floor: 0.1,
     value: (rows) => share(rows, (w) => w.f.rounds > 0),
   },
@@ -341,7 +341,7 @@ const SIGNALS: SignalSpec[] = [
     signal: 'ciRed',
     label: 'Checks went red',
     unit: 'percent',
-    phrase: 'more red checks',
+    phrase: 'fewer red checks',
     floor: 0.1,
     value: (rows) => share(rows, (w) => w.f.ciRedHours > 0),
   },
@@ -349,7 +349,7 @@ const SIGNALS: SignalSpec[] = [
     signal: 'land',
     label: 'Approved to merged',
     unit: 'workHours',
-    phrase: 'a longer wait to merge after approval',
+    phrase: 'a shorter wait to merge after approval',
     floor: 0.5,
     value: (rows) => median(rows.filter((w) => w.f.approvedAtMs != null).map((w) => w.landWork)),
   },
@@ -357,7 +357,7 @@ const SIGNALS: SignalSpec[] = [
     signal: 'lastDay',
     label: 'Opened on the last working day of the week',
     unit: 'percent',
-    phrase: 'more opened on the last working day of the week',
+    phrase: 'fewer opened on the last working day of the week',
     floor: 0.1,
     value: (rows, lastDay) => share(rows, (w) => w.weekday === lastDay),
   },
@@ -365,7 +365,7 @@ const SIGNALS: SignalSpec[] = [
     signal: 'reach',
     label: 'Touches a high-reach area',
     unit: 'percent',
-    phrase: 'more changes to high-reach areas (dependencies, CI, auth, database schema)',
+    phrase: 'fewer changes to high-reach areas (dependencies, CI, auth, database schema)',
     floor: 0.1,
     value: (rows) => share(rows, (w) => w.f.reachAreas.length > 0),
   },
@@ -404,15 +404,15 @@ function contrastOf(worked: Worked[], lastDay: number): FlowContrast | null {
     };
   });
   const sep = new Set(rows.filter((r) => r.verdict === 'separates').map((r) => r.signal));
-  // "more lines and files changed" reads as one fact; two phrases for it read as padding.
+  // "fewer lines and files changed" reads as one fact; two phrases for it read as padding.
   const both = sep.has('lines') && sep.has('files');
   const separating = SIGNALS.filter((s) => sep.has(s.signal) && !(both && s.signal === 'files')).map(
-    (s) => (both && s.signal === 'lines' ? 'more lines and files changed' : s.phrase),
+    (s) => (both && s.signal === 'lines' ? 'fewer lines and files changed' : s.phrase),
   );
   const sentence =
     separating.length > 0
-      ? `Against the fastest quarter, the slowest quarter had ${joinPhrases(separating)}.`
-      : 'Nothing measured here separates the slowest quarter from the fastest.';
+      ? `The fastest quarter had ${joinPhrases(separating)} than the slowest.`
+      : 'Nothing measured here sets the fastest quarter apart.';
   return { quartilePrs: q, rows, sentence };
 }
 
@@ -678,7 +678,7 @@ function prFiguresOf(worked: Worked[], dayHours: number): FlowPrFigures {
 const COURT_PHRASE: Record<PrCourt, string> = {
   reviewer: 'waiting for a reviewer',
   author: 'waiting for the author',
-  landing: 'approved and waiting to land',
+  landing: 'approved and waiting to merge',
 };
 
 export function buildFlowDetail(
@@ -714,7 +714,7 @@ export function buildFlowDetail(
         // In hours, like the budget rows beneath it — the same p75 spelled "2.2 working days" here
         // and "20 working hours" one row down is one figure in two spellings.
         `. Half of pull requests merged within ${fmtWork(medianLeadWorkHours, 0)} of opening; ` +
-        `the slowest quarter took ${fmtWork(p75LeadWorkHours, 0)} or more.`;
+        `three in four within ${fmtWork(p75LeadWorkHours, 0)}.`;
 
   const measures: Record<FlowBudgetMeasure, number[]> = {
     firstLook: worked.map((w) => w.firstLookWork).filter((v): v is number => v != null),

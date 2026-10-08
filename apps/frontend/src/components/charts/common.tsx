@@ -115,7 +115,7 @@ export function Legend({
   return (
     <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
       {series.map((s) => (
-        <span key={s.label} className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400">
+        <span key={s.label} className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
           <span
             className="inline-block h-2 w-2 rounded-[2px]"
             style={{ background: s.color }}
@@ -152,7 +152,7 @@ export function FloatingTip({
     <div
       className={`pointer-events-none absolute z-20 -translate-x-1/2 ${
         centered ? '' : '-translate-y-full'
-      } whitespace-nowrap rounded-md border border-gray-200 bg-white/95 px-2 py-1 text-[10px] leading-tight text-gray-700 shadow-md dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-200`}
+      } whitespace-nowrap rounded-md border border-gray-200 bg-white/95 px-2 py-1 text-[11px] leading-tight text-gray-700 shadow-md dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-200`}
       style={{ left: clampedX, top: centered ? 2 : Math.max(y - 6, 0) }}
     >
       {children}
@@ -164,12 +164,15 @@ export function FloatingTip({
 export function ChartCard({
   title,
   note,
+  info,
   className,
   testId,
   children,
 }: {
   title: string;
   note?: string;
+  /** The card's explanation: an `<InfoButton>`, rendered straight after the title. */
+  info?: React.ReactNode;
   /** Optional hook for the landing-screenshot capture, which crops one card at a time. */
   testId?: string;
   // Extra classes on the card's own box — for a card that has to place itself in its host's grid
@@ -186,8 +189,11 @@ export function ChartCard({
       }`}
     >
       <div className="mb-1 flex items-baseline justify-between gap-2">
-        <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">{title}</h4>
-        {note && <span className="text-[10px] text-gray-400">{note}</span>}
+        <div className="flex items-baseline gap-1">
+          <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">{title}</h4>
+          {info}
+        </div>
+        {note && <span className="text-[11px] text-gray-400">{note}</span>}
       </div>
       {children}
     </div>
@@ -197,7 +203,7 @@ export function ChartCard({
 // Shared empty-state body for a chart with no data in the window.
 export function ChartEmpty({ label = 'No data in this window' }: { label?: string }): JSX.Element {
   return (
-    <div className="flex h-[120px] items-center justify-center rounded-md border border-dashed border-gray-200 text-[10px] text-gray-400 dark:border-gray-800">
+    <div className="flex h-[120px] items-center justify-center rounded-md border border-dashed border-gray-200 text-[11px] text-gray-400 dark:border-gray-800">
       {label}
     </div>
   );

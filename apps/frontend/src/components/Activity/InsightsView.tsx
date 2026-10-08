@@ -92,8 +92,9 @@ function ChronologyTabBody(): JSX.Element | null {
       // misconfigured screenshot run photographs a lock screen and ships it as a marketing shot.
       <ProLockPanel heading="Chronology" testId="chronology-locked">
         Every hour a pull request is open, someone is holding it — a reviewer who hasn’t looked, an
-        author who owes a reply, or nobody, approved and waiting to land. Chronology splits that
-        time into the three courts and names the one that is both lopsided and slow.
+        author who owes a reply, or nobody, approved and waiting to merge. Chronology splits that
+        time between those three waits and names the repositories where one wait takes most of the
+        time and pull requests are slow to merge.
       </ProLockPanel>
     );
   }
@@ -216,10 +217,9 @@ export function InsightsView(): JSX.Element {
               </div>
             </div>
           ) : (
+            // No section heading here: the panel's own "Flow metrics" heading (with its info
+            // button) is the heading, and a second one above it read as a stutter.
             <section className="space-y-2">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                Flow metrics
-              </h3>
               <WorkspaceFlowMetrics />
             </section>
           )}

@@ -6,6 +6,7 @@ import {
   useSlackTarget,
   useUpdateSlackTarget,
 } from '../../hooks/useSlackTarget.js';
+import { InfoButton } from '../InfoModal.js';
 import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
@@ -173,17 +174,19 @@ export function SlackSection(): JSX.Element {
   return (
     <SectionShell
       title="Slack digest"
-      desc={
-        <>
-          Posts your Pending board for this workspace to a Slack channel on a schedule: your
-          turn, then each Pending tab, top 5 each, every PR once. A short sprint summary follows.
-          Links open the app.{' '}
-          <span className="font-medium">
-            Every workspace with a digest writes its own sprint summary on every send
-          </span>
-          , so at most {data.cap} can have one. A summary costs nothing when the workspace’s
-          activity has not changed.
-        </>
+      desc="Posts this workspace’s Pending board to a Slack channel on a schedule."
+      info={
+        <InfoButton title="Slack digest">
+          <p>
+            Each message lists your turn, then each Pending tab: the top 5 of each, every PR once.
+            A short sprint summary follows. Links open the app.
+          </p>
+          <p>
+            Every workspace with a digest writes its own sprint summary on every send, so at most{' '}
+            {data.cap} workspaces can have one. A summary costs nothing when the workspace’s
+            activity has not changed.
+          </p>
+        </InfoButton>
       }
     >
       {mutation.isError && (
@@ -287,8 +290,8 @@ export function SlackSection(): JSX.Element {
             Include a review-bot summary
           </span>
           <span className="block text-[11px] text-gray-400">
-            Adds a deterministic bots block — volume · acted-on · untouched — to this workspace’s
-            digest. Other workspaces’ digests are unaffected; each one decides for itself.
+            Adds each review bot’s comment count, the share your team used and the number left
+            untouched. This workspace’s digest only.
           </span>
         </span>
       </label>

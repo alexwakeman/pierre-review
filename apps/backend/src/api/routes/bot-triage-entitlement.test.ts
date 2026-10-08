@@ -164,6 +164,41 @@ describe('Chronology — GET /api/flow-findings gates on periodReports', () => {
     setProCapabilities(DEPTH_ONLY);
     expect((await get('/api/flow-findings')).status).toBe(402);
   });
+
+  it('defaults to the REPORTING WINDOW, resolved through the one resolver; ?days= is the long view', async () => {
+    setProCapabilities(REPORTS_ONLY);
+    const { registerReportingWindowResolver } = await import('../../db/reporting-window.js');
+    const now = Date.now();
+    const asked: number[] = [];
+    registerReportingWindowResolver(async ({ workspaceId }) => {
+      asked.push(workspaceId);
+      return { fromMs: now - 3 * 86_400_000, toMs: now + 11 * 86_400_000, mode: 'sprint' };
+    });
+    try {
+      const def = await get('/api/flow-findings');
+      expect(def.status).toBe(200);
+      expect(def.body.reportingWindow).toMatchObject({ mode: 'sprint', days: 14 });
+      // Three days of sprint so far (ceil, so a few ms past the boundary reads as four).
+      expect([3, 4]).toContain(def.body.windowDays);
+      // The resolver was asked about the RESOLVED workspace, the one echoed back.
+      expect(asked).toEqual([def.body.workspaceId]);
+      const explicit = await get('/api/flow-findings?window=reporting');
+      expect(explicit.body.reportingWindow).toMatchObject({ mode: 'sprint' });
+      // The 30/60/90 options carry no reporting window and keep the [7, 90] clamp.
+      const longer = await get('/api/flow-findings?days=60');
+      expect(longer.body.reportingWindow).toBeUndefined();
+      expect(longer.body.windowDays).toBe(60);
+      // Anything that is not a positive integer is the DEFAULT — the reporting window, never a
+      // silent 30 days.
+      for (const q of ['?days=abc', '?days=0', '?days=-5', '?window=bogus']) {
+        const r = await get(`/api/flow-findings${q}`);
+        expect(r.status, q).toBe(200);
+        expect(r.body.reportingWindow, q).toMatchObject({ mode: 'sprint' });
+      }
+    } finally {
+      registerReportingWindowResolver(null);
+    }
+  });
 });
 
 describe('The Bots ROI routes gate on botDepth', () => {
