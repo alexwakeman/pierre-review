@@ -55,6 +55,7 @@ import {
   saveReviewSuccess,
   type ReviewPrContext,
 } from './persist.js';
+import { emitClaudeReviewCompleted } from '../../pro/event-hooks.js';
 
 // The Claude Review queue/concurrency/SSE manager (CORE, free, local-only) — the analog of the
 // AI-Fix manager. It owns the product pipeline (prepare → route → prompt → run → persist), calling
@@ -410,6 +411,16 @@ function launch(item: QueueItem): void {
 
   void runPipeline(item, controller, emit)
     .then((succeeded) => {
+      // EVENT HOOK (Pro: the Slack "Claude Review ran" signal). Every SUCCEEDED run, manual or
+      // auto; fire-and-forget, never thrown into the review (pro/event-hooks.ts).
+      if (succeeded) {
+        emitClaudeReviewCompleted({
+          accountId: item.accountId,
+          prId,
+          reviewId,
+          trigger: item.trigger,
+        });
+      }
       // AUTO FIX: a SUCCEEDED auto run may start a review-seeded fix on the reader's OWN PR
       // (coding/ai-fix/auto-fix.ts decides; nothing is pushed). Fire-and-forget, never awaited and
       // never thrown into the review: a fix that fails to start costs the fix only.

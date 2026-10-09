@@ -99,12 +99,13 @@ function parseIntList(raw?: string): number[] | null {
    listing and read the whole vector by URL. If a fourth surface ever shares this fold, add it here
    rather than inventing a third predicate.
 
+   Since the whole Bots Monitoring screen went Pro, `…/bot-only-prs` and the resolvable-thread
+   read/resolve pair are `botDepth` too (their caption, banner and list live only there).
+
    ⚠ WHAT IS **NOT** GATED, and must not be swept in by a later "finish the job" pass: the reviewer
-   LISTING itself (`GET /api/bot-reviewers` is the app-wide bot identity/colour backbone and the
-   free classification screen — its price COLUMNS are stripped, the rows are not withheld),
-   `…/bot-only-prs` (the list behind the FREE governance caution — its caption and its list must
-   agree, and the caption is outside the panel), the resolvable-thread read/resolve pair, and
-   per-PR dedup. Those are `botTriage`-free surfaces.
+   LISTING and its writes (`/api/bot-reviewers*` is the app-wide bot identity/colour backbone that
+   Feed and Timeline bot hiding read, and the Feed's own "mark as bot/human" writes it — its price
+   COLUMNS are stripped, the rows are not withheld), and per-PR dedup. Those stay free.
 
    ⚠ `!req.account` READS AS UNENTITLED, matching the cost route's long-standing shape. In the real
    app the account is always populated (local synthesizes one; cloud 401s first), so this only ever
@@ -673,11 +674,11 @@ const scopeResolveSchema = {
 // Bot-triage platform routes (CORE, always registered — never "core" in the TIER sense). Two tiers
 // live in this one file and the split is deliberate:
 //
-//   FREE (`botTriage`)  detection/override + the reviewer listing, the bot-only governance list,
-//                       per-PR cross-bot dedup, and the confirm-gated workspace-wide thread resolve
-//                       — everything an `npx` install needs to classify and triage its bots.
-//   PAID (`botDepth`)   the ROI ANALYTICS: the per-bot table, the ML flagging strip, the volume
-//                       family, every drill-down off them, and the seat PRICES. See the two
+//   FREE                detection/override + the reviewer listing (bot hiding on Feed/Timeline
+//                       reads it) and per-PR cross-bot dedup.
+//   PAID (`botDepth`)   everything the Bots Monitoring screen reads: the ROI ANALYTICS, the ML
+//                       flagging strip, the volume family, the bot-only list, the resolvable-thread
+//                       backlog + resolve, every drill-down, and the seat PRICES. See the two
 //                       entitlement predicates at the top of this file for the exact split and for
 //                       the two routes the People report shares.
 //
@@ -687,12 +688,12 @@ const scopeResolveSchema = {
 export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // One row per (workspace, actor), each carrying its judgement, identity, price and the evidence
   // behind them — including `repoFootprints[]`, the real blast radius of an edit that is
-  // workspace-wide by design. Powers the Bots "Settings" tab.
+  // workspace-wide by design. Powers Feed → Bot classification.
   //
   // ⚠ THE ROUTE IS FREE AND MUST STAY FREE — but its PRICE COLUMNS ARE NOT. This is the identity
   // and colour backbone for the whole SPA (the feed's vendor tags, ThreadList, BotTriageCard, the
   // People picker, every drill-down header), so a 402 here would black out bot identity app-wide,
-  // and it also serves the free classification screen an OSS user needs. What it may NOT do is
+  // and the Feed's own bot/human judgement writes through it. What it may NOT do is
   // ship seat pricing to an account that cannot see pricing: today the client merely HIDES those
   // cells, which is a rendering decision, not a gate. So the rows come back with the money
   // stripped — exactly the shape a never-priced row already has, `costModel: 'flat'` included
@@ -944,7 +945,18 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  // PAID ON THE UNION (`botDepth || periodReports`): the Bots Monitoring screens and the People
+  // report's bot sections are its only consumers, and both are Pro surfaces. The gate goes FIRST,
+  // ahead of `parseWindowBounds`, so the 400/402 split cannot be read as an oracle.
+  //
+  // (It used to answer an unentitled account with a NARROWED shape — `botOnlyPrs` + `suggestions`
+  // for the free governance caution and tuning hints. Those lived on the Bots screen, which is now
+  // Pro as a whole, so the narrowing went with them.)
   app.get('/api/bot-analytics', { schema: analyticsSchema }, async (req, reply) => {
+    if (!botAnalyticsEntitled(req)) {
+      reply.status(402);
+      return PRO_REQUIRED;
+    }
     const { window, workspace, repoIds, fromMs, toMs } = req.query as {
       window: BotWindowKind;
       workspace?: string;
@@ -964,70 +976,10 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     // which data is measured — and the narrowing is already bounded by the workspace's membership,
     // so the two cannot describe different sets of repos.
     const scope = await resolveWorkspaceScope(accountId, workspace, parseIntList(repoIds));
-    const entitled = botAnalyticsEntitled(req);
-    // The Inflation column's weekly history — folded only when the account can see the column it
-    // draws in, which since the whole table went paid means "whenever the rest of this response is
-    // populated". Kept as its own flag because it is an extra SCAN WIDTH inside the getter (the
-    // trend span), not just a field to drop.
     const analytics: BotAnalyticsResponse = await getBotAnalytics(accountId, bounds.window, scope, {
-      inflationHistory: entitled,
+      inflationHistory: true,
     });
-    if (entitled) return analytics;
-
-    // ── THE NARROWED (unentitled) SHAPE ───────────────────────────────────────────────────────
-    // ⚠ THIS ROUTE IS NOT 402-ABLE, and that is the single most important thing to know before
-    // editing it. One response feeds FOUR consumers on two tiers: the paid ROI panel and its
-    // drill-downs, the paid People report's bot sections — and the FREE amber "Only a bot reviewed
-    // N open PRs" governance caution, which lives in BotsView OUTSIDE the panel and reads nothing
-    // but `totals.botOnlyPrs`. A blanket 402 would make that caution silently vanish (the client
-    // reads `?? 0`, so there is no error anywhere) and would re-fire every five minutes on the
-    // hook's sync-cadence poll. So the paid POPULATION is withheld and the free verdicts stay.
-    //
-    // The fold above still RUNS for an unentitled account — it is where `botOnlyPrs` and
-    // `suggestions` come from, so there is nothing cheaper to call and this costs exactly what the
-    // route cost before the gate. Only `inflationHistory` (an extra scan WIDTH, not a field) is
-    // actually skipped.
-    //
-    // WHAT SURVIVES, and why each one:
-    //   • `totals.botOnlyPrs` + `overdueGraceMs` — the free governance caution and its wording.
-    //   • `suggestions` — the free amber tuning-suggestions box, which is hoisted OUT of the panel
-    //     into BotsView's free area precisely so this narrowing can keep feeding it.
-    // WHAT IS WITHHELD: `vendors` (the ROI table: verdicts, noise ratios, PRICES), `qualityChecks`,
-    // the whole `ml` block (the flagging strip), and the ROI half of `totals`.
-    //
-    // ⚠ THE ZEROS IN `totals` ARE A WIRE ARTEFACT, NOT DATA. `vendors`, `suggestions` and `totals`
-    // are REQUIRED on `BotAnalyticsResponse` (`ml`/`qualityChecks` are optional, which is why those
-    // two are simply absent — the honest spelling). Nothing free renders these numbers, and the SPA
-    // decides what to draw from its own `/api/me` capability rather than by sniffing the payload,
-    // so no screen can read a zero as a measurement. `actedOnPct` is already nullable, so it takes
-    // the honest `null` rather than a 0%.
-    //
-    // ⚠ MAKING THE THREE OPTIONAL IN `packages/shared` WAS CONSIDERED AND DEFERRED, deliberately.
-    // It would let "not entitled" and "nothing happened" differ on the wire, which is the tidier
-    // contract — but `BotAnalyticsResponse.totals`/`.vendors`/`.suggestions` are read by the PRIVATE
-    // plugin submodule too (`packages/pro/src/insights/chat.ts` grounds on all three), so widening
-    // them is a two-repository, gitlink-coordinated edit for a distinction NOTHING currently reads:
-    // every consumer is contractually forbidden from sniffing this payload for entitlement. Revisit
-    // it with the next apiVersion bump, when the plugin half is already being touched. The ambiguity
-    // is pinned in bot-triage-entitlement.test.ts so it stays a known shape rather than a surprise.
-    const resp: BotAnalyticsResponse = {
-      enabled: analytics.enabled,
-      generatedAt: analytics.generatedAt,
-      window: analytics.window,
-      vendors: [],
-      totals: {
-        threads: 0,
-        comments: 0,
-        actedOn: 0,
-        actedOnPct: null,
-        untouched: 0,
-        botOnlyPrs: analytics.totals.botOnlyPrs,
-        overdueGraceMs: analytics.totals.overdueGraceMs,
-        overlapClusters: 0,
-      },
-      suggestions: analytics.suggestions,
-    };
-    return resp;
+    return analytics;
   });
 
   // The bot BEHAVIOUR analytics route MOVED to the plugin (`GET /api/pro/bot-behaviour`,
@@ -1039,7 +991,13 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // Same window/scope resolution as /api/bot-analytics so the amber caption's number and this
   // expandable list are computed identically and can't drift. Unbounded but small (real bot-only
   // PRs); no pagination.
-  app.get('/api/bot-analytics/bot-only-prs', { schema: analyticsSchema }, async (req) => {
+  //
+  // PAID (`botDepth`): its caption and its list both live on the Bots Monitoring screen.
+  app.get('/api/bot-analytics/bot-only-prs', { schema: analyticsSchema }, async (req, reply) => {
+    if (!botDepthEntitled(req)) {
+      reply.status(402);
+      return PRO_REQUIRED;
+    }
     const { window, workspace, repoIds } = req.query as {
       window: BotWindowKind;
       workspace?: string;
@@ -1399,7 +1357,12 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // in the scope, UNCAPPED, newest-thread-first, each row carrying all its resolvable thread ids +
   // a bot thread-state mix + `totalThreads` (the whole backlog). The client sorts / paginates /
   // "Select all"s across pages and chunks the resolve. Read-only.
-  app.get('/api/bot-threads/resolvable', { schema: resolvableSchema }, async (req) => {
+  // PAID (`botDepth`) — the backlog banner and its review list live on Bots Monitoring only.
+  app.get('/api/bot-threads/resolvable', { schema: resolvableSchema }, async (req, reply) => {
+    if (!botDepthEntitled(req)) {
+      reply.status(402);
+      return PRO_REQUIRED;
+    }
     const { workspace, repoIds } = req.query as { workspace?: string; repoIds?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, workspace, parseIntList(repoIds));
@@ -1418,7 +1381,12 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // shared helper the per-PR route uses. An empty list is a no-op (not an error); per-thread
   // failures are reported, not fatal. The re-derive path passes `threadIds` so the page cap is
   // bypassed — no requested-and-eligible id is silently dropped.
-  app.post('/api/bot-threads/resolve', { schema: scopeResolveSchema }, async (req) => {
+  // PAID (`botDepth`), like the listing above it — its only caller is that list.
+  app.post('/api/bot-threads/resolve', { schema: scopeResolveSchema }, async (req, reply) => {
+    if (!botDepthEntitled(req)) {
+      reply.status(402);
+      return PRO_REQUIRED;
+    }
     const { threadIds, workspaceId } = req.body as ScopeResolveBotThreadsBody;
     const accountId = accountIdOf(req);
     if (threadIds.length === 0) {

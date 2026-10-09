@@ -44,6 +44,7 @@ import { activityRoutes } from './api/routes/activity.js';
 import { mentionsRoutes } from './api/routes/mentions.js';
 import { searchRoutes } from './api/routes/search.js';
 import { dailyBriefRoutes } from './api/routes/daily-brief.js';
+import { dependencyMergeRoutes } from './api/routes/dependency-merge.js';
 import { flowRoutes } from './api/routes/flow.js';
 import { billingRoutes } from './api/routes/billing.js';
 import { contactRoutes } from './api/routes/contact.js';
@@ -257,6 +258,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   // DB reads over the owning surfaces' own folds, TTL-cached; the Pro narration is the plugin's
   // synthesis seam, not this route.
   await app.register(dailyBriefRoutes);
+  // Dependency auto-merge: Pending → Dependencies' "Merge or arm all" + the per-workspace setting.
+  await app.register(dependencyMergeRoutes);
   // Chronology (PAID on `periodReports`, no AI, no GitHub): the Bot Tuning Advisor's evidence-
   // cell machinery aimed at the HUMAN lane — where review time goes, with sample floors and a
   // NAMED refusal for anything that cannot clear one. Every sentence it returns is templated in

@@ -3,7 +3,7 @@ import { useWorkspaceMetrics } from '../../hooks/useWorkspaceInsights.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { ChevronIcon } from '../Icons.js';
-import { ProBadge, ProLockPanel, useProGateState } from '../ProGate.js';
+import { ProLockPanel, useProGateState } from '../ProGate.js';
 import { BottlenecksPanel } from './BottlenecksPanel.js';
 import { effectiveInsightsTab } from './bottlenecksModel.js';
 import { PeriodReportsPanel } from './PeriodReportsPanel.js';
@@ -13,24 +13,12 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 // The "Reports" pane — the Activity rail entry formerly labelled "Insights" (the store value
 // behind it is still `activityRepoId === 'insights'`; see Activity/index.tsx).
 //
-// ⚠ THE RAIL ENTRY THAT OPENS THIS PANE IS UNGATED ON EVERY TIER AND MUST STAY THAT WAY. That is
-// not an oversight surviving from when the pane was free: the free flow metrics live here, and
-// they are the reason a free account has any cause to open Reports at all. What is gated is the
-// named PANES inside, never the entry — gating the entry would take a free feature behind the wall.
-//
-// The pane MIXES TIERS, and its job is to keep them visibly apart:
-//
-//   • Flow metrics — CORE/FREE. The DORA-ish tiles + trend charts, moved here off the Feed, where
-//     a workspace-wide survey sat on top of a chronological stream.
-//   • Period reports — PRO (`periodReports`). The stored period-over-period artifact, its
-//     comparison, the forecast and the grounded chat, all inside PeriodReportsPanel, which carries
-//     its own posture and issues ZERO requests without the capability.
-//   • Chronology — PRO, on the SAME `periodReports` flag (see the second tab, below).
-//
-// ⚠ THE `Pro` CHIP SITS ON THE PERIOD-REPORT HEADING, NOT THE PANE HEADER — and on the Chronology
-// TAB, not on the tab strip. It used to badge the whole pane, which for a free account reads as
-// "Pro" stamped over free metrics: the wrong first impression on the one screen this pane exists
-// to make worth opening. Badge the thing that is paid, at the grain it is paid at.
+// ⚠ THE WHOLE PANE IS PRO (`periodReports`) — flow metrics, the "where the work is happening"
+// cards, period reports and Chronology alike. `InsightsView` below is the ONE gate:
+// visible-but-locked, one ProLockPanel for the whole pane, the single ProBadge on the rail entry
+// (Activity/index.tsx), no badges inside. The routes 402 (`/api/workspace-metrics*`,
+// `/api/flow-findings`, the plugin's period-report routes) and every hook ANDs the flag into its
+// own `enabled`. The inner Chronology/period-report locks stay as defence in depth.
 //
 // ⚠ "Track usage" IS PRO-GATED, and not merely for tidiness: it fires `/api/pro/ai-usage`, which
 // 402s for a free cloud account and 404s in OSS — but `useAiUsage` seeds `placeholderData` off
@@ -42,20 +30,10 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 // [fromMs, toMs) rather than a trailing window.
 //
 // ── THE PANE IS TWO TABS ─────────────────────────────────────────────────────────────────────
-//   • Overview   — exactly the body described above, unchanged.
+//   • Overview   — flow metrics, the two "where the work is happening" cards, period reports.
 //   • Chronology — the COURT LEDGER (BottlenecksPanel). PRO on `periodReports`; still
 //     deterministic (no model anywhere behind it) and still the twin of the Bots rail — that
 //     surface measures automation, this one measures where people's time went.
-//
-// ⚠ CHRONOLOGY IS VISIBLE-BUT-LOCKED, WHICH REVERSES THIS APP'S USUAL POSTURE. Everywhere else a
-// capability the account does not have is ABSENCE — `WorkspaceBotCharts` returns null, the
-// "Depth →" pill is simply omitted, `AskAboutPeriod` below renders nothing without
-// `activityDigest` — and that stays true everywhere else. (⚠ Not `PersonPeriodSection`: it used to
-// be the stock example and is now one of the six locked surfaces.) Here the tab is listed for
-// everyone, wears a `Pro` chip, and opens onto
-// `ProLockPanel`: what the view answers, plus one link. The reversal is scoped to six named
-// surfaces (components/ProGate.tsx enumerates them); do not "make it consistent" by converting
-// the absent ones.
 //
 // ⚠ IT RIDES `periodReports` RATHER THAN A FLAG OF ITS OWN — one capability, no `apiVersion` bump,
 // no plugin edit. The reasoning is written out on the route (api/routes/flow.ts), which is also
@@ -64,10 +42,8 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 //
 // ⚠ THE VISIBLE TAB IS DERIVED, NEVER WRITTEN BACK (`effectiveInsightsTab`) — the rule
 // `botsInnerTab` / `feedInnerTab` are commented against. A corrective `setInsightsInnerTab()`
-// would permanently forget the reader's choice. That temptation is no longer hypothetical now that
-// a member is gated: an unentitled `?insightsTab=bottlenecks` — a bookmark, or a history entry
-// Back replays — must render the LOCK under the tab the URL named, never be normalised into
-// Overview. Normalising would also break the round-trip urlHistory.test.ts pins.
+// would permanently forget the reader's choice, and would break the round-trip urlHistory.test.ts
+// pins.
 
 /**
  * The Chronology tab's body: the real panel, the locked pane, or nothing at all for the beat
@@ -101,9 +77,29 @@ function ChronologyTabBody(): JSX.Element | null {
   return <BottlenecksPanel />;
 }
 
-export function InsightsView(): JSX.Element {
+export function InsightsView(): JSX.Element | null {
+  const { periodReports } = useProCapabilities();
+  // Three-state, so a paying account never sees the lock flash while /api/me is in flight.
+  const gate = useProGateState(periodReports);
+  if (gate === 'pending') return null;
+  if (gate === 'locked') {
+    return (
+      <div className="space-y-4" data-testid="insights-view-locked">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Reports</h2>
+        <ProLockPanel heading="Reports">
+          How is the team&rsquo;s work flowing? See merge times, review waits and where the work
+          is happening this sprint, then a stored report for each finished period you can compare
+          and share.
+        </ProLockPanel>
+      </div>
+    );
+  }
+  return <InsightsBody />;
+}
+
+function InsightsBody(): JSX.Element {
   const [showUsage, setShowUsage] = useState(false);
-  const { activityDigest, periodReports } = useProCapabilities();
+  const { activityDigest } = useProCapabilities();
   const workspaceId = useFilters((s) => s.workspaceId);
   const innerTab = useFilters((s) => s.insightsInnerTab);
   const setInnerTab = useFilters((s) => s.setInsightsInnerTab);
@@ -111,22 +107,10 @@ export function InsightsView(): JSX.Element {
   // `workspaceId === null` means "not resolved yet" — the hook holds itself idle until then, so
   // this reads `undefined` rather than another workspace's numbers.
   const metrics = useWorkspaceMetrics(workspaceId);
-  // The FREE half has nothing to say: `WorkspaceFlowMetrics` self-hides when the workspace has no
-  // measurable history, which would leave a bare "Flow metrics" heading over empty space.
-  //
-  // ⚠ IT REPLACES THAT SECTION ONLY — NEVER THE WHOLE BODY. It used to replace both sections,
-  // which was right while the Pro half was SILENT without the capability (it rendered null in OSS
-  // and one 10px line in cloud): two bare headings were worse than one empty box. Under the
-  // visible-but-locked posture the Pro half is no longer silent — it has a locked pane to show —
-  // and swallowing it here would leave a newly-onboarded free account looking at "Nothing to
-  // measure" with NO Pro indicator anywhere on the pane. That account is precisely the reader the
-  // lock exists for.
-  //
-  // The `!periodReports` conjunct STAYS: an entitled account on an empty workspace keeps today's
-  // render (the self-hiding flow section, then the report panel's own setup prompt), because for
-  // them "no metrics yet" is not the end of the pane.
-  const nothingToShow =
-    !periodReports && metrics.data != null && metrics.data.metrics == null;
+  // `WorkspaceFlowMetrics` self-hides when the workspace has no measurable history; this empty
+  // state stands in for that SECTION only — the period-report panel below keeps its own setup
+  // prompt, because for an entitled account "no metrics yet" is not the end of the pane.
+  const nothingToShow = metrics.data != null && metrics.data.metrics == null;
 
   return (
     <div className="space-y-4" data-testid="insights-view">
@@ -155,26 +139,14 @@ export function InsightsView(): JSX.Element {
       {showUsage && activityDigest && <TrackUsage />}
 
       {/* The pane's sub-tab strip.
-          ⚠ THE LIST IS STILL A CONSTANT even though Chronology is now paid: BOTH members are
-          listed on every tier, `effectiveTab` (derived, never written back) picks the body, and
-          the entitlement gate lives on the BODY. Dropping the tab for unentitled accounts would
-          land a bookmarked `?insightsTab=bottlenecks` on Overview with nothing on screen saying
-          why — the opposite of the posture this change exists to establish.
-          ⚠ THE BADGE IS UNCONDITIONAL, for two reasons: it tells a paying admin which of these
-          their teammates on free cannot open, and a badge conditioned on `!periodReports` would
-          flicker ON then OFF for an entitled account while /api/me is in flight (capabilities read
-          all-false until it resolves). It also matches the "Period reports" heading chip below,
-          which has always rendered for everyone. */}
+          `effectiveTab` (derived, never written back) picks the body.
+          No badges here: the whole pane is Pro and the rail entry carries the one ProBadge. */}
       <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
         {(
           [
-            { key: 'overview', label: 'Overview', proTitle: null },
+            { key: 'overview', label: 'Overview' },
             // ⚠ LABEL-ONLY: the store/URL literal stays 'bottlenecks' (see InsightsInnerTab).
-            {
-              key: 'bottlenecks',
-              label: 'Chronology',
-              proTitle: 'Chronology is part of Pro.',
-            },
+            { key: 'bottlenecks', label: 'Chronology' },
           ] as const
         ).map((t) => {
           const on = effectiveTab === t.key;
@@ -192,11 +164,6 @@ export function InsightsView(): JSX.Element {
               }`}
             >
               {t.label}
-              {/* Inside the button, so the accessible name composes as "Chronology, Pro feature"
-                  rather than the chip becoming a control of its own inside a control. */}
-              {t.proTitle != null && (
-                <ProBadge variant="tab" className="shrink-0" title={t.proTitle} />
-              )}
             </button>
           );
         })}
@@ -206,7 +173,7 @@ export function InsightsView(): JSX.Element {
         <ChronologyTabBody />
       ) : (
         <>
-          {/* FREE. `WorkspaceFlowMetrics` self-hides when there is nothing to measure, so the empty
+          {/* `WorkspaceFlowMetrics` self-hides when there is nothing to measure, so the empty
               state stands in for the SECTION — heading included — rather than being stacked under
               a heading with nothing beneath it. */}
           {nothingToShow ? (
@@ -224,13 +191,9 @@ export function InsightsView(): JSX.Element {
             </section>
           )}
 
-          {/* PRO. The panel carries its own posture; this heading only says whose tier it is.
-              The chip comes from ProGate so the five Pro surfaces cannot drift into five slightly
-              different vermilion spellings — it renders the same classes this heading always had. */}
           <section className="space-y-2">
             <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
               Period reports
-              <ProBadge variant="heading" title="Period reports are part of Pro." />
             </h3>
             <PeriodReportsPanel />
           </section>

@@ -122,8 +122,9 @@ export function usePrBlast(prId: number | null | undefined): { blast: BlastSigna
 //
 // The second card of Reports → Flow metrics → "Where the work is happening". The population is the
 // pull requests MERGED in the workspace's REPORTING WINDOW (this sprint so far, or the last 7/14
-// days) — the window every Reports figure is tied to — riding the free `/api/workspace-metrics`
-// response (`reach`) beside the tiles that measured the same window.
+// days) — the window every Reports figure is tied to — riding the `/api/workspace-metrics`
+// response (`reach`; Pro, `periodReports`, 402 without it) beside the tiles that measured the
+// same window.
 //
 //  • THE LEVEL STAYS DECIDED IN ONE PLACE. The server sends SIGNALS per pull request (`blast`,
 //    `codeLoc`, `codeLocIsLowerBound` — the same fields the open-PR rows carry) and the fold calls

@@ -640,6 +640,10 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/prs/42/merge-queue')).toEqual(['github_write']);
     expect(tiers('DELETE', '/api/prs/42/merge-queue')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/42/auto-merge')).toEqual(['github_write']);
+    // Pending → Dependencies' bulk "Merge or arm all" — one merge or probe+arm per listed PR.
+    expect(tiers('POST', '/api/dependencies/merge-all')).toEqual(['github_write']);
+    // Its setting is a DB write on the workspace (the sweeper is server-paced).
+    expect(tiers('PUT', '/api/workspaces/3/dependency-auto-merge')).toEqual(['read']);
     expect(tiers('DELETE', '/api/prs/42/auto-merge')).toEqual(['github_write']);
   });
 

@@ -19,20 +19,23 @@ import { useMe } from '../hooks/useTriage.js';
 // opposite: it renders a `ProLockPanel` on the contributor-activity tab, because that tab is the
 // only place an unentitled reader can meet the People report at all.
 //
-// SIX named surfaces now do the opposite: Chronology, period reports, the People report, the
-// by-workspace comparison, the Bots ROI panel and the Bots PEER BENCHMARK are VISIBLE-BUT-LOCKED.
-// The reader sees the tab, the tab says Pro, and clicking it lands on a calm statement of what the
-// view answers plus one way to read more. The reversal is scoped to those six; do not "make it
+// TWO WHOLE RAIL ENTRIES now do the opposite, and are VISIBLE-BUT-LOCKED AS A WHOLE: **Bots
+// Monitoring** (`botDepth`; BotsView) and **Reports** (`periodReports`; InsightsView — flow
+// metrics, the "where the work is happening" cards, period reports, Chronology, everything). Each
+// rail entry wears ONE badge and the whole pane renders ONE `ProLockPanel`; nothing inside carries
+// a badge of its own. The six surfaces that used to be locked one by one (Chronology, period
+// reports, the People report, the by-workspace comparison, the Bots ROI panel and the Bots PEER
+// BENCHMARK) all live inside those two panes; their inner locks stay as defence in depth. Outside
+// those two entries the reversal does not apply (PersonPeriodSection aside, below); do not "make it
 // consistent" by converting the absent ones.
 //
-// ⚠ THE SIXTH WAS ADDED DELIBERATELY, AND THE ARGUMENT IS ON THE RECORD. The Benchmark tab could
-// have hidden inside the already-locked `roi` branch and cost no new upsell. It did not, because
-// it is the only surface in the product that answers "is this bot NORMAL?" — a question a reader
-// cannot discover from anywhere else, and cannot ask of their own data at all. A locked tab that
-// names the question is the whole of rule 2 below; an absent one would leave the question
-// unasked. That is a product decision with its own justification, not a side effect of adding a
-// tab, and it is why the count in this comment is load-bearing: the NEXT one needs its own
-// argument too.
+// ⚠ WHY WHOLE ENTRIES: the product decision (2026-10) is that Bots Monitoring and Reports are org
+// features, Pro in full, and a locked entry that names the question is rule 2 below. A THIRD
+// locked surface needs its own written argument here.
+//
+// ⚠ THE THIRD: Settings → Slack (`slackDigest`; SlackSection's `SlackSettings`). Slack posts to a
+// TEAM channel — an org feature by the same 2026-10 decision — and the section is the only place a
+// reader can learn the product posts to Slack at all, so it shows locked rather than absent.
 //
 // ── THE THREE RULES THIS COMPONENT KEEPS ─────────────────────────────────────────────────────
 //  1. IT NEVER READS A CAPABILITY. The caller passes entitlement in, so the gate is legible at
@@ -102,7 +105,7 @@ const SAME_ORIGIN_PRICING_PATH = '/pricing';
  *
  *  • `inline`  — the nudge chip that leads a sentence (DetectedReviewersTable, SynthesisCard,
  *                BotThemesPanel's nudge). Pair with `className="mr-1"` when it precedes text.
- *  • `tab`     — the small uppercase chip on a sub-tab label (the Advisor tab in BotsView).
+ *  • `tab`     — the small uppercase chip on a rail entry (Bots Monitoring, Reports).
  *  • `heading` — the chip beside a section `<h3>` (the "Period reports" heading in InsightsView).
  */
 export type ProBadgeVariant = 'inline' | 'tab' | 'heading';

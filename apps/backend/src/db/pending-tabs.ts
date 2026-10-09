@@ -1,12 +1,16 @@
 // ── THE PENDING BOARD'S TABS (CORE, deterministic, no AI) ───────────────────────────────────
 //
-// Six tabs (`PENDING_TABS` in packages/shared/src/pending-rules.ts), each a scored list: every PR
+// Seven tabs (`PENDING_TABS` in packages/shared/src/pending-rules.ts), each a scored list: every PR
 // card is scored by the one Do next scorer (`scoreCards`, db/work-plan.ts), with the READER's
 // weights (Settings → My Turn), and each tab lists its cards highest score first — except the two
 // STRICT-GROUP tabs, whose groups come first: My turn by card type in the READER's order
 // (`groupByReason`) and Dependencies security before bumps (`groupByKind`), each scored within.
 // There is no severity-first sort and no cross-kind spread rule — a card competes only with the
 // cards in its own tab (and group), and a PR with two jobs appears once per job, in each job's tab.
+//
+// ⚠ `my_turn` FEEDS TWO TABS, SPLIT BY TYPE: a finished Claude review is listed in "Claude reviews",
+// every other type in My turn (`pendingTabHolds`, the ONE predicate). Each tab's figures are counted
+// off the uncapped cards with that predicate, never `kindTotals.my_turn` minus something.
 //
 // ⚠ THE RULES RIDE THE RESPONSE (`PendingBoard.rules`). The board's info popovers and guide explain
 // the order the reader actually got — their weights and their type order — never the constants.
@@ -26,7 +30,9 @@
 import {
   PENDING_LIMITS,
   PENDING_TABS,
+  pendingTabHolds,
   type AttentionCardsResponse,
+  type PendingTabDef,
   type PendingBoardSnapshot,
   pendingAuthorSideOf,
   type InsightCard,
@@ -91,7 +97,7 @@ export function listGroupOf(card: InsightCard): string {
  *   • Dependencies (`groupByKind`): the kind's index in `def.kinds` — security before bumps;
  *   • every other tab: 0 (purely scored). */
 export function tabGroupRank(
-  def: (typeof PENDING_TABS)[number],
+  def: PendingTabDef,
   card: InsightCard,
   myTurnOrderIdx: ReadonlyMap<MyTurnCardReason, number>,
 ): number {
@@ -107,16 +113,15 @@ export function tabGroupRank(
  *  draws its rows only from what it lists (`listedCardIds`), so the two cannot disagree about
  *  which cards are on the board. */
 export function listTab(
-  def: (typeof PENDING_TABS)[number],
+  def: PendingTabDef,
   scored: readonly ScoredCard[],
   byId: ReadonlyMap<string, InsightCard>,
   myTurnOrderIdx: ReadonlyMap<MyTurnCardReason, number>,
 ): ScoredCard[] {
-  const rankedKinds: readonly InsightCard['kind'][] = def.kinds.filter((k) => k !== 'reviewer_load');
   const inTab = scored
     .filter((s) => {
       const card = byId.get(s.cardId);
-      return card != null && rankedKinds.includes(card.kind);
+      return card != null && pendingTabHolds(def, card);
     })
     .sort(
       (a, b) =>
@@ -204,16 +209,22 @@ export async function rankPendingTabs(
         .slice(0, PENDING_LIMITS.routingSuggestCap);
     }
 
-    const kindTotals: Partial<Record<InsightCard['kind'], number>> = {};
-    for (const k of rankedKinds) kindTotals[k] = totals[k] ?? 0;
     // WHO OPENED IT, counted off the UNCAPPED fold's cards — so these ARE the populations, exactly
     // like `relevanceTotals` below, and each of the lens's pills has a total of its own.
-    const tabCards = insights.cards.filter((c) => rankedKinds.includes(c.kind));
+    const tabCards = insights.cards.filter((c) => pendingTabHolds(def, c));
+    // ⚠ A TYPE-SPLIT TAB (My turn / Claude reviews share `my_turn`) counts its OWN cards: the fold's
+    // `kindTotals.my_turn` is already My turn's population alone, and Claude reviews has no total
+    // of its own there. Both are the uncapped cards, so the count IS the population.
+    const splitByType = def.reasons != null || def.exceptReasons != null;
+    const kindTotals: Partial<Record<InsightCard['kind'], number>> = {};
+    for (const k of rankedKinds) {
+      kindTotals[k] = splitByType ? tabCards.filter((c) => c.kind === k).length : (totals[k] ?? 0);
+    }
     const kindAuthorTotals: Partial<Record<InsightCard['kind'], PendingAuthorSplit>> = {};
     for (const k of rankedKinds) kindAuthorTotals[k] = authorSplit(tabCards.filter((c) => c.kind === k));
     const tab: PendingTab = {
       key: def.key,
-      total: rankedKinds.reduce((n, k) => n + (totals[k] ?? 0), 0),
+      total: rankedKinds.reduce((n, k) => n + (kindTotals[k] ?? 0), 0),
       kindTotals,
       cardIds: ids,
       authorTotals: authorSplit(tabCards),
@@ -223,7 +234,7 @@ export async function rankPendingTabs(
       // Uncapped fold ⇒ these ARE the populations. The two predicates are the board's own lens
       // predicates: 'mine' keeps a card unless it is explicitly not personal; 'others' is exactly
       // `relevance === 'none'` (see AttentionView's passesPersonalLens / passesOtherLens).
-      const mt = insights.cards.filter((c) => c.kind === 'my_turn');
+      const mt = tabCards.filter((c) => c.kind === 'my_turn');
       const mine = mt.filter((c) => c.kind === 'my_turn' && c.personal !== false);
       const others = mt.filter((c) => c.kind === 'my_turn' && c.relevance === 'none');
       tab.relevanceTotals = { mine: mine.length, others: others.length };

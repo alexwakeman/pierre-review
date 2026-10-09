@@ -1,10 +1,11 @@
-// THE ONE OPEN BOARD POPOVER — a chart's figures (ChartPopover) or a Pending "i" (PendingInfo).
+// THE ONE OPEN POPOVER — a chart's figures (ChartPopover), a Pending "i" (PendingInfo) or any
+// panel's "i" (InfoButton in components/InfoModal.tsx).
 //
 // ⚠ ONE SLOT FOR BOTH KINDS. Opening one closes whichever was open, so two sets of explanations
 // never point at two things at once.
 //
 // ⚠ A MODAL OPENING OVER THE PAGE CLOSES IT (`closeActivePopover` on mount: Settings, Help,
-// InfoModal, the Pending guide). The popovers close on an outside PRESS, and a modal opened from
+// the ticket InfoModal, the Pending guide). The popovers close on an outside PRESS, and a modal opened from
 // the keyboard (Enter on "Customise", on the avatar menu) makes none — so the popover stayed drawn
 // above the modal (z-[60] against z-50), covered its first controls, and its capture-phase Escape
 // listener, added first, took the Escape the reader meant for the modal.

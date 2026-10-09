@@ -44,6 +44,7 @@ const {
   benchmarkContributions,
   searchIndex,
   autoMergeRequests,
+  autoMergePolicySkips,
   branchCommits,
   trunkCiStatusEvents,
   mlCommentLabels,
@@ -218,6 +219,11 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .delete(autoMergeRequests)
       .where(eq(autoMergeRequests.accountId, accountId))
       .execute();
+    // Dependency auto-merge skips (migration 0093 / pg 0080) — same reasoning.
+    await tx
+      .delete(autoMergePolicySkips)
+      .where(eq(autoMergePolicySkips.accountId, accountId))
+      .execute();
     // Default-branch commit snapshots (author names, commit subjects) — same reasoning: the
     // repo cascade normally clears them, this makes the guarantee independent of it.
     await tx.delete(branchCommits).where(eq(branchCommits.accountId, accountId)).execute();
@@ -320,6 +326,11 @@ export function accountScopedTables(): {
       name: 'autoMergeRequests',
       col: autoMergeRequests.accountId,
       table: autoMergeRequests,
+    },
+    {
+      name: 'autoMergePolicySkips',
+      col: autoMergePolicySkips.accountId,
+      table: autoMergePolicySkips,
     },
     { name: 'branchCommits', col: branchCommits.accountId, table: branchCommits },
     // The trunk CI transition log. On the checklist rather than in the KNOWN_UNCHECKED

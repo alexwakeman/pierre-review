@@ -6,7 +6,12 @@ import {
   type InfiniteData,
 } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
-import type { ConsolidatedFeedItem, ConsolidatedFeedResponse, User } from '@pierre-review/shared';
+import type {
+  ConsolidatedFeedItem,
+  ConsolidatedFeedResponse,
+  FeedAuthors,
+  User,
+} from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { ACTIVITY_GC_TIME, workspaceKey } from './useActivity.js';
 
@@ -27,10 +32,11 @@ export function useMarkFeedSeen() {
 export const FEED_PAGE_SIZE = 50;
 
 /**
- * Build the /api/activity/feed query string from the active WORKSPACE + repo + member + bot scope.
+ * Build the /api/activity/feed query string from the active WORKSPACE + repo + member scope and
+ * the people/bots side.
  *
- * ⚠ `workspace` is not interchangeable with `repoIds`, and the bots-only path is why: the server
- * resolves "which logins count as automated reviewers" from the WORKSPACE, while `repoIds` only
+ * ⚠ `workspace` is not interchangeable with `repoIds`, and the `authors` split is why: the server
+ * resolves "which logins count as bots" from the WORKSPACE, while `repoIds` only
  * narrows which data is measured. The two deliberately disagree on the single-PR isolation path
  * (`prId`), which reaches a PR whose repo may be outside the current narrowing entirely.
  *
@@ -47,13 +53,9 @@ function feedSearch(
   workspaceId: number | null,
   repoIds: number[] | null,
   userIds: number[] | null,
-  excludeBots: boolean,
-  allowedBotIds: number[],
+  authors: FeedAuthors,
   prId: number | null,
-  botsOnly: boolean,
-  botWindowDays: number | null,
   includeAllCommits: boolean,
-  includeCiFailures: boolean,
 ): string {
   const p = new URLSearchParams();
   if (workspaceId != null) p.set('workspace', String(workspaceId));
@@ -62,29 +64,18 @@ function feedSearch(
   // Isolate to a single PR (`feedIsolatedPrId`, set by PrDetail's "Show in the Activity feed").
   // Only emitted when set.
   if (prId != null) p.set('prId', String(prId));
-  // Mirror the timeline: only emit when hiding bots (default false keeps the key clean).
-  if (excludeBots) {
-    p.set('excludeBots', 'true');
-    // The allow-list only bites under excludeBots — keep those bots visible.
-    if (allowedBotIds.length > 0) p.set('allowBotIds', allowedBotIds.join(','));
-  }
-  // The Bots pane's bot-only feed — filtered to automated reviewers server-side, before the cap.
-  if (botsOnly) p.set('botsOnly', 'true');
-  // Bot-only feed window (days), following the analytics window selector. Only meaningful —
-  // and only emitted — alongside botsOnly (the server ignores it otherwise).
-  if (botsOnly && botWindowDays != null) p.set('botWindowDays', String(botWindowDays));
+  // People or bots — ALWAYS emitted, default included. The feed is IndexedDB-persisted, and an
+  // older build's mixed "all" stream was keyed on a search with no bot param at all; spelling the
+  // side out keeps a new key from ever colliding with one of those.
+  p.set('authors', authors);
   // Opt-in "show individual commits" — surface plain commit-push runs too. Only emitted when
-  // on (default off keeps the key clean); ignored server-side on the botsOnly path.
+  // on (default off keeps the key clean).
   if (includeAllCommits) p.set('includeAllCommits', 'true');
-  // Opt-in "show CI failures" — surface one item per failed check run, on PR heads AND on the
-  // default branch. Only emitted when on (default off keeps the key clean); ignored server-side
-  // on the botsOnly path and whenever a member filter is active (the rows are actor-less).
-  if (includeCiFailures) p.set('includeCiFailures', 'true');
   return p.toString();
 }
 
 // The consolidated Feed (the Activity "Feed" entry): one chronological stream across the
-// scoped repos merging My Turn actionables + the activity feed. Paginated with
+// scoped repos (people's OR bots' activity, never both). Paginated with
 // useInfiniteQuery: page 0 loads the first FEED_PAGE_SIZE; "Load more" fetches the next
 // page by offset (never re-fetching earlier pages). WORKSPACE + any explicit repo scope is folded
 // into the query key so a WorkspaceSelector change (or a rail repo select, which passes a
@@ -99,26 +90,18 @@ export function useConsolidatedFeed(opts: {
   workspaceId: number | null;
   repoIds: number[] | null;
   userIds: number[] | null;
-  excludeBots?: boolean;
-  allowedBotIds?: number[];
+  authors?: FeedAuthors;
   prId?: number | null;
-  botsOnly?: boolean;
-  botWindowDays?: number | null;
   includeAllCommits?: boolean;
-  includeCiFailures?: boolean;
   enabled?: boolean;
 }) {
   const search = feedSearch(
     opts.workspaceId,
     opts.repoIds,
     opts.userIds,
-    opts.excludeBots ?? false,
-    opts.allowedBotIds ?? [],
+    opts.authors ?? 'humans',
     opts.prId ?? null,
-    opts.botsOnly ?? false,
-    opts.botWindowDays ?? null,
     opts.includeAllCommits ?? false,
-    opts.includeCiFailures ?? false,
   );
   const query = useInfiniteQuery<ConsolidatedFeedResponse>({
     queryKey: ['consolidated-feed', workspaceKey(opts.workspaceId), search],
@@ -184,7 +167,7 @@ export function useConsolidatedFeed(opts: {
     isFetchingMore: query.isFetchingNextPage,
     isLoading: query.isLoading,
     isFetching: query.isFetching,
-    // True while a key change (e.g. the bots window selector re-keying the search) is being
+    // True while a key change (e.g. the people/bots toggle re-keying the search) is being
     // served from the PREVIOUS key's pages via placeholderData — total/latestId reflect the
     // old key then, so has-new comparisons against them are meaningless.
     isPlaceholderData: query.isPlaceholderData,
@@ -226,8 +209,8 @@ export function planFeedHeadMerge(
  * round's wholesale refetch of `['consolidated-feed']` look identical from here, which is what
  * lets FeedView compensate for both with a single mechanism instead of a per-writer callback.
  *
- * ⚠ `narrow` IS NOT OPTIONAL POLISH. The feed's window indexes the NARROWED list (the My Turn /
- * Claude / CI-lens / category / bot-lens / thread-state / needs-review pills), while the arrival
+ * ⚠ `narrow` IS NOT OPTIONAL POLISH. The feed's window indexes the NARROWED list (the category /
+ * thread-state pills), while the arrival
  * itself is raw server rows. Shifting the window by the raw count slides it past the reader's
  * anchor, and the scroll fix then pays for rows that were never rendered. Narrowing the arriving
  * PREFIX on its own is equivalent to narrowing the whole list and taking its prefix, because
@@ -256,8 +239,8 @@ export function countHeadArrivals<T extends { id: string }>(
 // Deliberately reuses the real feed builder so the head's inclusion logic (coalescing, caps,
 // thread-addressing commits) matches the loaded feed EXACTLY — with real items now being spliced
 // in rather than a single id compared, that parity is STRICTER than it was: a divergent
-// `excludeBots` / `includeCiFailures` / `botWindowDays` would inject rows the loaded feed's own
-// request would never have returned.
+// `authors` / `includeAllCommits` would inject rows the loaded feed's own request would never have
+// returned.
 //
 // ⚠ THE LIMIT IS FEED_PAGE_SIZE, NOT 1, AND THAT IS THE CONTIGUITY GUARANTEE, not a bigger
 // appetite: the server folds the whole stream either way (`counts`/`uncappedTotal` are
@@ -277,15 +260,10 @@ export function useFeedAutoInsert(opts: {
   workspaceId: number | null;
   repoIds: number[] | null;
   userIds: number[] | null;
-  excludeBots?: boolean;
-  allowedBotIds?: number[];
+  authors?: FeedAuthors;
   prId?: number | null;
-  botsOnly?: boolean;
-  botWindowDays?: number | null;
   includeAllCommits?: boolean;
-  includeCiFailures?: boolean;
-  // Off for every non-cross-repo mount (per-repo console, the Bots pane's bot-only feed, a
-  // person's activity tab). Those surfaces are narrowed views someone opened on purpose, not
+  // Off for every non-cross-repo mount (per-repo console, a person's activity tab). Those surfaces are narrowed views someone opened on purpose, not
   // "the feed" being kept current, and they carry no "new" marker to go with an insert.
   enabled?: boolean;
   // Called SYNCHRONOUSLY, while the DOM still shows the PRE-INSERT list — the last moment a
@@ -306,13 +284,9 @@ export function useFeedAutoInsert(opts: {
     opts.workspaceId,
     opts.repoIds,
     opts.userIds,
-    opts.excludeBots ?? false,
-    opts.allowedBotIds ?? [],
+    opts.authors ?? 'humans',
     opts.prId ?? null,
-    opts.botsOnly ?? false,
-    opts.botWindowDays ?? null,
     opts.includeAllCommits ?? false,
-    opts.includeCiFailures ?? false,
   );
   const wsKey = workspaceKey(opts.workspaceId);
   const enabled = (opts.enabled ?? true) && opts.workspaceId != null;

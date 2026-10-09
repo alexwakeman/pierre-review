@@ -1,6 +1,5 @@
-// The fixed "Open PRs" tab chip's figure (PinnedTabsBar). Pure so it is pinned by
-// test/openPrsTab.test.ts; it used to be My turn's "Open PRs · N" button, retired when Open PRs
-// became a permanent tab between Activity and Timeline.
+// The Open PRs rail line's figure (Activity/index.tsx). Pure so it is pinned by
+// test/openPrsTab.test.ts. (`openPrsTabLabel` was the retired fixed tab chip's label.)
 
 /** The workspace's NON-DRAFT open PRs — the same figure the Reports → Flow metrics tile and the
  *  tab's own header lead with. ⚠ UNKNOWN IS NEVER ZERO: no answer yet (including the idle query

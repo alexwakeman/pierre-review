@@ -642,7 +642,8 @@ export function pendingRelevanceLabel(
 ): string | null {
   // ⚠ ABSENT relevance is NEUTRAL — the same rule `cardKindLabel` follows: a missing field may
   // never invent an ownership claim on screen.
-  if (card.relevance === 'direct') return tab === 'my_turn' ? null : 'Your turn';
+  // Inside My turn and Claude reviews the tab already says it is yours.
+  if (card.relevance === 'direct') return tab === 'my_turn' || tab === 'claude' ? null : 'Your turn';
   return cardKindLabel(card);
 }
 

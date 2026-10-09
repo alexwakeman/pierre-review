@@ -228,8 +228,11 @@ export function PrCardEventHeading({
   quote,
   age,
   ageTitle,
+  icon,
 }: {
   id?: string;
+  /** The card type's mark (decorative), leading the heading. */
+  icon?: ReactNode;
   lead: string;
   /** Plain text — rendered as a text node, never markup (third-party words). */
   quote?: string | null;
@@ -243,6 +246,11 @@ export function PrCardEventHeading({
       id={id}
       className="min-w-0 break-words text-sm font-semibold leading-snug text-gray-900 [overflow-wrap:anywhere] dark:text-gray-50"
     >
+      {icon != null && (
+        <span className="mr-1.5 inline-flex translate-y-[2px] align-baseline text-gray-500 dark:text-gray-400">
+          {icon}
+        </span>
+      )}
       {lead}
       {quote != null && quote !== '' && (
         <>

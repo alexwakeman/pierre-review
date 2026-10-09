@@ -65,7 +65,7 @@ const PR_NUMBER = 648; // "Paginate the comment normaliser"
 const THREAD_PATH_SUFFIX = 'segment.rs';
 const THREAD_ROOT_PREFIX = 'The error from `parse()` is swallowed here';
 
-const MODEL = 'claude-haiku-4-5'; // the plugin's own MODEL constant
+const MODEL = 'claude-haiku-5-5'; // the plugin's own MODEL constant
 
 // The later change the verdict is judged against. Fictional, like the estate it
 // belongs to — and written so the verdict's two sections are both true OF IT:

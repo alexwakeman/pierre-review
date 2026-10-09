@@ -248,6 +248,16 @@ says so. What IS stored is the reader's choice of which TYPES exist (§ Settings
 promotions) and — since sqlite `0069` / pg `0056` — a per-SUBJECT dismissal whose only power is to
 hide what happened BEFORE it (§ Dismissals and one card per PR).
 
+### Claude reviews have their own Pending tab
+
+A finished Claude review is still a my_turn item — same ball rule, same dismissals, still in
+`GET /api/my-turn` so the notification watcher sees it — but the board lists it in the **Claude
+reviews** tab, not My turn (`PENDING_TABS` splits `my_turn` by type; `pendingTabHolds` is the one
+predicate). So `getWorkspaceInsights` takes every my_turn TOTAL (`myTurnTotal`, the personal /
+direct / maintained / other totals, `kindTotals.my_turn`) over the array WITHOUT `claude_review`
+rows, and `rankPendingTabs` counts both type-split tabs off the uncapped cards. The daily brief and
+the work plan's `counts` skip those cards too, so every My turn figure is My turn's population.
+
 ### Dismissals and one card per PR (`db/my-turn-dismissals.ts`)
 
 **A dismissal sets a subject down until something new happens on it** — for the item the reader
@@ -579,7 +589,7 @@ same settings apply in every workspace.
 
 ## The Dependencies tab — dependency automation and security (CORE)
 
-The sixth Pending tab (`deps` in `PENDING_TABS`) holds two card kinds: **`security`** and
+The last Pending tab (`deps` in `PENDING_TABS`) holds two card kinds: **`security`** and
 **`dependency_bump`**. Deterministic, free on every tier, no model, no new route and no new table
 (the four `pull_requests` columns it reads are in [DATA-MODEL.md](DATA-MODEL.md) § `pull_requests` —
 dependency + security signals). Built in `getWorkspaceInsights` (`db/queries.ts`), ranked in
@@ -653,7 +663,7 @@ Dependencies-tab membership, so the three cannot disagree. It is read ONCE per f
   without `[bot]`: 7 such users on the dev DB, who wrote 112 PR comments on open PRs) ∪ every
   `AUTOMATION_VENDORS` login and prefix ∪ the workspace's automated rows. ⚠ A manual "this is a
   human" still removes the actor from EVERY half. The same set drives the Timeline's `excludeBots`
-  and the Feed lens: measured, 34 events from five accounts became hidden there (Copilot,
+  and the Feed's people/bots split: measured, 34 events from five accounts became hidden there (Copilot,
   lumberbot-app, ImgBotApp, diffray-bot, orbisai0security).
 - **The KIND** is `classificationKindForUser`, now seeded from the non-review vendors too
   (renovate, snyk-io, imgbot…), so a byline names the tool instead of a nameless "Bot". The

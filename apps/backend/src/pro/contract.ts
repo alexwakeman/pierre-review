@@ -47,9 +47,8 @@ export interface ProCapabilities {
   // (apps/backend/src/tracker/, docs/TRACKERS.md) — nothing about it is a capability any more.
   botTriage: boolean; // Review-bot triage tier — CORE/FREE, but its advanced settings are
   // pro_settings-backed, so this flag is true whenever the plugin is loaded (regardless of the
-  // paid PRO_* flags). It gates the free bot Settings section + overlays, NOT the Bots rail view
-  // (that reads the core bot routes and shows even with no plugin) — MINUS the ROI panel, which
-  // is `botDepth` below. ⚠ It no longer covers the cost overlay: seat prices moved to `botDepth`
+  // paid PRO_* flags). It gates NEITHER bot screen: bot classification (Feed → Bot
+  // classification) is free and works with no plugin, and Bots Monitoring is `botDepth` below. ⚠ It no longer covers the cost overlay: seat prices moved to `botDepth`
   // when the whole ROI table went paid, and all four routes that echo a reviewer row strip the
   // price without it (api/routes/bot-triage.ts `stripCost`).
   botAdvisor: boolean; // Bot Tuning Advisor (paid, like workspaceInsights): findings → intents →
@@ -1110,6 +1109,17 @@ export interface ProHostQueries {
   getPendingBoard?(accountId: number, workspaceId: number): Promise<PendingBoardSnapshot>;
 }
 
+// The host → plugin event hooks (see `ProContext.registerEventHooks`). Every member optional.
+export interface ProEventHooks {
+  onClaudeReviewCompleted?(e: {
+    accountId: number;
+    prId: number;
+    reviewId: number;
+    trigger: 'manual' | 'auto';
+  }): Promise<void> | void;
+  onPullRequestMerged?(e: { accountId: number; repoId: number; prId: number }): Promise<void> | void;
+}
+
 export interface ProContext {
   log: FastifyBaseLogger;
   host: {
@@ -1184,6 +1194,15 @@ export interface ProContext {
       nowMs: number;
     }) => Promise<{ fromMs: number; toMs: number; mode: SprintComparisonMode }>,
   ): void;
+  // EVENT HOOKS (Slack's two event signals). The host calls each registered hook AFTER the fact
+  // is committed — a Claude Review run that SUCCEEDED, a PR seen merging LIVE (never from a first
+  // sync or a backfill) — fire-and-forget: a hook's failure is logged and never fails the review or
+  // the sync. Ids only; the plugin reads what it needs. ⚠ OPTIONAL, so apiVersion stays 23.
+  registerEventHooks?(hooks: ProEventHooks): void;
+  // Is this account entitled to a capability? The per-account view /api/me serves (local = the
+  // plugin's published caps; cloud = paid plan). For work a REQUEST does not carry — a cron, an
+  // event hook — where the /api/pro/* 402 gate cannot apply. OPTIONAL, so apiVersion stays 23.
+  accountEntitled?(accountId: number, capability: keyof ProCapabilities): Promise<boolean>;
   // The cheap-tier completion seam (review/llm.ts) — so the plugin adds no new
   // Anthropic dependency.
   llm: {

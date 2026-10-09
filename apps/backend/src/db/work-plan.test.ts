@@ -1061,7 +1061,11 @@ describe('the Pending tabs', () => {
     };
     const kinds = Object.keys(ALL);
     const seen = PENDING_TABS.flatMap((t) => [...t.kinds]);
-    expect(new Set(seen).size).toBe(seen.length); // no kind in two tabs
+    // No kind in two tabs — except `my_turn`, split BY TYPE between My turn and Claude reviews.
+    const split = PENDING_TABS.filter((t) => t.reasons != null || t.exceptReasons != null);
+    expect(split.map((t) => t.key)).toEqual(['my_turn', 'claude']);
+    const unsplit = seen.filter((k) => k !== 'my_turn');
+    expect(new Set(unsplit).size).toBe(unsplit.length);
     for (const k of kinds) {
       const bot = k === 'bot_signal' || k === 'bot_only_review';
       expect([k, seen.includes(k as never)]).toEqual([k, !bot]);
@@ -1069,14 +1073,14 @@ describe('the Pending tabs', () => {
   });
 
   it('lists each card once, in exactly the tab its kind belongs to', async () => {
-    const { pendingTabOf } = await import('@pierre-review/shared');
+    const { pendingTabOfCard } = await import('@pierre-review/shared');
     for (const s of [planScope, fillerScope]) {
       const { tabs, cards } = await board(s);
-      const kindOf = new Map(cards.map((c: { id: string; kind: string }) => [c.id, c.kind]));
+      const cardOf = new Map(cards.map((c: InsightCard) => [c.id, c]));
       const all = tabs.flatMap((t: { cardIds: string[] }) => t.cardIds);
       expect(new Set(all).size).toBe(all.length);
       for (const t of tabs) {
-        for (const id of t.cardIds) expect([id, pendingTabOf(kindOf.get(id) as never)]).toEqual([id, t.key]);
+        for (const id of t.cardIds) expect([id, pendingTabOfCard(cardOf.get(id)!)]).toEqual([id, t.key]);
       }
     }
   });

@@ -32,19 +32,17 @@ const RESOLVE_CHUNK_SIZE = 25;
 // account-scoped server-side; these are plain DB reads that refresh on the sync cadence.
 //
 // ── WHICH OF THESE ARE FREE AND WHICH ARE PAID ──────────────────────────────────────────────────
-// FREE (`botTriage`): the reviewer listing + the four write/reset hooks (classification is free so
-// an `npx` install can do it), the bot-only-PR list, per-PR dedup and behaviour, and the resolvable
-// bot-thread read/resolve pair. Free means free — no `enabled` gate on any of them.
+// FREE (`botTriage`): the reviewer listing + the judgement/identity write/reset hooks (Feed → Bot
+// classification is free so an `npx` install can do it; `useSetReviewerCost`'s route 402s without
+// `botDepth`, and its only caller renders the price editor only with it), and per-PR dedup.
+// Free means free — no `enabled` gate on any of them.
 //
-// PAID (`botDepth`): `useBotBehaviour` (whose route lives in the plugin), and — since the Bot-ROI
-// panel went paid as a whole — the volume family and the per-vendor / flagging drill-downs, whose
-// hooks live in useBotVolume.ts, useBotVendorPrs.ts and useBotFlagging.ts. Those routes 402 now, so
-// a hook reaching one must gate its `enabled` on the capability or a mounted component will re-fire
-// the 402 on its own cadence. `useBotBehaviour` below is the pattern.
-//
-// ⚠ `useBotAnalytics` IS THE EXCEPTION AND IT IS NOT AN OVERSIGHT — it stays UNGATED because its
-// route serves both tiers by NARROWING rather than refusing. Read its own note before adding an
-// `enabled: … && botDepth` to it.
+// PAID (Bots Monitoring is Pro as a whole): `useBotAnalytics` (on the union `botDepth ||
+// periodReports`), the bot-only-PR list, the resolvable bot-thread read, `useBotBehaviour` (whose
+// route lives in the plugin), and the volume family and per-vendor / flagging drill-downs, whose
+// hooks live in useBotVolume.ts, useBotVendorPrs.ts and useBotFlagging.ts. Those routes 402, so
+// every hook reaching one takes an `enabled` that its CALLER ANDs with the capability, or a mounted
+// component re-fires the 402 on its own cadence. `useBotBehaviour` below gates itself.
 
 // ── THE TWO SCOPE INPUTS, AND WHY THEY ARE SEPARATE SLOTS ───────────────────────────────────────
 // `workspaceId` decides the VERDICT — who counts as an automated reviewer, what its vendor and
@@ -77,15 +75,10 @@ export function repoKeySlot(repoIds?: number[] | null): string {
 // total here is a plain sum — but the same actor's row in another workspace may legitimately hold
 // a different number, and nothing may add those together. `enabled` lets the caller gate the fetch.
 //
-// ── TWO TIERS, ONE RESPONSE: DO NOT GATE THIS HOOK ON `botDepth` ────────────────────────────────
-// The ROI table this feeds is paid, but the SAME response carries two free things: the amber "only
-// a bot reviewed N open PRs" governance caution (`totals.botOnlyPrs`) and the tuning-suggestions
-// box (`suggestions`), both mounted in BotsView OUTSIDE the paid panel. So the ROUTE narrows rather
-// than 402s — an unentitled account gets those two fields real and the ROI population withheld
-// (`vendors` empty, `ml`/`qualityChecks` absent, the ROI half of `totals` zeroed) — and this hook
-// stays open on every tier. A `botDepth` gate here would make the caution and the suggestions
-// silently vanish: both read with `?? 0` / `?? []`, so nothing would error, they would just stop
-// appearing.
+// ── PAID: EVERY CALLER PASSES ITS CAPABILITY AS `enabled` ────────────────────────────────────────
+// `/api/bot-analytics` 402s without `botDepth || periodReports` (it no longer narrows for a free
+// account), so every mount ANDs the capability into `enabled` — BotsView, BotRoiPanel,
+// BotPrsDetail, BotFlaggingDetail. A new caller that leaves it out polls a 402 every five minutes.
 //
 // ⚠ THE CLIENT DECIDES WHAT TO DRAW FROM `/api/me`, NEVER BY SNIFFING THIS PAYLOAD. The zeroed
 // `totals` fields are a wire artefact of three REQUIRED keys on `BotAnalyticsResponse`, not a
@@ -175,7 +168,7 @@ export function useBotOnlyPrs(
 
 // The bot-reviewer listing: ONE `WorkspaceReviewer` row per actor in the workspace, each carrying
 // its judgement (automated / role), its identity (kind / label), its price, and the evidence
-// behind them (`footprint` + `repoFootprints`). Feeds the Bots "Settings" list, the feed's vendor
+// behind them (`footprint` + `repoFootprints`). Feeds the Feed's "Bot classification" list, the feed's vendor
 // tag, ThreadList's resolve count and the bot colour map. There is no rows/reviewers split any
 // more — one grain, one row.
 //

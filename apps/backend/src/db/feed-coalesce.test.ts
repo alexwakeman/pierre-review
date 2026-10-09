@@ -31,8 +31,6 @@ function item(over: Partial<ConsolidatedFeedItem> & Pick<ConsolidatedFeedItem, '
     affectedThreads: null,
     commitCount: null,
     changeSummary: null,
-    claudeReviewId: null,
-    claudeVerdict: null,
     mergedComments: [],
     ...over,
   };
@@ -154,19 +152,14 @@ describe('computeFeedCounts', () => {
       item({ id: 'a', kind: 'pr_opened', isMyTurn: true, actorId: 1 }),
       item({ id: 'b', kind: 'review_comment', actorId: 2, threadId: 5, derivedState: 'untouched' }),
       item({ id: 'c', kind: 'pr_comment', actorId: 3 }),
-      item({ id: 'd', kind: 'claude_review', actorId: 1 }),
-      item({ id: 'e', kind: 'pr_merged', actorId: 9 }), // actor 9 is the only bot
+      item({ id: 'e', kind: 'pr_merged', actorId: 9 }),
       item({ id: 'f', kind: 'review_comment', actorId: 2, threadId: 6, derivedState: 'untouched' }),
     ];
-    const counts = computeFeedCounts(items, new Set([9]), false);
-    expect(counts.total).toBe(6);
-    expect(counts.myTurn).toBe(1);
-    expect(counts.claude).toBe(1);
+    const counts = computeFeedCounts(items);
+    expect(counts.total).toBe(5);
     expect(counts.comments).toBe(3); // b, c, f
     expect(counts.prEvents).toBe(2); // a (pr_opened) + e (pr_merged)
-    expect(counts.bots).toBe(1); // only e's actor 9 is in the global bot set
     expect(counts.byThreadState).toEqual({ untouched: 2 });
-    expect(counts.byBotActor).toEqual({}); // not the bot-only feed
     // The chip-row facet is a PARTITION of the same bucket `prEvents` counts, keyed by chip id.
     expect(counts.byEventType).toEqual({ opened: 1, merged: 1 });
   });
@@ -179,13 +172,12 @@ describe('computeFeedCounts', () => {
       item({ id: 'd', kind: 'review_submitted' }),
       item({ id: 'e', kind: 'pr_merged' }),
       item({ id: 'f', kind: 'pr_closed' }),
-      // Outside the bucket entirely — a comment, a commit and a synthesized kind must contribute
-      // to neither the pill's badge nor any chip's.
+      // Outside the bucket entirely — a comment and a commit must contribute to neither the
+      // pill's badge nor any chip's.
       item({ id: 'g', kind: 'pr_comment' }),
       item({ id: 'h', kind: 'commit_pushed' }),
-      item({ id: 'i', kind: 'claude_review' }),
     ];
-    const counts = computeFeedCounts(items, new Set<number>(), false);
+    const counts = computeFeedCounts(items);
     expect(counts.byEventType).toEqual({ opened: 3, reviewed: 1, merged: 1, closed: 1 });
     // A chip badge is a SUBTOTAL of the pill's badge, never a second population.
     // `?? {}` only because the field is a trailing OPTIONAL on the wire type (a stale
@@ -195,53 +187,17 @@ describe('computeFeedCounts', () => {
     expect(counts.prEvents).toBe(6);
   });
 
-  it('populates byBotActor only in the bot-only feed, grouped by actor', () => {
-    const items = [
-      item({ id: 'a', kind: 'review_submitted', actorId: 7 }),
-      item({ id: 'b', kind: 'review_comment', actorId: 7, threadId: 1, derivedState: 'likely_addressed' }),
-      item({ id: 'c', kind: 'review_comment', actorId: 8, threadId: 2, derivedState: 'resolved' }),
-    ];
-    const counts = computeFeedCounts(items, new Set<number>(), true);
-    expect(counts.total).toBe(3);
-    expect(counts.byBotActor).toEqual({ '7': 2, '8': 1 });
-    expect(counts.byThreadState).toEqual({ likely_addressed: 1, resolved: 1 });
-  });
-
   it('is all-zero / empty on an empty stream', () => {
-    const counts = computeFeedCounts([], new Set<number>(), false);
+    const counts = computeFeedCounts([]);
+    // EXHAUSTIVE on purpose — a new facet must be added here deliberately, which is how the
+    // shared ConsolidatedFeedCounts shape and the pure counter stay in step.
     expect(counts).toEqual({
       total: 0,
-      myTurn: 0,
-      claude: 0,
       comments: 0,
       prEvents: 0,
       commits: 0,
-      // The opt-in CI-failure facet ('ci_failed' | 'trunk_ci_failed'). This assertion is
-      // EXHAUSTIVE on purpose — a new facet must be added here deliberately, which is how the
-      // shared ConsolidatedFeedCounts shape and the pure counter stay in step.
-      ciFailures: 0,
-      awaitingReview: 0,
-      bots: 0,
-      byBotActor: {},
       byThreadState: {},
       byEventType: {},
     });
-  });
-
-  it('counts awaitingReview as DISTINCT PRs for pr_opened/pr_ready_for_review flagged prAwaitingReview', () => {
-    const items = [
-      // A draft-first PR has BOTH kinds in the window (same prId 10, the factory default) —
-      // the badge reads as a PR count, so the pair dedupes to one.
-      item({ id: 'a', kind: 'pr_opened', prAwaitingReview: true }),
-      item({ id: 'b', kind: 'pr_ready_for_review', prAwaitingReview: true }),
-      item({ id: 'b2', kind: 'pr_opened', prId: 11, prAwaitingReview: true }),
-      item({ id: 'c', kind: 'pr_opened', prId: 12, prAwaitingReview: false }), // reviewed since
-      item({ id: 'd', kind: 'pr_opened', prId: 13 }), // no flag attached (stale feed) — not counted
-      item({ id: 'e', kind: 'pr_merged', prId: 14, prAwaitingReview: true }), // non-matching kind
-    ];
-    const counts = computeFeedCounts(items, new Set<number>(), false);
-    expect(counts.awaitingReview).toBe(2); // PR 10 (deduped) + PR 11
-    expect(counts.prEvents).toBe(6); // the facet stays independent of the flag
-    expect(counts.byEventType).toEqual({ opened: 5, merged: 1 }); // and so does the chip split
   });
 });

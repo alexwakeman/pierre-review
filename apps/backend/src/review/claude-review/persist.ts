@@ -51,8 +51,8 @@ import {
 
 // The Claude Review persistence layer. It reads + writes the claudeReviews /
 // claudeReviewFindings tables via ctx.db + ctx.schema (review/agent-context.ts). Only the
-// FEATURE-only reads live here; the cross-surface reads (getClaudeReviewFeedItems /
-// getUnactionedClaudeReviews / listClaudeReviewsByRepo) live in db/queries.ts.
+// FEATURE-only reads live here; the cross-surface reads (getUnactionedClaudeReviews /
+// listClaudeReviewsByRepo) live in db/queries.ts.
 
 // ctx.schema is typed loosely (Record<string, any>) — this module addresses tables by name and
 // casts result rows, so it compiles identically against either dialect's schema.

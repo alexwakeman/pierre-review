@@ -3,11 +3,19 @@ import type { ActivityRepo, RepoBranchStatus, ThreadStateCounts } from '@pierre-
 import { useActivity } from '../../hooks/useActivity.js';
 import { useBranchStatus } from '../../hooks/useBranchStatus.js';
 import { useRepos } from '../../hooks/useTimeline.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useProCapabilities, useWorkspaceOpenPrs } from '../../hooks/useTriage.js';
+import { openPrsTabCount } from '../../lib/openPrsTab.js';
 import { useFilters } from '../../store/filters.js';
 import { MaintainerShield } from '../MaintainerShield.js';
 import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
-import { BotIcon, SparkleIcon, TimerIcon, WarningIcon, WorkspaceIcon } from '../Icons.js';
+import {
+  BotIcon,
+  PullRequestIcon,
+  SparkleIcon,
+  TimerIcon,
+  WarningIcon,
+  WorkspaceIcon,
+} from '../Icons.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { BranchStatusChip } from './BranchStatusChip.js';
 import { RepoFeedHeader } from './RepoFeedHeader.js';
@@ -19,13 +27,16 @@ import { HumanThemesPanel } from './HumanThemesPanel.js';
 import { InsightsView } from './InsightsView.js';
 import { AttentionView } from './AttentionView.js';
 import { BotsView } from './BotsView.js';
+import { BotSettingsPanel } from './BotSettingsPanel.js';
+import { effectiveFeedTab, feedTabsFor } from './feedTabsModel.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
+import { OpenPrsDetail } from './OpenPrsDetail.js';
+import { ProBadge } from '../ProGate.js';
 
-// DEFAULT LANDING = PENDING, for every tier. The rail's top entry is what opens: Pending is the
-// ranked worklist, and the Feed (the stream alone) is one click below it. The store's plain
-// 'attention' default IS the landing, and it is the one rail value `useUrlState` leaves out of
-// the URL. (The landing was the Feed from plan P3.1 until this change; before that a one-shot
-// effect auto-selected Insights for Pro accounts — that apparatus is gone.)
+// DEFAULT LANDING = OPEN PRS, for every tier. The rail's top entry is what opens: Open PRs is one
+// card per open PR (it was a fixed tab of its own until it moved here), and Pending — the ranked
+// worklist — is one click below it. The store's plain 'open-prs' default IS the landing, and it
+// is the one rail value `useUrlState` leaves out of the URL.
 
 // Rail sort: attention desc → unread → alphabetical. Computed once per data load so
 // the rail is stable (not jumpy) as the user interacts.
@@ -192,10 +203,10 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
 }
 
 // The Activity "Triage Console with a Briefing Feed": a fixed left rail (the cross-repo pseudo-
-// rows, then this WORKSPACE's repos, flat) + a right detail that defaults to the consolidated
-// Feed and narrows to a single-repo console on selection. Entirely on the core query layer — no
-// AI (the only Pro surfaces are the Insights rail entry and the per-repo digest banner inside
-// RepoFeedHeader).
+// rows, then this WORKSPACE's repos, flat) + a right detail that defaults to Open PRs (the first
+// rail line) and narrows to a single-repo console on selection. Entirely on the core query layer —
+// no AI. The Pro surfaces are the Bots Monitoring and Reports rail entries (each locked as a
+// whole when unentitled) and the per-repo digest banner inside RepoFeedHeader.
 //
 // SCOPE IS ONE WORKSPACE, always — the WHOLE workspace. There is no "all repos", no multi-select,
 // and (deliberately) NO second visibility axis on top: this console reads `filters.workspaceId` and
@@ -211,8 +222,8 @@ export function ActivityView(): JSX.Element {
   const activityRepoId = useFilters((s) => s.activityRepoId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
   const { workspaceInsights, activityDigest } = useProCapabilities();
-  // The cross-repo Feed's inner sub-tab: 'feed' (the consolidated stream) vs the Pro
-  // "Discussion themes" AI summary. The Themes tab only appears when the AI-summary tier is on.
+  // The cross-repo Feed's inner sub-tab: 'feed' (the consolidated stream), the Pro "Discussion
+  // themes" AI summary (listed only on the AI-summary tier) and the FREE "Bot classification".
   // ('compare' is NOT a member — cross-workspace comparison is Reports' "By workspace" axis.)
   const feedInnerTab = useFilters((s) => s.feedInnerTab);
   const setFeedInnerTab = useFilters((s) => s.setFeedInnerTab);
@@ -228,7 +239,7 @@ export function ActivityView(): JSX.Element {
   // Default-branch status for the SAME scope. `useBranchStatus` reads the workspace from the store
   // and narrows ONLY on an explicit argument, so an argument-less call here is the whole workspace
   // by construction and can never drift from useActivity's scope. Purely informational: it feeds
-  // the rail's third line; the strip under Pending → My turn reads this SAME cache entry (an
+  // the rail's third line; the strip heading Open PRs reads this SAME cache entry (an
   // argument-less call there too), and nothing else reads it — not the sort, not attentionCount,
   // not any badge.
   const { data: branchData } = useBranchStatus();
@@ -245,37 +256,33 @@ export function ActivityView(): JSX.Element {
     typeof activityRepoId === 'number'
       ? sorted.find((r) => r.repoId === activityRepoId) ?? null
       : null;
-  // Pending is the default detail (also when nothing is set).
+  // Open PRs is the default detail (also when nothing is set).
   // ('compare' left the activityRepoId union with the Compare rail entry — cross-workspace
   // comparison is Reports' "By workspace" axis now, and a legacy `?activityRepo=compare` link
   // already normalizes to Pending in useUrlState.)
   const showingFeed = activityRepoId === 'feed';
+  // Open PRs — one card per open PR in the workspace. The default (null included).
+  const showingOpenPrs = activityRepoId === 'open-prs' || activityRepoId == null;
+  // The rail line's count: the workspace-wide open-PRs key OpenPrsDetail reads too — one more
+  // observer, not a new request. Blank (never 0) until it answers.
+  const openPrsQuery = useWorkspaceOpenPrs();
+  const openPrsCount = openPrsTabCount(openPrsQuery.data, openPrsQuery.isPlaceholderData);
   // The CORE/free **Pending** cards console — always available, no Pro gate.
-  const showingAttention = activityRepoId === 'attention' || activityRepoId == null;
+  const showingAttention = activityRepoId === 'attention';
   const showingInsights = activityRepoId === 'insights';
-  // The review-bot triage console (BotsView) — the RAIL ENTRY is always available and must stay
-  // that way: it owns the free classification/Settings screen, the free bot-only governance
-  // caution, the tuning suggestions and the thread-resolve flows, all of which an `npx` install
-  // needs. Its ROI sub-tab is the paid half (`botDepth`) and locks its own BODY; the entry, the
-  // sub-tab strip and every other tab stay open on every tier.
+  // Bots Monitoring (BotsView) — Pro as a whole on `botDepth`. The RAIL ENTRY is listed on every
+  // tier (visible-but-locked); BotsView renders the lock for the whole pane when unentitled.
   const showingBots = activityRepoId === 'bots';
 
   // (The one-shot "default to Insights when Pro is on" effect lived here — removed with P3.1:
   // Pending is the default landing; see the note at the top.)
 
-  // The cross-repo Feed's sub-tab bar: Feed | Themes(Pro). Still built dynamically so a tab
-  // exists only where it means something — Themes needs the Pro AI tier. ("Compare teams" left
-  // this bar long ago; cross-workspace comparison is Reports' "By workspace" axis now.)
-  const feedTabs = useMemo(() => {
-    const tabs: { key: 'feed' | 'themes'; label: string }[] = [{ key: 'feed', label: 'Feed' }];
-    if (activityDigest) tabs.push({ key: 'themes', label: 'Themes' });
-    return tabs;
-  }, [activityDigest]);
-  // DERIVED, never written back to the store. Pro going away must not strand the pane on a tab
-  // that no longer exists — but a corrective `setFeedInnerTab` would also FORGET the user's
-  // choice, so the capability returning wouldn't restore Themes. Falling back for the render only
-  // keeps the choice intact.
-  const effectiveFeedTab = feedTabs.some((t) => t.key === feedInnerTab) ? feedInnerTab : 'feed';
+  // The cross-repo Feed's sub-tab bar: Feed | Themes (Pro, listed only on `activityDigest`) |
+  // Bot classification (FREE on every tier). The rules live in `feedTabsModel.ts`.
+  const feedTabs = useMemo(() => feedTabsFor({ activityDigest }), [activityDigest]);
+  // DERIVED, never written back to the store: Pro going away must not strand the pane on Themes,
+  // and a corrective `setFeedInnerTab` would FORGET the choice so Themes would not come back.
+  const visibleFeedTab = effectiveFeedTab(feedInnerTab, feedTabs);
 
   const generatedAt = data?.generatedAt ?? null;
 
@@ -387,28 +394,53 @@ export function ActivityView(): JSX.Element {
             isFetching && data != null ? 'opacity-60 transition-opacity' : ''
           }`}
         >
-          {/* RAIL ORDER, top to bottom: Pending · Feed · Bots · Reports (store value still
-              'insights') — then the per-repo rows BENEATH the whole block. Pending leads because
-              it is where the app opens: the ranked worklist is the first thing a reader needs.
+          {/* RAIL ORDER, top to bottom: Open PRs · Pending · Feed · Bots · Reports (store value
+              still 'insights') — then the per-repo rows BENEATH the whole block. Open PRs leads
+              because it is where the app opens; Pending, the ranked worklist, is next.
               The Feed follows as the stream of what happened. Bots sits DIRECTLY under the Feed
               because the two are read together: most of what scrolls past on the Feed is
-              bot-authored, and the Bots console owns the judgement that decides what the Feed
-              shows — `hiddenBotUserIds` is the union of `users.isBot` and this workspace's
-              automated reviewers, and a manual "human"/"bot" call made under Bots → Settings wins
+              bot-authored, and the Feed's own "Bot classification" tab owns the judgement that
+              decides what the Feed shows — `hiddenBotUserIds` is the union of `users.isBot` and
+              this workspace's automated reviewers, and a manual "human"/"bot" call made there wins
               in both directions. The control that filters the stream belongs next to the stream,
               not three entries away. Reports sits last as the retrospective surface.
-              ⚠ ALL FOUR ARE NOW UNGATED. Reports used to be first AND Pro-gated, from when it was
-              nothing but the Pro period report; the FREE flow metrics moved into it off the Feed,
-              so hiding the entry would have taken a free feature behind the Pro wall.
+              ⚠ Bots Monitoring and Reports are PRO AS A WHOLE: listed on every tier with one
+              ProBadge each, their panes locked (ProLockPanel) when unentitled.
               (The "Compare workspaces" entry was folded into Reports' "By workspace" axis.) */}
 
-          {/* PENDING pseudo-row — the worklist, and the default landing. Everything waiting on you
+          {/* OPEN PRS pseudo-row — FIRST, and the default landing: one card per open PR in the
+              workspace, headed by the default-branch strip. Was a fixed tab of its own; a legacy
+              `?view=open-prs` link lands here. */}
+          <button
+            type="button"
+            onClick={() => setActivityRepo('open-prs')}
+            aria-pressed={showingOpenPrs}
+            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+              showingOpenPrs
+                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+            }`}
+            title="Every open pull request in this workspace"
+          >
+            <span className="shrink-0 text-emerald-600 dark:text-emerald-400">
+              <PullRequestIcon />
+            </span>
+            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+              Open PRs
+            </span>
+            {openPrsCount != null && (
+              <span className="shrink-0 font-mono text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
+                {openPrsCount}
+              </span>
+            )}
+          </button>
+
+          {/* PENDING pseudo-row — the worklist, SECOND under Open PRs. Everything waiting on you
               or the workspace, in tabs, each ranked by db/work-plan.ts's Do next score
               (db/pending-tabs.ts). CORE/free — the RANK is code, only its narration is Pro — so
-              it's ALWAYS shown. FIRST in the rail because it is what opens.
+              it's ALWAYS shown.
               ⚠ LABEL-ONLY rename from "Needs attention": the rail id stays `'attention'` — it is
-              in bookmarks and in history entries Back replays, and it is now the default the URL
-              omits. */}
+              in bookmarks and in history entries Back replays (`?activityRepo=attention`). */}
           <button
             type="button"
             onClick={() => setActivityRepo('attention')}
@@ -459,16 +491,12 @@ export function ActivityView(): JSX.Element {
             </span>
           </button>
 
-          {/* BOTS pseudo-row — "the calm layer above your review bots". CORE/free (reads the
-              deterministic bot routes), so it's ALWAYS shown, on every tier, no Pro gate. A bot is
-              one object per WORKSPACE: a vendor running in six of this workspace's repos is ONE
-              row here, and everything about it — automated, role, vendor name, price — is edited
-              at this level.
-              THIRD in the rail, directly under the Feed, because this is where the Feed's own
-              bot judgement is made: the "human"/"bot" call under Bots → Settings feeds
-              `hiddenBotUserIds`, which is what the Feed and the Timeline hide by default. A reader
-              who wants to know why a vendor is (or isn't) in the stream goes one row up or one row
-              down, not across the rail. */}
+          {/* BOTS MONITORING pseudo-row (LABEL-ONLY rename of "Bots"; the rail id stays 'bots').
+              PRO AS A WHOLE (`botDepth`): VISIBLE on every tier with ONE ProBadge here, and the
+              whole pane — every sub-tab, Settings included — renders `ProLockPanel` when the
+              account is not entitled (BotsView gates itself). No per-sub-tab badges inside.
+              Bot HIDING on the Feed and Timeline stays free: it reads the stored/auto
+              classification through `/api/bot-reviewers`, which is not gated. */}
           <button
             type="button"
             onClick={() => setActivityRepo('bots')}
@@ -478,14 +506,17 @@ export function ActivityView(): JSX.Element {
                 ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
                 : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
             }`}
-            title="Detect, measure and triage this workspace's automated review bots — classification and triage are free; the ROI table is Pro"
+            title="Measure and triage this workspace's review bots (Pro)"
           >
             <span className="shrink-0">
               <BotIcon />
             </span>
             <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
-              Bots
+              Bots Monitoring
             </span>
+            {/* UNCONDITIONAL, like every tier label here: keyed on the capability it would flicker
+                on every cold load (capabilities read all-false until /api/me lands). */}
+            <ProBadge variant="tab" className="shrink-0" title="Bots Monitoring is part of Pro." />
           </button>
 
           {/* REPORTS pseudo-row (formerly "Insights" — renamed with plan C5, once the pane became
@@ -494,10 +525,9 @@ export function ActivityView(): JSX.Element {
               referenced across several files (useUrlState's `?activityRepo=insights`, FilterBar's
               `isInsights`), and renaming a wire/URL-visible token buys nothing but broken deep
               links.
-              ⚠ SHOWN ON EVERY TIER. It used to be wrapped in `{workspaceInsights && …}`, correct
-              while the pane was nothing but the Pro period report — but the FREE flow metrics
-              moved in here off the Feed, so hiding the entry would have taken a free feature
-              behind the Pro wall. The pane gates its own Pro halves internally. */}
+              PRO AS A WHOLE (`periodReports`), flow metrics included: VISIBLE on every tier with
+              ONE ProBadge here, and InsightsView renders `ProLockPanel` for the whole pane when
+              the account is not entitled. */}
           <button
             type="button"
             onClick={() => setActivityRepo('insights')}
@@ -507,7 +537,7 @@ export function ActivityView(): JSX.Element {
                 ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
                 : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
             }`}
-            title="Flow metrics for this workspace, and period-over-period reports (Pro)"
+            title="Flow metrics and period reports for this workspace (Pro)"
           >
             <span className="shrink-0 text-ai-signal">
               <WorkspaceIcon />
@@ -515,6 +545,7 @@ export function ActivityView(): JSX.Element {
             <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
               Reports
             </span>
+            <ProBadge variant="tab" className="shrink-0" title="Reports are part of Pro." />
           </button>
 
           {/* The workspace's repos — a FLAT list. There is nothing to group by: a repo belongs to
@@ -560,8 +591,11 @@ export function ActivityView(): JSX.Element {
           // rail-entry branches so a zero-repo account always lands here (a Pro account could
           // otherwise auto-select Insights and never reach the empty state).
           <FirstRunOnboarding />
+        ) : showingOpenPrs ? (
+          // Open PRs — the default landing. Owns its own empty-workspace state.
+          <OpenPrsDetail />
         ) : showingBots ? (
-          // The CORE/free review-bot triage console (ROI panel + a bot-only feed). Scoped to the
+          // Bots Monitoring — Pro as a whole; BotsView renders the lock itself. Scoped to the
           // whole active WORKSPACE (never the timeline's repo picker; the bot feed likewise ignores
           // the human-member filter); carries its own empty states, so it renders even before any
           // repo data loads.
@@ -586,45 +620,52 @@ export function ActivityView(): JSX.Element {
               : 'Detecting the repos you work on…'}
           </div>
         ) : showingFeed ? (
-          // The workspace Feed — a STREAM and nothing else. With Pro on, a "Discussion themes"
-          // sub-tab (the human sibling of Bots → Themes) sits beside it.
+          // The workspace Feed — a STREAM and nothing else. Beside it: a "Discussion themes"
+          // sub-tab with Pro (the human sibling of Bots → Themes), and the FREE "Bot
+          // classification" tab (who counts as a bot here — the Bots hiding on this Feed reads it).
           //
           // ⚠ Every survey panel has left it and none may come back: the work plan (the Pending
           // head), flow metrics (Reports), the daily-brief strip (DELETED — every line duplicated a
-          // Pending tab) and the trunk + open-PR panels (the default-branch strip now heads Pending →
-          // My turn, beside an "Open PRs" button into the drill-down). Panels of survey above a
+          // Pending tab) and the trunk + open-PR panels (the default-branch strip now heads the Open
+          // PRs rail line). Panels of survey above a
           // stream is not a feed.
           <div className="space-y-3">
-            {feedTabs.length > 1 && (
-              <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
-                {feedTabs.map((t) => {
-                  const on = effectiveFeedTab === t.key;
-                  return (
-                    <button
-                      key={t.key}
-                      type="button"
-                      role="tab"
-                      aria-selected={on}
-                      onClick={() => setFeedInnerTab(t.key)}
-                      className={`-mb-px flex items-center gap-1 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
-                        on
-                          ? 'border-gray-300 bg-white text-sky-600 dark:border-gray-700 dark:bg-gray-950 dark:text-sky-300'
-                          : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
-                      }`}
-                    >
-                      {t.label}
-                      {/* Only Themes is Pro; the Feed itself is core. */}
-                      {t.key === 'themes' && (
-                        <span className="rounded bg-ai-signal/10 px-1 text-[9px] font-semibold uppercase text-ai-signal">
-                          pro
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+            <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
+              {feedTabs.map((t) => {
+                const on = visibleFeedTab === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={on}
+                    onClick={() => setFeedInnerTab(t.key)}
+                    className={`-mb-px flex items-center gap-1 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
+                      on
+                        ? 'border-gray-300 bg-white text-sky-600 dark:border-gray-700 dark:bg-gray-950 dark:text-sky-300'
+                        : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
+                    }`}
+                  >
+                    {t.label}
+                    {/* Only Themes is Pro; the Feed and Bot classification are core. */}
+                    {t.key === 'themes' && (
+                      <span className="rounded bg-ai-signal/10 px-1 text-[11px] font-semibold uppercase text-ai-signal">
+                        pro
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {visibleFeedTab === 'themes' ? (
+              <HumanThemesPanel />
+            ) : visibleFeedTab === 'classification' ? (
+              // FREE on every tier — who counts as a bot in this Workspace. The price editor on
+              // each card renders only with `botDepth`; nothing else here is gated.
+              <BotSettingsPanel />
+            ) : (
+              <FeedView />
             )}
-            {effectiveFeedTab === 'themes' ? <HumanThemesPanel /> : <FeedView />}
           </div>
         ) : isLoading && data == null ? (
           <div className="space-y-3">

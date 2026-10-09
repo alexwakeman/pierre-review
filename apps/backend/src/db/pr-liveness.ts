@@ -18,6 +18,7 @@ import type { MergeQueueEntryState, MergeStateStatus } from '@pierre-review/shar
 import { db, schema } from './client.js';
 import { READY_MERGE_STATES } from './triage.js';
 import type { PrLivenessObservation } from '../github/pr-liveness.js';
+import { noteLiveMergeTransition } from '../sync/merge-notice.js';
 
 const { pullRequests } = schema;
 
@@ -196,6 +197,12 @@ export async function applyPrLiveness(
   if (obs.state !== target.state) {
     set.state = obs.state;
     change(true);
+    // A merge seen LIVE by this sweep. It writes `state` without `mergedById`, so the walk that
+    // follows would see the row as already merged; this record lets it still announce the merge
+    // (sync/merge-notice.ts — the Pro merge event hook).
+    if (target.state === 'open' && obs.state === 'merged') {
+      noteLiveMergeTransition(accountId, target.prId);
+    }
   }
   if (obs.isDraft != null && obs.isDraft !== target.isDraft) {
     set.isDraft = obs.isDraft;

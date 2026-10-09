@@ -635,7 +635,7 @@ export type ClassificationSource =
 // benchmark sets, which is the precise miscount this axis exists to prevent. `isReviewerRole()`
 // below is the one predicate; prefer it to an inline comparison.
 //
-// Any automated role stays `automated: true` — `excludeBots`, the feed bot lens and the
+// Any automated role stays `automated: true` — `excludeBots`, the Feed people/bots toggle and the
 // per-row vendor tag all keep working unchanged. The role only splits the two DERIVED SETS:
 //   role 'review'                    → SCORING (ROI, behaviour, dedup, benchmark)
 //   all automated (every role)       → EXCLUSION, the feed, AND bot-only PRs
@@ -3718,6 +3718,9 @@ export interface ArmedMergeRequest {
   // the queue" (head-pinned enqueue) instead of a direct merge, which GitHub refuses on a
   // queue-protected branch.
   viaMergeQueue: boolean;
+  // TRUE when the workspace's dependency auto-merge setting armed it, not a click. Absent = a
+  // person armed it. A policy intent lands like a click's: once the REQUIRED checks pass.
+  armedByPolicy?: boolean;
   // When the WATCHER enqueued the PR (ISO-8601); null until then, always null for
   // direct-merge intents. While set, cancelling also removes the queue entry.
   enqueuedAt: string | null;
@@ -4555,7 +4558,7 @@ export interface ProSettings {
      * @deprecated LEGACY, READ-ONLY. Per-bot monthly cost stored in the plugin-owned
      * `pro_settings.bot_cost_json` blob, superseded by `account_reviewers.monthly_cents` in CORE
      * (one row per (account, actor), nullable — NULL is "no price set", 0 is "free" — edited on
-     * the bot row in Activity → Bots → Settings). Cost became CORE/free in the move: an OSS/npx
+     * the bot row in Activity → Feed → Bot classification). Cost became CORE/free in the move: an OSS/npx
      * install can now set and see a price — but the READ is `botDepth`-gated as of the ROI panel
      * going paid, so an unentitled account gets `costMonthlyUsd: null` on every row regardless of
      * where the number came from. This legacy blob's read-time fallback is subject to the same
@@ -5320,6 +5323,15 @@ export interface SlackTarget {
   // messages about N different teams' bots. The 0033 migration copies the account flag onto every
   // existing target row, so nobody loses the block on upgrade.
   botDigest: boolean;
+  // Two EVENT signals posted to the same webhook, each its own switch, both OFF by default (plugin
+  // migration 0040). They ride the delivery row because they need its channel; the digest's
+  // cadence does not gate them (`cadence: 'off'` pauses the digest, not these).
+  //   • notifyReviews — one message when a Claude Review run succeeds: PR, author, verdict and the
+  //     run's own summary. Never the findings.
+  //   • notifyMerges — one message when a PR is SEEN merging live, naming who merged it. Never for
+  //     a merge first met by a backfill; once per PR, ever.
+  notifyReviews: boolean;
+  notifyMerges: boolean;
 }
 
 // GET/PUT/DELETE /api/pro/slack/target?workspace=<id> all answer with this.
@@ -5353,6 +5365,9 @@ export interface WorkspaceSlackTargetUpdate {
   // unchanged. It is a content switch on one delivery, not an account preference — see
   // `SlackTarget.botDigest`.
   botDigest?: boolean;
+  // The two event signals (see `SlackTarget.notifyReviews` / `notifyMerges`). Omitted = unchanged.
+  notifyReviews?: boolean;
+  notifyMerges?: boolean;
 }
 
 /** @deprecated The multi-select write shape. `PUT /api/pro/slack/targets` IS DELETED — settings
@@ -8942,25 +8957,18 @@ export interface FeedAffectedThread {
 export type MyTurnReason = 'requested' | 'authored' | 'merged' | 'reviewed' | 'commented';
 
 export interface ConsolidatedFeedItem {
-  // Stable unique id, e.g. "feed:1234", "feed:commitrun:99:1234", "feed:claude:42".
+  // Stable unique id, e.g. "feed:1234", "feed:commitrun:99:1234".
   id: string;
   // True when this event is "my turn": it's on a PR the viewer participates in
   // (authored / requested reviewer / reviewed / commented / merged) and the actor isn't
-  // the viewer. Drives the yellow card + the "My Turn only" filter.
+  // the viewer. Drives the yellow card.
   isMyTurn: boolean;
   // The relationships that make this item "my turn" (see MyTurnReason), most-relevant first;
   // empty for non-my-turn rows. The UI renders the primary reason as a pill.
   myTurnReasons: MyTurnReason[];
   // An activity EventType ('pr_opened' | 'pr_merged' | 'pr_closed' | 'review_submitted' |
-  // 'review_comment' | 'pr_comment' | 'commit_pushed'), or one of the SYNTHESIZED kinds that
-  // have no `events` row behind them: 'claude_review' (a Claude Review run), 'ci_failed' (a
-  // failed check on a PR head, from `ci_status_events`) and 'trunk_ci_failed' (a failed check
-  // on a repo's default branch, from `trunk_ci_status_events`).
-  //
-  // ⚠ DELIBERATELY A BARE `string`, NOT `EventType`. That is what lets a synthesized kind exist
-  // without widening `EVENT_TYPES` / `EVENT_CATEGORY_BY_TYPE` / the Timeline's type filter /
-  // the Welcome-back counter — five surfaces that read the `events` table's enum and have
-  // nothing to do with the Feed.
+  // 'review_comment' | 'pr_comment' | 'commit_pushed' | …). A bare `string` so the wire never has
+  // to widen `EventType` (the Claude-review and CI-failure kinds that once rode here are gone).
   kind: string;
   occurredAt: string; // ISO-8601 — the item's relevant timestamp (sort + display)
   repoId: number;
@@ -8977,14 +8985,9 @@ export interface ConsolidatedFeedItem {
   threadId: number | null;
   // The review-thread derived state for thread-bearing items (kind 'review_comment' with a
   // threadId) — 'untouched' | 'replied_unresolved' | 'likely_addressed' | 'resolved'. Powers
-  // the Bots pane's state-filter pills. Optional: undefined/null on non-thread items and on
+  // the Feed's state-filter pills. Optional: undefined/null on non-thread items and on
   // feeds that don't attach it.
   derivedState?: DerivedState | null;
-  // True when the item's PR is STILL awaiting its first review — open, not draft, and
-  // firstReviewAt null. A LIVE snapshot recomputed per request (the same card can match
-  // today and not tomorrow), never stored. Powers the "Needs review" pill. Optional:
-  // undefined/null on PR-less items and on feeds that don't attach it.
-  prAwaitingReview?: boolean | null;
   // Issue-level PR-comment items (kind 'pr_comment') only: the comment id, so a click can
   // deep-link straight to + highlight that comment in the PR detail's Overview tab. null
   // on every other kind.
@@ -9019,29 +9022,6 @@ export interface ConsolidatedFeedItem {
   // Short human-readable "what changed" summary (e.g. "pushed 3 commits · addressed 2
   // threads"); null when the row chrome already says everything.
   changeSummary: string | null;
-  // CI-failure items ('ci_failed' / 'trunk_ci_failed') only: the check name(s) this card
-  // reports as failing. ONE item is emitted per failed RUN — per (PR-or-branch, head sha,
-  // check name) — so this normally holds exactly one name; it is an array because a red
-  // rollup with no named contexts emits an empty one (an honest "CI failed, checks unknown").
-  //
-  // ⚠ NORMALISED to bare NAMES. The two sources store different shapes under the same column
-  // name: `ci_status_events.failing_checks` is `string[]`, `trunk_ci_status_events`' (like
-  // `branch_commits`') is `BranchCheckRun[]`. The wire carries names only, so no consumer has
-  // to know which side a card came from.
-  //
-  // OPTIONAL, like `uncappedTotal`/`counts`: feed responses are IndexedDB-persisted
-  // (PersistQueryClientProvider), so a cached response written before this field existed must
-  // stay type-honest.
-  failingChecks?: string[] | null;
-  // CI-failure items only: the commit sha the failure was observed on (the PR head, or the
-  // default-branch head). Rendered short and used to dedupe re-observations. Optional for the
-  // same stale-cache reason as `failingChecks`.
-  ciHeadSha?: string | null;
-  // Claude Review items (kind 'claude_review') only: the run id — so the card can
-  // deep-link into the PR's Claude Review tab — and Claude's verdict for the badge.
-  // null on every other kind.
-  claudeReviewId: number | null;
-  claudeVerdict: ClaudeReviewVerdict | null;
   // Consolidated top-level PR comment(s) folded INTO a coinciding "host" event — a
   // review_submitted OR a lifecycle action (pr_merged / pr_closed) — where the same actor
   // posted the comment(s) within a short window (GitHub's "Comment and close/merge", or a
@@ -9077,9 +9057,15 @@ export interface ConsolidatedFeedItem {
 // of real human activity they are 23 and 6 events — together 1.7% of the bucket — so either
 // chip would read 0 most days, advertising a filter that can only return nothing. All three of
 // Opened's kinds answer "this PR is (again) asking for review", which is the reading
-// `matchesNeedsReview` already takes when it pairs pr_opened with pr_ready_for_review. The CARD
+// the retired "Needs review" pill took when it paired pr_opened with pr_ready_for_review. The CARD
 // RENDERER still labels them apart ("PR reopened"): the chip groups, it never relabels.
 export type FeedPrEventChip = 'opened' | 'reviewed' | 'merged' | 'closed';
+
+// Whose activity the Activity Feed shows (`GET /api/activity/feed?authors=`): people or bots,
+// never both. Judged per ITEM by its actor against the UNION bot set (hiddenBotUserIds, a manual
+// judgement winning both ways), so a thread with a person and a bot in it appears on both sides.
+// An item with no actor is a person's. Absent / unknown on the wire = 'humans'.
+export type FeedAuthors = 'humans' | 'bots';
 
 // Server-computed facet counts over the WHOLE loadable stream (the post-cap `ordered` set
 // the page is sliced from), so the SPA's pill badges reflect every matching item — not just
@@ -9088,20 +9074,9 @@ export type FeedPrEventChip = 'opened' | 'reviewed' | 'merged' | 'closed';
 // facet is independent of the active pills (a count is "how many exist", not "how many show").
 export interface ConsolidatedFeedCounts {
   total: number; // == ConsolidatedFeedResponse.total (the full loadable stream length)
-  myTurn: number; // items flagged isMyTurn
-  claude: number; // kind 'claude_review'
   comments: number; // kind 'review_comment' | 'pr_comment'
   prEvents: number; // kind pr_opened|pr_merged|pr_closed|pr_reopened|pr_ready_for_review|review_submitted
   commits: number; // kind 'commit_pushed' — the count behind the opt-in "Commits" pill
-  // kind 'ci_failed' | 'trunk_ci_failed' — the count behind the opt-in "CI failures" pill.
-  // Zero (and no items) unless the request set `includeCiFailures=true`.
-  ciFailures: number;
-  // DISTINCT PRs with a pr_opened|pr_ready_for_review item still awaiting a first review
-  // (prAwaitingReview === true) — the "Needs review" pill. A PR count, not an event count:
-  // a draft-first PR has both kinds in the window and must not read as two PRs.
-  awaitingReview: number;
-  bots: number; // actorId in the GLOBAL users.isBot set (matches FeedView's isBotActor)
-  byBotActor: Record<string, number>; // actorId -> count; populated only in the bot-only feed
   byThreadState: Record<string, number>; // DerivedState -> count over items carrying a derivedState
   // FeedPrEventChip -> count: the badges on the "PR events" pill's dependent chip row. Keyed by
   // CHIP id rather than raw event kind so the client draws them without re-deriving the

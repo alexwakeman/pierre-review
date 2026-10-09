@@ -2595,6 +2595,42 @@ check(
   );
 }
 
+// ── DEPENDENCY AUTO-MERGE (merge/dependency-policy.ts) ──────────────────────────
+// The setting is id-addressed by a PATH param, and "Merge or arm all" takes PR ids in a BODY:
+// both must refuse another tenant's ids. Non-vacuous: A's workspace and A's PR really exist.
+{
+  const { getDependencyAutoMerge, setDependencyAutoMerge, listDependencyPrs } = await import(
+    '../src/merge/dependency-policy.js'
+  );
+  const wsA = await q.resolveWorkspaceScope(1, null);
+  const wsB = await q.resolveWorkspaceScope(2, null);
+  check(
+    'setDependencyAutoMerge(B, A’s workspace) refuses (IDOR blocked)',
+    (await setDependencyAutoMerge(2, wsA.workspaceId, true)) === false &&
+      (await getDependencyAutoMerge(1, wsA.workspaceId))?.enabled === false,
+  );
+  check(
+    'getDependencyAutoMerge(B, A’s workspace) reads nothing',
+    (await getDependencyAutoMerge(2, wsA.workspaceId)) === null,
+  );
+  // Make A's PR a dependency update so the refusal is not vacuous.
+  await db
+    .update(pullRequests)
+    .set({ dependencyVendor: 'dependabot' })
+    .where(eq(pullRequests.id, A.prId))
+    .execute();
+  check(
+    'listDependencyPrs(A) sees A’s dependency PR; B naming A’s repos and PR sees nothing',
+    (await listDependencyPrs(1, wsA.workspaceId, wsA.repoIds, [A.prId])).length === 1 &&
+      (await listDependencyPrs(2, wsB.workspaceId, wsA.repoIds, [A.prId])).length === 0,
+  );
+  await db
+    .update(pullRequests)
+    .set({ dependencyVendor: null })
+    .where(eq(pullRequests.id, A.prId))
+    .execute();
+}
+
 // ── The PENDING MUTE (db/pending-mute.ts) ──────────────────────────────────────
 // TWO id-addressed writes and one account-wide read, none of which live in db/queries.ts, so this
 // script cannot see them unless they are imported by name.

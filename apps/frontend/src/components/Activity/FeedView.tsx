@@ -10,7 +10,6 @@ import {
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import type {
   AutomatedReviewerKind,
-  ClaudeReviewVerdict,
   ConsolidatedFeedItem,
   DerivedState,
   EventType,
@@ -28,10 +27,9 @@ import {
 } from '../../hooks/useConsolidatedFeed.js';
 import { useDetectedReviewers, useSetWorkspaceReviewer } from '../../hooks/useBotTriage.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
-import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
-import { useFilters, type FeedBotLens } from '../../store/filters.js';
+import { useFilters, type FeedAuthors } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import {
   botVendorMeta,
@@ -45,7 +43,6 @@ import {
   MY_TURN_REASON_META,
   indexUsers,
   relativeTime,
-  safeExternalUrl,
   userLabel,
 } from '../../lib/ui.js';
 import { nearestScrollParent } from '../../lib/scrollParent.js';
@@ -56,12 +53,9 @@ import {
   BotIcon,
   CommentIcon,
   CommitIcon,
-  ExternalLinkIcon,
   MagnifierIcon,
+  PeopleIcon,
   PullRequestIcon,
-  SparkleIcon,
-  StarIcon,
-  WarningIcon,
 } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { PrCommentComposer } from '../PrCommentComposer.js';
@@ -71,11 +65,27 @@ import { LargePrFlag } from './LargePrFlag.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { UserName } from '../UserName.js';
 
-// The two SYNTHESIZED CI kinds (`db/queries.ts` isCiFeedKind's client twin). One predicate so
-// the count, the renderer and the click affordance can never cover different sets — missing one
-// arm is silent.
-function isCiFailureKind(kind: string): boolean {
-  return kind === 'ci_failed' || kind === 'trunk_ci_failed';
+// THE FILTER PILL EACH ITEM BELONGS TO, as the pill's own icon + ink — drawn on the card so a
+// reader can tell a comment from a PR event from a push at a glance, and so the icon on a card is
+// the icon of the pill that narrows to it. ONE table, read by both the pill row and FeedRow, so
+// the two cannot drift. (The PR-events chips carry no icons of their own, so every PR event wears
+// the pill's.)
+type FeedPillMeta = {
+  // An Icons.tsx component — aria-hidden by default (no `title`), so it never adds a name.
+  icon: (props: { size?: number; className?: string }) => JSX.Element;
+  label: string;
+  ink: string;
+};
+const FEED_PILL_META = {
+  comments: { icon: CommentIcon, label: 'Comment', ink: 'text-teal-600 dark:text-teal-300' },
+  prEvents: { icon: PullRequestIcon, label: 'PR event', ink: 'text-indigo-600 dark:text-indigo-300' },
+  commits: { icon: CommitIcon, label: 'Commits', ink: 'text-amber-600 dark:text-amber-300' },
+} satisfies Record<string, FeedPillMeta>;
+function feedPillOf(kind: string): FeedPillMeta | null {
+  if (kind === 'review_comment' || kind === 'pr_comment') return FEED_PILL_META.comments;
+  if (kind === 'commit_pushed') return FEED_PILL_META.commits;
+  if (feedPrEventChip(kind) != null) return FEED_PILL_META.prEvents;
+  return null;
 }
 
 // The "no chips pressed" reading of the PR-event sub-selection, hoisted so it is REFERENTIALLY
@@ -84,16 +94,8 @@ function isCiFailureKind(kind: string): boolean {
 const NO_PR_EVENT_KINDS: FeedPrEventChip[] = [];
 
 // A coloured chip + label describing WHAT an item is (the event kind). The My-Turn reason is
-// a separate pill (see MY_TURN_REASON_META); Claude runs get their own AI-signal chip.
-function itemGlyph(item: ConsolidatedFeedItem): { color: string; label: string; className?: string } {
-  // The one glyph whose colour must flip per theme — a hex can't (the chip below
-  // derives its wash by appending '1a'), so this kind carries classes instead.
-  if (item.kind === 'claude_review')
-    return { color: '', label: 'Claude Review', className: 'bg-ai-signal/10 text-ai-signal' };
-  // CI failures — one card per failed check run. "detected", not "failed at": both sources
-  // timestamp OUR observation, which can lag the real failure by up to the sync floor.
-  if (item.kind === 'ci_failed') return { color: '#ef4444', label: 'CI failed' };
-  if (item.kind === 'trunk_ci_failed') return { color: '#ef4444', label: 'Trunk CI failed' };
+// a separate pill (see MY_TURN_REASON_META).
+function itemGlyph(item: ConsolidatedFeedItem): { color: string; label: string } {
   // A submitted review is a first-class TYPED pill — the verdict is folded into the top
   // line ("Review: Approved" / "Review: Comment" / …), coloured by the verdict, instead
   // of a broad "Review" pill with the outcome in a footer.
@@ -122,13 +124,6 @@ const REVIEW_VERDICT_LABEL: Record<ReviewState, string> = {
   commented: 'Comment',
   dismissed: 'Dismissed',
   pending: 'Pending',
-};
-
-// Claude verdict → a small badge on a Claude Review card.
-const CLAUDE_VERDICT_META: Record<ClaudeReviewVerdict, { label: string; color: string }> = {
-  APPROVE: { label: 'approve', color: '#22c55e' },
-  REQUEST_CHANGES: { label: 'request changes', color: '#ef4444' },
-  COMMENT: { label: 'comment', color: '#9ca3af' },
 };
 
 // An automated-reviewer tag for a feed row's actor: a known VENDOR bot (by login) OR a
@@ -195,11 +190,10 @@ function metaOf(item: ConsolidatedFeedItem, prId: number): TabMeta {
 
 // The consolidated Feed — a flat, chronological, social-style stream of activity events.
 // Cross-repo when `repoId` is absent (scoped by the active FilterBar repos/members); scoped
-// to a single repo when a rail repo is selected. Each item is flagged `isMyTurn` (a PR you
-// participate in, acted on by someone else) → a yellow border + "My Turn" badge + why-pill,
-// plus optional client-side "My Turn only" / "Claude Reviews" filters. Clicking any item opens
-// full PR detail tab (a Claude item lands on its Claude Review tab; a PR comment scrolls to
-// the comment).
+// to a single repo when a rail repo is selected. People's activity OR bots' — a two-state toggle,
+// never mixed. Each item is flagged `isMyTurn` (a PR you participate in, acted on by someone
+// else) → a yellow border + "My Turn" badge + why-pill. Clicking any item opens the full PR detail
+// tab (a PR comment scrolls to the comment).
 
 // Windowing overscan (px) rendered past each edge of the visible viewport so a fast scroll
 // (or an expand-in-place row growing) never blanks, and a just-interacted row stays mounted.
@@ -247,46 +241,31 @@ const BOT_STATE_ORDER: DerivedState[] = [
 // cause with an em-dash, and at 25 hours the arithmetic did not support it.
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 
-// The cross-repo feed's server window (FEED_WINDOW_DAYS, db/queries.ts). The Bots pane's
-// bot-only feed overrides it with the analytics window selector — see `botWindowDays` below,
-// which is what the sentence must print, because that selector is on the same screen.
+// The cross-repo feed's server window (FEED_WINDOW_DAYS, db/queries.ts).
 const FEED_WINDOW_DAYS = 14;
 
 export function FeedView({
   repoId,
-  botsMode = false,
   userIds = null,
 }: {
   repoId?: number;
-  // The Bots pane's bot-only feed: hard-filters to automated-reviewer activity and swaps the
-  // normal pill row for review-thread derived-state pills (Untouched / Replied / Likely
-  // addressed / Resolved). Also drops the cross-repo "seen" marker.
-  botsMode?: boolean;
-  // Scope the feed to specific ACTORS (the per-contributor activity tab). Like botsMode this
-  // is an Activity-native scope, filtered server-side before the cap — NOT the Timeline's
-  // Members filter, which the feed still never sends. Also drops the cross-repo "seen" marker
-  // (a person's feed isn't "the feed" being caught up on).
+  // Scope the feed to specific ACTORS (the per-contributor activity tab). An Activity-native
+  // scope, filtered server-side before the cap — NOT the Timeline's Members filter, which the
+  // feed still never sends. Also drops the cross-repo "seen" marker (a person's feed isn't "the
+  // feed" being caught up on).
   userIds?: number[] | null;
 }): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
-  const feedMyTurnOnly = useFilters((s) => s.feedMyTurnOnly);
-  const toggleFeedMyTurnOnly = useFilters((s) => s.toggleFeedMyTurnOnly);
-  const feedClaudeOnly = useFilters((s) => s.feedClaudeOnly);
-  const toggleFeedClaudeOnly = useFilters((s) => s.toggleFeedClaudeOnly);
-  const feedBotLens = useFilters((s) => s.feedBotLens);
-  const cycleFeedBotLens = useFilters((s) => s.cycleFeedBotLens);
+  const feedAuthors = useFilters((s) => s.feedAuthors);
+  const setFeedAuthors = useFilters((s) => s.setFeedAuthors);
   const feedCatComments = useFilters((s) => s.feedCatComments);
   const feedCatPrEvents = useFilters((s) => s.feedCatPrEvents);
   const toggleFeedCatComments = useFilters((s) => s.toggleFeedCatComments);
   const toggleFeedCatPrEvents = useFilters((s) => s.toggleFeedCatPrEvents);
   const feedPrEventKinds = useFilters((s) => s.feedPrEventKinds);
   const toggleFeedPrEventKind = useFilters((s) => s.toggleFeedPrEventKind);
-  const feedNeedsReview = useFilters((s) => s.feedNeedsReview);
-  const toggleFeedNeedsReview = useFilters((s) => s.toggleFeedNeedsReview);
   const feedShowCommits = useFilters((s) => s.feedShowCommits);
   const toggleFeedShowCommits = useFilters((s) => s.toggleFeedShowCommits);
-  const feedCiLens = useFilters((s) => s.feedCiLens);
-  const cycleFeedCiLens = useFilters((s) => s.cycleFeedCiLens);
   const feedIsolatedPrId = useFilters((s) => s.feedIsolatedPrId);
   // The cross-repo feed's transient "New" markers (see FeedNewCohorts in store/filters.ts).
   const feedNewCohorts = useFilters((s) => s.feedNewCohorts);
@@ -295,11 +274,9 @@ export function FeedView({
   const selectThread = useFilters((s) => s.selectThread);
   const selectPr = useFilters((s) => s.selectPr);
   const showPrComment = useFilters((s) => s.showPrComment);
-  const openClaudeReview = useFilters((s) => s.openClaudeReview);
   const focusEventInTab = useFilters((s) => s.focusEventInTab);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
-  const claudeReviewEnabled = useAiCapabilities().enabled;
 
   // Detected reviewers for the ACTIVE WORKSPACE (CORE / free) → the actor→row map that lets
   // in-house AI / Pierre actors carry a vendor tag (login-based vendors don't need it).
@@ -330,8 +307,8 @@ export function FeedView({
     for (const r of detectedReviewers?.reviewers ?? []) m.set(r.userId, r);
     return m;
   }, [detectedReviewers]);
-  // The union verdict for ONE actor — mirrors the server's hiddenBotUserIds so the lens, the
-  // pill counts and the server-side exclusion agree on who is a bot. `user` may come from the
+  // The union verdict for ONE actor — mirrors the server's hiddenBotUserIds, so a person's
+  // activity tab picks the same side of the people/bots split the server would. `user` may come from the
   // feed response OR the account roster, whichever the caller holds; the workspace's stored
   // row wins in BOTH directions.
   const isUnionBot = useCallback(
@@ -368,7 +345,7 @@ export function FeedView({
       const ok = window.confirm(
         `Stop treating ${label} as an automated reviewer in this Workspace?\n\n` +
           'This applies to every repo in the Workspace — not just this PR’s repo. ' +
-          'It keeps the vendor name, and you can undo it from Bots › Settings.',
+          'It keeps the vendor name, and you can undo it from Feed › Bot classification.',
       );
       if (!ok) return;
       judgementMutate({ userId, body: { workspaceId, automated: false } });
@@ -415,21 +392,6 @@ export function FeedView({
     }
     return newest;
   }, [reposData, workspaceId, repoId]);
-  // Bots pane: the feed window follows the analytics window selector (shared store field),
-  // using the SAME window→days mapping as getBotAnalytics (rolling_7=7, rolling_30=30, else —
-  // incl. sprint — 14). Null outside botsMode so normal feeds keep their default window.
-  // ⚠ READ BEFORE THE STALENESS SENTENCE BELOW, WHICH HAS TO PRINT THIS NUMBER. The sentence
-  // used to say "14 days" whatever the selector beside it said; on "Last 30 days" both numbers
-  // were on screen and the one the app printed was the false one.
-  const botAnalyticsWindow = useFilters((s) => s.botAnalyticsWindow);
-  const botWindowDays = botsMode
-    ? botAnalyticsWindow === 'rolling_7'
-      ? 7
-      : botAnalyticsWindow === 'rolling_30'
-        ? 30
-        : 14
-    : null;
-
   // Computed at render from the timestamp, never stored: a cached "18 days" would go stale in
   // place. ⚠ It states two facts a reader can check — the list is empty over THIS feed's own
   // window, and the data is this old — AND STOPS. It claims no cause (staleness need not be the
@@ -437,32 +399,27 @@ export function FeedView({
   // and a repo with a dead token would make the promise false.
   // ⚠ SILENT UNDER SINGLE-PR ISOLATION: that feed has NO window at all (the server scopes to
   // the PR and reads from the epoch), so any window sentence there would be invented.
-  const feedWindowDays = botWindowDays ?? FEED_WINDOW_DAYS;
+  const feedWindowDays = FEED_WINDOW_DAYS;
   const staleMs = lastSyncedMs != null ? Date.now() - lastSyncedMs : null;
   const staleNotice =
     feedIsolatedPrId == null && staleMs != null && staleMs > STALE_AFTER_MS
-      ? `${
-          botsMode
-            ? `No bot activity in the last ${feedWindowDays} days`
-            : `Nothing in the last ${feedWindowDays} days`
-        }. Last synced ${formatBehind(staleMs)} ago.`
+      ? `Nothing in the last ${feedWindowDays} days. Last synced ${formatBehind(staleMs)} ago.`
       : null;
 
   // Single-PR isolation applies to BOTH the cross-repo feed and a per-repo console; it is set
   // from PrDetail's "Show in Activity feed" or a drill-down row. `setActivityRepo` clears it when
   // switching rails, so it never leaks across repos.
   // Scopes the feed query to a single PR when set. The "Showing only #N" banner itself renders
-  // in the surrounding panel (FeedIsolationBanner — under the repo/bots summary header), not
-  // here.
+  // in the surrounding panel (FeedIsolationBanner — under the repo summary header), not here.
   const isolatedPrId = feedIsolatedPrId;
 
-  // THE ONE PREDICATE that says "this mount is *the* feed". FeedView has five mounts sharing one
-  // FeedRow — the cross-repo feed, the unresolved-repo fallback, the per-repo console, the Bots
-  // pane's bot-only feed and a person's activity tab — and three behaviours are cross-repo-only:
+  // THE ONE PREDICATE that says "this mount is *the* feed". FeedView has four mounts sharing one
+  // FeedRow — the cross-repo feed, the unresolved-repo fallback, the per-repo console and a
+  // person's activity tab — and three behaviours are cross-repo-only:
   // the server "seen" marker below, the auto-insert of newly-arrived items, and the "New" card
   // marker that goes with it. The narrowed views are things someone opened on purpose; keeping
   // them live (and telling them what's new) would be answering a question they didn't ask.
-  const isCrossRepoFeed = repoId == null && !botsMode && userIds == null;
+  const isCrossRepoFeed = repoId == null && userIds == null;
 
   // Viewing the CROSS-REPO feed marks it seen server-side (once per mount), resetting the
   // "new My Turn since you were last here" count `/api/me` computes. A per-repo feed (repoId
@@ -483,37 +440,36 @@ export function FeedView({
   const markFeedSeen = useMarkFeedSeen();
   const markedSeenRef = useRef(false);
   useEffect(() => {
-    // botsMode and a userIds scope are both narrowed views — neither may reset the cross-repo
-    // My-Turn "seen" marker (you haven't caught up on the feed by reading one person's).
+    // A userIds scope is a narrowed view — it may not reset the cross-repo "seen" marker (you
+    // haven't caught up on the feed by reading one person's).
     if (isCrossRepoFeed && !markedSeenRef.current) {
       markedSeenRef.current = true;
       markFeedSeen.mutate();
     }
   }, [isCrossRepoFeed, markFeedSeen]);
 
-  // Per-contributor exemption: a BOT contributor's own activity tab must not be emptied by
-  // the hidden-by-default lens, so when EVERY viewed actor is a bot under the union
-  // definition the EFFECTIVE lens is 'all'. Derived for the render only — never written back
-  // to the store (the standing sub-tab landmine: a corrective set() would permanently forget
-  // the user's choice). The check reads the account roster + the workspace reviewer rows, NOT
-  // the feed response — the lens now drives the request itself (excludeBots below), so a
-  // response-derived check would ask an already-emptied feed whether its subject is a bot.
+  // A PERSON'S ACTIVITY TAB PICKS ITS OWN SIDE. The toggle is hidden there and the side follows
+  // the subject: every viewed actor a bot (union definition) → 'bots', else 'humans' — so neither
+  // a bot's tab nor a person's is emptied by the store's choice. Derived for the render only,
+  // never written back (a corrective set() would permanently forget the reader's choice). It reads
+  // the account roster + the workspace reviewer rows, NOT the feed response: the side drives the
+  // request itself, so a response-derived check would ask an already-emptied feed.
   const { data: roster } = useUsers();
   const rosterById = useMemo(() => indexUsers(roster ?? []), [roster]);
-  const lensInert = useMemo(
+  const personScoped = userIds != null && userIds.length > 0;
+  const authors: FeedAuthors = useMemo(
     () =>
-      userIds != null &&
-      userIds.length > 0 &&
-      userIds.every((id) => isUnionBot(id, rosterById.get(id))),
-    [userIds, isUnionBot, rosterById],
+      personScoped
+        ? userIds.every((id) => isUnionBot(id, rosterById.get(id)))
+          ? 'bots'
+          : 'humans'
+        : feedAuthors,
+    [personScoped, userIds, isUnionBot, rosterById, feedAuthors],
   );
-  const effectiveBotLens: FeedBotLens = lensInert ? 'all' : feedBotLens;
 
   // Members + the header exclude-bots toggle/allow-list are TIMELINE-only filters — the feed
-  // never sends them (userIds → null, allowedBotIds omitted). Bot filtering here is
-  // Activity-native: the feedBotLens pills — whose 'hide' now rides the server's excludeBots
-  // param (union bot definition, excluded BEFORE the page cap so a bot-heavy window fills
-  // with human rows) while 'only' stays a client-side view — and botsMode (server-side).
+  // never sends them. The people/bots split here is Activity-native and SERVER-side (`authors`,
+  // the union bot definition, applied BEFORE the page cap so either side fills its own window).
   // useConsolidatedFeed and useFeedAutoInsert below MUST share identical scope inputs — the
   // auto-insert path SPLICES the head's rows into this query's cache entry, so a divergent
   // scope would prepend rows this request would never have returned.
@@ -529,65 +485,30 @@ export function FeedView({
     loadMore,
     isFetchingMore,
   } = useConsolidatedFeed({
-      // The active WORKSPACE decides which logins count as automated reviewers (the botsOnly
-      // path) AND which repos `repoIds: null` expands to — `repoIds` alone can express neither.
+      // The active WORKSPACE decides which logins count as bots AND which repos `repoIds: null`
+      // expands to — `repoIds` alone can express neither.
       workspaceId,
       repoIds: effectiveRepoIds,
       userIds,
       prId: isolatedPrId,
-      // Lens 'hide' is SERVER-side: bots (union definition) excluded before the page cap.
-      // 'only'/'all' fetch everything; 'only' narrows client-side. Off in botsMode (the
-      // server forces it off under botsOnly anyway).
-      excludeBots: !botsMode && effectiveBotLens === 'hide',
-      // Bot pane: the backend filters to automated reviewers IN SQL (before the cap), so the
-      // feed spans the full window of bot activity instead of a bot-slice of a capped page.
-      botsOnly: botsMode,
-      botWindowDays,
+      authors,
       // Opt-in "show individual commits" — surfaces plain commit-push runs (not just the ones
-      // that addressed a thread). Inert in botsMode (the bot feed skips commits anyway).
-      includeAllCommits: !botsMode && feedShowCommits,
-      // Opt-in "show CI failures" — one row per failed check run, on PR heads AND on the
-      // default branch. Inert in botsMode (a red build is not review-bot activity, and the
-      // server ignores it there anyway).
-      includeCiFailures: !botsMode && feedCiLens !== 'off',
+      // that addressed a thread).
+      includeAllCommits: feedShowCommits,
     });
 
   const rootRef = useRef<HTMLDivElement>(null);
 
   const usersById = useMemo(() => indexUsers(users), [users]);
-  // Bot lens: an actor is a "bot" for the lens if it's ANY bot under the UNION definition —
-  // the global users.isBot flag (dependabot/CI) ∪ the workspace's automated-reviewer verdict
-  // (classified in-house bots like deepsource), with a manual "human" override un-botting in
-  // both directions — so "Hide bots" gives the clean human-only view and the pills/counts/lens
-  // agree with the server's exclusion. The per-row vendor TAG is review-bot-only.
-  const isBotActor = useCallback(
-    (i: ConsolidatedFeedItem): boolean =>
-      i.actorId != null && isUnionBot(i.actorId, usersById.get(i.actorId)),
-    [isUnionBot, usersById],
-  );
-  // Pill badge counts come from the SERVER facets (whole loadable stream), falling back to the
-  // loaded-page derivation only for a stale IndexedDB response predating `counts`.
-  const myTurnCount = useMemo(
-    () => counts?.myTurn ?? items.filter((i) => i.isMyTurn).length,
-    [counts, items],
-  );
-  const claudeCount = useMemo(
-    () => counts?.claude ?? items.filter((i) => i.kind === 'claude_review').length,
-    [counts, items],
-  );
-  const botCount = useMemo(
-    () => counts?.bots ?? items.filter(isBotActor).length,
-    [counts, items, isBotActor],
-  );
   // The sub-selection the render and the filter actually use. The store field is REMEMBERED
   // across the parent pill going off (see feedPrEventKinds) — the row just stops rendering and
   // this reads empty, exactly like BotPrsDetail's `activePills`. A corrective set() here would
   // permanently forget the reader's choice. Empty = all four chips.
   const activePrEventKinds = feedCatPrEvents ? feedPrEventKinds : NO_PR_EVENT_KINDS;
   // Event-category matcher for the Comments / PR-events pills. Both off = no category filter.
-  // When either is on, keep only items in the enabled categories (commit, Claude and CI-failure
-  // rows, which are in neither category, drop out while a category pill is active — deliberate:
-  // adding a kind here would silently change what those two existing pills mean).
+  // When either is on, keep only items in the enabled categories (commit rows, which are in
+  // neither category, drop out while a category pill is active — deliberate: adding a kind here
+  // would silently change what those two existing pills mean).
   //
   // The PR-events half additionally consults the dependent chip row, CLIENT-SIDE like its parent:
   // an empty selection is the whole bucket, so a feed with no chip pressed narrows exactly as it
@@ -646,61 +567,19 @@ export function FeedView({
     return labels.length === 0 ? last : `${labels.join(', ')} or ${last}`;
   }, [activePrEventKinds]);
   // Whether that sentence may be SAID — i.e. whether the chips are what actually narrowed the
-  // list. FOUR states pre-empt them, every one applied in applyFeedPills BEFORE catMatch ever
-  // runs: the CI lens' 'only' skips catMatch outright, Claude-only rows are in NO category,
-  // "Only mine" keeps just the rows where the reader owes something, and the bot lens' 'only'
-  // keeps just the bot rows. Naming chips in any of the four blames the wrong control — and the
-  // chip badges beside the sentence would flatly contradict it, because they come from the
-  // server's `byEventType` facet, computed over the whole loadable stream and deliberately blind
-  // to every client-side pill. ("Only mine" + "Merged", on a reader who owes nothing on a merged
-  // PR, said "No merged PR events in this window" under a Merged chip badging 533.)
-  //
-  // ⚠ THE BOT LENS IS TWO DIFFERENT MECHANISMS AND ONLY ONE OF THEM IS SAFE. 'hide' is SERVER-side
-  // (`excludeBots`, above), so the facet is computed over the same excluded stream and badge and
-  // list agree by construction — it needs no entry here. 'only' sends `excludeBots: false` and
-  // narrows on the CLIENT, so the facet still counts the human rows the list is hiding: on
-  // workspace 3 that is 36 merged events of which 0 are a bot's, i.e. an empty list under a
-  // Merged chip badging 36. Gate on the lens, never on "the bot lens is handled server-side".
-  const prEventKindsNarrowing =
-    activePrEventKinds.length > 0 &&
-    feedCiLens !== 'only' &&
-    !feedClaudeOnly &&
-    !feedMyTurnOnly &&
-    effectiveBotLens !== 'only';
-  // "Needs review" matcher — a pr_opened / pr_ready_for_review card whose PR STILL awaits a
-  // first review (the server-computed live snapshot). MUST mirror computeFeedCounts's
-  // awaitingReview facet exactly, or the badge and the filtered list disagree.
-  const matchesNeedsReview = useCallback(
-    (i: ConsolidatedFeedItem): boolean =>
-      (i.kind === 'pr_opened' || i.kind === 'pr_ready_for_review') &&
-      i.prAwaitingReview === true,
-    [],
-  );
-  // Needs-review pill badge — the server `awaitingReview` facet with a loaded-page fallback
-  // (a stale IndexedDB-persisted response predates the field). Both sides count DISTINCT PRs,
-  // not events — a draft-first PR carries both kinds in the window.
-  const needsReviewCount = useMemo(
-    () =>
-      counts?.awaitingReview ??
-      new Set(items.filter(matchesNeedsReview).map((i) => i.prId)).size,
-    [counts, items, matchesNeedsReview],
-  );
+  // list. Every narrowing on this screen is now a pure per-item pill whose facet the server counts
+  // over the same stream, so a pressed chip is the only thing that can have emptied it.
+  const prEventKindsNarrowing = activePrEventKinds.length > 0;
   // Commits pill badge — how many commit-push items are currently in the stream (the
   // thread-addressing runs by default; every push run once "show commits" is on).
   const commitsCount = useMemo(
     () => counts?.commits ?? items.filter((i) => i.kind === 'commit_pushed').length,
     [counts, items],
   );
-  // CI-failures pill badge. `counts.ciFailures` is undefined on a stale IndexedDB-persisted
-  // response predating the facet, so the page-derived fallback still has to exist.
-  const ciFailuresCount = useMemo(
-    () => counts?.ciFailures ?? items.filter((i) => isCiFailureKind(i.kind)).length,
-    [counts, items],
-  );
   // Review-thread DERIVED-state filter (a Set of selected states; empty = all) — a pill row
-  // on EVERY feed view, not just the Bots pane. Local (not a store filter). Only
-  // thread-bearing items carry a derivedState; a non-thread item (a PR open/merge, a plain
-  // comment, a Claude run) drops out whenever any state pill is active.
+  // on every feed view. Local (not a store filter). Only thread-bearing items carry a
+  // derivedState; a non-thread item (a PR open/merge, a plain comment) drops out whenever any
+  // state pill is active.
   const [botStateFilter, setBotStateFilter] = useState<Set<DerivedState>>(() => new Set());
   const toggleBotState = useCallback(
     (s: DerivedState): void => {
@@ -710,66 +589,11 @@ export function FeedView({
         else next.add(s);
         return next;
       });
-      // Mutually exclusive with the Needs-review pill: state pills keep only review_comment
-      // items (the only kind carrying derivedState) while Needs-review keeps only
-      // pr_opened/ready cards — ANDed they are empty for EVERY dataset, a dead end where both
-      // badges promise items the combination can never show.
-      if (feedNeedsReview) toggleFeedNeedsReview();
     },
-    [feedNeedsReview, toggleFeedNeedsReview],
+    [],
   );
-  // Bots pane: a per-VENDOR filter — a Set of actor ids (each distinct bot is one pill, so the
-  // in-house bots deepsource / github-actions / … isolate separately, not lumped as "in_house").
-  // Composes with the state pills (vendor ∧ state). Local, botsMode-only.
-  const [botVendorFilter, setBotVendorFilter] = useState<Set<number>>(() => new Set());
-  const toggleBotVendor = useCallback((actorId: number): void => {
-    setBotVendorFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(actorId)) next.delete(actorId);
-      else next.add(actorId);
-      return next;
-    });
-  }, []);
-  // The distinct bots present in the (already bot-only) feed → one pill each, labelled by the
-  // automated-reviewer tag (classification label / vendor name), most-active first.
-  const botVendors = useMemo(() => {
-    type Vendor = { actorId: number; label: string; color: string; count: number };
-    if (!botsMode) return [] as Vendor[];
-    const resolve = (aid: number, count: number): Vendor => {
-      const u = usersById.get(aid);
-      const tag = automatedTagFor(u, identityByUserId, botColor);
-      const label = tag?.label?.trim() ? tag.label : userLabel(u, aid);
-      return { actorId: aid, label, color: tag?.color ?? '#6b7280', count };
-    };
-    // Prefer the server facet (whole loadable stream): the counts + actor set span beyond the
-    // loaded page, and the backend ships every byBotActor actor in `users` so labels resolve.
-    // Skip an actor we can't label (defensive — shouldn't happen given the backfill).
-    if (counts?.byBotActor) {
-      const out: Vendor[] = [];
-      for (const [key, count] of Object.entries(counts.byBotActor)) {
-        const aid = Number(key);
-        if (!usersById.has(aid)) continue;
-        out.push(resolve(aid, count));
-      }
-      return out.sort((a, b) => b.count - a.count);
-    }
-    // Stale-cache fallback: derive from the loaded page (original items-based path).
-    const m = new Map<number, Vendor>();
-    for (const i of items) {
-      const aid = i.actorId;
-      if (aid == null) continue;
-      const existing = m.get(aid);
-      if (existing) {
-        existing.count += 1;
-        continue;
-      }
-      m.set(aid, resolve(aid, 1));
-    }
-    return [...m.values()].sort((a, b) => b.count - a.count);
-  }, [botsMode, counts, items, usersById, identityByUserId, botColor]);
   // Per-state counts for the pill badges — independent of the active pills. byThreadState
-  // populates server-side for every feed view (thread-bearing items only), so the same row
-  // works in and out of botsMode.
+  // populates server-side for every feed view (thread-bearing items only).
   const botStateCounts = useMemo(() => {
     const m = new Map<DerivedState, number>();
     // Prefer the server facet (whole loadable stream); fall back to the loaded page on a stale
@@ -787,10 +611,8 @@ export function FeedView({
     return m;
   }, [counts, items]);
 
-  // "My Turn only" and "Claude Reviews only" are mutually-exclusive client-side filters (My
-  // Turn is CORE / free, so it's always available). The category pills + the bot lens compose
-  // ON TOP of them. In botsMode the stream is hard-filtered to bot activity + the derived-state
-  // pills instead (the store lens/category/my-turn filters don't apply).
+  // The client-side pills: the category pills (with the PR-events chip row) and the thread-state
+  // pills, ANDed. The people/bots split is server-side and needs no pass here.
   //
   // ⚠ FACTORED OUT OF THE `visible` MEMO ON PURPOSE, so the auto-insert path can ask the SAME
   // question of a batch that is about to be prepended: how many of these rows actually reach the
@@ -798,52 +620,15 @@ export function FeedView({
   // on its own gives the same answer as narrowing the whole list and taking its prefix — which is
   // what lets the window shift be exact instead of an estimate (see countHeadArrivals).
   const applyFeedPills = useCallback((list: ConsolidatedFeedItem[]): ConsolidatedFeedItem[] => {
-    if (botsMode) {
-      // Backend already restricted to automated reviewers; the vendor + state pills compose here
-      // (vendor ∧ state — an empty set for a dimension means "all" for that dimension).
-      let base = list;
-      if (botVendorFilter.size > 0)
-        base = base.filter((i) => i.actorId != null && botVendorFilter.has(i.actorId));
-      if (botStateFilter.size > 0)
-        base = base.filter((i) => i.derivedState != null && botStateFilter.has(i.derivedState));
-      // The Needs-review pill lives in the SHARED row below the botsMode early return, so it
-      // must be applied here too — not just in the main chain.
-      if (feedNeedsReview) base = base.filter(matchesNeedsReview);
-      return base;
-    }
-    const base = feedMyTurnOnly
-      ? list.filter((i) => i.isMyTurn)
-      : feedClaudeOnly
-        ? list.filter((i) => i.kind === 'claude_review')
-        : feedCiLens === 'only'
-          ? list.filter((i) => isCiFailureKind(i.kind))
-          : list;
-    // The category pills are SKIPPED under the CI lens' 'only' state. CI rows belong to neither
-    // category (that exclusion is deliberate — see catMatch), so composing the two could only
-    // ever yield an empty feed, and an empty feed is exactly the "this pill is broken" reading
-    // this lens exists to remove.
-    const byCat =
-      (feedCatComments || feedCatPrEvents) && feedCiLens !== 'only' ? base.filter(catMatch) : base;
-    // 'hide' is applied server-side too (excludeBots on the request); the client pass here
-    // keeps placeholder pages from the previous key (which still hold bots) consistent while
-    // the re-keyed fetch is in flight, and covers any client/server divergence.
-    const byLens =
-      effectiveBotLens === 'hide'
-        ? byCat.filter((i) => !isBotActor(i))
-        : effectiveBotLens === 'only'
-          ? byCat.filter(isBotActor)
-          : byCat;
-    // Same rule as botsMode: any active state pill hides items without a derivedState
-    // (opens/merges/plain comments/Claude rows carry none).
-    const byState =
-      botStateFilter.size > 0
-        ? byLens.filter((i) => i.derivedState != null && botStateFilter.has(i.derivedState))
-        : byLens;
-    return feedNeedsReview ? byState.filter(matchesNeedsReview) : byState;
+    const byCat = feedCatComments || feedCatPrEvents ? list.filter(catMatch) : list;
+    // Any active state pill hides items without a derivedState (opens/merges/plain comments).
+    return botStateFilter.size > 0
+      ? byCat.filter((i) => i.derivedState != null && botStateFilter.has(i.derivedState))
+      : byCat;
     // `feedPrEventKinds` rides in through catMatch rather than being read here, but it is listed
     // because this array is HAND-MAINTAINED and a narrowing missing from it is a stale filter
     // with no error.
-  }, [botsMode, botStateFilter, botVendorFilter, feedMyTurnOnly, feedClaudeOnly, feedCiLens, effectiveBotLens, feedCatComments, feedCatPrEvents, feedPrEventKinds, catMatch, isBotActor, feedNeedsReview, matchesNeedsReview]);
+  }, [botStateFilter, feedCatComments, feedCatPrEvents, feedPrEventKinds, catMatch]);
   const visible = useMemo(() => applyFeedPills(items), [applyFeedPills, items]);
 
   // Honest count line: loaded-of-TOTAL (the server's post-cap stream length), never
@@ -1131,11 +916,8 @@ export function FeedView({
     repoIds: effectiveRepoIds,
     userIds,
     prId: isolatedPrId,
-    excludeBots: !botsMode && effectiveBotLens === 'hide',
-    botsOnly: botsMode,
-    botWindowDays,
-    includeAllCommits: !botsMode && feedShowCommits,
-    includeCiFailures: !botsMode && feedCiLens !== 'off',
+    authors,
+    includeAllCommits: feedShowCommits,
     enabled: isCrossRepoFeed,
     onBeforeInsert,
   });
@@ -1159,9 +941,8 @@ export function FeedView({
   // ⚠ A PLACEHOLDER LIST IS NOT THIS SCOPE'S LIST. `placeholderData: (prev) => prev` keeps the
   // PREVIOUS query key's rows on screen while a re-keyed fetch is in flight, and `scopeKey` flips
   // in that same render — so seeding the baseline from them makes the real response's extra head
-  // rows look like arrivals. Every WIDENING re-key (bot lens 'hide'→'only'/'all', Commits off→on,
-  // CI failures 'off'→'feed'/'only') would then mint a "New" cohort on rows that were merely
-  // hidden a moment ago. The baseline must be the first SETTLED list for the scope.
+  // rows look like arrivals. Every re-key (people ↔ bots, Commits off → on) would then mint a "New"
+  // cohort on rows that were merely hidden a moment ago. The baseline must be the first SETTLED list for the scope.
   const knownItemIdsRef = useRef<{ scopeKey: string; ids: Set<string> } | null>(null);
   useEffect(() => {
     if (!isCrossRepoFeed || items.length === 0 || isPlaceholderData) return;
@@ -1228,15 +1009,14 @@ export function FeedView({
     const prev = prevFeedRef.current;
     prevFeedRef.current = { scopeKey, items, placeholder: isPlaceholderData };
     // Gated to the cross-repo feed with the rest of the feature: the narrowed mounts (per-repo
-    // console, the Bots pane, a person's activity tab) are views someone opened on purpose.
+    // console, a person's activity tab) are views someone opened on purpose.
     if (!isCrossRepoFeed || prev == null || prev.items === items) return;
     // A re-key is not an arrival, and `placeholderData` shows the PREVIOUS key's rows while the
     // new one loads — neither end of that swap describes the same stream, so nothing may be
     // compensated across it.
     if (prev.scopeKey !== scopeKey || prev.placeholder || isPlaceholderData) return;
     // ⚠ SHIFT BY THE ROWS THAT ACTUALLY REACH `visible`, NOT THE RAW ARRIVAL COUNT. The window
-    // indexes `visible`, which the client-side pills (My Turn, Claude-only, CI lens 'only',
-    // category, bot lens 'only', thread state, needs-review) narrow. Shifting by the raw count
+    // indexes `visible`, which the client-side pills (category, thread state) narrow. Shifting by the raw count
     // slides the window PAST the anchor: the anchor unmounts, the carried-over `bottom` then
     // double-reserves the rows the window slid past, and the `scrollHeight` fallback yanks the
     // pane by the estimated height of rows that were never rendered — once per poll.
@@ -1410,27 +1190,19 @@ export function FeedView({
 
   // Open an item → the full-height PR DETAIL tab (its Show/Focus drive the timeline).
   // `fromActivity` arms Back-to-Activity + stashes this row's id so Back scrolls it back into
-  // view. We also drive the right in-detail deep link: a Claude run → its Claude Review tab;
-  // a thread → that thread's Threads-tab card; a PR comment → scroll to + highlight the
+  // view. We also drive the right in-detail deep link: a thread → that thread's Threads-tab card; a PR comment → scroll to + highlight the
   // comment; else the PR. Stable (store actions are stable) so memoised rows don't churn.
   const open = useCallback(
     (item: ConsolidatedFeedItem): void => {
       const prId = item.prId;
       if (prId == null) return;
       const meta = metaOf(item, prId);
-      const opts = { fromActivity: true, returnItemId: item.id };
-      // A Claude run lands on its Claude Review tab — openClaudeReview opens the pr-detail tab
-      // itself (so it works from any overlay), so don't also open it here (avoids a double open).
-      if (item.kind === 'claude_review') {
-        openClaudeReview(meta, opts);
-        return;
-      }
-      openPrDetailTab(meta, opts);
+      openPrDetailTab(meta, { fromActivity: true, returnItemId: item.id });
       if (item.threadId != null) selectThread(prId, item.threadId);
       else if (item.commentId != null) showPrComment(prId, item.commentId);
       else selectPr(prId);
     },
-    [openClaudeReview, openPrDetailTab, selectThread, showPrComment, selectPr],
+    [openPrDetailTab, selectThread, showPrComment, selectPr],
   );
 
   // Open a specific affected thread inline on a commit item — jump straight to that thread's
@@ -1456,15 +1228,11 @@ export function FeedView({
       const prId = item.prId;
       if (prId == null) return;
       openPrFocusTab(metaOf(item, prId), { fromActivity: true, returnItemId: item.id });
-      // Synthesized kinds are excluded: `focusEventInTab` takes an EventType and matches a
-      // TIMELINE MARKER by it, and neither 'claude_review' nor the CI kinds is one — the
-      // `as EventType` cast would be a lie that silently asks the timeline to glow a marker
-      // that cannot exist. The focus tab itself still opens, which is the useful half.
-      if (item.kind !== 'claude_review' && !isCiFailureKind(item.kind)) {
-        const refId = item.threadId ?? item.commentId ?? null;
-        const threadId = item.kind === 'review_comment' ? item.threadId : null;
-        focusEventInTab(prId, item.occurredAt, { type: item.kind as EventType, refId }, threadId);
-      }
+      // Every feed kind is an `events` row now (the synthesized Claude/CI kinds left the Feed),
+      // so each one has a timeline marker to glow.
+      const refId = item.threadId ?? item.commentId ?? null;
+      const threadId = item.kind === 'review_comment' ? item.threadId : null;
+      focusEventInTab(prId, item.occurredAt, { type: item.kind as EventType, refId }, threadId);
     },
     [openPrFocusTab, focusEventInTab],
   );
@@ -1482,82 +1250,53 @@ export function FeedView({
       {/* The AI repo-summary (digest) collection now lives in the Insights panel — one home
           for every AI summary, with a single unified Refresh. It's no longer atop the Feed. */}
 
-      {/* Filter pills, two rows. Row 1 branches: the Bots pane gets a per-VENDOR row (one per
-          distinct bot, so the in-house bots isolate separately) replacing the normal
-          My-Turn/Claude/category/bot-lens pills. Row 2 — the review-thread derived-STATE
-          pills — is SHARED by every feed view. Toggling multiple within a row ORs them; the
-          rows AND together. */}
+      {/* Filter pills. Row 1: humans | bots (never mixed), then the category pills. The PR-events
+          pill's dependent chip row sits under it while pressed. Last row: the review-thread
+          derived-STATE pills. Toggling multiple within a row ORs them; the rows AND together. */}
       <div className="space-y-2 px-0.5">
-        {botsMode ? (
-          botVendors.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
-                Vendor
-              </span>
-              {botVendors.map((v) => {
-                const on = botVendorFilter.has(v.actorId);
-                return (
-                  <button
-                    key={v.actorId}
-                    type="button"
-                    onClick={() => toggleBotVendor(v.actorId)}
-                    aria-pressed={on}
-                    className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                      on
-                        ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
-                        : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-                    }`}
-                    title={`Show only ${v.label}`}
-                  >
-                    <BotIcon />
-                    <span
-                      aria-hidden="true"
-                      className="inline-block h-2 w-2 rounded-full"
-                      style={{ background: v.color }}
-                    />
-                    {v.label}
-                    <span className="tabular-nums opacity-70">{v.count}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )
-        ) : (
-      <>
-      {/* My Turn / Claude filter toggles. My Turn is CORE / free. */}
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={toggleFeedMyTurnOnly}
-          aria-pressed={feedMyTurnOnly}
-          className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-            feedMyTurnOnly
-              ? 'border-yellow-400 bg-yellow-50 text-yellow-700 dark:border-yellow-500/60 dark:bg-yellow-950/30 dark:text-yellow-300'
-              : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-          }`}
-          title="Show only items that concern you (My Turn)"
-        >
-          <StarIcon /> My Turn
-          {myTurnCount > 0 && <span className="tabular-nums opacity-70">{myTurnCount}</span>}
-        </button>
-        {claudeReviewEnabled && (
-          <button
-            type="button"
-            onClick={toggleFeedClaudeOnly}
-            aria-pressed={feedClaudeOnly}
-            className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-              feedClaudeOnly
-                ? 'border-ai-signal/50 bg-ai-signal/10 text-ai-signal hover:border-ai-signal'
-                : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-            }`}
-            title="Show only Claude Reviews"
+        {/* Humans | Bots — a two-state SEGMENTED control, server-side (`authors`). Hidden on a
+            person's activity tab, whose side follows the person (see `authors`). */}
+        {!personScoped && (
+          <div
+            role="radiogroup"
+            aria-label="Whose activity"
+            className="inline-flex rounded-full border border-gray-300 p-0.5 dark:border-gray-700"
           >
-            <SparkleIcon /> Claude Reviews
-            {claudeCount > 0 && <span className="tabular-nums opacity-70">{claudeCount}</span>}
-          </button>
+            {(
+              [
+                { id: 'humans', label: 'Humans', Icon: PeopleIcon },
+                { id: 'bots', label: 'Bots', Icon: BotIcon },
+              ] as const
+            ).map(({ id, label, Icon }) => {
+              const on = feedAuthors === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  onClick={() => setFeedAuthors(id)}
+                  className={`flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                    on
+                      ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200'
+                      : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                  }`}
+                  title={
+                    id === 'humans'
+                      ? "Humans' activity, including their replies to bots"
+                      : "Bots' activity, including their replies to people"
+                  }
+                >
+                  <Icon /> {label}
+                </button>
+              );
+            })}
+          </div>
         )}
         {/* Event-category pills: narrow the stream to comment activity and/or PR events.
-            Independent toggles (both off = everything). Compose with the bot lens. */}
+            Independent toggles (both off = everything). Each pill's icon is also drawn on the
+            cards it keeps (FEED_PILL_META). */}
         <button
           type="button"
           onClick={toggleFeedCatComments}
@@ -1569,7 +1308,7 @@ export function FeedView({
           }`}
           title="Show comment activity (review threads + PR comments)"
         >
-          <CommentIcon /> Comments
+          <FEED_PILL_META.comments.icon /> Comments
           {commentCount > 0 && <span className="tabular-nums opacity-70">{commentCount}</span>}
         </button>
         <button
@@ -1583,7 +1322,7 @@ export function FeedView({
           }`}
           title="Show PR events (opens, merges, closes, reopens, ready-for-review, reviews)"
         >
-          <PullRequestIcon /> PR events
+          <FEED_PILL_META.prEvents.icon /> PR events
           {prEventsCount > 0 && <span className="tabular-nums opacity-70">{prEventsCount}</span>}
         </button>
         {/* Commits — opt-in (off by default). On: every commit-push run surfaces; off: only the
@@ -1598,83 +1337,15 @@ export function FeedView({
               ? 'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500/60 dark:bg-amber-950/30 dark:text-amber-300'
               : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
           }`}
-          title="Show individual commit pushes in the feed (off by default) — on surfaces every push run, off keeps only pushes that addressed a review thread"
+          title="Show every commit push. Off shows only pushes that addressed a review thread."
         >
-          <CommitIcon /> Commits
+          <FEED_PILL_META.commits.icon /> Commits
           {commitsCount > 0 && <span className="tabular-nums opacity-70">{commitsCount}</span>}
         </button>
-        {/* CI failures — a THREE-state lens cycling off → feed → only → off, and the one feed
-            control that PERSISTS with the filter bar. One card per failed check run, on PR heads
-            AND on the default branch.
-
-            'off' IS THE DEFAULT (see FeedCiLens for the two flips this default has had): one
-            card per failed check per head is too noisy to be a new user's first impression. The
-            pill still renders unconditionally, so the feature is one visible click away — that
-            is what makes an off-by-default acceptable here, where an invisible one was not.
-
-            Why three states rather than the include-toggle this shipped as: CI rows are placed
-            chronologically, so in a high-traffic workspace the newest one can sit ~23 rows below
-            the fold while the pill's count reads 34 — visually identical to a dead control,
-            while the SAME code looks perfect in a quiet workspace (index 0). 'only' is the state
-            that makes the pill's effect legible regardless of how busy the scope is.
-
-            The fetch half ('off' vs the rest) is server-side and threaded into the query key;
-            'only' is a client-side narrowing, like the category pills. */}
-        <button
-          type="button"
-          onClick={cycleFeedCiLens}
-          aria-pressed={feedCiLens !== 'off'}
-          className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-            feedCiLens === 'only'
-              ? 'border-red-500 bg-red-500 text-white dark:border-red-500 dark:bg-red-600 dark:text-white'
-              : feedCiLens === 'feed'
-                ? 'border-red-400 bg-red-50 text-red-700 dark:border-red-500/60 dark:bg-red-950/30 dark:text-red-300'
-                : // The RESTING state now, not a negated one — so no line-through, which read as
-                  // "this control is disabled" rather than "click to switch it on".
-                  'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-          }`}
-          title={
-            feedCiLens === 'feed'
-              ? 'CI failures are shown in the feed — click to show ONLY CI failures. One card per failed check run, on pull-request heads and on the default branch. Times are when Limn DETECTED the failure, which can lag the build.'
-              : feedCiLens === 'only'
-                ? 'Showing ONLY CI failures — click to hide them again'
-                : 'CI failures are hidden — click to show them in the feed, then again for CI failures only. One card per failed check run, on pull-request heads and on the default branch.'
-          }
-        >
-          <WarningIcon />
-          {feedCiLens === 'only' ? 'CI failures only' : 'CI failures'}
-          {ciFailuresCount > 0 && feedCiLens !== 'off' && (
-            <span className="tabular-nums opacity-70">{ciFailuresCount}</span>
-          )}
-        </button>
-        {/* Bot lens — Limn as the calm layer above your review bot. Cycles all → hide → only.
-            MUST also render whenever the lens is non-'all': under the server-side 'hide' the
-            counts facet is computed over the already-excluded stream, so botCount reads 0
-            exactly when hiding is working — and this pill is the only way back to 'all'.
-            Hidden when the lens is inert (a bot contributor's own tab renders at an effective
-            'all'), where cycling the store lens would visibly do nothing. */}
-        {!lensInert && (botCount > 0 || feedBotLens !== 'all') && (
-          <button
-            type="button"
-            onClick={cycleFeedBotLens}
-            aria-pressed={feedBotLens !== 'all'}
-            className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-              feedBotLens !== 'all'
-                ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
-                : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-            }`}
-            title="Tame the bot firehose: click to cycle all activity → hide bot noise → bot activity only"
-          >
-            <BotIcon />
-            {feedBotLens === 'hide' ? 'Bots hidden' : feedBotLens === 'only' ? 'Bots only' : 'Bots'}
-            {feedBotLens === 'all' && <span className="tabular-nums opacity-70">{botCount}</span>}
-          </button>
-        )}
       </div>
-      {/* The "PR events" pill's dependent chip row — rendered ONLY while that pill is pressed,
-          and only here, inside the non-botsMode fragment (the Bots pane replaces row 1 wholesale
-          and has no category pill to depend on). Client-side like its parent: it narrows the
-          loaded pages, it does not re-key the feed request.
+      {/* The "PR events" pill's dependent chip row — rendered ONLY while that pill is pressed.
+          Client-side like its parent: it narrows the loaded pages, it does not re-key the feed
+          request.
 
           No chip pressed = all four = the pill's whole bucket, so this row starts inert. The
           selection is REMEMBERED when the parent goes off: this block simply stops rendering. */}
@@ -1704,8 +1375,6 @@ export function FeedView({
           })}
         </div>
       )}
-      </>
-        )}
         {/* Review-thread derived-STATE pills + the honest count line — every feed view. */}
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
@@ -1738,32 +1407,6 @@ export function FeedView({
               </button>
             );
           })}
-          {/* PR-level pill — its own labelled group so it doesn't read as a fifth thread
-              state. Matches only pr_opened/ready cards whose PR still awaits a first review
-              (a live snapshot — the same card can stop matching tomorrow). */}
-          <span className="ml-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400">
-            PR
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              // Turning this on clears the (provably disjoint) state pills — see toggleBotState.
-              if (!feedNeedsReview && botStateFilter.size > 0) setBotStateFilter(new Set());
-              toggleFeedNeedsReview();
-            }}
-            aria-pressed={feedNeedsReview}
-            className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-              feedNeedsReview
-                ? 'border-indigo-400 bg-indigo-50 text-indigo-700 dark:border-indigo-500/60 dark:bg-indigo-950/30 dark:text-indigo-300'
-                : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-            }`}
-            title="PRs still awaiting a first review — shows their opened / marked-ready cards · last 14 days"
-          >
-            Needs review
-            {needsReviewCount > 0 && (
-              <span className="tabular-nums opacity-70">{needsReviewCount}</span>
-            )}
-          </button>
           {items.length > 0 && (
             <span className="text-[11px] text-gray-400">{countLabel}</span>
           )}
@@ -1790,46 +1433,30 @@ export function FeedView({
         ) : (
           <div className="flex h-32 items-center justify-center px-4 text-center text-sm text-gray-400">
             {staleNotice ??
-              (botsMode
-                ? 'No bot activity yet — automated-reviewer activity across your repos will appear here.'
+              (authors === 'bots'
+                ? isolatedPrId != null
+                  ? 'No bot activity on this pull request.'
+                  : `No bot activity in the last ${feedWindowDays} days.`
                 : 'Nothing to show yet — activity across your repos will appear here.')}
           </div>
         )
       ) : visible.length === 0 && isPlaceholderData ? (
-        // Placeholder pages belong to the PREVIOUS query key. The one transition where that
-        // matters here: lens hide→only re-keys the query (excludeBots leaves the search), and
-        // the carried-over 'hide' pages contain zero bot rows BY CONSTRUCTION — so until the
-        // new fetch lands, "No bot activity in this window" would be a fabricated claim in a
-        // window possibly full of it. Say nothing verdict-shaped while the data is borrowed.
+        // Placeholder pages belong to the PREVIOUS query key — e.g. people → bots re-keys the
+        // query and the carried-over pages hold the other side's rows. Until the new fetch lands,
+        // any "nothing here" sentence would be a fabricated claim. Say nothing verdict-shaped
+        // while the data is borrowed.
         <div className="flex h-32 items-center justify-center text-sm text-gray-400">
           Loading…
         </div>
       ) : visible.length === 0 ? (
         <div className="flex h-32 items-center justify-center text-sm text-gray-400">
-          {botsMode
-            ? feedNeedsReview
-              ? 'No PRs awaiting a first review in this window.'
-              : botStateFilter.size > 0
-                ? 'No bot activity matches these state filters.'
-                : 'No bot activity in this window.'
-            : feedNeedsReview
-            ? 'No PRs awaiting a first review in this window.'
-            : botStateFilter.size > 0
+          {botStateFilter.size > 0
             ? 'Nothing matches these state filters.'
             : prEventKindsNarrowing
-            ? `No ${prEventKindPhrase} PR events in this window.`
-            : feedClaudeOnly
-            ? 'No Claude Reviews in this window.'
-            : // "Only mine" is the FIRST narrowing applyFeedPills applies, so it is the control
-              // to name — ahead of the bot lens, which under its default 'hide' would otherwise
-              // claim "only bot activity here" about a stream the server already stripped bots from.
-              feedMyTurnOnly
-            ? 'Nothing needs your attention right now.'
-            : effectiveBotLens === 'only'
-              ? 'No bot activity in this window.'
-              : effectiveBotLens === 'hide'
-                ? 'Only bot activity here — nothing from humans in this window.'
-                : 'Nothing needs your attention right now.'}
+              ? `No ${prEventKindPhrase} PR events in this window.`
+              : authors === 'bots'
+                ? 'No bot activity in this window.'
+                : 'Nothing in this window.'}
         </div>
       ) : (
         // Windowed list: only the in-view slice (+overscan) is mounted; the spacer <li>s
@@ -2194,9 +1821,9 @@ type FeedRowProps = {
   // the row passes the vendor's display name for the confirm copy instead of a repo id.
   onNotBot: (userId: number, label: string) => void;
   // This row arrived while the reader had the feed open, in a cohort they haven't seen yet.
-  // Cross-repo feed only — the four narrowed mounts never auto-insert, so it is always false
+  // Cross-repo feed only — the narrowed mounts never auto-insert, so it is always false
   // there. ⚠ It renders as a CHIP beside the timestamp, never a border: the card's border is a
-  // strict flash → My Turn → Claude → default ladder, and a fifth branch would silently outrank
+  // strict flash → My Turn → default ladder, and another branch would silently outrank
   // (or be outranked by) a yellow My-Turn card depending on where it was inserted.
   isNew: boolean;
   flash: boolean;
@@ -2229,6 +1856,7 @@ function FeedRowImpl({
   onFocus,
 }: FeedRowProps): JSX.Element {
   const glyph = itemGlyph(item);
+  const pill = feedPillOf(item.kind);
   // Derived, memoised per row so props into this memoised component stay stable.
   const actorUser = item.actorId != null ? usersById.get(item.actorId) : undefined;
   const automatedTag = useMemo(
@@ -2247,24 +1875,17 @@ function FeedRowImpl({
 
   // My Turn is CORE / free — the backend flags isMyTurn for every tier.
   const isMyTurn = item.isMyTurn;
-  const isClaude = item.kind === 'claude_review';
   const isMerge = item.kind === 'pr_merged';
-  // A commit push (or Claude run) whose actor didn't resolve to a GitHub login shows a
-  // neutral label instead of the bare 'unknown'.
-  const actorName = isClaude
-    ? 'Claude'
-    : item.actorId == null && item.kind === 'commit_pushed'
+  // A commit push whose actor didn't resolve to a GitHub login shows a neutral label instead of
+  // the bare 'unknown'.
+  const actorName =
+    item.actorId == null && item.kind === 'commit_pushed'
       ? 'A contributor'
-      : // A CI observation has no actor at all — without this it would render the bare
-        // 'unknown' fallback, which reads as a data bug rather than "this wasn't a person".
-        isCiFailureKind(item.kind)
-        ? 'CI'
-        : userLabel(actorUser, item.actorId);
+      : userLabel(actorUser, item.actorId);
   const prLabel =
     item.prNumber != null
       ? `#${item.prNumber}${item.prTitle != null ? ` ${item.prTitle}` : ''}`
       : '';
-  const claudeVerdict = item.claudeVerdict != null ? CLAUDE_VERDICT_META[item.claudeVerdict] : null;
   const affected = item.affectedThreads ?? [];
   const primaryReason = item.myTurnReasons[0];
 
@@ -2274,16 +1895,6 @@ function FeedRowImpl({
   const isThreadCard = item.kind === 'review_comment' && item.threadId != null;
   const isPrCommentCard = item.kind === 'pr_comment' && item.prId != null;
   const isPrOpened = item.kind === 'pr_opened';
-  // A default-branch CI failure is a fact about trunk, but the server names the PR that LANDED
-  // the broken commit whenever the sha resolves to one (branch_commits.pr_number) — so the card
-  // opens that PR like any other. When it doesn't resolve (a direct push, an unobserved
-  // association, an untracked PR) there is genuinely nothing to open: rather than ship a card
-  // that visibly does nothing when clicked, it stops LOOKING clickable. Either way it keeps the
-  // commit link — that is where a trunk run's checks live — via safeExternalUrl (data-derived).
-  const isTrunkCi = item.kind === 'trunk_ci_failed';
-  const trunkCommitUrl = isTrunkCi ? safeExternalUrl(item.githubUrl) : undefined;
-  const trunkHasNoPr = isTrunkCi && item.prId == null;
-
   // Item 8 — only show credit that's meaningful for THIS card's context: "Merged by" +
   // "Reviewed by" belong on a merge card (and never re-attribute the merge to its own
   // actor); a comment / review card doesn't need them.
@@ -2317,8 +1928,6 @@ function FeedRowImpl({
   // (they call their own handlers).
   const onCardClick = (e: ReactMouseEvent<HTMLElement>): void => {
     if ((e.target as HTMLElement).closest('a,button')) return;
-    // No PR resolved behind this trunk card — see isTrunkCi. Its commit link is the affordance.
-    if (trunkHasNoPr) return;
     onOpen(item);
   };
 
@@ -2326,19 +1935,20 @@ function FeedRowImpl({
     <li ref={innerRef} className="pb-2">
       <article
         onClick={onCardClick}
-        className={`${trunkHasNoPr ? 'cursor-default' : 'cursor-pointer'} rounded-md border p-2.5 text-sm transition-colors ${
+        className={`cursor-pointer rounded-md border p-2.5 text-sm transition-colors ${
           flash
             ? 'border-sky-400 ring-2 ring-sky-400/60 dark:border-sky-500'
             : isMyTurn
               ? 'border-yellow-400 bg-yellow-50/40 dark:border-yellow-500/50 dark:bg-yellow-950/15'
-              : isClaude
-                ? 'border-ai-border bg-ai-surface'
-                : 'border-gray-200 hover:border-sky-300 dark:border-gray-800 dark:hover:border-sky-700'
+              : 'border-gray-200 hover:border-sky-300 dark:border-gray-800 dark:hover:border-sky-700'
         }`}
       >
-        {/* header: (Focus magnifier + event time on the left) then avatar + actor +
-            action chip + (My Turn badge + why-pill) */}
+        {/* header: (the item's filter-pill icon + Focus magnifier + event time on the left) then
+            avatar + actor + action chip + (My Turn badge + why-pill) */}
         <div className="flex items-center gap-2">
+          {/* WHICH PILL THIS CARD BELONGS TO, in that pill's own icon and ink — a glance tells a
+              comment from a PR event from a push. Decorative (the action chip names the kind). */}
+          {pill != null && <pill.icon size={13} className={`shrink-0 ${pill.ink}`} />}
           {item.prId != null && (
             <button
               type="button"
@@ -2371,8 +1981,8 @@ function FeedRowImpl({
           </span>
           <Avatar user={actorUser} size={20} />
           {/* A real actor's name opens the user popover (stats + activity tab); the synthetic
-              labels ('Claude', 'A contributor') have no user behind them and stay plain text. */}
-          {actorUser != null && !isClaude ? (
+              label ('A contributor') has no user behind it and stays plain text. */}
+          {actorUser != null ? (
             <span className="truncate font-medium text-gray-800 dark:text-gray-100">
               <UserName
                 user={actorUser}
@@ -2413,19 +2023,11 @@ function FeedRowImpl({
             </span>
           )}
           <span
-            className={`inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${glyph.className ?? ''}`}
-            style={glyph.className ? undefined : { color: glyph.color, background: glyph.color + '1a' }}
+            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
+            style={{ color: glyph.color, background: glyph.color + '1a' }}
           >
             {glyph.label}
           </span>
-          {claudeVerdict != null && (
-            <span
-              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
-              style={{ color: claudeVerdict.color, background: claudeVerdict.color + '1a' }}
-            >
-              {claudeVerdict.label}
-            </span>
-          )}
           {isMyTurn && (
             <span className="shrink-0 rounded bg-yellow-400/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-700 dark:text-yellow-300">
               My Turn
@@ -2444,15 +2046,6 @@ function FeedRowImpl({
         {/* PR ref line — the keyboard-accessible open affordance */}
         <div className="mt-1 flex items-baseline gap-1.5 text-xs">
           <span className="shrink-0 text-gray-400">{item.repoFullName}</span>
-          {/* On a trunk card the PR is not what failed — it is what PUT the broken commit on
-              trunk — so it is labelled. "landed by" only when the PR actually merged:
-              pickAssociatedPrNumber falls back to an OPEN associated PR when that is the only
-              candidate, and claiming that one landed anything would be a plain lie. */}
-          {isTrunkCi && prLabel !== '' && (
-            <span className="shrink-0 text-gray-400">
-              · {item.prState === 'merged' ? 'landed by' : 'from'}
-            </span>
-          )}
           {prLabel !== '' && (
             <button
               type="button"
@@ -2479,27 +2072,12 @@ function FeedRowImpl({
           {item.path != null && (
             <span className="shrink-0 text-gray-400">· {item.path.split('/').pop()}</span>
           )}
-          {/* Always on a trunk card — the commit page is where a trunk run's checks live, and
-              when no PR resolved it is the card's ONLY affordance. Data-derived href, so it
-              goes through safeExternalUrl — React happily renders a `javascript:` URL. */}
-          {trunkCommitUrl != null && (
-            <a
-              href={trunkCommitUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              onClick={(e) => e.stopPropagation()}
-              className="shrink-0 font-medium text-sky-600 hover:underline dark:text-sky-400"
-            >
-              commit {(item.ciHeadSha ?? '').slice(0, 7)}{' '}
-              <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
-            </a>
-          )}
         </div>
 
         {/* PR-opened cards: CI + files-changed + a collapsible description (item 2). */}
         {isPrOpened && <PrOpenedExtras item={item} />}
 
-        {/* markdown body (review / PR comment / Claude summary) — collapsed with a
+        {/* markdown body (review / PR comment) — collapsed with a
             "Show more" toggle once it overflows. Review-thread cards SKIP this: they
             render the whole conversation inline below (with this comment highlighted),
             so a standalone preview would just duplicate it. */}

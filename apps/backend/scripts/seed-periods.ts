@@ -265,7 +265,7 @@ export async function seedPeriodReports(ctx: PeriodCtx): Promise<number> {
         JSON.stringify(suggested),
         c.lanes ? JSON.stringify(c.lanes) : null,
         narrative,
-        narrative ? 'claude-haiku-4-5' : '',
+        narrative ? 'claude-haiku-5-5' : '',
         hash,
         c.fingerprint,
         narrative ? 11 : null,

@@ -27,25 +27,12 @@ import {
   type VendorDisagreeDirection,
   type WorkspaceMetricKey,
   type SprintChatResponse,
+  type FeedAuthors as SharedFeedAuthors,
 } from '@pierre-review/shared';
 
-// Feed bot lens (the Activity "Feed" bot-vs-human view): show everything, hide bot noise,
-// or bot activity only. Transient, URL-silent — like feedMyTurnOnly.
-export type FeedBotLens = 'all' | 'hide' | 'only';
-
-// The Activity "Feed" CI-failure lens. THREE states, cycled by one pill:
-//   'feed' (DEFAULT) — CI rows are interleaved into the stream by time, alongside human activity
-//   'only'           — the stream is narrowed to CI rows
-//   'off'            — no CI rows are fetched at all
-//
-// The default is 'feed', i.e. ON. It shipped OFF, and the reason it changed is worth keeping:
-// an include-only toggle produces NO VISIBLE CHANGE in a busy workspace. CI rows are placed
-// chronologically, so in a high-traffic workspace (bevy/three.js: ~23 non-CI events in the 11.5h
-// since the newest CI failure) the first CI card lands ~23 rows down while the pill's count
-// cheerfully reads 34 — indistinguishable from a broken toggle. In a quiet workspace the same
-// code puts it at index 0 and looks perfect. 'only' is what makes the pill's effect legible
-// regardless of traffic.
-export type FeedCiLens = 'feed' | 'only' | 'off';
+// Whose activity the Activity "Feed" shows: people (DEFAULT) or bots — never both at once (see
+// the shared FeedAuthors). Transient, URL-silent: every session opens on people.
+export type FeedAuthors = SharedFeedAuthors;
 
 // The Activity repo-console sub-tab strip (Activity | Bots). Store-remembered (see
 // repoConsoleTabs) so returning to a rail entry restores its last-active sub-tab.
@@ -92,7 +79,9 @@ export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'bo
 //   • `'roi'` and `'benchmark'` are VISIBLE-BUT-LOCKED (`botDepth`): listed on every tier, badged,
 //     and their BODIES render `ProLockPanel`. They must NEVER be corrected away, or an unentitled
 //     `?botsTab=benchmark` from a bookmark lands somewhere else and explains nothing.
-//   • `'settings'` is free on every tier and is why the rail entry and this strip stay ungated.
+//   • (`'settings'` LEFT this union: bot classification is FREE and is the Feed rail's
+//     "Bot classification" sub-tab now — `FeedInnerTab` below. A legacy `?botsTab=settings` is
+//     mapped there by useUrlState's read.)
 // ⚠ `'themes'` TOOK THE FIRST POSTURE ON PURPOSE. A locked Themes body would be a SEVENTH
 // visible-but-locked surface, and `components/ProGate.tsx` keeps that set at exactly six with a
 // written argument saying the next one needs its own; on the OSS build `BotThemesPanel` returns
@@ -100,14 +89,14 @@ export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'bo
 // The visible member is DERIVED per render (`effectiveBotsTab` in `Activity/benchmarkModel.ts`);
 // a corrective `setBotsInnerTab()` permanently forgets the reader's choice for the OTHER mount
 // that shares this one scalar (the per-repo console's Bots tab).
-export type BotsInnerTab = 'roi' | 'themes' | 'advisor' | 'settings' | 'benchmark';
-export const BOTS_INNER_TABS: readonly BotsInnerTab[] = [
-  'roi',
-  'themes',
-  'advisor',
-  'settings',
-  'benchmark',
-];
+export type BotsInnerTab = 'roi' | 'themes' | 'advisor' | 'benchmark';
+export const BOTS_INNER_TABS: readonly BotsInnerTab[] = ['roi', 'themes', 'advisor', 'benchmark'];
+// The Feed rail's sub-tab strip: 'feed' (the stream, the default), 'themes' (Pro, LISTED only on
+// `activityDigest`) and 'classification' — "Bot classification", FREE on every tier: who counts as
+// a bot in this Workspace, its role and vendor (and, with `botDepth`, its price). The visible member
+// is DERIVED per render (`effectiveFeedTab` in `Activity/feedTabsModel.ts`), never written back.
+export type FeedInnerTab = 'feed' | 'themes' | 'classification';
+export const FEED_INNER_TABS: readonly FeedInnerTab[] = ['feed', 'themes', 'classification'];
 // PrDetail's inner tab strip. It lives HERE, not in PrDetail's local state, because it is
 // URL-ADDRESSABLE: `?view=pr:<id>&prTab=changes` names one screen, so browser Back/Forward can
 // move between "the PR's diff" and "the PR's threads" like every other view. Which member is
@@ -130,7 +119,7 @@ export const PR_DETAIL_TABS: readonly PrDetailTab[] = [
   'claude_review',
   'ai_fix',
 ];
-// The fixed Open PRs tab's repo dropdown (see openPrsRepoFilter). Stamped with the workspace it
+// Activity → Open PRs' repo dropdown (see openPrsRepoFilter). Stamped with the workspace it
 // was chosen in, so a switch makes it inert by DERIVATION rather than by a reset effect.
 export interface OpenPrsRepoFilter {
   workspaceId: number | null;
@@ -391,27 +380,15 @@ export interface FilterState {
   // default; an empty set hides every review marker. Only affects review markers.
   reviewStates: ReviewState[];
   derivedStates: DerivedState[]; // empty = no derived-state filtering
-  // Activity "Feed" scope toggle: when true, the consolidated Feed shows only "My Turn"
-  // actionables. A TRANSIENT flag owned by the Activity lane (not a persisted filter, not
-  // URL-synced) — present in freshDefaults() but NOT in FilterDefaults /
-  // pickFilterBarState / sanitizePersistedFilters, so a fresh load starts false.
-  feedMyTurnOnly: boolean;
-  // Activity "Feed" scope toggle: when true, the consolidated Feed shows only Claude
-  // Review items. Transient (like feedMyTurnOnly) — owned by the Activity lane, not a
-  // persisted filter, not URL-synced. Mutually exclusive with feedMyTurnOnly.
-  feedClaudeOnly: boolean;
-  // Activity "Feed" bot lens (Limn as the layer above your review bot): 'hide' (default —
-  // drop bot-authored rows, the anti-fatigue view), 'all', or 'only' (bot activity only).
-  // 'hide' is SERVER-side (useConsolidatedFeed sends excludeBots=true, so bots are excluded
-  // BEFORE the page cap and a bot-heavy window fills with human rows); 'only' stays a
-  // client-side view over the loaded page. ORTHOGONAL to feedMyTurnOnly/feedClaudeOnly (they
-  // compose). Transient, URL-silent — the hidden default reasserts every session, deliberately.
-  feedBotLens: FeedBotLens;
+  // Activity "Feed" people/bots toggle (see FeedAuthors). 'humans' (DEFAULT) or 'bots' — never
+  // mixed. SERVER-side (useConsolidatedFeed sends `authors`, so the other side is excluded BEFORE
+  // the page cap). Transient, URL-silent — every session opens on people, deliberately.
+  feedAuthors: FeedAuthors;
   // Activity "Feed" event-CATEGORY pills — narrow the stream to comment activity and/or PR
   // events. Both false (default) = no category filter (everything shows). When either is true,
   // the feed shows only items in the enabled categories: 'comments' = review/PR comments,
   // 'pr_events' = opens/merges/closes/reopens/ready + reviews. Client-side, composes with the
-  // bot lens, ORTHOGONAL to feedMyTurnOnly/feedClaudeOnly. Transient, URL-silent (like feedBotLens).
+  // people/bots toggle. Transient, URL-silent (like feedAuthors).
   feedCatComments: boolean;
   feedCatPrEvents: boolean;
   // The chip row DEPENDENT on the "PR events" pill: which kinds inside that bucket to keep (see
@@ -432,46 +409,11 @@ export interface FilterState {
   // pickFilterBarState, NOT in sanitizePersistedFilters, so no FILTER_STORAGE_VERSION bump and
   // no useUrlState serializer entry is owed.
   feedPrEventKinds: FeedPrEventChip[];
-  // Activity "Feed" "Needs review" pill — narrow the stream to pr_opened/pr_ready_for_review
-  // cards whose PR is STILL awaiting a first review (the server-computed prAwaitingReview
-  // flag, a live snapshot). Client-side, composes like the category pills. Transient,
-  // URL-silent (like feedCatPrEvents).
-  feedNeedsReview: boolean;
   // Activity "Feed" opt-in "show individual commits" toggle. false (default) → only commit
   // pushes that ADDRESSED a review thread surface (the existing behaviour); true → the server
   // also emits plain commit-push runs. Server-side (the client can't synthesize plain commits),
   // so it's threaded into the feed query key. Transient, URL-silent (like the other feed toggles).
   feedShowCommits: boolean;
-  // Activity "Feed" CI-failure lens (see FeedCiLens). 'off' (DEFAULT) fetches none; 'feed'
-  // interleaves ONE item per failed check run — on PR heads AND on the default branch
-  // (`ci_failed` / `trunk_ci_failed`); 'only' narrows the stream to them. The fetch half is
-  // server-side (the client cannot synthesize these rows), so it is threaded into the feed query
-  // key AND the head-poll key; the 'only' half is a client-side narrowing, like the category
-  // pills. The pill cycles off → feed → only → off, so one click from rest turns the feature on.
-  //
-  // ⚠ IT DEFAULTS OFF ON PURPOSE, and that is the SECOND flip of this default. It first shipped
-  // as an include-only boolean defaulting off (invisible), was flipped on to make the feature
-  // discoverable, and is now off again because "on" is too noisy to be a good first impression:
-  // a red matrix build writes a card per failed check per head, and on a busy workspace that is
-  // most of what a new user's first feed contains. Discoverability is now the PILL's job — it
-  // renders whenever the Feed does, so the feature is one visible click away rather than
-  // ambient. The two lessons from the first flip still stand: never ship an include-only toggle
-  // whose only feedback is a count, and never re-derive this default from a stored value.
-  //
-  // ⚠ Unlike the other feed toggles this one is PERSISTED, with the filter bar (it is in
-  // FilterDefaults / freshFilterDefaults / pickFilterBarState). "Show me broken builds" is a
-  // standing preference, not a per-session lens — a user who narrows to CI should find that
-  // tomorrow. It is consequently also reset by "Clear filters", which is the correct reading of
-  // that control for a filter-shaped setting.
-  //
-  // ⚠ AND IT IS URL-SERIALIZED (`ci=only` / `ci=1`; the 'off' default is omitted), which is not
-  // optional for a FilterDefaults key. useUrlState's serializer is hand-written per param, so a
-  // new key is silently omitted unless someone adds it — and being omitted does NOT merely make
-  // it unshareable: `writeToUrl` emits `?workspace=<id>` as soon as the scope resolves, so the
-  // address bar is non-bare within a second of every load, and the localStorage restore path
-  // runs ONLY on a bare URL. A URL-silent FilterDefaults key therefore round-trips into storage
-  // and is read back never.
-  feedCiLens: FeedCiLens;
   // Activity "Feed" single-PR isolation: null (default) → every PR in scope; a pr id →
   // the consolidated Feed shows ONLY that PR's items. Set from PrDetail's "Show in Activity feed"
   // and the bot-only PR drill-down.
@@ -561,13 +503,12 @@ export interface FilterState {
   // (the reader is at the top). Read as a flat id set; never recomputed defensively on render.
   feedNewCohorts: FeedNewCohorts;
   // The rolling window the Bot-ROI panel (Insights) reports over. Transient, URL-silent
-  // (like feedBotLens) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
+  // (like feedAuthors) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
   botAnalyticsWindow: BotWindowKind;
-  // Which inner sub-tab the Bots view shows: 'roi' (the Measure surface — ROI panel + bot feed),
+  // Which inner sub-tab the Bots view shows: 'roi' (the Measure surface — the ROI panel),
   // 'themes' (the Pro "What they're flagging" AI report, `activityDigest`), 'advisor' (the Pro Bot
   // Tuning Advisor — findings → config-PR/brief/issue outputs), 'benchmark' (the peer-cohort
-  // placement) or 'settings' (the "who counts as a review bot in this workspace" classification
-  // tab).
+  // placement). (The classification tab, once 'settings' here, is the Feed's 'classification'.)
   // ('behaviour' was REMOVED in plan P1.1/C1: per-bot depth is the bot-detail drill-down tab and
   // the workspace charts a collapsed section under ROI. ⚠ 'themes' WAS ALSO REMOVED THEN — folded
   // into a synthesis-seam card on Measure — AND HAS SINCE COME BACK as a real member: the themes
@@ -575,14 +516,12 @@ export interface FilterState {
   // tab so the Bots console mirrors the Feed's `Feed | Themes` strip. The field is transient and
   // URL-silent, so both the drop and the return are safe: no persisted blob can hold or resurrect
   // a member.) A single scalar (both the cross-repo rail Bots view and the per-repo console Bots tab
-  // share one BotsView) — so 'settings' can be selected while a PER-REPO Bots tab is showing,
-  // where it is the same list narrowed to one repo's footprint rather than a different judgement
-  // (the bot object is keyed per WORKSPACE now, and a repo belongs to exactly one). BotsView's
+  // share one BotsView). BotsView's
   // effectiveTab fallback still owns any degradation ('advisor' and 'themes' are capability-gated
   // — the derived-effective-tab rule). Transient (never persisted) — but NOT URL-silent, unlike
   // its neighbours here; see the next paragraph.
   //
-  // ⚠ URL-SERIALIZED (`?botsTab=themes|advisor|settings|benchmark`, the 'roi' default omitted) and a
+  // ⚠ URL-SERIALIZED (`?botsTab=themes|advisor|benchmark`, the 'roi' default omitted) and a
   // NAVIGATION key, but ONLY alongside `activityRepo=bots` — the cross-repo Bots rail, where the
   // strip is on screen. The per-repo console's Bots tab shares this scalar and does NOT emit it; a
   // sub-tab that is not visible is not a view. Still transient: URL-visible ≠ persisted.
@@ -613,11 +552,11 @@ export interface FilterState {
   // only, never persisted, never URL-parsed) a stale value cannot outlive the session, which is
   // why removing 'compare' from the union needs no migration.
   //
-  // ⚠ URL-SERIALIZED (`?feedTab=themes`, the 'feed' default omitted) and a NAVIGATION key, but
+  // ⚠ URL-SERIALIZED (`?feedTab=themes|classification`, the 'feed' default omitted) and a NAVIGATION key, but
   // ONLY alongside the cross-repo Feed rail entry, where the strip is on screen. The READ seats
   // this RAW value; the derived-effective-tab rule above is unchanged — a URL naming 'themes' on
   // an account without the capability must not be written back as a correction.
-  feedInnerTab: 'feed' | 'themes';
+  feedInnerTab: FeedInnerTab;
   // Which inner sub-tab the Reports pane shows: 'overview' (free Flow metrics + the Pro Period
   // reports) or 'bottlenecks' — labelled "Chronology" on screen, the court ledger, Pro on
   // `periodReports`. See InsightsInnerTab for why the literal and the label differ, and for why a
@@ -738,7 +677,7 @@ export interface FilterState {
   // Bots rail).
   botPrsFocusRepoId: number | null;
 
-  // transient: the fixed Open PRs tab's own repo dropdown (null = every repo). The tab always
+  // transient: Activity → Open PRs' own repo dropdown (null = every repo). The tab always
   // fetches the WHOLE workspace; this narrows the loaded rows client-side. Seeded by the per-repo
   // "Show all N open PRs" footer (that repo), cleared by the tab chip and the Flow metrics tile.
   // ⚠ NOT `repoIds` — that is the Timeline picker, and the repo picker never scopes another screen.
@@ -816,13 +755,14 @@ export interface FilterState {
   } | null;
 
   // Activity tab (the master-detail triage console). Which detail is shown:
-  // 'attention' = the Pending board (the default landing detail), 'feed' = the cross-repo
-  // consolidated Feed, a number = that single repo's console, null = nothing selected yet
-  // (treated as 'attention'). Client-side narrow, no refetch. (The old 'all' briefing-feed
+  // 'open-prs' = the workspace's Open PRs cards (the FIRST rail line and the default landing
+  // detail), 'attention' = the Pending board, 'feed' = the cross-repo consolidated Feed, a number
+  // = that single repo's console, null = nothing selected yet (treated as 'open-prs'). Client-side narrow, no refetch. (The old 'all' briefing-feed
   // pseudo-row was removed — it was redundant with the Feed + per-repo entries.) Transient
   // (mirrors myTurnOnly/insightsOpen): in freshDefaults() but NOT in pickFilterBarState /
   // sanitizePersistedFilters. `?activityRepo=<id>` / `feed` / `bots` / `insights` are the
-  // URL mirrors (see useUrlState) — 'attention', the default, is the one value left out; the
+  // URL mirrors (see useUrlState) — 'open-prs', the default, is the one value left out
+  // (Pending carries `?activityRepo=attention`); the
   // active TAB lives in the pinnedTabs store. 'bots' = the CORE/free review-bot triage console
   // (BotsView); 'insights' is the Reports rail entry.
   // (The 'retro' rail value was REMOVED with the Retro panel — it was already unreachable:
@@ -830,9 +770,9 @@ export interface FilterState {
   // REMOVED with the "Compare workspaces" rail entry — cross-workspace comparison is Reports'
   // "By workspace" axis now. This field is transient and 'compare' is no longer URL-parsed, so a
   // stale value cannot enter the store; a legacy `?activityRepo=compare` link falls through the
-  // read side's parseInt branch and lands on the 'attention' default — normalization by
+  // read side's parseInt branch and lands on the 'open-prs' default — normalization by
   // construction.)
-  activityRepoId: number | 'feed' | 'attention' | 'insights' | 'bots' | null;
+  activityRepoId: number | 'open-prs' | 'feed' | 'attention' | 'insights' | 'bots' | null;
   // Soft thread-state filter inside an Activity repo console: clicking a thread-state
   // segment narrows the PRs-by-author list to PRs carrying that derived state.
   // null = no filter. Transient, URL-silent.
@@ -931,17 +871,8 @@ export interface FilterState {
   setReviewStates: (s: ReviewState[]) => void;
   toggleDerivedState: (s: DerivedState) => void;
   setDerivedStates: (s: DerivedState[]) => void;
-  // Toggle / set the Activity "Feed" My-Turn-only scope (see feedMyTurnOnly). Toggling
-  // it on clears feedClaudeOnly (the two pills are mutually exclusive).
-  toggleFeedMyTurnOnly: () => void;
-  setFeedMyTurnOnly: (v: boolean) => void;
-  // Toggle / set the Activity "Feed" Claude-Reviews-only scope (see feedClaudeOnly).
-  // Toggling it on clears feedMyTurnOnly.
-  toggleFeedClaudeOnly: () => void;
-  setFeedClaudeOnly: (v: boolean) => void;
-  // Feed bot lens: cycle all → hide → only → all, or set directly.
-  cycleFeedBotLens: () => void;
-  setFeedBotLens: (v: FeedBotLens) => void;
+  // Feed people/bots toggle (see feedAuthors).
+  setFeedAuthors: (v: FeedAuthors) => void;
   // Feed event-category pills (see feedCatComments/feedCatPrEvents) — independent toggles.
   toggleFeedCatComments: () => void;
   toggleFeedCatPrEvents: () => void;
@@ -949,15 +880,8 @@ export interface FilterState {
   // pressed chip lands back on the empty array, i.e. all four, so clicking can never reach an
   // all-off selection whose only honest rendering is an empty feed.
   toggleFeedPrEventKind: (k: FeedPrEventChip) => void;
-  // Feed "Needs review" pill (see feedNeedsReview) — independent toggle.
-  toggleFeedNeedsReview: () => void;
   // Feed "show individual commits" toggle (see feedShowCommits).
   toggleFeedShowCommits: () => void;
-  // Feed CI-failure lens (see feedCiLens): cycles off → feed → only → off, so ONE click from the
-  // default turns the feature on. Persisted with the filter bar and URL-serialized
-  // (`ci=only` / `ci=1`; the 'off' default is omitted).
-  cycleFeedCiLens: () => void;
-  setFeedCiLens: (v: FeedCiLens) => void;
   // Isolate the Feed to a single PR (or clear with null) — set from PrDetail's "Show in Activity
   // feed" and the bot-only PR drill-down.
   setFeedIsolatedPrId: (id: number | null) => void;
@@ -1023,8 +947,8 @@ export interface FilterState {
    */
   openMyTurnInWorkspace: (workspaceId: number) => void;
   /**
-   * A pick in the WorkspaceSelector dropdown: switch to `workspaceId` AND go to the fixed Open PRs
-   * tab (the app's default view). Clears the Timeline's selected PR (it belongs to the workspace
+   * A pick in the WorkspaceSelector dropdown: switch to `workspaceId` AND go to Activity → Open
+   * PRs (the app's default view). Clears the Timeline's selected PR (it belongs to the workspace
    * being left); pinned PR / Focus tabs stay. Re-picking the current workspace navigates too.
    *
    * ⚠ ONLY the dropdown calls this. `setWorkspace` itself must never navigate: URL hydrate,
@@ -1051,13 +975,13 @@ export interface FilterState {
   markFeedNewCohortsSeen: (scopeKey: string) => void;
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
-  // Switch the Bots view's inner sub-tab (ROI / experimental Behaviour / Themes / Settings).
+  // Switch the Bots view's inner sub-tab (ROI / Themes / Advisor / Benchmark).
   setBotsInnerTab: (v: BotsInnerTab) => void;
   // The Tune/Drop pills' entry point: focus the advisor on one bot AND switch the Bots view
   // to the Advisor tab in one action.
   focusAdvisor: (botKey: string, intent: 'tune' | 'drop') => void;
   clearAdvisorFocus: () => void;
-  setFeedInnerTab: (v: 'feed' | 'themes') => void;
+  setFeedInnerTab: (v: FeedInnerTab) => void;
   // Switch the Reports pane's inner sub-tab (Overview / Bottlenecks). Seats the CHOICE; the pane
   // derives what it renders from it.
   setInsightsInnerTab: (v: InsightsInnerTab) => void;
@@ -1171,7 +1095,7 @@ export interface FilterState {
   // BotPrsDetail consumes it.
   openBotPrsDetail: (key: string, repoId?: number | null) => void;
   consumeBotPrsFocus: () => void;
-  // Reveal the fixed Open PRs tab. A repoId pre-selects that repo in the tab's dropdown (the
+  // Reveal Activity → Open PRs. A repoId pre-selects that repo in the pane's dropdown (the
   // per-repo footer, which promised that repo's count); no argument clears the dropdown.
   openOpenPrsDetail: (repoId?: number | null) => void;
   // The tab's dropdown writes here (null = every repo).
@@ -1254,7 +1178,7 @@ export interface FilterState {
   bumpClaudeReviewKickoff: () => void;
   // Select an Activity detail target (a repo id, or one of the pseudo-rows: 'feed' for the
   // cross-repo consolidated Feed, 'bots', 'attention', 'insights').
-  setActivityRepo: (id: number | 'feed' | 'attention' | 'insights' | 'bots') => void;
+  setActivityRepo: (id: number | 'open-prs' | 'feed' | 'attention' | 'insights' | 'bots') => void;
   // Set/clear the Activity repo console's soft thread-state filter (toggles off when
   // the same state is re-selected).
   setActivityThreadFilter: (s: DerivedState | null) => void;
@@ -1324,17 +1248,11 @@ type FilterDefaults = Pick<
   | 'prStatuses'
   | 'reviewStates'
   | 'derivedStates'
-  // The one FEED toggle that is a standing preference rather than a per-session lens: "show me
-  // broken builds" should still be on tomorrow. Every other feed*/bot* toggle stays transient
-  // and out of this list. Adding a key here needs NO FILTER_STORAGE_VERSION bump — restore
-  // whitelists against freshFilterDefaults(), so an older blob just lacks it and the default
-  // applies. (A bump WITHOUT a migratePersistedFilters entry would discard the user's whole
-  // remembered filter bar, which is why that is the wrong tool for an additive key.)
-  //
-  // ⚠ A KEY IN THIS LIST MUST ALSO BE URL-SERIALIZED in hooks/useUrlState (both directions).
-  // Persistence alone does not survive a reload: writeToUrl makes the address bar non-bare the
-  // moment the workspace resolves, and the persisted blob is only read on a BARE url.
-  | 'feedCiLens'
+  // ⚠ NO FEED TOGGLE LIVES HERE. Every feed*/bot* toggle is transient. (The one persisted feed
+  // key, the retired CI-failure lens, is dropped by migratePersistedFilters' v4 → v5 step.)
+  // A key added to this list must ALSO be URL-serialized in hooks/useUrlState (both directions):
+  // writeToUrl makes the address bar non-bare the moment the workspace resolves, and the
+  // persisted blob is only read on a BARE url.
 >;
 
 // Single source of truth for the filter defaults; array defaults are rebuilt per
@@ -1367,11 +1285,6 @@ export function freshFilterDefaults(): FilterDefaults {
     prStatuses: [...DEFAULT_PR_STATUSES],
     reviewStates: [...DEFAULT_REVIEW_STATES],
     derivedStates: [],
-    // CI-failure rows are OUT of the feed on a fresh load — they are too noisy to be a new
-    // user's first impression (one card per failed check per head, so a red matrix build can
-    // dominate the stream). The pill is always rendered, so the feature stays one click away;
-    // discoverability is its job, not the default's. See FeedCiLens for the full history.
-    feedCiLens: 'off',
   };
 }
 
@@ -1394,7 +1307,6 @@ export function pickFilterBarState(s: FilterState): FilterDefaults {
     prStatuses: s.prStatuses,
     reviewStates: s.reviewStates,
     derivedStates: s.derivedStates,
-    feedCiLens: s.feedCiLens,
   };
 }
 
@@ -1421,22 +1333,6 @@ export function sanitizePersistedFilters(
     if (key in raw && raw[key] !== undefined) {
       (out as Record<string, unknown>)[key] = raw[key];
     }
-  }
-  // `feedCiLens` is the one whitelisted key that is a string UNION rather than a boolean/array,
-  // so the whitelist alone would let a tampered or future blob seat a value the type says cannot
-  // exist. Drop anything that isn't a member and let the default apply.
-  //
-  // Note what is deliberately NOT here: a migration from the legacy boolean `feedShowCiFailures`.
-  // It is not in the whitelist, so it is ignored — which is the intended outcome. Mapping the old
-  // `false` (its default, i.e. what nearly every stored blob holds) onto 'off' would preserve the
-  // very invisibility this change exists to fix, for exactly the users who never found the pill.
-  if (
-    out.feedCiLens !== undefined &&
-    out.feedCiLens !== 'feed' &&
-    out.feedCiLens !== 'only' &&
-    out.feedCiLens !== 'off'
-  ) {
-    delete out.feedCiLens;
   }
   return out;
 }
@@ -1481,17 +1377,13 @@ function freshDefaults(): FilterData {
     // listWorkspaces() lands. Nothing may render workspace-scoped data before then.
     // Deliberately outside freshFilterDefaults(): see FilterDefaults.
     workspaceId: null,
-    // Transient Activity "Feed" scope toggles (not persisted filters): fresh load = false.
-    feedMyTurnOnly: false,
-    feedClaudeOnly: false,
-    // Bots hidden by default (matches the Timeline's excludeBots default; same union
-    // definition server-side). Transient, so the calm view reasserts every session.
-    feedBotLens: 'hide',
+    // People by default (matches the Timeline's excludeBots default; same union definition
+    // server-side). Transient, so the calm view reasserts every session.
+    feedAuthors: 'humans',
     feedCatComments: false,
     feedCatPrEvents: false,
     // Empty = all four PR-event chips (see feedPrEventKinds) — the pill's whole bucket.
     feedPrEventKinds: [],
-    feedNeedsReview: false,
     feedShowCommits: false,
     feedIsolatedPrId: null,
     attentionIsolation: null,
@@ -1538,9 +1430,9 @@ function freshDefaults(): FilterData {
     botVolumeSeed: null,
     peopleReportSeed: null,
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open lands
-    // on Pending — the worklist, ranked — for every tier, with no thread-state filter. The
-    // Feed is one rail click below it.
-    activityRepoId: 'attention',
+    // on Open PRs — one card per open PR — for every tier, with no thread-state filter. Pending
+    // is one rail click below it.
+    activityRepoId: 'open-prs',
     activityThreadFilter: null,
     repoConsoleTabs: {},
     expandedDiffHunks: [],
@@ -1668,19 +1560,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   toggleDerivedState: (st) =>
     set((s) => ({ derivedStates: toggle(s.derivedStates, st) })),
   setDerivedStates: (st) => set({ derivedStates: st }),
-  toggleFeedMyTurnOnly: () =>
-    set((s) => ({ feedMyTurnOnly: !s.feedMyTurnOnly, feedClaudeOnly: false })),
-  setFeedMyTurnOnly: (v) =>
-    set(v ? { feedMyTurnOnly: true, feedClaudeOnly: false } : { feedMyTurnOnly: false }),
-  toggleFeedClaudeOnly: () =>
-    set((s) => ({ feedClaudeOnly: !s.feedClaudeOnly, feedMyTurnOnly: false })),
-  setFeedClaudeOnly: (v) =>
-    set(v ? { feedClaudeOnly: true, feedMyTurnOnly: false } : { feedClaudeOnly: false }),
-  cycleFeedBotLens: () =>
-    set((s) => ({
-      feedBotLens: s.feedBotLens === 'all' ? 'hide' : s.feedBotLens === 'hide' ? 'only' : 'all',
-    })),
-  setFeedBotLens: (v) => set({ feedBotLens: v }),
+  setFeedAuthors: (v) => set({ feedAuthors: v }),
   toggleFeedCatComments: () => set((s) => ({ feedCatComments: !s.feedCatComments })),
   toggleFeedCatPrEvents: () => set((s) => ({ feedCatPrEvents: !s.feedCatPrEvents })),
   // ⚠ Note what this does NOT do: it never touches feedCatPrEvents, and nothing anywhere clears
@@ -1691,13 +1571,7 @@ export const useFilters = create<FilterState>((set, get) => ({
         ? s.feedPrEventKinds.filter((x) => x !== k)
         : [...s.feedPrEventKinds, k],
     })),
-  toggleFeedNeedsReview: () => set((s) => ({ feedNeedsReview: !s.feedNeedsReview })),
   toggleFeedShowCommits: () => set((s) => ({ feedShowCommits: !s.feedShowCommits })),
-  cycleFeedCiLens: () =>
-    set((s) => ({
-      feedCiLens: s.feedCiLens === 'feed' ? 'only' : s.feedCiLens === 'only' ? 'off' : 'feed',
-    })),
-  setFeedCiLens: (v) => set({ feedCiLens: v }),
   setFeedIsolatedPrId: (id) => set({ feedIsolatedPrId: id }),
   // ⚠ Callers switching rail AND isolating must call setActivityRepo('attention') FIRST — see
   // the setter's declaration comment (setActivityRepo clears this, and no-ops when unchanged).
@@ -1736,7 +1610,8 @@ export const useFilters = create<FilterState>((set, get) => ({
   switchWorkspaceToOpenPrs: (workspaceId) => {
     const s = get();
     s.setWorkspace(workspaceId, null);
-    usePinnedTabs.getState().showOpenPrs();
+    usePinnedTabs.getState().showActivity();
+    s.setActivityRepo('open-prs');
     s.clearSelection();
     // A switch shows the WHOLE workspace — even a re-pick of the current one, where the filter's
     // workspace stamp would otherwise keep a repo narrowing from a "Show all N open PRs" footer.
@@ -1977,7 +1852,8 @@ export const useFilters = create<FilterState>((set, get) => ({
   consumeBotPrsFocus: () => set({ botPrsFocusKey: null }),
   openOpenPrsDetail: (repoId) => {
     set({ openPrsRepoFilter: repoId != null ? { workspaceId: get().workspaceId, repoIds: [repoId] } : null });
-    usePinnedTabs.getState().showOpenPrs();
+    usePinnedTabs.getState().showActivity();
+    get().setActivityRepo('open-prs');
   },
   setOpenPrsRepoFilter: (repoIds) =>
     set({ openPrsRepoFilter: repoIds != null ? { workspaceId: get().workspaceId, repoIds } : null }),

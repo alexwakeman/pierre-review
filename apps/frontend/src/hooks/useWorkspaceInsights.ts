@@ -4,12 +4,12 @@ import type {
   WorkspaceMetricsResponse,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+import { useProCapabilities } from './useTriage.js';
 
 // The workspace flow-metric header (DORA-ish tiles + trend charts) plus the per-repo "where is the
-// work happening?" breakdown under it — CORE/free, rendered in the "Flow metrics" section of the
-// REPORTS rail entry. (It moved out of the Pro Insights pane, then off the Feed, where a
-// workspace-wide survey sat on top of a chronological stream.) No capability gate; same refetch
-// cadence as useWorkspaceInsights below.
+// work happening?" breakdown under it, rendered in the "Flow metrics" section of the REPORTS rail
+// entry. PRO on `periodReports` with the rest of Reports: the route 402s without it, so the
+// capability is ANDed into `enabled` HERE (one place for every caller), or the SPA polls a 402.
 //
 // ⚠ ONE FETCH FOR THE WHOLE SECTION. The tiles, the 12-week trends and the per-repo pair all ride
 // this ONE response, so they can never be a refresh apart — and the per-repo half costs no extra
@@ -23,9 +23,11 @@ import { api } from '../api/client.js';
 // under whatever workspace resolves a moment later.
 export function useWorkspaceMetrics(workspaceId: number | null) {
   const id = workspaceId;
+  const { periodReports } = useProCapabilities();
   return useQuery<WorkspaceMetricsResponse>({
     queryKey: ['workspace-metrics', `ws:${id}`],
     queryFn: id == null ? skipToken : () => api.workspaceMetrics(id),
+    enabled: periodReports,
     refetchInterval: 5 * 60_000, // main sync cadence
     refetchIntervalInBackground: false,
     staleTime: 60_000,

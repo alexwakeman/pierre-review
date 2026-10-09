@@ -7,7 +7,7 @@ import { buildBotColorMap, resolveBotColor } from '../lib/ui.js';
 // buildBotColorMap): known vendors + Pierre keep their brand colour; every in-house / unbranded
 // bot gets a DISTINCT palette colour. Backed by the CORE detected-reviewers listing
 // (`['bot-reviewers', 'ws:<id>', 'all']`), so it's free wherever that query is already loaded (the
-// feed, the Bots settings tab) and one shared cached fetch elsewhere. Degrades to brand-by-kind
+// feed, Feed → Bot classification) and one shared cached fetch elsewhere. Degrades to brand-by-kind
 // before the listing loads (a branded bot never flashes; an in-house bot shows the neutral gray
 // until its palette hue lands).
 //

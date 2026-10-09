@@ -34,6 +34,7 @@ import {
   staleBranchCommitIds,
   staleTrunkCiEventIds,
   TRUNK_CI_EVENT_WINDOW,
+  trunkCiTransitionChanged,
 } from './branch-status.js';
 import { FEED_WINDOW_DAYS } from '../db/queries.js';
 import type { BranchCheckRun } from '@pierre-review/shared';
@@ -438,7 +439,7 @@ describe('staleTrunkCiEventIds (the hybrid trim)', () => {
 
   it('KEEPS rows past the count floor while they sit inside the Feed’s read window', () => {
     // A hot repo: 4x the floor, all observed inside the last week. The count-only trim deleted
-    // three quarters of these — every one of them still readable by getTrunkCiFailureFeedItems.
+    // three quarters of these — every one of them still inside the read window.
     const set = rows(
       Array.from({ length: TRUNK_CI_EVENT_WINDOW * 4 }, (_, i) => (i * 7) / (TRUNK_CI_EVENT_WINDOW * 4)),
     );
@@ -466,5 +467,138 @@ describe('staleTrunkCiEventIds (the hybrid trim)', () => {
   it('a row exactly at the window edge is inside it', () => {
     const set = rows([...Array.from({ length: TRUNK_CI_EVENT_WINDOW }, () => 0), FEED_WINDOW_DAYS]);
     expect(staleTrunkCiEventIds(set, NOW)).toEqual([]);
+  });
+});
+
+// A failing BranchCheckRun with only a name — the shape trunkCiTransitionChanged compares.
+const check = (name: string): BranchCheckRun => ({
+  name,
+  state: 'failure' as const,
+  url: null,
+  runId: null,
+  jobId: null,
+  workflowName: null,
+});
+
+// The partial-response half of the writer, which has no observable symptom until a repo's log
+// fills with spurious "checks changed" rows.
+describe('trunkCiTransitionChanged', () => {
+  const last = {
+    status: 'failure' as const,
+    headSha: 'sha1',
+    failingChecks: [check('build')],
+  };
+
+  it('records the first observation', () => {
+    expect(
+      trunkCiTransitionChanged(null, {
+        status: 'success',
+        headSha: 'sha1',
+        failingCheckNames: [],
+      }),
+    ).toBe(true);
+  });
+
+  it('records a status or head-sha change', () => {
+    expect(
+      trunkCiTransitionChanged(last, {
+        status: 'success',
+        headSha: 'sha1',
+        failingCheckNames: [],
+      }),
+    ).toBe(true);
+    // A NEW head that is still red is a NEW failure — its own commit, its own feed card — so it
+    // is recorded even though the failing set is byte-identical to the previous head's.
+    expect(
+      trunkCiTransitionChanged(last, {
+        status: 'failure',
+        headSha: 'sha2',
+        failingCheckNames: ['build'],
+      }),
+    ).toBe(true);
+  });
+
+  // ⚠ THE ONE HEAD MOVE THAT IS NOT A TRANSITION. Trunk's head changes on every landed PR, and
+  // the snapshot runs at the end of every walk (as often as every 120s on a hot repo), so
+  // recording green-on-a-newer-commit filled the log with rows that state nothing — and, under
+  // the old count-only trim, pushed the real failures out of the Feed's window. The narrowing is
+  // minimal by construction: it needs a POSITIVE green on both sides with nothing named.
+  it('does NOT record a head move while trunk is green and nothing is failing', () => {
+    const green = { status: 'success' as const, headSha: 'sha1', failingChecks: null };
+    expect(
+      trunkCiTransitionChanged(green, {
+        status: 'success',
+        headSha: 'sha2',
+        failingCheckNames: [],
+      }),
+    ).toBe(false);
+    // 'expected' is the other positive "nothing is failing" rollup.
+    expect(
+      trunkCiTransitionChanged(
+        { status: 'expected', headSha: 'sha1', failingChecks: [] },
+        { status: 'expected', headSha: 'sha2', failingCheckNames: [] },
+      ),
+    ).toBe(false);
+  });
+
+  it('still records a head move for every rollup that is not a positive green', () => {
+    for (const status of ['failure', 'error', 'pending'] as const) {
+      expect(
+        trunkCiTransitionChanged(
+          { status, headSha: 'sha1', failingChecks: null },
+          { status, headSha: 'sha2', failingCheckNames: [] },
+        ),
+        `${status} head move must be recorded`,
+      ).toBe(true);
+    }
+    // …and a green head move can never swallow a named failure: a green rollup that still names
+    // a failing check is a contradiction we record rather than drop.
+    expect(
+      trunkCiTransitionChanged(
+        { status: 'success', headSha: 'sha1', failingChecks: null },
+        { status: 'success', headSha: 'sha2', failingCheckNames: ['flaky'] },
+      ),
+    ).toBe(true);
+  });
+
+  it('records a changed failing-check SET', () => {
+    expect(
+      trunkCiTransitionChanged(last, {
+        status: 'failure',
+        headSha: 'sha1',
+        failingCheckNames: ['build', 'lint'],
+      }),
+    ).toBe(true);
+  });
+
+  it('does NOT record an identical re-observation', () => {
+    expect(
+      trunkCiTransitionChanged(last, {
+        status: 'failure',
+        headSha: 'sha1',
+        failingCheckNames: ['build'],
+      }),
+    ).toBe(false);
+  });
+
+  // THE PARTIAL-RESPONSE RULE: names we never received are not a statement that the set
+  // emptied. Comparing them against `[]` would log a spurious transition every single sync for
+  // any repo whose phase-2 detail fetch is failing.
+  it('drops the name dimension entirely when the names were not received', () => {
+    expect(
+      trunkCiTransitionChanged(last, {
+        status: 'failure',
+        headSha: 'sha1',
+        failingCheckNames: undefined,
+      }),
+    ).toBe(false);
+    // …but an unreceived name set still cannot mask a real status change.
+    expect(
+      trunkCiTransitionChanged(last, {
+        status: 'error',
+        headSha: 'sha1',
+        failingCheckNames: undefined,
+      }),
+    ).toBe(true);
   });
 });

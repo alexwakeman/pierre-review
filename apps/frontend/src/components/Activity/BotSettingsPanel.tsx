@@ -1,59 +1,28 @@
 import { useFilters } from '../../store/filters.js';
 import { DetectedReviewersTable } from '../settings/DetectedReviewersTable.js';
-import { InfoButton } from '../InfoModal.js';
 
-// The Bots rail's "Settings" sub-tab — **who counts as a review bot in this Workspace, who each
-// bot IS, and what it costs here**.
+// The Feed rail's "Bot classification" sub-tab — **who counts as a bot in this Workspace, what
+// kind of bot it is, and who it is** (plus, with `botDepth`, what it costs here). FREE on every
+// tier, both modes: classification is what the Feed's and Timeline's bot hiding reads, so an
+// `npx` install must be able to correct it. It used to be Bots Monitoring → Settings; it moved
+// here when Bots Monitoring went Pro as a whole (a legacy `?botsTab=settings` lands here).
 //
 // ── A BOT IS A PER-WORKSPACE OBJECT ─────────────────────────────────────────────────────────
 // One `workspace_reviewers` row per (account, workspace, actor) carries ALL of it: the judgement
-// (automated / review vs quality_check), the identity (vendor kind + display label) and the price.
-// A vendor running in six of the workspace's repos is therefore ONE row, merged by GitHub handle —
-// not six. The old per-REPO grain (and before it a per-TEAM key with an inheritance chain) is gone,
-// and with it the whole "which of these six rows is the real answer" question.
+// (automated + role), the identity (vendor kind + display label) and the price. A vendor running
+// in six of the workspace's repos is therefore ONE card, merged by GitHub handle — not six.
 //
 // Two provenance flags survive INSIDE that one row and are honoured independently: `source` owns
 // the judgement, `identitySource` owns the identity. That separation is what still stops a "not a
-// bot" click from blanking CodeRabbit's brand colour — there is no longer a table boundary to
-// catch it, so each card offers TWO reset controls rather than one. See DetectedReviewersTable,
-// which owns the copy at the point of edit.
-//
-// ── SCOPE AND BLAST RADIUS ──────────────────────────────────────────────────────────────────
-// `repoId` (the per-repo Bots tab) narrows only the DISPLAY: the table fetches the whole
-// workspace's listing and filters client-side to the bots with a footprint in that repo. It is
-// deliberately NOT a server-side narrowing — every edit made here lands workspace-wide because it
-// is literally the same row, and a card can only show that blast radius if it still carries its
-// full per-repo footprint list.
-//
-// THE BLAST RADIUS IS STATED THREE PLACES, AND ONLY ONE OF THEM IS HERE. The subtitle below says
-// it in a clause; DetectedReviewersTable owns the full disclosure (a workspace-scope banner, a
-// per-repo note, and the repo chips on each card) because that is the point of edit. Do not add a
-// fourth banner to this panel — a stack of three amber boxes repeating one sentence reads as
-// chrome and gets ignored, which is the failure this copy exists to prevent.
-export function BotSettingsPanel({ repoId }: { repoId?: number } = {}): JSX.Element {
+// bot" click from blanking CodeRabbit's brand colour, so each card offers TWO reset controls rather
+// than one. See DetectedReviewersTable, which owns the copy at the point of edit (and the
+// workspace-wide blast-radius disclosure — do not add a second banner here).
+export function BotSettingsPanel(): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
 
   return (
     <div className="space-y-3" data-testid="bot-settings-panel">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-          Who counts as a review bot in this Workspace
-        </h3>
-        <InfoButton title="Review bots in this Workspace">
-          <p>One card per bot, with its verdict, its name and its price in this Workspace.</p>
-          <p>Bots are detected automatically. Limn always marks its own reviews.</p>
-        </InfoButton>
-        {repoId != null && (
-          <span className="text-[12px] text-gray-500 dark:text-gray-400">
-            Bots active in this repo. Edits apply to the whole Workspace.
-          </span>
-        )}
-      </div>
-
-      {/* `repoId` is a DISPLAY filter only — the table fetches the whole Workspace's listing and
-          narrows client-side, so every card keeps its full per-repo footprint (the blast radius
-          the note above promises). */}
-      <DetectedReviewersTable workspaceId={workspaceId} repoId={repoId} />
+      <DetectedReviewersTable workspaceId={workspaceId} />
 
       {/* ⚠ THIS USED TO POINT AT "Settings → Review bots (account-wide)", WHICH NO LONGER EXISTS.
           Its three referents each ended somewhere different: detection takes no configuration at

@@ -9,7 +9,7 @@ import type {
   RequestReviewersBody,
   ReviewerRoutingCard,
 } from '@pierre-review/shared';
-import { PENDING_TABS, pendingAuthorSideOf } from '@pierre-review/shared';
+import { PENDING_TABS, pendingAuthorSideOf, pendingTabHolds } from '@pierre-review/shared';
 import { fixtures, installMockApi } from './mock-api.js';
 
 // A "Needs a reviewer" card on the Pending board: ONE Assign per suggested reviewer.
@@ -97,7 +97,7 @@ function attentionWithRouting(): AttentionCardsResponse {
   const tabs = PENDING_TABS.map((t): PendingTab => {
     const prior = base.tabs?.find((p) => p.key === t.key);
     const ranked: readonly InsightKind[] = t.kinds.filter((k) => k !== 'reviewer_load');
-    const inTab = cards.filter((c) => ranked.includes(c.kind));
+    const inTab = cards.filter((c) => pendingTabHolds(t, c));
     const ofKind = (k: InsightKind): InsightCard[] => inTab.filter((c) => c.kind === k);
     return {
       ...prior,
@@ -150,7 +150,7 @@ async function openWaitingOnReview(page: Page): Promise<Harness> {
     });
   });
 
-  await page.goto('/app/?view=activity');
+  await page.goto('/app/?view=activity&activityRepo=attention');
   await expect(page.getByTestId('attention-view')).toBeVisible();
   await page
     .getByRole('tablist', { name: 'Pending', exact: true })

@@ -22,7 +22,7 @@ import { ThreadStateBar } from './ThreadStateBar.js';
 
 // How many open-PR rows the inline lists show. Keeps a busy repo's list scannable — the sort
 // floats maintainer + most-recently-active PRs onto the visible slice; the full, sortable
-// list lives in the fixed Open PRs tab (the "Show all" footer → onShowAll).
+// list lives in the Open PRs rail line (the "Show all" footer → onShowAll).
 const OPEN_PRS_PAGE = 10;
 
 // One open-PR row: CI dot · ⚠ needs-attention · #number title · author · draft / approval /
@@ -172,7 +172,7 @@ export function OpenPrRows({
   prs: TimelinePr[];
   usersById: Map<number, User>;
   keyPrefix?: string;
-  // Reveal the fixed Open PRs tab with this list's repo pre-selected in its dropdown.
+  // Reveal the Open PRs rail line with this list's repo pre-selected in its dropdown.
   onShowAll: () => void;
 }): JSX.Element {
   const { data: repos } = useRepos();

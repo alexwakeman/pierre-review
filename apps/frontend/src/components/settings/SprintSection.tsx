@@ -231,11 +231,24 @@ export function SprintSection(): JSX.Element {
             label="Start date"
             hint="Any day one of this workspace’s sprints began — the cadence rolls forward and backward from here, so it sets where the boundaries fall, not when history starts."
           >
+            {/* ⚠ The theme is a CLASS on <html> while `color-scheme` follows the OS, so on a light
+                OS the native calendar button painted dark-on-dark in the dark theme and the
+                picker looked gone. The input carries its own scheme per theme, and a click
+                anywhere on it opens the calendar (Chrome otherwise opens it only from the
+                small button). */}
             <input
               type="date"
-              className={inputCls}
+              className={`${inputCls} cursor-pointer [color-scheme:light] dark:[color-scheme:dark]`}
               value={start}
               onChange={(e) => setStart(e.target.value)}
+              onClick={(e) => {
+                try {
+                  e.currentTarget.showPicker?.();
+                } catch {
+                  // Not allowed here (no user activation, or inside a cross-origin frame): the
+                  // field's own calendar button still works.
+                }
+              }}
             />
           </Field>
           {start === '' && (

@@ -6,49 +6,25 @@ import { BotRoiPanel, ResolveBacklogBanner, TuningSuggestions } from './BotRoiPa
 import { WorkspaceBotCharts } from './WorkspaceBotCharts.js';
 import { BotThemesPanel } from './BotThemesPanel.js';
 import { BotAdvisorPanel } from './BotAdvisorPanel.js';
-import { BotSettingsPanel } from './BotSettingsPanel.js';
 import { BenchmarkPanel } from './BenchmarkPanel.js';
 import { benchmarkBodyFor, effectiveBotsTab } from './benchmarkModel.js';
-import { FeedView } from './FeedView.js';
-import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { BotIcon } from '../Icons.js';
-import { ProBadge, ProLockPanel, useProGateState } from '../ProGate.js';
+import { ProLockPanel, useProGateState } from '../ProGate.js';
 
 // The Bots rail view — "the calm layer above your review bots". It composes:
-//   • the ROI / utilisation panel (per-bot signal-to-noise + trend + keep/tune/noisy verdicts),
-//   • a bot-ONLY activity feed (the consolidated Feed hard-filtered to automated-reviewer
-//     activity) with review-thread derived-state pills (Untouched / Replied / Likely-addressed /
-//     Resolved) so you can triage the bot firehose by state.
-// Everything here is deterministic — no AI anywhere in this view, on either tier. The detection
-// heuristics and Limn's own attribution markers (account-wide policy, not a judgement about any one
-// Workspace) stay in the Settings modal's "Review bots" section.
+//   • the ROI / utilisation panel (per-bot signal-to-noise + trend + keep/tune/noisy verdicts).
+//     (Bot ACTIVITY is not here: it is the Feed's "Bots" side — one Feed, two sides.)
+// Everything here is deterministic — no AI anywhere in this view, on either tier. Bot
+// CLASSIFICATION (who counts as a bot, its role and vendor) is NOT here: it is FREE and lives on
+// the Feed rail's "Bot classification" sub-tab (BotSettingsPanel).
 //
-// ── TWO TIERS IN ONE VIEW, AND THE RAIL ENTRY STAYS UNGATED ────────────────────────────────────
-// This used to be described here as a wholly CORE/FREE feature; it no longer is, and the split
-// matters because a reader reaching for "just gate the view" would take four free surfaces with it.
-//
-//   PAID (`botDepth`)  the ROI / utilisation PANEL — `BotRoiPanel` locks itself and renders
-//                      `ProLockPanel` in its own place — and the BENCHMARK sub-tab, the peer-cohort
-//                      placement, which locks the same way. The `WorkspaceBotCharts` section below
-//                      the ROI table was already `botDepth` and stays silently absent (its own,
-//                      older posture).
-//   PAID (`activityDigest`)
-//                      the THEMES sub-tab — "What they're flagging", the qualitative AI read of the
-//                      bot comment stream. A DIFFERENT capability from the two above, on the
-//                      AI-summary tier, and it takes the ABSENT posture rather than the locked one.
-//   FREE (`botTriage`) everything else in the `roi` branch: the "only a bot reviewed N open PRs"
-//                      governance caution, the resolve backlog, the hoisted tuning suggestions and
-//                      the bot-only feed — plus the whole `Settings` sub-tab, which is the reason
-//                      the RAIL ENTRY MUST STAY UNGATED (an `npx` user has to be able to classify a
-//                      reviewer, and there is real free triage on this screen).
-//
-// The `ROI` and `Benchmark` sub-tabs therefore keep their place in the tab list for everyone and
-// wear a Pro badge: visible-but-locked, not absent. (`Advisor` and `Themes` keep the opposite
-// posture — only LISTED when entitled. For the advisor it is because it is workspace-grain with no
-// free half to sit beside; for Themes it is because `ProGate.tsx` holds the visible-but-locked set
-// at SIX named surfaces with a written argument that a seventh needs its own, and because the panel
-// renders `null` on OSS, where an always-listed tab would be a blank pane. Two postures in one tab
-// strip is deliberate, not drift.)
+// ── PRO AS A WHOLE ───────────────────────────────────────────────────────────────────────────
+// The whole view is `botDepth`: `BotsView` below is the ONE gate (visible-but-locked, one
+// ProLockPanel for the whole pane, the single ProBadge on the rail entry). Inside it, Themes
+// additionally needs `activityDigest` and the Advisor `botAdvisor`; both are LISTED only when
+// entitled. The inner ROI/Benchmark locks stay as defence in depth but never show behind this gate.
+// Bot HIDING on the Feed/Timeline and bot classification are not this screen and stay free
+// (`/api/bot-reviewers*`, Feed → Bot classification).
 //
 // ── SCOPE: ONE WORKSPACE, ALWAYS ─────────────────────────────────────────────────────────────
 // Every panel here is scoped by `filters.workspaceId` — the single scope this app has. A BOT IS A
@@ -57,24 +33,40 @@ import { ProBadge, ProLockPanel, useProGateState } from '../ProGate.js';
 // repos is ONE row here, merged by GitHub handle — not six.
 //
 // `repoId` narrows the DATA to one repo (the per-repo Bots tab in the repo console): the
-// analytics, the bot-only feed, the bot-only-review caution and the vendor drill-down all measure
-// that repo alone. It does NOT narrow the judgement — there is nothing per-repo left to narrow —
-// which is why the Settings sub-tab renders the whole workspace's reviewers and filters them
-// client-side by footprint, and says out loud that an edit there lands workspace-wide.
-export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
-  // The same analytics query BotRoiPanel drives (same key → deduped), read here for the TWO FREE
-  // surfaces below: the bot-only-review count in the governance caution, and the tuning
-  // suggestions. Same workspace + repo narrowing as the panel, so both hit the same cache entry.
-  //
-  // ⚠ THIS ONE STAYS UNGATED, AND THAT IS WHY THE ROUTE IS NARROWED RATHER THAN 402'd. Free
-  // accounts still need `totals.botOnlyPrs` and `suggestions`; the server withholds the ROI
-  // population (`vendors`, `qualityChecks`, `ml`) instead of the whole response, so this fetch is
-  // legitimate on every tier. Gating it on `botDepth` would silently delete the caution — the
-  // client reads `?? 0`, so nothing would error, the amber box would just stop appearing.
+// analytics, the bot-only-review caution and the vendor drill-down all measure
+// that repo alone. It does NOT narrow the judgement — there is nothing per-repo left to narrow.
+export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element | null {
+  // ⚠ BOTS MONITORING IS PRO AS A WHOLE (`botDepth`) — every sub-tab, in BOTH
+  // mounts (the rail and the per-repo console's Bots tab). ONE gate here, no per-sub-tab badges:
+  // the rail entry carries the single ProBadge. The body is not even MOUNTED while locked, so none
+  // of its hooks fire (each also ANDs `botDepth` into its own `enabled`, because the routes 402).
+  // `useProGateState` keeps the lock from flashing at a paying account while /api/me is in flight.
+  const { botDepth } = useProCapabilities();
+  const gate = useProGateState(botDepth);
+  if (gate === 'pending') return null;
+  if (gate === 'locked') {
+    return (
+      <div className="space-y-3" data-testid="bots-view-locked">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Bots Monitoring</h2>
+        <ProLockPanel heading="Bots Monitoring">
+          Which of your review bots earn their keep? See what each bot writes, how much of it your
+          team acts on, which threads it left open, and how it compares with the same bot elsewhere.
+        </ProLockPanel>
+      </div>
+    );
+  }
+  return <BotsViewBody repoId={repoId} />;
+}
+
+function BotsViewBody({ repoId }: { repoId?: number }): JSX.Element {
+  // The same analytics query BotRoiPanel drives (same key → deduped), read here for the
+  // governance caution and the tuning suggestions. Same workspace + repo narrowing as the panel, so
+  // both hit the same cache entry. The route 402s without the capability, so the hook ANDs it in.
   const workspaceId = useFilters((s) => s.workspaceId);
   const window = useFilters((s) => s.botAnalyticsWindow);
   const repoScope = useMemo(() => (repoId != null ? [repoId] : null), [repoId]);
-  const { data } = useBotAnalytics(workspaceId, window, true, repoScope);
+  const { botDepth } = useProCapabilities();
+  const { data } = useBotAnalytics(workspaceId, window, botDepth, repoScope);
   const botOnly = data?.totals.botOnlyPrs ?? 0;
 
   // The EXACT PR list behind the count lives in the bot-only-PRs drill-down TAB (same
@@ -106,14 +98,6 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   // plugin's `scope_key` carries the matching `|r:` suffix, so the per-repo console's Bots tab
   // gets that repo's own report rather than the workspace's.
   const showThemes = activityDigest;
-  // "Settings" ("who counts as a review bot in this Workspace") shows in BOTH views. It used to be
-  // cross-repo ONLY because the judgement was keyed per TEAM and a repo tab could not express a
-  // team key (team_repos was many-to-many, so one repo sat in several teams). A repo now belongs
-  // to exactly ONE workspace and the judgement is the workspace's, so a repo tab is simply the
-  // same list filtered to the bots with a footprint in that repo. It is CORE/free — unlike Themes
-  // it has no capability gate, which also fixes an OSS gap: reviewer classification used to live
-  // behind SettingsModal's caps.botTriage, so an `npx` user could not classify a reviewer at all.
-  //
   // DERIVE the visible tab; never write a correction back to the store. `advisor` shares one
   // scalar with the per-repo console, so it can legitimately hold a key that isn't rendered
   // here — writing a "fix" would permanently forget the user's choice for the view that DOES
@@ -132,7 +116,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   return (
     <div className="space-y-3" data-testid="bots-view">
       <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Review bots</h2>
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Bots Monitoring</h2>
         {/* The per-repo mount says what it is scoped to; the rail needs no tagline. */}
         {repoId != null && (
           <span className="text-[12px] text-gray-500 dark:text-gray-400">
@@ -157,7 +141,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
           // reader learns the product can answer "is our bot normal?" at all, and a gated sub-tab
           // must still be SELECTABLE or a bookmarked `?botsTab=benchmark` lands elsewhere.
           { key: 'benchmark', label: 'Benchmark' },
-          { key: 'settings', label: 'Settings' },
+          // (No Settings tab: bot classification is FREE and is Feed → Bot classification.)
         ] as const).map((t) => {
           const on = effectiveTab === t.key;
           return (
@@ -174,45 +158,10 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               }`}
             >
               {t.label}
-              {/* The four paid sub-tabs, badged from the ONE shared badge so the paid surfaces
-                  cannot drift into slightly different chips. `Settings` carries none — it is free.
-
-                  ⚠ THE ROI BADGE IS UNCONDITIONAL, not `!botDepth`. Advisor's has always shown to
-                  the entitled (it is only listed for them at all), so a chip that appeared and
-                  vanished with entitlement would read as a glitch rather than a tier label — and
-                  keying it on the capability would also make it FLICKER on every cold load, since
-                  `useProCapabilities()` answers all-false until /api/me lands. It labels the tier,
-                  not the reader.
-
-                  The badge sits INSIDE the tab button so the accessible name composes as
-                  "ROI, Pro feature"; it is a label with no click target of its own, because a link
-                  inside a tab button is a nested interactive control. */}
-              {(t.key === 'advisor' ||
-                t.key === 'themes' ||
-                t.key === 'roi' ||
-                t.key === 'benchmark') && (
-                <ProBadge
-                  variant="tab"
-                  title={
-                    t.key === 'roi'
-                      ? 'The ROI table is part of Pro.'
-                      : t.key === 'benchmark'
-                        ? 'The peer benchmark is part of Pro.'
-                        : t.key === 'themes'
-                          ? 'The themes summary is part of Pro.'
-                          : 'The Bot Tuning Advisor is part of Pro.'
-                  }
-                />
-              )}
             </button>
           );
         })}
       </div>
-
-      {/* "Showing only #N" when the bot feed is isolated to one PR (e.g. from the Bot-only-PRs
-          "Show in feed", which lands here). Kept OUTSIDE the sub-tab switch so its Clear — the
-          only in-view way to un-isolate the bot feed — is always reachable. Self-hides otherwise. */}
-      <FeedIsolationBanner />
 
       {effectiveTab === 'advisor' ? (
         <BotAdvisorPanel />
@@ -232,11 +181,6 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
         <BotThemesPanel repoIds={repoScope} />
       ) : effectiveTab === 'benchmark' ? (
         <BenchmarkTabBody repoId={repoId} />
-      ) : effectiveTab === 'settings' ? (
-        /* A per-repo Bots tab shows the SAME workspace listing, filtered client-side to the bots
-           with a footprint in that repo — every edit there is still workspace-wide, and the panel
-           says so. */
-        <BotSettingsPanel repoId={repoId} />
       ) : (
         <>
           {/* Governance caution: PRs whose only review came from an automated reviewer — no human
@@ -275,13 +219,9 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               when the backlog is empty; opens the resolvable-bot-threads review-and-resolve tab. */}
           <ResolveBacklogBanner workspaceId={workspaceId} repoIds={repoScope} />
 
-          {/* Deterministic, ADVISORY tuning hints (which bot × path is mostly noise) — FREE, and
-              MOUNTED HERE rather than inside the ROI panel, which is where it used to live. When
-              the panel went paid this box had to leave it or go paid with it, and it is one of the
-              free `botTriage` surfaces. It reads `suggestions` off the SAME analytics response the
-              caution above does, which the server keeps populated for unentitled accounts for
-              exactly this reason — the hoist and that narrowing are one decision.
-              Self-hides when there is nothing to suggest. */}
+          {/* Deterministic, ADVISORY tuning hints (which bot × path is mostly noise), read off the
+              SAME analytics response the caution above does. Self-hides when there is nothing to
+              suggest. */}
           <TuningSuggestions suggestions={data?.suggestions ?? []} />
 
           {/* The ML severity surface lives INSIDE the ROI panel — one merged table (the ML columns)
@@ -295,7 +235,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
           {/* The surviving workspace-grain behaviour charts (findings density, PR-size-vs-volume,
               the ML block, cross-bot overlap, where-bots-work) — a collapsed-by-default section,
               `botDepth`-gated (it renders NOTHING without the capability, and fetches nothing
-              until opened). The bottom of the Measure surface, above the bot feed.
+              until opened). The bottom of the Measure surface.
 
               ⚠ SAME CAPABILITY AS THE PANEL ABOVE, DELIBERATELY DIFFERENT POSTURE: the panel is
               visible-but-locked, this is silently absent. The reversal was scoped to six named
@@ -303,14 +243,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               first would read as a paywall page rather than a screen with a paid section on it. If
               that is ever revisited, revisit it here, not by "making it consistent" in passing. */}
           <WorkspaceBotCharts repoId={repoId} />
-
-          {/* The bot-only activity feed — the consolidated Feed filtered to automated-reviewer
-              activity, with review-thread derived-state pills for triage. Same cards / inline
-              threads / pagination as every other feed, just bot-scoped (and repo-scoped in the
-              per-repo Bots tab). */}
-          <div className="border-t border-gray-200 pt-3 dark:border-gray-800">
-            <FeedView repoId={repoId} botsMode />
-          </div>
+          {/* No bot feed here: bot activity is the Feed's "Bots" side (one Feed, two sides). */}
         </>
       )}
     </div>

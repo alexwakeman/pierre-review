@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useProCapabilities } from '../../hooks/useTriage.js';
 import { PRODUCT_NAME } from '@pierre-review/shared';
 import type {
   BotVendorAnalytics,
@@ -331,7 +332,9 @@ export function BotPrsDetail(): JSX.Element {
 
   // Bot sub-tabs come from the CORE analytics read (the same query the Bot-ROI panel uses, at the
   // same workspace + repo narrowing, so switching to this tab is usually instant off the cache).
-  const analytics = useBotAnalytics(workspaceId, window, true, repoScope);
+  // The route 402s without the capability (Bots Monitoring is Pro), so the hook ANDs it in.
+  const { botDepth } = useProCapabilities();
+  const analytics = useBotAnalytics(workspaceId, window, botDepth, repoScope);
   const vendors = analytics.data?.vendors ?? NO_VENDORS;
 
   // The active reviewer sub-tab, identified by its analytics-row KEY (`u<userId>` | 'pierre').

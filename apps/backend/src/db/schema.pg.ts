@@ -681,6 +681,8 @@ export const autoMergeRequests = pgTable(
     // in flight — which is also the honest answer after a restart that happened before one.
     updateIssuedAgainstOid: text('update_issued_against_oid'),
     viaMergeQueue: boolean('via_merge_queue').notNull().default(false),
+    // Armed by the dependency auto-merge setting (migration 0093 / pg 0080). See the sqlite twin.
+    armedByPolicy: boolean('armed_by_policy'),
     enqueuedAt: timestamp('enqueued_at', { withTimezone: true, mode: 'date' }),
     state: text('state', {
       enum: [
@@ -727,6 +729,30 @@ export const autoMergeRequests = pgTable(
     accountPrUx: uniqueIndex('amr_account_pr').on(t.accountId, t.prId),
     accountIdx: index('amr_account_idx').on(t.accountId),
     stateIdx: index('amr_state_idx').on(t.state),
+  }),
+);
+
+// ---- Dependency auto-merge skips (migration 0093 / pg 0080) — the pg twin. See the sqlite twin.
+export const autoMergePolicySkips = pgTable(
+  'auto_merge_policy_skips',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // No single-column FK: the COMPOSITE declaration below (tenancy as a constraint).
+    prId: integer('pr_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    accountPrUx: uniqueIndex('amps_account_pr').on(t.accountId, t.prId),
+    prAccountFk: foreignKey({
+      name: 'amps_pr_account_fk',
+      columns: [t.prId, t.accountId],
+      foreignColumns: [pullRequests.id, pullRequests.accountId],
+    }).onDelete('cascade'),
   }),
 );
 
@@ -1348,6 +1374,8 @@ export const workspaces = pgTable(
     autoPostSettings: jsonb('auto_post_settings').$type<StoredAutoPostSettings>(),
     // Auto fix settings (migration 0091 / pg 0078), overrides only. Rationale in the sqlite twin.
     autoFixSettings: jsonb('auto_fix_settings').$type<StoredAutoFixSettings>(),
+    // Dependency auto-merge (migration 0093 / pg 0080). NULL/false = off. Rationale in the sqlite twin.
+    dependencyAutoMerge: boolean('dependency_auto_merge'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),
@@ -1545,7 +1573,7 @@ export const workspaceReviewers = pgTable(
       t.workspaceId,
       t.authorUserId,
     ),
-    // Listing one workspace's reviewers (the Bots settings list).
+    // Listing one workspace's reviewers (Feed → Bot classification).
     accountWorkspaceIdx: index('workspace_reviewers_account_workspace_idx').on(
       t.accountId,
       t.workspaceId,

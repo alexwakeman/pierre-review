@@ -6,6 +6,7 @@ import { pruneOldData } from '../db/retention.js';
 import { getScheduledJobs } from './scheduled-jobs.js';
 import { runBenchmarkRollup } from './benchmark-rollup.js';
 import { AUTO_MERGE_CRON, runAutoMergeTick } from '../merge/auto-merge-runner.js';
+import { runDependencyPolicyTick } from '../merge/dependency-policy.js';
 import { runMlEnrichmentTick } from './ml-enrichment.js';
 import { MENTION_SCAN_CRON, runMentionScanTick } from './mention-scan.js';
 import { isSeverityApiConfigured } from '../ml/severity-client.js';
@@ -82,7 +83,9 @@ export function startScheduler(log: FastifyBaseLogger): void {
   // the common case (the app is open on the developer's machine) and cloud arms per account.
   if (cron.validate(AUTO_MERGE_CRON)) {
     autoMergeTask = cron.schedule(AUTO_MERGE_CRON, () => {
-      void runAutoMergeTick(log);
+      // The dependency auto-merge sweep arms first (OFF unless a workspace switched it on), so a
+      // fresh policy intent is evaluated by the same tick. Both never throw.
+      void runDependencyPolicyTick(log).finally(() => runAutoMergeTick(log));
     });
     log.info(`auto-merge watcher started (cron "${AUTO_MERGE_CRON}")`);
   }

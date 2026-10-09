@@ -126,7 +126,8 @@ fixture tests (see Conventions).
     line and fire no notification, so muting them would re-colour "you can land this now" cards and
     suppress nothing. Pinned in `db/pending-mute.test.ts`.
 - **`users`** — GitHub actor metadata (`githubLogin` unique, `isBot`, `displayName`,
-  `avatarUrl`, `githubType` — the GraphQL author `__typename`, fed to the bot classifier;
+  `avatarUrl` — selected for `... on Bot` too, so an App bot carries its vendor logo (Feed → Bot
+  classification's card logo; coalesced, never cleared), `githubType` — the GraphQL author `__typename`, fed to the bot classifier;
   `appSlug` — the `performed_via_github_app.slug` the app-attribution probe persists,
   fill-or-update and never cleared by a later app-less comment; feeds the advisor's
   discovery tier); **global**.
@@ -219,9 +220,17 @@ fixture tests (see Conventions).
   queue at arm time — the watcher ENQUEUES instead of direct-merging), `enqueuedAt` (when the
   WATCHER enqueued; the attribution record — merged-while-set resolves 'merged', a human's queue
   entry never does, and disarm-with-it-set also dequeues; reset by every re-arm), `state`
-  (`ArmedMergeState`), `expiresAt`, `lastCheckedAt`, `lastReason`. FKs cascade from
+  (`ArmedMergeState`), `expiresAt`, `lastCheckedAt`, `lastReason`, `armedByPolicy` (0093 / pg
+  0080: the dependency auto-merge setting armed it — it lands like a click's, once REQUIRED
+  checks pass, `unstable` included; NULL/false = a person). FKs cascade from
   `accounts`/`pullRequests`. Both
   exported (Art. 15 — it records an action the user asked the server to take) and erased.
+- **`autoMergePolicySkips`** (`auto_merge_policy_skips`, 0093 / pg 0080) — one row per
+  `(accountId, prId)` whose auto-merge intent a PERSON cancelled; the dependency setting never
+  re-arms it. Composite FK `amps_pr_account_fk (pr_id, account_id) → pull_requests`. Joins both
+  delete paths, `eraseAccountData` and `accountScopedTables()`. `workspaces.dependency_auto_merge`
+  (same migration) is the setting itself — NULL/false = OFF, the one writer
+  `setDependencyAutoMerge` (merge/dependency-policy.ts).
 - **`branchCommits`** — the recent commits on each repo's DEFAULT branch (`accountId`
   denormalized; unique `(accountId, repoId, sha)`; trimmed to `BRANCH_COMMIT_WINDOW`=100 per
   repo in the same transaction as the upsert. COUNT bound only — a writer-side age bound was
@@ -621,7 +630,9 @@ Three vocabularies describe an automated actor, and they are **orthogonal axes, 
 | Identity | `AutomatedReviewerKind` (+ `label`) | **WHO** is it — the vendor brand | `identitySource` |
 | Price | `monthlyCents` + `costModel` | what does it cost | (no provenance; one writer) |
 
-All three live in ONE `workspace_reviewers` row — see **`workspaceReviewers`** above.
+All three live in ONE `workspace_reviewers` row — see **`workspaceReviewers`** above. Judgement and identity are edited
+FREE on every tier (Feed → Bot classification); price is `botDepth` (`PUT …/cost` 402s, and every
+route echoing a row strips it).
 
 ### `ReviewerRole` has SIX members, and EXACTLY ONE is the reviewer cohort
 
@@ -793,6 +804,7 @@ check every hit against its table's declared unique.**
 | `commit_files` | `sha` (immutable content — a single-column target) | `sync/commit-files.ts` |
 | `pr_views` | `prId` | `markPrViewed` (~5416), the bulk mark-all (~5447) |
 | `auto_merge_requests` | `[accountId, prId]` — current state, not a log; re-arm OVERWRITES, disarm DELETEs | `armAutoMerge` (~14009) |
+| `auto_merge_policy_skips` | `[accountId, prId]` (`amps_account_pr`) — **`onConflictDoNothing`** | `recordPolicySkip` (merge/dependency-policy.ts) |
 | `benchmark_contributions` | `[accountId, vendorKind, weekStart]` | the benchmark rollup (~13444) |
 | `ml_comment_labels` | `(account_id, target_kind, target_id)` (`mcl_account_target`) | `db/ml-labels.ts` (the enrichment worker's ONLY writer) |
 | `pr_mentions` | `(account_id, pr_id)` (`prm_account_pr`), `onConflictDoUpdate` (restamps `login`, `repo_id`, `mentioned_at`, `mentioned_by_user_id`) | `db/pr-mentions.ts` `syncAccountMentions` (the mention scanner's ONLY writer) |

@@ -56,7 +56,8 @@ import { registerRetentionHandler } from '../db/retention.js';
 import { registerAccountErasureHandler } from '../db/erase-account.js';
 import { registerReportingWindowResolver } from '../db/reporting-window.js';
 import { runPluginMigrations } from './migrate.js';
-import { setProCapabilities } from './contract.js';
+import { entitledProCapabilities, setProCapabilities } from './contract.js';
+import { registerProEventHooks } from './event-hooks.js';
 import type { ProContext, ProPlugin } from './contract.js';
 
 // Boot binding for the optional @pierre/pro plugin. The plugin lives in a PRIVATE
@@ -142,6 +143,16 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
     registerAccountErasure: (handler) => registerAccountErasureHandler(handler),
     // The plugin's comparison-window resolver becomes core's reporting window (db/reporting-window.ts).
     registerReportingWindow: (resolver) => registerReportingWindowResolver(resolver),
+    // Host → plugin event hooks (pro/event-hooks.ts): a succeeded Claude Review run, a PR seen
+    // merging live. Fire-and-forget on the host side.
+    registerEventHooks: (hooks) => registerProEventHooks(hooks, app.log),
+    // The per-account entitlement view (/api/me's), for crons and event hooks that carry no
+    // request for the /api/pro/* 402 gate to see. A missing account is never entitled.
+    accountEntitled: async (accountId, capability) => {
+      const account = await getAccountById(accountId);
+      if (!account) return false;
+      return entitledProCapabilities(account)[capability] === true;
+    },
     llm: {
       complete: cheapComplete,
       detectAuth: () => {

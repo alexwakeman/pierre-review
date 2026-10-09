@@ -228,7 +228,7 @@ AGGREGATE view of the level in the product.
 (this sprint so far when it has a sprint cadence, else the trailing 7/14 days), resolved once on the
 server by core `db/reporting-window.ts` — which asks the plugin's `resolveComparisonWindow`. The card
 used to be a snapshot of the pull requests open at that moment: it read as a sprint figure beside the
-tiles, and it emptied whenever nothing happened to be open. It now rides `reach` on the free
+tiles, and it emptied whenever nothing happened to be open. It now rides `reach` on the
 `/api/workspace-metrics` response (`db/merged-reach.ts`), measured over the same window as the tiles
 beside it, and names that window in its note and its "i". An empty window prints "No pull requests
 merged in this window." rather than hiding the card.
@@ -266,7 +266,9 @@ a key. The chip's own palette cannot be reused as fills: its greens/greys/ambers
 text pairs, `PALETTE.green` is the success green the chip rejects by name (and 2.28:1 here),
 `PALETTE.gray` is 2.54:1 and the chip's amber 2.15:1.
 
-**Free on every tier**, like the level itself — no `ProGate`, no capability read, no 402.
+**Pro, with the rest of Reports** (`periodReports`): `/api/workspace-metrics` 402s without it and the
+whole Reports pane is one `ProLockPanel`. The LEVEL itself (the chip on cards, PR detail, Feed,
+timeline) stays free on every tier.
 
 ## The expansion is free, because it is deterministic
 

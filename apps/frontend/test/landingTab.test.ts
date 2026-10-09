@@ -49,22 +49,22 @@ function state(over: Partial<FilterState>): FilterState {
 
 describe('landingTabFromUrl — the decision table', () => {
   // A cold start / "open the app": nothing to honour, so the front door.
-  it('bare URL → open-prs', () => {
-    expect(landingTabFromUrl('')).toBe('open-prs');
-    expect(landingTabFromUrl('?')).toBe('open-prs');
+  it('bare URL → activity (its Open PRs rail line)', () => {
+    expect(landingTabFromUrl('')).toBe('activity');
+    expect(landingTabFromUrl('?')).toBe('activity');
   });
 
   // ⚠ THE REGRESSION. `?workspace=` is stamped by the app itself on every load, so it can never
   // mean "the user asked for the board". This is the case that made the feature look broken.
-  it('?workspace=5 → open-prs (the app stamped that param, the user did not)', () => {
-    expect(landingTabFromUrl('?workspace=5')).toBe('open-prs');
+  it('?workspace=5 → activity (the app stamped that param, the user did not)', () => {
+    expect(landingTabFromUrl('?workspace=5')).toBe('activity');
   });
 
   // Same reasoning one step further: the whole self-stamped filter-bar tail is not a destination.
-  it('?workspace=5&repos=1,2 → open-prs', () => {
-    expect(landingTabFromUrl('?workspace=5&repos=1,2')).toBe('open-prs');
+  it('?workspace=5&repos=1,2 → activity', () => {
+    expect(landingTabFromUrl('?workspace=5&repos=1,2')).toBe('activity');
     expect(landingTabFromUrl('?workspace=5&repos=1,2&cats=review&status=open&ci=only')).toBe(
-      'open-prs',
+      'activity',
     );
   });
 
@@ -82,10 +82,11 @@ describe('landingTabFromUrl — the decision table', () => {
     expect(landingTabFromUrl('?workspace=5&view=timeline')).toBe('timeline');
   });
 
-  // The third FIXED view (Activity · Open PRs · Timeline): bookmarkable, and it beats a pr selection.
-  it('?view=open-prs → open-prs', () => {
-    expect(landingTabFromUrl('?view=open-prs')).toBe('open-prs');
-    expect(landingTabFromUrl('?workspace=5&view=open-prs&pr=4123')).toBe('open-prs');
+  // ⚠ BACK-COMPAT: the retired fixed Open PRs tab's spelling lands on Activity, whose default rail
+  // line IS Open PRs — and, as before, it beats a pr selection.
+  it('legacy ?view=open-prs → activity', () => {
+    expect(landingTabFromUrl('?view=open-prs')).toBe('activity');
+    expect(landingTabFromUrl('?workspace=5&view=open-prs&pr=4123')).toBe('activity');
   });
 
   it('?view=activity → activity', () => {
@@ -114,9 +115,9 @@ describe('landingTabFromUrl — the decision table', () => {
   // The URL is hand-editable and links outlive spellings: an unknown value is normalized to the
   // default rather than treated as an unknown board.
   it('ignores a `view` value that names no board', () => {
-    expect(landingTabFromUrl('?view=bogus')).toBe('open-prs');
-    expect(landingTabFromUrl('?view=')).toBe('open-prs');
-    expect(landingTabFromUrl('?view=insights')).toBe('open-prs');
+    expect(landingTabFromUrl('?view=bogus')).toBe('activity');
+    expect(landingTabFromUrl('?view=')).toBe('activity');
+    expect(landingTabFromUrl('?view=insights')).toBe('activity');
   });
 
   // ── `view=` NAMES TABS TOO, spelled as the Tab.key verbatim ───────────────────────────────
@@ -135,22 +136,22 @@ describe('landingTabFromUrl — the decision table', () => {
   // ⚠ THE SEED-BACKED DRILL-DOWNS STAY EPHEMERAL. Their identity is an in-memory seed that is
   // deliberately never persisted (a restored one could name a tile the strip no longer shows), so
   // no URL ever names them — and a hand-written or stale one resolves to the launching console
-  // rather than to a broken drill-down: to the default view, Open PRs.
+  // rather than to a broken drill-down: to the default view, Activity.
   it('does NOT honour a seed-backed drill-down key', () => {
-    expect(landingTabFromUrl('?view=bot-flagging')).toBe('open-prs');
-    expect(landingTabFromUrl('?view=people-report')).toBe('open-prs');
-    expect(landingTabFromUrl('?view=search')).toBe('open-prs');
+    expect(landingTabFromUrl('?view=bot-flagging')).toBe('activity');
+    expect(landingTabFromUrl('?view=people-report')).toBe('activity');
+    expect(landingTabFromUrl('?view=search')).toBe('activity');
     // Nor a malformed one that merely looks like a tab key.
-    expect(landingTabFromUrl('?view=pr-detail:')).toBe('open-prs');
-    expect(landingTabFromUrl('?view=pr-detail:abc')).toBe('open-prs');
+    expect(landingTabFromUrl('?view=pr-detail:')).toBe('activity');
+    expect(landingTabFromUrl('?view=pr-detail:abc')).toBe('activity');
   });
 
   // The predicate must mirror `readFromUrl`'s own parse (truthy raw, finite parseInt). A `?pr=`
   // that seats no selection is not a destination — honouring it would open an empty board.
   it('ignores a pr/thread param that names no id', () => {
-    expect(landingTabFromUrl('?pr=')).toBe('open-prs');
-    expect(landingTabFromUrl('?pr=nonsense')).toBe('open-prs');
-    expect(landingTabFromUrl('?thread=')).toBe('open-prs');
+    expect(landingTabFromUrl('?pr=')).toBe('activity');
+    expect(landingTabFromUrl('?pr=nonsense')).toBe('activity');
+    expect(landingTabFromUrl('?thread=')).toBe('activity');
   });
 });
 
@@ -177,11 +178,13 @@ describe('writeToUrl emits the board affirmatively (the round trip)', () => {
     expect(landingTabFromUrl(location.search)).toBe('activity');
   });
 
-  it('emits view=open-prs while the Open PRs tab is active, and that URL lands back on it', () => {
-    usePinnedTabs.setState({ activeTab: 'open-prs' });
-    writeToUrl(state({ workspaceId: 5 }));
-    expect(location.search).toContain('view=open-prs');
-    expect(landingTabFromUrl(location.search)).toBe('open-prs');
+  // Open PRs is Activity's DEFAULT rail line, so it names no console; Pending names itself.
+  it('omits activityRepo for Open PRs and emits it for Pending', () => {
+    usePinnedTabs.setState({ activeTab: 'activity' });
+    writeToUrl(state({ workspaceId: 5, activityRepoId: 'open-prs' }));
+    expect(location.search).not.toContain('activityRepo=');
+    writeToUrl(state({ workspaceId: 5, activityRepoId: 'attention' }));
+    expect(location.search).toContain('activityRepo=attention');
   });
 
   // A pinned PR tab IS a view now, and it round-trips: the key is the address. (This used to
@@ -194,12 +197,12 @@ describe('writeToUrl emits the board affirmatively (the round trip)', () => {
   });
 
   // The seed-backed drill-downs are the exception, and it is a deliberate one: no `view` at all,
-  // so a refresh (or a Forward onto that entry) resolves to Open PRs (the default) rather than to a drill-down
+  // so a refresh (or a Forward onto that entry) resolves to Activity (the default) rather than to a drill-down
   // whose seed died with the session.
-  it('emits no view for a seed-backed drill-down, so a refresh from one lands on Open PRs', () => {
+  it('emits no view for a seed-backed drill-down, so a refresh from one lands on Activity', () => {
     usePinnedTabs.setState({ activeTab: 'bot-flagging' });
     writeToUrl(state({ workspaceId: 5 }));
     expect(location.search).not.toContain('view=');
-    expect(landingTabFromUrl(location.search)).toBe('open-prs');
+    expect(landingTabFromUrl(location.search)).toBe('activity');
   });
 });

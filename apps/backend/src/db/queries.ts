@@ -112,6 +112,7 @@ import type {
   ConsolidatedFeedResponse,
   ConsolidatedFeedCounts,
   FeedPrEventChip,
+  FeedAuthors,
   FeedAffectedThread,
   MyTurnPr,
   MyTurnDismissedItem,
@@ -236,6 +237,7 @@ import {
 } from './my-turn-dismissals.js';
 import { enrichReviewerSuggestions } from '../github/reviewer-suggest.js';
 import { ensureRoutingPrFiles } from '../sync/routing-files.js';
+import { noteLiveMergeTransition } from '../sync/merge-notice.js';
 import {
   automationVendorKind,
   matchesAutomatedLoginPattern,
@@ -1794,17 +1796,26 @@ export interface FeedFilters {
   // scan is one PR, so its full history is cheap). Lets the Feed's per-PR filter show an
   // old PR's opened event + all activity, not just the last `daysBefore` days.
   prId?: number | null;
-  // Bot feed: restrict events to these actor ids (the automated-reviewer set) IN SQL, so the
-  // bot-only feed filters before the cap instead of the client thinning an already-capped mixed
-  // page. Null/omitted → no actor restriction. An empty array yields an empty feed by design.
+  // The Feed's 'bots' side: restrict events to these actor ids IN SQL, before any cap.
+  // Null/omitted → no actor restriction. An empty array yields an empty feed by design.
   botActorIds?: number[] | null;
+  // The Feed's 'humans' side: drop events by these actor ids IN SQL (actor-less rows are kept).
+  // Null/empty → no exclusion.
+  excludeActorIds?: number[] | null;
 }
 
 export async function getFeed(
   accountId: number,
   opts: FeedFilters = {},
 ): Promise<FeedResponse> {
-  const { daysBefore = 14, repoIds = null, userIds = null, prId = null, botActorIds = null } = opts;
+  const {
+    daysBefore = 14,
+    repoIds = null,
+    userIds = null,
+    prId = null,
+    botActorIds = null,
+    excludeActorIds = null,
+  } = opts;
   // Isolated to one PR → no time window (epoch 0); otherwise the rolling `daysBefore` window.
   const since = prId != null ? new Date(0) : new Date(Date.now() - daysBefore * 24 * 60 * 60 * 1000);
   const conds: SQL[] = [
@@ -1815,11 +1826,19 @@ export async function getFeed(
   if (prId != null) conds.push(eq(events.prId, prId));
   if (repoIds) conds.push(inArray(events.repoId, repoIds));
   if (userIds && userIds.length > 0) conds.push(inArray(events.actorId, userIds));
-  // Bot feed: restrict to the automated-reviewer actor set (before the cap). An empty set
-  // means "no bots" → force an unsatisfiable predicate so the feed is empty (not unfiltered).
+  // The 'bots' side: restrict to the bot actor set. An empty set means "no bots" → force an
+  // unsatisfiable predicate so the feed is empty (not unfiltered).
   if (botActorIds != null)
     conds.push(
       botActorIds.length > 0 ? inArray(events.actorId, botActorIds) : sql`1 = 0`,
+    );
+  // The 'humans' side: drop the bot actor set, keeping actor-less rows.
+  if (excludeActorIds != null && excludeActorIds.length > 0)
+    conds.push(
+      sql`(${events.actorId} is null or ${events.actorId} not in (${sql.join(
+        excludeActorIds,
+        sql`, `,
+      )}))`,
     );
   const rows = await db
     .select({
@@ -2821,10 +2840,6 @@ export const FEED_WINDOW_DAYS = 14;
 // Every My Turn (participated) event is always kept; the plain activity rows are bounded to
 // the most recent, so a busy multi-repo account doesn't render thousands of them.
 const FEED_EVENT_CAP = 250;
-// The Bots pane's bot-only feed filters to automated reviewers IN SQL, so its cap governs bot
-// activity alone (not a slice of all activity). Set generously so it spans the full window and
-// tracks the ROI thread counts; the feed is paginated + DOM-windowed, so a high total is cheap.
-const BOT_FEED_EVENT_CAP = 1000;
 
 // A top-level PR comment and a coinciding "host" event by the SAME actor on the SAME PR are
 // folded into ONE card when they land within this window of each other (issue comments carry
@@ -2918,11 +2933,11 @@ export function coalesceEventComments(
 }
 
 export interface ConsolidatedFeedFilters {
-  // WHICH WORKSPACE'S JUDGEMENT the bot-only feed uses. REQUIRED, and required rather than
-  // optional deliberately: the bots-only path resolves an automated-reviewer set, and that answer
-  // is a workspace fact. An optional field here would have every call site quietly fall back to
-  // some default workspace's verdicts while the rows on screen came from another's repos. The
-  // route resolves it via `resolveWorkspaceScope` (absent / unknown / foreign ⇒ Default).
+  // WHICH WORKSPACE'S JUDGEMENT decides who is a bot (the `authors` split). REQUIRED, and required
+  // rather than optional deliberately: "is this login a bot" is a workspace fact, and an optional
+  // field would have every call site quietly fall back to some default workspace's verdicts while
+  // the rows on screen came from another's repos. The route resolves it via
+  // `resolveWorkspaceScope` (absent / unknown / foreign → Default).
   workspaceId: number;
   // null / omitted → ALL the account's repos; a list → scope to those repo ids. The route
   // passes `scope.repoIds`, already bounded by the workspace's membership.
@@ -2931,42 +2946,19 @@ export interface ConsolidatedFeedFilters {
   userIds?: number[] | null;
   // Isolate the feed to a SINGLE PR: null → every PR in scope; a pr id → only that PR's
   // items. Applied after coalesce + my-turn enrich so `total` and the page reflect the
-  // isolated set. Drives the Feed "open PRs" panel's per-PR filter.
+  // isolated set.
   prId?: number | null;
-  // Mirror the timeline's "exclude bots" filter: drop feed activity + My Turn items whose
-  // actor is a bot under the UNION definition (global users.isBot ∪ this workspace's
-  // automated-reviewer verdict — see hiddenBotUserIds). Applied BEFORE the page cap, so a
-  // bot-heavy window fills with human rows rather than paging mostly-hidden ones (this is what
-  // the SPA's feed lens 'hide' sends). Claude-review items are never dropped (no member
-  // author). Absent/false → bots shown.
-  excludeBots?: boolean;
-  // Bots to KEEP visible even when excludeBots is on (the per-repo allow-list override).
-  // null/empty → exclude every bot. Ignored when excludeBots is false.
-  allowBotIds?: number[] | null;
-  // The Bots pane's bot-ONLY feed: restrict to the automated-reviewer set (deepsource /
-  // coderabbit / classified in-house / Pierre …) IN SQL, before the cap — so bot activity spans
-  // the full window instead of being thinned out of a 250-event mixed page. Skips commit-push +
-  // Claude items (not review-bot activity), ignores excludeBots, and uses a higher cap. The
-  // caller should also drop the member (userIds) filter (bots aren't members).
-  botsOnly?: boolean;
-  // Bot-only feed window override (days) so the bot feed follows the analytics window
-  // selector. Applied ONLY on the botsOnly path; absent/null → the default 14. The route
-  // clamps it to 1..90.
-  botWindowDays?: number | null;
+  // Whose activity: 'humans' (default) keeps items whose actor is NOT in the UNION bot set
+  // (hiddenBotUserIds — users.isBot ∪ github_type='Bot' ∪ vendor logins ∪ this workspace's
+  // automated reviewers, a manual "human" winning both ways), an actor-less item included;
+  // 'bots' keeps ONLY items whose actor IS in it. Never mixed. Judged per ITEM, so a thread with
+  // both a person and a bot replying shows on both sides. Applied BEFORE the page cap, so a
+  // bot-heavy window still fills with people's rows and vice versa.
+  authors?: FeedAuthors;
   // Surface EVERY commit-push run, not just the ones that addressed a review thread — the
   // opt-in "Commits" feed toggle (off by default). Plain pushes stay hidden unless this is
-  // set. Ignored on the botsOnly path (a push is the author responding, not review-bot
-  // activity). The addressed-thread runs still ride along inline either way.
+  // set. The addressed-thread runs still ride along inline either way.
   includeAllCommits?: boolean;
-  // Surface CI FAILURES as feed items — the opt-in "CI failures" toggle, OFF BY DEFAULT.
-  // Covers both halves at once: failed checks on a PR head (`ci_status_events`) AND failed
-  // checks on a repo's default branch (`trunk_ci_status_events`). Absent/false → the two
-  // builders are not even called and the `ciFailures` facet is 0.
-  //
-  // Ignored on the botsOnly path (a red build is not review-bot activity) and skipped whenever
-  // a member filter is active — these rows are actor-less, so they would survive a feed the
-  // reader explicitly scoped to specific people (the getClaudeReviewFeedItems rule).
-  includeCiFailures?: boolean;
   // Pagination over the merged, chronologically-sorted stream. `limit` omitted → the
   // whole stream (legacy). The response `total` is the full count so the client knows
   // when to stop "Load more". Only the returned page is enriched (merge/review credit)
@@ -2990,6 +2982,9 @@ async function getCommitThreadItems(
   opts: {
     repoIds: number[] | null;
     userIds: number[] | null;
+    // The `authors` split (see ConsolidatedFeedFilters): 'humans' drops pushes by `botIds`
+    // (keeping actor-less ones); 'bots' keeps ONLY pushes by `botIds`.
+    authors: FeedAuthors;
     botIds: Set<number>;
     since: Date;
     // Single-PR isolation (see getFeed): scope to this PR's commit rows. The caller widens
@@ -3001,7 +2996,7 @@ async function getCommitThreadItems(
     includeAllCommits?: boolean;
   },
 ): Promise<ConsolidatedFeedItem[]> {
-  const { repoIds, userIds, botIds, since, prId = null, includeAllCommits = false } = opts;
+  const { repoIds, userIds, authors, botIds, since, prId = null, includeAllCommits = false } = opts;
   const conds: SQL[] = [
     eq(events.accountId, accountId),
     eq(events.type, 'commit_pushed'),
@@ -3013,13 +3008,18 @@ async function getCommitThreadItems(
   if (prId != null) conds.push(eq(events.prId, prId));
   if (repoIds) conds.push(inArray(events.repoId, repoIds));
   if (userIds && userIds.length > 0) conds.push(inArray(events.actorId, userIds));
-  if (botIds.size > 0)
+  if (authors === 'bots') {
+    // An empty bot set means nobody is a bot here → no bot pushes, never "every push".
+    if (botIds.size === 0) return [];
+    conds.push(inArray(events.actorId, [...botIds]));
+  } else if (botIds.size > 0) {
     conds.push(
       sql`(${events.actorId} is null or ${events.actorId} not in (${sql.join(
         [...botIds],
         sql`, `,
       )}))`,
     );
+  }
 
   const evRows = await db
     .select({
@@ -3252,335 +3252,10 @@ async function getCommitThreadItems(
       affectedThreads: affected,
       commitCount: run.commitCount,
       changeSummary,
-      claudeReviewId: null,
-      claudeVerdict: null,
       mergedComments: [],
     });
   }
   return out;
-}
-
-// Claude Review runs surfaced in the consolidated feed as their own item kind. One item
-// per PR = that PR's most-recent SUCCEEDED run finished within the feed window, repo-scoped.
-// Gated on the feature flag (force-off in cloud) so no items appear where Claude Review
-// doesn't exist. Never member-/bot-filtered (a run has no member author).
-async function getClaudeReviewFeedItems(
-  accountId: number,
-  repoIds: number[] | null,
-  since: Date,
-  // Single-PR isolation (see getFeed): scope to this PR's runs (with a widened `since`).
-  prId: number | null = null,
-): Promise<ConsolidatedFeedItem[]> {
-  if (!config.aiEnabled) return [];
-  const conds = [
-    eq(repos.accountId, accountId),
-    eq(claudeReviews.status, 'succeeded'),
-    gte(sql`coalesce(${claudeReviews.finishedAt}, ${claudeReviews.createdAt})`, tsBound(since)),
-  ];
-  if (prId != null) conds.push(eq(claudeReviews.prId, prId));
-  if (repoIds) conds.push(inArray(pullRequests.repoId, repoIds));
-  const rows = await db
-    .select({
-      reviewId: claudeReviews.id,
-      prId: claudeReviews.prId,
-      repoId: pullRequests.repoId,
-      owner: repos.owner,
-      name: repos.name,
-      prNumber: pullRequests.number,
-      prTitle: pullRequests.title,
-      prState: pullRequests.state,
-      summary: claudeReviews.summary,
-      verdict: claudeReviews.verdict,
-      userVerdict: claudeReviews.userVerdict,
-      finishedAt: claudeReviews.finishedAt,
-      createdAt: claudeReviews.createdAt,
-    })
-    .from(claudeReviews)
-    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
-    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(and(...conds))
-    .orderBy(desc(claudeReviews.finishedAt), desc(claudeReviews.createdAt))
-    .execute();
-  // Keep the most-recent succeeded run per PR (rows are newest-first).
-  const seen = new Set<number>();
-  const out: ConsolidatedFeedItem[] = [];
-  for (const r of rows) {
-    if (seen.has(r.prId)) continue;
-    seen.add(r.prId);
-    out.push({
-      id: `feed:claude:${r.reviewId}`,
-      isMyTurn: false,
-      myTurnReasons: [],
-      kind: 'claude_review',
-      occurredAt: (r.finishedAt ?? r.createdAt).toISOString(),
-      repoId: r.repoId,
-      repoFullName: `${r.owner}/${r.name}`,
-      prId: r.prId,
-      prNumber: r.prNumber,
-      prTitle: r.prTitle,
-      prState: r.prState,
-      actorId: null,
-      content: r.summary,
-      threadId: null,
-      commentId: null,
-      path: null,
-      line: null,
-      reasonTag: null,
-      reviewState: null,
-      githubUrl:
-        r.prNumber != null ? `https://github.com/${r.owner}/${r.name}/pull/${r.prNumber}` : null,
-      mergedById: null,
-      reviewers: null,
-      ciStatus: null,
-      changedFilesCount: null,
-      affectedThreads: null,
-      commitCount: null,
-      changeSummary: null,
-      claudeReviewId: r.reviewId,
-      // Prefer the user's decision when they've set one, else Claude's read-only verdict.
-      claudeVerdict: r.userVerdict ?? r.verdict,
-      mergedComments: [],
-    });
-  }
-  return out;
-}
-
-// ---- CI-failure feed items (OFF BY DEFAULT — the "CI failures" pill) ----
-//
-// Two synthesized kinds, no `events` rows, following the `claude_review` precedent exactly:
-//   'ci_failed'       — a check failing on a PR head        (source: ci_status_events)
-//   'trunk_ci_failed' — a check failing on the default branch (source: trunk_ci_status_events)
-//
-// GRAIN: ONE ITEM PER FAILED RUN, keyed (PR-or-branch, head sha, check name). Both sources are
-// TRANSITION logs that write a new row whenever the failing-check SET changes, so a build whose
-// checks go red one at a time emits several rows for one broken push — un-deduped that reads as
-// spam and crowds the 250-row plain-activity cap. The EARLIEST observation of each key wins, so
-// a card's timestamp is when the failure was first seen, not when it was last re-confirmed.
-//
-// ⚠ `observedAt` is OUR observation time, never GitHub's completion time (neither GraphQL query
-// selects `completedAt`). A PR head can be up to the ~30-minute forced re-walk floor behind, and
-// trunk has no fast path at all — `syncBranchStatus` runs only at the end of a full walk. Card
-// copy therefore says "CI failure detected", never "CI failed at".
-//
-// Both builders are actor-less (`actorId: null`), so — exactly like getClaudeReviewFeedItems —
-// the caller skips them whenever a member filter is active, and they never enter the My-Turn
-// lane (see getConsolidatedFeed).
-
-// The two synthesized CI kinds, in ONE predicate. Every place that must treat them together —
-// the My-Turn withholding, the facet count, the live-CI enrichment guard — goes through this
-// rather than repeating a two-arm `||`, because missing one arm is silent. Exported for tests.
-export function isCiFeedKind(kind: string): boolean {
-  return kind === 'ci_failed' || kind === 'trunk_ci_failed';
-}
-
-// Newest CI transition rows scanned per builder. Bounds the read on an account with a chronically
-// red matrix build; the dedupe below collapses them further.
-const CI_EVENT_SCAN_CAP = 1000;
-// How many distinct failing CHECK NAMES one (target, head sha) may emit cards for. A 60-shard
-// matrix going red must not put 60 cards in the feed; the overflow is DISCLOSED on each emitted
-// card's summary rather than silently dropped.
-//
-// ⚠ THE GRAIN IS THE HEAD, NOT THE ROW. Both sources are TRANSITION logs (a fresh row every time
-// the failing SET changes on the same head), so a sharded matrix build going red shard by shard
-// writes ten rows for one head, each carrying the cumulative set. Applying this cap to a single
-// row's list — while the dedupe set spans rows — let EVERY row contribute one more card (a newly
-// named shard sorts into the top-N window, is an unseen key, and is emitted), so one head emitted
-// far more than N cards and the early ones disclosed "0 more" while N+5 checks were failing.
-// `collapseCiRows` therefore accumulates per head across rows.
-const MAX_CI_ITEMS_PER_HEAD = 5;
-
-const shortSha = (sha: string): string => sha.slice(0, 7);
-
-// Shared shape-builder for both halves, so a PR card and a trunk card can never drift apart.
-function ciFeedItem(args: {
-  id: string;
-  kind: 'ci_failed' | 'trunk_ci_failed';
-  occurredAt: Date;
-  repoId: number;
-  repoFullName: string;
-  prId: number | null;
-  prNumber: number | null;
-  prTitle: string | null;
-  prState: PrState | null;
-  status: CiStatus;
-  headSha: string;
-  checkName: string | null;
-  moreFailing: number;
-  githubUrl: string | null;
-  where: string;
-}): ConsolidatedFeedItem {
-  const label = args.checkName ?? 'CI';
-  const more =
-    args.moreFailing > 0
-      ? ` · ${args.moreFailing} more check${args.moreFailing === 1 ? '' : 's'} also failing`
-      : '';
-  return {
-    id: args.id,
-    isMyTurn: false,
-    myTurnReasons: [],
-    kind: args.kind,
-    occurredAt: args.occurredAt.toISOString(),
-    repoId: args.repoId,
-    repoFullName: args.repoFullName,
-    prId: args.prId,
-    prNumber: args.prNumber,
-    prTitle: args.prTitle,
-    prState: args.prState,
-    actorId: null,
-    content: null,
-    threadId: null,
-    commentId: null,
-    path: null,
-    line: null,
-    reasonTag: null,
-    reviewState: null,
-    githubUrl: args.githubUrl,
-    mergedById: null,
-    reviewers: null,
-    // The rollup state AT THE OBSERVATION, not the PR's live one. getConsolidatedFeed's
-    // per-page enrichment overwrites `ciStatus` for PR-bearing items from pull_requests, which
-    // is the right live answer for those cards; the historical state stays in changeSummary.
-    ciStatus: args.status,
-    changedFilesCount: null,
-    affectedThreads: null,
-    commitCount: null,
-    changeSummary: `${label} failed on ${args.where} ${shortSha(args.headSha)}${more}`,
-    failingChecks: args.checkName != null ? [args.checkName] : [],
-    ciHeadSha: args.headSha,
-    claudeReviewId: null,
-    claudeVerdict: null,
-    mergedComments: [],
-  };
-}
-
-/**
- * Collapse a transition log's rows into one card per (target, head sha, check name).
- *
- * `rows` must arrive NEWEST FIRST (that is how both indexes are read and how the scan cap keeps
- * the recent tail); this walks them in reverse so the EARLIEST row for each key wins the
- * timestamp. Emission order doesn't matter — getConsolidatedFeed sorts the merged stream.
- *
- * TWO PASSES, and the transition log's shape is the reason (see MAX_CI_ITEMS_PER_HEAD): the cap
- * and the "N more checks also failing" disclosure are both facts about a HEAD, which routinely
- * owns many rows, so neither can be computed from the single row being emitted. Pass 1 walks the
- * rows accumulating, per head, the UNION of every failing name it was ever observed with plus the
- * capped picks in first-observation order; pass 2 emits, so every card on a head discloses the
- * same, final overflow count.
- */
-function collapseCiRows<T>(
-  rows: T[],
-  key: (r: T) => string,
-  names: (r: T) => string[],
-  emit: (r: T, checkName: string | null, moreFailing: number) => ConsolidatedFeedItem,
-): ConsolidatedFeedItem[] {
-  interface HeadState {
-    // Every distinct failing check name this head was EVER observed with — the denominator of
-    // the overflow disclosure. It grows across rows; the cap never truncates it.
-    union: Set<string>;
-    // How many NAMED cards this head emitted (the bare-rollup card names nothing, so it is not
-    // counted here and therefore not subtracted from the union).
-    named: number;
-    cards: { row: T; name: string | null }[];
-  }
-  const heads = new Map<string, HeadState>();
-  const seen = new Set<string>();
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    const row = rows[i] as T;
-    const head = key(row);
-    let state = heads.get(head);
-    if (state == null) {
-      state = { union: new Set(), named: 0, cards: [] };
-      heads.set(head, state);
-    }
-    const all = [...new Set(names(row))].sort();
-    for (const name of all) state.union.add(name);
-    // A red rollup that carried no named contexts still deserves one honest card.
-    const emitted = all.length > 0 ? all : [null];
-    for (const name of emitted) {
-      // The cap is spent PER HEAD, ACROSS ROWS — never per row (that was the bug: each later
-      // row's newly-named shard was an unseen key inside its own top-N window, so a matrix build
-      // going red shard by shard emitted one card per row).
-      if (state.cards.length >= MAX_CI_ITEMS_PER_HEAD) break;
-      const k = `${head} ${name ?? ''}`;
-      if (seen.has(k)) continue;
-      seen.add(k);
-      state.cards.push({ row, name });
-      if (name != null) state.named += 1;
-    }
-  }
-
-  const out: ConsolidatedFeedItem[] = [];
-  for (const state of heads.values()) {
-    // Named failures the cap kept out of the feed, counted over the head's whole union rather
-    // than over whichever row happened to carry the card.
-    const more = Math.max(0, state.union.size - state.named);
-    for (const c of state.cards) out.push(emit(c.row, c.name, more));
-  }
-  return out;
-}
-
-/** PR-side CI failures, from the `ci_status_events` transition log. */
-async function getCiFailureFeedItems(
-  accountId: number,
-  repoIds: number[],
-  since: Date,
-  // Single-PR isolation (see getFeed): scope to this PR's rows (with a widened `since`).
-  prId: number | null = null,
-): Promise<ConsolidatedFeedItem[]> {
-  if (repoIds.length === 0) return [];
-  const conds = [
-    eq(ciStatusEvents.accountId, accountId),
-    inArray(ciStatusEvents.repoId, repoIds),
-    inArray(ciStatusEvents.status, ['failure', 'error']),
-    gte(ciStatusEvents.observedAt, since),
-  ];
-  if (prId != null) conds.push(eq(ciStatusEvents.prId, prId));
-  const rows = await db
-    .select({
-      prId: ciStatusEvents.prId,
-      repoId: ciStatusEvents.repoId,
-      headSha: ciStatusEvents.headSha,
-      status: ciStatusEvents.status,
-      failingChecks: ciStatusEvents.failingChecks,
-      observedAt: ciStatusEvents.observedAt,
-      owner: repos.owner,
-      name: repos.name,
-      prNumber: pullRequests.number,
-      prTitle: pullRequests.title,
-      prState: pullRequests.state,
-    })
-    .from(ciStatusEvents)
-    .innerJoin(pullRequests, eq(pullRequests.id, ciStatusEvents.prId))
-    .innerJoin(repos, eq(repos.id, ciStatusEvents.repoId))
-    .where(and(...conds))
-    // Covered by cse_account_repo_observed / cse_account_pr_observed.
-    .orderBy(desc(ciStatusEvents.observedAt))
-    .limit(CI_EVENT_SCAN_CAP)
-    .execute();
-
-  return collapseCiRows(
-    rows,
-    (r) => `${r.prId} ${r.headSha}`,
-    (r) => r.failingChecks ?? [],
-    (r, checkName, moreFailing) =>
-      ciFeedItem({
-        id: `feed:ci:${r.prId}:${r.headSha}:${checkName ?? ''}`,
-        kind: 'ci_failed',
-        occurredAt: r.observedAt,
-        repoId: r.repoId,
-        repoFullName: `${r.owner}/${r.name}`,
-        prId: r.prId,
-        prNumber: r.prNumber,
-        prTitle: r.prTitle,
-        prState: r.prState,
-        status: r.status as CiStatus,
-        headSha: r.headSha,
-        checkName,
-        moreFailing,
-        githubUrl: `https://github.com/${r.owner}/${r.name}/pull/${r.prNumber}/checks`,
-        where: `#${r.prNumber}`,
-      }),
-  );
 }
 
 /**
@@ -3687,90 +3362,6 @@ async function resolveTrunkCommitPrs(
       });
   }
   return out;
-}
-
-/**
- * Default-branch CI failures, from the `trunk_ci_status_events` transition log.
- *
- * The failure is a fact about TRUNK, but the commit it broke on was usually put there by a PR —
- * so each card carries the landing PR (`resolveTrunkCommitPrs`) when the sha resolves to one,
- * giving the SPA something to open. `githubUrl` stays the COMMIT, not the PR: a trunk run's
- * checks live on the commit page, and the card keeps that link either way.
- *
- * ⚠ A resolved `prId` no longer keeps these rows out of the My-Turn lane — the kind-based
- * `isCiFeedKind` guard in getConsolidatedFeed is now the ONLY thing that does, and it must stay.
- * A CI row is actor-less, so `enrichMyTurn` would flag every red trunk build on a PR you touched
- * as an UNCAPPED yellow card. Still skipped entirely under single-PR isolation — trunk is not a
- * PR's history, even when a PR landed the commit.
- */
-async function getTrunkCiFailureFeedItems(
-  accountId: number,
-  repoIds: number[],
-  since: Date,
-): Promise<ConsolidatedFeedItem[]> {
-  if (repoIds.length === 0) return [];
-  const rows = await db
-    .select({
-      repoId: trunkCiStatusEvents.repoId,
-      branchName: trunkCiStatusEvents.branchName,
-      headSha: trunkCiStatusEvents.headSha,
-      status: trunkCiStatusEvents.status,
-      failingChecks: trunkCiStatusEvents.failingChecks,
-      observedAt: trunkCiStatusEvents.observedAt,
-      owner: repos.owner,
-      name: repos.name,
-    })
-    .from(trunkCiStatusEvents)
-    .innerJoin(repos, eq(repos.id, trunkCiStatusEvents.repoId))
-    .where(
-      and(
-        eq(trunkCiStatusEvents.accountId, accountId),
-        inArray(trunkCiStatusEvents.repoId, repoIds),
-        inArray(trunkCiStatusEvents.status, ['failure', 'error']),
-        gte(trunkCiStatusEvents.observedAt, since),
-      ),
-    )
-    .orderBy(desc(trunkCiStatusEvents.observedAt))
-    .limit(CI_EVENT_SCAN_CAP)
-    .execute();
-
-  // One lookup for the whole scan's shas, BEFORE the collapse — which emits up to 5 cards per
-  // head, so resolving inside the emit would repeat the same two queries per card.
-  const prByCommit = await resolveTrunkCommitPrs(
-    accountId,
-    rows.map((r) => ({ repoId: r.repoId, sha: r.headSha })),
-  );
-
-  return collapseCiRows(
-    rows,
-    (r) => `${r.repoId} ${r.headSha}`,
-    (r) => (r.failingChecks ?? []).map((c) => c.name),
-    (r, checkName, moreFailing) => {
-      // The PR that landed this commit, when we can name it — often absent (a direct push, an
-      // association not observed yet, a PR not tracked here), and the card reads fine without it.
-      const pr = prByCommit.get(`${r.repoId}:${r.headSha}`);
-      return ciFeedItem({
-        id: `feed:trunkci:${r.repoId}:${r.headSha}:${checkName ?? ''}`,
-        kind: 'trunk_ci_failed',
-        occurredAt: r.observedAt,
-        repoId: r.repoId,
-        repoFullName: `${r.owner}/${r.name}`,
-        prId: pr?.id ?? null,
-        prNumber: pr?.number ?? null,
-        prTitle: pr?.title ?? null,
-        prState: pr?.state ?? null,
-        status: r.status as CiStatus,
-        headSha: r.headSha,
-        checkName,
-        moreFailing,
-        // The COMMIT, not the PR, even when one resolved: a trunk run's checks live on the
-        // commit page, and the failure is a fact about trunk. The landing PR is reachable from
-        // the card's own PR reference. Rendered through safeExternalUrl client-side.
-        githubUrl: `https://github.com/${r.owner}/${r.name}/commit/${r.headSha}`,
-        where: r.branchName ?? 'trunk',
-      });
-    },
-  );
 }
 
 // ---- Activity-Feed "seen" marker (server-side, per account) ----
@@ -5660,19 +5251,27 @@ export async function getWorkspaceInsights(
       // the fix (50 is already the edge of what this board should paint), and neither is
       // reporting 148 where the list holds 50 — that is the "number with no list behind it" bug
       // this whole surface exists to end.
-      myTurnTotal = ranked.length;
+      //
+      // ⚠ EVERY my_turn TOTAL IS THE MY TURN TAB'S POPULATION — a finished Claude review is listed
+      // in its own Pending tab ("Claude reviews", `PENDING_TABS`), so it is filtered out of these
+      // totals HERE, before any is taken, and the banner, Workspace badges and the daily brief —
+      // which open My turn — count exactly what My turn lists. The cards themselves stay in the
+      // array (the Claude reviews tab lists them, counted off the uncapped cards in
+      // db/pending-tabs.ts).
+      const myTurnTab = ranked.filter((r) => r.type !== 'pr' || r.s.reason !== 'claude_review');
+      myTurnTotal = myTurnTab.length;
       // ⚠ FOLDED OFF THE PRE-CAP ARRAY, for the same reason `myTurnTotal` is. Counted after the
       // slice it would be bounded by 50 and would stop being a total; counted here it is the real
       // "how many of these are actually about you" population the notification surfaces need.
-      myTurnPersonalTotal = ranked.filter((r) => r.relevance !== 'none').length;
+      myTurnPersonalTotal = myTurnTab.filter((r) => r.relevance !== 'none').length;
       // The three-way split of the same array, in the same pass and under the same pre-cap rule.
       // Mutually exclusive and exhaustive: direct + maintained + other === myTurnTotal, and
       // direct + maintained === myTurnPersonalTotal. Spelled out rather than subtracted — see the
       // declaration above for why a subtracted denominator is a silent defect, not a shortcut.
-      myTurnDirectTotal = ranked.filter((r) => r.relevance === 'direct').length;
-      myTurnMaintainedTotal = ranked.filter((r) => r.relevance === 'maintained').length;
-      myTurnOtherTotal = ranked.filter((r) => r.relevance === 'none').length;
-      kindTotals.my_turn = ranked.length;
+      myTurnDirectTotal = myTurnTab.filter((r) => r.relevance === 'direct').length;
+      myTurnMaintainedTotal = myTurnTab.filter((r) => r.relevance === 'maintained').length;
+      myTurnOtherTotal = myTurnTab.filter((r) => r.relevance === 'none').length;
+      kindTotals.my_turn = myTurnTab.length;
       const built = uncapped ? ranked : ranked.slice(0, MY_TURN_CARD_CAP);
 
       // ── THE HEADING FACTS (db/my-turn-card-facts.ts) — DEFERRED until the board has LISTED its
@@ -7106,7 +6705,7 @@ export async function suggestRoutingReviewers(
 }
 
 // Which chip of the "PR events" pill's dependent row a feed kind belongs to, or null when the
-// kind is outside the bucket entirely (comments, commits, and the synthesized Claude/CI kinds).
+// kind is outside the bucket entirely (comments, commits).
 // The four chips PARTITION the six PR-event kinds, so this doubles as the bucket predicate —
 // `prEvents` is counted off it below rather than re-spelling the six literals, which is what
 // keeps the pill's badge and its chips' badges from ever describing different sets.
@@ -7135,41 +6734,24 @@ function feedPrEventChip(kind: string): FeedPrEventChip | null {
 
 // Facet counts over the post-cap `ordered` stream (see ConsolidatedFeedCounts). Pure, so it's
 // unit-testable and shares the exact set the page is sliced from — the badges reconcile with
-// the loadable feed by construction. `botIds` is the raw UNION bot id set (users.isBot ∪ the
-// workspace's automated reviewers, manualHuman removed — NOT the allow-list-subtracted
-// excludeBots set), matching the SPA's isBotActor. `byBotActor` is only built in the bot-only
-// feed; `byThreadState` groups items carrying a derivedState; `byEventType` groups the PR-event
-// bucket by chip.
-export function computeFeedCounts(
-  ordered: ConsolidatedFeedItem[],
-  botIds: ReadonlySet<number>,
-  botsOnly: boolean,
-): ConsolidatedFeedCounts {
+// the loadable feed by construction. `byThreadState` groups items carrying a derivedState;
+// `byEventType` groups the PR-event bucket by chip.
+export function computeFeedCounts(ordered: ConsolidatedFeedItem[]): ConsolidatedFeedCounts {
   // `byEventType` is a TRAILING OPTIONAL on the wire type (only so a stale IndexedDB-persisted
   // response stays type-honest) but the server ALWAYS sends it — bound to a local so the
   // accumulator below writes through one non-optional reference.
   const byEventType: Record<string, number> = {};
   const counts: ConsolidatedFeedCounts = {
     total: ordered.length,
-    myTurn: 0,
-    claude: 0,
     comments: 0,
     prEvents: 0,
     commits: 0,
-    ciFailures: 0,
-    awaitingReview: 0,
-    bots: 0,
-    byBotActor: {},
     byThreadState: {},
     byEventType,
   };
-  const awaitingPrIds = new Set<number>();
   for (const it of ordered) {
-    if (it.isMyTurn) counts.myTurn += 1;
-    if (it.kind === 'claude_review') counts.claude += 1;
     if (it.kind === 'review_comment' || it.kind === 'pr_comment') counts.comments += 1;
     if (it.kind === 'commit_pushed') counts.commits += 1;
-    if (isCiFeedKind(it.kind)) counts.ciFailures += 1;
     // The pill and its chip row are counted off ONE partition (see feedPrEventChip): a chip
     // badge is a subtotal of the pill's badge, never a second population.
     const prEventChip = feedPrEventChip(it.kind);
@@ -7177,22 +6759,9 @@ export function computeFeedCounts(
       counts.prEvents += 1;
       byEventType[prEventChip] = (byEventType[prEventChip] ?? 0) + 1;
     }
-    // Mirrors FeedView's matchesNeedsReview — but counts DISTINCT PRs, not events: a PR opened
-    // as a draft and later marked ready has BOTH kinds in the window, and "Needs review 2" for
-    // one PR reads as two PRs. (FeedView's page-derived fallback dedupes the same way.)
-    if (
-      (it.kind === 'pr_opened' || it.kind === 'pr_ready_for_review') &&
-      it.prAwaitingReview === true &&
-      it.prId != null
-    )
-      awaitingPrIds.add(it.prId);
-    if (it.actorId != null && botIds.has(it.actorId)) counts.bots += 1;
-    if (botsOnly && it.actorId != null)
-      counts.byBotActor[it.actorId] = (counts.byBotActor[it.actorId] ?? 0) + 1;
     if (it.derivedState != null)
       counts.byThreadState[it.derivedState] = (counts.byThreadState[it.derivedState] ?? 0) + 1;
   }
-  counts.awaitingReview = awaitingPrIds.size;
   return counts;
 }
 
@@ -7210,12 +6779,8 @@ export async function getConsolidatedFeed(
     prId = null,
     limit = null,
     offset = 0,
-    excludeBots = false,
-    allowBotIds = null,
-    botsOnly = false,
-    botWindowDays = null,
+    authors = 'humans',
     includeAllCommits = false,
-    includeCiFailures = false,
   } = opts;
 
   // Restrict to the repos this account owns; a passed repoIds narrows within them. The
@@ -7223,15 +6788,14 @@ export async function getConsolidatedFeed(
   // scan. An out-of-scope / empty selection → a valid empty page (also avoids an inArray([])
   // below).
   // EXCEPTION — single-PR isolation (prId) bypasses the narrowing entirely: "Show in feed"
-  // promises the PR's history, and its repo may be outside the selected workspace (the bot-only
-  // list scopes to ALL account repos). Ownership still gates it — a foreign/unknown prId is an
-  // empty page, never a leak.
+  // promises the PR's history, and its repo may be outside the selected workspace. Ownership
+  // still gates it — a foreign/unknown prId is an empty page, never a leak.
   const emptyResponse = (): ConsolidatedFeedResponse => ({
     items: [],
     users: [],
     total: 0,
     uncappedTotal: 0,
-    counts: computeFeedCounts([], new Set<number>(), botsOnly),
+    counts: computeFeedCounts([]),
     generatedAt: new Date().toISOString(),
   });
   let effectiveRepoIds: number[];
@@ -7251,100 +6815,45 @@ export async function getConsolidatedFeed(
       : accountRepoIds;
   }
   if (effectiveRepoIds.length === 0) return emptyResponse();
-  const allowBots = new Set(allowBotIds ?? []);
-  // The UNION bot id set (global users.isBot ∪ this workspace's automated-reviewer verdict,
-  // manualHuman removed — see hiddenBotUserIds) — ONE lookup, reused for BOTH the excludeBots
-  // filter (below, minus the per-repo allow-list) AND the `bots` facet count (the raw union,
-  // matching the SPA's isBotActor, which reads the same two halves client-side). getFeed
-  // doesn't filter bots, so the notBot() below applies excludeBots here; the commit helper
-  // filters in its own SQL.
-  const unionBotIds = new Set(await hiddenBotUserIds(accountId, workspaceId));
-  // excludeBots is meaningless in the bot-only feed (it would drop everything) — force it off.
-  // The per-repo allow-list subtracts the "important" bots so their activity stays visible.
-  const botIds =
-    !botsOnly && excludeBots
-      ? new Set([...unionBotIds].filter((id) => !allowBots.has(id)))
-      : new Set<number>();
-  const notBot = (id: number | null): boolean =>
-    !excludeBots || id == null || !botIds.has(id);
-
-  // Isolated to a single PR (the Open-PRs filter) → show that PR's FULL history: scope every
-  // source to the PR and drop the 14-day window (epoch since). The scan is one PR, so it's
-  // cheap, and the reader sees the opened event + all activity even on a long-idle PR — not an
-  // empty pane. The un-isolated feed keeps the rolling 14-day window (a live activity stream).
-  const feedSince =
-    prId != null ? new Date(0) : new Date(Date.now() - FEED_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  // Bot-only feed: resolve the automated-reviewer actor set (vendors + classified in-house /
-  // Pierre — the SAME set the ROI panel counts, so it catches deepsource-io etc. that aren't
-  // users.isBot). Empty → nobody's classified → an empty feed. Filtered IN SQL by getFeed.
-  // `role: 'all'` — NOT 'review'. The bot feed must keep showing quality-check activity: the
-  // user confirmed a quality-check reviewer stays visible and reclassifiable, and a linter's
-  // threads are still things a human has to triage. The role only splits METRICS from the feed.
+  // THE UNION bot id set (users.isBot ∪ github_type='Bot' ∪ vendor logins ∪ this workspace's
+  // automated-reviewer verdict, a manual "human" winning both ways — see hiddenBotUserIds): ONE
+  // lookup deciding which side of the `authors` split every source's rows fall on. getFeed and the
+  // commit helper filter by it in SQL, before any cap.
   //
   // The judgement comes from `workspaceId`, not from `effectiveRepoIds`. They agree in the normal
   // case (the route intersects the narrowing with the workspace's membership), and they
-  // deliberately do NOT in the single-PR isolation branch below, which reaches a PR whose repo may
-  // sit outside the selected workspace — the workspace still owns "is this login a bot", which is what
-  // keeps the vendor tag on an isolated PR's rows consistent with the rest of the app.
-  const botActorIds = botsOnly
-    ? await automatedReviewerUserIds(accountId, workspaceId, 'all')
-    : null;
-  if (botsOnly && (botActorIds == null || botActorIds.length === 0)) {
-    return {
-      items: [],
-      users: [],
-      total: 0,
-      uncappedTotal: 0,
-      counts: computeFeedCounts([], unionBotIds, botsOnly),
-      generatedAt: new Date().toISOString(),
-    };
-  }
-  // CI-failure rows are actor-less, so a member filter must skip them for the same reason it
-  // skips Claude runs: an actor-less row cannot belong to any of the people the reader picked.
-  // Computed once and shared by both halves so the two can never disagree.
-  const ciFailuresOn =
-    includeCiFailures && !botsOnly && !(userIds != null && userIds.length > 0);
-  const [feed, commitItems, claudeItems, ciItems, trunkCiItems] = await Promise.all([
-    // The bot-only feed follows the analytics window selector (botWindowDays); every other
-    // view keeps the rolling 14 days.
+  // deliberately do NOT in the single-PR isolation branch, which reaches a PR whose repo may sit
+  // outside the selected workspace — the workspace still owns "is this login a bot".
+  const botIds = new Set(await hiddenBotUserIds(accountId, workspaceId));
+  const botList = [...botIds];
+  if (authors === 'bots' && botList.length === 0) return emptyResponse();
+
+  // Isolated to a single PR → show that PR's FULL history: scope every source to the PR and drop
+  // the 14-day window (epoch since). The scan is one PR, so it's cheap, and the reader sees the
+  // opened event + all activity even on a long-idle PR — not an empty pane. The un-isolated feed
+  // keeps the rolling 14-day window (a live activity stream).
+  const feedSince =
+    prId != null ? new Date(0) : new Date(Date.now() - FEED_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const [feed, commitItems] = await Promise.all([
     getFeed(accountId, {
-      daysBefore: botsOnly && botWindowDays != null ? botWindowDays : 14,
+      daysBefore: FEED_WINDOW_DAYS,
       prId,
       repoIds: effectiveRepoIds,
       userIds,
-      botActorIds,
+      botActorIds: authors === 'bots' ? botList : null,
+      excludeActorIds: authors === 'humans' ? botList : null,
     }),
-    // Commit-push activity that ADDRESSED a review thread (the only commit rows we surface
-    // — plain pushes are noise). Each carries the affected threads inline. Skipped in the
-    // bot-only feed (a commit push is the AUTHOR responding, not review-bot activity).
-    botsOnly
-      ? Promise.resolve<ConsolidatedFeedItem[]>([])
-      : getCommitThreadItems(accountId, {
-          repoIds: effectiveRepoIds,
-          userIds,
-          botIds,
-          since: feedSince,
-          prId,
-          includeAllCommits,
-        }),
-    // Claude Review runs surfaced as their own feed item kind (local-only; empty in cloud).
-    // Skipped in the bot-only feed (they're the user's own runs, not review-bot activity).
-    // ALSO skipped whenever a member filter is active: these rows are emitted with
-    // `actorId: null` (a run has no member author), and getClaudeReviewFeedItems takes no
-    // userIds, so they would survive every member filter and appear in a feed the reader
-    // explicitly scoped to specific people. An actor-less row cannot belong to any of them.
-    botsOnly || (userIds != null && userIds.length > 0)
-      ? Promise.resolve<ConsolidatedFeedItem[]>([])
-      : getClaudeReviewFeedItems(accountId, effectiveRepoIds, feedSince, prId),
-    // CI failures on a PR head — the opt-in "CI failures" toggle, off by default.
-    ciFailuresOn
-      ? getCiFailureFeedItems(accountId, effectiveRepoIds, feedSince, prId)
-      : Promise.resolve<ConsolidatedFeedItem[]>([]),
-    // CI failures on the DEFAULT BRANCH. Same toggle; additionally skipped under single-PR
-    // isolation, where the reader asked for one PR's history and trunk is not part of it.
-    ciFailuresOn && prId == null
-      ? getTrunkCiFailureFeedItems(accountId, effectiveRepoIds, feedSince)
-      : Promise.resolve<ConsolidatedFeedItem[]>([]),
+    // Commit-push activity that ADDRESSED a review thread (plus every push run when
+    // includeAllCommits is on). Each carries the affected threads inline.
+    getCommitThreadItems(accountId, {
+      repoIds: effectiveRepoIds,
+      userIds,
+      authors,
+      botIds,
+      since: feedSince,
+      prId,
+      includeAllCommits,
+    }),
   ]);
 
   // The "My Turn" participation flag (isMyTurn / myTurnReasons / reasonTag) is CORE / free
@@ -7366,8 +6875,6 @@ export async function getConsolidatedFeed(
   // participation below; without it every row stays plain. Exactly one row per underlying
   // event (no synthesized "My Turn" layer / dedup).
   for (const f of feed.events) {
-    // excludeBots: drop bot-authored activity (getFeed doesn't filter bots).
-    if (!notBot(f.actorId)) continue;
     push({
       id: `feed:${f.id}`,
       isMyTurn: false,
@@ -7398,8 +6905,6 @@ export async function getConsolidatedFeed(
       affectedThreads: null,
       commitCount: null,
       changeSummary: null,
-      claudeReviewId: null,
-      claudeVerdict: null,
       mergedComments: [],
     });
   }
@@ -7407,16 +6912,6 @@ export async function getConsolidatedFeed(
   // Commit-push items (already repo/member/bot-scoped + thread-enriched in the SQL helper).
   // Pushed as plain rows; the Pro enricher flags participation below.
   for (const it of commitItems) push(it);
-
-  // Claude Review items — a distinct kind (never bot/member-scoped). Kept out of the My-Turn
-  // flow but always retained (see the caps below) so the "Claude Reviews" pill finds them.
-  for (const it of claudeItems) push(it);
-
-  // CI-failure items (both halves). Deliberately NOT added to the uncapped `alwaysRows` set
-  // below: a repo with a flaky matrix build or a chronically red trunk could otherwise starve
-  // the 250-row plain-activity budget with red cards.
-  for (const it of ciItems) push(it);
-  for (const it of trunkCiItems) push(it);
 
   // Consolidate a coinciding host event (a submitted review OR a close/merge) + the SAME
   // actor's top-level PR comment(s) on the SAME PR posted within a short window (issue comments
@@ -7428,7 +6923,7 @@ export async function getConsolidatedFeed(
   coalesceEventComments(items, byId);
 
   // Attach each thread-bearing item's review-thread derived state (untouched / replied /
-  // likely_addressed / resolved) — powers the Bots pane's state-filter pills. One query over
+  // likely_addressed / resolved) — powers the Feed's state-filter pills. One query over
   // the distinct thread ids referenced by this page's items; non-thread items stay null.
   const feedThreadIds = [
     ...new Set(items.map((i) => i.threadId).filter((t): t is number => t != null)),
@@ -7447,56 +6942,21 @@ export async function getConsolidatedFeed(
     }
   }
 
-  // Attach each PR-bearing item's LIVE "still awaiting a first review" snapshot (open ∧ not
-  // draft ∧ firstReviewAt null) — powers the "Needs review" pill. Recomputed per request,
-  // never stored: the same card can match today and not tomorrow. One query over the distinct
-  // PR ids referenced by the stream; PR-less items stay null.
-  const feedPrIds = [...new Set(items.map((i) => i.prId).filter((p): p is number => p != null))];
-  if (feedPrIds.length > 0) {
-    const prRows = await db
-      .select({
-        id: pullRequests.id,
-        state: pullRequests.state,
-        isDraft: pullRequests.isDraft,
-        firstReviewAt: pullRequests.firstReviewAt,
-      })
-      .from(pullRequests)
-      .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, feedPrIds)))
-      .execute();
-    const awaitingByPr = new Map<number, boolean>(
-      prRows.map((r) => [r.id, r.state === 'open' && !r.isDraft && r.firstReviewAt == null]),
-    );
-    for (const it of items) {
-      it.prAwaitingReview = it.prId != null ? (awaitingByPr.get(it.prId) ?? false) : null;
-    }
-  }
-
   // "My Turn" enrichment (CORE / free): flag each item `isMyTurn` by the viewer's participation
-  // in its PR. Runs BEFORE the cap so uncapped My-Turn rows survive.
-  //
-  // ⚠ CI-failure rows are WITHHELD from it, and this is not tidiness. `enrichMyTurn` flags any
-  // PR-bearing item whose actor isn't you — and a CI item's actor is `null`, so `actorId !==
-  // localUserId` is trivially true. Handing them over would turn every red build on a PR you
-  // participate in into an UNCAPPED yellow My-Turn card, i.e. a silent behaviour change to the
-  // product's core lane hidden inside a CI toggle. (`enrichMyTurn` mutates the items it is
-  // given, so passing a filtered array is enough — the objects are the same.)
-  await enrichMyTurn(
-    accountId,
-    ciFailuresOn ? items.filter((i) => !isCiFeedKind(i.kind)) : items,
-  );
+  // in its PR (the card's yellow border). Runs BEFORE the cap so uncapped My-Turn rows survive.
+  await enrichMyTurn(accountId, items);
 
   // Optional single-PR isolation (the Feed "open PRs" panel): keep only this PR's items.
   // Applied here so `total` + the page bounds reflect the isolated set.
   const scoped = prId == null ? items : items.filter((i) => i.prId === prId);
 
-  // Pure chronological — newest first. Keep every My Turn item AND every Claude-review item
-  // (both are always relevant); cap the plain activity rows so a busy multi-repo account
-  // doesn't render thousands of them.
-  const alwaysRows = scoped.filter((i) => i.isMyTurn || i.kind === 'claude_review');
+  // Pure chronological — newest first. Keep every My Turn item (always relevant); cap the plain
+  // activity rows so a busy multi-repo account doesn't render thousands of them.
+  const alwaysRows = scoped.filter((i) => i.isMyTurn);
   const feedRows = scoped
-    .filter((i) => !i.isMyTurn && i.kind !== 'claude_review')
+    .filter((i) => !i.isMyTurn)
     .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
-    .slice(0, botsOnly ? BOT_FEED_EVENT_CAP : FEED_EVENT_CAP);
+    .slice(0, FEED_EVENT_CAP);
   const ordered = [...alwaysRows, ...feedRows].sort((a, b) =>
     b.occurredAt.localeCompare(a.occurredAt),
   );
@@ -7505,8 +6965,8 @@ export async function getConsolidatedFeed(
   // the page is enriched + has its users backfilled, so hidden items cost nothing.
   const total = ordered.length;
   // Facet counts over the WHOLE post-cap stream (not just the page) so the SPA's pill badges
-  // reflect every matching item. Uses the raw union bot set, so `bots` matches isBotActor.
-  const counts = computeFeedCounts(ordered, unionBotIds, botsOnly);
+  // reflect every matching item.
+  const counts = computeFeedCounts(ordered);
   const start = Math.max(0, offset ?? 0);
   const page =
     limit != null ? ordered.slice(start, start + Math.max(0, limit)) : ordered.slice(start);
@@ -7605,10 +7065,7 @@ export async function getConsolidatedFeed(
     if (it.prId == null) continue;
     it.mergedById = mergedByPr.get(it.prId) ?? null;
     it.reviewers = reviewersByPr.get(it.prId) ?? null;
-    // A CI-failure card's `ciStatus` is the rollup AT THE OBSERVATION it reports. Overwriting it
-    // with the PR's LIVE rollup would leave a card that says "CI failed" carrying a green
-    // status once the re-run passed — the one item kind where the live answer is the wrong one.
-    if (!isCiFeedKind(it.kind)) it.ciStatus = ciByPr.get(it.prId) ?? null;
+    it.ciStatus = ciByPr.get(it.prId) ?? null;
     it.changedFilesCount = filesByPr.get(it.prId) ?? null;
     // ⚠ A PR MISSING FROM THE MAP IS UNKNOWN, NOT ZERO — same rule as `codeLoc: null` itself.
     const cl = codeLocByPr.get(it.prId);
@@ -7634,15 +7091,6 @@ export async function getConsolidatedFeed(
   const pageUsers: User[] = [];
   const pageUserIds = new Set(needed);
   for (const i of page) if (i.actorId != null) pageUserIds.add(i.actorId);
-  // Bot-only feed: the vendor pills are built from `counts.byBotActor`, which spans the WHOLE
-  // stream (beyond the loaded page). Fetch + ship every such actor so the SPA can label a pill
-  // whose items all fall past the current page.
-  if (botsOnly)
-    for (const key of Object.keys(counts.byBotActor)) {
-      const id = Number(key);
-      needed.add(id);
-      pageUserIds.add(id);
-    }
   for (const id of usersById.keys()) needed.delete(id);
   if (needed.size > 0) {
     for (const u of await db
@@ -10106,6 +9554,12 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
         .delete(schema.myTurnDismissals)
         .where(inArray(schema.myTurnDismissals.prId, prIds))
         .execute();
+      // Dependency auto-merge skips (migration 0093 / pg 0080). Composite FK cascades; explicit
+      // for the same reason.
+      await tx
+        .delete(schema.autoMergePolicySkips)
+        .where(inArray(schema.autoMergePolicySkips.prId, prIds))
+        .execute();
       // Claude review runs + findings reference these PRs (FKs are ON), so clear
       // them before the PRs.
       const reviewIdRows = await tx
@@ -11070,7 +10524,7 @@ export async function markPrMergedLocally(
   accountId: number,
   mergedById: number | null,
 ): Promise<void> {
-  await db
+  const stamped = await db
     .update(pullRequests)
     .set({
       state: 'merged',
@@ -11084,7 +10538,13 @@ export async function markPrMergedLocally(
       mergeQueueEntryState: null,
     })
     .where(and(eq(pullRequests.id, prId), eq(pullRequests.accountId, accountId)))
+    .returning({ id: pullRequests.id })
     .execute();
+  // This stamp writes `state='merged'` BEFORE any walk, so the walk that follows reads
+  // `prev.state === 'merged'` and would treat the landing as history. Record it as a live
+  // observation (as the liveness sweep does), or no merge made INSIDE Limn ever reaches the
+  // Slack "Pull request merged" signal. The walk announces it once, with the real merger.
+  if (stamped.length > 0) noteLiveMergeTransition(accountId, prId);
 }
 
 // Optimistic stamp for a close (not a merge): state → 'closed' + closedAt now. Mirrors
@@ -11841,7 +11301,8 @@ function narrowAutomatedIds(
   });
 }
 
-// The UNION bot set that "hide bots" hides (the Timeline's excludeBots + the Feed lens) and the
+// The UNION bot set that "hide bots" hides (the Timeline's excludeBots + the Feed's people/bots
+// split) and the
 // Pending board calls automation (`authorIsBot`, the People / Automation lens): the global
 // `users.isBot` flag ∪ the review-bot logins ∪ every account GitHub itself TYPES a Bot
 // (`users.github_type = 'Bot'` — the Apps whose login GraphQL returns without `[bot]`, so
@@ -13411,7 +12872,7 @@ export interface BotOnlyReviewPr {
   updatedAt: string;
   authorId: number | null;
   // The PR's ONLY automated touch is a Pierre-verbatim review (posted with the human's token,
-  // so no bot-ACTOR events exist) — the bot-only feed isolation can't surface it.
+  // so no bot-ACTOR events exist) — the Feed's bots side can't surface it.
   viaPierreOnly: boolean;
 }
 export async function getBotOnlyReviewPrs(
@@ -13546,7 +13007,7 @@ export async function getBotOnlyReviewPrs(
     let anyHuman = false;
     // True when a CLASSIFIED bot actor touched the PR. A PR whose only automated touch is a
     // Pierre-VERBATIM review has NO bot-actor events (the human's token posted it), so the
-    // bot-only feed isolation can't surface it — the UI needs to know (viaPierreOnly).
+    // Feed's bots side can't surface it — the UI needs to know (viaPierreOnly).
     let anyRealBot = false;
     let botLabel: string | null = null;
     const noteAuto = (authorId: number | null, isPierre: boolean): void => {
@@ -17571,6 +17032,7 @@ const armedMergeColumns = () => ({
   mergeMethod: autoMergeRequests.mergeMethod,
   updateStrategy: autoMergeRequests.updateStrategy,
   viaMergeQueue: autoMergeRequests.viaMergeQueue,
+  armedByPolicy: autoMergeRequests.armedByPolicy,
   enqueuedAt: autoMergeRequests.enqueuedAt,
   armedAt: autoMergeRequests.armedAt,
   expectedHeadOid: autoMergeRequests.expectedHeadOid,
@@ -17590,6 +17052,7 @@ interface AutoMergeRow {
   mergeMethod: string;
   updateStrategy: 'rebase' | 'merge' | 'none';
   viaMergeQueue: boolean;
+  armedByPolicy: boolean | null;
   enqueuedAt: Date | null;
   armedAt: Date;
   expectedHeadOid: string;
@@ -17614,6 +17077,8 @@ function toArmedMergeRequest(row: AutoMergeRow): ArmedMergeRequest {
     mergeMethod: row.mergeMethod as MergeMethod,
     updateStrategy: row.updateStrategy,
     viaMergeQueue: row.viaMergeQueue,
+    // Only a TRUE rides the wire: absent = a person armed it.
+    ...(row.armedByPolicy === true ? { armedByPolicy: true } : {}),
     enqueuedAt: iso(row.enqueuedAt),
     armedAt: row.armedAt.toISOString(),
     expectedHeadOid: row.expectedHeadOid,
@@ -17655,6 +17120,8 @@ export async function armAutoMerge(
      */
     expectedBaseRef: string | null;
     expiresAt: Date;
+    /** Armed by the workspace's dependency auto-merge setting, not a click. Omitted = a person. */
+    armedByPolicy?: boolean;
   },
 ): Promise<ArmedMergeRequest> {
   const now = new Date();
@@ -17666,6 +17133,7 @@ export async function armAutoMerge(
       mergeMethod: opts.mergeMethod,
       updateStrategy: opts.updateStrategy,
       viaMergeQueue: opts.viaMergeQueue,
+      armedByPolicy: opts.armedByPolicy === true,
       enqueuedAt: null,
       expectedHeadOid: opts.expectedHeadOid,
       expectedBaseRef: opts.expectedBaseRef,
@@ -17687,6 +17155,8 @@ export async function armAutoMerge(
         mergeMethod: opts.mergeMethod,
         updateStrategy: opts.updateStrategy,
         viaMergeQueue: opts.viaMergeQueue,
+        // Whoever armed LAST owns the intent: a person re-arming a policy intent makes it theirs.
+        armedByPolicy: opts.armedByPolicy === true,
         // A re-arm starts clean: any queue entry recorded on the previous intent belonged
         // to a head/consent that no longer applies.
         enqueuedAt: null,
@@ -17831,6 +17301,9 @@ export interface ArmedMergeWork {
   // When the watcher itself enqueued the PR; null until then. The attribution record:
   // merged-while-set resolves 'merged', a human's queue entry never does.
   enqueuedAt: Date | null;
+  /** Armed by the dependency auto-merge setting: lands only on a fully green head (never
+   *  'unstable'). False for a person's intent. */
+  armedByPolicy: boolean;
   expectedHeadOid: string;
   expiresAt: Date;
   armedAt: Date;
@@ -17887,6 +17360,7 @@ export async function listArmedMergeRequestsForRunner(
       mergeMethod: autoMergeRequests.mergeMethod,
       updateStrategy: autoMergeRequests.updateStrategy,
       viaMergeQueue: autoMergeRequests.viaMergeQueue,
+      armedByPolicy: autoMergeRequests.armedByPolicy,
       enqueuedAt: autoMergeRequests.enqueuedAt,
       expectedHeadOid: autoMergeRequests.expectedHeadOid,
       expiresAt: autoMergeRequests.expiresAt,
@@ -17911,6 +17385,7 @@ export async function listArmedMergeRequestsForRunner(
     ...r,
     prState: r.prState as PrState,
     mergeMethod: r.mergeMethod as MergeMethod,
+    armedByPolicy: r.armedByPolicy === true,
     syncedCiStatus: r.syncedCiStatus as CiStatus | null,
   }));
 }

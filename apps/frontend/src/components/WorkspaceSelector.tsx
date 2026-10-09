@@ -243,7 +243,7 @@ export function WorkspaceSelector(): JSX.Element {
   // work is real, it is just not yours. (See useMyTurnByWorkspace.)
   //
   // ⚠ The BADGE is informational; the ROW is a navigation. Picking a workspace (the current one
-  // included) takes you to its Open PRs tab (`switchWorkspaceToOpenPrs`),
+  // included) takes you to Activity → Open PRs (`switchWorkspaceToOpenPrs`),
   // clears the Timeline's selected PR and leaves pinned tabs alone. Someone who only wanted the
   // Timeline re-scoped is one Back away. Only this picker navigates: `setWorkspace` itself stays
   // a pure scope write for deep links, Back/Forward and the corrections below.

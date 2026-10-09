@@ -793,7 +793,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
     // it belongs in the same bucket as an explicit merge.
     //
     // Deliberately NOT here: `/dismiss` and `/mark-viewed` (pure local bookkeeping).
+    //
+    // `/api/dependencies/merge-all` is Pending → Dependencies' "Merge or arm all": up to one
+    // merge (or a live probe + arm) per listed PR, sequentially, on the account's quota. Spelled
+    // EXACTLY; its dry run hits no GitHub but shares the bucket rather than a second rule.
     const hitsGithub =
+      path === '/api/dependencies/merge-all' ||
       path.startsWith('/api/threads/') ||
       path.startsWith('/api/bot-threads/') ||
       /^\/api\/prs\/\d+\/(review-comment|comments?|approve|request-changes|close|reopen|ci\/rerun|request-reviewers|merge-queue|merge|auto-merge|update-branch|resolve-bot-threads|reviews)/.test(

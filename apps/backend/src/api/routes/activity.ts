@@ -65,10 +65,10 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
   // every repo in it, with no second visibility axis; `repoIds` + `userIds` narrow WITHIN that.
   // Pure DB read — no GitHub sync, no AI.
   //
-  // `workspaceId` is passed SEPARATELY from `repoIds` and is required: the bots-only path
-  // resolves an automated-reviewer set, and that answer is a workspace fact. The two deliberately
-  // disagree on the single-PR isolation path (`prId`), which reaches a PR whose repo may be
-  // filtered out of `repoIds` — the workspace still owns "is this login a bot" there.
+  // `workspaceId` is passed SEPARATELY from `repoIds` and is required: the `authors` split
+  // (people | bots) resolves the union bot set, and that answer is a workspace fact. The two
+  // deliberately disagree on the single-PR isolation path (`prId`), which reaches a PR whose repo
+  // may be filtered out of `repoIds` — the workspace still owns "is this login a bot" there.
   app.get('/api/activity/feed', async (req): Promise<ConsolidatedFeedResponse> => {
     const q = req.query as {
       workspace?: string;
@@ -77,24 +77,14 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
       prId?: string;
       limit?: string;
       offset?: string;
-      excludeBots?: string;
-      allowBotIds?: string;
-      botsOnly?: string;
-      botWindowDays?: string;
+      authors?: string;
       includeAllCommits?: string;
-      includeCiFailures?: string;
     };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
     const limit = q.limit != null ? Number(q.limit) : null;
     const offset = q.offset != null ? Number(q.offset) : 0;
     const prId = q.prId != null ? Number(q.prId) : null;
-    // Bot-only feed window (days) — clamped to 1..90; only honored on the botsOnly path.
-    const botWindowDaysRaw = q.botWindowDays != null ? Number(q.botWindowDays) : null;
-    const botWindowDays =
-      botWindowDaysRaw != null && Number.isFinite(botWindowDaysRaw)
-        ? Math.min(90, Math.max(1, Math.trunc(botWindowDaysRaw)))
-        : null;
     return getConsolidatedFeed(accountId, {
       workspaceId: scope.workspaceId,
       repoIds: scope.repoIds,
@@ -102,15 +92,9 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
       prId: prId != null && Number.isFinite(prId) ? prId : null,
       limit: Number.isFinite(limit) && limit != null && limit > 0 ? limit : null,
       offset: Number.isFinite(offset) && offset > 0 ? offset : 0,
-      excludeBots: q.excludeBots === 'true',
-      allowBotIds: parseIntList(q.allowBotIds),
-      botsOnly: q.botsOnly === 'true',
-      botWindowDays,
+      // People or bots, never both. Anything but an explicit 'bots' is people — the default.
+      authors: q.authors === 'bots' ? 'bots' : 'humans',
       includeAllCommits: q.includeAllCommits === 'true',
-      // Opt-in CI-failure rows (PR heads + the default branch). OFF unless explicitly asked
-      // for, like includeAllCommits — a missing/garbage value means off, never on. Still a
-      // pure DB read over two indexed transition logs, so no new rate-limit tier is needed.
-      includeCiFailures: q.includeCiFailures === 'true',
     });
   });
 

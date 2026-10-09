@@ -933,6 +933,42 @@ for a PR the stack was already showing. Four rules hold it together:
   `useMergeOptions` per armed PR (~3 GitHub calls each — the reason the row carries its own
   identity and phase).
 
+### Dependency auto-merge (`merge/dependency-policy.ts`, CORE/free, both modes)
+
+Two features over ONE classifier — `authorAutomationFor(...).role === 'dependency'` with the
+workspace's bot maps, the same resolution the Dependencies tab's membership reads:
+
+- **"Merge or arm all"** on Pending → Dependencies (`DependencyMergeAll.tsx`,
+  `POST /api/dependencies/merge-all?workspace=`). The tab's LISTED dependency PRs, at most
+  `DEPENDENCY_MERGE_ALL_MAX` (the most the tab can list; the SPA sends that many and names the rest) (a person's PR a
+  tool flagged is not one). The confirm dialog prints the server's DRY RUN (synced rows only, no
+  GitHub): how many land now, how many will be armed, every skip with its reason (draft, conflicts,
+  no write access, already armed, already queued). The run is SEQUENTIAL; per PR it probes the
+  queue (in it → skipped; a queue repo → armed, the watcher enqueues), then the live mergeability:
+  conflicting → skipped, ready (clean / has_hooks / unstable — a click keeps GitHub's tolerance) →
+  merged pinned to the live head, stamped + `noteMergeLanded` like the merge route; anything else,
+  or a merge GitHub refuses as not mergeable → armed. Arms use the repo's first enabled method and
+  ⚠ ALWAYS GitHub's merge-in update, never the local clone rebase — a force-push onto a Dependabot /
+  Renovate branch makes the bot stop maintaining it (same as the policy sweep). Outcomes come back per PR and land as
+  ONE card in the toast column; the SPA refetches through `invalidateAfterPrWrite`.
+- **"Merge dependency updates automatically"** (`workspaces.dependency_auto_merge`, NULL = OFF,
+  Settings → Workspace). `runDependencyPolicyTick` runs on the watcher's cron just before it
+  (≤ 10 arms per tick) and arms each open, non-draft, non-conflicting, not-queued dependency PR in
+  a repo the account can push to — pinned to its LIVE head, `armedByPolicy: true`, update strategy
+  GitHub's merge-in. The UI says "Armed automatically (dependency setting)".
+  ⚠ **ONLY REQUIRED CHECKS GATE A POLICY INTENT**, exactly as they gate a click: it lands on
+  clean / has_hooks / `unstable` (a red OPTIONAL check never blocks it). Drafts, conflicts,
+  `behind` (freshened first) and `blocked` (bar the merge-queue enqueue rule) never merge.
+  ⚠ **THE SETTING IS THE CONSENT, SO A NEW HEAD IS RE-ARMED**: the bot's push disarms by rule 1 as
+  always, and the next sweep arms the new head. An intent that ENDED on the SAME head (expired,
+  failed, lost access, retargeted) is never re-armed on it (`refuseIfHead`).
+  ⚠ **A PERSON'S CANCEL WINS FOR EVER**: `DELETE /api/prs/:id/auto-merge` records the PR in
+  `auto_merge_policy_skips`, and the sweep never arms a PR listed there.
+
+Every arm — the click, the bulk run, the sweep — goes through ONE function, `armIntentLive`
+(`merge/arm-intent.ts`): live head pinned, base checked and pinned, a queued PR refused, the queue
+probe stamped.
+
 ### CI logs (`github/actions-logs.ts`)
 
 `GET /repos/…/actions/jobs/{id}/logs` 302s to a short-lived signed blob URL that **does honour
@@ -965,16 +1001,9 @@ none of those). The Pending board's red-trunk cards read `repos.default_branch_c
 themselves, not this route; the one thing they share with it is the head's failing-check NAMES,
 read through the same reader (below) and only displayed — nothing counts them.
 
-> **ONE EXPLICIT EXCEPTION, added with `trunk_ci_status_events` (migration `0052` / pg `0039`):
-> a trunk CI FAILURE can appear as a row in the Activity Feed** — but only behind the Feed's
-> "CI failures" pill, which is OFF by default — one click turns it on. The sentence above still holds in the
-> sense that matters: a trunk failure produces **no attention count, no badge, and no My Turn
-> row**. ⚠ It USED to be emitted with `prId: null`, which made `enrichMyTurn` structurally decline
-> it; now that it names the PR that landed the broken commit, the only thing keeping it out of the
-> My-Turn lane is being withheld from that enrichment by KIND (`db/queries.ts` `isCiFeedKind`) —
-> a CI item is actor-less and would otherwise satisfy "the actor isn't you" trivially and become an
-> UNCAPPED yellow card. CI rows also stay in the CAPPED set, so a chronically red trunk cannot
-> starve the 250-row plain-activity budget. See **Trunk CI failures in the Activity Feed** below.
+> The Activity Feed's old opt-in "CI failures" rows (`ci_failed` / `trunk_ci_failed`) are
+> RETIRED — the Feed shows no CI items at all; Pending owns red builds. See
+> **Trunk CI transition log** below.
 
 - **Both detail columns follow the partial-response write policy** (Conventions): `undefined` ⇒
   omit the key from the upsert, `null`/`[]` ⇒ clear. `failingChecksToWrite` /`prNumberToWrite`
@@ -1017,7 +1046,7 @@ read through the same reader (below) and only displayed — nothing counts them.
   the FIRST thing eaten, so the chip would otherwise sit next to a dangling `(#2…`.
 - UI: `Activity/BranchStatusChip` (rail row: dot + branch + age; a HOLLOW dot for "no CI
   observed", unlike the PR surfaces which render nothing for `unknown`) and
-  `Activity/BranchStatusPanel` (cross-repo strip at the top of Pending → My turn, ONLY on that tab and
+  `Activity/BranchStatusPanel` (cross-repo strip at the top of Activity → Open PRs, and
   COUNT-FREE; `compact` per-repo variant in
   `RepoFeedHeader`). **The expanded row lists MERGED PRs, not commits** (`mergedPrs`, ≤10 in
   merge order): each row consolidates its retained trunk commits, whose sha + headline list is
@@ -1063,164 +1092,20 @@ read through the same reader (below) and only displayed — nothing counts them.
   by the 90d backfill/read window (and, on a repo landing >1000 trunk commits in 90 days, by
   the history backfill's page cap — disclosed in its log line, never silently).
 
-### Trunk CI failures in the Activity Feed (`trunk_ci_status_events`)
+### Trunk CI transition log (`trunk_ci_status_events`)
 
-The Feed's **"CI failures"** pill emits **one item per failed check RUN**, keyed
-`(PR-or-branch, head sha, check name)`, from two transition logs. It is a THREE-state lens
-(`feedCiLens`), not a toggle:
+Written by `sync/branch-status.ts` (migration `0052` / pg `0039`), trimmed hybrid (newest-200 ∪
+the 14-day window — `staleTrunkCiEventIds`). It first fed the Activity Feed's "CI failures" rows;
+those rows, the `feedCiLens` pill, `getCiFailureFeedItems` / `getTrunkCiFailureFeedItems` and
+`isCiFeedKind` are DELETED (the Feed carries no CI items; Pending owns red builds). The log itself
+stays.
 
-The pill cycles **`off` → `feed` → `only` → `off`**, so one click from the default turns it on:
-
-| state | stream | wire |
-|---|---|---|
-| `'off'` (**default**) | no CI rows fetched at all | param omitted |
-| `'feed'` | CI rows interleaved chronologically with human activity | `includeCiFailures=true` |
-| `'only'` | narrowed to CI rows (client-side, like the category pills) | `includeCiFailures=true` |
-
-> ⚠ **Why three states.** It shipped as an include-only boolean, OFF by default, and that
-> combination hid the feature twice over. Rows are placed by TIME, so in a high-traffic workspace
-> (bevy/three.js: ~23 non-CI events in the 11.5h since the newest CI failure) the first red card
-> lands ~23 rows down while the pill's count reads 34 — a control that looks dead. The identical
-> code puts it at index 0 in a quiet workspace and looks perfect, which is why it was reported as
-> "works under one workspace, broken under another". `'only'` is the state that makes the effect
-> legible at any traffic level.
->
-> ⚠ **The DEFAULT has flipped twice — off → feed → off — and the two flips are not symmetric.**
-> The first was a fix for the invisibility above. The second is a product call: one card per
-> failed check per head means a red matrix build can be most of what a new user's first feed
-> contains, which is a poor first impression of a situational-awareness tool. What makes an
-> off-by-default acceptable NOW and not then is that the pill renders **unconditionally**, so the
-> feature is one visible click away rather than ambient. The include-only-boolean lesson is
-> unchanged and permanent: never ship a toggle whose only feedback is a count.
->
-> ⚠ **A default flip on this key needs a `FILTER_STORAGE_VERSION` bump** (v3 → v4, dropping
-> exactly `feedCiLens`) because `pickFilterBarState` persists it UNCONDITIONALLY — every blob
-> written under the old default holds a literal `'feed'` that no user chose, so without the bump
-> the new default would reach new installs only and every existing user would keep the noisy
-> feed forever. A deliberate `'only'` is lost with it; that is the accepted cost of flipping a
-> default on a key whose stored value cannot be told apart from the default that produced it.
-> `migratePersistedFilters`'s steps CHAIN — a v2 blob must land at v4, and a per-step early
-> return would strand it where the caller's version check then discards the blob WHOLE.
->
-> ⚠ `'only'` **skips the Comments / PR-events category pills.** CI rows belong to neither category
-> (deliberately — see `catMatch`), so composing them could only ever produce an empty feed.
->
-> ⚠ The lens is a **standing preference**: it is the one feed control in `FilterDefaults`, so it
-> persists with the filter bar **and is URL-serialized** (`ci=only` / `ci=1`; the `'off'` default
-> is omitted, an explicit `ci=0` is still honoured, and `ci=1` has meant "on" since this was a
-> boolean — so links from every older shape read correctly). ⚠ **The OMITTED value must track the
-> CURRENT default**: when the default flipped, leaving `ci=0` as the emitted one would have
-> written the default onto every URL while the newly non-default `'feed'` vanished — i.e. the one
-> state that now needs serializing would be the one state that never survived a reload. An old
-> link that MEANT `'feed'` carried no `ci` param and now reads as `'off'`; an absent param cannot
-> be told apart from a bare URL, and it is the same direction as the storage migration.
-> BOTH are required, and the URL half
-> is the one that actually restores it: the persisted blob is read only on a BARE url, while
-> `writeToUrl` puts `?workspace=<id>` on the address bar as soon as the scope resolves. A
-> `FilterDefaults` key that is not serialized is written to localStorage on every change and read
-> back never — it survives nothing.
->
-> ⚠ The legacy boolean `feedShowCiFailures` in a stored blob is **dropped, not migrated**. Its
-> default was `false` — what nearly every stored blob holds — so mapping it onto `'off'` would
-> preserve the very invisibility this change fixes, for exactly the users who never found the pill.
-
-| kind | source | shape |
-|---|---|---|
-| `ci_failed` | `ci_status_events` (written by `sync/upsert.ts` on every walk) | has a `prId` |
-| `trunk_ci_failed` | `trunk_ci_status_events` (written by `sync/branch-status.ts`) | the LANDING PR when the head sha resolves to one, else `prId: null` |
-
-**Why the trunk half needed a new table rather than reading `branch_commits`.** That table's
-`ci_status` is **updated IN PLACE** by the idempotent snapshot upsert, so a commit that turns red
-hours after it landed carries no record of *when*: its only timestamps are `committedAt` (git
-commit time) and `createdAt` (first insertion). Presenting either as a failure time would be a
-quiet lie, so the observation gets its own append-only row — the exact trunk twin of what
-`ci_status_events` already does for a PR head.
-
-Write rules, all load-bearing:
-- **Only on a TRANSITION** — status / head sha / failing-check name set differs from this repo's
-  last row (`trunkCiTransitionChanged`, pure + tested) — **with one narrow exception: a head move
-  while trunk is GREEN is not a transition.** Trunk's head changes on every landed PR and the
-  snapshot runs at the end of every walk (as often as every 120s on a hot repo), so recording
-  "still green, newer commit" filled an active repo's log with rows that state nothing the Feed
-  can read. The exception is deliberately minimal — it needs a POSITIVE green (`success` /
-  `expected`) on BOTH sides with no named failing checks on either — so nothing red, and nothing
-  amber-with-a-real-failure, can be swallowed: a new head that is still red is a NEW failure (its
-  own commit, its own card) and is always recorded, and the first green after a red is a status
-  change, so recovery timing survives.
-- **Only on a POSITIVE statement from GitHub.** `headSha == null` or a rollup mapping to
-  `'unknown'` writes NOTHING. `'unknown'` is both "a state we don't model" and what
-  `graphqlTolerant` yields when a partial response NULLs the selection — recording it would
-  manufacture a "trunk changed" event out of a permissions error. Same gate the PR-side writer
-  uses (`ciStatus !== 'unknown'`).
-- **Failing-check names follow the same three-state rule as the columns**: `undefined` (phase 2
-  never told us) DROPS the name dimension from the transition comparison rather than comparing it
-  against `[]`, or a repo whose detail fetch is failing would log a spurious transition every
-  sync. The stored value is `null` — names are never inherited forward from the previous row.
-- **Strictly non-fatal and OUTSIDE the snapshot's transaction.** A feed nicety must not be able
-  to roll back (or fail) the strip that just succeeded; its own `try/catch` warns and moves on.
-
-Retention: the table has **no PR**, so `pruneOldData` — which anchors everything to a parent PR's
-`updatedAt` — can never reach it. It is bounded by a per-repo trim in the writer
-(`staleTrunkCiEventIds`), and cleared outright by `deleteRepo` + `eraseAccountData` (it is on
-`accountScopedTables()`, unlike `ci_status_events` which sits in that test's KNOWN_UNCHECKED
-exemption).
-
-⚠ **That trim is HYBRID — newest `TRUNK_CI_EVENT_WINDOW` (200) rows unconditionally ∪ everything
-inside `FEED_WINDOW_DAYS` (14)** — the same shape as `branch_commits`, and it has to be, for
-reasons pointing in opposite directions. A pure COUNT bound was wrong: this log is written on
-every observed transition and an active repo transitions far faster than 14 days' worth of 200
-rows, so the newest-200 rule evicted the failure rows `getTrunkCiFailureFeedItems` reads — exactly
-on the repos that have the most of them, and with no symptom other than a Feed that quietly stops
-showing trunk failures. A pure AGE bound is wrong too: a dormant repo's whole log is older than
-the cutoff, so it would be emptied and the next observation would read as a first observation
-forever. `FEED_WINDOW_DAYS` is imported from `db/queries.ts`, not restated, so the retention can
-never drift below what the read window asks for.
-
-Reading side (`db/queries.ts`): both builders collapse the log to one card per key, taking the
-**EARLIEST** observation so a re-confirmed failure doesn't keep jumping to the top; a head with
-more than `MAX_CI_ITEMS_PER_HEAD` (5) failing checks emits 5 cards and **discloses** the overflow
-in each summary rather than dropping it silently.
-
-⚠ **The cap and the disclosure are per (target, head), NOT per row** — `collapseCiRows` is
-two-pass for exactly that reason. Both sources are TRANSITION logs, so a sharded matrix build
-going red shard by shard writes ten rows for ONE head, each carrying the cumulative set. Computing
-the cap from a single row's list (while the dedupe set spanned rows) let EVERY row contribute one
-more card — a newly-named shard sorts into that row's top-5 window and is an unseen key — so one
-head emitted far more than 5 cards, and the early ones disclosed "0 more" while 7+ checks were
-failing. Pass 1 accumulates, per head, the UNION of every name ever observed plus the capped picks
-in first-observation order; pass 2 emits, so every card on a head carries the same final overflow
-count. Cards are actor-less, so they are skipped
-whenever a member filter is active and on the `botsOnly` path, and the trunk half is also skipped
-under single-PR isolation. ⚠ `observedAt` is **OUR** observation time — neither GraphQL query
-selects `completedAt`, and trunk has no fast path at all (`syncBranchStatus` runs only at the end
-of a full walk, never from `syncOnePr`), so a trunk failure can be up to the adaptive bucket + the
-30-minute floor old. Copy therefore says **"detected"**, never "failed at".
-
-**A trunk card names the PR that LANDED the broken commit** (`resolveTrunkCommitPrs` in
-`db/queries.ts`), so it opens like any other card. The mapping is already stored —
-`branch_commits.pr_number`, written by the snapshot's `pickAssociatedPrNumber` — and this only
-walks the two hops that turn it into a local PR id. What to know before touching it:
+`resolveTrunkCommitPrs` (db/queries.ts) still turns a trunk sha into the PR that LANDED it, for the
+Pending board's red-trunk cards:
 
 - **Both hops key on `(repoId, X)`, never a bare sha or number.** The lookups are
   `inArray(repoIds) × inArray(shas|numbers)`, which deliberately over-matches; the composite key
-  is the only thing discarding the cross-repo rows it returns. ⚠ The repo/number lists are built
-  **from the trunk rows being resolved**, so a cross-repo test is VACUOUS unless a second repo
-  also has a red trunk — the first version of that test passed against a deliberately-broken
-  bare-number map for exactly this reason. `ci-feed-items.test.ts` now gives acme/decoy its own
-  failure and its own `#34`, and the mutation fails two tests.
+  is the only thing discarding the cross-repo rows it returns.
 - **A miss is ordinary, not an error** — a direct push has no PR, `pr_number` is null until the
-  association is observed, the two logs trim on different schedules (`branch_commits` =
-  newest-100 ∪ 90d vs `trunk_ci_status_events` = newest-200 ∪ the 14-day feed window), and the
-  landing PR may not be synced. All of them fall back to a PR-less card, which stops looking
-  clickable and keeps the commit link as its only affordance.
-- **`githubUrl` stays the COMMIT even when a PR resolved**: a trunk run's checks live on the
-  commit page, and the failure is a fact about trunk. The PR is reached from the card's own PR
-  reference, which is LABELLED (`landed by` when `prState === 'merged'`, else `from`) — the
-  picker falls back to an OPEN associated PR when that is the only candidate, and claiming that
-  one landed anything would be false.
-- ⚠ **`prId: null` used to be what kept these rows out of the My-Turn lane.** It no longer is —
-  the kind-based `isCiFeedKind` filter on `enrichMyTurn` is now the ONLY guard, and it must stay:
-  a CI row is actor-less, so `actorId !== localUserId` is trivially true and every red trunk build
-  on a PR you touched would become an uncapped yellow card. Pinned by a test.
-
-
+  association is observed, and the two logs trim on different schedules (`branch_commits` =
+  newest-100 ∪ 90d vs `trunk_ci_status_events` = newest-200 ∪ 14 days).

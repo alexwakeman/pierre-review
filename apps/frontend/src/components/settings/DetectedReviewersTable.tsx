@@ -12,7 +12,8 @@ import {
   roleForVendorKind,
   vendorKindsForRole,
 } from '@pierre-review/shared';
-import { automatedReviewerMeta, vendorInk } from '../../lib/ui.js';
+import { automatedReviewerMeta, safeExternalUrl, vendorInk } from '../../lib/ui.js';
+import { monogramFor, monogramInk } from '../../lib/botAvatar.js';
 import { InfoButton } from '../InfoModal.js';
 import {
   costEditOutcome,
@@ -29,7 +30,6 @@ import {
   humanCandidates,
   monthlyCostTotal,
   reviewerListEmptyKind,
-  reviewersWithFootprintIn,
 } from '../../lib/botReviewers.js';
 import {
   useDetectedReviewers,
@@ -41,7 +41,6 @@ import {
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useRepos } from '../../hooks/useTimeline.js';
-import { ProBadge } from '../ProGate.js';
 import { SectionShell, inputCls } from './ui.js';
 
 const MAX_SEARCH_MATCHES = 8;
@@ -54,6 +53,14 @@ const MAX_REPO_CHIPS = 8;
 // and the row read as a form, not a list. This is the same chrome with the width left off.
 const FIELD_CLS =
   'rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100';
+// The label in front of each control row on a card ("Counts as", "Role", "Vendor").
+const CONTROL_LABEL_CLS = 'w-16 shrink-0 text-[11px] font-medium text-gray-500 dark:text-gray-400';
+const segmentCls = (active: boolean): string =>
+  `px-2 py-0.5 text-[11px] font-medium disabled:opacity-40 ${
+    active
+      ? 'bg-sky-600 text-white'
+      : 'bg-white text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+  }`;
 
 // What each role MEANS, in terms of the consequence the user is choosing. Every string names the
 // lane the actor lands in on the period report, because that consequence is otherwise two screens
@@ -83,10 +90,19 @@ type ReviewerPatch = Omit<WorkspaceReviewerPatchBody, 'workspaceId'>;
 
 type BotColorFn = (bot: { login?: string | null; kind: AutomatedReviewerKind }) => string;
 
-// The bot-reviewer settings surface. FREE, and the SCREEN carries no capability gate: classifying
-// a reviewer, naming its vendor and setting its role all work on every tier, including a plugin-
-// less `npx` install. The one paid thing on it is the PRICE (`botDepth`) — the editor on each card
-// and the workspace total below the lists. See the note at `showCost` for how that is enforced.
+// The bot classification surface — Feed → Bot classification. FREE on every tier, both modes, and
+// the screen carries no capability gate: classifying a reviewer, naming its vendor and setting its
+// role all work on a plugin-less `npx` install. The one paid thing on it is the PRICE (`botDepth`)
+// — the editor on each card and the workspace total — and without the capability those are simply
+// ABSENT (no badge, no nudge). See the note at `showCost` for how that is enforced.
+//
+// ── ONE CARD PER BOT, IN A GRID ─────────────────────────────────────────────────────────────
+// Each entry is a distinct bordered card (1 column on a phone, 2–3 wide): a header with the bot's
+// own GitHub avatar (for an App bot, the vendor's logo; a monogram tile on the vendor colour when
+// there is none or it fails to load), its name and login, and its role and vendor as labelled
+// chips; the controls sit beneath. The vendor colour is a thin LEFT ACCENT — a non-text use, so the
+// raw hex is fine there; as text it always goes through `vendorInk`. A row judged a person is drawn
+// muted, so the grid separates bots from people at a glance.
 //
 // ── ONE CARD PER BOT, AND THE WORKSPACE IS THE ONLY SCOPE ───────────────────────────────────
 // A bot is configured once per Workspace. `judgement` (is it automated, is it reviewing or
@@ -123,20 +139,14 @@ type BotColorFn = (bot: { login?: string | null; kind: AutomatedReviewerKind }) 
 // footer total is a plain sum; across Workspaces it is not a sum at all and no surface may add
 // them up.
 //
-// ── THE REPO NARROWING IS A DISPLAY FILTER, NOT A SCOPE ─────────────────────────────────────
-// `repoId` filters the cards CLIENT-SIDE (`reviewersWithFootprintIn`) over the full Workspace
-// listing. It deliberately does NOT narrow the request: every control here writes the
-// Workspace-wide row, so each card has to be able to show its whole repo footprint — the real
-// blast radius — and a server-narrowed response would leave one chip behind a promise the UI
-// cannot back up. It also keeps this screen on the same cache entry as the bot colour map.
+// ── THE LISTING IS ALWAYS WORKSPACE-WIDE ────────────────────────────────────────────────────
+// Every control here writes the Workspace-wide row, so each card shows its whole repo footprint —
+// the real blast radius. It also keeps this screen on the same cache entry as the bot colour map.
 export function DetectedReviewersTable({
   workspaceId,
-  repoId,
 }: {
   /** The Workspace whose bots are being configured. `null` while the store is still resolving. */
   workspaceId: number | null;
-  /** Optional DISPLAY filter: show only bots with a footprint in this repo. Never a write scope. */
-  repoId?: number;
 }): JSX.Element {
   // No `repoIds`: the listing is always fetched Workspace-wide (see the header). That is also what
   // keeps this screen sharing one warm cache entry with `useBotColors`.
@@ -147,13 +157,9 @@ export function DetectedReviewersTable({
   const botColor = useBotColors(workspaceId);
 
   // ── THE COST SURFACES ARE PAID (`botDepth`), THE REST OF THIS SCREEN IS FREE ──────────────
-  // Classification / identity / role editing stays exactly as gated before (i.e. not at all — the
-  // deliberate OSS fix: an `npx` user must be able to classify a reviewer). Only the price editor
-  // and the workspace cost total are gated here; `botDepth` now also covers the whole Bots → ROI
-  // panel, which is where the $/acted-on column lives.
-  //
-  // With `botDepth` false: one Pro nudge under the list, in BOTH deployment modes (it used to be
-  // cloud-only — see the note at the nudge itself), never an error.
+  // Classification / identity / role editing is ungated (an `npx` user must be able to classify a
+  // reviewer — the Feed's bot hiding reads it). Only the price editor and the workspace cost total
+  // read `showCost`, and without it they are ABSENT: no ProBadge, no upsell line.
   //
   // ⚠ THE SERVER ENFORCES BOTH HALVES NOW, ON ALL FOUR ROUTES THAT ECHO A REVIEWER ROW. `PUT
   // …/cost` has always 402'd; as of the ROI gate the LISTING this screen reads strips
@@ -179,15 +185,8 @@ export function DetectedReviewersTable({
   // preview multiplies by it; every SAVED figure comes back server-multiplied.
   const workspaceSeatCount = q.data?.workspaceSeatCount ?? 0;
 
-  // The cards on screen. Filtered for the per-repo tab; the numbers below are deliberately NOT.
-  const shown = useMemo(
-    () => (repoId == null ? reviewers : reviewersWithFootprintIn(reviewers, repoId)),
-    [reviewers, repoId],
-  );
-  const buckets = useMemo(() => bucketReviewers(shown), [shown]);
-  // ⚠ TOTALLED OVER THE WHOLE WORKSPACE, NOT OVER `shown`. The price is a Workspace fact; a total
-  // over a repo-filtered subset would read as "this repo costs $X", which is a number this product
-  // does not have and must not imply.
+  const buckets = useMemo(() => bucketReviewers(reviewers), [reviewers]);
+  // The price is a Workspace fact, so the total is over the whole Workspace's rows.
   const costTotal = useMemo(() => monthlyCostTotal(reviewers), [reviewers]);
   const repoName = useMemo(() => {
     const m = new Map<number, string>();
@@ -206,15 +205,16 @@ export function DetectedReviewersTable({
   const anyError =
     patch.error ?? cost.error ?? resetJudgement.error ?? resetIdentity.error;
 
-  const title = 'Review bots';
+  const title = 'Bot classification';
   // The cost clause only when the cost surfaces actually render (`botDepth`).
   const desc = showCost
-    ? 'Who counts as an automated reviewer in this Workspace, who each bot is, and what it costs here.'
-    : 'Who counts as an automated reviewer in this Workspace and who each bot is.';
+    ? 'Who counts as a bot in this Workspace, what kind of bot it is, and what it costs here.'
+    : 'Who counts as a bot in this Workspace and what kind of bot it is.';
   // The six roles, reachable by touch and keyboard. The role picker's `title` carries the same
   // text, but a hover tooltip is not an explanation anyone on a phone can read.
   const info = (
-    <InfoButton title="Review bots">
+    <InfoButton title="Bot classification">
+      <p>Bots are detected automatically. Bots are hidden on the Feed and Timeline by default.</p>
       <p>Each bot has one role in this Workspace. The role decides which figures count it:</p>
       <ul className="list-disc space-y-1 pl-5">
         {REVIEWER_ROLES.map((k) => (
@@ -224,8 +224,8 @@ export function DetectedReviewersTable({
         ))}
       </ul>
       <p>
-        A change here reaches every repo in this Workspace, including repos not listed on a card.
-        The repo chips on each card show where that bot is active.
+        A change here reaches every repo in this Workspace. The repo chips on each card show where
+        that bot is active.
       </p>
       {showCost && (
         <p>
@@ -273,21 +273,6 @@ export function DetectedReviewersTable({
             <span className="font-semibold">this Workspace</span>: all {listRepoIds.length} of its
             repo{listRepoIds.length === 1 ? '' : 's'}, and none of your other Workspaces.
           </p>
-
-          {/* ⚠ NO SECOND "this write is Workspace-wide" BANNER FOR THE `repoId` CASE. The banner
-              above already says it, and the per-repo Bots tab (BotSettingsPanel) renders its own
-              prominent note saying it again in the repo's own words — a third copy on one screen
-              makes all three read as boilerplate. What this component owes the repo case instead is
-              EVIDENCE, and it has it: every card lists the repos it is active in. */}
-          {repoId != null && (
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Filtered to the bots active in{' '}
-              <span className="font-medium text-gray-600 dark:text-gray-300">
-                {repoName.get(repoId) ?? `repo #${repoId}`}
-              </span>
-              .
-            </p>
-          )}
 
           <ReviewerList
             heading="Review bots"
@@ -350,34 +335,9 @@ export function DetectedReviewersTable({
             onResetIdentity={(userId) => resetIdentity.mutate({ userId, workspaceId })}
           />
 
-          {repoId != null && shown.length === 0 && (
-            <p className="py-3 text-center text-[11px] text-gray-400">
-              No automated reviewer has touched this repo yet. This Workspace&apos;s other bots are
-              still configured — clear the repo filter to see them.
-            </p>
-          )}
-
-          {/* The workspace cost total — a cost surface, so paid (`botDepth`). With the capability
-              off, ONE line stands in for the whole pricing feature.
-
-              ⚠ IT NO LONGER BRANCHES ON `isCloud`. It used to render in cloud and nothing in OSS,
-              on the reasoning that a local install has nothing to upgrade to. That reasoning is
-              retired for this surface: seat pricing and the ROI table it feeds are Pro in BOTH
-              deployment modes, and a local reader who sees the price editor simply missing has no
-              way to tell "not built" from "not included". The shared `ProLockPanel` on the ROI tab
-              carries the same statement at panel scale and resolves the destination per mode, so
-              this line does not need to know which mode it is in.
-
-              It stays a one-line NUDGE rather than a locked pane: this is a footnote under a list
-              the reader came here to use, not a view they navigated to and found closed. One badge,
-              one sentence, no button. */}
-          {!showCost ? (
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              <ProBadge className="mr-1" title="Per-bot pricing is part of Pro." />
-              Per-bot prices and the cost per used comment are part of Pro. Classifying bots here
-              is free.
-            </p>
-          ) : (
+          {/* The workspace cost total — a cost surface (`botDepth`). Without the capability it is
+              simply absent: no badge, no upsell line. */}
+          {showCost && (
           <p className="text-xs text-gray-500 dark:text-gray-400">
             {costTotal.totalUsd == null ? (
               <>
@@ -395,7 +355,7 @@ export function DetectedReviewersTable({
                   <> · {costTotal.unpricedActors} with no price set</>
                 )}
                 .
-                {/* "Never added across Workspaces" lives in the section's info modal; the amber
+                {/* "Never added across Workspaces" lives in the section's info popover; the amber
                     banner above already says this screen is this Workspace only. */}
               </>
             )}
@@ -420,7 +380,7 @@ export function DetectedReviewersTable({
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 Type a reviewer&apos;s name to treat them as an automated reviewer in this
                 Workspace. They join the <span className="font-medium">Review bots</span> list
-                above, where you set the vendor and the price.
+                above, where you set the vendor{showCost ? ' and the price' : ''}.
               </p>
             ) : matches.length === 0 ? (
               <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -430,8 +390,13 @@ export function DetectedReviewersTable({
               <ul className="divide-y divide-gray-100 rounded border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
                 {matches.map((m) => (
                   <li key={m.userId} className="flex flex-wrap items-center gap-2 px-2.5 py-1.5">
-                    {m.avatarUrl != null && (
-                      <img src={m.avatarUrl} alt="" className="h-5 w-5 shrink-0 rounded-full" />
+                    {safeExternalUrl(m.avatarUrl) !== undefined && (
+                      <img
+                        src={safeExternalUrl(m.avatarUrl)!}
+                        alt=""
+                        loading="lazy"
+                        className="h-5 w-5 shrink-0 rounded-full"
+                      />
                     )}
                     <span className="truncate text-xs font-medium text-gray-800 dark:text-gray-100">
                       {m.login}
@@ -497,14 +462,16 @@ function ReviewerList({
 }): JSX.Element | null {
   if (reviewers.length === 0) return null;
   return (
-    <section className="space-y-1.5">
+    <section className="space-y-2">
       <div className="flex flex-wrap items-baseline gap-1.5">
         <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
           {heading} ({reviewers.length})
         </h4>
         <span className="text-[11px] text-gray-500 dark:text-gray-400">{note}</span>
       </div>
-      <ul className="divide-y divide-gray-100 rounded border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
+      {/* A responsive GRID of distinct cards: one column at phone width, two from `md`, three on a
+          wide screen. `items-start` keeps a short card from stretching to its row-mate's height. */}
+      <ul className="grid grid-cols-1 items-start gap-3 md:grid-cols-2 2xl:grid-cols-3">
         {reviewers.map((r) => (
           <ReviewerCard
             key={r.userId}
@@ -601,103 +568,183 @@ function ReviewerCard({
     .map((e) => repoName.get(e.repoId) ?? `repo #${e.repoId}`)
     .join(', ');
 
+  // A row judged a PERSON is drawn muted (grey accent, grey ground, a "Person" chip), so the grid
+  // separates bots from people at a glance. The text keeps its normal contrast — muted is the
+  // ground and the accent, never an opacity over the words.
+  const isPerson = !r.automated;
+  const vendorLabel = automatedReviewerMeta(serverKind).label;
+  // The card's title: the human-set label / vendor brand (`r.label`), with the login beneath it.
+  const title = r.label.trim() !== '' ? r.label : r.login;
+
   return (
-    <li className="flex flex-col gap-1.5 px-2.5 py-2">
-      <div className="flex flex-wrap items-center gap-2">
-        {r.avatarUrl != null && (
-          <img src={r.avatarUrl} alt="" className="h-5 w-5 shrink-0 rounded-full" />
+    <li
+      className={`relative flex min-w-0 flex-col gap-2.5 overflow-hidden rounded-lg border py-3 pl-4 pr-3 ${
+        isPerson
+          ? 'border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40'
+          : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'
+      }`}
+      data-testid="bot-classification-card"
+    >
+      {/* The vendor colour as a thin LEFT ACCENT — a non-text use of the raw brand hex. */}
+      <span
+        aria-hidden="true"
+        className="absolute inset-y-0 left-0 w-1"
+        style={{ backgroundColor: isPerson ? 'rgb(156 163 175)' : color }}
+      />
+
+      {/* ── HEADER: logo · name + login · role and vendor chips ── */}
+      <div className="flex min-w-0 items-start gap-2.5">
+        <BotAvatar avatarUrl={r.avatarUrl} name={title} color={color} muted={isPerson} />
+        <div className="min-w-0 flex-1">
+          <div
+            className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100"
+            title={r.sampleReviewBody ?? undefined}
+          >
+            {title}
+          </div>
+          <div className="truncate text-xs text-gray-500 dark:text-gray-400">
+            @{r.login}
+            {r.displayName != null && r.displayName !== r.login && r.displayName !== title && (
+              <span className="ml-1">· {r.displayName}</span>
+            )}
+          </div>
+        </div>
+        {/* The Workspace-wide footprint. All-zero counts mean "a judgement recorded for a
+            Workspace this reviewer no longer touches". */}
+        <span
+          className="shrink-0 text-[11px] tabular-nums text-gray-500 dark:text-gray-400"
+          title="Reviews / inline threads / PR comments across this Workspace over the last 90 days"
+        >
+          {f.reviews}r · {f.threads}t · {f.comments}c · 90d
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        {isPerson ? (
+          <span className="inline-flex items-center rounded-full border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:border-gray-700 dark:text-gray-300">
+            Person
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 rounded-full border border-gray-300 px-2 py-0.5 text-[11px] text-gray-600 dark:border-gray-700 dark:text-gray-300">
+            <span className="text-gray-500 dark:text-gray-400">Role</span>
+            <span className="font-medium">{REVIEWER_ROLE_LABEL[r.role]}</span>
+          </span>
         )}
         <span
-          className="truncate text-xs font-medium text-gray-800 dark:text-gray-100"
-          title={r.sampleReviewBody ?? undefined}
-        >
-          {r.login}
-          {r.displayName != null && r.displayName !== r.login && (
-            <span className="ml-1 font-normal text-gray-400">{r.displayName}</span>
-          )}
-        </span>
-        <span
-          className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-medium"
+          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
           style={{ ...vendorInk(color), backgroundColor: `${color}1a` }}
         >
-          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
-          {automatedReviewerMeta(serverKind).label}
+          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
+          {vendorLabel}
         </span>
         {r.identitySource === 'manual' && (
-          <span className="shrink-0 rounded bg-sky-50 px-1 py-0.5 text-[11px] font-medium uppercase tracking-wide text-sky-600 dark:bg-sky-950 dark:text-sky-300">
-            named by you
+          <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+            Named by you
           </span>
         )}
         {r.isManualOverride ? (
-          <span className="shrink-0 rounded bg-sky-50 px-1 py-0.5 text-[11px] font-medium uppercase tracking-wide text-sky-600 dark:bg-sky-950 dark:text-sky-300">
-            set by you
+          <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+            Set by you
           </span>
         ) : (
           <span
-            className="shrink-0 text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400"
+            className="text-[11px] text-gray-500 dark:text-gray-400"
             title={r.reasons.join(' · ')}
           >
-            {r.source.replace(/_/g, ' ')}
+            Detected: {r.source.replace(/_/g, ' ')}
           </span>
         )}
         {r.automated && r.confidence !== 'high' && !r.isManualOverride && (
-          <span className="shrink-0 text-[11px] text-amber-500" title={r.reasons.join(' · ')}>
+          <span className="text-[11px] text-amber-700 dark:text-amber-300" title={r.reasons.join(' · ')}>
             likely ({r.confidence})
           </span>
         )}
-        {/* The Workspace-wide footprint. It is what makes a stale card legible without a flag:
-            all-zero counts mean "a judgement recorded for a Workspace this reviewer no longer
-            touches", which used to need a `dormantInScope` boolean. */}
-        <span
-          className="ml-auto shrink-0 text-[11px] text-gray-400"
-          title="Reviews / inline threads / PR comments across this Workspace over the last 90 days"
-        >
-          {f.reviews}r · {f.threads}t · {f.comments}c
-          <span className="ml-1 text-gray-500 dark:text-gray-400">90d</span>
-        </span>
       </div>
 
       {/* THE BLAST RADIUS, SPELLED OUT AS DATA. Every control on this card writes one row that
           judges, names and prices this bot in all of these repos at once. */}
       {footprints.length > 0 && (
         <div className="flex flex-wrap items-center gap-1" title={allRepoNames}>
-          <span className="text-[11px] uppercase tracking-wide text-gray-400">Active in</span>
+          <span className="text-[11px] text-gray-500 dark:text-gray-400">Active in</span>
           {shownRepos.map((e) => (
             <span
               key={e.repoId}
-              className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+              className="max-w-full truncate rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-300"
               title={`${e.reviews}r · ${e.threads}t · ${e.comments}c here over the last 90 days`}
             >
               {repoName.get(e.repoId) ?? `repo #${e.repoId}`}
             </span>
           ))}
           {hiddenRepos > 0 && (
-            <span className="text-[11px] text-gray-400">+{hiddenRepos} more</span>
+            <span className="text-[11px] text-gray-500 dark:text-gray-400">+{hiddenRepos} more</span>
           )}
         </div>
       )}
 
-      {/* ── JUDGEMENT (provenance: source) ── */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {r.automated ? (
-          <>
-            {/* ⚠ A SELECT, NOT THE TWO-WAY TOGGLE THIS USED TO BE. The toggle read
-                `role: isQuality ? 'review' : 'quality_check'`, which can express exactly two of
-                the six roles — and, worse, would have silently RE-ROLED any of the four newer
-                ones to `quality_check` on a single click, because everything that was not
-                `quality_check` was assumed to be `review`.
-
-                The label under it names the lane this choice puts the actor in on the period
-                report, because that is the consequence a user is actually choosing and it is
-                otherwise two screens away. */}
-            <label className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
-              <span className="sr-only">Role in this Workspace</span>
+      {/* ── CONTROLS, beneath the header ── */}
+      <div className="space-y-2 border-t border-gray-200 pt-2.5 dark:border-gray-800">
+        {/* ── JUDGEMENT (provenance: source) ── */}
+        {/* Bot or person: a segmented pair, so the stored state is always one of the two words on
+            screen. Pressing the side already held writes nothing. Both writes stamp
+            `source: 'manual'`; "Reset classification" is the way back. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={CONTROL_LABEL_CLS}>Counts as</span>
+          <span
+            role="group"
+            aria-label={`Is ${r.login} a bot in this Workspace?`}
+            className="inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700"
+          >
+            <button
+              type="button"
+              disabled={busy}
+              aria-pressed={r.automated}
+              onClick={() => {
+                if (!r.automated) onPatch(r.userId, { automated: true });
+              }}
+              title="Treat this account as a bot in this Workspace — every repo in it. Your other Workspaces are unaffected."
+              className={segmentCls(r.automated)}
+            >
+              Bot
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              aria-pressed={!r.automated}
+              onClick={() => {
+                if (r.automated) onPatch(r.userId, { automated: false });
+              }}
+              title={`Treat this account as a person in this Workspace — every repo in it. Its vendor name${showCost ? ' and price are' : ' is'} kept, and your other Workspaces are unaffected.`}
+              className={segmentCls(!r.automated)}
+            >
+              Person
+            </button>
+          </span>
+          {/* THE WAY BACK for the judgement half, shown ONLY once a human has pinned it. Pressing
+              Bot/Person again undoes nothing: the row stays pinned, just on the new value. */}
+          {r.isManualOverride && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onResetJudgement(r.userId)}
+              title={`Forget your bot / person and role judgement for this Workspace and let detection decide again. The vendor name${showCost ? ' and the price are' : ' is'} untouched.`}
+              className="rounded border border-dashed border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              Reset classification
+            </button>
+          )}
+        </div>
+        {r.automated && (
+          <div className="flex flex-wrap items-center gap-2">
+            {/* ⚠ A SELECT OVER ALL SIX ROLES, never a two-way toggle (a toggle silently re-roled the
+                four newer roles to `quality_check`). Its `title` names the consequence. */}
+            <label className="flex items-center gap-2">
+              <span className={CONTROL_LABEL_CLS}>Role</span>
               <select
                 disabled={busy}
                 value={role}
                 onChange={(e) => setRole(e.target.value as ReviewerRole)}
                 title={ROLE_HELP[role]}
-                className="rounded border border-gray-300 bg-transparent px-1.5 py-0.5 text-[11px] font-medium text-gray-600 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300"
+                className={`${FIELD_CLS} py-0.5 disabled:opacity-40`}
               >
                 {REVIEWER_ROLES.map((k) => (
                   <option key={k} value={k}>
@@ -706,25 +753,18 @@ function ReviewerCard({
                 ))}
               </select>
             </label>
-            {/* ⚠ THE WRITE IS BEHIND AN EXPLICIT BUTTON, AND THIS IS NOT STYLE PEDANTRY.
-                The first cut wrote on the select's `change` event. That is a PERSISTENT,
-                provenance-stamping write — it stamps `source: 'manual'`, which means the
-                classifier will never re-derive the row again and only an explicit "Reset
-                classification" undoes it. A `change` event is not a deliberate act: a scroll
-                wheel over a focused select, an arrow key, or the browser restoring form state on
-                a reload all fire one. It happened during development — a live row went from
-                `review` to `housekeeping` with nobody choosing it — which is exactly the class of
-                accident a metric cohort should not be one stray event away from.
-                The identity half already works this way ("Save name"); so does this now. */}
+            {/* ⚠ THE ROLE WRITE IS BEHIND AN EXPLICIT BUTTON. Writing on the select's `change`
+                event made a persistent, provenance-stamping write out of a scroll wheel or a
+                browser form restore — a live row once went `review` → `housekeeping` with nobody
+                choosing it. The identity half works the same way ("Save name"). */}
             {role !== r.role && (
               <button
                 type="button"
                 disabled={busy}
                 onClick={() =>
                   onPatch(r.userId, {
-                    // `automated: true` rides along with the role so the row is stamped a human
-                    // judgement in one write. It is already true on this branch, so it changes
-                    // nothing but the provenance — which is the point of pressing a button.
+                    // `automated: true` rides along so the row is stamped a human judgement in
+                    // one write; it is already true here, so only the provenance changes.
                     automated: true,
                     role,
                   })
@@ -735,146 +775,171 @@ function ReviewerCard({
                 Apply role
               </button>
             )}
+          </div>
+        )}
+        {/* On screen rather than only on hover: the reset is the half of the model that is not
+            guessable from the buttons. */}
+        {r.isManualOverride && (
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+            Set by you — detection will not change it in this Workspace until you reset. Resetting
+            keeps the bot&apos;s{' '}
+            <span className="font-medium text-gray-600 dark:text-gray-300">
+              {showCost ? 'name and price' : 'name'}
+            </span>
+            .
+          </p>
+        )}
+
+        {/* ── IDENTITY (provenance: identitySource) ── */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={CONTROL_LABEL_CLS}>Vendor</span>
+          {/* ⚠ SCOPED TO THE ROLE ABOVE, and the whole ~70-brand list is deliberately NOT offered.
+              A user who has just said "this is a quality check" is looking for SonarQube, not
+              scrolling past CodeRabbit, Dependabot and a CLA bot to reach it — and an ungrouped
+              list is also how a quality gate ends up tagged with a review vendor's brand.
+
+              ⚠ `kind` IS PASSED AS `current` FOR A CORRECTNESS REASON, not a cosmetic one. A
+              `<select>` whose `value` is absent from its options renders the FIRST option instead,
+              so the card would display a vendor the row does not hold — and "Save name" would then
+              write that wrong vendor. Role and identity are independently owned halves, so a row
+              legitimately carries a vendor from another family (someone marks CodeRabbit a quality
+              check without renaming it), and the stored value has to stay selectable. */}
+          <select
+            className={`${FIELD_CLS} w-auto py-0.5`}
+            value={kind}
+            onChange={(e) => setKind(e.target.value as AutomatedReviewerKind)}
+            aria-label={`Vendor for ${r.login} in this Workspace`}
+          >
+            {vendorKindsForRole(role, kind).map((k) => (
+              <option key={k} value={k}>
+                {automatedReviewerMeta(k).label}
+                {/* Name the mismatch rather than hiding it — see `current` above. */}
+                {roleForVendorKind(k) != null && roleForVendorKind(k) !== role
+                  ? ` (${REVIEWER_ROLE_LABEL[roleForVendorKind(k)!].toLowerCase()})`
+                  : ''}
+              </option>
+            ))}
+          </select>
+          <input
+            className={`${FIELD_CLS} w-40 py-0.5`}
+            value={label}
+            placeholder="Label"
+            onChange={(e) => setLabel(e.target.value)}
+            aria-label={`Display label for ${r.login} in this Workspace`}
+          />
+          <button
+            type="button"
+            disabled={busy || !identityDirty}
+            onClick={() =>
+              // Identity ONLY. Sending `automated`/`role` here would stamp `source: 'manual'` and
+              // freeze the classification because someone corrected a vendor name — the exact
+              // coupling the two provenance flags exist to prevent.
+              onPatch(r.userId, { kind, label: label.trim() === '' ? null : label })
+            }
+            title="Name this bot for this Workspace. It does not change whether it counts as a bot, and it does not reach your other Workspaces."
+            className="rounded bg-sky-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:opacity-40"
+          >
+            Save name
+          </button>
+          {/* THE WAY BACK for the identity half, shown ONLY on a manually-named bot. On an auto
+              identity there is nothing to reset, and a control that does nothing reads as a broken
+              one. It is the only way back: re-typing the auto name by hand just re-stamps
+              "named by you". */}
+          {r.identitySource === 'manual' && (
             <button
               type="button"
               disabled={busy}
-              onClick={() => onPatch(r.userId, { automated: false })}
-              title="Stop treating this reviewer as automated in this Workspace — every repo in it. Its vendor name and price are kept, and your other Workspaces are unaffected."
+              onClick={() => onResetIdentity(r.userId)}
+              title={`Forget the vendor and label you set and let detection name this bot again in this Workspace.${showCost ? ' The monthly price is kept, and the' : ' The'} bot / not-a-bot verdict is unchanged.`}
               className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
             >
-              Not a bot in this Workspace
+              Reset name
             </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onPatch(r.userId, { automated: true })}
-            title="Treat this reviewer as automated again in this Workspace — every repo in it. Your other Workspaces are unaffected."
-            className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-          >
-            Treat as a review bot
-          </button>
-        )}
-        {/* THE WAY BACK for the judgement half, shown ONLY once a human has pinned it. Both buttons
-            above stamp `source: 'manual'`, which is what stops the next detection pass silently
-            reverting the edit — and also what makes it permanent without this. Pressing one of them
-            AGAIN undoes nothing: the row stays pinned, just on the new value. */}
-        {r.isManualOverride && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onResetJudgement(r.userId)}
-            title="Forget your bot / not-a-bot and review / quality-check judgement for this Workspace and let detection decide again. The vendor name and the price are untouched."
-            className="rounded border border-dashed border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
-          >
-            Reset classification
-          </button>
-        )}
-      </div>
-      {/* On screen rather than only on hover: the reset is the half of the model that is not
-          guessable from the buttons. */}
-      {r.isManualOverride && (
-        <p className="text-[11px] text-gray-500 dark:text-gray-400">
-          Set by you — detection will not change it in this Workspace until you reset. Resetting
-          keeps the bot&apos;s{' '}
-          <span className="font-medium text-gray-500 dark:text-gray-300">name and price</span>.
-        </p>
-      )}
-
-      {/* ── IDENTITY (provenance: identitySource) ── */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {/* ⚠ SCOPED TO THE ROLE ABOVE, and the whole ~70-brand list is deliberately NOT offered.
-            A user who has just said "this is a quality check" is looking for SonarQube, not
-            scrolling past CodeRabbit, Dependabot and a CLA bot to reach it — and an ungrouped
-            list is also how a quality gate ends up tagged with a review vendor's brand.
-
-            ⚠ `kind` IS PASSED AS `current` FOR A CORRECTNESS REASON, not a cosmetic one. A
-            `<select>` whose `value` is absent from its options renders the FIRST option instead,
-            so the card would display a vendor the row does not hold — and "Save name" would then
-            write that wrong vendor. Role and identity are independently owned halves, so a row
-            legitimately carries a vendor from another family (someone marks CodeRabbit a quality
-            check without renaming it), and the stored value has to stay selectable. */}
-        <select
-          className={`${FIELD_CLS} w-auto py-0.5`}
-          value={kind}
-          onChange={(e) => setKind(e.target.value as AutomatedReviewerKind)}
-          aria-label={`Vendor for ${r.login} in this Workspace`}
-        >
-          {vendorKindsForRole(role, kind).map((k) => (
-            <option key={k} value={k}>
-              {automatedReviewerMeta(k).label}
-              {/* Name the mismatch rather than hiding it — see `current` above. */}
-              {roleForVendorKind(k) != null && roleForVendorKind(k) !== role
-                ? ` (${REVIEWER_ROLE_LABEL[roleForVendorKind(k)!].toLowerCase()})`
-                : ''}
-            </option>
-          ))}
-        </select>
-        <input
-          className={`${FIELD_CLS} w-40 py-0.5`}
-          value={label}
-          placeholder="Label"
-          onChange={(e) => setLabel(e.target.value)}
-          aria-label={`Display label for ${r.login} in this Workspace`}
-        />
-        <button
-          type="button"
-          disabled={busy || !identityDirty}
-          onClick={() =>
-            // Identity ONLY. Sending `automated`/`role` here would stamp `source: 'manual'` and
-            // freeze the classification because someone corrected a vendor name — the exact
-            // coupling the two provenance flags exist to prevent.
-            onPatch(r.userId, { kind, label: label.trim() === '' ? null : label })
-          }
-          title="Name this bot for this Workspace. It does not change whether it counts as a bot, and it does not reach your other Workspaces."
-          className="rounded bg-sky-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:opacity-40"
-        >
-          Save name
-        </button>
-        {/* THE WAY BACK for the identity half, shown ONLY on a manually-named bot. On an auto
-            identity there is nothing to reset, and a control that does nothing reads as a broken
-            one. It is the only way back: re-typing the auto name by hand just re-stamps
-            "named by you". */}
+          )}
+        </div>
+        {/* Stated on screen, not only in a tooltip: "reset" reads as "delete everything", and the
+            one thing a user is afraid of losing here is the number they typed into the box below. */}
         {r.identitySource === 'manual' && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onResetIdentity(r.userId)}
-            title="Forget the vendor and label you set and let detection name this bot again in this Workspace. The monthly price is kept, and the bot / not-a-bot verdict is unchanged."
-            className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-          >
-            Reset name
-          </button>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+            Reset hands the vendor and label back to detection for this Workspace
+            {showCost && (
+              <>
+                {' '}—{' '}
+                <span className="font-medium text-gray-600 dark:text-gray-300">the price is kept</span>
+              </>
+            )}
+            . Bot or person does not change.
+          </p>
+        )}
+
+        {/* ── PRICE (no provenance; one writer) ── Paid (`botDepth`): with the capability off the
+            editor is simply absent — no badge, no nudge. */}
+        {showCost && (
+        <CostEditor
+          // Remount on a userId change so a half-typed number (or a flipped pricing mode) can never
+          // survive onto another bot.
+          key={r.userId}
+          login={r.login}
+          costMonthlyUsd={r.costMonthlyUsd}
+          costModel={r.costModel}
+          workspaceSeatCount={workspaceSeatCount}
+          busy={busy}
+          onApply={(v, m) => onCost(r.userId, v, m)}
+        />
         )}
       </div>
-      {/* Stated on screen, not only in a tooltip: "reset" reads as "delete everything", and the
-          one thing a user is afraid of losing here is the number they typed into the box below. */}
-      {r.identitySource === 'manual' && (
-        <p className="text-[11px] text-gray-500 dark:text-gray-400">
-          Reset hands the vendor and label back to detection for this Workspace —{' '}
-          <span className="font-medium text-gray-500 dark:text-gray-300">the price is kept</span>,
-          and the bot / not-a-bot verdict does not change.
-        </p>
-      )}
-
-      {/* ── PRICE (no provenance; one writer) ── Paid (`botDepth`, plan P0.3): with the
-          capability off the editor simply doesn't render — the single nudge lives on the
-          section footer, not on every card. */}
-      {showCost && (
-      <CostEditor
-        // Remount on a userId change so a half-typed number (or a flipped pricing mode) can never
-        // survive onto another bot.
-        key={r.userId}
-        login={r.login}
-        costMonthlyUsd={r.costMonthlyUsd}
-        costModel={r.costModel}
-        workspaceSeatCount={workspaceSeatCount}
-        busy={busy}
-        onApply={(v, m) => onCost(r.userId, v, m)}
-      />
-      )}
     </li>
+  );
+}
+
+// ── The logo ────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The card's logo: the account's own GitHub avatar (for a GitHub App bot that IS the vendor's
+ * logo), else — no avatar, an unsafe URL, or a load error — a monogram tile on the vendor colour.
+ *
+ * The URL goes through `safeExternalUrl` (a data-derived URL never reaches `src` raw); the SPA's CSP
+ * `img-src … https:` already admits avatars.githubusercontent.com in both modes. The monogram's
+ * text colour is picked by contrast against the tile (`monogramInk`), never the brand hex itself.
+ */
+function BotAvatar({
+  avatarUrl,
+  name,
+  color,
+  muted,
+}: {
+  avatarUrl: string | null;
+  name: string;
+  color: string;
+  muted: boolean;
+}): JSX.Element {
+  const src = safeExternalUrl(avatarUrl);
+  // Keyed on the URL so a refetch that brings a NEW avatar retries the image.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  if (src != null && failedSrc !== src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        width={36}
+        height={36}
+        loading="lazy"
+        onError={() => setFailedSrc(src)}
+        className={`h-9 w-9 shrink-0 rounded-md border border-gray-200 bg-white object-cover dark:border-gray-700 ${
+          muted ? 'grayscale' : ''
+        }`}
+      />
+    );
+  }
+  const bg = muted ? '#6b7280' : color;
+  return (
+    <span
+      aria-hidden="true"
+      className="flex h-9 w-9 shrink-0 select-none items-center justify-center rounded-md text-xs font-semibold"
+      style={{ backgroundColor: bg, color: monogramInk(bg) }}
+    >
+      {monogramFor(name)}
+    </span>
   );
 }
 
@@ -974,7 +1039,7 @@ function CostEditor({
 
   return (
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-      <span className="text-[11px] uppercase tracking-wide text-gray-400">
+      <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
         Price for this Workspace
       </span>
       <span className="text-[11px] text-gray-400">$</span>

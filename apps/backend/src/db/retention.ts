@@ -88,6 +88,11 @@ async function deletePrSubtree(
     .delete(schema.myTurnDismissals)
     .where(inArray(schema.myTurnDismissals.prId, prIds))
     .execute();
+  // Dependency auto-merge skips (migration 0093 / pg 0080) — composite FK cascades; explicit anyway.
+  await tx
+    .delete(schema.autoMergePolicySkips)
+    .where(inArray(schema.autoMergePolicySkips.prId, prIds))
+    .execute();
   // Claude review runs + findings FK these PRs — clear findings (via reviewId) then runs.
   const reviewIdRows = await tx
     .select({ id: claudeReviews.id })

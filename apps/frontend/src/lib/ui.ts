@@ -234,8 +234,7 @@ export const EVENT_META: Record<
 // ONE resolver, like `blastRadius` / `mergeVerdict` below: the Feed's `catMatch`, its pill badge
 // fallback, its dependent chip row and the empty-state sentence all ask this the same question,
 // so the count, the filter and the affordance can never cover different sets. `null` means the
-// kind is outside the bucket — a comment, a commit, or one of the synthesized Claude / CI kinds,
-// which belong to no category pill by deliberate design (see FeedView's catMatch).
+// kind is outside the bucket — a comment or a commit.
 //
 // The four chips are a PARTITION — every bucket kind has exactly one — which is what lets an
 // EMPTY selection mean "all four" rather than "none". Why `pr_reopened` and `pr_ready_for_review`

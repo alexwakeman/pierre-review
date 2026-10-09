@@ -11,14 +11,15 @@ import { indexUsers } from '../../lib/ui.js';
 import { RefreshIcon } from '../Icons.js';
 import { MetricRepoFilter } from './MetricRepoFilter.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
+import { DefaultBranchesSlot } from './DefaultBranchesSlot.js';
 import { AutoReviewUsageLine, OpenPrsCards, OpenPrsSortMenu, OpenPrsViewToggle } from './OpenPrsCards.js';
 import type { OpenPrsSort } from '../../lib/openPrsSort.js';
 
-// The fixed Open PRs tab — the FIRST of the three permanent views (Open PRs · Activity · Timeline)
-// and the app's default (a URL with no `view=`), so it
-// is always the WHOLE active workspace: one card per open PR (OpenPrsCards) over /api/open-prs. Every
-// opener (the tab chip, the Reports → Flow metrics "Open PRs" tile, the per-repo "Show all N open
-// PRs" footer) just reveals it; the footer also pre-selects its repo in the tab's own dropdown.
+// Activity → Open PRs — the FIRST rail line and the app's default (a URL with no `view=`), so it
+// is always the WHOLE active workspace: one card per open PR (OpenPrsCards) over /api/open-prs,
+// headed by the default-branch strip. Every opener (the rail line, the Reports → Flow metrics
+// "Open PRs" tile, the per-repo "Show all N open PRs" footer, a workspace switch) just reveals it;
+// the footer also pre-selects its repo in the pane's own dropdown.
 // Clicking a card opens the PR's detail tab. The order is the header's Sort menu (no column headings).
 // With a tracker configured for the workspace (core, free) the header adds "Group by ticket / List" — grouped is the
 // default, remembered per viewer (store/openPrsView.ts); without it the toggle is absent and the
@@ -92,7 +93,7 @@ export function OpenPrsDetail(): JSX.Element {
         : `${repoSel.length} repos`;
   const draftCount = rows.reduce((n, p) => n + (p.isDraft ? 1 : 0), 0);
 
-  // This tab is where the app OPENS, so it owns the two empty-workspace states Activity used to:
+  // This pane is where the app OPENS, so it owns the two empty-workspace states Activity used to:
   // an account with no repos at all gets first-run onboarding, and a workspace with none of them
   // gets the "move some in" guidance — never a bare "No open PRs here.".
   const { data: workspaces } = useWorkspaces();
@@ -102,7 +103,9 @@ export function OpenPrsDetail(): JSX.Element {
   if (noReposAtAll) return <FirstRunOnboarding />;
 
   return (
-    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
+    <div data-testid="open-prs-view" className="mx-auto max-w-[100rem] space-y-4">
+      {/* The workspace's default branches, above the cards — informational, never a count. */}
+      {!emptyWorkspace && <DefaultBranchesSlot />}
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Open PRs</h2>
         <span className="text-[11px] text-gray-400">

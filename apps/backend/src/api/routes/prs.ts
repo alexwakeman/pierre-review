@@ -42,10 +42,8 @@ import { stampPrMergeQueueStateNonFatal } from '../../db/pr-merge-queue-stamp.js
 import { getAccessToken, getAccountUserId } from '../../auth/account.js';
 import { fetchActionsJobLog } from '../../github/actions-logs.js';
 import {
-  armAutoMerge,
   disarmAutoMerge,
   getAutoMergeRequest,
-  getSyncedBaseRef,
   listAutoMergeRequests,
   getMentionCandidates,
   getPrDetail,
@@ -72,6 +70,8 @@ import { resolveArmedQueues, withArmedQueueFields } from '../../db/merge-queue.j
 // import is not a layering smell: every one of them is a LIVE observation of GitHub made inside
 // the tick, so the runner is the only thing that can own them, and the route only reports them.
 import { armedQueueMarks } from '../../merge/auto-merge-runner.js';
+import { armIntentLive } from '../../merge/arm-intent.js';
+import { recordPolicySkip } from '../../merge/dependency-policy.js';
 import { enrichReviewerSuggestions } from '../../github/reviewer-suggest.js';
 import {
   buildFileAnchors,
@@ -129,11 +129,6 @@ import { accountIdOf } from '../plugins/auth.js';
 function diffAnchorId(path: string): string {
   return createHash('sha256').update(path, 'utf8').digest('hex');
 }
-
-// How long an armed auto-merge intent stays live before the watcher expires it. A hard stop
-// so an intent can't linger for weeks against a PR the user has long forgotten — 72h covers
-// "arm it on Friday, it lands when Monday's CI goes green".
-const AUTO_MERGE_TTL_MS = 72 * 60 * 60 * 1000;
 
 const PR_FILE_STATUSES: readonly PrFileDiffStatus[] = [
   'added',
@@ -1118,58 +1113,24 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
 
     try {
       const token = await getAccessToken(accountId);
-      // The LIVE head, never the possibly-stale synced one: arming against a SHA that is
-      // already superseded would disarm itself on the very first tick.
-      const info = await fetchPrHeadInfo(token, ctx.owner, ctx.name, ctx.number);
-      // The head pin is blind to a RETARGET (PATCH pulls/{n} with a new `base` leaves head.sha
-      // untouched), so the watcher guards the target branch too — against the last SYNCED base
-      // ref, which is the branch the SPA was showing the user. That is only a valid consent
-      // record if it agrees with GitHub right now; if the PR was retargeted since the last
-      // sync, say so instead of arming an intent the watcher would immediately disarm.
-      const syncedBaseRef = await getSyncedBaseRef(accountId, id);
-      if (syncedBaseRef !== info.baseRef) {
-        reply.status(409);
-        return {
-          error: 'StaleBase',
-          message: `This PR now targets ${info.baseRef}; Limn last saw ${syncedBaseRef ?? 'no base branch'}. Sync the repository, then arm auto-merge again.`,
-        };
-      }
-      // Does the base branch have a merge queue? Stamped on the intent so the watcher
-      // enqueues instead of direct-merging (which GitHub refuses on a queue-protected
-      // branch). Best-effort like merge-options' read: an older GHES or a token that can't
-      // run the query arms a direct-merge intent, exactly what those repos need.
-      const queue = await fetchMergeQueueState(token, ctx.owner, ctx.name, ctx.number).catch(
-        () => null,
-      );
-      // An answer is an answer, whichever way this route then goes — and the AlreadyQueued 409
-      // below is the case that matters: the reader pressed "Merge when ready" because their
-      // screen did not know the PR was queued, and the row is what every screen reads.
-      // NON-FATAL: a failed local copy of GitHub's answer must not refuse the arm.
-      if (queue) {
-        await stampPrMergeQueueStateNonFatal(id, accountId, queue.inQueue, queue.state, req.log);
-      }
-      if (queue?.inQueue) {
-        // Already in the queue ⇒ landing is already arranged; an armed intent could only
-        // duplicate or contradict it.
-        reply.status(409);
-        return {
-          error: 'AlreadyQueued',
-          message: 'This PR is already in the merge queue — it will land on its own.',
-        };
-      }
-      const armed = await armAutoMerge(accountId, id, {
+      // THE ONE ARM PATH (merge/arm-intent.ts): the LIVE head pinned, the base checked against the
+      // synced one and pinned as GitHub's answer, a queued PR refused, the queue probe stamped.
+      const out = await armIntentLive({
+        accountId,
+        prId: id,
+        owner: ctx.owner,
+        name: ctx.name,
+        number: ctx.number,
+        token,
         mergeMethod,
         updateStrategy: updateStrategy ?? 'none',
-        viaMergeQueue: queue?.enabled === true,
-        expectedHeadOid: info.headSha,
-        // ⚠ THE LIVE REF, PINNED — not `syncedBaseRef`, even though the guard above has just
-        // proven the two equal. They are equal AT THIS INSTANT; the synced column belongs to the
-        // sync and may be rewritten at any moment, and the watcher used to re-read it every tick
-        // and disarm on any disagreement. Recording GitHub's own answer here makes the consent a
-        // fact about the click rather than a lookup that can change underneath it.
-        expectedBaseRef: info.baseRef,
-        expiresAt: new Date(Date.now() + AUTO_MERGE_TTL_MS),
+        log: req.log,
       });
+      if (!out.ok) {
+        reply.status(409);
+        return { error: out.code, message: out.message };
+      }
+      const armed = out.armed;
       // The full row, identity and `phase: 'pending_first_check'` included — the SPA seeds its
       // progress card from this response, so the surface appears on the click rather than on
       // the next poll (and, before it, the watcher's next tick, up to two minutes away).
@@ -1201,6 +1162,9 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     }
     const intent = await getAutoMergeRequest(accountId, id);
     await disarmAutoMerge(accountId, id);
+    // A PERSON CANCELLED: the dependency auto-merge setting must never re-arm this PR
+    // (merge/dependency-policy.ts). Recorded for any cancelled intent — a cancel is a "no".
+    if (intent) await recordPolicySkip(accountId, id);
     if (intent?.state === 'armed' && intent.enqueuedAt != null) {
       let dequeued = false;
       try {

@@ -12,8 +12,7 @@ import { usePinnedTabs, type Tab } from '../store/pinnedTabs.js';
 import { useFilters } from '../store/filters.js';
 import { usePeriodReportsList } from '../hooks/usePeriodReports.js';
 import { useRepos } from '../hooks/useTimeline.js';
-import { useProCapabilities, useWorkspaceOpenPrs } from '../hooks/useTriage.js';
-import { openPrsTabCount, openPrsTabLabel } from '../lib/openPrsTab.js';
+import { useProCapabilities } from '../hooks/useTriage.js';
 import { botNarrowLabel, selectorLabel } from '../lib/severityAgreement.js';
 import { periodTitle } from './Activity/periodReportMarkdown.js';
 import {
@@ -23,7 +22,6 @@ import {
   MagnifierIcon,
   PeopleIcon,
   PersonIcon,
-  PullRequestIcon,
   ResolveIcon,
   ThreadsIcon,
 } from './Icons.js';
@@ -162,7 +160,7 @@ function TabChip({
   onOpenMenu: (e: React.MouseEvent, tabKey: string | null) => void;
 }): JSX.Element {
   const active = usePinnedTabs((s) => s.activeTab === tab.key);
-  // Repo-scoped drill-down chips (bot-only-prs / bot-threads / open-prs) show the repo name so a
+  // Repo-scoped drill-down chips (bot-only-prs / bot-threads) show the repo name so a
   // per-repo tab is easy to track. These hooks run UNCONDITIONALLY (before the kind branches) to
   // satisfy the Rules of Hooks — TabChip renders for every tab; only the branches below use them.
   const botOnlyRepoId = useFilters((s) => s.botOnlyFocusRepoId);
@@ -671,12 +669,6 @@ export function PinnedTabsBar(): JSX.Element {
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
   const showTimeline = usePinnedTabs((s) => s.showTimeline);
-  const openOpenPrsDetail = useFilters((s) => s.openOpenPrsDetail);
-  // The Open PRs chip's count: the workspace-wide open-PRs key, shared with the tab body, the
-  // Timeline board (picker unset) and FeedIsolationBanner — an extra observer, not a new request.
-  // Disabled while `workspaceId` is null, and blank (never 0) until it answers.
-  const openPrs = useWorkspaceOpenPrs();
-  const openPrsCount = openPrsTabCount(openPrs.data, openPrs.isPlaceholderData);
   const moveTab = usePinnedTabs((s) => s.moveTab);
 
   const stripRef = useRef<HTMLDivElement>(null);
@@ -984,17 +976,8 @@ export function PinnedTabsBar(): JSX.Element {
       // height with vertically-centred content — no ragged tops or misaligned text.
       className="tab-scrollbar flex min-h-[42px] shrink-0 items-stretch gap-1 overflow-x-auto bg-gray-100 px-2 pt-1 dark:bg-gray-900"
     >
-      {/* Open PRs FIRST: it is the app's default view (a URL with no `view=`). */}
-      <FixedChip
-        active={activeTab === 'open-prs'}
-        // Clicking the chip shows every repo: it clears a repo the "Show all N open PRs" footer
-        // pre-selected (store/filters.ts openPrsRepoFilter).
-        onClick={() => openOpenPrsDetail()}
-        onContextMenu={(e) => openMenu(e, null)}
-        icon={<PullRequestIcon />}
-        label={openPrsTabLabel(openPrsCount)}
-        title="Open PRs — every open pull request in this Workspace"
-      />
+      {/* Activity FIRST: it is the app's default view (a URL with no `view=`), opening on its
+          Open PRs rail line. */}
       <FixedChip
         active={activeTab === 'activity'}
         onClick={() => setActiveTab('activity')}

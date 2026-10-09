@@ -129,7 +129,7 @@ beforeEach(() => {
   // A clean filter bar as well as a clean history — these tests assert on the whole query string,
   // and vitest shares one module-level store across a file.
   useFilters.getState().resetAllFilters();
-  // The starting board is the FEED, named in the entry: a bare URL means Pending now, so seating
+  // The starting board is the FEED, named in the entry: a bare URL means Open PRs now, so seating
   // the Feed under a bare entry would make the first refinement disagree with its own URL.
   entries = ['/app/?workspace=5&view=activity&activityRepo=feed'];
   cursor = 0;
@@ -158,8 +158,8 @@ describe('the verb: navigations push, refinements replace', () => {
   it('a rail switch PUSHES', () => {
     gesture(() => useFilters.getState().setActivityRepo('attention'));
     expect(entries).toHaveLength(2);
-    // Pending is the default, so its URL names no console.
-    expect(location.search).not.toContain('activityRepo=');
+    // Pending names itself (Open PRs is the default the URL omits).
+    expect(location.search).toContain('activityRepo=attention');
   });
 
   it('a Feed link survives: the Feed is emitted and parsed', () => {
@@ -209,7 +209,7 @@ describe('the verb: navigations push, refinements replace', () => {
     markUrlCorrection();
     gesture(() => useFilters.getState().setActivityRepo('attention'));
     expect(entries).toHaveLength(1);
-    expect(location.search).not.toContain('activityRepo=');
+    expect(location.search).toContain('activityRepo=attention');
     // …and it is a ONE-SHOT: the next real navigation pushes again.
     gesture(() => useFilters.getState().setActivityRepo('bots'));
     expect(entries).toHaveLength(2);
@@ -286,7 +286,7 @@ describe('Back from Needs attention (the reported bug)', () => {
       useFilters.getState().setActivityRepo('attention');
       useFilters.getState().setAttentionIsolation('stalled_review');
     });
-    expect(location.search).not.toContain('activityRepo=');
+    expect(location.search).toContain('activityRepo=attention');
     expect(location.search).toContain('attn=stalled_review');
     // ONE entry for one gesture, even though it was two setters.
     expect(entries).toHaveLength(2);
@@ -651,7 +651,7 @@ describe('a pop onto a URL that omits a key', () => {
     expect(useFilters.getState().searchSeed).not.toBeNull();
   });
 
-  it('a popped URL naming no console lands on Pending, the default', () => {
+  it('a popped URL naming no console lands on Open PRs, the default', () => {
     entries = [
       '/app/?workspace=5&view=activity',
       '/app/?workspace=5&view=activity&activityRepo=bots',
@@ -660,15 +660,24 @@ describe('a pop onto a URL that omits a key', () => {
     seat(entries[1] as string);
     useFilters.setState({ activityRepoId: 'bots' });
     back();
-    expect(useFilters.getState().activityRepoId).toBe('attention');
+    expect(useFilters.getState().activityRepoId).toBe('open-prs');
   });
 
   // A legacy console (`compare`) or plain garbage falls through the parseInt branch and names
   // nothing, so the pop's reset leaves the default standing.
-  it('an unknown console lands on Pending', () => {
-    seat('/app/?workspace=5&view=activity&activityRepo=compare');
+  // ⚠ BACK-COMPAT: a Pending link minted while Pending was the default named no console, only its
+  // narrowing. It still lands on Pending.
+  it('a legacy Pending link (attn* keys, no console) lands on Pending', () => {
+    seat('/app/?workspace=5&view=activity&attnTab=review');
     applyUrlToStores({ fromPop: true });
     expect(useFilters.getState().activityRepoId).toBe('attention');
+    expect(useFilters.getState().attentionTab).toBe('review');
+  });
+
+  it('an unknown console lands on Open PRs', () => {
+    seat('/app/?workspace=5&view=activity&activityRepo=compare');
+    applyUrlToStores({ fromPop: true });
+    expect(useFilters.getState().activityRepoId).toBe('open-prs');
   });
 
   // ⚠ `workspaceId: null` does not mean "no workspace", it means "not resolved yet" — it blanks
@@ -746,9 +755,9 @@ describe('tabs are views: opening one is a navigation', () => {
     expect(useFilters.getState().activityRepoId).toBe('bots');
 
     // Forward onto the drill-down's own entry: it must land somewhere coherent, never crash or
-    // strand the reader on an empty tab — the default view, Open PRs (no `view=`).
+    // strand the reader on an empty tab — the default view, Activity (no `view=`).
     forward();
-    expect(usePinnedTabs.getState().activeTab).toBe('open-prs');
+    expect(usePinnedTabs.getState().activeTab).toBe('activity');
   });
 
   // ⚠ A POP MUST RECONCILE THE ADDRESS BAR, exactly as the cold load does. A seed-backed
@@ -768,9 +777,9 @@ describe('tabs are views: opening one is a navigation', () => {
     usePinnedTabs.setState({ activeTab: prDetailKey(4123) });
 
     back();
-    // No `view` = the default view, Open PRs (since 2026-10-07).
-    expect(usePinnedTabs.getState().activeTab).toBe('open-prs');
-    expect(location.search).toContain('view=open-prs');
+    // No `view` = the default view, Activity (on its Open PRs rail line).
+    expect(usePinnedTabs.getState().activeTab).toBe('activity');
+    expect(location.search).toContain('view=activity');
     // A REPLACE, so the forward entry is still there.
     expect(entries).toHaveLength(3);
     expect(cursor).toBe(1);
@@ -797,8 +806,8 @@ describe('tabs are views: opening one is a navigation', () => {
 describe('the Activity sub-tab strips', () => {
   it('switching the Bots sub-tab pushes and round-trips', () => {
     gesture(() => useFilters.getState().setActivityRepo('bots'));
-    gesture(() => useFilters.getState().setBotsInnerTab('settings'));
-    expect(location.search).toContain('botsTab=settings');
+    gesture(() => useFilters.getState().setBotsInnerTab('benchmark'));
+    expect(location.search).toContain('botsTab=benchmark');
     expect(entries).toHaveLength(3);
 
     back();
@@ -811,6 +820,37 @@ describe('the Activity sub-tab strips', () => {
     seat('/app/?workspace=5&view=activity&feedTab=themes');
     applyUrlToStores({ fromPop: true });
     expect(useFilters.getState().feedInnerTab).toBe('themes');
+  });
+
+  // Bot classification is a FEED sub-tab, free on every tier: it pushes, is emitted only beside
+  // the Feed rail entry, and round-trips.
+  it('switching to Feed → Bot classification pushes and round-trips', () => {
+    gesture(() => useFilters.getState().setActivityRepo('feed'));
+    const before = entries.length;
+    gesture(() => useFilters.getState().setFeedInnerTab('classification'));
+    expect(location.search).toContain('feedTab=classification');
+    expect(entries).toHaveLength(before + 1);
+
+    back();
+    expect(useFilters.getState().feedInnerTab).toBe('feed');
+    expect(location.search).not.toContain('feedTab');
+  });
+
+  // ⚠ LEGACY: the classification screen used to be Bots Monitoring → Settings. An old bookmark (or
+  // a history entry Back replays) must land on its new home, not on a Pro lock.
+  it('maps a legacy ?botsTab=settings link to Feed → Bot classification', () => {
+    seat('/app/?workspace=5&view=activity&activityRepo=bots&botsTab=settings');
+    applyUrlToStores({ fromPop: true });
+    expect(useFilters.getState().activityRepoId).toBe('feed');
+    expect(useFilters.getState().feedInnerTab).toBe('classification');
+    expect(useFilters.getState().botsInnerTab).toBe('roi');
+  });
+
+  it('seats ?feedTab=classification as the raw Feed sub-tab', () => {
+    seat('/app/?workspace=5&view=activity&activityRepo=feed&feedTab=classification');
+    applyUrlToStores({ fromPop: true });
+    expect(useFilters.getState().activityRepoId).toBe('feed');
+    expect(useFilters.getState().feedInnerTab).toBe('classification');
   });
 
   // ⚠ THE BOTS TWIN, AND `themes` IS THE MEMBER THAT NEEDS IT MOST. It is listed only when

@@ -1064,3 +1064,261 @@ export function TicketIcon({ size = 14, ...rest }: IconProps): JSX.Element {
     </IconShell>
   );
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   Pending card types — one purpose-built mark per card type, leading each card's heading and
+   each tab / kind chip (`Activity/PendingKindIcon.tsx` maps a card to its mark). Decorative
+   everywhere: the words beside them say the same thing. Two cards may share a mark only when
+   they ARE one type shown in two places (your red build in My turn and in Needs fixing).
+   ───────────────────────────────────────────────────────────────────────────────────────── */
+
+// The ball — "My turn": the ball is in your court.
+export function PendingBallIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M5.2 6.8c3.6 1.6 4.9 5.8 3 10.4" />
+      <path d="M18.8 17.2c-3.6-1.6-4.9-5.8-3-10.4" />
+    </IconShell>
+  );
+}
+
+// An eye with a plus — somebody asked you for a review.
+export function PendingReviewRequestIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M2.5 14s3.3-5.5 8.5-5.5 8.5 5.5 8.5 5.5-3.3 5.5-8.5 5.5S2.5 14 2.5 14Z" />
+      <circle cx="11" cy="14" r="2.3" />
+      <path d="M19 2.5v5M16.5 5h5" />
+    </IconShell>
+  );
+}
+
+// An at-sign — you were @-mentioned.
+export function PendingMentionIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <circle cx="12" cy="12" r="3.6" />
+      <path d="M15.6 8.4v4.8a2.7 2.7 0 0 0 5.4 0V12a9 9 0 1 0-3.6 7.2" />
+    </IconShell>
+  );
+}
+
+// A speech bubble with an ellipsis — a thread waiting on your reply.
+export function PendingReplyOwedIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M20.5 11.5a8 8 0 0 1-11.7 7.1L3.5 20l1.4-4.9A8 8 0 1 1 20.5 11.5Z" />
+      <path d="M8.5 11.5h.01M12.5 11.5h.01M16.5 11.5h.01" strokeWidth={2.6} />
+    </IconShell>
+  );
+}
+
+// A speech bubble with a reply arrow — somebody replied to you in a thread.
+export function PendingThreadReplyIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M20.5 11.5a8 8 0 0 1-11.7 7.1L3.5 20l1.4-4.9A8 8 0 1 1 20.5 11.5Z" />
+      <path d="M11 8.5 8 11.5l3 3" />
+      <path d="M8 11.5h5a2.5 2.5 0 0 1 2.5 2.5v.5" />
+    </IconShell>
+  );
+}
+
+// Two overlapping bubbles — a PR comment written after yours.
+export function PendingCommentAfterIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M14.5 9.5h4a2 2 0 0 1 2 2v8l-3-2.5h-6a2 2 0 0 1-2-2v-1" />
+      <path d="M3.5 5.5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-6l-3 2.5Z" />
+    </IconShell>
+  );
+}
+
+// A commit with an arrow up out of it — new commits pushed since you looked.
+export function PendingPushedIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <circle cx="12" cy="15.5" r="3" />
+      <path d="M12 18.5v3" />
+      <path d="M12 12.5V3M8.5 6.5 12 3l3.5 3.5" />
+    </IconShell>
+  );
+}
+
+// A check run crossed out — a failing build on a pull request.
+export function PendingBuildFailedIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+      <path d="m9 9 6 6M15 9l-6 6" />
+    </IconShell>
+  );
+}
+
+// A default branch line with a cross beside it — the default branch's build is red.
+export function PendingTrunkRedIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M6 3v18" />
+      <circle cx="6" cy="12" r="2.6" />
+      <path d="m13.5 8.5 7 7M20.5 8.5l-7 7" />
+    </IconShell>
+  );
+}
+
+// Two paths crossing — a merge conflict.
+export function PendingConflictsIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M3 6.5h5l8 11h5" />
+      <path d="M3 17.5h5l8-11h5" />
+      <path d="M18.5 4 21 6.5 18.5 9M18.5 15l2.5 2.5-2.5 2.5" />
+    </IconShell>
+  );
+}
+
+// A rosette — your pull request was approved.
+export function PendingApprovedIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <circle cx="12" cy="9.5" r="6" />
+      <path d="m9.5 9.5 1.8 1.8 3.2-3.6" />
+      <path d="M8.6 14.5 7 21l5-2.6 5 2.6-1.6-6.5" />
+    </IconShell>
+  );
+}
+
+// Two lines meeting and landing — ready to merge.
+export function PendingLandIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M6.5 3v4a5.5 5.5 0 0 0 11 0V3" />
+      <path d="M12 12.5V21" />
+      <path d="m8.5 17.5 3.5 3.5 3.5-3.5" />
+    </IconShell>
+  );
+}
+
+// A branch pulling in its base — behind the base branch, needs an update.
+export function PendingBehindIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M5.5 3v18" />
+      <path d="M18.5 3v6.5a4.5 4.5 0 0 1-4.5 4.5H9" />
+      <path d="M12 11 9 14l3 3" />
+    </IconShell>
+  );
+}
+
+// A bell — new activity on your pull request.
+export function PendingActivityIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M18 9a6 6 0 0 0-12 0c0 6.5-2.5 8.5-2.5 8.5h17S18 15.5 18 9Z" />
+      <path d="M13.7 20.5a2 2 0 0 1-3.4 0" />
+    </IconShell>
+  );
+}
+
+// A speech bubble with clock hands — a review thread nobody has answered.
+export function PendingUnansweredIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M20.5 11.5a8 8 0 0 1-11.7 7.1L3.5 20l1.4-4.9A8 8 0 1 1 20.5 11.5Z" />
+      <path d="M12.5 7.5v4l2.5 1.5" />
+    </IconShell>
+  );
+}
+
+// A magnifier with a spark inside — a finished Claude review.
+export function PendingClaudeReviewIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <circle cx="10.5" cy="10.5" r="7" />
+      <path d="m15.6 15.6 5.4 5.4" />
+      <path d="M10.5 6.8 11.4 9.6l2.8.9-2.8.9-.9 2.8-.9-2.8-2.8-.9 2.8-.9Z" />
+    </IconShell>
+  );
+}
+
+// A pull request with a plus — a new pull request in a repo you follow.
+export function PendingNewPrIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <circle cx="6" cy="6" r="2.4" />
+      <circle cx="6" cy="18" r="2.4" />
+      <path d="M6 8.4v7.2" />
+      <circle cx="17" cy="18" r="2.4" />
+      <path d="M17 15.6V11" />
+      <path d="M17 2.5v5.5M14.25 5.25h5.5" />
+    </IconShell>
+  );
+}
+
+// An hourglass — a review that has been waiting too long.
+export function PendingStalledIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M6 3h12M6 21h12" />
+      <path d="M7.5 3c0 5 9 5 9 9s-9 4-9 9" />
+      <path d="M16.5 3c0 5-9 5-9 9s9 4 9 9" />
+    </IconShell>
+  );
+}
+
+// A person with a question mark — a pull request nobody has been asked to review.
+export function PendingNeedsReviewerIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <circle cx="9" cy="8" r="3.6" />
+      <path d="M2.5 20.5v-.5a6.5 6.5 0 0 1 10-5.5" />
+      <path d="M16 14.2a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4" />
+      <path d="M18.5 21h.01" strokeWidth={2.6} />
+    </IconShell>
+  );
+}
+
+// A person beside a stack — how many reviews someone has waiting.
+export function PendingReviewLoadIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <circle cx="8.5" cy="8" r="3.6" />
+      <path d="M2.5 20.5v-.5a6 6 0 0 1 12 0v.5" />
+      <path d="M17 6.5h4.5M17 10.5h4.5M18.5 14.5h3" />
+    </IconShell>
+  );
+}
+
+// A shield with an exclamation mark — a security alert on a pull request.
+export function PendingSecurityAlertIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M12 3.2 19 5.8v5.6c0 4.4-3 7.9-7 9.4-4-1.5-7-5-7-9.4V5.8Z" />
+      <path d="M12 8.5v4" />
+      <path d="M12 15.8h.01" strokeWidth={2.6} />
+    </IconShell>
+  );
+}
+
+// A shield with a tick — a pull request that fixes a known advisory.
+export function PendingSecurityFixIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M12 3.2 19 5.8v5.6c0 4.4-3 7.9-7 9.4-4-1.5-7-5-7-9.4V5.8Z" />
+      <path d="m9 12 2.2 2.2 4-4.2" />
+    </IconShell>
+  );
+}
+
+// A package with an arrow up — a dependency update.
+export function PendingDependencyIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M20.5 8 12 3.5 3.5 8v8l8.5 4.5" />
+      <path d="M3.5 8 12 12.5 20.5 8" />
+      <path d="M12 12.5v8" />
+      <path d="M18 21v-6.5M15.5 17l2.5-2.5 2.5 2.5" />
+    </IconShell>
+  );
+}

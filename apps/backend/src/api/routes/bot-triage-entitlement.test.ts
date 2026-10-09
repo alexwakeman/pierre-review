@@ -8,8 +8,8 @@
 //
 // It pins BOTH directions on purpose, and the SECOND direction is the one that catches the more
 // likely mistake. Over-gating is as much a defect as under-gating here: three surfaces on the Bots
-// rail are deliberately free (the bot-only governance caution, the tuning-suggestions box, the
-// whole classification screen), and each of them reads a route that a "finish the job" pass would
+// rail were deliberately free (the classification screen — now Feed → Bot classification — still
+// is), and each of them reads a route that a "finish the job" pass would
 // find sitting suspiciously ungated beside its 402'ing siblings.
 //
 // ── THE HARNESS NEEDS TWO THINGS, AND THE SECOND IS THE ONE PEOPLE MISS ─────────────────────────
@@ -79,11 +79,15 @@ const BOT_DEPTH_ONLY_ROUTES: readonly string[] = [
   '/api/bot-analytics/volume/scatter?window=rolling_14',
   '/api/bot-analytics/flagging?select=findings',
   '/api/bot-analytics/vendor/u999/prs?window=rolling_14',
+  // Since Bots Monitoring went Pro as a whole: the bot-only list and the resolvable backlog.
+  '/api/bot-analytics/bot-only-prs?window=rolling_14',
+  '/api/bot-threads/resolvable',
 ];
 
 /** The routes the ROI panel SHARES with the People report's bot sections, and which therefore take
- *  the UNION. `/api/bot-analytics` is deliberately absent: it narrows rather than refusing. */
+ *  the UNION. */
 const UNION_ROUTES: readonly string[] = [
+  '/api/bot-analytics?window=rolling_14',
   '/api/bot-analytics/vendor/u999/comments?window=rolling_14',
   `/api/bot-authoring?userId=999&fromMs=${FROM}&toMs=${TO}`,
 ];
@@ -91,13 +95,8 @@ const UNION_ROUTES: readonly string[] = [
 /** Routes that MUST stay 200 on a completely unentitled account. Each one is the data behind a
  *  surface that is free by decision, not by omission. */
 const FREE_ROUTES: readonly string[] = [
-  // The identity/colour backbone for the whole SPA, and the free classification screen.
+  // The identity/colour backbone for the whole SPA — Feed and Timeline bot hiding read it.
   '/api/bot-reviewers',
-  // The list behind the free amber "only a bot reviewed these" caution — its caption and its list
-  // must agree, and the caption lives outside the paid panel.
-  '/api/bot-analytics/bot-only-prs?window=rolling_14',
-  // Narrows rather than refuses: the same response feeds two free surfaces in BotsView.
-  '/api/bot-analytics?window=rolling_14',
 ];
 
 beforeAll(async () => {
@@ -293,25 +292,15 @@ describe('The free surfaces stay free — this half catches OVER-gating', () => 
     }
   });
 
-  it('keeps the free governance half of /api/bot-analytics and withholds the ROI half', async () => {
+  it('402s the scope-wide bot-thread RESOLVE without botDepth', async () => {
     setProCapabilities(EMPTY);
-    const { status, body } = await get('/api/bot-analytics?window=rolling_14');
-    expect(status).toBe(200);
-    // ⚠ THE FREE HALF. `totals.botOnlyPrs` is the amber "only a bot reviewed N open PRs" caution
-    // that lives in BotsView OUTSIDE the panel, and `suggestions` is the hoisted tuning box. A
-    // blanket 402 here would delete both with NO error anywhere (the client reads `?? 0` / `?? []`)
-    // — which is exactly why this route narrows instead of refusing.
-    expect(typeof body.totals.botOnlyPrs).toBe('number');
-    expect(typeof body.totals.overdueGraceMs).toBe('number');
-    expect(Array.isArray(body.suggestions)).toBe(true);
-    // ⚠ THE PAID HALF, WITHHELD. `vendors` is REQUIRED on the wire so it comes back empty rather
-    // than absent; `ml`/`qualityChecks` are optional, so they take the honest absence.
-    expect(body.vendors).toEqual([]);
-    expect(body.ml).toBeUndefined();
-    expect(body.qualityChecks).toBeUndefined();
-    // The ROI half of `totals` is zeroed, and `actedOnPct` takes the honest null rather than 0%.
-    expect(body.totals.threads).toBe(0);
-    expect(body.totals.actedOnPct).toBeNull();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/bot-threads/resolve',
+      payload: { threadIds: [1], workspaceId: 1 },
+    });
+    expect(res.statusCode).toBe(402);
+    expect(res.json()).toEqual({ error: 'pro required' });
   });
 
   it('strips the seat PRICE from the reviewer listing without botDepth', async () => {
@@ -329,7 +318,85 @@ describe('The free surfaces stay free — this half catches OVER-gating', () => 
     expect(body).toHaveProperty('workspaceSeatCount');
   });
 
-  it('still answers the reviewer listing and the bot-only list with botDepth on', async () => {
+  // ⚠ BOT CLASSIFICATION IS FREE (Feed → Bot classification): every classification WRITE answers
+  // an unentitled account — only the PRICE write 402s, and every echoed row has its price stripped.
+  it('answers every classification write with no capabilities, price stripped', async () => {
+    const client = (await import('../../db/client.js')) as any;
+    const { db, schema } = client;
+    await db
+      .insert(schema.accounts)
+      .values({ id: 1, githubUserId: 'U_local', githubLogin: 'me', isLocal: true })
+      .onConflictDoNothing()
+      .execute();
+    const [ws] = await db
+      .insert(schema.workspaces)
+      .values({ accountId: 1, name: 'Classify', isDefault: false })
+      .returning({ id: schema.workspaces.id })
+      .execute();
+    const [u] = await db
+      .insert(schema.users)
+      .values({ githubLogin: 'classify-bot[bot]', isBot: true })
+      .returning({ id: schema.users.id })
+      .execute();
+    await db
+      .insert(schema.workspaceReviewers)
+      .values({
+        accountId: 1,
+        workspaceId: ws.id,
+        authorUserId: u.id,
+        automated: true,
+        role: 'review',
+        confidence: 'high',
+        source: 'vendor_login',
+        monthlyCents: 1500,
+      })
+      .execute();
+
+    setProCapabilities(EMPTY);
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: `/api/bot-reviewers/${u.id}`,
+      payload: { workspaceId: ws.id, role: 'quality_check', automated: true },
+    });
+    expect(patch.statusCode).toBe(200);
+    expect(patch.json().role).toBe('quality_check');
+    expect(patch.json().costMonthlyUsd).toBeNull();
+
+    const named = await app.inject({
+      method: 'PATCH',
+      url: `/api/bot-reviewers/${u.id}`,
+      payload: { workspaceId: ws.id, kind: 'in_house', label: 'Our bot' },
+    });
+    expect(named.statusCode).toBe(200);
+
+    for (const part of ['judgement', 'identity']) {
+      const res = await app.inject({
+        method: 'DELETE',
+        url: `/api/bot-reviewers/${u.id}/${part}?workspaceId=${ws.id}`,
+      });
+      expect(res.statusCode, part).toBe(200);
+      expect(res.json().costMonthlyUsd, part).toBeNull();
+    }
+
+    // The price write stays Pro.
+    const cost = await app.inject({
+      method: 'PUT',
+      url: `/api/bot-reviewers/${u.id}/cost`,
+      payload: { workspaceId: ws.id, monthlyUsd: 20 },
+    });
+    expect(cost.statusCode).toBe(402);
+
+    // …and the price the unentitled writes could not see is still stored, untouched.
+    const { eq } = await import('drizzle-orm');
+    const [row] = await db
+      .select({ monthlyCents: schema.workspaceReviewers.monthlyCents })
+      .from(schema.workspaceReviewers)
+      .where(eq(schema.workspaceReviewers.authorUserId, u.id))
+      .execute();
+    expect(row.monthlyCents).toBe(1500);
+  });
+
+  it('still answers the reviewer listing with botDepth on', async () => {
     // The free routes must not have been made CONDITIONALLY free — entitled is still 200.
     setProCapabilities(FULL);
     for (const url of FREE_ROUTES) {

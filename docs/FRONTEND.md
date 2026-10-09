@@ -17,7 +17,7 @@ Three layers, deliberately separated:
 2. **Filter & selection state** → the Zustand store `store/filters.ts` (`useFilters`):
    **`workspaceId: number | null`** (the scope), repos/members/range, category + derived-state
    filters, the selected PR/thread, transient timeline hints (`timelineFocusPr/At/Event`,
-   `timelineCenterAt`), and the `feedMyTurnOnly` feed filter. (The old overlay-focus signals
+   `timelineCenterAt`), and the transient Feed toggles (`feedAuthors`, the category pills). (The old overlay-focus signals
    `focusActive`/`myTurnOnly`/`timelineIsolate`/`exitFocusSignal` were **removed** — focus is now
    a tab, see below.)
    - ⚠ **`workspaceId === null` means "not resolved yet"**, and **nothing may render
@@ -204,8 +204,8 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
     toggle. The filter STATE persists
     (reachable again from the Timeline tab); the Activity console's queries never send
     `userIds` or the FilterBar's exclude-bots toggle/allow-list anyway (its bot control is the
-    feed's bot-lens pills — whose 'hide', the DEFAULT, rides the feed route's own `excludeBots`
-    param server-side); the board stays member-scoped. **Bots are HIDDEN by default on the
+    Feed's Humans | Bots toggle, which rides the feed route's own `authors` param server-side);
+    the board stays member-scoped. **Bots are HIDDEN by default on the
     Timeline too** (`excludeBots: true` in `freshFilterDefaults`; the hidden set is the UNION of
     `users.isBot`, the accounts GitHub types a Bot (`github_type = 'Bot'`), the `AUTOMATION_VENDORS`
     logins and prefixes, and the workspace's automated-reviewer verdict, a workspace manual "human"
@@ -230,8 +230,8 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
 - **DetailPane** — resizable bottom pane (height persisted) under the board slot. **Hidden
   until a PR is selected** (`selectedPrId != null && !overlayActive`); no selection → the
   Timeline takes the full height (App fires a synthetic `resize` on the transition so vis
-  refits). Shows **PrDetail** for the selected PR. **App lands on the Open PRs tab by
-  default** (a bare load → `?view=open-prs`; Activity, on its Pending board, is `?view=activity`;
+  refits). Shows **PrDetail** for the selected PR. **App lands on Activity → Open PRs by
+  default** (a bare load → `?view=activity`; Pending is `?view=activity&activityRepo=attention`;
   `?pr=`/`?thread=` deep links keep the timeline).
 - **`AutoMergeBanner`** — the armed-merge PROGRESS STACK, a bottom-right card (same shape as
   `ClaudeReviewBanner`) fed by `GET /api/auto-merge`. One row per armed PR from the click that
@@ -268,24 +268,24 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   context menu** (floating-ui in a `FloatingPortal` — the strip is `overflow-x-auto`, an
   in-flow menu would clip to the 42px bar — virtual reference at the click point): Close this
   tab / Close other tabs / Close all tabs (`closeOtherTabs`/`closeAllTabs` in the store; on
-  the fixed Activity/Open PRs/Timeline chips the menu shows only "Close all tabs"; "close all" keeps
+  the fixed Activity/Timeline chips the menu shows only "Close all tabs"; "close all" keeps
   you on a fixed view if that's where you are, mirroring `closeTab`'s fallback). ⚠ The menu's
   (and an in-flight drag's) Escape MUST `stopPropagation` or `useKeyboard`'s global Escape
   also yanks the user to the Timeline. TabChip is now one shared `ChipShell` — the nine
   per-kind branches collapsed to a config switch, which is what made the drag/menu handlers a
   one-place change; the e2e selectors (`data-testid="pinned-tabs"`, `role="tab"` names, ✕
   aria-labels) are load-bearing and survived.
-  **Open PRs is the FIRST FIXED VIEW AND THE DEFAULT** (`activeTab === 'open-prs'`, chip before
-  Activity and Timeline, no ✕). Since 2026-10-07 a URL with NO `view=` lands here
-  (`landingTabFromUrl`); `writeToUrl` still emits `view=open-prs` (old links keep working) and
-  Activity always carries `view=activity`, so a stale or seed-backed drill-down URL resolves to
-  Open PRs too. Every "is this
+  **Open PRs is Activity's FIRST RAIL LINE AND THE DEFAULT** (`activityRepoId: 'open-prs'`, the
+  one rail value `writeToUrl` omits; null renders it too). It was a third fixed view until
+  2026-10-09; the fixed views are now Activity · Timeline (`FIXED_VIEWS`). A URL with NO `view=`
+  lands on Activity (`landingTabFromUrl`), and so does a legacy `view=open-prs` (never emitted
+  again). Pending now carries `?activityRepo=attention`; a legacy Pending link naming no console but
+  carrying an `attn*` key (or `attnView`) still lands on Pending. Every "is this
   a fixed view?" test goes through `isFixedView` / `FIXED_VIEWS` (`store/pinnedTabs.ts`) — never a
-  `'timeline' || 'activity'` literal pair, which is exactly what forgets a third. The chip reads
-  **"Open PRs · N"**, N = the workspace's NON-DRAFT open PRs off `useWorkspaceOpenPrs`
+  literal pair. The rail line shows N = the workspace's NON-DRAFT open PRs off `useWorkspaceOpenPrs`
   (`lib/openPrsTab.ts` `openPrsTabCount`; ⚠ **unknown is never zero** — no answer yet, the idle
-  query while `workspaceId` is null, or the PREVIOUS workspace's `placeholderData` prints "Open PRs"
-  with no figure). It is the same cache entry as the tab body and FeedIsolationBanner, so the chip
+  query while `workspaceId` is null, or the PREVIOUS workspace's `placeholderData` prints no
+  figure). It is the same cache entry as the pane body and FeedIsolationBanner, so the count
   adds an observer, not a request. The view is **THE consolidated open-PR view** — the shared
   `OpenPrsCards` (`Activity/OpenPrsCards.tsx`) over `GET /api/open-prs`, ALWAYS workspace-wide:
   drafts included with a "· N drafts" callout. ⚠ **IT IS A LIST OF CARDS WITH NO COLUMN HEADINGS**
@@ -377,9 +377,11 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   `POST /api/claude-review/states` covers every listed card, click-gated starts share the tab's
   mutation key, every panel control `stopPropagation` ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) §
   Starting from the Open PRs tab). Every opener just REVEALS it (`openOpenPrsDetail(repoId?)` →
-  `showOpenPrs`): the chip and the Reports → Flow metrics "Open PRs" tile pass nothing and CLEAR
+  `showActivity()` + `setActivityRepo('open-prs')`): the Reports → Flow metrics "Open PRs" tile pass nothing and CLEAR
   the tab's repo dropdown; the per-repo "Show all N open PRs" footer (`RepoOpenPrList`) passes its
-  repo and PRE-SELECTS it, because the footer promised that repo's count. The dropdown
+  repo and PRE-SELECTS it, because the footer promised that repo's count. The pane is headed by
+  the workspace's **default-branch strip** (`DefaultBranchesSlot` → `BranchStatusPanel`; it headed
+  Pending → My turn until 2026-10-09). The dropdown
   (`MetricRepoFilter`) is `filters.openPrsRepoFilter` — transient, URL-silent, stamped with the
   `workspaceId` it was chosen in and IGNORED under any other (derived in `OpenPrsDetail`, no reset
   effect to race the seed) — and must never write `filters.repoIds` (the Timeline picker). It
@@ -1404,13 +1406,13 @@ Backend contract: [docs/CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § AI Fix.
 
 ## The calm-consolidation surfaces (apiVersion 21 wave)
 
-**Default landing = PENDING, for every tier.** The rail reads Pending · Feed · Bots · Reports and
-its top entry is what opens. `activityRepoId` defaults to `'attention'`, the ONE rail value
-omitted from the URL; `'feed'` is EMITTED and PARSED (`?activityRepo=feed`) so a Feed link
-survives. An unknown or legacy value (`compare`, garbage) and a URL naming no console land on
-Pending — including bookmarks from before this change. The Feed is the stream alone
-(`FeedView`). (The landing was the Feed from
-P3.1 until this change; the older one-shot "auto-select Insights when Pro is on" effect,
+**Default landing = OPEN PRS, for every tier** (Pending until 2026-10-09). The rail reads Open
+PRs · Pending · Feed · Bots · Reports and its top entry is what opens. `activityRepoId` defaults to
+`'open-prs'`, the ONE rail value omitted from the URL; `'attention'` and `'feed'` are EMITTED and
+PARSED so a Pending or Feed link survives. An unknown or legacy value (`compare`, garbage) and a URL
+naming no console land on Open PRs — except a legacy Pending link carrying `attn*` keys, which still
+lands on Pending. The Feed is the stream alone (`FeedView`). (The landing was the Feed from
+P3.1 until Pending took it; the older one-shot "auto-select Insights when Pro is on" effect,
 `insightsDefaultApplied` + `suppressInsightsDefault()`, is deleted.) The Insights rail entry is
 relabelled **"Reports"** — ⚠ LABEL-ONLY: the store/URL token stays `activityRepoId ===
 'insights'` (it is wire/URL-visible across `useUrlState`, FilterBar; renaming it buys nothing
@@ -1421,7 +1423,7 @@ but broken deep links).
   it through `useMyTurnByWorkspace`; it still refetches in lockstep with `['attention-cards']` /
   `['work-plan']`). Gone with it: `openBriefLine`, the "Elsewhere" roll-up,
   `myTurnOtherCapDisclosure`, `ciFailingCapDisclosure`, and the Feed's bot-anomaly / red-trunk
-  lines (red trunks show under Pending → My turn; bot anomalies on Bots). The Pro synthesis seam's
+  lines (red trunks show atop Activity → Open PRs; bot anomalies on Bots). The Pro synthesis seam's
   `kind:'brief'`/`'rollup'` ordering narration is still served and validated by the plugin, but
   no SPA surface requests it: dormant, not removed.
 - **`BotTriageCard`** (`components/BotTriageCard.tsx`, CORE/free): the per-PR verdict sentence —
@@ -1438,13 +1440,16 @@ but broken deep links).
   legacy login-string classification PrDetail's bot chips still use; and every figure comes from
   the SAME folds the Threads tab uses (`rollupCounts`/`threadSeverities`/
   `resolvableBotThreadIds`) restricted to the bot subset, so card and tab cannot disagree.
-- **Bots view is `ROI ('roi' = Measure) | Themes | Advisor | Benchmark | Settings`**
+- **Bots view is `ROI ('roi' = Measure) | Themes | Advisor | Benchmark`** (`'settings'` LEFT the
+  union: bot classification is the FREE Feed → Bot classification tab, bullet below)
   (`botsInnerTab` lost `'behaviour'` — transient + URL-silent, so member removal is safe — gained
   `'benchmark'`, and has since REGAINED `'themes'`; see "The Bots Themes panel" below). ⚠ **TWO
   GATING POSTURES SIT IN THIS ONE STRIP AND BOTH ARE DELIBERATE**: `'roi'` and `'benchmark'` are
   visible-but-locked (`botDepth`) and are NEVER corrected away, while `'advisor'` (`botAdvisor`)
   and `'themes'` (`activityDigest`) are LISTED only when entitled and degrade to `'roi'` in
-  `effectiveBotsTab`. `'settings'` is free, and is why the rail entry and the strip stay ungated.
+  `effectiveBotsTab`. ⚠ **Superseded at the entry level: the WHOLE Bots Monitoring pane (rail label
+  "Bots Monitoring", store value `'bots'`) is Pro on `botDepth`** — `BotsView` renders one
+  `ProLockPanel` for every sub-tab, and no sub-tab wears a badge.
   ⚠ **THE `roi`
   SUB-TAB IS PAID (`botDepth`) AND THE WHOLE `BotRoiPanel` LOCKS IN PLACE** — the tab stays
   selectable (no corrective `setBotsInnerTab`; only `'advisor'` and `'themes'` are corrected, and
@@ -1463,7 +1468,7 @@ but broken deep links).
   near-identical headings apart: they used to sit on one screen, and now cannot. What stays FREE around it, in `BotsView`: the amber bot-only governance caution, the
   resolve backlog, the **hoisted `TuningSuggestions` box** (moved OUT of the panel so the narrowed
   `/api/bot-analytics` can keep feeding it — do not move it back, and note it now sits ABOVE the
-  table for entitled readers), the bot feed, and the whole Settings tab. `WorkspaceBotCharts`
+  table for entitled readers) and the bot feed. `WorkspaceBotCharts`
   (`botDepth`) keeps the older ABSENCE posture on purpose — a second upsell stacked under the first
   reads as a paywall page.
 - ⚠ **`BotRoiPanel`'s `$/acted-on` COLUMN IS A GRAIN GATE AS WELL AS A TIER GATE:
@@ -1478,9 +1483,26 @@ but broken deep links).
   the docstring said so; every per-repo Bots tab reaches it now). The `ProLockPanel` body drops its
   cost clause on the per-repo mount too — a lock is a PROMISE about what paying reveals, and paying
   no longer reveals that figure there.
-- **The Bots RAIL ENTRY stays ungated on every tier**, exactly like Reports': it owns the free
-  classification/Settings screen, the free triage flows and the governance caution. Its tooltip says
-  which half is which.
+- **The Bots Monitoring RAIL ENTRY is PRO AS A WHOLE (`botDepth`)**, like Reports
+  (`periodReports`): listed on every tier with ONE `ProBadge`, the whole pane one `ProLockPanel`
+  when unentitled (both mounts — rail and the per-repo console's Bots tab). Its routes 402
+  (`/api/bot-analytics*`, `/api/bot-threads/*`) and every hook ANDs `botDepth`. ⚠ Bot HIDING on the
+  Feed/Timeline and bot CLASSIFICATION are NOT this screen and stay free: `/api/bot-reviewers` and
+  its writes are ungated (only `PUT …/cost` 402s).
+- **Bot classification is a FEED sub-tab, FREE on every tier** — the Feed strip is `Feed | Themes
+  (Pro, listed only on activityDigest) | Bot classification` (`feedInnerTab` ∈ `FEED_INNER_TABS`,
+  `?feedTab=classification`; the visible tab is DERIVED by `effectiveFeedTab` in
+  `Activity/feedTabsModel.ts`, never written back). It mounts `BotSettingsPanel` →
+  `DetectedReviewersTable`: one CARD per bot in a responsive grid (1 column on a phone, 2 from `md`,
+  3 at `2xl`) — the account's own GitHub avatar (an App bot's avatar IS its vendor logo; `... on Bot
+  { avatarUrl }` is selected by the sync queries for this), else a monogram tile on the vendor colour
+  whose text colour is picked by contrast (`lib/botAvatar.ts`); name + login; Role and vendor chips;
+  the vendor colour as a thin LEFT accent (non-text use only); a person-judged row drawn muted. Then
+  the controls: Counts as Bot | Person, Role + the explicit **Apply role** button, Vendor + label +
+  Save name, the two resets. The PRICE editor and workspace total render only with `botDepth` and are
+  otherwise ABSENT (no badge, no nudge). ⚠ A legacy `?activityRepo=bots&botsTab=settings` is mapped
+  by `readFromUrl` to `activityRepo=feed` + `feedInnerTab='classification'`. Tests:
+  `test/feedInnerTab.test.ts`, `test/botAvatar.test.ts`, `test/urlHistory.test.ts`.
 
 ### Bots → Benchmark (the peer-cohort placement, `botDepth`)
 
@@ -1513,7 +1535,7 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
     `benchmark-no-live-reviewers` (`rollup === []` — the fold RAN and no reviewer has commented
     yet). ⚠ A `?? []` collapsing the last two told a reader whose bots simply had not commented that
     their BUILD was deficient — the ordinary state right after classifying a reviewer in
-    Bots → Settings.
+    Feed → Bot classification.
   - The truncation note's remedy clause ("open a repository's own Bots tab", plus the sentence
     saying money is withheld while counters and spread still render) is **rail-only**; on the
     repository tab that advice is a no-op, and it shipped unconditional.
@@ -1833,8 +1855,7 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
 
 Deleted outright with this wave: `BotBehaviourPanel`,
 `WorkspaceComparisonPanel` + `useWorkspaceComparison` + the `'compare'` rail value (no longer
-URL-parsed — a legacy `?activityRepo=compare` link lands on the `'attention'` (Pending) default,
-per "Default landing = PENDING"),
+URL-parsed — a legacy `?activityRepo=compare` link lands on the rail default, now Open PRs),
 `SprintReportCard` + `useSprintReport`, `lib/workspaceColors.ts`, and `InsightsSubTab`.
 (`BotThemesPanel` + `useBotThemes` were deleted here too and have since been RESTORED — see
 "The Bots Themes panel" below. ⚠ `botsInnerTab` HAS since regained a `'themes'` member: the panel
@@ -2037,8 +2058,11 @@ convention this file has to remember.
   pins. **The gate lives in the PANE, never in the tab resolution.**
 - The store key lives in `freshDefaults()` only, so **no `FILTER_STORAGE_VERSION` bump is owed**,
   and `'overview'` — the current default — is the OMITTED URL value.
-- **The RAIL ENTRY stays ungated on every tier** (the free flow metrics live under Overview
-  precisely so it can), and BOTH tabs stay listed and selectable. What is gated is two BODIES, each
+- ⚠ **Superseded: the WHOLE Reports pane is Pro (`periodReports`)** — `InsightsView` renders one
+  `ProLockPanel` when unentitled, the rail entry carries the one `ProBadge`, and the inner badges
+  below were REMOVED (the inner locks remain as defence in depth). `useWorkspaceMetrics` /
+  `useWorkspaceMetricsDetail` AND `periodReports` into `enabled`; the routes 402. Historical note:
+  the rail entry used to be ungated, and BOTH tabs stay listed and selectable. What was gated was two BODIES, each
   VISIBLE-BUT-LOCKED: `PeriodReportsPanel` (`period-reports-locked`) and the Chronology tab
   (`chronology-locked`, wrapping `BottlenecksPanel`). Both wear a `ProBadge` from
   `components/ProGate.tsx` — `variant="heading"` on the "Period reports" `<h3>`, `variant="tab"`
@@ -2071,12 +2095,14 @@ convention this file has to remember.
   rows, and the full `directive` sits in that Block's modal — then **Merged without a human
   review**. Refusals print last, by name. An older server sends none of the working-hour fields
   (`hasWorkingHours`): the page then opens on the CLOCK-hour split and renders the clock half only.
-- ⚠ **Every panel's explanation is behind its "i"** (`components/InfoModal.tsx`: focus-trapped,
-  Escape captured, 14px; the copy is `Activity/chronologyInfo.tsx`, every number read from
-  `FLOW_RULES`). The page keeps only figures, charts and the disclosure lines. The modal body takes
-  focus on open, because it is the only part that scrolls and the arrow keys scroll only the focused
-  element; opening a modal also closes any pinned chart popover, whose own Escape listener would
-  otherwise take the first Escape.
+- ⚠ **Every panel's explanation is behind its "i"** (`InfoButton` in `components/InfoModal.tsx`;
+  the copy is `Activity/chronologyInfo.tsx`, every number read from `FLOW_RULES`). The page keeps
+  only figures, charts and the disclosure lines. ⚠ **EVERY "i" OPENS A POPOVER, NEVER A MODAL** —
+  anchored to the button, 22rem (26rem `lg`), 12px, kept in the viewport (flip/shift/size), closed
+  by Escape (captured), an outside press, focus leaving it or the button. Its body takes focus on
+  open, because it is the part that scrolls and the arrow keys scroll only the focused element. It
+  holds the ONE popover slot (`lib/activePopover.ts`) shared with the Pending "i"s and the chart
+  popovers. `InfoModal` survives only for content no "i" opens (the Open PRs ticket story).
 - ⚠ **Budget figures live in `ChartPopover`** (`components/charts/ChartPopover.tsx`: hover or
   keyboard focus opens, click/tap pins, Escape or an outside press closes, one open at a time). A
   bar past the axis carries an arrow, because the popover is the only place its true value appears.
@@ -2354,7 +2380,9 @@ besides an armed intent's Cancel.
 
 ### The Pending tabs (`AttentionView.tsx`, `pendingTabs.ts`, `db/pending-tabs.ts`)
 
-Pending is six tabs (`PENDING_TABS` in `packages/shared/src/pending-rules.ts`): **My turn** ·
+Pending is seven tabs (`PENDING_TABS` in `packages/shared/src/pending-rules.ts`): **My turn** ·
+**Claude reviews** (finished Claude reviews you have not acted on — the my_turn cards of type
+`claude_review`, moved out of My turn; same ball rule and dismissals, one scored list) ·
 **Needs fixing** (CI failing, merge conflicts) · **Waiting on review** (stalled review, needs a
 reviewer; review load as a "Reviews waiting on people" strip above the list, unranked and uncounted)
 · **Unanswered threads** · **Ready to land** (ready to merge, behind trunk) · **Dependencies**
@@ -2368,6 +2396,16 @@ within. There are no group headings — each card's type chip names its group, a
 Dependencies (plus My turn for a direct summons); the server contract is [BACKEND.md](BACKEND.md)
 § The Dependencies tab, and My Turn's is § My Turn — the ball rule.
 
+- **My turn and Claude reviews split ONE kind by type.** `pendingTabHolds(def, card)` (shared) is the
+  one predicate — `reasons` / `exceptReasons` on the tab def — read by the server's lists and totals
+  and the SPA's `tabsOf` fallback; `pendingTabOfCard` names a card's tab (`pendingTabOf(kind)` still
+  answers My turn for `my_turn`). Claude reviews is shown only where `me.ai.enabled`, or while it
+  holds something or is on screen. Inside both tabs a `direct` card drops its "Your turn" label.
+- **Every card leads with its type's mark** (`PendingCardIcon`, on `PrCardEventHeading`'s `icon`),
+  every tab and kind chip with its own (`PendingTabIcon` / `PendingKindIcon`), and the guide's tab and
+  My Turn tables carry them too. The marks are purpose-built `Pending*Icon`s in `Icons.tsx`; the maps
+  in `Activity/PendingKindIcon.tsx` are `Record`s over the full unions, so a new kind, My Turn type or
+  tab fails to compile until it has one. Decorative only — the words beside each say the same.
 - **The server ranks the UNCAPPED fold, then caps** (`rankPendingTabs`): up to `boardListCap` per
   LIST GROUP — kind × My turn's "Only yours" side × who opened it — so the whole tab, a kind chip and
   each lens are their own true top. The SPA caps EVERY view to `boardListCap` (a chip or "Only
@@ -2402,20 +2440,16 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   `attentionTab` (`?attnTab=`, a NAV key); else My turn. Clicking a tab is ONE write that seats the
   tab and clears the kind (`setAttentionTab`). Old `?attn=<kind>` links land on the right tab with
   that chip selected.
-- **My turn's HEAD — My turn ONLY** (`showsMyTurnHead`, `pendingTabs.ts`; `Activity/MyTurnHead.tsx`):
-  the default-branch strip (`DefaultBranchesSlot` → `BranchStatusPanel`), then the tab's controls
-  and cards. No other tab renders it. It REPLACED My turn's second view ("Default branches and open
-  PRs", `attentionMyTurnView` / `effectiveMyTurnView` / `MY_TURN_VIEWS` — all DELETED, 2026-10-01).
-  The "Open PRs · N" button that used to sit above the strip is DELETED: Open PRs is a fixed tab
-  (the first, and the default view) and its chip carries the count (see the tab strip above). ⚠ **NO
-  NEW REQUEST**: the strip's argument-less `useBranchStatus()` is the SAME cache entry the rail
-  reads at boot; it mounts once per board, never per card, and trends stay lazy per row. ⚠ **COUNT-FREE**: nothing it reads reaches a badge, `myTurn`,
-  the scorer, the liveness sweep or a notification. The strip's slot is a placeholder while pending
-  (idle included), "Couldn’t load the default branches." on failure, "No default branch has synced
-  yet." on an answered empty, else the panel. ⚠ **`?attnView=branches` shipped**: it is still
-  parsed and IGNORED (lands on My turn, or on whatever `attnTab` names), never emitted, and is no
-  longer a NAV key — dropping it from a legacy URL replaces the entry. Never persisted, so no
-  storage bump (`attentionIsolation.test.ts` pins a blob carrying it still restoring).
+- **No Pending tab has a head.** The default-branch strip that headed My turn (`showsMyTurnHead`,
+  `MyTurnHead.tsx` — both gone) now heads Activity → Open PRs (`Activity/DefaultBranchesSlot.tsx`;
+  see the Open PRs entry above). ⚠ **NO NEW REQUEST**: the strip's argument-less
+  `useBranchStatus()` is the SAME cache entry the rail reads at boot, and trends stay lazy per row.
+  ⚠ **COUNT-FREE**: nothing it reads reaches a badge, `myTurn`, the scorer, the liveness sweep or a
+  notification. Its slot is a placeholder while pending (idle included), "Couldn’t load the default
+  branches." on failure, "No default branch has synced yet." on an answered empty, else the panel.
+  ⚠ **`?attnView=branches` shipped**: it is still parsed, only to pick Pending when no console is
+  named, never emitted, and is no longer a NAV key — dropping it from a legacy URL replaces the
+  entry.
 - **Removed with the cross-kind head**: `doNextIds`, the "already in Do next" chip, the header "My turn"
   pill (the tab replaces it), `AttentionIsolationBanner` (the selected tab and chip say the same
   thing on the board itself) and the spread/superseded explanations. The Pro plan still picks its
@@ -2548,7 +2582,7 @@ owns the frame and the type, never the content, and fetches nothing.
 
 ### The Pending card — layout B, event first (`lib/pendingHeadings.ts`, `PendingCard`)
 
-Every Pending card, on all six tabs, reads top to bottom in one order, everything LEFT-aligned:
+Every Pending card, on all seven tabs, reads top to bottom in one order, everything LEFT-aligned:
 
 1. **The heading — what happened.** "David Buckley replied: “…” · 2d", "Your build failed:
    SonarCloud · 2h", "main is red in bng-metric-frontend: Run Journey Tests · 14m", "Waiting 4d on
@@ -3138,7 +3172,7 @@ that carried no suffix.
 | 7 | `PendingMuteSection` | workspace | none — CORE/free, both modes, every tier |
 | 8 | `FlowSettingsSection` (working hours and budgets) | workspace | none — CORE/free, both modes, every tier |
 | 9 | `SprintSection` (cadence + comparison window) | workspace | `caps.workspaceInsights` + `proReady` |
-| 10 | `SlackSection` (schedule + the bot block) | workspace | `caps.slackDigest` + `proReady` |
+| 10 | `SlackSettings` → `SlackSection` (schedule, the bot block, the two event switches) | workspace | VISIBLE-BUT-LOCKED: `ProLockPanel` without `caps.slackDigest`; the form on `caps.slackDigest` + `proReady`. The "Claude review ran" switch shows only with `me.ai.enabled` |
 | 9b | `IssueLinksSection` (the issue tracker + Jira API access) | workspace | none — CORE/free, both modes, every tier (apiVersion 23); renders above the pro-settings gate, after `FlowSettingsSection`. The Jira API access block shows whenever the SAVED tracker is Jira with a base URL — no longer behind `me.ai.enabled` (the token feeds free surfaces) |
 
 - ⚠ **THE HEADING IS THE NAMING RULE NOW, AND IT IS STILL LOAD-BEARING.** There is no workspace
@@ -3261,7 +3295,7 @@ the source.
   `useClaudeReview` key hooks went with it) and `BotSection` (an explainer pointing at
   Activity → Bots → Settings plus one toggle, which became a per-delivery field inside
   `SlackSection`). ⚠ `data-testid="bot-settings-section"` died with the latter — `pnpm shots`' 7d
-  targets `bot-settings-panel` on the Bots rail instead.
+  targets `bot-settings-panel` on Feed → Bot classification instead.
 
 ## The AI-surface palette (`ai-*` tokens) — and the purple that STAYS
 
@@ -3299,7 +3333,7 @@ migration".
 | `lib/ui.ts` event-category colours + `.ev-*` dots, `ML_CATEGORY_COLOR`, `BOT_VENDOR_META` vendor accents, `charts/common.tsx` `PALETTE`/`SERIES_COLORS` | DATA ENCODING — hues must stay identical across every chart |
 | `PeriodReportsPanel`'s `LANE_META` (`ai_review` violet, `release` indigo) | the 7-lane palette needs 7 stable distinct hues; vermilion collides with the red already in charts |
 | `BotRoiPanel`'s inflation under-call violet | direction encoding — the drill-down matrix keys on the same hues |
-| FeedView's "PR events" / "Needs review" indigo pills, and the PR-event `Kind` sub-chips under the first | feed category-pill palette |
+| FeedView's "PR events" indigo pill (and the matching card icon), and the PR-event `Kind` sub-chips under it | feed category-pill palette |
 | `ChecksTab` / `AttentionCards` "Assign" buttons | suggested reviewers are deterministic CORE (CODEOWNERS + inference) — no model, so not an AI marker |
 | `MetricsDetail` / `PinnedTabsBar`'s `violet` tone (Flow metrics) | core deterministic drill-down; a generic active accent |
 | `index.css` `.tl-repo-tint-1`, the cross-person chips | timeline layout encoding |
@@ -3413,10 +3447,8 @@ and the `.code-hl` palette above — with exactly one deliberate exception, `Mar
   CI logs and `BotAdvisorPanel`'s brief markdown. None of them has a file path, so none of them has a language.
 
 ⚠ **A hex a component DERIVES a wash from cannot become a var.** `FeedView`'s `itemGlyph`
-returns `{color}` and the chip paints `background: glyph.color + '1a'`. The `claude_review` kind
-therefore returns a `className` (`bg-ai-signal/10 text-ai-signal`) with an empty `color`, and the
-chip skips the `style` attribute whenever a className is present. Adding a second theme-flipping
-glyph means extending that branch, not the hex table.
+returns `{color}` and the chip paints `background: glyph.color + '1a'`. A theme-flipping glyph would
+need a className branch, not a var in the hex table.
 
 ## ML severity badges + the Bots severity rollup
 
@@ -3426,6 +3458,24 @@ per-PR query (`['ml-labels', prId]`, `staleTime: Infinity`) — the badge never 
 target with no label renders nothing. Gated on `MeResponse.mlSeverity` (a TOP-LEVEL field, not a
 `pro` capability). `threadSeverityFilter` is a global store field and carries the same
 `selectedPrId === prId` guard as `threadStateFilter`. Detail: [ML-SEVERITY.md](ML-SEVERITY.md).
+
+## The Feed: people OR bots, one Feed, icons on the cards
+
+- **ONE FEED, TWO SIDES, NEVER MIXED.** A segmented `Humans | Bots` control (`feedAuthors`,
+  transient, URL-silent, default `'humans'`) sends `?authors=humans|bots`. The server splits per
+  ITEM by actor against `hiddenBotUserIds` (a manual "human" winning both ways), before the page
+  cap — so a thread a person and a bot both replied on shows on BOTH sides, and an actor-less row
+  is a person's. The old Bots-rail bot feed (`botsMode`, `botsOnly`, `botWindowDays`, vendor
+  pills) is DELETED; Bot-only-PRs "Show in feed" now opens the Feed's Bots side with the PR
+  isolated.
+- **A person's activity tab hides the toggle** and picks the side from the subject (all viewed
+  actors bots → `'bots'`, else `'humans'`), derived for the render, never written back.
+- **No My Turn, Needs review, Claude Reviews or CI-failure pills, and no such items** — Pending
+  owns them. My Turn survives only as the card's yellow border + reason pill.
+- **Each card wears its filter pill's icon** (`FEED_PILL_META`: Comments → `CommentIcon`, PR events
+  → `PullRequestIcon`, Commits → `CommitIcon`), in the pill's ink, `aria-hidden`. The PR-event
+  chips have no icons, so every PR event wears the pill's. One table feeds the pills AND the cards.
+- `FILTER_STORAGE_VERSION` is 5: the v4 → v5 step drops the retired `feedCiLens`.
 
 ## The Feed's "PR events" pill has a dependent chip row
 
@@ -3456,10 +3506,8 @@ rendered. (`FeedView.tsx`, `FEED_PR_EVENT_CHIPS` + `feedPrEventChip` in `lib/ui.
   through `catMatch` inside `applyFeedPills` — no `types` query param, no re-keyed request.
   A server-side narrowing would break three things at once: `computeFeedCounts` runs over the
   already-narrowed stream, so every other pill's badge would read 0 while the pill stayed
-  rendered; the CI lens' `'only'` state and `feedClaudeOnly` are CLIENT filters over rows the
-  server would no longer send (defeating the deliberate category-pill skip that exists to stop
-  those combinations yielding a provably empty feed); and the feed is an infinite query keyed on
-  `feedSearch`, so every chip click would discard pages the reader had already paged in.
+  rendered; and the feed is an infinite query keyed on `feedSearch`, so every chip click would
+  discard pages the reader had already paged in.
 - **The badges are the server's `counts.byEventType` facet** — the whole loadable stream, keyed by
   chip, independent of which chips are pressed, with the loaded-page fallback every other badge
   here carries for a stale IndexedDB response. The subtotals sum to the parent's `prEvents` badge,
@@ -3469,22 +3517,10 @@ rendered. (`FeedView.tsx`, `FEED_PR_EVENT_CHIPS` + `feedPrEventChip` in `lib/ui.
 - **The empty-state ladder names the pressed chips** ("No Opened or Merged PR events in this
   window."), in the row's display order rather than click order. That is the third channel making
   the row legible beside the pressed state and the count line — never ship an include-only toggle
-  whose only feedback is a count. ⚠ It is withheld under all FOUR narrowings `applyFeedPills`
-  runs BEFORE `catMatch`: the CI lens' `'only'` (which skips `catMatch` outright), `feedClaudeOnly`
-  (whose rows are in no category, so the parent pill alone already empties the list),
-  `feedMyTurnOnly`, and the BOT LENS' `'only'`. Naming chips under any of them blames the wrong
-  control — and the chip badges beside the sentence would contradict it outright, since
-  `byEventType` is computed server-side over the whole stream and is blind to every client-side
-  pill ("Only mine" + "Merged" said "No merged PR events in this window" under a Merged chip
-  badging 533). ⚠ **The bot lens is TWO mechanisms and only `hide` is safe**: `hide` sets
-  `excludeBots`, so the facet is computed over the same excluded stream and agrees by
-  construction, but `'only'` sends `excludeBots: false` and narrows on the CLIENT, so the facet
-  still counts the human rows the list is hiding — 36 merged events on workspace 3 of which 0 are
-  a bot's. Gate on the lens value, never on "the bot lens is server-side". With the chips
-  withheld, "Only mine" claims the empty state itself ("Nothing needs
-  your attention right now.") ahead of the bot-lens branches, whose default `hide` would otherwise
-  claim "only bot activity here" about a stream the server already stripped bots from.
-- The three group labels in this block (`Vendor`, `State`, `PR`) were 10px uppercase-with-tracking
+  whose only feedback is a count. Every other narrowing on the screen is now a pure per-item pill
+  (or the server-side people/bots split, whose facets the server counts over the same stream), so a
+  pressed chip is the only thing that can have emptied the list.
+- The group labels in this block (`State`, `Kind`) were 10px uppercase-with-tracking
   and are now **11px, muted pairing** (`text-gray-500 dark:text-gray-400`), matching the new
   `Kind` label rather than leaving one row correct and its neighbours not.
 
@@ -3495,10 +3531,10 @@ into the cross-repo Feed as it arrives and the inserted cards wear a **"New" chi
 reader has seen them. Content is never withheld behind a click, and nothing sticky sits over the
 feed. (`FeedView.tsx` + `useFeedAutoInsert` in `hooks/useConsolidatedFeed.ts`.)
 
-- **CROSS-REPO FEED ONLY.** `FeedView` has FIVE mounts sharing one `FeedRow` — the cross-repo
-  feed, the unresolved-repo fallback, the per-repo console, the Bots pane's bot-only feed and a
-  person's activity tab. Auto-insert AND the marker are gated on the single predicate
-  `isCrossRepoFeed = repoId == null && !botsMode && userIds == null` — the same one the server
+- **CROSS-REPO FEED ONLY.** `FeedView` has FOUR mounts sharing one `FeedRow` — the cross-repo
+  feed, the unresolved-repo fallback, the per-repo console and a person's activity tab.
+  Auto-insert AND the marker are gated on the single predicate
+  `isCrossRepoFeed = repoId == null && userIds == null` — the same one the server
   "seen" marker uses. The narrowed views are things someone opened on purpose; keeping them live
   would answer a question they didn't ask.
 - **The head poll became the insert source.** `['feed-head', ws, search]` still polls every 60s,
@@ -3507,7 +3543,7 @@ feed. (`FeedView.tsx` + `useFeedAutoInsert` in `hooks/useConsolidatedFeed.ts`.)
   either way (`counts`/`uncappedTotal` are whole-stream facets), so the limit costs payload, not
   query work — and a head as wide as page 0 is what lets `planFeedHeadMerge` PROVE the two lists
   overlap. ⚠ Its scope inputs must stay byte-identical to `useConsolidatedFeed`'s; real rows are
-  spliced now, so a divergent `excludeBots`/`includeCiFailures`/`botWindowDays` injects rows the
+  spliced now, so a divergent `authors`/`includeAllCommits` injects rows the
   loaded request would never have returned.
 - ⚠ **The merge must keep the loaded pages a contiguous PREFIX of the stream.** Paging is by
   OFFSET, so `planFeedHeadMerge` (pure, tested) prepends only the head's prefix above the first
@@ -3559,8 +3595,7 @@ feed. (`FeedView.tsx` + `useFeedAutoInsert` in `hooks/useConsolidatedFeed.ts`.)
   ⚠ **SETTLED means `!isPlaceholderData`, and the guard is load-bearing.** `placeholderData:
   (prev) => prev` keeps the PREVIOUS query key's rows on screen while a re-keyed fetch is in
   flight, and `scopeKey` flips in that same render — so seeding the baseline from `items` there
-  reads the old key's list. Every WIDENING re-key (bot lens `hide`→`only`/`all`, Commits off→on,
-  CI failures `off`→`feed`/`only`) then mints a spurious cohort of "New" chips on rows that were
+  reads the old key's list. Every re-key (People ↔ Bots, Commits off→on) then mints a spurious cohort of "New" chips on rows that were
   merely hidden a moment ago. Narrowing flips are harmless (`cut === 0`) and a workspace switch
   shares nothing (`cut === -1`) — which is exactly why the bug survives casual testing.
 - **SEEN = COHORT + SCROLL POSITION.** `feedNewCohorts` in `store/filters.ts` holds
@@ -3731,9 +3766,9 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   line in the dropdown and a line in the banner. ⚠ **Absence is not zero** — do not "tidy" a
   missing line into a 0.
 - ⚠ **The dropdown badge is INFORMATIONAL; the ROW is a navigation** (reversed 2026-09-30; lands
-  on Open PRs since 2026-10-07). A pick — the current workspace included — runs
-  `useFilters.switchWorkspaceToOpenPrs(id)`: `setWorkspace(id, null)` → `showOpenPrs()` →
-  `clearSelection()` (the Timeline's selected PR belonged to the workspace left). Pinned PR / Focus
+  on Activity → Open PRs). A pick — the current workspace included — runs
+  `useFilters.switchWorkspaceToOpenPrs(id)`: `setWorkspace(id, null)` → `showActivity()` +
+  `setActivityRepo('open-prs')` → `clearSelection()` (the Timeline's selected PR belonged to the workspace left). Pinned PR / Focus
   tabs stay. All writes are synchronous in one handler, so `useUrlState` pushes ONE history entry.
   ⚠ `setWorkspace` itself NEVER navigates — URL hydrate, Back/Forward, `useWorkspaceSync`'s
   corrections, PrDetail's "Show in Activity feed" and the `WorkspaceManager` call it and must stay

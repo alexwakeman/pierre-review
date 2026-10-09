@@ -13,6 +13,7 @@ import {
 } from '../../hooks/useAttentionCards.js';
 import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import {
   useGenerateWorkPlan,
   useWorkPlan,
@@ -26,16 +27,16 @@ import {
   offerAuthorLens,
   offerOnlyYours,
   relevancePillCount,
-  showsMyTurnHead,
   tabBadgeCount,
   tabsOf,
   TAB_LABEL,
 } from './pendingTabs.js';
 import { relativeTime } from '../../lib/ui.js';
 import { CheckCircleIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
+import { PendingKindIcon, PendingTabIcon } from './PendingKindIcon.js';
 import { AttentionCards, KIND_LABEL } from './AttentionCards.js';
+import { DependencyMergeAll } from './DependencyMergeAll.js';
 import { MyTurnDismissedList } from './MyTurnDismissedList.js';
-import { DefaultBranchesSlot } from './MyTurnHead.js';
 import { PendingGuideModal, PendingOrderInfo } from './PendingInfo.js';
 import { capSentence } from './pendingExplain.js';
 
@@ -181,6 +182,7 @@ export const LENS_COPY: Record<
 
 const TAB_EMPTY: Record<PendingTabKey, string> = {
   my_turn: 'Nothing is your turn right now.',
+  claude: 'No finished Claude reviews are waiting on you.',
   fixing: 'No failing builds or merge conflicts are yours to fix.',
   review: 'No reviews are waiting.',
   threads: 'No review threads are waiting for an answer.',
@@ -266,6 +268,12 @@ export function AttentionView(): JSX.Element {
 
   const tabKey = effectivePendingTab(attentionIsolation, attentionTab);
   const tabs = useMemo(() => tabsOf(data), [data]);
+  // "Claude reviews" is offered only where Claude Review runs (local, AI on) — or while it holds
+  // something or is the tab on screen, so a card is never stranded behind a hidden tab.
+  const aiEnabled = useAiCapabilities().enabled;
+  const shownTabs = tabs.filter(
+    (t) => t.key !== 'claude' || aiEnabled || t.total > 0 || t.key === tabKey,
+  );
   const view = useMemo(
     () => buildPendingView(data, tabKey, attentionIsolation, attentionRelevance, attentionAuthorLens),
     [data, tabKey, attentionIsolation, attentionRelevance, attentionAuthorLens],
@@ -556,7 +564,7 @@ export function AttentionView(): JSX.Element {
           returns for it. A tab with nothing in it stays, dimmed, so the layout never shifts
           and "0" is a fact rather than an absence. */}
       <div role="tablist" aria-label="Pending" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
-        {tabs.map((t) => {
+        {shownTabs.map((t) => {
           const on = t.key === tabKey;
           // Under the People / Automation lens a badge counts that side of its tab — the list a
           // click on it opens. The server's own figure, never `total − other`.
@@ -575,6 +583,7 @@ export function AttentionView(): JSX.Element {
                   : 'border-transparent text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
               }`}
             >
+              <PendingTabIcon tab={t.key} className="shrink-0" />
               {TAB_LABEL[t.key]}
               <span
                 className={`rounded-full px-1.5 text-[11px] tabular-nums ${
@@ -593,12 +602,6 @@ export function AttentionView(): JSX.Element {
       </div>
 
       <div id="pending-tabpanel" role="tabpanel" className="space-y-3">
-        {showsMyTurnHead(tabKey) && (
-          // My turn's head: the default-branch strip, above the cards. My turn ONLY. Open PRs is
-          // a fixed tab now (between Activity and Timeline), so there is no button into it here.
-          // See MyTurnHead.tsx for why this costs no new request.
-          <DefaultBranchesSlot />
-        )}
         {/* The tab's narrowing controls: kind chips on a two-kind tab, "Only yours" on My
             turn, and — right-aligned — the People / Automation lens wherever it would change
             the list, then My turn's "Customise". The row always renders on My turn, empty
@@ -622,6 +625,7 @@ export function AttentionView(): JSX.Element {
                     aria-pressed={view.kind === c.kind}
                     className={pill(view.kind === c.kind)}
                   >
+                    <PendingKindIcon kind={c.kind} className="mr-1 inline-block shrink-0 align-[-2px]" />
                     {KIND_LABEL[c.kind]} <span className="tabular-nums">{c.total}</span>
                   </button>
                 ))}
@@ -724,6 +728,13 @@ export function AttentionView(): JSX.Element {
                 REVIEWERS, so no PR narrowing applies to it — and without this the reader got the
                 strip and no word that the lens or chip had hidden every card, nor a way back. */}
             {empty?.placement === 'above' && emptyNote}
+            {/* Dependencies: one press merges what can land and arms the rest (the server's dry
+                run is the confirm dialog). Renders nothing when no listed card is a dependency PR. */}
+            {tabKey === 'deps' && (
+              <div className="flex justify-end">
+                <DependencyMergeAll cards={view.cards} workspaceId={workspaceId} />
+              </div>
+            )}
             <AttentionCards
               cards={view.cards}
               users={data?.users}

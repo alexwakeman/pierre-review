@@ -96,16 +96,18 @@ describe('the period report link', () => {
     expect(location.search).not.toContain('report=');
   });
 
-  // 'attention' is the one console that stays out of the URL — Pending is where the app opens,
-  // so it is the bare state a link means when it says nothing. Pinned so a later "emit every
-  // console" tidy-up has to think about it.
-  it('omits Pending, which is what a link with no console means', () => {
-    writeToUrl(state({ activityRepoId: 'attention', insightsReportKey: null }));
+  // 'open-prs' is the one console that stays out of the URL — Open PRs is where the app opens,
+  // so it is the bare state a link means when it says nothing. Pending names itself. Pinned so a
+  // later "emit every console" tidy-up has to think about it.
+  it('omits Open PRs, which is what a link with no console means', () => {
+    writeToUrl(state({ activityRepoId: 'open-prs', insightsReportKey: null }));
     expect(location.search).not.toContain('activityRepo=');
+    writeToUrl(state({ activityRepoId: 'attention', insightsReportKey: null }));
+    expect(location.search).toContain('activityRepo=attention');
+    expect(readFromUrl().activityRepoId).toBe('attention');
   });
 
-  // …and the Feed is EMITTED since the landing moved off it: left out, a Feed link would open
-  // Pending. Round-tripped, because an emit-only key is erased by the next write.
+  // …and the Feed is EMITTED: left out, a Feed link would open Open PRs. Round-tripped, because an emit-only key is erased by the next write.
   it('emits the Feed, so a Feed link survives', () => {
     writeToUrl(state({ activityRepoId: 'feed' }));
     expect(location.search).toContain('activityRepo=feed');

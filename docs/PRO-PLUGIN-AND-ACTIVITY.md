@@ -168,10 +168,9 @@ active workspace's repos**:
 ── repos ──           flat: no grouping headers, no colour dots, no "Other" bucket
 ```
 
-⚠ **ALL FOUR ARE UNGATED.** Reports used to be FIRST and wrapped in `{caps.workspaceInsights && …}`,
-from when it was nothing but the Pro period report. The FREE flow-metric header moved into it off
-the Feed, so gating the entry would have taken a free feature behind the Pro wall; the pane gates
-its own Pro halves internally instead. ⚠ **PENDING LEADS BECAUSE IT IS WHERE THE APP OPENS**
+⚠ **Bots Monitoring (`botDepth`) and Reports (`periodReports`) are PRO AS A WHOLE**: each entry is
+listed on every tier with ONE `ProBadge`, and the whole pane renders ONE `ProLockPanel` when
+unentitled — flow metrics, Bots → Settings and everything else included. ⚠ **PENDING LEADS BECAUSE IT IS WHERE THE APP OPENS**
 (`'attention'` is the store default and the one rail value left out of the URL; see "Default
 landing = PENDING" in docs/FRONTEND.md). **Bots sits directly under the Feed** because Bots →
 Settings is where the human/bot call that feeds `hiddenBotUserIds` is made — the control that
@@ -237,15 +236,15 @@ tab exists only where it means something):
   `freshDefaults()` but not in `FilterDefaults`/`pickFilterBarState`/`sanitizePersistedFilters`, and
   `useUrlState` never touches it, so a stale `'compare'` cannot survive a reload and needed no
   migration.)
-- **Bots** (`BotsView`) — `ROI` (the Measure surface; the PANEL is Pro `botDepth` and shows a
-  badge + locked pane, the caution / resolve backlog / tuning suggestions / bot feed around it stay
-  free — see § The Bots ROI panel is paid) | `Themes` (Pro **`activityDigest`**, LISTED only when
+- **Bots Monitoring** (`BotsView`; label-only rename, rail id `'bots'`) — ⚠ **the WHOLE view is Pro
+  on `botDepth`**: one `ProLockPanel` for every sub-tab, no per-tab badges; the notes below on
+  per-tab posture describe what an ENTITLED reader sees. `ROI` (the Measure surface — see § The Bots
+  ROI panel is paid) | `Themes` (Pro **`activityDigest`**, LISTED only when
   entitled — `BotThemesPanel`, see § The Bot Themes panel) | `Advisor` (Pro `botAdvisor`, LISTED
   only when entitled) | `Benchmark` (Pro `botDepth`, visible-but-locked) | **`Settings`**
-  (CORE/free — the classification tab, see below; it shows in the
+  (the classification tab, see below; it shows in the
   per-repo Bots tab too, where it is the same WORKSPACE listing filtered CLIENT-SIDE to the actors
-  with a footprint in that repo). ⚠ **The Bots RAIL ENTRY stays ungated on every tier**, exactly as
-  the Reports one does, because the free Settings tab and the free triage flows live behind it.
+  with a footprint in that repo).
   `'behaviour'` and `'themes'` were both REMOVED from `botsInnerTab` with their tabs:
   per-bot depth is the `bot-detail` pinned drill-down, the workspace charts are a collapsed Pro
   section under ROI (`WorkspaceBotCharts`), and the bot-themes summary became the synthesis seam's
@@ -291,8 +290,8 @@ kept in lockstep by `bot-detection.test.ts`. Verified logins (2026-07); coding a
 `copilot-swe-agent`) + dependency bots (`dependabot`/`renovate`/`snyk`) are deliberately EXCLUDED —
 still `isBot`, just not *review* bots. **Surfaces:** a PrDetail "Bots" chip ("CodeRabbit · 12 · 3
 unresolved", `ChecksTab`) that filters the Threads tab to that vendor (`store.threadBotFilter`); a
-feed **bot lens** (hide — the DEFAULT — /all/only, `store.feedBotLens`; 'hide' is server-side via
-the feed route's `excludeBots`, union bot definition) + per-row vendor tag (`FeedView`); a **core
+Feed **Humans | Bots** toggle (`store.feedAuthors`, default humans, never mixed; server-side via
+the feed route's `authors`, union bot definition) + per-row vendor tag (`FeedView`); a **core
 per-repo acted-on stat** (`ActivityRepoStats.botThreads/botThreadsActedOn` computed in `getActivity`
 → `RepoStats`, free); a **Pro-gated deterministic `bot_signal` Insights card** (per-vendor volume /
 acted-on % / oldest-untouched backlog, computed in core `getWorkspaceInsights`, rides `/api/pro/insights`
@@ -597,7 +596,7 @@ member: a login would have to give up its brand identity to be marked a linter, 
 `getBenchmarkContributions` filters kinds with a RUNTIME string test against exactly
 `in_house|pierre|vendor`, so a new member would sail through and ship linters into the **cross-org
 benchmark** as a named review-bot cohort — data that leaves the tenant and cannot be un-shipped.
-A quality check stays `automated: true`, so `excludeBots`, the feed bot lens and the vendor tag are
+A quality check stays `automated: true`, so `excludeBots`, the Feed people/bots split and the vendor tag are
 unchanged. **The role splits exactly two sets** (`automatedReviewerUserIds(accountId, workspaceId, role)`
 takes the filter POSITIONALLY and REQUIRED, so every call site had to be re-read). ⚠ **`null` is gone
 from every workspace-scoped getter**: the scope is a `BotScope {workspaceId, repoIds}` whose
@@ -652,15 +651,14 @@ is gone). The participation compute lives in the core module **`src/feed/my-turn
 + reason pills + `countNewMyTurnFeedItems`); `getConsolidatedFeed` calls it directly, and `/api/me`
 uses `countNewMyTurnFeedItems` for `me.newFeedItems`. Every tier gets the My Turn cards/toggle/badge
 + Welcome-back banner — no capability gate. `isMyTurn` rows are the **content-rich, yellow-bordered
-cards** with a "My Turn" badge + a `feedMyTurnOnly` "My Turn only" toggle; they're
+cards** with a "My Turn" badge (there is no "My Turn only" filter — Pending owns that); they're
 uncapped, plain activity is capped (`FEED_EVENT_CAP`). Cards render the **full comment/review body
 as markdown**, the affected threads inline, + a merge/review credit line
-(`mergedById`/`reviewers`). The **`excludeBots`** filter drops bot-authored activity BEFORE the
-page cap, using the UNION bot definition `hiddenBotUserIds` (`users.isBot` ∪ `github_type='Bot'`
+(`mergedById`/`reviewers`). The **`authors=humans|bots`** param splits the stream per item BEFORE
+the page cap, using the UNION bot definition `hiddenBotUserIds` (`users.isBot` ∪ `github_type='Bot'`
 ∪ the review-bot and `AUTOMATION_VENDORS` logins ∪ the workspace's automated set, a manual "human"
-winning over every half — see docs/FRONTEND.md, bots hidden by default) — it is what the lens's
-default 'hide' sends; a bot contributor's own activity tab
-derives an effective 'all' so it isn't empty (derive-for-render, never written back). **PAGINATED**
+winning over every half) — never mixed; a person's activity tab picks its side from the person
+(derive-for-render, never written back). **PAGINATED**
 — `useConsolidatedFeed` is a `useInfiniteQuery` (page 0 loads `FEED_PAGE_SIZE`=50, "Load more" by
 `offset`; `total` tells the client when to stop). **No "seen"/Done concept.**
 **Click → pr-DETAIL tab:** clicking ANY feed card → `usePinnedTabs.openPrDetailTab(meta,
@@ -670,30 +668,9 @@ scrolls + flashes the clicked item** (`activityReturnItemId`). A digest's `#N` P
 `pr-detail` tab. (The old pr-focus-on-click, the My-Turn tab, and the MyTurnPanel/FeedPanel/pills
 are all gone.)
 
-**Opt-in CI-failure rows (`includeCiFailures`, OFF by default).** Two more SYNTHESIZED kinds with
-no `events` rows behind them, following the `claude_review` precedent: **`ci_failed`** (a failed
-check on a PR head, from `ci_status_events`) and **`trunk_ci_failed`** (a failed check on the
-default branch, from `trunk_ci_status_events` — migration `0052` / pg `0039`). `ConsolidatedFeedItem.
-kind` stays a bare `string`, NOT `EventType`, precisely so a synthesized kind needs no widening of
-`EVENT_TYPES` / the Timeline's type filter / the Welcome-back counter. What to know before touching
-them:
-- **Grain: one item per `(PR-or-branch, head sha, check name)`, EARLIEST observation winning.** Both
-  sources are TRANSITION logs, so checks going red one at a time write several rows for one broken
-  push. Capped at `MAX_CI_ITEMS_PER_HEAD` = 5 names per head, with the overflow DISCLOSED in the
-  card's summary; scan capped at 1000 rows per builder.
-- **`observedAt` is OUR observation time** (neither branch nor PR query selects `completedAt`), so
-  the copy says "detected", never "failed at".
-- **Actor-less**, so — exactly like Claude runs — the server skips them under `botsOnly` or any
-  member filter, and they are **WITHHELD from `enrichMyTurn`**: a null actor is trivially "not
-  you", so handing them over would turn every red build on a participating PR into an UNCAPPED
-  My-Turn card, a core-lane behaviour change hidden inside a CI toggle.
-- They are NOT in the uncapped `alwaysRows` set (a flaky matrix build would starve the 250-row
-  plain-activity budget), the per-page enrichment must NOT overwrite their `ciStatus` with the PR's
-  LIVE rollup (the card reports the state AT the observation), and `trunk_ci_failed` has **no PR**
-  — its card is non-clickable and carries one `safeExternalUrl`'d commit link instead.
-- Client side: `feedShowCiFailures` is a FETCH toggle threaded into the feed key AND the head-poll
-  key, and the one feed toggle that PERSISTS with the filter bar. See CLAUDE.md § Frontend.
-- ⚠ **No backfill for the trunk log** — see docs/MIGRATIONS.md § known gaps.
+**No CI-failure, Claude Review or "Needs review" rows.** The synthesized `ci_failed` /
+`trunk_ci_failed` / `claude_review` feed kinds, their builders and their pills are DELETED — Pending
+owns those. Every feed item is an `events` row.
 
 **Pro: Haiku digests — per-repo, rendered as a COLLECTION** (`packages/pro/src/activity-digest/`).
 The flagged AI panel: a per-repo banner in each repo's console (`DigestBanner` → `RepoDigestCard`,
@@ -1182,7 +1159,15 @@ the named composite FK `workspace_slack_targets_workspace_account_fk` against co
 **A ROW IS A DELIVERY TARGET.** It exists ⇒ that workspace's digest is generated on this schedule
 and posted to this channel; no row ⇒ nothing.
 
-**WHAT THE MESSAGE SAYS — the configuring account's own Pending board** (`slack/pending-blocks.ts`),
+⚠ **STRICTLY PRO (`slackDigest`, 2026-10).** Slack is an ORG feature. Every Slack route 402s unless
+the plugin's paid flag is on (a `preHandler` in `slack/routes.ts` — locally too, where the host's
+`/api/pro/*` gate lets everything through); in cloud a free plan 402s at that host gate first. Work
+with no request — the digest sweep and the two event signals — asks the optional
+`ctx.accountEntitled(accountId, 'slackDigest')` seam (no `apiVersion` bump). Settings shows the
+section VISIBLE-BUT-LOCKED (`SlackSettings` → `ProLockPanel`), and `useSlackTarget` ANDs the
+capability into `enabled`.
+
+**WHAT THE MESSAGE SAYS — the TEAM tabs of the Pending board** (`slack/pending-blocks.ts`),
 then a SHORT AI sprint summary (one section), then the optional bot block, then the footer link.
 The per-repo AI digests are no longer sent. The board comes from the OPTIONAL host seam
 `ProHostQueries.getPendingBoard(accountId, workspaceId)` → `PendingBoardSnapshot` (core
@@ -1190,8 +1175,15 @@ The per-repo AI digests are no longer sent. The board comes from the OPTIONAL ho
 the two cannot list different cards; `apiVersion` stays 21 — an older host leaves it undefined and
 the Pending sections are simply absent). The seam runs WITHOUT the route's two live extras
 (failing-check names, suggested reviewers): a cron send spends no GitHub budget.
-- Sections follow `PENDING_TABS` — "My turn (@login)" (a channel reads ONE person's board, so it
-  says whose), Needs fixing, Waiting on review, Unanswered threads, Ready to land, Dependencies.
+- ⚠ **THE AUDIENCE IS THE TEAM.** Sections follow `PENDING_TABS` minus `PERSONAL_PENDING_TABS`
+  (My turn, Claude reviews — one person's board, the configuring account's): Needs fixing, Waiting
+  on review, Unanswered threads, Ready to land, Dependencies. Nothing names the configuring account.
+  A new tab key fails to compile in `PENDING_TAB_LABEL` until it is labelled or declared personal.
+  ⚠ A CARD ABOUT THE VIEWER is dropped from a team tab too (`isViewerScopedCard`): `ci_failing`'s
+  `your_pr` arm lists only the configuring account's own red PRs — neither listed nor counted. A
+  red default branch and a conflicting PR stay: facts about a branch or PR that the viewer's
+  access merely COVERS.
+  The sprint report drops EVERY `my_turn` card too (no hash moves — my_turn has no hash slot).
   Empty sections are skipped; the review-load people strip is not a PR and is left out.
 - ⚠ **A PR IS MENTIONED ONCE**, in the first tab (board order) that lists it; a red default branch
   likewise, keyed by repo. A later tab neither lists nor counts it.
@@ -1319,6 +1311,25 @@ Model text and titles are Slack-escaped, and every mrkdwn object is `verbatim: t
 URL the model writes is rewritten: a PR or issue URL becomes its `owner/name#N` token, and anything
 else becomes plain text. Sections split at line boundaries (`fitSections`): up to 3 for the sprint
 and 2 per repo, inside a 48-block budget. A cut never lands inside a link.
+
+### The Slack EVENT signals (plugin migration 0040)
+
+Two per-workspace switches on the delivery row, **both OFF by default**, sent to the same webhook
+(`slack/signals.ts`); `cadence: 'off'` pauses the digest, not these.
+- **"Claude Review ran"** (`notify_reviews`) — PR link (Limn + GitHub), author, verdict and the run's
+  own `summary`, trimmed to 700 characters. Never the findings. Only a SUCCEEDED run, never a
+  `skip`-routed one. The Settings switch shows only where Claude Review can run (`me.ai.enabled`).
+- **"Pull request merged"** (`notify_merges`) — PR, repo and who merged it (`pull_requests.merged_by_id`,
+  already synced). Only for a merge SEEN LIVE: core's `sync/merge-notice.ts` requires the row was
+  known OPEN (persistPr's pre-upsert row, or the liveness sweep's open → merged flip, which writes no
+  merger and so leaves an in-memory note for the walk that follows) and `mergedAt` within 2 hours. A
+  first sighting, the deep backfill and any re-walk of a merged row stay silent.
+- Host → plugin through the optional `ProContext.registerEventHooks({ onClaudeReviewCompleted,
+  onPullRequestMerged })` (core `pro/event-hooks.ts`), fired AFTER the commit, fire-and-forget,
+  ids only. `apiVersion` stays 23.
+- ⚠ **CLAIM, THEN SEND, NEVER RETRY.** `slack_signal_notices` (unique `(account_id, kind, ref_id)`;
+  `merge` keys the PR, `review` the run) is inserted before the webhook call; a failed post is logged
+  and stays claimed — a retry double-posts when Slack accepted but answered late. In the erasure list.
 
 **Rate limits, erasure, secrets.** `PUT`/`DELETE /api/pro/slack/target` is a SETTINGS WRITE on
 `read` (one upsert or one delete, no model, no GitHub) and `POST /api/pro/slack/test` stays on
@@ -1475,9 +1486,10 @@ open). Two predicates in `api/routes/bot-triage.ts` say which is which:
   `monthly_cents`: Art. 15/20 are about the subject's own data, not a feature tier
   (`db/export-account.ts` records the split).
 
-⚠ **`/api/bot-analytics/bot-only-prs` STAYS FREE and must not be swept in by a later "finish the
-job" pass** — it is the list behind the free amber caution, and a caption and its list have to
-agree. Likewise the resolvable-thread read/resolve pair and per-PR dedup.
+⚠ **SUPERSEDED (Bots Monitoring went Pro as a whole):** `/api/bot-analytics` now 402s on the union
+(`botDepth || periodReports`) instead of narrowing, and `…/bot-only-prs` plus the resolvable-thread
+read/resolve pair 402 on `botDepth`. Per-PR dedup and `/api/bot-reviewers` (bot hiding) stay free.
+The narrowed-shape notes below are history.
 
 ⚠ **`vendors`, `suggestions` and `totals` are REQUIRED on `BotAnalyticsResponse`**, which is why the
 narrowed `totals` carries zeros rather than absence (`actedOnPct` takes the honest `null`). Nothing
@@ -1489,7 +1501,7 @@ distinction nothing currently reads — every consumer is contractually forbidde
 payload for entitlement. Do it with the next apiVersion bump, when the plugin half is being touched
 anyway. The ambiguity is pinned in `bot-triage-entitlement.test.ts` so it stays a known shape.
 
-⚠ **`useBotAnalytics` MUST STAY UNGATED** for the same reason the route narrows. Every OTHER hook
+⚠ **`useBotAnalytics` callers now AND `botDepth`** (the People report ANDs `periodReports`). Every OTHER hook
 onto a now-402 route needs `enabled: … && botDepth` (`useBotBehaviour` is the pattern), or a mounted
 component re-fires the 402 on its own cadence — twice over for the two infinite queries with scroll
 sentinels (`useBotFlagging`, `useBotVolumePrs`).
@@ -2323,7 +2335,7 @@ forward is the transcript, not stale data), and the answer may end in a `FOLLOWU
   kept. A client cap is a convenience, not the enforcement.
 - **The answering model is the account's resolved REPORT model**, not the hardcoded Haiku
   `DIGEST_MODEL`: `pro_settings.report_model` → `readReportModel` → `DEFAULT_REPORT_MODEL`
-  (`PRO_REPORT_MODEL`, default `claude-haiku-4-5`), through `makeReportClient`. There is
+  (`PRO_REPORT_MODEL`, default `claude-haiku-5-5`), through `makeReportClient`. There is
   deliberately no per-request override — a follow-up is fresh work billed at the model the
   account chose. The ledger row, the response's `model` and the stored history row all carry the
   RESOLVED id, so `costUsd` (priced from that model's `REPORT_MODEL_PRICING` row) and the ledger
@@ -2902,7 +2914,7 @@ paywall. It has been folded into the **Pending** board:
 
 - the two signals the cards never carried (`merge`, `update_branch`) are now real `InsightKind`s
   emitted by `getWorkspaceInsights`, so **all seven** WorkPlanKinds fold off cards;
-- core `GET /api/attention` serves the board as **six tabs**, each ordered by the SAME Do next
+- core `GET /api/attention` serves the board as **seven tabs**, each ordered by the SAME Do next
   scorer the plan ranks with (`db/work-plan.ts` `scoreCards`), **free on every tier**;
 - the `workPlan` capability gates **the sentences only**: a headline and `parked` above the tabs,
   and one `why` per planned row, shown on that row's card in whichever tab it sits. A free or OSS

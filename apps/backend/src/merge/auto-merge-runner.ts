@@ -25,6 +25,8 @@
 //                              value of arming. Only the head-moved case disarms.
 //   7. clean / unstable      → re-read the intent (the user may have hit Cancel mid-tick) and
 //                              merge. ('unstable' = non-required checks red; GitHub merges it.)
+//                              A POLICY intent (`armedByPolicy`, the dependency setting) is no
+//                              different: only REQUIRED checks gate it, exactly like a click.
 //   8. the LOCAL LANDING QUEUE → exactly ONE intent per (accountId, repoId) may run rules 5–7;
 //                              the rest wait at phase 'queued_local'. See below.
 //
@@ -731,7 +733,9 @@ async function processOne(
   // recovery automatic; gating them on the slot would leave a repaired waiter permanently
   // skipped for a slot it was never asked to want. The writes below still report the tick's OWN
   // decision (`slot.yieldReason`), so phase and prose can never describe two states of the queue.
-  if (m.mergeableState !== 'blocked') yieldedForFailedChecks.delete(work.id);
+  if (m.mergeableState !== 'blocked') {
+    yieldedForFailedChecks.delete(work.id);
+  }
   if (!conflicts) yieldedForConflicts.delete(work.id);
 
   // ⚠ The stored `viaMergeQueue` flag is deliberately NOT consulted here. `buildArmedRepoQueues`

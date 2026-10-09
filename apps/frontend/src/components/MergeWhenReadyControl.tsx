@@ -15,6 +15,7 @@ import {
 import { mergeVerdict, mergeWhenReadyEligible, toMergeStateStatus } from '../lib/ui.js';
 import { ApiError } from '../api/client.js';
 import { TimerIcon } from './Icons.js';
+import { ARMED_BY_POLICY_LABEL } from './AutoMergeBanner.js';
 
 // The dedicated "Merge when ready" control — THE one place auto-merge is ARMED (MergeControl
 // keeps its richer armed panel + cancel, but no arm button). Mounted beside Merge/Close in the
@@ -148,6 +149,9 @@ export function MergeWhenReadyControl({
               ? 'Armed — queueing when ready'
               : 'Armed — merging when ready'}
         </span>
+        {armed.armedByPolicy && (
+          <span className="text-[12px] text-gray-500 dark:text-gray-400">{ARMED_BY_POLICY_LABEL}</span>
+        )}
         <button
           type="button"
           onClick={() => disarm.mutate()}

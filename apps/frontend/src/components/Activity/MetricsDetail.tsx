@@ -19,7 +19,7 @@ import { SortHeader, type SortDir, type SortState, compare, nextSort } from './s
 // the metric-specific figure) so a lead can see WHERE issues cluster. All data comes from a single
 // lazy read (useWorkspaceMetricsDetail); clicking any PR opens its detail tab.
 
-// (No 'open_prs' sub-tab: the "Open PRs" tile reveals the fixed Open PRs tab —
+// (No 'open_prs' sub-tab: the "Open PRs" tile reveals the Open PRs rail line —
 // the ONE open-PR list — not here.)
 // `blurb` names the list's POPULATION (what is in it, and its order) and stays on screen: the
 // Time to merge list holds open pull requests as well as merged ones, which the tile does not, so

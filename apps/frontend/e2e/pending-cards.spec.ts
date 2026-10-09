@@ -7,7 +7,7 @@ import type {
   PendingAuthorSplit,
   PendingTab,
 } from '@pierre-review/shared';
-import { PENDING_TABS, pendingAuthorSideOf } from '@pierre-review/shared';
+import { PENDING_TABS, pendingAuthorSideOf, pendingTabHolds } from '@pierre-review/shared';
 import { fixtures, installMockApi } from './mock-api.js';
 
 // THE PENDING CARD, LAYOUT B — what the reader sees first, and what waits for a click:
@@ -70,7 +70,7 @@ function attentionWithReply(): AttentionCardsResponse {
   const tabs = PENDING_TABS.map((t): PendingTab => {
     const prior = base.tabs?.find((p) => p.key === t.key);
     const ranked: readonly InsightKind[] = t.kinds.filter((k) => k !== 'reviewer_load');
-    const inTab = cards.filter((c) => ranked.includes(c.kind));
+    const inTab = cards.filter((c) => pendingTabHolds(t, c));
     const ofKind = (k: InsightKind): InsightCard[] => inTab.filter((c) => c.kind === k);
     return {
       ...prior,
@@ -102,7 +102,7 @@ async function openMyTurn(page: Page): Promise<{ threadHits: () => number }> {
   page.on('request', (r) => {
     if (/\/api\/threads\/\d+$/.test(new URL(r.url()).pathname)) threads += 1;
   });
-  await page.goto('/app/?view=activity');
+  await page.goto('/app/?view=activity&activityRepo=attention');
   await expect(page.getByTestId('attention-view')).toBeVisible();
   return { threadHits: () => threads };
 }

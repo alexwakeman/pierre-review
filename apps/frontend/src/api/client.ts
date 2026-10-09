@@ -1,5 +1,8 @@
 import type {
   ActiveReviewsResponse,
+  DependencyMergeAllBody,
+  DependencyMergeAllResponse,
+  WorkspaceDependencyAutoMergeResponse,
   AdvisorBriefResponse,
   AdvisorConfigEventBody,
   AdvisorConfigPrBody,
@@ -508,6 +511,13 @@ export const api = {
     ),
   // Auto Claude review for this workspace (CORE, local only — the route is not registered in the
   // cloud or under LIMN_AI_DISABLED). OFF until switched on; a 404 is "not this account's".
+  // "Merge dependency updates automatically" for this workspace (CORE, both modes). OFF by default.
+  workspaceDependencyAutoMerge: (id: number) =>
+    get<WorkspaceDependencyAutoMergeResponse>(`/api/workspaces/${id}/dependency-auto-merge`),
+  setWorkspaceDependencyAutoMerge: (id: number, enabled: boolean) =>
+    fetch(`/api/workspaces/${id}/dependency-auto-merge`, jsonBody('PUT', { enabled })).then((r) =>
+      handle<WorkspaceDependencyAutoMergeResponse>(r),
+    ),
   workspaceAutoReview: (id: number) =>
     get<WorkspaceAutoReviewResponse>(`/api/workspaces/${id}/auto-review`),
   setWorkspaceAutoReview: (id: number, body: SetWorkspaceAutoReviewBody) =>
@@ -771,6 +781,13 @@ export const api = {
     ),
   disarmAutoMerge: (prId: number) =>
     fetch(`/api/prs/${prId}/auto-merge`, jsonBody('DELETE')).then((r) => handle<void>(r)),
+  // Pending → Dependencies' "Merge or arm all": the tab's listed PR ids, processed one by one
+  // server-side. `dryRun` plans from synced rows (no GitHub) for the confirm dialog.
+  mergeAllDependencies: (workspaceId: number, body: DependencyMergeAllBody) =>
+    fetch(
+      `/api/dependencies/merge-all?workspace=${workspaceId}`,
+      jsonBody('POST', body),
+    ).then((r) => handle<DependencyMergeAllResponse>(r)),
   // Every armed (and recently-resolved) intent for the account — the cross-PR "what's queued
   // to land" surface. Pure DB read.
   armedMerges: () => get<ArmedMergeListResponse>('/api/auto-merge'),

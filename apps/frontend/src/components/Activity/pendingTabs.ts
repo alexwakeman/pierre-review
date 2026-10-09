@@ -3,6 +3,7 @@ import {
   PENDING_LIMITS,
   PENDING_TABS,
   pendingAuthorSideOf,
+  pendingTabHolds,
   pendingTabOf,
   type AttentionCardsResponse,
   type InsightCard,
@@ -25,6 +26,7 @@ import type { AttentionRelevanceLens } from '../../store/filters.js';
 
 export const TAB_LABEL: Record<PendingTabKey, string> = {
   my_turn: 'My turn',
+  claude: 'Claude reviews',
   fixing: 'Needs fixing',
   review: 'Waiting on review',
   threads: 'Unanswered threads',
@@ -46,13 +48,6 @@ export function effectivePendingTab(
     if (t != null) return t;
   }
   return picked ?? 'my_turn';
-}
-
-/** Does this tab open with the My turn HEAD — the default-branch strip above the cards? My turn
- *  only; every other tab opens straight onto its own controls and cards. (Open PRs is a fixed tab
- *  between Activity and Timeline, so the head no longer carries a button into it.) */
-export function showsMyTurnHead(tab: PendingTabKey): boolean {
-  return tab === 'my_turn';
 }
 
 /** Does this card survive My turn's "Only yours" ('mine') or its complement ('others')?
@@ -106,7 +101,7 @@ export function tabsOf(data: AttentionCardsResponse | undefined): PendingTab[] {
   const cards = data?.cards ?? [];
   return PENDING_TABS.map((def) => {
     const ranked: readonly InsightKind[] = def.kinds.filter((k) => k !== 'reviewer_load');
-    const mine = cards.filter((c) => ranked.includes(c.kind));
+    const mine = cards.filter((c) => pendingTabHolds(def, c));
     const kindTotals: Partial<Record<InsightKind, number>> = {};
     for (const k of ranked) kindTotals[k] = mine.filter((c) => c.kind === k).length;
     return {

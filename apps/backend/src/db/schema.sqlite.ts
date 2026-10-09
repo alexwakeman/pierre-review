@@ -867,6 +867,11 @@ export const autoMergeRequests = sqliteTable(
     // queue-protected branch). Re-checked live each tick — a queue disabled after arming
     // falls back to the direct merge.
     viaMergeQueue: integer('via_merge_queue', { mode: 'boolean' }).notNull().default(false),
+    // Armed by the workspace's dependency auto-merge setting rather than a click (migration 0093 /
+    // pg 0080). NULL/false = a person armed it. A policy intent lands only on a fully green head
+    // (mergeStateStatus clean / has_hooks — never 'unstable'), and the UI says it was armed
+    // automatically.
+    armedByPolicy: integer('armed_by_policy', { mode: 'boolean' }),
     // When the WATCHER added the PR to the merge queue; null until then (and always null for
     // direct-merge intents). Load-bearing for attribution: a PR that merges while this is set
     // resolves 'merged' (the watcher's doing — the toast fires); one a human queued resolves
@@ -927,6 +932,34 @@ export const autoMergeRequests = sqliteTable(
     accountIdx: index('amr_account_idx').on(t.accountId),
     // The watcher's scan: "every still-armed row", cheapest as an indexed state probe.
     stateIdx: index('amr_state_idx').on(t.state),
+  }),
+);
+
+// ---- Dependency auto-merge: PRs the reader took back (migration 0093 / pg 0080) ----------
+// One row per (account, PR) whose auto-merge intent a PERSON cancelled. The dependency setting
+// (`workspaces.dependency_auto_merge`) never arms a PR with a row here, whatever its head does
+// next: a cancel is a "no" the policy must not overrule. A child of `pull_requests` (cascade),
+// in `accountScopedTables()` and both delete paths.
+export const autoMergePolicySkips = sqliteTable(
+  'auto_merge_policy_skips',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // No single-column FK: the COMPOSITE declaration below (tenancy as a constraint).
+    prId: integer('pr_id').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountPrUx: uniqueIndex('amps_account_pr').on(t.accountId, t.prId),
+    prAccountFk: foreignKey({
+      name: 'amps_pr_account_fk',
+      columns: [t.prId, t.accountId],
+      foreignColumns: [pullRequests.id, pullRequests.accountId],
+    }).onDelete('cascade'),
   }),
 );
 
@@ -1784,6 +1817,12 @@ export const workspaces = sqliteTable(
     // resolved through `resolveAutoFixSettings` (review/claude-review/auto-settings.ts), whose
     // `setWorkspaceAutoReview` is the ONE writer.
     autoFixSettings: text('auto_fix_settings', { mode: 'json' }).$type<StoredAutoFixSettings>(),
+    // DEPENDENCY AUTO-MERGE (migration 0093 / pg 0080): may the server arm "merge when ready" on
+    // every open dependency-automation PR in this workspace's repos (merge/dependency-policy.ts)?
+    // NULL/false = OFF, the default for every workspace; nullable with no default, so no insert
+    // has to name it. The setting IS the consent, so a bot's new head is re-armed; a reader's
+    // cancel is recorded in `auto_merge_policy_skips` and never overridden.
+    dependencyAutoMerge: integer('dependency_auto_merge', { mode: 'boolean' }),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -2101,7 +2140,7 @@ export const workspaceReviewers = sqliteTable(
       t.workspaceId,
       t.authorUserId,
     ),
-    // Listing one workspace's reviewers (the Bots settings list).
+    // Listing one workspace's reviewers (Feed → Bot classification).
     accountWorkspaceIdx: index('workspace_reviewers_account_workspace_idx').on(
       t.accountId,
       t.workspaceId,

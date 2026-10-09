@@ -419,7 +419,7 @@ describe('by repository', () => {
   });
 });
 
-// ── The "i" modal, from the keyboard ──────────────────────────────────────────────────────────
+// ── The "i" popover (and the ticket modal), from the keyboard ──────────────────────────────────────────────────────────
 //
 // Structural, because nothing under test/ renders: these are the two things a keyboard reader
 // loses without, and neither shows up with a mouse.
@@ -438,6 +438,10 @@ describe('the "i" modal from the keyboard', () => {
     expect(body).toContain('tabIndex={0}');
     expect(body).toContain('overflow-auto');
     expect(src).toContain('initialFocus={bodyRef}');
+    // The "i" popover too: its body is focused on open for the same reason.
+    const btn = src.slice(src.indexOf('export function InfoButton'));
+    expect(btn).toContain('initialFocus={bodyRef}');
+    expect(btn.slice(btn.indexOf('ref={bodyRef}'))).toContain('overflow-auto');
   });
 
   it('closes a pinned chart popover as it opens', () => {

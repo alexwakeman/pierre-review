@@ -4,7 +4,7 @@ import { fixtures, installMockApi } from './mock-api.js';
 // Regression gates for the consolidated Activity Feed + click-to-detail UX (see CLAUDE.md):
 //   • a bare URL lands on the OPEN PRS tab (the default view); Activity opens on its Pending rail
 //     entry; an empty workspace lands on the guidance to move repos in
-//   • the rail reads Pending, Feed, Bots, Reports
+//   • the rail reads Open PRs, Pending, Feed, Bots Monitoring, Reports
 //   • a Feed link names `?activityRepo=feed`, and the consolidated stream renders there, flat —
 //     the stream ALONE (no daily brief, no trunk strip, no open-PR panel)
 //   • Pending's My turn tab has two views: its cards, and the default branches + open PRs
@@ -13,14 +13,15 @@ import { fixtures, installMockApi } from './mock-api.js';
 //     get a yellow-bordered card + badge; there is no "seen/Done" control
 //   • clicking ANY feed item opens the full-height PR DETAIL tab (an overlay + a closable
 //     PR tab), NOT an isolated timeline — Show/Focus in the detail then drive the timeline
-//   • Open PRs, Activity and Timeline are permanent, non-closable TABS in the tab strip
+//   • Activity and Timeline are permanent, non-closable TABS in the tab strip; Open PRs is
+//     Activity's first rail line and the default
 
 const overlay = (p: Page) => p.getByTestId('activity-overlay');
 const tabs = (p: Page) => p.getByTestId('pinned-tabs');
 
 async function gotoActivity(page: Page, query = ''): Promise<void> {
   await installMockApi(page);
-  // A bare URL lands on Open PRs (the default view), so Activity is named — the link the app emits.
+  // A bare URL lands on Activity → Open PRs; Activity is named anyway — the link the app emits.
   const extra = query.replace(/^\?/, '');
   await page.goto('/app/' + (/(^|[?&])view=/.test(query) ? query : `?view=activity${extra ? `&${extra}` : ''}`));
   await expect(overlay(page)).toBeVisible();
@@ -35,14 +36,21 @@ const railButton = (p: Page, name: string) =>
   overlay(p).getByRole('button', { name, exact: true });
 
 test.describe('Activity Feed / click-to-detail flows', () => {
-  test('lands on the Activity console with Pending selected by default', async ({ page }) => {
+  test('lands on the Activity console with Open PRs selected by default', async ({ page }) => {
     await gotoActivity(page);
-    await expect(railButton(page, 'Pending')).toHaveAttribute('aria-pressed', 'true');
-    await expect(railButton(page, 'Feed')).toHaveAttribute('aria-pressed', 'false');
-    // The board itself renders — a fixture gap would blank it rather than fail loudly.
-    await expect(page.getByTestId('attention-view')).toBeVisible();
-    // Pending is the default, so the app's own URL names no console.
+    await expect(overlay(page).getByRole('button', { name: /^Open PRs/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(railButton(page, 'Pending')).toHaveAttribute('aria-pressed', 'false');
+    // The list itself renders — a fixture gap would blank it rather than fail loudly.
+    await expect(page.getByTestId('open-prs-view')).toBeVisible();
+    // Open PRs is the default, so the app's own URL names no console.
     await expect(page).not.toHaveURL(/activityRepo=/);
+    // Pending is a named console.
+    await railButton(page, 'Pending').click();
+    await expect(page.getByTestId('attention-view')).toBeVisible();
+    await expect(page).toHaveURL(/activityRepo=attention/);
   });
 
   test('the landing board claims no counts before the workspace resolves', async ({ page }) => {
@@ -58,7 +66,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
         await route.fallback();
       },
     );
-    await page.goto('/app/?view=activity');
+    await page.goto('/app/?view=activity&activityRepo=attention');
     const board = page.getByTestId('attention-view');
     await expect(board).toBeVisible();
     // Unknown is never zero: the badges wait, and the board does not say My turn is empty.
@@ -79,24 +87,28 @@ test.describe('Activity Feed / click-to-detail flows', () => {
       (url) => url.pathname.endsWith('/api/activity'),
       (route) => route.fulfill({ json: { ...fixtures.ACTIVITY, repos: [] } }),
     );
-    await page.goto('/app/?view=activity');
+    await page.goto('/app/?view=activity&activityRepo=attention');
     await expect(overlay(page).getByText(/No repos in this workspace yet/)).toBeVisible();
     await expect(page.getByTestId('attention-view')).toHaveCount(0);
     // Still the Pending entry: the guidance replaces the board, not the selection.
     await expect(railButton(page, 'Pending')).toHaveAttribute('aria-pressed', 'true');
   });
 
-  test('the rail reads Pending, Feed, Bots, Reports', async ({ page }) => {
+  test('the rail reads Open PRs, Pending, Feed, Bots Monitoring, Reports', async ({ page }) => {
     await gotoActivity(page);
-    // The four pseudo-rows are the first `aria-pressed` buttons in the overlay; the per-repo rows
+    // The five pseudo-rows are the first `aria-pressed` buttons in the overlay; the per-repo rows
     // follow them. Polled, because the rail can re-render while the workspace resolves.
     await expect
       .poll(() =>
         overlay(page)
           .locator('button[aria-pressed]')
-          .evaluateAll((els) => els.slice(0, 4).map((el) => (el as HTMLElement).innerText.trim())),
+          .evaluateAll((els) =>
+            // The LABEL span only: Bots Monitoring and Reports carry a Pro badge after it, and
+            // Open PRs a count.
+            els.slice(0, 5).map((el) => (el.querySelector('.truncate')?.textContent ?? '').trim()),
+          ),
       )
-      .toEqual(['Pending', 'Feed', 'Bots', 'Reports']);
+      .toEqual(['Open PRs', 'Pending', 'Feed', 'Bots Monitoring', 'Reports']);
   });
 
   test('a Feed link opens the Feed and survives a reload', async ({ page }) => {
@@ -159,69 +171,56 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(overlay(page).getByRole('button', { name: /Mark seen/i })).toHaveCount(0);
   });
 
-  test('My turn heads its cards with the default branches and no Open PRs button; no other tab does', async ({
+  test('Open PRs is headed by the default branches; My turn is not', async ({ page }) => {
+    await gotoActivity(page);
+    const list = page.getByTestId('open-prs-view');
+    await expect(list.getByTestId('branch-status-panel')).toBeVisible();
+    // The tab strip carries no Open PRs chip any more: it is a rail line.
+    await expect(tabs(page).getByRole('tab', { name: /^Open PRs/ })).toHaveCount(0);
+
+    // ⚠ The branch read is CACHED now, so a strip still mounted on My turn would render at once —
+    // the absence is a real check, not a race against a fetch.
+    await railButton(page, 'Pending').click();
+    const board = page.getByTestId('attention-view');
+    await expect(board.getByRole('tab', { name: /My turn/ })).not.toContainText('…');
+    await expect(board.getByTestId('branch-status-panel')).toHaveCount(0);
+    await expect(board.getByTestId('open-prs-panel')).toHaveCount(0);
+  });
+
+  test('a bare URL lands on Activity → Open PRs', async ({ page }) => {
+    await installMockApi(page);
+    await page.goto('/app/');
+    await expect(overlay(page)).toBeVisible();
+    await expect(page.getByTestId('open-prs-view')).toBeVisible();
+  });
+
+  test('the tab strip is Activity then Timeline; a legacy ?view=open-prs link lands on Open PRs', async ({
     page,
   }) => {
     await gotoActivity(page);
-    const board = page.getByTestId('attention-view');
-    await expect(board.getByRole('tab', { name: /My turn/ })).not.toContainText('…');
-    // The retired view switch is gone.
-    await expect(board.getByRole('tablist', { name: 'My turn views' })).toHaveCount(0);
-    await expect(board.getByTestId('branch-status-panel')).toBeVisible();
-    // Open PRs is a fixed tab now, so the board carries no button into it. The chip's count has
-    // landed by now (same cached read), so the absence is not a race against a fetch.
-    const nonDraft = fixtures.PRS.filter((p) => !p.isDraft).length;
-    await expect(tabs(page).getByRole('tab', { name: `Open PRs · ${nonDraft}`, exact: true })).toBeVisible();
-    await expect(board.getByRole('button', { name: /^Open PRs/ })).toHaveCount(0);
-    // The repo-grouped open-PR panel is no longer mounted anywhere.
-    await expect(board.getByTestId('open-prs-panel')).toHaveCount(0);
-
-    // Another tab opens straight onto its own cards. ⚠ The read is CACHED, so a head still mounted
-    // there would render at once — the absence is a real check, not a race against a fetch.
-    await board.getByRole('tab', { name: /^Needs fixing/ }).click();
-    await expect(board.getByTestId('branch-status-panel')).toHaveCount(0);
-  });
-
-  test('a bare URL lands on Open PRs', async ({ page }) => {
-    await installMockApi(page);
-    await page.goto('/app/');
-    await expect(page.getByTestId('open-prs-overlay')).toBeVisible();
-    await expect(overlay(page)).toBeHidden();
-  });
-
-  test('Open PRs is the first permanent tab, before Activity and Timeline', async ({ page }) => {
-    await gotoActivity(page);
     const strip = tabs(page);
-    const nonDraft = fixtures.PRS.filter((p) => !p.isDraft).length;
-    // The three fixed chips, in order, before any dynamic tab. (Wait for the count to land first:
-    // `allTextContents` does not retry.)
-    await expect(strip.getByRole('tab', { name: `Open PRs · ${nonDraft}`, exact: true })).toBeVisible();
-    const names = await strip.getByRole('tab').allTextContents();
-    expect(names.slice(0, 3).map((n) => n.trim())).toEqual([
-      `Open PRs · ${nonDraft}`,
-      'Activity',
-      'Timeline',
-    ]);
-    // It has no close button: a fixed view is never closed.
-    await expect(strip.getByRole('button', { name: /Close open-PRs tab/i })).toHaveCount(0);
+    // Auto-retrying (a one-shot `allTextContents` raced the strip's first paint).
+    await expect(strip.getByRole('tab').nth(0)).toHaveText('Activity');
+    await expect(strip.getByRole('tab').nth(1)).toHaveText('Timeline');
 
-    await strip.getByRole('tab', { name: `Open PRs · ${nonDraft}`, exact: true }).click();
-    await expect(page.getByTestId('open-prs-overlay')).toBeVisible();
+    await installMockApi(page);
+    await page.goto('/app/?view=open-prs');
+    await expect(overlay(page)).toBeVisible();
+    await expect(page.getByTestId('open-prs-view')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Open PRs', exact: true })).toBeVisible();
-    await expect(page).toHaveURL(/view=open-prs/);
+    await expect(page).not.toHaveURL(/view=open-prs/);
 
-    // Bookmarkable: a reload lands back on it.
+    // A reload lands back on it.
     await page.reload();
-    await expect(page.getByTestId('open-prs-overlay')).toBeVisible();
+    await expect(page.getByTestId('open-prs-view')).toBeVisible();
   });
 
   test('a legacy ?attnView=branches link lands on My turn and is never re-emitted', async ({
     page,
   }) => {
-    await gotoActivity(page, '?attnView=branches');
+    await gotoActivity(page, '?activityRepo=attention&attnView=branches');
     const board = page.getByTestId('attention-view');
     await expect(board.getByRole('tab', { name: /My turn/ })).toHaveAttribute('aria-selected', 'true');
-    await expect(board.getByTestId('branch-status-panel')).toBeVisible();
     await expect(page).not.toHaveURL(/attnView=/);
   });
 
@@ -243,14 +242,13 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     );
     const brief = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith('/api/daily-brief'));
     // ⚠ ABSENCE NEEDS THE DATA FIRST. `toHaveCount(0)` passes the instant nothing is there, so on a
-    // cold Feed load it passes before any of the three reads lands. Land on My turn, where the trunk
-    // strip renders and the open-PR count has landed (the brief is read at boot by the header),
-    // THEN open the Feed: every read is cached, so a panel still mounted there would paint in the
-    // Feed's first render.
+    // cold Feed load it passes before any of the three reads lands. Land on Open PRs, where the
+    // trunk strip renders and the open-PR count has landed (the brief is read at boot by the
+    // header), THEN open the Feed: every read is cached, so a panel still mounted there would paint
+    // in the Feed's first render.
     await page.goto('/app/?view=activity');
-    const board = page.getByTestId('attention-view');
-    await expect(board.getByTestId('branch-status-panel')).toBeVisible();
-    await expect(tabs(page).getByRole('tab', { name: /^Open PRs · \d/ })).toBeVisible();
+    await expect(page.getByTestId('open-prs-view').getByTestId('branch-status-panel')).toBeVisible();
+    await expect(overlay(page).getByRole('button', { name: /^Open PRs \d/ })).toBeVisible();
     await (await brief).finished();
 
     await railButton(page, 'Feed').click();
@@ -263,7 +261,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
 
   test('the Activity | Timeline tabs toggle the board', async ({ page }) => {
     await gotoActivity(page);
-    // Open PRs, Activity and Timeline are permanent tabs (role=tab) in the tab strip, not a header pill.
+    // Activity and Timeline are permanent tabs (role=tab) in the tab strip, not a header pill.
     await tabs(page).getByRole('tab', { name: 'Timeline' }).click();
     await expect(overlay(page)).toBeHidden();
     await expect(page.locator('.vis-timeline')).toBeVisible();

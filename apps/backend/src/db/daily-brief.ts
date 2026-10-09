@@ -330,6 +330,8 @@ async function computeBriefCounts(
   // per kind, so an omission here is a CI failure, not a silence.
   for (const c of insights.cards) {
     if (c.kind === 'ci_failing') ciFailing += 1;
+    // A finished Claude review is listed in its own tab, not My turn, so no My turn line counts it.
+    else if (c.kind === 'my_turn' && c.reason === 'claude_review') continue;
     else if (c.kind === 'my_turn') {
       myTurn += 1;
       if (c.personal) myTurnPersonal += 1;

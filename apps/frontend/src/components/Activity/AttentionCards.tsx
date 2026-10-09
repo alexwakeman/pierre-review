@@ -124,6 +124,7 @@ import {
   useConflictResolverEntry,
 } from '../conflicts/ResolveConflictsButton.js';
 import { LargePrFlag } from './LargePrFlag.js';
+import { PendingCardIcon } from './PendingKindIcon.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
 import {
   AUTHOR_ROLE_CHIP,
@@ -2972,6 +2973,7 @@ function PendingCard({ card, board }: { card: InsightCard; board: PendingBoardAp
     >
       <PrCardEventHeading
         id={titleId}
+        icon={<PendingCardIcon card={card} />}
         lead={heading.lead}
         quote={heading.quote?.text ?? null}
         age={age}

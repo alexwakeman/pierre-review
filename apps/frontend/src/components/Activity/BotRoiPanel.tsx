@@ -677,10 +677,10 @@ function MlTotalsStrip({
  * argument against ever hiding the panel: re-role a bot to `quality_check` in the free Settings tab
  * and it drops out of `vendors`, so without a home here it would look like detection had stopped
  * seeing it. That argument no longer holds, because the ROLE ITSELF IS EDITED ON A FREE SCREEN THAT
- * LISTS IT: Bots → Settings renders an "Other automation" list (quality gates, dependency bots,
+ * LISTS IT: Feed → Bot classification renders an "Other automation" list (quality gates, dependency bots,
  * code agents, …) with each row's role picker, so the bot the user just re-roled is visible, named
  * and re-rolable one click from where they changed it. This section is the ROI-tier restatement of
- * that fact, not its only witness. If the free Settings list is ever narrowed to review bots, this
+ * that fact, not its only witness. If the free classification list is ever narrowed to review bots, this
  * reasoning breaks and the section has to be hoisted next to `TuningSuggestions`.
  *
  * `<details>` rather than React state: it is a disclosure with no other behaviour, and the browser
@@ -1035,7 +1035,7 @@ function VendorTable({
   // the un-narrowed mount. Unlike `onOpenDepth`'s null, this false IS reachable from the live
   // mount — every per-repo Bots tab hits it.
   //
-  // The upgrade nudge for pricing still lives on the price editor in Bots → Settings, never on
+  // The upgrade nudge for pricing lives on the price editor in Feed → Bot classification, never on
   // this table — a locked TABLE and an in-table upsell are two different answers to the same
   // question. And nothing in here may reintroduce a cost figure behind a caveat: the caveat was
   // tried and the grain moved instead.
@@ -1211,7 +1211,7 @@ function VendorTable({
                 // the two figures differ only by the stretch each was measured over — which both
                 // surfaces state. Benchmark measures the reviewer's whole observed span; this
                 // measures the window in the picker, so a bot busier lately reads cheaper here.
-                title="Monthly cost ÷ used threads a month, both over this whole Workspace — the used count is scaled from the selected window to a month, so the price and the work are on the same time base. Bots → Benchmark measures the same fraction over each reviewer's whole observed span instead, so the two answer different questions and need not match. The price is this bot's price FOR THIS WORKSPACE — set it on the bot's card in Bots → Settings. Another Workspace may hold a different figure for the same bot; the two are never added together."
+                title="Monthly cost ÷ used threads a month, both over this whole Workspace — the used count is scaled from the selected window to a month, so the price and the work are on the same time base. Bots Monitoring → Benchmark measures the same fraction over each reviewer's whole observed span instead, so the two answer different questions and need not match. The price is this bot's price FOR THIS WORKSPACE — set it on the bot's card in Feed → Bot classification. Another Workspace may hold a different figure for the same bot; the two are never added together."
               >
                 $ per used thread
               </th>
@@ -1477,8 +1477,8 @@ function VendorTable({
                           // holds $X for this login, but nothing reads it any more — including
                           // when the user deliberately CLEARED the price, which is indistinguishable
                           // from "never migrated" on this row. So it is offered, not charged.
-                          `No price set for this bot in this Workspace. The old account-wide list still has $${formatCostInput(v.legacyOnlyUsd)}/mo for it — re-enter it in Bots → Settings to use it.`
-                        : 'No price set for this bot in this Workspace — set one in Bots → Settings.'
+                          `No price set for this bot in this Workspace. The old account-wide list still has $${formatCostInput(v.legacyOnlyUsd)}/mo for it — re-enter it in Feed → Bot classification to use it.`
+                        : 'No price set for this bot in this Workspace — set one in Feed → Bot classification.'
                       : // `costMonthlyUsd` arrives EFFECTIVE (the server already multiplied a
                         // per-seat unit by the Workspace's derived seat count on read), so the
                         // per-seat case only ANNOTATES the figure — nothing here multiplies.
@@ -1589,7 +1589,9 @@ export function ResolveBacklogBanner({
   workspaceId: number | null;
   repoIds: number[] | null;
 }): JSX.Element | null {
-  const { data } = useResolvableBotThreads(workspaceId, true, repoIds);
+  // Bots Monitoring is Pro (`botDepth`) and the route 402s without it.
+  const { botDepth } = useProCapabilities();
+  const { data } = useResolvableBotThreads(workspaceId, botDepth, repoIds);
   const openBotThreadsDetail = useFilters((s) => s.openBotThreadsDetail);
   const totalThreads = data?.totalThreads ?? 0;
 
@@ -1733,7 +1735,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   // for doing exactly its job.
   //
   // ⚠ THEY MUST STILL BE SHOWN SOMEWHERE. Without this section, marking a bot as a quality check
-  // in Bots → Settings makes it silently VANISH from the only screen that lists review bots —
+  // in Feed → Bot classification makes it silently VANISH from the only screen that lists review bots —
   // indistinguishable from "we stopped detecting it", and there is no way to notice a MIS-role.
   // Volume only: no verdict, no noise ratio, no $/acted-on, because those are the ROI judgements
   // that were deliberately withheld.
@@ -2041,7 +2043,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
         <div className="text-[11px] text-gray-500 dark:text-gray-400">
           {showCost ? (
             <>
-              Set a bot’s monthly price in <span className="font-medium">Bots → Settings</span> to
+              Set a bot’s monthly price in <span className="font-medium">Feed → Bot classification</span> to
               see $ per used thread.
             </>
           ) : (

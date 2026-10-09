@@ -1,7 +1,7 @@
 import type { User, WorkspaceReviewer } from '@pierre-review/shared';
 
 // The CLIENT MIRROR of the server's union bot set (`hiddenBotUserIds` in db/queries.ts) — the set
-// the Timeline's "hide bots" and the Feed lens hide.
+// the Timeline's "hide bots" hides and the Feed's people/bots toggle splits on.
 //
 // The rule, per actor:
 //   1. The WORKSPACE's stored judgement wins in BOTH directions: `automated` adds the actor, a

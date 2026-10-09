@@ -44,12 +44,13 @@ Three places carry it, and they are ONE decision written three times:
   state; `verify:isolation` calls that fold directly. The free/paid line is a ROUTING decision, and
   the day it moves into `pr-intervals.ts` those assertions need an account to run. Same reason the
   `[7, 90]` window clamp lives in the engine and the entitlement check does not.
-- ⚠ **THE REPORTS RAIL ENTRY IS UNGATED ON EVERY TIER AND THIS DID NOT CHANGE THAT.** The free flow
-  metrics share the pane and are the reason the entry is free. Only the named sub-tab is gated.
+- ⚠ **THE WHOLE REPORTS RAIL ENTRY IS PRO (`periodReports`)**, flow metrics included: listed on
+  every tier with one ProBadge, the whole pane one `ProLockPanel` when unentitled. The Chronology
+  tab's own lock stays as defence in depth.
 - ⚠ **VISIBLE-BUT-LOCKED, WHICH REVERSES THE APP'S USUAL POSTURE** (elsewhere a missing capability
   is silent absence — `WorkspaceBotCharts` returns null, the "Depth →" pill is omitted). The
-  reversal is scoped to six named surfaces; `apps/frontend/src/components/ProGate.tsx` enumerates
-  them and owns the badge and the locked pane. Nothing hand-rolls either.
+  reversal is scoped to two whole rail entries (Reports, Bots Monitoring);
+  `apps/frontend/src/components/ProGate.tsx` names them and owns the badge and the locked pane. Nothing hand-rolls either.
 - ⚠ **AN UNENTITLED `?insightsTab=bottlenecks` RENDERS THE LOCK UNDER THE TAB IT NAMED.**
   `effectiveInsightsTab` normalises values outside the union only — never a gated member. That
   literal ships in bookmarks and in history entries Back replays, and a redirect to Overview would

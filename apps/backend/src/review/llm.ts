@@ -1,7 +1,13 @@
 // The cheap-tier ("Haiku") completion seam. Core-owned so the optional @pierre/pro
 // plugin can do a single-shot LLM call (e.g. the per-repo digest) through ctx.llm
 // WITHOUT adding its own Anthropic dependency. Non-agentic: one completion, no
-// tools, no thinking.
+// tools.
+//
+// ⚠ THE DEFAULT MODEL THINKS UNLESS TOLD OTHERWISE. Its adaptive thinking is on by default and its
+// thinking tokens count toward `max_tokens`, so a small cap tuned for the previous Haiku could stop
+// after a thinking block with no text at all. Every call to it therefore goes out at effort 'low'
+// (it may skip thinking entirely on a simple prompt) with THINKING_HEADROOM added to the cap. It
+// also 400s on a non-default temperature/top_p/top_k and on an assistant prefill: send neither.
 //
 // AUTH is CALLER-OWNED (this is deliberate — it keeps each feature's auth discrete):
 //   • `opts.apiKey` given → the raw, metered `@anthropic-ai/sdk` with THAT key. The
@@ -43,7 +49,22 @@ export interface CheapCompleteResult {
   usage?: { inputTokens: number; outputTokens: number };
 }
 
-const DEFAULT_MODEL = 'claude-haiku-4-5';
+const DEFAULT_MODEL = 'claude-haiku-5-5';
+
+// Models given the low-effort, headroom-padded shape above. A caller passing another model id (a
+// stored per-account override, say) gets the plain request it always got.
+const ADAPTIVE_CHEAP_MODELS: ReadonlySet<string> = new Set(['claude-haiku-5-5']);
+const THINKING_HEADROOM = 1024;
+
+/** The model-dependent request shape for one cheap completion (exported for the test). */
+export function cheapRequestShape(
+  model: string,
+  maxTokens: number,
+): { maxTokens: number; effort?: 'low' } {
+  return ADAPTIVE_CHEAP_MODELS.has(model)
+    ? { maxTokens: maxTokens + THINKING_HEADROOM, effort: 'low' }
+    : { maxTokens };
+}
 
 export async function cheapComplete(
   opts: CheapCompleteOpts,
@@ -68,9 +89,11 @@ async function rawComplete(
 ): Promise<CheapCompleteResult> {
   const { default: Anthropic } = await loadAnthropicSdk();
   const client = new Anthropic({ apiKey });
+  const shape = cheapRequestShape(model, opts.maxTokens ?? 700);
   const resp = await client.messages.create({
     model,
-    max_tokens: opts.maxTokens ?? 700,
+    max_tokens: shape.maxTokens,
+    ...(shape.effort ? { output_config: { effort: shape.effort } } : {}),
     system: opts.system,
     messages: [{ role: 'user', content: opts.prompt }],
   });
@@ -106,10 +129,12 @@ async function agentComplete(
     ? `${opts.system}\n\n---\n\n${opts.prompt}`
     : opts.prompt;
 
+  const shape = cheapRequestShape(model, opts.maxTokens ?? 700);
   const q = query({
     prompt,
     options: {
       model,
+      ...(shape.effort ? { effort: shape.effort } : {}),
       systemPrompt: opts.system,
       allowedTools: [],
       maxTurns: 1,

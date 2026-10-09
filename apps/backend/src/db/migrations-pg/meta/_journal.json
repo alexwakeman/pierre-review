@@ -561,6 +561,13 @@
       "when": 1791360000000,
       "tag": "0079_finding_pushback",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1791446400000,
+      "tag": "0080_dependency_auto_merge",
+      "breakpoints": true
     }
   ]
 }

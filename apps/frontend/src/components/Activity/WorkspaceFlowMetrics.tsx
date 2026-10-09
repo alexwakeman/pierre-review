@@ -48,7 +48,7 @@ export function WorkspaceFlowMetrics(): JSX.Element | null {
       <WorkspaceMetricsPanel
         metrics={data.metrics}
         onOpenMetric={openMetricsDetail}
-        // The Open-PRs tile reveals the fixed Open PRs tab, every repo (it clears a repo the
+        // The Open-PRs tile reveals the Open PRs rail line, every repo (it clears a repo the
         // "Show all" footer pre-selected) — not a metrics-detail sub-tab.
         onOpenOpenPrs={() => openOpenPrsDetail()}
       />

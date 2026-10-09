@@ -178,7 +178,7 @@ async function seedAccount(accountId: number, login: string): Promise<void> {
       accountId,
       seam: 'summary',
       feature: 'digest',
-      model: 'claude-haiku-4-5',
+      model: 'claude-haiku-5-5',
       costUsd: 0.01,
       occurredAt: new Date(),
     })

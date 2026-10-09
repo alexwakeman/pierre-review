@@ -506,7 +506,7 @@ describe('quality-check role', () => {
       {},
       SCOPE,
     );
-    // automated STAYS true — excludeBots / the feed bot lens / the per-row vendor tag all keep
+    // automated STAYS true — excludeBots / the Feed people-bots split / the per-row vendor tag all keep
     // working. Only the METRIC sets narrow by role.
     expect(c.automated).toBe(true);
     expect(c.role).toBe('quality_check');

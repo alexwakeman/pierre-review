@@ -186,7 +186,7 @@ async function proShots() {
   await shot('bot-settings.png', async () => {
     const c = await ctx({ height: 1050 });
     const p = await c.newPage();
-    await console_(p, 'bots', '&botsTab=settings');
+    await console_(p, 'feed', '&feedTab=classification');
     await p.getByTestId('bot-settings-panel').waitFor({ timeout: 15_000 });
     await p.waitForTimeout(2200);
     await crop(p, p.getByTestId('bot-settings-panel'), 'bot-settings.png', { maxHeight: 1050 });

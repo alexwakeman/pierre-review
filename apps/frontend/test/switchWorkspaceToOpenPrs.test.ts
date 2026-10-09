@@ -1,5 +1,5 @@
-// A pick in the WorkspaceSelector dropdown is a NAVIGATION: switch workspace, land on the fixed
-// Open PRs tab, and drop the Timeline's selected PR. Pinned tabs stay.
+// A pick in the WorkspaceSelector dropdown is a NAVIGATION: switch workspace, land on Activity →
+// Open PRs, and drop the Timeline's selected PR. Pinned tabs stay.
 //
 // What this pins, each of which has a quiet way to regress:
 //   - `setWorkspace` itself does NOT navigate (URL hydrate, Back/Forward and useWorkspaceSync's
@@ -41,19 +41,22 @@ describe('switchWorkspaceToOpenPrs', () => {
     expect(f.repoIds).toBeNull();
     expect(f.selectedPrId).toBeNull();
     expect(f.selectedThreadId).toBeNull();
-    expect(usePinnedTabs.getState().activeTab).toBe('open-prs');
+    expect(usePinnedTabs.getState().activeTab).toBe('activity');
+    expect(useFilters.getState().activityRepoId).toBe('open-prs');
   });
 
   it('from Activity: lands on Open PRs too', () => {
     usePinnedTabs.setState({ activeTab: 'activity' });
     useFilters.getState().switchWorkspaceToOpenPrs(5);
-    expect(usePinnedTabs.getState().activeTab).toBe('open-prs');
+    expect(usePinnedTabs.getState().activeTab).toBe('activity');
+    expect(useFilters.getState().activityRepoId).toBe('open-prs');
   });
 
   it('re-picking the current workspace navigates too', () => {
     useFilters.getState().switchWorkspaceToOpenPrs(3);
     expect(useFilters.getState().workspaceId).toBe(3);
-    expect(usePinnedTabs.getState().activeTab).toBe('open-prs');
+    expect(usePinnedTabs.getState().activeTab).toBe('activity');
+    expect(useFilters.getState().activityRepoId).toBe('open-prs');
     expect(useFilters.getState().selectedPrId).toBeNull();
   });
 

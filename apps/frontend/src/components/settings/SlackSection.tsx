@@ -7,6 +7,9 @@ import {
   useUpdateSlackTarget,
 } from '../../hooks/useSlackTarget.js';
 import { InfoButton } from '../InfoModal.js';
+import { ProLockPanel, useProGateState } from '../ProGate.js';
+import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
@@ -54,6 +57,25 @@ const hourLabel = (h: number): string => {
  * times. The name STAYS in the sentences where it disambiguates one workspace from ANOTHER (the
  * cap disclosure points at a different team's settings), and only there.
  */
+/**
+ * Slack in Settings, behind its Pro gate. ⚠ STRICTLY PRO (`slackDigest`): Slack is an ORG feature,
+ * so an unentitled reader sees the section LOCKED — never the form — and no hook below fires (the
+ * routes 402 anyway). `ready` is the modal's plugin-settings gate, which only the real form waits on.
+ */
+export function SlackSettings({ ready }: { ready: boolean }): JSX.Element | null {
+  const gate = useProGateState(useProCapabilities().slackDigest);
+  if (gate === 'pending') return null;
+  if (gate === 'locked') {
+    return (
+      <ProLockPanel heading="Slack" testId="slack-locked">
+        Post this workspace’s Pending board to a team channel on a schedule, and say when a pull
+        request merges or a Claude review runs.
+      </ProLockPanel>
+    );
+  }
+  return ready ? <SlackSection /> : null;
+}
+
 export function SlackSection(): JSX.Element {
   const { workspaceId, name } = useSettingsWorkspace();
   const query = useSlackTarget(workspaceId != null, workspaceId);
@@ -68,6 +90,10 @@ export function SlackSection(): JSX.Element {
   const [hour1, setHour1] = useState(9);
   const [hour2, setHour2] = useState(16);
   const [botDigest, setBotDigest] = useState(false);
+  const [notifyReviews, setNotifyReviews] = useState(false);
+  const [notifyMerges, setNotifyMerges] = useState(false);
+  // Claude Review runs only where the agentic features do (local), so its switch shows only there.
+  const reviewsCanRun = useAiCapabilities().enabled;
   const [test, setTest] = useState<{ busy: boolean; msg: string | null; ok: boolean }>({
     busy: false,
     msg: null,
@@ -84,7 +110,7 @@ export function SlackSection(): JSX.Element {
     () =>
       target == null
         ? `${workspaceId ?? 'none'}:none`
-        : `${workspaceId ?? 'none'}:${target.cadence}:${target.hour1}:${target.hour2}:${target.botDigest}`,
+        : `${workspaceId ?? 'none'}:${target.cadence}:${target.hour1}:${target.hour2}:${target.botDigest}:${target.notifyReviews}:${target.notifyMerges}`,
     [target, workspaceId],
   );
   // The typed webhook is intentionally dropped on a re-seed: it is already saved (or the save
@@ -98,12 +124,16 @@ export function SlackSection(): JSX.Element {
       setHour1(9);
       setHour2(16);
       setBotDigest(false);
+      setNotifyReviews(false);
+      setNotifyMerges(false);
       return;
     }
     setCadence(target.cadence);
     setHour1(target.hour1);
     setHour2(target.hour2);
     setBotDigest(target.botDigest);
+    setNotifyReviews(target.notifyReviews);
+    setNotifyMerges(target.notifyMerges);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
 
@@ -127,7 +157,7 @@ export function SlackSection(): JSX.Element {
   // `?workspace=` is answered by the account's DEFAULT workspace, which on this surface would post
   // one team's figures into another team's channel.
   if (workspaceId == null || data == null) {
-    return <ScopePendingSection title="Slack digest" failed={query.isError} />;
+    return <ScopePendingSection title="Slack" failed={query.isError} />;
   }
 
   const typed = webhookUrl.trim();
@@ -147,10 +177,19 @@ export function SlackSection(): JSX.Element {
       (cadence !== target.cadence ||
         hour1 !== target.hour1 ||
         hour2 !== target.hour2 ||
-        botDigest !== target.botDigest));
+        botDigest !== target.botDigest ||
+        notifyReviews !== target.notifyReviews ||
+        notifyMerges !== target.notifyMerges));
 
   const onSave = (): void => {
-    const patch: WorkspaceSlackTargetUpdate = { cadence, hour1, hour2, botDigest };
+    const patch: WorkspaceSlackTargetUpdate = {
+      cadence,
+      hour1,
+      hour2,
+      botDigest,
+      notifyReviews,
+      notifyMerges,
+    };
     // Only send the webhook when one was typed. '' would be a no-op server-side, but sending it
     // makes the request carry a secret-shaped field for no reason.
     if (typed !== '') patch.webhookUrl = typed;
@@ -173,13 +212,18 @@ export function SlackSection(): JSX.Element {
 
   return (
     <SectionShell
-      title="Slack digest"
-      desc="Posts this workspace’s Pending board to a Slack channel on a schedule."
+      title="Slack"
+      desc="Sends this workspace’s Pending board, merges and Claude reviews to a Slack channel."
       info={
-        <InfoButton title="Slack digest">
+        <InfoButton title="Slack">
           <p>
-            Each message lists your turn, then each Pending tab: the top 5 of each, every PR once.
-            A short sprint summary follows. Links open the app.
+            Each digest lists the team’s Pending tabs: the top 5 of each, every PR once. My turn is
+            left out. A short sprint summary follows. Links open the app.
+          </p>
+          <p>
+            The two event messages are off until you switch them on. A merge message names who
+            merged the pull request and is sent once per pull request, only for merges seen as
+            they happen.
           </p>
           <p>
             Every workspace with a digest writes its own sprint summary on every send, so at most{' '}
@@ -292,6 +336,43 @@ export function SlackSection(): JSX.Element {
           <span className="block text-[11px] text-gray-400">
             Adds each review bot’s comment count, the share your team used and the number left
             untouched. This workspace’s digest only.
+          </span>
+        </span>
+      </label>
+
+      {/* The two EVENT signals (plugin migration 0040). Same row, same Save; the cadence above
+          does not gate them — "Off" pauses the digest, not these. */}
+      {reviewsCanRun && (
+        <label className="flex items-start gap-2 text-xs">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={notifyReviews}
+            onChange={(e) => setNotifyReviews(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium text-gray-700 dark:text-gray-200">
+              Post when a Claude review runs
+            </span>
+            <span className="block text-[12px] text-gray-400">
+              The pull request, its verdict and the review’s summary. Not the comments.
+            </span>
+          </span>
+        </label>
+      )}
+      <label className="flex items-start gap-2 text-xs">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={notifyMerges}
+          onChange={(e) => setNotifyMerges(e.target.checked)}
+        />
+        <span>
+          <span className="font-medium text-gray-700 dark:text-gray-200">
+            Post when a pull request merges
+          </span>
+          <span className="block text-[12px] text-gray-400">
+            The pull request and who merged it.
           </span>
         </span>
       </label>

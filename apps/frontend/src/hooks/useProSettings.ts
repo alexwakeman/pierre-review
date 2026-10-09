@@ -44,7 +44,7 @@ export function useHasProSettings(): boolean {
 //
 // ⚠ THREE CAPS CAME OFF THIS LIST WITH THEIR SECTIONS, and none of them may drift back:
 //   • `botTriage` — the account-wide "Review bots" section is DELETED. Its explainer pointed at
-//     Activity → Bots → Settings (where a bot's judgement, identity and price actually live, all
+//     Activity → Feed → Bot classification (where a bot's judgement, identity and price actually live, all
 //     CORE/free) and its last knob, the Slack bot digest, is now a per-DELIVERY field folded into
 //     the Slack section (plugin migration 0033). A `botTriage`-only account would otherwise get a
 //     "Workspace" heading with nothing under it.

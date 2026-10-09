@@ -36,9 +36,8 @@ function floatFromEnv(key: string, fallback: number): number {
 }
 
 // The Claude Agent SDK `effort` levels (guides thinking depth + overall token
-// spend). Lower effort → fewer/cheaper thinking tokens + terser output. NOTE:
-// `effort` is rejected by Haiku 4.5 — only models that accept it get it (see
-// review/model-options.ts EFFORT_CAPABLE_MODELS).
+// spend). Lower effort → fewer/cheaper thinking tokens + terser output. Only the
+// models in review/model-options.ts EFFORT_CAPABLE_MODELS get it on an agentic run.
 const REVIEW_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ReviewEffort = (typeof REVIEW_EFFORTS)[number];
 function effortFromEnv(key: string, fallback: ReviewEffort): ReviewEffort {
@@ -445,7 +444,7 @@ export const config = {
   // core so the model id / budgets live in one place and aren't hardcoded at call
   // sites. Inert until the plugin is present AND digestEnabled.
   pro: {
-    digestModel: process.env.PRO_DIGEST_MODEL ?? 'claude-haiku-4-5',
+    digestModel: process.env.PRO_DIGEST_MODEL ?? 'claude-haiku-5-5',
     // The period-report narration's default model. Reaches the plugin the same way digestModel
     // does — the env var itself (@pierre/pro reads PRO_REPORT_MODEL in llm/seam.ts's
     // DEFAULT_REPORT_MODEL); this entry keeps the model ids in the one place they are all
@@ -457,14 +456,14 @@ export const config = {
     // ⚠ THE TWO SPELLINGS MUST AGREE. This literal and `DEFAULT_REPORT_MODEL`'s fallback in
     // packages/pro/src/llm/seam.ts are the same default written twice (the plugin cannot import
     // host config, and this line is where the model ids are documented); a half-edit makes this
-    // comment lie about what actually narrates. Both now say claude-haiku-4-5.
+    // comment lie about what actually narrates. Both now say claude-haiku-5-5.
     //
     // It was claude-sonnet-5 — plan P4.1's "a forwarded sprint retro is worth more prose care
     // than a per-repo digest". Retired: Haiku narrates every summary surface now, so a report
     // cannot differ from the one a colleague forwarded by model. The model id is folded into the
     // narration's payload hash (and the stored row's key), so this flip is a deliberate one-off
     // re-bill: the next generate of each period is a cache miss.
-    reportModel: process.env.PRO_REPORT_MODEL ?? 'claude-haiku-4-5',
+    reportModel: process.env.PRO_REPORT_MODEL ?? 'claude-haiku-5-5',
     digestEnabled: process.env.PRO_DIGEST_ENABLED === 'true',
     digestMaxUsdPerRefresh: floatFromEnv('PRO_DIGEST_MAX_USD', 0.5),
     digestMaxReposPerRefresh: intFromEnv('PRO_DIGEST_MAX_REPOS', 30),

@@ -319,7 +319,7 @@ The one genuinely-missing aggregation is `threadTotals` — sum `buildThreadCoun
 
 ## 4. Pro per-repo LLM digest (`@pierre/pro`, flagged)
 
-**Model:** cheap tier = **`claude-haiku-4-5`** ($1.00/1M in, $5.00/1M out, 200K context). Single-shot, non-agentic, no tools, no thinking, no `effort` (both add cost; `effort` 400s on Haiku).
+**Model:** cheap tier = **`claude-haiku-5-5`** ($0.10/1M in, $0.50/1M out for a prompt up to 100k input tokens; $0.50/$2.50 above; 1M context). Single-shot, non-agentic, no tools. Its adaptive thinking is on by default and counts toward `max_tokens`, so the host seam (`review/llm.ts`) sends `effort: 'low'` and adds 1,024 tokens of headroom; never send `temperature`/`top_p`/`top_k` or an assistant prefill (400). (It was `claude-haiku-4-5` until 2026-10; stored rows naming it still read and price.)
 
 ### 4.1 Payload assembler (`packages/pro/src/inbox-digest/metrics.ts`)
 
@@ -354,7 +354,7 @@ export interface LlmClient {
     : Promise<{ text: string; inputTokens: number; outputTokens: number; costUsd: number }>;
 }
 ```
-Default impl `AnthropicHaikuClient` → `client.messages.create({ model: config.pro.digestModel /* 'claude-haiku-4-5' */, max_tokens, system: [{ type:'text', text: HEADLINES_SYSTEM, cache_control:{type:'ephemeral'} }], messages:[{ role:'user', content: JSON.stringify(payload) }] })`. No `thinking`, no `effort`, no tools. The model id lives in `@pierre/pro` config — never hardcoded at call sites; a future `OpenAiCompatibleClient` drops in by changing `config.pro.digestProvider`. Auth reuses the existing local key seam (`ANTHROPIC_API_KEY` / `review/local-settings.ts`). Internally the plugin can call `ctx.llm.complete` (core-owned Anthropic wiring) so it adds **no new curated dependency**.
+Default impl `AnthropicHaikuClient` → `client.messages.create({ model: config.pro.digestModel /* 'claude-haiku-5-5' */, max_tokens, system: [{ type:'text', text: HEADLINES_SYSTEM, cache_control:{type:'ephemeral'} }], messages:[{ role:'user', content: JSON.stringify(payload) }] })`. No `thinking`, no `effort`, no tools. The model id lives in `@pierre/pro` config — never hardcoded at call sites; a future `OpenAiCompatibleClient` drops in by changing `config.pro.digestProvider`. Auth reuses the existing local key seam (`ANTHROPIC_API_KEY` / `review/local-settings.ts`). Internally the plugin can call `ctx.llm.complete` (core-owned Anthropic wiring) so it adds **no new curated dependency**.
 
 **Grounding system prompt (cached across repos):** *"You will receive a JSON object of pre-computed metrics for ONE repository. Write a 3–6 sentence headline briefing: the types of changes, who is driving them, the level of change vs the prior period, and which review threads remain unresolved. Use ONLY the numbers and names present in the JSON. Do not invent PRs, people, files, counts, or events. Lead with the level-of-change signal. Plain prose, no markdown headers."* The payload is the sole source of truth → output is auditable against `stats`/`prs`.
 
@@ -1128,7 +1128,7 @@ Conventions honored: dual-dialect (no schema change needed for core; if `threadT
 
 # Design: Per-repo LLM "headlines digest" (Pro, flagged) — `@pierre/pro`
 
-**Model decision (from `claude-api` skill):** cheap tier = **`claude-haiku-4-5`** — $1.00 / 1M input, $5.00 / 1M output, 200K context, 64K max output. Single-shot, non-agentic, no tools, no thinking (effort/adaptive add cost and `effort` 400s on Haiku — omit both).
+**Model decision:** cheap tier = **`claude-haiku-5-5`** (was `claude-haiku-4-5`) — see §4 for price, the low-effort request shape and what it refuses.
 
 ---
 
@@ -1211,8 +1211,8 @@ export interface LlmClient {
 }
 ```
 
-- **Default impl** = `AnthropicHaikuClient` backed by `@anthropic-ai/sdk` `client.messages.create({ model: "claude-haiku-4-5", max_tokens, system:[{type:"text", text:SYSTEM, cache_control:{type:"ephemeral"}}], messages:[{role:"user", content: JSON.stringify(payload)}] })`. No `thinking`, no `effort`, no tools.
-- The interface is **OpenAI-compatible-shaped** (system + user + maxTokens → text) so a future `OpenAiCompatibleClient` (GPT/Gemini/local via `/v1/chat/completions`) drops in by changing one config value `config.pro.digestModel` / `config.pro.digestProvider`. The model id is **never hardcoded in call sites** — it lives in `@pierre/pro` config, defaulting to `claude-haiku-4-5`.
+- **Default impl** = `AnthropicHaikuClient` backed by `@anthropic-ai/sdk` `client.messages.create({ model: "claude-haiku-5-5", max_tokens, system:[{type:"text", text:SYSTEM, cache_control:{type:"ephemeral"}}], messages:[{role:"user", content: JSON.stringify(payload)}] })`. No `thinking`, no `effort`, no tools.
+- The interface is **OpenAI-compatible-shaped** (system + user + maxTokens → text) so a future `OpenAiCompatibleClient` (GPT/Gemini/local via `/v1/chat/completions`) drops in by changing one config value `config.pro.digestModel` / `config.pro.digestProvider`. The model id is **never hardcoded in call sites** — it lives in `@pierre/pro` config, defaulting to `claude-haiku-5-5`.
 - **Auth** reuses the existing local key seam: `ANTHROPIC_API_KEY` ambient, or the user-supplied key already wired via `review/local-settings.ts` / `PUT /api/claude-review/key`. Pro digest and Claude Review share the same key source.
 
 **Grounding instruction (system prompt, cached across repos):**
@@ -1268,7 +1268,7 @@ GET  /api/pro/inbox/digests/:repoId     → single repo digest (+ optional ?prId
 - **Rate-limit:** per-account min interval between full Refreshes (e.g. 60s) + the per-account in-flight gate; payload-hash caching means repeated Refreshes on an unchanged board are free and instant.
 - **Content cap:** every payload array is bounded (≤25 PRs, ≤15 threads), so input tokens are bounded regardless of repo size — a runaway repo can't blow the budget.
 - **Prompt caching:** the cached system+grounding block makes multi-repo refreshes cheaper (marginal repos pay input-payload only).
-- **Swappable model:** the model id and provider live in `@pierre/pro` config (`digestModel` / `digestProvider`), consumed only by the `LlmClient` factory. Default `claude-haiku-4-5` via `AnthropicHaikuClient`; swapping to a cheaper/newer tier (or an OpenAI-compatible endpoint) is a config change + an alternate `LlmClient` impl — zero call-site changes, because every call goes through the `LlmClient.complete()` seam.
+- **Swappable model:** the model id and provider live in `@pierre/pro` config (`digestModel` / `digestProvider`), consumed only by the `LlmClient` factory. Default `claude-haiku-5-5` via `AnthropicHaikuClient`; swapping to a cheaper/newer tier (or an OpenAI-compatible endpoint) is a config change + an alternate `LlmClient` impl — zero call-site changes, because every call goes through the `LlmClient.complete()` seam.
 
 **Net:** a 10-repo active workspace pays ~$0.05 for a full cold Refresh and $0 for any Refresh where nothing changed; cost scales only with genuine repo change, gated behind flag + plugin + key + budget, on-demand, never background.
 

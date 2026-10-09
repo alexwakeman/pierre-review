@@ -452,6 +452,35 @@ describe('the auto-merge watcher', () => {
     expect(row.phase).toBeNull();
   });
 
+  it("merges an 'unstable' PR whether a PERSON or the POLICY armed it (only REQUIRED checks gate)", async () => {
+    // A red OPTIONAL check never blocks a merge — the dependency setting included.
+    await q.armAutoMerge(A, prC, { ...armArgs('uuu'), armedByPolicy: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'uuu', mergeableState: 'unstable' }));
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed_p' });
+    await runner.runAutoMergeTick(log);
+    expect(gh.mergePullRequest).toHaveBeenCalledTimes(1);
+    expect(await rowFor(prC)).toMatchObject({ state: 'merged', armedByPolicy: true });
+
+    // The same 'unstable' head armed by a click merges too.
+    await db
+      .update(schema.pullRequests)
+      .set({ state: 'open' })
+      .where((await import('drizzle-orm')).eq(schema.pullRequests.id, prC))
+      .execute();
+    await q.armAutoMerge(A, prC, armArgs('uuu'));
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prC)).state).toBe('merged');
+    expect((await rowFor(prC)).armedByPolicy).toBe(false);
+  });
+
+  it("never merges a POLICY intent that is 'blocked' (a REQUIRED check or review is missing)", async () => {
+    await q.armAutoMerge(A, prC, { ...armArgs('bbb'), armedByPolicy: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'bbb', mergeableState: 'blocked' }));
+    await runner.runAutoMergeTick(log);
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+    expect((await rowFor(prC)).state).toBe('armed');
+  });
+
   it('says "merging" while the merge call is in flight (the row is never blank at success)', async () => {
     await q.armAutoMerge(A, prC, { ...armArgs('mmm'), updateStrategy: 'none' });
     gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'mmm' }));

@@ -7,6 +7,7 @@ import {
   DEFAULT_PR_STATUSES,
   DEFAULT_REVIEW_STATES,
   BOTS_INNER_TABS,
+  FEED_INNER_TABS,
   INSIGHTS_INNER_TABS,
   PR_DETAIL_TABS,
   freshFilterDefaults,
@@ -17,6 +18,7 @@ import {
   sanitizePersistedScope,
   useFilters,
   type BotsInnerTab,
+  type FeedInnerTab,
   type FilterState,
   type InsightsInnerTab,
   type PrDetailTab,
@@ -170,9 +172,10 @@ function namesId(p: URLSearchParams, key: string): boolean {
 /**
  * WHICH BOARD does this URL land on? — the ONE tab decision, made on every load.
  *
- * The rule: **always Open PRs, unless the URL EXPLICITLY names a destination.** Open PRs (one card
- * per open PR, with its Claude review) is the app's front door since 2026-10-07; Activity and the
- * timeline are surfaces you navigate TO, each with its own affirmative `view=`.
+ * The rule: **always Activity, unless the URL EXPLICITLY names a destination.** Activity opens on its
+ * Open PRs rail line (one card per open PR, with its Claude review) — the app's front door — and the
+ * timeline is a surface you navigate TO, with its own affirmative `view=`. (Open PRs was a fixed tab
+ * of its own, `view=open-prs`, until it moved under Activity; that spelling still lands here.)
  *
  * ⚠ `?workspace=<id>` IS NOT A DEEP LINK, and structurally never can be: `writeToUrl` stamps it
  * onto the address bar itself as soon as the scope resolves — within ~1s of every load — so its
@@ -186,7 +189,7 @@ function namesId(p: URLSearchParams, key: string): boolean {
  * The board is named two ways, and they are checked IN THIS ORDER:
  *
  *  1. `view=` — the AFFIRMATIVE statement, written by `writeToUrl` from the live tab. When it
- *     names a board the app knows (`timeline`, `activity`, or the fixed `open-prs` tab), it wins
+ *     names a board the app knows (`timeline`, `activity`, or the retired `open-prs`), it wins
  *     outright. (The read and write halves must always
  *     change together, or a deliberate switch to the board is undone on the next F5.)
  *  2. `?pr=<id>` / `?thread=<id>`, and ONLY when `view=` said nothing — the board INFERRED from a
@@ -202,7 +205,7 @@ function namesId(p: URLSearchParams, key: string): boolean {
  * Testing `pr` first would refresh exactly those users onto the board.
  *
  * Anything else in `view=` — a stale spelling, a hand-edited value — falls through to the
- * inference and then to Open PRs (the default view, since 2026-10-07), the right normalization for
+ * inference and then to Activity → Open PRs (the default view), the right normalization for
  * a destination that no longer exists.
  *
  * `view=` NAMES TABS TOO, not just the two boards, and the spelling is the `Tab.key` VERBATIM
@@ -212,7 +215,7 @@ function namesId(p: URLSearchParams, key: string): boolean {
  * (`applyUrlTab` re-creates it). The seed-backed drill-downs (`bot-flagging`, `people-report`,
  * `search`, …) are NOT named by any URL: their identity lives in transient in-memory seeds, and a
  * restored seed could name a tile the strip no longer shows or people this workspace no longer
- * has. They stay ephemeral, and a URL landing on one resolves to Open PRs — which is exactly what
+ * has. They stay ephemeral, and a URL landing on one resolves to Activity — which is exactly what
  * the unknown-value rule below already does.
  *
  * Exported for its unit test — see test/landingTab.test.ts.
@@ -222,9 +225,10 @@ export function landingTabFromUrl(search: string): ActiveTab {
   const view = p.get('view');
   if (view === 'timeline') return 'timeline';
   if (view === 'activity') return 'activity';
-  // The DEFAULT fixed view (Open PRs · Activity · Timeline) — also what silence means, below. Its
-  // repo dropdown is transient and stays out of the URL: a link to it opens on every repo.
-  if (view === 'open-prs') return 'open-prs';
+  // ⚠ BACK-COMPAT: `view=open-prs` named the retired fixed Open PRs tab and is in bookmarks and
+  // history. It lands on Activity, whose default rail line IS Open PRs (readFromUrl seats nothing
+  // for it, so the 'open-prs' default holds).
+  if (view === 'open-prs') return 'activity';
   if (
     view != null &&
     (parseTabKey(view) != null ||
@@ -234,8 +238,8 @@ export function landingTabFromUrl(search: string): ActiveTab {
     return view;
   }
   if (namesId(p, 'pr') || namesId(p, 'thread')) return 'timeline';
-  // Silence means Open PRs, the app's default view (Activity has its own affirmative `view=`).
-  return 'open-prs';
+  // Silence means Activity → Open PRs, the app's default view.
+  return 'activity';
 }
 
 /** Exported for its unit test only — see test/feedCiFailuresToggle.test.ts. */
@@ -276,22 +280,7 @@ export function readFromUrl(): Partial<FilterState> {
   const stale = p.get('stale');
   if (stale === '0') out.excludeStale = false;
   else if (stale === '1') out.excludeStale = true;
-  // The Feed's CI-failure lens — THREE states, defaulting to 'off' (no CI rows fetched), so only
-  // the two non-default values appear: `ci=1` interleaves them, `ci=only` narrows to them.
-  // `ci=1` has meant "on" since this was a boolean, so links minted under either older shape
-  // still read correctly, and an explicit `ci=0` is still honoured as 'off' — it is now merely
-  // redundant with the default. ⚠ THIS PARAM IS WHAT MAKES IT SURVIVE A RELOAD: it is
-  // persisted with the filter bar, but the persisted blob is read ONLY on a BARE URL, and
-  // writeToUrl puts `?workspace=<id>` (and `view=activity`) on the address bar within a second of
-  // every load — so a FilterDefaults key that is not serialized here is restored precisely never.
-  const ci = p.get('ci');
-  if (ci === 'only') out.feedCiLens = 'only';
-  else if (ci === '0') out.feedCiLens = 'off';
-  else if (ci !== null) out.feedCiLens = 'feed';
-  // ⚠ An OLD link that meant 'feed' carried NO `ci` param (it was the default when the link was
-  // minted), so it now reads as the new 'off' default. That is deliberate and unavoidable — an
-  // absent param cannot be told apart from a bare URL — and it is the same direction as the
-  // stored-blob migration below.
+  // `ci=` (the retired Feed CI-failure lens) is IGNORED — old links parse to the default feed.
   out.customFrom = p.get('from');
   out.customTo = p.get('to');
 
@@ -334,20 +323,22 @@ export function readFromUrl(): Partial<FilterState> {
   const activityRepo = p.get('activityRepo');
   if (activityRepo) {
     if (activityRepo === 'bots') out.activityRepoId = 'bots';
+    // Pending is EXPLICIT since Open PRs became the default rail line (the omitted value).
     else if (activityRepo === 'attention') out.activityRepoId = 'attention';
-    // 'feed' is parsed EXPLICITLY since the landing moved to Pending: the write side emits it, so
+    else if (activityRepo === 'open-prs') out.activityRepoId = 'open-prs';
+    // 'feed' is parsed EXPLICITLY (it is not the default): the write side emits it, so
     // a Feed link must come back as the Feed rather than fall through to the default.
     else if (activityRepo === 'feed') out.activityRepoId = 'feed';
     // ('compare' is deliberately NOT parsed: the "Compare workspaces" rail entry was folded into
     // Reports' "By workspace" axis. A legacy `?activityRepo=compare` link falls through the
-    // parseInt branch below — NaN, nothing set — and lands on the 'attention' default, which is
+    // parseInt branch below — NaN, nothing set — and lands on the 'open-prs' default, which is
     // the normalization for a value that no longer exists. Any other unknown value does the same.)
     // 'insights' USED to be write-only-by-omission: a landing default that stayed out of the URL
     // and was not parsed here either. That made the period report unforwardable — `?report=` names
     // a period on a console the link could not select, so the recipient landed on the Feed and saw
     // no report at all. It is parsed and emitted now. (The one-shot landing default that used to
-    // auto-select this rail entry for Pro accounts is GONE — the store default is 'attention' on
-    // every tier, so making Reports free-visible changes nothing about where the app lands.)
+    // auto-select this rail entry for Pro accounts is GONE — the store default is 'open-prs' on
+    // every tier.)
     else if (activityRepo === 'insights') out.activityRepoId = 'insights';
     else {
       const n = Number.parseInt(activityRepo, 10);
@@ -385,6 +376,21 @@ export function readFromUrl(): Partial<FilterState> {
   // The People / Automation lens. Only the two literals seat it; anything else means All.
   const attnBy = p.get('attnBy');
   if (attnBy === 'people' || attnBy === 'automation') out.attentionAuthorLens = attnBy;
+  // ⚠ BACK-COMPAT: before Open PRs became the default rail line, a Pending link carried NO
+  // `activityRepo` (Pending was the omitted default) — just its `attn*` narrowings (and the retired
+  // `attnView`). Those keys are only ever emitted on Pending, so one of them with no rail named
+  // still means Pending.
+  if (
+    out.activityRepoId === undefined &&
+    !activityRepo &&
+    (p.get('attnView') != null ||
+      out.attentionIsolation != null ||
+      out.attentionTab != null ||
+      out.attentionRelevance != null ||
+      out.attentionAuthorLens != null)
+  ) {
+    out.activityRepoId = 'attention';
+  }
   // The Feed's single-PR isolation — the attention board's twin, addressable for the same reason.
   const feedPr = p.get('feedPr');
   if (feedPr) {
@@ -396,13 +402,22 @@ export function readFromUrl(): Partial<FilterState> {
   // `effectiveTab`, ActivityView's `effectiveFeedTab`), and writing a correction back would
   // permanently forget a choice the moment a capability blinked.
   const feedTab = p.get('feedTab');
-  if (feedTab === 'themes' || feedTab === 'feed') out.feedInnerTab = feedTab;
+  if ((FEED_INNER_TABS as readonly string[]).includes(feedTab ?? '')) {
+    out.feedInnerTab = feedTab as FeedInnerTab;
+  }
   // ⚠ 'benchmark' IS PARSED ON EVERY TIER, capability or not. It is one of the visible-but-locked
   // members, so an unentitled bookmark must land on the tab it names and meet the LOCK there —
   // dropping it here would silently seat 'roi' and explain nothing.
   const botsTab = p.get('botsTab');
   if ((BOTS_INNER_TABS as readonly string[]).includes(botsTab ?? '')) {
     out.botsInnerTab = botsTab as BotsInnerTab;
+  }
+  // ⚠ LEGACY: `?activityRepo=bots&botsTab=settings` was Bots Monitoring → Settings, the bot
+  // classification screen. Classification is FREE and lives on the Feed now, so that bookmark (and
+  // the history entries Back replays) lands on Feed → Bot classification instead of a Pro lock.
+  else if (botsTab === 'settings' && activityRepo === 'bots') {
+    out.activityRepoId = 'feed';
+    out.feedInnerTab = 'classification';
   }
   // The Reports pane's strip. Same raw-seat rule: InsightsView derives what it renders (a value
   // outside the union normalises to 'overview' FOR THE RENDER), so an unknown literal here would
@@ -549,15 +564,6 @@ export function writeToUrl(s: FilterState): void {
   if (s.allowedBotIds.length) p.set('allowBots', s.allowedBotIds.join(','));
   // Hidden is the default; only encode the non-default "show stale" choice (stale=0).
   if (!s.excludeStale) p.set('stale', '0');
-  // 'off' is the default; encode only the two non-default lenses. It is a FilterDefaults key,
-  // so — like every other one — it has to round-trip through the URL to survive a reload: this
-  // subscription makes the address bar non-bare immediately, and the localStorage restore path
-  // only runs on a BARE url. ⚠ The OMITTED value must always be the CURRENT default: when the
-  // default flipped, leaving `ci=0` as the emitted one would have written the default onto every
-  // URL while the newly non-default 'feed' vanished — i.e. the one state that now needs
-  // serializing would be the one state that never survived a reload.
-  if (s.feedCiLens === 'only') p.set('ci', 'only');
-  else if (s.feedCiLens === 'feed') p.set('ci', '1');
   if (s.preset === 'custom' && s.customFrom) p.set('from', s.customFrom);
   if (s.preset === 'custom' && s.customTo) p.set('to', s.customTo);
   // Serialize the category selection whenever it differs from the fresh-load
@@ -579,18 +585,15 @@ export function writeToUrl(s: FilterState): void {
   // The active BOARD (the only tabs that are URL-deep-linkable; pinned-PR tabs stay
   // localStorage-only). Read the active tab from the pinnedTabs store — a different
   // store than this subscriber's, so useUrlState also subscribes to it. `activityRepo`
-  // is emitted for every console except Pending, the default.
+  // is emitted for every console except Open PRs, the default.
   //
   // ⚠ EVERY fixed view is emitted AFFIRMATIVELY, and the timeline and activity halves are not
-  // optional. Silence now MEANS Open PRs (`landingTabFromUrl`), so leaving a board implicit would
-  // bounce a user who deliberately switched to it straight back to Open PRs on the next F5 —
+  // optional. Silence MEANS Activity (`landingTabFromUrl`), so leaving the timeline implicit would
+  // bounce a user who deliberately switched to it straight back to Activity on the next F5 —
   // the write half and the read half of a URL rule always move together.
   const activeTab = usePinnedTabs.getState().activeTab;
   if (activeTab === 'timeline') {
     p.set('view', 'timeline');
-  } else if (activeTab === 'open-prs') {
-    // The fixed Open PRs tab — emitted affirmatively like the other two fixed views.
-    p.set('view', 'open-prs');
   } else if (activeTab === 'activity') {
     p.set('view', 'activity');
     // The board's own narrowings, each emitted ONLY on the rail entry that renders it — a lens
@@ -630,15 +633,17 @@ export function writeToUrl(s: FilterState): void {
     }
     // A single-repo console and the Feed / Bots / Reports consoles are deep-linkable — Reports
     // because omitting it made the period report's `?report=` link land somewhere else.
-    // Only 'attention' stays out of the URL, because it is the bare state a link means when it
-    // says nothing. 'feed' is emitted since the landing moved to Pending — without it a Feed
-    // link would open Pending. Emitting a value the read side does not parse would be
+    // Only 'open-prs' stays out of the URL, because it is the bare state a link means when it
+    // says nothing. 'attention' (Pending) is emitted since Open PRs became the default rail line —
+    // without it a Pending link would open Open PRs. Emitting a value the read side does not parse would be
     // write-only, so the two halves always change together.
     // (The 'retro' pseudo-row is gone with the Retro panel; the 'compare' pseudo-row is gone
     // with the Compare rail entry — its surface is Reports' "By workspace" axis, reachable via
     // `?activityRepo=insights&report=…`.)
     if (typeof s.activityRepoId === 'number') {
       p.set('activityRepo', String(s.activityRepoId));
+    } else if (s.activityRepoId === 'attention') {
+      p.set('activityRepo', 'attention');
     } else if (s.activityRepoId === 'feed') {
       p.set('activityRepo', 'feed');
     } else if (s.activityRepoId === 'bots') {
@@ -658,7 +663,7 @@ export function writeToUrl(s: FilterState): void {
       if (s.insightsReportGrain !== 'sprint') p.set('reportGrain', s.insightsReportGrain);
       if (s.insightsReportKey) p.set('report', s.insightsReportKey);
     }
-    // 'attention' (and null) stay out: a link naming no console means Pending.
+    // 'open-prs' (and null) stay out: a link naming no console means Open PRs.
   } else if (
     parseTabKey(activeTab) != null ||
     parseUserActivityKey(activeTab) != null ||
@@ -761,12 +766,15 @@ const FILTER_STORAGE_KEY = 'pierre:filterBarState';
 // migration the new default would reach new installs only, and every existing user would keep
 // the noisy feed forever — the exact failure the v2→v3 note describes, in the other direction.
 //
+// v5 = the Feed's CI-failure lens is GONE (CI failures left the Feed). `feedCiLens` was the one
+// persisted feed key; the v4 → v5 step drops it so no blob carries a key nothing reads.
+//
 // ⚠ NO BUMP IS OWED for the history work that made `attn` / `feedPr` / `feedTab` / `botsTab` /
 // `insightsTab` / `prTab` URL-visible: not one of them is PERSISTED. This blob's version tracks the meaning of
 // what is STORED, and those keys are transient view state that dies with the tab — the version
 // moves only when a stored key's meaning changes, or when a default flips on a key
 // `pickFilterBarState` writes unconditionally.
-const FILTER_STORAGE_VERSION = 4;
+const FILTER_STORAGE_VERSION = 5;
 
 // Per-version migrations for the persisted filter blob, applied in loadPersistedFilters before
 // the version check (so a migrated blob passes it). Exported for its unit test only.
@@ -784,7 +792,10 @@ const FILTER_STORAGE_VERSION = 4;
 // cannot be told apart from the default that produced it. (Note the pill's own state is what
 // makes this recoverable in one click.)
 //
-// ⚠ The steps CHAIN — a v2 blob must land at v4, so this walks them in order rather than
+// v4 → v5: drop `feedCiLens` again — the lens itself is retired (a v3 blob already lost it in
+// the step above, so this only bites blobs written by a v4 build).
+//
+// ⚠ The steps CHAIN — a v2 blob must land at v5, so this walks them in order rather than
 // returning early on a single version. An `if (parsed.v !== N) return parsed` per step would
 // carry a v2 blob no further than v3, where the version check below then discards it WHOLE.
 export function migratePersistedFilters(
@@ -798,6 +809,10 @@ export function migratePersistedFilters(
   if (out.v === 3) {
     const { feedCiLens: _feedCiLens, ...rest } = out;
     out = { ...rest, v: 4 };
+  }
+  if (out.v === 4) {
+    const { feedCiLens: _feedCiLens, ...rest } = out;
+    out = { ...rest, v: 5 };
   }
   return out;
 }

@@ -76,7 +76,9 @@ export function UserMenu({
         }
       >
         {avatar}
-        <span className="max-w-[10rem] truncate">{label}</span>
+        {/* The name is the first thing to give way at phone width (it pushed the header 20px
+            past a 390px viewport); `sr-only` keeps it as the button's accessible name. */}
+        <span className="sr-only sm:not-sr-only sm:max-w-[10rem] sm:truncate">{label}</span>
         <CaretIcon dir="down" className="shrink-0 text-gray-400" />
       </button>
 

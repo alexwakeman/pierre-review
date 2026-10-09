@@ -403,7 +403,8 @@ export function staleBranchCommitIds(
 // red is nowhere on that row — its only timestamps are `committedAt` (git commit time) and
 // `createdAt` (first insertion). Approximating a failure time with either would be a quiet lie,
 // so an observation gets its own append-only row, exactly as `ci_status_events` does for a PR
-// head (sync/upsert.ts). It is what makes the Feed's trunk CI-failure cards honest.
+// head (sync/upsert.ts). (The Feed's trunk CI-failure cards that first read it are retired; the
+// 14-day retention floor below is kept as-is.)
 //
 // How many rows one repo's log keeps UNCONDITIONALLY. The trim is HYBRID, exactly like
 // `branch_commits` above (newest-N ∪ inside the read window), and for the same two reasons in
@@ -412,9 +413,8 @@ export function staleBranchCommitIds(
 //  • The count half alone was WRONG. `trunkCiTransitionChanged` records a transition on any head
 //    move, and `syncBranchStatus` runs at the end of every walk (as often as every 120s on a hot
 //    repo), so an active repo produces transitions far faster than the Feed's window elapses —
-//    and a pure newest-200 bound evicted the failure rows `getTrunkCiFailureFeedItems` reads over
-//    FEED_WINDOW_DAYS. The symptom is invisible: the Feed just quietly stops showing trunk
-//    failures on exactly the repos that have the most of them.
+//    and a pure newest-200 bound evicted failure rows still inside FEED_WINDOW_DAYS — invisibly,
+//    on exactly the repos that have the most of them.
 //  • The age half alone would be wrong too. A dormant repo's whole log is older than the cutoff,
 //    so an unconditional age bound would delete every row it has and the next observation would
 //    read as a first observation forever.
@@ -425,8 +425,7 @@ export const TRUNK_CI_EVENT_WINDOW = 200;
  * anything both below the newest-TRUNK_CI_EVENT_WINDOW floor AND older than the Feed's read
  * window. Pure and exported so the hybrid bound's two halves are pinned by tests, not comments.
  *
- * `observedAt` (our observation time) is the right axis because it is exactly what
- * `getTrunkCiFailureFeedItems` filters on.
+ * `observedAt` (our observation time) is the axis, because readers filter on it.
  */
 export function staleTrunkCiEventIds(
   rows: { id: number; observedAt: Date }[],

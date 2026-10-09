@@ -2116,7 +2116,7 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
   for (const repoId of [WEB, API, INFRA]) {
     insDigest.run(
       1, repoId, `demo-digest-${repoId}`, maxEventAt(repoId),
-      'claude-haiku-4-5', DIGESTS[repoId]!, 0.0031, 6214, 342, hoursAgo(2),
+      'claude-haiku-5-5', DIGESTS[repoId]!, 0.0031, 6214, 342, hoursAgo(2),
     );
   }
 
@@ -2202,7 +2202,7 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
-      1, insightsHash, 'claude-haiku-4-5', SPRINT_SUMMARY,
+      1, insightsHash, 'claude-haiku-5-5', SPRINT_SUMMARY,
       0.0044, 8931, 512, Math.floor(window.fromMs / 1000), Math.floor(window.toMs / 1000),
       hoursAgo(2),
     );
@@ -2223,7 +2223,7 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
       '',
       '**Risk** — Low blast radius (staging first, prod behind a separate apply), but the current revision inverts the min/max bounds — which is exactly why `terraform plan` fails validation.',
     ].join('\n'),
-    'claude-haiku-4-5', 0.0018, 3120, 214, hoursAgo(3),
+    'claude-haiku-5-5', 0.0018, 3120, 214, hoursAgo(3),
   );
   insAnalysis.run(
     1, INFRA, 114, 'ci_analysis', 'sha114headcommit', 'demo-ci-114',
@@ -2235,7 +2235,7 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
       '',
       '**Suggested fix** — restore `min_size = 2` and raise `max_size = 8` for the intended head-room; `desired_size = 4` stays valid inside the corrected range.',
     ].join('\n'),
-    'claude-haiku-4-5', 0.0021, 4480, 296, hoursAgo(2),
+    'claude-haiku-5-5', 0.0021, 4480, 296, hoursAgo(2),
   );
   raw
     .prepare(

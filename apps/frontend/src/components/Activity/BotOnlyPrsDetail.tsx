@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useProCapabilities } from '../../hooks/useTriage.js';
 import type { BotOnlyPrItem, BotWindowKind, User } from '@pierre-review/shared';
 import { useBotOnlyPrs } from '../../hooks/useBotTriage.js';
 import { useUsers } from '../../hooks/useTimeline.js';
@@ -17,9 +18,9 @@ import { InfoButton } from '../InfoModal.js';
 // route also returns (client-side filter on `state`, so toggling is instant). A SORTABLE table
 // (age, last-update, author, bot, state); the cross-repo tab adds a Repo column + a repo filter
 // dropdown. Bot-touch is judged over the PR's whole history and open PRs are unwindowed, so rows
-// may predate the feed window. Clicking a row opens its detail tab; "Show in feed" returns to the
-// matching Bots rail entry with the PR isolated (bypasses the feed window); a Pierre-verbatim row
-// has no bot-actor events, so it explains instead.
+// may predate the feed window. Clicking a row opens its detail tab; "Show in feed" opens the
+// Feed's Bots side with the PR isolated (bypasses the feed window); a Pierre-verbatim row has no
+// bot-actor events, so it explains instead.
 
 // The window picker options — kept in lockstep with BotRoiPanel's WINDOWS (same store field).
 const WINDOWS: { key: BotWindowKind; label: string }[] = [
@@ -138,7 +139,7 @@ function Row({
           // instead of offering a dead-end button.
           <span
             className="cursor-help rounded border border-amber-300/60 px-1.5 py-0.5 text-[11px] text-amber-500 dark:border-amber-700/50 dark:text-amber-400/70"
-            title="This review was posted via Limn with your token, so it has no bot activity to show in the bot feed — open it on GitHub instead."
+            title="This review was posted via Limn with your token, so it has no bot activity to show in the Feed — open it on GitHub instead."
           >
             via Limn
           </span>
@@ -148,7 +149,7 @@ function Row({
             onClick={() => onShowInFeed(pr)}
             aria-pressed={isolated}
             className="rounded border border-amber-400 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-600/70 dark:text-amber-300 dark:hover:bg-amber-900/30"
-            title="Return to the Bots console with this PR isolated in the bot feed (bypasses the feed window)"
+            title="Open the Feed's bot activity for just this PR"
           >
             Show in feed
           </button>
@@ -169,10 +170,12 @@ export function BotOnlyPrsDetail(): JSX.Element {
   // persists for the tab's lifetime; only reset when the next drill-down opens.
   const focusRepoId = useFilters((s) => s.botOnlyFocusRepoId);
   const repoScope = useMemo(() => (focusRepoId != null ? [focusRepoId] : null), [focusRepoId]);
+  // Pro (`botDepth`) with the rest of Bots Monitoring; the route 402s without it.
+  const { botDepth } = useProCapabilities();
   const { data, isLoading, isError, refetch, isFetching } = useBotOnlyPrs(
     workspaceId,
     window,
-    true,
+    botDepth,
     repoScope,
   );
   const prs = useMemo(() => data?.prs ?? [], [data]);
@@ -184,6 +187,7 @@ export function BotOnlyPrsDetail(): JSX.Element {
   const setRepoConsoleTab = useFilters((s) => s.setRepoConsoleTab);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
   const setFeedIsolatedPrId = useFilters((s) => s.setFeedIsolatedPrId);
+  const setFeedAuthors = useFilters((s) => s.setFeedAuthors);
   const feedIsolatedPrId = useFilters((s) => s.feedIsolatedPrId);
 
   // Cross-repo repo filter (the drill-down opened from the cross-repo Bots rail). Built from the
@@ -247,15 +251,17 @@ export function BotOnlyPrsDetail(): JSX.Element {
     openPrDetailTab(meta, { fromActivity: true });
   };
 
-  // Return to the matching Bots rail entry with this PR isolated in the bot feed. ORDER IS
-  // LOAD-BEARING: setActivityRepo clears feedIsolatedPrId, so isolate AFTER the rail move.
+  // Open the Feed's BOTS side with this PR isolated — the repo console's Activity tab when this
+  // drill-down is per-repo, else the cross-repo Feed. ORDER IS LOAD-BEARING: setActivityRepo
+  // clears feedIsolatedPrId, so isolate AFTER the rail move.
   const showInFeed = (pr: BotOnlyPrItem): void => {
     if (focusRepoId != null) {
-      setRepoConsoleTab(focusRepoId, 'bots');
+      setRepoConsoleTab(focusRepoId, 'activity');
       setActivityRepo(focusRepoId);
     } else {
-      setActivityRepo('bots');
+      setActivityRepo('feed');
     }
+    setFeedAuthors('bots');
     setFeedIsolatedPrId(pr.prId);
     showActivity();
   };

@@ -1626,7 +1626,7 @@ function Body({
           headline="No automated reviewer to place"
           message={
             'Nothing in this Workspace is classified as an automated reviewer with activity to ' +
-            'measure. Bots → Settings is where a reviewer is classified; a bot classified there ' +
+            'measure. Feed → Bot classification is where a reviewer is classified; a bot classified there ' +
             'appears here once it has commented.'
           }
         />
@@ -1666,7 +1666,7 @@ function Body({
               // live anywhere — and the route has a test pinning each. Collapsing them with a
               // `?? []` told a reader whose bots simply had not commented yet that their BUILD was
               // deficient, sending them to chase a deployment problem that does not exist. This is
-              // the ordinary state right after somebody classifies a reviewer in Bots → Settings.
+              // the ordinary state right after somebody classifies a reviewer in Feed → Bot classification.
               // ⚠ THE HEADLINE IS SCOPED TO WHAT WAS READ, AND THAT IS NOT PEDANTRY. The first
               // wording — "No reviewer has been active in this Workspace yet" — is FALSE of a
               // workspace whose bots are merely quiet in the sampled window: one real workspace
@@ -1683,7 +1683,7 @@ function Body({
                   'No automated reviewer has commented on the pull requests read here, so there is ' +
                   'nothing to compare or price. Only each repository’s most recently updated pull ' +
                   'requests are read, so a bot busy elsewhere can still be working. A bot ' +
-                  'classified in Bots → Settings appears once it comments on one of them.'
+                  'classified in Feed → Bot classification appears once it comments on one of them.'
                 }
               />
             )

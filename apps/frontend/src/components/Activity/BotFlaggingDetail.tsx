@@ -10,6 +10,7 @@ import { useAutoLoadSentinel } from '../../hooks/useAutoLoadSentinel.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { useBotFlagging } from '../../hooks/useBotFlagging.js';
 import { useBotAnalytics } from '../../hooks/useBotTriage.js';
+import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
@@ -150,7 +151,8 @@ function PopulationPicker({
       : null;
   // Gated on the family so the two arms that render no dropdown never fetch. `enabled: false` still
   // serves a cached entry, which is all this needs anyway.
-  const { data } = useBotAnalytics(workspaceId, window, family != null, repoIds);
+  const { botDepth } = useProCapabilities();
+  const { data } = useBotAnalytics(workspaceId, window, botDepth && family != null, repoIds);
   const ml = data?.ml;
 
   // The option lists, counts folded in. Built here rather than at each `<option>` so a background

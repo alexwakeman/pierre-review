@@ -94,20 +94,17 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             not noise. A PR’s <strong>Bots</strong> chip filters its threads to that vendor;
             you can <strong>bulk-resolve</strong> the ones a later commit likely addressed —
             always a confirm-gated, one-click action that resolves the threads on GitHub, never
-            automatic. The rail&rsquo;s <strong>Bots</strong> console sits directly under the Feed
-            because it is where the Feed&rsquo;s own bot judgement is made: who counts as a review
-            bot <em>in this Workspace</em> (under <strong>Settings</strong>) is exactly what the
-            Feed and the Timeline hide by default. The rest of the strip measures them:
-            per-vendor keep / tune / rarely used verdicts, cost and severity inflation
-            (<strong>ROI</strong>), what they keep flagging (<strong>Themes</strong>) and how your
-            bots compare with the same vendor elsewhere (<strong>Benchmark</strong>).
-            A bot is <em>one row per Workspace</em>, merged by GitHub handle however many repos it
-            runs in, and everything about it is edited there: whether it&rsquo;s automated, whether
-            it&rsquo;s a <strong>quality&nbsp;check</strong> (SonarCloud, Codecov &amp; co, kept out
-            of the ROI verdicts), its vendor name, and its <strong>price</strong>. All of those are
-            per Workspace — setting a price in one leaves the others untouched, and prices are
-            never added up across Workspaces. How we detect bots and how Limn attributes its own
-            reviews stay account-wide, in <strong>Settings → Review bots</strong>.
+            automatic. Who counts as a bot <em>in this Workspace</em> is set on{' '}
+            <strong>Feed → Bot classification</strong> (free): it is exactly what the Feed and the
+            Timeline hide by default. A bot is <em>one card per Workspace</em>, merged by GitHub
+            handle however many repos it runs in: bot or person, its role (a{' '}
+            <strong>quality&nbsp;check</strong> such as SonarCloud is kept out of the review-bot
+            figures), its vendor name and, with Pro, its <strong>price</strong>. Prices are per
+            Workspace and never added up across Workspaces. The <strong>Bots Monitoring</strong>{' '}
+            console (Pro) measures them: per-vendor keep / tune / rarely used verdicts, cost and
+            severity inflation (<strong>ROI</strong>), what they keep flagging (
+            <strong>Themes</strong>) and how your bots compare with the same vendor elsewhere (
+            <strong>Benchmark</strong>).
           </Section>
 
           <Section title="Pending">

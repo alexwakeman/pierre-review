@@ -251,7 +251,7 @@ communicating that uncertainty.
 
 ### Data model
 
-`db/schema.sqlite.ts` + `schema.pg.ts` are authoritative (30 tables). **Per-table contracts and
+`db/schema.sqlite.ts` + `schema.pg.ts` are authoritative (44 tables). **Per-table contracts and
 the automation vocabulary (`ReviewerRole` — SIX members, EXACTLY ONE of which, `'review'`, is
 the reviewer cohort · `AutomatedReviewerKind` · `AUTOMATION_VENDORS`, the ONE table every
 per-family login set is DERIVED from · `REVIEW_BOT_KINDS`) live in
@@ -345,19 +345,20 @@ Four deliberately-separated state layers: **server state** in TanStack Query (PR
 on demand, IndexedDB-persisted at `staleTime: Infinity`), **filter/selection** in Zustand
 `store/filters.ts` (`workspaceId` is the scope), **tabs** in `store/pinnedTabs.ts` (exactly one
 board mounts at a time), **URL** mirrored by `useUrlState.ts` (serializer diffs against
-defaults). App lands on the **Open PRs** tab (the first fixed tab; a URL with no `?view=` means it,
-Activity carries `?view=activity`); Activity opens on the **Pending** board (default
-`activityRepoId: 'attention'`, the one rail value left out of the URL; a Feed link carries
-`?activityRepo=feed`); the Insights rail entry is
+defaults). App lands on **Activity → Open PRs** (the FIRST rail line, headed by the default-branch
+strip; `activityRepoId: 'open-prs'`, omitted from the URL; legacy `?view=open-prs` lands there).
+Fixed tabs: Activity · Timeline. Pending is `?activityRepo=attention` (a legacy link with only
+`attn*` keys still lands there); the Insights rail entry is
 labelled **"Reports"** (LABEL-ONLY — the store/URL value stays `'insights'`). Cloud renders
 `<SignInGate>` on a 401.
 
 Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any:
 
-- **Bots are HIDDEN by default on Timeline AND Feed**, using the UNION set `hiddenBotUserIds`
-  (`users.isBot` ∪ `github_type='Bot'` ∪ vendor logins ∪ the workspace's automated reviewers; a
-  manual "human" judgement wins BOTH directions); the Feed lens `'hide'` rides the SERVER's
-  `excludeBots`, excluded before the page cap. ⚠ `useSearchTimeline` and `rosterTimelineSearch`
+- **Bots are HIDDEN by default on the Timeline, and the Feed is People OR Bots, never mixed**,
+  both by the UNION set `hiddenBotUserIds` (`users.isBot` ∪ `github_type='Bot'` ∪ vendor logins ∪
+  the workspace's automated reviewers; a manual "human" judgement wins BOTH directions). The Feed's
+  toggle (`feedAuthors`, default `'humans'`) rides the server's `?authors=`, split per ITEM before
+  the page cap (a mixed thread shows on both sides). No separate Bots feed. ⚠ `useSearchTimeline` and `rosterTimelineSearch`
   always send `excludeBots=false` — the Members dropdown's bot listing depends on it. A PR Focus
   tab (Events + Hide bots only) filters CLIENT-SIDE (`Timeline/isolateFilter.ts`, its OWN
   workspace's union): ⚠ no filter in `buildTimelineSearch`'s `prIds` branch (re-keys the tab,
@@ -379,15 +380,13 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   render it.
 - **The Feed is a STREAM: `FeedView`, and nothing else.** Every survey panel left it — the work
   plan (Pending head), flow metrics (`WorkspaceFlowMetrics`, Reports), the daily-brief strip
-  (DELETED) and the trunk + Open PRs panels (now My turn's head: the trunk strip; Open PRs is a fixed tab). Do not re-add
-  any. ⚠ **The Reports
-  rail entry is UNGATED on every tier** precisely because those free metrics live there now; the
-  pane gates its Pro half internally — `PeriodReportsPanel`, Track usage, **and now the Chronology
-  sub-tab**, each as a visible-but-locked pane. The same rule holds on the **Bots** rail: the entry
-  and the sub-tab strip stay open on every tier (it owns the free Settings/classification screen),
-  and the `roi` and `benchmark` BODIES lock. ⚠ **A gated sub-tab must still be SELECTABLE** — `effectiveInsightsTab`
-  normalises an out-of-union value and nothing else, never a capability fallback, or an unentitled
-  `?insightsTab=bottlenecks` from a bookmark silently lands on Overview explaining nothing.
+  (DELETED) and the trunk + Open PRs panels (the trunk strip now heads the Open PRs rail line). Do not re-add
+  any. ⚠ **Reports (`periodReports`) and Bots Monitoring (`botDepth`; label-only rename of "Bots")
+  are PRO AS A WHOLE**: ONE `ProBadge` on the rail entry, ONE `ProLockPanel` for the pane, no badges
+  inside; their routes 402. ⚠ Bot HIDING and bot CLASSIFICATION stay FREE: classification is the
+  Feed rail's **"Bot classification"** sub-tab (`feedInnerTab: 'classification'`; a legacy
+  `?botsTab=settings` lands there), one card per bot, and `/api/bot-reviewers*` never 402s — only
+  the price (`PUT …/cost`, the card's price editor) is `botDepth`, ABSENT without it.
 - **REPORTS IS TIED TO ONE REPORTING WINDOW** — the workspace's comparison window (this sprint so
   far when it has a sprint cadence and mode `'sprint'`, else the trailing 7/14 days), resolved ONCE
   per request by core `db/reporting-window.ts` `getReportingWindow`, which asks the PLUGIN's
@@ -401,7 +400,7 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   completed period reports / month to date, and Chronology's 30/60/90-day options.
 - **"Where the work is happening" is TWO CARDS under Flow metrics, both horizontal ROW LISTS
   (`charts/RepoRows`), neither carrying a blended score, both over the REPORTING WINDOW.** LEFT —
-  `WorkspaceRepoActivityCharts`, riding `repoActivity` on the SAME free `/api/workspace-metrics`
+  `WorkspaceRepoActivityCharts`, riding `repoActivity` on the SAME `/api/workspace-metrics`
   response: PRs opened (STACKED people vs automation) beside lines changed, ranked by PRs opened,
   over the window the tiles use (it follows the sprint now — the window is handed in, the fold
   resolves nothing). RIGHT — `WorkspaceReachCard`: pull requests MERGED in that window per repo at
@@ -410,10 +409,8 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   length is a ratio WITHIN one column, never a cross-measure number and NOT the banned normalised
   index (nothing is z-scored, weighted or summed across measures). A GROUPED `BarChart` was never
   available either: `niceMax` gives both series ONE y-axis (50 vs 50k on real data).
-  ⚠ **The repo name is written out IN FULL and wraps** — the rotated 8px axis label it replaced was
-  truncated to 13 chars AND clipped, so 6 of 7 real repos read "…tric-backend";
-  `axisLabels()`/`MAX_LABEL_CHARS`/the "In order:" line are DELETED, and a `title=` tooltip may not
-  replace them (no touch, no keyboard). ⚠ **Unknown is never zero on either card**: `linesChanged:
+  ⚠ **The repo name is written out IN FULL and wraps** — never a truncated axis label or a
+  `title=` tooltip (no touch, no keyboard). ⚠ **Unknown is never zero on either card**: `linesChanged:
   null` prints "size unknown" in that repo's OWN row (the unsized-PR count is still disclosed in
   words), and a null `blastRadius()` verdict is NOT a fourth segment — undrawn, so the reach bars do
   NOT total the merged count the list is ranked by, and that count is stated in words + per repo.
@@ -423,7 +420,7 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   through the ONE `blastRadius()` resolver (`Activity/reachModel.ts`), so the Settings dial repaints
   it with NO cache invalidation; a per-repo level on the wire would be the first server-decided
   level. An empty window renders "No pull requests merged in this window." — the card never
-  vanishes. FREE on every tier, no ProGate. ⚠ Both mount in `WorkspaceFlowMetrics`,
+  vanishes. Pro with the rest of Reports. ⚠ Both mount in `WorkspaceFlowMetrics`,
   **never inside `WorkspaceMetricsPanel`** — that panel ALSO mounts per-repo behind a Pro gate,
   where a per-repo breakdown is one row for paying accounts only.
 - **Pending cards carry MERGE-RELATED ACTIONS, on the two FORWARD kinds only** (`merge`,
@@ -463,8 +460,11 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   renders a generic "Bot"; a bot chip on a person is a false claim about a human, so only bots
   are badged. `automation` (role/kind/source) drives the byline and the People/Automation lens; a
   tool's MARKER makes a person's PR automation.
-- **The Pending board is SIX TABS, each a SCORED list** (`PENDING_TABS`: My turn · Needs fixing ·
-  Waiting on review · Unanswered threads · Ready to land · Dependencies; `db/pending-tabs.ts`).
+- **The Pending board is SEVEN TABS, each a SCORED list** (`PENDING_TABS`: My turn · Claude reviews ·
+  Needs fixing · Waiting on review · Unanswered threads · Ready to land · Dependencies;
+  `db/pending-tabs.ts`). ⚠ `my_turn` FEEDS TWO TABS by type (`pendingTabHolds`): `claude_review`
+  → Claude reviews, the rest → My turn; every my_turn TOTAL is My turn's and leaves Claude reviews
+  out (`GET /api/my-turn` keeps them). Each type/tab/chip has its mark (`Activity/PendingKindIcon.tsx`).
   Every PR card is scored by the ONE Do next scorer (`db/work-plan.ts` `scoreCards`) and each tab
   lists highest score first; the first `PENDING_DO_NEXT_SIZE` (5) of whatever view is on screen are
   "Do next". My turn (the reader's type order, Settings → My Turn) and Dependencies (security,
@@ -488,7 +488,7 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   ALLOW-LIST** — a new `InsightKind` with no tab is folded, counted and never listed (a
   compiler-checked test in work-plan.test.ts fails first). ⚠ The visible tab is DERIVED
   (`effectivePendingTab`: a seated kind names its tab, else the picked `attentionTab`, else My
-  turn; My turn ALONE is headed by the trunk strip, count-free; Open PRs is the first permanent tab and the default view). ⚠ "Pending" is a LABEL-ONLY
+  turn; no tab carries the trunk strip — it heads Activity → Open PRs, the default view). ⚠ "Pending" is a LABEL-ONLY
   rename of "Needs attention" — the store/URL literal stays
   `'attention'`. ⚠ **The board EXPLAINS its own order** (header + per-card info popovers, "How
   Pending works" modal), so every admission floor, cap, colour threshold and Do next preset lives
@@ -584,12 +584,9 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   PRs — and must NEVER demote; a stored verdict is ignored unless `content_kind_sha` still matches
   `head_sha`, a comparison that lives ONCE inside `blastSignalsFor`.
   ⚠ **THE LEVEL IS ALREADY UNIVERSAL AND FREE — do not "optimise" it onto sync.** It is folded from
-  synced columns on every read, so a push moves the band with no extra work. MEASURED: classifying
-  `contentKind` for every open PR costs 1,410 calls (~213/day) and **0 of 40** sampled outside the
-  narrow gate were trivial, vs 12% inside it. Two SEPARATE backfills exist and are not
-  interchangeable: `backfillMissingPrFiles` (a level EXISTS AT ALL — took chip coverage 90.2% →
-  100%) and `runChangeShapeClassification` (a level is REFINED). With no `files` there is nothing
-  for a diff to refine.
+  synced columns on every read, so a push moves the band with no extra work (classifying every open
+  PR measured ~213 calls/day for no gain). Two SEPARATE backfills, not interchangeable:
+  `backfillMissingPrFiles` (a level EXISTS AT ALL) and `runChangeShapeClassification` (REFINED).
   ⚠ **THE EXPANSION IS DETERMINISTIC, SO IT IS FREE FOR EVERY TIER** — `reasons[]` + the signal
   vector, no model in that call path. The Pro half is the impact NOTE only. ⚠ **TWO CONTROLS, TWO
   QUESTIONS**: the note's caret is a REVERSIBLE per-viewer collapse (localStorage), while Settings'
@@ -644,20 +641,18 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   `POST /api/reactions/lookup`. The bar renders nothing while state is `undefined` (unknown ≠
   "no reactions"), the toggle carries a per-target MUTATION key, and these queries stay OUT of
   `shouldDehydrateQuery`.
-- **The Feed's "CI failures" control is a THREE-state lens defaulting to OFF** (`feedCiLens`:
-  `'off'` → `'feed'` → `'only'`). **Never ship an include-only toggle whose only feedback is a
-  count.** ⚠ **The OMITTED URL value must always track the CURRENT default, and a default flip
-  on a key persisted UNCONDITIONALLY needs a `FILTER_STORAGE_VERSION` bump.**
-  ⚠ `migratePersistedFilters` steps CHAIN — a v2 blob must land at v4, and a per-step early
-  return strands it where the version check discards the whole blob.
+- **The Feed has no My Turn, Needs review, Claude Reviews or CI-failure filters or items** (Pending
+  owns them; those feed kinds are deleted). Each card wears its pill's icon (`FEED_PILL_META`).
+  **Never ship an include-only toggle whose only feedback is a count.** ⚠ A default flip on a key
+  persisted UNCONDITIONALLY needs a `FILTER_STORAGE_VERSION` bump (now v5, which dropped
+  `feedCiLens`), and `migratePersistedFilters` steps CHAIN — a v2 blob must land at v5.
 - **The Feed's "PR events" pill opens a DEPENDENT chip row** (`Kind` — Opened / Reviewed / Merged
   / Closed; `feedPrEventKinds`, transient, URL-silent): a PARTITION of the pill's six kinds, so
   **empty means ALL FOUR** and an all-off feed is unreachable by clicking. ⚠ **NOT cleared when
   the parent goes off** — the row unmounts, the choice survives (a corrective `set()` here is the
   derived-sub-tab defect). ⚠ **CLIENT-side like its parent, never a wire param**: facets are
   computed over the post-cap stream, so a server `types` filter would zero every OTHER pill's
-  badge, strand the CI/Claude client lenses over rows no longer sent, and re-key the infinite
-  query on every click. Badges ride the `counts.byEventType` facet, which sums to `prEvents`.
+  badge and re-key the infinite query on every click. Badges ride the `counts.byEventType` facet, which sums to `prEvents`.
 
 ---
 
@@ -693,10 +688,15 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   a head move disarms unless proven to be our own update-merge, with a compare-and-set and a
   write-permission re-check at LAND time. ⚠ **`behindBy > 0` is true of most healthy PRs** —
   only `mergeStateStatus === 'behind'` means GitHub is blocking, so never gate Merge on
-  `behindBy`. Exactly ONE UI path arms (`MergeWhenReadyControl`), always storing a real
-  `updateStrategy`. Merge-queue repos arm the same way with a head-pinned ENQUEUE — freshen
-  once BEFORE the first enqueue, never while queued; disarm with `enqueuedAt` set also dequeues
-  (cancel must win).
+  `behindBy`. Every arm — `MergeWhenReadyControl`, Pending → Dependencies' "Merge or arm all",
+  the dependency setting's sweep — goes through ONE function, `armIntentLive`
+  (`merge/arm-intent.ts`), always storing a real `updateStrategy`. Merge-queue repos arm the same
+  way with a head-pinned ENQUEUE — freshen once BEFORE the first enqueue, never while queued;
+  disarm with `enqueuedAt` set also dequeues (cancel must win).
+- **Dependency auto-merge** (`merge/dependency-policy.ts`, CORE; sqlite `0093`/pg `0080`): "Merge
+  or arm all" + a per-workspace setting, OFF by default. ⚠ A POLICY intent merges like a click (REQUIRED
+  checks only — `unstable` lands); the bot's new head is re-armed; a person's cancel is never overridden; both arm with GitHub's
+  merge-in, never a force-push onto the bot's branch. [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md) § Dependency auto-merge.
 - **A repo's armed intents land ONE AT A TIME** (`db/merge-queue.ts`): one slot per
   `(accountId, repoId)` in `armedAt` order, the rest at phase `queued_local`. ⚠ **RULES 1–4 STILL
   RUN FOR EVERY INTENT** — only freshen/enqueue/merge is gated, or a queued intent whose PR was
@@ -774,7 +774,7 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 - CI logs are live ranged reads of the signed Actions blob URL — server-side only, **NEVER
   returned to a client** (it is unauthenticated).
 - Trunk status (`/api/branch-status`) is **informational only** — no attention counts, badges
-  or My Turn items (its strip atop Pending → My turn is count-free). Its detail columns follow the
+  or My Turn items (its strip atop Activity → Open PRs is count-free). Its detail columns follow the
   partial-response write policy (Conventions); the
   commit→PR map keys on `(repoId, number)`.
 
@@ -928,27 +928,32 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
 - `ctx.schema` is `Record<string, any>` — a leftover `ctx.schema.teams` type-checks and throws
   only when the query runs. Grep, don't trust the compiler.
 - Tiers — **free gets the per-PR truth, paid gets the cross-team roll-up**: **core** is free
-  (feed/timeline/My Turn, per-COMMENT ML severity badges, Settings classification, the bot-only
-  caution + `TuningSuggestions`, the `BotTriageCard` grade) **and, locally, the agentic features —
+  (feed/timeline/My Turn, per-COMMENT ML severity badges, bot hiding + classification, the
+  `BotTriageCard` grade)
+  **and, locally, the agentic features —
   Claude Review, AI Fix — on the user's own Claude** (`MeResponse.ai`, above);
-  **pro** adds `botDepth` (NON-AI depth **and the WHOLE Bots → ROI panel** — vendor table,
-  keep / tune / rarely used verdicts, the Inflation column *counts included*, ML flagging, volume, seat
-  prices), `activityDigest`, `periodReports` (period reports + by-workspace axis + the People
-  report + **Chronology**), and `prSummary` — every ONE-SHOT Haiku feature on
+  **pro** adds `botDepth` (the WHOLE **Bots Monitoring** entry — ROI panel, vendor table, verdicts,
+  Inflation, ML flagging, volume, seat prices, Benchmark, triage — NOT classification, which is free
+  on Feed → Bot classification), `activityDigest`,
+  `periodReports` (the WHOLE **Reports** entry — flow metrics, reach cards, period reports,
+  by-workspace axis, the People report, **Chronology**), and `prSummary` — every ONE-SHOT Haiku feature on
   the Anthropic API (PR summary, comment validity/addressed/simplify annotations, the blast impact note, conflict-assist) plus all reporting narration. There is no
   "pro+" tier any more (apiVersion 22). The issue tracker (ticket links, stored tickets, the Open PRs
   ticket stacks) is FREE CORE since apiVersion 23.
-- ⚠ **Those last SIX surfaces are VISIBLE-BUT-LOCKED, reversing the app's "absent, never upsold"
-  posture** (Chronology, period reports, the People report, the by-workspace axis, the ROI panel,
-  and the Bots → **Benchmark** tab): tab listed, `ProBadge` on it, body renders `ProLockPanel` — all
-  from `components/ProGate.tsx`
-  (badge + lock + `useProGateState`; nothing hand-rolls a vermilion chip). Scoped to those six — a
-  seventh needs its own argument, written down where ProGate.tsx keeps the other six.
+- ⚠ **Bots Monitoring, Reports and Settings → Slack are VISIBLE-BUT-LOCKED, reversing the app's
+  "absent, never upsold" posture**: ONE `ProBadge` + a whole-pane `ProLockPanel`, all from
+  `components/ProGate.tsx` (nothing hand-rolls a vermilion chip); a fourth needs its own argument there.
   **Every one is server-enforced with a 402** (a client gate is not a monetisation gate) **and
   every hook reaching a gated route ANDs the capability into its own `enabled`**, or the SPA polls
   a 402. ⚠ Local/OSS is gated too — `entitledProCapabilities` short-circuits on `isLocal` to
-  whatever the plugin published, so a flag-less `pnpm dev` with the submodule shows all five
+  whatever the plugin published, so a flag-less `pnpm dev` with the submodule shows both
   LOCKED; `PRO_DIGEST_ENABLED=true` is the fully-entitled dev run (`pnpm demo` sets it).
+- ⚠ **SLACK IS STRICTLY PRO (`slackDigest`), WHOLLY IN THE PLUGIN** (`packages/pro/src/slack/`):
+  routes 402 (locally too); request-less work asks `ctx.accountEntitled`. The digest is for a TEAM:
+  no personal tab, no card ABOUT the configuring account, never its name. Two per-workspace EVENT
+  signals, OFF by default (plugin `0040`, `registerEventHooks`): Claude Review ran, PR merged.
+  ⚠ A merge is announced only when SEEN LIVE (`sync/merge-notice.ts`; a liveness flip or local
+  `markPrMergedLocally` stamp records it). Each signal is CLAIMED before the post, never retried. [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § The Slack EVENT signals.
 - **Generation is cost-gated everywhere** — every gate is a bill somebody paid: the
   payload-hash cache (⚠ **the hash must zero `Date.now()`-derived fields**, or a dormant scope
   re-bills on a timer); a per-account in-flight slot **claimed SYNCHRONOUSLY, with the credit
@@ -1038,18 +1043,15 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   (`showCost = botDepth && repoId == null` — do NOT simplify back to `botDepth`). ⚠ **`$ per
   acted-on thread` DIVIDES BY A CHOSEN CALENDAR MONTH — `COST_WINDOW_DAYS` = `DAYS_PER_MONTH`
   (30.44) — AT BOTH ENDS**: `monthlyUsd ÷ (acted-on threads whose SETTLE POINT fell in
-  `[now − 30.44d, now)`)`, a division the card prints both halves of. It replaced `Σ_r (acted_r ×
-  30.44 ÷ spanDays_r)`, a window NOBODY CHOSE (237 days on a real card), an order statistic one old
-  comment could set, and a divisor no component ever rendered — US$23.94 against the ROI tab's
-  US$3.2 for the same bot at the same price. **30.44 and not 30 is load-bearing**: the ROI tab
+  `[now − 30.44d, now)`)`, a division the card prints both halves of (it replaced a per-repo span
+  window nobody chose). **30.44 and not 30 is load-bearing**: the ROI tab
   annualises by `DAYS_PER_MONTH ÷ windowDays`, so the two tabs agree at exactly one window length
   and `test/benchmark-roi-agreement.test.ts` fails if the constant moves. The window is FIXED, never
   the ROI chip (a placement must not move because someone flipped a selector elsewhere), and it
   **REFUSES rather than falling back** — `repo_window_incomplete` (a repo younger than the window:
   partial work, whole price), `nothing_acted_on` (a dormant reviewer), `window_underpopulated`
   (< 10 acted-on threads), each withholding the per-thread money ALONE. ⚠ The two tabs still differ
-  on real data (US$1.97 vs US$3.22) because the acted-on DEFINITIONS differ by design — do not
-  reconcile them. Five fold rules
+  because the acted-on DEFINITIONS differ by design — do not reconcile them. Five fold rules
   in [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md), each of which has already
   cost a bug: rates are additive but **spans are NOT** (now VACUOUS — nothing divides by a span;
   kept for its argument); `yours` carries the WINDOW's thread pair and `unacted` the whole SLICE's
@@ -1115,7 +1117,7 @@ a refusable forecast. **Metrics are CORE** (`db/period-metrics.ts`, `db/forecast
   plus a live **month to date**. The grain is a READING CHOICE on the request
   (`?grain=` on the list; every other route derives it from the KEY, `sprint-YYYY-MM-DD` vs
   `month-YYYY-MM`) and is NEVER a stored setting — folding it into the cadence row would move the
-  free flow-metrics window on another tab. ⚠ **The comparison refusal keys on GRAIN FIRST, and on
+  flow-metrics window on another tab. ⚠ **The comparison refusal keys on GRAIN FIRST, and on
   `cadenceDays` ONLY within the sprint grain**: Jan is 31 days and Feb is 28, so a bare day-count
   test refuses EVERY month-over-month comparison, silently. ⚠ A month row keeps its REAL day count
   (28-31), never a sentinel. ⚠ **`grain` is a column that four sites used to hard-code**, so a month
@@ -1229,8 +1231,7 @@ microservice from **`packages/ml`**. Full detail: **[docs/ML-SEVERITY.md](docs/M
   (no weekly denominator exists on the wire), its span is a FIXED 12 weeks beside window-scoped
   table counts and it **says so on the card**, and its marks are deliberately NOT clickable (the
   flagging route has no week narrowing, so a click would open a list contradicting the mark). It is
-  NOT a re-add of the two workspace-grain inflation ChartCards P1.2/C2 cut — those stay cut; see
-  docs/ML-SEVERITY.md § The enlarged inflation chart.
+  NOT a re-add of the cut inflation ChartCards.
 
 ---
 
@@ -1328,8 +1329,7 @@ auth plumbing, or any AI route.** Two zero-dependency core plugins own the postu
   the stored rows and NARROWS the write list** rather than using a `setWhere`.
 - **A target with no stored annotations must render NOTHING and issue NO request** — read the
   ONE per-PR `useAnnotationIndex` query, never a per-target hook behind a tier flag.
-- **A feature can be fully built, correctly gated, and completely UNREACHABLE — grep for the
-  mount.** When a change says a component "now renders in X", check `grep '<Component'`.
+- **A feature can be built, gated and UNREACHABLE — grep for the mount** (`grep '<Component'`).
 - **Two mounts of one paid-generation card must share the MUTATION key, not just the query key**
   (`useIsMutating({mutationKey})`) — per-mount `isPending` resets to "Generate" on a tab switch
   mid-run, inviting a second BILLED POST.
@@ -1471,7 +1471,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0079` and plugin `0034`–`0037` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0080` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

@@ -76,16 +76,17 @@ export interface Tab {
   botMeta?: TabBotMeta | null; // label meta for bot-detail tabs
 }
 
-// Which "tab" the main area is showing: one of the three FIXED views (the workspace's Open PRs
-// cards — the default view —, the Activity console, the timeline board) or one of the dynamic tabs identified by its
-// `Tab.key`. These are ONE axis — only one renders at a time.
-export type FixedView = 'activity' | 'open-prs' | 'timeline';
+// Which "tab" the main area is showing: one of the two FIXED views (the Activity console — the
+// default view, opening on its Open PRs rail line — and the timeline board) or one of the dynamic
+// tabs identified by its `Tab.key`. These are ONE axis — only one renders at a time. (Open PRs was
+// a third fixed view until it moved under Activity as a rail line, `activityRepoId: 'open-prs'`.)
+export type FixedView = 'activity' | 'timeline';
 export type ActiveTab = FixedView | string;
 
 // The fixed views, in tab-strip order. ⚠ Every "is this a fixed view?" test goes through
 // `isFixedView`, never a literal pair — a third view was added once already and a hard-coded
 // `'timeline' || 'activity'` is exactly the check that forgets it.
-export const FIXED_VIEWS: readonly FixedView[] = ['open-prs', 'activity', 'timeline'];
+export const FIXED_VIEWS: readonly FixedView[] = ['activity', 'timeline'];
 export function isFixedView(tab: ActiveTab): tab is FixedView {
   return (FIXED_VIEWS as readonly string[]).includes(tab);
 }
@@ -241,7 +242,6 @@ interface TabsState {
   // as "leave this detail for the board", which is a different intent from a rail click.
   showBoardFromDetail: () => void;
   showActivity: () => void; // idempotent → 'activity'
-  showOpenPrs: () => void; // idempotent → 'open-prs' (the fixed workspace Open PRs tab)
   /**
    * Seat the tab a URL names (`useUrlState`'s `view=`), on load AND on every browser Back /
    * Forward. `fromPop` distinguishes the two: only a real pop promotes the pending feed
@@ -516,9 +516,6 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
     },
     showActivity: () => {
       if (get().activeTab !== 'activity') set({ activeTab: 'activity' });
-    },
-    showOpenPrs: () => {
-      if (get().activeTab !== 'open-prs') set({ activeTab: 'open-prs' });
     },
     applyUrlTab: (tab, opts) =>
       set((s) => {

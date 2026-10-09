@@ -98,6 +98,13 @@ describe('every board popover holds the one slot while open', () => {
   it('the chart popover', () => {
     expect(read('charts/ChartPopover.tsx')).toContain('return claimActivePopover(');
   });
+  it('every panel "i" (InfoButton), which is a popover and never a modal', () => {
+    const src = read('InfoModal.tsx');
+    const btn = src.slice(src.indexOf('export function InfoButton'));
+    expect(btn).toContain('claimActivePopover(() => setOpen(false))');
+    expect(btn).not.toContain('<InfoModal');
+    expect(btn).toContain('modal={false}');
+  });
 });
 
 describe('Settings hands focus back on close', () => {

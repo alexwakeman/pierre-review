@@ -69,16 +69,9 @@ describe('the PR-event chip partition', () => {
   });
 
   it('claims nothing outside the bucket', () => {
-    // The other two controls' kinds, plus the synthesized Feed-only kinds that belong to NO
-    // category pill (see FeedView's catMatch) — dragging one in would silently change what the
-    // Comments pill, the Commits toggle or the CI lens mean.
-    const outside = [
-      ...COMMENT_KINDS,
-      'commit_pushed',
-      'claude_review',
-      'ci_failed',
-      'trunk_ci_failed',
-    ];
+    // The other two controls' kinds — dragging one in would silently change what the Comments
+    // pill or the Commits toggle mean.
+    const outside = [...COMMENT_KINDS, 'commit_pushed'];
     for (const kind of outside) expect(feedPrEventChip(kind), kind).toBeNull();
   });
 });

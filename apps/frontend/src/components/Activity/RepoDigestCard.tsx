@@ -3,7 +3,7 @@ import { relativeTime } from '../../lib/ui.js';
 import { ChevronIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { DigestMarkdown } from './DigestMarkdown.js';
 
-// Friendly model label ('claude-haiku-4-5' → 'Haiku'); falls back to the raw id.
+// Friendly model label ('claude-haiku-5-5' → 'Haiku'); falls back to the raw id.
 function modelLabel(model: string | undefined): string {
   if (!model) return 'Haiku';
   const m = model.toLowerCase();

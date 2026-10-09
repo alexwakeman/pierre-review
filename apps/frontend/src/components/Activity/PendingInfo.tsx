@@ -38,6 +38,7 @@ import {
   type PendingBoardState,
 } from './pendingExplain.js';
 import { AUTHOR_ROLE_CHIP, KIND_LABEL, MY_TURN_REASON_LABEL } from './pendingLabels.js';
+import { PendingReasonIcon, PendingTabIcon } from './PendingKindIcon.js';
 import { TAB_LABEL } from './pendingTabs.js';
 import { WEIGHT_LABEL, weightPhrase } from '../settings/myTurnSettingsForm.js';
 
@@ -336,6 +337,7 @@ function Dot({ severity }: { severity: InsightSeverity }): JSX.Element {
 /** One line per tab for the guide — what the reader will find in it. */
 const TAB_BLURB: Record<(typeof PENDING_TABS)[number]['key'], string> = {
   my_turn: 'Things you owe an action on — see “When it is your turn” below.',
+  claude: 'Claude reviews that finished with findings you have not posted. Same rules as My turn.',
   fixing: 'Failing builds you are on the hook for, and PRs with merge conflicts in repos you can push to.',
   review:
     'PRs whose requested review has not come, and PRs nobody has been asked to review. People with reviews waiting are listed above them.',
@@ -497,7 +499,12 @@ export function PendingGuideModal({
               <tbody>
                 {PENDING_TABS.map((t) => (
                   <tr key={t.key}>
-                    <td className={`${td} whitespace-nowrap font-medium`}>{TAB_LABEL[t.key]}</td>
+                    <td className={`${td} whitespace-nowrap font-medium`}>
+                      <span className="inline-flex items-center gap-1.5">
+                        <PendingTabIcon tab={t.key} className="shrink-0 text-gray-500 dark:text-gray-400" />
+                        {TAB_LABEL[t.key]}
+                      </span>
+                    </td>
                     <td className={td}>{TAB_BLURB[t.key]}</td>
                   </tr>
                 ))}
@@ -509,9 +516,9 @@ export function PendingGuideModal({
               the list narrow it to one.
             </p>
             <p>
-              {TAB_LABEL.my_turn} also shows every default branch in the workspace above its cards,
-              and an <strong>Open PRs</strong> button that lists every open PR. Neither is scored
-              or counted in a tab.
+              Every default branch and every open PR in the workspace are listed under{' '}
+              <strong>Open PRs</strong>, the first line in the Activity rail. Neither is scored or
+              counted in a tab.
             </p>
           </GuideSection>
 
@@ -716,7 +723,8 @@ export function PendingGuideModal({
           <GuideSection title="When it is your turn">
             <p>
               A My turn card means you owe an action. These put one on the board, in the order My
-              turn groups them:
+              turn groups them. A finished Claude review follows the same rules but is listed in{' '}
+              {TAB_LABEL.claude}.
             </p>
             <table className="w-full border-collapse text-sm">
               <thead>
@@ -730,7 +738,12 @@ export function PendingGuideModal({
               <tbody>
                 {myTurnOrder.map((reason) => (
                   <tr key={reason}>
-                    <td className={`${td} font-medium`}>{MY_TURN_REASON_LABEL[reason]}</td>
+                    <td className={`${td} font-medium`}>
+                      <span className="inline-flex items-center gap-1.5">
+                        <PendingReasonIcon reason={reason} className="shrink-0 text-gray-500 dark:text-gray-400" />
+                        {MY_TURN_REASON_LABEL[reason]}
+                      </span>
+                    </td>
                     <td className={td}>{MY_TURN_GUIDE[reason].appears}</td>
                     <td className={td}>{MY_TURN_GUIDE[reason].goes}</td>
                     <td className={td}>

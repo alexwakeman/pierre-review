@@ -297,6 +297,8 @@ function foldCounts(
   let needsReviewer = 0;
   for (const c of cards) {
     if (c.kind === 'ci_failing') ciFailing += 1;
+    // A finished Claude review has its own tab; My turn's figures leave it out (as the brief does).
+    else if (c.kind === 'my_turn' && c.reason === 'claude_review') continue;
     else if (c.kind === 'my_turn') {
       myTurn += 1;
       if (c.personal) myTurnPersonal += 1;

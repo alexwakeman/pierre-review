@@ -25,6 +25,8 @@ import {
   PENDING_DO_NEXT_SIZE,
   PENDING_LIMITS,
   PENDING_TABS,
+  pendingTabHolds,
+  pendingTabOfCard,
   type AttentionCardsResponse,
   type PrAutomation,
   type DailyBriefCounts,
@@ -36,7 +38,6 @@ import {
   buildPendingView,
   effectivePendingTab,
   offerAuthorLens,
-  showsMyTurnHead,
   offerOnlyYours,
   passesAuthorLens,
   passesLens,
@@ -81,18 +82,6 @@ describe('the tab on screen', () => {
 
   it('ignores a kind that belongs to no tab', () => {
     expect(effectivePendingTab('bot_signal', 'threads')).toBe('threads');
-  });
-});
-
-// My turn's head — the default-branch strip above its cards. It replaced My turn's second view
-// ("Default branches and open PRs"), so it belongs to My turn alone. (Its "Open PRs" button is
-// gone: Open PRs is a fixed tab now — see openPrsTab.test.ts.)
-describe("My turn's head", () => {
-  it('heads My turn, and no other tab', () => {
-    expect(showsMyTurnHead('my_turn')).toBe(true);
-    for (const t of PENDING_TABS) {
-      if (t.key !== 'my_turn') expect(showsMyTurnHead(t.key)).toBe(false);
-    }
   });
 });
 
@@ -219,12 +208,37 @@ describe('My turn’s “Only yours”', () => {
 });
 
 describe('a response from a server that predates tabs', () => {
-  it('still gets all six tabs, built from its cards by kind, in the order sent', () => {
-    const cards = [card('m', 'merge'), card('t', 'my_turn'), card('u', 'update_branch'), card('l', 'reviewer_load')];
+  it('still gets all seven tabs, built from its cards by kind, in the order sent', () => {
+    const cards = [
+      card('m', 'merge'),
+      card('t', 'my_turn', { reason: 'review_request' }),
+      card('c', 'my_turn', { reason: 'claude_review' }),
+      card('u', 'update_branch'),
+      card('l', 'reviewer_load'),
+    ];
     const tabs = tabsOf({ cards, users: [] });
-    expect(tabs.map((t) => t.key)).toEqual(['my_turn', 'fixing', 'review', 'threads', 'land', 'deps']);
+    expect(tabs.map((t) => t.key)).toEqual(['my_turn', 'claude', 'fixing', 'review', 'threads', 'land', 'deps']);
     expect(tabs.find((t) => t.key === 'land')!.cardIds).toEqual(['m', 'u']);
     expect(tabs.find((t) => t.key === 'review')!.peopleCardIds).toEqual(['l']);
+    // A finished Claude review is listed in its own tab, never in My turn.
+    expect(tabs.find((t) => t.key === 'my_turn')!.cardIds).toEqual(['t']);
+    expect(tabs.find((t) => t.key === 'claude')!.cardIds).toEqual(['c']);
+    expect(tabs.find((t) => t.key === 'claude')!.total).toBe(1);
+  });
+});
+
+describe('the Claude reviews tab', () => {
+  it('holds exactly the finished Claude review My Turn cards, and My turn holds every other type', () => {
+    const def = (k: string) => PENDING_TABS.find((t) => t.key === k)!;
+    const claude = card('c', 'my_turn', { reason: 'claude_review' });
+    const reply = card('r', 'my_turn', { reason: 'thread_reply' });
+    expect(pendingTabHolds(def('claude'), claude)).toBe(true);
+    expect(pendingTabHolds(def('claude'), reply)).toBe(false);
+    expect(pendingTabHolds(def('my_turn'), claude)).toBe(false);
+    expect(pendingTabHolds(def('my_turn'), reply)).toBe(true);
+    expect(pendingTabOfCard(claude)).toBe('claude');
+    expect(pendingTabOfCard(reply)).toBe('my_turn');
+    expect(TAB_LABEL.claude).toBe('Claude reviews');
   });
 });
 

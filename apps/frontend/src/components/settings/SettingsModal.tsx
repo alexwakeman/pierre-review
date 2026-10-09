@@ -3,7 +3,7 @@ import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useHasProWorkspaceSettings, useProSettings } from '../../hooks/useProSettings.js';
 import { SprintSection } from './SprintSection.js';
-import { SlackSection } from './SlackSection.js';
+import { SlackSettings } from './SlackSection.js';
 import { IssueLinksSection } from './IssueLinksSection.js';
 import { AutoReviewSection } from './AutoReviewSection.js';
 import { BenchmarkConsentSection } from './BenchmarkConsentSection.js';
@@ -11,6 +11,7 @@ import { LargePrThresholdSection } from './LargePrThresholdSection.js';
 import { BlastRadiusSection } from './BlastRadiusSection.js';
 import { MyTurnSection, MY_TURN_SECTION_HEADING_ID } from './MyTurnSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
+import { DependencyAutoMergeSection } from './DependencyAutoMergeSection.js';
 import { FlowSettingsSection } from './FlowSettingsSection.js';
 import { GithubAppInstallSection } from './GithubAppInstallSection.js';
 import { YourDataSection } from './YourDataSection.js';
@@ -72,7 +73,7 @@ import type { SettingsFocus } from '../../store/settingsModal.js';
 // auth line, so a form here could only offer a third, worse one. The routes are gone too.
 //
 // "Review bots (account-wide)" — an explainer plus one toggle. The explainer pointed at
-// Activity → Bots → Settings, which is where a bot's judgement, identity and price actually live
+// Activity → Feed → Bot classification, which is where a bot's judgement, identity and price actually live
 // (one CORE/free `workspace_reviewers` row each), and the toggle — the Slack bot digest — became a
 // property of the DELIVERY in plugin migration 0033 and is now a checkbox inside the Slack section
 // under the schedule it modifies. An empty section pointing elsewhere is a signpost, not a setting.
@@ -256,6 +257,8 @@ export function SettingsModal({
                     modes, read from core's `workspace_trackers` row (apiVersion 23), so it sits
                     above the pro-settings gate with the other free sections. */}
                 <IssueLinksSection />
+                {/* Dependency auto-merge — CORE, free, both modes, read from the workspace row. */}
+                <DependencyAutoMergeSection />
                 {/* ⚠ ONLY THE PAID SECTIONS WAIT ON THE PLUGIN, and this line speaks for them
                     alone — it used to speak for the whole half, which is precisely why a free
                     section could not live here. */}
@@ -278,7 +281,9 @@ export function SettingsModal({
                     looking at. One row now. The cap disclosure stayed: with no picker there is no
                     screen listing every delivery, and each one is a billed report on every
                     send. */}
-                {proReady && caps.slackDigest && <SlackSection />}
+                {/* ⚠ STRICTLY PRO, VISIBLE-BUT-LOCKED: an unentitled reader sees the Slack
+                    section as a lock panel (Slack is an org feature), never the form. */}
+                <SlackSettings ready={proReady} />
                 {/* Auto Claude review of new human PRs in THIS workspace — CORE/free, read from
                     the workspace row (core migration 0074), so it does NOT wait on the plugin
                     gate. Claude Review is local-only, so this appears only where it can run. */}

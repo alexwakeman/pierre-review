@@ -246,6 +246,31 @@ describe('the Claude review card follows the ball rule', () => {
   });
 });
 
+describe('the Claude reviews tab', () => {
+  it('lists every Claude review card and none in My turn; My turn’s totals leave them out', async () => {
+    const insights = await q.getWorkspaceInsights(1, undefined, scope, { uncapped: true });
+    const { rankPendingTabs } = await import('./pending-tabs.js');
+    const board = await rankPendingTabs(1, scope, insights);
+    const mt = insights.cards.filter((c: any) => c.kind === 'my_turn');
+    const claude = mt.filter((c: any) => c.reason === 'claude_review').map((c: any) => c.id);
+    const others = mt.filter((c: any) => c.reason !== 'claude_review').map((c: any) => c.id);
+    expect(claude.length).toBeGreaterThan(0); // non-vacuous
+    const tab = (k: string) => board.tabs.find((t: any) => t.key === k)!;
+    expect([...tab('claude').cardIds].sort()).toEqual([...claude].sort());
+    expect([...tab('my_turn').cardIds].sort()).toEqual([...others].sort());
+    expect(tab('claude').total).toBe(claude.length);
+    expect(tab('my_turn').total).toBe(others.length);
+    // The fold's own totals are My turn's population — what the brief and the badges count.
+    expect(insights.myTurnTotal).toBe(others.length);
+    expect(insights.kindTotals!.my_turn).toBe(others.length);
+  });
+
+  it('keeps them in GET /api/my-turn, so the reader is still notified', async () => {
+    const mt = await q.getMyTurn(1, scope);
+    expect(mt.claudeReviewsToAction.length).toBeGreaterThan(0);
+  });
+});
+
 describe('an AUTO run is owned like a manual one', () => {
   it('raises the card on a PR you neither wrote nor were asked to review', async () => {
     const keys = await claudeKeys();

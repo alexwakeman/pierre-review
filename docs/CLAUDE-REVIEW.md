@@ -724,7 +724,7 @@ CURRENT head — an earlier commit's is hidden whether the head is green or red
 
 ## Starting from the Open PRs tab
 
-The Open PRs cards (`OpenPrsCards`, the pinned "Open PRs" tab) carry a **Claude review** panel on every card
+The Open PRs cards (`OpenPrsCards`, Activity → Open PRs) carry a **Claude review** panel on every card
 when — and only when — `MeResponse.ai.enabled` is on; without it there is no panel and no
 request.
 
@@ -1156,9 +1156,19 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   banner ignores auto runs (`ActiveReview.trigger`).
 - **It says it was auto.** "Auto review" is printed on the Pending card's chip
   (`MyTurnCard.trigger`, `AUTO_REVIEW_LABEL` in `Activity/pendingLabels.ts`), the Slack Pending line
-  (`pending-blocks.ts`), the Open PRs column's marker (`ClaudeReviewPrState.trigger`), and in the
+  (`pending-blocks.ts` — since 2026-10 the digest omits the personal tabs, so it no longer prints
+  this), the Open PRs column's marker (`ClaudeReviewPrState.trigger`), and in the
   Claude Review tab's header, running row and History options
   (`ClaudeReview`/`ClaudeReviewSummary.trigger`). The Feed's Claude item is not labelled.
+
+## The Slack "Claude Review ran" signal (Pro)
+
+When a run SUCCEEDS — manual or auto — `manager.ts`'s `launch` calls core
+`emitClaudeReviewCompleted({ accountId, prId, reviewId, trigger })` (`pro/event-hooks.ts`):
+fire-and-forget, after the run is stored, never thrown into the review. Failed and cancelled runs
+emit nothing. The plugin decides the rest (the workspace's `notify_reviews` switch, entitlement, a
+`skip`-routed run is silent, once per run): docs/PRO-PLUGIN-AND-ACTIVITY.md § The Slack EVENT
+signals. Ticket reviews do not emit.
 
 ## Auto-posting (per workspace)
 

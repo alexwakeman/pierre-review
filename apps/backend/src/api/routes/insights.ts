@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type {
   AttentionCardsResponse,
   AttentionLivenessBody,
@@ -19,11 +19,9 @@ import { getWorkspaceRepoActivity } from '../../db/repo-activity.js';
 import { getWorkspaceMergedReach } from '../../db/merged-reach.js';
 import { getReportingWindow, reportingWindowInfo } from '../../db/reporting-window.js';
 import { buildPendingBoard } from '../../db/pending-tabs.js';
-import {
-  PR_LIVENESS_MAX_IDS,
-  sweepPrLiveness,
-} from '../../sync/pr-liveness-sweep.js';
+import { PR_LIVENESS_MAX_IDS, sweepPrLiveness } from '../../sync/pr-liveness-sweep.js';
 import { accountIdOf } from '../plugins/auth.js';
+import { entitledProCapabilities } from '../../pro/contract.js';
 
 // The liveness body. `maxItems` is a coarse guard only — the real cap is applied in the handler
 // AFTER de-duplication (a board legitimately renders several cards for one PR), and it 400s
@@ -57,6 +55,14 @@ function parseIntList(raw: string | undefined): number[] | null {
   return ids.length > 0 ? ids : null;
 }
 
+// Reports is Pro as a whole (`periodReports`), flow metrics included. Same entitlement view /api/me
+// hands the SPA, so the locked pane and the 402 cannot disagree. `!req.account` fails closed (a bare
+// test harness); the real app always has one. Checked BEFORE any DB work, so the 402 is identical
+// for every `?workspace=` and cannot be read as an oracle.
+function reportsEntitled(req: FastifyRequest): boolean {
+  return Boolean(req.account && entitledProCapabilities(req.account).periodReports);
+}
+
 export async function insightsRoutes(app: FastifyInstance): Promise<void> {
   // Per-repo sprint stats for the Insights panel. Scoped to the account; `repoIds` narrows to the
   // repos the CALLER names. NOT workspace-scoped: it is a per-repo snapshot the caller already
@@ -69,10 +75,9 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  // Workspace flow-metric header (DORA-ish tiles + trend charts) — CORE/free. It sits under the
-  // "Flow metrics" heading on the REPORTS rail entry, not the Feed: a workspace-wide survey on top
-  // of a chronological stream pushed the feed two screens down, and it is precisely why the Reports
-  // entry is ungated on every tier.
+  // Workspace flow-metric header (DORA-ish tiles + trend charts) — PAID on `periodReports`, with
+  // the whole Reports rail entry it sits on. The compute stays CORE; the gate is this route's, and
+  // the SPA ANDs the same flag into `useWorkspaceMetrics`' `enabled`, or it would poll a 402.
   //
   // `?workspace=<id>` is the ONE scope parameter: `resolveWorkspaceScope` resolves an absent,
   // unparseable, unknown or foreign id to the account's DEFAULT workspace (never a 404 — every id
@@ -94,42 +99,56 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
   // anything (indexed window scans, the lane resolver's fixed handful, one co-change lookup), so
   // `/api/workspace-metrics` keeps the `read` fall-through that api/plugins/rate-limit.ts records
   // for it.
-  app.get('/api/workspace-metrics', async (req): Promise<WorkspaceMetricsResponse> => {
-    const q = req.query as { workspace?: string };
-    const accountId = accountIdOf(req);
-    const scope = await resolveWorkspaceScope(accountId, q.workspace);
-    const nowMs = Date.now();
-    const window = await getReportingWindow(accountId, scope.workspaceId, nowMs);
-    const [metrics, repoActivity, reach] = await Promise.all([
-      getWorkspaceMetricsForScope(accountId, scope.repoIds, window),
-      getWorkspaceRepoActivity(accountId, scope, nowMs, window),
-      getWorkspaceMergedReach(accountId, scope, nowMs, window),
-    ]);
-    // `workspaceId` is the scope echo every scoped response owes the client (docs/API.md) — this
-    // route was the one that never sent it, so a SPA holding a stale `?workspace=` had no way to
-    // learn it had been resolved to Default.
-    return {
-      metrics,
-      workspaceId: scope.workspaceId,
-      window: reportingWindowInfo(window, nowMs),
-      ...(repoActivity != null ? { repoActivity } : {}),
-      ...(reach != null ? { reach } : {}),
-    };
-  });
+  app.get(
+    '/api/workspace-metrics',
+    async (req, reply): Promise<WorkspaceMetricsResponse | { error: string }> => {
+      if (!reportsEntitled(req)) {
+        reply.status(402);
+        return { error: 'pro required' };
+      }
+      const q = req.query as { workspace?: string };
+      const accountId = accountIdOf(req);
+      const scope = await resolveWorkspaceScope(accountId, q.workspace);
+      const nowMs = Date.now();
+      const window = await getReportingWindow(accountId, scope.workspaceId, nowMs);
+      const [metrics, repoActivity, reach] = await Promise.all([
+        getWorkspaceMetricsForScope(accountId, scope.repoIds, window),
+        getWorkspaceRepoActivity(accountId, scope, nowMs, window),
+        getWorkspaceMergedReach(accountId, scope, nowMs, window),
+      ]);
+      // `workspaceId` is the scope echo every scoped response owes the client (docs/API.md) — this
+      // route was the one that never sent it, so a SPA holding a stale `?workspace=` had no way to
+      // learn it had been resolved to Default.
+      return {
+        metrics,
+        workspaceId: scope.workspaceId,
+        window: reportingWindowInfo(window, nowMs),
+        ...(repoActivity != null ? { repoActivity } : {}),
+        ...(reach != null ? { reach } : {}),
+      };
+    },
+  );
 
-  // The PR lists behind each flow-metric tile (the tile drill-down) — also CORE/free, so a Feed
-  // tile opens the same drill-down for everyone. Mirrors the Pro route's `{enabled, detail}` shape
-  // (enabled always true here). Same workspace resolution as its sibling above.
-  app.get('/api/workspace-metrics/detail', async (req): Promise<WorkspaceMetricsDetailResponse> => {
-    const q = req.query as { workspace?: string };
-    const accountId = accountIdOf(req);
-    const scope = await resolveWorkspaceScope(accountId, q.workspace);
-    // The SAME reporting window the tiles were measured over, or a tile and its drill-down would
-    // list two different windows' pull requests.
-    const window = await getReportingWindow(accountId, scope.workspaceId);
-    const detail = await getWorkspaceMetricsDetail(accountId, window, scope.repoIds);
-    return { enabled: true, detail };
-  });
+  // The PR lists behind each flow-metric tile (the tile drill-down) — PAID on `periodReports`, like
+  // the tiles it opens from. Mirrors the Pro route's `{enabled, detail}` shape (enabled always true
+  // here). Same workspace resolution as its sibling above.
+  app.get(
+    '/api/workspace-metrics/detail',
+    async (req, reply): Promise<WorkspaceMetricsDetailResponse | { error: string }> => {
+      if (!reportsEntitled(req)) {
+        reply.status(402);
+        return { error: 'pro required' };
+      }
+      const q = req.query as { workspace?: string };
+      const accountId = accountIdOf(req);
+      const scope = await resolveWorkspaceScope(accountId, q.workspace);
+      // The SAME reporting window the tiles were measured over, or a tile and its drill-down would
+      // list two different windows' pull requests.
+      const window = await getReportingWindow(accountId, scope.workspaceId);
+      const detail = await getWorkspaceMetricsDetail(accountId, window, scope.repoIds);
+      return { enabled: true, detail };
+    },
+  );
 
   // (GET /api/workspace-metrics/compare was DELETED with the "Compare workspaces" rail entry —
   // cross-workspace comparison now lives inside Reports as the plugin-served "By workspace" axis,
@@ -235,9 +254,7 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/insights/:repoId/analytics', async (req, reply): Promise<RepoAnalytics> => {
     const { repoId } = req.params as { repoId: string };
     const id = Number.parseInt(repoId, 10);
-    const data = Number.isFinite(id)
-      ? await getRepoAnalytics(accountIdOf(req), id)
-      : null;
+    const data = Number.isFinite(id) ? await getRepoAnalytics(accountIdOf(req), id) : null;
     if (!data) return reply.code(404).send({ error: 'repo not found' }) as never;
     return data;
   });

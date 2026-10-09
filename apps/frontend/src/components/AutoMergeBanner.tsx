@@ -91,6 +91,10 @@ function queuedLocalHeadline(row: ArmedMergeRequest): string {
  * for the row above it — and a phase the watcher could not honestly characterise comes back as
  * the truthful "Waiting…", never a hole.
  */
+/** WHO ARMED IT, when it was not a person — THE one spelling, shown under the headline on every
+ *  surface that draws an armed intent (this stack, the PR's merge control, the Pending card). */
+export const ARMED_BY_POLICY_LABEL = 'Armed automatically (dependency setting)';
+
 export function armedPhaseHeadline(row: ArmedMergeRequest): string {
   if (row.phase === 'queued_local') return queuedLocalHeadline(row);
   return row.phase != null ? PHASE_LABEL[row.phase] : 'Waiting…';
@@ -356,6 +360,9 @@ function LiveRow({ row }: { row: ArmedMergeRequest }): JSX.Element {
       <div className="mt-0.5 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-gray-500 dark:text-gray-400">{headline}</div>
+          {row.armedByPolicy && (
+            <div className="text-gray-500 dark:text-gray-400">{ARMED_BY_POLICY_LABEL}</div>
+          )}
           {/* ⚠ `lastReason` is the SPECIFICS under the headline — which branch, which error. For
               a POSITIONED `queued_local` alone it is not: the watcher writes "waiting its turn —
               3rd of 3 armed on acme/mine", which is the same fact the headline already derived

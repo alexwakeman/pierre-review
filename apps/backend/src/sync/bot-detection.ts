@@ -190,7 +190,7 @@ export function qualityCheckBot(login: string | null | undefined): boolean {
 
 // The bare quality-check login slugs — used by the query layer to resolve the DEFAULT role of a
 // reviewer with no explicit classification row (a `users.githubLogin IN (…)` predicate). Without
-// this, a SonarQube account nobody has opened the Bots settings tab for would still count as a
+// this, a SonarQube account nobody has opened Feed → Bot classification for would still count as a
 // review bot in every metric, because the role seed only lands when the lazy classifier runs.
 export function qualityCheckBotLogins(): string[] {
   return [...QUALITY_CHECK_BOTS];

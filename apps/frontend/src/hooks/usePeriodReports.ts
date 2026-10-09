@@ -182,6 +182,8 @@ export function useGeneratePeriodReport(workspaceId: number | null, periodKey: s
 // and the report header, the period list and the transcript captions all name the model that wrote
 // what you are reading. Dropping the row would degrade those to a raw id for no gain.
 const MODEL_LABELS: Record<string, { label: string; hint: string }> = {
+  'claude-haiku-5-5': { label: 'Haiku', hint: 'fast · cheapest' },
+  // The previous Haiku: retired as a choice, kept as a label for the reports it narrated.
   'claude-haiku-4-5': { label: 'Haiku', hint: 'fast · cheapest' },
   // Retired as a choice, kept as a label — see above. The hint is unreachable (only the picker
   // renders one) and stays for the day it is a choice again.

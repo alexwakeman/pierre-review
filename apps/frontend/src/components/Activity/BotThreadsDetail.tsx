@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useProCapabilities } from '../../hooks/useTriage.js';
 import type {
   AddressedConfidence,
   AddressedConfidenceCounts,
@@ -138,9 +139,11 @@ export function BotThreadsDetail(): JSX.Element {
   // drill-down opens.
   const focusRepoId = useFilters((s) => s.botThreadsFocusRepoId);
   const repoScope = useMemo(() => (focusRepoId != null ? [focusRepoId] : null), [focusRepoId]);
+  // Pro (`botDepth`) with the rest of Bots Monitoring; the route 402s without it.
+  const { botDepth } = useProCapabilities();
   const { data, isLoading, isError, refetch, isFetching } = useResolvableBotThreads(
     workspaceId,
-    true,
+    botDepth,
     repoScope,
   );
   const resolve = useScopeResolveBotThreads();

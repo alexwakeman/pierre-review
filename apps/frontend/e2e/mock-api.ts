@@ -47,6 +47,7 @@ import type {
 import {
   LARGE_PR_CODE_LOC_DEFAULT,
   PENDING_TABS,
+  pendingTabHolds,
   pendingAuthorSideOf,
   resolveMyTurnSettings,
 } from '@pierre-review/shared';
@@ -71,7 +72,7 @@ const USERS: User[] = [ME, ALICE, BOB];
 // A workspace is the app's ONLY scope. The store starts with `workspaceId: null` and NOTHING
 // workspace-scoped renders or fetches until `GET /api/workspaces` lands and the sync effect fills
 // it in (every scoped hook holds itself idle with `skipToken`). So this fixture is not decoration:
-// without it the Open PRs tab — the default landing view — and the Activity console stay empty and every
+// without it Activity → Open PRs — the default landing view — and the Activity console stay empty and every
 // spec in this directory fails with no useful message.
 //
 // One workspace, `isDefault: true`, owning the single repo. That mirrors a real fresh account:
@@ -336,8 +337,8 @@ const DAILY_BRIEF: DailyBriefResponse = {
 
 // ── DEFAULT-BRANCH STATUS ────────────────────────────────────────────────────────────────────────
 // The Activity rail reads `/api/branch-status` at BOOT (its third line), so this was a boot-time
-// route falling through to the untyped `{}`. One synced, green repo: the strip under Pending → My
-// turn → "Default branches and open PRs" renders (collapsed, "all green").
+// route falling through to the untyped `{}`. One synced, green repo: the strip heading Activity →
+// Open PRs renders (collapsed, "all green").
 const BRANCH_STATUS: BranchStatusResponse = {
   repos: [
     {
@@ -354,8 +355,8 @@ const BRANCH_STATUS: BranchStatusResponse = {
 // Defensive: an EXPANDED branch row reads `daily`, and a `{}` there would blank the page.
 const BRANCH_TRENDS: BranchTrendsResponse = { repoId: REPO.id, daily: [] };
 
-// ── THE PENDING BOARD — THE DEFAULT LANDING ─────────────────────────────────────────────────────
-// The app opens on Pending, so EVERY spec's first paint calls `GET /api/attention`. Left to the
+// ── THE PENDING BOARD ───────────────────────────────────────────────────────────────────────────
+// Every Pending visit calls `GET /api/attention`. Left to the
 // catch-all `{}`, the board would render off a response with no `cards` — a blank-page risk the
 // moment any required field is read in render. Empty tabs are the honest fixture: the specs here
 // are about the Feed, and an empty board is a state the board already renders.
@@ -455,7 +456,7 @@ const ATTENTION: AttentionCardsResponse = {
   users: [DEPENDABOT],
   tabs: PENDING_TABS.map((t): PendingTab => {
     const ranked: readonly InsightKind[] = t.kinds.filter((k) => k !== 'reviewer_load');
-    const cards = ATTENTION_CARDS.filter((c) => ranked.includes(c.kind));
+    const cards = ATTENTION_CARDS.filter((c) => pendingTabHolds(t, c));
     const ofKind = (k: InsightKind): InsightCard[] => cards.filter((c) => c.kind === k);
     return {
       key: t.key,
@@ -584,8 +585,6 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
       id: 'feed:6001',
       isMyTurn: true,
       myTurnReasons: ['authored'],
-      claudeReviewId: null,
-      claudeVerdict: null,
       commentId: null,
       kind: 'review_comment',
       occurredAt: iso(1),
@@ -616,8 +615,6 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
       id: 'feed:7000',
       isMyTurn: false,
       myTurnReasons: [],
-      claudeReviewId: null,
-      claudeVerdict: null,
       commentId: null,
       kind: 'pr_opened',
       occurredAt: iso(4),
@@ -648,8 +645,6 @@ const CONSOLIDATED_FEED: ConsolidatedFeedResponse = {
       id: 'feed:7001',
       isMyTurn: false,
       myTurnReasons: [],
-      claudeReviewId: null,
-      claudeVerdict: null,
       commentId: null,
       kind: 'pr_merged',
       occurredAt: iso(5),
@@ -821,7 +816,7 @@ export async function installMockApi(page: Page): Promise<void> {
         });
       // ⚠ MUST BE SERVED, not left to the catch-all. `workspaceId` starts null in the store and
       // every workspace-scoped query holds itself idle until this response resolves it — a `{}`
-      // here leaves the Open PRs tab (the default landing view) permanently blank.
+      // here leaves Activity → Open PRs (the default landing view) permanently blank.
       if (path.endsWith('/api/workspaces')) return json(route, WORKSPACES);
       // The workspace's bot listing. Shape matters even while empty: consumers read `.reviewers`
       // and `.repoIds` off it.
@@ -832,7 +827,7 @@ export async function installMockApi(page: Page): Promise<void> {
       if (path.endsWith('/api/auto-merge')) return json(route, ARMED_MERGES);
       if (path.endsWith('/api/sync-activity')) return json(route, SYNC_ACTIVITY);
       if (path.endsWith('/api/my-turn')) return json(route, MY_TURN);
-      // The Pending board, where the app lands, and its liveness sweep (a POST on its own path).
+      // The Pending board and its liveness sweep (a POST on its own path).
       if (path.endsWith('/api/attention/liveness')) return json(route, ATTENTION_LIVENESS);
       if (path.endsWith('/api/attention')) return json(route, ATTENTION);
       if (path.endsWith('/api/activity/feed')) return json(route, CONSOLIDATED_FEED);
@@ -867,7 +862,7 @@ export async function installMockApi(page: Page): Promise<void> {
       }
       // Pro digest endpoints — disabled in e2e (pro:{activityDigest:false}); harmless stub.
       if (path.includes('/api/pro/')) {
-        return json(route, { enabled: false, model: 'claude-haiku-4-5', digests: [], digest: null, generatedAt: iso(0) });
+        return json(route, { enabled: false, model: 'claude-haiku-5-5', digests: [], digest: null, generatedAt: iso(0) });
       }
       if (prDetailMatch) return json(route, prDetailFor(Number(prDetailMatch[1])));
       // mark-viewed, insights, and anything else: a harmless empty 200. (The two dismissal stubs

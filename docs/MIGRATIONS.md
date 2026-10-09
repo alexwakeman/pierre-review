@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0077` and plugin `0034`–`0037` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
+  ⚠ pg `0052`–`0080` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -1028,7 +1028,7 @@ statement no-ops the second time), both unique indexes present, the three time c
 against a real row. It was replayed in ISOLATION, not on top of the full plugin chain (it names no
 other table, so the chain cannot change its outcome).
 
-⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0077` and plugin `0034`–`0037`; plugin
+⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0077` and plugin `0034`–`0037` + `0040`; plugin
 `0038`/`0039` are `SELECT 1;` stubs since apiVersion 23). The
 standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
 through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —
@@ -1099,3 +1099,23 @@ the links ADD to key detection, so NULL never hides a detected ticket. No data t
 (every read is by PR id). Journal `when` `1791187200000` in both folders. ⚠ **The pg twin is NOT
 replayed** (`ADD COLUMN IF NOT EXISTS`, so a re-run no-ops).
 
+
+### Plugin `0040_slack_event_signals` — the two Slack event signals
+
+Two nullable boolean switches on `workspace_slack_targets` (`notify_reviews`, `notify_merges`; NULL
+reads as off) and a new table `slack_signal_notices (account_id, kind, ref_id)` with unique index
+`slack_signal_notices_account_kind_ref` — the claimed "already sent" markers (`kind` `merge` keys the
+PR id, `review` the Claude Review run id). No data to move, no FK onto core (open-core boundary); the
+table is in the plugin's erasure hook. No core migration: the merger was already synced
+(`pull_requests.merged_by_id`). ⚠ **The pg twin is NOT replayed** (`ADD COLUMN IF NOT EXISTS` /
+`CREATE … IF NOT EXISTS`, so a re-run no-ops); the plugin chain now ends at **40**.
+
+### `0093_dependency_auto_merge` (pg `0080`) — dependency auto-merge
+
+Additive: `workspaces.dependency_auto_merge` (nullable boolean, NULL = OFF), `auto_merge_requests
+.armed_by_policy` (nullable boolean, NULL = a person armed it) and a new table
+`auto_merge_policy_skips` (`(account_id, pr_id)` unique `amps_account_pr`, composite FK
+`amps_pr_account_fk` against `pull_requests(id, account_id)`, cascade). No data to move; existing
+intents read as a person's. Journal `when` `1791446400000` in both folders. Contract:
+docs/MERGE-CI-TRUNK.md § Dependency auto-merge. ⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS`
+throughout, so a re-run no-ops).

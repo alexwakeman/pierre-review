@@ -6,7 +6,6 @@ import { Timeline } from './components/Timeline/index.js';
 import { ActivityView } from './components/Activity/index.js';
 import { MetricsDetail } from './components/Activity/MetricsDetail.js';
 import { BotPrsDetail } from './components/Activity/BotPrsDetail.js';
-import { OpenPrsDetail } from './components/Activity/OpenPrsDetail.js';
 import { BotOnlyPrsDetail } from './components/Activity/BotOnlyPrsDetail.js';
 import { BotThreadsDetail } from './components/Activity/BotThreadsDetail.js';
 import { BotFlaggingDetail } from './components/Activity/BotFlaggingDetail.js';
@@ -29,6 +28,7 @@ import { useSettingsModal } from './store/settingsModal.js';
 import { ConflictResolverOverlay } from './components/conflicts/ConflictResolverOverlay.js';
 import { ClosedResolverToast } from './components/conflicts/ClosedResolverToast.js';
 import { MyTurnDismissToast } from './components/Activity/MyTurnDismissToast.js';
+import { DependencyMergeToast } from './components/Activity/DependencyMergeAll.js';
 import { SignInGate } from './components/SignInGate.js';
 import { AuthNoticeBanner } from './components/AuthNoticeBanner.js';
 import { UserMenu } from './components/UserMenu.js';
@@ -130,8 +130,6 @@ export default function App(): JSX.Element {
   const prDetailId = activeTabObj?.kind === 'pr-detail' ? activeTabObj.prId : null;
   const metricsActive = activeTabObj?.kind === 'metrics-detail';
   const botPrsActive = activeTabObj?.kind === 'bot-prs';
-  // A FIXED view (Activity · Open PRs · Timeline), not a dynamic tab — no `Tab` object behind it.
-  const openPrsActive = activeTab === 'open-prs';
   const botOnlyActive = activeTabObj?.kind === 'bot-only-prs';
   const botThreadsActive = activeTabObj?.kind === 'bot-threads';
   const botFlaggingActive = activeTabObj?.kind === 'bot-flagging';
@@ -148,7 +146,7 @@ export default function App(): JSX.Element {
   // bot-PRs) covers the warm full board. Drives the `inert` a11y treatment. pr-focus is NOT
   // an overlay — it replaces the board slot, so it doesn't set this.
   //
-  // Note the axis: these are TABS. The Activity console's own RAIL entries — Pending, Feed,
+  // Note the axis: these are TABS. The Activity console's own RAIL entries — Open PRs, Pending, Feed,
   // Bots, Reports (store value `'insights'`), and each repo — are not tabs and get no branch
   // here; they are `filters.activityRepoId` values rendered inside <ActivityView/>, which is
   // already covered by `inboxActive`. (The "Compare workspaces" rail line is gone —
@@ -158,7 +156,6 @@ export default function App(): JSX.Element {
     inboxActive ||
     metricsActive ||
     botPrsActive ||
-    openPrsActive ||
     botOnlyActive ||
     botThreadsActive ||
     botFlaggingActive ||
@@ -461,16 +458,6 @@ export default function App(): JSX.Element {
           </div>
         )}
 
-        {/* The fixed Open PRs tab — a sibling full-main overlay over the board. */}
-        {openPrsActive && (
-          <div
-            data-testid="open-prs-overlay"
-            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
-          >
-            <OpenPrsDetail />
-          </div>
-        )}
-
         {/* The bot-only-PRs drill-down — a sibling full-main overlay over the board. */}
         {botOnlyActive && (
           <div
@@ -579,6 +566,8 @@ export default function App(): JSX.Element {
         <ClosedResolverToast />
         {/* Undo for the My Turn entry just dismissed from the Pending board. */}
         <MyTurnDismissToast />
+        {/* The outcome of Pending → Dependencies' "Merge or arm all". */}
+        <DependencyMergeToast />
         <AutoMergeBanner />
         {/* Ambient heavy-work indicator (full-mode backfills + ML bot-comment scoring).
             An indicator, not a dialog: non-dismissible, no click target. */}

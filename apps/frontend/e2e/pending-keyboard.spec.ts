@@ -11,7 +11,7 @@ import { installMockApi } from './mock-api.js';
 
 async function gotoPending(page: Page): Promise<void> {
   await installMockApi(page);
-  await page.goto('/app/?view=activity');
+  await page.goto('/app/?view=activity&activityRepo=attention');
   await expect(page.getByTestId('attention-view')).toBeVisible();
 }
 

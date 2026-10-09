@@ -1,5 +1,7 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, schema, runTransaction, type Executor } from '../db/client.js';
+import { emitPullRequestMerged } from '../pro/event-hooks.js';
+import { isLiveMergeObservation } from './merge-notice.js';
 import { searchText } from '../db/search.js';
 // The single owner of "which workspace is this account's Default" — concurrent-safe (INSERT …
 // ON CONFLICT DO NOTHING then re-SELECT) and carrying the name-collision ladder. Duplicating a
@@ -736,6 +738,9 @@ export async function persistPr(
   // Set inside the transaction from the `prev` read; the SPA change signal is raised only AFTER
   // the commit, so it can never announce a row a reader cannot see yet.
   let boardMoved = false;
+  // Set inside the transaction; the Pro merge event hook fires only AFTER the commit (never a
+  // network call under the write lock). See sync/merge-notice.ts for what counts as LIVE.
+  let liveMergePrId: number | null = null;
   await runTransaction(async (tx) => {
     const authorId = await resolver.resolve(tx, pr.author);
     // The actual merger (null for non-merged PRs / when GitHub omits the actor).
@@ -1030,6 +1035,11 @@ export async function persistPr(
       dedupeKey: `pr_opened:${pr.id}`,
     });
     if (pr.state === 'MERGED' && mergedAt) {
+      if (
+        isLiveMergeObservation({ accountId, prId, prevState: prev?.state ?? null, mergedAt })
+      ) {
+        liveMergePrId = prId;
+      }
       await upsertEvent(tx, {
         accountId,
         repoId,
@@ -1390,6 +1400,7 @@ export async function persistPr(
     }
   });
   if (boardMoved) notePrChanged(accountId, repoId);
+  if (liveMergePrId != null) emitPullRequestMerged({ accountId, repoId, prId: liveMergePrId });
 }
 
 /** The PR columns the Pending board, the timeline bar and the PR header render — the ONLY

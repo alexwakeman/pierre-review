@@ -196,7 +196,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       maxTurns = config.reviewDiffOnlyMaxTurns;
     }
     // Effort guides thinking depth + token spend — the dominant cost knob. Per-mode, and only
-    // for models that accept it (Haiku rejects `effort`; it runs unset). Opus 5.5 also gets an
+    // for the offered models (EFFORT_CAPABLE_MODELS). Opus 5.5 also gets an
     // explicit adaptive-thinking config (see model-options.ts).
     const modelOptions = sdkModelOptions(model, mode);
 

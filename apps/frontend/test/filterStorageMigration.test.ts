@@ -9,6 +9,7 @@
 //            shown-by-default world forever) and `allowedBotIds` (an allow-list picked when
 //            excluding was an opt-in choice doesn't carry that intent into an ambient world).
 //   v3 → v4  CI failures out of the feed by default: drop `feedCiLens`.
+//   v4 → v5  the CI lens is retired with CI failures leaving the Feed: drop `feedCiLens`.
 //
 // The v1 → v2 rule stays a discard: those blobs' `teamScope`/`repoIds` have no forward
 // interpretation (see FILTER_STORAGE_VERSION).
@@ -39,7 +40,7 @@ describe('migratePersistedFilters', () => {
       reviewStates: ['approved'],
       derivedStates: ['untouched'],
     });
-    expect(out.v).toBe(4);
+    expect(out.v).toBe(5);
     // The two bot keys are gone — every v2 user gets the new hidden-by-default baseline once.
     expect('excludeBots' in out).toBe(false);
     expect('allowedBotIds' in out).toBe(false);
@@ -56,7 +57,7 @@ describe('migratePersistedFilters', () => {
     expect(out.derivedStates).toEqual(['untouched']);
   });
 
-  it('v3 → v4 drops ONLY the CI lens, keeping a deliberate post-v3 bot choice', () => {
+  it('v3 → v5 drops ONLY the CI lens, keeping a deliberate post-v3 bot choice', () => {
     // A user who CHOSE to show bots after the v3 flip must keep that choice — the later step
     // must not re-drop keys the earlier one already settled.
     const out = migratePersistedFilters({
@@ -66,16 +67,21 @@ describe('migratePersistedFilters', () => {
       feedCiLens: 'only',
       preset: '7d',
     });
-    expect(out.v).toBe(4);
+    expect(out.v).toBe(5);
     expect('feedCiLens' in out).toBe(false);
     expect(out.excludeBots).toBe(false);
     expect(out.allowedBotIds).toEqual([7]);
     expect(out.preset).toBe('7d');
   });
 
-  it('leaves a current v4 blob untouched — including a deliberate feedCiLens', () => {
-    const v4 = { v: 4, excludeBots: false, feedCiLens: 'only', preset: '7d' };
-    expect(migratePersistedFilters(v4)).toBe(v4);
+  it('v4 → v5 drops the retired CI lens and nothing else', () => {
+    const out = migratePersistedFilters({ v: 4, excludeBots: false, feedCiLens: 'only', preset: '7d' });
+    expect(out).toEqual({ v: 5, excludeBots: false, preset: '7d' });
+  });
+
+  it('leaves a current v5 blob untouched', () => {
+    const v5 = { v: 5, excludeBots: false, preset: '7d' };
+    expect(migratePersistedFilters(v5)).toBe(v5);
   });
 
   it('does not touch pre-v2 blobs (the version check discards them, never a migration)', () => {

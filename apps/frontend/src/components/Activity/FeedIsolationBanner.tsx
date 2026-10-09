@@ -10,7 +10,7 @@ import { FilterIcon } from '../Icons.js';
 export function FeedIsolationBanner(): JSX.Element | null {
   const feedIsolatedPrId = useFilters((s) => s.feedIsolatedPrId);
   const setFeedIsolatedPrId = useFilters((s) => s.setFeedIsolatedPrId);
-  // WORKSPACE-WIDE open-PRs cache (shared with the fixed Open PRs tab and its chip count, and
+  // WORKSPACE-WIDE open-PRs cache (shared with the Open PRs rail line and its count, and
   // OpenPrsDetail) resolves the isolated PR's number
   // + title for the label. Deliberately NOT the timeline-scoped `useSearchOpenPrs`: Members AND
   // the repo picker are both Timeline-only filters, and a board narrowed to other repos would hide

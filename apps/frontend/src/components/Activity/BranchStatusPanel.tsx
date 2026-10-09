@@ -284,7 +284,7 @@ function BranchTrends({
     );
   }
 
-  // The cross-repo strip (Pending → My turn) lives in a max-h-64 scroll box — same chart,
+  // The cross-repo strip (Activity → Open PRs) lives in a max-h-64 scroll box — same chart,
   // caption instead of a card.
   return (
     <div className="mb-1 border-b border-gray-100 pb-1 dark:border-gray-800/60">
@@ -390,8 +390,8 @@ function BranchRow({
   );
 }
 
-/** Has any repo in scope been branch-synced? The panel hides until one has — and My turn's
- *  `DefaultBranchesSlot` (MyTurnHead.tsx) says so in its place, from this same predicate. */
+/** Has any repo in scope been branch-synced? The panel hides until one has — and Open PRs'
+ *  `DefaultBranchesSlot` says so in its place, from this same predicate. */
 export function anyBranchSynced(rows: readonly RepoBranchStatus[]): boolean {
   return rows.some((r) => r.branchName != null);
 }
@@ -441,7 +441,7 @@ export function BranchStatusPanel({
 
   // ── COLLAPSE WHEN NOTHING IS RED ──────────────────────────────────────────────────────────
   //
-  // The cross-repo mount (the top of Pending → My turn) lists every repo in
+  // The cross-repo mount (the top of Activity → Open PRs) lists every repo in
   // the workspace, where a twelve-repo workspace spends most of its life rendering twelve green
   // rows nobody reads. Collapsed, it is the header line
   // alone — still always expandable, and `useBranchTrends` is lazy per row, so a collapsed strip
@@ -557,7 +557,7 @@ export function BranchStatusPanel({
             showRepoName={!compact}
             // INVERTED from `compact` on purpose: the `compact` panel is the per-repo console
             // header, which has the vertical room for full ChartCards; the non-compact panel is
-            // the cross-repo strip on Pending → My turn, whose rows live in the max-h-64 scroll
+            // the cross-repo strip on Activity → Open PRs, whose rows live in the max-h-64 scroll
             // box above and get the two-line compact strips instead.
             fullTrends={compact}
           />

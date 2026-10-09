@@ -1,14 +1,12 @@
 import { useBranchStatus } from '../../hooks/useBranchStatus.js';
 import { anyBranchSynced, BranchStatusPanel } from './BranchStatusPanel.js';
 
-// The top of Pending → My turn (and ONLY My turn — see `showsMyTurnHead`): the workspace's
-// default-branch strip. It used to live in My turn's second view (`?attnView=branches`, retired)
-// beside an "Open PRs · N" button; Open PRs is now a fixed tab between Activity and Timeline, so
-// the button is gone and the count rides that tab's chip.
+// The top of Activity → Open PRs: the workspace's default-branch strip. (It headed Pending → My
+// turn until Open PRs became the first rail line.)
 //
-// ⚠ NO NEW REQUESTS. The rail's argument-less `useBranchStatus()` (Activity/index.tsx sorts the rail
-// by it, so it is in flight on every Pending visit) — this adds a second observer to ONE query, not
-// a second request. Not per-card: this mounts once per board.
+// ⚠ NO NEW REQUESTS. The rail's argument-less `useBranchStatus()` (Activity/index.tsx feeds the
+// rail's trunk line from it, so it is in flight on every Activity visit) — this adds a second
+// observer to ONE query, not a second request. Mounts once per pane.
 //
 // ⚠ INFORMATIONAL. Nothing read here reaches a tab badge, a my_turn count, the scorer, the liveness
 // sweep or a notification — trunk status is a readout, not an alert channel.

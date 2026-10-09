@@ -76,7 +76,7 @@ const FIX_TOOLS = [
 const DISALLOWED_TOOLS = ['Bash', 'NotebookEdit'];
 
 // Per-model effort + thinking options: ONE table in review/model-options.ts, shared with the
-// review agent (Haiku 4.5 rejects `effort`; Opus 5.5 gets explicit adaptive thinking and 400s on
+// review agent (Opus 5.5 gets explicit adaptive thinking and 400s on
 // disabled thinking / a thinking budget / a forced tool_choice, none of which is sent here).
 const ACTIVITY_LOG_CAP = 25;
 

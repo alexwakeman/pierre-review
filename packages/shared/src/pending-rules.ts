@@ -306,12 +306,32 @@ export const DO_NEXT_UNSCORED_KINDS: ReadonlySet<InsightKind> = new Set<InsightK
 /** How many of a tab's highest-scoring cards sit under "Do next". The rest are "Everything else". */
 export const PENDING_DO_NEXT_SIZE = 5;
 
-export type PendingTabKey = 'my_turn' | 'fixing' | 'review' | 'threads' | 'land' | 'deps';
+export type PendingTabKey = 'my_turn' | 'claude' | 'fixing' | 'review' | 'threads' | 'land' | 'deps';
+
+/** The My Turn card type that has its own tab ("Claude reviews") instead of a group in My turn. */
+export const CLAUDE_REVIEW_TAB_REASONS: readonly MyTurnCardReason[] = ['claude_review'];
+
+/** One tab's definition — see `PENDING_TABS`. */
+export interface PendingTabDef {
+  key: PendingTabKey;
+  kinds: readonly InsightKind[];
+  groupByKind?: true;
+  groupByReason?: true;
+  /** `my_turn` cards: list ONLY these types. */
+  reasons?: readonly MyTurnCardReason[];
+  /** `my_turn` cards: list every type EXCEPT these. */
+  exceptReasons?: readonly MyTurnCardReason[];
+}
 
 /**
- * The six tabs, in display order, and the card kinds each holds. Every PR card kind on the board
- * belongs to exactly ONE tab, so a card is listed once; a PR with two jobs (your approved PR is both
- * "Approved" in My turn and "Ready to merge") appears once per job, in each job's tab.
+ * The seven tabs, in display order, and the cards each holds. Every PR card on the board belongs to
+ * exactly ONE tab, so a card is listed once; a PR with two jobs (your approved PR is both "Approved"
+ * in My turn and "Ready to merge") appears once per job, in each job's tab.
+ *
+ * ⚠ `my_turn` IS SPLIT BY TYPE ACROSS TWO TABS: a finished Claude review (`reason: 'claude_review'`)
+ * is listed in "Claude reviews", every other type in My turn. Both are the SAME my_turn fold — the
+ * ball rule, dismissals and the one-card-per-PR exception for a Claude review are unchanged — and
+ * `pendingTabHolds` is the ONE predicate the server lists and counts by and the SPA reads.
  *
  * `reviewer_load` sits in 'review' but is not ranked with the PR cards — it is the "who has reviews
  * waiting" strip at the top of that tab, and it is not in the tab's count.
@@ -325,13 +345,14 @@ export type PendingTabKey = 'my_turn' | 'fixing' | 'review' | 'threads' | 'land'
  * Both are read by the ONE group comparator (`tabGroupRank`, db/pending-tabs.ts), never a second
  * sort chosen by tab key.
  */
-export const PENDING_TABS: readonly {
-  key: PendingTabKey;
-  kinds: readonly InsightKind[];
-  groupByKind?: true;
-  groupByReason?: true;
-}[] = [
-  { key: 'my_turn', kinds: ['my_turn'], groupByReason: true },
+export const PENDING_TABS: readonly PendingTabDef[] = [
+  {
+    key: 'my_turn',
+    kinds: ['my_turn'],
+    groupByReason: true,
+    exceptReasons: CLAUDE_REVIEW_TAB_REASONS,
+  },
+  { key: 'claude', kinds: ['my_turn'], reasons: CLAUDE_REVIEW_TAB_REASONS },
   { key: 'fixing', kinds: ['ci_failing', 'conflicts'] },
   { key: 'review', kinds: ['stalled_review', 'reviewer_routing', 'reviewer_load'] },
   { key: 'threads', kinds: ['untouched_thread'] },
@@ -339,10 +360,28 @@ export const PENDING_TABS: readonly {
   { key: 'deps', kinds: ['security', 'dependency_bump'], groupByKind: true },
 ];
 
-/** The tab a card kind lives in, or null for the two bot kinds (they never reach the board). */
+/** Is this card one of this tab's PR cards? Kind first, then — for `my_turn` — its type. Review
+ *  load is not a PR card and is never held (it rides `peopleCardIds`). ONE predicate for the
+ *  server's lists and totals and the SPA's fallback. */
+export function pendingTabHolds(def: PendingTabDef, card: InsightCard): boolean {
+  if (card.kind === 'reviewer_load' || !def.kinds.includes(card.kind)) return false;
+  if (card.kind !== 'my_turn') return true;
+  if (def.reasons != null && !def.reasons.includes(card.reason)) return false;
+  if (def.exceptReasons != null && def.exceptReasons.includes(card.reason)) return false;
+  return true;
+}
+
+/** The tab a card kind lives in, or null for the two bot kinds (they never reach the board).
+ *  `my_turn` answers My turn — a Claude review card's own tab is `pendingTabOfCard`. */
 export function pendingTabOf(kind: InsightKind): PendingTabKey | null {
   for (const t of PENDING_TABS) if (t.kinds.includes(kind)) return t.key;
   return null;
+}
+
+/** The tab one card is listed in. */
+export function pendingTabOfCard(card: InsightCard): PendingTabKey | null {
+  for (const t of PENDING_TABS) if (pendingTabHolds(t, card)) return t.key;
+  return card.kind === 'reviewer_load' ? 'review' : null;
 }
 
 /** WHO OPENED IT, as the board's lens reads it: 'automation' iff the card names a PR whose

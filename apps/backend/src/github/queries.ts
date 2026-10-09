@@ -80,6 +80,7 @@ const REVIEW_THREAD_NODE_FIELDS = /* GraphQL */ `
         }
         ... on Bot {
           id
+          avatarUrl
         }
       }
     }
@@ -164,6 +165,7 @@ const PR_NODE_FIELDS = /* GraphQL */ `
     }
     ... on Bot {
       id
+      avatarUrl
     }
   }
   mergedBy {
@@ -176,6 +178,7 @@ const PR_NODE_FIELDS = /* GraphQL */ `
     }
     ... on Bot {
       id
+      avatarUrl
     }
   }
   labels(first: 20) {
@@ -288,6 +291,7 @@ const PR_NODE_FIELDS = /* GraphQL */ `
         }
         ... on Bot {
           id
+          avatarUrl
         }
       }
     }
@@ -338,6 +342,7 @@ const PR_NODE_FIELDS = /* GraphQL */ `
         }
         ... on Bot {
           id
+          avatarUrl
         }
       }
     }
@@ -748,6 +753,8 @@ export interface GqlActor {
   login: string;
   id?: string; // present only for User/Bot (via inline fragment)
   name?: string | null;
+  // Selected on BOTH `... on User` and `... on Bot` (a scalar: free in GraphQL points). A GitHub
+  // App bot's avatar IS its vendor logo — Feed → Bot classification shows it on each card.
   avatarUrl?: string | null;
   // GraphQL __typename ('User' | 'Bot' | 'Organization' | 'Mannequin' | …) — captured
   // for the bot-triage classifier (stored on users.githubType). Absent when the actor
