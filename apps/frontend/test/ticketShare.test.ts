@@ -215,7 +215,7 @@ describe('the wiring', () => {
 
   it('the Post button only renders with a viewed PR', () => {
     const parts = src('components/TicketReviewParts.tsx');
-    expect(parts).toMatch(/if \(viewedPrId != null\) \{\s*return \(\s*<div className="mt-1\.5">\s*<ItemPost /);
+    expect(parts).toMatch(/if \(viewedPrId != null\) \{\s*return \(\s*<div className="mt-1\.5[^"]*">\s*<ItemPost /);
   });
 });
 

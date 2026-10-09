@@ -523,8 +523,11 @@ Key behaviors to know about:
 - **Contributor names open the USER POPOVER** (`UserProfilePopover`), no longer navigating
   straight to GitHub. Three surfaces: `UserName` (PrDetail / ChecksTab / comments / threads /
   the drill-down tables), the **feed card actor** (`FeedView`), and the **vis-timeline row
-  labels**. The card shows an enlarged avatar, the contributor's ALL-TIME
-  `GET /api/users/:id/stats` totals, a GitHub-profile link, and **View activity →**. Details
+  labels**. The card shows an enlarged avatar, the contributor's LAST-90-DAY
+  `GET /api/users/:id/stats` counts (captioned "Last 90 days · <scope>" from the shared
+  `USER_STATS_WINDOW_DAYS`), a GitHub-profile link, and **Last 14 days of activity →** (the person
+  tab is the Feed narrowed to one author, so it reads `FEED_WINDOW_DAYS`; both constants live in
+  `packages/shared/src/activity-windows.ts` — never retype 90 or 14 in the copy). Details
   that are load-bearing:
   - **Scope**: `repoId` prop set (rendered in a PR context) → that repo's numbers; else the
     FilterBar-visible set (`filters.repoIds`, already bounded by the active workspace). The caption states
@@ -1211,7 +1214,9 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
     pasted `manual:` story keeps the full view in the pane.
   - **"What this PR adds" — each member's CONTRIBUTION CARD** (`TicketReviewMember.card`, the card at
     the PR's CURRENT synced head; docs/CLAUDE-REVIEW.md § Ticket review). The stack's body lists
-    "What each PR adds" (`MemberCards`): one collapsed `PrCardDisclosure` per member that HAS a card —
+    "What each PR adds" (`MemberCards`): one collapsed `PrCardDisclosure` per member that HAS a card,
+    toggled by the PR ref alone (the heading already says what it is; a bare mount with no `label`
+    — the slim pane's own card — still reads "What this PR adds") —
     summary, interfaces (Added/Changed/Removed chip, kind word, the exact name, its note), loose ends.
     The slim pane shows THIS PR's card only (`prCardOf`, `lib/ticketShare.ts`) above the rest line.
     ⚠ A member with no card renders NOTHING (`membersWithCards` drops it) — never a placeholder claim.
@@ -2058,6 +2063,17 @@ convention this file has to remember.
   pins. **The gate lives in the PANE, never in the tab resolution.**
 - The store key lives in `freshDefaults()` only, so **no `FILTER_STORAGE_VERSION` bump is owed**,
   and `'overview'` — the current default — is the OMITTED URL value.
+- **Merged so far** (`?insightsTab=merged`, `MergedPrsView.tsx`) — THREE tabs now (Overview ·
+  Merged so far · Chronology). The Open PRs page over the work that LANDED: every PR merged in the
+  REPORTING WINDOW from `GET /api/merged-prs` (`useMergedPrs`, `ws:<id>` key, `periodReports` ANDed
+  into `enabled`), header named through `reportingWindowText.ts` + "N pull requests merged".
+  ⚠ **It REUSES `OpenPrsCards` with `variant="merged"`, never a fork** — that prop drops the CI and
+  merge-readiness chips (a "Merged" chip and "merged X ago" instead), the stack roll-up, the Claude
+  Review panel + ticket review AND their batched requests, and the stack's "Merged (n)" panel (the
+  stack IS the merged work); default order is newest merge first, and there is no Sort menu. The
+  Group by ticket / List choice (and stack collapse) is the SAME per-viewer `store/openPrsView.ts`
+  state as Open PRs; the repo dropdown is the tab's own local state. Ungated inside the one
+  Reports gate.
 - ⚠ **Superseded: the WHOLE Reports pane is Pro (`periodReports`)** — `InsightsView` renders one
   `ProLockPanel` when unentitled, the rail entry carries the one `ProBadge`, and the inner badges
   below were REMOVED (the inner locks remain as defence in depth). `useWorkspaceMetrics` /

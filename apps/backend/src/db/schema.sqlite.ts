@@ -32,6 +32,8 @@ import type {
   CiAutoPostRecord,
   FindingAutoResolveRecord,
   FindingPushbackRecord,
+  ClaudeReviewChatPin,
+  ClaudeReviewChatExplanation,
   StoredAutoFixSettings,
   StoredAutoPostSettings,
   TicketAutoPostRecord,
@@ -173,6 +175,13 @@ export const repos = sqliteTable(
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
+    // ---- Does this repo use GitHub Issues? (migration 0094; docs/TRACKERS.md § Automatic default) ----
+    // true = issues are ENABLED and at least one issue was linked to a PR in the last 90 days; the
+    // tracker worker asks GitHub at most once a day per repo, and only for repos in a workspace
+    // with NO tracker choice stored. NULL = never answered. ⚠ Written only on a POSITIVE answer
+    // from GitHub (a nulled selection leaves it as it was); `checked_at` stamps every attempt.
+    usesGithubIssues: integer('uses_github_issues', { mode: 'boolean' }),
+    githubIssuesCheckedAt: integer('github_issues_checked_at', { mode: 'timestamp' }),
   },
   (t) => ({
     // Composite uniques so two accounts can watch the same GitHub repo (each
@@ -1339,6 +1348,12 @@ export const claudeReviewChatMessages = sqliteTable(
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
+    // "EXPLAIN THESE" turns (migration 0095 / pg 0082). `pins` on a USER row: the findings / story
+    // items the reader sent to the chat — references plus the label the server built from the stored
+    // rows (never client text). `explanations` on the ASSISTANT row: one card per pin, validated
+    // against those pins before it is stored. Both NULL on a plain question and answer.
+    pins: text('pins', { mode: 'json' }).$type<ClaudeReviewChatPin[]>(),
+    explanations: text('explanations', { mode: 'json' }).$type<ClaudeReviewChatExplanation[]>(),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -2497,7 +2512,9 @@ export const workspaceTrackers = sqliteTable(
       .references(() => accounts.id, { onDelete: 'cascade' }),
     // The composite FK below, not a `.references()`.
     workspaceId: integer('workspace_id').notNull(),
-    // TrackerProvider | null. null = no tracker (the row may still hold a dormant token's absence).
+    // TrackerProvider | 'none' | null. 'none' = the workspace CHOSE no tracker; NULL = no choice
+    // stored, so the AUTOMATIC default applies (GitHub Issues when a repo uses it, else none —
+    // tracker/settings.ts `effectiveTrackerRow`, migration 0094). A missing row reads like NULL.
     provider: text('provider'),
     baseUrl: text('base_url'),
     // Comma-joined, normalised project prefixes; null = no allowlist (heuristic detection).

@@ -55,7 +55,7 @@ import { writeClipboard } from './CopyButton.js';
 import { copyFindingsLabel, copyableFindings, findingsMarkdown } from '../lib/findingsMarkdown.js';
 import { Markdown } from './Markdown.js';
 import { MentionTextarea } from './MentionTextarea.js';
-import { ReviewChatSection } from './ClaudeReviewChat.js';
+import { ReviewChatSection, SendToChatButton } from './ClaudeReviewChat.js';
 import { InfoButton } from './InfoModal.js';
 import {
   ArrowIcon,
@@ -1082,6 +1082,13 @@ function FindingRow({
             <button type="button" onClick={copy} className={BTN_SECONDARY}>
               {copied ? 'Copied' : 'Copy'}
             </button>
+            {/* Pins this finding to the Review chat (shown only while that chat is on screen). */}
+            <SendToChatButton
+              prId={prId}
+              reviewId={finding.reviewId}
+              pinRef={{ kind: 'finding', findingId: finding.id }}
+              label={`${finding.severity.charAt(0).toUpperCase()}${finding.severity.slice(1)} · ${finding.title}`}
+            />
             {canIgnore && (
               <button
                 type="button"
@@ -1311,7 +1318,7 @@ function ClaudesReview({
       {ciCheck}
       {/* The chat sits UNDER Story check and CI check and opens expanded, so a question about the
           review or the story is one click from both. */}
-      {chatReviewId != null && <ReviewChatSection reviewId={chatReviewId} />}
+      {chatReviewId != null && <ReviewChatSection reviewId={chatReviewId} prId={review.prId} />}
     </>
   );
 }

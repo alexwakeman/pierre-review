@@ -880,6 +880,16 @@ describe('the Activity sub-tab strips', () => {
     expect(location.search).not.toContain('insightsTab');
   });
 
+  // "Merged so far" rides the same key, and a reload of its link lands back on it.
+  it('round-trips the Merged so far tab through ?insightsTab=merged', () => {
+    gesture(() => useFilters.getState().setActivityRepo('insights'));
+    gesture(() => useFilters.getState().setInsightsInnerTab('merged'));
+    expect(location.search).toContain('insightsTab=merged');
+    useFilters.getState().setInsightsInnerTab('overview');
+    applyUrlToStores({ fromPop: true });
+    expect(useFilters.getState().insightsInnerTab).toBe('merged');
+  });
+
   // A sub-tab that is not on screen is not part of the view: the scalar survives a rail move (so
   // returning to Reports restores the choice) but never rides a Feed link.
   it('does not emit insightsTab from a rail entry that has no Reports strip', () => {

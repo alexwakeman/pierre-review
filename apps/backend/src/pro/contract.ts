@@ -653,11 +653,16 @@ export interface ReviewChatArgs {
   // Same contract as RunReviewArgs.applyAuthEnv: true ONLY when no other run can share the env.
   applyAuthEnv: boolean;
   abortController: AbortController;
+  // An "explain these" turn (review/claude-review/chat-explain.ts): the run also gets the in-process
+  // `submit_explanations` tool and succeeds ONLY by calling it. Optional, so no apiVersion bump.
+  explain?: boolean;
 }
 
 export interface ReviewChatResult {
   ok: boolean; // false ⇒ no usable answer (failureReason says why); the turn may still have cost
   text: string;
+  // An explain turn: the raw `submit_explanations` payload, UNVALIDATED (chat.ts validates it).
+  submitted?: unknown;
   failureReason?: string;
   costUsd: number | null;
   inputTokens: number;

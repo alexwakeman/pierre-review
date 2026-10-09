@@ -346,3 +346,157 @@ describe('routes', () => {
     }
   });
 });
+
+// ---- "EXPLAIN THESE": pins sent to the chat, answered with one card per pin ----------------------
+describe('explain turns (pins)', () => {
+  let trId = 0;
+  let itemId = 0;
+  let strangerTrId = 0;
+  let strangerItemId = 0;
+  let foreignTrId = 0;
+  let foreignItemId = 0;
+  let explainReviewId = 0;
+  let explainFindingId = 0;
+
+  beforeAll(async () => {
+    const { ticketReviews, ticketReviewMembers, ticketReviewItems, pullRequests, claudeReviews, claudeReviewFindings } = schema;
+    const [prRow] = await db.select().from(pullRequests).where((await import('drizzle-orm')).eq(pullRequests.id, prId)).execute();
+    // A fresh run so earlier tests' general-thread turns do not muddy the transcript checks.
+    explainReviewId = (
+      await db
+        .insert(claudeReviews)
+        .values({ accountId: 1, prId, headSha: 'h'.repeat(40), status: 'succeeded', model: 'claude-sonnet-5', reviewMode: 'diff_only', summary: 's', verdict: 'COMMENT' })
+        .returning()
+        .execute()
+    )[0].id;
+    explainFindingId = (
+      await db
+        .insert(claudeReviewFindings)
+        .values({ reviewId: explainReviewId, path: 'src/b.ts', line: 7, severity: 'blocker', title: 'Race on save', body: 'Two writers.' })
+        .returning()
+        .execute()
+    )[0].id;
+    const run = async (accountId: number, memberPr: number | null, repoId: number) => {
+      const id = (
+        await db
+          .insert(ticketReviews)
+          .values({ accountId, workspaceId: 1, ticketIdent: `manual:${accountId}:${memberPr}`, ticketKey: 'PROJ-7', ticketTitle: 'Save drafts', status: 'succeeded', model: 'claude-sonnet-5' })
+          .returning()
+          .execute()
+      )[0].id as number;
+      if (memberPr != null) {
+        await db.insert(ticketReviewMembers).values({ ticketReviewId: id, accountId, prId: memberPr, repoId, headSha: 'h'.repeat(40), prState: 'open' }).execute();
+      }
+      const item = (
+        await db
+          .insert(ticketReviewItems)
+          .values({ ticketReviewId: id, accountId, ref: 'AC2', status: 'partly_met', title: 'Drafts survive a reload', body: 'Only saved on blur.' })
+          .returning()
+          .execute()
+      )[0].id as number;
+      return { id, item };
+    };
+    ({ id: trId, item: itemId } = await run(1, prId, prRow.repoId));
+    // The account's own ticket review that this PR is NOT on.
+    ({ id: strangerTrId, item: strangerItemId } = await run(1, null, prRow.repoId));
+    // Another account's.
+    ({ id: foreignTrId, item: foreignItemId } = await run(2, null, prRow.repoId));
+  });
+
+  const pins = () => [
+    { kind: 'finding' as const, findingId: explainFindingId },
+    { kind: 'story_item' as const, ticketReviewId: trId, itemId },
+  ];
+
+  it('runs ONE explain turn, keeps only cards that answer a pin, and stores pins + cards', async () => {
+    chatImpl = async () => ({
+      ...answer(''),
+      submitted: {
+        cards: [
+          { ref: 'P2', meaning: 'Drafts are lost', whyItMatters: 'Users lose work', where: [{ path: 'src/draft.ts', line: 3 }], fix: 'Save on change' },
+          { ref: 'P9', meaning: 'invented', whyItMatters: 'x', fix: 'x' },
+          { ref: 'p1', meaning: 'Two saves race', whyItMatters: 'Data loss', where: [{ path: '/etc/passwd'.repeat(100) }], fix: 'Lock' },
+          { ref: 'P1', meaning: 'duplicate', whyItMatters: 'x', fix: 'x' },
+        ],
+      },
+    });
+    const out = await chat.answerReviewChat(ctx, 1, explainReviewId, { question: '', pins: [...pins(), pins()[0]!] });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    const call = chatCalls[0]!;
+    expect(call.explain).toBe(true);
+    expect(call.systemPrompt).toContain('submit_explanations');
+    // Each pinned item's text is read from the DB and fenced.
+    const nonce = /---BEGIN ITEMS ([0-9a-f]{16})---/.exec(call.prompt)?.[1];
+    expect(nonce).toBeTruthy();
+    expect(call.prompt).toContain('P1\nA finding of your review');
+    expect(call.prompt).toContain('Race on save');
+    expect(call.prompt).toContain('Only saved on blur.');
+    expect(call.prompt).toContain('one card per item: P1, P2');
+
+    const [q, a] = out.answer.messages;
+    expect(q!.content).toBe('Explain each of these in detail.');
+    expect(q!.pins?.map((p) => p.label)).toEqual(['Blocker · Race on save', 'PROJ-7 AC2 · Partly done · Drafts survive a reload']);
+    // In PIN order, the invented ref and the duplicate dropped, the over-long path dropped.
+    expect(a!.explanations?.map((c) => c.meaning)).toEqual(['Two saves race', 'Drafts are lost']);
+    expect(a!.explanations?.[0]!.where).toEqual([]);
+    expect(a!.explanations?.[1]!.label).toBe('PROJ-7 AC2 · Partly done · Drafts survive a reload');
+    expect(a!.content).toContain('### Blocker · Race on save');
+
+    // The next plain turn's transcript carries the pins' labels.
+    chatImpl = async () => answer('Sure.');
+    await chat.answerReviewChat(ctx, 1, explainReviewId, { question: 'And the second?' });
+    expect(chatCalls[1]!.explain).toBeUndefined();
+    expect(chatCalls[1]!.prompt).toContain('Items: Blocker · Race on save; PROJ-7 AC2');
+  });
+
+  it('refuses pins it cannot vouch for, before any agent call', async () => {
+    const bad: Array<[unknown, number]> = [
+      [[{ kind: 'finding', findingId: otherFindingId }], 404],
+      [[{ kind: 'story_item', ticketReviewId: strangerTrId, itemId: strangerItemId }], 404],
+      [[{ kind: 'story_item', ticketReviewId: foreignTrId, itemId: foreignItemId }], 404],
+      [[{ kind: 'story_item', ticketReviewId: trId, itemId: strangerItemId }], 404],
+      [[{ kind: 'finding', findingId: 'x' }], 400],
+      [[{ kind: 'note', text: 'trust me' }], 400],
+      [Array.from({ length: 11 }, (_, i) => ({ kind: 'finding', findingId: i + 1 })), 400],
+    ];
+    for (const [p, status] of bad) {
+      const out = await chat.answerReviewChat(ctx, 1, explainReviewId, { question: '', pins: p as any });
+      expect(out).toMatchObject({ ok: false, status });
+    }
+    // Pins only ride the review's general thread.
+    const thread = await chat.answerReviewChat(ctx, 1, explainReviewId, { question: 'x', findingId: explainFindingId, pins: pins() });
+    expect(thread).toMatchObject({ ok: false, status: 400 });
+    expect(chatCalls).toHaveLength(0);
+  });
+
+  it('stores nothing when no card answers a pin, but still meters', async () => {
+    const before = (await chat.listChatMessages(ctx, 1, explainReviewId, null)).length;
+    chatImpl = async () => ({ ...answer(''), submitted: { cards: [{ ref: 'P7', meaning: 'x', whyItMatters: 'x', fix: 'x' }] } });
+    const out = await chat.answerReviewChat(ctx, 1, explainReviewId, { question: 'Why?', pins: pins() });
+    expect(out).toMatchObject({ ok: false, status: 502, error: 'NoAnswer' });
+    expect(usage).toHaveLength(1);
+    expect(await chat.listChatMessages(ctx, 1, explainReviewId, null)).toHaveLength(before);
+  });
+
+  it('GET /api/prs/:id/claude-review-chats lists each run with a chat, newest first, and 404s a stranger', async () => {
+    const { default: Fastify } = await import('fastify');
+    const app = Fastify({ logger: false });
+    chat.registerClaudeReviewChatRoutes(app, { ...ctx, accountIdOf: () => 1 } as any);
+    await app.ready();
+    const res = await app.inject({ method: 'GET', url: `/api/prs/${prId}/claude-review-chats` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    const ids = body.runs.map((r: any) => r.reviewId);
+    expect(ids[0]).toBe(explainReviewId);
+    expect(ids).toContain(reviewId);
+    expect([...ids].sort((x: number, y: number) => y - x)).toEqual(ids);
+    // Only general-thread turns, and the explain turn's cards ride along.
+    expect(body.runs.every((r: any) => r.messages.every((m: any) => m.findingId === null))).toBe(true);
+    expect(body.runs[0].messages[1].explanations).toHaveLength(2);
+    const other = Fastify({ logger: false });
+    chat.registerClaudeReviewChatRoutes(other, { ...ctx, accountIdOf: () => 2 } as any);
+    await other.ready();
+    expect((await other.inject({ method: 'GET', url: `/api/prs/${prId}/claude-review-chats` })).statusCode).toBe(404);
+  });
+});

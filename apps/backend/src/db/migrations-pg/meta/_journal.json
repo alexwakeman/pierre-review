@@ -568,6 +568,20 @@
       "when": 1791446400000,
       "tag": "0080_dependency_auto_merge",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1791532800000,
+      "tag": "0081_repo_uses_github_issues",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1791619200000,
+      "tag": "0082_review_chat_explain",
+      "breakpoints": true
     }
   ]
 }

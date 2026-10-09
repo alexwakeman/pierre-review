@@ -39,6 +39,7 @@ import {
 import { accessFingerprint, backoffCode, kickTrackerSync, syncOnePrNow } from './worker.js';
 import { registerTicketLinksRoute } from './links.js';
 import { registerTicketMergedPrsRoute } from './merged.js';
+import { registerManualTicketLinkRoute } from './manual-links.js';
 
 // THE TRACKER'S HTTP SURFACE — CORE and FREE, both modes (the plugin's `/api/pro/*` Jira routes until
 // apiVersion 23). Every route that can spend the customer's tracker quota sits on the `search`
@@ -60,6 +61,9 @@ import { registerTicketMergedPrsRoute } from './merged.js';
 //   POST /api/prs/:id/tracker-ticket/refresh          { key } — read it again NOW (backoff bypassed).
 //   PUT  /api/prs/:id/tracker-ticket/ac-field         { key, fieldId|null } — the criteria field for
 //                                                     this ticket's ISSUE TYPE in the PR's workspace.
+//   POST /api/prs/:id/tracker-ticket/resolve          ./manual-links.ts — the Story check's paste
+//                                                     box: read (and with `link`, store) tickets a
+//                                                     person named by URL or key.
 //   POST /api/ticket-links                            ./links.ts — the Open PRs ticket row.
 //   GET  /api/ticket-merged-prs                       ./merged.ts — the stacks' "Merged (n)" panel.
 //
@@ -233,6 +237,7 @@ export function registerTrackerRoutes(
 
   registerTicketLinksRoute(app, ctx, opts);
   registerTicketMergedPrsRoute(app, ctx);
+  registerManualTicketLinkRoute(app, ctx, opts);
 
   const idParams = {
     type: 'object',

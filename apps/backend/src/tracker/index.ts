@@ -4,6 +4,8 @@ import { registerTrackerRoutes } from './routes.js';
 import { trackerContext } from './runtime.js';
 import { enableTrackerWorker, kickTrackerSync } from './worker.js';
 import { moveLegacyTrackerData } from './legacy-import.js';
+import { checkReposGithubIssuesUsage } from './github/issues-usage.js';
+import type { TrackerContext } from './context.js';
 
 // THE ISSUE TRACKER — CORE, FREE, BOTH MODES (apiVersion 23; docs/TRACKERS.md). Two entry points:
 //
@@ -17,11 +19,27 @@ export function registerTracker(app: FastifyInstance): void {
 }
 
 let started = false;
+let processCtx: TrackerContext | null = null;
+
+/**
+ * A repo JOINED a workspace (moved in, or re-homed to Default): ask GitHub whether it uses GitHub
+ * Issues NOW, once, so the workspace's automatic default tracker is right straight away rather than
+ * after the daily tick (./github/issues-usage.ts). A newly switched-on account gets a ticket pass.
+ * Fire-and-forget, never throws; a no-op before `startTracker` (and in tests that never start it).
+ */
+export function kickGithubIssuesCheck(accountId: number, repoIds: readonly number[]): void {
+  const ctx = processCtx;
+  if (ctx == null || repoIds.length === 0) return;
+  void checkReposGithubIssuesUsage(ctx, accountId, repoIds).then(({ switchedOn }) => {
+    if (switchedOn) void kickTrackerSync(ctx, accountId);
+  });
+}
 
 export async function startTracker(app: FastifyInstance): Promise<void> {
   if (started) return;
   started = true;
   const ctx = trackerContext(app.log);
+  processCtx = ctx;
   // ⚠ AFTER the plugin's migrations (bindProPlugin), so a very old plugin's own 0031 backfill has
   // already landed in `pro_workspace_settings` before it is moved. Never fatal: a failure leaves the
   // source untouched and is retried on the next boot.
@@ -36,6 +54,9 @@ export async function startTracker(app: FastifyInstance): Promise<void> {
   enableTrackerWorker(true);
   // A KICK, NEVER A STEP: fire-and-forget after each completed repo walk, outside every transaction.
   registerRepoSyncedHook(({ accountId, repoId }) => {
-    void kickTrackerSync(ctx, accountId, { repoId });
+    // A NEWLY ADDED repo lands in Default with no GitHub Issues answer: ask once, after its first walk.
+    void checkReposGithubIssuesUsage(ctx, accountId, [repoId], { onlyUnasked: true }).then(({ switchedOn }) => {
+      void kickTrackerSync(ctx, accountId, switchedOn ? {} : { repoId });
+    });
   });
 }

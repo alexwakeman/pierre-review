@@ -15,15 +15,19 @@ export interface PrEnrichInput {
 
 // The tri-state PrDetail.tickets value: null = no tracker for this PR's workspace; [] = a tracker
 // is configured but no ticket key was found; [..] = detected tickets. Never throws.
-export async function resolvePrTickets(input: PrEnrichInput): Promise<TicketRef[] | null> {
+// `addable`: the workspace has a READING tracker, so a ticket can be added by hand — true even while
+// `tickets` is null because the PR's GitHub Issues links are not read yet.
+export async function resolvePrTickets(
+  input: PrEnrichInput,
+): Promise<{ tickets: TicketRef[] | null; addable: boolean }> {
   try {
     // Lazy: tracker/runtime.ts opens the database client at import time (see tracker/ticket-source.ts).
-    const [{ prTicketRefs }, { trackerContext }] = await Promise.all([
+    const [{ prTicketView }, { trackerContext }] = await Promise.all([
       import('../tracker/enricher.js'),
       import('../tracker/runtime.js'),
     ]);
-    return await prTicketRefs(trackerContext(), input);
+    return await prTicketView(trackerContext(), input);
   } catch {
-    return null; // enrichment is best-effort; never fail the PR-detail read
+    return { tickets: null, addable: false }; // enrichment is best-effort; never fail the PR-detail read
   }
 }

@@ -92,6 +92,10 @@ async function columnsOf(tx: Tx, table: string): Promise<Set<string>> {
   return new Set(rows.map((r) => String(r.name)));
 }
 
+// ⚠ A NULL `issue_provider` is copied as NULL — "no choice", which follows the automatic default
+// (docs/TRACKERS.md § Automatic default). Migration 0094 / pg 0081 turns only an ALL-NULL row into
+// 'none', and a moved row always has a value set, so this move and that migration agree whichever
+// runs first.
 const SETTING_COLS = [
   ['issue_provider', 'provider'],
   ['issue_base_url', 'base_url'],

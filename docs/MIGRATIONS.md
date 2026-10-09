@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0080` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
+  ⚠ pg `0052`–`0081` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -1119,3 +1119,16 @@ Additive: `workspaces.dependency_auto_merge` (nullable boolean, NULL = OFF), `au
 intents read as a person's. Journal `when` `1791446400000` in both folders. Contract:
 docs/MERGE-CI-TRUNK.md § Dependency auto-merge. ⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS`
 throughout, so a re-run no-ops).
+
+### `0094_repo_uses_github_issues` (pg `0081`) — GitHub Issues as the automatic default tracker
+
+Additive: `repos.uses_github_issues` (nullable boolean; NULL = never answered) and
+`repos.github_issues_checked_at` (timestamp). Plus ONE data step: `UPDATE workspace_trackers SET
+provider = 'none' WHERE provider IS NULL`. From here on `provider` NULL (or no row) means "no choice
+stored → follow the automatic default" and the literal `'none'` is a chosen None; every NULL row that
+existed before was somebody choosing None (the legacy move copies only rows with a value), so it
+keeps that meaning. Journal `when` `1791532800000` in both folders, slotted BEFORE `0095` / pg
+`0082` (written concurrently) — ⚠ drizzle's sqlite migrator skips an entry whose `when` is at or
+below the newest APPLIED one, so a DB that had already applied 0095 before 0094 existed would skip
+0094 silently; none did at the time of writing. Contract: docs/TRACKERS.md § Automatic default.
+⚠ **The pg twin is NOT replayed** (`ADD COLUMN IF NOT EXISTS`; the UPDATE is idempotent).

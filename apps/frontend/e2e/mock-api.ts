@@ -852,6 +852,8 @@ export async function installMockApi(page: Page): Promise<void> {
           workspaceId: WORKSPACE.id,
           issue: { provider: null, baseUrl: null, projectKeys: [], matchScope: 'title_branch' },
           jira: { email: null, hasToken: false },
+          providerChosen: false,
+          githubIssuesRepos: [],
         } satisfies WorkspaceTrackerSettings);
       }
       if (path.endsWith('/api/ticket-links')) {

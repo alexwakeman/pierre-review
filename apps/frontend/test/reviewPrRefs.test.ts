@@ -143,7 +143,7 @@ describe('the Review tab wiring', () => {
 
   it('puts Review chat directly under Story check', () => {
     const story = tab.indexOf('{storyCheck({');
-    const chat = tab.indexOf('<ReviewChatSection reviewId={chatReviewId} />');
+    const chat = tab.indexOf('<ReviewChatSection reviewId={chatReviewId} prId={review.prId} />');
     const findings = tab.indexOf('title="Findings"');
     expect(findings).toBeGreaterThan(0);
     expect(story).toBeGreaterThan(findings);

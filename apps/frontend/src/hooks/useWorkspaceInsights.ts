@@ -1,5 +1,6 @@
 import { skipToken, useQuery } from '@tanstack/react-query';
 import type {
+  MergedPrsResponse,
   WorkspaceInsightsResponse,
   WorkspaceMetricsResponse,
 } from '@pierre-review/shared';
@@ -27,6 +28,22 @@ export function useWorkspaceMetrics(workspaceId: number | null) {
   return useQuery<WorkspaceMetricsResponse>({
     queryKey: ['workspace-metrics', `ws:${id}`],
     queryFn: id == null ? skipToken : () => api.workspaceMetrics(id),
+    enabled: periodReports,
+    refetchInterval: 5 * 60_000, // main sync cadence
+    refetchIntervalInBackground: false,
+    staleTime: 60_000,
+  });
+}
+
+// Reports → "Merged so far": every PR merged in the workspace's reporting window. Pro on
+// `periodReports` with the rest of Reports — the capability is ANDed into `enabled` here, or the
+// SPA polls a 402. Same `ws:<id>` key discipline and `skipToken` hold as `useWorkspaceMetrics`.
+export function useMergedPrs(workspaceId: number | null) {
+  const id = workspaceId;
+  const { periodReports } = useProCapabilities();
+  return useQuery<MergedPrsResponse>({
+    queryKey: ['merged-prs', `ws:${id}`],
+    queryFn: id == null ? skipToken : () => api.mergedPrs(id),
     enabled: periodReports,
     refetchInterval: 5 * 60_000, // main sync cadence
     refetchIntervalInBackground: false,

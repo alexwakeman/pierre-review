@@ -2,10 +2,17 @@ import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, max, or } from 'drizzle-orm';
 import { TICKET_LINKS_TITLE_LOOKUPS, type TrackerProvider } from '@pierre-review/shared';
 import { githubAccessFor, inChunks, type TrackerContext } from './context.js';
-import { detectForAccess, linksUnknownFor, prLinkColumns, withParsedLinks } from './enricher.js';
+import { detectForAccess, linksUnknownFor, manualKeysOf, prLinkColumns, withParsedLinks } from './enricher.js';
 import { adapterFor, maybeAdapterFor, readingProviders, ticketUrl } from './registry.js';
-import { readWorkspaceTrackerRow, trackerAccessOf, trackerBaseUrl, type WorkspaceTrackerAccess } from './settings.js';
+import {
+  autoDetectedWorkspaces,
+  readWorkspaceTrackerRow,
+  trackerAccessOf,
+  trackerBaseUrl,
+  type WorkspaceTrackerAccess,
+} from './settings.js';
 import { prepareTrackerCall } from './calls.js';
+import { refreshGithubIssuesUsage } from './github/issues-usage.js';
 import { JiraFetchError, type JiraTransport } from './jira/fetch.js';
 import type { DetectInput, DetectedTicket, LinkerPr, TrackerCall } from './types.js';
 import {
@@ -350,8 +357,11 @@ export async function syncPrTickets(
       if (merged) stats.mergedUnsettled.add(row.id);
       continue;
     }
-    const detected = wc != null ? (detectWithSources(wc.access, row) ?? []) : [];
     const mine = stored.get(row.id) ?? [];
+    // A ticket a person linked by hand (a 'manual' row on the current site) is detected like any
+    // other: kept by the prune below and re-read on its TTL.
+    const detected =
+      wc != null ? (detectWithSources(wc.access, { ...row, manualKeys: manualKeysOf(mine, wc.access) }) ?? []) : [];
     // ⚠ Only a READING workspace's detection may PRUNE: a PR whose workspace has no tracker (or a
     // link-only one) simply has no rows, and one in no workspace keeps what it had (absent, not wrong).
     // A MERGED PR is never pruned: its rows are history.
@@ -441,8 +451,10 @@ export async function syncPrTickets(
     wants.delete(k);
   }
 
-  // New open tickets first, then merged-only tickets, then the longest overdue; capped.
-  const rank = (w: Want): number => (w.hasOpen && w.missing ? 0 : !w.hasOpen ? 1 : 2);
+  // FORCED keys (a person pressed a button: `syncOnePrNow`) first, then new open tickets, then
+  // merged-only tickets, then the longest overdue; capped. A forced key whose row already exists
+  // (a hand-added ticket's placeholder, a Refresh) must not lose its one slot to a new key.
+  const rank = (w: Want): number => (w.dueAt < 0 ? -1 : w.hasOpen && w.missing ? 0 : !w.hasOpen ? 1 : 2);
   const queue = [...wants.values()].sort(
     (a, b) => rank(a) - rank(b) || a.dueAt - b.dueAt || a.key.localeCompare(b.key),
   );
@@ -654,9 +666,14 @@ async function readingWorkspaces(
     .from(s)
     .where(and(inArray(s.provider, providers), ...(accountId != null ? [eq(s.accountId, accountId)] : [])))
     .execute()) as Array<{ accountId: number; workspaceId: number; provider: string; authToken: string | null }>;
-  return rows
+  const stored = rows
     .filter((r) => maybeAdapterFor(r.provider)?.reader?.credential === 'none' || (r.authToken != null && r.authToken !== ''))
     .map((r) => ({ accountId: r.accountId, workspaceId: r.workspaceId }));
+  // ⚠ PLUS THE AUTOMATIC DEFAULT: a workspace with no stored choice whose repo uses GitHub Issues
+  // reads as GitHub Issues everywhere (./settings.ts), so the worker must read it too. GitHub Issues
+  // needs no saved credential (the account's own GitHub token).
+  if (!providers.includes('github')) return stored;
+  return [...stored, ...(await autoDetectedWorkspaces(ctx, accountId))];
 }
 
 /** The repos of an account's reading workspaces (optionally just one). */
@@ -982,6 +999,9 @@ export async function runTrackerTick(
   if (!enabled || tickRunning) return;
   tickRunning = true;
   try {
+    // The automatic default's fact (./github/issues-usage.ts): a few due repos per tick, each at most
+    // once a day. FIRST, so a workspace it switches on is read in this same tick.
+    await refreshGithubIssuesUsage(ctx, opts.now != null ? { now: opts.now } : {});
     const accounts = [...new Set((await readingWorkspaces(ctx, null)).map((w) => w.accountId))];
     let left = MAX_PER_TICK;
     for (const accountId of accounts) {

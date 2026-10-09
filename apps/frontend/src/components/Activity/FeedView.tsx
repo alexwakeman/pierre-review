@@ -25,6 +25,7 @@ import {
   useFeedAutoInsert,
   useMarkFeedSeen,
 } from '../../hooks/useConsolidatedFeed.js';
+import { FEED_WINDOW_DAYS } from '@pierre-review/shared';
 import { useDetectedReviewers, useSetWorkspaceReviewer } from '../../hooks/useBotTriage.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
@@ -241,8 +242,7 @@ const BOT_STATE_ORDER: DerivedState[] = [
 // cause with an em-dash, and at 25 hours the arithmetic did not support it.
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 
-// The cross-repo feed's server window (FEED_WINDOW_DAYS, db/queries.ts).
-const FEED_WINDOW_DAYS = 14;
+// The cross-repo feed's server window — spelled once in shared/activity-windows.ts.
 
 export function FeedView({
   repoId,

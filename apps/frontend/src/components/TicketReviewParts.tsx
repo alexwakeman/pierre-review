@@ -55,6 +55,7 @@ import { CheckIcon, ChevronIcon, WarningIcon } from './Icons.js';
 import { Markdown } from './Markdown.js';
 import { autoPostFailureLine } from '../lib/autoPost.js';
 import { MemberPrLink, PrRefText } from './ReviewPrRefs.js';
+import { SendToChatButton } from './ClaudeReviewChat.js';
 import {
   REVIEW_CHIP,
   REVIEW_ITEM_CARD,
@@ -193,12 +194,26 @@ function ItemPost({
   );
 }
 
-/** The item's action line: Post in the pane; in the stack only where it was posted, if it was. */
+/**
+ * The item's action line: Post (and Send to chat, while this PR's Review chat is on screen) in the
+ * pane; in the stack only where it was posted, if it was.
+ */
 function ItemAction({ item, review, viewedPrId }: { item: TicketReviewItem; review: TicketReview; viewedPrId: number | null }): JSX.Element | null {
   if (viewedPrId != null) {
     return (
-      <div className="mt-1.5">
+      <div className="mt-1.5 flex flex-wrap items-center gap-2">
         <ItemPost item={item} review={review} viewedPrId={viewedPrId} />
+        {/* ⚠ The SERVER's rule (`resolveChatPins`): a story item can join this PR's chat only when
+            this PR started that ticket review or is one of its members. The ticket's latest review
+            may predate this PR joining the ticket — then it offers no pin that would 404. */}
+        {(review.originPrId === viewedPrId || review.members.some((m) => m.prId === viewedPrId)) && (
+        <SendToChatButton
+          prId={viewedPrId}
+          reviewId={null}
+          pinRef={{ kind: 'story_item', ticketReviewId: review.id, itemId: item.id }}
+          label={`${review.ticketKey != null ? `${review.ticketKey} ` : ''}${item.ref} · ${item.title}`}
+        />
+        )}
       </div>
     );
   }
@@ -441,8 +456,8 @@ export function PrCardDisclosure({ card, label }: { card: TicketPrCard; label?: 
         className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-50"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
-        {label != null && <span className="font-mono">{label}</span>}
-        What this PR adds
+        {/* Under "What each PR adds" the PR ref IS the label; a bare mount (one PR's own coverage) names the card. */}
+        {label != null ? <span className="font-mono">{label}</span> : 'What this PR adds'}
       </button>
       {open && (
         <div id={bodyId} className="ml-5 mt-1 space-y-2 text-xs">

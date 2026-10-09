@@ -29,7 +29,9 @@ const LABEL: Record<TrackerProvider, string> = { jira: 'Jira', linear: 'Linear',
  *
  * ⚠ IT IS PER-WORKSPACE, not per-account. The enricher's input is a PR,
  * and a PR's repo belongs to exactly ONE workspace, so there was never a reason for one tracker to
- * govern every team's PRs. There is no account-level default beneath this: two states, no chain.
+ * govern every team's PRs. There is no account-level default beneath this. With NO choice saved
+ * the server's automatic default applies (GitHub Issues when one of this workspace's repos uses it,
+ * else none) and arrives as `issue.provider` with `providerChosen: false`; a saved None wins.
  *
  * ⚠ THE HINT MUST NOT SAY "in the title AND branch". It used to, and it read as "the key must
  * appear in BOTH" when it meant "in either place we look" — a hint that describes a stricter rule
@@ -79,6 +81,13 @@ export function IssueLinksSection(): JSX.Element {
   }
 
   const saved = data.issue;
+  // The workspace's repos that use GitHub Issues, and whether the provider was picked for it.
+  const detected = data.githubIssuesRepos;
+  const autoPicked = !data.providerChosen && saved.provider === 'github';
+  const autoReason =
+    detected.length === 1
+      ? `Picked automatically: ${detected[0]} uses GitHub Issues.`
+      : `Picked automatically: ${detected[0]} and ${detected.length - 1} more ${detected.length === 2 ? 'repo use' : 'repos use'} GitHub Issues.`;
   // Project keys as a comma-separated string in the input; parsed to a list on save. The saved
   // list is normalized (uppercase), so compare against its comma-joined form.
   const parsedKeys = projectKeys
@@ -141,7 +150,7 @@ export function IssueLinksSection(): JSX.Element {
           <option value="">None</option>
           {TRACKER_PROVIDERS_AVAILABLE.map((p) => (
             <option key={p} value={p}>
-              {LABEL[p]}
+              {p === 'github' && detected.length > 0 ? `${LABEL[p]} (detected)` : LABEL[p]}
             </option>
           ))}
         </select>
@@ -150,6 +159,12 @@ export function IssueLinksSection(): JSX.Element {
         <p className="text-xs text-gray-600 dark:text-gray-300">
           Uses the issues each PR closes or links. Nothing to set up.
         </p>
+      )}
+      {/* ⚠ THE AUTOMATIC DEFAULT NAMES ITS REASON. With no choice saved the server picks GitHub
+          Issues when a repo here uses it (docs/TRACKERS.md § Automatic default); choosing None and
+          saving stores None, which then wins. */}
+      {autoPicked && provider === 'github' && (
+        <p className="text-xs text-gray-600 dark:text-gray-300">{autoReason}</p>
       )}
       {fields?.baseUrl === true && (
         <>

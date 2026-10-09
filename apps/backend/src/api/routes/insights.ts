@@ -4,6 +4,7 @@ import type {
   AttentionLivenessBody,
   AttentionLivenessResponse,
   InsightsResponse,
+  MergedPrsResponse,
   RepoAnalytics,
   WorkspaceMetricsDetailResponse,
   WorkspaceMetricsResponse,
@@ -17,6 +18,7 @@ import {
 } from '../../db/queries.js';
 import { getWorkspaceRepoActivity } from '../../db/repo-activity.js';
 import { getWorkspaceMergedReach } from '../../db/merged-reach.js';
+import { getMergedPrsInWindow } from '../../db/merged-prs.js';
 import { getReportingWindow, reportingWindowInfo } from '../../db/reporting-window.js';
 import { buildPendingBoard } from '../../db/pending-tabs.js';
 import { PR_LIVENESS_MAX_IDS, sweepPrLiveness } from '../../sync/pr-liveness-sweep.js';
@@ -125,6 +127,33 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
         window: reportingWindowInfo(window, nowMs),
         ...(repoActivity != null ? { repoActivity } : {}),
         ...(reach != null ? { reach } : {}),
+      };
+    },
+  );
+
+  // Reports → "Merged so far": every PR MERGED in the workspace's REPORTING WINDOW, as the same
+  // `TimelinePr` rows the Open PRs cards draw — PAID on `periodReports` with the rest of Reports,
+  // the 402 checked before any DB work. Same scope rule as /api/workspace-metrics (no `?repoIds=`:
+  // Reports covers the whole workspace) and the same window, resolved once and echoed. DB-only, so
+  // it stays on the `read` tier.
+  app.get(
+    '/api/merged-prs',
+    async (req, reply): Promise<MergedPrsResponse | { error: string }> => {
+      if (!reportsEntitled(req)) {
+        reply.status(402);
+        return { error: 'pro required' };
+      }
+      const q = req.query as { workspace?: string };
+      const accountId = accountIdOf(req);
+      const scope = await resolveWorkspaceScope(accountId, q.workspace);
+      const nowMs = Date.now();
+      const window = await getReportingWindow(accountId, scope.workspaceId, nowMs);
+      const { prs, truncated } = await getMergedPrsInWindow(accountId, scope, nowMs, window);
+      return {
+        prs,
+        workspaceId: scope.workspaceId,
+        window: reportingWindowInfo(window, nowMs),
+        truncated,
       };
     },
   );

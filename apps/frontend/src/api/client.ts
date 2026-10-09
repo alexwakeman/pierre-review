@@ -43,6 +43,7 @@ import type {
   ClaudeReviewStatesResponse,
   ClaudeReviewChatAnswer,
   ClaudeReviewChatBody,
+  ClaudeReviewChatHistoryResponse,
   ClaudeReviewChatResponse,
   ClaudeReviewStatusResponse,
   ClaudeReviewVerdict,
@@ -138,6 +139,7 @@ import type {
   RepoDigest,
   RepoDigestsResponse,
   OpenPrsResponse,
+  MergedPrsResponse,
   PostCommentResult,
   FollowUpReplyResult,
   PostReviewPreview,
@@ -888,6 +890,10 @@ export const api = {
   // response, one scope, one window; it also echoes the resolved `workspaceId`.
   workspaceMetrics: (workspaceId: number) =>
     get<WorkspaceMetricsResponse>(withQuery('/api/workspace-metrics', workspaceParam(workspaceId))),
+  // Reports → "Merged so far" — every PR merged in the workspace's REPORTING WINDOW, as Open PRs
+  // card rows. PAID on `periodReports` (the route 402s); one scope, one window, echoed.
+  mergedPrs: (workspaceId: number) =>
+    get<MergedPrsResponse>(withQuery('/api/merged-prs', workspaceParam(workspaceId))),
   // The attention cards (CORE/free) for the **Pending** rail entry.
   attentionCards: (workspaceId: number) =>
     get<AttentionCardsResponse>(withQuery('/api/attention', workspaceParam(workspaceId))),
@@ -1232,6 +1238,18 @@ export const api = {
       `/api/prs/${prId}/tracker-ticket/refresh`,
       jsonBody('POST', { key } satisfies JiraTicketRefreshBody),
     ).then((r) => handle<JiraTicketDetails>(r)),
+  // The Story check's paste box: ticket URLs or keys, read against the PR's workspace tracker.
+  // `link: false` only reads (the chips); `link: true` adds each readable one to the PR.
+  resolveTicketRefs: (prId: number, refs: string[], link: boolean) =>
+    fetch(
+      `/api/prs/${prId}/tracker-ticket/resolve`,
+      jsonBody('POST', { refs, link } satisfies import('@pierre-review/shared').ResolveTicketRefsBody),
+    ).then((r) => handle<import('@pierre-review/shared').ResolveTicketRefsResponse>(r)),
+  // Remove a ticket a person added by hand (`TicketRef.manual`). Only the 'manual' row goes.
+  removeManualTicket: (prId: number, key: string) =>
+    fetch(`/api/prs/${prId}/tracker-ticket/manual?key=${encodeURIComponent(key)}`, jsonBody('DELETE')).then((r) =>
+      handle<{ removed: number }>(r),
+    ),
   // The acceptance-criteria field for this ticket's ISSUE TYPE in the PR's workspace (null = back
   // to the default name match). Answers the ticket re-read with it.
   setJiraAcField: (prId: number, key: string, fieldId: string | null) =>
@@ -1404,6 +1422,9 @@ export const api = {
     fetch(`/api/claude-reviews/${reviewId}/chat`, jsonBody('POST', body)).then((r) =>
       handle<ClaudeReviewChatAnswer>(r),
     ),
+  // Every review run of this PR that has a chat, newest first (read-only history).
+  claudeReviewChatHistory: (prId: number) =>
+    get<ClaudeReviewChatHistoryResponse>(`/api/prs/${prId}/claude-review-chats`),
 
   // ---- Ticket review (CORE, local-only): one review per TICKET across every PR on it ----
   // docs/API.md § Ticket review. The live progress is an SSE GET at

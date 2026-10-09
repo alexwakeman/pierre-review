@@ -50,7 +50,9 @@ export interface TrackerConfig {
 }
 
 // 'link' = a link the provider itself states (GitHub: the PR closes the issue).
-export type DetectedFrom = 'title' | 'branch' | 'link';
+// 'manual' = a person pasted the ticket on the PR (the Story check's paste box): the stored row IS
+// the link, so detection keeps it (docs/TRACKERS.md § Adding a ticket by hand).
+export type DetectedFrom = 'title' | 'branch' | 'link' | 'manual';
 
 /** What detection may read off a pull request. `closingIssues` is the GitHub linker's stored read,
  *  `linearLinks` the Linear linker's (read against the Linear workspace `linearLinksRoot`):
@@ -61,6 +63,9 @@ export interface DetectInput {
   closingIssues?: string[] | null;
   linearLinks?: string[] | null;
   linearLinksRoot?: string | null;
+  /** Keys a person linked by hand (stored rows with `detected_from = 'manual'` on the workspace's
+   *  current provider + site — `manualKeysOf`). Appended after detection; undefined = none loaded. */
+  manualKeys?: readonly string[] | null;
 }
 
 export interface DetectedTicket {

@@ -146,6 +146,9 @@ describe('tierFor — the issue tracker', () => {
     expect(tiers('GET', '/api/prs/42/tracker-ticket')).toEqual(['search', 'read']);
     expect(tiers('POST', '/api/prs/42/tracker-ticket/refresh')).toEqual(['search', 'read']);
     expect(tiers('PUT', '/api/prs/42/tracker-ticket/ac-field')).toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/prs/42/tracker-ticket/resolve')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/prs/42/tracker-ticket/resolve')).not.toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/prs/42/tracker-ticket/resolves')).not.toEqual(['search', 'read']);
     // The wrong verb, or a near-miss path, is not swept in.
     expect(tiers('GET', '/api/prs/42/tracker-ticket/refresh')).not.toEqual(['search', 'read']);
     expect(tiers('POST', '/api/prs/42/tracker-ticket/ac-field')).not.toEqual(['search', 'read']);

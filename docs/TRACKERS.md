@@ -70,7 +70,38 @@ is not stored under lean storage and is not a source either.
 - ⚠ **The workspace is the PR's own.** A repo belongs to exactly one workspace; a repo with NO
   membership row, or another tenant's repo, has NO tracker — absent, never a neighbour's.
 - `detectForAccess` is the ONE rule; the PR chips, the ticket routes, the Open PRs batch and the
-  worker all call it.
+  worker all call it. It also appends the tickets a person added by hand (§ Adding a ticket by hand).
+
+## Adding a ticket by hand — the Story check's paste box
+
+A ticket that is not in the PR's title, branch or links can be ADDED by a person: the Story check's
+paste box (`components/TicketPasteBox.tsx`, the DEFAULT way in; "Input manually" reveals the typed
+story form) takes one or more ticket links or keys — `PROJ-123`, `owner/repo#12`, `#12` (an issue in
+the PR's own repo), `…/browse/KEY`, a Jira board `?selectedIssue=KEY`, a Jira Cloud issue view `…/projects/P/issues/KEY`, `github.com/o/r/issues/12`,
+`linear.app/<ws>/issue/KEY`. Parser: shared `ticket-refs.ts` (`parseTicketRef`, `splitTicketRefs`),
+run by the SPA for chips and again by the server. Route: `POST /api/prs/:id/tracker-ticket/resolve
+{refs, link}` (`tracker/manual-links.ts`, `[search, read]` tier, ≤ `TICKET_REFS_MAX` (10) refs). A hand-added
+ticket the detection would not name carries `TicketRef.manual` and is removable from the PR pane's Ticket
+row (`DELETE /api/prs/:id/tracker-ticket/manual?key=`, deletes only the `'manual'` row).
+
+- ⚠ **Decided against the PR's OWN workspace tracker.** A link for another provider or another
+  site/Linear workspace is `other_tracker` with a sentence — refused BEFORE any call, never read with
+  this workspace's credential. Roots compare through the shared folds (`jiraApiRoot`,
+  `linearSiteRoot`, `GITHUB_TRACKER_ROOT`). The project allowlist does NOT apply: a person named it.
+- `link: false` reads each ticket once (`adapter.reader.fetchTicket`) for the chip, stores nothing.
+  `link: true` writes a placeholder `tracker_tickets` row with **`detected_from = 'manual'`** (no
+  migration: the column is free text) and reads exactly those keys through `syncOnePrNow` (forced keys
+  now rank FIRST in the worker's queue, so an existing row cannot lose its one slot to a new key). A
+  ticket that does not read `ok` is DELETED again — a typo never becomes one of the PR's tickets. At
+  most `MANUAL_LINKS_PER_PR` (20) per PR.
+- ⚠ **Detection UNIONS the manual rows** (`DetectInput.manualKeys`, filled by `manualKeysOf` from rows
+  on the workspace's CURRENT provider + site; `detectPrTickets` reads them itself). So a hand-added
+  ticket is the PR's everywhere — chips, the Open PRs row, `resolvePrTickets`, the ticket review's
+  members and its `{prId, ident}` start — and the worker's prune KEEPS it and refreshes it on its TTL.
+  A key both detected and hand-added stays `'manual'`, so a later title edit cannot prune it. A manual
+  row left on another site after a tracker change is not a ticket and is pruned like any other.
+- This widens "not a tracker proxy" deliberately and only this far: a key a PERSON named, on the
+  workspace's own site, with its own credential, capped and rate-limited. There is no "unlink" yet.
 
 ## Fetch on receipt — the stored tickets and the worker
 
@@ -124,6 +155,41 @@ now). ⚠ **STORED ROWS ONLY** (`resolvePrTickets(…, { storedOnly: true })`) �
 - ⚠ `ticket-source.ts` imports its reader LAZILY: `tracker/runtime.ts` opens the database client at
   import time, and a test that statically imported the chain before pointing `DATABASE_URL` at a
   throwaway file once wrote into the developer's real database.
+
+## Automatic default — GitHub Issues when a repo uses it
+
+A workspace with **no stored tracker choice** (no `workspace_trackers` row, or `provider` NULL) uses
+**GitHub Issues** when at least one of its repos uses it, else no tracker. A **stored choice always
+wins, "None" included** — a chosen None is stored as the literal `'none'` (`NONE_PROVIDER`;
+`maybeAdapterFor('none')` is null, so it reads as no tracker), because NULL means "no choice"
+(migration sqlite `0094` / pg `0081` turned only an ALL-NULL pre-existing row — the one a None save alone writes — into `'none'`; a NULL provider beside any other stored value, e.g. a legacy-moved match scope, stays unchosen, and `tracker/legacy-import.ts` leaves its NULL providers NULL so both upgrade orders agree).
+
+- **A repo "uses GitHub Issues"** when issues are ENABLED and at least one issue was linked to a PR
+  in the last 90 days: `repos.uses_github_issues` (+ `github_issues_checked_at`), written by
+  `tracker/github/issues-usage.ts`. ONE GraphQL call per repo (`repository.hasIssuesEnabled` +
+  `search(type: ISSUE)` returning only `issueCount` for `repo:o/n is:issue linked:pr
+  updated:>=<90d>`; 1 point, no paging), from the tracker tick, at most once a day, ≤ 10 repos per
+  tick, and ONLY for repos in an unchosen workspace. ⚠ `pull_requests.closing_issues` cannot be the
+  source: it is read only for workspaces that ALREADY use GitHub Issues. ⚠ The column is written only
+  on a POSITIVE answer (a nulled selection leaves it); a low budget stamps nothing.
+- **ONCE PER WORKSPACE ADD, TOO** (`checkReposGithubIssuesUsage`, kicked by `kickGithubIssuesCheck`
+  in `tracker/index.ts`): a repo that JOINS a workspace — `POST /api/workspaces/:id/repos`, a PATCH's
+  added repos, and the repos a PATCH re-homes to Default — is asked NOW, whatever its last answer's
+  age and whatever the target's tracker choice, so the automatic default is right at once instead of
+  after the daily tick. A brand-new repo (which lands in Default with no answer) is asked once after
+  its FIRST walk (the repo-synced hook, `onlyUnasked`). A newly-true answer kicks that account's
+  ticket pass. Same positive-answer and low-budget rules; fire-and-forget, never fails the route.
+- ⚠ **ONE RESOLVER.** `readWorkspaceTrackerRow` (`tracker/settings.ts`) returns the EFFECTIVE row
+  (`effectiveTrackerRow`), so the enricher, the worker, the ticket routes, the merged panel, the
+  closing-issues step and the SPA's `useTrackerOn` all agree. The worker's population
+  (`readingWorkspaces`) is a set query and adds `autoDetectedWorkspaces`. Only the WRITER (and the
+  fold itself) reads the stored row (`readStoredTrackerRow`) — a patch that names no provider must
+  leave an unchosen workspace automatic, never freeze today's detection into a choice.
+- **The wire** (`GET`/`PUT /api/workspaces/:id/tracker`) carries the effective `issue.provider`,
+  `providerChosen` (false = automatic) and `githubIssuesRepos` (the workspace's repos that use it,
+  sent whatever the choice). Settings preselects the effective provider, labels the option "GitHub
+  Issues (detected)" and, when it was picked automatically, says which repo caused it. Saving None
+  from there stores `'none'`.
 
 ## GitHub Issues (phase 2) — `tracker/github/`
 

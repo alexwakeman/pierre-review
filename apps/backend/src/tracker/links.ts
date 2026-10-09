@@ -8,7 +8,7 @@ import {
   type TicketLinksResponse,
 } from '@pierre-review/shared';
 import { inChunks, type TrackerContext } from './context.js';
-import { detectKeysWithAccess, linksUnknownFor, prLinkColumns, withParsedLinks } from './enricher.js';
+import { detectKeysWithAccess, linksUnknownFor, manualKeysOf, prLinkColumns, withParsedLinks } from './enricher.js';
 import { trackerBaseUrl } from './settings.js';
 import { buildTicketRefs, ticketUrl } from './registry.js';
 import type { JiraTransport } from './jira/fetch.js';
@@ -102,10 +102,10 @@ export async function ticketLinksForPrs(
       }
       continue;
     }
-    const keys = detectKeysWithAccess(wc.access, row);
+    const mine = stored.get(id) ?? [];
+    const keys = detectKeysWithAccess(wc.access, { ...row, manualKeys: manualKeysOf(mine, wc.access) });
     const baseUrl = trackerBaseUrl(wc.access.issue);
     if (keys == null || provider == null || baseUrl == null) continue;
-    const mine = stored.get(id) ?? [];
     const tickets: TicketLink[] = buildTicketRefs(provider, baseUrl, keys).map((r) => {
       const s =
         wc.call != null

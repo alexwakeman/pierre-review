@@ -11,6 +11,7 @@ import {
   type WorkspaceTrackerAccess,
 } from './settings.js';
 import type { DetectInput, DetectedTicket } from './types.js';
+import type { StoredTicketRow } from './store.js';
 
 // THE PR'S TICKETS — compute-on-read from the PR title + head branch against the WORKSPACE's
 // tracker. Core `getPrDetail` calls `prTicketRefs` (via pr/detail-enricher.ts); the ticket routes,
@@ -52,6 +53,9 @@ export interface PrTicketDetection {
   /** The provider READS its links (GitHub Issues) and this PR's were never read: `keys` is [] for
    *  want of an answer, NOT "no ticket". Views show nothing rather than "No ticket found". */
   linksUnknown: boolean;
+  /** Keys present ONLY because a person added them by hand (detection alone would not name them) —
+   *  the ones a reader can remove (`DELETE /api/prs/:id/tracker-ticket/manual`). */
+  manualOnlyKeys: string[];
 }
 
 /** True when this provider's links are the WHOLE answer (GitHub Issues) and the PR's have not been
@@ -70,10 +74,55 @@ export function detectForAccess(access: WorkspaceTrackerAccess, pr: DetectInput)
   const adapter = maybeAdapterFor(issue.provider);
   const baseUrl = trackerBaseUrl(issue);
   if (adapter == null || baseUrl == null) return null;
-  return adapter.detect(
+  const found = adapter.detect(
     { provider: issue.provider, baseUrl, projectKeys: issue.projectKeys, matchScope: issue.matchScope },
     pr,
   );
+  // A ticket a person LINKED BY HAND is one of the PR's tickets like a detected one, and stays
+  // 'manual' even when the title names it too — so a later title edit cannot prune what a person
+  // added. Not filtered by the project allowlist: a person named it on purpose.
+  const manual = new Set(
+    (pr.manualKeys ?? []).map((k) => adapter.normalizeKey(k)).filter((k): k is string => k != null && adapter.isKey(k)),
+  );
+  if (manual.size === 0) return found;
+  const out: DetectedTicket[] = found.map((d) => (manual.has(d.key) ? { ...d, from: 'manual' } : d));
+  for (const key of manual) {
+    if (!out.some((d) => d.key === key)) out.push({ key, from: 'manual', order: out.length });
+  }
+  return out;
+}
+
+/**
+ * The keys of a PR's stored rows a person linked by hand, on the workspace's CURRENT provider and
+ * site — a manual row left over from another tracker is not one of its tickets (and the worker's
+ * prune removes it, like any key detection no longer names).
+ */
+export function manualKeysOf(
+  rows: ReadonlyArray<Pick<StoredTicketRow, 'detectedFrom' | 'provider' | 'apiRoot' | 'issueKey'>>,
+  access: WorkspaceTrackerAccess,
+): string[] {
+  const provider = access.issue.provider;
+  const adapter = maybeAdapterFor(provider);
+  if (adapter == null) return [];
+  const root = adapter.siteRoot(trackerBaseUrl(access.issue));
+  if (root == null) return [];
+  return rows
+    .filter((r) => r.detectedFrom === 'manual' && r.provider === provider && r.apiRoot === root)
+    .map((r) => r.issueKey);
+}
+
+/** One PR's manually linked rows (this account only) — the columns `manualKeysOf` reads. */
+export async function readManualRows(
+  ctx: TrackerContext,
+  accountId: number,
+  prId: number,
+): Promise<Array<Pick<StoredTicketRow, 'detectedFrom' | 'provider' | 'apiRoot' | 'issueKey'>>> {
+  const t = ctx.schema.trackerTickets;
+  return (await ctx.db
+    .select({ detectedFrom: t.detectedFrom, provider: t.provider, apiRoot: t.apiRoot, issueKey: t.issueKey })
+    .from(t)
+    .where(and(eq(t.accountId, accountId), eq(t.prId, prId), eq(t.detectedFrom, 'manual')))
+    .execute()) as Array<Pick<StoredTicketRow, 'detectedFrom' | 'provider' | 'apiRoot' | 'issueKey'>>;
 }
 
 /** Just the keys, in detection order. null = no tracker. */
@@ -105,10 +154,19 @@ export async function detectPrTickets(
   ) {
     input = { ...pr, ...(await storedLinks(ctx, accountId, pr.id)) };
   }
+  if (input.manualKeys === undefined && pr.id != null) {
+    input = { ...input, manualKeys: manualKeysOf(await readManualRows(ctx, accountId, pr.id), access) };
+  }
   const keys = detectKeysWithAccess(access, input);
-  return keys == null
-    ? null
-    : { workspaceId, access, keys, linksUnknown: linksUnknownFor(access.issue.provider, input) };
+  if (keys == null) return null;
+  const detected = (input.manualKeys ?? []).length > 0 ? new Set(detectKeysWithAccess(access, { ...input, manualKeys: [] }) ?? []) : null;
+  return {
+    workspaceId,
+    access,
+    keys,
+    linksUnknown: linksUnknownFor(access.issue.provider, input),
+    manualOnlyKeys: detected == null ? [] : keys.filter((k) => !detected.has(k)),
+  };
 }
 
 /** The stored-link columns every detection caller selects (GitHub's closing issues, Linear's
@@ -176,18 +234,36 @@ export async function prTicketRefs(
   ctx: TrackerContext,
   input: { accountId: number; prId?: number; repoId: number; title: string; headRefName: string | null },
 ): Promise<TicketRef[] | null> {
+  return (await prTicketView(ctx, input)).tickets;
+}
+
+/**
+ * PrDetail's ticket fields: `tickets` (the tri-state above) and `ticketsAddable` — the PR's workspace
+ * has a READING tracker, so the Story check's paste box can add a ticket by hand. ⚠ `addable` is
+ * true even while `tickets` is null for want of read links (GitHub Issues, `linksUnknown`): those
+ * PRs are exactly the ones most likely to need a hand-added ticket. Never throws.
+ */
+export async function prTicketView(
+  ctx: TrackerContext,
+  input: { accountId: number; prId?: number; repoId: number; title: string; headRefName: string | null },
+): Promise<{ tickets: TicketRef[] | null; addable: boolean }> {
   try {
     const found = await detectPrTickets(ctx, input.accountId, { ...input, id: input.prId });
-    if (found == null || found.linksUnknown) return null;
+    if (found == null) return { tickets: null, addable: false };
     const { issue } = found.access;
     const baseUrl = trackerBaseUrl(issue);
-    if (!isIssueConfigured(issue) || baseUrl == null) return null;
-    const refs = buildTicketRefs(issue.provider, baseUrl, found.keys);
+    if (!isIssueConfigured(issue) || baseUrl == null) return { tickets: null, addable: false };
     const reader = maybeAdapterFor(issue.provider)?.reader;
-    if (reader == null) return refs;
+    const addable = reader != null;
+    if (found.linksUnknown) return { tickets: null, addable };
+    const manualOnly = new Set(found.manualOnlyKeys);
+    const refs = buildTicketRefs(issue.provider, baseUrl, found.keys).map((r) =>
+      manualOnly.has(r.key) ? { ...r, manual: true } : r,
+    );
+    if (reader == null) return { tickets: refs, addable };
     const canFetchDetails = reader.credential === 'none' || found.access.token.state !== 'none';
-    return refs.map((r) => ({ ...r, canFetchDetails }));
+    return { tickets: refs.map((r) => ({ ...r, canFetchDetails })), addable };
   } catch {
-    return null; // best-effort; never fail the PR-detail read
+    return { tickets: null, addable: false }; // best-effort; never fail the PR-detail read
   }
 }

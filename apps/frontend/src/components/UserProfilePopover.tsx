@@ -10,6 +10,7 @@ import {
   useInteractions,
 } from '@floating-ui/react';
 import type { User } from '@pierre-review/shared';
+import { FEED_WINDOW_DAYS, USER_STATS_WINDOW_DAYS } from '@pierre-review/shared';
 import { profileUrl, userLabel } from '../lib/ui.js';
 import { useFilters } from '../store/filters.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
@@ -154,8 +155,8 @@ export function UserProfilePopover({
   const rows: { label: string; value: number; dot?: string }[] = stats
     ? [
         { label: 'PRs merged', value: stats.prsMerged, dot: '#8957e5' },
-        { label: 'PRs open', value: stats.prsOpen, dot: '#3b82f6' },
-        { label: 'PRs draft', value: stats.prsDraft, dot: '#9ca3af' },
+        { label: 'PRs open now', value: stats.prsOpen, dot: '#3b82f6' },
+        { label: 'Drafts open now', value: stats.prsDraft, dot: '#9ca3af' },
         { label: 'PRs closed', value: stats.prsClosed, dot: '#ef4444' },
         { label: 'Reviews given', value: stats.reviewsGiven },
         { label: 'Comments', value: stats.comments },
@@ -202,8 +203,8 @@ export function UserProfilePopover({
           </div>
         </div>
 
-        <div className="mt-2.5 text-[10px] uppercase tracking-wide text-gray-400" title={scopeLabel}>
-          All time · {scopeLabel}
+        <div className="mt-2.5 text-[11px] text-gray-500 dark:text-gray-400" title={scopeLabel}>
+          Last {USER_STATS_WINDOW_DAYS} days · {scopeLabel}
         </div>
 
         {isLoading && (
@@ -254,9 +255,9 @@ export function UserProfilePopover({
                 onDismiss();
               }}
               className="rounded px-1.5 py-1 text-xs font-medium text-sky-600 hover:bg-sky-50 dark:text-sky-400 dark:hover:bg-sky-950/40"
-              title={`Open ${label}'s recent activity in a tab`}
+              title={`Open ${label}'s last ${FEED_WINDOW_DAYS} days of activity in a tab`}
             >
-              View activity →
+              {`Last ${FEED_WINDOW_DAYS} days of activity →`}
             </button>
             {/* 1:1 prep (Pro `periodReports`, plan P4.2): the SAME tab — its header carries the
                 person-period vector. A separate line so the EM's entry point is named; absent

@@ -782,6 +782,14 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   is shared `jiraApiRoot`, ONE copy the server and the SPA both call. Members are OPEN + MERGED PRs
   (a merged one is read at its final head); closed-unmerged drop out. Over `TICKET_REVIEW_MAX_PRS`
   (30; it was 8 before contribution cards) it REFUSES `too_many_prs` with the count, never samples.
+- **Adding a ticket by link or key** (the DEFAULT story input): the Story check's paste box turns
+  pasted URLs/keys into chips, previews each (`POST /api/prs/:id/tracker-ticket/resolve`, `link:
+  false`), and its Check links the readable ones (`link: true`, a `'manual'` stored row — [TRACKERS.md](TRACKERS.md)
+  § Adding a ticket by hand) then starts ONE ticket review PER ticket with `{prId, ident}` — never a
+  combined run (`hooks/useTicketRefs.ts`). The start route's "is this PR on that ticket" check also
+  accepts the ticket's stored members (`ticketMembers`), so a hand-added ticket past the
+  `CLAUDE_REVIEW_MAX_TICKETS` story cap still starts. "Input manually" reveals the typed-story form
+  (`manual:` idents), unchanged; with no tracker on the PR only that form shows.
 - **Tables** `ticket_reviews` / `ticket_review_members` / `ticket_review_items` (sqlite `0080`, pg
   `0067`), tenancy STRUCTURAL via named composite FKs. Deleting a PR prunes its member rows and drops
   a run left with none (`db/ticket-review-prune.ts`, in BOTH delete paths).
@@ -1312,7 +1320,8 @@ nothing on screen opens a new one. Free and local-only like the rest of Claude R
   default), same credential ladder (`applyClaudeReviewAuth`; env mutation only under the review's
   own concurrency-1 rule AND no review in flight — `chatMayApplyAuthEnv`), its own per-turn budget
   `REVIEW_CHAT_BUDGET_USD` (default $1) and low turn caps (`REVIEW_CHAT_MAX_TURNS` 8,
-  `REVIEW_CHAT_DIFF_ONLY_MAX_TURNS` 2). The answer is free text — no MCP tool.
+  `REVIEW_CHAT_DIFF_ONLY_MAX_TURNS` 2). A plain answer is free text — no MCP tool (an "explain
+  these" turn is the exception, below).
 - **THE GROUNDING IS THE WHOLE REVIEW, FENCED.** PR title + description, verdict + summary, every
   finding (severity, file, line, body, the reader's reword, suggestion, hunk), the user story and its
   assessment, the follow-up record, the diff (`ctx.review.prepareReview`, cached 10 minutes per
@@ -1337,7 +1346,43 @@ nothing on screen opens a new one. Free and local-only like the rest of Claude R
   key (`claudeReviewChatAskKey(reviewId)`) read through `useIsMutating`/`useMutationState`, so a tab
   switch mid-answer cannot offer a second billed POST, and the completed turn is written into the
   thread's cache in the hook-level `onSuccess`, never a `mutate()` callback. A thread reopened while
-  the server is still answering polls every 4s until the answer lands.
+  the server is still answering polls every 4s until the answer lands. Ask EMPTIES the box at once
+  and the question shows as the pending turn (read off the shared mutation's variables), with the
+  shared `RegenProgressBar` easing under it while Claude answers.
+
+### Send to chat — "explain these" (sqlite `0095` / pg `0082`)
+
+Every finding card (`FindingRow`, older story findings included) and every not-done / partly-done
+story item of a ticket review (`TicketReviewParts.tsx` `ItemAction`, PR pane only) carries **Send to
+chat**. It pins the item to the Review chat as a pill; Ask then sends the pins, and ONE agent run
+answers with ONE CARD PER PIN (what it means, why it matters, where, what would fix it). Pure half:
+`review/claude-review/chat-explain.ts`; SPA pins: `store/reviewChatPins.ts`.
+
+- **THE CLIENT SENDS REFERENCES ONLY** — `{kind:'finding', findingId}` or `{kind:'story_item',
+  ticketReviewId, itemId}` (`parsePinRefs`: ids and nothing else, duplicates collapse, more than
+  `CLAUDE_REVIEW_CHAT_MAX_PINS` (10) REFUSES rather than cuts). The server reads each item's text
+  itself (`resolveChatPins`): a finding must belong to THE review being chatted about; a story item
+  must belong to one of the account's ticket reviews that this PR is on (a member, or the PR that
+  started it). Anything else 404s before any agent call. Pins ride the GENERAL thread only.
+- **STRUCTURED, VALIDATED ANSWER.** The run gets one extra in-process tool, `submit_explanations`
+  (`mcp__chat__submit_explanations`; never in the `tools` base set, Bash still denied, 4 extra turns)
+  and succeeds ONLY by calling it. The model answers each pin by its prompt handle `P1…Pn`;
+  `validateExplanations` drops a card naming any other ref or a pin twice, keeps PIN order and
+  stamps the SERVER's label (never model text). No surviving card = `502 NoAnswer`, nothing stored,
+  the turn still metered. A pin with no card is said so under the cards.
+- **STORED ON THE SAME ROWS.** The user row carries `pins` (refs + the server's label at ask time,
+  so history reads the same after a finding or run is gone); the assistant row carries
+  `explanations` AND a markdown rendering in `content`, which is what a later turn's transcript reads
+  (`pairTurns` also appends the pins' labels to the question).
+- **PINS LIVE IN MEMORY, PER PR** (never storage, the URL or the server until Ask). A finding pin
+  also carries its review run and shows only on that run's chat (`pinsForChat`), so picking an older
+  run hides — never mixes — them. The buttons render only while a Review chat is MOUNTED for the PR
+  (`registerChat`), and a press opens + scrolls the chat (`focus` tick). Ask removes the sent pins at
+  once; a failed send puts them back in the HOOK-level `onError` (it survives the panel closing).
+- **EARLIER REVIEWS' CHATS** — a collapsed section under the thread, fetched only once opened:
+  `GET /api/prs/:id/claude-review-chats` (read tier; 404 for another account's PR) returns every run
+  of the PR with a general-thread chat, newest first; a select (short sha · date/time · mode) shows
+  one run's turns read-only, cards included.
 
 ## AI Fix (the agentic fixer)
 

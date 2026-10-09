@@ -11,6 +11,7 @@ import { createPathGuard, pathGuardHook } from './path-guard.js';
 import { sdkModelOptions } from './model-options.js';
 import { estimateCostUsd } from './pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from './usage.js';
+import { submitExplanationsShape } from './claude-review/chat-explain.js';
 
 // ctx.review.chat — ONE answered question about a succeeded Claude Review. The plugin owns the
 // product (the prompt, the stored transcript, gating, metering); core owns the run, exactly as for
@@ -38,13 +39,25 @@ export const CHAT_DISALLOWED_TOOLS: readonly string[] = [
   'Task',
 ];
 
+// An EXPLAIN turn's one extra tool: the in-process structured answer (chat-explain.ts). It reads and
+// writes nothing — it only hands the cards back to this process.
+export const CHAT_EXPLAIN_TOOL_NAME = 'mcp__chat__submit_explanations';
+const EXPLAIN_EXTRA_TURNS = 4;
+
 /** The tool surface for one chat turn — exported so a test can pin it without running an agent. */
-export function chatToolsFor(mode: ReviewChatArgs['mode']): {
+export function chatToolsFor(
+  mode: ReviewChatArgs['mode'],
+  explain = false,
+): {
+  // The built-in base set (`tools`): never the MCP tool, never a shell.
+  builtinTools: string[];
   allowedTools: string[];
   disallowedTools: string[];
 } {
+  const builtin = [...(mode === 'worktree' ? CHAT_WORKTREE_TOOLS : CHAT_DIFF_ONLY_TOOLS)];
   return {
-    allowedTools: [...(mode === 'worktree' ? CHAT_WORKTREE_TOOLS : CHAT_DIFF_ONLY_TOOLS)],
+    builtinTools: builtin,
+    allowedTools: explain ? [...builtin, CHAT_EXPLAIN_TOOL_NAME] : builtin,
     disallowedTools: [...CHAT_DISALLOWED_TOOLS],
   };
 }
@@ -57,6 +70,7 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
   let result: SDKResultMessage | null = null;
   let restoreEnv: (() => void) | null = null;
   let lastText = '';
+  let submitted: unknown = undefined;
   const usageByUuid = new Map<string, UsageTokens>();
 
   const telemetry = (): Pick<
@@ -98,11 +112,34 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
       cwd = tempCwd;
       maxTurns = config.reviewChatDiffOnlyMaxTurns;
     }
-    const { allowedTools, disallowedTools } = chatToolsFor(mode);
+    // An explain turn spends one more turn on the submit call and usually reads a file per item.
+    if (args.explain) maxTurns += EXPLAIN_EXTRA_TURNS;
+    const { builtinTools, allowedTools, disallowedTools } = chatToolsFor(mode, args.explain === true);
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
 
     // From the AI runtime (ai/runtime.ts); a missing one throws into the catch below.
-    const { query } = await loadAgentSdk();
+    const { query, createSdkMcpServer, tool } = await loadAgentSdk();
+    let mcpServers: Record<string, ReturnType<typeof createSdkMcpServer>> | undefined;
+    if (args.explain) {
+      const shape = await submitExplanationsShape();
+      mcpServers = {
+        chat: createSdkMcpServer({
+          name: 'chat',
+          version: '1.0.0',
+          tools: [
+            tool(
+              'submit_explanations',
+              'Submit one card per item the developer asked about. Call this EXACTLY once, at the end.',
+              shape,
+              async (a) => {
+                submitted = a;
+                return { content: [{ type: 'text', text: 'Explanations recorded.' }] };
+              },
+            ),
+          ],
+        }),
+      };
+    }
     const q = query({
       prompt: args.prompt,
       options: {
@@ -113,7 +150,7 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
         permissionMode: 'bypassPermissions',
         // `tools` is the BASE SET the model can see at all ([] = no built-in tools); allowedTools
         // only skips prompts. Both say the same thing, plus the deny list.
-        tools: allowedTools,
+        tools: builtinTools,
         allowedTools,
         disallowedTools,
         maxTurns,
@@ -123,6 +160,7 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
         // bypassPermissions nothing else confines an absolute path, so the file tools may read
         // cwd and nothing else.
         hooks: { PreToolUse: [pathGuardHook(createPathGuard(cwd, []))] },
+        ...(mcpServers ? { mcpServers } : {}),
         abortController,
         ...claudeExecutableOptions(),
       },
@@ -142,6 +180,16 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
       }
     }
 
+    if (args.explain) {
+      if (submitted === undefined) {
+        const reason =
+          result && result.subtype !== 'success'
+            ? `agent stopped (${result.subtype}) without submitting explanations`
+            : 'agent finished without calling submit_explanations';
+        return fail(reason, false);
+      }
+      return { ok: true, text: lastText.trim(), submitted, ...telemetry(), aborted: false };
+    }
     const finalText =
       result && result.subtype === 'success' && typeof result.result === 'string' && result.result.trim()
         ? result.result.trim()

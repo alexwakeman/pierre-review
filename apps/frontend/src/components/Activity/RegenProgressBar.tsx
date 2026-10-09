@@ -68,7 +68,7 @@ export function RegenProgressBar({
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className="shrink-0 whitespace-nowrap text-right text-[10px] tabular-nums text-ai-signal">
+      <span className="shrink-0 whitespace-nowrap text-right text-[11px] tabular-nums text-ai-signal">
         {sub ?? `${rounded}%`}
       </span>
     </div>

@@ -473,6 +473,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (method === 'PUT' && /^\/api\/prs\/\d+\/tracker-ticket\/ac-field$/.test(path)) {
     return [TIERS.search, TIERS.read];
   }
+  // POST …/tracker-ticket/resolve — the Story check's paste box: up to TICKET_REFS_MAX tickets a
+  // person named, each read from the customer's tracker (or GitHub, for GitHub Issues) with the
+  // workspace's credential. Their quota, so `search`. Exact segment `resolve`.
+  if (method === 'POST' && /^\/api\/prs\/\d+\/tracker-ticket\/resolve$/.test(path)) {
+    return [TIERS.search, TIERS.read];
+  }
   // POST /api/ticket-links — the Open PRs cards' ticket row, ONE request per board: DB-only
   // detection plus the STORED ticket rows; a detected ticket with no row kicks the background
   // worker, which spends the customer's tracker quota — so `search`, not `read`. A POST only

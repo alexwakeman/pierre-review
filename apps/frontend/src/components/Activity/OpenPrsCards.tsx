@@ -323,6 +323,7 @@ export function OpenPrsCards({
   isError,
   sort,
   grouped = false,
+  variant = 'open',
   onOpenPr,
   emptyLabel = (
     <>
@@ -338,6 +339,12 @@ export function OpenPrsCards({
   sort: OpenPrsSort | null;
   /** The reader picked "Group by ticket". Honoured only once tickets are known (see below). */
   grouped?: boolean;
+  /** 'merged' = Reports → "Merged so far": the same cards and stacks over MERGED PRs. It drops
+   *  what means nothing once a PR has landed — the CI and merge-readiness chips, the stack
+   *  roll-up, the Claude Review panel and the ticket review (and their batched requests), and the
+   *  stack's own "Merged (n)" panel (the stack IS the merged work) — and the default order is
+   *  newest merge first. */
+  variant?: 'open' | 'merged';
   onOpenPr: (pr: TimelinePr) => void;
   // The zero-row copy — overridden when a client-side narrowing (not the data) emptied the list.
   // ReactNode, not string: the DEFAULT is the all-clear state and leads with a muted tick, while
@@ -351,7 +358,8 @@ export function OpenPrsCards({
   const repoNameById = useMemo(() => new Map((repos ?? []).map((r) => [r.id, r.fullName])), [repos]);
 
   // The Claude Review panel: capability-gated, ONE request for every listed PR.
-  const claudeOn = useAiCapabilities().enabled;
+  const merged = variant === 'merged';
+  const claudeOn = useAiCapabilities().enabled && !merged;
   const prIds = useMemo(() => prs.map((p) => p.id), [prs]);
   const { data: claudeData } = useClaudeReviewStates(prIds, claudeOn);
   const claudeStates = useMemo(
@@ -398,6 +406,9 @@ export function OpenPrsCards({
 
   const shownSort = effectiveSort(sort, claudeOn);
   const rows = useMemo(() => {
+    if (shownSort == null && merged) {
+      return [...prs].sort((a, b) => (b.mergedAt ?? '').localeCompare(a.mergedAt ?? '') || b.id - a.id);
+    }
     if (shownSort == null) {
       return sortOpenPrsByActivity(prs, (pr) => {
         const set = maintainersByRepo.get(pr.repoId);
@@ -405,7 +416,7 @@ export function OpenPrsCards({
       });
     }
     return sortOpenPrs(prs, shownSort, { usersById, repoNameById, claudeStates });
-  }, [prs, shownSort, maintainersByRepo, usersById, repoNameById, claudeStates]);
+  }, [prs, merged, shownSort, maintainersByRepo, usersById, repoNameById, claudeStates]);
 
   // GROUPED only once the ticket answer is HERE: before it, the plain list (no skeleton, no wait
   // on Jira); after it, the list again if no PR names a ticket (a lone "No ticket" header says
@@ -414,16 +425,22 @@ export function OpenPrsCards({
   const stacked = useMemo(
     () =>
       grouped && ticketsOn && ticketData != null
-        ? stackOpenPrs(rows, (pr) => cardTickets(detectedTickets.get(pr.id)))
+        ? stackOpenPrs(
+            rows,
+            (pr) => cardTickets(detectedTickets.get(pr.id)),
+            // Merged so far orders stacks by the MERGE, newest first — a merged PR's `updatedAt`
+            // moves with any later comment, label or branch deletion.
+            merged ? (pr) => pr.mergedAt ?? pr.updatedAt : undefined,
+          )
         : null,
-    [grouped, ticketsOn, ticketData, rows, detectedTickets],
+    [grouped, ticketsOn, ticketData, rows, detectedTickets, merged],
   );
   const showStacks = stacked != null && stacksWorthShowing(stacked);
   // Each stack's "Merged (n)" panel: ONE request for every stack on the board, only while the
   // stacks are on screen.
   const workspaceId = useFilters((s) => s.workspaceId);
   const mergedKeys = useMemo(() => (showStacks && stacked != null ? mergedPanelKeys(stacked.stacks) : []), [showStacks, stacked]);
-  const { data: mergedData } = useTicketMergedPrs(workspaceId, mergedKeys, ticketsOn && showStacks);
+  const { data: mergedData } = useTicketMergedPrs(workspaceId, mergedKeys, ticketsOn && showStacks && !merged);
   const mergedStacks = useMemo(
     () => (stacked != null ? mergedByStack(stacked.stacks, mergedData) : new Map<string, TicketMergedPr[]>()),
     [stacked, mergedData],
@@ -467,7 +484,7 @@ export function OpenPrsCards({
     );
   }
   if (isError) {
-    return <div className="text-sm text-red-500">Couldn’t load the open PRs.</div>;
+    return <div className="text-sm text-red-500">{merged ? 'Couldn’t load the merged PRs.' : 'Couldn’t load the open PRs.'}</div>;
   }
   if (rows.length === 0) {
     return (
@@ -492,6 +509,7 @@ export function OpenPrsCards({
       tickets={opts.inStack == null ? ticketsOf(pr) : []}
       alsoIn={opts.inStack?.alsoIn ?? []}
       headingLevel={opts.inStack != null ? 4 : 3}
+      variant={variant}
       working={
         claudeOn ? (
           <ClaudeWorkChip
@@ -531,8 +549,9 @@ export function OpenPrsCards({
           <TicketStack
             key={stack.id}
             stack={stack}
-            merged={mergedStacks.get(stack.id) ?? []}
+            merged={merged ? [] : (mergedStacks.get(stack.id) ?? [])}
             onOpenMerged={openMerged}
+            showRollup={!merged}
             review={
               ticketReviewOn && stack.ticket?.ident != null && stack.rows[0] != null
                 ? { ident: stack.ticket.ident, state: ticketStates.get(stack.ticket.ident), prId: stack.rows[0].pr.id }
@@ -552,7 +571,7 @@ export function OpenPrsCards({
   }
 
   return (
-    <ul aria-label="Open pull requests" className="space-y-2">
+    <ul aria-label={merged ? 'Merged pull requests' : 'Open pull requests'} className="space-y-2">
       {rows.map((pr) => renderCard(pr))}
     </ul>
   );
@@ -696,9 +715,12 @@ function TicketStack({
   review,
   merged,
   onOpenMerged,
+  showRollup = true,
   children,
 }: {
   stack: OpenPrsStack;
+  /** false on Reports → "Merged so far": failing CI / ready to merge say nothing about landed work. */
+  showRollup?: boolean;
   /** Every merged PR linked to this ticket (the "Merged (n)" panel); [] = no panel. */
   merged: readonly TicketMergedPr[];
   onOpenMerged: (pr: TicketMergedPr) => void;
@@ -713,7 +735,7 @@ function TicketStack({
   const t = stack.ticket;
   const cat = t?.statusCategory ?? null;
   const href = t != null ? safeExternalUrl(t.url) : null;
-  const rollup = stackRollupParts(stackRollup(stack.rows));
+  const rollup = showRollup ? stackRollupParts(stackRollup(stack.rows)) : [];
   const name = t != null ? t.key : 'No ticket';
   // Any PR on the ticket reads its stored row; only a Jira ticket (it has an ident) has one.
   const storyPrId = t?.ident != null ? (stack.rows[0]?.pr.id ?? null) : null;
@@ -993,10 +1015,13 @@ function OpenPrCard({
   tickets,
   alsoIn,
   headingLevel,
+  variant = 'open',
   working,
   claude,
 }: {
   pr: TimelinePr;
+  /** 'merged': a "Merged" chip in place of CI + merge readiness, and "merged X ago" in the meta. */
+  variant?: 'open' | 'merged';
   author: User | undefined;
   repoName: string;
   onOpen: () => void;
@@ -1030,10 +1055,17 @@ function OpenPrCard({
 
       {/* 2 — the PR's status chips, left-aligned under the title so they read with it. */}
       <PrCardChips>
-        <CiChip ci={pr.ciStatus} />
+        {variant === 'merged' ? (
+          <span className={NEUTRAL_CHIP}>
+            <MergeIcon size={11} />
+            Merged
+          </span>
+        ) : (
+          <CiChip ci={pr.ciStatus} />
+        )}
         <ReviewChip pr={pr} />
         <ThreadsChip pr={pr} />
-        <MergeChip pr={pr} />
+        {variant !== 'merged' && <MergeChip pr={pr} />}
       </PrCardChips>
 
       {/* 3 — the ticket row: absent when the PR names no ticket (never an empty row). */}
@@ -1121,8 +1153,12 @@ function OpenPrCard({
             <span className="truncate">{userLabel(author, pr.authorId)}</span>
           </span>,
           <span title={`Opened ${dateTime(pr.openedAt)}`}>opened {relativeTime(pr.openedAt)}</span>,
-          pr.updatedAt !== pr.openedAt && (
-            <span title={`Updated ${dateTime(pr.updatedAt)}`}>updated {relativeTime(pr.updatedAt)}</span>
+          variant === 'merged' && pr.mergedAt != null ? (
+            <span title={`Merged ${dateTime(pr.mergedAt)}`}>merged {relativeTime(pr.mergedAt)}</span>
+          ) : (
+            pr.updatedAt !== pr.openedAt && (
+              <span title={`Updated ${dateTime(pr.updatedAt)}`}>updated {relativeTime(pr.updatedAt)}</span>
+            )
           ),
           <span>{filesLabel(pr.changedFiles)}</span>,
         ]}

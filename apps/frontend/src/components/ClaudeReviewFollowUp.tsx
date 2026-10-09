@@ -318,6 +318,8 @@ export function ClaudeReviewTicketPanel({
   tickets,
   prWorkspaceName,
   autoPullReady,
+  defaultOpen = false,
+  onClose,
 }: {
   value: TicketDraft[];
   onChange: (next: TicketDraft[]) => void;
@@ -329,9 +331,13 @@ export function ClaudeReviewTicketPanel({
   // The stored run has loaded, so the list is settled: the automatic pull waits for it, or the
   // prefill from the latest run would land on top of (or under) what it pulled.
   autoPullReady: boolean;
+  // Mount with the tabs shown (the paste box's "Input manually" asked for the form).
+  defaultOpen?: boolean;
+  // Close was pressed (after blank tabs were dropped).
+  onClose?: () => void;
 }): JSX.Element {
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const tabsId = useId();
   const [selectedRaw, setSelected] = useState(0);
   const selected = clampTab(selectedRaw, value.length);
@@ -634,6 +640,7 @@ export function ClaudeReviewTicketPanel({
     }
     setFieldEditing(null);
     setOpen(false);
+    onClose?.();
   };
   const hintText = hint.replace(/^ · /, '');
   const pullButton =

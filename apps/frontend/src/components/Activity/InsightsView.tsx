@@ -6,6 +6,7 @@ import { ChevronIcon } from '../Icons.js';
 import { ProLockPanel, useProGateState } from '../ProGate.js';
 import { BottlenecksPanel } from './BottlenecksPanel.js';
 import { effectiveInsightsTab } from './bottlenecksModel.js';
+import { MergedPrsView } from './MergedPrsView.js';
 import { PeriodReportsPanel } from './PeriodReportsPanel.js';
 import { TrackUsage } from './TrackUsage.js';
 import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
@@ -29,8 +30,10 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 // "Ask about this period" section under the report, grounded in the viewed period's own
 // [fromMs, toMs) rather than a trailing window.
 //
-// ── THE PANE IS TWO TABS ─────────────────────────────────────────────────────────────────────
+// ── THE PANE IS THREE TABS ───────────────────────────────────────────────────────────────────
 //   • Overview   — flow metrics, the two "where the work is happening" cards, period reports.
+//   • Merged so far — the Open PRs cards over every PR merged in the REPORTING WINDOW
+//     (MergedPrsView, GET /api/merged-prs), grouped per ticket when the workspace has a tracker.
 //   • Chronology — the COURT LEDGER (BottlenecksPanel). PRO on `periodReports`; still
 //     deterministic (no model anywhere behind it) and still the twin of the Bots rail — that
 //     surface measures automation, this one measures where people's time went.
@@ -145,6 +148,7 @@ function InsightsBody(): JSX.Element {
         {(
           [
             { key: 'overview', label: 'Overview' },
+            { key: 'merged', label: 'Merged so far' },
             // ⚠ LABEL-ONLY: the store/URL literal stays 'bottlenecks' (see InsightsInnerTab).
             { key: 'bottlenecks', label: 'Chronology' },
           ] as const
@@ -171,6 +175,8 @@ function InsightsBody(): JSX.Element {
 
       {effectiveTab === 'bottlenecks' ? (
         <ChronologyTabBody />
+      ) : effectiveTab === 'merged' ? (
+        <MergedPrsView />
       ) : (
         <>
           {/* `WorkspaceFlowMetrics` self-hides when there is nothing to measure, so the empty

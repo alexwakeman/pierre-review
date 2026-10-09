@@ -216,7 +216,12 @@ export function registerTicketReviewRoutes(app: FastifyInstance, ctx: AgentConte
         targets.push({ ident, ticket: latest.ticket, manual: true });
       } else {
         const detected = await detectedTickets(accountId, body.prId);
-        const known = detected.some((d) => d.ident === ident) || (await getTicketIdentsForPr(ctx, accountId, body.prId)).includes(ident);
+        // A ticket the PR carries past the per-PR story cap (a hand-added one, docs/TRACKERS.md §
+        // Adding a ticket by hand) is still the PR's: its stored rows say so.
+        const known =
+          detected.some((d) => d.ident === ident) ||
+          (await getTicketIdentsForPr(ctx, accountId, body.prId)).includes(ident) ||
+          (await getTicketSource().ticketMembers(accountId, ident)).some((m) => m.prId === body.prId);
         if (!known) {
           reply.status(404);
           return { error: 'NotFound', message: 'This PR is not on that ticket.' };

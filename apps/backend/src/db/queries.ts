@@ -194,6 +194,8 @@ import {
   PENDING_LIMITS,
   PENDING_SEVERITY,
   REPORTING_DEFAULT_DAYS,
+  FEED_WINDOW_DAYS as SHARED_FEED_WINDOW_DAYS,
+  USER_STATS_WINDOW_DAYS,
 } from '@pierre-review/shared';
 
 // Local copy of the shared `REASON_PRIORITY` value constant. `@pierre-review/shared`
@@ -1094,13 +1096,18 @@ export async function listUsers(accountId: number): Promise<User[]> {
   return rows.map(mapUser);
 }
 
-// All-time contribution counts for ONE user, as seen from ONE account's synced data.
+// Contribution counts for ONE user over the trailing USER_STATS_WINDOW_DAYS (90), as seen from
+// ONE account's synced data.
 //
 // Deliberately COUNTS-ONLY: no titles, no bodies, no ids, no profile fields — the caller
 // already knows who it asked about, and a popover that leaks a PR title would leak it from
-// repos the reader may not have open. There is no date window either; these are lifetime
-// totals over whatever this account has synced, which is what a "who is this person" hover
-// wants (a windowed number reads as "did nothing" for a long-tenured contributor).
+// repos the reader may not have open.
+//
+// THE WINDOW is `[now - 90 days, now)`, half-open, and each count reads ITS OWN clock: merged by
+// `mergedAt`, closed by `closedAt`, open/draft are NOT windowed (open is a
+// now-state: every currently-open PR counts, labelled "now" in the popover), reviews by `submittedAt`, comments by `createdAt`. The
+// popover captions it "Last 90 days" from the same shared constant. (It was lifetime totals; a
+// lifetime count over a coverage-biased sync read as an activity level it was not.)
 //
 // Account scoping is the load-bearing part. `users` is a GLOBAL table, so the user id alone
 // grants nothing: every count is bound to `pullRequests.accountId = accountId`. PRs carry
@@ -1116,7 +1123,10 @@ export async function getUserStats(
   accountId: number,
   userId: number,
   repoIds: number[] | null = null,
+  nowMs: number = Date.now(),
 ): Promise<UserContributionStats> {
+  const to = new Date(nowMs);
+  const from = new Date(nowMs - USER_STATS_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   const zero: UserContributionStats = {
     userId,
     prsMerged: 0,
@@ -1145,6 +1155,13 @@ export async function getUserStats(
         and(
           eq(pullRequests.accountId, accountId),
           eq(pullRequests.authorId, userId),
+          or(
+            and(eq(pullRequests.state, 'merged'), gte(pullRequests.mergedAt, from), lt(pullRequests.mergedAt, to)),
+            and(eq(pullRequests.state, 'closed'), gte(pullRequests.closedAt, from), lt(pullRequests.closedAt, to)),
+            // OPEN IS A NOW-STATE, NOT A WINDOW EVENT: every currently-open/draft PR counts,
+            // whenever it was opened, or a PR opened 100 days ago reads as "has no open PRs".
+            eq(pullRequests.state, 'open'),
+          ),
           ...repoScope,
         ),
       )
@@ -1173,6 +1190,8 @@ export async function getUserStats(
           eq(reviews.authorId, userId),
           ne(reviews.state, 'pending'),
           or(ne(reviews.state, 'commented'), and(isNotNull(reviews.body), ne(reviews.body, ''))),
+          gte(reviews.submittedAt, from),
+          lt(reviews.submittedAt, to),
           ...repoScope,
         ),
       )
@@ -1186,6 +1205,8 @@ export async function getUserStats(
         and(
           eq(pullRequests.accountId, accountId),
           eq(prComments.authorId, userId),
+          gte(prComments.createdAt, from),
+          lt(prComments.createdAt, to),
           ...repoScope,
         ),
       )
@@ -1200,6 +1221,8 @@ export async function getUserStats(
         and(
           eq(pullRequests.accountId, accountId),
           eq(reviewComments.authorId, userId),
+          gte(reviewComments.createdAt, from),
+          lt(reviewComments.createdAt, to),
           ...repoScope,
         ),
       )
@@ -1438,7 +1461,7 @@ function isStalled(pr: { state: PrState; lastCommitAt: Date | null }, counts: Th
 type PrRow = typeof pullRequests.$inferSelect;
 
 /** Build full TimelinePr objects (incl. triage fields) for a set of PR rows. */
-async function buildTimelinePrs(
+export async function buildTimelinePrs(
   prRows: PrRow[],
   accountId: number,
 ): Promise<TimelinePr[]> {
@@ -2835,7 +2858,7 @@ export async function getActivity(
 // at least this long or the Feed reads rows that no longer exist: `sync/branch-status.ts`'s trunk
 // CI transition log trims against it, after a count-only trim let an active repo evict the very
 // failure rows this window is supposed to surface.
-export const FEED_WINDOW_DAYS = 14;
+export const FEED_WINDOW_DAYS = SHARED_FEED_WINDOW_DAYS; // 14 — spelled once in shared/activity-windows.ts
 
 // Every My Turn (participated) event is always kept; the plain activity rows are bounded to
 // the most recent, so a busy multi-repo account doesn't render thousands of them.
@@ -9189,7 +9212,7 @@ export async function getPrDetail(
   }
 
   // Jira/Linear ticket links — compute-on-read via the Pro enricher (inert in OSS → null).
-  const tickets = await resolvePrTickets({
+  const { tickets, addable: ticketsAddable } = await resolvePrTickets({
     accountId,
     prId: pr.id,
     repoId: pr.repoId,
@@ -9206,6 +9229,7 @@ export async function getPrDetail(
     title: pr.title,
     body: pr.body,
     tickets,
+    ticketsAddable,
     authorId: pr.authorId,
     state: pr.state,
     isDraft: pr.isDraft,

@@ -112,10 +112,11 @@ describe('1. the writer', () => {
 });
 
 describe('2. only implemented providers', () => {
-  it('the writer refuses a provider with no adapter (stored null)', () => {
-    // GitHub Issues has an adapter since phase 2; a provider name nobody implements is refused.
+  it('the writer refuses a provider with no adapter (stored as a chosen None)', () => {
+    // GitHub Issues has an adapter since phase 2; a provider name nobody implements is refused —
+    // stored as the explicit 'none' (0094), never NULL, which would mean "follow the automatic default".
     const cols = mergeTracker(null, { issue: { provider: 'asana' as never, baseUrl: 'https://app.asana.com' } });
-    expect(cols.provider).toBeNull();
+    expect(cols.provider).toBe('none');
   });
 
   it('a stored provider with no adapter reads as "no tracker"', async () => {

@@ -8,3 +8,5 @@ export * from './my-turn-settings.js';
 export * from './claude-review.js';
 export * from './reporting-window.js';
 export * from './dependency-merge.js';
+export * from './activity-windows.js';
+export * from './ticket-refs.js';

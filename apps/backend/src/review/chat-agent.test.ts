@@ -1,7 +1,7 @@
 // The Claude Review chat agent's tool surface. Its input (the review, the diff, the PR text) is
 // attacker-authored, so the one thing that must never drift is what it is allowed to run.
 import { describe, expect, it } from 'vitest';
-import { chatToolsFor } from './chat-agent.js';
+import { CHAT_EXPLAIN_TOOL_NAME, chatToolsFor } from './chat-agent.js';
 
 const WRITE_OR_SHELL = ['Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'WebSearch'];
 
@@ -24,5 +24,15 @@ describe('chatToolsFor', () => {
   it('hands out copies, so a caller cannot widen the shared lists', () => {
     chatToolsFor('worktree').allowedTools.push('Bash');
     expect(chatToolsFor('worktree').allowedTools).not.toContain('Bash');
+  });
+
+  it('an explain turn adds ONLY the submit tool, never to the built-in base set', () => {
+    for (const mode of ['worktree', 'diff_only'] as const) {
+      const plain = chatToolsFor(mode);
+      const explain = chatToolsFor(mode, true);
+      expect(explain.allowedTools).toEqual([...plain.allowedTools, CHAT_EXPLAIN_TOOL_NAME]);
+      expect(explain.builtinTools).toEqual(plain.allowedTools);
+      expect(explain.disallowedTools).toContain('Bash');
+    }
   });
 });

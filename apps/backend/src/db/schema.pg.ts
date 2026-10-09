@@ -37,6 +37,8 @@ import type {
   CiAutoPostRecord,
   FindingAutoResolveRecord,
   FindingPushbackRecord,
+  ClaudeReviewChatPin,
+  ClaudeReviewChatExplanation,
   StoredAutoFixSettings,
   StoredAutoPostSettings,
   TicketAutoPostRecord,
@@ -136,6 +138,9 @@ export const repos = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),
+    // Does this repo use GitHub Issues? (pg 0081) — see schema.sqlite.ts.
+    usesGithubIssues: boolean('uses_github_issues'),
+    githubIssuesCheckedAt: timestamp('github_issues_checked_at', { withTimezone: true, mode: 'date' }),
   },
   (t) => ({
     ownerNameUx: uniqueIndex('repos_account_owner_name').on(
@@ -1009,6 +1014,8 @@ export const claudeReviewChatMessages = pgTable(
     costUsd: doublePrecision('cost_usd'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
+    pins: jsonb('pins').$type<ClaudeReviewChatPin[]>(),
+    explanations: jsonb('explanations').$type<ClaudeReviewChatExplanation[]>(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),

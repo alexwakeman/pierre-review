@@ -4704,6 +4704,13 @@ export interface WorkspaceTrackerSettings {
   // Jira API access. Present whatever the provider (both fields are then empty) so the reader never
   // has to ask whether the block exists. ⚠ `hasToken` only — the token never reaches the wire.
   jira: WorkspaceJiraApiSettings;
+  // false = no tracker choice is stored, so `issue.provider` is the AUTOMATIC default: GitHub Issues
+  // when `githubIssuesRepos` is non-empty, else null (docs/TRACKERS.md § Automatic default). A
+  // chosen "None" is `providerChosen: true` with a null provider.
+  providerChosen: boolean;
+  // This workspace's repos that use GitHub Issues (issues enabled + an issue linked to a PR in the
+  // last 90 days), `owner/name`, sorted. Sent whatever the choice, so Settings can say why.
+  githubIssuesRepos: string[];
 }
 
 // The PUT body: a PARTIAL patch. An omitted section is untouched; an omitted key inside one is too.
@@ -5445,6 +5452,19 @@ export interface OpenPrsResponse {
   prs: TimelinePr[];
 }
 
+/** Reports → "Merged so far" (GET /api/merged-prs, Pro on `periodReports`): every PR MERGED in the
+ *  workspace's REPORTING WINDOW, as the same `TimelinePr` rows the Open PRs cards draw. The window
+ *  is `[window.from, window.to)` on `mergedAt`, half-open and two-sided. Newest merge first. */
+export interface MergedPrsResponse {
+  prs: TimelinePr[];
+  /** The resolved scope (docs/API.md: every scoped response echoes it). */
+  workspaceId: number;
+  /** The reporting window the list covers, named through the shared reporting-window spelling. */
+  window: ReportingWindowInfo;
+  /** The scan hit its row cap: `prs` holds the LATEST `prs.length` merges and the page says so. */
+  truncated: boolean;
+}
+
 // Per-repo "merge rights" inference: the distinct users who have actually merged
 // a PR in that repo (GraphQL mergedBy). Used to badge maintainers on the
 // timeline. Reference data — not bounded by the timeline window or filters.
@@ -5772,6 +5792,10 @@ export interface TicketRef {
   // for the PR's workspace. The Claude Review panel shows its "Fill from KEY" button only then.
   // OPTIONAL so the contract stays additive — absent (an older plugin, or Linear) reads as false.
   canFetchDetails?: boolean;
+  /** True when a person ADDED this ticket by hand (the Story check's paste box) and detection alone
+   *  would not name it — the PR pane offers to remove it (`DELETE /api/prs/:id/tracker-ticket/manual`).
+   *  Absent = detected. */
+  manual?: boolean;
 }
 
 // ── The Open PRs cards' ticket row (CORE, free) ─────────────────────────────────────────────────
@@ -5895,6 +5919,10 @@ export interface PrDetail {
   //   []   → provider configured but no ticket key found (render a muted "No ticket found")
   //   [..] → render a link chip per detected ticket
   tickets: TicketRef[] | null;
+  /** The PR's workspace has a tracker Limn READS, so a ticket can be added by hand (the Story
+   *  check's paste box). ⚠ True even while `tickets` is null because a GitHub Issues workspace has
+   *  not read this PR's links yet. Optional: absent reads as `tickets != null`. */
+  ticketsAddable?: boolean;
   /** The head branch as synced (bare name, never `owner:branch` for a fork) and the branch it
    *  targets. Null = not synced yet; the Overview's Branch row is then omitted. */
   headRefName: string | null;
@@ -8231,12 +8259,48 @@ export type CiReviewStreamEvent =
 // GET/POST /api/claude-reviews/:reviewId/chat (?findingId= on the GET).
 export const CLAUDE_REVIEW_CHAT_MAX_QUESTION_CHARS = 4000;
 
+// "SEND TO CHAT": the reader pins findings and story items to the review's chat, then asks once;
+// ONE agent run answers with one card per pin. The client sends REFERENCES ONLY — the server reads
+// each pinned item's text from the stored rows it owns, never from the request.
+//   finding     a finding of the review being chatted about (story findings of an older run too)
+//   story_item  a not-done / partly-done criterion or missing item of a ticket review this PR is on
+export type ClaudeReviewChatPinRef =
+  | { kind: 'finding'; findingId: number }
+  | { kind: 'story_item'; ticketReviewId: number; itemId: number };
+
+export const CLAUDE_REVIEW_CHAT_MAX_PINS = 10;
+// The question an explain turn is stored with when the reader typed none.
+export const CLAUDE_REVIEW_CHAT_EXPLAIN_DEFAULT_QUESTION = 'Explain each of these in detail.';
+
+// A pin as STORED on the question: the reference plus a label the SERVER built from the stored row
+// at ask time ("Warning · Missing null check", "AC2 · Partly done"), so history reads the same after
+// the finding or ticket review is gone.
+export interface ClaudeReviewChatPin {
+  ref: ClaudeReviewChatPinRef;
+  label: string;
+}
+
+// One card of an explain answer, about exactly one pin. Every field is model-written plain text.
+export interface ClaudeReviewChatExplanation {
+  ref: ClaudeReviewChatPinRef;
+  // The server's label for that pin (copied from the question, not from the model).
+  label: string;
+  meaning: string;
+  whyItMatters: string;
+  where: Array<{ path: string; line: number | null }>;
+  fix: string;
+}
+
 export interface ClaudeReviewChatMessage {
   id: number;
   findingId: number | null;
   role: 'user' | 'assistant';
   content: string; // markdown on an assistant turn
   createdAt: string;
+  // A user turn that sent pins (null/absent = a plain question).
+  pins?: ClaudeReviewChatPin[] | null;
+  // The answer to such a turn, one card per pin (null/absent = a plain answer).
+  explanations?: ClaudeReviewChatExplanation[] | null;
 }
 
 export interface ClaudeReviewChatResponse {
@@ -8250,8 +8314,11 @@ export interface ClaudeReviewChatResponse {
 }
 
 export interface ClaudeReviewChatBody {
+  // May be '' when `pins` is non-empty (the default question is used).
   question: string;
   findingId?: number | null;
+  // Up to CLAUDE_REVIEW_CHAT_MAX_PINS references; only on the review's general thread.
+  pins?: ClaudeReviewChatPinRef[];
 }
 
 export interface ClaudeReviewChatAnswer {
@@ -8260,6 +8327,22 @@ export interface ClaudeReviewChatAnswer {
   // Earlier turns left out of the prompt to fit (the oldest go first). 0 when nothing was dropped.
   trimmedTurns: number;
   headMoved: boolean;
+}
+
+// GET /api/prs/:id/claude-review-chats — every review run of this PR that has a chat (its general
+// thread), newest run first. Read-only history for the chat panel's "Earlier reviews' chats".
+export interface ClaudeReviewChatHistoryRun {
+  reviewId: number;
+  headSha: string | null;
+  reviewMode: ReviewMode | null;
+  // When the run finished (else when it was created).
+  at: string;
+  messages: ClaudeReviewChatMessage[];
+}
+
+export interface ClaudeReviewChatHistoryResponse {
+  prId: number;
+  runs: ClaudeReviewChatHistoryRun[];
 }
 
 export interface PostReviewBody {

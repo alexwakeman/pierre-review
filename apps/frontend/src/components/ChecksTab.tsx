@@ -6,6 +6,7 @@ import type {
   ReviewBotKind,
   ReviewerSuggestion,
   SuggestedReviewersResponse,
+  TicketRef,
   User,
 } from '@pierre-review/shared';
 import { TRACKER_PROVIDER_LABEL } from '@pierre-review/shared';
@@ -43,10 +44,12 @@ import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import {
   BotIcon,
   CheckIcon,
+  CloseIcon,
   ExternalLinkIcon,
   MergeIcon,
   WarningIcon,
 } from './Icons.js';
+import { useRemoveManualTicket } from '../hooks/useTicketRefs.js';
 
 function Row({
   label,
@@ -927,16 +930,7 @@ export function ChecksTab({
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {pr.tickets.map((t) => (
-                <a
-                  key={t.key}
-                  href={safeExternalUrl(t.url)}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="inline-flex items-center rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-100 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-300"
-                  title={`Open ${t.key} in ${TRACKER_PROVIDER_LABEL[t.provider]}`}
-                >
-                  {t.key}
-                </a>
+                <PrTicketChip key={t.key} prId={pr.id} ticket={t} />
               ))}
             </div>
           )}
@@ -1009,5 +1003,45 @@ export function ChecksTab({
       </Row>
       </div>
     </>
+  );
+}
+
+/** One ticket chip on the Ticket row. A ticket a person ADDED BY HAND (`manual`) carries a remove
+ *  control — a detected one does not (detection would name it again). */
+function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }): JSX.Element {
+  const remove = useRemoveManualTicket(prId);
+  const link = (
+    <a
+      href={safeExternalUrl(t.url)}
+      target="_blank"
+      rel="noreferrer noopener"
+      className={`inline-flex items-center px-1.5 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-100 dark:text-sky-300 ${
+        t.manual ? 'rounded-l' : 'rounded'
+      }`}
+      title={`Open ${t.key} in ${TRACKER_PROVIDER_LABEL[t.provider]}`}
+    >
+      {t.key}
+    </a>
+  );
+  return (
+    <span className="inline-flex items-center rounded border border-sky-200 bg-sky-50 dark:border-sky-900 dark:bg-sky-950">
+      {link}
+      {t.manual === true && (
+        <button
+          type="button"
+          disabled={remove.isPending}
+          onClick={() => remove.mutate(t.key)}
+          aria-label={`Remove ${t.key} (added by hand)`}
+          className="rounded-r px-1 py-1 text-sky-700 hover:bg-sky-100 disabled:opacity-50 dark:text-sky-300 dark:hover:bg-sky-900"
+        >
+          <CloseIcon size={10} />
+        </button>
+      )}
+      {remove.isError && (
+        <span role="alert" className="px-1 text-xs text-red-600 dark:text-red-400">
+          {remove.error.message || 'Could not remove it.'}
+        </span>
+      )}
+    </span>
   );
 }

@@ -75,6 +75,8 @@ import { jiraRefFor, storyUrlOf } from '../lib/ticketStory.js';
 import { showStoryInOpenPrs } from '../store/stackStoryCheck.js';
 import { AiRunGate } from './AiSetup.js';
 import { ClaudeReviewTicketPanel, ClaudeReviewTicketResults, storyLabel } from './ClaudeReviewFollowUp.js';
+import { TicketPasteBox } from './TicketPasteBox.js';
+import { storiesOnOpen } from '../lib/storyTabs.js';
 import { JiraKeyLink } from './ClaudeReviewTickets.js';
 import { StoryDisclosure } from './TicketStory.js';
 import { InfoButton } from './InfoModal.js';
@@ -378,20 +380,45 @@ function StoryInput({ pr, entries }: { pr: PrDetail; entries: readonly TicketEnt
     const listed = new Set(entries.map((e) => e.ticketKey?.trim().toUpperCase()).filter(Boolean));
     return (pr.tickets ?? []).filter((t) => !listed.has(t.key.trim().toUpperCase()));
   }, [entries, pr.tickets]);
+  // THE PASTE BOX IS THE DEFAULT (./TicketPasteBox.tsx): ticket links or keys, read from the PR's
+  // workspace tracker. The typed-story form shows when asked for ("Input manually"), while typed
+  // stories exist, or when the PR has no tracker to read from. ⚠ `ticketsAddable`, not
+  // `tickets != null`: a GitHub Issues PR whose links are not read yet has `tickets: null` but a
+  // tracker the paste box can add from — exactly the PRs most likely to need a hand-added ticket.
+  const [manualAsked, setManualAsked] = useState(false);
+  const hasTracker = pr.ticketsAddable ?? pr.tickets != null;
+  const showManual = !hasTracker || manualAsked || drafts.length > 0;
+  const inputManually = (): void => {
+    setDrafts(storiesOnOpen(drafts));
+    setManualAsked(true);
+  };
 
   return (
     <div>
-      <ClaudeReviewTicketPanel
-        key={pr.id}
-        // Detected Jira tickets are blocks above already; the panel pulls one only when asked.
-        autoPullReady={false}
-        value={drafts}
-        onChange={setDrafts}
-        check={check}
-        prId={pr.id}
-        tickets={unlisted}
-        prWorkspaceName={prWorkspaceName}
-      />
+      {hasTracker && (
+        <TicketPasteBox
+          key={pr.id}
+          prId={pr.id}
+          startOpen={entries.length === 0}
+          manualShown={showManual}
+          onInputManually={inputManually}
+        />
+      )}
+      {showManual && (
+        <ClaudeReviewTicketPanel
+          key={pr.id}
+          // Detected Jira tickets are blocks above already; the panel pulls one only when asked.
+          autoPullReady={false}
+          value={drafts}
+          onChange={setDrafts}
+          check={check}
+          prId={pr.id}
+          tickets={unlisted}
+          prWorkspaceName={prWorkspaceName}
+          defaultOpen={manualAsked}
+          onClose={() => setManualAsked(false)}
+        />
+      )}
       {n > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <AiRunGate>
@@ -481,7 +508,7 @@ export function TicketCoverageSection({
             ))}
         </div>
       )}
-      <StoryInput pr={pr} entries={entries} />
+      <StoryInput key={pr.id} pr={pr} entries={entries} />
     </ReviewSection>
   );
 }

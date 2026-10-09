@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import {
+  CLAUDE_REVIEW_CHAT_EXPLAIN_DEFAULT_QUESTION,
   CLAUDE_REVIEW_CHAT_MAX_QUESTION_CHARS,
   CLAUDE_REVIEW_MODELS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
@@ -8,7 +9,13 @@ import {
   type ClaudeReview,
   type ClaudeReviewChatAnswer,
   type ClaudeReviewChatBody,
+  type ClaudeReviewChatExplanation,
+  type ClaudeReviewChatHistoryResponse,
+  type ClaudeReviewChatHistoryRun,
   type ClaudeReviewChatMessage,
+  type ClaudeReviewChatPin,
+  type ClaudeReviewChatPinRef,
+  type TicketReview,
   type ClaudeReviewChatResponse,
   type ClaudeReviewModel,
 } from '@pierre-review/shared';
@@ -17,6 +24,20 @@ import type { AgentContext } from '../agent-context.js';
 import { AGENTIC_AI_ENABLED, chatMayApplyAuthEnv } from './manager.js';
 import { getClaudeReviewById, getReviewPrContext, type ReviewPrContext } from './persist.js';
 import { pickReviewNonce } from './prompts.js';
+import {
+  EXPLAIN_INSTRUCTION,
+  EXPLAIN_SYSTEM_ADDENDUM,
+  explainSectionLines,
+  explanationsMarkdown,
+  findingPinLabel,
+  findingPinText,
+  parsePinRefs,
+  questionWithPins,
+  storyPinLabel,
+  storyPinText,
+  validateExplanations,
+  type ResolvedPin,
+} from './chat-explain.js';
 
 // CLAUDE REVIEW CHAT (CORE, free, local-only like the rest of Claude Review). Questions about ONE
 // succeeded review: a general thread (findingId null) and one thread per finding. The answer comes
@@ -65,9 +86,9 @@ export function chatInFlightFor(accountId: number): number | null {
 
 const diffCache = new Map<string, { at: number; prepared: PreparedReview }>();
 
-function tables(ctx: AgentContext): { msg: any; crf: any } {
+function tables(ctx: AgentContext): { msg: any; crf: any; cr: any } {
   const s = ctx.schema as any;
-  return { msg: s.claudeReviewChatMessages, crf: s.claudeReviewFindings };
+  return { msg: s.claudeReviewChatMessages, crf: s.claudeReviewFindings, cr: s.claudeReviews };
 }
 
 const isoReq = (d: unknown): string =>
@@ -79,6 +100,8 @@ interface MessageRow {
   role: 'user' | 'assistant';
   content: string;
   createdAt: Date;
+  pins?: ClaudeReviewChatPin[] | null;
+  explanations?: ClaudeReviewChatExplanation[] | null;
 }
 
 const toWire = (r: MessageRow): ClaudeReviewChatMessage => ({
@@ -87,6 +110,19 @@ const toWire = (r: MessageRow): ClaudeReviewChatMessage => ({
   role: r.role,
   content: r.content,
   createdAt: isoReq(r.createdAt),
+  ...(Array.isArray(r.pins) && r.pins.length > 0 ? { pins: r.pins } : {}),
+  ...(Array.isArray(r.explanations) ? { explanations: r.explanations } : {}),
+});
+
+// The columns every message read selects (the wire form's fields).
+const messageCols = (msg: any) => ({
+  id: msg.id,
+  findingId: msg.findingId,
+  role: msg.role,
+  content: msg.content,
+  createdAt: msg.createdAt,
+  pins: msg.pins,
+  explanations: msg.explanations,
 });
 
 /** One thread's stored messages, oldest first. Callers have already proved the review is theirs. */
@@ -98,13 +134,7 @@ export async function listChatMessages(
 ): Promise<ClaudeReviewChatMessage[]> {
   const { msg } = tables(ctx);
   const rows = (await ctx.db
-    .select({
-      id: msg.id,
-      findingId: msg.findingId,
-      role: msg.role,
-      content: msg.content,
-      createdAt: msg.createdAt,
-    })
+    .select(messageCols(msg))
     .from(msg)
     .where(
       and(
@@ -130,7 +160,8 @@ export function pairTurns(messages: ReadonlyArray<ClaudeReviewChatMessage>): Cha
   const out: ChatTurnPair[] = [];
   let pending: string | null = null;
   for (const m of messages) {
-    if (m.role === 'user') pending = m.content;
+    // An explain turn's question carries its pins' labels, so a later "and the second one?" reads.
+    if (m.role === 'user') pending = questionWithPins(m.content, m.pins);
     else if (pending != null) {
       out.push({ question: pending, answer: m.content });
       pending = null;
@@ -228,6 +259,8 @@ export interface ChatPromptInput {
   turns: ChatTurnPair[];
   question: string;
   nonce: string;
+  // An explain turn's pins, resolved from stored rows (absent/empty = a plain question).
+  pins?: ResolvedPin[];
 }
 
 // The review's tickets as the chat sees them: ref, the ticket, its assessment (no posted state).
@@ -249,6 +282,7 @@ export function chatUntrustedTexts(input: Omit<ChatPromptInput, 'nonce'>): strin
   if (input.review.followUp) out.push(JSON.stringify(input.review.followUp));
   if (input.prepared) out.push(input.prepared.promptDiff, ...input.prepared.changedFiles);
   for (const t of input.turns) out.push(t.question, t.answer);
+  for (const p of input.pins ?? []) out.push(p.text);
   return out.filter((s) => s.length > 0);
 }
 
@@ -354,8 +388,17 @@ export function buildChatPrompt(input: ChatPromptInput): string {
     );
     lines.push('');
   }
+  const pins = input.pins ?? [];
+  if (pins.length > 0) {
+    lines.push(...explainSectionLines(pins, nonce));
+    lines.push('');
+  }
   lines.push('## The developer asks');
   lines.push(question);
+  if (pins.length > 0) {
+    lines.push('');
+    lines.push(EXPLAIN_INSTRUCTION(pins.map((p) => p.promptRef)));
+  }
   return lines.join('\n');
 }
 
@@ -399,6 +442,63 @@ export type AnswerOutcome =
       message: string;
     };
 
+type PinResolution =
+  | { ok: true; pins: ResolvedPin[] }
+  | { ok: false; status: number; error: string; message: string };
+
+/**
+ * The pins' text, read from rows the ACCOUNT OWNS — never from the request. A finding must belong to
+ * THIS review; a story item must belong to a ticket review of the account that this review's PR is
+ * on (a member, or the PR that started it). Anything else 404s, naming nothing about other tenants.
+ */
+export async function resolveChatPins(
+  ctx: AgentContext,
+  accountId: number,
+  review: Pick<ClaudeReview, 'prId' | 'findings'>,
+  refs: ReadonlyArray<ClaudeReviewChatPinRef>,
+): Promise<PinResolution> {
+  const out: ResolvedPin[] = [];
+  // Lazy: the ticket-review module graph stays out of a plain question's path.
+  let getTicketReviewById: typeof import('../ticket-review/persist.js').getTicketReviewById | null = null;
+  // id → the account's ticket review (null = not this account's) and whether it is on this PR.
+  const ticketReviews = new Map<number, { tr: TicketReview | null; onThisPr: boolean }>();
+  for (const ref of refs) {
+    const promptRef = `P${out.length + 1}`;
+    if (ref.kind === 'finding') {
+      const idx = review.findings.findIndex((f) => f.id === ref.findingId);
+      const f = idx >= 0 ? review.findings[idx] : undefined;
+      if (!f) return { ok: false, status: 404, error: 'NotFound', message: 'A pinned finding is not part of this review.' };
+      out.push({ ref, label: findingPinLabel(f), promptRef, text: findingPinText(f, `F${idx + 1}`) });
+      continue;
+    }
+    if (!ticketReviews.has(ref.ticketReviewId)) {
+      getTicketReviewById ??= (await import('../ticket-review/persist.js')).getTicketReviewById;
+      const tr = await getTicketReviewById(ctx, accountId, ref.ticketReviewId);
+      const onThisPr =
+        tr != null && (tr.originPrId === review.prId || tr.members.some((m) => m.prId === review.prId));
+      ticketReviews.set(ref.ticketReviewId, { tr, onThisPr });
+    }
+    const got = ticketReviews.get(ref.ticketReviewId);
+    const tr = got?.tr ?? null;
+    const item = tr?.items.find((i) => i.id === ref.itemId);
+    if (!tr || !item) {
+      return { ok: false, status: 404, error: 'NotFound', message: 'A pinned story item is not part of this pull request.' };
+    }
+    if (!got?.onThisPr) {
+      // The account's own review, from before this PR joined the ticket: NAME the pin, so the reader
+      // knows which pill to remove (nothing here belongs to another tenant).
+      return {
+        ok: false,
+        status: 404,
+        error: 'NotFound',
+        message: `${storyPinLabel(item, tr.ticketKey)} is from a story check this pull request was not part of. Remove it and ask again.`,
+      };
+    }
+    out.push({ ref, label: storyPinLabel(item, tr.ticketKey), promptRef, text: storyPinText(tr, item) });
+  }
+  return { ok: true, pins: out };
+}
+
 /** Exported for the route test; the POST route is the only production caller. */
 export async function answerReviewChat(
   ctx: AgentContext,
@@ -406,7 +506,23 @@ export async function answerReviewChat(
   reviewId: number,
   body: ClaudeReviewChatBody,
 ): Promise<AnswerOutcome> {
-  const question = (typeof body.question === 'string' ? body.question : '').trim();
+  const parsedPins = parsePinRefs(body.pins);
+  if (!parsedPins.ok) {
+    return { ok: false, status: 400, error: parsedPins.error, message: parsedPins.message };
+  }
+  const pinRefs = parsedPins.refs;
+  const explain = pinRefs.length > 0;
+  if (explain && body.findingId != null) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'BadPins',
+      message: 'Send items to the review chat, not a finding thread.',
+    };
+  }
+  const typed = (typeof body.question === 'string' ? body.question : '').trim();
+  // An explain turn may come with no question: it is stored with the default one.
+  const question = typed === '' && explain ? CLAUDE_REVIEW_CHAT_EXPLAIN_DEFAULT_QUESTION : typed;
   if (question === '') {
     return { ok: false, status: 400, error: 'EmptyQuestion', message: 'Type a question first.' };
   }
@@ -460,6 +576,12 @@ export async function answerReviewChat(
     }
     const pr = await getReviewPrContext(ctx, review.prId, accountId);
     if (!pr) return { ok: false, status: 404, error: 'NotFound', message: 'Pull request not found' };
+    const resolved = explain ? await resolveChatPins(ctx, accountId, review, pinRefs) : null;
+    if (resolved && !resolved.ok) {
+      return { ok: false, status: resolved.status, error: resolved.error, message: resolved.message };
+    }
+    const pins = resolved?.ok ? resolved.pins : [];
+    const storedPins: ClaudeReviewChatPin[] = pins.map((p) => ({ ref: p.ref, label: p.label }));
     const headMoved = pr.headSha != null && pr.headSha !== review.headSha;
     // The diff is fetched at the PR's CURRENT head, so it is the reviewed commit's diff only while
     // the head has not moved. Once it has, the findings' own excerpts (and, in worktree mode, the
@@ -468,7 +590,7 @@ export async function answerReviewChat(
 
     const stored = await listChatMessages(ctx, accountId, reviewId, findingId);
     const fit = fitTranscript(pairTurns(stored));
-    const base = { review, pr, mode, headMoved, prepared, findingId, turns: fit.turns, question };
+    const base = { review, pr, mode, headMoved, prepared, findingId, turns: fit.turns, question, pins };
     const nonce = pickReviewNonce(chatUntrustedTexts(base));
     const prompt = buildChatPrompt({ ...base, nonce });
     const model = chatModelFor(review.model);
@@ -484,10 +606,11 @@ export async function answerReviewChat(
         headSha: review.headSha,
         model,
         mode,
-        systemPrompt: chatSystemPrompt(mode),
+        systemPrompt: chatSystemPrompt(mode) + (explain ? EXPLAIN_SYSTEM_ADDENDUM : ''),
         prompt,
         applyAuthEnv: chatMayApplyAuthEnv(),
         abortController,
+        ...(explain ? { explain: true } : {}),
       });
     } finally {
       clearTimeout(timer);
@@ -517,6 +640,17 @@ export async function answerReviewChat(
       };
     }
 
+    // An explain turn keeps ONLY cards that answer a pin; none at all is no answer.
+    let explanations: ClaudeReviewChatExplanation[] | null = null;
+    let answerText = result.text;
+    if (explain) {
+      explanations = validateExplanations(result.submitted, pins);
+      if (explanations.length === 0) {
+        return { ok: false, status: 502, error: 'NoAnswer', message: 'Claude did not answer. Try again.' };
+      }
+      answerText = explanationsMarkdown(explanations, storedPins);
+    }
+
     const { msg } = tables(ctx);
     const now = Date.now();
     const rows = (await ctx.db
@@ -528,6 +662,7 @@ export async function answerReviewChat(
           findingId,
           role: 'user',
           content: question,
+          pins: explain ? storedPins : null,
           createdAt: new Date(now),
         },
         {
@@ -535,7 +670,8 @@ export async function answerReviewChat(
           reviewId,
           findingId,
           role: 'assistant',
-          content: clip(result.text, STORED_ANSWER_CHARS),
+          content: clip(answerText, STORED_ANSWER_CHARS),
+          explanations,
           model,
           costUsd: result.costUsd,
           inputTokens: result.inputTokens,
@@ -543,13 +679,7 @@ export async function answerReviewChat(
           createdAt: new Date(now),
         },
       ])
-      .returning({
-        id: msg.id,
-        findingId: msg.findingId,
-        role: msg.role,
-        content: msg.content,
-        createdAt: msg.createdAt,
-      })
+      .returning(messageCols(msg))
       .execute()) as MessageRow[];
     rows.sort((a, b) => a.id - b.id);
     return {
@@ -559,6 +689,75 @@ export async function answerReviewChat(
   } finally {
     inFlight.delete(accountId);
   }
+}
+
+// ---- history across the PR's review runs ---------------------------------------------
+
+/**
+ * Every review run of this PR that has a GENERAL chat thread, newest run first, each with its whole
+ * thread. Read-only history for the panel's "Earlier reviews' chats". null when the PR is not this
+ * account's (→ 404). Two reads: the account's runs of the PR, then their messages.
+ */
+export async function listChatHistoryForPr(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+): Promise<ClaudeReviewChatHistoryResponse | null> {
+  const pr = await getReviewPrContext(ctx, prId, accountId);
+  if (!pr) return null;
+  const { msg, cr } = tables(ctx);
+  const runs = (await ctx.db
+    .select({
+      id: cr.id,
+      headSha: cr.headSha,
+      reviewMode: cr.reviewMode,
+      finishedAt: cr.finishedAt,
+      createdAt: cr.createdAt,
+    })
+    .from(cr)
+    .where(and(eq(cr.accountId, accountId), eq(cr.prId, prId)))
+    .orderBy(desc(cr.id))
+    .execute()) as Array<{
+    id: number;
+    headSha: string | null;
+    reviewMode: ClaudeReviewChatHistoryRun['reviewMode'];
+    finishedAt: Date | null;
+    createdAt: Date;
+  }>;
+  if (runs.length === 0) return { prId, runs: [] };
+  const rows = (await ctx.db
+    .select({ ...messageCols(msg), reviewId: msg.reviewId })
+    .from(msg)
+    .where(
+      and(
+        eq(msg.accountId, accountId),
+        inArray(
+          msg.reviewId,
+          runs.map((r) => r.id),
+        ),
+        isNull(msg.findingId),
+      ),
+    )
+    .orderBy(asc(msg.id))
+    .execute()) as Array<MessageRow & { reviewId: number }>;
+  const byRun = new Map<number, ClaudeReviewChatMessage[]>();
+  for (const r of rows) {
+    const list = byRun.get(r.reviewId) ?? [];
+    list.push(toWire(r));
+    byRun.set(r.reviewId, list);
+  }
+  return {
+    prId,
+    runs: runs
+      .filter((r) => (byRun.get(r.id)?.length ?? 0) > 0)
+      .map((r) => ({
+        reviewId: r.id,
+        headSha: r.headSha ?? null,
+        reviewMode: r.reviewMode ?? null,
+        at: isoReq(r.finishedAt ?? r.createdAt),
+        messages: byRun.get(r.id) ?? [],
+      })),
+  };
 }
 
 // ---- routes ------------------------------------------------------------------------
@@ -575,7 +774,8 @@ function notFound(reply: FastifyReply, what: string): { error: string; message: 
 }
 
 /**
- * GET/POST /api/claude-reviews/:reviewId/chat. Registered ONLY where Claude Review runs (the
+ * GET/POST /api/claude-reviews/:reviewId/chat and GET /api/prs/:id/claude-review-chats (every
+ * run's chat, for the panel's history). Registered ONLY where Claude Review runs (the
  * agentic switch, local mode) — elsewhere both 404.
  * Rate tier: matched explicitly in core's `tierFor` (POST = ai, GET = read).
  */
@@ -626,6 +826,22 @@ export function registerClaudeReviewChatRoutes(app: FastifyInstance, ctx: AgentC
           properties: {
             question: { type: 'string' },
             findingId: { type: ['integer', 'null'] },
+            // References only; parsePinRefs re-checks every one (chat-explain.ts).
+            pins: {
+              type: 'array',
+              maxItems: 50,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['kind'],
+                properties: {
+                  kind: { type: 'string', enum: ['finding', 'story_item'] },
+                  findingId: { type: 'integer' },
+                  ticketReviewId: { type: 'integer' },
+                  itemId: { type: 'integer' },
+                },
+              },
+            },
           },
         },
       },
@@ -643,6 +859,26 @@ export function registerClaudeReviewChatRoutes(app: FastifyInstance, ctx: AgentC
         return { error: out.error, message: out.message };
       }
       return out.answer;
+    },
+  );
+
+  // Every earlier run's chat for the panel's history. DB-only (rate tier: read).
+  app.get(
+    '/api/prs/:id/claude-review-chats',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'integer' } },
+        },
+      },
+    },
+    async (req, reply): Promise<ClaudeReviewChatHistoryResponse | { error: string; message: string }> => {
+      const { id } = req.params as { id: number };
+      const out = await listChatHistoryForPr(ctx, ctx.accountIdOf(req), id);
+      if (!out) return notFound(reply, 'Pull request');
+      return out;
     },
   );
 }

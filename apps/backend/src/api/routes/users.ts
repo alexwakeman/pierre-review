@@ -53,7 +53,7 @@ const statsSchema = {
 export async function userRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/users', async (req) => listUsers(accountIdOf(req)));
 
-  // All-time PR / review / comment counts for one user, counted only over THIS account's
+  // Last-90-day (USER_STATS_WINDOW_DAYS) PR / review / comment counts for one user, counted only over THIS account's
   // synced data (getUserStats binds every source to pullRequests.accountId).
   //
   // There is deliberately NO ownership 404: `users` is global, so a foreign or unknown id is

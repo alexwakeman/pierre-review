@@ -38,7 +38,7 @@ export interface OpenPrsStack {
   /** null = the "No ticket" stack. */
   ticket: CardTicket | null;
   rows: StackRow[];
-  /** The latest `updatedAt` among the stack's PRs (ISO). */
+  /** The latest activity time among the stack's PRs (ISO; `updatedAt` unless the caller picks a clock). */
   latestActivity: string;
 }
 
@@ -74,11 +74,14 @@ function fillGaps(into: CardTicket, from: CardTicket): void {
 
 /**
  * Group the (already sorted) open PRs into ticket stacks. `ticketsOf` answers each PR's tickets
- * in the card's own order (`cardTickets`).
+ * in the card's own order (`cardTickets`). `activityOf` is the clock a stack's `latestActivity`
+ * (and so the between-stack order) reads: `updatedAt` for open work; Reports → Merged so far passes
+ * `mergedAt`, since a merged PR's `updatedAt` moves with any later comment or label.
  */
 export function stackOpenPrs(
   sortedPrs: readonly TimelinePr[],
   ticketsOf: (pr: TimelinePr) => readonly CardTicket[],
+  activityOf: (pr: TimelinePr) => string = (pr) => pr.updatedAt,
 ): StackedOpenPrs {
   const byId = new Map<string, OpenPrsStack>();
   const none: OpenPrsStack = { id: NO_TICKET_STACK_ID, ticket: null, rows: [], latestActivity: '' };
@@ -100,7 +103,7 @@ export function stackOpenPrs(
     }
     if (tickets.length === 0) {
       none.rows.push({ pr, alsoIn: [] });
-      if (pr.updatedAt > none.latestActivity) none.latestActivity = pr.updatedAt;
+      if (activityOf(pr) > none.latestActivity) none.latestActivity = activityOf(pr);
       continue;
     }
     ticketed += 1;
@@ -114,7 +117,7 @@ export function stackOpenPrs(
         fillGaps(stack.ticket, t);
       }
       stack.rows.push({ pr, alsoIn: tickets.filter((o) => o.key !== t.key) });
-      if (pr.updatedAt > stack.latestActivity) stack.latestActivity = pr.updatedAt;
+      if (activityOf(pr) > stack.latestActivity) stack.latestActivity = activityOf(pr);
     }
   }
 

@@ -70,8 +70,10 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // ⚠ This is the OPPOSITE of `BotsView`'s `effectiveTab`, which does correct `'advisor'` away. That
 // one predates the visible-but-locked posture; do not copy it here, and note that BotsView's own
 // `'roi'` member is now handled this way too (selectable, body locks).
-export type InsightsInnerTab = 'overview' | 'bottlenecks';
-export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'bottlenecks'];
+// `'merged'` is the "Merged so far" tab (`?insightsTab=merged`): every PR merged in the reporting
+// window, as Open PRs cards. Inside the same one Reports gate; no gate of its own.
+export type InsightsInnerTab = 'overview' | 'merged' | 'bottlenecks';
+export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'merged', 'bottlenecks'];
 // The Bots rail's sub-tab strip. ⚠ TWO POSTURES IN ONE UNION, both deliberate:
 //   • `'advisor'` (`botAdvisor`) and `'themes'` (`activityDigest`) are only LISTED when entitled,
 //     and BotsView's `effectiveBotsTab` degrades either to `'roi'` when it is not — the older

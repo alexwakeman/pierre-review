@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { FEED_WINDOW_DAYS } from '@pierre-review/shared';
 import { usePinnedTabs, parseUserActivityKey } from '../../store/pinnedTabs.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { profileUrl, userLabel } from '../../lib/ui.js';
@@ -72,7 +73,7 @@ export function UserActivityDetail(): JSX.Element {
             visibility, which is a Timeline-board filter the feed no longer honours — a caption
             reading "across 2 repos" over a Workspace-wide feed is worse than no caption. */}
         <span className="text-[11px] text-gray-400">
-          last 14 days · across this Workspace · merge/close rows are PRs they authored
+          last {FEED_WINDOW_DAYS} days · across this Workspace · merge/close rows are PRs they authored
         </span>
         {login && (
           <a

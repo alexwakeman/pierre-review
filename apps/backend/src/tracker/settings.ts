@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import {
   TRACKER_PROVIDERS_AVAILABLE,
   linearSiteRoot,
@@ -18,9 +18,10 @@ import { openTrackerToken, storeTrackerToken, type HostSeal, type OpenedToken } 
 // 0031 + 0035) until apiVersion 23; ./legacy-import.ts MOVED the values here once, token included,
 // in its stored form.
 //
-// ⚠ TWO STATES, NO CHAIN. A stored tracker, or none. There is no account-level default beneath it
-// (the plugin retired that in 0031) and a repo with no workspace membership has no tracker — ABSENT,
-// NEVER ANOTHER WORKSPACE'S (./enricher.ts).
+// ⚠ NO CHAIN. A stored choice (a provider, or a chosen "None"), else the AUTOMATIC default below —
+// derived from this workspace's OWN repos, never an account-level value (the plugin retired that in
+// 0031). A repo with no workspace membership has no tracker — ABSENT, NEVER ANOTHER WORKSPACE'S
+// (./enricher.ts).
 
 /** The raw row (sqlite returns Date for timestamps). ⚠ `authToken` is the STORED form. */
 export interface WorkspaceTrackerRow {
@@ -36,8 +37,10 @@ export interface WorkspaceTrackerRow {
 export const DEFAULT_MATCH_SCOPE: IssueMatchScope = 'title_branch';
 const VALID_MATCH_SCOPE: readonly IssueMatchScope[] = ['title', 'title_branch'];
 
-/** The `workspace_trackers` row for one workspace, or null. */
-export async function readWorkspaceTrackerRow(
+/** The STORED `workspace_trackers` row for one workspace, or null. ⚠ Only the writer and the
+ *  automatic-default fold read this directly; every other reader goes through
+ *  `readWorkspaceTrackerRow`, which applies the default. */
+export async function readStoredTrackerRow(
   ctx: TrackerContext,
   accountId: number,
   workspaceId: number,
@@ -57,6 +60,92 @@ export async function readWorkspaceTrackerRow(
     .limit(1)
     .execute()) as WorkspaceTrackerRow[];
   return rows[0] ?? null;
+}
+
+// ── THE AUTOMATIC DEFAULT (migration 0094; docs/TRACKERS.md § Automatic default) ──────────────
+// A workspace with NO stored choice (no row, or a row whose provider is NULL) uses GitHub Issues
+// when at least one of its repos uses it (`repos.uses_github_issues`, ./github/issues-usage.ts), else
+// no tracker. A stored choice always wins, "None" included — stored as `NONE_PROVIDER`, because NULL
+// means "no choice".
+//
+// ⚠ THIS IS THE ONE PLACE THE DEFAULT IS APPLIED. `readWorkspaceTrackerRow` returns the EFFECTIVE
+// row, so the enricher, the worker, the ticket routes, the merged panel, the GitHub closing-issues
+// step and the Settings screen (`useTrackerOn`) all read the same provider. The worker's population
+// (`readingWorkspaces`) is a set query and repeats the rule through `autoDetectedWorkspaces` below.
+
+/** The stored spelling of an explicit "None". Not a provider: `maybeAdapterFor('none')` is null. */
+export const NONE_PROVIDER = 'none';
+
+/** Whether a stored row leaves the provider to the automatic default. */
+export function isProviderUnchosen(row: Pick<WorkspaceTrackerRow, 'provider'> | null): boolean {
+  return row == null || row.provider == null;
+}
+
+/** The workspace's repos that use GitHub Issues (`owner/name`, sorted). [] when the context carries
+ *  no `repos` table (a narrow test context). */
+export async function githubIssuesRepos(ctx: TrackerContext, accountId: number, workspaceId: number): Promise<string[]> {
+  const r = ctx.schema.repos;
+  const wr = ctx.schema.workspaceRepos;
+  // A narrow test context may carry no `repos` table, or one without the 0094 columns.
+  if (r?.usesGithubIssues == null || wr == null) return [];
+  const rows = (await ctx.db
+    .select({ owner: r.owner, name: r.name })
+    .from(wr)
+    .innerJoin(r, and(eq(r.id, wr.repoId), eq(r.accountId, wr.accountId)))
+    .where(and(eq(wr.accountId, accountId), eq(wr.workspaceId, workspaceId), eq(r.usesGithubIssues, true)))
+    .execute()) as Array<{ owner: string; name: string }>;
+  return rows.map((x) => `${x.owner}/${x.name}`).sort();
+}
+
+/** A stored row (or none) → the EFFECTIVE row: the automatic default applied when nothing is chosen. */
+export function effectiveTrackerRow(stored: WorkspaceTrackerRow | null, detectedRepos: readonly string[]): WorkspaceTrackerRow | null {
+  if (!isProviderUnchosen(stored) || detectedRepos.length === 0) return stored;
+  return {
+    provider: 'github',
+    baseUrl: stored?.baseUrl ?? null,
+    projectKeys: stored?.projectKeys ?? null,
+    matchScope: stored?.matchScope ?? null,
+    authEmail: stored?.authEmail ?? null,
+    authToken: stored?.authToken ?? null,
+  };
+}
+
+/** Workspaces (of one account, or of all) with no stored choice and a repo that uses GitHub Issues —
+ *  the worker's auto-detected population. */
+export async function autoDetectedWorkspaces(
+  ctx: TrackerContext,
+  accountId: number | null,
+): Promise<Array<{ accountId: number; workspaceId: number }>> {
+  const r = ctx.schema.repos;
+  const wr = ctx.schema.workspaceRepos;
+  const t = ctx.schema.workspaceTrackers;
+  // A narrow test context may carry no `repos` table, or one without the 0094 columns.
+  if (r?.usesGithubIssues == null || wr == null) return [];
+  const rows = (await ctx.db
+    .selectDistinct({ accountId: wr.accountId, workspaceId: wr.workspaceId })
+    .from(wr)
+    .innerJoin(r, and(eq(r.id, wr.repoId), eq(r.accountId, wr.accountId)))
+    .leftJoin(t, and(eq(t.accountId, wr.accountId), eq(t.workspaceId, wr.workspaceId)))
+    .where(
+      and(
+        eq(r.usesGithubIssues, true),
+        isNull(t.provider),
+        ...(accountId != null ? [eq(wr.accountId, accountId)] : []),
+      ),
+    )
+    .execute()) as Array<{ accountId: number; workspaceId: number }>;
+  return rows;
+}
+
+/** The EFFECTIVE tracker row for one workspace (the automatic default applied), or null. */
+export async function readWorkspaceTrackerRow(
+  ctx: TrackerContext,
+  accountId: number,
+  workspaceId: number,
+): Promise<WorkspaceTrackerRow | null> {
+  const stored = await readStoredTrackerRow(ctx, accountId, workspaceId);
+  if (!isProviderUnchosen(stored)) return stored;
+  return effectiveTrackerRow(stored, await githubIssuesRepos(ctx, accountId, workspaceId));
 }
 
 /**
@@ -79,14 +168,19 @@ export function issueOf(row: WorkspaceTrackerRow | null): WorkspaceIssueSettings
   };
 }
 
-/** The stored row → the wire (GET/PUT /api/workspaces/:id/tracker). */
+/** The stored row → the wire (GET/PUT /api/workspaces/:id/tracker). `detectedRepos` are the
+ *  workspace's repos that use GitHub Issues; with no choice stored they decide the provider. */
 export function toWorkspaceTrackerSettings(
   workspaceId: number,
-  row: WorkspaceTrackerRow | null,
+  stored: WorkspaceTrackerRow | null,
+  detectedRepos: readonly string[] = [],
 ): WorkspaceTrackerSettings {
+  const row = effectiveTrackerRow(stored, detectedRepos);
   return {
     workspaceId,
     issue: issueOf(row),
+    providerChosen: !isProviderUnchosen(stored),
+    githubIssuesRepos: [...detectedRepos],
     // ⚠ `hasToken`, NEVER THE TOKEN. This is the only place the row reaches the wire, and the stored
     // value (sealed or plain) must not ride along in any form.
     jira: {
@@ -148,7 +242,8 @@ export async function readWorkspaceTracker(
   accountId: number,
   workspaceId: number,
 ): Promise<WorkspaceTrackerSettings> {
-  return toWorkspaceTrackerSettings(workspaceId, await readWorkspaceTrackerRow(ctx, accountId, workspaceId));
+  const stored = await readStoredTrackerRow(ctx, accountId, workspaceId);
+  return toWorkspaceTrackerSettings(workspaceId, stored, await githubIssuesRepos(ctx, accountId, workspaceId));
 }
 
 function normalizeBaseUrl(raw: string | null): string | null {
@@ -217,8 +312,11 @@ export function mergeTracker(
 
   if (patch.issue) {
     const i = patch.issue;
+    // ⚠ A CHOSEN "None" IS STORED, as `NONE_PROVIDER` — NULL would hand the workspace back to the
+    // automatic default (GitHub Issues when a repo uses it).
     if (i.provider !== undefined)
-      out.provider = i.provider != null && TRACKER_PROVIDERS_AVAILABLE.includes(i.provider) ? i.provider : null;
+      out.provider =
+        i.provider != null && TRACKER_PROVIDERS_AVAILABLE.includes(i.provider) ? i.provider : NONE_PROVIDER;
     if (i.baseUrl !== undefined) out.baseUrl = normalizeBaseUrl(i.baseUrl);
     if (i.projectKeys !== undefined) {
       // Normalise (uppercase, well-shaped prefixes only, deduped, capped), store comma-joined; an
@@ -267,7 +365,9 @@ export async function writeWorkspaceTracker(
   patch: WorkspaceTrackerUpdate,
 ): Promise<WorkspaceTrackerSettings> {
   const t = ctx.schema.workspaceTrackers;
-  const existing = await readWorkspaceTrackerRow(ctx, accountId, workspaceId);
+  // ⚠ The STORED row, never the effective one: a patch that does not name a provider must leave an
+  // unchosen workspace on the automatic default, not freeze today's detection into a choice.
+  const existing = await readStoredTrackerRow(ctx, accountId, workspaceId);
   const cols = mergeTracker(existing, patch, ctx.host);
   const now = new Date();
   await ctx.db

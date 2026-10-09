@@ -17,6 +17,7 @@ import {
 import { setWorkspacePendingMute } from '../../db/pending-mute.js';
 import { setWorkspaceFlowSettings } from '../../db/flow-settings.js';
 import { accountIdOf } from '../plugins/auth.js';
+import { kickGithubIssuesCheck } from '../../tracker/index.js';
 
 // Workspaces (CORE): the ONE scope this app has. A workspace groups an account's repos, and a repo
 // belongs to EXACTLY ONE workspace — a database fact (`workspace_repos`, UNIQUE (account_id,
@@ -223,6 +224,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const toRemove = current.repoIds.filter((r) => !target.has(r));
       if (toAdd.length > 0) await assignReposToWorkspace(id, accountId, toAdd);
       if (toRemove.length > 0) await rehomeReposToDefault(accountId, toRemove);
+      // Each repo joined a workspace (this one, or Default): check GitHub Issues use once, now.
+      kickGithubIssuesCheck(accountId, [...toAdd, ...toRemove]);
     }
 
     const workspace = await findWorkspace(accountId, id);
@@ -275,6 +278,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       return { error: 'NotFound', message: `Workspace ${id} not found` };
     }
     await assignReposToWorkspace(id, accountId, [repoId]);
+    kickGithubIssuesCheck(accountId, [repoId]);
     const workspace = await findWorkspace(accountId, id);
     if (!workspace) {
       reply.status(404);
