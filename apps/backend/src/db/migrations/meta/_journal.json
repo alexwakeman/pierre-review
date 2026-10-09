@@ -673,6 +673,13 @@
       "when": 1791619200000,
       "tag": "0095_review_chat_explain",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "6",
+      "when": 1791705600000,
+      "tag": "0096_workspace_setting_events",
+      "breakpoints": true
     }
   ]
 }

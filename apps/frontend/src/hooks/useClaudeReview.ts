@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   useIsMutating,
   useMutation,
@@ -24,6 +24,11 @@ import { useFilters } from '../store/filters.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
 import { anyReviewInFlight, reviewTabPill, type ReviewTabPill } from '../lib/claudeReviewColumn.js';
 import { anyFixRunning } from '../lib/claudeAutoReview.js';
+import {
+  activeReviewSignatures,
+  changedActivePrIds,
+  prHasActiveReview,
+} from '../lib/claudeReviewActive.js';
 
 export function useClaudeReview(prId: number | null) {
   return useQuery<ClaudeReviewResponse>({
@@ -43,17 +48,27 @@ export function useClaudeReview(prId: number | null) {
 /**
  * The outcome pill on the PR pane's "Claude Review" tab label. The SAME query as the tab
  * (`['claude-review', prId]`, DB-only), so opening the tab reads the cache and this adds no second
- * request. This observer alone also re-reads every 5s while a run is in flight: with the tab shut
- * there is no SSE stream to say the run ended.
+ * request. With the tab shut there is no SSE stream to say a run started or ended, so this
+ * observer also keeps the shared active list (`['claude-reviews-active']`, ONE request for every
+ * PR) polled while the pane is open: `useClaudeReviewActiveSync` invalidates this PR's review the
+ * moment it enters or leaves that list, and the pill re-reads every 5s while it is in it.
  */
 export function useClaudeReviewTabPill(prId: number, enabled: boolean): ReviewTabPill | null {
   const starting = useClaudeReviewStarting(prId);
+  const { data: active } = useQuery<ActiveReviewsResponse>({
+    queryKey: ['claude-reviews-active'],
+    queryFn: api.activeClaudeReviews,
+    enabled,
+    refetchInterval: ACTIVE_POLL_WHILE_PANE_OPEN_MS,
+  });
+  const inActiveList = prHasActiveReview(active?.reviews, prId);
   const { data } = useQuery<ClaudeReviewResponse>({
     queryKey: ['claude-review', prId],
     queryFn: () => api.claudeReview(prId),
     enabled,
     refetchInterval: (q) => {
       const d = q.state.data;
+      if (inActiveList) return 5000;
       if (d == null) return false;
       const inFlight =
         d.review?.status === 'running' || d.review?.status === 'queued' || d.autoReview != null;
@@ -61,6 +76,36 @@ export function useClaudeReviewTabPill(prId: number, enabled: boolean): ReviewTa
     },
   });
   return enabled ? reviewTabPill(data, starting) : null;
+}
+
+/** The active-list cadence while a PR pane is open. The banner polls faster (2.5s) only after a
+ *  person starts a run; React Query uses the shortest interval among mounted observers. */
+const ACTIVE_POLL_WHILE_PANE_OPEN_MS = 5000;
+
+/**
+ * Mounted ONCE (App). A PASSIVE observer of `['claude-reviews-active']` — it never fetches; the
+ * banner and the open pane's tab pill do — that invalidates `['claude-review', prId]` and the Open
+ * PRs column for every PR whose entry appeared, changed or left the list between two polls. That
+ * is how a run started or finished elsewhere (auto review, the Open PRs table, another tab) reaches
+ * a pane whose Claude Review tab is shut. See lib/claudeReviewActive.ts.
+ */
+export function useClaudeReviewActiveSync(): void {
+  const qc = useQueryClient();
+  const { data, dataUpdatedAt } = useQuery<ActiveReviewsResponse>({
+    queryKey: ['claude-reviews-active'],
+    queryFn: api.activeClaudeReviews,
+    enabled: false,
+  });
+  const prevRef = useRef<Map<number, string> | null>(null);
+  useEffect(() => {
+    if (data == null) return;
+    const next = activeReviewSignatures(data.reviews);
+    const changed = changedActivePrIds(prevRef.current, next);
+    prevRef.current = next;
+    if (changed.length === 0) return;
+    for (const prId of changed) void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
+    void qc.invalidateQueries({ queryKey: CLAUDE_REVIEW_STATES_KEY });
+  }, [data, dataUpdatedAt, qc]);
 }
 
 // Fetch a specific past run by id (for the history selector when viewing a run

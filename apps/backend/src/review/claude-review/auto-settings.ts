@@ -21,6 +21,7 @@ import {
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { dropAutoReviews } from './manager.js';
+import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
 
 // AUTO CLAUDE REVIEW — THE PER-WORKSPACE SWITCH (CORE since migration 0074 / pg 0061; it lived on
 // the plugin's `pro_workspace_settings` until Claude Review left the plugin, and plugin migration
@@ -287,7 +288,14 @@ export async function setWorkspaceAutoReview(
   const wasOn = existing.enabled === true && toMs(existing.enabledAt) != null;
   let review: Pick<AutoRow, 'enabled' | 'enabledAt'>;
   if (enabled === undefined || (enabled && wasOn)) review = existing;
-  else if (!enabled) review = { enabled: false, enabledAt: null };
+  // Already off (the Settings Save always sends `enabled`): keep the row, so nothing is written
+  // and no "switched off" marker reaches Chronology's settings history.
+  else if (!enabled) {
+    review =
+      existing.enabled !== true && existing.enabledAt == null
+        ? existing
+        : { enabled: false, enabledAt: null };
+  }
   // Whole seconds: SQLite stores this column in seconds, so an un-truncated stamp would make the
   // PUT's echo disagree with every later read by the milliseconds the column dropped.
   else review = { enabled: true, enabledAt: new Date(Math.floor(nowMs / 1000) * 1000) };
@@ -356,9 +364,37 @@ export async function setWorkspaceAutoReview(
       .set(set)
       .where(and(eq(w.id, workspaceId), eq(w.accountId, accountId)))
       .execute();
+    // Chronology's settings history (docs/BOTTLENECKS.md § Over time): one line per setting that
+    // really moved, written through the context's own executor (no core DB import here).
+    for (const [kind, summary] of settingChanges(set, existing, next)) {
+      await writeSettingEvent(ctx, accountId, workspaceId, kind, summary, new Date(nowMs));
+    }
   }
   if (enabled === false) dropAutoReviews((a, ws) => !(a === accountId && ws === workspaceId));
   return autoReviewOf(next);
+}
+
+/** The settings-history lines for one write: the `set` object names what actually changed. */
+function settingChanges(
+  set: Record<string, unknown>,
+  existing: AutoRow,
+  next: AutoRow,
+): ['auto_review' | 'auto_fix' | 'auto_post', string][] {
+  const out: ['auto_review' | 'auto_fix' | 'auto_post', string][] = [];
+  // A REAL flip only — compared on the effective state, never on the key being present in `set`.
+  const wasOn = existing.enabled === true && toMs(existing.enabledAt) != null;
+  const isOn = next.enabled === true && toMs(next.enabledAt) != null;
+  if ('autoReviewEnabled' in set && wasOn !== isOn) out.push(['auto_review', `Auto review ${onOff(isOn)}`]);
+  if ('autoReviewDailyCap' in set) out.push(['auto_review', 'Auto review daily limit changed']);
+  if ('autoFixEnabled' in set) out.push(['auto_fix', `Auto fix ${onOff(next.autoFixEnabled === true)}`]);
+  if ('autoFixSettings' in set) {
+    const was = resolveAutoFixSettings(existing.autoFixSettings).autoPush;
+    const now = resolveAutoFixSettings(next.autoFixSettings).autoPush;
+    out.push(['auto_fix', was !== now ? `Auto fix push ${onOff(now)}` : 'Auto fix contents changed']);
+  }
+  if ('autoPostEnabled' in set) out.push(['auto_post', `Auto-posting ${onOff(next.autoPostEnabled === true)}`]);
+  else if ('autoPostSettings' in set) out.push(['auto_post', 'Auto-posting settings changed']);
+  return out;
 }
 
 export interface AutoReviewRosterEntry {

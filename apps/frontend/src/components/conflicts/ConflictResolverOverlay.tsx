@@ -34,6 +34,8 @@ import { ResolverPanes } from './ResolverPanes.js';
 import { LandingStep } from './LandingStep.js';
 import { CommitResultPanel } from './CommitResultPanel.js';
 import { CloseResolverConfirm } from './CloseResolverConfirm.js';
+import { ClaudeResolutionBanner } from './ClaudeResolutionBanner.js';
+import { useClaudePrefill } from '../../hooks/useClaudePrefill.js';
 import {
   BRANCH_MOVED_RESTART,
   DECISIONS_KEPT,
@@ -133,6 +135,9 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
       conflictCount: session.files.reduce((n, f) => n + f.conflictCount, 0),
     });
   }, [key, session, seedSession]);
+  // "Resolve with Claude": apply its answer for THIS session, once. ⚠ AFTER the seed effect above,
+  // so the decision store already holds this key when the answer lands.
+  useClaudePrefill(target.prId, session, key);
 
   const decisions = stored?.decisions ?? EMPTY_DECISIONS;
 
@@ -341,6 +346,8 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
           {BRANCH_MOVED_RESTART}
         </div>
       )}
+
+      <ClaudeResolutionBanner />
 
       {/* ⚠ `min-h-0` is load-bearing: without it the flex child refuses to shrink and the grid
           overflows the viewport instead of scrolling. The panes bring their OWN scroller, and so

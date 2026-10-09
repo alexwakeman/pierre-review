@@ -1889,3 +1889,30 @@ export const jiraAcFields = pgTable(
     ),
   }),
 );
+
+// workspace_setting_events — see schema.sqlite.ts for the contract (migration pg 0083).
+export const workspaceSettingEvents = pgTable(
+  'workspace_setting_events',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    kind: text('kind').notNull(),
+    summary: text('summary').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (t) => ({
+    accountWsTimeIdx: index('workspace_setting_events_account_ws_time_idx').on(
+      t.accountId,
+      t.workspaceId,
+      t.occurredAt,
+    ),
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_setting_events_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);

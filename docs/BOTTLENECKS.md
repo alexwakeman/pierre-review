@@ -17,10 +17,11 @@ Three courts, and they partition the open life of a pull request:
 | Settings | `packages/shared/src/flow-settings.ts` · `workspaces.flow_settings` · `PUT /api/workspaces/:id/flow-settings` · `components/settings/FlowSettingsSection.tsx` |
 | Request history | `review_request_events` · `sync/upsert.ts` `persistReviewRequestHistory` · `sync/backfill-review-requests.ts` |
 | Pointers (Pro, model) | core `db/flow-pointers.ts` (evidence) · `packages/pro/src/flow-pointers/` · `GET`/`POST /api/pro/flow-pointers` · `Activity/FlowPointersPanel.tsx` |
-| The route | `apps/backend/src/api/routes/flow.ts` — `GET /api/flow-findings?workspace&window=reporting|days` (default: the reporting window) |
+| The route | `apps/backend/src/api/routes/flow.ts` — `GET /api/flow-findings?workspace&window=reporting|days` (default: the reporting window) · `GET /api/flow-trend?workspace` (Over time, 26 weeks) |
+| Over time | core `db/flow-trend.ts` (+ `flowCoreFigures` in `db/flow-detail.ts`, `loadFlowPopulation` in `db/pr-intervals.ts`, `localWeeksEndingAt` in `db/working-hours.ts`) · `db/workspace-setting-events.ts` + `db/setting-event-write.ts` (`workspace_setting_events`) · `packages/shared/src/flow-trend.ts` · `hooks/useFlowTrend.ts` · `Activity/ChronologyTrend.tsx` + `chronologyTrendModel.ts` · `components/charts/EventMarkers.tsx` |
 | The contract | `FlowResponse` and friends in `packages/shared/src/types.ts` |
 | The panel | `apps/frontend/src/components/Activity/BottlenecksPanel.tsx` + `bottlenecksModel.ts` + `ChronologyCharts.tsx` / `ChronologyTables.tsx` / `chronologyModel.ts` + `chronologyInfo.tsx` (the modal copy) · `components/InfoModal.tsx` · `components/charts/ChartPopover.tsx` |
-| Tests | `db/pr-intervals.test.ts` · `db/flow-detail.test.ts` · `db/working-hours.test.ts` · `sync/review-request-history.test.ts` · `api/routes/workspace-flow-settings.test.ts` · the `getFlowCourts` block in `verify-isolation.ts` · `packages/pro/test/flow-pointers.test.ts` · `apps/frontend/test/chronologyModel.test.ts` + `flowSettingsForm.test.ts` |
+| Tests | `db/flow-trend.test.ts` · `apps/frontend/test/chronologyTrendModel.test.ts` · `db/pr-intervals.test.ts` · `db/flow-detail.test.ts` · `db/working-hours.test.ts` · `sync/review-request-history.test.ts` · `api/routes/workspace-flow-settings.test.ts` · the `getFlowCourts` block in `verify-isolation.ts` · `packages/pro/test/flow-pointers.test.ts` · `apps/frontend/test/chronologyModel.test.ts` + `flowSettingsForm.test.ts` |
 
 Deterministic, **no model touches any part of it except the Pointers block**, which is a separate,
 opt-in, credit-metered generation (below) — and **PRO**, on the existing `periodReports` capability.
@@ -106,9 +107,13 @@ LANDING court where it finally has a denominator.
   by construction and on real data that is **46% of merges** — including them would drive every
   reviewer share towards 100%. They are reported separately as the unreviewed-merge finding, which
   is a governance claim (a branch-protection setting) rather than a productivity one.
-- ⚠ **THIS SCREEN NAMES NO PERSON.** Not a login, not an avatar, not a per-head count. The server
-  does not send actor ids at all, which makes it structural rather than a convention. "Guide the
-  work, never rank the people" is the licence this feature operates under.
+- ⚠ **THIS SCREEN NAMES NO PERSON — WITH ONE NARROW EXCEPTION.** Not a login, not an avatar, not a
+  per-head count. The court data carries no actor ids at all, which makes it structural rather than
+  a convention. "Guide the work, never rank the people" is the licence this feature operates under.
+  The exception (the user asked for it): **"Over time" names a NEW CONTRIBUTOR by login on an event
+  marker** — "@x first contributed". A marker names a FIRST APPEARANCE and nothing else: it carries
+  no figure, no wait is ever attributed to the person, and the before/after lens compares WEEKS, not
+  people. Nothing else on the page may name anyone, and the weekly figures still carry no actor.
 - ⚠ **EVERY SENTENCE IS TEMPLATED** in `pr-intervals.ts`. The SPA formats figures and renders the
   server's prose; it never composes a claim of its own out of the numbers. The page renders server
   prose only where it is not a restatement: refusals, a budget row's reason (in its popover, when
@@ -162,6 +167,55 @@ echoed as `windowDays`; only a positive integer `?days=` picks a fixed span — 
 unknown `?window=` is the reporting window (core route and plugin pointers route alike), because every sentence on screen names it. The picker's choice is remembered
 for the session only (a module variable), as before. The window is on `mergedAt`, two-sided and half-open `[from, to)` — a cycle-time
 figure belongs to the period the work COMPLETED in, matching `db/period-metrics.ts`.
+
+## Over time — the last 26 weeks, with event markers
+
+`GET /api/flow-trend` (same 402 gate, `search` tier) feeds ONE section under the budgets, "Over time ·
+Last 26 weeks", with four charts on one fetch: where the working hours went (a stacked area of the
+working-hour split per week), each wait against its budget (one cell per week, coloured within /
+acceptable / past limit against TODAY's budgets, which the page says), working hours saved against a
+baseline, and a before/after lens opened from any marker.
+
+- ⚠ **THE 26 WEEKS ARE THE ONE LABELLED EXCEPTION TO THE 90-DAY CAP.** The cap stays for the panel.
+  This view keeps the coverage bias VISIBLE instead: the page says "Last 26 weeks"; every week carries
+  `reposWithData` / `reposInWorkspace` (on hover); every repository that joined is a marker; and a
+  week under `FLOW_TREND.thinWeekPrs` (5) measured pull requests is THIN — drawn faint and left out of
+  every baseline, lens median and shift. The current week is partial and left out the same way.
+- ⚠ **ONE DEFINITION.** Weeks are keyed by MERGE week (Monday 00:00 in the workspace's working zone,
+  `localWeeksEndingAt`). Each week's figures come from `flowCoreFigures` — the function
+  `buildFlowDetail` itself calls for the panel — over the population `loadFlowPopulation` builds (the
+  panel's loader and state machine; `detail: false` skips only the request-history and CI scans).
+  A week's split and budget rows therefore equal the panel's for that span. Never fork either.
+- **Caps.** The 26 weeks are scanned four weeks per population load so each stays inside
+  `FLOW_PR_CAP`; any cap hit sets `truncated`, stated on the page. Completed weeks are cached in
+  memory per (account, workspace, repo set, settings, week) for an hour; the current week is live.
+- **Markers.** `repo` (`workspace_repos.created_at` — restamped on a real MOVE), `setting`
+  (`workspace_setting_events`, going forward only; the page says when that history starts), `bot`
+  (earliest event per automation actor — the lane union, `resolveActorLanes` — named by vendor where
+  known), `contributor` (earliest MERGED pull request, review or review comment per human, named by
+  login), and `shift` (dashed: `detectChangepoints` per series, one strongest split each, every candidate
+  judged over the LENS's own windows at a usable week — so a marker never opens a lens that calls it
+  ordinary variation). Markers in
+  one week stack into one head with a count. ⚠ **A first appearance at the EDGE of our records is not
+  an arrival**: a repository's history starts at `max(added − BACKFILL_DAYS, now − RETENTION_DAYS)`,
+  and a first appearance within `FLOW_TREND.historyEdgeDays` (14) of it is not marked. ⚠ Authored
+  pull requests count only when MERGED — on a public repository opened-and-abandoned drive-bys
+  otherwise bury every real arrival (measured on the dev workspace: 46 markers, 40 of them drive-bys
+  in three weeks).
+- **The lens** compares, per measure (the four budget p75s and the three shares), the median of up to
+  `FLOW_TREND.lensWeeks` (8) usable weeks before the event week with up to 8 from it on, and asks
+  `detectChangepoints` anchored there over exactly those weeks (verdict `shift` at robust z ≥ 3,
+  `normal`, or `too_few` under 4 a side). Each row is TWO HORIZONTAL BARS (before grey, after) on one
+  per-row scale (shares on 0–100%). ⚠ ONLY SIGNIFICANCE IS SPOKEN: a `shift` paints the after bar
+  green (lower = better — every measure is a wait) or red and labels it "Real improvement" / "Real
+  slowdown" with the change (`lensSignificance`); a normal or too-few row says NOTHING about it.
+  Every explanation (the window, "three in four within", the z rule) lives in the ⓘ popover only.
+- **Working hours saved** (client-side, `chronologyTrendModel.ts` `runningGain`): each counted week
+  adds `(baseline − that week's median whole-PR time) × pull requests measured that week`; the line is
+  the running total, so rising = merging faster than the baseline. The default baseline is the median
+  of the first 8 usable weeks and counting starts the week after; clicking a week (or "Measure hours
+  saved from this week" in the lens) moves the start there, against the 8 usable weeks before it.
+  Fewer than 4 usable weeks before the start refuses.
 
 ## Working hours and budgets
 

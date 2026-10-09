@@ -29,6 +29,7 @@ import type {
   DependencyMergeSkipReason,
 } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
+import { onOff, recordWorkspaceSettingEvent } from '../db/workspace-setting-events.js';
 import { getAccessToken, getAccountUserId } from '../auth/account.js';
 import {
   getWorkspaceRepoIds,
@@ -80,13 +81,25 @@ export async function setDependencyAutoMerge(
   workspaceId: number,
   enabled: boolean,
 ): Promise<boolean> {
+  const before = await getDependencyAutoMerge(accountId, workspaceId);
+  if (before == null) return false;
   const rows = await db
     .update(workspaces)
     .set({ dependencyAutoMerge: enabled ? true : null })
     .where(and(eq(workspaces.id, workspaceId), eq(workspaces.accountId, accountId)))
     .returning({ id: workspaces.id })
     .execute();
-  return rows.length > 0;
+  if (rows.length === 0) return false;
+  // Chronology's settings history: only a real change is recorded.
+  if (before.enabled !== enabled) {
+    await recordWorkspaceSettingEvent(
+      accountId,
+      workspaceId,
+      'dependency_auto_merge',
+      `Dependency auto-merge ${onOff(enabled)}`,
+    );
+  }
+  return true;
 }
 
 /** A person cancelled this PR's intent: the setting never re-arms it. Idempotent. */

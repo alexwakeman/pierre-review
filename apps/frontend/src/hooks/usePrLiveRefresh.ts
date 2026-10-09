@@ -89,6 +89,10 @@ export function usePrLiveRefresh(prId: number, enabled: boolean): PrLiveRefresh 
       void qc.invalidateQueries({ queryKey: ['thread', t.id] });
     }
     void qc.invalidateQueries({ queryKey: prMlLabelsKey(prId) });
+    // The PR's Claude review read (DB-only): a new head moves whether an auto review is waiting
+    // and whether the latest run reviewed the current code. Runs starting and ending reach it
+    // through the active list instead (useClaudeReviewActiveSync).
+    void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
     // ⚠ AND THE MERGE CONTROL'S KEY, which ['pr', prId] does NOT cover. `useMergeOptions`
     // (usePrWrites.ts) holds the LIVE GitHub read — allowed merge methods, current mergeability,
     // and merge-queue membership, position and entry state — none of which the sync persists, so

@@ -439,7 +439,7 @@ function sharesOf(h: CourtHours): CourtShare[] {
 
 // ── The query ────────────────────────────────────────────────────────────────────────────────
 
-interface PrRow {
+export interface PrRow {
   id: number;
   repoId: number;
   number: number;
@@ -469,99 +469,51 @@ function linesOf(pr: PrRow): number | null {
   return fromFiles > 0 ? fromFiles : null;
 }
 
+/** One measured pull request: its ledger in clock hours and the walk it came from. */
+export interface MeasuredPr {
+  pr: PrRow;
+  hours: CourtHours;
+  leadHours: number;
+  walk: CourtWalk;
+}
+
+/** Everything the court ledger reads, for one workspace and one merge window. */
+export interface FlowPopulation {
+  repoName: Map<number, string>;
+  /** Every merged pull request in the window (bots included) — the scan, before exclusions. */
+  prs: PrRow[];
+  /** Human-authored, human-touched: the population every share and budget is over. */
+  measured: MeasuredPr[];
+  botAuthors: Set<number>;
+  unreviewedByRepo: Map<number, PrRow[]>;
+  excludedNoHumanTouch: number;
+  excludedBotAuthored: number;
+  /** A scan cap was hit. */
+  truncated: boolean;
+  requestEvents: Map<
+    number,
+    { atMs: number; kind: 'requested' | 'removed'; reviewerKind: string; userId: number | null }[]
+  >;
+  ciObs: Map<number, { atMs: number; red: boolean }[]>;
+  isHuman: (userId: number | null) => boolean;
+}
+
 /**
- * The court ledger for a workspace.
+ * THE ONE LOADER for the court ledger: merged pull requests in `[from, to)`, their human actions,
+ * and the walk of each. ⚠ `getFlowCourts` (the panel) and `db/flow-trend.ts` (26 weeks) both read
+ * through it, so the population and the state machine cannot fork between them.
  *
- * Two window shapes. `windowDaysRaw` is the fixed trailing-N-days option (30/60/90 on the panel),
- * CLAMPED to [7, 90]. `opts.reporting` is the workspace's REPORTING WINDOW (the panel's default —
- * this sprint so far, or the trailing 7/14 days), resolved by the caller through the ONE resolver
- * (`getReportingWindow`, db/reporting-window.ts) and handed in. It is NOT floored at seven days:
- * early in a sprint the window is short by definition, and the too-few-PRs refusals below are what
- * stop a thin sample being read as a finding. It is still capped at 90 days for the coverage-bias
- * reason the clamp states.
+ * `opts.detail: false` skips the two scans only the panel's detail reads (review-request history
+ * and CI observations); nothing in the shares, medians or budgets depends on them.
  */
-export async function getFlowCourts(
+export async function loadFlowPopulation(
   accountId: number,
   scope: BotScope,
-  windowDaysRaw: number,
-  opts: { reporting?: ReportingWindow; nowMs?: number } = {},
-): Promise<FlowResponse> {
-  const toMs = opts.reporting
-    ? Math.max(opts.reporting.fromMs, measuredTo(opts.reporting, opts.nowMs ?? Date.now()))
-    : (opts.nowMs ?? Date.now());
-  const fromMs = opts.reporting
-    ? Math.max(opts.reporting.fromMs, toMs - FLOW_MAX_WINDOW_DAYS * 24 * HOUR_MS)
-    : toMs -
-      Math.min(FLOW_MAX_WINDOW_DAYS, Math.max(FLOW_MIN_WINDOW_DAYS, Math.round(windowDaysRaw))) *
-        24 *
-        HOUR_MS;
-  const windowDays = Math.max(1, Math.ceil((toMs - fromMs) / (24 * HOUR_MS)));
-  const reportingWindow = opts.reporting
-    ? reportingWindowInfo(opts.reporting, opts.nowMs ?? Date.now())
-    : undefined;
-  // Every templated sentence names the window the same way the panel's picker does.
-  const phrase = reportingWindow
-    ? reportingWindowPhrase(reportingWindow)
-    : `in the last ${windowDays} days`;
-  const to = new Date(toMs);
-  const from = new Date(fromMs);
-
-  const refusals: FlowRefusal[] = [];
-  const refuse = (
-    kind: FlowRefusal['kind'],
-    reason: string,
-    basis: FlowRefusal['basis'] = 'insufficient_data',
-  ): void => {
-    refusals.push({ kind, reason, basis });
-  };
-
-  const settings = await getResolvedFlowSettings(accountId, scope.workspaceId);
-
-  const empty = (coverage: FlowCoverage): FlowResponse => ({
-    workspaceId: scope.workspaceId,
-    windowDays,
-    ...(reportingWindow ? { reportingWindow } : {}),
-    measuredPrs: 0,
-    courts: sharesOf({ reviewer: 0, author: 0, landing: 0 }),
-    medianLeadHours: 0,
-    p75LeadHours: 0,
-    headline: null,
-    repos: [],
-    directives: [],
-    unreviewed: [],
-    refusals,
-    coverage,
-    settings,
-    courtsWork: sharesOf({ reviewer: 0, author: 0, landing: 0 }),
-    medianLeadWorkHours: 0,
-    p75LeadWorkHours: 0,
-    workHeadline: null,
-    budgets: [],
-    prs: [],
-    prsCapped: false,
-    contrast: null,
-    sizeBands: [],
-    weekdays: [],
-    landingTail: null,
-    concentration: [],
-    prFigures: { overWorkingDay: 0, slowestTenthCount: 0, slowestTenthShare: 0, neverWentBack: 0 },
-  });
-
-  // `[]` is a real answer ("this workspace is empty"), never a widening to the whole account.
-  if (scope.repoIds.length === 0) {
-    for (const k of ['courts', 'unreviewed'] as const) {
-      refuse(k, 'This workspace has no repositories yet.');
-    }
-    return empty({
-      reposInWorkspace: 0,
-      reposWithData: 0,
-      prsScanned: 0,
-      truncated: false,
-      excludedNoHumanTouch: 0,
-      excludedBotAuthored: 0,
-    });
-  }
-
+  from: Date,
+  to: Date,
+  opts: { detail?: boolean; lanes?: ActorLanes } = {},
+): Promise<FlowPopulation> {
+  const detail = opts.detail !== false;
   const caps = { truncated: false };
   const noteCap = (rows: number, cap: number): void => {
     if (rows >= cap) caps.truncated = true;
@@ -631,22 +583,25 @@ export async function getFlowCourts(
   }
 
   if (prs.length === 0) {
-    for (const k of ['courts', 'unreviewed'] as const) {
-      refuse(k, `No pull request merged ${phrase}.`);
-    }
-    return empty({
-      reposInWorkspace: scope.repoIds.length,
-      reposWithData: 0,
-      prsScanned: 0,
-      truncated: caps.truncated,
+    return {
+      repoName,
+      prs,
+      measured: [],
+      botAuthors: new Set(),
+      unreviewedByRepo: new Map(),
       excludedNoHumanTouch: 0,
       excludedBotAuthored: 0,
-    });
+      truncated: caps.truncated,
+      requestEvents: new Map(),
+      ciObs: new Map(),
+      isHuman: () => false,
+    };
   }
 
   const byId = new Map(prs.map((p) => [p.id, p]));
   const prIds = prs.map((p) => p.id);
-  const lanes: ActorLanes = await resolveActorLanes(accountId, scope);
+  // A caller loading several windows resolves the lanes once and hands them in.
+  const lanes: ActorLanes = opts.lanes ?? (await resolveActorLanes(accountId, scope));
   // ⚠ The lane resolver's UNION, never `users.isBot` alone — see the header.
   const isHuman = (userId: number | null): boolean =>
     userId != null && lanes.laneOf(userId) === 'human';
@@ -741,44 +696,47 @@ export async function getFlowCourts(
       push(r.prId, { atMs: r.at.getTime(), by: 'author', approves: false });
     }
 
-    // Review-request HISTORY — who was asked first, and when. Never moves the ball: a request is
-    // not a review. Read by PR id only (a PR child with no account_id; the ids are this account's).
-    const rrRows = await db
-      .select({
-        prId: reviewRequestEvents.prId,
-        at: reviewRequestEvents.occurredAt,
-        kind: reviewRequestEvents.kind,
-        reviewerKind: reviewRequestEvents.reviewerKind,
-        userId: reviewRequestEvents.reviewerUserId,
-      })
-      .from(reviewRequestEvents)
-      .where(inArray(reviewRequestEvents.prId, ids))
-      .limit(FLOW_ACTION_CAP)
-      .execute();
-    noteCap(rrRows.length, FLOW_ACTION_CAP);
-    for (const r of rrRows) {
-      if (r.at == null) continue;
-      const list = requestEvents.get(r.prId);
-      const e = { atMs: r.at.getTime(), kind: r.kind, reviewerKind: r.reviewerKind, userId: r.userId };
-      if (list) list.push(e);
-      else requestEvents.set(r.prId, [e]);
-    }
+    // The panel's detail only (who was asked first; red CI). The trend skips both.
+    if (detail) {
+      // Review-request HISTORY — who was asked first, and when. Never moves the ball: a request is
+      // not a review. Read by PR id only (a PR child with no account_id; the ids are this account's).
+      const rrRows = await db
+        .select({
+          prId: reviewRequestEvents.prId,
+          at: reviewRequestEvents.occurredAt,
+          kind: reviewRequestEvents.kind,
+          reviewerKind: reviewRequestEvents.reviewerKind,
+          userId: reviewRequestEvents.reviewerUserId,
+        })
+        .from(reviewRequestEvents)
+        .where(inArray(reviewRequestEvents.prId, ids))
+        .limit(FLOW_ACTION_CAP)
+        .execute();
+      noteCap(rrRows.length, FLOW_ACTION_CAP);
+      for (const r of rrRows) {
+        if (r.at == null) continue;
+        const list = requestEvents.get(r.prId);
+        const e = { atMs: r.at.getTime(), kind: r.kind, reviewerKind: r.reviewerKind, userId: r.userId };
+        if (list) list.push(e);
+        else requestEvents.set(r.prId, [e]);
+      }
 
-    // CI observations — for "checks went red", never for the ball. Red time is approximate: a
-    // failure counts until the next observation, and observations are only as dense as syncs.
-    const ciRows = await db
-      .select({ prId: ciStatusEvents.prId, at: ciStatusEvents.observedAt, status: ciStatusEvents.status })
-      .from(ciStatusEvents)
-      .where(and(eq(ciStatusEvents.accountId, accountId), inArray(ciStatusEvents.prId, ids)))
-      .limit(FLOW_ACTION_CAP)
-      .execute();
-    noteCap(ciRows.length, FLOW_ACTION_CAP);
-    for (const r of ciRows) {
-      if (r.at == null) continue;
-      const list = ciObs.get(r.prId);
-      const o = { atMs: r.at.getTime(), red: r.status === 'failure' || r.status === 'error' };
-      if (list) list.push(o);
-      else ciObs.set(r.prId, [o]);
+      // CI observations — for "checks went red", never for the ball. Red time is approximate: a
+      // failure counts until the next observation, and observations are only as dense as syncs.
+      const ciRows = await db
+        .select({ prId: ciStatusEvents.prId, at: ciStatusEvents.observedAt, status: ciStatusEvents.status })
+        .from(ciStatusEvents)
+        .where(and(eq(ciStatusEvents.accountId, accountId), inArray(ciStatusEvents.prId, ids)))
+        .limit(FLOW_ACTION_CAP)
+        .execute();
+      noteCap(ciRows.length, FLOW_ACTION_CAP);
+      for (const r of ciRows) {
+        if (r.at == null) continue;
+        const list = ciObs.get(r.prId);
+        const o = { atMs: r.at.getTime(), red: r.status === 'failure' || r.status === 'error' };
+        if (list) list.push(o);
+        else ciObs.set(r.prId, [o]);
+      }
     }
   }
 
@@ -796,13 +754,7 @@ export async function getFlowCourts(
   }
 
   // ── Attribute ──────────────────────────────────────────────────────────────────────────────
-  interface Measured {
-    pr: PrRow;
-    hours: CourtHours;
-    leadHours: number;
-    walk: CourtWalk;
-  }
-  const measured: Measured[] = [];
+  const measured: MeasuredPr[] = [];
   const unreviewedByRepo = new Map<number, PrRow[]>();
   let excludedNoHumanTouch = 0;
 
@@ -836,6 +788,145 @@ export async function getFlowCourts(
     });
   }
 
+  return {
+    repoName,
+    prs,
+    measured,
+    botAuthors,
+    unreviewedByRepo,
+    excludedNoHumanTouch,
+    excludedBotAuthored,
+    truncated: caps.truncated,
+    requestEvents,
+    ciObs,
+    isHuman,
+  };
+}
+
+type Measured = MeasuredPr;
+
+/**
+ * The court ledger for a workspace.
+ *
+ * Two window shapes. `windowDaysRaw` is the fixed trailing-N-days option (30/60/90 on the panel),
+ * CLAMPED to [7, 90]. `opts.reporting` is the workspace's REPORTING WINDOW (the panel's default —
+ * this sprint so far, or the trailing 7/14 days), resolved by the caller through the ONE resolver
+ * (`getReportingWindow`, db/reporting-window.ts) and handed in. It is NOT floored at seven days:
+ * early in a sprint the window is short by definition, and the too-few-PRs refusals below are what
+ * stop a thin sample being read as a finding. It is still capped at 90 days for the coverage-bias
+ * reason the clamp states.
+ */
+export async function getFlowCourts(
+  accountId: number,
+  scope: BotScope,
+  windowDaysRaw: number,
+  opts: { reporting?: ReportingWindow; nowMs?: number } = {},
+): Promise<FlowResponse> {
+  const toMs = opts.reporting
+    ? Math.max(opts.reporting.fromMs, measuredTo(opts.reporting, opts.nowMs ?? Date.now()))
+    : (opts.nowMs ?? Date.now());
+  const fromMs = opts.reporting
+    ? Math.max(opts.reporting.fromMs, toMs - FLOW_MAX_WINDOW_DAYS * 24 * HOUR_MS)
+    : toMs -
+      Math.min(FLOW_MAX_WINDOW_DAYS, Math.max(FLOW_MIN_WINDOW_DAYS, Math.round(windowDaysRaw))) *
+        24 *
+        HOUR_MS;
+  const windowDays = Math.max(1, Math.ceil((toMs - fromMs) / (24 * HOUR_MS)));
+  const reportingWindow = opts.reporting
+    ? reportingWindowInfo(opts.reporting, opts.nowMs ?? Date.now())
+    : undefined;
+  // Every templated sentence names the window the same way the panel's picker does.
+  const phrase = reportingWindow
+    ? reportingWindowPhrase(reportingWindow)
+    : `in the last ${windowDays} days`;
+  const to = new Date(toMs);
+  const from = new Date(fromMs);
+
+  const refusals: FlowRefusal[] = [];
+  const refuse = (
+    kind: FlowRefusal['kind'],
+    reason: string,
+    basis: FlowRefusal['basis'] = 'insufficient_data',
+  ): void => {
+    refusals.push({ kind, reason, basis });
+  };
+
+  const settings = await getResolvedFlowSettings(accountId, scope.workspaceId);
+
+  const empty = (coverage: FlowCoverage): FlowResponse => ({
+    workspaceId: scope.workspaceId,
+    windowDays,
+    ...(reportingWindow ? { reportingWindow } : {}),
+    measuredPrs: 0,
+    courts: sharesOf({ reviewer: 0, author: 0, landing: 0 }),
+    medianLeadHours: 0,
+    p75LeadHours: 0,
+    headline: null,
+    repos: [],
+    directives: [],
+    unreviewed: [],
+    refusals,
+    coverage,
+    settings,
+    courtsWork: sharesOf({ reviewer: 0, author: 0, landing: 0 }),
+    medianLeadWorkHours: 0,
+    p75LeadWorkHours: 0,
+    workHeadline: null,
+    budgets: [],
+    prs: [],
+    prsCapped: false,
+    contrast: null,
+    sizeBands: [],
+    weekdays: [],
+    landingTail: null,
+    concentration: [],
+    prFigures: { overWorkingDay: 0, slowestTenthCount: 0, slowestTenthShare: 0, neverWentBack: 0 },
+  });
+
+  // `[]` is a real answer ("this workspace is empty"), never a widening to the whole account.
+  if (scope.repoIds.length === 0) {
+    for (const k of ['courts', 'unreviewed'] as const) {
+      refuse(k, 'This workspace has no repositories yet.');
+    }
+    return empty({
+      reposInWorkspace: 0,
+      reposWithData: 0,
+      prsScanned: 0,
+      truncated: false,
+      excludedNoHumanTouch: 0,
+      excludedBotAuthored: 0,
+    });
+  }
+
+  const pop = await loadFlowPopulation(accountId, scope, from, to);
+  const {
+    repoName,
+    prs,
+    measured,
+    botAuthors,
+    unreviewedByRepo,
+    excludedNoHumanTouch,
+    excludedBotAuthored,
+    requestEvents,
+    ciObs,
+    isHuman,
+  } = pop;
+
+  if (prs.length === 0) {
+    for (const k of ['courts', 'unreviewed'] as const) {
+      refuse(k, `No pull request merged ${phrase}.`);
+    }
+    return empty({
+      reposInWorkspace: scope.repoIds.length,
+      reposWithData: 0,
+      prsScanned: 0,
+      truncated: pop.truncated,
+      excludedNoHumanTouch: 0,
+      excludedBotAuthored: 0,
+    });
+  }
+
+
   // ⚠ The unreviewed-merge DENOMINATOR is the same human-authored population the shares are over.
   // Counting bot merges into it would report "30% of merges went in unreviewed" against a total
   // that includes work no human was ever meant to review.
@@ -849,7 +940,7 @@ export async function getFlowCourts(
     reposInWorkspace: scope.repoIds.length,
     reposWithData: new Set(prs.map((p) => p.repoId)).size,
     prsScanned: prs.length,
-    truncated: caps.truncated,
+    truncated: pop.truncated,
     excludedNoHumanTouch,
     excludedBotAuthored,
   };

@@ -2649,3 +2649,43 @@ export const jiraAcFields = sqliteTable(
     ),
   }),
 );
+
+// ── workspace_setting_events: WHEN A WORKSPACE SETTING CHANGED (migration 0096 / pg 0083) ────────
+// APPEND-ONLY history of real changes to the settings that can move how work flows — auto review,
+// auto fix, auto-posting, working hours and budgets, dependency auto-merge, the issue tracker. One
+// row per change, written by each setting's ONE writer (db/workspace-setting-events.ts
+// `recordWorkspaceSettingEvent`) only when the stored value actually moved. Read by Chronology's
+// "Over time" charts as event markers (db/flow-trend.ts).
+//
+// ⚠ GOING FORWARD ONLY: there was no history before this table, so the page states the first row's
+// date as the start of settings history. `kind` is a `WorkspaceSettingEventKind` (packages/shared).
+// `workspace_id` arrives in a request path, so its FK is the named COMPOSITE one. Listed in
+// `accountScopedTables()`.
+export const workspaceSettingEvents = sqliteTable(
+  'workspace_setting_events',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // The composite FK below, not a `.references()`.
+    workspaceId: integer('workspace_id').notNull(),
+    kind: text('kind').notNull(),
+    summary: text('summary').notNull(),
+    occurredAt: integer('occurred_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountWsTimeIdx: index('workspace_setting_events_account_ws_time_idx').on(
+      t.accountId,
+      t.workspaceId,
+      t.occurredAt,
+    ),
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_setting_events_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);

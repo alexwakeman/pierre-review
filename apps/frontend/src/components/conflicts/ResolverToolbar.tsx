@@ -12,6 +12,7 @@ import {
   FILE_NEXT,
   FILE_PREV,
   NEXT_OUTSTANDING,
+  NEXT_OUTSTANDING_BLOCKED,
   NEXT_OUTSTANDING_LABEL,
   TAKE_FILE_OURS,
   UNDO_LAST,
@@ -31,7 +32,9 @@ import {
 //
 // ⚠ THREE CONTROLS MOVE BETWEEN FILES AND THEY ARE NOT THE SAME CONTROL. The chevrons page the
 // MANIFEST, in order, conflict-blind, and they say so ("Next file in the list"). "Next" goes to the
-// next file that still needs decisions (`nextOutstandingFile`) and disappears once none does. The
+// next file that still needs decisions (`nextOutstandingFile`); it sits on the LEFT beside "Merge
+// base" with the file's own count, is DISABLED until the file on screen is fully decided, and
+// disappears once no other file needs anything (`nextOutstandingControl`). The
 // keys `n`/`p` walk REGIONS inside the file the reader is in, and `[`/`]` are the chevrons. Two
 // controls announcing as "Next …" is the duplicate-verb problem the gutter arrows cost us, so the
 // chevrons were re-worded rather than the new button being given a quieter name.
@@ -43,8 +46,8 @@ import {
 // undo step either way. They are NOT the gutter arrows at a larger size: those remain the one
 // per-CHANGE route to a side, and these say "file" in their names so the two never announce alike.
 //
-// ⚠ THE COUNTS ON THE RIGHT ARE ONE FOLD. "This file: N of M changes left" is the file's row of the
-// shell's `CommitPlan` and "All files: …" is its total — the population the commit button is held
+// ⚠ THE TWO COUNTS ARE ONE FOLD. "This file: N of M changes left" (left, beside "Next") is the
+// file's row of the shell's `CommitPlan` and "All files: …" (right) is its total — the population the commit button is held
 // shut by. The file menu's trigger no longer repeats the file's count: "2 of 6 decided" beside
 // "4 of 6 changes left" was one fact printed twice, inches apart.
 
@@ -78,6 +81,7 @@ export function ResolverToolbar({
   onOutstandingOpen,
   onJumpToFile,
   nextOutstanding,
+  nextOutstandingBlocked,
   onNextOutstanding,
   blockedReason,
   onLand,
@@ -121,9 +125,12 @@ export function ResolverToolbar({
   onOutstandingOpen: (open: boolean) => void;
   /** Go to that file's first unanswered region. */
   onJumpToFile: (index: number) => void;
-  /** `nextOutstandingFile(outstanding, activeIndex)`. Null ⇒ no "Next" button at all: either
-   *  everything is decided or the only outstanding file is the one the reader is already in. */
+  /** `nextOutstandingControl(...).target`. Null ⇒ no "Next" button at all: either everything is
+   *  decided or the only outstanding file is the one the reader is already in. */
   nextOutstanding: number | null;
+  /** `nextOutstandingControl(...).blocked` — the file on screen still has undecided changes, so
+   *  "Next" is shown disabled. */
+  nextOutstandingBlocked: boolean;
   onNextOutstanding: () => void;
   /** `commitBlockedReason(plan, headMoved)` — the ONE sentence for why the commit cannot go, and
    *  the gate itself: non-null disables the button below. Null ⇒ nothing is in the way. */
@@ -222,28 +229,40 @@ export function ResolverToolbar({
         onOpenChange={onBaseOpen}
       />
 
-      <div className="ml-auto flex items-center gap-2">
-        {/* ⚠ ABSENT, NEVER DISABLED. `nextOutstanding` is null exactly when there is nowhere to
-            jump — nothing outstanding, or nothing outstanding but this file — and a "Next" that
-            lands the reader where they already are reads as a broken control. */}
-        {nextOutstanding != null && (
+      {/* ⚠ DISABLED WHILE THIS FILE HAS WORK, ABSENT WHEN THERE IS NOWHERE TO GO. The user asked
+          for "Next" to stay shut until every change in the file on screen is decided; finishing
+          the file is what opens it. `nextOutstanding` is null when no OTHER file is outstanding,
+          and a disabled button that could never open is not a control, so it is absent then. The
+          file's count sits beside it so the reason it is shut is on screen, not only in a
+          tooltip. */}
+      {nextOutstanding != null && (
+        <>
+          {nextOutstandingBlocked && (
+            <span id={NEXT_BLOCKED_ID} className="sr-only">
+              {NEXT_OUTSTANDING_BLOCKED}
+            </span>
+          )}
           <button
             type="button"
             onClick={onNextOutstanding}
-            title={NEXT_OUTSTANDING_LABEL}
+            disabled={nextOutstandingBlocked}
+            title={nextOutstandingBlocked ? NEXT_OUTSTANDING_BLOCKED : NEXT_OUTSTANDING_LABEL}
             aria-label={NEXT_OUTSTANDING_LABEL}
-            className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
+            aria-describedby={nextOutstandingBlocked ? NEXT_BLOCKED_ID : undefined}
+            className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:border-gray-400 disabled:opacity-40 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
           >
             {NEXT_OUTSTANDING}
           </button>
-        )}
+        </>
+      )}
 
-        {fileDecidable != null && fileDecided != null && (
-          <span className="text-[11px] text-gray-600 dark:text-gray-300">
-            {fileChangesLeft(fileDecidable - fileDecided, fileDecidable)}
-          </span>
-        )}
+      {fileDecidable != null && fileDecided != null && (
+        <span className="text-[11px] text-gray-600 dark:text-gray-300">
+          {fileChangesLeft(fileDecidable - fileDecided, fileDecidable)}
+        </span>
+      )}
 
+      <div className="ml-auto flex items-center gap-2">
         <OutstandingPopover
           decided={decided}
           total={total}
@@ -289,3 +308,6 @@ export function ResolverToolbar({
  *  mount together, but two elements that could ever share an id is not a fact worth betting a
  *  screen reader's description on. */
 const BLOCKED_REASON_ID = 'conflict-toolbar-blocked-reason';
+
+/** "Next"'s `aria-describedby` target while it is shut. */
+const NEXT_BLOCKED_ID = 'conflict-toolbar-next-blocked';

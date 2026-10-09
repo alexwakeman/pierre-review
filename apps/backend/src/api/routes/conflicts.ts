@@ -666,7 +666,7 @@ export async function conflictRoutes(app: FastifyInstance): Promise<void> {
  * the session it was building would sit at `preparing` until the TTL, with the overlay reading
  * "Reading the conflicting files…" the whole time.
  */
-async function runOpen(rec: ConflictSessionRecord, log: FastifyBaseLogger): Promise<void> {
+export async function runOpen(rec: ConflictSessionRecord, log: FastifyBaseLogger): Promise<void> {
   try {
     const result = await buildConflictModel({
       accountId: rec.accountId,

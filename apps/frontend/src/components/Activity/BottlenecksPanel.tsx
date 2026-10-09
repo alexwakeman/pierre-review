@@ -21,6 +21,7 @@ import {
 } from '../Icons.js';
 import { metaFor } from './AttentionCards.js';
 import { FlowPointersPanel } from './FlowPointersPanel.js';
+import { ChronologyTrend } from './ChronologyTrend.js';
 import {
   BudgetChart,
   COURT_SWATCH,
@@ -402,13 +403,17 @@ export function BottlenecksPanel(): JSX.Element {
       </div>
 
       {model.nothingMeasured ? (
-        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-          Nothing to measure in this workspace yet.
-          <p className="mt-1 text-xs">
-            A pull request has to merge, and a person has to have reviewed or commented on it,
-            before its waiting time can be counted.
-          </p>
-        </div>
+        <>
+          <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+            Nothing to measure in this workspace yet.
+            <p className="mt-1 text-xs">
+              A pull request has to merge, and a person has to have reviewed or commented on it,
+              before its waiting time can be counted.
+            </p>
+          </div>
+          {/* The last 26 weeks can hold work even when the picked window holds none. */}
+          <ChronologyTrend workspaceId={workspaceId} />
+        </>
       ) : (
         <>
           {/* ══ THE WORKING-HOURS HALF (db/flow-detail.ts) ════════════════════════════════
@@ -429,6 +434,10 @@ export function BottlenecksPanel(): JSX.Element {
               <Block title="Each wait against its time budget" info={<BudgetsInfo />} testId="chronology-budgets">
                 <BudgetChart rows={resp.budgets ?? []} dayHours={dayHours} />
               </Block>
+
+              {/* Over time: the last 26 weeks of the two blocks above, with event markers — its own
+                  fetch (GET /api/flow-trend), independent of the window picker. */}
+              <ChronologyTrend workspaceId={workspaceId} />
 
               {prs.length > 0 && (
                 <Block title="Every pull request" info={<ScatterInfo />} testId="chronology-scatter">

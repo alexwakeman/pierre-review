@@ -2,6 +2,12 @@ import type { ThreadDetail, User } from '@pierre-review/shared';
 import { ChevronIcon } from '../Icons.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { ThreadCountChips, rollupCounts } from './ThreadCountChips.js';
+import {
+  effectiveResolved,
+  forcedOpen,
+  threadIsOpen,
+  type ThreadCollapseState,
+} from '../../lib/threadCollapse.js';
 
 // Newest thread first (by createdAt).
 function sortThreads(threads: ThreadDetail[]): ThreadDetail[] {
@@ -27,7 +33,8 @@ function snippet(thread: ThreadDetail): string {
  * One file's threads. The header is a GROUPING LABEL only — files never collapse as a whole.
  * Collapse is per THREAD: a resolved thread shows as one line until clicked; every other state
  * stays open. The open/closed set is owned by ThreadList (local to this PR view, keyed by thread
- * id) and a selected thread is always open, resolved or not.
+ * id) and a selected thread is open, resolved or not, until a resolve collapses it
+ * (lib/threadCollapse.ts).
  */
 export function FileGroup({
   path,
@@ -39,7 +46,7 @@ export function FileGroup({
   viewedSince,
   registerRef,
   openInChangesFor,
-  expandedResolved,
+  collapse,
   onToggleResolved,
 }: {
   path: string;
@@ -54,8 +61,8 @@ export function FileGroup({
   openInChangesFor?: (
     thread: ThreadDetail,
   ) => { run: () => void; approximate: boolean; line: number | null } | null;
-  /** Resolved threads the reader has opened in this PR view. */
-  expandedResolved: ReadonlySet<number>;
+  /** Which resolved threads are open, and local resolve verdicts awaiting the refetch. */
+  collapse: ThreadCollapseState;
   onToggleResolved: (threadId: number) => void;
 }): JSX.Element {
   const counts = rollupCounts(threads);
@@ -76,8 +83,9 @@ export function FileGroup({
       <div className="space-y-2 px-3 pb-3">
         {sortThreads(threads).map((t) => {
           const selected = t.id === selectedThreadId;
-          const resolved = t.derivedState === 'resolved';
-          const open = !resolved || selected || expandedResolved.has(t.id);
+          const resolved = effectiveResolved(t.derivedState === 'resolved', t.id, collapse.overrides);
+          const forced = forcedOpen(selected, t.id, collapse.released);
+          const open = threadIsOpen({ resolved, selected, threadId: t.id, state: collapse });
           const lineLabel = t.line != null ? `Line ${t.line}` : 'File';
           if (!open) {
             const authorId = t.comments[0]?.authorId ?? null;
@@ -107,9 +115,9 @@ export function FileGroup({
           }
           return (
             <div key={t.id} ref={(el) => registerRef(t.id, el)}>
-              {/* An opened resolved thread keeps a way back to one line. Not offered on the
-                  selected thread: selection forces it open, so the control would do nothing. */}
-              {resolved && !selected && (
+              {/* An opened resolved thread keeps a way back to one line. Not offered while
+                  selection forces it open, where the control would do nothing. */}
+              {resolved && !forced && (
                 <button
                   type="button"
                   onClick={() => onToggleResolved(t.id)}

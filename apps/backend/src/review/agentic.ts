@@ -14,6 +14,8 @@ import { reconcileCiReviewsOnStartup } from './ci-review/manager.js';
 import { registerCiReviewSweep } from './ci-review/sweep.js';
 import { registerAiFixRoutes } from '../coding/ai-fix/routes.js';
 import { reconcileFixesOnStartup } from '../coding/ai-fix/manager.js';
+import { registerAiResolveRoutes } from '../coding/ai-resolve/routes.js';
+import { runOpen } from '../api/routes/conflicts.js';
 
 // THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, the chat, auto
 // review), the ticket review (one run per ticket across its PRs, + its cascade sweeper), the CI
@@ -45,6 +47,9 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   registerTicketReviewRoutes(app, ctx);
   registerCiReviewRoutes(app, ctx);
   registerAiFixRoutes(app, ctx);
+  // "Resolve with Claude" — the agentic half of the merge-conflict resolver. The resolver's own
+  // routes stay in both modes (app.ts); this one is agentic and follows this function's rule.
+  registerAiResolveRoutes(app, ctx, { runOpen });
   return ctx;
 }
 

@@ -525,3 +525,28 @@ describe('auto verdict, auto resolve and auto fix settings (0091)', () => {
     await app.close();
   });
 });
+
+describe('the settings history records only REAL changes', () => {
+  it('⚠ a Save on a workspace whose auto review is already off records no "switched off" line', async () => {
+    const [extra] = await ctx.db
+      .insert(ctx.schema.workspaces)
+      .values({ accountId: 1, name: 'History', isDefault: false })
+      .returning()
+      .execute();
+    const ws = extra!.id as number;
+    const t = ctx.schema.workspaceSettingEvents;
+    const lines = async (): Promise<string[]> =>
+      ((await ctx.db.select().from(t).where(eq(t.workspaceId, ws)).execute()) as { summary: string }[]).map(
+        (r) => r.summary,
+      );
+    // The Settings Save always sends `enabled`; here it is off, and only auto fix moves.
+    await s.setWorkspaceAutoReview(ctx, 1, ws, { enabled: false, autoFixEnabled: true });
+    expect(await lines()).toEqual(['Auto fix switched on']);
+    await s.setWorkspaceAutoReview(ctx, 1, ws, { enabled: false, dailyCap: 7 });
+    expect(await lines()).toEqual(['Auto fix switched on', 'Auto review daily limit changed']);
+    // A real flip is still recorded, both ways.
+    await s.setWorkspaceAutoReview(ctx, 1, ws, { enabled: true });
+    await s.setWorkspaceAutoReview(ctx, 1, ws, { enabled: false });
+    expect((await lines()).slice(2)).toEqual(['Auto review switched on', 'Auto review switched off']);
+  });
+});

@@ -620,6 +620,23 @@ Core since apiVersion 23 (migration `0088` / pg `0075`); the contract is [TRACKE
 - ⚠ The plugin-era copies (`pro_workspace_settings.issue_*`/`jira_*`, `pro_pr_jira_tickets`) are
   MOVED and cleared at boot, never read again; the columns are dormant.
 
+## `workspace_setting_events` — when a workspace setting changed (CORE; sqlite `0096` / pg `0083`)
+
+APPEND-ONLY history read by Chronology's "Over time" markers (docs/BOTTLENECKS.md § Over time). One
+row per REAL change — `kind` (`WorkspaceSettingEventKind`: `auto_review` · `auto_fix` · `auto_post` ·
+`flow_settings` · `dependency_auto_merge` · `tracker`), a short plain-English `summary`, `occurred_at`.
+Written by each setting's ONE writer after the stored value moved (`setWorkspaceAutoReview`,
+`setWorkspaceFlowSettings`, `setDependencyAutoMerge`, the tracker PUT) — a Save that changes nothing
+writes nothing. ⚠ **Never fatal**: the setting is already stored, so a failed insert is logged and
+swallowed. ⚠ The context-injected writers (auto review's `AgentContext`, the tracker's
+`TrackerContext`) write through `db/setting-event-write.ts`, which takes the caller's executor and
+imports NO database client — an import-time DB open is how test rows once leaked into the dev DB.
+Named composite FK onto `workspaces (id, account_id)`, cascade; in `accountScopedTables()`.
+
+⚠ **`workspace_repos.created_at` is now the JOIN date**: `assignReposToWorkspace` restamps it on a
+real MOVE (a re-assignment to the same workspace keeps it), so the "repo joined" marker dates a moved
+repo by its arrival. Nothing else reads the column.
+
 ## The automation vocabulary — `AUTOMATION_VENDORS`, `ReviewerRole`, `AutomatedReviewerKind`
 
 Three vocabularies describe an automated actor, and they are **orthogonal axes, not one enum**:

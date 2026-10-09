@@ -189,6 +189,12 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.trackerTickets).where(eq(schema.trackerTickets.accountId, accountId)).execute();
     await tx.delete(schema.jiraAcFields).where(eq(schema.jiraAcFields.accountId, accountId)).execute();
     await tx.delete(schema.workspaceTrackers).where(eq(schema.workspaceTrackers.accountId, accountId)).execute();
+    // Workspace settings history (migration 0096 / pg 0083) — cascades from workspaces too, and is
+    // explicit anyway.
+    await tx
+      .delete(schema.workspaceSettingEvents)
+      .where(eq(schema.workspaceSettingEvents.accountId, accountId))
+      .execute();
     // The AI spend ledger (token/credit counts — no prompt text).
     await tx.delete(aiUsage).where(eq(aiUsage.accountId, accountId)).execute();
     // Any aggregate rows contributed to the cross-org benchmark. Consent was the basis for
@@ -300,6 +306,12 @@ export function accountScopedTables(): {
     { name: 'trackerTickets', col: schema.trackerTickets.accountId, table: schema.trackerTickets },
     { name: 'jiraAcFields', col: schema.jiraAcFields.accountId, table: schema.jiraAcFields },
     { name: 'workspaceTrackers', col: schema.workspaceTrackers.accountId, table: schema.workspaceTrackers },
+    // Chronology's settings history (migration 0096 / pg 0083), erased explicitly above.
+    {
+      name: 'workspaceSettingEvents',
+      col: schema.workspaceSettingEvents.accountId,
+      table: schema.workspaceSettingEvents,
+    },
     // `myTurnDismissals` sat here until migration 0060 / pg 0047 DROPPED the table. It is named
     // rather than silently absent because this list is a checklist, and a checklist that shortens
     // with no explanation reads as an omission — the exact failure this function guards against.

@@ -128,6 +128,27 @@ afterAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
 });
 
+describe('Chronology over time — GET /api/flow-trend gates on periodReports', () => {
+  it('402s without periodReports, for every ?workspace= value', async () => {
+    setProCapabilities(EMPTY);
+    for (const url of ['/api/flow-trend', '/api/flow-trend?workspace=987654']) {
+      const res = await get(url);
+      expect(res.status).toBe(402);
+      expect(res.body).toEqual({ error: 'pro required' });
+    }
+    setProCapabilities(DEPTH_ONLY);
+    expect((await get('/api/flow-trend')).status).toBe(402);
+  });
+
+  it('200s with periodReports, echoing the resolved workspace and 26 weeks', async () => {
+    setProCapabilities(REPORTS_ONLY);
+    const res = await get('/api/flow-trend?workspace=not-a-number');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('workspaceId');
+    expect(res.body.weeks).toHaveLength(26);
+  });
+});
+
 describe('Chronology — GET /api/flow-findings gates on periodReports', () => {
   it('402s with the plugin-absent capability set', async () => {
     setProCapabilities(EMPTY);

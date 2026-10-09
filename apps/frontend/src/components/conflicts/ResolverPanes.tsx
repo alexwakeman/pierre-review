@@ -6,6 +6,7 @@ import type {
   ConflictSession,
 } from '@pierre-review/shared';
 import {
+  nextUndecidedAfterWand,
   slotFor,
   tallyFile,
   wandPlan,
@@ -14,7 +15,7 @@ import {
   type FileTally,
   type WholeFileSide,
 } from '../../lib/mergeResolver.js';
-import { nextOutstandingFile, type CommitPlan } from '../../lib/conflictCommit.js';
+import { nextOutstandingControl, type CommitPlan } from '../../lib/conflictCommit.js';
 import { languageForPath } from '../../lib/hljsLines.js';
 import { regionKey, useConflictResolverStore, useResolverSession } from '../../store/conflictResolver.js';
 import { RegionRibbons } from './RegionRibbons.js';
@@ -151,6 +152,12 @@ export function ResolverPanes({
   // Set by the keyboard paths only: a click already moved focus, and stealing it back on every
   // activation would fight the reader's pointer.
   const focusOnActivate = useRef(false);
+  // The wand's follow-on jump asks for the next region to be CENTRED (a long file should show it
+  // with context above and below, not pinned to an edge). Read and cleared by the reveal effect;
+  // every other path keeps `nearest`. `revealTick` re-runs that effect when the target is the
+  // region already active (the wand ran on it and left it undecided, with nothing else left).
+  const centreOnActivate = useRef(false);
+  const [revealTick, setRevealTick] = useState(0);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
@@ -348,14 +355,34 @@ export function ResolverPanes({
     setAnnouncement('Undone.');
   }, [decideRegion, sessionKey]);
 
-  const runWand = useCallback(() => {
-    if (activeFile == null) return;
-    const plan = wandPlan(activeFile.regions, activeFile.index, decisions);
-    apply(plan.moves.map((m) => ({ ...m, suggestionId: null })));
-    const sentence = wandSentence(plan);
-    setWandMessage(sentence);
-    setAnnouncement(sentence);
-  }, [activeFile, decisions, apply]);
+  // ⚠ AFTER THE RUN, MOVE TO WHAT IS STILL LEFT IN THIS FILE. On a long file the wand can decide
+  // dozens of changes off screen and leave the reader looking at a decided one with no idea where
+  // the rest are, so the view moves to the first undecided change after the active one (wrapping)
+  // and centres it. Nothing left ⇒ the view stays put and "Next" opens. Focus moves only when the
+  // run came from the `w` key — a click on the toolbar keeps focus where the pointer put it.
+  const runWand = useCallback(
+    (fromKeyboard = false) => {
+      if (activeFile == null) return;
+      const plan = wandPlan(activeFile.regions, activeFile.index, decisions);
+      apply(plan.moves.map((m) => ({ ...m, suggestionId: null })));
+      const sentence = wandSentence(plan);
+      setWandMessage(sentence);
+      setAnnouncement(sentence);
+      const target = nextUndecidedAfterWand(
+        activeFile.regions,
+        activeFile.index,
+        decisions,
+        plan.moves,
+        activeRegionId,
+      );
+      if (target == null) return;
+      centreOnActivate.current = true;
+      if (fromKeyboard) focusOnActivate.current = true;
+      setActiveRegionId(target);
+      setRevealTick((t) => t + 1);
+    },
+    [activeFile, activeRegionId, decisions, apply],
+  );
 
   // The two whole-file takes. ⚠ ONE `apply`, SO ONE UNDO ENTRY, exactly like the wand's run: a
   // press that rewrote a file must come back with one press too. Only the regions whose decision
@@ -489,10 +516,14 @@ export function ResolverPanes({
   );
 
   // ⚠ FILES, NOT REGIONS. `n`/`p` walk the regions inside the file the reader is in; this is the
-  // toolbar's "Next", which goes to the next FILE that still needs decisions and wraps. Null means
-  // there is nowhere to jump — everything is decided, or the only file left is this one — and the
-  // button is then absent rather than disabled. See `nextOutstandingFile`.
-  const nextOutstanding = nextOutstandingFile(plan.outstanding, activeIndex);
+  // toolbar's "Next", which goes to the next FILE that still needs decisions and wraps. A null
+  // target means there is nowhere to jump — everything is decided, or the only file left is this
+  // one — and the button is then absent. `blocked` holds it DISABLED while this file still has
+  // undecided changes. See `nextOutstandingControl`.
+  const { target: nextOutstanding, blocked: nextOutstandingBlocked } = nextOutstandingControl(
+    plan.outstanding,
+    activeIndex,
+  );
 
   // Land on the first decidable region whenever the file changes, so `←`/`→` always have a target.
   useEffect(() => {
@@ -550,7 +581,8 @@ export function ResolverPanes({
       `[data-mr-region="${activeIndex}:${activeRegionId}"]`,
     );
     if (el == null || scroller == null) return;
-    el.scrollIntoView({ block: 'nearest' });
+    el.scrollIntoView({ block: centreOnActivate.current ? 'center' : 'nearest' });
+    centreOnActivate.current = false;
     if (focusOnActivate.current) {
       focusOnActivate.current = false;
       const take =
@@ -562,7 +594,7 @@ export function ResolverPanes({
         );
       (take ?? el.querySelector<HTMLElement>('button'))?.focus();
     }
-  }, [activeIndex, activeRegionId]);
+  }, [activeIndex, activeRegionId, revealTick]);
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -632,7 +664,7 @@ export function ResolverPanes({
           return;
         case 'w':
           e.preventDefault();
-          runWand();
+          runWand(true);
           return;
         case 'f':
           e.preventDefault();
@@ -691,7 +723,7 @@ export function ResolverPanes({
         baseRef={session.baseRef}
         onTakeFile={takeWholeFile}
         takeFileDisabled={takeFileDisabled}
-        onWand={runWand}
+        onWand={() => runWand(false)}
         wandDisabled={wandDisabled}
         onUndo={undoLast}
         undoDepth={undoDepth}
@@ -708,8 +740,9 @@ export function ResolverPanes({
         onOutstandingOpen={setOutstandingOpen}
         onJumpToFile={goToFile}
         nextOutstanding={nextOutstanding}
+        nextOutstandingBlocked={nextOutstandingBlocked}
         onNextOutstanding={() => {
-          if (nextOutstanding != null) goToFile(nextOutstanding);
+          if (nextOutstanding != null && !nextOutstandingBlocked) goToFile(nextOutstanding);
         }}
         blockedReason={landBlockedReason}
         onLand={onLand}

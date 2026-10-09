@@ -1016,6 +1016,9 @@ check(
 // pullRequests.accountId (PRs directly; reviews/comments through their parent PR). Seed a
 // contributor who authored A's PR and reviewed it, then assert B asking about the SAME
 // user id gets all zeros — the cross-account IDOR this route would otherwise open.
+// A minute in the past: getUserStats windows on a HALF-OPEN `[from, to)` with `to = Date.now()`, and
+// SQLite stores whole seconds, so a row seeded in the same second as the read is excluded.
+const statsSeedAt = new Date(now.getTime() - 60_000);
 const [contributor] = await db
   .insert(schema.users)
   .values({ githubLogin: 'contrib-iso', githubNodeId: 'U_contrib', isBot: false })
@@ -1033,7 +1036,7 @@ await db
     prId: A.prId,
     authorId: contributor!.id,
     state: 'approved',
-    submittedAt: now,
+    submittedAt: statsSeedAt,
   })
   .execute();
 await db
@@ -1043,7 +1046,7 @@ await db
     prId: A.prId,
     authorId: contributor!.id,
     body: 'iso',
-    createdAt: now,
+    createdAt: statsSeedAt,
   })
   .execute();
 // An INLINE review comment too, not just the issue-level one. `comments` sums two sources,
@@ -1065,7 +1068,7 @@ await db
     prId: A.prId,
     authorId: contributor!.id,
     body: 'iso inline',
-    createdAt: now,
+    createdAt: statsSeedAt,
   })
   .execute();
 const usOwn = await q.getUserStats(1, contributor!.id);
@@ -2557,6 +2560,38 @@ check(
     'getFlowCourts counts each tenant own pull requests only',
     aOut.measuredPrs === bOut.measuredPrs && aOut.measuredPrs > 0,
   );
+
+  // CHRONOLOGY OVER TIME reads through the same loader, plus four grouped first-seen scans (events,
+  // authored PRs, reviews, review comments) and the settings history. Same identical-shape seed, so
+  // a leak shows as one tenant's weekly totals carrying the other's PRs, or the other's repos named.
+  {
+    const { getFlowTrend } = await import('../src/db/flow-trend.js');
+    const aT = await getFlowTrend(1, scopeA);
+    const bT = await getFlowTrend(2, scopeB);
+    const sumPrs = (t: typeof aT): number => t.weeks.reduce((n, w) => n + w.measuredPrs, 0);
+    check(
+      'getFlowTrend is PRODUCTIVE and counts each tenant own pull requests only',
+      sumPrs(aT) > 0 && sumPrs(aT) === sumPrs(bT),
+    );
+    check(
+      'getFlowTrend echoes the scope it was handed',
+      aT.workspaceId === scopeA.workspaceId && bT.workspaceId === scopeB.workspaceId,
+    );
+    const namesOf = async (accountId: number): Promise<string[]> =>
+      (
+        await db
+          .select({ owner: schema.repos.owner, name: schema.repos.name })
+          .from(schema.repos)
+          .where(eq(schema.repos.accountId, accountId))
+          .execute()
+      ).map((r) => `${r.owner}/${r.name}`);
+    const [aNames, bNames] = await Promise.all([namesOf(1), namesOf(2)]);
+    check(
+      'getFlowTrend repo markers name only the caller own repos',
+      aT.events.every((e) => e.repoFullName == null || aNames.includes(e.repoFullName)) &&
+        bT.events.every((e) => e.repoFullName == null || bNames.includes(e.repoFullName)),
+    );
+  }
 
   // The coverage line is a claim about the CALLER's workspace; counting another tenant's repos
   // into it would be a quiet cross-tenant disclosure in a footnote nobody audits.

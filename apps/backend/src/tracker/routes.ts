@@ -40,6 +40,9 @@ import { accessFingerprint, backoffCode, kickTrackerSync, syncOnePrNow } from '.
 import { registerTicketLinksRoute } from './links.js';
 import { registerTicketMergedPrsRoute } from './merged.js';
 import { registerManualTicketLinkRoute } from './manual-links.js';
+import { writeSettingEvent } from '../db/setting-event-write.js';
+
+const TRACKER_NAME: Record<string, string> = { jira: 'Jira', github: 'GitHub Issues', linear: 'Linear' };
 
 // THE TRACKER'S HTTP SURFACE — CORE and FREE, both modes (the plugin's `/api/pro/*` Jira routes until
 // apiVersion 23). Every route that can spend the customer's tracker quota sits on the `search`
@@ -170,7 +173,22 @@ export function registerTrackerRoutes(
       const body = req.body ?? {};
       const refused = trackerPatchError(await readWorkspaceTrackerRow(ctx, accountId, ws), body);
       if (refused != null) return reply.code(400).send({ error: 'InvalidTrackerToken', message: refused });
+      const before = 'issue' in body ? await readWorkspaceTracker(ctx, accountId, ws) : null;
       const saved = await writeWorkspaceTracker(ctx, accountId, ws, body);
+      // Chronology's settings history: a change of tracker (or of its site) is a marker.
+      if (
+        before != null &&
+        (before.issue.provider !== saved.issue.provider || before.issue.baseUrl !== saved.issue.baseUrl)
+      ) {
+        const name = saved.issue.provider == null ? null : TRACKER_NAME[saved.issue.provider];
+        await writeSettingEvent(
+          ctx,
+          accountId,
+          ws,
+          'tracker',
+          name == null ? 'Issue tracker switched off' : `Issue tracker set to ${name}`,
+        );
+      }
       // A changed tracker or token: read this account's tickets with it now, not at the next tick
       // (fire-and-forget; a no-op while the worker is off).
       if ('issue' in body || 'jira' in body) void kickTrackerSync(ctx, accountId);

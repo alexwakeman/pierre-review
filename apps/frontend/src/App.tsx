@@ -36,6 +36,7 @@ import { useUrlState } from './hooks/useUrlState.js';
 import { useLocalStorage } from './hooks/useLocalStorage.js';
 import { useKeyboard } from './hooks/useKeyboard.js';
 import { useDetailCacheReconciler } from './hooks/useDetailCache.js';
+import { useClaudeReviewActiveSync } from './hooks/useClaudeReview.js';
 import { useMyTurnNotifications } from './hooks/useMyTurnNotifications.js';
 import { useNotificationPref } from './hooks/useNotificationPref.js';
 import { useMe } from './hooks/useTriage.js';
@@ -70,6 +71,9 @@ export default function App(): JSX.Element {
   // updatedAt, so cloud-hydrated text refetches exactly once on change (no-op for
   // unchanged PRs). Harmless in local mode.
   useDetailCacheReconciler();
+  // A Claude review that starts or ends anywhere refetches that PR's review (the tab pill). ONE
+  // passive observer of the polled active list; it fetches nothing itself.
+  useClaudeReviewActiveSync();
   const [dark, toggleDark] = useDarkMode();
   const [helpOpen, setHelpOpen] = useState(false);
   // The Settings modal opens from the avatar menu AND from Pending's "Customise" link, so its

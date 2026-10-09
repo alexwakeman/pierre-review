@@ -192,3 +192,41 @@ export function buildWorkingCalendar(
     settings,
   };
 }
+
+/** One local week, Monday 00:00 to the next Monday 00:00 in the zone, half-open. */
+export interface LocalWeek {
+  /** The local Monday, `YYYY-MM-DD`. */
+  key: string;
+  startMs: number;
+  endMs: number;
+}
+
+/**
+ * The `count` local weeks ending with the one containing `nowMs`, oldest first. Each edge is a
+ * local midnight converted through Intl separately, so a week holding a clock change is simply an
+ * hour shorter or longer in UTC terms (the calendar's own rule). Weeks start on Monday (ISO).
+ */
+export function localWeeksEndingAt(nowMs: number, tz: string, count: number): LocalWeek[] {
+  const p = localParts(nowMs, tz);
+  const today = Date.UTC(p.y, p.mo - 1, p.d);
+  const dow = new Date(today).getUTCDay();
+  const iso = dow === 0 ? 7 : dow;
+  const thisMonday = today - (iso - 1) * DAY_MS;
+  const edge = (calMs: number): { key: string; ms: number } => {
+    const c = new Date(calMs);
+    const y = c.getUTCFullYear();
+    const mo = c.getUTCMonth() + 1;
+    const d = c.getUTCDate();
+    return {
+      key: `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+      ms: zonedToUtc(y, mo, d, 0, tz),
+    };
+  };
+  const out: LocalWeek[] = [];
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const a = edge(thisMonday - i * 7 * DAY_MS);
+    const b = edge(thisMonday - (i - 1) * 7 * DAY_MS);
+    out.push({ key: a.key, startMs: a.ms, endMs: b.ms });
+  }
+  return out;
+}

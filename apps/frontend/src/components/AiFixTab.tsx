@@ -37,6 +37,8 @@ import { DiffWrapToggle, FileDiffView, type DiffFile } from './diff/FileDiffView
 import { parseGitPatch } from '../lib/diff.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { InfoButton } from './InfoModal.js';
+import { ConflictAiCard, resolverTargetOf, usePrConflictsResolvable } from './AiFix/ConflictAiCard.js';
+import { startConflictAiRun } from '../hooks/useConflictAiResolve.js';
 
 const BTN_PRIMARY =
   'whitespace-nowrap rounded border border-blue-400 px-2.5 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
@@ -149,6 +151,12 @@ function FixerSection({
   const [pickerOpen, setPickerOpen] = useState(false);
   const showPicker = pickerOpen || !fix || fix.status !== 'succeeded';
 
+  // "Resolve with Claude", offered beside a review fix ONLY when the branch conflicts (the
+  // resolver entry's own gate). OFF by default; a separate run with a separate result — the merge
+  // lands from the resolver as its own commit, never folded into the fix.
+  const conflictsResolvable = usePrConflictsResolvable(pr);
+  const [alsoResolve, setAlsoResolve] = useState(false);
+
   const picked = preview.data ? pickedKeys(preview.data, overrides) : [];
   const cutCount = preview.data ? budgetCutKeys(preview.data, overrides).size : 0;
 
@@ -165,6 +173,10 @@ function FixerSection({
       { model, seed: 'review', sourceReviewId: reviewId, include: picked },
       { onSuccess: () => setPickerOpen(false) },
     );
+    // The merge half: its own run, opening the resolver when Claude's answer is ready. Started on
+    // the PRESS, not in a mutate()-scoped callback (lost if this tab unmounts before the fix POST
+    // answers) — it does not depend on the fix's result.
+    if (alsoResolve && conflictsResolvable) startConflictAiRun(resolverTargetOf(pr), { model });
   };
 
   return (
@@ -192,6 +204,7 @@ function FixerSection({
         AI Fix
       </SectionTitle>
       <div className="px-4">
+        {conflictsResolvable && <ConflictAiCard pr={pr} />}
         {data?.enabled === false ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">
             The agentic fixer is turned off.
@@ -239,6 +252,23 @@ function FixerSection({
                     onChange={setOverrides}
                     disabled={fixStarting}
                   />
+                )}
+                {preview.data && preview.data.items.length > 0 && conflictsResolvable && (
+                  <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-gray-800 dark:text-gray-100">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={alsoResolve}
+                      disabled={fixStarting}
+                      onChange={(e) => setAlsoResolve(e.target.checked)}
+                    />
+                    <span>
+                      Also resolve merge conflicts with {pr.baseRefName ?? 'the base branch'}
+                      <span className="block text-[12px] text-gray-600 dark:text-gray-300">
+                        You check the merge in the resolver. It lands as its own commit, apart from the fix.
+                      </span>
+                    </span>
+                  </label>
                 )}
                 {preview.data && preview.data.items.length > 0 && (
                   <div className="mt-3 flex flex-wrap items-center gap-2">

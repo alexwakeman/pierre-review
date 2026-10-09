@@ -581,15 +581,32 @@ describe('the "Next" button and the list behind the counter', () => {
   it('walks OUTSTANDING files, never the manifest', () => {
     // ⚠ THE CHEVRONS ARE THE MANIFEST WALK AND THEY STAY. Plain sequential paging is a different
     // job; this one goes where the work is, off the same plan the gate reads.
-    expect(PANES).toMatch(/nextOutstandingFile\(plan\.outstanding, activeIndex\)/);
+    expect(PANES).toMatch(/nextOutstandingControl\(\s*plan\.outstanding,\s*activeIndex,?\s*\)/);
     expect(stripComments(TOOLBAR), 'the chevrons keep stepFile').toMatch(/onStepFile\(1\)/);
   });
 
-  it('is absent when there is nowhere to jump, never disabled', () => {
+  it('is absent when there is nowhere to jump, and disabled while this file has work', () => {
+    // The user's rule: "Next" stays shut until every change in the file on screen is decided.
+    // When no OTHER file is outstanding it is absent, not disabled — it could never open.
     expect(stripComments(TOOLBAR)).toMatch(/\{nextOutstanding != null && \(/);
     const at = TOOLBAR.indexOf('{nextOutstanding != null && (');
     const btn = TOOLBAR.slice(at, TOOLBAR.indexOf('</button>', at));
-    expect(btn, 'a jump that is offered is a jump that works').not.toMatch(/disabled/);
+    expect(btn).toMatch(/disabled=\{nextOutstandingBlocked\}/);
+    expect(btn, 'a shut button says why').toMatch(/NEXT_OUTSTANDING_BLOCKED/);
+    // The click handler re-checks the lock, so no path round the disabled attribute jumps.
+    expect(PANES).toMatch(/nextOutstanding != null && !nextOutstandingBlocked\) goToFile\(nextOutstanding\)/);
+  });
+
+  it('sits on the LEFT beside "Merge base", with the file count, not in the right-hand group', () => {
+    const t = stripComments(TOOLBAR);
+    const base = t.indexOf('<BasePopover');
+    const next = t.indexOf('{nextOutstanding != null && (');
+    const count = t.indexOf('fileChangesLeft(fileDecidable - fileDecided, fileDecidable)');
+    const right = t.indexOf('ml-auto');
+    expect(base).toBeGreaterThan(-1);
+    expect(next).toBeGreaterThan(base);
+    expect(count).toBeGreaterThan(next);
+    expect(right).toBeGreaterThan(count);
   });
 
   it('says "Next" and announces which "Next" it is', () => {
@@ -662,7 +679,7 @@ describe('the "Next" button and the list behind the counter', () => {
     const jump = PANES.slice(PANES.indexOf('const goToFile = useCallback('));
     expect(jump.slice(0, jump.indexOf('[activeIndex, files'))).toMatch(/pendingJump\.current = index;/);
     expect(PANES).toMatch(/onJumpToFile=\{goToFile\}/);
-    expect(PANES).toMatch(/if \(nextOutstanding != null\) goToFile\(nextOutstanding\)/);
+    expect(PANES).toMatch(/if \(nextOutstanding != null && !nextOutstandingBlocked\) goToFile\(nextOutstanding\)/);
     // ⚠ AND THE ONE CASE `pendingJump` CANNOT SERVE: its second half is keyed on `activeIndex`
     // changing, so a row naming the file already on screen would land on region 1 rather than on
     // the first unanswered one. The popover lists that file; "Next" never does.

@@ -7,7 +7,18 @@ import type {
   User,
 } from '@pierre-review/shared';
 import { DERIVED_STATES, ML_SEVERITIES } from '@pierre-review/shared';
-import { useResolveBotThreads } from '../../hooks/usePrWrites.js';
+import { useMutationState } from '@tanstack/react-query';
+import {
+  RESOLVE_THREAD_MUTATION_KEY,
+  useResolveBotThreads,
+} from '../../hooks/usePrWrites.js';
+import {
+  applyResolveEvents,
+  EMPTY_THREAD_COLLAPSE,
+  pruneOverrides,
+  toggleExpanded,
+  type ThreadCollapseState,
+} from '../../lib/threadCollapse.js';
 import { useDetectedReviewers, usePrBotDedup } from '../../hooks/useBotTriage.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import {
@@ -123,23 +134,52 @@ export function ThreadList({
   const resolveBotThreads = useResolveBotThreads();
   const [confirming, setConfirming] = useState(false);
 
-  // Resolved threads the reader has opened, by thread id. LOCAL to this PR view on purpose — not
-  // the store, not remembered across PRs. Reset when the PR changes so a reused mount (tab switch
-  // between PR views) starts every resolved thread collapsed again.
-  const [expandedResolved, setExpandedResolved] = useState<ReadonlySet<number>>(
-    () => new Set<number>(),
-  );
+  // Which resolved threads are open, plus the local resolve verdicts awaiting the refetch. LOCAL
+  // to this PR view on purpose — not the store, not remembered across PRs. Reset when the PR
+  // changes so a reused mount (tab switch between PR views) starts every resolved thread
+  // collapsed again. The rule: lib/threadCollapse.ts.
+  const [collapse, setCollapse] = useState<ThreadCollapseState>(EMPTY_THREAD_COLLAPSE);
   useEffect(() => {
-    setExpandedResolved(new Set<number>());
+    setCollapse(EMPTY_THREAD_COLLAPSE);
   }, [prId]);
+  // A NEW selection forces its thread open again, whatever a resolve released.
+  useEffect(() => {
+    setCollapse((cur) => (cur.released.size === 0 ? cur : { ...cur, released: new Set() }));
+  }, [selectedThreadId]);
   const toggleResolved = useCallback((threadId: number): void => {
-    setExpandedResolved((cur) => {
-      const next = new Set(cur);
-      if (next.has(threadId)) next.delete(threadId);
-      else next.add(threadId);
-      return next;
-    });
+    setCollapse((cur) => toggleExpanded(cur, threadId));
   }, []);
+
+  // A resolve that SUCCEEDED anywhere (this tab, the Claude Review tab, a Pending card) collapses
+  // its thread at once, before the refetch lands. Each mutation is applied once; the ones already
+  // in the cache when this view mounted are history, not news.
+  const resolveWrites = useMutationState({
+    filters: { mutationKey: RESOLVE_THREAD_MUTATION_KEY, status: 'success' },
+    select: (m) => ({
+      id: m.mutationId,
+      at: m.state.submittedAt,
+      vars: m.state.variables as { prId: number; threadId: number; resolved: boolean } | undefined,
+    }),
+  });
+  const seenWritesRef = useRef<Set<number> | null>(null);
+  seenWritesRef.current ??= new Set(resolveWrites.map((w) => w.id));
+  useEffect(() => {
+    const seen = seenWritesRef.current!;
+    const fresh = resolveWrites
+      .filter((w) => !seen.has(w.id))
+      .sort((a, b) => a.at - b.at);
+    if (fresh.length === 0) return;
+    for (const w of fresh) seen.add(w.id);
+    const events = fresh
+      .filter((w) => w.vars != null && w.vars.prId === prId)
+      .map((w) => ({ threadId: w.vars!.threadId, resolved: w.vars!.resolved }));
+    if (events.length > 0) setCollapse((cur) => applyResolveEvents(cur, events));
+  }, [resolveWrites, prId]);
+  // Drop each local verdict once the refetched thread agrees with it.
+  useEffect(() => {
+    const server = new Map(threads.map((t) => [t.id, t.derivedState === 'resolved'] as const));
+    setCollapse((cur) => pruneOverrides(cur, server));
+  }, [threads]);
 
   // Cross-bot dedup: (path, ±3-line) spots where ≥2 DISTINCT automated reviewers both left a
   // thread — the backend clusters + flags consensus/conflict; we surface a compact rollup so
@@ -539,7 +579,7 @@ export function ThreadList({
               else rowRefs.current.delete(id);
             }}
             openInChangesFor={openInChangesFor}
-            expandedResolved={expandedResolved}
+            collapse={collapse}
             onToggleResolved={toggleResolved}
           />
         ))

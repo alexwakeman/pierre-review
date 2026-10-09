@@ -656,6 +656,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // genuinely bounded; the engine's own scan caps bound the work per request. Complementary,
   // neither a substitute.
   if (!mutating && path === '/api/flow-findings') return [TIERS.search, TIERS.read];
+  // GET /api/flow-trend — Chronology "Over time" (PAID `periodReports`, deterministic): the same
+  // ledger walk as /api/flow-findings over 26 weeks, plus four grouped first-seen scans. DB-only,
+  // and heavier than the panel, so the same `search` bucket.
+  if (!mutating && path === '/api/flow-trend') return [TIERS.search, TIERS.read];
   // ---- Emoji reactions: BOTH routes reach GitHub, and NEITHER lives under /api/prs/<id>/ ----
   //
   // Spelled as two EXACT string matches, above the mutating block, for the reason this file has
@@ -765,6 +769,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //   GET  …/conflicts/stream   an SSE subscribe onto an already-started job — a read.
   //   DELETE …/conflicts        a Map.delete. `read` — DECIDED, not inherited from the POST
   //                             line, which it would otherwise match.
+  // "Resolve with Claude" (coding/ai-resolve/, LOCAL ONLY): the POST starts an agent run — model
+  // money, and possibly a clone — so `ai` + `ai_hourly`. Its GET is a Map lookup polled while the
+  // run works and its DELETE a cancel: `read`. Exact paths, ABOVE the resolver's own lines.
+  if (/^\/api\/prs\/\d+\/conflicts\/ai-resolve$/.test(path)) {
+    return method === 'POST' ? [TIERS.ai, TIERS.aiHourly] : [TIERS.read];
+  }
   if (method === 'POST' && /^\/api\/prs\/\d+\/conflicts$/.test(path)) return [TIERS.sync];
   if (method === 'DELETE' && /^\/api\/prs\/\d+\/conflicts$/.test(path)) return [TIERS.read];
   if (mutating && /^\/api\/prs\/\d+\/conflicts\/commit$/.test(path)) return [TIERS.githubWrite];

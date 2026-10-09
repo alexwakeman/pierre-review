@@ -847,8 +847,23 @@ export async function assignReposToWorkspace(
     .execute();
   const validIds = ownedRepos.map((r) => r.id);
   if (validIds.length === 0) return;
+  // A real MOVE restamps `created_at` (when the repo JOINED this workspace), so Chronology's
+  // "Over time" repo-joined markers (db/flow-trend.ts) date a moved repo by its arrival here, not by
+  // when it first joined any workspace. Re-assigning a repo to the workspace it is already in
+  // keeps the stamp: that is not a join.
+  const current = new Map(
+    (
+      await db
+        .select({ repoId: workspaceRepos.repoId, workspaceId: workspaceRepos.workspaceId })
+        .from(workspaceRepos)
+        .where(and(eq(workspaceRepos.accountId, accountId), inArray(workspaceRepos.repoId, validIds)))
+        .execute()
+    ).map((r) => [r.repoId, r.workspaceId]),
+  );
+  const joinedAt = new Date(Math.floor(Date.now() / 1000) * 1000);
   await runTransaction(async (tx) => {
     for (const repoId of validIds) {
+      const was = current.get(repoId);
       await tx
         .insert(workspaceRepos)
         .values({ accountId, workspaceId, repoId })
@@ -857,7 +872,7 @@ export async function assignReposToWorkspace(
           // type-checks perfectly and raises "no unique or exclusion constraint matching the
           // ON CONFLICT specification" at RUNTIME, in both dialects, only on a real write.
           target: [workspaceRepos.accountId, workspaceRepos.repoId],
-          set: { workspaceId },
+          set: was != null && was !== workspaceId ? { workspaceId, createdAt: joinedAt } : { workspaceId },
         })
         .execute();
     }

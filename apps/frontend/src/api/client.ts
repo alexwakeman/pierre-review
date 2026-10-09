@@ -54,6 +54,8 @@ import type {
   ConflictFileContent,
   ConflictOpenBody,
   ConflictRegionEditBody,
+  ConflictAiStartBody,
+  ConflictAiStatusResponse,
   ConflictRegionEditResponse,
   ConflictSession,
   ConsolidatedFeedResponse,
@@ -63,6 +65,7 @@ import type {
   AttentionLivenessResponse,
   DailyBriefResponse,
   FlowResponse,
+  FlowTrendResponse,
   RepoWorkspaceMetricsResponse,
   WorkspaceMetricsDetailResponse,
   WorkspaceMetricsResponse,
@@ -761,6 +764,19 @@ export const api = {
       jsonBody('DELETE'),
     ).then((r) => handle<void>(r)),
 
+  // ---- "Resolve with Claude" (LOCAL ONLY, agentic; 404 in cloud) ----
+  // Start (or re-attach to) the run that builds the conflict session and lets Claude decide its
+  // regions. Nothing is committed: the reader reviews the answer in the resolver.
+  startConflictAiResolve: (prId: number, body: ConflictAiStartBody = {}) =>
+    fetch(`/api/prs/${prId}/conflicts/ai-resolve`, jsonBody('POST', body)).then((r) =>
+      handle<ConflictAiStatusResponse>(r),
+    ),
+  // This account's latest answer for the PR (a Map lookup — polled while the run works).
+  conflictAiResolution: (prId: number) =>
+    get<ConflictAiStatusResponse>(`/api/prs/${prId}/conflicts/ai-resolve`),
+  cancelConflictAiResolve: (prId: number) =>
+    fetch(`/api/prs/${prId}/conflicts/ai-resolve`, jsonBody('DELETE')).then((r) => handle<void>(r)),
+
   // ---- Merge queue (GitHub-native) ----
   // Enqueue / dequeue this PR on the repo's merge queue. Only offerable when
   // `mergeOptions().mergeQueue?.enabled` — the routes 400 otherwise rather than guessing.
@@ -931,6 +947,10 @@ export const api = {
     get<FlowResponse>(
       withQuery('/api/flow-findings', workspaceParam(workspaceId), flowWindowParam(window)),
     ),
+  // Chronology "Over time" (PAID `periodReports`, same gate as above): the last 26 weeks of the
+  // same ledger, the event markers and a before/after lens per marked week. Fixed span, no window.
+  flowTrend: (workspaceId: number) =>
+    get<FlowTrendResponse>(withQuery('/api/flow-trend', workspaceParam(workspaceId))),
   // The per-metric PR drill-down behind the flow-metric tiles (loaded on tile click) — CORE/free
   // too, so a Feed tile opens the drill-down for everyone.
   workspaceMetricsDetail: (workspaceId: number) =>

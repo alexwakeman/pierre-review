@@ -669,7 +669,14 @@ Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix
   resolved thread is one line (line, author, first words, "Resolved") until clicked; every other
   state stays open; the file header is a label only. The open set is LOCAL `ThreadList` state keyed
   by thread id and reset on a PR change — the old global `expandedFileGroups`/`collapsedFileGroups`
-  slice (by path, across every PR) is DELETED. A selected thread is always open. A sticky header carries **derived-state filter
+  slice (by path, across every PR) is DELETED. A selected thread is open — until it is resolved.
+  ⚠ **A resolve COLLAPSES the thread AT ONCE, from any surface** (`lib/threadCollapse.ts`): every
+  resolve shares `RESOLVE_THREAD_MUTATION_KEY`, and `ThreadList` reads the SUCCESSFUL ones with
+  `useMutationState` (each applied once; those already cached at mount are history). It holds a
+  local resolved verdict until the refetch agrees (`pruneOverrides` — never longer, or a later
+  change on GitHub is masked), drops the thread from the opened set, and RELEASES the selected
+  thread's forced-open (a new selection forces open again; the reader can re-open it by clicking).
+  Unresolving re-opens it. A sticky header carries **derived-state filter
   pills** (Untouched/Replied/Likely-addressed/Resolved, `store.threadStateFilter: Set<DerivedState>`)
   ANDed with the vendor `threadBotFilter`; the pills' badge counts come from the full loaded set
   (stable), and the bulk "Resolve N addressed" set is derived from the full list (independent of
@@ -1304,6 +1311,14 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   "Failed"; nothing with no run) — `useClaudeReviewTabPill` OBSERVES the tab's own
   `['claude-review', prId]` query (DB-only, no second request when the tab opens) and alone re-reads
   every 5s while a run is in flight, because a shut tab has no SSE stream; pure half `reviewTabPill`.
+  ⚠ **A run started or finished ELSEWHERE reaches it through the ACTIVE LIST** (auto review, the
+  Open PRs table, another tab): the pill also observes `['claude-reviews-active']` (ONE request for
+  every PR, 5s while a pane is open; the banner's 2.5s only after a person starts a run) and polls
+  while its PR is in it, and `useClaudeReviewActiveSync` — mounted ONCE in App, a PASSIVE observer
+  that never fetches — invalidates `['claude-review', prId]` + the Open PRs column for each PR whose
+  entry appeared, changed (`reviewId`/`status`) or left between two polls (pure half
+  `lib/claudeReviewActive.ts`). The pane's `changed` refresh also invalidates the review (a new head
+  moves the auto-review wait). Never a per-card fetch.
 - **Preview (Post to GitHub) renders the WHOLE dry-run payload** (`PostReviewPreviewPanel`): the
   verdict, the summary as markdown (the hidden `<!-- pierre:claude-review -->` marker dropped by
   `visibleReviewBody`), each inline comment as `path:line` + markdown body, and each off-diff PR
@@ -2973,6 +2988,15 @@ landmines:
   `useConflictResolverEntry`. ⚠ **It fetches nothing** — the gate is four synced facts plus the
   App-root `['me']` cache, so fifty cards on a board issue zero requests, and `?? false` while
   `['me']` loads (an undefined capability must not render a button that 404s on the first click).
+- **With `me.ai.enabled` the entry is a MENU — "Resolve manually" / "Resolve with Claude"**
+  (MERGE-CI-TRUNK § Resolve with Claude). Still zero requests on mount: the run lives in the module
+  store `hooks/useConflictAiResolve.ts` (keyed by PR id, read through `useSyncExternalStore`, so
+  every mount shows the same run), and polling starts only on the click. Only the AI Fix tab's card
+  RESUMES a run on mount (one GET, the PR pane). The overlay applies Claude's answer through
+  `useClaudePrefill`, mounted AFTER the seed effect so the decision store already holds the key;
+  `store/conflictClaude.ts` remembers which decisions are Claude's and `useClaudeMark` shows the
+  chip only while the live decision still matches. `'edited'` lines reach the centre pane through
+  `seedEditLines` (`useRegionEdit`'s module map, with a listener so a mounted pane re-reads it).
   ⚠ **HIDE, never disable.**
 - **The overlay mounts in `App.tsx`, not inside `PrDetail`** — it opens from three places and must
   not unmount when the pane behind it closes. It is OPAQUE (`z-[60]`, above the one toast column's

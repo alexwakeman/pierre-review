@@ -7,6 +7,7 @@ import type {
 } from '@pierre-review/shared';
 import {
   centreLines,
+  nextUndecidedAfterWand,
   fileRowState,
   panePaint,
   ribbonSides,
@@ -83,6 +84,41 @@ const entry = (index: number, over: Partial<ConflictFileEntry> = {}): ConflictFi
   wandResolvableCount: 0,
   maxSideBytes: 100,
   ...over,
+});
+
+describe('nextUndecidedAfterWand', () => {
+  // A long file: ours-only changes the wand takes, two real conflicts it never touches.
+  const regions = [
+    R(1, 'ours_only', { wand: { decision: 'ours', reason: 'only_ours' } }),
+    R(2, 'unchanged'),
+    R(3, 'conflict'),
+    R(4, 'theirs_only', { wand: { decision: 'theirs', reason: 'only_theirs' } }),
+    R(5, 'conflict'),
+    R(6, 'ours_only', { wand: { decision: 'ours', reason: 'only_ours' } }),
+  ];
+
+  it('moves to the first change still undecided AFTER the active one', () => {
+    const plan = wandPlan(regions, 0, {});
+    expect(nextUndecidedAfterWand(regions, 0, {}, plan.moves, 3)).toBe(5);
+    expect(nextUndecidedAfterWand(regions, 0, {}, plan.moves, 1)).toBe(3);
+  });
+
+  it('wraps to the top of the file when nothing is left below', () => {
+    const plan = wandPlan(regions, 0, {});
+    expect(nextUndecidedAfterWand(regions, 0, {}, plan.moves, 6)).toBe(3);
+  });
+
+  it("counts the run's own moves as decided, before the store has caught up", () => {
+    // `decisions` is the PRE-run map; region 1 and 4 are decided by `moves` alone.
+    const plan = wandPlan(regions, 0, {});
+    expect(nextUndecidedAfterWand(regions, 0, {}, plan.moves, null)).toBe(3);
+  });
+
+  it('skips what the reader already decided and is null when the file is done', () => {
+    const decisions: Record<string, ConflictDecision> = { '0:3': 'ours', '0:5': 'theirs' };
+    const plan = wandPlan(regions, 0, decisions);
+    expect(nextUndecidedAfterWand(regions, 0, decisions, plan.moves, 1)).toBeNull();
+  });
 });
 
 describe('wandPlan', () => {

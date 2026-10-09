@@ -516,6 +516,8 @@ describe('tierFor — GitHub quota spenders', () => {
   it('puts the bottlenecks fold on the expensive bucket, not the blanket read one', () => {
     expect(tiers('GET', '/api/flow-findings')).toEqual(['search', 'read']);
     expect(tiers('GET', '/api/flow-findings')).not.toEqual(['read']);
+    // Chronology over time (26 weeks of the same walk) rides the same bucket.
+    expect(tiers('GET', '/api/flow-trend')).toEqual(['search', 'read']);
     // Deterministic — no model behind it, so it must never be swept onto the BILLED `ai` bucket
     // either. Paid ≠ AI: the `ai` tier meters token spend, and this route spends none.
     expect(tiers('GET', '/api/flow-findings')).not.toContain('ai');
@@ -738,6 +740,14 @@ describe('tierFor — merge-conflict resolver', () => {
     expect(tiers('POST', '/api/prs/12/conflicts/edit')).not.toEqual(
       tiers('POST', '/api/prs/12/conflicts'),
     );
+  });
+
+  it('puts "Resolve with Claude" on the AI buckets and its poll + cancel on read', () => {
+    // The POST is a billed agent run (and may build a clone first): money, so `ai`.
+    expect(tiers('POST', '/api/prs/12/conflicts/ai-resolve')).toEqual(['ai', 'ai_hourly']);
+    // Polled every ~2s while the run works — a Map lookup.
+    expect(tiers('GET', '/api/prs/12/conflicts/ai-resolve')).toEqual(['read']);
+    expect(tiers('DELETE', '/api/prs/12/conflicts/ai-resolve')).toEqual(['read']);
   });
 
   it('puts one file’s regions on search — the response body IS the work', () => {

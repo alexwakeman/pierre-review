@@ -270,7 +270,9 @@ export function commitBlockedReason(plan: CommitPlan, headMoved: boolean): strin
  * REGIONS inside the file the reader is in (`ResolverPanes.step`).
  *
  * ⚠ IT WRAPS RATHER THAN STOPPING, and that can never loop over nothing: the button renders only
- * while this returns an index, and it returns one only while some OTHER file is outstanding.
+ * while this returns an index, and it returns one only while some OTHER file is outstanding. The
+ * button is also DISABLED while the current file has undecided changes — see
+ * `nextOutstandingControl`.
  *
  * ⚠ THE FILE THE READER IS ALREADY IN IS NEVER THE ANSWER. If it is the only one left, there is
  * nowhere to jump — a "Next" that lands you where you are reads as a broken control — so this
@@ -286,6 +288,37 @@ export function nextOutstandingFile(
   // with a higher index and the wrap is the first entry outright.
   const after = others.find((o) => o.index > activeIndex);
   return (after ?? others[0])?.index ?? null;
+}
+
+/** The toolbar "Next" button's state: where it goes and whether it may be pressed yet. */
+export interface NextOutstandingControl {
+  /** `nextOutstandingFile`. Null ⇒ the button is ABSENT: there is no other file to go to. */
+  target: number | null;
+  /** True while the file the reader is in still has undecided changes. The button is shown
+   *  DISABLED then, with `NEXT_OUTSTANDING_BLOCKED` as its reason. */
+  blocked: boolean;
+}
+
+/**
+ * Where the toolbar's "Next" goes, and whether it is held shut.
+ *
+ * ⚠ DISABLED UNTIL THIS FILE IS DONE, ABSENT WHEN THERE IS NOWHERE TO GO. The user asked for the
+ * button to stay shut until every change in the current file is decided, so finishing a file is
+ * what opens the way to the next one. That replaced the earlier "absent, never disabled" rule for
+ * the in-progress case ONLY: when no OTHER file is outstanding the button is still absent, because
+ * a disabled button that could never open is a control with no purpose.
+ *
+ * "This file still has work" reads `outstanding` — the same `CommitPlan` the per-file count beside
+ * the button reads — so the lock and the "N of M changes left" text can never disagree.
+ */
+export function nextOutstandingControl(
+  outstanding: readonly OutstandingFile[],
+  activeIndex: number,
+): NextOutstandingControl {
+  return {
+    target: nextOutstandingFile(outstanding, activeIndex),
+    blocked: outstanding.some((o) => o.index === activeIndex && o.remaining > 0),
+  };
 }
 
 /** Which "Where to put it" options the landing step offers, and where the commit is going. */

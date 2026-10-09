@@ -681,15 +681,33 @@ const COURT_PHRASE: Record<PrCourt, string> = {
   landing: 'approved and waiting to merge',
 };
 
-export function buildFlowDetail(
+/**
+ * The panel's headline figures — the working-hour split, whole-PR medians and the four budget rows —
+ * over one set of measured pull requests. ⚠ THE ONE DEFINITION: `buildFlowDetail` calls this for the
+ * panel's window and `db/flow-trend.ts` calls it once per week, so a week's figures are the panel's
+ * figures for that span by construction, never a second fold that could drift.
+ */
+export function flowCoreFigures(
   facts: FlowPrFacts[],
   cal: WorkingCalendar,
   settings: ResolvedFlowSettings,
-  minRepoPrs: number,
-): FlowDetail {
-  const worked = facts.map((f) => workOf(f, cal));
-  const dayHours = cal.dayHours;
+): CoreFigures {
+  return coreOf(
+    facts.map((f) => workOf(f, cal)),
+    settings,
+  );
+}
 
+export interface CoreFigures {
+  courtsWork: CourtShare[];
+  /** Raw (unrounded) working-hour medians. */
+  medianLeadWorkHours: number;
+  p75LeadWorkHours: number;
+  leads: number[];
+  budgets: FlowBudgetRow[];
+}
+
+function coreOf(worked: Worked[], settings: ResolvedFlowSettings): CoreFigures {
   const totals: Record<PrCourt, number> = { reviewer: 0, author: 0, landing: 0 };
   for (const w of worked) {
     totals.reviewer += w.work.reviewer;
@@ -705,6 +723,25 @@ export function buildFlowDetail(
   const leads = worked.map((w) => w.leadWork);
   const medianLeadWorkHours = median(leads);
   const p75LeadWorkHours = percentile(leads, 0.75);
+  const measures: Record<FlowBudgetMeasure, number[]> = {
+    firstLook: worked.map((w) => w.firstLookWork).filter((v): v is number => v != null),
+    reply: worked.map((w) => w.longestReplyWork).filter((v): v is number => v != null),
+    land: worked.filter((w) => w.f.approvedAtMs != null).map((w) => w.landWork),
+    lead: leads,
+  };
+  const budgets = FLOW_BUDGET_MEASURES.map((m) => budgetRow(m, measures[m], settings));
+  return { courtsWork, medianLeadWorkHours, p75LeadWorkHours, leads, budgets };
+}
+
+export function buildFlowDetail(
+  facts: FlowPrFacts[],
+  cal: WorkingCalendar,
+  settings: ResolvedFlowSettings,
+  minRepoPrs: number,
+): FlowDetail {
+  const worked = facts.map((f) => workOf(f, cal));
+  const dayHours = cal.dayHours;
+  const { courtsWork, medianLeadWorkHours, p75LeadWorkHours, budgets } = coreOf(worked, settings);
 
   const workHeadline =
     worked.length === 0
@@ -715,14 +752,6 @@ export function buildFlowDetail(
         // and "20 working hours" one row down is one figure in two spellings.
         `. Half of pull requests merged within ${fmtWork(medianLeadWorkHours, 0)} of opening; ` +
         `three in four within ${fmtWork(p75LeadWorkHours, 0)}.`;
-
-  const measures: Record<FlowBudgetMeasure, number[]> = {
-    firstLook: worked.map((w) => w.firstLookWork).filter((v): v is number => v != null),
-    reply: worked.map((w) => w.longestReplyWork).filter((v): v is number => v != null),
-    land: worked.filter((w) => w.f.approvedAtMs != null).map((w) => w.landWork),
-    lead: leads,
-  };
-  const budgets = FLOW_BUDGET_MEASURES.map((m) => budgetRow(m, measures[m], settings));
 
   const lastDay = Math.max(...settings.days);
 

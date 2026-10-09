@@ -212,6 +212,9 @@ with no wash at all and every decidable region reads "Needs a decision". ⚠ **T
 SPA sends, which is now the contract. ⚠ **Do NOT bump `CONFLICT_MODEL_VERSION` for it**: `autoApply`
 changes which decision a region STARTS on, not what the region IS, which is exactly why `hash.ts`
 leaves it out of the model hash — a defensive bump would throw away every live session's decisions.
+⚠ **ONE EXCEPTION, AND ONLY ONE: a "Resolve with Claude" run the reader started** (§ Resolve with
+Claude, below). Its answer pre-fills the regions the reader has not decided, each marked "Claude".
+The resolver opened any other way still opens bare, and the open still sends `autoApply: false`.
 
 **The commit is HARD BLOCKED until every decidable region in every supported file is decided.**
 `CommitPlan.canCommit` (`lib/conflictCommit.ts`) is the ONE gate, folded ONCE in the shell and handed
@@ -253,9 +256,14 @@ rows, each a `<button>` that jumps to that file's first unanswered region. ⚠ `
 commit will not carry — is still rendered only on the landing step, and every unsupported file is
 listed with the server's own noun phrase in the FILE MENU, so nothing went out of reach behind the
 shut button. ⚠ **"Next" jumps to the next file that still needs decisions** (`nextOutstandingFile`:
-it walks `outstanding`, not the manifest, and WRAPS) and is ABSENT rather than disabled once there
-is nowhere to jump — including when the only outstanding file is the one the reader is already in,
-where the jump would land them where they are. The chevrons still page the manifest and were
+it walks `outstanding`, not the manifest, and WRAPS). It sits on the LEFT of the toolbar, directly
+beside "Merge base", with "This file: N of M changes left" next to it. ⚠ **It is DISABLED while the
+file on screen still has undecided changes** (`nextOutstandingControl().blocked`, read off the same
+`outstanding` the count reads; tooltip + `aria-describedby` "Decide every change in this file
+first"; the click handler re-checks the lock). This was the user's call and it REPLACED the earlier
+"absent, never disabled" rule for that case: finishing a file is what opens the way on. ⚠ It is
+still ABSENT when no OTHER file is outstanding — including when the only outstanding file is the
+one the reader is in — because a disabled button that could never open has no purpose. The chevrons still page the manifest and were
 re-worded to "Previous/Next file in the list", because two controls announcing as "Next …" is the
 duplicate-verb problem the gutter arrows already cost us; `n`/`p` still walk REGIONS within a file.
 
@@ -360,6 +368,11 @@ picked the better one"**, because it never does. It settles a region only when o
 or both made the identical edit, or the two edits are provably disjoint at word level; a genuine
 contest is left alone. The reason rides every region it touches so it can say exactly what it did,
 and ⚠ a decision the reader already took is never overwritten — it is an accelerator, not a reset.
+⚠ **After a run, the view moves to what is left in THIS file** (`nextUndecidedAfterWand`): the first
+undecided change after the active one, wrapping to the top, made active and scrolled to the CENTRE
+(the reveal effect's one `center` case, via `centreOnActivate`; every other path stays `nearest`).
+It folds the run's own `moves` in because the store has not caught up in the same callback. Focus
+moves only when the run came from the `w` key. Nothing left ⇒ the view stays put and "Next" opens.
 ⚠ The disjoint merge's LINES ride the wire (`ConflictRegion.mergedLines`), because a client that
 recomputed them computed something else: cross-checked over 4,000 generated three-way regions, the
 SPA's second implementation dropped every pure insertion and rendered the ancestor for a region the
@@ -414,7 +427,7 @@ and not for tidiness**: a merge-strategy resolution commit has exactly the two-p
 reader never consented to merge.
 
 **Nothing is stored.** No table, no migration, no journal entry, no `accountScopedTables()` entry,
-nothing in `localStorage`. The reader's typed edits are held in the same module-level session and
+nothing in `localStorage`. "Resolve with Claude"'s answer follows the same rule — it is held on the session. The reader's typed edits are held in the same module-level session and
 die with it, bounded by a per-session character budget (64 × `CONFLICT_SUGGEST_MAX_CHARS`) with one
 live edit per region — re-saving REPLACES, so the store is bounded by region count rather than by
 keystrokes. The server session is a module-level `Map`, bounded four ways —
@@ -498,6 +511,53 @@ The one floor is 2.38 for `--write-tree`, probed once and refused as `git_too_ol
 Routes and tiers: [docs/API.md](API.md). The SPA's landmines, the `--mr-*` palette and the two
 defects found by running it: [docs/FRONTEND.md](FRONTEND.md) § The merge-conflict resolver. The
 clone-cache hardening it rests on: [docs/SECURITY.md](SECURITY.md).
+
+### Resolve with Claude (`src/coding/ai-resolve/`, CORE, free, LOCAL ONLY)
+
+The agentic half of the resolver. **Claude's answer is reviewed IN THE RESOLVER** — the run decides
+regions; it never commits, pushes or writes a file.
+
+- **Agentic, so it follows the agentic rule.** Its three routes (`POST|GET|DELETE
+  /api/prs/:id/conflicts/ai-resolve`) are registered by `registerAgenticRoutes` and 404 in cloud and
+  under `LIMN_AI_DISABLED`. The resolver's own seven routes still run in both modes. Ownership and
+  write permission on all three, the resolver's rule (→ 404 / 403).
+- **One run = one conflict session, then one read-only agent.** The run claims (or re-attaches to)
+  the PR's session with `autoApply: false`, waits for the build (`runOpen`), then runs the agent in a
+  worktree at the session's PINNED head. Tools: Read/Glob/Grep + `submit_resolution`; Bash,
+  NotebookEdit and every write tool are DENIED — it has nothing to write, and the conflict text is
+  attacker-authored. Every side and context line sits inside a NONCE fence (`prompt.ts`). The prompt
+  is budgeted by characters, contested regions first; a region that did not fit is not OFFERED.
+- **The answer is RESOLVER DECISIONS, validated before they exist** (`validate.ts`
+  `acceptAiChoices`): the region id must be in the session, the `fingerprint` must match (the content
+  pin, as on `…/conflicts/edit`), the region must have been offered, and the decision must be in
+  `allowedDecisions(region)` — or `'edited'`, whose lines go through `editShapeFor` +
+  `validateConflictEdit` + `storeEdit`, the reader's own door, and come back as an `editId`.
+  `'suggestion'` is never Claude's. A refused choice is reported back to the agent so it can fix it;
+  it mints nothing.
+- **Stored ON THE SESSION (`rec.ai`), never in a table** — the header of `conflict/session.ts`
+  applies to it unchanged. It dies with the session; a moved head is a new session and no answer.
+  `aiRunning` is a third job flag: the record is never reaped, evicted or dropped under it, a commit
+  refuses `Busy` while Claude is deciding, and a `restart` is refused. It is deliberately NOT in
+  `jobCounts` — the run has its own one-per-ACCOUNT slot (`run.ts`), claimed synchronously.
+- **Cost** is recorded on the usage ledger (`feature: 'ai_resolve'`, seam `agent`). Rate tier: the
+  POST is `ai` + `ai_hourly`; the GET (polled every 2s while it runs) and the DELETE (cancel) are
+  `read`.
+- **The SPA.** `ResolveConflictsButton` becomes a menu — "Resolve manually" / "Resolve with Claude" —
+  when `me.ai.enabled`; otherwise it is the plain button. A missing runtime or credential is the ONE
+  `AiRunGate` in place of the Claude item. ⚠ **It still fetches nothing on mount**: the run lives in
+  a module store (`hooks/useConflictAiResolve.ts`) and a PR with no run issues no request. On success
+  the resolver opens and `useClaudePrefill` applies the answer ONCE (by `runId`) and ONLY for the same
+  server session and `modelHash`: it fills UNDECIDED regions only (the reader's own choices win, the
+  wand's rule), seeds `'edited'` lines into `useRegionEdit`'s module map, and records which decisions
+  are Claude's (`store/conflictClaude.ts`). A region wears a "Claude" chip while its decision is
+  still Claude's — checked against the live decision on every read, so replacing it removes the chip
+  with no write — and the chip toggles Claude's one-line reason in place. The banner above the panes
+  counts the live choices and offers "Undo all Claude's choices". Claude's decisions are ordinary
+  decisions: counted, gated by `CommitPlan.canCommit` and committed by the existing land path.
+- **The AI Fix tab** shows a "Resolve merge conflicts with Claude" card when the PR conflicts (the
+  resolver entry's own gate) and, in the fix picker, an OPTIONAL, default-off "Also resolve merge
+  conflicts with `<base>`". Ticked, the conflict run starts beside the fix: two runs, two results,
+  and the merge lands from the resolver as its own commit — never folded into the fix.
 
 ### Merge queue (GitHub's native)
 

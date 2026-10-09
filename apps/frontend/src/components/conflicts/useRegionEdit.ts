@@ -89,6 +89,21 @@ function pruneTo(sessionId: string): Record<string, string[]> {
   return EDITS_BY_SESSION.get(sessionId) ?? {};
 }
 
+/** Mounted hooks, told when lines arrive from somewhere other than their own `save`. */
+const EDIT_LISTENERS = new Set<(sessionId: string) => void>();
+
+/**
+ * Hand the module map lines for handles minted OUTSIDE this hook — "Resolve with Claude"'s
+ * `'edited'` choices, whose lines the run's answer carries. ⚠ The same map and the same rule as a
+ * save: keyed by SERVER session, so the centre pane renders an edited region the moment its
+ * decision lands, mounted or not.
+ */
+export function seedEditLines(sessionId: string, lines: Readonly<Record<string, string[]>>): void {
+  const held = EDITS_BY_SESSION.get(sessionId) ?? {};
+  EDITS_BY_SESSION.set(sessionId, { ...held, ...lines });
+  for (const l of EDIT_LISTENERS) l(sessionId);
+}
+
 export function useRegionEdit(prId: number, sessionId: string | null): RegionEdits {
   const [states, setStates] = useState<Record<string, RegionEditState>>({});
   const [editLines, setEditLines] = useState<Record<string, string[]>>(() =>
@@ -105,6 +120,18 @@ export function useRegionEdit(prId: number, sessionId: string | null): RegionEdi
   useEffect(() => {
     if (sessionId == null) return;
     setEditLines(pruneTo(sessionId));
+  }, [sessionId]);
+
+  // Lines seeded from outside (`seedEditLines`) for THIS session.
+  useEffect(() => {
+    if (sessionId == null) return;
+    const onSeed = (id: string): void => {
+      if (id === sessionId) setEditLines({ ...(EDITS_BY_SESSION.get(sessionId) ?? {}) });
+    };
+    EDIT_LISTENERS.add(onSeed);
+    return () => {
+      EDIT_LISTENERS.delete(onSeed);
+    };
   }, [sessionId]);
 
   const draftFor = useCallback(

@@ -14,6 +14,7 @@ import {
   commitPlan,
   decideTheRest,
   landingTargets,
+  nextOutstandingControl,
   nextOutstandingFile,
   stillConflictingPaths,
   type OutstandingFile,
@@ -604,5 +605,28 @@ describe('landingTargets', () => {
     const t = landingTargets(session([entry(0, 'a.ts')]), true);
     expect(t.offerPrBranch).toBe(true);
     expect(t.toNewBranch).toBe(true);
+  });
+});
+
+describe('nextOutstandingControl', () => {
+  const file = (index: number, remaining: number): OutstandingFile => ({
+    index,
+    path: `src/${index}.ts`,
+    remaining,
+    opened: true,
+  });
+
+  it('is disabled while the file on screen still has undecided changes', () => {
+    expect(nextOutstandingControl([file(1, 2), file(4, 1)], 1)).toEqual({ target: 4, blocked: true });
+  });
+
+  it('opens once the file on screen is fully decided and another file needs work', () => {
+    // A fully decided file is not in `outstanding` at all.
+    expect(nextOutstandingControl([file(4, 1)], 1)).toEqual({ target: 4, blocked: false });
+  });
+
+  it('is absent (no target) when no OTHER file is outstanding, decided or not', () => {
+    expect(nextOutstandingControl([file(1, 3)], 1).target).toBeNull();
+    expect(nextOutstandingControl([], 1).target).toBeNull();
   });
 });

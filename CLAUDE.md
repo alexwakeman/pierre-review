@@ -334,6 +334,18 @@ a component, and the reader cannot tell them apart.
   *Period reporting*, *Chronology* and *The peer benchmark* about labelling populations apart and
   refusing rather than guessing still holds — those exist so the app does not assert what it
   cannot back. Meet them in fewer words; never by adding a paragraph of hedging.
+- **EXPLANATION LIVES BEHIND AN ⓘ BUTTON, NEVER ON THE SURFACE.** Any text that explains rather
+  than states — how a figure is worked out, what a window or threshold is, what a colour or verdict
+  means, why something is excluded — goes in an info popover opened by the ⓘ button
+  (`InfoButton` from `components/InfoModal.tsx`), placed beside the heading it explains. The surface
+  carries the facts, values and labels only; no caption paragraphs, no "Medians of 8 weeks…"
+  sub-lines, no definitions folded into row labels. ⚠ Example — Chronology's Before / after lens
+  (`Activity/ChronologyTrend.tsx` `BeforeAfterLens`): the rows read "First look" with two bars and
+  "4.6 h → 4.8 h"; the label is NOT "First look, three in four within", there is no "Medians of 8
+  weeks before and 8 weeks from this week on" line, and a non-significant row says NOTHING (no
+  "Within normal variation"). The ⓘ beside "Before and after the week of Jun 22" holds all of it:
+  the 8-week window, that each wait is the time three in four PRs finished within, that lower is
+  better, and that green/red means a robust z ≥ 3 step.
 - **SMALL TEXT IS NOT FREE.** 8-10px uppercase-with-tracking is the least legible setting there
   is. 11px is the floor for a label, 12px for a sentence, and contrast is enforced from source by
   `apps/frontend/test/textContrast.test.ts` + `vendorInk.test.ts` (see **Colour and contrast**
@@ -397,7 +409,9 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   option (`?window=reporting`) use it too. Name it through the shared spelling
   (`packages/shared/src/reporting-window.ts`). ⚠ **EXCEPTIONS ARE LABELLED, NEVER IMPLIED**: the
   "Right now" tile group (Open pull requests, Red checks now), the "Last 12 weeks" trend band,
-  completed period reports / month to date, and Chronology's 30/60/90-day options.
+  completed period reports / month to date, Chronology's 30/60/90-day options, and Chronology's
+  "Over time · Last 26 weeks" (`GET /api/flow-trend`, the ONE exception to its 90-day cap — per-week
+  repo coverage, repo-joined markers and faint thin weeks keep the coverage bias on screen).
 - **"Where the work is happening" is TWO CARDS under Flow metrics, both horizontal ROW LISTS
   (`charts/RepoRows`), neither carrying a blended score, both over the REPORTING WINDOW.** LEFT —
   `WorkspaceRepoActivityCharts`, riding `repoActivity` on the SAME `/api/workspace-metrics`
@@ -743,7 +757,14 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   paint, neither of which changes what bytes a decision produces.
   ⚠ **NOTHING IS APPLIED BEFORE THE READER PRESSES SOMETHING** — the SPA opens every session with
   `autoApply: false` (BOTH open arms) and there is no client seeding pass, so the centre pane opens
-  with NO wash. ⚠ **The commit is HARD BLOCKED until every decidable region in every supported file
+  with NO wash. The ONE exception is a **"Resolve with Claude"** run the reader STARTED (the split
+  entry button, the AI Fix tab; CORE, free, LOCAL ONLY — `coding/ai-resolve/`, registered by
+  `registerAgenticRoutes`): its answer pre-fills only UNDECIDED regions, each marked "Claude" with
+  its reason, undoable per region and by "Undo all Claude's choices"; the reader still presses
+  Commit and push. Claude answers in RESOLVER DECISIONS validated against the session (region id +
+  `fingerprint`, `region.allowed`, `'edited'` lines through `validateConflictEdit` + `storeEdit`),
+  held ON THE SESSION, never a table. [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md) § Resolve
+  with Claude. ⚠ **The commit is HARD BLOCKED until every decidable region in every supported file
   is decided** — `CommitPlan.canCommit` is the ONE gate, and everything it will not carry is NAMED
   on the landing step (`notCarried` is not just the unsupported files). ⚠ **BOTH BUTTONS ARE SHUT
   BY ONE FOLD AND PRINT ITS ONE SENTENCE** — the toolbar's button and the landing step's both say
@@ -752,10 +773,11 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   the panes is the same door with the same lock, and `headMoved` stays OUT of `canCommit` (a fact
   about GitHub, not about the reader's decisions). What blocks it is listed in a popover off the
   toolbar's "N of M changes decided" counter, with per-file jump rows.
-  ⚠ **"Next" walks OUTSTANDING files and WRAPS** (`nextOutstandingFile`), and is ABSENT — never
-  disabled — once there is nowhere to jump, including when the only outstanding file is the one you
-  are in; the chevrons still page the manifest ("Next file in the list") and `n`/`p` still walk
-  REGIONS. ⚠ **Hue means a different
+  ⚠ **"Next" walks OUTSTANDING files and WRAPS** (`nextOutstandingControl`), sits LEFT beside
+  "Merge base" with the file's count, is DISABLED until the file on screen is fully decided (user
+  decision), and is ABSENT once no OTHER file is outstanding; the chevrons still page the manifest
+  ("Next file in the list") and `n`/`p` still walk REGIONS. After the wand, the view centres the next
+  undecided change in the file (`nextUndecidedAfterWand`). ⚠ **Hue means a different
   thing per pane**: a SIDE is painted ONLY where it OFFERS something (`sideOffered` over
   `region.allowed` — so `both_same` paints the LEFT only), wearing the conflict TYPE while
   undecided and `applied` GREEN once its lines reach the result; a turned-down side and both sides
@@ -1181,7 +1203,11 @@ as the LANDING court. Without opening the doc:
   court produced six identical paragraphs on the first cut.
 - ⚠ **A NEVER-HUMAN-TOUCHED PR IS EXCLUDED** (46% of merges) - its ledger is 100% reviewer by
   construction. Reported separately as a governance finding.
-- ⚠ **NO PERSON IS NAMED ANYWHERE**, and the server sends no actor ids, so it is structural.
+- ⚠ **NO PERSON IS NAMED**, and the court data carries no actor ids, so it is structural — with ONE
+  narrow exception: the "Over time" NEW-CONTRIBUTOR marker names a first appearance by login and
+  nothing else (no figure, no wait attributed). Markers come from `workspace_setting_events`
+  (sqlite `0096` / pg `0083`, append-only, going forward only) and first-seen scans
+  ([docs/BOTTLENECKS.md](docs/BOTTLENECKS.md) § Over time).
 - ⚠ **WORKING HOURS LEAD, CLOCK HOURS CALL OUT.** The page opens on the working-hour split, then each
   wait against a per-workspace budget (`workspaces.flow_settings`, OVERRIDES ONLY — resolve through
   `resolveFlowSettings`); the lopsided-and-slow repo rule stays on CLOCK hours, where it was

@@ -12,6 +12,7 @@ import {
 } from '@pierre-review/shared';
 import { config } from '../config.js';
 import { db, schema } from './client.js';
+import { recordWorkspaceSettingEvent } from './workspace-setting-events.js';
 
 const { workspaces } = schema;
 
@@ -43,13 +44,46 @@ export async function setWorkspaceFlowSettings(
   settings: FlowSettings,
 ): Promise<boolean> {
   const stored = compactFlowSettings(settings);
+  const before = (
+    await db
+      .select({ flowSettings: workspaces.flowSettings })
+      .from(workspaces)
+      .where(and(eq(workspaces.id, workspaceId), eq(workspaces.accountId, accountId)))
+      .limit(1)
+      .execute()
+  )[0];
+  if (!before) return false;
   const rows = await db
     .update(workspaces)
     .set({ flowSettings: stored })
     .where(and(eq(workspaces.id, workspaceId), eq(workspaces.accountId, accountId)))
     .returning({ id: workspaces.id })
     .execute();
-  return rows.length > 0;
+  if (rows.length === 0) return false;
+  // Chronology's settings history: only a real change is recorded.
+  const summary = flowSettingsChangeSummary(compactFlowSettings(before.flowSettings ?? {}), stored);
+  if (summary != null) await recordWorkspaceSettingEvent(accountId, workspaceId, 'flow_settings', summary);
+  return true;
+}
+
+/** One plain line for what changed between two stored override sets, or null when nothing did. */
+export function flowSettingsChangeSummary(
+  before: FlowSettings | null,
+  after: FlowSettings | null,
+): string | null {
+  if (JSON.stringify(before) === JSON.stringify(after)) return null;
+  if (after == null) return 'Working hours and budgets reset to defaults';
+  const pick = (s: FlowSettings | null) => ({
+    hours: JSON.stringify([s?.timeZone, s?.days, s?.startMinute, s?.endMinute]),
+    budgets: JSON.stringify(s?.budgets ?? null),
+  });
+  const a = pick(before);
+  const b = pick(after);
+  const hours = a.hours !== b.hours;
+  const budgets = a.budgets !== b.budgets;
+  if (hours && budgets) return 'Working hours and wait budgets changed';
+  if (budgets) return 'Wait budgets changed';
+  return 'Working hours changed';
 }
 
 /** Drop empty branches so "nothing overridden" is stored as NULL, not as `{budgets:{}}`. */

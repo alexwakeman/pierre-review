@@ -1508,3 +1508,15 @@ Haiku, `prSummary`).
   (`coding/ai-fix/no-shell.test.ts`).
 - A finished fix PUSHES AS-IS (no trunk step) and only when the reader presses Push — or, for an
   auto fix, under "Push automatically".
+
+### Merge conflicts — "Resolve with Claude"
+
+A SEPARATE run from the fixer (`apps/backend/src/coding/ai-resolve/`), not a seed: the fixer edits
+files and pushes a patch; this one answers in RESOLVER DECISIONS that the reader reviews in the
+merge-conflict resolver and lands from there. It is reached from the resolver's split entry button,
+from a "Resolve merge conflicts with Claude" card at the top of the AI Fix tab, and from an
+OPTIONAL, default-off checkbox in the fix picker ("Also resolve merge conflicts with `<base>`"),
+shown only when the PR conflicts. Ticked, both runs start; the fix and the merge are separate
+results and separate commits. Same rules as every agentic run: local only, `me.ai` + `AiRunGate`,
+no shell (and here no write tools either), cost on the usage ledger as `ai_resolve`. Full contract:
+[docs/MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Resolve with Claude.

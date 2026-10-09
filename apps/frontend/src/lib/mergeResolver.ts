@@ -482,6 +482,36 @@ export function wandPlan(
   return { moves, changesApplied, conflictsResolved, conflictsLeft, alreadyDecided };
 }
 
+/**
+ * The region the view moves to after "Take the obvious ones": the first change in this file still
+ * undecided once the wand's `moves` land, looking AFTER the active region first and wrapping to the
+ * top of the file. Null ⇒ nothing in this file is left, and the view stays where it is (the
+ * toolbar's "Next" opens instead).
+ *
+ * ⚠ IT FOLDS THE MOVES IN ITSELF rather than reading `decisions` after the run: the decisions the
+ * wand just wrote reach the store on the NEXT render, and the caller picks the target in the same
+ * callback that applied them. A null active region (none chosen yet) starts from the top.
+ */
+export function nextUndecidedAfterWand(
+  regions: readonly ConflictRegion[],
+  fileIndex: number,
+  decisions: Readonly<Record<string, ConflictDecision>>,
+  moves: readonly WandMove[],
+  activeRegionId: number | null,
+): number | null {
+  const moved = new Set(moves.filter((m) => m.fileIndex === fileIndex).map((m) => m.regionId));
+  const left = regions.filter(
+    (r) =>
+      r.kind !== 'unchanged' &&
+      !moved.has(r.id) &&
+      decisions[regionKey(fileIndex, r.id)] == null,
+  );
+  if (left.length === 0) return null;
+  const at = activeRegionId == null ? -1 : regions.findIndex((r) => r.id === activeRegionId);
+  const after = at < 0 ? undefined : left.find((r) => regions.indexOf(r) > at);
+  return (after ?? left[0])?.id ?? null;
+}
+
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 /**

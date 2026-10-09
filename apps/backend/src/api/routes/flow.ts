@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
-import type { FlowResponse } from '@pierre-review/shared';
+import type { FlowResponse, FlowTrendResponse } from '@pierre-review/shared';
 import { FLOW_DEFAULT_WINDOW_DAYS, getFlowCourts } from '../../db/pr-intervals.js';
+import { getFlowTrend } from '../../db/flow-trend.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
 import { getReportingWindow } from '../../db/reporting-window.js';
 import { accountIdOf } from '../plugins/auth.js';
@@ -83,5 +84,24 @@ export async function flowRoutes(app: FastifyInstance): Promise<void> {
       return getFlowCourts(accountId, scope, FLOW_DEFAULT_WINDOW_DAYS, { reporting, nowMs });
     }
     return getFlowCourts(accountId, scope, parsed);
+  });
+
+  // GET /api/flow-trend — Chronology "Over time": the last 26 weeks of the same ledger, one point per
+  // merge week, plus the event markers (bots and people first seen, repos joining, setting changes,
+  // detected shifts) and a before/after lens per marked week. docs/BOTTLENECKS.md § Over time.
+  //
+  // Same gate, same scope rule, same tier (`search`) as /api/flow-findings above. ⚠ THE 26 WEEKS ARE
+  // THE LABELLED EXCEPTION TO THE 90-DAY CAP — the response carries per-week coverage, repo-joined
+  // markers and a thin-week flag so the coverage bias the cap guards against stays on screen. No
+  // `?days=`: the span is fixed.
+  app.get('/api/flow-trend', async (req, reply): Promise<FlowTrendResponse | { error: string }> => {
+    if (!req.account || !entitledProCapabilities(req.account).periodReports) {
+      reply.status(402);
+      return { error: 'pro required' };
+    }
+    const q = req.query as { workspace?: string };
+    const accountId = accountIdOf(req);
+    const scope = await resolveWorkspaceScope(accountId, q.workspace);
+    return getFlowTrend(accountId, scope);
   });
 }

@@ -1132,3 +1132,14 @@ keeps that meaning. Journal `when` `1791532800000` in both folders, slotted BEFO
 below the newest APPLIED one, so a DB that had already applied 0095 before 0094 existed would skip
 0094 silently; none did at the time of writing. Contract: docs/TRACKERS.md § Automatic default.
 ⚠ **The pg twin is NOT replayed** (`ADD COLUMN IF NOT EXISTS`; the UPDATE is idempotent).
+
+### `0096_workspace_setting_events` (pg `0083`) — settings history for Chronology "Over time"
+
+Additive: a new APPEND-ONLY table `workspace_setting_events` (`account_id`, `workspace_id`, `kind`,
+`summary`, `occurred_at`), index `workspace_setting_events_account_ws_time_idx`, and the named
+COMPOSITE FK `workspace_setting_events_workspace_account_fk` onto `workspaces (id, account_id)` with
+cascade (the `workspace_trackers` precedent — every writer gets the workspace id from a request path).
+GOING FORWARD ONLY: nothing is backfilled, and the page states the first row's date as the start of
+settings history. In `accountScopedTables()` and erased explicitly. Journal `when` `1791705600000` in
+both folders (after `0095` / pg `0082`). Contract: docs/BOTTLENECKS.md § Over time.
+⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS` throughout).

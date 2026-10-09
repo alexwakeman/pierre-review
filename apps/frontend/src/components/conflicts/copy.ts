@@ -189,10 +189,13 @@ export const FILE_NEXT = 'Next file in the list';
 /** The jump to the next file that still needs decisions. ⚠ THE VISIBLE WORD AND THE ACCESSIBLE
  *  NAME DIFFER ON PURPOSE: "Next" is what the reader asked for and what fits beside six other
  *  controls, and the name says which "next" it is. The name CONTAINS the visible word, which is
- *  WCAG 2.5.3 and not decoration. It is absent — never disabled — once nothing else is
- *  outstanding; see `nextOutstandingFile`. */
+ *  WCAG 2.5.3 and not decoration. It is DISABLED while the file on screen still has undecided
+ *  changes (it says why in `NEXT_OUTSTANDING_BLOCKED`), and absent once no other file is
+ *  outstanding; see `nextOutstandingControl`. */
 export const NEXT_OUTSTANDING = 'Next';
 export const NEXT_OUTSTANDING_LABEL = 'Next file that needs decisions';
+/** Why "Next" is shut. Its tooltip and accessible description. */
+export const NEXT_OUTSTANDING_BLOCKED = 'Decide every change in this file first';
 
 /** The counter's popover — the outstanding list, reachable from the panes.
  *
