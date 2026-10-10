@@ -24,6 +24,7 @@ import {
 import { sql } from 'drizzle-orm';
 import type {
   BlastRadiusConfig,
+  SprintChecks,
   BranchCheckRun,
   CheckRun,
   ClaudeReviewFollowUpRecord,
@@ -1811,6 +1812,9 @@ export const workspaces = sqliteTable(
     // the `accounts.blast_radius_config` precedent. Per WORKSPACE, because two teams in two
     // zones in one account work different hours.
     flowSettings: text('flow_settings', { mode: 'json' }).$type<FlowSettings>(),
+    // Reports → This sprint: which chips this workspace raises (migration 0102 / pg 0089). OVERRIDES
+    // ONLY (`SprintChecks`, shared); NULL = every check on for every issue type. db/sprint-checks.ts.
+    sprintChecks: text('sprint_checks', { mode: 'json' }).$type<SprintChecks>(),
     // ── AUTO CLAUDE REVIEW (migration 0074 / pg 0061; moved off the plugin's
     // pro_workspace_settings, whose columns are dormant now) ─────────────────────────────────
     // NULL/false = off. `autoReviewEnabledAt` is when it was last switched ON — the floor the

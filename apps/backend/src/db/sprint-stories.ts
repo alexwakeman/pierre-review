@@ -17,6 +17,7 @@ import {
   type TrackerProvider,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
+import { getSprintChecks } from './sprint-checks.js';
 import { sprintChipsFor, sprintCriteriaOf, sprintLabelState, type SprintChipInput } from './sprint-chips.js';
 import { suggestSprintRepos, suggestTicketOf } from './sprint-repo-suggest.js';
 import {
@@ -219,6 +220,8 @@ export async function getSprintStories(
       doneCount: 0,
       aiEnabled: opts.aiEnabled,
       repos,
+      checks: { off: [], issueTypes: {} },
+      issueTypes: [],
     };
   }
   const provider: TrackerProvider = site.provider;
@@ -258,7 +261,7 @@ export async function getSprintStories(
   }
   const idents = listed.map((l) => l.row.ident);
 
-  const [labels, prRefs, assessments, writes, accepted] = await Promise.all([
+  const [labels, prRefs, assessments, writes, accepted, checks] = await Promise.all([
     opts.aiEnabled
       ? import('./story-health.js').then((m) => m.currentLabelRowsFor(accountId, idents))
       : Promise.resolve(new Map<string, Map<string, never>>()),
@@ -266,6 +269,7 @@ export async function getSprintStories(
     latestSprintAssessments(accountId, workspaceId, idents),
     latestTrackerWrites(accountId, workspaceId, idents),
     acceptedSprintRepoDetails(accountId, workspaceId, idents),
+    getSprintChecks(accountId, workspaceId),
   ]);
   const suggestions = await suggestSprintRepos(
     accountId,
@@ -279,8 +283,8 @@ export async function getSprintStories(
     const text = { title: row.title, description: row.description ?? '', acceptanceCriteria: row.acceptanceCriteria ?? '' };
     const input = opts.aiEnabled ? storyLabelInput(text, provider) : null;
     const label = input != null ? (labels.get(row.ident)?.get(input.textHash) ?? null) : null;
-    const chipInput: SprintChipInput = { provider, ...text, label };
-    const chips = sprintChipsFor(chipInput);
+    const chipInput: SprintChipInput = { provider, ...text, issueType: row.issueTypeName ?? null, label };
+    const chips = sprintChipsFor(chipInput, checks);
     const acc = accepted.get(row.ident) ?? [];
     const a = assessments.get(row.ident);
     const w = writes.get(row.ident);
@@ -327,5 +331,9 @@ export async function getSprintStories(
     doneCount,
     aiEnabled: opts.aiEnabled,
     repos,
+    checks,
+    issueTypes: [...new Set(stored.map((r) => r.issueTypeName?.trim() ?? '').filter((n) => n !== ''))].sort((a, b) =>
+      a.localeCompare(b),
+    ),
   };
 }

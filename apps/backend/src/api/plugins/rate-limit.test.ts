@@ -481,6 +481,7 @@ describe('tierFor — GitHub quota spenders', () => {
   it('tiers This sprint per route', () => {
     expect(tiers('GET', '/api/sprint-stories')).toEqual(['read']);
     expect(tiers('PUT', '/api/sprint-stories/repos')).toEqual(['read']);
+    expect(tiers('PUT', '/api/sprint-stories/checks')).toEqual(['read']);
     expect(tiers('POST', '/api/sprint-stories/refresh')).toEqual(['search', 'read']);
     expect(tiers('POST', '/api/sprint-stories/assess')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('GET', '/api/sprint-stories/assessments/7')).toEqual(['read']);

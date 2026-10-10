@@ -146,6 +146,7 @@ describe('GET /api/sprint-stories', () => {
     for (const r of [
       { method: 'GET' as const, url: '/api/sprint-stories' },
       { method: 'PUT' as const, url: '/api/sprint-stories/repos', payload: { workspaceId: ownWs, ident: 'x', repoIds: [] } },
+      { method: 'PUT' as const, url: '/api/sprint-stories/checks', payload: { workspaceId: ownWs, checks: { off: [], issueTypes: {} } } },
     ]) {
       const res = await app.inject(r);
       expect(res.statusCode).toBe(402);
@@ -250,5 +251,36 @@ describe('PUT /api/sprint-stories/repos', () => {
     // Nothing was written by a refusal.
     const list = (await app.inject({ method: 'GET', url: '/api/sprint-stories' })).json() as any;
     expect(list.tickets.find((t: any) => t.key === 'ENG-1').repos.accepted).toEqual([{ repoId: ownRepo, fullName: 'acme/web' }]);
+  });
+});
+
+describe('PUT /api/sprint-stories/checks', () => {
+  const put = (payload: unknown) => app.inject({ method: 'PUT', url: '/api/sprint-stories/checks', payload: payload as any });
+
+  it('stores the checks; the list echoes them and drops the switched-off chips', async () => {
+    const before = (await app.inject({ method: 'GET', url: '/api/sprint-stories' })).json() as any;
+    const checks = { off: ['no_persona'], issueTypes: { no_criteria: ['Story'] } };
+    const res = await put({ workspaceId: ownWs, checks });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ workspaceId: ownWs, checks });
+    const list = (await app.inject({ method: 'GET', url: '/api/sprint-stories' })).json() as any;
+    expect(list.checks).toEqual(checks);
+    for (const t of list.tickets) {
+      expect(t.chips.some((c: any) => c.id === 'no_persona')).toBe(false);
+      expect(t.flagCount).toBe(t.chips.length);
+    }
+    expect(Array.isArray(list.issueTypes)).toBe(true);
+    expect(before.checks).toEqual({ off: [], issueTypes: {} });
+    // Back to the defaults.
+    await put({ workspaceId: ownWs, checks: { off: [], issueTypes: {} } });
+    expect(((await app.inject({ method: 'GET', url: '/api/sprint-stories' })).json() as any).checks).toEqual({ off: [], issueTypes: {} });
+  });
+
+  it('refuses malformed checks and writes nothing', async () => {
+    for (const checks of [{ off: ['nope'], issueTypes: {} }, { off: 'x' }, { off: [], issueTypes: { no_persona: [''] } }, null]) {
+      expect((await put({ workspaceId: ownWs, checks })).statusCode).toBe(400);
+    }
+    expect((await put({ workspaceId: 'x', checks: { off: [], issueTypes: {} } })).statusCode).toBe(400);
+    expect(((await app.inject({ method: 'GET', url: '/api/sprint-stories' })).json() as any).checks).toEqual({ off: [], issueTypes: {} });
   });
 });

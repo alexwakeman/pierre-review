@@ -57,7 +57,7 @@ function ticket(over: Partial<SprintTicketRow> = {}): SprintTicketRow {
     criteria: { items: ['Users get a link'], source: 'acceptance_criteria' },
     labels: 'current',
     chips: [
-      { id: 'user_value_missing', criterion: null, fix: sprintChipFix('user_value_missing', null) },
+      { id: 'no_persona', criterion: null, fix: sprintChipFix('no_persona', null) },
       {
         id: 'criterion_not_testable',
         criterion: { n: 1, text: 'Users get a link' },
@@ -109,7 +109,7 @@ describe('markdown composers', () => {
       `**Not testable** (criterion 1: "Users get a link"): ${sprintChipFix('criterion_not_testable', { n: 1, text: 'Users get a link' })}`,
     );
     const md = chipFixesMarkdown(t);
-    expect(md.startsWith('**What to fix**\n\n- **No user value**: ')).toBe(true);
+    expect(md.startsWith('**What to fix**\n\n- **No persona**: ')).toBe(true);
     expect(md.split('\n').filter((l) => l.startsWith('- '))).toHaveLength(2);
     expect(chipFixesMarkdown(ticket({ chips: [] }))).toBe('');
   });

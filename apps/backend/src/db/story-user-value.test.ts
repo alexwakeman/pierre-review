@@ -1,6 +1,6 @@
 // db/story-user-value.ts — the code rule behind Story health's "Stories saying who benefits and why".
 import { describe, expect, it } from 'vitest';
-import { userValueStated } from './story-user-value.js';
+import { personaStated, userValueStated } from './story-user-value.js';
 
 describe('userValueStated', () => {
   it('accepts the user-story template with its reason', () => {
@@ -25,5 +25,18 @@ describe('userValueStated', () => {
 
   it('strips Jira colour markup', () => {
     expect(userValueStated('{color:#172b4d}As a user I want X so that I save time{color}')).toBe(true);
+  });
+});
+
+describe('personaStated', () => {
+  it('accepts the template without a reason, and a named beneficiary', () => {
+    expect(personaStated('As an admin I want a delete button')).toBe(true);
+    expect(personaStated('As a *planning officer*, we need the export')).toBe(true);
+    expect(personaStated('Cache it so that customers no longer wait.')).toBe(true);
+  });
+  it('rejects text naming no one', () => {
+    expect(personaStated('Fix the null check in the parser')).toBe(false);
+    expect(personaStated('Retry so that the build will pass')).toBe(false);
+    expect(personaStated('')).toBe(false);
   });
 });

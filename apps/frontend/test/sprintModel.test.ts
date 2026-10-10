@@ -14,6 +14,8 @@ import {
 } from '@pierre-review/shared';
 import {
   assessButtonLabel,
+  chipGroupSuffix,
+  groupChips,
   assessmentProgressLine,
   currentTextFor,
   groupSprintTickets,
@@ -227,5 +229,28 @@ describe('update panel', () => {
       writeRecordLine({ ...base, status: 'failed', error: 'no_write_permission', message: sprintNoWriteSentence('github') }, 'github'),
     ).toEqual({ tone: 'bad', text: 'This token can’t write to GitHub.' });
     expect(writeRecordLine({ ...base, status: 'writing' }, 'jira').tone).toBe('busy');
+  });
+});
+
+describe('groupChips / chipGroupSuffix', () => {
+  const crit = (id: 'criterion_bundled' | 'criterion_not_testable', n: number) => ({ id, criterion: { n, text: `c${n}` }, fix: '' });
+  it('one pill per check, carrying its criterion numbers', () => {
+    const chips = [
+      { id: 'no_criteria' as const, criterion: null, fix: '' },
+      crit('criterion_not_testable', 1),
+      crit('criterion_bundled', 3),
+      crit('criterion_bundled', 5),
+    ];
+    expect(groupChips(chips)).toEqual([
+      { id: 'no_criteria', criteria: [] },
+      { id: 'criterion_not_testable', criteria: [1] },
+      { id: 'criterion_bundled', criteria: [3, 5] },
+    ]);
+  });
+  it('names up to three criteria, then counts', () => {
+    expect(chipGroupSuffix([])).toBeNull();
+    expect(chipGroupSuffix([2])).toBe('criterion 2');
+    expect(chipGroupSuffix([2, 3, 5])).toBe('criteria 2, 3, 5');
+    expect(chipGroupSuffix([1, 2, 3, 4])).toBe('4 criteria');
   });
 });

@@ -541,6 +541,8 @@ const SPRINT_STORIES: SprintStoriesResponse = {
   doneCount: 3,
   aiEnabled: true,
   repos: [{ repoId: REPO.id, fullName: REPO.fullName }],
+  checks: { off: [], issueTypes: {} },
+  issueTypes: ['Story'],
   tickets: [
     {
       ...SPRINT_TICKET_BASE,
@@ -552,7 +554,7 @@ const SPRINT_STORIES: SprintStoriesResponse = {
       status: { name: 'To Do', category: 'new' },
       chips: [
         { id: 'no_criteria', criterion: null, fix: sprintChipFix('no_criteria', null) },
-        { id: 'user_value_missing', criterion: null, fix: sprintChipFix('user_value_missing', null) },
+        { id: 'no_persona', criterion: null, fix: sprintChipFix('no_persona', null) },
       ],
       flagCount: 2,
       repos: { accepted: [], suggested: [{ repoId: REPO.id, fullName: REPO.fullName, reasons: ['same_project'], prCount: 4 }] },

@@ -1184,7 +1184,10 @@ text, `db/story-label-input.ts`) and are OMITTED when `config.aiEnabled` is fals
 edit bumps `STORY_RUBRIC_VERSION`; `countCriteriaLines` IS `extractCriteria(...).length`. ⚠ A RATE
 shift is a two-proportion test on POOLED counts (`STORY_SHIFT_*` in shared: ≥15 stories a side, ≥10
 points, |z| ≥ 2.58), never a changepoint over weekly percentages — that flagged one story's move.
-[docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story labels.
+[docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story labels. ⚠ Reports → This sprint's chips obey the workspace's CHECKS
+(`workspaces.sprint_checks`, sqlite `0102` / pg `0089`, overrides only; `sprintCheckApplies` is the ONE
+predicate, applied server-side): a check can be off or limited to issue types. "No persona" is who the
+ticket is for (`personaStated`), never a claim the ticket has no value.
 
 **Reports → This sprint** (`?insightsTab=sprint`, Pro `periodReports`; sqlite `0100` / pg `0087`): the
 tracker's current sprint, code chips + the free story labels, reader-ACCEPTED repos (code only
@@ -1531,7 +1534,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0088` and plugin `0034`–`0037` + `0040` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0089` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

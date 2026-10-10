@@ -669,6 +669,7 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
 
 ## Reports → This sprint — five tables (CORE; sqlite `0100` / pg `0087`)
 
+- **`workspaces.sprint_checks`** — Reports → This sprint's checks, OVERRIDES ONLY (`SprintChecks`, NULL = all on). `db/sprint-checks.ts`.
 - **`sprint_reads`** — one per (account, workspace): the demand gate (`viewed_at`), `next_read_at`,
   the last good `source_json` + `read_at`, `error_code`, `truncated`, and the `provider` + `api_root`
   (sqlite `0101` / pg `0088`) it was read from — a workspace that moved tracker or site since is

@@ -40,6 +40,34 @@ export function splitChips(chips: readonly SprintChip[]): { code: SprintChip[]; 
   };
 }
 
+/** The collapsed card's chips: ONE pill per check, carrying the criterion numbers it flagged — a
+ *  27-criterion ticket drew 27 "More than one outcome" pills. Order is the chips' own (the server's). */
+export interface ChipGroup {
+  id: SprintChip['id'];
+  criteria: number[];
+}
+
+export function groupChips(chips: readonly SprintChip[]): ChipGroup[] {
+  const out: ChipGroup[] = [];
+  for (const c of chips) {
+    let g = out.find((x) => x.id === c.id);
+    if (g == null) {
+      g = { id: c.id, criteria: [] };
+      out.push(g);
+    }
+    if (c.criterion != null) g.criteria.push(c.criterion.n);
+  }
+  return out;
+}
+
+/** The pill's suffix: "criterion 2", "criteria 2, 3, 5", or "18 criteria" past three. */
+export function chipGroupSuffix(criteria: readonly number[]): string | null {
+  if (criteria.length === 0) return null;
+  if (criteria.length === 1) return `criterion ${criteria[0]}`;
+  if (criteria.length <= 3) return `criteria ${criteria.join(', ')}`;
+  return `${criteria.length} criteria`;
+}
+
 export function assessmentActive(status: SprintAssessmentStatus | null | undefined): boolean {
   return status === 'queued' || status === 'running';
 }

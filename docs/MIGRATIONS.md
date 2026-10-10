@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0088` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
+  ⚠ pg `0052`–`0089` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -1202,3 +1202,8 @@ Additive `sprint_reads.api_root text` (NULL before the first read). With `provid
 and resets that row (`resetSprintReadForSite`: no source, no read time, due now) so the page says
 "Reading…" instead of the old read's time over an empty list. A separate migration because `0100` was
 already applied in development. ⚠ pg `0088` NOT replayed.
+
+### `0102_workspace_sprint_checks` (pg `0089`) — which chips a workspace raises
+`workspaces.sprint_checks` (sqlite text JSON / pg jsonb), OVERRIDES ONLY (`SprintChecks`): NULL = every
+Reports → This sprint check on for every issue type. Read and written only by `db/sprint-checks.ts`.
+⚠ pg `0089` NOT replayed.

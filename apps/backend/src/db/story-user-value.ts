@@ -43,3 +43,17 @@ export function userValueStated(text: string | null | undefined): boolean {
   }
   return false;
 }
+
+// "DOES THIS STORY NAME WHO IT IS FOR?" — the persona half alone (Reports → This sprint's
+// `no_persona` chip). TRUE on the user-story template with or without a reason ("As an admin, I
+// want a button"), the "In order to …, as a …" order, or a "so that" clause naming a beneficiary.
+// Not having one is NOT "no value": a team with one persona often never writes it down, which is
+// why the chip can be switched off per workspace.
+const PERSONA_RE = /\bas an?\s+[^.\n]{1,120}?\b(?:i|we)\s+(?:want|need|would like|wish|should|can|must)\b/i;
+
+/** Does the story name who it is for? See the comment above. */
+export function personaStated(text: string | null | undefined): boolean {
+  const t = (text ?? '').replace(COLOR_RE, '').replace(EMPHASIS_RE, '').replace(/\s+/g, ' ');
+  if (t.trim() === '') return false;
+  return PERSONA_RE.test(t) || userValueStated(t);
+}

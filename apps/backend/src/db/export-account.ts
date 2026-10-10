@@ -208,6 +208,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
         // Chronology's working hours and budgets — settings the user TYPED, so Art. 15 material,
         // exported deliberately (NULL = every default).
         flowSettings: workspaces.flowSettings,
+        sprintChecks: workspaces.sprintChecks,
       })
       .from(workspaces)
       .where(eq(workspaces.accountId, accountId))

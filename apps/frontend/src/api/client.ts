@@ -155,6 +155,8 @@ import type {
   SprintStoriesResponse,
   SprintRefreshResponse,
   SprintReposUpdate,
+  SprintChecksUpdate,
+  SprintChecksResponse,
   SprintReposResponse,
   SprintAssessRequest,
   SprintAssessResponse,
@@ -952,6 +954,8 @@ export const api = {
     ),
   sprintSetRepos: (body: SprintReposUpdate) =>
     fetch('/api/sprint-stories/repos', jsonBody('PUT', body)).then((r) => handle<SprintReposResponse>(r)),
+  sprintSetChecks: (body: SprintChecksUpdate) =>
+    fetch('/api/sprint-stories/checks', jsonBody('PUT', body)).then((r) => handle<SprintChecksResponse>(r)),
   // "Assess with code" (core, agentic, LOCAL-ONLY — not registered in cloud). The POST is the ONE
   // path that runs Claude; the GET polls one run; cancel is account-scoped.
   sprintAssess: (body: SprintAssessRequest) =>

@@ -6,12 +6,14 @@ import {
   type SprintSource,
   type SprintStoriesResponse,
 } from '@pierre-review/shared';
+import { useState } from 'react';
 import { useSprintRefresh, useSprintRefreshing, useSprintStories } from '../../hooks/useSprintStories.js';
 import { formatDate } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
-import { RefreshIcon } from '../Icons.js';
+import { GearIcon, RefreshIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { groupSprintTickets } from './sprintModel.js';
+import { changedCheckCount, SprintChecksPanel } from './SprintChecksPanel.js';
 import { SprintTicketCard } from './SprintTicketCard.js';
 
 // Reports → "This sprint" — the tracker's CURRENT sprint, one card per open ticket.
@@ -57,13 +59,14 @@ function SprintInfo({ data }: { data: SprintStoriesResponse }): JSX.Element {
       <p>The list is read again every 20 minutes while this tab is in use. Refresh reads it now.</p>
       <p>
         <strong>Grey chips</strong> come from rules in code: no criteria, criteria written in the description
-        instead of the criteria field, no user value. <strong>Outlined chips</strong> come from Claude Haiku reading
+        instead of the criteria field, no persona (who the ticket is for). <strong>Outlined chips</strong> come from Claude Haiku reading
         each criterion, and show only while that reading matches the ticket&rsquo;s current text.
       </p>
       <p>
         Not started comes first, then In progress. Within each, the tickets with the most chips come first. Done
         tickets are counted, not listed.
       </p>
+      <p>Checks chooses which chips this workspace raises, and for which issue types.</p>
       <p>Nothing is written to your tracker until you confirm the exact text on one ticket.</p>
     </>
   );
@@ -74,6 +77,7 @@ export function SprintView(): JSX.Element {
   const { data, isLoading, isError } = useSprintStories(workspaceId);
   const refresh = useSprintRefresh(workspaceId);
   const refreshing = useSprintRefreshing(workspaceId);
+  const [checksOpen, setChecksOpen] = useState(false);
 
   if (isError) {
     return <p className="text-sm text-rose-700 dark:text-rose-400">Could not load this sprint.</p>;
@@ -96,6 +100,8 @@ export function SprintView(): JSX.Element {
     facts.push(`${data.tickets.length} open ${data.tickets.length === 1 ? 'ticket' : 'tickets'}`);
     facts.push(`${data.doneCount} done`);
   }
+  const changed = changedCheckCount(data.checks);
+  if (changed > 0) facts.push(`${changed} ${changed === 1 ? 'check' : 'checks'} changed`);
 
   return (
     <div data-testid="sprint-view" className="space-y-4">
@@ -110,14 +116,32 @@ export function SprintView(): JSX.Element {
         {reading && <span className={`text-xs ${MUTED}`}>Reading…</span>}
         <button
           type="button"
+          onClick={() => setChecksOpen((o) => !o)}
+          aria-expanded={checksOpen}
+          className="ml-auto inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
+        >
+          <GearIcon size={12} />
+          Checks
+        </button>
+        <button
+          type="button"
           onClick={() => refresh.mutate()}
           disabled={refreshing}
-          className="ml-auto inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
+          className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
         >
           <RefreshIcon size={12} className={refreshing ? 'animate-spin' : undefined} />
           Refresh
         </button>
       </div>
+
+      {checksOpen && (
+        <SprintChecksPanel
+          workspaceId={data.workspaceId}
+          checks={data.checks}
+          issueTypes={data.issueTypes}
+          onClose={() => setChecksOpen(false)}
+        />
+      )}
 
       {data.read.error != null && <p className="text-xs text-rose-700 dark:text-rose-400">{data.read.error}</p>}
       {refresh.isError && (

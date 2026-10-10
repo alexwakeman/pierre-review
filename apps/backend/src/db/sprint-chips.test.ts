@@ -44,8 +44,8 @@ describe('sprintChipsFor — code rules', () => {
     expect(ids(base())).toEqual([]);
   });
 
-  it('no criteria and no user value', () => {
-    expect(ids(base({ acceptanceCriteria: '', description: 'Fix the thing' }))).toEqual(['no_criteria', 'user_value_missing']);
+  it('no criteria and no persona', () => {
+    expect(ids(base({ acceptanceCriteria: '', description: 'Fix the thing' }))).toEqual(['no_criteria', 'no_persona']);
   });
 
   it('criteria in the description are flagged on Jira only', () => {
@@ -114,5 +114,20 @@ describe('sprintLabelState', () => {
     expect(sprintLabelState(base({ acceptanceCriteria: '', description: 'x' }), true)).toBe('none');
     expect(sprintLabelState(base({ label }), true)).toBe('current');
     expect(sprintLabelState(base(), true)).toBe('pending');
+  });
+});
+
+describe('sprintChipsFor — the workspace checks', () => {
+  const bare = base({ acceptanceCriteria: '', description: 'Fix the thing', issueType: 'Bug' });
+  it('a switched-off check raises nothing', () => {
+    expect(sprintChipsFor(bare, { off: ['no_persona'], issueTypes: {} }).map((c) => c.id)).toEqual(['no_criteria']);
+  });
+  it('a check limited to other issue types skips this one, case-insensitively', () => {
+    const storyOnly = { off: [], issueTypes: { no_persona: ['story'] } };
+    expect(sprintChipsFor(bare, storyOnly).map((c) => c.id)).toEqual(['no_criteria']);
+    expect(sprintChipsFor({ ...bare, issueType: 'Story' }, storyOnly).map((c) => c.id)).toEqual(['no_criteria', 'no_persona']);
+  });
+  it('the template without a reason names a persona', () => {
+    expect(ids(base({ description: 'As an admin I want a delete button' }))).not.toContain('no_persona');
   });
 });

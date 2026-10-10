@@ -538,7 +538,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (mutating && path === '/api/sprint-stories/refresh') return [TIERS.search, TIERS.read];
   if (mutating && path === '/api/sprint-stories/assess') return [TIERS.ai, TIERS.aiHourly];
   if (mutating && path === '/api/sprint-stories/write') return [TIERS.githubWrite];
-  if (path === '/api/sprint-stories' || path === '/api/sprint-stories/repos') return [TIERS.read];
+  if (path === '/api/sprint-stories' || path === '/api/sprint-stories/repos' || path === '/api/sprint-stories/checks') return [TIERS.read];
   if (/^\/api\/sprint-stories\/assessments\/\d+(\/cancel)?$/.test(path)) return [TIERS.read];
   // CI REVIEW (review/ci-review/routes.ts), matched EXPLICITLY by exact path for the same reason:
   //   POST /api/ci-reviews          starts an agent run (reads the head's checks + logs) → ai + ai_hourly

@@ -1,6 +1,9 @@
 import {
+  SPRINT_CHECKS_DEFAULT,
   SPRINT_CHIP_ORDER,
+  sprintCheckApplies,
   sprintChipFix,
+  type SprintChecks,
   type SprintChip,
   type SprintChipId,
   type SprintLabelState,
@@ -11,14 +14,16 @@ import {
 } from '@pierre-review/shared';
 import { acceptanceSectionOf, extractCriteria } from './story-criteria.js';
 import { STORY_LABEL_CRITERION_MAX_CHARS } from './story-label-input.js';
-import { userValueStated } from './story-user-value.js';
+import { personaStated } from './story-user-value.js';
 
 // REPORTS → THIS SPRINT — THE CHIPS (pure; sprint-chips.test.ts). Each sprint ticket carries the
 // flags a reader can act on before the work starts, from TWO sources labelled apart on screen:
 //
 //   CODE   no_criteria · criteria_not_in_field (Jira only: Linear and GitHub Issues keep criteria in
-//          the body, so a criteria section there is the right place) · user_value_missing (the ONE
-//          rule, db/story-user-value.ts).
+//          the body, so a criteria section there is the right place) · no_persona (`personaStated`,
+//          db/story-user-value.ts — who it is for, not whether it has value).
+//   CHECKS the workspace's `SprintChecks` drop chips it switched off or limited to other issue
+//          types (`sprintCheckApplies`), HERE, so flagCount, the order and Copy all agree.
 //   LABEL  the six stored story labels (review/story-labels, Haiku, `STORY_RUBRIC_VERSION`):
 //          per criterion testable / bundled / dependsOnOtherWork; per story outOfScopeStated /
 //          dependencyNamed / nonCodeWork.
@@ -35,6 +40,8 @@ export interface SprintChipInput {
   title: string;
   description: string;
   acceptanceCriteria: string;
+  /** The ticket's issue type name, for the workspace's checks. */
+  issueType?: string | null;
   /** The CURRENT label only (text hash matches today's); null when there is none. */
   label: { criteria: StoryCriterionLabel[]; story: StoryLevelLabels } | null;
 }
@@ -68,13 +75,13 @@ function usableLabel(i: SprintChipInput, items: readonly string[]): SprintChipIn
 }
 
 /** Every chip of one ticket, in SPRINT_CHIP_ORDER (criterion chips by n within their id). */
-export function sprintChipsFor(i: SprintChipInput): SprintChip[] {
+export function sprintChipsFor(i: SprintChipInput, checks: SprintChecks = SPRINT_CHECKS_DEFAULT): SprintChip[] {
   const { items, source } = sprintCriteriaOf(i, i.provider);
   const found: Array<{ id: SprintChipId; criterion: { n: number; text: string } | null }> = [];
   if (items.length === 0) found.push({ id: 'no_criteria', criterion: null });
   if (source === 'description_heading' && i.provider === 'jira') found.push({ id: 'criteria_not_in_field', criterion: null });
-  if (!userValueStated([i.title, i.description, i.acceptanceCriteria].join('\n'))) {
-    found.push({ id: 'user_value_missing', criterion: null });
+  if (!personaStated([i.title, i.description, i.acceptanceCriteria].join('\n'))) {
+    found.push({ id: 'no_persona', criterion: null });
   }
   const label = usableLabel(i, items);
   if (label != null) {
@@ -98,6 +105,7 @@ export function sprintChipsFor(i: SprintChipInput): SprintChip[] {
   }
   const rank = new Map(SPRINT_CHIP_ORDER.map((id, k) => [id, k]));
   return found
+    .filter((f) => sprintCheckApplies(checks, f.id, i.issueType ?? null))
     .map((f, k) => ({ f, k }))
     .sort(
       (a, b) =>

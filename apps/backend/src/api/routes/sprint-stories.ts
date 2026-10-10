@@ -1,11 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import {
   SPRINT_REPOS_PER_TICKET_MAX,
+  type SprintChecksResponse,
   type SprintReposResponse,
   type SprintStoriesResponse,
 } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
+import { parseSprintChecks, setSprintChecks } from '../../db/sprint-checks.js';
 import { suggestSprintRepos, suggestTicketOf } from '../../db/sprint-repo-suggest.js';
 import { readSprintTicket } from '../../db/sprint-store.js';
 import { getSprintStories } from '../../db/sprint-stories.js';
@@ -21,6 +23,7 @@ import { reportsEntitled } from './insights.js';
 //
 //   GET /api/sprint-stories?workspace=<id>   the list (DB only; stamps the view, kicks a due read)  → read
 //   PUT /api/sprint-stories/repos            replace ONE ticket's accepted candidate repos          → read
+//   PUT /api/sprint-stories/checks           replace the workspace's checks (which chips it raises)  → read
 
 const PRO_REQUIRED = { error: 'pro required' } as const;
 const IDENT_MAX = 600;
@@ -37,6 +40,23 @@ export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
     return getSprintStories(accountId, scope.workspaceId, { aiEnabled: config.aiEnabled, now: Date.now() });
+  });
+
+  app.put('/api/sprint-stories/checks', async (req, reply): Promise<SprintChecksResponse | ErrorBody> => {
+    if (!reportsEntitled(req)) {
+      reply.status(402);
+      return PRO_REQUIRED;
+    }
+    const body = (req.body ?? {}) as { workspaceId?: unknown; checks?: unknown };
+    const checks = parseSprintChecks(body.checks, true);
+    if (typeof body.workspaceId !== 'number' || !Number.isSafeInteger(body.workspaceId) || body.checks == null || checks == null) {
+      reply.status(400);
+      return { error: 'bad_request', message: 'Send a workspaceId and the checks.' };
+    }
+    const accountId = accountIdOf(req);
+    const scope = await resolveWorkspaceScope(accountId, body.workspaceId);
+    await setSprintChecks(accountId, scope.workspaceId, checks);
+    return { workspaceId: scope.workspaceId, checks };
   });
 
   app.put('/api/sprint-stories/repos', async (req, reply): Promise<SprintReposResponse | ErrorBody> => {

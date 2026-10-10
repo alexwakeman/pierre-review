@@ -16,7 +16,7 @@ import { InfoButton } from '../InfoModal.js';
 import { SprintAssessment } from './SprintAssessment.js';
 import { SprintCopyButton } from './SprintCopyButton.js';
 import { SprintUpdatePanel } from './SprintUpdatePanel.js';
-import { splitChips } from './sprintModel.js';
+import { chipGroupSuffix, groupChips, splitChips, type ChipGroup } from './sprintModel.js';
 
 // One ticket on Reports → This sprint. Collapsed: key + title, status, assignee (display only), chips,
 // PRs. Expanded: each chip's criterion and templated fix (each copyable), candidate repos, the code
@@ -24,17 +24,18 @@ import { splitChips } from './sprintModel.js';
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 
-function ChipPill({ chip }: { chip: SprintChip }): JSX.Element {
-  const meta = SPRINT_CHIPS[chip.id];
+function ChipPill({ group }: { group: ChipGroup }): JSX.Element {
+  const meta = SPRINT_CHIPS[group.id];
   // Code chips are filled grey, label chips outlined — the ⓘ on the heading says which is which.
   const cls =
     meta.source === 'code'
       ? 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200'
       : 'border border-amber-300 text-amber-800 dark:border-amber-700 dark:text-amber-300';
+  const suffix = chipGroupSuffix(group.criteria);
   return (
     <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium ${cls}`}>
       {meta.label}
-      {chip.criterion != null && <span className="ml-1 font-normal">· {chip.criterion.n}</span>}
+      {suffix != null && <span className="ml-1 font-normal">· {suffix}</span>}
     </span>
   );
 }
@@ -105,8 +106,8 @@ export function SprintTicketCard({
           </div>
           {(code.length > 0 || label.length > 0) && (
             <div className="flex flex-wrap gap-1 pt-0.5">
-              {[...code, ...label].map((c, i) => (
-                <ChipPill key={`${c.id}-${c.criterion?.n ?? 's'}-${i}`} chip={c} />
+              {groupChips([...code, ...label]).map((g) => (
+                <ChipPill key={g.id} group={g} />
               ))}
             </div>
           )}

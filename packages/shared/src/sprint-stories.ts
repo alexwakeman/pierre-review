@@ -141,7 +141,7 @@ export type SprintChipId =
   // code, story-level
   | 'no_criteria'
   | 'criteria_not_in_field'
-  | 'user_value_missing'
+  | 'no_persona'
   // label, criterion-level
   | 'criterion_not_testable'
   | 'criterion_bundled'
@@ -163,7 +163,7 @@ export interface SprintChipMeta {
 export const SPRINT_CHIPS: Readonly<Record<SprintChipId, SprintChipMeta>> = {
   no_criteria: { id: 'no_criteria', source: 'code', label: 'No criteria', grain: 'story' },
   criteria_not_in_field: { id: 'criteria_not_in_field', source: 'code', label: 'Criteria not in field', grain: 'story' },
-  user_value_missing: { id: 'user_value_missing', source: 'code', label: 'No user value', grain: 'story' },
+  no_persona: { id: 'no_persona', source: 'code', label: 'No persona', grain: 'story' },
   criterion_not_testable: { id: 'criterion_not_testable', source: 'label', label: 'Not testable', grain: 'criterion' },
   criterion_bundled: { id: 'criterion_bundled', source: 'label', label: 'More than one outcome', grain: 'criterion' },
   criterion_depends_on_other_work: {
@@ -181,7 +181,7 @@ export const SPRINT_CHIPS: Readonly<Record<SprintChipId, SprintChipMeta>> = {
 export const SPRINT_CHIP_ORDER: readonly SprintChipId[] = [
   'no_criteria',
   'criteria_not_in_field',
-  'user_value_missing',
+  'no_persona',
   'criterion_not_testable',
   'criterion_bundled',
   'criterion_depends_on_other_work',
@@ -207,8 +207,8 @@ export function sprintChipFix(id: SprintChipId, criterion: { n: number; text: st
       return 'Add acceptance criteria: a short list of outcomes a tester could check, one per line.';
     case 'criteria_not_in_field':
       return 'Move the acceptance criteria out of the description into the criteria field.';
-    case 'user_value_missing':
-      return 'Say who benefits and why, for example: “As a <role>, I want <goal>, so that <benefit>.”';
+    case 'no_persona':
+      return 'Name who this is for, for example: “As a <role>, I want <goal>.”';
     case 'criterion_not_testable':
       return `Rewrite ${q} as an outcome someone could check: name the input, the action and the result they should see.`;
     case 'criterion_bundled':
@@ -222,6 +222,41 @@ export function sprintChipFix(id: SprintChipId, criterion: { n: number; text: st
     case 'non_code_work':
       return 'Split out the work code cannot show (sign-off, docs, config, comms) into its own task or a named criterion with an owner.';
   }
+}
+
+// ── Checks (per-workspace settings: which chips this team wants raised) ─────────────────────────
+
+/** Which chips a workspace raises. OVERRIDES ONLY: an absent id is ON for every issue type.
+ *  `off` switches a check off entirely; `issueTypes[id]` limits it to those issue type names
+ *  (matched case-insensitively). Teams differ: one with a single persona does not want "No persona". */
+export interface SprintChecks {
+  off: SprintChipId[];
+  issueTypes: Partial<Record<SprintChipId, string[]>>;
+}
+
+export const SPRINT_CHECKS_DEFAULT: SprintChecks = { off: [], issueTypes: {} };
+export const SPRINT_CHECK_ISSUE_TYPES_MAX = 40;
+export const SPRINT_CHECK_ISSUE_TYPE_MAX_CHARS = 80;
+
+/** Does this check apply to a ticket of this issue type? A ticket with no issue type is checked
+ *  unless the check is off. THE ONE predicate: the server filters chips with it. */
+export function sprintCheckApplies(checks: SprintChecks, id: SprintChipId, issueType: string | null): boolean {
+  if (checks.off.includes(id)) return false;
+  const only = checks.issueTypes[id];
+  if (only == null || only.length === 0 || issueType == null) return true;
+  const t = issueType.trim().toLowerCase();
+  return only.some((x) => x.trim().toLowerCase() === t);
+}
+
+/** PUT /api/sprint-stories/checks — replace the workspace's checks. */
+export interface SprintChecksUpdate {
+  workspaceId: number;
+  checks: SprintChecks;
+}
+
+export interface SprintChecksResponse {
+  workspaceId: number;
+  checks: SprintChecks;
 }
 
 /** The label half's state on this ticket. 'off' = labels are not made here (cloud, AI disabled);
@@ -606,6 +641,10 @@ export interface SprintStoriesResponse {
   aiEnabled: boolean;
   /** The workspace's repos, for the picker. */
   repos: SprintRepoRef[];
+  /** The workspace's checks; chips on `tickets` are already filtered by them. */
+  checks: SprintChecks;
+  /** Issue type names on this sprint's tickets (open and done), sorted — the checks' type choices. */
+  issueTypes: string[];
 }
 
 /** POST /api/sprint-stories/refresh {workspaceId} — read the sprint list now (bypasses the interval,

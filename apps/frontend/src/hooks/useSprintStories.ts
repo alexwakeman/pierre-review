@@ -1,5 +1,7 @@
 import { skipToken, useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  SprintChecks,
+  SprintChecksResponse,
   SprintAssessmentResponse,
   SprintAssessResponse,
   SprintRefreshResponse,
@@ -94,6 +96,22 @@ export function useSprintRefresh(workspaceId: number | null) {
 
 export function useSprintRefreshing(workspaceId: number | null): boolean {
   return useIsMutating({ mutationKey: ['sprint-refresh', workspaceKey(workspaceId)] }) > 0;
+}
+
+/** Replace the workspace's checks (which chips it raises). The list refetches: chips, flag counts
+ *  and the order all move with them. */
+export function useSprintSetChecks(workspaceId: number | null) {
+  const qc = useQueryClient();
+  return useMutation<SprintChecksResponse, Error, SprintChecks>({
+    mutationKey: ['sprint-checks', workspaceKey(workspaceId)],
+    mutationFn: (checks) => {
+      if (workspaceId == null) return Promise.reject(new Error('No workspace selected'));
+      return api.sprintSetChecks({ workspaceId, checks });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: sprintStoriesKey(workspaceId) });
+    },
+  });
 }
 
 /** Replace a ticket's accepted repos. */
