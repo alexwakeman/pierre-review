@@ -164,6 +164,7 @@ describe('figures', () => {
   it('names a point\'s story issue, and nothing on an old point', () => {
     expect(pointIssueLabel({ issue: 'waits_on_work' })).toBe('Waits on other work');
     expect(pointIssueLabel({})).toBeNull();
+    expect(pointIssueLabel({ issue: 'waits_on_work' }, 'positive')).toBe('Nothing to wait on');
   });
 });
 

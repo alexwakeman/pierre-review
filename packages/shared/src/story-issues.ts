@@ -35,14 +35,16 @@ export interface StoryIssueMeta {
   label: string;
   /** Display order (chips, bullets, series, Copy all). */
   order: number;
+  /** The issue AVOIDED, for a strength ("What we do well"): naming the problem there reads as one. */
+  avoided: string;
 }
 
 /** In display order. */
 export const STORY_ISSUES: readonly StoryIssueMeta[] = [
-  { id: 'unclear_done', label: 'Unclear when done', order: 0 },
-  { id: 'too_big', label: 'Too big', order: 1 },
-  { id: 'waits_on_work', label: 'Waits on other work', order: 2 },
-  { id: 'scope_unstated', label: 'Scope not stated', order: 3 },
+  { id: 'unclear_done', label: 'Unclear when done', order: 0, avoided: 'Clear when done' },
+  { id: 'too_big', label: 'Too big', order: 1, avoided: 'Right-sized' },
+  { id: 'waits_on_work', label: 'Waits on other work', order: 2, avoided: 'Nothing to wait on' },
+  { id: 'scope_unstated', label: 'Scope not stated', order: 3, avoided: 'Scope stated' },
 ];
 
 export const STORY_ISSUE_IDS: readonly StoryIssueId[] = STORY_ISSUES.map((m) => m.id);

@@ -442,7 +442,7 @@ function ReportView({ record, body, stale }: { record: StoryReportRecord; body: 
 }
 
 function PointItem({ point, index, tone }: { point: StoryReportPoint; index: CandidateIndex; tone: 'positive' | 'negative' }): JSX.Element {
-  const issue = pointIssueLabel(point);
+  const issue = pointIssueLabel(point, tone);
   return (
     <li className={`border-l-2 pl-3 ${tone === 'positive' ? 'border-emerald-500' : 'border-rose-500'}`}>
       <p className="flex flex-wrap items-baseline gap-x-2 text-sm font-medium text-gray-800 dark:text-gray-100">

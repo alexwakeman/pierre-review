@@ -136,8 +136,11 @@ export function storyReportFigures(p: StoryReportPopulation): StoryReportFigure[
 }
 
 /** The story issue a point is about, as its label; null when the point names none (or an old row). */
-export function pointIssueLabel(p: Pick<StoryReportPoint, 'issue'>): string | null {
-  return p.issue != null && STORY_ISSUE_BY_ID[p.issue] != null ? STORY_ISSUE_BY_ID[p.issue].label : null;
+/** The point's issue tag: the problem on a shortfall, the issue AVOIDED on a strength. */
+export function pointIssueLabel(p: Pick<StoryReportPoint, 'issue'>, tone: 'positive' | 'negative' = 'negative'): string | null {
+  const meta = p.issue != null ? STORY_ISSUE_BY_ID[p.issue] : undefined;
+  if (meta == null) return null;
+  return tone === 'positive' ? meta.avoided : meta.label;
 }
 
 // ── Sections ──────────────────────────────────────────────────────────────────────────────────
