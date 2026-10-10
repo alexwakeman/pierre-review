@@ -98,6 +98,10 @@ export interface FetchedTicket {
   /** The ticket's own link as the tracker gave it (Linear's issue URL), https only; absent = build
    *  it from the workspace's base URL (`browseUrl`). */
   url?: string | null;
+  /** The ticket's created / resolved instants (./dates.ts): undefined = not in the answer (the
+   *  stored value stands), null = the tracker said none. */
+  issueCreatedAt?: Date | null;
+  issueResolvedAt?: Date | null;
 }
 
 /** A GitHub GraphQL answer: the data (partial data included) and any errors GitHub reported. */

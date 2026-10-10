@@ -2144,6 +2144,54 @@ convention this file has to remember.
     Reports (the mock's `periodReports` is false), so `e2e/mock-api.ts` has no `/api/stories` or
     `/api/story-reports` fixture; add typed ones if a spec ever opens the tab (today the catch-all `{}`
     reads as "no tracker": the card hides and the tab prints one sentence).
+  - **Story health** (`StoryHealth.tsx` + pure `storyHealthModel.ts`, `test/storyHealthModel.test.ts`;
+    hooks `hooks/useStoryHealth.ts`) — mounted BETWEEN the story report card and the lists/charts:
+    "Story health · Last 90 days" (`STORY_HEALTH_SPAN_LABEL` — a FIXED, LABELLED span, the Chronology
+    "Over time" exception rule; it follows no window picker). ONE fetch, `GET /api/story-health`, key
+    `['story-health','ws:<id>']`, `periodReports` ANDed into `enabled`; the contract is
+    `packages/shared/src/story-health.ts`. No tracker → the section renders NOTHING (the lists below
+    already print the one sentence).
+    - **How stories are written** (by ticket-created week) is SMALL MULTIPLES: one small chart per
+      refinement series (`SmallMultiple`), in two groups — ⚠ **model and code measures LABELLED APART**:
+      "Labelled by Claude" (sparkle) and "Counted by code". A responsive grid: 2 columns when the
+      container is ≥ `SMALL_MULTIPLE_TWO_COLUMNS_FROM` (560px), else 1 (`smallMultipleColumns`); widths
+      come from the one `useChartWidth` callback ref, so no horizontal scroll. Each chart: the series'
+      label, its LATEST rolling value large and the change since the FIRST rolling value in the span
+      (`rollingHeadline`) — ⚠ coloured ONLY when the series has a detected shift moving the same way
+      (`headlineVerdict`, green/red from `shift.verdict`), else grey; y fixed 0–100%; the rolling line
+      over faint weekly dots (thin = hollow, fainter); first / middle / "This week" x labels; a dashed
+      line at that series' own shift (no other chart's) plus a "From Aug 17: 19% → 44%" line under it;
+      hover a week → week, value + n (criteria on criterion-weighted series), 4-week value, and "12 of
+      15 stories labelled" (`coverageLine`) on label series. No legend toggles on this panel.
+    - **How stories are delivered** (by last-merge week) keeps THREE strips on ONE x-axis
+      (`geometryFor`), one per UNIT (`DELIVERY_STRIPS`: working time S/M/L · pull requests per story ·
+      criteria met, dotted) — ⚠ never two units on one axis — with legend toggles (`aria-pressed`,
+      local state keyed by workspace), the hover box per week, and shift markers clustered per week
+      through `EventMarkerRail`/`EventMarkerLines` (dashed = detected); a click opens the before/after
+      lens (held by `weekStart`, never an index), each row sized in its shift's own units
+      (`shiftUnits`: stories / criteria / weeks).
+    - ⚠ **The SPA recomputes nothing** — values, rolling, thin, shifts, their before/after figures and
+      verdicts are all the server's. ⚠ **Green/red from `shift.verdict` ALONE** — a series with
+      `better: null` ("Stories naming a dependency", "Pull requests per story") is never coloured.
+    - The shift rule (docs/API.md § GET /api/story-health): RATE series on POOLED counts with a
+      two-proportion z-test (≥ `STORY_SHIFT_MIN_STORIES` stories a side, ≥ `STORY_SHIFT_MIN_POINTS`
+      points, |z| ≥ `STORY_SHIFT_Z`); TIME / COUNT series by `detectChangepoints` over the rolling
+      values with a minimum change (`STORY_SHIFT_MIN_HOURS` / `STORY_SHIFT_MIN_PRS`). The ⓘ copy
+      (`ShiftRuleInfo`) PRINTS those shared constants — never retype one.
+    - **The label run** (local-only agentic): `useStoryLabelsOn()` = `periodReports && me.ai.enabled`,
+      AND the response's `labels` — without either there is no button and the server sends no label
+      series (cloud shows code measures only). "Label N stories" (N = min(`unlabelled`,
+      `STORY_LABEL_RUN_CAP`), hidden at 0) sits in `AiRunGate`. ⚠ Mutation key
+      `['story-label-start','ws:<id>']` read through `useIsMutating`; the run is written into
+      `['story-label-run']` (ACCOUNT-scoped, no workspace) in the HOOK-level `onSuccess`. The run key
+      polls every 2 s while `running` (the GET's `labelRun` re-attaches it after a reload); when a
+      watched run leaves `running` every `['story-health']` and `['ai-usage']` re-reads. While it runs:
+      `RegenProgressBar` at `done/total` with "d of t · US$x.xx" and Cancel; a run in another workspace
+      replaces the button with one line. A stop short (budget, cancel, no Claude, failed labels) is one
+      line after it ends.
+    - Every explanation (the span, created vs merge week, the rolling line, thin weeks, the rubric
+      version, the measured labeller noise, coverage, size bands, criteria met over reviewed stories,
+      what a shift is) sits behind ⓘs. No e2e fixture (no spec opens Reports).
 - ⚠ **Superseded: the WHOLE Reports pane is Pro (`periodReports`)** — `InsightsView` renders one
   `ProLockPanel` when unentitled, the rail entry carries the one `ProBadge`, and the inner badges
   below were REMOVED (the inner locks remain as defence in depth). `useWorkspaceMetrics` /

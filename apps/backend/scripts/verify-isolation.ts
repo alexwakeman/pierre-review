@@ -3813,6 +3813,63 @@ check(
   check("the composite FK refuses A's run in B's workspace", fkRefused);
 }
 
+// ── STORY HEALTH (db/story-health.ts; story_labels migration 0099 / pg 0086, tracker dates 0098 / pg 0085)
+// Both accounts hold a label for the SAME ident and text hash, and a stored row of the SAME ticket with
+// a different created date; every read predicates on accountId.
+// MUTATION CHECK: drop the accountId predicate from `currentLabelRowsFor` / `createdDatesFor` and the
+// first / third checks go red (A reads B's label / B's date).
+{
+  console.log('\nstory_labels + tracker ticket dates');
+  const sh = await import('../src/db/story-health.js');
+  const { trackerTicketIdent } = await import('@pierre-review/shared');
+  const root = 'https://iso-story.atlassian.net';
+  const ident = trackerTicketIdent('jira', root, 'ISO-1');
+  const label = (accountId: number, testable: boolean) =>
+    db
+      .insert(schema.storyLabels)
+      .values({
+        accountId,
+        ident,
+        textHash: 'same-hash',
+        rubricVersion: 1,
+        criteriaJson: [{ n: 1, testable, bundled: false, dependsOnOtherWork: false }],
+        storyJson: { outOfScopeStated: false, dependencyNamed: false, nonCodeWork: false },
+        criteriaCount: 1,
+        model: 'claude-haiku-5-5',
+      })
+      .execute();
+  await label(1, true);
+  await label(2, false);
+  const mineA = (await sh.currentLabelRowsFor(1, [ident])).get(ident)?.get('same-hash');
+  check("currentLabelRowsFor(A) reads A's label, never B's", mineA?.criteria[0]?.testable === true);
+  check("currentLabelRowsFor(B) reads B's label", (await sh.currentLabelRowsFor(2, [ident])).get(ident)?.get('same-hash')?.criteria[0]?.testable === false);
+  const ticket = (accountId: number, workspaceId: number, createdAt: Date) =>
+    db
+      .insert(schema.trackerTickets)
+      .values({
+        accountId,
+        workspaceId,
+        prId: 990_000 + accountId,
+        provider: 'jira',
+        issueKey: 'ISO-1',
+        detectedFrom: 'title',
+        detectOrder: 0,
+        apiRoot: root,
+        url: `${root}/browse/ISO-1`,
+        state: 'ok',
+        title: 'iso',
+        fetchedAt: now,
+        checkedAt: now,
+        nextCheckAt: now,
+        issueCreatedAt: createdAt,
+      })
+      .execute();
+  await ticket(1, defaultA, new Date('2026-01-01T00:00:00Z'));
+  await ticket(2, defaultB, new Date('2026-02-02T00:00:00Z'));
+  const dA = (await sh.createdDatesFor(1, 'jira', ['ISO-1'], new Set([ident]))).get(ident);
+  check("createdDatesFor(A) reads A's created date, never B's", dA?.ms === Date.parse('2026-01-01T00:00:00Z'));
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

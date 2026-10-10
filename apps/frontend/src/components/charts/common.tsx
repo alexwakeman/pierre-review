@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 // Shared foundation for the zero-dependency SVG charts used by the Insights
 // drill-down panel. Conventions: data marks use explicit palette hexes (which read
@@ -7,11 +7,19 @@ import { useEffect, useRef, useState } from 'react';
 
 // Measure the host element's width (px) so SVGs render at a 1:1 coordinate system —
 // crisp strokes/dots at any panel width, no viewBox scaling.
-export function useChartWidth(): [React.RefObject<HTMLDivElement>, number] {
-  const ref = useRef<HTMLDivElement>(null);
+/**
+ * The width of the element `ref` is attached to, kept current by a ResizeObserver.
+ *
+ * ⚠ A CALLBACK REF, NOT A RefObject: the observer attaches whenever the element MOUNTS. A
+ * mount-only effect over `useRef` saw `null` when the chart's container rendered after a loading
+ * state (Story health printed "Loading…" first), never re-ran, and left the width at 0 — so the
+ * chart drew nothing, with no error.
+ */
+export function useChartWidth(): [(node: HTMLDivElement | null) => void, number] {
+  const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [w, setW] = useState(0);
+  const ref = useCallback((node: HTMLDivElement | null) => setEl(node), []);
   useEffect(() => {
-    const el = ref.current;
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
       const cw = entries[0]?.contentRect.width;
@@ -20,7 +28,7 @@ export function useChartWidth(): [React.RefObject<HTMLDivElement>, number] {
     ro.observe(el);
     setW(el.clientWidth);
     return () => ro.disconnect();
-  }, []);
+  }, [el]);
   return [ref, w];
 }
 

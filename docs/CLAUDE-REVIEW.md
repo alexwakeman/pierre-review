@@ -1572,3 +1572,52 @@ orphan `pro_story_notes` table from the never-committed plugin migration 0041, w
   id and its PRs' `[id, state, mergedAt]` — nothing derived from now. A different fingerprint today
   shows the stored report as `stale`; nothing re-runs it by itself.
 
+## Story labels (Reports → Stories → Story health)
+
+The model half of Story health: Haiku 5.5 answers a FIXED rubric about each story's criteria, and the
+weekly series read the stored answers. Everything else on that section is code.
+
+- **Where**: `src/review/story-labels/` — `prompt.ts`, `validate.ts`, `manager.ts`, `routes.ts`; the
+  input (what is sent, and so which label is current) is core `db/story-label-input.ts`; the reads and
+  the fold are `db/story-health.ts` + `db/story-health-fold.ts`. Contract:
+  `packages/shared/src/story-health.ts`. Routes: docs/API.md § Story health.
+- **Gating**: agentic, so LOCAL-ONLY — registered only through `registerAgenticRoutes` — AND Pro with
+  the rest of Reports (`periodReports`, 402 before any DB work). `GET /api/story-health` reports
+  `labels: config.aiEnabled`; when false every label series is omitted, never half-drawn.
+- **THE RUBRIC** is the measured prototype's prompt VERBATIM (40 stories × 2 runs; Cohen's κ in shared
+  `STORY_LABEL_AGREEMENT`) minus three questions: `vague` (κ 0.56) and `scopeStated` (κ 0.48) were
+  dropped, and `userValueStated` is CODE (`db/story-user-value.ts`: the "As a … I want … so that"
+  template, or a "so that" clause naming a beneficiary). Per criterion: `testable`, `bundled`,
+  `dependsOnOtherWork`; per story: `outOfScopeStated`, `dependencyNamed`, `nonCodeWork`. ⚠ ONE WORD
+  CHANGED IS A NEW RUBRIC: bump `STORY_RUBRIC_VERSION` in the same commit (it is in the row's
+  identity, so every story relabels and old rows stop counting), and a question whose meaning changes
+  gets a NEW series id — renamed, never redefined.
+- **The input**: the criteria are `extractCriteria` over the criteria field, else the description's
+  "Acceptance criteria" section — the SAME list `countCriteriaLines` counts (the count is defined as
+  its length) — numbered, each clipped to 500 characters; the description is colour-stripped and
+  clipped to 2,500. `text_hash` is sha256 of exactly that plus the provider's text rule. A story with
+  no criteria is not labellable (never "0 criteria").
+- **The call**: core `cheapComplete` (review/llm.ts) — one tool-less completion, `ISOLATED_MCP` +
+  `ownToolsOnlyHook([])` already inside it; no new Agent SDK `query()`. Model `claude-haiku-5-5`,
+  `maxTokens` max(2,500, 300 + 40 × criteria). The ticket text sits inside a per-call NONCE fence
+  (`pickReviewNonce` over every fenced string) and the prompt says it is data.
+- **Validation** (`validateStoryLabels`): JSON; EXACTLY one criterion entry per numbered criterion with
+  `n` = 1, 2, 3 … in order; booleans strict (`true`/`false` or exactly `"true"`/`"false"`). Anything
+  else FAILS — not stored, retried on the next press. Never repaired: a shifted criterion would move
+  every criterion-weighted percentage.
+- **The run**: `POST /api/story-health/label {workspaceId}` labels the span's refinement-bucketed
+  stories with criteria and no current label, newest first, at most `STORY_LABEL_RUN_CAP` (150),
+  `STORY_LABEL_CONCURRENCY` (4) calls at once. ONE run per ACCOUNT, claimed SYNCHRONOUSLY before the
+  route's first await and released on every path. State is in MEMORY (`GET /api/story-health/label`
+  polls it); the labels are the durable part, so a restart loses a progress bar, never a label.
+  Cancel stops new calls; in-flight calls finish. A missing credential (`detectAuth`) fails the run at
+  once (`stoppedBy: 'auth'`); a missing AI runtime stops it (`'runtime'`).
+- **Spend**: every call is recorded (`recordAiUsage`, seam `summary`, feature `story_labels`), priced
+  from tokens at Haiku's rates (the ambient path reports no dollar figure). The run stops STARTING
+  calls once its recorded spend reaches `STORY_LABEL_BUDGET_USD` (default $1); at most
+  CONCURRENCY − 1 small calls already in flight finish past it. Measured noise of the labels on a
+  weekly rate: median 2–4 points, p90 7–12 — which is why every label series floors the shift test at
+  `STORY_LABEL_NOISE.typicalPoints`.
+- **Storage**: `story_labels` (sqlite `0099` / pg `0086`; docs/DATA-MODEL.md), insert
+  `ON CONFLICT DO NOTHING` on (account, ident, rubric version, text hash): the first answer stands.
+

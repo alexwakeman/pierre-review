@@ -424,6 +424,7 @@ beforeAll(async () => {
   );
   // The PR columns this adapter adds, exactly as a real install has them.
   sqlite.exec(migration('0088_issue_tracker.sql'));
+  sqlite.exec(migration('0098_tracker_ticket_dates.sql'));
   for (const stmt of migration('0090_linear_links.sql').split('--> statement-breakpoint')) sqlite.exec(stmt);
   ctx = {
     db: drizzle(sqlite),

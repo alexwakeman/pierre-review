@@ -57,6 +57,10 @@ export interface StoredTicketRow {
   // Written ONLY by this module (upsertTicketRow / deleteStaleKeys / rederiveAcForIssueType); see
   // `storyOrMembershipMoved`.
   changedAt: Date | null;
+  // The ticket's own created / resolved instants (migration 0098 / pg 0085). null = not read yet
+  // (a row from before 0098) or the tracker said none. NOT story text: never moves `changedAt`.
+  issueCreatedAt: Date | null;
+  issueResolvedAt: Date | null;
 }
 
 // ---- the acceptance-criteria field ----
@@ -201,8 +205,15 @@ export function groupByPr(rows: readonly StoredTicketRow[]): Map<number, StoredT
   return m;
 }
 
-/** The columns a write sets (everything but the identity triple, id and `changedAt`). */
-export type TicketWrite = Omit<StoredTicketRow, 'id' | 'accountId' | 'prId' | 'issueKey' | 'changedAt'>;
+/** The columns a write sets (everything but the identity triple, id and `changedAt`). The two
+ *  ticket dates follow the POSITIVE-ANSWER rule: an absent (undefined) key = the read did not
+ *  carry them, and the stored value is kept; null = the tracker said none, and the column is
+ *  cleared. */
+export type TicketWrite = Omit<
+  StoredTicketRow,
+  'id' | 'accountId' | 'prId' | 'issueKey' | 'changedAt' | 'issueCreatedAt' | 'issueResolvedAt'
+> &
+  Partial<Pick<StoredTicketRow, 'issueCreatedAt' | 'issueResolvedAt'>>;
 
 type MovedFields = Pick<StoredTicketRow, 'state' | 'provider' | 'apiRoot' | 'title' | 'description' | 'acceptanceCriteria'>;
 
@@ -233,7 +244,9 @@ export async function upsertTicketRow(
 ): Promise<void> {
   const t = ctx.schema.trackerTickets;
   // A caller spreading a stored row must not round-trip its `changedAt`: this function owns it.
-  const { changedAt: _ignored, ...write } = values as TicketWrite & { changedAt?: unknown };
+  const { changedAt: _ignored, ...spread } = values as TicketWrite & { changedAt?: unknown };
+  // An undefined date is "not asked" — drop the key so the stored value stands.
+  const write = Object.fromEntries(Object.entries(spread).filter(([, v]) => v !== undefined)) as TicketWrite;
   const prior = (
     (await ctx.db
       .select({

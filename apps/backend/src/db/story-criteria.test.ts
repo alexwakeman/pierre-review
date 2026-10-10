@@ -1,7 +1,7 @@
 // db/story-criteria.ts — the deterministic criteria count Reports → Stories plots against size.
 // Pure; no database.
 import { describe, expect, it } from 'vitest';
-import { acceptanceSectionOf, countCriteriaLines, textCriteriaCount } from './story-criteria.js';
+import { acceptanceSectionOf, countCriteriaLines, extractCriteria, textCriteriaCount } from './story-criteria.js';
 
 const md = { jira: false };
 const jira = { jira: true };
@@ -65,5 +65,52 @@ describe('textCriteriaCount', () => {
       count: null,
       source: 'none',
     });
+  });
+});
+
+describe('extractCriteria', () => {
+  it('returns one string per top-level bullet, markers and task boxes stripped, sub-bullets folded in', () => {
+    expect(extractCriteria('- a\n- b\n  - detail of b\n- c', md)).toEqual(['a', 'b detail of b', 'c']);
+    expect(extractCriteria('- [ ] one\n- [x] two', md)).toEqual(['one', 'two']);
+    expect(extractCriteria('1. one\n2) two', md)).toEqual(['one', 'two']);
+  });
+
+  it('reads Jira runs as depth and drops headings, label lines and a preamble', () => {
+    expect(extractCriteria('h3. Acceptance criteria\n* a\n** sub\n* b', jira)).toEqual(['a sub', 'b']);
+    expect(extractCriteria('{color:#172b4d}*Acceptance criteria:*{color}\n\n# first\n# second', jira)).toEqual([
+      'first',
+      'second',
+    ]);
+    expect(extractCriteria('The page must:\n- load\n- save', md)).toEqual(['load', 'save']);
+  });
+
+  it('without bullets, one line each with Given/When/Then folded into one', () => {
+    expect(extractCriteria('Given a user\nWhen they log in\nThen they see home', md)).toEqual([
+      'Given a user When they log in Then they see home',
+    ]);
+    expect(extractCriteria('Users can export CSV\nAdmins can delete rows', md)).toEqual([
+      'Users can export CSV',
+      'Admins can delete rows',
+    ]);
+  });
+
+  it('is [] for nothing', () => {
+    expect(extractCriteria(null, md)).toEqual([]);
+    expect(extractCriteria('```\n```', md)).toEqual([]);
+  });
+
+  it('agrees with countCriteriaLines on every shape (the count IS the list length)', () => {
+    const samples = [
+      '- a\n- b\n  - c',
+      'h3. AC\n* a\n** b\n* c\n\ntext after',
+      '# x\n## y\n# z',
+      'Given a\nWhen b\nThen c\nUsers can x',
+      'intro\n  - deep\n- top',
+      '{color:red}* red{color}\n* blue',
+      '',
+    ];
+    for (const t of samples) {
+      for (const o of [md, jira]) expect(countCriteriaLines(t, o)).toBe(extractCriteria(t, o).length);
+    }
   });
 });

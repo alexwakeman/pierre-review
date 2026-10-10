@@ -3,6 +3,7 @@ import { isRateLimitError } from '../../github/client.js';
 import { isBudgetLow, noteBudget, noteLimited } from '../../github/rate-budget.js';
 import { JiraFetchError } from '../jira/fetch.js';
 import type { FetchedTicket, GithubCallAccess, TrackerCall } from '../types.js';
+import { ticketDateFields, trackerDate } from '../dates.js';
 import { extractGithubAcceptanceCriteria, githubAcFieldId, type GithubSubIssue } from './ac.js';
 
 // GITHUB ISSUES — THE READER. One GraphQL call per issue (1 point), with the ACCOUNT's own token
@@ -35,6 +36,8 @@ export const GITHUB_ISSUE_QUERY = /* GraphQL */ `
         state
         stateReason
         body
+        createdAt
+        closedAt
         issueType { id name }
         assignees(first: 1) { nodes { login avatarUrl } }
         subIssues(first: ${SUB_ISSUE_CAP}) { totalCount nodes { number title state } }
@@ -51,6 +54,9 @@ interface GqlIssue {
   state: string | null;
   stateReason: string | null;
   body: string | null;
+  // ISO-8601; `closedAt` null while open. Absent from an older fixture = not in the answer.
+  createdAt?: string | null;
+  closedAt?: string | null;
   issueType?: { id: string; name: string } | null;
   assignees?: { nodes?: Array<{ login: string; avatarUrl: string | null } | null> | null } | null;
   subIssues?: { totalCount?: number | null; nodes?: Array<GithubSubIssue | null> | null } | null;
@@ -151,6 +157,10 @@ export function toFetchedTicket(key: string, issue: GqlIssue): FetchedTicket {
         ? [{ id: githubAcFieldId(ac.criteria.source), name: ac.criteria.name, text: ac.criteria.text, match: 'strong' }]
         : [],
     omittedCandidates: 0,
+    ...ticketDateFields({
+      issueCreatedAt: trackerDate(issue as unknown as Record<string, unknown>, 'createdAt'),
+      issueResolvedAt: trackerDate(issue as unknown as Record<string, unknown>, 'closedAt'),
+    }),
   };
 }
 

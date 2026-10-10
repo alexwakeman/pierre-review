@@ -198,6 +198,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // The story report (migration 0097 / pg 0084) — model prose about the account's own tickets.
     // Cascades from workspaces too, and is explicit anyway.
     await tx.delete(schema.storyReports).where(eq(schema.storyReports.accountId, accountId)).execute();
+    // Story health's labels (migration 0099 / pg 0086) — model answers about the account's tickets.
+    await tx.delete(schema.storyLabels).where(eq(schema.storyLabels.accountId, accountId)).execute();
     // The AI spend ledger (token/credit counts — no prompt text).
     await tx.delete(aiUsage).where(eq(aiUsage.accountId, accountId)).execute();
     // Any aggregate rows contributed to the cross-org benchmark. Consent was the basis for
@@ -317,6 +319,8 @@ export function accountScopedTables(): {
     },
     // The story report's runs (migration 0097 / pg 0084), erased explicitly above.
     { name: 'storyReports', col: schema.storyReports.accountId, table: schema.storyReports },
+    // Story health's labels (migration 0099 / pg 0086), erased explicitly above.
+    { name: 'storyLabels', col: schema.storyLabels.accountId, table: schema.storyLabels },
     // `myTurnDismissals` sat here until migration 0060 / pg 0047 DROPPED the table. It is named
     // rather than silently absent because this list is a checklist, and a checklist that shortens
     // with no explanation reads as an omission — the exact failure this function guards against.

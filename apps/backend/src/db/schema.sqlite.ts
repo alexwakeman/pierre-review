@@ -52,6 +52,8 @@ import type {
   StoryReportDropped,
   StoryReportPopulation,
   StoryReportRange,
+  StoryCriterionLabel,
+  StoryLevelLabels,
   TicketAssessment,
 } from '@pierre-review/shared';
 
@@ -2609,6 +2611,13 @@ export const trackerTickets = sqliteTable(
     // When the worker may read it again. Epoch 0 = due now (a forced refresh / field change).
     nextCheckAt: integer('next_check_at', { mode: 'timestamp' }).notNull(),
     changedAt: integer('changed_at', { mode: 'timestamp' }),
+    // The TICKET's own created / resolved instants as the tracker gave them (Jira `created` /
+    // `resolutiondate`, GitHub Issues `createdAt` / `closedAt`, Linear `createdAt` / `completedAt`;
+    // migration 0098, pg 0085). Story health buckets REFINEMENT by the created week. NULL on a row
+    // read before 0098 (filled on its next read; tracker/dates-backfill.ts nudges merged ones) or
+    // when the tracker said none. Neither moves `changed_at` (not story text).
+    issueCreatedAt: integer('issue_created_at', { mode: 'timestamp' }),
+    issueResolvedAt: integer('issue_resolved_at', { mode: 'timestamp' }),
   },
   (t) => ({
     accountPrKeyUx: uniqueIndex('tracker_tickets_account_pr_key').on(t.accountId, t.prId, t.issueKey),
@@ -2749,5 +2758,42 @@ export const storyReports = sqliteTable(
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),
+  }),
+);
+
+// STORY LABELS (Reports → Stories → Story health; migration 0099, pg 0086). ONE row per (story ident,
+// rubric version, hash of the text the labeller was SENT): Haiku 5.5's answers to a FIXED rubric
+// (shared `STORY_RUBRIC_VERSION`) — per numbered criterion (`criteria_json`, `StoryCriterionLabel[]`,
+// one entry per `extractCriteria` line, in order) and per story (`story_json`, `StoryLevelLabels`).
+// A label is CURRENT only while both its rubric version and its `text_hash` match today's text, so an
+// edited ticket or a rubric bump relabels from scratch and the old row simply stops counting. Written
+// ONLY by the local agentic label run (review/story-labels/); read by db/story-health.ts.
+// No workspace column: a ticket's story is one fact per ACCOUNT (the ident already names the site).
+// Listed in `accountScopedTables()` and erased with the account.
+export const storyLabels = sqliteTable(
+  'story_labels',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // shared `trackerTicketIdent` — `<provider>:<root>#<key>`.
+    ident: text('ident').notNull(),
+    // sha256 hex of the title + description + numbered criteria the labeller was sent.
+    textHash: text('text_hash').notNull(),
+    rubricVersion: integer('rubric_version').notNull(),
+    criteriaJson: text('criteria_json', { mode: 'json' }).$type<StoryCriterionLabel[]>().notNull(),
+    storyJson: text('story_json', { mode: 'json' }).$type<StoryLevelLabels>().notNull(),
+    criteriaCount: integer('criteria_count').notNull(),
+    model: text('model').notNull(),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    identityUx: uniqueIndex('story_labels_identity_ux').on(t.accountId, t.ident, t.rubricVersion, t.textHash),
   }),
 );

@@ -149,6 +149,9 @@ import type {
   StoryReportWindowChoice,
   StartStoryReportBody,
   StartStoryReportResponse,
+  StoryHealthResponse,
+  StartStoryLabelRunBody,
+  StoryLabelRunResponse,
   PostCommentResult,
   FollowUpReplyResult,
   PostReviewPreview,
@@ -930,6 +933,17 @@ export const api = {
   storyReport: (id: number) => get<StoryReportResponse>(`/api/story-reports/${id}`),
   cancelStoryReport: (id: number) =>
     fetch(`/api/story-reports/${id}/cancel`, jsonBody('POST')).then((r) => handle<StoryReportResponse>(r)),
+  // Reports → Stories → Story health (core, Pro on `periodReports`): 13 weekly points, two panels.
+  // Code only — the GET never runs Claude.
+  storyHealth: (workspaceId: number) =>
+    get<StoryHealthResponse>(withQuery('/api/story-health', workspaceParam(workspaceId))),
+  // The label run (core, agentic, LOCAL-ONLY; one in flight per account). The POST is the ONE path
+  // that bills; the GET and cancel are account-scoped.
+  startStoryLabelRun: (body: StartStoryLabelRunBody) =>
+    fetch('/api/story-health/label', jsonBody('POST', body)).then((r) => handle<StoryLabelRunResponse>(r)),
+  storyLabelRun: () => get<StoryLabelRunResponse>('/api/story-health/label'),
+  cancelStoryLabelRun: () =>
+    fetch('/api/story-health/label/cancel', jsonBody('POST')).then((r) => handle<StoryLabelRunResponse>(r)),
   // The attention cards (CORE/free) for the **Pending** rail entry.
   attentionCards: (workspaceId: number) =>
     get<AttentionCardsResponse>(withQuery('/api/attention', workspaceParam(workspaceId))),

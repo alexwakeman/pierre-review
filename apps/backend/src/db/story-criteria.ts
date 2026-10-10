@@ -54,24 +54,61 @@ function isHeading(line: string, jira: boolean): boolean {
   return jira ? JIRA_HEADING_RE.test(line) : MD_HEADING_RE.test(line);
 }
 
-/** Criteria in one block of text by the rule in the header; 0 when there is nothing to count. */
-export function countCriteriaLines(text: string | null | undefined, opts: { jira: boolean }): number {
-  const lines = (text ?? '')
+// The marker a criterion's text is written without: a bullet (or Jira `*`/`#` run, or a number),
+// then an optional task box.
+const MARKER_RE = /^\s*(?:[*#]+|[-+•]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/;
+
+function keptLines(text: string | null | undefined, jira: boolean): string[] {
+  return (text ?? '')
     .replace(COLOR_RE, '')
     .split(/\r?\n/)
-    .filter((l) => l.trim() !== '');
-  const kept = lines.filter((l) => {
-    const t = l.trim();
-    return !isHeading(t, opts.jira) && !LABEL_ONLY_RE.test(t) && !/^(`{3,}|~{3,}|\{(?:code|noformat)[^}]*\})/.test(t);
-  });
-  const bullets = kept.map((l) => bulletOf(l, opts.jira)).filter((b): b is Bullet => b != null);
-  if (bullets.length > 0) {
-    const top = Math.min(...bullets.map((b) => b.depth));
-    return bullets.filter((b) => b.depth === top).length;
+    .filter((l) => l.trim() !== '')
+    .filter((l) => {
+      const t = l.trim();
+      return !isHeading(t, jira) && !LABEL_ONLY_RE.test(t) && !/^(`{3,}|~{3,}|\{(?:code|noformat)[^}]*\})/.test(t);
+    });
+}
+
+/**
+ * The criteria in one block of text, by the rule in the header — ONE string per criterion, in order.
+ * A top-depth bullet starts a criterion (its marker stripped); a deeper bullet or a plain line after
+ * it is folded into it. Without bullets, every line starts one except a When / Then / And / But line,
+ * which is folded into the one above. Text before the first criterion (a preamble above the bullets)
+ * is not a criterion and is dropped. `[]` when there is nothing to count.
+ *
+ * ⚠ `countCriteriaLines(t, o) === extractCriteria(t, o).length` ALWAYS — the count is defined as
+ * this list's length, so the number on Reports → Stories and the criteria Story health labels can
+ * never disagree.
+ */
+export function extractCriteria(text: string | null | undefined, opts: { jira: boolean }): string[] {
+  const kept = keptLines(text, opts.jira);
+  const bullets = kept.map((l) => bulletOf(l, opts.jira));
+  const depths = bullets.filter((b): b is Bullet => b != null).map((b) => b.depth);
+  const out: string[] = [];
+  const fold = (line: string): void => {
+    if (out.length > 0) out[out.length - 1] = `${out[out.length - 1]} ${line}`.trim();
+  };
+  if (depths.length > 0) {
+    const top = Math.min(...depths);
+    kept.forEach((l, i) => {
+      const b = bullets[i];
+      const body = b != null ? l.replace(MARKER_RE, '').trim() : l.trim();
+      if (b != null && b.depth === top) out.push(body);
+      else fold(body);
+    });
+    return out;
   }
-  let n = 0;
-  for (const l of kept) if (n === 0 || !CONTINUATION_RE.test(l.trim())) n += 1;
-  return n;
+  for (const l of kept) {
+    const t = l.trim();
+    if (out.length === 0 || !CONTINUATION_RE.test(t)) out.push(t);
+    else fold(t);
+  }
+  return out;
+}
+
+/** Criteria in one block of text by the rule in the header; 0 when there is nothing to count. */
+export function countCriteriaLines(text: string | null | undefined, opts: { jira: boolean }): number {
+  return extractCriteria(text, opts).length;
 }
 
 /** The section of a DESCRIPTION under an "Acceptance criteria" heading (or label line), up to the

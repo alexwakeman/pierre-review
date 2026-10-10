@@ -57,6 +57,8 @@ import type {
   StoryReportDropped,
   StoryReportPopulation,
   StoryReportRange,
+  StoryCriterionLabel,
+  StoryLevelLabels,
   TicketAssessment,
 } from '@pierre-review/shared';
 
@@ -1857,6 +1859,9 @@ export const trackerTickets = pgTable(
     checkedAt: timestamp('checked_at', { withTimezone: true, mode: 'date' }).notNull(),
     nextCheckAt: timestamp('next_check_at', { withTimezone: true, mode: 'date' }).notNull(),
     changedAt: timestamp('changed_at', { withTimezone: true, mode: 'date' }),
+    // See the sqlite twin (migration pg 0085).
+    issueCreatedAt: timestamp('issue_created_at', { withTimezone: true, mode: 'date' }),
+    issueResolvedAt: timestamp('issue_resolved_at', { withTimezone: true, mode: 'date' }),
   },
   (t) => ({
     accountPrKeyUx: uniqueIndex('tracker_tickets_account_pr_key').on(t.accountId, t.prId, t.issueKey),
@@ -1962,5 +1967,30 @@ export const storyReports = pgTable(
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),
+  }),
+);
+
+// STORY LABELS — see the sqlite twin (migration pg 0086).
+export const storyLabels = pgTable(
+  'story_labels',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    ident: text('ident').notNull(),
+    textHash: text('text_hash').notNull(),
+    rubricVersion: integer('rubric_version').notNull(),
+    criteriaJson: jsonb('criteria_json').$type<StoryCriterionLabel[]>().notNull(),
+    storyJson: jsonb('story_json').$type<StoryLevelLabels>().notNull(),
+    criteriaCount: integer('criteria_count').notNull(),
+    model: text('model').notNull(),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (t) => ({
+    identityUx: uniqueIndex('story_labels_identity_ux').on(t.accountId, t.ident, t.rubricVersion, t.textHash),
   }),
 );

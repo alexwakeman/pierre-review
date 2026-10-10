@@ -121,7 +121,7 @@ const now = () => clock;
 const calls: string[] = [];
 
 // Jira's answers, per key. `status` / `assignee` / the criteria fields move between tests.
-const jira = new Map<string, { status?: number; summary?: string; statusName?: string; category?: string; type?: string }>();
+const jira = new Map<string, { status?: number; summary?: string; statusName?: string; category?: string; type?: string; created?: string }>();
 const issueJson = (key: string): string => {
   const j = jira.get(key) ?? {};
   return JSON.stringify({
@@ -136,6 +136,7 @@ const issueJson = (key: string): string => {
       customfield_1: `AC of ${key}`,
       customfield_2: `DoD of ${key}`,
       customfield_3: `Notes of ${key}`,
+      ...(j.created != null ? { created: j.created, resolutiondate: null } : {}),
     },
   });
 };
@@ -155,6 +156,9 @@ const setPr = (id: number, title: string, branch: string | null = null, state = 
 const rows = (accountId: number, prIds: number[]) => readStoredTickets(ctx, accountId, prIds);
 const pass = (accountId = A, budget?: number) =>
   runAccountPass(ctx, accountId, { transport, now, ...(budget != null ? { budget } : {}) });
+/** The cron tick's pass: the only one that runs the ticket-dates nudge. */
+const tickPass = (accountId = A, budget?: number) =>
+  runAccountPass(ctx, accountId, { transport, now, datesNudge: true, ...(budget != null ? { budget } : {}) });
 
 beforeAll(async () => {
   sqlite = new Database(':memory:');
@@ -192,6 +196,7 @@ beforeAll(async () => {
   );
   // The core tracker tables (migration 0088), exactly as a real install has them.
   sqlite.exec(migration('0088_issue_tracker.sql'));
+  sqlite.exec(migration('0098_tracker_ticket_dates.sql'));
   // The PR columns the GitHub Issues linker reads (migration 0089).
   for (const col of ['github_node_id text', 'updated_at integer', 'closing_issues text', 'closing_issues_checked_at integer', 'linear_links text', 'linear_links_root text', 'linear_links_checked_at integer', 'number integer']) {
     try {
@@ -610,6 +615,68 @@ describe('8. merged pull requests', () => {
     clock += OK_TTL_MS + 1000; // a merged PR's row is never TTL-refreshed
     await pass();
     expect(calls).toHaveLength(0);
+  });
+
+  it('the ticket-dates nudge: a dateless row on a merged PR is read ONCE for its dates, never again', async () => {
+    setPr(10, 'No ticket', null);
+    merge(20, 'ENG-60 old work', 10 * DAY);
+    merge(21, 'ENG-61 old work', 12 * DAY);
+    await pass();
+    // As a row read before migration 0098 looks: no dates, read long ago. A restart (reset) follows.
+    sqlite.exec(`UPDATE tracker_tickets SET issue_created_at = NULL, fetched_at = ${Math.floor((clock - 2 * DAY) / 1000)}`);
+    resetTrackerWorker();
+    enableTrackerWorker(true);
+    jira.set('ENG-60', { created: '2026-09-01T00:00:00.000+0000' });
+    calls.length = 0;
+    // A repo-walk kick's pass never nudges (it sits outside the tick's budget).
+    await pass();
+    expect(calls).toHaveLength(0);
+    await tickPass();
+    expect(keysRead().sort()).toEqual(['ENG-60', 'ENG-61']);
+    const byKey = new Map((await rows(A, [20, 21])).map((r) => [r.issueKey, r]));
+    expect(byKey.get('ENG-60')?.issueCreatedAt?.toISOString()).toBe('2026-09-01T00:00:00.000Z');
+    expect(byKey.get('ENG-60')?.issueResolvedAt).toBeNull();
+    // ENG-61's tracker gave no date: tried once, never looped on.
+    expect(byKey.get('ENG-61')?.issueCreatedAt).toBeNull();
+    calls.length = 0;
+    clock += OK_TTL_MS + 1000;
+    await tickPass();
+    expect(calls).toHaveLength(0);
+  });
+
+  it('⚠ a repo-scoped pass over a repo that owes nothing never switches the nudge off for the account', async () => {
+    setPr(10, 'No ticket', null);
+    merge(20, 'ENG-62 old work', 10 * DAY);
+    await pass();
+    sqlite.exec(`UPDATE tracker_tickets SET issue_created_at = NULL, fetched_at = ${Math.floor((clock - 2 * DAY) / 1000)}`);
+    resetTrackerWorker();
+    enableTrackerWorker(true);
+    jira.set('ENG-62', { created: '2026-09-02T00:00:00.000+0000' });
+    // A second reading repo of the account, with nothing owed.
+    sqlite.exec('INSERT INTO workspace_repos (account_id, workspace_id, repo_id) VALUES (1,2,201)');
+    try {
+      calls.length = 0;
+      await runAccountPass(ctx, A, { transport, now, repoId: 201, datesNudge: true });
+      expect(calls).toHaveLength(0);
+      await tickPass();
+      expect(keysRead()).toEqual(['ENG-62']);
+      expect((await rows(A, [20]))[0]?.issueCreatedAt?.toISOString()).toBe('2026-09-02T00:00:00.000Z');
+    } finally {
+      sqlite.exec('DELETE FROM workspace_repos WHERE repo_id = 201');
+    }
+  });
+
+  it('the ticket-dates nudge takes only what the pass budget leaves', async () => {
+    setPr(10, 'No ticket', null);
+    for (const [i, id] of [20, 21, 22].entries()) merge(id, `ENG-7${i} old`, (10 + i) * DAY);
+    await pass();
+    sqlite.exec(`UPDATE tracker_tickets SET issue_created_at = NULL, fetched_at = ${Math.floor((clock - 2 * DAY) / 1000)}`);
+    resetTrackerWorker();
+    enableTrackerWorker(true);
+    calls.length = 0;
+    // Budget 1: the pass's own work (none) leaves 1 → one ticket nudged.
+    await tickPass(A, 1);
+    expect(calls).toHaveLength(1);
   });
 
   it('never a closed-unmerged PR, never one merged outside the 90-day window', async () => {

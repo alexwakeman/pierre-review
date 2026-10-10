@@ -12,6 +12,7 @@ import {
   type RawResponse,
 } from '../jira/fetch.js';
 import type { FetchedTicket, TrackerCall } from '../types.js';
+import { ticketDateFields, trackerDate } from '../dates.js';
 
 // LINEAR — THE CLIENT (docs/TRACKERS.md § Linear). Every Linear call goes through `linearGraphql`.
 //
@@ -169,6 +170,8 @@ export const LINEAR_ISSUE_QUERY = /* GraphQL */ `
       title
       description
       url
+      createdAt
+      completedAt
       state { name type }
       assignee { id name displayName avatarUrl }
       project { name }
@@ -185,6 +188,9 @@ interface GqlIssue {
   title?: string | null;
   description?: string | null;
   url?: string | null;
+  // ISO-8601; `completedAt` null until the issue completes (a CANCELED issue has none either).
+  createdAt?: string | null;
+  completedAt?: string | null;
   state?: { name?: string | null; type?: string | null } | null;
   assignee?: { id?: string | null; name?: string | null; displayName?: string | null; avatarUrl?: string | null } | null;
   project?: { name?: string | null } | null;
@@ -247,6 +253,10 @@ export function toLinearTicket(key: string, issue: GqlIssue): FetchedTicket {
         : [],
     omittedCandidates: 0,
     url: httpsOnly(issue.url),
+    ...ticketDateFields({
+      issueCreatedAt: trackerDate(issue as unknown as Record<string, unknown>, 'createdAt'),
+      issueResolvedAt: trackerDate(issue as unknown as Record<string, unknown>, 'completedAt'),
+    }),
   };
 }
 

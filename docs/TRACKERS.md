@@ -140,6 +140,41 @@ detected ticket in `tracker_tickets`; every consumer reads the row.
 - `changed_at` moves ONLY when membership or story text moves (`storyOrMembershipMoved`); a status
   or assignee change is not a change (the ticket review would re-bill for nothing).
 
+## Created and resolved dates (`tracker/dates.ts`, `tracker/dates-backfill.ts`)
+
+Every reader returns the ticket's OWN created / resolved instants on `FetchedTicket`
+(`issueCreatedAt` / `issueResolvedAt`), and the worker stores them on `tracker_tickets`
+(`issue_created_at` / `issue_resolved_at`, sqlite `0098` / pg `0085`). Story health (Reports → Stories)
+buckets refinement by the CREATED week.
+
+| Provider | Created | Resolved | Cost |
+|---|---|---|---|
+| Jira | `fields.created` | `fields.resolutiondate` | none — the issue read is already `?fields=*all` |
+| GitHub Issues | `createdAt` | `closedAt` | two scalars on the existing issue query |
+| Linear | `createdAt` | `completedAt` | two scalars on the existing issue query |
+
+- **The positive-answer rule** (`trackerDate`, ONE parse for all three): a field ABSENT from the
+  answer is `undefined` and its key is left out of the write, so the stored value stands; `null` means
+  the tracker said there is none (an unresolved ticket) and clears the column; an UNPARSEABLE value is
+  treated as not received, never as none. Jira's `+hhmm` offset is normalised before parsing.
+- **Not story text**: neither column moves `changed_at` (`storyOrMembershipMoved` is unchanged), so a
+  date arriving never re-runs the ticket review.
+- **A copied row carries the source's dates** (`withoutIdentity`), like every other column.
+- **THE TICKET-DATES NUDGE** (`tracker/dates-backfill.ts`). An OPEN PR's rows are re-read on their TTL
+  and fill by themselves; a MERGED PR's rows are history (missing-only mode) and would stay dateless.
+  So `runAccountPass`, ONLY on the cron tick's unscoped pass (`datesNudge`, passed by `runTrackerTick`
+  alone — a repo-walk kick never nudges, because those passes sit outside `MAX_PER_TICK`) and ONLY
+  when its own pass left nothing due (`pending === 0`, no forced keys), hands
+  the worker at most `DATES_BACKFILL_BATCH` (6) tickets out of what remains of the pass budget: tickets
+  whose 'ok' row on a PR merged in the last 90 days has no created date and was read more than a TTL
+  ago. They go through the worker's ONE body (`syncPrTickets` with `datesOwed`): a stored sibling that
+  already HAS the dates is copied (no call), else the ticket is read — under the same backoff and
+  budget as any read. Ticks are two minutes apart, so the backlog drains at a walking pace, never a
+  burst. ⚠ Each ticket is tried ONCE per process (`tried`, in memory): one whose tracker gives no
+  created date is never looped on. Once a scan over EVERY reading repo finds nothing owed the account
+  is DONE until restart or a settings change (`reopenDatesBackfill`); ⚠ a scan narrowed to one repo
+  (`fullScope` false) never marks it done — one quiet repo says nothing about the others.
+
 ## Peers — the ticket review's source
 
 `tracker/peers.ts`, read by the ticket review and a deep PR review through

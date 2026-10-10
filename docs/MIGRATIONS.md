@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0084` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
+  ⚠ pg `0052`–`0086` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -1159,3 +1159,26 @@ It REPLACED the per-story notes, whose plugin migration `0041_story_notes` was n
 DELETED (both dialects). A dev DB that ran it keeps an orphan `pro_story_notes` table (harmless) and
 its `pro_migrations` record — never reuse the file name `0041_story_notes.sql`.
 ⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS` throughout).
+
+### `0098_tracker_ticket_dates` (pg `0085`) — a ticket's own created / resolved dates
+
+Additive: two NULLABLE timestamp columns on `tracker_tickets` — `issue_created_at` and
+`issue_resolved_at` (Jira `created` / `resolutiondate`, GitHub Issues `createdAt` / `closedAt`, Linear
+`createdAt` / `completedAt`). No default and no backfill in SQL: a row read before this migration
+stays NULL until its next read (open PRs: the 30-minute TTL; merged PRs: the worker's bounded
+ticket-dates nudge, `tracker/dates-backfill.ts`). The positive-answer rule applies (an absent field
+keeps the stored value; null clears). Neither column moves `changed_at`. Journal `when`
+`1791878400000` in both folders (after `0097` / pg `0084`). Contract: docs/TRACKERS.md § Created and
+resolved dates. ⚠ The tracker test suites exec single migrations by name — each one that execs
+`0088_issue_tracker.sql` now execs `0098` too. ⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS`).
+
+### `0099_story_labels` (pg `0086`) — Story health's model labels
+
+Additive: a new table `story_labels` — `account_id` (FK `accounts`, cascade), `ident`, `text_hash`,
+`rubric_version`, `criteria_json`, `story_json`, `criteria_count`, `model`, `cost_usd`,
+`input_tokens`, `output_tokens`, `created_at`; UNIQUE `story_labels_identity_ux` on (account_id,
+ident, rubric_version, text_hash) — the label run's insert is `ON CONFLICT DO NOTHING` on exactly
+that target. No workspace column (a ticket's story is one fact per account) and so no composite FK
+(no request body names a row). In `accountScopedTables()`, erased explicitly, and checked by
+`verify:isolation`. Journal `when` `1791964800000` in both folders (after `0098` / pg `0085`).
+Contract: docs/CLAUDE-REVIEW.md § Story labels. ⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS`).

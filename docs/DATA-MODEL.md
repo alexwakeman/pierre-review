@@ -651,6 +651,28 @@ derived from now, so a dormant workspace's report stays current. ⚠ Every read 
 `account_id` (`review/story-report/manager.ts`). Named composite FK onto `workspaces (id,
 account_id)`, cascade (a report is regenerable); in `accountScopedTables()` and erased explicitly.
 
+## `story_labels` — Story health's model labels (CORE; sqlite `0099` / pg `0086`)
+
+One row per (account, story `ident`, `rubric_version`, `text_hash`): Haiku 5.5's answers to the FIXED
+story rubric (`review/story-labels/prompt.ts`, shared `STORY_RUBRIC_VERSION`) — `criteria_json`
+(`StoryCriterionLabel[]`, one entry per `extractCriteria` line, `n` 1-based and in order: `testable`,
+`bundled`, `dependsOnOtherWork`) and `story_json` (`StoryLevelLabels`: `outOfScopeStated`,
+`dependencyNamed`, `nonCodeWork`), plus the call's model, cost and tokens. Written ONLY by the local
+label run (`review/story-labels/manager.ts`, insert `ON CONFLICT DO NOTHING` on the unique). ⚠ A row
+is CURRENT only while its `rubric_version` is today's AND its `text_hash` equals today's hash of the
+text the labeller would be sent (`db/story-label-input.ts` — title, clipped description, the
+numbered criteria, and the provider's text rule). An edited ticket or a rubric bump simply stops
+counting the old row; nothing deletes it. `userValueStated` is NOT stored: it is CODE
+(`db/story-user-value.ts`). No workspace column: the ident already names the site, and a story is one
+fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`); in
+`accountScopedTables()` and erased explicitly.
+
+`tracker_tickets.issue_created_at` / `issue_resolved_at` (sqlite `0098` / pg `0085`): the ticket's own
+created / resolved instants. ⚠ The table is ONE ROW PER (account, PR, key), so several rows can carry a
+ticket's date; Story health takes the freshest-READ non-null one (`createdDatesFor`). NULL = not read
+since 0098, or the tracker said none — never "created at epoch". Not story text: never moves
+`changed_at`.
+
 ## The automation vocabulary — `AUTOMATION_VENDORS`, `ReviewerRole`, `AutomatedReviewerKind`
 
 Three vocabularies describe an automated actor, and they are **orthogonal axes, not one enum**:

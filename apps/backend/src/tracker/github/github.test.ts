@@ -337,6 +337,7 @@ beforeAll(async () => {
         'linear_links text, linear_links_root text, linear_links_checked_at integer);',
   );
   sqlite.exec(migration('0088_issue_tracker.sql'));
+  sqlite.exec(migration('0098_tracker_ticket_dates.sql'));
   ctx = {
     db: drizzle(sqlite),
     isPg: false,

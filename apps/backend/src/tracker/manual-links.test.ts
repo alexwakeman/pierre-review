@@ -213,6 +213,7 @@ beforeAll(async () => {
       'issue_provider text, issue_base_url text, issue_project_keys text);',
   );
   sqlite.exec(migration('0088_issue_tracker.sql'));
+  sqlite.exec(migration('0098_tracker_ticket_dates.sql'));
 
   ctx = {
     db: drizzle(sqlite),

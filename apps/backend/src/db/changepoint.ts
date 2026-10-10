@@ -10,7 +10,11 @@
 // median), floored at `minScale` so a near-constant series can't divide by ~0 into
 // significance. Nulls (no-data weeks — the null-vs-zero policy) are skipped, not imputed.
 
-export const CHANGEPOINT_Z = 3; // same bar as ANOMALY_Z — ≥3 robust SDs is an exception
+import { CHANGEPOINT_Z } from '@pierre-review/shared';
+
+// Same bar as ANOMALY_Z — ≥3 robust SDs is an exception. Spelled ONCE in packages/shared (the Story
+// health ⓘ prints it).
+export { CHANGEPOINT_Z };
 export const MIN_BASELINE_POINTS = 4; // fewer and "typical" isn't yet meaningful, per side
 
 export interface Changepoint {

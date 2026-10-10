@@ -2,6 +2,7 @@ import type { JiraAcCandidate, JiraFieldOption } from '@pierre-review/shared';
 import { extractAcCandidates } from './candidates.js';
 import { JiraFetchError, jiraGetJson, type JiraFetchPolicy, type JiraTransport } from './fetch.js';
 import { fieldValueToText, jiraWikiToMarkdown } from './text.js';
+import { ticketDateFields, trackerDate } from '../dates.js';
 
 // The Jira REST v2 calls Limn makes — exactly two: the field list (the Settings connection check)
 // and one issue with every field (title, description, issue type, status, assignee and the
@@ -134,6 +135,9 @@ export interface JiraIssueText {
   assignee: JiraIssueAssignee | null;
   candidates: JiraAcCandidate[];
   omittedCandidates: number;
+  // `created` / `resolutiondate` (../dates.ts: undefined = not in the answer, null = none).
+  issueCreatedAt?: Date | null;
+  issueResolvedAt?: Date | null;
 }
 
 const STATUS_CATEGORIES: readonly string[] = ['new', 'indeterminate', 'done'];
@@ -212,6 +216,8 @@ export async function fetchJiraIssue(call: JiraCall, key: string): Promise<JiraI
     assignee: assigneeOf(f.assignee),
     candidates,
     omittedCandidates: omitted,
+    // `*all` carries both; an unresolved ticket's `resolutiondate` is null.
+    ...ticketDateFields({ issueCreatedAt: trackerDate(f, 'created'), issueResolvedAt: trackerDate(f, 'resolutiondate') }),
   };
 }
 

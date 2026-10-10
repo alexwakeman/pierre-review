@@ -1169,6 +1169,20 @@ the agent may never quote a rate from. ⚠ Every ticket key in the report must b
 server drops the rest); the first `submit_report` wins. It replaced the plugin's per-story notes.
 [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story report.
 
+**Story health** (Reports → Stories, "Last 90 days", a FIXED labelled span) — core
+`GET /api/story-health` (Pro, 402): 13 weekly points per series, REFINEMENT by the ticket's CREATED
+week (`tracker_tickets.issue_created_at`, sqlite `0098` / pg `0085`; else first PR opened, counted),
+DELIVERY by last merge. ⚠ TWO POPULATIONS: refinement is every ticket with an open OR merged PR
+written in the span, never only the merged ones (that keeps the quick stories and fakes a shift at
+the right edge). The pure fold is `db/story-health-fold.ts`. ⚠ Model-made series read ONLY
+CURRENT `story_labels` rows (sqlite `0099` / pg `0086`: rubric version AND text hash match today's
+text, `db/story-label-input.ts`) and are OMITTED when `config.aiEnabled` is false; the label run
+(`POST /api/story-health/label`, Haiku through `cheapComplete`) is agentic, local-only. ⚠ A rubric
+edit bumps `STORY_RUBRIC_VERSION`; `countCriteriaLines` IS `extractCriteria(...).length`. ⚠ A RATE
+shift is a two-proportion test on POOLED counts (`STORY_SHIFT_*` in shared: ≥15 stories a side, ≥10
+points, |z| ≥ 2.58), never a changepoint over weekly percentages — that flagged one story's move.
+[docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story labels.
+
 **The People report** (Reports → People) — a multi-select picker of humans AND bots, one report
 with a SECTION per pick; contract in
 [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § "The People report".
@@ -1507,7 +1521,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0084` and plugin `0034`–`0037` + `0040` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0086` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

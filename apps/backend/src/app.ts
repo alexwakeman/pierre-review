@@ -46,6 +46,7 @@ import { searchRoutes } from './api/routes/search.js';
 import { dailyBriefRoutes } from './api/routes/daily-brief.js';
 import { dependencyMergeRoutes } from './api/routes/dependency-merge.js';
 import { flowRoutes } from './api/routes/flow.js';
+import { storyHealthRoutes } from './api/routes/story-health.js';
 import { billingRoutes } from './api/routes/billing.js';
 import { contactRoutes } from './api/routes/contact.js';
 import { botTriageRoutes } from './api/routes/bot-triage.js';
@@ -266,6 +267,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   // db/pr-intervals.ts; there is no narration seam and no plugin half. The route carries the 402
   // itself (the ENGINE stays capability-blind — verify:isolation calls that fold directly).
   await app.register(flowRoutes);
+  // Reports → Stories → Story health (Pro on `periodReports`, both modes; the LABEL RUN that feeds
+  // its model-made series is agentic and registers in `registerAgenticRoutes`).
+  await app.register(storyHealthRoutes);
   // Bot-triage platform (CORE code, always registered — but TWO tiers inside one file): free
   // detection/override + the governance list + confirm-gated bot-thread resolve; PAID (`botDepth`)
   // ROI analytics, the volume family and the seat prices. Account-scoped; no AI on either tier.

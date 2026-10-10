@@ -17,6 +17,7 @@ import { reconcileFixesOnStartup } from '../coding/ai-fix/manager.js';
 import { registerAiResolveRoutes } from '../coding/ai-resolve/routes.js';
 import { registerStoryReportRoutes } from './story-report/routes.js';
 import { reconcileStoryReportsOnStartup } from './story-report/manager.js';
+import { registerStoryLabelRoutes } from './story-labels/routes.js';
 import { runOpen } from '../api/routes/conflicts.js';
 
 // THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, the chat, auto
@@ -56,6 +57,9 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // The STORY REPORT (Reports → Stories): one Haiku run across 10-20 code-picked stories. Pro on
   // `periodReports` as well (its routes 402), and agentic, so it registers here and nowhere else.
   registerStoryReportRoutes(app, ctx);
+  // STORY LABELS (Reports → Stories → Story health): Haiku labels each story's criteria against a
+  // fixed rubric. Pro on `periodReports` too, and agentic — so here and nowhere else.
+  registerStoryLabelRoutes(app, ctx);
   return ctx;
 }
 

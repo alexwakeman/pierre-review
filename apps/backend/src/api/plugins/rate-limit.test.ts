@@ -468,6 +468,14 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/story-reports/12/cancel')).not.toContain('ai');
   });
 
+  // Story health: the GET and the run's status are DB/memory reads; only the label run's POST bills.
+  it('tiers Story health: the label run POST on ai, everything else on read', () => {
+    expect(tiers('POST', '/api/story-health/label')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('GET', '/api/story-health/label')).toEqual(['read']);
+    expect(tiers('POST', '/api/story-health/label/cancel')).toEqual(['read']);
+    expect(tiers('GET', '/api/story-health')).toEqual(['read']);
+  });
+
   // /api/pro/bot-themes — the revived Bots "What they're flagging" panel. Both tiers land via
   // the /api/pro/ catch-all and are pinned here so the family's placement is explicit: the POST
   // /refresh is a real model spend (Haiku behind a payload-hash $0 cache) → the `ai` pair; the

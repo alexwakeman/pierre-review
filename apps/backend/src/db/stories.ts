@@ -126,7 +126,7 @@ export function reviewSummaryOf(
   };
 }
 
-async function workspaceSite(
+export async function workspaceSite(
   accountId: number,
   workspaceId: number,
 ): Promise<{ provider: TrackerProvider; apiRoot: string } | null> {

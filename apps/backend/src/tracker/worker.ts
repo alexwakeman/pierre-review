@@ -15,6 +15,8 @@ import { prepareTrackerCall } from './calls.js';
 import { refreshGithubIssuesUsage } from './github/issues-usage.js';
 import { JiraFetchError, type JiraTransport } from './jira/fetch.js';
 import type { DetectInput, DetectedTicket, LinkerPr, TrackerCall } from './types.js';
+import { ticketDateFields } from './dates.js';
+import { datesOwedFor, noteDatesTried, reopenDatesBackfill, resetDatesBackfill, DATES_BACKFILL_BATCH } from './dates-backfill.js';
 import {
   deleteStaleKeys,
   deriveAc,
@@ -222,6 +224,12 @@ export interface PassOptions {
    * re-label). An id also in `prIds` is treated as open.
    */
   mergedPrIds?: readonly number[];
+  /**
+   * Keys (per MERGED PR) whose stored 'ok' row predates the ticket dates (migration 0098): read
+   * again, once, so Story health can bucket them by created week (./dates-backfill.ts). A stored
+   * sibling that already HAS the dates is copied instead — no call.
+   */
+  datesOwed?: ReadonlyMap<number, ReadonlySet<string>>;
 }
 
 export interface PassStats {
@@ -272,6 +280,8 @@ interface Want {
   dueAt: number;
   /** Any OPEN PR on it. A merged-only ticket may be copied from a stored row instead of read. */
   hasOpen: boolean;
+  /** Read only to fill the ticket dates (`PassOptions.datesOwed`). */
+  datesOwed: boolean;
 }
 
 function errorCodeOf(err: unknown): { code: string; status: number | null } {
@@ -384,13 +394,15 @@ export async function syncPrTickets(
       const prior = mine.find((r) => r.issueKey === det.key);
       const missing = prior == null || prior.apiRoot !== wc.apiRoot || prior.provider !== wc.call.provider;
       const dueAt = prior == null ? 0 : new Date(prior.nextCheckAt).getTime();
+      // A merged PR's 'ok' row read before the ticket dates existed (./dates-backfill.ts): once.
+      const owesDates = merged && !missing && prior?.state === 'ok' && opts.datesOwed?.get(row.id)?.has(det.key) === true;
       if (merged) {
         // Missing-only: a row it never had, or a transient failure on its TTL. Nothing else.
         const failed = !missing && prior?.state === 'failed';
         if (failed && dueAt > t0) stats.mergedUnsettled.add(row.id); // retried on its TTL
-        if (!missing && !(failed && dueAt <= t0)) continue;
+        if (!missing && !(failed && dueAt <= t0) && !owesDates) continue;
       }
-      const due = missing || dueAt <= t0 || forced?.has(det.key) === true;
+      const due = missing || owesDates || dueAt <= t0 || forced?.has(det.key) === true;
       if (!due) {
         // Not due, but the key may have MOVED (branch → title, reordered): keep the cheap columns true.
         if (prior != null && (prior.detectedFrom !== det.from || prior.detectOrder !== det.order)) {
@@ -404,10 +416,19 @@ export async function syncPrTickets(
       }
       const k = `${wsId}|${det.key}`;
       const w =
-        wants.get(k) ?? { workspaceId: wsId, key: det.key, prs: [], missing: false, dueAt: Infinity, hasOpen: false };
+        wants.get(k) ?? {
+          workspaceId: wsId,
+          key: det.key,
+          prs: [],
+          missing: false,
+          dueAt: Infinity,
+          hasOpen: false,
+          datesOwed: false,
+        };
       w.prs.push({ prId: row.id, det, prior, merged });
       w.missing ||= missing;
       w.hasOpen ||= !merged;
+      w.datesOwed ||= owesDates;
       w.dueAt = Math.min(w.dueAt, forced?.has(det.key) ? -1 : dueAt);
       wants.set(k, w);
     }
@@ -423,6 +444,8 @@ export async function syncPrTickets(
     if (wc?.apiRoot == null) continue;
     const source = await storedSibling(ctx, accountId, wc.call!.provider, wc.apiRoot, w.key);
     if (source == null) continue;
+    // Owed the dates: a sibling read before 0098 has none to give — read it instead.
+    if (w.datesOwed && source.issueCreatedAt == null) continue;
     const at = new Date(now());
     const ac = deriveAc(
       parseCandidates(source.candidatesJson),
@@ -511,6 +534,8 @@ export async function syncPrTickets(
           assigneeAvatarUrl: issue.assignee?.avatarUrl ?? null,
           candidatesJson: JSON.stringify(issue.candidates),
           omittedCandidates: issue.omittedCandidates,
+          // Positive-answer: a date the read did not carry is left out (the stored one stands).
+          ...ticketDateFields(issue),
           fetchedAt: at,
           checkedAt: at,
           nextCheckAt: new Date(at.getTime() + OK_TTL_MS),
@@ -882,13 +907,14 @@ function reopenMergedWindow(accountId: number, repoId: number | null): void {
   for (const k of [...reopenAsked]) if (k.startsWith(`${accountId}|`)) reopenAsked.delete(k);
   mergedSettled.delete(accountId);
   mergedOwed.delete(accountId);
+  reopenDatesBackfill(accountId);
 }
 
 /** One bounded pass over an account's open PRs, and its merged PRs owed a row, in reading workspaces. */
 export async function runAccountPass(
   ctx: TrackerContext,
   accountId: number,
-  opts: PassOptions & { repoId?: number | null } = {},
+  opts: PassOptions & { repoId?: number | null; datesNudge?: boolean } = {},
 ): Promise<PassStats> {
   const nowMs = (opts.now ?? Date.now)();
   const ws = await readingWorkspaces(ctx, accountId);
@@ -897,6 +923,25 @@ export async function runAccountPass(
   const merged = await mergedCandidates(ctx, accountId, repoIds, nowMs);
   const stats = await syncPrTickets(ctx, accountId, prIds, { ...opts, mergedPrIds: merged.ids });
   noteMergedSettled(accountId, merged, stats.mergedUnsettled, nowMs);
+  // THE TICKET-DATES NUDGE (./dates-backfill.ts): the cron tick's pass only (`datesNudge`, never a
+  // repo-walk kick — those passes sit outside `MAX_PER_TICK`), only when the pass left nothing due,
+  // and only with what is left of its budget, at most `DATES_BACKFILL_BATCH` tickets — never a burst.
+  const left = Math.min(DATES_BACKFILL_BATCH, Math.max(0, opts.budget ?? PER_ACCOUNT_PASS) - stats.fetched - stats.failed);
+  if (opts.datesNudge === true && stats.pending === 0 && left > 0 && opts.force == null) {
+    const owed = await datesOwedFor(ctx, accountId, repoIds, nowMs, left, opts.repoId == null);
+    if (owed.prIds.length > 0) {
+      const extra = await syncPrTickets(ctx, accountId, [], {
+        ...opts,
+        mergedPrIds: owed.prIds,
+        datesOwed: owed.keys,
+        budget: left,
+      });
+      noteDatesTried(accountId, owed, extra.mergedUnsettled);
+      stats.fetched += extra.fetched;
+      stats.failed += extra.failed;
+      stats.copied += extra.copied;
+    }
+  }
   return stats;
 }
 
@@ -918,6 +963,7 @@ export function resetTrackerWorker(): void {
   reopenAsked.clear();
   mergedSettled.clear();
   mergedOwed.clear();
+  resetDatesBackfill();
   accountRunning.clear();
   accountAgain.clear();
   prKickRunning.clear();
@@ -1011,6 +1057,7 @@ export async function runTrackerTick(
         const s = await runAccountPass(ctx, accountId, {
           ...opts,
           budget: Math.min(PER_ACCOUNT_PASS, left),
+          datesNudge: true,
         });
         left -= s.fetched + s.failed;
       })();
