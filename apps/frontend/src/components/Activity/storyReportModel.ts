@@ -1,5 +1,7 @@
 import {
   reportingWindowShortTitle,
+  STORY_ISSUE_BY_ID,
+  type StoryReportPoint,
   type ReportingWindowInfo,
   type StoryReportBody,
   type StoryReportCandidate,
@@ -124,7 +126,18 @@ export function storyReportFigures(p: StoryReportPopulation): StoryReportFigure[
     label: 'Median working time',
     value: p.medianWorkingHours == null ? 'not measured' : formatWorkingTime(p.medianWorkingHours, p.workingDayHours),
   });
+  // The four story issues, counted by code over the whole window (absent on reports written before
+  // them; an issue nothing could be told about is left out, never "0 of 0").
+  // Over the stories Claude has read in their current form (`of`), never mixed with no-criteria stories.
+  for (const r of p.issueRates ?? []) {
+    if (r.of > 0) out.push({ key: `issue:${r.id}`, label: STORY_ISSUE_BY_ID[r.id].label, value: `${r.stories} of ${r.of} read` });
+  }
   return out;
+}
+
+/** The story issue a point is about, as its label; null when the point names none (or an old row). */
+export function pointIssueLabel(p: Pick<StoryReportPoint, 'issue'>): string | null {
+  return p.issue != null && STORY_ISSUE_BY_ID[p.issue] != null ? STORY_ISSUE_BY_ID[p.issue].label : null;
 }
 
 // ── Sections ──────────────────────────────────────────────────────────────────────────────────
@@ -230,7 +243,15 @@ export function storyReportMarkdown(record: StoryReportRecord): string {
     lines.push(`## ${STORY_REPORT_SECTION_TITLE[key]}`, '');
     if (key === 'doingWell' || key === 'fallingShort') {
       for (const p of body[key]) {
-        lines.push(`### ${escapeModelText(oneLine(p.title))}`, '', md(p.detail), '', `Tickets: ${ticketList(p.tickets, index)}`, '');
+        const issue = pointIssueLabel(p);
+        lines.push(
+          `### ${escapeModelText(oneLine(p.title))}${issue != null ? ` · ${issue}` : ''}`,
+          '',
+          md(p.detail),
+          '',
+          `Tickets: ${ticketList(p.tickets, index)}`,
+          '',
+        );
       }
     } else if (key === 'spotlights') {
       for (const s of body.spotlights) {

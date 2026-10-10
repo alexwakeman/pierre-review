@@ -3,6 +3,7 @@ import type {
   ReportingWindowInfo,
   TrackerProvider,
 } from './types.js';
+import type { StoryIssue, StoryIssueId } from './story-issues.js';
 
 // ── REPORTS → STORIES ───────────────────────────────────────────────────────────────────────────
 //
@@ -219,6 +220,23 @@ export interface StoryReportCandidate {
     notMet: number;
     missing: number;
   } | null;
+  /** `foldStoryIssues` over today's criteria + the CURRENT label (code halves only when none); null
+   *  when the ticket text was never read. Absent on old rows. */
+  issues?: StoryIssue[] | null;
+  /** Per issue: true = present, false = known absent, null = NOT KNOWN (no current label) —
+   *  `storyIssueStates`. null when the ticket text was never read. Absent on old rows. ⚠ An absent or
+   *  null answer is unknown, never "the team avoided it". */
+  issueStates?: Record<StoryIssueId, boolean | null> | null;
+}
+
+/** One story issue's whole-window rate (code, `storyIssueMeasure`): over the stories Claude has read in
+ *  their current form ONLY — never mixed with the no-criteria count (`noCriteriaFound`). */
+export interface StoryReportIssueRate {
+  id: StoryIssueId;
+  /** Stories in the window with this issue (`storyIssueMeasure` === true). */
+  stories: number;
+  /** Stories with a current label (`storyIssueMeasure` !== null) — the same stories for every issue. */
+  of: number;
 }
 
 /** Whole-window figures, computed by CODE over every story in the window (not the picks) — the ONLY
@@ -243,6 +261,8 @@ export interface StoryReportPopulation {
   workingDayHours: number;
   /** The fold hit `STORIES_MAX`: the figures cover the newest `storiesInWindow` only. */
   truncated: boolean;
+  /** Whole-window, CODE, `storyIssueMeasure`, in STORY_ISSUES order. Absent on old rows. */
+  issueRates?: StoryReportIssueRate[];
 }
 
 /** The span a report covers. For 'reporting', `reporting` carries the echo so the SPA names it
@@ -265,6 +285,9 @@ export interface StoryReportPoint {
   detail: string;
   /** ≥ 1 candidate key; a point left with none after validation is dropped. */
   tickets: string[];
+  /** Which of the four story issues the point is about (doing well: the issue the team avoids).
+   *  Absent on old rows and when the point fits none. */
+  issue?: StoryIssueId;
 }
 
 export type StoryReportTone = 'positive' | 'negative';
@@ -322,19 +345,22 @@ export interface StoryReportDropped {
 /** Per report section (doingWell, fallingShort, spotlights, themes, actions). `leftOut` is capped at
  *  `STORY_REPORT_MAX_CANDIDATES` — it lists skipped candidates, not report items. */
 export const STORY_REPORT_ITEMS_MAX = 6;
+/** The LEAN report: at most this many items per section. "Falling short" and actions are one per
+ *  story issue at most; spotlights and themes are no longer written (old stored reports still read). */
+export const STORY_REPORT_LEAN = { doingWell: 3, fallingShort: 4, actions: 4 } as const;
 /** Ticket keys per point / theme / action. */
 export const STORY_REPORT_TICKETS_PER_ITEM_MAX = 8;
 /** Characters, after trimming. Over-long text is cut (with "…"), never refused. */
 export const STORY_REPORT_TEXT_MAX = {
   headline: 200,
-  summary: 1200,
+  summary: 500,
   /** title, theme, spotlight headline */
   title: 160,
   /** A next-sprint action is a full instruction, not a heading: the first live report's actions
    *  ran 170-260 characters and were cut mid-word at 160. */
-  action: 400,
+  action: 260,
   /** detail, why */
-  detail: 900,
+  detail: 360,
   /** leftOut reason */
   reason: 300,
 } as const;

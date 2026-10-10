@@ -1,6 +1,12 @@
 import {
+  STORY_ISSUE_IDS,
   STORY_REPORT_GROUP_CAPS,
+  foldStoryIssues,
+  storyIssueMeasure,
+  storyIssueStates,
   storyReportWindowDays,
+  type StoryIssueInput,
+  type StoryReportIssueRate,
   type StoryReportCandidate,
   type StoryReportGroup,
   type StoryReportPopulation,
@@ -10,6 +16,8 @@ import {
 import type { BotScope } from './queries.js';
 import { getReportingWindow, measuredTo, reportingWindowInfo, type ReportingWindow } from './reporting-window.js';
 import { foldStories, type StoryInternals } from './stories.js';
+import { storyLabelInput } from './story-label-input.js';
+import { currentLabelRowsFor } from './story-health.js';
 
 // THE STORY REPORT'S PICKS — which 10-20 stories the agent reads (docs/CLAUDE-REVIEW.md § Story
 // report). CODE decides, never the model: four groups with caps, each pick carrying code-written
@@ -20,6 +28,12 @@ import { foldStories, type StoryInternals } from './stories.js';
 // change: ⚠ A STORY WITH NO CRITERIA (`criteria.source === 'none'`) IS NEVER FILED UNDER fell_short.
 // With nothing written to check against, its outcome is UNKNOWN, not bad; it falls through to
 // no_criteria.
+//
+// THE FOUR STORY ISSUES (shared `story-issues.ts`): each pick carries `foldStoryIssues` over today's
+// criteria + its CURRENT label with a per-issue state (`storyIssueStates`: true / false / null = not
+// known — never "avoided"), and `population.issueRates` counts every story in the window by THE rate
+// rule `storyIssueMeasure` (labelled stories only; "no criteria" stays its own `noCriteriaFound`) — so
+// the agent's rates come from code over the whole window, never from the picks.
 //
 // ⚠ DETERMINISTIC: the input order is the fold's (newest last merge first, then ident) and the sort is
 // stable with explicit tie-breaks, so the same data always picks the same stories — the fingerprint
@@ -36,11 +50,29 @@ export interface StorySelection {
 
 const pct = (vals: number[], v: number) => vals.filter((x) => x <= v).length / Math.max(vals.length, 1);
 
-/** The pure half: the picks and the whole-window figures over the fold's stories. */
+/** Whole-window issue rates by THE rate rule; a story whose input is null (ticket never read) is out. */
+export function storyIssueRates(inputs: Iterable<StoryIssueInput | null>): StoryReportIssueRate[] {
+  const rates = STORY_ISSUE_IDS.map((id): StoryReportIssueRate => ({ id, stories: 0, of: 0 }));
+  for (const input of inputs) {
+    if (input == null) continue;
+    const m = storyIssueMeasure(input);
+    for (const r of rates) {
+      const v = m[r.id];
+      if (v == null) continue;
+      r.of += 1;
+      if (v) r.stories += 1;
+    }
+  }
+  return rates;
+}
+
+/** The pure half: the picks and the whole-window figures over the fold's stories. `issueInputs` (by
+ *  ident; null = ticket text never read) adds the story issues — absent, no issue fields are written. */
 export function selectStories(
   stories: readonly StoryInternals[],
   workingDayHours: number,
   truncated = false,
+  issueInputs?: ReadonlyMap<string, StoryIssueInput | null>,
 ): StorySelection {
   const hrs = stories.map((s) => s.row.workingHours);
   const lines = stories.map((s) => s.row.linesChanged ?? 0);
@@ -118,9 +150,17 @@ export function selectStories(
     workingDayHours,
     truncated,
   };
+  if (issueInputs != null) population.issueRates = storyIssueRates(stories.map((s) => issueInputs.get(s.row.ident) ?? null));
 
   const candidates: StoryReportCandidate[] = picked.map((c) => {
     const r = c.s.row;
+    const input = issueInputs?.get(r.ident) ?? null;
+    const issues =
+      issueInputs == null
+        ? {}
+        : input == null
+          ? { issues: null, issueStates: null }
+          : { issues: foldStoryIssues(input), issueStates: storyIssueStates(input) };
     return {
       ident: r.ident,
       key: r.key,
@@ -143,6 +183,7 @@ export function selectStories(
             missing: r.review.missing,
           }
         : null,
+      ...issues,
     };
   });
   return { candidates, population, internalsByKey: new Map(picked.map((c) => [c.s.row.key, c.s])) };
@@ -188,6 +229,29 @@ export async function loadStorySelection(
 ): Promise<StorySelection & { range: StoryReportRange; trackerOn: boolean }> {
   const { window, range } = await storyReportWindow(accountId, scope.workspaceId, choice, nowMs);
   const fold = await foldStories(accountId, scope, nowMs, window);
-  const sel = selectStories([...fold.internals.values()], fold.workingDayHours, fold.truncated);
+  const stories = [...fold.internals.values()];
+  const issueInputs = await storyIssueInputs(accountId, stories);
+  const sel = selectStories(stories, fold.workingDayHours, fold.truncated, issueInputs);
   return { ...sel, range, trackerOn: fold.trackerOn };
+}
+
+/** Each story's issue input: today's criteria (the labeller's list — the ONE extractor) and its CURRENT
+ *  label (rubric + text hash match), in ONE batched, account-predicated label read. null = the ticket
+ *  text was never read. */
+export async function storyIssueInputs(
+  accountId: number,
+  stories: readonly StoryInternals[],
+): Promise<Map<string, StoryIssueInput | null>> {
+  const labels = stories.length > 0 ? await currentLabelRowsFor(accountId, stories.map((s) => s.row.ident)) : new Map();
+  const out = new Map<string, StoryIssueInput | null>();
+  for (const s of stories) {
+    if (s.ticket == null) {
+      out.set(s.row.ident, null);
+      continue;
+    }
+    const input = storyLabelInput(s.ticket, s.row.provider);
+    const label = input != null ? (labels.get(s.row.ident)?.get(input.textHash) ?? null) : null;
+    out.set(s.row.ident, { criteria: input?.criteria ?? [], label });
+  }
+  return out;
 }

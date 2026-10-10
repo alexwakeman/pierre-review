@@ -1524,6 +1524,29 @@ results and separate commits. Same rules as every agentic run: local only, `me.a
 no shell (and here no write tools either), cost on the usage ledger as `ai_resolve`. Full contract:
 [docs/MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Resolve with Claude.
 
+## Story issues (the one vocabulary)
+
+`packages/shared/src/story-issues.ts`, pure, tested in `apps/backend/src/db/story-issues.test.ts`. FOUR
+issues, folded in CODE from `extractCriteria` + the six stored labels (§ Story labels) — never a new
+model call:
+
+| Issue | Raised when |
+|---|---|
+| Unclear when done | no criteria (code), or any criterion not `testable` |
+| Too big | more than `STORY_TOO_BIG_CRITERIA` (8) criteria (code), any criterion `bundled`, or `nonCodeWork` |
+| Waits on other work | any criterion `dependsOnOtherWork` (the bullet asks to name it when `!dependencyNamed`) |
+| Scope not stated | `!outOfScopeStated` |
+
+- A label is used only when CURRENT (the caller's text-hash check) AND it judged today's number of
+  criteria (`usableStoryLabel`); without one only the code halves are raised.
+- ⚠ RATES over many stories use `storyIssueMeasure`, never `foldStoryIssues`: ONE population, the
+  LABELLED stories, for every issue. An unlabelled ticket with 12 criteria is NOT counted as Too big
+  (only "yes" answers could be counted that way), and a no-criteria story is NOT folded into Unclear
+  when done (it can never be labelled, so the rate would move with label coverage). No criteria is
+  counted apart, by code: the week's `noCriteria` (Story health) and `noCriteriaFound` (the report).
+  Story health and the story report's `issueRates` both read it.
+- Every sentence (chip detail, bullet) is TEMPLATED (`storyIssueChipText`, `storyIssueBullet`).
+
 ## Story report (Reports → Stories)
 
 ONE agentic report, for an engineering manager to take upstairs, on how well the team writes user
@@ -1547,9 +1570,18 @@ orphan `pro_story_notes` table from the never-committed plugin migration 0041, w
   (`StoryReportPopulation`). The rules are the trial harness's verbatim with ONE change: ⚠ a story
   with no criteria is NEVER fell_short (its outcome is unknown, not bad). The picks are a sample, so
   the prompt forbids quoting a rate from them; the card prints code's figures in their own row.
+- **The four story issues**: each pick carries `issues` (`foldStoryIssues` over today's criteria +
+  its CURRENT label, one batched label read; null = ticket never read) and `issueStates`
+  (`storyIssueStates`: true / false / null), and the population carries `issueRates`
+  (`storyIssueMeasure`, labelled stories only). The agent sees all four issues per pick with
+  `present: true | false | null` — ⚠ null is NOT KNOWN, never "the team avoids it", and an unlabelled
+  pick never reads as `issues: []` — and the rates as `{stories, ofReadStories}`. The agent sees them BY LABEL, groups its
+  points under the issues and sets an optional `issue` per point (kept only when it is one of the
+  four; otherwise the field is dropped, never the point). It may quote issue rates from
+  `wholeWindow.issueRates` only. Old rows lack all three fields and render without them.
 - **The run**: Haiku 5.5, an in-process `stories` MCP server with `list_candidates`, `get_story` and
-  `submit_report` (the trial harness's descriptions, zod shapes and SYSTEM text verbatim, plus ONE
-  sentence naming the nonce fence), `tools: []`, the built-ins denied, `ISOLATED_MCP` +
+  `submit_report` (the trial harness's descriptions, zod shapes and SYSTEM text verbatim, plus the
+  four-issues paragraph and ONE sentence naming the nonce fence), `tools: []`, the built-ins denied, `ISOLATED_MCP` +
   `ownToolsOnlyHook(['stories'])`, `settingSources: []`, a throwaway cwd, `maxTurns`
   `STORY_REPORT_MAX_TURNS` (40), `maxBudgetUsd` `STORY_REPORT_BUDGET_USD` ($1). The trial read all 18
   stories in 21 turns, 46 s, about $0.02. ⚠ Every tool answer is inside a per-run nonce fence: ticket
@@ -1568,14 +1600,16 @@ orphan `pro_story_notes` table from the never-committed plugin migration 0041, w
   `cancelled` at once; the run's own terminal write is a compare-and-set, so the cancel wins. The boot
   sweep marks an orphaned in-flight row failed `interrupted`. Spend: `recordAiUsage`, feature
   `story_report`.
-- **Currency**: sha256 over the window choice + the picked idents + each pick's latest ticket review
+- **Currency**: sha256 over a format tag (`STORY_REPORT_FORMAT`, `story-report-v2` since the four
+  issues — older reports read stale) + the window choice + the picked idents + each pick's latest ticket review
   id and its PRs' `[id, state, mergedAt]` — nothing derived from now. A different fingerprint today
   shows the stored report as `stale`; nothing re-runs it by itself.
 
 ## Story labels (Reports → Stories → Story health)
 
-The model half of Story health: Haiku 5.5 answers a FIXED rubric about each story's criteria, and the
-weekly series read the stored answers. Everything else on that section is code.
+The model half of Story health (and of the four story issues everywhere): Haiku 5.5 answers a FIXED
+rubric about each story's criteria; code folds the answers into the issues (§ Story issues), and
+Story health's refinement panel is one "% of stories" series per issue. Everything else is code.
 
 - **Where**: `src/review/story-labels/` — `prompt.ts`, `validate.ts`, `manager.ts`, `routes.ts`; the
   input (what is sent, and so which label is current) is core `db/story-label-input.ts`; the reads and
@@ -1583,15 +1617,15 @@ weekly series read the stored answers. Everything else on that section is code.
   `packages/shared/src/story-health.ts`. Routes: docs/API.md § Story health.
 - **Gating**: agentic, so LOCAL-ONLY — registered only through `registerAgenticRoutes` — AND Pro with
   the rest of Reports (`periodReports`, 402 before any DB work). `GET /api/story-health` reports
-  `labels: config.aiEnabled`; when false every label series is omitted, never half-drawn.
-- **THE RUBRIC** is the measured prototype's prompt VERBATIM (40 stories × 2 runs; Cohen's κ in shared
-  `STORY_LABEL_AGREEMENT`) minus three questions: `vague` (κ 0.56) and `scopeStated` (κ 0.48) were
-  dropped, and `userValueStated` is CODE (`db/story-user-value.ts`: the "As a … I want … so that"
-  template, or a "so that" clause naming a beneficiary). Per criterion: `testable`, `bundled`,
+  `labels: config.aiEnabled`; when false all four refinement series are omitted (the panel prints one
+  sentence), never half-drawn.
+- **THE RUBRIC** is the measured prototype's prompt VERBATIM (40 stories × 2 runs; Cohen's κ 0.67–0.85
+  per kept label) minus three questions: `vague` (κ 0.56), `scopeStated` (κ 0.48) and who benefits.
+  Per criterion: `testable`, `bundled`,
   `dependsOnOtherWork`; per story: `outOfScopeStated`, `dependencyNamed`, `nonCodeWork`. ⚠ ONE WORD
   CHANGED IS A NEW RUBRIC: bump `STORY_RUBRIC_VERSION` in the same commit (it is in the row's
-  identity, so every story relabels and old rows stop counting), and a question whose meaning changes
-  gets a NEW series id — renamed, never redefined.
+  identity, so every story relabels and old rows stop counting). The four issues are folded from the
+  answers on READ, so changing the fold needs no relabel.
 - **The input**: the criteria are `extractCriteria` over the criteria field, else the description's
   "Acceptance criteria" section — the SAME list `countCriteriaLines` counts (the count is defined as
   its length) — numbered, each clipped to 500 characters; the description is colour-stripped and
@@ -1603,8 +1637,8 @@ weekly series read the stored answers. Everything else on that section is code.
   (`pickReviewNonce` over every fenced string) and the prompt says it is data.
 - **Validation** (`validateStoryLabels`): JSON; EXACTLY one criterion entry per numbered criterion with
   `n` = 1, 2, 3 … in order; booleans strict (`true`/`false` or exactly `"true"`/`"false"`). Anything
-  else FAILS — not stored, retried on the next press. Never repaired: a shifted criterion would move
-  every criterion-weighted percentage.
+  else FAILS — not stored, retried on the next press. Never repaired: a shifted criterion would point
+  an issue at the wrong criterion.
 - **The run**: `POST /api/story-health/label {workspaceId}` labels the span's refinement-bucketed
   stories with criteria and no current label, newest first, at most `STORY_LABEL_RUN_CAP` (150),
   `STORY_LABEL_CONCURRENCY` (4) calls at once. ONE run per ACCOUNT, claimed SYNCHRONOUSLY before the
@@ -1616,15 +1650,15 @@ weekly series read the stored answers. Everything else on that section is code.
   from tokens at Haiku's rates (the ambient path reports no dollar figure). The run stops STARTING
   calls once its recorded spend reaches `STORY_LABEL_BUDGET_USD` (default $1); at most
   CONCURRENCY − 1 small calls already in flight finish past it. Measured noise of the labels on a
-  weekly rate: median 2–4 points, p90 7–12 — which is why every label series floors the shift test at
-  `STORY_LABEL_NOISE.typicalPoints`.
+  weekly rate: median 2–4 points, p90 7–12 (`STORY_LABEL_NOISE`, quoted in the ⓘ) — under the shift
+  test's `STORY_SHIFT_MIN_POINTS` floor.
 - **Storage**: `story_labels` (sqlite `0099` / pg `0086`; docs/DATA-MODEL.md), insert
   `ON CONFLICT DO NOTHING` on (account, ident, rubric version, text hash): the first answer stands.
 
-## Sprint assessment (Reports → This sprint → "Assess with code")
+## Sprint assessment (Reports → This sprint → "Check against code")
 
-One Sonnet 5 run per ticket, on demand, that judges the ticket's criteria against the code before
-anyone builds it. LOCAL ONLY (`registerAgenticRoutes`) AND Pro on `periodReports` (402 first).
+One Sonnet 5 run per ticket, on demand, that checks the ticket against the code before anyone
+builds it. LOCAL ONLY (`registerAgenticRoutes`) AND Pro on `periodReports` (402 first).
 
 - **Where**: `src/review/sprint-assess/` — `agent.ts`, `prompts.ts`, `schema.ts`, `validate.ts`,
   `manager.ts`, `routes.ts`. Contract: `packages/shared/src/sprint-stories.ts`. Routes: docs/API.md §
@@ -1636,15 +1670,25 @@ anyone builds it. LOCAL ONLY (`registerAgenticRoutes`) AND Pro on `periodReports
   `ownToolsOnlyHook(['sprint'])`, ONE `submit_assessment` tool (first submit wins). Budget
   `SPRINT_ASSESS_BUDGET_USD` (default $1.50), `SPRINT_ASSESS_MAX_TURNS` (60). It shares the review
   pool (`registerReviewSlotPeer`; a PR-review click goes first). Spend: feature `sprint_assess`.
-- **Validation**: caps and enums enforced; every cited path must exist inside an accepted checkout,
-  else it is DROPPED (counted, shown only behind an ⓘ). No criteria and no summary → failed
-  `invalid_assessment`.
-- **Currency**: fingerprint = ticket text hash + sorted (repoId, synced default-branch SHA), so it is
-  checkable from the DB; stale → the button reads "Re-assess". One run per (account, ticket), claimed
+- **The answer is SHORT, in the four story issues' terms** (`story-issues.ts`): `summary` (one
+  sentence, the most important finding — "This may already be done: …" included), `issues` (at most
+  one sentence per issue id, ≤ 4, an optional verified file) and `revisedCriteria` (≤ 12, or none).
+  On the card, Claude's sentence REPLACES the templated bullet for an issue CODE raised, and only
+  while the run is CURRENT (`sprintBullets` via `sprintCurrentAssessmentBodyOf`); it never adds an
+  issue, so chips, `flagCount`, order and the expanded card agree. A stale run's summary shows on the
+  card tagged "Out of date" and feeds neither the comment default nor Copy all.
+- **Validation** (`SPRINT_ASSESS_CAPS`): over-long text is cut with "…"; an unknown or repeated id,
+  an empty sentence or a fifth issue is dropped; a cited path must exist inside an accepted checkout,
+  else the PATH is dropped and the sentence kept (counted, shown only behind an ⓘ). Nothing left →
+  failed `invalid_assessment`.
+- **Currency**: fingerprint = `SPRINT_ASSESS_FORMAT_VERSION` + ticket text hash + sorted (repoId,
+  synced default-branch SHA), so it is checkable from the DB; stale → the button reads "Check again",
+  and the stale run's sentences still show, marked out of date. A run stored in an older body shape
+  is served `body: null, outdated: true` (never thrown on). One run per (account, ticket), claimed
   synchronously; a crash orphan is failed `interrupted` at boot.
 - **The free labels** are not this run: every sprint ticket goes through the existing story label run
-  (§ Story labels) after each sprint read (`review/sprint-labels/`). Per-criterion fix text is
-  TEMPLATED in code (`sprintChipFix`), never written by a model.
+  (§ Story labels) after each sprint read (`review/sprint-labels/`); the issues are folded from them
+  in code, and every chip and templated bullet is code (`storyIssueChipText`, `storyIssueBullet`).
 
 ## Ticket write-back (Reports → This sprint → "Update in <tracker>")
 

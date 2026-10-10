@@ -1,5 +1,14 @@
 import type { JiraStatusCategory, TrackerProvider } from './types.js';
 import type { StoryCriteriaSource, StoryPrRef } from './stories.js';
+import {
+  STORY_ISSUE_CHECKS_DEFAULT,
+  STORY_ISSUE_IDS,
+  applyStoryIssueChecks,
+  storyIssueBullet,
+  type StoryIssue,
+  type StoryIssueChecks,
+  type StoryIssueId,
+} from './story-issues.js';
 
 // REPORTS → THIS SPRINT — the wire contract for `GET /api/sprint-stories` and its siblings
 // (docs/API.md § This sprint; docs/TRACKERS.md § The sprint list read; docs/CLAUDE-REVIEW.md §
@@ -11,16 +20,17 @@ import type { StoryCriteriaSource, StoryPrRef } from './stories.js';
 //     workspace whose This sprint tab was opened in the last `SPRINT_VIEW_TTL_DAYS`): Jira's open
 //     sprints, Linear's active cycle, GitHub's nearest-due open milestone, else the status fallback
 //     (To do + In progress tickets touched in the reporting window). The `source` says which.
-//   • THE CHIPS are deterministic over the ticket text and its STORED story labels (the existing
-//     `story_labels` rows, Haiku, `STORY_RUBRIC_VERSION`): a label chip appears only while the label
-//     is CURRENT. The fix text on a chip is TEMPLATED here (`sprintChipFix`) — never model text.
-//   • THE ASSESSMENT ("Assess with code") is a local-only Sonnet 5 agent run over read-only default
-//     branch checkouts of the repos the reader ACCEPTED for the ticket. Its cited paths are VERIFIED
-//     by the server against the checkout; an unverified path is DROPPED.
+//   • THE ISSUES are the FOUR story issues (`story-issues.ts`), folded in code from the criteria and
+//     the STORED story labels (`story_labels`, Haiku, `STORY_RUBRIC_VERSION`); a label half appears
+//     only while the label is CURRENT. Chip text and bullets are TEMPLATED — never model text.
+//   • THE ASSESSMENT ("Check against code") is a local-only Sonnet 5 agent run over read-only default
+//     branch checkouts of the repos the reader ACCEPTED for the ticket: a one-sentence summary, at
+//     most one sentence per issue, and an optional revised criteria list. Its cited paths are VERIFIED
+//     by the server against the checkout; an unverified path is DROPPED (the sentence stays).
 //   • THE WRITE-BACK writes exactly the text the reader confirmed, to ONE ticket, on ONE press. No
 //     bulk, no automatic setting, no agent tool can write. Claimed before the write, never retried.
 //
-// ⚠ ORDER: Not started first, then In progress; within each, most flags first, then key. NEVER by
+// ⚠ ORDER: Not started first, then In progress; within each, most issues first, then key. NEVER by
 // assignee, and there is no team or person score anywhere on this surface.
 
 // ── Constants (the ONE spelling the server and the page's copy both read) ────────────────────────
@@ -61,16 +71,13 @@ export const SPRINT_ASSESS_MAX_TURNS = 60;
 
 /** The assessment's caps — the server's validator; the SPA never re-checks. */
 export const SPRINT_ASSESS_CAPS = {
-  /** Criteria judged per run (the ticket's numbered criteria, in order). */
-  criteria: 30,
-  /** `landsIn` entries per criterion. */
-  landsInPerCriterion: 8,
-  /** Entries per gap list, per suggestion list. */
-  listItems: 10,
-  /** Parts a split may propose. */
-  splitParts: 5,
   /** Characters, after trimming. Over-long text is cut (with "…"), never refused. */
-  text: { short: 300, long: 1200, summary: 1500 },
+  summary: 200,
+  issueText: 220,
+  criterionText: 200,
+  /** One per issue id. */
+  issues: 4,
+  revisedCriteria: 12,
 } as const;
 
 /** The write-back's text cap (characters). Jira's own comment limit is 32,767. */
@@ -132,123 +139,20 @@ export interface SprintReadState {
   truncated: boolean;
 }
 
-// ── The chips ────────────────────────────────────────────────────────────────────────────────────
+// ── The issues and the checks ────────────────────────────────────────────────────────────────────
+//
+// A ticket's issues are the FOUR story issues (`story-issues.ts`: `foldStoryIssues`, folded by the
+// server from the criteria and the CURRENT stored label), filtered by the workspace's checks
+// (`applyStoryIssueChecks`) — so `flagCount`, the order and Copy all agree with what is on screen.
 
-/** Where a chip came from: deterministic code, or a stored story label. Labelled apart on screen. */
-export type SprintChipSource = 'code' | 'label';
+/** The workspace's checks: `workspaces.sprint_checks` (same JSON column as before; parsed
+ *  tolerantly — unknown ids dropped, an old object-shaped `issueTypes` reads as []). */
+export type SprintChecks = StoryIssueChecks;
 
-export type SprintChipId =
-  // code, story-level
-  | 'no_criteria'
-  | 'criteria_not_in_field'
-  | 'no_persona'
-  // label, criterion-level
-  | 'criterion_not_testable'
-  | 'criterion_bundled'
-  | 'criterion_depends_on_other_work'
-  // label, story-level
-  | 'out_of_scope_missing'
-  | 'dependency_not_named'
-  | 'non_code_work';
+export const SPRINT_CHECKS_DEFAULT: SprintChecks = STORY_ISSUE_CHECKS_DEFAULT;
 
-export interface SprintChipMeta {
-  id: SprintChipId;
-  source: SprintChipSource;
-  /** Chip text, plain English, ≤ 4 words. */
-  label: string;
-  /** criterion = one chip per flagged criterion (carries its text); story = one per ticket. */
-  grain: 'criterion' | 'story';
-}
-
-export const SPRINT_CHIPS: Readonly<Record<SprintChipId, SprintChipMeta>> = {
-  no_criteria: { id: 'no_criteria', source: 'code', label: 'No criteria', grain: 'story' },
-  criteria_not_in_field: { id: 'criteria_not_in_field', source: 'code', label: 'Criteria not in field', grain: 'story' },
-  no_persona: { id: 'no_persona', source: 'code', label: 'No persona', grain: 'story' },
-  criterion_not_testable: { id: 'criterion_not_testable', source: 'label', label: 'Not testable', grain: 'criterion' },
-  criterion_bundled: { id: 'criterion_bundled', source: 'label', label: 'More than one outcome', grain: 'criterion' },
-  criterion_depends_on_other_work: {
-    id: 'criterion_depends_on_other_work',
-    source: 'label',
-    label: 'Waits on other work',
-    grain: 'criterion',
-  },
-  out_of_scope_missing: { id: 'out_of_scope_missing', source: 'label', label: 'No out of scope', grain: 'story' },
-  dependency_not_named: { id: 'dependency_not_named', source: 'label', label: 'Dependency not named', grain: 'story' },
-  non_code_work: { id: 'non_code_work', source: 'label', label: 'Work code cannot show', grain: 'story' },
-};
-
-/** Display order of chips on a card (and of fixes in "Copy all"). */
-export const SPRINT_CHIP_ORDER: readonly SprintChipId[] = [
-  'no_criteria',
-  'criteria_not_in_field',
-  'no_persona',
-  'criterion_not_testable',
-  'criterion_bundled',
-  'criterion_depends_on_other_work',
-  'dependency_not_named',
-  'out_of_scope_missing',
-  'non_code_work',
-];
-
-export interface SprintChip {
-  id: SprintChipId;
-  /** For a criterion chip: the 1-based number (= position in `extractCriteria`) and its text, AS
-   *  JUDGED. null for a story chip. */
-  criterion: { n: number; text: string } | null;
-  /** The templated fix (`sprintChipFix`) — never model text. */
-  fix: string;
-}
-
-/** THE ONE fix template per chip. Pure; the server fills `SprintChip.fix` with it. */
-export function sprintChipFix(id: SprintChipId, criterion: { n: number; text: string } | null): string {
-  const q = criterion != null ? `“${criterion.text}”` : '';
-  switch (id) {
-    case 'no_criteria':
-      return 'Add acceptance criteria: a short list of outcomes a tester could check, one per line.';
-    case 'criteria_not_in_field':
-      return 'Move the acceptance criteria out of the description into the criteria field.';
-    case 'no_persona':
-      return 'Name who this is for, for example: “As a <role>, I want <goal>.”';
-    case 'criterion_not_testable':
-      return `Rewrite ${q} as an outcome someone could check: name the input, the action and the result they should see.`;
-    case 'criterion_bundled':
-      return `Split ${q} into separate criteria, one outcome each.`;
-    case 'criterion_depends_on_other_work':
-      return `Name the work ${q} waits on, link its ticket, and say what happens if it is late.`;
-    case 'out_of_scope_missing':
-      return 'Add an “Out of scope” line listing what this story will not do.';
-    case 'dependency_not_named':
-      return 'Name the other ticket or team this story depends on, and link it.';
-    case 'non_code_work':
-      return 'Split out the work code cannot show (sign-off, docs, config, comms) into its own task or a named criterion with an owner.';
-  }
-}
-
-// ── Checks (per-workspace settings: which chips this team wants raised) ─────────────────────────
-
-/** Which chips a workspace raises. OVERRIDES ONLY: an absent id is ON for every issue type.
- *  `off` switches a check off entirely; `issueTypes[id]` limits it to those issue type names
- *  (matched case-insensitively). Teams differ: one with a single persona does not want "No persona". */
-export interface SprintChecks {
-  off: SprintChipId[];
-  issueTypes: Partial<Record<SprintChipId, string[]>>;
-}
-
-export const SPRINT_CHECKS_DEFAULT: SprintChecks = { off: [], issueTypes: {} };
-export const SPRINT_CHECK_ISSUE_TYPES_MAX = 40;
-export const SPRINT_CHECK_ISSUE_TYPE_MAX_CHARS = 80;
-
-/** Does this check apply to a ticket of this issue type? A ticket with no issue type is checked
- *  unless the check is off. THE ONE predicate: the server filters chips with it. */
-export function sprintCheckApplies(checks: SprintChecks, id: SprintChipId, issueType: string | null): boolean {
-  if (checks.off.includes(id)) return false;
-  const only = checks.issueTypes[id];
-  if (only == null || only.length === 0 || issueType == null) return true;
-  const t = issueType.trim().toLowerCase();
-  return only.some((x) => x.trim().toLowerCase() === t);
-}
-
-/** PUT /api/sprint-stories/checks — replace the workspace's checks. */
+/** PUT /api/sprint-stories/checks — replace the workspace's checks. Strict: an unknown issue id, a
+ *  non-array, or a bad type name 400s and nothing is written. */
 export interface SprintChecksUpdate {
   workspaceId: number;
   checks: SprintChecks;
@@ -316,76 +220,43 @@ export interface SprintReposResponse {
   accepted: SprintRepoRef[];
 }
 
-// ── The assessment ───────────────────────────────────────────────────────────────────────────────
+// ── The assessment ("Check against code") ────────────────────────────────────────────────────────
 
-/** Does the code already do what the criterion asks? */
-export type SprintExisting = 'none' | 'partial' | 'full' | 'unclear';
-
-export const SPRINT_EXISTING_LABEL: Record<SprintExisting, string> = {
-  none: 'Not in the code yet',
-  partial: 'Partly in the code',
-  full: 'Already in the code',
-  unclear: 'Unclear',
-};
+/** Bumped when the stored body's SHAPE changes: folded into the run's fingerprint (old runs read
+ *  'stale') and a stored body of another shape is served as `body: null, outdated: true`. */
+export const SPRINT_ASSESS_FORMAT_VERSION = 2;
 
 export interface SprintCodeRef {
   /** owner/name — one of the run's accepted repos. */
   repo: string;
   /** Repo-relative POSIX path, VERIFIED to exist in the checkout. */
   path: string;
-  /** A function / class / route name the agent named; not verified. */
-  symbol: string | null;
 }
 
-export interface SprintCriterionAssessment {
-  /** 1-based, = the ticket's criterion number. */
-  n: number;
-  /** The criterion text as the agent was sent it. */
-  criterion: string;
-  testableAgainstCode: boolean;
-  /** Where the change lands. Unverified paths were dropped (`dropped.paths`). */
-  landsIn: SprintCodeRef[];
-  existing: SprintExisting;
-  /** One or two sentences on why. */
-  note: string;
+/** Claude's one sentence for one of the four issues, backed by the ticket or the code. */
+export interface SprintAssessmentIssue {
+  id: StoryIssueId;
+  /** One sentence, ≤ SPRINT_ASSESS_CAPS.issueText. */
+  text: string;
+  /** A verified file it rests on; null when none was cited or the path did not verify. */
+  ref: SprintCodeRef | null;
 }
 
-export interface SprintAssessmentGaps {
-  unnamedDependencies: string[];
-  unstatedBehaviourChanges: string[];
-  dataOrMigrationImpact: string[];
-  edgeCases: string[];
-}
-
-export const SPRINT_GAP_LABEL: Record<keyof SprintAssessmentGaps, string> = {
-  unnamedDependencies: 'Dependencies not named',
-  unstatedBehaviourChanges: 'Behaviour changes not stated',
-  dataOrMigrationImpact: 'Data or migration impact',
-  edgeCases: 'Edge cases',
-};
-
-export interface SprintAssessmentSuggestion {
-  /** A better wording of criterion `n`. */
-  rewrittenCriteria: Array<{ n: number; text: string }>;
-  addedCriteria: string[];
-  /** A proposed split, or null when the story is one piece of work. */
-  split: Array<{ title: string; criteria: string[] }> | null;
-  questionsForOwner: string[];
-  summary: string;
-}
-
-/** Field names are the `submit_assessment` tool's, verbatim (after server validation). */
+/** Field names are the `submit_assessment` tool's (after server validation). */
 export interface SprintAssessmentBody {
-  criteria: SprintCriterionAssessment[];
-  gaps: SprintAssessmentGaps;
-  suggestion: SprintAssessmentSuggestion;
+  /** The single most important finding, one sentence (e.g. "This may already be done: …"). */
+  summary: string;
+  /** At most one per issue id, at most 4, in STORY_ISSUES order. */
+  issues: SprintAssessmentIssue[];
+  /** A proposed criteria list (≤ 12), each ≤ SPRINT_ASSESS_CAPS.criterionText. [] = keep them. */
+  revisedCriteria: string[];
 }
 
 /** What validation removed — stored, behind an ⓘ. */
 export interface SprintAssessmentDropped {
-  /** `landsIn` entries whose path does not exist in the checkout (or names an unaccepted repo). */
+  /** Cited paths that do not exist in the checkout (or name an unaccepted repo); the text is kept. */
   paths: number;
-  /** Criteria with an unknown `n`, empty items, items over a cap. */
+  /** Issues with an unknown or repeated id, empty items, items over a cap. */
   items: number;
 }
 
@@ -426,8 +297,11 @@ export interface SprintAssessmentRecord {
   phase: SprintAssessmentPhase | null;
   /** The repos and the default-branch commits the run read. */
   repos: Array<SprintRepoRef & { sha: string | null }>;
-  /** Set only on 'succeeded'. */
+  /** Set only on 'succeeded' AND when the stored body is this format (`SPRINT_ASSESS_FORMAT_VERSION`). */
   body: SprintAssessmentBody | null;
+  /** 'succeeded', but stored in an older format: the card says it is out of date and offers
+   *  "Check against code" again. Never true for any other status. */
+  outdated: boolean;
   dropped: SprintAssessmentDropped | null;
   error: SprintAssessmentErrorCode | null;
   costUsd: number | null;
@@ -436,8 +310,8 @@ export interface SprintAssessmentRecord {
   completedAt: string | null;
 }
 
-/** 'current' = same ticket text and the same default-branch commits as the run read; 'stale' = the
- *  button reads "Re-assess". null for an unfinished or failed run. */
+/** 'current' = same ticket text, same default-branch commits and same format as the run read; 'stale'
+ *  = the button reads "Check again". null for an unfinished or failed run. */
 export type SprintAssessmentCurrency = 'current' | 'stale' | null;
 
 /** POST /api/sprint-stories/assess — local only (registerAgenticRoutes), Pro. */
@@ -456,7 +330,7 @@ export interface SprintAssessmentResponse {
   currency: SprintAssessmentCurrency;
 }
 
-export type SprintAssessRefusal = 'busy' | 'no_repos' | 'no_ticket' | 'no_criteria' | 'bad_request';
+export type SprintAssessRefusal = 'busy' | 'no_repos' | 'no_ticket' | 'bad_request';
 
 export interface SprintAssessErrorBody {
   error: SprintAssessRefusal;
@@ -606,8 +480,10 @@ export interface SprintTicketRow {
   /** The numbered criteria (`extractCriteria`), in order. */
   criteria: { items: string[]; source: StoryCriteriaSource };
   labels: SprintLabelState;
-  chips: SprintChip[];
-  /** = `chips.length` — the within-phase sort key. */
+  /** `foldStoryIssues` filtered by the workspace's checks (`applyStoryIssueChecks`), in STORY_ISSUES
+   *  order; ≤ 4. [] for a ticket whose type the checks do not cover. */
+  issues: StoryIssue[];
+  /** = `issues.length` — the within-phase sort key. */
   flagCount: number;
   /** PRs already on this ticket (stored `tracker_tickets`, via `ticketMembers`); [] for most. */
   pullRequests: StoryPrRef[];
@@ -641,7 +517,7 @@ export interface SprintStoriesResponse {
   aiEnabled: boolean;
   /** The workspace's repos, for the picker. */
   repos: SprintRepoRef[];
-  /** The workspace's checks; chips on `tickets` are already filtered by them. */
+  /** The workspace's checks; `issues` on `tickets` are already filtered by them. */
   checks: SprintChecks;
   /** Issue type names on this sprint's tickets (open and done), sorted — the checks' type choices. */
   issueTypes: string[];
@@ -654,32 +530,88 @@ export interface SprintRefreshResponse {
   read: SprintReadState;
 }
 
-// ── Composers for copy and for the proposed update (pure; the SPA and tests share them) ──────────
+// ── Bullets and composers (pure; the SPA and tests share them) ──────────────────────────────────
 
-/** The proposed criteria list as Markdown: rewritten criteria replace their originals in place,
- *  added ones follow. `original` = the ticket's numbered criteria. */
-export function proposedCriteriaMarkdown(original: readonly string[], s: SprintAssessmentSuggestion): string {
-  const rewritten = new Map(s.rewrittenCriteria.map((r) => [r.n, r.text]));
-  const lines = original.map((c, i) => `- ${rewritten.get(i + 1) ?? c}`);
-  for (const a of s.addedCriteria) lines.push(`- ${a}`);
-  return lines.join('\n');
+/** One line of the expanded card: ≤ 4, one per issue. */
+export interface SprintBullet {
+  id: StoryIssueId;
+  text: string;
+  /** 'code' = the templated `storyIssueBullet`; 'claude' = the assessment's own sentence. */
+  source: 'code' | 'claude';
+  ref: SprintCodeRef | null;
 }
 
-/** The default "Add as a comment" text: the proposal, the questions, and nothing the reader did not
- *  see. Plain Markdown; the server converts it per provider. */
-export function sprintCommentMarkdown(original: readonly string[], body: SprintAssessmentBody): string {
-  const parts: string[] = [];
-  if (body.suggestion.summary.trim() !== '') parts.push(body.suggestion.summary.trim());
-  parts.push(`**Proposed acceptance criteria**\n\n${proposedCriteriaMarkdown(original, body.suggestion)}`);
-  if (body.suggestion.split != null && body.suggestion.split.length > 0) {
-    parts.push(
-      `**Proposed split**\n\n${body.suggestion.split
-        .map((p) => `- ${p.title}${p.criteria.map((c) => `\n  - ${c}`).join('')}`)
-        .join('\n')}`,
-    );
+/** The latest SUCCEEDED assessment body in the current format, or null. */
+export function sprintAssessmentBodyOf(t: Pick<SprintTicketRow, 'assessment'>): SprintAssessmentBody | null {
+  const r = t.assessment?.record;
+  return r != null && r.status === 'succeeded' && !r.outdated ? r.body : null;
+}
+
+/** The latest succeeded body only while it is CURRENT (same ticket text, same commits, same format) —
+ *  the one body allowed to speak for the ticket: its sentences in the bullets, its summary in the
+ *  comment default and in Copy all. A stale body is shown on the card only, tagged out of date. */
+export function sprintCurrentAssessmentBodyOf(
+  t: Pick<SprintTicketRow, 'assessment'>,
+): SprintAssessmentBody | null {
+  return t.assessment?.currency === 'current' ? sprintAssessmentBodyOf(t) : null;
+}
+
+/** The ticket's issues: code's (already filtered by the checks) PLUS any issue a CURRENT "Check
+ *  against code" run raised that code did not (reason 'claude', no criteria numbers), filtered by the
+ *  same checks, in STORY_ISSUES order. The server builds `SprintTicketRow.issues` with it, so the
+ *  chips, `flagCount`, the order and the bullets always name the same issues. A STALE run adds nothing. */
+export function sprintIssuesWithClaude(
+  coded: readonly StoryIssue[],
+  body: SprintAssessmentBody | null,
+  checks: SprintChecks,
+  issueType: string | null,
+  total: number,
+): StoryIssue[] {
+  const out = [...coded];
+  for (const c of body?.issues ?? []) {
+    if (!out.some((x) => x.id === c.id)) out.push({ id: c.id, criteria: [], total, reasons: ['claude'] });
   }
-  if (body.suggestion.questionsForOwner.length > 0) {
-    parts.push(`**Questions for the owner**\n\n${body.suggestion.questionsForOwner.map((q) => `- ${q}`).join('\n')}`);
+  return applyStoryIssueChecks(out, checks, issueType).sort(
+    (a, b) => STORY_ISSUE_IDS.indexOf(a.id) - STORY_ISSUE_IDS.indexOf(b.id),
+  );
+}
+
+/** THE bullet rule: one bullet per issue on the row (`t.issues` — code's plus a current run's, see
+ *  `sprintIssuesWithClaude`), in STORY_ISSUES order; the CURRENT assessment's sentence for that id
+ *  REPLACES the templated one. */
+export function sprintBullets(
+  t: Pick<SprintTicketRow, 'issues' | 'assessment' | 'issueType'>,
+  checks: SprintChecks,
+): SprintBullet[] {
+  const claude = sprintCurrentAssessmentBodyOf(t)?.issues ?? [];
+  // The server already filters `t.issues`; re-applying is idempotent and keeps this pure fold honest.
+  const listed = applyStoryIssueChecks(t.issues, checks, t.issueType);
+  const out: SprintBullet[] = [];
+  for (const id of STORY_ISSUE_IDS) {
+    const issue = listed.find((x) => x.id === id);
+    if (issue == null) continue;
+    const c = claude.find((x) => x.id === id);
+    if (c != null) out.push({ id, text: c.text, source: 'claude', ref: c.ref });
+    else if (!(issue.reasons.length === 1 && issue.reasons[0] === 'claude')) {
+      out.push({ id, text: storyIssueBullet(issue), source: 'code', ref: null });
+    }
+  }
+  return out;
+}
+
+/** A criteria list as Markdown bullets. */
+export function criteriaListMarkdown(items: readonly string[]): string {
+  return items.map((c) => `- ${c}`).join('\n');
+}
+
+/** The default "Add as a comment" text: the summary (when a CURRENT assessment exists), the bullets, and the revised
+ *  criteria when there are any. Plain Markdown; the server converts it per provider. */
+export function sprintCommentMarkdown(bullets: readonly SprintBullet[], body: SprintAssessmentBody | null): string {
+  const parts: string[] = [];
+  if (body != null && body.summary.trim() !== '') parts.push(body.summary.trim());
+  if (bullets.length > 0) parts.push(bullets.map((b) => `- ${b.text}`).join('\n'));
+  if (body != null && body.revisedCriteria.length > 0) {
+    parts.push(`**Proposed acceptance criteria**\n\n${criteriaListMarkdown(body.revisedCriteria)}`);
   }
   return parts.join('\n\n');
 }

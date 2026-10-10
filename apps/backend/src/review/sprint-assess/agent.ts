@@ -12,7 +12,7 @@ import { estimateCostUsd } from '../pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
 import { submitAssessmentShape } from './schema.js';
 
-// THE SPRINT ASSESSMENT'S AGENT RUN ("Assess with code") — the SDK half. The manager (manager.ts)
+// THE SPRINT ASSESSMENT'S AGENT RUN ("Check against code") — the SDK half. The manager (manager.ts)
 // prepares a scratch working directory and a read-only DEFAULT-BRANCH checkout of every accepted
 // repo, builds the prompts, validates what comes back and cleans up; this module only runs the agent
 // and returns the FIRST `submit_assessment` payload, raw. It never touches the DB and never throws

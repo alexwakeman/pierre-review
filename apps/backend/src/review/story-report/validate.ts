@@ -1,5 +1,7 @@
 import {
+  isStoryIssueId,
   STORY_REPORT_ITEMS_MAX,
+  STORY_REPORT_LEAN,
   STORY_REPORT_MAX_CANDIDATES,
   STORY_REPORT_TEXT_MAX,
   STORY_REPORT_TICKETS_PER_ITEM_MAX,
@@ -19,6 +21,8 @@ import {
 //     lists are deduped and capped; an item left with no ticket is dropped; a spotlight or leftOut on
 //     an unknown key is dropped. The model may drop a weak example, never add a story.
 //   • `tone` must be 'positive' | 'negative' (anything else drops the spotlight).
+//   • A point's `issue` is kept only when it is one of the four story issues; otherwise the FIELD is
+//     dropped, never the point.
 //   • Each report section is capped at `STORY_REPORT_ITEMS_MAX`. `leftOut` is NOT a section — it is
 //     the list of picked candidates the agent chose not to cover, so it is capped at
 //     `STORY_REPORT_MAX_CANDIDATES` (and deduped by ticket); cutting it at 6 would hide stories the
@@ -72,7 +76,10 @@ export function validateStoryReport(raw: unknown, candidateKeys: ReadonlySet<str
     const p = obj(v);
     const title = text(p.title, STORY_REPORT_TEXT_MAX.title);
     const tickets = ticketList(p.tickets);
-    return title === '' || tickets.length === 0 ? null : { title, detail: text(p.detail, STORY_REPORT_TEXT_MAX.detail), tickets };
+    if (title === '' || tickets.length === 0) return null;
+    const out: StoryReportPoint = { title, detail: text(p.detail, STORY_REPORT_TEXT_MAX.detail), tickets };
+    if (isStoryIssueId(p.issue)) out.issue = p.issue;
+    return out;
   };
   const spotlight = (v: unknown): StoryReportSpotlight | null => {
     const p = obj(v);
@@ -106,11 +113,19 @@ export function validateStoryReport(raw: unknown, candidateKeys: ReadonlySet<str
   const report: StoryReportBody = {
     headline: text(o.headline, STORY_REPORT_TEXT_MAX.headline),
     summary: text(o.summary, STORY_REPORT_TEXT_MAX.summary),
-    doingWell: cap(arr(o.doingWell).map(point).filter(keep)),
-    fallingShort: cap(arr(o.fallingShort).map(point).filter(keep)),
-    spotlights: cap(arr(o.spotlights).map(spotlight).filter(keep)),
-    themes: cap(arr(o.themes).map(theme).filter(keep)),
-    actions: cap(arr(o.actions).map(action).filter(keep)),
+    doingWell: cap(arr(o.doingWell).map(point).filter(keep), STORY_REPORT_LEAN.doingWell),
+    // One shortfall per story issue (the first wins); a point with no issue still counts toward the cap.
+    fallingShort: cap(
+      arr(o.fallingShort)
+        .map(point)
+        .filter(keep)
+        .filter((p, i, all) => p.issue == null || all.findIndex((x) => x.issue === p.issue) === i),
+      STORY_REPORT_LEAN.fallingShort,
+    ),
+    // The lean report writes no spotlights or themes; anything sent is dropped, uncounted.
+    spotlights: [],
+    themes: [],
+    actions: cap(arr(o.actions).map(action).filter(keep), STORY_REPORT_LEAN.actions),
     leftOut: cap(
       arr(o.leftOut)
         .map(leftOut)

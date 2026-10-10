@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
-import { SPRINT_PROVIDER_LABEL, type SprintTicketRow, type SprintWriteMode } from '@pierre-review/shared';
+import {
+  SPRINT_PROVIDER_LABEL,
+  sprintCurrentAssessmentBodyOf,
+  type SprintChecks,
+  type SprintTicketRow,
+  type SprintWriteMode,
+} from '@pierre-review/shared';
 import { useSprintWrite, useSprintWriting } from '../../hooks/useSprintStories.js';
 import { relativeTime, safeExternalUrl } from '../../lib/ui.js';
 import { CloseIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { SprintCopyButton } from './SprintCopyButton.js';
 import {
-  assessmentBody,
   currentTextFor,
   newWriteRequestId,
   proposedDefault,
@@ -32,7 +37,15 @@ const MUTED = 'text-gray-500 dark:text-gray-400';
 
 type Drafts = Record<SprintWriteMode, string | null>;
 
-export function SprintUpdatePanel({ ticket: t, workspaceId }: { ticket: SprintTicketRow; workspaceId: number }): JSX.Element {
+export function SprintUpdatePanel({
+  ticket: t,
+  workspaceId,
+  checks,
+}: {
+  ticket: SprintTicketRow;
+  workspaceId: number;
+  checks: SprintChecks;
+}): JSX.Element {
   const [picked, setMode] = useState<SprintWriteMode>('comment');
   // A ticket whose text is longer than the page carries cannot be replaced here (the server refuses
   // it too): Replace is not offered. Derived for the render, never written back.
@@ -43,7 +56,7 @@ export function SprintUpdatePanel({ ticket: t, workspaceId }: { ticket: SprintTi
   const writing = useSprintWriting(t.ident);
   const write = useSprintWrite(workspaceId, t.ident);
 
-  const text = drafts[mode] ?? proposedDefault(t, mode);
+  const text = drafts[mode] ?? proposedDefault(t, mode, checks);
   const problem = writeTextProblem(text);
   const before = currentTextFor(t, t.replaceTarget);
   const provider = SPRINT_PROVIDER_LABEL[t.provider];
@@ -169,7 +182,7 @@ export function SprintUpdatePanel({ ticket: t, workspaceId }: { ticket: SprintTi
                 // The "before" this dialog was built on; the server re-reads the ticket and refuses
                 // a replace over text that changed since.
                 baseHash: confirm.mode === 'replace' ? confirm.baseHash : undefined,
-                assessmentId: assessmentBody(t) != null ? (t.assessment?.record.id ?? null) : null,
+                assessmentId: sprintCurrentAssessmentBodyOf(t) != null ? (t.assessment?.record.id ?? null) : null,
               },
               // UI-only: close the dialog. The record lands in the list cache in the hook's onSuccess.
               { onSuccess: () => setConfirm(null) },

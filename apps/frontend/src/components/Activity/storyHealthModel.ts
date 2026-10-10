@@ -22,14 +22,10 @@ import { hoursShort, weekLabel } from './chronologyTrendModel.js';
 
 /** Stroke colour per series (non-text: lines, dots, legend swatches). */
 export const STORY_SERIES_COLOR: Record<StoryHealthSeriesId, string> = {
-  criteriaTestable: '#2563eb',
-  criteriaBundled: '#d97706',
-  criteriaDependent: '#db2777',
-  criteriaInField: '#0d9488',
-  userValueStated: '#16a34a',
-  outOfScopeStated: '#7c3aed',
-  dependencyNamed: '#64748b',
-  nonCodeWork: '#ea580c',
+  unclearDone: '#2563eb',
+  tooBig: '#d97706',
+  waitsOnWork: '#db2777',
+  scopeUnstated: '#7c3aed',
   workingTimeS: '#14b8a6',
   workingTimeM: '#3b82f6',
   workingTimeL: '#6366f1',
@@ -114,10 +110,11 @@ export function coverageLine(w: StoryHealthWeek): string {
   return `${w.labelled} of ${w.labellable} ${w.labellable === 1 ? 'story' : 'stories'} labelled`;
 }
 
-/** "15 stories written" (+ how many were dated by their first pull request). */
+/** "15 stories written" (+ how many were dated by their first pull request, + how many have no criteria). */
 export function createdLine(w: StoryHealthWeek): string {
   const base = `${w.storiesCreated} ${w.storiesCreated === 1 ? 'story' : 'stories'} written`;
-  return w.createdFallback > 0 ? `${base} (${w.createdFallback} dated by first pull request)` : base;
+  const dated = w.createdFallback > 0 ? `${base} (${w.createdFallback} dated by first pull request)` : base;
+  return w.noCriteria > 0 ? `${dated} · ${w.noCriteria} with no criteria` : dated;
 }
 
 /** "9 stories merged" (+ unknown size, reviewed). */
@@ -132,8 +129,7 @@ export function mergedLine(w: StoryHealthWeek): string {
 export function pointLine(meta: StoryHealthSeriesMeta, p: StoryHealthPoint): string {
   const nWord = `${p.n} ${meta.over === 'reviewed' ? (p.n === 1 ? 'reviewed story' : 'reviewed stories') : p.n === 1 ? 'story' : 'stories'}`;
   if (p.value == null) return p.n === 0 ? 'none' : `not measured (${nWord})`;
-  const crit = p.criteria != null ? `, ${p.criteria} ${p.criteria === 1 ? 'criterion' : 'criteria'}` : '';
-  const head = `${formatStoryValue(meta.unit, p.value)} (${nWord}${crit})`;
+  const head = `${formatStoryValue(meta.unit, p.value)} (${nWord})`;
   if (p.thin) return `${head}: too few to compare`;
   return p.rolling != null ? `${head} · 4 weeks ${formatStoryValue(meta.unit, p.rolling)}` : head;
 }
@@ -164,7 +160,7 @@ export function clusterShifts(shifts: StoryHealthShift[], visible: ReadonlySet<S
     }));
 }
 
-/** One line per shift, for a marker's hover box: "Criteria a tester could check: 52% → 71%". */
+/** One line per shift, for a marker's hover box: "Too big: 52% → 31%". */
 export function shiftLine(s: StoryHealthShift): string {
   const meta = STORY_HEALTH_SERIES_BY_ID[s.series];
   return `${meta.label}: ${formatStoryValue(meta.unit, s.before)} → ${formatStoryValue(meta.unit, s.after)}`;

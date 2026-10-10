@@ -52,7 +52,7 @@ import {
   pendingTabHolds,
   pendingAuthorSideOf,
   resolveMyTurnSettings,
-  sprintChipFix,
+  foldStoryIssues,
 } from '@pierre-review/shared';
 
 // Deterministic, self-contained API fixtures for the My Turn / Feed / Focus-mode
@@ -510,7 +510,8 @@ const SYNC_ACTIVITY: SyncActivityResponse = {
 
 // Reports → This sprint (GET /api/sprint-stories). Typed so `pnpm typecheck` covers the shape, and
 // served explicitly — the catch-all `{}` has no `tickets`/`read`, and the tab would blank. One
-// not-started ticket with chips and no repos, one in-progress ticket with a SUCCEEDED assessment.
+// not-started ticket with issues and no repos, one in-progress ticket with a SUCCEEDED assessment.
+// Issues come from the shared fold, so the fixture cannot drift from it.
 const SPRINT_TICKET_BASE: Omit<SprintTicketRow, 'ident' | 'key' | 'title' | 'phase'> = {
   url: null,
   provider: 'jira',
@@ -523,7 +524,7 @@ const SPRINT_TICKET_BASE: Omit<SprintTicketRow, 'ident' | 'key' | 'title' | 'pha
   acField: null,
   criteria: { items: [], source: 'none' },
   labels: 'none',
-  chips: [],
+  issues: [],
   flagCount: 0,
   pullRequests: [],
   repos: { accepted: [], suggested: [] },
@@ -532,6 +533,17 @@ const SPRINT_TICKET_BASE: Omit<SprintTicketRow, 'ident' | 'key' | 'title' | 'pha
   replaceBase: { hash: '0'.repeat(64), truncated: false },
   lastWrite: null,
 };
+const SPRINT_ACME1_ISSUES = foldStoryIssues({ criteria: [], label: null });
+const SPRINT_ACME2_ISSUES = foldStoryIssues({
+  criteria: ['Users get a link by email', 'The link works once'],
+  label: {
+    criteria: [
+      { n: 1, testable: false, bundled: false, dependsOnOtherWork: false },
+      { n: 2, testable: true, bundled: false, dependsOnOtherWork: false },
+    ],
+    story: { outOfScopeStated: true, dependencyNamed: true, nonCodeWork: false },
+  },
+});
 const SPRINT_STORIES: SprintStoriesResponse = {
   workspaceId: WORKSPACE.id,
   trackerOn: true,
@@ -541,7 +553,7 @@ const SPRINT_STORIES: SprintStoriesResponse = {
   doneCount: 3,
   aiEnabled: true,
   repos: [{ repoId: REPO.id, fullName: REPO.fullName }],
-  checks: { off: [], issueTypes: {} },
+  checks: { off: [], issueTypes: [] },
   issueTypes: ['Story'],
   tickets: [
     {
@@ -552,11 +564,8 @@ const SPRINT_STORIES: SprintStoriesResponse = {
       url: 'https://acme.atlassian.net/browse/ACME-1',
       phase: 'not_started',
       status: { name: 'To Do', category: 'new' },
-      chips: [
-        { id: 'no_criteria', criterion: null, fix: sprintChipFix('no_criteria', null) },
-        { id: 'no_persona', criterion: null, fix: sprintChipFix('no_persona', null) },
-      ],
-      flagCount: 2,
+      issues: SPRINT_ACME1_ISSUES,
+      flagCount: SPRINT_ACME1_ISSUES.length,
       repos: { accepted: [], suggested: [{ repoId: REPO.id, fullName: REPO.fullName, reasons: ['same_project'], prCount: 4 }] },
     },
     {
@@ -570,14 +579,8 @@ const SPRINT_STORIES: SprintStoriesResponse = {
       description: '## Acceptance criteria\n\n- Users get a link by email\n- The link works once',
       criteria: { items: ['Users get a link by email', 'The link works once'], source: 'description_heading' },
       labels: 'current',
-      chips: [
-        {
-          id: 'criterion_not_testable',
-          criterion: { n: 1, text: 'Users get a link by email' },
-          fix: sprintChipFix('criterion_not_testable', { n: 1, text: 'Users get a link by email' }),
-        },
-      ],
-      flagCount: 1,
+      issues: SPRINT_ACME2_ISSUES,
+      flagCount: SPRINT_ACME2_ISSUES.length,
       repos: { accepted: [{ repoId: REPO.id, fullName: REPO.fullName }], suggested: [] },
       assessment: {
         currency: 'current',
@@ -590,25 +593,17 @@ const SPRINT_STORIES: SprintStoriesResponse = {
           phase: null,
           repos: [{ repoId: REPO.id, fullName: REPO.fullName, sha: 'abc1234def' }],
           body: {
-            criteria: [
+            summary: 'Sending a link exists in src/auth/magic-link.ts; expiry does not.',
+            issues: [
               {
-                n: 1,
-                criterion: 'Users get a link by email',
-                testableAgainstCode: true,
-                landsIn: [{ repo: REPO.fullName, path: 'src/auth/magic-link.ts', symbol: 'sendMagicLink' }],
-                existing: 'partial',
-                note: 'Sending exists; expiry does not.',
+                id: 'unclear_done',
+                text: 'Say how long a link lasts and what an expired link shows.',
+                ref: { repo: REPO.fullName, path: 'src/auth/magic-link.ts' },
               },
             ],
-            gaps: { unnamedDependencies: [], unstatedBehaviourChanges: [], dataOrMigrationImpact: [], edgeCases: ['An expired link'] },
-            suggestion: {
-              rewrittenCriteria: [{ n: 1, text: 'A user who asks for a link receives an email within a minute' }],
-              addedCriteria: ['An expired link shows a clear message'],
-              split: null,
-              questionsForOwner: ['How long should a link last?'],
-              summary: 'Mostly clear; expiry is unstated.',
-            },
+            revisedCriteria: ['A user who asks for a link receives an email within a minute', 'An expired link shows a clear message'],
           },
+          outdated: false,
           dropped: { paths: 0, items: 0 },
           error: null,
           costUsd: 0.42,

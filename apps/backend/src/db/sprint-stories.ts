@@ -6,6 +6,8 @@ import {
   sprintReplaceBaseText,
   sprintReplaceBaseTruncated,
   sprintReplaceTarget,
+  sprintCurrentAssessmentBodyOf,
+  sprintIssuesWithClaude,
   type JiraStatusCategory,
   type SprintAssessmentCurrency,
   type SprintPhase,
@@ -18,7 +20,7 @@ import {
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { getSprintChecks } from './sprint-checks.js';
-import { sprintChipsFor, sprintCriteriaOf, sprintLabelState, type SprintChipInput } from './sprint-chips.js';
+import { sprintCriteriaOf, sprintIssuesFor, sprintLabelState, type SprintChipInput } from './sprint-chips.js';
 import { suggestSprintRepos, suggestTicketOf } from './sprint-repo-suggest.js';
 import {
   kickSprintRead,
@@ -47,10 +49,11 @@ import { storyLabelInput } from './story-label-input.js';
 //   • POPULATION: this workspace's `sprint_tickets` with `in_sprint`, on the workspace tracker's
 //     CURRENT site (a row from a provider the workspace has since left is not listed). Done tickets
 //     are COUNTED (`doneCount`), never listed.
-//   • ORDER: Not started, then In progress; within each, most flags first, then key. NEVER by
+//   • ORDER: Not started, then In progress; within each, most issues first, then key. NEVER by
 //     assignee, and no team or person score.
-//   • LABELS: only a CURRENT label (text hash = today's `storyLabelInput` hash, `STORY_RUBRIC_VERSION`)
-//     makes label chips; `aiEnabled` false → labels 'off' and no label chips at all.
+//   • ISSUES: the four story issues (`sprintIssuesFor`). Only a CURRENT label (text hash = today's
+//     `storyLabelInput` hash, `STORY_RUBRIC_VERSION`) feeds the label half; `aiEnabled` false →
+//     labels 'off' and only what code knows ("no criteria", "more than 8 criteria").
 //   • ASSESSMENT CURRENCY is DB-only: today's ticket text hash + the accepted repos' SYNCED
 //     default-branch head sha, against the run's stored fingerprint.
 
@@ -220,7 +223,7 @@ export async function getSprintStories(
       doneCount: 0,
       aiEnabled: opts.aiEnabled,
       repos,
-      checks: { off: [], issueTypes: {} },
+      checks: { off: [], issueTypes: [] },
       issueTypes: [],
     };
   }
@@ -283,10 +286,23 @@ export async function getSprintStories(
     const text = { title: row.title, description: row.description ?? '', acceptanceCriteria: row.acceptanceCriteria ?? '' };
     const input = opts.aiEnabled ? storyLabelInput(text, provider) : null;
     const label = input != null ? (labels.get(row.ident)?.get(input.textHash) ?? null) : null;
-    const chipInput: SprintChipInput = { provider, ...text, issueType: row.issueTypeName ?? null, label };
-    const chips = sprintChipsFor(chipInput, checks);
+    const chipInput: SprintChipInput = {
+      provider,
+      description: text.description,
+      acceptanceCriteria: text.acceptanceCriteria,
+      issueType: row.issueTypeName ?? null,
+      label,
+    };
     const acc = accepted.get(row.ident) ?? [];
     const a = assessments.get(row.ident);
+    const assessment = a != null ? { record: sprintAssessmentRecordOf(a), currency: sprintAssessmentCurrencyFrom(a, row, acc) } : null;
+    const issues = sprintIssuesWithClaude(
+      sprintIssuesFor(chipInput, checks),
+      sprintCurrentAssessmentBodyOf({ assessment }),
+      checks,
+      row.issueTypeName ?? null,
+      sprintCriteriaOf(text, provider).items.length,
+    );
     const w = writes.get(row.ident);
     const acField = row.acFieldId != null && row.acFieldName != null ? { id: row.acFieldId, name: row.acFieldName } : null;
     const replaceTarget = sprintReplaceTarget(provider, acField);
@@ -307,14 +323,14 @@ export async function getSprintStories(
       acField,
       criteria: sprintCriteriaOf(text, provider),
       labels: sprintLabelState(chipInput, opts.aiEnabled),
-      chips,
-      flagCount: chips.length,
+      issues,
+      flagCount: issues.length,
       pullRequests: prRefs.get(row.ident) ?? [],
       repos: {
         accepted: acc.map((d) => ({ repoId: d.repoId, fullName: d.fullName })),
         suggested: suggestions.get(row.ident) ?? [],
       },
-      assessment: a != null ? { record: sprintAssessmentRecordOf(a), currency: sprintAssessmentCurrencyFrom(a, row, acc) } : null,
+      assessment,
       replaceTarget,
       replaceBase: { hash: sha256(baseText), truncated: sprintReplaceBaseTruncated(baseText, replaceTarget) },
       lastWrite: w != null ? trackerWriteRecordOf(w, trackerWriteMessage) : null,

@@ -13,6 +13,7 @@ import {
   indexCandidates,
   linkifyTicketKeys,
   markdownWithLinks,
+  pointIssueLabel,
   storyReportFigures,
   storyReportMarkdown,
   storyReportSections,
@@ -142,6 +143,28 @@ describe('figures', () => {
     expect(f.map((x) => x.key)).toEqual(['stories', 'criteria', 'checked', 'median']);
     expect(f.at(-1)?.value).toBe('not measured');
   });
+
+  it('adds the whole-window issue rates, skipping one nothing could be told about', () => {
+    const f = storyReportFigures({
+      ...population,
+      issueRates: [
+        { id: 'unclear_done', stories: 12, of: 81 },
+        { id: 'too_big', stories: 9, of: 40 },
+        { id: 'waits_on_work', stories: 0, of: 0 },
+        { id: 'scope_unstated', stories: 30, of: 40 },
+      ],
+    });
+    expect(f.slice(-3).map((x) => [x.label, x.value])).toEqual([
+      ['Unclear when done', '12 of 81 read'],
+      ['Too big', '9 of 40 read'],
+      ['Scope not stated', '30 of 40 read'],
+    ]);
+  });
+
+  it('names a point\'s story issue, and nothing on an old point', () => {
+    expect(pointIssueLabel({ issue: 'waits_on_work' })).toBe('Waits on other work');
+    expect(pointIssueLabel({})).toBeNull();
+  });
 });
 
 describe('sections and the window label', () => {
@@ -169,7 +192,7 @@ describe('the markdown export', () => {
     headline: 'Criteria held up.',
     summary: 'Most stories with criteria\nwere met. BMD-12 is the best, BMD-568 is not built.',
     doingWell: [{ title: 'Clear criteria', detail: 'BMD-12 names each case.', tickets: ['BMD-12'] }],
-    fallingShort: [{ title: 'No criteria', detail: 'Big work.', tickets: ['BMD-40'] }],
+    fallingShort: [{ title: 'No criteria', detail: 'Big work.', tickets: ['BMD-40'], issue: 'unclear_done' }],
     spotlights: [{ ticket: 'BMD-40', tone: 'negative', headline: 'Too big.', detail: 'Split it.' }],
     themes: [{ theme: 'Spikes', detail: 'No exit.', tickets: [] }],
     actions: [
@@ -187,6 +210,7 @@ describe('the markdown export', () => {
     );
     expect(md).toContain('- With written criteria: 36 of 81');
     expect(md).toContain('## What we do well\n\n### Clear criteria\n\n[BMD-12](https://x.atlassian.net/browse/BMD-12) names each case.\n\nTickets: [BMD-12](https://x.atlassian.net/browse/BMD-12)');
+    expect(md).toContain('### No criteria · Unclear when done\n');
     expect(md).toContain('- **[BMD-40](https://x.atlassian.net/browse/BMD-40)** (Weak example): Too big. Split it.');
     expect(md).toContain('- **Spikes**: No exit.\n');
     expect(md).toContain('1. **Write criteria**: So done is clear. ([BMD-40](https://x.atlassian.net/browse/BMD-40))\n2. **Split work**: Smaller.');

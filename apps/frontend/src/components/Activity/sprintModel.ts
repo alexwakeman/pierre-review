@@ -1,26 +1,27 @@
 import {
-  SPRINT_CHIPS,
   SPRINT_PROVIDER_LABEL,
   SPRINT_WRITE_MAYBE_SENTENCE,
   SPRINT_WRITE_TEXT_MAX,
-  proposedCriteriaMarkdown,
+  criteriaListMarkdown,
+  sprintBullets,
+  sprintCurrentAssessmentBodyOf,
   sprintCommentMarkdown,
   type SprintAssessmentPhase,
-  type SprintAssessmentRecord,
   type SprintAssessmentStatus,
-  type SprintChip,
+  type SprintChecks,
   type SprintPhase,
   type SprintReplaceTarget,
   type SprintTicketRow,
   type SprintWriteMode,
   type SprintWriteRecord,
 } from '@pierre-review/shared';
-import { chipFixesMarkdown } from '../../lib/copy.js';
 
 // Reports → This sprint: the pure folds behind the tab (test/sprintModel.test.ts).
 //
-// ⚠ THE ORDER IS THE SERVER'S (Not started, then In progress; most flags first; then key). The
+// ⚠ THE ORDER IS THE SERVER'S (Not started, then In progress; most issues first; then key). The
 // grouping here keeps it; nothing re-ranks, and nothing ever sorts by assignee.
+// ⚠ THE ISSUES AND THEIR BULLETS ARE SHARED FOLDS (`story-issues.ts`, `sprintBullets`) — nothing here
+// re-derives an issue or re-words a bullet.
 
 /** The two groups in the server's order, each keeping the server's order inside it. */
 export function groupSprintTickets(tickets: readonly SprintTicketRow[]): Array<{ phase: SprintPhase; tickets: SprintTicketRow[] }> {
@@ -32,40 +33,27 @@ export function groupSprintTickets(tickets: readonly SprintTicketRow[]): Array<{
   return groups.filter((g) => g.tickets.length > 0);
 }
 
-/** Code chips first, then label chips — the card shows them as two styles. */
-export function splitChips(chips: readonly SprintChip[]): { code: SprintChip[]; label: SprintChip[] } {
-  return {
-    code: chips.filter((c) => SPRINT_CHIPS[c.id].source === 'code'),
-    label: chips.filter((c) => SPRINT_CHIPS[c.id].source === 'label'),
-  };
+/** How many checks differ from the default — the header's disclosure: each issue switched off, plus
+ *  one for a limited issue-type list. */
+export function changedCheckCount(c: SprintChecks): number {
+  return c.off.length + (c.issueTypes.length > 0 ? 1 : 0);
 }
 
-/** The collapsed card's chips: ONE pill per check, carrying the criterion numbers it flagged — a
- *  27-criterion ticket drew 27 "More than one outcome" pills. Order is the chips' own (the server's). */
-export interface ChipGroup {
-  id: SprintChip['id'];
-  criteria: number[];
-}
-
-export function groupChips(chips: readonly SprintChip[]): ChipGroup[] {
-  const out: ChipGroup[] = [];
-  for (const c of chips) {
-    let g = out.find((x) => x.id === c.id);
-    if (g == null) {
-      g = { id: c.id, criteria: [] };
-      out.push(g);
-    }
-    if (c.criterion != null) g.criteria.push(c.criterion.n);
+/** The issue-type choices in the Checks panel: this sprint's types plus any saved ones (so saving
+ *  never drops a stored type silently), de-duplicated case-insensitively, sorted. */
+export function checkTypeChoices(sprintTypes: readonly string[], saved: readonly string[]): string[] {
+  const seen = new Map<string, string>();
+  for (const t of [...sprintTypes, ...saved]) {
+    const k = t.trim().toLowerCase();
+    if (k !== '' && !seen.has(k)) seen.set(k, t.trim());
   }
-  return out;
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }
 
-/** The pill's suffix: "criterion 2", "criteria 2, 3, 5", or "18 criteria" past three. */
-export function chipGroupSuffix(criteria: readonly number[]): string | null {
-  if (criteria.length === 0) return null;
-  if (criteria.length === 1) return `criterion ${criteria[0]}`;
-  if (criteria.length <= 3) return `criteria ${criteria.join(', ')}`;
-  return `${criteria.length} criteria`;
+/** Toggle one type in a saved list (case-insensitive match). */
+export function toggleCheckType(list: readonly string[], type: string): string[] {
+  const k = type.trim().toLowerCase();
+  return list.some((x) => x.trim().toLowerCase() === k) ? list.filter((x) => x.trim().toLowerCase() !== k) : [...list, type];
 }
 
 export function assessmentActive(status: SprintAssessmentStatus | null | undefined): boolean {
@@ -87,19 +75,16 @@ export function assessmentProgressLine(status: SprintAssessmentStatus, phase: Sp
 }
 
 /** The assess button's word, or null when no button belongs there (a current assessment, or one in
- *  flight). */
-export function assessButtonLabel(t: Pick<SprintTicketRow, 'assessment'>): 'Assess with code' | 'Re-assess' | null {
+ *  flight). An outdated-format run offers a fresh check, not "again". */
+export function assessButtonLabel(t: Pick<SprintTicketRow, 'assessment'>): 'Check against code' | 'Check again' | null {
   const a = t.assessment;
-  if (a == null) return 'Assess with code';
+  if (a == null) return 'Check against code';
   if (assessmentActive(a.record.status)) return null;
-  if (a.record.status === 'succeeded') return a.currency === 'stale' ? 'Re-assess' : null;
-  return 'Assess with code';
-}
-
-/** The latest SUCCEEDED assessment body, or null. */
-export function assessmentBody(t: Pick<SprintTicketRow, 'assessment'>): SprintAssessmentRecord['body'] {
-  const r = t.assessment?.record;
-  return r != null && r.status === 'succeeded' ? r.body : null;
+  if (a.record.status === 'succeeded') {
+    if (a.record.outdated) return 'Check against code';
+    return a.currency === 'stale' ? 'Check again' : null;
+  }
+  return 'Check against code';
 }
 
 // ── The update panel ─────────────────────────────────────────────────────────────────────────────
@@ -159,17 +144,16 @@ export function replaceCriteriaSection(description: string, criteria: string): s
   return `${before}\n\n${criteria}${after === '' ? '' : `\n\n${after}`}`;
 }
 
-/** The right-hand side's starting text for a mode: from the latest succeeded assessment when there
- *  is one, else from the chips' fixes (comment) or the current text (replace). */
-export function proposedDefault(t: SprintTicketRow, mode: SprintWriteMode): string {
-  const body = assessmentBody(t);
-  if (mode === 'comment') {
-    if (body != null) return sprintCommentMarkdown(t.criteria.items, body);
-    return chipFixesMarkdown(t);
-  }
+/** The right-hand side's starting text for a mode. Comment: the summary (current assessment only), one bullet
+ *  per issue and any revised criteria. Replace: the revised criteria when the assessment proposed
+ *  some (the list alone for a criteria field; the description with its criteria section swapped),
+ *  else the current text. */
+export function proposedDefault(t: SprintTicketRow, mode: SprintWriteMode, checks: SprintChecks): string {
+  const body = sprintCurrentAssessmentBodyOf(t);
+  if (mode === 'comment') return sprintCommentMarkdown(sprintBullets(t, checks), body);
   const current = currentTextFor(t, t.replaceTarget);
-  if (body == null) return current;
-  const list = proposedCriteriaMarkdown(t.criteria.items, body.suggestion);
+  if (body == null || body.revisedCriteria.length === 0) return current;
+  const list = criteriaListMarkdown(body.revisedCriteria);
   return t.replaceTarget.kind === 'ac_field' ? list : replaceCriteriaSection(current, list);
 }
 

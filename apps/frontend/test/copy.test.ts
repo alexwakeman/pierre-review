@@ -3,38 +3,38 @@
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/copy.test.ts
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { sprintChipFix, type SprintAssessmentBody, type SprintTicketRow } from '@pierre-review/shared';
 import {
-  assessmentSectionMarkdown,
+  SPRINT_CHECKS_DEFAULT,
+  applyStoryIssueChecks,
+  foldStoryIssues,
+  storyIssueBullet,
+  type SprintAssessmentBody,
+  type SprintTicketRow,
+} from '@pierre-review/shared';
+import {
   blocksMarkdown,
-  chipFixesMarkdown,
-  chipFixMarkdown,
   copyRich,
   markdownToClipboardHtml,
+  sprintBulletMarkdown,
   ticketCopyAllMarkdown,
   ticketHeader,
 } from '../src/lib/copy.js';
 
+const CRITERIA = ['Users get a link'];
+// Criterion 1 not testable, no out-of-scope line: two issues.
+const ISSUES = foldStoryIssues({
+  criteria: CRITERIA,
+  label: {
+    criteria: [{ n: 1, testable: false, bundled: false, dependsOnOtherWork: false }],
+    story: { outOfScopeStated: false, dependencyNamed: true, nonCodeWork: false },
+  },
+});
+
 function body(over: Partial<SprintAssessmentBody> = {}): SprintAssessmentBody {
   return {
-    criteria: [
-      {
-        n: 1,
-        criterion: 'Users get a link',
-        testableAgainstCode: true,
-        landsIn: [{ repo: 'acme/web', path: 'src/auth/link.ts', symbol: 'sendLink' }],
-        existing: 'partial',
-        note: 'Sending exists.',
-      },
-    ],
-    gaps: { unnamedDependencies: [], unstatedBehaviourChanges: [], dataOrMigrationImpact: ['A new column'], edgeCases: ['Expired link'] },
-    suggestion: {
-      rewrittenCriteria: [{ n: 1, text: 'A user receives a link within a minute' }],
-      addedCriteria: ['An expired link says so'],
-      split: [{ title: 'Email part', criteria: ['Send it'] }],
-      questionsForOwner: ['How long does a link last?'],
-      summary: 'Mostly clear.',
-    },
+    summary: 'This may already be done: src/auth/link.ts sends the link.',
+    issues: [{ id: 'unclear_done', text: 'Say how long a link lasts.', ref: { repo: 'acme/web', path: 'src/auth/link.ts' } }],
+    revisedCriteria: ['A user receives a link within a minute'],
     ...over,
   };
 }
@@ -54,17 +54,10 @@ function ticket(over: Partial<SprintTicketRow> = {}): SprintTicketRow {
     description: '',
     acceptanceCriteria: '- Users get a link',
     acField: { id: 'customfield_1', name: 'Acceptance Criteria' },
-    criteria: { items: ['Users get a link'], source: 'acceptance_criteria' },
+    criteria: { items: CRITERIA, source: 'acceptance_criteria' },
     labels: 'current',
-    chips: [
-      { id: 'no_persona', criterion: null, fix: sprintChipFix('no_persona', null) },
-      {
-        id: 'criterion_not_testable',
-        criterion: { n: 1, text: 'Users get a link' },
-        fix: sprintChipFix('criterion_not_testable', { n: 1, text: 'Users get a link' }),
-      },
-    ],
-    flagCount: 2,
+    issues: ISSUES,
+    flagCount: ISSUES.length,
     pullRequests: [],
     repos: { accepted: [], suggested: [] },
     assessment: null,
@@ -75,7 +68,7 @@ function ticket(over: Partial<SprintTicketRow> = {}): SprintTicketRow {
   };
 }
 
-function succeeded(b: SprintAssessmentBody): SprintTicketRow['assessment'] {
+function succeeded(b: SprintAssessmentBody | null, over: { outdated?: boolean; status?: 'succeeded' | 'running' } = {}): SprintTicketRow['assessment'] {
   return {
     currency: 'current',
     record: {
@@ -83,10 +76,11 @@ function succeeded(b: SprintAssessmentBody): SprintTicketRow['assessment'] {
       workspaceId: 1,
       ident: 'x',
       model: 'claude-sonnet-5',
-      status: 'succeeded',
+      status: over.status ?? 'succeeded',
       phase: null,
       repos: [],
       body: b,
+      outdated: over.outdated ?? false,
       dropped: null,
       error: null,
       costUsd: null,
@@ -103,60 +97,66 @@ describe('markdown composers', () => {
     expect(ticketHeader('ACME-2', '  ')).toBe('## ACME-2');
   });
 
-  it('chip fixes are bullets naming the chip, the criterion number and its text', () => {
-    const t = ticket();
-    expect(chipFixMarkdown(t.chips[1]!)).toBe(
-      `**Not testable** (criterion 1: "Users get a link"): ${sprintChipFix('criterion_not_testable', { n: 1, text: 'Users get a link' })}`,
+  it('a bullet is one line: bold issue label, the sentence, the path in backticks', () => {
+    expect(sprintBulletMarkdown({ id: 'scope_unstated', text: 'Add a line.\nNow.', source: 'code', ref: null })).toBe(
+      '**Scope not stated**: Add a line. Now.',
     );
-    const md = chipFixesMarkdown(t);
-    expect(md.startsWith('**What to fix**\n\n- **No persona**: ')).toBe(true);
-    expect(md.split('\n').filter((l) => l.startsWith('- '))).toHaveLength(2);
-    expect(chipFixesMarkdown(ticket({ chips: [] }))).toBe('');
+    expect(
+      sprintBulletMarkdown({ id: 'unclear_done', text: 'Say how long.', source: 'claude', ref: { repo: 'acme/web', path: 'src/a.ts' } }),
+    ).toBe('**Unclear when done**: Say how long. (`src/a.ts` in `acme/web`)');
   });
 
-  it('criteria section puts file paths and repos in backticks', () => {
-    const md = assessmentSectionMarkdown('criteria', ticket(), body());
-    expect(md).toContain('1. Users get a link');
-    expect(md).toContain('   - Partly in the code · Testable against the code');
-    expect(md).toContain('   - `src/auth/link.ts` in `acme/web` (`sendLink`)');
-    expect(md).toContain('   - Sending exists.');
-  });
-
-  it('gaps lists only non-empty gaps, empty when none', () => {
-    const md = assessmentSectionMarkdown('gaps', ticket(), body());
-    expect(md).toBe('**Data or migration impact**\n\n- A new column\n\n**Edge cases**\n\n- Expired link');
-    const none = body({ gaps: { unnamedDependencies: [], unstatedBehaviourChanges: [], dataOrMigrationImpact: [], edgeCases: [] } });
-    expect(assessmentSectionMarkdown('gaps', ticket(), none)).toBe('');
-  });
-
-  it('suggestion merges rewritten and added criteria, and the split', () => {
-    const md = assessmentSectionMarkdown('suggestion', ticket(), body());
-    expect(md).toContain('Mostly clear.');
-    expect(md).toContain('**Proposed acceptance criteria**\n\n- A user receives a link within a minute\n- An expired link says so');
-    expect(md).toContain('**Proposed split**\n\n- Email part\n  - Send it');
-  });
-
-  it('questions section', () => {
-    expect(assessmentSectionMarkdown('questions', ticket(), body())).toBe(
-      '**Questions for the owner**\n\n- How long does a link last?',
+  it('copy all without an assessment: header, link, one bullet per issue', () => {
+    expect(ticketCopyAllMarkdown(ticket(), SPRINT_CHECKS_DEFAULT)).toBe(
+      [
+        '## ACME-2 — Sign in with a link',
+        'https://acme.atlassian.net/browse/ACME-2',
+        `- **Unclear when done**: ${storyIssueBullet(ISSUES[0]!)}\n- **Scope not stated**: ${storyIssueBullet(ISSUES[1]!)}`,
+      ].join('\n\n'),
     );
   });
 
-  it('copy all: header, link, fixes, then every assessment section of a SUCCEEDED run', () => {
-    const md = ticketCopyAllMarkdown(ticket({ assessment: succeeded(body()) }));
-    const order = ['## ACME-2 — Sign in with a link', 'https://acme.atlassian.net/browse/ACME-2', '**What to fix**', '**Criteria against the code**', '**Edge cases**', '**Proposed acceptance criteria**', '**Questions for the owner**'];
-    let at = -1;
-    for (const o of order) {
-      const i = md.indexOf(o);
-      expect(i, o).toBeGreaterThan(at);
-      at = i;
-    }
+  it("copy all with an assessment: the summary, then Claude's sentence replaces the template", () => {
+    const md = ticketCopyAllMarkdown(ticket({ assessment: succeeded(body()) }), SPRINT_CHECKS_DEFAULT);
+    expect(md).toBe(
+      [
+        '## ACME-2 — Sign in with a link',
+        'https://acme.atlassian.net/browse/ACME-2',
+        'This may already be done: src/auth/link.ts sends the link.',
+        `- **Unclear when done**: Say how long a link lasts. (\`src/auth/link.ts\` in \`acme/web\`)\n- **Scope not stated**: ${storyIssueBullet(ISSUES[1]!)}`,
+      ].join('\n\n'),
+    );
+  });
+
+  it('copy all follows the checks, and ignores running / outdated runs and unsafe links', () => {
+    // The server sends `issues` already filtered; the checks also drop Claude's sentence for an issue
+    // switched off.
+    const checks = { off: ['scope_unstated' as const], issueTypes: [] };
+    const claudeScope = body({ issues: [{ id: 'scope_unstated', text: 'Say it is CSV only.', ref: null }] });
+    const off = ticketCopyAllMarkdown(
+      ticket({ issues: applyStoryIssueChecks(ISSUES, checks, null), assessment: succeeded(claudeScope) }),
+      checks,
+    );
+    expect(off).not.toContain('Scope not stated');
+    expect(off).toContain('Unclear when done');
+    // A type the checks do not cover: header, link and summary — no bullets, not even Claude's.
+    expect(
+      ticketCopyAllMarkdown(ticket({ issueType: 'Bug', issues: [], assessment: succeeded(body()) }), { off: [], issueTypes: ['Story'] }),
+    ).toBe(
+      '## ACME-2 — Sign in with a link\n\nhttps://acme.atlassian.net/browse/ACME-2\n\nThis may already be done: src/auth/link.ts sends the link.',
+    );
+    expect(ticketCopyAllMarkdown(ticket({ assessment: succeeded(null, { status: 'running' }) }), SPRINT_CHECKS_DEFAULT)).not.toContain(
+      'may already be done',
+    );
+    expect(ticketCopyAllMarkdown(ticket({ assessment: succeeded(null, { outdated: true }) }), SPRINT_CHECKS_DEFAULT)).not.toContain(
+      'may already be done',
+    );
+    // ⚠ A STALE run puts nothing in Copy all: no summary, no sentence of its own.
+    const stale = { ...succeeded(body({ issues: [{ id: 'scope_unstated', text: 'Say it is CSV only.', ref: null }] }))!, currency: 'stale' as const };
+    const staleMd = ticketCopyAllMarkdown(ticket({ issues: [], assessment: stale }), SPRINT_CHECKS_DEFAULT);
+    expect(staleMd).toBe('## ACME-2 — Sign in with a link\n\nhttps://acme.atlassian.net/browse/ACME-2');
     // A javascript: URL is never copied as the ticket link.
-    expect(ticketCopyAllMarkdown(ticket({ url: 'javascript:alert(1)' }))).not.toContain('javascript:');
-    // A running assessment contributes nothing.
-    const running = succeeded(body())!;
-    running.record = { ...running.record, status: 'running', body: null };
-    expect(ticketCopyAllMarkdown(ticket({ assessment: running }))).not.toContain('Criteria against the code');
+    expect(ticketCopyAllMarkdown(ticket({ url: 'javascript:alert(1)' }), SPRINT_CHECKS_DEFAULT)).not.toContain('javascript:');
   });
 
   it('blocksMarkdown skips empty blocks', () => {

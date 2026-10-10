@@ -18,6 +18,14 @@ describe('sprint assessment tool policy', () => {
 });
 
 describe('sprint assessment prompt', () => {
+  it('names the four issues and asks for one sentence each', async () => {
+    const { SPRINT_ASSESS_SYSTEM_PROMPT } = await import('./prompts.js');
+    for (const id of ['unclear_done', 'too_big', 'waits_on_work', 'scope_unstated']) expect(SPRINT_ASSESS_SYSTEM_PROMPT).toContain(id);
+    expect(SPRINT_ASSESS_SYSTEM_PROMPT).toContain('This may already be done');
+    expect(SPRINT_ASSESS_SYSTEM_PROMPT).toContain('more than 8 criteria');
+    expect(SPRINT_ASSESS_SYSTEM_PROMPT.length).toBeLessThan(2400);
+  });
+
   it('fences the ticket text with a nonce it does not contain', () => {
     const ticket = {
       key: 'ENG-1',
@@ -35,7 +43,7 @@ describe('sprint assessment prompt', () => {
 
   it('asks for criteria when the ticket has none', () => {
     const prompt = buildSprintAssessPrompt({ key: 'ENG-2', title: 't', description: '', criteria: [] }, [], 'n0nce');
-    expect(prompt).toContain('The ticket has no acceptance criteria.');
+    expect(prompt).toContain('The ticket has no acceptance criteria. Propose criteria in `revisedCriteria`.');
     expect(prompt).not.toContain('BEGIN CRITERIA');
   });
 });

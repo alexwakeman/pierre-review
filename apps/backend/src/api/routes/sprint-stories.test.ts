@@ -5,7 +5,8 @@
 //   3. Order: Not started first, then In progress; most flags first; then key. Done tickets are counted,
 //      not listed; out-of-sprint and other tenants' tickets never listed.
 //   4. A view stamps `sprint_reads.viewed_at` and kicks a due read.
-//   5. Labels: a CURRENT label makes label chips; `aiEnabled` false → 'off' and no label chips.
+//   5. Issues: a CURRENT label feeds the label half; `aiEnabled` false → 'off' and only code issues.
+//   7. PUT /api/sprint-stories/checks: strict on a post; a stored old-shape value reads as defaults.
 //   6. PUT /api/sprint-stories/repos: replace, too_many, bad_repo (another tenant's repo through a
 //      foreign workspace id lands on the caller's Default), no_ticket, bad_request.
 //
@@ -146,7 +147,7 @@ describe('GET /api/sprint-stories', () => {
     for (const r of [
       { method: 'GET' as const, url: '/api/sprint-stories' },
       { method: 'PUT' as const, url: '/api/sprint-stories/repos', payload: { workspaceId: ownWs, ident: 'x', repoIds: [] } },
-      { method: 'PUT' as const, url: '/api/sprint-stories/checks', payload: { workspaceId: ownWs, checks: { off: [], issueTypes: {} } } },
+      { method: 'PUT' as const, url: '/api/sprint-stories/checks', payload: { workspaceId: ownWs, checks: { off: [], issueTypes: [] } } },
     ]) {
       const res = await app.inject(r);
       expect(res.statusCode).toBe(402);
@@ -165,13 +166,16 @@ describe('GET /api/sprint-stories', () => {
     expect(body.read.readAt).toBeNull();
     expect(body.tickets.map((t: any) => [t.key, t.phase, t.flagCount])).toEqual([
       ['ENG-1', 'not_started', 2],
-      ['ENG-3', 'not_started', 1],
-      ['ENG-2', 'in_progress', 2],
+      ['ENG-3', 'not_started', 0],
+      ['ENG-2', 'in_progress', 1],
     ]);
     const eng1 = body.tickets[0];
     expect(eng1.labels).toBe('current');
-    expect(eng1.chips.map((c: any) => c.id)).toEqual(['criterion_not_testable', 'out_of_scope_missing']);
-    expect(eng1.chips[0].criterion).toEqual({ n: 2, text: 'Basket expires after 30 days' });
+    expect(eng1.issues).toEqual([
+      { id: 'unclear_done', criteria: [2], total: 2, reasons: ['untestable'] },
+      { id: 'scope_unstated', criteria: [], total: 2, reasons: ['no_out_of_scope'] },
+    ]);
+    expect(body.tickets[2].issues.map((i: any) => i.id)).toEqual(['unclear_done']);
     expect(eng1.replaceTarget).toEqual({ kind: 'description' });
     expect(eng1.repos).toEqual({ accepted: [], suggested: [] });
     expect(body.repos).toEqual([{ repoId: ownRepo, fullName: 'acme/web' }]);
@@ -181,12 +185,13 @@ describe('GET /api/sprint-stories', () => {
     expect(await store.readSprintRead(1, foreignWs)).toBeNull();
   });
 
-  it('aiEnabled false → labels off and no label chips', async () => {
+  it('aiEnabled false → labels off and no label issues', async () => {
     const out = await fold.getSprintStories(1, ownWs, { aiEnabled: false, now: Date.now() });
     expect(out.aiEnabled).toBe(false);
     const eng1 = out.tickets.find((t) => t.key === 'ENG-1')!;
     expect(eng1.labels).toBe('off');
-    expect(eng1.chips).toEqual([]);
+    expect(eng1.issues).toEqual([]);
+    expect(out.tickets.find((t) => t.key === 'ENG-2')!.issues.map((i) => i.id)).toEqual(['unclear_done']);
   });
 });
 
@@ -256,31 +261,70 @@ describe('PUT /api/sprint-stories/repos', () => {
 
 describe('PUT /api/sprint-stories/checks', () => {
   const put = (payload: unknown) => app.inject({ method: 'PUT', url: '/api/sprint-stories/checks', payload: payload as any });
+  const list = async () => (await app.inject({ method: 'GET', url: '/api/sprint-stories' })).json() as any;
+  const DEFAULTS = { off: [], issueTypes: [] };
 
-  it('stores the checks; the list echoes them and drops the switched-off chips', async () => {
-    const before = (await app.inject({ method: 'GET', url: '/api/sprint-stories' })).json() as any;
-    const checks = { off: ['no_persona'], issueTypes: { no_criteria: ['Story'] } };
-    const res = await put({ workspaceId: ownWs, checks });
+  it('stores the checks; the list echoes them and drops the switched-off issues', async () => {
+    const before = await list();
+    expect(before.checks).toEqual(DEFAULTS);
+    const res = await put({ workspaceId: ownWs, checks: { off: ['scope_unstated'], issueTypes: [' Story ', 'story', 'Bug'] } });
     expect(res.statusCode).toBe(200);
+    const checks = { off: ['scope_unstated'], issueTypes: ['Story', 'Bug'] };
     expect(res.json()).toEqual({ workspaceId: ownWs, checks });
-    const list = (await app.inject({ method: 'GET', url: '/api/sprint-stories' })).json() as any;
-    expect(list.checks).toEqual(checks);
-    for (const t of list.tickets) {
-      expect(t.chips.some((c: any) => c.id === 'no_persona')).toBe(false);
-      expect(t.flagCount).toBe(t.chips.length);
-    }
-    expect(Array.isArray(list.issueTypes)).toBe(true);
-    expect(before.checks).toEqual({ off: [], issueTypes: {} });
-    // Back to the defaults.
-    await put({ workspaceId: ownWs, checks: { off: [], issueTypes: {} } });
-    expect(((await app.inject({ method: 'GET', url: '/api/sprint-stories' })).json() as any).checks).toEqual({ off: [], issueTypes: {} });
+    const after = await list();
+    expect(after.checks).toEqual(checks);
+    // ENG-1 has no issue type, so it is checked; only its scope issue is switched off.
+    expect(after.tickets.find((t: any) => t.key === 'ENG-1').issues.map((i: any) => i.id)).toEqual(['unclear_done']);
+    for (const t of after.tickets) expect(t.flagCount).toBe(t.issues.length);
+    expect(Array.isArray(after.issueTypes)).toBe(true);
+    // Back to the defaults, stored as NULL.
+    await put({ workspaceId: ownWs, checks: DEFAULTS });
+    expect((await list()).checks).toEqual(DEFAULTS);
+    const { eq } = await import('drizzle-orm');
+    const [ws] = await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, ownWs)).execute();
+    expect(ws.sprintChecks).toBeNull();
+  });
+
+  it('a ticket whose type is not listed shows no issues and is still listed', async () => {
+    const { eq, and } = await import('drizzle-orm');
+    const t = schema.sprintTickets;
+    await db.update(t).set({ issueTypeName: 'Bug' }).where(and(eq(t.accountId, 1), eq(t.issueKey, 'ENG-1'))).execute();
+    await put({ workspaceId: ownWs, checks: { off: [], issueTypes: ['Story'] } });
+    const eng1 = (await list()).tickets.find((x: any) => x.key === 'ENG-1');
+    expect(eng1.issues).toEqual([]);
+    expect(eng1.flagCount).toBe(0);
+    await db.update(t).set({ issueTypeName: null }).where(and(eq(t.accountId, 1), eq(t.issueKey, 'ENG-1'))).execute();
+    await put({ workspaceId: ownWs, checks: DEFAULTS });
+  });
+
+  it('an old stored shape reads as the defaults (unknown ids dropped, object issueTypes → [])', async () => {
+    const { eq } = await import('drizzle-orm');
+    await db.update(schema.workspaces).set({ sprintChecks: { off: ['no_persona'], issueTypes: {} } }).where(eq(schema.workspaces.id, ownWs)).execute();
+    expect((await list()).checks).toEqual(DEFAULTS);
+    await db
+      .update(schema.workspaces)
+      .set({ sprintChecks: { off: ['no_persona', 'too_big'], issueTypes: { no_criteria: ['Story'] } } })
+      .where(eq(schema.workspaces.id, ownWs))
+      .execute();
+    expect((await list()).checks).toEqual({ off: ['too_big'], issueTypes: [] });
+    await db.update(schema.workspaces).set({ sprintChecks: null }).where(eq(schema.workspaces.id, ownWs)).execute();
   });
 
   it('refuses malformed checks and writes nothing', async () => {
-    for (const checks of [{ off: ['nope'], issueTypes: {} }, { off: 'x' }, { off: [], issueTypes: { no_persona: [''] } }, null]) {
+    for (const checks of [
+      { off: ['nope'], issueTypes: [] },
+      { off: ['no_persona'], issueTypes: [] },
+      { off: 'x' },
+      { off: [], issueTypes: {} },
+      { off: [], issueTypes: [''] },
+      { off: [], issueTypes: ['x'.repeat(81)] },
+      { off: [], issueTypes: ['a\u0007b'] },
+      { off: [], issueTypes: Array.from({ length: 41 }, (_, k) => `T${k}`) },
+      null,
+    ]) {
       expect((await put({ workspaceId: ownWs, checks })).statusCode).toBe(400);
     }
-    expect((await put({ workspaceId: 'x', checks: { off: [], issueTypes: {} } })).statusCode).toBe(400);
-    expect(((await app.inject({ method: 'GET', url: '/api/sprint-stories' })).json() as any).checks).toEqual({ off: [], issueTypes: {} });
+    expect((await put({ workspaceId: 'x', checks: DEFAULTS })).statusCode).toBe(400);
+    expect((await list()).checks).toEqual(DEFAULTS);
   });
 });

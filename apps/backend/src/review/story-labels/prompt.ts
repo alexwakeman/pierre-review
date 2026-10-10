@@ -1,14 +1,14 @@
 import type { StoryLabelInput } from '../../db/story-label-input.js';
 
-// THE STORY LABELLER'S PROMPT (docs/CLAUDE-REVIEW.md § Story labels). The FIXED rubric behind Story
-// health's label series — shared `STORY_RUBRIC_VERSION`. ⚠ Changing ONE WORD of it is a new rubric:
+// THE STORY LABELLER'S PROMPT (docs/CLAUDE-REVIEW.md § Story labels). The FIXED rubric whose six
+// answers code folds into the four story issues (shared `story-issues.ts`) — shared
+// `STORY_RUBRIC_VERSION`. ⚠ Changing ONE WORD of it is a new rubric:
 // bump `STORY_RUBRIC_VERSION` in the same commit (every story relabels; old rows stop counting), and
 // a question whose MEANING changes gets a NEW series id — a metric is renamed, never redefined.
 //
-// It is the measured prototype's prompt (40 stories × 2 runs, Cohen's κ per label in shared
-// `STORY_LABEL_AGREEMENT`) VERBATIM, minus the three questions that did not earn a place: `vague`
-// (κ 0.56) and `scopeStated` (κ 0.48) were dropped, and `userValueStated` moved to CODE
-// (db/story-user-value.ts). Their keys are gone from the JSON shape too.
+// It is the measured prototype's prompt (40 stories × 2 runs; Cohen's κ 0.67–0.85 per kept label)
+// VERBATIM, minus the three questions that did not earn a place: `vague` (κ 0.56), `scopeStated`
+// (κ 0.48) and the who-benefits question were dropped. Their keys are gone from the JSON shape too.
 //
 // The ticket text is attacker-authorable, so it travels inside a per-run NONCE fence and the system
 // prompt says it is data. The call goes through the core cheap seam (review/llm.ts `cheapComplete`):

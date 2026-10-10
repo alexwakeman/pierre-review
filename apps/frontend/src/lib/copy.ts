@@ -1,20 +1,17 @@
 import {
-  SPRINT_CHIPS,
-  SPRINT_EXISTING_LABEL,
-  SPRINT_GAP_LABEL,
-  proposedCriteriaMarkdown,
-  type SprintAssessmentBody,
-  type SprintAssessmentGaps,
-  type SprintChip,
+  STORY_ISSUE_BY_ID,
+  sprintBullets,
+  sprintCurrentAssessmentBodyOf,
+  type SprintBullet,
+  type SprintChecks,
   type SprintTicketRow,
 } from '@pierre-review/shared';
 import { writeClipboard } from '../components/CopyButton.js';
 
 // COPY AND PASTE FOR GENERATED TEXT — the ONE place (Reports → This sprint).
 //
-// Everything the This sprint tab generates (a chip's fix, each assessment section, the proposed
-// update, the questions for the owner, "Copy all" for a ticket) is copied through here, so a block
-// pastes the same way wherever it came from.
+// Everything the This sprint tab generates (one issue's bullet, the proposed update, "Copy all" for a
+// ticket) is copied through here, so a block pastes the same way wherever it came from.
 //
 //   • text/plain carries CLEAN MARKDOWN: a "## KEY — Title" header, `-` bullets, file paths in
 //     backticks. It pastes as-is into a Jira / Linear / GitHub editor, a Slack message or a prompt.
@@ -40,92 +37,21 @@ export function ticketHeader(key: string, title: string): string {
   return t === '' ? `## ${key}` : `## ${key} — ${t}`;
 }
 
-/** One chip's fix as one Markdown line (the per-chip Copy). */
-export function chipFixMarkdown(chip: SprintChip): string {
-  const label = SPRINT_CHIPS[chip.id].label;
-  // The criterion's TEXT travels with its number: pasted outside the app, "criterion 2" alone names
-  // nothing anyone can see.
-  const c = chip.criterion;
-  const text = c != null ? oneLine(c.text) : '';
-  const where = c != null ? (text !== '' ? ` (criterion ${c.n}: "${text}")` : ` (criterion ${c.n})`) : '';
-  return `**${label}**${where}: ${oneLine(chip.fix)}`;
+/** One issue's bullet as one Markdown line: "**Too big**: Split this story: … (`path` in `repo`)". */
+export function sprintBulletMarkdown(b: SprintBullet): string {
+  const ref = b.ref != null ? ` (\`${b.ref.path}\` in \`${b.ref.repo}\`)` : '';
+  return `**${STORY_ISSUE_BY_ID[b.id].label}**: ${oneLine(b.text)}${ref}`;
 }
 
-/** Every chip's fix on the ticket, as a bulleted list under a bold label. '' when there are none. */
-export function chipFixesMarkdown(t: SprintTicketRow): string {
-  if (t.chips.length === 0) return '';
-  return `**What to fix**\n\n${t.chips.map((c) => `- ${chipFixMarkdown(c)}`).join('\n')}`;
-}
-
-function bullets(items: readonly string[]): string {
-  return items.map((i) => `- ${oneLine(i)}`).join('\n');
-}
-
-/** One assessment section as Markdown. '' when the section has nothing in it. */
-export function assessmentSectionMarkdown(
-  section: 'criteria' | 'gaps' | 'suggestion' | 'questions',
-  t: SprintTicketRow,
-  body: SprintAssessmentBody,
-): string {
-  switch (section) {
-    case 'criteria': {
-      if (body.criteria.length === 0) return '';
-      const items = body.criteria.map((c) => {
-        const lines = [`${c.n}. ${oneLine(c.criterion)}`];
-        lines.push(
-          `   - ${SPRINT_EXISTING_LABEL[c.existing]} · ${c.testableAgainstCode ? 'Testable against the code' : 'Not testable against the code'}`,
-        );
-        for (const r of c.landsIn) {
-          lines.push(`   - \`${r.path}\` in \`${r.repo}\`${r.symbol != null && r.symbol !== '' ? ` (\`${r.symbol}\`)` : ''}`);
-        }
-        if (c.note.trim() !== '') lines.push(`   - ${oneLine(c.note)}`);
-        return lines.join('\n');
-      });
-      return `**Criteria against the code**\n\n${items.join('\n')}`;
-    }
-    case 'gaps': {
-      const keys = Object.keys(SPRINT_GAP_LABEL) as Array<keyof SprintAssessmentGaps>;
-      const parts = keys
-        .filter((k) => body.gaps[k].length > 0)
-        .map((k) => `**${SPRINT_GAP_LABEL[k]}**\n\n${bullets(body.gaps[k])}`);
-      return parts.join('\n\n');
-    }
-    case 'suggestion': {
-      const s = body.suggestion;
-      const parts: string[] = [];
-      if (s.summary.trim() !== '') parts.push(s.summary.trim());
-      if (t.criteria.items.length > 0 || s.addedCriteria.length > 0) {
-        parts.push(`**Proposed acceptance criteria**\n\n${proposedCriteriaMarkdown(t.criteria.items, s)}`);
-      }
-      if (s.split != null && s.split.length > 0) {
-        parts.push(
-          `**Proposed split**\n\n${s.split
-            .map((p) => `- ${oneLine(p.title)}${p.criteria.map((c) => `\n  - ${oneLine(c)}`).join('')}`)
-            .join('\n')}`,
-        );
-      }
-      return parts.join('\n\n');
-    }
-    case 'questions':
-      return body.suggestion.questionsForOwner.length === 0
-        ? ''
-        : `**Questions for the owner**\n\n${bullets(body.suggestion.questionsForOwner)}`;
-  }
-}
-
-/** Everything generated for a ticket: header, link, fixes, and the latest SUCCEEDED assessment. */
-export function ticketCopyAllMarkdown(t: SprintTicketRow): string {
+/** Everything for a ticket: header, link, the CURRENT assessment's summary (when there is one) and one bullet
+ *  per issue — the same bullets the card shows (`sprintBullets`, the workspace's checks applied). */
+export function ticketCopyAllMarkdown(t: SprintTicketRow, checks: SprintChecks): string {
   const parts = [ticketHeader(t.key, t.title)];
   if (t.url != null && /^https?:\/\//i.test(t.url)) parts.push(t.url);
-  const fixes = chipFixesMarkdown(t);
-  if (fixes !== '') parts.push(fixes);
-  const body = t.assessment?.record.status === 'succeeded' ? t.assessment.record.body : null;
-  if (body != null) {
-    for (const s of ['criteria', 'gaps', 'suggestion', 'questions'] as const) {
-      const md = assessmentSectionMarkdown(s, t, body);
-      if (md !== '') parts.push(md);
-    }
-  }
+  const body = sprintCurrentAssessmentBodyOf(t);
+  if (body != null && body.summary.trim() !== '') parts.push(oneLine(body.summary));
+  const bullets = sprintBullets(t, checks);
+  if (bullets.length > 0) parts.push(bullets.map((b) => `- ${sprintBulletMarkdown(b)}`).join('\n'));
   return parts.join('\n\n');
 }
 

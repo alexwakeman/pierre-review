@@ -1,41 +1,38 @@
 import { useState } from 'react';
 import {
-  SPRINT_CHIPS,
   SPRINT_REPO_REASON_LABEL,
   SPRINT_REPOS_PER_TICKET_MAX,
-  STORY_CRITERIA_SOURCE_LABEL,
-  type SprintChip,
+  STORY_ISSUE_BY_ID,
+  sprintAssessmentBodyOf,
+  sprintBullets,
+  sprintCurrentAssessmentBodyOf,
+  storyIssueChipText,
+  type SprintChecks,
   type SprintRepoRef,
   type SprintTicketRow,
 } from '@pierre-review/shared';
 import { useSprintReposSaving, useSprintSetRepos } from '../../hooks/useSprintStories.js';
-import { chipFixesMarkdown, chipFixMarkdown, ticketCopyAllMarkdown } from '../../lib/copy.js';
-import { safeExternalUrl } from '../../lib/ui.js';
-import { ChevronIcon, CloseIcon, PlusIcon } from '../Icons.js';
+import { sprintBulletMarkdown, ticketCopyAllMarkdown } from '../../lib/copy.js';
+import { relativeTime, safeExternalUrl } from '../../lib/ui.js';
+import { ChevronIcon, CloseIcon, PlusIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { SprintAssessment } from './SprintAssessment.js';
 import { SprintCopyButton } from './SprintCopyButton.js';
 import { SprintUpdatePanel } from './SprintUpdatePanel.js';
-import { chipGroupSuffix, groupChips, splitChips, type ChipGroup } from './sprintModel.js';
 
-// One ticket on Reports → This sprint. Collapsed: key + title, status, assignee (display only), chips,
-// PRs. Expanded: each chip's criterion and templated fix (each copyable), candidate repos, the code
-// assessment and the update panel. "Copy all" copies everything generated for the ticket.
+// One ticket on Reports → This sprint. Collapsed: key + title, status, assignee (display only), at
+// most four issue chips, PRs. Expanded, in this order and nothing else: one bullet per issue (each
+// copyable; Claude's sentence replaces the template once the ticket was checked against code), the
+// candidate repos, the "Check against code" button and the update panel. "Copy all" copies the
+// header, the summary and the bullets.
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 
-function ChipPill({ group }: { group: ChipGroup }): JSX.Element {
-  const meta = SPRINT_CHIPS[group.id];
-  // Code chips are filled grey, label chips outlined — the ⓘ on the heading says which is which.
-  const cls =
-    meta.source === 'code'
-      ? 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200'
-      : 'border border-amber-300 text-amber-800 dark:border-amber-700 dark:text-amber-300';
-  const suffix = chipGroupSuffix(group.criteria);
+function ClaudeMark(): JSX.Element {
   return (
-    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium ${cls}`}>
-      {meta.label}
-      {suffix != null && <span className="ml-1 font-normal">· {suffix}</span>}
+    <span className="ml-1 inline-flex items-center gap-0.5 align-middle text-[11px] text-ai-ink">
+      <SparkleIcon size={10} className="text-ai-signal" />
+      Claude
     </span>
   );
 }
@@ -45,15 +42,16 @@ export function SprintTicketCard({
   workspaceId,
   aiEnabled,
   repos,
+  checks,
 }: {
   ticket: SprintTicketRow;
   workspaceId: number;
   aiEnabled: boolean;
   repos: SprintRepoRef[];
+  checks: SprintChecks;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const href = safeExternalUrl(t.url);
-  const { code, label } = splitChips(t.chips);
 
   return (
     <article className="rounded-lg border border-gray-200 p-3 dark:border-gray-800" data-testid="sprint-ticket">
@@ -104,66 +102,80 @@ export function SprintTicketCard({
               </span>
             )}
           </div>
-          {(code.length > 0 || label.length > 0) && (
+          {t.issues.length > 0 && (
             <div className="flex flex-wrap gap-1 pt-0.5">
-              {groupChips([...code, ...label]).map((g) => (
-                <ChipPill key={g.id} group={g} />
+              {t.issues.map((i) => (
+                <span
+                  key={i.id}
+                  className="inline-flex items-center rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+                >
+                  {storyIssueChipText(i)}
+                </span>
               ))}
             </div>
           )}
           {t.labels === 'pending' && aiEnabled && <p className={`text-xs ${MUTED}`}>Criteria not read yet.</p>}
         </div>
-        <SprintCopyButton markdown={ticketCopyAllMarkdown(t)} label="Copy all" what={`everything for ${t.key}`} />
+        <SprintCopyButton markdown={ticketCopyAllMarkdown(t, checks)} label="Copy all" what={`everything for ${t.key}`} />
       </div>
 
       {open && (
         <div className="mt-3 space-y-4 border-t border-gray-100 pt-3 dark:border-gray-800">
-          <FixesBlock ticket={t} />
+          <IssuesBlock ticket={t} checks={checks} />
           <ReposBlock ticket={t} workspaceId={workspaceId} repos={repos} />
           {(aiEnabled || t.assessment != null) && (
             <SprintAssessment ticket={t} workspaceId={workspaceId} aiEnabled={aiEnabled} />
           )}
-          <SprintUpdatePanel ticket={t} workspaceId={workspaceId} />
+          {/* Nothing to propose and nothing written yet → no editor at all. */}
+          {(sprintBullets(t, checks).length > 0 || sprintCurrentAssessmentBodyOf(t) != null || t.lastWrite != null) && (
+            <SprintUpdatePanel ticket={t} workspaceId={workspaceId} checks={checks} />
+          )}
         </div>
       )}
     </article>
   );
 }
 
-function FixesBlock({ ticket: t }: { ticket: SprintTicketRow }): JSX.Element {
+function IssuesBlock({ ticket: t, checks }: { ticket: SprintTicketRow; checks: SprintChecks }): JSX.Element {
+  const record = t.assessment?.record ?? null;
+  const body = sprintAssessmentBodyOf(t);
+  const stale = body != null && t.assessment?.currency === 'stale';
+  const bullets = sprintBullets(t, checks);
   return (
-    <section className="space-y-2">
-      <div className="flex items-center gap-2">
-        <h5 className="text-xs font-semibold text-gray-700 dark:text-gray-200">What to fix</h5>
-        {t.criteria.items.length > 0 && (
-          <span className={`text-[11px] ${MUTED}`}>
-            {t.criteria.items.length} {t.criteria.items.length === 1 ? 'criterion' : 'criteria'} ·{' '}
-            {STORY_CRITERIA_SOURCE_LABEL[t.criteria.source]}
-          </span>
-        )}
-        <SprintCopyButton markdown={chipFixesMarkdown(t)} what={`the fixes for ${t.key}`} className="ml-auto" />
-      </div>
-      {t.chips.length === 0 ? (
+    <section className="space-y-2" data-testid="sprint-issues">
+      {record?.outdated === true && <p className={`text-xs ${MUTED}`}>Out of date — check against code again.</p>}
+      {body != null && body.summary.trim() !== '' && (
+        <p className="text-xs text-gray-800 dark:text-gray-100">
+          {body.summary}
+          <ClaudeMark />
+          {record?.completedAt != null && <span className={`ml-1 text-[11px] ${MUTED}`}>· {relativeTime(record.completedAt)}</span>}
+          {stale && (
+            <span className="ml-1 rounded bg-gray-100 px-1 text-[11px] text-gray-700 dark:bg-gray-800 dark:text-gray-200">Out of date</span>
+          )}
+        </p>
+      )}
+      {bullets.length === 0 ? (
         <p className={`text-xs ${MUTED}`}>Nothing flagged.</p>
       ) : (
-        <ul className="space-y-2">
-          {t.chips.map((c, i) => (
-            <li key={`${c.id}-${c.criterion?.n ?? 's'}-${i}`} className="flex items-start gap-2">
-              <div className="min-w-0 flex-1 space-y-0.5">
-                <div className="text-[11px] font-semibold text-gray-700 dark:text-gray-200">
-                  {SPRINT_CHIPS[c.id].label}
-                  {c.criterion != null && <span className={`font-normal ${MUTED}`}> · criterion {c.criterion.n}</span>}
-                </div>
-                {c.criterion != null && (
-                  <blockquote className="border-l-2 border-gray-200 pl-2 text-xs text-gray-600 dark:border-gray-700 dark:text-gray-300">
-                    {c.criterion.text}
-                  </blockquote>
-                )}
-                <p className="text-xs text-gray-800 dark:text-gray-100">{c.fix}</p>
-              </div>
-              <SprintCopyButton markdown={chipFixMarkdown(c)} what="this fix" />
-            </li>
-          ))}
+        <ul className="space-y-1.5">
+          {bullets.map((b) => {
+            const label = STORY_ISSUE_BY_ID[b.id].label;
+            return (
+              <li key={b.id} className="flex items-start gap-2">
+                <p className="min-w-0 flex-1 text-xs text-gray-800 dark:text-gray-100">
+                  <strong className="font-semibold">{label}</strong> · {b.text}
+                  {b.ref != null && (
+                    <span className={MUTED}>
+                      {' '}
+                      <code className="font-mono text-[11px]">{b.ref.path}</code> in {b.ref.repo}
+                    </span>
+                  )}
+                  {b.source === 'claude' && <ClaudeMark />}
+                </p>
+                <SprintCopyButton markdown={sprintBulletMarkdown(b)} what={`the ${label} line`} />
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>
@@ -193,7 +205,7 @@ function ReposBlock({
       <h5 className="flex items-center gap-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
         Repos
         <InfoButton title="Repos">
-          <p>The repos this ticket&rsquo;s work lands in. Only the repos you add are used when you assess the ticket with code.</p>
+          <p>The repos this ticket&rsquo;s work lands in. Only the repos you add are read when you check the ticket against code.</p>
           <p>Dashed repos are suggestions. Click one to use it. Each says why it was suggested.</p>
           <p>Up to {SPRINT_REPOS_PER_TICKET_MAX} repos per ticket.</p>
         </InfoButton>

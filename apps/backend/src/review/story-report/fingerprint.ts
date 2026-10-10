@@ -4,10 +4,14 @@ import type { StoryInternals } from '../../db/stories.js';
 
 // THE STORY REPORT'S CURRENCY — a stored report is 'stale' when this differs from today's. Pure.
 //
-// sha256 over a canonical JSON of: the window choice, the picked stories sorted by ident, and for
+// sha256 over a canonical JSON of: a FORMAT TAG (`STORY_REPORT_FORMAT` — bumped when what the agent
+// is given or asked for changes, so older reports read stale), the window choice, the picked stories sorted by ident, and for
 // each its latest ticket review id (or null) and its PRs sorted by id as [id, state, mergedAt ISO].
 // ⚠ NOTHING DERIVED FROM `now`: a dormant workspace's report stays current. With a trailing window the
 // picks move as it slides, which is the honest stale signal (the report covers other stories now).
+
+/** v2: the four story issues (per-pick issues, whole-window issue rates, an issue per point). */
+export const STORY_REPORT_FORMAT = 'story-report-v3';
 
 export interface FingerprintPick {
   ident: string;
@@ -25,6 +29,7 @@ export function fingerprintPickOf(s: StoryInternals): FingerprintPick {
 
 export function storyReportFingerprint(choice: StoryReportWindowChoice, picks: readonly FingerprintPick[]): string {
   const canonical = {
+    format: STORY_REPORT_FORMAT,
     window: choice,
     picks: [...picks]
       .sort((a, b) => (a.ident < b.ident ? -1 : a.ident > b.ident ? 1 : 0))

@@ -274,7 +274,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(storyHealthRoutes);
   // REPORTS → THIS SPRINT (core, both modes; Pro on `periodReports`, 402): the list + candidate
   // repos, and the per-ticket write-back to the tracker (one confirmed press, claimed, never
-  // retried). The "Assess with code" run is agentic and registers in `registerAgenticRoutes`; the
+  // retried). The "Check against code" run is agentic and registers in `registerAgenticRoutes`; the
   // refresh route registers with the tracker (`registerTracker`).
   await app.register(sprintStoriesRoutes);
   registerTrackerWriteRoutes(app);

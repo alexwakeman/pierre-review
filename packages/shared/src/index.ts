@@ -15,3 +15,4 @@ export * from './ticket-refs.js';
 export * from './stories.js';
 export * from './story-health.js';
 export * from './sprint-stories.js';
+export * from './story-issues.js';

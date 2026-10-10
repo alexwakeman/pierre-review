@@ -32,6 +32,7 @@ import {
   STORY_REPORT_SECTION_TITLE,
   storyReportDate,
   storyReportFigures,
+  pointIssueLabel,
   storyReportMarkdown,
   storyReportRangeDates,
   storyReportSections,
@@ -292,6 +293,10 @@ function FiguresInfo({ picked }: { picked: number }): JSX.Element {
         <strong> Fully met</strong> and <strong>With gaps</strong> count tickets a ticket review checked.
         Working time runs from the first pull request opened to the last one merged, in working hours.
       </p>
+      <p>
+        Each story issue counts only the stories Claude has read in their current form (&ldquo;read&rdquo;). Stories
+        with no criteria are counted on their own.
+      </p>
     </>
   );
 }
@@ -437,9 +442,17 @@ function ReportView({ record, body, stale }: { record: StoryReportRecord; body: 
 }
 
 function PointItem({ point, index, tone }: { point: StoryReportPoint; index: CandidateIndex; tone: 'positive' | 'negative' }): JSX.Element {
+  const issue = pointIssueLabel(point);
   return (
     <li className={`border-l-2 pl-3 ${tone === 'positive' ? 'border-emerald-500' : 'border-rose-500'}`}>
-      <p className="text-sm font-medium text-gray-800 dark:text-gray-100">{point.title}</p>
+      <p className="flex flex-wrap items-baseline gap-x-2 text-sm font-medium text-gray-800 dark:text-gray-100">
+        <span>{point.title}</span>
+        {issue != null && (
+          <span className="rounded border border-gray-300 px-1.5 text-[11px] font-medium text-gray-700 dark:border-gray-700 dark:text-gray-200">
+            {issue}
+          </span>
+        )}
+      </p>
       <p className={`mt-0.5 text-sm ${BODY}`}>
         <LinkedText text={point.detail} index={index} />
       </p>

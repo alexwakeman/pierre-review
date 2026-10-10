@@ -1,65 +1,48 @@
 import type { z as Zod } from 'zod';
+import { SPRINT_ASSESS_CAPS, STORY_ISSUE_IDS, type StoryIssueId } from '@pierre-review/shared';
 import { loadZod } from '../../ai/runtime.js';
 
 // The structured-output contract for the sprint assessment's in-process `submit_assessment` tool.
 // BUILT from a zod namespace handed in (the AI runtime's own install — review/schema.ts explains why
 // a second zod instance silently breaks the SDK's tool schemas).
 //
-// The shape is deliberately LENIENT (optional where a model may reasonably leave something out):
-// the SERVER validator (validate.ts) is the contract — it enforces caps, enums, criterion numbers
-// and verifies every cited path against the checkout, dropping what does not hold.
+// The shape is deliberately LENIENT (optional where a model may reasonably leave something out),
+// EXCEPT text LENGTHS: an over-long sentence is refused by the tool's own schema, so the model rewrites
+// it shorter instead of the server clipping it mid-sentence (BMD-1042's summary ended in "…").
+// the SERVER validator (validate.ts) is the contract — it enforces caps, issue ids and one entry per
+// id, and verifies every cited path against the checkout, dropping a path that does not hold.
 
 type ZodNs = typeof Zod;
 
 export function buildSubmitAssessmentShape(z: ZodNs) {
-  const text = z.string();
-  const list = z.array(z.string());
   return {
-    criteria: z
+    summary: z
+      .string()
+      .max(SPRINT_ASSESS_CAPS.summary)
+      .describe(`One sentence, at most ${SPRINT_ASSESS_CAPS.summary} characters: the single most important finding.`),
+    issues: z
       .array(
         z.object({
-          n: z.number().int().describe('The criterion number from the ticket (1-based).'),
-          testableAgainstCode: z
-            .boolean()
-            .describe('true when someone could check this criterion by reading or running the code.'),
-          landsIn: z
-            .array(
-              z.object({
-                repo: z.string().describe('owner/name of one of the listed repos.'),
-                path: z.string().describe('Repo-relative path of a file or directory you opened, e.g. src/api/users.ts'),
-                symbol: z.string().nullable().optional().describe('A function, class or route name, if one fits.'),
-              }),
-            )
-            .describe('Where the change would land. Only paths you actually saw.'),
-          existing: z
-            .enum(['none', 'partial', 'full', 'unclear'])
-            .describe('Does the code already do what the criterion asks?'),
-          note: text.describe('One or two sentences on why.'),
+          id: z
+            .enum(STORY_ISSUE_IDS as unknown as [StoryIssueId, ...StoryIssueId[]])
+            .describe('Which of the four issues this is.'),
+          text: z
+            .string()
+            .max(SPRINT_ASSESS_CAPS.issueText)
+            .describe(`One sentence, at most ${SPRINT_ASSESS_CAPS.issueText} characters, saying what to change.`),
+          repo: z.string().optional().describe('owner/name of the repo the file is in, when you cite one.'),
+          path: z
+            .string()
+            .optional()
+            .describe('Repo-relative path of a file you opened that backs this, e.g. src/api/users.ts'),
         }),
       )
-      .describe('One entry per numbered criterion of the ticket.'),
-    gaps: z.object({
-      unnamedDependencies: list.describe('Other work, teams or services this story needs that the ticket does not name.'),
-      unstatedBehaviourChanges: list.describe('Behaviour the change would alter that the ticket does not mention.'),
-      dataOrMigrationImpact: list.describe('Data, schema or migration consequences.'),
-      edgeCases: list.describe('Cases the criteria do not cover.'),
-    }),
-    suggestion: z.object({
-      rewrittenCriteria: z
-        .array(z.object({ n: z.number().int(), text }))
-        .describe('A clearer, checkable wording for criterion n. Only where it helps.'),
-      addedCriteria: list.describe('Criteria the ticket should add.'),
-      split: z
-        .array(z.object({ title: text, criteria: list }))
-        .nullable()
-        .optional()
-        .describe('A proposed split into smaller stories, or null when it is one piece of work.'),
-      questionsForOwner: list.describe('Questions the code cannot answer, for the ticket owner.'),
-      summary: text.describe('Two or three plain sentences on how ready this ticket is to build.'),
-    }),
+      .describe('At most one entry per issue, only issues you can back from the ticket or the code.'),
+    revisedCriteria: z
+      .array(z.string().max(SPRINT_ASSESS_CAPS.criterionText))
+      .describe('A better criteria list, one checkable outcome each. Empty to keep them.'),
   };
 }
-
 export type SubmitAssessmentShape = ReturnType<typeof buildSubmitAssessmentShape>;
 
 /** The raw shape `tool()` wants, built from the runtime's zod. */

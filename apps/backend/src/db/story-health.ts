@@ -17,9 +17,7 @@ import { foldStories, workspaceSite } from './stories.js';
 import type { StoredTicketRow } from '../tracker/store.js';
 import { getResolvedFlowSettings } from './flow-settings.js';
 import { localWeeksEndingAt } from './working-hours.js';
-import { textCriteriaCount } from './story-criteria.js';
 import { storyLabelInput, type StoryLabelInput } from './story-label-input.js';
-import { userValueStated } from './story-user-value.js';
 import { foldStoryHealth, refinementWeekOf, type StoryHealthStoryInput, type StoryHealthWeekBound } from './story-health-fold.js';
 
 // REPORTS → STORIES → STORY HEALTH — the READS (docs/API.md § GET /api/story-health). The pure fold
@@ -90,15 +88,7 @@ export async function loadStoryHealthInputs(accountId: number, scope: BotScope, 
 
   const created = await createdDatesFor(accountId, provider, keys, idents);
 
-  type Draft = Omit<StoryHealthStory, 'label' | 'input'> & { ticket: StoredTicketRow | null };
-  const textFields = (ticket: StoredTicketRow | null, p: TrackerProvider) => {
-    const text = ticket != null ? [ticket.title, ticket.description, ticket.acceptanceCriteria].filter(Boolean).join('\n\n') : '';
-    return {
-      ticketKnown: ticket != null,
-      criteriaInField: ticket != null && textCriteriaCount(ticket, p).source === 'acceptance_criteria',
-      userValueStated: ticket != null && userValueStated(text),
-    };
-  };
+  type Draft = Omit<StoryHealthStory, 'label' | 'input' | 'labellable' | 'criteriaCount'> & { ticket: StoredTicketRow | null };
   const drafts: Draft[] = [];
   for (const row of fold.stories) {
     const ticket = fold.internals.get(row.ident)?.ticket ?? null;
@@ -113,8 +103,7 @@ export async function loadStoryHealthInputs(accountId: number, scope: BotScope, 
       workingHours: row.workingHours,
       prsTotal: row.prs.total,
       review: row.review != null && row.review.total > 0 ? { met: row.review.met, total: row.review.total } : null,
-      labellable: false,
-      ...textFields(ticket, row.provider),
+      ticketKnown: ticket != null,
       ticket,
     });
   }
@@ -133,8 +122,7 @@ export async function loadStoryHealthInputs(accountId: number, scope: BotScope, 
       workingHours: 0,
       prsTotal: x.prsTotal,
       review: null,
-      labellable: false,
-      ...textFields(x.ticket, x.provider),
+      ticketKnown: x.ticket != null,
       ticket: x.ticket,
     };
     if (refinementWeekOf(d, weeks).week >= 0) refinementOnly.push(d);
@@ -149,7 +137,8 @@ export async function loadStoryHealthInputs(accountId: number, scope: BotScope, 
   const stories: StoryHealthStory[] = drafts.map(({ ticket, ...d }) => {
     const input = storyLabelInput(ticket, d.provider);
     const label = input != null ? (labelsByIdent.get(d.ident)?.get(input.textHash) ?? null) : null;
-    return { ...d, labellable: input != null, label, input };
+    // `criteriaCount` is the labeller's list length — the ONE extractor, so a label's n points at it.
+    return { ...d, labellable: input != null, criteriaCount: input?.criteria.length ?? 0, label, input };
   });
   return { ...base, stories, truncated: fold.truncated || extrasTruncated };
 }

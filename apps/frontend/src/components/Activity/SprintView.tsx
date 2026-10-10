@@ -1,4 +1,5 @@
 import {
+  STORY_TOO_BIG_CRITERIA,
   SPRINT_PHASE_LABEL,
   SPRINT_PROVIDER_LABEL,
   SPRINT_TICKETS_MAX,
@@ -12,20 +13,20 @@ import { formatDate } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
 import { GearIcon, RefreshIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
-import { groupSprintTickets } from './sprintModel.js';
-import { changedCheckCount, SprintChecksPanel } from './SprintChecksPanel.js';
+import { changedCheckCount, groupSprintTickets } from './sprintModel.js';
+import { SprintChecksPanel } from './SprintChecksPanel.js';
 import { SprintTicketCard } from './SprintTicketCard.js';
 
 // Reports → "This sprint" — the tracker's CURRENT sprint, one card per open ticket.
 //
 //   • THE LIST is read by the tracker worker (GET /api/sprint-stories reads stored rows; opening the
 //     tab is what lets the worker read this workspace's sprint at all). "Refresh" asks for a read now.
-//   • A CARD carries code chips and label chips (told apart by style, explained behind the ⓘ), and
-//     expands to: each chip's templated fix, candidate repos, "Assess with code" (agentic,
-//     local-only) and the update panel.
+//   • A CARD carries at most four issue chips (the FOUR story issues, `story-issues.ts`) and expands
+//     to: one bullet per issue, candidate repos, "Check against code" (agentic, local-only) and the
+//     update panel.
 //   • NOTHING IS WRITTEN TO A TRACKER without the per-ticket confirm dialog (SprintUpdatePanel).
 //
-// ⚠ THE ORDER IS THE SERVER'S — Not started, then In progress; most flags first. Never by assignee,
+// ⚠ THE ORDER IS THE SERVER'S — Not started, then In progress; most issues first. Never by assignee,
 // and there is no team or person score here.
 // ⚠ EVERY EXPLANATION SITS BEHIND AN ⓘ — the page carries facts and labels.
 // ⚠ GENERATED TEXT IS SELECTABLE and every generated block has a Copy button (lib/copy.ts).
@@ -57,16 +58,35 @@ function SprintInfo({ data }: { data: SprintStoriesResponse }): JSX.Element {
     <>
       <p>{sourceInfo(data.source)}</p>
       <p>The list is read again every 20 minutes while this tab is in use. Refresh reads it now.</p>
+      <p>Each ticket shows up to four issues:</p>
+      <ul className="list-disc space-y-0.5 pl-5">
+        <li>
+          <strong>Unclear when done</strong>: no acceptance criteria, or a criterion nobody could check.
+        </li>
+        <li>
+          <strong>Too big</strong>: more than {STORY_TOO_BIG_CRITERIA} criteria, a criterion with more than one outcome, or
+          work that is not code.
+        </li>
+        <li>
+          <strong>Waits on other work</strong>: a criterion needs another team, ticket or service.
+        </li>
+        <li>
+          <strong>Scope not stated</strong>: no &ldquo;out of scope&rdquo; line.
+        </li>
+      </ul>
       <p>
-        <strong>Grey chips</strong> come from rules in code: no criteria, criteria written in the description
-        instead of the criteria field, no persona (who the ticket is for). <strong>Outlined chips</strong> come from Claude Haiku reading
-        each criterion, and show only while that reading matches the ticket&rsquo;s current text.
+        &ldquo;No criteria&rdquo; and &ldquo;more than {STORY_TOO_BIG_CRITERIA} criteria&rdquo; are found in code. The rest
+        come from Claude reading the ticket, and show once it has read the current text.
       </p>
       <p>
-        Not started comes first, then In progress. Within each, the tickets with the most chips come first. Done
-        tickets are counted, not listed.
+        &ldquo;Check against code&rdquo; has Claude read the repos you chose for a ticket. Its sentence for an issue
+        replaces ours and is marked Claude, until the ticket or the code changes.
       </p>
-      <p>Checks chooses which chips this workspace raises, and for which issue types.</p>
+      <p>
+        Not started comes first, then In progress. Within each, the tickets with the most issues come first. Done tickets
+        are counted, not listed.
+      </p>
+      <p>Checks chooses which issues this workspace raises, and for which issue types.</p>
       <p>Nothing is written to your tracker until you confirm the exact text on one ticket.</p>
     </>
   );
@@ -163,7 +183,13 @@ export function SprintView(): JSX.Element {
           <ul className="space-y-2">
             {g.tickets.map((t) => (
               <li key={t.ident}>
-                <SprintTicketCard ticket={t} workspaceId={data.workspaceId} aiEnabled={data.aiEnabled} repos={data.repos} />
+                <SprintTicketCard
+                  ticket={t}
+                  workspaceId={data.workspaceId}
+                  aiEnabled={data.aiEnabled}
+                  repos={data.repos}
+                  checks={data.checks}
+                />
               </li>
             ))}
           </ul>

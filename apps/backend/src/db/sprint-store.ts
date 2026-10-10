@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import {
+  SPRINT_ASSESS_FORMAT_VERSION,
   SPRINT_ASSESS_MODEL,
+  STORY_ISSUE_IDS,
+  isStoryIssueId,
+  type SprintAssessmentBody,
+  type SprintAssessmentIssue,
   type SprintAssessmentErrorCode,
   type SprintAssessmentPhase,
   type SprintAssessmentRecord,
@@ -39,11 +44,12 @@ export function sprintTicketTextHash(t: { title: string | null; description: str
   return sha256([t.title ?? '', t.description ?? '', t.acceptanceCriteria ?? ''].join('\u0000'));
 }
 
-/** The assessment's currency input: the ticket text hash + sorted "repoId:defaultBranchHeadSha"
+/** The assessment's currency input: the body format (`SPRINT_ASSESS_FORMAT_VERSION`, so a run stored
+ *  in an older shape reads 'stale'), the ticket text hash + sorted "repoId:defaultBranchHeadSha"
  *  (the SYNCED `repos.default_branch_head_sha`; null → ''). Pure and clock-free. */
 export function sprintAssessFingerprint(textHash: string, repos: ReadonlyArray<{ repoId: number; sha: string | null }>): string {
   const parts = [...repos].sort((a, b) => a.repoId - b.repoId).map((r) => `${r.repoId}:${r.sha ?? ''}`);
-  return sha256(['sprint-assess-v1', textHash, ...parts].join('\u0000'));
+  return sha256([`sprint-assess-v${SPRINT_ASSESS_FORMAT_VERSION}`, textHash, ...parts].join('\u0000'));
 }
 
 // ── the demand gate + due marks ─────────────────────────────────────────────────────────────────
@@ -155,8 +161,36 @@ export function kickSprintRead(accountId: number, workspaceId: number): void {
 
 // ── row → wire ───────────────────────────────────────────────────────────────────────────────────
 
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v != null && !Array.isArray(v);
+
+/** A stored `body_json` as the CURRENT body shape, or null when it is another shape (an older
+ *  format, or damaged). Re-checked defensively — a malformed issue entry is dropped, never thrown on. */
+export function sprintAssessmentBodyFromStored(raw: unknown): SprintAssessmentBody | null {
+  if (!isObj(raw) || typeof raw.summary !== 'string' || !Array.isArray(raw.issues) || !Array.isArray(raw.revisedCriteria)) {
+    return null;
+  }
+  const issues: SprintAssessmentIssue[] = [];
+  for (const it of raw.issues) {
+    if (!isObj(it) || !isStoryIssueId(it.id) || typeof it.text !== 'string' || it.text.trim() === '') continue;
+    if (issues.some((x) => x.id === it.id)) continue;
+    const ref =
+      isObj(it.ref) && typeof it.ref.repo === 'string' && typeof it.ref.path === 'string'
+        ? { repo: it.ref.repo, path: it.ref.path }
+        : null;
+    issues.push({ id: it.id, text: it.text, ref });
+  }
+  issues.sort((a, b) => STORY_ISSUE_IDS.indexOf(a.id) - STORY_ISSUE_IDS.indexOf(b.id));
+  return {
+    summary: raw.summary,
+    issues,
+    revisedCriteria: raw.revisedCriteria.filter((c): c is string => typeof c === 'string' && c.trim() !== ''),
+  };
+}
+
 export function sprintAssessmentRecordOf(r: SprintAssessmentRow): SprintAssessmentRecord {
   const live = r.status === 'queued' || r.status === 'running';
+  const succeeded = r.status === 'succeeded';
+  const body = succeeded ? sprintAssessmentBodyFromStored(r.bodyJson) : null;
   return {
     id: r.id,
     workspaceId: r.workspaceId,
@@ -165,7 +199,8 @@ export function sprintAssessmentRecordOf(r: SprintAssessmentRow): SprintAssessme
     status: r.status as SprintAssessmentStatus,
     phase: live ? ((r.phase as SprintAssessmentPhase | null) ?? null) : null,
     repos: r.reposJson ?? [],
-    body: r.status === 'succeeded' ? (r.bodyJson ?? null) : null,
+    body,
+    outdated: succeeded && body == null,
     dropped: r.droppedJson ?? null,
     error: (r.error as SprintAssessmentErrorCode | null) ?? null,
     costUsd: r.costUsd ?? null,

@@ -1812,8 +1812,9 @@ export const workspaces = sqliteTable(
     // the `accounts.blast_radius_config` precedent. Per WORKSPACE, because two teams in two
     // zones in one account work different hours.
     flowSettings: text('flow_settings', { mode: 'json' }).$type<FlowSettings>(),
-    // Reports → This sprint: which chips this workspace raises (migration 0102 / pg 0089). OVERRIDES
-    // ONLY (`SprintChecks`, shared); NULL = every check on for every issue type. db/sprint-checks.ts.
+    // Reports → This sprint: which story issues this workspace raises (migration 0102 / pg 0089).
+    // OVERRIDES ONLY (`SprintChecks` = {off, issueTypes}, shared); NULL = all four on, every issue
+    // type. An older stored shape is read tolerantly by db/sprint-checks.ts.
     sprintChecks: text('sprint_checks', { mode: 'json' }).$type<SprintChecks>(),
     // ── AUTO CLAUDE REVIEW (migration 0074 / pg 0061; moved off the plugin's
     // pro_workspace_settings, whose columns are dormant now) ─────────────────────────────────
@@ -2953,7 +2954,7 @@ export const sprintTicketRepos = sqliteTable(
   }),
 );
 
-// sprint_assessments — ONE row per "Assess with code" run (local-only, Sonnet 5). `fingerprint` =
+// sprint_assessments — ONE row per "Check against code" run (local-only, Sonnet 5). `fingerprint` =
 // sha256(ticket text hash + sorted "repoId:defaultBranchHeadSha"), from SYNCED columns only, so
 // currency is a DB read; `repos_json` names the repos and the commits the checkout actually read.
 // `body_json` is the server-VALIDATED `submit_assessment` body (paths verified), set only on

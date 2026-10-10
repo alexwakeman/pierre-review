@@ -4,9 +4,9 @@
 //  • the whole-window figures count EVERY story, not the picks;
 //  • determinism: the same stories in any order pick the same keys in the same order.
 import { describe, expect, it } from 'vitest';
-import type { StoryCriteriaSource, StoryReviewSummary, StoryRow } from '@pierre-review/shared';
+import type { StoryCriteriaSource, StoryIssueInput, StoryReviewSummary, StoryRow } from '@pierre-review/shared';
 import type { StoryInternals } from './stories.js';
-import { selectStories } from './story-selection.js';
+import { selectStories, storyIssueRates } from './story-selection.js';
 
 let n = 0;
 function story(o: {
@@ -132,5 +132,45 @@ describe('selectStories', () => {
     const a = selectStories(xs, 8).candidates.map((c) => c.key);
     const b = selectStories([...xs].reverse(), 8).candidates.map((c) => c.key);
     expect(b).toEqual(a);
+  });
+
+  it('carries each pick\'s story issues and whole-window issue rates by the measure rule', () => {
+    const a = story({ key: 'I-1', criteria: 4, source: 'review', review: { alignment: 'aligned', met: 4, total: 4 } });
+    const b = story({ key: 'I-2', criteria: null, source: 'none' });
+    const c = story({ key: 'I-3', criteria: 12 }); // not picked; unlabelled, 12 criteria
+    const d = story({ key: 'I-4', criteria: 5 }); // ticket never read
+    const crit = (k: number) => Array.from({ length: k }, (_, i) => `c${i + 1}`);
+    const label = {
+      criteria: crit(4).map((_, i) => ({ n: i + 1, testable: i !== 2, bundled: false, dependsOnOtherWork: false })),
+      story: { outOfScopeStated: false, dependencyNamed: false, nonCodeWork: false },
+    };
+    const inputs = new Map<string, StoryIssueInput | null>([
+      [a.row.ident, { criteria: crit(4), label }],
+      [b.row.ident, { criteria: [], label: null }],
+      [c.row.ident, { criteria: crit(12), label: null }],
+      [d.row.ident, null],
+    ]);
+    const s = selectStories([a, b, c, d], 8, false, inputs);
+    const by = new Map(s.candidates.map((x) => [x.key, x]));
+    expect(by.get('I-1')!.issues!.map((i) => i.id)).toEqual(['unclear_done', 'scope_unstated']);
+    expect(by.get('I-1')!.issues![0]!.criteria).toEqual([3]);
+    expect(by.get('I-2')!.issues!.map((i) => i.id)).toEqual(['unclear_done']);
+    expect(by.get('I-1')!.issueStates).toEqual({ unclear_done: true, too_big: false, waits_on_work: false, scope_unstated: true });
+    // No label: what code knows is true, the rest NOT KNOWN — never false.
+    expect(by.get('I-2')!.issueStates).toEqual({ unclear_done: true, too_big: null, waits_on_work: null, scope_unstated: null });
+    // ⚠ ONE population: only the labelled story counts, for every issue — the no-criteria story is
+    // `noCriteriaFound`, the unlabelled 12-criteria story is not "too big", the unread ticket is out.
+    expect(s.population.noCriteriaFound).toBe(1);
+    expect(s.population.issueRates).toEqual([
+      { id: 'unclear_done', stories: 1, of: 1 },
+      { id: 'too_big', stories: 0, of: 1 },
+      { id: 'waits_on_work', stories: 0, of: 1 },
+      { id: 'scope_unstated', stories: 1, of: 1 },
+    ]);
+    // Without inputs, no issue fields are written (old callers, old rows).
+    const plain = selectStories([a, b], 8);
+    expect(plain.population.issueRates).toBeUndefined();
+    expect(plain.candidates[0]!.issues).toBeUndefined();
+    expect(storyIssueRates([])).toHaveLength(4);
   });
 });

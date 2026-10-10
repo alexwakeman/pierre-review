@@ -15,6 +15,7 @@ import {
   STORY_LABEL_RUN_CAP,
   STORY_RUBRIC_VERSION,
   STORY_SIZE_BANDS,
+  STORY_TOO_BIG_CRITERIA,
   type StoryHealthPanel,
   type StoryHealthPoint,
   type StoryHealthResponse,
@@ -398,6 +399,7 @@ function SmallMultiple({
           <FloatingTip x={cx(hover)} y={SM_TOP} width={width} centered>
             <div className="font-medium">{storyWeekHead(weeks[hover]!)}</div>
             <div>{pointLine(meta, points[hover]!)}</div>
+            {isLabel && <div>{createdLine(weeks[hover]!)}</div>}
             {isLabel && labels && <div>{coverageLine(weeks[hover]!)}</div>}
             {shift != null && shift.week === hover && <div>{shiftLine(shift)}</div>}
           </FloatingTip>
@@ -734,7 +736,7 @@ function ShiftRuleInfo({ only }: { only?: 'rate' | 'time' }): JSX.Element {
       {only !== 'time' && (
         <p>
           For a percentage, every week before a split is added up and compared with every week from it on:
-          stories, or criteria for the criteria measures. A shift needs at least {STORY_SHIFT_MIN_STORIES}{' '}
+          stories, or criteria for criteria met. A shift needs at least {STORY_SHIFT_MIN_STORIES}{' '}
           stories on each side, a gap of at least {STORY_SHIFT_MIN_POINTS} points, and a difference that
           chance would give less than 1 time in 100 (z of {STORY_SHIFT_Z} or more). The before and after
           figures are those totals.
@@ -759,23 +761,31 @@ function ShiftRuleInfo({ only }: { only?: 'rate' | 'time' }): JSX.Element {
 function RefinementInfo({ labels }: { labels: boolean }): JSX.Element {
   return (
     <div className="space-y-2">
+      <p>Each chart is the share of stories with one issue. Lower is better.</p>
+      <ul className="list-disc space-y-1 pl-4">
+        <li>
+          <strong>Unclear when done</strong>: a criterion nobody could check.
+        </li>
+        <li>
+          <strong>Too big</strong>: more than {STORY_TOO_BIG_CRITERIA} criteria, a criterion with more than one
+          outcome, or work that is not code.
+        </li>
+        <li>
+          <strong>Waits on other work</strong>: a criterion needs another team, ticket or service.
+        </li>
+        <li>
+          <strong>Scope not stated</strong>: no &ldquo;out of scope&rdquo; line.
+        </li>
+      </ul>
       <p>
-        One chart per measure. The large figure is the latest {STORY_HEALTH_ROLLING_WEEKS}-week value; beside
-        it, the change since the first one in the chart. That change is coloured only when the measure
-        shows a shift, marked by a dashed line. Each chart runs from 0 to 100%.
+        All four count the same stories: those written that week that Claude has read in their current form.
+        Stories with no criteria cannot be read this way, so they are counted on their own; hover a week to see
+        how many{labels ? ', and how many were read' : ''}. A story whose ticket we could not read is left out.
       </p>
-      {labels && (
-        <p>
-          The three criteria measures count every acceptance criterion of the week&rsquo;s labelled
-          stories. The story measures count labelled stories. Hover a week to see how many were labelled.
-        </p>
-      )}
       <p>
-        <strong>Stories with criteria in the criteria field</strong> and <strong>Stories saying who
-        benefits and why</strong> are counted by code over every story written that week with a pull
-        request, open or merged. A story whose ticket we could not read is left out. Who benefits
-        means an &ldquo;As a &hellip; I want &hellip; so that&rdquo; line, or a &ldquo;so that&rdquo;
-        clause naming who gains.
+        The large figure is the latest {STORY_HEALTH_ROLLING_WEEKS}-week value; beside it, the change since the
+        first one in the chart. Run twice on the same tickets, the labels moved a week&rsquo;s figure by about{' '}
+        {STORY_LABEL_NOISE.typicalPoints} points.
       </p>
       <ShiftRuleInfo only="rate" />
     </div>
@@ -888,8 +898,7 @@ function StoryHealthFor({ workspaceId }: { workspaceId: number | null }): JSX.El
     ) : null;
 
   const refShifts = shiftsIn('refinement');
-  const labelItems = refinement.filter((x) => x.meta.source === 'label').map((x) => ({ meta: x.meta, points: x.series.points }));
-  const codeItems = refinement.filter((x) => x.meta.source === 'code').map((x) => ({ meta: x.meta, points: x.series.points }));
+  const refItems = refinement.map((x) => ({ meta: x.meta, points: x.series.points }));
 
   return (
     <section data-testid="story-health" className="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-800">
@@ -913,25 +922,21 @@ function StoryHealthFor({ workspaceId }: { workspaceId: number | null }): JSX.El
                   <RefinementInfo labels={data.labels} />
                 </InfoButton>
               </h4>
-              <div className="space-y-4">
+              {data.labels ? (
                 <SmallMultipleGroup
-                  title="Labelled by Claude"
+                  title="% of stories · labelled by Claude"
                   icon={<SparkleIcon size={11} className="text-ai-signal" />}
-                  items={labelItems}
+                  items={refItems}
                   weeks={weeks}
                   shifts={refShifts}
                   width={width}
                   labels={data.labels}
                 />
-                <SmallMultipleGroup
-                  title="Counted by code"
-                  items={codeItems}
-                  weeks={weeks}
-                  shifts={refShifts}
-                  width={width}
-                  labels={data.labels}
-                />
-              </div>
+              ) : (
+                <p data-testid="story-health-refinement-off" className={`text-xs ${BODY}`}>
+                  Refinement needs story labels, which run on your own Claude.
+                </p>
+              )}
             </div>
 
             <div data-testid="story-health-delivery" className="space-y-2">

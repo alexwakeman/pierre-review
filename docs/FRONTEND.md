@@ -2123,9 +2123,11 @@ convention this file has to remember.
     same workspace) — never a disabled button; the list re-reads every 5 s until it ends.
   - The report renders as a news piece: headline, summary, a FIGURES row (`storyReportFigures`, from
     the run's STORED `population` — code, styled apart from Claude's text, each count with its
-    denominator), then What we do well (green edge) / Where stories fall short (red edge) /
+    denominator, plus "Too big 9 of 40" per story issue from `issueRates` when present and `of > 0`),
+    then What we do well (green edge) / Where stories fall short (red edge) /
     Spotlights (edge + "Good/Weak example" words, not hue alone) / Emerging themes / Next sprint
-    actions (numbered); empty sections are not headings (`storyReportSections`). "Not covered (N)"
+    actions (numbered); a point with an `issue` wears that issue's label as a small chip
+    (`pointIssueLabel`); empty sections are not headings (`storyReportSections`). "Not covered (N)"
     sits behind a toggle and stays OUT of the export. ⚠ **A key is a link only when it is one of the
     run's picks** (`linkifyTicketKeys`: whole tokens only, so `BMD-12` never matches inside
     `BMD-123`), always through `safeExternalUrl`. "Copy as Markdown" (`storyReportMarkdown`,
@@ -2151,18 +2153,17 @@ convention this file has to remember.
     `['story-health','ws:<id>']`, `periodReports` ANDed into `enabled`; the contract is
     `packages/shared/src/story-health.ts`. No tracker → the section renders NOTHING (the lists below
     already print the one sentence).
-    - **How stories are written** (by ticket-created week) is SMALL MULTIPLES: one small chart per
-      refinement series (`SmallMultiple`), in two groups — ⚠ **model and code measures LABELLED APART**:
-      "Labelled by Claude" (sparkle) and "Counted by code". A responsive grid: 2 columns when the
-      container is ≥ `SMALL_MULTIPLE_TWO_COLUMNS_FROM` (560px), else 1 (`smallMultipleColumns`); widths
-      come from the one `useChartWidth` callback ref, so no horizontal scroll. Each chart: the series'
-      label, its LATEST rolling value large and the change since the FIRST rolling value in the span
-      (`rollingHeadline`) — ⚠ coloured ONLY when the series has a detected shift moving the same way
-      (`headlineVerdict`, green/red from `shift.verdict`), else grey; y fixed 0–100%; the rolling line
-      over faint weekly dots (thin = hollow, fainter); first / middle / "This week" x labels; a dashed
-      line at that series' own shift (no other chart's) plus a "From Aug 17: 19% → 44%" line under it;
-      hover a week → week, value + n (criteria on criterion-weighted series), 4-week value, and "12 of
-      15 stories labelled" (`coverageLine`) on label series. No legend toggles on this panel.
+    - **How stories are written** (by ticket-created week) is FOUR SMALL CHARTS, one per story issue
+      ("% of stories" with it, lower is better), in ONE group titled "% of stories · labelled by
+      Claude" (sparkle). With `labels: false` the panel prints ONE sentence instead ("Refinement needs
+      story labels, which run on your own Claude."). A responsive grid: 2 columns from
+      `SMALL_MULTIPLE_TWO_COLUMNS_FROM` (560px), else 1; widths from the one `useChartWidth` ref, so no
+      horizontal scroll. Each chart: the issue's label, its LATEST rolling value large and the change
+      since the FIRST rolling value (`rollingHeadline`) — ⚠ coloured ONLY when the series has a
+      detected shift moving the same way (`headlineVerdict`), else grey; y fixed 0–100%; the rolling
+      line over faint weekly dots (thin = hollow); a dashed line at that series' own shift plus a
+      "From Aug 17: 19% → 44%" line; hover a week → value + n, 4-week value, and "12 of 15 stories
+      labelled" (`coverageLine`). The ⓘ defines the four issues, the population and the label noise.
     - **How stories are delivered** (by last-merge week) keeps THREE strips on ONE x-axis
       (`geometryFor`), one per UNIT (`DELIVERY_STRIPS`: working time S/M/L · pull requests per story ·
       criteria met, dotted) — ⚠ never two units on one axis — with legend toggles (`aria-pressed`,
@@ -2172,7 +2173,7 @@ convention this file has to remember.
       (`shiftUnits`: stories / criteria / weeks).
     - ⚠ **The SPA recomputes nothing** — values, rolling, thin, shifts, their before/after figures and
       verdicts are all the server's. ⚠ **Green/red from `shift.verdict` ALONE** — a series with
-      `better: null` ("Stories naming a dependency", "Pull requests per story") is never coloured.
+      `better: null` ("Pull requests per story") is never coloured.
     - The shift rule (docs/API.md § GET /api/story-health): RATE series on POOLED counts with a
       two-proportion z-test (≥ `STORY_SHIFT_MIN_STORIES` stories a side, ≥ `STORY_SHIFT_MIN_POINTS`
       points, |z| ≥ `STORY_SHIFT_Z`); TIME / COUNT series by `detectChangepoints` over the rolling
@@ -2180,7 +2181,7 @@ convention this file has to remember.
       (`ShiftRuleInfo`) PRINTS those shared constants — never retype one.
     - **The label run** (local-only agentic): `useStoryLabelsOn()` = `periodReports && me.ai.enabled`,
       AND the response's `labels` — without either there is no button and the server sends no label
-      series (cloud shows code measures only). "Label N stories" (N = min(`unlabelled`,
+      series (cloud shows the delivery panel only). "Label N stories" (N = min(`unlabelled`,
       `STORY_LABEL_RUN_CAP`), hidden at 0) sits in `AiRunGate`. ⚠ Mutation key
       `['story-label-start','ws:<id>']` read through `useIsMutating`; the run is written into
       `['story-label-run']` (ACCOUNT-scoped, no workspace) in the HOOK-level `onSuccess`. The run key
@@ -2196,8 +2197,21 @@ convention this file has to remember.
   `SprintTicketCard` / `SprintAssessment` / `SprintUpdatePanel` / `SprintCopyButton`, pure
   `sprintModel.ts`, hooks `hooks/useSprintStories.ts`) — the tracker's CURRENT sprint, under the ONE
   Reports gate. The visible tab is DERIVED (`effectiveInsightsTab` accepts `'sprint'`). Every hook ANDs
-  `periodReports` into `enabled`; the Assess hooks also AND `me.ai.enabled`. Keys carry `ws:<id>`
-  (`['sprint-stories','ws:<id>']`); a queued/running assessment polls every 2 s.
+  `periodReports` into `enabled`; the "Check against code" hooks also AND `me.ai.enabled`. Keys carry
+  `ws:<id>` (`['sprint-stories','ws:<id>']`); a queued/running assessment polls every 2 s.
+  - **ONE VOCABULARY, THE FOUR STORY ISSUES** (shared `story-issues.ts`). The collapsed card shows at
+    most four chips (`storyIssueChipText`: "Unclear when done · 3 of 25 criteria"); the expanded card
+    is, in order and nothing else: one bullet per issue code raised (`sprintBullets` — a CURRENT run's
+    sentence, marked "Claude", replaces the template for that issue; it never adds one; each with
+    Copy), the repos, the "Check against code" / "Check again" button, the update panel (rendered only
+    when there is a bullet, a current run or a last write). Nothing in the SPA re-derives an issue or
+    re-words a bullet. A STALE run shows only its summary, tagged "Out of date", and feeds nothing
+    else (`sprintCurrentAssessmentBodyOf`); an OUTDATED-format run shows one line.
+    `proposedDefault(t, mode, checks)` builds the comment from `sprintCommentMarkdown` and Replace
+    from the revised criteria only, both from a current run.
+  - **Checks** (`SprintChecksPanel`): four switches + ONE issue-type row for the whole tab;
+    `changedCheckCount` = `off.length` + 1 for a type list. The server applies them; the SPA passes
+    the response's `checks` down so Copy all and the bullets follow too.
   - ⚠ **SHARED mutation keys** read through `useIsMutating`, never per-mount `isPending`:
     `['sprint-assess', ident]`, `['sprint-write', ident]`, `['sprint-repos', ident]`.
   - ⚠ **NOTHING WRITES WITHOUT THE DIALOG'S CONFIRM** — "Update in <tracker>" opens a dialog showing
@@ -2206,8 +2220,8 @@ convention this file has to remember.
     comment" is preselected. No bulk control anywhere.
   - **Copy is ONE helper, `lib/copy.ts`** (`test/copy.test.ts`): clean markdown as `text/plain` +
     `text/html` through `ClipboardItem`, falling back to plain text. Every generated block (each
-    chip's fix, each assessment section, the proposed update, the dialog's text) has a Copy button and
-    each card a "Copy all"; "Copied" shows ~1.6 s. Generated text is never `select-none`.
+    issue's bullet, the proposed update, the dialog's text) has a Copy button and each card a "Copy
+    all" (header, link, summary, bullets); "Copied" shows ~1.6 s. Generated text is never `select-none`.
 - ⚠ **Superseded: the WHOLE Reports pane is Pro (`periodReports`)** — `InsightsView` renders one
   `ProLockPanel` when unentitled, the rail entry carries the one `ProBadge`, and the inner badges
   below were REMOVED (the inner locks remain as defence in depth). `useWorkspaceMetrics` /

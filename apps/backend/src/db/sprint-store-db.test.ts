@@ -87,6 +87,52 @@ describe('sprint store', () => {
     const rec = store.sprintAssessmentRecordOf(mine.get(base.ident)!);
     expect(rec.phase).toBeNull();
     expect(rec.body).toBeNull();
+    expect(rec.outdated).toBe(true);
+  });
+
+  it('a stored body serves only in the current format; an old one is outdated, never thrown on', () => {
+    const row = (status: string, bodyJson: unknown) =>
+      ({
+        id: 1, workspaceId: wsA, ident: 'x', model: 'm', status, phase: null, reposJson: [], bodyJson,
+        droppedJson: null, error: null, costUsd: null, numTurns: null, createdAt: new Date(0), completedAt: null,
+      }) as any;
+    const v1 = { criteria: [{ n: 1, existing: 'missing' }], gaps: { missing: [] }, suggestion: { addedCriteria: [] }, questions: [] };
+    expect(store.sprintAssessmentRecordOf(row('succeeded', v1))).toMatchObject({ body: null, outdated: true });
+    expect(store.sprintAssessmentRecordOf(row('failed', null))).toMatchObject({ body: null, outdated: false });
+    const v2 = {
+      summary: 'This may already be done.',
+      issues: [
+        { id: 'scope_unstated', text: 'Say what is out of scope.', ref: null },
+        { id: 'no_persona', text: 'dropped', ref: null },
+        { id: 'unclear_done', text: 'Criterion 2 cannot be checked.', ref: { repo: 'acme/web', path: 'src/a.ts' } },
+        { id: 'unclear_done', text: 'a repeat', ref: null },
+        'junk',
+      ],
+      revisedCriteria: ['One', 7, ''],
+    };
+    expect(store.sprintAssessmentRecordOf(row('succeeded', v2))).toMatchObject({
+      outdated: false,
+      body: {
+        summary: 'This may already be done.',
+        issues: [
+          { id: 'unclear_done', text: 'Criterion 2 cannot be checked.', ref: { repo: 'acme/web', path: 'src/a.ts' } },
+          { id: 'scope_unstated', text: 'Say what is out of scope.', ref: null },
+        ],
+        revisedCriteria: ['One'],
+      },
+    });
+  });
+
+  it('a run fingerprinted in the old format reads stale', async () => {
+    const { createHash } = await import('node:crypto');
+    const fold = await import('./sprint-stories.js');
+    const ticket = { title: 'T', description: 'D', acceptanceCriteria: 'A' };
+    const h = store.sprintTicketTextHash(ticket);
+    const accepted = [{ repoId: 1, syncedSha: 'a' }];
+    const v1 = createHash('sha256').update(['sprint-assess-v1', h, '1:a'].join('\u0000'), 'utf8').digest('hex');
+    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: v1 }, ticket, accepted)).toBe('stale');
+    const now = store.sprintAssessFingerprint(h, [{ repoId: 1, sha: 'a' }]);
+    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: now }, ticket, accepted)).toBe('current');
   });
 
   it('hashes are pure and order-free', () => {

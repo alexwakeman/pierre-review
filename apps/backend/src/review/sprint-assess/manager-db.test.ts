@@ -45,20 +45,12 @@ const fakeCheckout = async (repos: any[]) => ({
 });
 
 const goodSubmit = {
-  criteria: [
-    {
-      n: 1,
-      testableAgainstCode: true,
-      existing: 'partial',
-      note: 'Kept in memory.',
-      landsIn: [
-        { repo: 'acme/web', path: 'src/basket.ts', symbol: 'saveBasket' },
-        { repo: 'acme/web', path: 'src/invented.ts' },
-      ],
-    },
+  summary: 'Nearly ready: the basket is kept in memory only.',
+  issues: [
+    { id: 'unclear_done', text: 'Criterion 1 does not say how long the basket is kept.', repo: 'acme/web', path: 'src/basket.ts' },
+    { id: 'scope_unstated', text: 'Say whether guest baskets are out of scope.', repo: 'acme/web', path: 'src/invented.ts' },
   ],
-  gaps: { unnamedDependencies: [], unstatedBehaviourChanges: [], dataOrMigrationImpact: ['A new table'], edgeCases: [] },
-  suggestion: { rewrittenCriteria: [], addedCriteria: [], split: null, questionsForOwner: ['How long?'], summary: 'Nearly ready.' },
+  revisedCriteria: [],
 };
 const result = (o: Record<string, unknown> = {}) => ({
   submitted: goodSubmit,
@@ -175,7 +167,7 @@ describe('sprint assessment manager', () => {
     expect(phases).toEqual(['reading', 'writing']);
     expect(row.status).toBe('succeeded');
     expect(row.phase).toBeNull();
-    expect(row.bodyJson!.criteria[0]!.landsIn).toEqual([{ repo: 'acme/web', path: 'src/basket.ts', symbol: 'saveBasket' }]);
+    expect(row.bodyJson!.issues.map((i: any) => i.ref)).toEqual([{ repo: 'acme/web', path: 'src/basket.ts' }, null]);
     expect(row.droppedJson).toEqual({ paths: 1, items: 0 });
     expect(row.reposJson).toEqual([{ repoId, fullName: 'acme/web', sha: 'checkout-sha' }]);
     expect(recordAiUsage).toHaveBeenCalledWith(expect.objectContaining({ accountId: 1, feature: 'sprint_assess', model: 'claude-sonnet-5', costUsd: 0.4 }));
@@ -210,7 +202,7 @@ describe('sprint assessment manager', () => {
     expect((await start()).error).toBe('max_turns');
     mgr.setSprintAssessRunnerForTests(async () => result({ submitted: null, subtype: 'success', failureReason: 'no call' }));
     expect((await start()).error).toBe('no_assessment');
-    mgr.setSprintAssessRunnerForTests(async () => result({ submitted: { criteria: [], suggestion: { summary: '' } } }));
+    mgr.setSprintAssessRunnerForTests(async () => result({ submitted: { summary: '', issues: [], revisedCriteria: [] } }));
     const invalid = await start();
     expect(invalid.error).toBe('invalid_assessment');
     expect(await mgr.sprintAssessmentCurrency(1, invalid)).toBeNull();

@@ -18,10 +18,10 @@ import { useProCapabilities } from './useTriage.js';
 
 // Reports → This sprint. Pro with the rest of Reports (`periodReports`): every route 402s without it,
 // so every hook ANDs the capability into its own `enabled` — the SPA must never learn the paywall by
-// polling a 402. "Assess with code" is agentic and LOCAL-ONLY (its routes are not registered in
+// polling a 402. "Check against code" is agentic and LOCAL-ONLY (its routes are not registered in
 // cloud), so its hooks also AND `me.ai.enabled`.
 //
-// ⚠ SHARED MUTATION KEYS. Every mount of one ticket's Assess / Update shares `['sprint-assess', ident]`
+// ⚠ SHARED MUTATION KEYS. Every mount of one ticket's Check / Update shares `['sprint-assess', ident]`
 // / `['sprint-write', ident]`, and the UI reads `useIsMutating` — never a per-mount `isPending`, which
 // resets on a tab switch mid-request and would offer a second billed run or a second write.
 //
@@ -98,8 +98,8 @@ export function useSprintRefreshing(workspaceId: number | null): boolean {
   return useIsMutating({ mutationKey: ['sprint-refresh', workspaceKey(workspaceId)] }) > 0;
 }
 
-/** Replace the workspace's checks (which chips it raises). The list refetches: chips, flag counts
- *  and the order all move with them. */
+/** Replace the workspace's checks (which issues it raises). The list refetches: issues, counts and
+ *  the order all move with them. */
 export function useSprintSetChecks(workspaceId: number | null) {
   const qc = useQueryClient();
   return useMutation<SprintChecksResponse, Error, SprintChecks>({
@@ -144,7 +144,7 @@ export function useSprintReposSaving(ident: string): boolean {
   return useIsMutating({ mutationKey: sprintReposMutationKey(ident) }) > 0;
 }
 
-/** True when "Assess with code" may show at all (Pro + agentic AI on). */
+/** True when "Check against code" may show at all (Pro + agentic AI on). */
 export function useSprintAssessOn(): boolean {
   const { periodReports } = useProCapabilities();
   const ai = useAiCapabilities();
@@ -202,7 +202,7 @@ export function useStartSprintAssess(workspaceId: number | null, ident: string) 
   });
 }
 
-/** "Assess with code" in flight on ANY mount of this ticket. */
+/** "Check against code" in flight on ANY mount of this ticket. */
 export function useSprintAssessStarting(ident: string): boolean {
   return useIsMutating({ mutationKey: sprintAssessMutationKey(ident) }) > 0;
 }

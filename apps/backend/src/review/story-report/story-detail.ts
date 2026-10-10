@@ -1,4 +1,4 @@
-import type { StoryReportCandidate, StoryReportPopulation } from '@pierre-review/shared';
+import { STORY_ISSUES, STORY_ISSUE_BY_ID, type StoryReportCandidate, type StoryReportPopulation } from '@pierre-review/shared';
 import type { StoryInternals } from '../../db/stories.js';
 
 // What the story report's agent READS — the trial harness's (scratchpad haiku/agent-exp.mts)
@@ -39,7 +39,23 @@ export function candidateRow(c: StoryReportCandidate, dayHours: number) {
     review: c.review
       ? { alignment: c.review.alignment, met: c.review.met, partlyMet: c.review.partlyMet, notMet: c.review.notMet, missing: c.review.missing }
       : null,
+    // The four story issues by LABEL (what the agent quotes), each with a state: present (and the
+    // criteria behind it), false = known absent, null = NOT KNOWN. ⚠ An unread ticket is `issues: null`
+    // and an unlabelled one says null per issue — never `[]`, which would read as "avoids all four".
+    ...(c.issues !== undefined ? { issues: candidateIssues(c) } : {}),
   };
+}
+
+/** One candidate's four issues for the agent; null when the ticket text was never read. */
+export function candidateIssues(c: StoryReportCandidate) {
+  if (c.issues == null) return null;
+  const states = c.issueStates ?? null;
+  return STORY_ISSUES.map((m) => {
+    const hit = c.issues!.find((i) => i.id === m.id);
+    if (hit != null) return { issue: m.label, present: true as const, criteria: hit.criteria };
+    // An issue code did not raise is known absent only when its state says so; old rows had no state.
+    return { issue: m.label, present: states != null ? (states[m.id] ?? null) : null };
+  });
 }
 
 /** `list_candidates`' `wholeWindow` — the raw population with the median as words, as the prototype sent. */
@@ -53,6 +69,11 @@ export function populationForAgent(p: StoryReportPopulation) {
     checkedAndFullyMet: p.checkedAndFullyMet,
     checkedWithGaps: p.checkedWithGaps,
     medianWorkingTime: workingDuration(p.medianWorkingHours ?? 0, p.workingDayHours),
+    // Whole-window, by code: the ONLY issue rates the agent may quote — over the stories Claude has read
+    // (`ofReadStories`), so the field name carries the population; no-criteria is `noCriteriaFound`.
+    ...(p.issueRates != null
+      ? { issueRates: p.issueRates.map((r) => ({ issue: STORY_ISSUE_BY_ID[r.id].label, stories: r.stories, ofReadStories: r.of })) }
+      : {}),
   };
 }
 

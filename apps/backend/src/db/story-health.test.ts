@@ -160,7 +160,7 @@ afterAll(async () => {
 });
 
 describe('loadStoryHealthInputs', () => {
-  it('takes the freshest created date, attaches only CURRENT labels, and marks criteria in the field', async () => {
+  it('takes the freshest created date, attaches only CURRENT labels, and counts the criteria', async () => {
     const q = await import('./queries.js');
     const s = await q.resolveWorkspaceScope(A1, WS);
     const inputs = await sh.loadStoryHealthInputs(A1, s, NOW);
@@ -171,7 +171,7 @@ describe('loadStoryHealthInputs', () => {
     expect(by.get('ENG-2')!.createdMs).toBeNull();
     expect(by.get('ENG-3')!.label?.story.outOfScopeStated).toBe(true);
     expect(by.get('ENG-4')!.label).toBeNull();
-    expect(by.get('ENG-3')).toMatchObject({ labellable: true, criteriaInField: true, userValueStated: true, ticketKnown: true });
+    expect(by.get('ENG-3')).toMatchObject({ labellable: true, criteriaCount: 2, ticketKnown: true });
     // ⚠ The refinement population is not only what has merged: an open story written in the span is in.
     expect(by.get('ENG-5')).toMatchObject({ createdMs: NOW - 4 * DAY, lastMergedMs: null, ticketKnown: true, labellable: true });
     expect(by.has('ENG-6')).toBe(false);
@@ -190,11 +190,11 @@ describe('getStoryHealth', () => {
     expect(on.weeks.reduce((n, w) => n + w.storiesMerged, 0)).toBe(4);
     expect(on.weeks.reduce((n, w) => n + w.storiesCreated, 0)).toBe(5);
     expect(on.weeks.reduce((n, w) => n + w.labelled, 0)).toBe(1);
-    expect(on.series.map((x) => x.id)).toContain('criteriaTestable');
+    expect(on.series.map((x) => x.id)).toContain('unclearDone');
     expect(on.span.label).toBe('Last 90 days');
     const off = await sh.getStoryHealth(A1, s, NOW, { labels: false, labelRun: null });
-    expect(off.series.map((x) => x.id)).not.toContain('criteriaTestable');
-    expect(off.series.map((x) => x.id)).toContain('criteriaInField');
+    expect(off.series.map((x) => x.id)).not.toContain('unclearDone');
+    expect(off.series.map((x) => x.id)).toContain('workingTimeS');
     expect(off).toMatchObject({ labels: false, unlabelled: 0, labelRun: null });
   });
 });

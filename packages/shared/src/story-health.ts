@@ -30,6 +30,8 @@
 // ⚠ UNKNOWN IS NEVER ZERO: a week with no measurable items carries `value: null` (a gap), and a
 // story whose size is unknown is left out of the size-band lines and COUNTED (`unsizedStories`).
 
+import { STORY_ISSUES, STORY_ISSUE_BY_ID, type StoryIssueId } from './story-issues.js';
+
 // ── Constants (the ONE spelling the folds and the page's copy both read) ───────────────────────────
 
 /** The labelling rubric's version. Bump = every story is relabelled; never redefine a label in place. */
@@ -52,13 +54,13 @@ export const STORY_HEALTH_ROLLING_WEEKS = 4;
 //
 // RATE series (every refinement series, and criteria met) are tested on POOLED COUNTS, never on
 // weekly percentages: for each split week, the units before and after are summed and compared with a
-// two-proportion z-test. The units are STORIES for a story-weighted series and CRITERIA for a
-// criterion-weighted one (criteria met is criterion-weighted too: met ÷ judged). TIME and COUNT
+// two-proportion z-test. The units are STORIES for the refinement series (one per story issue) and
+// CRITERIA for criteria met (met ÷ judged). TIME and COUNT
 // series run `detectChangepoints` over the server's ROLLING values of non-thin weeks, and must also
 // move by a minimum amount.
 
-/** Rate series: stories needed on EACH side of a split (criterion-weighted series too: stories decide
- *  the floor; the test then counts criteria). */
+/** Rate series: stories needed on EACH side of a split (criteria met too: stories decide the floor;
+ *  the test then counts criteria). */
 export const STORY_SHIFT_MIN_STORIES = 15;
 
 /** Rate series: the pooled shares must differ by at least this many percentage points. */
@@ -124,7 +126,7 @@ export interface StoryCriterionLabel {
   dependsOnOtherWork: boolean;
 }
 
-/** Per story (`story_json`). `userValueStated` is NOT here — it is CODE (`db/story-user-value.ts`). */
+/** Per story (`story_json`). */
 export interface StoryLevelLabels {
   outOfScopeStated: boolean;
   dependencyNamed: boolean;
@@ -136,23 +138,25 @@ export interface StoryLevelLabels {
 export type StoryHealthPanel = 'refinement' | 'delivery';
 
 export type StoryHealthSeriesId =
-  // REFINEMENT — label, criterion-weighted (over every criterion of the week's labelled stories)
-  | 'criteriaTestable'
-  | 'criteriaBundled'
-  | 'criteriaDependent'
-  // REFINEMENT — code, story-weighted (over every story created that week)
-  | 'criteriaInField'
-  | 'userValueStated'
-  // REFINEMENT — label, story-weighted (over the week's labelled stories)
-  | 'outOfScopeStated'
-  | 'dependencyNamed'
-  | 'nonCodeWork'
+  // REFINEMENT — one per story issue (`story-issues.ts`), story-weighted, `source: 'label'`
+  | 'unclearDone'
+  | 'tooBig'
+  | 'waitsOnWork'
+  | 'scopeUnstated'
   // DELIVERY — code (stories by last-merge week)
   | 'workingTimeS'
   | 'workingTimeM'
   | 'workingTimeL'
   | 'prsPerStory'
   | 'criteriaMet';
+
+/** Refinement series id ↔ story issue id (one table, both directions read it). */
+export const STORY_HEALTH_ISSUE_SERIES: Readonly<Record<StoryIssueId, StoryHealthSeriesId>> = {
+  unclear_done: 'unclearDone',
+  too_big: 'tooBig',
+  waits_on_work: 'waitsOnWork',
+  scope_unstated: 'scopeUnstated',
+};
 
 /** `pct` = 0–100; `hours` = median working hours; `count` = a median count. */
 export type StoryHealthUnit = 'pct' | 'hours' | 'count';
@@ -165,9 +169,9 @@ export interface StoryHealthSeriesMeta {
   /** `label` = stored model labels (omitted from the response when `labels: false`); `code` = deterministic. */
   source: 'label' | 'code';
   unit: StoryHealthUnit;
-  /** What each week's value is computed over: `criteria` = criterion-weighted (n is still the number of
-   *  STORIES, which decides thinness); `stories` = story-weighted; `reviewed` = reviewed stories only. */
-  over: 'criteria' | 'stories' | 'reviewed';
+  /** What each week's value is computed over: `stories` = story-weighted; `reviewed` = reviewed
+   *  stories only (criteria met: n is stories, the percentage is over their judged criteria). */
+  over: 'stories' | 'reviewed';
   /** Which way is better, for colouring a DETECTED shift only. null = neither (no green/red ever). */
   better: 'higher' | 'lower' | null;
   /** TIME / COUNT series only (rate series are tested on pooled counts): the floor for the change-point
@@ -186,14 +190,18 @@ export const CHANGEPOINT_Z = 3;
 
 /** Every series, in legend order. The server sends values for these ids; the SPA reads labels here. */
 export const STORY_HEALTH_SERIES: readonly StoryHealthSeriesMeta[] = [
-  { id: 'criteriaTestable', panel: 'refinement', label: 'Criteria a tester could check', source: 'label', unit: 'pct', over: 'criteria', better: 'higher' },
-  { id: 'criteriaBundled', panel: 'refinement', label: 'Criteria holding more than one outcome', source: 'label', unit: 'pct', over: 'criteria', better: 'lower' },
-  { id: 'criteriaDependent', panel: 'refinement', label: 'Criteria waiting on other work', source: 'label', unit: 'pct', over: 'criteria', better: 'lower' },
-  { id: 'criteriaInField', panel: 'refinement', label: 'Stories with criteria in the criteria field', source: 'code', unit: 'pct', over: 'stories', better: 'higher' },
-  { id: 'userValueStated', panel: 'refinement', label: 'Stories saying who benefits and why', source: 'code', unit: 'pct', over: 'stories', better: 'higher' },
-  { id: 'outOfScopeStated', panel: 'refinement', label: 'Stories saying what is out of scope', source: 'label', unit: 'pct', over: 'stories', better: 'higher' },
-  { id: 'dependencyNamed', panel: 'refinement', label: 'Stories naming a dependency', source: 'label', unit: 'pct', over: 'stories', better: null },
-  { id: 'nonCodeWork', panel: 'refinement', label: 'Stories with work code cannot show', source: 'label', unit: 'pct', over: 'stories', better: 'lower' },
+  // Refinement: "% of stories with <issue>" over LABELLED stories only (`storyIssueMeasure`).
+  ...STORY_ISSUES.map(
+    (m): StoryHealthSeriesMeta => ({
+      id: STORY_HEALTH_ISSUE_SERIES[m.id],
+      panel: 'refinement',
+      label: STORY_ISSUE_BY_ID[m.id].label,
+      source: 'label',
+      unit: 'pct',
+      over: 'stories',
+      better: 'lower',
+    }),
+  ),
   { id: 'workingTimeS', panel: 'delivery', label: 'Working time, small stories', source: 'code', unit: 'hours', over: 'stories', better: 'lower', minScale: 1, minShift: STORY_SHIFT_MIN_HOURS },
   { id: 'workingTimeM', panel: 'delivery', label: 'Working time, medium stories', source: 'code', unit: 'hours', over: 'stories', better: 'lower', minScale: 1, minShift: STORY_SHIFT_MIN_HOURS },
   { id: 'workingTimeL', panel: 'delivery', label: 'Working time, large stories', source: 'code', unit: 'hours', over: 'stories', better: 'lower', minScale: 1, minShift: STORY_SHIFT_MIN_HOURS },
@@ -203,17 +211,6 @@ export const STORY_HEALTH_SERIES: readonly StoryHealthSeriesMeta[] = [
 
 export const STORY_HEALTH_SERIES_BY_ID: Readonly<Record<StoryHealthSeriesId, StoryHealthSeriesMeta>> =
   Object.fromEntries(STORY_HEALTH_SERIES.map((s) => [s.id, s])) as Record<StoryHealthSeriesId, StoryHealthSeriesMeta>;
-
-/** The labeller's measured agreement with itself (Cohen's κ, two runs over 40 stories / 388
- *  criteria) per label series — for the ⓘ only. Labels under κ 0.6 were dropped from the rubric. */
-export const STORY_LABEL_AGREEMENT: Readonly<Partial<Record<StoryHealthSeriesId, number>>> = {
-  criteriaTestable: 0.73,
-  criteriaBundled: 0.67,
-  criteriaDependent: 0.73,
-  outOfScopeStated: 0.85,
-  dependencyNamed: 0.83,
-  nonCodeWork: 0.68,
-};
 
 // ── GET /api/story-health?workspace=<id> ─────────────────────────────────────────────────────────
 
@@ -230,6 +227,10 @@ export interface StoryHealthWeek {
   storiesCreated: number;
   /** …of which bucketed by first-PR-opened because the ticket has no created date. */
   createdFallback: number;
+  /** …of which the ticket was read and has NO criteria (code, every known ticket). Not part of any
+   *  refinement series: a no-criteria story can never be labelled, so folding it into "Unclear when
+   *  done" would mix two populations. Shown beside the week's story count instead. */
+  noCriteria: number;
   /** …of which have criteria text to label (the label coverage denominator). */
   labellable: number;
   /** …of which have a CURRENT label (this rubric version, this text hash). "12 of 15 stories labelled"
@@ -248,8 +249,6 @@ export interface StoryHealthPoint {
   value: number | null;
   /** Items behind the value: stories (or reviewed stories for `criteriaMet`). Decides `thin`. */
   n: number;
-  /** For `over: 'criteria'` series: criteria behind the percentage. Absent otherwise. */
-  criteria?: number;
   /** `n < STORY_HEALTH_THIN_N`: drawn faint, excluded from the rolling line and the time / count shift test. */
   thin: boolean;
   /** The rolling 4-week value ending this week, POOLED over the underlying items of the non-thin

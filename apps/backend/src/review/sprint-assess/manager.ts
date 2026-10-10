@@ -35,7 +35,7 @@ import type { SprintAssessRunResult, SprintAssessRunner } from './agent.js';
 import { SPRINT_ASSESS_SYSTEM_PROMPT, buildSprintAssessPrompt, sprintAssessUntrustedTexts } from './prompts.js';
 import { validateSprintAssessment } from './validate.js';
 
-// THE SPRINT ASSESSMENT'S RUNS ("Assess with code", Reports → This sprint; docs/CLAUDE-REVIEW.md §
+// THE SPRINT ASSESSMENT'S RUNS ("Check against code", Reports → This sprint; docs/CLAUDE-REVIEW.md §
 // Sprint assessment). LOCAL ONLY — reached only through routes registered by `registerAgenticRoutes`.
 //
 //   • ONE RUN PER (account, ticket), claimed SYNCHRONOUSLY before the route's first await
@@ -321,7 +321,6 @@ async function runAssessment(job: Job): Promise<void> {
       return;
     }
     const v = validateSprintAssessment(res.submitted, {
-      criteria: job.criteria,
       repos: ok.map((x) => ({ fullName: x.repo.fullName, path: x.path })),
     });
     if (!v.ok) {

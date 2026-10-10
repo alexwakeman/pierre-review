@@ -1166,33 +1166,33 @@ a refusable forecast. **Metrics are CORE** (`db/period-metrics.ts`, `db/forecast
 **Reports → Stories** — core `GET /api/stories` (tracker stories merged in the reporting window:
 time, PRs, size, criteria) + the **story report**: ONE agentic Haiku 5.5 run across 10-20 stories
 CODE picks (`db/story-selection.ts`) over a chosen window (sprint / 30 / 60 / 90 days, default 60),
-local-only (`registerAgenticRoutes`) AND Pro (`periodReports`, 402), stored in `story_reports`
-(sqlite `0097` / pg `0084`). ⚠ The figures are CODE's, over the whole window; the picks are a sample
-the agent may never quote a rate from. ⚠ Every ticket key in the report must be a picked key (the
-server drops the rest); the first `submit_report` wins. It replaced the plugin's per-story notes.
-[docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story report.
+local-only AND Pro (`periodReports`, 402), stored in `story_reports` (sqlite `0097` / pg `0084`). Its
+points group under the FOUR STORY ISSUES (below). ⚠ The figures — issue rates included — are CODE's,
+over the whole window; the picks are a sample the agent may never quote a rate from. ⚠ Every ticket
+key must be a picked key; the first `submit_report` wins. [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story report.
+
+**THE FOUR STORY ISSUES** (shared `story-issues.ts`) are the ONE vocabulary for what is wrong with a
+ticket — Unclear when done · Too big · Waits on other work · Scope not stated — folded in CODE from
+`extractCriteria` + the six stored Haiku labels (`story_labels`; `STORY_RUBRIC_VERSION` unchanged).
+Rates over many stories go through ONE rule, `storyIssueMeasure`: labelled stories only, for every
+issue; "no criteria" is counted apart, never folded in (it would track label coverage). Every sentence
+about an issue is templated.
 
 **Story health** (Reports → Stories, "Last 90 days", a FIXED labelled span) — core
-`GET /api/story-health` (Pro, 402): 13 weekly points per series, REFINEMENT by the ticket's CREATED
-week (`tracker_tickets.issue_created_at`, sqlite `0098` / pg `0085`; else first PR opened, counted),
-DELIVERY by last merge. ⚠ TWO POPULATIONS: refinement is every ticket with an open OR merged PR
-written in the span, never only the merged ones (that keeps the quick stories and fakes a shift at
-the right edge). The pure fold is `db/story-health-fold.ts`. ⚠ Model-made series read ONLY
-CURRENT `story_labels` rows (sqlite `0099` / pg `0086`: rubric version AND text hash match today's
-text, `db/story-label-input.ts`) and are OMITTED when `config.aiEnabled` is false; the label run
-(`POST /api/story-health/label`, Haiku through `cheapComplete`) is agentic, local-only. ⚠ A rubric
-edit bumps `STORY_RUBRIC_VERSION`; `countCriteriaLines` IS `extractCriteria(...).length`. ⚠ A RATE
-shift is a two-proportion test on POOLED counts (`STORY_SHIFT_*` in shared: ≥15 stories a side, ≥10
-points, |z| ≥ 2.58), never a changepoint over weekly percentages — that flagged one story's move.
-[docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story labels. ⚠ Reports → This sprint's chips obey the workspace's CHECKS
-(`workspaces.sprint_checks`, sqlite `0102` / pg `0089`, overrides only; `sprintCheckApplies` is the ONE
-predicate, applied server-side): a check can be off or limited to issue types. "No persona" is who the
-ticket is for (`personaStated`), never a claim the ticket has no value.
+`GET /api/story-health` (Pro, 402). REFINEMENT (by the ticket's CREATED week, `issue_created_at`,
+else first PR opened, counted) is one "% of stories" series per issue; DELIVERY is by last merge.
+⚠ Refinement is every ticket with an open OR merged PR written in the span, never only the merged
+ones. ⚠ Labels count ONLY when CURRENT (rubric version AND text hash, `db/story-label-input.ts`); with
+`config.aiEnabled` false the four series are OMITTED. ⚠ A RATE shift is a two-proportion test on
+POOLED counts (`STORY_SHIFT_*`), never a changepoint over weekly percentages.
+[docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story labels.
 
 **Reports → This sprint** (`?insightsTab=sprint`, Pro `periodReports`; sqlite `0100` / pg `0087`): the
-tracker's current sprint, code chips + the free story labels, reader-ACCEPTED repos (code only
-suggests), "Assess with code" (Sonnet 5, LOCAL ONLY, `review/sprint-assess/`, cited paths verified or
-dropped) and the per-ticket write-back. ⚠ Nothing writes without the dialog's Confirm; no agent tool,
+tracker's current sprint; per ticket at most FOUR story issues (`foldStoryIssues`, shared
+`story-issues.ts`, minus the workspace's checks — `applyStoryIssueChecks`, server-side), one sentence
+each; reader-ACCEPTED repos (code only suggests); "Check against code" (Sonnet 5, LOCAL ONLY,
+`review/sprint-assess/`: a summary + ≤ 1 sentence per issue, cited paths verified or dropped) and the
+per-ticket write-back. ⚠ Nothing writes without the dialog's Confirm; no agent tool,
 setting or bulk route writes. Copy goes through ONE helper, `lib/copy.ts`.
 [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint assessment · docs/TRACKERS.md.
 

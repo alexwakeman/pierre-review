@@ -6,8 +6,9 @@ import { SPRINT_ASSESS_CAPS } from '@pierre-review/shared';
 import { normaliseCitedPath, validateSprintAssessment } from './validate.js';
 
 // The sprint assessment's server validator: every cited path is checked against a REAL temp checkout
-// (dropped when missing, outside, absolute elsewhere, `..`, or in an unaccepted repo), caps cut text
-// and lists, unknown criterion numbers are dropped, and an empty result is refused.
+// (dropped when missing, outside, absolute elsewhere, `..`, or in an unaccepted repo — the sentence is
+// kept), caps cut text and lists, unknown or repeated issue ids are dropped, and an empty result is
+// refused.
 
 let root: string;
 let web: string;
@@ -32,17 +33,16 @@ afterAll(() => {
 });
 
 const ctx = () => ({
-  criteria: ['Basket survives a reload', 'Basket expires after 30 days'],
   repos: [
     { fullName: 'acme/web', path: web },
     { fullName: 'acme/api', path: api },
   ],
 });
 
-const body = (criteria: unknown[], extra: Record<string, unknown> = {}) => ({
-  criteria,
-  gaps: { unnamedDependencies: [], unstatedBehaviourChanges: [], dataOrMigrationImpact: [], edgeCases: [] },
-  suggestion: { rewrittenCriteria: [], addedCriteria: [], split: null, questionsForOwner: [], summary: 'Ready.' },
+const body = (issues: unknown[], extra: Record<string, unknown> = {}) => ({
+  summary: 'This may already be done.',
+  issues,
+  revisedCriteria: [],
   ...extra,
 });
 
@@ -61,93 +61,92 @@ describe('normaliseCitedPath', () => {
 });
 
 describe('validateSprintAssessment', () => {
-  it('keeps verified paths and drops every other kind', () => {
-    const v = validateSprintAssessment(
-      body([
-        {
-          n: 1,
-          testableAgainstCode: true,
-          existing: 'partial',
-          note: 'Stored in memory only.',
-          landsIn: [
-            { repo: 'acme/web', path: 'src/basket/store.ts', symbol: 'saveBasket' },
-            { repo: 'ACME/API', path: 'routes.ts' },
-            { repo: 'acme/web', path: 'src/missing.ts' }, // does not exist
-            { repo: 'acme/other', path: 'routes.ts' }, // not an accepted repo
-            { repo: 'acme/web', path: '../secret/keys.txt' }, // ..
-            { repo: 'acme/web', path: '/etc/hosts' }, // absolute outside
-            { repo: 'acme/web', path: 'escape/keys.txt' }, // symlink out of the checkout
-          ],
-        },
-      ]),
-      ctx(),
-    );
-    expect(v.ok).toBe(true);
-    if (!v.ok) return;
-    expect(v.body.criteria[0]!.landsIn).toEqual([
-      { repo: 'acme/web', path: 'src/basket/store.ts', symbol: 'saveBasket' },
-      { repo: 'acme/api', path: 'routes.ts', symbol: null },
-    ]);
-    expect(v.dropped.paths).toBe(5);
-    expect(v.body.criteria[0]!.criterion).toBe('Basket survives a reload');
+  it('keeps the sentence and a verified path; an unverified path is dropped, the sentence kept', () => {
+    const cases: Array<[Record<string, unknown>, unknown]> = [
+      [{ repo: 'acme/web', path: 'src/basket/store.ts' }, { repo: 'acme/web', path: 'src/basket/store.ts' }],
+      [{ repo: 'ACME/API', path: 'routes.ts' }, { repo: 'acme/api', path: 'routes.ts' }],
+      [{ repo: 'acme/web', path: 'src/missing.ts' }, null], // does not exist
+      [{ repo: 'acme/other', path: 'routes.ts' }, null], // not an accepted repo
+      [{ repo: 'acme/web', path: '../secret/keys.txt' }, null], // ..
+      [{ repo: 'acme/web', path: '/etc/hosts' }, null], // absolute outside
+      [{ repo: 'acme/web', path: 'escape/keys.txt' }, null], // symlink out of the checkout
+      [{ path: 'routes.ts' }, null], // no repo, and two were checked out
+      [{}, null], // nothing cited: not counted
+    ];
+    let refused = 0;
+    for (const [cite, ref] of cases) {
+      const v = validateSprintAssessment(body([{ id: 'unclear_done', text: 'Criterion 2 cannot be checked.', ...cite }]), ctx());
+      expect(v.ok).toBe(true);
+      if (!v.ok) return;
+      expect(v.body.issues).toEqual([{ id: 'unclear_done', text: 'Criterion 2 cannot be checked.', ref }]);
+      refused += v.dropped.paths;
+    }
+    expect(refused).toBe(6);
   });
 
-  it('drops unknown and repeated criterion numbers; the criterion text is the server’s', () => {
+  it('drops unknown and repeated ids, empty sentences and a fifth entry; sorts in issue order', () => {
     const v = validateSprintAssessment(
       body([
-        { n: 2, criterion: 'model echo', testableAgainstCode: false, existing: 'bogus', note: 'n', landsIn: [] },
-        { n: 2, testableAgainstCode: true, existing: 'full', note: 'dup', landsIn: [] },
-        { n: 9, testableAgainstCode: true, existing: 'full', note: 'unknown', landsIn: [] },
-        { n: 0, testableAgainstCode: true, existing: 'full', note: 'zero', landsIn: [] },
+        { id: 'scope_unstated', text: 'Say what is out of scope.' },
+        { id: 'no_persona', text: 'old id' },
+        { id: 'scope_unstated', text: 'a repeat' },
+        { id: 'too_big', text: '   ' },
+        { id: 'too_big', text: 'Split the import from the export.' },
+        { id: 'unclear_done', text: 'Criterion 2 cannot be checked.' },
+        { id: 'waits_on_work', text: 'It needs the pricing service: link its ticket.' },
       ]),
       ctx(),
     );
     expect(v.ok).toBe(true);
     if (!v.ok) return;
-    expect(v.body.criteria).toHaveLength(1);
-    expect(v.body.criteria[0]).toMatchObject({ n: 2, criterion: 'Basket expires after 30 days', existing: 'unclear', testableAgainstCode: false });
+    expect(v.body.issues.map((i) => i.id)).toEqual(['unclear_done', 'too_big', 'waits_on_work', 'scope_unstated']);
     expect(v.dropped.items).toBe(3);
+    const fifth = validateSprintAssessment(
+      body([
+        { id: 'unclear_done', text: 'a' },
+        { id: 'too_big', text: 'b' },
+        { id: 'waits_on_work', text: 'c' },
+        { id: 'scope_unstated', text: 'd' },
+        { id: 'unclear_done', text: 'e' },
+      ]),
+      ctx(),
+    );
+    expect(fifth.ok && fifth.body.issues).toHaveLength(SPRINT_ASSESS_CAPS.issues);
   });
 
-  it('cuts long text with an ellipsis and caps lists', () => {
-    const long = 'w'.repeat(SPRINT_ASSESS_CAPS.text.summary + 50);
-    const many = Array.from({ length: SPRINT_ASSESS_CAPS.listItems + 3 }, (_, i) => `edge ${i}`);
+  it('cuts long text with an ellipsis and caps the revised criteria', () => {
+    const long = (n: number) => 'w'.repeat(n + 50);
     const v = validateSprintAssessment(
-      body([], {
-        gaps: { unnamedDependencies: [], unstatedBehaviourChanges: [], dataOrMigrationImpact: [], edgeCases: many },
-        suggestion: {
-          rewrittenCriteria: [{ n: 1, text: 'Reload keeps the basket' }, { n: 5, text: 'bad n' }],
-          addedCriteria: ['', 'Show a saved badge'],
-          split: Array.from({ length: SPRINT_ASSESS_CAPS.splitParts + 1 }, (_, i) => ({ title: `Part ${i}`, criteria: ['c'] })),
-          questionsForOwner: ['Is 30 days a legal requirement?'],
-          summary: long,
-        },
+      body([{ id: 'too_big', text: long(SPRINT_ASSESS_CAPS.issueText) }], {
+        summary: long(SPRINT_ASSESS_CAPS.summary),
+        revisedCriteria: ['', long(SPRINT_ASSESS_CAPS.criterionText), ...Array.from({ length: SPRINT_ASSESS_CAPS.revisedCriteria + 2 }, (_, i) => `c${i}`)],
       }),
       ctx(),
     );
     expect(v.ok).toBe(true);
     if (!v.ok) return;
-    expect(v.body.suggestion.summary.length).toBe(SPRINT_ASSESS_CAPS.text.summary);
-    expect(v.body.suggestion.summary.endsWith('…')).toBe(true);
-    expect(v.body.gaps.edgeCases).toHaveLength(SPRINT_ASSESS_CAPS.listItems);
-    expect(v.body.suggestion.rewrittenCriteria).toEqual([{ n: 1, text: 'Reload keeps the basket' }]);
-    expect(v.body.suggestion.addedCriteria).toEqual(['Show a saved badge']);
-    expect(v.body.suggestion.split).toHaveLength(SPRINT_ASSESS_CAPS.splitParts);
-    // 3 over-cap edges + bad n + empty added + 1 extra split part
-    expect(v.dropped.items).toBe(6);
+    expect(v.body.summary.length).toBe(SPRINT_ASSESS_CAPS.summary);
+    expect(v.body.summary.endsWith('…')).toBe(true);
+    expect(v.body.issues[0]!.text.length).toBe(SPRINT_ASSESS_CAPS.issueText);
+    expect(v.body.revisedCriteria).toHaveLength(SPRINT_ASSESS_CAPS.revisedCriteria);
+    expect(v.body.revisedCriteria[0]!.length).toBe(SPRINT_ASSESS_CAPS.criterionText);
+    // the empty one + 3 over the cap
+    expect(v.dropped.items).toBe(4);
   });
 
   it('a repo may be left out when exactly one was checked out', () => {
-    const v = validateSprintAssessment(
-      body([{ n: 1, testableAgainstCode: true, existing: 'none', note: 'x', landsIn: [{ path: 'src/basket' }] }]),
-      { criteria: ['a'], repos: [{ fullName: 'acme/web', path: web }] },
-    );
-    expect(v.ok && v.body.criteria[0]!.landsIn).toEqual([{ repo: 'acme/web', path: 'src/basket', symbol: null }]);
+    const v = validateSprintAssessment(body([{ id: 'unclear_done', text: 'x', path: 'src/basket' }]), {
+      repos: [{ fullName: 'acme/web', path: web }],
+    });
+    expect(v.ok && v.body.issues[0]!.ref).toEqual({ repo: 'acme/web', path: 'src/basket' });
   });
 
-  it('refuses an empty result and a non-object', () => {
-    expect(validateSprintAssessment(body([], { suggestion: { summary: '   ' } }), ctx()).ok).toBe(false);
+  it('accepts a summary alone or revised criteria alone; refuses an empty result and a non-object', () => {
+    expect(validateSprintAssessment(body([]), ctx()).ok).toBe(true);
+    expect(validateSprintAssessment(body([], { summary: '', revisedCriteria: ['One outcome'] }), ctx()).ok).toBe(true);
+    expect(validateSprintAssessment(body([{ id: 'nope', text: 'x' }], { summary: '   ' }), ctx()).ok).toBe(false);
     expect(validateSprintAssessment(null, ctx()).ok).toBe(false);
     expect(validateSprintAssessment('text', ctx()).ok).toBe(false);
+    expect(validateSprintAssessment([], ctx()).ok).toBe(false);
   });
 });

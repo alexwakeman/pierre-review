@@ -1,58 +1,60 @@
-// Reports → This sprint — which chips a workspace raises. The ONE reader and writer of
-// `workspaces.sprint_checks` (migration 0102 / pg 0089). OVERRIDES ONLY: NULL (or `{off:[],
-// issueTypes:{}}`, stored as NULL) = every check on for every issue type. Applied server-side by
-// `sprintChipsFor` through the shared `sprintCheckApplies`, so flagCount, the order and Copy all
-// agree with what is on screen.
+// Reports → This sprint — which story issues a workspace raises. The ONE reader and writer of
+// `workspaces.sprint_checks` (migration 0102 / pg 0089). OVERRIDES ONLY: NULL (or the default
+// `{off:[], issueTypes:[]}`, stored as NULL) = all four issues on, every issue type. Applied
+// server-side by `sprintIssuesFor` through the shared `applyStoryIssueChecks`, so flagCount, the
+// order and Copy all agree with what is on screen.
+//
+// ⚠ THE COLUMN OUTLIVED ITS FIRST SHAPE — an earlier cut stored chip ids in `off` and an OBJECT of
+// per-chip type lists in `issueTypes`. A STORED value is read tolerantly (unknown ids dropped, a
+// non-array `issueTypes` read as []); only a POSTED value is strict. No migration: same JSON column.
 import { and, eq } from 'drizzle-orm';
 import {
   SPRINT_CHECKS_DEFAULT,
-  SPRINT_CHECK_ISSUE_TYPES_MAX,
-  SPRINT_CHECK_ISSUE_TYPE_MAX_CHARS,
-  SPRINT_CHIPS,
+  STORY_ISSUE_CHECK_TYPES_MAX,
+  STORY_ISSUE_CHECK_TYPE_MAX_CHARS,
+  isStoryIssueId,
   type SprintChecks,
-  type SprintChipId,
+  type StoryIssueId,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 
 const { workspaces } = schema;
 
-const isChipId = (v: unknown): v is SprintChipId => typeof v === 'string' && Object.hasOwn(SPRINT_CHIPS, v);
+const badTypeName = (t: string): boolean => t === '' || t.length > STORY_ISSUE_CHECK_TYPE_MAX_CHARS || /[\u0000-\u001f\u007f]/.test(t);
 
-/** A stored or posted value as clean `SprintChecks`, or null when it is malformed. Unknown chip ids
- *  are dropped from a STORED value (a chip renamed later) but refused in a POSTED one (`strict`). */
+/** A stored or posted value as clean `SprintChecks`, or null when a POSTED one is malformed
+ *  (`strict`). A stored value never reads as null: anything unreadable in it falls back to the
+ *  default for that half. */
 export function parseSprintChecks(raw: unknown, strict: boolean): SprintChecks | null {
-  if (raw == null) return { off: [], issueTypes: {} };
-  if (typeof raw !== 'object' || Array.isArray(raw)) return null;
+  if (raw == null) return { off: [], issueTypes: [] };
+  if (typeof raw !== 'object' || Array.isArray(raw)) return strict ? null : { off: [], issueTypes: [] };
   const r = raw as { off?: unknown; issueTypes?: unknown };
   const offIn = r.off ?? [];
-  const typesIn = r.issueTypes ?? {};
-  if (!Array.isArray(offIn) || typeof typesIn !== 'object' || typesIn == null || Array.isArray(typesIn)) return null;
-  const off: SprintChipId[] = [];
-  for (const id of offIn) {
-    if (isChipId(id)) {
+  const typesIn = r.issueTypes ?? [];
+  if (strict && (!Array.isArray(offIn) || !Array.isArray(typesIn))) return null;
+
+  const off: StoryIssueId[] = [];
+  for (const id of Array.isArray(offIn) ? offIn : []) {
+    if (isStoryIssueId(id)) {
       if (!off.includes(id)) off.push(id);
     } else if (strict) return null;
   }
-  const issueTypes: Partial<Record<SprintChipId, string[]>> = {};
-  for (const [id, list] of Object.entries(typesIn as Record<string, unknown>)) {
-    if (!isChipId(id)) {
+
+  const list = Array.isArray(typesIn) ? typesIn : [];
+  if (strict && list.length > STORY_ISSUE_CHECK_TYPES_MAX) return null;
+  const issueTypes: string[] = [];
+  for (const n of list) {
+    const t = typeof n === 'string' ? n.trim() : '';
+    if (typeof n !== 'string' || badTypeName(t)) {
       if (strict) return null;
       continue;
     }
-    if (!Array.isArray(list) || list.length > SPRINT_CHECK_ISSUE_TYPES_MAX) return null;
-    const names: string[] = [];
-    for (const n of list) {
-      if (typeof n !== 'string') return null;
-      const t = n.trim();
-      if (t === '' || t.length > SPRINT_CHECK_ISSUE_TYPE_MAX_CHARS || /[\u0000-\u001f]/.test(t)) return null;
-      if (!names.some((x) => x.toLowerCase() === t.toLowerCase())) names.push(t);
-    }
-    if (names.length > 0) issueTypes[id] = names;
+    if (!issueTypes.some((x) => x.toLowerCase() === t.toLowerCase())) issueTypes.push(t);
   }
-  return { off, issueTypes };
+  return { off, issueTypes: issueTypes.slice(0, STORY_ISSUE_CHECK_TYPES_MAX) };
 }
 
-const isDefault = (c: SprintChecks): boolean => c.off.length === 0 && Object.keys(c.issueTypes).length === 0;
+const isDefault = (c: SprintChecks): boolean => c.off.length === 0 && c.issueTypes.length === 0;
 
 /** The workspace's checks (defaults for a workspace that is not this account's). */
 export async function getSprintChecks(accountId: number, workspaceId: number): Promise<SprintChecks> {

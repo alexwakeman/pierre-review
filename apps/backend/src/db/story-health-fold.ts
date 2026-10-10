@@ -1,10 +1,13 @@
 import {
+  STORY_HEALTH_ISSUE_SERIES,
   STORY_HEALTH_ROLLING_WEEKS,
   STORY_HEALTH_SERIES,
+  STORY_ISSUE_IDS,
   STORY_HEALTH_THIN_N,
   STORY_SHIFT_MIN_POINTS,
   STORY_SHIFT_MIN_STORIES,
   STORY_SHIFT_Z,
+  storyIssueMeasure,
   storySizeBand,
   type StoryCriterionLabel,
   type StoryHealthPoint,
@@ -15,6 +18,7 @@ import {
   type StoryHealthWeek,
   type StoryLevelLabels,
   type StorySizeBand,
+  type StoryIssueId,
 } from '@pierre-review/shared';
 import { detectChangepoints } from './changepoint.js';
 
@@ -30,10 +34,14 @@ import { detectChangepoints } from './changepoint.js';
 //     one list (db/story-health.ts).
 //   • UNKNOWN IS NEVER ZERO. A week with nothing measurable is `value: null`; a story of unknown size
 //     is in no size band and is counted (`unsizedStories`).
-//   • LABEL SERIES read CURRENT labels only (the caller passes `label: null` for a stale one), and the
-//     week's coverage (`labelled` of `labellable`) rides beside them. Criterion-weighted series are
-//     Σtrue ÷ Σcriteria with `n` = labelled STORIES (n decides thinness) and `criteria` = Σcriteria.
-//     `labels: false` omits every label series (cloud / the kill switch) — never a partial one.
+//   • REFINEMENT = the FOUR STORY ISSUES (shared `story-issues.ts`), one series each: "% of stories with
+//     <issue>", story-weighted, counted by THE ONE RATE RULE `storyIssueMeasure` — over LABELLED
+//     stories only (CURRENT labels: the caller passes `label: null` for a stale one), every issue over
+//     the same stories. ⚠ A known ticket with NO criteria is counted apart (`noCriteria` on the week,
+//     code) and never folded into "Unclear when done": it can never be labelled, so the mix would move
+//     with label coverage, not with the tickets.
+//     The week's coverage (`labelled` of `labellable`) rides beside them. `labels: false` omits all
+//     four (cloud / the kill switch) — never a partial one.
 //   • THIN: n < STORY_HEALTH_THIN_N → faint, and out of the rolling line and the time / count shift test.
 //   • ROLLING: the week and the three before it, NON-THIN weeks only, POOLED over their items — a
 //     percentage is Σnumerators ÷ Σdenominators, hours and counts the median of the pooled items. Never
@@ -41,8 +49,8 @@ import { detectChangepoints } from './changepoint.js';
 //   • SHIFTS — at most ONE per series, and the bar is set so noise cannot reach it:
 //       RATE series (unit 'pct'): POOLED COUNTS, never weekly percentages (`rateShift`). For every split
 //       week, Σnum / Σden each side (every week, thin or not: pooling is what makes a thin week safe)
-//       and a two-proportion z-test over the UNITS — stories for a story-weighted series, criteria for
-//       a criterion-weighted one (criteria met included). Reported only with ≥ STORY_SHIFT_MIN_STORIES
+//       and a two-proportion z-test over the UNITS — stories for the refinement series, criteria for
+//       criteria met. Reported only with ≥ STORY_SHIFT_MIN_STORIES
 //       stories each side, ≥ STORY_SHIFT_MIN_POINTS points between the pooled shares and
 //       |z| ≥ STORY_SHIFT_Z; the split with the largest |z| wins. A weekly-percentage changepoint
 //       flagged one story's move on a three-story week; this cannot.
@@ -64,15 +72,13 @@ export interface StoryHealthStoryInput {
   prsTotal: number;
   /** The latest succeeded ticket review's counts, when it judged at least one criterion. */
   review: { met: number; total: number } | null;
-  /** A stored ticket row with text was read. False = its text is unknown: the code series leave it
-   *  out (never count it as "no criteria in the field" / "no user value"). */
+  /** A stored ticket row with text was read. False = its text is unknown: every refinement series
+   *  leaves it out (never "no criteria"). */
   ticketKnown: boolean;
   /** Has criteria text the labeller can be sent (`storyLabelInput` non-null). */
   labellable: boolean;
-  /** The text rule found the criteria in the tracker's criteria FIELD (not the description). */
-  criteriaInField: boolean;
-  /** db/story-user-value.ts. */
-  userValueStated: boolean;
+  /** Today's numbered criteria (the ONE extractor); 0 = none. Meaningful only when `ticketKnown`. */
+  criteriaCount: number;
   /** The CURRENT label (this rubric, this text hash), or null. */
   label: { criteria: StoryCriterionLabel[]; story: StoryLevelLabels } | null;
 }
@@ -140,32 +146,26 @@ export function storiesToLabel<T extends StoryHealthStoryInput>(stories: readonl
     .sort((a, b) => (b.createdMs ?? b.firstOpenedMs) - (a.createdMs ?? a.firstOpenedMs) || a.ident.localeCompare(b.ident));
 }
 
+const ISSUE_OF_SERIES = new Map<StoryHealthSeriesId, StoryIssueId>(
+  STORY_ISSUE_IDS.map((id) => [STORY_HEALTH_ISSUE_SERIES[id], id]),
+);
+
+/** One story's answer per issue under THE rate rule (`storyIssueMeasure`); null = leave it out. */
+export function storyIssueAnswers(s: Pick<StoryHealthStoryInput, 'ticketKnown' | 'criteriaCount' | 'label'>): Record<StoryIssueId, boolean | null> | null {
+  if (!s.ticketKnown) return null;
+  return storyIssueMeasure({ criteria: Array.from({ length: s.criteriaCount }, () => ''), label: s.label });
+}
+
 const BAND_SERIES: Record<StorySizeBand, StoryHealthSeriesId> = { S: 'workingTimeS', M: 'workingTimeM', L: 'workingTimeL' };
 
 /** The items one story contributes to one series in its week (none = it does not count there). */
 function itemsFor(id: StoryHealthSeriesId, s: StoryHealthStoryInput): Item[] {
-  const l = s.label;
-  const crit = (pick: (c: StoryCriterionLabel) => boolean): Item[] =>
-    l != null && l.criteria.length > 0 ? [{ num: l.criteria.filter(pick).length, den: l.criteria.length }] : [];
-  const story = (v: boolean | undefined): Item[] => (l != null && v != null ? [{ num: v ? 1 : 0, den: 1 }] : []);
+  const issue = ISSUE_OF_SERIES.get(id);
+  if (issue != null) {
+    const m = storyIssueAnswers(s)?.[issue] ?? null;
+    return m == null ? [] : [{ num: m ? 1 : 0, den: 1 }];
+  }
   switch (id) {
-    case 'criteriaTestable':
-      return crit((c) => c.testable);
-    case 'criteriaBundled':
-      return crit((c) => c.bundled);
-    case 'criteriaDependent':
-      return crit((c) => c.dependsOnOtherWork);
-    // Unknown is never zero: a story whose ticket text was never read is not "no".
-    case 'criteriaInField':
-      return s.ticketKnown ? [{ num: s.criteriaInField ? 1 : 0, den: 1 }] : [];
-    case 'userValueStated':
-      return s.ticketKnown ? [{ num: s.userValueStated ? 1 : 0, den: 1 }] : [];
-    case 'outOfScopeStated':
-      return story(l?.story.outOfScopeStated);
-    case 'dependencyNamed':
-      return story(l?.story.dependencyNamed);
-    case 'nonCodeWork':
-      return story(l?.story.nonCodeWork);
     case 'workingTimeS':
     case 'workingTimeM':
     case 'workingTimeL': {
@@ -176,6 +176,8 @@ function itemsFor(id: StoryHealthSeriesId, s: StoryHealthStoryInput): Item[] {
       return [{ v: s.prsTotal }];
     case 'criteriaMet':
       return s.review != null && s.review.total > 0 ? [{ num: s.review.met, den: s.review.total }] : [];
+    default:
+      return [];
   }
 }
 
@@ -336,6 +338,7 @@ export function foldStoryHealth(
     partial: w.endMs > opts.nowMs,
     storiesCreated: 0,
     createdFallback: 0,
+    noCriteria: 0,
     labellable: 0,
     labelled: 0,
     storiesMerged: 0,
@@ -358,6 +361,7 @@ export function foldStoryHealth(
         w.createdFallback += 1;
         createdFallbackTotal += 1;
       }
+      if (s.ticketKnown && s.criteriaCount === 0) w.noCriteria += 1;
       if (s.labellable) {
         w.labellable += 1;
         if (opts.labels) {
@@ -394,15 +398,13 @@ export function foldStoryHealth(
         pooled = pooled.concat(perWeek[j]!);
         rollingWeeks += 1;
       }
-      const p: StoryHealthPoint = {
+      return {
         value: valueOf(meta, items),
         n: items.length,
         thin: thin[i]!,
         rolling: rollingWeeks > 0 ? valueOf(meta, pooled) : null,
         rollingWeeks,
       };
-      if (meta.over === 'criteria') p.criteria = items.reduce((n, it) => n + ('den' in it ? it.den : 0), 0);
-      return p;
     });
     series.push({ id: meta.id, points });
 

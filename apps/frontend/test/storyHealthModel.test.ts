@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   STORY_HEALTH_SERIES,
   STORY_HEALTH_SERIES_BY_ID,
+  STORY_ISSUES,
   STORY_LABEL_RUN_CAP,
   type StoryHealthPoint,
   type StoryHealthShift,
@@ -35,6 +36,7 @@ function week(over: Partial<StoryHealthWeek> = {}): StoryHealthWeek {
     partial: false,
     storiesCreated: 15,
     createdFallback: 0,
+    noCriteria: 0,
     labellable: 15,
     labelled: 12,
     storiesMerged: 9,
@@ -46,7 +48,7 @@ function week(over: Partial<StoryHealthWeek> = {}): StoryHealthWeek {
 
 function shift(over: Partial<StoryHealthShift>): StoryHealthShift {
   return {
-    series: 'criteriaTestable',
+    series: 'scopeUnstated',
     week: 6,
     weekStart: '2026-08-10',
     before: 50,
@@ -55,7 +57,7 @@ function shift(over: Partial<StoryHealthShift>): StoryHealthShift {
     afterWeeks: 5,
     beforeN: 40,
     afterN: 35,
-    nOf: 'criteria',
+    nOf: 'stories',
     direction: 'up',
     verdict: 'better',
     ...over,
@@ -88,12 +90,19 @@ describe('story health model', () => {
 
   it('keeps the legend order and drops series the response omits', () => {
     const series = [
-      { id: 'userValueStated' as const, points: [] },
-      { id: 'criteriaInField' as const, points: [] },
+      { id: 'scopeUnstated' as const, points: [] },
+      { id: 'unclearDone' as const, points: [] },
       { id: 'workingTimeS' as const, points: [] },
     ];
-    expect(panelSeries({ series }, 'refinement').map((x) => x.meta.id)).toEqual(['criteriaInField', 'userValueStated']);
+    expect(panelSeries({ series }, 'refinement').map((x) => x.meta.id)).toEqual(['unclearDone', 'scopeUnstated']);
     expect(panelSeries({ series }, 'delivery').map((x) => x.meta.id)).toEqual(['workingTimeS']);
+  });
+
+  it('draws one refinement series per story issue, labelled with the issue, lower is better', () => {
+    const ref = STORY_HEALTH_SERIES.filter((m) => m.panel === 'refinement');
+    expect(ref.map((m) => m.label)).toEqual(STORY_ISSUES.map((i) => i.label));
+    for (const m of ref) expect(m).toMatchObject({ source: 'label', unit: 'pct', over: 'stories', better: 'lower' });
+    expect(new Set(ref.map((m) => STORY_SERIES_COLOR[m.id])).size).toBe(4);
   });
 
   it('gives every series a colour and every delivery series a strip of one unit', () => {
@@ -109,12 +118,13 @@ describe('story health model', () => {
     expect(coverageLine(week())).toBe('12 of 15 stories labelled');
     expect(coverageLine(week({ labelled: 0, labellable: 1 }))).toBe('0 of 1 story labelled');
     expect(createdLine(week({ createdFallback: 2 }))).toBe('15 stories written (2 dated by first pull request)');
+    expect(createdLine(week({ noCriteria: 3 }))).toBe('15 stories written · 3 with no criteria');
   });
 
   it('says thin and unknown, never zero', () => {
-    const meta = STORY_HEALTH_SERIES_BY_ID.criteriaTestable;
+    const meta = STORY_HEALTH_SERIES_BY_ID.tooBig;
     const p = (o: Partial<StoryHealthPoint>): StoryHealthPoint => ({ value: 60, n: 5, thin: false, rolling: 55, rollingWeeks: 4, ...o });
-    expect(pointLine(meta, p({ criteria: 31 }))).toBe('60% (5 stories, 31 criteria) · 4 weeks 55%');
+    expect(pointLine(meta, p({}))).toBe('60% (5 stories) · 4 weeks 55%');
     expect(pointLine(meta, p({ n: 2, thin: true }))).toBe('60% (2 stories): too few to compare');
     expect(pointLine(meta, p({ value: null, n: 0 }))).toBe('none');
     expect(pointLine(STORY_HEALTH_SERIES_BY_ID.criteriaMet, p({ n: 1, rolling: null }))).toBe('60% (1 reviewed story)');
@@ -122,20 +132,20 @@ describe('story health model', () => {
 
   it('clusters only visible series, by week, in legend order', () => {
     const shifts = [
-      shift({ series: 'criteriaBundled', week: 6 }),
-      shift({ series: 'criteriaTestable', week: 6 }),
-      shift({ series: 'criteriaDependent', week: 3 }),
+      shift({ series: 'tooBig', week: 6 }),
+      shift({ series: 'unclearDone', week: 6 }),
+      shift({ series: 'waitsOnWork', week: 3 }),
     ];
-    const c = clusterShifts(shifts, new Set(['criteriaTestable', 'criteriaBundled']));
+    const c = clusterShifts(shifts, new Set(['unclearDone', 'tooBig']));
     expect(c).toHaveLength(1);
     expect(c[0]?.week).toBe(6);
-    expect(c[0]?.shifts.map((s) => s.series)).toEqual(['criteriaTestable', 'criteriaBundled']);
+    expect(c[0]?.shifts.map((s) => s.series)).toEqual(['unclearDone', 'tooBig']);
   });
 
   it('colours a shift only from its verdict', () => {
     expect(shiftVerdictWord(shift({ verdict: 'better' }))).toBe('Better');
     expect(shiftVerdictWord(shift({ verdict: 'worse' }))).toBe('Worse');
-    expect(shiftVerdictWord(shift({ series: 'dependencyNamed', verdict: null }))).toBeNull();
+    expect(shiftVerdictWord(shift({ series: 'prsPerStory', verdict: null }))).toBeNull();
   });
 
   it('finds a picked week by its start and caps a press', () => {
@@ -163,7 +173,7 @@ describe('story health model', () => {
     expect(headlineVerdict(shift({ direction: 'up', verdict: 'better' }), 40, 60)).toBe('better');
     expect(headlineVerdict(shift({ direction: 'up', verdict: 'better' }), 60, 40)).toBeNull();
     expect(headlineVerdict(shift({ direction: 'down', verdict: 'worse' }), 60, 40)).toBe('worse');
-    expect(headlineVerdict(shift({ series: 'dependencyNamed', verdict: null }), 40, 60)).toBeNull();
+    expect(headlineVerdict(shift({ series: 'prsPerStory', verdict: null }), 40, 60)).toBeNull();
   });
 
   it('names a shift side by its units', () => {

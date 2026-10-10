@@ -662,14 +662,14 @@ label run (`review/story-labels/manager.ts`, insert `ON CONFLICT DO NOTHING` on 
 is CURRENT only while its `rubric_version` is today's AND its `text_hash` equals today's hash of the
 text the labeller would be sent (`db/story-label-input.ts` — title, clipped description, the
 numbered criteria, and the provider's text rule). An edited ticket or a rubric bump simply stops
-counting the old row; nothing deletes it. `userValueStated` is NOT stored: it is CODE
-(`db/story-user-value.ts`). No workspace column: the ident already names the site, and a story is one
+counting the old row; nothing deletes it. Code folds these six answers into the four story issues
+(shared `story-issues.ts`); the issues are never stored. No workspace column: the ident already names the site, and a story is one
 fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`); in
 `accountScopedTables()` and erased explicitly.
 
 ## Reports → This sprint — five tables (CORE; sqlite `0100` / pg `0087`)
 
-- **`workspaces.sprint_checks`** — Reports → This sprint's checks, OVERRIDES ONLY (`SprintChecks`, NULL = all on). `db/sprint-checks.ts`.
+- **`workspaces.sprint_checks`** — Reports → This sprint's checks, OVERRIDES ONLY (`SprintChecks` = `{off: StoryIssueId[], issueTypes: string[]}`, NULL = all four issues on, every type). An older stored shape (chip ids, per-chip type object) is read tolerantly — no migration. `db/sprint-checks.ts`.
 - **`sprint_reads`** — one per (account, workspace): the demand gate (`viewed_at`), `next_read_at`,
   the last good `source_json` + `read_at`, `error_code`, `truncated`, and the `provider` + `api_root`
   (sqlite `0101` / pg `0088`) it was read from — a workspace that moved tracker or site since is
@@ -682,8 +682,9 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
 - **`sprint_ticket_repos`** — the repos the reader ACCEPTED for a ticket, unique (account, workspace,
   ident, repo). ⚠ Ids arrive in a BODY, so tenancy is STRUCTURAL: NAMED composite FKs onto
   `repos(id, account_id)` and `workspaces(id, account_id)`. `deleteRepo` deletes its rows explicitly.
-- **`sprint_assessments`** — one row per "Assess with code" run (no unique): status/phase, the
-  validated body, `fingerprint` (text hash + sorted repo SHAs), `repos_json` (the SHAs read), cost.
+- **`sprint_assessments`** — one row per "Check against code" run (no unique): status/phase, the
+  validated body (`{summary, issues, revisedCriteria}`; an older shape is served as `outdated`),
+  `fingerprint` (format version + text hash + sorted repo SHAs), `repos_json` (the SHAs read), cost.
 - **`tracker_writes`** — the write-back log, unique (account, `request_id`): the claim
   (`status:'writing'`), the EXACT text sent + its hash, mode/target, outcome, url. ⚠ It is the only
   record that a write reached the tracker, so `deleteWorkspace` MOVES its rows to Default before the
