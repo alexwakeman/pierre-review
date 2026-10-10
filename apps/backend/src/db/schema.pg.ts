@@ -52,6 +52,11 @@ import type {
   ReviewRouteReason,
   StoredPrFile,
   StoredTicketPrCard,
+  StoryReportBody,
+  StoryReportCandidate,
+  StoryReportDropped,
+  StoryReportPopulation,
+  StoryReportRange,
   TicketAssessment,
 } from '@pierre-review/shared';
 
@@ -1911,6 +1916,49 @@ export const workspaceSettingEvents = pgTable(
     ),
     workspaceAccountFk: foreignKey({
       name: 'workspace_setting_events_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// THE STORY REPORT — see the sqlite twin (migration pg 0084).
+export const storyReports = pgTable(
+  'story_reports',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    windowChoice: text('window_choice').notNull(),
+    fromAt: timestamp('from_at', { withTimezone: true, mode: 'date' }).notNull(),
+    toAt: timestamp('to_at', { withTimezone: true, mode: 'date' }).notNull(),
+    rangeJson: jsonb('range_json').$type<StoryReportRange>().notNull(),
+    model: text('model').notNull(),
+    status: text('status').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    pickedJson: jsonb('picked_json').$type<StoryReportCandidate[]>().notNull(),
+    populationJson: jsonb('population_json').$type<StoryReportPopulation>().notNull(),
+    reportJson: jsonb('report_json').$type<StoryReportBody>(),
+    droppedJson: jsonb('dropped_json').$type<StoryReportDropped>(),
+    error: text('error'),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
+  },
+  (t) => ({
+    accountWsWindowIdx: index('story_reports_account_ws_window_idx').on(
+      t.accountId,
+      t.workspaceId,
+      t.windowChoice,
+      t.createdAt,
+    ),
+    workspaceAccountFk: foreignKey({
+      name: 'story_reports_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),

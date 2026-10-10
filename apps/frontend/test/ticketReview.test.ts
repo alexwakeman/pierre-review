@@ -241,7 +241,8 @@ describe('the wiring', () => {
 
   it('Open PRs reads ONE batched states request, gated on AI and the tracker', () => {
     const cards = src('components/Activity/OpenPrsCards.tsx');
-    expect(cards).toMatch(/const ticketReviewOn = claudeOn && ticketsOn;/);
+    // Merged so far keeps the ticket review, so the gate is AI + tracker, not the code-review panel's.
+    expect(cards).toMatch(/const ticketReviewOn = aiOn && ticketsOn;/);
     expect(cards).toMatch(/useTicketReviewStates\(ticketIdents, ticketReviewOn\)/);
     expect(src('components/Activity/ClaudeReviewCell.tsx')).not.toMatch(/useTicketReviewStates|assessedStoryPills/);
   });

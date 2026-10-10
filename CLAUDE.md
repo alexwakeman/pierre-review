@@ -251,7 +251,7 @@ communicating that uncertainty.
 
 ### Data model
 
-`db/schema.sqlite.ts` + `schema.pg.ts` are authoritative (44 tables). **Per-table contracts and
+`db/schema.sqlite.ts` + `schema.pg.ts` are authoritative (46 tables). **Per-table contracts and
 the automation vocabulary (`ReviewerRole` — SIX members, EXACTLY ONE of which, `'review'`, is
 the reviewer cohort · `AutomatedReviewerKind` · `AUTOMATION_VENDORS`, the ONE table every
 per-family login set is DERIVED from · `REVIEW_BOT_KINDS`) live in
@@ -809,7 +809,8 @@ plugin): Claude Review (run, follow-up, auto review, the review chat, and the se
 review; a DEEP review consults up to five specialist sub-agents, the cap a PreToolUse hook, never
 the prompt) in `src/review/claude-review/`, AI Fix's agentic fixer + push in `src/coding/ai-fix/`.
 Review memory is DELETED (`review_learnings` dropped by sqlite `0075` / pg `0062`); the depth is
-always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
+always the router's; the models are Opus 5.5 and Sonnet 5 only (the story report alone runs on
+Haiku 5.5). Details:
 [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md). Non-negotiables:
 
 - **ONE switch, `config.aiEnabled` = `!isCloud && LIMN_AI_DISABLED !== 'true'`** — on and always
@@ -1159,6 +1160,15 @@ a refusable forecast. **Metrics are CORE** (`db/period-metrics.ts`, `db/forecast
   and **an explicit `toMs` must reach EVERY fold of a windowed getter — and only an explicit
   one** (`typeof window === 'string' ? null : to`, half-open `lt`, never `lte`).
 
+**Reports → Stories** — core `GET /api/stories` (tracker stories merged in the reporting window:
+time, PRs, size, criteria) + the **story report**: ONE agentic Haiku 5.5 run across 10-20 stories
+CODE picks (`db/story-selection.ts`) over a chosen window (sprint / 30 / 60 / 90 days, default 60),
+local-only (`registerAgenticRoutes`) AND Pro (`periodReports`, 402), stored in `story_reports`
+(sqlite `0097` / pg `0084`). ⚠ The figures are CODE's, over the whole window; the picks are a sample
+the agent may never quote a rate from. ⚠ Every ticket key in the report must be a picked key (the
+server drops the rest); the first `submit_report` wins. It replaced the plugin's per-story notes.
+[docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story report.
+
 **The People report** (Reports → People) — a multi-select picker of humans AND bots, one report
 with a SECTION per pick; contract in
 [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § "The People report".
@@ -1497,7 +1507,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0080` and plugin `0034`–`0037` + `0040` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0084` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

@@ -64,7 +64,7 @@ import { useStackStoryCheck } from '../../store/stackStoryCheck.js';
 import { ReviewedAgo } from '../ReviewedAgo.js';
 import { StackStoryCheck } from './StackStoryCheck.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
-import { ClaudeReviewPanel } from './ClaudeReviewCell.js';
+import { ClaudeReviewPanel, TicketPillsRow } from './ClaudeReviewCell.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { LargePrFlag } from './LargePrFlag.js';
 import {
@@ -341,9 +341,11 @@ export function OpenPrsCards({
   grouped?: boolean;
   /** 'merged' = Reports → "Merged so far": the same cards and stacks over MERGED PRs. It drops
    *  what means nothing once a PR has landed — the CI and merge-readiness chips, the stack
-   *  roll-up, the Claude Review panel and the ticket review (and their batched requests), and the
+   *  roll-up, the Claude Review panel and the CI review (and their batched requests), and the
    *  stack's own "Merged (n)" panel (the stack IS the merged work) — and the default order is
-   *  newest merge first. */
+   *  newest merge first. It KEEPS the ticket review: the card's coverage pills, the stack's
+   *  coverage pill and its Story check (the criteria met, the story, "What each PR adds"), and,
+   *  for a ticket never reviewed, the story alone. */
   variant?: 'open' | 'merged';
   onOpenPr: (pr: TimelinePr) => void;
   // The zero-row copy — overridden when a client-side narrowing (not the data) emptied the list.
@@ -359,7 +361,8 @@ export function OpenPrsCards({
 
   // The Claude Review panel: capability-gated, ONE request for every listed PR.
   const merged = variant === 'merged';
-  const claudeOn = useAiCapabilities().enabled && !merged;
+  const aiOn = useAiCapabilities().enabled;
+  const claudeOn = aiOn && !merged;
   const prIds = useMemo(() => prs.map((p) => p.id), [prs]);
   const { data: claudeData } = useClaudeReviewStates(prIds, claudeOn);
   const claudeStates = useMemo(
@@ -379,7 +382,9 @@ export function OpenPrsCards({
   );
   // The TICKET review's reading of every listed ticket: ONE batched request (never one per stack),
   // only where agentic AI runs AND the tracker does. It feeds the stack headers and the card pills.
-  const ticketReviewOn = claudeOn && ticketsOn;
+  // Merged so far reads it too: the story, the criteria met and each PR's contribution are what a
+  // reader wants to know about LANDED work (the code review and CI panels are not).
+  const ticketReviewOn = aiOn && ticketsOn;
   const ticketIdents = useMemo(
     () => (ticketData?.prs ?? []).flatMap((p) => cardTickets(p).map((t) => t.ident)),
     [ticketData],
@@ -524,7 +529,11 @@ export function OpenPrsCards({
         ) : null
       }
       claude={
-        claudeOn ? (
+        merged ? (
+          ticketReviewOn ? (
+            <TicketPillsRow ticketPills={cardTicketPills(ticketsOf(pr), ticketStates, opts.inStack?.key ?? null)} />
+          ) : null
+        ) : claudeOn ? (
           <ClaudeReviewPanel
             prId={pr.id}
             state={claudeStates.get(pr.id)}
@@ -552,9 +561,15 @@ export function OpenPrsCards({
             merged={merged ? [] : (mergedStacks.get(stack.id) ?? [])}
             onOpenMerged={openMerged}
             showRollup={!merged}
+            storyWithoutReview={merged}
             review={
-              ticketReviewOn && stack.ticket?.ident != null && stack.rows[0] != null
-                ? { ident: stack.ticket.ident, state: ticketStates.get(stack.ticket.ident), prId: stack.rows[0].pr.id }
+              (ticketReviewOn || merged) && stack.ticket?.ident != null && stack.rows[0] != null
+                ? {
+                    ident: stack.ticket.ident,
+                    state: ticketReviewOn ? ticketStates.get(stack.ticket.ident) : undefined,
+                    prId: stack.rows[0].pr.id,
+                    canCheck: ticketReviewOn,
+                  }
                 : null
             }
           >
@@ -716,16 +731,20 @@ function TicketStack({
   merged,
   onOpenMerged,
   showRollup = true,
+  storyWithoutReview = false,
   children,
 }: {
   stack: OpenPrsStack;
+  /** Merged so far: a ticket never reviewed still offers its story (read only when opened). */
+  storyWithoutReview?: boolean;
   /** false on Reports → "Merged so far": failing CI / ready to merge say nothing about landed work. */
   showRollup?: boolean;
   /** Every merged PR linked to this ticket (the "Merged (n)" panel); [] = no panel. */
   merged: readonly TicketMergedPr[];
   onOpenMerged: (pr: TicketMergedPr) => void;
   // The ticket review's reading + who starts it (any PR on the ticket); null = not offered here.
-  review: { ident: string; state: TicketReviewState | undefined; prId: number } | null;
+  // `canCheck: false` = show what is stored, never offer Check (no AI here).
+  review: { ident: string; state: TicketReviewState | undefined; prId: number; canCheck?: boolean } | null;
   children: ReactNode;
 }): JSX.Element {
   const collapsed = useOpenPrsView((s) => s.collapsed.includes(stack.id));
@@ -832,7 +851,9 @@ function TicketStack({
           </div>
         </div>
         <div className="ml-7 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 sm:ml-0 sm:mt-0.5">
-          {review != null && <StackCoverage ident={review.ident} state={review.state} prId={review.prId} />}
+          {review != null && review.canCheck !== false && (
+            <StackCoverage ident={review.ident} state={review.state} prId={review.prId} />
+          )}
           {rollup.length > 0 && (
             <span className="inline-flex flex-wrap items-center gap-x-1.5 text-xs">
               {rollup.map((p, i) => (
@@ -850,8 +871,14 @@ function TicketStack({
           </span>
         </div>
       </div>
-      {t != null && review?.state != null && !collapsed && (
-        <StackStoryCheck stackId={stack.id} ticket={t} state={review.state} storyPrId={review.prId} />
+      {t != null && review != null && (review.state != null || storyWithoutReview) && !collapsed && (
+        <StackStoryCheck
+          stackId={stack.id}
+          ticket={t}
+          state={review.state}
+          storyPrId={review.prId}
+          storyWithoutReview={storyWithoutReview}
+        />
       )}
       <ul
         id={listId}

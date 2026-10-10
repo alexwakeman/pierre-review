@@ -405,3 +405,27 @@ export function ClaudeReviewPanel({
   );
 }
 
+
+/**
+ * The ticket review's pills ALONE ("BMD-1 · 4 of 6 met") — Merged so far's card, where the code
+ * review panel (Review / Fix) means nothing once a PR has landed. Same pills, same tones.
+ */
+export function TicketPillsRow({ ticketPills }: { ticketPills: readonly CardTicketPill[] }): JSX.Element | null {
+  if (ticketPills.length === 0) return null;
+  return (
+    <Group>
+      {ticketPills.map((t) => (
+        <span key={t.key} className={`${PILL} ${TICKET_TONE[t.tone]}`} title={t.title}>
+          {t.running && <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ai-signal-fill" />}
+          {t.key} · {t.label}
+          {t.stale && (
+            <>
+              <WarningIcon size={10} />
+              <span className="sr-only">(changed since)</span>
+            </>
+          )}
+        </span>
+      ))}
+    </Group>
+  );
+}

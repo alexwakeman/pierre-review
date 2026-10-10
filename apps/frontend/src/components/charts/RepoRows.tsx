@@ -54,6 +54,9 @@ export interface RepoRowColumn {
   /** The words a `null` row prints where its bar would be — "size unknown", "no reading". */
   unknownLabel: string;
   format: (n: number) => string;
+  /** The scale's upper tick, when the row figure is too long for the bar column ("22.4 working
+   *  days" beside "0" in an 18% column). Defaults to `format`. */
+  axisFormat?: (n: number) => string;
   /** `total` prints one figure after the bar (the segments' sum); `segments` prints one figure per
    *  segment, each under its own heading, for a column whose split IS the point. */
   valueMode: 'total' | 'segments';
@@ -237,9 +240,9 @@ export function RepoRows({
               <Fragment key={c.key}>
                 {/* The scale, under its own column and nowhere near its neighbour's. */}
                 <td className="border-t border-gray-200 pr-2 pt-1 dark:border-gray-800">
-                  <span className="flex items-baseline justify-between text-[11px] text-gray-500 dark:text-gray-400">
+                  <span className="flex items-baseline justify-between gap-1 text-[11px] text-gray-500 dark:text-gray-400">
                     <span>0</span>
-                    <span className="tabular-nums">{c.format(columnMax[ci] ?? 0)}</span>
+                    <span className="text-right tabular-nums">{(c.axisFormat ?? c.format)(columnMax[ci] ?? 0)}</span>
                   </span>
                 </td>
                 {Array.from({ length: valueCellCount(c) }, (_, k) => (

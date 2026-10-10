@@ -890,6 +890,16 @@ describe('the Activity sub-tab strips', () => {
     expect(useFilters.getState().insightsInnerTab).toBe('merged');
   });
 
+  // "Stories" too: its link reloads onto it, between Merged so far and Chronology.
+  it('round-trips the Stories tab through ?insightsTab=stories', () => {
+    gesture(() => useFilters.getState().setActivityRepo('insights'));
+    gesture(() => useFilters.getState().setInsightsInnerTab('stories'));
+    expect(location.search).toContain('insightsTab=stories');
+    useFilters.getState().setInsightsInnerTab('overview');
+    applyUrlToStores({ fromPop: true });
+    expect(useFilters.getState().insightsInnerTab).toBe('stories');
+  });
+
   // A sub-tab that is not on screen is not part of the view: the scalar survives a rail move (so
   // returning to Reports restores the choice) but never rides a Feed link.
   it('does not emit insightsTab from a rail entry that has no Reports strip', () => {

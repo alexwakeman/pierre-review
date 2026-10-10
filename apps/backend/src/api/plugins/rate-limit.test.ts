@@ -457,6 +457,17 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/pro/flow-pointers')).not.toContain('ai');
   });
 
+  // Reports → Stories: the core list is DB-only (`read` fall-through); the story report's POST
+  // starts a Haiku agent run (the `ai` pair), its GETs and cancel spend nothing.
+  it('tiers Reports → Stories: the list on read, the story report per verb', () => {
+    expect(tiers('GET', '/api/stories')).toEqual(['read']);
+    expect(tiers('POST', '/api/story-reports')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('GET', '/api/story-reports')).toEqual(['read']);
+    expect(tiers('GET', '/api/story-reports/12')).toEqual(['read']);
+    expect(tiers('POST', '/api/story-reports/12/cancel')).toEqual(['read']);
+    expect(tiers('POST', '/api/story-reports/12/cancel')).not.toContain('ai');
+  });
+
   // /api/pro/bot-themes — the revived Bots "What they're flagging" panel. Both tiers land via
   // the /api/pro/ catch-all and are pinned here so the family's placement is explicit: the POST
   // /refresh is a real model spend (Haiku behind a payload-hash $0 cache) → the `ai` pair; the

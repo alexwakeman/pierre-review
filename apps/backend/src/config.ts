@@ -582,6 +582,10 @@ export const config = {
   // AUTOMATIC CI reviews per workspace per UTC day. Not shared with the PR or ticket review caps.
   // Manual runs never count. Default = shared CI_REVIEW_DAILY_CAP.
   ciReviewDailyCap: intFromEnv('CI_REVIEW_DAILY_CAP', 20),
+  // ---- Story report (one Haiku run across 10-20 picked stories — review/story-report/) ----
+  // Its OWN spend and turn caps (the trial run cost $0.02 in 21 turns). Env only — no route sets it.
+  storyReportBudgetUsd: floatFromEnv('STORY_REPORT_BUDGET_USD', 1),
+  storyReportMaxTurns: intFromEnv('STORY_REPORT_MAX_TURNS', 40),
 
   // ---- Diff-size cap ----
   // A very large inlined diff is the dominant cost on a big PR (it's the cached

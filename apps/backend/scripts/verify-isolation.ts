@@ -3755,6 +3755,64 @@ check(
   await app.close();
 }
 
+// ── THE STORY REPORT (review/story-report/, migration 0097 / pg 0084) ─────────────────────────
+// Both accounts hold a run for the same window choice; every read predicates on accountId.
+// MUTATION CHECK: drop the accountId predicate from `loadStoryReport` / `latestStoryReports` and the
+// first and third checks go red (A reads B's row).
+{
+  console.log('\nstory_reports');
+  const sr = await import('../src/review/story-report/manager.js');
+  const mk = async (accountId: number, workspaceId: number, headline: string, status = 'succeeded') =>
+    (
+      await db
+        .insert(schema.storyReports)
+        .values({
+          accountId,
+          workspaceId,
+          windowChoice: '60',
+          fromAt: from,
+          toAt: now,
+          rangeJson: { choice: '60', from: from.toISOString(), to: now.toISOString(), days: 60, reporting: null },
+          model: 'claude-haiku-5-5',
+          status,
+          fingerprint: `fp-${accountId}`,
+          pickedJson: [],
+          populationJson: {
+            storiesInWindow: 0,
+            withWrittenCriteria: 0,
+            criteriaOnlyInDescription: 0,
+            noCriteriaFound: 0,
+            checkedByTicketReview: 0,
+            checkedAndFullyMet: 0,
+            checkedWithGaps: 0,
+            medianWorkingHours: null,
+            workingDayHours: 8,
+            truncated: false,
+          },
+          reportJson: { headline, summary: 's', doingWell: [], fallingShort: [], spotlights: [], themes: [], actions: [], leftOut: [] },
+        })
+        .returning()
+        .execute()
+    )[0]!.id;
+  const srA = await mk(1, defaultA, 'A report');
+  const srB = await mk(2, defaultB, 'B report');
+  const srBRunning = await mk(2, defaultB, 'B running', 'running');
+  check("loadStoryReport(A, B's id) is null (IDOR blocked)", (await sr.loadStoryReport(1, srB)) === null);
+  check("loadStoryReport(A, A's id) is A's run", (await sr.loadStoryReport(1, srA))?.id === srA);
+  const latestCross = await sr.latestStoryReports(1, defaultB, '60');
+  check("latestStoryReports(A, B's workspace) reads nothing of B's", latestCross.latest === null && latestCross.report === null);
+  check("latestStoryReports(A, A's workspace) is A's run", (await sr.latestStoryReports(1, defaultA, '60')).report?.id === srA);
+  check("runningStoryReport(A) never names B's in-flight run", (await sr.runningStoryReport(1)) === null);
+  check("cancelStoryReport(A, B's id) is null and leaves B's run alone", (await sr.cancelStoryReport(1, srBRunning)) === null && (await sr.loadStoryReport(2, srBRunning))?.status === 'running');
+  let fkRefused = false;
+  try {
+    await mk(1, defaultB, 'A into B');
+  } catch {
+    fkRefused = true;
+  }
+  check("the composite FK refuses A's run in B's workspace", fkRefused);
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

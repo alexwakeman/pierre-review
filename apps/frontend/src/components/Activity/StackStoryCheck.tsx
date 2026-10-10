@@ -32,17 +32,35 @@ export function StackStoryCheck({
   ticket,
   state,
   storyPrId,
+  storyWithoutReview = false,
 }: {
   stackId: string;
   ticket: CardTicket;
-  state: TicketReviewState;
-  /** Any open PR on the ticket — the stored Jira row is read through its workspace. */
+  /** The ticket review's state; undefined = never reviewed (or no AI here). */
+  state: TicketReviewState | undefined;
+  /** Any PR on the ticket — the stored Jira row is read through its workspace. */
   storyPrId: number;
+  /** Merged so far: with no review run, still offer the ticket's STORY on its own (read on open). */
+  storyWithoutReview?: boolean;
 }): JSX.Element | null {
   const open = useStackStoryCheck((s) => s.open.has(stackId));
   const toggle = useStackStoryCheck((s) => s.toggle);
   const bodyId = useId();
-  if (state.latestRunId == null) return null;
+  const jiraRef = useMemo<TicketRef | null>(
+    () =>
+      ticket.ident != null && ticket.url != null
+        ? { key: ticket.key, url: ticket.url, provider: 'jira', canFetchDetails: true }
+        : null,
+    [ticket.ident, ticket.key, ticket.url],
+  );
+  if (state?.latestRunId == null) {
+    if (!storyWithoutReview) return null;
+    return (
+      <div className="px-3 pb-2">
+        <StoryDisclosure prId={storyPrId} jiraRef={jiraRef} stored={[]} url={ticket.url} />
+      </div>
+    );
+  }
   return (
     <div className="px-3 pb-2">
       <button
@@ -60,7 +78,7 @@ export function StackStoryCheck({
           id={bodyId}
           className="mt-1.5 space-y-2 rounded-md border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-950"
         >
-          <StoryCheckBody runId={state.latestRunId} ticket={ticket} state={state} storyPrId={storyPrId} />
+          <StoryCheckBody runId={state.latestRunId} ticket={ticket} state={state} storyPrId={storyPrId} jiraRef={jiraRef} />
         </div>
       )}
     </div>
@@ -72,11 +90,13 @@ function StoryCheckBody({
   ticket,
   state,
   storyPrId,
+  jiraRef,
 }: {
   runId: number;
   ticket: CardTicket;
   state: TicketReviewState;
   storyPrId: number;
+  jiraRef: TicketRef | null;
 }): JSX.Element {
   const { data: review, isLoading, isError } = useTicketReviewById(runId);
   const members = useMemo(() => review?.members ?? [], [review]);
@@ -85,14 +105,6 @@ function StoryCheckBody({
     [members],
   );
   const texts = useMemo(() => (review != null ? reviewTexts(null, [review]) : []), [review]);
-  // The stored Jira row when Limn has read it (opened on demand), else the story as judged.
-  const jiraRef = useMemo<TicketRef | null>(
-    () =>
-      ticket.ident != null && ticket.url != null
-        ? { key: ticket.key, url: ticket.url, provider: 'jira', canFetchDetails: true }
-        : null,
-    [ticket.ident, ticket.key, ticket.url],
-  );
   if (isLoading) return <p className={`text-xs ${MUTED}`}>Loading…</p>;
   if (isError || review == null) return <p className="text-xs text-red-600 dark:text-red-400">Could not load the story check.</p>;
   const labelOf = (prId: number): string | null => {

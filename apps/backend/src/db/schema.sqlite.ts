@@ -47,6 +47,11 @@ import type {
   ReviewRouteReason,
   StoredPrFile,
   StoredTicketPrCard,
+  StoryReportBody,
+  StoryReportCandidate,
+  StoryReportDropped,
+  StoryReportPopulation,
+  StoryReportRange,
   TicketAssessment,
 } from '@pierre-review/shared';
 
@@ -2684,6 +2689,63 @@ export const workspaceSettingEvents = sqliteTable(
     ),
     workspaceAccountFk: foreignKey({
       name: 'workspace_setting_events_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// THE STORY REPORT (review/story-report/, Reports → Stories; migration 0097, pg 0084). ONE row per
+// agentic run across 10-20 stories CODE picked; the LATEST per (workspace, window_choice) is shown.
+// `picked_json` / `population_json` are the code-computed picks and whole-window figures AS THEY WERE
+// when the run started (the report's ticket keys resolve against them); `report_json` is the
+// server-VALIDATED `submit_report` body, set only on 'succeeded'. `fingerprint` is the currency
+// input (review/story-report/fingerprint.ts) — nothing derived from `now`.
+// Tenancy: `workspace_id` arrives in a request BODY (POST), so its FK is the named COMPOSITE one onto
+// `workspaces (id, account_id)`; a workspace delete cascades (a report is regenerable). Listed in
+// `accountScopedTables()` and erased with the account.
+export const storyReports = sqliteTable(
+  'story_reports',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // The composite FK below, not a `.references()`.
+    workspaceId: integer('workspace_id').notNull(),
+    // 'reporting' | '30' | '60' | '90' (shared `StoryReportWindowChoice`).
+    windowChoice: text('window_choice').notNull(),
+    fromAt: integer('from_at', { mode: 'timestamp' }).notNull(),
+    toAt: integer('to_at', { mode: 'timestamp' }).notNull(),
+    rangeJson: text('range_json', { mode: 'json' }).$type<StoryReportRange>().notNull(),
+    model: text('model').notNull(),
+    // queued | running | succeeded | failed | cancelled
+    status: text('status').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    pickedJson: text('picked_json', { mode: 'json' }).$type<StoryReportCandidate[]>().notNull(),
+    populationJson: text('population_json', { mode: 'json' }).$type<StoryReportPopulation>().notNull(),
+    reportJson: text('report_json', { mode: 'json' }).$type<StoryReportBody>(),
+    droppedJson: text('dropped_json', { mode: 'json' }).$type<StoryReportDropped>(),
+    // A `StoryReportErrorCode`; never a stack.
+    error: text('error'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    accountWsWindowIdx: index('story_reports_account_ws_window_idx').on(
+      t.accountId,
+      t.workspaceId,
+      t.windowChoice,
+      t.createdAt,
+    ),
+    workspaceAccountFk: foreignKey({
+      name: 'story_reports_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),

@@ -110,7 +110,8 @@ export function niceMax(v: number): number {
 export function Legend({
   series,
 }: {
-  series: { label: string; color: string }[];
+  /** `shape: 'hollow-square'` draws an outlined swatch, for a series whose mark is a hollow square. */
+  series: { label: string; color: string; shape?: 'hollow-square' }[];
 }): JSX.Element {
   return (
     <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
@@ -118,7 +119,7 @@ export function Legend({
         <span key={s.label} className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
           <span
             className="inline-block h-2 w-2 rounded-[2px]"
-            style={{ background: s.color }}
+            style={s.shape === 'hollow-square' ? { border: `1.5px solid ${s.color}` } : { background: s.color }}
           />
           {s.label}
         </span>

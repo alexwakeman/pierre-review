@@ -72,8 +72,11 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // `'roi'` member is now handled this way too (selectable, body locks).
 // `'merged'` is the "Merged so far" tab (`?insightsTab=merged`): every PR merged in the reporting
 // window, as Open PRs cards. Inside the same one Reports gate; no gate of its own.
-export type InsightsInnerTab = 'overview' | 'merged' | 'bottlenecks';
-export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'merged', 'bottlenecks'];
+// `'stories'` is the "Stories" tab (`?insightsTab=stories`): every tracker ticket with a PR merged in
+// the reporting window, how well it was written, and the story report (agentic, local-only). Same
+// one Reports gate.
+export type InsightsInnerTab = 'overview' | 'merged' | 'stories' | 'bottlenecks';
+export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'merged', 'stories', 'bottlenecks'];
 // The Bots rail's sub-tab strip. ⚠ TWO POSTURES IN ONE UNION, both deliberate:
 //   • `'advisor'` (`botAdvisor`) and `'themes'` (`activityDigest`) are only LISTED when entitled,
 //     and BotsView's `effectiveBotsTab` degrades either to `'roi'` when it is not — the older

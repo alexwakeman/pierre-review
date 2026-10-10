@@ -190,7 +190,7 @@ describe('the wiring', () => {
     // The per-stack request never sits on the cards list itself.
     const cards = src('components/Activity/OpenPrsCards.tsx');
     expect(cards).not.toMatch(/useTicketReviewById|useTicketReviews\(/);
-    expect(cards).toMatch(/<StackStoryCheck stackId=\{stack\.id\}/);
+    expect(cards).toMatch(/<StackStoryCheck\s+stackId=\{stack\.id\}/);
   });
 
   it('the pane shows only this PR’s share where a stack exists, and links to it', () => {

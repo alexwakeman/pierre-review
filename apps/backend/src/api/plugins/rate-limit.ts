@@ -516,6 +516,13 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (path === '/api/ticket-reviews/states') return [TIERS.read];
   if (mutating && /^\/api\/ticket-reviews\/\d+\/items\/\d+\/post$/.test(path)) return [TIERS.githubWrite];
   if (path.startsWith('/api/ticket-reviews')) return [TIERS.read];
+  // STORY REPORT (review/story-report/routes.ts — Reports → Stories), matched EXPLICITLY by exact path:
+  //   POST /api/story-reports              starts ONE Haiku agent run          → ai + ai_hourly
+  //   POST /api/story-reports/:id/cancel   stops spend, spends nothing         → read
+  //   GET  /api/story-reports, …/:id       the stories fold + stored rows only → read
+  if (path === '/api/story-reports' && mutating) return [TIERS.ai, TIERS.aiHourly];
+  if (/^\/api\/story-reports\/\d+\/cancel$/.test(path)) return [TIERS.read];
+  if (path === '/api/story-reports' || /^\/api\/story-reports\/\d+$/.test(path)) return [TIERS.read];
   // CI REVIEW (review/ci-review/routes.ts), matched EXPLICITLY by exact path for the same reason:
   //   POST /api/ci-reviews          starts an agent run (reads the head's checks + logs) → ai + ai_hourly
   //   POST /api/ci-reviews/states   batched DB read of the SYNCED head + failing names   → read

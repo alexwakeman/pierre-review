@@ -279,6 +279,9 @@ praise comment already on GitHub is still Limn's own comment. The ticket review 
   deleted). Nothing stores a model as a SETTING, so there was nothing to migrate: stored runs and
   fixes keep their id and print it raw, both generate routes 400 the two ids, and the review chat's
   `chatModelFor` already falls back to the default for a stored run on an unoffered model.
+- **THE ONE EXCEPTION IS THE STORY REPORT, ON HAIKU 5.5 (`STORY_REPORT_MODEL` = `claude-haiku-5-5`).**
+  It is not a reader-picked model and never enters `ClaudeReviewModel`: the run is fixed to Haiku
+  (§ Story report). Every other agentic run is Opus 5.5 or Sonnet 5.
 
 ## Deep-review specialists
 
@@ -1520,3 +1523,52 @@ shown only when the PR conflicts. Ticked, both runs start; the fix and the merge
 results and separate commits. Same rules as every agentic run: local only, `me.ai` + `AiRunGate`,
 no shell (and here no write tools either), cost on the usage ledger as `ai_resolve`. Full contract:
 [docs/MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Resolve with Claude.
+
+## Story report (Reports → Stories)
+
+ONE agentic report, for an engineering manager to take upstairs, on how well the team writes user
+stories: what it does well, where stories fall short, odd ones out, emerging themes and actions for
+next sprint. It REPLACED the plugin's per-story Haiku notes (`/api/pro/story-notes`,
+`pro_story_notes`, `ProHostQueries.getStoryNoteInputs` — all deleted; a dev DB may still hold an
+orphan `pro_story_notes` table from the never-committed plugin migration 0041, which is harmless).
+
+- **Where**: `src/review/story-report/` — `routes.ts`, `manager.ts`, `agent.ts`, `validate.ts`,
+  `fingerprint.ts`, `story-detail.ts`; the picks are core `db/story-selection.ts` over the same
+  `foldStories` population `GET /api/stories` lists. Contract: `packages/shared/src/stories.ts`
+  § THE STORY REPORT. Routes: docs/API.md.
+- **Gating**: agentic, so LOCAL-ONLY — registered only through `registerAgenticRoutes` (its
+  explicit `isCloud` check) — AND Pro with the rest of Reports (`periodReports`, 402 before any DB
+  work). The SPA shows the controls only when `me.ai.enabled`; `AiRunGate` covers a missing runtime
+  or credential. The credential ladder is the usual one (`applyClaudeReviewAuth`, applied to the
+  environment only when no Claude Review run is in flight — the review chat's rule).
+- **CODE PICKS, THE MODEL WRITES.** `selectStories` files each story in the chosen window
+  (`reporting` / `30` / `60` / `90`, default `60`) into done_well (≤6), fell_short (≤6), no_criteria
+  (≤4) or outlier (≤3) with code-written `whyPicked` reasons, plus WHOLE-WINDOW figures
+  (`StoryReportPopulation`). The rules are the trial harness's verbatim with ONE change: ⚠ a story
+  with no criteria is NEVER fell_short (its outcome is unknown, not bad). The picks are a sample, so
+  the prompt forbids quoting a rate from them; the card prints code's figures in their own row.
+- **The run**: Haiku 5.5, an in-process `stories` MCP server with `list_candidates`, `get_story` and
+  `submit_report` (the trial harness's descriptions, zod shapes and SYSTEM text verbatim, plus ONE
+  sentence naming the nonce fence), `tools: []`, the built-ins denied, `ISOLATED_MCP` +
+  `ownToolsOnlyHook(['stories'])`, `settingSources: []`, a throwaway cwd, `maxTurns`
+  `STORY_REPORT_MAX_TURNS` (40), `maxBudgetUsd` `STORY_REPORT_BUDGET_USD` ($1). The trial read all 18
+  stories in 21 turns, 46 s, about $0.02. ⚠ Every tool answer is inside a per-run nonce fence: ticket
+  text, PR titles and the ticket review's prose are all attacker-authored.
+- **THE FIRST `submit_report` WINS**; a later call is answered "Already recorded." and changes
+  nothing. The server then VALIDATES it (`validateStoryReport`): every ticket key must be a picked
+  key (unknown keys removed and counted in `dropped`), an item left with no ticket is dropped, a
+  spotlight/leftOut on an unknown key or a bad tone is dropped, text trimmed and capped, ≤6 items per
+  section, ≤8 tickets per item. No headline or summary left → the run FAILS (`invalid_report`).
+- **One run in flight per ACCOUNT**, claimed synchronously in the POST before any await (`409 busy`
+  otherwise) and released on every path. ⚠ It does NOT share `REVIEW_CONCURRENCY`: the run is short
+  and cheap, and parking it behind an Opus review would buy nothing.
+- **Storage**: `story_reports` (sqlite `0097` / pg `0084`, composite FK onto `workspaces (id,
+  account_id)`, in `accountScopedTables()`), one row per run: queued → running → succeeded / failed /
+  cancelled. The latest per (workspace, window choice) is shown. Cancel aborts the run and writes
+  `cancelled` at once; the run's own terminal write is a compare-and-set, so the cancel wins. The boot
+  sweep marks an orphaned in-flight row failed `interrupted`. Spend: `recordAiUsage`, feature
+  `story_report`.
+- **Currency**: sha256 over the window choice + the picked idents + each pick's latest ticket review
+  id and its PRs' `[id, state, mergedAt]` — nothing derived from now. A different fingerprint today
+  shows the stored report as `stale`; nothing re-runs it by itself.
+

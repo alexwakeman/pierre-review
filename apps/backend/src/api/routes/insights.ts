@@ -5,6 +5,7 @@ import type {
   AttentionLivenessResponse,
   InsightsResponse,
   MergedPrsResponse,
+  StoriesResponse,
   RepoAnalytics,
   WorkspaceMetricsDetailResponse,
   WorkspaceMetricsResponse,
@@ -19,6 +20,7 @@ import {
 import { getWorkspaceRepoActivity } from '../../db/repo-activity.js';
 import { getWorkspaceMergedReach } from '../../db/merged-reach.js';
 import { getMergedPrsInWindow } from '../../db/merged-prs.js';
+import { getStories } from '../../db/stories.js';
 import { getReportingWindow, reportingWindowInfo } from '../../db/reporting-window.js';
 import { buildPendingBoard } from '../../db/pending-tabs.js';
 import { PR_LIVENESS_MAX_IDS, sweepPrLiveness } from '../../sync/pr-liveness-sweep.js';
@@ -61,7 +63,7 @@ function parseIntList(raw: string | undefined): number[] | null {
 // hands the SPA, so the locked pane and the 402 cannot disagree. `!req.account` fails closed (a bare
 // test harness); the real app always has one. Checked BEFORE any DB work, so the 402 is identical
 // for every `?workspace=` and cannot be read as an oracle.
-function reportsEntitled(req: FastifyRequest): boolean {
+export function reportsEntitled(req: FastifyRequest): boolean {
   return Boolean(req.account && entitledProCapabilities(req.account).periodReports);
 }
 
@@ -155,6 +157,30 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
         window: reportingWindowInfo(window, nowMs),
         truncated,
       };
+    },
+  );
+
+  // Reports → "Stories": every tracker ticket with a PR MERGED in the workspace's REPORTING WINDOW
+  // — how long it took, how many PRs, how big, how many criteria, and its latest ticket review
+  // folded to counts (db/stories.ts). PAID on `periodReports` with the rest of Reports, the 402
+  // checked before any DB work. Same scope rule as /api/merged-prs (no `?repoIds=`) and the same
+  // window, resolved once and echoed. DB-only (stored ticket rows, PRs, reviews — no tracker, no
+  // GitHub, no model), so it stays on the `read` tier. The agentic story report
+  // (review/story-report/, local-only) folds the SAME population over its own chosen window.
+  app.get(
+    '/api/stories',
+    async (req, reply): Promise<StoriesResponse | { error: string }> => {
+      if (!reportsEntitled(req)) {
+        reply.status(402);
+        return { error: 'pro required' };
+      }
+      const q = req.query as { workspace?: string };
+      const accountId = accountIdOf(req);
+      const scope = await resolveWorkspaceScope(accountId, q.workspace);
+      const nowMs = Date.now();
+      const window = await getReportingWindow(accountId, scope.workspaceId, nowMs);
+      const body = await getStories(accountId, scope, nowMs, window);
+      return { workspaceId: scope.workspaceId, window: reportingWindowInfo(window, nowMs), ...body };
     },
   );
 

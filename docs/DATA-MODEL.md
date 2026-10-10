@@ -637,6 +637,20 @@ Named composite FK onto `workspaces (id, account_id)`, cascade; in `accountScope
 real MOVE (a re-assignment to the same workspace keeps it), so the "repo joined" marker dates a moved
 repo by its arrival. Nothing else reads the column.
 
+## `story_reports` — the story report's runs (CORE; sqlite `0097` / pg `0084`)
+
+One row per agentic story-report run (Reports → Stories; docs/CLAUDE-REVIEW.md § Story report):
+`window_choice` (`reporting` · `30` · `60` · `90`), the span (`from_at`/`to_at` + `range_json`),
+`model` (Haiku 5.5), `status` (queued · running · succeeded · failed · cancelled), the code-computed
+picks and whole-window figures AS THEY WERE at start (`picked_json`, `population_json`), the
+server-validated report (`report_json`, set only on succeeded) and what validation removed
+(`dropped_json`), an error code (never a stack), and the run's cost / tokens / turns. The LATEST row
+per (account, workspace, window_choice) is what the card shows. `fingerprint` is the currency input
+(the window choice + picked idents + each pick's latest ticket review id and PR states) — nothing
+derived from now, so a dormant workspace's report stays current. ⚠ Every read predicates on
+`account_id` (`review/story-report/manager.ts`). Named composite FK onto `workspaces (id,
+account_id)`, cascade (a report is regenerable); in `accountScopedTables()` and erased explicitly.
+
 ## The automation vocabulary — `AUTOMATION_VENDORS`, `ReviewerRole`, `AutomatedReviewerKind`
 
 Three vocabularies describe an automated actor, and they are **orthogonal axes, not one enum**:

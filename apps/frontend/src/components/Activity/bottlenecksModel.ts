@@ -57,7 +57,7 @@ export const COURT_SHORT: Record<PrCourt, string> = {
  * urlHistory.test.ts pins.
  */
 export function effectiveInsightsTab(raw: string | null | undefined): InsightsInnerTab {
-  return raw === 'bottlenecks' || raw === 'merged' ? raw : 'overview';
+  return raw === 'bottlenecks' || raw === 'merged' || raw === 'stories' ? raw : 'overview';
 }
 
 // ── Formatting ───────────────────────────────────────────────────────────────────────────────

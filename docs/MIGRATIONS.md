@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0081` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
+  ⚠ pg `0052`–`0084` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -1142,4 +1142,20 @@ cascade (the `workspace_trackers` precedent — every writer gets the workspace 
 GOING FORWARD ONLY: nothing is backfilled, and the page states the first row's date as the start of
 settings history. In `accountScopedTables()` and erased explicitly. Journal `when` `1791705600000` in
 both folders (after `0095` / pg `0082`). Contract: docs/BOTTLENECKS.md § Over time.
+⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS` throughout).
+
+### `0097_story_reports` (pg `0084`) — the story report's runs
+
+Additive: a new table `story_reports` — one row per agentic story-report run (Reports → Stories):
+`window_choice`, `from_at`/`to_at`, `range_json`, `model`, `status` (queued · running · succeeded ·
+failed · cancelled), `fingerprint`, `picked_json`, `population_json`, `report_json` (null until
+succeeded), `dropped_json`, `error`, `cost_usd`, `input_tokens`, `output_tokens`, `num_turns`,
+`created_at`, `completed_at`. Index `story_reports_account_ws_window_idx` on (account, workspace,
+window_choice, created_at), and the named COMPOSITE FK `story_reports_workspace_account_fk` onto
+`workspaces (id, account_id)` with cascade (`workspace_id` arrives in a POST body; a report is
+regenerable). In `accountScopedTables()` and erased explicitly. Journal `when` `1791792000000` in
+both folders (after `0096` / pg `0083`). Contract: docs/CLAUDE-REVIEW.md § Story report.
+It REPLACED the per-story notes, whose plugin migration `0041_story_notes` was never committed and is
+DELETED (both dialects). A dev DB that ran it keeps an orphan `pro_story_notes` table (harmless) and
+its `pro_migrations` record — never reuse the file name `0041_story_notes.sql`.
 ⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS` throughout).

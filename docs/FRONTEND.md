@@ -2078,17 +2078,72 @@ convention this file has to remember.
   pins. **The gate lives in the PANE, never in the tab resolution.**
 - The store key lives in `freshDefaults()` only, so **no `FILTER_STORAGE_VERSION` bump is owed**,
   and `'overview'` — the current default — is the OMITTED URL value.
-- **Merged so far** (`?insightsTab=merged`, `MergedPrsView.tsx`) — THREE tabs now (Overview ·
-  Merged so far · Chronology). The Open PRs page over the work that LANDED: every PR merged in the
+- **Merged so far** (`?insightsTab=merged`, `MergedPrsView.tsx`) — FOUR tabs now (Overview ·
+  Merged so far · Stories · Chronology). The Open PRs page over the work that LANDED: every PR merged in the
   REPORTING WINDOW from `GET /api/merged-prs` (`useMergedPrs`, `ws:<id>` key, `periodReports` ANDed
   into `enabled`), header named through `reportingWindowText.ts` + "N pull requests merged".
   ⚠ **It REUSES `OpenPrsCards` with `variant="merged"`, never a fork** — that prop drops the CI and
   merge-readiness chips (a "Merged" chip and "merged X ago" instead), the stack roll-up, the Claude
-  Review panel + ticket review AND their batched requests, and the stack's "Merged (n)" panel (the
-  stack IS the merged work); default order is newest merge first, and there is no Sort menu. The
+  Review panel + CI review AND their batched requests, and the stack's "Merged (n)" panel (the
+  stack IS the merged work); default order is newest merge first, and there is no Sort menu.
+  ⚠ It KEEPS the TICKET review (where AI runs and the tracker is on): the ONE batched
+  `useTicketReviewStates`, the card's coverage pills (`TicketPillsRow`, the pills without the code
+  review's Review/Fix), the stack's coverage pill + Check story, and the collapsed Story check
+  (criteria met, the story, "What each PR adds"). A ticket with no review run — or no AI at all —
+  still offers its STORY alone (`StackStoryCheck storyWithoutReview`, read only when opened), so
+  nothing fetches on mount. The
   Group by ticket / List choice (and stack collapse) is the SAME per-viewer `store/openPrsView.ts`
   state as Open PRs; the repo dropdown is the tab's own local state. Ungated inside the one
   Reports gate.
+- **Stories** (`?insightsTab=stories`, `StoriesView.tsx` + pure `storiesModel.ts`,
+  `test/storiesModel.test.ts`) — how well the TICKETS were written. TOP: **the story report**
+  (`StoryReportCard.tsx` + pure `storyReportModel.ts`, `test/storyReportModel.test.ts`). BELOW: the two
+  charts, then every story behind ONE "All N stories" disclosure (Fell short · Not reviewed · Reviewed,
+  no gaps), over the REPORTING WINDOW (`GET /api/stories`, `useStories`, key `['stories','ws:<id>']`,
+  `periodReports` ANDed into `enabled`). The two windows are labelled apart (the report card names its
+  own; the lists carry the reporting-window caption). No tracker → one sentence and no card. The
+  server orders `shortfall` / `unchecked`; the SPA never re-ranks them. The per-story AI notes, their
+  "Write note" buttons and the pattern chips are DELETED (replaced by the report).
+  - **The story report** (core, agentic, LOCAL-ONLY, Pro): `useStoryReportsOn()` =
+    `periodReports && me.ai.enabled` (`useAiCapabilities`, never `useProCapabilities` alone) is ANDed
+    into every report hook's `enabled`, and without it the card renders NOTHING (cloud, or
+    `LIMN_AI_DISABLED=true`) — the tab keeps its lists and charts. A missing runtime or credential
+    swaps only the button, through `AiRunGate`.
+  - Keys: `['story-reports','ws:<id>',window]` (the list: stored runs + what a run would pick, code
+    only), `['story-report',id]` (one run, polled every 2 s while queued/running; a terminal status
+    invalidates the list and `['ai-usage']`). ⚠ **"Write report" / "Re-write" is the ONE billing
+    path**: mutation key `['story-report-start','ws:<id>',window]`, read through `useIsMutating`
+    (`useStoryReportStarting`), never a per-mount `isPending`; the queued run is written into the list
+    cache (`latest` + `running`) in the HOOK-level `onSuccess`, never a `mutate()` callback. The run is
+    stored server-side, so a tab switch mid-run loses nothing.
+  - The window picker (`STORY_REPORT_WINDOW_CHOICES`, default `STORY_REPORT_DEFAULT_WINDOW` = 60 days;
+    the 'reporting' option is named by `reportingWindowShortTitle` off `/api/stories`' echo) is local
+    state keyed by workspace and derived for the render, URL-silent. A run in flight elsewhere
+    (`running` names another window/workspace) REPLACES the button with one line (+ "Show it" in the
+    same workspace) — never a disabled button; the list re-reads every 5 s until it ends.
+  - The report renders as a news piece: headline, summary, a FIGURES row (`storyReportFigures`, from
+    the run's STORED `population` — code, styled apart from Claude's text, each count with its
+    denominator), then What we do well (green edge) / Where stories fall short (red edge) /
+    Spotlights (edge + "Good/Weak example" words, not hue alone) / Emerging themes / Next sprint
+    actions (numbered); empty sections are not headings (`storyReportSections`). "Not covered (N)"
+    sits behind a toggle and stays OUT of the export. ⚠ **A key is a link only when it is one of the
+    run's picks** (`linkifyTicketKeys`: whole tokens only, so `BMD-12` never matches inside
+    `BMD-123`), always through `safeExternalUrl`. "Copy as Markdown" (`storyReportMarkdown`,
+    `writeClipboard` with its fallback) emits a clean document with links and one line labelling the
+    figures apart from the model text. A stale report wears "Out of date: stories changed since";
+    nothing re-runs by itself. How the stories were picked, the model, cost and what validation
+    dropped all sit behind ⓘs.
+  - Charts: "Time and pull requests" is `RepoRows` with two single-segment columns on SEPARATE scales
+    (working time via `formatWorkingTime` over `workingDayHours`; PR count), top
+    `STORY_TIME_CHART_ROWS` by working hours + "N more not shown". "Size and criteria" is `ScatterChart`
+    with the new optional props `yScale: 'linear'`, `legend`, `dotColor` and `ScatterPoint.flagged`
+    (a hollow SQUARE — shape, not hue alone — for a story in `shortfall`); an unknown size or a null
+    criteria count is LISTED under the chart, never plotted at zero. The old call site
+    (`RepoAnalyticsModal`) passes none of them and is unchanged.
+  - Every explanation sits behind an `InfoButton`; no caption paragraphs. No e2e spec mounts
+    Reports (the mock's `periodReports` is false), so `e2e/mock-api.ts` has no `/api/stories` or
+    `/api/story-reports` fixture; add typed ones if a spec ever opens the tab (today the catch-all `{}`
+    reads as "no tracker": the card hides and the tab prints one sentence).
 - ⚠ **Superseded: the WHOLE Reports pane is Pro (`periodReports`)** — `InsightsView` renders one
   `ProLockPanel` when unentitled, the rail entry carries the one `ProBadge`, and the inner badges
   below were REMOVED (the inner locks remain as defence in depth). `useWorkspaceMetrics` /

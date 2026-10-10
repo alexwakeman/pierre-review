@@ -15,12 +15,15 @@ import { registerCiReviewSweep } from './ci-review/sweep.js';
 import { registerAiFixRoutes } from '../coding/ai-fix/routes.js';
 import { reconcileFixesOnStartup } from '../coding/ai-fix/manager.js';
 import { registerAiResolveRoutes } from '../coding/ai-resolve/routes.js';
+import { registerStoryReportRoutes } from './story-report/routes.js';
+import { reconcileStoryReportsOnStartup } from './story-report/manager.js';
 import { runOpen } from '../api/routes/conflicts.js';
 
 // THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, the chat, auto
 // review), the ticket review (one run per ticket across its PRs, + its cascade sweeper), the CI
-// review (why checks failed on a PR's head, + its sweeper) and AI Fix's fixer. CORE and FREE since apiVersion 22 (they
-// were the plugin's "pro+" tier); they run on the user's OWN Claude Code session or
+// review (why checks failed on a PR's head, + its sweeper), AI Fix's fixer and the story report
+// (Reports → Stories — the one agentic run that is ALSO Pro, on `periodReports`). CORE and FREE
+// since apiVersion 22 (they were the plugin's "pro+" tier); they run on the user's OWN Claude Code session or
 // ANTHROPIC_API_KEY (review/auth.ts), and Limn stores no key and charges nothing for them.
 //
 // ⚠ THE CLOUD GUARANTEE IS THIS `isCloud` CHECK, EXPLICITLY. It used to rest on an env var being
@@ -50,6 +53,9 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // "Resolve with Claude" — the agentic half of the merge-conflict resolver. The resolver's own
   // routes stay in both modes (app.ts); this one is agentic and follows this function's rule.
   registerAiResolveRoutes(app, ctx, { runOpen });
+  // The STORY REPORT (Reports → Stories): one Haiku run across 10-20 code-picked stories. Pro on
+  // `periodReports` as well (its routes 402), and agentic, so it registers here and nowhere else.
+  registerStoryReportRoutes(app, ctx);
   return ctx;
 }
 
@@ -87,4 +93,9 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
     app.log.warn({ err }, 'ci review: startup reconcile failed');
   }
   await reconcileFixesOnStartup(ctx);
+  try {
+    await reconcileStoryReportsOnStartup();
+  } catch (err) {
+    app.log.warn({ err }, 'story report: startup reconcile failed');
+  }
 }

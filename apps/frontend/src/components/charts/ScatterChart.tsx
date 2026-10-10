@@ -6,6 +6,16 @@ export interface ScatterPoint {
   y: number;
   label: string;
   merged?: boolean;
+  /** Drawn as a hollow square instead of a dot — a second SHAPE, so the distinction never rests on
+   *  hue alone. The caller names it through `legend`. */
+  flagged?: boolean;
+}
+
+export interface ScatterLegendEntry {
+  label: string;
+  color: string;
+  /** 'hollow-square' for the entry naming the `flagged` mark, so the key shows the mark's shape. */
+  shape?: 'hollow-square';
 }
 
 // Scatter on log–log axes (both x = LOC and y = hours are heavy-tailed, so a
@@ -19,6 +29,10 @@ export function ScatterChart({
   formatY = fmtNum,
   fit = false,
   height = 150,
+  yScale = 'log',
+  legend,
+  dotColor,
+  flaggedColor = PALETTE.amber,
 }: {
   points: ScatterPoint[];
   xLabel: string;
@@ -30,25 +44,43 @@ export function ScatterChart({
   // disproportionately slower to land. The slope is annotated on the chart.
   fit?: boolean;
   height?: number;
+  /** 'linear' for a small-integer axis (a count of criteria); the x axis stays log. */
+  yScale?: 'log' | 'linear';
+  /** Replaces the default merged/closed key. */
+  legend?: ScatterLegendEntry[];
+  /** One colour for every unflagged dot (ignores `merged`). */
+  dotColor?: string;
+  flaggedColor?: string;
 }): JSX.Element {
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
 
-  const PAD_L = 32;
+  const PAD_L = 36;
   const PAD_R = 8;
   const PAD_T = 8;
-  const PAD_B = 18;
+  const PAD_B = 16;
   const innerW = Math.max(w - PAD_L - PAD_R, 1);
   const innerH = height - PAD_T - PAD_B;
   const lg = (v: number): number => Math.log10(1 + Math.max(0, v));
   const xMax = lg(Math.max(1, ...points.map((p) => p.x)));
-  const yMax = lg(Math.max(1, ...points.map((p) => p.y)));
+  const linY = yScale === 'linear';
+  const yRaw = Math.max(1, ...points.map((p) => p.y));
+  const yMax = linY ? yRaw : lg(yRaw);
+  const ty = (v: number): number => (linY ? Math.max(0, v) : lg(v));
   const X = (v: number): number => PAD_L + (lg(v) / (xMax || 1)) * innerW;
-  const Y = (v: number): number => PAD_T + innerH * (1 - lg(v) / (yMax || 1));
+  const Y = (v: number): number => PAD_T + innerH * (1 - ty(v) / (yMax || 1));
 
   // Gridline ticks at the powers of ten that fall inside each axis range.
   const ticks = (maxLg: number): number[] =>
     [0, 1, 10, 100, 1000, 10000].filter((v) => lg(v) <= maxLg + 0.01);
+  // A linear axis: whole-number ticks, at most ~5 of them.
+  const linTicks = (max: number): number[] => {
+    const step = Math.max(1, Math.ceil(max / 4));
+    const out: number[] = [];
+    for (let v = 0; v <= max; v += step) out.push(v);
+    return out;
+  };
+  const yTicks = linY ? linTicks(yRaw) : ticks(yMax);
 
   // Power-law fit: least-squares on log10(x)/log10(y) over points with x>0 & y>0,
   // then a sampled polyline (the plot maps via log1p, so sample rather than draw a
@@ -109,7 +141,7 @@ export function ScatterChart({
       <div ref={ref} className="relative" style={{ height }}>
         {w > 0 && (
           <svg width={w} height={height} className="block">
-            {ticks(yMax).map((v) => (
+            {yTicks.map((v) => (
               <g key={`y${v}`}>
                 <line
                   x1={PAD_L}
@@ -120,7 +152,7 @@ export function ScatterChart({
                   stroke="currentColor"
                   strokeWidth={1}
                 />
-                <text x={PAD_L - 4} y={Y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-[8px]">
+                <text x={PAD_L - 4} y={Y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-[11px]">
                   {formatY(v)}
                 </text>
               </g>
@@ -129,23 +161,42 @@ export function ScatterChart({
               <text
                 key={`x${v}`}
                 x={X(v)}
-                y={height - 8}
+                y={height - 3}
                 textAnchor="middle"
-                className="fill-gray-500 dark:fill-gray-400 text-[8px]"
+                className="fill-gray-500 dark:fill-gray-400 text-[11px]"
               >
                 {formatX(v)}
               </text>
             ))}
-            {points.map((p, i) => (
-              <circle
-                key={i}
-                cx={X(p.x)}
-                cy={Y(p.y)}
-                r={hover === i ? 4 : 2.2}
-                fill={p.merged ? PALETTE.green : PALETTE.gray}
-                opacity={hover == null || hover === i ? 0.75 : 0.3}
-              />
-            ))}
+            {points.map((p, i) => {
+              const opacity = hover == null || hover === i ? 0.85 : 0.3;
+              if (p.flagged) {
+                const r = hover === i ? 4.5 : 3.2;
+                return (
+                  <rect
+                    key={i}
+                    x={X(p.x) - r}
+                    y={Y(p.y) - r}
+                    width={r * 2}
+                    height={r * 2}
+                    fill="none"
+                    stroke={flaggedColor}
+                    strokeWidth={1.5}
+                    opacity={opacity}
+                  />
+                );
+              }
+              return (
+                <circle
+                  key={i}
+                  cx={X(p.x)}
+                  cy={Y(p.y)}
+                  r={hover === i ? 4 : 2.2}
+                  fill={dotColor ?? (p.merged ? PALETTE.green : PALETTE.gray)}
+                  opacity={opacity}
+                />
+              );
+            })}
             {fitLine && (
               <path
                 d={fitLine.d}
@@ -161,14 +212,11 @@ export function ScatterChart({
                 x={PAD_L + 5}
                 y={PAD_T + 9}
                 fill={PALETTE.amber}
-                className="text-[8px] font-semibold"
+                className="text-[11px] font-semibold"
               >
                 ≈ {yLabel} ∝ {xLabel}^{fitLine.slope.toFixed(1)}
               </text>
             )}
-            <text x={PAD_L} y={height - 1} className="fill-gray-500 dark:fill-gray-400 text-[8px]">
-              {xLabel} →
-            </text>
             <rect
               x={0}
               y={0}
@@ -193,12 +241,19 @@ export function ScatterChart({
         )}
       </div>
       <div className="flex items-center justify-between">
-        <span className="text-[9px] text-gray-400">{yLabel} (log) ↑</span>
+        {/* Both axes named, each with its scale: the x axis is ALWAYS log, and a linear y caption must
+            not leave the chart reading as two linear axes. */}
+        <span className="text-[11px] text-gray-500 dark:text-gray-400">
+          {yLabel}
+          {linY ? '' : ' (log)'} ↑ · {xLabel} (log) →
+        </span>
         <Legend
-          series={[
-            { label: 'merged', color: PALETTE.green },
-            { label: 'closed', color: PALETTE.gray },
-          ]}
+          series={
+            legend ?? [
+              { label: 'merged', color: PALETTE.green },
+              { label: 'closed', color: PALETTE.gray },
+            ]
+          }
         />
       </div>
     </div>

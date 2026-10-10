@@ -8,6 +8,7 @@ import { BottlenecksPanel } from './BottlenecksPanel.js';
 import { effectiveInsightsTab } from './bottlenecksModel.js';
 import { MergedPrsView } from './MergedPrsView.js';
 import { PeriodReportsPanel } from './PeriodReportsPanel.js';
+import { StoriesView } from './StoriesView.js';
 import { TrackUsage } from './TrackUsage.js';
 import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 
@@ -30,10 +31,13 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 // "Ask about this period" section under the report, grounded in the viewed period's own
 // [fromMs, toMs) rather than a trailing window.
 //
-// ── THE PANE IS THREE TABS ───────────────────────────────────────────────────────────────────
+// ── THE PANE IS FOUR TABS ───────────────────────────────────────────────────────────────────
 //   • Overview   — flow metrics, the two "where the work is happening" cards, period reports.
 //   • Merged so far — the Open PRs cards over every PR merged in the REPORTING WINDOW
 //     (MergedPrsView, GET /api/merged-prs), grouped per ticket when the workspace has a tracker.
+//   • Stories    — the agentic story report (local-only, its own window picker, GET/POST
+//     /api/story-reports), then every tracker ticket with a PR merged in the REPORTING WINDOW: two
+//     charts and the lists (StoriesView, GET /api/stories).
 //   • Chronology — the COURT LEDGER (BottlenecksPanel). PRO on `periodReports`; still
 //     deterministic (no model anywhere behind it) and still the twin of the Bots rail — that
 //     surface measures automation, this one measures where people's time went.
@@ -149,6 +153,7 @@ function InsightsBody(): JSX.Element {
           [
             { key: 'overview', label: 'Overview' },
             { key: 'merged', label: 'Merged so far' },
+            { key: 'stories', label: 'Stories' },
             // ⚠ LABEL-ONLY: the store/URL literal stays 'bottlenecks' (see InsightsInnerTab).
             { key: 'bottlenecks', label: 'Chronology' },
           ] as const
@@ -177,6 +182,8 @@ function InsightsBody(): JSX.Element {
         <ChronologyTabBody />
       ) : effectiveTab === 'merged' ? (
         <MergedPrsView />
+      ) : effectiveTab === 'stories' ? (
+        <StoriesView />
       ) : (
         <>
           {/* `WorkspaceFlowMetrics` self-hides when there is nothing to measure, so the empty
