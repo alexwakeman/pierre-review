@@ -1,0 +1,188 @@
+// Jira's sprint list (./jira.ts): the request shape (v3 enhanced search through the one outbound
+// helper, quoted project keys, `expand=names,schema`), the active sprint's names, the issue fold
+// (criteria candidates, epic, components, project), the two fallbacks (400 → no_sprint_concept,
+// 0 issues → none_active), `nextPageToken` paging, the 150 cap, and the Server / DC v2 retry.
+// No request leaves the process: every answer comes from the fake transport.
+import { describe, expect, it } from 'vitest';
+import { SPRINT_TICKETS_MAX } from '@pierre-review/shared';
+import { JiraFetchError, type JiraTransport, type RawResponse } from '../jira/fetch.js';
+import type { TrackerCall } from '../types.js';
+import { fallbackJql, listJiraSprint, sprintJql, sprintsOf, toJiraSprintTicket } from './jira.js';
+
+const ROOT = 'https://acme.atlassian.net';
+const json = (body: unknown, status = 200): RawResponse => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+
+const NAMES = { summary: 'Summary', customfield_10020: 'Sprint', customfield_10050: 'Acceptance Criteria', customfield_10014: 'Epic Link' };
+const SCHEMA = {
+  customfield_10020: { type: 'array', custom: 'com.pyxis.greenhopper.jira:gh-sprint' },
+  customfield_10050: { type: 'string', custom: 'com.atlassian.jira.plugin.system.customfieldtypes:textarea' },
+  customfield_10014: { type: 'any', custom: 'com.pyxis.greenhopper.jira:gh-epic-link' },
+};
+
+function issue(n: number, over: Record<string, unknown> = {}) {
+  return {
+    key: `ENG-${n}`,
+    fields: {
+      summary: `Story ${n}`,
+      description: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: `Body ${n}` }] }] },
+      issuetype: { id: '10001', name: 'Story' },
+      status: { name: 'To Do', statusCategory: { key: 'new' } },
+      assignee: null,
+      project: { key: 'ENG' },
+      components: [{ name: 'Billing' }],
+      updated: '2026-10-01T10:00:00.000+0000',
+      created: '2026-09-20T10:00:00.000+0000',
+      customfield_10020: [
+        { id: 1, name: 'Sprint 41', state: 'closed' },
+        { id: 2, name: 'Sprint 42', state: 'active' },
+      ],
+      customfield_10050: '* The user sees the invoice',
+      ...over,
+    },
+  };
+}
+
+function call(transport: JiraTransport): TrackerCall {
+  return { provider: 'jira', apiRoot: ROOT, credentials: { email: 'me@acme.com', token: 'tok' }, policy: { cloud: false }, transport };
+}
+
+const args = (transport: JiraTransport, projectKeys = ['ENG']) => ({
+  call: call(transport),
+  projectKeys,
+  repos: [],
+  fallbackWindow: { fromMs: Date.UTC(2026, 8, 26, 9, 5), toMs: Date.UTC(2026, 9, 10) },
+  acSettingFor: () => null,
+});
+
+describe('JQL', () => {
+  it('quotes the project keys and drops malformed ones', () => {
+    expect(sprintJql(['ENG', 'OPS', 'bad key"'])).toBe('project in ("ENG","OPS") AND sprint in openSprints() ORDER BY rank');
+    expect(() => sprintJql(['"; DROP'])).toThrow(JiraFetchError);
+  });
+  it('the fallback reads To do + In progress touched since the window start (a relative duration, time-zone free)', () => {
+    const now = Date.UTC(2026, 9, 10, 12, 0);
+    expect(fallbackJql(['ENG'], now - 14 * 86_400_000 - 30_000, now)).toBe(
+      'project in ("ENG") AND statusCategory in ("To Do","In Progress") AND updated >= -20161m ORDER BY updated DESC',
+    );
+  });
+});
+
+describe('sprint field values', () => {
+  it('reads Cloud objects and old Server strings', () => {
+    expect(sprintsOf([{ name: 'S1', state: 'ACTIVE' }])).toEqual([{ name: 'S1', state: 'active' }]);
+    expect(sprintsOf(['com.atlassian.greenhopper.service.sprint.Sprint@1a[id=3,rapidViewId=1,state=ACTIVE,name=Sprint 7,startDate=x]'])).toEqual([
+      { name: 'Sprint 7', state: 'active' },
+    ]);
+    expect(sprintsOf(null)).toEqual([]);
+  });
+});
+
+describe('the issue fold', () => {
+  it('maps title, ADF description, criteria candidates, status, project, components, sprint, epic', () => {
+    const t = toJiraSprintTicket(issue(1, { parent: { key: 'ENG-100', fields: { summary: 'Billing', issuetype: { name: 'Epic' } } } }), NAMES, SCHEMA, true)!;
+    expect(t.key).toBe('ENG-1');
+    expect(t.title).toBe('Story 1');
+    expect(t.description).toContain('Body 1');
+    expect(t.status).toEqual({ name: 'To Do', category: 'new' });
+    expect(t.projectKey).toBe('ENG');
+    expect(t.components).toEqual(['Billing']);
+    expect(t.sprintName).toBe('Sprint 42');
+    expect(t.epic).toEqual({ key: 'ENG-100', title: 'Billing' });
+    expect(t.candidates.map((c) => c.id)).toContain('customfield_10050');
+    expect(t.issueUpdatedAt?.toISOString()).toBe('2026-10-01T10:00:00.000Z');
+  });
+  it('falls back to the Epic Link field, and leaves components null when not read', () => {
+    const t = toJiraSprintTicket(issue(2, { customfield_10014: 'ENG-7', components: undefined }), NAMES, SCHEMA, true)!;
+    expect(t.epic).toEqual({ key: 'ENG-7', title: null });
+    expect(t.components).toBeNull();
+  });
+  it('a fallback ticket carries no sprint name; a malformed key is dropped', () => {
+    expect(toJiraSprintTicket(issue(3), NAMES, SCHEMA, false)!.sprintName).toBeNull();
+    expect(toJiraSprintTicket({ key: 'nope', fields: {} }, NAMES, SCHEMA, true)).toBeNull();
+  });
+});
+
+describe('listJiraSprint', () => {
+  it('reads the open sprint through v3 search/jql with the auth header and names its sprints', async () => {
+    const seen: Array<{ url: URL; headers: Record<string, string>; method: string | undefined }> = [];
+    const t: JiraTransport = async (url, headers, _o, init) => {
+      seen.push({ url, headers, method: init?.method });
+      return json({ issues: [issue(1), issue(2)], names: NAMES, schema: SCHEMA, isLast: true });
+    };
+    const r = await listJiraSprint(args(t));
+    expect(r.source).toEqual({ kind: 'sprint', provider: 'jira', names: ['Sprint 42'] });
+    expect(r.tickets.map((x) => x.key)).toEqual(['ENG-1', 'ENG-2']);
+    expect(r.truncated).toBe(false);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.method).toBeUndefined(); // a GET
+    expect(seen[0]!.url.pathname).toBe('/rest/api/3/search/jql');
+    expect(seen[0]!.url.searchParams.get('jql')).toBe(sprintJql(['ENG']));
+    expect(seen[0]!.url.searchParams.get('fields')).toBe('*all');
+    expect(seen[0]!.url.searchParams.get('expand')).toBe('names,schema');
+    expect(seen[0]!.headers.authorization).toMatch(/^Basic /);
+  });
+
+  it('a 400 (no sprint field) falls back to the status read, no_sprint_concept', async () => {
+    const jqls: string[] = [];
+    const t: JiraTransport = async (url) => {
+      const jql = url.searchParams.get('jql') ?? '';
+      jqls.push(jql);
+      if (jql.includes('openSprints')) return json({ errorMessages: ['Field sprint does not exist'] }, 400);
+      return json({ issues: [issue(5)], names: NAMES, schema: SCHEMA, isLast: true });
+    };
+    const r = await listJiraSprint(args(t));
+    expect(r.source).toMatchObject({ kind: 'status_fallback', provider: 'jira', reason: 'no_sprint_concept' });
+    expect(r.source.kind === 'status_fallback' && r.source.from).toBe('2026-09-26T09:05:00.000Z');
+    expect(jqls[1]).toContain('statusCategory in ("To Do","In Progress")');
+    expect(r.tickets[0]!.sprintName).toBeNull();
+  });
+
+  it('no issues in an open sprint falls back with none_active', async () => {
+    const t: JiraTransport = async (url) =>
+      (url.searchParams.get('jql') ?? '').includes('openSprints') ? json({ issues: [], isLast: true }) : json({ issues: [issue(9)], isLast: true });
+    const r = await listJiraSprint(args(t));
+    expect(r.source).toMatchObject({ kind: 'status_fallback', reason: 'none_active' });
+    expect(r.tickets).toHaveLength(1);
+  });
+
+  it('pages with nextPageToken and cuts at the cap (truncated)', async () => {
+    const tokens: Array<string | null> = [];
+    const t: JiraTransport = async (url) => {
+      const tok = url.searchParams.get('nextPageToken');
+      tokens.push(tok);
+      const page = tok == null ? 0 : Number(tok);
+      const issues = Array.from({ length: 100 }, (_, i) => issue(page * 100 + i + 1));
+      return json({ issues, names: NAMES, schema: SCHEMA, nextPageToken: String(page + 1), isLast: false });
+    };
+    const r = await listJiraSprint(args(t));
+    expect(tokens).toEqual([null, '1']);
+    expect(r.tickets).toHaveLength(SPRINT_TICKETS_MAX);
+    expect(r.truncated).toBe(true);
+  });
+
+  it('a Server / DC site (no v3 search, 404) is retried once on v2 with startAt paging', async () => {
+    const paths: string[] = [];
+    const t: JiraTransport = async (url) => {
+      paths.push(`${url.pathname}?startAt=${url.searchParams.get('startAt') ?? ''}`);
+      if (url.pathname.includes('/3/')) return json({}, 404);
+      const startAt = Number(url.searchParams.get('startAt'));
+      return json({
+        startAt,
+        total: 3,
+        issues: startAt === 0 ? [issue(1, { description: 'h1. Title' }), issue(2)] : [issue(3)],
+        names: NAMES,
+        schema: SCHEMA,
+      });
+    };
+    const r = await listJiraSprint(args(t));
+    expect(paths).toEqual(['/rest/api/3/search/jql?startAt=', '/rest/api/2/search?startAt=0', '/rest/api/2/search?startAt=2']);
+    expect(r.tickets.map((x) => x.key)).toEqual(['ENG-1', 'ENG-2', 'ENG-3']);
+    // v2 wiki markup becomes markdown.
+    expect(r.tickets[0]!.description).toContain('# Title');
+  });
+
+  it('a refused token is thrown, not swallowed into a fallback', async () => {
+    const t: JiraTransport = async () => json({}, 401);
+    await expect(listJiraSprint(args(t))).rejects.toMatchObject({ code: 'unauthorized' });
+  });
+});

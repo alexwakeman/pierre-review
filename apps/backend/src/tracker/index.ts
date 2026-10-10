@@ -6,6 +6,7 @@ import { enableTrackerWorker, kickTrackerSync } from './worker.js';
 import { moveLegacyTrackerData } from './legacy-import.js';
 import { checkReposGithubIssuesUsage } from './github/issues-usage.js';
 import type { TrackerContext } from './context.js';
+import { registerSprintReadRoutes, startSprintRead } from './sprint/index.js';
 
 // THE ISSUE TRACKER — CORE, FREE, BOTH MODES (apiVersion 23; docs/TRACKERS.md). Two entry points:
 //
@@ -16,6 +17,8 @@ import type { TrackerContext } from './context.js';
 
 export function registerTracker(app: FastifyInstance): void {
   registerTrackerRoutes(app, trackerContext());
+  // Reports → This sprint: POST /api/sprint-stories/refresh (./sprint/routes.ts).
+  registerSprintReadRoutes(app, trackerContext());
 }
 
 let started = false;
@@ -52,6 +55,9 @@ export async function startTracker(app: FastifyInstance): Promise<void> {
     app.log.warn({ err: err instanceof Error ? err.message : String(err) }, 'tracker: legacy move failed (retried next boot)');
   }
   enableTrackerWorker(true);
+  // The sprint list read's KICK (a GET / Refresh reads a due workspace at once). Its tick needs no
+  // registration: `runTrackerTick` calls `runSprintReadTick` at its end (./sprint/read.ts).
+  startSprintRead(ctx);
   // A KICK, NEVER A STEP: fire-and-forget after each completed repo walk, outside every transaction.
   registerRepoSyncedHook(({ accountId, repoId }) => {
     // A NEWLY ADDED repo lands in Default with no GitHub Issues answer: ask once, after its first walk.

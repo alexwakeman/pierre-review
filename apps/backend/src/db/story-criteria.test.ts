@@ -114,3 +114,34 @@ describe('extractCriteria', () => {
     }
   });
 });
+
+describe('acceptanceSectionOf — sub-labels inside the section', () => {
+  it('carries "For option N:" onto its items instead of ending the section', () => {
+    const d = [
+      'Acceptance criteria',
+      'For option 1:',
+      '- generate:scenarios writes rounded areas.',
+      '- The comparison reports no differences.',
+      'For option 2:',
+      '- Units use the unrounded size.',
+      'References:',
+      '- G-4 temporal multipliers',
+    ].join('\n');
+    const sec = acceptanceSectionOf(d, { jira: false });
+    expect(extractCriteria(sec, { jira: false })).toEqual([
+      'For option 1: generate:scenarios writes rounded areas.',
+      'For option 1: The comparison reports no differences.',
+      'For option 2: Units use the unrounded size.',
+    ]);
+  });
+
+  it('still ends at a colon line with no list under it', () => {
+    const d = ['Acceptance criteria', '- A works.', 'Owner:', 'Someone'].join('\n');
+    expect(extractCriteria(acceptanceSectionOf(d, { jira: false }), { jira: false })).toEqual(['A works.']);
+  });
+});
+
+it('ends the section at a bare "References" line', () => {
+  const d = ['Acceptance criteria', '- A works.', '- B works.', 'References', '- G-4 multipliers'].join('\n');
+  expect(extractCriteria(acceptanceSectionOf(d, { jira: false }), { jira: false })).toEqual(['A works.', 'B works.']);
+});

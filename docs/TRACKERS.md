@@ -106,7 +106,8 @@ row (`DELETE /api/prs/:id/tracker-ticket/manual?key=`, deletes only the `'manual
 ## Fetch on receipt — the stored tickets and the worker
 
 **A tracker is read when a PR is RECEIVED, never when it is VIEWED.** The worker stores each
-detected ticket in `tracker_tickets`; every consumer reads the row.
+detected ticket in `tracker_tickets`; every consumer reads the row. The ONE exception is the sprint list read
+(§ The sprint list read), and it is still never triggered by a view.
 
 - **`tracker_tickets`** — one row per `(account_id, pr_id, issue_key)` (the conflict target):
   provider, workspace, site (`api_root`), browse URL, `detected_from` + `detect_order`, title,
@@ -139,6 +140,65 @@ detected ticket in `tracker_tickets`; every consumer reads the row.
   the re-derivation. "None of these" stays a per-tab choice, never stored.
 - `changed_at` moves ONLY when membership or story text moves (`storyOrMembershipMoved`); a status
   or assignee change is not a change (the ticket review would re-bill for nothing).
+
+## The sprint list read — the ONE read not triggered by a received PR (`tracker/sprint/`)
+
+⚠ **A deliberate exception to "read when received".** Reports → This sprint needs the tickets of the
+tracker's CURRENT sprint, and most of them have no PR yet, so no PR can trigger their read. The rule
+it keeps: **a view still never calls a reader.** `GET /api/sprint-stories` only stamps
+`sprint_reads.viewed_at` and kicks; the read runs in the worker.
+
+- **Demand-gated**: a workspace is read only while `viewed_at` is within `SPRINT_VIEW_TTL_DAYS` (7),
+  at most every `SPRINT_READ_INTERVAL_MS` (20 min, `next_read_at`), only when its account has Reports
+  (`periodReports`), its tracker READS (the worker's population, including the automatic GitHub
+  default), its call prepares (`prepareTrackerCall`) and the worker has not backed it off. ≤ 5
+  workspaces per tick, at the end of `runTrackerTick`; `POST /api/sprint-stories/refresh` marks it due
+  and kicks.
+- **Providers** (`SPRINT_LISTERS`): Jira `project in (<keys>) AND sprint in openSprints()` through
+  `jiraGetJson` (`/rest/api/3/search/jql`, one retry on Server's `/rest/api/2/search` after a 404),
+  sprint names from the `gh-sprint` field; Linear each team's `activeCycle`; GitHub Issues the
+  nearest-due open milestone across the workspace's repos (never an overdue one; ≤ 20 repos per pass,
+  `truncated` when cut). Project keys / team keys are the ones seen on this workspace's stored
+  `tracker_tickets` (+ the tracker's `project_keys`); none → `no_projects`.
+- **Fallback** when the tracker has no sprint concept or none is active: To do + In progress tickets
+  touched in the workspace's reporting window (`getReportingWindow`), else the trailing 14 days. The
+  `source` says which (`sprint` / `cycle` / `milestone` / `status_fallback` + reason).
+  ⚠ Jira's JQL says `updated >= -<N>m` (a relative duration), never a date literal: Jira reads a
+  literal in the token owner's profile time zone.
+- **Storage**: `sprint_tickets` (keyed `(account, workspace, ident)` — they cannot live in
+  `tracker_tickets`, which is keyed on a PR). A ticket the read no longer returns flips `in_sprint`
+  false; one unseen for 90 days is deleted with its accepted repos. A failure records `error_code` and
+  keeps the last good list (5 min retry after a rate limit, else 20 min). A workspace the worker has
+  BACKED OFF is recorded the same way, with the worker's code — never skipped silently, or a first
+  read would show "Reading…" for ever. After a good read, and after a forced single-ticket re-read,
+  the free labels run (`review/sprint-labels/`, local only). `sprint_reads` remembers the
+  `provider` + `api_root` it read; a workspace that moved tracker or site since is reset on the next
+  view (no source, no read time, due now).
+
+## The write-back — per ticket, confirmed, never retried (`tracker/write/`)
+
+`POST /api/sprint-stories/write` is the only tracker WRITE. Nothing writes without the reader's
+Confirm in a dialog that shows exactly the text; no agent tool, setting or bulk route can write.
+
+- **Order**: the ticket must be on this workspace's sprint list under its CURRENT tracker → a replace
+  target must equal the server's (`sprintReplaceTarget` over the STORED row — the workspace's criteria
+  field choice; else `409 target_changed`) → for a REPLACE, the base check: `baseHash` must be the
+  sha256 of the FULL stored text it overwrites (the row's `replaceBase`), a text longer than the page
+  carries refuses `409 too_long`, and the ticket is re-read LIVE (`rereadSprintTicketNow`) — a text
+  edited in the tracker since refuses `409 ticket_changed` with the fresh text stored, a failed read
+  `502 read_failed`; nothing is written either way → an in-memory per-ticket lock → the `tracker_writes` row is
+  CLAIMED (`status:'writing'`, insert on `(account_id, request_id)`; a repeated request id answers
+  with its own record) → ONE write → a compare-and-set on `status = 'writing'`. **Never retried.** A
+  timeout after sending, a 2xx we cannot read, or a write cut off by a restart
+  (`reconcileTrackerWritesOnStartup`) is `maybe_written`.
+- **Providers**: Jira Cloud v3 + ADF (`markdownToAdf`); Jira Server/Data Center (no saved email) v2 +
+  wiki markup. Replacing a Jira criteria field reads `editmeta` first (a single-line text field gets
+  a string). Linear `commentCreate` / `issueUpdate`. GitHub Issues REST with the account's token.
+- **Refusals are named**: 401/403 → `no_write_permission` ("This token can't write to Jira"), shown
+  on that ticket. The text is validated (≤ `SPRINT_WRITE_TEXT_MAX`, no NUL, no lone surrogate).
+- **Afterwards** the sprint ticket and every PR-linked `tracker_tickets` row of the same ticket in
+  the account are marked due (`next_check_at` epoch 0) and a sprint read is kicked, so the chips
+  refresh.
 
 ## Created and resolved dates (`tracker/dates.ts`, `tracker/dates-backfill.ts`)
 

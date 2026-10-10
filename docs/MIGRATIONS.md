@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0086` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
+  ⚠ pg `0052`–`0088` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -1182,3 +1182,23 @@ that target. No workspace column (a ticket's story is one fact per account) and 
 (no request body names a row). In `accountScopedTables()`, erased explicitly, and checked by
 `verify:isolation`. Journal `when` `1791964800000` in both folders (after `0098` / pg `0085`).
 Contract: docs/CLAUDE-REVIEW.md § Story labels. ⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS`).
+
+### `0100_sprint_stories` (pg `0087`) — Reports → This sprint
+
+Additive: five new tables — `sprint_reads`, `sprint_tickets`, `sprint_ticket_repos`,
+`sprint_assessments`, `tracker_writes` (docs/DATA-MODEL.md § Reports → This sprint). Uniques (every
+`onConflictDo*` uses exactly these): `sprint_reads (account_id, workspace_id)`, `sprint_tickets
+(account_id, workspace_id, ident)`, `sprint_ticket_repos (account_id, workspace_id, ident, repo_id)`,
+`tracker_writes (account_id, request_id)`; `sprint_assessments` has none. NAMED composite FKs onto
+`workspaces(id, account_id)` on all five and onto `repos(id, account_id)` on `sprint_ticket_repos`,
+all cascade. In `accountScopedTables()`, erased explicitly, `deleteRepo` deletes
+`sprint_ticket_repos` rows, checked by `verify:isolation`. Contract: docs/TRACKERS.md § The sprint list
+read / § The write-back. ⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS`).
+
+### `0101_sprint_reads_api_root` (pg `0088`) — the site a sprint list was read from
+
+Additive `sprint_reads.api_root text` (NULL before the first read). With `provider`, the GET
+(`db/sprint-stories.ts`) spots a workspace that moved to another tracker or site since its stored read
+and resets that row (`resetSprintReadForSite`: no source, no read time, due now) so the page says
+"Reading…" instead of the old read's time over an empty list. A separate migration because `0100` was
+already applied in development. ⚠ pg `0088` NOT replayed.

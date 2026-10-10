@@ -3870,6 +3870,120 @@ check(
   check("createdDatesFor(A) reads A's created date, never B's", dA?.ms === Date.parse('2026-01-01T00:00:00Z'));
 }
 
+// ── REPORTS → THIS SPRINT (sprint_reads / sprint_tickets / sprint_ticket_repos / sprint_assessments /
+// tracker_writes; migration 0100 / pg 0087). BOTH accounts hold the SAME ticket ident on the SAME Jira
+// site (the tracker section above wrote both trackers), so every read must answer only for the caller.
+// Workspace ids arrive in BODIES, so `sprint_ticket_repos` carries named composite FKs onto
+// repos(id, account_id) and workspaces(id, account_id): a cross-account pair fails in the database.
+// MUTATION CHECK: drop the accountId predicate from `getSprintStories` / `acceptedSprintRepos` /
+// `loadSprintAssessment` / `readSprintTicket` and the matching check goes red.
+{
+  console.log('\nsprint_tickets + sprint_ticket_repos + sprint_assessments + tracker_writes');
+  const { trackerTicketIdent } = await import('@pierre-review/shared');
+  const SITE = 'https://acme.atlassian.net';
+  const ident = trackerTicketIdent('jira', SITE, 'SPR-1');
+  const { buildTrackerContext } = await import('../src/tracker/runtime.js');
+  const ts = await import('../src/tracker/settings.js');
+  const tctx = buildTrackerContext({ info() {}, warn() {}, error() {} });
+  // The sections above moved both workspaces to other trackers; point both back at the shared site.
+  for (const [acct, ws] of [
+    [1, defaultA],
+    [2, defaultB],
+  ] as const) {
+    await ts.writeWorkspaceTracker(tctx, acct, ws, { issue: { provider: 'jira', baseUrl: SITE }, jira: { token: `token-of-${acct}` } });
+  }
+  for (const [acct, ws, title] of [
+    [1, defaultA, 'A sprint ticket'],
+    [2, defaultB, 'B sprint ticket'],
+  ] as const) {
+    await db
+      .insert(schema.sprintTickets)
+      .values({
+        accountId: acct,
+        workspaceId: ws,
+        ident,
+        provider: 'jira',
+        apiRoot: SITE,
+        issueKey: 'SPR-1',
+        title,
+        statusCategory: 'new',
+        firstSeenAt: now,
+        lastSeenAt: now,
+        fetchedAt: now,
+        nextCheckAt: now,
+      })
+      .execute();
+  }
+  const { getSprintStories } = await import('../src/db/sprint-stories.js');
+  const { acceptedSprintRepos, setSprintRepos } = await import('../src/db/sprint-ticket-repos.js');
+  const { readSprintTicket } = await import('../src/db/sprint-store.js');
+  const { loadSprintAssessment, cancelSprintAssessment } = await import('../src/review/sprint-assess/manager.js');
+  const ssA = await getSprintStories(1, defaultA, { aiEnabled: false, now: now.getTime() });
+  check(
+    "getSprintStories(A) lists A's ticket only",
+    ssA.tickets.length === 1 && ssA.tickets[0]!.ident === ident && ssA.tickets[0]!.title === 'A sprint ticket',
+  );
+  const ssCross = await getSprintStories(1, defaultB, { aiEnabled: false, now: now.getTime() });
+  check("getSprintStories(A, B's workspace) never lists B's ticket", !ssCross.tickets.some((t) => t.title === 'B sprint ticket'));
+  check("readSprintTicket(A, B's workspace) is null", (await readSprintTicket(1, defaultB, ident)) === null);
+  check(
+    "setSprintRepos(A, wsA, ident, [B.repo]) → bad_repo",
+    (await setSprintRepos(1, defaultA, ident, [B.repoId], () => 'manual')).ok === false,
+  );
+  await setSprintRepos(1, defaultA, ident, [A.repoId], () => 'manual');
+  check("acceptedSprintRepos(A) holds A's repo", (await acceptedSprintRepos(1, defaultA, [ident])).get(ident)?.[0]?.repoId === A.repoId);
+  check("acceptedSprintRepos(B, wsA) is empty", (await acceptedSprintRepos(2, defaultA, [ident])).size === 0);
+  check("acceptedSprintRepos(B, wsB) never reads A's accepted repo", (await acceptedSprintRepos(2, defaultB, [ident])).size === 0);
+  let fkRefused = false;
+  try {
+    await db
+      .insert(schema.sprintTicketRepos)
+      .values({ accountId: 1, workspaceId: defaultA, ident, repoId: B.repoId, via: 'manual', acceptedAt: now })
+      .execute();
+  } catch {
+    fkRefused = true;
+  }
+  check("the composite FK refuses A's ticket accepting B's repo", fkRefused);
+  const [asA] = await db
+    .insert(schema.sprintAssessments)
+    .values({ accountId: 1, workspaceId: defaultA, ident, model: 'claude-sonnet-5', status: 'running', fingerprint: 'f', textHash: 'h', reposJson: [] })
+    .returning()
+    .execute();
+  check("loadSprintAssessment(B, A's id) is null (IDOR blocked)", (await loadSprintAssessment(2, asA!.id)) === null);
+  check(
+    "cancelSprintAssessment(B, A's id) is null and leaves A's run alone",
+    (await cancelSprintAssessment(2, asA!.id)) === null && (await loadSprintAssessment(1, asA!.id))?.status === 'running',
+  );
+  const { performTrackerWrite } = await import('../src/tracker/write/run.js');
+  let writerCalls = 0;
+  const fakeWriter = {
+    async comment() {
+      writerCalls++;
+      return { url: null };
+    },
+    async replace() {
+      writerCalls++;
+      return { url: null };
+    },
+  };
+  // A's sprint ticket is gone from A's list: a write by A to the shared ident must not reach B's row.
+  await db
+    .update(schema.sprintTickets)
+    .set({ inSprint: false })
+    .where(and(eq(schema.sprintTickets.accountId, 1), eq(schema.sprintTickets.ident, ident)))
+    .execute();
+  const crossWrite = await performTrackerWrite(tctx, {
+    accountId: 1,
+    workspaceId: defaultB,
+    ident,
+    mode: 'comment',
+    text: 'hello',
+    requestId: '00000000-0000-4000-8000-000000000001',
+    writers: { jira: fakeWriter, linear: fakeWriter, github: fakeWriter },
+  });
+  check("performTrackerWrite(A, B's workspace) refuses no_ticket and writes nothing", crossWrite.ok === false && writerCalls === 0);
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

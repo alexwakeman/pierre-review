@@ -75,8 +75,11 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // `'stories'` is the "Stories" tab (`?insightsTab=stories`): every tracker ticket with a PR merged in
 // the reporting window, how well it was written, and the story report (agentic, local-only). Same
 // one Reports gate.
-export type InsightsInnerTab = 'overview' | 'merged' | 'stories' | 'bottlenecks';
-export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'merged', 'stories', 'bottlenecks'];
+// `'sprint'` is the "This sprint" tab (`?insightsTab=sprint`): the tracker's current sprint, how well
+// each ticket is written, an on-demand code assessment (agentic, local-only) and a per-ticket,
+// confirmed write-back. Same one Reports gate.
+export type InsightsInnerTab = 'overview' | 'merged' | 'stories' | 'sprint' | 'bottlenecks';
+export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'merged', 'stories', 'sprint', 'bottlenecks'];
 // The Bots rail's sub-tab strip. ⚠ TWO POSTURES IN ONE UNION, both deliberate:
 //   • `'advisor'` (`botAdvisor`) and `'themes'` (`activityDigest`) are only LISTED when entitled,
 //     and BotsView's `effectiveBotsTab` degrades either to `'roi'` when it is not — the older

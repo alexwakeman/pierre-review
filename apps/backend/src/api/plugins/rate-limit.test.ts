@@ -476,6 +476,19 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/story-health')).toEqual(['read']);
   });
 
+  // This sprint: the refresh kicks a tracker read, the assess POST bills a Sonnet run, the write is
+  // ONE third-party write per press; everything else is a DB read.
+  it('tiers This sprint per route', () => {
+    expect(tiers('GET', '/api/sprint-stories')).toEqual(['read']);
+    expect(tiers('PUT', '/api/sprint-stories/repos')).toEqual(['read']);
+    expect(tiers('POST', '/api/sprint-stories/refresh')).toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/sprint-stories/assess')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('GET', '/api/sprint-stories/assessments/7')).toEqual(['read']);
+    expect(tiers('POST', '/api/sprint-stories/assessments/7/cancel')).toEqual(['read']);
+    expect(tiers('POST', '/api/sprint-stories/write')).toEqual(['github_write']);
+    expect(tiers('GET', '/api/sprint-stories/write')).toEqual(['read']);
+  });
+
   // /api/pro/bot-themes — the revived Bots "What they're flagging" panel. Both tiers land via
   // the /api/pro/ catch-all and are pinned here so the family's placement is explicit: the POST
   // /refresh is a real model spend (Haiku behind a payload-hash $0 cache) → the `ai` pair; the

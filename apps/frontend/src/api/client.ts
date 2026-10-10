@@ -152,6 +152,15 @@ import type {
   StoryHealthResponse,
   StartStoryLabelRunBody,
   StoryLabelRunResponse,
+  SprintStoriesResponse,
+  SprintRefreshResponse,
+  SprintReposUpdate,
+  SprintReposResponse,
+  SprintAssessRequest,
+  SprintAssessResponse,
+  SprintAssessmentResponse,
+  SprintWriteRequest,
+  SprintWriteResponse,
   PostCommentResult,
   FollowUpReplyResult,
   PostReviewPreview,
@@ -933,6 +942,29 @@ export const api = {
   storyReport: (id: number) => get<StoryReportResponse>(`/api/story-reports/${id}`),
   cancelStoryReport: (id: number) =>
     fetch(`/api/story-reports/${id}/cancel`, jsonBody('POST')).then((r) => handle<StoryReportResponse>(r)),
+  // Reports → This sprint (core, Pro on `periodReports`; every route 402s without it). The list GET
+  // stamps the workspace as viewed, which is what lets the worker read its sprint at all.
+  sprintStories: (workspaceId: number) =>
+    get<SprintStoriesResponse>(withQuery('/api/sprint-stories', workspaceParam(workspaceId))),
+  sprintRefresh: (workspaceId: number) =>
+    fetch('/api/sprint-stories/refresh', jsonBody('POST', { workspaceId })).then((r) =>
+      handle<SprintRefreshResponse>(r),
+    ),
+  sprintSetRepos: (body: SprintReposUpdate) =>
+    fetch('/api/sprint-stories/repos', jsonBody('PUT', body)).then((r) => handle<SprintReposResponse>(r)),
+  // "Assess with code" (core, agentic, LOCAL-ONLY — not registered in cloud). The POST is the ONE
+  // path that runs Claude; the GET polls one run; cancel is account-scoped.
+  sprintAssess: (body: SprintAssessRequest) =>
+    fetch('/api/sprint-stories/assess', jsonBody('POST', body)).then((r) => handle<SprintAssessResponse>(r)),
+  sprintAssessment: (id: number) => get<SprintAssessmentResponse>(`/api/sprint-stories/assessments/${id}`),
+  sprintAssessCancel: (id: number) =>
+    fetch(`/api/sprint-stories/assessments/${id}/cancel`, jsonBody('POST')).then((r) =>
+      handle<SprintAssessmentResponse>(r),
+    ),
+  // The write-back: ONE ticket, the EXACT text the reader confirmed in the dialog. A failed write is a
+  // 200 record; never retried by the client (a new dialog mints a new requestId).
+  sprintWrite: (body: SprintWriteRequest) =>
+    fetch('/api/sprint-stories/write', jsonBody('POST', body)).then((r) => handle<SprintWriteResponse>(r)),
   // Reports → Stories → Story health (core, Pro on `periodReports`): 13 weekly points, two panels.
   // Code only — the GET never runs Claude.
   storyHealth: (workspaceId: number) =>

@@ -667,6 +667,33 @@ counting the old row; nothing deletes it. `userValueStated` is NOT stored: it is
 fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`); in
 `accountScopedTables()` and erased explicitly.
 
+## Reports → This sprint — five tables (CORE; sqlite `0100` / pg `0087`)
+
+- **`sprint_reads`** — one per (account, workspace): the demand gate (`viewed_at`), `next_read_at`,
+  the last good `source_json` + `read_at`, `error_code`, `truncated`, and the `provider` + `api_root`
+  (sqlite `0101` / pg `0088`) it was read from — a workspace that moved tracker or site since is
+  reset on the next view (no source, no read time, due now).
+- **`sprint_tickets`** — one per (account, workspace, `ident`): the sprint list's tickets, PR or not
+  (they cannot live in `tracker_tickets`, keyed on a PR). Story text, status, assignee, project /
+  epic / components, `sprint_name`, `in_sprint` (false once a read stops returning it),
+  `first_seen_at` (insert-only), `next_check_at` (epoch 0 = re-read now, after a write). Pruned 90
+  days after `last_seen_at`, with its accepted repos.
+- **`sprint_ticket_repos`** — the repos the reader ACCEPTED for a ticket, unique (account, workspace,
+  ident, repo). ⚠ Ids arrive in a BODY, so tenancy is STRUCTURAL: NAMED composite FKs onto
+  `repos(id, account_id)` and `workspaces(id, account_id)`. `deleteRepo` deletes its rows explicitly.
+- **`sprint_assessments`** — one row per "Assess with code" run (no unique): status/phase, the
+  validated body, `fingerprint` (text hash + sorted repo SHAs), `repos_json` (the SHAs read), cost.
+- **`tracker_writes`** — the write-back log, unique (account, `request_id`): the claim
+  (`status:'writing'`), the EXACT text sent + its hash, mode/target, outcome, url. ⚠ It is the only
+  record that a write reached the tracker, so `deleteWorkspace` MOVES its rows to Default before the
+  delete (like `workspace_reviewers`), never lets the cascade take them. `assessment_id` is history
+  only and has NO FK (a composite `(assessment_id, account_id)` SET NULL would null `account_id` on
+  SQLite); `performTrackerWrite` keeps it only when it is this account's assessment of this ticket in
+  this workspace.
+
+All five carry `account_id` (cascade) and a composite FK onto `workspaces(id, account_id)`; all are
+in `accountScopedTables()`, erased explicitly, and checked by `verify:isolation`.
+
 `tracker_tickets.issue_created_at` / `issue_resolved_at` (sqlite `0098` / pg `0085`): the ticket's own
 created / resolved instants. ⚠ The table is ONE ROW PER (account, PR, key), so several rows can carry a
 ticket's date; Story health takes the freshest-READ non-null one (`createdDatesFor`). NULL = not read

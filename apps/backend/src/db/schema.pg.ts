@@ -59,6 +59,10 @@ import type {
   StoryReportRange,
   StoryCriterionLabel,
   StoryLevelLabels,
+  SprintAssessmentBody,
+  SprintAssessmentDropped,
+  SprintReplaceTarget,
+  SprintSource,
   TicketAssessment,
 } from '@pierre-review/shared';
 
@@ -1992,5 +1996,186 @@ export const storyLabels = pgTable(
   },
   (t) => ({
     identityUx: uniqueIndex('story_labels_identity_ux').on(t.accountId, t.ident, t.rubricVersion, t.textHash),
+  }),
+);
+
+// ── REPORTS → THIS SPRINT — see the sqlite twin (migration pg 0087) ──────────────────────────────
+export const sprintReads = pgTable(
+  'sprint_reads',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    provider: text('provider'),
+    apiRoot: text('api_root'),
+    sourceJson: jsonb('source_json').$type<SprintSource>(),
+    readAt: timestamp('read_at', { withTimezone: true, mode: 'date' }),
+    checkedAt: timestamp('checked_at', { withTimezone: true, mode: 'date' }),
+    nextReadAt: timestamp('next_read_at', { withTimezone: true, mode: 'date' }).notNull(),
+    errorCode: text('error_code'),
+    truncated: boolean('truncated').notNull().default(false),
+    viewedAt: timestamp('viewed_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (t) => ({
+    accountWorkspaceUx: uniqueIndex('sprint_reads_account_workspace').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_reads_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+export const sprintTickets = pgTable(
+  'sprint_tickets',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    ident: text('ident').notNull(),
+    provider: text('provider').notNull(),
+    apiRoot: text('api_root').notNull(),
+    issueKey: text('issue_key').notNull(),
+    url: text('url'),
+    title: text('title').notNull(),
+    description: text('description').notNull().default(''),
+    acceptanceCriteria: text('acceptance_criteria').notNull().default(''),
+    acFieldId: text('ac_field_id'),
+    acFieldName: text('ac_field_name'),
+    candidatesJson: text('candidates_json'),
+    omittedCandidates: integer('omitted_candidates').notNull().default(0),
+    issueTypeId: text('issue_type_id'),
+    issueTypeName: text('issue_type_name'),
+    statusName: text('status_name'),
+    statusCategory: text('status_category'),
+    assigneeName: text('assignee_name'),
+    assigneeAvatarUrl: text('assignee_avatar_url'),
+    projectKey: text('project_key'),
+    epicKey: text('epic_key'),
+    epicTitle: text('epic_title'),
+    componentsJson: text('components_json'),
+    sprintName: text('sprint_name'),
+    inSprint: boolean('in_sprint').notNull().default(true),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true, mode: 'date' }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true, mode: 'date' }).notNull(),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true, mode: 'date' }).notNull(),
+    nextCheckAt: timestamp('next_check_at', { withTimezone: true, mode: 'date' }).notNull(),
+    issueUpdatedAt: timestamp('issue_updated_at', { withTimezone: true, mode: 'date' }),
+  },
+  (t) => ({
+    accountWsIdentUx: uniqueIndex('sprint_tickets_account_ws_ident').on(t.accountId, t.workspaceId, t.ident),
+    accountIdentIdx: index('sprint_tickets_account_ident').on(t.accountId, t.ident),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_tickets_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+export const sprintTicketRepos = pgTable(
+  'sprint_ticket_repos',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    ident: text('ident').notNull(),
+    repoId: integer('repo_id').notNull(),
+    via: text('via').notNull(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (t) => ({
+    identityUx: uniqueIndex('sprint_ticket_repos_identity').on(t.accountId, t.workspaceId, t.ident, t.repoId),
+    repoAccountFk: foreignKey({
+      name: 'sprint_ticket_repos_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_ticket_repos_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+export const sprintAssessments = pgTable(
+  'sprint_assessments',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    ident: text('ident').notNull(),
+    model: text('model').notNull(),
+    status: text('status').notNull(),
+    phase: text('phase'),
+    fingerprint: text('fingerprint').notNull(),
+    textHash: text('text_hash').notNull(),
+    reposJson: jsonb('repos_json')
+      .$type<Array<{ repoId: number; fullName: string; sha: string | null }>>()
+      .notNull(),
+    bodyJson: jsonb('body_json').$type<SprintAssessmentBody>(),
+    droppedJson: jsonb('dropped_json').$type<SprintAssessmentDropped>(),
+    error: text('error'),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
+  },
+  (t) => ({
+    accountWsIdentIdx: index('sprint_assessments_account_ws_ident_idx').on(
+      t.accountId,
+      t.workspaceId,
+      t.ident,
+      t.createdAt,
+    ),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_assessments_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+export const trackerWrites = pgTable(
+  'tracker_writes',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    ident: text('ident').notNull(),
+    provider: text('provider').notNull(),
+    requestId: text('request_id').notNull(),
+    mode: text('mode').notNull(),
+    targetJson: jsonb('target_json').$type<SprintReplaceTarget>(),
+    text: text('text').notNull(),
+    textHash: text('text_hash').notNull(),
+    status: text('status').notNull(),
+    errorCode: text('error_code'),
+    url: text('url'),
+    assessmentId: integer('assessment_id'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
+  },
+  (t) => ({
+    accountRequestUx: uniqueIndex('tracker_writes_account_request').on(t.accountId, t.requestId),
+    accountIdentIdx: index('tracker_writes_account_ident_idx').on(t.accountId, t.workspaceId, t.ident, t.createdAt),
+    workspaceAccountFk: foreignKey({
+      name: 'tracker_writes_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
   }),
 );

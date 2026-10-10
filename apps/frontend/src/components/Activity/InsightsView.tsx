@@ -8,6 +8,7 @@ import { BottlenecksPanel } from './BottlenecksPanel.js';
 import { effectiveInsightsTab } from './bottlenecksModel.js';
 import { MergedPrsView } from './MergedPrsView.js';
 import { PeriodReportsPanel } from './PeriodReportsPanel.js';
+import { SprintView } from './SprintView.js';
 import { StoriesView } from './StoriesView.js';
 import { TrackUsage } from './TrackUsage.js';
 import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
@@ -31,13 +32,16 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 // "Ask about this period" section under the report, grounded in the viewed period's own
 // [fromMs, toMs) rather than a trailing window.
 //
-// ── THE PANE IS FOUR TABS ───────────────────────────────────────────────────────────────────
+// ── THE PANE IS FIVE TABS ───────────────────────────────────────────────────────────────────
 //   • Overview   — flow metrics, the two "where the work is happening" cards, period reports.
 //   • Merged so far — the Open PRs cards over every PR merged in the REPORTING WINDOW
 //     (MergedPrsView, GET /api/merged-prs), grouped per ticket when the workspace has a tracker.
 //   • Stories    — the agentic story report (local-only, its own window picker, GET/POST
 //     /api/story-reports), then every tracker ticket with a PR merged in the REPORTING WINDOW: two
 //     charts and the lists (StoriesView, GET /api/stories).
+//   • This sprint — the tracker's CURRENT sprint (SprintView, GET /api/sprint-stories): chips per
+//     ticket, candidate repos, "Assess with code" (agentic, local-only) and a per-ticket write-back
+//     that writes nothing until the reader confirms the exact text.
 //   • Chronology — the COURT LEDGER (BottlenecksPanel). PRO on `periodReports`; still
 //     deterministic (no model anywhere behind it) and still the twin of the Bots rail — that
 //     surface measures automation, this one measures where people's time went.
@@ -147,13 +151,15 @@ function InsightsBody(): JSX.Element {
 
       {/* The pane's sub-tab strip.
           `effectiveTab` (derived, never written back) picks the body.
-          No badges here: the whole pane is Pro and the rail entry carries the one ProBadge. */}
-      <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
+          No badges here: the whole pane is Pro and the rail entry carries the one ProBadge.
+          Five tabs are wider than a phone: the strip scrolls inside itself, never the page. */}
+      <div role="tablist" className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-gray-200 dark:border-gray-800">
         {(
           [
             { key: 'overview', label: 'Overview' },
             { key: 'merged', label: 'Merged so far' },
             { key: 'stories', label: 'Stories' },
+            { key: 'sprint', label: 'This sprint' },
             // ⚠ LABEL-ONLY: the store/URL literal stays 'bottlenecks' (see InsightsInnerTab).
             { key: 'bottlenecks', label: 'Chronology' },
           ] as const
@@ -166,7 +172,7 @@ function InsightsBody(): JSX.Element {
               role="tab"
               aria-selected={on}
               onClick={() => setInnerTab(t.key)}
-              className={`-mb-px flex items-center gap-1 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
+              className={`-mb-px flex shrink-0 items-center gap-1 whitespace-nowrap rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
                 on
                   ? 'border-gray-300 bg-white text-sky-600 dark:border-gray-700 dark:bg-gray-950 dark:text-sky-300'
                   : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
@@ -184,6 +190,8 @@ function InsightsBody(): JSX.Element {
         <MergedPrsView />
       ) : effectiveTab === 'stories' ? (
         <StoriesView />
+      ) : effectiveTab === 'sprint' ? (
+        <SprintView />
       ) : (
         <>
           {/* `WorkspaceFlowMetrics` self-hides when there is nothing to measure, so the empty

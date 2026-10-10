@@ -530,6 +530,16 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (path === '/api/story-health/label' && mutating) return [TIERS.ai, TIERS.aiHourly];
   if (path === '/api/story-health/label/cancel') return [TIERS.read];
   if (path === '/api/story-health' || path === '/api/story-health/label') return [TIERS.read];
+  // THIS SPRINT (Reports → This sprint), matched EXPLICITLY by exact path, FOLLOWING THE TOKEN:
+  //   POST /api/sprint-stories/refresh               kicks a third-party tracker read  → search + read
+  //   POST /api/sprint-stories/assess                starts ONE Sonnet agent run        → ai + ai_hourly
+  //   POST /api/sprint-stories/write                 ONE write to Jira/Linear/GitHub    → github_write
+  //   GET  /api/sprint-stories, PUT …/repos, GET …/assessments/:id, POST …/:id/cancel  → read
+  if (mutating && path === '/api/sprint-stories/refresh') return [TIERS.search, TIERS.read];
+  if (mutating && path === '/api/sprint-stories/assess') return [TIERS.ai, TIERS.aiHourly];
+  if (mutating && path === '/api/sprint-stories/write') return [TIERS.githubWrite];
+  if (path === '/api/sprint-stories' || path === '/api/sprint-stories/repos') return [TIERS.read];
+  if (/^\/api\/sprint-stories\/assessments\/\d+(\/cancel)?$/.test(path)) return [TIERS.read];
   // CI REVIEW (review/ci-review/routes.ts), matched EXPLICITLY by exact path for the same reason:
   //   POST /api/ci-reviews          starts an agent run (reads the head's checks + logs) → ai + ai_hourly
   //   POST /api/ci-reviews/states   batched DB read of the SYNCED head + failing names   → read

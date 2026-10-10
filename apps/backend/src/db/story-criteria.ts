@@ -31,6 +31,9 @@ const AC_PHRASE_RE = /acceptance\s+criteria/i;
 const LABEL_ONLY_RE = /^(?:\*\*|__|\*|_)?\s*(?:acceptance\s+criteria|a\/?cs?)\s*:?\s*(?:\*\*|__|\*|_)?\s*:?$/i;
 // A line that is ONLY emphasised text (optionally with a colon) — reads as a sub-heading.
 const BOLD_LINE_RE = /^(?:\*\*[^*]+\*\*|\*[^*\s][^*]*\*|__[^_]+__)\s*:?$/;
+// A colon label that names ANOTHER section, so it still ends the criteria even with a list under it.
+const OTHER_SECTION_RE =
+  /^(?:notes?|references?|links?|resources|out of scope|not in scope|dependencies|assumptions|risks?|questions?|context|background|designs?|technical notes?|tech notes?|definition of done|dod)\b/i;
 const CONTINUATION_RE = /^(?:when|then|and|but)\b/i;
 
 interface Bullet {
@@ -116,18 +119,45 @@ export function countCriteriaLines(text: string | null | undefined, opts: { jira
 export function acceptanceSectionOf(description: string | null | undefined, opts: { jira: boolean }): string | null {
   const lines = (description ?? '').replace(COLOR_RE, '').split(/\r?\n/);
   const isSectionHead = (t: string): boolean =>
-    isHeading(t, opts.jira) || BOLD_LINE_RE.test(t) || (/:$/.test(t) && t.length <= 60 && bulletOf(t, opts.jira) == null);
+    isHeading(t, opts.jira) ||
+    BOLD_LINE_RE.test(t) ||
+    (/:$/.test(t) && t.length <= 60 && bulletOf(t, opts.jira) == null) ||
+    // A bare "References" / "Notes" line with no colon still starts another section.
+    (OTHER_SECTION_RE.test(t) && /^[\p{L} ]{1,40}$/u.test(t));
   const start = lines.findIndex((l) => {
     const t = l.trim();
     if (!AC_PHRASE_RE.test(t)) return false;
     return isHeading(t, opts.jira) || LABEL_ONLY_RE.test(t) || BOLD_LINE_RE.test(t);
   });
   if (start < 0) return null;
+  // A plain "For option 1:" line followed by a list is a SUB-LABEL inside the section, not the next
+  // section: it is carried onto each of its own list items ("For option 1: …"), so two options'
+  // criteria stay told apart. Treating it as a section end read BMD-1042's six criteria as none.
+  const nextBullet = (from: number): Bullet | null => {
+    for (let j = from; j < lines.length; j += 1) {
+      if (lines[j]!.trim() !== '') return bulletOf(lines[j]!, opts.jira);
+    }
+    return null;
+  };
   const out: string[] = [];
+  let label: { text: string; depth: number } | null = null;
   for (let i = start + 1; i < lines.length; i += 1) {
     const t = lines[i]!.trim();
-    if (t !== '' && isSectionHead(t)) break;
-    out.push(lines[i]!);
+    if (t !== '' && isSectionHead(t)) {
+      const first = /:$/.test(t) && !isHeading(t, opts.jira) && !BOLD_LINE_RE.test(t) && !OTHER_SECTION_RE.test(t)
+        ? nextBullet(i + 1)
+        : null;
+      if (first == null) break;
+      label = { text: t.replace(/:$/, '').trim(), depth: first.depth };
+      continue;
+    }
+    const b = label != null && t !== '' ? bulletOf(lines[i]!, opts.jira) : null;
+    if (label != null && b != null && b.depth === label.depth) {
+      const marker = MARKER_RE.exec(lines[i]!)?.[0] ?? '';
+      out.push(`${marker}${label.text}: ${lines[i]!.slice(marker.length).trim()}`);
+    } else {
+      out.push(lines[i]!);
+    }
   }
   return out.join('\n');
 }

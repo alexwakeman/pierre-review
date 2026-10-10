@@ -54,6 +54,10 @@ import type {
   StoryReportRange,
   StoryCriterionLabel,
   StoryLevelLabels,
+  SprintAssessmentBody,
+  SprintAssessmentDropped,
+  SprintReplaceTarget,
+  SprintSource,
   TicketAssessment,
 } from '@pierre-review/shared';
 
@@ -2795,5 +2799,249 @@ export const storyLabels = sqliteTable(
   },
   (t) => ({
     identityUx: uniqueIndex('story_labels_identity_ux').on(t.accountId, t.ident, t.rubricVersion, t.textHash),
+  }),
+);
+
+// ── REPORTS → THIS SPRINT (migration 0100, pg 0087) ──────────────────────────────────────────────
+// Five tables for the "This sprint" tab (packages/shared/src/sprint-stories.ts is the wire contract;
+// docs/TRACKERS.md § The sprint list read, docs/CLAUDE-REVIEW.md § Sprint assessment). Every one
+// carries its own `account_id`, is listed in `accountScopedTables()` and erased with the account.
+// Every `workspace_id` / `repo_id` that arrives in a request is a NAMED COMPOSITE FK against
+// `(id, account_id)`, so a cross-account pair fails in the database.
+
+// sprint_reads — ONE row per (account, workspace): what the stored sprint list IS (`source_json`, a
+// `SprintSource`), when it was read, and when the tab was last OPENED. ⚠ THE FIRST TRACKER READ THAT
+// IS NOT TRIGGERED BY A RECEIVED PULL REQUEST, so it is DEMAND-GATED: the worker reads a workspace's
+// sprint only while `viewed_at` is within SPRINT_VIEW_TTL_DAYS, at most every SPRINT_READ_INTERVAL_MS
+// (`next_read_at`; epoch 0 = due now). A failure keeps the last good list and records `error_code`.
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId].
+export const sprintReads = sqliteTable(
+  'sprint_reads',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // The composite FK below, not a `.references()`.
+    workspaceId: integer('workspace_id').notNull(),
+    // TrackerProvider the list was read from; null before the first read.
+    provider: text('provider'),
+    // The tracker SITE (`apiRoot`) the list was read from (migration 0101 / pg 0088); with
+    // `provider`, the GET spots a workspace that moved tracker since. null before the first read.
+    apiRoot: text('api_root'),
+    sourceJson: text('source_json', { mode: 'json' }).$type<SprintSource>(),
+    // Last SUCCESSFUL read; null until one.
+    readAt: integer('read_at', { mode: 'timestamp' }),
+    // Last attempt, successful or not.
+    checkedAt: integer('checked_at', { mode: 'timestamp' }),
+    nextReadAt: integer('next_read_at', { mode: 'timestamp' }).notNull(),
+    // The last attempt's failure CODE (a JiraFetchErrorCode or 'no_tracker'); null = fine.
+    errorCode: text('error_code'),
+    truncated: integer('truncated', { mode: 'boolean' }).notNull().default(false),
+    // When GET /api/sprint-stories last served this workspace — the demand gate.
+    viewedAt: integer('viewed_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    accountWorkspaceUx: uniqueIndex('sprint_reads_account_workspace').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_reads_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_tickets — ONE row per (account, workspace, ticket ident): a ticket the sprint read returned,
+// with its text, WHETHER OR NOT it has a pull request (`tracker_tickets` is keyed on pr_id and cannot
+// hold these). `in_sprint` is false once a later read no longer returns it (rows not seen for 90 days
+// are pruned by the read). `next_check_at` = epoch 0 asks the worker to re-read THIS ticket alone at
+// once (a write-back does that); otherwise the list read refreshes every row.
+// `ident` is shared `trackerTicketIdent(provider, api_root, issue_key)`.
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId, ident].
+export const sprintTickets = sqliteTable(
+  'sprint_tickets',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    ident: text('ident').notNull(),
+    provider: text('provider').notNull(),
+    apiRoot: text('api_root').notNull(),
+    issueKey: text('issue_key').notNull(),
+    url: text('url'),
+    title: text('title').notNull(),
+    // MARKDOWN (the reader's conversion, as in tracker_tickets).
+    description: text('description').notNull().default(''),
+    acceptanceCriteria: text('acceptance_criteria').notNull().default(''),
+    acFieldId: text('ac_field_id'),
+    acFieldName: text('ac_field_name'),
+    candidatesJson: text('candidates_json'),
+    omittedCandidates: integer('omitted_candidates').notNull().default(0),
+    issueTypeId: text('issue_type_id'),
+    issueTypeName: text('issue_type_name'),
+    statusName: text('status_name'),
+    // 'new' | 'indeterminate' | 'done', null when the tracker sent another.
+    statusCategory: text('status_category'),
+    assigneeName: text('assignee_name'),
+    assigneeAvatarUrl: text('assignee_avatar_url'),
+    // Jira project key / Linear team key / GitHub owner/repo — the repo suggestion's "same project".
+    projectKey: text('project_key'),
+    epicKey: text('epic_key'),
+    epicTitle: text('epic_title'),
+    // JSON string[] of component names (Jira) / label names (Linear); null = none read.
+    componentsJson: text('components_json'),
+    // The sprint / cycle / milestone name this ticket was read under (null for the status fallback).
+    sprintName: text('sprint_name'),
+    inSprint: integer('in_sprint', { mode: 'boolean' }).notNull().default(true),
+    firstSeenAt: integer('first_seen_at', { mode: 'timestamp' }).notNull(),
+    lastSeenAt: integer('last_seen_at', { mode: 'timestamp' }).notNull(),
+    fetchedAt: integer('fetched_at', { mode: 'timestamp' }).notNull(),
+    nextCheckAt: integer('next_check_at', { mode: 'timestamp' }).notNull(),
+    // The tracker's own last-updated instant, when it sent one.
+    issueUpdatedAt: integer('issue_updated_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    accountWsIdentUx: uniqueIndex('sprint_tickets_account_ws_ident').on(t.accountId, t.workspaceId, t.ident),
+    accountIdentIdx: index('sprint_tickets_account_ident').on(t.accountId, t.ident),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_tickets_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_ticket_repos — the repos a reader ACCEPTED as candidates for one ticket (only accepted rows;
+// a suggestion is computed on read and never stored). `repo_id` arrives in a REQUEST BODY (PUT
+// /api/sprint-stories/repos), so tenancy is STRUCTURAL: the named composite FK onto
+// `repos (id, account_id)` (the `repos_id_account` parent key), and the workspace one likewise.
+// ⚠ Every `onConflictDoUpdate` / `onConflictDoNothing` on this table targets exactly
+// [accountId, workspaceId, ident, repoId].
+export const sprintTicketRepos = sqliteTable(
+  'sprint_ticket_repos',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    ident: text('ident').notNull(),
+    // No single-column FK: it is the COMPOSITE declaration below.
+    repoId: integer('repo_id').notNull(),
+    // 'suggested' (accepted with one click) | 'manual' (picked from the list).
+    via: text('via').notNull(),
+    acceptedAt: integer('accepted_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    identityUx: uniqueIndex('sprint_ticket_repos_identity').on(t.accountId, t.workspaceId, t.ident, t.repoId),
+    repoAccountFk: foreignKey({
+      name: 'sprint_ticket_repos_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_ticket_repos_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_assessments — ONE row per "Assess with code" run (local-only, Sonnet 5). `fingerprint` =
+// sha256(ticket text hash + sorted "repoId:defaultBranchHeadSha"), from SYNCED columns only, so
+// currency is a DB read; `repos_json` names the repos and the commits the checkout actually read.
+// `body_json` is the server-VALIDATED `submit_assessment` body (paths verified), set only on
+// 'succeeded'. queued → running → succeeded | failed | cancelled; the terminal write is a
+// compare-and-set on queued/running. Interrupted runs are swept to failed('interrupted') at boot.
+export const sprintAssessments = sqliteTable(
+  'sprint_assessments',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    ident: text('ident').notNull(),
+    model: text('model').notNull(),
+    status: text('status').notNull(),
+    // SprintAssessmentPhase while queued/running.
+    phase: text('phase'),
+    fingerprint: text('fingerprint').notNull(),
+    textHash: text('text_hash').notNull(),
+    reposJson: text('repos_json', { mode: 'json' })
+      .$type<Array<{ repoId: number; fullName: string; sha: string | null }>>()
+      .notNull(),
+    bodyJson: text('body_json', { mode: 'json' }).$type<SprintAssessmentBody>(),
+    droppedJson: text('dropped_json', { mode: 'json' }).$type<SprintAssessmentDropped>(),
+    // A SprintAssessmentErrorCode; never a stack.
+    error: text('error'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    accountWsIdentIdx: index('sprint_assessments_account_ws_ident_idx').on(
+      t.accountId,
+      t.workspaceId,
+      t.ident,
+      t.createdAt,
+    ),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_assessments_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// tracker_writes — the WRITE-BACK history: ONE row per confirmed press of "Update in <tracker>". The
+// row is INSERTED with status 'writing' BEFORE the tracker call — the claim: `(account_id,
+// request_id)` is unique, so a repeated POST of one confirm dialog finds the first row and never
+// writes again. Never retried. 'writing' left by a restart is swept to 'maybe_written' at boot, and
+// a cut-off call (timeout) is recorded 'maybe_written' too. `text` is EXACTLY what was sent.
+export const trackerWrites = sqliteTable(
+  'tracker_writes',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    ident: text('ident').notNull(),
+    provider: text('provider').notNull(),
+    requestId: text('request_id').notNull(),
+    // 'comment' | 'replace'
+    mode: text('mode').notNull(),
+    // SprintReplaceTarget for 'replace'; null for 'comment'.
+    targetJson: text('target_json', { mode: 'json' }).$type<SprintReplaceTarget>(),
+    text: text('text').notNull(),
+    textHash: text('text_hash').notNull(),
+    // 'writing' | 'written' | 'failed' | 'maybe_written'
+    status: text('status').notNull(),
+    // A SprintWriteErrorCode; never the tracker's body.
+    errorCode: text('error_code'),
+    // The comment / ticket URL the tracker answered with.
+    url: text('url'),
+    assessmentId: integer('assessment_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    accountRequestUx: uniqueIndex('tracker_writes_account_request').on(t.accountId, t.requestId),
+    accountIdentIdx: index('tracker_writes_account_ident_idx').on(t.accountId, t.workspaceId, t.ident, t.createdAt),
+    workspaceAccountFk: foreignKey({
+      name: 'tracker_writes_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
   }),
 );

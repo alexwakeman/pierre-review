@@ -1621,3 +1621,35 @@ weekly series read the stored answers. Everything else on that section is code.
 - **Storage**: `story_labels` (sqlite `0099` / pg `0086`; docs/DATA-MODEL.md), insert
   `ON CONFLICT DO NOTHING` on (account, ident, rubric version, text hash): the first answer stands.
 
+## Sprint assessment (Reports → This sprint → "Assess with code")
+
+One Sonnet 5 run per ticket, on demand, that judges the ticket's criteria against the code before
+anyone builds it. LOCAL ONLY (`registerAgenticRoutes`) AND Pro on `periodReports` (402 first).
+
+- **Where**: `src/review/sprint-assess/` — `agent.ts`, `prompts.ts`, `schema.ts`, `validate.ts`,
+  `manager.ts`, `routes.ts`. Contract: `packages/shared/src/sprint-stories.ts`. Routes: docs/API.md §
+  This sprint.
+- **Input**: the ticket (title, description, criteria) NONCE-FENCED as untrusted, and read-only
+  DEFAULT-BRANCH checkouts of the repos the reader ACCEPTED (`sprint_ticket_repos`; code only
+  suggests — `db/sprint-repo-suggest.ts`). No accepted repo → `422 no_repos`.
+- **The agent**: Read/Glob/Grep behind the path guard, `Bash` denied, `...ISOLATED_MCP` +
+  `ownToolsOnlyHook(['sprint'])`, ONE `submit_assessment` tool (first submit wins). Budget
+  `SPRINT_ASSESS_BUDGET_USD` (default $1.50), `SPRINT_ASSESS_MAX_TURNS` (60). It shares the review
+  pool (`registerReviewSlotPeer`; a PR-review click goes first). Spend: feature `sprint_assess`.
+- **Validation**: caps and enums enforced; every cited path must exist inside an accepted checkout,
+  else it is DROPPED (counted, shown only behind an ⓘ). No criteria and no summary → failed
+  `invalid_assessment`.
+- **Currency**: fingerprint = ticket text hash + sorted (repoId, synced default-branch SHA), so it is
+  checkable from the DB; stale → the button reads "Re-assess". One run per (account, ticket), claimed
+  synchronously; a crash orphan is failed `interrupted` at boot.
+- **The free labels** are not this run: every sprint ticket goes through the existing story label run
+  (§ Story labels) after each sprint read (`review/sprint-labels/`). Per-criterion fix text is
+  TEMPLATED in code (`sprintChipFix`), never written by a model.
+
+## Ticket write-back (Reports → This sprint → "Update in <tracker>")
+
+The only path that writes to a tracker, and no agent can reach it: the assessment's suggestion is a
+DRAFT in an editable before/after view, and `POST /api/sprint-stories/write` writes ONE ticket only
+after the reader confirms a dialog showing the exact text ("Add as a comment", preselected, or
+"Replace criteria/description"). Claimed before the write, never retried, `maybe_written` when cut
+off. Full contract: docs/TRACKERS.md § The write-back.

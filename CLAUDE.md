@@ -943,7 +943,10 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   (`tracker/secret.ts`); every call to a customer-typed host goes through `tracker/jira/fetch.ts` (no
   redirects, cloud refuses private addresses at connect time) — never a bare `fetch`. ⚠ **A tracker
   is read when a PR is RECEIVED, never when it is VIEWED**: the pull-based worker stores tickets in
-  `tracker_tickets` and every surface reads the rows. ⚠ The plugin-era data was MOVED by a guarded
+  `tracker_tickets` and every surface reads the rows. ⚠ The ONE exception is the SPRINT LIST read
+  (`tracker/sprint/`, Reports → This sprint): demand-gated by `sprint_reads.viewed_at` (7 days), every
+  20 min, its own `sprint_tickets` table; still never called by a view. The write-back
+  (`tracker/write/`) writes only on a per-ticket confirmed press, claimed, never retried. ⚠ The plugin-era data was MOVED by a guarded
   boot step (`tracker/legacy-import.ts`), not a migration; plugin `0038`/`0039` are `SELECT 1;`
   stubs and the `issue_*`/`jira_*` columns on `pro_workspace_settings` are dormant — never re-declare
   them. ⚠ `tracker/runtime.ts` opens the DB at import: keep the review-side imports LAZY
@@ -1182,6 +1185,13 @@ edit bumps `STORY_RUBRIC_VERSION`; `countCriteriaLines` IS `extractCriteria(...)
 shift is a two-proportion test on POOLED counts (`STORY_SHIFT_*` in shared: ≥15 stories a side, ≥10
 points, |z| ≥ 2.58), never a changepoint over weekly percentages — that flagged one story's move.
 [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story labels.
+
+**Reports → This sprint** (`?insightsTab=sprint`, Pro `periodReports`; sqlite `0100` / pg `0087`): the
+tracker's current sprint, code chips + the free story labels, reader-ACCEPTED repos (code only
+suggests), "Assess with code" (Sonnet 5, LOCAL ONLY, `review/sprint-assess/`, cited paths verified or
+dropped) and the per-ticket write-back. ⚠ Nothing writes without the dialog's Confirm; no agent tool,
+setting or bulk route writes. Copy goes through ONE helper, `lib/copy.ts`.
+[docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint assessment · docs/TRACKERS.md.
 
 **The People report** (Reports → People) — a multi-select picker of humans AND bots, one report
 with a SECTION per pick; contract in
@@ -1521,7 +1531,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0086` and plugin `0034`–`0037` + `0040` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0088` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

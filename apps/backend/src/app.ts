@@ -47,6 +47,8 @@ import { dailyBriefRoutes } from './api/routes/daily-brief.js';
 import { dependencyMergeRoutes } from './api/routes/dependency-merge.js';
 import { flowRoutes } from './api/routes/flow.js';
 import { storyHealthRoutes } from './api/routes/story-health.js';
+import { sprintStoriesRoutes } from './api/routes/sprint-stories.js';
+import { registerTrackerWriteRoutes } from './tracker/write/routes.js';
 import { billingRoutes } from './api/routes/billing.js';
 import { contactRoutes } from './api/routes/contact.js';
 import { botTriageRoutes } from './api/routes/bot-triage.js';
@@ -270,6 +272,12 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Reports → Stories → Story health (Pro on `periodReports`, both modes; the LABEL RUN that feeds
   // its model-made series is agentic and registers in `registerAgenticRoutes`).
   await app.register(storyHealthRoutes);
+  // REPORTS → THIS SPRINT (core, both modes; Pro on `periodReports`, 402): the list + candidate
+  // repos, and the per-ticket write-back to the tracker (one confirmed press, claimed, never
+  // retried). The "Assess with code" run is agentic and registers in `registerAgenticRoutes`; the
+  // refresh route registers with the tracker (`registerTracker`).
+  await app.register(sprintStoriesRoutes);
+  registerTrackerWriteRoutes(app);
   // Bot-triage platform (CORE code, always registered — but TWO tiers inside one file): free
   // detection/override + the governance list + confirm-gated bot-thread resolve; PAID (`botDepth`)
   // ROI analytics, the volume family and the seat prices. Account-scoped; no AI on either tier.

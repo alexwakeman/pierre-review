@@ -18,6 +18,9 @@ import { registerAiResolveRoutes } from '../coding/ai-resolve/routes.js';
 import { registerStoryReportRoutes } from './story-report/routes.js';
 import { reconcileStoryReportsOnStartup } from './story-report/manager.js';
 import { registerStoryLabelRoutes } from './story-labels/routes.js';
+import { registerSprintAssessRoutes } from './sprint-assess/routes.js';
+import { reconcileSprintAssessmentsOnStartup } from './sprint-assess/manager.js';
+import { registerSprintLabelling } from './sprint-labels/index.js';
 import { runOpen } from '../api/routes/conflicts.js';
 
 // THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, the chat, auto
@@ -60,6 +63,11 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // STORY LABELS (Reports → Stories → Story health): Haiku labels each story's criteria against a
   // fixed rubric. Pro on `periodReports` too, and agentic — so here and nowhere else.
   registerStoryLabelRoutes(app, ctx);
+  // REPORTS → THIS SPRINT: "Assess with code" (one Sonnet run per ticket over read-only default-branch
+  // checkouts, the shared review pool) and the free labels' after-read hook (the sprint list read
+  // hands each workspace's unlabelled tickets to the story label run). Pro on `periodReports` too.
+  registerSprintAssessRoutes(app, ctx);
+  registerSprintLabelling(ctx);
   return ctx;
 }
 
@@ -101,5 +109,10 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
     await reconcileStoryReportsOnStartup();
   } catch (err) {
     app.log.warn({ err }, 'story report: startup reconcile failed');
+  }
+  try {
+    await reconcileSprintAssessmentsOnStartup();
+  } catch (err) {
+    app.log.warn({ err }, 'sprint assessment: startup reconcile failed');
   }
 }

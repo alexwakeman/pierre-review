@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { migrateLegacyDataDir, resolveDataDir } from './data-dir.js';
+import { SPRINT_ASSESS_BUDGET_USD_DEFAULT, SPRINT_ASSESS_MAX_TURNS } from '@pierre-review/shared';
 
 // apps/backend as the base for relative paths regardless of cwd.
 const backendRoot = resolve(import.meta.dirname, '..');
@@ -589,6 +590,10 @@ export const config = {
   // ---- Story labels (Story health's label run — review/story-labels/) ----
   // The per-RUN spending cap (US$). Default = shared STORY_LABEL_BUDGET_USD_DEFAULT (1). Env only.
   storyLabelBudgetUsd: floatFromEnv('STORY_LABEL_BUDGET_USD', 1),
+  // ---- Sprint assessment (Reports → This sprint, "Assess with code" — review/sprint-assess/) ----
+  // Per-RUN spending and turn caps. Env only — no route sets them.
+  sprintAssessBudgetUsd: floatFromEnv('SPRINT_ASSESS_BUDGET_USD', SPRINT_ASSESS_BUDGET_USD_DEFAULT),
+  sprintAssessMaxTurns: intFromEnv('SPRINT_ASSESS_MAX_TURNS', SPRINT_ASSESS_MAX_TURNS),
 
   // ---- Diff-size cap ----
   // A very large inlined diff is the dominant cost on a big PR (it's the cached

@@ -41,6 +41,8 @@ import type {
   TicketLinksResponse,
   TicketMergedPrsResponse,
   WorkspaceTrackerSettings,
+  SprintStoriesResponse,
+  SprintTicketRow,
 } from '@pierre-review/shared';
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
 // build the Pending tabs from the shipped list rather than re-typing it.
@@ -50,6 +52,7 @@ import {
   pendingTabHolds,
   pendingAuthorSideOf,
   resolveMyTurnSettings,
+  sprintChipFix,
 } from '@pierre-review/shared';
 
 // Deterministic, self-contained API fixtures for the My Turn / Feed / Focus-mode
@@ -505,6 +508,117 @@ const SYNC_ACTIVITY: SyncActivityResponse = {
   generatedAt: iso(0),
 };
 
+// Reports → This sprint (GET /api/sprint-stories). Typed so `pnpm typecheck` covers the shape, and
+// served explicitly — the catch-all `{}` has no `tickets`/`read`, and the tab would blank. One
+// not-started ticket with chips and no repos, one in-progress ticket with a SUCCEEDED assessment.
+const SPRINT_TICKET_BASE: Omit<SprintTicketRow, 'ident' | 'key' | 'title' | 'phase'> = {
+  url: null,
+  provider: 'jira',
+  status: null,
+  issueType: 'Story',
+  assignee: null,
+  epic: null,
+  description: '',
+  acceptanceCriteria: '',
+  acField: null,
+  criteria: { items: [], source: 'none' },
+  labels: 'none',
+  chips: [],
+  flagCount: 0,
+  pullRequests: [],
+  repos: { accepted: [], suggested: [] },
+  assessment: null,
+  replaceTarget: { kind: 'description' },
+  replaceBase: { hash: '0'.repeat(64), truncated: false },
+  lastWrite: null,
+};
+const SPRINT_STORIES: SprintStoriesResponse = {
+  workspaceId: WORKSPACE.id,
+  trackerOn: true,
+  provider: 'jira',
+  source: { kind: 'sprint', provider: 'jira', names: ['Sprint 42'] },
+  read: { readAt: iso(0.01), checkedAt: iso(0.01), error: null, truncated: false },
+  doneCount: 3,
+  aiEnabled: true,
+  repos: [{ repoId: REPO.id, fullName: REPO.fullName }],
+  tickets: [
+    {
+      ...SPRINT_TICKET_BASE,
+      ident: 'jira:https://acme.atlassian.net#ACME-1',
+      key: 'ACME-1',
+      title: 'Export a report as CSV',
+      url: 'https://acme.atlassian.net/browse/ACME-1',
+      phase: 'not_started',
+      status: { name: 'To Do', category: 'new' },
+      chips: [
+        { id: 'no_criteria', criterion: null, fix: sprintChipFix('no_criteria', null) },
+        { id: 'user_value_missing', criterion: null, fix: sprintChipFix('user_value_missing', null) },
+      ],
+      flagCount: 2,
+      repos: { accepted: [], suggested: [{ repoId: REPO.id, fullName: REPO.fullName, reasons: ['same_project'], prCount: 4 }] },
+    },
+    {
+      ...SPRINT_TICKET_BASE,
+      ident: 'jira:https://acme.atlassian.net#ACME-2',
+      key: 'ACME-2',
+      title: 'Sign in with a magic link',
+      url: 'https://acme.atlassian.net/browse/ACME-2',
+      phase: 'in_progress',
+      status: { name: 'In Progress', category: 'indeterminate' },
+      description: '## Acceptance criteria\n\n- Users get a link by email\n- The link works once',
+      criteria: { items: ['Users get a link by email', 'The link works once'], source: 'description_heading' },
+      labels: 'current',
+      chips: [
+        {
+          id: 'criterion_not_testable',
+          criterion: { n: 1, text: 'Users get a link by email' },
+          fix: sprintChipFix('criterion_not_testable', { n: 1, text: 'Users get a link by email' }),
+        },
+      ],
+      flagCount: 1,
+      repos: { accepted: [{ repoId: REPO.id, fullName: REPO.fullName }], suggested: [] },
+      assessment: {
+        currency: 'current',
+        record: {
+          id: 7,
+          workspaceId: WORKSPACE.id,
+          ident: 'jira:https://acme.atlassian.net#ACME-2',
+          model: 'claude-sonnet-5',
+          status: 'succeeded',
+          phase: null,
+          repos: [{ repoId: REPO.id, fullName: REPO.fullName, sha: 'abc1234def' }],
+          body: {
+            criteria: [
+              {
+                n: 1,
+                criterion: 'Users get a link by email',
+                testableAgainstCode: true,
+                landsIn: [{ repo: REPO.fullName, path: 'src/auth/magic-link.ts', symbol: 'sendMagicLink' }],
+                existing: 'partial',
+                note: 'Sending exists; expiry does not.',
+              },
+            ],
+            gaps: { unnamedDependencies: [], unstatedBehaviourChanges: [], dataOrMigrationImpact: [], edgeCases: ['An expired link'] },
+            suggestion: {
+              rewrittenCriteria: [{ n: 1, text: 'A user who asks for a link receives an email within a minute' }],
+              addedCriteria: ['An expired link shows a clear message'],
+              split: null,
+              questionsForOwner: ['How long should a link last?'],
+              summary: 'Mostly clear; expiry is unstated.',
+            },
+          },
+          dropped: { paths: 0, items: 0 },
+          error: null,
+          costUsd: 0.42,
+          numTurns: 12,
+          createdAt: iso(0.05),
+          completedAt: iso(0.04),
+        },
+      },
+    },
+  ],
+};
+
 function myTurnPr(id: number): MyTurnPr {
   const p = PRS.find((x) => x.id === id)!;
   return {
@@ -859,6 +973,7 @@ export async function installMockApi(page: Page): Promise<void> {
       if (path.endsWith('/api/ticket-links')) {
         return json(route, { prs: [], titlesComplete: true } satisfies TicketLinksResponse);
       }
+      if (path.endsWith('/api/sprint-stories')) return json(route, SPRINT_STORIES);
       if (path.endsWith('/api/ticket-merged-prs')) {
         return json(route, { workspaceId: WORKSPACE.id, tickets: [] } satisfies TicketMergedPrsResponse);
       }

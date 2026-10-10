@@ -88,6 +88,13 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   {
     const { startTracker } = await import('./tracker/index.js');
     await startTracker(app);
+    // A tracker write-back cut off by the last exit is `maybe_written`, never retried.
+    try {
+      const { reconcileTrackerWritesOnStartup } = await import('./tracker/write/run.js');
+      await reconcileTrackerWritesOnStartup();
+    } catch (err) {
+      app.log.warn({ err }, 'tracker write: startup reconcile failed');
+    }
   }
 
   // Scheduler is wired in Phase 3; guarded so the skeleton runs without it.

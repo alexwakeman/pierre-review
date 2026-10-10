@@ -777,6 +777,20 @@ export async function deleteWorkspace(
         and(eq(workspaceReviewers.accountId, accountId), eq(workspaceReviewers.workspaceId, id)),
       )
       .execute();
+    // 2b. Write-back history -> Default. A `tracker_writes` row is the ONLY record that a
+    //     confirmed write reached Jira / Linear / GitHub (a `maybe_written` row is the warning
+    //     against a second press); the workspace FK cascades, so it must move before the delete.
+    //     A plain UPDATE cannot collide: its unique is (account_id, request_id).
+    await tx
+      .update(schema.trackerWrites)
+      .set({ workspaceId: defaultId })
+      .where(
+        and(
+          eq(schema.trackerWrites.accountId, accountId),
+          eq(schema.trackerWrites.workspaceId, id),
+        ),
+      )
+      .execute();
     // 3. Belt-and-braces: step 1 already emptied this, and the FK cascades — but the explicit
     //    delete keeps the ordering dialect-agnostic (Postgres enforces FKs immediately; SQLite
     //    only with foreign_keys=ON).
@@ -9654,6 +9668,13 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
     await tx
       .delete(pendingMutedRepos)
       .where(and(eq(pendingMutedRepos.accountId, accountId), eq(pendingMutedRepos.repoId, id)))
+      .execute();
+    // Reports → This sprint: the repos accepted for a sprint ticket (migration 0100 / pg 0087). Keyed
+    // on the REPO through a composite FK, deleted explicitly for the same dialect reason as above, so
+    // a re-added repository never arrives already accepted on a ticket.
+    await tx
+      .delete(schema.sprintTicketRepos)
+      .where(and(eq(schema.sprintTicketRepos.accountId, accountId), eq(schema.sprintTicketRepos.repoId, id)))
       .execute();
     // A dismissed red default branch of this repo — keyed on the REPO, so re-adding the repository
     // later must not arrive with its branch already dismissed.

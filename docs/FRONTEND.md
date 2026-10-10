@@ -2192,6 +2192,22 @@ convention this file has to remember.
     - Every explanation (the span, created vs merge week, the rolling line, thin weeks, the rubric
       version, the measured labeller noise, coverage, size bands, criteria met over reviewed stories,
       what a shift is) sits behind ⓘs. No e2e fixture (no spec opens Reports).
+- **Reports → This sprint** (`insightsTab: 'sprint'`, `?insightsTab=sprint`; `SprintView.tsx` +
+  `SprintTicketCard` / `SprintAssessment` / `SprintUpdatePanel` / `SprintCopyButton`, pure
+  `sprintModel.ts`, hooks `hooks/useSprintStories.ts`) — the tracker's CURRENT sprint, under the ONE
+  Reports gate. The visible tab is DERIVED (`effectiveInsightsTab` accepts `'sprint'`). Every hook ANDs
+  `periodReports` into `enabled`; the Assess hooks also AND `me.ai.enabled`. Keys carry `ws:<id>`
+  (`['sprint-stories','ws:<id>']`); a queued/running assessment polls every 2 s.
+  - ⚠ **SHARED mutation keys** read through `useIsMutating`, never per-mount `isPending`:
+    `['sprint-assess', ident]`, `['sprint-write', ident]`, `['sprint-repos', ident]`.
+  - ⚠ **NOTHING WRITES WITHOUT THE DIALOG'S CONFIRM** — "Update in <tracker>" opens a dialog showing
+    EXACTLY the text and where; the request id is minted when the dialog opens, the client never
+    retries, and after an error Confirm stays shut (a new attempt is a new dialog). "Add as a
+    comment" is preselected. No bulk control anywhere.
+  - **Copy is ONE helper, `lib/copy.ts`** (`test/copy.test.ts`): clean markdown as `text/plain` +
+    `text/html` through `ClipboardItem`, falling back to plain text. Every generated block (each
+    chip's fix, each assessment section, the proposed update, the dialog's text) has a Copy button and
+    each card a "Copy all"; "Copied" shows ~1.6 s. Generated text is never `select-none`.
 - ⚠ **Superseded: the WHOLE Reports pane is Pro (`periodReports`)** — `InsightsView` renders one
   `ProLockPanel` when unentitled, the rail entry carries the one `ProBadge`, and the inner badges
   below were REMOVED (the inner locks remain as defence in depth). `useWorkspaceMetrics` /

@@ -16,6 +16,7 @@ import { refreshGithubIssuesUsage } from './github/issues-usage.js';
 import { JiraFetchError, type JiraTransport } from './jira/fetch.js';
 import type { DetectInput, DetectedTicket, LinkerPr, TrackerCall } from './types.js';
 import { ticketDateFields } from './dates.js';
+import { runSprintReadTick } from './sprint/read.js';
 import { datesOwedFor, noteDatesTried, reopenDatesBackfill, resetDatesBackfill, DATES_BACKFILL_BATCH } from './dates-backfill.js';
 import {
   deleteStaleKeys,
@@ -956,6 +957,11 @@ export function enableTrackerWorker(on: boolean): void {
   enabled = on;
 }
 
+/** Test seam: put a workspace in backoff as a failed pass would. */
+export function __backOffForTest(accountId: number, workspaceId: number, fp: string, until: number, code: string): void {
+  backOff(accountId, workspaceId, fp, until, code);
+}
+
 /** Test seam: forget backoffs and locks. */
 export function resetTrackerWorker(): void {
   backoff.clear();
@@ -1071,6 +1077,9 @@ export async function runTrackerTick(
         accountRunning.delete(accountId);
       }
     }
+    // Reports → This sprint: the demand-gated sprint list read (./sprint/read.ts — the one tracker
+    // read NOT triggered by a received PR). Never throws.
+    await runSprintReadTick(ctx, opts).catch(() => {});
   } catch (err) {
     const { code } = errorCodeOf(err);
     ctx.log.warn({ code, route: 'tracker-worker' }, 'ticket tick failed (non-fatal)');
