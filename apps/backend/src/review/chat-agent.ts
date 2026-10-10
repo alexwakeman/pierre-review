@@ -12,6 +12,7 @@ import { sdkModelOptions } from './model-options.js';
 import { estimateCostUsd } from './pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from './usage.js';
 import { submitExplanationsShape } from './claude-review/chat-explain.js';
+import { ISOLATED_MCP, ownToolsOnlyHook } from '../ai/agent-isolation.js';
 
 // ctx.review.chat — ONE answered question about a succeeded Claude Review. The plugin owns the
 // product (the prompt, the stored transcript, gating, metering); core owns the run, exactly as for
@@ -156,10 +157,11 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
         maxTurns,
         maxBudgetUsd: config.reviewChatBudgetUsd,
         settingSources: [],
+        ...ISOLATED_MCP,
         // ⚠ The same PATH GUARD the review runs under (review/path-guard.ts): under
         // bypassPermissions nothing else confines an absolute path, so the file tools may read
         // cwd and nothing else.
-        hooks: { PreToolUse: [pathGuardHook(createPathGuard(cwd, []))] },
+        hooks: { PreToolUse: [pathGuardHook(createPathGuard(cwd, [])), ownToolsOnlyHook(Object.keys(mcpServers ?? {}))] },
         ...(mcpServers ? { mcpServers } : {}),
         abortController,
         ...claudeExecutableOptions(),

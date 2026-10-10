@@ -25,6 +25,7 @@
 // real dependency for the metered summary path, which the loader falls through to.
 
 import { claudeExecutableOptions, loadAgentSdk, loadAnthropicSdk } from '../ai/runtime.js';
+import { ISOLATED_MCP, ownToolsOnlyHook } from '../ai/agent-isolation.js';
 
 export interface CheapCompleteOpts {
   model?: string;
@@ -142,6 +143,9 @@ async function agentComplete(
       // Don't load the user's ~/.claude settings / MCP servers for a plain
       // completion (mirrors review/agent.ts).
       settingSources: [],
+      // No tools at all: the account's claude.ai connectors must not reach a plain completion.
+      ...ISOLATED_MCP,
+      hooks: { PreToolUse: [ownToolsOnlyHook([])] },
       ...claudeExecutableOptions(),
     },
   });

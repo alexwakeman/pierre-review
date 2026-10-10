@@ -25,6 +25,7 @@ import type {
 import { submitFixShape, type SubmitFixPayload } from './schema.js';
 import { captureWorktreeDiff } from './git.js';
 import { describeAssistantBlocks } from './activity.js';
+import { ISOLATED_MCP, ownToolsOnlyHook } from '../ai/agent-isolation.js';
 
 // The WRITE tool surface for the fixer: Read/Glob/Grep to explore, Write/Edit/MultiEdit to
 // make the change, and the submit_fix MCP tool for the prose summary. NO SHELL.
@@ -167,6 +168,7 @@ export async function runAgentInWorktree(
       maxTurns,
       maxBudgetUsd: opts.maxBudgetUsd,
       settingSources: [],
+      ...ISOLATED_MCP,
       mcpServers: opts.mcpServers,
       abortController: opts.abortController,
       // ⚠ THE PATH GUARD (review/path-guard.ts): file tools stay inside the worktree. Under
@@ -174,7 +176,7 @@ export async function runAgentInWorktree(
       // item (PR text, review threads, a ticket review's items) saying "also add this to
       // ~/.zshrc" would otherwise write outside the worktree, where captureWorktreeDiff never
       // shows it to the reader.
-      hooks: { PreToolUse: [pathGuardHook(createPathGuard(opts.worktreePath))] },
+      hooks: { PreToolUse: [pathGuardHook(createPathGuard(opts.worktreePath)), ownToolsOnlyHook(Object.keys(opts.mcpServers))] },
       // LIMN_CLAUDE_PATH → the user's own `claude` instead of the SDK's bundled binary.
       ...claudeExecutableOptions(),
     },

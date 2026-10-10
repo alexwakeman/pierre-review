@@ -10,6 +10,7 @@ import { createPathGuard, pathGuardHook } from '../path-guard.js';
 import { estimateCostUsd } from '../pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
 import { submitTicketReviewShape, type SubmitTicketReviewPayload } from './schema.js';
+import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
 
 // THE TICKET REVIEW'S AGENT RUN — the SDK half. The manager (manager.ts) prepares the scratch
 // working directory (MEMBERS.md) and every member's read-only worktree, builds the prompts, and
@@ -119,9 +120,10 @@ export async function runTicketReviewAgent(args: RunTicketAgentArgs): Promise<Ru
         maxTurns: config.ticketReviewMaxTurns,
         // ⚠ THE CONFINEMENT LIVES HERE, not in the prompt: a PreToolUse deny holds under
         // bypassPermissions.
-        hooks: { PreToolUse: [pathGuardHook(guard)] },
+        hooks: { PreToolUse: [pathGuardHook(guard), ownToolsOnlyHook(['ticket'])] },
         maxBudgetUsd: config.ticketReviewBudgetUsd,
         settingSources: [],
+        ...ISOLATED_MCP,
         mcpServers: { ticket: server },
         abortController,
         ...claudeExecutableOptions(),

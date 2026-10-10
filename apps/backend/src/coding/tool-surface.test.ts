@@ -66,7 +66,9 @@ describe('the fixer is confined to its worktree', () => {
   // The fixer WRITES under bypassPermissions; without this hook an absolute path (~/.zshrc) in a
   // seed item would be written outside the worktree. Behaviour: review/path-guard.test.ts.
   it('runs behind the path guard rooted at the worktree', () => {
-    expect(SRC).toContain('hooks: { PreToolUse: [pathGuardHook(createPathGuard(opts.worktreePath))] }');
+    expect(SRC).toContain(
+      'hooks: { PreToolUse: [pathGuardHook(createPathGuard(opts.worktreePath)), ownToolsOnlyHook(Object.keys(opts.mcpServers))] }',
+    );
   });
 });
 

@@ -15,6 +15,7 @@ import { estimateCostUsd } from '../pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
 import { normaliseCard } from './cards.js';
 import { submitPrCardShape } from './schema.js';
+import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
 
 // THE CARD PRE-PASS — a cheap per-PR run that writes a CONTRIBUTION CARD (cards.ts) for each member
 // a ticket review cannot read as a diff (more than TICKET_REVIEW_MAX_DIFFS lack a card at their
@@ -186,9 +187,10 @@ export const runCardAgent: RunCardAgent = async ({ input, ticket, nonce, signal,
         allowedTools: policy.allowedTools,
         disallowedTools: policy.disallowedTools,
         maxTurns: TICKET_CARD_MAX_TURNS,
-        hooks: { PreToolUse: [pathGuardHook(createPathGuard(scratch, []))] },
+        hooks: { PreToolUse: [pathGuardHook(createPathGuard(scratch, [])), ownToolsOnlyHook(['card'])] },
         maxBudgetUsd: config.ticketCardBudgetUsd,
         settingSources: [],
+        ...ISOLATED_MCP,
         mcpServers: { card: server },
         abortController: controller,
         ...claudeExecutableOptions(),

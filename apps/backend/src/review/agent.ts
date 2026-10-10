@@ -31,6 +31,7 @@ import {
   sumUsageMap,
   type UsageTokens,
 } from './usage.js';
+import { ISOLATED_MCP, ownToolsOnlyHook } from '../ai/agent-isolation.js';
 
 // The security-sensitive HALF of ctx.review.runReview (the plugin owns routing/prompts/
 // persistence; core owns the SDK run). Given a resolved mode + the plugin-built prompts +
@@ -253,6 +254,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
         hooks: {
           PreToolUse: [
             pathGuardHook(pathGuard),
+            ownToolsOnlyHook(['review']),
             // ⚠ THE SPECIALIST CAP LIVES HERE, not in the prompt.
             ...(guard
               ? [
@@ -273,6 +275,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
         maxBudgetUsd: config.reviewBudgetUsd,
         // Don't inherit the host's .claude settings / CLAUDE.md / skills.
         settingSources: [],
+        ...ISOLATED_MCP,
         mcpServers: { review: server },
         abortController,
         // LIMN_CLAUDE_PATH → the user's own `claude` instead of the SDK's bundled binary.

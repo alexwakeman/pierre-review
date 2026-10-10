@@ -10,6 +10,7 @@ import { createPathGuard, pathGuardHook } from '../path-guard.js';
 import { estimateCostUsd } from '../pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
 import { submitCiReviewShape, type SubmitCiReviewPayload } from './schema.js';
+import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
 
 // THE CI REVIEW'S AGENT RUN — the SDK half. The manager (manager.ts) reads the checks and logs,
 // prepares the scratch working directory and the PR's read-only worktree, builds the prompts, and
@@ -119,9 +120,10 @@ export async function runCiReviewAgent(args: RunCiAgentArgs): Promise<RunCiAgent
         maxTurns: config.ciReviewMaxTurns,
         // ⚠ THE CONFINEMENT LIVES HERE, not in the prompt: a PreToolUse deny holds under
         // bypassPermissions.
-        hooks: { PreToolUse: [pathGuardHook(guard)] },
+        hooks: { PreToolUse: [pathGuardHook(guard), ownToolsOnlyHook(['ci'])] },
         maxBudgetUsd: config.ciReviewBudgetUsd,
         settingSources: [],
+        ...ISOLATED_MCP,
         mcpServers: { ci: server },
         abortController,
         ...claudeExecutableOptions(),
