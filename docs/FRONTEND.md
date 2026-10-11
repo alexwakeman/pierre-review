@@ -2232,13 +2232,14 @@ convention this file has to remember.
   - **ONE VOCABULARY, THE THREE STORY ISSUES** (shared `story-issues.ts`: Unclear when done · Blocked ·
     Spec gaps). The collapsed card shows at most TWO chips (`storyIssueChipText`: "Unclear when done
     · 3 of 25 criteria"; ⚠ spec gaps are NEVER a chip — every labelled ticket had three), its PR links and a "Ticket PRs" button (the ticket tab); the expanded card
-    is, in order and nothing else: the SPECIFIC detail per issue code raised — each flagged criterion
-    with its reason and the criterion's own text, each open blocker (`storyBlockerPhrase`; a linked
-    key opens the tracker through `safeExternalUrl`) then finished ones as "Done: …" — or, for an issue
+    is, in order and nothing else: the SPECIFIC detail per issue code raised — the FIRST TWO flagged
+    criteria with their reasons and own text, then "and N more" (`storyUnclearCriteriaShown`), each
+    REAL blocker (`isRealStoryBlocker`: an unfinished ticket or an open decision; `storyBlockerPhrase`; a
+    linked key opens the tracker through `safeExternalUrl`) — or, for an issue
     a CURRENT run spoke to, its sentence marked "Claude" (`sprintBullets`; it never adds one); each with
-    Copy (the one-line bullet); then the "Spec gaps" section (`sprintSpecGapLines`: each gap with its
-    type, then a current run's spec_gaps sentence marked "Claude", each copyable, also in Copy all and
-    the comment default; the "Spec gaps" check hides it), the repos, the "Check against code" / "Check again" button, the update panel (rendered only
+    Copy (the one-line bullet); then the "Spec gaps" section (`sprintSpecGapLines`: NOT-STARTED tickets
+    only, ONE line — a current run's spec_gaps sentence marked "Claude", else the first gap with its
+    type; copyable, the same in Copy all and the comment default; the "Spec gaps" check hides it), the repos, the "Check against code" / "Check again" button, the update panel (rendered only
     when there is a bullet, a spec gap, a current run or a last write). Nothing in the SPA re-derives an issue or
     re-words a bullet. A STALE run shows only its summary, tagged "Out of date", and feeds nothing
     else (`sprintCurrentAssessmentBodyOf`); an OUTDATED-format run shows one line.

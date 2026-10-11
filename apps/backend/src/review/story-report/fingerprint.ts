@@ -12,8 +12,10 @@ import type { StoryInternals } from '../../db/stories.js';
 
 /** v2: the four story issues (per-pick issues, whole-window issue rates, an issue per point).
  *  v3: the lean report. v4: the THREE specific story issues (rubric 2: reasons, blockers, spec gaps).
- *  v5: Story health's measures for the rates (criteria that can't be checked; linked blockers only). */
-export const STORY_REPORT_FORMAT = 'story-report-v5';
+ *  v5: Story health's measures for the rates (criteria that can't be checked; linked blockers only).
+ *  v6: briefer (one-sentence point details, one example ticket per point) and the real-blocker rule
+ *  (inputs named in the text are no longer dependencies). */
+export const STORY_REPORT_FORMAT = 'story-report-v6';
 
 export interface FingerprintPick {
   ident: string;

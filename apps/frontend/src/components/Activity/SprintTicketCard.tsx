@@ -8,7 +8,9 @@ import {
   sprintBullets,
   sprintCurrentAssessmentBodyOf,
   sprintSpecGapLines,
+  isRealStoryBlocker,
   storyBlockerPhrase,
+  storyUnclearCriteriaShown,
   storyIssueChipText,
   type SprintBullet,
   type SprintChecks,
@@ -32,13 +34,14 @@ import { SprintUpdatePanel } from './SprintUpdatePanel.js';
 // most two issue chips (Unclear when done, Blocked), PRs (each opens on GitHub; "Ticket PRs" opens the
 // ticket tab). Expanded, in this order and nothing else: the detail per issue (each copyable as its
 // one-line bullet; Claude's sentence replaces the template once the ticket was checked against code),
-// the Spec gaps section (each gap with its type, copyable; never a chip), the candidate repos, the
+// the Spec gaps section (not-started tickets only: the first gap with its type, copyable; never a chip),
+// the candidate repos, the
 // "Check against code" button and the update panel. "Copy all" copies the header, the summary, the
 // bullets and the spec gaps.
 //
 // ⚠ THE DETAIL IS THE SPECIFIC ONE: which criterion and why, what the ticket waits on (a linked key
-// opens in the tracker), who owns it and its state, which details the spec leaves out. Finished
-// blockers are shown under the open ones as "Done: …", never raised.
+// opens in the tracker), who owns it and its state, which details the spec leaves out. Only the first
+// two flagged criteria are listed ("and N more"); only REAL blockers are listed (`isRealStoryBlocker`).
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 
@@ -341,40 +344,37 @@ function ClaudeBullet({ bullet: b, label }: { bullet: SprintBullet; label: strin
   );
 }
 
-/** One issue's specific detail (code's): every flagged criterion with its reason, every blocker with its
- *  owner and state (a linked key opens the tracker). */
+/** One issue's specific detail (code's): the first flagged criteria with their reasons (then "and N
+ *  more"), every real blocker with its owner and state (a linked key opens the tracker). */
 function IssueDetail({ issue, criteria, text }: { issue: StoryIssue; criteria: string[]; text: string }): JSX.Element {
   const label = STORY_ISSUE_BY_ID[issue.id].label;
   if (issue.id === 'unclear_done' && issue.criteria.length > 0) {
+    const { shown, more } = storyUnclearCriteriaShown(issue);
     return (
       <div>
         <strong className="font-semibold">{label}</strong>
         <ul className="mt-0.5 space-y-0.5">
-          {issue.criteria.map((c) => (
+          {shown.map((c) => (
             <li key={c.n}>
               Criterion {c.n}: {c.reason ?? 'can’t be checked'}
               {criteria[c.n - 1] != null && <span className={`block ${MUTED}`}>&ldquo;{criteria[c.n - 1]}&rdquo;</span>}
             </li>
           ))}
+          {more > 0 && <li className={MUTED}>and {more} more</li>}
         </ul>
       </div>
     );
   }
   if (issue.id === 'blocked') {
-    const open = issue.blockers.filter((b) => !b.resolved);
-    const done = issue.blockers.filter((b) => b.resolved);
+    // The fold keeps REAL blockers only (`isRealStoryBlocker`): unfinished tickets and open decisions.
+    const open = issue.blockers.filter(isRealStoryBlocker);
     return (
       <div>
         <strong className="font-semibold">{label}</strong> · Waits on
         <ul className="mt-0.5 space-y-0.5">
           {open.map((b, i) => (
-            <li key={`o${i}`}>
+            <li key={i}>
               <BlockerText blocker={b} />
-            </li>
-          ))}
-          {done.map((b, i) => (
-            <li key={`d${i}`} className={MUTED}>
-              Done: <BlockerText blocker={{ ...b, status: null }} />
             </li>
           ))}
         </ul>

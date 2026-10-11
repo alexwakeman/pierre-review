@@ -10,7 +10,7 @@
 //    four-issues paragraph and ONE fence line;
 //  • list_candidates carries each pick's issues and the whole-window issue rates by LABEL.
 import { describe, expect, it } from 'vitest';
-import { STORY_REPORT_ITEMS_MAX, STORY_REPORT_LEAN, STORY_REPORT_MAX_CANDIDATES, STORY_REPORT_TEXT_MAX, STORY_REPORT_TICKETS_PER_ITEM_MAX } from '@pierre-review/shared';
+import { STORY_REPORT_ITEMS_MAX, STORY_REPORT_LEAN, STORY_REPORT_MAX_CANDIDATES, STORY_REPORT_TEXT_MAX, STORY_REPORT_TICKETS_PER_ACTION_MAX, STORY_REPORT_TICKETS_PER_POINT_MAX } from '@pierre-review/shared';
 import { validateStoryReport } from './validate.js';
 import { STORY_REPORT_FORMAT, storyReportFingerprint, type FingerprintPick } from './fingerprint.js';
 import { STORY_REPORT_DISALLOWED_TOOLS, STORY_REPORT_SYSTEM, STORY_REPORT_TOOLS, fenceToolText } from './agent.js';
@@ -101,7 +101,27 @@ describe('validateStoryReport', () => {
       { ...base, doingWell: [{ title: 't', detail: 'd', tickets: Array.from({ length: 20 }, (_, i) => `K-${i}`) }] },
       new Set(Array.from({ length: 20 }, (_, i) => `K-${i}`)),
     );
-    expect(many.ok && many.report.doingWell[0]!.tickets).toHaveLength(STORY_REPORT_TICKETS_PER_ITEM_MAX);
+    // ONE example per point (the first known key), two per action, eight per old theme.
+    expect(many.ok && many.report.doingWell[0]!.tickets).toEqual(['K-0']);
+    expect(STORY_REPORT_TICKETS_PER_POINT_MAX).toBe(1);
+    expect(v.report.actions[0]!.tickets).toEqual(['BMD-1', 'BMD-2']);
+    expect(STORY_REPORT_TICKETS_PER_ACTION_MAX).toBe(2);
+  });
+
+  it('a point detail is one sentence: cut at the point cap, why keeps the longer one', () => {
+    const v = validateStoryReport(
+      {
+        ...base,
+        doingWell: [{ title: 't', detail: 'd'.repeat(500), tickets: ['BMD-1'] }],
+        actions: [{ action: 'a', why: 'w'.repeat(500), tickets: ['BMD-1'] }],
+      },
+      new Set(['BMD-1']),
+    );
+    expect(v.ok).toBe(true);
+    if (!v.ok) return;
+    expect(v.report.doingWell[0]!.detail).toHaveLength(STORY_REPORT_TEXT_MAX.pointDetail);
+    expect(STORY_REPORT_TEXT_MAX.pointDetail).toBe(200);
+    expect(v.report.actions[0]!.why).toHaveLength(STORY_REPORT_TEXT_MAX.detail);
   });
 
   it('leftOut is capped at the candidate ceiling, not the section cap', () => {
@@ -156,7 +176,7 @@ describe('storyReportFingerprint', () => {
     expect(storyReportFingerprint('60', shuffled)).toBe(storyReportFingerprint('60', picks));
   });
   it('folds the three-issues format tag, so a report written before it reads stale', () => {
-    expect(STORY_REPORT_FORMAT).toBe('story-report-v5');
+    expect(STORY_REPORT_FORMAT).toBe('story-report-v6');
   });
   it('changes on a new review, a merge, or another window choice', () => {
     const fp = storyReportFingerprint('60', picks);
@@ -184,6 +204,8 @@ describe('the agent surface', () => {
     for (const label of ['Unclear when done', '"Blocked"', 'Spec gaps']) expect(STORY_REPORT_SYSTEM).toContain(label);
     for (const gone of ['Too big', 'Waits on other work', 'Scope not stated']) expect(STORY_REPORT_SYSTEM).not.toContain(gone);
     expect(STORY_REPORT_SYSTEM).toContain('at most 3 fallingShort');
+    expect(STORY_REPORT_SYSTEM).toContain('ONE sentence of at most 200 characters and names ONE example ticket');
+    expect(STORY_REPORT_SYSTEM).toContain('each action names at most 2 tickets');
     expect(STORY_REPORT_SYSTEM).toContain('wholeWindow.issueRates only');
     expect(STORY_REPORT_SYSTEM).toContain('NOT KNOWN, never something the team avoided');
     expect(STORY_REPORT_SYSTEM).toContain('never state a rate');

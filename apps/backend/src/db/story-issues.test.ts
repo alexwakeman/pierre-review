@@ -4,6 +4,7 @@ import {
   applyStoryIssueChecks,
   foldStoryIssues,
   isBlockingRelation,
+  isRealStoryBlocker,
   isStoryIssueId,
   joinCapped,
   parseTicketLinkBlockers,
@@ -20,9 +21,12 @@ import {
   storyIssueRateUnits,
   storyIssueStates,
   storyIssueTypeChecked,
+  storyUnclearCriteriaShown,
   type KnownTicket,
   type SprintAssessmentRecord,
   type StoryCriterionLabel,
+  type StoryDependencyKind,
+  type StoryIssueInput,
   type StoryIssue,
   type StoryIssueLabel,
   type TicketLinkBlocker,
@@ -76,7 +80,7 @@ describe('foldStoryIssues', () => {
     const l: StoryIssueLabel = {
       criteria: [crit(1, { testable: false, reason: 'no expected result' }), crit(2), crit(3, { testable: false, reason: "'intuitive' can't be checked" })],
       story: {
-        dependencies: [{ kind: 'api', what: 'pricing API', owner: 'Payments team', ticketKey: null }],
+        dependencies: [{ kind: 'decision', what: 'pricing sign-off', owner: 'Payments team', ticketKey: null }],
         gaps: [{ type: 'edge_case', text: 'No behaviour when the upload fails' }],
       },
     };
@@ -89,12 +93,12 @@ describe('foldStoryIssues', () => {
     expect(out.map(storyIssueChipText)).toEqual(['Unclear when done · 2 of 3 criteria', 'Blocked · 1 open', 'Spec gaps · 1 gap']);
     expect(out.map(storyIssueBullet)).toEqual([
       "Criterion 1: no expected result · Criterion 3: 'intuitive' can't be checked",
-      'Waits on pricing API, Payments team, no ticket',
+      'Waits on pricing sign-off, Payments team, no ticket',
       'No behaviour when the upload fails',
     ]);
   });
 
-  it('links come first and win a key collision; a done link is shown, never raised', () => {
+  it('links come first and win a key collision; a done link is dropped, never raised', () => {
     const l = clean(2, { dependencies: [{ kind: 'ticket', what: 'banner', owner: 'UCD team', ticketKey: 'bmd-568' }] });
     const out = foldStoryIssues({
       criteria: items(2),
@@ -103,10 +107,7 @@ describe('foldStoryIssues', () => {
     });
     const blocked = out.find((i) => i.id === 'blocked')!;
     expect(blocked.reasons).toEqual(['linked']);
-    expect(blocked.blockers.map((b) => [b.source, b.ticketKey, b.resolved])).toEqual([
-      ['link', 'BMD-568', false],
-      ['link', 'BMD-12', true],
-    ]);
+    expect(blocked.blockers.map((b) => [b.source, b.ticketKey, b.resolved])).toEqual([['link', 'BMD-568', false]]);
     expect(storyIssueBullet(blocked)).toBe('Waits on BMD-568 cookie banner (To Do)');
     // Only done links → nothing raised now.
     expect(foldStoryIssues({ criteria: items(2), label: clean(2), links: [link('BMD-12', { category: 'done' })] })).toEqual([]);
@@ -119,6 +120,35 @@ describe('foldStoryIssues', () => {
     const [open] = foldStoryIssues({ criteria: items(2), label: l, knownTickets: known('indeterminate') });
     expect(storyBlockerPhrase(open!.blockers[0]!)).toBe('BMD-9 Cookie banner (In Review)');
     expect(foldStoryIssues({ criteria: items(2), label: l, knownTickets: known('done') })).toEqual([]);
+  });
+});
+
+describe('the blocker rule (isRealStoryBlocker)', () => {
+  const dep = (kind: StoryDependencyKind, ticketKey: string | null = null) => ({ kind, what: `${kind} thing`, owner: null, ticketKey });
+  const fold = (deps: ReturnType<typeof dep>[], o: Partial<StoryIssueInput> = {}) =>
+    foldStoryIssues({ criteria: items(2), label: clean(2, { dependencies: deps }), ...o }).find((i) => i.id === 'blocked');
+
+  it('keeps an unfinished ticket and an open decision; drops inputs with no ticket', () => {
+    const b = fold([dep('design'), dep('data'), dep('api'), dep('environment'), dep('other'), dep('decision'), dep('ticket', 'BMD-3')])!;
+    expect(b.blockers.map((x) => [x.kind, x.ticketKey])).toEqual([
+      ['decision', null],
+      ['ticket', 'BMD-3'],
+    ]);
+    // Inputs alone are not a blocked issue at all — no chip, not counted.
+    expect(fold([dep('design'), dep('data'), dep('other')])).toBeUndefined();
+  });
+
+  it('a text item of any kind that names a ticket is kept while the ticket is not done', () => {
+    expect(fold([dep('design', 'UX-4')])!.blockers.map((x) => x.ticketKey)).toEqual(['UX-4']);
+    const done = new Map<string, KnownTicket>([['UX-4', { title: 'Map design', status: 'Done', category: 'done', url: null }]]);
+    expect(fold([dep('design', 'UX-4')], { knownTickets: done })).toBeUndefined();
+  });
+
+  it('an unknown status counts as not done and says "status unknown"', () => {
+    const b = fold([], { links: [link('BMD-7', { title: null, status: null, category: null })] })!;
+    expect(storyBlockerPhrase(b.blockers[0]!)).toBe('BMD-7 (status unknown)');
+    expect(storyIssueBullet(fold([dep('ticket', 'BMD-8')])!)).toBe('Waits on BMD-8 ticket thing (status unknown)');
+    expect(isRealStoryBlocker(b.blockers[0]!)).toBe(true);
   });
 });
 
@@ -136,6 +166,9 @@ describe('the two questions: now vs as written', () => {
     expect(storyIssueMeasure(finished)).toEqual({ unclear_done: false, blocked: true, spec_gaps: false });
     const textOnly = { criteria: items(2), label: clean(2, { dependencies: [{ kind: 'decision', what: 'pricing decision', owner: null, ticketKey: null }] }) };
     expect(storyIssueMeasure(textOnly).blocked).toBe(true);
+    // An input (a design, data) is not a dependency, as written either.
+    const input = { criteria: items(2), label: clean(2, { dependencies: [{ kind: 'design', what: 'Figma node', owner: null, ticketKey: null }] }) };
+    expect(storyIssueMeasure(input).blocked).toBe(false);
     expect(storyIssueMeasure({ criteria: items(2), label: null, links: [link('X-1')] })).toEqual({ unclear_done: null, blocked: null, spec_gaps: null });
     // No criteria is never folded in: it can never be labelled.
     expect(storyIssueMeasure({ criteria: [], label: null }).unclear_done).toBeNull();
@@ -184,6 +217,22 @@ describe('templates', () => {
   it('joinCapped shows three, then "and N more"', () => {
     expect(joinCapped(['a', 'b'])).toBe('a · b');
     expect(joinCapped(['a', 'b', 'c', 'd', 'e'])).toBe('a · b · c and 2 more');
+  });
+  it('unclear when done lists the first two criteria, then "and N more"; the chip keeps the count', () => {
+    const four = issue({
+      id: 'unclear_done',
+      total: 9,
+      reasons: ['untestable'],
+      criteria: [
+        { n: 2, reason: 'vague' },
+        { n: 4, reason: null },
+        { n: 5, reason: 'no result' },
+        { n: 8, reason: 'x' },
+      ],
+    });
+    expect(storyIssueBullet(four)).toBe('Criterion 2: vague · Criterion 4: can’t be checked and 2 more');
+    expect(storyUnclearCriteriaShown(four)).toEqual({ shown: four.criteria.slice(0, 2), more: 2 });
+    expect(storyIssueChipText(four)).toBe('Unclear when done · 4 of 9 criteria');
   });
   it('a no-criteria bullet asks for criteria', () => {
     expect(storyIssueBullet(issue({ id: 'unclear_done', total: 0, reasons: ['no_criteria'] }))).toBe(
@@ -261,7 +310,7 @@ describe('spec gaps leave the chips', () => {
   it('only unclear_done and blocked are chips', () => {
     expect(STORY_CHIP_ISSUE_IDS).toEqual(['unclear_done', 'blocked']);
   });
-  it('sprintSpecGapLines: code gaps then a current run’s sentence; nothing when the check is off or the type is not checked', () => {
+  it('sprintSpecGapLines: one line on a not-started ticket — a current run’s sentence, else the first gap; nothing on other stages, when the check is off or the type is not checked', () => {
     const body = {
       summary: 'S.',
       issues: [{ id: 'spec_gaps' as const, text: 'No rule for an empty file.', ref: { repo: 'a/b', path: 'src/x.ts' } }],
@@ -272,19 +321,23 @@ describe('spec gaps leave the chips', () => {
       outdated: false, dropped: null, error: null, costUsd: null, numTurns: null, createdAt: '2026-10-10T00:00:00Z', completedAt: null,
     };
     const t = {
-      specGaps: [{ type: 'edge_case' as const, text: 'No behaviour when the upload fails' }],
+      specGaps: [
+        { type: 'edge_case' as const, text: 'No behaviour when the upload fails' },
+        { type: 'rule' as const, text: 'No rule for ties' },
+      ],
       assessment: { record: rec, currency: 'current' as const },
       issueType: 'Story',
+      stage: 'not_started' as const,
     };
+    // A current run's sentence replaces the first gap.
     const lines = sprintSpecGapLines(t, { off: [], issueTypes: [] });
-    expect(lines.map((l) => [l.source, l.type])).toEqual([
-      ['code', 'edge_case'],
-      ['claude', null],
-    ]);
-    expect(sprintSpecGapsMarkdown(lines)).toBe(
-      '**Spec gaps**\n\n- Edge case: No behaviour when the upload fails\n- No rule for an empty file. (`src/x.ts` in `a/b`)',
-    );
-    expect(sprintSpecGapLines({ ...t, assessment: { record: rec, currency: 'stale' as const } }, { off: [], issueTypes: [] })).toHaveLength(1);
+    expect(lines.map((l) => [l.source, l.type])).toEqual([['claude', null]]);
+    expect(sprintSpecGapsMarkdown(lines)).toBe('**Spec gaps**\n\n- No rule for an empty file. (`src/x.ts` in `a/b`)');
+    const code = sprintSpecGapLines({ ...t, assessment: { record: rec, currency: 'stale' as const } }, { off: [], issueTypes: [] });
+    expect(code.map((l) => [l.source, l.text])).toEqual([['code', 'No behaviour when the upload fails']]);
+    for (const stage of ['writing', 'delivered'] as const) {
+      expect(sprintSpecGapLines({ ...t, stage }, { off: [], issueTypes: [] })).toEqual([]);
+    }
     expect(sprintSpecGapLines(t, { off: ['spec_gaps'], issueTypes: [] })).toEqual([]);
     expect(sprintSpecGapLines(t, { off: [], issueTypes: ['Bug'] })).toEqual([]);
     expect(sprintCommentMarkdown([], null, lines)).toContain('**Spec gaps**');

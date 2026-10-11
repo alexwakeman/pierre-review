@@ -1172,7 +1172,7 @@ over the whole window; the picks are a sample the agent may never quote a rate f
 key must be a picked key; the first `submit_report` wins. [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story report.
 
 **THE THREE STORY ISSUES** (shared `story-issues.ts`) — Unclear when done (which criterion, why) ·
-Blocked (what, who, state: tracker links, then dependencies the label names) · Spec gaps (no chip).
+Blocked (only an unfinished ticket or open decision, `isRealStoryBlocker`) · Spec gaps (no chip).
 Input via `db/story-issue-input.ts`; retired ids drop through `isStoryIssueId`. ⚠ This sprint asks
 "blocked NOW" (`foldStoryIssues`); RATES use `storyIssueRateUnits` (unclear = % of CRITERIA;
 blocked = tracker LINKS, any status; "no criteria" apart). Every sentence is templated.

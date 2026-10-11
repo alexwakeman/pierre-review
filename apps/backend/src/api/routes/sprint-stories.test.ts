@@ -212,14 +212,11 @@ describe('GET /api/sprint-stories', () => {
     // Spec gaps are not a chip: they ride apart, for the opened card's own section.
     expect(eng1.specGaps).toEqual([{ type: 'edge_case', text: 'No behaviour when the basket is empty' }]);
     expect(body.tickets[1].specGaps).toEqual([]);
-    // ENG-3: a tracker link raises Blocked with no label; the done link is listed resolved, after.
+    // ENG-3: a tracker link raises Blocked with no label; the done link is dropped (`isRealStoryBlocker`).
     const eng3 = body.tickets[1];
     expect(eng3.issues.map((i: any) => i.id)).toEqual(['blocked']);
     expect(eng3.issues[0].reasons).toEqual(['linked']);
-    expect(eng3.issues[0].blockers.map((b: any) => [b.ticketKey, b.resolved])).toEqual([
-      ['ENG-8', false],
-      ['ENG-6', true],
-    ]);
+    expect(eng3.issues[0].blockers.map((b: any) => [b.ticketKey, b.resolved])).toEqual([['ENG-8', false]]);
     expect(body.tickets[2].issues.map((i: any) => i.id)).toEqual(['unclear_done']);
     // The status layout: no stored board order → the category fallback over the sprint's statuses.
     expect(body.statusLayout.order.map((o: any) => [o.name, o.category, o.count])).toEqual([

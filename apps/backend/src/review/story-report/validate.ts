@@ -4,7 +4,9 @@ import {
   STORY_REPORT_LEAN,
   STORY_REPORT_MAX_CANDIDATES,
   STORY_REPORT_TEXT_MAX,
+  STORY_REPORT_TICKETS_PER_ACTION_MAX,
   STORY_REPORT_TICKETS_PER_ITEM_MAX,
+  STORY_REPORT_TICKETS_PER_POINT_MAX,
   type StoryReportAction,
   type StoryReportBody,
   type StoryReportDropped,
@@ -16,9 +18,12 @@ import {
 
 // SERVER-SIDE VALIDATION of what the story report's agent submitted (`submit_report`). Pure.
 //
-//   • Every string is trimmed and cut to `STORY_REPORT_TEXT_MAX` (ending "…") — never refused.
+//   • Every string is trimmed and cut to `STORY_REPORT_TEXT_MAX` (ending "…") — never refused (the tool
+//     schema's `.max` is what makes the model rewrite; this cut is the backstop). A point's detail is
+//     ONE sentence (`pointDetail`).
 //   • Ticket keys must be PICKED CANDIDATES' keys: an unknown key is removed from a list (counted),
-//     lists are deduped and capped; an item left with no ticket is dropped; a spotlight or leftOut on
+//     lists are deduped and capped (ONE example per point, two per action, eight per old theme — the
+//     first known keys win); an item left with no ticket is dropped; a spotlight or leftOut on
 //     an unknown key is dropped. The model may drop a weak example, never add a story.
 //   • `tone` must be 'positive' | 'negative' (anything else drops the spotlight).
 //   • A point's `issue` is kept only when it is one of the three story issues (`isStoryIssueId` — a
@@ -49,7 +54,7 @@ export function validateStoryReport(raw: unknown, candidateKeys: ReadonlySet<str
     const key = typeof k === 'string' ? k.trim() : '';
     return key !== '' && candidateKeys.has(key) ? key : null;
   };
-  const ticketList = (v: unknown): string[] => {
+  const ticketList = (v: unknown, max: number = STORY_REPORT_TICKETS_PER_ITEM_MAX): string[] => {
     const out: string[] = [];
     for (const k of arr(v)) {
       const key = known(k);
@@ -59,7 +64,7 @@ export function validateStoryReport(raw: unknown, candidateKeys: ReadonlySet<str
       }
       if (!out.includes(key)) out.push(key);
     }
-    return out.slice(0, STORY_REPORT_TICKETS_PER_ITEM_MAX);
+    return out.slice(0, max);
   };
   const cap = <T>(items: T[], max: number = STORY_REPORT_ITEMS_MAX): T[] => {
     if (items.length > max) dropped.overCap += items.length - max;
@@ -75,9 +80,9 @@ export function validateStoryReport(raw: unknown, candidateKeys: ReadonlySet<str
   const point = (v: unknown): StoryReportPoint | null => {
     const p = obj(v);
     const title = text(p.title, STORY_REPORT_TEXT_MAX.title);
-    const tickets = ticketList(p.tickets);
+    const tickets = ticketList(p.tickets, STORY_REPORT_TICKETS_PER_POINT_MAX);
     if (title === '' || tickets.length === 0) return null;
-    const out: StoryReportPoint = { title, detail: text(p.detail, STORY_REPORT_TEXT_MAX.detail), tickets };
+    const out: StoryReportPoint = { title, detail: text(p.detail, STORY_REPORT_TEXT_MAX.pointDetail), tickets };
     if (isStoryIssueId(p.issue)) out.issue = p.issue;
     return out;
   };
@@ -100,7 +105,7 @@ export function validateStoryReport(raw: unknown, candidateKeys: ReadonlySet<str
   const action = (v: unknown): StoryReportAction | null => {
     const p = obj(v);
     const a = text(p.action, STORY_REPORT_TEXT_MAX.action);
-    const tickets = ticketList(p.tickets);
+    const tickets = ticketList(p.tickets, STORY_REPORT_TICKETS_PER_ACTION_MAX);
     return a === '' || tickets.length === 0 ? null : { action: a, why: text(p.why, STORY_REPORT_TEXT_MAX.detail), tickets };
   };
   const leftOut = (v: unknown): StoryReportLeftOut | null => {

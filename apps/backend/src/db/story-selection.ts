@@ -6,6 +6,7 @@ import {
   STORY_ISSUE_RATE_UNIT,
   STORY_REPORT_GROUP_CAPS,
   foldStoryIssues,
+  isStoryDependencyItem,
   storyBlockers,
   storyIssueMeasure,
   storyIssueRateUnits,
@@ -90,8 +91,9 @@ export function reportableIssueRates(rates: readonly StoryReportIssueRate[]): St
   );
 }
 
-/** One story's issues AS WRITTEN — `foldStoryIssues`, except `blocked` carries EVERY dependency the
- *  story had, finished or not (the rate rule's question) — and its per-issue state under the same
+/** One story's issues AS WRITTEN — `foldStoryIssues`, except `blocked` carries EVERY ticket or decision
+ *  the story depended on, finished or not (`isStoryDependencyItem`; inputs such as a design or data are
+ *  not dependencies) — and its per-issue state under the same
  *  rule: a usable label → `storyIssueMeasure`; none → only what code knows (no criteria; any link),
  *  the rest null. Pure. */
 export function storyIssuesAsWritten(input: StoryIssueInput): {
@@ -99,7 +101,7 @@ export function storyIssuesAsWritten(input: StoryIssueInput): {
   states: Record<StoryIssueId, boolean | null>;
 } {
   const now = foldStoryIssues(input);
-  const blockers = storyBlockers(input);
+  const blockers = storyBlockers(input).filter(isStoryDependencyItem);
   const issues = now.filter((i) => i.id !== 'blocked');
   if (blockers.length > 0) {
     const reasons: StoryIssueReason[] = [];

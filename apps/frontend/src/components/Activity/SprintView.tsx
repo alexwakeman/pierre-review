@@ -63,15 +63,17 @@ function SprintInfo({ data }: { data: SprintStoriesResponse }): JSX.Element {
       <p>Each ticket shows up to two issues:</p>
       <ul className="list-disc space-y-0.5 pl-5">
         <li>
-          <strong>Unclear when done</strong>: no acceptance criteria, or criteria a tester couldn&rsquo;t check, each with
-          the reason.
+          <strong>Unclear when done</strong>: no acceptance criteria, or criteria a tester couldn&rsquo;t check. Opening the
+          ticket shows the first two, each with the reason.
         </li>
         <li>
-          <strong>Blocked</strong>: unfinished work it waits on: tickets linked in your tracker, and work the ticket names.
+          <strong>Blocked</strong>: an unfinished ticket it waits on (linked in your tracker or named in the ticket), or a
+          decision nobody has made. Designs, data and files the ticket points to are not blockers.
         </li>
       </ul>
       <p>
-        Opening a ticket also lists its <strong>spec gaps</strong>: details a developer would have to ask about.
+        Opening a ticket that hasn&rsquo;t started also shows its first <strong>spec gap</strong>: a detail a developer
+        would have to ask about.
       </p>
       <p>
         &ldquo;No criteria&rdquo; and tracker links are found in code. The rest come from Claude reading the ticket, once it

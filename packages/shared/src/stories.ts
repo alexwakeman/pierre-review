@@ -359,8 +359,13 @@ export const STORY_REPORT_ITEMS_MAX = 6;
 /** The LEAN report: at most this many items per section. "Falling short" and actions are one per
  *  story issue at most; spotlights and themes are no longer written (old stored reports still read). */
 export const STORY_REPORT_LEAN = { doingWell: 3, fallingShort: 3, actions: 3 } as const;
-/** Ticket keys per point / theme / action. */
+/** Ticket keys per theme (old stored reports only). */
 export const STORY_REPORT_TICKETS_PER_ITEM_MAX = 8;
+/** Ticket keys per doingWell / fallingShort point: ONE example (2026-10-11, the BNG review: points
+ *  listing five tickets each made the report long without making it clearer). */
+export const STORY_REPORT_TICKETS_PER_POINT_MAX = 1;
+/** Ticket keys per action. */
+export const STORY_REPORT_TICKETS_PER_ACTION_MAX = 2;
 /** Characters, after trimming. Over-long text is cut (with "…"), never refused. */
 export const STORY_REPORT_TEXT_MAX = {
   headline: 200,
@@ -370,7 +375,9 @@ export const STORY_REPORT_TEXT_MAX = {
   /** A next-sprint action is a full instruction, not a heading: the first live report's actions
    *  ran 170-260 characters and were cut mid-word at 160. */
   action: 260,
-  /** detail, why */
+  /** A doingWell / fallingShort point's detail: ONE sentence. */
+  pointDetail: 200,
+  /** why, and old stored spotlight / theme details */
   detail: 360,
   /** leftOut reason */
   reason: 300,

@@ -392,18 +392,29 @@ describe('update panel', () => {
     expect(sprintBullets(withAssessment(ticket({ issues: [] }), 'succeeded', 'current', { body }), SPRINT_CHECKS_DEFAULT)).toEqual([]);
   });
 
-  it('spec gaps: their own section in the comment default, Claude’s current sentence included, never a bullet', () => {
+  it('spec gaps: their own section in the comment default, Claude’s current sentence replacing the first gap, never a bullet', () => {
     const body = { ...BODY, issues: [...BODY.issues, { id: 'spec_gaps' as const, text: 'No limit on rows.', ref: null }] };
+    const gaps = [
+      { type: 'edge_case' as const, text: 'No behaviour when the export is empty' },
+      { type: 'rule' as const, text: 'No rule for duplicates' },
+    ];
     const t = withAssessment(
-      ticket({ issues: [UNCLEAR], specGaps: [{ type: 'edge_case', text: 'No behaviour when the export is empty' }] }),
+      ticket({ issues: [UNCLEAR], specGaps: gaps }),
       'succeeded',
       'current',
       { body },
     );
     expect(sprintBullets(t, SPRINT_CHECKS_DEFAULT).map((b) => b.id)).toEqual(['unclear_done']);
     expect(proposedDefault(t, 'comment', SPRINT_CHECKS_DEFAULT)).toBe(
-      'Summary.\n\n- Say the export is CSV only.\n\n**Spec gaps**\n\n- Edge case: No behaviour when the export is empty\n- No limit on rows.\n\n**Proposed acceptance criteria**\n\n- old one\n- new two\n- added',
+      'Summary.\n\n- Say the export is CSV only.\n\n**Spec gaps**\n\n- No limit on rows.\n\n**Proposed acceptance criteria**\n\n- old one\n- new two\n- added',
     );
+    // Without a current run: the FIRST gap only.
+    expect(proposedDefault(ticket({ issues: [UNCLEAR], specGaps: gaps }), 'comment', SPRINT_CHECKS_DEFAULT)).toContain(
+      '**Spec gaps**\n\n- Edge case: No behaviour when the export is empty',
+    );
+    expect(proposedDefault(ticket({ issues: [UNCLEAR], specGaps: gaps }), 'comment', SPRINT_CHECKS_DEFAULT)).not.toContain('duplicates');
+    // A ticket under way shows no spec gaps at all.
+    expect(proposedDefault({ ...t, stage: 'writing' }, 'comment', SPRINT_CHECKS_DEFAULT)).not.toContain('Spec gaps');
     // The switch hides the section.
     expect(proposedDefault(t, 'comment', { off: ['spec_gaps'], issueTypes: [] })).not.toContain('Spec gaps');
   });

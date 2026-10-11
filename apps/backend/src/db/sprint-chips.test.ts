@@ -69,7 +69,11 @@ describe('sprintIssuesFor — with a current label', () => {
     const label: StoryIssueLabel = {
       criteria: [crit(1), crit(2, { testable: false, reason: 'no expected result' })],
       story: {
-        dependencies: [{ kind: 'design', what: 'map page design', owner: 'UCD team', ticketKey: null }],
+        dependencies: [
+          { kind: 'decision', what: 'map page sign-off', owner: 'UCD team', ticketKey: null },
+          // An input, not a blocker (`isRealStoryBlocker`): dropped.
+          { kind: 'design', what: 'Figma node', owner: null, ticketKey: null },
+        ],
         gaps: [{ type: 'edge_case', text: 'No behaviour when the upload fails' }],
       },
     };
@@ -79,9 +83,9 @@ describe('sprintIssuesFor — with a current label', () => {
     expect(issues[1]!.blockers).toEqual([
       {
         source: 'text',
-        kind: 'design',
+        kind: 'decision',
         ticketKey: null,
-        what: 'map page design',
+        what: 'map page sign-off',
         owner: 'UCD team',
         status: null,
         category: null,

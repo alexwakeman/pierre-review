@@ -545,7 +545,8 @@ const SPRINT_ACME2_ALL = foldStoryIssues({
       { n: 2, testable: true, reason: null },
     ],
     story: {
-      dependencies: [{ kind: 'design', what: 'email template', owner: 'UCD team', ticketKey: null }],
+      // A design input would be dropped (`isRealStoryBlocker`); an open decision is a real blocker.
+      dependencies: [{ kind: 'decision', what: 'email copy sign-off', owner: 'UCD team', ticketKey: null }],
       gaps: [{ type: 'edge_case', text: 'No behaviour when the link has expired' }],
     },
   },

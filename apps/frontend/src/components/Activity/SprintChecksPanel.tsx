@@ -62,7 +62,7 @@ export function SprintChecksPanel({
           Checks
           <InfoButton title="Checks">
             <p>Switch off an issue your team does not want raised. Every issue is on until you change it.</p>
-            <p>Spec gaps shows or hides the gaps listed when a ticket is opened.</p>
+            <p>Spec gaps shows or hides the spec gap shown when a ticket that hasn&rsquo;t started is opened.</p>
             <p>
               Pick issue types to raise issues only on tickets of those types, for example Story. With none picked, every
               type is checked. A ticket of another type is still listed, with no issues.

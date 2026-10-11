@@ -142,7 +142,11 @@ describe('selectStories', () => {
     const crit = (k: number) => Array.from({ length: k }, (_, i) => `c${i + 1}`);
     const label = {
       criteria: crit(4).map((_, i) => ({ n: i + 1, testable: i !== 2, reason: i === 2 ? 'no expected result' : null })),
-      story: { dependencies: [], gaps: [{ type: 'data' as const, text: 'No source for the prices' }] },
+      // An input named in the text is not a dependency (`isStoryDependencyItem`), as written either.
+      story: {
+        dependencies: [{ kind: 'design' as const, what: 'Figma node', owner: null, ticketKey: null }],
+        gaps: [{ type: 'data' as const, text: 'No source for the prices' }],
+      },
     };
     // I-1's only blocker is FINISHED: it still waited on it, so as written it is Blocked.
     const done = { key: 'X-9', title: 'Pricing API', status: 'Done', category: 'done' as const, relation: 'is blocked by', url: null };

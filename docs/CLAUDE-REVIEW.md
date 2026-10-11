@@ -1534,16 +1534,23 @@ names (`knownTicketsFor`, account-predicated, same tracker site):
 
 | Issue | Raised when | Detail it carries |
 |---|---|---|
-| Unclear when done | no criteria (code), or a criterion not `testable` | each criterion's number and the label's REASON |
-| Blocked | an OPEN tracker link (Jira "is blocked by" / "depends on", Linear "blocks"), or a dependency the label names | what, who (owner), ticket key and status; links first, a named key that is linked shown once |
+| Unclear when done | no criteria (code), or a criterion not `testable` | the FIRST TWO flagged criteria (number + REASON), then "and N more"; the chip keeps "N of M criteria" |
+| Blocked | a REAL blocker (`isRealStoryBlocker`): a ticket — tracker link or named key — not done (unknown status counts, reading "status unknown"), or a named DECISION nobody has made | what, who (owner), ticket key and status; links first, a named key that is linked shown once |
 | Spec gaps | the label lists missing details | ≤ 3 gaps, each typed (rule, edge case, design, data, non-functional) |
 
 - ⚠ **Spec gaps is NOT a This sprint chip** (2026-10-11: every labelled ticket got three, so a chip on
   every card said nothing). `STORY_ISSUES[].chip` / `STORY_CHIP_ISSUE_IDS` name the chips (Unclear when
   done, Blocked); the gaps ride `SprintTicketRow.specGaps` and render as the opened card's own "Spec
-  gaps" section (`sprintSpecGapLines`: code's typed gaps, then a CURRENT "Check against code" run's
-  spec_gaps sentence), copyable, and in Copy all and the comment default. Not in `flagCount` or the
-  order. The "Spec gaps" check now shows/hides that section.
+  gaps" section (`sprintSpecGapLines`) — ONE line, on a NOT-STARTED ticket only: a CURRENT "Check
+  against code" run's spec_gaps sentence, else code's FIRST gap; other stages show none. Copyable, and
+  the same in Copy all and the comment default. Not in `flagCount` or the order. The "Spec gaps" check
+  shows/hides that section.
+- ⚠ **BLOCKED IS REAL BLOCKERS ONLY** (2026-10-11, the review of all 42 BNG sprint tickets: of 63
+  dependency items, 13 were done tickets, 15 tickets of unknown status, 14 open and 21 had no ticket,
+  mostly inputs — Figma nodes, spreadsheets, reference files). `isRealStoryBlocker` (shared) keeps an
+  unfinished ticket or an open decision and drops done tickets and every other text kind with no ticket
+  key. Nothing left = no Blocked issue (no chip, not counted, not in the order). The rubric is unchanged
+  and Story health's linked-blocker rate does not use it.
 
 - **"Too big" and "Scope not stated" were REMOVED** (2026-10-11): the first fired on 69 of 73 real
   stories and splitting is the BA's call, not the reader's; the second was too generic to act on. Old
@@ -1554,7 +1561,8 @@ names (`knownTicketsFor`, account-predicated, same tracker site):
 - ⚠ **TWO QUESTIONS, TWO FOLDS.** This sprint asks "is it blocked NOW" (`foldStoryIssues`: a blocker
   whose status category is done — a link, or a named key resolved through stored tickets — is RESOLVED:
   listed, never raised). The story report's picks are merged stories, so they carry their issues "AS
-  WRITTEN" (`storyIssueMeasure` / `storyIssuesAsWritten`: any dependency, finished ones marked `resolved`).
+  WRITTEN" (`storyIssueMeasure` / `storyIssuesAsWritten`: any ticket or decision, `isStoryDependencyItem`,
+  finished ones marked `resolved`; inputs are dropped there too).
 - ⚠ **RATES over many stories (Story health, the story report's figures) are a THIRD rule,
   `storyIssueRateUnits`** (2026-10-11, after an agreement test showed story-level rates near 100%):
   "Criteria that can't be checked" = untestable CRITERIA of all criteria in the stories with a usable
@@ -1564,9 +1572,9 @@ names (`knownTicketsFor`, account-predicated, same tracker site):
   those; spec gaps = stories with a gap (HELD). A no-criteria story is counted apart (`noCriteria` /
   `noCriteriaFound`), never folded in.
 - Every sentence (chip detail, bullet) is TEMPLATED (`storyIssueChipText`, `storyIssueBullet`): the
-  label's short phrases sit inside them as data. Bullets show three items, then "and N more":
-  "Criterion 3: no expected result · …", "Waits on BMD-568 cookie banner (To Do) · Design for the map
-  page, UCD team, no ticket".
+  label's short phrases sit inside them as data. Bullets show three items (two criteria), then "and N
+  more": "Criterion 3: no expected result · …", "Waits on BMD-568 cookie banner (To Do) · BMD-9 (status
+  unknown) · Sign-off on the copy, product owner, no ticket".
 
 ## Story report (Reports → Stories)
 
@@ -1603,8 +1611,12 @@ orphan `pro_story_notes` table from the never-committed plugin migration 0041, w
   reads as `issues: []`. The prompt asks every point to say what the detail says and never "depends on
   other work" without naming it; it sets an optional `issue` per point (kept only when
   `isStoryIssueId`; otherwise the field is dropped, never the point), at most one shortfall and one
-  action per issue (`STORY_REPORT_LEAN`). It may quote issue rates from `wholeWindow.issueRates` only
-  (`{measure, count, of, unit}`), each in its own unit (`STORY_REPORT_FORMAT` v5).
+  action per issue (`STORY_REPORT_LEAN`: ≤ 3 doingWell, ≤ 3 fallingShort, ≤ 3 actions). BRIEF: a point's
+  detail is ONE sentence (`STORY_REPORT_TEXT_MAX.pointDetail`, 200) naming ONE example ticket
+  (`STORY_REPORT_TICKETS_PER_POINT_MAX`); an action names ≤ 2 (`…_PER_ACTION_MAX`). The tool schema's
+  `.max` makes the model rewrite; the validator's cut is the backstop. It may quote issue rates from
+  `wholeWindow.issueRates` only (`{measure, count, of, unit}`), each in its own unit
+  (`STORY_REPORT_FORMAT` v6).
   Old rows lack all three fields and render without them.
 - **The run**: Haiku 5.5, an in-process `stories` MCP server with `list_candidates`, `get_story` and
   `submit_report` (the trial harness's descriptions, zod shapes and SYSTEM text verbatim, plus the

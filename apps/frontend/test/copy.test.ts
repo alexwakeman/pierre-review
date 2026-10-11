@@ -112,14 +112,34 @@ describe('markdown composers', () => {
     ).toBe('**Unclear when done**: Say how long. (`src/a.ts` in `acme/web`)');
   });
 
-  it('copy all without an assessment: header, link, one bullet per issue, then the spec gaps', () => {
-    expect(ticketCopyAllMarkdown(ticket(), SPRINT_CHECKS_DEFAULT)).toBe(
+  it('copy all without an assessment: header, link, one bullet per issue, then the spec gap (not started only)', () => {
+    // Under way: no spec gaps.
+    expect(ticketCopyAllMarkdown(ticket(), SPRINT_CHECKS_DEFAULT)).not.toContain('Spec gaps');
+    expect(ticketCopyAllMarkdown(ticket({ stage: 'not_started', phase: 'not_started' }), SPRINT_CHECKS_DEFAULT)).toBe(
       [
         '## ACME-2 — Sign in with a link',
         'https://acme.atlassian.net/browse/ACME-2',
         `- **Unclear when done**: ${storyIssueBullet(ISSUES[0]!)}`,
         GAPS_MD,
       ].join('\n\n'),
+    );
+  });
+
+  it('copy all lists the first two unclear criteria, then "and N more"', () => {
+    const unclear = {
+      id: 'unclear_done' as const,
+      total: 5,
+      reasons: ['untestable' as const],
+      criteria: [
+        { n: 1, reason: 'vague' },
+        { n: 3, reason: 'no result' },
+        { n: 4, reason: 'x' },
+      ],
+      blockers: [],
+      gaps: [],
+    };
+    expect(ticketCopyAllMarkdown(ticket({ issues: [unclear] }), SPRINT_CHECKS_DEFAULT)).toContain(
+      '- **Unclear when done**: Criterion 1: vague · Criterion 3: no result and 1 more',
     );
   });
 
@@ -131,7 +151,7 @@ describe('markdown composers', () => {
   });
 
   it("copy all with an assessment: the summary, then Claude's sentence replaces the template", () => {
-    const md = ticketCopyAllMarkdown(ticket({ assessment: succeeded(body()) }), SPRINT_CHECKS_DEFAULT);
+    const md = ticketCopyAllMarkdown(ticket({ stage: 'not_started', phase: 'not_started', assessment: succeeded(body()) }), SPRINT_CHECKS_DEFAULT);
     expect(md).toBe(
       [
         '## ACME-2 — Sign in with a link',

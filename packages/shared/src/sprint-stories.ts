@@ -154,8 +154,9 @@ export interface SprintReadState {
 // A ticket's CHIPS are the story issues with `chip: true` (`story-issues.ts`: `foldStoryIssues`,
 // folded by the server from the criteria and the CURRENT stored label), filtered by the workspace's
 // checks (`applyStoryIssueChecks`) — so `flagCount`, the order and Copy all agree with what is on
-// screen. ⚠ Spec gaps is NOT a chip: its gaps ride `specGaps` and show only in the opened card, as
-// their own section (the "Spec gaps" check still switches that section).
+// screen. ⚠ Spec gaps is NOT a chip: its gaps ride `specGaps` and the opened card of a NOT-STARTED
+// ticket shows the first one as its own section (`sprintSpecGapLines`; the "Spec gaps" check still
+// switches that section off).
 
 /** The workspace's checks: `workspaces.sprint_checks` (same JSON column as before; parsed
  *  tolerantly — unknown ids dropped (incl. the retired 'too_big' / 'waits_on_work' /
@@ -614,8 +615,9 @@ export interface SprintTicketRow {
    *  the workspace's checks (`applyStoryIssueChecks`), in STORY_ISSUES order; ≤ 2. [] for a ticket
    *  whose type the checks do not cover. Never spec_gaps. */
   issues: StoryIssue[];
-  /** The CURRENT label's spec gaps (≤ STORY_SPEC_GAPS_MAX) — the opened card's own section. [] when
-   *  there is no current label, the "Spec gaps" check is off, or the type is not checked. */
+  /** The CURRENT label's spec gaps (≤ STORY_SPEC_GAPS_MAX). [] when there is no current label, the
+   *  "Spec gaps" check is off, or the type is not checked. The opened card shows at most ONE of them,
+   *  on a not-started ticket only (`sprintSpecGapLines`). */
   specGaps: StorySpecGap[];
   /** = `issues.length` — the within-phase sort key (spec gaps do not count). */
   flagCount: number;
@@ -750,17 +752,22 @@ export interface SprintSpecGapLine {
   ref: SprintCodeRef | null;
 }
 
-/** THE Spec gaps section: code's gaps (`t.specGaps`), then a CURRENT run's spec_gaps sentence. [] when
- *  the "Spec gaps" check is off or the ticket's type is not checked. Pure. */
+/** THE Spec gaps section — ONE line at most, on a NOT-STARTED ticket only: a CURRENT run's spec_gaps
+ *  sentence when there is one, else code's FIRST gap (`t.specGaps[0]`). [] on any other stage (the
+ *  work is under way; a missing detail is a question for the person doing it, not for refinement),
+ *  when the "Spec gaps" check is off, or when the ticket's type is not checked. The card, Copy all and
+ *  the comment default all read this. 2026-10-11, the BNG review: three gaps on every card was the
+ *  bulk of the page, and on tickets already in progress none of them was acted on. Pure. */
 export function sprintSpecGapLines(
-  t: Pick<SprintTicketRow, 'specGaps' | 'assessment' | 'issueType'>,
+  t: Pick<SprintTicketRow, 'specGaps' | 'assessment' | 'issueType' | 'stage'>,
   checks: SprintChecks,
 ): SprintSpecGapLine[] {
+  if (t.stage !== 'not_started') return [];
   if (checks.off.includes('spec_gaps') || !storyIssueTypeChecked(checks, t.issueType)) return [];
-  const out: SprintSpecGapLine[] = (t.specGaps ?? []).map((g) => ({ text: g.text, type: g.type, source: 'code', ref: null }));
   const c = sprintCurrentAssessmentBodyOf(t)?.issues.find((x) => x.id === 'spec_gaps');
-  if (c != null && c.text.trim() !== '') out.push({ text: c.text, type: null, source: 'claude', ref: c.ref });
-  return out;
+  if (c != null && c.text.trim() !== '') return [{ text: c.text, type: null, source: 'claude', ref: c.ref }];
+  const g = (t.specGaps ?? [])[0];
+  return g == null ? [] : [{ text: g.text, type: g.type, source: 'code', ref: null }];
 }
 
 /** One spec gap as plain text: "Edge case: No behaviour when the upload fails". */
