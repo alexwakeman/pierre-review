@@ -22,12 +22,12 @@ import { SprintTicketCard } from './SprintTicketCard.js';
 //   • SECTIONS follow the workspace's status layout (`statusLayout`): Not started, then "Writing code"
 //     (one section per status before the code-delivered status), then "Code delivered" (one per status
 //     from it on). Done is counted, never listed. Settings → Statuses changes the order and the split.
-//   • A CARD carries at most three issue chips (the THREE story issues, `story-issues.ts`) and expands
-//     to: the detail per issue (which criteria and why, what it waits on and who owns it, the missing
-//     details), candidate repos, "Check against code" (agentic, local-only) and the update panel.
+//   • A CARD carries at most two issue chips (Unclear when done, Blocked — `STORY_CHIP_ISSUE_IDS`) and
+//     expands to: the detail per issue (which criteria and why, what it waits on and who owns it), the
+//     Spec gaps section (never a chip), candidate repos, "Check against code" (agentic, local-only) and the update panel.
 //   • NOTHING IS WRITTEN TO A TRACKER without the per-ticket confirm dialog (SprintUpdatePanel).
 //
-// ⚠ THE ORDER IS THE SERVER'S — stage, status section, then most issues first. Never by assignee,
+// ⚠ THE ORDER IS THE SERVER'S — stage, status section, then most issues first (chips only). Never by assignee,
 // and there is no team or person score here.
 // ⚠ EVERY EXPLANATION SITS BEHIND AN ⓘ — the page carries facts and labels.
 // ⚠ GENERATED TEXT IS SELECTABLE and every generated block has a Copy button (lib/copy.ts).
@@ -60,7 +60,7 @@ function SprintInfo({ data }: { data: SprintStoriesResponse }): JSX.Element {
     <>
       <p>{sourceInfo(data.source)}</p>
       <p>The list is read again every 20 minutes while this tab is in use. Refresh reads it now.</p>
-      <p>Each ticket shows up to three issues:</p>
+      <p>Each ticket shows up to two issues:</p>
       <ul className="list-disc space-y-0.5 pl-5">
         <li>
           <strong>Unclear when done</strong>: no acceptance criteria, or criteria a tester couldn&rsquo;t check, each with
@@ -69,10 +69,10 @@ function SprintInfo({ data }: { data: SprintStoriesResponse }): JSX.Element {
         <li>
           <strong>Blocked</strong>: unfinished work it waits on: tickets linked in your tracker, and work the ticket names.
         </li>
-        <li>
-          <strong>Spec gaps</strong>: details a developer would have to ask about.
-        </li>
       </ul>
+      <p>
+        Opening a ticket also lists its <strong>spec gaps</strong>: details a developer would have to ask about.
+      </p>
       <p>
         &ldquo;No criteria&rdquo; and tracker links are found in code. The rest come from Claude reading the ticket, once it
         has read the current text.

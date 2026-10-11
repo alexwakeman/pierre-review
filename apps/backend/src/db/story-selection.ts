@@ -3,10 +3,12 @@ import {
   STORY_HEALTH_ISSUE_SERIES,
   STORY_ISSUE_BY_ID,
   STORY_ISSUE_IDS,
+  STORY_ISSUE_RATE_UNIT,
   STORY_REPORT_GROUP_CAPS,
   foldStoryIssues,
   storyBlockers,
   storyIssueMeasure,
+  storyIssueRateUnits,
   storyReportWindowDays,
   usableStoryLabel,
   type StoryIssue,
@@ -39,8 +41,10 @@ import { buildStoryIssueInput, knownTicketsFor, linksOfRow, namedTicketKeys } fr
 // no_criteria.
 //
 // THE THREE STORY ISSUES (shared `story-issues.ts`): `population.issueRates` counts every story in
-// the window by THE rate rule `storyIssueMeasure` (labelled stories only; "no criteria" stays its own
-// `noCriteriaFound`) — so the agent's rates come from code over the whole window, never from the picks.
+// the window by THE rate rule `storyIssueRateUnits` — the SAME measures as Story health: criteria that
+// can't be checked (over criteria in labelled stories; "no criteria" stays its own `noCriteriaFound`),
+// stories with a tracker-linked blocker (omitted when none has one), spec gaps omitted while held — so
+// the agent's rates come from code over the whole window, never from the picks.
 // Each pick carries its issues AS WRITTEN (`storyIssuesAsWritten`) with a per-issue state (true / false
 // / null = not known — never "avoided"): the SAME question the rates answer, so a story the rate counts
 // as blocked shows its blockers, finished ones included (`resolved`). These are merged stories — "is it
@@ -61,20 +65,29 @@ export interface StorySelection {
 
 const pct = (vals: number[], v: number) => vals.filter((x) => x <= v).length / Math.max(vals.length, 1);
 
-/** Whole-window issue rates by THE rate rule; a story whose input is null (ticket never read) is out. */
+/** Whole-window issue rates by THE rate rule (`storyIssueRateUnits`), every issue, in STORY_ISSUES
+ *  order — the caller drops the omitted ones. A story whose input is null (ticket never read) is out. */
 export function storyIssueRates(inputs: Iterable<StoryIssueInput | null>): StoryReportIssueRate[] {
-  const rates = STORY_ISSUE_IDS.map((id): StoryReportIssueRate => ({ id, stories: 0, of: 0 }));
+  const rates = STORY_ISSUE_IDS.map((id): StoryReportIssueRate => ({ id, stories: 0, of: 0, unit: STORY_ISSUE_RATE_UNIT[id] }));
   for (const input of inputs) {
     if (input == null) continue;
-    const m = storyIssueMeasure(input);
+    const m = storyIssueRateUnits(input);
     for (const r of rates) {
       const v = m[r.id];
       if (v == null) continue;
-      r.of += 1;
-      if (v) r.stories += 1;
+      r.of += v.den;
+      r.stories += v.num;
     }
   }
   return rates;
+}
+
+/** The rates the report may show and quote: Story health's omissions applied — a HELD series' rate is
+ *  dropped, and "Stories with a linked blocker" is dropped when no story has a link (as the chart). */
+export function reportableIssueRates(rates: readonly StoryReportIssueRate[]): StoryReportIssueRate[] {
+  return rates.filter(
+    (r) => STORY_HEALTH_HELD[STORY_HEALTH_ISSUE_SERIES[r.id]] == null && !(r.id === 'blocked' && r.stories === 0),
+  );
 }
 
 /** One story's issues AS WRITTEN — `foldStoryIssues`, except `blocked` carries EVERY dependency the
@@ -191,13 +204,10 @@ export function selectStories(
     workingDayHours,
     truncated,
   };
-  // A rate whose Story health series is HELD (STORY_HEALTH_HELD: its judgement failed the agreement
-  // test) is not handed to the report either — the same figure must not be withheld on one screen and
-  // quoted on the next.
+  // A rate Story health omits (HELD, or no linked blocker anywhere) is not handed to the report either —
+  // the same figure must not be withheld on one screen and quoted on the next.
   if (issueInputs != null) {
-    population.issueRates = storyIssueRates(stories.map((s) => issueInputs.get(s.row.ident) ?? null)).filter(
-      (r) => STORY_HEALTH_HELD[STORY_HEALTH_ISSUE_SERIES[r.id]] == null,
-    );
+    population.issueRates = reportableIssueRates(storyIssueRates(stories.map((s) => issueInputs.get(s.row.ident) ?? null)));
   }
 
   const candidates: StoryReportCandidate[] = picked.map((c) => {

@@ -3,6 +3,8 @@ import {
   STORY_ISSUE_BY_ID,
   isStoryIssueId,
   type StoryReportPoint,
+  type StoryIssueId,
+  type StoryReportIssueRate,
   type ReportingWindowInfo,
   type StoryReportBody,
   type StoryReportCandidate,
@@ -134,14 +136,28 @@ export function storyReportFigures(p: StoryReportPopulation): StoryReportFigure[
     label: 'Median working time',
     value: p.medianWorkingHours == null ? 'not measured' : formatWorkingTime(p.medianWorkingHours, p.workingDayHours),
   });
-  // The three story issues, counted by code over the whole window (absent on reports written before
-  // them; an issue nothing could be told about is left out, never "0 of 0"; a retired id on an old
-  // stored report is dropped). Over the stories Claude has read in their current form (`of`), never
-  // mixed with no-criteria stories.
+  // The story issues, counted by code over the whole window with Story health's measures (absent on
+  // reports written before them; an issue nothing could be told about is left out, never "0 of 0"; a
+  // retired id on an old stored report is dropped). Never mixed with no-criteria stories.
   for (const r of p.issueRates ?? []) {
-    if (isStoryIssueId(r.id) && r.of > 0) out.push({ key: `issue:${r.id}`, label: STORY_ISSUE_BY_ID[r.id].measureLabel, value: `${r.stories} of ${r.of} read` });
+    if (isStoryIssueId(r.id) && r.of > 0) out.push({ key: `issue:${r.id}`, ...issueRateFigure(r) });
   }
   return out;
+}
+
+/** Labels of the rates an OLDER stored report carries (no `unit`): story-level over labelled stories,
+ *  blocked counting named dependencies too — never shown under the new measures' names. */
+const LEGACY_RATE_LABEL: Record<StoryIssueId, string> = {
+  unclear_done: 'Unclear when done',
+  blocked: 'Had blockers',
+  spec_gaps: 'Spec gaps',
+};
+
+/** One issue rate's label and value: "Criteria that can’t be checked" · "12 of 80 criteria". */
+export function issueRateFigure(r: StoryReportIssueRate): { label: string; value: string } {
+  if (r.unit == null) return { label: LEGACY_RATE_LABEL[r.id], value: `${r.stories} of ${r.of} read` };
+  const unit = r.unit === 'criteria' ? (r.of === 1 ? 'criterion' : 'criteria') : r.of === 1 ? 'story' : 'stories';
+  return { label: STORY_ISSUE_BY_ID[r.id].measureLabel, value: `${r.stories} of ${r.of} ${unit}` };
 }
 
 /** The point's issue tag: the problem on a shortfall, the issue AVOIDED on a strength. null when the

@@ -1,5 +1,7 @@
 import {
   SPRINT_CHECKS_DEFAULT,
+  STORY_CHIP_ISSUE_IDS,
+  STORY_SPEC_GAPS_MAX,
   applyStoryIssueChecks,
   foldStoryIssues,
   usableStoryLabel,
@@ -9,16 +11,19 @@ import {
   type KnownTicket,
   type StoryIssue,
   type StoryIssueLabel,
+  type StorySpecGap,
   type TicketLinkBlocker,
   type TrackerProvider,
 } from '@pierre-review/shared';
 import { acceptanceSectionOf, extractCriteria } from './story-criteria.js';
 import { buildStoryIssueInput } from './story-issue-input.js';
 
-// REPORTS → THIS SPRINT — A TICKET'S ISSUES (pure; sprint-chips.test.ts). The THREE story issues
+// REPORTS → THIS SPRINT — A TICKET'S ISSUES (pure; sprint-chips.test.ts). The story issues
 // (`foldStoryIssues`, shared story-issues.ts) over the ticket's numbered criteria, its CURRENT stored
 // label, its stored tracker links and the stored tickets a label names, then the workspace's checks
 // (`applyStoryIssueChecks`) — HERE, so flagCount, the order and Copy all agree with what is on screen.
+// Only the CHIP issues (unclear_done, blocked) are chips; spec gaps go to their own section
+// (`sprintSpecGapsFor` → `SprintTicketRow.specGaps`).
 //
 // ⚠ A LABEL HALF NEEDS A CURRENT LABEL — the caller hands in only the label whose text hash equals
 // today's `storyLabelInput` hash; the fold also ignores a label that judged a different NUMBER of
@@ -54,11 +59,21 @@ export function sprintCriteriaOf(
   return { items: [], source: 'none' };
 }
 
-/** The issues this workspace raises on one ticket, in STORY_ISSUES order (≤ 3). */
+/** The CHIP issues this workspace raises on one ticket, in STORY_ISSUES order (≤ 2; never spec_gaps —
+ *  see `sprintSpecGapsFor`). */
 export function sprintIssuesFor(i: SprintChipInput, checks: SprintChecks = SPRINT_CHECKS_DEFAULT): StoryIssue[] {
   const { items } = sprintCriteriaOf(i, i.provider);
   const input = buildStoryIssueInput({ criteria: items, label: i.label, links: i.links ?? null, knownTickets: i.knownTickets ?? null });
-  return applyStoryIssueChecks(foldStoryIssues(input), checks, i.issueType ?? null);
+  return applyStoryIssueChecks(foldStoryIssues(input), checks, i.issueType ?? null).filter((x) => STORY_CHIP_ISSUE_IDS.includes(x.id));
+}
+
+/** The ticket's spec gaps for the opened card's own section: the CURRENT usable label's gaps, when the
+ *  workspace's "Spec gaps" check is on and the type is checked; else []. */
+export function sprintSpecGapsFor(i: SprintChipInput, checks: SprintChecks = SPRINT_CHECKS_DEFAULT): StorySpecGap[] {
+  const { items } = sprintCriteriaOf(i, i.provider);
+  const input = buildStoryIssueInput({ criteria: items, label: i.label, links: i.links ?? null, knownTickets: i.knownTickets ?? null });
+  const gaps = applyStoryIssueChecks(foldStoryIssues(input), checks, i.issueType ?? null).find((x) => x.id === 'spec_gaps');
+  return gaps == null ? [] : gaps.gaps.slice(0, STORY_SPEC_GAPS_MAX);
 }
 
 /** The label half's state on this ticket. */

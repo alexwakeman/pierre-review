@@ -22,7 +22,7 @@ import {
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { getSprintChecks } from './sprint-checks.js';
-import { sprintCriteriaOf, sprintIssuesFor, sprintLabelState, type SprintChipInput } from './sprint-chips.js';
+import { sprintCriteriaOf, sprintIssuesFor, sprintLabelState, sprintSpecGapsFor, type SprintChipInput } from './sprint-chips.js';
 import { suggestSprintRepos, suggestTicketOf } from './sprint-repo-suggest.js';
 import {
   kickSprintRead,
@@ -59,7 +59,8 @@ import { getSprintStatusLayout, sprintStageOf, sprintStatusSectionIndex } from '
 //     Done (status category) is counted, never listed.
 //   • ORDER: stage, then the status's section (layout order), then most issues first, then key. NEVER
 //     by assignee, and no team or person score.
-//   • ISSUES: the three story issues (`sprintIssuesFor`) over the criteria, the CURRENT label (text
+//   • ISSUES: the two CHIP issues (`sprintIssuesFor`) and the spec gaps (`sprintSpecGapsFor`, their own
+//     section of the opened card, never a chip) over the criteria, the CURRENT label (text
 //     hash = today's `storyLabelInput` hash, `STORY_RUBRIC_VERSION`), the stored tracker links
 //     (`blocked_by_json`) and the stored tickets a label names (`knownTicketsFor`). `aiEnabled` false →
 //     labels 'off' and only what code knows ("no criteria", open linked blockers).
@@ -361,6 +362,7 @@ export async function getSprintStories(
       criteria: sprintCriteriaOf(text, provider),
       labels: sprintLabelState(chipInput, opts.aiEnabled),
       issues,
+      specGaps: sprintSpecGapsFor(chipInput, checks),
       flagCount: issues.length,
       pullRequests: prRefs.get(row.ident) ?? [],
       repos: {

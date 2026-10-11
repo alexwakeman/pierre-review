@@ -15,6 +15,7 @@ import {
   markdownWithLinks,
   pointIssueLabel,
   storyReportFigures,
+  issueRateFigure,
   storyReportMarkdown,
   storyReportSections,
   storyReportWindowLabel,
@@ -160,6 +161,21 @@ describe('figures', () => {
       ['Unclear when done', '12 of 81 read'],
       ['Spec gaps', '30 of 40 read'],
     ]);
+  });
+
+  it('a current rate wears Story health\'s measure and its unit; an old one keeps its old label', () => {
+    const f = storyReportFigures({
+      ...population,
+      issueRates: [
+        { id: 'unclear_done', stories: 12, of: 81, unit: 'criteria' },
+        { id: 'blocked', stories: 3, of: 40, unit: 'stories' },
+      ],
+    });
+    expect(f.slice(-2).map((x) => [x.label, x.value])).toEqual([
+      ['Criteria that can’t be checked', '12 of 81 criteria'],
+      ['Stories with a linked blocker', '3 of 40 stories'],
+    ]);
+    expect(issueRateFigure({ id: 'blocked', stories: 2, of: 9 })).toEqual({ label: 'Had blockers', value: '2 of 9 read' });
   });
 
   it('names a point\'s story issue, and nothing on an old point or a retired id', () => {

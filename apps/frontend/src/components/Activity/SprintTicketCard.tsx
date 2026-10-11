@@ -7,17 +7,19 @@ import {
   sprintAssessmentBodyOf,
   sprintBullets,
   sprintCurrentAssessmentBodyOf,
+  sprintSpecGapLines,
   storyBlockerPhrase,
   storyIssueChipText,
   type SprintBullet,
   type SprintChecks,
   type SprintRepoRef,
+  type SprintSpecGapLine,
   type SprintTicketRow,
   type StoryBlocker,
   type StoryIssue,
 } from '@pierre-review/shared';
 import { useSprintReposSaving, useSprintSetRepos } from '../../hooks/useSprintStories.js';
-import { sprintBulletMarkdown, ticketCopyAllMarkdown } from '../../lib/copy.js';
+import { sprintBulletMarkdown, sprintSpecGapLineMarkdown, ticketCopyAllMarkdown } from '../../lib/copy.js';
 import { useOpenTicketTab } from '../../lib/ticketTab.js';
 import { relativeTime, safeExternalUrl } from '../../lib/ui.js';
 import { ChevronIcon, CloseIcon, PlusIcon, PullRequestIcon, SparkleIcon } from '../Icons.js';
@@ -27,11 +29,12 @@ import { SprintCopyButton } from './SprintCopyButton.js';
 import { SprintUpdatePanel } from './SprintUpdatePanel.js';
 
 // One ticket on Reports → This sprint. Collapsed: key + title, status, assignee (display only), at
-// most three issue chips, PRs (each opens on GitHub; "Ticket PRs" opens the ticket tab). Expanded, in
-// this order and nothing else: the detail per issue (each copyable as its one-line bullet; Claude's
-// sentence replaces the template once the ticket was checked against code), the candidate repos, the
-// "Check against code" button and the update panel. "Copy all" copies the header, the summary and
-// the bullets.
+// most two issue chips (Unclear when done, Blocked), PRs (each opens on GitHub; "Ticket PRs" opens the
+// ticket tab). Expanded, in this order and nothing else: the detail per issue (each copyable as its
+// one-line bullet; Claude's sentence replaces the template once the ticket was checked against code),
+// the Spec gaps section (each gap with its type, copyable; never a chip), the candidate repos, the
+// "Check against code" button and the update panel. "Copy all" copies the header, the summary, the
+// bullets and the spec gaps.
 //
 // ⚠ THE DETAIL IS THE SPECIFIC ONE: which criterion and why, what the ticket waits on (a linked key
 // opens in the tracker), who owns it and its state, which details the spec leaves out. Finished
@@ -147,7 +150,10 @@ export function SprintTicketCard({
             <SprintAssessment ticket={t} workspaceId={workspaceId} aiEnabled={aiEnabled} />
           )}
           {/* Nothing to propose and nothing written yet → no editor at all. */}
-          {(sprintBullets(t, checks).length > 0 || sprintCurrentAssessmentBodyOf(t) != null || t.lastWrite != null) && (
+          {(sprintBullets(t, checks).length > 0 ||
+            sprintSpecGapLines(t, checks).length > 0 ||
+            sprintCurrentAssessmentBodyOf(t) != null ||
+            t.lastWrite != null) && (
             <SprintUpdatePanel ticket={t} workspaceId={workspaceId} checks={checks} />
           )}
         </div>
@@ -161,6 +167,7 @@ function IssuesBlock({ ticket: t, checks }: { ticket: SprintTicketRow; checks: S
   const body = sprintAssessmentBodyOf(t);
   const stale = body != null && t.assessment?.currency === 'stale';
   const bullets = sprintBullets(t, checks);
+  const gaps = sprintSpecGapLines(t, checks);
   return (
     <section className="space-y-2" data-testid="sprint-issues">
       {record?.outdated === true && <p className={`text-xs ${MUTED}`}>Out of date — check against code again.</p>}
@@ -175,7 +182,7 @@ function IssuesBlock({ ticket: t, checks }: { ticket: SprintTicketRow; checks: S
         </p>
       )}
       {bullets.length === 0 ? (
-        <p className={`text-xs ${MUTED}`}>Nothing flagged.</p>
+        gaps.length === 0 && <p className={`text-xs ${MUTED}`}>Nothing flagged.</p>
       ) : (
         <ul className="space-y-1.5">
           {bullets.map((b) => {
@@ -196,7 +203,37 @@ function IssuesBlock({ ticket: t, checks }: { ticket: SprintTicketRow; checks: S
           })}
         </ul>
       )}
+      <SpecGapsBlock gaps={gaps} />
     </section>
+  );
+}
+
+/** The Spec gaps section: each gap with its type (Claude's sentence marked), each copyable. Nothing when
+ *  there are none or the "Spec gaps" check is off. */
+function SpecGapsBlock({ gaps }: { gaps: SprintSpecGapLine[] }): JSX.Element | null {
+  if (gaps.length === 0) return null;
+  return (
+    <div data-testid="sprint-spec-gaps">
+      <h5 className="text-xs font-semibold text-gray-800 dark:text-gray-100">Spec gaps</h5>
+      <ul className="mt-0.5 space-y-1">
+        {gaps.map((g, i) => (
+          <li key={i} className="flex items-start gap-2">
+            <p className="min-w-0 flex-1 text-xs text-gray-800 dark:text-gray-100">
+              {g.text}
+              {g.type != null && <span className={MUTED}> · {STORY_SPEC_GAP_TYPE_LABEL[g.type]}</span>}
+              {g.ref != null && (
+                <span className={MUTED}>
+                  {' '}
+                  <code className="font-mono text-[11px]">{g.ref.path}</code> in {g.ref.repo}
+                </span>
+              )}
+              {g.source === 'claude' && <ClaudeMark />}
+            </p>
+            <SprintCopyButton markdown={sprintSpecGapLineMarkdown(g)} what="this spec gap" />
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -305,7 +342,7 @@ function ClaudeBullet({ bullet: b, label }: { bullet: SprintBullet; label: strin
 }
 
 /** One issue's specific detail (code's): every flagged criterion with its reason, every blocker with its
- *  owner and state (a linked key opens the tracker), every spec gap with its type. */
+ *  owner and state (a linked key opens the tracker). */
 function IssueDetail({ issue, criteria, text }: { issue: StoryIssue; criteria: string[]; text: string }): JSX.Element {
   const label = STORY_ISSUE_BY_ID[issue.id].label;
   if (issue.id === 'unclear_done' && issue.criteria.length > 0) {
@@ -338,20 +375,6 @@ function IssueDetail({ issue, criteria, text }: { issue: StoryIssue; criteria: s
           {done.map((b, i) => (
             <li key={`d${i}`} className={MUTED}>
               Done: <BlockerText blocker={{ ...b, status: null }} />
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-  }
-  if (issue.id === 'spec_gaps' && issue.gaps.length > 0) {
-    return (
-      <div>
-        <strong className="font-semibold">{label}</strong>
-        <ul className="mt-0.5 space-y-0.5">
-          {issue.gaps.map((g, i) => (
-            <li key={i}>
-              {g.text} <span className={MUTED}>· {STORY_SPEC_GAP_TYPE_LABEL[g.type]}</span>
             </li>
           ))}
         </ul>

@@ -43,10 +43,10 @@ import { weekLabel } from './chronologyTrendModel.js';
 import { RegenProgressBar } from './RegenProgressBar.js';
 import {
   axisTop,
-  blockedSplitLine,
   clusterShifts,
   gapTypesLine,
   moreStoriesLine,
+  omittedSentence,
   seriesInfoLines,
   coverageLine,
   createdLine,
@@ -75,10 +75,12 @@ import {
 // § Story health.
 //
 //   • REFINEMENT — each story in the week its ticket was created, as SMALL MULTIPLES: one small chart
-//     per story issue (Unclear when done, Blocked, Spec gaps; its latest rolling value large, the
-//     change since the first one small). 2 columns from 560px, else 1. Hovering a week lists that
-//     week's stories with the issue (Blocked: linked vs named only; Spec gaps: by type); clicking it
-//     (or "Stories") PINS the list below the chart, where each story opens the ticket tab.
+//     per story issue the server sends (Criteria that can't be checked — Claude, over criteria; Stories
+//     with a linked blocker — code, tracker links only; its latest rolling value large, the change
+//     since the first one small). 2 columns from 560px, else 1. A series the server leaves out
+//     (`omitted`: held, or no blocking links in the span) is ONE short sentence; the why sits behind
+//     the panel's ⓘ. Hovering a week lists that week's stories with the issue; clicking it (or
+//     "Stories") PINS the list below the chart, where each story opens the ticket tab.
 //   • DELIVERY — each story in the week of its last merge, as three strips (one per unit, so no two
 //     scales share an axis): working time by size band, pull requests per story, criteria met.
 //
@@ -87,7 +89,7 @@ import {
 // hollow and faint and the server already left them out of the line and the shifts.
 // ⚠ GREEN/RED ONLY ON A DETECTED SHIFT, FROM `shift.verdict` — never from a client direction.
 // ⚠ WITHOUT AGENTIC AI (cloud, `LIMN_AI_DISABLED`) the server omits every label series and the page
-// offers no button: code measures only. A missing runtime/credential swaps the button via `AiRunGate`.
+// offers no button: code measures only (the linked-blocker chart still shows). A missing runtime/credential swaps the button via `AiRunGate`.
 // ⚠ EVERY EXPLANATION SITS BEHIND AN ⓘ (Product voice). Each CHART's ⓘ is COMPUTED (storyHealthModel
 // `seriesInfoLines`): what counts, this week's figure, the detected shift — nothing generic. The method
 // (rolling line, thin weeks, the shift test, label noise) lives once, in the section's ⓘ.
@@ -334,6 +336,7 @@ function SmallMultiple({
       : [{ key: 'shift', x: cx(shift.week), dashed: true, icon: null, count: 1, label: shiftLine(shift), lines: [] }];
   const shiftStyle = shift?.verdict == null ? null : HEADLINE_INK[shift.verdict];
   const isLabel = meta.source === 'label';
+  const isRefinement = meta.panel === 'refinement';
 
   return (
     <div data-testid={`story-health-sm-${meta.id}`} className="min-w-0">
@@ -404,10 +407,10 @@ function SmallMultiple({
               width={band}
               height={SM_PLOT}
               fill="transparent"
-              className={isLabel ? 'cursor-pointer' : undefined}
+              className={isRefinement ? 'cursor-pointer' : undefined}
               onMouseEnter={() => setHover(i)}
               onMouseLeave={() => setHover((h) => (h === i ? null : h))}
-              onClick={isLabel ? () => pin(pinned === i ? null : i) : undefined}
+              onClick={isRefinement ? () => pin(pinned === i ? null : i) : undefined}
             />
           ))}
         </svg>
@@ -415,11 +418,11 @@ function SmallMultiple({
           <FloatingTip x={cx(hover)} y={SM_TOP} width={width} centered>
             <div className="font-medium">{storyWeekHead(weeks[hover]!)}</div>
             <div>{pointLine(meta, points[hover]!)}</div>
-            {isLabel && <div>{createdLine(weeks[hover]!)}</div>}
+            {isRefinement && <div>{createdLine(weeks[hover]!)}</div>}
             {isLabel && labels && <div>{coverageLine(weeks[hover]!)}</div>}
             {shift != null && shift.week === hover && <div>{shiftLine(shift)}</div>}
-            {isLabel && <WeekExtras point={points[hover]!} />}
-            {isLabel && (points[hover]!.stories?.length ?? 0) > 0 && (
+            {isRefinement && <WeekExtras point={points[hover]!} />}
+            {isRefinement && (points[hover]!.stories?.length ?? 0) > 0 && (
               <ul className="mt-1 max-w-[16rem] whitespace-normal">
                 {points[hover]!.stories!.map((st) => (
                   <li key={st.ident} className="break-words">
@@ -442,7 +445,7 @@ function SmallMultiple({
           {shift.verdict != null && <span> · {shift.verdict === 'better' ? 'better' : 'worse'}</span>}
         </div>
       )}
-      {isLabel && n > 0 && pinned == null && (
+      {isRefinement && n > 0 && pinned == null && (
         <button
           type="button"
           onClick={() => pin(n - 1)}
@@ -452,7 +455,7 @@ function SmallMultiple({
           Stories
         </button>
       )}
-      {isLabel && pinned != null && weeks[pinned] != null && points[pinned] != null && (
+      {isRefinement && pinned != null && weeks[pinned] != null && points[pinned] != null && (
         <WeekStories
           meta={meta}
           week={weeks[pinned]!}
@@ -490,15 +493,8 @@ function SeriesInfo({
 }
 
 function WeekExtras({ point }: { point: StoryHealthPoint }): JSX.Element | null {
-  const split = blockedSplitLine(point);
   const gaps = gapTypesLine(point);
-  if (split == null && gaps == null) return null;
-  return (
-    <>
-      {split != null && <div>{split}</div>}
-      {gaps != null && <div>{gaps}</div>}
-    </>
-  );
+  return gaps == null ? null : <div>{gaps}</div>;
 }
 
 /** A PINNED week: its stories with the issue, each opening the ticket tab; Previous / Next week. */
@@ -860,12 +856,35 @@ function SectionInfo({ data }: { data: StoryHealthResponse }): JSX.Element {
       </p>
       {data.labels && (
         <p>
-          The written charts come from Claude ({modelName(STORY_LABEL_MODEL)}, version {STORY_RUBRIC_VERSION}) reading
-          each ticket, over the stories it has read in their current form. Run twice, a week moved about{' '}
+          Criteria that can&rsquo;t be checked comes from Claude ({modelName(STORY_LABEL_MODEL)}, version{' '}
+          {STORY_RUBRIC_VERSION}) reading each ticket, over the stories it has read in their current form. Linked
+          blockers come from your tracker. Run twice, a week moved about{' '}
           {STORY_LABEL_NOISE.typicalPoints} points.
         </p>
       )}
       <ShiftRuleInfo />
+    </div>
+  );
+}
+
+/** The refinement panel's ⓘ: what each written measure counts, and why some are not charted. */
+function RefinementInfo(): JSX.Element {
+  return (
+    <div className="space-y-2">
+      <p>
+        Criteria that can&rsquo;t be checked is a share of criteria, not of stories: almost every story has one loose
+        criterion, so a share of stories sat near 100%. Stories with no criteria are counted on their own, in the
+        hover.
+      </p>
+      <p>
+        Stories with a linked blocker counts links of a blocking type in your tracker (&ldquo;is blocked by&rdquo;,
+        &ldquo;depends on&rdquo;), finished or not. Work a ticket only names in its text is not counted. With no such
+        link in these weeks there is nothing to chart.
+      </p>
+      <p>
+        Spec gaps is not charted: read twice, every ticket got three gaps, and the two readings disagreed on what
+        kind of gap each was. Each ticket on This sprint still lists its gaps.
+      </p>
     </div>
   );
 }
@@ -877,8 +896,8 @@ function ShiftRuleInfo({ only }: { only?: 'rate' | 'time' }): JSX.Element {
       {only !== 'time' && (
         <p>
           For a percentage, every week before a split is added up and compared with every week from it on:
-          stories, or criteria for criteria met. A shift needs at least {STORY_SHIFT_MIN_STORIES}{' '}
-          stories on each side, a gap of at least {STORY_SHIFT_MIN_POINTS} points, and a difference that
+          criteria for the criteria measures, else stories. A shift needs at least {STORY_SHIFT_MIN_STORIES}{' '}
+          stories on each side (stories, even when criteria are compared), a gap of at least {STORY_SHIFT_MIN_POINTS} points, and a difference that
           chance would give less than 1 time in 100 (z of {STORY_SHIFT_Z} or more). The before and after
           figures are those totals.
         </p>
@@ -989,7 +1008,9 @@ function StoryHealthFor({ workspaceId }: { workspaceId: number | null }): JSX.El
     ) : null;
 
   const refShifts = shiftsIn('refinement');
-  const refItems = refinement.map((x) => ({ meta: x.meta, points: x.series.points }));
+  const refLabelItems = refinement.filter((x) => x.meta.source === 'label').map((x) => ({ meta: x.meta, points: x.series.points }));
+  const refCodeItems = refinement.filter((x) => x.meta.source === 'code').map((x) => ({ meta: x.meta, points: x.series.points }));
+  const omitted = (data.omitted ?? []).filter((o) => STORY_HEALTH_SERIES_BY_ID[o.series]?.panel === 'refinement');
 
   return (
     <section data-testid="story-health" className="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-800">
@@ -1009,12 +1030,15 @@ function StoryHealthFor({ workspaceId }: { workspaceId: number | null }): JSX.El
               <h4 className="flex items-center gap-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
                 How stories are written
                 <span className={`font-normal ${MUTED}`}>· by the week the ticket was created</span>
+                <InfoButton title="How stories are written">
+                  <RefinementInfo />
+                </InfoButton>
               </h4>
               {data.labels ? (
                 <SmallMultipleGroup
-                  title="% of stories · labelled by Claude"
+                  title="Read by Claude"
                   icon={<SparkleIcon size={11} className="text-ai-signal" />}
-                  items={refItems}
+                  items={refLabelItems}
                   weeks={weeks}
                   shifts={refShifts}
                   width={width}
@@ -1022,9 +1046,22 @@ function StoryHealthFor({ workspaceId }: { workspaceId: number | null }): JSX.El
                 />
               ) : (
                 <p data-testid="story-health-refinement-off" className={`text-xs ${BODY}`}>
-                  Refinement needs story labels, which run on your own Claude.
+                  Criteria checks need story labels, which run on your own Claude.
                 </p>
               )}
+              <SmallMultipleGroup
+                title="From your tracker"
+                items={refCodeItems}
+                weeks={weeks}
+                shifts={refShifts}
+                width={width}
+                labels={data.labels}
+              />
+              {omitted.map((o) => (
+                <p key={o.series} data-testid={`story-health-omitted-${o.series}`} className={`text-xs ${BODY}`}>
+                  {omittedSentence(o)}
+                </p>
+              ))}
             </div>
 
             <div data-testid="story-health-delivery" className="space-y-2">

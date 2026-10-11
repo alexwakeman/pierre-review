@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KnownTicket, StoryCriterionLabel, StoryIssueLabel, StoryLevelLabels, TicketLinkBlocker } from '@pierre-review/shared';
-import { sprintCriteriaOf, sprintIssuesFor, sprintLabelState, type SprintChipInput } from './sprint-chips.js';
+import { sprintCriteriaOf, sprintIssuesFor, sprintLabelState, sprintSpecGapsFor, type SprintChipInput } from './sprint-chips.js';
 
 // Reports → This sprint: a ticket's issues (db/sprint-chips.ts) — the three story issues over the
 // criteria, the CURRENT label, the stored tracker links and the stored tickets a label names; the label
@@ -65,7 +65,7 @@ describe('sprintIssuesFor — without a label', () => {
 });
 
 describe('sprintIssuesFor — with a current label', () => {
-  it('folds the label into the three specific issues', () => {
+  it('folds the label into the two chip issues; the spec gaps ride apart', () => {
     const label: StoryIssueLabel = {
       criteria: [crit(1), crit(2, { testable: false, reason: 'no expected result' })],
       story: {
@@ -74,7 +74,7 @@ describe('sprintIssuesFor — with a current label', () => {
       },
     };
     const issues = sprintIssuesFor(base({ label }));
-    expect(issues.map((i) => i.id)).toEqual(['unclear_done', 'blocked', 'spec_gaps']);
+    expect(issues.map((i) => i.id)).toEqual(['unclear_done', 'blocked']);
     expect(issues[0]!.criteria).toEqual([{ n: 2, reason: 'no expected result' }]);
     expect(issues[1]!.blockers).toEqual([
       {
@@ -90,7 +90,7 @@ describe('sprintIssuesFor — with a current label', () => {
         resolved: false,
       },
     ]);
-    expect(issues[2]!.gaps).toEqual([{ type: 'edge_case', text: 'No behaviour when the upload fails' }]);
+    expect(sprintSpecGapsFor(base({ label }))).toEqual([{ type: 'edge_case', text: 'No behaviour when the upload fails' }]);
   });
   it('a text dependency naming a linked key is shown once, as the link', () => {
     const label: StoryIssueLabel = {
@@ -137,13 +137,20 @@ describe('sprintIssuesFor — the workspace checks', () => {
     criteria: [crit(1), crit(2)],
     story: { dependencies: [], gaps: [{ type: 'rule', text: 'No rule for duplicate baskets' }] },
   };
-  it('a switched-off issue is not raised', () => {
-    expect(ids(base({ label }), { off: ['spec_gaps'], issueTypes: [] })).toEqual([]);
+  const gaps = (i: SprintChipInput, checks?: Parameters<typeof sprintSpecGapsFor>[1]) => sprintSpecGapsFor(i, checks).map((g) => g.text);
+  it('spec gaps are never a chip; the switch hides the section', () => {
+    expect(ids(base({ label }))).toEqual([]);
+    expect(gaps(base({ label }))).toEqual(['No rule for duplicate baskets']);
+    expect(gaps(base({ label }), { off: ['spec_gaps'], issueTypes: [] })).toEqual([]);
+    // No current label → no gaps.
+    expect(gaps(base())).toEqual([]);
   });
   it('a ticket whose type is not listed raises nothing, case-insensitively', () => {
     const storyOnly = { off: [], issueTypes: ['story'] };
-    expect(ids(base({ label, issueType: 'Bug' }), storyOnly)).toEqual([]);
-    expect(ids(base({ label, issueType: 'Story' }), storyOnly)).toEqual(['spec_gaps']);
-    expect(ids(base({ label, issueType: null }), storyOnly)).toEqual(['spec_gaps']);
+    const loose: StoryIssueLabel = { ...label, criteria: [crit(1), crit(2, { testable: false, reason: 'vague' })] };
+    expect(ids(base({ label: loose, issueType: 'Bug' }), storyOnly)).toEqual([]);
+    expect(gaps(base({ label, issueType: 'Bug' }), storyOnly)).toEqual([]);
+    expect(ids(base({ label: loose, issueType: 'Story' }), storyOnly)).toEqual(['unclear_done']);
+    expect(gaps(base({ label, issueType: null }), storyOnly)).toEqual(['No rule for duplicate baskets']);
   });
 });

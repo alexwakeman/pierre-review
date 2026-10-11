@@ -2123,8 +2123,10 @@ convention this file has to remember.
     same workspace) — never a disabled button; the list re-reads every 5 s until it ends.
   - The report renders as a news piece: headline, summary, a FIGURES row (`storyReportFigures`, from
     the run's STORED `population` — code, styled apart from Claude's text, each count with its
-    denominator, plus "Spec gaps 9 of 40" per story issue from `issueRates` when present and `of > 0`;
-    a retired id on an old stored report is dropped through `isStoryIssueId`),
+    denominator, plus one row per story issue from `issueRates` when present and `of > 0`
+    (`issueRateFigure`: "Criteria that can’t be checked · 12 of 81 criteria", "Stories with a linked
+    blocker · 3 of 40 stories"; a rate with no `unit` is an older report's and keeps its old label,
+    "… of N read"; a retired id on an old stored report is dropped through `isStoryIssueId`),
     then What we do well (green edge) / Where stories fall short (red edge) /
     Spotlights (edge + "Good/Weak example" words, not hue alone) / Emerging themes / Next sprint
     actions (numbered); a point with an `issue` wears that issue's label as a small chip
@@ -2161,10 +2163,14 @@ convention this file has to remember.
     `['story-health','ws:<id>']`, `periodReports` ANDed into `enabled`; the contract is
     `packages/shared/src/story-health.ts`. No tracker → the section renders NOTHING (the lists below
     already print the one sentence).
-    - **How stories are written** (by ticket-created week) is THREE SMALL CHARTS, one per story issue
-      (Unclear when done · Blocked · Spec gaps; "% of stories" with it, lower is better), in ONE group
-      titled "% of stories · labelled by Claude" (sparkle). With `labels: false` the panel prints ONE sentence instead ("Refinement needs
-      story labels, which run on your own Claude."). A responsive grid: 2 columns from
+    - **How stories are written** (by ticket-created week) is ONE SMALL CHART per refinement series the
+      server sends, in two groups: "Read by Claude" (sparkle; "Criteria that can’t be checked", a % of
+      CRITERIA) and "From your tracker" ("Stories with a linked blocker", CODE, shown with labels off
+      too). With `labels: false` the Claude group is ONE sentence ("Criteria checks need story labels,
+      which run on your own Claude."). Each `omitted` refinement series is ONE short sentence
+      (`omittedSentence`: "No blocking links in your tracker in these 90 days." · "Spec gaps is not
+      charted: two readings of the same tickets disagree too often."); WHY (criteria not stories, links
+      only, the spec-gaps agreement test) sits behind the panel heading's ⓘ (`RefinementInfo`). A responsive grid: 2 columns from
       `SMALL_MULTIPLE_TWO_COLUMNS_FROM` (560px), else 1; widths from the one `useChartWidth` ref, so no
       horizontal scroll. Each chart: the issue's label, its LATEST rolling value large and the change
       since the FIRST rolling value (`rollingHeadline`) — ⚠ coloured ONLY when the series has a
@@ -2172,15 +2178,17 @@ convention this file has to remember.
       line over faint weekly dots (thin = hollow); a dashed line at that series' own shift plus a
       "From Aug 17: 19% → 44%" line; hover a week → value + n, 4-week value, "12 of 15 stories
       labelled" (`coverageLine`), the week's stories WITH the issue (`point.stories`, ≤
-      `STORY_HEALTH_HOVER_STORIES` + "and N more"), Blocked's "Linked in the tracker: X · Named only in
-      the text: Y" (`blockedSplitLine`) and Spec gaps' types (`gapTypesLine`). ⚠ The hover box is
+      `STORY_HEALTH_HOVER_STORIES` + "and N more"; for criteria, the stories with ≥ 1 such criterion)
+      and Spec gaps' types (`gapTypesLine`). A criteria point reads "25% (20 criteria in 5 stories)". ⚠ The hover box is
       `pointer-events-none`, so CLICKING a week (or the chart's "Stories" button, the keyboard route)
       PINS that week's list under the chart, Previous / Next week, each story a button opening the
       ticket tab. ⚠ **Each chart's ⓘ is COMPUTED, three lines at most** (`seriesInfoLines`): what
-      counts (one sentence), this week's figure ("This week so far: 4 of 9 stories"), and the detected
-      shift ("Rose from 19% to 44% on Aug 17, 32 vs 28 stories") — nothing when there is none. No
-      panel-level method prose (`RefinementInfo` / `DeliveryInfo` are DELETED); the method (rolling
-      line, thin weeks, label noise, the shift test) lives ONCE in the section's ⓘ.
+      counts (one sentence), this week's figure ("This week so far: 4 of 9 stories" / "This week: 5 of 20
+      criteria"), and the detected shift ("Rose from 19% to 44% on Aug 17, 32 vs 28 stories" — criteria
+      for the criteria series) — nothing when there is none. No panel-level METHOD prose
+      (`DeliveryInfo` is DELETED; `RefinementInfo` holds only what the written measures count and why
+      a series is not charted); the method (rolling line, thin weeks, label noise, the shift test)
+      lives ONCE in the section's ⓘ.
     - **How stories are delivered** (by last-merge week) keeps THREE strips on ONE x-axis
       (`geometryFor`), one per UNIT (`DELIVERY_STRIPS`: working time S/M/L · pull requests per story ·
       criteria met, dotted) — ⚠ never two units on one axis — with legend toggles (`aria-pressed`,
@@ -2222,14 +2230,16 @@ convention this file has to remember.
     last. ⚠ The STAGE is the row's own (`stage`, the server's `sprintStageOf`: category beats position)
     — never re-derived in the SPA. Done is counted in the header, never listed.
   - **ONE VOCABULARY, THE THREE STORY ISSUES** (shared `story-issues.ts`: Unclear when done · Blocked ·
-    Spec gaps). The collapsed card shows at most three chips (`storyIssueChipText`: "Unclear when done
-    · 3 of 25 criteria"), its PR links and a "Ticket PRs" button (the ticket tab); the expanded card
+    Spec gaps). The collapsed card shows at most TWO chips (`storyIssueChipText`: "Unclear when done
+    · 3 of 25 criteria"; ⚠ spec gaps are NEVER a chip — every labelled ticket had three), its PR links and a "Ticket PRs" button (the ticket tab); the expanded card
     is, in order and nothing else: the SPECIFIC detail per issue code raised — each flagged criterion
     with its reason and the criterion's own text, each open blocker (`storyBlockerPhrase`; a linked
-    key opens the tracker through `safeExternalUrl`) then finished ones as "Done: …", each spec gap
-    with its type — or, for an issue a CURRENT run spoke to, its sentence marked "Claude"
-    (`sprintBullets`; it never adds one); each with Copy (the one-line bullet), the repos, the "Check against code" / "Check again" button, the update panel (rendered only
-    when there is a bullet, a current run or a last write). Nothing in the SPA re-derives an issue or
+    key opens the tracker through `safeExternalUrl`) then finished ones as "Done: …" — or, for an issue
+    a CURRENT run spoke to, its sentence marked "Claude" (`sprintBullets`; it never adds one); each with
+    Copy (the one-line bullet); then the "Spec gaps" section (`sprintSpecGapLines`: each gap with its
+    type, then a current run's spec_gaps sentence marked "Claude", each copyable, also in Copy all and
+    the comment default; the "Spec gaps" check hides it), the repos, the "Check against code" / "Check again" button, the update panel (rendered only
+    when there is a bullet, a spec gap, a current run or a last write). Nothing in the SPA re-derives an issue or
     re-words a bullet. A STALE run shows only its summary, tagged "Out of date", and feeds nothing
     else (`sprintCurrentAssessmentBodyOf`); an OUTDATED-format run shows one line.
     `proposedDefault(t, mode, checks)` builds the comment from `sprintCommentMarkdown` and Replace

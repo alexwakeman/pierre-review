@@ -11,6 +11,7 @@ import {
   sprintBullets,
   sprintCurrentAssessmentBodyOf,
   sprintCommentMarkdown,
+  sprintSpecGapLines,
   type SprintAssessmentPhase,
   type SprintAssessmentStatus,
   type SprintChecks,
@@ -337,12 +338,12 @@ export function replaceCriteriaSection(description: string, criteria: string): s
 }
 
 /** The right-hand side's starting text for a mode. Comment: the summary (current assessment only), one bullet
- *  per issue and any revised criteria. Replace: the revised criteria when the assessment proposed
+ *  per issue, the spec gaps and any revised criteria. Replace: the revised criteria when the assessment proposed
  *  some (the list alone for a criteria field; the description with its criteria section swapped),
  *  else the current text. */
 export function proposedDefault(t: SprintTicketRow, mode: SprintWriteMode, checks: SprintChecks): string {
   const body = sprintCurrentAssessmentBodyOf(t);
-  if (mode === 'comment') return sprintCommentMarkdown(sprintBullets(t, checks), body);
+  if (mode === 'comment') return sprintCommentMarkdown(sprintBullets(t, checks), body, sprintSpecGapLines(t, checks));
   const current = currentTextFor(t, t.replaceTarget);
   if (body == null || body.revisedCriteria.length === 0) return current;
   const list = criteriaListMarkdown(body.revisedCriteria);

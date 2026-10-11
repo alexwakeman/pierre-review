@@ -179,7 +179,7 @@ describe('GET /api/sprint-stories', () => {
     expect(body).toMatchObject({ trackerOn: true, provider: 'jira', doneCount: 1, source: null });
     expect(body.read.readAt).toBeNull();
     expect(body.tickets.map((t: any) => [t.key, t.phase, t.stage, t.flagCount])).toEqual([
-      ['ENG-1', 'not_started', 'not_started', 3],
+      ['ENG-1', 'not_started', 'not_started', 2],
       ['ENG-3', 'not_started', 'not_started', 1],
       ['ENG-2', 'in_progress', 'writing', 1],
     ]);
@@ -208,15 +208,10 @@ describe('GET /api/sprint-stories', () => {
         ],
         gaps: [],
       },
-      {
-        id: 'spec_gaps',
-        total: 2,
-        reasons: ['gaps'],
-        criteria: [],
-        blockers: [],
-        gaps: [{ type: 'edge_case', text: 'No behaviour when the basket is empty' }],
-      },
     ]);
+    // Spec gaps are not a chip: they ride apart, for the opened card's own section.
+    expect(eng1.specGaps).toEqual([{ type: 'edge_case', text: 'No behaviour when the basket is empty' }]);
+    expect(body.tickets[1].specGaps).toEqual([]);
     // ENG-3: a tracker link raises Blocked with no label; the done link is listed resolved, after.
     const eng3 = body.tickets[1];
     expect(eng3.issues.map((i: any) => i.id)).toEqual(['blocked']);
@@ -351,8 +346,9 @@ describe('PUT /api/sprint-stories/checks', () => {
     expect(res.json()).toEqual({ workspaceId: ownWs, checks });
     const after = await list();
     expect(after.checks).toEqual(checks);
-    // ENG-1 has no issue type, so it is checked; only its spec gaps issue is switched off.
+    // ENG-1 has no issue type, so it is checked; only its spec gaps section is switched off.
     expect(after.tickets.find((t: any) => t.key === 'ENG-1').issues.map((i: any) => i.id)).toEqual(['unclear_done', 'blocked']);
+    expect(after.tickets.find((t: any) => t.key === 'ENG-1').specGaps).toEqual([]);
     for (const t of after.tickets) expect(t.flagCount).toBe(t.issues.length);
     expect(Array.isArray(after.issueTypes)).toBe(true);
     // Back to the defaults, stored as NULL.

@@ -104,10 +104,17 @@ export function populationForAgent(p: StoryReportPopulation) {
     checkedAndFullyMet: p.checkedAndFullyMet,
     checkedWithGaps: p.checkedWithGaps,
     medianWorkingTime: workingDuration(p.medianWorkingHours ?? 0, p.workingDayHours),
-    // Whole-window, by code: the ONLY issue rates the agent may quote — over the stories Claude has read
-    // (`ofReadStories`), so the field name carries the population; no-criteria is `noCriteriaFound`.
+    // Whole-window, by code: the ONLY issue rates the agent may quote, each in its own unit (`count` of
+    // `of` criteria or stories) — the same measures as Story health; no-criteria is `noCriteriaFound`.
     ...(p.issueRates != null
-      ? { issueRates: p.issueRates.map((r) => ({ issue: STORY_ISSUE_BY_ID[r.id].measureLabel, stories: r.stories, ofReadStories: r.of })) }
+      ? {
+          issueRates: p.issueRates.map((r) => ({
+            measure: STORY_ISSUE_BY_ID[r.id].measureLabel,
+            count: r.stories,
+            of: r.of,
+            unit: r.unit ?? 'stories',
+          })),
+        }
       : {}),
   };
 }

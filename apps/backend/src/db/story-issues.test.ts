@@ -10,11 +10,14 @@ import {
   sprintBullets,
   sprintCommentMarkdown,
   sprintIssuesWithClaude,
-  storyBlockedSource,
+  sprintSpecGapLines,
+  sprintSpecGapsMarkdown,
+  STORY_CHIP_ISSUE_IDS,
   storyBlockerPhrase,
   storyIssueBullet,
   storyIssueChipText,
   storyIssueMeasure,
+  storyIssueRateUnits,
   storyIssueStates,
   storyIssueTypeChecked,
   type KnownTicket,
@@ -131,12 +134,35 @@ describe('the two questions: now vs as written', () => {
 
   it('storyIssueMeasure (as written): any dependency counts, finished or not — labelled stories only', () => {
     expect(storyIssueMeasure(finished)).toEqual({ unclear_done: false, blocked: true, spec_gaps: false });
-    expect(storyBlockedSource(finished)).toBe('linked');
     const textOnly = { criteria: items(2), label: clean(2, { dependencies: [{ kind: 'decision', what: 'pricing decision', owner: null, ticketKey: null }] }) };
-    expect(storyBlockedSource(textOnly)).toBe('text_only');
+    expect(storyIssueMeasure(textOnly).blocked).toBe(true);
     expect(storyIssueMeasure({ criteria: items(2), label: null, links: [link('X-1')] })).toEqual({ unclear_done: null, blocked: null, spec_gaps: null });
     // No criteria is never folded in: it can never be labelled.
     expect(storyIssueMeasure({ criteria: [], label: null }).unclear_done).toBeNull();
+  });
+});
+
+describe('storyIssueRateUnits (the rate rule)', () => {
+  it('unclear_done counts CRITERIA of a usable label; out without one or without criteria', () => {
+    const label: StoryIssueLabel = {
+      criteria: [
+        { n: 1, testable: false, reason: 'vague' },
+        { n: 2, testable: true, reason: null },
+        { n: 3, testable: false, reason: 'no result' },
+      ],
+      story: { dependencies: [], gaps: [] },
+    };
+    expect(storyIssueRateUnits({ criteria: items(3), label }).unclear_done).toEqual({ num: 2, den: 3 });
+    expect(storyIssueRateUnits({ criteria: items(3), label: clean(3) }).unclear_done).toEqual({ num: 0, den: 3 });
+    expect(storyIssueRateUnits({ criteria: items(2), label }).unclear_done).toBeNull(); // count mismatch
+    expect(storyIssueRateUnits({ criteria: [], label: null }).unclear_done).toBeNull();
+  });
+  it('blocked is CODE: a blocking link of any status counts, text-only does not, links not read is out', () => {
+    expect(storyIssueRateUnits({ criteria: [], label: null, links: [link('A-1', { category: 'done' })] }).blocked).toEqual({ num: 1, den: 1 });
+    expect(storyIssueRateUnits({ criteria: [], label: null, links: [] }).blocked).toEqual({ num: 0, den: 1 });
+    const textOnly = clean(2, { dependencies: [{ kind: 'decision', what: 'pricing decision', owner: null, ticketKey: null }] });
+    expect(storyIssueRateUnits({ criteria: items(2), label: textOnly, links: [] }).blocked).toEqual({ num: 0, den: 1 });
+    expect(storyIssueRateUnits({ criteria: items(2), label: textOnly }).blocked).toBeNull();
   });
 });
 
@@ -231,6 +257,40 @@ describe('sprintBullets', () => {
   });
 });
 
+describe('spec gaps leave the chips', () => {
+  it('only unclear_done and blocked are chips', () => {
+    expect(STORY_CHIP_ISSUE_IDS).toEqual(['unclear_done', 'blocked']);
+  });
+  it('sprintSpecGapLines: code gaps then a current run’s sentence; nothing when the check is off or the type is not checked', () => {
+    const body = {
+      summary: 'S.',
+      issues: [{ id: 'spec_gaps' as const, text: 'No rule for an empty file.', ref: { repo: 'a/b', path: 'src/x.ts' } }],
+      revisedCriteria: [],
+    };
+    const rec: SprintAssessmentRecord = {
+      id: 1, workspaceId: 1, ident: 'x', model: 'm', status: 'succeeded', phase: null, repos: [], body,
+      outdated: false, dropped: null, error: null, costUsd: null, numTurns: null, createdAt: '2026-10-10T00:00:00Z', completedAt: null,
+    };
+    const t = {
+      specGaps: [{ type: 'edge_case' as const, text: 'No behaviour when the upload fails' }],
+      assessment: { record: rec, currency: 'current' as const },
+      issueType: 'Story',
+    };
+    const lines = sprintSpecGapLines(t, { off: [], issueTypes: [] });
+    expect(lines.map((l) => [l.source, l.type])).toEqual([
+      ['code', 'edge_case'],
+      ['claude', null],
+    ]);
+    expect(sprintSpecGapsMarkdown(lines)).toBe(
+      '**Spec gaps**\n\n- Edge case: No behaviour when the upload fails\n- No rule for an empty file. (`src/x.ts` in `a/b`)',
+    );
+    expect(sprintSpecGapLines({ ...t, assessment: { record: rec, currency: 'stale' as const } }, { off: [], issueTypes: [] })).toHaveLength(1);
+    expect(sprintSpecGapLines(t, { off: ['spec_gaps'], issueTypes: [] })).toEqual([]);
+    expect(sprintSpecGapLines(t, { off: [], issueTypes: ['Bug'] })).toEqual([]);
+    expect(sprintCommentMarkdown([], null, lines)).toContain('**Spec gaps**');
+  });
+});
+
 describe('sprintIssuesWithClaude', () => {
   const body = {
     summary: 'May already be done.',
@@ -240,12 +300,14 @@ describe('sprintIssuesWithClaude', () => {
     ],
     revisedCriteria: [],
   };
-  const coded = [issue({ id: 'spec_gaps', total: 4, reasons: ['gaps'], gaps: [{ type: 'edge_case', text: 'No empty-file rule' }] })];
-  it('adds a current run’s issue that code did not raise, in order, and keeps code’s own', () => {
+  const coded = [issue({ id: 'blocked', total: 4, reasons: ['linked'] })];
+  it('adds a current run’s CHIP issue that code did not raise, in order, and keeps code’s own; spec_gaps never', () => {
     expect(sprintIssuesWithClaude(coded, body, { off: [], issueTypes: [] }, 'Bug', 4)).toEqual([
       issue({ id: 'unclear_done', total: 4, reasons: ['claude'] }),
       coded[0],
     ]);
+    const gaps = [issue({ id: 'spec_gaps', total: 4, reasons: ['gaps'], gaps: [{ type: 'edge_case', text: 'No empty-file rule' }] })];
+    expect(sprintIssuesWithClaude(gaps, null, { off: [], issueTypes: [] }, 'Bug', 4)).toEqual([]);
   });
   it('skips a retired id in a stored body, adds nothing without a run, and obeys the checks', () => {
     const old = { ...body, issues: [{ id: 'too_big', text: 'Split it.', ref: null }] } as unknown as typeof body;

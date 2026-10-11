@@ -30,7 +30,7 @@
 // ⚠ UNKNOWN IS NEVER ZERO: a week with no measurable items carries `value: null` (a gap), and a
 // story whose size is unknown is left out of the size-band lines and COUNTED (`unsizedStories`).
 
-import { STORY_ISSUES, STORY_ISSUE_BY_ID, type StoryIssueId } from './story-issues.js';
+import { STORY_ISSUE_BY_ID, type StoryIssueId } from './story-issues.js';
 
 // ── Constants (the ONE spelling the folds and the page's copy both read) ───────────────────────────
 
@@ -57,12 +57,13 @@ export const STORY_HEALTH_ROLLING_WEEKS = 4;
 //
 // RATE series (every refinement series, and criteria met) are tested on POOLED COUNTS, never on
 // weekly percentages: for each split week, the units before and after are summed and compared with a
-// two-proportion z-test. The units are STORIES for the refinement series (one per story issue) and
-// CRITERIA for criteria met (met ÷ judged). TIME and COUNT
+// two-proportion z-test. The units are CRITERIA for "can't be checked" and criteria met, STORIES for
+// the rest. ⚠ The floor (`STORY_SHIFT_MIN_STORIES` a side) is ALWAYS counted in STORIES, so a few
+// stories with many criteria cannot fake a shift. TIME and COUNT
 // series run `detectChangepoints` over the server's ROLLING values of non-thin weeks, and must also
 // move by a minimum amount.
 
-/** Rate series: stories needed on EACH side of a split (criteria met too: stories decide the floor;
+/** Rate series: stories needed on EACH side of a split (criteria series too: stories decide the floor;
  *  the test then counts criteria). */
 export const STORY_SHIFT_MIN_STORIES = 15;
 
@@ -219,9 +220,11 @@ export interface StoryLevelLabels {
 export type StoryHealthPanel = 'refinement' | 'delivery';
 
 export type StoryHealthSeriesId =
-  // REFINEMENT — one per story issue (`story-issues.ts`), story-weighted, `source: 'label'`.
-  // ⚠ RUBRIC 2 MEANS NEW IDS for the changed questions: 'blocked' and 'specGaps' are new metrics;
-  // 'unclearDone' keeps its id because its question (testable) did not change.
+  // REFINEMENT — one per story issue (`story-issues.ts`), counted by `storyIssueRateUnits`.
+  // 'unclearDone' = % of CRITERIA that can't be checked (label); 'blocked' = % of stories with a
+  // tracker-linked blocker (CODE); 'specGaps' = % of stories with a gap (label, HELD).
+  // (The ids were kept when 'unclearDone' moved from stories to criteria and 'blocked' to links only,
+  // 2026-10-11: no stored row carries them — every value is recomputed per request.)
   | 'unclearDone'
   | 'blocked'
   | 'specGaps'
@@ -250,9 +253,10 @@ export interface StoryHealthSeriesMeta {
   /** `label` = stored model labels (omitted from the response when `labels: false`); `code` = deterministic. */
   source: 'label' | 'code';
   unit: StoryHealthUnit;
-  /** What each week's value is computed over: `stories` = story-weighted; `reviewed` = reviewed
-   *  stories only (criteria met: n is stories, the percentage is over their judged criteria). */
-  over: 'stories' | 'reviewed';
+  /** What each week's value is computed over: `stories` = story-weighted; `criteria` = the criteria of
+   *  the counted stories (n is stories, the percentage is over criteria); `reviewed` = reviewed stories
+   *  only (criteria met: n is stories, the percentage is over their judged criteria). */
+  over: 'stories' | 'criteria' | 'reviewed';
   /** Which way is better, for colouring a DETECTED shift only. null = neither (no green/red ever). */
   better: 'higher' | 'lower' | null;
   /** TIME / COUNT series only (rate series are tested on pooled counts): the floor for the change-point
@@ -280,19 +284,12 @@ export const STORY_HEALTH_HELD: Readonly<Partial<Record<StoryHealthSeriesId, str
 
 /** Every series, in legend order. The server sends values for these ids; the SPA reads labels here. */
 export const STORY_HEALTH_SERIES: readonly StoryHealthSeriesMeta[] = [
-  // Refinement: "% of stories with <issue>" over LABELLED stories only (`storyIssueMeasure`).
-  ...STORY_ISSUES.map(
-    (m): StoryHealthSeriesMeta => ({
-      id: STORY_HEALTH_ISSUE_SERIES[m.id],
-      panel: 'refinement',
-      // The MEASURE's label ("Had blockers", not the chip's "Blocked"): finished dependencies count here.
-      label: STORY_ISSUE_BY_ID[m.id].measureLabel,
-      source: 'label',
-      unit: 'pct',
-      over: 'stories',
-      better: 'lower',
-    }),
-  ),
+  // Refinement, by `storyIssueRateUnits` (labels from each issue's `measureLabel`).
+  { id: 'unclearDone', panel: 'refinement', label: STORY_ISSUE_BY_ID.unclear_done.measureLabel, source: 'label', unit: 'pct', over: 'criteria', better: 'lower' },
+  // CODE: shows with labels off too. No better direction: linking a blocker is good practice, so a
+  // rise is not "worse".
+  { id: 'blocked', panel: 'refinement', label: STORY_ISSUE_BY_ID.blocked.measureLabel, source: 'code', unit: 'pct', over: 'stories', better: null },
+  { id: 'specGaps', panel: 'refinement', label: STORY_ISSUE_BY_ID.spec_gaps.measureLabel, source: 'label', unit: 'pct', over: 'stories', better: 'lower' },
   { id: 'workingTimeS', panel: 'delivery', label: 'Working time, small stories', source: 'code', unit: 'hours', over: 'stories', better: 'lower', minScale: 1, minShift: STORY_SHIFT_MIN_HOURS },
   { id: 'workingTimeM', panel: 'delivery', label: 'Working time, medium stories', source: 'code', unit: 'hours', over: 'stories', better: 'lower', minScale: 1, minShift: STORY_SHIFT_MIN_HOURS },
   { id: 'workingTimeL', panel: 'delivery', label: 'Working time, large stories', source: 'code', unit: 'hours', over: 'stories', better: 'lower', minScale: 1, minShift: STORY_SHIFT_MIN_HOURS },
@@ -338,7 +335,8 @@ export interface StoryHealthWeek {
 export interface StoryHealthPoint {
   /** The week's value in the series' unit; null when nothing was measurable (a gap, never 0). */
   value: number | null;
-  /** Items behind the value: stories (or reviewed stories for `criteriaMet`). Decides `thin`. */
+  /** Items behind the value: STORIES (reviewed stories for `criteriaMet`; the counted stories for a
+   *  criteria series). Decides `thin`. */
   n: number;
   /** `n < STORY_HEALTH_THIN_N`: drawn faint, excluded from the rolling line and the time / count shift test. */
   thin: boolean;
@@ -348,14 +346,15 @@ export interface StoryHealthPoint {
   rolling: number | null;
   /** Non-thin weeks the rolling value pooled (0–4). */
   rollingWeeks: number;
-  /** REFINEMENT series only: the week's stories WITH the issue (the numerator), key order, at most
-   *  `STORY_HEALTH_HOVER_STORIES` — the hover list (each opens the ticket tab). Absent on delivery. */
+  /** REFINEMENT series only: the week's stories WITH the issue (the numerator; for a criteria series,
+   *  the stories with ≥ 1 such criterion), key order, at most `STORY_HEALTH_HOVER_STORIES` — the hover
+   *  list (each opens the ticket tab). Absent on delivery. */
   stories?: StoryHealthStoryRef[];
   /** REFINEMENT only: how many more stories with the issue the cap left out ("and N more"). */
   storiesMore?: number;
-  /** 'blocked' only: the numerator split — stories with ≥ 1 tracker link vs dependencies named only in
-   *  the text (`storyBlockedSource`). `linked + textOnly` = the numerator. */
-  blockedSplit?: { linked: number; textOnly: number };
+  /** `over: 'criteria'` refinement series only: the week's criteria that can't be checked (`num`) of
+   *  all criteria in its counted stories (`den`). */
+  criteria?: { num: number; den: number };
   /** 'specGaps' only: gaps by type over the numerator's stories (a story counts once per type). */
   gapTypes?: Partial<Record<StorySpecGapType, number>>;
 }
@@ -403,6 +402,15 @@ export interface StoryHealthShift {
   verdict: 'better' | 'worse' | null;
 }
 
+/** A refinement series the response leaves out, and why — the SPA prints one sentence each.
+ *  'no_links' = no story in the span has a tracker-linked blocker (the Blocked series would be a flat
+ *  0% that says nothing about the tickets); 'held' = `STORY_HEALTH_HELD`. A label series is never
+ *  listed while `labels` is false (the whole label half is off then). */
+export interface StoryHealthOmitted {
+  series: StoryHealthSeriesId;
+  reason: 'no_links' | 'held';
+}
+
 export interface StoryHealthResponse {
   workspaceId: number;
   /** false = no tracker on the workspace: `weeks` still spans the 13 weeks, every series is empty
@@ -419,6 +427,8 @@ export interface StoryHealthResponse {
   labels: boolean;
   /** Present series in `STORY_HEALTH_SERIES` order. */
   series: StoryHealthSeries[];
+  /** Refinement series left out, in `STORY_HEALTH_SERIES` order. [] when `trackerOn` is false. */
+  omitted: StoryHealthOmitted[];
   shifts: StoryHealthShift[];
   /** Refinement: stories over the 13 weeks bucketed by first-PR-opened (no created date). */
   createdFallbackTotal: number;

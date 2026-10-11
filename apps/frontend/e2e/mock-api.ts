@@ -52,6 +52,7 @@ import {
   pendingTabHolds,
   pendingAuthorSideOf,
   resolveMyTurnSettings,
+  STORY_CHIP_ISSUE_IDS,
   foldStoryIssues,
 } from '@pierre-review/shared';
 
@@ -525,6 +526,7 @@ const SPRINT_TICKET_BASE: Omit<SprintTicketRow, 'ident' | 'key' | 'title' | 'pha
   criteria: { items: [], source: 'none' },
   labels: 'none',
   issues: [],
+  specGaps: [],
   flagCount: 0,
   pullRequests: [],
   repos: { accepted: [], suggested: [] },
@@ -533,8 +535,9 @@ const SPRINT_TICKET_BASE: Omit<SprintTicketRow, 'ident' | 'key' | 'title' | 'pha
   replaceBase: { hash: '0'.repeat(64), truncated: false },
   lastWrite: null,
 };
-const SPRINT_ACME1_ISSUES = foldStoryIssues({ criteria: [], label: null });
-const SPRINT_ACME2_ISSUES = foldStoryIssues({
+const chipsOnly = (issues: ReturnType<typeof foldStoryIssues>) => issues.filter((i) => STORY_CHIP_ISSUE_IDS.includes(i.id));
+const SPRINT_ACME1_ISSUES = chipsOnly(foldStoryIssues({ criteria: [], label: null }));
+const SPRINT_ACME2_ALL = foldStoryIssues({
   criteria: ['Users get a link by email', 'The link works once'],
   label: {
     criteria: [
@@ -557,6 +560,9 @@ const SPRINT_ACME2_ISSUES = foldStoryIssues({
     },
   ],
 });
+// Spec gaps are not a chip: they ride `specGaps` (the opened card's own section).
+const SPRINT_ACME2_ISSUES = chipsOnly(SPRINT_ACME2_ALL);
+const SPRINT_ACME2_GAPS = SPRINT_ACME2_ALL.find((i) => i.id === 'spec_gaps')?.gaps ?? [];
 const SPRINT_STORIES: SprintStoriesResponse = {
   workspaceId: WORKSPACE.id,
   trackerOn: true,
@@ -611,6 +617,7 @@ const SPRINT_STORIES: SprintStoriesResponse = {
       criteria: { items: ['Users get a link by email', 'The link works once'], source: 'description_heading' },
       labels: 'current',
       issues: SPRINT_ACME2_ISSUES,
+      specGaps: SPRINT_ACME2_GAPS,
       flagCount: SPRINT_ACME2_ISSUES.length,
       repos: { accepted: [{ repoId: REPO.id, fullName: REPO.fullName }], suggested: [] },
       assessment: {

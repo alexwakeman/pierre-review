@@ -8,11 +8,11 @@ import {
   STORY_SHIFT_MIN_POINTS,
   STORY_SHIFT_MIN_STORIES,
   STORY_SHIFT_Z,
-  storyBlockedSource,
-  storyIssueMeasure,
+  storyIssueRateUnits,
   storySizeBand,
   type KnownTicket,
   type StoryCriterionLabel,
+  type StoryHealthOmitted,
   type StoryHealthPoint,
   type StoryHealthSeries,
   type StoryHealthSeriesId,
@@ -26,6 +26,7 @@ import {
   type StoryLevelLabels,
   type StorySizeBand,
   type StoryIssueId,
+  type StoryRateUnits,
 } from '@pierre-review/shared';
 import { detectChangepoints } from './changepoint.js';
 
@@ -41,19 +42,23 @@ import { detectChangepoints } from './changepoint.js';
 //     one list (db/story-health.ts).
 //   • UNKNOWN IS NEVER ZERO. A week with nothing measurable is `value: null`; a story of unknown size
 //     is in no size band and is counted (`unsizedStories`).
-//   • REFINEMENT = the THREE STORY ISSUES (shared `story-issues.ts`), one series each: "% of stories
-//     with <issue>", story-weighted, counted by THE ONE RATE RULE `storyIssueMeasure` — over LABELLED
-//     stories only (CURRENT labels: the caller passes `label: null` for a stale one), every issue over
-//     the same stories. ⚠ "Blocked" here is HOW THE STORY WAS WRITTEN: it linked or named other work,
-//     FINISHED OR NOT — a closed blocker must not drop an old story out of the series (that would
-//     rise at the right edge by construction). ⚠ A known ticket with NO criteria is counted apart
-//     (`noCriteria` on the week, code) and never folded into "Unclear when done": it can never be
-//     labelled, so the mix would move with label coverage, not with the tickets.
-//     The week's coverage (`labelled` of `labellable`) rides beside them. `labels: false` omits all
-//     three (cloud / the kill switch) — never a partial one.
+//   • REFINEMENT = the STORY ISSUES (shared `story-issues.ts`), one series each, counted by THE ONE
+//     RATE RULE `storyIssueRateUnits`:
+//       - "Criteria that can't be checked" (unclearDone, label): CRITERIA, pooled like criteria met —
+//         each labelled story adds {its unchecked criteria, its criteria}. CURRENT labels only (the
+//         caller passes `label: null` for a stale one).
+//       - "Stories with a linked blocker" (blocked, CODE): stories whose tracker links were read, with
+//         ≥ 1 blocking link, ANY STATUS — a closed blocker must not drop an old story out (the series
+//         would rise at the right edge by construction). A dependency named only in the text is NOT
+//         counted. ⚠ No story in the span with a link → the series is OMITTED (`omitted`, 'no_links'):
+//         a tracker that nobody links in reads 0%, a claim about the tickets the data cannot make.
+//       - "Spec gaps" (specGaps, label): HELD (`opts.held` → `omitted`, 'held').
+//     ⚠ A known ticket with NO criteria is counted apart (`noCriteria` on the week, code) and never
+//     folded into a criteria series. The week's coverage (`labelled` of `labellable`) rides beside the
+//     label series. `labels: false` omits every LABEL series (cloud / the kill switch); the code one stays.
 //   • HOVER DETAIL (refinement points only, never in a hash or a shift): the week's numerator stories
-//     (key order, ≤ STORY_HEALTH_HOVER_STORIES, then `storiesMore`); Blocked's linked vs text-only
-//     split (`storyBlockedSource`); Spec gaps' types (each type once per story).
+//     (key order, ≤ STORY_HEALTH_HOVER_STORIES, then `storiesMore`; for criteria, the stories with ≥ 1
+//     such criterion); Spec gaps' types (each type once per story).
 //   • THIN: n < STORY_HEALTH_THIN_N → faint, and out of the rolling line and the time / count shift test.
 //   • ROLLING: the week and the three before it, NON-THIN weeks only, POOLED over their items — a
 //     percentage is Σnumerators ÷ Σdenominators, hours and counts the median of the pooled items. Never
@@ -61,9 +66,9 @@ import { detectChangepoints } from './changepoint.js';
 //   • SHIFTS — at most ONE per series, and the bar is set so noise cannot reach it:
 //       RATE series (unit 'pct'): POOLED COUNTS, never weekly percentages (`rateShift`). For every split
 //       week, Σnum / Σden each side (every week, thin or not: pooling is what makes a thin week safe)
-//       and a two-proportion z-test over the UNITS — stories for the refinement series, criteria for
-//       criteria met. Reported only with ≥ STORY_SHIFT_MIN_STORIES
-//       stories each side, ≥ STORY_SHIFT_MIN_POINTS points between the pooled shares and
+//       and a two-proportion z-test over the UNITS — criteria for the criteria series, else stories.
+//       Reported only with ≥ STORY_SHIFT_MIN_STORIES STORIES each side (counted in stories even when
+//       the test counts criteria, so a few criteria-heavy stories cannot fake a shift), ≥ STORY_SHIFT_MIN_POINTS points between the pooled shares and
 //       |z| ≥ STORY_SHIFT_Z; the split with the largest |z| wins. A weekly-percentage changepoint
 //       flagged one story's move on a three-story week; this cannot.
 //       TIME / COUNT series: `detectChangepoints` over the ROLLING values of non-thin weeks with the
@@ -116,6 +121,7 @@ export interface StoryHealthFold {
   createdFallbackTotal: number;
   unsizedTotal: number;
   unlabelled: number;
+  omitted: StoryHealthOmitted[];
 }
 
 // One item behind a weekly value: a ratio part (pct) or a raw value (hours / count).
@@ -140,6 +146,17 @@ function valueOf(meta: StoryHealthSeriesMeta, items: readonly Item[]): number | 
     return den > 0 ? (100 * num) / den : null;
   }
   return median(items.flatMap((it) => ('v' in it ? [it.v] : [])));
+}
+
+/** Σnum / Σden over a week's ratio items. */
+function sumItems(items: readonly Item[]): { num: number; den: number } {
+  let num = 0;
+  let den = 0;
+  for (const it of items) if ('num' in it) {
+    num += it.num;
+    den += it.den;
+  }
+  return { num, den };
 }
 
 /** The week index holding `ms`, or -1. */
@@ -181,35 +198,27 @@ function issueInputOf(s: IssueStory): StoryIssueInput {
   };
 }
 
-/** One story's answer per issue under THE rate rule (`storyIssueMeasure`); null = leave it out. */
-export function storyIssueAnswers(s: IssueStory): Record<StoryIssueId, boolean | null> | null {
+/** One story's units per issue under THE rate rule (`storyIssueRateUnits`); null = leave it out. An
+ *  unknown ticket is out of every series. */
+export function storyIssueAnswers(s: IssueStory): Record<StoryIssueId, StoryRateUnits | null> | null {
   if (!s.ticketKnown) return null;
-  return storyIssueMeasure(issueInputOf(s));
+  return storyIssueRateUnits(issueInputOf(s));
 }
 
-/** The hover detail of one refinement point: the numerator's stories and the per-issue split. Pure. */
+/** The hover detail of one refinement point: the numerator's stories (≥ 1 unit with the issue) and
+ *  Spec gaps' types. Pure. */
 export function refinementHover(
   issue: StoryIssueId,
   pop: readonly StoryHealthStoryInput[],
-): Pick<StoryHealthPoint, 'stories' | 'storiesMore' | 'blockedSplit' | 'gapTypes'> {
-  const hits = pop.filter((s) => storyIssueAnswers(s)?.[issue] === true);
+): Pick<StoryHealthPoint, 'stories' | 'storiesMore' | 'gapTypes'> {
+  const hits = pop.filter((s) => (storyIssueAnswers(s)?.[issue]?.num ?? 0) > 0);
   const refs: StoryHealthStoryRef[] = hits
     .map((s) => ({ ident: s.ident, key: s.key ?? s.ident, title: s.title ?? null }))
     .sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }) || a.ident.localeCompare(b.ident));
-  const out: Pick<StoryHealthPoint, 'stories' | 'storiesMore' | 'blockedSplit' | 'gapTypes'> = {
+  const out: Pick<StoryHealthPoint, 'stories' | 'storiesMore' | 'gapTypes'> = {
     stories: refs.slice(0, STORY_HEALTH_HOVER_STORIES),
     storiesMore: Math.max(0, refs.length - STORY_HEALTH_HOVER_STORIES),
   };
-  if (issue === 'blocked') {
-    let linked = 0;
-    let textOnly = 0;
-    for (const s of hits) {
-      const src = storyBlockedSource(issueInputOf(s));
-      if (src === 'linked') linked += 1;
-      else if (src === 'text_only') textOnly += 1;
-    }
-    out.blockedSplit = { linked, textOnly };
-  }
   if (issue === 'spec_gaps') {
     const types: Partial<Record<StorySpecGapType, number>> = {};
     for (const s of hits) {
@@ -227,7 +236,7 @@ function itemsFor(id: StoryHealthSeriesId, s: StoryHealthStoryInput): Item[] {
   const issue = ISSUE_OF_SERIES.get(id);
   if (issue != null) {
     const m = storyIssueAnswers(s)?.[issue] ?? null;
-    return m == null ? [] : [{ num: m ? 1 : 0, den: 1 }];
+    return m == null || m.den <= 0 ? [] : [{ num: m.num, den: m.den }];
   }
   switch (id) {
     case 'workingTimeS':
@@ -450,12 +459,22 @@ export function foldStoryHealth(
 
   const series: StoryHealthSeries[] = [];
   const shifts: StoryHealthShift[] = [];
+  const omitted: StoryHealthOmitted[] = [];
   for (const meta of STORY_HEALTH_SERIES) {
     if (meta.source === 'label' && !opts.labels) continue;
-    if (opts.held?.[meta.id] != null) continue;
+    if (opts.held?.[meta.id] != null) {
+      if (meta.panel === 'refinement') omitted.push({ series: meta.id, reason: 'held' });
+      continue;
+    }
     const pops = meta.panel === 'refinement' ? refinement : delivery;
     const issue = ISSUE_OF_SERIES.get(meta.id);
     const perWeek: Item[][] = pops.map((pop) => pop.flatMap((s) => itemsFor(meta.id, s)));
+    // No story in the span has a tracker-linked blocker → nothing to chart (a flat 0% would read as
+    // "nothing was blocked", which the data cannot say).
+    if (meta.id === 'blocked' && !perWeek.some((items) => items.some((it) => 'num' in it && it.num > 0))) {
+      omitted.push({ series: meta.id, reason: 'no_links' });
+      continue;
+    }
     const thin = perWeek.map((items) => items.length < STORY_HEALTH_THIN_N);
     const points: StoryHealthPoint[] = perWeek.map((items, i) => {
       let pooled: Item[] = [];
@@ -471,6 +490,7 @@ export function foldStoryHealth(
         thin: thin[i]!,
         rolling: rollingWeeks > 0 ? valueOf(meta, pooled) : null,
         rollingWeeks,
+        ...(meta.panel === 'refinement' && meta.over === 'criteria' ? { criteria: sumItems(items) } : {}),
         ...(issue != null ? refinementHover(issue, pops[i]!) : {}),
       };
     });
@@ -480,5 +500,5 @@ export function foldStoryHealth(
     if (shift != null) shifts.push(shift);
   }
 
-  return { weeks: outWeeks, series, shifts, createdFallbackTotal, unsizedTotal, unlabelled };
+  return { weeks: outWeeks, series, shifts, createdFallbackTotal, unsizedTotal, unlabelled, omitted };
 }

@@ -11,6 +11,7 @@ import {
   STORY_SIZE_BANDS,
   STORY_SPEC_GAP_TYPE_LABEL,
   STORY_SPEC_GAP_TYPES,
+  type StoryHealthOmitted,
   type StoryHealthPanel,
   type StoryHealthPoint,
   type StoryHealthResponse,
@@ -22,6 +23,9 @@ import {
   type StoryHealthWeek,
 } from '@pierre-review/shared';
 import { hoursShort, weekLabel } from './chronologyTrendModel.js';
+
+const storiesWord = (n: number): string => `${n} ${n === 1 ? 'story' : 'stories'}`;
+const criteriaWord = (n: number): string => `${n} ${n === 1 ? 'criterion' : 'criteria'}`;
 
 /** Stroke colour per series (non-text: lines, dots, legend swatches). */
 export const STORY_SERIES_COLOR: Record<StoryHealthSeriesId, string> = {
@@ -129,7 +133,10 @@ export function mergedLine(w: StoryHealthWeek): string {
 
 /** What one series says about one week, for the hover box. */
 export function pointLine(meta: StoryHealthSeriesMeta, p: StoryHealthPoint): string {
-  const nWord = `${p.n} ${meta.over === 'reviewed' ? (p.n === 1 ? 'reviewed story' : 'reviewed stories') : p.n === 1 ? 'story' : 'stories'}`;
+  const nWord =
+    meta.over === 'criteria' && p.criteria != null
+      ? `${criteriaWord(p.criteria.den)} in ${storiesWord(p.n)}`
+      : `${p.n} ${meta.over === 'reviewed' ? (p.n === 1 ? 'reviewed story' : 'reviewed stories') : p.n === 1 ? 'story' : 'stories'}`;
   if (p.value == null) return p.n === 0 ? 'none' : `not measured (${nWord})`;
   const head = `${formatStoryValue(meta.unit, p.value)} (${nWord})`;
   if (p.thin) return `${head}: too few to compare`;
@@ -241,9 +248,9 @@ export function shiftUnits(n: number, of: StoryHealthShift['nOf']): string {
 export function seriesCountsSentence(id: StoryHealthSeriesId): string {
   switch (id) {
     case 'unclearDone':
-      return 'A story counts when a criterion can’t be checked as written.';
+      return 'Criteria in the stories Claude has read that can’t be checked as written.';
     case 'blocked':
-      return 'A story counts when it links or names other work it waits on, finished or not.';
+      return 'A story counts when your tracker links it to work it waits on, finished or not.';
     case 'specGaps':
       return 'A story counts when a developer would have to ask about a missing detail.';
     case 'workingTimeS':
@@ -259,7 +266,6 @@ export function seriesCountsSentence(id: StoryHealthSeriesId): string {
   }
 }
 
-const storiesWord = (n: number): string => `${n} ${n === 1 ? 'story' : 'stories'}`;
 
 /** The week's NUMERATOR for a refinement series: the server's list + "more" when sent, else derived
  *  from the value and n. */
@@ -283,20 +289,19 @@ export function latestFigureLine(
   const when = w.partial ? 'This week so far' : 'This week';
   if (p.n === 0 || p.value == null) return `${when}: no stories`;
   if (meta.panel === 'refinement') {
+    if (meta.over === 'criteria' && p.criteria != null) return `${when}: ${p.criteria.num} of ${criteriaWord(p.criteria.den)}`;
     return `${when}: ${pointNumerator(p) ?? 0} of ${storiesWord(p.n)}`;
   }
   const over = meta.over === 'reviewed' ? `${p.n} reviewed ${p.n === 1 ? 'story' : 'stories'}` : storiesWord(p.n);
   return `${when}: ${formatStoryValue(meta.unit, p.value)} · ${over}`;
 }
 
-/** (3) The detected shift as one sentence: "Rose from 19% to 44% on 17 Aug, 32 vs 28 stories". */
+/** (3) The detected shift as one sentence: "Rose from 19% to 44% on 17 Aug, 32 vs 28 stories"; a criteria
+ *  series counts criteria ("…, 210 vs 240 criteria"). */
 export function shiftSentence(s: StoryHealthShift): string {
   const meta = STORY_HEALTH_SERIES_BY_ID[s.series];
   const verb = s.direction === 'up' ? 'Rose' : 'Fell';
-  const units =
-    s.beforeStories != null && s.afterStories != null
-      ? `${s.beforeStories} vs ${storiesWord(s.afterStories)}`
-      : `${s.beforeN} vs ${shiftUnits(s.afterN, s.nOf)}`;
+  const units = `${s.beforeN} vs ${shiftUnits(s.afterN, s.nOf)}`;
   return `${verb} from ${formatStoryValue(meta.unit, s.before)} to ${formatStoryValue(meta.unit, s.after)} on ${weekLabel(s.weekStart)}, ${units}`;
 }
 
@@ -316,13 +321,6 @@ export function seriesInfoLines(
 
 // ── A refinement week's extra hover lines ────────────────────────────────────────────────────────
 
-/** Blocked: "Linked in the tracker: 3 · Named only in the text: 2". null when not sent. */
-export function blockedSplitLine(p: Pick<StoryHealthPoint, 'blockedSplit'>): string | null {
-  const b = p.blockedSplit;
-  if (b == null) return null;
-  return `Linked in the tracker: ${b.linked} · Named only in the text: ${b.textOnly}`;
-}
-
 /** Spec gaps: "Edge case 4 · Business rule 2", most first (ties in type order). null when none. */
 export function gapTypesLine(p: Pick<StoryHealthPoint, 'gapTypes'>): string | null {
   const g = p.gapTypes;
@@ -338,3 +336,15 @@ export function moreStoriesLine(p: Pick<StoryHealthPoint, 'storiesMore'>): strin
   const n = p.storiesMore ?? 0;
   return n > 0 ? `and ${n} more` : null;
 }
+
+// ── Omitted refinement series ────────────────────────────────────────────────────────────────────
+
+/** One short sentence per refinement series the server left out (the reasoning sits behind the
+ *  panel's ⓘ). */
+export function omittedSentence(o: StoryHealthOmitted): string {
+  if (o.reason === 'no_links') return `No blocking links in your tracker in these ${STORY_HEALTH_SPAN_DAYS} days.`;
+  return `${STORY_HEALTH_SERIES_BY_ID[o.series].label} is not charted: two readings of the same tickets disagree too often.`;
+}
+
+/** The span's day count as the heading says it ("Last 90 days"). */
+const STORY_HEALTH_SPAN_DAYS = 90;

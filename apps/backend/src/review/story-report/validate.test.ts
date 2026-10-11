@@ -156,7 +156,7 @@ describe('storyReportFingerprint', () => {
     expect(storyReportFingerprint('60', shuffled)).toBe(storyReportFingerprint('60', picks));
   });
   it('folds the three-issues format tag, so a report written before it reads stale', () => {
-    expect(STORY_REPORT_FORMAT).toBe('story-report-v4');
+    expect(STORY_REPORT_FORMAT).toBe('story-report-v5');
   });
   it('changes on a new review, a merge, or another window choice', () => {
     const fp = storyReportFingerprint('60', picks);
@@ -226,8 +226,17 @@ describe('the agent surface', () => {
       storiesInWindow: 2, withWrittenCriteria: 2, criteriaOnlyInDescription: 0, noCriteriaFound: 0, checkedByTicketReview: 0,
       checkedAndFullyMet: 0, checkedWithGaps: 0, medianWorkingHours: 4, workingDayHours: 8, truncated: false,
     };
-    expect(populationForAgent({ ...pop, issueRates: [{ id: 'spec_gaps', stories: 1, of: 2 }] }).issueRates).toEqual([
-      { issue: 'Spec gaps', stories: 1, ofReadStories: 2 },
+    expect(
+      populationForAgent({
+        ...pop,
+        issueRates: [
+          { id: 'unclear_done', stories: 3, of: 20, unit: 'criteria' },
+          { id: 'blocked', stories: 1, of: 2, unit: 'stories' },
+        ],
+      }).issueRates,
+    ).toEqual([
+      { measure: 'Criteria that can’t be checked', count: 3, of: 20, unit: 'criteria' },
+      { measure: 'Stories with a linked blocker', count: 1, of: 2, unit: 'stories' },
     ]);
     expect('issueRates' in populationForAgent(pop)).toBe(false);
   });

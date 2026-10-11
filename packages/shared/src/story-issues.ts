@@ -24,7 +24,10 @@ import type {
 //                     owner, and a ticket key when one is named. A named key that is a STORED ticket
 //                     gets its title + status from code (`knownTickets`); one that is done is resolved.
 //   spec_gaps     up to three specific missing details from the label (a rule, an edge case, a design,
-//                 data, a non-functional need).
+//                 data, a non-functional need). NOT a This sprint chip (2026-10-11: every labelled ticket
+//                 got three, so a chip on every card said nothing) — the opened card lists the gaps as
+//                 their own section. `foldStoryIssues` still returns it; This sprint filters chips by
+//                 `chip` (`STORY_CHIP_ISSUE_IDS`).
 //
 // ⚠ "Too big" and "Scope not stated" were REMOVED (2026-10-11, user decision): the first flagged 69 of
 // 73 real stories and splitting is not the reader's call; the second was too generic to act on. Their
@@ -39,9 +42,11 @@ import type {
 // ⚠ TWO QUESTIONS, TWO FOLDS — never one reused for the other:
 //   • `foldStoryIssues` — THE TICKET NOW (This sprint): is it blocked TODAY? A finished dependency is
 //     not a blocker.
-//   • `storyIssueMeasure` — HOW THE STORY WAS WRITTEN (Story health, the story report's rates): did it
+//   • `storyIssueMeasure` — HOW THE STORY WAS WRITTEN (the story report's per-pick states): did it
 //     depend on other work at all? Finished or not — or every old story would read "not blocked" once
-//     its blockers closed, and the series would rise at the right edge by construction.
+//     its blockers closed.
+// RATES over many stories (Story health, the story report's figures) use a THIRD rule,
+// `storyIssueRateUnits`: unclear_done over CRITERIA, blocked over tracker LINKS only (code).
 //
 // ⚠ EVERY SENTENCE HERE IS TEMPLATED — the chip detail and the one-line bullet. The REASON / WHAT /
 // OWNER / GAP strings inside them are the labeller's short phrases (validated, capped), shown as data.
@@ -57,17 +62,20 @@ export interface StoryIssueMeta {
   order: number;
   /** The issue AVOIDED, for a strength ("What we do well"): naming the problem there reads as one. */
   avoided: string;
-  /** The label for a RATE counted by `storyIssueMeasure` (Story health's series, the story report's
-   *  whole-window figures). It differs from `label` where the populations differ: a "Blocked" chip is
-   *  the ticket NOW (open dependencies only); the measure counts every dependency, finished or not. */
+  /** The label for a RATE counted by `storyIssueRateUnits` (Story health's series, the story report's
+   *  whole-window figures). It differs from `label` because the populations differ: unclear_done is a
+   *  share of CRITERIA, blocked a share of stories with a tracker LINK (any status). */
   measureLabel: string;
+  /** A chip on This sprint (counted in `flagCount`, the sort order). spec_gaps is not: its gaps show
+   *  in the opened card as their own section (`SprintTicketRow.specGaps`). */
+  chip: boolean;
 }
 
 /** In display order. */
 export const STORY_ISSUES: readonly StoryIssueMeta[] = [
-  { id: 'unclear_done', label: 'Unclear when done', order: 0, avoided: 'Clear when done', measureLabel: 'Unclear when done' },
-  { id: 'blocked', label: 'Blocked', order: 1, avoided: 'Nothing blocking', measureLabel: 'Had blockers' },
-  { id: 'spec_gaps', label: 'Spec gaps', order: 2, avoided: 'Spec complete', measureLabel: 'Spec gaps' },
+  { id: 'unclear_done', label: 'Unclear when done', order: 0, avoided: 'Clear when done', measureLabel: 'Criteria that can’t be checked', chip: true },
+  { id: 'blocked', label: 'Blocked', order: 1, avoided: 'Nothing blocking', measureLabel: 'Stories with a linked blocker', chip: true },
+  { id: 'spec_gaps', label: 'Spec gaps', order: 2, avoided: 'Spec complete', measureLabel: 'Spec gaps', chip: false },
 ];
 
 export const STORY_ISSUE_IDS: readonly StoryIssueId[] = STORY_ISSUES.map((m) => m.id);
@@ -75,6 +83,9 @@ export const STORY_ISSUE_IDS: readonly StoryIssueId[] = STORY_ISSUES.map((m) => 
 export const STORY_ISSUE_BY_ID: Readonly<Record<StoryIssueId, StoryIssueMeta>> = Object.fromEntries(
   STORY_ISSUES.map((m) => [m.id, m]),
 ) as Record<StoryIssueId, StoryIssueMeta>;
+
+/** The issues that are chips on This sprint (`chip: true`), in display order. */
+export const STORY_CHIP_ISSUE_IDS: readonly StoryIssueId[] = STORY_ISSUES.filter((m) => m.chip).map((m) => m.id);
 
 /** THE tolerance gate: an old stored id ('too_big', 'waits_on_work', 'scope_unstated') is false. */
 export function isStoryIssueId(v: unknown): v is StoryIssueId {
@@ -323,16 +334,11 @@ export function storyIssueStates(input: StoryIssueInput): Record<StoryIssueId, b
   return { unclear_done: state('unclear_done'), blocked: state('blocked'), spec_gaps: state('spec_gaps') };
 }
 
-/** How `storyIssueMeasure` counted a blocked story — Story health's split of the Blocked series. */
-export type StoryBlockedSource = 'linked' | 'text_only';
-
-/** THE MEASUREMENT RULE for rates over many stories (Story health's refinement series, the story
- *  report's whole-window rates): ONE POPULATION — the stories with a usable label. Every issue is
- *  answered for a labelled story and for no other, so a rate's numerator and denominator come from
- *  the same stories. "No criteria" is NOT folded in (a no-criteria story can never be labelled); it is
- *  counted on its own, by code (`noCriteria` / `noCriteriaFound`).
- *  ⚠ `blocked` here = the story DEPENDED on other work, FINISHED OR NOT (see the header): any link,
- *  any named dependency. null = leave this story out of this issue's rate. Pure. */
+/** Per-story PRESENCE "as written" — the story report's per-pick states (`storyIssuesAsWritten`): did
+ *  the story have the issue at all? ONE population, the stories with a usable label (null otherwise).
+ *  ⚠ `blocked` here = the story DEPENDED on other work, FINISHED OR NOT: any link, any named
+ *  dependency. ⚠ This is NOT the rate rule — rates over many stories go through `storyIssueRateUnits`.
+ *  Pure. */
 export function storyIssueMeasure(input: StoryIssueInput): Record<StoryIssueId, boolean | null> {
   const label = usableStoryLabel(input);
   if (label == null) return { unclear_done: null, blocked: null, spec_gaps: null };
@@ -343,11 +349,42 @@ export function storyIssueMeasure(input: StoryIssueInput): Record<StoryIssueId, 
   };
 }
 
-/** For a story `storyIssueMeasure` counts as blocked: did any dependency come from a tracker link?
- *  null when it is not counted as blocked. Pure. */
-export function storyBlockedSource(input: StoryIssueInput): StoryBlockedSource | null {
-  if (storyIssueMeasure(input).blocked !== true) return null;
-  return storyBlockers(input).some((b) => b.source === 'link') ? 'linked' : 'text_only';
+/** One story's contribution to a rate: `num` of `den` units (see `STORY_ISSUE_RATE_UNIT`). */
+export interface StoryRateUnits {
+  num: number;
+  den: number;
+}
+
+/** What a rate counts, per issue: CRITERIA for "Unclear when done", STORIES for the rest. */
+export const STORY_ISSUE_RATE_UNIT: Readonly<Record<StoryIssueId, 'criteria' | 'stories'>> = {
+  unclear_done: 'criteria',
+  blocked: 'stories',
+  spec_gaps: 'stories',
+};
+
+/** THE RATE RULE for rates over many stories (Story health's refinement series, the story report's
+ *  whole-window rates). null = leave this story out of this issue's rate. Pure.
+ *   • unclear_done — CRITERIA: of the story's criteria, how many the CURRENT usable label could not
+ *     check. A story with no criteria or no usable label is out (no criteria is counted on its own, by
+ *     code: `noCriteria` / `noCriteriaFound`). A rate over stories saturated: almost every story had one
+ *     loose criterion.
+ *   • blocked — STORIES, CODE ONLY: does the ticket carry ≥ 1 tracker link of a blocking type, any
+ *     status? Out when its links were never read (`links` null/absent). A dependency named only in the
+ *     text is NOT counted: two readings of the same ticket disagree on those.
+ *   • spec_gaps — STORIES: the usable label found ≥ 1 gap (held from Story health, `STORY_HEALTH_HELD`). */
+export function storyIssueRateUnits(input: StoryIssueInput): Record<StoryIssueId, StoryRateUnits | null> {
+  const label = usableStoryLabel(input);
+  let unclear: StoryRateUnits | null = null;
+  if (label != null) {
+    const total = input.criteria.length;
+    const flagged = new Set(label.criteria.filter((c) => !c.testable && c.n >= 1 && c.n <= total).map((c) => c.n));
+    unclear = { num: flagged.size, den: total };
+  }
+  return {
+    unclear_done: unclear,
+    blocked: input.links == null ? null : { num: input.links.length > 0 ? 1 : 0, den: 1 },
+    spec_gaps: label == null ? null : { num: label.story.gaps.length > 0 ? 1 : 0, den: 1 },
+  };
 }
 
 // ── Checks (per-workspace, Reports → This sprint) ────────────────────────────────────────────────

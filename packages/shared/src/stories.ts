@@ -230,14 +230,22 @@ export interface StoryReportCandidate {
   issueStates?: Record<StoryIssueId, boolean | null> | null;
 }
 
-/** One story issue's whole-window rate (code, `storyIssueMeasure`): over the stories Claude has read in
- *  their current form ONLY — never mixed with the no-criteria count (`noCriteriaFound`). */
+/** One story issue's whole-window rate (code, `storyIssueRateUnits` — the SAME measures as Story
+ *  health): unclear_done = criteria that can't be checked, of all criteria in the stories Claude has
+ *  read in their current form (`unit: 'criteria'`); blocked = stories with a tracker-linked blocker, of
+ *  the stories whose links were read (`unit: 'stories'`) — omitted when none has one; spec_gaps is
+ *  omitted while held. Never mixed with the no-criteria count (`noCriteriaFound`). */
 export interface StoryReportIssueRate {
   id: StoryIssueId;
-  /** Stories in the window with this issue (`storyIssueMeasure` === true). */
+  /** The units with this issue — CRITERIA when `unit` is 'criteria', else stories. (The field name
+   *  predates criteria rates; stored rows keep it.) */
   stories: number;
-  /** Stories with a current label (`storyIssueMeasure` !== null) — the same stories for every issue. */
+  /** All units counted, in the same unit. */
   of: number;
+  /** Present on every rate written since 2026-10-11. ABSENT = an older stored report, whose rates were
+   *  story-level over labelled stories (blocked counted named dependencies too) — read with the old
+   *  labels, never as the new measures. */
+  unit?: 'stories' | 'criteria';
 }
 
 /** Whole-window figures, computed by CODE over every story in the window (not the picks) — the ONLY
@@ -262,7 +270,8 @@ export interface StoryReportPopulation {
   workingDayHours: number;
   /** The fold hit `STORIES_MAX`: the figures cover the newest `storiesInWindow` only. */
   truncated: boolean;
-  /** Whole-window, CODE, `storyIssueMeasure`, in STORY_ISSUES order. Absent on old rows. */
+  /** Whole-window, CODE, `storyIssueRateUnits`, in STORY_ISSUES order (an omitted issue is absent).
+   *  Absent on old rows. */
   issueRates?: StoryReportIssueRate[];
 }
 

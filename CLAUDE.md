@@ -1172,23 +1172,23 @@ over the whole window; the picks are a sample the agent may never quote a rate f
 key must be a picked key; the first `submit_report` wins. [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story report.
 
 **THE THREE STORY ISSUES** (shared `story-issues.ts`) — Unclear when done (which criterion, why) ·
-Blocked (what, who, state: tracker links, then dependencies the label names) · Spec gaps. Input via
-`db/story-issue-input.ts`; retired ids drop through `isStoryIssueId`. ⚠ This sprint asks "blocked NOW"
-(`foldStoryIssues`); rates ask "how it was WRITTEN" (`storyIssueMeasure`: labelled stories only, any
-dependency finished or not, "no criteria" apart). Every sentence is templated.
+Blocked (what, who, state: tracker links, then dependencies the label names) · Spec gaps (no chip).
+Input via `db/story-issue-input.ts`; retired ids drop through `isStoryIssueId`. ⚠ This sprint asks
+"blocked NOW" (`foldStoryIssues`); RATES use `storyIssueRateUnits` (unclear = % of CRITERIA;
+blocked = tracker LINKS, any status; "no criteria" apart). Every sentence is templated.
 
 **Story health** (Reports → Stories, "Last 90 days", a FIXED labelled span) — core
 `GET /api/story-health` (Pro, 402). REFINEMENT (by the ticket's CREATED week, `issue_created_at`,
-else first PR opened, counted) is one "% of stories" series per issue; DELIVERY is by last merge.
+else first PR opened, counted) is a series per issue (or `omitted`); DELIVERY by last merge.
 ⚠ Refinement is every ticket with an open OR merged PR written in the span, never only the merged
 ones. ⚠ Labels count ONLY when CURRENT (rubric version AND text hash, `db/story-label-input.ts`); with
-`config.aiEnabled` false the three series are OMITTED. ⚠ A RATE shift is a two-proportion test on
+`config.aiEnabled` false the label series are OMITTED. ⚠ A RATE shift is a two-proportion test on
 POOLED counts (`STORY_SHIFT_*`), never a changepoint over weekly percentages.
 [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story labels.
 
 **Reports → This sprint** (`?insightsTab=sprint`, Pro `periodReports`; sqlite `0100` / pg `0087`): the
-tracker's current sprint in status sections (`db/sprint-status-layout.ts`); per ticket ≤ 3 story
-issues minus the workspace's checks (`applyStoryIssueChecks`); reader-ACCEPTED repos; "Check against code" (Sonnet 5, LOCAL ONLY,
+tracker's current sprint in status sections (`db/sprint-status-layout.ts`); per ticket ≤ 2 issue
+chips minus the workspace's checks (`applyStoryIssueChecks`); reader-ACCEPTED repos; "Check against code" (Sonnet 5, LOCAL ONLY,
 `review/sprint-assess/`: a summary + ≤ 1 sentence per issue, cited paths verified or dropped) and the
 per-ticket write-back. ⚠ Nothing writes without the dialog's Confirm; no agent tool,
 setting or bulk route writes. Copy goes through ONE helper, `lib/copy.ts`.

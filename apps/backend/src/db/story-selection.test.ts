@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { StoryCriteriaSource, StoryIssueInput, StoryReviewSummary, StoryRow } from '@pierre-review/shared';
 import type { StoryInternals } from './stories.js';
-import { selectStories, storyIssueRates, storyIssuesAsWritten } from './story-selection.js';
+import { reportableIssueRates, selectStories, storyIssueRates, storyIssuesAsWritten } from './story-selection.js';
 
 let n = 0;
 function story(o: {
@@ -161,14 +161,16 @@ describe('selectStories', () => {
     expect(by.get('I-1')!.issueStates).toEqual({ unclear_done: true, blocked: true, spec_gaps: true });
     // No label: what code knows is true, the rest NOT KNOWN — never false.
     expect(by.get('I-2')!.issueStates).toEqual({ unclear_done: true, blocked: null, spec_gaps: null });
-    // ⚠ ONE population: only the labelled story counts, for every issue — the no-criteria story is
-    // `noCriteriaFound`, the unlabelled story and the unread ticket are out.
+    // Story health's measures: criteria that can't be checked over the labelled stories' CRITERIA (the
+    // no-criteria story is `noCriteriaFound`); linked blockers over the stories whose links were read.
     expect(s.population.noCriteriaFound).toBe(1);
     expect(s.population.issueRates).toEqual([
-      { id: 'unclear_done', stories: 1, of: 1 },
-      { id: 'blocked', stories: 1, of: 1 },
+      { id: 'unclear_done', stories: 1, of: 4, unit: 'criteria' },
+      { id: 'blocked', stories: 1, of: 1, unit: 'stories' },
       // spec_gaps is HELD (STORY_HEALTH_HELD), so its rate is not handed to the report.
     ]);
+    // ⚠ No story with a linked blocker → that rate is omitted, as the chart is.
+    expect(reportableIssueRates([{ id: 'blocked', stories: 0, of: 9, unit: 'stories' }])).toEqual([]);
     // Without inputs, no issue fields are written (old callers, old rows).
     const plain = selectStories([a, b], 8);
     expect(plain.population.issueRates).toBeUndefined();

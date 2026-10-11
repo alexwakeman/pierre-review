@@ -63,6 +63,7 @@ function ticket(over: Partial<SprintTicketRow> = {}): SprintTicketRow {
     criteria: { items: ['old one', 'old two'], source: 'description_heading' },
     labels: 'none',
     issues: [],
+    specGaps: [],
     flagCount: 0,
     pullRequests: [],
     repos: { accepted: [], suggested: [] },
@@ -74,18 +75,18 @@ function ticket(over: Partial<SprintTicketRow> = {}): SprintTicketRow {
   };
 }
 
-const GAPS: StoryIssue = {
-  id: 'spec_gaps',
-  criteria: [],
+const UNCLEAR: StoryIssue = {
+  id: 'unclear_done',
+  criteria: [{ n: 2, reason: 'no expected result' }],
   blockers: [],
-  gaps: [{ type: 'edge_case', text: 'No behaviour when the export is empty' }],
+  gaps: [],
   total: 2,
-  reasons: ['gaps'],
+  reasons: ['untestable'],
 };
 
 const BODY: SprintAssessmentBody = {
   summary: 'Summary.',
-  issues: [{ id: 'spec_gaps', text: 'Say the export is CSV only.', ref: null }],
+  issues: [{ id: 'unclear_done', text: 'Say the export is CSV only.', ref: null }],
   revisedCriteria: ['old one', 'new two', 'added'],
 };
 
@@ -345,7 +346,7 @@ describe('update panel', () => {
   });
 
   it('proposed defaults from a succeeded assessment', () => {
-    const t = withAssessment(ticket({ issues: [GAPS] }), 'succeeded', 'current');
+    const t = withAssessment(ticket({ issues: [UNCLEAR] }), 'succeeded', 'current');
     expect(proposedDefault(t, 'comment', SPRINT_CHECKS_DEFAULT)).toBe(
       'Summary.\n\n- Say the export is CSV only.\n\n**Proposed acceptance criteria**\n\n- old one\n- new two\n- added',
     );
@@ -366,15 +367,15 @@ describe('update panel', () => {
   });
 
   it('⚠ a stale run feeds nothing: no bullets of its own, no summary, no revised criteria', () => {
-    // The author filled the gap since: code no longer raises spec_gaps.
+    // The author fixed the criterion since: code no longer raises unclear_done.
     const stale = withAssessment(ticket({ issues: [] }), 'succeeded', 'stale');
     expect(sprintBullets(stale, SPRINT_CHECKS_DEFAULT)).toEqual([]);
     expect(proposedDefault(stale, 'comment', SPRINT_CHECKS_DEFAULT)).toBe('');
     expect(proposedDefault(stale, 'replace', SPRINT_CHECKS_DEFAULT)).toBe(stale.description);
     // Still raised by code: the TEMPLATED bullet, never the stale sentence.
-    const still = withAssessment(ticket({ issues: [GAPS] }), 'succeeded', 'stale');
+    const still = withAssessment(ticket({ issues: [UNCLEAR] }), 'succeeded', 'stale');
     expect(sprintBullets(still, SPRINT_CHECKS_DEFAULT)).toEqual([
-      { id: 'spec_gaps', text: 'No behaviour when the export is empty', source: 'code', ref: null },
+      { id: 'unclear_done', text: 'Criterion 2: no expected result', source: 'code', ref: null },
     ]);
     const old = withAssessment(ticket(), 'succeeded', 'stale', { outdated: true });
     expect(proposedDefault(old, 'comment', SPRINT_CHECKS_DEFAULT)).toBe('');
@@ -383,12 +384,28 @@ describe('update panel', () => {
 
   it("⚠ Claude's sentence only REPLACES a bullet for an issue code raised; it never adds one", () => {
     const body = { ...BODY, issues: [{ id: 'blocked' as const, text: 'Waits on the billing API.', ref: null }, ...BODY.issues] };
-    const t = withAssessment(ticket({ issues: [GAPS] }), 'succeeded', 'current', { body });
+    const t = withAssessment(ticket({ issues: [UNCLEAR] }), 'succeeded', 'current', { body });
     expect(sprintBullets(t, SPRINT_CHECKS_DEFAULT)).toEqual([
-      { id: 'spec_gaps', text: 'Say the export is CSV only.', source: 'claude', ref: null },
+      { id: 'unclear_done', text: 'Say the export is CSV only.', source: 'claude', ref: null },
     ]);
     // A ticket with no issues stays "Nothing flagged" when expanded, whatever Claude said.
     expect(sprintBullets(withAssessment(ticket({ issues: [] }), 'succeeded', 'current', { body }), SPRINT_CHECKS_DEFAULT)).toEqual([]);
+  });
+
+  it('spec gaps: their own section in the comment default, Claude’s current sentence included, never a bullet', () => {
+    const body = { ...BODY, issues: [...BODY.issues, { id: 'spec_gaps' as const, text: 'No limit on rows.', ref: null }] };
+    const t = withAssessment(
+      ticket({ issues: [UNCLEAR], specGaps: [{ type: 'edge_case', text: 'No behaviour when the export is empty' }] }),
+      'succeeded',
+      'current',
+      { body },
+    );
+    expect(sprintBullets(t, SPRINT_CHECKS_DEFAULT).map((b) => b.id)).toEqual(['unclear_done']);
+    expect(proposedDefault(t, 'comment', SPRINT_CHECKS_DEFAULT)).toBe(
+      'Summary.\n\n- Say the export is CSV only.\n\n**Spec gaps**\n\n- Edge case: No behaviour when the export is empty\n- No limit on rows.\n\n**Proposed acceptance criteria**\n\n- old one\n- new two\n- added',
+    );
+    // The switch hides the section.
+    expect(proposedDefault(t, 'comment', { off: ['spec_gaps'], issueTypes: [] })).not.toContain('Spec gaps');
   });
 
   it('text problems mirror the server cap', () => {

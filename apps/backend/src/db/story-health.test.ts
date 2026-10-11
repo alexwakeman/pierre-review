@@ -207,16 +207,19 @@ describe('getStoryHealth', () => {
     expect(on.weeks.reduce((n, w) => n + w.storiesCreated, 0)).toBe(5);
     expect(on.weeks.reduce((n, w) => n + w.labelled, 0)).toBe(1);
     expect(on.series.map((x) => x.id)).toContain('unclearDone');
-    // The hover detail: ENG-3 is the week's one blocked story, linked (its tracker link wins the split).
+    // The hover detail: ENG-3 is the week's one story with a linked blocker.
     const blockedPoint = on.series.find((x) => x.id === 'blocked')!.points.find((p) => (p.stories ?? []).length > 0)!;
     expect(blockedPoint.stories).toEqual([{ ident: expect.any(String), key: 'ENG-3', title: 'Story ENG-3' }]);
-    expect(blockedPoint.blockedSplit).toEqual({ linked: 1, textOnly: 0 });
-    // Spec gaps is HELD (STORY_HEALTH_HELD) until its judgement passes an agreement test.
+    // Spec gaps is HELD (STORY_HEALTH_HELD) until its judgement passes an agreement test — and says so.
     expect(on.series.map((x) => x.id)).not.toContain('specGaps');
+    expect(on.omitted).toEqual([{ series: 'specGaps', reason: 'held' }]);
     expect(on.span.label).toBe('Last 90 days');
     const off = await sh.getStoryHealth(A1, s, NOW, { labels: false, labelRun: null });
     expect(off.series.map((x) => x.id)).not.toContain('unclearDone');
     expect(off.series.map((x) => x.id)).toContain('workingTimeS');
+    // Linked blockers are CODE: still charted with labels off.
+    expect(off.series.map((x) => x.id)).toContain('blocked');
+    expect(off.omitted).toEqual([]);
     expect(off).toMatchObject({ labels: false, unlabelled: 0, labelRun: null });
   });
 });

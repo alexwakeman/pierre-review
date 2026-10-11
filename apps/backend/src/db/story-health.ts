@@ -339,6 +339,7 @@ export async function getStoryHealth(
     weeks: fold.weeks,
     labels: opts.labels,
     series: fold.series,
+    omitted: inputs.trackerOn ? fold.omitted : [],
     shifts: fold.shifts,
     createdFallbackTotal: fold.createdFallbackTotal,
     unsizedTotal: fold.unsizedTotal,

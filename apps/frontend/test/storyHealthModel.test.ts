@@ -10,11 +10,11 @@ import {
 } from '@pierre-review/shared';
 import {
   axisTop,
-  blockedSplitLine,
   clusterShifts,
   gapTypesLine,
   latestFigureLine,
   moreStoriesLine,
+  omittedSentence,
   pointNumerator,
   seriesCountsSentence,
   seriesInfoLines,
@@ -107,12 +107,17 @@ describe('story health model', () => {
     expect(panelSeries({ series }, 'delivery').map((x) => x.meta.id)).toEqual(['workingTimeS']);
   });
 
-  it('draws one refinement series per story issue, labelled with the MEASURE’s label, lower is better', () => {
+  it('draws one refinement series per story issue, labelled with the MEASURE’s label', () => {
     const ref = STORY_HEALTH_SERIES.filter((m) => m.panel === 'refinement');
     expect(ref.map((m) => m.label)).toEqual(STORY_ISSUES.map((i) => i.measureLabel));
-    // The measure counts finished dependencies too, so it never wears the chip's "Blocked".
-    expect(ref.map((m) => m.label)).toEqual(['Unclear when done', 'Had blockers', 'Spec gaps']);
-    for (const m of ref) expect(m).toMatchObject({ source: 'label', unit: 'pct', over: 'stories', better: 'lower' });
+    // The measures differ from the chips: criteria, not stories; tracker links only, finished or not.
+    expect(ref.map((m) => m.label)).toEqual(['Criteria that can’t be checked', 'Stories with a linked blocker', 'Spec gaps']);
+    expect(ref.map((m) => [m.source, m.over, m.better])).toEqual([
+      ['label', 'criteria', 'lower'],
+      ['code', 'stories', null],
+      ['label', 'stories', 'lower'],
+    ]);
+    for (const m of ref) expect(m.unit).toBe('pct');
     expect(new Set(ref.map((m) => STORY_SERIES_COLOR[m.id])).size).toBe(3);
   });
 
@@ -139,6 +144,9 @@ describe('story health model', () => {
     expect(pointLine(meta, p({ n: 2, thin: true }))).toBe('60% (2 stories): too few to compare');
     expect(pointLine(meta, p({ value: null, n: 0 }))).toBe('none');
     expect(pointLine(STORY_HEALTH_SERIES_BY_ID.criteriaMet, p({ n: 1, rolling: null }))).toBe('60% (1 reviewed story)');
+    expect(pointLine(STORY_HEALTH_SERIES_BY_ID.unclearDone, p({ rolling: null, criteria: { num: 12, den: 20 } }))).toBe(
+      '60% (20 criteria in 5 stories)',
+    );
   });
 
   it('clusters only visible series, by week, in legend order', () => {
@@ -211,14 +219,30 @@ describe('story health model', () => {
         storiesMore: 2,
       },
     ];
-    const sh = shift({ series: 'blocked', before: 19.2, after: 44, weekStart: '2026-08-17', beforeStories: 32, afterStories: 28, direction: 'up' });
+    const sh = shift({ series: 'blocked', before: 19.2, after: 44, weekStart: '2026-08-17', beforeN: 32, afterN: 28, nOf: 'stories', direction: 'up' });
     expect(seriesInfoLines(meta, pts, weeks, sh)).toEqual([
-      'A story counts when it links or names other work it waits on, finished or not.',
+      'A story counts when your tracker links it to work it waits on, finished or not.',
       'This week so far: 4 of 9 stories',
       `Rose from 19% to 44% on ${weekLabel('2026-08-17')}, 32 vs 28 stories`,
     ]);
     // No shift → nothing about shifts.
     expect(seriesInfoLines(meta, pts, weeks, undefined)).toHaveLength(2);
+    // Criteria that can't be checked counts CRITERIA, this week and in the shift.
+    const ud = STORY_HEALTH_SERIES_BY_ID.unclearDone;
+    const cp: StoryHealthPoint[] = [{ value: 25, n: 4, thin: false, rolling: 25, rollingWeeks: 1, criteria: { num: 5, den: 20 } }];
+    const csh = shift({ series: 'unclearDone', before: 10, after: 40, weekStart: '2026-08-17', beforeN: 150, afterN: 160, nOf: 'criteria', direction: 'up' });
+    expect(seriesInfoLines(ud, cp, [week({ weekStart: '2026-08-17' })], csh)).toEqual([
+      'Criteria in the stories Claude has read that can’t be checked as written.',
+      'This week: 5 of 20 criteria',
+      `Rose from 10% to 40% on ${weekLabel('2026-08-17')}, 150 vs 160 criteria`,
+    ]);
+  });
+
+  it('an omitted refinement series is one short sentence', () => {
+    expect(omittedSentence({ series: 'blocked', reason: 'no_links' })).toBe('No blocking links in your tracker in these 90 days.');
+    expect(omittedSentence({ series: 'specGaps', reason: 'held' })).toBe(
+      'Spec gaps is not charted: two readings of the same tickets disagree too often.',
+    );
   });
 
   it('this week\'s figure: numerator from the list, else from the value; empty weeks say so', () => {
@@ -246,9 +270,7 @@ describe('story health model', () => {
     expect(seriesCountsSentence('workingTimeS')).toContain('under 300 lines');
   });
 
-  it('hover extras: Blocked split, gap types (most first), "and N more"', () => {
-    expect(blockedSplitLine({ blockedSplit: { linked: 3, textOnly: 2 } })).toBe('Linked in the tracker: 3 · Named only in the text: 2');
-    expect(blockedSplitLine({})).toBeNull();
+  it('hover extras: gap types (most first), "and N more"', () => {
     expect(gapTypesLine({ gapTypes: { rule: 2, edge_case: 4, design: 0 } })).toBe('Edge case 4 · Business rule 2');
     expect(gapTypesLine({ gapTypes: {} })).toBeNull();
     expect(moreStoriesLine({ storiesMore: 3 })).toBe('and 3 more');

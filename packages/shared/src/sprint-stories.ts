@@ -1,15 +1,18 @@
 import type { JiraStatusCategory, TrackerProvider } from './types.js';
 import type { StoryCriteriaSource, StoryPrRef } from './stories.js';
 import {
+  STORY_CHIP_ISSUE_IDS,
+  STORY_ISSUE_BY_ID,
   STORY_ISSUE_CHECKS_DEFAULT,
-  STORY_ISSUE_IDS,
   applyStoryIssueChecks,
   isStoryIssueId,
   storyIssueBullet,
+  storyIssueTypeChecked,
   type StoryIssue,
   type StoryIssueChecks,
   type StoryIssueId,
 } from './story-issues.js';
+import { STORY_SPEC_GAP_TYPE_LABEL, type StorySpecGap, type StorySpecGapType } from './story-health.js';
 
 // REPORTS → THIS SPRINT — the wire contract for `GET /api/sprint-stories` and its siblings
 // (docs/API.md § This sprint; docs/TRACKERS.md § The sprint list read; docs/CLAUDE-REVIEW.md §
@@ -23,8 +26,9 @@ import {
 //     (To do + In progress tickets touched in the reporting window). The `source` says which.
 //   • THE ISSUES are the THREE story issues (`story-issues.ts`), folded in code from the criteria, the
 //     ticket's stored TRACKER LINKS (`blocked_by_json`) and the STORED story labels (`story_labels`,
-//     Haiku, `STORY_RUBRIC_VERSION`); a label half appears only while the label is CURRENT. Chip text
-//     and bullets are TEMPLATED — never model text.
+//     Haiku, `STORY_RUBRIC_VERSION`); a label half appears only while the label is CURRENT. Two are
+//     CHIPS (Unclear when done, Blocked); spec gaps are a section of the opened card (`specGaps`).
+//     Chip text and bullets are TEMPLATED — never model text.
 //   • THE SECTIONS follow the workspace's STATUS LAYOUT (`SprintStatusLayout`): Not started, then
 //     "Writing code" (one section per status before the code-delivered status), then "Code delivered"
 //     (one per status from it on). The order and the code-delivered status are AUTOMATIC (the tracker's
@@ -147,9 +151,11 @@ export interface SprintReadState {
 
 // ── The issues and the checks ────────────────────────────────────────────────────────────────────
 //
-// A ticket's issues are the THREE story issues (`story-issues.ts`: `foldStoryIssues`, folded by the
-// server from the criteria and the CURRENT stored label), filtered by the workspace's checks
-// (`applyStoryIssueChecks`) — so `flagCount`, the order and Copy all agree with what is on screen.
+// A ticket's CHIPS are the story issues with `chip: true` (`story-issues.ts`: `foldStoryIssues`,
+// folded by the server from the criteria and the CURRENT stored label), filtered by the workspace's
+// checks (`applyStoryIssueChecks`) — so `flagCount`, the order and Copy all agree with what is on
+// screen. ⚠ Spec gaps is NOT a chip: its gaps ride `specGaps` and show only in the opened card, as
+// their own section (the "Spec gaps" check still switches that section).
 
 /** The workspace's checks: `workspaces.sprint_checks` (same JSON column as before; parsed
  *  tolerantly — unknown ids dropped (incl. the retired 'too_big' / 'waits_on_work' /
@@ -604,10 +610,14 @@ export interface SprintTicketRow {
   /** The numbered criteria (`extractCriteria`), in order. */
   criteria: { items: string[]; source: StoryCriteriaSource };
   labels: SprintLabelState;
-  /** `foldStoryIssues` filtered by the workspace's checks (`applyStoryIssueChecks`), in STORY_ISSUES
-   *  order; ≤ 3. [] for a ticket whose type the checks do not cover. */
+  /** The CHIP issues (`STORY_CHIP_ISSUE_IDS`: unclear_done, blocked) of `foldStoryIssues`, filtered by
+   *  the workspace's checks (`applyStoryIssueChecks`), in STORY_ISSUES order; ≤ 2. [] for a ticket
+   *  whose type the checks do not cover. Never spec_gaps. */
   issues: StoryIssue[];
-  /** = `issues.length` — the within-phase sort key. */
+  /** The CURRENT label's spec gaps (≤ STORY_SPEC_GAPS_MAX) — the opened card's own section. [] when
+   *  there is no current label, the "Spec gaps" check is off, or the type is not checked. */
+  specGaps: StorySpecGap[];
+  /** = `issues.length` — the within-phase sort key (spec gaps do not count). */
   flagCount: number;
   /** PRs already on this ticket (stored `tracker_tickets`, via `ticketMembers`); [] for most. */
   pullRequests: StoryPrRef[];
@@ -658,7 +668,7 @@ export interface SprintRefreshResponse {
 
 // ── Bullets and composers (pure; the SPA and tests share them) ──────────────────────────────────
 
-/** One line of the expanded card: ≤ 3, one per issue. */
+/** One line of the expanded card: ≤ 2, one per chip issue (spec gaps have their own section). */
 export interface SprintBullet {
   id: StoryIssueId;
   text: string;
@@ -682,10 +692,12 @@ export function sprintCurrentAssessmentBodyOf(
   return t.assessment?.currency === 'current' ? sprintAssessmentBodyOf(t) : null;
 }
 
-/** The ticket's issues: code's (already filtered by the checks) PLUS any issue a CURRENT "Check
- *  against code" run raised that code did not (reason 'claude', no criteria numbers), filtered by the
- *  same checks, in STORY_ISSUES order. The server builds `SprintTicketRow.issues` with it, so the
- *  chips, `flagCount`, the order and the bullets always name the same issues. A STALE run adds nothing. */
+/** The ticket's CHIP issues: code's (already filtered by the checks) PLUS any chip issue a CURRENT
+ *  "Check against code" run raised that code did not (reason 'claude', no criteria numbers), filtered
+ *  by the same checks, in STORY_ISSUES order. The server builds `SprintTicketRow.issues` with it, so the
+ *  chips, `flagCount`, the order and the bullets always name the same issues. A STALE run adds nothing.
+ *  ⚠ A run's spec_gaps sentence is never a chip — it shows in the Spec gaps section
+ *  (`sprintSpecGapLines`). */
 export function sprintIssuesWithClaude(
   coded: readonly StoryIssue[],
   body: SprintAssessmentBody | null,
@@ -693,15 +705,15 @@ export function sprintIssuesWithClaude(
   issueType: string | null,
   total: number,
 ): StoryIssue[] {
-  const out = [...coded];
+  const out = coded.filter((x) => STORY_CHIP_ISSUE_IDS.includes(x.id));
   for (const c of body?.issues ?? []) {
-    if (!isStoryIssueId(c.id)) continue;
+    if (!isStoryIssueId(c.id) || !STORY_CHIP_ISSUE_IDS.includes(c.id)) continue;
     if (!out.some((x) => x.id === c.id)) {
       out.push({ id: c.id, criteria: [], blockers: [], gaps: [], total, reasons: ['claude'] });
     }
   }
   return applyStoryIssueChecks(out, checks, issueType).sort(
-    (a, b) => STORY_ISSUE_IDS.indexOf(a.id) - STORY_ISSUE_IDS.indexOf(b.id),
+    (a, b) => STORY_ISSUE_BY_ID[a.id].order - STORY_ISSUE_BY_ID[b.id].order,
   );
 }
 
@@ -716,7 +728,7 @@ export function sprintBullets(
   // The server already filters `t.issues`; re-applying is idempotent and keeps this pure fold honest.
   const listed = applyStoryIssueChecks(t.issues, checks, t.issueType);
   const out: SprintBullet[] = [];
-  for (const id of STORY_ISSUE_IDS) {
+  for (const id of STORY_CHIP_ISSUE_IDS) {
     const issue = listed.find((x) => x.id === id);
     if (issue == null) continue;
     const c = claude.find((x) => x.id === id);
@@ -728,17 +740,60 @@ export function sprintBullets(
   return out;
 }
 
+/** One line of the opened card's Spec gaps section. */
+export interface SprintSpecGapLine {
+  text: string;
+  /** The gap's type (code's, from the label); null for Claude's sentence. */
+  type: StorySpecGapType | null;
+  /** 'code' = a labelled gap; 'claude' = a CURRENT "Check against code" run's spec_gaps sentence. */
+  source: 'code' | 'claude';
+  ref: SprintCodeRef | null;
+}
+
+/** THE Spec gaps section: code's gaps (`t.specGaps`), then a CURRENT run's spec_gaps sentence. [] when
+ *  the "Spec gaps" check is off or the ticket's type is not checked. Pure. */
+export function sprintSpecGapLines(
+  t: Pick<SprintTicketRow, 'specGaps' | 'assessment' | 'issueType'>,
+  checks: SprintChecks,
+): SprintSpecGapLine[] {
+  if (checks.off.includes('spec_gaps') || !storyIssueTypeChecked(checks, t.issueType)) return [];
+  const out: SprintSpecGapLine[] = (t.specGaps ?? []).map((g) => ({ text: g.text, type: g.type, source: 'code', ref: null }));
+  const c = sprintCurrentAssessmentBodyOf(t)?.issues.find((x) => x.id === 'spec_gaps');
+  if (c != null && c.text.trim() !== '') out.push({ text: c.text, type: null, source: 'claude', ref: c.ref });
+  return out;
+}
+
+/** One spec gap as plain text: "Edge case: No behaviour when the upload fails". */
+export function sprintSpecGapText(g: Pick<SprintSpecGapLine, 'text' | 'type'>): string {
+  const text = g.text.replace(/\s*\r?\n\s*/g, ' ').trim();
+  return g.type != null ? `${STORY_SPEC_GAP_TYPE_LABEL[g.type]}: ${text}` : text;
+}
+
+/** The Spec gaps section as Markdown ("**Spec gaps**" then one bullet per gap); '' when empty. */
+export function sprintSpecGapsMarkdown(gaps: readonly SprintSpecGapLine[]): string {
+  if (gaps.length === 0) return '';
+  const line = (g: SprintSpecGapLine): string =>
+    `- ${sprintSpecGapText(g)}${g.ref != null ? ` (\`${g.ref.path}\` in \`${g.ref.repo}\`)` : ''}`;
+  return `**Spec gaps**\n\n${gaps.map(line).join('\n')}`;
+}
+
 /** A criteria list as Markdown bullets. */
 export function criteriaListMarkdown(items: readonly string[]): string {
   return items.map((c) => `- ${c}`).join('\n');
 }
 
-/** The default "Add as a comment" text: the summary (when a CURRENT assessment exists), the bullets, and the revised
- *  criteria when there are any. Plain Markdown; the server converts it per provider. */
-export function sprintCommentMarkdown(bullets: readonly SprintBullet[], body: SprintAssessmentBody | null): string {
+/** The default "Add as a comment" text: the summary (when a CURRENT assessment exists), the bullets,
+ *  the Spec gaps section, and the revised criteria when there are any. Plain Markdown; the server
+ *  converts it per provider. */
+export function sprintCommentMarkdown(
+  bullets: readonly SprintBullet[],
+  body: SprintAssessmentBody | null,
+  gaps: readonly SprintSpecGapLine[] = [],
+): string {
   const parts: string[] = [];
   if (body != null && body.summary.trim() !== '') parts.push(body.summary.trim());
   if (bullets.length > 0) parts.push(bullets.map((b) => `- ${b.text}`).join('\n'));
+  if (gaps.length > 0) parts.push(sprintSpecGapsMarkdown(gaps));
   if (body != null && body.revisedCriteria.length > 0) {
     parts.push(`**Proposed acceptance criteria**\n\n${criteriaListMarkdown(body.revisedCriteria)}`);
   }

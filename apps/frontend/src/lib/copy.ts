@@ -2,7 +2,11 @@ import {
   STORY_ISSUE_BY_ID,
   sprintBullets,
   sprintCurrentAssessmentBodyOf,
+  sprintSpecGapLines,
+  sprintSpecGapText,
+  sprintSpecGapsMarkdown,
   type SprintBullet,
+  type SprintSpecGapLine,
   type SprintChecks,
   type SprintTicketRow,
 } from '@pierre-review/shared';
@@ -43,8 +47,15 @@ export function sprintBulletMarkdown(b: SprintBullet): string {
   return `**${STORY_ISSUE_BY_ID[b.id].label}**: ${oneLine(b.text)}${ref}`;
 }
 
-/** Everything for a ticket: header, link, the CURRENT assessment's summary (when there is one) and one bullet
- *  per issue — the same bullets the card shows (`sprintBullets`, the workspace's checks applied). */
+/** One spec gap as one Markdown line: "**Spec gap**: Edge case: No behaviour when the upload fails". */
+export function sprintSpecGapLineMarkdown(g: SprintSpecGapLine): string {
+  const ref = g.ref != null ? ` (\`${g.ref.path}\` in \`${g.ref.repo}\`)` : '';
+  return `**Spec gap**: ${sprintSpecGapText(g)}${ref}`;
+}
+
+/** Everything for a ticket: header, link, the CURRENT assessment's summary (when there is one), one bullet
+ *  per issue and the Spec gaps section — what the card shows (`sprintBullets`, `sprintSpecGapLines`, the
+ *  workspace's checks applied). */
 export function ticketCopyAllMarkdown(t: SprintTicketRow, checks: SprintChecks): string {
   const parts = [ticketHeader(t.key, t.title)];
   if (t.url != null && /^https?:\/\//i.test(t.url)) parts.push(t.url);
@@ -52,6 +63,8 @@ export function ticketCopyAllMarkdown(t: SprintTicketRow, checks: SprintChecks):
   if (body != null && body.summary.trim() !== '') parts.push(oneLine(body.summary));
   const bullets = sprintBullets(t, checks);
   if (bullets.length > 0) parts.push(bullets.map((b) => `- ${sprintBulletMarkdown(b)}`).join('\n'));
+  const gaps = sprintSpecGapsMarkdown(sprintSpecGapLines(t, checks));
+  if (gaps !== '') parts.push(gaps);
   return parts.join('\n\n');
 }
 

@@ -1538,6 +1538,13 @@ names (`knownTicketsFor`, account-predicated, same tracker site):
 | Blocked | an OPEN tracker link (Jira "is blocked by" / "depends on", Linear "blocks"), or a dependency the label names | what, who (owner), ticket key and status; links first, a named key that is linked shown once |
 | Spec gaps | the label lists missing details | ≤ 3 gaps, each typed (rule, edge case, design, data, non-functional) |
 
+- ⚠ **Spec gaps is NOT a This sprint chip** (2026-10-11: every labelled ticket got three, so a chip on
+  every card said nothing). `STORY_ISSUES[].chip` / `STORY_CHIP_ISSUE_IDS` name the chips (Unclear when
+  done, Blocked); the gaps ride `SprintTicketRow.specGaps` and render as the opened card's own "Spec
+  gaps" section (`sprintSpecGapLines`: code's typed gaps, then a CURRENT "Check against code" run's
+  spec_gaps sentence), copyable, and in Copy all and the comment default. Not in `flagCount` or the
+  order. The "Spec gaps" check now shows/hides that section.
+
 - **"Too big" and "Scope not stated" were REMOVED** (2026-10-11): the first fired on 69 of 73 real
   stories and splitting is the BA's call, not the reader's; the second was too generic to act on. Old
   stored ids (story report points, assessment bodies, sprint checks) drop through `isStoryIssueId`,
@@ -1546,13 +1553,16 @@ names (`knownTicketsFor`, account-predicated, same tracker site):
   criteria (`usableStoryLabel`); without one only code is raised: no criteria, and open linked blockers.
 - ⚠ **TWO QUESTIONS, TWO FOLDS.** This sprint asks "is it blocked NOW" (`foldStoryIssues`: a blocker
   whose status category is done — a link, or a named key resolved through stored tickets — is RESOLVED:
-  listed, never raised). RATES over many stories (Story health, the story report) ask "how was it
-  WRITTEN" (`storyIssueMeasure`): ONE population, the LABELLED stories, for every issue, and Blocked
-  counts ANY dependency, finished or not — or every old story would read "not blocked" once its blockers
-  closed and the series would rise at the right edge by construction. A no-criteria story is NOT folded
-  into Unclear when done (it can never be labelled); it is counted apart (`noCriteria` /
-  `noCriteriaFound`). The story report's picks are merged stories, so they carry their issues AS WRITTEN
-  too (`storyIssuesAsWritten`, finished blockers marked `resolved`).
+  listed, never raised). The story report's picks are merged stories, so they carry their issues "AS
+  WRITTEN" (`storyIssueMeasure` / `storyIssuesAsWritten`: any dependency, finished ones marked `resolved`).
+- ⚠ **RATES over many stories (Story health, the story report's figures) are a THIRD rule,
+  `storyIssueRateUnits`** (2026-10-11, after an agreement test showed story-level rates near 100%):
+  "Criteria that can't be checked" = untestable CRITERIA of all criteria in the stories with a usable
+  label (pooled like criteria met); "Stories with a linked blocker" = stories whose tracker links were
+  read with ≥ 1 blocking link, ANY status (finished counts, or the series rises at the right edge by
+  construction) — CODE only: a dependency named only in the text is not counted, two readings disagree on
+  those; spec gaps = stories with a gap (HELD). A no-criteria story is counted apart (`noCriteria` /
+  `noCriteriaFound`), never folded in.
 - Every sentence (chip detail, bullet) is TEMPLATED (`storyIssueChipText`, `storyIssueBullet`): the
   label's short phrases sit inside them as data. Bullets show three items, then "and N more":
   "Criterion 3: no expected result · …", "Waits on BMD-568 cookie banner (To Do) · Design for the map
@@ -1583,15 +1593,18 @@ orphan `pro_story_notes` table from the never-committed plugin migration 0041, w
   the prompt forbids quoting a rate from them; the card prints code's figures in their own row.
 - **The three story issues**: each pick carries `issues` and `issueStates` AS WRITTEN
   (`storyIssuesAsWritten` over the ONE input builder — criteria, CURRENT label, links, named tickets;
-  null = ticket never read), and the population carries `issueRates` (`storyIssueMeasure`, labelled
-  stories only). The agent sees all three issues per pick with `present: true | false | null` and,
+  null = ticket never read), and the population carries `issueRates` (`storyIssueRateUnits`, Story
+  health's measures: `unit: 'criteria'` for criteria that can't be checked, `'stories'` for linked
+  blockers; held spec gaps and a linked-blocker rate with no link anywhere are dropped,
+  `reportableIssueRates`; a stored rate with no `unit` is an older report's, shown under its old label). The agent sees all three issues per pick with `present: true | false | null` and,
   when present, the SPECIFIC detail (`issueDetailForAgent`: criterion + reason; what / kind / ticket /
   owner / status / finished / source; gap type + text) — ticket-derived strings, fenced, and in
   `storyUntrustedTexts`. ⚠ null is NOT KNOWN, never "the team avoids it", and an unlabelled pick never
   reads as `issues: []`. The prompt asks every point to say what the detail says and never "depends on
   other work" without naming it; it sets an optional `issue` per point (kept only when
   `isStoryIssueId`; otherwise the field is dropped, never the point), at most one shortfall and one
-  action per issue (`STORY_REPORT_LEAN`). It may quote issue rates from `wholeWindow.issueRates` only.
+  action per issue (`STORY_REPORT_LEAN`). It may quote issue rates from `wholeWindow.issueRates` only
+  (`{measure, count, of, unit}`), each in its own unit (`STORY_REPORT_FORMAT` v5).
   Old rows lack all three fields and render without them.
 - **The run**: Haiku 5.5, an in-process `stories` MCP server with `list_candidates`, `get_story` and
   `submit_report` (the trial harness's descriptions, zod shapes and SYSTEM text verbatim, plus the
@@ -1675,12 +1688,17 @@ refinement panel is one "% of stories" series per issue. Everything else is code
   test's `STORY_SHIFT_MIN_POINTS` floor.
 - **Storage**: `story_labels` (sqlite `0099` / pg `0086`; docs/DATA-MODEL.md), insert
   `ON CONFLICT DO NOTHING` on (account, ident, rubric version, text hash): the first answer stands.
-- **The refinement series** (`db/story-health-fold.ts`): Unclear when done · Blocked · Spec gaps, each
-  "% of labelled stories" by `storyIssueMeasure` (Blocked = linked or named, finished or not). Each
-  refinement point also carries its HOVER detail — the week's stories with the issue (key order, ≤
-  `STORY_HEALTH_HOVER_STORIES`, then `storiesMore`; key + title from the freshest stored row), Blocked's
-  `blockedSplit` (linked vs named only in the text, `storyBlockedSource`) and Spec gaps' `gapTypes`
-  (each type once per story). Display only: none of it enters a hash or a shift test.
+- **The refinement series** (`db/story-health-fold.ts`, `storyIssueRateUnits`): "Criteria that can't
+  be checked" (`unclearDone`, label, `over: 'criteria'` — n is stories, the value pools criteria; each
+  point carries `criteria {num, den}`) · "Stories with a linked blocker" (`blocked`, `source: 'code'`, so
+  it shows with labels off; no better direction) · Spec gaps (HELD, `STORY_HEALTH_HELD`). ⚠ The shift
+  test counts criteria for the criteria series but its ≥ `STORY_SHIFT_MIN_STORIES` floor counts STORIES,
+  so a few criteria-heavy stories cannot fake a shift. ⚠ With NO linked blocker in the span, Blocked is
+  OMITTED, never a flat 0% — the response lists it in `omitted` (`no_links`), with held series
+  (`held`), and the SPA prints one sentence each. Each refinement point carries its HOVER detail — the
+  week's stories with the issue (for criteria, ≥ 1 such criterion; key order, ≤
+  `STORY_HEALTH_HOVER_STORIES`, then `storiesMore`) and Spec gaps' `gapTypes`. Display only: none of it
+  enters a hash or a shift test.
 
 ## Sprint assessment (Reports → This sprint → "Check against code")
 
@@ -1707,7 +1725,8 @@ builds it. LOCAL ONLY (`registerAgenticRoutes`) AND Pro on `periodReports` (402 
   one sentence per issue id, ≤ 3, an optional verified file) and `revisedCriteria` (≤ 12, or none).
   On the card, Claude's sentence REPLACES the templated bullet for an issue CODE raised, and only
   while the run is CURRENT (`sprintBullets` via `sprintCurrentAssessmentBodyOf`); it never adds an
-  issue, so chips, `flagCount`, order and the expanded card agree. A stale run's summary shows on the
+  issue, so chips, `flagCount`, order and the expanded card agree. Its spec_gaps sentence is never a
+  chip: it joins the card's Spec gaps section (`sprintSpecGapLines`). A stale run's summary shows on the
   card tagged "Out of date" and feeds neither the comment default nor Copy all.
 - **Validation** (`SPRINT_ASSESS_CAPS`): over-long text is cut with "…"; an unknown or repeated id,
   an empty sentence or a fourth issue is dropped; a cited path must exist inside an accepted checkout,
