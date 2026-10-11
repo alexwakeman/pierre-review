@@ -1,4 +1,12 @@
-import type { JiraAcCandidate, JiraFieldOption } from '@pierre-review/shared';
+import {
+  isBlockingRelation,
+  TICKET_LINK_BLOCKERS_MAX,
+  TICKET_LINK_RELATION_MAX,
+  TICKET_LINK_TITLE_MAX,
+  type JiraAcCandidate,
+  type JiraFieldOption,
+  type TicketLinkBlocker,
+} from '@pierre-review/shared';
 import { extractAcCandidates } from './candidates.js';
 import { JiraFetchError, jiraGetJson, type JiraFetchPolicy, type JiraTransport } from './fetch.js';
 import { fieldValueToText, jiraWikiToMarkdown } from './text.js';
@@ -131,10 +139,13 @@ export interface JiraIssueText {
   issueType: { id: string; name: string } | null;
   // The workflow status as Jira names it ("In Review"), and its category — the only part that
   // means the same thing on every site. null when Jira sent none.
-  status: { name: string; category: JiraStatusCategory | null } | null;
+  status: { name: string; category: JiraStatusCategory | null; id?: string | null } | null;
   assignee: JiraIssueAssignee | null;
   candidates: JiraAcCandidate[];
   omittedCandidates: number;
+  // The "is blocked by" / "depends on" issuelinks (`blockedByOf`); undefined when the answer had no
+  // `issuelinks` field at all.
+  blockedBy?: TicketLinkBlocker[];
   // `created` / `resolutiondate` (../dates.ts: undefined = not in the answer, null = none).
   issueCreatedAt?: Date | null;
   issueResolvedAt?: Date | null;
@@ -142,17 +153,67 @@ export interface JiraIssueText {
 
 const STATUS_CATEGORIES: readonly string[] = ['new', 'indeterminate', 'done'];
 
-/** Jira's `fields.status` → name + category key. */
+/** Jira's `fields.status` → name + category key + Jira's status id (what a board's columns list). */
 export function statusOf(raw: unknown): JiraIssueText['status'] {
   const s = asRecord(raw);
   const name = typeof s?.name === 'string' ? s.name.trim() : '';
   if (name === '') return null;
   const key = asRecord(s?.statusCategory)?.key;
+  const id = typeof s?.id === 'string' && s.id.trim() !== '' ? s.id.trim().slice(0, 64) : typeof s?.id === 'number' ? String(s.id) : null;
   return {
     name: name.slice(0, 100),
     category:
       typeof key === 'string' && STATUS_CATEGORIES.includes(key) ? (key as JiraStatusCategory) : null,
+    ...(id != null ? { id } : {}),
   };
+}
+
+/**
+ * `fields.issuelinks` → the links THIS ticket waits on (docs/TRACKERS.md § Blocking links). A link
+ * carries the OTHER issue on one side: `inwardIssue` present → the phrase from this ticket's side is
+ * `type.inward` ("is blocked by"); `outwardIssue` present → `type.outward` ("depends on"). Kept iff
+ * shared `isBlockingRelation(phrase)`. The linked issue's key, summary and status come in the SAME
+ * answer (Jira inlines them), so this costs no extra call. undefined when the field is absent (not
+ * in the answer — the stored value stands); [] when present and none block.
+ */
+export function blockedByOf(raw: unknown, apiRoot: string): TicketLinkBlocker[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: TicketLinkBlocker[] = [];
+  const seen = new Set<string>();
+  for (const l of raw) {
+    const o = asRecord(l);
+    if (o == null) continue;
+    const type = asRecord(o.type);
+    const inward = asRecord(o.inwardIssue);
+    const outward = asRecord(o.outwardIssue);
+    const other = inward ?? outward;
+    const phraseRaw = inward != null ? type?.inward : type?.outward;
+    const phrase = typeof phraseRaw === 'string' ? phraseRaw.trim() : '';
+    if (other == null || phrase === '' || !isBlockingRelation(phrase)) continue;
+    const key = typeof other.key === 'string' ? other.key.trim() : '';
+    if (!isTicketKey(key) || seen.has(key)) continue;
+    seen.add(key);
+    const f = asRecord(other.fields);
+    const summary = typeof f?.summary === 'string' ? f.summary.trim() : '';
+    const status = statusOf(f?.status);
+    let url: string | null = null;
+    try {
+      const u = `${apiRoot.replace(/\/+$/, '')}/browse/${encodeURIComponent(key)}`;
+      url = new URL(u).protocol === 'https:' ? u : null;
+    } catch {
+      url = null;
+    }
+    out.push({
+      key,
+      title: summary !== '' ? summary.slice(0, TICKET_LINK_TITLE_MAX) : null,
+      status: status?.name ?? null,
+      category: status?.category ?? null,
+      relation: phrase.slice(0, TICKET_LINK_RELATION_MAX),
+      url,
+    });
+    if (out.length >= TICKET_LINK_BLOCKERS_MAX) break;
+  }
+  return out;
 }
 
 /** Jira's `fields.assignee` → display name, an id and an https avatar. null = unassigned. */
@@ -171,6 +232,12 @@ export function assigneeOf(raw: unknown): JiraIssueAssignee | null {
     }
   }
   return { name: name.slice(0, 200), accountId: id?.slice(0, 200) ?? null, avatarUrl };
+}
+
+/** `{blockedBy}` when the answer carried `issuelinks`, else nothing (positive-answer rule). */
+export function linksField(fields: Record<string, unknown>, apiRoot: string): { blockedBy?: TicketLinkBlocker[] } {
+  const b = blockedByOf(fields.issuelinks, apiRoot);
+  return b === undefined ? {} : { blockedBy: b };
 }
 
 /** A ticket key as detection emits it (`PROJ-123`). The route re-checks it against detection. */
@@ -216,6 +283,7 @@ export async function fetchJiraIssue(call: JiraCall, key: string): Promise<JiraI
     assignee: assigneeOf(f.assignee),
     candidates,
     omittedCandidates: omitted,
+    ...linksField(f, call.apiRoot),
     // `*all` carries both; an unresolved ticket's `resolutiondate` is null.
     ...ticketDateFields({ issueCreatedAt: trackerDate(f, 'created'), issueResolvedAt: trackerDate(f, 'resolutiondate') }),
   };

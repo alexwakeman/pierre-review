@@ -6,6 +6,8 @@ import type {
   SprintAssessResponse,
   SprintRefreshResponse,
   SprintReposResponse,
+  SprintStatusesResponse,
+  SprintStatusSettings,
   SprintStoriesResponse,
   SprintTicketRow,
   SprintWriteRequest,
@@ -107,6 +109,28 @@ export function useSprintSetChecks(workspaceId: number | null) {
     mutationFn: (checks) => {
       if (workspaceId == null) return Promise.reject(new Error('No workspace selected'));
       return api.sprintSetChecks({ workspaceId, checks });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: sprintStoriesKey(workspaceId) });
+    },
+  });
+}
+
+/** Replace the workspace's status layout override (order + "code delivered from"). `{order: null,
+ *  deliveredFrom: null}` = back to automatic. The layout lands at once; the list refetches because every
+ *  row's stage and the section order move with it. */
+export function useSprintSetStatuses(workspaceId: number | null) {
+  const qc = useQueryClient();
+  return useMutation<SprintStatusesResponse, Error, SprintStatusSettings>({
+    mutationKey: ['sprint-statuses', workspaceKey(workspaceId)],
+    mutationFn: (settings) => {
+      if (workspaceId == null) return Promise.reject(new Error('No workspace selected'));
+      return api.sprintSetStatuses({ workspaceId, settings });
+    },
+    onSuccess: (data) => {
+      qc.setQueryData<SprintStoriesResponse>(sprintStoriesKey(data.workspaceId), (prev) =>
+        prev == null ? prev : { ...prev, statusLayout: data.statusLayout },
+      );
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: sprintStoriesKey(workspaceId) });

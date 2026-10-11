@@ -1,6 +1,7 @@
 import {
   reportingWindowShortTitle,
   STORY_ISSUE_BY_ID,
+  isStoryIssueId,
   type StoryReportPoint,
   type ReportingWindowInfo,
   type StoryReportBody,
@@ -66,6 +67,13 @@ export function ticketHref(key: string, index: CandidateIndex): string | null {
   return safeExternalUrl(index.get(key)?.url ?? null) ?? null;
 }
 
+/** A ticket chip's words: "KEY · Title" for a picked candidate with a title, else the key alone (a
+ *  key the run did not pick has no title we vouch for). Never cut: the chip wraps. */
+export function ticketChipLabel(key: string, index: CandidateIndex): string {
+  const title = index.get(key)?.title?.trim() ?? '';
+  return title === '' ? key : `${key} · ${title}`;
+}
+
 export type TextSegment = { kind: 'text'; text: string } | { kind: 'ticket'; key: string; href: string | null };
 
 function escapeRe(s: string): string {
@@ -126,20 +134,22 @@ export function storyReportFigures(p: StoryReportPopulation): StoryReportFigure[
     label: 'Median working time',
     value: p.medianWorkingHours == null ? 'not measured' : formatWorkingTime(p.medianWorkingHours, p.workingDayHours),
   });
-  // The four story issues, counted by code over the whole window (absent on reports written before
-  // them; an issue nothing could be told about is left out, never "0 of 0").
-  // Over the stories Claude has read in their current form (`of`), never mixed with no-criteria stories.
+  // The three story issues, counted by code over the whole window (absent on reports written before
+  // them; an issue nothing could be told about is left out, never "0 of 0"; a retired id on an old
+  // stored report is dropped). Over the stories Claude has read in their current form (`of`), never
+  // mixed with no-criteria stories.
   for (const r of p.issueRates ?? []) {
-    if (r.of > 0) out.push({ key: `issue:${r.id}`, label: STORY_ISSUE_BY_ID[r.id].label, value: `${r.stories} of ${r.of} read` });
+    if (isStoryIssueId(r.id) && r.of > 0) out.push({ key: `issue:${r.id}`, label: STORY_ISSUE_BY_ID[r.id].measureLabel, value: `${r.stories} of ${r.of} read` });
   }
   return out;
 }
 
-/** The story issue a point is about, as its label; null when the point names none (or an old row). */
-/** The point's issue tag: the problem on a shortfall, the issue AVOIDED on a strength. */
+/** The point's issue tag: the problem on a shortfall, the issue AVOIDED on a strength. null when the
+ *  point names none, or names a retired id (an old stored report: 'too_big', 'waits_on_work',
+ *  'scope_unstated') — dropped, never rendered. */
 export function pointIssueLabel(p: Pick<StoryReportPoint, 'issue'>, tone: 'positive' | 'negative' = 'negative'): string | null {
-  const meta = p.issue != null ? STORY_ISSUE_BY_ID[p.issue] : undefined;
-  if (meta == null) return null;
+  if (!isStoryIssueId(p.issue)) return null;
+  const meta = STORY_ISSUE_BY_ID[p.issue];
   return tone === 'positive' ? meta.avoided : meta.label;
 }
 

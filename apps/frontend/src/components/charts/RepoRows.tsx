@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { Legend } from './common.js';
 
 // A ROW LIST, NOT A BAR CHART — one row per repository, the name written out in full on the left
@@ -33,7 +33,9 @@ import { Legend } from './common.js';
 //
 // No row is a button and no cell has a handler. It is a table of numbers a reader looks at; adding
 // N unlabelled keyboard stops to a picture costs every keyboard user and buys nothing. (The rail
-// already owns per-repo navigation.)
+// already owns per-repo navigation.) The ONE exception is an explicit, NAMED control a caller hands in
+// through `rowAction` (Reports → Stories opens a ticket's pull requests from it): one labelled button
+// under the row's name, never the row or a bar.
 
 export interface RepoRowSegment {
   key: string;
@@ -84,6 +86,7 @@ export function RepoRows({
   nameHeader = 'Repository',
   nameWidthPct = 30,
   noteFor,
+  rowAction,
 }: {
   /** The row labels, in the order given — the caller owns the ranking. */
   labels: string[];
@@ -93,6 +96,8 @@ export function RepoRows({
   /** An extra muted line under row `i`'s name — for a per-row disclosure that belongs beside the
    *  repository it is about rather than in an aggregate footnote. */
   noteFor?: (index: number) => string | null;
+  /** An optional named control under row `i`'s name (a button with its own accessible name). */
+  rowAction?: (index: number) => ReactNode;
 }): JSX.Element {
   // ⚠ ONE MAXIMUM PER COLUMN, taken over that column alone. The RAW maximum, not a rounded one:
   // the leading repository then draws a full-width bar and the printed figure beside it IS the
@@ -161,6 +166,7 @@ export function RepoRows({
                   {note != null && (
                     <span className="block text-gray-500 dark:text-gray-400">{note}</span>
                   )}
+                  {rowAction?.(i)}
                 </th>
                 {columns.map((c, ci) => {
                   const values = c.values[i] ?? null;

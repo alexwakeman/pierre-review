@@ -7,7 +7,18 @@ import { describe, expect, it } from 'vitest';
 import { SPRINT_TICKETS_MAX } from '@pierre-review/shared';
 import { JiraFetchError, type JiraTransport, type RawResponse } from '../jira/fetch.js';
 import type { TrackerCall } from '../types.js';
-import { fallbackJql, listJiraSprint, sprintJql, sprintsOf, toJiraSprintTicket } from './jira.js';
+import { blockedByOf, statusOf } from '../jira/client.js';
+import {
+  boardStatusIds,
+  busiestBoard,
+  fallbackJql,
+  jiraBoardOrder,
+  listJiraSprint,
+  sprintJql,
+  sprintsOf,
+  statusCatalog,
+  toJiraSprintTicket,
+} from './jira.js';
 
 const ROOT = 'https://acme.atlassian.net';
 const json = (body: unknown, status = 200): RawResponse => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -69,9 +80,10 @@ describe('JQL', () => {
 
 describe('sprint field values', () => {
   it('reads Cloud objects and old Server strings', () => {
-    expect(sprintsOf([{ name: 'S1', state: 'ACTIVE' }])).toEqual([{ name: 'S1', state: 'active' }]);
+    expect(sprintsOf([{ name: 'S1', state: 'ACTIVE' }])).toEqual([{ name: 'S1', state: 'active', boardId: null }]);
+    expect(sprintsOf([{ name: 'S2', state: 'active', boardId: 12 }])).toEqual([{ name: 'S2', state: 'active', boardId: 12 }]);
     expect(sprintsOf(['com.atlassian.greenhopper.service.sprint.Sprint@1a[id=3,rapidViewId=1,state=ACTIVE,name=Sprint 7,startDate=x]'])).toEqual([
-      { name: 'Sprint 7', state: 'active' },
+      { name: 'Sprint 7', state: 'active', boardId: 1 },
     ]);
     expect(sprintsOf(null)).toEqual([]);
   });
@@ -99,6 +111,130 @@ describe('the issue fold', () => {
   it('a fallback ticket carries no sprint name; a malformed key is dropped', () => {
     expect(toJiraSprintTicket(issue(3), NAMES, SCHEMA, false)!.sprintName).toBeNull();
     expect(toJiraSprintTicket({ key: 'nope', fields: {} }, NAMES, SCHEMA, true)).toBeNull();
+  });
+});
+
+describe('blocking links (issuelinks)', () => {
+  const link = (type: Record<string, string>, side: 'inwardIssue' | 'outwardIssue', key: string, status = 'To Do', cat = 'new') => ({
+    type,
+    [side]: { key, fields: { summary: `Title ${key}`, status: { id: '1', name: status, statusCategory: { key: cat } } } },
+  });
+  const BLOCKS = { name: 'Blocks', inward: 'is blocked by', outward: 'blocks' };
+  const DEPENDS = { name: 'Dependency', inward: 'is depended on by', outward: 'depends on' };
+  const RELATES = { name: 'Relates', inward: 'relates to', outward: 'relates to' };
+
+  it('reads the phrase from THIS ticket’s side: inward issue → type.inward, outward → type.outward', () => {
+    const got = blockedByOf(
+      [
+        link(BLOCKS, 'inwardIssue', 'ENG-2'), // this ticket "is blocked by" ENG-2 → kept
+        link(BLOCKS, 'outwardIssue', 'ENG-3'), // this ticket "blocks" ENG-3 → dropped
+        link(DEPENDS, 'outwardIssue', 'ENG-4', 'Done', 'done'), // "depends on" ENG-4 → kept (resolved)
+        link(DEPENDS, 'inwardIssue', 'ENG-5'), // "is depended on by" → dropped
+        link(RELATES, 'inwardIssue', 'ENG-6'),
+        link(BLOCKS, 'inwardIssue', 'ENG-2'), // duplicate
+        { type: BLOCKS }, // no issue
+      ],
+      ROOT,
+    );
+    expect(got).toEqual([
+      { key: 'ENG-2', title: 'Title ENG-2', status: 'To Do', category: 'new', relation: 'is blocked by', url: `${ROOT}/browse/ENG-2` },
+      { key: 'ENG-4', title: 'Title ENG-4', status: 'Done', category: 'done', relation: 'depends on', url: `${ROOT}/browse/ENG-4` },
+    ]);
+  });
+
+  it('absent field → undefined (not in the answer); present and none → []; an http root gives no url', () => {
+    expect(blockedByOf(undefined, ROOT)).toBeUndefined();
+    expect(blockedByOf([], ROOT)).toEqual([]);
+    expect(blockedByOf([link(BLOCKS, 'inwardIssue', 'ENG-2')], 'http://jira.local')?.[0]?.url).toBeNull();
+  });
+
+  it('the sprint fold carries the links and the status id', () => {
+    const t = toJiraSprintTicket(
+      issue(7, { issuelinks: [link(BLOCKS, 'inwardIssue', 'ENG-2')], status: { id: '10003', name: 'In Dev', statusCategory: { key: 'indeterminate' } } }),
+      NAMES,
+      SCHEMA,
+      true,
+      ROOT,
+    )!;
+    expect(t.blockedBy?.map((b) => b.key)).toEqual(['ENG-2']);
+    expect(t.status).toEqual({ name: 'In Dev', category: 'indeterminate', id: '10003' });
+    // No issuelinks field at all: the key is absent, so the stored links stand.
+    expect('blockedBy' in toJiraSprintTicket(issue(8), NAMES, SCHEMA, true, ROOT)!).toBe(false);
+    expect(statusOf({ name: 'X', id: 5 })).toEqual({ name: 'X', category: null, id: '5' });
+  });
+});
+
+describe('the board order', () => {
+  const CONFIG = {
+    columnConfig: {
+      columns: [
+        { name: 'To Do', statuses: [{ id: '1' }] },
+        { name: 'Doing', statuses: [{ id: '3' }, { id: '10100' }] },
+        { name: 'Review', statuses: [{ id: '10200' }, { id: '3' }] },
+        { name: 'Done', statuses: [{ id: '10001' }, { id: '999' }] },
+      ],
+    },
+  };
+  const STATUSES = [
+    { id: '1', name: 'To Do', statusCategory: { key: 'new' } },
+    { id: '3', name: 'In Development', statusCategory: { key: 'indeterminate' } },
+    { id: '10100', name: 'Ready for QA', statusCategory: { key: 'indeterminate' } },
+    { id: '10200', name: 'In PO Review', statusCategory: { key: 'indeterminate' } },
+    { id: '10001', name: 'Done', statusCategory: { key: 'done' } },
+  ];
+
+  it('maps column status ids to names in column order; unknown ids dropped; duplicates once', () => {
+    expect(boardStatusIds(CONFIG)).toEqual(['1', '3', '10100', '10200', '10001', '999']);
+    const o = jiraBoardOrder(boardStatusIds(CONFIG), statusCatalog(STATUSES), 'T');
+    expect(o).toEqual({
+      source: 'jira_board',
+      readAt: 'T',
+      statuses: [
+        { id: '1', name: 'To Do', category: 'new' },
+        { id: '3', name: 'In Development', category: 'indeterminate' },
+        { id: '10100', name: 'Ready for QA', category: 'indeterminate' },
+        { id: '10200', name: 'In PO Review', category: 'indeterminate' },
+        { id: '10001', name: 'Done', category: 'done' },
+      ],
+    });
+    expect(jiraBoardOrder(['999'], statusCatalog(STATUSES), 'T')).toBeNull();
+    expect(boardStatusIds({})).toEqual([]);
+  });
+
+  it('picks the busiest board, ties to the lowest id', () => {
+    expect(busiestBoard(new Map([[7, 2], [3, 5], [9, 5]]))).toBe(3);
+    expect(busiestBoard(new Map())).toBeNull();
+  });
+
+  const withBoard = (n: number, boardId: number) =>
+    issue(n, { customfield_10020: [{ id: 2, name: 'Sprint 42', state: 'active', boardId }] });
+
+  it('the list read reads the busiest board’s configuration and the status catalog', async () => {
+    const paths: string[] = [];
+    const t: JiraTransport = async (url) => {
+      paths.push(url.pathname);
+      if (url.pathname === '/rest/agile/1.0/board/5/configuration') return json(CONFIG);
+      if (url.pathname === '/rest/api/2/status') return json(STATUSES);
+      return json({ issues: [withBoard(1, 5), withBoard(2, 5), withBoard(3, 8)], names: NAMES, schema: SCHEMA, isLast: true });
+    };
+    const r = await listJiraSprint(args(t));
+    expect(paths).toEqual(['/rest/api/3/search/jql', '/rest/agile/1.0/board/5/configuration', '/rest/api/2/status']);
+    expect(r.statusOrder?.statuses.map((s) => s.name)).toEqual(['To Do', 'In Development', 'Ready for QA', 'In PO Review', 'Done']);
+    expect(r.statusOrderError).toBeUndefined();
+  });
+
+  it('a failed board read never fails the list: statusOrder undefined (keep stored) + the code', async () => {
+    const t: JiraTransport = async (url) =>
+      url.pathname.includes('/agile/') ? json({}, 403) : json({ issues: [withBoard(1, 5)], names: NAMES, schema: SCHEMA, isLast: true });
+    const r = await listJiraSprint(args(t));
+    expect(r.tickets).toHaveLength(1);
+    expect(r.statusOrder).toBeUndefined();
+    expect(r.statusOrderError).toBe('forbidden');
+  });
+
+  it('no board on the sprint objects, or the status fallback → null', async () => {
+    const t: JiraTransport = async () => json({ issues: [issue(1)], names: NAMES, schema: SCHEMA, isLast: true });
+    expect((await listJiraSprint(args(t))).statusOrder).toBeNull();
   });
 });
 

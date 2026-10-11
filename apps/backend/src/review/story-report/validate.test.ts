@@ -123,19 +123,20 @@ describe('validateStoryReport', () => {
     const v = validateStoryReport(
       {
         ...base,
-        doingWell: [{ title: 'A', detail: 'd', tickets: ['BMD-1'], issue: 'scope_unstated' }],
+        doingWell: [{ title: 'A', detail: 'd', tickets: ['BMD-1'], issue: 'spec_gaps' }],
         fallingShort: [
-          { title: 'B', detail: 'd', tickets: ['BMD-2'], issue: 'no_persona' },
-          { title: 'C', detail: 'd', tickets: ['BMD-3'], issue: 'too_big' },
+          { title: 'B', detail: 'd', tickets: ['BMD-2'], issue: 'too_big' },
+          { title: 'C', detail: 'd', tickets: ['BMD-3'], issue: 'blocked' },
         ],
       },
       KEYS,
     );
     expect(v.ok).toBe(true);
     if (!v.ok) return;
-    expect(v.report.doingWell[0]!.issue).toBe('scope_unstated');
+    expect(v.report.doingWell[0]!.issue).toBe('spec_gaps');
+    // A retired id ('too_big') is dropped like any unknown one.
     expect(v.report.fallingShort[0]).toEqual({ title: 'B', detail: 'd', tickets: ['BMD-2'] });
-    expect(v.report.fallingShort[1]!.issue).toBe('too_big');
+    expect(v.report.fallingShort[1]!.issue).toBe('blocked');
   });
 
   it('a report with no headline or summary is invalid', () => {
@@ -154,8 +155,8 @@ describe('storyReportFingerprint', () => {
     const shuffled = [{ ...picks[1]! }, { ...picks[0]!, prs: [...picks[0]!.prs].reverse() }];
     expect(storyReportFingerprint('60', shuffled)).toBe(storyReportFingerprint('60', picks));
   });
-  it('folds the four-issues format tag, so a report written before it reads stale', () => {
-    expect(STORY_REPORT_FORMAT).toBe('story-report-v3');
+  it('folds the three-issues format tag, so a report written before it reads stale', () => {
+    expect(STORY_REPORT_FORMAT).toBe('story-report-v4');
   });
   it('changes on a new review, a merge, or another window choice', () => {
     const fp = storyReportFingerprint('60', picks);
@@ -180,7 +181,9 @@ describe('the agent surface', () => {
     expect(f).toBe('---BEGIN STORY abc123---\n{"key":"B-1"}\n---END STORY abc123---');
     expect(STORY_REPORT_SYSTEM.startsWith('You are writing a report for an engineering manager')).toBe(true);
     expect(STORY_REPORT_SYSTEM.split('\n')).toHaveLength(11);
-    for (const label of ['Unclear when done', 'Too big', 'Waits on other work', 'Scope not stated']) expect(STORY_REPORT_SYSTEM).toContain(label);
+    for (const label of ['Unclear when done', '"Blocked"', 'Spec gaps']) expect(STORY_REPORT_SYSTEM).toContain(label);
+    for (const gone of ['Too big', 'Waits on other work', 'Scope not stated']) expect(STORY_REPORT_SYSTEM).not.toContain(gone);
+    expect(STORY_REPORT_SYSTEM).toContain('at most 3 fallingShort');
     expect(STORY_REPORT_SYSTEM).toContain('wholeWindow.issueRates only');
     expect(STORY_REPORT_SYSTEM).toContain('NOT KNOWN, never something the team avoided');
     expect(STORY_REPORT_SYSTEM).toContain('never state a rate');
@@ -191,17 +194,28 @@ describe('the agent surface', () => {
       ident: 'i', key: 'B-1', title: 't', url: null, provider: 'jira' as const, group: 'fell_short' as const, whyPicked: [],
       workingHours: 4, pullRequests: 1, linesChanged: 10, criteria: 3, criteriaSource: 'acceptance_criteria' as const, review: null,
     };
-    const states = { unclear_done: true, too_big: false, waits_on_work: false, scope_unstated: false };
-    expect(
-      candidateRow({ ...cand, issues: [{ id: 'unclear_done', criteria: [2], total: 3, reasons: ['untestable'] }], issueStates: states }, 8).issues,
-    ).toEqual([
-      { issue: 'Unclear when done', present: true, criteria: [2] },
-      { issue: 'Too big', present: false },
-      { issue: 'Waits on other work', present: false },
-      { issue: 'Scope not stated', present: false },
+    const states = { unclear_done: true, blocked: true, spec_gaps: false };
+    const blocker = {
+      source: 'text' as const, kind: 'design' as const, ticketKey: null, what: 'map page design', owner: 'UCD team',
+      status: null, category: null, relation: null, url: null, resolved: false,
+    };
+    const issues = [
+      { id: 'unclear_done' as const, criteria: [{ n: 2, reason: 'no expected result' }], blockers: [], gaps: [], total: 3, reasons: ['untestable' as const] },
+      { id: 'blocked' as const, criteria: [], blockers: [blocker], gaps: [], total: 3, reasons: ['named' as const] },
+    ];
+    expect(candidateRow({ ...cand, issues, issueStates: states }, 8).issues).toEqual([
+      { issue: 'Unclear when done', present: true, criteria: [{ criterion: 2, reason: 'no expected result' }] },
+      {
+        issue: 'Blocked',
+        present: true,
+        waitsOn: [
+          { what: 'map page design', kind: 'A design', ticket: null, owner: 'UCD team', status: null, finished: false, source: 'named in the ticket text' },
+        ],
+      },
+      { issue: 'Spec gaps', present: false },
     ]);
-    // ⚠ An unlabelled pick with criteria never serialises as `issues: []` ("avoids all four").
-    const unknown = { unclear_done: null, too_big: null, waits_on_work: null, scope_unstated: null };
+    // ⚠ An unlabelled pick with criteria never serialises as `issues: []` ("avoids all three").
+    const unknown = { unclear_done: null, blocked: null, spec_gaps: null };
     const row = candidateRow({ ...cand, issues: [], issueStates: unknown }, 8).issues;
     expect(row).not.toEqual([]);
     expect(row!.every((i) => i.present === null)).toBe(true);
@@ -212,8 +226,8 @@ describe('the agent surface', () => {
       storiesInWindow: 2, withWrittenCriteria: 2, criteriaOnlyInDescription: 0, noCriteriaFound: 0, checkedByTicketReview: 0,
       checkedAndFullyMet: 0, checkedWithGaps: 0, medianWorkingHours: 4, workingDayHours: 8, truncated: false,
     };
-    expect(populationForAgent({ ...pop, issueRates: [{ id: 'too_big', stories: 1, of: 2 }] }).issueRates).toEqual([
-      { issue: 'Too big', stories: 1, ofReadStories: 2 },
+    expect(populationForAgent({ ...pop, issueRates: [{ id: 'spec_gaps', stories: 1, of: 2 }] }).issueRates).toEqual([
+      { issue: 'Spec gaps', stories: 1, ofReadStories: 2 },
     ]);
     expect('issueRates' in populationForAgent(pop)).toBe(false);
   });
@@ -225,19 +239,23 @@ describe('the agent surface', () => {
 });
 
 describe('the lean report', () => {
-  it('keeps one shortfall per story issue and caps doingWell', () => {
+  it('keeps one shortfall per story issue, drops a retired issue id (never the point) and caps doingWell', () => {
     const pt = (title: string, issue?: string) => ({ title, detail: 'd', tickets: ['BMD-1'], ...(issue ? { issue } : {}) });
     const v = validateStoryReport(
       {
         ...base,
         doingWell: [pt('a'), pt('b'), pt('c'), pt('d')],
-        fallingShort: [pt('x', 'too_big'), pt('y', 'too_big'), pt('z', 'unclear_done')],
+        fallingShort: [pt('x', 'blocked'), pt('y', 'blocked'), pt('z', 'unclear_done'), pt('old', 'too_big')],
       },
       KEYS,
     );
     expect(v.ok).toBe(true);
     if (!v.ok) return;
     expect(v.report.doingWell).toHaveLength(STORY_REPORT_LEAN.doingWell);
-    expect(v.report.fallingShort.map((p) => p.title)).toEqual(['x', 'z']);
+    expect(v.report.fallingShort.map((p) => [p.title, p.issue ?? null])).toEqual([
+      ['x', 'blocked'],
+      ['z', 'unclear_done'],
+      ['old', null],
+    ]);
   });
 });

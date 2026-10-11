@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import { linearSiteRoot } from '@pierre-review/shared';
+import {
+  linearSiteRoot,
+  TICKET_LINK_BLOCKERS_MAX,
+  TICKET_LINK_TITLE_MAX,
+  type TicketLinkBlocker,
+} from '@pierre-review/shared';
 import { acSourceFieldId, extractAcceptanceCriteria, type AcChild } from '../ac.js';
 import { normalizePrefixKey } from '../detect.js';
 import {
@@ -161,8 +166,19 @@ function isNotFound(e: LinearGqlError): boolean {
 // ---- the reader: one issue ----
 
 export const LINEAR_CHILD_CAP = 50;
+/** Inverse relations read per issue (the "blocks" ones are this issue's blockers). */
+export const LINEAR_RELATIONS_CAP = 20;
 
-// Complexity ≈ 120 points (50 children × their two small objects), far under Linear's 10,000.
+/** The blockers selection, shared by the one-issue read and the sprint list (docs/TRACKERS.md §
+ *  Blocking links). An INVERSE relation is one another issue made TO this one, so `type: "blocks"`
+ *  there means the other issue (`issue`) blocks THIS one. */
+export const linearRelationsSelection = (first: number): string => /* GraphQL */ `
+  inverseRelations(first: ${first}) {
+    nodes { type issue { identifier title url state { name type } } }
+  }
+`;
+
+// Complexity ≈ 200 points (50 children and 20 relations × their small objects), far under Linear's 10,000.
 export const LINEAR_ISSUE_QUERY = /* GraphQL */ `
   query LimnLinearIssue($id: String!) {
     issue(id: $id) {
@@ -172,13 +188,14 @@ export const LINEAR_ISSUE_QUERY = /* GraphQL */ `
       url
       createdAt
       completedAt
-      state { name type }
+      state { id name type }
       assignee { id name displayName avatarUrl }
       project { name }
       children(first: ${LINEAR_CHILD_CAP}) {
         nodes { identifier title state { type } }
         pageInfo { hasNextPage }
       }
+      ${linearRelationsSelection(LINEAR_RELATIONS_CAP)}
     }
   }
 `;
@@ -191,13 +208,58 @@ interface GqlIssue {
   // ISO-8601; `completedAt` null until the issue completes (a CANCELED issue has none either).
   createdAt?: string | null;
   completedAt?: string | null;
-  state?: { name?: string | null; type?: string | null } | null;
+  state?: { id?: string | null; name?: string | null; type?: string | null } | null;
   assignee?: { id?: string | null; name?: string | null; displayName?: string | null; avatarUrl?: string | null } | null;
   project?: { name?: string | null } | null;
   children?: {
     nodes?: Array<{ identifier?: string | null; title?: string | null; state?: { type?: string | null } | null } | null> | null;
     pageInfo?: { hasNextPage?: boolean | null } | null;
   } | null;
+  /** Absent = not selected (the stored links stand). */
+  inverseRelations?: {
+    nodes?: Array<{
+      type?: string | null;
+      issue?: { identifier?: string | null; title?: string | null; url?: string | null; state?: { name?: string | null; type?: string | null } | null } | null;
+    } | null> | null;
+  } | null;
+}
+
+/** Linear's workflow-state TYPE → the stored status category (null for an unknown type). */
+export function linearCategory(type: string | null | undefined): 'new' | 'indeterminate' | 'done' | null {
+  const t = (type ?? '').toLowerCase();
+  return t === 'completed' || t === 'canceled'
+    ? 'done'
+    : t === 'started'
+      ? 'indeterminate'
+      : t === 'backlog' || t === 'unstarted' || t === 'triage'
+        ? 'new'
+        : null;
+}
+
+/** The inverse "blocks" relations → the links this issue waits on. undefined when the selection was
+ *  absent (positive-answer rule), [] when read and none block. */
+export function linearBlockedBy(rel: GqlIssue['inverseRelations']): TicketLinkBlocker[] | undefined {
+  if (rel === undefined) return undefined;
+  const out: TicketLinkBlocker[] = [];
+  const seen = new Set<string>();
+  for (const n of rel?.nodes ?? []) {
+    if ((n?.type ?? '').toLowerCase() !== 'blocks') continue;
+    const key = normalizePrefixKey(n?.issue?.identifier ?? '');
+    if (key == null || seen.has(key)) continue;
+    seen.add(key);
+    const title = (n?.issue?.title ?? '').trim();
+    const status = linearStatus(n?.issue?.state ?? null);
+    out.push({
+      key,
+      title: title !== '' ? title.slice(0, TICKET_LINK_TITLE_MAX) : null,
+      status: status?.name ?? null,
+      category: status?.category ?? null,
+      relation: 'blocked by',
+      url: httpsOnly(n?.issue?.url),
+    });
+    if (out.length >= TICKET_LINK_BLOCKERS_MAX) break;
+  }
+  return out;
 }
 
 /** Linear's workflow-state TYPE → the stored status category. */
@@ -205,15 +267,8 @@ export function linearStatus(state: GqlIssue['state']): FetchedTicket['status'] 
   const name = (state?.name ?? '').trim();
   const type = (state?.type ?? '').toLowerCase();
   if (name === '' && type === '') return null;
-  const category =
-    type === 'completed' || type === 'canceled'
-      ? 'done'
-      : type === 'started'
-        ? 'indeterminate'
-        : type === 'backlog' || type === 'unstarted' || type === 'triage'
-          ? 'new'
-          : null;
-  return { name: name !== '' ? name : type, category };
+  const id = typeof state?.id === 'string' && state.id.trim() !== '' ? state.id.trim().slice(0, 64) : null;
+  return { name: name !== '' ? name : type, category: linearCategory(type), ...(id != null ? { id } : {}) };
 }
 
 const httpsOnly = (u: string | null | undefined): string | null => (u != null && /^https:\/\//i.test(u) ? u : null);
@@ -239,6 +294,7 @@ export function toLinearTicket(key: string, issue: GqlIssue): FetchedTicket {
   const description = project !== '' ? `${ac.description}${ac.description !== '' ? '\n\n' : ''}Linear project: ${project}` : ac.description;
   const who = issue.assignee;
   const whoName = (who?.displayName ?? '').trim() || (who?.name ?? '').trim();
+  const blockedBy = linearBlockedBy(issue.inverseRelations);
   return {
     key,
     title: (issue.title ?? '').trim(),
@@ -253,6 +309,7 @@ export function toLinearTicket(key: string, issue: GqlIssue): FetchedTicket {
         : [],
     omittedCandidates: 0,
     url: httpsOnly(issue.url),
+    ...(blockedBy === undefined ? {} : { blockedBy }),
     ...ticketDateFields({
       issueCreatedAt: trackerDate(issue as unknown as Record<string, unknown>, 'createdAt'),
       issueResolvedAt: trackerDate(issue as unknown as Record<string, unknown>, 'completedAt'),

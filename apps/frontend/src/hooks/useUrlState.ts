@@ -36,6 +36,7 @@ import {
 } from '@pierre-review/shared';
 import {
   parseBotDetailKey,
+  parseTicketTabKey,
   parseTabKey,
   parseUserActivityKey,
   usePinnedTabs,
@@ -233,7 +234,8 @@ export function landingTabFromUrl(search: string): ActiveTab {
     view != null &&
     (parseTabKey(view) != null ||
       parseUserActivityKey(view) != null ||
-      parseBotDetailKey(view) != null)
+      parseBotDetailKey(view) != null ||
+      parseTicketTabKey(view) != null)
   ) {
     return view;
   }
@@ -667,7 +669,8 @@ export function writeToUrl(s: FilterState): void {
   } else if (
     parseTabKey(activeTab) != null ||
     parseUserActivityKey(activeTab) != null ||
-    parseBotDetailKey(activeTab) != null
+    parseBotDetailKey(activeTab) != null ||
+    parseTicketTabKey(activeTab) != null
   ) {
     // A SELF-DESCRIBING tab: the key IS the address (see landingTabFromUrl). Emitted verbatim so
     // a PR read full-screen, a contributor's feed and a bot's depth each have their own URL —

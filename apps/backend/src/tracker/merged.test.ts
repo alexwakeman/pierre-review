@@ -126,6 +126,8 @@ beforeAll(async () => {
   // The core tracker tables (migration 0088), exactly as a real install has them.
   sqlite.exec(migration('0088_issue_tracker.sql'));
   sqlite.exec(migration('0098_tracker_ticket_dates.sql'));
+  // The blocking links + status id (migration 0103's tracker_tickets half).
+  sqlite.exec('ALTER TABLE tracker_tickets ADD blocked_by_json text; ALTER TABLE tracker_tickets ADD status_id text;');
   // The PR columns the GitHub Issues linker reads (migration 0089).
   for (const col of ['github_node_id text', 'updated_at integer', 'closing_issues text', 'closing_issues_checked_at integer', 'linear_links text', 'linear_links_root text', 'linear_links_checked_at integer']) {
     try {

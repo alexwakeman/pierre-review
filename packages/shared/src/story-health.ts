@@ -35,7 +35,7 @@ import { STORY_ISSUES, STORY_ISSUE_BY_ID, type StoryIssueId } from './story-issu
 // ── Constants (the ONE spelling the folds and the page's copy both read) ───────────────────────────
 
 /** The labelling rubric's version. Bump = every story is relabelled; never redefine a label in place. */
-export const STORY_RUBRIC_VERSION = 1;
+export const STORY_RUBRIC_VERSION = 2;
 
 /** Weeks on the chart, the current (partial) week included. 13 × 7 = 91 days ≈ "Last 90 days". */
 export const STORY_HEALTH_WEEKS = 13;
@@ -46,6 +46,9 @@ export const STORY_HEALTH_SPAN_LABEL = 'Last 90 days';
 /** A week whose series has fewer items (`n`) than this is THIN: drawn faint, left out of the rolling
  *  line and of the time / count shift test (a rate shift pools every week's units). */
 export const STORY_HEALTH_THIN_N = 3;
+
+/** Stories a refinement week's hover lists at most (then "and N more"). */
+export const STORY_HEALTH_HOVER_STORIES = 8;
 
 /** Weeks the rolling line pools (the week itself and the three before it), non-thin weeks only. */
 export const STORY_HEALTH_ROLLING_WEEKS = 4;
@@ -116,21 +119,99 @@ export const STORY_LABEL_NOISE = {
 } as const;
 
 // ── The model's labels (what `story_labels` stores; shared so both halves name the fields once) ────
+//
+// RUBRIC 2 (2026-10-11): per criterion "testable" + a short REASON when not; per story the
+// DEPENDENCIES it names (what, owner, a ticket key) and up to three SPEC GAPS. Rubric 1's
+// bundled / dependsOnOtherWork / outOfScopeStated / dependencyNamed / nonCodeWork are GONE: a
+// rubric-1 row is never read (every reader filters on `STORY_RUBRIC_VERSION`), so its old JSON shape
+// never reaches these types.
+
+/** Caps the label validator enforces (characters, after trimming; over-long text is REFUSED as a
+ *  failed label and retried, never cut — the reader sees these strings verbatim). */
+export const STORY_LABEL_TEXT_MAX = {
+  /** A criterion's reason ("no expected result"). */
+  reason: 80,
+  /** A dependency's `what`. */
+  what: 80,
+  /** A dependency's `owner`. */
+  owner: 60,
+  /** A spec gap's `text`. */
+  gap: 100,
+} as const;
+
+/** Dependencies one label may name; more is a failed label. */
+export const STORY_LABEL_DEPENDENCIES_MAX = 8;
 
 /** Per numbered criterion, in order (`criteria_json`). */
 export interface StoryCriterionLabel {
   /** 1-based, = the criterion's position in `extractCriteria(...)`. */
   n: number;
+  /** A tester could decide pass or fail from the words alone, with an observable result. */
   testable: boolean;
-  bundled: boolean;
-  dependsOnOtherWork: boolean;
+  /** Why not, ≤ STORY_LABEL_TEXT_MAX.reason ("no expected result", "'intuitive' can't be checked",
+   *  "no input given"). Required (non-empty) when `testable` is false; null when true. */
+  reason: string | null;
+}
+
+/** What a named dependency is. 'ticket' = another ticket (a key may be given). */
+export type StoryDependencyKind = 'ticket' | 'api' | 'design' | 'data' | 'environment' | 'decision' | 'other';
+
+export const STORY_DEPENDENCY_KINDS: readonly StoryDependencyKind[] = [
+  'ticket',
+  'api',
+  'design',
+  'data',
+  'environment',
+  'decision',
+  'other',
+];
+
+export const STORY_DEPENDENCY_KIND_LABEL: Record<StoryDependencyKind, string> = {
+  ticket: 'Another ticket',
+  api: 'An API',
+  design: 'A design',
+  data: 'Data',
+  environment: 'An environment',
+  decision: 'A decision',
+  other: 'Other work',
+};
+
+/** One dependency the ticket's TEXT names (it may also be linked; code dedupes by key). */
+export interface StoryDependencyLabel {
+  kind: StoryDependencyKind;
+  /** ≤ STORY_LABEL_TEXT_MAX.what ("cookie banner", "design for the map page"). */
+  what: string;
+  /** ≤ STORY_LABEL_TEXT_MAX.owner ("UCD team"); null when the ticket names nobody. */
+  owner: string | null;
+  /** A ticket key the text gives for it (`BMD-568`), as written; null when none. */
+  ticketKey: string | null;
+}
+
+export type StorySpecGapType = 'rule' | 'edge_case' | 'design' | 'data' | 'non_functional';
+
+export const STORY_SPEC_GAP_TYPES: readonly StorySpecGapType[] = ['rule', 'edge_case', 'design', 'data', 'non_functional'];
+
+export const STORY_SPEC_GAP_TYPE_LABEL: Record<StorySpecGapType, string> = {
+  rule: 'Business rule',
+  edge_case: 'Edge case',
+  design: 'Design',
+  data: 'Data',
+  non_functional: 'Non-functional',
+};
+
+/** One specific missing detail. */
+export interface StorySpecGap {
+  type: StorySpecGapType;
+  /** ≤ STORY_LABEL_TEXT_MAX.gap ("No behaviour when the upload fails"). */
+  text: string;
 }
 
 /** Per story (`story_json`). */
 export interface StoryLevelLabels {
-  outOfScopeStated: boolean;
-  dependencyNamed: boolean;
-  nonCodeWork: boolean;
+  /** ≤ STORY_LABEL_DEPENDENCIES_MAX; [] = the text names none. */
+  dependencies: StoryDependencyLabel[];
+  /** ≤ STORY_SPEC_GAPS_MAX (story-issues.ts); [] = none found. */
+  gaps: StorySpecGap[];
 }
 
 // ── Series metadata ────────────────────────────────────────────────────────────────────────────────
@@ -138,11 +219,12 @@ export interface StoryLevelLabels {
 export type StoryHealthPanel = 'refinement' | 'delivery';
 
 export type StoryHealthSeriesId =
-  // REFINEMENT — one per story issue (`story-issues.ts`), story-weighted, `source: 'label'`
+  // REFINEMENT — one per story issue (`story-issues.ts`), story-weighted, `source: 'label'`.
+  // ⚠ RUBRIC 2 MEANS NEW IDS for the changed questions: 'blocked' and 'specGaps' are new metrics;
+  // 'unclearDone' keeps its id because its question (testable) did not change.
   | 'unclearDone'
-  | 'tooBig'
-  | 'waitsOnWork'
-  | 'scopeUnstated'
+  | 'blocked'
+  | 'specGaps'
   // DELIVERY — code (stories by last-merge week)
   | 'workingTimeS'
   | 'workingTimeM'
@@ -153,9 +235,8 @@ export type StoryHealthSeriesId =
 /** Refinement series id ↔ story issue id (one table, both directions read it). */
 export const STORY_HEALTH_ISSUE_SERIES: Readonly<Record<StoryIssueId, StoryHealthSeriesId>> = {
   unclear_done: 'unclearDone',
-  too_big: 'tooBig',
-  waits_on_work: 'waitsOnWork',
-  scope_unstated: 'scopeUnstated',
+  blocked: 'blocked',
+  spec_gaps: 'specGaps',
 };
 
 /** `pct` = 0–100; `hours` = median working hours; `count` = a median count. */
@@ -188,6 +269,15 @@ export interface StoryHealthSeriesMeta {
  *  `CHANGEPOINT_Z`, and the Before-and-after ⓘ prints it, so the copy cannot drift from the test. */
 export const CHANGEPOINT_Z = 3;
 
+/** Series HELD BACK from Story health until their Haiku judgement passes an agreement test (two
+ *  independent runs, Cohen's kappa ≥ 0.6, and not saturated). The ticket cards still show the
+ *  judgement; only the chart waits. Each entry says why.
+ *  • specGaps — 2026-10-11, 37 BNG tickets labelled twice: every ticket got 3 gaps (saturated: the
+ *    rate is 100% by construction) and gap TYPES agreed at κ 0.13–0.47. */
+export const STORY_HEALTH_HELD: Readonly<Partial<Record<StoryHealthSeriesId, string>>> = {
+  specGaps: 'every labelled story gets gaps, and two readings disagree on their type',
+};
+
 /** Every series, in legend order. The server sends values for these ids; the SPA reads labels here. */
 export const STORY_HEALTH_SERIES: readonly StoryHealthSeriesMeta[] = [
   // Refinement: "% of stories with <issue>" over LABELLED stories only (`storyIssueMeasure`).
@@ -195,7 +285,8 @@ export const STORY_HEALTH_SERIES: readonly StoryHealthSeriesMeta[] = [
     (m): StoryHealthSeriesMeta => ({
       id: STORY_HEALTH_ISSUE_SERIES[m.id],
       panel: 'refinement',
-      label: STORY_ISSUE_BY_ID[m.id].label,
+      // The MEASURE's label ("Had blockers", not the chip's "Blocked"): finished dependencies count here.
+      label: STORY_ISSUE_BY_ID[m.id].measureLabel,
       source: 'label',
       unit: 'pct',
       over: 'stories',
@@ -257,6 +348,23 @@ export interface StoryHealthPoint {
   rolling: number | null;
   /** Non-thin weeks the rolling value pooled (0–4). */
   rollingWeeks: number;
+  /** REFINEMENT series only: the week's stories WITH the issue (the numerator), key order, at most
+   *  `STORY_HEALTH_HOVER_STORIES` — the hover list (each opens the ticket tab). Absent on delivery. */
+  stories?: StoryHealthStoryRef[];
+  /** REFINEMENT only: how many more stories with the issue the cap left out ("and N more"). */
+  storiesMore?: number;
+  /** 'blocked' only: the numerator split — stories with ≥ 1 tracker link vs dependencies named only in
+   *  the text (`storyBlockedSource`). `linked + textOnly` = the numerator. */
+  blockedSplit?: { linked: number; textOnly: number };
+  /** 'specGaps' only: gaps by type over the numerator's stories (a story counts once per type). */
+  gapTypes?: Partial<Record<StorySpecGapType, number>>;
+}
+
+/** A story in a refinement week's hover list. */
+export interface StoryHealthStoryRef {
+  ident: string;
+  key: string;
+  title: string | null;
 }
 
 export interface StoryHealthSeries {

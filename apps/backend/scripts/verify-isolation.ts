@@ -3676,6 +3676,22 @@ check(
   );
   const ghOwn = await app.inject({ method: 'GET', url: `/api/prs/${A.prId}/tracker-ticket?key=${encodeURIComponent(GH_KEY)}` });
   check("GET /api/prs/<A's>/tracker-ticket?key=<GitHub key> as A → A's issue", ghOwn.statusCode === 200 && ghOwn.json().title === 'A issue');
+  // The ticket tab (tracker/ticket-prs.ts): both accounts' PRs close the same issue, so a dropped
+  // account predicate on the members, the PR join or the title read would list B's PR or name B's text.
+  const prIdsOf = (b: { open: { id: number }[]; merged: { id: number }[]; closed: { id: number }[] }) =>
+    [...b.open, ...b.merged, ...b.closed].map((p) => p.id);
+  const tpOwn = await app.inject({ method: 'GET', url: `/api/ticket-prs?workspace=${defaultA}&ident=${encodeURIComponent(GH_IDENT)}` });
+  const tpOwnBody = tpOwn.json();
+  check(
+    "GET /api/ticket-prs (A's workspace, shared GitHub ident) as A → A's PR and title only",
+    tpOwn.statusCode === 200 && tpOwnBody.ticket?.title === 'A issue' && prIdsOf(tpOwnBody).includes(A.prId) && !prIdsOf(tpOwnBody).includes(B.prId),
+  );
+  const tpCross = await app.inject({ method: 'GET', url: `/api/ticket-prs?workspace=${defaultB}&ident=${encodeURIComponent(GH_IDENT)}` });
+  const tpCrossBody = tpCross.json();
+  check(
+    "GET /api/ticket-prs?workspace=<B's> as A → A's Default, never B's PR",
+    tpCross.statusCode === 200 && tpCrossBody.workspaceId === defaultA && !prIdsOf(tpCrossBody).includes(B.prId) && tpCrossBody.ticket?.title !== 'B issue',
+  );
   const ghShared = await db.select().from(tt).where(and(eq(tt.provider, 'github'), eq(tt.issueKey, GH_KEY))).execute();
   check('MUTATION: without the account predicate both accounts share the GitHub issue', ghShared.length === 2);
 
@@ -3821,7 +3837,7 @@ check(
 {
   console.log('\nstory_labels + tracker ticket dates');
   const sh = await import('../src/db/story-health.js');
-  const { trackerTicketIdent } = await import('@pierre-review/shared');
+  const { trackerTicketIdent, STORY_RUBRIC_VERSION } = await import('@pierre-review/shared');
   const root = 'https://iso-story.atlassian.net';
   const ident = trackerTicketIdent('jira', root, 'ISO-1');
   const label = (accountId: number, testable: boolean) =>
@@ -3831,9 +3847,9 @@ check(
         accountId,
         ident,
         textHash: 'same-hash',
-        rubricVersion: 1,
-        criteriaJson: [{ n: 1, testable, bundled: false, dependsOnOtherWork: false }],
-        storyJson: { outOfScopeStated: false, dependencyNamed: false, nonCodeWork: false },
+        rubricVersion: STORY_RUBRIC_VERSION,
+        criteriaJson: [{ n: 1, testable, reason: testable ? null : 'no expected result' }],
+        storyJson: { dependencies: [], gaps: [] },
         criteriaCount: 1,
         model: 'claude-haiku-5-5',
       })
@@ -3926,6 +3942,11 @@ check(
   const ssCross = await getSprintStories(1, defaultB, { aiEnabled: false, now: now.getTime() });
   check("getSprintStories(A, B's workspace) never lists B's ticket", !ssCross.tickets.some((t) => t.title === 'B sprint ticket'));
   check("readSprintTicket(A, B's workspace) is null", (await readSprintTicket(1, defaultB, ident)) === null);
+  // A label's named key resolves through STORED tickets: A must see A's row only, never B's title.
+  // MUTATION CHECK: drop the accountId predicate from `knownTicketsFor` and this goes red.
+  const { knownTicketsFor } = await import('../src/db/story-issue-input.js');
+  check("knownTicketsFor(A) resolves A's ticket, never B's", (await knownTicketsFor(1, 'jira', SITE, ['SPR-1'])).get('SPR-1')?.title === 'A sprint ticket');
+  check("knownTicketsFor(B) resolves B's ticket, never A's", (await knownTicketsFor(2, 'jira', SITE, ['spr-1'])).get('SPR-1')?.title === 'B sprint ticket');
   check(
     "setSprintRepos(A, wsA, ident, [B.repo]) → bad_repo",
     (await setSprintRepos(1, defaultA, ident, [B.repoId], () => 'manual')).ok === false,
@@ -3982,6 +4003,46 @@ check(
     writers: { jira: fakeWriter, linear: fakeWriter, github: fakeWriter },
   });
   check("performTrackerWrite(A, B's workspace) refuses no_ticket and writes nothing", crossWrite.ok === false && writerCalls === 0);
+
+  // The status layout override (workspaces.sprint_statuses; db/sprint-status-settings.ts). A write by
+  // A naming B's workspace must touch nothing — at the query layer AND over HTTP, where the route
+  // refuses rather than writing onto A's Default. MUTATION CHECK: drop the accountId predicate from
+  // `setSprintStatusSettings` and the first check goes red.
+  const statusSettings = await import('../src/db/sprint-status-settings.js');
+  const bOrder = { order: ['To Do', 'Doing', 'Done'], deliveredFrom: 'Doing' };
+  await statusSettings.setSprintStatusSettings(2, defaultB, bOrder);
+  check(
+    "setSprintStatusSettings(A, B's workspace) writes nothing",
+    (await statusSettings.setSprintStatusSettings(1, defaultB, { order: null, deliveredFrom: 'X' })) === false &&
+      (await statusSettings.getSprintStatusSettings(2, defaultB)).deliveredFrom === 'Doing',
+  );
+  check("getSprintStatusSettings(A, B's workspace) never reads B's order", (await statusSettings.getSprintStatusSettings(1, defaultB)).order == null);
+  const contract = await import('../src/pro/contract.js');
+  const savedCaps = contract.getProCapabilities();
+  contract.setProCapabilities({ ...contract.EMPTY_CAPABILITIES, periodReports: true });
+  try {
+    const Fastify = (await import('fastify')).default;
+    const { sprintStoriesRoutes } = await import('../src/api/routes/sprint-stories.js');
+    const [acctA] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, 1)).execute();
+    const sapp = Fastify({ logger: false });
+    sapp.addHook('onRequest', async (req) => {
+      (req as unknown as { account: unknown }).account = { ...acctA!, isLocal: true };
+    });
+    await sapp.register(sprintStoriesRoutes);
+    await sapp.ready();
+    const res = await sapp.inject({
+      method: 'PUT',
+      url: '/api/sprint-stories/statuses',
+      payload: { workspaceId: defaultB, settings: { order: null, deliveredFrom: 'X' } },
+    });
+    check(
+      "PUT /api/sprint-stories/statuses with B's workspace as A → 400, B's override intact",
+      res.statusCode === 400 && (await statusSettings.getSprintStatusSettings(2, defaultB)).deliveredFrom === 'Doing',
+    );
+    await sapp.close();
+  } finally {
+    contract.setProCapabilities(savedCaps);
+  }
 }
 
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);

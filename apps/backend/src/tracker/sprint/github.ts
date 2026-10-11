@@ -1,6 +1,6 @@
 import { SPRINT_TICKETS_MAX } from '@pierre-review/shared';
 import { JiraFetchError } from '../jira/fetch.js';
-import { githubGraphql, noteGithubBudget, SUB_ISSUE_CAP, toFetchedTicket } from '../github/reader.js';
+import { githubGraphql, noteGithubBudget, SUB_ISSUE_CAP, githubStatusOrder, toFetchedTicket } from '../github/reader.js';
 import type { GithubCallAccess } from '../types.js';
 import type { SprintFetchedTicket, SprintListResult, SprintLister } from './types.js';
 
@@ -213,6 +213,7 @@ export function makeGithubLister(now: () => number = Date.now): SprintLister {
         source: { kind: 'milestone', provider: 'github', name: pick.title, dueOn: pick.dueOn, repos: inRepos },
         tickets: into.tickets,
         truncated: into.truncated || cut,
+        statusOrder: githubStatusOrder(new Date().toISOString()),
       };
     }
     for (const r of byRepo) {
@@ -237,6 +238,7 @@ export function makeGithubLister(now: () => number = Date.now): SprintLister {
       },
       tickets: into.tickets,
       truncated: into.truncated || cut,
+      statusOrder: githubStatusOrder(new Date().toISOString()),
     };
   };
 }

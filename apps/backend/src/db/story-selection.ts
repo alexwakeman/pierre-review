@@ -1,11 +1,19 @@
 import {
+  STORY_HEALTH_HELD,
+  STORY_HEALTH_ISSUE_SERIES,
+  STORY_ISSUE_BY_ID,
   STORY_ISSUE_IDS,
   STORY_REPORT_GROUP_CAPS,
   foldStoryIssues,
+  storyBlockers,
   storyIssueMeasure,
-  storyIssueStates,
   storyReportWindowDays,
+  usableStoryLabel,
+  type StoryIssue,
+  type StoryIssueId,
   type StoryIssueInput,
+  type StoryIssueReason,
+  type TrackerProvider,
   type StoryReportIssueRate,
   type StoryReportCandidate,
   type StoryReportGroup,
@@ -18,6 +26,7 @@ import { getReportingWindow, measuredTo, reportingWindowInfo, type ReportingWind
 import { foldStories, type StoryInternals } from './stories.js';
 import { storyLabelInput } from './story-label-input.js';
 import { currentLabelRowsFor } from './story-health.js';
+import { buildStoryIssueInput, knownTicketsFor, linksOfRow, namedTicketKeys } from './story-issue-input.js';
 
 // THE STORY REPORT'S PICKS — which 10-20 stories the agent reads (docs/CLAUDE-REVIEW.md § Story
 // report). CODE decides, never the model: four groups with caps, each pick carrying code-written
@@ -29,11 +38,13 @@ import { currentLabelRowsFor } from './story-health.js';
 // With nothing written to check against, its outcome is UNKNOWN, not bad; it falls through to
 // no_criteria.
 //
-// THE FOUR STORY ISSUES (shared `story-issues.ts`): each pick carries `foldStoryIssues` over today's
-// criteria + its CURRENT label with a per-issue state (`storyIssueStates`: true / false / null = not
-// known — never "avoided"), and `population.issueRates` counts every story in the window by THE rate
-// rule `storyIssueMeasure` (labelled stories only; "no criteria" stays its own `noCriteriaFound`) — so
-// the agent's rates come from code over the whole window, never from the picks.
+// THE THREE STORY ISSUES (shared `story-issues.ts`): `population.issueRates` counts every story in
+// the window by THE rate rule `storyIssueMeasure` (labelled stories only; "no criteria" stays its own
+// `noCriteriaFound`) — so the agent's rates come from code over the whole window, never from the picks.
+// Each pick carries its issues AS WRITTEN (`storyIssuesAsWritten`) with a per-issue state (true / false
+// / null = not known — never "avoided"): the SAME question the rates answer, so a story the rate counts
+// as blocked shows its blockers, finished ones included (`resolved`). These are merged stories — "is it
+// blocked NOW" (This sprint's question) would read "no" on almost every one.
 //
 // ⚠ DETERMINISTIC: the input order is the fold's (newest last merge first, then ident) and the sort is
 // stable with explicit tie-breaks, so the same data always picks the same stories — the fingerprint
@@ -64,6 +75,36 @@ export function storyIssueRates(inputs: Iterable<StoryIssueInput | null>): Story
     }
   }
   return rates;
+}
+
+/** One story's issues AS WRITTEN — `foldStoryIssues`, except `blocked` carries EVERY dependency the
+ *  story had, finished or not (the rate rule's question) — and its per-issue state under the same
+ *  rule: a usable label → `storyIssueMeasure`; none → only what code knows (no criteria; any link),
+ *  the rest null. Pure. */
+export function storyIssuesAsWritten(input: StoryIssueInput): {
+  issues: StoryIssue[];
+  states: Record<StoryIssueId, boolean | null>;
+} {
+  const now = foldStoryIssues(input);
+  const blockers = storyBlockers(input);
+  const issues = now.filter((i) => i.id !== 'blocked');
+  if (blockers.length > 0) {
+    const reasons: StoryIssueReason[] = [];
+    if (blockers.some((b) => b.source === 'link')) reasons.push('linked');
+    if (blockers.some((b) => b.source === 'text')) reasons.push('named');
+    issues.push({ id: 'blocked', total: input.criteria.length, reasons, criteria: [], blockers, gaps: [] });
+  }
+  issues.sort((a, b) => STORY_ISSUE_BY_ID[a.id].order - STORY_ISSUE_BY_ID[b.id].order);
+  const present = new Set(issues.map((i) => i.id));
+  const states: Record<StoryIssueId, boolean | null> =
+    usableStoryLabel(input) != null
+      ? storyIssueMeasure(input)
+      : {
+          unclear_done: present.has('unclear_done') ? true : null,
+          blocked: present.has('blocked') ? true : null,
+          spec_gaps: null,
+        };
+  return { issues, states };
 }
 
 /** The pure half: the picks and the whole-window figures over the fold's stories. `issueInputs` (by
@@ -150,7 +191,14 @@ export function selectStories(
     workingDayHours,
     truncated,
   };
-  if (issueInputs != null) population.issueRates = storyIssueRates(stories.map((s) => issueInputs.get(s.row.ident) ?? null));
+  // A rate whose Story health series is HELD (STORY_HEALTH_HELD: its judgement failed the agreement
+  // test) is not handed to the report either — the same figure must not be withheld on one screen and
+  // quoted on the next.
+  if (issueInputs != null) {
+    population.issueRates = storyIssueRates(stories.map((s) => issueInputs.get(s.row.ident) ?? null)).filter(
+      (r) => STORY_HEALTH_HELD[STORY_HEALTH_ISSUE_SERIES[r.id]] == null,
+    );
+  }
 
   const candidates: StoryReportCandidate[] = picked.map((c) => {
     const r = c.s.row;
@@ -160,7 +208,10 @@ export function selectStories(
         ? {}
         : input == null
           ? { issues: null, issueStates: null }
-          : { issues: foldStoryIssues(input), issueStates: storyIssueStates(input) };
+          : (() => {
+              const w = storyIssuesAsWritten(input);
+              return { issues: w.issues, issueStates: w.states };
+            })();
     return {
       ident: r.ident,
       key: r.key,
@@ -235,14 +286,17 @@ export async function loadStorySelection(
   return { ...sel, range, trackerOn: fold.trackerOn };
 }
 
-/** Each story's issue input: today's criteria (the labeller's list — the ONE extractor) and its CURRENT
- *  label (rubric + text hash match), in ONE batched, account-predicated label read. null = the ticket
- *  text was never read. */
+/** Each story's issue input (db/story-issue-input.ts): today's criteria (the labeller's list — the
+ *  ONE extractor), its CURRENT label (rubric + text hash match) in ONE batched, account-predicated
+ *  label read, the freshest stored row's tracker links, and the stored tickets its label names (per
+ *  tracker site). null = the ticket text was never read. */
 export async function storyIssueInputs(
   accountId: number,
   stories: readonly StoryInternals[],
 ): Promise<Map<string, StoryIssueInput | null>> {
   const labels = stories.length > 0 ? await currentLabelRowsFor(accountId, stories.map((s) => s.row.ident)) : new Map();
+  type Draft = { s: StoryInternals; criteria: string[]; label: StoryIssueInput['label'] };
+  const drafts: Draft[] = [];
   const out = new Map<string, StoryIssueInput | null>();
   for (const s of stories) {
     if (s.ticket == null) {
@@ -251,7 +305,21 @@ export async function storyIssueInputs(
     }
     const input = storyLabelInput(s.ticket, s.row.provider);
     const label = input != null ? (labels.get(s.row.ident)?.get(input.textHash) ?? null) : null;
-    out.set(s.row.ident, { criteria: input?.criteria ?? [], label });
+    drafts.push({ s, criteria: input?.criteria ?? [], label });
+  }
+  // Named keys resolve on the story's OWN site (one read per site; normally one).
+  const bySite = new Map<string, { provider: TrackerProvider; apiRoot: string; drafts: Draft[] }>();
+  for (const d of drafts) {
+    const site = `${d.s.row.provider}\u0000${d.s.ticket!.apiRoot}`;
+    const g = bySite.get(site) ?? { provider: d.s.row.provider, apiRoot: d.s.ticket!.apiRoot, drafts: [] };
+    g.drafts.push(d);
+    bySite.set(site, g);
+  }
+  for (const g of bySite.values()) {
+    const known = await knownTicketsFor(accountId, g.provider, g.apiRoot, namedTicketKeys(g.drafts.map((d) => d.label)));
+    for (const d of g.drafts) {
+      out.set(d.s.row.ident, buildStoryIssueInput({ criteria: d.criteria, label: d.label, links: linksOfRow(d.s.ticket), knownTickets: known }));
+    }
   }
   return out;
 }

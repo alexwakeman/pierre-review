@@ -25,7 +25,7 @@ export function buildSubmitAssessmentShape(z: ZodNs) {
         z.object({
           id: z
             .enum(STORY_ISSUE_IDS as unknown as [StoryIssueId, ...StoryIssueId[]])
-            .describe('Which of the four issues this is.'),
+            .describe('Which of the three issues this is.'),
           text: z
             .string()
             .max(SPRINT_ASSESS_CAPS.issueText)

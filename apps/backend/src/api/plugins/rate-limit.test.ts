@@ -482,6 +482,9 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/sprint-stories')).toEqual(['read']);
     expect(tiers('PUT', '/api/sprint-stories/repos')).toEqual(['read']);
     expect(tiers('PUT', '/api/sprint-stories/checks')).toEqual(['read']);
+    expect(tiers('PUT', '/api/sprint-stories/statuses')).toEqual(['read']);
+    // The ticket tab: DB-only, decided.
+    expect(tiers('GET', '/api/ticket-prs')).toEqual(['read']);
     expect(tiers('POST', '/api/sprint-stories/refresh')).toEqual(['search', 'read']);
     expect(tiers('POST', '/api/sprint-stories/assess')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('GET', '/api/sprint-stories/assessments/7')).toEqual(['read']);

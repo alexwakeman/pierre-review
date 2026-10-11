@@ -21,12 +21,12 @@ import {
 } from '../src/lib/copy.js';
 
 const CRITERIA = ['Users get a link'];
-// Criterion 1 not testable, no out-of-scope line: two issues.
+// Criterion 1 not testable, one spec gap: two issues.
 const ISSUES = foldStoryIssues({
   criteria: CRITERIA,
   label: {
-    criteria: [{ n: 1, testable: false, bundled: false, dependsOnOtherWork: false }],
-    story: { outOfScopeStated: false, dependencyNamed: true, nonCodeWork: false },
+    criteria: [{ n: 1, testable: false, reason: 'no expected result' }],
+    story: { dependencies: [], gaps: [{ type: 'rule', text: 'No rule for how long a link lasts' }] },
   },
 });
 
@@ -47,6 +47,7 @@ function ticket(over: Partial<SprintTicketRow> = {}): SprintTicketRow {
     url: 'https://acme.atlassian.net/browse/ACME-2',
     provider: 'jira',
     phase: 'in_progress',
+    stage: 'writing',
     status: null,
     issueType: null,
     assignee: null,
@@ -98,8 +99,8 @@ describe('markdown composers', () => {
   });
 
   it('a bullet is one line: bold issue label, the sentence, the path in backticks', () => {
-    expect(sprintBulletMarkdown({ id: 'scope_unstated', text: 'Add a line.\nNow.', source: 'code', ref: null })).toBe(
-      '**Scope not stated**: Add a line. Now.',
+    expect(sprintBulletMarkdown({ id: 'spec_gaps', text: 'No error copy.\nNow.', source: 'code', ref: null })).toBe(
+      '**Spec gaps**: No error copy. Now.',
     );
     expect(
       sprintBulletMarkdown({ id: 'unclear_done', text: 'Say how long.', source: 'claude', ref: { repo: 'acme/web', path: 'src/a.ts' } }),
@@ -111,7 +112,7 @@ describe('markdown composers', () => {
       [
         '## ACME-2 — Sign in with a link',
         'https://acme.atlassian.net/browse/ACME-2',
-        `- **Unclear when done**: ${storyIssueBullet(ISSUES[0]!)}\n- **Scope not stated**: ${storyIssueBullet(ISSUES[1]!)}`,
+        `- **Unclear when done**: ${storyIssueBullet(ISSUES[0]!)}\n- **Spec gaps**: ${storyIssueBullet(ISSUES[1]!)}`,
       ].join('\n\n'),
     );
   });
@@ -123,7 +124,7 @@ describe('markdown composers', () => {
         '## ACME-2 — Sign in with a link',
         'https://acme.atlassian.net/browse/ACME-2',
         'This may already be done: src/auth/link.ts sends the link.',
-        `- **Unclear when done**: Say how long a link lasts. (\`src/auth/link.ts\` in \`acme/web\`)\n- **Scope not stated**: ${storyIssueBullet(ISSUES[1]!)}`,
+        `- **Unclear when done**: Say how long a link lasts. (\`src/auth/link.ts\` in \`acme/web\`)\n- **Spec gaps**: ${storyIssueBullet(ISSUES[1]!)}`,
       ].join('\n\n'),
     );
   });
@@ -131,13 +132,13 @@ describe('markdown composers', () => {
   it('copy all follows the checks, and ignores running / outdated runs and unsafe links', () => {
     // The server sends `issues` already filtered; the checks also drop Claude's sentence for an issue
     // switched off.
-    const checks = { off: ['scope_unstated' as const], issueTypes: [] };
-    const claudeScope = body({ issues: [{ id: 'scope_unstated', text: 'Say it is CSV only.', ref: null }] });
+    const checks = { off: ['spec_gaps' as const], issueTypes: [] };
+    const claudeScope = body({ issues: [{ id: 'spec_gaps', text: 'Say it is CSV only.', ref: null }] });
     const off = ticketCopyAllMarkdown(
       ticket({ issues: applyStoryIssueChecks(ISSUES, checks, null), assessment: succeeded(claudeScope) }),
       checks,
     );
-    expect(off).not.toContain('Scope not stated');
+    expect(off).not.toContain('Spec gaps');
     expect(off).toContain('Unclear when done');
     // A type the checks do not cover: header, link and summary — no bullets, not even Claude's.
     expect(
@@ -152,7 +153,7 @@ describe('markdown composers', () => {
       'may already be done',
     );
     // ⚠ A STALE run puts nothing in Copy all: no summary, no sentence of its own.
-    const stale = { ...succeeded(body({ issues: [{ id: 'scope_unstated', text: 'Say it is CSV only.', ref: null }] }))!, currency: 'stale' as const };
+    const stale = { ...succeeded(body({ issues: [{ id: 'spec_gaps', text: 'Say it is CSV only.', ref: null }] }))!, currency: 'stale' as const };
     const staleMd = ticketCopyAllMarkdown(ticket({ issues: [], assessment: stale }), SPRINT_CHECKS_DEFAULT);
     expect(staleMd).toBe('## ACME-2 — Sign in with a link\n\nhttps://acme.atlassian.net/browse/ACME-2');
     // A javascript: URL is never copied as the ticket link.

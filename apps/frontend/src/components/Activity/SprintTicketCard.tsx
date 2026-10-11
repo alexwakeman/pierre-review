@@ -3,28 +3,39 @@ import {
   SPRINT_REPO_REASON_LABEL,
   SPRINT_REPOS_PER_TICKET_MAX,
   STORY_ISSUE_BY_ID,
+  STORY_SPEC_GAP_TYPE_LABEL,
   sprintAssessmentBodyOf,
   sprintBullets,
   sprintCurrentAssessmentBodyOf,
+  storyBlockerPhrase,
   storyIssueChipText,
+  type SprintBullet,
   type SprintChecks,
   type SprintRepoRef,
   type SprintTicketRow,
+  type StoryBlocker,
+  type StoryIssue,
 } from '@pierre-review/shared';
 import { useSprintReposSaving, useSprintSetRepos } from '../../hooks/useSprintStories.js';
 import { sprintBulletMarkdown, ticketCopyAllMarkdown } from '../../lib/copy.js';
+import { useOpenTicketTab } from '../../lib/ticketTab.js';
 import { relativeTime, safeExternalUrl } from '../../lib/ui.js';
-import { ChevronIcon, CloseIcon, PlusIcon, SparkleIcon } from '../Icons.js';
+import { ChevronIcon, CloseIcon, PlusIcon, PullRequestIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { SprintAssessment } from './SprintAssessment.js';
 import { SprintCopyButton } from './SprintCopyButton.js';
 import { SprintUpdatePanel } from './SprintUpdatePanel.js';
 
 // One ticket on Reports → This sprint. Collapsed: key + title, status, assignee (display only), at
-// most four issue chips, PRs. Expanded, in this order and nothing else: one bullet per issue (each
-// copyable; Claude's sentence replaces the template once the ticket was checked against code), the
-// candidate repos, the "Check against code" button and the update panel. "Copy all" copies the
-// header, the summary and the bullets.
+// most three issue chips, PRs (each opens on GitHub; "Ticket PRs" opens the ticket tab). Expanded, in
+// this order and nothing else: the detail per issue (each copyable as its one-line bullet; Claude's
+// sentence replaces the template once the ticket was checked against code), the candidate repos, the
+// "Check against code" button and the update panel. "Copy all" copies the header, the summary and
+// the bullets.
+//
+// ⚠ THE DETAIL IS THE SPECIFIC ONE: which criterion and why, what the ticket waits on (a linked key
+// opens in the tracker), who owns it and its state, which details the spec leaves out. Finished
+// blockers are shown under the open ones as "Done: …", never raised.
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 
@@ -52,6 +63,7 @@ export function SprintTicketCard({
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const href = safeExternalUrl(t.url);
+  const openTicketTab = useOpenTicketTab();
 
   return (
     <article className="rounded-lg border border-gray-200 p-3 dark:border-gray-800" data-testid="sprint-ticket">
@@ -98,7 +110,15 @@ export function SprintTicketCard({
                       )}
                     </span>
                   );
-                })}
+                })}{' '}
+                <button
+                  type="button"
+                  onClick={() => openTicketTab({ ident: t.ident, key: t.key, title: t.title })}
+                  className="inline-flex items-center gap-0.5 rounded border border-gray-300 px-1 text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
+                >
+                  <PullRequestIcon size={10} />
+                  Ticket PRs
+                </button>
               </span>
             )}
           </div>
@@ -160,18 +180,16 @@ function IssuesBlock({ ticket: t, checks }: { ticket: SprintTicketRow; checks: S
         <ul className="space-y-1.5">
           {bullets.map((b) => {
             const label = STORY_ISSUE_BY_ID[b.id].label;
+            const issue = t.issues.find((x) => x.id === b.id);
             return (
               <li key={b.id} className="flex items-start gap-2">
-                <p className="min-w-0 flex-1 text-xs text-gray-800 dark:text-gray-100">
-                  <strong className="font-semibold">{label}</strong> · {b.text}
-                  {b.ref != null && (
-                    <span className={MUTED}>
-                      {' '}
-                      <code className="font-mono text-[11px]">{b.ref.path}</code> in {b.ref.repo}
-                    </span>
+                <div className="min-w-0 flex-1 text-xs text-gray-800 dark:text-gray-100">
+                  {b.source === 'code' && issue != null ? (
+                    <IssueDetail issue={issue} criteria={t.criteria.items} text={b.text} />
+                  ) : (
+                    <ClaudeBullet bullet={b} label={label} />
                   )}
-                  {b.source === 'claude' && <ClaudeMark />}
-                </p>
+                </div>
                 <SprintCopyButton markdown={sprintBulletMarkdown(b)} what={`the ${label} line`} />
               </li>
             );
@@ -268,5 +286,96 @@ function ReposBlock({
       {full && <p className={`text-xs ${MUTED}`}>Up to {SPRINT_REPOS_PER_TICKET_MAX} repos per ticket.</p>}
       {save.isError && <p className="text-xs text-rose-700 dark:text-rose-400">{save.error.message}</p>}
     </section>
+  );
+}
+
+function ClaudeBullet({ bullet: b, label }: { bullet: SprintBullet; label: string }): JSX.Element {
+  return (
+    <p>
+      <strong className="font-semibold">{label}</strong> · {b.text}
+      {b.ref != null && (
+        <span className={MUTED}>
+          {' '}
+          <code className="font-mono text-[11px]">{b.ref.path}</code> in {b.ref.repo}
+        </span>
+      )}
+      {b.source === 'claude' && <ClaudeMark />}
+    </p>
+  );
+}
+
+/** One issue's specific detail (code's): every flagged criterion with its reason, every blocker with its
+ *  owner and state (a linked key opens the tracker), every spec gap with its type. */
+function IssueDetail({ issue, criteria, text }: { issue: StoryIssue; criteria: string[]; text: string }): JSX.Element {
+  const label = STORY_ISSUE_BY_ID[issue.id].label;
+  if (issue.id === 'unclear_done' && issue.criteria.length > 0) {
+    return (
+      <div>
+        <strong className="font-semibold">{label}</strong>
+        <ul className="mt-0.5 space-y-0.5">
+          {issue.criteria.map((c) => (
+            <li key={c.n}>
+              Criterion {c.n}: {c.reason ?? 'can’t be checked'}
+              {criteria[c.n - 1] != null && <span className={`block ${MUTED}`}>&ldquo;{criteria[c.n - 1]}&rdquo;</span>}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  if (issue.id === 'blocked') {
+    const open = issue.blockers.filter((b) => !b.resolved);
+    const done = issue.blockers.filter((b) => b.resolved);
+    return (
+      <div>
+        <strong className="font-semibold">{label}</strong> · Waits on
+        <ul className="mt-0.5 space-y-0.5">
+          {open.map((b, i) => (
+            <li key={`o${i}`}>
+              <BlockerText blocker={b} />
+            </li>
+          ))}
+          {done.map((b, i) => (
+            <li key={`d${i}`} className={MUTED}>
+              Done: <BlockerText blocker={{ ...b, status: null }} />
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  if (issue.id === 'spec_gaps' && issue.gaps.length > 0) {
+    return (
+      <div>
+        <strong className="font-semibold">{label}</strong>
+        <ul className="mt-0.5 space-y-0.5">
+          {issue.gaps.map((g, i) => (
+            <li key={i}>
+              {g.text} <span className={MUTED}>· {STORY_SPEC_GAP_TYPE_LABEL[g.type]}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  return (
+    <p>
+      <strong className="font-semibold">{label}</strong> · {text}
+    </p>
+  );
+}
+
+/** A blocker phrase with its ticket key as a tracker link when the URL is safe. */
+function BlockerText({ blocker: b }: { blocker: StoryBlocker }): JSX.Element {
+  const phrase = storyBlockerPhrase(b);
+  const href = safeExternalUrl(b.url);
+  if (b.ticketKey == null || href == null || !phrase.startsWith(b.ticketKey)) return <>{phrase}</>;
+  return (
+    <>
+      <a href={href} target="_blank" rel="noreferrer" className="font-mono text-sky-700 hover:underline dark:text-sky-300">
+        {b.ticketKey}
+      </a>
+      {phrase.slice(b.ticketKey.length)}
+    </>
   );
 }

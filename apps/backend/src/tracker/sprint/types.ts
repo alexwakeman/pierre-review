@@ -1,4 +1,4 @@
-import type { SprintSource } from '@pierre-review/shared';
+import type { SprintSource, SprintStatusAutoOrder } from '@pierre-review/shared';
 import type { FetchedTicket, TrackerCall } from '../types.js';
 
 // THE SPRINT LIST SEAM (Reports → This sprint; docs/TRACKERS.md § The sprint list read). One lister
@@ -23,6 +23,12 @@ export interface SprintListResult {
   /** ≤ SPRINT_TICKETS_MAX (the lister cuts). */
   tickets: SprintFetchedTicket[];
   truncated: boolean;
+  /** The AUTOMATIC status order (docs/TRACKERS.md § The status order): undefined = not read this
+   *  time (a failed order read — the stored one stands), null = not readable (no board), else the
+   *  order to store on `sprint_reads.status_order_json`. */
+  statusOrder?: SprintStatusAutoOrder | null;
+  /** The failure CODE of an order read that failed (logged; never fails the list). */
+  statusOrderError?: string;
 }
 
 export interface SprintListArgs {

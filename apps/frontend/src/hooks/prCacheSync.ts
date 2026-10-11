@@ -72,6 +72,8 @@ function workspaceKeys(): QueryKey[] {
     ...ACTIVITY_QUERY_KEYS.map((k) => [k]),
     ['timeline'],
     ['open-prs'],
+    // The ticket tab draws the same PR rows (`useTicketPrs`); only an open tab refetches.
+    ['ticket-prs'],
     ['my-turn'],
     ['me'],
   ];

@@ -23,7 +23,8 @@ import {
 } from '../../hooks/useStories.js';
 import { AiRunGate } from '../AiSetup.js';
 import { writeClipboard } from '../CopyButton.js';
-import { CheckIcon, ChevronIcon, CopyIcon, SparkleIcon } from '../Icons.js';
+import { useOpenTicketTab } from '../../lib/ticketTab.js';
+import { CheckIcon, ChevronIcon, CopyIcon, PullRequestIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { RegenProgressBar } from './RegenProgressBar.js';
 import {
@@ -37,6 +38,7 @@ import {
   storyReportRangeDates,
   storyReportSections,
   storyReportWindowLabel,
+  ticketChipLabel,
   ticketHref,
   type CandidateIndex,
 } from './storyReportModel.js';
@@ -50,6 +52,9 @@ import {
 // population of the run, so they always describe the same window the text does.
 // ⚠ EVERY EXPLANATION SITS BEHIND AN ⓘ — no caption paragraphs (Product voice).
 // ⚠ A KEY IS A LINK ONLY WHEN IT IS ONE OF THE RUN'S PICKS (`linkifyTicketKeys`).
+// ⚠ A POINT'S / ACTION'S TICKET CHIP reads "KEY · Title" (the pick's title, wrapping — never cut behind
+// a `title=`), keeps its tracker link, and a picked ticket gains a "PRs" button that opens the ticket
+// tab (`useOpenTicketTab`).
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const BODY = 'text-gray-700 dark:text-gray-200';
@@ -479,26 +484,48 @@ function LinkedText({ text, index }: { text: string; index: CandidateIndex }): J
   );
 }
 
-function TicketChip({ ticket, index }: { ticket: string; index: CandidateIndex }): JSX.Element {
+function TicketChip({ ticket, index, titled = false }: { ticket: string; index: CandidateIndex; titled?: boolean }): JSX.Element {
   const href = ticketHref(ticket, index);
-  const cls = 'rounded border border-gray-300 px-1.5 text-[11px] font-medium dark:border-gray-700';
+  const text = titled ? ticketChipLabel(ticket, index) : ticket;
+  const cls = 'break-words rounded border border-gray-300 px-1.5 text-[11px] font-medium dark:border-gray-700';
   return href != null ? (
     <a href={href} target="_blank" rel="noreferrer" className={`${cls} text-sky-700 hover:underline dark:text-sky-300`}>
-      {ticket}
+      {text}
     </a>
   ) : (
-    <span className={`${cls} text-gray-700 dark:text-gray-200`}>{ticket}</span>
+    <span className={`${cls} text-gray-700 dark:text-gray-200`}>{text}</span>
+  );
+}
+
+/** "PRs" beside a picked ticket's chip: the ticket tab, this ticket's pull requests only. */
+function TicketPrsButton({ ticket, index }: { ticket: string; index: CandidateIndex }): JSX.Element | null {
+  const openTicketTab = useOpenTicketTab();
+  const c = index.get(ticket);
+  if (c == null) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => openTicketTab({ ident: c.ident, key: c.key, title: c.title })}
+      aria-label={`Pull requests for ${c.key}`}
+      className="inline-flex items-center gap-0.5 rounded border border-gray-300 px-1 text-[11px] text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
+    >
+      <PullRequestIcon size={10} />
+      PRs
+    </button>
   );
 }
 
 function TicketChips({ tickets, index }: { tickets: string[]; index: CandidateIndex }): JSX.Element | null {
   if (tickets.length === 0) return null;
   return (
-    <div className="mt-1 flex flex-wrap gap-1">
+    <ul className="mt-1 flex flex-col gap-1">
       {tickets.map((t) => (
-        <TicketChip key={t} ticket={t} index={index} />
+        <li key={t} className="flex flex-wrap items-start gap-1">
+          <TicketChip ticket={t} index={index} titled />
+          <TicketPrsButton ticket={t} index={index} />
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }
 

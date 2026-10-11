@@ -1,4 +1,12 @@
-import { STORY_ISSUES, STORY_ISSUE_BY_ID, type StoryReportCandidate, type StoryReportPopulation } from '@pierre-review/shared';
+import {
+  STORY_DEPENDENCY_KIND_LABEL,
+  STORY_ISSUES,
+  STORY_ISSUE_BY_ID,
+  STORY_SPEC_GAP_TYPE_LABEL,
+  type StoryIssue,
+  type StoryReportCandidate,
+  type StoryReportPopulation,
+} from '@pierre-review/shared';
 import type { StoryInternals } from '../../db/stories.js';
 
 // What the story report's agent READS — the trial harness's (scratchpad haiku/agent-exp.mts)
@@ -39,20 +47,47 @@ export function candidateRow(c: StoryReportCandidate, dayHours: number) {
     review: c.review
       ? { alignment: c.review.alignment, met: c.review.met, partlyMet: c.review.partlyMet, notMet: c.review.notMet, missing: c.review.missing }
       : null,
-    // The four story issues by LABEL (what the agent quotes), each with a state: present (and the
-    // criteria behind it), false = known absent, null = NOT KNOWN. ⚠ An unread ticket is `issues: null`
-    // and an unlabelled one says null per issue — never `[]`, which would read as "avoids all four".
+    // The three story issues by LABEL (what the agent quotes), each with a state: present (and the
+    // specific detail behind it), false = known absent, null = NOT KNOWN. ⚠ An unread ticket is
+    // `issues: null` and an unlabelled one says null per issue — never `[]` ("avoids all three").
     ...(c.issues !== undefined ? { issues: candidateIssues(c) } : {}),
   };
 }
 
-/** One candidate's four issues for the agent; null when the ticket text was never read. */
+/** The SPECIFIC detail behind one present issue — which criteria and why, what the story waited on
+ *  (who, ticket, status, finished or not), which details the spec leaves out. Ticket-derived strings:
+ *  fenced with the rest of the tool answer, and in `storyUntrustedTexts`. */
+export function issueDetailForAgent(i: StoryIssue) {
+  switch (i.id) {
+    case 'unclear_done':
+      return i.reasons.includes('no_criteria')
+        ? { noCriteria: true }
+        : { criteria: i.criteria.map((c) => ({ criterion: c.n, reason: c.reason })) };
+    case 'blocked':
+      return {
+        waitsOn: i.blockers.map((b) => ({
+          what: b.what,
+          kind: STORY_DEPENDENCY_KIND_LABEL[b.kind],
+          ticket: b.ticketKey,
+          owner: b.owner,
+          status: b.status,
+          finished: b.resolved,
+          source: b.source === 'link' ? 'tracker link' : 'named in the ticket text',
+        })),
+      };
+    case 'spec_gaps':
+      return { gaps: i.gaps.map((g) => ({ type: STORY_SPEC_GAP_TYPE_LABEL[g.type], gap: g.text })) };
+  }
+}
+
+/** One candidate's three issues for the agent; null when the ticket text was never read. Old rows'
+ *  retired ids never reach here (the list is STORY_ISSUES, looked up by id). */
 export function candidateIssues(c: StoryReportCandidate) {
   if (c.issues == null) return null;
   const states = c.issueStates ?? null;
   return STORY_ISSUES.map((m) => {
     const hit = c.issues!.find((i) => i.id === m.id);
-    if (hit != null) return { issue: m.label, present: true as const, criteria: hit.criteria };
+    if (hit != null) return { issue: m.label, present: true as const, ...issueDetailForAgent(hit) };
     // An issue code did not raise is known absent only when its state says so; old rows had no state.
     return { issue: m.label, present: states != null ? (states[m.id] ?? null) : null };
   });
@@ -72,7 +107,7 @@ export function populationForAgent(p: StoryReportPopulation) {
     // Whole-window, by code: the ONLY issue rates the agent may quote — over the stories Claude has read
     // (`ofReadStories`), so the field name carries the population; no-criteria is `noCriteriaFound`.
     ...(p.issueRates != null
-      ? { issueRates: p.issueRates.map((r) => ({ issue: STORY_ISSUE_BY_ID[r.id].label, stories: r.stories, ofReadStories: r.of })) }
+      ? { issueRates: p.issueRates.map((r) => ({ issue: STORY_ISSUE_BY_ID[r.id].measureLabel, stories: r.stories, ofReadStories: r.of })) }
       : {}),
   };
 }
@@ -115,6 +150,7 @@ export function storyUntrustedTexts(
   const out: string[] = [];
   for (const c of candidates) {
     out.push(c.key, c.title ?? '', c.url ?? '');
+    if (c.issues != null) out.push(JSON.stringify(candidateIssues(c)));
     const s = byKey.get(c.key);
     if (s == null) continue;
     out.push(JSON.stringify(storyDetail(c.key, byKey)));

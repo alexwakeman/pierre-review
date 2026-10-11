@@ -18,6 +18,7 @@ import {
   storyReportMarkdown,
   storyReportSections,
   storyReportWindowLabel,
+  ticketChipLabel,
 } from '../src/components/Activity/storyReportModel.js';
 
 // `safeExternalUrl` parses against `window.location.origin`; the node runner has no window.
@@ -144,27 +145,38 @@ describe('figures', () => {
     expect(f.at(-1)?.value).toBe('not measured');
   });
 
-  it('adds the whole-window issue rates, skipping one nothing could be told about', () => {
+  it('adds the whole-window issue rates, skipping one nothing could be told about and retired ids', () => {
     const f = storyReportFigures({
       ...population,
       issueRates: [
         { id: 'unclear_done', stories: 12, of: 81 },
-        { id: 'too_big', stories: 9, of: 40 },
-        { id: 'waits_on_work', stories: 0, of: 0 },
-        { id: 'scope_unstated', stories: 30, of: 40 },
+        { id: 'blocked', stories: 0, of: 0 },
+        { id: 'spec_gaps', stories: 30, of: 40 },
+        // An OLD stored report: retired ids are dropped, never rendered.
+        { id: 'too_big' as unknown as 'blocked', stories: 9, of: 40 },
       ],
     });
-    expect(f.slice(-3).map((x) => [x.label, x.value])).toEqual([
+    expect(f.slice(-2).map((x) => [x.label, x.value])).toEqual([
       ['Unclear when done', '12 of 81 read'],
-      ['Too big', '9 of 40 read'],
-      ['Scope not stated', '30 of 40 read'],
+      ['Spec gaps', '30 of 40 read'],
     ]);
   });
 
-  it('names a point\'s story issue, and nothing on an old point', () => {
-    expect(pointIssueLabel({ issue: 'waits_on_work' })).toBe('Waits on other work');
+  it('names a point\'s story issue, and nothing on an old point or a retired id', () => {
+    expect(pointIssueLabel({ issue: 'blocked' })).toBe('Blocked');
     expect(pointIssueLabel({})).toBeNull();
-    expect(pointIssueLabel({ issue: 'waits_on_work' }, 'positive')).toBe('Nothing to wait on');
+    expect(pointIssueLabel({ issue: 'blocked' }, 'positive')).toBe('Nothing blocking');
+    expect(pointIssueLabel({ issue: 'spec_gaps' }, 'positive')).toBe('Spec complete');
+    expect(pointIssueLabel({ issue: 'waits_on_work' as unknown as 'blocked' })).toBeNull();
+    expect(pointIssueLabel({ issue: 'too_big' as unknown as 'blocked' }, 'positive')).toBeNull();
+  });
+
+  it('a ticket chip reads "KEY · Title" for a pick, the key alone otherwise', () => {
+    const index = indexCandidates([cand('BMD-12'), cand('BMD-13', { title: '  ' }), cand('BMD-14', { title: null })]);
+    expect(ticketChipLabel('BMD-12', index)).toBe('BMD-12 · Title BMD-12');
+    expect(ticketChipLabel('BMD-13', index)).toBe('BMD-13');
+    expect(ticketChipLabel('BMD-14', index)).toBe('BMD-14');
+    expect(ticketChipLabel('BMD-999', index)).toBe('BMD-999');
   });
 });
 

@@ -197,38 +197,43 @@ async function runLabels(
     }
     const complete: CompleteFn = completeSeam ?? (await import('../llm.js')).cheapComplete;
     let next = 0;
+    // ONE retry on a refused answer (over a length cap, broken JSON): the agreement test saw ~15% of
+    // first answers refused and almost all second answers accepted. Both calls are billed and recorded.
     const one = async (s: StoryToLabel): Promise<void> => {
-      const nonce = pickReviewNonce(storyLabelUntrusted(s.input));
       try {
-        const res = await complete({
-          model: STORY_LABEL_MODEL,
-          system: STORY_LABEL_SYSTEM,
-          prompt: storyLabelPrompt(s.input, nonce),
-          maxTokens: labelMaxTokens(s.input.criteria.length),
-        });
-        const inputTokens = res.usage?.inputTokens ?? 0;
-        const outputTokens = res.usage?.outputTokens ?? 0;
-        const costUsd = labelCostUsd(inputTokens, outputTokens);
-        status.costUsd += costUsd;
-        await ctx
-          .recordAiUsage({
-            accountId: a.accountId,
-            seam: 'summary',
-            feature: 'story_labels',
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const nonce = pickReviewNonce(storyLabelUntrusted(s.input));
+          const res = await complete({
             model: STORY_LABEL_MODEL,
-            costUsd,
-            inputTokens,
-            outputTokens,
-          })
-          .catch((err) => ctx.log.warn({ err }, 'story labels: usage record failed'));
-        const v = validateStoryLabels(res.text, s.input.criteria.length);
-        if (!v.ok) {
-          status.failed += 1;
-          ctx.log.info({ accountId: a.accountId, reason: v.reason }, 'story labels: answer refused by validation');
-          return;
+            system: STORY_LABEL_SYSTEM,
+            prompt: storyLabelPrompt(s.input, nonce),
+            maxTokens: labelMaxTokens(s.input.criteria.length),
+          });
+          const inputTokens = res.usage?.inputTokens ?? 0;
+          const outputTokens = res.usage?.outputTokens ?? 0;
+          const costUsd = labelCostUsd(inputTokens, outputTokens);
+          status.costUsd += costUsd;
+          await ctx
+            .recordAiUsage({
+              accountId: a.accountId,
+              seam: 'summary',
+              feature: 'story_labels',
+              model: STORY_LABEL_MODEL,
+              costUsd,
+              inputTokens,
+              outputTokens,
+            })
+            .catch((err) => ctx.log.warn({ err }, 'story labels: usage record failed'));
+          const v = validateStoryLabels(res.text, s.input.criteria.length);
+          if (v.ok) {
+            await store(s, { criteria: v.criteria, story: v.story, costUsd, inputTokens, outputTokens });
+            status.labelled += 1;
+            return;
+          }
+          ctx.log.info({ accountId: a.accountId, reason: v.reason, attempt }, 'story labels: answer refused by validation');
+          if (status.costUsd >= a.budgetUsd) break;
         }
-        await store(s, { criteria: v.criteria, story: v.story, costUsd, inputTokens, outputTokens });
-        status.labelled += 1;
+        status.failed += 1;
       } catch (err) {
         status.failed += 1;
         if (err instanceof AiRuntimeMissingError) stop('runtime');

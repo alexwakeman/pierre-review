@@ -18,12 +18,31 @@ describe('sprint assessment tool policy', () => {
 });
 
 describe('sprint assessment prompt', () => {
-  it('names the four issues and asks for one sentence each', async () => {
+  it('names the three issues, asks for what/who on Blocked and a specific gap, one sentence each', async () => {
     const { SPRINT_ASSESS_SYSTEM_PROMPT } = await import('./prompts.js');
-    for (const id of ['unclear_done', 'too_big', 'waits_on_work', 'scope_unstated']) expect(SPRINT_ASSESS_SYSTEM_PROMPT).toContain(id);
+    for (const id of ['unclear_done', 'blocked', 'spec_gaps']) expect(SPRINT_ASSESS_SYSTEM_PROMPT).toContain(id);
+    for (const gone of ['too_big', 'waits_on_work', 'scope_unstated', 'more than 8 criteria']) expect(SPRINT_ASSESS_SYSTEM_PROMPT).not.toContain(gone);
+    expect(SPRINT_ASSESS_SYSTEM_PROMPT).toContain('Name WHAT it waits on and WHO owns it');
     expect(SPRINT_ASSESS_SYSTEM_PROMPT).toContain('This may already be done');
-    expect(SPRINT_ASSESS_SYSTEM_PROMPT).toContain('more than 8 criteria');
-    expect(SPRINT_ASSESS_SYSTEM_PROMPT.length).toBeLessThan(2400);
+    expect(SPRINT_ASSESS_SYSTEM_PROMPT.length).toBeLessThan(3000);
+  });
+
+  it('hands what code already knows (blockers, gaps) in as FENCED data, and only when there is some', () => {
+    const t = {
+      key: 'ENG-3',
+      title: 't',
+      description: 'd',
+      criteria: ['One'],
+      blockers: ['BMD-568 cookie banner (To Do)'],
+      gaps: ['No behaviour when the upload fails'],
+    };
+    const nonce = pickReviewNonce(sprintAssessUntrustedTexts(t));
+    expect(sprintAssessUntrustedTexts(t)).toContain('BMD-568 cookie banner (To Do)');
+    const prompt = buildSprintAssessPrompt(t, [], nonce);
+    expect(prompt).toContain(
+      `---BEGIN KNOWN ${nonce}---\n- Waits on: BMD-568 cookie banner (To Do)\n- Spec gap: No behaviour when the upload fails\n---END KNOWN ${nonce}---`,
+    );
+    expect(buildSprintAssessPrompt({ ...t, blockers: [], gaps: [] }, [], nonce)).not.toContain('BEGIN KNOWN');
   });
 
   it('fences the ticket text with a nonce it does not contain', () => {

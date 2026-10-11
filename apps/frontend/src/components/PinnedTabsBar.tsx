@@ -22,6 +22,7 @@ import {
   MagnifierIcon,
   PeopleIcon,
   PersonIcon,
+  TicketIcon,
   ResolveIcon,
   ThreadsIcon,
 } from './Icons.js';
@@ -269,6 +270,23 @@ function TabChip({
             </span>
           )}
           <span className={chipLabelClass(active, 'sky')}>{who}</span>
+        </>
+      ),
+    };
+  } else if (tab.kind === 'ticket') {
+    // One ticket's PRs (the ticket tab) — labelled with the tracker key captured at open time (or
+    // parsed off the ident when the tab was re-created from a URL).
+    // ⚠ Not cosmetic: without this branch the tab falls through to the PR ladder below.
+    const key = tab.ticketMeta?.key ?? 'Ticket';
+    cfg = {
+      title: `${key} — pull requests`,
+      closeAria: 'Close ticket tab',
+      body: (
+        <>
+          <span aria-hidden="true" className="shrink-0">
+            <TicketIcon />
+          </span>
+          <span className={chipLabelClass(active, 'sky')}>{key}</span>
         </>
       ),
     };

@@ -76,6 +76,24 @@ describe('sprint store', () => {
     expect(await store.readSprintRead(2, wsA)).toBeNull();
   });
 
+  it('resetSprintReadForSite clears the old site’s automatic status order', async () => {
+    const { eq } = await import('drizzle-orm');
+    const row = await store.noteSprintViewed(1, wsA, new Date(1_800_000_200_000));
+    await db
+      .update(schema.sprintReads)
+      .set({
+        provider: 'jira',
+        apiRoot: 'https://old.atlassian.net',
+        statusOrderJson: { source: 'jira_board', readAt: '2026-10-10T00:00:00.000Z', statuses: [{ id: '1', name: 'To Do', category: 'new' }] },
+      })
+      .where(eq(schema.sprintReads.id, row.id))
+      .execute();
+    const reset = await store.resetSprintReadForSite(1, wsA, { provider: 'linear', apiRoot: 'https://linear.app/acme' });
+    expect(reset?.provider).toBe('linear');
+    const [after] = await db.select().from(schema.sprintReads).where(eq(schema.sprintReads.id, row.id)).execute();
+    expect(after.statusOrderJson).toBeNull();
+  });
+
   it('latest-per-ticket reads are newest-first and tenant-scoped', async () => {
     const base = { workspaceId: wsA, ident: 'jira:https://acme.atlassian.net#ENG-1', model: 'claude-sonnet-5', fingerprint: 'f', textHash: 'h', reposJson: [] };
     await db.insert(schema.sprintAssessments).values({ ...base, accountId: 1, status: 'failed', createdAt: new Date(1_000_000) }).execute();
@@ -102,8 +120,10 @@ describe('sprint store', () => {
     const v2 = {
       summary: 'This may already be done.',
       issues: [
-        { id: 'scope_unstated', text: 'Say what is out of scope.', ref: null },
+        { id: 'spec_gaps', text: 'No behaviour when the upload fails.', ref: null },
         { id: 'no_persona', text: 'dropped', ref: null },
+        // A retired id (rubric 1's four issues) is dropped, never thrown on.
+        { id: 'too_big', text: 'dropped', ref: null },
         { id: 'unclear_done', text: 'Criterion 2 cannot be checked.', ref: { repo: 'acme/web', path: 'src/a.ts' } },
         { id: 'unclear_done', text: 'a repeat', ref: null },
         'junk',
@@ -116,7 +136,7 @@ describe('sprint store', () => {
         summary: 'This may already be done.',
         issues: [
           { id: 'unclear_done', text: 'Criterion 2 cannot be checked.', ref: { repo: 'acme/web', path: 'src/a.ts' } },
-          { id: 'scope_unstated', text: 'Say what is out of scope.', ref: null },
+          { id: 'spec_gaps', text: 'No behaviour when the upload fails.', ref: null },
         ],
         revisedCriteria: ['One'],
       },
@@ -131,6 +151,9 @@ describe('sprint store', () => {
     const accepted = [{ repoId: 1, syncedSha: 'a' }];
     const v1 = createHash('sha256').update(['sprint-assess-v1', h, '1:a'].join('\u0000'), 'utf8').digest('hex');
     expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: v1 }, ticket, accepted)).toBe('stale');
+    // A run from the four-issue format (v2) reads stale too: its issues were the old vocabulary.
+    const v2 = createHash('sha256').update(['sprint-assess-v2', h, '1:a'].join('\u0000'), 'utf8').digest('hex');
+    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: v2 }, ticket, accepted)).toBe('stale');
     const now = store.sprintAssessFingerprint(h, [{ repoId: 1, sha: 'a' }]);
     expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: now }, ticket, accepted)).toBe('current');
   });

@@ -30,6 +30,9 @@ import {
 import type {
   BlastRadiusConfig,
   SprintChecks,
+  SprintStatusAutoOrder,
+  SprintStatusSettings,
+  TicketLinkBlocker,
   BranchCheckRun,
   CheckRun,
   ClaudeReviewFollowUpRecord,
@@ -1382,6 +1385,8 @@ export const workspaces = pgTable(
     flowSettings: jsonb('flow_settings').$type<FlowSettings>(),
     // Reports → This sprint checks (migration 0102 / pg 0089) — the pg twin. See the sqlite twin.
     sprintChecks: jsonb('sprint_checks').$type<SprintChecks>(),
+    // See the sqlite twin (migration pg 0090).
+    sprintStatuses: jsonb('sprint_statuses').$type<SprintStatusSettings>(),
     // Auto Claude review (migration 0074 / pg 0061) — the pg twin. Full rationale in the sqlite twin.
     autoReviewEnabled: boolean('auto_review_enabled'),
     autoReviewEnabledAt: timestamp('auto_review_enabled_at', { withTimezone: true, mode: 'date' }),
@@ -1869,6 +1874,9 @@ export const trackerTickets = pgTable(
     // See the sqlite twin (migration pg 0085).
     issueCreatedAt: timestamp('issue_created_at', { withTimezone: true, mode: 'date' }),
     issueResolvedAt: timestamp('issue_resolved_at', { withTimezone: true, mode: 'date' }),
+    // See the sqlite twin (migration pg 0090).
+    blockedByJson: jsonb('blocked_by_json').$type<TicketLinkBlocker[]>(),
+    statusId: text('status_id'),
   },
   (t) => ({
     accountPrKeyUx: uniqueIndex('tracker_tickets_account_pr_key').on(t.accountId, t.prId, t.issueKey),
@@ -2020,6 +2028,8 @@ export const sprintReads = pgTable(
     errorCode: text('error_code'),
     truncated: boolean('truncated').notNull().default(false),
     viewedAt: timestamp('viewed_at', { withTimezone: true, mode: 'date' }).notNull(),
+    // See the sqlite twin (migration pg 0090).
+    statusOrderJson: jsonb('status_order_json').$type<SprintStatusAutoOrder>(),
   },
   (t) => ({
     accountWorkspaceUx: uniqueIndex('sprint_reads_account_workspace').on(t.accountId, t.workspaceId),
@@ -2068,6 +2078,9 @@ export const sprintTickets = pgTable(
     fetchedAt: timestamp('fetched_at', { withTimezone: true, mode: 'date' }).notNull(),
     nextCheckAt: timestamp('next_check_at', { withTimezone: true, mode: 'date' }).notNull(),
     issueUpdatedAt: timestamp('issue_updated_at', { withTimezone: true, mode: 'date' }),
+    // See the sqlite twin (migration pg 0090).
+    blockedByJson: jsonb('blocked_by_json').$type<TicketLinkBlocker[]>(),
+    statusId: text('status_id'),
   },
   (t) => ({
     accountWsIdentUx: uniqueIndex('sprint_tickets_account_ws_ident').on(t.accountId, t.workspaceId, t.ident),

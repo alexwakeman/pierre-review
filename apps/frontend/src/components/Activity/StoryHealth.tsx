@@ -14,8 +14,6 @@ import {
   STORY_SHIFT_Z,
   STORY_LABEL_RUN_CAP,
   STORY_RUBRIC_VERSION,
-  STORY_SIZE_BANDS,
-  STORY_TOO_BIG_CRITERIA,
   type StoryHealthPanel,
   type StoryHealthPoint,
   type StoryHealthResponse,
@@ -35,16 +33,21 @@ import {
   useStoryLabelStarting,
 } from '../../hooks/useStoryHealth.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useOpenTicketTab } from '../../lib/ticketTab.js';
 import { AiRunGate } from '../AiSetup.js';
 import { EventMarkerLines, EventMarkerRail, type ChartEventMarker } from '../charts/EventMarkers.js';
 import { FloatingTip, useChartWidth } from '../charts/common.js';
-import { ChartIcon, CloseIcon, SparkleIcon, WarningIcon } from '../Icons.js';
+import { ChartIcon, ChevronIcon, CloseIcon, SparkleIcon, WarningIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { weekLabel } from './chronologyTrendModel.js';
 import { RegenProgressBar } from './RegenProgressBar.js';
 import {
   axisTop,
+  blockedSplitLine,
   clusterShifts,
+  gapTypesLine,
+  moreStoriesLine,
+  seriesInfoLines,
   coverageLine,
   createdLine,
   DELIVERY_STRIPS,
@@ -72,8 +75,10 @@ import {
 // § Story health.
 //
 //   • REFINEMENT — each story in the week its ticket was created, as SMALL MULTIPLES: one small chart
-//     per measure (its latest rolling value large, the change since the first one small), the
-//     model-labelled ones grouped apart from the code-counted ones. 2 columns from 560px, else 1.
+//     per story issue (Unclear when done, Blocked, Spec gaps; its latest rolling value large, the
+//     change since the first one small). 2 columns from 560px, else 1. Hovering a week lists that
+//     week's stories with the issue (Blocked: linked vs named only; Spec gaps: by type); clicking it
+//     (or "Stories") PINS the list below the chart, where each story opens the ticket tab.
 //   • DELIVERY — each story in the week of its last merge, as three strips (one per unit, so no two
 //     scales share an axis): working time by size band, pull requests per story, criteria met.
 //
@@ -83,7 +88,9 @@ import {
 // ⚠ GREEN/RED ONLY ON A DETECTED SHIFT, FROM `shift.verdict` — never from a client direction.
 // ⚠ WITHOUT AGENTIC AI (cloud, `LIMN_AI_DISABLED`) the server omits every label series and the page
 // offers no button: code measures only. A missing runtime/credential swaps the button via `AiRunGate`.
-// ⚠ EVERY EXPLANATION SITS BEHIND AN ⓘ (Product voice).
+// ⚠ EVERY EXPLANATION SITS BEHIND AN ⓘ (Product voice). Each CHART's ⓘ is COMPUTED (storyHealthModel
+// `seriesInfoLines`): what counts, this week's figure, the detected shift — nothing generic. The method
+// (rolling line, thin weeks, the shift test, label noise) lives once, in the section's ⓘ.
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const BODY = 'text-gray-700 dark:text-gray-200';
@@ -287,6 +294,10 @@ function SmallMultiple({
   labels: boolean;
 }): JSX.Element {
   const [hover, setHover] = useState<number | null>(null);
+  // ⚠ Held by weekStart, never by index (a week roll-over shifts every index).
+  const [pinnedStart, setPinnedStart] = useState<string | null>(null);
+  const pinned = weekIndex(weeks, pinnedStart);
+  const pin = (i: number | null): void => setPinnedStart(i == null ? null : (weeks[i]?.weekStart ?? null));
   const n = weeks.length;
   const band = Math.max(width - SM_PAD_L - SM_PAD_R, 1) / Math.max(n, 1);
   const cx = (i: number): number => SM_PAD_L + band * (i + 0.5);
@@ -326,7 +337,10 @@ function SmallMultiple({
 
   return (
     <div data-testid={`story-health-sm-${meta.id}`} className="min-w-0">
-      <div className={`text-xs ${BODY}`}>{meta.label}</div>
+      <div className={`flex items-center gap-1 text-xs ${BODY}`}>
+        {meta.label}
+        <SeriesInfo meta={meta} points={points} weeks={weeks} shift={shift} />
+      </div>
       <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
         <span className="text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-50">
           {head == null ? '—' : formatStoryValue(meta.unit, head.current)}
@@ -390,8 +404,10 @@ function SmallMultiple({
               width={band}
               height={SM_PLOT}
               fill="transparent"
+              className={isLabel ? 'cursor-pointer' : undefined}
               onMouseEnter={() => setHover(i)}
               onMouseLeave={() => setHover((h) => (h === i ? null : h))}
+              onClick={isLabel ? () => pin(pinned === i ? null : i) : undefined}
             />
           ))}
         </svg>
@@ -402,6 +418,17 @@ function SmallMultiple({
             {isLabel && <div>{createdLine(weeks[hover]!)}</div>}
             {isLabel && labels && <div>{coverageLine(weeks[hover]!)}</div>}
             {shift != null && shift.week === hover && <div>{shiftLine(shift)}</div>}
+            {isLabel && <WeekExtras point={points[hover]!} />}
+            {isLabel && (points[hover]!.stories?.length ?? 0) > 0 && (
+              <ul className="mt-1 max-w-[16rem] whitespace-normal">
+                {points[hover]!.stories!.map((st) => (
+                  <li key={st.ident} className="break-words">
+                    <span className="font-mono">{st.key}</span> {st.title ?? ''}
+                  </li>
+                ))}
+                {moreStoriesLine(points[hover]!) != null && <li>{moreStoriesLine(points[hover]!)}</li>}
+              </ul>
+            )}
           </FloatingTip>
         )}
       </div>
@@ -415,7 +442,130 @@ function SmallMultiple({
           {shift.verdict != null && <span> · {shift.verdict === 'better' ? 'better' : 'worse'}</span>}
         </div>
       )}
+      {isLabel && n > 0 && pinned == null && (
+        <button
+          type="button"
+          onClick={() => pin(n - 1)}
+          className={`mt-1 inline-flex items-center gap-1 text-[11px] ${BODY} hover:underline`}
+        >
+          <ChevronIcon dir="right" size={10} />
+          Stories
+        </button>
+      )}
+      {isLabel && pinned != null && weeks[pinned] != null && points[pinned] != null && (
+        <WeekStories
+          meta={meta}
+          week={weeks[pinned]!}
+          point={points[pinned]!}
+          canPrev={pinned > 0}
+          canNext={pinned < n - 1}
+          onPrev={() => pin(pinned - 1)}
+          onNext={() => pin(pinned + 1)}
+          onClose={() => pin(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/** The chart's ⓘ: what counts, this week's figure, the detected shift (computed, never generic). */
+function SeriesInfo({
+  meta,
+  points,
+  weeks,
+  shift,
+}: {
+  meta: StoryHealthSeriesMeta;
+  points: StoryHealthPoint[];
+  weeks: StoryHealthWeek[];
+  shift: StoryHealthShift | undefined;
+}): JSX.Element {
+  return (
+    <InfoButton title={meta.label}>
+      {seriesInfoLines(meta, points, weeks, shift).map((l) => (
+        <p key={l}>{l}</p>
+      ))}
+    </InfoButton>
+  );
+}
+
+function WeekExtras({ point }: { point: StoryHealthPoint }): JSX.Element | null {
+  const split = blockedSplitLine(point);
+  const gaps = gapTypesLine(point);
+  if (split == null && gaps == null) return null;
+  return (
+    <>
+      {split != null && <div>{split}</div>}
+      {gaps != null && <div>{gaps}</div>}
+    </>
+  );
+}
+
+/** A PINNED week: its stories with the issue, each opening the ticket tab; Previous / Next week. */
+function WeekStories({
+  meta,
+  week,
+  point,
+  canPrev,
+  canNext,
+  onPrev,
+  onNext,
+  onClose,
+}: {
+  meta: StoryHealthSeriesMeta;
+  week: StoryHealthWeek;
+  point: StoryHealthPoint;
+  canPrev: boolean;
+  canNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+  onClose: () => void;
+}): JSX.Element {
+  const openTicketTab = useOpenTicketTab();
+  const stories = point.stories ?? [];
+  const more = moreStoriesLine(point);
+  const nav = 'rounded p-0.5 text-gray-600 hover:bg-gray-100 disabled:opacity-30 dark:text-gray-300 dark:hover:bg-gray-800';
+  return (
+    <section
+      data-testid={`story-health-week-${meta.id}`}
+      aria-label={`${meta.label}, ${storyWeekHead(week)}`}
+      className="mt-1 rounded border border-gray-200 p-2 text-xs dark:border-gray-800"
+    >
+      <div className="flex items-center gap-1">
+        <button type="button" className={nav} disabled={!canPrev} onClick={onPrev} aria-label="Previous week">
+          <ChevronIcon dir="left" size={11} />
+        </button>
+        <span className={`font-medium ${BODY}`}>{storyWeekHead(week)}</span>
+        <button type="button" className={nav} disabled={!canNext} onClick={onNext} aria-label="Next week">
+          <ChevronIcon dir="right" size={11} />
+        </button>
+        <button type="button" className={`ml-auto ${nav}`} onClick={onClose} aria-label="Close the list">
+          <CloseIcon size={11} />
+        </button>
+      </div>
+      <p className={MUTED}>{pointLine(meta, point)}</p>
+      <div className={MUTED}>
+        <WeekExtras point={point} />
+      </div>
+      {stories.length === 0 ? (
+        <p className={`mt-1 ${MUTED}`}>No stories with this issue.</p>
+      ) : (
+        <ul className="mt-1 space-y-0.5">
+          {stories.map((st) => (
+            <li key={st.ident}>
+              <button
+                type="button"
+                onClick={() => openTicketTab({ ident: st.ident, key: st.key, title: st.title })}
+                className="break-words text-left text-sky-700 hover:underline dark:text-sky-300"
+              >
+                <span className="font-mono">{st.key}</span> {st.title ?? ''}
+              </button>
+            </li>
+          ))}
+          {more != null && <li className={MUTED}>{more}</li>}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -701,30 +851,21 @@ function SectionInfo({ data }: { data: StoryHealthResponse }): JSX.Element {
   return (
     <div className="space-y-2">
       <p>
-        The last {data.span.weeks} weeks, one point per week, in this workspace&rsquo;s time zone (
-        {data.timeZone}). Each line is the last {STORY_HEALTH_ROLLING_WEEKS} weeks taken together; the
-        faint dots are single weeks.
+        One point per week ({data.timeZone}). Each line is the last {STORY_HEALTH_ROLLING_WEEKS} weeks taken
+        together; a week with fewer than {STORY_HEALTH_THIN_N} stories is hollow and left out.
       </p>
       <p>
-        <strong>Written</strong> puts each story in the week its ticket was created. A ticket with no
-        created date uses the week its first pull request was opened. <strong>Delivered</strong> puts
-        each story in the week its last pull request merged.
-      </p>
-      <p>
-        A week with fewer than {STORY_HEALTH_THIN_N} stories behind a measure is drawn hollow and left
-        out of the lines. A dashed line marks a shift: a change too large to be chance. Each panel&rsquo;s
-        info button says how it is tested.
+        Written: the week the ticket was created (else its first pull request). Delivered: the week of its last
+        merge.
       </p>
       {data.labels && (
         <p>
-          Measures marked <strong>Labelled by Claude</strong> come from Claude ({modelName(STORY_LABEL_MODEL)})
-          reading each ticket against a fixed set of questions (version {STORY_RUBRIC_VERSION}). Run twice on
-          the same tickets, a week&rsquo;s figure moved by about {STORY_LABEL_NOISE.typicalPoints} points
-          typically and up to {STORY_LABEL_NOISE.p90Points} at worst. A week&rsquo;s figure covers only its
-          labelled stories; hover a week to see how many. A ticket whose text changes is labelled again.
-          Labelling runs on your own Claude Code login or Anthropic API key.
+          The written charts come from Claude ({modelName(STORY_LABEL_MODEL)}, version {STORY_RUBRIC_VERSION}) reading
+          each ticket, over the stories it has read in their current form. Run twice, a week moved about{' '}
+          {STORY_LABEL_NOISE.typicalPoints} points.
         </p>
       )}
+      <ShiftRuleInfo />
     </div>
   );
 }
@@ -754,56 +895,6 @@ function ShiftRuleInfo({ only }: { only?: 'rate' | 'time' }): JSX.Element {
         Each measure shows at most one shift. Green is a change for the better, red for the worse; grey
         means the measure has no better direction.
       </p>
-    </div>
-  );
-}
-
-function RefinementInfo({ labels }: { labels: boolean }): JSX.Element {
-  return (
-    <div className="space-y-2">
-      <p>Each chart is the share of stories with one issue. Lower is better.</p>
-      <ul className="list-disc space-y-1 pl-4">
-        <li>
-          <strong>Unclear when done</strong>: a criterion nobody could check.
-        </li>
-        <li>
-          <strong>Too big</strong>: more than {STORY_TOO_BIG_CRITERIA} criteria, a criterion with more than one
-          outcome, or work that is not code.
-        </li>
-        <li>
-          <strong>Waits on other work</strong>: a criterion needs another team, ticket or service.
-        </li>
-        <li>
-          <strong>Scope not stated</strong>: no &ldquo;out of scope&rdquo; line.
-        </li>
-      </ul>
-      <p>
-        All four count the same stories: those written that week that Claude has read in their current form.
-        Stories with no criteria cannot be read this way, so they are counted on their own; hover a week to see
-        how many{labels ? ', and how many were read' : ''}. A story whose ticket we could not read is left out.
-      </p>
-      <p>
-        The large figure is the latest {STORY_HEALTH_ROLLING_WEEKS}-week value; beside it, the change since the
-        first one in the chart. Run twice on the same tickets, the labels moved a week&rsquo;s figure by about{' '}
-        {STORY_LABEL_NOISE.typicalPoints} points.
-      </p>
-      <ShiftRuleInfo only="rate" />
-    </div>
-  );
-}
-
-function DeliveryInfo(): JSX.Element {
-  return (
-    <div className="space-y-2">
-      <p>
-        Working time runs from the first pull request opened to the last one merged, in working hours,
-        and is the median within each size. Size is lines changed across the story&rsquo;s merged pull
-        requests: small under {STORY_SIZE_BANDS.mediumFrom}, medium {STORY_SIZE_BANDS.mediumFrom} to{' '}
-        {STORY_SIZE_BANDS.largeFrom - 1}, large {STORY_SIZE_BANDS.largeFrom} or more. A story of unknown
-        size is left out of these lines and counted.
-      </p>
-      <p>Pull requests per story is the median count. Criteria met covers only stories with a ticket review.</p>
-      <ShiftRuleInfo />
     </div>
   );
 }
@@ -918,9 +1009,6 @@ function StoryHealthFor({ workspaceId }: { workspaceId: number | null }): JSX.El
               <h4 className="flex items-center gap-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
                 How stories are written
                 <span className={`font-normal ${MUTED}`}>· by the week the ticket was created</span>
-                <InfoButton title="How stories are written">
-                  <RefinementInfo labels={data.labels} />
-                </InfoButton>
               </h4>
               {data.labels ? (
                 <SmallMultipleGroup
@@ -943,9 +1031,6 @@ function StoryHealthFor({ workspaceId }: { workspaceId: number | null }): JSX.El
               <h4 className="flex items-center gap-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
                 How stories are delivered
                 <span className={`font-normal ${MUTED}`}>· by the week of the last merge</span>
-                <InfoButton title="How stories are delivered">
-                  <DeliveryInfo />
-                </InfoButton>
               </h4>
               <div className="flex flex-wrap items-center gap-1.5">
                 {delivery.map((x) => (
@@ -961,7 +1046,24 @@ function StoryHealthFor({ workspaceId }: { workspaceId: number | null }): JSX.El
                 const unit = (items[0] as StripItem).meta.unit;
                 return (
                   <div key={strip.key}>
-                    <div className={`text-[11px] ${BODY}`}>{strip.title}</div>
+                    <div className={`flex items-center gap-1 text-[11px] ${BODY}`}>
+                      {strip.title}
+                      <InfoButton title={strip.title}>
+                        {items.map((it) => (
+                          <div key={it.meta.id} className="space-y-1">
+                            {items.length > 1 && <p className="font-semibold">{it.meta.label}</p>}
+                            {seriesInfoLines(
+                              it.meta,
+                              it.points,
+                              weeks,
+                              data.shifts.find((sh) => sh.series === it.meta.id),
+                            ).map((l) => (
+                              <p key={l}>{l}</p>
+                            ))}
+                          </div>
+                        ))}
+                      </InfoButton>
+                    </div>
                     <SeriesStrip
                       weeks={weeks}
                       geo={geo}

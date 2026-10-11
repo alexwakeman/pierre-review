@@ -8,6 +8,9 @@
 import {
   STORY_HEALTH_SERIES,
   STORY_HEALTH_SERIES_BY_ID,
+  STORY_SIZE_BANDS,
+  STORY_SPEC_GAP_TYPE_LABEL,
+  STORY_SPEC_GAP_TYPES,
   type StoryHealthPanel,
   type StoryHealthPoint,
   type StoryHealthResponse,
@@ -23,9 +26,8 @@ import { hoursShort, weekLabel } from './chronologyTrendModel.js';
 /** Stroke colour per series (non-text: lines, dots, legend swatches). */
 export const STORY_SERIES_COLOR: Record<StoryHealthSeriesId, string> = {
   unclearDone: '#2563eb',
-  tooBig: '#d97706',
-  waitsOnWork: '#db2777',
-  scopeUnstated: '#7c3aed',
+  blocked: '#db2777',
+  specGaps: '#d97706',
   workingTimeS: '#14b8a6',
   workingTimeM: '#3b82f6',
   workingTimeL: '#6366f1',
@@ -160,7 +162,7 @@ export function clusterShifts(shifts: StoryHealthShift[], visible: ReadonlySet<S
     }));
 }
 
-/** One line per shift, for a marker's hover box: "Too big: 52% → 31%". */
+/** One line per shift, for a marker's hover box: "Spec gaps: 52% → 31%". */
 export function shiftLine(s: StoryHealthShift): string {
   const meta = STORY_HEALTH_SERIES_BY_ID[s.series];
   return `${meta.label}: ${formatStoryValue(meta.unit, s.before)} → ${formatStoryValue(meta.unit, s.after)}`;
@@ -228,4 +230,111 @@ export function shiftUnits(n: number, of: StoryHealthShift['nOf']): string {
   if (of === 'criteria') return `${n} ${n === 1 ? 'criterion' : 'criteria'}`;
   if (of === 'stories') return `${n} ${n === 1 ? 'story' : 'stories'}`;
   return `${n} ${n === 1 ? 'week' : 'weeks'}`;
+}
+
+// ── The per-chart ⓘ: COMPUTED, three lines at most ──────────────────────────────────────────────
+//
+// (1) what counts, one sentence; (2) this week's figure; (3) the detected shift, when there is one.
+// Nothing generic: a chart with no shift says nothing about shifts.
+
+/** (1) What one series counts, one sentence. */
+export function seriesCountsSentence(id: StoryHealthSeriesId): string {
+  switch (id) {
+    case 'unclearDone':
+      return 'A story counts when a criterion can’t be checked as written.';
+    case 'blocked':
+      return 'A story counts when it links or names other work it waits on, finished or not.';
+    case 'specGaps':
+      return 'A story counts when a developer would have to ask about a missing detail.';
+    case 'workingTimeS':
+      return `Median working time from first pull request to last merge, for stories under ${STORY_SIZE_BANDS.mediumFrom} lines changed.`;
+    case 'workingTimeM':
+      return `Median working time from first pull request to last merge, for stories of ${STORY_SIZE_BANDS.mediumFrom} to ${STORY_SIZE_BANDS.largeFrom - 1} lines changed.`;
+    case 'workingTimeL':
+      return `Median working time from first pull request to last merge, for stories of ${STORY_SIZE_BANDS.largeFrom} lines changed or more.`;
+    case 'prsPerStory':
+      return 'Median pull requests per story, open, merged or closed.';
+    case 'criteriaMet':
+      return 'Share of criteria a ticket review found met, over reviewed stories.';
+  }
+}
+
+const storiesWord = (n: number): string => `${n} ${n === 1 ? 'story' : 'stories'}`;
+
+/** The week's NUMERATOR for a refinement series: the server's list + "more" when sent, else derived
+ *  from the value and n. */
+export function pointNumerator(p: Pick<StoryHealthPoint, 'value' | 'n' | 'stories' | 'storiesMore'>): number | null {
+  if (p.stories != null) return p.stories.length + (p.storiesMore ?? 0);
+  if (p.value == null) return null;
+  return Math.round((p.value / 100) * p.n);
+}
+
+/** (2) The latest week's figure: "4 of 9 stories" (+ " so far" on the partial week); a delivery series
+ *  reads "6.2 h · 9 stories". null when there are no weeks. */
+export function latestFigureLine(
+  meta: StoryHealthSeriesMeta,
+  points: readonly StoryHealthPoint[],
+  weeks: readonly StoryHealthWeek[],
+): string | null {
+  const i = points.length - 1;
+  const p = points[i];
+  const w = weeks[i];
+  if (p == null || w == null) return null;
+  const when = w.partial ? 'This week so far' : 'This week';
+  if (p.n === 0 || p.value == null) return `${when}: no stories`;
+  if (meta.panel === 'refinement') {
+    return `${when}: ${pointNumerator(p) ?? 0} of ${storiesWord(p.n)}`;
+  }
+  const over = meta.over === 'reviewed' ? `${p.n} reviewed ${p.n === 1 ? 'story' : 'stories'}` : storiesWord(p.n);
+  return `${when}: ${formatStoryValue(meta.unit, p.value)} · ${over}`;
+}
+
+/** (3) The detected shift as one sentence: "Rose from 19% to 44% on 17 Aug, 32 vs 28 stories". */
+export function shiftSentence(s: StoryHealthShift): string {
+  const meta = STORY_HEALTH_SERIES_BY_ID[s.series];
+  const verb = s.direction === 'up' ? 'Rose' : 'Fell';
+  const units =
+    s.beforeStories != null && s.afterStories != null
+      ? `${s.beforeStories} vs ${storiesWord(s.afterStories)}`
+      : `${s.beforeN} vs ${shiftUnits(s.afterN, s.nOf)}`;
+  return `${verb} from ${formatStoryValue(meta.unit, s.before)} to ${formatStoryValue(meta.unit, s.after)} on ${weekLabel(s.weekStart)}, ${units}`;
+}
+
+/** The chart's ⓘ lines, in order (2 or 3). */
+export function seriesInfoLines(
+  meta: StoryHealthSeriesMeta,
+  points: readonly StoryHealthPoint[],
+  weeks: readonly StoryHealthWeek[],
+  shift: StoryHealthShift | undefined,
+): string[] {
+  const out = [seriesCountsSentence(meta.id)];
+  const fig = latestFigureLine(meta, points, weeks);
+  if (fig != null) out.push(fig);
+  if (shift != null) out.push(shiftSentence(shift));
+  return out;
+}
+
+// ── A refinement week's extra hover lines ────────────────────────────────────────────────────────
+
+/** Blocked: "Linked in the tracker: 3 · Named only in the text: 2". null when not sent. */
+export function blockedSplitLine(p: Pick<StoryHealthPoint, 'blockedSplit'>): string | null {
+  const b = p.blockedSplit;
+  if (b == null) return null;
+  return `Linked in the tracker: ${b.linked} · Named only in the text: ${b.textOnly}`;
+}
+
+/** Spec gaps: "Edge case 4 · Business rule 2", most first (ties in type order). null when none. */
+export function gapTypesLine(p: Pick<StoryHealthPoint, 'gapTypes'>): string | null {
+  const g = p.gapTypes;
+  if (g == null) return null;
+  const rows = STORY_SPEC_GAP_TYPES.map((t, i) => ({ t, i, n: g[t] ?? 0 }))
+    .filter((r) => r.n > 0)
+    .sort((a, b) => b.n - a.n || a.i - b.i);
+  return rows.length === 0 ? null : rows.map((r) => `${STORY_SPEC_GAP_TYPE_LABEL[r.t]} ${r.n}`).join(' · ');
+}
+
+/** "and 3 more" under a capped story list; null when nothing was cut. */
+export function moreStoriesLine(p: Pick<StoryHealthPoint, 'storiesMore'>): string | null {
+  const n = p.storiesMore ?? 0;
+  return n > 0 ? `and ${n} more` : null;
 }

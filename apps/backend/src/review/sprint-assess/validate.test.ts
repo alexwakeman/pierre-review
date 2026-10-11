@@ -84,40 +84,39 @@ describe('validateSprintAssessment', () => {
     expect(refused).toBe(6);
   });
 
-  it('drops unknown and repeated ids, empty sentences and a fifth entry; sorts in issue order', () => {
+  it('drops unknown, retired and repeated ids, empty sentences and a fourth entry; sorts in issue order', () => {
     const v = validateSprintAssessment(
       body([
-        { id: 'scope_unstated', text: 'Say what is out of scope.' },
+        { id: 'spec_gaps', text: 'No behaviour when the upload fails.' },
         { id: 'no_persona', text: 'old id' },
-        { id: 'scope_unstated', text: 'a repeat' },
-        { id: 'too_big', text: '   ' },
-        { id: 'too_big', text: 'Split the import from the export.' },
+        { id: 'too_big', text: 'a retired id' },
+        { id: 'spec_gaps', text: 'a repeat' },
+        { id: 'blocked', text: '   ' },
+        { id: 'blocked', text: 'Waits on BMD-12 pricing API (To Do), owned by Payments.' },
         { id: 'unclear_done', text: 'Criterion 2 cannot be checked.' },
-        { id: 'waits_on_work', text: 'It needs the pricing service: link its ticket.' },
       ]),
       ctx(),
     );
     expect(v.ok).toBe(true);
     if (!v.ok) return;
-    expect(v.body.issues.map((i) => i.id)).toEqual(['unclear_done', 'too_big', 'waits_on_work', 'scope_unstated']);
-    expect(v.dropped.items).toBe(3);
-    const fifth = validateSprintAssessment(
+    expect(v.body.issues.map((i) => i.id)).toEqual(['unclear_done', 'blocked', 'spec_gaps']);
+    expect(v.dropped.items).toBe(4);
+    const fourth = validateSprintAssessment(
       body([
         { id: 'unclear_done', text: 'a' },
-        { id: 'too_big', text: 'b' },
-        { id: 'waits_on_work', text: 'c' },
-        { id: 'scope_unstated', text: 'd' },
-        { id: 'unclear_done', text: 'e' },
+        { id: 'blocked', text: 'b' },
+        { id: 'spec_gaps', text: 'c' },
+        { id: 'unclear_done', text: 'd' },
       ]),
       ctx(),
     );
-    expect(fifth.ok && fifth.body.issues).toHaveLength(SPRINT_ASSESS_CAPS.issues);
+    expect(fourth.ok && fourth.body.issues).toHaveLength(SPRINT_ASSESS_CAPS.issues);
   });
 
   it('cuts long text with an ellipsis and caps the revised criteria', () => {
     const long = (n: number) => 'w'.repeat(n + 50);
     const v = validateSprintAssessment(
-      body([{ id: 'too_big', text: long(SPRINT_ASSESS_CAPS.issueText) }], {
+      body([{ id: 'spec_gaps', text: long(SPRINT_ASSESS_CAPS.issueText) }], {
         summary: long(SPRINT_ASSESS_CAPS.summary),
         revisedCriteria: ['', long(SPRINT_ASSESS_CAPS.criterionText), ...Array.from({ length: SPRINT_ASSESS_CAPS.revisedCriteria + 2 }, (_, i) => `c${i}`)],
       }),

@@ -3,11 +3,14 @@ import {
   SPRINT_REPOS_PER_TICKET_MAX,
   type SprintChecksResponse,
   type SprintReposResponse,
+  type SprintStatusesResponse,
   type SprintStoriesResponse,
 } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
 import { parseSprintChecks, setSprintChecks } from '../../db/sprint-checks.js';
+import { resolveSprintStatusLayout, sprintLayoutFor } from '../../db/sprint-status-layout.js';
+import { parseSprintStatusSettings, setSprintStatusSettings } from '../../db/sprint-status-settings.js';
 import { suggestSprintRepos, suggestTicketOf } from '../../db/sprint-repo-suggest.js';
 import { readSprintTicket } from '../../db/sprint-store.js';
 import { getSprintStories } from '../../db/sprint-stories.js';
@@ -24,6 +27,7 @@ import { reportsEntitled } from './insights.js';
 //   GET /api/sprint-stories?workspace=<id>   the list (DB only; stamps the view, kicks a due read)  → read
 //   PUT /api/sprint-stories/repos            replace ONE ticket's accepted candidate repos          → read
 //   PUT /api/sprint-stories/checks           replace the workspace's checks (which chips it raises)  → read
+//   PUT /api/sprint-stories/statuses         replace the workspace's status order / delivered-from   → read
 
 const PRO_REQUIRED = { error: 'pro required' } as const;
 const IDENT_MAX = 600;
@@ -57,6 +61,34 @@ export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
     const scope = await resolveWorkspaceScope(accountId, body.workspaceId);
     await setSprintChecks(accountId, scope.workspaceId, checks);
     return { workspaceId: scope.workspaceId, checks };
+  });
+
+  // The status layout override (shared `SprintStatusesUpdate`). ⚠ Status names belong to ONE
+  // workspace's tracker, so an id that does not resolve to itself (unknown, another tenant's) is
+  // refused rather than written onto the caller's Default.
+  app.put('/api/sprint-stories/statuses', async (req, reply): Promise<SprintStatusesResponse | ErrorBody> => {
+    if (!reportsEntitled(req)) {
+      reply.status(402);
+      return PRO_REQUIRED;
+    }
+    const body = (req.body ?? {}) as { workspaceId?: unknown; settings?: unknown };
+    const settings = parseSprintStatusSettings(body.settings, true);
+    if (typeof body.workspaceId !== 'number' || !Number.isSafeInteger(body.workspaceId) || settings == null) {
+      reply.status(400);
+      return { error: 'bad_request', message: 'Send a workspaceId and the status settings.' };
+    }
+    const accountId = accountIdOf(req);
+    const scope = await resolveWorkspaceScope(accountId, String(body.workspaceId));
+    if (scope.workspaceId !== body.workspaceId) {
+      reply.status(400);
+      return { error: 'bad_workspace', message: 'This workspace was not found.' };
+    }
+    await setSprintStatusSettings(accountId, scope.workspaceId, settings);
+    // Never read yet: the layout is the settings over nothing (no site to name statuses on).
+    const statusLayout =
+      (await sprintLayoutFor(accountId, scope.workspaceId)) ??
+      resolveSprintStatusLayout({ autoOrder: null, settings, tickets: [], evidence: new Map() });
+    return { workspaceId: scope.workspaceId, settings: statusLayout.settings, statusLayout };
   });
 
   app.put('/api/sprint-stories/repos', async (req, reply): Promise<SprintReposResponse | ErrorBody> => {

@@ -2,6 +2,7 @@ import type {
   IssueMatchScope,
   JiraAcCandidate,
   JiraStatusCategory,
+  TicketLinkBlocker,
   TrackerProvider,
 } from '@pierre-review/shared';
 import type { JiraFetchPolicy, JiraTransport } from './jira/fetch.js';
@@ -89,7 +90,9 @@ export interface FetchedTicket {
   // MARKDOWN.
   description: string;
   issueType: { id: string; name: string } | null;
-  status: { name: string; category: JiraStatusCategory | null } | null;
+  /** `id` = the tracker's own status id (Jira `status.id`, Linear state id), which a board's column
+   *  order is written in; absent / null when the tracker has none (GitHub). */
+  status: { name: string; category: JiraStatusCategory | null; id?: string | null } | null;
   assignee: FetchedTicketAssignee | null;
   // Where the acceptance criteria might live (Jira custom text fields). [] when the provider keeps
   // them in the description; the criteria are then derived as '' and the description carries them.
@@ -102,6 +105,11 @@ export interface FetchedTicket {
    *  stored value stands), null = the tracker said none. */
   issueCreatedAt?: Date | null;
   issueResolvedAt?: Date | null;
+  /** The tracker LINKS this ticket waits on (docs/TRACKERS.md § Blocking links): Jira issuelinks
+   *  whose phrase from this side passes shared `isBlockingRelation`, Linear inverse "blocks"
+   *  relations. undefined = not in the answer (the stored value stands); null = the provider has no
+   *  links (GitHub Issues); [] = read, none. */
+  blockedBy?: TicketLinkBlocker[] | null;
 }
 
 /** A GitHub GraphQL answer: the data (partial data included) and any errors GitHub reported. */

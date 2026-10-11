@@ -1,4 +1,9 @@
 import {
+  SPRINT_DELIVERED_MIN_SHARE,
+  SPRINT_DELIVERED_MIN_TICKETS,
+  SPRINT_IN_PROGRESS_HEADING,
+  SPRINT_STAGE_LABEL,
+  SPRINT_STATUS_ORDER_MAX,
   SPRINT_PROVIDER_LABEL,
   SPRINT_WRITE_MAYBE_SENTENCE,
   SPRINT_WRITE_TEXT_MAX,
@@ -9,7 +14,11 @@ import {
   type SprintAssessmentPhase,
   type SprintAssessmentStatus,
   type SprintChecks,
-  type SprintPhase,
+  type SprintStage,
+  type SprintStatusEvidence,
+  type SprintStatusLayout,
+  type SprintStatusLayoutEntry,
+  type SprintStatusSettings,
   type SprintReplaceTarget,
   type SprintTicketRow,
   type SprintWriteMode,
@@ -18,19 +27,202 @@ import {
 
 // Reports → This sprint: the pure folds behind the tab (test/sprintModel.test.ts).
 //
-// ⚠ THE ORDER IS THE SERVER'S (Not started, then In progress; most issues first; then key). The
-// grouping here keeps it; nothing re-ranks, and nothing ever sorts by assignee.
+// ⚠ THE ORDER IS THE SERVER'S (stage, then status section in the layout's order, then most issues,
+// then key). The sections here keep it; nothing re-ranks, and nothing ever sorts by assignee.
 // ⚠ THE ISSUES AND THEIR BULLETS ARE SHARED FOLDS (`story-issues.ts`, `sprintBullets`) — nothing here
 // re-derives an issue or re-words a bullet.
 
-/** The two groups in the server's order, each keeping the server's order inside it. */
-export function groupSprintTickets(tickets: readonly SprintTicketRow[]): Array<{ phase: SprintPhase; tickets: SprintTicketRow[] }> {
-  const groups: Array<{ phase: SprintPhase; tickets: SprintTicketRow[] }> = [
-    { phase: 'not_started', tickets: [] },
-    { phase: 'in_progress', tickets: [] },
-  ];
-  for (const t of tickets) groups[t.phase === 'not_started' ? 0 : 1]!.tickets.push(t);
-  return groups.filter((g) => g.tickets.length > 0);
+// ── Sections by status ─────────────────────────────────────────────────────────────────────────
+
+/** One status section inside a stage. `status` is null for Not started (one section; each card shows
+ *  its own status). */
+export interface SprintSection {
+  status: string | null;
+  tickets: SprintTicketRow[];
+}
+
+export interface SprintStageGroup {
+  stage: Exclude<SprintStage, 'done'>;
+  heading: string;
+  sections: SprintSection[];
+}
+
+const normStatus = (s: string): string => s.trim().toLowerCase();
+
+/**
+ * THE SECTIONS: Not started (one section), then the in-progress statuses before "code delivered"
+ * ("Writing code", or "In progress" when nothing splits), then "Code delivered" — one section per
+ * status, in the LAYOUT's order, only non-empty ones. Each section keeps the server's order (most
+ * issues first). The stage is the row's own (`stage`, the server's `sprintStageOf`) — never re-derived
+ * here. A status the layout does not list sits after the listed ones, in first-seen order. Done rows
+ * are never listed.
+ */
+export function sprintSections(
+  tickets: readonly SprintTicketRow[],
+  layout: Pick<SprintStatusLayout, 'order' | 'deliveredFrom'> | null,
+): SprintStageGroup[] {
+  const order = layout?.order ?? [];
+  const rank = new Map(order.map((o, i) => [normStatus(o.name), i]));
+  const notStarted: SprintTicketRow[] = [];
+  const byStage: Record<'writing' | 'delivered', Map<string, SprintSection>> = { writing: new Map(), delivered: new Map() };
+  for (const t of tickets) {
+    if (t.stage === 'done') continue;
+    if (t.stage === 'not_started') {
+      notStarted.push(t);
+      continue;
+    }
+    const name = t.status?.name.trim() ?? '';
+    const k = normStatus(name);
+    const m = byStage[t.stage];
+    const sec = m.get(k) ?? { status: name === '' ? null : name, tickets: [] };
+    sec.tickets.push(t);
+    m.set(k, sec);
+  }
+  const ordered = (m: Map<string, SprintSection>): SprintSection[] => {
+    const firstSeen = [...m.keys()];
+    return [...m.entries()]
+      .sort(
+        (a, b) =>
+          (rank.get(a[0]) ?? order.length + firstSeen.indexOf(a[0])) -
+          (rank.get(b[0]) ?? order.length + firstSeen.indexOf(b[0])),
+      )
+      .map(([, sec]) => sec);
+  };
+  const out: SprintStageGroup[] = [];
+  if (notStarted.length > 0) {
+    out.push({ stage: 'not_started', heading: SPRINT_STAGE_LABEL.not_started, sections: [{ status: null, tickets: notStarted }] });
+  }
+  const writing = ordered(byStage.writing);
+  if (writing.length > 0) {
+    out.push({
+      stage: 'writing',
+      heading: layout?.deliveredFrom == null ? SPRINT_IN_PROGRESS_HEADING : SPRINT_STAGE_LABEL.writing,
+      sections: writing,
+    });
+  }
+  const delivered = ordered(byStage.delivered);
+  if (delivered.length > 0) out.push({ stage: 'delivered', heading: SPRINT_STAGE_LABEL.delivered, sections: delivered });
+  return out;
+}
+
+// ── The status settings ──────────────────────────────────────────────────────────────────────────
+
+/** Can this status be the "code delivered from" point? Only in-progress (or unknown-category) ones. */
+export function statusSplittable(e: Pick<SprintStatusLayoutEntry, 'category'>): boolean {
+  return e.category !== 'new' && e.category !== 'done';
+}
+
+const CATEGORY_RANK: Record<string, number> = { new: 0, indeterminate: 1, done: 2 };
+const categoryRank = (c: string | null | undefined): number => (c == null ? 1 : (CATEGORY_RANK[c] ?? 1));
+
+/** Can this entry move one step up (-1) or down (+1)? Not past either end, and never past a status of
+ *  another category: the server keeps the categories in order (not started, in progress, done), so
+ *  such a move would snap back on Save. `categoryOf` absent → ends only. */
+export function canMoveStatus(
+  names: readonly string[],
+  index: number,
+  dir: -1 | 1,
+  categoryOf?: (name: string) => string | null | undefined,
+): boolean {
+  const to = index + dir;
+  if (index < 0 || index >= names.length || to < 0 || to >= names.length) return false;
+  if (categoryOf == null) return true;
+  return categoryRank(categoryOf(names[index]!)) === categoryRank(categoryOf(names[to]!));
+}
+
+/** Move one entry up (-1) or down (+1); a move `canMoveStatus` refuses returns the list unchanged. */
+export function moveStatus(
+  names: readonly string[],
+  index: number,
+  dir: -1 | 1,
+  categoryOf?: (name: string) => string | null | undefined,
+): string[] {
+  const to = index + dir;
+  if (!canMoveStatus(names, index, dir, categoryOf)) return [...names];
+  const out = [...names];
+  const [x] = out.splice(index, 1);
+  out.splice(to, 0, x!);
+  return out;
+}
+
+const sameNames = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((x, i) => normStatus(x) === normStatus(b[i]!));
+
+/**
+ * What Save sends. ORDER: unchanged from what was shown → the stored override as it was (null when
+ * there is none); moved → every name, in the new order. DELIVERED FROM: untouched → the stored value as
+ * it was; picked → the name, or null when the pick is the automatic answer (so it keeps following the
+ * evidence).
+ */
+export function statusSettingsToSave(
+  layout: Pick<SprintStatusLayout, 'order' | 'deliveredFromAuto' | 'settings'>,
+  draft: { order: readonly string[]; deliveredFrom: string | null; deliveredTouched: boolean },
+): SprintStatusSettings {
+  const shown = layout.order.map((o) => o.name);
+  // Capped at the route's limit: a status past it keeps its automatic position anyway.
+  const order = sameNames(shown, draft.order) ? layout.settings.order : draft.order.slice(0, SPRINT_STATUS_ORDER_MAX);
+  let deliveredFrom = layout.settings.deliveredFrom;
+  if (draft.deliveredTouched) {
+    deliveredFrom =
+      draft.deliveredFrom == null ||
+      (layout.deliveredFromAuto != null && normStatus(draft.deliveredFrom) === normStatus(layout.deliveredFromAuto))
+        ? null
+        : draft.deliveredFrom;
+  }
+  return { order, deliveredFrom };
+}
+
+/** Where the order came from, in words. `inSentence` → the mid-sentence form (proper nouns keep
+ *  their capitals; never lower-case the whole label). */
+export function statusOrderSourceLabel(
+  source: SprintStatusLayout['orderSource'],
+  opts: { inSentence?: boolean } = {},
+): string {
+  if (opts.inSentence) {
+    switch (source) {
+      case 'override':
+        return 'your order';
+      case 'jira_board':
+        return 'your board’s columns';
+      case 'linear_states':
+        return 'Linear’s workflow';
+      case 'github':
+        return 'open, then closed';
+      case 'fallback':
+        return 'status category, then name';
+    }
+  }
+  switch (source) {
+    case 'override':
+      return 'Your order';
+    case 'jira_board':
+      return 'Your board’s columns';
+    case 'linear_states':
+      return 'Linear’s workflow';
+    case 'github':
+      return 'Open, then closed';
+    case 'fallback':
+      return 'Status category, then name';
+  }
+}
+
+/** A share as "3 in 5" (smallest denominator up to 10 that states it exactly), else a percentage. */
+export function shareWords(share: number): string {
+  for (let d = 2; d <= 10; d += 1) {
+    const n = share * d;
+    if (Math.abs(n - Math.round(n)) < 1e-9) return `${Math.round(n)} in ${d}`;
+  }
+  return `${Math.round(share * 100)}%`;
+}
+
+/** The automatic "code delivered from" rule, read from the shared constants. */
+export function deliveredRuleSentence(): string {
+  return `The first in-progress status where at least ${shareWords(SPRINT_DELIVERED_MIN_SHARE)} tickets with pull requests have them all merged, and at least ${SPRINT_DELIVERED_MIN_TICKETS} do.`;
+}
+
+/** "Ready for QA · 4 of 6 merged". */
+export function statusEvidenceLine(e: SprintStatusEvidence): string {
+  return `${e.status} · ${e.allMerged} of ${e.withPrs} merged`;
 }
 
 /** How many checks differ from the default — the header's disclosure: each issue switched off, plus

@@ -157,6 +157,9 @@ import type {
   SprintReposUpdate,
   SprintChecksUpdate,
   SprintChecksResponse,
+  SprintStatusesUpdate,
+  SprintStatusesResponse,
+  TicketPrsResponse,
   SprintReposResponse,
   SprintAssessRequest,
   SprintAssessResponse,
@@ -956,6 +959,14 @@ export const api = {
     fetch('/api/sprint-stories/repos', jsonBody('PUT', body)).then((r) => handle<SprintReposResponse>(r)),
   sprintSetChecks: (body: SprintChecksUpdate) =>
     fetch('/api/sprint-stories/checks', jsonBody('PUT', body)).then((r) => handle<SprintChecksResponse>(r)),
+  // The status layout override (order + "code delivered from"); `{order:null, deliveredFrom:null}` resets.
+  sprintSetStatuses: (body: SprintStatusesUpdate) =>
+    fetch('/api/sprint-stories/statuses', jsonBody('PUT', body)).then((r) => handle<SprintStatusesResponse>(r)),
+  // The ticket tab (core, FREE): one ticket's open / merged / closed PRs as TimelinePr rows. DB-only.
+  ticketPrs: (workspaceId: number, ident: string) =>
+    get<TicketPrsResponse>(
+      withQuery('/api/ticket-prs', workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`),
+    ),
   // "Check against code" (core, agentic, LOCAL-ONLY — not registered in cloud). The POST is the ONE
   // path that runs Claude; the GET polls one run; cancel is account-scoped.
   sprintAssess: (body: SprintAssessRequest) =>

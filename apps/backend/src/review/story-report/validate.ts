@@ -21,8 +21,8 @@ import {
 //     lists are deduped and capped; an item left with no ticket is dropped; a spotlight or leftOut on
 //     an unknown key is dropped. The model may drop a weak example, never add a story.
 //   • `tone` must be 'positive' | 'negative' (anything else drops the spotlight).
-//   • A point's `issue` is kept only when it is one of the four story issues; otherwise the FIELD is
-//     dropped, never the point.
+//   • A point's `issue` is kept only when it is one of the three story issues (`isStoryIssueId` — a
+//     retired id such as 'too_big' is dropped); otherwise the FIELD is dropped, never the point.
 //   • Each report section is capped at `STORY_REPORT_ITEMS_MAX`. `leftOut` is NOT a section — it is
 //     the list of picked candidates the agent chose not to cover, so it is capped at
 //     `STORY_REPORT_MAX_CANDIDATES` (and deduped by ticket); cutting it at 6 would hide stories the

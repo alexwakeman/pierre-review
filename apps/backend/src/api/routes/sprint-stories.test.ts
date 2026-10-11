@@ -2,10 +2,13 @@
 // (db/sprint-stories.ts), on a THROWAWAY sqlite DB with a real Fastify instance. Pinned:
 //   1. Pro on `periodReports`: 402 before any DB work (GET and PUT).
 //   2. Another tenant's workspace id resolves to the caller's Default (never theirs, never a 404).
-//   3. Order: Not started first, then In progress; most flags first; then key. Done tickets are counted,
-//      not listed; out-of-sprint and other tenants' tickets never listed.
+//   3. Order: stage (Not started, Writing code, Code delivered), then status section, then most flags,
+//      then key. Done tickets are counted, not listed; out-of-sprint and other tenants' tickets never
+//      listed. The response carries the status layout (`statusLayout`) and each row its `stage`.
 //   4. A view stamps `sprint_reads.viewed_at` and kicks a due read.
-//   5. Issues: a CURRENT label feeds the label half; `aiEnabled` false → 'off' and only code issues.
+//   5. Issues: a CURRENT label feeds the label half (criterion reasons, a named ticket resolved through
+//      stored tickets, spec gaps); tracker links raise "Blocked" with no label (a done link does not);
+//      `aiEnabled` false → 'off' and only code issues.
 //   7. PUT /api/sprint-stories/checks: strict on a post; a stored old-shape value reads as defaults.
 //   6. PUT /api/sprint-stories/repos: replace, too_many, bad_repo (another tenant's repo through a
 //      foreign workspace id lands on the caller's Default), no_ticket, bad_request.
@@ -90,12 +93,20 @@ beforeAll(async () => {
   await db.insert(schema.sprintTickets).values([
     ticket(1, ownWs, 'ENG-1', { assigneeName: 'Amy' }),
     ticket(1, ownWs, 'ENG-2', { statusName: 'In Progress', statusCategory: 'indeterminate', acceptanceCriteria: '', description: 'Fix it' }),
-    ticket(1, ownWs, 'ENG-3', { description: 'Fix it' }),
+    ticket(1, ownWs, 'ENG-3', {
+      description: 'Fix it',
+      blockedByJson: [
+        { key: 'ENG-8', title: 'Payments API', status: 'To Do', category: 'new', relation: 'is blocked by', url: 'https://acme.atlassian.net/browse/ENG-8' },
+        { key: 'ENG-6', title: 'Old spike', status: 'Done', category: 'done', relation: 'depends on', url: null },
+      ],
+    }),
     ticket(1, ownWs, 'ENG-4', { statusName: 'Done', statusCategory: 'done' }),
     ticket(1, ownWs, 'ENG-5', { inSprint: false }),
+    // Named by ENG-1's label: a stored ticket, out of the sprint — resolved for its title and status.
+    ticket(1, ownWs, 'ENG-7', { inSprint: false, title: 'Cookie banner', statusName: 'In Progress', statusCategory: 'indeterminate' }),
     ticket(2, foreignWs, 'ENG-9', {}),
   ]).execute();
-  // A CURRENT label on ENG-1: criterion 2 not testable, no out of scope.
+  // A CURRENT label on ENG-1: criterion 2 not testable, one named dependency (ENG-7), one spec gap.
   const { storyLabelInput } = await import('../../db/story-label-input.js');
   const input = storyLabelInput({ title: 'Story ENG-1', description: VALUE, acceptanceCriteria: '- Basket survives a reload\n- Basket expires after 30 days' }, 'jira')!;
   await db
@@ -106,10 +117,13 @@ beforeAll(async () => {
       textHash: input.textHash,
       rubricVersion: shared.STORY_RUBRIC_VERSION,
       criteriaJson: [
-        { n: 1, testable: true, bundled: false, dependsOnOtherWork: false },
-        { n: 2, testable: false, bundled: false, dependsOnOtherWork: false },
+        { n: 1, testable: true, reason: null },
+        { n: 2, testable: false, reason: 'no expected result' },
       ],
-      storyJson: { outOfScopeStated: false, dependencyNamed: true, nonCodeWork: false },
+      storyJson: {
+        dependencies: [{ kind: 'ticket', what: 'banner', owner: 'UCD team', ticketKey: 'eng-7' }],
+        gaps: [{ type: 'edge_case', text: 'No behaviour when the basket is empty' }],
+      },
       criteriaCount: 2,
       model: 'claude-haiku-5-5',
     })
@@ -164,18 +178,61 @@ describe('GET /api/sprint-stories', () => {
     expect(body.workspaceId).toBe(ownWs);
     expect(body).toMatchObject({ trackerOn: true, provider: 'jira', doneCount: 1, source: null });
     expect(body.read.readAt).toBeNull();
-    expect(body.tickets.map((t: any) => [t.key, t.phase, t.flagCount])).toEqual([
-      ['ENG-1', 'not_started', 2],
-      ['ENG-3', 'not_started', 0],
-      ['ENG-2', 'in_progress', 1],
+    expect(body.tickets.map((t: any) => [t.key, t.phase, t.stage, t.flagCount])).toEqual([
+      ['ENG-1', 'not_started', 'not_started', 3],
+      ['ENG-3', 'not_started', 'not_started', 1],
+      ['ENG-2', 'in_progress', 'writing', 1],
     ]);
     const eng1 = body.tickets[0];
     expect(eng1.labels).toBe('current');
     expect(eng1.issues).toEqual([
-      { id: 'unclear_done', criteria: [2], total: 2, reasons: ['untestable'] },
-      { id: 'scope_unstated', criteria: [], total: 2, reasons: ['no_out_of_scope'] },
+      { id: 'unclear_done', total: 2, reasons: ['untestable'], criteria: [{ n: 2, reason: 'no expected result' }], blockers: [], gaps: [] },
+      {
+        id: 'blocked',
+        total: 2,
+        reasons: ['named'],
+        criteria: [],
+        blockers: [
+          {
+            source: 'text',
+            kind: 'ticket',
+            ticketKey: 'eng-7',
+            what: 'Cookie banner',
+            owner: 'UCD team',
+            status: 'In Progress',
+            category: 'indeterminate',
+            relation: null,
+            url: 'https://acme.atlassian.net/browse/ENG-7',
+            resolved: false,
+          },
+        ],
+        gaps: [],
+      },
+      {
+        id: 'spec_gaps',
+        total: 2,
+        reasons: ['gaps'],
+        criteria: [],
+        blockers: [],
+        gaps: [{ type: 'edge_case', text: 'No behaviour when the basket is empty' }],
+      },
+    ]);
+    // ENG-3: a tracker link raises Blocked with no label; the done link is listed resolved, after.
+    const eng3 = body.tickets[1];
+    expect(eng3.issues.map((i: any) => i.id)).toEqual(['blocked']);
+    expect(eng3.issues[0].reasons).toEqual(['linked']);
+    expect(eng3.issues[0].blockers.map((b: any) => [b.ticketKey, b.resolved])).toEqual([
+      ['ENG-8', false],
+      ['ENG-6', true],
     ]);
     expect(body.tickets[2].issues.map((i: any) => i.id)).toEqual(['unclear_done']);
+    // The status layout: no stored board order → the category fallback over the sprint's statuses.
+    expect(body.statusLayout.order.map((o: any) => [o.name, o.category, o.count])).toEqual([
+      ['To Do', 'new', 2],
+      ['In Progress', 'indeterminate', 1],
+      ['Done', 'done', 0],
+    ]);
+    expect(body.statusLayout.deliveredFrom).toBeNull();
     expect(eng1.replaceTarget).toEqual({ kind: 'description' });
     expect(eng1.repos).toEqual({ accepted: [], suggested: [] });
     expect(body.repos).toEqual([{ repoId: ownRepo, fullName: 'acme/web' }]);
@@ -192,6 +249,27 @@ describe('GET /api/sprint-stories', () => {
     expect(eng1.labels).toBe('off');
     expect(eng1.issues).toEqual([]);
     expect(out.tickets.find((t) => t.key === 'ENG-2')!.issues.map((i) => i.id)).toEqual(['unclear_done']);
+    // Links are code: they still raise Blocked with labels off.
+    expect(out.tickets.find((t) => t.key === 'ENG-3')!.issues.map((i) => i.id)).toEqual(['blocked']);
+  });
+});
+
+describe('sortSprintTickets', () => {
+  it('stage, then the status section in layout order, then most flags, then key', () => {
+    const row = (key: string, stage: string, status: string, flagCount: number) => ({ key, stage, status: { name: status, category: null }, flagCount }) as any;
+    const layout = { order: [{ name: 'To Do' }, { name: 'In Development' }, { name: 'Ready for QA' }, { name: 'In PO Review' }] } as any;
+    const out = fold.sortSprintTickets(
+      [
+        row('A-9', 'delivered', 'In PO Review', 0),
+        row('A-1', 'writing', 'Ready for QA', 3),
+        row('A-2', 'writing', 'In Development', 0),
+        row('A-3', 'writing', 'in development', 2),
+        row('A-4', 'not_started', 'To Do', 0),
+        row('A-10', 'writing', 'Unknown', 9),
+      ],
+      layout,
+    );
+    expect(out.map((r: any) => r.key)).toEqual(['A-4', 'A-3', 'A-2', 'A-1', 'A-10', 'A-9']);
   });
 });
 
@@ -267,14 +345,14 @@ describe('PUT /api/sprint-stories/checks', () => {
   it('stores the checks; the list echoes them and drops the switched-off issues', async () => {
     const before = await list();
     expect(before.checks).toEqual(DEFAULTS);
-    const res = await put({ workspaceId: ownWs, checks: { off: ['scope_unstated'], issueTypes: [' Story ', 'story', 'Bug'] } });
+    const res = await put({ workspaceId: ownWs, checks: { off: ['spec_gaps'], issueTypes: [' Story ', 'story', 'Bug'] } });
     expect(res.statusCode).toBe(200);
-    const checks = { off: ['scope_unstated'], issueTypes: ['Story', 'Bug'] };
+    const checks = { off: ['spec_gaps'], issueTypes: ['Story', 'Bug'] };
     expect(res.json()).toEqual({ workspaceId: ownWs, checks });
     const after = await list();
     expect(after.checks).toEqual(checks);
-    // ENG-1 has no issue type, so it is checked; only its scope issue is switched off.
-    expect(after.tickets.find((t: any) => t.key === 'ENG-1').issues.map((i: any) => i.id)).toEqual(['unclear_done']);
+    // ENG-1 has no issue type, so it is checked; only its spec gaps issue is switched off.
+    expect(after.tickets.find((t: any) => t.key === 'ENG-1').issues.map((i: any) => i.id)).toEqual(['unclear_done', 'blocked']);
     for (const t of after.tickets) expect(t.flagCount).toBe(t.issues.length);
     expect(Array.isArray(after.issueTypes)).toBe(true);
     // Back to the defaults, stored as NULL.
@@ -303,10 +381,11 @@ describe('PUT /api/sprint-stories/checks', () => {
     expect((await list()).checks).toEqual(DEFAULTS);
     await db
       .update(schema.workspaces)
-      .set({ sprintChecks: { off: ['no_persona', 'too_big'], issueTypes: { no_criteria: ['Story'] } } })
+      .set({ sprintChecks: { off: ['no_persona', 'too_big', 'scope_unstated', 'blocked'], issueTypes: { no_criteria: ['Story'] } } })
       .where(eq(schema.workspaces.id, ownWs))
       .execute();
-    expect((await list()).checks).toEqual({ off: ['too_big'], issueTypes: [] });
+    // The retired ids (too_big, scope_unstated) are dropped; a current one survives.
+    expect((await list()).checks).toEqual({ off: ['blocked'], issueTypes: [] });
     await db.update(schema.workspaces).set({ sprintChecks: null }).where(eq(schema.workspaces.id, ownWs)).execute();
   });
 
@@ -314,6 +393,7 @@ describe('PUT /api/sprint-stories/checks', () => {
     for (const checks of [
       { off: ['nope'], issueTypes: [] },
       { off: ['no_persona'], issueTypes: [] },
+      { off: ['too_big'], issueTypes: [] },
       { off: 'x' },
       { off: [], issueTypes: {} },
       { off: [], issueTypes: [''] },

@@ -12,6 +12,9 @@ import type { SprintSource } from '@pierre-review/shared';
 //   • THE FORCED RE-READ: a row at `next_check_at` = epoch 0 is re-read alone, once.
 //   • ENTITLEMENT + ISOLATION: an account without Reports is not read; another tenant's rows untouched.
 //   • the after-read hook fires on success only.
+//   • THE STATUS ORDER + LINKS: a returned order lands on `sprint_reads.status_order_json`; an order
+//     read that failed (undefined + a code) keeps the stored order and the list read still succeeds;
+//     a ticket's blocking links + status id are stored, and a read that did not carry links keeps them.
 
 const DB_PATH = '/private/tmp/claude-501/pierre-sprint-read-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
@@ -58,12 +61,12 @@ function ticket(key: string, over: Record<string, unknown> = {}) {
 
 const SOURCE: SprintSource = { kind: 'sprint', provider: 'jira', names: ['Sprint 42'] };
 
-let listed: { tickets: ReturnType<typeof ticket>[]; fail: unknown | null; calls: number; args: any[] };
+let listed: { tickets: ReturnType<typeof ticket>[]; fail: unknown | null; calls: number; args: any[]; extra?: Record<string, unknown> };
 const fakeLister = async (a: any) => {
   listed.calls += 1;
   listed.args.push(a);
   if (listed.fail != null) throw listed.fail;
-  return { source: SOURCE, tickets: listed.tickets, truncated: false };
+  return { source: SOURCE, tickets: listed.tickets, truncated: false, ...(listed.extra ?? {}) };
 };
 const opts = (now = T0) => ({ now: () => now, listers: { jira: fakeLister }, entitled: async (a: number) => a === 1 });
 
@@ -335,5 +338,50 @@ describe('POST /api/sprint-stories/refresh', () => {
       store.setSprintReadKicker(null);
       await app.close();
     }
+  });
+});
+
+describe('status order and blocking links', () => {
+  const ORDER = {
+    source: 'jira_board' as const,
+    statuses: [
+      { id: '1', name: 'To Do', category: 'new' as const },
+      { id: '3', name: 'In Development', category: 'indeterminate' as const },
+    ],
+    readAt: new Date(T0).toISOString(),
+  };
+  const LINK = { key: 'ENG-9', title: 'Cookie banner', status: 'To Do', category: 'new' as const, relation: 'is blocked by', url: `${ROOT}/browse/ENG-9` };
+  const orderOf = async () => {
+    const sr = schema.sprintReads;
+    const [r] = await db.select({ o: sr.statusOrderJson }).from(sr).where(and(eq(sr.accountId, 1), eq(sr.workspaceId, wsA))).execute();
+    return r?.o ?? null;
+  };
+
+  it('stores the order, the links and the status id; a failed order read keeps the stored order', async () => {
+    listed.tickets = [ticket('ENG-1', { status: { name: 'In Development', category: 'indeterminate', id: '3' }, blockedBy: [LINK] })];
+    listed.extra = { statusOrder: ORDER };
+    expect((await read.readWorkspaceSprint(ctx, 1, wsA, opts(T0 + 200 * DAY))).ok).toBe(true);
+    expect(await orderOf()).toEqual(ORDER);
+    const one = (await rows(1, wsA)).find((r) => r.ident === ident('ENG-1'));
+    expect(one.blockedByJson).toEqual([LINK]);
+    expect(one.statusId).toBe('3');
+
+    // The order read failed this time: the list still lands, the stored order stands. The ticket read
+    // carried no links (undefined): the stored links stand too.
+    listed.tickets = [ticket('ENG-1', { title: 'Again', status: { name: 'In Development', category: 'indeterminate', id: '3' } })];
+    listed.extra = { statusOrder: undefined, statusOrderError: 'forbidden' };
+    expect((await read.readWorkspaceSprint(ctx, 1, wsA, opts(T0 + 201 * DAY))).ok).toBe(true);
+    expect(await orderOf()).toEqual(ORDER);
+    const again = (await rows(1, wsA)).find((r) => r.ident === ident('ENG-1'));
+    expect(again.title).toBe('Again');
+    expect(again.blockedByJson).toEqual([LINK]);
+
+    // A positive "none": links [] clear, order null (no board) clears.
+    listed.tickets = [ticket('ENG-1', { blockedBy: [] })];
+    listed.extra = { statusOrder: null };
+    await read.readWorkspaceSprint(ctx, 1, wsA, opts(T0 + 202 * DAY));
+    expect(await orderOf()).toBeNull();
+    expect((await rows(1, wsA)).find((r) => r.ident === ident('ENG-1')).blockedByJson).toEqual([]);
+    listed.extra = undefined;
   });
 });

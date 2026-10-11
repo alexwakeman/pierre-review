@@ -7,7 +7,7 @@ import { SPRINT_TICKETS_MAX } from '@pierre-review/shared';
 import type { JiraTransport, RawResponse } from '../jira/fetch.js';
 import { __resetLinearBudget } from '../linear/client.js';
 import type { TrackerCall } from '../types.js';
-import { listLinearCycle, toLinearSprintTicket } from './linear.js';
+import { linearStatesOrder, listLinearCycle, toLinearSprintTicket } from './linear.js';
 
 const ROOT = 'https://linear.app/acme';
 const json = (body: unknown, status = 200): RawResponse => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -153,5 +153,88 @@ describe('listLinearCycle', () => {
     const log: Array<{ query: string; vars: Record<string, unknown>; auth: string }> = [];
     await expect(listLinearCycle({ ...args(transport(() => ({}), log)), projectKeys: [] })).rejects.toMatchObject({ code: 'not_found' });
     expect(log).toHaveLength(0);
+  });
+});
+
+describe('blocking relations and the workflow order', () => {
+  const rel = (type: string, n: number, state = { name: 'Todo', type: 'unstarted' }) => ({
+    type,
+    issue: { identifier: `ENG-${n}`, title: `Dep ${n}`, url: `${ROOT}/issue/ENG-${n}/dep`, state },
+  });
+
+  it('an inverse "blocks" relation is a blocker of THIS issue; other types are not; the state id is kept', () => {
+    const t = toLinearSprintTicket(
+      node(1, {
+        state: { id: 'st-2', name: 'In Progress', type: 'started' },
+        inverseRelations: { nodes: [rel('blocks', 7), rel('related', 8), rel('duplicate', 9), rel('blocks', 10, { name: 'Done', type: 'completed' }), rel('blocks', 7)] },
+      }) as never,
+      ROOT,
+      'Cycle 5',
+    )!;
+    expect(t.status).toEqual({ name: 'In Progress', category: 'indeterminate', id: 'st-2' });
+    expect(t.blockedBy).toEqual([
+      { key: 'ENG-7', title: 'Dep 7', status: 'Todo', category: 'new', relation: 'blocked by', url: `${ROOT}/issue/ENG-7/dep` },
+      { key: 'ENG-10', title: 'Dep 10', status: 'Done', category: 'done', relation: 'blocked by', url: `${ROOT}/issue/ENG-10/dep` },
+    ]);
+    // No selection → the key is absent (the stored links stand).
+    expect('blockedBy' in toLinearSprintTicket(node(2) as never, ROOT, null)!).toBe(false);
+  });
+
+  it('orders the teams’ states by category then position, active-cycle team first, names deduped', () => {
+    const o = linearStatesOrder(
+      [
+        {
+          key: 'ENG',
+          states: {
+            nodes: [
+              { id: 'd', name: 'Done', type: 'completed', position: 0 },
+              { id: 'r', name: 'In Review', type: 'started', position: 2 },
+              { id: 'p', name: 'In Progress', type: 'started', position: 1 },
+              { id: 't', name: 'Todo', type: 'unstarted', position: 5 },
+              { id: 'b', name: 'Backlog', type: 'backlog', position: 0 },
+            ],
+          },
+        },
+        { key: 'OPS', states: { nodes: [{ id: 'x', name: 'todo', type: 'unstarted', position: 0 }, { id: 'q', name: 'QA', type: 'started', position: 9 }] } },
+      ],
+      'T',
+    );
+    expect(o?.source).toBe('linear_states');
+    expect(o?.statuses.map((s) => `${s.name}:${s.category}`)).toEqual([
+      'Backlog:new',
+      'Todo:new',
+      'In Progress:indeterminate',
+      'In Review:indeterminate',
+      'Done:done',
+      'QA:indeterminate',
+    ]);
+    expect(linearStatesOrder([{ key: 'ENG' }], 'T')).toBeNull();
+  });
+
+  it('the list read selects inverse relations and the teams’ states, and returns the order', async () => {
+    const log: Array<{ query: string; vars: Record<string, unknown>; auth: string }> = [];
+    const t = transport((q) => {
+      if (q.includes('LimnLinearSprintTeams')) {
+        return {
+          teams: {
+            nodes: [
+              {
+                id: 'T1',
+                key: 'ENG',
+                cyclesEnabled: true,
+                activeCycle: { id: 'C1', name: 'Cycle 5', number: 5 },
+                states: { nodes: [{ id: 's1', name: 'Todo', type: 'unstarted', position: 0 }, { id: 's2', name: 'In Progress', type: 'started', position: 1 }] },
+              },
+            ],
+          },
+        };
+      }
+      return { cycle: { issues: { nodes: [node(1)], pageInfo: { hasNextPage: false, endCursor: null } } } };
+    }, log);
+    const r = await listLinearCycle(args(t));
+    expect(log[0]!.query).toContain('states(first: 50) { nodes { id name type position } }');
+    expect(log[1]!.query).toContain('inverseRelations(first: 10)');
+    expect(log[1]!.query).toContain('state { id name type }');
+    expect(r.statusOrder?.statuses.map((s) => s.name)).toEqual(['Todo', 'In Progress']);
   });
 });

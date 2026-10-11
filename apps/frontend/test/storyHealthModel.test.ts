@@ -10,7 +10,15 @@ import {
 } from '@pierre-review/shared';
 import {
   axisTop,
+  blockedSplitLine,
   clusterShifts,
+  gapTypesLine,
+  latestFigureLine,
+  moreStoriesLine,
+  pointNumerator,
+  seriesCountsSentence,
+  seriesInfoLines,
+  shiftSentence,
   coverageLine,
   createdLine,
   DELIVERY_STRIPS,
@@ -27,6 +35,7 @@ import {
   STORY_SERIES_COLOR,
   weekIndex,
 } from '../src/components/Activity/storyHealthModel.js';
+import { weekLabel } from '../src/components/Activity/chronologyTrendModel.js';
 
 function week(over: Partial<StoryHealthWeek> = {}): StoryHealthWeek {
   return {
@@ -48,7 +57,7 @@ function week(over: Partial<StoryHealthWeek> = {}): StoryHealthWeek {
 
 function shift(over: Partial<StoryHealthShift>): StoryHealthShift {
   return {
-    series: 'scopeUnstated',
+    series: 'specGaps',
     week: 6,
     weekStart: '2026-08-10',
     before: 50,
@@ -90,19 +99,21 @@ describe('story health model', () => {
 
   it('keeps the legend order and drops series the response omits', () => {
     const series = [
-      { id: 'scopeUnstated' as const, points: [] },
+      { id: 'specGaps' as const, points: [] },
       { id: 'unclearDone' as const, points: [] },
       { id: 'workingTimeS' as const, points: [] },
     ];
-    expect(panelSeries({ series }, 'refinement').map((x) => x.meta.id)).toEqual(['unclearDone', 'scopeUnstated']);
+    expect(panelSeries({ series }, 'refinement').map((x) => x.meta.id)).toEqual(['unclearDone', 'specGaps']);
     expect(panelSeries({ series }, 'delivery').map((x) => x.meta.id)).toEqual(['workingTimeS']);
   });
 
-  it('draws one refinement series per story issue, labelled with the issue, lower is better', () => {
+  it('draws one refinement series per story issue, labelled with the MEASURE’s label, lower is better', () => {
     const ref = STORY_HEALTH_SERIES.filter((m) => m.panel === 'refinement');
-    expect(ref.map((m) => m.label)).toEqual(STORY_ISSUES.map((i) => i.label));
+    expect(ref.map((m) => m.label)).toEqual(STORY_ISSUES.map((i) => i.measureLabel));
+    // The measure counts finished dependencies too, so it never wears the chip's "Blocked".
+    expect(ref.map((m) => m.label)).toEqual(['Unclear when done', 'Had blockers', 'Spec gaps']);
     for (const m of ref) expect(m).toMatchObject({ source: 'label', unit: 'pct', over: 'stories', better: 'lower' });
-    expect(new Set(ref.map((m) => STORY_SERIES_COLOR[m.id])).size).toBe(4);
+    expect(new Set(ref.map((m) => STORY_SERIES_COLOR[m.id])).size).toBe(3);
   });
 
   it('gives every series a colour and every delivery series a strip of one unit', () => {
@@ -122,7 +133,7 @@ describe('story health model', () => {
   });
 
   it('says thin and unknown, never zero', () => {
-    const meta = STORY_HEALTH_SERIES_BY_ID.tooBig;
+    const meta = STORY_HEALTH_SERIES_BY_ID.blocked;
     const p = (o: Partial<StoryHealthPoint>): StoryHealthPoint => ({ value: 60, n: 5, thin: false, rolling: 55, rollingWeeks: 4, ...o });
     expect(pointLine(meta, p({}))).toBe('60% (5 stories) · 4 weeks 55%');
     expect(pointLine(meta, p({ n: 2, thin: true }))).toBe('60% (2 stories): too few to compare');
@@ -132,14 +143,14 @@ describe('story health model', () => {
 
   it('clusters only visible series, by week, in legend order', () => {
     const shifts = [
-      shift({ series: 'tooBig', week: 6 }),
+      shift({ series: 'specGaps', week: 6 }),
       shift({ series: 'unclearDone', week: 6 }),
-      shift({ series: 'waitsOnWork', week: 3 }),
+      shift({ series: 'blocked', week: 3 }),
     ];
-    const c = clusterShifts(shifts, new Set(['unclearDone', 'tooBig']));
+    const c = clusterShifts(shifts, new Set(['unclearDone', 'specGaps']));
     expect(c).toHaveLength(1);
     expect(c[0]?.week).toBe(6);
-    expect(c[0]?.shifts.map((s) => s.series)).toEqual(['unclearDone', 'tooBig']);
+    expect(c[0]?.shifts.map((s) => s.series)).toEqual(['unclearDone', 'specGaps']);
   });
 
   it('colours a shift only from its verdict', () => {
@@ -180,5 +191,67 @@ describe('story health model', () => {
     expect(shiftUnits(301, 'criteria')).toBe('301 criteria');
     expect(shiftUnits(1, 'stories')).toBe('1 story');
     expect(shiftUnits(4, 'weeks')).toBe('4 weeks');
+  });
+
+  it('the chart ⓘ is computed: what counts, this week, the shift', () => {
+    const meta = STORY_HEALTH_SERIES_BY_ID.blocked;
+    const weeks = [week({ weekStart: '2026-08-10' }), week({ weekStart: '2026-08-17', partial: true })];
+    const pts: StoryHealthPoint[] = [
+      { value: 20, n: 10, thin: false, rolling: 20, rollingWeeks: 1 },
+      {
+        value: 44.4,
+        n: 9,
+        thin: false,
+        rolling: 30,
+        rollingWeeks: 2,
+        stories: [
+          { ident: 'a', key: 'BMD-1', title: 'One' },
+          { ident: 'b', key: 'BMD-2', title: null },
+        ],
+        storiesMore: 2,
+      },
+    ];
+    const sh = shift({ series: 'blocked', before: 19.2, after: 44, weekStart: '2026-08-17', beforeStories: 32, afterStories: 28, direction: 'up' });
+    expect(seriesInfoLines(meta, pts, weeks, sh)).toEqual([
+      'A story counts when it links or names other work it waits on, finished or not.',
+      'This week so far: 4 of 9 stories',
+      `Rose from 19% to 44% on ${weekLabel('2026-08-17')}, 32 vs 28 stories`,
+    ]);
+    // No shift → nothing about shifts.
+    expect(seriesInfoLines(meta, pts, weeks, undefined)).toHaveLength(2);
+  });
+
+  it('this week\'s figure: numerator from the list, else from the value; empty weeks say so', () => {
+    expect(pointNumerator({ value: 50, n: 8 })).toBe(4);
+    expect(pointNumerator({ value: null, n: 0 })).toBeNull();
+    expect(pointNumerator({ value: 50, n: 8, stories: [], storiesMore: 0 })).toBe(0);
+    const ud = STORY_HEALTH_SERIES_BY_ID.unclearDone;
+    expect(latestFigureLine(ud, [{ value: null, n: 0, thin: true, rolling: null, rollingWeeks: 0 }], [week()])).toBe(
+      'This week: no stories',
+    );
+    expect(latestFigureLine(ud, [], [])).toBeNull();
+    expect(
+      latestFigureLine(STORY_HEALTH_SERIES_BY_ID.workingTimeS, [{ value: 6.2, n: 3, thin: false, rolling: null, rollingWeeks: 0 }], [week()]),
+    ).toBe('This week: 6.2 h · 3 stories');
+    expect(
+      latestFigureLine(STORY_HEALTH_SERIES_BY_ID.criteriaMet, [{ value: 80, n: 1, thin: true, rolling: null, rollingWeeks: 0 }], [week()]),
+    ).toBe('This week: 80% · 1 reviewed story');
+  });
+
+  it('a time shift counts weeks; every series has a "what counts" sentence', () => {
+    expect(
+      shiftSentence(shift({ series: 'workingTimeM', before: 30, after: 12, direction: 'down', beforeN: 6, afterN: 5, nOf: 'weeks', weekStart: '2026-08-17' })),
+    ).toBe(`Fell from 30 h to 12 h on ${weekLabel('2026-08-17')}, 6 vs 5 weeks`);
+    for (const m of STORY_HEALTH_SERIES) expect(seriesCountsSentence(m.id).length).toBeGreaterThan(10);
+    expect(seriesCountsSentence('workingTimeS')).toContain('under 300 lines');
+  });
+
+  it('hover extras: Blocked split, gap types (most first), "and N more"', () => {
+    expect(blockedSplitLine({ blockedSplit: { linked: 3, textOnly: 2 } })).toBe('Linked in the tracker: 3 · Named only in the text: 2');
+    expect(blockedSplitLine({})).toBeNull();
+    expect(gapTypesLine({ gapTypes: { rule: 2, edge_case: 4, design: 0 } })).toBe('Edge case 4 · Business rule 2');
+    expect(gapTypesLine({ gapTypes: {} })).toBeNull();
+    expect(moreStoriesLine({ storiesMore: 3 })).toBe('and 3 more');
+    expect(moreStoriesLine({ storiesMore: 0 })).toBeNull();
   });
 });

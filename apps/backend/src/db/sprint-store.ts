@@ -109,6 +109,7 @@ export async function resetSprintReadForSite(
       provider: site.provider,
       apiRoot: site.apiRoot,
       sourceJson: null,
+      statusOrderJson: null,
       readAt: null,
       checkedAt: null,
       errorCode: null,

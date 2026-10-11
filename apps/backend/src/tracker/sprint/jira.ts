@@ -1,6 +1,12 @@
-import { SPRINT_TICKETS_MAX } from '@pierre-review/shared';
+import {
+  SPRINT_STATUS_NAME_MAX,
+  SPRINT_STATUS_ORDER_MAX,
+  SPRINT_TICKETS_MAX,
+  type JiraStatusCategory,
+  type SprintStatusAutoOrder,
+} from '@pierre-review/shared';
 import { extractAcCandidates } from '../jira/candidates.js';
-import { assigneeOf, isTicketKey, jiraAuthHeader, statusOf } from '../jira/client.js';
+import { assigneeOf, isTicketKey, jiraAuthHeader, linksField, statusOf } from '../jira/client.js';
 import { JiraFetchError, jiraGetJson } from '../jira/fetch.js';
 import { fieldValueToText, jiraWikiToMarkdown } from '../jira/text.js';
 import { ticketDateFields, trackerDate } from '../dates.js';
@@ -15,8 +21,14 @@ import type { SprintFetchedTicket, SprintListArgs, SprintListResult, SprintListe
 //     workspace's stored tickets. Jira answers 400 when the site has no sprint field (no Jira
 //     Software) → the status fallback, `no_sprint_concept`; no issues → `none_active`.
 //   • Each issue is read with `fields=*all&expand=names,schema` and folded by the SAME pieces the
-//     one-ticket reader uses (candidates, status, assignee, the workspace's criteria field), so a
-//     ticket reads the same here as on a pull request.
+//     one-ticket reader uses (candidates, status, assignee, blocking links, the workspace's criteria
+//     field), so a ticket reads the same here as on a pull request.
+//   • THE STATUS ORDER (docs/TRACKERS.md § The status order): the active sprint's board (`boardId`
+//     on a Cloud sprint object, `rapidViewId=` in an old Server string) holding the most tickets →
+//     `GET /rest/agile/1.0/board/{id}/configuration` (columns → status ids, in column order) +
+//     `GET /rest/api/2/status` (id → name + category). Two calls per list read, which is itself
+//     interval-gated. A failure here never fails the list: `statusOrder` is left undefined (the
+//     stored order stands) and the code is reported. The status fallback has no board → null.
 
 const PAGE = 100;
 
@@ -66,24 +78,106 @@ function fieldIdsBySchema(schema: Record<string, unknown> | undefined, names: Re
   return { sprint, epicLink };
 }
 
-/** A sprint field value → its sprints. Cloud sends objects; old Server sends `…Sprint@x[id=1,state=ACTIVE,name=S 1,…]`. */
-export function sprintsOf(raw: unknown): Array<{ name: string; state: string }> {
+const boardIdOf = (v: unknown): number | null => {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^\d{1,12}$/.test(v.trim()) ? Number(v.trim()) : NaN;
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+};
+
+/** A sprint field value → its sprints (with the board each belongs to). Cloud sends objects (with
+ *  `boardId`); old Server sends `…Sprint@x[id=1,rapidViewId=2,state=ACTIVE,name=S 1,…]`. */
+export function sprintsOf(raw: unknown): Array<{ name: string; state: string; boardId: number | null }> {
   if (!Array.isArray(raw)) return [];
-  const out: Array<{ name: string; state: string }> = [];
+  const out: Array<{ name: string; state: string; boardId: number | null }> = [];
   for (const v of raw) {
     const o = asRecord(v);
     if (o != null) {
       const name = typeof o.name === 'string' ? o.name.trim() : '';
-      if (name !== '') out.push({ name: name.slice(0, 200), state: String(o.state ?? '').toLowerCase() });
+      if (name !== '') {
+        out.push({ name: name.slice(0, 200), state: String(o.state ?? '').toLowerCase(), boardId: boardIdOf(o.boardId ?? o.originBoardId) });
+      }
       continue;
     }
     if (typeof v === 'string') {
       const name = /[[,]name=([^,\]]*)/.exec(v)?.[1]?.trim() ?? '';
       const state = /[[,]state=([^,\]]*)/.exec(v)?.[1]?.trim().toLowerCase() ?? '';
-      if (name !== '') out.push({ name: name.slice(0, 200), state });
+      const board = /[[,]rapidViewId=([^,\]]*)/.exec(v)?.[1]?.trim() ?? '';
+      if (name !== '') out.push({ name: name.slice(0, 200), state, boardId: boardIdOf(board) });
     }
   }
   return out;
+}
+
+// ---- the board's column order ----
+
+const STATUS_CATEGORY_KEYS: readonly string[] = ['new', 'indeterminate', 'done'];
+
+/** A board configuration answer → its status ids in column order (deduped). Exported for its test. */
+export function boardStatusIds(raw: unknown): string[] {
+  const cols = asRecord(asRecord(raw)?.columnConfig)?.columns;
+  if (!Array.isArray(cols)) return [];
+  const out: string[] = [];
+  for (const c of cols) {
+    const statuses = asRecord(c)?.statuses;
+    if (!Array.isArray(statuses)) continue;
+    for (const st of statuses) {
+      const id = asRecord(st)?.id;
+      const s = typeof id === 'string' ? id.trim() : typeof id === 'number' ? String(id) : '';
+      if (s !== '' && !out.includes(s)) out.push(s);
+    }
+  }
+  return out;
+}
+
+/** `GET /rest/api/2/status` → id → name + category. Exported for its test. */
+export function statusCatalog(raw: unknown): Map<string, { name: string; category: JiraStatusCategory | null }> {
+  const out = new Map<string, { name: string; category: JiraStatusCategory | null }>();
+  if (!Array.isArray(raw)) return out;
+  for (const r of raw) {
+    const o = asRecord(r);
+    const id = typeof o?.id === 'string' ? o.id.trim() : typeof o?.id === 'number' ? String(o.id) : '';
+    const name = typeof o?.name === 'string' ? o.name.trim() : '';
+    if (id === '' || name === '') continue;
+    const key = asRecord(o?.statusCategory)?.key;
+    out.set(id, {
+      name: name.slice(0, SPRINT_STATUS_NAME_MAX),
+      category: typeof key === 'string' && STATUS_CATEGORY_KEYS.includes(key) ? (key as JiraStatusCategory) : null,
+    });
+  }
+  return out;
+}
+
+/** The board's columns as a status order. Ids the catalog does not know are dropped; names deduped
+ *  case-insensitively; capped. null when nothing maps. Pure. */
+export function jiraBoardOrder(
+  ids: readonly string[],
+  catalog: ReadonlyMap<string, { name: string; category: JiraStatusCategory | null }>,
+  readAt: string,
+): SprintStatusAutoOrder | null {
+  const statuses: SprintStatusAutoOrder['statuses'] = [];
+  const names = new Set<string>();
+  for (const id of ids) {
+    const s = catalog.get(id);
+    if (s == null || names.has(s.name.toLowerCase())) continue;
+    names.add(s.name.toLowerCase());
+    statuses.push({ id, name: s.name, category: s.category });
+    if (statuses.length >= SPRINT_STATUS_ORDER_MAX) break;
+  }
+  return statuses.length > 0 ? { source: 'jira_board', statuses, readAt } : null;
+}
+
+/** Read one board's order (two calls through the one outbound helper). Throws `JiraFetchError`. */
+export async function readJiraBoardOrder(a: SprintListArgs, boardId: number, nowMs: number): Promise<SprintStatusAutoOrder | null> {
+  const headers = { authorization: jiraAuthHeader(a.call.credentials) };
+  const config = await jiraGetJson(
+    `${a.call.apiRoot}/rest/agile/1.0/board/${encodeURIComponent(String(boardId))}/configuration`,
+    headers,
+    a.call.policy,
+    a.call.transport,
+  );
+  const ids = boardStatusIds(config);
+  if (ids.length === 0) return null;
+  const catalog = statusCatalog(await jiraGetJson(`${a.call.apiRoot}/rest/api/2/status`, headers, a.call.policy, a.call.transport));
+  return jiraBoardOrder(ids, catalog, new Date(nowMs).toISOString());
 }
 
 // ---- one issue ----
@@ -94,6 +188,7 @@ export function toJiraSprintTicket(
   names: Record<string, unknown> | undefined,
   schema: Record<string, unknown> | undefined,
   inSprint: boolean,
+  apiRoot = '',
 ): SprintFetchedTicket | null {
   const o = asRecord(raw);
   const f = asRecord(o?.fields);
@@ -135,6 +230,7 @@ export function toJiraSprintTicket(
     assignee: assigneeOf(f.assignee),
     candidates,
     omittedCandidates: omitted,
+    ...linksField(f, apiRoot),
     ...ticketDateFields({ issueCreatedAt: trackerDate(f, 'created'), issueResolvedAt: trackerDate(f, 'resolutiondate') }),
     projectKey,
     epic,
@@ -188,7 +284,7 @@ async function search(
   a: SprintListArgs,
   jql: string,
   inSprint: boolean,
-): Promise<{ tickets: SprintFetchedTicket[]; truncated: boolean; names: string[] }> {
+): Promise<{ tickets: SprintFetchedTicket[]; truncated: boolean; names: string[]; boards: Map<number, number> }> {
   let v2 = false;
   let first: SearchPage;
   try {
@@ -200,6 +296,8 @@ async function search(
   }
   const tickets: SprintFetchedTicket[] = [];
   const sprintNames: string[] = [];
+  // board id → tickets in one of its ACTIVE sprints (the order is read off the busiest board).
+  const boards = new Map<number, number>();
   let page: SearchPage = first;
   let truncated = false;
   let names = first.names;
@@ -212,16 +310,20 @@ async function search(
         truncated = true;
         break;
       }
-      const t = toJiraSprintTicket(raw, names, schema, inSprint);
+      const t = toJiraSprintTicket(raw, names, schema, inSprint, a.call.apiRoot);
       if (t == null) continue;
       tickets.push(t);
       if (inSprint) {
         const ids = fieldIdsBySchema(asRecord(asRecord(raw)?.schema) ?? schema, asRecord(asRecord(raw)?.names) ?? names);
         const f = asRecord(asRecord(raw)?.fields);
         if (ids.sprint != null && f != null) {
+          const ticketBoards = new Set<number>();
           for (const sp of sprintsOf(f[ids.sprint])) {
-            if (sp.state === 'active' && !sprintNames.includes(sp.name)) sprintNames.push(sp.name);
+            if (sp.state !== 'active') continue;
+            if (!sprintNames.includes(sp.name)) sprintNames.push(sp.name);
+            if (sp.boardId != null) ticketBoards.add(sp.boardId);
           }
+          for (const b of ticketBoards) boards.set(b, (boards.get(b) ?? 0) + 1);
         }
       }
     }
@@ -233,7 +335,16 @@ async function search(
     }
     page = await searchPage(a, jql, page.next, v2);
   }
-  return { tickets, truncated, names: sprintNames };
+  return { tickets, truncated, names: sprintNames, boards };
+}
+
+/** The busiest board (most tickets; ties → the lowest id, so the pick is stable). Pure. */
+export function busiestBoard(boards: ReadonlyMap<number, number>): number | null {
+  let best: number | null = null;
+  for (const [id, n] of boards) {
+    if (best == null || n > (boards.get(best) ?? 0) || (n === boards.get(best) && id < best)) best = id;
+  }
+  return best;
 }
 
 export const listJiraSprint: SprintLister = async (a): Promise<SprintListResult> => {
@@ -241,7 +352,25 @@ export const listJiraSprint: SprintLister = async (a): Promise<SprintListResult>
   try {
     const r = await search(a, sprintJql(a.projectKeys), true);
     if (r.tickets.length > 0) {
-      return { source: { kind: 'sprint', provider: 'jira', names: r.names }, tickets: r.tickets, truncated: r.truncated };
+      const board = busiestBoard(r.boards);
+      let statusOrder: SprintStatusAutoOrder | null | undefined = null;
+      let statusOrderError: string | undefined;
+      if (board != null) {
+        try {
+          statusOrder = await readJiraBoardOrder(a, board, Date.now());
+        } catch (err) {
+          // ⚠ Never fails the list: the stored order stands.
+          statusOrder = undefined;
+          statusOrderError = err instanceof JiraFetchError ? err.code : 'unknown';
+        }
+      }
+      return {
+        source: { kind: 'sprint', provider: 'jira', names: r.names },
+        tickets: r.tickets,
+        truncated: r.truncated,
+        statusOrder,
+        ...(statusOrderError != null ? { statusOrderError } : {}),
+      };
     }
   } catch (err) {
     // 400: the site has no sprint field (no Jira Software), so `sprint in openSprints()` is invalid.
@@ -259,5 +388,7 @@ export const listJiraSprint: SprintLister = async (a): Promise<SprintListResult>
     },
     tickets: r.tickets,
     truncated: r.truncated,
+    // No sprint, no board: the category fallback orders the page.
+    statusOrder: null,
   };
 };

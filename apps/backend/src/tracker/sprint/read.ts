@@ -11,7 +11,7 @@ import { MSG_NO_READING_TRACKER, prepareTrackerCall } from '../calls.js';
 import { JiraFetchError, type JiraFetchErrorCode, type JiraTransport } from '../jira/fetch.js';
 import { maybeAdapterFor } from '../registry.js';
 import { githubIssuesRepos, readWorkspaceTrackerRow, trackerAccessOf } from '../settings.js';
-import { deriveAc, readAcFieldSettings, settingFor } from '../store.js';
+import { deriveAc, linkColumns, readAcFieldSettings, settingFor } from '../store.js';
 import type { FetchedTicket, TrackerCall } from '../types.js';
 import { accessFingerprint, backoffCode } from '../worker.js';
 import { afterSprintRead } from './hooks.js';
@@ -152,6 +152,8 @@ function textColumns(t: FetchedTicket, acSetting: string | null) {
     statusCategory: t.status?.category ?? null,
     assigneeName: t.assignee?.name ?? null,
     assigneeAvatarUrl: t.assignee?.avatarUrl ?? null,
+    // The blocking links + status id, observed keys only (an absent key keeps the stored value).
+    ...linkColumns(t),
   };
 }
 
@@ -234,6 +236,12 @@ export async function readWorkspaceSprint(
       return { ok: false, stored: 0, code };
     }
     const stored = await storeSprintList(ctx, accountId, workspaceId, call, row?.baseUrl ?? null, result.tickets, acSettingFor, now());
+    if (result.statusOrderError != null) {
+      ctx.log.warn(
+        { accountId, workspaceId, code: result.statusOrderError, route: 'tracker-sprint' },
+        'sprint status order read failed (non-fatal)',
+      );
+    }
     const t = ctx.schema.sprintReads;
     const done = now();
     await ctx.db
@@ -247,6 +255,8 @@ export async function readWorkspaceSprint(
         errorCode: null,
         truncated: result.truncated,
         nextReadAt: new Date(done + SPRINT_READ_INTERVAL_MS),
+        // The automatic status order: undefined = not read this time (a failed order read) → kept.
+        ...(result.statusOrder !== undefined ? { statusOrderJson: result.statusOrder } : {}),
       })
       .where(and(eq(t.accountId, accountId), eq(t.workspaceId, workspaceId)))
       .execute();

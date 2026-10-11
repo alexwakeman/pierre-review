@@ -1,4 +1,4 @@
-import { parseGithubIssueKey } from '@pierre-review/shared';
+import { parseGithubIssueKey, type SprintStatusAutoOrder } from '@pierre-review/shared';
 import { isRateLimitError } from '../../github/client.js';
 import { isBudgetLow, noteBudget, noteLimited } from '../../github/rate-budget.js';
 import { JiraFetchError } from '../jira/fetch.js';
@@ -126,6 +126,23 @@ const STATE_NAMES: Record<string, string> = {
   REOPENED: 'Open',
 };
 
+/** The status order GitHub Issues has (docs/TRACKERS.md § The status order): Open, then the closed
+ *  names `githubStatus` stores. Projects v2 status is not stored on tickets, so it is not read. */
+export function githubStatusOrder(readAt: string): SprintStatusAutoOrder {
+  return {
+    source: 'github',
+    statuses: [
+      { id: null, name: 'Open', category: 'new' },
+      ...[...new Set(Object.values(STATE_NAMES).filter((n) => n !== 'Open'))].map((name) => ({
+        id: null,
+        name,
+        category: 'done' as const,
+      })),
+    ],
+    readAt,
+  };
+}
+
 /** GitHub's open/closed + reason → the stored status and its category. */
 export function githubStatus(state: string | null, reason: string | null): FetchedTicket['status'] {
   const s = (state ?? '').toUpperCase();
@@ -157,6 +174,8 @@ export function toFetchedTicket(key: string, issue: GqlIssue): FetchedTicket {
         ? [{ id: githubAcFieldId(ac.criteria.source), name: ac.criteria.name, text: ac.criteria.text, match: 'strong' }]
         : [],
     omittedCandidates: 0,
+    // GitHub Issues has no blocking links Limn reads (docs/TRACKERS.md § Blocking links).
+    blockedBy: null,
     ...ticketDateFields({
       issueCreatedAt: trackerDate(issue as unknown as Record<string, unknown>, 'createdAt'),
       issueResolvedAt: trackerDate(issue as unknown as Record<string, unknown>, 'closedAt'),

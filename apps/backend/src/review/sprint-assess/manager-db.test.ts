@@ -48,7 +48,7 @@ const goodSubmit = {
   summary: 'Nearly ready: the basket is kept in memory only.',
   issues: [
     { id: 'unclear_done', text: 'Criterion 1 does not say how long the basket is kept.', repo: 'acme/web', path: 'src/basket.ts' },
-    { id: 'scope_unstated', text: 'Say whether guest baskets are out of scope.', repo: 'acme/web', path: 'src/invented.ts' },
+    { id: 'spec_gaps', text: 'No rule for what happens to a guest basket at sign-in.', repo: 'acme/web', path: 'src/invented.ts' },
   ],
   revisedCriteria: [],
 };
@@ -100,6 +100,11 @@ beforeAll(async () => {
       title: 'Save basket',
       description: 'As a shopper…',
       acceptanceCriteria: '- Basket survives a reload',
+      // An open tracker link and a finished one: the prompt hands in the OPEN one only, as fenced data.
+      blockedByJson: [
+        { key: 'ENG-8', title: 'Payments API', status: 'To Do', category: 'new', relation: 'is blocked by', url: null },
+        { key: 'ENG-6', title: 'Old spike', status: 'Done', category: 'done', relation: 'depends on', url: null },
+      ],
       firstSeenAt: new Date(),
       lastSeenAt: new Date(),
       fetchedAt: new Date(),
@@ -157,6 +162,8 @@ describe('sprint assessment manager', () => {
       expect(a.model).toBe('claude-sonnet-5');
       expect(a.worktrees).toEqual([checkoutRoot]);
       expect(a.prompt).toContain('Basket survives a reload');
+      expect(a.prompt).toMatch(/---BEGIN KNOWN \S+---\n- Waits on: ENG-8 Payments API \(To Do\)\n---END KNOWN/);
+      expect(a.prompt).not.toContain('ENG-6');
       a.onSubmit?.();
       await new Promise((r) => setTimeout(r, 20));
       const [after] = await db.select().from(schema.sprintAssessments).where(eq(schema.sprintAssessments.id, row.id)).execute();

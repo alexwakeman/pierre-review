@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { TICKET_TAB_PREFIX, isTrackerIdent, parseTicketIdent, trackerTicketRow } from '@pierre-review/shared';
 
 // Lightweight metadata captured when a PR-backed tab is opened, so the tab can
 // render its label (title + author) without re-fetching the full PR detail on
@@ -30,6 +31,9 @@ export type PinnedPr = TabMeta;
 //  - user-activity: one contributor's activity feed (keyed PER USER, non-PR, EPHEMERAL)
 //  - bot-detail: one review bot's depth analytics (keyed PER BOT user id, non-PR, EPHEMERAL —
 //    the per-bot drill-down that replaced the Bots "Behaviour" inner tab, plan P1.1/C1)
+//  - ticket: ONE tracker ticket's pull requests in isolation — its open PRs and its merged PRs
+//    (keyed PER TICKET ident, non-PR, EPHEMERAL but SELF-DESCRIBING: the key is the address, so a URL
+//    re-creates it). FREE core, wherever it is opened from. docs/FRONTEND.md § The ticket tab.
 export type TabKind =
   | 'pr-detail'
   | 'pr-focus'
@@ -43,7 +47,8 @@ export type TabKind =
   | 'search'
   | 'user-activity'
   | 'bot-detail'
-  | 'people-report';
+  | 'people-report'
+  | 'ticket';
 
 // The label metadata a user-activity tab carries, so its chip renders without a lookup
 // (and keeps rendering if the user drops out of the roster). Captured at open time.
@@ -67,13 +72,21 @@ export interface TabBotMeta {
   repoId: number | null;
 }
 
+// The label metadata a ticket tab carries (captured at open time; the tab's fetch fills the rest).
+export interface TabTicketMeta {
+  ident: string; // shared `trackerTicketIdent` — the same string the tab key carries
+  key: string; // the tracker key shown on the chip ("BMD-568")
+  title: string | null;
+}
+
 export interface Tab {
-  key: string; // stable: 'pr-detail:123' | 'pr-focus:123' | 'user-activity:45' | 'bot-detail:45'
+  key: string; // stable: 'pr-detail:123' | 'pr-focus:123' | 'user-activity:45' | 'bot-detail:45' | 'ticket:<ident>'
   kind: TabKind;
   prId: number; // PR id for pr-detail / pr-focus
   meta: TabMeta | null; // label meta for PR tabs
   userMeta?: TabUserMeta | null; // label meta for user-activity tabs
   botMeta?: TabBotMeta | null; // label meta for bot-detail tabs
+  ticketMeta?: TabTicketMeta | null; // label meta for ticket tabs
 }
 
 // Which "tab" the main area is showing: one of the two FIXED views (the Activity console — the
@@ -159,6 +172,28 @@ export function parseBotDetailKey(key: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+// One ticket's PRs, keyed PER TICKET (the user-activity pattern): two tickets' tabs sit side by side
+// and re-opening the same ticket re-focuses its tab. The key is `ticket:<ident>` with the ident
+// VERBATIM (it contains ':' '/' '#'; URLSearchParams escapes it in `view=`). EPHEMERAL like the other
+// per-entity drill-downs (`persist` keeps only the two PR kinds) but SELF-DESCRIBING: `applyUrlTab`
+// re-creates it from the key alone, with the key text parsed off the ident's tail.
+export const ticketTabKey = (ident: string): string => `${TICKET_TAB_PREFIX}${ident}`;
+/** The ident behind a ticket tab key (null for any other key or an empty ident). */
+export function parseTicketTabKey(key: string): string | null {
+  if (!key.startsWith(TICKET_TAB_PREFIX)) return null;
+  const ident = key.slice(TICKET_TAB_PREFIX.length);
+  return ident.trim() === '' || ident.length > 600 ? null : ident;
+}
+/** The ticket key an ident names (`…#BMD-568` → `BMD-568`; a GitHub ident
+ *  `github:https://github.com/o/r#12` → `o/r#12`, through shared `trackerTicketRow`), for a chip with
+ *  no meta yet. Falls back to the text after the last `#`. */
+export function ticketKeyOfIdent(ident: string): string {
+  const parsed = parseTicketIdent(ident);
+  if (isTrackerIdent(parsed)) return trackerTicketRow(parsed).issueKey;
+  const i = ident.lastIndexOf('#');
+  return i >= 0 ? ident.slice(i + 1) : ident;
+}
+
 /**
  * What the BOARD SLOT renders for this active tab: a pr-focus tab's isolated Timeline, or null for
  * the full shared board. A 'pr-focus:<id>' key only counts while that tab is still in `tabs` — a
@@ -225,6 +260,9 @@ interface TabsState {
   // Ensure (and activate) one review bot's depth drill-down tab. Keyed per bot (users.id);
   // `bot` is the chip/header label metadata, captured at open time from the ROI row.
   openBotDetailTab: (userId: number, bot: TabBotMeta | null, opts?: OpenOpts) => void;
+  // Ensure (and activate) one ticket's PR tab. Keyed per ticket ident. Callers go through
+  // `useOpenTicketTab()` (lib/ticketTab.ts), never this action directly.
+  openTicketTab: (ticket: TabTicketMeta, opts?: OpenOpts) => void;
 
   syncMeta: (meta: TabMeta) => void; // backfill label on every tab with this prId
   closeTab: (key: string) => void; // remove; fall back to 'timeline' if it was active
@@ -357,7 +395,15 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
     const fromActivity = opts?.fromActivity ?? s.activeTab === 'activity';
     const exists = s.tabs.some((t) => t.key === tab.key);
     const tabs = exists
-      ? s.tabs.map((t) => (t.key === tab.key && tab.meta != null ? { ...t, meta: tab.meta } : t))
+      ? s.tabs.map((t) =>
+          t.key !== tab.key
+            ? t
+            : tab.meta != null
+              ? { ...t, meta: tab.meta }
+              : tab.ticketMeta != null
+                ? { ...t, ticketMeta: tab.ticketMeta }
+                : t,
+        )
       : [...s.tabs, tab];
     if (!exists || tab.meta != null) persist(tabs);
     set({
@@ -425,6 +471,18 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
           prId: 0,
           meta: null,
           botMeta: bot,
+        },
+        opts,
+      ),
+
+    openTicketTab: (ticket, opts) =>
+      openTab(
+        {
+          key: ticketTabKey(ticket.ident),
+          kind: 'ticket',
+          prId: 0,
+          meta: null,
+          ticketMeta: ticket,
         },
         opts,
       ),
@@ -535,7 +593,19 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
                 ? { key: tab, kind: 'user-activity', prId: 0, meta: null, userMeta: null }
                 : parseBotDetailKey(tab) != null
                   ? { key: tab, kind: 'bot-detail', prId: 0, meta: null, botMeta: null }
-                  : null;
+                  : parseTicketTabKey(tab) != null
+                    ? {
+                        key: tab,
+                        kind: 'ticket',
+                        prId: 0,
+                        meta: null,
+                        ticketMeta: {
+                          ident: parseTicketTabKey(tab) as string,
+                          key: ticketKeyOfIdent(parseTicketTabKey(tab) as string),
+                          title: null,
+                        },
+                      }
+                    : null;
         const tabs = newTab != null ? [...s.tabs, newTab] : s.tabs;
         if (tabs !== s.tabs) persist(tabs);
         // The Back-flash: EXACTLY on a pop that lands on Activity with a launching item pending.

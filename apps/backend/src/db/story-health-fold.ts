@@ -1,4 +1,5 @@
 import {
+  STORY_HEALTH_HOVER_STORIES,
   STORY_HEALTH_ISSUE_SERIES,
   STORY_HEALTH_ROLLING_WEEKS,
   STORY_HEALTH_SERIES,
@@ -7,15 +8,21 @@ import {
   STORY_SHIFT_MIN_POINTS,
   STORY_SHIFT_MIN_STORIES,
   STORY_SHIFT_Z,
+  storyBlockedSource,
   storyIssueMeasure,
   storySizeBand,
+  type KnownTicket,
   type StoryCriterionLabel,
   type StoryHealthPoint,
   type StoryHealthSeries,
   type StoryHealthSeriesId,
   type StoryHealthSeriesMeta,
   type StoryHealthShift,
+  type StoryHealthStoryRef,
   type StoryHealthWeek,
+  type StoryIssueInput,
+  type StorySpecGapType,
+  type TicketLinkBlocker,
   type StoryLevelLabels,
   type StorySizeBand,
   type StoryIssueId,
@@ -34,14 +41,19 @@ import { detectChangepoints } from './changepoint.js';
 //     one list (db/story-health.ts).
 //   • UNKNOWN IS NEVER ZERO. A week with nothing measurable is `value: null`; a story of unknown size
 //     is in no size band and is counted (`unsizedStories`).
-//   • REFINEMENT = the FOUR STORY ISSUES (shared `story-issues.ts`), one series each: "% of stories with
-//     <issue>", story-weighted, counted by THE ONE RATE RULE `storyIssueMeasure` — over LABELLED
+//   • REFINEMENT = the THREE STORY ISSUES (shared `story-issues.ts`), one series each: "% of stories
+//     with <issue>", story-weighted, counted by THE ONE RATE RULE `storyIssueMeasure` — over LABELLED
 //     stories only (CURRENT labels: the caller passes `label: null` for a stale one), every issue over
-//     the same stories. ⚠ A known ticket with NO criteria is counted apart (`noCriteria` on the week,
-//     code) and never folded into "Unclear when done": it can never be labelled, so the mix would move
-//     with label coverage, not with the tickets.
+//     the same stories. ⚠ "Blocked" here is HOW THE STORY WAS WRITTEN: it linked or named other work,
+//     FINISHED OR NOT — a closed blocker must not drop an old story out of the series (that would
+//     rise at the right edge by construction). ⚠ A known ticket with NO criteria is counted apart
+//     (`noCriteria` on the week, code) and never folded into "Unclear when done": it can never be
+//     labelled, so the mix would move with label coverage, not with the tickets.
 //     The week's coverage (`labelled` of `labellable`) rides beside them. `labels: false` omits all
-//     four (cloud / the kill switch) — never a partial one.
+//     three (cloud / the kill switch) — never a partial one.
+//   • HOVER DETAIL (refinement points only, never in a hash or a shift): the week's numerator stories
+//     (key order, ≤ STORY_HEALTH_HOVER_STORIES, then `storiesMore`); Blocked's linked vs text-only
+//     split (`storyBlockedSource`); Spec gaps' types (each type once per story).
 //   • THIN: n < STORY_HEALTH_THIN_N → faint, and out of the rolling line and the time / count shift test.
 //   • ROLLING: the week and the three before it, NON-THIN weeks only, POOLED over their items — a
 //     percentage is Σnumerators ÷ Σdenominators, hours and counts the median of the pooled items. Never
@@ -81,6 +93,13 @@ export interface StoryHealthStoryInput {
   criteriaCount: number;
   /** The CURRENT label (this rubric, this text hash), or null. */
   label: { criteria: StoryCriterionLabel[]; story: StoryLevelLabels } | null;
+  /** Hover: the ticket key and title (absent → the story is listed by ident). */
+  key?: string;
+  title?: string | null;
+  /** The freshest stored row's tracker links (`blocked_by_json`); null/absent = not read. */
+  links?: readonly TicketLinkBlocker[] | null;
+  /** Stored tickets a label's named keys point at (shared across stories). */
+  knownTickets?: ReadonlyMap<string, KnownTicket> | null;
 }
 
 export interface StoryHealthWeekBound {
@@ -150,10 +169,55 @@ const ISSUE_OF_SERIES = new Map<StoryHealthSeriesId, StoryIssueId>(
   STORY_ISSUE_IDS.map((id) => [STORY_HEALTH_ISSUE_SERIES[id], id]),
 );
 
+type IssueStory = Pick<StoryHealthStoryInput, 'ticketKnown' | 'criteriaCount' | 'label' | 'links' | 'knownTickets'>;
+
+/** The story-issue input of one story (the criteria text is not needed — only its count). */
+function issueInputOf(s: IssueStory): StoryIssueInput {
+  return {
+    criteria: Array.from({ length: s.criteriaCount }, () => ''),
+    label: s.label,
+    links: s.links ?? null,
+    knownTickets: s.knownTickets ?? null,
+  };
+}
+
 /** One story's answer per issue under THE rate rule (`storyIssueMeasure`); null = leave it out. */
-export function storyIssueAnswers(s: Pick<StoryHealthStoryInput, 'ticketKnown' | 'criteriaCount' | 'label'>): Record<StoryIssueId, boolean | null> | null {
+export function storyIssueAnswers(s: IssueStory): Record<StoryIssueId, boolean | null> | null {
   if (!s.ticketKnown) return null;
-  return storyIssueMeasure({ criteria: Array.from({ length: s.criteriaCount }, () => ''), label: s.label });
+  return storyIssueMeasure(issueInputOf(s));
+}
+
+/** The hover detail of one refinement point: the numerator's stories and the per-issue split. Pure. */
+export function refinementHover(
+  issue: StoryIssueId,
+  pop: readonly StoryHealthStoryInput[],
+): Pick<StoryHealthPoint, 'stories' | 'storiesMore' | 'blockedSplit' | 'gapTypes'> {
+  const hits = pop.filter((s) => storyIssueAnswers(s)?.[issue] === true);
+  const refs: StoryHealthStoryRef[] = hits
+    .map((s) => ({ ident: s.ident, key: s.key ?? s.ident, title: s.title ?? null }))
+    .sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }) || a.ident.localeCompare(b.ident));
+  const out: Pick<StoryHealthPoint, 'stories' | 'storiesMore' | 'blockedSplit' | 'gapTypes'> = {
+    stories: refs.slice(0, STORY_HEALTH_HOVER_STORIES),
+    storiesMore: Math.max(0, refs.length - STORY_HEALTH_HOVER_STORIES),
+  };
+  if (issue === 'blocked') {
+    let linked = 0;
+    let textOnly = 0;
+    for (const s of hits) {
+      const src = storyBlockedSource(issueInputOf(s));
+      if (src === 'linked') linked += 1;
+      else if (src === 'text_only') textOnly += 1;
+    }
+    out.blockedSplit = { linked, textOnly };
+  }
+  if (issue === 'spec_gaps') {
+    const types: Partial<Record<StorySpecGapType, number>> = {};
+    for (const s of hits) {
+      for (const t of new Set((s.label?.story.gaps ?? []).map((g) => g.type))) types[t] = (types[t] ?? 0) + 1;
+    }
+    out.gapTypes = types;
+  }
+  return out;
 }
 
 const BAND_SERIES: Record<StorySizeBand, StoryHealthSeriesId> = { S: 'workingTimeS', M: 'workingTimeM', L: 'workingTimeL' };
@@ -326,7 +390,8 @@ export function timeShift(
 export function foldStoryHealth(
   stories: readonly StoryHealthStoryInput[],
   weeks: readonly StoryHealthWeekBound[],
-  opts: { nowMs: number; labels: boolean },
+  /** `held`: series left out (the caller passes STORY_HEALTH_HELD; the pure tests pass nothing). */
+  opts: { nowMs: number; labels: boolean; held?: Readonly<Partial<Record<StoryHealthSeriesId, string>>> },
 ): StoryHealthFold {
   const W = weeks.length;
   const refinement: StoryHealthStoryInput[][] = Array.from({ length: W }, () => []);
@@ -387,7 +452,9 @@ export function foldStoryHealth(
   const shifts: StoryHealthShift[] = [];
   for (const meta of STORY_HEALTH_SERIES) {
     if (meta.source === 'label' && !opts.labels) continue;
+    if (opts.held?.[meta.id] != null) continue;
     const pops = meta.panel === 'refinement' ? refinement : delivery;
+    const issue = ISSUE_OF_SERIES.get(meta.id);
     const perWeek: Item[][] = pops.map((pop) => pop.flatMap((s) => itemsFor(meta.id, s)));
     const thin = perWeek.map((items) => items.length < STORY_HEALTH_THIN_N);
     const points: StoryHealthPoint[] = perWeek.map((items, i) => {
@@ -404,6 +471,7 @@ export function foldStoryHealth(
         thin: thin[i]!,
         rolling: rollingWeeks > 0 ? valueOf(meta, pooled) : null,
         rollingWeeks,
+        ...(issue != null ? refinementHover(issue, pops[i]!) : {}),
       };
     });
     series.push({ id: meta.id, points });

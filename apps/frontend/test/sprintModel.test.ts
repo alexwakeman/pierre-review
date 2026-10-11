@@ -7,11 +7,13 @@ import {
   SPRINT_WRITE_REQUEST_ID_RE,
   SPRINT_WRITE_TEXT_MAX,
   SPRINT_CHECKS_DEFAULT,
+  SPRINT_STATUS_ORDER_MAX,
   foldStoryIssues,
   sprintBullets,
   sprintNoWriteSentence,
   type StoryIssue,
   type SprintAssessmentBody,
+  type SprintStatusLayout,
   type SprintTicketRow,
   type SprintWriteRecord,
 } from '@pierre-review/shared';
@@ -22,8 +24,16 @@ import {
   checkTypeChoices,
   toggleCheckType,
   currentTextFor,
-  groupSprintTickets,
+  deliveredRuleSentence,
+  canMoveStatus,
+  moveStatus,
   newWriteRequestId,
+  shareWords,
+  sprintSections,
+  statusEvidenceLine,
+  statusOrderSourceLabel,
+  statusSettingsToSave,
+  statusSplittable,
   proposedDefault,
   replaceCriteriaSection,
   replaceModeLabel,
@@ -42,6 +52,7 @@ function ticket(over: Partial<SprintTicketRow> = {}): SprintTicketRow {
     url: null,
     provider: 'jira',
     phase: 'not_started',
+    stage: 'not_started',
     status: null,
     issueType: null,
     assignee: null,
@@ -63,11 +74,18 @@ function ticket(over: Partial<SprintTicketRow> = {}): SprintTicketRow {
   };
 }
 
-const SCOPE: StoryIssue = { id: 'scope_unstated', criteria: [], total: 2, reasons: ['no_out_of_scope'] };
+const GAPS: StoryIssue = {
+  id: 'spec_gaps',
+  criteria: [],
+  blockers: [],
+  gaps: [{ type: 'edge_case', text: 'No behaviour when the export is empty' }],
+  total: 2,
+  reasons: ['gaps'],
+};
 
 const BODY: SprintAssessmentBody = {
   summary: 'Summary.',
-  issues: [{ id: 'scope_unstated', text: 'Say the export is CSV only.', ref: null }],
+  issues: [{ id: 'spec_gaps', text: 'Say the export is CSV only.', ref: null }],
   revisedCriteria: ['old one', 'new two', 'added'],
 };
 
@@ -109,15 +127,162 @@ describe('tab', () => {
   });
 });
 
-describe('grouping keeps the server order', () => {
-  it('Not started then In progress; order within kept; empty groups dropped', () => {
-    const a = ticket({ ident: 'a', phase: 'in_progress' });
-    const b = ticket({ ident: 'b', phase: 'not_started' });
-    const c = ticket({ ident: 'c', phase: 'in_progress' });
-    const g = groupSprintTickets([a, b, c]);
-    expect(g.map((x) => x.phase)).toEqual(['not_started', 'in_progress']);
-    expect(g[1]!.tickets.map((t) => t.ident)).toEqual(['a', 'c']);
-    expect(groupSprintTickets([a]).map((x) => x.phase)).toEqual(['in_progress']);
+function layout(over: Partial<SprintStatusLayout> = {}): SprintStatusLayout {
+  return {
+    order: [
+      { name: 'To Do', category: 'new', count: 1, auto: true, stage: 'not_started' },
+      { name: 'In Development', category: 'indeterminate', count: 2, auto: true, stage: 'writing' },
+      { name: 'Ready for QA', category: 'indeterminate', count: 1, auto: true, stage: 'writing' },
+      { name: 'In PO Review', category: 'indeterminate', count: 1, auto: true, stage: 'delivered' },
+      { name: 'Done', category: 'done', count: 0, auto: true, stage: 'done' },
+    ],
+    orderSource: 'jira_board',
+    deliveredFrom: 'In PO Review',
+    deliveredFromAuto: 'In PO Review',
+    evidence: [
+      { status: 'In Development', withPrs: 9, allMerged: 2 },
+      { status: 'Ready for QA', withPrs: 6, allMerged: 4 },
+      { status: 'In PO Review', withPrs: 11, allMerged: 11 },
+    ],
+    settings: { order: null, deliveredFrom: null },
+    ...over,
+  };
+}
+
+const st = (name: string, category: 'new' | 'indeterminate' | 'done' = 'indeterminate') => ({ name, category });
+
+describe('sections by status', () => {
+  it('Not started, Writing code, Code delivered — sections in layout order, server order within', () => {
+    const rows = [
+      ticket({ ident: 'a', stage: 'writing', status: st('Ready for QA') }),
+      ticket({ ident: 'b', stage: 'not_started', status: st('To Do', 'new') }),
+      ticket({ ident: 'c', stage: 'writing', status: st('In Development') }),
+      ticket({ ident: 'd', stage: 'delivered', status: st('In PO Review') }),
+      ticket({ ident: 'e', stage: 'writing', status: st('in development') }),
+      ticket({ ident: 'f', stage: 'done', status: st('Done', 'done') }),
+    ];
+    const g = sprintSections(rows, layout());
+    expect(g.map((x) => [x.stage, x.heading])).toEqual([
+      ['not_started', 'Not started'],
+      ['writing', 'Writing code'],
+      ['delivered', 'Code delivered'],
+    ]);
+    expect(g[0]!.sections).toEqual([{ status: null, tickets: [rows[1]] }]);
+    expect(g[1]!.sections.map((s) => [s.status, s.tickets.map((t) => t.ident)])).toEqual([
+      ['In Development', ['c', 'e']],
+      ['Ready for QA', ['a']],
+    ]);
+    expect(g[2]!.sections.map((s) => s.status)).toEqual(['In PO Review']);
+    // Done is never listed.
+    expect(g.flatMap((x) => x.sections.flatMap((s) => s.tickets)).some((t) => t.ident === 'f')).toBe(false);
+  });
+
+  it('nothing splits → one "In progress" heading; empty stages dropped', () => {
+    const rows = [ticket({ ident: 'a', stage: 'writing', status: st('In Development') })];
+    const g = sprintSections(rows, layout({ deliveredFrom: null }));
+    expect(g.map((x) => x.heading)).toEqual(['In progress']);
+    expect(sprintSections([], layout())).toEqual([]);
+  });
+
+  it('a status the layout does not list goes after the listed ones', () => {
+    const rows = [
+      ticket({ ident: 'x', stage: 'writing', status: st('Blocked by legal') }),
+      ticket({ ident: 'y', stage: 'writing', status: st('Ready for QA') }),
+    ];
+    expect(sprintSections(rows, layout())[0]!.sections.map((s) => s.status)).toEqual(['Ready for QA', 'Blocked by legal']);
+    // No layout at all: grouping still works, by first seen.
+    expect(sprintSections(rows, null)[0]!.sections.map((s) => s.status)).toEqual(['Blocked by legal', 'Ready for QA']);
+  });
+
+  it('the stage is the row\'s own (category beats position is the server\'s rule)', () => {
+    // A row the server put in Not started stays there whatever its status name is.
+    const g = sprintSections([ticket({ ident: 'n', stage: 'not_started', status: st('In PO Review') })], layout());
+    expect(g.map((x) => x.stage)).toEqual(['not_started']);
+  });
+});
+
+describe('status settings', () => {
+  it('only in-progress statuses can be the split', () => {
+    expect(statusSplittable({ category: 'indeterminate' })).toBe(true);
+    expect(statusSplittable({ category: null })).toBe(true);
+    expect(statusSplittable({ category: 'new' })).toBe(false);
+    expect(statusSplittable({ category: 'done' })).toBe(false);
+  });
+
+  it('move up / down, ends are no-ops', () => {
+    expect(moveStatus(['a', 'b', 'c'], 1, -1)).toEqual(['b', 'a', 'c']);
+    expect(moveStatus(['a', 'b', 'c'], 1, 1)).toEqual(['a', 'c', 'b']);
+    expect(moveStatus(['a', 'b'], 0, -1)).toEqual(['a', 'b']);
+    expect(moveStatus(['a', 'b'], 1, 1)).toEqual(['a', 'b']);
+  });
+
+  it('a move never crosses into another category (the server would snap it back)', () => {
+    const cat: Record<string, string | null> = { 'To Do': 'new', Coding: 'indeterminate', Review: null, Done: 'done' };
+    const of = (n: string) => cat[n] ?? null;
+    const names = ['To Do', 'Coding', 'Review', 'Done'];
+    expect(canMoveStatus(names, 0, 1, of)).toBe(false);
+    expect(moveStatus(names, 0, 1, of)).toEqual(names);
+    expect(moveStatus(names, 3, -1, of)).toEqual(names);
+    expect(canMoveStatus(names, 1, 1, of)).toBe(true); // null category reads as in progress
+    expect(moveStatus(names, 1, 1, of)).toEqual(['To Do', 'Review', 'Coding', 'Done']);
+  });
+
+  it('save payload caps the order at the route’s limit', () => {
+    const many = Array.from({ length: SPRINT_STATUS_ORDER_MAX + 1 }, (_, i) => `S${i}`);
+    const l = layout({ order: many.map((name) => ({ name, category: 'indeterminate', count: 0, auto: true, stage: 'writing' })) });
+    const moved = moveStatus(many, 1, -1);
+    const out = statusSettingsToSave(l, { order: moved, deliveredFrom: null, deliveredTouched: false });
+    expect(out.order).toHaveLength(SPRINT_STATUS_ORDER_MAX);
+    expect(out.order?.[0]).toBe('S1');
+  });
+
+  it('the source label keeps proper nouns mid-sentence', () => {
+    expect(statusOrderSourceLabel('linear_states', { inSentence: true })).toBe('Linear’s workflow');
+    expect(statusOrderSourceLabel('jira_board', { inSentence: true })).toBe('your board’s columns');
+  });
+
+  it('save payload: nothing moved → order null; untouched split → stored value', () => {
+    const l = layout();
+    const names = l.order.map((o) => o.name);
+    expect(statusSettingsToSave(l, { order: names, deliveredFrom: 'In PO Review', deliveredTouched: false })).toEqual({
+      order: null,
+      deliveredFrom: null,
+    });
+  });
+
+  it('save payload: moved → every name; picked → the name; picked the automatic answer → null', () => {
+    const l = layout();
+    const moved = moveStatus(l.order.map((o) => o.name), 2, -1);
+    expect(statusSettingsToSave(l, { order: moved, deliveredFrom: 'Ready for QA', deliveredTouched: true })).toEqual({
+      order: moved,
+      deliveredFrom: 'Ready for QA',
+    });
+    expect(
+      statusSettingsToSave(l, { order: l.order.map((o) => o.name), deliveredFrom: 'in po review', deliveredTouched: true }),
+    ).toEqual({ order: null, deliveredFrom: null });
+  });
+
+  it('save payload keeps an existing override the reader did not touch', () => {
+    const l = layout({
+      orderSource: 'override',
+      deliveredFrom: 'Ready for QA',
+      settings: { order: ['To Do', 'In Development', 'Ready for QA', 'In PO Review', 'Done'], deliveredFrom: 'Ready for QA' },
+    });
+    expect(statusSettingsToSave(l, { order: l.order.map((o) => o.name), deliveredFrom: 'Ready for QA', deliveredTouched: false })).toEqual(
+      l.settings,
+    );
+  });
+
+  it('ⓘ words come from the shared constants', () => {
+    expect(shareWords(0.6)).toBe('3 in 5');
+    expect(shareWords(0.5)).toBe('1 in 2');
+    expect(shareWords(0.37)).toBe('37%');
+    expect(deliveredRuleSentence()).toBe(
+      'The first in-progress status where at least 3 in 5 tickets with pull requests have them all merged, and at least 2 do.',
+    );
+    expect(statusEvidenceLine({ status: 'Ready for QA', withPrs: 6, allMerged: 4 })).toBe('Ready for QA · 4 of 6 merged');
+    expect(statusOrderSourceLabel('jira_board')).toBe('Your board’s columns');
+    expect(statusOrderSourceLabel('fallback')).toBe('Status category, then name');
   });
 });
 
@@ -180,7 +345,7 @@ describe('update panel', () => {
   });
 
   it('proposed defaults from a succeeded assessment', () => {
-    const t = withAssessment(ticket({ issues: [SCOPE] }), 'succeeded', 'current');
+    const t = withAssessment(ticket({ issues: [GAPS] }), 'succeeded', 'current');
     expect(proposedDefault(t, 'comment', SPRINT_CHECKS_DEFAULT)).toBe(
       'Summary.\n\n- Say the export is CSV only.\n\n**Proposed acceptance criteria**\n\n- old one\n- new two\n- added',
     );
@@ -201,15 +366,15 @@ describe('update panel', () => {
   });
 
   it('⚠ a stale run feeds nothing: no bullets of its own, no summary, no revised criteria', () => {
-    // The author added an "Out of scope" line since: code no longer raises scope_unstated.
+    // The author filled the gap since: code no longer raises spec_gaps.
     const stale = withAssessment(ticket({ issues: [] }), 'succeeded', 'stale');
     expect(sprintBullets(stale, SPRINT_CHECKS_DEFAULT)).toEqual([]);
     expect(proposedDefault(stale, 'comment', SPRINT_CHECKS_DEFAULT)).toBe('');
     expect(proposedDefault(stale, 'replace', SPRINT_CHECKS_DEFAULT)).toBe(stale.description);
     // Still raised by code: the TEMPLATED bullet, never the stale sentence.
-    const still = withAssessment(ticket({ issues: [SCOPE] }), 'succeeded', 'stale');
+    const still = withAssessment(ticket({ issues: [GAPS] }), 'succeeded', 'stale');
     expect(sprintBullets(still, SPRINT_CHECKS_DEFAULT)).toEqual([
-      { id: 'scope_unstated', text: 'Add an “Out of scope” line saying what this story will not do.', source: 'code', ref: null },
+      { id: 'spec_gaps', text: 'No behaviour when the export is empty', source: 'code', ref: null },
     ]);
     const old = withAssessment(ticket(), 'succeeded', 'stale', { outdated: true });
     expect(proposedDefault(old, 'comment', SPRINT_CHECKS_DEFAULT)).toBe('');
@@ -217,10 +382,10 @@ describe('update panel', () => {
   });
 
   it("⚠ Claude's sentence only REPLACES a bullet for an issue code raised; it never adds one", () => {
-    const body = { ...BODY, issues: [{ id: 'waits_on_work' as const, text: 'Waits on the billing API.', ref: null }, ...BODY.issues] };
-    const t = withAssessment(ticket({ issues: [SCOPE] }), 'succeeded', 'current', { body });
+    const body = { ...BODY, issues: [{ id: 'blocked' as const, text: 'Waits on the billing API.', ref: null }, ...BODY.issues] };
+    const t = withAssessment(ticket({ issues: [GAPS] }), 'succeeded', 'current', { body });
     expect(sprintBullets(t, SPRINT_CHECKS_DEFAULT)).toEqual([
-      { id: 'scope_unstated', text: 'Say the export is CSV only.', source: 'claude', ref: null },
+      { id: 'spec_gaps', text: 'Say the export is CSV only.', source: 'claude', ref: null },
     ]);
     // A ticket with no issues stays "Nothing flagged" when expanded, whatever Claude said.
     expect(sprintBullets(withAssessment(ticket({ issues: [] }), 'succeeded', 'current', { body }), SPRINT_CHECKS_DEFAULT)).toEqual([]);
@@ -265,8 +430,8 @@ describe('update panel', () => {
 describe('checks', () => {
   it('counts each switched-off issue, plus one for a type list', () => {
     expect(changedCheckCount(SPRINT_CHECKS_DEFAULT)).toBe(0);
-    expect(changedCheckCount({ off: ['too_big'], issueTypes: [] })).toBe(1);
-    expect(changedCheckCount({ off: ['too_big', 'scope_unstated'], issueTypes: ['Story', 'Bug'] })).toBe(3);
+    expect(changedCheckCount({ off: ['blocked'], issueTypes: [] })).toBe(1);
+    expect(changedCheckCount({ off: ['blocked', 'spec_gaps'], issueTypes: ['Story', 'Bug'] })).toBe(3);
   });
 
   it("type choices: the sprint's types plus saved ones, once each, sorted", () => {

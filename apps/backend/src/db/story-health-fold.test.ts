@@ -1,6 +1,14 @@
 // db/story-health-fold.ts — Story health's pure fold. No database.
 import { describe, expect, it } from 'vitest';
-import { STORY_HEALTH_SERIES, STORY_SHIFT_MIN_HOURS, STORY_SHIFT_Z, type StoryCriterionLabel } from '@pierre-review/shared';
+import {
+  STORY_HEALTH_HOVER_STORIES,
+  STORY_HEALTH_SERIES,
+  STORY_SHIFT_MIN_HOURS,
+  STORY_SHIFT_Z,
+  type StoryCriterionLabel,
+  type StoryLevelLabels,
+  type TicketLinkBlocker,
+} from '@pierre-review/shared';
 import { foldStoryHealth, storiesToLabel, twoProportionZ, type StoryHealthStoryInput, type StoryHealthWeekBound } from './story-health-fold.js';
 
 const DAY = 86_400_000;
@@ -14,8 +22,8 @@ const NOW = T0 + 12 * 7 * DAY + 2 * DAY; // inside the last week
 const at = (week: number, day = 1) => T0 + week * 7 * DAY + day * DAY;
 
 let seq = 0;
-const crit = (flags: Array<[boolean, boolean, boolean]>): StoryCriterionLabel[] =>
-  flags.map(([testable, bundled, dependsOnOtherWork], i) => ({ n: i + 1, testable, bundled, dependsOnOtherWork }));
+const crit = (flags: Flags): StoryCriterionLabel[] =>
+  flags.map((testable, i) => ({ n: i + 1, testable, reason: testable ? null : 'no expected result' }));
 function story(p: Partial<StoryHealthStoryInput> = {}): StoryHealthStoryInput {
   seq += 1;
   return {
@@ -34,12 +42,18 @@ function story(p: Partial<StoryHealthStoryInput> = {}): StoryHealthStoryInput {
     ...p,
   };
 }
-type Flags = Array<[boolean, boolean, boolean]>;
-const STORY_OK = { outOfScopeStated: true, dependencyNamed: false, nonCodeWork: false };
+/** One `testable` answer per criterion. */
+type Flags = boolean[];
+const STORY_OK: StoryLevelLabels = { dependencies: [], gaps: [] };
+const DEP = { kind: 'design' as const, what: 'map page design', owner: 'UCD team', ticketKey: null };
+const GAP = { type: 'edge_case' as const, text: 'No behaviour when the upload fails' };
+const doneLink: TicketLinkBlocker = { key: 'K-900', title: 'Old spike', status: 'Done', category: 'done', relation: 'is blocked by', url: null };
 /** A labelled story whose criteria count matches its label (so the label is usable). */
-const labelled = (flags: Flags, st: Partial<typeof STORY_OK> = {}, p: Partial<StoryHealthStoryInput> = {}) =>
+const labelled = (flags: Flags, st: Partial<StoryLevelLabels> = {}, p: Partial<StoryHealthStoryInput> = {}) =>
   story({ criteriaCount: flags.length, label: { criteria: crit(flags), story: { ...STORY_OK, ...st } }, ...p });
-const OK: Flags = [[true, false, false]];
+const OK: Flags = [true];
+const withGap = (yes: boolean) => ({ gaps: yes ? [GAP] : [] });
+const withDep = (yes: boolean) => ({ dependencies: yes ? [DEP] : [] });
 const seriesOf = (f: ReturnType<typeof foldStoryHealth>, id: string) => f.series.find((s) => s.id === id)!;
 
 describe('foldStoryHealth', () => {
@@ -67,14 +81,14 @@ describe('foldStoryHealth', () => {
   it('counts each story once per issue under the measure rule, and reports coverage', () => {
     const f = foldStoryHealth(
       [
-        // Criterion 3 untestable, criterion 2 bundled, criterion 3 waits: three issues, scope stated.
-        labelled([[true, false, false], [true, true, false], [false, false, true]]),
-        // Clean but no "out of scope".
-        labelled(OK, { outOfScopeStated: false }),
-        // Work that is not code → too big.
-        labelled(OK, { nonCodeWork: true }),
-        // Unlabelled with 12 criteria: NOT counted as too big (only label-backed answers count).
-        story({ criteriaCount: 12, label: null }),
+        // Criterion 3 untestable, a named design dependency, a spec gap: all three issues.
+        labelled([true, true, false], { dependencies: [DEP], gaps: [GAP] }, { key: 'K-2', title: 'Map page' }),
+        // A spec gap only.
+        labelled(OK, withGap(true), { key: 'K-1', title: 'Upload' }),
+        // ⚠ A FINISHED linked blocker still counts: Blocked is how the story was written.
+        labelled(OK, {}, { links: [doneLink], key: 'K-3', title: null }),
+        // Unlabelled, with an OPEN link: in no series (only labelled stories are measured).
+        story({ criteriaCount: 12, label: null, links: [{ ...doneLink, category: 'new' }] }),
         // Known ticket, no criteria, no label possible: counted apart, in no series.
         story({ criteriaCount: 0, label: null, labellable: false }),
       ],
@@ -83,34 +97,63 @@ describe('foldStoryHealth', () => {
     );
     expect(f.weeks[0]).toMatchObject({ storiesCreated: 5, noCriteria: 1, labellable: 4, labelled: 3 });
     expect(f.unlabelled).toBe(1);
-    // Every series over the SAME 3 labelled stories: 1 untestable (the no-criteria story is not folded in).
-    expect(seriesOf(f, 'unclearDone').points[0]!.value).toBeCloseTo(100 / 3);
+    // Every series over the SAME 3 labelled stories (the no-criteria story is not folded in).
     expect(seriesOf(f, 'unclearDone').points[0]).toMatchObject({ n: 3, thin: false });
-    // Bundled + non-code work.
-    expect(seriesOf(f, 'tooBig').points[0]!.value).toBeCloseTo(200 / 3);
-    expect(seriesOf(f, 'tooBig').points[0]!.n).toBe(3);
-    expect(seriesOf(f, 'waitsOnWork').points[0]!.value).toBeCloseTo(100 / 3);
-    expect(seriesOf(f, 'scopeUnstated').points[0]!.value).toBeCloseTo(100 / 3);
+    expect(seriesOf(f, 'unclearDone').points[0]!.value).toBeCloseTo(100 / 3);
+    expect(seriesOf(f, 'blocked').points[0]!.value).toBeCloseTo(200 / 3);
+    expect(seriesOf(f, 'specGaps').points[0]!.value).toBeCloseTo(200 / 3);
     expect(f.series.filter((x) => STORY_HEALTH_SERIES.find((m) => m.id === x.id)!.panel === 'refinement').map((x) => x.id)).toEqual([
       'unclearDone',
-      'tooBig',
-      'waitsOnWork',
-      'scopeUnstated',
+      'blocked',
+      'specGaps',
     ]);
   });
 
+  it('a refinement point carries its hover detail: the stories, Blocked’s split, Spec gaps’ types', () => {
+    const f = foldStoryHealth(
+      [
+        labelled(OK, { dependencies: [DEP], gaps: [GAP, { type: 'edge_case', text: 'No empty-file rule' }] }, { key: 'K-10', title: 'B' }),
+        labelled(OK, { gaps: [{ type: 'rule', text: 'No rule for ties' }] }, { key: 'K-9', title: 'A' }),
+        labelled(OK, {}, { links: [doneLink], key: 'K-11', title: 'C' }),
+      ],
+      weeks,
+      { nowMs: NOW, labels: true },
+    );
+    const blocked = seriesOf(f, 'blocked').points[0]!;
+    expect(blocked.stories!.map((x) => x.key)).toEqual(['K-10', 'K-11']);
+    expect(blocked.storiesMore).toBe(0);
+    expect(blocked.blockedSplit).toEqual({ linked: 1, textOnly: 1 });
+    const gaps = seriesOf(f, 'specGaps').points[0]!;
+    // Key order is numeric-aware (K-9 before K-10); a type counts once per story.
+    expect(gaps.stories).toEqual([
+      { ident: expect.any(String), key: 'K-9', title: 'A' },
+      { ident: expect.any(String), key: 'K-10', title: 'B' },
+    ]);
+    expect(gaps.gapTypes).toEqual({ edge_case: 1, rule: 1 });
+    expect(seriesOf(f, 'unclearDone').points[0]!.stories).toEqual([]);
+    // Delivery points carry none of it.
+    expect(seriesOf(f, 'workingTimeS').points[0]!.stories).toBeUndefined();
+  });
+
+  it(`the hover list is capped at ${STORY_HEALTH_HOVER_STORIES}, the rest counted`, () => {
+    const many = Array.from({ length: STORY_HEALTH_HOVER_STORIES + 3 }, (_, i) => labelled(OK, withGap(true), { key: `K-${i + 1}` }));
+    const p = seriesOf(foldStoryHealth(many, weeks, { nowMs: NOW, labels: true }), 'specGaps').points[0]!;
+    expect(p.stories).toHaveLength(STORY_HEALTH_HOVER_STORIES);
+    expect(p.storiesMore).toBe(3);
+  });
+
   it('⚠ ignores a label that judged a different number of criteria than today', () => {
-    const f = foldStoryHealth([story({ criteriaCount: 2, label: { criteria: crit([[false, true, true]]), story: STORY_OK } })], weeks, {
+    const f = foldStoryHealth([story({ criteriaCount: 2, label: { criteria: crit([false]), story: { dependencies: [DEP], gaps: [GAP] } } })], weeks, {
       nowMs: NOW,
       labels: true,
     });
-    for (const id of ['unclearDone', 'tooBig', 'waitsOnWork', 'scopeUnstated']) expect(seriesOf(f, id).points[0]!.n).toBe(0);
+    for (const id of ['unclearDone', 'blocked', 'specGaps']) expect(seriesOf(f, id).points[0]!.n).toBe(0);
   });
 
   it('omits every label series, the coverage and the to-do count when labels are off', () => {
     const f = foldStoryHealth([labelled(OK), story({ criteriaCount: 0, labellable: false })], weeks, { nowMs: NOW, labels: false });
     const labelIds = STORY_HEALTH_SERIES.filter((s) => s.source === 'label').map((s) => s.id);
-    expect(labelIds).toEqual(['unclearDone', 'tooBig', 'waitsOnWork', 'scopeUnstated']);
+    expect(labelIds).toEqual(['unclearDone', 'blocked', 'specGaps']);
     expect(f.series.some((s) => (labelIds as string[]).includes(s.id))).toBe(false);
     expect(f.series.map((s) => s.id)).toContain('workingTimeS');
     expect(f.weeks[0]!.labelled).toBe(0);
@@ -194,36 +237,36 @@ describe('foldStoryHealth', () => {
   });
 
   it('⚠ rate series: a one-story change never flags', () => {
-    // Three labelled stories a week, all stating scope — except one story in week 9. Weekly that is
+    // Three labelled stories a week, no spec gaps — except one story in week 9. Weekly that is
     // 0% → 33% → 0%; pooled it is at most 1 of 15.
     const stories: StoryHealthStoryInput[] = [];
     for (let w = 0; w < 13; w += 1) {
-      for (let k = 0; k < 3; k += 1) stories.push(labelled(OK, { outOfScopeStated: !(w === 9 && k === 0) }, { createdMs: at(w) }));
+      for (let k = 0; k < 3; k += 1) stories.push(labelled(OK, withGap(w === 9 && k === 0), { createdMs: at(w) }));
     }
     const f = foldStoryHealth(stories, weeks, { nowMs: NOW, labels: true });
-    expect(f.shifts.filter((s) => s.series === 'scopeUnstated')).toEqual([]);
+    expect(f.shifts.filter((s) => s.series === 'specGaps')).toEqual([]);
     // Nor do small weeks swinging 0% ↔ 100% with no change in the pooled share.
     const swing: StoryHealthStoryInput[] = [];
-    for (let w = 0; w < 13; w += 1) for (let k = 0; k < 3; k += 1) swing.push(labelled(OK, { nonCodeWork: w % 2 === 0 }, { createdMs: at(w) }));
-    expect(foldStoryHealth(swing, weeks, { nowMs: NOW, labels: true }).shifts.filter((s) => s.series === 'tooBig')).toEqual([]);
+    for (let w = 0; w < 13; w += 1) for (let k = 0; k < 3; k += 1) swing.push(labelled(OK, withDep(w % 2 === 0), { createdMs: at(w) }));
+    expect(foldStoryHealth(swing, weeks, { nowMs: NOW, labels: true }).shifts.filter((s) => s.series === 'blocked')).toEqual([]);
   });
 
   it('rate series: a real 40% → 80% over 20 + 20 stories flags, with pooled shares and units', () => {
     const stories: StoryHealthStoryInput[] = [];
     for (let w = 0; w < 8; w += 1) {
-      for (let k = 0; k < 5; k += 1) stories.push(labelled(OK, { outOfScopeStated: !(k < (w < 4 ? 2 : 4)) }, { createdMs: at(w) }));
+      for (let k = 0; k < 5; k += 1) stories.push(labelled(OK, withGap(k < (w < 4 ? 2 : 4)), { createdMs: at(w) }));
     }
     const f = foldStoryHealth(stories, weeks, { nowMs: NOW, labels: true });
-    const s = f.shifts.find((x) => x.series === 'scopeUnstated')!;
+    const s = f.shifts.find((x) => x.series === 'specGaps')!;
     // Lower is better for every issue: up is worse.
     expect(s).toMatchObject({ week: 4, before: 40, after: 80, beforeN: 20, afterN: 20, nOf: 'stories', beforeWeeks: 4, afterWeeks: 4, direction: 'up', verdict: 'worse' });
     expect(twoProportionZ(8, 20, 16, 20)).toBeGreaterThanOrEqual(STORY_SHIFT_Z);
     // Fewer than STORY_SHIFT_MIN_STORIES a side: 14 + 14 stories, 43% → 86%, never flags.
     const few: StoryHealthStoryInput[] = [];
     for (let w = 0; w < 4; w += 1) {
-      for (let k = 0; k < 7; k += 1) few.push(labelled(OK, { outOfScopeStated: !(k < (w < 2 ? 3 : 6)) }, { createdMs: at(w) }));
+      for (let k = 0; k < 7; k += 1) few.push(labelled(OK, withGap(k < (w < 2 ? 3 : 6)), { createdMs: at(w) }));
     }
-    expect(foldStoryHealth(few, weeks, { nowMs: NOW, labels: true }).shifts.filter((x) => x.series === 'scopeUnstated')).toEqual([]);
+    expect(foldStoryHealth(few, weeks, { nowMs: NOW, labels: true }).shifts.filter((x) => x.series === 'specGaps')).toEqual([]);
   });
 
   it('rate series: criteria met tests CRITERIA, with the story floor', () => {
@@ -255,7 +298,7 @@ describe('foldStoryHealth', () => {
       { nowMs: NOW, labels: true },
     );
     expect(seriesOf(f, 'unclearDone').points[0]).toMatchObject({ value: null, n: 0 });
-    expect(seriesOf(f, 'scopeUnstated').points[0]).toMatchObject({ value: null, n: 0 });
+    expect(seriesOf(f, 'specGaps').points[0]).toMatchObject({ value: null, n: 0 });
     expect(f.weeks[0]!.storiesCreated).toBe(2);
     // The read ticket with no criteria is counted apart; the unread one is not.
     expect(f.weeks[0]!.noCriteria).toBe(1);
@@ -266,7 +309,7 @@ describe('foldStoryHealth', () => {
     const stories: StoryHealthStoryInput[] = [];
     for (let w = 0; w < 13; w += 1) {
       for (let i = 0; i < 10; i += 1) {
-        if (w < 6) stories.push(labelled(i < 2 ? [[false, false, false], ...OK.slice(1)] : OK, {}, { createdMs: at(w) }));
+        if (w < 6) stories.push(labelled(i < 2 ? [false] : OK, {}, { createdMs: at(w) }));
         else {
           stories.push(story({ createdMs: at(w), criteriaCount: 0, label: null, labellable: false }));
           stories.push(story({ createdMs: at(w), criteriaCount: 4, label: null }));
@@ -293,9 +336,17 @@ describe('storiesToLabel', () => {
   it('lists labellable, unlabelled, refinement-bucketed stories newest first', () => {
     const a = story({ createdMs: at(1) });
     const b = story({ createdMs: at(5) });
-    const done = labelled([[true, true, true]], {}, { createdMs: at(6) });
+    const done = labelled([true], {}, { createdMs: at(6) });
     const none = story({ createdMs: at(7), labellable: false });
     const old = story({ createdMs: T0 - 40 * DAY });
     expect(storiesToLabel([a, b, done, none, old], weeks).map((s) => s.ident)).toEqual([b.ident, a.ident]);
+  });
+});
+
+describe('held series', () => {
+  it('a held series is left out entirely — no points, no shifts', () => {
+    const f = foldStoryHealth([], [], { nowMs: 0, labels: true, held: { specGaps: 'not agreed' } });
+    expect(f.series.some((s) => s.id === 'specGaps')).toBe(false);
+    expect(foldStoryHealth([], [], { nowMs: 0, labels: true }).series.some((s) => s.id === 'specGaps')).toBe(true);
   });
 });

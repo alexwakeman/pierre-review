@@ -1,18 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import type { StoryCriterionLabel, StoryIssueLabel } from '@pierre-review/shared';
+import type { KnownTicket, StoryCriterionLabel, StoryIssueLabel, StoryLevelLabels, TicketLinkBlocker } from '@pierre-review/shared';
 import { sprintCriteriaOf, sprintIssuesFor, sprintLabelState, type SprintChipInput } from './sprint-chips.js';
 
-// Reports → This sprint: a ticket's issues (db/sprint-chips.ts) — the four story issues over the
-// criteria and the CURRENT label, the label gate, and the workspace checks.
+// Reports → This sprint: a ticket's issues (db/sprint-chips.ts) — the three story issues over the
+// criteria, the CURRENT label, the stored tracker links and the stored tickets a label names; the label
+// gate; and the workspace checks.
 
-const crit = (n: number, o: Partial<StoryCriterionLabel> = {}): StoryCriterionLabel => ({
-  n,
-  testable: true,
-  bundled: false,
-  dependsOnOtherWork: false,
-  ...o,
-});
-const fine = { outOfScopeStated: true, dependencyNamed: true, nonCodeWork: false };
+const crit = (n: number, o: Partial<StoryCriterionLabel> = {}): StoryCriterionLabel => ({ n, testable: true, reason: null, ...o });
+const fine: StoryLevelLabels = { dependencies: [], gaps: [] };
 const base = (o: Partial<SprintChipInput> = {}): SprintChipInput => ({
   provider: 'jira',
   description: 'Save the basket.',
@@ -22,6 +17,15 @@ const base = (o: Partial<SprintChipInput> = {}): SprintChipInput => ({
 });
 const ids = (i: SprintChipInput, checks?: Parameters<typeof sprintIssuesFor>[1]) => sprintIssuesFor(i, checks).map((c) => c.id);
 const many = (k: number) => Array.from({ length: k }, (_, j) => `- Outcome ${j + 1}`).join('\n');
+const link = (key: string, o: Partial<TicketLinkBlocker> = {}): TicketLinkBlocker => ({
+  key,
+  title: `Title ${key}`,
+  status: 'To Do',
+  category: 'new',
+  relation: 'is blocked by',
+  url: `https://acme.atlassian.net/browse/${key}`,
+  ...o,
+});
 
 describe('sprintCriteriaOf', () => {
   it('reads the field first, then the description section, else none', () => {
@@ -40,42 +44,79 @@ describe('sprintCriteriaOf', () => {
 });
 
 describe('sprintIssuesFor — without a label', () => {
-  it('a ticket with a few criteria and no label raises nothing', () => {
+  it('a ticket with criteria and no label raises nothing — however many criteria', () => {
     expect(ids(base())).toEqual([]);
+    // "Too big" is gone: a long list raises nothing on count alone.
+    expect(ids(base({ acceptanceCriteria: many(20) }))).toEqual([]);
   });
   it('no criteria is "Unclear when done"', () => {
     const issues = sprintIssuesFor(base({ acceptanceCriteria: '', description: 'Fix the thing' }));
-    expect(issues).toEqual([{ id: 'unclear_done', criteria: [], total: 0, reasons: ['no_criteria'] }]);
+    expect(issues).toEqual([{ id: 'unclear_done', total: 0, reasons: ['no_criteria'], criteria: [], blockers: [], gaps: [] }]);
   });
-  it('more than 8 criteria is "Too big" on count alone', () => {
-    expect(ids(base({ acceptanceCriteria: many(8) }))).toEqual([]);
-    expect(sprintIssuesFor(base({ acceptanceCriteria: many(9) }))).toEqual([
-      { id: 'too_big', criteria: [], total: 9, reasons: ['many_criteria'] },
-    ]);
+  it('an open tracker link raises "Blocked" with no label; a done one does not', () => {
+    const open = sprintIssuesFor(base({ links: [link('ENG-8')] }));
+    expect(open.map((i) => [i.id, i.reasons])).toEqual([['blocked', ['linked']]]);
+    expect(open[0]!.blockers[0]).toMatchObject({ source: 'link', ticketKey: 'ENG-8', what: 'Title ENG-8', status: 'To Do', resolved: false });
+    expect(ids(base({ links: [link('ENG-6', { status: 'Done', category: 'done' })] }))).toEqual([]);
   });
-  it('criteria in the description are not an issue any more', () => {
-    expect(ids(base({ acceptanceCriteria: '', description: 'Intro\n\nh3. Acceptance criteria\n* One\n* Two' }))).toEqual([]);
+  it('GitHub Issues (links null) raises only what code knows', () => {
+    expect(ids(base({ provider: 'github', links: null }))).toEqual([]);
   });
 });
 
 describe('sprintIssuesFor — with a current label', () => {
-  it('folds every label half into at most four issues', () => {
+  it('folds the label into the three specific issues', () => {
     const label: StoryIssueLabel = {
-      criteria: [crit(1, { bundled: true, dependsOnOtherWork: true }), crit(2, { testable: false })],
-      story: { outOfScopeStated: false, dependencyNamed: false, nonCodeWork: true },
+      criteria: [crit(1), crit(2, { testable: false, reason: 'no expected result' })],
+      story: {
+        dependencies: [{ kind: 'design', what: 'map page design', owner: 'UCD team', ticketKey: null }],
+        gaps: [{ type: 'edge_case', text: 'No behaviour when the upload fails' }],
+      },
     };
-    expect(sprintIssuesFor(base({ label }))).toEqual([
-      { id: 'unclear_done', criteria: [2], total: 2, reasons: ['untestable'] },
-      { id: 'too_big', criteria: [1], total: 2, reasons: ['bundled', 'non_code_work'] },
-      { id: 'waits_on_work', criteria: [1], total: 2, reasons: ['depends_unnamed'] },
-      { id: 'scope_unstated', criteria: [], total: 2, reasons: ['no_out_of_scope'] },
+    const issues = sprintIssuesFor(base({ label }));
+    expect(issues.map((i) => i.id)).toEqual(['unclear_done', 'blocked', 'spec_gaps']);
+    expect(issues[0]!.criteria).toEqual([{ n: 2, reason: 'no expected result' }]);
+    expect(issues[1]!.blockers).toEqual([
+      {
+        source: 'text',
+        kind: 'design',
+        ticketKey: null,
+        what: 'map page design',
+        owner: 'UCD team',
+        status: null,
+        category: null,
+        relation: null,
+        url: null,
+        resolved: false,
+      },
     ]);
+    expect(issues[2]!.gaps).toEqual([{ type: 'edge_case', text: 'No behaviour when the upload fails' }]);
+  });
+  it('a text dependency naming a linked key is shown once, as the link', () => {
+    const label: StoryIssueLabel = {
+      criteria: [crit(1), crit(2)],
+      story: { dependencies: [{ kind: 'ticket', what: 'banner', owner: null, ticketKey: 'eng-8' }], gaps: [] },
+    };
+    const [blocked] = sprintIssuesFor(base({ label, links: [link('ENG-8')] }));
+    expect(blocked!.reasons).toEqual(['linked']);
+    expect(blocked!.blockers.map((b) => [b.source, b.ticketKey])).toEqual([['link', 'ENG-8']]);
+  });
+  it('a named key resolves through the stored tickets; a done one is not raised', () => {
+    const label: StoryIssueLabel = {
+      criteria: [crit(1), crit(2)],
+      story: { dependencies: [{ kind: 'ticket', what: 'banner', owner: null, ticketKey: 'ENG-9' }], gaps: [] },
+    };
+    const known = (category: KnownTicket['category'], status: string) =>
+      new Map<string, KnownTicket>([['ENG-9', { title: 'Cookie banner', status, category, url: null }]]);
+    const [open] = sprintIssuesFor(base({ label, knownTickets: known('indeterminate', 'In Progress') }));
+    expect(open!.blockers[0]).toMatchObject({ what: 'Cookie banner', status: 'In Progress', resolved: false });
+    expect(ids(base({ label, knownTickets: known('done', 'Done') }))).toEqual([]);
   });
   it('a clean label raises nothing', () => {
     expect(ids(base({ label: { criteria: [crit(1), crit(2)], story: fine } }))).toEqual([]);
   });
   it('a label judging a different number of criteria is ignored', () => {
-    const label = { criteria: [crit(1, { testable: false })], story: { ...fine, outOfScopeStated: false } };
+    const label = { criteria: [crit(1, { testable: false, reason: 'vague' })], story: fine };
     expect(ids(base({ label }))).toEqual([]);
     expect(sprintLabelState(base({ label }), true)).toBe('pending');
   });
@@ -92,14 +133,17 @@ describe('sprintLabelState', () => {
 });
 
 describe('sprintIssuesFor — the workspace checks', () => {
-  const label: StoryIssueLabel = { criteria: [crit(1), crit(2)], story: { ...fine, outOfScopeStated: false } };
+  const label: StoryIssueLabel = {
+    criteria: [crit(1), crit(2)],
+    story: { dependencies: [], gaps: [{ type: 'rule', text: 'No rule for duplicate baskets' }] },
+  };
   it('a switched-off issue is not raised', () => {
-    expect(ids(base({ label }), { off: ['scope_unstated'], issueTypes: [] })).toEqual([]);
+    expect(ids(base({ label }), { off: ['spec_gaps'], issueTypes: [] })).toEqual([]);
   });
   it('a ticket whose type is not listed raises nothing, case-insensitively', () => {
     const storyOnly = { off: [], issueTypes: ['story'] };
     expect(ids(base({ label, issueType: 'Bug' }), storyOnly)).toEqual([]);
-    expect(ids(base({ label, issueType: 'Story' }), storyOnly)).toEqual(['scope_unstated']);
-    expect(ids(base({ label, issueType: null }), storyOnly)).toEqual(['scope_unstated']);
+    expect(ids(base({ label, issueType: 'Story' }), storyOnly)).toEqual(['spec_gaps']);
+    expect(ids(base({ label, issueType: null }), storyOnly)).toEqual(['spec_gaps']);
   });
 });

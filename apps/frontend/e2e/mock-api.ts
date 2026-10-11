@@ -512,7 +512,7 @@ const SYNC_ACTIVITY: SyncActivityResponse = {
 // served explicitly — the catch-all `{}` has no `tickets`/`read`, and the tab would blank. One
 // not-started ticket with issues and no repos, one in-progress ticket with a SUCCEEDED assessment.
 // Issues come from the shared fold, so the fixture cannot drift from it.
-const SPRINT_TICKET_BASE: Omit<SprintTicketRow, 'ident' | 'key' | 'title' | 'phase'> = {
+const SPRINT_TICKET_BASE: Omit<SprintTicketRow, 'ident' | 'key' | 'title' | 'phase' | 'stage'> = {
   url: null,
   provider: 'jira',
   status: null,
@@ -538,11 +538,24 @@ const SPRINT_ACME2_ISSUES = foldStoryIssues({
   criteria: ['Users get a link by email', 'The link works once'],
   label: {
     criteria: [
-      { n: 1, testable: false, bundled: false, dependsOnOtherWork: false },
-      { n: 2, testable: true, bundled: false, dependsOnOtherWork: false },
+      { n: 1, testable: false, reason: 'no expected result' },
+      { n: 2, testable: true, reason: null },
     ],
-    story: { outOfScopeStated: true, dependencyNamed: true, nonCodeWork: false },
+    story: {
+      dependencies: [{ kind: 'design', what: 'email template', owner: 'UCD team', ticketKey: null }],
+      gaps: [{ type: 'edge_case', text: 'No behaviour when the link has expired' }],
+    },
   },
+  links: [
+    {
+      key: 'ACME-9',
+      title: 'Email sending service',
+      status: 'In Progress',
+      category: 'indeterminate',
+      relation: 'is blocked by',
+      url: 'https://acme.atlassian.net/browse/ACME-9',
+    },
+  ],
 });
 const SPRINT_STORIES: SprintStoriesResponse = {
   workspaceId: WORKSPACE.id,
@@ -555,6 +568,22 @@ const SPRINT_STORIES: SprintStoriesResponse = {
   repos: [{ repoId: REPO.id, fullName: REPO.fullName }],
   checks: { off: [], issueTypes: [] },
   issueTypes: ['Story'],
+  statusLayout: {
+    order: [
+      { name: 'To Do', category: 'new', count: 1, auto: true, stage: 'not_started' },
+      { name: 'In Progress', category: 'indeterminate', count: 1, auto: true, stage: 'writing' },
+      { name: 'In Review', category: 'indeterminate', count: 0, auto: true, stage: 'delivered' },
+      { name: 'Done', category: 'done', count: 0, auto: true, stage: 'done' },
+    ],
+    orderSource: 'jira_board',
+    deliveredFrom: 'In Review',
+    deliveredFromAuto: 'In Review',
+    evidence: [
+      { status: 'In Progress', withPrs: 3, allMerged: 0 },
+      { status: 'In Review', withPrs: 4, allMerged: 3 },
+    ],
+    settings: { order: null, deliveredFrom: null },
+  },
   tickets: [
     {
       ...SPRINT_TICKET_BASE,
@@ -563,6 +592,7 @@ const SPRINT_STORIES: SprintStoriesResponse = {
       title: 'Export a report as CSV',
       url: 'https://acme.atlassian.net/browse/ACME-1',
       phase: 'not_started',
+      stage: 'not_started',
       status: { name: 'To Do', category: 'new' },
       issues: SPRINT_ACME1_ISSUES,
       flagCount: SPRINT_ACME1_ISSUES.length,
@@ -575,6 +605,7 @@ const SPRINT_STORIES: SprintStoriesResponse = {
       title: 'Sign in with a magic link',
       url: 'https://acme.atlassian.net/browse/ACME-2',
       phase: 'in_progress',
+      stage: 'writing',
       status: { name: 'In Progress', category: 'indeterminate' },
       description: '## Acceptance criteria\n\n- Users get a link by email\n- The link works once',
       criteria: { items: ['Users get a link by email', 'The link works once'], source: 'description_heading' },

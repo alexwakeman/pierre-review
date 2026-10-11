@@ -5,6 +5,7 @@ import {
   type JiraStatusCategory,
   type JiraTicketDetails,
   type TicketLink,
+  type TicketLinkBlocker,
 } from '@pierre-review/shared';
 import type { TrackerContext } from './context.js';
 import { inChunks } from './context.js';
@@ -61,6 +62,24 @@ export interface StoredTicketRow {
   // (a row from before 0098) or the tracker said none. NOT story text: never moves `changedAt`.
   issueCreatedAt: Date | null;
   issueResolvedAt: Date | null;
+  // The tracker LINKS this ticket waits on and the tracker's status id (migration 0103 / pg 0090;
+  // docs/TRACKERS.md § Blocking links). Optional on a WRITE: absent = the read did not carry them
+  // (the stored value stands). Not story text: never moves `changedAt`.
+  blockedByJson?: TicketLinkBlocker[] | null;
+  statusId?: string | null;
+}
+
+/** The link + status-id columns of a fetched ticket, observed keys only (CLAUDE.md: clear a column
+ *  only on a positive statement). Shared by the ticket worker and the sprint read. */
+export function linkColumns(t: {
+  blockedBy?: TicketLinkBlocker[] | null;
+  status: { id?: string | null } | null;
+}): { blockedByJson?: TicketLinkBlocker[] | null; statusId?: string | null } {
+  return {
+    ...(t.blockedBy !== undefined ? { blockedByJson: t.blockedBy } : {}),
+    // A status with no id (GitHub) states there is none; no status at all says nothing about it.
+    ...(t.status != null ? { statusId: t.status.id ?? null } : {}),
+  };
 }
 
 // ---- the acceptance-criteria field ----

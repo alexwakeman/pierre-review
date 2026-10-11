@@ -1167,30 +1167,28 @@ a refusable forecast. **Metrics are CORE** (`db/period-metrics.ts`, `db/forecast
 time, PRs, size, criteria) + the **story report**: ONE agentic Haiku 5.5 run across 10-20 stories
 CODE picks (`db/story-selection.ts`) over a chosen window (sprint / 30 / 60 / 90 days, default 60),
 local-only AND Pro (`periodReports`, 402), stored in `story_reports` (sqlite `0097` / pg `0084`). Its
-points group under the FOUR STORY ISSUES (below). ⚠ The figures — issue rates included — are CODE's,
+points group under the THREE STORY ISSUES (below). ⚠ The figures — issue rates included — are CODE's,
 over the whole window; the picks are a sample the agent may never quote a rate from. ⚠ Every ticket
 key must be a picked key; the first `submit_report` wins. [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story report.
 
-**THE FOUR STORY ISSUES** (shared `story-issues.ts`) are the ONE vocabulary for what is wrong with a
-ticket — Unclear when done · Too big · Waits on other work · Scope not stated — folded in CODE from
-`extractCriteria` + the six stored Haiku labels (`story_labels`; `STORY_RUBRIC_VERSION` unchanged).
-Rates over many stories go through ONE rule, `storyIssueMeasure`: labelled stories only, for every
-issue; "no criteria" is counted apart, never folded in (it would track label coverage). Every sentence
-about an issue is templated.
+**THE THREE STORY ISSUES** (shared `story-issues.ts`) — Unclear when done (which criterion, why) ·
+Blocked (what, who, state: tracker links, then dependencies the label names) · Spec gaps. Input via
+`db/story-issue-input.ts`; retired ids drop through `isStoryIssueId`. ⚠ This sprint asks "blocked NOW"
+(`foldStoryIssues`); rates ask "how it was WRITTEN" (`storyIssueMeasure`: labelled stories only, any
+dependency finished or not, "no criteria" apart). Every sentence is templated.
 
 **Story health** (Reports → Stories, "Last 90 days", a FIXED labelled span) — core
 `GET /api/story-health` (Pro, 402). REFINEMENT (by the ticket's CREATED week, `issue_created_at`,
 else first PR opened, counted) is one "% of stories" series per issue; DELIVERY is by last merge.
 ⚠ Refinement is every ticket with an open OR merged PR written in the span, never only the merged
 ones. ⚠ Labels count ONLY when CURRENT (rubric version AND text hash, `db/story-label-input.ts`); with
-`config.aiEnabled` false the four series are OMITTED. ⚠ A RATE shift is a two-proportion test on
+`config.aiEnabled` false the three series are OMITTED. ⚠ A RATE shift is a two-proportion test on
 POOLED counts (`STORY_SHIFT_*`), never a changepoint over weekly percentages.
 [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story labels.
 
 **Reports → This sprint** (`?insightsTab=sprint`, Pro `periodReports`; sqlite `0100` / pg `0087`): the
-tracker's current sprint; per ticket at most FOUR story issues (`foldStoryIssues`, shared
-`story-issues.ts`, minus the workspace's checks — `applyStoryIssueChecks`, server-side), one sentence
-each; reader-ACCEPTED repos (code only suggests); "Check against code" (Sonnet 5, LOCAL ONLY,
+tracker's current sprint in status sections (`db/sprint-status-layout.ts`); per ticket ≤ 3 story
+issues minus the workspace's checks (`applyStoryIssueChecks`); reader-ACCEPTED repos; "Check against code" (Sonnet 5, LOCAL ONLY,
 `review/sprint-assess/`: a summary + ≤ 1 sentence per issue, cited paths verified or dropped) and the
 per-ticket write-back. ⚠ Nothing writes without the dialog's Confirm; no agent tool,
 setting or bulk route writes. Copy goes through ONE helper, `lib/copy.ts`.
@@ -1534,7 +1532,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0089` and plugin `0034`–`0037` + `0040` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0090` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

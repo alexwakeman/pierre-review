@@ -37,7 +37,7 @@ export function ticketHeader(key: string, title: string): string {
   return t === '' ? `## ${key}` : `## ${key} — ${t}`;
 }
 
-/** One issue's bullet as one Markdown line: "**Too big**: Split this story: … (`path` in `repo`)". */
+/** One issue's bullet as one Markdown line: "**Spec gaps**: No error copy for an expired link (`path` in `repo`)". */
 export function sprintBulletMarkdown(b: SprintBullet): string {
   const ref = b.ref != null ? ` (\`${b.ref.path}\` in \`${b.ref.repo}\`)` : '';
   return `**${STORY_ISSUE_BY_ID[b.id].label}**: ${oneLine(b.text)}${ref}`;

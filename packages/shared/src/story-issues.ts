@@ -1,33 +1,53 @@
-import type { StoryCriterionLabel, StoryLevelLabels } from './story-health.js';
+import type { JiraStatusCategory } from './types.js';
+import type {
+  StoryCriterionLabel,
+  StoryDependencyKind,
+  StoryDependencyLabel,
+  StoryLevelLabels,
+  StorySpecGap,
+} from './story-health.js';
 
-// THE FOUR STORY ISSUES — the ONE vocabulary for "what is wrong with this ticket" across Reports →
+// THE THREE STORY ISSUES — the ONE vocabulary for "what is wrong with this ticket" across Reports →
 // This sprint (chips, bullets, checks, the code assessment), Story health (the refinement panel) and
 // the story report (its points carry an issue id). docs/CLAUDE-REVIEW.md § Story issues.
 //
-// FOLDED IN CODE from inputs that already exist — never a new model call, never a relabel:
-//   • the numbered criteria (`extractCriteria`, the ONE extractor), and
-//   • the six stored Haiku labels (`story_labels`, `STORY_RUBRIC_VERSION` unchanged): per criterion
-//     testable / bundled / dependsOnOtherWork, per story outOfScopeStated / dependencyNamed /
-//     nonCodeWork.
+// Each issue is SPECIFIC: it carries the detail a reader needs to act — WHICH criterion and WHY, WHAT
+// the story waits on, WHO owns it and in WHAT STATE, WHICH detail the spec leaves out.
 //
-//   unclear_done    no criteria, OR any criterion not testable.
-//   too_big         more than STORY_TOO_BIG_CRITERIA criteria, OR any criterion bundled, OR nonCodeWork.
-//   waits_on_work   any criterion dependsOnOtherWork.
-//   scope_unstated  outOfScopeStated is false.
+//   unclear_done  no criteria (code), OR criteria the labeller could not check — each with a REASON.
+//   blocked       work the story waits on, from TWO sources in order of trust:
+//                   • TRACKER LINKS (code, objective): Jira "is blocked by" / "depends on" links,
+//                     Linear "blocks" relations — stored on the ticket (`blocked_by_json`), with the
+//                     linked issue's key, title and status. A link whose status category is `done` is
+//                     RESOLVED: shown in the detail, never raised.
+//                   • NAMED IN TEXT (the label): dependencies the ticket names without a link — what,
+//                     owner, and a ticket key when one is named. A named key that is a STORED ticket
+//                     gets its title + status from code (`knownTickets`); one that is done is resolved.
+//   spec_gaps     up to three specific missing details from the label (a rule, an edge case, a design,
+//                 data, a non-functional need).
+//
+// ⚠ "Too big" and "Scope not stated" were REMOVED (2026-10-11, user decision): the first flagged 69 of
+// 73 real stories and splitting is not the reader's call; the second was too generic to act on. Their
+// ids may still sit in OLD stored rows (story reports' `issue`, assessment bodies, sprint checks): every
+// reader drops an id `isStoryIssueId` does not know — never renders it, never fails on it.
 //
 // ⚠ A LABEL HALF NEEDS A CURRENT LABEL — the caller hands in only the label whose text hash equals
-// today's (`storyLabelInput`), and a label that judged a different NUMBER of criteria than today's list
-// is ignored here (criterion n must point at the text it judged). With no usable label, only what code
-// knows is raised: "no criteria" and "more than 8 criteria". Unknown is never "fine": `storyIssueStates`
-// says `null` for an issue it cannot decide, and Story health leaves that story out of that series.
+// today's (`storyLabelInput`) at `STORY_RUBRIC_VERSION`, and a label that judged a different NUMBER of
+// criteria than today's list is ignored (criterion n must point at the text it judged). With no usable
+// label, only what code knows is raised: "no criteria" and linked blockers.
 //
-// ⚠ EVERY SENTENCE HERE IS TEMPLATED — the chip detail and the one-line bullet. Never model text. (The
-// code assessment may REPLACE a bullet with its own sentence; that is labelled as Claude's on screen.)
+// ⚠ TWO QUESTIONS, TWO FOLDS — never one reused for the other:
+//   • `foldStoryIssues` — THE TICKET NOW (This sprint): is it blocked TODAY? A finished dependency is
+//     not a blocker.
+//   • `storyIssueMeasure` — HOW THE STORY WAS WRITTEN (Story health, the story report's rates): did it
+//     depend on other work at all? Finished or not — or every old story would read "not blocked" once
+//     its blockers closed, and the series would rise at the right edge by construction.
+//
+// ⚠ EVERY SENTENCE HERE IS TEMPLATED — the chip detail and the one-line bullet. The REASON / WHAT /
+// OWNER / GAP strings inside them are the labeller's short phrases (validated, capped), shown as data.
+// (The code assessment may REPLACE a bullet with its own sentence; that is labelled as Claude's.)
 
-/** A ticket with more criteria than this is "Too big" on count alone. */
-export const STORY_TOO_BIG_CRITERIA = 8;
-
-export type StoryIssueId = 'unclear_done' | 'too_big' | 'waits_on_work' | 'scope_unstated';
+export type StoryIssueId = 'unclear_done' | 'blocked' | 'spec_gaps';
 
 export interface StoryIssueMeta {
   id: StoryIssueId;
@@ -37,14 +57,17 @@ export interface StoryIssueMeta {
   order: number;
   /** The issue AVOIDED, for a strength ("What we do well"): naming the problem there reads as one. */
   avoided: string;
+  /** The label for a RATE counted by `storyIssueMeasure` (Story health's series, the story report's
+   *  whole-window figures). It differs from `label` where the populations differ: a "Blocked" chip is
+   *  the ticket NOW (open dependencies only); the measure counts every dependency, finished or not. */
+  measureLabel: string;
 }
 
 /** In display order. */
 export const STORY_ISSUES: readonly StoryIssueMeta[] = [
-  { id: 'unclear_done', label: 'Unclear when done', order: 0, avoided: 'Clear when done' },
-  { id: 'too_big', label: 'Too big', order: 1, avoided: 'Right-sized' },
-  { id: 'waits_on_work', label: 'Waits on other work', order: 2, avoided: 'Nothing to wait on' },
-  { id: 'scope_unstated', label: 'Scope not stated', order: 3, avoided: 'Scope stated' },
+  { id: 'unclear_done', label: 'Unclear when done', order: 0, avoided: 'Clear when done', measureLabel: 'Unclear when done' },
+  { id: 'blocked', label: 'Blocked', order: 1, avoided: 'Nothing blocking', measureLabel: 'Had blockers' },
+  { id: 'spec_gaps', label: 'Spec gaps', order: 2, avoided: 'Spec complete', measureLabel: 'Spec gaps' },
 ];
 
 export const STORY_ISSUE_IDS: readonly StoryIssueId[] = STORY_ISSUES.map((m) => m.id);
@@ -53,37 +76,139 @@ export const STORY_ISSUE_BY_ID: Readonly<Record<StoryIssueId, StoryIssueMeta>> =
   STORY_ISSUES.map((m) => [m.id, m]),
 ) as Record<StoryIssueId, StoryIssueMeta>;
 
+/** THE tolerance gate: an old stored id ('too_big', 'waits_on_work', 'scope_unstated') is false. */
 export function isStoryIssueId(v: unknown): v is StoryIssueId {
   return typeof v === 'string' && (STORY_ISSUE_IDS as readonly string[]).includes(v);
 }
 
+/** Bullets show at most this many items per issue, then "and N more". */
+export const STORY_ISSUE_BULLET_ITEMS = 3;
+
+/** Spec gaps a label carries at most. */
+export const STORY_SPEC_GAPS_MAX = 3;
+
+// ── Tracker links (code, stored on `tracker_tickets` + `sprint_tickets` as `blocked_by_json`) ──────
+
+/** A linked issue this ticket waits on, as the tracker states it (Jira issuelinks of a blocking type,
+ *  Linear "blocks" relations pointing at this issue). Read in the SAME issue read as the ticket — no
+ *  extra call. Stored for done blockers too (`category: 'done'`): those are RESOLVED, never raised. */
+export interface TicketLinkBlocker {
+  /** The linked issue's key (`BMD-568`, `ENG-12`). */
+  key: string;
+  /** Its summary / title, ≤ TICKET_LINK_TITLE_MAX chars; null when the tracker did not send one. */
+  title: string | null;
+  /** Its status name, as the tracker spells it; null when not sent. */
+  status: string | null;
+  category: JiraStatusCategory | null;
+  /** The relation from THIS ticket's side, as the tracker phrases it ("is blocked by", "depends on",
+   *  Linear: "blocked by"). Shown in the detail ⓘ only. */
+  relation: string;
+  /** Browse URL (https only) — render through `safeExternalUrl`. */
+  url: string | null;
+}
+
+/** Links stored per ticket at most (the rest are cut; a ticket with more is rare). */
+export const TICKET_LINK_BLOCKERS_MAX = 20;
+export const TICKET_LINK_TITLE_MAX = 200;
+export const TICKET_LINK_RELATION_MAX = 60;
+
+/** Does a Jira link phrase (THIS ticket's side: `type.inward` when the link carries `inwardIssue`,
+ *  `type.outward` when it carries `outwardIssue`) mean "this ticket waits on the other"? THE ONE
+ *  predicate. "is blocked by", "depends on", "is dependent on", "requires", "waits on/for" → true;
+ *  "blocks", "is depended on by", "is required by", "relates to" → false. */
+export function isBlockingRelation(phrase: string): boolean {
+  return /\b(blocked by|depends on|dependent on|requires|waits? (on|for))\b/i.test(phrase);
+}
+
+/** A stored `blocked_by_json` value → clean links (tolerant: anything malformed is dropped; a
+ *  non-array is null = "not read"). */
+export function parseTicketLinkBlockers(raw: unknown): TicketLinkBlocker[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: TicketLinkBlocker[] = [];
+  const cats: readonly string[] = ['new', 'indeterminate', 'done'];
+  for (const x of raw) {
+    if (x == null || typeof x !== 'object') continue;
+    const o = x as Record<string, unknown>;
+    if (typeof o.key !== 'string' || o.key.trim() === '') continue;
+    out.push({
+      key: o.key.trim(),
+      title: typeof o.title === 'string' && o.title.trim() !== '' ? o.title.trim().slice(0, TICKET_LINK_TITLE_MAX) : null,
+      status: typeof o.status === 'string' && o.status.trim() !== '' ? o.status.trim() : null,
+      category: typeof o.category === 'string' && cats.includes(o.category) ? (o.category as JiraStatusCategory) : null,
+      relation: typeof o.relation === 'string' ? o.relation.slice(0, TICKET_LINK_RELATION_MAX) : '',
+      url: typeof o.url === 'string' && /^https:\/\//i.test(o.url) ? o.url : null,
+    });
+    if (out.length >= TICKET_LINK_BLOCKERS_MAX) break;
+  }
+  return out;
+}
+
+// ── The folded issue ─────────────────────────────────────────────────────────────────────────────
+
 /** Why an issue was raised — data the templates read (and tests pin). */
 export type StoryIssueReason =
-  | 'no_criteria' // unclear_done
-  | 'untestable' // unclear_done
-  | 'many_criteria' // too_big
-  | 'bundled' // too_big
-  | 'non_code_work' // too_big
-  | 'depends' // waits_on_work, the dependency is named in the ticket
-  | 'depends_unnamed' // waits_on_work, the ticket does not name it
-  | 'no_out_of_scope' // scope_unstated
+  | 'no_criteria' // unclear_done: the ticket has no criteria
+  | 'untestable' // unclear_done: criteria the labeller could not check
+  | 'linked' // blocked: an open tracker link
+  | 'named' // blocked: a dependency named in the text
+  | 'gaps' // spec_gaps
   | 'claude'; // any issue: raised by a CURRENT "Check against code" run that code did not raise
+
+/** One criterion "Unclear when done" points at. */
+export interface StoryFlaggedCriterion {
+  /** 1-based, = its position in `extractCriteria(...)`. */
+  n: number;
+  /** The labeller's short reason ("no expected result"); null when it gave none. */
+  reason: string | null;
+}
+
+/** One thing the story waits on, from either source. */
+export interface StoryBlocker {
+  source: 'link' | 'text';
+  /** 'ticket' for every link. */
+  kind: StoryDependencyKind;
+  /** The ticket key, when there is one (a link always; a text dependency when it names one). */
+  ticketKey: string | null;
+  /** What it is: the linked/known ticket's TITLE, else the labeller's `what`. ≤ 200 chars. */
+  what: string;
+  /** Who owns it, as the ticket names it (text only); null when not named. */
+  owner: string | null;
+  /** The ticket's status when known (a link, or a named key that is a stored ticket); null otherwise. */
+  status: string | null;
+  category: JiraStatusCategory | null;
+  /** Link only: the tracker's phrase from this ticket's side. */
+  relation: string | null;
+  url: string | null;
+  /** Finished (status category `done`): shown, never raised by `foldStoryIssues`. */
+  resolved: boolean;
+}
 
 export interface StoryIssue {
   id: StoryIssueId;
-  /** 1-based criterion numbers behind it, ascending (untestable / bundled / waiting). [] when the
-   *  issue is story-level (no criteria, many criteria, non-code work, no out of scope). */
-  criteria: number[];
   /** The ticket's criteria count today. */
   total: number;
   /** In the order above; at least one. */
   reasons: StoryIssueReason[];
+  /** unclear_done: the criteria behind it, ascending. [] for no_criteria / claude / other issues. */
+  criteria: StoryFlaggedCriterion[];
+  /** blocked: every dependency, open first (links before text), then resolved ones. [] otherwise. */
+  blockers: StoryBlocker[];
+  /** spec_gaps: the gaps, as labelled (≤ STORY_SPEC_GAPS_MAX). [] otherwise. */
+  gaps: StorySpecGap[];
 }
 
-/** The stored label shape (`story_labels.criteria_json` + `story_json`). */
+/** The stored label shape (`story_labels.criteria_json` + `story_json`) at the CURRENT rubric. */
 export interface StoryIssueLabel {
   criteria: StoryCriterionLabel[];
   story: StoryLevelLabels;
+}
+
+/** A stored ticket a text dependency may name (same tracker site), for its title + status. */
+export interface KnownTicket {
+  title: string | null;
+  status: string | null;
+  category: JiraStatusCategory | null;
+  url: string | null;
 }
 
 export interface StoryIssueInput {
@@ -91,6 +216,11 @@ export interface StoryIssueInput {
   criteria: readonly string[];
   /** The CURRENT label only; null when there is none (pending, off, or no criteria). */
   label: StoryIssueLabel | null;
+  /** The ticket's stored tracker links (`blocked_by_json`); null/absent = not read (GitHub Issues, an
+   *  old row). */
+  links?: readonly TicketLinkBlocker[] | null;
+  /** Stored tickets on the same site by KEY (upper-cased for Jira/Linear), for named keys. Absent = none. */
+  knownTickets?: ReadonlyMap<string, KnownTicket> | null;
 }
 
 /** The label if it may be used: present, and judged exactly today's number of criteria. */
@@ -100,82 +230,132 @@ export function usableStoryLabel(input: StoryIssueInput): StoryIssueLabel | null
   return l.criteria.length === input.criteria.length ? l : null;
 }
 
-const numbers = (l: StoryIssueLabel, pick: (c: StoryCriterionLabel) => boolean, total: number): number[] =>
-  [...new Set(l.criteria.filter((c) => pick(c) && c.n >= 1 && c.n <= total).map((c) => c.n))].sort((a, b) => a - b);
+const keyOf = (k: string): string => k.trim().toUpperCase();
 
-/** Every issue present on one ticket, in STORY_ISSUES order. Pure. */
+/** Every dependency of one ticket, links first then text, deduped by ticket key (a link wins), in
+ *  input order within each source. Pure; includes resolved ones. */
+export function storyBlockers(input: StoryIssueInput): StoryBlocker[] {
+  const out: StoryBlocker[] = [];
+  const seen = new Set<string>();
+  for (const l of input.links ?? []) {
+    const k = keyOf(l.key);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({
+      source: 'link',
+      kind: 'ticket',
+      ticketKey: l.key,
+      what: l.title ?? l.key,
+      owner: null,
+      status: l.status,
+      category: l.category,
+      relation: l.relation || null,
+      url: l.url,
+      resolved: l.category === 'done',
+    });
+  }
+  const label = usableStoryLabel(input);
+  for (const d of label?.story.dependencies ?? []) {
+    const k = d.ticketKey != null ? keyOf(d.ticketKey) : null;
+    if (k != null && seen.has(k)) continue;
+    if (k != null) seen.add(k);
+    const known = k != null ? (input.knownTickets?.get(k) ?? null) : null;
+    out.push({
+      source: 'text',
+      kind: d.kind,
+      ticketKey: d.ticketKey,
+      what: known?.title ?? d.what,
+      owner: d.owner,
+      status: known?.status ?? null,
+      category: known?.category ?? null,
+      relation: null,
+      url: known?.url ?? null,
+      resolved: known?.category === 'done',
+    });
+  }
+  // Open first (links before text — stable), then resolved.
+  return [...out.filter((b) => !b.resolved), ...out.filter((b) => b.resolved)];
+}
+
+/** Every issue present on one ticket NOW, in STORY_ISSUES order. Pure. */
 export function foldStoryIssues(input: StoryIssueInput): StoryIssue[] {
   const total = input.criteria.length;
   const label = usableStoryLabel(input);
   const out: StoryIssue[] = [];
+  const base = { total, criteria: [] as StoryFlaggedCriterion[], blockers: [] as StoryBlocker[], gaps: [] as StorySpecGap[] };
 
   // unclear_done
-  if (total === 0) out.push({ id: 'unclear_done', criteria: [], total, reasons: ['no_criteria'] });
+  if (total === 0) out.push({ ...base, id: 'unclear_done', reasons: ['no_criteria'] });
   else if (label != null) {
-    const untestable = numbers(label, (c) => !c.testable, total);
-    if (untestable.length > 0) out.push({ id: 'unclear_done', criteria: untestable, total, reasons: ['untestable'] });
+    const flagged = label.criteria
+      .filter((c) => !c.testable && c.n >= 1 && c.n <= total)
+      .map((c) => ({ n: c.n, reason: c.reason }))
+      .sort((a, b) => a.n - b.n)
+      .filter((c, i, a) => i === 0 || a[i - 1]!.n !== c.n);
+    if (flagged.length > 0) out.push({ ...base, id: 'unclear_done', reasons: ['untestable'], criteria: flagged });
   }
 
-  // too_big — the count half is code; the rest needs the label.
+  // blocked — the link half is code; the text half needs the label.
   {
-    const reasons: StoryIssueReason[] = [];
-    let crit: number[] = [];
-    if (total > STORY_TOO_BIG_CRITERIA) reasons.push('many_criteria');
-    if (label != null) {
-      crit = numbers(label, (c) => c.bundled, total);
-      if (crit.length > 0) reasons.push('bundled');
-      if (label.story.nonCodeWork) reasons.push('non_code_work');
+    const blockers = storyBlockers(input);
+    const open = blockers.filter((b) => !b.resolved);
+    if (open.length > 0) {
+      const reasons: StoryIssueReason[] = [];
+      if (open.some((b) => b.source === 'link')) reasons.push('linked');
+      if (open.some((b) => b.source === 'text')) reasons.push('named');
+      out.push({ ...base, id: 'blocked', reasons, blockers });
     }
-    if (reasons.length > 0) out.push({ id: 'too_big', criteria: crit, total, reasons });
   }
 
-  if (label != null) {
-    const waiting = numbers(label, (c) => c.dependsOnOtherWork, total);
-    if (waiting.length > 0) {
-      out.push({
-        id: 'waits_on_work',
-        criteria: waiting,
-        total,
-        reasons: [label.story.dependencyNamed ? 'depends' : 'depends_unnamed'],
-      });
-    }
-    if (!label.story.outOfScopeStated) out.push({ id: 'scope_unstated', criteria: [], total, reasons: ['no_out_of_scope'] });
+  // spec_gaps
+  if (label != null && label.story.gaps.length > 0) {
+    out.push({ ...base, id: 'spec_gaps', reasons: ['gaps'], gaps: label.story.gaps.slice(0, STORY_SPEC_GAPS_MAX) });
   }
   return out;
 }
 
-/** Per issue: true = present, false = known absent, null = cannot tell (no usable label). Story
- *  health's per-story input. Pure; agrees with `foldStoryIssues` by construction. */
+/** Per issue NOW: true = present, false = known absent, null = cannot tell. Pure. `blocked` is true
+ *  on an open link even with no label; false only with a usable label (the text half is known). */
 export function storyIssueStates(input: StoryIssueInput): Record<StoryIssueId, boolean | null> {
   const present = new Set(foldStoryIssues(input).map((i) => i.id));
   const labelled = usableStoryLabel(input) != null;
   const state = (id: StoryIssueId): boolean | null => (present.has(id) ? true : labelled ? false : null);
+  return { unclear_done: state('unclear_done'), blocked: state('blocked'), spec_gaps: state('spec_gaps') };
+}
+
+/** How `storyIssueMeasure` counted a blocked story — Story health's split of the Blocked series. */
+export type StoryBlockedSource = 'linked' | 'text_only';
+
+/** THE MEASUREMENT RULE for rates over many stories (Story health's refinement series, the story
+ *  report's whole-window rates): ONE POPULATION — the stories with a usable label. Every issue is
+ *  answered for a labelled story and for no other, so a rate's numerator and denominator come from
+ *  the same stories. "No criteria" is NOT folded in (a no-criteria story can never be labelled); it is
+ *  counted on its own, by code (`noCriteria` / `noCriteriaFound`).
+ *  ⚠ `blocked` here = the story DEPENDED on other work, FINISHED OR NOT (see the header): any link,
+ *  any named dependency. null = leave this story out of this issue's rate. Pure. */
+export function storyIssueMeasure(input: StoryIssueInput): Record<StoryIssueId, boolean | null> {
+  const label = usableStoryLabel(input);
+  if (label == null) return { unclear_done: null, blocked: null, spec_gaps: null };
   return {
-    unclear_done: state('unclear_done'),
-    too_big: state('too_big'),
-    waits_on_work: state('waits_on_work'),
-    scope_unstated: state('scope_unstated'),
+    unclear_done: label.criteria.some((c) => !c.testable),
+    blocked: storyBlockers(input).length > 0,
+    spec_gaps: label.story.gaps.length > 0,
   };
 }
 
-/** THE MEASUREMENT RULE for rates over many stories (Story health's refinement series, the story
- *  report's whole-window rates): ONE POPULATION — the stories with a usable label. Every issue, both
- *  halves, is answered for a labelled story and for no other, so a rate's numerator and denominator
- *  always come from the same stories. ⚠ "No criteria" is NOT folded into "Unclear when done" here: a
- *  no-criteria story can never be labelled, so counting it would mix a code-counted numerator into a
- *  label-covered denominator and the rate would move with label coverage, not with the tickets. It is
- *  counted on its own, by code, over every known ticket (`noCriteria` / `noCriteriaFound`). null =
- *  leave this story out of this issue's rate. Pure. */
-export function storyIssueMeasure(input: StoryIssueInput): Record<StoryIssueId, boolean | null> {
-  if (usableStoryLabel(input) != null) return storyIssueStates(input);
-  return { unclear_done: null, too_big: null, waits_on_work: null, scope_unstated: null };
+/** For a story `storyIssueMeasure` counts as blocked: did any dependency come from a tracker link?
+ *  null when it is not counted as blocked. Pure. */
+export function storyBlockedSource(input: StoryIssueInput): StoryBlockedSource | null {
+  if (storyIssueMeasure(input).blocked !== true) return null;
+  return storyBlockers(input).some((b) => b.source === 'link') ? 'linked' : 'text_only';
 }
 
 // ── Checks (per-workspace, Reports → This sprint) ────────────────────────────────────────────────
 
 /** Which issues a workspace raises. OVERRIDES ONLY: `off` switches an issue off; `issueTypes` limits
  *  the WHOLE tab's issues to tickets of those types (case-insensitive; [] = every type). A ticket of
- *  another type is still listed, with no issues. A ticket with no issue type is always checked. */
+ *  another type is still listed, with no issues. A ticket with no issue type is always checked.
+ *  ⚠ A STORED `off` may name a retired id — `parseSprintChecks` drops it. */
 export interface StoryIssueChecks {
   off: StoryIssueId[];
   issueTypes: string[];
@@ -202,31 +382,46 @@ export function applyStoryIssueChecks<T extends { id: StoryIssueId }>(
   return issues.filter((i) => !checks.off.includes(i.id));
 }
 
-// ── Templates (never model text) ─────────────────────────────────────────────────────────────────
+// ── Templates (never model text; the labeller's short phrases appear inside them as data) ─────────
 
-/** "criterion 3" · "criteria 2 and 5" · "criteria 2, 4 and 5" · "6 criteria" past three. */
-export function criteriaPhrase(ns: readonly number[]): string {
-  if (ns.length === 1) return `criterion ${ns[0]}`;
-  if (ns.length <= 3) return `criteria ${ns.slice(0, -1).join(', ')} and ${ns[ns.length - 1]}`;
-  return `${ns.length} criteria`;
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+/** "a · b · c" then " and N more" past STORY_ISSUE_BULLET_ITEMS. */
+export function joinCapped(items: readonly string[], cap: number = STORY_ISSUE_BULLET_ITEMS): string {
+  const shown = items.slice(0, cap).join(' · ');
+  return items.length > cap ? `${shown} and ${items.length - cap} more` : shown;
 }
 
-const capitalise = (s: string): string => (s === '' ? s : s[0]!.toUpperCase() + s.slice(1));
+/** One blocker as a phrase: "BMD-568 cookie banner (To Do)" · "Design for the map page, UCD team, no
+ *  ticket". The first of a bullet is prefixed "Waits on " by `storyIssueBullet`. */
+export function storyBlockerPhrase(b: StoryBlocker): string {
+  const parts: string[] = [];
+  if (b.ticketKey != null) {
+    const what = b.what.trim() !== '' && keyOf(b.what) !== keyOf(b.ticketKey) ? ` ${b.what}` : '';
+    parts.push(`${b.ticketKey}${what}${b.status != null ? ` (${b.status})` : ''}`);
+  } else parts.push(b.what);
+  if (b.owner != null && b.owner.trim() !== '') parts.push(b.owner);
+  if (b.ticketKey == null) parts.push('no ticket');
+  return parts.join(', ');
+}
 
-/** The chip's suffix after the label ("3 of 25 criteria", "25 criteria", "no criteria"), or null. */
+/** "Criterion 3: no expected result" — one flagged criterion. */
+export function storyCriterionPhrase(c: StoryFlaggedCriterion): string {
+  return `Criterion ${c.n}: ${c.reason ?? 'can’t be checked'}`;
+}
+
+/** The chip's suffix after the label ("3 of 25 criteria", "no criteria", "2 open", "2 gaps"), or null. */
 export function storyIssueDetail(issue: StoryIssue): string | null {
   if (issue.reasons.length === 1 && issue.reasons[0] === 'claude') return null;
   switch (issue.id) {
     case 'unclear_done':
       return issue.reasons.includes('no_criteria') ? 'no criteria' : `${issue.criteria.length} of ${issue.total} criteria`;
-    case 'too_big':
-      if (issue.reasons.includes('many_criteria')) return `${issue.total} criteria`;
-      if (issue.criteria.length > 0) return `${issue.criteria.length} of ${issue.total} criteria`;
-      return null;
-    case 'waits_on_work':
-      return `${issue.criteria.length} of ${issue.total} criteria`;
-    case 'scope_unstated':
-      return null;
+    case 'blocked': {
+      const open = issue.blockers.filter((b) => !b.resolved).length;
+      return open > 0 ? `${open} open` : null;
+    }
+    case 'spec_gaps':
+      return issue.gaps.length > 0 ? plural(issue.gaps.length, 'gap', 'gaps') : null;
   }
 }
 
@@ -236,40 +431,20 @@ export function storyIssueChipText(issue: StoryIssue): string {
   return d == null ? STORY_ISSUE_BY_ID[issue.id].label : `${STORY_ISSUE_BY_ID[issue.id].label} · ${d}`;
 }
 
-/** THE ONE templated bullet per issue: one sentence saying what to do. */
+/** THE ONE templated bullet per issue: the specific detail, capped at STORY_ISSUE_BULLET_ITEMS. */
 export function storyIssueBullet(issue: StoryIssue): string {
-  const of = ` (of ${issue.total})`;
   switch (issue.id) {
     case 'unclear_done':
       if (issue.reasons.includes('no_criteria')) {
         return 'Add acceptance criteria: outcomes a tester could check, one per line.';
       }
-      return `Rewrite ${criteriaPhrase(issue.criteria)}${of} as outcomes someone could check: the input, the action and the result.`;
-    case 'too_big': {
-      const many = issue.reasons.includes('many_criteria');
-      const bundled = issue.reasons.includes('bundled');
-      const nonCode = issue.reasons.includes('non_code_work');
-      if (!many && !bundled && nonCode) {
-        return 'Move the work that is not code (sign-off, docs, config) into its own task.';
-      }
-      const parts: string[] = [];
-      if (many) parts.push(`it has ${issue.total} criteria`);
-      if (bundled) {
-        const n = issue.criteria;
-        parts.push(`${criteriaPhrase(n)} ${n.length === 1 ? 'holds' : 'hold'} more than one outcome`);
-      }
-      if (nonCode) parts.push('part of the work is not code');
-      const joined = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
-      return `Split this story: ${joined}.`;
+      return joinCapped(issue.criteria.map(storyCriterionPhrase));
+    case 'blocked': {
+      const open = issue.blockers.filter((b) => !b.resolved).map(storyBlockerPhrase);
+      return open.length === 0 ? '' : `Waits on ${joinCapped(open)}`;
     }
-    case 'waits_on_work': {
-      const subject = capitalise(criteriaPhrase(issue.criteria));
-      const verb = issue.criteria.length === 1 ? 'waits' : 'wait';
-      return issue.reasons.includes('depends_unnamed')
-        ? `${subject}${of} ${verb} on other work: name it and link its ticket.`
-        : `${subject}${of} ${verb} on other work: say what happens if it is late.`;
-    }
-    case 'scope_unstated':
-      return 'Add an “Out of scope” line saying what this story will not do.';
+    case 'spec_gaps':
+      return joinCapped(issue.gaps.map((g) => g.text));
   }
 }
+

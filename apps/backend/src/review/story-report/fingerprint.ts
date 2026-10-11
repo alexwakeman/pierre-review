@@ -10,8 +10,9 @@ import type { StoryInternals } from '../../db/stories.js';
 // ⚠ NOTHING DERIVED FROM `now`: a dormant workspace's report stays current. With a trailing window the
 // picks move as it slides, which is the honest stale signal (the report covers other stories now).
 
-/** v2: the four story issues (per-pick issues, whole-window issue rates, an issue per point). */
-export const STORY_REPORT_FORMAT = 'story-report-v3';
+/** v2: the four story issues (per-pick issues, whole-window issue rates, an issue per point).
+ *  v3: the lean report. v4: the THREE specific story issues (rubric 2: reasons, blockers, spec gaps). */
+export const STORY_REPORT_FORMAT = 'story-report-v4';
 
 export interface FingerprintPick {
   ident: string;

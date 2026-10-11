@@ -1,5 +1,6 @@
 import { and, eq, gte, inArray, isNotNull, or } from 'drizzle-orm';
 import {
+  STORY_HEALTH_HELD,
   STORIES_MAX,
   STORY_HEALTH_SPAN_LABEL,
   STORY_HEALTH_WEEKS,
@@ -18,6 +19,7 @@ import type { StoredTicketRow } from '../tracker/store.js';
 import { getResolvedFlowSettings } from './flow-settings.js';
 import { localWeeksEndingAt } from './working-hours.js';
 import { storyLabelInput, type StoryLabelInput } from './story-label-input.js';
+import { knownTicketsFor, linksOfRow, namedTicketKeys } from './story-issue-input.js';
 import { foldStoryHealth, refinementWeekOf, type StoryHealthStoryInput, type StoryHealthWeekBound } from './story-health-fold.js';
 
 // REPORTS → STORIES → STORY HEALTH — the READS (docs/API.md § GET /api/story-health). The pure fold
@@ -134,12 +136,27 @@ export async function loadStoryHealthInputs(accountId: number, scope: BotScope, 
   drafts.push(...refinementOnly.slice(0, STORIES_MAX));
 
   const labelsByIdent = await currentLabelRowsFor(accountId, drafts.map((d) => d.ident));
-  const stories: StoryHealthStory[] = drafts.map(({ ticket, ...d }) => {
+  const withLabels = drafts.map(({ ticket, ...d }) => {
     const input = storyLabelInput(ticket, d.provider);
     const label = input != null ? (labelsByIdent.get(d.ident)?.get(input.textHash) ?? null) : null;
-    // `criteriaCount` is the labeller's list length — the ONE extractor, so a label's n points at it.
-    return { ...d, labellable: input != null, criteriaCount: input?.criteria.length ?? 0, label, input };
+    return { d, ticket, input, label };
   });
+  // Named ticket keys resolve on the workspace's site, in ONE read (no site → none resolved).
+  const knownTickets =
+    site != null
+      ? await knownTicketsFor(accountId, site.provider, site.apiRoot, namedTicketKeys(withLabels.map((x) => x.label)))
+      : null;
+  const stories: StoryHealthStory[] = withLabels.map(({ d, ticket, input, label }) => ({
+    ...d,
+    // `criteriaCount` is the labeller's list length — the ONE extractor, so a label's n points at it.
+    labellable: input != null,
+    criteriaCount: input?.criteria.length ?? 0,
+    label,
+    input,
+    title: ticket?.title ?? null,
+    links: linksOfRow(ticket),
+    knownTickets,
+  }));
   return { ...base, stories, truncated: fold.truncated || extrasTruncated };
 }
 
@@ -308,7 +325,7 @@ export async function getStoryHealth(
   opts: { labels: boolean; labelRun: StoryLabelRunStatus | null },
 ): Promise<StoryHealthResponse> {
   const inputs = await loadStoryHealthInputs(accountId, scope, nowMs);
-  const fold = foldStoryHealth(inputs.stories, inputs.weeks, { nowMs, labels: opts.labels });
+  const fold = foldStoryHealth(inputs.stories, inputs.weeks, { nowMs, labels: opts.labels, held: STORY_HEALTH_HELD });
   return {
     workspaceId: scope.workspaceId,
     trackerOn: inputs.trackerOn,

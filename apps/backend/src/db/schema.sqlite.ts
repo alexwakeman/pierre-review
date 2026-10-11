@@ -25,6 +25,9 @@ import { sql } from 'drizzle-orm';
 import type {
   BlastRadiusConfig,
   SprintChecks,
+  SprintStatusAutoOrder,
+  SprintStatusSettings,
+  TicketLinkBlocker,
   BranchCheckRun,
   CheckRun,
   ClaudeReviewFollowUpRecord,
@@ -1813,9 +1816,14 @@ export const workspaces = sqliteTable(
     // zones in one account work different hours.
     flowSettings: text('flow_settings', { mode: 'json' }).$type<FlowSettings>(),
     // Reports → This sprint: which story issues this workspace raises (migration 0102 / pg 0089).
-    // OVERRIDES ONLY (`SprintChecks` = {off, issueTypes}, shared); NULL = all four on, every issue
+    // OVERRIDES ONLY (`SprintChecks` = {off, issueTypes}, shared); NULL = every issue on, every issue
     // type. An older stored shape is read tolerantly by db/sprint-checks.ts.
     sprintChecks: text('sprint_checks', { mode: 'json' }).$type<SprintChecks>(),
+    // Reports → This sprint: the workspace's STATUS LAYOUT override (migration 0103 / pg 0090).
+    // OVERRIDES ONLY (`SprintStatusSettings` = {order, deliveredFrom}, status NAMES); NULL = the
+    // automatic order (`sprint_reads.status_order_json`) and the automatic code-delivered status.
+    // The ONE reader / writer is db/sprint-status-settings.ts.
+    sprintStatuses: text('sprint_statuses', { mode: 'json' }).$type<SprintStatusSettings>(),
     // ── AUTO CLAUDE REVIEW (migration 0074 / pg 0061; moved off the plugin's
     // pro_workspace_settings, whose columns are dormant now) ─────────────────────────────────
     // NULL/false = off. `autoReviewEnabledAt` is when it was last switched ON — the floor the
@@ -2627,6 +2635,13 @@ export const trackerTickets = sqliteTable(
     // when the tracker said none. Neither moves `changed_at` (not story text).
     issueCreatedAt: integer('issue_created_at', { mode: 'timestamp' }),
     issueResolvedAt: integer('issue_resolved_at', { mode: 'timestamp' }),
+    // The tracker LINKS this ticket waits on (migration 0103 / pg 0090): Jira "is blocked by" /
+    // "depends on" issuelinks, Linear "blocks" relations, each with the linked issue's key, title and
+    // status (shared `TicketLinkBlocker[]`, read in the same issue read). NULL = never read (an older
+    // row, or GitHub Issues — no links); [] = none. Not story text: does not move `changed_at`.
+    blockedByJson: text('blocked_by_json', { mode: 'json' }).$type<TicketLinkBlocker[]>(),
+    // The tracker's own status id (Jira `status.id`, Linear state id) — maps a board's column order.
+    statusId: text('status_id'),
   },
   (t) => ({
     accountPrKeyUx: uniqueIndex('tracker_tickets_account_pr_key').on(t.accountId, t.prId, t.issueKey),
@@ -2845,6 +2860,10 @@ export const sprintReads = sqliteTable(
     truncated: integer('truncated', { mode: 'boolean' }).notNull().default(false),
     // When GET /api/sprint-stories last served this workspace — the demand gate.
     viewedAt: integer('viewed_at', { mode: 'timestamp' }).notNull(),
+    // The AUTOMATIC status order the read found (migration 0103 / pg 0090; shared
+    // `SprintStatusAutoOrder`): Jira board columns, Linear workflow states, GitHub Open/Closed. NULL =
+    // not readable — the page falls back to category order. A failed order read never fails the read.
+    statusOrderJson: text('status_order_json', { mode: 'json' }).$type<SprintStatusAutoOrder>(),
   },
   (t) => ({
     accountWorkspaceUx: uniqueIndex('sprint_reads_account_workspace').on(t.accountId, t.workspaceId),
@@ -2906,6 +2925,9 @@ export const sprintTickets = sqliteTable(
     nextCheckAt: integer('next_check_at', { mode: 'timestamp' }).notNull(),
     // The tracker's own last-updated instant, when it sent one.
     issueUpdatedAt: integer('issue_updated_at', { mode: 'timestamp' }),
+    // As on tracker_tickets (migration 0103 / pg 0090): the blocking links and the status id.
+    blockedByJson: text('blocked_by_json', { mode: 'json' }).$type<TicketLinkBlocker[]>(),
+    statusId: text('status_id'),
   },
   (t) => ({
     accountWsIdentUx: uniqueIndex('sprint_tickets_account_ws_ident').on(t.accountId, t.workspaceId, t.ident),

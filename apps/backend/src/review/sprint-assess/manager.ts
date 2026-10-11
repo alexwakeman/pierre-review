@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import {
   SPRINT_ASSESS_MODEL,
+  foldStoryIssues,
+  storyBlockerPhrase,
   type SprintAssessmentCurrency,
   type SprintAssessmentErrorCode,
   type SprintAssessmentPhase,
@@ -34,6 +36,32 @@ import { pickReviewNonce } from '../claude-review/prompts.js';
 import type { SprintAssessRunResult, SprintAssessRunner } from './agent.js';
 import { SPRINT_ASSESS_SYSTEM_PROMPT, buildSprintAssessPrompt, sprintAssessUntrustedTexts } from './prompts.js';
 import { validateSprintAssessment } from './validate.js';
+import { storyLabelInput } from '../../db/story-label-input.js';
+import { buildStoryIssueInput, knownTicketsFor, linksOfRow, namedTicketKeys } from '../../db/story-issue-input.js';
+
+/** What code already knows about the ticket — open blockers (links + named) and the current label's
+ *  spec gaps — handed to the agent as fenced DATA to confirm or correct. Never fails the run. */
+export async function knownIssuesForPrompt(
+  accountId: number,
+  ticket: SprintTicketDbRow,
+  criteria: readonly string[],
+): Promise<{ blockers: string[]; gaps: string[] }> {
+  const provider = ticket.provider as 'jira' | 'github' | 'linear';
+  const input = storyLabelInput(
+    { title: ticket.title, description: ticket.description ?? '', acceptanceCriteria: ticket.acceptanceCriteria ?? '' },
+    provider,
+  );
+  const { currentLabelRowsFor } = await import('../../db/story-health.js');
+  const label = input != null ? ((await currentLabelRowsFor(accountId, [ticket.ident])).get(ticket.ident)?.get(input.textHash) ?? null) : null;
+  const knownTickets = await knownTicketsFor(accountId, provider, ticket.apiRoot, namedTicketKeys([label]));
+  const issues = foldStoryIssues(buildStoryIssueInput({ criteria, label, links: linksOfRow(ticket), knownTickets }));
+  const blocked = issues.find((i) => i.id === 'blocked');
+  const gaps = issues.find((i) => i.id === 'spec_gaps');
+  return {
+    blockers: (blocked?.blockers ?? []).filter((b) => !b.resolved).map(storyBlockerPhrase),
+    gaps: (gaps?.gaps ?? []).map((g) => g.text),
+  };
+}
 
 // THE SPRINT ASSESSMENT'S RUNS ("Check against code", Reports → This sprint; docs/CLAUDE-REVIEW.md §
 // Sprint assessment). LOCAL ONLY — reached only through routes registered by `registerAgenticRoutes`.
@@ -268,6 +296,11 @@ async function runAssessment(job: Job): Promise<void> {
       await finish(id, { status: 'failed', error: 'no_checkout' }, true);
       return;
     }
+    // What code already knows (DB only), read BEFORE the last abort check so a cancel during it wins.
+    const known = await knownIssuesForPrompt(job.accountId, job.ticket, job.criteria).catch((err) => {
+      ctx.log.warn({ assessmentId: id, err: String(err).slice(0, 200) }, 'sprint assess: known issues read failed');
+      return { blockers: [], gaps: [] };
+    });
     if (job.abort.signal.aborted) return;
 
     // ---- the agent ----
@@ -278,6 +311,8 @@ async function runAssessment(job: Job): Promise<void> {
       title: job.ticket.title,
       description: job.ticket.description ?? '',
       criteria: job.criteria,
+      blockers: known.blockers,
+      gaps: known.gaps,
     };
     const nonce = pickReviewNonce(sprintAssessUntrustedTexts(promptTicket));
     const promptRepos = ok.map((x) => ({ fullName: x.repo.fullName, path: x.path, sha: x.sha }));

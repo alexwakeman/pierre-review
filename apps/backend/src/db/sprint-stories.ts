@@ -13,6 +13,8 @@ import {
   type SprintPhase,
   type SprintRepoRef,
   type SprintSource,
+  type SprintStage,
+  type SprintStatusLayout,
   type SprintStoriesResponse,
   type SprintTicketRow,
   type StoryPrRef,
@@ -39,6 +41,8 @@ import {
 } from './sprint-store.js';
 import { acceptedSprintRepoDetails, type AcceptedRepoDetail } from './sprint-ticket-repos.js';
 import { storyLabelInput } from './story-label-input.js';
+import { knownTicketsFor, linksOfRow, namedTicketKeys } from './story-issue-input.js';
+import { getSprintStatusLayout, sprintStageOf, sprintStatusSectionIndex } from './sprint-status-layout.js';
 
 // REPORTS → THIS SPRINT — THE LIST (`GET /api/sprint-stories`; docs/API.md § This sprint). A
 // DB-only fold over what the tracker worker stored (`sprint_tickets`, `sprint_reads`) plus the
@@ -49,11 +53,16 @@ import { storyLabelInput } from './story-label-input.js';
 //   • POPULATION: this workspace's `sprint_tickets` with `in_sprint`, on the workspace tracker's
 //     CURRENT site (a row from a provider the workspace has since left is not listed). Done tickets
 //     are COUNTED (`doneCount`), never listed.
-//   • ORDER: Not started, then In progress; within each, most issues first, then key. NEVER by
-//     assignee, and no team or person score.
-//   • ISSUES: the four story issues (`sprintIssuesFor`). Only a CURRENT label (text hash = today's
-//     `storyLabelInput` hash, `STORY_RUBRIC_VERSION`) feeds the label half; `aiEnabled` false →
-//     labels 'off' and only what code knows ("no criteria", "more than 8 criteria").
+//   • STAGES: the workspace's STATUS LAYOUT (db/sprint-status-layout.ts `getSprintStatusLayout`: the
+//     tracker's board / workflow order + the per-workspace override + the "code delivered from"
+//     inference) puts each row in a stage (`sprintStageOf`): Not started, Writing code, Code delivered.
+//     Done (status category) is counted, never listed.
+//   • ORDER: stage, then the status's section (layout order), then most issues first, then key. NEVER
+//     by assignee, and no team or person score.
+//   • ISSUES: the three story issues (`sprintIssuesFor`) over the criteria, the CURRENT label (text
+//     hash = today's `storyLabelInput` hash, `STORY_RUBRIC_VERSION`), the stored tracker links
+//     (`blocked_by_json`) and the stored tickets a label names (`knownTicketsFor`). `aiEnabled` false →
+//     labels 'off' and only what code knows ("no criteria", open linked blockers).
 //   • ASSESSMENT CURRENCY is DB-only: today's ticket text hash + the accepted repos' SYNCED
 //     default-branch head sha, against the run's stored fingerprint.
 
@@ -93,12 +102,19 @@ export function sprintAssessmentCurrencyFrom(
   return now === row.fingerprint ? 'current' : 'stale';
 }
 
-/** The sort the page lists in. Pure. */
-export function sortSprintTickets<T extends Pick<SprintTicketRow, 'phase' | 'flagCount' | 'key'>>(rows: T[]): T[] {
-  const phaseRank = (p: SprintPhase): number => (p === 'not_started' ? 0 : 1);
+const STAGE_RANK: Record<SprintStage, number> = { not_started: 0, writing: 1, delivered: 2, done: 3 };
+
+/** The sort the page lists in: stage, then status section (layout order; null layout → none), then
+ *  most issues first, then key. Pure. */
+export function sortSprintTickets<T extends Pick<SprintTicketRow, 'stage' | 'flagCount' | 'key' | 'status'>>(
+  rows: T[],
+  layout: Pick<SprintStatusLayout, 'order'> | null = null,
+): T[] {
+  const section = (r: T): number => (layout == null ? 0 : sprintStatusSectionIndex(layout, r.status?.name ?? null));
   return [...rows].sort(
     (a, b) =>
-      phaseRank(a.phase) - phaseRank(b.phase) ||
+      STAGE_RANK[a.stage] - STAGE_RANK[b.stage] ||
+      section(a) - section(b) ||
       b.flagCount - a.flagCount ||
       a.key.localeCompare(b.key, undefined, { numeric: true }),
   );
@@ -225,6 +241,7 @@ export async function getSprintStories(
       repos,
       checks: { off: [], issueTypes: [] },
       issueTypes: [],
+      statusLayout: null,
     };
   }
   const provider: TrackerProvider = site.provider;
@@ -264,6 +281,13 @@ export async function getSprintStories(
   }
   const idents = listed.map((l) => l.row.ident);
 
+  const statusLayout = await getSprintStatusLayout(accountId, workspaceId, {
+    provider,
+    apiRoot: site.apiRoot,
+    tickets: stored.map((r) => ({ issueKey: r.issueKey, statusName: r.statusName ?? null, statusCategory: r.statusCategory ?? null })),
+    autoOrder: readRow.statusOrderJson ?? null,
+  });
+
   const [labels, prRefs, assessments, writes, accepted, checks] = await Promise.all([
     opts.aiEnabled
       ? import('./story-health.js').then((m) => m.currentLabelRowsFor(accountId, idents))
@@ -282,17 +306,29 @@ export async function getSprintStories(
     opts.now,
   );
 
+  // The CURRENT label per row first: the named ticket keys they carry are resolved in ONE read.
+  const currentLabels = new Map(
+    listed.map(({ row }) => {
+      const text = { title: row.title, description: row.description ?? '', acceptanceCriteria: row.acceptanceCriteria ?? '' };
+      const input = opts.aiEnabled ? storyLabelInput(text, provider) : null;
+      return [row.ident, input != null ? (labels.get(row.ident)?.get(input.textHash) ?? null) : null] as const;
+    }),
+  );
+  const knownTickets = await knownTicketsFor(accountId, provider, site.apiRoot, namedTicketKeys(currentLabels.values()));
+
   const rows: SprintTicketRow[] = listed.map(({ row, phase }) => {
     const text = { title: row.title, description: row.description ?? '', acceptanceCriteria: row.acceptanceCriteria ?? '' };
-    const input = opts.aiEnabled ? storyLabelInput(text, provider) : null;
-    const label = input != null ? (labels.get(row.ident)?.get(input.textHash) ?? null) : null;
+    const label = currentLabels.get(row.ident) ?? null;
     const chipInput: SprintChipInput = {
       provider,
       description: text.description,
       acceptanceCriteria: text.acceptanceCriteria,
       issueType: row.issueTypeName ?? null,
       label,
+      links: linksOfRow(row),
+      knownTickets,
     };
+    const status = row.statusName != null ? { name: row.statusName, category: (row.statusCategory as JiraStatusCategory | null) ?? null } : null;
     const acc = accepted.get(row.ident) ?? [];
     const a = assessments.get(row.ident);
     const assessment = a != null ? { record: sprintAssessmentRecordOf(a), currency: sprintAssessmentCurrencyFrom(a, row, acc) } : null;
@@ -314,7 +350,8 @@ export async function getSprintStories(
       url: row.url ?? null,
       provider,
       phase,
-      status: row.statusName != null ? { name: row.statusName, category: (row.statusCategory as JiraStatusCategory | null) ?? null } : null,
+      stage: sprintStageOf(statusLayout, status),
+      status,
       issueType: row.issueTypeName ?? null,
       assignee: row.assigneeName != null ? { name: row.assigneeName, avatarUrl: row.assigneeAvatarUrl ?? null } : null,
       epic: row.epicKey != null ? { key: row.epicKey, title: row.epicTitle ?? null } : null,
@@ -343,7 +380,7 @@ export async function getSprintStories(
     provider,
     source,
     read: sprintReadStateOf(readRow, (code) => sprintReadErrorMessage(provider, code)),
-    tickets: sortSprintTickets(rows),
+    tickets: sortSprintTickets(rows, statusLayout),
     doneCount,
     aiEnabled: opts.aiEnabled,
     repos,
@@ -351,5 +388,6 @@ export async function getSprintStories(
     issueTypes: [...new Set(stored.map((r) => r.issueTypeName?.trim() ?? '').filter((n) => n !== ''))].sort((a, b) =>
       a.localeCompare(b),
     ),
+    statusLayout,
   };
 }

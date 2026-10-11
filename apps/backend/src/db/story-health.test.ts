@@ -127,10 +127,13 @@ beforeAll(async () => {
         textHash,
         rubricVersion,
         criteriaJson: [
-          { n: 1, testable: true, bundled: false, dependsOnOtherWork: false },
-          { n: 2, testable: false, bundled: true, dependsOnOtherWork: false },
+          { n: 1, testable: true, reason: null },
+          { n: 2, testable: false, reason: 'no expected result' },
         ],
-        storyJson: { outOfScopeStated: true, dependencyNamed: false, nonCodeWork: false },
+        storyJson: {
+          dependencies: [{ kind: 'ticket', what: 'login', owner: null, ticketKey: 'ENG-1' }],
+          gaps: [{ type: 'rule', text: 'No rule for duplicate exports' }],
+        },
         criteriaCount: 2,
         model: 'claude-haiku-5-5',
       })
@@ -138,6 +141,15 @@ beforeAll(async () => {
   await label('ENG-3', current.textHash);
   await label('ENG-3', current.textHash, STORY_RUBRIC_VERSION + 1); // another rubric: ignored
   await label('ENG-4', 'old-hash');
+  // ENG-3 also carries a FINISHED tracker link: still counted as Blocked (how it was written).
+  {
+    const { and, eq } = await import('drizzle-orm');
+    await db
+      .update(trackerTickets)
+      .set({ blockedByJson: [{ key: 'ENG-90', title: 'Old spike', status: 'Done', category: 'done', relation: 'is blocked by', url: null }] })
+      .where(and(eq(trackerTickets.accountId, A1), eq(trackerTickets.issueKey, 'ENG-3')))
+      .execute();
+  }
 
   const contract = await import('../pro/contract.js');
   contract.setProCapabilities({ ...contract.EMPTY_CAPABILITIES, periodReports: true });
@@ -169,7 +181,11 @@ describe('loadStoryHealthInputs', () => {
     const by = new Map(inputs.stories.map((x) => [x.key, x]));
     expect(by.get('ENG-1')!.createdMs).toBe(NOW - 30 * DAY);
     expect(by.get('ENG-2')!.createdMs).toBeNull();
-    expect(by.get('ENG-3')!.label?.story.outOfScopeStated).toBe(true);
+    expect(by.get('ENG-3')!.label?.story.gaps).toEqual([{ type: 'rule', text: 'No rule for duplicate exports' }]);
+    expect(by.get('ENG-3')!.links?.map((l) => l.key)).toEqual(['ENG-90']);
+    expect(by.get('ENG-3')!.title).toBe('Story ENG-3');
+    // The named key ENG-1 is a stored ticket on the same site: resolved for its title.
+    expect(by.get('ENG-3')!.knownTickets?.get('ENG-1')?.title).toBe('Story ENG-1');
     expect(by.get('ENG-4')!.label).toBeNull();
     expect(by.get('ENG-3')).toMatchObject({ labellable: true, criteriaCount: 2, ticketKnown: true });
     // ⚠ The refinement population is not only what has merged: an open story written in the span is in.
@@ -191,6 +207,12 @@ describe('getStoryHealth', () => {
     expect(on.weeks.reduce((n, w) => n + w.storiesCreated, 0)).toBe(5);
     expect(on.weeks.reduce((n, w) => n + w.labelled, 0)).toBe(1);
     expect(on.series.map((x) => x.id)).toContain('unclearDone');
+    // The hover detail: ENG-3 is the week's one blocked story, linked (its tracker link wins the split).
+    const blockedPoint = on.series.find((x) => x.id === 'blocked')!.points.find((p) => (p.stories ?? []).length > 0)!;
+    expect(blockedPoint.stories).toEqual([{ ident: expect.any(String), key: 'ENG-3', title: 'Story ENG-3' }]);
+    expect(blockedPoint.blockedSplit).toEqual({ linked: 1, textOnly: 0 });
+    // Spec gaps is HELD (STORY_HEALTH_HELD) until its judgement passes an agreement test.
+    expect(on.series.map((x) => x.id)).not.toContain('specGaps');
     expect(on.span.label).toBe('Last 90 days');
     const off = await sh.getStoryHealth(A1, s, NOW, { labels: false, labelRun: null });
     expect(off.series.map((x) => x.id)).not.toContain('unclearDone');

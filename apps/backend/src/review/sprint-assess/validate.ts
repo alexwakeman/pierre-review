@@ -16,8 +16,8 @@ import { isWithin } from '../path-guard.js';
 //
 //   • CAPS (`SPRINT_ASSESS_CAPS`): over-long text is CUT with "…", never refused; `revisedCriteria`
 //     over its cap keeps the first N and counts the rest in `dropped.items`.
-//   • ISSUES are the four story ids: an unknown or repeated id, an empty sentence, or a fifth entry is
-//     dropped and counted in `dropped.items`. Kept issues are sorted in STORY_ISSUES order.
+//   • ISSUES are the three story ids: an unknown, retired or repeated id, an empty sentence, or a fourth
+//     entry is dropped and counted in `dropped.items`. Kept issues are sorted in STORY_ISSUES order.
 //   • EVERY CITED PATH IS VERIFIED: normalised to POSIX, refused when absolute (outside a checkout),
 //     containing `..` or NUL, naming a repo the reader did not accept, or not existing in that
 //     repo's checkout (realpath must stay inside it — a symlink pointing out is refused). A refused

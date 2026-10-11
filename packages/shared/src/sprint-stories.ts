@@ -4,6 +4,7 @@ import {
   STORY_ISSUE_CHECKS_DEFAULT,
   STORY_ISSUE_IDS,
   applyStoryIssueChecks,
+  isStoryIssueId,
   storyIssueBullet,
   type StoryIssue,
   type StoryIssueChecks,
@@ -20,9 +21,14 @@ import {
 //     workspace whose This sprint tab was opened in the last `SPRINT_VIEW_TTL_DAYS`): Jira's open
 //     sprints, Linear's active cycle, GitHub's nearest-due open milestone, else the status fallback
 //     (To do + In progress tickets touched in the reporting window). The `source` says which.
-//   • THE ISSUES are the FOUR story issues (`story-issues.ts`), folded in code from the criteria and
-//     the STORED story labels (`story_labels`, Haiku, `STORY_RUBRIC_VERSION`); a label half appears
-//     only while the label is CURRENT. Chip text and bullets are TEMPLATED — never model text.
+//   • THE ISSUES are the THREE story issues (`story-issues.ts`), folded in code from the criteria, the
+//     ticket's stored TRACKER LINKS (`blocked_by_json`) and the STORED story labels (`story_labels`,
+//     Haiku, `STORY_RUBRIC_VERSION`); a label half appears only while the label is CURRENT. Chip text
+//     and bullets are TEMPLATED — never model text.
+//   • THE SECTIONS follow the workspace's STATUS LAYOUT (`SprintStatusLayout`): Not started, then
+//     "Writing code" (one section per status before the code-delivered status), then "Code delivered"
+//     (one per status from it on). The order and the code-delivered status are AUTOMATIC (the tracker's
+//     board / workflow order; PR evidence) unless the workspace overrides them (`SprintStatusSettings`).
 //   • THE ASSESSMENT ("Check against code") is a local-only Sonnet 5 agent run over read-only default
 //     branch checkouts of the repos the reader ACCEPTED for the ticket: a one-sentence summary, at
 //     most one sentence per issue, and an optional revised criteria list. Its cited paths are VERIFIED
@@ -30,8 +36,8 @@ import {
 //   • THE WRITE-BACK writes exactly the text the reader confirmed, to ONE ticket, on ONE press. No
 //     bulk, no automatic setting, no agent tool can write. Claimed before the write, never retried.
 //
-// ⚠ ORDER: Not started first, then In progress; within each, most issues first, then key. NEVER by
-// assignee, and there is no team or person score anywhere on this surface.
+// ⚠ ORDER: by stage and status section (above); within a section, most issues first, then key. NEVER
+// by assignee, and there is no team or person score anywhere on this surface.
 
 // ── Constants (the ONE spelling the server and the page's copy both read) ────────────────────────
 
@@ -76,7 +82,7 @@ export const SPRINT_ASSESS_CAPS = {
   issueText: 220,
   criterionText: 200,
   /** One per issue id. */
-  issues: 4,
+  issues: 3,
   revisedCriteria: 12,
 } as const;
 
@@ -141,12 +147,13 @@ export interface SprintReadState {
 
 // ── The issues and the checks ────────────────────────────────────────────────────────────────────
 //
-// A ticket's issues are the FOUR story issues (`story-issues.ts`: `foldStoryIssues`, folded by the
+// A ticket's issues are the THREE story issues (`story-issues.ts`: `foldStoryIssues`, folded by the
 // server from the criteria and the CURRENT stored label), filtered by the workspace's checks
 // (`applyStoryIssueChecks`) — so `flagCount`, the order and Copy all agree with what is on screen.
 
 /** The workspace's checks: `workspaces.sprint_checks` (same JSON column as before; parsed
- *  tolerantly — unknown ids dropped, an old object-shaped `issueTypes` reads as []). */
+ *  tolerantly — unknown ids dropped (incl. the retired 'too_big' / 'waits_on_work' /
+ *  'scope_unstated'), an old object-shaped `issueTypes` reads as []). Three switches + issue types. */
 export type SprintChecks = StoryIssueChecks;
 
 export const SPRINT_CHECKS_DEFAULT: SprintChecks = STORY_ISSUE_CHECKS_DEFAULT;
@@ -224,7 +231,7 @@ export interface SprintReposResponse {
 
 /** Bumped when the stored body's SHAPE changes: folded into the run's fingerprint (old runs read
  *  'stale') and a stored body of another shape is served as `body: null, outdated: true`. */
-export const SPRINT_ASSESS_FORMAT_VERSION = 2;
+export const SPRINT_ASSESS_FORMAT_VERSION = 3;
 
 export interface SprintCodeRef {
   /** owner/name — one of the run's accepted repos. */
@@ -233,7 +240,8 @@ export interface SprintCodeRef {
   path: string;
 }
 
-/** Claude's one sentence for one of the four issues, backed by the ticket or the code. */
+/** Claude's one sentence for one of the three issues, backed by the ticket or the code. "Blocked" must
+ *  name WHAT it waits on and WHO; "Spec gaps" must name the missing detail. */
 export interface SprintAssessmentIssue {
   id: StoryIssueId;
   /** One sentence, ≤ SPRINT_ASSESS_CAPS.issueText. */
@@ -246,7 +254,7 @@ export interface SprintAssessmentIssue {
 export interface SprintAssessmentBody {
   /** The single most important finding, one sentence (e.g. "This may already be done: …"). */
   summary: string;
-  /** At most one per issue id, at most 4, in STORY_ISSUES order. */
+  /** At most one per issue id, at most 3, in STORY_ISSUES order. */
   issues: SprintAssessmentIssue[];
   /** A proposed criteria list (≤ 12), each ≤ SPRINT_ASSESS_CAPS.criterionText. [] = keep them. */
   revisedCriteria: string[];
@@ -460,6 +468,120 @@ export const SPRINT_PHASE_LABEL: Record<SprintPhase, string> = {
   in_progress: 'In progress',
 };
 
+// ── The status layout (sections by status) ───────────────────────────────────────────────────────
+//
+// Statuses are per PROJECT and per TRACKER, so nothing here hard-codes a status name. Two facts are
+// worked out automatically and may each be OVERRIDDEN per workspace:
+//
+//   • THE ORDER — Jira: the board's column order (the sprint's `boardId` →
+//     `/rest/agile/1.0/board/{id}/configuration`, status ids → names via `/rest/api/2/status`);
+//     Linear: the team's workflow states (type, then `position`); GitHub Issues: Open, Closed. Stored
+//     on `sprint_reads.status_order_json` by the sprint read. Unreadable → null, and the fallback is
+//     the statuses on the tickets sorted by category (new → indeterminate → done), then name.
+//   • "CODE DELIVERED FROM" — the FIRST in-progress (category `indeterminate`) status, in order, where
+//     at least SPRINT_DELIVERED_MIN_SHARE of the tickets that have ≥ 1 pull request have ALL of them
+//     merged and none open, with at least SPRINT_DELIVERED_MIN_TICKETS such tickets. The evidence is
+//     the stored ticket rows joined to `pull_requests` (`SprintStatusEvidence`). None qualifies → null.
+//
+// A status NAME is matched case-insensitively (trimmed). An override names statuses; a status it does
+// not name (new on the board since) keeps its AUTOMATIC position relative to its neighbours.
+//
+// ⚠ Category beats position: a `new` status is always Not started and a `done` one is always counted
+// (never listed), wherever the order puts it. Only `indeterminate` (or unknown-category) statuses are
+// split into "Writing code" / "Code delivered".
+
+/** Share of PR-bearing tickets in a status that must be fully merged for it to read as delivered. */
+export const SPRINT_DELIVERED_MIN_SHARE = 0.6;
+/** Fully-merged tickets a status needs at least, for that share to count. */
+export const SPRINT_DELIVERED_MIN_TICKETS = 2;
+/** Statuses an override may list at most; a status name's longest spelling. */
+export const SPRINT_STATUS_ORDER_MAX = 60;
+export const SPRINT_STATUS_NAME_MAX = 100;
+
+/** Where a ticket sits on the page. 'done' tickets are counted, never listed. */
+export type SprintStage = 'not_started' | 'writing' | 'delivered' | 'done';
+
+export const SPRINT_STAGE_LABEL: Record<Exclude<SprintStage, 'done'>, string> = {
+  not_started: 'Not started',
+  writing: 'Writing code',
+  delivered: 'Code delivered',
+};
+
+/** The heading over the in-progress statuses when no code-delivered status is known (nothing splits). */
+export const SPRINT_IN_PROGRESS_HEADING = 'In progress';
+
+/** The automatic order as the sprint read stored it (`sprint_reads.status_order_json`). */
+export interface SprintStatusAutoOrder {
+  source: 'jira_board' | 'linear_states' | 'github';
+  /** In board / workflow order. `id` is the tracker's status id when it has one. */
+  statuses: Array<{ id: string | null; name: string; category: JiraStatusCategory | null }>;
+  /** ISO-8601 of the read that produced it. */
+  readAt: string;
+}
+
+/** The workspace's override (`workspaces.sprint_statuses`). OVERRIDES ONLY: a null half = automatic;
+ *  both null is stored as NULL. Names are matched case-insensitively. */
+export interface SprintStatusSettings {
+  order: string[] | null;
+  deliveredFrom: string | null;
+}
+
+export const SPRINT_STATUS_SETTINGS_DEFAULT: SprintStatusSettings = { order: null, deliveredFrom: null };
+
+/** One status in the resolved order. */
+export interface SprintStatusLayoutEntry {
+  name: string;
+  category: JiraStatusCategory | null;
+  /** Listed (not done) tickets in this status right now; 0 for a known status with none. */
+  count: number;
+  /** Its position came from the automatic order (true) or the override (false). */
+  auto: boolean;
+  /** The stage tickets in this status are listed under. */
+  stage: SprintStage;
+}
+
+/** Per in-progress status: the PR evidence behind "code delivered from". */
+export interface SprintStatusEvidence {
+  status: string;
+  /** Tickets in this status with ≥ 1 pull request. */
+  withPrs: number;
+  /** …of which every pull request is merged and none is open. */
+  allMerged: number;
+}
+
+export interface SprintStatusLayout {
+  /** Every known status (automatic order ∪ statuses on the tickets ∪ the override's names), resolved
+   *  order. The page renders a section per entry with `count > 0`. */
+  order: SprintStatusLayoutEntry[];
+  /** Where the order came from: the override, the tracker, or the category fallback. */
+  orderSource: 'override' | SprintStatusAutoOrder['source'] | 'fallback';
+  /** The effective code-delivered status (override, else automatic); null = nothing splits. */
+  deliveredFrom: string | null;
+  /** What the evidence says on its own (shown in the settings ⓘ and as the "Reset" target). */
+  deliveredFromAuto: string | null;
+  /** In order; in-progress statuses only. */
+  evidence: SprintStatusEvidence[];
+  /** The stored override (default when none). */
+  settings: SprintStatusSettings;
+}
+
+/** PUT /api/sprint-stories/statuses — replace the workspace's override (Pro, `periodReports`; the
+ *  `read` tier; scope via `resolveWorkspaceScope`). Strict: a non-array `order`, a name over
+ *  SPRINT_STATUS_NAME_MAX, NUL / control characters, more than SPRINT_STATUS_ORDER_MAX names, or a
+ *  `deliveredFrom` that is not a string or null → 400 and nothing is written. `{order: null,
+ *  deliveredFrom: null}` = "Reset to automatic" (stored as NULL). */
+export interface SprintStatusesUpdate {
+  workspaceId: number;
+  settings: SprintStatusSettings;
+}
+
+export interface SprintStatusesResponse {
+  workspaceId: number;
+  settings: SprintStatusSettings;
+  /** The layout recomputed with the new settings (same fold as the list GET). */
+  statusLayout: SprintStatusLayout;
+}
+
 export interface SprintTicketRow {
   /** shared `trackerTicketIdent`. */
   ident: string;
@@ -469,6 +591,8 @@ export interface SprintTicketRow {
   url: string | null;
   provider: TrackerProvider;
   phase: SprintPhase;
+  /** Where the layout lists it (`statusLayout`); never 'done' on a listed row. */
+  stage: SprintStage;
   status: { name: string; category: JiraStatusCategory | null } | null;
   issueType: string | null;
   assignee: { name: string; avatarUrl: string | null } | null;
@@ -481,7 +605,7 @@ export interface SprintTicketRow {
   criteria: { items: string[]; source: StoryCriteriaSource };
   labels: SprintLabelState;
   /** `foldStoryIssues` filtered by the workspace's checks (`applyStoryIssueChecks`), in STORY_ISSUES
-   *  order; ≤ 4. [] for a ticket whose type the checks do not cover. */
+   *  order; ≤ 3. [] for a ticket whose type the checks do not cover. */
   issues: StoryIssue[];
   /** = `issues.length` — the within-phase sort key. */
   flagCount: number;
@@ -509,8 +633,10 @@ export interface SprintStoriesResponse {
   /** null until the first read finished. */
   source: SprintSource | null;
   read: SprintReadState;
-  /** Not started first, then In progress; most flags first; then key. */
+  /** By stage, then status section (layout order), then most flags, then key. */
   tickets: SprintTicketRow[];
+  /** The sections. null when there is no tracker (`trackerOn: false`). */
+  statusLayout: SprintStatusLayout | null;
   /** Tickets in the sprint already done — counted, not listed. */
   doneCount: number;
   /** `MeResponse.ai.enabled` on the server: labels and Assess exist. */
@@ -532,7 +658,7 @@ export interface SprintRefreshResponse {
 
 // ── Bullets and composers (pure; the SPA and tests share them) ──────────────────────────────────
 
-/** One line of the expanded card: ≤ 4, one per issue. */
+/** One line of the expanded card: ≤ 3, one per issue. */
 export interface SprintBullet {
   id: StoryIssueId;
   text: string;
@@ -569,7 +695,10 @@ export function sprintIssuesWithClaude(
 ): StoryIssue[] {
   const out = [...coded];
   for (const c of body?.issues ?? []) {
-    if (!out.some((x) => x.id === c.id)) out.push({ id: c.id, criteria: [], total, reasons: ['claude'] });
+    if (!isStoryIssueId(c.id)) continue;
+    if (!out.some((x) => x.id === c.id)) {
+      out.push({ id: c.id, criteria: [], blockers: [], gaps: [], total, reasons: ['claude'] });
+    }
   }
   return applyStoryIssueChecks(out, checks, issueType).sort(
     (a, b) => STORY_ISSUE_IDS.indexOf(a.id) - STORY_ISSUE_IDS.indexOf(b.id),

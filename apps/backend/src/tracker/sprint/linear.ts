@@ -1,15 +1,26 @@
-import { linearSiteRoot, SPRINT_TICKETS_MAX } from '@pierre-review/shared';
+import {
+  linearSiteRoot,
+  SPRINT_STATUS_NAME_MAX,
+  SPRINT_STATUS_ORDER_MAX,
+  SPRINT_TICKETS_MAX,
+  type SprintStatusAutoOrder,
+} from '@pierre-review/shared';
 import { normalizePrefixKey } from '../detect.js';
 import { JiraFetchError } from '../jira/fetch.js';
-import { linearGraphql, toLinearTicket } from '../linear/client.js';
+import { linearCategory, linearGraphql, linearRelationsSelection, toLinearTicket } from '../linear/client.js';
 import type { SprintFetchedTicket, SprintListArgs, SprintListResult, SprintLister } from './types.js';
 
 // LINEAR — THE SPRINT LIST (docs/TRACKERS.md § The sprint list read). Linear's sprint is the team's
 // ACTIVE CYCLE. The teams are those whose keys were seen on this workspace's stored tickets.
 //
-//   • ONE cheap query lists the teams (cycles on? which cycle is active?), then ONE paged query per
-//     active cycle reads its issues — per team, so no single query nears Linear's 10,000-point cap
-//     (50 issues × 10 children ≈ 1,000 points a page).
+//   • ONE cheap query lists the teams (cycles on? which cycle is active? their workflow states), then
+//     ONE paged query per active cycle reads its issues — per team, so no single query nears Linear's
+//     10,000-point cap (50 issues × (10 children + 20 labels + 10 inverse relations with their issue
+//     and state) ≈ 3,600 points a page). The relations cap is 10 here (20 on the one-issue read)
+//     to keep the page at 50.
+//   • THE STATUS ORDER: the teams' workflow states — by category (triage/backlog/unstarted →
+//     started → completed/canceled), then Linear's `position`; several teams concatenate in the
+//     teams' order, deduped by name (docs/TRACKERS.md § The status order).
 //   • No team with cycles switched on → the status fallback, `no_sprint_concept`; none active →
 //     `none_active`. The fallback is the teams' unstarted + started issues updated in the window.
 //   • Each issue folds through the SAME `toLinearTicket` the one-ticket reader uses. ⚠ An issue whose
@@ -18,6 +29,7 @@ import type { SprintFetchedTicket, SprintListArgs, SprintListResult, SprintListe
 
 const PAGE = 50;
 const CHILD_CAP = 10;
+const RELATIONS_CAP = 10;
 
 const ISSUE_FIELDS = /* GraphQL */ `
   identifier
@@ -27,7 +39,7 @@ const ISSUE_FIELDS = /* GraphQL */ `
   createdAt
   completedAt
   updatedAt
-  state { name type }
+  state { id name type }
   assignee { id name displayName avatarUrl }
   project { name }
   parent { identifier title }
@@ -36,12 +48,13 @@ const ISSUE_FIELDS = /* GraphQL */ `
     nodes { identifier title state { type } }
     pageInfo { hasNextPage }
   }
+  ${linearRelationsSelection(RELATIONS_CAP)}
 `;
 
 export const LINEAR_TEAMS_QUERY = /* GraphQL */ `
   query LimnLinearSprintTeams($keys: [String!]!) {
     teams(filter: { key: { in: $keys } }, first: 50) {
-      nodes { id key cyclesEnabled activeCycle { id name number } }
+      nodes { id key cyclesEnabled activeCycle { id name number } states(first: 50) { nodes { id name type position } } }
     }
   }
 `;
@@ -82,11 +95,42 @@ interface IssuePage {
   pageInfo?: { hasNextPage?: boolean | null; endCursor?: string | null } | null;
 }
 
-interface Team {
+export interface Team {
   id?: string | null;
   key?: string | null;
   cyclesEnabled?: boolean | null;
   activeCycle?: { id?: string | null; name?: string | null; number?: number | null } | null;
+  states?: { nodes?: Array<{ id?: string | null; name?: string | null; type?: string | null; position?: number | null } | null> | null } | null;
+}
+
+const TYPE_RANK: Record<string, number> = { triage: 0, backlog: 0, unstarted: 0, started: 1, completed: 2, canceled: 2 };
+
+/** The teams' workflow states as a status order: per team by category then `position`, teams
+ *  concatenated in the given order, names deduped case-insensitively. null when no team has states.
+ *  Pure; exported for its test. */
+export function linearStatesOrder(teams: readonly Team[], readAt: string): SprintStatusAutoOrder | null {
+  const statuses: SprintStatusAutoOrder['statuses'] = [];
+  const names = new Set<string>();
+  for (const t of teams) {
+    const states = (t.states?.nodes ?? [])
+      .filter((s): s is NonNullable<typeof s> => s != null && (s.name ?? '').trim() !== '')
+      .map((s, i) => ({ s, i }))
+      .sort(
+        (a, b) =>
+          (TYPE_RANK[(a.s.type ?? '').toLowerCase()] ?? 1) - (TYPE_RANK[(b.s.type ?? '').toLowerCase()] ?? 1) ||
+          (a.s.position ?? 0) - (b.s.position ?? 0) ||
+          a.i - b.i,
+      );
+    for (const { s } of states) {
+      const name = (s.name ?? '').trim().slice(0, SPRINT_STATUS_NAME_MAX);
+      if (names.has(name.toLowerCase())) continue;
+      names.add(name.toLowerCase());
+      statuses.push({ id: typeof s.id === 'string' && s.id !== '' ? s.id : null, name, category: linearCategory(s.type) });
+      if (statuses.length >= SPRINT_STATUS_ORDER_MAX) break;
+    }
+    if (statuses.length >= SPRINT_STATUS_ORDER_MAX) break;
+  }
+  return statuses.length > 0 ? { source: 'linear_states', statuses, readAt } : null;
 }
 
 const isoDate = (s: string | null | undefined): Date | null => {
@@ -161,6 +205,8 @@ export const listLinearCycle: SprintLister = async (a): Promise<SprintListResult
   const teams = (data?.teams?.nodes ?? []).filter((t): t is Team => t != null);
   const active = teams.filter((t) => t.cyclesEnabled === true && t.activeCycle?.id != null);
   const reason = teams.some((t) => t.cyclesEnabled === true) ? 'none_active' : 'no_sprint_concept';
+  // The active-cycle teams first (their tickets are the page), then the rest.
+  const statusOrder = linearStatesOrder([...active, ...teams.filter((t) => !active.includes(t))], new Date().toISOString());
   const into = { tickets: [] as SprintFetchedTicket[], foreign: 0, truncated: false };
   if (active.length > 0) {
     const names: string[] = [];
@@ -180,7 +226,7 @@ export const listLinearCycle: SprintLister = async (a): Promise<SprintListResult
     }
     if (noneOurs(into)) throw new JiraFetchError('bad_url');
     if (into.tickets.length > 0) {
-      return { source: { kind: 'cycle', provider: 'linear', names }, tickets: into.tickets, truncated: into.truncated };
+      return { source: { kind: 'cycle', provider: 'linear', names }, tickets: into.tickets, truncated: into.truncated, statusOrder };
     }
   }
   await readPages(
@@ -202,5 +248,6 @@ export const listLinearCycle: SprintLister = async (a): Promise<SprintListResult
     },
     tickets: into.tickets,
     truncated: into.truncated,
+    statusOrder,
   };
 };

@@ -220,11 +220,12 @@ export interface StoryReportCandidate {
     notMet: number;
     missing: number;
   } | null;
-  /** `foldStoryIssues` over today's criteria + the CURRENT label (code halves only when none); null
-   *  when the ticket text was never read. Absent on old rows. */
+  /** The issues AS WRITTEN (`storyIssuesAsWritten`): `foldStoryIssues` over today's criteria + the
+   *  CURRENT label, except `blocked` keeps EVERY dependency the story had, finished or not (a merged
+   *  story's blockers are mostly done). null when the ticket text was never read. Absent on old rows. */
   issues?: StoryIssue[] | null;
-  /** Per issue: true = present, false = known absent, null = NOT KNOWN (no current label) —
-   *  `storyIssueStates`. null when the ticket text was never read. Absent on old rows. ⚠ An absent or
+  /** Per issue: true = present, false = known absent, null = NOT KNOWN (no current label) — the
+   *  as-written states from `storyIssuesAsWritten`. null when the ticket text was never read. Absent on old rows. ⚠ An absent or
    *  null answer is unknown, never "the team avoided it". */
   issueStates?: Record<StoryIssueId, boolean | null> | null;
 }
@@ -285,8 +286,9 @@ export interface StoryReportPoint {
   detail: string;
   /** ≥ 1 candidate key; a point left with none after validation is dropped. */
   tickets: string[];
-  /** Which of the four story issues the point is about (doing well: the issue the team avoids).
-   *  Absent on old rows and when the point fits none. */
+  /** Which of the three story issues the point is about (doing well: the issue the team avoids).
+   *  Absent when the point fits none. ⚠ An OLD stored row may carry a retired id ('too_big',
+   *  'waits_on_work', 'scope_unstated'): readers drop any id `isStoryIssueId` rejects. */
   issue?: StoryIssueId;
 }
 
@@ -347,7 +349,7 @@ export interface StoryReportDropped {
 export const STORY_REPORT_ITEMS_MAX = 6;
 /** The LEAN report: at most this many items per section. "Falling short" and actions are one per
  *  story issue at most; spotlights and themes are no longer written (old stored reports still read). */
-export const STORY_REPORT_LEAN = { doingWell: 3, fallingShort: 4, actions: 4 } as const;
+export const STORY_REPORT_LEAN = { doingWell: 3, fallingShort: 3, actions: 3 } as const;
 /** Ticket keys per point / theme / action. */
 export const STORY_REPORT_TICKETS_PER_ITEM_MAX = 8;
 /** Characters, after trimming. Over-long text is cut (with "…"), never refused. */

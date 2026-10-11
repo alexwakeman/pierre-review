@@ -655,21 +655,22 @@ account_id)`, cascade (a report is regenerable); in `accountScopedTables()` and 
 
 One row per (account, story `ident`, `rubric_version`, `text_hash`): Haiku 5.5's answers to the FIXED
 story rubric (`review/story-labels/prompt.ts`, shared `STORY_RUBRIC_VERSION`) — `criteria_json`
-(`StoryCriterionLabel[]`, one entry per `extractCriteria` line, `n` 1-based and in order: `testable`,
-`bundled`, `dependsOnOtherWork`) and `story_json` (`StoryLevelLabels`: `outOfScopeStated`,
-`dependencyNamed`, `nonCodeWork`), plus the call's model, cost and tokens. Written ONLY by the local
+(`StoryCriterionLabel[]`, one entry per `extractCriteria` line, `n` 1-based and in order: `testable`
++ `reason` when not) and `story_json` (`StoryLevelLabels`: `dependencies` — kind, what, owner,
+ticketKey — and `gaps` — type, text), plus the call's model, cost and tokens. Rubric 1 rows (yes/no
+answers) keep their old JSON shape but are never read: every reader filters on `STORY_RUBRIC_VERSION`. Written ONLY by the local
 label run (`review/story-labels/manager.ts`, insert `ON CONFLICT DO NOTHING` on the unique). ⚠ A row
 is CURRENT only while its `rubric_version` is today's AND its `text_hash` equals today's hash of the
 text the labeller would be sent (`db/story-label-input.ts` — title, clipped description, the
 numbered criteria, and the provider's text rule). An edited ticket or a rubric bump simply stops
-counting the old row; nothing deletes it. Code folds these six answers into the four story issues
-(shared `story-issues.ts`); the issues are never stored. No workspace column: the ident already names the site, and a story is one
+counting the old row; nothing deletes it. Code folds these answers (with the ticket's tracker links)
+into the three story issues (shared `story-issues.ts`); the issues are never stored. No workspace column: the ident already names the site, and a story is one
 fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`); in
 `accountScopedTables()` and erased explicitly.
 
 ## Reports → This sprint — five tables (CORE; sqlite `0100` / pg `0087`)
 
-- **`workspaces.sprint_checks`** — Reports → This sprint's checks, OVERRIDES ONLY (`SprintChecks` = `{off: StoryIssueId[], issueTypes: string[]}`, NULL = all four issues on, every type). An older stored shape (chip ids, per-chip type object) is read tolerantly — no migration. `db/sprint-checks.ts`.
+- **`workspaces.sprint_checks`** — Reports → This sprint's checks, OVERRIDES ONLY (`SprintChecks` = `{off: StoryIssueId[], issueTypes: string[]}`, NULL = all three issues on, every type). An older stored shape (chip ids, per-chip type object, retired issue ids such as `too_big`) is read tolerantly — no migration. `db/sprint-checks.ts`.
 - **`sprint_reads`** — one per (account, workspace): the demand gate (`viewed_at`), `next_read_at`,
   the last good `source_json` + `read_at`, `error_code`, `truncated`, and the `provider` + `api_root`
   (sqlite `0101` / pg `0088`) it was read from — a workspace that moved tracker or site since is
@@ -701,6 +702,22 @@ created / resolved instants. ⚠ The table is ONE ROW PER (account, PR, key), so
 ticket's date; Story health takes the freshest-READ non-null one (`createdDatesFor`). NULL = not read
 since 0098, or the tracker said none — never "created at epoch". Not story text: never moves
 `changed_at`.
+
+Sqlite `0103` / pg `0090` (status sections + blockers; no new table):
+
+- **`tracker_tickets.blocked_by_json` / `sprint_tickets.blocked_by_json`** — the ticket's BLOCKING tracker
+  links (`TicketLinkBlocker[]`: key, title, status, category, relation, url; ≤ 20), read in the same
+  issue read. NULL = not read (GitHub Issues, an old row) — never "no blockers"; `[]` = the tracker said
+  none. Done links are stored too (shown resolved, never raised). Not story text: never moves
+  `changed_at`. Read through `parseTicketLinkBlockers` (tolerant) via `db/story-issue-input.ts`.
+- **`tracker_tickets.status_id` / `sprint_tickets.status_id`** — the tracker's status id, so a board's
+  column order (status ids) maps onto the tickets' status names.
+- **`sprint_reads.status_order_json`** — the AUTOMATIC status order (`SprintStatusAutoOrder`: Jira board
+  columns, Linear workflow states, or GitHub's Open → Closed), written by the sprint read; a failed read
+  leaves the previous value. NULL → statuses by category, then name.
+- **`workspaces.sprint_statuses`** — the per-workspace OVERRIDE (`SprintStatusSettings`: `order` names,
+  `deliveredFrom` name; NULL = automatic), the ONE reader/writer `db/sprint-status-settings.ts`. Names
+  match case-insensitively; a status the override does not name keeps its automatic place.
 
 ## The automation vocabulary — `AUTOMATION_VENDORS`, `ReviewerRole`, `AutomatedReviewerKind`
 

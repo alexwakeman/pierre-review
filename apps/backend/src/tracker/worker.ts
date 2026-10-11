@@ -26,6 +26,7 @@ import {
   parseCandidates,
   readStoredTickets,
   settingFor,
+  linkColumns,
   upsertTicketRow,
   type StoredTicketRow,
   type TicketState,
@@ -537,6 +538,8 @@ export async function syncPrTickets(
           omittedCandidates: issue.omittedCandidates,
           // Positive-answer: a date the read did not carry is left out (the stored one stands).
           ...ticketDateFields(issue),
+          // Same rule for the blocking links and the status id (not story text: `changedAt` stays).
+          ...linkColumns(issue),
           fetchedAt: at,
           checkedAt: at,
           nextCheckAt: new Date(at.getTime() + OK_TTL_MS),
@@ -653,6 +656,8 @@ function emptyContent(): Pick<
   | 'candidatesJson'
   | 'omittedCandidates'
   | 'fetchedAt'
+  | 'blockedByJson'
+  | 'statusId'
 > {
   return {
     title: null,
@@ -671,6 +676,8 @@ function emptyContent(): Pick<
     candidatesJson: null,
     omittedCandidates: 0,
     fetchedAt: null,
+    blockedByJson: null,
+    statusId: null,
   };
 }
 

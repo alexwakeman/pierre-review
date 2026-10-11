@@ -173,7 +173,61 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-stories` only 
   read would show "Reading…" for ever. After a good read, and after a forced single-ticket re-read,
   the free labels run (`review/sprint-labels/`, local only). `sprint_reads` remembers the
   `provider` + `api_root` it read; a workspace that moved tracker or site since is reset on the next
-  view (no source, no read time, due now).
+  view (no source, no read time, due now). It also stores the automatic status order (§ The status
+  order) and each ticket's blocking links + status id (§ Blocking links).
+
+## Blocking links — read in the same issue read (`blocked_by_json`)
+
+The links a ticket WAITS ON, stored on both `tracker_tickets` and `sprint_tickets` as
+`blocked_by_json` (shared `TicketLinkBlocker[]`: the linked issue's key, title, status + category, the
+relation phrase from THIS ticket's side, and an https browse URL; ≤ 20). Migration sqlite `0103` /
+pg `0090`. They feed the "Blocked" story issue (docs/CLAUDE-REVIEW.md § Story issues). No extra call:
+
+- **Jira** — `fields.issuelinks` from the `fields=*all` answer the reader and the sprint list already
+  make (`blockedByOf`, `jira/client.ts`). A link carries the OTHER issue on one side: `inwardIssue` →
+  the phrase is `type.inward` ("is blocked by"), `outwardIssue` → `type.outward` ("depends on"). Kept
+  iff shared `isBlockingRelation(phrase)` (the ONE predicate: "is blocked by", "depends on", "requires",
+  "waits on"…; never "blocks", "is depended on by", "relates to"). Jira inlines the linked issue's
+  summary and status, so the link needs nothing more.
+- **Linear** — `inverseRelations` (another issue's relation TO this one) with `type: "blocks"`: the
+  other issue blocks this one. 20 per issue on the one-issue read, 10 on the sprint list (complexity).
+- **GitHub Issues** — none (`blockedBy: null`); a GitHub ticket is "Blocked" only from its text.
+- ⚠ **POSITIVE-ANSWER RULE** (`store.ts` `linkColumns`, shared by the worker and the sprint read): an
+  answer without the field leaves the stored value; `[]` clears it; a refused read clears it with the
+  rest of the content. A link change is NOT story text — `changed_at` does not move.
+- A linked blocker whose status category is `done` is kept (shown as finished) but never raises the
+  issue; the fold decides that, not the read.
+- `status_id` (both tables) stores the tracker's own status id (Jira `status.id`, Linear state id) —
+  a board's column order is written in ids. GitHub has none.
+
+## The status order — what This sprint's sections are ordered by (`sprint_reads.status_order_json`)
+
+Statuses are per project and per tracker, so nothing hard-codes a name. The sprint list read stores the
+AUTOMATIC order (shared `SprintStatusAutoOrder`) with the list; a person may override it per workspace
+(`workspaces.sprint_statuses`, `db/sprint-status-settings.ts`, `PUT /api/sprint-stories/statuses`).
+
+- **Jira** (`tracker/sprint/jira.ts`): the board of the active sprints holding the most tickets
+  (`boardId` on a Cloud sprint object, `rapidViewId=` in an old Server string) →
+  `GET /rest/agile/1.0/board/{id}/configuration` (`columnConfig.columns[].statuses[].id`, column
+  order) + `GET /rest/api/2/status` (id → name + category). Two calls per list read, through
+  `jiraGetJson`; unknown ids are dropped. The status fallback has no board → null.
+- **Linear**: the teams' workflow `states` (read in the teams query) by type (triage / backlog /
+  unstarted → started → completed / canceled), then `position`; several teams concatenate, active-cycle
+  teams first, names deduped.
+- **GitHub Issues**: Open, then the closed names. Projects v2 status is NOT stored on tickets, so it is
+  not read — every GitHub ticket's category is `new`, so all are "Not started".
+- ⚠ **AN ORDER FAILURE NEVER FAILS THE LIST.** A failed board read returns `statusOrder: undefined`
+  (the stored order stands) and a code that is logged; `null` (no board) clears it, and the page falls
+  back to category then name.
+- **"Code delivered from"** is inferred, not read: the first in-progress status where at least 60% of
+  the tickets with a PR have every PR merged and none open, with at least 2 such tickets
+  (`SPRINT_DELIVERED_MIN_*`). Evidence = `tracker_tickets` (state `ok`, this workspace and site) ⨝
+  `pull_requests`, closed-unmerged PRs ignored; a ticket's status is the sprint row's where it is in the
+  sprint, else the freshest of its stored rows and any out-of-sprint sprint row — and ⚠ only when read
+  AT OR AFTER its last merge (the worker stops re-reading a merged ticket, so an older "In Code Review"
+  would drag the split earlier). The inference runs over the order the page uses, override included
+  (`db/sprint-status-layout.ts` `loadSprintStatusEvidence`). Settings moves a status only among its own
+  category.
 
 ## The write-back — per ticket, confirmed, never retried (`tracker/write/`)
 
@@ -380,9 +434,10 @@ where pasting a personal key is the only route today.
   `updatedAt` passed the last read, or every 30 min while open (a link made in Linear does not move the
   PR); a merged PR is read once. Steady state, a workspace with 100 open PRs costs ≈ 8 link requests an
   hour plus one issue read per ticket per 30 min — far inside Linear's per-key budget.
-- **FETCH** (`linear/client.ts`): one `issue(id: "ENG-123")` query per ticket (≈ 120 complexity
-  points with 50 children): identifier, title, description (markdown), url, state `{name, type}`,
-  assignee, project name, ≤ 50 children (+ `hasNextPage`). Status category from the state TYPE:
+- **FETCH** (`linear/client.ts`): one `issue(id: "ENG-123")` query per ticket (≈ 200 complexity
+  points with 50 children and 20 relations): identifier, title, description (markdown), url, state
+  `{id, name, type}`, assignee, project name, ≤ 50 children (+ `hasNextPage`), ≤ 20 inverse relations
+  (§ Blocking links). Status category from the state TYPE:
   backlog/unstarted/triage → `new`, started → `indeterminate`, completed/canceled → `done`. Linear has
   no issue types (`issue_type_*` NULL). The project is appended to the description as one line
   (`Linear project: …`) — context for the ticket review. ⚠ The CYCLE is deliberately NOT read: it rolls

@@ -1,36 +1,55 @@
 import { describe, expect, it } from 'vitest';
-import { sprintIssuesWithClaude,
+import {
   STORY_ISSUES,
-  STORY_TOO_BIG_CRITERIA,
   applyStoryIssueChecks,
-  criteriaPhrase,
   foldStoryIssues,
+  isBlockingRelation,
+  isStoryIssueId,
+  joinCapped,
+  parseTicketLinkBlockers,
   sprintBullets,
   sprintCommentMarkdown,
+  sprintIssuesWithClaude,
+  storyBlockedSource,
+  storyBlockerPhrase,
   storyIssueBullet,
   storyIssueChipText,
   storyIssueMeasure,
   storyIssueStates,
   storyIssueTypeChecked,
-  type StoryCriterionLabel,
-  type StoryIssueLabel,
+  type KnownTicket,
   type SprintAssessmentRecord,
+  type StoryCriterionLabel,
+  type StoryIssue,
+  type StoryIssueLabel,
+  type TicketLinkBlocker,
 } from '@pierre-review/shared';
 
-// The four story issues (packages/shared/src/story-issues.ts): the ONE fold, its templates and the
-// checks filter. Pure.
+// The three story issues (packages/shared/src/story-issues.ts): the ONE fold, its two questions (now vs
+// as written), its templates and the checks filter. Pure.
 
-const crit = (n: number, over: Partial<StoryCriterionLabel> = {}): StoryCriterionLabel => ({
-  n,
-  testable: true,
-  bundled: false,
-  dependsOnOtherWork: false,
-  ...over,
-});
+const crit = (n: number, over: Partial<StoryCriterionLabel> = {}): StoryCriterionLabel => ({ n, testable: true, reason: null, ...over });
 const items = (k: number): string[] => Array.from({ length: k }, (_, i) => `criterion ${i + 1}`);
 const clean = (k: number, story: Partial<StoryIssueLabel['story']> = {}): StoryIssueLabel => ({
   criteria: Array.from({ length: k }, (_, i) => crit(i + 1)),
-  story: { outOfScopeStated: true, dependencyNamed: true, nonCodeWork: false, ...story },
+  story: { dependencies: [], gaps: [], ...story },
+});
+const link = (key: string, o: Partial<TicketLinkBlocker> = {}): TicketLinkBlocker => ({
+  key,
+  title: `Title ${key}`,
+  status: 'To Do',
+  category: 'new',
+  relation: 'is blocked by',
+  url: null,
+  ...o,
+});
+const issue = (o: Partial<StoryIssue> & Pick<StoryIssue, 'id'>): StoryIssue => ({
+  total: 3,
+  reasons: [],
+  criteria: [],
+  blockers: [],
+  gaps: [],
+  ...o,
 });
 
 describe('foldStoryIssues', () => {
@@ -38,133 +57,124 @@ describe('foldStoryIssues', () => {
     expect(foldStoryIssues({ criteria: items(3), label: clean(3) })).toEqual([]);
   });
 
-  it('no criteria is unclear_done from code alone, with or without a label', () => {
+  it('no criteria is unclear_done from code alone', () => {
     const out = foldStoryIssues({ criteria: [], label: null });
-    expect(out).toEqual([{ id: 'unclear_done', criteria: [], total: 0, reasons: ['no_criteria'] }]);
+    expect(out).toEqual([issue({ id: 'unclear_done', total: 0, reasons: ['no_criteria'] })]);
     expect(storyIssueChipText(out[0]!)).toBe('Unclear when done · no criteria');
   });
 
-  it('no label: only the code halves (no criteria, more than 8 criteria) are raised', () => {
-    expect(foldStoryIssues({ criteria: items(5), label: null })).toEqual([]);
-    const big = foldStoryIssues({ criteria: items(STORY_TOO_BIG_CRITERIA + 1), label: null });
-    expect(big.map((i) => i.id)).toEqual(['too_big']);
-    expect(big[0]!.reasons).toEqual(['many_criteria']);
-    expect(foldStoryIssues({ criteria: items(STORY_TOO_BIG_CRITERIA), label: null })).toEqual([]);
+  it('no label: a long list raises nothing ("Too big" is gone); a label of the wrong length is ignored', () => {
+    expect(foldStoryIssues({ criteria: items(25), label: null })).toEqual([]);
+    const wrong = { criteria: [crit(1, { testable: false, reason: 'vague' })], story: { dependencies: [], gaps: [] } };
+    expect(foldStoryIssues({ criteria: items(4), label: wrong })).toEqual([]);
   });
 
-  it('a label that judged a different number of criteria is ignored', () => {
-    const l = clean(3, { outOfScopeStated: false });
-    expect(foldStoryIssues({ criteria: items(4), label: l })).toEqual([]);
-  });
-
-  it('folds every label into exactly one of the four issues, in order', () => {
+  it('folds a label into the three issues, in order, each with its detail', () => {
     const l: StoryIssueLabel = {
-      criteria: [
-        crit(1, { testable: false }),
-        crit(2, { bundled: true, dependsOnOtherWork: true }),
-        crit(3, { testable: false, bundled: true }),
-        crit(4),
-      ],
-      story: { outOfScopeStated: false, dependencyNamed: false, nonCodeWork: true },
+      criteria: [crit(1, { testable: false, reason: 'no expected result' }), crit(2), crit(3, { testable: false, reason: "'intuitive' can't be checked" })],
+      story: {
+        dependencies: [{ kind: 'api', what: 'pricing API', owner: 'Payments team', ticketKey: null }],
+        gaps: [{ type: 'edge_case', text: 'No behaviour when the upload fails' }],
+      },
     };
-    const out = foldStoryIssues({ criteria: items(4), label: l });
+    const out = foldStoryIssues({ criteria: items(3), label: l });
     expect(out.map((i) => i.id)).toEqual(STORY_ISSUES.map((m) => m.id));
-    expect(out[0]).toEqual({ id: 'unclear_done', criteria: [1, 3], total: 4, reasons: ['untestable'] });
-    expect(out[1]).toEqual({ id: 'too_big', criteria: [2, 3], total: 4, reasons: ['bundled', 'non_code_work'] });
-    expect(out[2]).toEqual({ id: 'waits_on_work', criteria: [2], total: 4, reasons: ['depends_unnamed'] });
-    expect(out[3]).toEqual({ id: 'scope_unstated', criteria: [], total: 4, reasons: ['no_out_of_scope'] });
-    expect(out.map(storyIssueChipText)).toEqual([
-      'Unclear when done · 2 of 4 criteria',
-      'Too big · 2 of 4 criteria',
-      'Waits on other work · 1 of 4 criteria',
-      'Scope not stated',
+    expect(out[0]!.criteria).toEqual([
+      { n: 1, reason: 'no expected result' },
+      { n: 3, reason: "'intuitive' can't be checked" },
+    ]);
+    expect(out.map(storyIssueChipText)).toEqual(['Unclear when done · 2 of 3 criteria', 'Blocked · 1 open', 'Spec gaps · 1 gap']);
+    expect(out.map(storyIssueBullet)).toEqual([
+      "Criterion 1: no expected result · Criterion 3: 'intuitive' can't be checked",
+      'Waits on pricing API, Payments team, no ticket',
+      'No behaviour when the upload fails',
     ]);
   });
 
-  it('too_big on count reads the count, and folds the label reasons in too', () => {
-    const l = clean(25);
-    l.criteria[4] = crit(5, { bundled: true });
-    const [big] = foldStoryIssues({ criteria: items(25), label: l });
-    expect(big).toEqual({ id: 'too_big', criteria: [5], total: 25, reasons: ['many_criteria', 'bundled'] });
-    expect(storyIssueChipText(big!)).toBe('Too big · 25 criteria');
-    expect(storyIssueBullet(big!)).toBe('Split this story: it has 25 criteria and criterion 5 holds more than one outcome.');
+  it('links come first and win a key collision; a done link is shown, never raised', () => {
+    const l = clean(2, { dependencies: [{ kind: 'ticket', what: 'banner', owner: 'UCD team', ticketKey: 'bmd-568' }] });
+    const out = foldStoryIssues({
+      criteria: items(2),
+      label: l,
+      links: [link('BMD-568', { title: 'cookie banner' }), link('BMD-12', { status: 'Done', category: 'done' })],
+    });
+    const blocked = out.find((i) => i.id === 'blocked')!;
+    expect(blocked.reasons).toEqual(['linked']);
+    expect(blocked.blockers.map((b) => [b.source, b.ticketKey, b.resolved])).toEqual([
+      ['link', 'BMD-568', false],
+      ['link', 'BMD-12', true],
+    ]);
+    expect(storyIssueBullet(blocked)).toBe('Waits on BMD-568 cookie banner (To Do)');
+    // Only done links → nothing raised now.
+    expect(foldStoryIssues({ criteria: items(2), label: clean(2), links: [link('BMD-12', { category: 'done' })] })).toEqual([]);
+  });
+
+  it('a named key resolves through the stored tickets (title, status), and a done one is resolved', () => {
+    const l = clean(2, { dependencies: [{ kind: 'ticket', what: 'banner', owner: null, ticketKey: 'BMD-9' }] });
+    const known = (category: KnownTicket['category']) =>
+      new Map<string, KnownTicket>([['BMD-9', { title: 'Cookie banner', status: 'In Review', category, url: null }]]);
+    const [open] = foldStoryIssues({ criteria: items(2), label: l, knownTickets: known('indeterminate') });
+    expect(storyBlockerPhrase(open!.blockers[0]!)).toBe('BMD-9 Cookie banner (In Review)');
+    expect(foldStoryIssues({ criteria: items(2), label: l, knownTickets: known('done') })).toEqual([]);
   });
 });
 
-describe('storyIssueStates', () => {
-  it('null where it cannot tell, false where the label says no', () => {
-    expect(storyIssueStates({ criteria: items(3), label: null })).toEqual({
-      unclear_done: null,
-      too_big: null,
-      waits_on_work: null,
-      scope_unstated: null,
-    });
-    expect(storyIssueStates({ criteria: [], label: null }).unclear_done).toBe(true);
-    expect(storyIssueStates({ criteria: items(3), label: clean(3) })).toEqual({
-      unclear_done: false,
-      too_big: false,
-      waits_on_work: false,
-      scope_unstated: false,
-    });
-  });
-});
+describe('the two questions: now vs as written', () => {
+  const finished = { criteria: items(2), label: clean(2), links: [link('BMD-12', { category: 'done' })] };
 
-describe('storyIssueMeasure', () => {
-  it('answers every issue for a labelled story and for no other (one population)', () => {
-    expect(storyIssueMeasure({ criteria: items(12), label: null })).toEqual({
-      unclear_done: null,
-      too_big: null,
-      waits_on_work: null,
-      scope_unstated: null,
-    });
-    // No criteria is never folded in: it can never be labelled, so it would mix two populations.
+  it('storyIssueStates (now): a finished blocker is not blocking', () => {
+    expect(storyIssueStates(finished).blocked).toBe(false);
+    // No label: blocked is true on an open link, otherwise unknown.
+    expect(storyIssueStates({ criteria: items(2), label: null, links: [link('X-1')] }).blocked).toBe(true);
+    expect(storyIssueStates({ criteria: items(2), label: null })).toEqual({ unclear_done: null, blocked: null, spec_gaps: null });
+  });
+
+  it('storyIssueMeasure (as written): any dependency counts, finished or not — labelled stories only', () => {
+    expect(storyIssueMeasure(finished)).toEqual({ unclear_done: false, blocked: true, spec_gaps: false });
+    expect(storyBlockedSource(finished)).toBe('linked');
+    const textOnly = { criteria: items(2), label: clean(2, { dependencies: [{ kind: 'decision', what: 'pricing decision', owner: null, ticketKey: null }] }) };
+    expect(storyBlockedSource(textOnly)).toBe('text_only');
+    expect(storyIssueMeasure({ criteria: items(2), label: null, links: [link('X-1')] })).toEqual({ unclear_done: null, blocked: null, spec_gaps: null });
+    // No criteria is never folded in: it can never be labelled.
     expect(storyIssueMeasure({ criteria: [], label: null }).unclear_done).toBeNull();
-    expect(storyIssueMeasure({ criteria: items(12), label: clean(12) }).too_big).toBe(true);
-    expect(storyIssueMeasure({ criteria: items(3), label: clean(3) }).too_big).toBe(false);
+  });
+});
+
+describe('tracker links', () => {
+  it('isBlockingRelation reads this ticket’s side of a Jira link', () => {
+    for (const p of ['is blocked by', 'depends on', 'Is Dependent On', 'requires', 'waits for']) expect(isBlockingRelation(p)).toBe(true);
+    for (const p of ['blocks', 'is depended on by', 'is required by', 'relates to', 'clones']) expect(isBlockingRelation(p)).toBe(false);
+  });
+  it('parseTicketLinkBlockers is tolerant: non-array → null, bad entries dropped, http urls dropped', () => {
+    expect(parseTicketLinkBlockers(null)).toBeNull();
+    expect(parseTicketLinkBlockers({})).toBeNull();
+    expect(
+      parseTicketLinkBlockers([{ key: ' A-1 ', category: 'odd', url: 'http://x' }, { title: 'no key' }, 7]),
+    ).toEqual([{ key: 'A-1', title: null, status: null, category: null, relation: '', url: null }]);
   });
 });
 
 describe('templates', () => {
-  it('criteriaPhrase', () => {
-    expect(criteriaPhrase([3])).toBe('criterion 3');
-    expect(criteriaPhrase([2, 5])).toBe('criteria 2 and 5');
-    expect(criteriaPhrase([2, 4, 5])).toBe('criteria 2, 4 and 5');
-    expect(criteriaPhrase([1, 2, 3, 4])).toBe('4 criteria');
+  it('joinCapped shows three, then "and N more"', () => {
+    expect(joinCapped(['a', 'b'])).toBe('a · b');
+    expect(joinCapped(['a', 'b', 'c', 'd', 'e'])).toBe('a · b · c and 2 more');
   });
-
-  it('one sentence per issue', () => {
-    expect(storyIssueBullet({ id: 'unclear_done', criteria: [2, 5], total: 12, reasons: ['untestable'] })).toBe(
-      'Rewrite criteria 2 and 5 (of 12) as outcomes someone could check: the input, the action and the result.',
+  it('a no-criteria bullet asks for criteria', () => {
+    expect(storyIssueBullet(issue({ id: 'unclear_done', total: 0, reasons: ['no_criteria'] }))).toBe(
+      'Add acceptance criteria: outcomes a tester could check, one per line.',
     );
-    expect(storyIssueBullet({ id: 'too_big', criteria: [], total: 3, reasons: ['non_code_work'] })).toBe(
-      'Move the work that is not code (sign-off, docs, config) into its own task.',
-    );
-    expect(storyIssueBullet({ id: 'waits_on_work', criteria: [4], total: 6, reasons: ['depends_unnamed'] })).toBe(
-      'Criterion 4 (of 6) waits on other work: name it and link its ticket.',
-    );
-    expect(storyIssueBullet({ id: 'waits_on_work', criteria: [1, 4], total: 6, reasons: ['depends'] })).toBe(
-      'Criteria 1 and 4 (of 6) wait on other work: say what happens if it is late.',
-    );
-    for (const m of STORY_ISSUES) {
-      const issue = foldStoryIssues({
-        criteria: items(9),
-        label: {
-          criteria: Array.from({ length: 9 }, (_, i) => crit(i + 1, { testable: false, bundled: true, dependsOnOtherWork: true })),
-          story: { outOfScopeStated: false, dependencyNamed: true, nonCodeWork: true },
-        },
-      }).find((i) => i.id === m.id)!;
-      const b = storyIssueBullet(issue);
-      expect(b.endsWith('.')).toBe(true);
-      expect(b.split(/\.\s/).length).toBe(1);
-    }
+  });
+  it('isStoryIssueId drops the retired ids', () => {
+    for (const old of ['too_big', 'waits_on_work', 'scope_unstated', 'no_persona']) expect(isStoryIssueId(old)).toBe(false);
+    for (const m of STORY_ISSUES) expect(isStoryIssueId(m.id)).toBe(true);
   });
 });
 
 describe('checks', () => {
-  const issues = foldStoryIssues({ criteria: items(3), label: clean(3, { outOfScopeStated: false }) });
+  const issues = foldStoryIssues({ criteria: items(3), label: clean(3, { gaps: [{ type: 'rule', text: 'No rule for ties' }] }) });
 
   it('off drops an issue; issue types gate the whole ticket, case-insensitively', () => {
-    expect(applyStoryIssueChecks(issues, { off: ['scope_unstated'], issueTypes: [] }, 'Story')).toEqual([]);
+    expect(applyStoryIssueChecks(issues, { off: ['spec_gaps'], issueTypes: [] }, 'Story')).toEqual([]);
     expect(applyStoryIssueChecks(issues, { off: [], issueTypes: ['story'] }, 'Story')).toHaveLength(1);
     expect(applyStoryIssueChecks(issues, { off: [], issueTypes: ['Story'] }, 'Bug')).toEqual([]);
     expect(storyIssueTypeChecked({ off: [], issueTypes: ['Story'] }, null)).toBe(true);
@@ -198,20 +208,19 @@ describe('sprintBullets', () => {
     const body = {
       summary: 'This may already be done.',
       issues: [
-        { id: 'waits_on_work' as const, text: 'Needs the pricing API change in BMD-12.', ref: null },
+        { id: 'blocked' as const, text: 'Waits on the pricing API change in BMD-12, owned by Payments.', ref: null },
         { id: 'unclear_done' as const, text: 'Say what a successful export looks like.', ref: { repo: 'a/b', path: 'src/x.ts' } },
       ],
       revisedCriteria: ['A user can export a CSV'],
     };
     const t = { issues, assessment: { record: record(body), currency: 'current' as const }, issueType: null };
     const got = sprintBullets(t, { off: [], issueTypes: [] });
-    // waits_on_work was not raised by code: Claude's sentence for it is not a bullet.
+    // blocked was not on the row: Claude's sentence for it is not a bullet.
     expect(got.map((b) => [b.id, b.source])).toEqual([['unclear_done', 'claude']]);
     expect(sprintBullets(t, { off: ['unclear_done'], issueTypes: [] })).toEqual([]);
     expect(sprintCommentMarkdown(got, body)).toBe(
       'This may already be done.\n\n- Say what a successful export looks like.\n\n**Proposed acceptance criteria**\n\n- A user can export a CSV',
     );
-    // A stale run: the templated bullet.
     const stale = { ...t, assessment: { record: record(body), currency: 'stale' as const } };
     expect(sprintBullets(stale, { off: [], issueTypes: [] }).map((b) => b.source)).toEqual(['code']);
   });
@@ -227,18 +236,20 @@ describe('sprintIssuesWithClaude', () => {
     summary: 'May already be done.',
     issues: [
       { id: 'unclear_done' as const, text: 'Two options, none chosen.', ref: null },
-      { id: 'scope_unstated' as const, text: 'Say what is out.', ref: null },
+      { id: 'spec_gaps' as const, text: 'No behaviour when the file is empty.', ref: null },
     ],
     revisedCriteria: [],
   };
-  const coded = [{ id: 'scope_unstated' as const, criteria: [], total: 4, reasons: ['no_out_of_scope' as const] }];
+  const coded = [issue({ id: 'spec_gaps', total: 4, reasons: ['gaps'], gaps: [{ type: 'edge_case', text: 'No empty-file rule' }] })];
   it('adds a current run’s issue that code did not raise, in order, and keeps code’s own', () => {
     expect(sprintIssuesWithClaude(coded, body, { off: [], issueTypes: [] }, 'Bug', 4)).toEqual([
-      { id: 'unclear_done', criteria: [], total: 4, reasons: ['claude'] },
+      issue({ id: 'unclear_done', total: 4, reasons: ['claude'] }),
       coded[0],
     ]);
   });
-  it('adds nothing without a current run, and obeys the checks', () => {
+  it('skips a retired id in a stored body, adds nothing without a run, and obeys the checks', () => {
+    const old = { ...body, issues: [{ id: 'too_big', text: 'Split it.', ref: null }] } as unknown as typeof body;
+    expect(sprintIssuesWithClaude(coded, old, { off: [], issueTypes: [] }, 'Bug', 4)).toEqual(coded);
     expect(sprintIssuesWithClaude(coded, null, { off: [], issueTypes: [] }, 'Bug', 4)).toEqual(coded);
     expect(sprintIssuesWithClaude(coded, body, { off: ['unclear_done'], issueTypes: [] }, 'Bug', 4)).toEqual(coded);
   });

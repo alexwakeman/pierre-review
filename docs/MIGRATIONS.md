@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0089` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
+  ⚠ pg `0052`–`0090` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -1207,3 +1207,12 @@ already applied in development. ⚠ pg `0088` NOT replayed.
 `workspaces.sprint_checks` (sqlite text JSON / pg jsonb), OVERRIDES ONLY (`SprintChecks`): NULL = every
 Reports → This sprint check on for every issue type. Read and written only by `db/sprint-checks.ts`.
 ⚠ pg `0089` NOT replayed.
+
+### `0103_sprint_statuses_and_blockers` (pg `0090`) — sections by status, blocking links
+Six additive, nullable columns, no new table (so `accountScopedTables()` is unchanged):
+`tracker_tickets` + `sprint_tickets` gain `blocked_by_json` (the ticket's blocking tracker links,
+`TicketLinkBlocker[]`; NULL = not read, never "none") and `status_id`; `sprint_reads` gains
+`status_order_json` (the automatic status order); `workspaces` gains `sprint_statuses` (the
+per-workspace override). Sqlite text JSON / pg jsonb. Journal `when` `1792051203000`. Ships with
+rubric 2 of the story labels (`STORY_RUBRIC_VERSION` 2 — a code bump, no migration: old
+`story_labels` rows simply stop counting). ⚠ pg `0090` NOT replayed.

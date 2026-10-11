@@ -39,6 +39,7 @@ import {
 import { accessFingerprint, backoffCode, kickTrackerSync, syncOnePrNow } from './worker.js';
 import { registerTicketLinksRoute } from './links.js';
 import { registerTicketMergedPrsRoute } from './merged.js';
+import { registerTicketPrsRoute } from './ticket-prs.js';
 import { registerManualTicketLinkRoute } from './manual-links.js';
 import { writeSettingEvent } from '../db/setting-event-write.js';
 
@@ -69,6 +70,7 @@ const TRACKER_NAME: Record<string, string> = { jira: 'Jira', github: 'GitHub Iss
 //                                                     person named by URL or key.
 //   POST /api/ticket-links                            ./links.ts — the Open PRs ticket row.
 //   GET  /api/ticket-merged-prs                       ./merged.ts — the stacks' "Merged (n)" panel.
+//   GET  /api/ticket-prs                              ./ticket-prs.ts — the ticket tab (one ticket's PRs).
 //
 // ⚠ LIMN IS NOT A TRACKER PROXY. The ticket routes address a PULL REQUEST (ownership-scoped → 404),
 // resolve that PR's workspace exactly as the enricher does, RE-RUN detection on it and answer only
@@ -255,6 +257,7 @@ export function registerTrackerRoutes(
 
   registerTicketLinksRoute(app, ctx, opts);
   registerTicketMergedPrsRoute(app, ctx);
+  registerTicketPrsRoute(app, ctx);
   registerManualTicketLinkRoute(app, ctx, opts);
 
   const idParams = {

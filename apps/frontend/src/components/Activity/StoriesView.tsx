@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { TICKET_ALIGNMENT_LABEL, type StoryRow } from '@pierre-review/shared';
 import { useStories } from '../../hooks/useStories.js';
+import { useOpenTicketTab } from '../../lib/ticketTab.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
 import { PALETTE } from '../charts/common.js';
 import { RepoRows } from '../charts/RepoRows.js';
 import { ScatterChart } from '../charts/ScatterChart.js';
-import { ChevronIcon } from '../Icons.js';
+import { ChevronIcon, PullRequestIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { reportingWindowCaption, reportingWindowPhrase, windowDates } from './reportingWindowText.js';
 import { StoryReportCard } from './StoryReportCard.js';
@@ -38,6 +39,8 @@ import {
 // re-ranks them.
 // ⚠ EVERY EXPLANATION SITS BEHIND AN ⓘ — the page carries facts and labels, no caption paragraphs.
 // ⚠ UNKNOWN IS NEVER ZERO: an unsized story is listed under the size chart, never plotted at 0.
+// ⚠ A STORY'S PULL REQUESTS OPEN IN THE TICKET TAB (`useOpenTicketTab`): the "Time and pull requests"
+// rows and every story row carry a named "Pull requests" button; the key still opens the tracker.
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const CARD = 'rounded-lg border border-gray-200 p-3 dark:border-gray-800';
@@ -59,11 +62,30 @@ function StoriesInfo(): JSX.Element {
 
 function TimeChartInfo(): JSX.Element {
   return (
-    <p>
-      Working time runs from the first pull request opened to the last one merged, counted in this
-      workspace&rsquo;s working hours. Pull requests counts every pull request on the ticket, open,
-      merged or closed. Each column has its own scale.
-    </p>
+    <>
+      <p>
+        Working time runs from the first pull request opened to the last one merged, counted in this
+        workspace&rsquo;s working hours. Pull requests counts every pull request on the ticket, open,
+        merged or closed. Each column has its own scale.
+      </p>
+      <p>&ldquo;Pull requests&rdquo; under a ticket opens a tab with only that ticket&rsquo;s pull requests.</p>
+    </>
+  );
+}
+
+/** Opens the ticket tab: this story's pull requests, open and merged, on their own. */
+function TicketPrsButton({ story, label }: { story: Pick<StoryRow, 'ident' | 'key' | 'title'>; label: string }): JSX.Element {
+  const openTicketTab = useOpenTicketTab();
+  return (
+    <button
+      type="button"
+      onClick={() => openTicketTab({ ident: story.ident, key: story.key, title: story.title })}
+      aria-label={`${label} for ${story.key}`}
+      className="mt-0.5 inline-flex items-center gap-1 rounded border border-gray-300 px-1.5 py-px text-[11px] text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
+    >
+      <PullRequestIcon size={10} />
+      {label}
+    </button>
   );
 }
 
@@ -272,6 +294,7 @@ function StoryItem({ story, workingDayHours }: { story: StoryRow; workingDayHour
         <span className="break-words">{story.title ?? ''}</span>
       </div>
       <div className={`mt-0.5 text-xs ${MUTED}`}>{storyMetaParts(story, workingDayHours).join(' · ')}</div>
+      {story.prs.total > 0 && <TicketPrsButton story={story} label="Pull requests" />}
       {story.review != null && (
         <div className="mt-0.5 text-xs text-gray-700 dark:text-gray-200">
           {TICKET_ALIGNMENT_LABEL[story.review.alignment]}
@@ -286,6 +309,7 @@ function StoryItem({ story, workingDayHours }: { story: StoryRow; workingDayHour
 
 function TimeChart({ stories, workingDayHours }: { stories: StoryRow[]; workingDayHours: number }): JSX.Element {
   const m = buildTimeRows(stories);
+  const byIdent = indexStories(stories);
   return (
     <section data-testid="stories-time-chart" className={CARD}>
       <h4 className="mb-2 flex items-center gap-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
@@ -298,6 +322,14 @@ function TimeChart({ stories, workingDayHours }: { stories: StoryRow[]; workingD
         labels={m.labels}
         nameHeader="Ticket"
         nameWidthPct={36}
+        rowAction={(i) => {
+          const s = byIdent.get(m.idents[i] ?? '');
+          return s == null ? null : (
+            <span className="block">
+              <TicketPrsButton story={s} label="Pull requests" />
+            </span>
+          );
+        }}
         columns={[
           {
             key: 'hours',

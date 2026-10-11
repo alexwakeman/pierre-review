@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { StoryCriteriaSource, StoryIssueInput, StoryReviewSummary, StoryRow } from '@pierre-review/shared';
 import type { StoryInternals } from './stories.js';
-import { selectStories, storyIssueRates } from './story-selection.js';
+import { selectStories, storyIssueRates, storyIssuesAsWritten } from './story-selection.js';
 
 let n = 0;
 function story(o: {
@@ -134,43 +134,52 @@ describe('selectStories', () => {
     expect(b).toEqual(a);
   });
 
-  it('carries each pick\'s story issues and whole-window issue rates by the measure rule', () => {
+  it('carries each pick\'s story issues AS WRITTEN and whole-window issue rates by the measure rule', () => {
     const a = story({ key: 'I-1', criteria: 4, source: 'review', review: { alignment: 'aligned', met: 4, total: 4 } });
     const b = story({ key: 'I-2', criteria: null, source: 'none' });
-    const c = story({ key: 'I-3', criteria: 12 }); // not picked; unlabelled, 12 criteria
+    const c = story({ key: 'I-3', criteria: 12 }); // not picked; unlabelled
     const d = story({ key: 'I-4', criteria: 5 }); // ticket never read
     const crit = (k: number) => Array.from({ length: k }, (_, i) => `c${i + 1}`);
     const label = {
-      criteria: crit(4).map((_, i) => ({ n: i + 1, testable: i !== 2, bundled: false, dependsOnOtherWork: false })),
-      story: { outOfScopeStated: false, dependencyNamed: false, nonCodeWork: false },
+      criteria: crit(4).map((_, i) => ({ n: i + 1, testable: i !== 2, reason: i === 2 ? 'no expected result' : null })),
+      story: { dependencies: [], gaps: [{ type: 'data' as const, text: 'No source for the prices' }] },
     };
+    // I-1's only blocker is FINISHED: it still waited on it, so as written it is Blocked.
+    const done = { key: 'X-9', title: 'Pricing API', status: 'Done', category: 'done' as const, relation: 'is blocked by', url: null };
     const inputs = new Map<string, StoryIssueInput | null>([
-      [a.row.ident, { criteria: crit(4), label }],
+      [a.row.ident, { criteria: crit(4), label, links: [done] }],
       [b.row.ident, { criteria: [], label: null }],
       [c.row.ident, { criteria: crit(12), label: null }],
       [d.row.ident, null],
     ]);
     const s = selectStories([a, b, c, d], 8, false, inputs);
     const by = new Map(s.candidates.map((x) => [x.key, x]));
-    expect(by.get('I-1')!.issues!.map((i) => i.id)).toEqual(['unclear_done', 'scope_unstated']);
-    expect(by.get('I-1')!.issues![0]!.criteria).toEqual([3]);
+    expect(by.get('I-1')!.issues!.map((i) => i.id)).toEqual(['unclear_done', 'blocked', 'spec_gaps']);
+    expect(by.get('I-1')!.issues![0]!.criteria).toEqual([{ n: 3, reason: 'no expected result' }]);
+    expect(by.get('I-1')!.issues![1]!.blockers.map((x) => [x.ticketKey, x.resolved])).toEqual([['X-9', true]]);
     expect(by.get('I-2')!.issues!.map((i) => i.id)).toEqual(['unclear_done']);
-    expect(by.get('I-1')!.issueStates).toEqual({ unclear_done: true, too_big: false, waits_on_work: false, scope_unstated: true });
+    expect(by.get('I-1')!.issueStates).toEqual({ unclear_done: true, blocked: true, spec_gaps: true });
     // No label: what code knows is true, the rest NOT KNOWN — never false.
-    expect(by.get('I-2')!.issueStates).toEqual({ unclear_done: true, too_big: null, waits_on_work: null, scope_unstated: null });
+    expect(by.get('I-2')!.issueStates).toEqual({ unclear_done: true, blocked: null, spec_gaps: null });
     // ⚠ ONE population: only the labelled story counts, for every issue — the no-criteria story is
-    // `noCriteriaFound`, the unlabelled 12-criteria story is not "too big", the unread ticket is out.
+    // `noCriteriaFound`, the unlabelled story and the unread ticket are out.
     expect(s.population.noCriteriaFound).toBe(1);
     expect(s.population.issueRates).toEqual([
       { id: 'unclear_done', stories: 1, of: 1 },
-      { id: 'too_big', stories: 0, of: 1 },
-      { id: 'waits_on_work', stories: 0, of: 1 },
-      { id: 'scope_unstated', stories: 1, of: 1 },
+      { id: 'blocked', stories: 1, of: 1 },
+      // spec_gaps is HELD (STORY_HEALTH_HELD), so its rate is not handed to the report.
     ]);
     // Without inputs, no issue fields are written (old callers, old rows).
     const plain = selectStories([a, b], 8);
     expect(plain.population.issueRates).toBeUndefined();
     expect(plain.candidates[0]!.issues).toBeUndefined();
-    expect(storyIssueRates([])).toHaveLength(4);
+    expect(storyIssueRates([])).toHaveLength(3);
+  });
+
+  it('storyIssuesAsWritten: an unlabelled story with only a link is blocked and nothing else is known', () => {
+    const open = { key: 'X-1', title: 'API', status: 'To Do', category: 'new' as const, relation: 'depends on', url: null };
+    const w = storyIssuesAsWritten({ criteria: ['a', 'b'], label: null, links: [open] });
+    expect(w.issues.map((i) => [i.id, i.reasons])).toEqual([['blocked', ['linked']]]);
+    expect(w.states).toEqual({ unclear_done: null, blocked: true, spec_gaps: null });
   });
 });

@@ -1,6 +1,6 @@
 // Reports → This sprint — which story issues a workspace raises. The ONE reader and writer of
 // `workspaces.sprint_checks` (migration 0102 / pg 0089). OVERRIDES ONLY: NULL (or the default
-// `{off:[], issueTypes:[]}`, stored as NULL) = all four issues on, every issue type. Applied
+// `{off:[], issueTypes:[]}`, stored as NULL) = all three issues on, every issue type. Applied
 // server-side by `sprintIssuesFor` through the shared `applyStoryIssueChecks`, so flagCount, the
 // order and Copy all agree with what is on screen.
 //

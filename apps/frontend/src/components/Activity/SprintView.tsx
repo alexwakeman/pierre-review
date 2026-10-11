@@ -1,6 +1,4 @@
 import {
-  STORY_TOO_BIG_CRITERIA,
-  SPRINT_PHASE_LABEL,
   SPRINT_PROVIDER_LABEL,
   SPRINT_TICKETS_MAX,
   sprintSourceTitle,
@@ -13,7 +11,7 @@ import { formatDate } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
 import { GearIcon, RefreshIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
-import { changedCheckCount, groupSprintTickets } from './sprintModel.js';
+import { changedCheckCount, sprintSections, statusOrderSourceLabel } from './sprintModel.js';
 import { SprintChecksPanel } from './SprintChecksPanel.js';
 import { SprintTicketCard } from './SprintTicketCard.js';
 
@@ -21,12 +19,15 @@ import { SprintTicketCard } from './SprintTicketCard.js';
 //
 //   • THE LIST is read by the tracker worker (GET /api/sprint-stories reads stored rows; opening the
 //     tab is what lets the worker read this workspace's sprint at all). "Refresh" asks for a read now.
-//   • A CARD carries at most four issue chips (the FOUR story issues, `story-issues.ts`) and expands
-//     to: one bullet per issue, candidate repos, "Check against code" (agentic, local-only) and the
-//     update panel.
+//   • SECTIONS follow the workspace's status layout (`statusLayout`): Not started, then "Writing code"
+//     (one section per status before the code-delivered status), then "Code delivered" (one per status
+//     from it on). Done is counted, never listed. Settings → Statuses changes the order and the split.
+//   • A CARD carries at most three issue chips (the THREE story issues, `story-issues.ts`) and expands
+//     to: the detail per issue (which criteria and why, what it waits on and who owns it, the missing
+//     details), candidate repos, "Check against code" (agentic, local-only) and the update panel.
 //   • NOTHING IS WRITTEN TO A TRACKER without the per-ticket confirm dialog (SprintUpdatePanel).
 //
-// ⚠ THE ORDER IS THE SERVER'S — Not started, then In progress; most issues first. Never by assignee,
+// ⚠ THE ORDER IS THE SERVER'S — stage, status section, then most issues first. Never by assignee,
 // and there is no team or person score here.
 // ⚠ EVERY EXPLANATION SITS BEHIND AN ⓘ — the page carries facts and labels.
 // ⚠ GENERATED TEXT IS SELECTABLE and every generated block has a Copy button (lib/copy.ts).
@@ -54,39 +55,40 @@ function sourceInfo(s: SprintSource | null): string {
 }
 
 function SprintInfo({ data }: { data: SprintStoriesResponse }): JSX.Element {
+  const layout = data.statusLayout;
   return (
     <>
       <p>{sourceInfo(data.source)}</p>
       <p>The list is read again every 20 minutes while this tab is in use. Refresh reads it now.</p>
-      <p>Each ticket shows up to four issues:</p>
+      <p>Each ticket shows up to three issues:</p>
       <ul className="list-disc space-y-0.5 pl-5">
         <li>
-          <strong>Unclear when done</strong>: no acceptance criteria, or a criterion nobody could check.
+          <strong>Unclear when done</strong>: no acceptance criteria, or criteria a tester couldn&rsquo;t check, each with
+          the reason.
         </li>
         <li>
-          <strong>Too big</strong>: more than {STORY_TOO_BIG_CRITERIA} criteria, a criterion with more than one outcome, or
-          work that is not code.
+          <strong>Blocked</strong>: unfinished work it waits on: tickets linked in your tracker, and work the ticket names.
         </li>
         <li>
-          <strong>Waits on other work</strong>: a criterion needs another team, ticket or service.
-        </li>
-        <li>
-          <strong>Scope not stated</strong>: no &ldquo;out of scope&rdquo; line.
+          <strong>Spec gaps</strong>: details a developer would have to ask about.
         </li>
       </ul>
       <p>
-        &ldquo;No criteria&rdquo; and &ldquo;more than {STORY_TOO_BIG_CRITERIA} criteria&rdquo; are found in code. The rest
-        come from Claude reading the ticket, and show once it has read the current text.
+        &ldquo;No criteria&rdquo; and tracker links are found in code. The rest come from Claude reading the ticket, once it
+        has read the current text.
       </p>
       <p>
         &ldquo;Check against code&rdquo; has Claude read the repos you chose for a ticket. Its sentence for an issue
         replaces ours and is marked Claude, until the ticket or the code changes.
       </p>
-      <p>
-        Not started comes first, then In progress. Within each, the tickets with the most issues come first. Done tickets
-        are counted, not listed.
-      </p>
-      <p>Checks chooses which issues this workspace raises, and for which issue types.</p>
+      {layout != null && (
+        <p>
+          Sections follow {statusOrderSourceLabel(layout.orderSource, { inSentence: true })}
+          {layout.deliveredFrom != null ? `; code counts as delivered from ${layout.deliveredFrom}` : ''}. Done tickets are
+          counted, not listed.
+        </p>
+      )}
+      <p>Settings chooses which issues this workspace raises, and the order of statuses.</p>
       <p>Nothing is written to your tracker until you confirm the exact text on one ticket.</p>
     </>
   );
@@ -97,7 +99,7 @@ export function SprintView(): JSX.Element {
   const { data, isLoading, isError } = useSprintStories(workspaceId);
   const refresh = useSprintRefresh(workspaceId);
   const refreshing = useSprintRefreshing(workspaceId);
-  const [checksOpen, setChecksOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   if (isError) {
     return <p className="text-sm text-rose-700 dark:text-rose-400">Could not load this sprint.</p>;
@@ -113,7 +115,7 @@ export function SprintView(): JSX.Element {
     );
   }
 
-  const groups = groupSprintTickets(data.tickets);
+  const groups = sprintSections(data.tickets, data.statusLayout);
   const reading = data.read.readAt == null && data.read.error == null;
   const facts: string[] = [];
   if (!reading) {
@@ -136,12 +138,12 @@ export function SprintView(): JSX.Element {
         {reading && <span className={`text-xs ${MUTED}`}>Reading…</span>}
         <button
           type="button"
-          onClick={() => setChecksOpen((o) => !o)}
-          aria-expanded={checksOpen}
+          onClick={() => setSettingsOpen((o) => !o)}
+          aria-expanded={settingsOpen}
           className="ml-auto inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
         >
           <GearIcon size={12} />
-          Checks
+          Settings
         </button>
         <button
           type="button"
@@ -154,12 +156,13 @@ export function SprintView(): JSX.Element {
         </button>
       </div>
 
-      {checksOpen && (
+      {settingsOpen && (
         <SprintChecksPanel
           workspaceId={data.workspaceId}
           checks={data.checks}
           issueTypes={data.issueTypes}
-          onClose={() => setChecksOpen(false)}
+          layout={data.statusLayout}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
 
@@ -176,23 +179,33 @@ export function SprintView(): JSX.Element {
       )}
 
       {groups.map((g) => (
-        <section key={g.phase} className="space-y-2" data-testid={`sprint-group-${g.phase}`}>
-          <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-            {SPRINT_PHASE_LABEL[g.phase]} <span className={`font-normal ${MUTED}`}>· {g.tickets.length}</span>
+        <section key={g.stage} className="space-y-3" data-testid={`sprint-group-${g.stage}`}>
+          <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+            {g.heading}{' '}
+            <span className={`font-normal ${MUTED}`}>· {g.sections.reduce((n, sec) => n + sec.tickets.length, 0)}</span>
           </h4>
-          <ul className="space-y-2">
-            {g.tickets.map((t) => (
-              <li key={t.ident}>
-                <SprintTicketCard
-                  ticket={t}
-                  workspaceId={data.workspaceId}
-                  aiEnabled={data.aiEnabled}
-                  repos={data.repos}
-                  checks={data.checks}
-                />
-              </li>
-            ))}
-          </ul>
+          {g.sections.map((sec) => (
+            <div key={sec.status ?? '-'} className="space-y-2" data-testid="sprint-section">
+              {g.stage !== 'not_started' && (
+                <h5 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                  {sec.status ?? 'No status'} <span className={`font-normal ${MUTED}`}>· {sec.tickets.length}</span>
+                </h5>
+              )}
+              <ul className="space-y-2">
+                {sec.tickets.map((t) => (
+                  <li key={t.ident}>
+                    <SprintTicketCard
+                      ticket={t}
+                      workspaceId={data.workspaceId}
+                      aiEnabled={data.aiEnabled}
+                      repos={data.repos}
+                      checks={data.checks}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </section>
       ))}
     </div>
