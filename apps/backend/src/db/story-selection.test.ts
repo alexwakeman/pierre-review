@@ -165,13 +165,13 @@ describe('selectStories', () => {
     expect(by.get('I-1')!.issueStates).toEqual({ unclear_done: true, blocked: true, spec_gaps: true });
     // No label: what code knows is true, the rest NOT KNOWN — never false.
     expect(by.get('I-2')!.issueStates).toEqual({ unclear_done: true, blocked: null, spec_gaps: null });
-    // Story health's measures: criteria that can't be checked over the labelled stories' CRITERIA (the
+    // The rate rule: criteria that can't be checked over the labelled stories' CRITERIA (the
     // no-criteria story is `noCriteriaFound`); linked blockers over the stories whose links were read.
     expect(s.population.noCriteriaFound).toBe(1);
     expect(s.population.issueRates).toEqual([
       { id: 'unclear_done', stories: 1, of: 4, unit: 'criteria' },
       { id: 'blocked', stories: 1, of: 1, unit: 'stories' },
-      // spec_gaps is HELD (STORY_HEALTH_HELD), so its rate is not handed to the report.
+      // spec_gaps is HELD (STORY_ISSUE_RATES_HELD), so its rate is not handed to the report.
     ]);
     // ⚠ No story with a linked blocker → that rate is omitted, as the chart is.
     expect(reportableIssueRates([{ id: 'blocked', stories: 0, of: 9, unit: 'stories' }])).toEqual([]);

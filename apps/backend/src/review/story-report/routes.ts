@@ -12,7 +12,7 @@ import { resolveWorkspaceScope } from '../../db/queries.js';
 import { loadStorySelection, type StorySelection } from '../../db/story-selection.js';
 import { reportsEntitled } from '../../api/routes/insights.js';
 import type { AgentContext } from '../agent-context.js';
-import { fingerprintPickOf, storyReportFingerprint } from './fingerprint.js';
+import { selectionFingerprint } from './fingerprint.js';
 import {
   cancelStoryReport,
   claimStoryReportSlot,
@@ -34,19 +34,13 @@ import {
 //
 //   GET  /api/story-reports?workspace=&window=   picks + figures NOW (code) + stored runs   → read
 //   POST /api/story-reports {workspaceId, window} the ONLY path that runs the model         → ai + ai_hourly
+//        (the run first LABELS the window's stories with no current label — manager.ts)
 //   GET  /api/story-reports/:id                  one run (the SPA polls while in flight)    → read
 //   POST /api/story-reports/:id/cancel           abort; spends nothing                      → read
 
 const PRO_REQUIRED = { error: 'pro required' } as const;
 
-const fingerprintOf = (choice: StoryReportWindowChoice, sel: StorySelection): string =>
-  storyReportFingerprint(
-    choice,
-    sel.candidates.flatMap((c) => {
-      const s = sel.internalsByKey.get(c.key);
-      return s != null ? [fingerprintPickOf(s)] : [];
-    }),
-  );
+const fingerprintOf = (choice: StoryReportWindowChoice, sel: StorySelection): string => selectionFingerprint(choice, sel);
 
 const parseId = (raw: unknown): number | null => {
   const n = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : NaN;
@@ -135,6 +129,8 @@ export function registerStoryReportRoutes(app: FastifyInstance, ctx: AgentContex
           reply.status(400);
           return { error: 'no_tracker', message: 'This workspace has no issue tracker.' };
         }
+        // Picks never depend on labels (only their issue fields and the rates do), so no picks means
+        // nothing to report even after a label pass.
         if (sel.candidates.length === 0) {
           reply.status(422);
           return { error: 'no_candidates', message: 'No stories to report on in this window.' };
@@ -142,6 +138,7 @@ export function registerStoryReportRoutes(app: FastifyInstance, ctx: AgentContex
         const record = await startStoryReport(ctx, {
           accountId,
           workspaceId: scope.workspaceId,
+          scope,
           choice,
           range: sel.range,
           candidates: sel.candidates,

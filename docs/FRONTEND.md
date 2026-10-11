@@ -2156,79 +2156,20 @@ convention this file has to remember.
     Reports (the mock's `periodReports` is false), so `e2e/mock-api.ts` has no `/api/stories` or
     `/api/story-reports` fixture; add typed ones if a spec ever opens the tab (today the catch-all `{}`
     reads as "no tracker": the card hides and the tab prints one sentence).
-  - **Story health** (`StoryHealth.tsx` + pure `storyHealthModel.ts`, `test/storyHealthModel.test.ts`;
-    hooks `hooks/useStoryHealth.ts`) — mounted BETWEEN the story report card and the lists/charts:
-    "Story health · Last 90 days" (`STORY_HEALTH_SPAN_LABEL` — a FIXED, LABELLED span, the Chronology
-    "Over time" exception rule; it follows no window picker). ONE fetch, `GET /api/story-health`, key
-    `['story-health','ws:<id>']`, `periodReports` ANDed into `enabled`; the contract is
-    `packages/shared/src/story-health.ts`. No tracker → the section renders NOTHING (the lists below
-    already print the one sentence).
-    - **How stories are written** (by ticket-created week) is ONE SMALL CHART per refinement series the
-      server sends, in two groups: "Read by Claude" (sparkle; "Criteria that can’t be checked", a % of
-      CRITERIA) and "From your tracker" ("Stories with a linked blocker", CODE, shown with labels off
-      too). With `labels: false` the Claude group is ONE sentence ("Criteria checks need story labels,
-      which run on your own Claude."). Each `omitted` refinement series is ONE short sentence
-      (`omittedSentence`: "No blocking links in your tracker in these 90 days." · "Spec gaps is not
-      charted: two readings of the same tickets disagree too often."); WHY (criteria not stories, links
-      only, the spec-gaps agreement test) sits behind the panel heading's ⓘ (`RefinementInfo`). A responsive grid: 2 columns from
-      `SMALL_MULTIPLE_TWO_COLUMNS_FROM` (560px), else 1; widths from the one `useChartWidth` ref, so no
-      horizontal scroll. Each chart: the issue's label, its LATEST rolling value large and the change
-      since the FIRST rolling value (`rollingHeadline`) — ⚠ coloured ONLY when the series has a
-      detected shift moving the same way (`headlineVerdict`), else grey; y fixed 0–100%; the rolling
-      line over faint weekly dots (thin = hollow); a dashed line at that series' own shift plus a
-      "From Aug 17: 19% → 44%" line; hover a week → value + n, 4-week value, "12 of 15 stories
-      labelled" (`coverageLine`), the week's stories WITH the issue (`point.stories`, ≤
-      `STORY_HEALTH_HOVER_STORIES` + "and N more"; for criteria, the stories with ≥ 1 such criterion)
-      and Spec gaps' types (`gapTypesLine`). A criteria point reads "25% (20 criteria in 5 stories)". ⚠ The hover box is
-      `pointer-events-none`, so CLICKING a week (or the chart's "Stories" button, the keyboard route)
-      PINS that week's list under the chart, Previous / Next week, each story a button opening the
-      ticket tab. ⚠ **Each chart's ⓘ is COMPUTED, three lines at most** (`seriesInfoLines`): what
-      counts (one sentence), this week's figure ("This week so far: 4 of 9 stories" / "This week: 5 of 20
-      criteria"), and the detected shift ("Rose from 19% to 44% on Aug 17, 32 vs 28 stories" — criteria
-      for the criteria series) — nothing when there is none. No panel-level METHOD prose
-      (`DeliveryInfo` is DELETED; `RefinementInfo` holds only what the written measures count and why
-      a series is not charted); the method (rolling line, thin weeks, label noise, the shift test)
-      lives ONCE in the section's ⓘ.
-    - **How stories are delivered** (by last-merge week) keeps THREE strips on ONE x-axis
-      (`geometryFor`), one per UNIT (`DELIVERY_STRIPS`: working time S/M/L · pull requests per story ·
-      criteria met, dotted) — ⚠ never two units on one axis — with legend toggles (`aria-pressed`,
-      local state keyed by workspace), the hover box per week, and shift markers clustered per week
-      through `EventMarkerRail`/`EventMarkerLines` (dashed = detected); a click opens the before/after
-      lens (held by `weekStart`, never an index), each row sized in its shift's own units
-      (`shiftUnits`: stories / criteria / weeks). Each strip's ⓘ follows the same computed pattern,
-      one block per series in the strip.
-    - ⚠ **The SPA recomputes nothing** — values, rolling, thin, shifts, their before/after figures and
-      verdicts are all the server's. ⚠ **Green/red from `shift.verdict` ALONE** — a series with
-      `better: null` ("Pull requests per story") is never coloured.
-    - The shift rule (docs/API.md § GET /api/story-health): RATE series on POOLED counts with a
-      two-proportion z-test (≥ `STORY_SHIFT_MIN_STORIES` stories a side, ≥ `STORY_SHIFT_MIN_POINTS`
-      points, |z| ≥ `STORY_SHIFT_Z`); TIME / COUNT series by `detectChangepoints` over the rolling
-      values with a minimum change (`STORY_SHIFT_MIN_HOURS` / `STORY_SHIFT_MIN_PRS`). The ⓘ copy
-      (`ShiftRuleInfo`) PRINTS those shared constants — never retype one.
-    - **The label run** (local-only agentic): `useStoryLabelsOn()` = `periodReports && me.ai.enabled`,
-      AND the response's `labels` — without either there is no button and the server sends no label
-      series (cloud shows the delivery panel only). "Label N stories" (N = min(`unlabelled`,
-      `STORY_LABEL_RUN_CAP`), hidden at 0) sits in `AiRunGate`. ⚠ Mutation key
-      `['story-label-start','ws:<id>']` read through `useIsMutating`; the run is written into
-      `['story-label-run']` (ACCOUNT-scoped, no workspace) in the HOOK-level `onSuccess`. The run key
-      polls every 2 s while `running` (the GET's `labelRun` re-attaches it after a reload); when a
-      watched run leaves `running` every `['story-health']` and `['ai-usage']` re-reads. While it runs:
-      `RegenProgressBar` at `done/total` with "d of t · US$x.xx" and Cancel; a run in another workspace
-      replaces the button with one line. A stop short (budget, cancel, no Claude, failed labels) is one
-      line after it ends.
-    - Every explanation sits behind ⓘs. No e2e fixture (no spec opens Reports).
+  - ⚠ **Story health is DELETED** (2026-10-11, "not adding anything"): no `StoryHealth.tsx`, no
+    `useStoryHealth`, no `GET /api/story-health`. Do not re-add a weekly-chart panel here. The label
+    run's client methods (`api.startStoryLabelRun` etc.) remain with no screen calling them.
 - **Reports → This sprint** (`insightsTab: 'sprint'`, `?insightsTab=sprint`; `SprintView.tsx` +
-  `SprintTicketCard` / `SprintAssessment` / `SprintUpdatePanel` / `SprintCopyButton`, pure
-  `sprintModel.ts`, hooks `hooks/useSprintStories.ts`) — the tracker's CURRENT sprint, under the ONE
+  `SprintTicketCard` / `SprintAssessment` / `SprintTicketReview` / `SprintUpdatePanel` / `SprintCopyButton`,
+  pure `sprintModel.ts` + `lib/ticketDraft.ts`, `useTicketDraft`, hooks `hooks/useSprintStories.ts`) — the tracker's CURRENT sprint, under the ONE
   Reports gate. The visible tab is DERIVED (`effectiveInsightsTab` accepts `'sprint'`). Every hook ANDs
   `periodReports` into `enabled`; the "Check against code" hooks also AND `me.ai.enabled`. Keys carry
   `ws:<id>` (`['sprint-stories','ws:<id>']`); a queued/running assessment polls every 2 s.
-  - **SECTIONS BY STATUS** (`sprintSections(tickets, statusLayout)`): Not started (ONE section, the
-    status on each card), then "Writing code" — or "In progress" when no code-delivered status is
-    known — with one section per status, then "Code delivered" with one per status; sections in
-    `statusLayout.order`, non-empty only, each "Status · N"; a status the layout does not list goes
-    last. ⚠ The STAGE is the row's own (`stage`, the server's `sprintStageOf`: category beats position)
-    — never re-derived in the SPA. Done is counted in the header, never listed.
+  - **FOUR STAGES, SECTIONS BY STATUS** (`sprintSections(tickets, statusLayout)`): Not started (ONE
+    section, the status on each card), then In progress, In review and Done, each with one section per
+    status in `statusLayout.order`, non-empty only; a status the layout does not list goes last.
+    ⚠ The STAGE is the row's own (`stage`, the server's `sprintStageOf`: the layout's placement, which
+    beats category) — never re-derived in the SPA. Done tickets are LISTED, last.
   - **ONE VOCABULARY, THE THREE STORY ISSUES** (shared `story-issues.ts`: Unclear when done · Blocked ·
     Spec gaps). The collapsed card shows at most TWO chips (`storyIssueChipText`: "Unclear when done
     · 3 of 25 criteria"; ⚠ spec gaps are NEVER a chip — every labelled ticket had three), its PR links and a "Ticket PRs" button (the ticket tab); the expanded card
@@ -2243,27 +2184,43 @@ convention this file has to remember.
     when there is a bullet, a spec gap, a current run or a last write). Nothing in the SPA re-derives an issue or
     re-words a bullet. A STALE run shows only its summary, tagged "Out of date", and feeds nothing
     else (`sprintCurrentAssessmentBodyOf`); an OUTDATED-format run shows one line.
-    `proposedDefault(t, mode, checks)` builds the comment from `sprintCommentMarkdown` and Replace
-    from the revised criteria only, both from a current run.
+  - **THE OPENED TICKET IS A DRAFT** (`SprintTicketReview` + `useTicketDraft`, pure
+    `lib/ticketDraft.ts`, `test/ticketDraft.test.ts`): the LEFT column renders a COPY of the description
+    (and the criteria field when `replaceBases.acceptanceCriteria` is non-null — the ticket's own field)
+    with finding marks plus `<ins class="story-rev">` over every word the draft added (`revisionMarkdown`
+    sentinels → `rehypeRevisions`, never before a line's Markdown syntax); Edit swaps a field for a
+    Markdown textarea. A finding's Replace swaps its quote's FIRST whitespace-normalised occurrence in
+    its field (`replaceQuoteInMarkdown`) and lists it under "Replaced" (one-step Undo); a proposal's
+    "Apply to draft" replaces the whole field. The draft mirrors to localStorage per (workspace, ident)
+    (guarded; pristine = removed). ⚠ When a field's base hash moves, it restarts only if unedited, equal
+    to the ticket, or just written from this card (`rebaseDraft`); otherwise the card says "The ticket
+    changed since you started editing" and Update stays shut. A field cut on the wire is not editable.
   - **Settings** (the header button; `SprintChecksPanel`), two parts saved separately. CHECKS: three
     switches + ONE issue-type row for the whole tab; `changedCheckCount` = `off.length` + 1 for a type
     list. The server applies them; the SPA passes the response's `checks` down so Copy all and the
     bullets follow too. STATUSES (`SprintStatusSettings`, `useSprintSetStatuses` →
-    `PUT /api/sprint-stories/statuses`): every `statusLayout.order` entry with Move up / Move down
-    buttons (named per status; no drag library) and ONE "Code delivered from here" radio per
-    in-progress row (not-started / done rows can move but never split). Save sends
-    `statusSettingsToSave`: an unmoved list keeps the stored order (null when none), an untouched
-    radio keeps the stored choice, and picking the automatic answer sends null so it keeps following
-    the evidence; "Reset to automatic" sends `{order: null, deliveredFrom: null}`. The ⓘ is computed:
-    the order's source (`statusOrderSourceLabel`), the automatic answer, the rule read from
-    `SPRINT_DELIVERED_MIN_SHARE` / `_MIN_TICKETS` (`deliveredRuleSentence`), and the evidence rows
-    ("Ready for QA · 4 of 6 merged"). The draft re-seeds when a saved layout lands (keyed on it).
+    `PUT /api/sprint-stories/statuses`): four lists (Not started · In progress · In review · Done) of
+    the layout's statuses (`statusSectionsOf`). A status moves by NATIVE HTML5 drag and drop (no
+    library; within and between lists, a drop line at the slot, an empty list takes a drop —
+    `moveStatusTo`, slots counted before the move) or by Move up / Move down buttons named per status
+    that cross a stage boundary at either end (`moveInSections`; focus follows the row, a polite live
+    region says where it landed). "Coding begins: X · Coding ends: Y" is read off the DRAFT
+    (`codingBoundsOf`: the first status of In progress / In review — the server's rule). Save (only when
+    `statusDraftChanged`) sends `statusSettingsToSave`: unchanged → the stored override as it was;
+    changed → every name per stage. Cancel drops the draft; "Reset to automatic" sends
+    `{sections: null}`. Every explanation (stages, dragging, coding begins/ends, the order's source via
+    `statusOrderSourceLabel`, the automatic In review rule `reviewRuleSentence` read from
+    `SPRINT_DELIVERED_MIN_SHARE` / `_MIN_TICKETS`, the evidence rows) sits behind the ⓘ.
+    The page lists the four stages with a sub-section per status; Done is COLLAPSED behind
+    "Show N done".
+    The draft re-seeds when a saved layout lands (keyed on it).
   - ⚠ **SHARED mutation keys** read through `useIsMutating`, never per-mount `isPending`:
     `['sprint-assess', ident]`, `['sprint-write', ident]`, `['sprint-repos', ident]`.
-  - ⚠ **NOTHING WRITES WITHOUT THE DIALOG'S CONFIRM** — "Update in <tracker>" opens a dialog showing
-    EXACTLY the text and where; the request id is minted when the dialog opens, the client never
-    retries, and after an error Confirm stays shut (a new attempt is a new dialog). "Add as a
-    comment" is preselected. No bulk control anywhere.
+  - ⚠ **NOTHING WRITES WITHOUT THE DIALOG'S CONFIRM** — the ONE "Update in <tracker>" (enabled when
+    the draft differs) opens a dialog showing, per changed field, the diff and EXACTLY the text; Confirm
+    writes each field in turn with its OWN request id (minted when the dialog opens) and its OWN
+    `replaceBases` hash, stopping at the first field not written. The client never retries, and after
+    an error Confirm stays shut (a new attempt is a new dialog). No comment composer, no bulk control.
   - **Copy is ONE helper, `lib/copy.ts`** (`test/copy.test.ts`): clean markdown as `text/plain` +
     `text/html` through `ClipboardItem`, falling back to plain text. Every generated block (each
     issue's bullet, the proposed update, the dialog's text) has a Copy button and each card a "Copy
@@ -3165,7 +3122,7 @@ from the URL like a bot-detail key, and NOT persisted across reloads (like user-
 
 - ⚠ **Opened ONLY through `useOpenTicketTab()`** (`lib/ticketTab.ts`) — Reports → Stories' "Time and
   pull requests" rows and story rows ("Pull requests"), the story report's ticket chips ("PRs"), This
-  sprint cards ("Ticket PRs") and Story health's pinned week lists. Never call the store action from a
+  sprint cards ("Ticket PRs"). Never call the store action from a
   component.
 - FREE core wherever it is opened from: it lists PR data only (a Pro surface's button still needs that
   surface to be open).

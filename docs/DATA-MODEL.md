@@ -651,7 +651,7 @@ derived from now, so a dormant workspace's report stays current. ⚠ Every read 
 `account_id` (`review/story-report/manager.ts`). Named composite FK onto `workspaces (id,
 account_id)`, cascade (a report is regenerable); in `accountScopedTables()` and erased explicitly.
 
-## `story_labels` — Story health's model labels (CORE; sqlite `0099` / pg `0086`)
+## `story_labels` — the story labels (CORE; sqlite `0099` / pg `0086`)
 
 One row per (account, story `ident`, `rubric_version`, `text_hash`): Haiku 5.5's answers to the FIXED
 story rubric (`review/story-labels/prompt.ts`, shared `STORY_RUBRIC_VERSION`) — `criteria_json`
@@ -678,8 +678,15 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
 - **`sprint_tickets`** — one per (account, workspace, `ident`): the sprint list's tickets, PR or not
   (they cannot live in `tracker_tickets`, keyed on a PR). Story text, status, assignee, project /
   epic / components, `sprint_name`, `in_sprint` (false once a read stops returning it),
-  `first_seen_at` (insert-only), `next_check_at` (epoch 0 = re-read now, after a write). Pruned 90
-  days after `last_seen_at`, with its accepted repos.
+  `first_seen_at` (insert-only), `next_check_at` (epoch 0 = re-read now, after a write),
+  `repos_saved_at` (sqlite `0104` / pg `0091`: the reader saved this ticket's repos — even an empty set;
+  NULL = never, so the confident suggestions are the default; the read's upsert never sets it). Pruned
+  90 days after `last_seen_at`, with its accepted repos.
+- **`sprint_ref_tickets`** (sqlite `0106` / pg `0093`) — one per (account, workspace, `ident`): the
+  key, title and status of a ticket the sprint's text NAMES that no `sprint_tickets` / `tracker_tickets`
+  row holds, written ONLY by the sprint read's one batched lookup (`tracker/sprint/ref-status.ts`) and
+  REPLACED by each finished lookup; `knownTicketsFor`'s last source. Workspace via the named composite
+  FK (cascade); in `accountScopedTables()` + erasure; `verify:isolation` checks `knownTicketsFor` reads.
 - **`sprint_ticket_repos`** — the repos the reader ACCEPTED for a ticket, unique (account, workspace,
   ident, repo). ⚠ Ids arrive in a BODY, so tenancy is STRUCTURAL: NAMED composite FKs onto
   `repos(id, account_id)` and `workspaces(id, account_id)`. `deleteRepo` deletes its rows explicitly.
@@ -699,7 +706,7 @@ in `accountScopedTables()`, erased explicitly, and checked by `verify:isolation`
 
 `tracker_tickets.issue_created_at` / `issue_resolved_at` (sqlite `0098` / pg `0085`): the ticket's own
 created / resolved instants. ⚠ The table is ONE ROW PER (account, PR, key), so several rows can carry a
-ticket's date; Story health takes the freshest-READ non-null one (`createdDatesFor`). NULL = not read
+ticket's date; the story label run takes the freshest-READ non-null one (`createdDatesFor`). NULL = not read
 since 0098, or the tracker said none — never "created at epoch". Not story text: never moves
 `changed_at`.
 
@@ -715,9 +722,11 @@ Sqlite `0103` / pg `0090` (status sections + blockers; no new table):
 - **`sprint_reads.status_order_json`** — the AUTOMATIC status order (`SprintStatusAutoOrder`: Jira board
   columns, Linear workflow states, or GitHub's Open → Closed), written by the sprint read; a failed read
   leaves the previous value. NULL → statuses by category, then name.
-- **`workspaces.sprint_statuses`** — the per-workspace OVERRIDE (`SprintStatusSettings`: `order` names,
-  `deliveredFrom` name; NULL = automatic), the ONE reader/writer `db/sprint-status-settings.ts`. Names
-  match case-insensitively; a status the override does not name keeps its automatic place.
+- **`workspaces.sprint_statuses`** — the per-workspace OVERRIDE (`SprintStatusSettings` = `{sections}`:
+  status names per stage — not_started / in_progress / in_review / done — in order; NULL = automatic),
+  the ONE reader/writer `db/sprint-status-settings.ts`. Names match case-insensitively; placement beats
+  category; a status the override does not name keeps its automatic stage and place. A stored value of
+  the RETIRED `{order, deliveredFrom}` shape is converted on read (no migration).
 
 ## The automation vocabulary — `AUTOMATION_VENDORS`, `ReviewerRole`, `AutomatedReviewerKind`
 

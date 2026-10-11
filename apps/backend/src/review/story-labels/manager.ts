@@ -1,5 +1,6 @@
 import {
   STORY_LABEL_CONCURRENCY,
+  STORY_LABEL_RUN_CAP,
   STORY_LABEL_MODEL,
   STORY_RUBRIC_VERSION,
   type StoryLabelRunStatus,
@@ -56,6 +57,7 @@ interface Slot {
 
 const slots = new Map<number, Slot>(); // accountId → the one in-flight run (status null while starting)
 const lastRun = new Map<number, StoryLabelRunStatus>(); // accountId → most recent finished run
+const pending = new Map<number, Promise<void>>(); // accountId → the in-flight run's background promise
 let seq = 0;
 
 /** Claim the account's slot. SYNCHRONOUS — call before any await. false = already taken. */
@@ -79,12 +81,6 @@ export function storyLabelRunOf(accountId: number): StoryLabelRunStatus | null {
   if (s != null) return snapshot(s);
   const last = lastRun.get(accountId);
   return last != null ? snapshot(last) : null;
-}
-
-/** The account's run IN FLIGHT only (the GET re-attaches the progress bar from it). */
-export function runningStoryLabelRun(accountId: number): StoryLabelRunStatus | null {
-  const s = slots.get(accountId)?.status;
-  return s != null ? snapshot(s) : null;
 }
 
 /** The id holding the slot, for a 409 body. */
@@ -113,7 +109,7 @@ export interface StartStoryLabelRunArgs {
 export function startStoryLabelRun(
   ctx: Pick<AgentContext, 'log' | 'llm' | 'recordAiUsage' | 'db' | 'schema'>,
   a: StartStoryLabelRunArgs,
-  seams: { complete?: CompleteFn; store?: (s: StoryToLabel, v: StoredLabel) => Promise<void> } = {},
+  seams: StoryLabelSeams = {},
 ): StoryLabelRunStatus {
   const slot = slots.get(a.accountId);
   if (slot == null || slot.status != null) throw new Error('story labels: start without a claimed slot');
@@ -134,12 +130,61 @@ export function startStoryLabelRun(
   };
   slot.status = status;
   const store = seams.store ?? ((s, v) => storeLabel(ctx, a.accountId, s, v));
-  void runLabels(ctx, a, slot, seams.complete, store).finally(() => {
+  const p = runLabels(ctx, a, slot, seams.complete, store).finally(() => {
     status.finishedAt = new Date().toISOString();
     lastRun.set(a.accountId, status);
     if (slots.get(a.accountId) === slot) slots.delete(a.accountId);
+    if (pending.get(a.accountId) === p) pending.delete(a.accountId);
   });
+  pending.set(a.accountId, p);
   return snapshot(status);
+}
+
+export interface StoryLabelSeams {
+  complete?: CompleteFn;
+  store?: (s: StoryToLabel, v: StoredLabel) => Promise<void>;
+}
+
+/**
+ * Label stories AND WAIT for the run to end — the story report's automatic label pass (it reads the
+ * labels it waited for). `stories` is evaluated AFTER the slot is claimed, so stories a run that was
+ * already in flight just labelled are not sent twice. A busy slot is waited for ONCE (that run is
+ * bounded by its own budget); still busy → null, nothing labelled. Nothing to label → null. `signal`
+ * aborting cancels THIS run (never another caller's). Returns the finished run's status.
+ */
+export async function runStoryLabelsToEnd(
+  ctx: Pick<AgentContext, 'log' | 'llm' | 'recordAiUsage' | 'db' | 'schema'>,
+  a: Omit<StartStoryLabelRunArgs, 'stories'> & { stories: () => Promise<readonly StoryToLabel[]> },
+  seams: StoryLabelSeams = {},
+  signal?: AbortSignal,
+): Promise<StoryLabelRunStatus | null> {
+  if (!claimStoryLabelRun(a.accountId)) {
+    await pending.get(a.accountId)?.catch(() => {});
+    if (!claimStoryLabelRun(a.accountId)) return null;
+  }
+  let started: StoryLabelRunStatus | null = null;
+  try {
+    if (signal?.aborted) return null;
+    const stories = await a.stories();
+    if (stories.length === 0) return null;
+    started = startStoryLabelRun(ctx, { ...a, stories: stories.slice(0, STORY_LABEL_RUN_CAP) }, seams);
+  } finally {
+    if (started == null) releaseStoryLabelRun(a.accountId);
+  }
+  const id = started.id;
+  const onAbort = (): void => {
+    const s = slots.get(a.accountId);
+    if (s?.status?.id === id) s.abort.abort();
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  if (signal?.aborted) onAbort();
+  try {
+    await pending.get(a.accountId)?.catch(() => {});
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+  }
+  const last = lastRun.get(a.accountId);
+  return last != null && last.id === id ? snapshot(last) : null;
 }
 
 export interface StoredLabel {
@@ -224,8 +269,15 @@ async function runLabels(
               outputTokens,
             })
             .catch((err) => ctx.log.warn({ err }, 'story labels: usage record failed'));
-          const v = validateStoryLabels(res.text, s.input.criteria.length);
+          const v = validateStoryLabels(res.text, s.input.criteria.length, {
+            title: s.input.title,
+            description: s.input.description,
+            criteria: s.input.criteria,
+          });
           if (v.ok) {
+            if (v.quotes.given > v.quotes.verified) {
+              ctx.log.info({ accountId: a.accountId, quotes: v.quotes }, 'story labels: quotes that did not verify were dropped');
+            }
             await store(s, { criteria: v.criteria, story: v.story, costUsd, inputTokens, outputTokens });
             status.labelled += 1;
             return;
@@ -271,4 +323,5 @@ async function runLabels(
 export function resetStoryLabelRuns(): void {
   slots.clear();
   lastRun.clear();
+  pending.clear();
 }

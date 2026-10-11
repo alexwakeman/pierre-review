@@ -1,15 +1,12 @@
-// db/story-health.ts + GET /api/story-health — on a THROWAWAY sqlite DB. The fold is pinned in
-// story-health-fold.test.ts; this pins the READS and the ROUTE:
+// db/story-health.ts — the label run's POPULATION reads, on a THROWAWAY sqlite DB:
 //  • created date = the freshest-read non-null `issue_created_at` across a ticket's rows; none →
-//    the first-PR fallback, counted;
+//    the first-PR fallback;
 //  • a label counts only when its rubric version AND text hash match today's text;
-//  • `labels: false` omits the label series and the to-do count;
-//  • the route: 402 without periodReports, another tenant's workspace → the caller's Default.
+//  • `storiesToLabel` picks the labellable stories with no current label, open ones included.
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { FastifyInstance } from 'fastify';
 import { jiraApiRoot, STORY_RUBRIC_VERSION, trackerTicketIdent } from '@pierre-review/shared';
 
 const DB_PATH = '/private/tmp/claude-501/pierre-story-health-test.sqlite';
@@ -22,11 +19,7 @@ let db: any;
 let schema: any;
 let closeDb: (() => Promise<void> | void) | undefined;
 let sh: typeof import('./story-health.js');
-let app: FastifyInstance;
-let setCaps: ((c: any) => void) | undefined;
-let emptyCaps: any;
 let WS = 0;
-let FOREIGN_WS = 0;
 let A1 = 0;
 
 const DAY = 86_400_000;
@@ -48,7 +41,8 @@ beforeAll(async () => {
   A1 = (await db.insert(accounts).values({ githubUserId: 'U_sh_a', githubLogin: 'sh-a' }).returning().execute())[0].id;
   const A2 = (await db.insert(accounts).values({ githubUserId: 'U_sh_b', githubLogin: 'sh-b' }).returning().execute())[0].id;
   WS = (await db.insert(workspaces).values({ accountId: A1, name: 'S', isDefault: true, flowSettings: { timeZone: 'UTC' } }).returning().execute())[0].id;
-  FOREIGN_WS = (await db.insert(workspaces).values({ accountId: A2, name: 'T', isDefault: true }).returning().execute())[0].id;
+  // Another tenant's workspace (it must stay out of every read).
+  void (await db.insert(workspaces).values({ accountId: A2, name: 'T', isDefault: true }).returning().execute())[0].id;
   await db.insert(workspaceTrackers).values({ accountId: A1, workspaceId: WS, provider: 'jira', baseUrl: 'https://acme.atlassian.net' }).execute();
   const repo = (await db.insert(repos).values({ accountId: A1, owner: 'acme', name: 'web', githubNodeId: 'R_sh' }).returning().execute())[0].id;
   await db.insert(workspaceRepos).values({ accountId: A1, workspaceId: WS, repoId: repo }).execute();
@@ -151,22 +145,9 @@ beforeAll(async () => {
       .execute();
   }
 
-  const contract = await import('../pro/contract.js');
-  contract.setProCapabilities({ ...contract.EMPTY_CAPABILITIES, periodReports: true });
-  setCaps = contract.setProCapabilities;
-  emptyCaps = contract.EMPTY_CAPABILITIES;
-  const { storyHealthRoutes } = await import('../api/routes/story-health.js');
-  const { registerAccountContext } = await import('../api/plugins/auth.js');
-  const { default: Fastify } = await import('fastify');
-  app = Fastify({ logger: false });
-  registerAccountContext(app);
-  await app.register(storyHealthRoutes);
-  await app.ready();
 });
 
 afterAll(async () => {
-  setCaps?.(emptyCaps);
-  await app?.close();
   await closeDb?.();
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
 });
@@ -194,51 +175,13 @@ describe('loadStoryHealthInputs', () => {
   });
 });
 
-describe('getStoryHealth', () => {
-  it('counts the fallback and the unlabelled stories; labels off omits the label half', async () => {
+describe('storiesToLabel', () => {
+  it('picks every labellable story with no CURRENT label, the open one included', async () => {
     const q = await import('./queries.js');
+    const { storiesToLabel } = await import('./story-health-fold.js');
     const s = await q.resolveWorkspaceScope(A1, WS);
-    const on = await sh.getStoryHealth(A1, s, NOW, { labels: true, labelRun: null });
-    expect(on.createdFallbackTotal).toBe(1);
-    // ENG-1, ENG-2, ENG-4 and the open ENG-5 are labellable with no current label.
-    expect(on.unlabelled).toBe(4);
-    // ENG-5 is written (refinement) but not merged (delivery).
-    expect(on.weeks.reduce((n, w) => n + w.storiesMerged, 0)).toBe(4);
-    expect(on.weeks.reduce((n, w) => n + w.storiesCreated, 0)).toBe(5);
-    expect(on.weeks.reduce((n, w) => n + w.labelled, 0)).toBe(1);
-    expect(on.series.map((x) => x.id)).toContain('unclearDone');
-    // The hover detail: ENG-3 is the week's one story with a linked blocker.
-    const blockedPoint = on.series.find((x) => x.id === 'blocked')!.points.find((p) => (p.stories ?? []).length > 0)!;
-    expect(blockedPoint.stories).toEqual([{ ident: expect.any(String), key: 'ENG-3', title: 'Story ENG-3' }]);
-    // Spec gaps is HELD (STORY_HEALTH_HELD) until its judgement passes an agreement test — and says so.
-    expect(on.series.map((x) => x.id)).not.toContain('specGaps');
-    expect(on.omitted).toEqual([{ series: 'specGaps', reason: 'held' }]);
-    expect(on.span.label).toBe('Last 90 days');
-    const off = await sh.getStoryHealth(A1, s, NOW, { labels: false, labelRun: null });
-    expect(off.series.map((x) => x.id)).not.toContain('unclearDone');
-    expect(off.series.map((x) => x.id)).toContain('workingTimeS');
-    // Linked blockers are CODE: still charted with labels off.
-    expect(off.series.map((x) => x.id)).toContain('blocked');
-    expect(off.omitted).toEqual([]);
-    expect(off).toMatchObject({ labels: false, unlabelled: 0, labelRun: null });
-  });
-});
-
-describe('GET /api/story-health', () => {
-  it("echoes the resolved workspace; another tenant's id falls to the caller's Default", async () => {
-    const res = await app.inject({ method: 'GET', url: `/api/story-health?workspace=${FOREIGN_WS}` });
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as any;
-    expect(typeof body.workspaceId).toBe('number');
-    expect(body.workspaceId).not.toBe(FOREIGN_WS);
-    expect(body.weeks).toHaveLength(13);
-  });
-
-  it('402s without periodReports', async () => {
-    setCaps?.(emptyCaps);
-    const res = await app.inject({ method: 'GET', url: '/api/story-health' });
-    expect(res.statusCode).toBe(402);
-    expect(res.json()).toEqual({ error: 'pro required' });
-    setCaps?.({ ...emptyCaps, periodReports: true });
+    const inputs = await sh.loadStoryHealthInputs(A1, s, NOW);
+    // ENG-1, ENG-2, ENG-4 and the open ENG-5 are labellable with no current label; ENG-3 is labelled.
+    expect(storiesToLabel(inputs.stories, inputs.weeks).map((x) => x.key).sort()).toEqual(['ENG-1', 'ENG-2', 'ENG-4', 'ENG-5']);
   });
 });

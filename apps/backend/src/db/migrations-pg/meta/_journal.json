@@ -638,6 +638,27 @@
       "when": 1792051203000,
       "tag": "0090_sprint_statuses_and_blockers",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1792051204000,
+      "tag": "0091_sprint_ticket_repos_saved",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1792051204001,
+      "tag": "0092_sprint_assessment_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1792051204002,
+      "tag": "0093_sprint_ref_tickets",
+      "breakpoints": true
     }
   ]
 }

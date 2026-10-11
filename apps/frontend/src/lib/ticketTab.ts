@@ -2,8 +2,8 @@ import { useCallback } from 'react';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
 
 // THE ONE WAY TO OPEN A TICKET TAB (docs/FRONTEND.md § The ticket tab). Every entry point — Reports →
-// Stories' "Time and pull requests", the story report's ticket chips, This sprint cards' PR list,
-// Story health's hover list — calls the function this hook returns:
+// Stories' "Time and pull requests", the story report's ticket chips, This sprint cards' PR list —
+// calls the function this hook returns:
 //
 //   const openTicketTab = useOpenTicketTab();
 //   openTicketTab({ ident, key, title });

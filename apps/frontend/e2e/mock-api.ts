@@ -528,11 +528,13 @@ const SPRINT_TICKET_BASE: Omit<SprintTicketRow, 'ident' | 'key' | 'title' | 'pha
   issues: [],
   specGaps: [],
   flagCount: 0,
+  findings: [],
+  related: [],
   pullRequests: [],
-  repos: { accepted: [], suggested: [] },
+  repos: { accepted: [], suggested: [], defaulted: false },
   assessment: null,
   replaceTarget: { kind: 'description' },
-  replaceBase: { hash: '0'.repeat(64), truncated: false },
+  replaceBases: { description: { hash: '0'.repeat(64), truncated: false }, acceptanceCriteria: null },
   lastWrite: null,
 };
 const chipsOnly = (issues: ReturnType<typeof foldStoryIssues>) => issues.filter((i) => STORY_CHIP_ISSUE_IDS.includes(i.id));
@@ -570,7 +572,7 @@ const SPRINT_STORIES: SprintStoriesResponse = {
   provider: 'jira',
   source: { kind: 'sprint', provider: 'jira', names: ['Sprint 42'] },
   read: { readAt: iso(0.01), checkedAt: iso(0.01), error: null, truncated: false },
-  doneCount: 3,
+  doneCount: 0,
   aiEnabled: true,
   repos: [{ repoId: REPO.id, fullName: REPO.fullName }],
   checks: { off: [], issueTypes: [] },
@@ -578,18 +580,18 @@ const SPRINT_STORIES: SprintStoriesResponse = {
   statusLayout: {
     order: [
       { name: 'To Do', category: 'new', count: 1, auto: true, stage: 'not_started' },
-      { name: 'In Progress', category: 'indeterminate', count: 1, auto: true, stage: 'writing' },
-      { name: 'In Review', category: 'indeterminate', count: 0, auto: true, stage: 'delivered' },
+      { name: 'In Progress', category: 'indeterminate', count: 1, auto: true, stage: 'in_progress' },
+      { name: 'In Review', category: 'indeterminate', count: 0, auto: true, stage: 'in_review' },
       { name: 'Done', category: 'done', count: 0, auto: true, stage: 'done' },
     ],
     orderSource: 'jira_board',
-    deliveredFrom: 'In Review',
-    deliveredFromAuto: 'In Review',
+    codingBegins: 'In Progress',
+    codingEnds: 'In Review',
     evidence: [
       { status: 'In Progress', withPrs: 3, allMerged: 0 },
       { status: 'In Review', withPrs: 4, allMerged: 3 },
     ],
-    settings: { order: null, deliveredFrom: null },
+    settings: { sections: null },
   },
   tickets: [
     {
@@ -603,7 +605,11 @@ const SPRINT_STORIES: SprintStoriesResponse = {
       status: { name: 'To Do', category: 'new' },
       issues: SPRINT_ACME1_ISSUES,
       flagCount: SPRINT_ACME1_ISSUES.length,
-      repos: { accepted: [], suggested: [{ repoId: REPO.id, fullName: REPO.fullName, reasons: ['same_project'], prCount: 4 }] },
+      repos: {
+        accepted: [],
+        suggested: [{ repoId: REPO.id, fullName: REPO.fullName, reasons: ['same_project'], prCount: 4, confident: true }],
+        defaulted: false,
+      },
     },
     {
       ...SPRINT_TICKET_BASE,
@@ -612,7 +618,7 @@ const SPRINT_STORIES: SprintStoriesResponse = {
       title: 'Sign in with a magic link',
       url: 'https://acme.atlassian.net/browse/ACME-2',
       phase: 'in_progress',
-      stage: 'writing',
+      stage: 'in_progress',
       status: { name: 'In Progress', category: 'indeterminate' },
       description: '## Acceptance criteria\n\n- Users get a link by email\n- The link works once',
       criteria: { items: ['Users get a link by email', 'The link works once'], source: 'description_heading' },
@@ -620,7 +626,7 @@ const SPRINT_STORIES: SprintStoriesResponse = {
       issues: SPRINT_ACME2_ISSUES,
       specGaps: SPRINT_ACME2_GAPS,
       flagCount: SPRINT_ACME2_ISSUES.length,
-      repos: { accepted: [{ repoId: REPO.id, fullName: REPO.fullName }], suggested: [] },
+      repos: { accepted: [{ repoId: REPO.id, fullName: REPO.fullName }], suggested: [], defaulted: false },
       assessment: {
         currency: 'current',
         record: {
@@ -629,18 +635,31 @@ const SPRINT_STORIES: SprintStoriesResponse = {
           ident: 'jira:https://acme.atlassian.net#ACME-2',
           model: 'claude-sonnet-5',
           status: 'succeeded',
+          mode: 'plan',
           phase: null,
           repos: [{ repoId: REPO.id, fullName: REPO.fullName, sha: 'abc1234def' }],
           body: {
-            summary: 'Sending a link exists in src/auth/magic-link.ts; expiry does not.',
-            issues: [
+            mode: 'plan',
+            plan: [
+              { repo: REPO.fullName, path: 'src/auth/magic-link.ts', newPath: null, change: 'Add an expiry time to each link.' },
+              { repo: REPO.fullName, path: null, newPath: 'src/auth/expired-link.tsx', change: 'Add a page for an expired link.' },
+            ],
+            criterionChecks: [],
+            coverage: null,
+            summary: 'Two changes in the auth module: link expiry and an expired-link page.',
+            findings: [
               {
-                id: 'unclear_done',
+                issue: 'unclear_done',
+                rule: 'no_expected_result',
+                quote: 'Users get a link by email',
+                where: 'criteria',
                 text: 'Say how long a link lasts and what an expired link shows.',
+                suggestion: null,
                 ref: { repo: REPO.fullName, path: 'src/auth/magic-link.ts' },
               },
             ],
             revisedCriteria: ['A user who asks for a link receives an email within a minute', 'An expired link shows a clear message'],
+            revisedDescription: null,
           },
           outdated: false,
           dropped: { paths: 0, items: 0 },

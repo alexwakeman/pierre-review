@@ -3,7 +3,7 @@ import { acceptanceSectionOf, extractCriteria } from './story-criteria.js';
 
 // WHAT THE STORY LABELLER IS SENT — and therefore WHICH label is current. Pure (story-label-input.
 // test.ts). ONE builder, two callers: the label run (review/story-labels/) sends exactly this, and
-// Story health (db/story-health.ts) recomputes it to decide whether a stored label is CURRENT — a
+// The label reads (db/story-health.ts) recompute it to decide whether a stored label is CURRENT — a
 // label counts only while its `text_hash` equals today's hash of today's text, so an edited ticket
 // falls out of the series until it is labelled again.
 //

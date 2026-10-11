@@ -222,9 +222,12 @@ describe('performTrackerWrite', () => {
     expect(out.ok && out.record.message).toMatch(/may have been written/);
   });
 
-  it('replace: the server target must match the dialog; a match writes into the stored field', async () => {
+  it('replace: the target must be the description or the ticket’s own criteria field; a match writes into the stored field', async () => {
     const { writers, calls } = fakeWriters(async () => ({ url: null }));
-    const wrong = await run.performTrackerWrite(ctx, base({ writers, mode: 'replace', target: { kind: 'description' } }));
+    const wrong = await run.performTrackerWrite(
+      ctx,
+      base({ writers, mode: 'replace', target: { ...AC_TARGET, fieldId: 'customfield_9' }, baseHash: sha(AC_TEXT), fetchTicket: liveTicket(AC_TEXT) }),
+    );
     expect(wrong).toMatchObject({ ok: false, status: 409, body: { error: 'target_changed' } });
     const missing = await run.performTrackerWrite(ctx, base({ writers, mode: 'replace' }));
     expect(missing).toMatchObject({ ok: false, status: 409, body: { error: 'target_changed' } });
@@ -235,6 +238,38 @@ describe('performTrackerWrite', () => {
     );
     expect(ok.ok && ok.record).toMatchObject({ status: 'written', target: AC_TARGET });
     expect(calls[0]).toMatchObject({ verb: 'replace', target: AC_TARGET });
+  });
+
+  it('replace: the DESCRIPTION is writable beside a criteria field, with its own base hash', async () => {
+    const { writers, calls } = fakeWriters(async () => ({ url: null }));
+    // The criteria field's hash does not stand for the description.
+    const crossed = await run.performTrackerWrite(
+      ctx,
+      base({ writers, mode: 'replace', target: { kind: 'description' }, baseHash: sha(AC_TEXT), fetchTicket: liveTicket(AC_TEXT) }),
+    );
+    expect(crossed).toMatchObject({ ok: false, status: 409, body: { error: 'ticket_changed' } });
+    expect(calls).toHaveLength(0);
+    const ok = await run.performTrackerWrite(
+      ctx,
+      base({ writers, mode: 'replace', target: { kind: 'description' }, text: 'New description', baseHash: sha(''), fetchTicket: liveTicket(AC_TEXT) }),
+    );
+    expect(ok.ok && ok.record).toMatchObject({ status: 'written', target: { kind: 'description' } });
+    expect(calls[0]).toMatchObject({ verb: 'replace', target: { kind: 'description' }, text: 'New description' });
+  });
+
+  it('replace: a criteria-field target on a ticket with no criteria field is refused', async () => {
+    const { and, eq } = await import('drizzle-orm');
+    const t = schema.sprintTickets;
+    const where = and(eq(t.accountId, 2), eq(t.ident, IDENT));
+    await db.update(t).set({ acFieldId: null, acFieldName: null }).where(where).execute();
+    const { writers, calls } = fakeWriters(async () => ({ url: null }));
+    const out = await run.performTrackerWrite(
+      ctx,
+      base({ writers, mode: 'replace', target: AC_TARGET, baseHash: sha(AC_TEXT), fetchTicket: liveTicket(AC_TEXT) }),
+    );
+    expect(out).toMatchObject({ ok: false, status: 409, body: { error: 'target_changed' } });
+    expect(calls).toHaveLength(0);
+    await db.update(t).set({ acFieldId: AC_TARGET.fieldId, acFieldName: AC_TARGET.fieldName }).where(where).execute();
   });
 
   it('replace: a ticket edited in the tracker since the dialog opened refuses, writes nothing, stores the new text', async () => {

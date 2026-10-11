@@ -1747,3 +1747,48 @@ body {
 .dark .budget-range::-moz-range-thumb {
   border-color: #111827;
 }
+
+/* ---- This sprint: highlighted ticket text (lib/storyHighlights.ts) and proposed-text diffs ----
+   Yellow in both themes, plus a 2px underline so the mark never rests on colour alone. Measured:
+   light #111827 on #fef08a = 15.0:1; dark #fefce8 on yellow-300 at 25% over the page (#413d1f)
+   = 10.6:1 (test/storyHighlights.test.ts pins both). */
+.story-mark {
+  background-color: #fef08a;
+  color: #111827;
+  border-bottom: 2px solid #ca8a04;
+  border-radius: 2px;
+  padding: 0 1px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.dark .story-mark {
+  background-color: rgba(253, 224, 71, 0.25);
+  color: #fefce8;
+  border-bottom-color: #facc15;
+}
+.story-mark[data-mark] {
+  cursor: pointer;
+}
+.story-mark[data-mark]:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+.story-mark.story-mark-selected {
+  box-shadow: 0 0 0 2px #eab308;
+}
+/* The draft's revisions (lib/ticketDraft.ts `rehypeRevisions`): text the reader's draft added or
+   changed. The same measured yellow as .story-mark, told apart by a DASHED underline and no pointer. */
+ins.story-rev {
+  text-decoration: none;
+  background-color: #fef08a;
+  color: #111827;
+  border-bottom: 2px dashed #ca8a04;
+  border-radius: 2px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.dark ins.story-rev {
+  background-color: rgba(253, 224, 71, 0.25);
+  color: #fefce8;
+  border-bottom-color: #facc15;
+}

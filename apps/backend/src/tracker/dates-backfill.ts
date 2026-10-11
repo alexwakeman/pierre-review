@@ -5,7 +5,7 @@ import { inChunks, type TrackerContext } from './context.js';
 // added `issue_created_at` / `issue_resolved_at`; every read since stores them. An OPEN PR's rows are
 // re-read on their 30-minute TTL anyway, so they fill by themselves. A MERGED PR's rows are history —
 // the worker reads them in missing-only mode and never refreshes them — so without this they would
-// stay dateless and Story health would bucket every older story by its first PR instead.
+// stay dateless and the label run would bucket every older story by its first PR instead.
 //
 // So, ONCE PER TICKET PER PROCESS, a few at a time: tickets whose 'ok' row on a PR MERGED in the last
 // 90 days (the worker's own `MERGED_WINDOW_MS`) has no created date are handed to the worker's ONE

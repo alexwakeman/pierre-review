@@ -22,6 +22,7 @@ import {
   storyIssueStates,
   storyIssueTypeChecked,
   storyUnclearCriteriaShown,
+  storyReferencesByKey,
   type KnownTicket,
   type SprintAssessmentRecord,
   type StoryCriterionLabel,
@@ -263,6 +264,7 @@ describe('sprintBullets', () => {
     ident: 'x',
     model: 'm',
     status: 'succeeded',
+    mode: 'plan' as const,
     phase: null,
     repos: [],
     body,
@@ -281,12 +283,17 @@ describe('sprintBullets', () => {
     expect(none).toEqual([{ id: 'unclear_done', text: storyIssueBullet(issues[0]!), source: 'code', ref: null }]);
 
     const body = {
+      mode: 'plan' as const,
+      plan: [],
+      criterionChecks: [],
+      coverage: null,
       summary: 'This may already be done.',
-      issues: [
-        { id: 'blocked' as const, text: 'Waits on the pricing API change in BMD-12, owned by Payments.', ref: null },
-        { id: 'unclear_done' as const, text: 'Say what a successful export looks like.', ref: { repo: 'a/b', path: 'src/x.ts' } },
+      findings: [
+        { issue: 'blocked' as const, rule: 'waits_on_ticket' as const, quote: null, where: null, text: 'Waits on the pricing API change in BMD-12, owned by Payments.', suggestion: null, ref: null },
+        { issue: 'unclear_done' as const, rule: 'no_expected_result' as const, quote: null, where: null, text: 'Say what a successful export looks like.', suggestion: null, ref: { repo: 'a/b', path: 'src/x.ts' } },
       ],
       revisedCriteria: ['A user can export a CSV'],
+      revisedDescription: null,
     };
     const t = { issues, assessment: { record: record(body), currency: 'current' as const }, issueType: null };
     const got = sprintBullets(t, { off: [], issueTypes: [] });
@@ -312,12 +319,17 @@ describe('spec gaps leave the chips', () => {
   });
   it('sprintSpecGapLines: one line on a not-started ticket — a current run’s sentence, else the first gap; nothing on other stages, when the check is off or the type is not checked', () => {
     const body = {
+      mode: 'plan' as const,
+      plan: [],
+      criterionChecks: [],
+      coverage: null,
       summary: 'S.',
-      issues: [{ id: 'spec_gaps' as const, text: 'No rule for an empty file.', ref: { repo: 'a/b', path: 'src/x.ts' } }],
+      findings: [{ issue: 'spec_gaps' as const, rule: 'edge_case' as const, quote: null, where: null, text: 'No rule for an empty file.', suggestion: null, ref: { repo: 'a/b', path: 'src/x.ts' } }],
       revisedCriteria: [],
+      revisedDescription: null,
     };
     const rec: SprintAssessmentRecord = {
-      id: 1, workspaceId: 1, ident: 'x', model: 'm', status: 'succeeded', phase: null, repos: [], body,
+      id: 1, workspaceId: 1, ident: 'x', model: 'm', status: 'succeeded', mode: 'plan', phase: null, repos: [], body,
       outdated: false, dropped: null, error: null, costUsd: null, numTurns: null, createdAt: '2026-10-10T00:00:00Z', completedAt: null,
     };
     const t = {
@@ -335,7 +347,7 @@ describe('spec gaps leave the chips', () => {
     expect(sprintSpecGapsMarkdown(lines)).toBe('**Spec gaps**\n\n- No rule for an empty file. (`src/x.ts` in `a/b`)');
     const code = sprintSpecGapLines({ ...t, assessment: { record: rec, currency: 'stale' as const } }, { off: [], issueTypes: [] });
     expect(code.map((l) => [l.source, l.text])).toEqual([['code', 'No behaviour when the upload fails']]);
-    for (const stage of ['writing', 'delivered'] as const) {
+    for (const stage of ['in_progress', 'in_review', 'done'] as const) {
       expect(sprintSpecGapLines({ ...t, stage }, { off: [], issueTypes: [] })).toEqual([]);
     }
     expect(sprintSpecGapLines(t, { off: ['spec_gaps'], issueTypes: [] })).toEqual([]);
@@ -346,12 +358,17 @@ describe('spec gaps leave the chips', () => {
 
 describe('sprintIssuesWithClaude', () => {
   const body = {
+    mode: 'plan' as const,
+    plan: [],
+    criterionChecks: [],
+    coverage: null,
     summary: 'May already be done.',
-    issues: [
-      { id: 'unclear_done' as const, text: 'Two options, none chosen.', ref: null },
-      { id: 'spec_gaps' as const, text: 'No behaviour when the file is empty.', ref: null },
+    findings: [
+      { issue: 'unclear_done' as const, rule: 'no_expected_result' as const, quote: null, where: null, text: 'Two options, none chosen.', suggestion: null, ref: null },
+      { issue: 'spec_gaps' as const, rule: 'edge_case' as const, quote: null, where: null, text: 'No behaviour when the file is empty.', suggestion: null, ref: null },
     ],
     revisedCriteria: [],
+    revisedDescription: null,
   };
   const coded = [issue({ id: 'blocked', total: 4, reasons: ['linked'] })];
   it('adds a current run’s CHIP issue that code did not raise, in order, and keeps code’s own; spec_gaps never', () => {
@@ -363,9 +380,76 @@ describe('sprintIssuesWithClaude', () => {
     expect(sprintIssuesWithClaude(gaps, null, { off: [], issueTypes: [] }, 'Bug', 4)).toEqual([]);
   });
   it('skips a retired id in a stored body, adds nothing without a run, and obeys the checks', () => {
-    const old = { ...body, issues: [{ id: 'too_big', text: 'Split it.', ref: null }] } as unknown as typeof body;
+    const old = { ...body, findings: [{ issue: 'too_big', rule: 'vague_term', quote: null, where: null, text: 'Split it.', suggestion: null, ref: null }] } as unknown as typeof body;
     expect(sprintIssuesWithClaude(coded, old, { off: [], issueTypes: [] }, 'Bug', 4)).toEqual(coded);
     expect(sprintIssuesWithClaude(coded, null, { off: [], issueTypes: [] }, 'Bug', 4)).toEqual(coded);
     expect(sprintIssuesWithClaude(coded, body, { off: ['unclear_done'], issueTypes: [] }, 'Bug', 4)).toEqual(coded);
+  });
+});
+
+describe('rubric 4: only a depends_on reference can block', () => {
+  const dep = (ticketKey: string) => ({ kind: 'ticket' as StoryDependencyKind, what: ticketKey, owner: null, ticketKey });
+  const ref = (ticketKey: string, relation: 'depends_on' | 'concurrent' | 'builds_on' | 'supersedes' | 'out_of_scope' | 'context') => ({
+    ticketKey,
+    relation,
+    quote: null,
+    owner: null,
+  });
+  const known = new Map<string, KnownTicket>([
+    ['ABC-343', { title: 'Upload page', status: 'Done', category: 'done', url: null }],
+    ['ABC-1066', { title: 'Lost habitats', status: 'In Development', category: 'indeterminate', url: null }],
+    ['ABC-20', { title: 'Endpoint', status: 'Done', category: 'done', url: null }],
+  ]);
+  const input = (story: Partial<StoryIssueLabel['story']>): StoryIssueInput => ({
+    criteria: items(1),
+    label: clean(1, story),
+    links: null,
+    knownTickets: known,
+  });
+
+  it('out of scope, build alongside, builds on, supersedes and context never block; depends_on does, unknown status included', () => {
+    const issues = foldStoryIssues(
+      input({
+        // The old rubric's habit: every named ticket listed as a dependency.
+        dependencies: [dep('ABC-1066'), dep('ABC-343'), dep('ABC-850'), dep('ABC-12')],
+        references: [
+          ref('ABC-1066', 'out_of_scope'),
+          ref('ABC-1066', 'concurrent'),
+          ref('ABC-343', 'builds_on'),
+          ref('ABC-850', 'supersedes'),
+          ref('ABC-12', 'depends_on'),
+          ref('ABC-20', 'depends_on'),
+          ref('ABC-30', 'context'),
+        ],
+      }),
+    );
+    const blocked = issues.find((i) => i.id === 'blocked')!;
+    expect(blocked.blockers.map((b) => [b.ticketKey, b.status])).toEqual([['ABC-12', null]]);
+    expect(storyIssueBullet(blocked)).toBe('Waits on ABC-12 (status unknown)');
+  });
+
+  it('a depends_on reference the dependencies forgot still blocks; a done one is resolved', () => {
+    const issues = foldStoryIssues(input({ references: [ref('ABC-1066', 'depends_on'), ref('ABC-20', 'depends_on')] }));
+    expect(issues.find((i) => i.id === 'blocked')!.blockers.map((b) => [b.ticketKey, b.what, b.status])).toEqual([
+      ['ABC-1066', 'Lost habitats', 'In Development'],
+    ]);
+  });
+
+  it('nothing blocks when every reference is something else', () => {
+    const issues = foldStoryIssues(input({ dependencies: [dep('ABC-1066')], references: [ref('ABC-1066', 'concurrent')] }));
+    expect(issues.some((i) => i.id === 'blocked')).toBe(false);
+  });
+
+  it('a tracker link still blocks whatever the text says', () => {
+    const issues = foldStoryIssues({ ...input({ references: [ref('ABC-5', 'out_of_scope')] }), links: [link('ABC-5')] });
+    expect(issues.find((i) => i.id === 'blocked')!.blockers.map((b) => [b.source, b.ticketKey])).toEqual([['link', 'ABC-5']]);
+  });
+
+  it('one relation per key: depends_on, then concurrent, … win', () => {
+    const m = storyReferencesByKey([ref('abc-1', 'out_of_scope'), ref('ABC-1', 'concurrent'), ref('ABC-2', 'context'), ref('ABC-2', 'depends_on')]);
+    expect([...m].map(([k, r]) => [k, r.relation])).toEqual([
+      ['ABC-1', 'concurrent'],
+      ['ABC-2', 'depends_on'],
+    ]);
   });
 });

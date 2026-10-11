@@ -9,7 +9,7 @@ import { useState } from 'react';
 import { useSprintRefresh, useSprintRefreshing, useSprintStories } from '../../hooks/useSprintStories.js';
 import { formatDate } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
-import { GearIcon, RefreshIcon } from '../Icons.js';
+import { ChevronIcon, GearIcon, RefreshIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { changedCheckCount, sprintSections, statusOrderSourceLabel } from './sprintModel.js';
 import { SprintChecksPanel } from './SprintChecksPanel.js';
@@ -19,9 +19,10 @@ import { SprintTicketCard } from './SprintTicketCard.js';
 //
 //   • THE LIST is read by the tracker worker (GET /api/sprint-stories reads stored rows; opening the
 //     tab is what lets the worker read this workspace's sprint at all). "Refresh" asks for a read now.
-//   • SECTIONS follow the workspace's status layout (`statusLayout`): Not started, then "Writing code"
-//     (one section per status before the code-delivered status), then "Code delivered" (one per status
-//     from it on). Done is counted, never listed. Settings → Statuses changes the order and the split.
+//   • SECTIONS follow the workspace's status layout (`statusLayout`): four stages — Not started, In
+//     progress, In review, Done (listed last, COLLAPSED behind "Show N done") — each with one section
+//     per status. Settings → Statuses
+//     places statuses in stages and orders them.
 //   • A CARD carries at most two issue chips (Unclear when done, Blocked — `STORY_CHIP_ISSUE_IDS`) and
 //     expands to: the detail per issue (which criteria and why, what it waits on and who owns it), the
 //     Spec gaps section (never a chip), candidate repos, "Check against code" (agentic, local-only) and the update panel.
@@ -63,8 +64,7 @@ function SprintInfo({ data }: { data: SprintStoriesResponse }): JSX.Element {
       <p>Each ticket shows up to two issues:</p>
       <ul className="list-disc space-y-0.5 pl-5">
         <li>
-          <strong>Unclear when done</strong>: no acceptance criteria, or criteria a tester couldn&rsquo;t check. Opening the
-          ticket shows the first two, each with the reason.
+          <strong>Unclear when done</strong>: no acceptance criteria, or criteria a tester couldn&rsquo;t check.
         </li>
         <li>
           <strong>Blocked</strong>: an unfinished ticket it waits on (linked in your tracker or named in the ticket), or a
@@ -72,26 +72,31 @@ function SprintInfo({ data }: { data: SprintStoriesResponse }): JSX.Element {
         </li>
       </ul>
       <p>
-        Opening a ticket that hasn&rsquo;t started also shows its first <strong>spec gap</strong>: a detail a developer
-        would have to ask about.
+        Opening a ticket shows its text with each problem highlighted in yellow. Hover a highlight for the rule it
+        breaks; click it for the detail on the right. Problems that point at no particular words are listed under
+        &ldquo;Not in the text&rdquo;. Opened tickets also show <strong>spec gaps</strong>: details a developer would
+        have to ask about.
       </p>
       <p>
         &ldquo;No criteria&rdquo; and tracker links are found in code. The rest come from Claude reading the ticket, once it
         has read the current text.
       </p>
       <p>
-        &ldquo;Check against code&rdquo; has Claude read the repos you chose for a ticket. Its sentence for an issue
-        replaces ours and is marked Claude, until the ticket or the code changes.
+        &ldquo;Check against code&rdquo; has Claude read the repos you chose for a ticket. Its findings are marked Claude,
+        and it may propose new criteria or a new description, with the changed words in yellow. They stay until the
+        ticket or the code changes.
       </p>
       {layout != null && (
         <p>
-          Sections follow {statusOrderSourceLabel(layout.orderSource, { inSentence: true })}
-          {layout.deliveredFrom != null ? `; code counts as delivered from ${layout.deliveredFrom}` : ''}. Done tickets are
-          counted, not listed.
+          Sections follow {statusOrderSourceLabel(layout.orderSource, { inSentence: true })}, in four stages: Not
+          started, In progress, In review and Done.
         </p>
       )}
       <p>Settings chooses which issues this workspace raises, and the order of statuses.</p>
-      <p>Nothing is written to your tracker until you confirm the exact text on one ticket.</p>
+      <p>
+        Open a ticket to edit its text: Replace takes Claude’s wording for a highlighted passage, Edit lets you rewrite
+        it. Nothing is written to your tracker until you press Update and confirm the exact text.
+      </p>
     </>
   );
 }
@@ -102,6 +107,7 @@ export function SprintView(): JSX.Element {
   const refresh = useSprintRefresh(workspaceId);
   const refreshing = useSprintRefreshing(workspaceId);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [doneOpen, setDoneOpen] = useState(false);
 
   if (isError) {
     return <p className="text-sm text-rose-700 dark:text-rose-400">Could not load this sprint.</p>;
@@ -121,7 +127,8 @@ export function SprintView(): JSX.Element {
   const reading = data.read.readAt == null && data.read.error == null;
   const facts: string[] = [];
   if (!reading) {
-    facts.push(`${data.tickets.length} open ${data.tickets.length === 1 ? 'ticket' : 'tickets'}`);
+    const open = data.tickets.length - data.doneCount;
+    facts.push(`${open} open ${open === 1 ? 'ticket' : 'tickets'}`);
     facts.push(`${data.doneCount} done`);
   }
   const changed = changedCheckCount(data.checks);
@@ -176,40 +183,62 @@ export function SprintView(): JSX.Element {
         <p className={`text-xs ${MUTED}`}>Showing the first {SPRINT_TICKETS_MAX} tickets.</p>
       )}
 
-      {!reading && groups.length === 0 && (
+      {!reading && groups.every((g) => g.stage === 'done') && (
         <p className={`text-sm ${MUTED}`}>No open tickets in this sprint.</p>
       )}
 
-      {groups.map((g) => (
-        <section key={g.stage} className="space-y-3" data-testid={`sprint-group-${g.stage}`}>
-          <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-            {g.heading}{' '}
-            <span className={`font-normal ${MUTED}`}>· {g.sections.reduce((n, sec) => n + sec.tickets.length, 0)}</span>
-          </h4>
-          {g.sections.map((sec) => (
-            <div key={sec.status ?? '-'} className="space-y-2" data-testid="sprint-section">
-              {g.stage !== 'not_started' && (
-                <h5 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-                  {sec.status ?? 'No status'} <span className={`font-normal ${MUTED}`}>· {sec.tickets.length}</span>
-                </h5>
+      {groups.map((g) => {
+        const n = g.sections.reduce((k, sec) => k + sec.tickets.length, 0);
+        // Done is COLLAPSED by default: the open work leads, finished tickets are one click away.
+        const collapsed = g.stage === 'done' && !doneOpen;
+        return (
+          <section key={g.stage} className="space-y-3" data-testid={`sprint-group-${g.stage}`}>
+            <h4 className="flex flex-wrap items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
+              <span>
+                {g.heading} <span className={`font-normal ${MUTED}`}>· {n}</span>
+              </span>
+              {g.stage === 'done' && (
+                <button
+                  type="button"
+                  onClick={() => setDoneOpen((o) => !o)}
+                  aria-expanded={doneOpen}
+                  aria-controls={doneOpen ? 'sprint-done-sections' : undefined}
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-normal text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                >
+                  <ChevronIcon dir={doneOpen ? 'up' : 'down'} size={11} />
+                  {doneOpen ? 'Hide done' : `Show ${n} done`}
+                </button>
               )}
-              <ul className="space-y-2">
-                {sec.tickets.map((t) => (
-                  <li key={t.ident}>
-                    <SprintTicketCard
-                      ticket={t}
-                      workspaceId={data.workspaceId}
-                      aiEnabled={data.aiEnabled}
-                      repos={data.repos}
-                      checks={data.checks}
-                    />
-                  </li>
+            </h4>
+            {!collapsed && (
+              <div className="space-y-3" id={g.stage === 'done' ? 'sprint-done-sections' : undefined}>
+                {g.sections.map((sec) => (
+                  <div key={sec.status ?? '-'} className="space-y-2" data-testid="sprint-section">
+                    {g.stage !== 'not_started' && (
+                      <h5 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                        {sec.status ?? 'No status'} <span className={`font-normal ${MUTED}`}>· {sec.tickets.length}</span>
+                      </h5>
+                    )}
+                    <ul className="space-y-2">
+                      {sec.tickets.map((t) => (
+                        <li key={t.ident}>
+                          <SprintTicketCard
+                            ticket={t}
+                            workspaceId={data.workspaceId}
+                            aiEnabled={data.aiEnabled}
+                            repos={data.repos}
+                            checks={data.checks}
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 ))}
-              </ul>
-            </div>
-          ))}
-        </section>
-      ))}
+              </div>
+            )}
+          </section>
+        );
+      })}
     </div>
   );
 }

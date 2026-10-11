@@ -1,6 +1,5 @@
 import {
-  STORY_HEALTH_HELD,
-  STORY_HEALTH_ISSUE_SERIES,
+  STORY_ISSUE_RATES_HELD,
   STORY_ISSUE_BY_ID,
   STORY_ISSUE_IDS,
   STORY_ISSUE_RATE_UNIT,
@@ -27,7 +26,7 @@ import {
 import type { BotScope } from './queries.js';
 import { getReportingWindow, measuredTo, reportingWindowInfo, type ReportingWindow } from './reporting-window.js';
 import { foldStories, type StoryInternals } from './stories.js';
-import { storyLabelInput } from './story-label-input.js';
+import { storyLabelInput, type StoryLabelInput } from './story-label-input.js';
 import { currentLabelRowsFor } from './story-health.js';
 import { buildStoryIssueInput, knownTicketsFor, linksOfRow, namedTicketKeys } from './story-issue-input.js';
 
@@ -42,7 +41,7 @@ import { buildStoryIssueInput, knownTicketsFor, linksOfRow, namedTicketKeys } fr
 // no_criteria.
 //
 // THE THREE STORY ISSUES (shared `story-issues.ts`): `population.issueRates` counts every story in
-// the window by THE rate rule `storyIssueRateUnits` — the SAME measures as Story health: criteria that
+// the window by THE rate rule `storyIssueRateUnits`: criteria that
 // can't be checked (over criteria in labelled stories; "no criteria" stays its own `noCriteriaFound`),
 // stories with a tracker-linked blocker (omitted when none has one), spec gaps omitted while held — so
 // the agent's rates come from code over the whole window, never from the picks.
@@ -83,11 +82,11 @@ export function storyIssueRates(inputs: Iterable<StoryIssueInput | null>): Story
   return rates;
 }
 
-/** The rates the report may show and quote: Story health's omissions applied — a HELD series' rate is
- *  dropped, and "Stories with a linked blocker" is dropped when no story has a link (as the chart). */
+/** The rates the report may show and quote: a HELD rate (`STORY_ISSUE_RATES_HELD`) is dropped, and
+ *  "Stories with a linked blocker" is dropped when no story has a link (a flat 0% says nothing). */
 export function reportableIssueRates(rates: readonly StoryReportIssueRate[]): StoryReportIssueRate[] {
   return rates.filter(
-    (r) => STORY_HEALTH_HELD[STORY_HEALTH_ISSUE_SERIES[r.id]] == null && !(r.id === 'blocked' && r.stories === 0),
+    (r) => STORY_ISSUE_RATES_HELD[r.id] == null && !(r.id === 'blocked' && r.stories === 0),
   );
 }
 
@@ -206,8 +205,7 @@ export function selectStories(
     workingDayHours,
     truncated,
   };
-  // A rate Story health omits (HELD, or no linked blocker anywhere) is not handed to the report either —
-  // the same figure must not be withheld on one screen and quoted on the next.
+  // A HELD rate, or Blocked with no linked blocker anywhere, is not handed to the report.
   if (issueInputs != null) {
     population.issueRates = reportableIssueRates(storyIssueRates(stories.map((s) => issueInputs.get(s.row.ident) ?? null)));
   }
@@ -289,13 +287,40 @@ export async function loadStorySelection(
   scope: BotScope,
   choice: StoryReportWindowChoice,
   nowMs: number,
-): Promise<StorySelection & { range: StoryReportRange; trackerOn: boolean }> {
+): Promise<StorySelection & { range: StoryReportRange; trackerOn: boolean; toLabel: StoryLabelTodo[] }> {
   const { window, range } = await storyReportWindow(accountId, scope.workspaceId, choice, nowMs);
   const fold = await foldStories(accountId, scope, nowMs, window);
   const stories = [...fold.internals.values()];
   const issueInputs = await storyIssueInputs(accountId, stories);
   const sel = selectStories(stories, fold.workingDayHours, fold.truncated, issueInputs);
-  return { ...sel, range, trackerOn: fold.trackerOn };
+  const picked = new Set(sel.candidates.map((c) => c.ident));
+  return { ...sel, range, trackerOn: fold.trackerOn, toLabel: storiesWithoutCurrentLabel(stories, issueInputs, picked) };
+}
+
+/** A story the label pass should send: its ident and today's label input. */
+export interface StoryLabelTodo {
+  ident: string;
+  input: StoryLabelInput;
+}
+
+/** The stories in the window with criteria and NO CURRENT label (rubric version + today's text hash) —
+ *  what the story report's automatic label pass sends. Picked stories first, then the most recently
+ *  merged; the caller caps it. Pure. */
+export function storiesWithoutCurrentLabel(
+  stories: readonly StoryInternals[],
+  issueInputs: ReadonlyMap<string, StoryIssueInput | null>,
+  picked: ReadonlySet<string> = new Set(),
+): StoryLabelTodo[] {
+  const out: Array<StoryLabelTodo & { picked: boolean; lastMs: number }> = [];
+  for (const s of stories) {
+    if (s.ticket == null) continue;
+    const input = storyLabelInput(s.ticket, s.row.provider);
+    if (input == null || issueInputs.get(s.row.ident)?.label != null) continue;
+    out.push({ ident: s.row.ident, input, picked: picked.has(s.row.ident), lastMs: Date.parse(s.row.lastMergedAt) || 0 });
+  }
+  return out
+    .sort((a, b) => Number(b.picked) - Number(a.picked) || b.lastMs - a.lastMs || a.ident.localeCompare(b.ident))
+    .map(({ ident, input }) => ({ ident, input }));
 }
 
 /** Each story's issue input (db/story-issue-input.ts): today's criteria (the labeller's list — the

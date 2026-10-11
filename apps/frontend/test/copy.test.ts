@@ -17,6 +17,7 @@ import {
   markdownToClipboardHtml,
   sprintBulletMarkdown,
   sprintSpecGapLineMarkdown,
+  sprintCodeCheckMarkdown,
   ticketCopyAllMarkdown,
   ticketHeader,
 } from '../src/lib/copy.js';
@@ -36,9 +37,14 @@ const GAPS_MD = '**Spec gaps**\n\n- Business rule: No rule for how long a link l
 
 function body(over: Partial<SprintAssessmentBody> = {}): SprintAssessmentBody {
   return {
+    mode: 'plan',
+    plan: [],
+    criterionChecks: [],
+    coverage: null,
     summary: 'This may already be done: src/auth/link.ts sends the link.',
-    issues: [{ id: 'unclear_done', text: 'Say how long a link lasts.', ref: { repo: 'acme/web', path: 'src/auth/link.ts' } }],
+    findings: [{ issue: 'unclear_done', rule: 'no_expected_result', quote: null, where: null, text: 'Say how long a link lasts.', suggestion: null, ref: { repo: 'acme/web', path: 'src/auth/link.ts' } }],
     revisedCriteria: ['A user receives a link within a minute'],
+    revisedDescription: null,
     ...over,
   };
 }
@@ -68,7 +74,7 @@ function ticket(over: Partial<SprintTicketRow> = {}): SprintTicketRow {
     repos: { accepted: [], suggested: [] },
     assessment: null,
     replaceTarget: { kind: 'ac_field', fieldId: 'customfield_1', fieldName: 'Acceptance Criteria' },
-    replaceBase: { hash: '0'.repeat(64), truncated: false },
+    replaceBases: { description: { hash: '0'.repeat(64), truncated: false }, acceptanceCriteria: null },
     lastWrite: null,
     ...over,
   };
@@ -83,6 +89,7 @@ function succeeded(b: SprintAssessmentBody | null, over: { outdated?: boolean; s
       ident: 'x',
       model: 'claude-sonnet-5',
       status: over.status ?? 'succeeded',
+      mode: 'plan',
       phase: null,
       repos: [],
       body: b,
@@ -167,7 +174,7 @@ describe('markdown composers', () => {
     // The server sends `issues` already filtered; the checks also drop Claude's sentence for an issue
     // switched off.
     const checks = { off: ['spec_gaps' as const], issueTypes: [] };
-    const claudeScope = body({ issues: [{ id: 'spec_gaps', text: 'Say it is CSV only.', ref: null }] });
+    const claudeScope = body({ findings: [{ issue: 'spec_gaps', rule: 'edge_case', quote: null, where: null, text: 'Say it is CSV only.', suggestion: null, ref: null }] });
     const off = ticketCopyAllMarkdown(
       ticket({ issues: applyStoryIssueChecks(ISSUES, checks, null), assessment: succeeded(claudeScope) }),
       checks,
@@ -187,11 +194,44 @@ describe('markdown composers', () => {
       'may already be done',
     );
     // ⚠ A STALE run puts nothing in Copy all: no summary, no sentence of its own.
-    const stale = { ...succeeded(body({ issues: [{ id: 'spec_gaps', text: 'Say it is CSV only.', ref: null }] }))!, currency: 'stale' as const };
+    const stale = { ...succeeded(body({ findings: [{ issue: 'spec_gaps', rule: 'edge_case', quote: null, where: null, text: 'Say it is CSV only.', suggestion: null, ref: null }] }))!, currency: 'stale' as const };
     const staleMd = ticketCopyAllMarkdown(ticket({ issues: [], specGaps: [], assessment: stale }), SPRINT_CHECKS_DEFAULT);
     expect(staleMd).toBe('## ACME-2 — Sign in with a link\n\nhttps://acme.atlassian.net/browse/ACME-2');
     // A javascript: URL is never copied as the ticket link.
     expect(ticketCopyAllMarkdown(ticket({ url: 'javascript:alert(1)' }), SPRINT_CHECKS_DEFAULT)).not.toContain('javascript:');
+  });
+
+  it('the code check copies its summary and its list: a plan, or each criterion with its pill word and test', () => {
+    const plan = body({
+      summary: 'Two changes.',
+      plan: [
+        { repo: 'acme/web', path: 'src/auth/link.ts', newPath: null, change: 'Add an expiry.' },
+        { repo: 'acme/web', path: null, newPath: 'src/auth/expired.tsx', change: 'Add a page.' },
+        { repo: 'acme/api', path: null, newPath: null, change: 'Store the expiry.' },
+      ],
+    });
+    expect(sprintCodeCheckMarkdown(plan, [])).toBe(
+      'Two changes.\n\n- `acme/web` `src/auth/link.ts`: Add an expiry.\n- `acme/web` new `src/auth/expired.tsx`: Add a page.\n- `acme/api`: Store the expiry.',
+    );
+    const verify = body({
+      mode: 'verify',
+      summary: 'One of two met.',
+      criterionChecks: [
+        { n: 1, status: 'met', evidence: 'Sends the link.', ref: { repo: 'acme/web', path: 'src/auth/link.ts' }, tests: { repo: 'acme/web', path: 'test/link.test.ts' } },
+        { n: 2, status: 'not_met', evidence: 'No expiry.', ref: null, tests: null },
+      ],
+      coverage: 'Only criterion 1 has a test.',
+    });
+    expect(sprintCodeCheckMarkdown(verify, ['Users get a link', 'The link expires'])).toBe(
+      [
+        'One of two met.',
+        '- Criterion 1 “Users get a link” (Met): Sends the link. `src/auth/link.ts` · test `test/link.test.ts`\n- Criterion 2 “The link expires” (Not met): No expiry. · no test found\n\nOnly criterion 1 has a test.',
+      ].join('\n\n'),
+    );
+    // Copy all carries a CURRENT run's list after its summary.
+    expect(ticketCopyAllMarkdown(ticket({ issues: [], specGaps: [], assessment: succeeded(plan) }), SPRINT_CHECKS_DEFAULT)).toContain(
+      'Two changes.\n\n- `acme/web` `src/auth/link.ts`: Add an expiry.',
+    );
   });
 
   it('blocksMarkdown skips empty blocks', () => {

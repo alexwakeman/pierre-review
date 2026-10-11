@@ -46,7 +46,6 @@ import { searchRoutes } from './api/routes/search.js';
 import { dailyBriefRoutes } from './api/routes/daily-brief.js';
 import { dependencyMergeRoutes } from './api/routes/dependency-merge.js';
 import { flowRoutes } from './api/routes/flow.js';
-import { storyHealthRoutes } from './api/routes/story-health.js';
 import { sprintStoriesRoutes } from './api/routes/sprint-stories.js';
 import { registerTrackerWriteRoutes } from './tracker/write/routes.js';
 import { billingRoutes } from './api/routes/billing.js';
@@ -269,9 +268,6 @@ export async function buildApp(): Promise<FastifyInstance> {
   // db/pr-intervals.ts; there is no narration seam and no plugin half. The route carries the 402
   // itself (the ENGINE stays capability-blind — verify:isolation calls that fold directly).
   await app.register(flowRoutes);
-  // Reports → Stories → Story health (Pro on `periodReports`, both modes; the LABEL RUN that feeds
-  // its model-made series is agentic and registers in `registerAgenticRoutes`).
-  await app.register(storyHealthRoutes);
   // REPORTS → THIS SPRINT (core, both modes; Pro on `periodReports`, 402): the list + candidate
   // repos, and the per-ticket write-back to the tracker (one confirmed press, claimed, never
   // retried). The "Check against code" run is agentic and registers in `registerAgenticRoutes`; the

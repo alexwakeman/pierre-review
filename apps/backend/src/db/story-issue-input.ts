@@ -11,7 +11,7 @@ import {
 
 // THE ONE STORY-ISSUE INPUT BUILDER (shared `story-issues.ts` folds it). Every surface that raises or
 // counts a story issue — Reports → This sprint (db/sprint-chips.ts, db/sprint-stories.ts), the story
-// report (db/story-selection.ts) and Story health (db/story-health.ts) — hands the fold the same four
+// report (db/story-selection.ts) and the label run (db/story-health.ts) — hands the fold the same four
 // things, built here:
 //
 //   • the ticket's numbered criteria (the ONE extractor, the caller's),
@@ -41,12 +41,16 @@ export function linksOfRow(row: object | null | undefined): TicketLinkBlocker[] 
   return parseTicketLinkBlockers((row as { blockedByJson: unknown }).blockedByJson);
 }
 
-/** The ticket keys a label names (upper-cased, deduped). */
+/** The ticket keys a label names — its dependencies' keys and (rubric 4) its references — upper-cased,
+ *  deduped. */
 export function namedTicketKeys(labels: Iterable<StoryIssueLabel | null | undefined>): string[] {
   const out = new Set<string>();
   for (const l of labels) {
     for (const d of l?.story.dependencies ?? []) {
       if (d.ticketKey != null && d.ticketKey.trim() !== '') out.add(d.ticketKey.trim().toUpperCase());
+    }
+    for (const r of l?.story.references ?? []) {
+      if (r.ticketKey.trim() !== '') out.add(r.ticketKey.trim().toUpperCase());
     }
   }
   return [...out];
@@ -59,14 +63,17 @@ const httpsOrNull = (u: string | null): string | null => (u != null && /^https:\
 
 /**
  * Stored tickets on this site by UPPER-CASED key: the freshest `sprint_tickets` row (any workspace of
- * the account) wins, else the freshest read `tracker_tickets` row (state 'ok'). Keys with no stored
- * ticket are absent. GitHub keys (`owner/repo#12`) compare upper-cased too — the map is only a lookup.
+ * the account) wins, else the freshest read `tracker_tickets` row (state 'ok'), else (unless
+ * `refs: false`) the freshest `sprint_ref_tickets` row — the sprint read's status lookup of tickets
+ * the sprint's text names (tracker/sprint/ref-status.ts). Keys with no stored ticket are absent.
+ * GitHub keys (`owner/repo#12`) compare upper-cased too — the map is only a lookup.
  */
 export async function knownTicketsFor(
   accountId: number,
   provider: TrackerProvider,
   apiRoot: string,
   keys: readonly string[],
+  opts: { refs?: boolean } = {},
 ): Promise<Map<string, KnownTicket>> {
   const out = new Map<string, KnownTicket>();
   const wanted = [...new Set(keys.map((k) => k.trim()).filter((k) => k !== ''))];
@@ -140,6 +147,33 @@ export async function knownTicketsFor(
       }, fromTracker);
     }
   }
+  const fromRefs = new Map<string, { at: number; t: KnownTicket }>();
+  const rt = schema.sprintRefTickets;
+  const stillMissing = opts.refs === false ? [] : missing.filter((k) => !fromTracker.has(k.toUpperCase()));
+  for (let i = 0; i < stillMissing.length; i += CHUNK) {
+    const chunk = stillMissing.slice(i, i + CHUNK);
+    const rows = await db
+      .select({
+        issueKey: rt.issueKey,
+        title: rt.title,
+        statusName: rt.statusName,
+        statusCategory: rt.statusCategory,
+        url: rt.url,
+        readAt: rt.readAt,
+      })
+      .from(rt)
+      .where(and(eq(rt.accountId, accountId), eq(rt.provider, provider), eq(rt.apiRoot, apiRoot), inArray(rt.issueKey, chunk)))
+      .execute();
+    for (const r of rows) {
+      offer(r.issueKey, r.readAt.getTime(), {
+        title: r.title != null && r.title.trim() !== '' ? r.title : null,
+        status: r.statusName,
+        category: categoryOf(r.statusCategory),
+        url: httpsOrNull(r.url),
+      }, fromRefs);
+    }
+  }
+  for (const [k, v] of fromRefs) out.set(k, v.t);
   for (const [k, v] of fromTracker) out.set(k, v.t);
   for (const [k, v] of fresh) out.set(k, v.t);
   return out;

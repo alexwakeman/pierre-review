@@ -2,10 +2,11 @@
 // (db/sprint-stories.ts), on a THROWAWAY sqlite DB with a real Fastify instance. Pinned:
 //   1. Pro on `periodReports`: 402 before any DB work (GET and PUT).
 //   2. Another tenant's workspace id resolves to the caller's Default (never theirs, never a 404).
-//   3. Order: stage (Not started, Writing code, Code delivered), then status section, then most flags,
-//      then key. Done tickets are counted, not listed; out-of-sprint and other tenants' tickets never
+//   3. Order: stage (Not started, In progress, In review, Done), then status section, then most flags,
+//      then key. Done tickets are counted and listed last; out-of-sprint and other tenants' tickets never
 //      listed. The response carries the status layout (`statusLayout`) and each row its `stage`.
-//   4. A view stamps `sprint_reads.viewed_at` and kicks a due read.
+//   4. A view stamps `sprint_reads.viewed_at` and kicks a due read; a view listing a PENDING label asks
+//      for the label run (the after-read hook), deduped.
 //   5. Issues: a CURRENT label feeds the label half (criterion reasons, a named ticket resolved through
 //      stored tickets, spec gaps); tracker links raise "Blocked" with no label (a done link does not);
 //      `aiEnabled` false → 'off' and only code issues.
@@ -181,7 +182,9 @@ describe('GET /api/sprint-stories', () => {
     expect(body.tickets.map((t: any) => [t.key, t.phase, t.stage, t.flagCount])).toEqual([
       ['ENG-1', 'not_started', 'not_started', 2],
       ['ENG-3', 'not_started', 'not_started', 1],
-      ['ENG-2', 'in_progress', 'writing', 1],
+      ['ENG-2', 'in_progress', 'in_progress', 1],
+      // Done tickets are listed now, last.
+      ['ENG-4', 'done', 'done', 0],
     ]);
     const eng1 = body.tickets[0];
     expect(eng1.labels).toBe('current');
@@ -218,20 +221,46 @@ describe('GET /api/sprint-stories', () => {
     expect(eng3.issues[0].reasons).toEqual(['linked']);
     expect(eng3.issues[0].blockers.map((b: any) => [b.ticketKey, b.resolved])).toEqual([['ENG-8', false]]);
     expect(body.tickets[2].issues.map((i: any) => i.id)).toEqual(['unclear_done']);
+    // Anchored findings ride every ticket, built server-side (db/sprint-findings.ts).
+    expect(eng1.findings.map((f: any) => [f.id, f.issue, f.source])).toEqual([
+      ['u-c2', 'unclear_done', 'code'],
+      ['b-0', 'blocked', 'code'],
+      ['g-0', 'spec_gaps', 'code'],
+    ]);
+    expect(eng3.findings.map((f: any) => [f.id, f.rule])).toEqual([['b-0', 'waits_on_ticket']]);
     // The status layout: no stored board order → the category fallback over the sprint's statuses.
     expect(body.statusLayout.order.map((o: any) => [o.name, o.category, o.count])).toEqual([
       ['To Do', 'new', 2],
       ['In Progress', 'indeterminate', 1],
-      ['Done', 'done', 0],
+      ['Done', 'done', 1],
     ]);
-    expect(body.statusLayout.deliveredFrom).toBeNull();
+    expect([body.statusLayout.codingBegins, body.statusLayout.codingEnds]).toEqual(['In Progress', null]);
     expect(eng1.replaceTarget).toEqual({ kind: 'description' });
-    expect(eng1.repos).toEqual({ accepted: [], suggested: [] });
+    // The workspace's ONLY repo is a confident suggestion: accepted by default until the reader saves.
+    expect(eng1.repos).toEqual({ accepted: [{ repoId: ownRepo, fullName: 'acme/web' }], suggested: [], defaulted: true });
     expect(body.repos).toEqual([{ repoId: ownRepo, fullName: 'acme/web' }]);
     expect(kicks).toContainEqual([1, ownWs]);
     const read = await store.readSprintRead(1, ownWs);
     expect(read).not.toBeNull();
     expect(await store.readSprintRead(1, foreignWs)).toBeNull();
+  });
+
+  it('a view listing a pending label asks for the label run (the after-read hook), once a minute', async () => {
+    const hooks = await import('../../tracker/sprint/hooks.js');
+    const { config } = await import('../../config.js');
+    hooks.resetSprintViewDedupe();
+    const fired: Array<[number, number]> = [];
+    hooks.setAfterSprintRead((a, w) => void fired.push([a, w]));
+    try {
+      const body = (await app.inject({ method: 'GET', url: `/api/sprint-stories?workspace=${ownWs}` })).json() as any;
+      const pending = body.tickets.filter((t: any) => t.labels === 'pending').length;
+      expect(pending > 0).toBe(config.aiEnabled);
+      await app.inject({ method: 'GET', url: `/api/sprint-stories?workspace=${ownWs}` });
+      expect(fired).toEqual(config.aiEnabled ? [[1, ownWs]] : []);
+    } finally {
+      hooks.setAfterSprintRead(null);
+      hooks.resetSprintViewDedupe();
+    }
   });
 
   it('aiEnabled false → labels off and no label issues', async () => {
@@ -252,16 +281,17 @@ describe('sortSprintTickets', () => {
     const layout = { order: [{ name: 'To Do' }, { name: 'In Development' }, { name: 'Ready for QA' }, { name: 'In PO Review' }] } as any;
     const out = fold.sortSprintTickets(
       [
-        row('A-9', 'delivered', 'In PO Review', 0),
-        row('A-1', 'writing', 'Ready for QA', 3),
-        row('A-2', 'writing', 'In Development', 0),
-        row('A-3', 'writing', 'in development', 2),
+        row('A-11', 'done', 'Done', 5),
+        row('A-9', 'in_review', 'In PO Review', 0),
+        row('A-1', 'in_progress', 'Ready for QA', 3),
+        row('A-2', 'in_progress', 'In Development', 0),
+        row('A-3', 'in_progress', 'in development', 2),
         row('A-4', 'not_started', 'To Do', 0),
-        row('A-10', 'writing', 'Unknown', 9),
+        row('A-10', 'in_progress', 'Unknown', 9),
       ],
       layout,
     );
-    expect(out.map((r: any) => r.key)).toEqual(['A-4', 'A-3', 'A-2', 'A-1', 'A-10', 'A-9']);
+    expect(out.map((r: any) => r.key)).toEqual(['A-4', 'A-3', 'A-2', 'A-1', 'A-10', 'A-9', 'A-11']);
   });
 });
 
@@ -294,8 +324,9 @@ describe('a stored read of another tracker site', () => {
     expect(row.nextReadAt.getTime()).toBe(0);
     // The replace base: the full stored text's hash, and whether the wire cut it.
     const eng1 = out.tickets.find((x) => x.key === 'ENG-1')!;
-    expect(eng1.replaceBase.truncated).toBe(false);
-    expect(eng1.replaceBase.hash).toMatch(/^[0-9a-f]{64}$/);
+    // No criteria field of its own: only the description is replaceable.
+    expect(eng1.replaceBases.acceptanceCriteria).toBeNull();
+    expect(eng1.replaceBases.description).toMatchObject({ truncated: false, hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(shared.sprintReplaceBaseText(eng1, eng1.replaceTarget)).toBe(VALUE);
   });
 });

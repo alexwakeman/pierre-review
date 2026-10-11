@@ -1,14 +1,16 @@
 import type { JiraStatusCategory } from './types.js';
-import type {
-  StoryCriterionLabel,
-  StoryDependencyKind,
-  StoryDependencyLabel,
-  StoryLevelLabels,
-  StorySpecGap,
+import {
+  STORY_REFERENCE_RELATIONS,
+  type StoryCriterionLabel,
+  type StoryDependencyKind,
+  type StoryDependencyLabel,
+  type StoryLevelLabels,
+  type StorySpecGap,
+  type StoryTicketReference,
 } from './story-health.js';
 
 // THE THREE STORY ISSUES — the ONE vocabulary for "what is wrong with this ticket" across Reports →
-// This sprint (chips, bullets, checks, the code assessment), Story health (the refinement panel) and
+// This sprint (chips, bullets, checks, the code assessment) and
 // the story report (its points carry an issue id). docs/CLAUDE-REVIEW.md § Story issues.
 //
 // Each issue is SPECIFIC: it carries the detail a reader needs to act — WHICH criterion and WHY, WHAT
@@ -23,6 +25,10 @@ import type {
 //                   • NAMED IN TEXT (the label): dependencies the ticket names without a link — what,
 //                     owner, and a ticket key when one is named. A named key that is a STORED ticket
 //                     gets its title + status from code (`knownTickets`); one that is done is resolved.
+//                     RUBRIC 4: a named TICKET counts only when the label's `references` give it the
+//                     relation `depends_on` — a ticket the story supersedes, builds on, leaves out of
+//                     scope, is built alongside or merely mentions is never a blocker
+//                     (`storyReferencesByKey`).
 //                 Only REAL blockers are raised (`isRealStoryBlocker`): an unfinished ticket, or a
 //                 decision nobody has made. Inputs (a design, data, a file) are not.
 //   spec_gaps     up to three specific missing details from the label (a rule, an edge case, a design,
@@ -47,7 +53,7 @@ import type {
 //   • `storyIssueMeasure` — HOW THE STORY WAS WRITTEN (the story report's per-pick states): did it
 //     depend on other work at all? Finished or not — or every old story would read "not blocked" once
 //     its blockers closed.
-// RATES over many stories (Story health, the story report's figures) use a THIRD rule,
+// RATES over many stories (the story report's figures) use a THIRD rule,
 // `storyIssueRateUnits`: unclear_done over CRITERIA, blocked over tracker LINKS only (code).
 //
 // ⚠ EVERY SENTENCE HERE IS TEMPLATED — the chip detail and the one-line bullet. The REASON / WHAT /
@@ -64,7 +70,7 @@ export interface StoryIssueMeta {
   order: number;
   /** The issue AVOIDED, for a strength ("What we do well"): naming the problem there reads as one. */
   avoided: string;
-  /** The label for a RATE counted by `storyIssueRateUnits` (Story health's series, the story report's
+  /** The label for a RATE counted by `storyIssueRateUnits` (the story report's
    *  whole-window figures). It differs from `label` because the populations differ: unclear_done is a
    *  share of CRITERIA, blocked a share of stories with a tracker LINK (any status). */
   measureLabel: string;
@@ -200,6 +206,8 @@ export interface StoryBlocker {
   url: string | null;
   /** Finished (status category `done`): never raised by `foldStoryIssues`. */
   resolved: boolean;
+  /** Text only (rubric 3): the label's verified passage naming it; ABSENT otherwise. */
+  quote?: string | null;
 }
 
 export interface StoryIssue {
@@ -253,6 +261,26 @@ export function usableStoryLabel(input: StoryIssueInput): StoryIssueLabel | null
 
 const keyOf = (k: string): string => k.trim().toUpperCase();
 
+/** The label's references by UPPER-CASED key, one per ticket: when the text names a ticket in two
+ *  roles, the higher-priority relation wins (`STORY_REFERENCE_RELATIONS` order — depends_on, then
+ *  concurrent, …). Pure. */
+export function storyReferencesByKey(
+  refs: readonly StoryTicketReference[] | null | undefined,
+): Map<string, StoryTicketReference> {
+  const out = new Map<string, StoryTicketReference>();
+  const rank = (r: StoryTicketReference): number => {
+    const i = STORY_REFERENCE_RELATIONS.indexOf(r.relation);
+    return i < 0 ? STORY_REFERENCE_RELATIONS.length : i;
+  };
+  for (const r of refs ?? []) {
+    const k = keyOf(r.ticketKey);
+    if (k === '') continue;
+    const prev = out.get(k);
+    if (prev == null || rank(r) < rank(prev)) out.set(k, r);
+  }
+  return out;
+}
+
 /** THE BLOCKER RULE — is this dependency something the story is really waiting on? Kept ONLY when it is
  *  (a) a TICKET (a tracker link, or a ticket key the text names) that is NOT done — an unknown status
  *  counts as not done and reads "status unknown" (`storyBlockerPhrase`); or (b) a text dependency of
@@ -297,8 +325,12 @@ export function storyBlockers(input: StoryIssueInput): StoryBlocker[] {
     });
   }
   const label = usableStoryLabel(input);
+  // RUBRIC 4: a label carrying `references` says what each named ticket IS to this story; only a
+  // `depends_on` ticket may block. (A label without the field — an old fixture — keeps every named key.)
+  const refs = label?.story.references != null ? storyReferencesByKey(label.story.references) : null;
   for (const d of label?.story.dependencies ?? []) {
     const k = d.ticketKey != null ? keyOf(d.ticketKey) : null;
+    if (k != null && refs != null && refs.has(k) && refs.get(k)!.relation !== 'depends_on') continue;
     if (k != null && seen.has(k)) continue;
     if (k != null) seen.add(k);
     const known = k != null ? (input.knownTickets?.get(k) ?? null) : null;
@@ -313,6 +345,27 @@ export function storyBlockers(input: StoryIssueInput): StoryBlocker[] {
       relation: null,
       url: known?.url ?? null,
       resolved: known?.category === 'done',
+      ...(d.quote != null ? { quote: d.quote } : {}),
+    });
+  }
+  // A depends_on reference the dependencies did not list (the validator keeps the two in step; this is
+  // the belt to its braces).
+  for (const [k, r] of refs ?? []) {
+    if (r.relation !== 'depends_on' || seen.has(k)) continue;
+    seen.add(k);
+    const known = input.knownTickets?.get(k) ?? null;
+    out.push({
+      source: 'text',
+      kind: 'ticket',
+      ticketKey: r.ticketKey,
+      what: known?.title ?? r.ticketKey,
+      owner: r.owner,
+      status: known?.status ?? null,
+      category: known?.category ?? null,
+      relation: null,
+      url: known?.url ?? null,
+      resolved: known?.category === 'done',
+      ...(r.quote != null ? { quote: r.quote } : {}),
     });
   }
   // Open first (links before text — stable), then resolved.
@@ -392,7 +445,7 @@ export const STORY_ISSUE_RATE_UNIT: Readonly<Record<StoryIssueId, 'criteria' | '
   spec_gaps: 'stories',
 };
 
-/** THE RATE RULE for rates over many stories (Story health's refinement series, the story report's
+/** THE RATE RULE for rates over many stories (the story report's
  *  whole-window rates). null = leave this story out of this issue's rate. Pure.
  *   • unclear_done — CRITERIA: of the story's criteria, how many the CURRENT usable label could not
  *     check. A story with no criteria or no usable label is out (no criteria is counted on its own, by
@@ -401,7 +454,7 @@ export const STORY_ISSUE_RATE_UNIT: Readonly<Record<StoryIssueId, 'criteria' | '
  *   • blocked — STORIES, CODE ONLY: does the ticket carry ≥ 1 tracker link of a blocking type, any
  *     status? Out when its links were never read (`links` null/absent). A dependency named only in the
  *     text is NOT counted: two readings of the same ticket disagree on those.
- *   • spec_gaps — STORIES: the usable label found ≥ 1 gap (held from Story health, `STORY_HEALTH_HELD`). */
+ *   • spec_gaps — STORIES: the usable label found ≥ 1 gap (held from the story report, `STORY_ISSUE_RATES_HELD`). */
 export function storyIssueRateUnits(input: StoryIssueInput): Record<StoryIssueId, StoryRateUnits | null> {
   const label = usableStoryLabel(input);
   let unclear: StoryRateUnits | null = null;

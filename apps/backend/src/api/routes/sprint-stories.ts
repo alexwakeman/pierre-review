@@ -15,6 +15,7 @@ import { suggestSprintRepos, suggestTicketOf } from '../../db/sprint-repo-sugges
 import { readSprintTicket } from '../../db/sprint-store.js';
 import { getSprintStories } from '../../db/sprint-stories.js';
 import { setSprintRepos } from '../../db/sprint-ticket-repos.js';
+import { sprintViewedWithPendingLabels } from '../../tracker/sprint/hooks.js';
 import { accountIdOf } from '../plugins/auth.js';
 import { reportsEntitled } from './insights.js';
 
@@ -24,10 +25,11 @@ import { reportsEntitled } from './insights.js';
 // 402 BEFORE any DB work. The workspace goes through `resolveWorkspaceScope`: absent / unknown /
 // another tenant's id ⇒ the caller's Default, never a 404.
 //
-//   GET /api/sprint-stories?workspace=<id>   the list (DB only; stamps the view, kicks a due read)  → read
+//   GET /api/sprint-stories?workspace=<id>   the list (DB only; stamps the view, kicks a due read and,
+//                                            locally, the label run for pending labels)              → read
 //   PUT /api/sprint-stories/repos            replace ONE ticket's accepted candidate repos          → read
 //   PUT /api/sprint-stories/checks           replace the workspace's checks (which chips it raises)  → read
-//   PUT /api/sprint-stories/statuses         replace the workspace's status order / delivered-from   → read
+//   PUT /api/sprint-stories/statuses         replace the workspace's status stages and order          → read
 
 const PRO_REQUIRED = { error: 'pro required' } as const;
 const IDENT_MAX = 600;
@@ -43,7 +45,11 @@ export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
     const q = req.query as { workspace?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
-    return getSprintStories(accountId, scope.workspaceId, { aiEnabled: config.aiEnabled, now: Date.now() });
+    const res = await getSprintStories(accountId, scope.workspaceId, { aiEnabled: config.aiEnabled, now: Date.now() });
+    // A listed ticket still waiting for its label (new text, a rubric bump): ask for the label run now
+    // rather than at the next list read. Local + AI only (the hook is unset otherwise); deduped.
+    if (res.tickets.some((t) => t.labels === 'pending')) sprintViewedWithPendingLabels(accountId, res.workspaceId);
+    return res;
   });
 
   app.put('/api/sprint-stories/checks', async (req, reply): Promise<SprintChecksResponse | ErrorBody> => {

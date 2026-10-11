@@ -1,11 +1,14 @@
 import {
+  SPRINT_CRITERION_STATUS_LABEL,
   STORY_ISSUE_BY_ID,
   sprintBullets,
   sprintCurrentAssessmentBodyOf,
   sprintSpecGapLines,
   sprintSpecGapText,
   sprintSpecGapsMarkdown,
+  type SprintAssessmentBody,
   type SprintBullet,
+  type SprintFinding,
   type SprintSpecGapLine,
   type SprintChecks,
   type SprintTicketRow,
@@ -61,10 +64,53 @@ export function ticketCopyAllMarkdown(t: SprintTicketRow, checks: SprintChecks):
   if (t.url != null && /^https?:\/\//i.test(t.url)) parts.push(t.url);
   const body = sprintCurrentAssessmentBodyOf(t);
   if (body != null && body.summary.trim() !== '') parts.push(oneLine(body.summary));
+  if (body != null) {
+    const check = sprintCodeCheckListMarkdown(body, t.criteria.items);
+    if (check !== '') parts.push(check);
+  }
   const bullets = sprintBullets(t, checks);
   if (bullets.length > 0) parts.push(bullets.map((b) => `- ${sprintBulletMarkdown(b)}`).join('\n'));
   const gaps = sprintSpecGapsMarkdown(sprintSpecGapLines(t, checks));
   if (gaps !== '') parts.push(gaps);
+  return parts.join('\n\n');
+}
+
+/** The code check's list without its summary: PLAN → one "- `repo` `path`: change" per step;
+ *  VERIFY → one "- Criterion n (Met): evidence `path` · test `path`" per criterion, then the coverage
+ *  line. '' when there is nothing. */
+export function sprintCodeCheckListMarkdown(body: SprintAssessmentBody, criteria: readonly string[]): string {
+  if (body.mode === 'plan') {
+    return body.plan
+      .map((p) => {
+        const where = p.path != null ? ` \`${p.path}\`` : p.newPath != null ? ` new \`${p.newPath}\`` : '';
+        return `- \`${p.repo}\`${where}: ${oneLine(p.change)}`;
+      })
+      .join('\n');
+  }
+  const lines = body.criterionChecks.map((c) => {
+    const text = criteria[c.n - 1];
+    const head = `Criterion ${c.n}${text != null ? ` “${oneLine(text)}”` : ''} (${SPRINT_CRITERION_STATUS_LABEL[c.status]})`;
+    const file = c.ref != null ? ` \`${c.ref.path}\`` : '';
+    const test = c.tests != null ? ` · test \`${c.tests.path}\`` : ' · no test found';
+    return `- ${head}: ${oneLine(c.evidence)}${file}${test}`;
+  });
+  if (body.coverage != null && body.coverage.trim() !== '') lines.push('', oneLine(body.coverage));
+  return lines.join('\n').trim();
+}
+
+/** The whole code check: summary, then the list (`sprintCodeCheckListMarkdown`). */
+export function sprintCodeCheckMarkdown(body: SprintAssessmentBody, criteria: readonly string[]): string {
+  return [oneLine(body.summary), sprintCodeCheckListMarkdown(body, criteria)].filter((x) => x !== '').join('\n\n');
+}
+
+/** One finding as Markdown: "**Unclear when done · Vague word**", the quoted text, the detail, the
+ *  suggested wording and the file it rests on — what the opened card's thread shows. */
+export function sprintFindingMarkdown(f: SprintFinding): string {
+  const parts = [`**${STORY_ISSUE_BY_ID[f.issue].label} · ${oneLine(f.brief)}**`];
+  if (f.quote != null && f.quote.trim() !== '') parts.push(`> ${oneLine(f.quote)}`);
+  if (f.detail.trim() !== '') parts.push(oneLine(f.detail));
+  if (f.suggestion != null && f.suggestion.trim() !== '') parts.push(`Suggested: ${oneLine(f.suggestion)}`);
+  if (f.ref != null) parts.push(`\`${f.ref.path}\` in \`${f.ref.repo}\``);
   return parts.join('\n\n');
 }
 

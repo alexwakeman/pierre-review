@@ -228,7 +228,7 @@ export interface PassOptions {
   mergedPrIds?: readonly number[];
   /**
    * Keys (per MERGED PR) whose stored 'ok' row predates the ticket dates (migration 0098): read
-   * again, once, so Story health can bucket them by created week (./dates-backfill.ts). A stored
+   * again, once, so the label run can bucket them by created week (./dates-backfill.ts). A stored
    * sibling that already HAS the dates is copied instead — no call.
    */
   datesOwed?: ReadonlyMap<number, ReadonlySet<string>>;

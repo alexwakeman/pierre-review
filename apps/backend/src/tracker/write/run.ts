@@ -5,6 +5,7 @@ import {
   sprintReplaceBaseText,
   sprintReplaceBaseTruncated,
   sprintReplaceTarget,
+  sprintWriteTargetAllowed,
   type SprintReplaceTarget,
   type SprintWriteErrorBody,
   type SprintWriteMode,
@@ -38,8 +39,10 @@ import { WRITERS, classifyWriteError, type TrackerWriter } from './providers.js'
 // is `maybe_written` for ever (and a restart mid-write sweeps `writing` → `maybe_written`), because
 // the tracker may well have stored it and a retry would post it twice.
 //
-// The replace TARGET is the server's (`sprintReplaceTarget` over the STORED row's criteria field) —
-// the client's copy is only compared, so a dialog that showed one field can never write another.
+// The replace TARGET is checked against the server's (`sprintWriteTargetAllowed`: the description, or
+// the STORED row's own criteria field) — the client's copy is only compared, so a dialog that showed
+// one field can never write a field the ticket does not have. Each field is its own write: its own
+// requestId, its own baseHash, its own live check.
 
 const sha256 = (s: string): string => createHash('sha256').update(s, 'utf8').digest('hex');
 
@@ -59,11 +62,6 @@ const refuse = (status: number, error: SprintWriteErrorBody['error'], message: s
 
 const recordOf = (r: TrackerWriteRow): SprintWriteRecord => trackerWriteRecordOf(r, trackerWriteMessage);
 
-const sameTarget = (a: SprintReplaceTarget | undefined, b: SprintReplaceTarget): boolean => {
-  if (a == null || a.kind !== b.kind) return false;
-  if (a.kind === 'ac_field' && b.kind === 'ac_field') return a.fieldId === b.fieldId && a.fieldName === b.fieldName;
-  return true;
-};
 
 async function readByRequestId(accountId: number, requestId: string): Promise<TrackerWriteRow | null> {
   const t = schema.trackerWrites;
@@ -108,7 +106,7 @@ export async function performTrackerWrite(
     text: string;
     requestId: string;
     target?: SprintReplaceTarget;
-    /** For 'replace': the `replaceBase.hash` the dialog was built on. */
+    /** For 'replace': that field's `replaceBases` hash the draft was built on. */
     baseHash?: string;
     assessmentId?: number | null;
     writers?: Record<TrackerProvider, TrackerWriter>;
@@ -143,16 +141,17 @@ export async function performTrackerWrite(
   }
   const provider = call.provider;
 
-  // 2. The replace target is the server's; the dialog's copy must match it.
+  // 2. The replace target: the description, or the STORED row's own criteria field — nothing else.
   let target: SprintReplaceTarget | null = null;
   if (a.mode === 'replace') {
-    target = sprintReplaceTarget(
+    const criteriaTarget = sprintReplaceTarget(
       provider,
       ticket.acFieldId != null ? { id: ticket.acFieldId, name: ticket.acFieldName ?? ticket.acFieldId } : null,
     );
-    if (!sameTarget(a.target, target)) {
+    if (a.target == null || !sprintWriteTargetAllowed(a.target, criteriaTarget)) {
       return refuse(409, 'target_changed', 'Where this ticket keeps its criteria has changed. Open the dialog again.');
     }
+    target = a.target.kind === 'description' ? { kind: 'description' } : criteriaTarget;
     // 2b. ⚠ Replace overwrites the WHOLE field, so the base the dialog was built on must be the
     //     ticket's text NOW. The page carries a capped copy of a list read up to 20 minutes old:
     //     a text longer than the page shows cannot be replaced here at all, and the ticket is read
@@ -160,7 +159,7 @@ export async function performTrackerWrite(
     //     and the fresh text is stored for the next dialog.
     const storedBase = sprintReplaceBaseText(ticket, target);
     if (sprintReplaceBaseTruncated(storedBase, target)) {
-      return refuse(409, 'too_long', 'This ticket’s text is too long to replace here. Add it as a comment instead.');
+      return refuse(409, 'too_long', 'This field is too long to edit here. Nothing was written.');
     }
     const changed = (): Refusal =>
       refuse(409, 'ticket_changed', 'This ticket changed since you opened it. Open the dialog again.');
@@ -187,12 +186,12 @@ export async function performTrackerWrite(
       provider,
       live.acFieldId != null ? { id: live.acFieldId, name: live.acFieldName ?? live.acFieldId } : null,
     );
-    if (!sameTarget(liveTarget, target)) {
+    if (!sprintWriteTargetAllowed(target, liveTarget)) {
       return refuse(409, 'target_changed', 'Where this ticket keeps its criteria has changed. Open the dialog again.');
     }
     const liveBase = sprintReplaceBaseText(live, target);
     if (sprintReplaceBaseTruncated(liveBase, target)) {
-      return refuse(409, 'too_long', 'This ticket’s text is too long to replace here. Add it as a comment instead.');
+      return refuse(409, 'too_long', 'This field is too long to edit here. Nothing was written.');
     }
     if (sha256(liveBase) !== a.baseHash) return changed();
   }

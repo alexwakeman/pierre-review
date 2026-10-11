@@ -18,6 +18,7 @@ import { afterSprintRead } from './hooks.js';
 import { listGithubMilestone } from './github.js';
 import { listJiraSprint } from './jira.js';
 import { listLinearCycle } from './linear.js';
+import { refreshSprintRefTickets, type RefLister } from './ref-status.js';
 import { sprintProjectKeys, workspaceRepoNames } from './project-keys.js';
 import type { SprintFetchedTicket, SprintLister } from './types.js';
 
@@ -38,7 +39,9 @@ import type { SprintFetchedTicket, SprintLister } from './types.js';
 //   • at most `TICK_WORKSPACES` workspaces per tick, one read per workspace in flight.
 //
 // What is stored: `sprint_tickets` (one row per ticket, WITH OR WITHOUT a PR; `in_sprint` false
-// once a later read stops returning it; pruned after 90 days unseen) and the workspace's
+// once a later read stops returning it; pruned after 90 days unseen), `sprint_ref_tickets` (the
+// status of tickets their text names that Limn holds nowhere else — ./ref-status.ts, one batched
+// lookup per read, replaced each time) and the workspace's
 // `sprint_reads` row (where the list came from, when, and the last failure's CODE — the sentence is
 // `sprintReadErrorMessage`'s). A failed read keeps the last good list. Logs carry account,
 // workspace and a code only — never a token or anything a tracker sent back.
@@ -66,6 +69,8 @@ export interface SprintReadOptions {
   transport?: JiraTransport;
   /** Test seam: the provider listers. */
   listers?: Partial<Record<TrackerProvider, SprintLister>>;
+  /** Test seam: the referenced-ticket status lookups (./ref-status.ts). */
+  refListers?: Partial<Record<TrackerProvider, RefLister>>;
 }
 
 export interface SprintTickOptions extends SprintReadOptions {
@@ -236,6 +241,17 @@ export async function readWorkspaceSprint(
       return { ok: false, stored: 0, code };
     }
     const stored = await storeSprintList(ctx, accountId, workspaceId, call, row?.baseUrl ?? null, result.tickets, acSettingFor, now());
+    // The status of the tickets their text names that Limn holds nowhere else: ONE batched lookup,
+    // never failing the read (./ref-status.ts).
+    await refreshSprintRefTickets(ctx, {
+      accountId,
+      workspaceId,
+      call,
+      baseUrl: row?.baseUrl ?? null,
+      projectKeys,
+      nowMs: now(),
+      ...(opts.refListers != null ? { listers: opts.refListers } : {}),
+    });
     if (result.statusOrderError != null) {
       ctx.log.warn(
         { accountId, workspaceId, code: result.statusOrderError, route: 'tracker-sprint' },

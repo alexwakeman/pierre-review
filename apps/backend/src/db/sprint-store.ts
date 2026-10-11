@@ -4,13 +4,20 @@ import {
   SPRINT_ASSESS_FORMAT_VERSION,
   SPRINT_ASSESS_MODEL,
   STORY_ISSUE_IDS,
+  STORY_RULE_BY_ID,
   isStoryIssueId,
+  isStoryRuleId,
   type SprintAssessmentBody,
-  type SprintAssessmentIssue,
+  type SprintAssessmentFinding,
   type SprintAssessmentErrorCode,
   type SprintAssessmentPhase,
   type SprintAssessmentRecord,
   type SprintAssessmentStatus,
+  type SprintAssessMode,
+  type SprintCodeRef,
+  type SprintCriterionCheck,
+  type SprintCriterionStatus,
+  type SprintPlanStep,
   type SprintReadState,
   type SprintWriteErrorCode,
   type SprintWriteMode,
@@ -45,11 +52,17 @@ export function sprintTicketTextHash(t: { title: string | null; description: str
 }
 
 /** The assessment's currency input: the body format (`SPRINT_ASSESS_FORMAT_VERSION`, so a run stored
- *  in an older shape reads 'stale'), the ticket text hash + sorted "repoId:defaultBranchHeadSha"
- *  (the SYNCED `repos.default_branch_head_sha`; null → ''). Pure and clock-free. */
-export function sprintAssessFingerprint(textHash: string, repos: ReadonlyArray<{ repoId: number; sha: string | null }>): string {
+ *  in an older shape reads 'stale'), the MODE (plan / verify, from the ticket's stage — so a ticket
+ *  moving from In progress to In review makes a plan stale), the ticket text hash + sorted
+ *  "repoId:defaultBranchHeadSha" (the SYNCED `repos.default_branch_head_sha`; null → ''). Pure and
+ *  clock-free. */
+export function sprintAssessFingerprint(
+  textHash: string,
+  repos: ReadonlyArray<{ repoId: number; sha: string | null }>,
+  mode: SprintAssessMode,
+): string {
   const parts = [...repos].sort((a, b) => a.repoId - b.repoId).map((r) => `${r.repoId}:${r.sha ?? ''}`);
-  return sha256([`sprint-assess-v${SPRINT_ASSESS_FORMAT_VERSION}`, textHash, ...parts].join('\u0000'));
+  return sha256([`sprint-assess-v${SPRINT_ASSESS_FORMAT_VERSION}`, `mode:${mode}`, textHash, ...parts].join('\u0000'));
 }
 
 // ── the demand gate + due marks ─────────────────────────────────────────────────────────────────
@@ -167,24 +180,75 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object
 /** A stored `body_json` as the CURRENT body shape, or null when it is another shape (an older
  *  format, or damaged). Re-checked defensively — a malformed issue entry is dropped, never thrown on. */
 export function sprintAssessmentBodyFromStored(raw: unknown): SprintAssessmentBody | null {
-  if (!isObj(raw) || typeof raw.summary !== 'string' || !Array.isArray(raw.issues) || !Array.isArray(raw.revisedCriteria)) {
+  // Format 5: `mode` + `findings` (+ `plan` / `criterionChecks`). A body of an earlier format (no
+  // `mode`, or `issues`) reads null → `outdated`.
+  if (
+    !isObj(raw) ||
+    (raw.mode !== 'plan' && raw.mode !== 'verify') ||
+    typeof raw.summary !== 'string' ||
+    !Array.isArray(raw.findings) ||
+    !Array.isArray(raw.revisedCriteria)
+  ) {
     return null;
   }
-  const issues: SprintAssessmentIssue[] = [];
-  for (const it of raw.issues) {
-    if (!isObj(it) || !isStoryIssueId(it.id) || typeof it.text !== 'string' || it.text.trim() === '') continue;
-    if (issues.some((x) => x.id === it.id)) continue;
+  const refOf = (v: unknown): SprintCodeRef | null =>
+    isObj(v) && typeof v.repo === 'string' && typeof v.path === 'string' ? { repo: v.repo, path: v.path } : null;
+  const plan: SprintPlanStep[] = [];
+  for (const it of Array.isArray(raw.plan) ? raw.plan : []) {
+    if (!isObj(it) || typeof it.repo !== 'string' || typeof it.change !== 'string' || it.change.trim() === '') continue;
+    plan.push({
+      repo: it.repo,
+      path: typeof it.path === 'string' && it.path !== '' ? it.path : null,
+      newPath: typeof it.newPath === 'string' && it.newPath !== '' ? it.newPath : null,
+      change: it.change,
+    });
+  }
+  const statuses: readonly string[] = ['met', 'partly', 'not_met', 'unclear'];
+  const criterionChecks: SprintCriterionCheck[] = [];
+  for (const it of Array.isArray(raw.criterionChecks) ? raw.criterionChecks : []) {
+    if (!isObj(it) || typeof it.n !== 'number' || !Number.isInteger(it.n) || it.n < 1) continue;
+    if (typeof it.status !== 'string' || !statuses.includes(it.status) || typeof it.evidence !== 'string') continue;
+    criterionChecks.push({
+      n: it.n,
+      status: it.status as SprintCriterionStatus,
+      evidence: it.evidence,
+      ref: refOf(it.ref),
+      tests: refOf(it.tests),
+    });
+  }
+  const findings: SprintAssessmentFinding[] = [];
+  const wheres: readonly string[] = ['title', 'description', 'criteria'];
+  for (const it of raw.findings) {
+    if (!isObj(it) || !isStoryIssueId(it.issue) || !isStoryRuleId(it.rule) || STORY_RULE_BY_ID[it.rule].issue !== it.issue) continue;
+    if (typeof it.text !== 'string' || it.text.trim() === '') continue;
     const ref =
       isObj(it.ref) && typeof it.ref.repo === 'string' && typeof it.ref.path === 'string'
         ? { repo: it.ref.repo, path: it.ref.path }
         : null;
-    issues.push({ id: it.id, text: it.text, ref });
+    const quote = typeof it.quote === 'string' && it.quote.trim() !== '' ? it.quote : null;
+    findings.push({
+      issue: it.issue,
+      rule: it.rule,
+      quote,
+      where: quote != null && typeof it.where === 'string' && wheres.includes(it.where) ? (it.where as SprintAssessmentFinding['where']) : null,
+      text: it.text,
+      suggestion: quote != null && typeof it.suggestion === 'string' && it.suggestion.trim() !== '' ? it.suggestion : null,
+      ref,
+    });
   }
-  issues.sort((a, b) => STORY_ISSUE_IDS.indexOf(a.id) - STORY_ISSUE_IDS.indexOf(b.id));
   return {
+    mode: raw.mode,
     summary: raw.summary,
-    issues,
+    plan: raw.mode === 'plan' ? plan : [],
+    criterionChecks: raw.mode === 'verify' ? criterionChecks : [],
+    coverage: raw.mode === 'verify' && typeof raw.coverage === 'string' && raw.coverage.trim() !== '' ? raw.coverage : null,
+    findings: findings
+      .map((f, i) => ({ f, i }))
+      .sort((a, b) => STORY_ISSUE_IDS.indexOf(a.f.issue) - STORY_ISSUE_IDS.indexOf(b.f.issue) || a.i - b.i)
+      .map((x) => x.f),
     revisedCriteria: raw.revisedCriteria.filter((c): c is string => typeof c === 'string' && c.trim() !== ''),
+    revisedDescription:
+      typeof raw.revisedDescription === 'string' && raw.revisedDescription.trim() !== '' ? raw.revisedDescription : null,
   };
 }
 
@@ -198,6 +262,7 @@ export function sprintAssessmentRecordOf(r: SprintAssessmentRow): SprintAssessme
     ident: r.ident,
     model: r.model || SPRINT_ASSESS_MODEL,
     status: r.status as SprintAssessmentStatus,
+    mode: r.mode === 'plan' || r.mode === 'verify' ? r.mode : null,
     phase: live ? ((r.phase as SprintAssessmentPhase | null) ?? null) : null,
     repos: r.reposJson ?? [],
     body,

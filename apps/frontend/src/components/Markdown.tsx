@@ -5,7 +5,9 @@ import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { rehypeReviewPrRefs } from '../lib/reviewPrRefs.js';
+import { flattenEmptyListItems } from '../lib/ticketMarkdown.js';
 import { PrRefLink } from './ReviewPrRefs.js';
+import { TicketRefLink } from './TicketRefLink.js';
 
 /**
  * HAST property names React refuses — subtracted from every allowlist below.
@@ -131,7 +133,7 @@ function declaredSizeVars(width: unknown, height: unknown): CSSProperties | unde
 // `prRefs` (the Claude Review tab only): PR references in the text ("api#12", "#3") become in-app
 // links through the nearest <ReviewPrRefsProvider>. The plugin runs AFTER the sanitizer and marks
 // refs outside links and code; an unresolved ref renders as its plain text.
-type RehypePlugins = NonNullable<MarkdownOptions['rehypePlugins']>;
+export type RehypePlugins = NonNullable<MarkdownOptions['rehypePlugins']>;
 const BASE_REHYPE: RehypePlugins = [
   rehypeRaw,
   [rehypeSanitize, sanitizeSchema],
@@ -142,15 +144,25 @@ const WITH_PR_REFS: RehypePlugins = [...BASE_REHYPE, rehypeReviewPrRefs];
 export const Markdown = memo(function Markdown({
   children,
   prRefs = false,
+  ticketLinks = false,
+  rehypeExtra,
 }: {
   children: string;
   prRefs?: boolean;
+  /** A link `lib/ticketLinks.ts` marked (`data-ticket-ident`) opens that ticket's tab (This sprint). */
+  ticketLinks?: boolean;
+  /** More rehype plugins, run AFTER the sanitizer (the This sprint card's highlights). Pass a
+   *  memoised array — a new one per render re-parses the body. */
+  rehypeExtra?: RehypePlugins;
 }): JSX.Element {
+  const base = prRefs ? WITH_PR_REFS : BASE_REHYPE;
+  // Tracker text: an empty bullet holding a list prints as that list (lib/ticketMarkdown.ts).
+  const text = ticketLinks ? flattenEmptyListItems(children) : children;
   return (
     <div className="md-body">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={prRefs ? WITH_PR_REFS : BASE_REHYPE}
+        rehypePlugins={rehypeExtra != null && rehypeExtra.length > 0 ? [...base, ...rehypeExtra] : base}
         components={{
           a: ({ node, ...props }) => {
             const num = node?.properties?.dataPrNumber;
@@ -160,6 +172,21 @@ export const Markdown = memo(function Markdown({
                 <PrRefLink repo={typeof repo === 'string' && repo !== '' ? repo : null} number={Number(num)}>
                   {props.children}
                 </PrRefLink>
+              );
+            }
+            const ident = node?.properties?.dataTicketIdent;
+            const tkey = node?.properties?.dataTicketKey;
+            if (ticketLinks && typeof ident === 'string' && ident !== '' && typeof tkey === 'string') {
+              const ttitle = node?.properties?.dataTicketTitle;
+              return (
+                <TicketRefLink
+                  ident={ident}
+                  ticketKey={tkey}
+                  title={typeof ttitle === 'string' ? ttitle : null}
+                  href={typeof props.href === 'string' ? props.href : null}
+                >
+                  {props.children}
+                </TicketRefLink>
               );
             }
             return <a {...props} target="_blank" rel="noreferrer noopener" />;
@@ -177,7 +204,7 @@ export const Markdown = memo(function Markdown({
           ),
         }}
       >
-        {children}
+        {text}
       </ReactMarkdown>
     </div>
   );

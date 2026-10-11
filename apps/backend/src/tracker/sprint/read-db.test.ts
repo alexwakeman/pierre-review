@@ -15,6 +15,8 @@ import type { SprintSource } from '@pierre-review/shared';
 //   • THE STATUS ORDER + LINKS: a returned order lands on `sprint_reads.status_order_json`; an order
 //     read that failed (undefined + a code) keeps the stored order and the list read still succeeds;
 //     a ticket's blocking links + status id are stored, and a read that did not carry links keeps them.
+//   • REFERENCED TICKETS: one lookup per read for keys the sprint names that no stored row knows,
+//     stored in `sprint_ref_tickets`, replaced next read, kept when the lookup fails, per tenant.
 
 const DB_PATH = '/private/tmp/claude-501/pierre-sprint-read-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
@@ -68,7 +70,19 @@ const fakeLister = async (a: any) => {
   if (listed.fail != null) throw listed.fail;
   return { source: SOURCE, tickets: listed.tickets, truncated: false, ...(listed.extra ?? {}) };
 };
-const opts = (now = T0) => ({ now: () => now, listers: { jira: fakeLister }, entitled: async (a: number) => a === 1 });
+// The referenced-ticket lookup (./ref-status.ts): a fake, so no test ever reaches a real tracker.
+let refAsked: string[][] = [];
+let refAnswer: (keys: readonly string[]) => Array<{ key: string; title: string | null; status: string | null; category: 'new' | 'indeterminate' | 'done' | null; url: string | null }> = () => [];
+const fakeRefLister = async (_call: unknown, keys: readonly string[]) => {
+  refAsked.push([...keys]);
+  return { tickets: refAnswer(keys), complete: true };
+};
+const opts = (now = T0) => ({
+  now: () => now,
+  listers: { jira: fakeLister },
+  refListers: { jira: fakeRefLister },
+  entitled: async (a: number) => a === 1,
+});
 
 beforeAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
@@ -383,5 +397,50 @@ describe('status order and blocking links', () => {
     expect(await orderOf()).toBeNull();
     expect((await rows(1, wsA)).find((r) => r.ident === ident('ENG-1')).blockedByJson).toEqual([]);
     listed.extra = undefined;
+  });
+});
+
+describe('referenced tickets: their status, looked up ONCE per read (./ref-status.ts)', () => {
+  const refRows = async (accountId: number) =>
+    db.select().from(schema.sprintRefTickets).where(eq(schema.sprintRefTickets.accountId, accountId)).execute() as Promise<any[]>;
+
+  it('asks only for keys Limn holds nowhere else, stores them, replaces them on the next read; knownTicketsFor reads them', async () => {
+    refAsked = [];
+    refAnswer = (keys) => keys.filter((k) => k !== 'ENG-77').map((k) => ({ key: k, title: `Title ${k}`, status: 'Done', category: 'done', url: `${ROOT}/browse/${k}` }));
+    listed.tickets = [
+      ticket('ENG-1', {
+        description: `Supersedes ${ROOT}/browse/ENG-50. Uses ENG-51 and ENG-77; follows ENG-2. UTF-8. Not OPS-1.`,
+        blockedBy: [{ key: 'ENG-60', title: null, status: null, category: null, relation: 'is blocked by', url: null }],
+      }),
+      ticket('ENG-2'),
+    ];
+    expect((await read.readWorkspaceSprint(ctx, 1, wsA, opts(T0 + 300 * DAY))).ok).toBe(true);
+    // ENG-1 / ENG-2 are sprint tickets; OPS is not a project this workspace reads; UTF-8 is a word.
+    expect(refAsked).toEqual([['ENG-60', 'ENG-50', 'ENG-51', 'ENG-77']]);
+    const stored = await refRows(1);
+    expect(stored.map((r) => [r.issueKey, r.statusName, r.statusCategory, r.workspaceId]).sort()).toEqual([
+      ['ENG-50', 'Done', 'done', wsA],
+      ['ENG-51', 'Done', 'done', wsA],
+      ['ENG-60', 'Done', 'done', wsA],
+    ]);
+    const { knownTicketsFor } = await import('../../db/story-issue-input.js');
+    expect((await knownTicketsFor(1, 'jira', ROOT, ['eng-51'])).get('ENG-51')).toMatchObject({ title: 'Title ENG-51', status: 'Done', category: 'done' });
+    expect((await knownTicketsFor(1, 'jira', ROOT, ['ENG-51'], { refs: false })).has('ENG-51')).toBe(false);
+    // Another tenant reads none of it.
+    expect((await knownTicketsFor(2, 'jira', ROOT, ['ENG-51'])).size).toBe(0);
+    expect(await refRows(2)).toEqual([]);
+
+    // The next read: ENG-51 is no longer named → its row goes; ENG-50 is now a sprint ticket, so the
+    // store already knows it and it is not asked again (its row goes too).
+    refAsked = [];
+    listed.tickets = [ticket('ENG-1', { description: `Uses ${ROOT}/browse/ENG-50 and ENG-60`, blockedBy: [] }), ticket('ENG-50')];
+    expect((await read.readWorkspaceSprint(ctx, 1, wsA, opts(T0 + 301 * DAY))).ok).toBe(true);
+    expect(refAsked).toEqual([['ENG-60']]);
+    expect((await refRows(1)).map((r) => r.issueKey)).toEqual(['ENG-60']);
+
+    // A lookup that fails keeps what it had; the read itself still succeeds.
+    const failing = { ...opts(T0 + 302 * DAY), refListers: { jira: async () => { throw new Error('boom'); } } };
+    expect((await read.readWorkspaceSprint(ctx, 1, wsA, failing as never)).ok).toBe(true);
+    expect((await refRows(1)).map((r) => r.issueKey)).toEqual(['ENG-60']);
   });
 });

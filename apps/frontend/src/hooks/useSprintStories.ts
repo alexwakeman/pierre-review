@@ -116,8 +116,8 @@ export function useSprintSetChecks(workspaceId: number | null) {
   });
 }
 
-/** Replace the workspace's status layout override (order + "code delivered from"). `{order: null,
- *  deliveredFrom: null}` = back to automatic. The layout lands at once; the list refetches because every
+/** Replace the workspace's status layout override (the four stages' statuses, in order).
+ *  `{sections: null}` = back to automatic. The layout lands at once; the list refetches because every
  *  row's stage and the section order move with it. */
 export function useSprintSetStatuses(workspaceId: number | null) {
   const qc = useQueryClient();
@@ -152,7 +152,7 @@ export function useSprintSetRepos(workspaceId: number | null, ident: string) {
       qc.setQueryData<SprintStoriesResponse>(sprintStoriesKey(data.workspaceId), (prev) =>
         patchTicket(prev, data.ident, (t) => ({
           ...t,
-          repos: { accepted: data.accepted, suggested: t.repos.suggested.filter((s) => !accepted.has(s.repoId)) },
+          repos: { accepted: data.accepted, suggested: t.repos.suggested.filter((s) => !accepted.has(s.repoId)), defaulted: false },
         })),
       );
       // Suggestions and the assessment's currency both move with the accepted set.

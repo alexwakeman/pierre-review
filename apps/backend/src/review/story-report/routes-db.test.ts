@@ -9,6 +9,9 @@
 //   5. Cancel writes 'cancelled' and the run's late finish cannot overwrite it.
 //   6. Currency: a new ticket review on a picked story makes the stored report 'stale'.
 //   7. The boot sweep marks an orphaned queued/running row failed 'interrupted'.
+//   8. THE LABEL PASS: a run first labels the window's stories with criteria and no current label (a
+//      FAKE completion), re-reads the picks with the labels, and folds the label cost into the row's;
+//      a later run sends nothing (the labels are current).
 // (Cloud registers none of these routes — pinned in review/agentic.test.ts.)
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
@@ -31,7 +34,10 @@ let setCaps: ((c: any) => void) | undefined;
 let emptyCaps: any;
 let ownWs = 0;
 let foreignWs = 0;
-const recordAiUsage = vi.fn(async () => {});
+const recordAiUsage = vi.fn(async (_r: any) => {});
+const labelPrompts: string[] = [];
+const labelAnswer = (n: number) =>
+  `{"criteria":[${Array.from({ length: n }, (_, i) => `{"n":${i + 1},"testable":true,"reason":null}`).join(',')}],"story":{"references":[],"dependencies":[],"gaps":[]}}`;
 
 const DAY = 86_400_000;
 const NOW = Date.now();
@@ -181,6 +187,12 @@ beforeAll(async () => {
   emptyCaps = contract.EMPTY_CAPABILITIES;
   mgr = await import('./manager.js');
   mgr.setStoryReportRunnerForTests((args) => runnerImpl(args));
+  mgr.setStoryReportLabelSeamsForTests({
+    complete: async (o) => {
+      labelPrompts.push(o.prompt);
+      return { text: labelAnswer(3), usage: { inputTokens: 1000, outputTokens: 200 } };
+    },
+  });
   const { registerStoryReportRoutes } = await import('./routes.js');
   const { registerAccountContext, accountIdOf } = await import('../../api/plugins/auth.js');
   const { default: Fastify } = await import('fastify');
@@ -198,6 +210,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   mgr?.setStoryReportRunnerForTests(null);
+  mgr?.setStoryReportLabelSeamsForTests(null);
   setCaps?.(emptyCaps);
   await app?.close();
   await closeDb?.();
@@ -259,8 +272,21 @@ describe('story report routes', () => {
     expect(one.currency).toBe('current');
     expect(one.report.report.doingWell[0].tickets).toEqual(['ENG-3']); // NOPE-1 removed
     expect(one.report.dropped).toEqual({ unknownTickets: 1, items: 0, overCap: 0 });
-    expect(one.report).toMatchObject({ costUsd: 0.02, numTurns: 21 });
+    // The label pass ran first: ENG-1 and ENG-3 (criteria, no label) — never ENG-2 (no criteria).
+    expect(labelPrompts).toHaveLength(2);
+    expect(labelPrompts.some((p) => p.includes('Story ENG-2'))).toBe(false);
+    const labels = await db.select().from(schema.storyLabels).execute();
+    expect(labels.filter((l: any) => l.accountId === 1)).toHaveLength(2);
+    const { labelCostUsd } = await import('../story-labels/manager.js');
+    expect(one.report.costUsd).toBeCloseTo(0.02 + 2 * labelCostUsd(1000, 200), 10);
+    expect(one.report.numTurns).toBe(21);
     expect(recordAiUsage).toHaveBeenCalledWith(expect.objectContaining({ accountId: 1, feature: 'story_report', seam: 'agent', costUsd: 0.02 }));
+    expect(recordAiUsage).toHaveBeenCalledWith(expect.objectContaining({ accountId: 1, feature: 'story_labels' }));
+    // The stored picks were re-read WITH the labels: ENG-1's spec-gap state is now known.
+    const before = queued.picked.find((c: any) => c.key === 'ENG-1');
+    const after = one.report.picked.find((c: any) => c.key === 'ENG-1');
+    expect(before.issueStates.spec_gaps).toBeNull();
+    expect(after.issueStates.spec_gaps).not.toBeNull();
     const list = (await app.inject({ method: 'GET', url: `/api/story-reports?workspace=${ownWs}&window=60` })).json() as any;
     expect(list.report.id).toBe(queued.id);
     expect(list.latest.id).toBe(queued.id);
@@ -307,6 +333,8 @@ describe('story report routes', () => {
     await settle(next.report.id);
     const failed = (await app.inject({ method: 'GET', url: `/api/story-reports/${next.report.id}` })).json() as any;
     expect(failed.report).toMatchObject({ status: 'failed', error: 'max_turns', report: null });
+    // Every later run found the labels current: no label call since the first run.
+    expect(labelPrompts).toHaveLength(2);
     expect(failed.currency).toBeNull();
   });
 

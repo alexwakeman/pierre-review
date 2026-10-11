@@ -1,5 +1,11 @@
-import type { ReactNode } from 'react';
-import { SPRINT_ASSESSMENT_ERROR_LABEL, type SprintAssessmentRecord, type SprintTicketRow } from '@pierre-review/shared';
+import { useEffect, useState, type ReactNode } from 'react';
+import {
+  SPRINT_ASSESSMENT_ERROR_LABEL,
+  sprintAssessModeOf,
+  type SprintAssessmentRecord,
+  type SprintAssessMode,
+  type SprintTicketRow,
+} from '@pierre-review/shared';
 import {
   useCancelSprintAssess,
   useSprintAssessment,
@@ -9,13 +15,17 @@ import {
 import { AiRunGate } from '../AiSetup.js';
 import { SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
-import { assessButtonLabel, assessmentActive, assessmentProgressLine } from './sprintModel.js';
+import { RegenProgressBar } from './RegenProgressBar.js';
+import { assessButtonLabel, assessmentActive, assessmentProgressLine, assessmentProgressPct, elapsedLabel } from './sprintModel.js';
 
 // "Check against code" for one ticket (core, agentic, LOCAL-ONLY — Sonnet 5 over read-only default
 // branch checkouts of the repos the reader accepted). The button shows only when AI is on here
-// (`aiEnabled`) and goes through the ONE `AiRunGate`. This is the button row only: the result (a
-// summary and one sentence per issue) renders in the card's issue bullets (`sprintBullets`). What the
-// server's checks dropped is mentioned only in the ⓘ.
+// (`aiEnabled`) and goes through the ONE `AiRunGate`. This is the button row and, while a run is
+// queued or running, its PROGRESS BAR (`RegenProgressBar`, phase-based — the agent reports no
+// fraction — with the phase in words, the elapsed time and Cancel). The result renders in the card's
+// "Code check" section (`SprintCodeCheck`) and the findings. The check is STAGE-AWARE (the server picks
+// the mode from the ticket's stage): a plan for a ticket not built yet, a criteria check for one in
+// review or done. What the server's checks dropped is mentioned only in the ⓘ.
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 
@@ -40,11 +50,16 @@ export function SprintAssessment({
   const buttonLabel = assessButtonLabel({ assessment: record != null ? { record, currency: t.assessment?.currency ?? null } : null });
   const noRepos = t.repos.accepted.length === 0;
 
+  const mode: SprintAssessMode = record?.mode ?? sprintAssessModeOf(t.stage);
+  const now = useNow(active || starting);
+  const elapsed = record != null && active ? now - Date.parse(record.createdAt) : 0;
+
   let action: ReactNode = null;
+  let progress: ReactNode = null;
   if (active || starting) {
     action = (
-      <span className={`flex items-center gap-2 text-xs ${MUTED}`}>
-        {record != null && active ? assessmentProgressLine(record.status, record.phase) : 'Starting…'}
+      <span className={`flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200`}>
+        {record != null && active ? assessmentProgressLine(record.status, record.phase, mode) : 'Starting…'}
         {record != null && active && (
           <button
             type="button"
@@ -56,6 +71,16 @@ export function SprintAssessment({
           </button>
         )}
       </span>
+    );
+    progress = (
+      <div className="w-72 max-w-full" data-testid="sprint-assess-progress">
+        <RegenProgressBar
+          active
+          label={mode === 'verify' ? 'Checking the ticket against the code' : 'Planning the ticket against the code'}
+          value={record != null && active ? assessmentProgressPct(record.status, record.phase, elapsed) : 2}
+          sub={record != null && active ? elapsedLabel(elapsed) : '0s'}
+        />
+      </div>
     );
   } else if (aiEnabled && buttonLabel != null) {
     action = noRepos ? (
@@ -72,10 +97,9 @@ export function SprintAssessment({
         </button>
       </AiRunGate>
     );
-  } else if (record != null && record.status === 'succeeded') {
-    // Current: nothing to press, so say what happened (a bare ⓘ on its own line read as broken).
-    action = <span className={`text-xs ${MUTED}`}>Checked against the code</span>;
   }
+  // A current run has nothing to press: its result is the Code check section below (`SprintCodeCheck`,
+  // with its own ⓘ), so this row says nothing.
   if (action == null && (record == null || record.status === 'succeeded')) return null;
 
   return (
@@ -86,6 +110,7 @@ export function SprintAssessment({
           <AssessInfo record={record} />
         </InfoButton>
       </div>
+      {progress}
       {start.isError && <p className="text-xs text-rose-700 dark:text-rose-400">{start.error.message}</p>}
       {record != null && record.status === 'failed' && (
         <p className="text-xs text-rose-700 dark:text-rose-400">
@@ -97,14 +122,38 @@ export function SprintAssessment({
   );
 }
 
-function AssessInfo({ record }: { record: SprintAssessmentRecord | null }): JSX.Element {
+/** Re-renders every second while `on` (the elapsed time beside the bar). */
+function useNow(on: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!on) return;
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [on]);
+  return now;
+}
+
+/** The ⓘ: what the check does in each mode, what it read, what was removed, what it cost. Shared with
+ *  the Code check section. */
+export function AssessInfo({ record }: { record: SprintAssessmentRecord | null }): JSX.Element {
   return (
     <>
       <p>
-        Claude Sonnet 5 reads the default branch of each repo you chose and checks the ticket against the code. It
-        writes one line per issue it can back up, a one-line summary (for example, that the work may already be
-        done) and, when needed, a better list of criteria. It can read files but cannot run or change anything.
+        Claude Sonnet 5 reads the default branch of each repo you chose. It can read files but cannot run or change
+        anything. What it checks depends on where the ticket is:
       </p>
+      <ul className="list-disc space-y-1 pl-5">
+        <li>
+          <strong>Not started or in progress:</strong> the code is not expected yet. It lists the few high-level changes
+          the ticket needs and where they go.
+        </li>
+        <li>
+          <strong>In review or done:</strong> the code should be on the default branch. It checks each criterion (met,
+          partly met, not met or unclear) and looks for a test that covers it.
+        </li>
+      </ul>
+      <p>Either way it also flags problems in the ticket text and may suggest better wording or criteria.</p>
       <p>Every file it cites was checked to exist. Citations that did not check out were removed; the line stays.</p>
       {record != null && record.status === 'succeeded' && !record.outdated && (
         <>
@@ -130,7 +179,7 @@ function AssessInfo({ record }: { record: SprintAssessmentRecord | null }): JSX.
           {record.costUsd != null && <p>Cost: US${record.costUsd.toFixed(2)}.</p>}
         </>
       )}
-      <p>It goes out of date when the ticket text or a repo&rsquo;s default branch changes.</p>
+      <p>It goes out of date when the ticket text, its stage or a repo&rsquo;s default branch changes.</p>
     </>
   );
 }

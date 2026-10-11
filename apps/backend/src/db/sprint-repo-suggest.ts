@@ -1,5 +1,6 @@
 import { and, eq, gte, inArray } from 'drizzle-orm';
 import {
+  SPRINT_REPO_CONFIDENT_MIN_PRS,
   SPRINT_REPO_SUGGESTIONS_MAX,
   type SprintRepoReason,
   type SprintRepoSuggestion,
@@ -23,6 +24,9 @@ import type { SprintTicketDbRow } from './sprint-store.js';
 //
 // Only repos of THIS workspace (`workspace_repos`), never one already accepted, at most
 // SPRINT_REPO_SUGGESTIONS_MAX per ticket. Ranked by best reason, then merged-PR count, then name.
+// CONFIDENT (`confidentSuggestion` — accepted by default while the reader never saved a set): a
+// direct reason (issue_repo, ticket_pr, named_in_ticket), a history reason over ≥
+// SPRINT_REPO_CONFIDENT_MIN_PRS merged PRs, or the workspace's ONLY repo.
 // COST: a fixed handful of account-scoped indexed scans for the WHOLE list — never a query per ticket.
 
 const DAY_MS = 86_400_000;
@@ -39,6 +43,7 @@ const REASON_ORDER: readonly SprintRepoReason[] = [
   'named_in_ticket',
 ];
 const HISTORY: ReadonlySet<SprintRepoReason> = new Set(['ticket_pr', 'same_epic', 'same_component', 'same_project']);
+const DIRECT: ReadonlySet<SprintRepoReason> = new Set(['issue_repo', 'ticket_pr', 'named_in_ticket']);
 
 export interface SuggestTicket {
   ident: string;
@@ -93,6 +98,16 @@ const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 export function namedInText(name: string, text: string): boolean {
   if (name.length < NAME_MIN_CHARS) return false;
   return new RegExp(`(^|[^A-Za-z0-9_.-])${escapeRe(name)}($|[^A-Za-z0-9_-])`, 'i').test(text);
+}
+
+/** Is this suggestion strong enough to be accepted by default? Pure. */
+export function confidentSuggestion(
+  s: Pick<SprintRepoSuggestion, 'reasons' | 'prCount'>,
+  workspaceRepoCount: number,
+): boolean {
+  if (workspaceRepoCount === 1) return true;
+  if (s.reasons.some((r) => DIRECT.has(r))) return true;
+  return s.reasons.some((r) => HISTORY.has(r)) && s.prCount >= SPRINT_REPO_CONFIDENT_MIN_PRS;
 }
 
 interface Evidence {
@@ -254,12 +269,20 @@ export async function suggestSprintRepos(
       if (taken.has(repoId)) continue;
       const repo = repoById.get(repoId)!;
       const reasons = [...e.reasons].sort((a, b) => (rank.get(a) ?? 99) - (rank.get(b) ?? 99));
+      const prCount = [...e.reasons].some((x) => HISTORY.has(x)) ? e.prIds.size : 0;
       rows.push({
         repoId,
         fullName: repo.fullName,
         reasons,
-        prCount: [...e.reasons].some((x) => HISTORY.has(x)) ? e.prIds.size : 0,
+        prCount,
+        confident: confidentSuggestion({ reasons, prCount }, wsRepos.length),
       });
+    }
+    // The workspace's ONLY repo is suggested (and confident) even with no evidence: there is nowhere
+    // else the code can be. `reasons: []` — nothing to say about it.
+    if (rows.length === 0 && wsRepos.length === 1 && !taken.has(wsRepos[0]!.id)) {
+      const only = repoById.get(wsRepos[0]!.id)!;
+      rows.push({ repoId: only.repoId, fullName: only.fullName, reasons: [], prCount: 0, confident: true });
     }
     rows.sort(
       (a, b) =>

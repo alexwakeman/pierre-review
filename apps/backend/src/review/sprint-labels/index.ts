@@ -16,18 +16,22 @@ import {
 // REPORTS → THIS SPRINT — THE FREE LABELS. After each successful sprint list read, the in-sprint
 // tickets with no CURRENT story label are sent through the EXISTING story label run
 // (review/story-labels/: Haiku through `cheapComplete`, `STORY_RUBRIC_VERSION` + text-hash currency,
-// one run per account) — so a sprint ticket's chips and Story health read the SAME label rows.
+// one run per account) — so a sprint ticket's chips and the story report read the SAME label rows.
 //
 //   • Registered ONLY from `registerAgenticRoutes` (local; cloud registers nothing agentic), and
 //     only acts when `config.aiEnabled`, the account has Reports (`periodReports`) and a Claude
 //     credential is present.
 //   • It never queues: a busy slot (a run already labelling) is skipped silently; the next read
 //     (≤ 20 minutes) tries again, and a label that landed meanwhile is current and not sent twice.
-//   • Done tickets are not labelled (the page counts them, it does not list them).
+//   • ALSO ASKED FOR BY A VIEW: `GET /api/sprint-stories` fires the same hook when a listed ticket's
+//     label is pending (`sprintViewedWithPendingLabels`, deduped to once a minute per workspace), so a
+//     rubric bump or new text is labelled when the tab is opened, not only at the next list read.
+//   • Done tickets are labelled too (the page lists them, collapsed), AFTER every open one.
 
-const STATUS_ORDER: Record<string, number> = { new: 0, indeterminate: 1 };
+const STATUS_ORDER: Record<string, number> = { new: 0, indeterminate: 1, done: 3 };
 
-/** In-sprint, not-done tickets of the workspace with criteria and no CURRENT label, ≤ STORY_LABEL_RUN_CAP. */
+/** In-sprint tickets of the workspace with criteria and no CURRENT label — Not started, then In
+ *  progress, then Done — ≤ STORY_LABEL_RUN_CAP. */
 export async function sprintStoriesToLabel(accountId: number, workspaceId: number): Promise<StoryToLabel[]> {
   const st = schema.sprintTickets;
   const rows = await db
@@ -44,7 +48,6 @@ export async function sprintStoriesToLabel(accountId: number, workspaceId: numbe
     .where(and(eq(st.accountId, accountId), eq(st.workspaceId, workspaceId), eq(st.inSprint, true)))
     .execute();
   const candidates = rows
-    .filter((r) => r.statusCategory !== 'done')
     .sort(
       (a, b) =>
         (STATUS_ORDER[a.statusCategory ?? ''] ?? 2) - (STATUS_ORDER[b.statusCategory ?? ''] ?? 2) ||

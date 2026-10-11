@@ -1820,8 +1820,9 @@ export const workspaces = sqliteTable(
     // type. An older stored shape is read tolerantly by db/sprint-checks.ts.
     sprintChecks: text('sprint_checks', { mode: 'json' }).$type<SprintChecks>(),
     // Reports → This sprint: the workspace's STATUS LAYOUT override (migration 0103 / pg 0090).
-    // OVERRIDES ONLY (`SprintStatusSettings` = {order, deliveredFrom}, status NAMES); NULL = the
-    // automatic order (`sprint_reads.status_order_json`) and the automatic code-delivered status.
+    // OVERRIDES ONLY (`SprintStatusSettings` = {sections}: status NAMES per stage; a stored retired
+    // {order, deliveredFrom} is converted on read); NULL = the
+    // automatic layout (`sprint_reads.status_order_json` + category + name + PR evidence).
     // The ONE reader / writer is db/sprint-status-settings.ts.
     sprintStatuses: text('sprint_statuses', { mode: 'json' }).$type<SprintStatusSettings>(),
     // ── AUTO CLAUDE REVIEW (migration 0074 / pg 0061; moved off the plugin's
@@ -2630,7 +2631,7 @@ export const trackerTickets = sqliteTable(
     changedAt: integer('changed_at', { mode: 'timestamp' }),
     // The TICKET's own created / resolved instants as the tracker gave them (Jira `created` /
     // `resolutiondate`, GitHub Issues `createdAt` / `closedAt`, Linear `createdAt` / `completedAt`;
-    // migration 0098, pg 0085). Story health buckets REFINEMENT by the created week. NULL on a row
+    // migration 0098, pg 0085). The label run buckets stories by the created week. NULL on a row
     // read before 0098 (filled on its next read; tracker/dates-backfill.ts nudges merged ones) or
     // when the tracker said none. Neither moves `changed_at` (not story text).
     issueCreatedAt: integer('issue_created_at', { mode: 'timestamp' }),
@@ -2785,7 +2786,7 @@ export const storyReports = sqliteTable(
   }),
 );
 
-// STORY LABELS (Reports → Stories → Story health; migration 0099, pg 0086). ONE row per (story ident,
+// STORY LABELS (Reports → Stories; migration 0099, pg 0086). ONE row per (story ident,
 // rubric version, hash of the text the labeller was SENT): Haiku 5.5's answers to a FIXED rubric
 // (shared `STORY_RUBRIC_VERSION`) — per numbered criterion (`criteria_json`, `StoryCriterionLabel[]`,
 // one entry per `extractCriteria` line, in order) and per story (`story_json`, `StoryLevelLabels`).
@@ -2928,12 +2929,55 @@ export const sprintTickets = sqliteTable(
     // As on tracker_tickets (migration 0103 / pg 0090): the blocking links and the status id.
     blockedByJson: text('blocked_by_json', { mode: 'json' }).$type<TicketLinkBlocker[]>(),
     statusId: text('status_id'),
+    // When the reader last SAVED this ticket's candidate repos (migration 0104 / pg 0091; PUT
+    // /api/sprint-stories/repos). NULL = never saved: the CONFIDENT suggestions are the accepted set
+    // by default. Set even when the saved set is EMPTY — that is what tells "none" from "never chosen".
+    // Insert-only from the reader's write; the sprint read's upsert never touches it.
+    reposSavedAt: integer('repos_saved_at', { mode: 'timestamp' }),
   },
   (t) => ({
     accountWsIdentUx: uniqueIndex('sprint_tickets_account_ws_ident').on(t.accountId, t.workspaceId, t.ident),
     accountIdentIdx: index('sprint_tickets_account_ident').on(t.accountId, t.ident),
     workspaceAccountFk: foreignKey({
       name: 'sprint_tickets_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_ref_tickets — the STATUS of tickets a workspace's sprint tickets NAME (their text's keys and
+// links, their tracker links without a status) that Limn holds nowhere else (not a sprint ticket, not a
+// read PR ticket): key, title, status. Written ONLY by the sprint read (tracker/sprint/ref-status.ts,
+// one batched search per read, ≤ SPRINT_REF_LOOKUP_MAX keys) and REPLACED by each successful lookup
+// (keys no longer named, or not found, are deleted) — never by a view. Read by `knownTicketsFor` as
+// its last source, so "BMD-343 (Done)" shows where "status unknown" did (migration 0106 / pg 0093).
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId, ident].
+export const sprintRefTickets = sqliteTable(
+  'sprint_ref_tickets',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    // shared `trackerTicketIdent(provider, api_root, issue_key)`.
+    ident: text('ident').notNull(),
+    provider: text('provider').notNull(),
+    apiRoot: text('api_root').notNull(),
+    issueKey: text('issue_key').notNull(),
+    title: text('title'),
+    statusName: text('status_name'),
+    // 'new' | 'indeterminate' | 'done', null when the tracker sent another.
+    statusCategory: text('status_category'),
+    url: text('url'),
+    readAt: integer('read_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    accountWsIdentUx: uniqueIndex('sprint_ref_tickets_account_ws_ident').on(t.accountId, t.workspaceId, t.ident),
+    accountKeyIdx: index('sprint_ref_tickets_account_key').on(t.accountId, t.issueKey),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_ref_tickets_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),
@@ -2993,6 +3037,8 @@ export const sprintAssessments = sqliteTable(
     ident: text('ident').notNull(),
     model: text('model').notNull(),
     status: text('status').notNull(),
+    // SprintAssessMode ('plan' | 'verify'), from the ticket's stage at start; NULL before format 5.
+    mode: text('mode'),
     // SprintAssessmentPhase while queued/running.
     phase: text('phase'),
     fingerprint: text('fingerprint').notNull(),

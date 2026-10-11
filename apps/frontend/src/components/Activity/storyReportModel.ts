@@ -136,7 +136,7 @@ export function storyReportFigures(p: StoryReportPopulation): StoryReportFigure[
     label: 'Median working time',
     value: p.medianWorkingHours == null ? 'not measured' : formatWorkingTime(p.medianWorkingHours, p.workingDayHours),
   });
-  // The story issues, counted by code over the whole window with Story health's measures (absent on
+  // The story issues, counted by code over the whole window by the shared rate rule (absent on
   // reports written before them; an issue nothing could be told about is left out, never "0 of 0"; a
   // retired id on an old stored report is dropped). Never mixed with no-criteria stories.
   for (const r of p.issueRates ?? []) {

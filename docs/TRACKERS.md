@@ -175,6 +175,25 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-stories` only 
   `provider` + `api_root` it read; a workspace that moved tracker or site since is reset on the next
   view (no source, no read time, due now). It also stores the automatic status order (§ The status
   order) and each ticket's blocking links + status id (§ Blocking links).
+- **Referenced tickets** (`tracker/sprint/ref-status.ts`, `sprint_ref_tickets`, sqlite `0106` / pg
+  `0093`): a sprint ticket's text names other tickets — work it supersedes, shipped work it extends, an
+  existing page it sends the user to, siblings out of scope, one to build alongside, one it really
+  waits on — and Limn knew the STATUS only of sprint tickets and PR tickets, so the rest read "status
+  unknown". After storing the list, the read collects every key the in-sprint rows NAME (shared
+  `ticketMentionsInText` over description + criteria: a link on this site always, a bare key only in a
+  project the workspace reads or the ticket's own; plus tracker links that came without a status;
+  `sprintReferencedKeys`) — a label's references name keys from the same text (its validator keeps no
+  other), so the text is the superset — minus the sprint's own keys and any key a stored row already
+  gives a status (`knownTicketsFor(…, {refs: false})`), ≤ `SPRINT_REF_LOOKUP_MAX` (200). It asks for
+  them in ONE batched search per read: **Jira only for now** — JQL `key in ("A-1",…)`,
+  `fields=summary,status`, `SPRINT_REF_CHUNK` (50) keys per call through `jiraGetJson` (404 → the v2
+  search). ⚠ Jira answers 400 for the WHOLE query when one key does not exist, so a 400 chunk is
+  BISECTED down to the lone bad key, which is dropped — bounded by `SPRINT_REF_CALLS_MAX` (16) calls per
+  read. Linear and GitHub Issues look nothing up (not built). The rows are REPLACED per workspace by a
+  lookup that finished (keys no longer named or not found go); one that failed or ran out of calls
+  keeps what it could not re-read, and never fails the read. `knownTicketsFor` reads them as its LAST
+  source (after `sprint_tickets` and `tracker_tickets`), so the card's related pills, the Blocked issue
+  and "Check against code" all see "BMD-343 (Done)". ⚠ Still never on a view.
 
 ## Blocking links — read in the same issue read (`blocked_by_json`)
 
@@ -200,11 +219,16 @@ pg `0090`. They feed the "Blocked" story issue (docs/CLAUDE-REVIEW.md § Story i
 - `status_id` (both tables) stores the tracker's own status id (Jira `status.id`, Linear state id) —
   a board's column order is written in ids. GitHub has none.
 
-## The status order — what This sprint's sections are ordered by (`sprint_reads.status_order_json`)
+## The status order — This sprint's four stages and their sections (`sprint_reads.status_order_json`)
 
-Statuses are per project and per tracker, so nothing hard-codes a name. The sprint list read stores the
-AUTOMATIC order (shared `SprintStatusAutoOrder`) with the list; a person may override it per workspace
-(`workspaces.sprint_statuses`, `db/sprint-status-settings.ts`, `PUT /api/sprint-stories/statuses`).
+Statuses are per project and per tracker, so nothing hard-codes a name. Every status sits in ONE of four
+stages — Not started, In progress, In review, Done — in an order. The sprint list read stores the
+AUTOMATIC order (shared `SprintStatusAutoOrder`) with the list; a person may place any status in any
+stage, in any order, per workspace (`workspaces.sprint_statuses` = `{sections}`,
+`db/sprint-status-settings.ts`, `PUT /api/sprint-stories/statuses`). ⚠ Placement beats category, and a
+status the override does not name keeps its automatic stage and position. A stored value of the
+retired `{order, deliveredFrom}` shape is converted on read (no migration). "Coding begins" / "Coding
+ends" = the first status of In progress / In review, derived.
 
 - **Jira** (`tracker/sprint/jira.ts`): the board of the active sprints holding the most tickets
   (`boardId` on a Cloud sprint object, `rapidViewId=` in an old Server string) →
@@ -219,15 +243,16 @@ AUTOMATIC order (shared `SprintStatusAutoOrder`) with the list; a person may ove
 - ⚠ **AN ORDER FAILURE NEVER FAILS THE LIST.** A failed board read returns `statusOrder: undefined`
   (the stored order stands) and a code that is logged; `null` (no board) clears it, and the page falls
   back to category then name.
-- **"Code delivered from"** is inferred, not read: the first in-progress status where at least 60% of
-  the tickets with a PR have every PR merged and none open, with at least 2 such tickets
-  (`SPRINT_DELIVERED_MIN_*`). Evidence = `tracker_tickets` (state `ok`, this workspace and site) ⨝
+- **The automatic stage**: category `new` → Not started, `done` → Done. An in-progress status is In
+  review when its NAME reads as review / QA / test / release (`SPRINT_REVIEW_STATUS_RE`: "Code Review",
+  "Ready for QA", "In Test", "Awaiting Deployment", "UAT"…) or it sits at or after the PR-evidence
+  boundary — the first in-progress status where at least 60% of the tickets with a PR have every PR
+  merged and none open, with at least 2 such tickets (`SPRINT_DELIVERED_MIN_*`); else In progress. Evidence = `tracker_tickets` (state `ok`, this workspace and site) ⨝
   `pull_requests`, closed-unmerged PRs ignored; a ticket's status is the sprint row's where it is in the
   sprint, else the freshest of its stored rows and any out-of-sprint sprint row — and ⚠ only when read
   AT OR AFTER its last merge (the worker stops re-reading a merged ticket, so an older "In Code Review"
-  would drag the split earlier). The inference runs over the order the page uses, override included
-  (`db/sprint-status-layout.ts` `loadSprintStatusEvidence`). Settings moves a status only among its own
-  category.
+  would drag the split earlier). The boundary is found over the AUTOMATIC order
+  (`db/sprint-status-layout.ts` `inferReviewFrom`, `loadSprintStatusEvidence`).
 
 ## The write-back — per ticket, confirmed, never retried (`tracker/write/`)
 
@@ -235,9 +260,9 @@ AUTOMATIC order (shared `SprintStatusAutoOrder`) with the list; a person may ove
 Confirm in a dialog that shows exactly the text; no agent tool, setting or bulk route can write.
 
 - **Order**: the ticket must be on this workspace's sprint list under its CURRENT tracker → a replace
-  target must equal the server's (`sprintReplaceTarget` over the STORED row — the workspace's criteria
-  field choice; else `409 target_changed`) → for a REPLACE, the base check: `baseHash` must be the
-  sha256 of the FULL stored text it overwrites (the row's `replaceBase`), a text longer than the page
+  target must be the description or the STORED row's own criteria field (`sprintWriteTargetAllowed`
+  over `sprintReplaceTarget`; else `409 target_changed`) → for a REPLACE, the base check: `baseHash` must
+  be the sha256 of the FULL stored text of THAT field (the row's `replaceBases`), a text longer than the page
   carries refuses `409 too_long`, and the ticket is re-read LIVE (`rereadSprintTicketNow`) — a text
   edited in the tracker since refuses `409 ticket_changed` with the fresh text stored, a failed read
   `502 read_failed`; nothing is written either way → an in-memory per-ticket lock → the `tracker_writes` row is
@@ -258,8 +283,8 @@ Confirm in a dialog that shows exactly the text; no agent tool, setting or bulk 
 
 Every reader returns the ticket's OWN created / resolved instants on `FetchedTicket`
 (`issueCreatedAt` / `issueResolvedAt`), and the worker stores them on `tracker_tickets`
-(`issue_created_at` / `issue_resolved_at`, sqlite `0098` / pg `0085`). Story health (Reports → Stories)
-buckets refinement by the CREATED week.
+(`issue_created_at` / `issue_resolved_at`, sqlite `0098` / pg `0085`). The story label run buckets
+stories by the CREATED week.
 
 | Provider | Created | Resolved | Cost |
 |---|---|---|---|

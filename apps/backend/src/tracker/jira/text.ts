@@ -119,6 +119,11 @@ function blocks(nodes: AdfNode[]): string[] {
           // nested list — its lines are indented under this item's text by the marker's width).
           const body =
             item.type === 'taskItem' ? inline(children(item)) : blocks(children(item)).join('\n');
+          // An item with NO text of its own whose first block is a list (Jira's editor makes one when
+          // a list is indented under an empty bullet) would print "- - a" — a bullet holding a bullet.
+          // Its list stands in for it instead, at this level.
+          const first = item.type === 'taskItem' ? undefined : children(item)[0];
+          if (first != null && (first.type === 'bulletList' || first.type === 'orderedList') && body.trim() !== '') return body;
           return marker + indentLines(body, ' '.repeat(marker.length));
         });
         // ONE entry for the whole list, so its items stay on consecutive lines.

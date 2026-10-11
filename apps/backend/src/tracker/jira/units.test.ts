@@ -155,6 +155,32 @@ describe('ADF flattening', () => {
   });
 });
 
+describe('ADF — a list indented under an EMPTY bullet (BMD-1056: "- - https://…")', () => {
+  const li = (text: string) => ({ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] });
+  it('prints the inner list in place of the empty item, never a bullet holding a bullet', () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'Enhances:' }] },
+        {
+          type: 'bulletList',
+          content: [{ type: 'listItem', content: [{ type: 'bulletList', content: [li('A-1'), li('A-2'), li('A-3')] }] }],
+        },
+      ],
+    };
+    const text = adfToText(doc);
+    expect(text).toBe('Enhances:\n\n- A-1\n- A-2\n- A-3');
+    expect(text).not.toContain('- - ');
+  });
+  it('keeps an item WITH text and a nested list nested', () => {
+    const doc = {
+      type: 'doc',
+      content: [{ type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'outer' }] }, { type: 'bulletList', content: [li('inner')] }] }, li('next')] }],
+    };
+    expect(adfToText(doc)).toBe('- outer\n  - inner\n- next');
+  });
+});
+
 describe('the field list (the Settings connection check)', () => {
   const raw = [
     { id: 'summary', name: 'Summary', custom: false, schema: { type: 'string' } },

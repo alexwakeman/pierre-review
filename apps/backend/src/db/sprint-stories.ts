@@ -8,9 +8,15 @@ import {
   sprintReplaceTarget,
   sprintCurrentAssessmentBodyOf,
   sprintIssuesWithClaude,
+  sprintPhaseOfStage,
+  usableStoryLabel,
+  SPRINT_STAGES,
   type JiraStatusCategory,
+  sprintAssessModeOf,
   type SprintAssessmentCurrency,
-  type SprintPhase,
+  type SprintAssessMode,
+  type SprintReplaceBase,
+  type SprintReplaceTarget,
   type SprintRepoRef,
   type SprintSource,
   type SprintStage,
@@ -23,7 +29,8 @@ import {
 import { db, schema } from './client.js';
 import { getSprintChecks } from './sprint-checks.js';
 import { sprintCriteriaOf, sprintIssuesFor, sprintLabelState, sprintSpecGapsFor, type SprintChipInput } from './sprint-chips.js';
-import { suggestSprintRepos, suggestTicketOf } from './sprint-repo-suggest.js';
+import { sprintFindingsFor } from './sprint-findings.js';
+import { sprintRelatedCandidateKeys, sprintRelatedFor } from './sprint-related.js';
 import {
   kickSprintRead,
   latestSprintAssessments,
@@ -39,10 +46,10 @@ import {
   type SprintReadRow,
   type SprintTicketDbRow,
 } from './sprint-store.js';
-import { acceptedSprintRepoDetails, type AcceptedRepoDetail } from './sprint-ticket-repos.js';
+import { effectiveSprintRepos, type AcceptedRepoDetail } from './sprint-ticket-repos.js';
 import { storyLabelInput } from './story-label-input.js';
 import { knownTicketsFor, linksOfRow, namedTicketKeys } from './story-issue-input.js';
-import { getSprintStatusLayout, sprintStageOf, sprintStatusSectionIndex } from './sprint-status-layout.js';
+import { getSprintStatusLayout, sprintLayoutFor, sprintStageOf, sprintStatusSectionIndex } from './sprint-status-layout.js';
 
 // REPORTS → THIS SPRINT — THE LIST (`GET /api/sprint-stories`; docs/API.md § This sprint). A
 // DB-only fold over what the tracker worker stored (`sprint_tickets`, `sprint_reads`) plus the
@@ -52,11 +59,13 @@ import { getSprintStatusLayout, sprintStageOf, sprintStatusSectionIndex } from '
 //
 //   • POPULATION: this workspace's `sprint_tickets` with `in_sprint`, on the workspace tracker's
 //     CURRENT site (a row from a provider the workspace has since left is not listed). Done tickets
-//     are COUNTED (`doneCount`), never listed.
+//     are LISTED (last) and counted (`doneCount`).
 //   • STAGES: the workspace's STATUS LAYOUT (db/sprint-status-layout.ts `getSprintStatusLayout`: the
-//     tracker's board / workflow order + the per-workspace override + the "code delivered from"
-//     inference) puts each row in a stage (`sprintStageOf`): Not started, Writing code, Code delivered.
-//     Done (status category) is counted, never listed.
+//     tracker's board / workflow order + category + review-name vocabulary + PR evidence + the
+//     per-workspace placement) puts each row in one of four stages (`sprintStageOf`): Not started,
+//     In progress, In review, Done.
+//   • REPOS: the EFFECTIVE set (db/sprint-ticket-repos.ts `effectiveSprintRepos`): the reader's saved
+//     set, else the confident suggestions (`defaulted`).
 //   • ORDER: stage, then the status's section (layout order), then most issues first, then key. NEVER
 //     by assignee, and no team or person score.
 //   • ISSUES: the two CHIP issues (`sprintIssuesFor`) and the spec gaps (`sprintSpecGapsFor`, their own
@@ -80,30 +89,38 @@ const capText = (s: string | null | undefined, max: number): string => {
   return t.slice(0, cut);
 };
 
-/** Status category → phase; 'done' → null (counted, not listed); unknown → not started. */
-export function sprintPhaseOf(category: string | null): SprintPhase | null {
-  if (category === 'done') return null;
-  if (category === 'indeterminate') return 'in_progress';
-  return 'not_started';
-}
-
 /** Pure currency: a SUCCEEDED run is current while today's text hash and today's accepted repos'
  *  synced default-branch shas give its stored fingerprint. A ticket gone from the store is stale. */
 export function sprintAssessmentCurrencyFrom(
   row: Pick<SprintAssessmentRow, 'status' | 'fingerprint'>,
   ticket: Pick<SprintTicketDbRow, 'title' | 'description' | 'acceptanceCriteria'> | null,
   accepted: ReadonlyArray<Pick<AcceptedRepoDetail, 'repoId' | 'syncedSha'>>,
+  /** The mode TODAY's stage asks for (`sprintAssessModeOf`) — a stage change makes the run stale. */
+  mode: SprintAssessMode,
 ): SprintAssessmentCurrency {
   if (row.status !== 'succeeded') return null;
   if (ticket == null) return 'stale';
   const now = sprintAssessFingerprint(
     sprintTicketTextHash(ticket),
     accepted.map((a) => ({ repoId: a.repoId, sha: a.syncedSha })),
+    mode,
   );
   return now === row.fingerprint ? 'current' : 'stale';
 }
 
-const STAGE_RANK: Record<SprintStage, number> = { not_started: 0, writing: 1, delivered: 2, done: 3 };
+/** One stored ticket's stage under the workspace's status layout — the list's own rule
+ *  (`sprintStageOf`), for a caller holding one row ("Check against code" picks its mode from it). */
+export async function sprintTicketStage(
+  accountId: number,
+  workspaceId: number,
+  row: Pick<SprintTicketDbRow, 'statusName' | 'statusCategory'>,
+): Promise<SprintStage> {
+  const layout = await sprintLayoutFor(accountId, workspaceId);
+  const status = row.statusName != null ? { name: row.statusName, category: row.statusCategory ?? null } : null;
+  return sprintStageOf(layout ?? { order: [] }, status);
+}
+
+const STAGE_RANK = Object.fromEntries(SPRINT_STAGES.map((k, i) => [k, i])) as Record<SprintStage, number>;
 
 /** The sort the page lists in: stage, then status section (layout order; null layout → none), then
  *  most issues first, then key. Pure. */
@@ -273,13 +290,7 @@ export async function getSprintStories(
     )
     .execute()) as SprintTicketDbRow[];
 
-  let doneCount = 0;
-  const listed: Array<{ row: SprintTicketDbRow; phase: SprintPhase }> = [];
-  for (const row of stored) {
-    const phase = sprintPhaseOf(row.statusCategory ?? null);
-    if (phase == null) doneCount += 1;
-    else listed.push({ row, phase });
-  }
+  const listed = stored.map((row) => ({ row }));
   const idents = listed.map((l) => l.row.ident);
 
   const statusLayout = await getSprintStatusLayout(accountId, workspaceId, {
@@ -296,16 +307,9 @@ export async function getSprintStories(
     ticketPrRefs(accountId, listed.map((l) => l.row)),
     latestSprintAssessments(accountId, workspaceId, idents),
     latestTrackerWrites(accountId, workspaceId, idents),
-    acceptedSprintRepoDetails(accountId, workspaceId, idents),
+    effectiveSprintRepos(accountId, workspaceId, idents, { rows: stored, nowMs: opts.now }),
     getSprintChecks(accountId, workspaceId),
   ]);
-  const suggestions = await suggestSprintRepos(
-    accountId,
-    workspaceId,
-    listed.map((l) => suggestTicketOf(l.row)),
-    new Map([...accepted].map(([k, v]) => [k, v.map((a) => a.repoId)])),
-    opts.now,
-  );
 
   // The CURRENT label per row first: the named ticket keys they carry are resolved in ONE read.
   const currentLabels = new Map(
@@ -316,8 +320,27 @@ export async function getSprintStories(
     }),
   );
   const knownTickets = await knownTicketsFor(accountId, provider, site.apiRoot, namedTicketKeys(currentLabels.values()));
+  // The tickets each card points at (`related`): its links + what its text names, looked up ONCE.
+  const relatedSite = { provider, root: site.apiRoot };
+  const relatedInputs = new Map(
+    listed.map(({ row }) => [
+      row.ident,
+      {
+        key: row.issueKey,
+        description: row.description ?? '',
+        acceptanceCriteria: row.acceptanceCriteria ?? '',
+        links: linksOfRow(row),
+      },
+    ]),
+  );
+  const relatedKnown = await knownTicketsFor(
+    accountId,
+    provider,
+    site.apiRoot,
+    [...[...relatedInputs.values()].flatMap((i) => sprintRelatedCandidateKeys(i, relatedSite)), ...namedTicketKeys(currentLabels.values())],
+  );
 
-  const rows: SprintTicketRow[] = listed.map(({ row, phase }) => {
+  const rows: SprintTicketRow[] = listed.map(({ row }) => {
     const text = { title: row.title, description: row.description ?? '', acceptanceCriteria: row.acceptanceCriteria ?? '' };
     const label = currentLabels.get(row.ident) ?? null;
     const chipInput: SprintChipInput = {
@@ -330,9 +353,11 @@ export async function getSprintStories(
       knownTickets,
     };
     const status = row.statusName != null ? { name: row.statusName, category: (row.statusCategory as JiraStatusCategory | null) ?? null } : null;
-    const acc = accepted.get(row.ident) ?? [];
+    const eff = accepted.get(row.ident);
+    const acc = eff?.accepted ?? [];
+    const stage = sprintStageOf(statusLayout, status);
     const a = assessments.get(row.ident);
-    const assessment = a != null ? { record: sprintAssessmentRecordOf(a), currency: sprintAssessmentCurrencyFrom(a, row, acc) } : null;
+    const assessment = a != null ? { record: sprintAssessmentRecordOf(a), currency: sprintAssessmentCurrencyFrom(a, row, acc, sprintAssessModeOf(stage)) } : null;
     const issues = sprintIssuesWithClaude(
       sprintIssuesFor(chipInput, checks),
       sprintCurrentAssessmentBodyOf({ assessment }),
@@ -343,15 +368,18 @@ export async function getSprintStories(
     const w = writes.get(row.ident);
     const acField = row.acFieldId != null && row.acFieldName != null ? { id: row.acFieldId, name: row.acFieldName } : null;
     const replaceTarget = sprintReplaceTarget(provider, acField);
-    const baseText = sprintReplaceBaseText(row, replaceTarget);
+    const baseOf = (target: SprintReplaceTarget): SprintReplaceBase => {
+      const text = sprintReplaceBaseText(row, target);
+      return { hash: sha256(text), truncated: sprintReplaceBaseTruncated(text, target) };
+    };
     return {
       ident: row.ident,
       key: row.issueKey,
       title: capText(row.title, SPRINT_TEXT_MAX.title),
       url: row.url ?? null,
       provider,
-      phase,
-      stage: sprintStageOf(statusLayout, status),
+      phase: sprintPhaseOfStage(stage),
+      stage,
       status,
       issueType: row.issueTypeName ?? null,
       assignee: row.assigneeName != null ? { name: row.assigneeName, avatarUrl: row.assigneeAvatarUrl ?? null } : null,
@@ -364,14 +392,28 @@ export async function getSprintStories(
       issues,
       specGaps: sprintSpecGapsFor(chipInput, checks),
       flagCount: issues.length,
+      findings: sprintFindingsFor({ ...chipInput, title: row.title }, checks, sprintCurrentAssessmentBodyOf({ assessment })),
+      related: sprintRelatedFor(
+        {
+          ...relatedInputs.get(row.ident)!,
+          blockers: issues.find((i) => i.id === 'blocked')?.blockers ?? [],
+          references: usableStoryLabel({ criteria: sprintCriteriaOf(text, provider).items, label })?.story.references ?? null,
+        },
+        relatedSite,
+        relatedKnown,
+      ),
       pullRequests: prRefs.get(row.ident) ?? [],
       repos: {
         accepted: acc.map((d) => ({ repoId: d.repoId, fullName: d.fullName })),
-        suggested: suggestions.get(row.ident) ?? [],
+        suggested: eff?.suggested ?? [],
+        defaulted: eff?.defaulted ?? false,
       },
       assessment,
       replaceTarget,
-      replaceBase: { hash: sha256(baseText), truncated: sprintReplaceBaseTruncated(baseText, replaceTarget) },
+      replaceBases: {
+        description: baseOf({ kind: 'description' }),
+        acceptanceCriteria: replaceTarget.kind === 'ac_field' ? baseOf(replaceTarget) : null,
+      },
       lastWrite: w != null ? trackerWriteRecordOf(w, trackerWriteMessage) : null,
     };
   });
@@ -383,7 +425,7 @@ export async function getSprintStories(
     source,
     read: sprintReadStateOf(readRow, (code) => sprintReadErrorMessage(provider, code)),
     tickets: sortSprintTickets(rows, statusLayout),
-    doneCount,
+    doneCount: rows.filter((r) => r.stage === 'done').length,
     aiEnabled: opts.aiEnabled,
     repos,
     checks,

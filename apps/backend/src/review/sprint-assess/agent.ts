@@ -1,5 +1,5 @@
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { ClaudeReviewModel } from '@pierre-review/shared';
+import type { ClaudeReviewModel, SprintAssessMode } from '@pierre-review/shared';
 import { AiRuntimeMissingError, claudeExecutableOptions, loadAgentSdk } from '../../ai/runtime.js';
 import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
 import { config } from '../../config.js';
@@ -37,6 +37,8 @@ export interface SprintAssessRunArgs {
   cwd: string;
   worktrees: string[];
   model: string;
+  /** Plan or verify — picks the tool's shape (the prompt is built by the manager). */
+  mode: SprintAssessMode;
   abortController: AbortController;
   applyAuthEnv: boolean;
   /** Called on the FIRST submit_assessment attempt (the manager's 'writing' phase). */
@@ -93,7 +95,7 @@ export const runSprintAssessAgent: SprintAssessRunner = async (args) => {
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
     const { createSdkMcpServer, query, tool } = await loadAgentSdk();
-    const shape = await submitAssessmentShape();
+    const shape = await submitAssessmentShape(args.mode);
     let attempted = false;
     const server = createSdkMcpServer({
       name: 'sprint',

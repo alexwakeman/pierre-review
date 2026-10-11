@@ -1,14 +1,10 @@
 import { and, eq, gte, inArray, isNotNull, or } from 'drizzle-orm';
 import {
-  STORY_HEALTH_HELD,
   STORIES_MAX,
-  STORY_HEALTH_SPAN_LABEL,
-  STORY_HEALTH_WEEKS,
+  STORY_LABEL_SPAN_WEEKS,
   STORY_RUBRIC_VERSION,
   trackerTicketIdent,
   type StoryCriterionLabel,
-  type StoryHealthResponse,
-  type StoryLabelRunStatus,
   type StoryLevelLabels,
   type TrackerProvider,
 } from '@pierre-review/shared';
@@ -20,21 +16,18 @@ import { getResolvedFlowSettings } from './flow-settings.js';
 import { localWeeksEndingAt } from './working-hours.js';
 import { storyLabelInput, type StoryLabelInput } from './story-label-input.js';
 import { knownTicketsFor, linksOfRow, namedTicketKeys } from './story-issue-input.js';
-import { foldStoryHealth, refinementWeekOf, type StoryHealthStoryInput, type StoryHealthWeekBound } from './story-health-fold.js';
+import { refinementWeekOf, type StoryHealthStoryInput, type StoryHealthWeekBound } from './story-health-fold.js';
 
-// REPORTS → STORIES → STORY HEALTH — the READS (docs/API.md § GET /api/story-health). The pure fold
-// is db/story-health-fold.ts; this gathers its inputs:
+// REPORTS → STORIES — THE STORY LABEL RUN'S POPULATION (and the shared label read). The Story health
+// charts that first used it are RETIRED (2026-10-11); what is left is what the label run
+// (review/story-labels/routes.ts) and the label readers (This sprint, the story report) need:
 //
-//   • THE SPAN is STORY_HEALTH_WEEKS Monday-start weeks in the workspace's WORKING time zone
-//     (`getResolvedFlowSettings` + `localWeeksEndingAt`, Chronology's "Over time" convention), the
-//     current partial week last. FIXED and labelled — it follows no window picker.
-//   • TWO POPULATIONS, one list. DELIVERY is the stories fold (db/stories.ts `foldStories`) over
-//     [first Monday, now): every ticket with a pull request in the workspace's repos MERGED in the span
-//     — the same stories, read the same way, as the rest of Reports → Stories. REFINEMENT is every
-//     ticket with an OPEN or MERGED pull request in the workspace's repos whose created week (else
-//     first PR opened) falls in the span, merged or not — so a recent week is not only the stories
-//     that already shipped (which would keep the small, quick ones and fake a shift at the right
-//     edge). A refinement-only story rides the list with `lastMergedMs: null`.
+//   • THE SPAN is STORY_LABEL_SPAN_WEEKS Monday-start weeks in the workspace's WORKING time zone
+//     (`getResolvedFlowSettings` + `localWeeksEndingAt`), the current partial week last.
+//   • THE STORIES: every ticket with a pull request in the workspace's repos MERGED in the span (the
+//     stories fold, db/stories.ts `foldStories`), plus every ticket with an OPEN or MERGED pull request
+//     whose created week (else first PR opened) falls in the span — so open work is labelled too. A
+//     not-yet-merged story rides the list with `lastMergedMs: null`.
 //   • CREATED DATE: `tracker_tickets` is one row per (account, PR, key), so several rows can carry a
 //     ticket's `issue_created_at`; the freshest-read non-null one wins.
 //   • LABELS: a `story_labels` row counts only when its rubric version is STORY_RUBRIC_VERSION and
@@ -42,7 +35,7 @@ import { foldStoryHealth, refinementWeekOf, type StoryHealthStoryInput, type Sto
 //     (db/story-label-input.ts). Anything else is not current and the story counts as unlabelled.
 //
 // ⚠ Every read predicates on accountId; `scope.repoIds` is the resolved workspace's membership. No
-// GitHub, no tracker, no model — the `read` tier.
+// GitHub, no tracker, no model.
 
 const CHUNK = 400;
 
@@ -71,7 +64,7 @@ async function chunked<T, R>(items: readonly T[], read: (chunk: T[]) => Promise<
 /** The span's weeks and every story in it, with current labels attached. */
 export async function loadStoryHealthInputs(accountId: number, scope: BotScope, nowMs: number): Promise<StoryHealthInputs> {
   const settings = await getResolvedFlowSettings(accountId, scope.workspaceId);
-  const weeks: StoryHealthWeekBound[] = localWeeksEndingAt(nowMs, settings.timeZone, STORY_HEALTH_WEEKS).map((w) => ({
+  const weeks: StoryHealthWeekBound[] = localWeeksEndingAt(nowMs, settings.timeZone, STORY_LABEL_SPAN_WEEKS).map((w) => ({
     key: w.key,
     startMs: w.startMs,
     endMs: w.endMs,
@@ -315,36 +308,4 @@ export async function currentLabelRowsFor(
     out.set(r.ident, m);
   }
   return out;
-}
-
-/** GET /api/story-health's body. `labels` = `config.aiEnabled`; `labelRun` = the account's run. */
-export async function getStoryHealth(
-  accountId: number,
-  scope: BotScope,
-  nowMs: number,
-  opts: { labels: boolean; labelRun: StoryLabelRunStatus | null },
-): Promise<StoryHealthResponse> {
-  const inputs = await loadStoryHealthInputs(accountId, scope, nowMs);
-  const fold = foldStoryHealth(inputs.stories, inputs.weeks, { nowMs, labels: opts.labels, held: STORY_HEALTH_HELD });
-  return {
-    workspaceId: scope.workspaceId,
-    trackerOn: inputs.trackerOn,
-    span: {
-      label: STORY_HEALTH_SPAN_LABEL,
-      from: new Date(inputs.weeks[0]?.startMs ?? nowMs).toISOString(),
-      to: new Date(nowMs).toISOString(),
-      weeks: inputs.weeks.length,
-    },
-    timeZone: inputs.timeZone,
-    weeks: fold.weeks,
-    labels: opts.labels,
-    series: fold.series,
-    omitted: inputs.trackerOn ? fold.omitted : [],
-    shifts: fold.shifts,
-    createdFallbackTotal: fold.createdFallbackTotal,
-    unsizedTotal: fold.unsizedTotal,
-    unlabelled: opts.labels ? fold.unlabelled : 0,
-    labelRun: opts.labels ? opts.labelRun : null,
-    truncated: inputs.truncated,
-  };
 }

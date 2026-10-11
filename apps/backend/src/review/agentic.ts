@@ -60,7 +60,7 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // The STORY REPORT (Reports → Stories): one Haiku run across 10-20 code-picked stories. Pro on
   // `periodReports` as well (its routes 402), and agentic, so it registers here and nowhere else.
   registerStoryReportRoutes(app, ctx);
-  // STORY LABELS (Reports → Stories → Story health): Haiku labels each story's criteria against a
+  // STORY LABELS (Reports → Stories): Haiku labels each story's criteria against a
   // fixed rubric. Pro on `periodReports` too, and agentic — so here and nowhere else.
   registerStoryLabelRoutes(app, ctx);
   // REPORTS → THIS SPRINT: "Check against code" (one Sonnet run per ticket over read-only default-branch

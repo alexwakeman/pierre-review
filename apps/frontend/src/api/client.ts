@@ -149,7 +149,6 @@ import type {
   StoryReportWindowChoice,
   StartStoryReportBody,
   StartStoryReportResponse,
-  StoryHealthResponse,
   StartStoryLabelRunBody,
   StoryLabelRunResponse,
   SprintStoriesResponse,
@@ -959,7 +958,7 @@ export const api = {
     fetch('/api/sprint-stories/repos', jsonBody('PUT', body)).then((r) => handle<SprintReposResponse>(r)),
   sprintSetChecks: (body: SprintChecksUpdate) =>
     fetch('/api/sprint-stories/checks', jsonBody('PUT', body)).then((r) => handle<SprintChecksResponse>(r)),
-  // The status layout override (order + "code delivered from"); `{order:null, deliveredFrom:null}` resets.
+  // The status layout override (statuses per stage, in order); `{sections: null}` resets.
   sprintSetStatuses: (body: SprintStatusesUpdate) =>
     fetch('/api/sprint-stories/statuses', jsonBody('PUT', body)).then((r) => handle<SprintStatusesResponse>(r)),
   // The ticket tab (core, FREE): one ticket's open / merged / closed PRs as TimelinePr rows. DB-only.
@@ -980,12 +979,9 @@ export const api = {
   // 200 record; never retried by the client (a new dialog mints a new requestId).
   sprintWrite: (body: SprintWriteRequest) =>
     fetch('/api/sprint-stories/write', jsonBody('POST', body)).then((r) => handle<SprintWriteResponse>(r)),
-  // Reports → Stories → Story health (core, Pro on `periodReports`): 13 weekly points, two panels.
-  // Code only — the GET never runs Claude.
-  storyHealth: (workspaceId: number) =>
-    get<StoryHealthResponse>(withQuery('/api/story-health', workspaceParam(workspaceId))),
-  // The label run (core, agentic, LOCAL-ONLY; one in flight per account). The POST is the ONE path
-  // that bills; the GET and cancel are account-scoped.
+  // The story label run (core, agentic, LOCAL-ONLY; one in flight per account; the path keeps the
+  // retired Story health prefix). No screen starts it since Story health was removed. The POST is the
+  // ONE path that bills; the GET and cancel are account-scoped.
   startStoryLabelRun: (body: StartStoryLabelRunBody) =>
     fetch('/api/story-health/label', jsonBody('POST', body)).then((r) => handle<StoryLabelRunResponse>(r)),
   storyLabelRun: () => get<StoryLabelRunResponse>('/api/story-health/label'),

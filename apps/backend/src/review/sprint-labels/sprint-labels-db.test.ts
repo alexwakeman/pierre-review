@@ -2,8 +2,8 @@ import { rmSync } from 'node:fs';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 // The sprint read's free labels (./index.ts) on a SCRATCH SQLite — never apps/backend/data. Pins:
-//   • WHAT IS SENT: in-sprint, not-done tickets of THIS workspace with criteria and no CURRENT label
-//     (rubric version + today's text hash), Not started before In progress.
+//   • WHAT IS SENT: in-sprint tickets of THIS workspace with criteria and no CURRENT label (rubric
+//     version + today's text hash), Not started before In progress, Done last.
 //   • WHEN: only with AI on, a Claude credential, Reports; a busy label slot is skipped (released on
 //     every path that does not start a run); nothing to label releases the slot.
 //   • the hook is installed by registerSprintLabelling and fires the enqueue.
@@ -96,9 +96,9 @@ afterAll(async () => {
 });
 
 describe('sprintStoriesToLabel', () => {
-  it('in-sprint, not done, with criteria, no current label, this workspace only; Not started first', async () => {
+  it('in-sprint, with criteria, no current label, this workspace only; Not started first, Done last', async () => {
     const todo = await mod.sprintStoriesToLabel(1, wsA);
-    expect(todo.map((t) => t.ident)).toEqual([ident('ENG-2'), ident('ENG-1')]);
+    expect(todo.map((t) => t.ident)).toEqual([ident('ENG-2'), ident('ENG-1'), ident('ENG-3')]);
     expect(todo[0]!.input.criteria).toEqual(['One', 'Two']);
     expect(await mod.sprintStoriesToLabel(2, wsA)).toEqual([]);
   });
@@ -136,7 +136,24 @@ describe('enqueueSprintLabels', () => {
     expect(res).toBe('started');
     expect(started).toHaveLength(1);
     expect(started[0]).toMatchObject({ accountId: 1, workspaceId: wsA });
-    expect(started[0].stories.map((s: any) => s.ident)).toEqual([ident('ENG-2'), ident('ENG-1')]);
+    expect(started[0].stories.map((s: any) => s.ident)).toEqual([ident('ENG-2'), ident('ENG-1'), ident('ENG-3')]);
+  });
+
+  it('a VIEW with pending labels fires the same hook, at most once a minute per workspace', async () => {
+    const hooks = await import('../../tracker/sprint/hooks.js');
+    hooks.resetSprintViewDedupe();
+    const fired: Array<[number, number]> = [];
+    hooks.setAfterSprintRead((a, w) => void fired.push([a, w]));
+    const t0 = 1_000_000;
+    expect(hooks.sprintViewedWithPendingLabels(1, wsA, t0)).toBe(true);
+    expect(hooks.sprintViewedWithPendingLabels(1, wsA, t0 + 30_000)).toBe(false);
+    expect(hooks.sprintViewedWithPendingLabels(1, wsOther, t0 + 30_000)).toBe(true);
+    expect(hooks.sprintViewedWithPendingLabels(1, wsA, t0 + hooks.SPRINT_LABEL_VIEW_MIN_INTERVAL_MS)).toBe(true);
+    expect(fired).toEqual([[1, wsA], [1, wsOther], [1, wsA]]);
+    // No hook (cloud, AI off): nothing fires, nothing is remembered.
+    hooks.setAfterSprintRead(null);
+    hooks.resetSprintViewDedupe();
+    expect(hooks.sprintViewedWithPendingLabels(1, wsA, t0)).toBe(false);
   });
 
   it('registerSprintLabelling installs the after-read hook', async () => {

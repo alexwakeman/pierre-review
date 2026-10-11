@@ -1,12 +1,14 @@
 import type { FastifyInstance } from 'fastify';
-import type {
-  SprintAssessErrorBody,
-  SprintAssessResponse,
-  SprintAssessmentResponse,
+import {
+  sprintAssessModeOf,
+  type SprintAssessErrorBody,
+  type SprintAssessResponse,
+  type SprintAssessmentResponse,
 } from '@pierre-review/shared';
 import { resolveWorkspaceScope } from '../../db/queries.js';
 import { sprintCriteriaOf } from '../../db/sprint-chips.js';
 import { readSprintTicket, sprintAssessmentRecordOf } from '../../db/sprint-store.js';
+import { sprintTicketStage } from '../../db/sprint-stories.js';
 import { acceptedSprintRepoDetails } from '../../db/sprint-ticket-repos.js';
 import { reportsEntitled } from '../../api/routes/insights.js';
 import type { AgentContext } from '../agent-context.js';
@@ -88,6 +90,9 @@ export function registerSprintAssessRoutes(app: FastifyInstance, ctx: AgentConte
           { description: ticket.description ?? '', acceptanceCriteria: ticket.acceptanceCriteria ?? '' },
           ticket.provider as 'jira' | 'github' | 'linear',
         ).items;
+        // THE MODE IS THE SERVER'S: plan (not started / in progress) or verify (in review / done), from
+        // the stored ticket's stage under the workspace's status layout.
+        const mode = sprintAssessModeOf(await sprintTicketStage(accountId, scope.workspaceId, ticket));
         const record = await startSprintAssessment(ctx, {
           accountId,
           workspaceId: scope.workspaceId,
@@ -95,6 +100,7 @@ export function registerSprintAssessRoutes(app: FastifyInstance, ctx: AgentConte
           ticket,
           criteria,
           repos,
+          mode,
         });
         handedOff = true;
         reply.status(202);

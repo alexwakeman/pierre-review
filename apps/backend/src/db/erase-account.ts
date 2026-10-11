@@ -198,7 +198,7 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // The story report (migration 0097 / pg 0084) — model prose about the account's own tickets.
     // Cascades from workspaces too, and is explicit anyway.
     await tx.delete(schema.storyReports).where(eq(schema.storyReports.accountId, accountId)).execute();
-    // Story health's labels (migration 0099 / pg 0086) — model answers about the account's tickets.
+    // Story labels (migration 0099 / pg 0086) — model answers about the account's tickets.
     await tx.delete(schema.storyLabels).where(eq(schema.storyLabels.accountId, accountId)).execute();
     // Reports → This sprint (migration 0100 / pg 0087): the sprint list and its ticket text (from the
     // customer's tracker), the accepted candidate repos, the assessments (model prose about the
@@ -207,6 +207,7 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.trackerWrites).where(eq(schema.trackerWrites.accountId, accountId)).execute();
     await tx.delete(schema.sprintAssessments).where(eq(schema.sprintAssessments.accountId, accountId)).execute();
     await tx.delete(schema.sprintTicketRepos).where(eq(schema.sprintTicketRepos.accountId, accountId)).execute();
+    await tx.delete(schema.sprintRefTickets).where(eq(schema.sprintRefTickets.accountId, accountId)).execute();
     await tx.delete(schema.sprintTickets).where(eq(schema.sprintTickets.accountId, accountId)).execute();
     await tx.delete(schema.sprintReads).where(eq(schema.sprintReads.accountId, accountId)).execute();
     // The AI spend ledger (token/credit counts — no prompt text).
@@ -328,11 +329,12 @@ export function accountScopedTables(): {
     },
     // The story report's runs (migration 0097 / pg 0084), erased explicitly above.
     { name: 'storyReports', col: schema.storyReports.accountId, table: schema.storyReports },
-    // Story health's labels (migration 0099 / pg 0086), erased explicitly above.
+    // Story labels (migration 0099 / pg 0086), erased explicitly above.
     { name: 'storyLabels', col: schema.storyLabels.accountId, table: schema.storyLabels },
     // Reports → This sprint (migration 0100 / pg 0087), erased explicitly above.
     { name: 'sprintReads', col: schema.sprintReads.accountId, table: schema.sprintReads },
     { name: 'sprintTickets', col: schema.sprintTickets.accountId, table: schema.sprintTickets },
+    { name: 'sprintRefTickets', col: schema.sprintRefTickets.accountId, table: schema.sprintRefTickets },
     { name: 'sprintTicketRepos', col: schema.sprintTicketRepos.accountId, table: schema.sprintTicketRepos },
     { name: 'sprintAssessments', col: schema.sprintAssessments.accountId, table: schema.sprintAssessments },
     { name: 'trackerWrites', col: schema.trackerWrites.accountId, table: schema.trackerWrites },

@@ -46,9 +46,17 @@ const fakeCheckout = async (repos: any[]) => ({
 
 const goodSubmit = {
   summary: 'Nearly ready: the basket is kept in memory only.',
-  issues: [
-    { id: 'unclear_done', text: 'Criterion 1 does not say how long the basket is kept.', repo: 'acme/web', path: 'src/basket.ts' },
-    { id: 'spec_gaps', text: 'No rule for what happens to a guest basket at sign-in.', repo: 'acme/web', path: 'src/invented.ts' },
+  findings: [
+    {
+      issue: 'unclear_done',
+      rule: 'no_expected_result',
+      quote: 'basket survives a RELOAD',
+      text: 'Criterion 1 does not say how long the basket is kept.',
+      suggestion: 'The basket is still there after a reload within 30 days',
+      repo: 'acme/web',
+      path: 'src/basket.ts',
+    },
+    { issue: 'spec_gaps', rule: 'edge_case', quote: 'not in the ticket', text: 'No rule for what happens to a guest basket at sign-in.', repo: 'acme/web', path: 'src/invented.ts' },
   ],
   revisedCriteria: [],
 };
@@ -135,10 +143,10 @@ beforeEach(() => {
 });
 
 const repos = () => [{ repoId, fullName: 'acme/web', owner: 'acme', name: 'web', defaultBranch: 'main', syncedSha: 'sha-1' }];
-const start = async () => {
+const start = async (mode: 'plan' | 'verify' = 'plan') => {
   const ticket = (await store.readSprintTicket(1, ws, IDENT))!;
   expect(mgr.claimSprintAssessSlot(1, IDENT)).toBe(true);
-  const rec = await mgr.startSprintAssessment(ctx(), { accountId: 1, workspaceId: ws, ident: IDENT, ticket, criteria: ['Basket survives a reload'], repos: repos() });
+  const rec = await mgr.startSprintAssessment(ctx(), { accountId: 1, workspaceId: ws, ident: IDENT, ticket, criteria: ['Basket survives a reload'], repos: repos(), mode });
   await mgr.sprintAssessRunPromise(rec.id);
   return (await mgr.loadSprintAssessment(1, rec.id))!;
 };
@@ -163,7 +171,11 @@ describe('sprint assessment manager', () => {
       expect(a.worktrees).toEqual([checkoutRoot]);
       expect(a.prompt).toContain('Basket survives a reload');
       expect(a.prompt).toMatch(/---BEGIN KNOWN \S+---\n- Waits on: ENG-8 Payments API \(To Do\)\n---END KNOWN/);
-      expect(a.prompt).not.toContain('ENG-6');
+      // A done link is no blocker: never in KNOWN, but a known fact in the referenced tickets.
+      expect(a.prompt.split('---END KNOWN')[0]).not.toContain('ENG-6');
+      expect(a.prompt).toMatch(
+        /---BEGIN REFERENCES \S+---\n- ENG-8 · Payments API · status To Do · blocked_by\n- ENG-6 · Old spike · status Done \(done\) · blocked_by\n---END REFERENCES/,
+      );
       a.onSubmit?.();
       await new Promise((r) => setTimeout(r, 20));
       const [after] = await db.select().from(schema.sprintAssessments).where(eq(schema.sprintAssessments.id, row.id)).execute();
@@ -174,8 +186,13 @@ describe('sprint assessment manager', () => {
     expect(phases).toEqual(['reading', 'writing']);
     expect(row.status).toBe('succeeded');
     expect(row.phase).toBeNull();
-    expect(row.bodyJson!.issues.map((i: any) => i.ref)).toEqual([{ repo: 'acme/web', path: 'src/basket.ts' }, null]);
-    expect(row.droppedJson).toEqual({ paths: 1, items: 0 });
+    expect(row.bodyJson!.findings.map((i: any) => i.ref)).toEqual([{ repo: 'acme/web', path: 'src/basket.ts' }, null]);
+    // Quotes are verified against the ticket text the run was given (case-insensitive second pass).
+    expect(row.bodyJson!.findings.map((i: any) => [i.quote, i.where])).toEqual([
+      ['Basket survives a reload', 'criteria'],
+      [null, null],
+    ]);
+    expect(row.droppedJson).toEqual({ paths: 1, items: 0, quotes: 1 });
     expect(row.reposJson).toEqual([{ repoId, fullName: 'acme/web', sha: 'checkout-sha' }]);
     expect(recordAiUsage).toHaveBeenCalledWith(expect.objectContaining({ accountId: 1, feature: 'sprint_assess', model: 'claude-sonnet-5', costUsd: 0.4 }));
     // The slot was released by the run's end.
@@ -197,6 +214,44 @@ describe('sprint assessment manager', () => {
     await db.update(schema.sprintTickets).set({ acceptanceCriteria: '- Basket survives a reload' }).where(eq(schema.sprintTickets.ident, IDENT)).execute();
   });
 
+  it('the MODE: stored, picks the prompt + tool shape, bounds what the validator keeps; a stage change makes it stale', async () => {
+    const seen: string[] = [];
+    mgr.setSprintAssessRunnerForTests(async (a) => {
+      seen.push(a.mode);
+      expect(a.systemPrompt).toContain(a.mode === 'plan' ? 'Expect NO code for it' : 'should already be on the default branch');
+      expect(a.prompt).toMatch(a.mode === 'plan' ? /^Plan ticket ENG-1/ : /^Verify ticket ENG-1/);
+      return result({
+        submitted: {
+          ...goodSubmit,
+          plan: [{ repo: 'acme/web', path: 'src/basket.ts', change: 'Persist the basket.' }],
+          criterionChecks: [{ n: 1, status: 'partly', evidence: 'Kept in memory only.', repo: 'acme/web', path: 'src/basket.ts', tests: 'src/nope.test.ts' }],
+          coverage: 'No tests cover criterion 1.',
+        },
+      });
+    });
+    // The ticket has no status → Not started → plan.
+    const plan = await start('plan');
+    expect(plan.mode).toBe('plan');
+    expect(plan.bodyJson!.mode).toBe('plan');
+    expect(plan.bodyJson!.plan).toEqual([{ repo: 'acme/web', path: 'src/basket.ts', newPath: null, change: 'Persist the basket.' }]);
+    expect(plan.bodyJson!.criterionChecks).toEqual([]);
+    expect(store.sprintAssessmentRecordOf(plan)).toMatchObject({ mode: 'plan', outdated: false });
+    expect(await mgr.sprintAssessmentCurrency(1, plan)).toBe('current');
+    // The ticket moves to Done: the plan is stale (the check to run now verifies).
+    await db.update(schema.sprintTickets).set({ statusName: 'Done', statusCategory: 'done' }).where(eq(schema.sprintTickets.ident, IDENT)).execute();
+    expect(await mgr.sprintAssessmentCurrency(1, plan)).toBe('stale');
+    const verify = await start('verify');
+    expect(verify.mode).toBe('verify');
+    expect(verify.bodyJson!.plan).toEqual([]);
+    expect(verify.bodyJson!.criterionChecks).toEqual([
+      { n: 1, status: 'partly', evidence: 'Kept in memory only.', ref: { repo: 'acme/web', path: 'src/basket.ts' }, tests: null },
+    ]);
+    expect(verify.bodyJson!.coverage).toBe('No tests cover criterion 1.');
+    expect(await mgr.sprintAssessmentCurrency(1, verify)).toBe('current');
+    expect(seen).toEqual(['plan', 'verify']);
+    await db.update(schema.sprintTickets).set({ statusName: null, statusCategory: null }).where(eq(schema.sprintTickets.ident, IDENT)).execute();
+  });
+
   it('failure codes: no checkout, auth, max turns, no submit, invalid', async () => {
     mgr.setSprintAssessRunnerForTests(async () => result());
     checkoutOk = false;
@@ -209,7 +264,7 @@ describe('sprint assessment manager', () => {
     expect((await start()).error).toBe('max_turns');
     mgr.setSprintAssessRunnerForTests(async () => result({ submitted: null, subtype: 'success', failureReason: 'no call' }));
     expect((await start()).error).toBe('no_assessment');
-    mgr.setSprintAssessRunnerForTests(async () => result({ submitted: { summary: '', issues: [], revisedCriteria: [] } }));
+    mgr.setSprintAssessRunnerForTests(async () => result({ submitted: { summary: '', findings: [], revisedCriteria: [] } }));
     const invalid = await start();
     expect(invalid.error).toBe('invalid_assessment');
     expect(await mgr.sprintAssessmentCurrency(1, invalid)).toBeNull();
@@ -227,7 +282,7 @@ describe('sprint assessment manager', () => {
     });
     const ticket = (await store.readSprintTicket(1, ws, IDENT))!;
     expect(mgr.claimSprintAssessSlot(1, IDENT)).toBe(true);
-    const rec = await mgr.startSprintAssessment(ctx(), { accountId: 1, workspaceId: ws, ident: IDENT, ticket, criteria: ['x'], repos: repos() });
+    const rec = await mgr.startSprintAssessment(ctx(), { accountId: 1, workspaceId: ws, ident: IDENT, ticket, criteria: ['x'], repos: repos(), mode: 'plan' });
     for (let i = 0; i < 50 && (await mgr.loadSprintAssessment(1, rec.id))!.phase !== 'reading'; i += 1) await new Promise((r) => setTimeout(r, 10));
     expect(await mgr.cancelSprintAssessment(2, rec.id)).toBeNull();
     const cancelled = (await mgr.cancelSprintAssessment(1, rec.id))!;

@@ -468,12 +468,11 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/story-reports/12/cancel')).not.toContain('ai');
   });
 
-  // Story health: the GET and the run's status are DB/memory reads; only the label run's POST bills.
-  it('tiers Story health: the label run POST on ai, everything else on read', () => {
+  // The story label run: the run's status is a memory read; only the label run's POST bills.
+  it('tiers the story label run: the POST on ai, everything else on read', () => {
     expect(tiers('POST', '/api/story-health/label')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('GET', '/api/story-health/label')).toEqual(['read']);
     expect(tiers('POST', '/api/story-health/label/cancel')).toEqual(['read']);
-    expect(tiers('GET', '/api/story-health')).toEqual(['read']);
   });
 
   // This sprint: the refresh kicks a tracker read, the assess POST bills a Sonnet run, the write is

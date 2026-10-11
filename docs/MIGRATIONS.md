@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0090` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
+  ⚠ pg `0052`–`0093` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -1216,3 +1216,21 @@ Six additive, nullable columns, no new table (so `accountScopedTables()` is unch
 per-workspace override). Sqlite text JSON / pg jsonb. Journal `when` `1792051203000`. Ships with
 rubric 2 of the story labels (`STORY_RUBRIC_VERSION` 2 — a code bump, no migration: old
 `story_labels` rows simply stop counting). ⚠ pg `0090` NOT replayed.
+
+### `0104_sprint_ticket_repos_saved` (pg `0091`) — "the reader saved this ticket's repos"
+One additive, nullable column, no new table: `sprint_tickets.repos_saved_at`, stamped by `PUT
+/api/sprint-stories/repos` even for an EMPTY set. NULL = never saved, so the CONFIDENT repo
+suggestions are the accepted set by default (`effectiveSprintRepos`); a ticket with stored
+`sprint_ticket_repos` rows but no stamp counts as saved. The sprint read's upsert never sets it; a
+pruned row takes it with it. The same release changes the SHAPE of `workspaces.sprint_statuses` to
+`{sections}` (four stages) with NO migration: a stored `{order, deliveredFrom}` is converted on read.
+Journal `when` `1792051204000`. ⚠ pg `0091` NOT replayed.
+
+### `0106_sprint_ref_tickets` (pg `0093`) — referenced tickets' status
+One additive table, `sprint_ref_tickets` (account, workspace, ident, provider, api_root, issue_key,
+title, status_name, status_category, url, read_at), unique `(account_id, workspace_id, ident)` (the
+lookup's `onConflictDoUpdate` target), index `(account_id, issue_key)`, named composite FK onto
+`workspaces(id, account_id)` with cascade. Written only by the sprint read (docs/TRACKERS.md § The
+sprint list read → Referenced tickets). Ships with rubric 4 of the story labels (`STORY_RUBRIC_VERSION`
+4 — a code bump: every story relabels). Journal `when` sqlite `1792051203003` / pg `1792051204002`.
+⚠ pg `0093` NOT replayed.

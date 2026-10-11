@@ -11,7 +11,6 @@ import { ChevronIcon, PullRequestIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { reportingWindowCaption, reportingWindowPhrase, windowDates } from './reportingWindowText.js';
 import { StoryReportCard } from './StoryReportCard.js';
-import { StoryHealth } from './StoryHealth.js';
 import {
   buildSizeModel,
   buildTimeRows,
@@ -27,9 +26,6 @@ import {
 //
 //   • TOP: THE STORY REPORT (StoryReportCard) — one agentic report over stories code picked, with
 //     its own window picker (default the last 60 days). Local-only: hidden without agentic AI.
-//   • THEN: STORY HEALTH (StoryHealth) — 13 weekly points over a FIXED, labelled "Last 90 days"
-//     (GET /api/story-health): how stories are written and how they land. Its label series and the
-//     "Label N stories" button need agentic AI; without it only the code measures render.
 //   • BELOW: the two charts and every story, over the workspace's REPORTING WINDOW (GET
 //     /api/stories, core, Pro on `periodReports`), named by its own caption — the two windows are
 //     labelled apart, never implied to be one.
@@ -114,7 +110,6 @@ export function StoriesView(): JSX.Element {
   return (
     <div data-testid="stories-view" className="space-y-4">
       {(data == null || data.trackerOn) && <StoryReportCard workspaceId={workspaceId} reportingWindow={w} />}
-      {(data == null || data.trackerOn) && <StoryHealth workspaceId={workspaceId} />}
       <StoriesBlock data={data} isLoading={isLoading} isError={isError} />
     </div>
   );

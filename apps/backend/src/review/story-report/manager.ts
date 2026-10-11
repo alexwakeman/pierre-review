@@ -12,10 +12,14 @@ import {
 } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { db, schema } from '../../db/client.js';
+import type { BotScope } from '../../db/queries.js';
 import type { StoryInternals } from '../../db/stories.js';
+import { loadStorySelection } from '../../db/story-selection.js';
 import type { AgentContext } from '../agent-context.js';
 import { pickReviewNonce } from '../claude-review/prompts.js';
+import { runStoryLabelsToEnd, type StoryLabelSeams } from '../story-labels/manager.js';
 import type { StoryReportAgentResult, StoryReportAgentRunner } from './agent.js';
+import { selectionFingerprint } from './fingerprint.js';
 import { storyUntrustedTexts } from './story-detail.js';
 import { validateStoryReport } from './validate.js';
 
@@ -34,8 +38,21 @@ import { validateStoryReport } from './validate.js';
 //     queued/running, so a cancel that lands as the run finishes wins.
 //   • Spend is recorded for every finished run that cost money (`recordAiUsage`, seam 'agent',
 //     feature 'story_report') — local spend is the user's own money, still recorded.
+//   • ⚠ THE LABEL PASS COMES FIRST (no button anywhere): before the agent starts, the window's stories
+//     with criteria and no CURRENT label (rubric version + text hash) go through the story label run
+//     (review/story-labels/, Haiku, ≤ STORY_LABEL_RUN_CAP, picked stories first, its own budget
+//     `STORY_LABEL_BUDGET_USD`), and the run WAITS for it. Then the selection is re-read so the picks'
+//     issues and the rates see the new labels (picks themselves never depend on labels). The label
+//     calls are recorded as feature 'story_labels'; the row's `costUsd` is agent + labels. A cancel
+//     during the pass cancels the label run too.
 
 type Ctx = Pick<AgentContext, 'log' | 'recordAiUsage' | 'llm'>;
+
+let labelSeams: StoryLabelSeams | null = null;
+/** Tests inject the label pass's completion/store seams (never a real model call); null restores them. */
+export function setStoryReportLabelSeamsForTests(s: StoryLabelSeams | null): void {
+  labelSeams = s;
+}
 
 interface Slot {
   id: number | null;
@@ -143,6 +160,8 @@ export async function runningStoryReport(accountId: number): Promise<StoryReport
 export interface StartStoryReportArgs {
   accountId: number;
   workspaceId: number;
+  /** The resolved scope, for the selection re-read after the label pass. */
+  scope: BotScope;
   choice: StoryReportWindowChoice;
   range: StoryReportRange;
   candidates: StoryReportCandidate[];
@@ -224,24 +243,59 @@ async function runStoryReport(ctx: Ctx, id: number, a: StartStoryReportArgs, abo
       await finish(id, { status: 'failed', error: 'auth' }, true);
       return;
     }
+    // THE LABEL PASS (header). Best effort: a failed pass leaves the labels as they were.
+    let labelCostUsd = 0;
+    let sel = { candidates: a.candidates, population: a.population, internalsByKey: a.internalsByKey };
+    try {
+      const pass = await runStoryLabelsToEnd(
+        { ...ctx, db, schema },
+        {
+          accountId: a.accountId,
+          workspaceId: a.workspaceId,
+          budgetUsd: config.storyLabelBudgetUsd,
+          stories: async () => (await loadStorySelection(a.accountId, a.scope, a.choice, Date.now())).toLabel,
+        },
+        labelSeams ?? {},
+        abort.signal,
+      );
+      labelCostUsd = pass?.costUsd ?? 0;
+      if (pass != null && pass.labelled > 0 && !abort.signal.aborted) {
+        const fresh = await loadStorySelection(a.accountId, a.scope, a.choice, Date.now());
+        if (fresh.candidates.length > 0) {
+          sel = { candidates: fresh.candidates, population: fresh.population, internalsByKey: fresh.internalsByKey };
+          await db
+            .update(t())
+            .set({ pickedJson: sel.candidates, populationJson: sel.population, fingerprint: selectionFingerprint(a.choice, sel) })
+            .where(and(eq(t().id, id), inArray(t().status, ['queued', 'running'])))
+            .execute();
+        }
+      }
+    } catch (err) {
+      ctx.log.warn({ reportId: id, err: String(err).slice(0, 200) }, 'story report: label pass failed (non-fatal)');
+    }
+    if (abort.signal.aborted) {
+      await finish(id, { status: 'cancelled', costUsd: labelCostUsd > 0 ? labelCostUsd : null }, false);
+      return;
+    }
     const runner = runnerOverride ?? (await import('./agent.js')).runStoryReportAgent;
     // The credential ladder is applied to process.env only when no Claude Review run is in flight
     // (the review chat's rule): two runs mutating the env at once would restore each other's values.
     const { chatMayApplyAuthEnv } = await import('../claude-review/manager.js');
     const res = await runner({
-      candidates: a.candidates,
-      population: a.population,
-      internalsByKey: a.internalsByKey,
+      candidates: sel.candidates,
+      population: sel.population,
+      internalsByKey: sel.internalsByKey,
       windowLabel: windowLabelOf(a.range),
       model: STORY_REPORT_MODEL,
-      nonce: pickReviewNonce(storyUntrustedTexts(a.candidates, a.internalsByKey)),
+      nonce: pickReviewNonce(storyUntrustedTexts(sel.candidates, sel.internalsByKey)),
       maxTurns: config.storyReportMaxTurns,
       maxBudgetUsd: config.storyReportBudgetUsd,
       applyAuthEnv: chatMayApplyAuthEnv(),
       abortController: abort,
     });
     const usage = {
-      costUsd: res.costUsd,
+      // The row's cost is the whole run's: the agent's plus the label pass's (each recorded apart).
+      costUsd: res.costUsd == null && labelCostUsd === 0 ? res.costUsd : (res.costUsd ?? 0) + labelCostUsd,
       inputTokens: res.inputTokens,
       outputTokens: res.outputTokens,
       numTurns: res.numTurns,
@@ -268,7 +322,7 @@ async function runStoryReport(ctx: Ctx, id: number, a: StartStoryReportArgs, abo
       await finish(id, { status: 'failed', error: storyReportFailureOf(res), ...usage }, true);
       return;
     }
-    const v = validateStoryReport(res.submitted, new Set(a.candidates.map((c) => c.key)));
+    const v = validateStoryReport(res.submitted, new Set(sel.candidates.map((c) => c.key)));
     if (v.dropped.unknownTickets + v.dropped.items + v.dropped.overCap > 0) {
       ctx.log.info({ reportId: id, dropped: v.dropped }, 'story report: validation removed items');
     }

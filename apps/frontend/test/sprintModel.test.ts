@@ -10,6 +10,10 @@ import {
   SPRINT_STATUS_ORDER_MAX,
   foldStoryIssues,
   sprintBullets,
+  sprintCommentMarkdown,
+  sprintCurrentAssessmentBodyOf,
+  sprintSpecGapLines,
+  type SprintChecks,
   sprintNoWriteSentence,
   type StoryIssue,
   type SprintAssessmentBody,
@@ -20,23 +24,27 @@ import {
 import {
   assessButtonLabel,
   assessmentProgressLine,
+  assessmentProgressPct,
+  elapsedLabel,
   changedCheckCount,
   checkTypeChoices,
   toggleCheckType,
-  currentTextFor,
-  deliveredRuleSentence,
-  canMoveStatus,
-  moveStatus,
+  reviewRuleSentence,
+  canMoveInSections,
+  codingBoundsOf,
+  moveInSections,
+  moveStatusTo,
+  statusDraftChanged,
+  statusPlaceOf,
   newWriteRequestId,
   shareWords,
   sprintSections,
   statusEvidenceLine,
   statusOrderSourceLabel,
+  statusSectionsOf,
   statusSettingsToSave,
-  statusSplittable,
-  proposedDefault,
+  proposedCriteriaDraft,
   replaceCriteriaSection,
-  replaceModeLabel,
   writeRecordLine,
   writeTargetSentence,
   writeTextProblem,
@@ -66,10 +74,10 @@ function ticket(over: Partial<SprintTicketRow> = {}): SprintTicketRow {
     specGaps: [],
     flagCount: 0,
     pullRequests: [],
-    repos: { accepted: [], suggested: [] },
+    repos: { accepted: [], suggested: [], defaulted: false },
     assessment: null,
     replaceTarget: { kind: 'description' },
-    replaceBase: { hash: '0'.repeat(64), truncated: false },
+    replaceBases: { description: { hash: '0'.repeat(64), truncated: false }, acceptanceCriteria: null },
     lastWrite: null,
     ...over,
   };
@@ -86,8 +94,9 @@ const UNCLEAR: StoryIssue = {
 
 const BODY: SprintAssessmentBody = {
   summary: 'Summary.',
-  issues: [{ id: 'unclear_done', text: 'Say the export is CSV only.', ref: null }],
+  findings: [{ issue: 'unclear_done', rule: 'no_expected_result', quote: null, where: null, text: 'Say the export is CSV only.', suggestion: null, ref: null }],
   revisedCriteria: ['old one', 'new two', 'added'],
+  revisedDescription: null,
 };
 
 function withAssessment(
@@ -132,20 +141,20 @@ function layout(over: Partial<SprintStatusLayout> = {}): SprintStatusLayout {
   return {
     order: [
       { name: 'To Do', category: 'new', count: 1, auto: true, stage: 'not_started' },
-      { name: 'In Development', category: 'indeterminate', count: 2, auto: true, stage: 'writing' },
-      { name: 'Ready for QA', category: 'indeterminate', count: 1, auto: true, stage: 'writing' },
-      { name: 'In PO Review', category: 'indeterminate', count: 1, auto: true, stage: 'delivered' },
+      { name: 'In Development', category: 'indeterminate', count: 2, auto: true, stage: 'in_progress' },
+      { name: 'Ready for QA', category: 'indeterminate', count: 1, auto: true, stage: 'in_review' },
+      { name: 'In PO Review', category: 'indeterminate', count: 1, auto: true, stage: 'in_review' },
       { name: 'Done', category: 'done', count: 0, auto: true, stage: 'done' },
     ],
     orderSource: 'jira_board',
-    deliveredFrom: 'In PO Review',
-    deliveredFromAuto: 'In PO Review',
+    codingBegins: 'In Development',
+    codingEnds: 'Ready for QA',
     evidence: [
       { status: 'In Development', withPrs: 9, allMerged: 2 },
       { status: 'Ready for QA', withPrs: 6, allMerged: 4 },
       { status: 'In PO Review', withPrs: 11, allMerged: 11 },
     ],
-    settings: { order: null, deliveredFrom: null },
+    settings: { sections: null },
     ...over,
   };
 }
@@ -153,88 +162,118 @@ function layout(over: Partial<SprintStatusLayout> = {}): SprintStatusLayout {
 const st = (name: string, category: 'new' | 'indeterminate' | 'done' = 'indeterminate') => ({ name, category });
 
 describe('sections by status', () => {
-  it('Not started, Writing code, Code delivered — sections in layout order, server order within', () => {
+  it('the four stages in order — sections in layout order, server order within; Done listed', () => {
     const rows = [
-      ticket({ ident: 'a', stage: 'writing', status: st('Ready for QA') }),
+      ticket({ ident: 'a', stage: 'in_review', status: st('Ready for QA') }),
       ticket({ ident: 'b', stage: 'not_started', status: st('To Do', 'new') }),
-      ticket({ ident: 'c', stage: 'writing', status: st('In Development') }),
-      ticket({ ident: 'd', stage: 'delivered', status: st('In PO Review') }),
-      ticket({ ident: 'e', stage: 'writing', status: st('in development') }),
+      ticket({ ident: 'c', stage: 'in_progress', status: st('In Development') }),
+      ticket({ ident: 'd', stage: 'in_review', status: st('In PO Review') }),
+      ticket({ ident: 'e', stage: 'in_progress', status: st('in development') }),
       ticket({ ident: 'f', stage: 'done', status: st('Done', 'done') }),
     ];
     const g = sprintSections(rows, layout());
     expect(g.map((x) => [x.stage, x.heading])).toEqual([
       ['not_started', 'Not started'],
-      ['writing', 'Writing code'],
-      ['delivered', 'Code delivered'],
+      ['in_progress', 'In progress'],
+      ['in_review', 'In review'],
+      ['done', 'Done'],
     ]);
     expect(g[0]!.sections).toEqual([{ status: null, tickets: [rows[1]] }]);
-    expect(g[1]!.sections.map((s) => [s.status, s.tickets.map((t) => t.ident)])).toEqual([
-      ['In Development', ['c', 'e']],
-      ['Ready for QA', ['a']],
-    ]);
-    expect(g[2]!.sections.map((s) => s.status)).toEqual(['In PO Review']);
-    // Done is never listed.
-    expect(g.flatMap((x) => x.sections.flatMap((s) => s.tickets)).some((t) => t.ident === 'f')).toBe(false);
+    expect(g[1]!.sections.map((s) => [s.status, s.tickets.map((t) => t.ident)])).toEqual([['In Development', ['c', 'e']]]);
+    expect(g[2]!.sections.map((s) => s.status)).toEqual(['Ready for QA', 'In PO Review']);
+    expect(g[3]!.sections.map((s) => s.tickets.map((t) => t.ident))).toEqual([['f']]);
   });
 
-  it('nothing splits → one "In progress" heading; empty stages dropped', () => {
-    const rows = [ticket({ ident: 'a', stage: 'writing', status: st('In Development') })];
-    const g = sprintSections(rows, layout({ deliveredFrom: null }));
-    expect(g.map((x) => x.heading)).toEqual(['In progress']);
+  it('empty stages dropped', () => {
+    const rows = [ticket({ ident: 'a', stage: 'in_progress', status: st('In Development') })];
+    expect(sprintSections(rows, layout()).map((x) => x.heading)).toEqual(['In progress']);
     expect(sprintSections([], layout())).toEqual([]);
   });
 
   it('a status the layout does not list goes after the listed ones', () => {
     const rows = [
-      ticket({ ident: 'x', stage: 'writing', status: st('Blocked by legal') }),
-      ticket({ ident: 'y', stage: 'writing', status: st('Ready for QA') }),
+      ticket({ ident: 'x', stage: 'in_review', status: st('Blocked by legal') }),
+      ticket({ ident: 'y', stage: 'in_review', status: st('Ready for QA') }),
     ];
     expect(sprintSections(rows, layout())[0]!.sections.map((s) => s.status)).toEqual(['Ready for QA', 'Blocked by legal']);
     // No layout at all: grouping still works, by first seen.
     expect(sprintSections(rows, null)[0]!.sections.map((s) => s.status)).toEqual(['Blocked by legal', 'Ready for QA']);
   });
 
-  it('the stage is the row\'s own (category beats position is the server\'s rule)', () => {
-    // A row the server put in Not started stays there whatever its status name is.
+  it('the stage is the row\'s own (the server\'s placement)', () => {
     const g = sprintSections([ticket({ ident: 'n', stage: 'not_started', status: st('In PO Review') })], layout());
     expect(g.map((x) => x.stage)).toEqual(['not_started']);
   });
 });
 
 describe('status settings', () => {
-  it('only in-progress statuses can be the split', () => {
-    expect(statusSplittable({ category: 'indeterminate' })).toBe(true);
-    expect(statusSplittable({ category: null })).toBe(true);
-    expect(statusSplittable({ category: 'new' })).toBe(false);
-    expect(statusSplittable({ category: 'done' })).toBe(false);
+  it('the draft is the layout’s placement', () => {
+    expect(statusSectionsOf(layout())).toEqual({
+      not_started: ['To Do'],
+      in_progress: ['In Development'],
+      in_review: ['Ready for QA', 'In PO Review'],
+      done: ['Done'],
+    });
   });
 
-  it('move up / down, ends are no-ops', () => {
-    expect(moveStatus(['a', 'b', 'c'], 1, -1)).toEqual(['b', 'a', 'c']);
-    expect(moveStatus(['a', 'b', 'c'], 1, 1)).toEqual(['a', 'c', 'b']);
-    expect(moveStatus(['a', 'b'], 0, -1)).toEqual(['a', 'b']);
-    expect(moveStatus(['a', 'b'], 1, 1)).toEqual(['a', 'b']);
+  it('move up / down within a stage, and across a stage boundary; the two ends are no-ops', () => {
+    const d = statusSectionsOf(layout());
+    expect(moveInSections(d, 'in_review', 1, -1).in_review).toEqual(['In PO Review', 'Ready for QA']);
+    const up = moveInSections(d, 'in_review', 0, -1);
+    expect([up.in_progress, up.in_review]).toEqual([['In Development', 'Ready for QA'], ['In PO Review']]);
+    const down = moveInSections(d, 'in_progress', 0, 1);
+    expect([down.in_progress, down.in_review]).toEqual([[], ['In Development', 'Ready for QA', 'In PO Review']]);
+    expect(canMoveInSections(d, 'not_started', 0, -1)).toBe(false);
+    expect(canMoveInSections(d, 'done', 0, 1)).toBe(false);
+    expect(moveInSections(d, 'not_started', 0, -1)).toEqual(d);
+    expect(canMoveInSections(d, 'done', 0, -1)).toBe(true);
   });
 
-  it('a move never crosses into another category (the server would snap it back)', () => {
-    const cat: Record<string, string | null> = { 'To Do': 'new', Coding: 'indeterminate', Review: null, Done: 'done' };
-    const of = (n: string) => cat[n] ?? null;
-    const names = ['To Do', 'Coding', 'Review', 'Done'];
-    expect(canMoveStatus(names, 0, 1, of)).toBe(false);
-    expect(moveStatus(names, 0, 1, of)).toEqual(names);
-    expect(moveStatus(names, 3, -1, of)).toEqual(names);
-    expect(canMoveStatus(names, 1, 1, of)).toBe(true); // null category reads as in progress
-    expect(moveStatus(names, 1, 1, of)).toEqual(['To Do', 'Review', 'Coding', 'Done']);
+  it('drag: insert at a slot of any list — within a list, across stages, into an empty list', () => {
+    const d = statusSectionsOf(layout());
+    // Within a list: slot counted before the move.
+    expect(moveStatusTo(d, { stage: 'in_review', index: 0 }, 'in_review', 2).in_review).toEqual(['In PO Review', 'Ready for QA']);
+    expect(moveStatusTo(d, { stage: 'in_review', index: 1 }, 'in_review', 0).in_review).toEqual(['In PO Review', 'Ready for QA']);
+    // The slots just above and below the row itself are no-ops.
+    expect(moveStatusTo(d, { stage: 'in_review', index: 0 }, 'in_review', 0)).toEqual(d);
+    expect(moveStatusTo(d, { stage: 'in_review', index: 0 }, 'in_review', 1)).toEqual(d);
+    // Across stages, at any slot.
+    const x = moveStatusTo(d, { stage: 'not_started', index: 0 }, 'in_review', 1);
+    expect([x.not_started, x.in_review]).toEqual([[], ['Ready for QA', 'To Do', 'In PO Review']]);
+    // Into an empty list.
+    const y = moveStatusTo(x, { stage: 'done', index: 0 }, 'not_started', 0);
+    expect([y.not_started, y.done]).toEqual([['Done'], []]);
+    // Bad indexes leave it unchanged, and the input is never mutated.
+    expect(moveStatusTo(d, { stage: 'done', index: 5 }, 'in_review', 0)).toEqual(d);
+    expect(moveStatusTo(d, { stage: 'done', index: 0 }, 'in_review', 9)).toEqual(d);
+    expect(d.in_review).toEqual(['Ready for QA', 'In PO Review']);
   });
 
-  it('save payload caps the order at the route’s limit', () => {
+  it('coding begins / ends read off the draft; where a status sits; changed or not', () => {
+    const d = statusSectionsOf(layout());
+    expect(codingBoundsOf(d)).toEqual({ begins: 'In Development', ends: 'Ready for QA' });
+    const moved = moveStatusTo(d, { stage: 'in_progress', index: 0 }, 'in_review', 0);
+    expect(codingBoundsOf(moved)).toEqual({ begins: null, ends: 'In Development' });
+    expect(statusPlaceOf(moved, 'In PO Review')).toEqual({ stage: 'in_review', index: 2 });
+    expect(statusPlaceOf(moved, 'Nope')).toBeNull();
+    expect(statusDraftChanged(layout(), d)).toBe(false);
+    expect(statusDraftChanged(layout(), moved)).toBe(true);
+  });
+
+  it('save payload: nothing moved → the stored override as it was; moved → every name per stage', () => {
+    const l = layout();
+    expect(statusSettingsToSave(l, statusSectionsOf(l))).toEqual({ sections: null });
+    const moved = moveInSections(statusSectionsOf(l), 'in_review', 0, -1);
+    expect(statusSettingsToSave(l, moved)).toEqual({ sections: moved });
+  });
+
+  it('save payload caps the names at the route’s limit', () => {
     const many = Array.from({ length: SPRINT_STATUS_ORDER_MAX + 1 }, (_, i) => `S${i}`);
-    const l = layout({ order: many.map((name) => ({ name, category: 'indeterminate', count: 0, auto: true, stage: 'writing' })) });
-    const moved = moveStatus(many, 1, -1);
-    const out = statusSettingsToSave(l, { order: moved, deliveredFrom: null, deliveredTouched: false });
-    expect(out.order).toHaveLength(SPRINT_STATUS_ORDER_MAX);
-    expect(out.order?.[0]).toBe('S1');
+    const l = layout({ order: many.map((name) => ({ name, category: 'indeterminate', count: 0, auto: true, stage: 'in_progress' })) });
+    const out = statusSettingsToSave(l, moveInSections(statusSectionsOf(l), 'in_progress', 1, -1));
+    const all = Object.values(out.sections ?? {}).flat();
+    expect(all).toHaveLength(SPRINT_STATUS_ORDER_MAX);
+    expect(all[0]).toBe('S1');
   });
 
   it('the source label keeps proper nouns mid-sentence', () => {
@@ -242,44 +281,12 @@ describe('status settings', () => {
     expect(statusOrderSourceLabel('jira_board', { inSentence: true })).toBe('your board’s columns');
   });
 
-  it('save payload: nothing moved → order null; untouched split → stored value', () => {
-    const l = layout();
-    const names = l.order.map((o) => o.name);
-    expect(statusSettingsToSave(l, { order: names, deliveredFrom: 'In PO Review', deliveredTouched: false })).toEqual({
-      order: null,
-      deliveredFrom: null,
-    });
-  });
-
-  it('save payload: moved → every name; picked → the name; picked the automatic answer → null', () => {
-    const l = layout();
-    const moved = moveStatus(l.order.map((o) => o.name), 2, -1);
-    expect(statusSettingsToSave(l, { order: moved, deliveredFrom: 'Ready for QA', deliveredTouched: true })).toEqual({
-      order: moved,
-      deliveredFrom: 'Ready for QA',
-    });
-    expect(
-      statusSettingsToSave(l, { order: l.order.map((o) => o.name), deliveredFrom: 'in po review', deliveredTouched: true }),
-    ).toEqual({ order: null, deliveredFrom: null });
-  });
-
-  it('save payload keeps an existing override the reader did not touch', () => {
-    const l = layout({
-      orderSource: 'override',
-      deliveredFrom: 'Ready for QA',
-      settings: { order: ['To Do', 'In Development', 'Ready for QA', 'In PO Review', 'Done'], deliveredFrom: 'Ready for QA' },
-    });
-    expect(statusSettingsToSave(l, { order: l.order.map((o) => o.name), deliveredFrom: 'Ready for QA', deliveredTouched: false })).toEqual(
-      l.settings,
-    );
-  });
-
   it('ⓘ words come from the shared constants', () => {
     expect(shareWords(0.6)).toBe('3 in 5');
     expect(shareWords(0.5)).toBe('1 in 2');
     expect(shareWords(0.37)).toBe('37%');
-    expect(deliveredRuleSentence()).toBe(
-      'The first in-progress status where at least 3 in 5 tickets with pull requests have them all merged, and at least 2 do.',
+    expect(reviewRuleSentence()).toBe(
+      'In review starts at a status whose name reads as review or QA, or the first in-progress status where at least 3 in 5 tickets with pull requests have them all merged, and at least 2 do.',
     );
     expect(statusEvidenceLine({ status: 'Ready for QA', withPrs: 6, allMerged: 4 })).toBe('Ready for QA · 4 of 6 merged');
     expect(statusOrderSourceLabel('jira_board')).toBe('Your board’s columns');
@@ -303,22 +310,52 @@ describe('assessment button and progress', () => {
     expect(assessmentProgressLine('running', 'checking_out')).toBe('Checking out the repos…');
     expect(assessmentProgressLine('running', 'reading')).toBe('Reading the code…');
     expect(assessmentProgressLine('running', 'writing')).toBe('Writing the assessment…');
+    // In the run's own mode.
+    expect(assessmentProgressLine('running', 'reading', 'plan')).toBe('Reading the code to plan the work…');
+    expect(assessmentProgressLine('running', 'reading', 'verify')).toBe('Checking each criterion against the code…');
+    expect(assessmentProgressLine('running', 'writing', 'verify')).toBe('Writing up the check…');
+  });
+
+  it('progress bar: phase-based, monotone within a phase, never 100 while running', () => {
+    const q = assessmentProgressPct('queued', null, 10_000);
+    const c = assessmentProgressPct('running', 'checking_out', 10_000);
+    const r0 = assessmentProgressPct('running', 'reading', 0);
+    const r1 = assessmentProgressPct('running', 'reading', 60_000);
+    const r2 = assessmentProgressPct('running', 'reading', 3_600_000);
+    const w = assessmentProgressPct('running', 'writing', 0);
+    expect(q).toBeLessThanOrEqual(5);
+    expect(c).toBeGreaterThan(5);
+    expect(c).toBeLessThanOrEqual(20);
+    expect(r0).toBe(20);
+    expect(r1).toBeGreaterThan(r0);
+    expect(r2).toBeLessThanOrEqual(85);
+    expect(w).toBe(90);
+    expect(elapsedLabel(45_400)).toBe('45s');
+    expect(elapsedLabel(125_000)).toBe('2m 05s');
+    expect(elapsedLabel(-5)).toBe('0s');
   });
 });
 
+/** The templated comment composition (shared folds) — what Copy all and the comment text are built from. */
+const commentDefault = (t: SprintTicketRow, checks: SprintChecks): string =>
+  sprintCommentMarkdown(sprintBullets(t, checks), sprintCurrentAssessmentBodyOf(t), sprintSpecGapLines(t, checks));
+
 describe('update panel', () => {
-  it('the current text follows the replace target', () => {
-    const t = ticket({ acceptanceCriteria: 'AC' });
-    expect(currentTextFor(t, { kind: 'description' })).toBe(t.description);
-    expect(currentTextFor(t, { kind: 'ac_field', fieldId: 'f', fieldName: 'AC field' })).toBe('AC');
-    expect(replaceModeLabel({ kind: 'ac_field', fieldId: 'f', fieldName: 'Acceptance Criteria' })).toBe('Replace Acceptance Criteria');
-    expect(replaceModeLabel({ kind: 'description' })).toBe('Replace description');
+  it('the dialog names the field and the ticket', () => {
+    expect(writeTargetSentence('ACME-1', { kind: 'description' })).toBe('Replaces the description of ACME-1.');
+    expect(writeTargetSentence('ACME-1', { kind: 'ac_field', fieldId: 'f', fieldName: 'AC' })).toBe('Replaces AC on ACME-1.');
   });
 
-  it('the dialog names the target and the ticket', () => {
-    expect(writeTargetSentence('ACME-1', 'comment', { kind: 'description' })).toBe('Adds a comment to ACME-1.');
-    expect(writeTargetSentence('ACME-1', 'replace', { kind: 'description' })).toBe('Replaces the description of ACME-1.');
-    expect(writeTargetSentence('ACME-1', 'replace', { kind: 'ac_field', fieldId: 'f', fieldName: 'AC' })).toBe('Replaces AC on ACME-1.');
+  it('"Apply to draft" for proposed criteria: the criteria field alone, else the description’s criteria section', () => {
+    const t = ticket();
+    expect(proposedCriteriaDraft({ description: t.description, criteria: '- old' }, ['new one', 'new two'])).toEqual({
+      field: 'criteria',
+      text: '- new one\n- new two',
+    });
+    expect(proposedCriteriaDraft({ description: t.description, criteria: null }, ['a'])).toEqual({
+      field: 'description',
+      text: 'Intro\n\n## Acceptance criteria\n\n- a\n\n## Notes\n\nKeep me',
+    });
   });
 
   it('replaces the criteria section and keeps the rest of the description', () => {
@@ -337,53 +374,36 @@ describe('update panel', () => {
     );
   });
 
-  it('proposed defaults without an assessment: the templated bullets / the current text', () => {
+  it('the comment composition without an assessment: the templated bullets', () => {
     const t = ticket({ criteria: { items: [], source: 'none' }, issues: foldStoryIssues({ criteria: [], label: null }) });
-    expect(proposedDefault(t, 'comment', SPRINT_CHECKS_DEFAULT)).toBe(
+    expect(commentDefault(t, SPRINT_CHECKS_DEFAULT)).toBe(
       '- Add acceptance criteria: outcomes a tester could check, one per line.',
     );
-    expect(proposedDefault(t, 'replace', SPRINT_CHECKS_DEFAULT)).toBe(t.description);
   });
 
-  it('proposed defaults from a succeeded assessment', () => {
+  it('the comment composition from a succeeded assessment', () => {
     const t = withAssessment(ticket({ issues: [UNCLEAR] }), 'succeeded', 'current');
-    expect(proposedDefault(t, 'comment', SPRINT_CHECKS_DEFAULT)).toBe(
+    expect(commentDefault(t, SPRINT_CHECKS_DEFAULT)).toBe(
       'Summary.\n\n- Say the export is CSV only.\n\n**Proposed acceptance criteria**\n\n- old one\n- new two\n- added',
     );
-    // description target: only the criteria section changes
-    expect(proposedDefault(t, 'replace', SPRINT_CHECKS_DEFAULT)).toBe(
-      'Intro\n\n## Acceptance criteria\n\n- old one\n- new two\n- added\n\n## Notes\n\nKeep me',
-    );
-    // AC field target: just the list
-    const ac = withAssessment(
-      ticket({ acceptanceCriteria: '- old one\n- old two', replaceTarget: { kind: 'ac_field', fieldId: 'f', fieldName: 'AC' } }),
-      'succeeded',
-      'current',
-    );
-    expect(proposedDefault(ac, 'replace', SPRINT_CHECKS_DEFAULT)).toBe('- old one\n- new two\n- added');
-    // No revised criteria: Replace starts from the current text.
-    const keep = withAssessment(ticket(), 'succeeded', 'current', { body: { ...BODY, revisedCriteria: [] } });
-    expect(proposedDefault(keep, 'replace', SPRINT_CHECKS_DEFAULT)).toBe(keep.description);
   });
 
   it('⚠ a stale run feeds nothing: no bullets of its own, no summary, no revised criteria', () => {
     // The author fixed the criterion since: code no longer raises unclear_done.
     const stale = withAssessment(ticket({ issues: [] }), 'succeeded', 'stale');
     expect(sprintBullets(stale, SPRINT_CHECKS_DEFAULT)).toEqual([]);
-    expect(proposedDefault(stale, 'comment', SPRINT_CHECKS_DEFAULT)).toBe('');
-    expect(proposedDefault(stale, 'replace', SPRINT_CHECKS_DEFAULT)).toBe(stale.description);
+    expect(commentDefault(stale, SPRINT_CHECKS_DEFAULT)).toBe('');
     // Still raised by code: the TEMPLATED bullet, never the stale sentence.
     const still = withAssessment(ticket({ issues: [UNCLEAR] }), 'succeeded', 'stale');
     expect(sprintBullets(still, SPRINT_CHECKS_DEFAULT)).toEqual([
       { id: 'unclear_done', text: 'Criterion 2: no expected result', source: 'code', ref: null },
     ]);
     const old = withAssessment(ticket(), 'succeeded', 'stale', { outdated: true });
-    expect(proposedDefault(old, 'comment', SPRINT_CHECKS_DEFAULT)).toBe('');
-    expect(proposedDefault(old, 'replace', SPRINT_CHECKS_DEFAULT)).toBe(old.description);
+    expect(commentDefault(old, SPRINT_CHECKS_DEFAULT)).toBe('');
   });
 
   it("⚠ Claude's sentence only REPLACES a bullet for an issue code raised; it never adds one", () => {
-    const body = { ...BODY, issues: [{ id: 'blocked' as const, text: 'Waits on the billing API.', ref: null }, ...BODY.issues] };
+    const body = { ...BODY, findings: [{ issue: 'blocked' as const, rule: 'waits_on_external' as const, quote: null, where: null, text: 'Waits on the billing API.', suggestion: null, ref: null }, ...BODY.findings] };
     const t = withAssessment(ticket({ issues: [UNCLEAR] }), 'succeeded', 'current', { body });
     expect(sprintBullets(t, SPRINT_CHECKS_DEFAULT)).toEqual([
       { id: 'unclear_done', text: 'Say the export is CSV only.', source: 'claude', ref: null },
@@ -393,7 +413,7 @@ describe('update panel', () => {
   });
 
   it('spec gaps: their own section in the comment default, Claude’s current sentence replacing the first gap, never a bullet', () => {
-    const body = { ...BODY, issues: [...BODY.issues, { id: 'spec_gaps' as const, text: 'No limit on rows.', ref: null }] };
+    const body = { ...BODY, findings: [...BODY.findings, { issue: 'spec_gaps' as const, rule: 'edge_case' as const, quote: null, where: null, text: 'No limit on rows.', suggestion: null, ref: null }] };
     const gaps = [
       { type: 'edge_case' as const, text: 'No behaviour when the export is empty' },
       { type: 'rule' as const, text: 'No rule for duplicates' },
@@ -405,18 +425,18 @@ describe('update panel', () => {
       { body },
     );
     expect(sprintBullets(t, SPRINT_CHECKS_DEFAULT).map((b) => b.id)).toEqual(['unclear_done']);
-    expect(proposedDefault(t, 'comment', SPRINT_CHECKS_DEFAULT)).toBe(
+    expect(commentDefault(t, SPRINT_CHECKS_DEFAULT)).toBe(
       'Summary.\n\n- Say the export is CSV only.\n\n**Spec gaps**\n\n- No limit on rows.\n\n**Proposed acceptance criteria**\n\n- old one\n- new two\n- added',
     );
     // Without a current run: the FIRST gap only.
-    expect(proposedDefault(ticket({ issues: [UNCLEAR], specGaps: gaps }), 'comment', SPRINT_CHECKS_DEFAULT)).toContain(
+    expect(commentDefault(ticket({ issues: [UNCLEAR], specGaps: gaps }), SPRINT_CHECKS_DEFAULT)).toContain(
       '**Spec gaps**\n\n- Edge case: No behaviour when the export is empty',
     );
-    expect(proposedDefault(ticket({ issues: [UNCLEAR], specGaps: gaps }), 'comment', SPRINT_CHECKS_DEFAULT)).not.toContain('duplicates');
+    expect(commentDefault(ticket({ issues: [UNCLEAR], specGaps: gaps }), SPRINT_CHECKS_DEFAULT)).not.toContain('duplicates');
     // A ticket under way shows no spec gaps at all.
-    expect(proposedDefault({ ...t, stage: 'writing' }, 'comment', SPRINT_CHECKS_DEFAULT)).not.toContain('Spec gaps');
+    expect(commentDefault({ ...t, stage: 'in_progress' }, SPRINT_CHECKS_DEFAULT)).not.toContain('Spec gaps');
     // The switch hides the section.
-    expect(proposedDefault(t, 'comment', { off: ['spec_gaps'], issueTypes: [] })).not.toContain('Spec gaps');
+    expect(commentDefault(t, { off: ['spec_gaps'], issueTypes: [] })).not.toContain('Spec gaps');
   });
 
   it('text problems mirror the server cap', () => {

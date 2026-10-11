@@ -587,7 +587,7 @@ export const config = {
   // Its OWN spend and turn caps (the trial run cost $0.02 in 21 turns). Env only — no route sets it.
   storyReportBudgetUsd: floatFromEnv('STORY_REPORT_BUDGET_USD', 1),
   storyReportMaxTurns: intFromEnv('STORY_REPORT_MAX_TURNS', 40),
-  // ---- Story labels (Story health's label run — review/story-labels/) ----
+  // ---- Story labels (the label run — review/story-labels/) ----
   // The per-RUN spending cap (US$). Default = shared STORY_LABEL_BUDGET_USD_DEFAULT (1). Env only.
   storyLabelBudgetUsd: floatFromEnv('STORY_LABEL_BUDGET_USD', 1),
   // ---- Sprint assessment (Reports → This sprint, "Check against code" — review/sprint-assess/) ----

@@ -24,7 +24,7 @@ import {
 import { AiRunGate } from '../AiSetup.js';
 import { writeClipboard } from '../CopyButton.js';
 import { useOpenTicketTab } from '../../lib/ticketTab.js';
-import { CheckIcon, ChevronIcon, CopyIcon, PullRequestIcon, SparkleIcon } from '../Icons.js';
+import { CheckIcon, ChevronIcon, CopyIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { RegenProgressBar } from './RegenProgressBar.js';
 import {
@@ -470,48 +470,58 @@ function LinkedText({ text, index }: { text: string; index: CandidateIndex }): J
   return (
     <>
       {linkifyTicketKeys(text, index).map((s, i) =>
-        s.kind === 'text' ? (
-          <span key={i}>{s.text}</span>
-        ) : s.href != null ? (
-          <a key={i} href={s.href} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline dark:text-sky-300">
-            {s.key}
-          </a>
-        ) : (
-          <span key={i}>{s.key}</span>
-        ),
+        s.kind === 'text' ? <span key={i}>{s.text}</span> : <TicketLink key={i} ticket={s.key} index={index} />,
       )}
     </>
   );
 }
 
-function TicketChip({ ticket, index, titled = false }: { ticket: string; index: CandidateIndex; titled?: boolean }): JSX.Element {
+const LINK = 'text-sky-700 hover:underline dark:text-sky-300';
+
+/** A ticket key in the report: opens the ticket tab (its merged and open pull requests) when the key is a
+ *  picked candidate; else the tracker link; else plain text. */
+function TicketLink({
+  ticket,
+  index,
+  className = '',
+  children,
+}: {
+  ticket: string;
+  index: CandidateIndex;
+  className?: string;
+  children?: ReactNode;
+}): JSX.Element {
+  const openTicketTab = useOpenTicketTab();
+  const c = index.get(ticket);
+  const label = children ?? ticket;
+  if (c != null) {
+    return (
+      <button
+        type="button"
+        onClick={() => openTicketTab({ ident: c.ident, key: c.key, title: c.title })}
+        aria-label={`Pull requests for ${c.key}`}
+        className={`${className} ${LINK} text-left`}
+      >
+        {label}
+      </button>
+    );
+  }
   const href = ticketHref(ticket, index);
-  const text = titled ? ticketChipLabel(ticket, index) : ticket;
-  const cls = 'break-words rounded border border-gray-300 px-1.5 text-[11px] font-medium dark:border-gray-700';
   return href != null ? (
-    <a href={href} target="_blank" rel="noreferrer" className={`${cls} text-sky-700 hover:underline dark:text-sky-300`}>
-      {text}
+    <a href={href} target="_blank" rel="noreferrer" className={`${className} ${LINK}`}>
+      {label}
     </a>
   ) : (
-    <span className={`${cls} text-gray-700 dark:text-gray-200`}>{text}</span>
+    <span className={className}>{label}</span>
   );
 }
 
-/** "PRs" beside a picked ticket's chip: the ticket tab, this ticket's pull requests only. */
-function TicketPrsButton({ ticket, index }: { ticket: string; index: CandidateIndex }): JSX.Element | null {
-  const openTicketTab = useOpenTicketTab();
-  const c = index.get(ticket);
-  if (c == null) return null;
+function TicketChip({ ticket, index, titled = false }: { ticket: string; index: CandidateIndex; titled?: boolean }): JSX.Element {
+  const cls = 'break-words rounded border border-gray-300 px-1.5 text-[11px] font-medium dark:border-gray-700';
   return (
-    <button
-      type="button"
-      onClick={() => openTicketTab({ ident: c.ident, key: c.key, title: c.title })}
-      aria-label={`Pull requests for ${c.key}`}
-      className="inline-flex items-center gap-0.5 rounded border border-gray-300 px-1 text-[11px] text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
-    >
-      <PullRequestIcon size={10} />
-      PRs
-    </button>
+    <TicketLink ticket={ticket} index={index} className={`${cls} text-gray-700 dark:text-gray-200`}>
+      {titled ? ticketChipLabel(ticket, index) : ticket}
+    </TicketLink>
   );
 }
 
@@ -522,7 +532,6 @@ function TicketChips({ tickets, index }: { tickets: string[]; index: CandidateIn
       {tickets.map((t) => (
         <li key={t} className="flex flex-wrap items-start gap-1">
           <TicketChip ticket={t} index={index} titled />
-          <TicketPrsButton ticket={t} index={index} />
         </li>
       ))}
     </ul>

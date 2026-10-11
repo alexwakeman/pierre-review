@@ -105,7 +105,7 @@ export function populationForAgent(p: StoryReportPopulation) {
     checkedWithGaps: p.checkedWithGaps,
     medianWorkingTime: workingDuration(p.medianWorkingHours ?? 0, p.workingDayHours),
     // Whole-window, by code: the ONLY issue rates the agent may quote, each in its own unit (`count` of
-    // `of` criteria or stories) — the same measures as Story health; no-criteria is `noCriteriaFound`.
+    // `of` criteria or stories); no-criteria is `noCriteriaFound`.
     ...(p.issueRates != null
       ? {
           issueRates: p.issueRates.map((r) => ({

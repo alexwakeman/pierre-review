@@ -1172,25 +1172,30 @@ over the whole window; the picks are a sample the agent may never quote a rate f
 key must be a picked key; the first `submit_report` wins. [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story report.
 
 **THE THREE STORY ISSUES** (shared `story-issues.ts`) — Unclear when done (which criterion, why) ·
-Blocked (only an unfinished ticket or open decision, `isRealStoryBlocker`) · Spec gaps (no chip).
+Blocked (only an unfinished ticket or open decision, `isRealStoryBlocker`; a ticket the TEXT names
+blocks ONLY when the label's rubric-4 `references` read it `depends_on` — never out of scope, built
+alongside, builds on, supersedes or context) · Spec gaps (no chip).
 Input via `db/story-issue-input.ts`; retired ids drop through `isStoryIssueId`. ⚠ This sprint asks
 "blocked NOW" (`foldStoryIssues`); RATES use `storyIssueRateUnits` (unclear = % of CRITERIA;
 blocked = tracker LINKS, any status; "no criteria" apart). Every sentence is templated.
 
-**Story health** (Reports → Stories, "Last 90 days", a FIXED labelled span) — core
-`GET /api/story-health` (Pro, 402). REFINEMENT (by the ticket's CREATED week, `issue_created_at`,
-else first PR opened, counted) is a series per issue (or `omitted`); DELIVERY by last merge.
-⚠ Refinement is every ticket with an open OR merged PR written in the span, never only the merged
-ones. ⚠ Labels count ONLY when CURRENT (rubric version AND text hash, `db/story-label-input.ts`); with
-`config.aiEnabled` false the label series are OMITTED. ⚠ A RATE shift is a two-proportion test on
-POOLED counts (`STORY_SHIFT_*`), never a changepoint over weekly percentages.
-[docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story labels.
+**Story labels** — the Story health charts are DELETED (2026-10-11; no `GET /api/story-health`, no
+UI); the labels stay. The label run (`POST /api/story-health/label`, path kept, local-only) labels the
+last 13 weeks' stories (`db/story-health.ts`); This sprint's labels come from `review/sprint-labels/`.
+⚠ Labels count ONLY when CURRENT (rubric version AND text hash, `db/story-label-input.ts`). A HELD rate
+(`STORY_ISSUE_RATES_HELD`) never reaches the story report. [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md)
+§ Story labels.
 
 **Reports → This sprint** (`?insightsTab=sprint`, Pro `periodReports`; sqlite `0100` / pg `0087`): the
-tracker's current sprint in status sections (`db/sprint-status-layout.ts`); per ticket ≤ 2 issue
-chips minus the workspace's checks (`applyStoryIssueChecks`); reader-ACCEPTED repos; "Check against code" (Sonnet 5, LOCAL ONLY,
-`review/sprint-assess/`: a summary + ≤ 1 sentence per issue, cited paths verified or dropped) and the
-per-ticket write-back. ⚠ Nothing writes without the dialog's Confirm; no agent tool,
+tracker's current sprint in FOUR stages (Not started · In progress · In review · Done, Done listed
+last), sections by status (`db/sprint-status-layout.ts`; the reader's placement beats category);
+per ticket ≤ 2 issue chips minus the workspace's checks (`applyStoryIssueChecks`); repos = the
+reader's SAVED set, else the confident suggestions (`effectiveSprintRepos`, `repos_saved_at`); "Check against code" (Sonnet 5, LOCAL ONLY,
+`review/sprint-assess/`: STAGE-AWARE, the server picking the mode from the stage — a PLAN of changes for
+a ticket not built yet, a per-criterion VERIFY + tests once in review; cited paths verified or dropped),
+`related` ticket pills (stored rows only, never a tracker call: Blocked by · Coordinate with ·
+Related; statuses of tickets the text names come from the sprint READ's one batched lookup,
+`sprint_ref_tickets`, Jira only) and the per-ticket write-back. ⚠ Nothing writes without the dialog's Confirm; no agent tool,
 setting or bulk route writes. Copy goes through ONE helper, `lib/copy.ts`.
 [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint assessment · docs/TRACKERS.md.
 
@@ -1532,7 +1537,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0090` and plugin `0034`–`0037` + `0040` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0093` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

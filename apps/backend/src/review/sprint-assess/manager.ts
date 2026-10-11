@@ -5,11 +5,19 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import {
   SPRINT_ASSESS_MODEL,
   foldStoryIssues,
+  isBlockingRelation,
+  sprintAssessModeOf,
   storyBlockerPhrase,
+  storyReferencesByKey,
+  usableStoryLabel,
+  type KnownTicket,
+  type StoryTicketReference,
+  type TicketLinkBlocker,
   type SprintAssessmentCurrency,
   type SprintAssessmentErrorCode,
   type SprintAssessmentPhase,
   type SprintAssessmentRecord,
+  type SprintAssessMode,
   type SprintRepoRef,
 } from '@pierre-review/shared';
 import { db, schema } from '../../db/client.js';
@@ -21,7 +29,7 @@ import {
   type SprintAssessmentRow,
   type SprintTicketDbRow,
 } from '../../db/sprint-store.js';
-import { sprintAssessmentCurrencyFrom } from '../../db/sprint-stories.js';
+import { sprintAssessmentCurrencyFrom, sprintTicketStage } from '../../db/sprint-stories.js';
 import { acceptedSprintRepoDetails } from '../../db/sprint-ticket-repos.js';
 import type { AgentContext } from '../agent-context.js';
 import { cleanupCloneCache, prepDefaultBranchCheckouts } from '../clone-manager.js';
@@ -34,18 +42,20 @@ import {
 } from '../claude-review/manager.js';
 import { pickReviewNonce } from '../claude-review/prompts.js';
 import type { SprintAssessRunResult, SprintAssessRunner } from './agent.js';
-import { SPRINT_ASSESS_SYSTEM_PROMPT, buildSprintAssessPrompt, sprintAssessUntrustedTexts } from './prompts.js';
+import { buildSprintAssessPrompt, sprintAssessSystemPrompt, sprintAssessUntrustedTexts, type PromptReference } from './prompts.js';
 import { validateSprintAssessment } from './validate.js';
 import { storyLabelInput } from '../../db/story-label-input.js';
 import { buildStoryIssueInput, knownTicketsFor, linksOfRow, namedTicketKeys } from '../../db/story-issue-input.js';
 
-/** What code already knows about the ticket — open blockers (links + named) and the current label's
- *  spec gaps — handed to the agent as fenced DATA to confirm or correct. Never fails the run. */
+/** What code already knows about the ticket — open blockers (links + named), the current label's
+ *  spec gaps, and every ticket it REFERENCES with the relation the label read and the status Limn
+ *  holds (sprint tickets, PR tickets, the sprint read's lookup) — handed to the agent as fenced DATA.
+ *  Never fails the run. */
 export async function knownIssuesForPrompt(
   accountId: number,
   ticket: SprintTicketDbRow,
   criteria: readonly string[],
-): Promise<{ blockers: string[]; gaps: string[] }> {
+): Promise<{ blockers: string[]; gaps: string[]; references: PromptReference[] }> {
   const provider = ticket.provider as 'jira' | 'github' | 'linear';
   const input = storyLabelInput(
     { title: ticket.title, description: ticket.description ?? '', acceptanceCriteria: ticket.acceptanceCriteria ?? '' },
@@ -57,10 +67,51 @@ export async function knownIssuesForPrompt(
   const issues = foldStoryIssues(buildStoryIssueInput({ criteria, label, links: linksOfRow(ticket), knownTickets }));
   const blocked = issues.find((i) => i.id === 'blocked');
   const gaps = issues.find((i) => i.id === 'spec_gaps');
+  const usable = usableStoryLabel({ criteria, label });
   return {
     blockers: (blocked?.blockers ?? []).filter((b) => !b.resolved).map(storyBlockerPhrase),
     gaps: (gaps?.gaps ?? []).map((g) => g.text),
+    references: promptReferencesOf(linksOfRow(ticket), usable?.story.references ?? null, knownTickets, ticket.issueKey),
   };
+}
+
+/** The "Referenced tickets" the prompt lists (pure): the tracker links (blocked_by / linked, with the
+ *  status the tracker sent), then the label's references (one per key, `storyReferencesByKey`), each
+ *  with the stored status. The ticket itself is left out; ≤ PROMPT_REFERENCES_MAX. */
+export const PROMPT_REFERENCES_MAX = 30;
+export function promptReferencesOf(
+  links: readonly TicketLinkBlocker[] | null,
+  references: readonly StoryTicketReference[] | null,
+  known: ReadonlyMap<string, KnownTicket>,
+  selfKey: string,
+): PromptReference[] {
+  const out = new Map<string, PromptReference>();
+  const self = selfKey.trim().toUpperCase();
+  for (const l of links ?? []) {
+    const k = l.key.trim().toUpperCase();
+    if (k === self || out.has(k)) continue;
+    out.set(k, {
+      key: l.key,
+      title: l.title,
+      status: l.status,
+      done: l.category == null ? null : l.category === 'done',
+      relation: isBlockingRelation(l.relation) ? 'blocked_by' : 'linked',
+      quote: null,
+    });
+  }
+  for (const [k, r] of storyReferencesByKey(references)) {
+    if (k === self || out.has(k)) continue;
+    const t = known.get(k) ?? null;
+    out.set(k, {
+      key: r.ticketKey,
+      title: t?.title ?? null,
+      status: t?.status ?? null,
+      done: t?.category == null ? null : t.category === 'done',
+      relation: r.relation,
+      quote: r.quote,
+    });
+  }
+  return [...out.values()].slice(0, PROMPT_REFERENCES_MAX);
 }
 
 // THE SPRINT ASSESSMENT'S RUNS ("Check against code", Reports → This sprint; docs/CLAUDE-REVIEW.md §
@@ -78,9 +129,13 @@ export async function knownIssuesForPrompt(
 //     flips the phase to writing) → the server validator (validate.ts: every cited path checked
 //     against the checkout, unverified ones DROPPED) → succeeded. The `finally` removes every
 //     checkout and the scratch directory, then runs a deferred clone-cache eviction.
-//   • CURRENCY: `fingerprint` is taken at START from SYNCED columns (ticket text hash + the accepted
-//     repos' `default_branch_head_sha`), so it is re-checkable from the DB alone; `repos_json` keeps
-//     the commit each checkout actually read.
+//   • THE MODE (plan / verify) is the CALLER's, from the ticket's stage at start (`sprintAssessModeOf`);
+//     stored on the row (`mode`) and folded into the fingerprint, and it picks the system prompt, the
+//     tool's shape and what the validator keeps.
+//   • CURRENCY: `fingerprint` is taken at START from SYNCED columns (mode + ticket text hash + the
+//     accepted repos' `default_branch_head_sha`), so it is re-checkable from the DB alone (the stage
+//     re-derived through the workspace's status layout); `repos_json` keeps the commit each checkout
+//     actually read.
 //   • The terminal write is a compare-and-set on queued/running, so a cancel that lands as the run
 //     finishes wins. Spend is recorded for every finished run that cost money (`recordAiUsage`,
 //     seam 'agent', feature 'sprint_assess').
@@ -102,6 +157,8 @@ export interface StartSprintAssessmentArgs {
   ticket: SprintTicketDbRow;
   criteria: string[];
   repos: SprintAssessRepo[];
+  /** From the ticket's stage at start (`sprintAssessModeOf`). */
+  mode: SprintAssessMode;
 }
 
 interface Job extends StartSprintAssessmentArgs {
@@ -178,7 +235,8 @@ export async function sprintAssessmentCurrency(accountId: number, row: Row): Pro
   if (row.status !== 'succeeded') return null;
   const ticket = await readSprintTicket(accountId, row.workspaceId, row.ident);
   const accepted = (await acceptedSprintRepoDetails(accountId, row.workspaceId, [row.ident])).get(row.ident) ?? [];
-  return sprintAssessmentCurrencyFrom(row, ticket, accepted);
+  const mode = ticket != null ? sprintAssessModeOf(await sprintTicketStage(accountId, row.workspaceId, ticket)) : 'plan';
+  return sprintAssessmentCurrencyFrom(row, ticket, accepted, mode);
 }
 
 /**
@@ -198,8 +256,13 @@ export async function startSprintAssessment(ctx: Ctx, a: StartSprintAssessmentAr
       ident: a.ident,
       model: SPRINT_ASSESS_MODEL,
       status: 'queued',
+      mode: a.mode,
       phase: null,
-      fingerprint: sprintAssessFingerprint(textHash, a.repos.map((r) => ({ repoId: r.repoId, sha: r.syncedSha }))),
+      fingerprint: sprintAssessFingerprint(
+        textHash,
+        a.repos.map((r) => ({ repoId: r.repoId, sha: r.syncedSha })),
+        a.mode,
+      ),
       textHash,
       reposJson: a.repos.map((r) => ({ repoId: r.repoId, fullName: r.fullName, sha: r.syncedSha })),
       createdAt: new Date(),
@@ -299,7 +362,7 @@ async function runAssessment(job: Job): Promise<void> {
     // What code already knows (DB only), read BEFORE the last abort check so a cancel during it wins.
     const known = await knownIssuesForPrompt(job.accountId, job.ticket, job.criteria).catch((err) => {
       ctx.log.warn({ assessmentId: id, err: String(err).slice(0, 200) }, 'sprint assess: known issues read failed');
-      return { blockers: [], gaps: [] };
+      return { blockers: [], gaps: [], references: [] as PromptReference[] };
     });
     if (job.abort.signal.aborted) return;
 
@@ -313,13 +376,15 @@ async function runAssessment(job: Job): Promise<void> {
       criteria: job.criteria,
       blockers: known.blockers,
       gaps: known.gaps,
+      references: known.references,
     };
     const nonce = pickReviewNonce(sprintAssessUntrustedTexts(promptTicket));
     const promptRepos = ok.map((x) => ({ fullName: x.repo.fullName, path: x.path, sha: x.sha }));
     const runner = runnerOverride ?? (await import('./agent.js')).runSprintAssessAgent;
     const res = await runner({
-      prompt: buildSprintAssessPrompt(promptTicket, promptRepos, nonce),
-      systemPrompt: SPRINT_ASSESS_SYSTEM_PROMPT,
+      prompt: buildSprintAssessPrompt(promptTicket, promptRepos, nonce, job.mode),
+      systemPrompt: sprintAssessSystemPrompt(job.mode),
+      mode: job.mode,
       cwd: scratch,
       worktrees: ok.map((x) => x.path),
       model: SPRINT_ASSESS_MODEL,
@@ -356,13 +421,21 @@ async function runAssessment(job: Job): Promise<void> {
       return;
     }
     const v = validateSprintAssessment(res.submitted, {
+      mode: job.mode,
+      criteriaCount: job.criteria.length,
       repos: ok.map((x) => ({ fullName: x.repo.fullName, path: x.path })),
+      references: known.references,
+      ticket: {
+        title: job.ticket.title,
+        description: job.ticket.description ?? '',
+        criteria: [...job.criteria, job.ticket.acceptanceCriteria ?? ''],
+      },
     });
     if (!v.ok) {
       await finish(id, { status: 'failed', error: 'invalid_assessment', ...usage }, true);
       return;
     }
-    if (v.dropped.paths + v.dropped.items > 0) ctx.log.info({ assessmentId: id, dropped: v.dropped }, 'sprint assess: validation removed items');
+    if (v.dropped.paths + v.dropped.items + (v.dropped.quotes ?? 0) > 0) ctx.log.info({ assessmentId: id, dropped: v.dropped }, 'sprint assess: validation removed items');
     await finish(id, { status: 'succeeded', bodyJson: v.body, droppedJson: v.dropped, error: null, ...usage }, true);
   } catch (err) {
     ctx.log.warn({ err, assessmentId: id }, 'sprint assess: run threw');

@@ -119,3 +119,41 @@ describe('setSprintRepos / acceptedSprintRepos', () => {
     await q.assignReposToWorkspace(wsA, 1, [repo['acme/web']!]);
   });
 });
+
+describe('effectiveSprintRepos (the default set)', () => {
+  const IDENT2 = 'jira:https://acme.atlassian.net#ENG-2';
+  it('never saved → the confident suggestions, defaulted; a saved EMPTY set wins from then on', async () => {
+    await db
+      .insert(schema.sprintTickets)
+      .values({
+        accountId: 1,
+        workspaceId: wsA,
+        ident: IDENT2,
+        provider: 'jira',
+        apiRoot: 'https://acme.atlassian.net',
+        issueKey: 'ENG-2',
+        title: 'Rate-limit the api endpoints',
+        firstSeenAt: new Date(),
+        lastSeenAt: new Date(),
+        fetchedAt: new Date(),
+        nextCheckAt: new Date(),
+      })
+      .execute();
+    const before = (await mod.effectiveSprintRepos(1, wsA, [IDENT2])).get(IDENT2)!;
+    expect(before.defaulted).toBe(true);
+    expect(before.accepted.map((r) => r.fullName)).toEqual(['acme/api']);
+    expect(before.accepted[0]).toMatchObject({ syncedSha: 'sha-api' });
+    expect(before.suggested).toEqual([]);
+    // The assessment reads the same effective set.
+    expect((await mod.acceptedSprintRepoDetails(1, wsA, [IDENT2])).get(IDENT2)?.map((r) => r.fullName)).toEqual(['acme/api']);
+    // Another tenant sees nothing of it.
+    expect((await mod.effectiveSprintRepos(2, wsA, [IDENT2])).size).toBe(0);
+
+    expect(await mod.setSprintRepos(1, wsA, IDENT2, [], () => 'manual')).toEqual({ ok: true, accepted: [] });
+    const after = (await mod.effectiveSprintRepos(1, wsA, [IDENT2])).get(IDENT2)!;
+    expect(after.defaulted).toBe(false);
+    expect(after.accepted).toEqual([]);
+    expect(after.suggested.map((s) => [s.fullName, s.confident])).toEqual([['acme/api', true]]);
+    expect((await mod.acceptedSprintRepoDetails(1, wsA, [IDENT2])).has(IDENT2)).toBe(false);
+  });
+});

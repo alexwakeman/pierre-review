@@ -3894,7 +3894,7 @@ check(
 // MUTATION CHECK: drop the accountId predicate from `getSprintStories` / `acceptedSprintRepos` /
 // `loadSprintAssessment` / `readSprintTicket` and the matching check goes red.
 {
-  console.log('\nsprint_tickets + sprint_ticket_repos + sprint_assessments + tracker_writes');
+  console.log('\nsprint_tickets + sprint_ref_tickets + sprint_ticket_repos + sprint_assessments + tracker_writes');
   const { trackerTicketIdent } = await import('@pierre-review/shared');
   const SITE = 'https://acme.atlassian.net';
   const ident = trackerTicketIdent('jira', SITE, 'SPR-1');
@@ -3947,6 +3947,19 @@ check(
   const { knownTicketsFor } = await import('../src/db/story-issue-input.js');
   check("knownTicketsFor(A) resolves A's ticket, never B's", (await knownTicketsFor(1, 'jira', SITE, ['SPR-1'])).get('SPR-1')?.title === 'A sprint ticket');
   check("knownTicketsFor(B) resolves B's ticket, never A's", (await knownTicketsFor(2, 'jira', SITE, ['spr-1'])).get('SPR-1')?.title === 'B sprint ticket');
+  // sprint_ref_tickets (the sprint read's referenced-ticket lookup) — knownTicketsFor's LAST source.
+  // MUTATION CHECK: drop the accountId predicate from its sprint_ref_tickets read and this goes red.
+  for (const [acct, ws, status] of [
+    [1, defaultA, 'A status'],
+    [2, defaultB, 'B status'],
+  ] as const) {
+    await db
+      .insert(schema.sprintRefTickets)
+      .values({ accountId: acct, workspaceId: ws, ident: trackerTicketIdent('jira', SITE, 'REF-9'), provider: 'jira', apiRoot: SITE, issueKey: 'REF-9', title: `${status} title`, statusName: status, statusCategory: 'done', url: null, readAt: now })
+      .execute();
+  }
+  check("knownTicketsFor(A) reads A's referenced ticket, never B's", (await knownTicketsFor(1, 'jira', SITE, ['REF-9'])).get('REF-9')?.status === 'A status');
+  check("knownTicketsFor(B) reads B's referenced ticket, never A's", (await knownTicketsFor(2, 'jira', SITE, ['REF-9'])).get('REF-9')?.status === 'B status');
   check(
     "setSprintRepos(A, wsA, ident, [B.repo]) → bad_repo",
     (await setSprintRepos(1, defaultA, ident, [B.repoId], () => 'manual')).ok === false,
@@ -3954,6 +3967,11 @@ check(
   await setSprintRepos(1, defaultA, ident, [A.repoId], () => 'manual');
   check("acceptedSprintRepos(A) holds A's repo", (await acceptedSprintRepos(1, defaultA, [ident])).get(ident)?.[0]?.repoId === A.repoId);
   check("acceptedSprintRepos(B, wsA) is empty", (await acceptedSprintRepos(2, defaultA, [ident])).size === 0);
+  {
+    const { effectiveSprintRepos } = await import('../src/db/sprint-ticket-repos.js');
+    check("effectiveSprintRepos(B, wsA) sees no ticket and no repo", (await effectiveSprintRepos(2, defaultA, [ident])).size === 0);
+    check("effectiveSprintRepos(A) is A's SAVED set", (await effectiveSprintRepos(1, defaultA, [ident])).get(ident)?.defaulted === false);
+  }
   check("acceptedSprintRepos(B, wsB) never reads A's accepted repo", (await acceptedSprintRepos(2, defaultB, [ident])).size === 0);
   let fkRefused = false;
   try {
@@ -4009,14 +4027,15 @@ check(
   // refuses rather than writing onto A's Default. MUTATION CHECK: drop the accountId predicate from
   // `setSprintStatusSettings` and the first check goes red.
   const statusSettings = await import('../src/db/sprint-status-settings.js');
-  const bOrder = { order: ['To Do', 'Doing', 'Done'], deliveredFrom: 'Doing' };
+  const bOrder = { sections: { not_started: ['To Do'], in_progress: [], in_review: ['Doing'], done: ['Done'] } };
+  const bReview = async () => (await statusSettings.getSprintStatusSettings(2, defaultB)).sections?.in_review[0];
   await statusSettings.setSprintStatusSettings(2, defaultB, bOrder);
   check(
     "setSprintStatusSettings(A, B's workspace) writes nothing",
-    (await statusSettings.setSprintStatusSettings(1, defaultB, { order: null, deliveredFrom: 'X' })) === false &&
-      (await statusSettings.getSprintStatusSettings(2, defaultB)).deliveredFrom === 'Doing',
+    (await statusSettings.setSprintStatusSettings(1, defaultB, { sections: { not_started: [], in_progress: [], in_review: ['X'], done: [] } })) === false &&
+      (await bReview()) === 'Doing',
   );
-  check("getSprintStatusSettings(A, B's workspace) never reads B's order", (await statusSettings.getSprintStatusSettings(1, defaultB)).order == null);
+  check("getSprintStatusSettings(A, B's workspace) never reads B's order", (await statusSettings.getSprintStatusSettings(1, defaultB)).sections == null);
   const contract = await import('../src/pro/contract.js');
   const savedCaps = contract.getProCapabilities();
   contract.setProCapabilities({ ...contract.EMPTY_CAPABILITIES, periodReports: true });
@@ -4033,11 +4052,11 @@ check(
     const res = await sapp.inject({
       method: 'PUT',
       url: '/api/sprint-stories/statuses',
-      payload: { workspaceId: defaultB, settings: { order: null, deliveredFrom: 'X' } },
+      payload: { workspaceId: defaultB, settings: { sections: { not_started: [], in_progress: [], in_review: ['X'], done: [] } } },
     });
     check(
       "PUT /api/sprint-stories/statuses with B's workspace as A → 400, B's override intact",
-      res.statusCode === 400 && (await statusSettings.getSprintStatusSettings(2, defaultB)).deliveredFrom === 'Doing',
+      res.statusCode === 400 && (await bReview()) === 'Doing',
     );
     await sapp.close();
   } finally {

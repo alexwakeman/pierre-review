@@ -1,7 +1,8 @@
 // The sprint assessment's ROUTES (review/sprint-assess/routes.ts) on a THROWAWAY sqlite DB with a
 // real Fastify instance, a FAKE runner and a FAKE checkout (never a real model call or clone).
 // Pinned: 402 before any DB work on all three; 400 on shape; 404 no_ticket (incl. another tenant's
-// ticket through a foreign workspace id); 422 no_repos; 202 start; 409 busy + runningId while a run
+// ticket through a foreign workspace id); 422 no_repos (never saved, no confident suggestion); a
+// never-saved ticket runs on its DEFAULTED confident repos; 202 start; 409 busy + runningId while a run
 // is in flight; GET/cancel of another account's id → 404. (Cloud registers none of these — the
 // integrator pins that in review/agentic.test.ts.)
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -31,6 +32,8 @@ const ROOT = 'https://acme.atlassian.net';
 const WITH_REPO = `jira:${ROOT}#ENG-1`;
 const NO_REPO = `jira:${ROOT}#ENG-2`;
 const FOREIGN = `jira:${ROOT}#ENG-9`;
+const DEFAULTED = `jira:${ROOT}#ENG-3`;
+let checkedOut: string[] = [];
 let release: () => void = () => {};
 
 beforeAll(async () => {
@@ -49,22 +52,33 @@ beforeAll(async () => {
   ws = await q.ensureDefaultWorkspace(1);
   foreignWs = await q.ensureDefaultWorkspace(2);
   const [r] = await db.insert(schema.repos).values({ accountId: 1, githubNodeId: 'R_sar', owner: 'acme', name: 'web' }).returning({ id: schema.repos.id }).execute();
-  await q.assignReposToWorkspace(ws, 1, [r.id]);
-  const ticket = (accountId: number, workspaceId: number, ident: string) => ({
+  // TWO repos, so no repo is confident by being the only one: a ticket naming neither has no default.
+  const [r2] = await db.insert(schema.repos).values({ accountId: 1, githubNodeId: 'R_sar2', owner: 'acme', name: 'payments' }).returning({ id: schema.repos.id }).execute();
+  await q.assignReposToWorkspace(ws, 1, [r.id, r2.id]);
+  const ticket = (accountId: number, workspaceId: number, ident: string, title = 'T') => ({
     accountId,
     workspaceId,
     ident,
     provider: 'jira',
     apiRoot: ROOT,
     issueKey: ident.split('#')[1],
-    title: 'T',
+    title,
     acceptanceCriteria: '- one',
     firstSeenAt: new Date(),
     lastSeenAt: new Date(),
     fetchedAt: new Date(),
     nextCheckAt: new Date(),
   });
-  await db.insert(schema.sprintTickets).values([ticket(1, ws, WITH_REPO), ticket(1, ws, NO_REPO), ticket(2, foreignWs, FOREIGN)]).execute();
+  await db
+    .insert(schema.sprintTickets)
+    .values([
+      ticket(1, ws, WITH_REPO),
+      ticket(1, ws, NO_REPO),
+      // Names the payments repo: a confident suggestion, accepted by default (never saved).
+      ticket(1, ws, DEFAULTED, 'Refunds in payments'),
+      ticket(2, foreignWs, FOREIGN),
+    ])
+    .execute();
   await db.insert(schema.sprintTicketRepos).values({ accountId: 1, workspaceId: ws, ident: WITH_REPO, repoId: r.id, via: 'manual', acceptedAt: new Date() }).execute();
 
   const contract = await import('../../pro/contract.js');
@@ -73,10 +87,13 @@ beforeAll(async () => {
   contract.setProCapabilities(fullCaps);
   setCaps = contract.setProCapabilities;
   mgr = await import('./manager.js');
-  mgr.setSprintAssessCheckoutForTests((async (repos: any[]) => ({
-    checkouts: repos.map((x) => ({ ...x, path: checkout, repoCloneDir: checkout, sha: 's', error: null })),
-    cleanup: async () => {},
-  })) as any);
+  mgr.setSprintAssessCheckoutForTests((async (repos: any[]) => {
+    checkedOut = repos.map((x: any) => `${x.owner}/${x.name}`);
+    return {
+      checkouts: repos.map((x) => ({ ...x, path: checkout, repoCloneDir: checkout, sha: 's', error: null })),
+      cleanup: async () => {},
+    };
+  }) as any);
   mgr.setSprintAssessRunnerForTests(async () => {
     await new Promise<void>((res) => {
       release = res;
@@ -138,11 +155,23 @@ describe('sprint assessment routes', () => {
     mgr.releaseSprintAssessSlot(1, NO_REPO);
   });
 
+  it('a never-saved ticket runs on its defaulted confident repos', async () => {
+    const res = await assess({ workspaceId: ws, ident: DEFAULTED });
+    expect(res.statusCode).toBe(202);
+    const id = (res.json() as any).assessment.id as number;
+    for (let i = 0; i < 100 && checkedOut.length === 0; i += 1) await new Promise((r) => setTimeout(r, 10));
+    expect(checkedOut).toEqual(['acme/payments']);
+    await app.inject({ method: 'POST', url: `/api/sprint-stories/assessments/${id}/cancel` });
+    release();
+    await mgr.sprintAssessRunPromise(id);
+  });
+
   it('starts one run per ticket; a second click is busy; another account cannot read or cancel it', async () => {
     const res = await assess({ workspaceId: ws, ident: WITH_REPO });
     expect(res.statusCode).toBe(202);
     const id = (res.json() as any).assessment.id as number;
-    expect((res.json() as any).assessment).toMatchObject({ ident: WITH_REPO, model: 'claude-sonnet-5' });
+    // No status → Not started → the server picks PLAN.
+    expect((res.json() as any).assessment).toMatchObject({ ident: WITH_REPO, model: 'claude-sonnet-5', mode: 'plan' });
     const busy = await assess({ workspaceId: ws, ident: WITH_REPO });
     expect(busy.statusCode).toBe(409);
     expect(busy.json()).toMatchObject({ error: 'busy', runningId: id });
@@ -159,5 +188,19 @@ describe('sprint assessment routes', () => {
     release();
     await mgr.sprintAssessRunPromise(id);
     expect((await mgr.loadSprintAssessment(1, id))!.status).toBe('cancelled');
+  });
+
+  it('the server picks the mode from the stored ticket stage: in review → verify (the client cannot choose)', async () => {
+    const { eq } = await import('drizzle-orm');
+    await db.update(schema.sprintTickets).set({ statusName: 'In Review', statusCategory: 'indeterminate' }).where(eq(schema.sprintTickets.ident, WITH_REPO)).execute();
+    const res = await assess({ workspaceId: ws, ident: WITH_REPO, mode: 'plan' });
+    expect(res.statusCode).toBe(202);
+    const id = (res.json() as any).assessment.id as number;
+    expect((res.json() as any).assessment.mode).toBe('verify');
+    expect((await mgr.loadSprintAssessment(1, id))!.mode).toBe('verify');
+    await app.inject({ method: 'POST', url: `/api/sprint-stories/assessments/${id}/cancel` });
+    release();
+    await mgr.sprintAssessRunPromise(id);
+    await db.update(schema.sprintTickets).set({ statusName: null, statusCategory: null }).where(eq(schema.sprintTickets.ident, WITH_REPO)).execute();
   });
 });

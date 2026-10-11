@@ -19,9 +19,9 @@ import {
   storyLabelRunningId,
 } from './manager.js';
 
-// THE STORY LABEL RUN'S ROUTES (docs/API.md § Story health; docs/CLAUDE-REVIEW.md § Story labels).
-// Registered ONLY through `registerAgenticRoutes` — its explicit `isCloud` check is the cloud
-// guarantee (these 404 there, and `GET /api/story-health` reports `labels: false`). Pro with the rest
+// THE STORY LABEL RUN'S ROUTES (docs/API.md § Story labels; docs/CLAUDE-REVIEW.md § Story labels). The
+// paths keep the retired Story health prefix. Registered ONLY through `registerAgenticRoutes` — its
+// explicit `isCloud` check is the cloud guarantee (these 404 there). Pro with the rest
 // of Reports: `reportsEntitled` false → 402 BEFORE any DB work. The body's workspace goes through
 // `resolveWorkspaceScope`: an unknown or another tenant's id falls to the caller's Default, never 404.
 //

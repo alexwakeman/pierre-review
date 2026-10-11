@@ -8,11 +8,13 @@ import {
   isStoryIssueId,
   storyIssueBullet,
   storyIssueTypeChecked,
+  type StoryBlocker,
   type StoryIssue,
   type StoryIssueChecks,
   type StoryIssueId,
 } from './story-issues.js';
 import { STORY_SPEC_GAP_TYPE_LABEL, type StorySpecGap, type StorySpecGapType } from './story-health.js';
+import type { StoryQuoteWhere, StoryRuleId } from './story-rules.js';
 
 // REPORTS → THIS SPRINT — the wire contract for `GET /api/sprint-stories` and its siblings
 // (docs/API.md § This sprint; docs/TRACKERS.md § The sprint list read; docs/CLAUDE-REVIEW.md §
@@ -29,10 +31,11 @@ import { STORY_SPEC_GAP_TYPE_LABEL, type StorySpecGap, type StorySpecGapType } f
 //     Haiku, `STORY_RUBRIC_VERSION`); a label half appears only while the label is CURRENT. Two are
 //     CHIPS (Unclear when done, Blocked); spec gaps are a section of the opened card (`specGaps`).
 //     Chip text and bullets are TEMPLATED — never model text.
-//   • THE SECTIONS follow the workspace's STATUS LAYOUT (`SprintStatusLayout`): Not started, then
-//     "Writing code" (one section per status before the code-delivered status), then "Code delivered"
-//     (one per status from it on). The order and the code-delivered status are AUTOMATIC (the tracker's
-//     board / workflow order; PR evidence) unless the workspace overrides them (`SprintStatusSettings`).
+//   • THE SECTIONS follow the workspace's STATUS LAYOUT (`SprintStatusLayout`): FOUR stages — Not
+//     started, In progress, In review, Done — each with one sub-section per status, in order. Which
+//     stage a status sits in, and the order, are AUTOMATIC (category, a review/QA name vocabulary, PR
+//     evidence; the tracker's board / workflow order) unless the workspace places them itself
+//     (`SprintStatusSettings`). Done tickets are LISTED, last.
 //   • THE ASSESSMENT ("Check against code") is a local-only Sonnet 5 agent run over read-only default
 //     branch checkouts of the repos the reader ACCEPTED for the ticket: a one-sentence summary, at
 //     most one sentence per issue, and an optional revised criteria list. Its cited paths are VERIFIED
@@ -81,13 +84,26 @@ export const SPRINT_ASSESS_MAX_TURNS = 60;
 
 /** The assessment's caps — the server's validator; the SPA never re-checks. */
 export const SPRINT_ASSESS_CAPS = {
-  /** Characters, after trimming. Over-long text is cut (with "…"), never refused. */
-  summary: 200,
-  issueText: 220,
+  /** Characters, after trimming. The tool's schema refuses over-long text (the model rewrites it);
+   *  the server's validator cuts anything that still gets through (with "…"). Two or three sentences. */
+  summary: 400,
+  /** A finding's sentence. */
+  findingText: 220,
+  /** A finding's suggested rewrite of its quote. */
+  suggestion: 300,
   criterionText: 200,
-  /** One per issue id. */
-  issues: 3,
+  /** Findings one run may store. */
+  findings: 6,
   revisedCriteria: 12,
+  /** A proposed description (only when the description should change). */
+  revisedDescription: 4000,
+  /** PLAN mode: high-level changes one run may store, and one change's sentence. */
+  planSteps: 6,
+  planChange: 200,
+  /** VERIFY mode: criteria one run may check, one check's evidence sentence, the coverage line. */
+  criterionChecks: 30,
+  evidence: 220,
+  coverage: 300,
 } as const;
 
 /** The write-back's text cap (characters). Jira's own comment limit is 32,767. */
@@ -214,11 +230,17 @@ export const SPRINT_REPO_REASON_LABEL: Record<SprintRepoReason, string> = {
 };
 
 export interface SprintRepoSuggestion extends SprintRepoRef {
-  /** Strongest first. */
+  /** Strongest first; [] only for the workspace's ONLY repo when nothing else points at it. */
   reasons: SprintRepoReason[];
   /** Earlier merged PRs behind the history reasons (0 for a text-only reason). */
   prCount: number;
+  /** Strong enough to be accepted by default: a `ticket_pr`, `issue_repo` or `named_in_ticket` reason,
+   *  a history reason over ≥ SPRINT_REPO_CONFIDENT_MIN_PRS merged PRs, or the workspace's only repo. */
+  confident: boolean;
 }
+
+/** Merged PRs a history reason needs for its suggestion to be confident. */
+export const SPRINT_REPO_CONFIDENT_MIN_PRS = 3;
 
 /** PUT /api/sprint-stories/repos — replace the ACCEPTED set for one ticket (≤ SPRINT_REPOS_PER_TICKET_MAX).
  *  Every id must be a repo of THIS workspace; anything else 400s (`bad_repo`) and nothing is written. */
@@ -238,7 +260,55 @@ export interface SprintReposResponse {
 
 /** Bumped when the stored body's SHAPE changes: folded into the run's fingerprint (old runs read
  *  'stale') and a stored body of another shape is served as `body: null, outdated: true`. */
-export const SPRINT_ASSESS_FORMAT_VERSION = 3;
+export const SPRINT_ASSESS_FORMAT_VERSION = 5;
+
+/** "Check against code" is STAGE-AWARE (format 5). The server picks the mode from the ticket's stage
+ *  at start (`sprintAssessModeOf`), stores it on the run and folds it into the fingerprint, so a stage
+ *  change makes the run stale.
+ *   • 'plan'   (Not started, In progress): no code is expected yet — the run lists the few high-level
+ *              changes needed and where (`plan`), never "this may already be done".
+ *   • 'verify' (In review, Done): the code is expected on the default branch — the run checks each
+ *              criterion against it and names a covering test (`criterionChecks`, `coverage`). */
+export type SprintAssessMode = 'plan' | 'verify';
+
+export function sprintAssessModeOf(stage: SprintStage): SprintAssessMode {
+  return stage === 'in_review' || stage === 'done' ? 'verify' : 'plan';
+}
+
+/** PLAN mode: one high-level change the ticket needs. */
+export interface SprintPlanStep {
+  /** owner/name — one of the run's accepted repos. */
+  repo: string;
+  /** An existing file or directory the change touches, VERIFIED in the checkout; null when the step
+   *  names a new file (`newPath`) or the path did not verify. */
+  path: string | null;
+  /** A proposed repo-relative path for a NEW file (not verified — it does not exist yet); null otherwise. */
+  newPath: string | null;
+  /** One sentence, ≤ SPRINT_ASSESS_CAPS.planChange. */
+  change: string;
+}
+
+export type SprintCriterionStatus = 'met' | 'partly' | 'not_met' | 'unclear';
+
+export const SPRINT_CRITERION_STATUS_LABEL: Record<SprintCriterionStatus, string> = {
+  met: 'Met',
+  partly: 'Partly met',
+  not_met: 'Not met',
+  unclear: 'Unclear',
+};
+
+/** VERIFY mode: one numbered criterion checked against the default branch. */
+export interface SprintCriterionCheck {
+  /** 1-based, the ticket's criterion number (`criteria.items`). */
+  n: number;
+  status: SprintCriterionStatus;
+  /** One sentence, ≤ SPRINT_ASSESS_CAPS.evidence. */
+  evidence: string;
+  /** The file showing it, VERIFIED; null when none was cited or it did not verify. */
+  ref: SprintCodeRef | null;
+  /** A test file covering it, VERIFIED; null = no covering test found (or it did not verify). */
+  tests: SprintCodeRef | null;
+}
 
 export interface SprintCodeRef {
   /** owner/name — one of the run's accepted repos. */
@@ -247,32 +317,55 @@ export interface SprintCodeRef {
   path: string;
 }
 
-/** Claude's one sentence for one of the three issues, backed by the ticket or the code. "Blocked" must
- *  name WHAT it waits on and WHO; "Spec gaps" must name the missing detail. */
-export interface SprintAssessmentIssue {
-  id: StoryIssueId;
-  /** One sentence, ≤ SPRINT_ASSESS_CAPS.issueText. */
+/** One of Claude's findings (format 4), anchored like the labeller's: `rule` from the closed
+ *  vocabulary for its issue (story-rules.ts), `quote` an exact passage of the ticket VERIFIED by the
+ *  server (null when none was given or it did not verify — the finding is kept, unanchored). */
+export interface SprintAssessmentFinding {
+  issue: StoryIssueId;
+  rule: StoryRuleId;
+  /** The ticket's own spelling of the passage (`verifyStoryQuote`); null = unanchored. */
+  quote: string | null;
+  where: StoryQuoteWhere | null;
+  /** One sentence, ≤ SPRINT_ASSESS_CAPS.findingText. */
   text: string;
+  /** A rewrite of the quoted text, ≤ SPRINT_ASSESS_CAPS.suggestion; null when none (always null on an
+   *  unanchored finding — there is nothing to rewrite). */
+  suggestion: string | null;
   /** A verified file it rests on; null when none was cited or the path did not verify. */
   ref: SprintCodeRef | null;
 }
 
 /** Field names are the `submit_assessment` tool's (after server validation). */
 export interface SprintAssessmentBody {
-  /** The single most important finding, one sentence (e.g. "This may already be done: …"). */
+  /** Which check this was (format 5). */
+  mode: SprintAssessMode;
+  /** The most important things, two or three sentences at most. */
   summary: string;
-  /** At most one per issue id, at most 3, in STORY_ISSUES order. */
-  issues: SprintAssessmentIssue[];
+  /** PLAN mode only (≤ SPRINT_ASSESS_CAPS.planSteps); [] in verify mode. */
+  plan: SprintPlanStep[];
+  /** VERIFY mode only, by criterion number; [] in plan mode. */
+  criterionChecks: SprintCriterionCheck[];
+  /** VERIFY mode: one sentence on which criteria have tests; null in plan mode. */
+  coverage: string | null;
+  /** ≤ SPRINT_ASSESS_CAPS.findings, in STORY_ISSUES order (stable within an issue). */
+  findings: SprintAssessmentFinding[];
   /** A proposed criteria list (≤ 12), each ≤ SPRINT_ASSESS_CAPS.criterionText. [] = keep them. */
   revisedCriteria: string[];
+  /** A proposed description (≤ SPRINT_ASSESS_CAPS.revisedDescription), only when the description
+   *  should change; null = keep it. */
+  revisedDescription: string | null;
 }
 
 /** What validation removed — stored, behind an ⓘ. */
 export interface SprintAssessmentDropped {
   /** Cited paths that do not exist in the checkout (or name an unaccepted repo); the text is kept. */
   paths: number;
-  /** Issues with an unknown or repeated id, empty items, items over a cap. */
+  /** Findings with an unknown issue or a rule outside its issue's vocabulary, empty items, items over
+   *  a cap. */
   items: number;
+  /** Quotes that did not verify against the ticket text (the finding is kept, unanchored). Absent on
+   *  runs stored before format 4. */
+  quotes?: number;
 }
 
 export type SprintAssessmentStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
@@ -308,6 +401,8 @@ export interface SprintAssessmentRecord {
   ident: string;
   model: string;
   status: SprintAssessmentStatus;
+  /** The check this run does (from the ticket's stage at start); null on runs stored before format 5. */
+  mode: SprintAssessMode | null;
   /** While queued/running; null once finished. */
   phase: SprintAssessmentPhase | null;
   /** The repos and the default-branch commits the run read. */
@@ -386,6 +481,21 @@ export function sprintReplaceBaseTruncated(text: string, target: SprintReplaceTa
   return text.length > (target.kind === 'ac_field' ? SPRINT_TEXT_MAX.criteria : SPRINT_TEXT_MAX.description);
 }
 
+/** Whether a write may replace `target` on a ticket whose criteria live where `criteriaTarget` says:
+ *  the description ALWAYS, and the criteria field only when it is the ticket's own (`sprintReplaceTarget`).
+ *  The server's check (`409 target_changed` otherwise). */
+export function sprintWriteTargetAllowed(target: SprintReplaceTarget, criteriaTarget: SprintReplaceTarget): boolean {
+  if (target.kind === 'description') return true;
+  return criteriaTarget.kind === 'ac_field' && criteriaTarget.fieldId === target.fieldId && criteriaTarget.fieldName === target.fieldName;
+}
+
+/** One replaceable field's base: the sha256 of its FULL stored text (sent back as `baseHash`) and
+ *  whether the copy on the wire was cut (`SPRINT_TEXT_MAX`) — a cut field is not editable. */
+export interface SprintReplaceBase {
+  hash: string;
+  truncated: boolean;
+}
+
 /** The button's product name ("Update in Jira"). */
 export const SPRINT_PROVIDER_LABEL: Record<TrackerProvider, string> = {
   jira: 'Jira',
@@ -403,9 +513,10 @@ export interface SprintWriteRequest {
   /** Minted per confirm dialog (`SPRINT_WRITE_REQUEST_ID_RE`). A second POST with the same id is
    *  answered with the first one's record and never writes again. */
   requestId: string;
-  /** For 'replace': the target the dialog SHOWED. A server-side mismatch refuses `target_changed`. */
+  /** For 'replace': the field written — the description, or the ticket's own criteria field
+   *  (`sprintWriteTargetAllowed`); anything else refuses `target_changed`. */
   target?: SprintReplaceTarget;
-  /** For 'replace' (required there): the row's `replaceBase.hash` the dialog was built on. The server
+  /** For 'replace' (required there): that field's `replaceBases` hash the draft was built on. The server
    *  re-reads the ticket live first; a different text refuses `ticket_changed` and writes nothing. */
   baseHash?: string;
   /** The assessment the text came from, when it did (history only). */
@@ -468,54 +579,71 @@ export function sprintNoWriteSentence(provider: TrackerProvider): string {
 
 // ── The list ─────────────────────────────────────────────────────────────────────────────────────
 
-export type SprintPhase = 'not_started' | 'in_progress';
+/** The coarse phase of a listed ticket — derived from its `stage` (in_progress = In progress or In
+ *  review). */
+export type SprintPhase = 'not_started' | 'in_progress' | 'done';
 
 export const SPRINT_PHASE_LABEL: Record<SprintPhase, string> = {
   not_started: 'Not started',
   in_progress: 'In progress',
+  done: 'Done',
 };
 
-// ── The status layout (sections by status) ───────────────────────────────────────────────────────
+// ── The status layout (four stages, sections by status) ───────────────────────────────────────────
 //
-// Statuses are per PROJECT and per TRACKER, so nothing here hard-codes a status name. Two facts are
-// worked out automatically and may each be OVERRIDDEN per workspace:
+// Statuses are per PROJECT and per TRACKER, so nothing here hard-codes a status name. Each status is
+// placed in ONE of four stages and given a position; both are worked out automatically and the
+// workspace may place any status itself:
 //
 //   • THE ORDER — Jira: the board's column order (the sprint's `boardId` →
 //     `/rest/agile/1.0/board/{id}/configuration`, status ids → names via `/rest/api/2/status`);
 //     Linear: the team's workflow states (type, then `position`); GitHub Issues: Open, Closed. Stored
 //     on `sprint_reads.status_order_json` by the sprint read. Unreadable → null, and the fallback is
 //     the statuses on the tickets sorted by category (new → indeterminate → done), then name.
-//   • "CODE DELIVERED FROM" — the FIRST in-progress (category `indeterminate`) status, in order, where
-//     at least SPRINT_DELIVERED_MIN_SHARE of the tickets that have ≥ 1 pull request have ALL of them
-//     merged and none open, with at least SPRINT_DELIVERED_MIN_TICKETS such tickets. The evidence is
-//     the stored ticket rows joined to `pull_requests` (`SprintStatusEvidence`). None qualifies → null.
+//   • THE AUTOMATIC STAGE — category `new` → Not started, `done` → Done. An in-progress (or
+//     unknown-category) status is In review when its NAME reads as review / QA / test / release
+//     (`SPRINT_REVIEW_STATUS_RE`), or when it sits at or after the PR-evidence boundary: the FIRST
+//     in-progress status, in order, where at least SPRINT_DELIVERED_MIN_SHARE of the tickets that have
+//     ≥ 1 pull request have ALL of them merged and none open, with at least
+//     SPRINT_DELIVERED_MIN_TICKETS such tickets. Otherwise In progress.
+//   • THE OVERRIDE (`SprintStatusSettings.sections`) lists, per stage, the statuses the reader placed,
+//     in order. ⚠ PLACEMENT BEATS CATEGORY: a `done`-category status the reader put in In review is In
+//     review. A status the override does not name (new on the board since) keeps its AUTOMATIC stage
+//     and position.
+//   • "Coding begins" = the first status of In progress; "Coding ends" = the first of In review
+//     (`codingBegins` / `codingEnds`) — derived, never stored.
 //
-// A status NAME is matched case-insensitively (trimmed). An override names statuses; a status it does
-// not name (new on the board since) keeps its AUTOMATIC position relative to its neighbours.
-//
-// ⚠ Category beats position: a `new` status is always Not started and a `done` one is always counted
-// (never listed), wherever the order puts it. Only `indeterminate` (or unknown-category) statuses are
-// split into "Writing code" / "Code delivered".
+// A status NAME is matched case-insensitively (trimmed).
 
-/** Share of PR-bearing tickets in a status that must be fully merged for it to read as delivered. */
+/** Share of PR-bearing tickets in a status that must be fully merged for it to start In review. */
 export const SPRINT_DELIVERED_MIN_SHARE = 0.6;
 /** Fully-merged tickets a status needs at least, for that share to count. */
 export const SPRINT_DELIVERED_MIN_TICKETS = 2;
-/** Statuses an override may list at most; a status name's longest spelling. */
+/** Statuses an override may list at most (over all four stages); a status name's longest spelling. */
 export const SPRINT_STATUS_ORDER_MAX = 60;
 export const SPRINT_STATUS_NAME_MAX = 100;
 
-/** Where a ticket sits on the page. 'done' tickets are counted, never listed. */
-export type SprintStage = 'not_started' | 'writing' | 'delivered' | 'done';
+/** An in-progress status whose NAME matches this is automatically In review ("Code Review", "Ready for
+ *  QA", "In Test", "Awaiting Deployment", "UAT", "Sign-off", "Staging", "Demo", "Release"). */
+export const SPRINT_REVIEW_STATUS_RE =
+  /\b(?:review|qa|tests?|testing|verif\w*|uat|accept\w*|sign.?off|staging|ready for|demo|deploy\w*|release\w*)\b/i;
 
-export const SPRINT_STAGE_LABEL: Record<Exclude<SprintStage, 'done'>, string> = {
+/** The four stages, in page order. */
+export type SprintStage = 'not_started' | 'in_progress' | 'in_review' | 'done';
+
+export const SPRINT_STAGES: readonly SprintStage[] = ['not_started', 'in_progress', 'in_review', 'done'];
+
+export const SPRINT_STAGE_LABEL: Record<SprintStage, string> = {
   not_started: 'Not started',
-  writing: 'Writing code',
-  delivered: 'Code delivered',
+  in_progress: 'In progress',
+  in_review: 'In review',
+  done: 'Done',
 };
 
-/** The heading over the in-progress statuses when no code-delivered status is known (nothing splits). */
-export const SPRINT_IN_PROGRESS_HEADING = 'In progress';
+/** The coarse phase of a stage. */
+export function sprintPhaseOfStage(stage: SprintStage): SprintPhase {
+  return stage === 'not_started' ? 'not_started' : stage === 'done' ? 'done' : 'in_progress';
+}
 
 /** The automatic order as the sprint read stored it (`sprint_reads.status_order_json`). */
 export interface SprintStatusAutoOrder {
@@ -526,28 +654,29 @@ export interface SprintStatusAutoOrder {
   readAt: string;
 }
 
-/** The workspace's override (`workspaces.sprint_statuses`). OVERRIDES ONLY: a null half = automatic;
- *  both null is stored as NULL. Names are matched case-insensitively. */
+/** The workspace's override (`workspaces.sprint_statuses`). OVERRIDES ONLY: `sections: null` =
+ *  automatic (stored as NULL). Each stage lists the statuses the reader placed there, in order; names
+ *  are matched case-insensitively. (A stored value of the retired `{order, deliveredFrom}` shape is
+ *  read into this one.) */
 export interface SprintStatusSettings {
-  order: string[] | null;
-  deliveredFrom: string | null;
+  sections: Record<SprintStage, string[]> | null;
 }
 
-export const SPRINT_STATUS_SETTINGS_DEFAULT: SprintStatusSettings = { order: null, deliveredFrom: null };
+export const SPRINT_STATUS_SETTINGS_DEFAULT: SprintStatusSettings = { sections: null };
 
 /** One status in the resolved order. */
 export interface SprintStatusLayoutEntry {
   name: string;
   category: JiraStatusCategory | null;
-  /** Listed (not done) tickets in this status right now; 0 for a known status with none. */
+  /** Tickets in this status right now (Done ones included); 0 for a known status with none. */
   count: number;
-  /** Its position came from the automatic order (true) or the override (false). */
+  /** Its stage AND position came from the automatic layout (true) or the override (false). */
   auto: boolean;
   /** The stage tickets in this status are listed under. */
   stage: SprintStage;
 }
 
-/** Per in-progress status: the PR evidence behind "code delivered from". */
+/** Per in-progress status: the PR evidence behind the automatic In review boundary. */
 export interface SprintStatusEvidence {
   status: string;
   /** Tickets in this status with ≥ 1 pull request. */
@@ -557,26 +686,27 @@ export interface SprintStatusEvidence {
 }
 
 export interface SprintStatusLayout {
-  /** Every known status (automatic order ∪ statuses on the tickets ∪ the override's names), resolved
-   *  order. The page renders a section per entry with `count > 0`. */
+  /** Every known status (automatic order ∪ statuses on the tickets ∪ the override's names), grouped
+   *  by stage in SPRINT_STAGES order, in order within a stage. The page renders a section per entry
+   *  with `count > 0`. */
   order: SprintStatusLayoutEntry[];
   /** Where the order came from: the override, the tracker, or the category fallback. */
   orderSource: 'override' | SprintStatusAutoOrder['source'] | 'fallback';
-  /** The effective code-delivered status (override, else automatic); null = nothing splits. */
-  deliveredFrom: string | null;
-  /** What the evidence says on its own (shown in the settings ⓘ and as the "Reset" target). */
-  deliveredFromAuto: string | null;
-  /** In order; in-progress statuses only. */
+  /** The first status of In progress / of In review (null when that stage is empty). */
+  codingBegins: string | null;
+  codingEnds: string | null;
+  /** In order; in-progress (and unknown-category) statuses only. */
   evidence: SprintStatusEvidence[];
   /** The stored override (default when none). */
   settings: SprintStatusSettings;
 }
 
 /** PUT /api/sprint-stories/statuses — replace the workspace's override (Pro, `periodReports`; the
- *  `read` tier; scope via `resolveWorkspaceScope`). Strict: a non-array `order`, a name over
- *  SPRINT_STATUS_NAME_MAX, NUL / control characters, more than SPRINT_STATUS_ORDER_MAX names, or a
- *  `deliveredFrom` that is not a string or null → 400 and nothing is written. `{order: null,
- *  deliveredFrom: null}` = "Reset to automatic" (stored as NULL). */
+ *  `read` tier; scope via `resolveWorkspaceScope`). Strict: `sections` not null and not an object with
+ *  exactly the four stage keys, each an array of names; a name over SPRINT_STATUS_NAME_MAX, empty, or
+ *  with NUL / control characters; more than SPRINT_STATUS_ORDER_MAX names in all; or one name in two
+ *  places (case-insensitive) → 400 and nothing is written. `{sections: null}` = "Reset to automatic"
+ *  (stored as NULL). */
 export interface SprintStatusesUpdate {
   workspaceId: number;
   settings: SprintStatusSettings;
@@ -589,6 +719,57 @@ export interface SprintStatusesResponse {
   statusLayout: SprintStatusLayout;
 }
 
+/** How a related ticket is tied to this one:
+ *   • blocked_by — a stored tracker link that BLOCKS it ("is blocked by", "depends on");
+ *   • depends_on / concurrent / builds_on / supersedes / out_of_scope / context — what the CURRENT
+ *     label says the text means by it (shared `StoryReferenceRelation`, rubric 4);
+ *   • linked — another stored tracker link;
+ *   • mentioned — named in the description / criteria with no label reading of it (no current label). */
+export type SprintRelation =
+  | 'blocked_by'
+  | 'depends_on'
+  | 'concurrent'
+  | 'builds_on'
+  | 'supersedes'
+  | 'out_of_scope'
+  | 'context'
+  | 'linked'
+  | 'mentioned';
+
+/** Related tickets one card lists at most (blockers first, then build-alongside, then the rest). */
+export const SPRINT_RELATED_MAX = 16;
+
+/** Is this related ticket a REAL blocker of the card — a blocking tracker link or a `depends_on`
+ *  reference — that is not done? THE ONE rule the collapsed card's "Blocked by" group reads; it agrees
+ *  with the Blocked issue (`foldStoryIssues`), which raises exactly these. */
+export function isBlockingSprintRelation(r: { relation: SprintRelation; done: boolean | null }): boolean {
+  return (r.relation === 'blocked_by' || r.relation === 'depends_on') && r.done !== true;
+}
+
+/** The collapsed card's three pill groups: "Blocked by" (`isBlockingSprintRelation`), "Coordinate with"
+ *  (concurrent, not done), then "Related" (everything else, done ones muted), each in list order. */
+export function sprintRelatedGroups<T extends { relation: SprintRelation; done: boolean | null }>(
+  related: readonly T[],
+): { blockedBy: T[]; coordinate: T[]; related: T[] } {
+  const blockedBy = related.filter(isBlockingSprintRelation);
+  const coordinate = related.filter((r) => r.relation === 'concurrent' && r.done !== true);
+  return { blockedBy, coordinate, related: related.filter((r) => !blockedBy.includes(r) && !coordinate.includes(r)) };
+}
+
+export interface SprintRelatedTicket {
+  /** shared `trackerTicketIdent` — opens the ticket tab. */
+  ident: string;
+  key: string;
+  /** From the stored link or a stored ticket row; null when nothing stored names it. */
+  title: string | null;
+  status: string | null;
+  relation: SprintRelation;
+  /** The status category is done; null when not known. */
+  done: boolean | null;
+  /** The tracker's browse link (https; render through `safeExternalUrl`). */
+  url: string | null;
+}
+
 export interface SprintTicketRow {
   /** shared `trackerTicketIdent`. */
   ident: string;
@@ -597,8 +778,9 @@ export interface SprintTicketRow {
   /** Browse URL — render through `safeExternalUrl`. */
   url: string | null;
   provider: TrackerProvider;
+  /** = `sprintPhaseOfStage(stage)`. */
   phase: SprintPhase;
-  /** Where the layout lists it (`statusLayout`); never 'done' on a listed row. */
+  /** Where the layout lists it (`statusLayout`). Done tickets are listed too, last. */
   stage: SprintStage;
   status: { name: string; category: JiraStatusCategory | null } | null;
   issueType: string | null;
@@ -621,16 +803,30 @@ export interface SprintTicketRow {
   specGaps: StorySpecGap[];
   /** = `issues.length` — the within-phase sort key (spec gaps do not count). */
   flagCount: number;
+  /** Every ANCHORED FINDING on the ticket (`SprintFinding`), built server-side: code's "no criteria",
+   *  the open linked/named blockers, the CURRENT label's criteria / dependencies / gaps (≤ 3 gaps,
+   *  every stage) and a CURRENT assessment's findings, all filtered by the workspace's checks. In
+   *  STORY_ISSUES order, code before Claude within an issue. */
+  findings: SprintFinding[];
+  /** Other tickets this one points at (`SprintRelatedTicket`): its stored tracker links first, then
+   *  tickets its description / criteria link to or name, deduped, itself excluded, ≤ SPRINT_RELATED_MAX.
+   *  Titles and statuses from STORED rows only — never a tracker call on a view. */
+  related: SprintRelatedTicket[];
   /** PRs already on this ticket (stored `tracker_tickets`, via `ticketMembers`); [] for most. */
   pullRequests: StoryPrRef[];
-  repos: { accepted: SprintRepoRef[]; suggested: SprintRepoSuggestion[] };
+  /** `accepted` = the reader's saved set, or — while the reader has NEVER saved one for this ticket —
+   *  the CONFIDENT suggestions (≤ SPRINT_REPOS_PER_TICKET_MAX), with `defaulted: true`; "Check against
+   *  code" uses the same effective set. A saved set (even an empty one) always wins. `suggested` = the
+   *  suggestions NOT in `accepted` (the picker tags them "suggested"). */
+  repos: { accepted: SprintRepoRef[]; suggested: SprintRepoSuggestion[]; defaulted: boolean };
   /** The latest assessment of any status, with its currency. */
   assessment: { record: SprintAssessmentRecord; currency: SprintAssessmentCurrency } | null;
-  /** = `sprintReplaceTarget(provider, acField)`. */
+  /** = `sprintReplaceTarget(provider, acField)`: where the ticket keeps its criteria — its own field
+   *  (editable beside the description) or the description. */
   replaceTarget: SprintReplaceTarget;
-  /** The FULL stored text "Replace" would overwrite: its sha256 (sent back as `baseHash`), and whether
-   *  the copy on the wire was cut (`SPRINT_TEXT_MAX`) — then Replace is not offered. */
-  replaceBase: { hash: string; truncated: boolean };
+  /** Per editable field, the base a write is checked against. `acceptanceCriteria` is null unless the
+   *  criteria live in a field of their own (`replaceTarget.kind === 'ac_field'`). */
+  replaceBases: { description: SprintReplaceBase; acceptanceCriteria: SprintReplaceBase | null };
   /** The latest write to this ticket, any status. */
   lastWrite: SprintWriteRecord | null;
 }
@@ -645,11 +841,12 @@ export interface SprintStoriesResponse {
   /** null until the first read finished. */
   source: SprintSource | null;
   read: SprintReadState;
-  /** By stage, then status section (layout order), then most flags, then key. */
+  /** By stage (SPRINT_STAGES order, Done last), then status section (layout order), then most flags,
+   *  then key. */
   tickets: SprintTicketRow[];
   /** The sections. null when there is no tracker (`trackerOn: false`). */
   statusLayout: SprintStatusLayout | null;
-  /** Tickets in the sprint already done — counted, not listed. */
+  /** Tickets in the sprint whose stage is Done (they are listed too). */
   doneCount: number;
   /** `MeResponse.ai.enabled` on the server: labels and Assess exist. */
   aiEnabled: boolean;
@@ -666,6 +863,36 @@ export interface SprintStoriesResponse {
 export interface SprintRefreshResponse {
   workspaceId: number;
   read: SprintReadState;
+}
+
+// ── Anchored findings ────────────────────────────────────────────────────────────────────────────
+
+/** One thing wrong with a ticket, anchored in its text when it can be. The SPA highlights `quote`
+ *  (whitespace-normalised match within `where`); an unanchored finding (`quote: null`) shows as a pill.
+ *  ⚠ `quote` is VERIFIED by the server against the ticket text (`verifyStoryQuote`) — never a guessed
+ *  position. `brief` is TEMPLATED (`STORY_RULE_BY_ID[rule].label`); `detail` is the finding's own
+ *  words (the labeller's reason, the blocker phrase, the gap, Claude's sentence). */
+export interface SprintFinding {
+  /** Stable within the ticket: "u-none", "u-c3" (criterion 3), "b-0", "g-1", "claude-2". */
+  id: string;
+  issue: StoryIssueId;
+  rule: StoryRuleId;
+  quote: string | null;
+  where: StoryQuoteWhere | null;
+  brief: string;
+  detail: string;
+  /** A rewrite of the quoted text — Claude only; null otherwise. */
+  suggestion: string | null;
+  source: 'code' | 'claude';
+  ref: SprintCodeRef | null;
+  /** Blocked findings from code: the blocker it is about. */
+  blocker?: StoryBlocker;
+}
+
+/** A CURRENT body's first finding per issue — its sentence speaks for that issue in the bullets, the
+ *  spec-gap line and the chips (`sprintIssuesWithClaude`). */
+function claudeSentenceFor(body: SprintAssessmentBody | null, id: StoryIssueId): SprintAssessmentFinding | null {
+  return body?.findings.find((f) => f.issue === id && f.text.trim() !== '') ?? null;
 }
 
 // ── Bullets and composers (pure; the SPA and tests share them) ──────────────────────────────────
@@ -708,10 +935,10 @@ export function sprintIssuesWithClaude(
   total: number,
 ): StoryIssue[] {
   const out = coded.filter((x) => STORY_CHIP_ISSUE_IDS.includes(x.id));
-  for (const c of body?.issues ?? []) {
-    if (!isStoryIssueId(c.id) || !STORY_CHIP_ISSUE_IDS.includes(c.id)) continue;
-    if (!out.some((x) => x.id === c.id)) {
-      out.push({ id: c.id, criteria: [], blockers: [], gaps: [], total, reasons: ['claude'] });
+  for (const c of body?.findings ?? []) {
+    if (!isStoryIssueId(c.issue) || !STORY_CHIP_ISSUE_IDS.includes(c.issue)) continue;
+    if (!out.some((x) => x.id === c.issue)) {
+      out.push({ id: c.issue, criteria: [], blockers: [], gaps: [], total, reasons: ['claude'] });
     }
   }
   return applyStoryIssueChecks(out, checks, issueType).sort(
@@ -726,14 +953,14 @@ export function sprintBullets(
   t: Pick<SprintTicketRow, 'issues' | 'assessment' | 'issueType'>,
   checks: SprintChecks,
 ): SprintBullet[] {
-  const claude = sprintCurrentAssessmentBodyOf(t)?.issues ?? [];
+  const body = sprintCurrentAssessmentBodyOf(t);
   // The server already filters `t.issues`; re-applying is idempotent and keeps this pure fold honest.
   const listed = applyStoryIssueChecks(t.issues, checks, t.issueType);
   const out: SprintBullet[] = [];
   for (const id of STORY_CHIP_ISSUE_IDS) {
     const issue = listed.find((x) => x.id === id);
     if (issue == null) continue;
-    const c = claude.find((x) => x.id === id);
+    const c = claudeSentenceFor(body, id);
     if (c != null) out.push({ id, text: c.text, source: 'claude', ref: c.ref });
     else if (!(issue.reasons.length === 1 && issue.reasons[0] === 'claude')) {
       out.push({ id, text: storyIssueBullet(issue), source: 'code', ref: null });
@@ -764,7 +991,7 @@ export function sprintSpecGapLines(
 ): SprintSpecGapLine[] {
   if (t.stage !== 'not_started') return [];
   if (checks.off.includes('spec_gaps') || !storyIssueTypeChecked(checks, t.issueType)) return [];
-  const c = sprintCurrentAssessmentBodyOf(t)?.issues.find((x) => x.id === 'spec_gaps');
+  const c = claudeSentenceFor(sprintCurrentAssessmentBodyOf(t), 'spec_gaps');
   if (c != null && c.text.trim() !== '') return [{ text: c.text, type: null, source: 'claude', ref: c.ref }];
   const g = (t.specGaps ?? [])[0];
   return g == null ? [] : [{ text: g.text, type: g.type, source: 'code', ref: null }];
@@ -803,6 +1030,9 @@ export function sprintCommentMarkdown(
   if (gaps.length > 0) parts.push(sprintSpecGapsMarkdown(gaps));
   if (body != null && body.revisedCriteria.length > 0) {
     parts.push(`**Proposed acceptance criteria**\n\n${criteriaListMarkdown(body.revisedCriteria)}`);
+  }
+  if (body != null && body.revisedDescription != null && body.revisedDescription.trim() !== '') {
+    parts.push(`**Proposed description**\n\n${body.revisedDescription.trim()}`);
   }
   return parts.join('\n\n');
 }

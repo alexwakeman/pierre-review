@@ -117,28 +117,54 @@ describe('sprint store', () => {
     const v1 = { criteria: [{ n: 1, existing: 'missing' }], gaps: { missing: [] }, suggestion: { addedCriteria: [] }, questions: [] };
     expect(store.sprintAssessmentRecordOf(row('succeeded', v1))).toMatchObject({ body: null, outdated: true });
     expect(store.sprintAssessmentRecordOf(row('failed', null))).toMatchObject({ body: null, outdated: false });
-    const v2 = {
+    // Format 3 (`issues`, one sentence per issue): an older shape → outdated.
+    const v3 = { summary: 'S', issues: [{ id: 'spec_gaps', text: 'No behaviour when the upload fails.', ref: null }], revisedCriteria: [] };
+    expect(store.sprintAssessmentRecordOf(row('succeeded', v3))).toMatchObject({ body: null, outdated: true });
+    // Format 4 (`findings`, no `mode`): an older shape → outdated (BMD-1056's real run reads this way).
+    const v4old = { summary: 'S', findings: [], revisedCriteria: [], revisedDescription: null };
+    expect(store.sprintAssessmentRecordOf(row('succeeded', v4old))).toMatchObject({ body: null, outdated: true });
+    const v4 = {
+      mode: 'verify',
+      coverage: 'Criterion 1 has a test.',
+      criterionChecks: [
+        { n: 2, status: 'partly', evidence: 'Half done.', ref: { repo: 'acme/web', path: 'src/a.ts' }, tests: null },
+        { n: 1, status: 'met', evidence: 'Done.', ref: null, tests: { repo: 'acme/web', path: 'test/a.test.ts' } },
+        { n: 0, status: 'met', evidence: 'bad n' },
+        { n: 3, status: 'maybe', evidence: 'bad status' },
+      ],
+      plan: [{ repo: 'acme/web', path: 'src', newPath: null, change: 'ignored in verify mode' }],
       summary: 'This may already be done.',
-      issues: [
-        { id: 'spec_gaps', text: 'No behaviour when the upload fails.', ref: null },
-        { id: 'no_persona', text: 'dropped', ref: null },
-        // A retired id (rubric 1's four issues) is dropped, never thrown on.
-        { id: 'too_big', text: 'dropped', ref: null },
-        { id: 'unclear_done', text: 'Criterion 2 cannot be checked.', ref: { repo: 'acme/web', path: 'src/a.ts' } },
-        { id: 'unclear_done', text: 'a repeat', ref: null },
+      findings: [
+        { issue: 'spec_gaps', rule: 'error_handling', quote: 'upload a file', where: 'description', text: 'No behaviour when the upload fails.', suggestion: 'upload a CSV file', ref: null },
+        // A retired issue id, a rule of another issue, an unknown rule: dropped, never thrown on.
+        { issue: 'too_big', rule: 'vague_term', quote: null, where: null, text: 'dropped', suggestion: null, ref: null },
+        { issue: 'blocked', rule: 'edge_case', quote: null, where: null, text: 'dropped', suggestion: null, ref: null },
+        { issue: 'blocked', rule: 'nope', quote: null, where: null, text: 'dropped', suggestion: null, ref: null },
+        { issue: 'unclear_done', rule: 'vague_term', quote: null, where: 'title', text: 'Criterion 2 cannot be checked.', suggestion: 'orphan', ref: { repo: 'acme/web', path: 'src/a.ts' } },
+        { issue: 'unclear_done', rule: 'bundled', quote: 'x', where: 'nowhere', text: '  ', suggestion: null, ref: null },
         'junk',
       ],
       revisedCriteria: ['One', 7, ''],
+      revisedDescription: 'A new description.',
     };
-    expect(store.sprintAssessmentRecordOf(row('succeeded', v2))).toMatchObject({
+    expect(store.sprintAssessmentRecordOf(row('succeeded', v4))).toMatchObject({
       outdated: false,
       body: {
+        mode: 'verify',
+        plan: [],
+        coverage: 'Criterion 1 has a test.',
+        criterionChecks: [
+          { n: 2, status: 'partly', evidence: 'Half done.', ref: { repo: 'acme/web', path: 'src/a.ts' }, tests: null },
+          { n: 1, status: 'met', evidence: 'Done.', ref: null, tests: { repo: 'acme/web', path: 'test/a.test.ts' } },
+        ],
         summary: 'This may already be done.',
-        issues: [
-          { id: 'unclear_done', text: 'Criterion 2 cannot be checked.', ref: { repo: 'acme/web', path: 'src/a.ts' } },
-          { id: 'spec_gaps', text: 'No behaviour when the upload fails.', ref: null },
+        findings: [
+          // No quote → no `where` and no suggestion.
+          { issue: 'unclear_done', rule: 'vague_term', quote: null, where: null, text: 'Criterion 2 cannot be checked.', suggestion: null, ref: { repo: 'acme/web', path: 'src/a.ts' } },
+          { issue: 'spec_gaps', rule: 'error_handling', quote: 'upload a file', where: 'description', text: 'No behaviour when the upload fails.', suggestion: 'upload a CSV file', ref: null },
         ],
         revisedCriteria: ['One'],
+        revisedDescription: 'A new description.',
       },
     });
   });
@@ -150,21 +176,30 @@ describe('sprint store', () => {
     const h = store.sprintTicketTextHash(ticket);
     const accepted = [{ repoId: 1, syncedSha: 'a' }];
     const v1 = createHash('sha256').update(['sprint-assess-v1', h, '1:a'].join('\u0000'), 'utf8').digest('hex');
-    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: v1 }, ticket, accepted)).toBe('stale');
+    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: v1 }, ticket, accepted, 'plan')).toBe('stale');
     // A run from the four-issue format (v2) reads stale too: its issues were the old vocabulary.
     const v2 = createHash('sha256').update(['sprint-assess-v2', h, '1:a'].join('\u0000'), 'utf8').digest('hex');
-    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: v2 }, ticket, accepted)).toBe('stale');
-    const now = store.sprintAssessFingerprint(h, [{ repoId: 1, sha: 'a' }]);
-    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: now }, ticket, accepted)).toBe('current');
+    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: v2 }, ticket, accepted, 'plan')).toBe('stale');
+    // Format 3 (one sentence per issue, no quotes) reads stale too.
+    const v3 = createHash('sha256').update(['sprint-assess-v3', h, '1:a'].join('\u0000'), 'utf8').digest('hex');
+    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: v3 }, ticket, accepted, 'plan')).toBe('stale');
+    // Format 4 (no mode) reads stale too.
+    const v4 = createHash('sha256').update(['sprint-assess-v4', h, '1:a'].join('\u0000'), 'utf8').digest('hex');
+    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: v4 }, ticket, accepted, 'plan')).toBe('stale');
+    const now = store.sprintAssessFingerprint(h, [{ repoId: 1, sha: 'a' }], 'plan');
+    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: now }, ticket, accepted, 'plan')).toBe('current');
+    // The ticket moved to In review: the plan is stale (the check to run now is a verify).
+    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: now }, ticket, accepted, 'verify')).toBe('stale');
   });
 
   it('hashes are pure and order-free', () => {
     const h = store.sprintTicketTextHash({ title: 'T', description: 'D', acceptanceCriteria: 'A' });
     expect(h).toBe(store.sprintTicketTextHash({ title: 'T', description: 'D', acceptanceCriteria: 'A' }));
     expect(h).not.toBe(store.sprintTicketTextHash({ title: 'T', description: 'D', acceptanceCriteria: 'B' }));
-    const a = store.sprintAssessFingerprint(h, [{ repoId: 2, sha: 'b' }, { repoId: 1, sha: 'a' }]);
-    expect(a).toBe(store.sprintAssessFingerprint(h, [{ repoId: 1, sha: 'a' }, { repoId: 2, sha: 'b' }]));
-    expect(a).not.toBe(store.sprintAssessFingerprint(h, [{ repoId: 1, sha: 'a' }, { repoId: 2, sha: 'c' }]));
+    const a = store.sprintAssessFingerprint(h, [{ repoId: 2, sha: 'b' }, { repoId: 1, sha: 'a' }], 'plan');
+    expect(a).toBe(store.sprintAssessFingerprint(h, [{ repoId: 1, sha: 'a' }, { repoId: 2, sha: 'b' }], 'plan'));
+    expect(a).not.toBe(store.sprintAssessFingerprint(h, [{ repoId: 1, sha: 'a' }, { repoId: 2, sha: 'c' }], 'plan'));
+    expect(a).not.toBe(store.sprintAssessFingerprint(h, [{ repoId: 1, sha: 'a' }, { repoId: 2, sha: 'b' }], 'verify'));
   });
 
   it('sprint_ticket_repos refuses another account’s repo in the database', async () => {

@@ -2081,12 +2081,44 @@ export const sprintTickets = pgTable(
     // See the sqlite twin (migration pg 0090).
     blockedByJson: jsonb('blocked_by_json').$type<TicketLinkBlocker[]>(),
     statusId: text('status_id'),
+    // See the sqlite twin (migration pg 0091).
+    reposSavedAt: timestamp('repos_saved_at', { withTimezone: true, mode: 'date' }),
   },
   (t) => ({
     accountWsIdentUx: uniqueIndex('sprint_tickets_account_ws_ident').on(t.accountId, t.workspaceId, t.ident),
     accountIdentIdx: index('sprint_tickets_account_ident').on(t.accountId, t.ident),
     workspaceAccountFk: foreignKey({
       name: 'sprint_tickets_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_ref_tickets — see schema.sqlite.ts (migration 0106 / pg 0093).
+export const sprintRefTickets = pgTable(
+  'sprint_ref_tickets',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    ident: text('ident').notNull(),
+    provider: text('provider').notNull(),
+    apiRoot: text('api_root').notNull(),
+    issueKey: text('issue_key').notNull(),
+    title: text('title'),
+    statusName: text('status_name'),
+    statusCategory: text('status_category'),
+    url: text('url'),
+    readAt: timestamp('read_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (t) => ({
+    accountWsIdentUx: uniqueIndex('sprint_ref_tickets_account_ws_ident').on(t.accountId, t.workspaceId, t.ident),
+    accountKeyIdx: index('sprint_ref_tickets_account_key').on(t.accountId, t.issueKey),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_ref_tickets_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),
@@ -2132,6 +2164,7 @@ export const sprintAssessments = pgTable(
     ident: text('ident').notNull(),
     model: text('model').notNull(),
     status: text('status').notNull(),
+    mode: text('mode'),
     phase: text('phase'),
     fingerprint: text('fingerprint').notNull(),
     textHash: text('text_hash').notNull(),

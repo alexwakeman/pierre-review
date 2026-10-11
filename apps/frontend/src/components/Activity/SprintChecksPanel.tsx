@@ -10,7 +10,7 @@ import { SprintStatusSettings } from './SprintStatusSettings.js';
 //   • CHECKS — three on/off switches (one per story issue) and ONE issue-type list for the whole tab.
 //     The server applies them (`applyStoryIssueChecks`), so the list, the issue counts, the order and
 //     Copy all follow. A DRAFT until Save; Cancel closes without saving.
-//   • STATUSES (SprintStatusSettings) — the section order and the "code delivered from" status.
+//   • STATUSES (SprintStatusSettings) — which stage each status sits in, and the order.
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 
@@ -122,7 +122,7 @@ export function SprintChecksPanel({
       {layout != null && (
         <SprintStatusSettings
           // A saved layout re-seeds the draft.
-          key={`${layout.order.map((o) => o.name).join('\u0000')}|${layout.deliveredFrom ?? ''}|${layout.orderSource}`}
+          key={`${layout.order.map((o) => `${o.stage}:${o.name}`).join('\u0000')}|${layout.orderSource}`}
           workspaceId={workspaceId}
           layout={layout}
         />

@@ -1535,7 +1535,7 @@ names (`knownTicketsFor`, account-predicated, same tracker site):
 | Issue | Raised when | Detail it carries |
 |---|---|---|
 | Unclear when done | no criteria (code), or a criterion not `testable` | the FIRST TWO flagged criteria (number + REASON), then "and N more"; the chip keeps "N of M criteria" |
-| Blocked | a REAL blocker (`isRealStoryBlocker`): a ticket — tracker link or named key — not done (unknown status counts, reading "status unknown"), or a named DECISION nobody has made | what, who (owner), ticket key and status; links first, a named key that is linked shown once |
+| Blocked | a REAL blocker (`isRealStoryBlocker`): a ticket — tracker link, or a key the label reads as `depends_on` — not done (unknown status counts, reading "status unknown"), or a named DECISION nobody has made | what, who (owner), ticket key and status; links first, a named key that is linked shown once |
 | Spec gaps | the label lists missing details | ≤ 3 gaps, each typed (rule, edge case, design, data, non-functional) |
 
 - ⚠ **Spec gaps is NOT a This sprint chip** (2026-10-11: every labelled ticket got three, so a chip on
@@ -1550,7 +1550,7 @@ names (`knownTicketsFor`, account-predicated, same tracker site):
   mostly inputs — Figma nodes, spreadsheets, reference files). `isRealStoryBlocker` (shared) keeps an
   unfinished ticket or an open decision and drops done tickets and every other text kind with no ticket
   key. Nothing left = no Blocked issue (no chip, not counted, not in the order). The rubric is unchanged
-  and Story health's linked-blocker rate does not use it.
+  and the story report's linked-blocker rate does not use it.
 
 - **"Too big" and "Scope not stated" were REMOVED** (2026-10-11): the first fired on 69 of 73 real
   stories and splitting is the BA's call, not the reader's; the second was too generic to act on. Old
@@ -1563,7 +1563,7 @@ names (`knownTicketsFor`, account-predicated, same tracker site):
   listed, never raised). The story report's picks are merged stories, so they carry their issues "AS
   WRITTEN" (`storyIssueMeasure` / `storyIssuesAsWritten`: any ticket or decision, `isStoryDependencyItem`,
   finished ones marked `resolved`; inputs are dropped there too).
-- ⚠ **RATES over many stories (Story health, the story report's figures) are a THIRD rule,
+- ⚠ **RATES over many stories (the story report's figures) are a THIRD rule,
   `storyIssueRateUnits`** (2026-10-11, after an agreement test showed story-level rates near 100%):
   "Criteria that can't be checked" = untestable CRITERIA of all criteria in the stories with a usable
   label (pooled like criteria met); "Stories with a linked blocker" = stories whose tracker links were
@@ -1644,20 +1644,33 @@ orphan `pro_story_notes` table from the never-committed plugin migration 0041, w
   id and its PRs' `[id, state, mergedAt]` — nothing derived from now. A different fingerprint today
   shows the stored report as `stale`; nothing re-runs it by itself.
 
-## Story labels (Reports → Stories → Story health)
+## Story labels (Reports → Stories, Reports → This sprint)
 
-The model half of Story health (and of the three story issues everywhere): Haiku 5.5 answers a FIXED
-rubric about each story; code folds the answers into the issues (§ Story issues), and Story health's
-refinement panel is one "% of stories" series per issue. Everything else is code.
+The model half of the three story issues everywhere: Haiku 5.5 answers a FIXED rubric about each
+story; code folds the answers into the issues (§ Story issues) — This sprint's chips and findings, the
+story report's rates. Everything else is code. ⚠ The Story health charts that first used them are
+DELETED (2026-10-11, "not adding anything"): no `GET /api/story-health`, no panel.
 
 - **Where**: `src/review/story-labels/` — `prompt.ts`, `validate.ts`, `manager.ts`, `routes.ts`; the
-  input (what is sent, and so which label is current) is core `db/story-label-input.ts`; the reads and
-  the fold are `db/story-health.ts` + `db/story-health-fold.ts`. Contract:
-  `packages/shared/src/story-health.ts`. Routes: docs/API.md § Story health.
+  input (what is sent, and so which label is current) is core `db/story-label-input.ts`; the label read
+  (`currentLabelRowsFor`) and the run's population are `db/story-health.ts` + `db/story-health-fold.ts`
+  (names kept). Contract: `packages/shared/src/story-health.ts`. Routes: docs/API.md § The story label
+  run. This sprint's tickets are labelled after each sprint read by `review/sprint-labels/`.
+- **LABELLING IS AUTOMATIC — NO BUTTON** (2026-10-11, after Story health's "Label N stories" went):
+  (1) a **story report run labels first** — before its agent starts, the window's stories with
+  criteria and no CURRENT label go through the label run (`runStoryLabelsToEnd`, which claims the
+  account's label slot, waits ONCE for a run already in flight, reads its list AFTER the claim, and
+  waits for its own run; picked stories first, then newest; ≤ `STORY_LABEL_RUN_CAP`, its own
+  `STORY_LABEL_BUDGET_USD`). The run then re-reads the selection so the picks' issues and the rates see
+  the new labels (picks never depend on labels), and the row's `costUsd` is agent + labels (each still
+  recorded under its own feature). A cancel cancels the label pass too. (2) **This sprint** labels
+  after every sprint read AND when `GET /api/sprint-stories` lists a ticket whose label is `pending`
+  (`sprintViewedWithPendingLabels`: the same after-read hook, deduped to once a minute per workspace;
+  set only locally with AI on). Done tickets are labelled too, after the open ones. A rubric bump
+  therefore relabels on the next view or report, with no reader action.
 - **Gating**: agentic, so LOCAL-ONLY — registered only through `registerAgenticRoutes` — AND Pro with
-  the rest of Reports (`periodReports`, 402 before any DB work). `GET /api/story-health` reports
-  `labels: config.aiEnabled`; when false all three refinement series are omitted (the panel prints one
-  sentence), never half-drawn.
+  the rest of Reports (`periodReports`, 402 before any DB work). With `config.aiEnabled` false no label
+  is made or read; only what code knows is shown.
 - **THE RUBRIC** (`STORY_RUBRIC_VERSION` 2, 2026-10-11): rubric 1's yes/no answers (`bundled`,
   `dependsOnOtherWork`, `outOfScopeStated`, `dependencyNamed`, `nonCodeWork`) were too vague to act on,
   so each answer now carries its DETAIL. Per criterion: `testable` (rubric 1's measured wording, κ
@@ -1669,6 +1682,34 @@ refinement panel is one "% of stories" series per issue. Everything else is code
   CHANGED IS A NEW RUBRIC: bump `STORY_RUBRIC_VERSION` in the same commit (it is in the row's identity,
   so every story relabels and old rows stop counting — the ONE reader, `currentLabelRowsFor`, filters
   on it). The issues are folded from the answers on READ, so changing the fold needs no relabel.
+- **RUBRIC 3** (`STORY_RUBRIC_VERSION` 3, 2026-10-11): every answer is ANCHORED. An untestable
+  criterion also gives `rule` — one of `STORY_CRITERION_RULE_IDS` (shared `story-rules.ts`: the CLOSED
+  vocabulary, each rule owned by one issue, with a templated label and one-line hover; `no_criteria` is
+  code-only) — and `quote`; each dependency and gap gives `quote` (a gap about something the text never
+  mentions gives null); gap types gain `error_handling` (`rule` maps to the `business_rule` rule,
+  `STORY_SPEC_GAP_RULE`). ⚠ The `testable` line is still word for word rubric 1's (the agreement
+  measures read it exactly as before). ⚠ **A QUOTE IS VERIFIED, NEVER TRUSTED**: `verifyStoryQuote`
+  against the text SENT (whitespace-normalised, curly quotes read straight, case-sensitive then
+  insensitive, ≤ `STORY_QUOTE_MAX` 120) and stored in the TICKET's spelling; a miss is stored null and
+  the answer survives, unanchored — never a guessed position, never a refusal. A missing or foreign
+  rule on an untestable criterion IS a refusal (`bad_rule`).
+- **RUBRIC 4** (`STORY_RUBRIC_VERSION` 4, 2026-10-11): `story.references` — EVERY other ticket the text
+  names (key or browse link), each `{ticketKey, relation, quote, owner}` with `relation` one of
+  `depends_on` (cannot be finished until that one is), `concurrent` (built alongside — coordinate),
+  `builds_on` (extends shipped work or uses an existing feature / page), `supersedes`, `out_of_scope`
+  (a follow-up or sibling explicitly left out), `context` (related, see also, a destination page). One
+  real story named fifteen tickets and rubric 3 made dependencies of all of them, so Blocked listed a
+  ticket the text had put OUT OF SCOPE and "status not stated" for an existing page. ⚠ **ONLY
+  `depends_on` CAN BLOCK** (`storyBlockers`; a tracker link still blocks whatever the text says); one
+  ticket named in two roles keeps the higher one (`storyReferencesByKey`: depends_on › concurrent ›
+  builds_on › supersedes › out_of_scope › context — "out of scope" + "build alongside" reads as
+  coordinate). Validation: relations strict (`shape`), ≤ `STORY_LABEL_REFERENCES_MAX` 20 (`too_many`),
+  a key that is not a key shape or that the SENT text never names is dropped, quotes verified like any
+  other; a ticket-keyed DEPENDENCY must agree — dropped unless its key reads `depends_on`, and one no
+  reference names adds that `depends_on` reference. Non-ticket dependencies (decisions, APIs, data,
+  teams) stay in `dependencies`. Statuses come from `knownTicketsFor`, including the sprint read's
+  referenced-ticket lookup (docs/TRACKERS.md § The sprint list read). `testable` is still rubric 1's
+  wording; the examples are generic (no customer names). `maxTokens` max(4,000, 1,800 + 110 × criteria).
 - **The input**: the criteria are `extractCriteria` over the criteria field, else the description's
   "Acceptance criteria" section — the SAME list `countCriteriaLines` counts (the count is defined as
   its length) — numbered, each clipped to 500 characters; the description is colour-stripped and
@@ -1676,7 +1717,7 @@ refinement panel is one "% of stories" series per issue. Everything else is code
   no criteria is not labellable (never "0 criteria").
 - **The call**: core `cheapComplete` (review/llm.ts) — one tool-less completion, `ISOLATED_MCP` +
   `ownToolsOnlyHook([])` already inside it; no new Agent SDK `query()`. Model `claude-haiku-5-5`,
-  `maxTokens` max(2,500, 400 + 70 × criteria). The ticket text sits inside a per-call NONCE fence
+  `maxTokens` max(4,000, 1,800 + 110 × criteria) (rubric 3's quotes, rubric 4's references). The ticket text sits inside a per-call NONCE fence
   (`pickReviewNonce` over every fenced string) and the prompt says it is data.
 - **Validation** (`validateStoryLabels`): JSON; EXACTLY one criterion entry per numbered criterion with
   `n` = 1, 2, 3 … in order; booleans strict (`true`/`false` or exactly `"true"`/`"false"`); a reason on
@@ -1685,8 +1726,9 @@ refinement panel is one "% of stories" series per issue. Everything else is code
   reader sees these phrases verbatim. Anything else FAILS — not stored, retried on the next press. Never
   repaired: a shifted criterion would point an issue at the wrong criterion. The one softening: a
   `ticketKey` that is not a ticket-key shape is stored as null and the dependency kept.
-- **The run**: `POST /api/story-health/label {workspaceId}` labels the span's refinement-bucketed
-  stories with criteria and no current label, newest first, at most `STORY_LABEL_RUN_CAP` (150),
+- **The run**: `POST /api/story-health/label {workspaceId}` (path kept; NO screen calls it since Story
+  health went — labelling is automatic, above) labels the last 13 weeks' stories (an open or merged PR in the workspace, by created
+  week, else first PR opened) with criteria and no current label, newest first, at most `STORY_LABEL_RUN_CAP` (150),
   `STORY_LABEL_CONCURRENCY` (4) calls at once. ONE run per ACCOUNT, claimed SYNCHRONOUSLY before the
   route's first await and released on every path. State is in MEMORY (`GET /api/story-health/label`
   polls it); the labels are the durable part, so a restart loses a progress bar, never a label.
@@ -1696,33 +1738,49 @@ refinement panel is one "% of stories" series per issue. Everything else is code
   from tokens at Haiku's rates (the ambient path reports no dollar figure). The run stops STARTING
   calls once its recorded spend reaches `STORY_LABEL_BUDGET_USD` (default $1); at most
   CONCURRENCY − 1 small calls already in flight finish past it. Measured noise of the labels on a
-  weekly rate: median 2–4 points, p90 7–12 (`STORY_LABEL_NOISE`, quoted in the ⓘ) — under the shift
-  test's `STORY_SHIFT_MIN_POINTS` floor.
+  weekly rate: median 2–4 points, p90 7–12 (`STORY_LABEL_NOISE`).
 - **Storage**: `story_labels` (sqlite `0099` / pg `0086`; docs/DATA-MODEL.md), insert
   `ON CONFLICT DO NOTHING` on (account, ident, rubric version, text hash): the first answer stands.
-- **The refinement series** (`db/story-health-fold.ts`, `storyIssueRateUnits`): "Criteria that can't
-  be checked" (`unclearDone`, label, `over: 'criteria'` — n is stories, the value pools criteria; each
-  point carries `criteria {num, den}`) · "Stories with a linked blocker" (`blocked`, `source: 'code'`, so
-  it shows with labels off; no better direction) · Spec gaps (HELD, `STORY_HEALTH_HELD`). ⚠ The shift
-  test counts criteria for the criteria series but its ≥ `STORY_SHIFT_MIN_STORIES` floor counts STORIES,
-  so a few criteria-heavy stories cannot fake a shift. ⚠ With NO linked blocker in the span, Blocked is
-  OMITTED, never a flat 0% — the response lists it in `omitted` (`no_links`), with held series
-  (`held`), and the SPA prints one sentence each. Each refinement point carries its HOVER detail — the
-  week's stories with the issue (for criteria, ≥ 1 such criterion; key order, ≤
-  `STORY_HEALTH_HOVER_STORIES`, then `storiesMore`) and Spec gaps' `gapTypes`. Display only: none of it
-  enters a hash or a shift test.
+- **Held rates**: a rate whose judgement has not passed an agreement test is HELD from the story
+  report (`STORY_ISSUE_RATES_HELD`: Spec gaps — saturated, gap types κ 0.13–0.47); the cards still show
+  it.
 
 ## Sprint assessment (Reports → This sprint → "Check against code")
 
-One Sonnet 5 run per ticket, on demand, that checks the ticket against the code before anyone
-builds it. LOCAL ONLY (`registerAgenticRoutes`) AND Pro on `periodReports` (402 first).
+One Sonnet 5 run per ticket, on demand, that checks the ticket against the code. LOCAL ONLY
+(`registerAgenticRoutes`) AND Pro on `periodReports` (402 first).
+
+- **STAGE-AWARE (format 5)**: the SERVER picks the MODE from the stored ticket's stage under the
+  workspace's status layout (`sprintTicketStage` → shared `sprintAssessModeOf`), never the client. It is
+  stored on the run (`sprint_assessments.mode`, sqlite `0105` / pg `0092`), folded into the fingerprint
+  (a ticket moving from In progress to In review makes a plan STALE) and picks the system prompt
+  (`sprintAssessSystemPrompt(mode)`), the tool's shape (`buildSubmitAssessmentShape(z, mode)`) and what
+  the validator keeps.
+  - **PLAN** (Not started, In progress): no code is expected. The prompt FORBIDS looking for an
+    existing implementation or saying the work "may already be done" (the old prompt's favourite misread
+    of an unbuilt ticket). It returns `plan` — ≤ 6 high-level changes `{repo, path | newPath, change}`:
+    `path` an EXISTING file or directory, verified in the checkout; `newPath` a proposed new file (a
+    clean relative path that does NOT exist — not verified, it cannot be).
+  - **VERIFY** (In review, Done): the code should be on the default branch. It returns
+    `criterionChecks` — one per numbered criterion `{n, status: met | partly | not_met | unclear,
+    evidence, ref, tests}`, `n` within the ticket's criteria, one per `n`, sorted; `ref` and `tests`
+    verified like any cited path (`tests` looked up in the criterion's repo, then every accepted repo) —
+    and `coverage`, one sentence on which criteria have tests.
+  - Both keep the findings, revised criteria and revised description below. `summary` is two or three
+    sentences (≤ 400). The SPA shows the result in the card's **Code check** section
+    (`SprintCodeCheck.tsx`: the summary, then the plan list or the per-criterion rows with Met / Partly
+    met / Not met / Unclear pills and test paths; Copy via `lib/copy.ts` `sprintCodeCheckMarkdown`), and
+    a running check as a PHASE-BASED progress bar (`assessmentProgressPct`: never 100 before the end —
+    the agent reports no fraction) with the phase in words, the elapsed time and Cancel.
 
 - **Where**: `src/review/sprint-assess/` — `agent.ts`, `prompts.ts`, `schema.ts`, `validate.ts`,
   `manager.ts`, `routes.ts`. Contract: `packages/shared/src/sprint-stories.ts`. Routes: docs/API.md §
   This sprint.
 - **Input**: the ticket (title, description, criteria) NONCE-FENCED as untrusted, and read-only
-  DEFAULT-BRANCH checkouts of the repos the reader ACCEPTED (`sprint_ticket_repos`; code only
-  suggests — `db/sprint-repo-suggest.ts`). No accepted repo → `422 no_repos`.
+  DEFAULT-BRANCH checkouts of the ticket's EFFECTIVE repos (`effectiveSprintRepos`): the reader's saved
+  set (`sprint_ticket_repos`, an empty save stays empty), else — never saved — the CONFIDENT suggestions
+  (`db/sprint-repo-suggest.ts` `confidentSuggestion`: a direct reason, ≥ 3 PRs of history, or the
+  workspace's only repo). No repo → `422 no_repos`.
 - **The agent**: Read/Glob/Grep behind the path guard, `Bash` denied, `...ISOLATED_MCP` +
   `ownToolsOnlyHook(['sprint'])`, ONE `submit_assessment` tool (first submit wins). Budget
   `SPRINT_ASSESS_BUDGET_USD` (default $1.50), `SPRINT_ASSESS_MAX_TURNS` (60). It shares the review
@@ -1731,32 +1789,72 @@ builds it. LOCAL ONLY (`registerAgenticRoutes`) AND Pro on `periodReports` (402 
   key and status when there is one) and a spec gap must name the missing detail. What code already
   knows — open blockers (links + named) and the current label's gaps (`knownIssuesForPrompt`, read
   before the last abort check, never failing the run) — is handed in FENCED as data, for Claude to
-  confirm, correct or drop against the code.
-- **The answer is SHORT, in the three story issues' terms** (`story-issues.ts`): `summary` (one
-  sentence, the most important finding — "This may already be done: …" included), `issues` (at most
-  one sentence per issue id, ≤ 3, an optional verified file) and `revisedCriteria` (≤ 12, or none).
-  On the card, Claude's sentence REPLACES the templated bullet for an issue CODE raised, and only
-  while the run is CURRENT (`sprintBullets` via `sprintCurrentAssessmentBodyOf`); it never adds an
-  issue, so chips, `flagCount`, order and the expanded card agree. Its spec_gaps sentence is never a
-  chip: it joins the card's Spec gaps section (`sprintSpecGapLines`). A stale run's summary shows on the
-  card tagged "Out of date" and feeds neither the comment default nor Copy all.
-- **Validation** (`SPRINT_ASSESS_CAPS`): over-long text is cut with "…"; an unknown or repeated id,
-  an empty sentence or a fourth issue is dropped; a cited path must exist inside an accepted checkout,
-  else the PATH is dropped and the sentence kept (counted, shown only behind an ⓘ). Nothing left →
-  failed `invalid_assessment`.
-- **Currency**: fingerprint = `SPRINT_ASSESS_FORMAT_VERSION` (3 since the three issues) + ticket text hash + sorted (repoId,
-  synced default-branch SHA), so it is checkable from the DB; stale → the button reads "Check again",
+  confirm, correct or drop against the code. So is a **Referenced tickets** block (`REFERENCES` fence,
+  `promptReferencesOf`): every tracker link and every ticket the current label references — key,
+  title, status (`knownTicketsFor`, including the sprint read's lookup; "status not known to Limn"
+  otherwise), relation (`blocked_by`/`linked` for links, the label's relation otherwise) and the quote
+  naming it. The system prompt (both modes) treats them as FACTS: a ticket blocks ONLY when its relation
+  is `blocked_by` or `depends_on` and its status is not done; never a blocked finding about an
+  out-of-scope / build-alongside / builds-on / supersedes / context / linked ticket; never "status
+  unknown / not stated" when the list gives it; a `concurrent` ticket may be named "coordinate with
+  KEY" in the summary or a plan step.
+- **The answer is SHORT and ANCHORED (format 4, kept in 5)**: `summary` (two or three sentences),
+  the mode's list (above), `findings` (≤ 6, each `{issue, rule, quote, text,
+  suggestion?, repo?, path?}` — the rule from THAT issue's closed vocabulary, the quote copied exactly
+  from the ticket, the suggestion a rewrite of the quoted words), `revisedCriteria` (≤ 12, or none) and
+  an optional `revisedDescription` (≤ 4,000, only when the description should change). The prompt
+  lists the vocabulary from the ONE shared table (`STORY_RULES`). Claude's FIRST finding per issue
+  speaks for that issue: it REPLACES the templated bullet for an issue CODE raised, only while the run
+  is CURRENT (`sprintBullets` via `sprintCurrentAssessmentBodyOf`), and never adds an issue, so chips,
+  `flagCount` and order agree. Its spec_gaps sentence is never a chip (`sprintSpecGapLines`). Every
+  finding also lands in `SprintTicketRow.findings` (below). A stale run's summary shows tagged "Out of
+  date" and feeds neither the comment default nor Copy all.
+- **Validation** (`SPRINT_ASSESS_CAPS`): the tool's zod `.max` caps refuse over-long text, so the
+  model rewrites it shorter; whatever still gets through is cut with "…"; an unknown issue, a rule
+  outside its issue's vocabulary (or the code-only `no_criteria`), an empty sentence or a seventh
+  finding is dropped; ⚠ every QUOTE is verified against the ticket text the run was given
+  (`verifyStoryQuote`; a leading "3. " is forgiven) and stored in the ticket's spelling with `where` —
+  a miss is nulled with its suggestion, the finding KEPT, counted in `dropped.quotes`; a cited path
+  must exist inside an accepted checkout, else the PATH is dropped and the sentence kept (counted,
+  shown only behind an ⓘ); a `revisedDescription` equal to today's is dropped; ⚠ a **blocked** finding
+  whose text + quote name ticket keys that are ALL known references that cannot block (not
+  `blocked_by`/`depends_on`, or done — `isBlockingReference`) is dropped, counted in `dropped.items`
+  (conservative: a key the list does not hold, or no key at all, keeps it). Nothing left → failed
+  `invalid_assessment`.
+- **The findings fold** (`db/sprint-findings.ts`, pure, `SprintTicketRow.findings`): code's "no
+  criteria" (`u-none`), each untestable criterion of the CURRENT label (`u-c<n>`: its rule, its quote —
+  else the criterion's own sentence when it is in the text, a known position), the REAL open blockers
+  (`b-<i>`: a text blocker by the label's quote, a link by its KEY as a whole token when the text names
+  it), the label's gaps on every stage (`g-<i>`, ≤ 3) and a CURRENT run's findings (`claude-<i>`).
+  ⚠ **ONE ROW PER THING**: a Claude finding about the same thing as a code finding — same issue, and
+  quotes that overlap (one holds the other, or a shared run of ≥ 24 characters) or a ticket key in
+  common (`sameFindingSubject`) — is MERGED into that row: Claude's sentence is the detail, with its
+  rule, suggestion, file and quote (code's quote when it has none), `source: 'claude'`, the code
+  blocker kept; a code finding absorbs at most one. The SPA's findings panel then folds a rule met more
+  than once into ONE row with a count ("Several outcomes · 11", `groupSprintFindings`), opened to list
+  each; the highlights in the text stay one per finding.
+  ⚠ Every quote is RE-verified against the text on the wire (the label's was checked against the
+  clipped, colour-stripped text sent). Filtered by the workspace's checks like the chips.
+- **Currency**: fingerprint = `SPRINT_ASSESS_FORMAT_VERSION` (5 since the stage-aware modes) + the
+  MODE today's stage asks for + ticket text hash + sorted (repoId, synced default-branch SHA), so it is
+  checkable from the DB (the stage re-derived through `sprintLayoutFor`); stale → the button reads "Check again",
   and the stale run's sentences still show, marked out of date. A run stored in an older body shape
   is served `body: null, outdated: true` (never thrown on). One run per (account, ticket), claimed
   synchronously; a crash orphan is failed `interrupted` at boot.
 - **The free labels** are not this run: every sprint ticket goes through the existing story label run
-  (§ Story labels) after each sprint read (`review/sprint-labels/`); the issues are folded from them
+  (§ Story labels) after each sprint read and when a view lists a pending label (`review/sprint-labels/`); the issues are folded from them
   in code, and every chip and templated bullet is code (`storyIssueChipText`, `storyIssueBullet`).
 
 ## Ticket write-back (Reports → This sprint → "Update in <tracker>")
 
-The only path that writes to a tracker, and no agent can reach it: the assessment's suggestion is a
-DRAFT in an editable before/after view, and `POST /api/sprint-stories/write` writes ONE ticket only
-after the reader confirms a dialog showing the exact text ("Add as a comment", preselected, or
-"Replace criteria/description"). Claimed before the write, never retried, `maybe_written` when cut
-off. Full contract: docs/TRACKERS.md § The write-back.
+The only path that writes to a tracker, and no agent can reach it. The opened ticket is a DRAFT of
+its text (the description, plus the criteria field when the ticket has its own): a finding's Replace
+swaps its quote for Claude's suggestion IN THE DRAFT, a proposal's "Apply to draft" replaces a whole
+field, and Edit lets the reader type Markdown. One "Update in <tracker>" opens a dialog showing, per
+changed field, the diff and the exact text; "Apply all suggestions" folds every suggestion into the draft as ONE undoable
+step (`lib/ticketDraft.ts` `applyAllSuggestions`): whole-field proposals FIRST (a proposed description,
+then proposed criteria — swapped into the proposed description when they live there), and a field a
+proposal rewrote takes no quote-replace; then every finding's suggestion whose quote is still in its
+field, by the same rule as Replace. It writes nothing. Confirm sends `POST /api/sprint-stories/write` once PER
+FIELD (its own requestId and base hash). Claimed before the write, never retried, `maybe_written` when
+cut off. Full contract: docs/TRACKERS.md § The write-back.

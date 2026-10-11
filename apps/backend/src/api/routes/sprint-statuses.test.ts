@@ -110,22 +110,25 @@ afterAll(async () => {
 
 const put = (payload: unknown) => app.inject({ method: 'PUT', url: '/api/sprint-stories/statuses', payload: payload as any });
 
+const sections = (o: Record<string, unknown> = {}) => ({ sections: { not_started: [], in_progress: [], in_review: [], done: [], ...o } });
+
 describe('PUT /api/sprint-stories/statuses', () => {
   it('402 without Reports, nothing written', async () => {
     setCaps?.(emptyCaps);
-    const res = await put({ workspaceId: ownWs, settings: { order: ['Ready for QA'], deliveredFrom: null } });
+    const res = await put({ workspaceId: ownWs, settings: sections({ in_review: ['Ready for QA'] }) });
     setCaps?.(fullCaps);
     expect(res.statusCode).toBe(402);
     expect(await stored(ownWs)).toBeNull();
   });
 
-  it('400 bad_request on a malformed body', async () => {
+  it('400 bad_request on a malformed body (the retired shape included)', async () => {
     for (const body of [
       {},
-      { workspaceId: 'x', settings: { order: null, deliveredFrom: null } },
+      { workspaceId: 'x', settings: { sections: null } },
       { workspaceId: ownWs },
-      { workspaceId: ownWs, settings: { order: 'Ready', deliveredFrom: null } },
-      { workspaceId: ownWs, settings: { order: ['A', 'a'], deliveredFrom: null } },
+      { workspaceId: ownWs, settings: { order: ['Ready for QA'], deliveredFrom: null } },
+      { workspaceId: ownWs, settings: sections({ in_review: 'Ready' }) },
+      { workspaceId: ownWs, settings: sections({ in_progress: ['A'], in_review: ['a'] }) },
     ]) {
       const res = await put(body);
       expect(res.statusCode).toBe(400);
@@ -136,7 +139,7 @@ describe('PUT /api/sprint-stories/statuses', () => {
 
   it('400 bad_workspace for another tenant’s or an unknown id — never written onto the Default', async () => {
     for (const id of [foreignWs, 99_999]) {
-      const res = await put({ workspaceId: id, settings: { order: ['Ready for QA'], deliveredFrom: null } });
+      const res = await put({ workspaceId: id, settings: sections({ in_review: ['Ready for QA'] }) });
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe('bad_workspace');
     }
@@ -145,17 +148,23 @@ describe('PUT /api/sprint-stories/statuses', () => {
   });
 
   it('200: stores the override and answers the recomputed layout; Reset stores NULL', async () => {
-    const res = await put({ workspaceId: ownWs, settings: { order: ['Ready for QA', 'In Development'], deliveredFrom: 'ready for qa' } });
+    const S = { not_started: [], in_progress: ['Ready for QA', 'In Development'], in_review: [], done: [] };
+    const res = await put({ workspaceId: ownWs, settings: { sections: S } });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.workspaceId).toBe(ownWs);
-    expect(body.settings).toEqual({ order: ['Ready for QA', 'In Development'], deliveredFrom: 'ready for qa' });
+    expect(body.settings).toEqual({ sections: S });
     expect(body.statusLayout.orderSource).toBe('override');
-    expect(body.statusLayout.deliveredFrom).toBe('Ready for QA');
-    expect(body.statusLayout.order.map((o: any) => o.name)).toEqual(['To Do', 'Ready for QA', 'In Development', 'Done']);
-    expect(await stored(ownWs)).toEqual({ order: ['Ready for QA', 'In Development'], deliveredFrom: 'ready for qa' });
+    expect([body.statusLayout.codingBegins, body.statusLayout.codingEnds]).toEqual(['Ready for QA', null]);
+    expect(body.statusLayout.order.map((o: any) => `${o.name}:${o.stage}`)).toEqual([
+      'To Do:not_started',
+      'Ready for QA:in_progress',
+      'In Development:in_progress',
+      'Done:done',
+    ]);
+    expect(await stored(ownWs)).toEqual({ sections: S });
 
-    const reset = await put({ workspaceId: ownWs, settings: { order: null, deliveredFrom: null } });
+    const reset = await put({ workspaceId: ownWs, settings: { sections: null } });
     expect(reset.statusCode).toBe(200);
     expect(reset.json().statusLayout.orderSource).toBe('jira_board');
     expect(await stored(ownWs)).toBeNull();

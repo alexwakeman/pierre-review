@@ -80,7 +80,7 @@ function keptLines(text: string | null | undefined, jira: boolean): string[] {
  * is not a criterion and is dropped. `[]` when there is nothing to count.
  *
  * ⚠ `countCriteriaLines(t, o) === extractCriteria(t, o).length` ALWAYS — the count is defined as
- * this list's length, so the number on Reports → Stories and the criteria Story health labels can
+ * this list's length, so the number on Reports → Stories and the criteria the label run labels can
  * never disagree.
  */
 export function extractCriteria(text: string | null | undefined, opts: { jira: boolean }): string[] {

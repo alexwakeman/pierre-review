@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { StoryReportWindowChoice } from '@pierre-review/shared';
 import type { StoryInternals } from '../../db/stories.js';
+import type { StorySelection } from '../../db/story-selection.js';
 
 // THE STORY REPORT'S CURRENCY — a stored report is 'stale' when this differs from today's. Pure.
 //
@@ -46,4 +47,15 @@ export function storyReportFingerprint(choice: StoryReportWindowChoice, picks: r
       ]),
   };
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
+
+/** A selection's fingerprint: its picks' internals (the route's and the run's ONE spelling). */
+export function selectionFingerprint(choice: StoryReportWindowChoice, sel: Pick<StorySelection, 'candidates' | 'internalsByKey'>): string {
+  return storyReportFingerprint(
+    choice,
+    sel.candidates.flatMap((c) => {
+      const s = sel.internalsByKey.get(c.key);
+      return s != null ? [fingerprintPickOf(s)] : [];
+    }),
+  );
 }

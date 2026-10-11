@@ -177,3 +177,14 @@ describe('suggestSprintRepos', () => {
     expect(mod.keyPrefix('github', 'Acme/Web#3')).toBe('acme/web');
   });
 });
+
+describe('confidentSuggestion', () => {
+  it('a direct reason, ≥ 3 PRs of history, or the only repo', () => {
+    expect(mod.confidentSuggestion({ reasons: ['ticket_pr'], prCount: 1 }, 5)).toBe(true);
+    expect(mod.confidentSuggestion({ reasons: ['issue_repo'], prCount: 0 }, 5)).toBe(true);
+    expect(mod.confidentSuggestion({ reasons: ['named_in_ticket'], prCount: 0 }, 5)).toBe(true);
+    expect(mod.confidentSuggestion({ reasons: ['same_epic'], prCount: 3 }, 5)).toBe(true);
+    expect(mod.confidentSuggestion({ reasons: ['same_project'], prCount: 2 }, 5)).toBe(false);
+    expect(mod.confidentSuggestion({ reasons: ['same_project'], prCount: 0 }, 1)).toBe(true);
+  });
+});

@@ -1,6 +1,8 @@
 import {
   SPRINT_DELIVERED_MIN_SHARE,
   SPRINT_DELIVERED_MIN_TICKETS,
+  SPRINT_REVIEW_STATUS_RE,
+  SPRINT_STAGES,
   SPRINT_STATUS_SETTINGS_DEFAULT,
   type JiraStatusCategory,
   type SprintStage,
@@ -12,26 +14,30 @@ import {
   type TrackerProvider,
 } from '@pierre-review/shared';
 import { and, eq } from 'drizzle-orm';
+import { parseSprintStatusSettings } from './sprint-status-settings.js';
 
 // ⚠ The DB half imports db/client LAZILY: the pure fold above it is imported by tests (and the SPA's
 // shapes mirror it) and must not open a database at import.
 const dbMods = async () => {
   const [client, settings] = await Promise.all([import('./client.js'), import('./sprint-status-settings.js')]);
-  return { db: client.db, schema: client.schema, getSprintStatusSettings: settings.getSprintStatusSettings };
+  return { db: client.db, schema: client.schema, getSprintStatusSettingsRaw: settings.getSprintStatusSettingsRaw };
 };
 
 // REPORTS → THIS SPRINT — THE STATUS LAYOUT (shared sprint-stories.ts § The status layout; docs/API.md
-// § This sprint). Which sections the page shows, in what order, and which status "code delivered"
-// starts at. The PURE half is here (sprint-status-layout.test.ts); the DB half — the stored override
-// (db/sprint-status-settings.ts) and the PR evidence (`loadSprintStatusEvidence`) — feeds it.
+// § This sprint). Which of the FOUR stages (Not started, In progress, In review, Done) each status
+// sits in, and in what order. The PURE half is here (sprint-status-layout.test.ts); the DB half — the
+// stored override (db/sprint-status-settings.ts) and the PR evidence (`loadSprintStatusEvidence`) —
+// feeds it.
 //
-//   ORDER: override names first-class; every other known status keeps its AUTOMATIC position (the
-//   tracker's board / workflow order), else the category fallback (new → indeterminate → done, then
-//   name). A status the override names that nobody has seen is kept (count 0) so the settings list
-//   can show it.
-//   DELIVERED FROM: the override when it names a status in the order (case-insensitive), else the
-//   automatic inference (`inferDeliveredFrom`).
-//   STAGE: category beats position — new → not_started, done → done; the rest split at deliveredFrom.
+//   AUTOMATIC ORDER: the tracker's board / workflow order, else the category fallback (new →
+//   indeterminate → done, then name); a status on the tickets the tracker did not list is placed by
+//   category among the known ones.
+//   AUTOMATIC STAGE: new → Not started, done → Done; an in-progress (or unknown) status → In review
+//   when its name reads as review / QA (`SPRINT_REVIEW_STATUS_RE`) or it sits at / after the PR
+//   evidence boundary (`inferReviewFrom`), else In progress.
+//   OVERRIDE: the reader's sections, in their order. ⚠ PLACEMENT BEATS CATEGORY. A status it does not
+//   name keeps its automatic stage, right after its nearest automatic predecessor in that stage (else
+//   first). A status it names that nobody has seen is kept (count 0) so the settings list can show it.
 
 const norm = (s: string): string => s.trim().toLowerCase();
 const CAT_RANK: Record<string, number> = { new: 0, indeterminate: 1, done: 2 };
@@ -45,7 +51,7 @@ export interface StatusTicketInput {
 export interface StatusLayoutInput {
   autoOrder: SprintStatusAutoOrder | null;
   settings: SprintStatusSettings;
-  /** The LISTED + done tickets of the current sprint (status name + category). */
+  /** Every ticket of the current sprint (status name + category). */
   tickets: readonly StatusTicketInput[];
   /** Per status NAME (any case): PR evidence, from `loadSprintStatusEvidence`. */
   evidence: ReadonlyMap<string, { withPrs: number; allMerged: number }>;
@@ -94,48 +100,9 @@ export function automaticStatusOrder(
   return out;
 }
 
-/** Merge an override onto the automatic order: the override's names in its order; a status it does
- *  not name is inserted right after its automatic predecessor's position (or first); then a stable
- *  sort by category (new → in progress / unknown → done). Pure. */
-export function applyOrderOverride(
-  auto: ReadonlyArray<{ name: string; category: JiraStatusCategory | null }>,
-  override: readonly string[] | null,
-): Array<{ name: string; category: JiraStatusCategory | null; auto: boolean }> {
-  if (override == null || override.length === 0) return auto.map((s) => ({ ...s, auto: true }));
-  const byKey = new Map(auto.map((s) => [norm(s.name), s]));
-  const out: Array<{ name: string; category: JiraStatusCategory | null; auto: boolean }> = [];
-  const placed = new Set<string>();
-  for (const n of override) {
-    const k = norm(n);
-    if (k === '' || placed.has(k)) continue;
-    placed.add(k);
-    const known = byKey.get(k);
-    out.push({ name: known?.name ?? n.trim(), category: known?.category ?? null, auto: false });
-  }
-  for (let i = 0; i < auto.length; i += 1) {
-    const s = auto[i]!;
-    const k = norm(s.name);
-    if (placed.has(k)) continue;
-    // After the nearest automatic predecessor that is already placed.
-    let at = 0;
-    for (let j = i - 1; j >= 0; j -= 1) {
-      const pk = norm(auto[j]!.name);
-      const idx = out.findIndex((o) => norm(o.name) === pk);
-      if (idx >= 0) {
-        at = idx + 1;
-        break;
-      }
-    }
-    out.splice(at, 0, { ...s, auto: true });
-    placed.add(k);
-  }
-  // Category beats position here too (it does for the stage): a stable sort keeps the reader's order
-  // within a category, so a done status inserted after a moved predecessor never sits mid-list.
-  return out.map((s, i) => ({ s, i })).sort((a, b) => catRank(a.s.category) - catRank(b.s.category) || a.i - b.i).map((x) => x.s);
-}
-
-/** The first in-progress status, in order, whose PR-bearing tickets are mostly fully merged. Pure. */
-export function inferDeliveredFrom(
+/** The first in-progress (or unknown-category) status, in order, whose PR-bearing tickets are mostly
+ *  fully merged: it and every in-progress status after it are automatically In review. Pure. */
+export function inferReviewFrom(
   order: ReadonlyArray<{ name: string; category: JiraStatusCategory | null }>,
   evidence: ReadonlyMap<string, { withPrs: number; allMerged: number }>,
 ): string | null {
@@ -149,19 +116,84 @@ export function inferDeliveredFrom(
   return null;
 }
 
-/** The stage a ticket in this status is listed under. Pure; THE ONE stage rule. */
+/** Does this status name read as review / QA / test / release? Pure. */
+export function isReviewStatusName(name: string): boolean {
+  return SPRINT_REVIEW_STATUS_RE.test(name);
+}
+
+/** The automatic stage of every status in the automatic order. Pure. */
+export function automaticStages(
+  auto: ReadonlyArray<{ name: string; category: JiraStatusCategory | null }>,
+  evidence: ReadonlyMap<string, { withPrs: number; allMerged: number }>,
+): SprintStage[] {
+  const from = inferReviewFrom(auto, evidence);
+  const fromAt = from == null ? -1 : auto.findIndex((s) => norm(s.name) === norm(from));
+  return auto.map((s, i) => {
+    if (s.category === 'new') return 'not_started';
+    if (s.category === 'done') return 'done';
+    if (isReviewStatusName(s.name) || (fromAt >= 0 && i >= fromAt)) return 'in_review';
+    return 'in_progress';
+  });
+}
+
+type Placed = { name: string; category: JiraStatusCategory | null; auto: boolean; stage: SprintStage };
+
+/** Merge the override's sections onto the automatic placement, grouped in SPRINT_STAGES order. Pure. */
+export function applySectionsOverride(
+  auto: ReadonlyArray<{ name: string; category: JiraStatusCategory | null; stage: SprintStage }>,
+  sections: SprintStatusSettings['sections'],
+): Placed[] {
+  const byStage = new Map<SprintStage, Placed[]>(SPRINT_STAGES.map((k) => [k, []]));
+  const placed = new Map<string, SprintStage>();
+  const autoByKey = new Map(auto.map((s) => [norm(s.name), s]));
+  if (sections != null) {
+    for (const stage of SPRINT_STAGES) {
+      for (const n of sections[stage] ?? []) {
+        const k = norm(n);
+        if (k === '' || placed.has(k)) continue;
+        const known = autoByKey.get(k);
+        byStage.get(stage)!.push({ name: known?.name ?? n.trim(), category: known?.category ?? null, auto: false, stage });
+        placed.set(k, stage);
+      }
+    }
+  }
+  for (let i = 0; i < auto.length; i += 1) {
+    const s = auto[i]!;
+    const k = norm(s.name);
+    if (placed.has(k)) continue;
+    const list = byStage.get(s.stage)!;
+    // After the nearest automatic predecessor already placed in the SAME stage; else first.
+    let at = 0;
+    for (let j = i - 1; j >= 0; j -= 1) {
+      const idx = list.findIndex((o) => norm(o.name) === norm(auto[j]!.name));
+      if (idx >= 0) {
+        at = idx + 1;
+        break;
+      }
+    }
+    // With no override, keep the automatic order exactly (append).
+    if (sections == null) at = list.length;
+    list.splice(at, 0, { name: s.name, category: s.category, auto: true, stage: s.stage });
+    placed.set(k, s.stage);
+  }
+  return SPRINT_STAGES.flatMap((k) => byStage.get(k)!);
+}
+
+/** The stage a ticket in this status is listed under. Pure; THE ONE stage rule: the layout's
+ *  placement; a status the layout does not know falls back to its category (done → Done, new or none
+ *  → Not started, else In review by name, else In progress). */
 export function sprintStageOf(
-  layout: Pick<SprintStatusLayout, 'order' | 'deliveredFrom'>,
+  layout: Pick<SprintStatusLayout, 'order'>,
   status: { name: string; category: string | null } | null,
 ): SprintStage {
+  if (status != null) {
+    const hit = layout.order.find((o) => norm(o.name) === norm(status.name));
+    if (hit != null) return hit.stage;
+  }
   const cat = asCategory(status?.category ?? null);
   if (cat === 'done') return 'done';
   if (cat === 'new' || status == null) return 'not_started';
-  if (layout.deliveredFrom == null) return 'writing';
-  const at = layout.order.findIndex((o) => norm(o.name) === norm(status.name));
-  const from = layout.order.findIndex((o) => norm(o.name) === norm(layout.deliveredFrom as string));
-  if (at < 0 || from < 0) return 'writing';
-  return at >= from ? 'delivered' : 'writing';
+  return isReviewStatusName(status.name) ? 'in_review' : 'in_progress';
 }
 
 /** A status's section index in the layout (the sort key within a stage); unknown → after all. */
@@ -174,43 +206,47 @@ export function sprintStatusSectionIndex(layout: Pick<SprintStatusLayout, 'order
 /** THE layout fold. Pure. */
 export function resolveSprintStatusLayout(input: StatusLayoutInput): SprintStatusLayout {
   const settings = input.settings ?? SPRINT_STATUS_SETTINGS_DEFAULT;
-  const auto = automaticStatusOrder(input.autoOrder, input.tickets);
-  const merged = applyOrderOverride(auto, settings.order);
+  const autoOrder = automaticStatusOrder(input.autoOrder, input.tickets);
+  const stages = automaticStages(autoOrder, input.evidence);
+  const merged = applySectionsOverride(
+    autoOrder.map((s, i) => ({ ...s, stage: stages[i]! })),
+    settings.sections,
+  );
   const counts = new Map<string, number>();
   for (const t of input.tickets) {
-    if (asCategory(t.statusCategory) === 'done') continue;
     const k = norm(t.statusName ?? '');
     if (k !== '') counts.set(k, (counts.get(k) ?? 0) + 1);
   }
-  // Over the order the page USES (the reader's, when they saved one), so the split never lands after
-  // an earlier status, on screen, that passes the same test.
-  const deliveredFromAuto = inferDeliveredFrom(merged, input.evidence);
-  const overridden =
-    settings.deliveredFrom != null && merged.some((s) => norm(s.name) === norm(settings.deliveredFrom as string))
-      ? (merged.find((s) => norm(s.name) === norm(settings.deliveredFrom as string))?.name ?? null)
-      : null;
-  const deliveredFrom = overridden ?? deliveredFromAuto;
-  const partial = { order: merged.map((s) => ({ name: s.name, category: s.category })), deliveredFrom };
   const order: SprintStatusLayoutEntry[] = merged.map((s) => ({
     name: s.name,
     category: s.category,
     count: counts.get(norm(s.name)) ?? 0,
     auto: s.auto,
-    stage: sprintStageOf(partial as Pick<SprintStatusLayout, 'order' | 'deliveredFrom'>, s),
+    stage: s.stage,
   }));
   const ev = new Map([...input.evidence].map(([k, v]) => [norm(k), v]));
-  const evidence: SprintStatusEvidence[] = merged
+  const evidence: SprintStatusEvidence[] = autoOrder
     .filter((s) => s.category !== 'new' && s.category !== 'done')
     .map((s) => ({ status: s.name, withPrs: ev.get(norm(s.name))?.withPrs ?? 0, allMerged: ev.get(norm(s.name))?.allMerged ?? 0 }));
   return {
     order,
-    orderSource:
-      settings.order != null && settings.order.length > 0 ? 'override' : (input.autoOrder?.source ?? 'fallback'),
-    deliveredFrom,
-    deliveredFromAuto,
+    orderSource: settings.sections != null ? 'override' : (input.autoOrder?.source ?? 'fallback'),
+    codingBegins: order.find((o) => o.stage === 'in_progress')?.name ?? null,
+    codingEnds: order.find((o) => o.stage === 'in_review')?.name ?? null,
     evidence,
     settings,
   };
+}
+
+/** Parse a STORED override against the statuses this layout knows (a retired `{order, deliveredFrom}`
+ *  value needs each status's category). Pure. */
+export function storedSettingsFor(
+  raw: unknown,
+  autoOrder: SprintStatusAutoOrder | null,
+  tickets: readonly StatusTicketInput[],
+): SprintStatusSettings {
+  const cats = new Map(automaticStatusOrder(autoOrder, tickets).map((s) => [norm(s.name), s.category]));
+  return parseSprintStatusSettings(raw, false, (n) => cats.get(norm(n)) ?? null) ?? { ...SPRINT_STATUS_SETTINGS_DEFAULT };
 }
 
 // ── The DB half (signatures are the contract db/sprint-stories.ts calls) ─────────────────────────
@@ -387,11 +423,12 @@ export async function getSprintStatusLayout(
   workspaceId: number,
   args: SprintStatusLayoutArgs,
 ): Promise<SprintStatusLayout> {
-  const { getSprintStatusSettings } = await dbMods();
-  const [evidence, settings] = await Promise.all([
+  const { getSprintStatusSettingsRaw } = await dbMods();
+  const [evidence, raw] = await Promise.all([
     loadSprintStatusEvidence(accountId, workspaceId, args),
-    getSprintStatusSettings(accountId, workspaceId),
+    getSprintStatusSettingsRaw(accountId, workspaceId),
   ]);
+  const settings = storedSettingsFor(raw, args.autoOrder, args.tickets);
   return resolveSprintStatusLayout({ autoOrder: args.autoOrder, settings, tickets: args.tickets, evidence });
 }
 
