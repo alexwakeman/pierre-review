@@ -253,6 +253,9 @@ export interface SprintTicketReference {
   /** It is a node of the graph (the drawer can move to it). */
   inGraph: boolean;
   url: string | null;
+  /** Its assignee, from the stored sprint / referenced-ticket rows: null = unassigned; ABSENT = Limn has
+   *  not read that ticket (never shown as "Unassigned"). */
+  assignee?: { name: string; avatarUrl: string | null } | null;
 }
 
 /** GET /api/sprint-graph/ticket?workspace=<id>&ident=<ident> — Pro (402), DB ONLY. An ident that is not

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   SPRINT_REPOS_PER_TICKET_MAX,
@@ -28,9 +28,10 @@ import { groupReferences } from './sprintGraphModel.js';
 import { repoPickerOptions } from './sprintModel.js';
 
 // THIS SPRINT'S DRAWER — one ticket of the sprint graph, opened from its node (or from a reference /
-// a ticket key in an answer). It slides in from the right OVER the graph (a light backdrop; the graph
-// stays mounted, readable, and zooms its ticket into the strip beside the drawer); Escape, the close button or a backdrop click closes it, focus is trapped
-// inside and handed back to the node.
+// a ticket key in an answer). It slides in from the right OVER the graph, NON-MODAL: no scrim and no
+// focus trap, so the graph beside it stays live (pan, zoom, click another ticket to switch) and zooms
+// its ticket into the strip beside the drawer. Escape or the close button closes it; focus returns to
+// the node.
 //
 // It is built from the Open PRs pieces, so a ticket reads the same here as in its stack:
 //   • the header: key, title, status pill, assignee, epic, the tracker link and "Open ticket tab";
@@ -78,43 +79,27 @@ export function SprintTicketDrawer({
     closeRef.current?.focus();
   }, [ident]);
 
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
-    if (e.key === 'Escape' && !e.defaultPrevented) {
-      e.stopPropagation();
-      onClose();
-      return;
-    }
-    if (e.key !== 'Tab') return;
-    const panel = panelRef.current;
-    if (panel == null) return;
-    const focusables = [
-      ...panel.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), select:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      ),
-    ].filter((el) => el.offsetParent !== null || el === document.activeElement);
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-    if (first == null || last == null) return;
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  };
+  // NON-MODAL: the graph beside the drawer stays live (pan, zoom, click another ticket to switch), so
+  // there is no scrim and no focus trap. Escape closes it from anywhere on the page — unless something
+  // else (a menu, the graph) already handled that key.
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent): void => {
+      if (e.key === 'Escape' && !e.defaultPrevented) onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   // PORTALED to <body>: rendered in place it inherited its parent's `space-y-*` top margin, a strip of
   // page showing above the drawer. The scrim is light — the graph beside the drawer stays readable.
   return createPortal(
-    <div className="fixed inset-0 z-50" onKeyDown={onKeyDown} data-testid="sprint-drawer">
-      <div className="absolute inset-0 bg-slate-950/10" onClick={onClose} aria-hidden="true" />
+    <div className="pointer-events-none fixed inset-0 z-50" data-testid="sprint-drawer">
       <div
         ref={panelRef}
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
         aria-labelledby={titleId}
-        className="sprint-drawer-in absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col border-l border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-950"
+        className="sprint-drawer-in pointer-events-auto absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col border-l border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-950"
       >
         <div className="flex items-start gap-2 border-b border-gray-200 px-4 py-3 dark:border-gray-800">
           <div className="min-w-0 flex-1">
@@ -419,6 +404,11 @@ function References({
                     <span className={`shrink-0 whitespace-nowrap font-mono font-semibold ${r.done === true ? 'line-through' : ''}`}>{r.key}</span>
                     {r.title != null && r.title !== '' && <span className="min-w-0 truncate">{r.title}</span>}
                     {r.status != null && <span className="shrink-0 text-gray-500 dark:text-gray-400">· {r.status}</span>}
+                    {r.assignee !== undefined && (
+                      <span className="shrink-0 whitespace-nowrap text-gray-500 dark:text-gray-400">
+                        · {r.assignee?.name ?? 'Unassigned'}
+                      </span>
+                    )}
                   </button>
                   {r.quote != null && r.quote !== '' && <p className={`mt-0.5 text-xs italic ${MUTED}`}>“{r.quote}”</p>}
                 </div>

@@ -367,7 +367,7 @@ export function ticketReferencesOf(
   t: Pick<GraphTicketInput, 'ident' | 'links' | 'brief'>,
   provider: TrackerProvider,
   apiRoot: string,
-  known: ReadonlyMap<string, { key: string; title: string; status: GraphTicketInput['status']; url: string | null }>,
+  known: ReadonlyMap<string, { key: string; title: string; status: GraphTicketInput['status']; url: string | null; assignee?: GraphTicketInput['assignee'] }>,
   inGraph: ReadonlySet<string>,
 ): SprintTicketReference[] {
   const out: SprintTicketReference[] = [];
@@ -390,6 +390,8 @@ export function ticketReferencesOf(
       quote,
       inGraph: inGraph.has(id.ident),
       url: row?.url ?? fallback?.url ?? null,
+      // A ticket we hold a row for: its assignee or null (unassigned). One we never read: no claim.
+      ...(row != null ? { assignee: row.assignee ?? null } : {}),
     });
   };
   for (const l of t.links ?? []) {
@@ -452,7 +454,7 @@ export async function getSprintTicketDetail(
   if (node == null) return none;
   const input = (node.ghost ? t.ghosts : t.sprint).find((x) => x.ident === ident)!;
   const known = new Map(
-    [...t.sprint, ...t.ghosts].map((x) => [x.ident, { key: x.key, title: x.title, status: x.status, url: x.url }] as const),
+    [...t.sprint, ...t.ghosts].map((x) => [x.ident, { key: x.key, title: x.title, status: x.status, url: x.url, assignee: x.assignee }] as const),
   );
   const references = ticketReferencesOf(input, site.provider, site.apiRoot, known, new Set(g.nodes.map((n) => n.ident)));
   const prs = await opts.prsOf(ident);

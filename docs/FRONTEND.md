@@ -2176,7 +2176,8 @@ Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the 
     mark); Complete faded; ghosts smaller, dashed, fainter with depth; assignee avatar badge outside the
     top-right rim (image through `safeExternalUrl`, initials when it fails), counter-scaled by CSS
     `--sg-badge` (`badgeScale`) so it never drops below an 18px picture on screen, and an obstacle to
-    every label and name; PR satellites orbiting (open / draft / merged, a red ring for failing checks on an
+    every label and name; HIDDEN when zoomed far out (`data-zoom='far'`, below `FAR_ZOOM`), where it
+    also reserves no halo room and blocks nothing (`hasBadge(id, k)`); PR satellites orbiting (open / draft / merged, a red ring for failing checks on an
     OPEN PR; at most 12). **Edges**: `depends_on` a directed arrow (from → to), `concurrent` dashed,
     `builds_on` / `supersedes` faint and thin (only with "Show builds on / replaces"; the key lists them
     then); hovering a node or an edge shows a tooltip-popover
@@ -2215,8 +2216,9 @@ Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the 
     Enter / Space opens the drawer; a visually hidden list repeats every ticket.
   - **The drawer** (`SprintTicketDrawer`) is PORTALED to `<body>` (in place it inherited the parent's
     `space-y-*` top margin — a gap above a `fixed inset-0` panel) and slides in from the right over the
-    graph (a LIGHT backdrop, so the framed tickets stay readable beside it; Escape /
-    close / backdrop click; focus trapped and handed back to the node). It is built from the Open PRs
+    graph, NON-MODAL — no scrim, no focus trap, the panel alone takes pointer events — so the graph
+    beside it stays live: pan, zoom, click another ticket to switch (user decision 2026-10-13). Escape
+    (a window listener, skipped when already handled) or close; focus returns to the node. It is built from the Open PRs
     pieces: the header (key, title, status pill, assignee, epic, tracker link, "Open ticket tab"), the
     "Story check" block (the brief's summary and numbered criteria, the first 10 then "Show all";
     "Worked out from the description" when derived) plus the Open PRs `StackStoryCheck` when the

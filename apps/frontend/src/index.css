@@ -1818,7 +1818,8 @@ body {
 }
 /* No free spot on screen: hidden until hover, focus or zoom gives it room (`placeLabels`). */
 .sprint-canvas .sg-label[data-side='none'],
-.sprint-canvas svg[data-zoom='far'] .sg-title {
+.sprint-canvas svg[data-zoom='far'] .sg-title,
+.sprint-canvas svg[data-zoom='far'] .sg-badge {
   display: none;
 }
 /* A halo name with no room inside its halo at this zoom, or crowded by a neighbour: hidden (`placeHaloNames`). */

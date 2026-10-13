@@ -339,6 +339,12 @@ describe('GET /api/sprint-graph/ticket', () => {
       // Out of scope: listed in the drawer, no node.
       ['ENG-60', 'out_of_scope', false, 'In Progress'],
     ]);
+    // Each reference carries its assignee from the stored rows (null = unassigned).
+    expect(body.references.map((r: any) => [r.key, r.assignee])).toEqual([
+      ['ENG-7', null],
+      ['ENG-2', { name: 'Zed', avatarUrl: null }],
+      ['ENG-60', null],
+    ]);
     expect(body.prs.found).toBe(true);
     expect(body.prs.open.map((p: any) => p.number)).toEqual([12]);
     expect(body.prs.merged.map((p: any) => p.number)).toEqual([11]);
@@ -355,6 +361,11 @@ describe('GET /api/sprint-graph/ticket', () => {
     expect(eng3.references.map((r: any) => [r.key, r.relation, r.done])).toEqual([
       ['ENG-8', 'blocked_by', false],
       ['ENG-6', 'linked', true],
+    ]);
+    // A ticket Limn never read (ENG-6, only a tracker link) makes no assignee claim at all.
+    expect(eng3.references.map((r: any) => [r.key, 'assignee' in r])).toEqual([
+      ['ENG-8', true],
+      ['ENG-6', false],
     ]);
     for (const ident of [id('ENG-60'), id('ENG-5'), id('ENG-9'), 'not an ident']) {
       const r = (await get(ident)).json() as any;

@@ -506,7 +506,10 @@ export function SprintGraph({
   // `HALO_NAME_LAYOUT_ZOOM` for the groups and `HALO_SUBNAME_LAYOUT_ZOOM` for the status and person rooms
   // inside them (`kInner`). A parent's halo is sized round its children's ROOMY halos, so the nesting holds.
   // A ticket's assignee badge pokes past its disc (top right): the halos hold it too.
-  const hasBadge = (id: string): boolean => {
+  // Zoomed far out (the whole sprint) the assignee badges are not drawn (CSS `data-zoom='far'`), so
+  // they reserve no room in a halo and block no name.
+  const hasBadge = (id: string, k: number): boolean => {
+    if (k < FAR_ZOOM) return false;
     const node = labelCtx.current.byId.get(id);
     return node != null && !node.ghost && node.assignee != null;
   };
@@ -522,7 +525,7 @@ export function SprintGraph({
           pts.set(n.person, e);
         }
         e.l.push({ x: n.x, y: n.y, r: drawnRadius(n.r, s) });
-        if (hasBadge(n.id)) e.b.push(badgeCircle(n.x, n.y, n.r, s, bs));
+        if (hasBadge(n.id, k)) e.b.push(badgeCircle(n.x, n.y, n.r, s, bs));
       }
       const out = new Map<string, NamedHalo & { parent: string; group: string }>();
       for (const [key, e] of pts) {
@@ -556,7 +559,7 @@ export function SprintGraph({
         if (n.sub == null || n.person != null || n.group == null || n.x == null || n.y == null) continue;
         const e = entry(n.sub, n.group);
         e.l.push({ x: n.x, y: n.y, r: drawnRadius(n.r, s) });
-        if (hasBadge(n.id)) e.b.push(badgeCircle(n.x, n.y, n.r, s, bs));
+        if (hasBadge(n.id, k)) e.b.push(badgeCircle(n.x, n.y, n.r, s, bs));
       }
       const out = new Map<string, NamedHalo & { group: string }>();
       for (const [key, e] of pts) {
@@ -590,7 +593,7 @@ export function SprintGraph({
       for (const n of simNodes.current.values()) {
         if (n.group == null || n.sub != null || n.person != null || n.x == null || n.y == null) continue;
         add(n.group, { x: n.x, y: n.y, r: drawnRadius(n.r, s) });
-        if (hasBadge(n.id)) add(n.group, badgeCircle(n.x, n.y, n.r, s, bs), badges);
+        if (hasBadge(n.id, k)) add(n.group, badgeCircle(n.x, n.y, n.r, s, bs), badges);
       }
       const out = new Map<string, NamedHalo>();
       for (const [key, l] of pts) {
@@ -644,7 +647,7 @@ export function SprintGraph({
     const badges: Array<{ x: number; y: number; R: number; group: string | null; sub: string | null; person: string | null }> = [];
     for (const n of simNodes.current.values()) {
       const node = ctx.byId.get(n.id);
-      if (node == null || node.ghost || node.assignee == null || n.x == null || n.y == null) continue;
+      if (far || node == null || node.ghost || node.assignee == null || n.x == null || n.y == null) continue;
       const c = badgeCentre(n.r, bs);
       const f = disc * t.k;
       badges.push({ x: n.x * t.k + t.x + c.x * f, y: n.y * t.k + t.y + c.y * f, R: (BADGE_R + 1) * bs * f, group: n.group, sub: n.sub, person: n.person });
