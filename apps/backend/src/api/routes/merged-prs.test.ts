@@ -6,7 +6,7 @@
 //      `from` is in, a merge AT `to` is out, an open PR and a closed-unmerged PR are out.
 //   2. Newest merge first, and the window + resolved workspace are echoed.
 //   3. Another tenant's workspace id resolves to the caller's Default; a foreign PR never appears.
-//   4. Pro on `periodReports`: 402 without it.
+//   4. FREE: no `periodReports` 402 (it moved from Reports to the This Sprint rail line).
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
@@ -170,11 +170,11 @@ describe('GET /api/merged-prs — the reporting window', () => {
     expect(body.prs.some((p: any) => p.id === ids.foreign)).toBe(false);
   });
 
-  it('402s without periodReports', async () => {
+  it('is FREE: answers without periodReports (This Sprint → Merged so far)', async () => {
     setCaps?.(emptyCaps);
     const res = await app.inject({ method: 'GET', url: '/api/merged-prs' });
-    expect(res.statusCode).toBe(402);
-    expect(res.json()).toEqual({ error: 'pro required' });
     setCaps?.({ ...emptyCaps, periodReports: true });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().workspaceId).toBe(ownWs);
   });
 });

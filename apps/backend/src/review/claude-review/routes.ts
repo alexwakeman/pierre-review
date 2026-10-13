@@ -8,6 +8,8 @@ import type {
   ClaudeReviewStatesBody,
   ClaudeReviewStatesResponse,
   ClaudeReviewStatusResponse,
+  ClaudeThreadJudgementsBody,
+  ClaudeThreadJudgementsResponse,
   GenerateReviewBody,
   PostCommentResult,
   PostReviewBody,
@@ -51,6 +53,7 @@ import {
   updateFinding,
   updateReviewDraft,
 } from './persist.js';
+import { getThreadJudgements } from './thread-judgements.js';
 
 // The Claude Review product API (CORE, free, LOCAL ONLY). The paths are the historical ones
 // (/api/prs/:id/claude-review*, /api/claude-reviews/*, /api/claude-findings/*,
@@ -377,6 +380,35 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       const accountId = ctx.accountIdOf(req);
       const stored = await getLatestReviewStates(ctx, unique, accountId, isFixRunning);
       return { states: withAutoHolds(stored, unique, accountId) };
+    },
+  );
+
+  // The thread cards' Claude marker: what the latest review said about each thread, for every PR
+  // on screen in ONE request (never one per card). DB-only — `tierFor` keeps it on `read`.
+  app.post(
+    '/api/claude-review/thread-judgements',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['prIds'],
+          additionalProperties: false,
+          properties: { prIds: { type: 'array', items: { type: 'integer' } } },
+        },
+      },
+    },
+    async (req, reply): Promise<ClaudeThreadJudgementsResponse | { error: string; message: string }> => {
+      const { prIds } = req.body as ClaudeThreadJudgementsBody;
+      const unique = [...new Set(prIds)];
+      if (unique.length > CLAUDE_REVIEW_STATES_MAX_IDS) {
+        reply.status(400);
+        return {
+          error: 'TooManyIds',
+          message: `At most ${CLAUDE_REVIEW_STATES_MAX_IDS} PRs per request; got ${unique.length}.`,
+        };
+      }
+      if (!AGENTIC_AI_ENABLED) return { prs: [] };
+      return { prs: await getThreadJudgements(ctx, unique, ctx.accountIdOf(req)) };
     },
   );
 

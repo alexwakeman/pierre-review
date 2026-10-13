@@ -47,7 +47,16 @@ import {
   languageForPath,
 } from '../../lib/hljsLines.js';
 import { DERIVED_STATE_META, relativeTime, safeExternalUrl, userLabel } from '../../lib/ui.js';
-import { CheckIcon, ChevronIcon, ExternalLinkIcon, FoldIcon, UnfoldIcon } from '../Icons.js';
+import {
+  CheckIcon,
+  ChevronIcon,
+  ExternalLinkIcon,
+  FoldIcon,
+  PendingClaudeReviewIcon,
+  UnfoldIcon,
+} from '../Icons.js';
+import { useClaudeThreadJudgements } from '../../hooks/useClaudeThreadJudgements.js';
+import { threadPillFor } from '../../lib/claudeThreadMarker.js';
 import { CopyButton } from '../CopyButton.js';
 import { MentionTextarea } from '../MentionTextarea.js';
 import { ThreadCard } from '../ThreadView/index.js';
@@ -412,6 +421,10 @@ function InlineThread({
 
   const meta = DERIVED_STATE_META[thread.derivedState];
   const resolved = thread.derivedState === 'resolved';
+  // The latest Claude review's judgement, when it made one, replaces the state dot (the same rule
+  // and the same ONE batched read as the card's pill — lib/claudeThreadMarker.ts).
+  const pill = threadPillFor(thread, useClaudeThreadJudgements(thread.prId));
+  const claude = pill.kind === 'claude' ? pill.marker : null;
   const root = thread.comments[0];
   // TOTAL over stored data (no error boundary): a null/unsynced author, an empty comments
   // array and an empty body all degrade to text, never throw.
@@ -435,11 +448,23 @@ function InlineThread({
         // A disclosure, like the tree's dir rows: the ⌄/⌃ glyph is visual-only, so without
         // this a screen reader hears a state description on a button whose action is unstated.
         aria-expanded={open}
-        title={`${meta.label} — ${meta.description}`}
+        title={
+          claude != null
+            ? `${claude.label}${claude.stale ? ' (earlier commit)' : ''}`
+            : `${meta.label} — ${meta.description}`
+        }
         // Inline colour, not a class pair: border-l colour classes lose to the shorthand
         // border-colour class depending on utility order. Transparent (not absent) when
         // resolved so the pills stay column-aligned.
-        style={{ borderLeftColor: resolved ? 'transparent' : meta.color }}
+        // A Claude judgement replaces the state colour too, or the edge keeps saying "Likely
+        // addressed" beside the marker that replaced it.
+        style={{
+          borderLeftColor: resolved
+            ? 'transparent'
+            : claude != null
+              ? 'rgb(var(--ai-signal-fill))'
+              : meta.color,
+        }}
         className={`flex w-full items-center gap-1.5 rounded border border-l-2 border-gray-200 bg-white px-2 py-1 text-left text-[11px] hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800 ${
           resolved
             ? 'text-gray-400 opacity-70 dark:text-gray-500'
@@ -451,6 +476,8 @@ function InlineThread({
             size={11}
             className="shrink-0 text-emerald-600 dark:text-emerald-400"
           />
+        ) : claude != null ? (
+          <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
         ) : (
           <span
             className="inline-block h-2 w-2 shrink-0 rounded-full"
@@ -475,6 +502,9 @@ function InlineThread({
             ⚠ SCOPED TO `open`. Do NOT drop them outright: the shut pill is the only description of
             the thread a reader gets while scrolling the diff, and a bare state dot describes
             nothing. */}
+        {!open && claude != null && (
+          <span className="shrink-0 font-medium text-ai-ink">{claude.label} ·</span>
+        )}
         {!open && (
           <>
             <span className="shrink-0 font-medium">{author}</span>

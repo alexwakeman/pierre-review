@@ -19,27 +19,34 @@ import {
   DEFAULT_VISIBILITY,
   NO_EPIC,
   NO_FILTERS,
+  NO_THEME,
   SPRINT_GROUP_MODES,
   SPRINT_GROUP_MODE_LABEL,
   UNASSIGNED,
   assignGroups,
+  canSplitByAssignee,
+  canSplitByStatus,
   effectiveGroupMode,
   filterOptions,
   filtersActive,
   groupList,
   pinnedStorageKey,
   readGroupMode,
+  readSplitAssignee,
+  readSplitStatus,
   safeLocalStorage,
   stageRing,
   toggleStage,
   visibleGraph,
   writeGroupMode,
+  writeSplitAssignee,
+  writeSplitStatus,
   type SprintGraphFilters,
   type SprintGraphVisibility,
   type SprintGroupMode,
 } from './sprintGraphModel.js';
 
-// Reports → "This sprint" — THE SPRINT GRAPH (GET /api/sprint-graph): the tracker's current sprint as a
+// This Sprint (its own rail line, FREE) — THE SPRINT GRAPH (GET /api/sprint-graph): the tracker's current sprint as a
 // graph of tickets (plus the GHOST tickets outside the sprint they reach), their links and their pull
 // requests. Toolbar (title + ⓘ, Ask Claude, statuses, Refresh), filters, the canvas (SprintGraph), the
 // drawer for one ticket (SprintTicketDrawer) and "Ask Claude about this sprint" (SprintAskPanel).
@@ -65,14 +72,19 @@ export function SprintView(): JSX.Element {
   const [filters, setFilters] = useState<SprintGraphFilters>(NO_FILTERS);
   const [selected, setSelected] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<string | null>(null);
+  /** Bumped on every open, so the graph frames the ticket (and its links) even when it was selected. */
+  const [frameRequest, setFrameRequest] = useState(0);
   const [hops, setHops] = useState<1 | 2>(1);
   const [visibility, setVisibility] = useState<SprintGraphVisibility>(DEFAULT_VISIBILITY);
   const [groupChoice, setGroupChoice] = useState<SprintGroupMode>(() => readGroupMode(safeLocalStorage()));
+  const [splitChoice, setSplitChoice] = useState<boolean>(() => readSplitStatus(safeLocalStorage()));
+  const [personChoice, setPersonChoice] = useState<boolean>(() => readSplitAssignee(safeLocalStorage()));
 
   const nodes = useMemo(() => data?.nodes ?? [], [data]);
   const edges = useMemo(() => data?.edges ?? [], [data]);
   const idents = useMemo(() => new Set(nodes.map((n) => n.ident)), [nodes]);
   const options = useMemo(() => filterOptions(nodes), [nodes]);
+  const members = useMemo(() => new Map(options.members.map((m) => [m.id, m])), [options]);
   const shown = useMemo(() => visibleGraph(nodes, edges, visibility), [nodes, edges, visibility]);
   const themesOn = data?.themes != null && data.themes.length > 0;
   const groupMode = effectiveGroupMode(groupChoice, themesOn);
@@ -82,10 +94,32 @@ export function SprintView(): JSX.Element {
     setGroupChoice(m);
     writeGroupMode(safeLocalStorage(), m);
   }, []);
+  // "Split by status" applies to an Epic or Theme grouping only; the stored choice survives the others.
+  const canSplit = canSplitByStatus(groupMode);
+  const splitOn = splitChoice && canSplit;
+  const chooseSplit = useCallback((on: boolean): void => {
+    setSplitChoice(on);
+    writeSplitStatus(safeLocalStorage(), on);
+  }, []);
+  // "Assigned to": one level deeper, under any grouping but None.
+  const canSplitPeople = canSplitByAssignee(groupMode);
+  const personOn = personChoice && canSplitPeople;
+  const choosePerson = useCallback((on: boolean): void => {
+    setPersonChoice(on);
+    writeSplitAssignee(safeLocalStorage(), on);
+  }, []);
+  // The second picker follows the grouping: Theme while grouping by theme, Epic otherwise. The hidden
+  // one's choice is kept but not applied (derived here, never written back).
+  const themePicker = groupMode === 'theme';
+  const applied = useMemo<SprintGraphFilters>(
+    () => (themePicker ? { ...filters, epic: null } : { ...filters, theme: null }),
+    [filters, themePicker],
+  );
 
   const open = useCallback((ident: string): void => {
     setSelected(ident);
     setDrawer(ident);
+    setFrameRequest((n) => n + 1);
   }, []);
   const closeDrawer = useCallback((): void => {
     const ident = drawer;
@@ -120,7 +154,7 @@ export function SprintView(): JSX.Element {
   const ghostCount = shown.nodes.length - sprintCount;
   const title = data.source != null ? sprintSourceTitle(data.source) : 'This sprint';
   const pinKey = pinnedStorageKey(data.workspaceId, title);
-  const active = filtersActive(filters);
+  const active = filtersActive(applied);
   const showAsk = askOn && data.aiEnabled;
 
   return (
@@ -181,6 +215,12 @@ export function SprintView(): JSX.Element {
             <ViewControls
               groupMode={groupMode}
               onGroup={chooseGroup}
+              split={splitOn}
+              canSplit={canSplit}
+              onSplit={chooseSplit}
+              splitPeople={personOn}
+              canSplitPeople={canSplitPeople}
+              onSplitPeople={choosePerson}
               themesOn={themesOn}
               visibility={visibility}
               setVisibility={setVisibility}
@@ -189,6 +229,7 @@ export function SprintView(): JSX.Element {
               filters={filters}
               setFilters={setFilters}
               options={options}
+              themePicker={themePicker}
               active={active}
               selected={selected}
               hops={hops}
@@ -202,11 +243,17 @@ export function SprintView(): JSX.Element {
                 groupMode={groupMode}
                 groupOf={groupOf}
                 groups={groups}
+                splitStatus={splitOn}
+                splitAssignee={personOn}
+                members={members}
                 faintShown={visibility.faint}
+                layoutIntent={`${groupMode}|${splitOn ? 1 : 0}|${personOn ? 1 : 0}|${visibility.history ? 1 : 0}|${visibility.faint ? 1 : 0}`}
                 pinKey={pinKey}
-                filters={filters}
+                filters={applied}
                 selected={selected}
                 hops={hops}
+                drawerOpen={drawer != null}
+                frameRequest={frameRequest}
                 onOpen={open}
                 onClearSelection={() => setSelected(null)}
               />
@@ -231,12 +278,24 @@ export function SprintView(): JSX.Element {
 function ViewControls({
   groupMode,
   onGroup,
+  split,
+  canSplit,
+  onSplit,
+  splitPeople,
+  canSplitPeople,
+  onSplitPeople,
   themesOn,
   visibility,
   setVisibility,
 }: {
   groupMode: SprintGroupMode;
   onGroup: (m: SprintGroupMode) => void;
+  split: boolean;
+  canSplit: boolean;
+  onSplit: (on: boolean) => void;
+  splitPeople: boolean;
+  canSplitPeople: boolean;
+  onSplitPeople: (on: boolean) => void;
   themesOn: boolean;
   visibility: SprintGraphVisibility;
   setVisibility: (v: SprintGraphVisibility) => void;
@@ -283,6 +342,24 @@ function ViewControls({
             Themes appear after Claude reads the sprint
           </span>
         )}
+        <button
+          type="button"
+          aria-pressed={split}
+          disabled={!canSplit}
+          onClick={() => onSplit(!split)}
+          className={`${toggle(split)} disabled:cursor-not-allowed disabled:border-dashed disabled:opacity-50 disabled:hover:border-gray-300 dark:disabled:hover:border-gray-700`}
+        >
+          Split by status
+        </button>
+        <button
+          type="button"
+          aria-pressed={splitPeople}
+          disabled={!canSplitPeople}
+          onClick={() => onSplitPeople(!splitPeople)}
+          className={`${toggle(splitPeople)} disabled:cursor-not-allowed disabled:border-dashed disabled:opacity-50 disabled:hover:border-gray-300 dark:disabled:hover:border-gray-700`}
+        >
+          Assigned to
+        </button>
       </span>
       <button
         type="button"
@@ -308,6 +385,7 @@ function Filters({
   filters,
   setFilters,
   options,
+  themePicker,
   active,
   selected,
   hops,
@@ -317,6 +395,8 @@ function Filters({
   filters: SprintGraphFilters;
   setFilters: (f: SprintGraphFilters) => void;
   options: ReturnType<typeof filterOptions>;
+  /** The second picker lists themes (grouping by theme) instead of epics. */
+  themePicker: boolean;
   active: boolean;
   selected: string | null;
   hops: 1 | 2;
@@ -354,34 +434,53 @@ function Filters({
         );
       })}
       <select
-        aria-label="Assignee"
+        aria-label="Member"
         value={filters.assignee ?? ''}
         onChange={(e) => setFilters({ ...filters, assignee: e.target.value === '' ? null : e.target.value })}
         className={select}
       >
         <option value="">Anyone</option>
-        {options.assignees.map((a) => (
-          <option key={a} value={a}>
-            {a}
+        {options.members.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.label}
           </option>
         ))}
         {options.anyUnassigned && <option value={UNASSIGNED}>Unassigned</option>}
       </select>
-      {(options.epics.length > 0 || options.anyNoEpic) && (
-        <select
-          aria-label="Epic"
-          value={filters.epic ?? ''}
-          onChange={(e) => setFilters({ ...filters, epic: e.target.value === '' ? null : e.target.value })}
-          className={select}
-        >
-          <option value="">Any epic</option>
-          {options.epics.map((ep) => (
-            <option key={ep.key} value={ep.key}>
-              {ep.title != null ? `${ep.title} (${ep.key})` : ep.key}
-            </option>
-          ))}
-          {options.anyNoEpic && <option value={NO_EPIC}>No epic</option>}
-        </select>
+      {themePicker ? (
+        (options.themes.length > 0 || options.anyNoTheme) && (
+          <select
+            aria-label="Theme"
+            value={filters.theme ?? ''}
+            onChange={(e) => setFilters({ ...filters, theme: e.target.value === '' ? null : e.target.value })}
+            className={select}
+          >
+            <option value="">Any theme</option>
+            {options.themes.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+            {options.anyNoTheme && <option value={NO_THEME}>No theme</option>}
+          </select>
+        )
+      ) : (
+        (options.epics.length > 0 || options.anyNoEpic) && (
+          <select
+            aria-label="Epic"
+            value={filters.epic ?? ''}
+            onChange={(e) => setFilters({ ...filters, epic: e.target.value === '' ? null : e.target.value })}
+            className={select}
+          >
+            <option value="">Any epic</option>
+            {options.epics.map((ep) => (
+              <option key={ep.key} value={ep.key}>
+                {ep.title != null ? `${ep.title} (${ep.key})` : ep.key}
+              </option>
+            ))}
+            {options.anyNoEpic && <option value={NO_EPIC}>No epic</option>}
+          </select>
+        )
       )}
       <button type="button" aria-pressed={filters.hasPrs} onClick={() => setFilters({ ...filters, hasPrs: !filters.hasPrs })} className={chip(filters.hasPrs)}>
         Has PRs
@@ -414,8 +513,14 @@ function GraphInfo(): JSX.Element {
       <p>Each circle is a ticket in the sprint. Click one, or press Enter on it, to open it.</p>
       <ul className="list-disc space-y-1 pl-5">
         <li>
-          <strong>Ring colour</strong> is the ticket&rsquo;s section: not started, in progress, in review or done. Done
+          <strong>Ring colour</strong> is the ticket&rsquo;s section: not started, in progress, in review or complete.
+          The circle&rsquo;s fill takes the same colour, and the mark in its middle repeats it as a shape: an empty
+          circle, a half-filled circle, an eye or a tick (a question mark when the status is not known). Complete
           tickets are fainter. Hover for the exact status.
+        </li>
+        <li>
+          <strong>The small round picture</strong> on a ticket&rsquo;s edge is the person it is assigned to (their
+          initials when there is no picture).
         </li>
         <li>
           <strong>Size</strong> is how many of the lines on screen touch the ticket.
@@ -429,7 +534,7 @@ function GraphInfo(): JSX.Element {
         <li>
           <strong>Small dashed circles</strong> are tickets outside the sprint that a sprint ticket leads to, up to three
           links away. The further away, the fainter. Only unfinished ones show; &ldquo;Show shipped history&rdquo; adds
-          the done ones and the chains behind them.
+          the complete ones and the chains behind them.
         </li>
         <li>
           <strong>Group by</strong> gathers tickets inside a faint labelled circle: by theme (the default), by epic or by
@@ -439,15 +544,29 @@ function GraphInfo(): JSX.Element {
           each ticket is in one; until Claude has named them, Theme shows epics. This browser remembers your choice.
         </li>
         <li>
+          <strong>Split by status</strong> divides each epic or theme into not started, in progress, in review and complete,
+          left to right, each in a small circle of its section&rsquo;s colour. It works with Epic and Theme only. This
+          browser remembers it.
+        </li>
+        <li>
+          <strong>Assigned to</strong> puts each person&rsquo;s tickets in a small grey circle with their name, inside
+          the epic, theme or section (and inside the status, when that is split too). It does nothing with None.
+        </li>
+        <li>
+          <strong>Member</strong> picks one person: the tickets assigned to them and the tickets carrying a pull request
+          they opened. A tracker name and a GitHub account count as one person when the names match.
+        </li>
+        <li>
           <strong>Dots</strong> circling a ticket are its pull requests: open, draft or merged. A red ring means its checks
           are failing.
         </li>
       </ul>
       <p>
-        The graph drifts slowly and stops while your pointer is over it or a ticket is selected. Drag a ticket to pin it
-        there; this browser remembers it. Hold Ctrl or ⌘ and scroll, or pinch, to zoom; a plain scroll moves the page.
-        Drag the background to move around. Fit frames what is shown.
+        The graph moves for a few seconds after it loads or changes, then stays still. Drag a ticket to pin it there;
+        this browser remembers it. Scroll or pinch to zoom. Drag the
+        background to move around. Fit frames what is shown.
       </p>
+      <p>Opening a ticket zooms to it and the tickets it links to. Picking an epic or theme zooms to its tickets.</p>
       <p>Where tickets crowd, some names hide. Hover or zoom in to read them.</p>
       <p>Filters fade what they leave out without moving anything. A selected ticket fades everything more than one link away.</p>
     </>

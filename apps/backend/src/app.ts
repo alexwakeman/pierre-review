@@ -267,7 +267,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // db/pr-intervals.ts; there is no narration seam and no plugin half. The route carries the 402
   // itself (the ENGINE stays capability-blind — verify:isolation calls that fold directly).
   await app.register(flowRoutes);
-  // REPORTS → THIS SPRINT (core, both modes; Pro on `periodReports`, 402): the sprint GRAPH, the
+  // THIS SPRINT (its own rail line; core, both modes, FREE — no 402): the sprint GRAPH, the
   // drawer's ticket detail, candidate repos and the status layout — all DB only. "Check against
   // code" and "Ask Claude about this sprint" are agentic and register in `registerAgenticRoutes`; the
   // refresh route registers with the tracker (`registerTracker`). Nothing here writes to a tracker.

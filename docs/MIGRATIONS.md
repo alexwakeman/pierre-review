@@ -1183,10 +1183,10 @@ that target. No workspace column (a ticket's story is one fact per account) and 
 `verify:isolation`. Journal `when` `1791964800000` in both folders (after `0098` / pg `0085`).
 Contract: docs/CLAUDE-REVIEW.md § Story labels. ⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS`).
 
-### `0100_sprint_stories` (pg `0087`) — Reports → This sprint
+### `0100_sprint_stories` (pg `0087`) — This sprint (then under Reports; now Activity → This Sprint)
 
 Additive: five new tables — `sprint_reads`, `sprint_tickets`, `sprint_ticket_repos`,
-`sprint_assessments`, `tracker_writes` (docs/DATA-MODEL.md § Reports → This sprint). Uniques (every
+`sprint_assessments`, `tracker_writes` (docs/DATA-MODEL.md § Activity → This Sprint). Uniques (every
 `onConflictDo*` uses exactly these): `sprint_reads (account_id, workspace_id)`, `sprint_tickets
 (account_id, workspace_id, ident)`, `sprint_ticket_repos (account_id, workspace_id, ident, repo_id)`,
 `tracker_writes (account_id, request_id)`; `sprint_assessments` has none. NAMED composite FKs onto

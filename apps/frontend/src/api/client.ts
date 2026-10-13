@@ -40,6 +40,8 @@ import type {
   ClaudeReviewModel,
   ClaudeReviewResponse,
   ClaudeReviewStatesBody,
+  ClaudeThreadJudgementsBody,
+  ClaudeThreadJudgementsResponse,
   ClaudeReviewStatesResponse,
   ClaudeReviewChatAnswer,
   ClaudeReviewChatBody,
@@ -927,8 +929,8 @@ export const api = {
   // response, one scope, one window; it also echoes the resolved `workspaceId`.
   workspaceMetrics: (workspaceId: number) =>
     get<WorkspaceMetricsResponse>(withQuery('/api/workspace-metrics', workspaceParam(workspaceId))),
-  // Reports → "Merged so far" — every PR merged in the workspace's REPORTING WINDOW, as Open PRs
-  // card rows. PAID on `periodReports` (the route 402s); one scope, one window, echoed.
+  // This Sprint → "Merged so far" — every PR merged in the workspace's REPORTING WINDOW, as Open PRs
+  // card rows. FREE (no 402); one scope, one window, echoed.
   mergedPrs: (workspaceId: number) =>
     get<MergedPrsResponse>(withQuery('/api/merged-prs', workspaceParam(workspaceId))),
   // Reports → Stories (core, Pro on `periodReports`): every ticket with a PR merged in the window.
@@ -945,7 +947,7 @@ export const api = {
   storyReport: (id: number) => get<StoryReportResponse>(`/api/story-reports/${id}`),
   cancelStoryReport: (id: number) =>
     fetch(`/api/story-reports/${id}/cancel`, jsonBody('POST')).then((r) => handle<StoryReportResponse>(r)),
-  // Reports → This sprint (core, Pro on `periodReports`; every route 402s without it). The graph GET
+  // This Sprint (its own rail line; core, FREE — no route here 402s). The graph GET
   // stamps the workspace as viewed, which is what lets the worker read its sprint at all. Both GETs
   // are DB only.
   sprintGraph: (workspaceId: number) =>
@@ -1464,6 +1466,13 @@ export const api = {
       '/api/claude-review/states',
       jsonBody('POST', { prIds } satisfies ClaudeReviewStatesBody),
     ).then((r) => handle<ClaudeReviewStatesResponse>(r)),
+  // The thread cards' Claude marker: the latest review's per-thread judgements for every PR on
+  // screen, ONE request (hooks/useClaudeThreadJudgements.ts batches the cards). DB-only.
+  claudeThreadJudgements: (prIds: number[]) =>
+    fetch(
+      '/api/claude-review/thread-judgements',
+      jsonBody('POST', { prIds } satisfies ClaudeThreadJudgementsBody),
+    ).then((r) => handle<ClaudeThreadJudgementsResponse>(r)),
   claudeReviewStatus: (prId: number) =>
     get<ClaudeReviewStatusResponse>(`/api/prs/${prId}/claude-review/status`),
   cancelClaudeReview: (prId: number) =>

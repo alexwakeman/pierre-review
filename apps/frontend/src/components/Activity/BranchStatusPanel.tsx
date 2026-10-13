@@ -419,10 +419,9 @@ export function BranchStatusPanel({
   const { data, isLoading } = useBranchStatus(repoIds);
   const { data: repos } = useRepos();
   const nameById = new Map((repos ?? []).map((r) => [r.id, r.fullName]));
-  // ⚠ THREE-STATE, NOT A BOOLEAN. `null` = "nobody has touched this control, so fall back to the
-  // red-trunk default"; `true`/`false` = an explicit choice, which ALWAYS wins from then on.
-  // This was a two-state boolean OR-ed with `failing > 0`, which made the chevron a dead control
-  // on exactly the panel a reader most wants to collapse — see the block above `expanded`.
+  // `null` = "nobody has touched this control this visit" → collapsed; `true`/`false` = an
+  // explicit choice, which wins for the rest of the mount. (It was once OR-ed with `failing > 0`,
+  // which made the chevron a dead control on a red trunk — never derive `expanded` from data.)
   // Per-mount only, deliberately: this is a "let me look" toggle, not a remembered preference.
   const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
 
@@ -439,37 +438,31 @@ export function BranchStatusPanel({
     (r) => r.ciStatus === 'failure' || r.ciStatus === 'error',
   ).length;
 
-  // ── COLLAPSE WHEN NOTHING IS RED ──────────────────────────────────────────────────────────
+  // ── ALWAYS ARRIVES COLLAPSED ──────────────────────────────────────────────────────────────
   //
-  // The cross-repo mount (the top of Activity → Open PRs) lists every repo in
-  // the workspace, where a twelve-repo workspace spends most of its life rendering twelve green
-  // rows nobody reads. Collapsed, it is the header line
-  // alone — still always expandable, and `useBranchTrends` is lazy per row, so a collapsed strip
-  // issues ZERO extra requests.
+  // The cross-repo mount (the top of Activity → Open PRs) lists every repo in the workspace, and
+  // opening the Open PRs rail line is for the PRs: the strip starts as its header line alone —
+  // the status pills still say "2 failing" at a glance — and the reader expands it for the visit
+  // with one click. `useBranchTrends` is lazy per row, so a collapsed strip issues ZERO extra
+  // requests. (It used to arrive OPEN when a default branch was red; the user asked for it to
+  // start collapsed every time, red or not.)
   //
   // ⚠ "GREEN" IS NOT A BOOLEAN. `CiStatus` has six members, and `pending`/`expected`/`unknown`
-  // are neither red nor green (CiDot paints `unknown` as a HOLLOW grey dot). The rule is: collapse
-  // unless some repo is `failure|error` — a pending build is not a call to action — and the
-  // header says "all N green" ONLY when every repo is `success`; otherwise it shows one pill per
-  // state that exists (green / failing / running) and `unknown` gets none.
+  // are neither red nor green (CiDot paints `unknown` as a HOLLOW grey dot). The header says
+  // "all N green" ONLY when every repo is `success`; otherwise it shows one pill per state that
+  // exists (green / failing / running) and `unknown` gets none.
   //
   // ⚠ CROSS-REPO MOUNT ONLY. `RepoFeedHeader` mounts this `compact` for a SINGLE repo, where the
   // panel IS the trunk line; collapsing there would hide that repo's status inside its own
   // console header.
   //
-  // ⚠ `failing > 0` IS A DEFAULT, NEVER AN OVERRIDE — and getting that backwards is what broke
-  // this control. It read `failing > 0 || userExpanded`, so on any workspace with a red default
-  // branch the disjunct was permanently true: the chevron flipped `userExpanded` faithfully,
-  // `expanded` never moved, and the panel could not be collapsed. Worse, it was dead precisely
-  // when the panel is at its tallest and most in the way (a red trunk is also the state that
-  // renders the failing-check names), so the one reader who needed the control was the one it
-  // ignored. `??` instead of `||` is the whole fix: the red-trunk default only applies while the
-  // reader has expressed no preference, and the first click retires it for this mount. A red
-  // default branch therefore still ARRIVES open — the alerting behaviour is unchanged — it simply
-  // no longer wins an argument with a person who has clicked.
+  // ⚠ PER-MOUNT, AND THAT IS THE "ALWAYS". `OpenPrsDetail` mounts only while the Open PRs rail line
+  // is on screen, so every arrival is a fresh mount with `userExpanded === null` → collapsed; a
+  // click during the visit sticks until the reader leaves. Never lift this into a store or
+  // localStorage, or "always collapsed on open" becomes "remembers the last visit".
   const allGreen = rows.every((r) => r.ciStatus === 'success');
   const collapsible = !compact;
-  const expanded = !collapsible || (userExpanded ?? failing > 0);
+  const expanded = !collapsible || (userExpanded ?? false);
 
   // The status pills, one per state that EXISTS (never a "0 running"): green, failing, running.
   // "Running" is `pending | expected` — a build GitHub is still waiting on. `unknown` (no checks)

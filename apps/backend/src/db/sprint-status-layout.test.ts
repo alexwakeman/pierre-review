@@ -1,8 +1,8 @@
-// Reports → This sprint — the PURE status-layout fold (db/sprint-status-layout.ts). No database: the
+// Activity → This Sprint — the PURE status-layout fold (db/sprint-status-layout.ts). No database: the
 // DB half imports db/client lazily, so importing this module opens nothing. Pinned:
 //   • the automatic order: the tracker's order first, then statuses only the tickets carry, placed
 //     by category; no tracker order → category then name;
-//   • the automatic STAGE: new → Not started, done → Done; a review / QA name → In review; the PR
+//   • the automatic STAGE: new → Not started, done → Complete; a review / QA name → In review; the PR
 //     evidence boundary (first in-progress status at ≥ 60% fully merged with ≥ 2 such tickets) and
 //     every in-progress status after it → In review; the rest In progress;
 //   • the override: placement beats category, unnamed statuses keep their automatic stage after their
@@ -201,7 +201,7 @@ describe('resolveSprintStatusLayout', () => {
 });
 
 describe('storedSettingsFor (the retired {order, deliveredFrom} shape)', () => {
-  it('keeps the order: new → Not started, done → Done, before deliveredFrom → In progress, from it → In review', () => {
+  it('keeps the order: new → Not started, done → Complete, before deliveredFrom → In progress, from it → In review', () => {
     const s = storedSettingsFor(
       { order: ['To Do', 'In Development', 'Ready for QA', 'In PO Review', 'Done'], deliveredFrom: 'ready for qa' },
       BOARD,

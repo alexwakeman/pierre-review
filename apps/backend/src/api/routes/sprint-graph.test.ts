@@ -1,6 +1,6 @@
-// Reports → This sprint as a GRAPH — the CORE routes (api/routes/sprint-stories.ts) and the graph fold's
+// Activity → This Sprint as a GRAPH — the CORE routes (api/routes/sprint-stories.ts) and the graph fold's
 // DB half (db/sprint-graph.ts), on a THROWAWAY sqlite DB with a real Fastify instance. Pinned:
-//   1. Pro on `periodReports`: 402 before any DB work (GET graph, GET ticket, PUT repos).
+//   1. FREE: no `periodReports` 402 (GET graph, GET ticket, PUT repos) — This Sprint left Reports.
 //   2. Another tenant's workspace id resolves to the caller's Default (never theirs, never a 404).
 //   3. Nodes: the sprint (stage, then key) then GHOSTS reached through an EDGE (a blocking tracker
 //      link, a CURRENT brief's depends_on / concurrent / builds_on / supersedes) — chains followed
@@ -184,8 +184,11 @@ beforeAll(async () => {
       .execute();
     return row.id as number;
   };
-  await pr(11, 'merged', { mergedAt: new Date(Date.now() - 86_400_000) });
-  await pr(12, 'open', { isDraft: true, ciStatus: 'failure' });
+  // An unbranded CI account GitHub types as a Bot: `isBot` rides the author (the Members filter drops it).
+  const [ci] = await db.insert(schema.users).values({ githubLogin: 'ci-runner', githubType: 'Bot' }).returning({ id: schema.users.id }).execute();
+  await pr(11, 'merged', { mergedAt: new Date(Date.now() - 86_400_000), authorId: ci.id });
+  const [amy] = await db.insert(schema.users).values({ githubLogin: 'amy-sg', displayName: 'Amy' }).returning({ id: schema.users.id }).execute();
+  await pr(12, 'open', { isDraft: true, ciStatus: 'failure', authorId: amy.id });
 
   store = await import('../../db/sprint-store.js');
   store.setSprintReadKicker((a, w) => kicks.push([a, w]));
@@ -212,21 +215,23 @@ afterAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
 });
 
-describe('the Pro gate', () => {
-  it('402s without periodReports, before any DB work', async () => {
+describe('no Pro gate (This Sprint is free)', () => {
+  it('answers without periodReports', async () => {
     setCaps?.(emptyCaps);
-    const before = await db.select().from(schema.sprintReads).execute();
-    for (const r of [
-      { method: 'GET' as const, url: '/api/sprint-graph' },
-      { method: 'GET' as const, url: `/api/sprint-graph/ticket?ident=${encodeURIComponent(id('ENG-1'))}` },
-      { method: 'PUT' as const, url: '/api/sprint-stories/repos', payload: { workspaceId: ownWs, ident: 'x', repoIds: [] } },
-    ]) {
-      const res = await app.inject(r);
-      expect(res.statusCode).toBe(402);
-      expect(res.json()).toEqual({ error: 'pro required' });
+    try {
+      for (const r of [
+        { method: 'GET' as const, url: '/api/sprint-graph' },
+        { method: 'GET' as const, url: `/api/sprint-graph/ticket?ident=${encodeURIComponent(id('ENG-1'))}` },
+      ]) {
+        const res = await app.inject(r);
+        expect(res.statusCode).toBe(200);
+      }
+      // A ticket that is not in the list: the route ran (404 no_ticket), it was not paywalled.
+      const put = await app.inject({ method: 'PUT', url: '/api/sprint-stories/repos', payload: { workspaceId: ownWs, ident: 'x', repoIds: [] } });
+      expect(put.statusCode).not.toBe(402);
+    } finally {
+      setCaps?.(fullCaps);
     }
-    expect(await db.select().from(schema.sprintReads).execute()).toEqual(before);
-    setCaps?.(fullCaps);
   });
 });
 
@@ -274,6 +279,12 @@ describe('GET /api/sprint-graph', () => {
       [11, 'merged', false, null],
     ]);
     expect(n('ENG-1').prs[0].url).toBe('https://github.com/acme/web/pull/12');
+    // The PR's author rides along (the Members filter folds it into the ticket's assignee), with the
+    // global automation verdict.
+    expect(n('ENG-1').prs.map((p: any) => p.author)).toEqual([
+      { login: 'amy-sg', name: 'Amy', isBot: false },
+      { login: 'ci-runner', name: null, isBot: true },
+    ]);
     expect(body.briefs).toEqual({ current: 3, pending: 5 });
     expect(body.statusLayout.order.map((o: any) => o.name)).toEqual(['To Do', 'In Progress', 'Done']);
     expect(body.repos).toEqual([{ repoId: ownRepo, fullName: 'acme/web' }]);

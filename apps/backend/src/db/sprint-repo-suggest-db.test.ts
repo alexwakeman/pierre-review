@@ -1,7 +1,7 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// Reports → This sprint: candidate repo SUGGESTIONS (db/sprint-repo-suggest.ts) on a SCRATCH SQLite —
+// Activity → This Sprint: candidate repo SUGGESTIONS (db/sprint-repo-suggest.ts) on a SCRATCH SQLite —
 // never apps/backend/data. Pins every evidence kind, the ranking, the workspace-only rule, the
 // accepted exclusion, the 180-day project lookback, and that another tenant's history never counts.
 

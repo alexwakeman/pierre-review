@@ -4,7 +4,9 @@ import { fixtures, installMockApi } from './mock-api.js';
 // Regression gates for the consolidated Activity Feed + click-to-detail UX (see CLAUDE.md):
 //   • a bare URL lands on the OPEN PRS tab (the default view); Activity opens on its Pending rail
 //     entry; an empty workspace lands on the guidance to move repos in
-//   • the rail reads Open PRs, Pending, Feed, Bots Monitoring, Reports
+//   • the rail reads Open PRs, Pending, This Sprint, Feed, Reports, Bots Monitoring
+//   • This Sprint is free (no Pro badge) and a legacy ?insightsTab=sprint|merged link lands on it
+//   • the Open PRs trunk strip arrives collapsed, and expands on a click
 //   • a Feed link names `?activityRepo=feed`, and the consolidated stream renders there, flat —
 //     the stream ALONE (no daily brief, no trunk strip, no open-PR panel)
 //   • Pending's My turn tab has two views: its cards, and the default branches + open PRs
@@ -94,21 +96,77 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(railButton(page, 'Pending')).toHaveAttribute('aria-pressed', 'true');
   });
 
-  test('the rail reads Open PRs, Pending, Feed, Bots Monitoring, Reports', async ({ page }) => {
+  test('the rail reads Open PRs, Pending, This Sprint, Feed, Reports, Bots Monitoring', async ({ page }) => {
     await gotoActivity(page);
-    // The five pseudo-rows are the first `aria-pressed` buttons in the overlay; the per-repo rows
+    // The six pseudo-rows are the first `aria-pressed` buttons in the overlay; the per-repo rows
     // follow them. Polled, because the rail can re-render while the workspace resolves.
     await expect
       .poll(() =>
         overlay(page)
           .locator('button[aria-pressed]')
           .evaluateAll((els) =>
-            // The LABEL span only: Bots Monitoring and Reports carry a Pro badge after it, and
+            // The LABEL span only: Reports and Bots Monitoring carry a Pro badge after it, and
             // Open PRs a count.
-            els.slice(0, 5).map((el) => (el.querySelector('.truncate')?.textContent ?? '').trim()),
+            els.slice(0, 6).map((el) => (el.querySelector('.truncate')?.textContent ?? '').trim()),
           ),
       )
-      .toEqual(['Open PRs', 'Pending', 'Feed', 'Bots Monitoring', 'Reports']);
+      .toEqual(['Open PRs', 'Pending', 'This Sprint', 'Feed', 'Reports', 'Bots Monitoring']);
+    // This Sprint is FREE: its rail line carries no Pro badge.
+    await expect(railButton(page, 'This Sprint')).toBeVisible();
+  });
+
+  test('This Sprint opens on the sprint graph, with Merged so far beside it', async ({ page }) => {
+    await gotoActivity(page);
+    await railButton(page, 'This Sprint').click();
+    const view = page.getByTestId('sprint-rail-view');
+    await expect(view).toBeVisible();
+    await expect(page).toHaveURL(/activityRepo=sprint/);
+    await expect(view.getByRole('tab', { name: 'Sprint graph' })).toHaveAttribute('aria-selected', 'true');
+
+    await view.getByRole('tab', { name: 'Merged so far' }).click();
+    await expect(view.getByRole('tab', { name: 'Merged so far' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page).toHaveURL(/sprintTab=merged/);
+  });
+
+  for (const [legacy, tab] of [
+    ['sprint', 'Sprint graph'],
+    ['merged', 'Merged so far'],
+  ] as const) {
+    test(`a legacy ?insightsTab=${legacy} link lands on This Sprint → ${tab}`, async ({ page }) => {
+      await gotoActivity(page, `?activityRepo=insights&insightsTab=${legacy}`);
+      await expect(railButton(page, 'This Sprint')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.getByTestId('sprint-rail-view').getByRole('tab', { name: tab })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+      await expect(page).not.toHaveURL(/insightsTab=/);
+    });
+  }
+
+  test('the Open PRs trunk strip arrives collapsed, even with a red default branch', async ({ page }) => {
+    await installMockApi(page);
+    // A RED default branch — the state that used to arrive open. Registered after the mock, so it wins.
+    await page.route(
+      (url) => url.pathname.endsWith('/api/branch-status'),
+      (route) =>
+        route.fulfill({
+          json: {
+            repos: fixtures.BRANCH_STATUS.repos.map((r) => ({ ...r, ciStatus: 'failure' as const })),
+          },
+        }),
+    );
+    await page.goto('/app/?view=activity');
+    await expect(overlay(page)).toBeVisible();
+    const header = () =>
+      page.getByTestId('open-prs-view').getByTestId('branch-status-panel').locator(':scope > button[aria-expanded]');
+    await expect(header()).toHaveAttribute('aria-expanded', 'false');
+    await header().click();
+    await expect(header()).toHaveAttribute('aria-expanded', 'true');
+    // Leaving and coming back is a fresh visit: collapsed again.
+    await railButton(page, 'Feed').click();
+    await expect(page.getByTestId('feed-view')).toBeVisible();
+    await overlay(page).getByRole('button', { name: /^Open PRs/ }).first().click();
+    await expect(header()).toHaveAttribute('aria-expanded', 'false');
   });
 
   test('a Feed link opens the Feed and survives a reload', async ({ page }) => {

@@ -22,7 +22,7 @@ import { refreshSprintRefTickets, type RefLister } from './ref-status.js';
 import { sprintProjectKeys, workspaceRepoNames } from './project-keys.js';
 import type { SprintFetchedTicket, SprintLister } from './types.js';
 
-// ── THE SPRINT LIST READ (Reports → This sprint; docs/TRACKERS.md § The sprint list read) ────────
+// ── THE SPRINT LIST READ (Activity → This Sprint; docs/TRACKERS.md § The sprint list read) ────────
 //
 // ⚠ THE RULE CHANGE. Until this, a tracker was read ONLY when a pull request was RECEIVED (the
 // ticket worker, ../worker.ts) or a person pressed Refresh on one. This is the FIRST tracker read
@@ -71,7 +71,7 @@ export interface SprintReadOptions {
 }
 
 export interface SprintTickOptions extends SprintReadOptions {
-  /** Whether the account may have Reports (`periodReports`). Default: the account's entitlement. */
+  /** Whether the account may have its sprint read. Default: the account exists (This Sprint is free). */
   entitled?: (accountId: number) => Promise<boolean>;
 }
 
@@ -411,13 +411,11 @@ export async function expandSprintGhosts(
 
 // ---- the tick ----
 
+// This Sprint is FREE on every tier (it left Pro Reports): any account that still exists may have its
+// sprint read. The view stamp (`sprint_reads.viewed_at`) stays the demand gate.
 async function defaultEntitled(accountId: number): Promise<boolean> {
-  const [{ getAccountById }, { entitledProCapabilities }] = await Promise.all([
-    import('../../auth/account.js'),
-    import('../../pro/contract.js'),
-  ]);
-  const account = await getAccountById(accountId);
-  return account != null && entitledProCapabilities(account).periodReports === true;
+  const { getAccountById } = await import('../../auth/account.js');
+  return (await getAccountById(accountId)) != null;
 }
 
 /** The tick body: viewed-recently AND due workspaces (≤ TICK_WORKSPACES). Never throws. */

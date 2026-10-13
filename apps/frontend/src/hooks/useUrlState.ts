@@ -9,6 +9,7 @@ import {
   BOTS_INNER_TABS,
   FEED_INNER_TABS,
   INSIGHTS_INNER_TABS,
+  SPRINT_INNER_TABS,
   PR_DETAIL_TABS,
   freshFilterDefaults,
   freshUrlOwnedDefaults,
@@ -21,6 +22,7 @@ import {
   type FeedInnerTab,
   type FilterState,
   type InsightsInnerTab,
+  type SprintInnerTab,
   type PrDetailTab,
   type RangePreset,
 } from '../store/filters.js';
@@ -120,6 +122,8 @@ const NAV_KEYS = [
   // The Reports pane's Overview | Bottlenecks strip. A sub-tab switch is a navigation for the
   // same reason its two siblings above are: it changes what the pane IS, not how it is filtered.
   'insightsTab',
+  // The This Sprint rail line's graph | Merged so far strip — same reason as its siblings.
+  'sprintTab',
   'prTab',
 ] as const;
 
@@ -342,6 +346,8 @@ export function readFromUrl(): Partial<FilterState> {
     // auto-select this rail entry for Pro accounts is GONE — the store default is 'open-prs' on
     // every tier.)
     else if (activityRepo === 'insights') out.activityRepoId = 'insights';
+    // The FREE This Sprint rail line (the sprint graph + "Merged so far").
+    else if (activityRepo === 'sprint') out.activityRepoId = 'sprint';
     else {
       const n = Number.parseInt(activityRepo, 10);
       if (Number.isFinite(n)) out.activityRepoId = n;
@@ -428,6 +434,23 @@ export function readFromUrl(): Partial<FilterState> {
   const insightsTab = p.get('insightsTab');
   if ((INSIGHTS_INNER_TABS as readonly string[]).includes(insightsTab ?? '')) {
     out.insightsInnerTab = insightsTab as InsightsInnerTab;
+  }
+  // ⚠ LEGACY: `?insightsTab=sprint` / `?insightsTab=merged` were Activity → This Sprint / Merged so
+  // far. Both moved to the FREE This Sprint rail line, and the old links sit in bookmarks and in
+  // history entries Back replays, so they land THERE (rail + tab) — never on a Reports tab that no
+  // longer exists. Only when the link named Reports or no rail at all: a hand-made link naming
+  // another rail keeps that rail. Never emitted again.
+  else if (
+    (insightsTab === 'sprint' || insightsTab === 'merged') &&
+    (activityRepo == null || activityRepo === 'insights')
+  ) {
+    out.activityRepoId = 'sprint';
+    out.sprintInnerTab = insightsTab === 'merged' ? 'merged' : 'graph';
+  }
+  // The This Sprint strip. Same raw-seat rule as `insightsTab`.
+  const sprintTab = p.get('sprintTab');
+  if ((SPRINT_INNER_TABS as readonly string[]).includes(sprintTab ?? '')) {
+    out.sprintInnerTab = sprintTab as SprintInnerTab;
   }
   // PrDetail's inner tab, and it is only meaningful PAIRED with the PR tab `view=` names — the
   // store field is a {prId, tab} pair precisely so one PR's tab cannot be read on another's
@@ -650,6 +673,10 @@ export function writeToUrl(s: FilterState): void {
       p.set('activityRepo', 'feed');
     } else if (s.activityRepoId === 'bots') {
       p.set('activityRepo', 'bots');
+    } else if (s.activityRepoId === 'sprint') {
+      p.set('activityRepo', 'sprint');
+      // ⚠ THE OMITTED VALUE IS THE CURRENT DEFAULT ('graph') — a bare `?activityRepo=sprint` means it.
+      if (s.sprintInnerTab !== 'graph') p.set('sprintTab', s.sprintInnerTab);
     } else if (s.activityRepoId === 'insights') {
       p.set('activityRepo', 'insights');
       // The pane's sub-tab, on the same "only where the strip is on screen" gate as `feedTab` /

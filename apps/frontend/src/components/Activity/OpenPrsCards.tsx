@@ -652,7 +652,7 @@ const STATUS_PILL: Record<'new' | 'indeterminate' | 'done', string> = {
 const STATUS_WORD: Record<'new' | 'indeterminate' | 'done', string> = {
   new: 'To do',
   indeterminate: 'In progress',
-  done: 'Done',
+  done: 'Complete',
 };
 /** Move to another stack on the page (opening it if collapsed) — the "Also in" link. */
 function jumpToStack(stackId: string): void {

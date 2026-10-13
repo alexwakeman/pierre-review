@@ -19,7 +19,7 @@ import {
   type TicketSite,
 } from '@pierre-review/shared';
 
-// Reports → This sprint: the pure folds behind the tab that survive the move to the GRAPH (status
+// Activity → This Sprint: the pure folds behind the tab that survive the move to the GRAPH (status
 // settings, the "Check against code" progress, the repo picker). test/sprintModel.test.ts.
 // ⚠ Nothing here ranks tickets or people.
 

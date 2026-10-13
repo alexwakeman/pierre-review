@@ -18,7 +18,7 @@ import {
   type StatusSectionsDraft,
 } from './sprintModel.js';
 
-// Reports → This sprint → Settings → STATUSES: FOUR LISTS — Not started, In progress, In review, Done —
+// Activity → This Sprint → Settings → STATUSES: FOUR LISTS — Not started, In progress, In review, Complete —
 // holding every status, in order. AUTOMATIC (the tracker's board / workflow order, category, review
 // names, PR evidence) until a reader changes it here, per workspace. A DRAFT until Save; Cancel drops
 // it; "Reset to automatic" clears the override (`{sections: null}`). "Coding begins / ends" is read
@@ -130,7 +130,7 @@ export function SprintStatusSettings({
         <span className={`font-normal ${MUTED}`}>· {statusOrderSourceLabel(changed ? 'override' : layout.orderSource)}</span>
         <InfoButton title="Statuses">
           <p>
-            Each status sits in one of four stages: Not started, In progress, In review and Done. Tickets are listed by
+            Each status sits in one of four stages: Not started, In progress, In review and Complete. Tickets are listed by
             stage, then by status in this order.
           </p>
           <p>

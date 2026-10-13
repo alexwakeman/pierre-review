@@ -4293,9 +4293,9 @@ export interface BlastRadiusConfig {
   showImpactNote?: boolean;
 }
 
-/** What the SPA's `resolveBlastConfig()` hands every renderer — the dial applied and the
- *  overrides merged, so no consumer has to know about either. Produced CLIENT-SIDE from the
- *  nullable `MeResponse.blastRadius`; see that field for why the server does not resolve it. */
+/** What the shared `resolveBlastConfig()` hands every renderer — the dial applied and the
+ *  overrides merged, so no consumer has to know about either. Produced from the nullable stored
+ *  config (`MeResponse.blastRadius` in the SPA, the account row on the server). */
 export interface ResolvedBlastConfig {
   sensitivity: BlastSensitivity;
   surfacesOff: BlastSurface[];
@@ -4415,12 +4415,9 @@ export interface MeResponse {
   // audience. (The Pro half is only the Haiku impact NOTE, which gates on `pro.prSummary`.)
   //
   // ⚠ THE RAW STORED CONFIG, NOT A RESOLVED ONE, and `null` means "this account has never
-  // chosen". Unlike `largePrCodeLocThreshold` — which the server resolves because its default is
-  // ONE number cheap to mirror — the defaults here are an 18-number table across three dial
-  // positions, and `shared` is a TYPES-ONLY package the backend may only `import type` from (see
-  // PACKAGING). Resolving server-side would mean hand-mirroring that table in `db/blast-radius.ts`
-  // and keeping the two in sync forever. Instead the SPA's ONE `resolveBlastConfig()` applies
-  // `BLAST_THRESHOLDS` — which it can import as a real value — and nothing is duplicated.
+  // chosen". The ONE `resolveBlastConfig()` + `blastRadius()` live in `shared/blast-radius.ts`
+  // (real code, vendored at release): the SPA applies them per chip, and the server applies the
+  // same pair for the auto-approve impact gate. Nothing is mirrored.
   blastRadius: BlastRadiusConfig | null;
   // Orgs whose sync is currently BLOCKED because the sign-in token isn't authorized for their
   // SAML SSO (cloud). Populated by the sync when it hits the SAML wall; drives the global
@@ -4792,6 +4789,8 @@ export interface SetWorkspaceAutoReviewBody {
     // `WorkspaceAutoPostSettings.autoVerdict` / `.autoResolve`.
     autoVerdict?: boolean;
     autoResolve?: boolean;
+    // `WorkspaceAutoPostSettings.approveImpact`; a level left out keeps its stored value.
+    approveImpact?: Partial<AutoApproveImpact>;
   };
   // Auto AI Fix's contents + push switch (`WorkspaceAutoReviewSettings.autoFix`). Each field
   // optional; an `include` section left out keeps its stored value.
@@ -4877,6 +4876,12 @@ export interface WorkspaceAutoPostSettings {
   // (read LIVE from GitHub) is none or COMMENTED, and never on the reader's own PR (always
   // COMMENT). What was done is recorded on `ClaudeAutoPostRecord.verdict`.
   autoVerdict: boolean;
+  // WHICH IMPACT LEVELS MAY BE AUTO-APPROVED (all allowed by default). The level is the PR's blast
+  // radius, read on the server through the SAME `blastRadius()` + `resolveBlastConfig()` the chips
+  // use (shared/blast-radius.ts) with the account's stored config. A disallowed level turns an
+  // APPROVE into a COMMENT (`heldReason: 'impact'`); REQUEST_CHANGES is never held by it. An
+  // UNKNOWN level (the resolver draws nothing) is treated as HIGH — the safe direction.
+  approveImpact: AutoApproveImpact;
   // AUTO RESOLVE (default OFF): a Limn-posted inline finding thread that a later review's
   // follow-up judges 'addressed' / 'no_longer_applies' gets a short reply and is resolved. ONLY
   // Limn's own threads; once per finding (`claude_review_findings.auto_resolved_at` +
@@ -4884,6 +4889,13 @@ export interface WorkspaceAutoPostSettings {
   autoResolve: boolean;
 }
 export const AUTO_POST_DEFAULT_AUTO_VERDICT = false;
+// Per blast-radius level: may an automatic APPROVE be sent on a PR at that level?
+export interface AutoApproveImpact {
+  high: boolean;
+  medium: boolean;
+  low: boolean;
+}
+export const AUTO_POST_DEFAULT_APPROVE_IMPACT: AutoApproveImpact = { high: true, medium: true, low: true };
 export const AUTO_POST_DEFAULT_AUTO_RESOLVE = false;
 
 // What `workspaces.auto_post_settings` stores: OVERRIDES ONLY (NULL / a missing field = the default).
@@ -4892,6 +4904,7 @@ export interface StoredAutoPostSettings {
   kinds?: Partial<AutoPostKinds>;
   autoVerdict?: boolean;
   autoResolve?: boolean;
+  approveImpact?: Partial<AutoApproveImpact>;
 }
 
 // ---- Auto AI Fix contents + push (workspaces.auto_fix_settings, migration 0091 / pg 0078) ----
@@ -4964,12 +4977,17 @@ export type AutoPostSkipReason =
 //              (the reader's own latest review is APPROVED / CHANGES_REQUESTED / DISMISSED),
 //              'reviews_unreadable' (the live read failed — never guess), 'refused' (GitHub turned
 //              the verdict down — branch rules, permissions — so the same review went again as a
-//              COMMENT, leaving just the comments), null when sent as wanted.
+//              COMMENT, leaving just the comments), 'impact' (an APPROVE on a PR whose impact level
+//              the workspace does not allow to be auto-approved — `approveImpact`), null when sent
+//              as wanted.
+//   impact     the PR's impact level when the APPROVE was weighed against `approveImpact`
+//              ('unknown' = the resolver drew nothing, held as if high). Absent otherwise.
 export type AutoVerdictEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
 export interface ClaudeAutoVerdictRecord {
   wanted: AutoVerdictEvent;
   submitted: AutoVerdictEvent;
-  heldReason: 'own_pr' | 'prior_review' | 'reviews_unreadable' | 'refused' | null;
+  heldReason: 'own_pr' | 'prior_review' | 'reviews_unreadable' | 'refused' | 'impact' | null;
+  impact?: 'high' | 'medium' | 'low' | 'unknown' | null;
   // GitHub's answer when heldReason is 'refused'.
   refusedError?: string | null;
 }
@@ -7733,6 +7751,44 @@ export interface ClaudeReviewStateSummary {
 
 export interface ClaudeReviewStatesResponse {
   states: ClaudeReviewPrState[];
+}
+
+// ---- Thread cards: what the latest Claude review said about each review thread ----
+// `POST /api/claude-review/thread-judgements` — ONE batched read for every PR on screen (the
+// thread cards of the Threads tab, the Feed, Pending, search). DB-only, account-scoped, `read` tier.
+// Per PR it serves the NEWEST succeeded run that assessed threads (`thread_assessments` not null);
+// a PR with no such run, or one the caller does not own, is ABSENT. Over
+// `CLAUDE_REVIEW_STATES_MAX_IDS` is a 400, never a silent truncation.
+export interface ClaudeThreadJudgementsBody {
+  prIds: number[];
+}
+
+/** One thread's judgement, trimmed from `ClaudeThreadAssessment`. Only threads Claude actually
+ *  judged are listed — an entry with both fields `not_checked` is left out, never sent as a claim. */
+export interface ClaudeThreadJudgement {
+  threadId: number;
+  validity: ClaudeThreadValidity;
+  addressed: ClaudeThreadAddressed;
+  explanation: string | null;
+  /** The head the judgement was made at (a carried judgement keeps its own). */
+  assessedAtHead: string;
+  /** Copied from an earlier run unchanged (no new commits, no new comments since). */
+  carried: boolean;
+}
+
+export interface ClaudeThreadJudgementsForPr {
+  prId: number;
+  reviewId: number;
+  /** The head that run reviewed. */
+  reviewedHeadSha: string;
+  finishedAt: string | null; // ISO-8601
+  /** The PR's head as last synced; null = not synced (then no judgement is called out of date). */
+  currentHeadSha: string | null;
+  judgements: ClaudeThreadJudgement[];
+}
+
+export interface ClaudeThreadJudgementsResponse {
+  prs: ClaudeThreadJudgementsForPr[];
 }
 
 // ---- Ticket review: one review per TICKET, across every PR on it ----

@@ -532,7 +532,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (path === '/api/story-health/label' && mutating) return [TIERS.ai, TIERS.aiHourly];
   if (path === '/api/story-health/label/cancel') return [TIERS.read];
   if (path === '/api/story-health/label') return [TIERS.read];
-  // THIS SPRINT (Reports → This sprint), matched EXPLICITLY by exact path, FOLLOWING THE TOKEN:
+  // THIS SPRINT (Activity → This Sprint), matched EXPLICITLY by exact path, FOLLOWING THE TOKEN:
   //   POST /api/sprint-stories/refresh               kicks a third-party tracker read  → search + read
   //   POST /api/sprint-stories/assess                starts ONE Sonnet agent run        → ai + ai_hourly
   //   POST /api/sprint-graph/ask                     ONE Haiku completion per turn       → ai + ai_hourly
@@ -585,6 +585,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
       // The Open PRs table's batched latest-run read: a POST only because a list of ids does not
       // fit a query string. One DB query, no model, no GitHub — so `read`, exact path only.
       path !== '/api/claude-review/states' &&
+      // The thread cards' batched Claude-judgement read: the same shape, DB-only.
+      path !== '/api/claude-review/thread-judgements' &&
       !isSettingsWrite;
     if (generates) return [TIERS.ai, TIERS.aiHourly];
     return [TIERS.read];

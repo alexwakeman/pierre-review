@@ -64,10 +64,10 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // STORY LABELS (Reports → Stories): Haiku labels each story's criteria against a
   // fixed rubric. Pro on `periodReports` too, and agentic — so here and nowhere else.
   registerStoryLabelRoutes(app, ctx);
-  // REPORTS → THIS SPRINT: "Check against code" (one Sonnet run per ticket over read-only default-branch
+  // THIS SPRINT (its own rail line): "Check against code" (one Sonnet run per ticket over read-only default-branch
   // checkouts, the shared review pool), the BRIEF pass the sprint read hands each workspace to (Haiku:
   // summary, itemised criteria, references → the graph's edges and ghost chains) and "Ask Claude about
-  // this sprint" (Haiku over the stored graph). Pro on `periodReports` too.
+  // this sprint" (Haiku over the stored graph). FREE (no Pro gate) — local-only and agentic, like the rest.
   registerSprintAssessRoutes(app, ctx);
   registerSprintBriefs(ctx);
   registerSprintAskRoutes(app, ctx);

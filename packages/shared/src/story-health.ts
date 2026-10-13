@@ -2,7 +2,7 @@
 // (`/api/story-health/label*`, the path kept from the retired Story health charts). docs/API.md §
 // Story labels; docs/CLAUDE-REVIEW.md § Story labels.
 //
-// Labels feed the ticket chips and findings (Reports → This sprint) and the story report's rates.
+// Labels feed the ticket chips and findings (Activity → This Sprint) and the story report's rates.
 // Made only by the local agentic run (`registerAgenticRoutes`): in cloud — or with
 // `LIMN_AI_DISABLED=true` — no label exists and only what code knows is shown.
 //

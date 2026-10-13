@@ -1,5 +1,5 @@
-// Reports → This sprint — PUT /api/sprint-stories/statuses (api/routes/sprint-stories.ts) on a
-// THROWAWAY sqlite DB with a real Fastify instance. Pinned: 402 without Reports (before any write);
+// This Sprint — PUT /api/sprint-stories/statuses (api/routes/sprint-stories.ts) on a
+// THROWAWAY sqlite DB with a real Fastify instance. Pinned: free (no 402 without Reports);
 // 400 bad_request on a malformed body (nothing written); 400 bad_workspace for an id that does not
 // resolve to itself (another tenant's, unknown) — never written onto the caller's Default; 200 with the
 // stored settings and the recomputed layout; "Reset to automatic" stores NULL.
@@ -113,11 +113,11 @@ const put = (payload: unknown) => app.inject({ method: 'PUT', url: '/api/sprint-
 const sections = (o: Record<string, unknown> = {}) => ({ sections: { not_started: [], in_progress: [], in_review: [], done: [], ...o } });
 
 describe('PUT /api/sprint-stories/statuses', () => {
-  it('402 without Reports, nothing written', async () => {
+  it('is FREE: no 402 without Reports', async () => {
     setCaps?.(emptyCaps);
-    const res = await put({ workspaceId: ownWs, settings: sections({ in_review: ['Ready for QA'] }) });
+    const res = await put({ workspaceId: ownWs, settings: { bogus: true } });
     setCaps?.(fullCaps);
-    expect(res.statusCode).toBe(402);
+    expect(res.statusCode).toBe(400);
     expect(await stored(ownWs)).toBeNull();
   });
 

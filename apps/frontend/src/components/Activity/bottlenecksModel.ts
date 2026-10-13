@@ -57,7 +57,9 @@ export const COURT_SHORT: Record<PrCourt, string> = {
  * urlHistory.test.ts pins.
  */
 export function effectiveInsightsTab(raw: string | null | undefined): InsightsInnerTab {
-  return raw === 'bottlenecks' || raw === 'merged' || raw === 'stories' || raw === 'sprint' ? raw : 'overview';
+  // ('merged' and 'sprint' left this union for the This Sprint rail line; useUrlState maps the
+  // legacy literals there, so one reaching this function normalises to Overview like any unknown.)
+  return raw === 'bottlenecks' || raw === 'stories' ? raw : 'overview';
 }
 
 // ── Formatting ───────────────────────────────────────────────────────────────────────────────

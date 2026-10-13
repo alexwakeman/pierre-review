@@ -459,6 +459,27 @@ export function PartialCircleIcon({ size = 11, ...rest }: IconProps): JSX.Elemen
   );
 }
 
+// The sprint graph's CENTRE MARKS, one per ticket status, so status is a shape as well as a colour:
+// an empty circle (not started), a half-filled one (in progress), EyeIcon (in review), CheckIcon
+// (complete), QuestionIcon (unknown). Purpose-built rather than reused: RingIcon is the bot charts'
+// anomaly marker ("not a status"), and PartialCircleIcon's quarter is pinned to period-report coverage.
+export function StageNotStartedIcon({ size = 11, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={2.4} {...rest}>
+      <circle cx="12" cy="12" r="7.5" />
+    </IconShell>
+  );
+}
+
+export function StageInProgressIcon({ size = 11, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={2.4} {...rest}>
+      <circle cx="12" cy="12" r="7.5" />
+      <path d="M12 4.5A7.5 7.5 0 0 1 12 19.5z" fill="currentColor" stroke="none" />
+    </IconShell>
+  );
+}
+
 // BLAST RADIUS — a centre with concentric rings around it, one MORE ring per level (a dot, a
 // dot in a ring, a dot in two rings). Literally a radius, which
 // is why it is a purpose-built mark rather than a reuse: every candidate already in this file

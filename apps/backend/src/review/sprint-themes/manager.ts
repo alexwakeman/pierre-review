@@ -49,13 +49,12 @@ export function resetSprintThemePasses(): void {
   running.clear();
 }
 
+// This Sprint is FREE on every tier (it left Pro Reports), so the default answer is "the account
+// exists" — the agentic switch (`config.aiEnabled`) and the credential are the gates. The seam stays
+// for tests.
 async function accountHasReports(accountId: number): Promise<boolean> {
-  const [{ getAccountById }, { entitledProCapabilities }] = await Promise.all([
-    import('../../auth/account.js'),
-    import('../../pro/contract.js'),
-  ]);
-  const account = await getAccountById(accountId);
-  return account != null && entitledProCapabilities(account).periodReports === true;
+  const { getAccountById } = await import('../../auth/account.js');
+  return (await getAccountById(accountId)) != null;
 }
 
 /** Theme this workspace's sprint when its input changed. Never throws. */

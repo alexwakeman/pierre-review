@@ -11,7 +11,7 @@ import { InfoButton } from '../InfoModal.js';
 import { AssessInfo, type SprintAssessTicket } from './SprintAssessment.js';
 import { SprintCopyButton } from './SprintCopyButton.js';
 
-// THE CODE CHECK (Reports → This sprint, a ticket's drawer): what "Check against code" said. STAGE-AWARE
+// THE CODE CHECK (Activity → This Sprint, a ticket's drawer): what "Check against code" said. STAGE-AWARE
 // like the run (format 6):
 //   • PLAN (the ticket is not built yet): the summary, then the few high-level changes it needs —
 //     repo, the existing file or folder it touches (or a proposed new file), one sentence each.

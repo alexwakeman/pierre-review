@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import {
   AUTO_FIX_DAILY_CAP,
   AUTO_FIX_DEFAULT_INCLUDE,
+  AUTO_POST_DEFAULT_APPROVE_IMPACT,
   AUTO_POST_DEFAULT_KINDS,
   AUTO_POST_DEFAULT_SCOPE,
+  type AutoApproveImpact,
   type AutoFixInclude,
   type AutoPostKinds,
   type AutoPostScope,
@@ -65,6 +67,13 @@ import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
  * threads, once a later review finds them fixed). AUTO FIX gains "Always include" (one checkbox per
  * fix-picker section; style bots off by default) and "Push automatically" (OFF) — `autoFix` on the
  * same route, dimmed while auto fix is off.
+ *
+ * Under "Approve or request changes", three checkboxes — one per blast-radius level
+ * (`autoPost.approveImpact`, overrides-only JSON, all on by default) — say which PRs may be
+ * APPROVED automatically. A PR at an unticked level gets a comment-only review instead; requesting
+ * changes is never held by them. Dimmed while the verdict switch is off (they do nothing then).
+ * The level is the chip's level: the server folds the same shared `blastRadius()` with the
+ * account's Settings → Blast radius config. Unknown is held as High — said behind the ⓘ only.
  */
 
 const KIND_ROWS: Array<{ key: keyof AutoPostKinds; label: string }> = [
@@ -90,6 +99,14 @@ const FIX_ROWS: Array<{ key: keyof AutoFixInclude; label: string }> = [
 ];
 const sameInclude = (a: AutoFixInclude, b: AutoFixInclude): boolean =>
   FIX_ROWS.every(({ key }) => a[key] === b[key]);
+
+const IMPACT_ROWS: Array<{ key: keyof AutoApproveImpact; label: string }> = [
+  { key: 'high', label: 'High impact PRs' },
+  { key: 'medium', label: 'Medium impact PRs' },
+  { key: 'low', label: 'Low impact PRs' },
+];
+const sameImpact = (a: AutoApproveImpact, b: AutoApproveImpact): boolean =>
+  IMPACT_ROWS.every(({ key }) => a[key] === b[key]);
 export function AutoReviewSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
   const settings = useWorkspaceAutoReview(true, workspaceId);
@@ -116,6 +133,9 @@ export function AutoReviewSection(): JSX.Element {
   const storedResolve = storedPost?.autoResolve === true;
   const [verdict, setVerdict] = useState(storedVerdict);
   const [resolve, setResolve] = useState(storedResolve);
+  const storedImpact: AutoApproveImpact = storedPost?.approveImpact ?? AUTO_POST_DEFAULT_APPROVE_IMPACT;
+  const storedImpactKey = IMPACT_ROWS.map(({ key }) => (storedImpact[key] ? '1' : '0')).join('');
+  const [impact, setImpact] = useState<AutoApproveImpact>(storedImpact);
   const storedInclude: AutoFixInclude = stored?.autoFix?.include ?? AUTO_FIX_DEFAULT_INCLUDE;
   const storedIncludeKey = FIX_ROWS.map(({ key }) => (storedInclude[key] ? '1' : '0')).join('');
   const storedPush = stored?.autoFix?.autoPush === true;
@@ -150,6 +170,10 @@ export function AutoReviewSection(): JSX.Element {
     setResolve(storedResolve);
   }, [workspaceId, storedResolve]);
   useEffect(() => {
+    setImpact(storedImpact);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, storedImpactKey]);
+  useEffect(() => {
     setInclude(storedInclude);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, storedIncludeKey]);
@@ -167,7 +191,8 @@ export function AutoReviewSection(): JSX.Element {
     scope !== storedScope ||
     !sameKinds(kinds, storedKinds) ||
     verdict !== storedVerdict ||
-    resolve !== storedResolve;
+    resolve !== storedResolve ||
+    !sameImpact(impact, storedImpact);
   const fixSettingsDirty = autoPush !== storedPush || !sameInclude(include, storedInclude);
 
   return (
@@ -395,6 +420,33 @@ export function AutoReviewSection(): JSX.Element {
               </span>
             </span>
           </label>
+          <fieldset className={`space-y-1 pl-5 ${verdict ? '' : 'opacity-60'}`}>
+            <legend className="flex items-center gap-1 font-medium text-gray-700 dark:text-gray-200">
+              Approve
+              <InfoButton title="Approve by impact">
+                <p>
+                  Impact is the High, Medium or Low chip on a PR: how far the change can reach. It
+                  follows your Blast radius settings.
+                </p>
+                <p>
+                  A PR at an impact you untick gets a comment-only review instead of an approval.
+                  Requesting changes is not affected.
+                </p>
+                <p>A PR whose impact Limn could not measure counts as High.</p>
+              </InfoButton>
+            </legend>
+            {IMPACT_ROWS.map(({ key, label }) => (
+              <label key={key} className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={impact[key]}
+                  onChange={(e) => setImpact((v) => ({ ...v, [key]: e.target.checked }))}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </fieldset>
           <label className="flex items-start gap-2">
             <input
               type="checkbox"
@@ -422,7 +474,16 @@ export function AutoReviewSection(): JSX.Element {
             autoFixEnabled: fixOn,
             ...(capDirty && cap != null ? { dailyCap: cap } : {}),
             ...(postDirty
-              ? { autoPost: { enabled: postOn, scope, kinds, autoVerdict: verdict, autoResolve: resolve } }
+              ? {
+                  autoPost: {
+                    enabled: postOn,
+                    scope,
+                    kinds,
+                    autoVerdict: verdict,
+                    autoResolve: resolve,
+                    approveImpact: impact,
+                  },
+                }
               : {}),
             ...(fixSettingsDirty ? { autoFix: { include, autoPush } } : {}),
           })

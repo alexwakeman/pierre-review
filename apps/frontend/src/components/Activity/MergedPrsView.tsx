@@ -11,15 +11,14 @@ import { MetricRepoFilter } from './MetricRepoFilter.js';
 import { OpenPrsCards, OpenPrsViewToggle } from './OpenPrsCards.js';
 import { reportingWindowCaption, reportingWindowPhrase, windowDates } from './reportingWindowText.js';
 
-// Reports → "Merged so far" — the Open PRs page over the work that LANDED: every PR merged in the
+// This Sprint → "Merged so far" — the Open PRs page over the work that LANDED: every PR merged in the
 // workspace's REPORTING WINDOW (this sprint so far, else the trailing 14 days), from
 // GET /api/merged-prs. The SAME cards and ticket stacks (`OpenPrsCards variant="merged"`), so a
 // lead can see what got done per ticket — plus a "No ticket" stack — in this sprint.
 //
 // ⚠ THE WINDOW IS THE SERVER'S, never re-derived here: the response echoes it and the header names
 // it through the shared reporting-window spelling, so this tab and the flow tiles say the same thing.
-// ⚠ Pro with the rest of Reports: `InsightsView` is the one gate and `useMergedPrs` ANDs
-// `periodReports` into its own `enabled`.
+// FREE on every tier (the This Sprint rail line has no Pro gate; the route never 402s).
 // The repo dropdown narrows client-side and is this tab's OWN state (not Open PRs' store filter,
 // not the Timeline picker). The Group by ticket / List choice is shared with Open PRs (one
 // per-viewer preference).

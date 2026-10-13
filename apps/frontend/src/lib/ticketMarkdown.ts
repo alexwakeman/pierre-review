@@ -1,4 +1,4 @@
-// TRACKER TEXT, TIDIED FOR DISPLAY (Reports → This sprint; `<Markdown ticketLinks>`).
+// TRACKER TEXT, TIDIED FOR DISPLAY (Activity → This Sprint; `<Markdown ticketLinks>`).
 //
 // Jira's editor lets a list be indented under an EMPTY bullet, which the server's ADF conversion
 // printed as "- - a" with the rest of the inner list indented under it — rendered as a bullet holding

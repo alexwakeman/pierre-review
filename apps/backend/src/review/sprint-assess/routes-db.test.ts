@@ -1,6 +1,6 @@
 // The sprint assessment's ROUTES (review/sprint-assess/routes.ts) on a THROWAWAY sqlite DB with a
 // real Fastify instance, a FAKE runner and a FAKE checkout (never a real model call or clone).
-// Pinned: 402 before any DB work on all three; 400 on shape; 404 no_ticket (incl. another tenant's
+// Pinned: no 402 (free; agentic, gated on AI only); 400 on shape; 404 no_ticket (incl. another tenant's
 // ticket through a foreign workspace id); 422 no_repos (never saved, no confident suggestion); a
 // never-saved ticket runs on its DEFAULTED confident repos; 202 start; 409 busy + runningId while a run
 // is in flight; GET/cancel of another account's id → 404. (Cloud registers none of these — the
@@ -127,18 +127,21 @@ afterAll(async () => {
 const assess = (payload: unknown) => app.inject({ method: 'POST', url: '/api/sprint-stories/assess', payload: payload as any });
 
 describe('sprint assessment routes', () => {
-  it('402s every route without periodReports, before any DB work', async () => {
+  it('is FREE: no route 402s without periodReports (agentic, gated on AI only)', async () => {
     setCaps?.(emptyCaps);
-    for (const r of [
-      { method: 'POST' as const, url: '/api/sprint-stories/assess', payload: { workspaceId: ws, ident: WITH_REPO } },
-      { method: 'GET' as const, url: '/api/sprint-stories/assessments/1' },
-      { method: 'POST' as const, url: '/api/sprint-stories/assessments/1/cancel' },
-    ]) {
-      const res = await app.inject(r);
-      expect(res.statusCode).toBe(402);
+    try {
+      for (const r of [
+        { method: 'POST' as const, url: '/api/sprint-stories/assess', payload: { workspaceId: ws } },
+        { method: 'GET' as const, url: '/api/sprint-stories/assessments/999999' },
+        { method: 'POST' as const, url: '/api/sprint-stories/assessments/999999/cancel' },
+      ]) {
+        const res = await app.inject(r);
+        expect(res.statusCode).not.toBe(402);
+      }
+      expect(await db.select().from(schema.sprintAssessments).execute()).toEqual([]);
+    } finally {
+      setCaps?.(fullCaps);
     }
-    expect(await db.select().from(schema.sprintAssessments).execute()).toEqual([]);
-    setCaps?.(fullCaps);
   });
 
   it('refuses bad shapes, unknown and foreign tickets, and tickets with no repo', async () => {

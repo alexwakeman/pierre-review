@@ -1,6 +1,6 @@
 import { siteTicketKeyOfUrl, ticketBrowseUrl, trackerTicketIdent, type TicketSite } from '@pierre-review/shared';
 
-// TICKET REFERENCES IN A TICKET'S TEXT → THAT TICKET IN LIMN (Reports → This sprint, the opened card).
+// TICKET REFERENCES IN A TICKET'S TEXT → THAT TICKET IN LIMN (Activity → This Sprint, the opened card).
 // The rehype half: after the sanitizer, every LINK to a ticket on this tracker site (shared
 // `siteTicketKeyOfUrl`, the one URL parser) and every BARE KEY the server listed in `related` (a key's
 // shape alone is not enough — `UTF-8` has it) is marked with `data-ticket-ident` / `-key` / `-title`.

@@ -880,17 +880,50 @@ describe('the Activity sub-tab strips', () => {
     expect(location.search).not.toContain('insightsTab');
   });
 
-  // "Merged so far" rides the same key, and a reload of its link lands back on it.
-  it('round-trips the Merged so far tab through ?insightsTab=merged', () => {
-    gesture(() => useFilters.getState().setActivityRepo('insights'));
-    gesture(() => useFilters.getState().setInsightsInnerTab('merged'));
-    expect(location.search).toContain('insightsTab=merged');
-    useFilters.getState().setInsightsInnerTab('overview');
+  // "Merged so far" LEFT Reports for the This Sprint rail line: its own key (`sprintTab`), the graph
+  // default omitted, and a reload of its link lands back on it.
+  it('round-trips This Sprint and its Merged so far tab through ?activityRepo=sprint&sprintTab=merged', () => {
+    gesture(() => useFilters.getState().setActivityRepo('sprint'));
+    expect(location.search).toContain('activityRepo=sprint');
+    expect(location.search).not.toContain('sprintTab');
+    gesture(() => useFilters.getState().setSprintInnerTab('merged'));
+    expect(location.search).toContain('sprintTab=merged');
+    expect(location.search).not.toContain('insightsTab');
+    useFilters.getState().setSprintInnerTab('graph');
+    useFilters.getState().setActivityRepo('feed');
     applyUrlToStores({ fromPop: true });
-    expect(useFilters.getState().insightsInnerTab).toBe('merged');
+    expect(useFilters.getState().activityRepoId).toBe('sprint');
+    expect(useFilters.getState().sprintInnerTab).toBe('merged');
   });
 
-  // "Stories" too: its link reloads onto it, between Merged so far and Chronology.
+  // ⚠ LEGACY: the two tabs' old Reports links still sit in bookmarks and history; they land on the
+  // new rail line + tab, never on a Reports tab that no longer exists.
+  it.each([
+    ['sprint', 'graph'],
+    ['merged', 'merged'],
+  ] as const)('a legacy ?insightsTab=%s link lands on This Sprint → %s', (legacy, tab) => {
+    seat(`/app/?workspace=5&view=activity&activityRepo=insights&insightsTab=${legacy}`);
+    applyUrlToStores({ fromPop: true });
+    expect(useFilters.getState().activityRepoId).toBe('sprint');
+    expect(useFilters.getState().sprintInnerTab).toBe(tab);
+    expect(useFilters.getState().insightsInnerTab).not.toBe(legacy);
+  });
+
+  it('a legacy ?insightsTab=merged link with no rail named lands on This Sprint too', () => {
+    seat('/app/?workspace=5&view=activity&insightsTab=merged');
+    applyUrlToStores({ fromPop: true });
+    expect(useFilters.getState().activityRepoId).toBe('sprint');
+    expect(useFilters.getState().sprintInnerTab).toBe('merged');
+  });
+
+  it('does not emit sprintTab from a rail entry that has no This Sprint strip', () => {
+    gesture(() => useFilters.getState().setSprintInnerTab('merged'));
+    gesture(() => useFilters.getState().setActivityRepo('feed'));
+    expect(location.search).not.toContain('sprintTab');
+    expect(useFilters.getState().sprintInnerTab).toBe('merged');
+  });
+
+  // "Stories" too: its link reloads onto it, between Overview and Chronology.
   it('round-trips the Stories tab through ?insightsTab=stories', () => {
     gesture(() => useFilters.getState().setActivityRepo('insights'));
     gesture(() => useFilters.getState().setInsightsInnerTab('stories'));

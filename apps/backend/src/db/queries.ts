@@ -9655,7 +9655,7 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       .delete(pendingMutedRepos)
       .where(and(eq(pendingMutedRepos.accountId, accountId), eq(pendingMutedRepos.repoId, id)))
       .execute();
-    // Reports → This sprint: the repos accepted for a sprint ticket (migration 0100 / pg 0087). Keyed
+    // Activity → This Sprint: the repos accepted for a sprint ticket (migration 0100 / pg 0087). Keyed
     // on the REPO through a composite FK, deleted explicitly for the same dialect reason as above, so
     // a re-added repository never arrives already accepted on a ticket.
     await tx

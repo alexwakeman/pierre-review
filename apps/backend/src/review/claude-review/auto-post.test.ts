@@ -773,6 +773,83 @@ describe('auto verdict', () => {
     });
   });
 
+  it('the impact gate (pure): a disallowed level holds an APPROVE; unknown is judged as high', () => {
+    const allowed = { high: false, medium: true, low: true };
+    const g = (level: 'high' | 'medium' | 'low' | 'unknown') =>
+      ap.verdictGate('APPROVE', { authorIsMe: false, ownLatest: 'none', impact: { level, allowed } });
+    expect(g('high')).toEqual({ wanted: 'APPROVE', submitted: 'COMMENT', heldReason: 'impact', impact: 'high' });
+    expect(g('unknown')).toEqual({ wanted: 'APPROVE', submitted: 'COMMENT', heldReason: 'impact', impact: 'unknown' });
+    expect(g('medium')).toEqual({ wanted: 'APPROVE', submitted: 'APPROVE', heldReason: null, impact: 'medium' });
+    expect(g('low')).toEqual({ wanted: 'APPROVE', submitted: 'APPROVE', heldReason: null, impact: 'low' });
+    const noLow = { high: true, medium: true, low: false };
+    expect(ap.impactAllowsApprove('low', noLow)).toBe(false);
+    expect(ap.impactAllowsApprove('unknown', noLow)).toBe(true);
+    expect(ap.impactAllowsApprove('medium', { high: true, medium: false, low: true })).toBe(false);
+    // An allowed level still answers to the other holds.
+    expect(
+      ap.verdictGate('APPROVE', { authorIsMe: false, ownLatest: 'APPROVED', impact: { level: 'low', allowed } }),
+    ).toEqual({ wanted: 'APPROVE', submitted: 'COMMENT', heldReason: 'prior_review', impact: 'low' });
+    // REQUEST_CHANGES is never held by impact, and your own PR stays own_pr.
+    expect(
+      ap.verdictGate('REQUEST_CHANGES', { authorIsMe: false, ownLatest: 'none', impact: { level: 'high', allowed } }).submitted,
+    ).toBe('REQUEST_CHANGES');
+    expect(ap.verdictGate('APPROVE', { authorIsMe: true, ownLatest: 'none', impact: { level: 'high', allowed } }).heldReason).toBe('own_pr');
+  });
+
+  it('the impact gate (end to end): per level, unknown as high, blockers still request changes', async () => {
+    const impactDeps = (level: 'high' | 'medium' | 'low' | null | Error) => ({
+      ...deps(),
+      impactLevel: vi.fn(async () => {
+        if (level instanceof Error) throw level;
+        return level;
+      }),
+    });
+    try {
+      await setPost(true, { scope: 'all', autoVerdict: true, approveImpact: { high: false, low: false } });
+      for (const [level, sent, impact] of [
+        ['high', 'COMMENT', 'high'],
+        [null, 'COMMENT', 'unknown'],
+        [new Error('db down'), 'COMMENT', 'unknown'],
+        ['low', 'COMMENT', 'low'],
+        ['medium', 'APPROVE', 'medium'],
+      ] as const) {
+        postReview.mockClear();
+        liveReviews.mockClear();
+        const pr = await makePr({ author: 'alice' });
+        // A question posts by default, so a held approve still leaves a COMMENT review to send.
+        const id = await run(pr, [{ severity: 'question', title: 'Why this?' }], 'auto', 'APPROVE');
+        await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, impactDeps(level));
+        expect(postReview.mock.calls[0]![0].verdict, String(level)).toBe(sent);
+        const v = (await persist.getClaudeReviewById(ctx, id, 1))?.autoPost?.verdict;
+        expect(v, String(level)).toMatchObject({ wanted: 'APPROVE', submitted: sent, impact });
+        if (sent === 'COMMENT') {
+          expect(v?.heldReason).toBe('impact');
+          // A held approve costs no live review read.
+          expect(liveReviews).not.toHaveBeenCalled();
+        }
+      }
+      // A held approve with nothing to post is a skip, not an empty COMMENT review.
+      postReview.mockClear();
+      const bare = await makePr({ author: 'alice' });
+      const bareRun = await run(bare, [], 'auto', 'APPROVE');
+      expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: bare, reviewId: bareRun }, impactDeps('high'))).toEqual({
+        kind: 'skipped',
+        reason: 'nothing_new',
+      });
+      expect(postReview).not.toHaveBeenCalled();
+      // Every level off: a blocker still requests changes, and impact is never read for it.
+      await setPost(true, { approveImpact: { medium: false } });
+      const blocked = await makePr({ author: 'alice' });
+      const blockedRun = await run(blocked, [{ severity: 'blocker', title: 'Bug' }]);
+      const d = impactDeps('high');
+      await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: blocked, reviewId: blockedRun }, d);
+      expect(postReview.mock.calls[0]![0].verdict).toBe('REQUEST_CHANGES');
+      expect(d.impactLevel).not.toHaveBeenCalled();
+    } finally {
+      await setPost(true, { approveImpact: { high: true, medium: true, low: true } });
+    }
+  });
+
   it('isVerdictRefusal: a 4xx refusal only', () => {
     expect(ap.isVerdictRefusal(refusal())).toBe(true);
     expect(ap.isVerdictRefusal(Object.assign(new Error('x'), { status: 403 }))).toBe(true);

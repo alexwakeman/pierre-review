@@ -6,9 +6,7 @@ import { ChevronIcon } from '../Icons.js';
 import { ProLockPanel, useProGateState } from '../ProGate.js';
 import { BottlenecksPanel } from './BottlenecksPanel.js';
 import { effectiveInsightsTab } from './bottlenecksModel.js';
-import { MergedPrsView } from './MergedPrsView.js';
 import { PeriodReportsPanel } from './PeriodReportsPanel.js';
-import { SprintView } from './SprintView.js';
 import { StoriesView } from './StoriesView.js';
 import { TrackUsage } from './TrackUsage.js';
 import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
@@ -32,19 +30,16 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 // "Ask about this period" section under the report, grounded in the viewed period's own
 // [fromMs, toMs) rather than a trailing window.
 //
-// ── THE PANE IS FIVE TABS ───────────────────────────────────────────────────────────────────
+// ── THE PANE IS THREE TABS ──────────────────────────────────────────────────────────────────
 //   • Overview   — flow metrics, the two "where the work is happening" cards, period reports.
-//   • Merged so far — the Open PRs cards over every PR merged in the REPORTING WINDOW
-//     (MergedPrsView, GET /api/merged-prs), grouped per ticket when the workspace has a tracker.
 //   • Stories    — the agentic story report (local-only, its own window picker, GET/POST
 //     /api/story-reports), then every tracker ticket with a PR merged in the REPORTING WINDOW: two
 //     charts and the lists (StoriesView, GET /api/stories).
-//   • This sprint — the tracker's CURRENT sprint as a GRAPH (SprintView, GET /api/sprint-graph): the
-//     tickets, the outside tickets they depend on, the links between them, a drawer per ticket and
-//     "Check against code" (agentic, local-only). Nothing is written to a tracker.
 //   • Chronology — the COURT LEDGER (BottlenecksPanel). PRO on `periodReports`; still
 //     deterministic (no model anywhere behind it) and still the twin of the Bots rail — that
 //     surface measures automation, this one measures where people's time went.
+// ("Merged so far" and "This sprint" LEFT this pane for the FREE This Sprint rail line —
+// SprintRailView; a legacy `?insightsTab=sprint|merged` lands there.)
 //
 // ⚠ IT RIDES `periodReports` RATHER THAN A FLAG OF ITS OWN — one capability, no `apiVersion` bump,
 // no plugin edit. The reasoning is written out on the route (api/routes/flow.ts), which is also
@@ -152,14 +147,12 @@ function InsightsBody(): JSX.Element {
       {/* The pane's sub-tab strip.
           `effectiveTab` (derived, never written back) picks the body.
           No badges here: the whole pane is Pro and the rail entry carries the one ProBadge.
-          Five tabs are wider than a phone: the strip scrolls inside itself, never the page. */}
+          The strip can be wider than a phone: the strip scrolls inside itself, never the page. */}
       <div role="tablist" className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-gray-200 dark:border-gray-800">
         {(
           [
             { key: 'overview', label: 'Overview' },
-            { key: 'merged', label: 'Merged so far' },
             { key: 'stories', label: 'Stories' },
-            { key: 'sprint', label: 'This sprint' },
             // ⚠ LABEL-ONLY: the store/URL literal stays 'bottlenecks' (see InsightsInnerTab).
             { key: 'bottlenecks', label: 'Chronology' },
           ] as const
@@ -186,12 +179,8 @@ function InsightsBody(): JSX.Element {
 
       {effectiveTab === 'bottlenecks' ? (
         <ChronologyTabBody />
-      ) : effectiveTab === 'merged' ? (
-        <MergedPrsView />
       ) : effectiveTab === 'stories' ? (
         <StoriesView />
-      ) : effectiveTab === 'sprint' ? (
-        <SprintView />
       ) : (
         <>
           {/* `WorkspaceFlowMetrics` self-hides when there is nothing to measure, so the empty

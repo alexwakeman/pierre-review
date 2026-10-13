@@ -64,6 +64,11 @@ export function autoVerdictLine(
       return `${verb}: your last review on GitHub still stands.`;
     case 'reviews_unreadable':
       return `${verb}: couldn’t read your earlier reviews on GitHub.`;
+    case 'impact':
+      // Unknown is held as if High; the line says which it was, the ⓘ in Settings says why.
+      return v.impact === 'high' || v.impact === 'medium' || v.impact === 'low'
+        ? `${verb}: ${v.impact[0]!.toUpperCase()}${v.impact.slice(1)} impact.`
+        : `${verb}: impact unknown.`;
     case 'refused':
       return a.status === 'posted' || a.status === 'partial'
         ? `${verb}: GitHub refused it, so the comments were posted on their own.`

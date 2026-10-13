@@ -28,7 +28,7 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { AUTO_FIX_DEFAULT_INCLUDE, AUTO_POST_DEFAULT_KINDS } from '@pierre-review/shared';
+import { AUTO_FIX_DEFAULT_INCLUDE, AUTO_POST_DEFAULT_APPROVE_IMPACT, AUTO_POST_DEFAULT_KINDS } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -86,7 +86,7 @@ describe('the switch and its floor', () => {
       enabledAt: null,
       dailyCap: s.AUTO_REVIEW_DAILY_CAP,
       autoFixEnabled: false,
-      autoPost: { enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false },
+      autoPost: { enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT },
       autoFix: { include: AUTO_FIX_DEFAULT_INCLUDE, autoPush: false },
     });
   });
@@ -344,7 +344,7 @@ describe('auto-posting — off by default, overrides only', () => {
       .execute();
     for (const id of [wsA, wsA2, fresh.id]) {
       const r = await s.readWorkspaceAutoReview(ctx, 1, id);
-      expect(r?.autoPost).toEqual({ enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false });
+      expect(r?.autoPost).toEqual({ enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT });
     }
     expect(AUTO_POST_DEFAULT_KINDS).toEqual({
       blockers: true,
@@ -364,11 +364,11 @@ describe('auto-posting — off by default, overrides only', () => {
   });
 
   it('resolves malformed or partial overrides to the defaults', () => {
-    expect(s.resolveAutoPostSettings(null, null)).toEqual({ enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false });
+    expect(s.resolveAutoPostSettings(null, null)).toEqual({ enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT });
     expect(
       s.resolveAutoPostSettings(true, { scope: 'bogus' as any, kinds: { nits: true, blockers: 'yes' as any } }),
-    ).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false });
-    expect(s.autoPostOverrides({ scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false })).toBeNull();
+    ).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT });
+    expect(s.autoPostOverrides({ scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT })).toBeNull();
     expect(s.autoPostOverrides({ scope: 'all', kinds: { ...AUTO_POST_DEFAULT_KINDS, questions: false } })).toEqual({
       scope: 'all',
       kinds: { questions: false },
@@ -378,11 +378,11 @@ describe('auto-posting — off by default, overrides only', () => {
   it('writes alone, keeps unsent kinds, stores overrides only, and leaves auto review alone', async () => {
     const before = await s.readWorkspaceAutoReview(ctx, 1, wsA2);
     const on = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoPost: { enabled: true, kinds: { nits: true } } });
-    expect(on?.autoPost).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false });
+    expect(on?.autoPost).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT });
     expect(on?.enabled).toBe(before?.enabled);
     expect(on?.enabledAt).toBe(before?.enabledAt);
     const scoped = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoPost: { scope: 'all' } });
-    expect(scoped?.autoPost).toEqual({ enabled: true, scope: 'all', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false });
+    expect(scoped?.autoPost).toEqual({ enabled: true, scope: 'all', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT });
     const [row] = await (ctx.db as any)
       .select({ st: (ctx.schema as any).workspaces.autoPostSettings })
       .from((ctx.schema as any).workspaces)
@@ -417,6 +417,9 @@ describe('auto-posting — off by default, overrides only', () => {
       { autoPost: { kinds: {} } },
       { autoPost: { kinds: { nits: 'yes' } } },
       { autoPost: { kinds: { nits: 0 } } },
+      { autoPost: { approveImpact: {} } },
+      { autoPost: { approveImpact: { high: 'false' } } },
+      { autoPost: { approveImpact: { high: 0 } } },
     ]) {
       const res = await app.inject({ method: 'PUT', url, payload: bad });
       expect(res.statusCode, JSON.stringify(bad)).toBe(400);
@@ -429,6 +432,7 @@ describe('auto-posting — off by default, overrides only', () => {
       kinds: { ...AUTO_POST_DEFAULT_KINDS, questions: false },
       autoVerdict: false,
       autoResolve: false,
+      approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT,
     });
     expect((await app.inject({ method: 'GET', url })).json()).toEqual(ok.json());
     await app.inject({ method: 'PUT', url, payload: { autoPost: { enabled: false, scope: 'mine', kinds: { questions: true } } } });
@@ -481,6 +485,31 @@ describe('auto verdict, auto resolve and auto fix settings (0091)', () => {
       .execute();
     expect(row2.f).toBeNull();
     expect(row2.p).toBeNull();
+  });
+
+  it('approveImpact: all allowed by default, overrides only, a level left out keeps its value', async () => {
+    expect(AUTO_POST_DEFAULT_APPROVE_IMPACT).toEqual({ high: true, medium: true, low: true });
+    expect(s.resolveAutoPostSettings(true, { approveImpact: { high: 'no' as any, low: false } }).approveImpact).toEqual({
+      high: true,
+      medium: true,
+      low: false,
+    });
+    const a = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoPost: { approveImpact: { high: false } } });
+    expect(a?.autoPost.approveImpact).toEqual({ high: false, medium: true, low: true });
+    const b = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoPost: { approveImpact: { medium: false } } });
+    expect(b?.autoPost.approveImpact).toEqual({ high: false, medium: false, low: true });
+    expect(await s.readWorkspaceAutoReview(ctx, 1, wsA2)).toEqual(b);
+    const read = async () =>
+      (
+        await (ctx.db as any)
+          .select({ p: (ctx.schema as any).workspaces.autoPostSettings })
+          .from((ctx.schema as any).workspaces)
+          .where(eq((ctx.schema as any).workspaces.id, wsA2))
+          .execute()
+      )[0].p;
+    expect(await read()).toEqual({ approveImpact: { high: false, medium: false } });
+    await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoPost: { approveImpact: { high: true, medium: true } } });
+    expect(await read()).toBeNull();
   });
 
   it('resolveAutoFixSettings reads malformed overrides as the defaults', () => {

@@ -1,7 +1,7 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// Reports → This sprint — the status layout's DB half on a SCRATCH SQLite (never apps/backend/data):
+// Activity → This Sprint — the status layout's DB half on a SCRATCH SQLite (never apps/backend/data):
 //   • parseSprintStatusSettings: strict on a post (not the four stage keys, a non-array stage, bad /
 //     long / control-character names, one name in two stages, too many), tolerant on a stored value;
 //   • get/set: the default stored as NULL, account + workspace predicated (another tenant's

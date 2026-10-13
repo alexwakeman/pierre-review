@@ -1,7 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type {
-  DerivedState,
   EventType,
   PrDetail as PrDetailT,
   PrFilesResponse,
@@ -10,6 +9,7 @@ import type {
   User,
 } from '@pierre-review/shared';
 import { usePr } from '../hooks/usePr.js';
+import type { ThreadStateBucket } from '../lib/claudeThreadMarker.js';
 import { usePrCodeLoc } from '../hooks/useLargePr.js';
 import { usePrBlast } from '../hooks/useBlastRadius.js';
 import { usePrLiveRefresh } from '../hooks/usePrLiveRefresh.js';
@@ -689,7 +689,7 @@ function PrDetailSkeleton(): JSX.Element {
 
 // Stable empty filter for the guarded threadStateFilter (see the effect below) — a fresh Set
 // each render would churn the effect deps.
-const EMPTY_THREAD_STATE_FILTER: Set<DerivedState> = new Set();
+const EMPTY_THREAD_STATE_FILTER: Set<ThreadStateBucket> = new Set();
 const EMPTY_THREAD_SEVERITY_FILTER: Set<MlSeverity> = new Set();
 
 // Every icon button right of the title wears the TITLE's ink, per theme — one class, so the
@@ -1478,8 +1478,9 @@ export function PrDetail({
           </div>
         ) : effectiveTab === 'threads' ? (
           <>
-            {/* P3.2: full triage card — same folds as the list below it (rollupCounts /
-                threadSeverities / resolvableBotThreadIds), so the numbers always agree. */}
+            {/* P3.2: full triage card — threadSeverities / resolvableBotThreadIds are the list's
+                own folds. Its state counts are the DERIVED states (`rollupCounts`); the list's
+                state chips count what the cards show (`threadStateBucket`, "Claude judged"). */}
             <BotTriageCard pr={pr} usersById={usersById} variant="full" />
             <ThreadList
             threads={pr.threads}

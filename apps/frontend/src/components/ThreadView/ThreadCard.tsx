@@ -1,6 +1,4 @@
 import type { ThreadDetail, User } from '@pierre-review/shared';
-import { StateBadge } from '../StateBadge.js';
-import { ConfidenceBadge } from '../ConfidenceBadge.js';
 import { ReviewCheckButton, ThreadCheckOutput } from '../CommentAnnotations.js';
 import { MlSeverityBadge, worstSeverity } from '../MlSeverityBadge.js';
 import { mlLabelKey, useMlLabelIndex, useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
@@ -12,6 +10,7 @@ import { ArrowIcon, ExternalLinkIcon } from '../Icons.js';
 import { ResolveThread } from './ResolveThread.js';
 import { ReplyComposer } from './ReplyComposer.js';
 import { isNewComment } from './NewCommentHighlight.js';
+import { ThreadStatePill } from './ClaudeThreadBadge.js';
 
 // A single review thread rendered conversation-first: the code it's anchored to
 // sits inside the opening comment, replies follow as plain conversation.
@@ -136,14 +135,10 @@ export function ThreadCard({
       >
         {/* State pill anchored top-LEFT on every thread card — so a resolved (or otherwise-
             stateful) thread is legible at a glance without expanding it, and all thread cards
-            read uniformly. */}
-        <StateBadge state={thread.derivedState} />
-        {thread.derivedState === 'likely_addressed' && (
-          <ConfidenceBadge
-            confidence={thread.addressedConfidence}
-            reason={thread.addressedReason}
-          />
-        )}
+            read uniformly. The latest Claude review's judgement REPLACES the state pill and the
+            confidence marker when it made one (lib/claudeThreadMarker.ts); a resolved thread
+            keeps "Resolved". */}
+        <ThreadStatePill thread={thread} withConfidence />
         {/* The worst ML severity anywhere in this conversation (summaries excluded). Renders
             nothing when no comment in the thread is labelled — which is also the state of every
             thread on a deployment with no model. */}

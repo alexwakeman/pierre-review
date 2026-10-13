@@ -200,7 +200,7 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.storyReports).where(eq(schema.storyReports.accountId, accountId)).execute();
     // Story labels (migration 0099 / pg 0086) — model answers about the account's tickets.
     await tx.delete(schema.storyLabels).where(eq(schema.storyLabels.accountId, accountId)).execute();
-    // Reports → This sprint (migration 0100 / pg 0087): the sprint list and its ticket text (from the
+    // Activity → This Sprint (migration 0100 / pg 0087): the sprint list and its ticket text (from the
     // customer's tracker), the accepted candidate repos, the assessments (model prose about the
     // tickets and code paths) and the sprint graph's briefs (model prose about the tickets, migration
     // 0107 / pg 0094). All cascade from workspaces too, and are explicit anyway. Order is free.
@@ -332,7 +332,7 @@ export function accountScopedTables(): {
     { name: 'storyReports', col: schema.storyReports.accountId, table: schema.storyReports },
     // Story labels (migration 0099 / pg 0086), erased explicitly above.
     { name: 'storyLabels', col: schema.storyLabels.accountId, table: schema.storyLabels },
-    // Reports → This sprint (migration 0100 / pg 0087), erased explicitly above.
+    // Activity → This Sprint (migration 0100 / pg 0087), erased explicitly above.
     { name: 'sprintReads', col: schema.sprintReads.accountId, table: schema.sprintReads },
     { name: 'sprintTickets', col: schema.sprintTickets.accountId, table: schema.sprintTickets },
     { name: 'sprintRefTickets', col: schema.sprintRefTickets.accountId, table: schema.sprintRefTickets },

@@ -67,7 +67,7 @@ export async function referencesForPrompt(accountId: number, workspaceId: number
   return promptReferencesOf(ticketReferencesOf(self, site.provider, site.apiRoot, known, new Set(nodes.map((n) => n.ident))));
 }
 
-// THE SPRINT ASSESSMENT'S RUNS ("Check against code", Reports → This sprint; docs/CLAUDE-REVIEW.md §
+// THE SPRINT ASSESSMENT'S RUNS ("Check against code", Activity → This Sprint; docs/CLAUDE-REVIEW.md §
 // Sprint assessment). LOCAL ONLY — reached only through routes registered by `registerAgenticRoutes`.
 //
 //   • ONE RUN PER (account, ticket), claimed SYNCHRONOUSLY before the route's first await

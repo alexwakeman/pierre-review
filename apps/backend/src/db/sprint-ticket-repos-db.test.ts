@@ -1,7 +1,7 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// Reports → This sprint: the ACCEPTED candidate repos (db/sprint-ticket-repos.ts) on a SCRATCH SQLite
+// Activity → This Sprint: the ACCEPTED candidate repos (db/sprint-ticket-repos.ts) on a SCRATCH SQLite
 // — never apps/backend/data. Pins: replace semantics, `via`, bad_repo for another WORKSPACE's repo and
 // another TENANT's repo (nothing written), too_many, no_ticket, tenant-scoped reads, membership filter.
 

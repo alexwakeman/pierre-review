@@ -1748,7 +1748,7 @@ body {
   border-color: #111827;
 }
 
-/* ---- Reports → This sprint: the SPRINT GRAPH canvas (Activity/SprintGraph.tsx) ----
+/* ---- Activity → This Sprint: the SPRINT GRAPH canvas (Activity/SprintGraph.tsx) ----
    ALWAYS deep navy, in both themes: a radial gradient whose centre (#0f1b3d) is the lightest ground a
    label sits on — the label colours are measured against it (sprintGraphModel.ts `SPRINT_CANVAS`,
    test/textContrast.test.ts). */
@@ -1757,6 +1757,32 @@ body {
 }
 .sprint-canvas .sg-focus {
   opacity: 0;
+}
+/* The drifting star layers (SprintGraph.tsx STAR_LAYERS): transform-only, so they run on the
+   compositor at no CPU cost; the graph's own physics still stops after 5 s. */
+.sprint-canvas .sg-stars {
+  width: 200%;
+  will-change: transform;
+  animation: sg-star-drift linear infinite;
+}
+.sprint-canvas .sg-stars-0 {
+  animation-duration: 600s;
+}
+.sprint-canvas .sg-stars-1 {
+  animation-duration: 300s;
+}
+@keyframes sg-star-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sprint-canvas .sg-stars {
+    animation: none;
+  }
 }
 .sprint-canvas .sg-node:focus-visible .sg-focus {
   opacity: 1;
@@ -1795,7 +1821,7 @@ body {
 .sprint-canvas svg[data-zoom='far'] .sg-title {
   display: none;
 }
-/* A group name with no clear place (another name, or another group's ticket, is there): hidden. */
+/* A halo name with no room inside its halo at this zoom, or crowded by a neighbour: hidden (`placeHaloNames`). */
 .sprint-canvas .sg-group-name[data-place='none'] {
   display: none;
 }
@@ -1809,6 +1835,11 @@ body {
 }
 .sprint-canvas .sg-body {
   transform: scale(var(--sg-disc, 1));
+}
+/* The assignee badge: counter-scaled when zoomed out so it never drops below a readable size on screen
+   (sprintGraphModel.ts `badgeScale`); it grows outward from the disc's rim. */
+.sprint-canvas .sg-badge {
+  transform: scale(var(--sg-badge, 1));
 }
 /* A group halo's label: at a fixed screen size at any zoom, like the ticket labels. */
 .sprint-canvas .sg-group-label {

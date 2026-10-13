@@ -21,7 +21,7 @@ import { deriveAc, readAcFieldSettings, settingFor } from '../store.js';
 import { toJiraSprintTicket } from './jira.js';
 import type { TrackerCall } from '../types.js';
 
-// ── REFERENCED TICKETS AND GHOST CHAINS (Reports → This sprint; docs/TRACKERS.md § The sprint list
+// ── REFERENCED TICKETS AND GHOST CHAINS (Activity → This Sprint; docs/TRACKERS.md § The sprint list
 // read → Referenced tickets and ghost chains) ────────────────────────────────────────────────────
 //
 // A sprint ticket's text names other tickets — work it supersedes, shipped work it extends, a page it

@@ -88,6 +88,10 @@ describe('skips, verdicts and resolves', () => {
       'Changes not requested: GitHub refused it, so the comments were posted on their own.',
     );
     expect(autoVerdictLine({ status: 'failed', verdict: v('APPROVE', 'COMMENT', 'refused') })).toBe('Not approved: GitHub refused it.');
+    const held = (impact: any) => ({ wanted: 'APPROVE' as const, submitted: 'COMMENT' as const, heldReason: 'impact' as const, impact });
+    expect(autoVerdictLine({ status: 'posted', verdict: held('high') })).toBe('Not approved: High impact.');
+    expect(autoVerdictLine({ status: 'skipped', verdict: held('low') })).toBe('Not approved: Low impact.');
+    expect(autoVerdictLine({ status: 'posted', verdict: held('unknown') })).toBe('Not approved: impact unknown.');
     expect(autoVerdictLine({ status: 'posted', verdict: v('COMMENT', 'COMMENT', null) })).toBeNull();
     expect(autoVerdictLine({ status: 'posted' })).toBeNull();
   });

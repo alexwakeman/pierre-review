@@ -10,7 +10,6 @@ import { currentSprintBriefs, sprintBriefInput, sprintCriteriaOf } from '../../d
 import { readSprintTicket, sprintAssessmentRecordOf } from '../../db/sprint-store.js';
 import { sprintTicketStage } from '../../db/sprint-stories.js';
 import { acceptedSprintRepoDetails } from '../../db/sprint-ticket-repos.js';
-import { reportsEntitled } from '../../api/routes/insights.js';
 import type { AgentContext } from '../agent-context.js';
 import {
   cancelSprintAssessment,
@@ -24,16 +23,14 @@ import {
 
 // THE SPRINT ASSESSMENT'S ROUTES (docs/API.md § This sprint; docs/CLAUDE-REVIEW.md § Sprint
 // assessment). Registered ONLY through `registerAgenticRoutes` — its explicit `isCloud` check is the
-// cloud guarantee (these routes 404 there). Pro with the rest of Reports: `reportsEntitled` false →
-// 402 BEFORE any DB work, identical for every id/workspace. The workspace goes through
-// `resolveWorkspaceScope`: an unknown or another tenant's id degrades to the caller's Default, never a
-// 404.
+// cloud guarantee (these routes 404 there). Free like the rest of This Sprint — agentic, so never a
+// Pro gate. The workspace goes through `resolveWorkspaceScope`: an unknown or another tenant's id
+// degrades to the caller's Default, never a 404.
 //
 //   POST /api/sprint-stories/assess                {workspaceId, ident}   the ONLY path that runs the model → ai + ai_hourly
 //   GET  /api/sprint-stories/assessments/:id       one run (the SPA polls while in flight)                → read
 //   POST /api/sprint-stories/assessments/:id/cancel abort; spends nothing more                            → read
 
-const PRO_REQUIRED = { error: 'pro required' } as const;
 const IDENT_MAX = 600;
 
 const parseId = (raw: unknown): number | null => {
@@ -45,10 +42,6 @@ export function registerSprintAssessRoutes(app: FastifyInstance, ctx: AgentConte
   app.post(
     '/api/sprint-stories/assess',
     async (req, reply): Promise<SprintAssessResponse | SprintAssessErrorBody | { error: string }> => {
-      if (!reportsEntitled(req)) {
-        reply.status(402);
-        return PRO_REQUIRED;
-      }
       const body = (req.body ?? {}) as { workspaceId?: unknown; ident?: unknown };
       if (
         typeof body.workspaceId !== 'number' ||
@@ -121,10 +114,6 @@ export function registerSprintAssessRoutes(app: FastifyInstance, ctx: AgentConte
   app.get(
     '/api/sprint-stories/assessments/:id',
     async (req, reply): Promise<SprintAssessmentResponse | { error: string }> => {
-      if (!reportsEntitled(req)) {
-        reply.status(402);
-        return PRO_REQUIRED;
-      }
       const id = parseId((req.params as { id?: string }).id);
       const accountId = ctx.accountIdOf(req);
       const row = id != null ? await loadSprintAssessment(accountId, id) : null;
@@ -139,10 +128,6 @@ export function registerSprintAssessRoutes(app: FastifyInstance, ctx: AgentConte
   app.post(
     '/api/sprint-stories/assessments/:id/cancel',
     async (req, reply): Promise<SprintAssessmentResponse | { error: string }> => {
-      if (!reportsEntitled(req)) {
-        reply.status(402);
-        return PRO_REQUIRED;
-      }
       const id = parseId((req.params as { id?: string }).id);
       const accountId = ctx.accountIdOf(req);
       const row = id != null ? await cancelSprintAssessment(accountId, id) : null;

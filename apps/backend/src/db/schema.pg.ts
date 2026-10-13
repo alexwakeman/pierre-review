@@ -1384,7 +1384,7 @@ export const workspaces = pgTable(
     // Chronology's working hours and wait budgets (migration 0065 / pg 0052) — the pg twin.
     // OVERRIDES ONLY, resolved through `resolveFlowSettings`. Full rationale in the sqlite twin.
     flowSettings: jsonb('flow_settings').$type<FlowSettings>(),
-    // Reports → This sprint checks (migration 0102 / pg 0089) — the pg twin. See the sqlite twin.
+    // Activity → This Sprint checks (migration 0102 / pg 0089) — the pg twin. See the sqlite twin.
     // DORMANT since 2026-10-12 — see the sqlite twin.
     sprintChecks: jsonb('sprint_checks').$type<unknown>(),
     // See the sqlite twin (migration pg 0090).

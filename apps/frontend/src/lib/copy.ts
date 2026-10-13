@@ -1,7 +1,7 @@
 import { SPRINT_CRITERION_STATUS_LABEL, type SprintAssessmentBody } from '@pierre-review/shared';
 import { writeClipboard } from '../components/CopyButton.js';
 
-// COPY AND PASTE FOR GENERATED TEXT — the ONE place (Reports → This sprint).
+// COPY AND PASTE FOR GENERATED TEXT — the ONE place (Activity → This Sprint).
 //
 // Everything the This sprint tab generates (the code check, a brief) is copied through here, so a
 // block pastes the same way wherever it came from.

@@ -1,4 +1,4 @@
-// Reports → This sprint: the pure folds behind the tab (components/Activity/sprintModel.ts).
+// Activity → This Sprint: the pure folds behind the tab (components/Activity/sprintModel.ts).
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/sprintModel.test.ts
 import { describe, expect, it } from 'vitest';
@@ -28,7 +28,8 @@ import {
   statusSettingsToSave,
 } from '../src/components/Activity/sprintModel.js';
 import { effectiveInsightsTab } from '../src/components/Activity/bottlenecksModel.js';
-import { INSIGHTS_INNER_TABS } from '../src/store/filters.js';
+import { INSIGHTS_INNER_TABS, SPRINT_INNER_TABS } from '../src/store/filters.js';
+import { effectiveSprintTab, SPRINT_RAIL_TABS } from '../src/components/Activity/sprintRailModel.js';
 
 type Assessed = { assessment: { record: SprintAssessmentRecord; currency: SprintAssessmentCurrency } | null };
 
@@ -71,9 +72,23 @@ function withAssessment(
 }
 
 describe('tab', () => {
-  it('"sprint" is a Reports tab and survives the derive', () => {
-    expect(INSIGHTS_INNER_TABS).toContain('sprint');
-    expect(effectiveInsightsTab('sprint')).toBe('sprint');
+  // The sprint graph LEFT Reports for the free This Sprint rail line: it is no Reports tab, and a stray
+  // 'sprint' / 'merged' reaching the Reports derive is an unknown member (Overview). Legacy links are
+  // mapped onto the rail line by useUrlState, never here.
+  it('"sprint" and "merged" are no longer Reports tabs', () => {
+    expect(INSIGHTS_INNER_TABS).not.toContain('sprint');
+    expect(INSIGHTS_INNER_TABS).not.toContain('merged');
+    expect(effectiveInsightsTab('sprint')).toBe('overview');
+    expect(effectiveInsightsTab('merged')).toBe('overview');
+  });
+
+  it('This Sprint opens on the graph; "merged" is its second tab; anything else derives to the graph', () => {
+    expect(SPRINT_INNER_TABS).toEqual(['graph', 'merged']);
+    expect(SPRINT_RAIL_TABS.map((t) => t.label)).toEqual(['Sprint graph', 'Merged so far']);
+    expect(effectiveSprintTab('merged')).toBe('merged');
+    expect(effectiveSprintTab('graph')).toBe('graph');
+    expect(effectiveSprintTab('nonsense')).toBe('graph');
+    expect(effectiveSprintTab(null)).toBe('graph');
   });
 });
 

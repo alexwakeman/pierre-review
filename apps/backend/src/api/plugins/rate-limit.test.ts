@@ -61,6 +61,8 @@ describe('tierFor — AI generation', () => {
     expect(tiers('POST', '/api/claude-review/states')).toEqual(['read']);
     // …and only that exact path: a sibling POST under the family still bills.
     expect(tiers('POST', '/api/claude-review/states/x')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/claude-review/thread-judgements')).toEqual(['read']);
+    expect(tiers('POST', '/api/claude-review/thread-judgements/x')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('PUT', '/api/pro/settings')).toEqual(['read']);
     // ⚠ AND EVERY SETTINGS WRITE BENEATH IT. The per-workspace sprint cadence is one DB upsert —
     // no model, no GitHub quota — but its path does not END in `/settings`, so the catch-all's

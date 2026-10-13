@@ -1084,7 +1084,7 @@ export async function runTrackerTick(
         accountRunning.delete(accountId);
       }
     }
-    // Reports → This sprint: the demand-gated sprint list read (./sprint/read.ts — the one tracker
+    // Activity → This Sprint: the demand-gated sprint list read (./sprint/read.ts — the one tracker
     // read NOT triggered by a received PR). Never throws.
     await runSprintReadTick(ctx, opts).catch(() => {});
   } catch (err) {

@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import {
   SPRINT_REPOS_PER_TICKET_MAX,
   SPRINT_STAGE_LABEL,
@@ -27,8 +28,8 @@ import { groupReferences } from './sprintGraphModel.js';
 import { repoPickerOptions } from './sprintModel.js';
 
 // THIS SPRINT'S DRAWER — one ticket of the sprint graph, opened from its node (or from a reference /
-// a ticket key in an answer). It slides in from the right OVER the graph (the graph dims behind a
-// backdrop and stays mounted); Escape, the close button or a backdrop click closes it, focus is trapped
+// a ticket key in an answer). It slides in from the right OVER the graph (a light backdrop; the graph
+// stays mounted, readable, and zooms its ticket into the strip beside the drawer); Escape, the close button or a backdrop click closes it, focus is trapped
 // inside and handed back to the node.
 //
 // It is built from the Open PRs pieces, so a ticket reads the same here as in its stack:
@@ -103,9 +104,11 @@ export function SprintTicketDrawer({
     }
   };
 
-  return (
+  // PORTALED to <body>: rendered in place it inherited its parent's `space-y-*` top margin, a strip of
+  // page showing above the drawer. The scrim is light — the graph beside the drawer stays readable.
+  return createPortal(
     <div className="fixed inset-0 z-50" onKeyDown={onKeyDown} data-testid="sprint-drawer">
-      <div className="absolute inset-0 bg-slate-950/35" onClick={onClose} aria-hidden="true" />
+      <div className="absolute inset-0 bg-slate-950/10" onClick={onClose} aria-hidden="true" />
       <div
         ref={panelRef}
         role="dialog"
@@ -139,7 +142,8 @@ export function SprintTicketDrawer({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

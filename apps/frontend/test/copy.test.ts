@@ -1,4 +1,4 @@
-// Reports → This sprint: the copy helper (lib/copy.ts) — Markdown shapes, HTML escaping, and the
+// Activity → This Sprint: the copy helper (lib/copy.ts) — Markdown shapes, HTML escaping, and the
 // plain-text fallback.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/copy.test.ts

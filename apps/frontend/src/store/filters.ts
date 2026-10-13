@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { ThreadStateBucket } from '../lib/claudeThreadMarker.js';
 import { usePinnedTabs, type TabMeta } from './pinnedTabs.js';
 // TYPE-ONLY, and from the pure drill-down layer that also renders it (`botNarrowLabel` /
 // `selectorLabel`): the seed and the label must describe the same shape, and a second inline
@@ -70,16 +71,23 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // ⚠ This is the OPPOSITE of `BotsView`'s `effectiveTab`, which does correct `'advisor'` away. That
 // one predates the visible-but-locked posture; do not copy it here, and note that BotsView's own
 // `'roi'` member is now handled this way too (selectable, body locks).
-// `'merged'` is the "Merged so far" tab (`?insightsTab=merged`): every PR merged in the reporting
-// window, as Open PRs cards. Inside the same one Reports gate; no gate of its own.
 // `'stories'` is the "Stories" tab (`?insightsTab=stories`): every tracker ticket with a PR merged in
 // the reporting window, how well it was written, and the story report (agentic, local-only). Same
 // one Reports gate.
-// `'sprint'` is the "This sprint" tab (`?insightsTab=sprint`): the tracker's current sprint as a graph
-// of tickets and their links, and an on-demand code assessment (agentic, local-only). Same one
-// Reports gate.
-export type InsightsInnerTab = 'overview' | 'merged' | 'stories' | 'sprint' | 'bottlenecks';
-export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'merged', 'stories', 'sprint', 'bottlenecks'];
+//
+// ⚠ `'merged'` AND `'sprint'` LEFT THIS UNION. "Merged so far" and "This sprint" moved to their own
+// FREE rail line, This Sprint (`activityRepoId === 'sprint'`, `SprintInnerTab` below). The two
+// literals still sit in bookmarks and in history entries Back replays (`?insightsTab=sprint|merged`),
+// so useUrlState's READ maps them onto the new rail line + tab; they are never emitted again.
+export type InsightsInnerTab = 'overview' | 'stories' | 'bottlenecks';
+export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'stories', 'bottlenecks'];
+// The This Sprint rail line's sub-tab strip (FREE on every tier): `'graph'` is the sprint graph (the
+// landing panel, SprintView) and `'merged'` is "Merged so far" (MergedPrsView — every PR merged in
+// the reporting window). URL: `?sprintTab=merged`, the `'graph'` default omitted, emitted ONLY
+// alongside `activityRepo=sprint`. The visible tab is DERIVED (`effectiveSprintTab`), never written
+// back. Transient like its siblings — no FILTER_STORAGE_VERSION bump is owed.
+export type SprintInnerTab = 'graph' | 'merged';
+export const SPRINT_INNER_TABS: readonly SprintInnerTab[] = ['graph', 'merged'];
 // The Bots rail's sub-tab strip. ⚠ TWO POSTURES IN ONE UNION, both deliberate:
 //   • `'advisor'` (`botAdvisor`) and `'themes'` (`activityDigest`) are only LISTED when entitled,
 //     and BotsView's `effectiveBotsTab` degrades either to `'roi'` when it is not — the older
@@ -579,6 +587,9 @@ export interface FilterState {
   // view, the same rule `feedTab` / `botsTab` follow. The READ seats the RAW value and InsightsView
   // DERIVES what it renders; a corrective write-back would permanently forget the choice.
   insightsInnerTab: InsightsInnerTab;
+  // Which inner sub-tab the This Sprint rail line shows (see SprintInnerTab). Transient,
+  // URL-serialized (`?sprintTab=merged`) only alongside `activityRepo=sprint`.
+  sprintInnerTab: SprintInnerTab;
   // Which inner tab the PR-detail overlay shows (see PrDetailTab), PAIRED WITH THE PR IT BELONGS
   // TO. null = nothing chosen yet → 'overview'.
   //
@@ -638,7 +649,8 @@ export interface FilterState {
   // Resolved), matching the feed's state pills. Empty = all shown. Preset to
   // {likely_addressed} when arriving from the resolvable-bot-threads tab. Transient; cleared
   // when the PR changes / selection clears.
-  threadStateFilter: Set<DerivedState>;
+  // Keyed by what the card SHOWS (`ThreadStateBucket`): a Claude-judged thread is 'claude'.
+  threadStateFilter: Set<ThreadStateBucket>;
   // PR-detail Threads-tab ML-SEVERITY filter pills (Critical/Major/Minor/Nit). Empty = all
   // shown. A thread matches when ANY of its non-summary bot comments carries a selected
   // severity, so the pills read as "show me threads containing a major finding", not "threads
@@ -780,7 +792,10 @@ export interface FilterState {
   // stale value cannot enter the store; a legacy `?activityRepo=compare` link falls through the
   // read side's parseInt branch and lands on the 'open-prs' default — normalization by
   // construction.)
-  activityRepoId: number | 'open-prs' | 'feed' | 'attention' | 'insights' | 'bots' | null;
+  //
+  // 'sprint' is the FREE **This Sprint** rail line (under Pending): the sprint graph and "Merged so
+  // far" (`?activityRepo=sprint`, its sub-tab `sprintInnerTab`).
+  activityRepoId: number | 'open-prs' | 'feed' | 'attention' | 'sprint' | 'insights' | 'bots' | null;
   // Soft thread-state filter inside an Activity repo console: clicking a thread-state
   // segment narrows the PRs-by-author list to PRs carrying that derived state.
   // null = no filter. Transient, URL-silent.
@@ -993,6 +1008,8 @@ export interface FilterState {
   // Switch the Reports pane's inner sub-tab (Overview / Bottlenecks). Seats the CHOICE; the pane
   // derives what it renders from it.
   setInsightsInnerTab: (v: InsightsInnerTab) => void;
+  // Switch the This Sprint rail line's sub-tab (graph / Merged so far). Seats the CHOICE.
+  setSprintInnerTab: (v: SprintInnerTab) => void;
   /**
    * Seat PrDetail's inner tab FOR ONE PR (see prDetailTab). Always call it with the prId the
    * component is rendering — the pair is what keeps one PR's tab out of another's.
@@ -1012,8 +1029,8 @@ export interface FilterState {
   // that vendor). Re-selecting the same vendor toggles it off.
   setThreadBotFilter: (kind: ReviewBotKind | null) => void;
   // Toggle one state pill on the PR-detail Threads tab (rebuilds the Set so subscribers rerender).
-  toggleThreadStateFilter: (s: DerivedState) => void;
-  setThreadStateFilter: (states: Set<DerivedState>) => void;
+  toggleThreadStateFilter: (s: ThreadStateBucket) => void;
+  setThreadStateFilter: (states: Set<ThreadStateBucket>) => void;
   toggleThreadSeverityFilter: (s: MlSeverity) => void;
   setThreadSeverityFilter: (severities: Set<MlSeverity>) => void;
   selectPr: (id: number | null) => void;
@@ -1186,7 +1203,7 @@ export interface FilterState {
   bumpClaudeReviewKickoff: () => void;
   // Select an Activity detail target (a repo id, or one of the pseudo-rows: 'feed' for the
   // cross-repo consolidated Feed, 'bots', 'attention', 'insights').
-  setActivityRepo: (id: number | 'open-prs' | 'feed' | 'attention' | 'insights' | 'bots') => void;
+  setActivityRepo: (id: number | 'open-prs' | 'feed' | 'attention' | 'sprint' | 'insights' | 'bots') => void;
   // Set/clear the Activity repo console's soft thread-state filter (toggles off when
   // the same state is re-selected).
   setActivityThreadFilter: (s: DerivedState | null) => void;
@@ -1411,6 +1428,8 @@ function freshDefaults(): FilterData {
     // `?report=` deep link therefore lands where the report actually renders, without the tab
     // needing to know anything about the report key.
     insightsInnerTab: 'overview',
+    // The This Sprint rail line opens on the graph.
+    sprintInnerTab: 'graph',
     prDetailTab: null,
     sprintChatDraft: { question: '', wantChart: false, wantBots: false },
     sprintChatThreads: {},
@@ -1419,7 +1438,7 @@ function freshDefaults(): FilterData {
     insightsReportKey: null,
     insightsReportGrain: 'sprint',
     threadBotFilter: null,
-    threadStateFilter: new Set<DerivedState>(),
+    threadStateFilter: new Set<ThreadStateBucket>(),
     threadSeverityFilter: new Set<MlSeverity>(),
     selectedCommentId: null,
     activityFocus: null,
@@ -1496,6 +1515,7 @@ export type UrlOwnedState = Pick<
   | 'feedInnerTab'
   | 'botsInnerTab'
   | 'insightsInnerTab'
+  | 'sprintInnerTab'
 >;
 
 /** The fresh values of the URL-owned keys — read off freshDefaults() so the two cannot drift. */
@@ -1516,6 +1536,7 @@ export function freshUrlOwnedDefaults(): UrlOwnedState {
     feedInnerTab: d.feedInnerTab,
     botsInnerTab: d.botsInnerTab,
     insightsInnerTab: d.insightsInnerTab,
+    sprintInnerTab: d.sprintInnerTab,
   };
 }
 
@@ -1661,6 +1682,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   clearAdvisorFocus: () => set({ advisorFocus: null }),
   setFeedInnerTab: (v) => set({ feedInnerTab: v }),
   setInsightsInnerTab: (v) => set({ insightsInnerTab: v }),
+  setSprintInnerTab: (v) => set({ sprintInnerTab: v }),
   setPrDetailTab: (prId, tab) =>
     set((s) =>
       s.prDetailTab?.prId === prId && s.prDetailTab.tab === tab
@@ -1702,7 +1724,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       selectedThreadId: null,
       selectedCommentId: null,
       threadBotFilter: null,
-      threadStateFilter: new Set<DerivedState>(),
+      threadStateFilter: new Set<ThreadStateBucket>(),
       threadSeverityFilter: new Set<MlSeverity>(),
     }),
   selectThread: (prId, threadId) =>
@@ -1713,7 +1735,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       // Focusing a SPECIFIC thread must guarantee it's visible — a leftover state-pill preset
       // (from the resolvable-bot-threads tab) could otherwise filter the target thread out and
       // it would never scroll into view.
-      threadStateFilter: threadId != null ? new Set<DerivedState>() : s.threadStateFilter,
+      threadStateFilter: threadId != null ? new Set<ThreadStateBucket>() : s.threadStateFilter,
       threadSeverityFilter:
         threadId != null ? new Set<MlSeverity>() : s.threadSeverityFilter,
     })),
@@ -1723,7 +1745,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       selectedThreadId: null,
       selectedCommentId: null,
       threadBotFilter: null,
-      threadStateFilter: new Set<DerivedState>(),
+      threadStateFilter: new Set<ThreadStateBucket>(),
       threadSeverityFilter: new Set<MlSeverity>(),
     }),
   openPrFocused: (id, threadId = null, focusAt = null, event = null) => {
@@ -1740,7 +1762,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       timelineFocusAt: focusAt,
       timelineFocusEvent: event,
       // Clear a leftover Threads-tab state preset when focusing a specific thread (see selectThread).
-      threadStateFilter: threadId != null ? new Set<DerivedState>() : s.threadStateFilter,
+      threadStateFilter: threadId != null ? new Set<ThreadStateBucket>() : s.threadStateFilter,
       threadSeverityFilter:
         threadId != null ? new Set<MlSeverity>() : s.threadSeverityFilter,
     }));
@@ -1952,7 +1974,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       selectedThreadId: null,
       selectedCommentId: null,
       threadBotFilter: null,
-      threadStateFilter: new Set<DerivedState>([state]),
+      threadStateFilter: new Set<ThreadStateBucket>([state]),
       // Reset the severity pills too. This set() is a deliberate "seed the filters for the PR we
       // are opening", and it is the ONLY place that seeds one of them — so anything it does NOT
       // name survives from the PREVIOUS PR and silently hides threads on the new one. The same

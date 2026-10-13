@@ -620,6 +620,31 @@ CODE, not by prompt:
   the model still is. ⚠ This deliberately overrides the older "the server does NOT coerce statuses
   on an unmoved head" rule for the same-head case only (product decision, 2026-10).
 
+### The judgement on the thread cards
+
+Wherever a thread wears a state pill — the PR's Threads tab and every `ThreadCard` (Feed, Pending
+expansions), the Timeline marker popover, the inline thread in the Changes diff — the LATEST judged
+run's verdict REPLACES the derived-state pill AND the "Likely addressed" confidence marker with ONE
+`--ai-*` marker: "Claude: addressed" / "partly addressed" / "not addressed" / "not valid" / "unsure"
+(`not_valid` wins over any addressed answer). The ONE rule is `threadPillFor`
+(`lib/claudeThreadMarker.ts`, pinned by `apps/frontend/test/claudeThreadMarker.test.ts`); the ONE
+component is `ThreadStatePill` (`ThreadView/ClaudeThreadBadge.tsx`). ⚠ A RESOLVED thread keeps
+"Resolved"; a thread the run did not judge (both halves `not_checked`, or absent), no judged run, or
+judgements still loading keep the old pills — a missing judgement never makes a claim. ⚠ A judgement
+whose `assessedAtHead` is not the PR's synced head is still shown, marked "earlier commit"; an
+unknown synced head is never "moved". The run, commit and reason sit behind the ⓘ. ⚠ The data is ONE
+batched `POST /api/claude-review/thread-judgements` per screen (`hooks/useClaudeThreadJudgements.ts`,
+microtask-batched like reactions), keyed under `['claude-review', prId]` so a run finishing refreshes
+it with the review's own invalidations — never a per-card fetch. "Latest" is the newest succeeded,
+non-skip run with `thread_assessments`; a run in flight, failed or skipped leaves the previous
+judgements standing. The Pro Haiku "addressed" check panel is an explicit, separate output and is
+NOT replaced. ⚠ **The Threads tab's State chips count and filter what the CARDS show**
+(`threadStateBucket` / `threadStateBucketCounts`, same module): a thread wearing a Claude marker sits
+under its own "Claude judged" chip (shown only when one exists), never under the derived state its
+card no longer displays — a "Likely addressed" chip listing cards that read "Claude: not addressed"
+contradicted itself. The file-group and Changes-tab count chips (`rollupCounts`) still count the
+derived states.
+
 ## CI review (why checks failed — its own process)
 
 ⚠ **THE PR REVIEW NO LONGER DIAGNOSES CI.** The split (2026-10) made the CI review its own Claude
@@ -1239,7 +1264,13 @@ auto-posting: claim before any GitHub write, never retried.
   COMMENT. A non-COMMENT verdict is sent only (a) off the reader's own PR (GitHub refuses
   self-approval → `own_pr`) and (b) when the reader's own latest review — read LIVE
   (`GET …/pulls/:n/reviews`, the synced table can lag) — is none or COMMENTED (`prior_review`; a failed
-  read is `reviews_unreadable`, never a guess). Held ⇒ COMMENT. A sendable APPROVE / REQUEST_CHANGES
+  read is `reviews_unreadable`, never a guess), and (c) for an APPROVE, when the workspace allows
+  auto-approve at the PR's IMPACT level (`approveImpact: {high, medium, low}`, all on by default,
+  overrides-only inside `auto_post_settings`; the level is the blast-radius chip's, read by
+  `getPrImpactLevel` through the shared resolver + the account's config; UNKNOWN is held as HIGH; a
+  failed read is unknown) — else `heldReason: 'impact'` with `impact` recorded ("Not approved: High
+  impact."). The impact read comes FIRST, so a held approve costs no live review read;
+  REQUEST_CHANGES is never held by it. Held ⇒ COMMENT. A sendable APPROVE / REQUEST_CHANGES
   goes out even with no new comment (body only); a held one with nothing to post is a skip. Recorded
   on `ClaudeAutoPostRecord.verdict`; the tab prints "Approved automatically." / "Not approved: …".
   ⚠ The verdict and the comments are ONE submission. A verdict GitHub REFUSES (a 4xx on the review
@@ -1737,10 +1768,10 @@ DELETED (2026-10-11, "not adding anything"): no `GET /api/story-health`, no pane
   report (`STORY_ISSUE_RATES_HELD`: Spec gaps — saturated, gap types κ 0.13–0.47); the cards still show
   it.
 
-## Sprint assessment (Reports → This sprint → "Check against code")
+## Sprint assessment (Activity → This Sprint → "Check against code")
 
 One Sonnet 5 run per ticket, on demand, that checks the ticket against the code. LOCAL ONLY
-(`registerAgenticRoutes`) AND Pro on `periodReports` (402 first).
+(`registerAgenticRoutes`); free — no Pro gate, the SPA gates it on `me.ai`.
 
 - **STAGE-AWARE**: the SERVER picks the MODE from the stored ticket's stage under the workspace's status
   layout (`sprintTicketStage` → shared `sprintAssessModeOf`), never the client. It is stored on the run
@@ -1750,7 +1781,7 @@ One Sonnet 5 run per ticket, on demand, that checks the ticket against the code.
     implementation or saying the work "may already be done". It returns `plan` — ≤ 6 high-level changes
     `{repo, path | newPath, change}`: `path` an EXISTING file or directory, verified in the checkout;
     `newPath` a proposed new file (a clean relative path that does NOT exist).
-  - **VERIFY** (In review, Done): it returns `criterionChecks` — one per numbered criterion `{n, status:
+  - **VERIFY** (In review, Complete): it returns `criterionChecks` — one per numbered criterion `{n, status:
     met | partly | not_met | unclear, evidence, ref, tests}`, `ref` and `tests` verified like any cited
     path — and `coverage`, one sentence on which criteria have tests.
   - `summary` is two or three sentences (≤ 400). The SPA shows the result as the **Code check**
@@ -1782,7 +1813,7 @@ One Sonnet 5 run per ticket, on demand, that checks the ticket against the code.
   text hash + sorted (repoId, synced default-branch SHA), checkable from the DB; stale → "Check again".
   One run per (account, ticket), claimed synchronously; a crash orphan is failed `interrupted` at boot.
 
-## Sprint briefs (Reports → This sprint, the graph)
+## Sprint briefs (Activity → This Sprint, the graph)
 
 A cheap Haiku 5.5 pass that turns every node of the sprint graph — each sprint ticket and each GHOST
 (an outside ticket reached through an edge) — into a BRIEF: `{summary, criteria: [{n, text}],
@@ -1825,7 +1856,7 @@ criteriaDerived, references}`. The graph's text edges and its ghost chains come 
   `supersedes` draws an edge from the ticket to the named one; `out_of_scope` / `context` draw none (the
   drawer lists them). A blocking tracker link draws `depends_on` with `source: 'tracker'`.
 
-## Sprint themes (Reports → This sprint, "Group by → Theme")
+## Sprint themes (Activity → This Sprint, "Group by → Theme")
 
 ONE sprint-wide Haiku 5.5 call that names 3–8 short shared THEMES for the sprint and puts every sprint
 ticket in exactly one, so the graph can cluster by area of work rather than by epic.
@@ -1856,10 +1887,10 @@ ticket in exactly one, so the graph can cluster by area of work rather than by e
   CURRENT for today's hash and version — otherwise null, and the SPA disables "Theme" with "Themes
   appear after Claude reads the sprint".
 
-## Ask about this sprint (Reports → This sprint)
+## Ask about this sprint (Activity → This Sprint)
 
 `POST /api/sprint-graph/ask` — one Haiku 5.5 answer per turn (`review/sprint-ask/`), LOCAL ONLY
-(`registerAgenticRoutes`) and Pro (`periodReports`, 402 first). Grounded ONLY in the stored graph
+(`registerAgenticRoutes`); free — no Pro gate, the SPA gates it on `me.ai`. Grounded ONLY in the stored graph
 (`getSprintGraph`: tickets with stage, status, assignee, epic, brief summary, criteria count and PRs; the
 links), the whole map inside ONE nonce fence and the prior turns inside another — a previous answer is
 model text over the same data. ⚠ The turn cap is SERVER-side (`capAskHistory`: the newest

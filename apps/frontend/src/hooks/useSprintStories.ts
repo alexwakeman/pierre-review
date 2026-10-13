@@ -15,12 +15,11 @@ import { create } from 'zustand';
 import { api } from '../api/client.js';
 import { useAiCapabilities } from './useAiCapabilities.js';
 import { workspaceKey } from './useActivity.js';
-import { useProCapabilities } from './useTriage.js';
 
-// Reports → This sprint (the GRAPH). Pro with the rest of Reports (`periodReports`): every route 402s
-// without it, so every hook ANDs the capability into its own `enabled` — the SPA must never learn the
-// paywall by polling a 402. "Check against code" and "Ask Claude about this sprint" are agentic and
-// LOCAL-ONLY (their routes are not registered in cloud), so their hooks also AND `me.ai.enabled`.
+// This Sprint (its own Activity rail line) — the sprint GRAPH. FREE on every tier: no route here
+// 402s, so no hook ANDs a Pro capability into `enabled`. "Check against code" and "Ask Claude about
+// this sprint" are agentic and LOCAL-ONLY (their routes are not registered in cloud), so their hooks
+// AND `me.ai.enabled` — the agentic gate, never a Pro one.
 //
 // ⚠ SHARED MUTATION KEYS. Every mount of one ticket's Check shares `['sprint-assess', ident]`, and the
 // UI reads `useIsMutating` — never a per-mount `isPending`, which resets on a tab switch mid-request and
@@ -55,11 +54,9 @@ function invalidateSprint(qc: ReturnType<typeof useQueryClient>, workspaceId: nu
 }
 
 export function useSprintGraph(workspaceId: number | null) {
-  const { periodReports } = useProCapabilities();
   return useQuery<SprintGraphResponse>({
     queryKey: sprintGraphKey(workspaceId),
     queryFn: workspaceId == null ? skipToken : () => api.sprintGraph(workspaceId),
-    enabled: periodReports,
     staleTime: 30_000,
     // The worker re-reads the sprint every 20 minutes and briefs arrive in the background; a minute is
     // often enough. While the first read has not landed ("Reading…") or briefs are pending, look sooner.
@@ -75,11 +72,9 @@ export function useSprintGraph(workspaceId: number | null) {
 
 /** The drawer's detail for one node. */
 export function useSprintTicket(workspaceId: number | null, ident: string | null) {
-  const { periodReports } = useProCapabilities();
   return useQuery<SprintTicketDetailResponse>({
     queryKey: sprintTicketKey(workspaceId, ident),
     queryFn: workspaceId == null || ident == null ? skipToken : () => api.sprintTicket(workspaceId, ident),
-    enabled: periodReports,
     staleTime: 30_000,
   });
 }
@@ -150,11 +145,9 @@ export function useSprintReposSaving(ident: string): boolean {
   return useIsMutating({ mutationKey: sprintReposMutationKey(ident) }) > 0;
 }
 
-/** True when the agentic sprint features may show at all (Pro + agentic AI on). */
+/** True when the agentic sprint features may show at all (agentic AI on — local only, free). */
 export function useSprintAssessOn(): boolean {
-  const { periodReports } = useProCapabilities();
-  const ai = useAiCapabilities();
-  return periodReports && ai.enabled;
+  return useAiCapabilities().enabled;
 }
 
 /** Polls one run every 2 s while it is queued or running; on a terminal status re-reads the sprint

@@ -1,7 +1,7 @@
 import type { SprintSource, SprintStatusAutoOrder } from '@pierre-review/shared';
 import type { FetchedTicket, TrackerCall } from '../types.js';
 
-// THE SPRINT LIST SEAM (Reports → This sprint; docs/TRACKERS.md § The sprint list read). One lister
+// THE SPRINT LIST SEAM (Activity → This Sprint; docs/TRACKERS.md § The sprint list read). One lister
 // per provider (./jira.ts, ./linear.ts, ./github.ts) answers "which tickets are in this workspace's
 // current sprint" — or, when the tracker has no sprint concept or none is active, the STATUS
 // FALLBACK (To do + In progress tickets touched in the window) — and says which in `source`.

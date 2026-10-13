@@ -24,7 +24,7 @@ const dbMods = async () => {
 };
 
 // REPORTS → THIS SPRINT — THE STATUS LAYOUT (shared sprint-stories.ts § The status layout; docs/API.md
-// § This sprint). Which of the FOUR stages (Not started, In progress, In review, Done) each status
+// § This sprint). Which of the FOUR stages (Not started, In progress, In review, Complete) each status
 // sits in, and in what order. The PURE half is here (sprint-status-layout.test.ts); the DB half — the
 // stored override (db/sprint-status-settings.ts) and the PR evidence (`loadSprintStatusEvidence`) —
 // feeds it.
@@ -32,7 +32,7 @@ const dbMods = async () => {
 //   AUTOMATIC ORDER: the tracker's board / workflow order, else the category fallback (new →
 //   indeterminate → done, then name); a status on the tickets the tracker did not list is placed by
 //   category among the known ones.
-//   AUTOMATIC STAGE: new → Not started, done → Done; an in-progress (or unknown) status → In review
+//   AUTOMATIC STAGE: new → Not started, done → Complete; an in-progress (or unknown) status → In review
 //   when its name reads as review / QA (`SPRINT_REVIEW_STATUS_RE`) or it sits at / after the PR
 //   evidence boundary (`inferReviewFrom`), else In progress.
 //   OVERRIDE: the reader's sections, in their order. ⚠ PLACEMENT BEATS CATEGORY. A status it does not
@@ -180,7 +180,7 @@ export function applySectionsOverride(
 }
 
 /** The stage a ticket in this status is listed under. Pure; THE ONE stage rule: the layout's
- *  placement; a status the layout does not know falls back to its category (done → Done, new or none
+ *  placement; a status the layout does not know falls back to its category (done → Complete, new or none
  *  → Not started, else In review by name, else In progress). */
 export function sprintStageOf(
   layout: Pick<SprintStatusLayout, 'order'>,

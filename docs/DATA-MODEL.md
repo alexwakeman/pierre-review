@@ -668,7 +668,7 @@ into the three story issues (shared `story-issues.ts`); the issues are never sto
 fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`); in
 `accountScopedTables()` and erased explicitly.
 
-## Reports → This sprint — six tables (CORE; sqlite `0100` / pg `0087`, `0107` / pg `0094`)
+## Activity → This Sprint — six tables (CORE; sqlite `0100` / pg `0087`, `0107` / pg `0094`)
 
 - **`workspaces.sprint_checks`** — DORMANT since 2026-10-12 (the checks left with This sprint's chips): never read or written; kept rather than rebuilding the table.
 - **`sprint_reads`** — one per (account, workspace): the demand gate (`viewed_at`), `next_read_at`,

@@ -1,4 +1,4 @@
-// Reports → This sprint — the workspace's STATUS LAYOUT override. The ONE reader and writer of
+// Activity → This Sprint — the workspace's STATUS LAYOUT override. The ONE reader and writer of
 // `workspaces.sprint_statuses` (migration 0103 / pg 0090; shared `SprintStatusSettings`). OVERRIDES
 // ONLY: NULL (or the default `{sections: null}`, stored as NULL) = the automatic layout
 // (db/sprint-status-layout.ts). Each of the four stages lists the status NAMES the reader placed there,
@@ -34,7 +34,7 @@ const norm = (s: string): string => s.trim().toLowerCase();
 const emptySections = (): Record<SprintStage, string[]> => ({ not_started: [], in_progress: [], in_review: [], done: [] });
 
 /** The retired `{order, deliveredFrom}` override as sections: the order is kept; category `new` → Not
- *  started, `done` → Done; any other status before `deliveredFrom` → In progress, from it on → In
+ *  started, `done` → Complete; any other status before `deliveredFrom` → In progress, from it on → In
  *  review (no `deliveredFrom`, or one not in the order → all In progress). Pure. */
 export function legacyToSections(
   order: readonly string[],

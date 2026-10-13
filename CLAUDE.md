@@ -394,7 +394,7 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   plan (Pending head), flow metrics (`WorkspaceFlowMetrics`, Reports), the daily-brief strip
   (DELETED) and the trunk + Open PRs panels (the trunk strip now heads the Open PRs rail line). Do not re-add
   any. ⚠ **Reports (`periodReports`) and Bots Monitoring (`botDepth`; label-only rename of "Bots")
-  are PRO AS A WHOLE**: ONE `ProBadge` on the rail entry, ONE `ProLockPanel` for the pane, no badges
+  are PRO AS A WHOLE** (This Sprint, its own rail line, is FREE): ONE `ProBadge` on the rail entry, ONE `ProLockPanel` for the pane, no badges
   inside; their routes 402. ⚠ Bot HIDING and bot CLASSIFICATION stay FREE: classification is the
   Feed rail's **"Bot classification"** sub-tab (`feedInnerTab: 'classification'`; a legacy
   `?botsTab=settings` lands there), one card per bot, and `/api/bot-reviewers*` never 402s — only
@@ -578,10 +578,11 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   pinned, not emergent. ⚠ It is also why the Settings **Workspace heading is no longer Pro-gated**: a free
   workspace section must never sit below the `/api/pro/settings` gate, which 404s with no plugin.
 - **Visible sub-tabs are DERIVED, never written back** (`feedInnerTab`, `botsInnerTab`,
-  `insightsTab` — Reports' Overview/Bottlenecks — and the Pending tab, `effectivePendingTab`) —
+  `insightsTab`, `sprintInnerTab` → `effectiveSprintTab`, and the Pending tab, `effectivePendingTab`) —
   compute an `effectiveTab` for the render only; a corrective `set…` permanently forgets the
   choice.
-- **BLAST RADIUS is ONE resolver, `blastRadius()` in `lib/ui.ts`** — Pending cards, the Feed's
+- **BLAST RADIUS is ONE resolver, `blastRadius()` in shared `blast-radius.ts`** (re-exported by
+  `lib/ui.ts`; the server's auto-approve gate calls it too) — Pending cards, the Feed's
   PR-ref line, the PR-detail header and the vis-timeline tooltip all call it, exactly like
   `largePrFlag` beside it. The wire carries SIGNALS (`blast?: BlastSignals`), never a level, so the
   Settings sensitivity dial is a render-time comparison with NO cache invalidation.
@@ -846,7 +847,9 @@ Haiku 5.5). Details:
   It posts UNDER THE READER'S OWN GITHUB ACCOUNT, ONE review (questions inline too), event `COMMENT`
   unless the OFF-by-default `autoVerdict` lets a STRICTER verdict through (never on the reader's own
   PR, never over their standing APPROVED/CHANGES_REQUESTED, read LIVE), footer + the hidden marker on
-  every body (so `isLimnPostedComment` holds and it never re-triggers a review). The OFF-by-default
+  every body (so `isLimnPostedComment` holds and it never re-triggers a review). An auto APPROVE also
+  needs the workspace's switch for the PR's impact level (`approveImpact`, High/Medium/Low, all on;
+  the shared blast resolver; UNKNOWN counts as High). The OFF-by-default
   `autoResolve` (`claude-review/auto-resolve.ts`) replies on and resolves LIMN'S OWN finding threads a
   later run judged fixed — the one automatic resolve, claimed per finding, never retried. ⚠ The run's
   `auto_post` record is CLAIMED (compare-and-set from NULL, `status:'posting'`) BEFORE any GitHub
@@ -944,7 +947,7 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   redirects, cloud refuses private addresses at connect time) — never a bare `fetch`. ⚠ **A tracker
   is read when a PR is RECEIVED, never when it is VIEWED**: the pull-based worker stores tickets in
   `tracker_tickets` and every surface reads the rows. ⚠ The ONE exception is the SPRINT LIST read
-  (`tracker/sprint/`, Reports → This sprint): demand-gated by `sprint_reads.viewed_at` (7 days), every
+  (`tracker/sprint/`, Activity → This Sprint): demand-gated by `sprint_reads.viewed_at` (7 days), every
   20 min, its own `sprint_tickets` table, plus the tickets they name and the GHOST CHAINS those lead to
   (`sprint_ref_tickets`, ≤ 3 hops / 60); still never called by a view. ⚠ **Nothing writes to a tracker**
   (the write-back and `tracker_writes` were removed 2026-10-12). ⚠ The plugin-era data was MOVED by a guarded
@@ -1164,8 +1167,7 @@ a refusable forecast. **Metrics are CORE** (`db/period-metrics.ts`, `db/forecast
   and **an explicit `toMs` must reach EVERY fold of a windowed getter — and only an explicit
   one** (`typeof window === 'string' ? null : to`, half-open `lt`, never `lte`).
 
-**Reports → Stories** — core `GET /api/stories` (tracker stories merged in the reporting window:
-time, PRs, size, criteria) + the **story report**: ONE agentic Haiku 5.5 run across 10-20 stories
+**Reports → Stories** — core `GET /api/stories` (stories merged in the reporting window) + the **story report**: ONE agentic Haiku 5.5 run across 10-20 stories
 CODE picks (`db/story-selection.ts`) over a chosen window (sprint / 30 / 60 / 90 days, default 60),
 local-only AND Pro (`periodReports`, 402), stored in `story_reports` (sqlite `0097` / pg `0084`). Its
 points group under the THREE STORY ISSUES (below). ⚠ The figures — issue rates included — are CODE's,
@@ -1177,29 +1179,29 @@ Blocked (only an unfinished ticket or open decision, `isRealStoryBlocker`; a tic
 blocks ONLY when the label's rubric-4 `references` read it `depends_on` — never out of scope, built
 alongside, builds on, supersedes or context) · Spec gaps (no chip).
 Input via `db/story-issue-input.ts`; retired ids drop through `isStoryIssueId`. They feed the story
-report only — This sprint raises NO issues since 2026-10-12. RATES use `storyIssueRateUnits` (unclear =
+report only — This Sprint raises NO issues since 2026-10-12. RATES use `storyIssueRateUnits` (unclear =
 % of CRITERIA; blocked = tracker LINKS, any status; "no criteria" apart). Every sentence is templated.
 
 **Story labels** — the Story health charts are DELETED (2026-10-11; no `GET /api/story-health`, no
 UI); the labels stay. The label run (`POST /api/story-health/label`, path kept, local-only) labels the
-last 13 weeks' stories (`db/story-health.ts`); This sprint makes BRIEFS, not labels.
+last 13 weeks' stories (`db/story-health.ts`); This Sprint makes BRIEFS, not labels.
 ⚠ Labels count ONLY when CURRENT (rubric version AND text hash, `db/story-label-input.ts`). A HELD rate
 (`STORY_ISSUE_RATES_HELD`) never reaches the story report. [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md)
 § Story labels.
 
-**Reports → This sprint is a GRAPH** (`?insightsTab=sprint`, Pro `periodReports`; `GET /api/sprint-graph`
-+ `…/ticket`, DB only, shared `sprint-graph.ts`): nodes = the sprint's tickets + GHOSTS (outside tickets
-reached along edges, ≤ 3 hops / 60), each staged by the status layout (`db/sprint-status-layout.ts`, four
-stages, placement beats category) with all its PRs; edges = a blocking tracker link or a CURRENT BRIEF's
-depends_on / concurrent / builds_on / supersedes (never out_of_scope / context) — ONE fold for page, brief
-pass and ghost lookup (`db/sprint-graph-fold.ts`). The BRIEF (Haiku, `review/sprint-briefs/`, local + AI,
-after each read, never a view) = summary + criteria itemised in the Story check's words (derived when
-absent) + rubric 4's references (`STORY_REFERENCE_RULES`, shared verbatim); current on text hash +
-`SPRINT_BRIEF_VERSION`. "Check against code" (Sonnet 5, LOCAL, `review/sprint-assess/`, format 6: PLAN or
-VERIFY over the brief's criteria, no findings / revisions; paths verified); "Ask Claude about this sprint"
-(Haiku, LOCAL, `review/sprint-ask/`, the stored graph nonce-fenced, server-side turn cap). ⚠ No chips,
-findings, checks or write-back (2026-10-12). [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint briefs ·
-§ Sprint assessment · docs/TRACKERS.md.
+**Activity → This Sprint** (FREE — its own rail line under Pending, `?activityRepo=sprint`; legacy
+`?insightsTab=sprint|merged` lands there): two tabs, the GRAPH and "Merged so far" (`?sprintTab=merged`).
+The graph (`GET /api/sprint-graph` + `…/ticket`, DB only, shared `sprint-graph.ts`): nodes = the sprint's
+tickets + GHOSTS (outside tickets ≤ 3 hops / 60 along edges), staged by the status layout
+(`db/sprint-status-layout.ts`; four stages, the last "Complete", key `'done'`) + PRs; edges = a
+blocking tracker link or a CURRENT BRIEF's depends_on / concurrent / builds_on / supersedes — ONE fold for page, briefs and ghosts (`db/sprint-graph-fold.ts`).
+The BRIEF (Haiku, `review/sprint-briefs/`, after each read, never a view) = summary + criteria + rubric 4's
+references; current on text hash + `SPRINT_BRIEF_VERSION`. Halos nest group → status → person
+("Assigned to"), sized round the DRAWN disc.
+"Check against code" (Sonnet 5, `review/sprint-assess/`, PLAN or VERIFY over the brief's criteria) and
+"Ask Claude about this sprint" (Haiku, `review/sprint-ask/`, the stored graph nonce-fenced, server-side
+turn cap) are LOCAL, gated on `me.ai`, not Pro. ⚠ No chips, findings, checks or write-back.
+[docs/FRONTEND.md](docs/FRONTEND.md) § Activity → This Sprint · [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint briefs.
 
 **The People report** (Reports → People) — a multi-select picker of humans AND bots, one report
 with a SECTION per pick; contract in
@@ -1543,12 +1545,8 @@ how you work:
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.
-  - ⚠ The `regexp_replace(…, '\[bot\]$', '')` vs `replace(…, '[bot]', '')` divergence
-    (pg `0040`/`0041` vs their sqlite twins `0053`/`0054`) is REAL but unreachable: the two
-    disagree on `foo[bot]bar` (`foo[bot]bar` vs `foobar`) and on a LEADING `[bot]`, and agree
-    everywhere else. Measured identical across all 4,561 real logins, and zero of them carry
-    `[bot]` anywhere but the end — which is the only place GitHub puts it. Do not "fix" one to
-    match the other; each is idiomatic for its dialect.
+  - ⚠ The `regexp_replace` vs `replace` `[bot]` strip (pg `0040`/`0041` vs sqlite `0053`/`0054`)
+    diverges only on login shapes GitHub cannot produce — do not "fix" one to match the other.
 - **The E2E API FIXTURES ARE A WIRE CONTRACT, AND THEY ARE NOW TYPECHECKED.**
   `apps/frontend/e2e/mock-api.ts` answers every `/api/**` call the suite makes, annotated with
   the real shared types — but it sat outside every tsconfig, so the annotations were never

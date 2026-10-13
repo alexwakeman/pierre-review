@@ -123,6 +123,11 @@ export interface SprintGraphPr {
   ciState: CiStatus | null;
   /** https://github.com/… */
   url: string;
+  /** Who opened it on GitHub (`users`): the login and the profile's display name. null when the PR
+   *  carries no author. The Members filter folds this person into a ticket assignee whose name is the
+   *  same once spacing, case and punctuation are set aside (`sprintMembers`). `isBot` is the GLOBAL
+   *  automation set (`users.isBot` ∪ GitHub's Bot type ∪ vendor logins); a bot is never a member. */
+  author: { login: string; name: string | null; isBot: boolean } | null;
 }
 
 export interface SprintGraphNode {

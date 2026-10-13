@@ -1816,11 +1816,11 @@ export const workspaces = sqliteTable(
     // the `accounts.blast_radius_config` precedent. Per WORKSPACE, because two teams in two
     // zones in one account work different hours.
     flowSettings: text('flow_settings', { mode: 'json' }).$type<FlowSettings>(),
-    // Reports → This sprint: which story issues this workspace raised (migration 0102 / pg 0089).
+    // Activity → This Sprint: which story issues this workspace raised (migration 0102 / pg 0089).
     // DORMANT since 2026-10-12 (the sprint checks left This sprint with the chips): never read or
     // written; kept rather than rebuilding the table to drop a column.
     sprintChecks: text('sprint_checks', { mode: 'json' }).$type<unknown>(),
-    // Reports → This sprint: the workspace's STATUS LAYOUT override (migration 0103 / pg 0090).
+    // Activity → This Sprint: the workspace's STATUS LAYOUT override (migration 0103 / pg 0090).
     // OVERRIDES ONLY (`SprintStatusSettings` = {sections}: status NAMES per stage; a stored retired
     // {order, deliveredFrom} is converted on read); NULL = the
     // automatic layout (`sprint_reads.status_order_json` + category + name + PR evidence).

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { GROUP_HALO, SPRINT_CANVAS, STAGE_RING, blendHex } from '../src/components/Activity/sprintGraphModel.js';
+import { DISC_GROUND, GROUP_HALO, PERSON_HALO, SPRINT_CANVAS, STAGE_RING, STATUS_SLOTS, SUB_HALO, blendHex, discFill, glyphColour, subHaloColour, subLabelColour } from '../src/components/Activity/sprintGraphModel.js';
 
 // TEXT CONTRAST, ENFORCED FROM THE SOURCE.
 //
@@ -240,7 +240,29 @@ describe('text contrast', () => {
     const haloGround = blendHex(GROUP_HALO.fill, ground, GROUP_HALO.fillAlpha);
     expect(contrastRatio(GROUP_HALO.label, ground)).toBeGreaterThanOrEqual(AA_BODY);
     expect(contrastRatio(GROUP_HALO.label, haloGround)).toBeGreaterThanOrEqual(AA_BODY);
+    // "Split by status": a sub-group's name (11px, its section's colour) sits inside the group halo, on
+    // the ground lightened by BOTH halos' fills.
+    for (const slot of STATUS_SLOTS) {
+      const subGround = blendHex(subHaloColour(slot), haloGround, SUB_HALO.fillAlpha);
+      expect(contrastRatio(subLabelColour(slot), ground)).toBeGreaterThanOrEqual(AA_BODY);
+      expect(contrastRatio(subLabelColour(slot), subGround)).toBeGreaterThanOrEqual(AA_BODY);
+      // "Split by assignee": a person's name (11px, neutral) inside a status sub-halo — three fills deep.
+      const personGround = blendHex(PERSON_HALO.fill, subGround, PERSON_HALO.fillAlpha);
+      expect(contrastRatio(PERSON_HALO.label, personGround)).toBeGreaterThanOrEqual(AA_BODY);
+    }
+    // Split by assignee alone: the person halo sits straight inside the group halo.
+    const personOnGroup = blendHex(PERSON_HALO.fill, haloGround, PERSON_HALO.fillAlpha);
+    expect(contrastRatio(PERSON_HALO.label, ground)).toBeGreaterThanOrEqual(AA_BODY);
+    expect(contrastRatio(PERSON_HALO.label, personOnGroup)).toBeGreaterThanOrEqual(AA_BODY);
     // The stage rings are non-text marks (WCAG 1.4.11: 3:1).
     for (const ring of Object.values(STAGE_RING)) expect(contrastRatio(ring, ground)).toBeGreaterThanOrEqual(3);
+    // Each disc is filled with a dark tint of its status: the ring and the centre mark (non-text, 3:1)
+    // are measured against that fill, and the assignee initials (text) against the badge's ground.
+    for (const stage of [...(Object.keys(STAGE_RING) as Array<keyof typeof STAGE_RING>), null]) {
+      const fill = discFill(stage, false);
+      expect(contrastRatio(glyphColour(stage), fill)).toBeGreaterThanOrEqual(3);
+      if (stage != null) expect(contrastRatio(STAGE_RING[stage], fill)).toBeGreaterThanOrEqual(3);
+    }
+    expect(contrastRatio(SPRINT_CANVAS.labelKey, DISC_GROUND)).toBeGreaterThanOrEqual(AA_BODY);
   });
 });

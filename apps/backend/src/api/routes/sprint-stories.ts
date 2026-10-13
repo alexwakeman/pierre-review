@@ -15,12 +15,11 @@ import { suggestSprintRepos, suggestTicketOf } from '../../db/sprint-repo-sugges
 import { readSprintTicket } from '../../db/sprint-store.js';
 import { setSprintRepos } from '../../db/sprint-ticket-repos.js';
 import { accountIdOf } from '../plugins/auth.js';
-import { reportsEntitled } from './insights.js';
 
-// REPORTS → THIS SPRINT — the CORE routes (both modes; docs/API.md § This sprint). Nothing agentic
-// lives here: "Check against code" is review/sprint-assess/routes.ts and "Ask Claude about this
-// sprint" review/sprint-ask/routes.ts (local only). Nothing here, or anywhere, writes to a tracker.
-// Pro with the rest of Reports: `reportsEntitled` false → 402 BEFORE any DB work. The workspace goes
+// THIS SPRINT (its own Activity rail line) — the CORE routes (both modes; docs/API.md § This sprint).
+// Nothing agentic lives here: "Check against code" is review/sprint-assess/routes.ts and "Ask Claude
+// about this sprint" review/sprint-ask/routes.ts (local only). Nothing here, or anywhere, writes to a
+// tracker. FREE on every tier — no `periodReports` 402 (it left Reports). The workspace goes
 // through `resolveWorkspaceScope`: absent / unknown / another tenant's id ⇒ the caller's Default,
 // never a 404.
 //
@@ -29,17 +28,12 @@ import { reportsEntitled } from './insights.js';
 //   PUT /api/sprint-stories/repos                       replace ONE ticket's accepted candidate repos        → read
 //   PUT /api/sprint-stories/statuses                    replace the workspace's status stages and order      → read
 
-const PRO_REQUIRED = { error: 'pro required' } as const;
 const IDENT_MAX = 600;
 
 type ErrorBody = { error: string; message?: string };
 
 export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/sprint-graph', async (req, reply): Promise<SprintGraphResponse | ErrorBody> => {
-    if (!reportsEntitled(req)) {
-      reply.status(402);
-      return PRO_REQUIRED;
-    }
+  app.get('/api/sprint-graph', async (req): Promise<SprintGraphResponse> => {
     const q = req.query as { workspace?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
@@ -49,10 +43,6 @@ export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
   // The drawer: one node's brief, references, PRs (the ticket tab's fold), repos and assessment. An
   // ident that is not a node answers `found: false` — never a 404.
   app.get('/api/sprint-graph/ticket', async (req, reply): Promise<SprintTicketDetailResponse | ErrorBody> => {
-    if (!reportsEntitled(req)) {
-      reply.status(402);
-      return PRO_REQUIRED;
-    }
     const q = req.query as { workspace?: string; ident?: string };
     const ident = typeof q.ident === 'string' ? q.ident : '';
     if (ident === '' || ident.length > IDENT_MAX) {
@@ -74,10 +64,6 @@ export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
   // workspace's tracker, so an id that does not resolve to itself (unknown, another tenant's) is
   // refused rather than written onto the caller's Default.
   app.put('/api/sprint-stories/statuses', async (req, reply): Promise<SprintStatusesResponse | ErrorBody> => {
-    if (!reportsEntitled(req)) {
-      reply.status(402);
-      return PRO_REQUIRED;
-    }
     const body = (req.body ?? {}) as { workspaceId?: unknown; settings?: unknown };
     const settings = parseSprintStatusSettings(body.settings, true);
     if (typeof body.workspaceId !== 'number' || !Number.isSafeInteger(body.workspaceId) || settings == null) {
@@ -99,10 +85,6 @@ export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.put('/api/sprint-stories/repos', async (req, reply): Promise<SprintReposResponse | ErrorBody> => {
-    if (!reportsEntitled(req)) {
-      reply.status(402);
-      return PRO_REQUIRED;
-    }
     const body = (req.body ?? {}) as { workspaceId?: unknown; ident?: unknown; repoIds?: unknown };
     if (
       typeof body.workspaceId !== 'number' ||

@@ -12,6 +12,7 @@ import {
   BotIcon,
   PullRequestIcon,
   SparkleIcon,
+  TicketIcon,
   TimerIcon,
   WarningIcon,
   WorkspaceIcon,
@@ -25,6 +26,7 @@ import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { HumanThemesPanel } from './HumanThemesPanel.js';
 import { InsightsView } from './InsightsView.js';
+import { SprintRailView } from './SprintRailView.js';
 import { AttentionView } from './AttentionView.js';
 import { BotsView } from './BotsView.js';
 import { BotSettingsPanel } from './BotSettingsPanel.js';
@@ -270,6 +272,8 @@ export function ActivityView(): JSX.Element {
   // The CORE/free **Pending** cards console — always available, no Pro gate.
   const showingAttention = activityRepoId === 'attention';
   const showingInsights = activityRepoId === 'insights';
+  // This Sprint — the sprint graph + "Merged so far". FREE on every tier (no ProBadge, no lock).
+  const showingSprint = activityRepoId === 'sprint';
   // Bots Monitoring (BotsView) — Pro as a whole on `botDepth`. The RAIL ENTRY is listed on every
   // tier (visible-but-locked); BotsView renders the lock for the whole pane when unentitled.
   const showingBots = activityRepoId === 'bots';
@@ -394,16 +398,14 @@ export function ActivityView(): JSX.Element {
             isFetching && data != null ? 'opacity-60 transition-opacity' : ''
           }`}
         >
-          {/* RAIL ORDER, top to bottom: Open PRs · Pending · Feed · Bots · Reports (store value
-              still 'insights') — then the per-repo rows BENEATH the whole block. Open PRs leads
-              because it is where the app opens; Pending, the ranked worklist, is next.
-              The Feed follows as the stream of what happened. Bots sits DIRECTLY under the Feed
-              because the two are read together: most of what scrolls past on the Feed is
-              bot-authored, and the Feed's own "Bot classification" tab owns the judgement that
-              decides what the Feed shows — `hiddenBotUserIds` is the union of `users.isBot` and
-              this workspace's automated reviewers, and a manual "human"/"bot" call made there wins
-              in both directions. The control that filters the stream belongs next to the stream,
-              not three entries away. Reports sits last as the retrospective surface.
+          {/* RAIL ORDER, top to bottom: Open PRs · Pending · This Sprint · Feed · Reports (store
+              value still 'insights') · Bots Monitoring — then the per-repo rows BENEATH the whole
+              block. Open PRs leads because it is where the app opens; Pending, the ranked worklist,
+              is next, and This Sprint (the sprint graph + Merged so far, FREE) sits directly under
+              it. The Feed follows as the stream of what happened. Reports sits ABOVE Bots
+              Monitoring (the user's order); bot classification itself lives on the Feed's own
+              "Bot classification" tab, so moving Bots Monitoring down separates nothing that
+              filters the stream from the stream.
               ⚠ Bots Monitoring and Reports are PRO AS A WHOLE: listed on every tier with one
               ProBadge each, their panes locked (ProLockPanel) when unentitled.
               (The "Compare workspaces" entry was folded into Reports' "By workspace" axis.) */}
@@ -468,7 +470,30 @@ export function ActivityView(): JSX.Element {
             </span>
           </button>
 
-          {/* FEED pseudo-row — SECOND, under Pending. This workspace's consolidated state of play,
+          {/* THIS SPRINT pseudo-row — directly UNDER Pending. The tracker's current sprint as a graph
+              (the landing panel) and "Merged so far" (every PR merged in the reporting window), as
+              two tabs (SprintRailView). FREE on every tier: no ProBadge, and nothing inside locks.
+              `?activityRepo=sprint`; a legacy `?insightsTab=sprint|merged` lands here. */}
+          <button
+            type="button"
+            onClick={() => setActivityRepo('sprint')}
+            aria-pressed={showingSprint}
+            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+              showingSprint
+                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+            }`}
+            title="This sprint's tickets, their links and pull requests, and what has merged so far"
+          >
+            <span className="shrink-0 text-sky-600 dark:text-sky-400">
+              <TicketIcon />
+            </span>
+            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+              This Sprint
+            </span>
+          </button>
+
+          {/* FEED pseudo-row — under This Sprint. This workspace's consolidated state of play,
               across every repo in it. A Feed link carries `?activityRepo=feed` (it is no longer
               the default). The old "All repos" pseudo-row was removed (redundant with the Feed +
               the per-repo entries below). */}
@@ -489,34 +514,6 @@ export function ActivityView(): JSX.Element {
             <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
               Feed
             </span>
-          </button>
-
-          {/* BOTS MONITORING pseudo-row (LABEL-ONLY rename of "Bots"; the rail id stays 'bots').
-              PRO AS A WHOLE (`botDepth`): VISIBLE on every tier with ONE ProBadge here, and the
-              whole pane — every sub-tab, Settings included — renders `ProLockPanel` when the
-              account is not entitled (BotsView gates itself). No per-sub-tab badges inside.
-              Bot HIDING on the Feed and Timeline stays free: it reads the stored/auto
-              classification through `/api/bot-reviewers`, which is not gated. */}
-          <button
-            type="button"
-            onClick={() => setActivityRepo('bots')}
-            aria-pressed={showingBots}
-            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
-              showingBots
-                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
-                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
-            }`}
-            title="Measure and triage this workspace's review bots (Pro)"
-          >
-            <span className="shrink-0">
-              <BotIcon />
-            </span>
-            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
-              Bots Monitoring
-            </span>
-            {/* UNCONDITIONAL, like every tier label here: keyed on the capability it would flicker
-                on every cold load (capabilities read all-false until /api/me lands). */}
-            <ProBadge variant="tab" className="shrink-0" title="Bots Monitoring is part of Pro." />
           </button>
 
           {/* REPORTS pseudo-row (formerly "Insights" — renamed with plan C5, once the pane became
@@ -546,6 +543,34 @@ export function ActivityView(): JSX.Element {
               Reports
             </span>
             <ProBadge variant="tab" className="shrink-0" title="Reports are part of Pro." />
+          </button>
+
+          {/* BOTS MONITORING pseudo-row (LABEL-ONLY rename of "Bots"; the rail id stays 'bots').
+              PRO AS A WHOLE (`botDepth`): VISIBLE on every tier with ONE ProBadge here, and the
+              whole pane — every sub-tab, Settings included — renders `ProLockPanel` when the
+              account is not entitled (BotsView gates itself). No per-sub-tab badges inside.
+              Bot HIDING on the Feed and Timeline stays free: it reads the stored/auto
+              classification through `/api/bot-reviewers`, which is not gated. */}
+          <button
+            type="button"
+            onClick={() => setActivityRepo('bots')}
+            aria-pressed={showingBots}
+            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+              showingBots
+                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+            }`}
+            title="Measure and triage this workspace's review bots (Pro)"
+          >
+            <span className="shrink-0">
+              <BotIcon />
+            </span>
+            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+              Bots Monitoring
+            </span>
+            {/* UNCONDITIONAL, like every tier label here: keyed on the capability it would flicker
+                on every cold load (capabilities read all-false until /api/me lands). */}
+            <ProBadge variant="tab" className="shrink-0" title="Bots Monitoring is part of Pro." />
           </button>
 
           {/* The workspace's repos — a FLAT list. There is nothing to group by: a repo belongs to
@@ -613,6 +638,10 @@ export function ActivityView(): JSX.Element {
           <AttentionView />
         ) : showingInsights ? (
           <InsightsView />
+        ) : showingSprint ? (
+          // This Sprint — FREE; the sprint graph (landing) and Merged so far. Workspace-scoped, with
+          // its own empty states (no tracker, no sprint), so it renders before repo data loads.
+          <SprintRailView />
         ) : noRepos ? (
           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-400">
             {hasAnyRepo

@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { BlastSignals, BlastSurface } from '@pierre-review/shared';
 import {
   blastRadius,
   resolveBlastConfig,
   type BlastPrFields,
-} from '../src/lib/ui.js';
+  type BlastSignals,
+  type BlastSurface,
+} from '@pierre-review/shared';
 
 // ── The blast-radius LEVEL rules ──────────────────────────────────────────────────────────────
 //
@@ -12,13 +13,9 @@ import {
 // halves are deliberately separate — the signal vector is a fact about a pull request and the
 // level is a reading of it, and the reading is the half a user can reconfigure.
 //
-// ⚠ THIS SUITE DOES NOT RUN IN CI, AND IS NOT TYPECHECKED EITHER (`pnpm test` is recursive vitest
-// and the frontend's `test` script is a no-op; its tsconfig includes only `src`). Run it by hand:
-//     ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
-// That is a repo-wide condition, not a property of this file — but it bit during this feature's
-// own build: renaming `hubP90` to `hubBar` left a stale key in the factory below, which no
-// compiler saw, and the hub arm silently stopped firing in every test that used it. A field name
-// in this file is not checked against the type it claims to build; only running it finds that.
+// The resolver lives in `packages/shared/src/blast-radius.ts` (the SPA re-exports it from lib/ui.ts
+// and the server's auto-approve impact gate calls it), so this suite moved here from
+// apps/frontend/test, where it ran by hand only: in the backend it runs in CI and is typechecked.
 
 const DEFAULTS = resolveBlastConfig(null);
 

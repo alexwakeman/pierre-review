@@ -22,7 +22,7 @@ const ROUTES: Array<{ method: 'GET' | 'POST' | 'PUT'; url: string }> = [
   { method: 'POST', url: '/api/story-reports' },
   { method: 'GET', url: '/api/story-reports/:id' },
   { method: 'POST', url: '/api/story-reports/:id/cancel' },
-  // "Check against code" (Reports → This sprint) — agentic AND Pro: cloud must register none of it.
+  // "Check against code" (Activity → This Sprint) — agentic: cloud must register none of it.
   { method: 'POST', url: '/api/sprint-stories/assess' },
   { method: 'GET', url: '/api/sprint-stories/assessments/:id' },
   { method: 'POST', url: '/api/sprint-stories/assessments/:id/cancel' },

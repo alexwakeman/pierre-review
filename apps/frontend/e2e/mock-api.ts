@@ -10,9 +10,11 @@ import type {
   ActivityResponse,
   MeResponse,
   MyTurnPr,
+  MergedPrsResponse,
   MyTurnResponse,
   OpenPrsResponse,
   ClaudeReviewStatesResponse,
+  ClaudeThreadJudgementsResponse,
   PrTicketReviewsResponse,
   TicketReviewStatesResponse,
   CiReviewStatesResponse,
@@ -506,7 +508,16 @@ const SYNC_ACTIVITY: SyncActivityResponse = {
   generatedAt: iso(0),
 };
 
-// Reports → This sprint (GET /api/sprint-graph). Typed so `pnpm typecheck` covers the shape, and
+// This Sprint → "Merged so far" (GET /api/merged-prs, FREE). Served explicitly: the catch-all `{}`
+// has no `window`, which the tab's header names. Nothing merged — the tab's own empty state.
+const MERGED_PRS: MergedPrsResponse = {
+  prs: [],
+  workspaceId: WORKSPACE.id,
+  window: { mode: 'rolling_14', from: iso(14), to: iso(0), end: iso(0), days: 14, elapsedDays: 14 },
+  truncated: false,
+};
+
+// This Sprint (its own rail line) → the sprint graph (GET /api/sprint-graph). Typed so `pnpm typecheck` covers the shape, and
 // served explicitly — the catch-all `{}` has no `nodes`/`read`, and the tab would blank. Two sprint
 // tickets and one ghost: ACME-2 depends on ACME-9 (a tracker link) and is built alongside ACME-1 (its
 // brief); ACME-2 carries an open PR.
@@ -580,6 +591,7 @@ const SPRINT_GRAPH: SprintGraphResponse = {
           draft: false,
           ciState: 'failure',
           url: `https://github.com/${REPO.fullName}/pull/${PRS[0]!.number}`,
+          author: { login: 'ada', name: 'Ada Lovelace', isBot: false },
         },
       ],
       degree: 2,
@@ -940,6 +952,9 @@ export async function installMockApi(page: Page): Promise<void> {
       if (path.includes('/api/timeline')) return json(route, TIMELINE);
       if (path.includes('/api/open-prs')) return json(route, OPEN_PRS);
       if (path.endsWith('/api/claude-review/states')) return json(route, CLAUDE_REVIEW_STATES);
+      // The thread cards' Claude marker (one batched POST per screen): no judged run here.
+      if (path.endsWith('/api/claude-review/thread-judgements'))
+        return json(route, { prs: [] } satisfies ClaudeThreadJudgementsResponse);
       if (path.endsWith('/api/ticket-reviews/states')) return json(route, TICKET_REVIEW_STATES);
       const ticketReviewsMatch = path.match(/\/api\/prs\/(\d+)\/ticket-reviews$/);
       if (ticketReviewsMatch) return json(route, prTicketReviewsFor(Number(ticketReviewsMatch[1])));
@@ -965,6 +980,7 @@ export async function installMockApi(page: Page): Promise<void> {
         return json(route, { prs: [], titlesComplete: true } satisfies TicketLinksResponse);
       }
       if (path.endsWith('/api/sprint-graph')) return json(route, SPRINT_GRAPH);
+      if (path.endsWith('/api/merged-prs')) return json(route, MERGED_PRS);
       if (path.endsWith('/api/ticket-merged-prs')) {
         return json(route, { workspaceId: WORKSPACE.id, tickets: [] } satisfies TicketMergedPrsResponse);
       }

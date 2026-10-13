@@ -323,7 +323,7 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   `aria-expanded`/`aria-controls`; a click on the header's empty space toggles too) · ticket KEY
   (mono, linked through `safeExternalUrl`) · ticket TITLE (`text-base`, the heaviest text on the
   page) / next line: STATUS pill coloured by `statusCategory` (new grey, indeterminate blue, done
-  green; the site's own status words, else To do / In progress / Done) · issue type (11px) ·
+  green; the site's own status words, else To do / In progress / Complete) · issue type (11px) ·
   assignee as INITIALS + name (Jira avatar URLs are third-party and the CSP blocks them — do not
   loosen it) or "Unassigned" when the status is known / right: a quiet roll-up over the stack's
   cards from fields they already carry ("N failing CI · N changes requested · N ready to merge",
@@ -1375,6 +1375,13 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
     while auto review is off (it acts on auto runs only, which the hint line says). The facts (posts as
     you, COMMENT only, counts as your review, never twice, never on merged/closed/draft/bot PRs, team
     requests do not count, failures stay visible) sit behind one `InfoButton`, not in the copy.
+  - **Approve by impact**: under "Approve or request changes for me", an "Approve" fieldset with one
+    checkbox per blast-radius level (`IMPACT_ROWS` — "High / Medium / Low impact PRs", all ticked by
+    default; `autoPost.approveImpact`, stored overrides-only). It dims with the verdict switch and
+    stays editable. An unticked level turns an auto APPROVE into a comment-only review; REQUEST_CHANGES
+    is never held by it. ⚠ The level is the SAME one the PR's chip shows — the server folds it through
+    the ONE shared `blastRadius()` with the account's dial — and a PR with no level counts as HIGH. The
+    ⓘ says both; the surface carries only the labels.
   - What it did is shown where the posts are: `lib/autoPost.ts` `postedChipLabel` turns a finding's
     "Posted" chip into "Posted automatically · <time ago>" (`ClaudeFinding.postedAuto`), the Post to
     GitHub pill does the same off `ClaudeReview.autoPost`, and `autoPostFailureLine` prints ONE amber
@@ -2055,11 +2062,201 @@ to removable chips.
   Bot sections are deterministic, no AI. Every per-section query key carries `ws:` + `u:<userId>`
   + `pw:<from>-<to>` fixed-arity slots, so two chips can never share a cache entry.
 
-## The Reports pane is two tabs, and the Pending board can now merge
+### Activity → This Sprint (free)
 
-### Reports → Overview | Chronology (`insightsTab`)
+This Sprint is its OWN Activity rail line (`activityRepo: 'sprint'`, `?activityRepo=sprint`), directly
+under Pending: Open PRs · Pending · This Sprint · Feed · Reports · Bots Monitoring. It is FREE — no
+`ProBadge`, no `ProLockPanel`, and none of its routes 402 (`/api/sprint-graph*`, `/api/merged-prs`,
+the sprint refresh / statuses / repos routes). The agentic parts ("Ask Claude", "Check against code")
+stay LOCAL-ONLY and gate on `me.ai.enabled` through `useAiCapabilities()`, never a Pro capability.
+Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the worker read the sprint.
 
-`InsightsView` is a TWO-TAB pane. **Overview** is the pane as it was — free Flow metrics above the
+- **Two tabs, DERIVED, never written back**: "Sprint graph" (the landing tab) and "Merged so far".
+  The store's `sprintInnerTab` is mirrored to `?sprintTab=merged` (the `'graph'` default omitted, the
+  key emitted ONLY beside `activityRepo=sprint`); the render reads `effectiveSprintTab`
+  (`Activity/sprintRailModel.ts`), the `feedInnerTab` / `insightsTab` rule. Both values live in the URL
+  only, so no `FILTER_STORAGE_VERSION` bump.
+- ⚠ **Legacy links still land**: `?insightsTab=sprint` and `?insightsTab=merged` shipped as Reports
+  tabs and are in bookmarks and in history entries Back replays. `useUrlState` reads them as
+  `activityRepo=sprint` + the matching tab, and never writes either value back. Reports itself is now
+  THREE tabs: Overview · Stories · Chronology.
+
+- **Sprint graph** (`?activityRepo=sprint`, the landing tab) — THE SPRINT GRAPH
+  (`SprintView.tsx`: toolbar, filters, `SprintGraph`, `SprintTicketDrawer`, `SprintAskPanel`; pure folds
+  in `sprintGraphModel.ts`, test/sprintGraphModel.test.ts). Data: `GET /api/sprint-graph` (nodes = the
+  sprint's tickets + GHOST tickets outside it, edges, status layout, repos) and, per opened ticket only,
+  `GET /api/sprint-graph/ticket` (docs/API.md § This sprint). Hooks in `hooks/useSprintStories.ts` — NO
+  capability gate; the agentic ones (Ask Claude, Check against code) AND `me.ai.enabled` alone; shared mutation keys `['sprint-assess',
+  ident]`, `['sprint-repos', ident]`, `['sprint-ask', ws]` read through `useIsMutating`.
+  - **The canvas is ALWAYS deep navy** (`.sprint-canvas` in index.css, a radial gradient + a seeded,
+    static star field) in BOTH themes, so its colours live in `SPRINT_CANVAS` / `STAGE_RING` /
+    `edgeStyle` / `SATELLITE_FILL`, never the page's tokens. ⚠ The label colours are measured against the
+    gradient's CENTRE (its lightest stop) at the lowest label opacity in test/textContrast.test.ts, which
+    also checks index.css keeps the centre the lightest stop.
+  - **WHAT IS DRAWN** (`visibleGraph`, the toolbar's "View" row): hidden things are REMOVED from the
+    simulation, not faded, so the layout only places what is shown. Outside tickets: by default only
+    ghosts that are NOT done (status category not `done`; unknown counts as open); **"Show shipped
+    history"** adds the complete ghosts and the chains behind them. Links: by default only `depends_on` +
+    `concurrent`; **"Show builds on / replaces"** adds the faint two. A ghost is drawn only while a drawn
+    edge chain reaches it from a sprint ticket. ⚠ A node's SIZE counts only the DRAWN edges
+    (`visibleGraph` recounts `degree`; the wire's `degree` counts every edge). Measured on workspace 1
+    (Sprint 14, 77 tickets, 136 nodes / 181 edges on the wire): the default draws 78 nodes / 15 edges;
+    history 87 / 31; builds-on 80 / 34; both 136 / 181. The header counts what is drawn.
+  - **"Group by"** — Epic · Theme (DEFAULT) · Section · None; a stored per-browser choice wins
+    (`sprint-graph-group`, `readGroupMode` / `writeGroupMode`, try/catch). SOFT clusters: each group gets
+    an ANCHOR (`groupAnchors`: placed in `groupList` order — largest first, sections in stage order —
+    along a spiral STRETCHED to the canvas's measured aspect, at the first spot overlapping no placed
+    group; the no-epic / no-theme group placed OUTWARD) and a weak forceX / forceY toward it; a link
+    BETWEEN groups pulls lightly so clusters hold while lines still cross. ⚠ A group's ROOM
+    (`groupRadius`, area ∝ members) is sized by its DRAWN members (`SprintGroup.drawn`, ghosts included),
+    while the ORDER keys on `count` (sprint tickets only) — so "Show shipped history" re-spaces the
+    groups instead of pushing one halo into the next. A large group is a spread disc (`collidePadding`
+    grows with group size), and halos that still touch are pushed apart as wholes (`haloSeparation`, a
+    custom force). A faint labelled HALO (`groupHalo`, recomputed
+    from the members' positions in the rAF loop; label at a fixed screen size, `.sg-group-label`) sits
+    behind each group, and its label is contrast-tested on the ground lightened by the halo's fill
+    (`GROUP_HALO`, test/textContrast.test.ts). A ghost joins the group of the NEAREST sprint ticket
+    through drawn edges (`assignGroups`). ⚠ `groupList` counts SPRINT tickets only, so a toggle never
+    re-orders or moves the anchors. "Theme" needs the response's `themes` (the theme pass, docs/CLAUDE-REVIEW.md
+    § Sprint themes); without them the button is disabled with "Themes appear after Claude reads the
+    sprint" beside it, and a stored (or default) "theme" choice DRAWS as Epic (`effectiveGroupMode` —
+    derived, never written back). A toggle or a grouping switch REBUILDS the simulation, computes the new
+    layout TO REST, then eases every node from where it was to where it lands over `SETTLE_FRAMES` (a
+    `tween`, even while frozen); a grouping switch seeds each node inside its NEW group (starting from the
+    old arrangement jammed groups that had to pass through each other). With reduced motion it simply
+    appears. **Fit** frames the drawn nodes, their halos and names, leaving room for the open key; until
+    the reader zooms or pans (`viewTouched`), the view FOLLOWS Fit through every re-layout, and a grouping
+    switch re-arms that — so Section never opens zoomed in.
+  - **"Assigned to"** (any grouping but None — Section too, as status then person — `canSplitByAssignee`;
+    per browser, `sprint-graph-split-assignee`) nests ONE level below "Split by status": inside each group —
+    or each status sub-group when that is on too — one PERSON room per assignee (`personSplitLayout`: busiest first,
+    Unassigned last, rows of ~√n; a split status room is sized ROUND its people via `statusSplitLayout`'s
+    `roomOf`). A person is the Members filter's identity (`personOf` → `p:<personNameKey>`, labelled as
+    `sprintMembers` labels it), so two spellings are one halo; a ghost uses its own assignee, else
+    Unassigned. Person halos are NEUTRAL (`PERSON_HALO`, contrast-tested three fills deep) so the status
+    tint still reads; siblings are pushed apart within their parent (`separate-people`), and the parent
+    halo encloses them. It is part of `layoutIntent`, so toggling animates and a refetch stays quiet.
+  - ⚠ **Every halo name (group, status, person) sits INSIDE the top of its OWN halo**, centred, cut with an
+    ellipsis to the chord (`haloName`) — outside, a zoom into one group put its name off screen. The halo
+    makes the ROOM (`haloNameRoom` + `withNameRoom`: top raised by the name's height plus the depth where the
+    chord fits, same bottom), and since the name is a constant SCREEN size the room is px ÷ zoom, recomputed
+    in `applyHalos`; a parent is sized round its children's roomy halos, and the halos hold the assignee
+    badges too (`badgeCircle`), so a name never sits on a ticket, a badge or a child halo. Too small on
+    screen (chord < `HALO_NAME_MIN_W`, or room > `HALO_NAME_MAX_PAD` × radius — nested bulges compound) ⇒
+    no room and no name; a name crowded by a neighbour hides (`placeHaloNames`, groups then status then
+    person). The forces make room at `HALO_NAME_LAYOUT_ZOOM` (0.4, ~Fit) for groups and
+    `HALO_SUBNAME_LAYOUT_ZOOM` (1) inside them; Fit and the epic/theme pick frame twice (room at the zoom
+    the first pass gave). Never driven by hover.
+  - ⚠ **Every halo is sized round the tickets AS DRAWN** (`drawnRadius`: disc + half the thickest ring,
+    times the zoom's `discScale`), and re-applied on every zoom (`applyHalos` in `applyView`). Sized from
+    the layout radius, 60 of 78 tickets spilled out of their person halo at Fit (zoom 0.25, discs ×2). The
+    separation forces and Fit size halos at `HALO_LAYOUT_SCALE` (the largest enlargement), so no two halos
+    overlap at any zoom; zoomed in, the gaps between them are wider than the halos need.
+  - **Labels** keep a fixed SCREEN size, so collisions are decided on screen (`placeLabels`, after every
+    zoom and every `LABEL_EVERY` frames while moving): each tries below / above / right / left / the
+    four corners of its ticket (keeping its previous side while free, so nothing flickers), clear of every
+    placed label, of the group names and of other tickets' discs (grazing a rim is allowed, the middle
+    never); one with no free spot is HIDDEN (`data-side="none"`) until zoom gives it room, or hover,
+    focus or selection REVEALS it (`LabelItem.reveal`). ⚠ **Hover never moves a label**: a revealed label
+    is placed exactly as if it were not (same priority, same side), and only a label that would be hidden
+    is then shown — after every other label, so none moves — at its last side, else the first clear one.
+    Promoting it to `LABEL_ALWAYS` (placed first) made it jump sides and pushed its neighbours round; a
+    second cause was an inline label ref, re-run with null on every hover re-render, which dropped its
+    remembered side — `LabelView`'s refs are stable. Labels live in their own LAYER above every disc
+    (`LabelView`), the promoted ones drawn last (on top). Group names are not promoted either. Priority:
+    readable before faded, sprint before ghost, more links, larger. The side is written as CSS variables on `.sg-label` (`labelOffset`), never
+    by React. Halo names are placed first and are obstacles for every ticket label. Measured on workspace 1 at Fit, 1440×900: overlapping label pairs
+    went from 32 (Theme) / 33 (Epic) / 22 (Section) to 0 everywhere, with 69/78, 69/78, 76/78 and 74/87
+    (Epic + history) keys shown.
+  - **Nodes**: radius by degree (`nodeRadius`, 14–34, sized to read at Fit); the fourth stage is labelled
+    "Complete" (`SPRINT_STAGE_LABEL.done`; the key stays `'done'`, and a tracker status named "Done" keeps
+    its own word — the hover tip, like the drawer, never adds the Complete stage); status THREE ways — a thick
+    ring (`ringWidth`), a dark tint of the ring colour as the fill (`discFill`; ghosts keep the plain
+    ground) and a centre mark from Icons.tsx (`statusGlyph`: empty circle, half circle, eye, tick, question
+    mark); Complete faded; ghosts smaller, dashed, fainter with depth; assignee avatar badge outside the
+    top-right rim (image through `safeExternalUrl`, initials when it fails), counter-scaled by CSS
+    `--sg-badge` (`badgeScale`) so it never drops below an 18px picture on screen, and an obstacle to
+    every label and name; PR satellites orbiting (open / draft / merged, a red ring for failing checks on an
+    OPEN PR; at most 12). **Edges**: `depends_on` a directed arrow (from → to), `concurrent` dashed,
+    `builds_on` / `supersedes` faint and thin (only with "Show builds on / replaces"; the key lists them
+    then); hovering a node or an edge shows a tooltip-popover
+    (status, relations; an edge's label and quote) — never `title=`.
+  - ⚠ **POSITIONS NEVER GO THROUGH REACT.** d3-force is the physics only (`d3-force`, no other graph
+    library); React renders each node / edge when what it SHOWS changes, and one rAF loop writes the
+    simulation's positions straight to the DOM. A JSX `transform` on a node (or `x1…y2` on an edge) would
+    be overwritten every frame — and re-rendering 125 nodes per frame is the jank this avoids (measured
+    ~60 fps on the real 136-node sprint). Labels and discs keep a readable SCREEN size at any zoom (CSS
+    `--sg-inv` / `--sg-disc` on the svg); zoomed out the titles hide (`data-zoom="far"`); which KEYS show is
+    the label placement's call (below), not a zoom threshold.
+  - **Motion is BRIEF, then the canvas is STILL.** Every layout is computed to rest before it is shown
+    and then ANIMATED in: on first load the tickets travel from another grouping (`introGroupMode`: Epic,
+    or Theme/Section when Epic is chosen; seeds `introSeeds`) over `INTRO_MS`, the halos fading in only
+    as they arrive; a re-layout eases each ticket from where it was (`RELAYOUT_MS`). For `SETTLE_MS` (5 s)
+    after load, a re-layout or a drag release the forces run and a drift turns the graph (fading,
+    `driftScale`; none under the pointer, nothing while a ticket is selected); then the rAF loop STOPS
+    itself — ⚠ there is no perpetual loop any more, so anything that moves must `wake()` it (or
+    `animateView`). `prefers-reduced-motion`: no tween, no loop — every layout and framing jumps.
+    ⚠ **Opening a ticket FRAMES it and its one-link neighbours in the strip the drawer leaves visible**
+    (`uncoveredSpan` + `fitBoxIn`, the drawer's measured width; on a phone the drawer is full width, so
+    the whole canvas). SprintView bumps `frameRequest` on every open, so re-opening the selected ticket
+    re-frames it. Picking an epic or theme in the filter frames those tickets, their links and the
+    group's halo; clearing it animates back to Fit. Any reader zoom / pan cancels an animated framing.
+    Drag a node to PIN it — per browser, per (workspace, sprint source) in localStorage through
+    `readPinned` / `writePinned` (try/catch; works without storage); "Reset layout" clears them.
+    The wheel and a trackpad pinch (sent as Ctrl + wheel) ZOOM about the pointer (`wheelZoomFactor`,
+    one notch capped) — the page is short, so the canvas may take the wheel (user decision 2026-10-13). Touch: the surface is `touch-action: pan-x pan-y`, so one
+    finger scrolls the page unless it starts on a ticket (a drag; nodes are `touch-action: none` and a
+    non-passive touchstart claims it); two fingers pinch-zoom (`pinchTransform`). Mouse drag on the
+    background pans; "Fit", +, −.
+  - **Filters** (section chips, assignee, epic, Has PRs, Has dependencies) FADE what they set aside —
+    nothing re-lays out. **Selecting** a node dims everything beyond one link ("2 hops" widens it); a
+    background click or "Show all" clears it. The selection outlives the drawer.
+  - **Accessibility**: every node is a focusable `<g role="button">` with "KEY title, status, N PRs";
+    Enter / Space opens the drawer; a visually hidden list repeats every ticket.
+  - **The drawer** (`SprintTicketDrawer`) is PORTALED to `<body>` (in place it inherited the parent's
+    `space-y-*` top margin — a gap above a `fixed inset-0` panel) and slides in from the right over the
+    graph (a LIGHT backdrop, so the framed tickets stay readable beside it; Escape /
+    close / backdrop click; focus trapped and handed back to the node). It is built from the Open PRs
+    pieces: the header (key, title, status pill, assignee, epic, tracker link, "Open ticket tab"), the
+    "Story check" block (the brief's summary and numbered criteria, the first 10 then "Show all";
+    "Worked out from the description" when derived) plus the Open PRs `StackStoryCheck` when the
+    ticket has a ticket review (ONE `useTicketReviewStates` read), the references grouped by relation
+    (a ticket on the graph moves the drawer, any other opens its tab), EVERY PR as the Open PRs cards via
+    `Ticket/TicketPrsSections.tsx` — the SAME component the ticket tab renders — and, sprint tickets
+    only, the repo picker + `SprintAssessment` / `SprintCodeCheck`.
+  - **"Ask Claude about this sprint"** (`SprintAskPanel`, docked over the canvas's bottom-right corner;
+    shown only where `me.ai.enabled` and the response's `aiEnabled`): the transcript lives in the module
+    store `useSprintAskTranscript` (per workspace, memory only) and ⚠ the completed turn is appended in
+    `useSprintAsk`'s HOOK-level `onSuccess`. Answers render through `Markdown` with `ticketLinks` +
+    `rehypeTicketLinks` over the graph's keys; `TicketRefOpenContext` (TicketRefLink.tsx) lets a key on
+    the graph open in the drawer. Each answer shows its cost in US$.
+  - Kept from the list era: `SprintStatusSettings` (four lists, drag and drop + Move up / down),
+    `SprintCopyButton` + `lib/copy.ts`, pure `sprintModel.ts`. DELETED with the chips, findings,
+    highlights, checks and write-back: `SprintTicketCard`, `SprintTicketReview`, `SprintUpdatePanel`,
+    `SprintChecksPanel`, `SprintDiffText`, `useTicketDraft`, `lib/ticketDraft.ts`,
+    `lib/storyHighlights.ts`, `lib/wordDiff.ts` and the `.story-mark` / `.story-rev` CSS.
+- **Merged so far** (`?activityRepo=sprint&sprintTab=merged`, `MergedPrsView.tsx`) — the Open PRs
+  page over the work that LANDED: every PR merged in the
+  REPORTING WINDOW from `GET /api/merged-prs` (`useMergedPrs`, `ws:<id>` key, no capability gate), header named through `reportingWindowText.ts` + "N pull requests merged".
+  ⚠ **It REUSES `OpenPrsCards` with `variant="merged"`, never a fork** — that prop drops the CI and
+  merge-readiness chips (a "Merged" chip and "merged X ago" instead), the stack roll-up, the Claude
+  Review panel + CI review AND their batched requests, and the stack's "Merged (n)" panel (the
+  stack IS the merged work); default order is newest merge first, and there is no Sort menu.
+  ⚠ It KEEPS the TICKET review (where AI runs and the tracker is on): the ONE batched
+  `useTicketReviewStates`, the card's coverage pills (`TicketPillsRow`, the pills without the code
+  review's Review/Fix), the stack's coverage pill + Check story, and the collapsed Story check
+  (criteria met, the story, "What each PR adds"). A ticket with no review run — or no AI at all —
+  still offers its STORY alone (`StackStoryCheck storyWithoutReview`, read only when opened), so
+  nothing fetches on mount. The
+  Group by ticket / List choice (and stack collapse) is the SAME per-viewer `store/openPrsView.ts`
+  state as Open PRs; the repo dropdown is the tab's own local state.
+
+## The Reports pane is three tabs, and the Pending board can now merge
+
+### Reports → Overview | Stories | Chronology (`insightsTab`)
+
+`InsightsView` is a THREE-TAB pane (Overview · Stories · Chronology; This Sprint and Merged so far
+left for their own rail line, above). **Overview** is the pane as it was — free Flow metrics above the
 Pro-badged Period reports. **Chronology** is the COURT LEDGER panel (`BottlenecksPanel.tsx`, contract in
 [BOTTLENECKS.md](BOTTLENECKS.md)). ⚠ It renders NO PERSON — not a login, not an avatar, not a
 per-head count — and the server sends no actor ids, which makes that structural rather than a
@@ -2078,23 +2275,6 @@ convention this file has to remember.
   pins. **The gate lives in the PANE, never in the tab resolution.**
 - The store key lives in `freshDefaults()` only, so **no `FILTER_STORAGE_VERSION` bump is owed**,
   and `'overview'` — the current default — is the OMITTED URL value.
-- **Merged so far** (`?insightsTab=merged`, `MergedPrsView.tsx`) — FOUR tabs now (Overview ·
-  Merged so far · Stories · Chronology). The Open PRs page over the work that LANDED: every PR merged in the
-  REPORTING WINDOW from `GET /api/merged-prs` (`useMergedPrs`, `ws:<id>` key, `periodReports` ANDed
-  into `enabled`), header named through `reportingWindowText.ts` + "N pull requests merged".
-  ⚠ **It REUSES `OpenPrsCards` with `variant="merged"`, never a fork** — that prop drops the CI and
-  merge-readiness chips (a "Merged" chip and "merged X ago" instead), the stack roll-up, the Claude
-  Review panel + CI review AND their batched requests, and the stack's "Merged (n)" panel (the
-  stack IS the merged work); default order is newest merge first, and there is no Sort menu.
-  ⚠ It KEEPS the TICKET review (where AI runs and the tracker is on): the ONE batched
-  `useTicketReviewStates`, the card's coverage pills (`TicketPillsRow`, the pills without the code
-  review's Review/Fix), the stack's coverage pill + Check story, and the collapsed Story check
-  (criteria met, the story, "What each PR adds"). A ticket with no review run — or no AI at all —
-  still offers its STORY alone (`StackStoryCheck storyWithoutReview`, read only when opened), so
-  nothing fetches on mount. The
-  Group by ticket / List choice (and stack collapse) is the SAME per-viewer `store/openPrsView.ts`
-  state as Open PRs; the repo dropdown is the tab's own local state. Ungated inside the one
-  Reports gate.
 - **Stories** (`?insightsTab=stories`, `StoriesView.tsx` + pure `storiesModel.ts`,
   `test/storiesModel.test.ts`) — how well the TICKETS were written. TOP: **the story report**
   (`StoryReportCard.tsx` + pure `storyReportModel.ts`, `test/storyReportModel.test.ts`). BELOW: the two
@@ -2159,112 +2339,6 @@ convention this file has to remember.
   - ⚠ **Story health is DELETED** (2026-10-11, "not adding anything"): no `StoryHealth.tsx`, no
     `useStoryHealth`, no `GET /api/story-health`. Do not re-add a weekly-chart panel here. The label
     run's client methods (`api.startStoryLabelRun` etc.) remain with no screen calling them.
-- **Reports → This sprint** (`insightsTab: 'sprint'`, `?insightsTab=sprint`) — THE SPRINT GRAPH
-  (`SprintView.tsx`: toolbar, filters, `SprintGraph`, `SprintTicketDrawer`, `SprintAskPanel`; pure folds
-  in `sprintGraphModel.ts`, test/sprintGraphModel.test.ts). Data: `GET /api/sprint-graph` (nodes = the
-  sprint's tickets + GHOST tickets outside it, edges, status layout, repos) and, per opened ticket only,
-  `GET /api/sprint-graph/ticket` (docs/API.md § This sprint). Hooks in `hooks/useSprintStories.ts` — every
-  one ANDs `periodReports`, the agentic ones `me.ai.enabled`; shared mutation keys `['sprint-assess',
-  ident]`, `['sprint-repos', ident]`, `['sprint-ask', ws]` read through `useIsMutating`.
-  - **The canvas is ALWAYS deep navy** (`.sprint-canvas` in index.css, a radial gradient + a seeded,
-    static star field) in BOTH themes, so its colours live in `SPRINT_CANVAS` / `STAGE_RING` /
-    `edgeStyle` / `SATELLITE_FILL`, never the page's tokens. ⚠ The label colours are measured against the
-    gradient's CENTRE (its lightest stop) at the lowest label opacity in test/textContrast.test.ts, which
-    also checks index.css keeps the centre the lightest stop.
-  - **WHAT IS DRAWN** (`visibleGraph`, the toolbar's "View" row): hidden things are REMOVED from the
-    simulation, not faded, so the layout only places what is shown. Outside tickets: by default only
-    ghosts that are NOT done (status category not `done`; unknown counts as open); **"Show shipped
-    history"** adds the Done ghosts and the chains behind them. Links: by default only `depends_on` +
-    `concurrent`; **"Show builds on / replaces"** adds the faint two. A ghost is drawn only while a drawn
-    edge chain reaches it from a sprint ticket. ⚠ A node's SIZE counts only the DRAWN edges
-    (`visibleGraph` recounts `degree`; the wire's `degree` counts every edge). Measured on workspace 1
-    (Sprint 14, 77 tickets, 136 nodes / 181 edges on the wire): the default draws 78 nodes / 15 edges;
-    history 87 / 31; builds-on 80 / 34; both 136 / 181. The header counts what is drawn.
-  - **"Group by"** — Epic · Theme (DEFAULT) · Section · None; a stored per-browser choice wins
-    (`sprint-graph-group`, `readGroupMode` / `writeGroupMode`, try/catch). SOFT clusters: each group gets
-    an ANCHOR (`groupAnchors`: placed in `groupList` order — largest first, sections in stage order —
-    along a spiral STRETCHED to the canvas's measured aspect, at the first spot overlapping no placed
-    group; the no-epic / no-theme group placed OUTWARD) and a weak forceX / forceY toward it; a link
-    BETWEEN groups pulls lightly so clusters hold while lines still cross. ⚠ A group's ROOM
-    (`groupRadius`, area ∝ members) is sized by its DRAWN members (`SprintGroup.drawn`, ghosts included),
-    while the ORDER keys on `count` (sprint tickets only) — so "Show shipped history" re-spaces the
-    groups instead of pushing one halo into the next. A large group is a spread disc (`collidePadding`
-    grows with group size), and halos that still touch are pushed apart as wholes (`haloSeparation`, a
-    custom force). A faint labelled HALO (`groupHalo`, recomputed
-    from the members' positions in the rAF loop; label at a fixed screen size, `.sg-group-label`) sits
-    behind each group, and its label is contrast-tested on the ground lightened by the halo's fill
-    (`GROUP_HALO`, test/textContrast.test.ts). A ghost joins the group of the NEAREST sprint ticket
-    through drawn edges (`assignGroups`). ⚠ `groupList` counts SPRINT tickets only, so a toggle never
-    re-orders or moves the anchors. "Theme" needs the response's `themes` (the theme pass, docs/CLAUDE-REVIEW.md
-    § Sprint themes); without them the button is disabled with "Themes appear after Claude reads the
-    sprint" beside it, and a stored (or default) "theme" choice DRAWS as Epic (`effectiveGroupMode` —
-    derived, never written back). A toggle or a grouping switch REBUILDS the simulation, computes the new
-    layout TO REST, then eases every node from where it was to where it lands over `SETTLE_FRAMES` (a
-    `tween`, even while frozen); a grouping switch seeds each node inside its NEW group (starting from the
-    old arrangement jammed groups that had to pass through each other). With reduced motion it simply
-    appears. **Fit** frames the drawn nodes, their halos and names, leaving room for the open key; until
-    the reader zooms or pans (`viewTouched`), the view FOLLOWS Fit through every re-layout, and a grouping
-    switch re-arms that — so Section never opens zoomed in.
-  - **Labels** keep a fixed SCREEN size, so collisions are decided on screen (`placeLabels`, after every
-    zoom and every `LABEL_EVERY` frames while moving): each tries below / above / right / left / the
-    four corners of its ticket (keeping its previous side while free, so nothing flickers), clear of every
-    placed label, of the group names and of other tickets' discs (grazing a rim is allowed, the middle
-    never); one with no free spot is HIDDEN (`data-side="none"`) until hover, focus or selection promotes
-    it (`LABEL_ALWAYS`) or zoom gives it room. Priority: promoted, readable before faded, sprint before
-    ghost, more links, larger. The side is written as CSS variables on `.sg-label` (`labelOffset`), never
-    by React. Group names get the same treatment (`placeGroupLabels`: above the halo, else below, else
-    hidden; the bigger group first). Measured on workspace 1 at Fit, 1440×900: overlapping label pairs
-    went from 32 (Theme) / 33 (Epic) / 22 (Section) to 0 everywhere, with 69/78, 69/78, 76/78 and 74/87
-    (Epic + history) keys shown.
-  - **Nodes**: radius by degree (`nodeRadius`); ring colour by stage (four hues), Done faded; ghosts
-    smaller, dashed, fainter with depth; assignee avatar badge (image through `safeExternalUrl`, initials
-    when it fails); PR satellites orbiting (open / draft / merged, a red ring for failing checks on an
-    OPEN PR; at most 12). **Edges**: `depends_on` a directed arrow (from → to), `concurrent` dashed,
-    `builds_on` / `supersedes` faint and thin (only with "Show builds on / replaces"; the key lists them
-    then); hovering a node or an edge shows a tooltip-popover
-    (status, relations; an edge's label and quote) — never `title=`.
-  - ⚠ **POSITIONS NEVER GO THROUGH REACT.** d3-force is the physics only (`d3-force`, no other graph
-    library); React renders each node / edge when what it SHOWS changes, and one rAF loop writes the
-    simulation's positions straight to the DOM. A JSX `transform` on a node (or `x1…y2` on an edge) would
-    be overwritten every frame — and re-rendering 125 nodes per frame is the jank this avoids (measured
-    ~60 fps on the real 136-node sprint). Labels and discs keep a readable SCREEN size at any zoom (CSS
-    `--sg-inv` / `--sg-disc` on the svg); zoomed out the titles hide (`data-zoom="far"`); which KEYS show is
-    the label placement's call (below), not a zoom threshold.
-  - **Motion**: a slow drift (a tiny rotation + forces at a low `alphaTarget`) that FREEZES while the
-    pointer is over the canvas or a node is selected; `prefers-reduced-motion` settles once and stays
-    still. Drag a node to PIN it — per browser, per (workspace, sprint source) in localStorage through
-    `readPinned` / `writePinned` (try/catch; works without storage); "Reset layout" clears them.
-    ⚠ **A plain wheel SCROLLS THE PAGE** (`wheelIntent`; the canvas is not a scroll trap) and shows a
-    brief "Hold Ctrl/⌘ to zoom" hint; Ctrl / ⌘ + wheel and a trackpad pinch (sent as Ctrl + wheel) zoom
-    (`wheelZoomFactor`, one notch capped). Touch: the surface is `touch-action: pan-x pan-y`, so one
-    finger scrolls the page unless it starts on a ticket (a drag; nodes are `touch-action: none` and a
-    non-passive touchstart claims it); two fingers pinch-zoom (`pinchTransform`). Mouse drag on the
-    background pans; "Fit", +, −.
-  - **Filters** (section chips, assignee, epic, Has PRs, Has dependencies) FADE what they set aside —
-    nothing re-lays out. **Selecting** a node dims everything beyond one link ("2 hops" widens it); a
-    background click or "Show all" clears it. The selection outlives the drawer.
-  - **Accessibility**: every node is a focusable `<g role="button">` with "KEY title, status, N PRs";
-    Enter / Space opens the drawer; a visually hidden list repeats every ticket.
-  - **The drawer** (`SprintTicketDrawer`) slides in from the right over the graph (backdrop; Escape /
-    close / backdrop click; focus trapped and handed back to the node). It is built from the Open PRs
-    pieces: the header (key, title, status pill, assignee, epic, tracker link, "Open ticket tab"), the
-    "Story check" block (the brief's summary and numbered criteria, the first 10 then "Show all";
-    "Worked out from the description" when derived) plus the Open PRs `StackStoryCheck` when the
-    ticket has a ticket review (ONE `useTicketReviewStates` read), the references grouped by relation
-    (a ticket on the graph moves the drawer, any other opens its tab), EVERY PR as the Open PRs cards via
-    `Ticket/TicketPrsSections.tsx` — the SAME component the ticket tab renders — and, sprint tickets
-    only, the repo picker + `SprintAssessment` / `SprintCodeCheck`.
-  - **"Ask Claude about this sprint"** (`SprintAskPanel`, docked over the canvas's bottom-right corner;
-    shown only where `me.ai.enabled` and the response's `aiEnabled`): the transcript lives in the module
-    store `useSprintAskTranscript` (per workspace, memory only) and ⚠ the completed turn is appended in
-    `useSprintAsk`'s HOOK-level `onSuccess`. Answers render through `Markdown` with `ticketLinks` +
-    `rehypeTicketLinks` over the graph's keys; `TicketRefOpenContext` (TicketRefLink.tsx) lets a key on
-    the graph open in the drawer. Each answer shows its cost in US$.
-  - Kept from the list era: `SprintStatusSettings` (four lists, drag and drop + Move up / down),
-    `SprintCopyButton` + `lib/copy.ts`, pure `sprintModel.ts`. DELETED with the chips, findings,
-    highlights, checks and write-back: `SprintTicketCard`, `SprintTicketReview`, `SprintUpdatePanel`,
-    `SprintChecksPanel`, `SprintDiffText`, `useTicketDraft`, `lib/ticketDraft.ts`,
-    `lib/storyHighlights.ts`, `lib/wordDiff.ts` and the `.story-mark` / `.story-rev` CSS.
 - ⚠ **Superseded: the WHOLE Reports pane is Pro (`periodReports`)** — `InsightsView` renders one
   `ProLockPanel` when unentitled, the rail entry carries the one `ProBadge`, and the inner badges
   below were REMOVED (the inner locks remain as defence in depth). `useWorkspaceMetrics` /

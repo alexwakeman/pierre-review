@@ -143,14 +143,13 @@ detected ticket in `tracker_tickets`; every consumer reads the row. The ONE exce
 
 ## The sprint list read — the ONE read not triggered by a received PR (`tracker/sprint/`)
 
-⚠ **A deliberate exception to "read when received".** Reports → This sprint needs the tickets of the
+⚠ **A deliberate exception to "read when received".** Activity → This Sprint needs the tickets of the
 tracker's CURRENT sprint, and most of them have no PR yet, so no PR can trigger their read. The rule
 it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only stamps
 `sprint_reads.viewed_at` and kicks; the read runs in the worker.
 
 - **Demand-gated**: a workspace is read only while `viewed_at` is within `SPRINT_VIEW_TTL_DAYS` (7),
-  at most every `SPRINT_READ_INTERVAL_MS` (20 min, `next_read_at`), only when its account has Reports
-  (`periodReports`), its tracker READS (the worker's population, including the automatic GitHub
+  at most every `SPRINT_READ_INTERVAL_MS` (20 min, `next_read_at`), only when its tracker READS (the worker's population, including the automatic GitHub
   default), its call prepares (`prepareTrackerCall`) and the worker has not backed it off. ≤ 5
   workspaces per tick, at the end of `runTrackerTick`; `POST /api/sprint-stories/refresh` marks it due
   and kicks.
@@ -228,7 +227,7 @@ pg `0090`. They feed the "Blocked" story issue (docs/CLAUDE-REVIEW.md § Story i
 ## The status order — This sprint's four stages and their sections (`sprint_reads.status_order_json`)
 
 Statuses are per project and per tracker, so nothing hard-codes a name. Every status sits in ONE of four
-stages — Not started, In progress, In review, Done — in an order. The sprint list read stores the
+stages — Not started, In progress, In review, Complete — in an order. The sprint list read stores the
 AUTOMATIC order (shared `SprintStatusAutoOrder`) with the list; a person may place any status in any
 stage, in any order, per workspace (`workspaces.sprint_statuses` = `{sections}`,
 `db/sprint-status-settings.ts`, `PUT /api/sprint-stories/statuses`). ⚠ Placement beats category, and a
@@ -249,7 +248,7 @@ ends" = the first status of In progress / In review, derived.
 - ⚠ **AN ORDER FAILURE NEVER FAILS THE LIST.** A failed board read returns `statusOrder: undefined`
   (the stored order stands) and a code that is logged; `null` (no board) clears it, and the page falls
   back to category then name.
-- **The automatic stage**: category `new` → Not started, `done` → Done. An in-progress status is In
+- **The automatic stage**: category `new` → Not started, `done` → Complete. An in-progress status is In
   review when its NAME reads as review / QA / test / release (`SPRINT_REVIEW_STATUS_RE`: "Code Review",
   "Ready for QA", "In Test", "Awaiting Deployment", "UAT"…) or it sits at or after the PR-evidence
   boundary — the first in-progress status where at least 60% of the tickets with a PR have every PR

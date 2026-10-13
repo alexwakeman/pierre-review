@@ -1,5 +1,5 @@
 // "Ask Claude about this sprint" (review/sprint-ask/) on a SCRATCH SQLite with a FAKE completion —
-// never a real model call, never apps/backend/data. Pinned: the 402 before any DB work, the 400s, the
+// never a real model call, never apps/backend/data. Pinned: no 402 (free), the 400s, the
 // grounding (the stored graph, inside ONE nonce fence; prior turns in another), the server-side turn
 // cap, cost recorded, a failing completion a 502 (nothing recorded), no tracker → a sentence, no call.
 import { rmSync } from 'node:fs';
@@ -104,12 +104,11 @@ afterAll(async () => {
 const ask = (payload: unknown) => app.inject({ method: 'POST', url: '/api/sprint-graph/ask', payload: payload as any });
 
 describe('POST /api/sprint-graph/ask', () => {
-  it('402s without periodReports before any DB work', async () => {
+  it('is FREE: no 402 without periodReports (agentic, so gated on AI only)', async () => {
     setCaps?.(emptyCaps);
-    const res = await ask({ workspaceId: ws, question: 'What is blocked?' });
-    expect(res.statusCode).toBe(402);
-    expect(await db.select().from(schema.sprintReads).execute()).toEqual([]);
+    const res = await ask({ workspaceId: ws, question: ' ' });
     setCaps?.(fullCaps);
+    expect(res.statusCode).toBe(400);
   });
 
   it('400s a bad body', async () => {

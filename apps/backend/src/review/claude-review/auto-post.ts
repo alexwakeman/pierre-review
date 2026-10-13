@@ -23,7 +23,9 @@
 //      blocker and no warning (included, non-story findings of the run); else COMMENT. A non-COMMENT
 //      verdict is SENT only when the PR is not the reader's own (GitHub refuses self-approval) and
 //      the reader's own latest review, read LIVE from GitHub (the synced table can lag), is none or
-//      COMMENTED. Otherwise the event is COMMENT and the record says why;
+//      COMMENTED, and an APPROVE only when the workspace allows auto-approve at the PR's IMPACT
+//      level (`approveImpact`; the blast-radius level from the shared resolver, unknown = high).
+//      Otherwise the event is COMMENT and the record says why;
 //   4. nothing to post and nothing but COMMENT to send ⇒ `skipped` — `already_posted` (with the
 //      ids) when the dedupe alone emptied it, else `nothing_new` — no GitHub write;
 //   5. the LIVE PR is still open, not a draft, at the reviewed head (a moved head ⇒ `failed`);
@@ -47,6 +49,7 @@
 import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
 import {
   AUTO_POST_FOOTER,
+  type AutoApproveImpact,
   type AutoPostKinds,
   type AutoPostScope,
   type AutoPostSkipReason,
@@ -196,13 +199,28 @@ export function autoVerdictFor(
 /** The reader's own latest review on the PR, as read live: none, its state, or unreadable. */
 export type OwnLatestReview = 'none' | 'COMMENTED' | 'APPROVED' | 'CHANGES_REQUESTED' | 'DISMISSED' | 'unreadable';
 
-/** Is the wanted verdict sent? Only off the reader's own PR, and over no standing verdict of theirs. */
+/** A PR's impact level as the auto-approve gate reads it: null (the resolver drew nothing) → 'unknown'. */
+export type ImpactLevel = 'high' | 'medium' | 'low' | 'unknown';
+
+/** May an automatic APPROVE go out at this impact level? ⚠ 'unknown' is judged as HIGH. */
+export function impactAllowsApprove(level: ImpactLevel, allowed: AutoApproveImpact): boolean {
+  return allowed[level === 'unknown' ? 'high' : level];
+}
+
+/** Is the wanted verdict sent? Only off the reader's own PR, at an impact level the workspace allows
+ *  to be approved (APPROVE only), and over no standing verdict of theirs. */
 export function verdictGate(
   wanted: AutoVerdictEvent,
-  g: { authorIsMe: boolean; ownLatest: OwnLatestReview },
+  g: { authorIsMe: boolean; ownLatest: OwnLatestReview; impact?: { level: ImpactLevel; allowed: AutoApproveImpact } },
 ): ClaudeAutoVerdictRecord {
   if (wanted === 'COMMENT') return { wanted, submitted: 'COMMENT', heldReason: null };
   if (g.authorIsMe) return { wanted, submitted: 'COMMENT', heldReason: 'own_pr' };
+  if (wanted === 'APPROVE' && g.impact != null) {
+    const impact = g.impact.level;
+    if (!impactAllowsApprove(impact, g.impact.allowed)) return { wanted, submitted: 'COMMENT', heldReason: 'impact', impact };
+    const v = verdictGate(wanted, { authorIsMe: g.authorIsMe, ownLatest: g.ownLatest });
+    return { ...v, impact };
+  }
   if (g.ownLatest === 'unreadable') return { wanted, submitted: 'COMMENT', heldReason: 'reviews_unreadable' };
   if (g.ownLatest !== 'none' && g.ownLatest !== 'COMMENTED') return { wanted, submitted: 'COMMENT', heldReason: 'prior_review' };
   return { wanted, submitted: wanted, heldReason: null };
@@ -263,6 +281,9 @@ export interface AutoPostDeps {
   accountLogin(accountId: number): Promise<string | null>;
   // EVERY review on the PR, LIVE from GitHub, oldest first.
   liveReviews(owner: string, name: string, prNumber: number): Promise<Array<{ login: string | null; state: string }>>;
+  // The PR's blast-radius level through the shared resolver + the account's config (null = none
+  // drawn). Optional so a test fake without it reads as unknown.
+  impactLevel?(accountId: number, prId: number): Promise<'high' | 'medium' | 'low' | null>;
 }
 
 export const defaultAutoPostDeps: AutoPostDeps = {
@@ -288,6 +309,10 @@ export const defaultAutoPostDeps: AutoPostDeps = {
   async accountLogin(accountId) {
     const { accountGithubLogin } = await import('../../db/review-threads-for-review.js');
     return accountGithubLogin(accountId);
+  },
+  async impactLevel(accountId, prId) {
+    const { getPrImpactLevel } = await import('../../db/blast-radius-query.js');
+    return getPrImpactLevel(accountId, prId);
   },
   async liveReviews(owner, name, prNumber) {
     const { ghRestGet } = await import('../../github/client.js');
@@ -533,8 +558,21 @@ async function autoPostReview(
   // The verdict gate reads the reader's own reviews LIVE: a stale synced row must never let an
   // automatic APPROVE overwrite a person's REQUEST_CHANGES.
   if (wanted != null && wanted !== 'COMMENT') {
+    // THE IMPACT GATE (APPROVE only): read before the live reviews, so a held approve costs no
+    // GitHub call. A failed read is 'unknown', which is held as if high — never guessed down.
+    let impact: { level: ImpactLevel; allowed: AutoApproveImpact } | undefined;
+    if (wanted === 'APPROVE' && !facts.authorIsMe) {
+      let level: ImpactLevel = 'unknown';
+      try {
+        level = (await deps.impactLevel?.(accountId, prId)) ?? 'unknown';
+      } catch (err) {
+        ctx.log.warn(`auto post review ${reviewId}: could not read the PR's impact: ${errText(err)}`);
+      }
+      impact = { level, allowed: ws.settings.approveImpact };
+    }
+    const impactHeld = impact != null && !impactAllowsApprove(impact.level, impact.allowed);
     let ownLatest: OwnLatestReview = 'unreadable';
-    if (!facts.authorIsMe) {
+    if (!facts.authorIsMe && !impactHeld) {
       try {
         const [login, reviews] = await Promise.all([
           deps.accountLogin(accountId),
@@ -545,7 +583,7 @@ async function autoPostReview(
         ctx.log.warn(`auto post review ${reviewId}: could not read the PR's reviews: ${errText(err)}`);
       }
     }
-    verdict = verdictGate(wanted, { authorIsMe: facts.authorIsMe, ownLatest });
+    verdict = verdictGate(wanted, { authorIsMe: facts.authorIsMe, ownLatest, ...(impact ? { impact } : {}) });
     if (picked.toPost.length === 0 && verdict.submitted === 'COMMENT') return skip(...nothingReason());
   }
   const event: AutoVerdictEvent = verdict?.submitted ?? 'COMMENT';

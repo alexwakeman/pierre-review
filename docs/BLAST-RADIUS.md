@@ -1,7 +1,7 @@
 # Blast radius — how far a pull request can reach
 
-**Read this before touching `db/blast-radius.ts`, `db/file-coupling.ts`, `lib/ui.ts`'s
-`blastRadius()`, or the `impact` annotation kind.**
+**Read this before touching `db/blast-radius.ts`, `db/file-coupling.ts`, the shared
+`blastRadius()` (`packages/shared/src/blast-radius.ts`, re-exported by `lib/ui.ts`), or the `impact` annotation kind.**
 
 A maintainer looking at the Pending board cannot tell, without opening each pull request, which
 ones deserve a real review and which can be pushed through on a glance. The board already carries
@@ -28,13 +28,21 @@ Only the **impact note** — two sentences explaining what could break — is Pr
 |---|---|---|
 | The signal vector, folded from stored `files[]` | `db/blast-radius.ts` | CORE, free |
 | The co-change ("hub file") index | `db/file-coupling.ts` + `repo_file_coupling` | CORE, free |
-| The level + the reasons | `lib/ui.ts` → `blastRadius()` | CORE, free |
+| The level + the reasons | `packages/shared/src/blast-radius.ts` → `blastRadius()` (re-exported by `lib/ui.ts`) | CORE, free |
 | The impact note | `packages/pro/src/annotations/` — kind `impact` | **Pro** (`prSummary`) |
 
 **The wire carries SIGNALS, never a level.** Exactly the rule `codeLoc` follows, for the same three
 payoffs: the sensitivity dial becomes a pure render-time comparison (change it in Settings and
 every surface repaints with **no query-cache invalidation anywhere**), the chip can name its
 reasons rather than assert a bare verdict, and there is **exactly one place** a level is decided.
+
+**The one resolver lives in `packages/shared`** (real code, vendored at release — see PACKAGING),
+so the SERVER can apply it too: the auto-approve impact gate (`db/blast-radius-query.ts`
+`getPrImpactLevel`) folds the same signals (`blastSignalsFor` + the hub reading, `codeLocFor`)
+through the same `blastRadius()` + `resolveBlastConfig()` with the account's stored config, and gets
+the level the chip shows. A null level (the chip draws nothing) or a failed read is `'unknown'`,
+which the gate treats as HIGH ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Auto-posting). ⚠ Never fork a server copy; its level never goes on the wire. Its tests
+moved with it to `apps/backend/src/db/blast-level.test.ts` (now in CI).
 
 ---
 

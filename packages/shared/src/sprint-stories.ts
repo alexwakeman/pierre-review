@@ -12,7 +12,7 @@ import type { JiraStatusCategory, TrackerProvider } from './types.js';
 //     sprints, Linear's active cycle, GitHub's nearest-due open milestone, else the status fallback
 //     (To do + In progress tickets touched in the reporting window). The `source` says which.
 //   • THE SECTIONS follow the workspace's STATUS LAYOUT (`SprintStatusLayout`): FOUR stages — Not
-//     started, In progress, In review, Done. Which stage a status sits in, and the order, are
+//     started, In progress, In review, Complete. Which stage a status sits in, and the order, are
 //     AUTOMATIC (category, a review/QA name vocabulary, PR evidence; the tracker's board / workflow
 //     order) unless the workspace places them itself (`SprintStatusSettings`).
 //   • THE ASSESSMENT ("Check against code") is a local-only Sonnet 5 agent run over read-only default
@@ -195,7 +195,7 @@ export const SPRINT_ASSESS_FORMAT_VERSION = 6;
  *  change makes the run stale.
  *   • 'plan'   (Not started, In progress): no code is expected yet — the run lists the few high-level
  *              changes needed and where (`plan`), never "this may already be done".
- *   • 'verify' (In review, Done): the code is expected on the default branch — the run checks each
+ *   • 'verify' (In review, Complete): the code is expected on the default branch — the run checks each
  *              criterion against it and names a covering test (`criterionChecks`, `coverage`). */
 export type SprintAssessMode = 'plan' | 'verify';
 
@@ -358,7 +358,7 @@ export type SprintPhase = 'not_started' | 'in_progress' | 'done';
 export const SPRINT_PHASE_LABEL: Record<SprintPhase, string> = {
   not_started: 'Not started',
   in_progress: 'In progress',
-  done: 'Done',
+  done: 'Complete',
 };
 
 // ── The status layout (four stages, sections by status) ───────────────────────────────────────────
@@ -372,7 +372,7 @@ export const SPRINT_PHASE_LABEL: Record<SprintPhase, string> = {
 //     Linear: the team's workflow states (type, then `position`); GitHub Issues: Open, Closed. Stored
 //     on `sprint_reads.status_order_json` by the sprint read. Unreadable → null, and the fallback is
 //     the statuses on the tickets sorted by category (new → indeterminate → done), then name.
-//   • THE AUTOMATIC STAGE — category `new` → Not started, `done` → Done. An in-progress (or
+//   • THE AUTOMATIC STAGE — category `new` → Not started, `done` → Complete. An in-progress (or
 //     unknown-category) status is In review when its NAME reads as review / QA / test / release
 //     (`SPRINT_REVIEW_STATUS_RE`), or when it sits at or after the PR-evidence boundary: the FIRST
 //     in-progress status, in order, where at least SPRINT_DELIVERED_MIN_SHARE of the tickets that have
@@ -409,7 +409,7 @@ export const SPRINT_STAGE_LABEL: Record<SprintStage, string> = {
   not_started: 'Not started',
   in_progress: 'In progress',
   in_review: 'In review',
-  done: 'Done',
+  done: 'Complete',
 };
 
 /** The coarse phase of a stage. */

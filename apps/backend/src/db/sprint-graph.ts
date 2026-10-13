@@ -18,6 +18,7 @@ import {
   type TicketPrsResponse,
   type TrackerProvider,
 } from '@pierre-review/shared';
+import { globalAutomationUserIds } from './automation-ids.js';
 import { db, schema } from './client.js';
 import { currentSprintBriefs, sprintBriefInput, type SprintBriefInput } from './sprint-briefs.js';
 import { foldSprintGraph, identOfKey, type GraphTicketInput } from './sprint-graph-fold.js';
@@ -152,7 +153,7 @@ export async function graphPrsFor(
   const out = new Map<string, SprintGraphPr[]>();
   const list = [...new Set(keys)];
   if (list.length === 0) return out;
-  const { trackerTickets: tt, pullRequests: pr, repos: r, workspaceRepos: wr } = schema;
+  const { trackerTickets: tt, pullRequests: pr, repos: r, workspaceRepos: wr, users: u } = schema;
   type Row = {
     issueKey: string;
     prId: number;
@@ -165,6 +166,9 @@ export async function graphPrsFor(
     updatedAt: Date | null;
     owner: string;
     name: string;
+    authorId: number | null;
+    authorLogin: string | null;
+    authorName: string | null;
   };
   const rows: Row[] = [];
   for (let i = 0; i < list.length; i += CHUNK) {
@@ -182,11 +186,16 @@ export async function graphPrsFor(
           updatedAt: pr.updatedAt,
           owner: r.owner,
           name: r.name,
+          authorId: u.id,
+          authorLogin: u.githubLogin,
+          authorName: u.displayName,
         })
         .from(tt)
         .innerJoin(pr, and(eq(pr.id, tt.prId), eq(pr.accountId, accountId)))
         .innerJoin(r, and(eq(r.id, pr.repoId), eq(r.accountId, accountId)))
         .innerJoin(wr, and(eq(wr.repoId, r.id), eq(wr.accountId, accountId), eq(wr.workspaceId, workspaceId)))
+        // `users` is GLOBAL: only the PR's own author row is read, by the PR's id.
+        .leftJoin(u, eq(u.id, pr.authorId))
         .where(
           and(
             eq(tt.accountId, accountId),
@@ -200,6 +209,9 @@ export async function graphPrsFor(
         .execute()) as Row[]),
     );
   }
+  // The ball rule's GLOBAL automation set (`users.isBot` ∪ `github_type='Bot'` ∪ vendor logins), read
+  // only when a PR has an author: the Members filter must not list dependabot as a person.
+  const bots = rows.some((x) => x.authorId != null) ? await globalAutomationUserIds() : new Set<number>();
   const rank = (s: string): number => (s === 'open' ? 0 : s === 'merged' ? 1 : 2);
   const byIdent = new Map<string, Row[]>();
   for (const row of rows) {
@@ -229,6 +241,10 @@ export async function graphPrsFor(
           draft: m.isDraft === true,
           ciState: m.ciStatus ?? null,
           url: `https://github.com/${m.owner}/${m.name}/pull/${m.number}`,
+          author:
+            m.authorLogin != null
+              ? { login: m.authorLogin, name: m.authorName ?? null, isBot: m.authorId != null && bots.has(m.authorId) }
+              : null,
         })),
     );
   }

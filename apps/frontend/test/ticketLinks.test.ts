@@ -1,4 +1,4 @@
-// TICKET LINKS IN A TICKET'S TEXT (lib/ticketLinks.ts) — Reports → This sprint, the opened card.
+// TICKET LINKS IN A TICKET'S TEXT (lib/ticketLinks.ts) — Activity → This Sprint, the opened card.
 // A link to a ticket on this site and a bare key the server listed become marked <a>s (the Markdown
 // renderer opens the ticket's tab for them); a key's shape alone, the ticket itself, another site and
 // anything inside code are left alone.

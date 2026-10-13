@@ -17,7 +17,7 @@ import { registerSprintReadRoutes, startSprintRead } from './sprint/index.js';
 
 export function registerTracker(app: FastifyInstance): void {
   registerTrackerRoutes(app, trackerContext());
-  // Reports → This sprint: POST /api/sprint-stories/refresh (./sprint/routes.ts).
+  // Activity → This Sprint: POST /api/sprint-stories/refresh (./sprint/routes.ts).
   registerSprintReadRoutes(app, trackerContext());
 }
 

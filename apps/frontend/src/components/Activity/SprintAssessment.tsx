@@ -161,7 +161,7 @@ export function AssessInfo({ record }: { record: SprintAssessmentRecord | null }
           the ticket needs and where they go.
         </li>
         <li>
-          <strong>In review or done:</strong> the code should be on the default branch. It checks each criterion (met,
+          <strong>In review or complete:</strong> the code should be on the default branch. It checks each criterion (met,
           partly met, not met or unclear) and looks for a test that covers it.
         </li>
       </ul>

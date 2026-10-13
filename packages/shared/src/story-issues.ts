@@ -470,7 +470,7 @@ export function storyIssueRateUnits(input: StoryIssueInput): Record<StoryIssueId
   };
 }
 
-// ── Checks (per-workspace, Reports → This sprint) ────────────────────────────────────────────────
+// ── Checks (per-workspace, Activity → This Sprint) ────────────────────────────────────────────────
 
 /** Which issues a workspace raises. OVERRIDES ONLY: `off` switches an issue off; `issueTypes` limits
  *  the WHOLE tab's issues to tickets of those types (case-insensitive; [] = every type). A ticket of

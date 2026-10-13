@@ -9,7 +9,7 @@ import { InfoButton } from '../InfoModal.js';
 import { Markdown, type RehypePlugins } from '../Markdown.js';
 import { sprintTicketSite } from './sprintModel.js';
 
-// "Ask Claude about this sprint" (Reports → This sprint): a compact chat docked over the graph's
+// "Ask Claude about this sprint" (Activity → This Sprint): a compact chat docked over the graph's
 // bottom-right corner. LOCAL ONLY and Pro, like the route (the caller mounts it only where agentic AI
 // runs). One Haiku answer per question, grounded in the stored graph; the conversation is kept for the
 // visit in a module store, and the completed turn is appended in `useSprintAsk`'s HOOK-level onSuccess

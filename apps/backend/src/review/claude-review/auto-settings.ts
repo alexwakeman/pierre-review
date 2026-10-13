@@ -3,10 +3,12 @@ import { and, eq } from 'drizzle-orm';
 import {
   AUTO_FIX_DEFAULT_AUTO_PUSH,
   AUTO_FIX_DEFAULT_INCLUDE,
+  AUTO_POST_DEFAULT_APPROVE_IMPACT,
   AUTO_POST_DEFAULT_AUTO_RESOLVE,
   AUTO_POST_DEFAULT_AUTO_VERDICT,
   AUTO_POST_DEFAULT_KINDS,
   AUTO_POST_DEFAULT_SCOPE,
+  type AutoApproveImpact,
   type AutoFixInclude,
   type AutoFixSettings,
   type AutoPostKinds,
@@ -59,7 +61,8 @@ import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
 // ({ scope?, kinds? }; NULL = the product defaults), resolved through `resolveAutoPostSettings`.
 // Stored independently of `auto_review_enabled`: it only ever acts on AUTO runs, so it does nothing
 // while auto review is off, but switching auto review off and on keeps it. The `autoVerdict` and
-// `autoResolve` switches (both OFF by default) ride the same overrides JSON (no column).
+// `autoResolve` switches (both OFF by default) ride the same overrides JSON (no column), and so
+// does `approveImpact` (which blast-radius levels an auto verdict may APPROVE; all by default).
 
 /** Auto Claude reviews started per workspace per UTC day. Past it, PRs wait for the next day. */
 export const AUTO_REVIEW_DAILY_CAP = 20;
@@ -78,6 +81,7 @@ export function resolveAutoReviewDailyCap(stored: number | null | undefined): nu
 }
 
 const AUTO_POST_KIND_KEYS = Object.keys(AUTO_POST_DEFAULT_KINDS) as Array<keyof AutoPostKinds>;
+export const APPROVE_IMPACT_KEYS = Object.keys(AUTO_POST_DEFAULT_APPROVE_IMPACT) as Array<keyof AutoApproveImpact>;
 const isScope = (v: unknown): v is AutoPostScope => v === 'mine' || v === 'all';
 
 /** The stored switch + overrides → the settings in force. Anything malformed reads as the default. */
@@ -90,19 +94,25 @@ export function resolveAutoPostSettings(
   if (sk != null && typeof sk === 'object') {
     for (const k of AUTO_POST_KIND_KEYS) if (typeof sk[k] === 'boolean') kinds[k] = sk[k] as boolean;
   }
+  const approveImpact = { ...AUTO_POST_DEFAULT_APPROVE_IMPACT };
+  const si = stored?.approveImpact;
+  if (si != null && typeof si === 'object') {
+    for (const k of APPROVE_IMPACT_KEYS) if (typeof si[k] === 'boolean') approveImpact[k] = si[k] as boolean;
+  }
   return {
     enabled: enabled === true,
     scope: isScope(stored?.scope) ? stored!.scope! : AUTO_POST_DEFAULT_SCOPE,
     kinds,
     autoVerdict: typeof stored?.autoVerdict === 'boolean' ? stored.autoVerdict : AUTO_POST_DEFAULT_AUTO_VERDICT,
     autoResolve: typeof stored?.autoResolve === 'boolean' ? stored.autoResolve : AUTO_POST_DEFAULT_AUTO_RESOLVE,
+    approveImpact,
   };
 }
 
 /** The settings in force → what to store: only what differs from the product default (null = none). */
 export function autoPostOverrides(
   s: Pick<WorkspaceAutoPostSettings, 'scope' | 'kinds'> &
-    Partial<Pick<WorkspaceAutoPostSettings, 'autoVerdict' | 'autoResolve'>>,
+    Partial<Pick<WorkspaceAutoPostSettings, 'autoVerdict' | 'autoResolve' | 'approveImpact'>>,
 ): StoredAutoPostSettings | null {
   const out: StoredAutoPostSettings = {};
   if (s.scope !== AUTO_POST_DEFAULT_SCOPE) out.scope = s.scope;
@@ -111,6 +121,13 @@ export function autoPostOverrides(
   if (Object.keys(kinds).length > 0) out.kinds = kinds;
   if (s.autoVerdict !== undefined && s.autoVerdict !== AUTO_POST_DEFAULT_AUTO_VERDICT) out.autoVerdict = s.autoVerdict;
   if (s.autoResolve !== undefined && s.autoResolve !== AUTO_POST_DEFAULT_AUTO_RESOLVE) out.autoResolve = s.autoResolve;
+  if (s.approveImpact !== undefined) {
+    const levels: Partial<AutoApproveImpact> = {};
+    for (const k of APPROVE_IMPACT_KEYS) {
+      if (s.approveImpact[k] !== AUTO_POST_DEFAULT_APPROVE_IMPACT[k]) levels[k] = s.approveImpact[k];
+    }
+    if (Object.keys(levels).length > 0) out.approveImpact = levels;
+  }
   return Object.keys(out).length > 0 ? out : null;
 }
 
@@ -312,10 +329,15 @@ export async function setWorkspaceAutoReview(
     kinds: { ...postBefore.kinds },
     autoVerdict: autoPost?.autoVerdict ?? postBefore.autoVerdict,
     autoResolve: autoPost?.autoResolve ?? postBefore.autoResolve,
+    approveImpact: { ...postBefore.approveImpact },
   };
   for (const k of AUTO_POST_KIND_KEYS) {
     const v = autoPost?.kinds?.[k];
     if (typeof v === 'boolean') postAfter.kinds[k] = v;
+  }
+  for (const k of APPROVE_IMPACT_KEYS) {
+    const v = autoPost?.approveImpact?.[k];
+    if (typeof v === 'boolean') postAfter.approveImpact[k] = v;
   }
   const postOverrides = autoPostOverrides(postAfter);
   // Auto fix contents + push: each field optional; a section left out keeps its stored value.
@@ -525,6 +547,12 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
                 },
                 autoVerdict: { type: 'boolean' },
                 autoResolve: { type: 'boolean' },
+                approveImpact: {
+                  type: 'object',
+                  minProperties: 1,
+                  additionalProperties: false,
+                  properties: Object.fromEntries(APPROVE_IMPACT_KEYS.map((k) => [k, { type: 'boolean' }])),
+                },
               },
             },
             autoFix: {
@@ -551,12 +579,15 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
         // The same for the auto-post booleans: `"true"` or `1` must not read as a switch.
         const post = raw.autoPost as Record<string, unknown> | undefined;
         const kinds = post != null && typeof post === 'object' ? (post.kinds as Record<string, unknown> | undefined) : undefined;
+        const impact =
+          post != null && typeof post === 'object' ? (post.approveImpact as Record<string, unknown> | undefined) : undefined;
         const notBool = (o: Record<string, unknown>, k: string) => k in o && typeof o[k] !== 'boolean';
         if (
           (post != null &&
             typeof post === 'object' &&
             (notBool(post, 'enabled') || notBool(post, 'autoVerdict') || notBool(post, 'autoResolve'))) ||
-          (kinds != null && typeof kinds === 'object' && Object.values(kinds).some((v) => typeof v !== 'boolean'))
+          (kinds != null && typeof kinds === 'object' && Object.values(kinds).some((v) => typeof v !== 'boolean')) ||
+          (impact != null && typeof impact === 'object' && Object.values(impact).some((v) => typeof v !== 'boolean'))
         ) {
           reply.status(400);
           return reply.send({ error: 'BadRequest', message: 'autoPost switches must be true or false' });

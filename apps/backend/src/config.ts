@@ -590,11 +590,11 @@ export const config = {
   // ---- Story labels (the label run — review/story-labels/) ----
   // The per-RUN spending cap (US$). Default = shared STORY_LABEL_BUDGET_USD_DEFAULT (1). Env only.
   storyLabelBudgetUsd: floatFromEnv('STORY_LABEL_BUDGET_USD', 1),
-  // ---- Sprint assessment (Reports → This sprint, "Check against code" — review/sprint-assess/) ----
+  // ---- Sprint assessment (Activity → This Sprint, "Check against code" — review/sprint-assess/) ----
   // Per-RUN spending and turn caps. Env only — no route sets them.
   sprintAssessBudgetUsd: floatFromEnv('SPRINT_ASSESS_BUDGET_USD', SPRINT_ASSESS_BUDGET_USD_DEFAULT),
   sprintAssessMaxTurns: intFromEnv('SPRINT_ASSESS_MAX_TURNS', SPRINT_ASSESS_MAX_TURNS),
-  // ---- Sprint briefs (Reports → This sprint, the graph — review/sprint-briefs/) ----
+  // ---- Sprint briefs (Activity → This Sprint, the graph — review/sprint-briefs/) ----
   // The per-PASS spending cap (US$) of the Haiku brief pass after each sprint read. Env only.
   sprintBriefBudgetUsd: floatFromEnv('SPRINT_BRIEF_BUDGET_USD', 1),
 

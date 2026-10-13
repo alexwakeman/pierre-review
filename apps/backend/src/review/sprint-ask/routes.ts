@@ -7,7 +7,6 @@ import {
 } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
-import { reportsEntitled } from '../../api/routes/insights.js';
 import type { AgentContext } from '../agent-context.js';
 import { AiRuntimeMissingError } from '../../ai/runtime.js';
 import { pickReviewNonce } from '../claude-review/prompts.js';
@@ -16,13 +15,12 @@ import { capAskHistory, SPRINT_ASK_SYSTEM, sprintAskPrompt, sprintAskUntrusted, 
 
 // POST /api/sprint-graph/ask {workspaceId, question, history?} — "Ask Claude about this sprint"
 // (docs/API.md § This sprint; docs/CLAUDE-REVIEW.md § Ask about this sprint). Registered ONLY through
-// `registerAgenticRoutes` (local; it 404s in cloud). Pro with the rest of Reports: 402 BEFORE any DB
-// work. ONE Haiku completion per turn through the core cheap seam (`cheapComplete`: tool-less,
+// `registerAgenticRoutes` (local; it 404s in cloud). Free like the rest of This Sprint — agentic, so
+// gated on `config.aiEnabled`, never on a Pro capability. ONE Haiku completion per turn through the core cheap seam (`cheapComplete`: tool-less,
 // connectors isolated) over the STORED graph (`getSprintGraph`, DB only) — never a tracker call. The
 // workspace resolves the `?workspace=` way. Cost recorded (`recordAiUsage`, feature 'sprint_ask').
 // Rate tier: ai + ai_hourly (`tierFor`).
 
-const PRO_REQUIRED = { error: 'pro required' } as const;
 const ANSWER_TOKENS = 900;
 
 let completeOverride: CompleteFn | null = null;
@@ -33,10 +31,6 @@ export function setSprintAskCompleteForTests(fn: CompleteFn | null): void {
 
 export function registerSprintAskRoutes(app: FastifyInstance, ctx: AgentContext): void {
   app.post('/api/sprint-graph/ask', async (req, reply): Promise<SprintAskResponse | { error: string; message?: string }> => {
-    if (!reportsEntitled(req)) {
-      reply.status(402);
-      return PRO_REQUIRED;
-    }
     const body = (req.body ?? {}) as { workspaceId?: unknown; question?: unknown; history?: unknown };
     const question = typeof body.question === 'string' ? body.question.replace(/\u0000/g, '').trim() : '';
     if (

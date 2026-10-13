@@ -133,18 +133,14 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // Reports → "Merged so far": every PR MERGED in the workspace's REPORTING WINDOW, as the same
-  // `TimelinePr` rows the Open PRs cards draw — PAID on `periodReports` with the rest of Reports,
-  // the 402 checked before any DB work. Same scope rule as /api/workspace-metrics (no `?repoIds=`:
-  // Reports covers the whole workspace) and the same window, resolved once and echoed. DB-only, so
-  // it stays on the `read` tier.
+  // This Sprint → "Merged so far": every PR MERGED in the workspace's REPORTING WINDOW, as the same
+  // `TimelinePr` rows the Open PRs cards draw. FREE on every tier (it left Reports for the This
+  // Sprint rail line) — no `periodReports` 402. Same scope rule as /api/workspace-metrics (no
+  // `?repoIds=`: it covers the whole workspace) and the same window, resolved once and echoed.
+  // DB-only, so it stays on the `read` tier.
   app.get(
     '/api/merged-prs',
-    async (req, reply): Promise<MergedPrsResponse | { error: string }> => {
-      if (!reportsEntitled(req)) {
-        reply.status(402);
-        return { error: 'pro required' };
-      }
+    async (req): Promise<MergedPrsResponse> => {
       const q = req.query as { workspace?: string };
       const accountId = accountIdOf(req);
       const scope = await resolveWorkspaceScope(accountId, q.workspace);

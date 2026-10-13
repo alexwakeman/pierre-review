@@ -1,6 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
-  DerivedState,
   MlSeverity,
   ReviewBotKind,
   ThreadDetail,
@@ -35,12 +34,18 @@ import {
   vendorInk,
 } from '../../lib/ui.js';
 import { useMlLabelIndex, useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
-import { BotIcon } from '../Icons.js';
+import { BotIcon, PendingClaudeReviewIcon } from '../Icons.js';
 import { FileGroup } from './FileGroup.js';
-import { rollupCounts, threadSeverities } from './ThreadCountChips.js';
+import { useClaudeThreadJudgements } from '../../hooks/useClaudeThreadJudgements.js';
+import {
+  threadStateBucket,
+  threadStateBucketCounts,
+  type ThreadStateBucket,
+} from '../../lib/claudeThreadMarker.js';
+import { threadSeverities } from './ThreadCountChips.js';
 
 // Stable empty Set so an absent stateFilter prop doesn't churn the memo deps every render.
-const EMPTY_STATE_SET: Set<DerivedState> = new Set();
+const EMPTY_STATE_SET: Set<ThreadStateBucket> = new Set();
 const EMPTY_SEVERITY_SET: Set<MlSeverity> = new Set();
 
 interface FileBucket {
@@ -91,9 +96,10 @@ export function ThreadList({
   viewedSince?: string | null;
   // When set, show ONLY this vendor's threads (from an Overview "Bots" chip click).
   botFilter?: ReviewBotKind | null;
-  // Derived-state pill filter (empty = all). ANDs with botFilter. Preset to
+  // State pill filter (empty = all), keyed by what the CARD shows (`threadStateBucket`): a thread
+  // wearing a Claude marker is 'claude', not its derived state. ANDs with botFilter. Preset to
   // {likely_addressed} when arriving from the resolvable-bot-threads tab.
-  stateFilter?: Set<DerivedState>;
+  stateFilter?: Set<ThreadStateBucket>;
   // ML-severity pill filter (empty = all). ANDs with the other two. Passed in (not read from
   // the store here) for the same reason as `stateFilter`: it is a GLOBAL store field and only
   // PrDetail knows whether it belongs to the PR being rendered.
@@ -120,6 +126,9 @@ export function ThreadList({
   // cost nothing extra. Undefined until it lands (or forever, with no model configured), which
   // is why the severity row hides itself rather than rendering dead pills.
   const mlEnabled = useMlSeverityEnabled();
+  // The latest Claude review's judgements — the SAME batched per-PR read the cards wear, so the
+  // state chips count and filter exactly what the cards show.
+  const claudeJudgements = useClaudeThreadJudgements(prId ?? null);
   const mlIndex = useMlLabelIndex(prId ?? null, mlEnabled);
 
   // Every non-summary severity present in a thread — the shared `threadSeverities` fold (also
@@ -218,17 +227,20 @@ export function ThreadList({
       threads.filter(
         (t) =>
           (botFilter ? threadBotKind(t, usersById) === botFilter : true) &&
-          (activeStates.size === 0 || activeStates.has(t.derivedState)) &&
+          (activeStates.size === 0 || activeStates.has(threadStateBucket(t, claudeJudgements))) &&
           (activeSeverities.size === 0 ||
             [...severitiesOf(t)].some((sev) => activeSeverities.has(sev))),
       ),
-    [threads, botFilter, usersById, activeStates, activeSeverities, severitiesOf],
+    [threads, botFilter, usersById, activeStates, activeSeverities, severitiesOf, claudeJudgements],
   );
 
   // Per-state counts for the pill badges — over the FULL thread list (independent of the active
   // pills, like the feed's whole-stream facet counts), so a pill's badge doesn't drop to 0 when
   // another pill is active.
-  const stateCounts = useMemo(() => rollupCounts(threads), [threads]);
+  const stateCounts = useMemo(
+    () => threadStateBucketCounts(threads, claudeJudgements),
+    [threads, claudeJudgements],
+  );
 
   // Per-severity THREAD counts (a thread counts once per distinct severity it contains), over
   // the FULL list like stateCounts — so a pill's badge doesn't drop to 0 when another is active.
@@ -348,6 +360,23 @@ export function ThreadList({
                 </button>
               );
             })}
+            {(stateCounts.claude > 0 || activeStates.has('claude')) && (
+              <button
+                type="button"
+                onClick={() => toggleThreadStateFilter('claude')}
+                aria-pressed={activeStates.has('claude')}
+                className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                  activeStates.has('claude')
+                    ? 'border-ai-border bg-ai-surface-2 text-ai-ink'
+                    : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+                }`}
+                data-testid="thread-state-claude"
+              >
+                <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
+                Claude judged
+                {stateCounts.claude > 0 && <span className="tabular-nums opacity-70">{stateCounts.claude}</span>}
+              </button>
+            )}
             {activeStates.size > 0 && (
               <button
                 type="button"

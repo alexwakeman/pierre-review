@@ -9,7 +9,7 @@ import type {
 } from '@pierre-review/shared';
 import { SPRINT_EDGE_LABEL, SPRINT_STAGE_LABEL, SPRINT_STAGES, STORY_REFERENCE_RELATION_LABEL, isSprintEdgeRelation } from '@pierre-review/shared';
 
-// Reports → This sprint as a GRAPH: the pure folds behind SprintGraph.tsx (test/sprintGraphModel.test.ts).
+// Activity → This Sprint as a GRAPH: the pure folds behind SprintGraph.tsx (test/sprintGraphModel.test.ts).
 // Sizes, colours, which nodes a filter or a selection keeps, edge styling, label truncation and the
 // pinned-position store. Nothing here ranks tickets or people.
 //
@@ -45,15 +45,84 @@ export function blendHex(fg: string, bg: string, alpha: number): string {
 
 // ── Nodes ────────────────────────────────────────────────────────────────────────────────────────
 
-export const NODE_RADIUS_MIN = 9;
-export const NODE_RADIUS_MAX = 26;
-export const GHOST_RADIUS_MIN = 6;
+// Large enough that the status (ring, fill and centre mark) reads at Fit, not only zoomed in.
+export const NODE_RADIUS_MIN = 14;
+export const NODE_RADIUS_MAX = 34;
+export const GHOST_RADIUS_MIN = 9;
 
 /** A node's radius: by its number of links (degree), square-root so a hub does not swamp the page. */
 export function nodeRadius(degree: number, ghost: boolean): number {
   const d = Math.max(0, Number.isFinite(degree) ? degree : 0);
-  const r = Math.min(NODE_RADIUS_MAX, NODE_RADIUS_MIN + 4 * Math.sqrt(d));
+  const r = Math.min(NODE_RADIUS_MAX, NODE_RADIUS_MIN + 5 * Math.sqrt(d));
   return ghost ? Math.max(GHOST_RADIUS_MIN, Math.round(r * 0.7 * 10) / 10) : r;
+}
+
+/** The status ring's stroke (layout units): thick enough that its colour reads at Fit. */
+export function ringWidth(ghost: boolean, selected: boolean): number {
+  return ghost ? 2.5 : selected ? 6 : 5;
+}
+
+/** The disc's ground under every ticket (lines pass BEHIND it). */
+export const DISC_GROUND = '#0b1430';
+/** How much of the status colour tints a sprint ticket's disc. */
+export const DISC_TINT_ALPHA = 0.3;
+
+/** A disc's fill: a dark tint of its status colour, so status reads as an area as well as a ring.
+ *  An outside (ghost) ticket keeps the plain ground — it stays the dim one. */
+export function discFill(stage: SprintStage | null, ghost: boolean): string {
+  return ghost ? DISC_GROUND : blendHex(stageRing(stage), DISC_GROUND, DISC_TINT_ALPHA);
+}
+
+/** The centre mark per status, so status is a SHAPE as well as a colour (SprintGraph.tsx draws it from
+ *  Icons.tsx): not started = an empty ring, in progress = a half-filled circle, in review = an eye,
+ *  complete = a tick, unknown = a question mark. */
+export type StatusGlyph = 'ring' | 'half' | 'eye' | 'tick' | 'question';
+export function statusGlyph(stage: SprintStage | null): StatusGlyph {
+  switch (stage) {
+    case 'not_started':
+      return 'ring';
+    case 'in_progress':
+      return 'half';
+    case 'in_review':
+      return 'eye';
+    case 'done':
+      return 'tick';
+    default:
+      return 'question';
+  }
+}
+
+/** The centre mark's colour: the ring colour, except the unknown slate (too dark on the fill). */
+export function glyphColour(stage: SprintStage | null): string {
+  return stage == null ? STAGE_RING_UNKNOWN_LABEL : STAGE_RING[stage];
+}
+
+/** The centre mark's size (layout units) for a disc of radius `r`. */
+export function glyphSize(r: number): number {
+  return Math.round(r * 1.05 * 10) / 10;
+}
+
+// ── The assignee badge ──────────────────────────────────────────────────────────────────────────
+// An avatar (or initials) badge sits OUTSIDE the disc's top-right rim, so it never covers the centre
+// mark. It is drawn in layout units inside the disc's scaled body, and counter-scaled when zoomed out
+// so it never drops below `BADGE_MIN_SCREEN_R` px on screen (an 18px picture).
+
+/** The badge's radius at zoom 1 (layout units; the avatar image is this radius). */
+export const BADGE_R = 9;
+/** The badge's smallest radius on screen (px). */
+export const BADGE_MIN_SCREEN_R = 9;
+
+/** How much the badge is enlarged at zoom `k` (the disc is already scaled by `discScale(k)`). */
+export function badgeScale(k: number): number {
+  const onScreen = BADGE_R * discScale(k) * Math.max(1e-3, k);
+  return Math.max(1, BADGE_MIN_SCREEN_R / onScreen);
+}
+
+/** The badge's centre relative to the disc's centre, in the disc's own (unscaled) units, for a badge
+ *  scaled by `s`: anchored on the rim at 45° and pushed out by part of its own radius as it grows. */
+export function badgeCentre(r: number, s: number): { x: number; y: number } {
+  const d = r * Math.SQRT1_2 + BADGE_R * s * 0.45;
+  return { x: d, y: -d };
 }
 
 /** The ring colour per stage (four hues on navy); an unknown stage is slate. */
@@ -69,7 +138,7 @@ export function stageRing(stage: SprintStage | null): string {
   return stage == null ? STAGE_RING_UNKNOWN : STAGE_RING[stage];
 }
 
-/** How bright a node is drawn when nothing dims it: Done fades; a ghost fades with its depth. */
+/** How bright a node is drawn when nothing dims it: Complete fades; a ghost fades with its depth. */
 export function nodeBaseOpacity(n: Pick<SprintGraphNode, 'ghost' | 'depth' | 'stage'>): number {
   let o = 1;
   if (n.stage === 'done') o *= 0.55;
@@ -226,18 +295,24 @@ export function neighbourhood(
 
 // ── Filters ──────────────────────────────────────────────────────────────────────────────────────
 
-/** The assignee select's "nobody" value. */
+/** The member select's "nobody" value. */
 export const UNASSIGNED = '__unassigned__';
 /** The epic select's "no epic" value. */
 export const NO_EPIC = '__no_epic__';
+/** The theme select's "no theme" value. */
+export const NO_THEME = '__no_theme__';
 
 export interface SprintGraphFilters {
   /** The four section chips; an empty set is never stored (all off reads as all on). */
   stages: ReadonlySet<SprintStage>;
-  /** An assignee name, UNASSIGNED, or null = everyone. */
+  /** A member id (`SprintMember.id`), UNASSIGNED, or null = everyone. A bare assignee name still
+   *  matches by name when no member list is given. */
   assignee: string | null;
   /** An epic key, NO_EPIC, or null = any. */
   epic: string | null;
+  /** A theme name, NO_THEME, or null = any. The picker shows Theme while the graph groups by theme,
+   *  Epic otherwise. */
+  theme: string | null;
   hasPrs: boolean;
   hasDeps: boolean;
 }
@@ -246,12 +321,103 @@ export const NO_FILTERS: SprintGraphFilters = {
   stages: new Set<SprintStage>(['not_started', 'in_progress', 'in_review', 'done']),
   assignee: null,
   epic: null,
+  theme: null,
   hasPrs: false,
   hasDeps: false,
 };
 
 export function filtersActive(f: SprintGraphFilters): boolean {
-  return f.stages.size < 4 || f.assignee != null || f.epic != null || f.hasPrs || f.hasDeps;
+  return f.stages.size < 4 || f.assignee != null || f.epic != null || f.theme != null || f.hasPrs || f.hasDeps;
+}
+
+// ── Members: one entry per person, across the tracker and GitHub ─────────────────────────────────
+//
+// A ticket names its assignee as the TRACKER spells them ("Johny Farrar", "johny.farrar"); a PR names
+// its author by GitHub login and profile name ("jbfarrar" / "Johny Farrar"). The Members filter lists a
+// person ONCE and matches both their tickets and their PRs. The join is EXACT after setting aside case,
+// accents, spacing and the punctuation people use between name parts (`personNameKey`): an assignee
+// joins a GitHub author whose profile name or login reads the same, or whose login is the name run
+// together ("Sinan Goktas" ↔ `sinangoktas`). Nothing is guessed: a login that would join two different
+// assignees joins neither and is listed on its own.
+
+/** A person's name with case, accents, spacing and `. _ -` between parts set aside. */
+export function personNameKey(s: string): string {
+  return s
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[._\-\s]+/g, ' ')
+    .trim();
+}
+
+const compactKey = (k: string): string => k.replace(/ /g, '');
+
+export interface SprintMember {
+  /** The select's value: `p:<name key>` for a tracker person, `gh:<login>` for a GitHub-only one. */
+  id: string;
+  label: string;
+  /** The assignee names (as the wire spells them) that are this person. */
+  names: string[];
+  /** The GitHub logins that are this person. */
+  logins: string[];
+}
+
+/** One member per person over the SPRINT tickets' assignees and their PRs' authors, by label. Pure. */
+export function sprintMembers(
+  nodes: ReadonlyArray<Pick<SprintGraphNode, 'ghost' | 'assignee' | 'prs'>>,
+): SprintMember[] {
+  const people = new Map<string, string[]>();
+  const authors = new Map<string, string | null>();
+  for (const n of nodes) {
+    if (n.ghost) continue;
+    if (n.assignee != null && n.assignee.name.trim() !== '') {
+      const k = personNameKey(n.assignee.name);
+      const l = people.get(k);
+      if (l == null) people.set(k, [n.assignee.name]);
+      else if (!l.includes(n.assignee.name)) l.push(n.assignee.name);
+    }
+    for (const p of n.prs) {
+      if (p.author == null || p.author.isBot === true) continue;
+      if (!authors.has(p.author.login) || authors.get(p.author.login) == null) authors.set(p.author.login, p.author.name);
+    }
+  }
+  const linked = new Map<string, string[]>();
+  const alone: string[] = [];
+  for (const [login, name] of authors) {
+    const lk = personNameKey(login);
+    const hits = new Set<string>();
+    for (const k of people.keys()) {
+      if ((name != null && personNameKey(name) === k) || lk === k || compactKey(lk) === compactKey(k)) hits.add(k);
+    }
+    if (hits.size === 1) {
+      const k = [...hits][0] as string;
+      linked.set(k, [...(linked.get(k) ?? []), login]);
+    } else alone.push(login);
+  }
+  // A label reads as a real name where one is on offer: spaced and capitalised beats "johny.farrar".
+  const pick = (cands: ReadonlyArray<string | null | undefined>): string | null => {
+    const list = cands.filter((c): c is string => c != null && c.trim() !== '');
+    return (
+      list.find((c) => /\s/.test(c.trim()) && /\p{Lu}/u.test(c)) ?? list.find((c) => /\s/.test(c.trim())) ?? list[0] ?? null
+    );
+  };
+  const out: SprintMember[] = [];
+  for (const [k, names] of people) {
+    const logins = (linked.get(k) ?? []).sort();
+    out.push({ id: `p:${k}`, label: pick([...names, ...logins.map((l) => authors.get(l))]) ?? names[0] ?? k, names, logins });
+  }
+  for (const login of alone) out.push({ id: `gh:${login}`, label: pick([authors.get(login)]) ?? login, names: [], logins: [login] });
+  // Never two entries under one label: a GitHub login tells them apart.
+  const seen = new Map<string, number>();
+  for (const m of out) seen.set(m.label, (seen.get(m.label) ?? 0) + 1);
+  for (const m of out) if ((seen.get(m.label) ?? 0) > 1 && m.logins.length > 0) m.label = `${m.label} (@${m.logins[0]})`;
+  return out.sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
+}
+
+/** Is this node the member's — assigned to them, or carrying a PR they opened? */
+export function memberMatches(n: Pick<SprintGraphNode, 'assignee' | 'prs'>, m: Pick<SprintMember, 'names' | 'logins'>): boolean {
+  if (n.assignee != null && m.names.includes(n.assignee.name)) return true;
+  return n.prs.some((p) => p.author != null && m.logins.includes(p.author.login));
 }
 
 /** Nodes touching a `depends_on` edge, either end. */
@@ -268,16 +434,27 @@ export function dependencyIdents(edges: ReadonlyArray<Pick<SprintGraphEdge, 'fro
 /** Does the node pass the filters? A node with an unknown stage passes the section chips only when
  *  all four are on. A ghost's epic is not read, so an epic filter sets every ghost aside. */
 export function passesFilters(
-  n: Pick<SprintGraphNode, 'ident' | 'stage' | 'assignee' | 'epic' | 'prs'>,
+  n: Pick<SprintGraphNode, 'ident' | 'stage' | 'assignee' | 'epic' | 'prs'> & Partial<Pick<SprintGraphNode, 'theme'>>,
   f: SprintGraphFilters,
   deps: ReadonlySet<string>,
+  /** The member list by id (`sprintMembers`); without it a member value matches an assignee by name. */
+  members?: ReadonlyMap<string, Pick<SprintMember, 'names' | 'logins'>>,
 ): boolean {
   if (f.stages.size < 4 && (n.stage == null || !f.stages.has(n.stage))) return false;
   if (f.assignee != null) {
-    if (f.assignee === UNASSIGNED ? n.assignee != null : n.assignee?.name !== f.assignee) return false;
+    if (f.assignee === UNASSIGNED) {
+      if (n.assignee != null) return false;
+    } else {
+      const m = members?.get(f.assignee);
+      if (m != null ? !memberMatches(n, m) : n.assignee?.name !== f.assignee) return false;
+    }
   }
   if (f.epic != null) {
     if (f.epic === NO_EPIC ? n.epic != null : n.epic?.key !== f.epic) return false;
+  }
+  if (f.theme != null) {
+    const t = n.theme ?? null;
+    if (f.theme === NO_THEME ? t != null : t !== f.theme) return false;
   }
   if (f.hasPrs && n.prs.length === 0) return false;
   if (f.hasDeps && !deps.has(n.ident)) return false;
@@ -292,32 +469,41 @@ export function toggleStage(stages: ReadonlySet<SprintStage>, s: SprintStage): S
   return next.size === 0 ? new Set(NO_FILTERS.stages) : next;
 }
 
-/** The select options: assignees and epics present on the sprint's tickets, by name. */
-export function filterOptions(nodes: ReadonlyArray<Pick<SprintGraphNode, 'ghost' | 'assignee' | 'epic'>>): {
-  assignees: string[];
+/** The select options: members (assignees and PR authors, one per person), epics and themes present
+ *  on the sprint's tickets. Themes largest first, then by name. */
+export function filterOptions(
+  nodes: ReadonlyArray<Pick<SprintGraphNode, 'ghost' | 'assignee' | 'epic' | 'prs'> & Partial<Pick<SprintGraphNode, 'theme'>>>,
+): {
+  members: SprintMember[];
   anyUnassigned: boolean;
   epics: Array<{ key: string; title: string | null }>;
   anyNoEpic: boolean;
+  themes: string[];
+  anyNoTheme: boolean;
 } {
-  const names = new Set<string>();
   const epics = new Map<string, string | null>();
+  const themes = new Map<string, number>();
   let anyUnassigned = false;
   let anyNoEpic = false;
+  let anyNoTheme = false;
   for (const n of nodes) {
     if (n.ghost) continue;
-    if (n.assignee != null) names.add(n.assignee.name);
-    else anyUnassigned = true;
+    if (n.assignee == null) anyUnassigned = true;
     if (n.epic != null) {
       if (!epics.has(n.epic.key) || epics.get(n.epic.key) == null) epics.set(n.epic.key, n.epic.title);
     } else anyNoEpic = true;
+    if (n.theme != null) themes.set(n.theme, (themes.get(n.theme) ?? 0) + 1);
+    else anyNoTheme = true;
   }
   return {
-    assignees: [...names].sort((a, b) => a.localeCompare(b)),
+    members: sprintMembers(nodes),
     anyUnassigned,
     epics: [...epics.entries()]
       .map(([key, title]) => ({ key, title }))
       .sort((a, b) => (a.title ?? a.key).localeCompare(b.title ?? b.key)),
     anyNoEpic,
+    themes: [...themes.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([t]) => t),
+    anyNoTheme: anyNoTheme && themes.size > 0,
   };
 }
 
@@ -414,16 +600,18 @@ export interface ViewTransform {
 export const ZOOM_MIN = 0.2;
 export const ZOOM_MAX = 4;
 
-/** The transform that fits every circle into a w × h viewport, leaving SCREEN room for the labels
- *  (drawn at a fixed screen size under each circle): `padX` either side, `padTop` above, `padBottom`
- *  below. The zoom is capped at 1.6. */
-export function fitTransform(
-  points: ReadonlyArray<{ x: number; y: number; r: number }>,
-  w: number,
-  h: number,
-  pad: { x: number; top: number; bottom: number } = { x: 64, top: 28, bottom: 48 },
-): ViewTransform {
-  if (points.length === 0 || w <= 0 || h <= 0) return { k: 1, x: w / 2, y: h / 2 };
+/** A layout-space box. */
+export interface Bounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/** The box round a set of circles (rims included); null for none. The seam for framing ANY set of
+ *  nodes — a selection with its links, a filtered group — as well as the whole canvas. Pure. */
+export function boundsOf(points: ReadonlyArray<{ x: number; y: number; r: number }>): Bounds | null {
+  if (points.length === 0) return null;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -434,18 +622,169 @@ export function fitTransform(
     minY = Math.min(minY, p.y - p.r);
     maxY = Math.max(maxY, p.y + p.r);
   }
-  const bw = Math.max(1, maxX - minX);
-  const bh = Math.max(1, maxY - minY);
-  const k = Math.max(ZOOM_MIN, Math.min(1.6, Math.min((w - 2 * pad.x) / bw, (h - pad.top - pad.bottom) / bh)));
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
+  return { minX, minY, maxX, maxY };
+}
+
+/** The transform that fits a box into a w × h viewport, leaving SCREEN room for the labels (drawn at a
+ *  fixed screen size under each circle): `pad.x` either side, `pad.top` above, `pad.bottom` below. The
+ *  zoom is capped at `maxK` (1.6). Pure. */
+export function fitBox(
+  b: Bounds | null,
+  w: number,
+  h: number,
+  pad: { x: number; top: number; bottom: number } = { x: 64, top: 28, bottom: 48 },
+  maxK = 1.6,
+): ViewTransform {
+  if (b == null || w <= 0 || h <= 0) return { k: 1, x: w / 2, y: h / 2 };
+  const bw = Math.max(1, b.maxX - b.minX);
+  const bh = Math.max(1, b.maxY - b.minY);
+  const k = Math.max(ZOOM_MIN, Math.min(maxK, Math.min((w - 2 * pad.x) / bw, (h - pad.top - pad.bottom) / bh)));
+  const cx = (b.minX + b.maxX) / 2;
+  const cy = (b.minY + b.maxY) / 2;
   return { k, x: w / 2 - cx * k, y: (h + pad.top - pad.bottom) / 2 - cy * k };
+}
+
+/** The transform that fits every circle into a w × h viewport (`fitBox` over `boundsOf`). */
+export function fitTransform(
+  points: ReadonlyArray<{ x: number; y: number; r: number }>,
+  w: number,
+  h: number,
+  pad: { x: number; top: number; bottom: number } = { x: 64, top: 28, bottom: 48 },
+): ViewTransform {
+  return fitBox(boundsOf(points), w, h, pad);
+}
+
+/** The horizontal span of the canvas a reader can SEE (canvas px, `x0`…`x1`) when something covers the
+ *  screen from `coverLeft` (viewport px) rightwards — the ticket drawer, which opens from the right.
+ *  `null` = nothing covers it. When the uncovered strip is narrower than `minWidth` (a phone, where the
+ *  drawer is full width) the whole canvas is used: there is nowhere beside the drawer to frame into.
+ *  Pure. */
+export function uncoveredSpan(
+  canvas: { left: number; width: number },
+  coverLeft: number | null,
+  minWidth = 240,
+): { x0: number; x1: number } {
+  const whole = { x0: 0, x1: Math.max(0, canvas.width) };
+  if (coverLeft == null) return whole;
+  const x1 = Math.min(canvas.width, Math.max(0, coverLeft - canvas.left));
+  return x1 < minWidth ? whole : { x0: 0, x1 };
+}
+
+/** `fitBox` into a horizontal SPAN of a viewport h tall (`uncoveredSpan`). Pure. */
+export function fitBoxIn(
+  b: Bounds | null,
+  span: { x0: number; x1: number },
+  h: number,
+  pad: { x: number; top: number; bottom: number } = { x: 64, top: 28, bottom: 48 },
+  maxK = 1.6,
+): ViewTransform {
+  const t = fitBox(b, Math.max(1, span.x1 - span.x0), h, pad, maxK);
+  return { ...t, x: t.x + span.x0 };
+}
+
+/** The ids given plus every ticket one DRAWN edge away from any of them. Pure. */
+export function withNeighbours(edges: ReadonlyArray<Pick<SprintGraphEdge, 'from' | 'to'>>, ids: Iterable<string>): Set<string> {
+  const out = new Set(ids);
+  const base = new Set(out);
+  for (const e of edges) {
+    if (base.has(e.from)) out.add(e.to);
+    if (base.has(e.to)) out.add(e.from);
+  }
+  return out;
+}
+
+// ── Motion ───────────────────────────────────────────────────────────────────────────────────────
+// The graph moves only for a while: after it loads, after a re-layout (a grouping or visibility
+// change) and after a drag, then it is STILL (`SETTLE_MS`). Reduced motion: no motion at all.
+
+/** How long the canvas may move after load, a re-layout or a drag release (ms). */
+export const SETTLE_MS = 5000;
+/** The opening animation: tickets travel from another grouping into the chosen one (ms). */
+export const INTRO_MS = 2000;
+/** A re-layout's travel (ms). */
+export const RELAYOUT_MS = 1100;
+/** An animated zoom / pan (a ticket opened, a filter picked) (ms). */
+export const VIEW_MS = 650;
+/** The drift fades to nothing over the last this-many ms before the canvas stills. */
+export const DRIFT_FADE_MS = 2000;
+
+/** Ease in and out (quadratic), p in [0, 1]. Pure. */
+export function easeInOut(p: number): number {
+  const q = Math.min(1, Math.max(0, p));
+  return q < 0.5 ? 2 * q * q : 1 - (-2 * q + 2) ** 2 / 2;
+}
+
+/** The view part-way from a to b. Pure. */
+export function lerpView(a: ViewTransform, b: ViewTransform, e: number): ViewTransform {
+  return { k: a.k + (b.k - a.k) * e, x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e };
+}
+
+/** How strong the drift is at `now`: full until the last `DRIFT_FADE_MS` before `liveUntil`, then
+ *  fading to 0, so the canvas comes to rest instead of stopping mid-turn. Pure. */
+export function driftScale(now: number, liveUntil: number, fadeMs = DRIFT_FADE_MS): number {
+  if (now >= liveUntil) return 0;
+  return Math.min(1, (liveUntil - now) / Math.max(1, fadeMs));
+}
+
+/** The grouping the opening animation starts FROM: Epic, unless Epic is the chosen one — then Theme
+ *  (when themes exist), else Section. Pure. */
+export function introGroupMode(mode: SprintGroupMode, themesAvailable: boolean): SprintGroupMode {
+  if (mode !== 'epic') return 'epic';
+  return themesAvailable ? 'theme' : 'section';
+}
+
+/** Where each ticket starts the opening animation: seeded (sunflower) inside its group's anchor in the
+ *  intro grouping (`introGroupMode`); a ticket in no group starts on a ring just outside them all.
+ *  Deterministic. Pure. */
+export function introSeeds(
+  idents: readonly string[],
+  groupOf: ReadonlyMap<string, string | null>,
+  anchors: ReadonlyMap<string, GroupAnchor>,
+): Map<string, { x: number; y: number }> {
+  const count = new Map<string, number>();
+  for (const id of idents) {
+    const g = groupOf.get(id);
+    if (g != null && anchors.has(g)) count.set(g, (count.get(g) ?? 0) + 1);
+  }
+  let extent = 120;
+  for (const a of anchors.values()) extent = Math.max(extent, Math.hypot(a.x, a.y) + a.r);
+  const seat = new Map<string, number>();
+  const loose = idents.filter((id) => {
+    const g = groupOf.get(id);
+    return g == null || !anchors.has(g);
+  });
+  const out = new Map<string, { x: number; y: number }>();
+  for (const id of idents) {
+    const g = groupOf.get(id);
+    const a = g != null ? anchors.get(g) : undefined;
+    if (g == null || a == null) continue;
+    const j = seat.get(g) ?? 0;
+    seat.set(g, j + 1);
+    const rr = a.r * 0.8 * Math.sqrt((j + 0.5) / Math.max(1, count.get(g) ?? 1));
+    out.set(id, { x: Math.round(a.x + Math.cos(j * 2.39996) * rr), y: Math.round(a.y + Math.sin(j * 2.39996) * rr) });
+  }
+  loose.forEach((id, i) => {
+    const t = (2 * Math.PI * i) / Math.max(1, loose.length);
+    out.set(id, { x: Math.round(Math.cos(t) * (extent + 60)), y: Math.round(Math.sin(t) * (extent + 60)) });
+  });
+  return out;
 }
 
 /** How much a node's DISC is enlarged when zoomed out, so a far view still shows the tickets: 1 at
  *  zoom ≥ 0.75, growing as 0.75 / zoom, at most 2. */
 export function discScale(k: number): number {
-  return Math.min(2, Math.max(1, 0.75 / Math.max(1e-3, k)));
+  return Math.min(DISC_SCALE_MAX, Math.max(1, 0.75 / Math.max(1e-3, k)));
+}
+
+/** The most a disc is ever enlarged (`discScale` far out). The forces that keep halos apart, and Fit,
+ *  size halos at this scale, so halos drawn round the enlarged discs never overlap at any zoom. */
+export const DISC_SCALE_MAX = 2;
+export const HALO_LAYOUT_SCALE = DISC_SCALE_MAX;
+
+/** A ticket's radius AS DRAWN at disc scale `s` (layout units): the disc plus half the thickest ring,
+ *  both enlarged about the centre. Halos are sized from this, so they contain the drawn tickets. */
+export function drawnRadius(r: number, s: number): number {
+  return (r + ringWidth(false, true) / 2) * s;
 }
 
 /** The radius each UNLINKED ticket orbits at: two staggered rings just outside the linked cluster,
@@ -722,7 +1061,7 @@ export function groupList(
 export function groupRadius(count: number): number {
   const n = Math.max(1, count);
   // Each ticket's share: a disc of (typical radius + collide padding), packed at ~75%.
-  return Math.round(Math.sqrt(n / 0.75) * (collidePadding(true, n) + 12) + 16);
+  return Math.round(Math.sqrt(n / 0.75) * (collidePadding(true, n) + 20) + 16);
 }
 
 /** The collide padding round a ticket (added to its radius): wider when grouped, and wider again in a
@@ -748,7 +1087,7 @@ const ANCHOR_GAP = 40;
  *  into an ellipse of the canvas's shape, so Fit fills a wide canvas instead of a square in its middle.
  *  Re-centred on the origin (the drift turns about it). Deterministic. Pure. */
 export function groupAnchors(
-  groups: ReadonlyArray<Pick<SprintGroup, 'key' | 'count'> & { drawn?: number }>,
+  groups: ReadonlyArray<Pick<SprintGroup, 'key' | 'count'> & { drawn?: number; radius?: number }>,
   aspect = 1,
 ): Map<string, GroupAnchor> {
   const sx = Math.sqrt(Math.min(3, Math.max(1 / 3, Number.isFinite(aspect) && aspect > 0 ? aspect : 1)));
@@ -771,11 +1110,11 @@ export function groupAnchors(
   };
   for (const g of groups) {
     if (g.key === NO_GROUP) continue;
-    place(g.key, groupRadius(g.drawn ?? g.count), 0);
+    place(g.key, g.radius ?? groupRadius(g.drawn ?? g.count), 0);
   }
   const noGroup = groups.find((g) => g.key === NO_GROUP);
   if (noGroup != null) {
-    const r = groupRadius(noGroup.drawn ?? noGroup.count);
+    const r = noGroup.radius ?? groupRadius(noGroup.drawn ?? noGroup.count);
     // Outward: beyond the furthest placed group, measured in the spiral's own (unstretched) terms.
     const extent = placed.reduce((m, p) => Math.max(m, Math.hypot(p.x / sx, p.y * sx) + p.r), 0);
     place(NO_GROUP, r, placed.length === 0 ? 0 : extent + r + ANCHOR_GAP);
@@ -797,8 +1136,13 @@ export function groupAnchors(
 }
 
 /** The halo drawn behind a group: around its members' CURRENT positions (centroid, out to the furthest
- *  rim plus a margin). null for no members. Pure. */
-export function groupHalo(points: ReadonlyArray<{ x: number; y: number; r: number }>, margin = 16): { x: number; y: number; r: number } | null {
+ *  rim plus a margin). `extras` (the assignee badges poking past their discs) widen the halo without moving
+ *  its centre. null for no members. Pure. */
+export function groupHalo(
+  points: ReadonlyArray<{ x: number; y: number; r: number }>,
+  margin = 16,
+  extras: ReadonlyArray<{ x: number; y: number; r: number }> = [],
+): { x: number; y: number; r: number } | null {
   if (points.length === 0) return null;
   let sx = 0;
   let sy = 0;
@@ -810,7 +1154,14 @@ export function groupHalo(points: ReadonlyArray<{ x: number; y: number; r: numbe
   const y = sy / points.length;
   let r = 0;
   for (const p of points) r = Math.max(r, Math.hypot(p.x - x, p.y - y) + p.r);
+  for (const p of extras) r = Math.max(r, Math.hypot(p.x - x, p.y - y) + p.r);
   return { x, y, r: r + margin };
+}
+
+/** A ticket's assignee badge as a layout-space circle, at disc scale `s` and badge scale `bs`. Pure. */
+export function badgeCircle(x: number, y: number, r: number, s: number, bs: number): { x: number; y: number; r: number } {
+  const c = badgeCentre(r, bs);
+  return { x: x + c.x * s, y: y + c.y * s, r: (BADGE_R + 1) * bs * s };
 }
 
 /** How far each group must move so no two halos overlap (with `gap` between rims): every overlapping
@@ -869,6 +1220,322 @@ export const GROUP_HALO = {
 
 export const GROUP_LABEL_MAX = 30;
 
+// ── Split by status: sub-groups inside each epic / theme ─────────────────────────────────────────
+//
+// "Split by status" (Epic or Theme only) divides each group into up to four SUB-GROUPS, one per section
+// (Not started · In progress · In review · Complete), laid out LEFT TO RIGHT in that fixed order inside the
+// group's room, each behind a faint halo tinted with its section's ring colour and named small. A ticket
+// whose status is not known sits in a fifth, "Status unknown", after Complete (only when there is one). A
+// ghost goes in its OWN status's sub-group of the group it inherits.
+
+export type StatusSlot = SprintStage | 'unknown';
+export const STATUS_SLOTS: readonly StatusSlot[] = [...SPRINT_STAGES, 'unknown'];
+export const STATUS_SLOT_LABEL: Record<StatusSlot, string> = { ...SPRINT_STAGE_LABEL, unknown: 'Status unknown' };
+
+/** Only an Epic or Theme grouping splits (a Section grouping already IS the statuses). */
+export function canSplitByStatus(mode: SprintGroupMode): boolean {
+  return mode === 'epic' || mode === 'theme';
+}
+
+export function statusSlotOf(stage: SprintStage | null): StatusSlot {
+  return stage ?? 'unknown';
+}
+
+const SUB_SEP = '\u241f';
+
+/** A sub-group's key: its group and its status. */
+export function subGroupKey(group: string, slot: StatusSlot): string {
+  return `${group}${SUB_SEP}${slot}`;
+}
+
+/** The DRAWN members per group, per status slot (ghosts included — they take room). Pure. */
+export function subGroupCounts(
+  nodes: ReadonlyArray<Pick<SprintGraphNode, 'ident' | 'stage'>>,
+  groupOf: ReadonlyMap<string, string | null>,
+): Map<string, Map<StatusSlot, number>> {
+  const out = new Map<string, Map<StatusSlot, number>>();
+  for (const n of nodes) {
+    const g = groupOf.get(n.ident);
+    if (g == null) continue;
+    const slot = statusSlotOf(n.stage);
+    let m = out.get(g);
+    if (m == null) {
+      m = new Map();
+      out.set(g, m);
+    }
+    m.set(slot, (m.get(slot) ?? 0) + 1);
+  }
+  return out;
+}
+
+/** The gap (layout units) between two sub-groups' rooms. */
+export const SUB_GAP = 28;
+
+export interface StatusSplit {
+  /** The group's whole room: a circle round the row of sub-groups. */
+  r: number;
+  /** Each present slot's room, as an offset from the group's anchor, left to right in slot order. */
+  subs: Map<StatusSlot, GroupAnchor>;
+}
+
+/** The sub-groups' rooms inside one group: a row, in STATUS_SLOTS order, each sized like a group of its
+ *  own count (`groupRadius`), centred on the group's anchor. Pure. */
+export function statusSplitLayout(
+  counts: ReadonlyMap<StatusSlot, number>,
+  /** A slot's room when it is split again (by assignee): `PersonSplit.r`; else sized by its count. */
+  roomOf?: (slot: StatusSlot) => number | undefined,
+): StatusSplit {
+  const present = STATUS_SLOTS.filter((s) => (counts.get(s) ?? 0) > 0);
+  const radii = present.map((s) => roomOf?.(s) ?? groupRadius(counts.get(s) ?? 1));
+  const width = radii.reduce((a, r) => a + 2 * r, 0) + SUB_GAP * Math.max(0, present.length - 1);
+  const subs = new Map<StatusSlot, GroupAnchor>();
+  let x = -width / 2;
+  present.forEach((s, i) => {
+    const r = radii[i] as number;
+    subs.set(s, { x: Math.round(x + r), y: 0, r });
+    x += 2 * r + SUB_GAP;
+  });
+  const tallest = radii.reduce((a, r) => Math.max(a, r), 0);
+  return { r: Math.round(Math.max(width / 2, tallest) + 8), subs };
+}
+
+/** Every sub-group's anchor in layout space: its group's anchor plus its offset. Pure. */
+export function subGroupAnchors(
+  anchors: ReadonlyMap<string, GroupAnchor>,
+  splits: ReadonlyMap<string, StatusSplit>,
+): Map<string, GroupAnchor> {
+  const out = new Map<string, GroupAnchor>();
+  for (const [g, split] of splits) {
+    const a = anchors.get(g);
+    if (a == null) continue;
+    for (const [slot, o] of split.subs) out.set(subGroupKey(g, slot), { x: a.x + o.x, y: a.y + o.y, r: o.r });
+  }
+  return out;
+}
+
+/** The circle round a set of circles (the group's halo round its sub-group halos), from the centre of
+ *  their box, plus a margin. null for none. Pure. */
+export function enclosingHalo(circles: ReadonlyArray<{ x: number; y: number; r: number }>, margin = 14): { x: number; y: number; r: number } | null {
+  const b = boundsOf(circles);
+  if (b == null) return null;
+  const x = (b.minX + b.maxX) / 2;
+  const y = (b.minY + b.maxY) / 2;
+  let r = 0;
+  for (const c of circles) r = Math.max(r, Math.hypot(c.x - x, c.y - y) + c.r);
+  return { x, y, r: r + margin };
+}
+
+/** A sub-group halo's look: its section's ring colour, faint. The name is drawn in the ring colour
+ *  (measured by textContrast.test against the ground lightened by both halos' fills). */
+export const SUB_HALO = {
+  fillAlpha: 0.05,
+  strokeAlpha: 0.4,
+} as const;
+
+/** A sub-group halo's tint: its section's ring colour. */
+export function subHaloColour(slot: StatusSlot): string {
+  return slot === 'unknown' ? STAGE_RING_UNKNOWN : STAGE_RING[slot];
+}
+
+/** The unknown slot's name colour: the slate ring is too dark for 11px text on navy. */
+export const STAGE_RING_UNKNOWN_LABEL = '#94a3b8';
+
+/** A sub-group's NAME colour: the ring colour, except the unknown slot's (too dark for text). */
+export function subLabelColour(slot: StatusSlot): string {
+  return slot === 'unknown' ? STAGE_RING_UNKNOWN_LABEL : STAGE_RING[slot];
+}
+
+/** A sub-group name's box size on screen (11px semibold — the label floor). */
+export function subLabelSize(text: string): { w: number; h: number } {
+  return { w: Math.ceil(textWidth(text, 11) + 6), h: 15 };
+}
+
+/** The slot a sub-group key names (`subGroupKey`), or null for a plain group key. */
+export function slotOfSubKey(key: string): StatusSlot | null {
+  const i = key.lastIndexOf(SUB_SEP);
+  if (i < 0) return null;
+  const s = key.slice(i + 1);
+  return (STATUS_SLOTS as readonly string[]).includes(s) ? (s as StatusSlot) : null;
+}
+
+export const SPLIT_STORAGE_KEY = 'sprint-graph-split-status';
+
+/** The stored "Split by status" choice (off by default); anything unreadable → off. */
+export function readSplitStatus(storage: StorageLike | null | undefined): boolean {
+  try {
+    return storage?.getItem(SPLIT_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function writeSplitStatus(storage: StorageLike | null | undefined, on: boolean): void {
+  try {
+    if (on) storage?.setItem(SPLIT_STORAGE_KEY, '1');
+    else storage?.removeItem(SPLIT_STORAGE_KEY);
+  } catch {
+    /* the choice lasts the visit */
+  }
+}
+
+// ── Split by assignee: one small PERSON halo per assignee, one level deeper ──────────────────────
+//
+// "Assigned to" (any grouping but None) divides each group — or, with "Split by status" on too, each
+// status sub-group — into one room per ASSIGNEE, each behind a faint NEUTRAL halo (so the status tint
+// still reads) named with the person. A person is the Members filter's identity (`sprintMembers`, so
+// "Johny Farrar" and "johny.farrar" are one halo) and named as it is there; a ticket with no assignee —
+// or a ghost whose assignee is not known — sits in "Unassigned", always last.
+
+/** Any grouping splits by person — Section too (status, then person); None has no circle to split. */
+export function canSplitByAssignee(mode: SprintGroupMode): boolean {
+  return mode !== 'none';
+}
+
+/** The person room key for "no assignee". */
+export const PERSON_UNASSIGNED = 'unassigned';
+export const PERSON_UNASSIGNED_LABEL = 'Unassigned';
+/** A person halo's name, truncated past this many characters. */
+export const PERSON_LABEL_MAX = 24;
+
+/** A ticket's person: the member identity its assignee folds into (`p:<name key>`, as `sprintMembers`
+ *  spells it) and that member's label; else the assignee's own name; none → Unassigned. Pure. */
+export function personOf(
+  assignee: { name: string } | null | undefined,
+  members?: ReadonlyMap<string, Pick<SprintMember, 'label'>>,
+): { key: string; label: string } {
+  const name = assignee?.name.trim() ?? '';
+  if (name === '') return { key: PERSON_UNASSIGNED, label: PERSON_UNASSIGNED_LABEL };
+  const key = `p:${personNameKey(name)}`;
+  return { key, label: members?.get(key)?.label ?? name };
+}
+
+const PERSON_SEP = '␞';
+
+/** A person room's key: its parent room (a group, or a status sub-group) and the person. */
+export function personRoomKey(parent: string, person: string): string {
+  return `${parent}${PERSON_SEP}${person}`;
+}
+
+/** The parent room and person a person room key names; null for any other key. */
+export function splitPersonRoomKey(key: string): { parent: string; person: string } | null {
+  const i = key.lastIndexOf(PERSON_SEP);
+  return i < 0 ? null : { parent: key.slice(0, i), person: key.slice(i + 1) };
+}
+
+/** The DRAWN members per parent room, per person (ghosts included — they take room). Pure. */
+export function personGroupCounts(
+  nodes: ReadonlyArray<Pick<SprintGraphNode, 'ident' | 'assignee'>>,
+  parentOf: (ident: string) => string | null,
+  members?: ReadonlyMap<string, Pick<SprintMember, 'label'>>,
+): Map<string, Map<string, number>> {
+  const out = new Map<string, Map<string, number>>();
+  for (const n of nodes) {
+    const p = parentOf(n.ident);
+    if (p == null) continue;
+    const { key } = personOf(n.assignee, members);
+    let m = out.get(p);
+    if (m == null) {
+      m = new Map();
+      out.set(p, m);
+    }
+    m.set(key, (m.get(key) ?? 0) + 1);
+  }
+  return out;
+}
+
+/** The gap (layout units) between two person rooms. */
+export const PERSON_GAP = 22;
+
+export interface PersonSplit {
+  /** The parent's whole room: a circle round its person rooms. */
+  r: number;
+  /** Each person's room, as an offset from the parent's anchor. */
+  subs: Map<string, GroupAnchor>;
+}
+
+/** The person rooms inside one parent: the busiest first, Unassigned last, in rows of about √n, each
+ *  sized like a group of its own count (`groupRadius`), centred on the parent's anchor. Pure. */
+export function personSplitLayout(counts: ReadonlyMap<string, number>, labelOf: (key: string) => string = (k) => k): PersonSplit {
+  const keys = [...counts.keys()]
+    .filter((k) => (counts.get(k) ?? 0) > 0)
+    .sort((a, b) => {
+      if ((a === PERSON_UNASSIGNED) !== (b === PERSON_UNASSIGNED)) return a === PERSON_UNASSIGNED ? 1 : -1;
+      return (counts.get(b) ?? 0) - (counts.get(a) ?? 0) || labelOf(a).localeCompare(labelOf(b)) || a.localeCompare(b);
+    });
+  const subs = new Map<string, GroupAnchor>();
+  if (keys.length === 0) return { r: 0, subs };
+  const cols = Math.ceil(Math.sqrt(keys.length));
+  const rows: string[][] = [];
+  for (let i = 0; i < keys.length; i += cols) rows.push(keys.slice(i, i + cols));
+  const radius = (k: string): number => groupRadius(counts.get(k) ?? 1);
+  const rowH = rows.map((row) => row.reduce((a, k) => Math.max(a, radius(k)), 0));
+  const height = rowH.reduce((a, h) => a + 2 * h, 0) + PERSON_GAP * (rows.length - 1);
+  let y = -height / 2;
+  rows.forEach((row, ri) => {
+    const h = rowH[ri] as number;
+    const width = row.reduce((a, k) => a + 2 * radius(k), 0) + PERSON_GAP * (row.length - 1);
+    let x = -width / 2;
+    for (const k of row) {
+      const r = radius(k);
+      subs.set(k, { x: Math.round(x + r), y: Math.round(y + h), r });
+      x += 2 * r + PERSON_GAP;
+    }
+    y += 2 * h + PERSON_GAP;
+  });
+  let r = 0;
+  for (const o of subs.values()) r = Math.max(r, Math.hypot(o.x, o.y) + o.r);
+  return { r: Math.round(r + 8), subs };
+}
+
+/** Every person room's anchor in layout space: its parent's anchor plus its offset. Pure. */
+export function personRoomAnchors(
+  parentAnchors: ReadonlyMap<string, GroupAnchor>,
+  splits: ReadonlyMap<string, PersonSplit>,
+): Map<string, GroupAnchor> {
+  const out = new Map<string, GroupAnchor>();
+  for (const [p, split] of splits) {
+    const a = parentAnchors.get(p);
+    if (a == null) continue;
+    for (const [person, o] of split.subs) out.set(personRoomKey(p, person), { x: a.x + o.x, y: a.y + o.y, r: o.r });
+  }
+  return out;
+}
+
+/** A person halo's look: neutral and fainter than a status halo, so the status tint still reads. The
+ *  name is measured by textContrast.test against the ground lightened by all three halos' fills. */
+export const PERSON_HALO = {
+  fill: '#ffffff',
+  fillAlpha: 0.03,
+  stroke: '#cbd5e1',
+  strokeAlpha: 0.3,
+  label: '#cbd5e1',
+} as const;
+
+/** A person name's box size on screen (11px semibold — the label floor). */
+export function personLabelSize(text: string): { w: number; h: number } {
+  return { w: Math.ceil(textWidth(text, 11) + 6), h: 15 };
+}
+
+export const SPLIT_ASSIGNEE_STORAGE_KEY = 'sprint-graph-split-assignee';
+
+/** The stored "Split by assignee" choice (off by default); anything unreadable → off. */
+export function readSplitAssignee(storage: StorageLike | null | undefined): boolean {
+  try {
+    return storage?.getItem(SPLIT_ASSIGNEE_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function writeSplitAssignee(storage: StorageLike | null | undefined, on: boolean): void {
+  try {
+    if (on) storage?.setItem(SPLIT_ASSIGNEE_STORAGE_KEY, '1');
+    else storage?.removeItem(SPLIT_ASSIGNEE_STORAGE_KEY);
+  } catch {
+    /* the choice lasts the visit */
+  }
+}
+
 // ── The view choices, per browser ────────────────────────────────────────────────────────────────
 
 export const GROUP_MODE_STORAGE_KEY = 'sprint-graph-group';
@@ -900,7 +1567,8 @@ export function writeGroupMode(storage: StorageLike | null | undefined, mode: Sp
 // overlaps no label already placed and no other ticket's disc. Placed in PRIORITY order (the selected,
 // hovered or focused ticket first, then the better-connected, sprint tickets before outside ones,
 // readable before faded); a label with no free spot is HIDDEN, and shows again on hover, focus or
-// zoom — when it is promoted, or the screen has room.
+// zoom. ⚠ Hover, focus and selection only REVEAL a hidden label (`LabelItem.reveal`) — they never
+// change a shown label's side or anyone's priority, so nothing jumps under the pointer.
 
 export type LabelSide = 'below' | 'above' | 'right' | 'left' | 'below-right' | 'below-left' | 'above-right' | 'above-left' | 'none';
 /** The order a label tries its sides in: straight below / above first, then beside, then the corners. */
@@ -970,6 +1638,12 @@ export interface LabelItem {
   priority: number;
   /** The side it had last time (tried first, so labels hold still). */
   prev?: LabelSide;
+  /** Hovered, focused or selected: REVEALED if it has no spot, never moved and never given priority.
+   *  Its side is decided exactly as if it were not revealed; only a label that would be hidden is
+   *  then shown — after every other label is placed, so none of them moves — at the side it had
+   *  (else the first side clear of the others). Hover must never move a label (a promoted label
+   *  placed FIRST took the best free side and jumped, and pushed others out of theirs). */
+  reveal?: boolean;
 }
 
 /** A label at or above this priority is always shown (the selected / hovered / focused ticket). */
@@ -1055,16 +1729,28 @@ export function placeLabels(items: readonly LabelItem[], obstacles: readonly Scr
     out.set(it.id, chosen);
     if (chosen !== 'none') placed.push(labelBox(it, chosen));
   }
+  // Revealed labels with no spot: shown ON TOP (the canvas draws them last), without moving any other.
+  for (const { it } of order) {
+    if (it.reveal !== true || out.get(it.id) !== 'none') continue;
+    const prev = it.prev != null && it.prev !== 'none' ? it.prev : null;
+    let chosen: LabelSide | null = prev;
+    if (chosen == null) {
+      for (const shrink of [1, 0.55, 0]) {
+        const s = LABEL_SIDES.find((side) => free(labelBox(it, side), it.id, shrink));
+        if (s != null) {
+          chosen = s;
+          break;
+        }
+      }
+    }
+    const side = chosen ?? 'below';
+    out.set(it.id, side);
+    placed.push(labelBox(it, side));
+  }
   return out;
 }
 
-// ── The wheel and touch: the page scrolls, Ctrl/⌘ zooms ──────────────────────────────────────────
-
-/** What a wheel event over the canvas does: a plain wheel SCROLLS THE PAGE (the canvas is not a trap);
- *  Ctrl or ⌘ + wheel zooms — and a trackpad pinch, which the browser sends as a Ctrl + wheel. */
-export function wheelIntent(e: { ctrlKey: boolean; metaKey: boolean }): 'zoom' | 'scroll' {
-  return e.ctrlKey || e.metaKey ? 'zoom' : 'scroll';
-}
+// ── The wheel and touch: the wheel zooms ─────────────────────────────────────────────────────────
 
 /** The zoom factor for one zooming wheel event: lines and pages converted to pixels, each event capped
  *  so a mouse notch is a step (≈1.28×) while a pinch's small deltas zoom smoothly. */
@@ -1094,51 +1780,132 @@ export function pinchTransform(
   return { k, x: m1.x - gx * k, y: m1.y - gy * k };
 }
 
-// ── Group names: one per halo, the bigger group's first ──────────────────────────────────────────
+// ── Halo names: inside the top of their own halo ─────────────────────────────────────────────────
+//
+// Every halo's name (a group's, a status sub-group's, a person room's) sits JUST INSIDE THE TOP of its own
+// halo, centred on the chord, so a zoom into one group keeps its name on screen. The halo makes ROOM for
+// it: its top is raised by the name's height plus the depth where the chord is wide enough (`haloNameRoom`),
+// so the name never sits on a ticket or on a child halo. The name is drawn at a constant SCREEN size, so the
+// room is worked out in screen px and converted to layout units at each zoom (the halos are recomputed per
+// zoom anyway). A long name is cut with an ellipsis to the chord; a halo too small on screen for even a
+// short name makes no room and shows no name until a zoom gives it one.
 
-export type GroupLabelPlace = 'top' | 'bottom' | 'none';
+/** px between the name's box and the halo's contents below it. */
+export const HALO_NAME_GAP = 3;
+/** px between the rim and the box's top corners (the dashed stroke, and breathing room). */
+export const HALO_NAME_RIM = 2;
+/** The deepest the box's top may sit below the rim, as a fraction of the halo's radius: a wider name is
+ *  cut, rather than the halo bulging for it. */
+export const HALO_NAME_DEPTH = 0.3;
+/** A chord narrower than this shows no name at all (and the halo makes no room). */
+export const HALO_NAME_MIN_W = 44;
+/** The most room a halo makes, as a fraction of its radius on screen: a halo too small on screen for its
+ *  name hides the name rather than ballooning round it (the halos nest, so a bulge compounds). */
+export const HALO_NAME_MAX_PAD = 0.75;
+/** The zoom the FORCES make room at for the GROUP names (about Fit's, so the groups' names show there):
+ *  the room is screen px over the zoom, so it is largest zoomed out. */
+export const HALO_NAME_LAYOUT_ZOOM = 0.4;
+/** …and for the status and person names inside a group, which show once zoomed in: room for them at
+ *  Fit's zoom would balloon every nested halo (the room compounds level by level). */
+export const HALO_SUBNAME_LAYOUT_ZOOM = 1;
 
-export interface GroupLabelItem {
-  key: string;
-  /** The halo's centre and radius, in screen px. */
-  x: number;
-  y: number;
-  r: number;
-  /** The name's box size (px). */
+/** The room a halo makes for its name, in screen px: `pad` raises the halo's top (`withNameRoom`); the
+ *  name's box top sits `depth` below the new rim, `width` wide at most (the chord there). */
+export interface HaloNameRoom {
+  pad: number;
+  depth: number;
+  width: number;
+}
+
+/** The room for a `w`×`h` name inside the top of a halo of screen radius `r` (before the room). null when
+ *  even a short name cannot fit. The box always fits the chord at its depth and ends `HALO_NAME_GAP` above
+ *  the old halo's top, which holds every ticket and child halo. Pure. */
+export function haloNameRoom(r: number, w: number, h: number): HaloNameRoom | null {
+  if (!(r > 0) || !(w > 0)) return null;
+  // The deepest the box may sit and still leave the room within `HALO_NAME_MAX_PAD`.
+  const deepest = HALO_NAME_MAX_PAD * r - h - HALO_NAME_GAP;
+  if (deepest < HALO_NAME_RIM) return null;
+  const rimOf = (R: number, depth: number): number => {
+    const inner = (R - HALO_NAME_RIM) ** 2 - (R - depth) ** 2;
+    return inner > 0 ? 2 * Math.sqrt(inner) : 0;
+  };
+  let depth = HALO_NAME_RIM;
+  for (let i = 0; i < 8; i += 1) {
+    const R = r + (depth + h + HALO_NAME_GAP) / 2;
+    const inner = (R - HALO_NAME_RIM) ** 2 - (w / 2) ** 2;
+    // +1px: the depth moves R, so a box sized exactly at the last R could miss the chord by a hair.
+    const need = inner > 0 ? R - Math.sqrt(inner) + 1 : Infinity;
+    depth = Math.max(HALO_NAME_RIM, Math.min(need, HALO_NAME_DEPTH * R, deepest));
+  }
+  const pad = depth + h + HALO_NAME_GAP;
+  const width = Math.min(w, rimOf(r + pad / 2, depth));
+  return width < HALO_NAME_MIN_W ? null : { pad, depth, width };
+}
+
+/** The halo raised by `pad` (layout units) at the top: same bottom, so it still holds everything. Pure. */
+export function withNameRoom<T extends { x: number; y: number; r: number }>(h: T, pad: number): T {
+  return pad > 0 ? { ...h, y: h.y - pad / 2, r: h.r + pad / 2 } : h;
+}
+
+/** The longest start of `text` (ellipsis added) whose measured width fits `maxW`. Pure. */
+export function fitLabelText(text: string, maxW: number, widthOf: (t: string) => number): string {
+  if (widthOf(text) <= maxW) return text;
+  const chars = [...text];
+  for (let n = chars.length - 1; n > 0; n -= 1) {
+    const t = `${chars.slice(0, n).join('').replace(/[\s,.;:–—-]+$/, '')}…`;
+    if (widthOf(t) <= maxW) return t;
+  }
+  return '…';
+}
+
+/** A halo's name as drawn: the (possibly cut) text, its box size and the room it takes. */
+export interface HaloName {
+  text: string;
   w: number;
   h: number;
-  /** Higher places first (the group's size; a hovered / selected member's group first of all). */
+  room: HaloNameRoom;
+}
+
+/** The name for a halo of screen radius `r`: a group's (12px) or a status / person room's (11px). null
+ *  when the halo is too small on screen for one. Pure. */
+export function haloName(text: string, size: 'group' | 'sub', r: number): HaloName | null {
+  const measure = size === 'group' ? groupLabelSize : subLabelSize;
+  const full = measure(text);
+  const room = haloNameRoom(r, full.w, full.h);
+  if (room == null) return null;
+  const cut = fitLabelText(text, room.width, (t) => measure(t).w);
+  return { text: cut, w: Math.min(room.width, measure(cut).w), h: full.h, room };
+}
+
+/** The name's screen box inside the top of its halo (`x`/`y`/`r`: the halo WITH its room, screen px). */
+export function haloNameBox(halo: { x: number; y: number; r: number }, name: Pick<HaloName, 'w' | 'h' | 'room'>): ScreenBox {
+  const t = halo.y - halo.r + name.room.depth;
+  return { l: halo.x - name.w / 2, t, r: halo.x + name.w / 2, b: t + name.h };
+}
+
+export interface HaloNameItem {
+  key: string;
+  box: ScreenBox;
+  /** Higher places first (the group's size). */
   priority: number;
 }
 
-/** The name's box for a place: centred above the halo's top, or below its bottom. */
-export function groupLabelBox(it: Pick<GroupLabelItem, 'x' | 'y' | 'r' | 'w' | 'h'>, place: Exclude<GroupLabelPlace, 'none'>): ScreenBox {
-  const t = place === 'top' ? it.y - it.r - it.h - 1 : it.y + it.r + 1;
-  return { l: it.x - it.w / 2, t, r: it.x + it.w / 2, b: t + it.h };
-}
-
-/** Where each group's name goes: above its halo, else below it, clear of every name already placed and
- *  of OTHER groups' tickets (`discs`, tagged with their group); a name with no clear place is hidden
- *  (a zoom, or hovering one of its tickets, brings it back). Pure. */
-export function placeGroupLabels(
-  items: readonly GroupLabelItem[],
-  discs: ReadonlyArray<{ x: number; y: number; R: number; group: string | null }> = [],
-): Map<string, GroupLabelPlace> {
+/** Which names show: each in its place inside its halo, in priority order, unless it would cover a name
+ *  already shown (`fixed` first) or a ticket / badge (`discs`, screen circles). Its own halo's contents sit
+ *  below the room by construction, so in practice only a neighbouring halo crowding in hides one. Pure. */
+export function placeHaloNames(
+  items: readonly HaloNameItem[],
+  discs: ReadonlyArray<{ x: number; y: number; R: number }> = [],
+  fixed: readonly ScreenBox[] = [],
+): Map<string, boolean> {
   const order = items.map((it, i) => ({ it, i })).sort((a, b) => b.it.priority - a.it.priority || a.i - b.i);
-  const placed: ScreenBox[] = [];
-  const out = new Map<string, GroupLabelPlace>();
+  const placed: ScreenBox[] = [...fixed];
+  const out = new Map<string, boolean>();
   for (const { it } of order) {
-    let chosen: GroupLabelPlace = 'none';
-    for (const place of ['top', 'bottom'] as const) {
-      const b = groupLabelBox(it, place);
-      if (placed.some((p) => boxesOverlap(p, b))) continue;
-      if (discs.some((d) => d.group !== it.key && boxHitsDisc(b, d.x, d.y, d.R))) continue;
-      chosen = place;
-      break;
-    }
-    if (chosen === 'none' && it.priority >= LABEL_ALWAYS) chosen = 'top';
-    out.set(it.key, chosen);
-    if (chosen !== 'none') placed.push(groupLabelBox(it, chosen));
+    const clear = !placed.some((p) => boxesOverlap(p, it.box)) && !discs.some((d) => boxHitsDisc(it.box, d.x, d.y, d.R));
+    const show = clear || it.priority >= LABEL_ALWAYS;
+    out.set(it.key, show);
+    if (show) placed.push(it.box);
   }
   return out;
 }

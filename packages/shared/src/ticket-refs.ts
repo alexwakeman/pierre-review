@@ -152,7 +152,7 @@ export interface ResolveTicketRefsResponse {
   results: TicketRefResult[];
 }
 
-// ── REFERENCES INSIDE A TICKET'S OWN TEXT (Reports → This sprint; docs/API.md § This sprint) ───────
+// ── REFERENCES INSIDE A TICKET'S OWN TEXT (Activity → This Sprint; docs/API.md § This sprint) ───────
 //
 // A ticket's description and criteria name other tickets — a browse link
 // (`https://acme.atlassian.net/browse/BMD-855`), a Linear or GitHub issue link, or a bare key. The

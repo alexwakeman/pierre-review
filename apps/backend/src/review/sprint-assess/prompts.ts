@@ -1,6 +1,6 @@
 import { SPRINT_ASSESS_CAPS, type SprintAssessMode } from '@pierre-review/shared';
 
-// THE SPRINT ASSESSMENT PROMPTS ("Check against code", Reports → This sprint). Deliberately SHORT.
+// THE SPRINT ASSESSMENT PROMPTS ("Check against code", Activity → This Sprint). Deliberately SHORT.
 // STAGE-AWARE: the server picks the MODE from the ticket's stage (`sprintAssessModeOf`).
 //   • PLAN (not started / in progress): no code is expected — list the few high-level changes needed
 //     and where (`plan`). The prompt FORBIDS looking for an existing implementation or saying the work
