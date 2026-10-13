@@ -1,24 +1,10 @@
-import {
-  SPRINT_CRITERION_STATUS_LABEL,
-  STORY_ISSUE_BY_ID,
-  sprintBullets,
-  sprintCurrentAssessmentBodyOf,
-  sprintSpecGapLines,
-  sprintSpecGapText,
-  sprintSpecGapsMarkdown,
-  type SprintAssessmentBody,
-  type SprintBullet,
-  type SprintFinding,
-  type SprintSpecGapLine,
-  type SprintChecks,
-  type SprintTicketRow,
-} from '@pierre-review/shared';
+import { SPRINT_CRITERION_STATUS_LABEL, type SprintAssessmentBody } from '@pierre-review/shared';
 import { writeClipboard } from '../components/CopyButton.js';
 
 // COPY AND PASTE FOR GENERATED TEXT — the ONE place (Reports → This sprint).
 //
-// Everything the This sprint tab generates (one issue's bullet, the proposed update, "Copy all" for a
-// ticket) is copied through here, so a block pastes the same way wherever it came from.
+// Everything the This sprint tab generates (the code check, a brief) is copied through here, so a
+// block pastes the same way wherever it came from.
 //
 //   • text/plain carries CLEAN MARKDOWN: a "## KEY — Title" header, `-` bullets, file paths in
 //     backticks. It pastes as-is into a Jira / Linear / GitHub editor, a Slack message or a prompt.
@@ -42,37 +28,6 @@ export interface CopyBlock {
 export function ticketHeader(key: string, title: string): string {
   const t = oneLine(title);
   return t === '' ? `## ${key}` : `## ${key} — ${t}`;
-}
-
-/** One issue's bullet as one Markdown line: "**Spec gaps**: No error copy for an expired link (`path` in `repo`)". */
-export function sprintBulletMarkdown(b: SprintBullet): string {
-  const ref = b.ref != null ? ` (\`${b.ref.path}\` in \`${b.ref.repo}\`)` : '';
-  return `**${STORY_ISSUE_BY_ID[b.id].label}**: ${oneLine(b.text)}${ref}`;
-}
-
-/** One spec gap as one Markdown line: "**Spec gap**: Edge case: No behaviour when the upload fails". */
-export function sprintSpecGapLineMarkdown(g: SprintSpecGapLine): string {
-  const ref = g.ref != null ? ` (\`${g.ref.path}\` in \`${g.ref.repo}\`)` : '';
-  return `**Spec gap**: ${sprintSpecGapText(g)}${ref}`;
-}
-
-/** Everything for a ticket: header, link, the CURRENT assessment's summary (when there is one), one bullet
- *  per issue and the Spec gaps section — what the card shows (`sprintBullets`, `sprintSpecGapLines`, the
- *  workspace's checks applied). */
-export function ticketCopyAllMarkdown(t: SprintTicketRow, checks: SprintChecks): string {
-  const parts = [ticketHeader(t.key, t.title)];
-  if (t.url != null && /^https?:\/\//i.test(t.url)) parts.push(t.url);
-  const body = sprintCurrentAssessmentBodyOf(t);
-  if (body != null && body.summary.trim() !== '') parts.push(oneLine(body.summary));
-  if (body != null) {
-    const check = sprintCodeCheckListMarkdown(body, t.criteria.items);
-    if (check !== '') parts.push(check);
-  }
-  const bullets = sprintBullets(t, checks);
-  if (bullets.length > 0) parts.push(bullets.map((b) => `- ${sprintBulletMarkdown(b)}`).join('\n'));
-  const gaps = sprintSpecGapsMarkdown(sprintSpecGapLines(t, checks));
-  if (gaps !== '') parts.push(gaps);
-  return parts.join('\n\n');
 }
 
 /** The code check's list without its summary: PLAN → one "- `repo` `path`: change" per step;
@@ -101,17 +56,6 @@ export function sprintCodeCheckListMarkdown(body: SprintAssessmentBody, criteria
 /** The whole code check: summary, then the list (`sprintCodeCheckListMarkdown`). */
 export function sprintCodeCheckMarkdown(body: SprintAssessmentBody, criteria: readonly string[]): string {
   return [oneLine(body.summary), sprintCodeCheckListMarkdown(body, criteria)].filter((x) => x !== '').join('\n\n');
-}
-
-/** One finding as Markdown: "**Unclear when done · Vague word**", the quoted text, the detail, the
- *  suggested wording and the file it rests on — what the opened card's thread shows. */
-export function sprintFindingMarkdown(f: SprintFinding): string {
-  const parts = [`**${STORY_ISSUE_BY_ID[f.issue].label} · ${oneLine(f.brief)}**`];
-  if (f.quote != null && f.quote.trim() !== '') parts.push(`> ${oneLine(f.quote)}`);
-  if (f.detail.trim() !== '') parts.push(oneLine(f.detail));
-  if (f.suggestion != null && f.suggestion.trim() !== '') parts.push(`Suggested: ${oneLine(f.suggestion)}`);
-  if (f.ref != null) parts.push(`\`${f.ref.path}\` in \`${f.ref.repo}\``);
-  return parts.join('\n\n');
 }
 
 /** Joins blocks under their headings ("### heading"), skipping empty ones. */

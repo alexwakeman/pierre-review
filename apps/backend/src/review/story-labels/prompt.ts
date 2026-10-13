@@ -29,6 +29,19 @@ import type { StoryLabelInput } from '../../db/story-label-input.js';
 // one completion, no tools, the account's claude.ai connectors isolated (ISOLATED_MCP +
 // ownToolsOnlyHook) — never a new Agent SDK `query()`.
 
+/** RUBRIC 4's references rule — the relation vocabulary and its wording, SHARED with the sprint
+ *  brief (review/sprint-briefs/prompt.ts) so both read the text the same way. ⚠ Part of the label
+ *  rubric: changing ONE word is a new rubric (bump `STORY_RUBRIC_VERSION`) AND a new brief
+ *  (bump `SPRINT_BRIEF_VERSION`). */
+export const STORY_REFERENCE_RULES = `"references": EVERY other ticket the text names, by key (e.g. "ABC-123") or by a link to it. For each: "ticketKey" (the key as written), "relation" (below), "quote" (the words that show how it relates, e.g. "Supersedes the current implementation from", "Not in ticket scope", "Must be implemented concurrently with"), "owner" (at most 60 characters, the team or person the text names for it, else null). "relation" is exactly one of:
+  - depends_on: this story cannot be finished until that ticket is done, e.g. "blocked until ABC-12 is released", "needs the endpoint from ABC-12 first".
+  - concurrent: built at the same time as this story, to coordinate with, e.g. "must be implemented together with ABC-12".
+  - builds_on: extends work that is already built, or uses an existing feature or page, e.g. "enhances the existing export from ABC-12", "the user is taken to the upload page ABC-12".
+  - supersedes: replaces what that ticket built, e.g. "replaces the current implementation from ABC-12".
+  - out_of_scope: a follow-up or sibling the text leaves out of this story, e.g. a ticket listed under "Out of scope" or "Not in this ticket".
+  - context: anything else: related tickets, see also, background, or a page the user ends up on.
+  Choose depends_on ONLY when the text says this story needs that work first; a ticket that is merely listed, already built, or left out is never depends_on. A ticket named in two roles may appear once per role. At most 20. [] when it names none.`;
+
 export const STORY_LABEL_SYSTEM = `You review how a user story is written, for a team tracking story quality over time. Judge ONLY the text given. Be consistent: the same text must always get the same answer.
 Every "quote" below is copied EXACTLY from the ticket text (title, description or criteria): the shortest passage, at most 120 characters, that shows the problem, e.g. the vague word "intuitive", the phrase "once the API is ready", or the criterion sentence. Never reword, shorten with "…" or fix the spelling of a quote. null when there is no such passage.
 For EACH numbered criterion:
@@ -37,14 +50,7 @@ For EACH numbered criterion:
 - "rule": when testable is false, exactly one of: no_expected_result (it does not say what should happen), vague_term (a word nobody can test), no_input_or_state (no input or starting state), not_observable (the result could not be seen or measured), bundled (several outcomes in one criterion). null when testable is true.
 - "quote": when testable is false, the words that show the problem (the vague word, the missing-result phrase, or the whole criterion). null when testable is true.
 For the STORY:
-- "references": EVERY other ticket the text names, by key (e.g. "ABC-123") or by a link to it. For each: "ticketKey" (the key as written), "relation" (below), "quote" (the words that show how it relates, e.g. "Supersedes the current implementation from", "Not in ticket scope", "Must be implemented concurrently with"), "owner" (at most 60 characters, the team or person the text names for it, else null). "relation" is exactly one of:
-  - depends_on: this story cannot be finished until that ticket is done, e.g. "blocked until ABC-12 is released", "needs the endpoint from ABC-12 first".
-  - concurrent: built at the same time as this story, to coordinate with, e.g. "must be implemented together with ABC-12".
-  - builds_on: extends work that is already built, or uses an existing feature or page, e.g. "enhances the existing export from ABC-12", "the user is taken to the upload page ABC-12".
-  - supersedes: replaces what that ticket built, e.g. "replaces the current implementation from ABC-12".
-  - out_of_scope: a follow-up or sibling the text leaves out of this story, e.g. a ticket listed under "Out of scope" or "Not in this ticket".
-  - context: anything else: related tickets, see also, background, or a page the user ends up on.
-  Choose depends_on ONLY when the text says this story needs that work first; a ticket that is merely listed, already built, or left out is never depends_on. A ticket named in two roles may appear once per role. At most 20. [] when it names none.
+- ${STORY_REFERENCE_RULES}
 - "dependencies": other work this story can only finish after, that the TEXT names (a ticket, an API, a design, data, an environment, a decision). A ticket goes here ONLY when its relation in "references" is depends_on. For each: "kind" (ticket|api|design|data|environment|decision|other), "what" (at most 80 characters, the thing itself, e.g. "cookie banner"), "owner" (at most 60 characters, the team or person the text names, else null), "ticketKey" (a ticket key written in the text, e.g. "ABC-123", else null), "quote" (the words that name it, e.g. "once the API is ready"). At most 8. [] when it names none. Never guess a dependency the text does not state.
 - "gaps": at most 3 SPECIFIC details a developer would have to ask about before building this, e.g. "No behaviour when the upload fails", "No error copy for an expired link". For each: "type" (rule|edge_case|error_handling|design|data|non_functional), "text" (at most 100 characters, starting "No …" where natural), "quote" (the passage the gap is about, e.g. "the user uploads a file"; null when the gap is about something the text never mentions). [] when nothing important is missing. Never a generic gap such as "more detail needed".
 Return ONLY JSON: {"criteria":[{"n":1,"testable":bool,"reason":string|null,"rule":string|null,"quote":string|null}],"story":{"references":[{"ticketKey":"…","relation":"…","quote":string|null,"owner":string|null}],"dependencies":[{"kind":"…","what":"…","owner":string|null,"ticketKey":string|null,"quote":string|null}],"gaps":[{"type":"…","text":"…","quote":string|null}]}}

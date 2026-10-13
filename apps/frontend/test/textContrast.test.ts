@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { GROUP_HALO, SPRINT_CANVAS, STAGE_RING, blendHex } from '../src/components/Activity/sprintGraphModel.js';
 
 // TEXT CONTRAST, ENFORCED FROM THE SOURCE.
 //
@@ -217,5 +218,29 @@ describe('text contrast', () => {
       .map((v) => `${v.file}:${v.line}  ${v.cls}  ${v.theme} ${v.ratio.toFixed(2)}:1`)
       .join('\n');
     expect(report).toBe('');
+  });
+  it('the sprint graph’s labels are legible on its always-navy canvas, in both themes', () => {
+    // ⚠ THE CANVAS DOES NOT FOLLOW THE THEME (Activity/SprintGraph.tsx), so its text is measured
+    // against the canvas, not the page — at its LIGHTEST point, the gradient's centre, which index.css
+    // must keep as the lightest stop.
+    const css = readFileSync(join(SRC, 'index.css'), 'utf8');
+    const rule = css.slice(css.indexOf('.sprint-canvas {'), css.indexOf('}', css.indexOf('.sprint-canvas {')));
+    const stops = [...rule.matchAll(/#[0-9a-f]{6}/gi)].map((m) => m[0]);
+    expect(stops[0]?.toLowerCase()).toBe(SPRINT_CANVAS.groundCentre);
+    for (const st of stops) expect(luminance(st)).toBeLessThanOrEqual(luminance(SPRINT_CANVAS.groundCentre));
+    const ground = SPRINT_CANVAS.groundCentre;
+    // A label is drawn at full opacity, or at `labelMinAlpha` for a done / ghost ticket: measure what
+    // the reader sees, the colour blended over the ground.
+    for (const fg of [SPRINT_CANVAS.labelKey, SPRINT_CANVAS.labelTitle, SPRINT_CANVAS.legendText]) {
+      expect(contrastRatio(fg, ground)).toBeGreaterThanOrEqual(AA_BODY);
+      expect(contrastRatio(blendHex(fg, ground, SPRINT_CANVAS.labelMinAlpha), ground)).toBeGreaterThanOrEqual(AA_BODY);
+    }
+    // A group halo's label sits on the halo's rim: measured on the ground AND on the ground lightened by
+    // the halo's fill.
+    const haloGround = blendHex(GROUP_HALO.fill, ground, GROUP_HALO.fillAlpha);
+    expect(contrastRatio(GROUP_HALO.label, ground)).toBeGreaterThanOrEqual(AA_BODY);
+    expect(contrastRatio(GROUP_HALO.label, haloGround)).toBeGreaterThanOrEqual(AA_BODY);
+    // The stage rings are non-text marks (WCAG 1.4.11: 3:1).
+    for (const ring of Object.values(STAGE_RING)) expect(contrastRatio(ring, ground)).toBeGreaterThanOrEqual(3);
   });
 });

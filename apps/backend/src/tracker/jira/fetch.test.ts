@@ -20,7 +20,6 @@ import {
   guardedLookup,
   isBlockedAddress,
   jiraGetJson,
-  jiraSendJson,
   nodeTransport,
   type JiraTransport,
 } from './fetch.js';
@@ -250,46 +249,5 @@ describe('real sockets (LOCAL mode, loopback server)', () => {
 
   it('⚠ CLOUD refuses the same loopback server (http AND the address)', async () => {
     await expect(jiraGetJson(`${base}/ok`, {}, cloud)).rejects.toMatchObject({ code: 'blocked' });
-  });
-});
-
-describe('jiraSendJson — the write-back POST/PUT through the same guard', () => {
-  const fake = (status: number, body = '', contentType = 'application/json') => {
-    const calls: Array<{ url: string; headers: Record<string, string>; method: string | undefined; body: string | undefined; guarded: boolean }> = [];
-    const t: JiraTransport = async (url, headers, opts, init) => {
-      calls.push({ url: url.toString(), headers, method: init?.method, body: init?.body, guarded: opts.lookup != null });
-      return { status, contentType, body };
-    };
-    return { t, calls };
-  };
-
-  it('sends the method, a JSON body and a JSON content type; parses a JSON answer', async () => {
-    const { t, calls } = fake(201, '{"id":"10001"}');
-    const out = await jiraSendJson('https://acme.atlassian.net/rest/api/3/issue/A-1/comment', 'POST', { authorization: 'x' }, { body: 1 }, cloud, t);
-    expect(out).toEqual({ id: '10001' });
-    expect(calls[0]).toMatchObject({ method: 'POST', body: '{"body":1}', guarded: true });
-    expect(calls[0]!.headers['content-type']).toBe('application/json');
-  });
-
-  it('204 and an empty body are null', async () => {
-    expect(await jiraSendJson('http://jira.lan/rest/api/2/issue/A-1', 'PUT', {}, {}, local, fake(204).t)).toBeNull();
-    expect(await jiraSendJson('http://jira.lan/rest/api/2/issue/A-1', 'PUT', {}, {}, local, fake(200, '  ').t)).toBeNull();
-  });
-
-  it.each([
-    [401, 'unauthorized'],
-    [403, 'forbidden'],
-    [404, 'not_found'],
-    [302, 'redirect'],
-    [400, 'http'],
-    [429, 'http'],
-  ])('%i → %s', async (status, code) => {
-    await expect(jiraSendJson('https://acme.atlassian.net/x', 'PUT', {}, {}, cloud, fake(status).t)).rejects.toMatchObject({ code, status });
-  });
-
-  it('refuses a blocked address before any socket opens', async () => {
-    const { t, calls } = fake(200);
-    await expect(jiraSendJson('https://169.254.169.254/', 'POST', {}, {}, cloud, t)).rejects.toMatchObject({ code: 'blocked' });
-    expect(calls).toHaveLength(0);
   });
 });

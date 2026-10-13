@@ -108,7 +108,7 @@ describe('sprint store', () => {
     expect(rec.outdated).toBe(true);
   });
 
-  it('a stored body serves only in the current format; an old one is outdated, never thrown on', () => {
+  it('a stored body serves when it has a mode and a summary; an older shape is outdated, never thrown on', () => {
     const row = (status: string, bodyJson: unknown) =>
       ({
         id: 1, workspaceId: wsA, ident: 'x', model: 'm', status, phase: null, reposJson: [], bodyJson,
@@ -158,15 +158,11 @@ describe('sprint store', () => {
           { n: 1, status: 'met', evidence: 'Done.', ref: null, tests: { repo: 'acme/web', path: 'test/a.test.ts' } },
         ],
         summary: 'This may already be done.',
-        findings: [
-          // No quote → no `where` and no suggestion.
-          { issue: 'unclear_done', rule: 'vague_term', quote: null, where: null, text: 'Criterion 2 cannot be checked.', suggestion: null, ref: { repo: 'acme/web', path: 'src/a.ts' } },
-          { issue: 'spec_gaps', rule: 'error_handling', quote: 'upload a file', where: 'description', text: 'No behaviour when the upload fails.', suggestion: 'upload a CSV file', ref: null },
-        ],
-        revisedCriteria: ['One'],
-        revisedDescription: 'A new description.',
       },
     });
+    // Format 6: a format-5 body still reads, its findings and revisions ignored (the run is stale anyway).
+    const body = store.sprintAssessmentRecordOf(row('succeeded', v4)).body!;
+    expect(Object.keys(body).sort()).toEqual(['coverage', 'criterionChecks', 'mode', 'plan', 'summary']);
   });
 
   it('a run fingerprinted in the old format reads stale', async () => {

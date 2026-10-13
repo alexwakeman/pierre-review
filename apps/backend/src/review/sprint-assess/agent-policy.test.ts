@@ -18,25 +18,21 @@ describe('sprint assessment tool policy', () => {
 });
 
 describe('sprint assessment prompt', () => {
-  it('names the three issues, asks for what/who on Blocked and a specific gap, in both modes', async () => {
+  it('format 6: no findings, no rule vocabulary, no revisions — in both modes', async () => {
     const { sprintAssessSystemPrompt } = await import('./prompts.js');
     for (const mode of ['plan', 'verify'] as const) {
       const p = sprintAssessSystemPrompt(mode);
-      for (const id of ['unclear_done', 'blocked', 'spec_gaps']) expect(p).toContain(id);
-      for (const gone of ['too_big', 'waits_on_work', 'scope_unstated', 'more than 8 criteria']) expect(p).not.toContain(gone);
-      expect(p).toContain('Name WHAT it waits on and WHO owns it');
-      // The old "may already be done" ask is gone from both: a plan forbids it, a verify checks instead.
+      for (const gone of ['unclear_done', 'spec_gaps', 'findings', 'revisedCriteria', 'revisedDescription', 'EXACT words from the ticket']) {
+        expect(p).not.toContain(gone);
+      }
       expect(p).not.toContain('This may already be done');
-      expect(p.length).toBeLessThan(6600);
-      // Referenced tickets are facts: only an open depends_on / blocked_by ticket can block.
-      expect(p).toContain('A ticket is a blocker ONLY when its relation is blocked_by or depends_on AND its status is not done');
-      expect(p).toContain('Never say a ticket’s status is unknown or not stated when the list gives it'.replace('’', "'"));
       expect(p).toContain('coordinate with KEY');
+      expect(p.length).toBeLessThan(4200);
     }
   });
 
   it('the user message lists the referenced tickets in their own fence, with status and relation', async () => {
-    const { buildSprintAssessPrompt, sprintAssessUntrustedTexts, isBlockingReference } = await import('./prompts.js');
+    const { buildSprintAssessPrompt, sprintAssessUntrustedTexts } = await import('./prompts.js');
     const t = {
       key: 'ABC-1',
       title: 'Upload',
@@ -52,9 +48,6 @@ describe('sprint assessment prompt', () => {
       '---BEGIN REFERENCES n0nce---\n- ABC-343 · Upload page · status Done (done) · builds_on · quote: “directed to the upload function”\n- ABC-1066 · status not known to Limn · concurrent\n---END REFERENCES n0nce---',
     );
     expect(sprintAssessUntrustedTexts(t).some((x) => x.includes('directed to the upload function'))).toBe(true);
-    expect(isBlockingReference({ relation: 'depends_on', done: null })).toBe(true);
-    expect(isBlockingReference({ relation: 'depends_on', done: true })).toBe(false);
-    expect(isBlockingReference({ relation: 'concurrent', done: false })).toBe(false);
   });
 
   it('PLAN expects no code and asks for the changes needed; VERIFY checks each criterion and its tests', async () => {
@@ -75,34 +68,10 @@ describe('sprint assessment prompt', () => {
     expect(buildSprintAssessPrompt(t, [], 'n0nce', 'verify')).toMatch(/^Verify ticket ENG-9: it should be built/);
   });
 
-  it('format 4+: names every model rule of the closed vocabulary (never the code-only one) and asks for the EXACT quote', async () => {
-    const { sprintAssessSystemPrompt } = await import('./prompts.js');
-    const { STORY_RULES } = await import('@pierre-review/shared');
-    const p = sprintAssessSystemPrompt('plan');
-    for (const r of STORY_RULES) {
-      if (r.codeOnly) expect(p).not.toContain(r.id);
-      else expect(p).toContain(r.id);
-    }
-    expect(p).toContain('EXACT words from the ticket');
-    expect(p).toContain('revisedDescription');
-  });
-
-  it('hands what code already knows (blockers, gaps) in as FENCED data, and only when there is some', () => {
-    const t = {
-      key: 'ENG-3',
-      title: 't',
-      description: 'd',
-      criteria: ['One'],
-      blockers: ['BMD-568 cookie banner (To Do)'],
-      gaps: ['No behaviour when the upload fails'],
-    };
-    const nonce = pickReviewNonce(sprintAssessUntrustedTexts(t));
-    expect(sprintAssessUntrustedTexts(t)).toContain('BMD-568 cookie banner (To Do)');
-    const prompt = buildSprintAssessPrompt(t, [], nonce);
-    expect(prompt).toContain(
-      `---BEGIN KNOWN ${nonce}---\n- Waits on: BMD-568 cookie banner (To Do)\n- Spec gap: No behaviour when the upload fails\n---END KNOWN ${nonce}---`,
-    );
-    expect(buildSprintAssessPrompt({ ...t, blockers: [], gaps: [] }, [], nonce)).not.toContain('BEGIN KNOWN');
+  it('says when the criteria were DERIVED from the description', () => {
+    const t = { key: 'ENG-3', title: 't', description: 'd', criteria: ['One'] };
+    expect(buildSprintAssessPrompt({ ...t, criteriaDerived: true }, [], 'n0nce')).toContain('derived from the description');
+    expect(buildSprintAssessPrompt(t, [], 'n0nce')).not.toContain('derived from the description');
   });
 
   it('fences the ticket text with a nonce it does not contain', () => {
@@ -120,9 +89,9 @@ describe('sprint assessment prompt', () => {
     expect(ticket.description.includes(nonce)).toBe(false);
   });
 
-  it('asks for criteria when the ticket has none', () => {
+  it('plans from the title and description when the ticket has no criteria', () => {
     const prompt = buildSprintAssessPrompt({ key: 'ENG-2', title: 't', description: '', criteria: [] }, [], 'n0nce');
-    expect(prompt).toContain('The ticket has no acceptance criteria. Propose criteria in `revisedCriteria`.');
+    expect(prompt).toContain('The ticket has no acceptance criteria. Plan from the title and description.');
     expect(prompt).not.toContain('BEGIN CRITERIA');
   });
 });

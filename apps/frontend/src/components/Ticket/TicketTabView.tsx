@@ -1,13 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { TimelinePr } from '@pierre-review/shared';
 import { useTicketPrs } from '../../hooks/useTicketPrs.js';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { parseTicketTabKey, ticketKeyOfIdent, usePinnedTabs } from '../../store/pinnedTabs.js';
-import { dateTime, indexUsers, relativeTime, safeExternalUrl } from '../../lib/ui.js';
-import { OpenPrsCards } from '../Activity/OpenPrsCards.js';
+import { indexUsers, safeExternalUrl } from '../../lib/ui.js';
 import { CARD_NEUTRAL_CHIP } from '../Activity/PrCardShell.js';
-import { ChevronIcon, ExternalLinkIcon, TicketIcon } from '../Icons.js';
+import { ExternalLinkIcon, TicketIcon } from '../Icons.js';
+import { TicketPrsSections } from './TicketPrsSections.js';
 
 // THE TICKET TAB — one ticket's pull requests in isolation (docs/FRONTEND.md § The ticket tab):
 // its open PRs on the Open PRs cards, its merged PRs on the "Merged so far" cards, and closed ones
@@ -32,7 +32,6 @@ export function TicketTabView(): JSX.Element | null {
   const { data: repos } = useRepos();
   const usersById = useMemo(() => indexUsers(users), [users]);
   const repoNameById = useMemo(() => new Map((repos ?? []).map((r) => [r.id, r.fullName])), [repos]);
-  const [closedOpen, setClosedOpen] = useState(false);
 
   if (workspaceId == null || ident == null) return null;
 
@@ -111,64 +110,7 @@ export function TicketTabView(): JSX.Element | null {
         </p>
       ) : (
         <>
-          {open.length > 0 && (
-            <section aria-labelledby="ticket-tab-open" className="space-y-2">
-              <h3 id="ticket-tab-open" className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                Open
-              </h3>
-              <OpenPrsCards prs={open} isLoading={false} isError={false} sort={null} grouped={false} onOpenPr={openTab} />
-            </section>
-          )}
-          {merged.length > 0 && (
-            <section aria-labelledby="ticket-tab-merged" className="space-y-2">
-              <h3 id="ticket-tab-merged" className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                Merged
-              </h3>
-              <OpenPrsCards
-                prs={merged}
-                isLoading={false}
-                isError={false}
-                sort={null}
-                variant="merged"
-                grouped={false}
-                onOpenPr={openTab}
-              />
-            </section>
-          )}
-          {closed.length > 0 && (
-            <section className="space-y-2">
-              <button
-                type="button"
-                aria-expanded={closedOpen}
-                onClick={() => setClosedOpen((v) => !v)}
-                className="inline-flex items-center gap-1 text-sm font-semibold text-gray-800 hover:underline dark:text-gray-100"
-              >
-                <ChevronIcon dir={closedOpen ? 'down' : 'right'} aria-hidden="true" />
-                Closed without merging ({closed.length})
-              </button>
-              {closedOpen && (
-                <ul aria-label="Closed pull requests" className="space-y-1">
-                  {closed.map((pr) => (
-                    <li key={pr.id}>
-                      <button
-                        type="button"
-                        onClick={() => openTab(pr)}
-                        className="flex w-full flex-wrap items-baseline gap-x-2 rounded px-2 py-1 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-                      >
-                        <span className="min-w-0 break-words text-gray-900 dark:text-gray-100">{pr.title}</span>
-                        <span className="text-xs text-gray-600 dark:text-gray-300">
-                          {repoNameById.get(pr.repoId) ?? ''}#{pr.number}
-                          {pr.closedAt != null && (
-                            <span title={`Closed ${dateTime(pr.closedAt)}`}> · closed {relativeTime(pr.closedAt)}</span>
-                          )}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
+          <TicketPrsSections open={open} merged={merged} closed={closed} onOpenPr={openTab} />
         </>
       )}
     </div>

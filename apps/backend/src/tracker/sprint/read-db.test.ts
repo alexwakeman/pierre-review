@@ -72,7 +72,7 @@ const fakeLister = async (a: any) => {
 };
 // The referenced-ticket lookup (./ref-status.ts): a fake, so no test ever reaches a real tracker.
 let refAsked: string[][] = [];
-let refAnswer: (keys: readonly string[]) => Array<{ key: string; title: string | null; status: string | null; category: 'new' | 'indeterminate' | 'done' | null; url: string | null }> = () => [];
+let refAnswer: (keys: readonly string[]) => Array<{ key: string; title: string | null; status: string | null; category: 'new' | 'indeterminate' | 'done' | null; url: string | null; description?: string | null; blockedBy?: any[] }> = () => [];
 const fakeRefLister = async (_call: unknown, keys: readonly string[]) => {
   refAsked.push([...keys]);
   return { tickets: refAnswer(keys), complete: true };
@@ -279,41 +279,6 @@ describe('a workspace the ticket worker backed off', () => {
   });
 });
 
-describe('the forced single-ticket re-read', () => {
-  it('re-reads a row at epoch 0 through the reader, once', async () => {
-    const st = schema.sprintTickets;
-    await store.markSprintTicketDue(1, wsA, ident('ENG-1'));
-    const requested: string[] = [];
-    const transport = async (url: URL) => {
-      requested.push(url.pathname);
-      return {
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          key: 'ENG-1',
-          names: { customfield_1: 'Acceptance Criteria' },
-          schema: {},
-          fields: { summary: 'Reread title', description: 'New body', customfield_1: '- Rewritten', issuetype: { id: '10001', name: 'Story' }, status: { name: 'In Progress', statusCategory: { key: 'indeterminate' } } },
-        }),
-      };
-    };
-    const fired: Array<[number, number]> = [];
-    hooks.setAfterSprintRead((a, w) => fired.push([a, w]));
-    const n = await read.rereadForcedSprintTickets(ctx, 1, { now: () => T0 + 200 * DAY, transport });
-    hooks.setAfterSprintRead(null);
-    expect(n).toBe(1);
-    // The new text starts its label run now, not at the next list read.
-    expect(fired).toEqual([[1, wsA]]);
-    expect(requested).toEqual(['/rest/api/2/issue/ENG-1']);
-    const [row] = await db.select().from(st).where(and(eq(st.accountId, 1), eq(st.ident, ident('ENG-1')))).execute();
-    expect(row).toMatchObject({ title: 'Reread title', acceptanceCriteria: '- Rewritten', statusCategory: 'indeterminate' });
-    expect(row.nextCheckAt.getTime()).toBeGreaterThan(0);
-    // Not again.
-    expect(await read.rereadForcedSprintTickets(ctx, 1, { now: () => T0 + 200 * DAY, transport })).toBe(0);
-    expect(requested).toHaveLength(1);
-  });
-});
-
 describe('POST /api/sprint-stories/refresh', () => {
   it('402s without Reports before any DB work; with it stamps, marks due, kicks, 202s', async () => {
     const Fastify = (await import('fastify')).default;
@@ -400,11 +365,11 @@ describe('status order and blocking links', () => {
   });
 });
 
-describe('referenced tickets: their status, looked up ONCE per read (./ref-status.ts)', () => {
+describe('referenced tickets and ghost chains (./ref-status.ts)', () => {
   const refRows = async (accountId: number) =>
     db.select().from(schema.sprintRefTickets).where(eq(schema.sprintRefTickets.accountId, accountId)).execute() as Promise<any[]>;
 
-  it('asks only for keys Limn holds nowhere else, stores them, replaces them on the next read; knownTicketsFor reads them', async () => {
+  it('asks for every key the sprint names (never its own), stores them, replaces them on the next read; knownTicketsFor reads them', async () => {
     refAsked = [];
     refAnswer = (keys) => keys.filter((k) => k !== 'ENG-77').map((k) => ({ key: k, title: `Title ${k}`, status: 'Done', category: 'done', url: `${ROOT}/browse/${k}` }));
     listed.tickets = [
@@ -442,5 +407,49 @@ describe('referenced tickets: their status, looked up ONCE per read (./ref-statu
     const failing = { ...opts(T0 + 302 * DAY), refListers: { jira: async () => { throw new Error('boom'); } } };
     expect((await read.readWorkspaceSprint(ctx, 1, wsA, failing as never)).ok).toBe(true);
     expect((await refRows(1)).map((r) => r.issueKey)).toEqual(['ENG-60']);
+  });
+
+  it('follows a chain through blocking links to SPRINT_GHOST_DEPTH_MAX, and a brief pass asks for the next hop (mode missing)', async () => {
+    const link = (key: string) => [{ key, title: null, status: null, category: null, relation: 'is blocked by', url: null }];
+    const next: Record<string, string> = { 'ENG-80': 'ENG-81', 'ENG-81': 'ENG-82', 'ENG-82': 'ENG-83', 'ENG-83': 'ENG-84' };
+    refAsked = [];
+    refAnswer = (keys) =>
+      keys.map((k) => ({ key: k, title: `Title ${k}`, status: 'To Do', category: 'new', url: null, description: `Text of ${k}`, blockedBy: next[k] != null ? link(next[k]!) : [] }));
+    listed.tickets = [ticket('ENG-1', { description: 'Plain', blockedBy: link('ENG-80') }), ticket('ENG-2', { description: 'Plain', blockedBy: [] })];
+    expect((await read.readWorkspaceSprint(ctx, 1, wsA, opts(T0 + 310 * DAY))).ok).toBe(true);
+    // Depth 1, then one hop per round, never past depth 3.
+    expect(refAsked).toEqual([['ENG-80'], ['ENG-81'], ['ENG-82']]);
+    const rows = await refRows(1);
+    expect(rows.map((r) => [r.issueKey, r.depth, r.description]).sort()).toEqual([
+      ['ENG-80', 1, 'Text of ENG-80'],
+      ['ENG-81', 2, 'Text of ENG-81'],
+      ['ENG-82', 3, 'Text of ENG-82'],
+    ]);
+    // A brief on ENG-81 (its CURRENT text) names ENG-90 as a dependency: the expansion asks for it at
+    // depth 3, stores it and deletes nothing.
+    const briefs = await import('../../db/sprint-briefs.js');
+    const e81 = rows.find((r) => r.issueKey === 'ENG-81');
+    await briefs.storeSprintBrief(1, wsA, e81.ident, briefs.sprintBriefInput(e81, 'jira').textHash, {
+      summary: 's',
+      criteria: [],
+      criteriaDerived: true,
+      references: [{ ticketKey: 'ENG-90', relation: 'depends_on', quote: null }],
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    refAsked = [];
+    expect(await read.expandSprintGhosts(ctx, 1, wsA, opts(T0 + 311 * DAY))).toBe(1);
+    expect(refAsked).toEqual([['ENG-90']]);
+    expect((await refRows(1)).map((r) => [r.issueKey, r.depth]).sort()).toEqual([
+      ['ENG-80', 1],
+      ['ENG-81', 2],
+      ['ENG-82', 3],
+      ['ENG-90', 3],
+    ]);
+    // Nothing new to ask: no call.
+    refAsked = [];
+    expect(await read.expandSprintGhosts(ctx, 1, wsA, opts(T0 + 312 * DAY))).toBe(0);
+    expect(refAsked).toEqual([]);
   });
 });

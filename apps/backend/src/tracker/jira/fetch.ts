@@ -11,9 +11,9 @@ import { BlockList, isIP } from 'node:net';
 // through `jiraGetJson`, and nothing else in core talks to a customer-named host (the Slack webhook has its own guard).
 //
 // What it enforces, in BOTH modes:
-//   • GET for every READ (the exceptions: the Linear GraphQL POST to its FIXED host — linear/client.ts —
-//     and the sprint WRITE-BACK's POST/PUT, `jiraSendJson`, sent only on a person's confirmed press —
-//     tracker/write/), both through the same transport and guard; a hard TIMEOUT (10s for the whole exchange) and a RESPONSE SIZE CAP;
+//   • GET only (the one exception: the Linear GraphQL POST to its FIXED host — linear/client.ts —
+//     through the same transport and guard). Nothing in core WRITES to a tracker; a hard TIMEOUT (10s
+//     for the whole exchange) and a RESPONSE SIZE CAP;
 //   • NO REDIRECTS. Node's http client never follows one, and any 3xx is an error — following it
 //     would forward the Authorization header to a host nobody chose;
 //   • JSON ONLY: a non-JSON body (an SSO login page, a proxy's HTML) is an error, never parsed.
@@ -195,8 +195,7 @@ export interface RawResponse {
   headers?: Record<string, string>;
 }
 
-/** A request BODY — the Linear GraphQL POST (tracker/linear/client.ts) or the write-back's POST/PUT
- *  (`jiraSendJson`). Absent = a GET. */
+/** A request BODY — the Linear GraphQL POST (tracker/linear/client.ts). Absent = a GET. */
 export interface TransportInit {
   method: 'POST' | 'PUT';
   body: string;
@@ -287,45 +286,6 @@ export async function jiraGetJson(
   if (res.status === 403) throw new JiraFetchError('forbidden', 403);
   if (res.status === 404) throw new JiraFetchError('not_found', 404);
   if (res.status < 200 || res.status >= 300) throw new JiraFetchError('http', res.status);
-  if (!/\bjson\b/i.test(res.contentType)) throw new JiraFetchError('not_json', res.status);
-  try {
-    return JSON.parse(res.body) as unknown;
-  } catch {
-    throw new JiraFetchError('not_json', res.status);
-  }
-}
-
-/**
- * POST/PUT JSON to a Jira URL through the SAME guard as `jiraGetJson` (no redirects, timeout, size
- * cap, cloud SSRF rules). Only the sprint write-back calls it (tracker/write/), on a person's
- * confirmed press. 204 or an empty 2xx body → null; any other 2xx must be JSON. Throws
- * `JiraFetchError` like `jiraGetJson` (429 → `http` 429).
- */
-export async function jiraSendJson(
-  rawUrl: string,
-  method: 'POST' | 'PUT',
-  headers: Record<string, string>,
-  body: unknown,
-  policy: JiraFetchPolicy,
-  transport: JiraTransport = nodeTransport,
-): Promise<unknown> {
-  const url = checkJiraUrl(rawUrl, policy);
-  const res = await transport(
-    url,
-    { accept: 'application/json', 'content-type': 'application/json', 'user-agent': 'Limn', ...headers },
-    {
-      lookup: policy.cloud ? guardedLookup() : undefined,
-      timeoutMs: JIRA_TIMEOUT_MS,
-      maxBytes: JIRA_MAX_BYTES,
-    },
-    { method, body: JSON.stringify(body) },
-  );
-  if (res.status >= 300 && res.status < 400) throw new JiraFetchError('redirect', res.status);
-  if (res.status === 401) throw new JiraFetchError('unauthorized', 401);
-  if (res.status === 403) throw new JiraFetchError('forbidden', 403);
-  if (res.status === 404) throw new JiraFetchError('not_found', 404);
-  if (res.status < 200 || res.status >= 300) throw new JiraFetchError('http', res.status);
-  if (res.status === 204 || res.body.trim() === '') return null;
   if (!/\bjson\b/i.test(res.contentType)) throw new JiraFetchError('not_json', res.status);
   try {
     return JSON.parse(res.body) as unknown;

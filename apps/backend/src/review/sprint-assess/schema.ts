@@ -1,13 +1,5 @@
 import type { z as Zod } from 'zod';
-import {
-  SPRINT_ASSESS_CAPS,
-  STORY_ISSUE_IDS,
-  STORY_QUOTE_MAX,
-  STORY_RULES,
-  type SprintAssessMode,
-  type StoryIssueId,
-  type StoryRuleId,
-} from '@pierre-review/shared';
+import { SPRINT_ASSESS_CAPS, type SprintAssessMode } from '@pierre-review/shared';
 import { loadZod } from '../../ai/runtime.js';
 
 // The structured-output contract for the sprint assessment's in-process `submit_assessment` tool.
@@ -17,9 +9,8 @@ import { loadZod } from '../../ai/runtime.js';
 // The shape is deliberately LENIENT (optional where a model may reasonably leave something out),
 // EXCEPT text LENGTHS: an over-long sentence is refused by the tool's own schema, so the model rewrites
 // it shorter instead of the server clipping it mid-sentence (BMD-1042's summary ended in "…").
-// the SERVER validator (validate.ts) is the contract — it enforces caps, issue ids, the rule
-// vocabulary per issue, verifies every QUOTE against the ticket text and every cited path against
-// the checkout, dropping a quote or path that does not hold (format 4).
+// the SERVER validator (validate.ts) is the contract — it enforces caps and verifies every cited
+// path against the checkout, dropping a path that does not hold. Format 6: no findings, no revisions.
 
 type ZodNs = typeof Zod;
 
@@ -76,7 +67,6 @@ function verifyShape(z: ZodNs) {
 }
 
 export function buildSubmitAssessmentShape(z: ZodNs, mode: SprintAssessMode) {
-  const rules = STORY_RULES.filter((r) => !r.codeOnly).map((r) => r.id) as [StoryRuleId, ...StoryRuleId[]];
   return {
     summary: z
       .string()
@@ -84,48 +74,6 @@ export function buildSubmitAssessmentShape(z: ZodNs, mode: SprintAssessMode) {
       .describe(`Two or three short sentences, at most ${SPRINT_ASSESS_CAPS.summary} characters.`),
     ...(mode === 'plan' ? planShape(z) : {}),
     ...(mode === 'verify' ? verifyShape(z) : {}),
-    findings: z
-      .array(
-        z.object({
-          issue: z
-            .enum(STORY_ISSUE_IDS as unknown as [StoryIssueId, ...StoryIssueId[]])
-            .describe('Which of the three issues this is.'),
-          rule: z.enum(rules).describe('The rule it breaks — one of the rules listed for its issue.'),
-          quote: z
-            .string()
-            .max(STORY_QUOTE_MAX)
-            .nullable()
-            .optional()
-            .describe(
-              `The exact words from the ticket (title, description or criteria) this is about, copied character for character, at most ${STORY_QUOTE_MAX} characters. Null when it is about something the ticket never mentions.`,
-            ),
-          text: z
-            .string()
-            .max(SPRINT_ASSESS_CAPS.findingText)
-            .describe(`One sentence, at most ${SPRINT_ASSESS_CAPS.findingText} characters, saying what to change.`),
-          suggestion: z
-            .string()
-            .max(SPRINT_ASSESS_CAPS.suggestion)
-            .optional()
-            .describe(`A rewrite of the quoted words, at most ${SPRINT_ASSESS_CAPS.suggestion} characters. Only with a quote.`),
-          repo: z.string().optional().describe('owner/name of the repo the file is in, when you cite one.'),
-          path: z
-            .string()
-            .optional()
-            .describe('Repo-relative path of a file you opened that backs this, e.g. src/api/users.ts'),
-        }),
-      )
-      .describe(`At most ${SPRINT_ASSESS_CAPS.findings} findings, only ones you can back from the ticket or the code.`),
-    revisedCriteria: z
-      .array(z.string().max(SPRINT_ASSESS_CAPS.criterionText))
-      .describe('A better criteria list, one checkable outcome each. Empty to keep them.'),
-    revisedDescription: z
-      .string()
-      .max(SPRINT_ASSESS_CAPS.revisedDescription)
-      .optional()
-      .describe(
-        `A rewritten description, at most ${SPRINT_ASSESS_CAPS.revisedDescription} characters. Only when the description itself should change; leave it out otherwise.`,
-      ),
   };
 }
 export type SubmitAssessmentShape = ReturnType<typeof buildSubmitAssessmentShape>;

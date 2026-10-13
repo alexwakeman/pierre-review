@@ -1,120 +1,113 @@
+import { useCallback, useMemo, useState } from 'react';
 import {
-  SPRINT_PROVIDER_LABEL,
+  SPRINT_GHOST_MAX,
+  SPRINT_STAGE_LABEL,
+  SPRINT_STAGES,
   SPRINT_TICKETS_MAX,
   sprintSourceTitle,
-  type SprintSource,
-  type SprintStoriesResponse,
 } from '@pierre-review/shared';
-import { useState } from 'react';
-import { useSprintRefresh, useSprintRefreshing, useSprintStories } from '../../hooks/useSprintStories.js';
-import { formatDate } from '../../lib/ui.js';
+import { useSprintAssessOn, useSprintGraph, useSprintRefresh, useSprintRefreshing } from '../../hooks/useSprintStories.js';
 import { useFilters } from '../../store/filters.js';
-import { ChevronIcon, GearIcon, RefreshIcon } from '../Icons.js';
+import { GearIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
-import { changedCheckCount, sprintSections, statusOrderSourceLabel } from './sprintModel.js';
-import { SprintChecksPanel } from './SprintChecksPanel.js';
-import { SprintTicketCard } from './SprintTicketCard.js';
+import { TicketRefOpenContext, type TicketRefOpener } from '../TicketRefLink.js';
+import { SprintAskPanel } from './SprintAskPanel.js';
+import { SprintGraph } from './SprintGraph.js';
+import { SprintStatusSettings } from './SprintStatusSettings.js';
+import { SprintTicketDrawer } from './SprintTicketDrawer.js';
+import {
+  DEFAULT_VISIBILITY,
+  NO_EPIC,
+  NO_FILTERS,
+  SPRINT_GROUP_MODES,
+  SPRINT_GROUP_MODE_LABEL,
+  UNASSIGNED,
+  assignGroups,
+  effectiveGroupMode,
+  filterOptions,
+  filtersActive,
+  groupList,
+  pinnedStorageKey,
+  readGroupMode,
+  safeLocalStorage,
+  stageRing,
+  toggleStage,
+  visibleGraph,
+  writeGroupMode,
+  type SprintGraphFilters,
+  type SprintGraphVisibility,
+  type SprintGroupMode,
+} from './sprintGraphModel.js';
 
-// Reports → "This sprint" — the tracker's CURRENT sprint, one card per open ticket.
-//
-//   • THE LIST is read by the tracker worker (GET /api/sprint-stories reads stored rows; opening the
-//     tab is what lets the worker read this workspace's sprint at all). "Refresh" asks for a read now.
-//   • SECTIONS follow the workspace's status layout (`statusLayout`): four stages — Not started, In
-//     progress, In review, Done (listed last, COLLAPSED behind "Show N done") — each with one section
-//     per status. Settings → Statuses
-//     places statuses in stages and orders them.
-//   • A CARD carries at most two issue chips (Unclear when done, Blocked — `STORY_CHIP_ISSUE_IDS`) and
-//     expands to: the detail per issue (which criteria and why, what it waits on and who owns it), the
-//     Spec gaps section (never a chip), candidate repos, "Check against code" (agentic, local-only) and the update panel.
-//   • NOTHING IS WRITTEN TO A TRACKER without the per-ticket confirm dialog (SprintUpdatePanel).
-//
-// ⚠ THE ORDER IS THE SERVER'S — stage, status section, then most issues first (chips only). Never by assignee,
-// and there is no team or person score here.
-// ⚠ EVERY EXPLANATION SITS BEHIND AN ⓘ — the page carries facts and labels.
-// ⚠ GENERATED TEXT IS SELECTABLE and every generated block has a Copy button (lib/copy.ts).
+// Reports → "This sprint" — THE SPRINT GRAPH (GET /api/sprint-graph): the tracker's current sprint as a
+// graph of tickets (plus the GHOST tickets outside the sprint they reach), their links and their pull
+// requests. Toolbar (title + ⓘ, Ask Claude, statuses, Refresh), filters, the canvas (SprintGraph), the
+// drawer for one ticket (SprintTicketDrawer) and "Ask Claude about this sprint" (SprintAskPanel).
+// Filters FADE what they set aside (the layout never moves); a selected node dims everything beyond one
+// (or two) links. The VIEW row decides what is DRAWN at all — shipped ghosts and the faint link kinds are
+// off by default (`visibleGraph`) — and how tickets GROUP (Epic · Theme · Section · None, remembered per
+// browser; "Theme" needs the theme pass and falls back to Epic until it has run). Every state of the page is one short sentence. ⚠ Nothing here ranks tickets or people.
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
+const TOOL_BUTTON =
+  'inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
 
-function sourceInfo(s: SprintSource | null): string {
-  if (s == null) return 'The list appears after the first read of your tracker.';
-  switch (s.kind) {
-    case 'sprint':
-      return 'Tickets in the open Jira sprint for the projects this workspace’s tickets belong to.';
-    case 'cycle':
-      return 'Issues in the active Linear cycle of the teams this workspace’s tickets belong to.';
-    case 'milestone':
-      return `Open issues in the GitHub milestone due soonest${s.dueOn != null ? ` (due ${formatDate(s.dueOn)})` : ''}${
-        s.repos.length > 0 ? `, across ${s.repos.join(', ')}` : ''
-      }.`;
-    case 'status_fallback':
-      return `${
-        s.reason === 'none_active'
-          ? `No ${SPRINT_PROVIDER_LABEL[s.provider]} sprint is active right now`
-          : `${SPRINT_PROVIDER_LABEL[s.provider]} has no sprint here to read`
-      }, so this lists To do and In progress tickets updated between ${formatDate(s.from)} and ${formatDate(s.to)}.`;
-  }
-}
-
-function SprintInfo({ data }: { data: SprintStoriesResponse }): JSX.Element {
-  const layout = data.statusLayout;
-  return (
-    <>
-      <p>{sourceInfo(data.source)}</p>
-      <p>The list is read again every 20 minutes while this tab is in use. Refresh reads it now.</p>
-      <p>Each ticket shows up to two issues:</p>
-      <ul className="list-disc space-y-0.5 pl-5">
-        <li>
-          <strong>Unclear when done</strong>: no acceptance criteria, or criteria a tester couldn&rsquo;t check.
-        </li>
-        <li>
-          <strong>Blocked</strong>: an unfinished ticket it waits on (linked in your tracker or named in the ticket), or a
-          decision nobody has made. Designs, data and files the ticket points to are not blockers.
-        </li>
-      </ul>
-      <p>
-        Opening a ticket shows its text with each problem highlighted in yellow. Hover a highlight for the rule it
-        breaks; click it for the detail on the right. Problems that point at no particular words are listed under
-        &ldquo;Not in the text&rdquo;. Opened tickets also show <strong>spec gaps</strong>: details a developer would
-        have to ask about.
-      </p>
-      <p>
-        &ldquo;No criteria&rdquo; and tracker links are found in code. The rest come from Claude reading the ticket, once it
-        has read the current text.
-      </p>
-      <p>
-        &ldquo;Check against code&rdquo; has Claude read the repos you chose for a ticket. Its findings are marked Claude,
-        and it may propose new criteria or a new description, with the changed words in yellow. They stay until the
-        ticket or the code changes.
-      </p>
-      {layout != null && (
-        <p>
-          Sections follow {statusOrderSourceLabel(layout.orderSource, { inSentence: true })}, in four stages: Not
-          started, In progress, In review and Done.
-        </p>
-      )}
-      <p>Settings chooses which issues this workspace raises, and the order of statuses.</p>
-      <p>
-        Open a ticket to edit its text: Replace takes Claude’s wording for a highlighted passage, Edit lets you rewrite
-        it. Nothing is written to your tracker until you press Update and confirm the exact text.
-      </p>
-    </>
-  );
-}
+const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
 export function SprintView(): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
-  const { data, isLoading, isError } = useSprintStories(workspaceId);
+  const { data, isLoading, isError } = useSprintGraph(workspaceId);
   const refresh = useSprintRefresh(workspaceId);
   const refreshing = useSprintRefreshing(workspaceId);
+  const askOn = useSprintAssessOn();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [doneOpen, setDoneOpen] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
+  const [filters, setFilters] = useState<SprintGraphFilters>(NO_FILTERS);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [drawer, setDrawer] = useState<string | null>(null);
+  const [hops, setHops] = useState<1 | 2>(1);
+  const [visibility, setVisibility] = useState<SprintGraphVisibility>(DEFAULT_VISIBILITY);
+  const [groupChoice, setGroupChoice] = useState<SprintGroupMode>(() => readGroupMode(safeLocalStorage()));
 
-  if (isError) {
-    return <p className="text-sm text-rose-700 dark:text-rose-400">Could not load this sprint.</p>;
-  }
-  if (isLoading || data == null) {
-    return <p className={`text-xs ${MUTED}`}>Loading…</p>;
-  }
+  const nodes = useMemo(() => data?.nodes ?? [], [data]);
+  const edges = useMemo(() => data?.edges ?? [], [data]);
+  const idents = useMemo(() => new Set(nodes.map((n) => n.ident)), [nodes]);
+  const options = useMemo(() => filterOptions(nodes), [nodes]);
+  const shown = useMemo(() => visibleGraph(nodes, edges, visibility), [nodes, edges, visibility]);
+  const themesOn = data?.themes != null && data.themes.length > 0;
+  const groupMode = effectiveGroupMode(groupChoice, themesOn);
+  const groupOf = useMemo(() => assignGroups(shown.nodes, shown.edges, groupMode), [shown, groupMode]);
+  const groups = useMemo(() => groupList(shown.nodes, groupOf, groupMode), [shown, groupOf, groupMode]);
+  const chooseGroup = useCallback((m: SprintGroupMode): void => {
+    setGroupChoice(m);
+    writeGroupMode(safeLocalStorage(), m);
+  }, []);
+
+  const open = useCallback((ident: string): void => {
+    setSelected(ident);
+    setDrawer(ident);
+  }, []);
+  const closeDrawer = useCallback((): void => {
+    const ident = drawer;
+    setDrawer(null);
+    if (ident == null) return;
+    // Hand focus back to the node the drawer was opened for.
+    requestAnimationFrame(() => {
+      const el = document.querySelector<SVGGElement>(`[data-sg-node="${CSS.escape(ident)}"]`);
+      el?.focus();
+    });
+  }, [drawer]);
+  const opener = useCallback<TicketRefOpener>(
+    (t) => {
+      if (!idents.has(t.ident)) return false;
+      open(t.ident);
+      return true;
+    },
+    [idents, open],
+  );
+
+  if (isError) return <p className="text-sm text-rose-700 dark:text-rose-400">Could not load this sprint.</p>;
+  if (isLoading || data == null || workspaceId == null) return <p className={`text-xs ${MUTED}`}>Loading…</p>;
   if (!data.trackerOn) {
     return (
       <div data-testid="sprint-view" className={`rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm dark:border-gray-700 ${MUTED}`}>
@@ -122,123 +115,341 @@ export function SprintView(): JSX.Element {
       </div>
     );
   }
-
-  const groups = sprintSections(data.tickets, data.statusLayout);
   const reading = data.read.readAt == null && data.read.error == null;
-  const facts: string[] = [];
-  if (!reading) {
-    const open = data.tickets.length - data.doneCount;
-    facts.push(`${open} open ${open === 1 ? 'ticket' : 'tickets'}`);
-    facts.push(`${data.doneCount} done`);
-  }
-  const changed = changedCheckCount(data.checks);
-  if (changed > 0) facts.push(`${changed} ${changed === 1 ? 'check' : 'checks'} changed`);
+  const sprintCount = nodes.filter((n) => !n.ghost).length;
+  const ghostCount = shown.nodes.length - sprintCount;
+  const title = data.source != null ? sprintSourceTitle(data.source) : 'This sprint';
+  const pinKey = pinnedStorageKey(data.workspaceId, title);
+  const active = filtersActive(filters);
+  const showAsk = askOn && data.aiEnabled;
 
   return (
-    <div data-testid="sprint-view" className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="flex items-center gap-1 text-sm font-semibold text-gray-800 dark:text-gray-100">
-          {data.source != null ? sprintSourceTitle(data.source) : 'This sprint'}
-          <InfoButton title="This sprint">
-            <SprintInfo data={data} />
-          </InfoButton>
-        </h3>
-        {facts.length > 0 && <span className={`text-xs ${MUTED}`}>{facts.join(' · ')}</span>}
-        {reading && <span className={`text-xs ${MUTED}`}>Reading…</span>}
-        <button
-          type="button"
-          onClick={() => setSettingsOpen((o) => !o)}
-          aria-expanded={settingsOpen}
-          className="ml-auto inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
-        >
-          <GearIcon size={12} />
-          Settings
-        </button>
-        <button
-          type="button"
-          onClick={() => refresh.mutate()}
-          disabled={refreshing}
-          className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
-        >
-          <RefreshIcon size={12} className={refreshing ? 'animate-spin' : undefined} />
-          Refresh
-        </button>
-      </div>
+    <TicketRefOpenContext.Provider value={opener}>
+      <div data-testid="sprint-view" className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-800 dark:text-gray-100">
+            {title}
+            <InfoButton title="Reading the sprint graph">
+              <GraphInfo />
+            </InfoButton>
+          </h3>
+          {!reading && nodes.length > 0 && (
+            <span className={`text-xs ${MUTED}`}>
+              {plural(sprintCount, 'ticket')} · {ghostCount} outside the sprint · {plural(shown.edges.length, 'link')}
+            </span>
+          )}
+          {reading && <span className={`text-xs ${MUTED}`}>Reading the sprint…</span>}
+          <span className="ml-auto" />
+          {showAsk && (
+            <button
+              type="button"
+              onClick={() => setAskOpen((o) => !o)}
+              aria-pressed={askOpen}
+              className="inline-flex items-center gap-1 rounded border border-ai-border px-2 py-0.5 text-xs font-medium text-ai-ink hover:bg-ai-surface-2"
+            >
+              <SparkleIcon size={12} className="text-ai-signal" />
+              Ask Claude
+            </button>
+          )}
+          <button type="button" onClick={() => setSettingsOpen((o) => !o)} aria-expanded={settingsOpen} className={TOOL_BUTTON}>
+            <GearIcon size={12} />
+            Statuses
+          </button>
+          <button type="button" onClick={() => refresh.mutate()} disabled={refreshing} className={TOOL_BUTTON}>
+            <RefreshIcon size={12} className={refreshing ? 'animate-spin' : undefined} />
+            Refresh
+          </button>
+        </div>
+        {settingsOpen && data.statusLayout != null && <SprintStatusSettings workspaceId={data.workspaceId} layout={data.statusLayout} />}
+        {data.read.error != null && <p className="text-xs text-rose-700 dark:text-rose-400">{data.read.error}</p>}
+        {(data.read.truncated || data.ghostsTruncated || (data.aiEnabled && data.briefs.pending > 0)) && (
+          <p className={`text-xs ${MUTED}`}>
+            {[
+              data.read.truncated ? `Showing the first ${SPRINT_TICKETS_MAX} tickets.` : null,
+              data.ghostsTruncated ? `Showing ${SPRINT_GHOST_MAX} tickets outside the sprint.` : null,
+              data.aiEnabled && data.briefs.pending > 0 ? `Summarising ${plural(data.briefs.pending, 'ticket')}…` : null,
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          </p>
+        )}
 
-      {settingsOpen && (
-        <SprintChecksPanel
+        {nodes.length === 0 ? (
+          !reading && <p className={`text-sm ${MUTED}`}>No tickets in this sprint.</p>
+        ) : (
+          <>
+            <ViewControls
+              groupMode={groupMode}
+              onGroup={chooseGroup}
+              themesOn={themesOn}
+              visibility={visibility}
+              setVisibility={setVisibility}
+            />
+            <Filters
+              filters={filters}
+              setFilters={setFilters}
+              options={options}
+              active={active}
+              selected={selected}
+              hops={hops}
+              setHops={setHops}
+              onClearSelection={() => setSelected(null)}
+            />
+            <div className="relative">
+              <SprintGraph
+                nodes={shown.nodes}
+                edges={shown.edges}
+                groupMode={groupMode}
+                groupOf={groupOf}
+                groups={groups}
+                faintShown={visibility.faint}
+                pinKey={pinKey}
+                filters={filters}
+                selected={selected}
+                hops={hops}
+                onOpen={open}
+                onClearSelection={() => setSelected(null)}
+              />
+              {showAsk && askOpen && <SprintAskPanel workspaceId={data.workspaceId} nodes={nodes} onClose={() => setAskOpen(false)} />}
+            </div>
+          </>
+        )}
+      </div>
+      {drawer != null && (
+        <SprintTicketDrawer
           workspaceId={data.workspaceId}
-          checks={data.checks}
-          issueTypes={data.issueTypes}
-          layout={data.statusLayout}
-          onClose={() => setSettingsOpen(false)}
+          ident={drawer}
+          repos={data.repos}
+          onClose={closeDrawer}
+          onOpenTicket={open}
         />
       )}
+    </TicketRefOpenContext.Provider>
+  );
+}
 
-      {data.read.error != null && <p className="text-xs text-rose-700 dark:text-rose-400">{data.read.error}</p>}
-      {refresh.isError && (
-        <p className="text-xs text-rose-700 dark:text-rose-400">{refresh.error.message}</p>
-      )}
-      {data.read.truncated && (
-        <p className={`text-xs ${MUTED}`}>Showing the first {SPRINT_TICKETS_MAX} tickets.</p>
-      )}
+function ViewControls({
+  groupMode,
+  onGroup,
+  themesOn,
+  visibility,
+  setVisibility,
+}: {
+  groupMode: SprintGroupMode;
+  onGroup: (m: SprintGroupMode) => void;
+  themesOn: boolean;
+  visibility: SprintGraphVisibility;
+  setVisibility: (v: SprintGraphVisibility) => void;
+}): JSX.Element {
+  const seg = (on: boolean): string =>
+    `px-2 py-0.5 text-xs first:rounded-l last:rounded-r border-y border-r first:border-l focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 ${
+      on
+        ? 'border-gray-400 bg-gray-100 font-medium text-gray-900 dark:border-gray-500 dark:bg-gray-800 dark:text-gray-100'
+        : 'border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800/60'
+    }`;
+  const toggle = (on: boolean): string =>
+    `inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${
+      on
+        ? 'border-gray-400 bg-gray-100 text-gray-800 dark:border-gray-500 dark:bg-gray-800 dark:text-gray-100'
+        : 'border-gray-300 text-gray-600 dark:border-gray-700 dark:text-gray-300'
+    } hover:border-gray-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500`;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5" role="group" aria-label="View">
+      <span className="inline-flex items-center gap-1.5">
+        <span id="sprint-group-by" className="text-xs text-gray-600 dark:text-gray-300">
+          Group by
+        </span>
+        <span className="inline-flex" role="radiogroup" aria-labelledby="sprint-group-by">
+          {SPRINT_GROUP_MODES.map((m) => {
+            const disabled = m === 'theme' && !themesOn;
+            return (
+              <button
+                key={m}
+                type="button"
+                role="radio"
+                aria-checked={groupMode === m}
+                disabled={disabled}
+                aria-describedby={disabled ? 'sprint-themes-pending' : undefined}
+                onClick={() => onGroup(m)}
+                className={seg(groupMode === m)}
+              >
+                {SPRINT_GROUP_MODE_LABEL[m]}
+              </button>
+            );
+          })}
+        </span>
+        {!themesOn && (
+          <span id="sprint-themes-pending" className={`text-xs ${MUTED}`}>
+            Themes appear after Claude reads the sprint
+          </span>
+        )}
+      </span>
+      <button
+        type="button"
+        aria-pressed={visibility.history}
+        onClick={() => setVisibility({ ...visibility, history: !visibility.history })}
+        className={toggle(visibility.history)}
+      >
+        Show shipped history
+      </button>
+      <button
+        type="button"
+        aria-pressed={visibility.faint}
+        onClick={() => setVisibility({ ...visibility, faint: !visibility.faint })}
+        className={toggle(visibility.faint)}
+      >
+        Show builds on / replaces
+      </button>
+    </div>
+  );
+}
 
-      {!reading && groups.every((g) => g.stage === 'done') && (
-        <p className={`text-sm ${MUTED}`}>No open tickets in this sprint.</p>
-      )}
-
-      {groups.map((g) => {
-        const n = g.sections.reduce((k, sec) => k + sec.tickets.length, 0);
-        // Done is COLLAPSED by default: the open work leads, finished tickets are one click away.
-        const collapsed = g.stage === 'done' && !doneOpen;
+function Filters({
+  filters,
+  setFilters,
+  options,
+  active,
+  selected,
+  hops,
+  setHops,
+  onClearSelection,
+}: {
+  filters: SprintGraphFilters;
+  setFilters: (f: SprintGraphFilters) => void;
+  options: ReturnType<typeof filterOptions>;
+  active: boolean;
+  selected: string | null;
+  hops: 1 | 2;
+  setHops: (h: 1 | 2) => void;
+  onClearSelection: () => void;
+}): JSX.Element {
+  const chip = (on: boolean): string =>
+    `inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${
+      on
+        ? 'border-gray-400 bg-gray-100 text-gray-800 dark:border-gray-500 dark:bg-gray-800 dark:text-gray-100'
+        : 'border-gray-300 text-gray-600 dark:border-gray-700 dark:text-gray-300'
+    } hover:border-gray-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500`;
+  const allStages = filters.stages.size === 4;
+  const select =
+    'max-w-[12rem] rounded border border-gray-300 bg-white px-1 py-0.5 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200';
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filters">
+      {SPRINT_STAGES.map((s) => {
+        const on = !allStages && filters.stages.has(s);
         return (
-          <section key={g.stage} className="space-y-3" data-testid={`sprint-group-${g.stage}`}>
-            <h4 className="flex flex-wrap items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
-              <span>
-                {g.heading} <span className={`font-normal ${MUTED}`}>· {n}</span>
-              </span>
-              {g.stage === 'done' && (
-                <button
-                  type="button"
-                  onClick={() => setDoneOpen((o) => !o)}
-                  aria-expanded={doneOpen}
-                  aria-controls={doneOpen ? 'sprint-done-sections' : undefined}
-                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-normal text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
-                >
-                  <ChevronIcon dir={doneOpen ? 'up' : 'down'} size={11} />
-                  {doneOpen ? 'Hide done' : `Show ${n} done`}
-                </button>
-              )}
-            </h4>
-            {!collapsed && (
-              <div className="space-y-3" id={g.stage === 'done' ? 'sprint-done-sections' : undefined}>
-                {g.sections.map((sec) => (
-                  <div key={sec.status ?? '-'} className="space-y-2" data-testid="sprint-section">
-                    {g.stage !== 'not_started' && (
-                      <h5 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-                        {sec.status ?? 'No status'} <span className={`font-normal ${MUTED}`}>· {sec.tickets.length}</span>
-                      </h5>
-                    )}
-                    <ul className="space-y-2">
-                      {sec.tickets.map((t) => (
-                        <li key={t.ident}>
-                          <SprintTicketCard
-                            ticket={t}
-                            workspaceId={data.workspaceId}
-                            aiEnabled={data.aiEnabled}
-                            repos={data.repos}
-                            checks={data.checks}
-                          />
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
+          <button
+            key={s}
+            type="button"
+            aria-pressed={on}
+            onClick={() =>
+              setFilters({ ...filters, stages: allStages ? new Set([s]) : toggleStage(filters.stages, s) })
+            }
+            className={chip(on)}
+          >
+            <svg width="10" height="10" aria-hidden="true">
+              <circle cx="5" cy="5" r="3.5" fill="none" stroke={stageRing(s)} strokeWidth="2" />
+            </svg>
+            {SPRINT_STAGE_LABEL[s]}
+          </button>
         );
       })}
+      <select
+        aria-label="Assignee"
+        value={filters.assignee ?? ''}
+        onChange={(e) => setFilters({ ...filters, assignee: e.target.value === '' ? null : e.target.value })}
+        className={select}
+      >
+        <option value="">Anyone</option>
+        {options.assignees.map((a) => (
+          <option key={a} value={a}>
+            {a}
+          </option>
+        ))}
+        {options.anyUnassigned && <option value={UNASSIGNED}>Unassigned</option>}
+      </select>
+      {(options.epics.length > 0 || options.anyNoEpic) && (
+        <select
+          aria-label="Epic"
+          value={filters.epic ?? ''}
+          onChange={(e) => setFilters({ ...filters, epic: e.target.value === '' ? null : e.target.value })}
+          className={select}
+        >
+          <option value="">Any epic</option>
+          {options.epics.map((ep) => (
+            <option key={ep.key} value={ep.key}>
+              {ep.title != null ? `${ep.title} (${ep.key})` : ep.key}
+            </option>
+          ))}
+          {options.anyNoEpic && <option value={NO_EPIC}>No epic</option>}
+        </select>
+      )}
+      <button type="button" aria-pressed={filters.hasPrs} onClick={() => setFilters({ ...filters, hasPrs: !filters.hasPrs })} className={chip(filters.hasPrs)}>
+        Has PRs
+      </button>
+      <button type="button" aria-pressed={filters.hasDeps} onClick={() => setFilters({ ...filters, hasDeps: !filters.hasDeps })} className={chip(filters.hasDeps)}>
+        Has dependencies
+      </button>
+      {active && (
+        <button type="button" onClick={() => setFilters(NO_FILTERS)} className="text-xs text-sky-700 hover:underline dark:text-sky-300">
+          Clear filters
+        </button>
+      )}
+      {selected != null && (
+        <span className="ml-auto inline-flex items-center gap-1.5">
+          <button type="button" aria-pressed={hops === 2} onClick={() => setHops(hops === 2 ? 1 : 2)} className={chip(hops === 2)}>
+            2 hops
+          </button>
+          <button type="button" onClick={onClearSelection} className="text-xs text-sky-700 hover:underline dark:text-sky-300">
+            Show all
+          </button>
+        </span>
+      )}
     </div>
+  );
+}
+
+function GraphInfo(): JSX.Element {
+  return (
+    <>
+      <p>Each circle is a ticket in the sprint. Click one, or press Enter on it, to open it.</p>
+      <ul className="list-disc space-y-1 pl-5">
+        <li>
+          <strong>Ring colour</strong> is the ticket&rsquo;s section: not started, in progress, in review or done. Done
+          tickets are fainter. Hover for the exact status.
+        </li>
+        <li>
+          <strong>Size</strong> is how many of the lines on screen touch the ticket.
+        </li>
+        <li>
+          <strong>Lines</strong>: an arrow points from a ticket to one it depends on (a blocking link in the tracker, or
+          the ticket&rsquo;s own text). A dashed line joins tickets built alongside each other. &ldquo;Show builds on /
+          replaces&rdquo; adds faint lines where one ticket builds on or replaces another. Hover a line for the words
+          behind it.
+        </li>
+        <li>
+          <strong>Small dashed circles</strong> are tickets outside the sprint that a sprint ticket leads to, up to three
+          links away. The further away, the fainter. Only unfinished ones show; &ldquo;Show shipped history&rdquo; adds
+          the done ones and the chains behind them.
+        </li>
+        <li>
+          <strong>Group by</strong> gathers tickets inside a faint labelled circle: by theme (the default), by epic or by
+          section.
+          Lines still cross between groups. A ticket outside the sprint joins the group of the sprint ticket it is
+          linked to. Themes are short names Claude gives the sprint&rsquo;s main areas of work, read from the tickets;
+          each ticket is in one; until Claude has named them, Theme shows epics. This browser remembers your choice.
+        </li>
+        <li>
+          <strong>Dots</strong> circling a ticket are its pull requests: open, draft or merged. A red ring means its checks
+          are failing.
+        </li>
+      </ul>
+      <p>
+        The graph drifts slowly and stops while your pointer is over it or a ticket is selected. Drag a ticket to pin it
+        there; this browser remembers it. Hold Ctrl or ⌘ and scroll, or pinch, to zoom; a plain scroll moves the page.
+        Drag the background to move around. Fit frames what is shown.
+      </p>
+      <p>Where tickets crowd, some names hide. Hover or zoom in to read them.</p>
+      <p>Filters fade what they leave out without moving anything. A selected ticket fades everything more than one link away.</p>
+    </>
   );
 }

@@ -17,6 +17,7 @@
     "@tanstack/query-core": "^5.101.0",
     "@tanstack/react-query": "^5.101.0",
     "@tanstack/react-query-persist-client": "^5.101.0",
+    "d3-force": "^3.0.0",
     "highlight.js": "^11.11.1",
     "idb-keyval": "^6.2.1",
     "react": "^18.3.1",
@@ -31,6 +32,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@types/d3-force": "^3.0.10",
     "@types/node": "^22.10.5",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",

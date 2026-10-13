@@ -945,8 +945,9 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   is read when a PR is RECEIVED, never when it is VIEWED**: the pull-based worker stores tickets in
   `tracker_tickets` and every surface reads the rows. ⚠ The ONE exception is the SPRINT LIST read
   (`tracker/sprint/`, Reports → This sprint): demand-gated by `sprint_reads.viewed_at` (7 days), every
-  20 min, its own `sprint_tickets` table; still never called by a view. The write-back
-  (`tracker/write/`) writes only on a per-ticket confirmed press, claimed, never retried. ⚠ The plugin-era data was MOVED by a guarded
+  20 min, its own `sprint_tickets` table, plus the tickets they name and the GHOST CHAINS those lead to
+  (`sprint_ref_tickets`, ≤ 3 hops / 60); still never called by a view. ⚠ **Nothing writes to a tracker**
+  (the write-back and `tracker_writes` were removed 2026-10-12). ⚠ The plugin-era data was MOVED by a guarded
   boot step (`tracker/legacy-import.ts`), not a migration; plugin `0038`/`0039` are `SELECT 1;`
   stubs and the `issue_*`/`jira_*` columns on `pro_workspace_settings` are dormant — never re-declare
   them. ⚠ `tracker/runtime.ts` opens the DB at import: keep the review-side imports LAZY
@@ -1175,29 +1176,30 @@ key must be a picked key; the first `submit_report` wins. [docs/CLAUDE-REVIEW.md
 Blocked (only an unfinished ticket or open decision, `isRealStoryBlocker`; a ticket the TEXT names
 blocks ONLY when the label's rubric-4 `references` read it `depends_on` — never out of scope, built
 alongside, builds on, supersedes or context) · Spec gaps (no chip).
-Input via `db/story-issue-input.ts`; retired ids drop through `isStoryIssueId`. ⚠ This sprint asks
-"blocked NOW" (`foldStoryIssues`); RATES use `storyIssueRateUnits` (unclear = % of CRITERIA;
-blocked = tracker LINKS, any status; "no criteria" apart). Every sentence is templated.
+Input via `db/story-issue-input.ts`; retired ids drop through `isStoryIssueId`. They feed the story
+report only — This sprint raises NO issues since 2026-10-12. RATES use `storyIssueRateUnits` (unclear =
+% of CRITERIA; blocked = tracker LINKS, any status; "no criteria" apart). Every sentence is templated.
 
 **Story labels** — the Story health charts are DELETED (2026-10-11; no `GET /api/story-health`, no
 UI); the labels stay. The label run (`POST /api/story-health/label`, path kept, local-only) labels the
-last 13 weeks' stories (`db/story-health.ts`); This sprint's labels come from `review/sprint-labels/`.
+last 13 weeks' stories (`db/story-health.ts`); This sprint makes BRIEFS, not labels.
 ⚠ Labels count ONLY when CURRENT (rubric version AND text hash, `db/story-label-input.ts`). A HELD rate
 (`STORY_ISSUE_RATES_HELD`) never reaches the story report. [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md)
 § Story labels.
 
-**Reports → This sprint** (`?insightsTab=sprint`, Pro `periodReports`; sqlite `0100` / pg `0087`): the
-tracker's current sprint in FOUR stages (Not started · In progress · In review · Done, Done listed
-last), sections by status (`db/sprint-status-layout.ts`; the reader's placement beats category);
-per ticket ≤ 2 issue chips minus the workspace's checks (`applyStoryIssueChecks`); repos = the
-reader's SAVED set, else the confident suggestions (`effectiveSprintRepos`, `repos_saved_at`); "Check against code" (Sonnet 5, LOCAL ONLY,
-`review/sprint-assess/`: STAGE-AWARE, the server picking the mode from the stage — a PLAN of changes for
-a ticket not built yet, a per-criterion VERIFY + tests once in review; cited paths verified or dropped),
-`related` ticket pills (stored rows only, never a tracker call: Blocked by · Coordinate with ·
-Related; statuses of tickets the text names come from the sprint READ's one batched lookup,
-`sprint_ref_tickets`, Jira only) and the per-ticket write-back. ⚠ Nothing writes without the dialog's Confirm; no agent tool,
-setting or bulk route writes. Copy goes through ONE helper, `lib/copy.ts`.
-[docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint assessment · docs/TRACKERS.md.
+**Reports → This sprint is a GRAPH** (`?insightsTab=sprint`, Pro `periodReports`; `GET /api/sprint-graph`
++ `…/ticket`, DB only, shared `sprint-graph.ts`): nodes = the sprint's tickets + GHOSTS (outside tickets
+reached along edges, ≤ 3 hops / 60), each staged by the status layout (`db/sprint-status-layout.ts`, four
+stages, placement beats category) with all its PRs; edges = a blocking tracker link or a CURRENT BRIEF's
+depends_on / concurrent / builds_on / supersedes (never out_of_scope / context) — ONE fold for page, brief
+pass and ghost lookup (`db/sprint-graph-fold.ts`). The BRIEF (Haiku, `review/sprint-briefs/`, local + AI,
+after each read, never a view) = summary + criteria itemised in the Story check's words (derived when
+absent) + rubric 4's references (`STORY_REFERENCE_RULES`, shared verbatim); current on text hash +
+`SPRINT_BRIEF_VERSION`. "Check against code" (Sonnet 5, LOCAL, `review/sprint-assess/`, format 6: PLAN or
+VERIFY over the brief's criteria, no findings / revisions; paths verified); "Ask Claude about this sprint"
+(Haiku, LOCAL, `review/sprint-ask/`, the stored graph nonce-fenced, server-side turn cap). ⚠ No chips,
+findings, checks or write-back (2026-10-12). [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint briefs ·
+§ Sprint assessment · docs/TRACKERS.md.
 
 **The People report** (Reports → People) — a multi-select picker of humans AND bots, one report
 with a SECTION per pick; contract in
@@ -1537,7 +1539,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0093` and plugin `0034`–`0037` + `0040` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0095` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

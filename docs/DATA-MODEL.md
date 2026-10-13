@@ -668,9 +668,9 @@ into the three story issues (shared `story-issues.ts`); the issues are never sto
 fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`); in
 `accountScopedTables()` and erased explicitly.
 
-## Reports → This sprint — five tables (CORE; sqlite `0100` / pg `0087`)
+## Reports → This sprint — six tables (CORE; sqlite `0100` / pg `0087`, `0107` / pg `0094`)
 
-- **`workspaces.sprint_checks`** — Reports → This sprint's checks, OVERRIDES ONLY (`SprintChecks` = `{off: StoryIssueId[], issueTypes: string[]}`, NULL = all three issues on, every type). An older stored shape (chip ids, per-chip type object, retired issue ids such as `too_big`) is read tolerantly — no migration. `db/sprint-checks.ts`.
+- **`workspaces.sprint_checks`** — DORMANT since 2026-10-12 (the checks left with This sprint's chips): never read or written; kept rather than rebuilding the table.
 - **`sprint_reads`** — one per (account, workspace): the demand gate (`viewed_at`), `next_read_at`,
   the last good `source_json` + `read_at`, `error_code`, `truncated`, and the `provider` + `api_root`
   (sqlite `0101` / pg `0088`) it was read from — a workspace that moved tracker or site since is
@@ -678,31 +678,37 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
 - **`sprint_tickets`** — one per (account, workspace, `ident`): the sprint list's tickets, PR or not
   (they cannot live in `tracker_tickets`, keyed on a PR). Story text, status, assignee, project /
   epic / components, `sprint_name`, `in_sprint` (false once a read stops returning it),
-  `first_seen_at` (insert-only), `next_check_at` (epoch 0 = re-read now, after a write),
+  `first_seen_at` (insert-only), `next_check_at` (dormant since the write-back left),
   `repos_saved_at` (sqlite `0104` / pg `0091`: the reader saved this ticket's repos — even an empty set;
   NULL = never, so the confident suggestions are the default; the read's upsert never sets it). Pruned
   90 days after `last_seen_at`, with its accepted repos.
-- **`sprint_ref_tickets`** (sqlite `0106` / pg `0093`) — one per (account, workspace, `ident`): the
-  key, title and status of a ticket the sprint's text NAMES that no `sprint_tickets` / `tracker_tickets`
-  row holds, written ONLY by the sprint read's one batched lookup (`tracker/sprint/ref-status.ts`) and
-  REPLACED by each finished lookup; `knownTicketsFor`'s last source. Workspace via the named composite
+- **`sprint_ref_tickets`** (sqlite `0106` / pg `0093`; text + `depth` sqlite `0107` / pg `0094`) — one per
+  (account, workspace, `ident`): a ticket outside the sprint that the sprint NAMES (depth 1) or a GHOST
+  CHAIN reaches (depth 2–3): key, title, status, description, criteria, type, assignee, links
+  (`blocked_by_json`) and `depth`, written ONLY by the sprint read's batched lookups
+  (`tracker/sprint/ref-status.ts`) and REPLACED by each finished full lookup; `knownTicketsFor`'s last
+  source. Workspace via the named composite
   FK (cascade); in `accountScopedTables()` + erasure; `verify:isolation` checks `knownTicketsFor` reads.
 - **`sprint_ticket_repos`** — the repos the reader ACCEPTED for a ticket, unique (account, workspace,
   ident, repo). ⚠ Ids arrive in a BODY, so tenancy is STRUCTURAL: NAMED composite FKs onto
   `repos(id, account_id)` and `workspaces(id, account_id)`. `deleteRepo` deletes its rows explicitly.
-- **`sprint_assessments`** — one row per "Check against code" run (no unique): status/phase, the
-  validated body (`{summary, issues, revisedCriteria}`; an older shape is served as `outdated`),
-  `fingerprint` (format version + text hash + sorted repo SHAs), `repos_json` (the SHAs read), cost.
-- **`tracker_writes`** — the write-back log, unique (account, `request_id`): the claim
-  (`status:'writing'`), the EXACT text sent + its hash, mode/target, outcome, url. ⚠ It is the only
-  record that a write reached the tracker, so `deleteWorkspace` MOVES its rows to Default before the
-  delete (like `workspace_reviewers`), never lets the cascade take them. `assessment_id` is history
-  only and has NO FK (a composite `(assessment_id, account_id)` SET NULL would null `account_id` on
-  SQLite); `performTrackerWrite` keeps it only when it is this account's assessment of this ticket in
-  this workspace.
-
-All five carry `account_id` (cascade) and a composite FK onto `workspaces(id, account_id)`; all are
-in `accountScopedTables()`, erased explicitly, and checked by `verify:isolation`.
+- **`sprint_assessments`** — one row per "Check against code" run (no unique): status/phase/mode, the
+  validated body (format 6: `{mode, summary, plan, criterionChecks, coverage}`; an unreadable shape is
+  served as `outdated`), `fingerprint` (format version + mode + text hash + sorted repo SHAs),
+  `repos_json` (the SHAs read), cost.
+- **`sprint_briefs`** (sqlite `0107` / pg `0094`) — one per (account, workspace, `ident`): the Haiku BRIEF
+  of a sprint ticket or ghost — `summary`, `criteria_json` (`[{n, text}]`), `criteria_derived`,
+  `references_json` (rubric-4 relations, verified quotes), model, cost — CURRENT while `text_hash` and
+  `brief_version` match today's (`db/sprint-briefs.ts`). Written only by `review/sprint-briefs/`;
+  replaced by each new brief.
+- **`sprint_themes`** (sqlite `0108` / pg `0095`) — ONE per (account, workspace): the sprint-wide Haiku
+  THEMES — `themes_json` (`[{name}]`, 3–8) and `assignments_json` (`[{ident, theme}]`, every sprint
+  ticket once), model, cost — CURRENT while `input_hash` (sprint keys + brief summaries) and
+  `theme_version` match today's (`db/sprint-themes.ts`). Written only by `review/sprint-themes/`;
+  replaced by each pass.
+All seven carry `account_id` (cascade) and a composite FK onto `workspaces(id, account_id)`; all are
+in `accountScopedTables()`, erased explicitly, and checked by `verify:isolation`. `tracker_writes` (the
+write-back log) is DROPPED by sqlite `0107` / pg `0094`.
 
 `tracker_tickets.issue_created_at` / `issue_resolved_at` (sqlite `0098` / pg `0085`): the ticket's own
 created / resolved instants. ⚠ The table is ONE ROW PER (account, PR, key), so several rows can carry a

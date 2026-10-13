@@ -41,8 +41,7 @@ import type {
   TicketLinksResponse,
   TicketMergedPrsResponse,
   WorkspaceTrackerSettings,
-  SprintStoriesResponse,
-  SprintTicketRow,
+  SprintGraphResponse,
 } from '@pierre-review/shared';
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
 // build the Pending tabs from the shipped list rather than re-typing it.
@@ -52,8 +51,6 @@ import {
   pendingTabHolds,
   pendingAuthorSideOf,
   resolveMyTurnSettings,
-  STORY_CHIP_ISSUE_IDS,
-  foldStoryIssues,
 } from '@pierre-review/shared';
 
 // Deterministic, self-contained API fixtures for the My Turn / Feed / Focus-mode
@@ -509,74 +506,21 @@ const SYNC_ACTIVITY: SyncActivityResponse = {
   generatedAt: iso(0),
 };
 
-// Reports → This sprint (GET /api/sprint-stories). Typed so `pnpm typecheck` covers the shape, and
-// served explicitly — the catch-all `{}` has no `tickets`/`read`, and the tab would blank. One
-// not-started ticket with issues and no repos, one in-progress ticket with a SUCCEEDED assessment.
-// Issues come from the shared fold, so the fixture cannot drift from it.
-const SPRINT_TICKET_BASE: Omit<SprintTicketRow, 'ident' | 'key' | 'title' | 'phase' | 'stage'> = {
-  url: null,
-  provider: 'jira',
-  status: null,
-  issueType: 'Story',
-  assignee: null,
-  epic: null,
-  description: '',
-  acceptanceCriteria: '',
-  acField: null,
-  criteria: { items: [], source: 'none' },
-  labels: 'none',
-  issues: [],
-  specGaps: [],
-  flagCount: 0,
-  findings: [],
-  related: [],
-  pullRequests: [],
-  repos: { accepted: [], suggested: [], defaulted: false },
-  assessment: null,
-  replaceTarget: { kind: 'description' },
-  replaceBases: { description: { hash: '0'.repeat(64), truncated: false }, acceptanceCriteria: null },
-  lastWrite: null,
-};
-const chipsOnly = (issues: ReturnType<typeof foldStoryIssues>) => issues.filter((i) => STORY_CHIP_ISSUE_IDS.includes(i.id));
-const SPRINT_ACME1_ISSUES = chipsOnly(foldStoryIssues({ criteria: [], label: null }));
-const SPRINT_ACME2_ALL = foldStoryIssues({
-  criteria: ['Users get a link by email', 'The link works once'],
-  label: {
-    criteria: [
-      { n: 1, testable: false, reason: 'no expected result' },
-      { n: 2, testable: true, reason: null },
-    ],
-    story: {
-      // A design input would be dropped (`isRealStoryBlocker`); an open decision is a real blocker.
-      dependencies: [{ kind: 'decision', what: 'email copy sign-off', owner: 'UCD team', ticketKey: null }],
-      gaps: [{ type: 'edge_case', text: 'No behaviour when the link has expired' }],
-    },
-  },
-  links: [
-    {
-      key: 'ACME-9',
-      title: 'Email sending service',
-      status: 'In Progress',
-      category: 'indeterminate',
-      relation: 'is blocked by',
-      url: 'https://acme.atlassian.net/browse/ACME-9',
-    },
-  ],
-});
-// Spec gaps are not a chip: they ride `specGaps` (the opened card's own section).
-const SPRINT_ACME2_ISSUES = chipsOnly(SPRINT_ACME2_ALL);
-const SPRINT_ACME2_GAPS = SPRINT_ACME2_ALL.find((i) => i.id === 'spec_gaps')?.gaps ?? [];
-const SPRINT_STORIES: SprintStoriesResponse = {
+// Reports → This sprint (GET /api/sprint-graph). Typed so `pnpm typecheck` covers the shape, and
+// served explicitly — the catch-all `{}` has no `nodes`/`read`, and the tab would blank. Two sprint
+// tickets and one ghost: ACME-2 depends on ACME-9 (a tracker link) and is built alongside ACME-1 (its
+// brief); ACME-2 carries an open PR.
+const SPRINT_GRAPH: SprintGraphResponse = {
   workspaceId: WORKSPACE.id,
   trackerOn: true,
   provider: 'jira',
   source: { kind: 'sprint', provider: 'jira', names: ['Sprint 42'] },
   read: { readAt: iso(0.01), checkedAt: iso(0.01), error: null, truncated: false },
-  doneCount: 0,
   aiEnabled: true,
   repos: [{ repoId: REPO.id, fullName: REPO.fullName }],
-  checks: { off: [], issueTypes: [] },
-  issueTypes: ['Story'],
+  themes: null,
+  ghostsTruncated: false,
+  briefs: { current: 2, pending: 1 },
   statusLayout: {
     order: [
       { name: 'To Do', category: 'new', count: 1, auto: true, stage: 'not_started' },
@@ -593,84 +537,76 @@ const SPRINT_STORIES: SprintStoriesResponse = {
     ],
     settings: { sections: null },
   },
-  tickets: [
+  nodes: [
     {
-      ...SPRINT_TICKET_BASE,
       ident: 'jira:https://acme.atlassian.net#ACME-1',
       key: 'ACME-1',
       title: 'Export a report as CSV',
       url: 'https://acme.atlassian.net/browse/ACME-1',
-      phase: 'not_started',
-      stage: 'not_started',
+      provider: 'jira',
+      ghost: false,
+      depth: 0,
       status: { name: 'To Do', category: 'new' },
-      issues: SPRINT_ACME1_ISSUES,
-      flagCount: SPRINT_ACME1_ISSUES.length,
-      repos: {
-        accepted: [],
-        suggested: [{ repoId: REPO.id, fullName: REPO.fullName, reasons: ['same_project'], prCount: 4, confident: true }],
-        defaulted: false,
-      },
+      stage: 'not_started',
+      issueType: 'Story',
+      assignee: { name: 'Amy', avatarUrl: null },
+      epic: { key: 'ACME-100', title: 'Reports' },
+      brief: { state: 'current', summary: 'Lets a manager download any report as a CSV file.', criteriaCount: 3, criteriaDerived: true },
+      prs: [],
+      degree: 1,
+      theme: null,
     },
     {
-      ...SPRINT_TICKET_BASE,
       ident: 'jira:https://acme.atlassian.net#ACME-2',
       key: 'ACME-2',
       title: 'Sign in with a magic link',
       url: 'https://acme.atlassian.net/browse/ACME-2',
-      phase: 'in_progress',
-      stage: 'in_progress',
+      provider: 'jira',
+      ghost: false,
+      depth: 0,
       status: { name: 'In Progress', category: 'indeterminate' },
-      description: '## Acceptance criteria\n\n- Users get a link by email\n- The link works once',
-      criteria: { items: ['Users get a link by email', 'The link works once'], source: 'description_heading' },
-      labels: 'current',
-      issues: SPRINT_ACME2_ISSUES,
-      specGaps: SPRINT_ACME2_GAPS,
-      flagCount: SPRINT_ACME2_ISSUES.length,
-      repos: { accepted: [{ repoId: REPO.id, fullName: REPO.fullName }], suggested: [], defaulted: false },
-      assessment: {
-        currency: 'current',
-        record: {
-          id: 7,
-          workspaceId: WORKSPACE.id,
-          ident: 'jira:https://acme.atlassian.net#ACME-2',
-          model: 'claude-sonnet-5',
-          status: 'succeeded',
-          mode: 'plan',
-          phase: null,
-          repos: [{ repoId: REPO.id, fullName: REPO.fullName, sha: 'abc1234def' }],
-          body: {
-            mode: 'plan',
-            plan: [
-              { repo: REPO.fullName, path: 'src/auth/magic-link.ts', newPath: null, change: 'Add an expiry time to each link.' },
-              { repo: REPO.fullName, path: null, newPath: 'src/auth/expired-link.tsx', change: 'Add a page for an expired link.' },
-            ],
-            criterionChecks: [],
-            coverage: null,
-            summary: 'Two changes in the auth module: link expiry and an expired-link page.',
-            findings: [
-              {
-                issue: 'unclear_done',
-                rule: 'no_expected_result',
-                quote: 'Users get a link by email',
-                where: 'criteria',
-                text: 'Say how long a link lasts and what an expired link shows.',
-                suggestion: null,
-                ref: { repo: REPO.fullName, path: 'src/auth/magic-link.ts' },
-              },
-            ],
-            revisedCriteria: ['A user who asks for a link receives an email within a minute', 'An expired link shows a clear message'],
-            revisedDescription: null,
-          },
-          outdated: false,
-          dropped: { paths: 0, items: 0 },
-          error: null,
-          costUsd: 0.42,
-          numTurns: 12,
-          createdAt: iso(0.05),
-          completedAt: iso(0.04),
+      stage: 'in_progress',
+      issueType: 'Story',
+      assignee: null,
+      epic: null,
+      brief: { state: 'current', summary: 'Users sign in from a one-time link sent by email.', criteriaCount: 2, criteriaDerived: false },
+      prs: [
+        {
+          prId: PRS[0]!.id,
+          number: PRS[0]!.number,
+          repoFullName: REPO.fullName,
+          title: PRS[0]!.title,
+          state: 'open',
+          draft: false,
+          ciState: 'failure',
+          url: `https://github.com/${REPO.fullName}/pull/${PRS[0]!.number}`,
         },
-      },
+      ],
+      degree: 2,
+      theme: null,
     },
+    {
+      ident: 'jira:https://acme.atlassian.net#ACME-9',
+      key: 'ACME-9',
+      title: 'Email sending service',
+      url: 'https://acme.atlassian.net/browse/ACME-9',
+      provider: 'jira',
+      ghost: true,
+      depth: 1,
+      status: { name: 'In Progress', category: 'indeterminate' },
+      stage: 'in_progress',
+      issueType: 'Story',
+      assignee: { name: 'Ben', avatarUrl: null },
+      epic: null,
+      brief: { state: 'pending', summary: null, criteriaCount: 0, criteriaDerived: false },
+      prs: [],
+      degree: 1,
+      theme: null,
+    },
+  ],
+  edges: [
+    { from: 'jira:https://acme.atlassian.net#ACME-2', to: 'jira:https://acme.atlassian.net#ACME-9', kind: 'depends_on', source: 'tracker', quote: null },
+    { from: 'jira:https://acme.atlassian.net#ACME-2', to: 'jira:https://acme.atlassian.net#ACME-1', kind: 'concurrent', source: 'text', quote: 'built together with ACME-1' },
   ],
 };
 
@@ -1028,7 +964,7 @@ export async function installMockApi(page: Page): Promise<void> {
       if (path.endsWith('/api/ticket-links')) {
         return json(route, { prs: [], titlesComplete: true } satisfies TicketLinksResponse);
       }
-      if (path.endsWith('/api/sprint-stories')) return json(route, SPRINT_STORIES);
+      if (path.endsWith('/api/sprint-graph')) return json(route, SPRINT_GRAPH);
       if (path.endsWith('/api/ticket-merged-prs')) {
         return json(route, { workspaceId: WORKSPACE.id, tickets: [] } satisfies TicketMergedPrsResponse);
       }

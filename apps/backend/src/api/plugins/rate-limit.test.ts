@@ -475,12 +475,13 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/story-health/label/cancel')).toEqual(['read']);
   });
 
-  // This sprint: the refresh kicks a tracker read, the assess POST bills a Sonnet run, the write is
-  // ONE third-party write per press; everything else is a DB read.
+  // This sprint: the refresh kicks a tracker read, the assess POST bills a Sonnet run, Ask bills one
+  // Haiku completion per turn; everything else is a DB read. Nothing writes to a tracker.
   it('tiers This sprint per route', () => {
-    expect(tiers('GET', '/api/sprint-stories')).toEqual(['read']);
+    expect(tiers('GET', '/api/sprint-graph')).toEqual(['read']);
+    expect(tiers('GET', '/api/sprint-graph/ticket')).toEqual(['read']);
+    expect(tiers('POST', '/api/sprint-graph/ask')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('PUT', '/api/sprint-stories/repos')).toEqual(['read']);
-    expect(tiers('PUT', '/api/sprint-stories/checks')).toEqual(['read']);
     expect(tiers('PUT', '/api/sprint-stories/statuses')).toEqual(['read']);
     // The ticket tab: DB-only, decided.
     expect(tiers('GET', '/api/ticket-prs')).toEqual(['read']);
@@ -488,8 +489,6 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/sprint-stories/assess')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('GET', '/api/sprint-stories/assessments/7')).toEqual(['read']);
     expect(tiers('POST', '/api/sprint-stories/assessments/7/cancel')).toEqual(['read']);
-    expect(tiers('POST', '/api/sprint-stories/write')).toEqual(['github_write']);
-    expect(tiers('GET', '/api/sprint-stories/write')).toEqual(['read']);
   });
 
   // /api/pro/bot-themes — the revived Bots "What they're flagging" panel. Both tiers land via

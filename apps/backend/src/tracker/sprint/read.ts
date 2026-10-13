@@ -40,8 +40,8 @@ import type { SprintFetchedTicket, SprintLister } from './types.js';
 //
 // What is stored: `sprint_tickets` (one row per ticket, WITH OR WITHOUT a PR; `in_sprint` false
 // once a later read stops returning it; pruned after 90 days unseen), `sprint_ref_tickets` (the
-// status of tickets their text names that Limn holds nowhere else — ./ref-status.ts, one batched
-// lookup per read, replaced each time) and the workspace's
+// tickets their text names, with their text, and the ghost chains those lead to — ./ref-status.ts,
+// batched lookups per read, replaced each time) and the workspace's
 // `sprint_reads` row (where the list came from, when, and the last failure's CODE — the sentence is
 // `sprintReadErrorMessage`'s). A failed read keeps the last good list. Logs carry account,
 // workspace and a code only — never a token or anything a tracker sent back.
@@ -54,15 +54,12 @@ export const SPRINT_LISTERS: Record<TrackerProvider, SprintLister> = {
 
 /** Workspaces read per tick at most. */
 export const TICK_WORKSPACES = 5;
-/** Forced single-ticket re-reads per account per tick at most. */
-export const FORCED_REREADS_PER_TICK = 10;
 /** A ticket unseen this long is deleted. */
 export const SPRINT_PRUNE_MS = 90 * 86_400_000;
 /** A rate-limited read is retried this soon. */
 export const SPRINT_RATE_LIMIT_RETRY_MS = 5 * 60_000;
 
 const DAY_MS = 86_400_000;
-const EPOCH = new Date(0);
 
 export interface SprintReadOptions {
   now?: () => number;
@@ -371,127 +368,45 @@ async function storeSprintList(
   return idents.length;
 }
 
-// ---- one ticket, read live now (the write-back's pre-write check) ----
+// ---- the ghost chain's next hop (after a brief pass) ----
 
 /**
- * Read ONE stored sprint ticket from the tracker now and store its text. Returns the stored text
- * columns. THROWS when the tracker cannot be read — the caller (the "Replace" write-back) must not
- * write over text it could not check. `fetch` is a test seam for `reader.fetchTicket`.
+ * The brief pass briefed new ghosts: look up the tickets THEY point at that nothing stores yet
+ * (./ref-status.ts, mode 'missing'). Part of the read's pipeline — the pass runs only after a read —
+ * never a view. Gated like a read (tracker reads, call prepares, not backed off). Returns the rows
+ * stored. Never throws.
  */
-export async function rereadSprintTicketNow(
-  ctx: TrackerContext,
-  a: {
-    accountId: number;
-    workspaceId: number;
-    rowId: number;
-    issueKey: string;
-    call: TrackerCall;
-    fetch?: (call: TrackerCall, key: string) => Promise<FetchedTicket>;
-    now?: () => number;
-  },
-): Promise<{ description: string; acceptanceCriteria: string; acFieldId: string | null; acFieldName: string | null }> {
-  const now = a.now ?? Date.now;
-  const fetch =
-    a.fetch ??
-    ((call: TrackerCall, key: string) => {
-      const reader = maybeAdapterFor(call.provider)?.reader;
-      if (reader == null) throw new JiraFetchError('not_found');
-      return reader.fetchTicket(call, key);
-    });
-  const t = await fetch(a.call, a.issueKey);
-  const acSettings = await readAcFieldSettings(ctx, a.accountId, [a.workspaceId]);
-  const cols = textColumns(t, settingFor(acSettings, a.workspaceId, a.call.apiRoot, t.issueType?.id ?? null));
-  const st = ctx.schema.sprintTickets;
-  await ctx.db
-    .update(st)
-    .set({ ...cols, fetchedAt: new Date(now()) })
-    .where(and(eq(st.id, a.rowId), eq(st.accountId, a.accountId), eq(st.workspaceId, a.workspaceId)))
-    .execute();
-  afterSprintRead(a.accountId, a.workspaceId);
-  return {
-    description: cols.description,
-    acceptanceCriteria: cols.acceptanceCriteria,
-    acFieldId: cols.acFieldId,
-    acFieldName: cols.acFieldName,
-  };
-}
-
-// ---- the forced single-ticket re-read (after a write-back) ----
-
-/** Re-read singly every sprint_tickets row with `next_check_at` = epoch 0. Bounded; never throws. */
-export async function rereadForcedSprintTickets(
+export async function expandSprintGhosts(
   ctx: TrackerContext,
   accountId: number,
-  opts: SprintReadOptions & { limit?: number } = {},
+  workspaceId: number,
+  opts: SprintReadOptions = {},
 ): Promise<number> {
   const now = opts.now ?? Date.now;
-  const st = ctx.schema.sprintTickets;
-  const rows = (await ctx.db
-    .select({
-      id: st.id,
-      workspaceId: st.workspaceId,
-      provider: st.provider,
-      apiRoot: st.apiRoot,
-      issueKey: st.issueKey,
-    })
-    .from(st)
-    .where(and(eq(st.accountId, accountId), lte(st.nextCheckAt, EPOCH)))
-    .orderBy(asc(st.id))
-    .limit(opts.limit ?? FORCED_REREADS_PER_TICK)
-    .execute()) as Array<{ id: number; workspaceId: number; provider: string; apiRoot: string; issueKey: string }>;
-  let read = 0;
-  const reread = new Set<number>();
-  const calls = new Map<number, { call: TrackerCall; acSettings: Awaited<ReturnType<typeof readAcFieldSettings>> } | null>();
-  for (const r of rows) {
-    const later = new Date(now() + SPRINT_READ_INTERVAL_MS);
-    try {
-      if (!calls.has(r.workspaceId)) {
-        const access = trackerAccessOf(ctx.host, await readWorkspaceTrackerRow(ctx, accountId, r.workspaceId));
-        const prepared = prepareTrackerCall(access, {
-          cloud: ctx.host.isCloud,
-          transport: opts.transport,
-          github: githubAccessFor(ctx, accountId),
-        });
-        calls.set(
-          r.workspaceId,
-          prepared.ok ? { call: prepared.call, acSettings: await readAcFieldSettings(ctx, accountId, [r.workspaceId]) } : null,
-        );
-      }
-      const wc = calls.get(r.workspaceId) ?? null;
-      const reader = wc != null ? maybeAdapterFor(wc.call.provider)?.reader : undefined;
-      // The workspace moved to another tracker or site: this row is not re-readable; the list read
-      // will flip it out of the sprint.
-      if (wc == null || reader == null || wc.call.provider !== r.provider || wc.call.apiRoot !== r.apiRoot) {
-        await ctx.db.update(st).set({ nextCheckAt: later }).where(and(eq(st.id, r.id), eq(st.accountId, accountId))).execute();
-        continue;
-      }
-      const t = await reader.fetchTicket(wc.call, r.issueKey);
-      const at = new Date(now());
-      await ctx.db
-        .update(st)
-        .set({
-          ...textColumns(t, settingFor(wc.acSettings, r.workspaceId, wc.call.apiRoot, t.issueType?.id ?? null)),
-          fetchedAt: at,
-          nextCheckAt: later,
-        })
-        .where(and(eq(st.id, r.id), eq(st.accountId, accountId)))
-        .execute();
-      read += 1;
-      reread.add(r.workspaceId);
-    } catch (err) {
-      // ⚠ Never loop on a failing ticket: it waits for the next list read like every other row.
-      ctx.log.warn({ accountId, workspaceId: r.workspaceId, code: codeOf(err), route: 'tracker-sprint' }, 'sprint ticket re-read failed (non-fatal)');
-      try {
-        await ctx.db.update(st).set({ nextCheckAt: later }).where(and(eq(st.id, r.id), eq(st.accountId, accountId))).execute();
-      } catch {
-        /* next tick */
-      }
-    }
+  try {
+    const row = await readWorkspaceTrackerRow(ctx, accountId, workspaceId);
+    const access = trackerAccessOf(ctx.host, row);
+    const provider = access.issue.provider;
+    if (provider == null || maybeAdapterFor(provider)?.reader == null) return 0;
+    const prepared = prepareTrackerCall(access, { cloud: ctx.host.isCloud, transport: opts.transport, github: githubAccessFor(ctx, accountId) });
+    if (!prepared.ok) return 0;
+    if (backoffCode(accountId, workspaceId, accessFingerprint(prepared.call), now()) != null) return 0;
+    const projectKeys = await sprintProjectKeys(ctx, accountId, workspaceId, provider, prepared.call.apiRoot);
+    const res = await refreshSprintRefTickets(ctx, {
+      accountId,
+      workspaceId,
+      call: prepared.call,
+      baseUrl: row?.baseUrl ?? null,
+      projectKeys,
+      nowMs: now(),
+      mode: 'missing',
+      ...(opts.refListers != null ? { listers: opts.refListers } : {}),
+    });
+    return res.stored;
+  } catch (err) {
+    ctx.log.warn({ accountId, workspaceId, code: codeOf(err), route: 'tracker-sprint' }, 'sprint ghost expansion failed (non-fatal)');
+    return 0;
   }
-  // The new text has no current label yet: start the (free) label run for it now, not at the next
-  // list read. It skips tickets already labelled and an account whose run is busy.
-  for (const workspaceId of reread) afterSprintRead(accountId, workspaceId);
-  return read;
 }
 
 // ---- the tick ----
@@ -505,7 +420,7 @@ async function defaultEntitled(accountId: number): Promise<boolean> {
   return account != null && entitledProCapabilities(account).periodReports === true;
 }
 
-/** The tick body: viewed-recently AND due workspaces (≤ TICK_WORKSPACES), then forced re-reads. Never throws. */
+/** The tick body: viewed-recently AND due workspaces (≤ TICK_WORKSPACES). Never throws. */
 export async function runSprintReadTick(ctx: TrackerContext, opts: SprintTickOptions = {}): Promise<void> {
   const now = opts.now ?? Date.now;
   const entitled = opts.entitled ?? defaultEntitled;
@@ -533,16 +448,6 @@ export async function runSprintReadTick(ctx: TrackerContext, opts: SprintTickOpt
       if (!(await isEntitled(w.accountId))) continue;
       left -= 1;
       await readWorkspaceSprintOnce(ctx, w.accountId, w.workspaceId, opts);
-    }
-    const st = ctx.schema.sprintTickets;
-    const forced = (await ctx.db
-      .selectDistinct({ accountId: st.accountId })
-      .from(st)
-      .where(lte(st.nextCheckAt, EPOCH))
-      .execute()) as Array<{ accountId: number }>;
-    for (const f of forced) {
-      if (!(await isEntitled(f.accountId))) continue;
-      await rereadForcedSprintTickets(ctx, f.accountId, opts);
     }
   } catch (err) {
     ctx.log.warn({ code: codeOf(err), route: 'tracker-sprint' }, 'sprint tick failed (non-fatal)');

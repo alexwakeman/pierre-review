@@ -46,19 +46,13 @@ const fakeCheckout = async (repos: any[]) => ({
 
 const goodSubmit = {
   summary: 'Nearly ready: the basket is kept in memory only.',
-  findings: [
-    {
-      issue: 'unclear_done',
-      rule: 'no_expected_result',
-      quote: 'basket survives a RELOAD',
-      text: 'Criterion 1 does not say how long the basket is kept.',
-      suggestion: 'The basket is still there after a reload within 30 days',
-      repo: 'acme/web',
-      path: 'src/basket.ts',
-    },
-    { issue: 'spec_gaps', rule: 'edge_case', quote: 'not in the ticket', text: 'No rule for what happens to a guest basket at sign-in.', repo: 'acme/web', path: 'src/invented.ts' },
+  plan: [
+    { repo: 'acme/web', path: 'src/basket.ts', change: 'Keep the basket in local storage.' },
+    { repo: 'acme/web', path: 'src/invented.ts', change: 'A step whose path does not exist: kept without it.' },
   ],
-  revisedCriteria: [],
+  // Format 6: anything of the retired kind is ignored.
+  findings: [{ issue: 'unclear_done', rule: 'vague_term', text: 'ignored' }],
+  revisedCriteria: ['ignored'],
 };
 const result = (o: Record<string, unknown> = {}) => ({
   submitted: goodSubmit,
@@ -170,9 +164,7 @@ describe('sprint assessment manager', () => {
       expect(a.model).toBe('claude-sonnet-5');
       expect(a.worktrees).toEqual([checkoutRoot]);
       expect(a.prompt).toContain('Basket survives a reload');
-      expect(a.prompt).toMatch(/---BEGIN KNOWN \S+---\n- Waits on: ENG-8 Payments API \(To Do\)\n---END KNOWN/);
-      // A done link is no blocker: never in KNOWN, but a known fact in the referenced tickets.
-      expect(a.prompt.split('---END KNOWN')[0]).not.toContain('ENG-6');
+      expect(a.prompt).not.toContain('BEGIN KNOWN');
       expect(a.prompt).toMatch(
         /---BEGIN REFERENCES \S+---\n- ENG-8 · Payments API · status To Do · blocked_by\n- ENG-6 · Old spike · status Done \(done\) · blocked_by\n---END REFERENCES/,
       );
@@ -186,13 +178,9 @@ describe('sprint assessment manager', () => {
     expect(phases).toEqual(['reading', 'writing']);
     expect(row.status).toBe('succeeded');
     expect(row.phase).toBeNull();
-    expect(row.bodyJson!.findings.map((i: any) => i.ref)).toEqual([{ repo: 'acme/web', path: 'src/basket.ts' }, null]);
-    // Quotes are verified against the ticket text the run was given (case-insensitive second pass).
-    expect(row.bodyJson!.findings.map((i: any) => [i.quote, i.where])).toEqual([
-      ['Basket survives a reload', 'criteria'],
-      [null, null],
-    ]);
-    expect(row.droppedJson).toEqual({ paths: 1, items: 0, quotes: 1 });
+    expect(row.bodyJson!.plan.map((i: any) => i.path)).toEqual(['src/basket.ts', null]);
+    expect(row.bodyJson).not.toHaveProperty('findings');
+    expect(row.droppedJson).toEqual({ paths: 1, items: 0 });
     expect(row.reposJson).toEqual([{ repoId, fullName: 'acme/web', sha: 'checkout-sha' }]);
     expect(recordAiUsage).toHaveBeenCalledWith(expect.objectContaining({ accountId: 1, feature: 'sprint_assess', model: 'claude-sonnet-5', costUsd: 0.4 }));
     // The slot was released by the run's end.

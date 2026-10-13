@@ -39,9 +39,9 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 //   • Stories    — the agentic story report (local-only, its own window picker, GET/POST
 //     /api/story-reports), then every tracker ticket with a PR merged in the REPORTING WINDOW: two
 //     charts and the lists (StoriesView, GET /api/stories).
-//   • This sprint — the tracker's CURRENT sprint (SprintView, GET /api/sprint-stories): up to four
-//     issues per ticket, candidate repos, "Check against code" (agentic, local-only) and a write-back
-//     that writes nothing until the reader confirms the exact text.
+//   • This sprint — the tracker's CURRENT sprint as a GRAPH (SprintView, GET /api/sprint-graph): the
+//     tickets, the outside tickets they depend on, the links between them, a drawer per ticket and
+//     "Check against code" (agentic, local-only). Nothing is written to a tracker.
 //   • Chronology — the COURT LEDGER (BottlenecksPanel). PRO on `periodReports`; still
 //     deterministic (no model anywhere behind it) and still the twin of the Bots rail — that
 //     surface measures automation, this one measures where people's time went.

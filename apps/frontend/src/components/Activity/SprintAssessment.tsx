@@ -4,7 +4,8 @@ import {
   sprintAssessModeOf,
   type SprintAssessmentRecord,
   type SprintAssessMode,
-  type SprintTicketRow,
+  type SprintAssessmentCurrency,
+  type SprintStage,
 } from '@pierre-review/shared';
 import {
   useCancelSprintAssess,
@@ -22,19 +23,30 @@ import { assessButtonLabel, assessmentActive, assessmentProgressLine, assessment
 // branch checkouts of the repos the reader accepted). The button shows only when AI is on here
 // (`aiEnabled`) and goes through the ONE `AiRunGate`. This is the button row and, while a run is
 // queued or running, its PROGRESS BAR (`RegenProgressBar`, phase-based — the agent reports no
-// fraction — with the phase in words, the elapsed time and Cancel). The result renders in the card's
-// "Code check" section (`SprintCodeCheck`) and the findings. The check is STAGE-AWARE (the server picks
+// fraction — with the phase in words, the elapsed time and Cancel). The result renders in the
+// "Code check" section (`SprintCodeCheck`). The check is STAGE-AWARE (the server picks
 // the mode from the ticket's stage): a plan for a ticket not built yet, a criteria check for one in
 // review or done. What the server's checks dropped is mentioned only in the ⓘ.
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
+
+/** What the check needs of one ticket — the drawer's detail (`SprintTicketDetailResponse`) gives it. */
+export interface SprintAssessTicket {
+  ident: string;
+  /** The ticket's stage (null = unknown → plan). */
+  stage: SprintStage | null;
+  assessment: { record: SprintAssessmentRecord; currency: SprintAssessmentCurrency } | null;
+  repos: { accepted: Array<{ repoId: number; fullName: string }> };
+  /** The brief's itemised criteria (numbers the checks). */
+  criteria: readonly string[];
+}
 
 export function SprintAssessment({
   ticket: t,
   workspaceId,
   aiEnabled,
 }: {
-  ticket: SprintTicketRow;
+  ticket: SprintAssessTicket;
   workspaceId: number;
   aiEnabled: boolean;
 }): JSX.Element | null {
@@ -50,7 +62,7 @@ export function SprintAssessment({
   const buttonLabel = assessButtonLabel({ assessment: record != null ? { record, currency: t.assessment?.currency ?? null } : null });
   const noRepos = t.repos.accepted.length === 0;
 
-  const mode: SprintAssessMode = record?.mode ?? sprintAssessModeOf(t.stage);
+  const mode: SprintAssessMode = record?.mode ?? sprintAssessModeOf(t.stage ?? 'not_started');
   const now = useNow(active || starting);
   const elapsed = record != null && active ? now - Date.parse(record.createdAt) : 0;
 
@@ -153,7 +165,7 @@ export function AssessInfo({ record }: { record: SprintAssessmentRecord | null }
           partly met, not met or unclear) and looks for a test that covers it.
         </li>
       </ul>
-      <p>Either way it also flags problems in the ticket text and may suggest better wording or criteria.</p>
+      <p>It reads the criteria from the ticket&rsquo;s brief: one short sentence each, worked out from the description when the ticket has none.</p>
       <p>Every file it cites was checked to exist. Citations that did not check out were removed; the line stays.</p>
       {record != null && record.status === 'succeeded' && !record.outdated && (
         <>

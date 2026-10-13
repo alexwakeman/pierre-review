@@ -151,11 +151,12 @@ import type {
   StartStoryReportResponse,
   StartStoryLabelRunBody,
   StoryLabelRunResponse,
-  SprintStoriesResponse,
+  SprintGraphResponse,
+  SprintTicketDetailResponse,
+  SprintAskRequest,
+  SprintAskResponse,
   SprintRefreshResponse,
   SprintReposUpdate,
-  SprintChecksUpdate,
-  SprintChecksResponse,
   SprintStatusesUpdate,
   SprintStatusesResponse,
   TicketPrsResponse,
@@ -163,8 +164,6 @@ import type {
   SprintAssessRequest,
   SprintAssessResponse,
   SprintAssessmentResponse,
-  SprintWriteRequest,
-  SprintWriteResponse,
   PostCommentResult,
   FollowUpReplyResult,
   PostReviewPreview,
@@ -946,18 +945,25 @@ export const api = {
   storyReport: (id: number) => get<StoryReportResponse>(`/api/story-reports/${id}`),
   cancelStoryReport: (id: number) =>
     fetch(`/api/story-reports/${id}/cancel`, jsonBody('POST')).then((r) => handle<StoryReportResponse>(r)),
-  // Reports → This sprint (core, Pro on `periodReports`; every route 402s without it). The list GET
-  // stamps the workspace as viewed, which is what lets the worker read its sprint at all.
-  sprintStories: (workspaceId: number) =>
-    get<SprintStoriesResponse>(withQuery('/api/sprint-stories', workspaceParam(workspaceId))),
+  // Reports → This sprint (core, Pro on `periodReports`; every route 402s without it). The graph GET
+  // stamps the workspace as viewed, which is what lets the worker read its sprint at all. Both GETs
+  // are DB only.
+  sprintGraph: (workspaceId: number) =>
+    get<SprintGraphResponse>(withQuery('/api/sprint-graph', workspaceParam(workspaceId))),
+  sprintTicket: (workspaceId: number, ident: string) =>
+    get<SprintTicketDetailResponse>(
+      withQuery('/api/sprint-graph/ticket', workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`),
+    ),
+  // "Ask Claude about this sprint" (agentic, LOCAL-ONLY): one Haiku answer per turn, grounded in the
+  // stored graph; the server caps the turns it reads.
+  sprintAsk: (body: SprintAskRequest) =>
+    fetch('/api/sprint-graph/ask', jsonBody('POST', body)).then((r) => handle<SprintAskResponse>(r)),
   sprintRefresh: (workspaceId: number) =>
     fetch('/api/sprint-stories/refresh', jsonBody('POST', { workspaceId })).then((r) =>
       handle<SprintRefreshResponse>(r),
     ),
   sprintSetRepos: (body: SprintReposUpdate) =>
     fetch('/api/sprint-stories/repos', jsonBody('PUT', body)).then((r) => handle<SprintReposResponse>(r)),
-  sprintSetChecks: (body: SprintChecksUpdate) =>
-    fetch('/api/sprint-stories/checks', jsonBody('PUT', body)).then((r) => handle<SprintChecksResponse>(r)),
   // The status layout override (statuses per stage, in order); `{sections: null}` resets.
   sprintSetStatuses: (body: SprintStatusesUpdate) =>
     fetch('/api/sprint-stories/statuses', jsonBody('PUT', body)).then((r) => handle<SprintStatusesResponse>(r)),
@@ -975,10 +981,6 @@ export const api = {
     fetch(`/api/sprint-stories/assessments/${id}/cancel`, jsonBody('POST')).then((r) =>
       handle<SprintAssessmentResponse>(r),
     ),
-  // The write-back: ONE ticket, the EXACT text the reader confirmed in the dialog. A failed write is a
-  // 200 record; never retried by the client (a new dialog mints a new requestId).
-  sprintWrite: (body: SprintWriteRequest) =>
-    fetch('/api/sprint-stories/write', jsonBody('POST', body)).then((r) => handle<SprintWriteResponse>(r)),
   // The story label run (core, agentic, LOCAL-ONLY; one in flight per account; the path keeps the
   // retired Story health prefix). No screen starts it since Story health was removed. The POST is the
   // ONE path that bills; the GET and cancel are account-scoped.

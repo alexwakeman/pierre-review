@@ -1538,13 +1538,9 @@ names (`knownTicketsFor`, account-predicated, same tracker site):
 | Blocked | a REAL blocker (`isRealStoryBlocker`): a ticket — tracker link, or a key the label reads as `depends_on` — not done (unknown status counts, reading "status unknown"), or a named DECISION nobody has made | what, who (owner), ticket key and status; links first, a named key that is linked shown once |
 | Spec gaps | the label lists missing details | ≤ 3 gaps, each typed (rule, edge case, design, data, non-functional) |
 
-- ⚠ **Spec gaps is NOT a This sprint chip** (2026-10-11: every labelled ticket got three, so a chip on
-  every card said nothing). `STORY_ISSUES[].chip` / `STORY_CHIP_ISSUE_IDS` name the chips (Unclear when
-  done, Blocked); the gaps ride `SprintTicketRow.specGaps` and render as the opened card's own "Spec
-  gaps" section (`sprintSpecGapLines`) — ONE line, on a NOT-STARTED ticket only: a CURRENT "Check
-  against code" run's spec_gaps sentence, else code's FIRST gap; other stages show none. Copyable, and
-  the same in Copy all and the comment default. Not in `flagCount` or the order. The "Spec gaps" check
-  shows/hides that section.
+- ⚠ **This sprint no longer raises the issues** (2026-10-12: the chips, findings, highlights and checks
+  were "not actually useful" and left with the sprint GRAPH). The issues live on in the story report's
+  rates and points (`STORY_CHIP_ISSUE_IDS` survives for those folds).
 - ⚠ **BLOCKED IS REAL BLOCKERS ONLY** (2026-10-11, the review of all 42 BNG sprint tickets: of 63
   dependency items, 13 were done tickets, 15 tickets of unknown status, 14 open and 21 had no ticket,
   mostly inputs — Figma nodes, spreadsheets, reference files). `isRealStoryBlocker` (shared) keeps an
@@ -1558,7 +1554,7 @@ names (`knownTicketsFor`, account-predicated, same tracker site):
   never render and never fail a read.
 - A label is used only when CURRENT (the caller's text-hash check) AND it judged today's number of
   criteria (`usableStoryLabel`); without one only code is raised: no criteria, and open linked blockers.
-- ⚠ **TWO QUESTIONS, TWO FOLDS.** This sprint asks "is it blocked NOW" (`foldStoryIssues`: a blocker
+- ⚠ **TWO QUESTIONS, TWO FOLDS.** "Is it blocked NOW" (`foldStoryIssues`: a blocker
   whose status category is done — a link, or a named key resolved through stored tickets — is RESOLVED:
   listed, never raised). The story report's picks are merged stories, so they carry their issues "AS
   WRITTEN" (`storyIssueMeasure` / `storyIssuesAsWritten`: any ticket or decision, `isStoryDependencyItem`,
@@ -1644,18 +1640,17 @@ orphan `pro_story_notes` table from the never-committed plugin migration 0041, w
   id and its PRs' `[id, state, mergedAt]` — nothing derived from now. A different fingerprint today
   shows the stored report as `stale`; nothing re-runs it by itself.
 
-## Story labels (Reports → Stories, Reports → This sprint)
+## Story labels (Reports → Stories)
 
 The model half of the three story issues everywhere: Haiku 5.5 answers a FIXED rubric about each
-story; code folds the answers into the issues (§ Story issues) — This sprint's chips and findings, the
-story report's rates. Everything else is code. ⚠ The Story health charts that first used them are
+story; code folds the answers into the issues (§ Story issues) — the story report's rates and points. Everything else is code. ⚠ The Story health charts that first used them are
 DELETED (2026-10-11, "not adding anything"): no `GET /api/story-health`, no panel.
 
 - **Where**: `src/review/story-labels/` — `prompt.ts`, `validate.ts`, `manager.ts`, `routes.ts`; the
   input (what is sent, and so which label is current) is core `db/story-label-input.ts`; the label read
   (`currentLabelRowsFor`) and the run's population are `db/story-health.ts` + `db/story-health-fold.ts`
   (names kept). Contract: `packages/shared/src/story-health.ts`. Routes: docs/API.md § The story label
-  run. This sprint's tickets are labelled after each sprint read by `review/sprint-labels/`.
+  run. (This sprint no longer labels: its tickets get a BRIEF instead — § Sprint briefs.)
 - **LABELLING IS AUTOMATIC — NO BUTTON** (2026-10-11, after Story health's "Label N stories" went):
   (1) a **story report run labels first** — before its agent starts, the window's stories with
   criteria and no CURRENT label go through the label run (`runStoryLabelsToEnd`, which claims the
@@ -1663,11 +1658,8 @@ DELETED (2026-10-11, "not adding anything"): no `GET /api/story-health`, no pane
   waits for its own run; picked stories first, then newest; ≤ `STORY_LABEL_RUN_CAP`, its own
   `STORY_LABEL_BUDGET_USD`). The run then re-reads the selection so the picks' issues and the rates see
   the new labels (picks never depend on labels), and the row's `costUsd` is agent + labels (each still
-  recorded under its own feature). A cancel cancels the label pass too. (2) **This sprint** labels
-  after every sprint read AND when `GET /api/sprint-stories` lists a ticket whose label is `pending`
-  (`sprintViewedWithPendingLabels`: the same after-read hook, deduped to once a minute per workspace;
-  set only locally with AI on). Done tickets are labelled too, after the open ones. A rubric bump
-  therefore relabels on the next view or report, with no reader action.
+  recorded under its own feature). A cancel cancels the label pass too. A rubric bump therefore
+  relabels on the next report, with no reader action.
 - **Gating**: agentic, so LOCAL-ONLY — registered only through `registerAgenticRoutes` — AND Pro with
   the rest of Reports (`periodReports`, 402 before any DB work). With `config.aiEnabled` false no label
   is made or read; only what code knows is shown.
@@ -1750,111 +1742,126 @@ DELETED (2026-10-11, "not adding anything"): no `GET /api/story-health`, no pane
 One Sonnet 5 run per ticket, on demand, that checks the ticket against the code. LOCAL ONLY
 (`registerAgenticRoutes`) AND Pro on `periodReports` (402 first).
 
-- **STAGE-AWARE (format 5)**: the SERVER picks the MODE from the stored ticket's stage under the
-  workspace's status layout (`sprintTicketStage` → shared `sprintAssessModeOf`), never the client. It is
-  stored on the run (`sprint_assessments.mode`, sqlite `0105` / pg `0092`), folded into the fingerprint
-  (a ticket moving from In progress to In review makes a plan STALE) and picks the system prompt
-  (`sprintAssessSystemPrompt(mode)`), the tool's shape (`buildSubmitAssessmentShape(z, mode)`) and what
-  the validator keeps.
-  - **PLAN** (Not started, In progress): no code is expected. The prompt FORBIDS looking for an
-    existing implementation or saying the work "may already be done" (the old prompt's favourite misread
-    of an unbuilt ticket). It returns `plan` — ≤ 6 high-level changes `{repo, path | newPath, change}`:
-    `path` an EXISTING file or directory, verified in the checkout; `newPath` a proposed new file (a
-    clean relative path that does NOT exist — not verified, it cannot be).
-  - **VERIFY** (In review, Done): the code should be on the default branch. It returns
-    `criterionChecks` — one per numbered criterion `{n, status: met | partly | not_met | unclear,
-    evidence, ref, tests}`, `n` within the ticket's criteria, one per `n`, sorted; `ref` and `tests`
-    verified like any cited path (`tests` looked up in the criterion's repo, then every accepted repo) —
-    and `coverage`, one sentence on which criteria have tests.
-  - Both keep the findings, revised criteria and revised description below. `summary` is two or three
-    sentences (≤ 400). The SPA shows the result in the card's **Code check** section
-    (`SprintCodeCheck.tsx`: the summary, then the plan list or the per-criterion rows with Met / Partly
-    met / Not met / Unclear pills and test paths; Copy via `lib/copy.ts` `sprintCodeCheckMarkdown`), and
-    a running check as a PHASE-BASED progress bar (`assessmentProgressPct`: never 100 before the end —
-    the agent reports no fraction) with the phase in words, the elapsed time and Cancel.
-
+- **STAGE-AWARE**: the SERVER picks the MODE from the stored ticket's stage under the workspace's status
+  layout (`sprintTicketStage` → shared `sprintAssessModeOf`), never the client. It is stored on the run
+  (`sprint_assessments.mode`), folded into the fingerprint (a ticket moving from In progress to In
+  review makes a plan STALE) and picks the system prompt, the tool's shape and what the validator keeps.
+  - **PLAN** (Not started, In progress): no code is expected. The prompt FORBIDS looking for an existing
+    implementation or saying the work "may already be done". It returns `plan` — ≤ 6 high-level changes
+    `{repo, path | newPath, change}`: `path` an EXISTING file or directory, verified in the checkout;
+    `newPath` a proposed new file (a clean relative path that does NOT exist).
+  - **VERIFY** (In review, Done): it returns `criterionChecks` — one per numbered criterion `{n, status:
+    met | partly | not_met | unclear, evidence, ref, tests}`, `ref` and `tests` verified like any cited
+    path — and `coverage`, one sentence on which criteria have tests.
+  - `summary` is two or three sentences (≤ 400). The SPA shows the result as the **Code check**
+    (`SprintCodeCheck.tsx`; Copy via `lib/copy.ts` `sprintCodeCheckMarkdown`) and a running check as a
+    PHASE-BASED progress bar with the phase in words, the elapsed time and Cancel.
+- ⚠ **FORMAT 6 (2026-10-12): NO FINDINGS, NO REVISIONS.** The anchored findings, `revisedCriteria` and
+  `revisedDescription` are gone from the prompt, the tool's shape, the validator and the wire (anything of
+  the kind in an answer is ignored); `SPRINT_ASSESS_FORMAT_VERSION` 6 makes every older run `stale`. A
+  stored format-5 body still READS (its extra fields ignored).
+- **THE CRITERIA ARE THE BRIEF'S** (§ Sprint briefs): the ticket's CURRENT brief — itemised one short
+  sentence each, DERIVED from the description when the ticket has none (the prompt says so) — else the
+  ticket's own as written. `n` numbers them.
 - **Where**: `src/review/sprint-assess/` — `agent.ts`, `prompts.ts`, `schema.ts`, `validate.ts`,
   `manager.ts`, `routes.ts`. Contract: `packages/shared/src/sprint-stories.ts`. Routes: docs/API.md §
   This sprint.
-- **Input**: the ticket (title, description, criteria) NONCE-FENCED as untrusted, and read-only
-  DEFAULT-BRANCH checkouts of the ticket's EFFECTIVE repos (`effectiveSprintRepos`): the reader's saved
-  set (`sprint_ticket_repos`, an empty save stays empty), else — never saved — the CONFIDENT suggestions
-  (`db/sprint-repo-suggest.ts` `confidentSuggestion`: a direct reason, ≥ 3 PRs of history, or the
-  workspace's only repo). No repo → `422 no_repos`.
+- **Input**: the ticket (title, description, criteria) NONCE-FENCED as untrusted, read-only
+  DEFAULT-BRANCH checkouts of the ticket's EFFECTIVE repos (`effectiveSprintRepos`: the reader's saved
+  set, else the CONFIDENT suggestions; none → `422 no_repos`), and a fenced **Referenced tickets** block
+  (`referencesForPrompt`: the drawer's references — tracker links, then the brief's — with the status
+  Limn holds), treated as facts; a `concurrent` ticket may be named "coordinate with KEY".
 - **The agent**: Read/Glob/Grep behind the path guard, `Bash` denied, `...ISOLATED_MCP` +
   `ownToolsOnlyHook(['sprint'])`, ONE `submit_assessment` tool (first submit wins). Budget
   `SPRINT_ASSESS_BUDGET_USD` (default $1.50), `SPRINT_ASSESS_MAX_TURNS` (60). It shares the review
   pool (`registerReviewSlotPeer`; a PR-review click goes first). Spend: feature `sprint_assess`.
-- **What it is told**: the three issues, and that Blocked must name WHAT it waits on and WHO (ticket
-  key and status when there is one) and a spec gap must name the missing detail. What code already
-  knows — open blockers (links + named) and the current label's gaps (`knownIssuesForPrompt`, read
-  before the last abort check, never failing the run) — is handed in FENCED as data, for Claude to
-  confirm, correct or drop against the code. So is a **Referenced tickets** block (`REFERENCES` fence,
-  `promptReferencesOf`): every tracker link and every ticket the current label references — key,
-  title, status (`knownTicketsFor`, including the sprint read's lookup; "status not known to Limn"
-  otherwise), relation (`blocked_by`/`linked` for links, the label's relation otherwise) and the quote
-  naming it. The system prompt (both modes) treats them as FACTS: a ticket blocks ONLY when its relation
-  is `blocked_by` or `depends_on` and its status is not done; never a blocked finding about an
-  out-of-scope / build-alongside / builds-on / supersedes / context / linked ticket; never "status
-  unknown / not stated" when the list gives it; a `concurrent` ticket may be named "coordinate with
-  KEY" in the summary or a plan step.
-- **The answer is SHORT and ANCHORED (format 4, kept in 5)**: `summary` (two or three sentences),
-  the mode's list (above), `findings` (≤ 6, each `{issue, rule, quote, text,
-  suggestion?, repo?, path?}` — the rule from THAT issue's closed vocabulary, the quote copied exactly
-  from the ticket, the suggestion a rewrite of the quoted words), `revisedCriteria` (≤ 12, or none) and
-  an optional `revisedDescription` (≤ 4,000, only when the description should change). The prompt
-  lists the vocabulary from the ONE shared table (`STORY_RULES`). Claude's FIRST finding per issue
-  speaks for that issue: it REPLACES the templated bullet for an issue CODE raised, only while the run
-  is CURRENT (`sprintBullets` via `sprintCurrentAssessmentBodyOf`), and never adds an issue, so chips,
-  `flagCount` and order agree. Its spec_gaps sentence is never a chip (`sprintSpecGapLines`). Every
-  finding also lands in `SprintTicketRow.findings` (below). A stale run's summary shows tagged "Out of
-  date" and feeds neither the comment default nor Copy all.
-- **Validation** (`SPRINT_ASSESS_CAPS`): the tool's zod `.max` caps refuse over-long text, so the
-  model rewrites it shorter; whatever still gets through is cut with "…"; an unknown issue, a rule
-  outside its issue's vocabulary (or the code-only `no_criteria`), an empty sentence or a seventh
-  finding is dropped; ⚠ every QUOTE is verified against the ticket text the run was given
-  (`verifyStoryQuote`; a leading "3. " is forgiven) and stored in the ticket's spelling with `where` —
-  a miss is nulled with its suggestion, the finding KEPT, counted in `dropped.quotes`; a cited path
-  must exist inside an accepted checkout, else the PATH is dropped and the sentence kept (counted,
-  shown only behind an ⓘ); a `revisedDescription` equal to today's is dropped; ⚠ a **blocked** finding
-  whose text + quote name ticket keys that are ALL known references that cannot block (not
-  `blocked_by`/`depends_on`, or done — `isBlockingReference`) is dropped, counted in `dropped.items`
-  (conservative: a key the list does not hold, or no key at all, keeps it). Nothing left → failed
-  `invalid_assessment`.
-- **The findings fold** (`db/sprint-findings.ts`, pure, `SprintTicketRow.findings`): code's "no
-  criteria" (`u-none`), each untestable criterion of the CURRENT label (`u-c<n>`: its rule, its quote —
-  else the criterion's own sentence when it is in the text, a known position), the REAL open blockers
-  (`b-<i>`: a text blocker by the label's quote, a link by its KEY as a whole token when the text names
-  it), the label's gaps on every stage (`g-<i>`, ≤ 3) and a CURRENT run's findings (`claude-<i>`).
-  ⚠ **ONE ROW PER THING**: a Claude finding about the same thing as a code finding — same issue, and
-  quotes that overlap (one holds the other, or a shared run of ≥ 24 characters) or a ticket key in
-  common (`sameFindingSubject`) — is MERGED into that row: Claude's sentence is the detail, with its
-  rule, suggestion, file and quote (code's quote when it has none), `source: 'claude'`, the code
-  blocker kept; a code finding absorbs at most one. The SPA's findings panel then folds a rule met more
-  than once into ONE row with a count ("Several outcomes · 11", `groupSprintFindings`), opened to list
-  each; the highlights in the text stay one per finding.
-  ⚠ Every quote is RE-verified against the text on the wire (the label's was checked against the
-  clipped, colour-stripped text sent). Filtered by the workspace's checks like the chips.
-- **Currency**: fingerprint = `SPRINT_ASSESS_FORMAT_VERSION` (5 since the stage-aware modes) + the
-  MODE today's stage asks for + ticket text hash + sorted (repoId, synced default-branch SHA), so it is
-  checkable from the DB (the stage re-derived through `sprintLayoutFor`); stale → the button reads "Check again",
-  and the stale run's sentences still show, marked out of date. A run stored in an older body shape
-  is served `body: null, outdated: true` (never thrown on). One run per (account, ticket), claimed
-  synchronously; a crash orphan is failed `interrupted` at boot.
-- **The free labels** are not this run: every sprint ticket goes through the existing story label run
-  (§ Story labels) after each sprint read and when a view lists a pending label (`review/sprint-labels/`); the issues are folded from them
-  in code, and every chip and templated bullet is code (`storyIssueChipText`, `storyIssueBullet`).
+- **Validation** (`SPRINT_ASSESS_CAPS`): the tool's zod `.max` caps refuse over-long text; whatever still
+  gets through is cut with "…"; a cited path must exist inside an accepted checkout, else the PATH is
+  dropped and the sentence kept (counted, shown only behind an ⓘ). Nothing left → `invalid_assessment`.
+- **Currency**: fingerprint = `SPRINT_ASSESS_FORMAT_VERSION` + the MODE today's stage asks for + ticket
+  text hash + sorted (repoId, synced default-branch SHA), checkable from the DB; stale → "Check again".
+  One run per (account, ticket), claimed synchronously; a crash orphan is failed `interrupted` at boot.
 
-## Ticket write-back (Reports → This sprint → "Update in <tracker>")
+## Sprint briefs (Reports → This sprint, the graph)
 
-The only path that writes to a tracker, and no agent can reach it. The opened ticket is a DRAFT of
-its text (the description, plus the criteria field when the ticket has its own): a finding's Replace
-swaps its quote for Claude's suggestion IN THE DRAFT, a proposal's "Apply to draft" replaces a whole
-field, and Edit lets the reader type Markdown. One "Update in <tracker>" opens a dialog showing, per
-changed field, the diff and the exact text; "Apply all suggestions" folds every suggestion into the draft as ONE undoable
-step (`lib/ticketDraft.ts` `applyAllSuggestions`): whole-field proposals FIRST (a proposed description,
-then proposed criteria — swapped into the proposed description when they live there), and a field a
-proposal rewrote takes no quote-replace; then every finding's suggestion whose quote is still in its
-field, by the same rule as Replace. It writes nothing. Confirm sends `POST /api/sprint-stories/write` once PER
-FIELD (its own requestId and base hash). Claimed before the write, never retried, `maybe_written` when
-cut off. Full contract: docs/TRACKERS.md § The write-back.
+A cheap Haiku 5.5 pass that turns every node of the sprint graph — each sprint ticket and each GHOST
+(an outside ticket reached through an edge) — into a BRIEF: `{summary, criteria: [{n, text}],
+criteriaDerived, references}`. The graph's text edges and its ghost chains come from it.
+
+- **Where**: `src/review/sprint-briefs/` — `prompt.ts`, `validate.ts`, `manager.ts`, `index.ts`; the
+  input and the store are core `db/sprint-briefs.ts`; the to-do list is `db/sprint-graph.ts`
+  `sprintBriefTodo` (the graph's own fold). Table `sprint_briefs` (sqlite `0107` / pg `0094`), one row per
+  (account, workspace, ident), replaced by each new brief.
+- **WHEN**: after every stored sprint read (`setAfterSprintRead`, set only by `registerAgenticRoutes`;
+  it REPLACES the story-label trigger This sprint used to have — the story labels themselves are
+  untouched) — local, `config.aiEnabled`, Reports entitlement and a credential. Never on a view. ONE pass
+  per (account, workspace), claimed synchronously; a read landing mid-pass re-runs it once after.
+- **WHAT**: graph nodes with no CURRENT brief — sprint first, then ghosts by depth, ≤
+  `SPRINT_BRIEF_RUN_CAP` (120) per pass. ⚠ A ghost's references come from its brief, so after each round
+  the pass asks the tracker side for the chain's NEXT hop (`expandGhostsAfterBriefs` → ref-status mode
+  `missing`, docs/TRACKERS.md) and briefs what that stored: ≤ `SPRINT_GHOST_DEPTH_MAX` + 1 rounds,
+  stopping when a round briefs nothing and stores nothing.
+- **CURRENCY**: a brief counts while its `text_hash` = today's `sprintBriefInput` hash (title,
+  colour-stripped description ≤ 4,000, the criteria as written — the ONE extractor, each ≤ 500 — and the
+  provider's text rule) AND `brief_version` = `SPRINT_BRIEF_VERSION`. ⚠ Changing one word of the prompt
+  is a new version.
+- **THE PROMPT** (`SPRINT_BRIEF_SYSTEM`): the summary (one or two sentences, ≤ 400); the CRITERIA itemised
+  in the Open PRs Story check's words ("one entry per testable requirement, whether written as bullets,
+  numbered lists, Given/When/Then scenarios, tables or prose … the criterion in one short sentence", ≤
+  200 each, ≤ 40) — DERIVED from the title and description when the ticket has none, and then
+  `criteriaDerived` is set by the SERVER from the input, never the model; the REFERENCES are rubric 4's
+  rule word for word (`STORY_REFERENCE_RULES`, exported from the story labels' prompt so the two can
+  never drift). The ticket sits inside a per-call NONCE fence; the "has / has no criteria" note sits
+  outside it.
+- **VALIDATION** (`validateSprintBrief`): JSON with a non-empty summary and both arrays; over a cap →
+  refused, never cut; criteria renumbered 1..k, blanks dropped, a ticket WITH criteria must get ≥ 1 back;
+  references through the story labels' OWN `reference` rule (relation from the vocabulary, a key the
+  text never names dropped, every quote verified, (key, relation) repeats once). ONE retry on a refused
+  answer, both calls billed.
+- **COST**: one `cheapComplete` per ticket (Haiku 5.5, tool-less, connectors isolated), 4 at a time,
+  recorded under feature `sprint_briefs`; the pass stops STARTING calls at `SPRINT_BRIEF_BUDGET_USD`
+  (env, default $1).
+- **EDGES** (`db/sprint-graph-fold.ts`): a reference `depends_on` / `concurrent` / `builds_on` /
+  `supersedes` draws an edge from the ticket to the named one; `out_of_scope` / `context` draw none (the
+  drawer lists them). A blocking tracker link draws `depends_on` with `source: 'tracker'`.
+
+## Sprint themes (Reports → This sprint, "Group by → Theme")
+
+ONE sprint-wide Haiku 5.5 call that names 3–8 short shared THEMES for the sprint and puts every sprint
+ticket in exactly one, so the graph can cluster by area of work rather than by epic.
+
+- **Where**: `src/review/sprint-themes/` — `prompt.ts`, `validate.ts`, `manager.ts`; the input and store
+  are core `db/sprint-themes.ts`, the to-do is `db/sprint-graph.ts` `sprintThemeTodo` /
+  `sprintThemeInputOf`. Table `sprint_themes` (sqlite `0108` / pg `0095`): ONE row per (account,
+  workspace), replaced by each pass.
+- **WHEN**: right AFTER the brief pass, from the same after-read seam (`review/sprint-briefs/index.ts`;
+  local only, `config.aiEnabled`, Reports entitlement, a credential). A brief pass that answered `busy`
+  starts none (the running one's caller themes after it). ⚠ It CALLS THE MODEL ONLY WHEN THE INPUT HASH
+  CHANGED: the sprint tickets' keys + CURRENT brief summaries (a pending brief hashes its title in the
+  summary's place, so the brief landing re-runs it) + `SPRINT_THEME_VERSION`. A read that changed nothing
+  costs nothing. Fewer than `SPRINT_THEME_CAPS.minTickets` (6) sprint tickets → not themed. Ghosts never.
+- **THE PROMPT** (`SPRINT_THEME_SYSTEM`): every ticket's key, title and summary inside ONE per-call nonce
+  fence; 3–8 themes, each plain English ≤ 4 words with no keys or jargon; every ticket in one theme by
+  NUMBER. ⚠ Changing one word is a new `SPRINT_THEME_VERSION`.
+- **VALIDATION** (`validateSprintThemes`): JSON; names cleaned (control characters, whitespace, quotes, a
+  trailing full stop), a blank or repeated name refused, over 4 words / 40 characters refused (never
+  cut); a key that is not a sprint key DROPPED; a sprint key given twice with two themes → `duplicate`, a
+  sprint key never given → `missing`, an unknown theme number → `shape`; unused themes dropped and what
+  remains must number 3–8. ONE retry on a refused answer, both billed; a failed pass stores nothing.
+- **COST**: one `cheapComplete` per changed sprint (tool-less, connectors isolated), recorded under
+  feature `sprint_themes` — measured 2026-10-13 on workspace 1 (77 tickets): one call, 3,680 output
+  tokens, US$0.0018 as recorded (the ambient-session path under-reports cached input tokens, as for the
+  briefs).
+- **READ**: `getSprintGraph` returns `themes` and each node's `theme` only while the stored row is
+  CURRENT for today's hash and version — otherwise null, and the SPA disables "Theme" with "Themes
+  appear after Claude reads the sprint".
+
+## Ask about this sprint (Reports → This sprint)
+
+`POST /api/sprint-graph/ask` — one Haiku 5.5 answer per turn (`review/sprint-ask/`), LOCAL ONLY
+(`registerAgenticRoutes`) and Pro (`periodReports`, 402 first). Grounded ONLY in the stored graph
+(`getSprintGraph`: tickets with stage, status, assignee, epic, brief summary, criteria count and PRs; the
+links), the whole map inside ONE nonce fence and the prior turns inside another — a previous answer is
+model text over the same data. ⚠ The turn cap is SERVER-side (`capAskHistory`: the newest
+`SPRINT_ASK_MAX_TURNS` − 1 pairs, each re-capped; `trimmedTurns` counts the rest). Short Markdown naming
+ticket keys; no ranking of people. Spend: feature `sprint_ask`. Tier `ai` + `ai_hourly`.

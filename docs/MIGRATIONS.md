@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0093` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
+  ⚠ pg `0052`–`0095` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -1234,3 +1234,22 @@ lookup's `onConflictDoUpdate` target), index `(account_id, issue_key)`, named co
 sprint list read → Referenced tickets). Ships with rubric 4 of the story labels (`STORY_RUBRIC_VERSION`
 4 — a code bump: every story relabels). Journal `when` sqlite `1792051203003` / pg `1792051204002`.
 ⚠ pg `0093` NOT replayed.
+
+### `0107_sprint_graph` (pg `0094`) — the sprint graph: ghost text, briefs; the write-back's table dropped
+Additive on `sprint_ref_tickets`: `description`, `acceptance_criteria`, `issue_type_name`,
+`assignee_name`, `assignee_avatar_url`, `blocked_by_json` (sqlite text / pg jsonb) and `depth` (integer
+NOT NULL DEFAULT 1 — existing rows read as named by the sprint). New table `sprint_briefs` (account,
+workspace, ident, text_hash, brief_version, summary, criteria_json, criteria_derived, references_json,
+model, cost/tokens, created_at), unique `(account_id, workspace_id, ident)` (the pass's
+`onConflictDoUpdate` target), named composite FK onto `workspaces(id, account_id)` with cascade; in
+`accountScopedTables()` + erasure + `verify:isolation`. `DROP TABLE IF EXISTS tracker_writes` — the
+write-back is removed (its rows are history of a feature that no longer exists; nothing reads them).
+`workspaces.sprint_checks` is NOT dropped (SQLite needs a table rebuild): it is dormant. Journal `when`
+sqlite `1792051203004` / pg `1792051204003`. ⚠ pg `0094` NOT replayed.
+
+### `0108_sprint_themes` (pg `0095`) — the sprint graph's themes
+New table `sprint_themes` (account, workspace, input_hash, theme_version, themes_json, assignments_json,
+model, cost/tokens, created_at), unique `(account_id, workspace_id)` (the pass's `onConflictDoUpdate`
+target), named composite FK `sprint_themes_workspace_account_fk` onto `workspaces(id, account_id)` with
+cascade; in `accountScopedTables()` + erasure + `verify:isolation`. Purely additive. Journal `when`
+sqlite `1792051203005` / pg `1792051204004`. ⚠ pg `0095` NOT replayed.

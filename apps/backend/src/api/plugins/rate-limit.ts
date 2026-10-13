@@ -535,16 +535,15 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // THIS SPRINT (Reports → This sprint), matched EXPLICITLY by exact path, FOLLOWING THE TOKEN:
   //   POST /api/sprint-stories/refresh               kicks a third-party tracker read  → search + read
   //   POST /api/sprint-stories/assess                starts ONE Sonnet agent run        → ai + ai_hourly
-  //   POST /api/sprint-stories/write                 ONE write to Jira/Linear/GitHub    → github_write
-  //   GET  /api/sprint-stories, PUT …/repos, GET …/assessments/:id, POST …/:id/cancel  → read
+  //   POST /api/sprint-graph/ask                     ONE Haiku completion per turn       → ai + ai_hourly
+  //   GET  /api/sprint-graph, …/ticket, PUT …/repos, …/statuses, GET …/assessments/:id, …/cancel → read
   if (mutating && path === '/api/sprint-stories/refresh') return [TIERS.search, TIERS.read];
   if (mutating && path === '/api/sprint-stories/assess') return [TIERS.ai, TIERS.aiHourly];
-  if (mutating && path === '/api/sprint-stories/write') return [TIERS.githubWrite];
-  //   PUT  /api/sprint-stories/statuses              the status layout override, DB-only  → read
+  if (mutating && path === '/api/sprint-graph/ask') return [TIERS.ai, TIERS.aiHourly];
   if (
-    path === '/api/sprint-stories' ||
+    path === '/api/sprint-graph' ||
+    path === '/api/sprint-graph/ticket' ||
     path === '/api/sprint-stories/repos' ||
-    path === '/api/sprint-stories/checks' ||
     path === '/api/sprint-stories/statuses'
   ) {
     return [TIERS.read];

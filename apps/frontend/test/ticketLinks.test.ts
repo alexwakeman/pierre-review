@@ -6,7 +6,7 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/ticketLinks.test.ts
 import { describe, expect, it } from 'vitest';
 import { rehypeTicketLinks, splitBareTicketKeys, type TicketLinkOptions } from '../src/lib/ticketLinks.js';
-import { relatedPillParts, sprintTicketLinkOptions, sprintTicketSite } from '../src/components/Activity/sprintModel.js';
+import { sprintTicketSite } from '../src/components/Activity/sprintModel.js';
 
 const O: TicketLinkOptions = {
   site: { provider: 'jira', root: 'https://eaflood.atlassian.net' },
@@ -64,15 +64,9 @@ describe('ticket links', () => {
     expect(splitBareTicketKeys('BMD-8550 xBMD-855', O)).toBeNull();
   });
 
-  it('the site comes from the ident; the pill shortens a long title', () => {
+  it('the site comes from the ident', () => {
     expect(sprintTicketSite({ ident: 'jira:https://eaflood.atlassian.net#BMD-919' })).toEqual({ provider: 'jira', root: 'https://eaflood.atlassian.net' });
     expect(sprintTicketSite({ ident: 'github:https://github.com/acme/web#12' })).toEqual({ provider: 'github', root: 'https://github.com' });
     expect(sprintTicketSite({ ident: 'nonsense' })).toBeNull();
-    expect(sprintTicketLinkOptions({ ident: 'nonsense', key: 'X-1', related: [] })).toBeNull();
-    expect(relatedPillParts({ key: 'BMD-1', title: 'A very long title that goes on and on and on', status: 'To Do' })).toEqual({
-      key: 'BMD-1',
-      title: 'A very long title that goes on…',
-      status: 'To Do',
-    });
   });
 });

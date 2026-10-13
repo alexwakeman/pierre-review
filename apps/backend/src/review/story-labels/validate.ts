@@ -83,7 +83,7 @@ const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 /** A clean string, '' when absent / not a string / blank. */
 const clean = (v: unknown): string => (typeof v === 'string' ? v.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim() : '');
 
-class Refused extends Error {
+export class Refused extends Error {
   constructor(readonly reason: LabelValidationFailure) {
     super(reason);
   }
@@ -139,13 +139,16 @@ function dependency(v: unknown, sources: StoryQuoteSources | undefined, stats: L
 }
 
 /** Does the sent text name this key as a whole token (a bare key, or inside a link)? */
-function textNamesKey(key: string, sources: StoryQuoteSources): boolean {
+export function textNamesKey(key: string, sources: StoryQuoteSources): boolean {
   const esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`(^|[^A-Za-z0-9])${esc}(?![A-Za-z0-9])`, 'i');
   return [sources.title, sources.description, ...sources.criteria].some((t) => re.test(t));
 }
 
-function reference(
+/** One answered reference → the stored one, or null (dropped: not a key, or a key the text never
+ *  names). Throws `Refused('shape')` for a relation outside the vocabulary. Shared with the sprint
+ *  brief's validator (review/sprint-briefs/validate.ts) — one rule for both. */
+export function reference(
   v: unknown,
   sources: StoryQuoteSources | undefined,
   stats: LabelQuoteStats,

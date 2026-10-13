@@ -3886,15 +3886,17 @@ check(
   check("createdDatesFor(A) reads A's created date, never B's", dA?.ms === Date.parse('2026-01-01T00:00:00Z'));
 }
 
-// ── REPORTS → THIS SPRINT (sprint_reads / sprint_tickets / sprint_ticket_repos / sprint_assessments /
-// tracker_writes; migration 0100 / pg 0087). BOTH accounts hold the SAME ticket ident on the SAME Jira
+// ── REPORTS → THIS SPRINT (sprint_reads / sprint_tickets / sprint_ref_tickets / sprint_briefs / sprint_themes /
+// sprint_ticket_repos / sprint_assessments; migration 0100 / pg 0087, 0107 / pg 0094). BOTH accounts
+// hold the SAME ticket ident on the SAME Jira
 // site (the tracker section above wrote both trackers), so every read must answer only for the caller.
 // Workspace ids arrive in BODIES, so `sprint_ticket_repos` carries named composite FKs onto
 // repos(id, account_id) and workspaces(id, account_id): a cross-account pair fails in the database.
-// MUTATION CHECK: drop the accountId predicate from `getSprintStories` / `acceptedSprintRepos` /
-// `loadSprintAssessment` / `readSprintTicket` and the matching check goes red.
+// MUTATION CHECK: drop the accountId predicate from `loadGraphTickets` (db/sprint-graph.ts) /
+// `storedSprintBriefs` / `graphPrsFor` / `acceptedSprintRepos` / `loadSprintAssessment` /
+// `readSprintTicket` and the matching check goes red.
 {
-  console.log('\nsprint_tickets + sprint_ref_tickets + sprint_ticket_repos + sprint_assessments + tracker_writes');
+  console.log('\nsprint_tickets + sprint_ref_tickets + sprint_briefs + sprint_ticket_repos + sprint_assessments');
   const { trackerTicketIdent } = await import('@pierre-review/shared');
   const SITE = 'https://acme.atlassian.net';
   const ident = trackerTicketIdent('jira', SITE, 'SPR-1');
@@ -3930,17 +3932,64 @@ check(
       })
       .execute();
   }
-  const { getSprintStories } = await import('../src/db/sprint-stories.js');
+  const { getSprintGraph, getSprintTicketDetail } = await import('../src/db/sprint-graph.js');
   const { acceptedSprintRepos, setSprintRepos } = await import('../src/db/sprint-ticket-repos.js');
   const { readSprintTicket } = await import('../src/db/sprint-store.js');
   const { loadSprintAssessment, cancelSprintAssessment } = await import('../src/review/sprint-assess/manager.js');
-  const ssA = await getSprintStories(1, defaultA, { aiEnabled: false, now: now.getTime() });
+  const ssA = await getSprintGraph(1, defaultA, { aiEnabled: true, now: now.getTime() });
   check(
-    "getSprintStories(A) lists A's ticket only",
-    ssA.tickets.length === 1 && ssA.tickets[0]!.ident === ident && ssA.tickets[0]!.title === 'A sprint ticket',
+    "getSprintGraph(A) lists A's ticket only",
+    ssA.nodes.filter((n) => !n.ghost).length === 1 && ssA.nodes[0]!.ident === ident && ssA.nodes[0]!.title === 'A sprint ticket',
   );
-  const ssCross = await getSprintStories(1, defaultB, { aiEnabled: false, now: now.getTime() });
-  check("getSprintStories(A, B's workspace) never lists B's ticket", !ssCross.tickets.some((t) => t.title === 'B sprint ticket'));
+  const ssCross = await getSprintGraph(1, defaultB, { aiEnabled: true, now: now.getTime() });
+  check("getSprintGraph(A, B's workspace) never lists B's ticket", !ssCross.nodes.some((n) => n.title === 'B sprint ticket'));
+  // The brief: B's brief on the shared ident must never reach A's node. The row is keyed by
+  // (account, workspace, ident) with a NAMED COMPOSITE FK onto workspaces(id, account_id), so B cannot
+  // even hold a brief in A's workspace — and A's read predicates on both. MUTATION CHECK: drop the
+  // accountId predicate from `storedSprintBriefs` and the last check here goes red.
+  {
+    const briefs = await import('../src/db/sprint-briefs.js');
+    const textHash = briefs.sprintBriefInput({ title: 'A sprint ticket', description: '', acceptanceCriteria: '' }, 'jira').textHash;
+    const brief = { summary: 'B brief', criteria: [], criteriaDerived: true, references: [], costUsd: 0, inputTokens: 0, outputTokens: 0 };
+    await briefs.storeSprintBrief(2, defaultB, ident, textHash, brief);
+    let briefFk = false;
+    try {
+      await briefs.storeSprintBrief(2, defaultA, ident, textHash, brief);
+    } catch {
+      briefFk = true;
+    }
+    check("the composite FK refuses B's brief in A's workspace", briefFk);
+    const graphA = await getSprintGraph(1, defaultA, { aiEnabled: true, now: now.getTime() });
+    check("getSprintGraph(A) never shows B's brief on the shared ident", graphA.nodes[0]?.brief.summary == null);
+    const detailCross = await getSprintTicketDetail(1, defaultB, ident, {
+      aiEnabled: true,
+      now: now.getTime(),
+      prsOf: async () => {
+        throw new Error('must not be asked');
+      },
+    });
+    check("getSprintTicketDetail(A, B's workspace) is found:false", detailCross.found === false);
+    check("storedSprintBriefs(A, B's workspace) is empty", (await briefs.storedSprintBriefs(1, defaultB, [ident])).size === 0);
+    check("storedSprintBriefs(B, B's workspace) holds B's brief", (await briefs.storedSprintBriefs(2, defaultB, [ident])).size === 1);
+  }
+  // The themes: ONE row per (account, workspace), same composite FK. MUTATION CHECK: drop the accountId
+  // predicate from `storedSprintThemes` (db/sprint-themes.ts) and the cross check goes red.
+  {
+    const themes = await import('../src/db/sprint-themes.js');
+    const v = { themes: [{ name: 'B one' }, { name: 'B two' }, { name: 'B three' }], assignments: [{ ident, theme: 'B one' }], costUsd: 0, inputTokens: 0, outputTokens: 0 };
+    await themes.storeSprintThemes(2, defaultB, 'hash-b', v);
+    let themeFk = false;
+    try {
+      await themes.storeSprintThemes(2, defaultA, 'hash-b', v);
+    } catch {
+      themeFk = true;
+    }
+    check("the composite FK refuses B's themes in A's workspace", themeFk);
+    check("storedSprintThemes(A, B's workspace) is null", (await themes.storedSprintThemes(1, defaultB)) === null);
+    check("storedSprintThemes(B, B's workspace) holds B's themes", (await themes.storedSprintThemes(2, defaultB))?.inputHash === 'hash-b');
+    const graphA = await getSprintGraph(1, defaultA, { aiEnabled: true, now: now.getTime() });
+    check("getSprintGraph(A) never shows B's themes", graphA.themes === null && graphA.nodes.every((n) => n.theme === null));
+  }
   check("readSprintTicket(A, B's workspace) is null", (await readSprintTicket(1, defaultB, ident)) === null);
   // A label's named key resolves through STORED tickets: A must see A's row only, never B's title.
   // MUTATION CHECK: drop the accountId predicate from `knownTicketsFor` and this goes red.
@@ -3993,35 +4042,6 @@ check(
     "cancelSprintAssessment(B, A's id) is null and leaves A's run alone",
     (await cancelSprintAssessment(2, asA!.id)) === null && (await loadSprintAssessment(1, asA!.id))?.status === 'running',
   );
-  const { performTrackerWrite } = await import('../src/tracker/write/run.js');
-  let writerCalls = 0;
-  const fakeWriter = {
-    async comment() {
-      writerCalls++;
-      return { url: null };
-    },
-    async replace() {
-      writerCalls++;
-      return { url: null };
-    },
-  };
-  // A's sprint ticket is gone from A's list: a write by A to the shared ident must not reach B's row.
-  await db
-    .update(schema.sprintTickets)
-    .set({ inSprint: false })
-    .where(and(eq(schema.sprintTickets.accountId, 1), eq(schema.sprintTickets.ident, ident)))
-    .execute();
-  const crossWrite = await performTrackerWrite(tctx, {
-    accountId: 1,
-    workspaceId: defaultB,
-    ident,
-    mode: 'comment',
-    text: 'hello',
-    requestId: '00000000-0000-4000-8000-000000000001',
-    writers: { jira: fakeWriter, linear: fakeWriter, github: fakeWriter },
-  });
-  check("performTrackerWrite(A, B's workspace) refuses no_ticket and writes nothing", crossWrite.ok === false && writerCalls === 0);
-
   // The status layout override (workspaces.sprint_statuses; db/sprint-status-settings.ts). A write by
   // A naming B's workspace must touch nothing — at the query layer AND over HTTP, where the route
   // refuses rather than writing onto A's Default. MUTATION CHECK: drop the accountId predicate from

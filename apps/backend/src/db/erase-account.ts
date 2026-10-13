@@ -202,9 +202,10 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.storyLabels).where(eq(schema.storyLabels.accountId, accountId)).execute();
     // Reports → This sprint (migration 0100 / pg 0087): the sprint list and its ticket text (from the
     // customer's tracker), the accepted candidate repos, the assessments (model prose about the
-    // tickets and code paths) and the write-back history (the exact text written to the tracker).
-    // All cascade from workspaces too, and are explicit anyway. Children of nothing: order is free.
-    await tx.delete(schema.trackerWrites).where(eq(schema.trackerWrites.accountId, accountId)).execute();
+    // tickets and code paths) and the sprint graph's briefs (model prose about the tickets, migration
+    // 0107 / pg 0094). All cascade from workspaces too, and are explicit anyway. Order is free.
+    await tx.delete(schema.sprintBriefs).where(eq(schema.sprintBriefs.accountId, accountId)).execute();
+    await tx.delete(schema.sprintThemes).where(eq(schema.sprintThemes.accountId, accountId)).execute();
     await tx.delete(schema.sprintAssessments).where(eq(schema.sprintAssessments.accountId, accountId)).execute();
     await tx.delete(schema.sprintTicketRepos).where(eq(schema.sprintTicketRepos.accountId, accountId)).execute();
     await tx.delete(schema.sprintRefTickets).where(eq(schema.sprintRefTickets.accountId, accountId)).execute();
@@ -337,7 +338,8 @@ export function accountScopedTables(): {
     { name: 'sprintRefTickets', col: schema.sprintRefTickets.accountId, table: schema.sprintRefTickets },
     { name: 'sprintTicketRepos', col: schema.sprintTicketRepos.accountId, table: schema.sprintTicketRepos },
     { name: 'sprintAssessments', col: schema.sprintAssessments.accountId, table: schema.sprintAssessments },
-    { name: 'trackerWrites', col: schema.trackerWrites.accountId, table: schema.trackerWrites },
+    { name: 'sprintBriefs', col: schema.sprintBriefs.accountId, table: schema.sprintBriefs },
+    { name: 'sprintThemes', col: schema.sprintThemes.accountId, table: schema.sprintThemes },
     // `myTurnDismissals` sat here until migration 0060 / pg 0047 DROPPED the table. It is named
     // rather than silently absent because this list is a checklist, and a checklist that shortens
     // with no explanation reads as an omission — the exact failure this function guards against.

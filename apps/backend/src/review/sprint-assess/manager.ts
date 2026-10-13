@@ -4,21 +4,15 @@ import { join } from 'node:path';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import {
   SPRINT_ASSESS_MODEL,
-  foldStoryIssues,
-  isBlockingRelation,
   sprintAssessModeOf,
-  storyBlockerPhrase,
-  storyReferencesByKey,
-  usableStoryLabel,
-  type KnownTicket,
-  type StoryTicketReference,
-  type TicketLinkBlocker,
   type SprintAssessmentCurrency,
   type SprintAssessmentErrorCode,
   type SprintAssessmentPhase,
   type SprintAssessmentRecord,
   type SprintAssessMode,
   type SprintRepoRef,
+  type SprintTicketReference,
+  type TrackerProvider,
 } from '@pierre-review/shared';
 import { db, schema } from '../../db/client.js';
 import {
@@ -44,74 +38,33 @@ import { pickReviewNonce } from '../claude-review/prompts.js';
 import type { SprintAssessRunResult, SprintAssessRunner } from './agent.js';
 import { buildSprintAssessPrompt, sprintAssessSystemPrompt, sprintAssessUntrustedTexts, type PromptReference } from './prompts.js';
 import { validateSprintAssessment } from './validate.js';
-import { storyLabelInput } from '../../db/story-label-input.js';
-import { buildStoryIssueInput, knownTicketsFor, linksOfRow, namedTicketKeys } from '../../db/story-issue-input.js';
 
-/** What code already knows about the ticket — open blockers (links + named), the current label's
- *  spec gaps, and every ticket it REFERENCES with the relation the label read and the status Limn
- *  holds (sprint tickets, PR tickets, the sprint read's lookup) — handed to the agent as fenced DATA.
- *  Never fails the run. */
-export async function knownIssuesForPrompt(
-  accountId: number,
-  ticket: SprintTicketDbRow,
-  criteria: readonly string[],
-): Promise<{ blockers: string[]; gaps: string[]; references: PromptReference[] }> {
-  const provider = ticket.provider as 'jira' | 'github' | 'linear';
-  const input = storyLabelInput(
-    { title: ticket.title, description: ticket.description ?? '', acceptanceCriteria: ticket.acceptanceCriteria ?? '' },
-    provider,
-  );
-  const { currentLabelRowsFor } = await import('../../db/story-health.js');
-  const label = input != null ? ((await currentLabelRowsFor(accountId, [ticket.ident])).get(ticket.ident)?.get(input.textHash) ?? null) : null;
-  const knownTickets = await knownTicketsFor(accountId, provider, ticket.apiRoot, namedTicketKeys([label]));
-  const issues = foldStoryIssues(buildStoryIssueInput({ criteria, label, links: linksOfRow(ticket), knownTickets }));
-  const blocked = issues.find((i) => i.id === 'blocked');
-  const gaps = issues.find((i) => i.id === 'spec_gaps');
-  const usable = usableStoryLabel({ criteria, label });
-  return {
-    blockers: (blocked?.blockers ?? []).filter((b) => !b.resolved).map(storyBlockerPhrase),
-    gaps: (gaps?.gaps ?? []).map((g) => g.text),
-    references: promptReferencesOf(linksOfRow(ticket), usable?.story.references ?? null, knownTickets, ticket.issueKey),
-  };
-}
-
-/** The "Referenced tickets" the prompt lists (pure): the tracker links (blocked_by / linked, with the
- *  status the tracker sent), then the label's references (one per key, `storyReferencesByKey`), each
- *  with the stored status. The ticket itself is left out; ≤ PROMPT_REFERENCES_MAX. */
+/** The "Referenced tickets" the prompt lists (pure): the drawer's references (tracker links, then the
+ *  brief's references), each with the status Limn holds. ≤ PROMPT_REFERENCES_MAX. */
 export const PROMPT_REFERENCES_MAX = 30;
-export function promptReferencesOf(
-  links: readonly TicketLinkBlocker[] | null,
-  references: readonly StoryTicketReference[] | null,
-  known: ReadonlyMap<string, KnownTicket>,
-  selfKey: string,
-): PromptReference[] {
+export function promptReferencesOf(refs: readonly SprintTicketReference[]): PromptReference[] {
   const out = new Map<string, PromptReference>();
-  const self = selfKey.trim().toUpperCase();
-  for (const l of links ?? []) {
-    const k = l.key.trim().toUpperCase();
-    if (k === self || out.has(k)) continue;
-    out.set(k, {
-      key: l.key,
-      title: l.title,
-      status: l.status,
-      done: l.category == null ? null : l.category === 'done',
-      relation: isBlockingRelation(l.relation) ? 'blocked_by' : 'linked',
-      quote: null,
-    });
-  }
-  for (const [k, r] of storyReferencesByKey(references)) {
-    if (k === self || out.has(k)) continue;
-    const t = known.get(k) ?? null;
-    out.set(k, {
-      key: r.ticketKey,
-      title: t?.title ?? null,
-      status: t?.status ?? null,
-      done: t?.category == null ? null : t.category === 'done',
-      relation: r.relation,
-      quote: r.quote,
-    });
+  for (const r of refs) {
+    const k = r.key.trim().toUpperCase();
+    if (out.has(k)) continue;
+    out.set(k, { key: r.key, title: r.title, status: r.status, done: r.done, relation: r.relation, quote: r.quote });
   }
   return [...out.values()].slice(0, PROMPT_REFERENCES_MAX);
+}
+
+/** The ticket's references as the graph knows them (DB only). Never fails the run: [] on error. */
+export async function referencesForPrompt(accountId: number, workspaceId: number, ticket: SprintTicketDbRow): Promise<PromptReference[]> {
+  const [{ loadGraphTickets, ticketReferencesOf }, { foldSprintGraph }] = await Promise.all([
+    import('../../db/sprint-graph.js'),
+    import('../../db/sprint-graph-fold.js'),
+  ]);
+  const site = { provider: ticket.provider as TrackerProvider, apiRoot: ticket.apiRoot };
+  const g = await loadGraphTickets(accountId, workspaceId, site, true);
+  const self = g.sprint.find((x) => x.ident === ticket.ident);
+  if (self == null) return [];
+  const nodes = foldSprintGraph({ ...site, sprint: g.sprint, ghosts: g.ghosts, stageOf: () => null }).nodes;
+  const known = new Map([...g.sprint, ...g.ghosts].map((x) => [x.ident, { key: x.key, title: x.title, status: x.status, url: x.url }] as const));
+  return promptReferencesOf(ticketReferencesOf(self, site.provider, site.apiRoot, known, new Set(nodes.map((n) => n.ident))));
 }
 
 // THE SPRINT ASSESSMENT'S RUNS ("Check against code", Reports → This sprint; docs/CLAUDE-REVIEW.md §
@@ -155,7 +108,10 @@ export interface StartSprintAssessmentArgs {
   workspaceId: number;
   ident: string;
   ticket: SprintTicketDbRow;
+  /** The brief's itemised criteria (else the ticket's own, as written). */
   criteria: string[];
+  /** The criteria were derived from the description (the ticket has none of its own). */
+  criteriaDerived?: boolean;
   repos: SprintAssessRepo[];
   /** From the ticket's stage at start (`sprintAssessModeOf`). */
   mode: SprintAssessMode;
@@ -359,10 +315,10 @@ async function runAssessment(job: Job): Promise<void> {
       await finish(id, { status: 'failed', error: 'no_checkout' }, true);
       return;
     }
-    // What code already knows (DB only), read BEFORE the last abort check so a cancel during it wins.
-    const known = await knownIssuesForPrompt(job.accountId, job.ticket, job.criteria).catch((err) => {
-      ctx.log.warn({ assessmentId: id, err: String(err).slice(0, 200) }, 'sprint assess: known issues read failed');
-      return { blockers: [], gaps: [], references: [] as PromptReference[] };
+    // The referenced tickets (DB only), read BEFORE the last abort check so a cancel during it wins.
+    const references = await referencesForPrompt(job.accountId, job.workspaceId, job.ticket).catch((err) => {
+      ctx.log.warn({ assessmentId: id, err: String(err).slice(0, 200) }, 'sprint assess: references read failed');
+      return [] as PromptReference[];
     });
     if (job.abort.signal.aborted) return;
 
@@ -374,9 +330,8 @@ async function runAssessment(job: Job): Promise<void> {
       title: job.ticket.title,
       description: job.ticket.description ?? '',
       criteria: job.criteria,
-      blockers: known.blockers,
-      gaps: known.gaps,
-      references: known.references,
+      criteriaDerived: job.criteriaDerived === true,
+      references,
     };
     const nonce = pickReviewNonce(sprintAssessUntrustedTexts(promptTicket));
     const promptRepos = ok.map((x) => ({ fullName: x.repo.fullName, path: x.path, sha: x.sha }));
@@ -424,18 +379,12 @@ async function runAssessment(job: Job): Promise<void> {
       mode: job.mode,
       criteriaCount: job.criteria.length,
       repos: ok.map((x) => ({ fullName: x.repo.fullName, path: x.path })),
-      references: known.references,
-      ticket: {
-        title: job.ticket.title,
-        description: job.ticket.description ?? '',
-        criteria: [...job.criteria, job.ticket.acceptanceCriteria ?? ''],
-      },
     });
     if (!v.ok) {
       await finish(id, { status: 'failed', error: 'invalid_assessment', ...usage }, true);
       return;
     }
-    if (v.dropped.paths + v.dropped.items + (v.dropped.quotes ?? 0) > 0) ctx.log.info({ assessmentId: id, dropped: v.dropped }, 'sprint assess: validation removed items');
+    if (v.dropped.paths + v.dropped.items > 0) ctx.log.info({ assessmentId: id, dropped: v.dropped }, 'sprint assess: validation removed items');
     await finish(id, { status: 'succeeded', bodyJson: v.body, droppedJson: v.dropped, error: null, ...usage }, true);
   } catch (err) {
     ctx.log.warn({ err, assessmentId: id }, 'sprint assess: run threw');

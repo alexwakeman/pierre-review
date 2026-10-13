@@ -6,7 +6,7 @@ import {
   type SprintAssessmentResponse,
 } from '@pierre-review/shared';
 import { resolveWorkspaceScope } from '../../db/queries.js';
-import { sprintCriteriaOf } from '../../db/sprint-chips.js';
+import { currentSprintBriefs, sprintBriefInput, sprintCriteriaOf } from '../../db/sprint-briefs.js';
 import { readSprintTicket, sprintAssessmentRecordOf } from '../../db/sprint-store.js';
 import { sprintTicketStage } from '../../db/sprint-stories.js';
 import { acceptedSprintRepoDetails } from '../../db/sprint-ticket-repos.js';
@@ -85,11 +85,17 @@ export function registerSprintAssessRoutes(app: FastifyInstance, ctx: AgentConte
           reply.status(422);
           return { error: 'no_repos', message: 'Choose at least one repo first.' };
         }
-        // [] is allowed: the agent then proposes criteria.
-        const criteria = sprintCriteriaOf(
-          { description: ticket.description ?? '', acceptanceCriteria: ticket.acceptanceCriteria ?? '' },
-          ticket.provider as 'jira' | 'github' | 'linear',
-        ).items;
+        // THE CRITERIA are the ticket's CURRENT BRIEF (itemised, derived from the description when the
+        // ticket has none); with no current brief, the ticket's own as written. [] is allowed.
+        const provider = ticket.provider as 'jira' | 'github' | 'linear';
+        const brief = (
+          await currentSprintBriefs(accountId, scope.workspaceId, [{ ident, input: sprintBriefInput(ticket, provider) }])
+        ).get(ident);
+        const criteria =
+          brief != null && brief.criteria.length > 0
+            ? brief.criteria.map((c) => c.text)
+            : sprintCriteriaOf({ description: ticket.description ?? '', acceptanceCriteria: ticket.acceptanceCriteria ?? '' }, provider).items;
+        const criteriaDerived = brief != null && brief.criteria.length > 0 && brief.criteriaDerived;
         // THE MODE IS THE SERVER'S: plan (not started / in progress) or verify (in review / done), from
         // the stored ticket's stage under the workspace's status layout.
         const mode = sprintAssessModeOf(await sprintTicketStage(accountId, scope.workspaceId, ticket));
@@ -99,6 +105,7 @@ export function registerSprintAssessRoutes(app: FastifyInstance, ctx: AgentConte
           ident,
           ticket,
           criteria,
+          criteriaDerived,
           repos,
           mode,
         });

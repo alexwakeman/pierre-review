@@ -777,20 +777,6 @@ export async function deleteWorkspace(
         and(eq(workspaceReviewers.accountId, accountId), eq(workspaceReviewers.workspaceId, id)),
       )
       .execute();
-    // 2b. Write-back history -> Default. A `tracker_writes` row is the ONLY record that a
-    //     confirmed write reached Jira / Linear / GitHub (a `maybe_written` row is the warning
-    //     against a second press); the workspace FK cascades, so it must move before the delete.
-    //     A plain UPDATE cannot collide: its unique is (account_id, request_id).
-    await tx
-      .update(schema.trackerWrites)
-      .set({ workspaceId: defaultId })
-      .where(
-        and(
-          eq(schema.trackerWrites.accountId, accountId),
-          eq(schema.trackerWrites.workspaceId, id),
-        ),
-      )
-      .execute();
     // 3. Belt-and-braces: step 1 already emptied this, and the FK cascades — but the explicit
     //    delete keeps the ordering dialect-agnostic (Postgres enforces FKs immediately; SQLite
     //    only with foreign_keys=ON).

@@ -24,10 +24,12 @@ import {
 import { sql } from 'drizzle-orm';
 import type {
   BlastRadiusConfig,
-  SprintChecks,
   SprintStatusAutoOrder,
   SprintStatusSettings,
   TicketLinkBlocker,
+  SprintBriefCriterion,
+  SprintTheme,
+  SprintBriefReference,
   BranchCheckRun,
   CheckRun,
   ClaudeReviewFollowUpRecord,
@@ -60,7 +62,6 @@ import type {
   StoryLevelLabels,
   SprintAssessmentBody,
   SprintAssessmentDropped,
-  SprintReplaceTarget,
   SprintSource,
   TicketAssessment,
 } from '@pierre-review/shared';
@@ -1815,10 +1816,10 @@ export const workspaces = sqliteTable(
     // the `accounts.blast_radius_config` precedent. Per WORKSPACE, because two teams in two
     // zones in one account work different hours.
     flowSettings: text('flow_settings', { mode: 'json' }).$type<FlowSettings>(),
-    // Reports → This sprint: which story issues this workspace raises (migration 0102 / pg 0089).
-    // OVERRIDES ONLY (`SprintChecks` = {off, issueTypes}, shared); NULL = every issue on, every issue
-    // type. An older stored shape is read tolerantly by db/sprint-checks.ts.
-    sprintChecks: text('sprint_checks', { mode: 'json' }).$type<SprintChecks>(),
+    // Reports → This sprint: which story issues this workspace raised (migration 0102 / pg 0089).
+    // DORMANT since 2026-10-12 (the sprint checks left This sprint with the chips): never read or
+    // written; kept rather than rebuilding the table to drop a column.
+    sprintChecks: text('sprint_checks', { mode: 'json' }).$type<unknown>(),
     // Reports → This sprint: the workspace's STATUS LAYOUT override (migration 0103 / pg 0090).
     // OVERRIDES ONLY (`SprintStatusSettings` = {sections}: status NAMES per stage; a stored retired
     // {order, deliveredFrom} is converted on read); NULL = the
@@ -2859,7 +2860,7 @@ export const sprintReads = sqliteTable(
     // The last attempt's failure CODE (a JiraFetchErrorCode or 'no_tracker'); null = fine.
     errorCode: text('error_code'),
     truncated: integer('truncated', { mode: 'boolean' }).notNull().default(false),
-    // When GET /api/sprint-stories last served this workspace — the demand gate.
+    // When GET /api/sprint-graph last served this workspace — the demand gate.
     viewedAt: integer('viewed_at', { mode: 'timestamp' }).notNull(),
     // The AUTOMATIC status order the read found (migration 0103 / pg 0090; shared
     // `SprintStatusAutoOrder`): Jira board columns, Linear workflow states, GitHub Open/Closed. NULL =
@@ -2879,8 +2880,8 @@ export const sprintReads = sqliteTable(
 // sprint_tickets — ONE row per (account, workspace, ticket ident): a ticket the sprint read returned,
 // with its text, WHETHER OR NOT it has a pull request (`tracker_tickets` is keyed on pr_id and cannot
 // hold these). `in_sprint` is false once a later read no longer returns it (rows not seen for 90 days
-// are pruned by the read). `next_check_at` = epoch 0 asks the worker to re-read THIS ticket alone at
-// once (a write-back does that); otherwise the list read refreshes every row.
+// are pruned by the read). `next_check_at` is DORMANT since the write-back left (2026-10-12): the
+// list read refreshes every row.
 // `ident` is shared `trackerTicketIdent(provider, api_root, issue_key)`.
 // ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId, ident].
 export const sprintTickets = sqliteTable(
@@ -2972,12 +2973,99 @@ export const sprintRefTickets = sqliteTable(
     statusCategory: text('status_category'),
     url: text('url'),
     readAt: integer('read_at', { mode: 'timestamp' }).notNull(),
+    // THE SPRINT GRAPH (migration 0107 / pg 0094): a referenced ticket is read WITH its text, so its
+    // brief can name what IT depends on — the ghost chain (tracker/sprint/ref-status.ts). `depth` = hops
+    // from the sprint (1 = named by a sprint ticket; ≤ SPRINT_GHOST_DEPTH_MAX).
+    description: text('description'),
+    acceptanceCriteria: text('acceptance_criteria'),
+    issueTypeName: text('issue_type_name'),
+    assigneeName: text('assignee_name'),
+    assigneeAvatarUrl: text('assignee_avatar_url'),
+    blockedByJson: text('blocked_by_json', { mode: 'json' }).$type<TicketLinkBlocker[]>(),
+    depth: integer('depth').notNull().default(1),
   },
   (t) => ({
     accountWsIdentUx: uniqueIndex('sprint_ref_tickets_account_ws_ident').on(t.accountId, t.workspaceId, t.ident),
     accountKeyIdx: index('sprint_ref_tickets_account_key').on(t.accountId, t.issueKey),
     workspaceAccountFk: foreignKey({
       name: 'sprint_ref_tickets_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_briefs — THE SPRINT GRAPH's per-ticket BRIEF (migration 0107 / pg 0094): a Haiku pass after
+// each sprint read writes, per sprint ticket and per ghost, a summary, the acceptance criteria itemised
+// (derived from the description when the ticket has none) and the references to other tickets (the
+// rubric-4 relation vocabulary, each quote VERIFIED). ONE row per (account, workspace, ident), replaced
+// by each new brief; CURRENT while `text_hash` = today's text hash and `brief_version` =
+// SPRINT_BRIEF_VERSION. Written ONLY by review/sprint-briefs/ (local, agentic); read by db/sprint-graph.ts.
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId, ident].
+export const sprintBriefs = sqliteTable(
+  'sprint_briefs',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    ident: text('ident').notNull(),
+    textHash: text('text_hash').notNull(),
+    briefVersion: integer('brief_version').notNull(),
+    summary: text('summary').notNull(),
+    criteriaJson: text('criteria_json', { mode: 'json' }).$type<SprintBriefCriterion[]>().notNull(),
+    criteriaDerived: integer('criteria_derived', { mode: 'boolean' }).notNull().default(false),
+    referencesJson: text('references_json', { mode: 'json' }).$type<SprintBriefReference[]>().notNull(),
+    model: text('model').notNull(),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountWsIdentUx: uniqueIndex('sprint_briefs_account_ws_ident').on(t.accountId, t.workspaceId, t.ident),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_briefs_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_themes — THE SPRINT GRAPH's THEMES (migration 0108 / pg 0095): ONE sprint-wide Haiku call after
+// the brief pass names 3–8 short themes and puts each sprint ticket in exactly one. ONE row per
+// (account, workspace), replaced by each new pass; CURRENT while `input_hash` = today's hash of the sprint
+// tickets' keys + brief summaries AND `theme_version` = SPRINT_THEME_VERSION. Written ONLY by
+// review/sprint-themes/ (local, agentic); read by db/sprint-graph.ts. Tenancy via the named composite
+// FK onto `workspaces (id, account_id)`.
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId].
+export const sprintThemes = sqliteTable(
+  'sprint_themes',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    inputHash: text('input_hash').notNull(),
+    themeVersion: integer('theme_version').notNull(),
+    themesJson: text('themes_json', { mode: 'json' }).$type<SprintTheme[]>().notNull(),
+    assignmentsJson: text('assignments_json', { mode: 'json' }).$type<Array<{ ident: string; theme: string }>>().notNull(),
+    model: text('model').notNull(),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountWsUx: uniqueIndex('sprint_themes_account_ws').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_themes_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),
@@ -3074,47 +3162,3 @@ export const sprintAssessments = sqliteTable(
   }),
 );
 
-// tracker_writes — the WRITE-BACK history: ONE row per confirmed press of "Update in <tracker>". The
-// row is INSERTED with status 'writing' BEFORE the tracker call — the claim: `(account_id,
-// request_id)` is unique, so a repeated POST of one confirm dialog finds the first row and never
-// writes again. Never retried. 'writing' left by a restart is swept to 'maybe_written' at boot, and
-// a cut-off call (timeout) is recorded 'maybe_written' too. `text` is EXACTLY what was sent.
-export const trackerWrites = sqliteTable(
-  'tracker_writes',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    accountId: integer('account_id')
-      .notNull()
-      .references(() => accounts.id, { onDelete: 'cascade' }),
-    workspaceId: integer('workspace_id').notNull(),
-    ident: text('ident').notNull(),
-    provider: text('provider').notNull(),
-    requestId: text('request_id').notNull(),
-    // 'comment' | 'replace'
-    mode: text('mode').notNull(),
-    // SprintReplaceTarget for 'replace'; null for 'comment'.
-    targetJson: text('target_json', { mode: 'json' }).$type<SprintReplaceTarget>(),
-    text: text('text').notNull(),
-    textHash: text('text_hash').notNull(),
-    // 'writing' | 'written' | 'failed' | 'maybe_written'
-    status: text('status').notNull(),
-    // A SprintWriteErrorCode; never the tracker's body.
-    errorCode: text('error_code'),
-    // The comment / ticket URL the tracker answered with.
-    url: text('url'),
-    assessmentId: integer('assessment_id'),
-    createdAt: integer('created_at', { mode: 'timestamp' })
-      .notNull()
-      .default(sql`(unixepoch())`),
-    completedAt: integer('completed_at', { mode: 'timestamp' }),
-  },
-  (t) => ({
-    accountRequestUx: uniqueIndex('tracker_writes_account_request').on(t.accountId, t.requestId),
-    accountIdentIdx: index('tracker_writes_account_ident_idx').on(t.accountId, t.workspaceId, t.ident, t.createdAt),
-    workspaceAccountFk: foreignKey({
-      name: 'tracker_writes_workspace_account_fk',
-      columns: [t.workspaceId, t.accountId],
-      foreignColumns: [workspaces.id, workspaces.accountId],
-    }).onDelete('cascade'),
-  }),
-);

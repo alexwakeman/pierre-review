@@ -1,6 +1,11 @@
-// The one seam between the tracker's sprint read (core, both modes) and the story labelling it
-// starts afterwards (agentic, LOCAL ONLY — review/sprint-labels/, registered through
-// `registerAgenticRoutes`). Unset — cloud, or AI disabled — a read labels nothing.
+// The seams between the tracker's sprint read (core, both modes) and the BRIEF PASS it starts afterwards
+// (agentic, LOCAL ONLY — review/sprint-briefs/, registered through `registerAgenticRoutes`).
+//
+//   • `afterSprintRead` — set by the brief pass: a stored read hands the workspace to it. Unset (cloud,
+//     AI disabled) → a read briefs nothing.
+//   • `expandGhostsAfterBriefs` — set by the tracker (`startSprintRead`): the pass briefed new ghosts,
+//     so look up the tickets THEY point at (the next hop of the chain). Part of the read's pipeline —
+//     no view ever reaches either seam.
 
 type AfterSprintRead = (accountId: number, workspaceId: number) => void;
 let hook: AfterSprintRead | null = null;
@@ -14,28 +19,22 @@ export function afterSprintRead(accountId: number, workspaceId: number): void {
   try {
     hook?.(accountId, workspaceId);
   } catch {
-    /* labelling is best effort; the next read tries again */
+    /* the brief pass is best effort; the next read tries again */
   }
 }
 
-/** The same labelling, asked for by a VIEW: `GET /api/sprint-stories` calls this when a listed ticket's
- *  label is still pending (no current label — new text, or a rubric bump). Deduped per (account,
- *  workspace) to once a minute, so a page that refetches does not keep re-queuing; the run itself
- *  skips current labels and a busy slot. Never throws. */
-export const SPRINT_LABEL_VIEW_MIN_INTERVAL_MS = 60_000;
-const lastViewAsk = new Map<string, number>();
+type GhostExpander = (accountId: number, workspaceId: number) => Promise<number>;
+let expander: GhostExpander | null = null;
 
-export function sprintViewedWithPendingLabels(accountId: number, workspaceId: number, nowMs = Date.now()): boolean {
-  if (hook == null) return false;
-  const k = `${accountId}:${workspaceId}`;
-  const last = lastViewAsk.get(k);
-  if (last != null && nowMs - last < SPRINT_LABEL_VIEW_MIN_INTERVAL_MS) return false;
-  lastViewAsk.set(k, nowMs);
-  afterSprintRead(accountId, workspaceId);
-  return true;
+export function setSprintGhostExpander(fn: GhostExpander | null): void {
+  expander = fn;
 }
 
-/** Test seam: forget the view dedupe. */
-export function resetSprintViewDedupe(): void {
-  lastViewAsk.clear();
+/** Look up the ghost chain's next hop; the rows stored (0 when unset or nothing new). Never throws. */
+export async function expandGhostsAfterBriefs(accountId: number, workspaceId: number): Promise<number> {
+  try {
+    return (await expander?.(accountId, workspaceId)) ?? 0;
+  } catch {
+    return 0;
+  }
 }

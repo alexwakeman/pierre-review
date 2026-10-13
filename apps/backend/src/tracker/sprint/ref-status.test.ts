@@ -21,7 +21,7 @@ const hit = (key: string, status = 'Done', cat = 'done') => ({ key, fields: { su
 const keysOf = (url: URL): string[] => [...(url.searchParams.get('jql') ?? '').matchAll(/"([A-Z0-9]+-\d+)"/g)].map((m) => m[1]!);
 
 describe('sprintReferencedKeys', () => {
-  it('links on the site always, bare keys only in a known project, status-less tracker links, never the sprint’s own', () => {
+  it('links on the site always, bare keys only in a known project, every tracker link, never the sprint’s own', () => {
     const rows = [
       {
         issueKey: 'BMD-1056',
@@ -34,12 +34,12 @@ describe('sprintReferencedKeys', () => {
       },
       { issueKey: 'BMD-1001', description: 'Uses BMD-343', acceptanceCriteria: null },
     ];
-    expect(sprintReferencedKeys(rows, SITE, ['BMD'])).toEqual(['XYZ-7', 'BMD-850', 'BMD-343']);
+    expect(sprintReferencedKeys(rows, SITE, ['BMD'])).toEqual(['XYZ-7', 'XYZ-8', 'BMD-850', 'BMD-343']);
   });
 });
 
 describe('jiraRefLister', () => {
-  it('one call for a small set: key in (…), summary + status, browse links on the site', async () => {
+  it('one call for a small set: key in (…), every field (the text too), browse links on the site', async () => {
     const seen: URL[] = [];
     const t: JiraTransport = async (url) => {
       seen.push(url);
@@ -49,7 +49,8 @@ describe('jiraRefLister', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]!.pathname).toBe('/rest/api/3/search/jql');
     expect(seen[0]!.searchParams.get('jql')).toBe(refJql(['BMD-850', 'BMD-343']));
-    expect(seen[0]!.searchParams.get('fields')).toBe('summary,status');
+    expect(seen[0]!.searchParams.get('fields')).toBe('*all');
+    expect(seen[0]!.searchParams.get('expand')).toBe('names,schema');
     expect(r).toEqual({
       complete: true,
       tickets: [
@@ -96,6 +97,38 @@ describe('jiraRefLister', () => {
     expect((await jiraRefLister(call(t), ['BMD-1'], ROOT)).tickets.map((x) => x.key)).toEqual(['BMD-1']);
     expect(paths).toEqual(['/rest/api/3/search/jql', '/rest/api/2/search']);
     await expect(jiraRefLister(call(async () => json({}, 401)), ['BMD-1'], ROOT)).rejects.toBeInstanceOf(JiraFetchError);
+  });
+
+  it('refTicketsOf reads a ghost’s TEXT from a full answer: description, the criteria field, type, assignee, links', () => {
+    const raw = {
+      names: { customfield_1: 'Acceptance Criteria' },
+      schema: {},
+      issues: [
+        {
+          key: 'BMD-7',
+          fields: {
+            summary: 'Ghost',
+            description: 'The page shows the list.',
+            customfield_1: '- The list is sorted',
+            issuetype: { id: '10001', name: 'Story' },
+            assignee: { displayName: 'Ann', avatarUrls: {} },
+            status: { name: 'To Do', statusCategory: { key: 'new' } },
+            issuelinks: [{ type: { name: 'Blocks', inward: 'is blocked by', outward: 'blocks' }, inwardIssue: { key: 'BMD-8', fields: { summary: 'API', status: { name: 'Done', statusCategory: { key: 'done' } } } } }],
+          },
+        },
+      ],
+    };
+    const [g] = refTicketsOf(raw, ROOT, ROOT);
+    expect(g).toMatchObject({
+      key: 'BMD-7',
+      title: 'Ghost',
+      status: 'To Do',
+      description: 'The page shows the list.',
+      acceptanceCriteria: '- The list is sorted',
+      issueTypeName: 'Story',
+    });
+    expect(g!.assignee?.name).toBe('Ann');
+    expect(g!.blockedBy?.map((l) => [l.key, l.relation])).toEqual([['BMD-8', 'is blocked by']]);
   });
 
   it('refTicketsOf ignores junk and a non-https browse base', () => {

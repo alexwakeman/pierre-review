@@ -594,6 +594,9 @@ export const config = {
   // Per-RUN spending and turn caps. Env only — no route sets them.
   sprintAssessBudgetUsd: floatFromEnv('SPRINT_ASSESS_BUDGET_USD', SPRINT_ASSESS_BUDGET_USD_DEFAULT),
   sprintAssessMaxTurns: intFromEnv('SPRINT_ASSESS_MAX_TURNS', SPRINT_ASSESS_MAX_TURNS),
+  // ---- Sprint briefs (Reports → This sprint, the graph — review/sprint-briefs/) ----
+  // The per-PASS spending cap (US$) of the Haiku brief pass after each sprint read. Env only.
+  sprintBriefBudgetUsd: floatFromEnv('SPRINT_BRIEF_BUDGET_USD', 1),
 
   // ---- Diff-size cap ----
   // A very large inlined diff is the dominant cost on a big PR (it's the cached

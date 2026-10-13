@@ -3,12 +3,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import {
   SPRINT_ASSESS_FORMAT_VERSION,
   SPRINT_ASSESS_MODEL,
-  STORY_ISSUE_IDS,
-  STORY_RULE_BY_ID,
-  isStoryIssueId,
-  isStoryRuleId,
   type SprintAssessmentBody,
-  type SprintAssessmentFinding,
   type SprintAssessmentErrorCode,
   type SprintAssessmentPhase,
   type SprintAssessmentRecord,
@@ -19,15 +14,11 @@ import {
   type SprintCriterionStatus,
   type SprintPlanStep,
   type SprintReadState,
-  type SprintWriteErrorCode,
-  type SprintWriteMode,
-  type SprintWriteRecord,
-  type SprintWriteStatus,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 
 // REPORTS → THIS SPRINT — the SHARED STORE HALF (foundation module; the tracker sprint read, the
-// assessment and the write-back all import it, none of them owns it). Row → wire mappers, the
+// graph and the assessment all import it, none of them owns it). Row → wire mappers, the
 // demand gate (`sprint_reads.viewed_at`), the "read me again now" marks, the two currency hashes and
 // the latest-per-ticket reads. Schema + rationale: db/schema.sqlite.ts § REPORTS → THIS SPRINT.
 //
@@ -38,7 +29,6 @@ import { db, schema } from './client.js';
 export type SprintReadRow = typeof schema.sprintReads.$inferSelect;
 export type SprintTicketDbRow = typeof schema.sprintTickets.$inferSelect;
 export type SprintAssessmentRow = typeof schema.sprintAssessments.$inferSelect;
-export type TrackerWriteRow = typeof schema.trackerWrites.$inferSelect;
 
 const EPOCH = new Date(0);
 const sha256 = (s: string): string => createHash('sha256').update(s, 'utf8').digest('hex');
@@ -68,7 +58,7 @@ export function sprintAssessFingerprint(
 // ── the demand gate + due marks ─────────────────────────────────────────────────────────────────
 
 /**
- * GET /api/sprint-stories served this workspace: stamp `viewed_at`. A workspace with no row gets one
+ * GET /api/sprint-graph served this workspace: stamp `viewed_at`. A workspace with no row gets one
  * that is DUE NOW (`next_read_at` = epoch 0), so its first read happens on the next tick (or the
  * kick below). Returns the row as stored.
  */
@@ -134,16 +124,6 @@ export async function resetSprintReadForSite(
   return readSprintRead(accountId, workspaceId);
 }
 
-/** Ask for ONE ticket to be re-read alone at once (after a write-back). `next_check_at` = epoch 0. */
-export async function markSprintTicketDue(accountId: number, workspaceId: number, ident: string): Promise<void> {
-  const t = schema.sprintTickets;
-  await db
-    .update(t)
-    .set({ nextCheckAt: EPOCH })
-    .where(and(eq(t.accountId, accountId), eq(t.workspaceId, workspaceId), eq(t.ident, ident)))
-    .execute();
-}
-
 /** The read state for the wire. `errorMessage` is the provider-named sentence for `error_code`. */
 export function sprintReadStateOf(row: SprintReadRow | null, errorMessage: (code: string) => string): SprintReadState {
   return {
@@ -178,19 +158,11 @@ export function kickSprintRead(accountId: number, workspaceId: number): void {
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v != null && !Array.isArray(v);
 
 /** A stored `body_json` as the CURRENT body shape, or null when it is another shape (an older
- *  format, or damaged). Re-checked defensively — a malformed issue entry is dropped, never thrown on. */
+ *  format, or damaged). Re-checked defensively — a malformed entry is dropped, never thrown on. A
+ *  format-5 body still reads (its findings and revisions are ignored); its run is stale anyway — the
+ *  format is folded into the fingerprint. */
 export function sprintAssessmentBodyFromStored(raw: unknown): SprintAssessmentBody | null {
-  // Format 5: `mode` + `findings` (+ `plan` / `criterionChecks`). A body of an earlier format (no
-  // `mode`, or `issues`) reads null → `outdated`.
-  if (
-    !isObj(raw) ||
-    (raw.mode !== 'plan' && raw.mode !== 'verify') ||
-    typeof raw.summary !== 'string' ||
-    !Array.isArray(raw.findings) ||
-    !Array.isArray(raw.revisedCriteria)
-  ) {
-    return null;
-  }
+  if (!isObj(raw) || (raw.mode !== 'plan' && raw.mode !== 'verify') || typeof raw.summary !== 'string') return null;
   const refOf = (v: unknown): SprintCodeRef | null =>
     isObj(v) && typeof v.repo === 'string' && typeof v.path === 'string' ? { repo: v.repo, path: v.path } : null;
   const plan: SprintPlanStep[] = [];
@@ -216,39 +188,12 @@ export function sprintAssessmentBodyFromStored(raw: unknown): SprintAssessmentBo
       tests: refOf(it.tests),
     });
   }
-  const findings: SprintAssessmentFinding[] = [];
-  const wheres: readonly string[] = ['title', 'description', 'criteria'];
-  for (const it of raw.findings) {
-    if (!isObj(it) || !isStoryIssueId(it.issue) || !isStoryRuleId(it.rule) || STORY_RULE_BY_ID[it.rule].issue !== it.issue) continue;
-    if (typeof it.text !== 'string' || it.text.trim() === '') continue;
-    const ref =
-      isObj(it.ref) && typeof it.ref.repo === 'string' && typeof it.ref.path === 'string'
-        ? { repo: it.ref.repo, path: it.ref.path }
-        : null;
-    const quote = typeof it.quote === 'string' && it.quote.trim() !== '' ? it.quote : null;
-    findings.push({
-      issue: it.issue,
-      rule: it.rule,
-      quote,
-      where: quote != null && typeof it.where === 'string' && wheres.includes(it.where) ? (it.where as SprintAssessmentFinding['where']) : null,
-      text: it.text,
-      suggestion: quote != null && typeof it.suggestion === 'string' && it.suggestion.trim() !== '' ? it.suggestion : null,
-      ref,
-    });
-  }
   return {
     mode: raw.mode,
     summary: raw.summary,
     plan: raw.mode === 'plan' ? plan : [],
     criterionChecks: raw.mode === 'verify' ? criterionChecks : [],
     coverage: raw.mode === 'verify' && typeof raw.coverage === 'string' && raw.coverage.trim() !== '' ? raw.coverage : null,
-    findings: findings
-      .map((f, i) => ({ f, i }))
-      .sort((a, b) => STORY_ISSUE_IDS.indexOf(a.f.issue) - STORY_ISSUE_IDS.indexOf(b.f.issue) || a.i - b.i)
-      .map((x) => x.f),
-    revisedCriteria: raw.revisedCriteria.filter((c): c is string => typeof c === 'string' && c.trim() !== ''),
-    revisedDescription:
-      typeof raw.revisedDescription === 'string' && raw.revisedDescription.trim() !== '' ? raw.revisedDescription : null,
   };
 }
 
@@ -276,23 +221,6 @@ export function sprintAssessmentRecordOf(r: SprintAssessmentRow): SprintAssessme
   };
 }
 
-/** `message` comes from the write-back's own sentence table (tracker/write), handed in so this
- *  module stays provider-free. */
-export function trackerWriteRecordOf(r: TrackerWriteRow, message: (r: TrackerWriteRow) => string | null): SprintWriteRecord {
-  return {
-    id: r.id,
-    ident: r.ident,
-    mode: r.mode as SprintWriteMode,
-    target: r.targetJson ?? null,
-    status: r.status as SprintWriteStatus,
-    error: (r.errorCode as SprintWriteErrorCode | null) ?? null,
-    message: message(r),
-    url: r.url ?? null,
-    createdAt: r.createdAt.toISOString(),
-    completedAt: r.completedAt != null ? r.completedAt.toISOString() : null,
-  };
-}
-
 // ── latest per ticket ────────────────────────────────────────────────────────────────────────────
 
 /** The newest assessment (any status) per ident, this account + workspace only. */
@@ -305,28 +233,6 @@ export async function latestSprintAssessments(
   const list = [...new Set(idents)];
   if (list.length === 0) return out;
   const t = schema.sprintAssessments;
-  for (let i = 0; i < list.length; i += 500) {
-    const rows = await db
-      .select()
-      .from(t)
-      .where(and(eq(t.accountId, accountId), eq(t.workspaceId, workspaceId), inArray(t.ident, list.slice(i, i + 500))))
-      .orderBy(desc(t.createdAt), desc(t.id))
-      .execute();
-    for (const r of rows) if (!out.has(r.ident)) out.set(r.ident, r);
-  }
-  return out;
-}
-
-/** The newest write-back (any status) per ident, this account + workspace only. */
-export async function latestTrackerWrites(
-  accountId: number,
-  workspaceId: number,
-  idents: readonly string[],
-): Promise<Map<string, TrackerWriteRow>> {
-  const out = new Map<string, TrackerWriteRow>();
-  const list = [...new Set(idents)];
-  if (list.length === 0) return out;
-  const t = schema.trackerWrites;
   for (let i = 0; i < list.length; i += 500) {
     const rows = await db
       .select()

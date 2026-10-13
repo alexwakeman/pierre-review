@@ -1,20 +1,18 @@
 import {
   SPRINT_CRITERION_STATUS_LABEL,
-  sprintAssessmentBodyOf,
   type SprintAssessmentBody,
   type SprintCodeRef,
   type SprintCriterionStatus,
-  type SprintTicketRow,
 } from '@pierre-review/shared';
 import { sprintCodeCheckMarkdown } from '../../lib/copy.js';
 import { relativeTime } from '../../lib/ui.js';
+import { SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
-import { AssessInfo } from './SprintAssessment.js';
+import { AssessInfo, type SprintAssessTicket } from './SprintAssessment.js';
 import { SprintCopyButton } from './SprintCopyButton.js';
-import { ClaudeMark } from './SprintTicketReview.js';
 
-// THE CODE CHECK (Reports → This sprint, the opened card): what "Check against code" said, full width
-// above the ticket text so a few sentences have room. STAGE-AWARE like the run (format 5):
+// THE CODE CHECK (Reports → This sprint, a ticket's drawer): what "Check against code" said. STAGE-AWARE
+// like the run (format 6):
 //   • PLAN (the ticket is not built yet): the summary, then the few high-level changes it needs —
 //     repo, the existing file or folder it touches (or a proposed new file), one sentence each.
 //   • VERIFY (in review / done): the summary, then each criterion with a Met / Partly met / Not met /
@@ -32,7 +30,17 @@ const STATUS_PILL: Record<SprintCriterionStatus, string> = {
   unclear: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100',
 };
 
-export function SprintCodeCheck({ ticket: t }: { ticket: SprintTicketRow }): JSX.Element | null {
+/** The small "Claude" mark beside model-written text. */
+export function ClaudeMark(): JSX.Element {
+  return (
+    <span className="ml-1 inline-flex items-center gap-0.5 align-middle text-[11px] text-ai-ink">
+      <SparkleIcon size={10} className="text-ai-signal" />
+      Claude
+    </span>
+  );
+}
+
+export function SprintCodeCheck({ ticket: t }: { ticket: SprintAssessTicket }): JSX.Element | null {
   const record = t.assessment?.record ?? null;
   if (record?.outdated === true) {
     return (
@@ -41,7 +49,7 @@ export function SprintCodeCheck({ ticket: t }: { ticket: SprintTicketRow }): JSX
       </p>
     );
   }
-  const body = sprintAssessmentBodyOf(t);
+  const body = record != null && record.status === 'succeeded' && !record.outdated ? record.body : null;
   if (body == null || record == null) return null;
   const stale = t.assessment?.currency === 'stale';
   const multiRepo = new Set([...body.plan.map((p) => p.repo), ...record.repos.map((r) => r.fullName)]).size > 1;
@@ -60,10 +68,10 @@ export function SprintCodeCheck({ ticket: t }: { ticket: SprintTicketRow }): JSX
         <InfoButton title="Code check">
           <AssessInfo record={record} />
         </InfoButton>
-        <SprintCopyButton markdown={sprintCodeCheckMarkdown(body, t.criteria.items)} what="the code check" className="ml-auto" />
+        <SprintCopyButton markdown={sprintCodeCheckMarkdown(body, t.criteria)} what="the code check" className="ml-auto" />
       </div>
       {body.summary.trim() !== '' && <p className="text-sm text-gray-800 dark:text-gray-100">{body.summary}</p>}
-      {body.mode === 'plan' ? <PlanList body={body} multiRepo={multiRepo} /> : <CriteriaChecks body={body} criteria={t.criteria.items} />}
+      {body.mode === 'plan' ? <PlanList body={body} multiRepo={multiRepo} /> : <CriteriaChecks body={body} criteria={t.criteria} />}
     </section>
   );
 }

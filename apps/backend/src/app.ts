@@ -47,7 +47,6 @@ import { dailyBriefRoutes } from './api/routes/daily-brief.js';
 import { dependencyMergeRoutes } from './api/routes/dependency-merge.js';
 import { flowRoutes } from './api/routes/flow.js';
 import { sprintStoriesRoutes } from './api/routes/sprint-stories.js';
-import { registerTrackerWriteRoutes } from './tracker/write/routes.js';
 import { billingRoutes } from './api/routes/billing.js';
 import { contactRoutes } from './api/routes/contact.js';
 import { botTriageRoutes } from './api/routes/bot-triage.js';
@@ -268,12 +267,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   // db/pr-intervals.ts; there is no narration seam and no plugin half. The route carries the 402
   // itself (the ENGINE stays capability-blind — verify:isolation calls that fold directly).
   await app.register(flowRoutes);
-  // REPORTS → THIS SPRINT (core, both modes; Pro on `periodReports`, 402): the list + candidate
-  // repos, and the per-ticket write-back to the tracker (one confirmed press, claimed, never
-  // retried). The "Check against code" run is agentic and registers in `registerAgenticRoutes`; the
-  // refresh route registers with the tracker (`registerTracker`).
+  // REPORTS → THIS SPRINT (core, both modes; Pro on `periodReports`, 402): the sprint GRAPH, the
+  // drawer's ticket detail, candidate repos and the status layout — all DB only. "Check against
+  // code" and "Ask Claude about this sprint" are agentic and register in `registerAgenticRoutes`; the
+  // refresh route registers with the tracker (`registerTracker`). Nothing here writes to a tracker.
   await app.register(sprintStoriesRoutes);
-  registerTrackerWriteRoutes(app);
   // Bot-triage platform (CORE code, always registered — but TWO tiers inside one file): free
   // detection/override + the governance list + confirm-gated bot-thread resolve; PAID (`botDepth`)
   // ROI analytics, the volume family and the seat prices. Account-scoped; no AI on either tier.

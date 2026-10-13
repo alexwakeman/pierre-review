@@ -20,7 +20,8 @@ import { reconcileStoryReportsOnStartup } from './story-report/manager.js';
 import { registerStoryLabelRoutes } from './story-labels/routes.js';
 import { registerSprintAssessRoutes } from './sprint-assess/routes.js';
 import { reconcileSprintAssessmentsOnStartup } from './sprint-assess/manager.js';
-import { registerSprintLabelling } from './sprint-labels/index.js';
+import { registerSprintBriefs } from './sprint-briefs/index.js';
+import { registerSprintAskRoutes } from './sprint-ask/routes.js';
 import { runOpen } from '../api/routes/conflicts.js';
 
 // THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, the chat, auto
@@ -64,10 +65,12 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // fixed rubric. Pro on `periodReports` too, and agentic — so here and nowhere else.
   registerStoryLabelRoutes(app, ctx);
   // REPORTS → THIS SPRINT: "Check against code" (one Sonnet run per ticket over read-only default-branch
-  // checkouts, the shared review pool) and the free labels' after-read hook (the sprint list read
-  // hands each workspace's unlabelled tickets to the story label run). Pro on `periodReports` too.
+  // checkouts, the shared review pool), the BRIEF pass the sprint read hands each workspace to (Haiku:
+  // summary, itemised criteria, references → the graph's edges and ghost chains) and "Ask Claude about
+  // this sprint" (Haiku over the stored graph). Pro on `periodReports` too.
   registerSprintAssessRoutes(app, ctx);
-  registerSprintLabelling(ctx);
+  registerSprintBriefs(ctx);
+  registerSprintAskRoutes(app, ctx);
   return ctx;
 }
 

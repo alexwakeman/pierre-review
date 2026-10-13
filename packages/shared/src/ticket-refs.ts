@@ -156,7 +156,7 @@ export interface ResolveTicketRefsResponse {
 //
 // A ticket's description and criteria name other tickets — a browse link
 // (`https://acme.atlassian.net/browse/BMD-855`), a Linear or GitHub issue link, or a bare key. The
-// server lists them on the card (`SprintTicketRow.related`); the SPA turns them into in-app links that
+// server lists them (the sprint graph's drawer references); the SPA turns them into in-app links that
 // open the ticket's tab. Both go through `parseTicketRef` above (the ONE parser) and the site folds.
 //
 //   • A LINK counts only when it names a ticket on THIS site (the workspace tracker's root; a loose

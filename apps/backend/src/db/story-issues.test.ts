@@ -8,11 +8,6 @@ import {
   isStoryIssueId,
   joinCapped,
   parseTicketLinkBlockers,
-  sprintBullets,
-  sprintCommentMarkdown,
-  sprintIssuesWithClaude,
-  sprintSpecGapLines,
-  sprintSpecGapsMarkdown,
   STORY_CHIP_ISSUE_IDS,
   storyBlockerPhrase,
   storyIssueBullet,
@@ -257,133 +252,9 @@ describe('checks', () => {
   });
 });
 
-describe('sprintBullets', () => {
-  const record = (body: SprintAssessmentRecord['body'], outdated = false): SprintAssessmentRecord => ({
-    id: 1,
-    workspaceId: 1,
-    ident: 'x',
-    model: 'm',
-    status: 'succeeded',
-    mode: 'plan' as const,
-    phase: null,
-    repos: [],
-    body,
-    outdated,
-    dropped: null,
-    error: null,
-    costUsd: null,
-    numTurns: null,
-    createdAt: '2026-10-10T00:00:00Z',
-    completedAt: null,
-  });
-  const issues = foldStoryIssues({ criteria: [], label: null });
-
-  it('the templated bullet without an assessment; a current run replaces it per id and never adds one', () => {
-    const none = sprintBullets({ issues, assessment: null, issueType: null }, { off: [], issueTypes: [] });
-    expect(none).toEqual([{ id: 'unclear_done', text: storyIssueBullet(issues[0]!), source: 'code', ref: null }]);
-
-    const body = {
-      mode: 'plan' as const,
-      plan: [],
-      criterionChecks: [],
-      coverage: null,
-      summary: 'This may already be done.',
-      findings: [
-        { issue: 'blocked' as const, rule: 'waits_on_ticket' as const, quote: null, where: null, text: 'Waits on the pricing API change in BMD-12, owned by Payments.', suggestion: null, ref: null },
-        { issue: 'unclear_done' as const, rule: 'no_expected_result' as const, quote: null, where: null, text: 'Say what a successful export looks like.', suggestion: null, ref: { repo: 'a/b', path: 'src/x.ts' } },
-      ],
-      revisedCriteria: ['A user can export a CSV'],
-      revisedDescription: null,
-    };
-    const t = { issues, assessment: { record: record(body), currency: 'current' as const }, issueType: null };
-    const got = sprintBullets(t, { off: [], issueTypes: [] });
-    // blocked was not on the row: Claude's sentence for it is not a bullet.
-    expect(got.map((b) => [b.id, b.source])).toEqual([['unclear_done', 'claude']]);
-    expect(sprintBullets(t, { off: ['unclear_done'], issueTypes: [] })).toEqual([]);
-    expect(sprintCommentMarkdown(got, body)).toBe(
-      'This may already be done.\n\n- Say what a successful export looks like.\n\n**Proposed acceptance criteria**\n\n- A user can export a CSV',
-    );
-    const stale = { ...t, assessment: { record: record(body), currency: 'stale' as const } };
-    expect(sprintBullets(stale, { off: [], issueTypes: [] }).map((b) => b.source)).toEqual(['code']);
-  });
-
-  it('an outdated body is ignored', () => {
-    const t = { issues, assessment: { record: record(null, true), currency: 'stale' as const }, issueType: null };
-    expect(sprintBullets(t, { off: [], issueTypes: [] }).map((b) => b.source)).toEqual(['code']);
-  });
-});
-
 describe('spec gaps leave the chips', () => {
   it('only unclear_done and blocked are chips', () => {
     expect(STORY_CHIP_ISSUE_IDS).toEqual(['unclear_done', 'blocked']);
-  });
-  it('sprintSpecGapLines: one line on a not-started ticket — a current run’s sentence, else the first gap; nothing on other stages, when the check is off or the type is not checked', () => {
-    const body = {
-      mode: 'plan' as const,
-      plan: [],
-      criterionChecks: [],
-      coverage: null,
-      summary: 'S.',
-      findings: [{ issue: 'spec_gaps' as const, rule: 'edge_case' as const, quote: null, where: null, text: 'No rule for an empty file.', suggestion: null, ref: { repo: 'a/b', path: 'src/x.ts' } }],
-      revisedCriteria: [],
-      revisedDescription: null,
-    };
-    const rec: SprintAssessmentRecord = {
-      id: 1, workspaceId: 1, ident: 'x', model: 'm', status: 'succeeded', mode: 'plan', phase: null, repos: [], body,
-      outdated: false, dropped: null, error: null, costUsd: null, numTurns: null, createdAt: '2026-10-10T00:00:00Z', completedAt: null,
-    };
-    const t = {
-      specGaps: [
-        { type: 'edge_case' as const, text: 'No behaviour when the upload fails' },
-        { type: 'rule' as const, text: 'No rule for ties' },
-      ],
-      assessment: { record: rec, currency: 'current' as const },
-      issueType: 'Story',
-      stage: 'not_started' as const,
-    };
-    // A current run's sentence replaces the first gap.
-    const lines = sprintSpecGapLines(t, { off: [], issueTypes: [] });
-    expect(lines.map((l) => [l.source, l.type])).toEqual([['claude', null]]);
-    expect(sprintSpecGapsMarkdown(lines)).toBe('**Spec gaps**\n\n- No rule for an empty file. (`src/x.ts` in `a/b`)');
-    const code = sprintSpecGapLines({ ...t, assessment: { record: rec, currency: 'stale' as const } }, { off: [], issueTypes: [] });
-    expect(code.map((l) => [l.source, l.text])).toEqual([['code', 'No behaviour when the upload fails']]);
-    for (const stage of ['in_progress', 'in_review', 'done'] as const) {
-      expect(sprintSpecGapLines({ ...t, stage }, { off: [], issueTypes: [] })).toEqual([]);
-    }
-    expect(sprintSpecGapLines(t, { off: ['spec_gaps'], issueTypes: [] })).toEqual([]);
-    expect(sprintSpecGapLines(t, { off: [], issueTypes: ['Bug'] })).toEqual([]);
-    expect(sprintCommentMarkdown([], null, lines)).toContain('**Spec gaps**');
-  });
-});
-
-describe('sprintIssuesWithClaude', () => {
-  const body = {
-    mode: 'plan' as const,
-    plan: [],
-    criterionChecks: [],
-    coverage: null,
-    summary: 'May already be done.',
-    findings: [
-      { issue: 'unclear_done' as const, rule: 'no_expected_result' as const, quote: null, where: null, text: 'Two options, none chosen.', suggestion: null, ref: null },
-      { issue: 'spec_gaps' as const, rule: 'edge_case' as const, quote: null, where: null, text: 'No behaviour when the file is empty.', suggestion: null, ref: null },
-    ],
-    revisedCriteria: [],
-    revisedDescription: null,
-  };
-  const coded = [issue({ id: 'blocked', total: 4, reasons: ['linked'] })];
-  it('adds a current run’s CHIP issue that code did not raise, in order, and keeps code’s own; spec_gaps never', () => {
-    expect(sprintIssuesWithClaude(coded, body, { off: [], issueTypes: [] }, 'Bug', 4)).toEqual([
-      issue({ id: 'unclear_done', total: 4, reasons: ['claude'] }),
-      coded[0],
-    ]);
-    const gaps = [issue({ id: 'spec_gaps', total: 4, reasons: ['gaps'], gaps: [{ type: 'edge_case', text: 'No empty-file rule' }] })];
-    expect(sprintIssuesWithClaude(gaps, null, { off: [], issueTypes: [] }, 'Bug', 4)).toEqual([]);
-  });
-  it('skips a retired id in a stored body, adds nothing without a run, and obeys the checks', () => {
-    const old = { ...body, findings: [{ issue: 'too_big', rule: 'vague_term', quote: null, where: null, text: 'Split it.', suggestion: null, ref: null }] } as unknown as typeof body;
-    expect(sprintIssuesWithClaude(coded, old, { off: [], issueTypes: [] }, 'Bug', 4)).toEqual(coded);
-    expect(sprintIssuesWithClaude(coded, null, { off: [], issueTypes: [] }, 'Bug', 4)).toEqual(coded);
-    expect(sprintIssuesWithClaude(coded, body, { off: ['unclear_done'], issueTypes: [] }, 'Bug', 4)).toEqual(coded);
   });
 });
 

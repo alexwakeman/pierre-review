@@ -1748,47 +1748,69 @@ body {
   border-color: #111827;
 }
 
-/* ---- This sprint: highlighted ticket text (lib/storyHighlights.ts) and proposed-text diffs ----
-   Yellow in both themes, plus a 2px underline so the mark never rests on colour alone. Measured:
-   light #111827 on #fef08a = 15.0:1; dark #fefce8 on yellow-300 at 25% over the page (#413d1f)
-   = 10.6:1 (test/storyHighlights.test.ts pins both). */
-.story-mark {
-  background-color: #fef08a;
-  color: #111827;
-  border-bottom: 2px solid #ca8a04;
-  border-radius: 2px;
-  padding: 0 1px;
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
+/* ---- Reports → This sprint: the SPRINT GRAPH canvas (Activity/SprintGraph.tsx) ----
+   ALWAYS deep navy, in both themes: a radial gradient whose centre (#0f1b3d) is the lightest ground a
+   label sits on — the label colours are measured against it (sprintGraphModel.ts `SPRINT_CANVAS`,
+   test/textContrast.test.ts). */
+.sprint-canvas {
+  background: radial-gradient(ellipse at 50% 45%, #0f1b3d 0%, #0a1330 45%, #050a1a 100%);
 }
-.dark .story-mark {
-  background-color: rgba(253, 224, 71, 0.25);
-  color: #fefce8;
-  border-bottom-color: #facc15;
+.sprint-canvas .sg-focus {
+  opacity: 0;
 }
-.story-mark[data-mark] {
-  cursor: pointer;
+.sprint-canvas .sg-node:focus-visible .sg-focus {
+  opacity: 1;
 }
-.story-mark[data-mark]:focus-visible {
-  outline: 2px solid #2563eb;
-  outline-offset: 1px;
+/* This sprint's drawer slides in from the right (SprintTicketDrawer.tsx); still where motion is reduced. */
+@keyframes sprint-drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
 }
-.story-mark.story-mark-selected {
-  box-shadow: 0 0 0 2px #eab308;
+.sprint-drawer-in {
+  animation: sprint-drawer-in 160ms ease-out;
 }
-/* The draft's revisions (lib/ticketDraft.ts `rehypeRevisions`): text the reader's draft added or
-   changed. The same measured yellow as .story-mark, told apart by a DASHED underline and no pointer. */
-ins.story-rev {
-  text-decoration: none;
-  background-color: #fef08a;
-  color: #111827;
-  border-bottom: 2px dashed #ca8a04;
-  border-radius: 2px;
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
+@media (prefers-reduced-motion: reduce) {
+  .sprint-drawer-in {
+    animation: none;
+  }
 }
-.dark ins.story-rev {
-  background-color: rgba(253, 224, 71, 0.25);
-  color: #fefce8;
-  border-bottom-color: #facc15;
+.sprint-canvas .sg-label {
+  /* To the side of the (possibly enlarged) disc that label placement picked (`--sx`/`--sy` in radii,
+     below by default), then at a fixed screen size, then the block's own offset in screen px
+     (`--lx`/`--ly`; sprintGraphModel.ts `labelOffset`). */
+  transform: translate(
+      calc(var(--sx, 0) * var(--r, 0) * var(--sg-disc, 1) * 1px),
+      calc(var(--sy, 1) * var(--r, 0) * var(--sg-disc, 1) * 1px)
+    )
+    scale(var(--sg-inv, 1)) translate(calc(var(--lx, 0) * 1px), calc(var(--ly, 3) * 1px));
+}
+/* No free spot on screen: hidden until hover, focus or zoom gives it room (`placeLabels`). */
+.sprint-canvas .sg-label[data-side='none'],
+.sprint-canvas svg[data-zoom='far'] .sg-title {
+  display: none;
+}
+/* A group name with no clear place (another name, or another group's ticket, is there): hidden. */
+.sprint-canvas .sg-group-name[data-place='none'] {
+  display: none;
+}
+/* One finger scrolls the PAGE over the canvas; a ticket takes its own touch (a drag), and the canvas
+   handles the two-finger pinch (SprintGraph.tsx). */
+.sprint-canvas .sg-surface {
+  touch-action: pan-x pan-y;
+}
+.sprint-canvas .sg-node {
+  touch-action: none;
+}
+.sprint-canvas .sg-body {
+  transform: scale(var(--sg-disc, 1));
+}
+/* A group halo's label: at a fixed screen size at any zoom, like the ticket labels. */
+.sprint-canvas .sg-group-label {
+  transform: scale(var(--sg-inv, 1));
 }

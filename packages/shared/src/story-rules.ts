@@ -1,10 +1,9 @@
 import type { StoryIssueId } from './story-issues.js';
 import type { StoryDependencyKind, StorySpecGapType } from './story-health.js';
 
-// THE STORY RULES — the CLOSED vocabulary every anchored finding carries (Reports → This sprint: the
-// highlights in the ticket text, their hover line and the filters). ONE spelling, read by the
-// labeller's validator (review/story-labels), the "Check against code" validator (review/sprint-assess),
-// the server's findings fold (db/sprint-findings.ts) and the SPA.
+// THE STORY RULES — the CLOSED vocabulary a story label's untestable criterion carries. ONE spelling,
+// read by the labeller's validator (review/story-labels) and the story folds. (This sprint's anchored
+// findings, which also read it, were removed 2026-10-12.)
 //
 // Each rule belongs to exactly ONE story issue (`story-issues.ts`). The labels and hover lines are
 // TEMPLATED, never model text: a finding's own detail (the labeller's reason, Claude's sentence) is

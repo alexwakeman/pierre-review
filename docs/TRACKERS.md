@@ -145,7 +145,7 @@ detected ticket in `tracker_tickets`; every consumer reads the row. The ONE exce
 
 ⚠ **A deliberate exception to "read when received".** Reports → This sprint needs the tickets of the
 tracker's CURRENT sprint, and most of them have no PR yet, so no PR can trigger their read. The rule
-it keeps: **a view still never calls a reader.** `GET /api/sprint-stories` only stamps
+it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only stamps
 `sprint_reads.viewed_at` and kicks; the read runs in the worker.
 
 - **Demand-gated**: a workspace is read only while `viewed_at` is within `SPRINT_VIEW_TTL_DAYS` (7),
@@ -170,30 +170,36 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-stories` only 
   false; one unseen for 90 days is deleted with its accepted repos. A failure records `error_code` and
   keeps the last good list (5 min retry after a rate limit, else 20 min). A workspace the worker has
   BACKED OFF is recorded the same way, with the worker's code — never skipped silently, or a first
-  read would show "Reading…" for ever. After a good read, and after a forced single-ticket re-read,
-  the free labels run (`review/sprint-labels/`, local only). `sprint_reads` remembers the
+  read would show "Reading…" for ever. After a good read the BRIEF pass runs (`review/sprint-briefs/`,
+  local + AI only; docs/CLAUDE-REVIEW.md § Sprint briefs). `sprint_reads` remembers the
   `provider` + `api_root` it read; a workspace that moved tracker or site since is reset on the next
   view (no source, no read time, due now). It also stores the automatic status order (§ The status
   order) and each ticket's blocking links + status id (§ Blocking links).
-- **Referenced tickets** (`tracker/sprint/ref-status.ts`, `sprint_ref_tickets`, sqlite `0106` / pg
-  `0093`): a sprint ticket's text names other tickets — work it supersedes, shipped work it extends, an
-  existing page it sends the user to, siblings out of scope, one to build alongside, one it really
-  waits on — and Limn knew the STATUS only of sprint tickets and PR tickets, so the rest read "status
-  unknown". After storing the list, the read collects every key the in-sprint rows NAME (shared
-  `ticketMentionsInText` over description + criteria: a link on this site always, a bare key only in a
-  project the workspace reads or the ticket's own; plus tracker links that came without a status;
-  `sprintReferencedKeys`) — a label's references name keys from the same text (its validator keeps no
-  other), so the text is the superset — minus the sprint's own keys and any key a stored row already
-  gives a status (`knownTicketsFor(…, {refs: false})`), ≤ `SPRINT_REF_LOOKUP_MAX` (200). It asks for
-  them in ONE batched search per read: **Jira only for now** — JQL `key in ("A-1",…)`,
-  `fields=summary,status`, `SPRINT_REF_CHUNK` (50) keys per call through `jiraGetJson` (404 → the v2
-  search). ⚠ Jira answers 400 for the WHOLE query when one key does not exist, so a 400 chunk is
-  BISECTED down to the lone bad key, which is dropped — bounded by `SPRINT_REF_CALLS_MAX` (16) calls per
-  read. Linear and GitHub Issues look nothing up (not built). The rows are REPLACED per workspace by a
-  lookup that finished (keys no longer named or not found go); one that failed or ran out of calls
-  keeps what it could not re-read, and never fails the read. `knownTicketsFor` reads them as its LAST
-  source (after `sprint_tickets` and `tracker_tickets`), so the card's related pills, the Blocked issue
-  and "Check against code" all see "BMD-343 (Done)". ⚠ Still never on a view.
+- **Referenced tickets and GHOST CHAINS** (`tracker/sprint/ref-status.ts`, `sprint_ref_tickets`,
+  sqlite `0106` + `0107` / pg `0093` + `0094`): the sprint graph draws the tickets a sprint ticket
+  depends on, runs alongside, builds on or replaces — inside the sprint or not — and follows the chain
+  outside it (A → B → C). So after storing the list the read asks the tracker for them **WITH THEIR
+  TEXT** (description, the workspace's criteria field, type, assignee, links):
+  - **Depth 1** (`sprintReferencedKeys`, pure): every key the in-sprint rows NAME — every tracker link,
+    plus shared `ticketMentionsInText` over description + criteria (a link on this site always, a bare
+    key only in a project the workspace reads or the ticket's own) — minus the sprint's own keys,
+    ≤ `SPRINT_REF_LOOKUP_MAX` (200). All of them, so the drawer can say "BMD-343 · Done" for a ticket
+    named only as context.
+  - **Depth 2–3**: what a GHOST points at through an EDGE (a blocking link, or its CURRENT brief's
+    depends_on / concurrent / builds_on / supersedes reference) that nothing stores yet — the graph
+    fold's `missing` (`db/sprint-graph-fold.ts`, the SAME fold the page draws), bounded so the graph
+    never holds more than `SPRINT_GHOST_MAX` (60) ghosts, ≤ `SPRINT_GHOST_DEPTH_MAX` (3) hops. A ghost's
+    references come from its brief, written AFTER the read, so the brief pass asks for the next hop
+    itself (`expandSprintGhosts` through the `setSprintGhostExpander` seam, mode `missing`: only keys
+    nothing stores, never a delete) — still the read's pipeline, ⚠ never a view.
+  - **The call**: Jira only — JQL `key in ("A-1",…)`, `fields=*all&expand=names,schema` (the same fold
+    as the sprint list), `SPRINT_REF_CHUNK` (40) keys per call through `jiraGetJson` (404 → the v2
+    search). ⚠ Jira answers 400 for the WHOLE query when one key does not exist, so a 400 chunk is
+    BISECTED down to the lone bad key, which is dropped — `SPRINT_REF_CALLS_MAX` (16) calls per lookup.
+    Linear and GitHub Issues look nothing up (not built; their sprint tickets still link to each other).
+  - **The store**: a FULL lookup that finished REPLACES the workspace's rows (`depth` = hops from the
+    sprint); one cut short keeps what it could not re-read; a failure never fails the read.
+    `knownTicketsFor` reads them as its LAST source.
 
 ## Blocking links — read in the same issue read (`blocked_by_json`)
 
@@ -254,30 +260,10 @@ ends" = the first status of In progress / In review, derived.
   would drag the split earlier). The boundary is found over the AUTOMATIC order
   (`db/sprint-status-layout.ts` `inferReviewFrom`, `loadSprintStatusEvidence`).
 
-## The write-back — per ticket, confirmed, never retried (`tracker/write/`)
+## No write-back
 
-`POST /api/sprint-stories/write` is the only tracker WRITE. Nothing writes without the reader's
-Confirm in a dialog that shows exactly the text; no agent tool, setting or bulk route can write.
-
-- **Order**: the ticket must be on this workspace's sprint list under its CURRENT tracker → a replace
-  target must be the description or the STORED row's own criteria field (`sprintWriteTargetAllowed`
-  over `sprintReplaceTarget`; else `409 target_changed`) → for a REPLACE, the base check: `baseHash` must
-  be the sha256 of the FULL stored text of THAT field (the row's `replaceBases`), a text longer than the page
-  carries refuses `409 too_long`, and the ticket is re-read LIVE (`rereadSprintTicketNow`) — a text
-  edited in the tracker since refuses `409 ticket_changed` with the fresh text stored, a failed read
-  `502 read_failed`; nothing is written either way → an in-memory per-ticket lock → the `tracker_writes` row is
-  CLAIMED (`status:'writing'`, insert on `(account_id, request_id)`; a repeated request id answers
-  with its own record) → ONE write → a compare-and-set on `status = 'writing'`. **Never retried.** A
-  timeout after sending, a 2xx we cannot read, or a write cut off by a restart
-  (`reconcileTrackerWritesOnStartup`) is `maybe_written`.
-- **Providers**: Jira Cloud v3 + ADF (`markdownToAdf`); Jira Server/Data Center (no saved email) v2 +
-  wiki markup. Replacing a Jira criteria field reads `editmeta` first (a single-line text field gets
-  a string). Linear `commentCreate` / `issueUpdate`. GitHub Issues REST with the account's token.
-- **Refusals are named**: 401/403 → `no_write_permission` ("This token can't write to Jira"), shown
-  on that ticket. The text is validated (≤ `SPRINT_WRITE_TEXT_MAX`, no NUL, no lone surrogate).
-- **Afterwards** the sprint ticket and every PR-linked `tracker_tickets` row of the same ticket in
-  the account are marked due (`next_check_at` epoch 0) and a sprint read is kicked, so the chips
-  refresh.
+Limn never writes to a tracker. The per-ticket write-back (`tracker/write/`, `tracker_writes`) was
+removed on 2026-10-12 with This sprint's chips and findings; sqlite `0107` / pg `0094` drop the table.
 
 ## Created and resolved dates (`tracker/dates.ts`, `tracker/dates-backfill.ts`)
 

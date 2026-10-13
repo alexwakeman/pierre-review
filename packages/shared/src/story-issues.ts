@@ -74,8 +74,8 @@ export interface StoryIssueMeta {
    *  whole-window figures). It differs from `label` because the populations differ: unclear_done is a
    *  share of CRITERIA, blocked a share of stories with a tracker LINK (any status). */
   measureLabel: string;
-  /** A chip on This sprint (counted in `flagCount`, the sort order). spec_gaps is not: its gaps show
-   *  in the opened card as their own section (`SprintTicketRow.specGaps`). */
+  /** Was a chip on This sprint (the chips left with the sprint graph, 2026-10-12); kept for the story
+   *  folds that still read it. spec_gaps never was. */
   chip: boolean;
 }
 

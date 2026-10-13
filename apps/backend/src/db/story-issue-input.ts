@@ -10,7 +10,7 @@ import {
 } from '@pierre-review/shared';
 
 // THE ONE STORY-ISSUE INPUT BUILDER (shared `story-issues.ts` folds it). Every surface that raises or
-// counts a story issue — Reports → This sprint (db/sprint-chips.ts, db/sprint-stories.ts), the story
+// counts a story issue — the story
 // report (db/story-selection.ts) and the label run (db/story-health.ts) — hands the fold the same four
 // things, built here:
 //
@@ -21,7 +21,7 @@ import {
 //     its title and status, and a finished one is resolved rather than raised.
 //
 // ⚠ Every read predicates on accountId. A named key resolves only on the SAME tracker site.
-// ⚠ PURE AT IMPORT: the pure folds (db/sprint-chips.ts) import this file, so the DB client is reached
+// ⚠ PURE AT IMPORT: pure folds import this file, so the DB client is reached
 // LAZILY inside `knownTicketsFor` — a pure test must never open a database.
 
 const CHUNK = 400;

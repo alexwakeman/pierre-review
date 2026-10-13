@@ -2159,72 +2159,112 @@ convention this file has to remember.
   - ⚠ **Story health is DELETED** (2026-10-11, "not adding anything"): no `StoryHealth.tsx`, no
     `useStoryHealth`, no `GET /api/story-health`. Do not re-add a weekly-chart panel here. The label
     run's client methods (`api.startStoryLabelRun` etc.) remain with no screen calling them.
-- **Reports → This sprint** (`insightsTab: 'sprint'`, `?insightsTab=sprint`; `SprintView.tsx` +
-  `SprintTicketCard` / `SprintAssessment` / `SprintTicketReview` / `SprintUpdatePanel` / `SprintCopyButton`,
-  pure `sprintModel.ts` + `lib/ticketDraft.ts`, `useTicketDraft`, hooks `hooks/useSprintStories.ts`) — the tracker's CURRENT sprint, under the ONE
-  Reports gate. The visible tab is DERIVED (`effectiveInsightsTab` accepts `'sprint'`). Every hook ANDs
-  `periodReports` into `enabled`; the "Check against code" hooks also AND `me.ai.enabled`. Keys carry
-  `ws:<id>` (`['sprint-stories','ws:<id>']`); a queued/running assessment polls every 2 s.
-  - **FOUR STAGES, SECTIONS BY STATUS** (`sprintSections(tickets, statusLayout)`): Not started (ONE
-    section, the status on each card), then In progress, In review and Done, each with one section per
-    status in `statusLayout.order`, non-empty only; a status the layout does not list goes last.
-    ⚠ The STAGE is the row's own (`stage`, the server's `sprintStageOf`: the layout's placement, which
-    beats category) — never re-derived in the SPA. Done tickets are LISTED, last.
-  - **ONE VOCABULARY, THE THREE STORY ISSUES** (shared `story-issues.ts`: Unclear when done · Blocked ·
-    Spec gaps). The collapsed card shows at most TWO chips (`storyIssueChipText`: "Unclear when done
-    · 3 of 25 criteria"; ⚠ spec gaps are NEVER a chip — every labelled ticket had three), its PR links and a "Ticket PRs" button (the ticket tab); the expanded card
-    is, in order and nothing else: the SPECIFIC detail per issue code raised — the FIRST TWO flagged
-    criteria with their reasons and own text, then "and N more" (`storyUnclearCriteriaShown`), each
-    REAL blocker (`isRealStoryBlocker`: an unfinished ticket or an open decision; `storyBlockerPhrase`; a
-    linked key opens the tracker through `safeExternalUrl`) — or, for an issue
-    a CURRENT run spoke to, its sentence marked "Claude" (`sprintBullets`; it never adds one); each with
-    Copy (the one-line bullet); then the "Spec gaps" section (`sprintSpecGapLines`: NOT-STARTED tickets
-    only, ONE line — a current run's spec_gaps sentence marked "Claude", else the first gap with its
-    type; copyable, the same in Copy all and the comment default; the "Spec gaps" check hides it), the repos, the "Check against code" / "Check again" button, the update panel (rendered only
-    when there is a bullet, a spec gap, a current run or a last write). Nothing in the SPA re-derives an issue or
-    re-words a bullet. A STALE run shows only its summary, tagged "Out of date", and feeds nothing
-    else (`sprintCurrentAssessmentBodyOf`); an OUTDATED-format run shows one line.
-  - **THE OPENED TICKET IS A DRAFT** (`SprintTicketReview` + `useTicketDraft`, pure
-    `lib/ticketDraft.ts`, `test/ticketDraft.test.ts`): the LEFT column renders a COPY of the description
-    (and the criteria field when `replaceBases.acceptanceCriteria` is non-null — the ticket's own field)
-    with finding marks plus `<ins class="story-rev">` over every word the draft added (`revisionMarkdown`
-    sentinels → `rehypeRevisions`, never before a line's Markdown syntax); Edit swaps a field for a
-    Markdown textarea. A finding's Replace swaps its quote's FIRST whitespace-normalised occurrence in
-    its field (`replaceQuoteInMarkdown`) and lists it under "Replaced" (one-step Undo); a proposal's
-    "Apply to draft" replaces the whole field. The draft mirrors to localStorage per (workspace, ident)
-    (guarded; pristine = removed). ⚠ When a field's base hash moves, it restarts only if unedited, equal
-    to the ticket, or just written from this card (`rebaseDraft`); otherwise the card says "The ticket
-    changed since you started editing" and Update stays shut. A field cut on the wire is not editable.
-  - **Settings** (the header button; `SprintChecksPanel`), two parts saved separately. CHECKS: three
-    switches + ONE issue-type row for the whole tab; `changedCheckCount` = `off.length` + 1 for a type
-    list. The server applies them; the SPA passes the response's `checks` down so Copy all and the
-    bullets follow too. STATUSES (`SprintStatusSettings`, `useSprintSetStatuses` →
-    `PUT /api/sprint-stories/statuses`): four lists (Not started · In progress · In review · Done) of
-    the layout's statuses (`statusSectionsOf`). A status moves by NATIVE HTML5 drag and drop (no
-    library; within and between lists, a drop line at the slot, an empty list takes a drop —
-    `moveStatusTo`, slots counted before the move) or by Move up / Move down buttons named per status
-    that cross a stage boundary at either end (`moveInSections`; focus follows the row, a polite live
-    region says where it landed). "Coding begins: X · Coding ends: Y" is read off the DRAFT
-    (`codingBoundsOf`: the first status of In progress / In review — the server's rule). Save (only when
-    `statusDraftChanged`) sends `statusSettingsToSave`: unchanged → the stored override as it was;
-    changed → every name per stage. Cancel drops the draft; "Reset to automatic" sends
-    `{sections: null}`. Every explanation (stages, dragging, coding begins/ends, the order's source via
-    `statusOrderSourceLabel`, the automatic In review rule `reviewRuleSentence` read from
-    `SPRINT_DELIVERED_MIN_SHARE` / `_MIN_TICKETS`, the evidence rows) sits behind the ⓘ.
-    The page lists the four stages with a sub-section per status; Done is COLLAPSED behind
-    "Show N done".
-    The draft re-seeds when a saved layout lands (keyed on it).
-  - ⚠ **SHARED mutation keys** read through `useIsMutating`, never per-mount `isPending`:
-    `['sprint-assess', ident]`, `['sprint-write', ident]`, `['sprint-repos', ident]`.
-  - ⚠ **NOTHING WRITES WITHOUT THE DIALOG'S CONFIRM** — the ONE "Update in <tracker>" (enabled when
-    the draft differs) opens a dialog showing, per changed field, the diff and EXACTLY the text; Confirm
-    writes each field in turn with its OWN request id (minted when the dialog opens) and its OWN
-    `replaceBases` hash, stopping at the first field not written. The client never retries, and after
-    an error Confirm stays shut (a new attempt is a new dialog). No comment composer, no bulk control.
-  - **Copy is ONE helper, `lib/copy.ts`** (`test/copy.test.ts`): clean markdown as `text/plain` +
-    `text/html` through `ClipboardItem`, falling back to plain text. Every generated block (each
-    issue's bullet, the proposed update, the dialog's text) has a Copy button and each card a "Copy
-    all" (header, link, summary, bullets); "Copied" shows ~1.6 s. Generated text is never `select-none`.
+- **Reports → This sprint** (`insightsTab: 'sprint'`, `?insightsTab=sprint`) — THE SPRINT GRAPH
+  (`SprintView.tsx`: toolbar, filters, `SprintGraph`, `SprintTicketDrawer`, `SprintAskPanel`; pure folds
+  in `sprintGraphModel.ts`, test/sprintGraphModel.test.ts). Data: `GET /api/sprint-graph` (nodes = the
+  sprint's tickets + GHOST tickets outside it, edges, status layout, repos) and, per opened ticket only,
+  `GET /api/sprint-graph/ticket` (docs/API.md § This sprint). Hooks in `hooks/useSprintStories.ts` — every
+  one ANDs `periodReports`, the agentic ones `me.ai.enabled`; shared mutation keys `['sprint-assess',
+  ident]`, `['sprint-repos', ident]`, `['sprint-ask', ws]` read through `useIsMutating`.
+  - **The canvas is ALWAYS deep navy** (`.sprint-canvas` in index.css, a radial gradient + a seeded,
+    static star field) in BOTH themes, so its colours live in `SPRINT_CANVAS` / `STAGE_RING` /
+    `edgeStyle` / `SATELLITE_FILL`, never the page's tokens. ⚠ The label colours are measured against the
+    gradient's CENTRE (its lightest stop) at the lowest label opacity in test/textContrast.test.ts, which
+    also checks index.css keeps the centre the lightest stop.
+  - **WHAT IS DRAWN** (`visibleGraph`, the toolbar's "View" row): hidden things are REMOVED from the
+    simulation, not faded, so the layout only places what is shown. Outside tickets: by default only
+    ghosts that are NOT done (status category not `done`; unknown counts as open); **"Show shipped
+    history"** adds the Done ghosts and the chains behind them. Links: by default only `depends_on` +
+    `concurrent`; **"Show builds on / replaces"** adds the faint two. A ghost is drawn only while a drawn
+    edge chain reaches it from a sprint ticket. ⚠ A node's SIZE counts only the DRAWN edges
+    (`visibleGraph` recounts `degree`; the wire's `degree` counts every edge). Measured on workspace 1
+    (Sprint 14, 77 tickets, 136 nodes / 181 edges on the wire): the default draws 78 nodes / 15 edges;
+    history 87 / 31; builds-on 80 / 34; both 136 / 181. The header counts what is drawn.
+  - **"Group by"** — Epic · Theme (DEFAULT) · Section · None; a stored per-browser choice wins
+    (`sprint-graph-group`, `readGroupMode` / `writeGroupMode`, try/catch). SOFT clusters: each group gets
+    an ANCHOR (`groupAnchors`: placed in `groupList` order — largest first, sections in stage order —
+    along a spiral STRETCHED to the canvas's measured aspect, at the first spot overlapping no placed
+    group; the no-epic / no-theme group placed OUTWARD) and a weak forceX / forceY toward it; a link
+    BETWEEN groups pulls lightly so clusters hold while lines still cross. ⚠ A group's ROOM
+    (`groupRadius`, area ∝ members) is sized by its DRAWN members (`SprintGroup.drawn`, ghosts included),
+    while the ORDER keys on `count` (sprint tickets only) — so "Show shipped history" re-spaces the
+    groups instead of pushing one halo into the next. A large group is a spread disc (`collidePadding`
+    grows with group size), and halos that still touch are pushed apart as wholes (`haloSeparation`, a
+    custom force). A faint labelled HALO (`groupHalo`, recomputed
+    from the members' positions in the rAF loop; label at a fixed screen size, `.sg-group-label`) sits
+    behind each group, and its label is contrast-tested on the ground lightened by the halo's fill
+    (`GROUP_HALO`, test/textContrast.test.ts). A ghost joins the group of the NEAREST sprint ticket
+    through drawn edges (`assignGroups`). ⚠ `groupList` counts SPRINT tickets only, so a toggle never
+    re-orders or moves the anchors. "Theme" needs the response's `themes` (the theme pass, docs/CLAUDE-REVIEW.md
+    § Sprint themes); without them the button is disabled with "Themes appear after Claude reads the
+    sprint" beside it, and a stored (or default) "theme" choice DRAWS as Epic (`effectiveGroupMode` —
+    derived, never written back). A toggle or a grouping switch REBUILDS the simulation, computes the new
+    layout TO REST, then eases every node from where it was to where it lands over `SETTLE_FRAMES` (a
+    `tween`, even while frozen); a grouping switch seeds each node inside its NEW group (starting from the
+    old arrangement jammed groups that had to pass through each other). With reduced motion it simply
+    appears. **Fit** frames the drawn nodes, their halos and names, leaving room for the open key; until
+    the reader zooms or pans (`viewTouched`), the view FOLLOWS Fit through every re-layout, and a grouping
+    switch re-arms that — so Section never opens zoomed in.
+  - **Labels** keep a fixed SCREEN size, so collisions are decided on screen (`placeLabels`, after every
+    zoom and every `LABEL_EVERY` frames while moving): each tries below / above / right / left / the
+    four corners of its ticket (keeping its previous side while free, so nothing flickers), clear of every
+    placed label, of the group names and of other tickets' discs (grazing a rim is allowed, the middle
+    never); one with no free spot is HIDDEN (`data-side="none"`) until hover, focus or selection promotes
+    it (`LABEL_ALWAYS`) or zoom gives it room. Priority: promoted, readable before faded, sprint before
+    ghost, more links, larger. The side is written as CSS variables on `.sg-label` (`labelOffset`), never
+    by React. Group names get the same treatment (`placeGroupLabels`: above the halo, else below, else
+    hidden; the bigger group first). Measured on workspace 1 at Fit, 1440×900: overlapping label pairs
+    went from 32 (Theme) / 33 (Epic) / 22 (Section) to 0 everywhere, with 69/78, 69/78, 76/78 and 74/87
+    (Epic + history) keys shown.
+  - **Nodes**: radius by degree (`nodeRadius`); ring colour by stage (four hues), Done faded; ghosts
+    smaller, dashed, fainter with depth; assignee avatar badge (image through `safeExternalUrl`, initials
+    when it fails); PR satellites orbiting (open / draft / merged, a red ring for failing checks on an
+    OPEN PR; at most 12). **Edges**: `depends_on` a directed arrow (from → to), `concurrent` dashed,
+    `builds_on` / `supersedes` faint and thin (only with "Show builds on / replaces"; the key lists them
+    then); hovering a node or an edge shows a tooltip-popover
+    (status, relations; an edge's label and quote) — never `title=`.
+  - ⚠ **POSITIONS NEVER GO THROUGH REACT.** d3-force is the physics only (`d3-force`, no other graph
+    library); React renders each node / edge when what it SHOWS changes, and one rAF loop writes the
+    simulation's positions straight to the DOM. A JSX `transform` on a node (or `x1…y2` on an edge) would
+    be overwritten every frame — and re-rendering 125 nodes per frame is the jank this avoids (measured
+    ~60 fps on the real 136-node sprint). Labels and discs keep a readable SCREEN size at any zoom (CSS
+    `--sg-inv` / `--sg-disc` on the svg); zoomed out the titles hide (`data-zoom="far"`); which KEYS show is
+    the label placement's call (below), not a zoom threshold.
+  - **Motion**: a slow drift (a tiny rotation + forces at a low `alphaTarget`) that FREEZES while the
+    pointer is over the canvas or a node is selected; `prefers-reduced-motion` settles once and stays
+    still. Drag a node to PIN it — per browser, per (workspace, sprint source) in localStorage through
+    `readPinned` / `writePinned` (try/catch; works without storage); "Reset layout" clears them.
+    ⚠ **A plain wheel SCROLLS THE PAGE** (`wheelIntent`; the canvas is not a scroll trap) and shows a
+    brief "Hold Ctrl/⌘ to zoom" hint; Ctrl / ⌘ + wheel and a trackpad pinch (sent as Ctrl + wheel) zoom
+    (`wheelZoomFactor`, one notch capped). Touch: the surface is `touch-action: pan-x pan-y`, so one
+    finger scrolls the page unless it starts on a ticket (a drag; nodes are `touch-action: none` and a
+    non-passive touchstart claims it); two fingers pinch-zoom (`pinchTransform`). Mouse drag on the
+    background pans; "Fit", +, −.
+  - **Filters** (section chips, assignee, epic, Has PRs, Has dependencies) FADE what they set aside —
+    nothing re-lays out. **Selecting** a node dims everything beyond one link ("2 hops" widens it); a
+    background click or "Show all" clears it. The selection outlives the drawer.
+  - **Accessibility**: every node is a focusable `<g role="button">` with "KEY title, status, N PRs";
+    Enter / Space opens the drawer; a visually hidden list repeats every ticket.
+  - **The drawer** (`SprintTicketDrawer`) slides in from the right over the graph (backdrop; Escape /
+    close / backdrop click; focus trapped and handed back to the node). It is built from the Open PRs
+    pieces: the header (key, title, status pill, assignee, epic, tracker link, "Open ticket tab"), the
+    "Story check" block (the brief's summary and numbered criteria, the first 10 then "Show all";
+    "Worked out from the description" when derived) plus the Open PRs `StackStoryCheck` when the
+    ticket has a ticket review (ONE `useTicketReviewStates` read), the references grouped by relation
+    (a ticket on the graph moves the drawer, any other opens its tab), EVERY PR as the Open PRs cards via
+    `Ticket/TicketPrsSections.tsx` — the SAME component the ticket tab renders — and, sprint tickets
+    only, the repo picker + `SprintAssessment` / `SprintCodeCheck`.
+  - **"Ask Claude about this sprint"** (`SprintAskPanel`, docked over the canvas's bottom-right corner;
+    shown only where `me.ai.enabled` and the response's `aiEnabled`): the transcript lives in the module
+    store `useSprintAskTranscript` (per workspace, memory only) and ⚠ the completed turn is appended in
+    `useSprintAsk`'s HOOK-level `onSuccess`. Answers render through `Markdown` with `ticketLinks` +
+    `rehypeTicketLinks` over the graph's keys; `TicketRefOpenContext` (TicketRefLink.tsx) lets a key on
+    the graph open in the drawer. Each answer shows its cost in US$.
+  - Kept from the list era: `SprintStatusSettings` (four lists, drag and drop + Move up / down),
+    `SprintCopyButton` + `lib/copy.ts`, pure `sprintModel.ts`. DELETED with the chips, findings,
+    highlights, checks and write-back: `SprintTicketCard`, `SprintTicketReview`, `SprintUpdatePanel`,
+    `SprintChecksPanel`, `SprintDiffText`, `useTicketDraft`, `lib/ticketDraft.ts`,
+    `lib/storyHighlights.ts`, `lib/wordDiff.ts` and the `.story-mark` / `.story-rev` CSS.
 - ⚠ **Superseded: the WHOLE Reports pane is Pro (`periodReports`)** — `InsightsView` renders one
   `ProLockPanel` when unentitled, the rail entry carries the one `ProBadge`, and the inner badges
   below were REMOVED (the inner locks remain as defence in depth). `useWorkspaceMetrics` /
@@ -3122,8 +3162,10 @@ from the URL like a bot-detail key, and NOT persisted across reloads (like user-
 
 - ⚠ **Opened ONLY through `useOpenTicketTab()`** (`lib/ticketTab.ts`) — Reports → Stories' "Time and
   pull requests" rows and story rows ("Pull requests"), the story report's ticket chips ("PRs"), This
-  sprint cards ("Ticket PRs"). Never call the store action from a
-  component.
+  sprint's drawer ("Open ticket tab", and a reference that is not on the graph). Never call the store
+  action from a component.
+- The PR lists are `Ticket/TicketPrsSections.tsx`, shared with This sprint's drawer — one component, so
+  a ticket's PRs never render two ways.
 - FREE core wherever it is opened from: it lists PR data only (a Pro surface's button still needs that
   surface to be open).
 - Lists only THIS workspace's repos and counts the rest ("N in other workspaces"). An ident on another

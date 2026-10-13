@@ -1,35 +1,33 @@
 import type { FastifyInstance } from 'fastify';
 import {
   SPRINT_REPOS_PER_TICKET_MAX,
-  type SprintChecksResponse,
+  type SprintGraphResponse,
   type SprintReposResponse,
   type SprintStatusesResponse,
-  type SprintStoriesResponse,
+  type SprintTicketDetailResponse,
 } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
-import { parseSprintChecks, setSprintChecks } from '../../db/sprint-checks.js';
+import { getSprintGraph, getSprintTicketDetail } from '../../db/sprint-graph.js';
 import { resolveSprintStatusLayout, sprintLayoutFor } from '../../db/sprint-status-layout.js';
 import { parseSprintStatusSettings, setSprintStatusSettings } from '../../db/sprint-status-settings.js';
 import { suggestSprintRepos, suggestTicketOf } from '../../db/sprint-repo-suggest.js';
 import { readSprintTicket } from '../../db/sprint-store.js';
-import { getSprintStories } from '../../db/sprint-stories.js';
 import { setSprintRepos } from '../../db/sprint-ticket-repos.js';
-import { sprintViewedWithPendingLabels } from '../../tracker/sprint/hooks.js';
 import { accountIdOf } from '../plugins/auth.js';
 import { reportsEntitled } from './insights.js';
 
-// REPORTS → THIS SPRINT — the CORE read routes (both modes; docs/API.md § This sprint). Nothing
-// agentic lives here: the assessment's routes are review/sprint-assess/routes.ts (local only) and the
-// write-back's are tracker/write/routes.ts. Pro with the rest of Reports: `reportsEntitled` false →
-// 402 BEFORE any DB work. The workspace goes through `resolveWorkspaceScope`: absent / unknown /
-// another tenant's id ⇒ the caller's Default, never a 404.
+// REPORTS → THIS SPRINT — the CORE routes (both modes; docs/API.md § This sprint). Nothing agentic
+// lives here: "Check against code" is review/sprint-assess/routes.ts and "Ask Claude about this
+// sprint" review/sprint-ask/routes.ts (local only). Nothing here, or anywhere, writes to a tracker.
+// Pro with the rest of Reports: `reportsEntitled` false → 402 BEFORE any DB work. The workspace goes
+// through `resolveWorkspaceScope`: absent / unknown / another tenant's id ⇒ the caller's Default,
+// never a 404.
 //
-//   GET /api/sprint-stories?workspace=<id>   the list (DB only; stamps the view, kicks a due read and,
-//                                            locally, the label run for pending labels)              → read
-//   PUT /api/sprint-stories/repos            replace ONE ticket's accepted candidate repos          → read
-//   PUT /api/sprint-stories/checks           replace the workspace's checks (which chips it raises)  → read
-//   PUT /api/sprint-stories/statuses         replace the workspace's status stages and order          → read
+//   GET /api/sprint-graph?workspace=<id>                the graph (DB only; stamps the view, kicks a due read) → read
+//   GET /api/sprint-graph/ticket?workspace=<id>&ident=  the drawer for one node (DB only)                    → read
+//   PUT /api/sprint-stories/repos                       replace ONE ticket's accepted candidate repos        → read
+//   PUT /api/sprint-stories/statuses                    replace the workspace's status stages and order      → read
 
 const PRO_REQUIRED = { error: 'pro required' } as const;
 const IDENT_MAX = 600;
@@ -37,7 +35,7 @@ const IDENT_MAX = 600;
 type ErrorBody = { error: string; message?: string };
 
 export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/sprint-stories', async (req, reply): Promise<SprintStoriesResponse | ErrorBody> => {
+  app.get('/api/sprint-graph', async (req, reply): Promise<SprintGraphResponse | ErrorBody> => {
     if (!reportsEntitled(req)) {
       reply.status(402);
       return PRO_REQUIRED;
@@ -45,28 +43,31 @@ export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
     const q = req.query as { workspace?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
-    const res = await getSprintStories(accountId, scope.workspaceId, { aiEnabled: config.aiEnabled, now: Date.now() });
-    // A listed ticket still waiting for its label (new text, a rubric bump): ask for the label run now
-    // rather than at the next list read. Local + AI only (the hook is unset otherwise); deduped.
-    if (res.tickets.some((t) => t.labels === 'pending')) sprintViewedWithPendingLabels(accountId, res.workspaceId);
-    return res;
+    return getSprintGraph(accountId, scope.workspaceId, { aiEnabled: config.aiEnabled, now: Date.now() });
   });
 
-  app.put('/api/sprint-stories/checks', async (req, reply): Promise<SprintChecksResponse | ErrorBody> => {
+  // The drawer: one node's brief, references, PRs (the ticket tab's fold), repos and assessment. An
+  // ident that is not a node answers `found: false` — never a 404.
+  app.get('/api/sprint-graph/ticket', async (req, reply): Promise<SprintTicketDetailResponse | ErrorBody> => {
     if (!reportsEntitled(req)) {
       reply.status(402);
       return PRO_REQUIRED;
     }
-    const body = (req.body ?? {}) as { workspaceId?: unknown; checks?: unknown };
-    const checks = parseSprintChecks(body.checks, true);
-    if (typeof body.workspaceId !== 'number' || !Number.isSafeInteger(body.workspaceId) || body.checks == null || checks == null) {
+    const q = req.query as { workspace?: string; ident?: string };
+    const ident = typeof q.ident === 'string' ? q.ident : '';
+    if (ident === '' || ident.length > IDENT_MAX) {
       reply.status(400);
-      return { error: 'bad_request', message: 'Send a workspaceId and the checks.' };
+      return { error: 'bad_request', message: 'Send a ticket.' };
     }
     const accountId = accountIdOf(req);
-    const scope = await resolveWorkspaceScope(accountId, body.workspaceId);
-    await setSprintChecks(accountId, scope.workspaceId, checks);
-    return { workspaceId: scope.workspaceId, checks };
+    const scope = await resolveWorkspaceScope(accountId, q.workspace);
+    // LAZY: tracker/runtime.ts opens the DB at import.
+    const [{ trackerContext }, { ticketPrs }] = await Promise.all([import('../../tracker/runtime.js'), import('../../tracker/ticket-prs.js')]);
+    return getSprintTicketDetail(accountId, scope.workspaceId, ident, {
+      aiEnabled: config.aiEnabled,
+      now: Date.now(),
+      prsOf: (i) => ticketPrs(trackerContext(), accountId, scope.workspaceId, i),
+    });
   });
 
   // The status layout override (shared `SprintStatusesUpdate`). ⚠ Status names belong to ONE

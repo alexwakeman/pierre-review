@@ -3,32 +3,17 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/sprintModel.test.ts
 import { describe, expect, it } from 'vitest';
 import {
-  SPRINT_WRITE_MAYBE_SENTENCE,
-  SPRINT_WRITE_REQUEST_ID_RE,
-  SPRINT_WRITE_TEXT_MAX,
-  SPRINT_CHECKS_DEFAULT,
   SPRINT_STATUS_ORDER_MAX,
-  foldStoryIssues,
-  sprintBullets,
-  sprintCommentMarkdown,
-  sprintCurrentAssessmentBodyOf,
-  sprintSpecGapLines,
-  type SprintChecks,
-  sprintNoWriteSentence,
-  type StoryIssue,
   type SprintAssessmentBody,
+  type SprintAssessmentCurrency,
+  type SprintAssessmentRecord,
   type SprintStatusLayout,
-  type SprintTicketRow,
-  type SprintWriteRecord,
 } from '@pierre-review/shared';
 import {
   assessButtonLabel,
   assessmentProgressLine,
   assessmentProgressPct,
   elapsedLabel,
-  changedCheckCount,
-  checkTypeChoices,
-  toggleCheckType,
   reviewRuleSentence,
   canMoveInSections,
   codingBoundsOf,
@@ -36,75 +21,29 @@ import {
   moveStatusTo,
   statusDraftChanged,
   statusPlaceOf,
-  newWriteRequestId,
   shareWords,
-  sprintSections,
   statusEvidenceLine,
   statusOrderSourceLabel,
   statusSectionsOf,
   statusSettingsToSave,
-  proposedCriteriaDraft,
-  replaceCriteriaSection,
-  writeRecordLine,
-  writeTargetSentence,
-  writeTextProblem,
 } from '../src/components/Activity/sprintModel.js';
 import { effectiveInsightsTab } from '../src/components/Activity/bottlenecksModel.js';
 import { INSIGHTS_INNER_TABS } from '../src/store/filters.js';
 
-function ticket(over: Partial<SprintTicketRow> = {}): SprintTicketRow {
-  return {
-    ident: 'jira:https://acme.atlassian.net#ACME-1',
-    key: 'ACME-1',
-    title: 'T',
-    url: null,
-    provider: 'jira',
-    phase: 'not_started',
-    stage: 'not_started',
-    status: null,
-    issueType: null,
-    assignee: null,
-    epic: null,
-    description: 'Intro\n\n## Acceptance criteria\n\n- old one\n- old two\n\n## Notes\n\nKeep me',
-    acceptanceCriteria: '',
-    acField: null,
-    criteria: { items: ['old one', 'old two'], source: 'description_heading' },
-    labels: 'none',
-    issues: [],
-    specGaps: [],
-    flagCount: 0,
-    pullRequests: [],
-    repos: { accepted: [], suggested: [], defaulted: false },
-    assessment: null,
-    replaceTarget: { kind: 'description' },
-    replaceBases: { description: { hash: '0'.repeat(64), truncated: false }, acceptanceCriteria: null },
-    lastWrite: null,
-    ...over,
-  };
+type Assessed = { assessment: { record: SprintAssessmentRecord; currency: SprintAssessmentCurrency } | null };
+
+function ticket(): Assessed {
+  return { assessment: null };
 }
 
-const UNCLEAR: StoryIssue = {
-  id: 'unclear_done',
-  criteria: [{ n: 2, reason: 'no expected result' }],
-  blockers: [],
-  gaps: [],
-  total: 2,
-  reasons: ['untestable'],
-};
-
-const BODY: SprintAssessmentBody = {
-  summary: 'Summary.',
-  findings: [{ issue: 'unclear_done', rule: 'no_expected_result', quote: null, where: null, text: 'Say the export is CSV only.', suggestion: null, ref: null }],
-  revisedCriteria: ['old one', 'new two', 'added'],
-  revisedDescription: null,
-};
+const BODY: SprintAssessmentBody = { mode: 'plan', summary: 'Summary.', plan: [], criterionChecks: [], coverage: null };
 
 function withAssessment(
-  t: SprintTicketRow,
+  t: Assessed,
   status: 'succeeded' | 'running' | 'failed',
   currency: 'current' | 'stale' | null,
   opts: { body?: SprintAssessmentBody; outdated?: boolean } = {},
-): SprintTicketRow {
+): Assessed {
   return {
     ...t,
     assessment: {
@@ -112,9 +51,10 @@ function withAssessment(
       record: {
         id: 9,
         workspaceId: 1,
-        ident: t.ident,
+        ident: 'jira:https://acme.atlassian.net#ACME-1',
         model: 'claude-sonnet-5',
         status,
+        mode: 'plan',
         phase: status === 'running' ? 'reading' : null,
         repos: [],
         body: status === 'succeeded' && opts.outdated !== true ? (opts.body ?? BODY) : null,
@@ -159,52 +99,6 @@ function layout(over: Partial<SprintStatusLayout> = {}): SprintStatusLayout {
   };
 }
 
-const st = (name: string, category: 'new' | 'indeterminate' | 'done' = 'indeterminate') => ({ name, category });
-
-describe('sections by status', () => {
-  it('the four stages in order — sections in layout order, server order within; Done listed', () => {
-    const rows = [
-      ticket({ ident: 'a', stage: 'in_review', status: st('Ready for QA') }),
-      ticket({ ident: 'b', stage: 'not_started', status: st('To Do', 'new') }),
-      ticket({ ident: 'c', stage: 'in_progress', status: st('In Development') }),
-      ticket({ ident: 'd', stage: 'in_review', status: st('In PO Review') }),
-      ticket({ ident: 'e', stage: 'in_progress', status: st('in development') }),
-      ticket({ ident: 'f', stage: 'done', status: st('Done', 'done') }),
-    ];
-    const g = sprintSections(rows, layout());
-    expect(g.map((x) => [x.stage, x.heading])).toEqual([
-      ['not_started', 'Not started'],
-      ['in_progress', 'In progress'],
-      ['in_review', 'In review'],
-      ['done', 'Done'],
-    ]);
-    expect(g[0]!.sections).toEqual([{ status: null, tickets: [rows[1]] }]);
-    expect(g[1]!.sections.map((s) => [s.status, s.tickets.map((t) => t.ident)])).toEqual([['In Development', ['c', 'e']]]);
-    expect(g[2]!.sections.map((s) => s.status)).toEqual(['Ready for QA', 'In PO Review']);
-    expect(g[3]!.sections.map((s) => s.tickets.map((t) => t.ident))).toEqual([['f']]);
-  });
-
-  it('empty stages dropped', () => {
-    const rows = [ticket({ ident: 'a', stage: 'in_progress', status: st('In Development') })];
-    expect(sprintSections(rows, layout()).map((x) => x.heading)).toEqual(['In progress']);
-    expect(sprintSections([], layout())).toEqual([]);
-  });
-
-  it('a status the layout does not list goes after the listed ones', () => {
-    const rows = [
-      ticket({ ident: 'x', stage: 'in_review', status: st('Blocked by legal') }),
-      ticket({ ident: 'y', stage: 'in_review', status: st('Ready for QA') }),
-    ];
-    expect(sprintSections(rows, layout())[0]!.sections.map((s) => s.status)).toEqual(['Ready for QA', 'Blocked by legal']);
-    // No layout at all: grouping still works, by first seen.
-    expect(sprintSections(rows, null)[0]!.sections.map((s) => s.status)).toEqual(['Blocked by legal', 'Ready for QA']);
-  });
-
-  it('the stage is the row\'s own (the server\'s placement)', () => {
-    const g = sprintSections([ticket({ ident: 'n', stage: 'not_started', status: st('In PO Review') })], layout());
-    expect(g.map((x) => x.stage)).toEqual(['not_started']);
-  });
-});
 
 describe('status settings', () => {
   it('the draft is the layout’s placement', () => {
@@ -333,162 +227,5 @@ describe('assessment button and progress', () => {
     expect(elapsedLabel(45_400)).toBe('45s');
     expect(elapsedLabel(125_000)).toBe('2m 05s');
     expect(elapsedLabel(-5)).toBe('0s');
-  });
-});
-
-/** The templated comment composition (shared folds) — what Copy all and the comment text are built from. */
-const commentDefault = (t: SprintTicketRow, checks: SprintChecks): string =>
-  sprintCommentMarkdown(sprintBullets(t, checks), sprintCurrentAssessmentBodyOf(t), sprintSpecGapLines(t, checks));
-
-describe('update panel', () => {
-  it('the dialog names the field and the ticket', () => {
-    expect(writeTargetSentence('ACME-1', { kind: 'description' })).toBe('Replaces the description of ACME-1.');
-    expect(writeTargetSentence('ACME-1', { kind: 'ac_field', fieldId: 'f', fieldName: 'AC' })).toBe('Replaces AC on ACME-1.');
-  });
-
-  it('"Apply to draft" for proposed criteria: the criteria field alone, else the description’s criteria section', () => {
-    const t = ticket();
-    expect(proposedCriteriaDraft({ description: t.description, criteria: '- old' }, ['new one', 'new two'])).toEqual({
-      field: 'criteria',
-      text: '- new one\n- new two',
-    });
-    expect(proposedCriteriaDraft({ description: t.description, criteria: null }, ['a'])).toEqual({
-      field: 'description',
-      text: 'Intro\n\n## Acceptance criteria\n\n- a\n\n## Notes\n\nKeep me',
-    });
-  });
-
-  it('replaces the criteria section and keeps the rest of the description', () => {
-    const out = replaceCriteriaSection(ticket().description, '- a\n- b');
-    expect(out).toBe('Intro\n\n## Acceptance criteria\n\n- a\n- b\n\n## Notes\n\nKeep me');
-  });
-
-  it('appends a section when the description has none', () => {
-    expect(replaceCriteriaSection('Just text', '- a')).toBe('Just text\n\n## Acceptance criteria\n\n- a');
-    expect(replaceCriteriaSection('', '- a')).toBe('## Acceptance criteria\n\n- a');
-  });
-
-  it('a bold label line counts as the heading', () => {
-    expect(replaceCriteriaSection('**Acceptance criteria:**\n- x\n\nOther:\nmore', '- y')).toBe(
-      '**Acceptance criteria:**\n\n- y\n\nOther:\nmore',
-    );
-  });
-
-  it('the comment composition without an assessment: the templated bullets', () => {
-    const t = ticket({ criteria: { items: [], source: 'none' }, issues: foldStoryIssues({ criteria: [], label: null }) });
-    expect(commentDefault(t, SPRINT_CHECKS_DEFAULT)).toBe(
-      '- Add acceptance criteria: outcomes a tester could check, one per line.',
-    );
-  });
-
-  it('the comment composition from a succeeded assessment', () => {
-    const t = withAssessment(ticket({ issues: [UNCLEAR] }), 'succeeded', 'current');
-    expect(commentDefault(t, SPRINT_CHECKS_DEFAULT)).toBe(
-      'Summary.\n\n- Say the export is CSV only.\n\n**Proposed acceptance criteria**\n\n- old one\n- new two\n- added',
-    );
-  });
-
-  it('⚠ a stale run feeds nothing: no bullets of its own, no summary, no revised criteria', () => {
-    // The author fixed the criterion since: code no longer raises unclear_done.
-    const stale = withAssessment(ticket({ issues: [] }), 'succeeded', 'stale');
-    expect(sprintBullets(stale, SPRINT_CHECKS_DEFAULT)).toEqual([]);
-    expect(commentDefault(stale, SPRINT_CHECKS_DEFAULT)).toBe('');
-    // Still raised by code: the TEMPLATED bullet, never the stale sentence.
-    const still = withAssessment(ticket({ issues: [UNCLEAR] }), 'succeeded', 'stale');
-    expect(sprintBullets(still, SPRINT_CHECKS_DEFAULT)).toEqual([
-      { id: 'unclear_done', text: 'Criterion 2: no expected result', source: 'code', ref: null },
-    ]);
-    const old = withAssessment(ticket(), 'succeeded', 'stale', { outdated: true });
-    expect(commentDefault(old, SPRINT_CHECKS_DEFAULT)).toBe('');
-  });
-
-  it("⚠ Claude's sentence only REPLACES a bullet for an issue code raised; it never adds one", () => {
-    const body = { ...BODY, findings: [{ issue: 'blocked' as const, rule: 'waits_on_external' as const, quote: null, where: null, text: 'Waits on the billing API.', suggestion: null, ref: null }, ...BODY.findings] };
-    const t = withAssessment(ticket({ issues: [UNCLEAR] }), 'succeeded', 'current', { body });
-    expect(sprintBullets(t, SPRINT_CHECKS_DEFAULT)).toEqual([
-      { id: 'unclear_done', text: 'Say the export is CSV only.', source: 'claude', ref: null },
-    ]);
-    // A ticket with no issues stays "Nothing flagged" when expanded, whatever Claude said.
-    expect(sprintBullets(withAssessment(ticket({ issues: [] }), 'succeeded', 'current', { body }), SPRINT_CHECKS_DEFAULT)).toEqual([]);
-  });
-
-  it('spec gaps: their own section in the comment default, Claude’s current sentence replacing the first gap, never a bullet', () => {
-    const body = { ...BODY, findings: [...BODY.findings, { issue: 'spec_gaps' as const, rule: 'edge_case' as const, quote: null, where: null, text: 'No limit on rows.', suggestion: null, ref: null }] };
-    const gaps = [
-      { type: 'edge_case' as const, text: 'No behaviour when the export is empty' },
-      { type: 'rule' as const, text: 'No rule for duplicates' },
-    ];
-    const t = withAssessment(
-      ticket({ issues: [UNCLEAR], specGaps: gaps }),
-      'succeeded',
-      'current',
-      { body },
-    );
-    expect(sprintBullets(t, SPRINT_CHECKS_DEFAULT).map((b) => b.id)).toEqual(['unclear_done']);
-    expect(commentDefault(t, SPRINT_CHECKS_DEFAULT)).toBe(
-      'Summary.\n\n- Say the export is CSV only.\n\n**Spec gaps**\n\n- No limit on rows.\n\n**Proposed acceptance criteria**\n\n- old one\n- new two\n- added',
-    );
-    // Without a current run: the FIRST gap only.
-    expect(commentDefault(ticket({ issues: [UNCLEAR], specGaps: gaps }), SPRINT_CHECKS_DEFAULT)).toContain(
-      '**Spec gaps**\n\n- Edge case: No behaviour when the export is empty',
-    );
-    expect(commentDefault(ticket({ issues: [UNCLEAR], specGaps: gaps }), SPRINT_CHECKS_DEFAULT)).not.toContain('duplicates');
-    // A ticket under way shows no spec gaps at all.
-    expect(commentDefault({ ...t, stage: 'in_progress' }, SPRINT_CHECKS_DEFAULT)).not.toContain('Spec gaps');
-    // The switch hides the section.
-    expect(commentDefault(t, { off: ['spec_gaps'], issueTypes: [] })).not.toContain('Spec gaps');
-  });
-
-  it('text problems mirror the server cap', () => {
-    expect(writeTextProblem('  ')).toBe('Nothing to write.');
-    expect(writeTextProblem('ok')).toBeNull();
-    expect(writeTextProblem('x'.repeat(SPRINT_WRITE_TEXT_MAX + 1))).toMatch(/^Too long/);
-  });
-
-  it('a request id matches the server pattern and is fresh', () => {
-    const a = newWriteRequestId();
-    const b = newWriteRequestId();
-    expect(SPRINT_WRITE_REQUEST_ID_RE.test(a)).toBe(true);
-    expect(a).not.toBe(b);
-  });
-
-  it('write record lines', () => {
-    const base: SprintWriteRecord = {
-      id: 1,
-      ident: 'x',
-      mode: 'comment',
-      target: null,
-      status: 'written',
-      error: null,
-      message: null,
-      url: null,
-      createdAt: '2026-10-01T00:00:00Z',
-      completedAt: '2026-10-01T00:00:01Z',
-    };
-    expect(writeRecordLine(base, 'jira')).toEqual({ tone: 'ok', text: 'Comment added in Jira.' });
-    expect(writeRecordLine({ ...base, mode: 'replace' }, 'linear').text).toBe('Updated in Linear.');
-    expect(writeRecordLine({ ...base, status: 'maybe_written', message: null }, 'jira')).toEqual({ tone: 'warn', text: SPRINT_WRITE_MAYBE_SENTENCE });
-    expect(
-      writeRecordLine({ ...base, status: 'failed', error: 'no_write_permission', message: sprintNoWriteSentence('github') }, 'github'),
-    ).toEqual({ tone: 'bad', text: 'This token can’t write to GitHub.' });
-    expect(writeRecordLine({ ...base, status: 'writing' }, 'jira').tone).toBe('busy');
-  });
-});
-
-describe('checks', () => {
-  it('counts each switched-off issue, plus one for a type list', () => {
-    expect(changedCheckCount(SPRINT_CHECKS_DEFAULT)).toBe(0);
-    expect(changedCheckCount({ off: ['blocked'], issueTypes: [] })).toBe(1);
-    expect(changedCheckCount({ off: ['blocked', 'spec_gaps'], issueTypes: ['Story', 'Bug'] })).toBe(3);
-  });
-
-  it("type choices: the sprint's types plus saved ones, once each, sorted", () => {
-    expect(checkTypeChoices(['Story', 'Bug'], ['story', 'Spike'])).toEqual(['Bug', 'Spike', 'Story']);
-    expect(checkTypeChoices([], [])).toEqual([]);
-  });
-
-  it('toggling a type matches case-insensitively', () => {
-    expect(toggleCheckType([], 'Story')).toEqual(['Story']);
-    expect(toggleCheckType(['story', 'Bug'], 'Story')).toEqual(['Bug']);
   });
 });

@@ -26,7 +26,7 @@ import { submitAssessmentShape } from './schema.js';
 // denies any path outside the working directory and those checkouts (under bypassPermissions nothing
 // else confines an absolute path, and the ticket text is attacker-authored). ISOLATED_MCP + the
 // ownToolsOnlyHook backstop keep the account's claude.ai connectors out (ai/agent-isolation.ts).
-// ⚠ No tool can WRITE to a tracker: the write-back is a separate, per-ticket, confirmed press.
+// ⚠ No tool can WRITE to a tracker, and nothing in Limn does.
 
 export const SPRINT_ASSESS_TOOL = 'mcp__sprint__submit_assessment';
 const ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', SPRINT_ASSESS_TOOL];

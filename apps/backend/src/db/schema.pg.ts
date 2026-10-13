@@ -29,10 +29,12 @@ import {
 } from 'drizzle-orm/pg-core';
 import type {
   BlastRadiusConfig,
-  SprintChecks,
   SprintStatusAutoOrder,
   SprintStatusSettings,
   TicketLinkBlocker,
+  SprintBriefCriterion,
+  SprintTheme,
+  SprintBriefReference,
   BranchCheckRun,
   CheckRun,
   ClaudeReviewFollowUpRecord,
@@ -65,7 +67,6 @@ import type {
   StoryLevelLabels,
   SprintAssessmentBody,
   SprintAssessmentDropped,
-  SprintReplaceTarget,
   SprintSource,
   TicketAssessment,
 } from '@pierre-review/shared';
@@ -1384,7 +1385,8 @@ export const workspaces = pgTable(
     // OVERRIDES ONLY, resolved through `resolveFlowSettings`. Full rationale in the sqlite twin.
     flowSettings: jsonb('flow_settings').$type<FlowSettings>(),
     // Reports → This sprint checks (migration 0102 / pg 0089) — the pg twin. See the sqlite twin.
-    sprintChecks: jsonb('sprint_checks').$type<SprintChecks>(),
+    // DORMANT since 2026-10-12 — see the sqlite twin.
+    sprintChecks: jsonb('sprint_checks').$type<unknown>(),
     // See the sqlite twin (migration pg 0090).
     sprintStatuses: jsonb('sprint_statuses').$type<SprintStatusSettings>(),
     // Auto Claude review (migration 0074 / pg 0061) — the pg twin. Full rationale in the sqlite twin.
@@ -2113,12 +2115,80 @@ export const sprintRefTickets = pgTable(
     statusCategory: text('status_category'),
     url: text('url'),
     readAt: timestamp('read_at', { withTimezone: true, mode: 'date' }).notNull(),
+    description: text('description'),
+    acceptanceCriteria: text('acceptance_criteria'),
+    issueTypeName: text('issue_type_name'),
+    assigneeName: text('assignee_name'),
+    assigneeAvatarUrl: text('assignee_avatar_url'),
+    blockedByJson: jsonb('blocked_by_json').$type<TicketLinkBlocker[]>(),
+    depth: integer('depth').notNull().default(1),
   },
   (t) => ({
     accountWsIdentUx: uniqueIndex('sprint_ref_tickets_account_ws_ident').on(t.accountId, t.workspaceId, t.ident),
     accountKeyIdx: index('sprint_ref_tickets_account_key').on(t.accountId, t.issueKey),
     workspaceAccountFk: foreignKey({
       name: 'sprint_ref_tickets_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_briefs — see the sqlite twin (migration pg 0094).
+export const sprintBriefs = pgTable(
+  'sprint_briefs',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    ident: text('ident').notNull(),
+    textHash: text('text_hash').notNull(),
+    briefVersion: integer('brief_version').notNull(),
+    summary: text('summary').notNull(),
+    criteriaJson: jsonb('criteria_json').$type<SprintBriefCriterion[]>().notNull(),
+    criteriaDerived: boolean('criteria_derived').notNull().default(false),
+    referencesJson: jsonb('references_json').$type<SprintBriefReference[]>().notNull(),
+    model: text('model').notNull(),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (t) => ({
+    accountWsIdentUx: uniqueIndex('sprint_briefs_account_ws_ident').on(t.accountId, t.workspaceId, t.ident),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_briefs_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_themes — see the sqlite twin (migration pg 0095).
+export const sprintThemes = pgTable(
+  'sprint_themes',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    inputHash: text('input_hash').notNull(),
+    themeVersion: integer('theme_version').notNull(),
+    themesJson: jsonb('themes_json').$type<SprintTheme[]>().notNull(),
+    assignmentsJson: jsonb('assignments_json').$type<Array<{ ident: string; theme: string }>>().notNull(),
+    model: text('model').notNull(),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (t) => ({
+    accountWsUx: uniqueIndex('sprint_themes_account_ws').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_themes_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),
@@ -2196,35 +2266,3 @@ export const sprintAssessments = pgTable(
   }),
 );
 
-export const trackerWrites = pgTable(
-  'tracker_writes',
-  {
-    id: serial('id').primaryKey(),
-    accountId: integer('account_id')
-      .notNull()
-      .references(() => accounts.id, { onDelete: 'cascade' }),
-    workspaceId: integer('workspace_id').notNull(),
-    ident: text('ident').notNull(),
-    provider: text('provider').notNull(),
-    requestId: text('request_id').notNull(),
-    mode: text('mode').notNull(),
-    targetJson: jsonb('target_json').$type<SprintReplaceTarget>(),
-    text: text('text').notNull(),
-    textHash: text('text_hash').notNull(),
-    status: text('status').notNull(),
-    errorCode: text('error_code'),
-    url: text('url'),
-    assessmentId: integer('assessment_id'),
-    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
-    completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
-  },
-  (t) => ({
-    accountRequestUx: uniqueIndex('tracker_writes_account_request').on(t.accountId, t.requestId),
-    accountIdentIdx: index('tracker_writes_account_ident_idx').on(t.accountId, t.workspaceId, t.ident, t.createdAt),
-    workspaceAccountFk: foreignKey({
-      name: 'tracker_writes_workspace_account_fk',
-      columns: [t.workspaceId, t.accountId],
-      foreignColumns: [workspaces.id, workspaces.accountId],
-    }).onDelete('cascade'),
-  }),
-);

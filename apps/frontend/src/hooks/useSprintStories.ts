@@ -1,38 +1,39 @@
 import { skipToken, useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  SprintChecks,
-  SprintChecksResponse,
+  SprintAskResponse,
+  SprintAskTurn,
   SprintAssessmentResponse,
   SprintAssessResponse,
+  SprintGraphResponse,
   SprintRefreshResponse,
   SprintReposResponse,
   SprintStatusesResponse,
   SprintStatusSettings,
-  SprintStoriesResponse,
-  SprintTicketRow,
-  SprintWriteRequest,
-  SprintWriteResponse,
+  SprintTicketDetailResponse,
 } from '@pierre-review/shared';
+import { create } from 'zustand';
 import { api } from '../api/client.js';
 import { useAiCapabilities } from './useAiCapabilities.js';
 import { workspaceKey } from './useActivity.js';
 import { useProCapabilities } from './useTriage.js';
 
-// Reports → This sprint. Pro with the rest of Reports (`periodReports`): every route 402s without it,
-// so every hook ANDs the capability into its own `enabled` — the SPA must never learn the paywall by
-// polling a 402. "Check against code" is agentic and LOCAL-ONLY (its routes are not registered in
-// cloud), so its hooks also AND `me.ai.enabled`.
+// Reports → This sprint (the GRAPH). Pro with the rest of Reports (`periodReports`): every route 402s
+// without it, so every hook ANDs the capability into its own `enabled` — the SPA must never learn the
+// paywall by polling a 402. "Check against code" and "Ask Claude about this sprint" are agentic and
+// LOCAL-ONLY (their routes are not registered in cloud), so their hooks also AND `me.ai.enabled`.
 //
-// ⚠ SHARED MUTATION KEYS. Every mount of one ticket's Check / Update shares `['sprint-assess', ident]`
-// / `['sprint-write', ident]`, and the UI reads `useIsMutating` — never a per-mount `isPending`, which
-// resets on a tab switch mid-request and would offer a second billed run or a second write.
-//
-// ⚠ CACHE WRITES LIVE IN THE HOOK-LEVEL `onSuccess`, never a `mutate()` callback: observer teardown
-// (the reader switching tab) kills mutate-scoped callbacks. Both the run and the write record are
-// stored server-side, so the list re-reads them in any case.
+// ⚠ SHARED MUTATION KEYS. Every mount of one ticket's Check shares `['sprint-assess', ident]`, and the
+// UI reads `useIsMutating` — never a per-mount `isPending`, which resets on a tab switch mid-request and
+// would offer a second billed run.
+// ⚠ CACHE WRITES LIVE IN THE HOOK-LEVEL `onSuccess`, never a `mutate()` callback (observer teardown kills
+// mutate-scoped callbacks).
 
-export function sprintStoriesKey(workspaceId: number | null): [string, string] {
-  return ['sprint-stories', workspaceKey(workspaceId)];
+export function sprintGraphKey(workspaceId: number | null): [string, string] {
+  return ['sprint-graph', workspaceKey(workspaceId)];
+}
+
+export function sprintTicketKey(workspaceId: number | null, ident: string | null): [string, string, string | null] {
+  return ['sprint-ticket', workspaceKey(workspaceId), ident];
 }
 
 export function sprintAssessmentKey(id: number | null): [string, number | null] {
@@ -43,39 +44,43 @@ export function sprintAssessMutationKey(ident: string): [string, string] {
   return ['sprint-assess', ident];
 }
 
-export function sprintWriteMutationKey(ident: string): [string, string] {
-  return ['sprint-write', ident];
-}
-
 export function sprintReposMutationKey(ident: string): [string, string] {
   return ['sprint-repos', ident];
 }
 
-function patchTicket(
-  data: SprintStoriesResponse | undefined,
-  ident: string,
-  patch: (t: SprintTicketRow) => SprintTicketRow,
-): SprintStoriesResponse | undefined {
-  if (data == null) return data;
-  return { ...data, tickets: data.tickets.map((t) => (t.ident === ident ? patch(t) : t)) };
+/** Everything that reads the sprint for this workspace: the graph and every open drawer. */
+function invalidateSprint(qc: ReturnType<typeof useQueryClient>, workspaceId: number | null): void {
+  void qc.invalidateQueries({ queryKey: sprintGraphKey(workspaceId) });
+  void qc.invalidateQueries({ queryKey: ['sprint-ticket', workspaceKey(workspaceId)] });
 }
 
-export function useSprintStories(workspaceId: number | null) {
+export function useSprintGraph(workspaceId: number | null) {
   const { periodReports } = useProCapabilities();
-  return useQuery<SprintStoriesResponse>({
-    queryKey: sprintStoriesKey(workspaceId),
-    queryFn: workspaceId == null ? skipToken : () => api.sprintStories(workspaceId),
+  return useQuery<SprintGraphResponse>({
+    queryKey: sprintGraphKey(workspaceId),
+    queryFn: workspaceId == null ? skipToken : () => api.sprintGraph(workspaceId),
     enabled: periodReports,
     staleTime: 30_000,
-    // The worker re-reads the sprint every 20 minutes and labels arrive in the background; a minute
-    // is often enough. While the first read has not landed ("Reading…"), look sooner.
+    // The worker re-reads the sprint every 20 minutes and briefs arrive in the background; a minute is
+    // often enough. While the first read has not landed ("Reading…") or briefs are pending, look sooner.
     refetchInterval: (q) => {
       const d = q.state.data;
       if (d != null && d.trackerOn && d.read.readAt == null && d.read.error == null) return 5_000;
+      if (d != null && d.aiEnabled && d.briefs.pending > 0) return 15_000;
       return 60_000;
     },
-    // Visible tabs only.
     refetchIntervalInBackground: false,
+  });
+}
+
+/** The drawer's detail for one node. */
+export function useSprintTicket(workspaceId: number | null, ident: string | null) {
+  const { periodReports } = useProCapabilities();
+  return useQuery<SprintTicketDetailResponse>({
+    queryKey: sprintTicketKey(workspaceId, ident),
+    queryFn: workspaceId == null || ident == null ? skipToken : () => api.sprintTicket(workspaceId, ident),
+    enabled: periodReports,
+    staleTime: 30_000,
   });
 }
 
@@ -88,10 +93,8 @@ export function useSprintRefresh(workspaceId: number | null) {
       return api.sprintRefresh(workspaceId);
     },
     onSuccess: (data) => {
-      qc.setQueryData<SprintStoriesResponse>(sprintStoriesKey(data.workspaceId), (prev) =>
-        prev == null ? prev : { ...prev, read: data.read },
-      );
-      void qc.invalidateQueries({ queryKey: sprintStoriesKey(workspaceId) });
+      qc.setQueryData<SprintGraphResponse>(sprintGraphKey(data.workspaceId), (prev) => (prev == null ? prev : { ...prev, read: data.read }));
+      invalidateSprint(qc, workspaceId);
     },
   });
 }
@@ -100,25 +103,9 @@ export function useSprintRefreshing(workspaceId: number | null): boolean {
   return useIsMutating({ mutationKey: ['sprint-refresh', workspaceKey(workspaceId)] }) > 0;
 }
 
-/** Replace the workspace's checks (which issues it raises). The list refetches: issues, counts and
- *  the order all move with them. */
-export function useSprintSetChecks(workspaceId: number | null) {
-  const qc = useQueryClient();
-  return useMutation<SprintChecksResponse, Error, SprintChecks>({
-    mutationKey: ['sprint-checks', workspaceKey(workspaceId)],
-    mutationFn: (checks) => {
-      if (workspaceId == null) return Promise.reject(new Error('No workspace selected'));
-      return api.sprintSetChecks({ workspaceId, checks });
-    },
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: sprintStoriesKey(workspaceId) });
-    },
-  });
-}
-
 /** Replace the workspace's status layout override (the four stages' statuses, in order).
- *  `{sections: null}` = back to automatic. The layout lands at once; the list refetches because every
- *  row's stage and the section order move with it. */
+ *  `{sections: null}` = back to automatic. The layout lands at once; the graph refetches because
+ *  every node's stage moves with it. */
 export function useSprintSetStatuses(workspaceId: number | null) {
   const qc = useQueryClient();
   return useMutation<SprintStatusesResponse, Error, SprintStatusSettings>({
@@ -128,13 +115,11 @@ export function useSprintSetStatuses(workspaceId: number | null) {
       return api.sprintSetStatuses({ workspaceId, settings });
     },
     onSuccess: (data) => {
-      qc.setQueryData<SprintStoriesResponse>(sprintStoriesKey(data.workspaceId), (prev) =>
+      qc.setQueryData<SprintGraphResponse>(sprintGraphKey(data.workspaceId), (prev) =>
         prev == null ? prev : { ...prev, statusLayout: data.statusLayout },
       );
     },
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: sprintStoriesKey(workspaceId) });
-    },
+    onSettled: () => invalidateSprint(qc, workspaceId),
   });
 }
 
@@ -149,18 +134,15 @@ export function useSprintSetRepos(workspaceId: number | null, ident: string) {
     },
     onSuccess: (data) => {
       const accepted = new Set(data.accepted.map((r) => r.repoId));
-      qc.setQueryData<SprintStoriesResponse>(sprintStoriesKey(data.workspaceId), (prev) =>
-        patchTicket(prev, data.ident, (t) => ({
-          ...t,
-          repos: { accepted: data.accepted, suggested: t.repos.suggested.filter((s) => !accepted.has(s.repoId)), defaulted: false },
-        })),
+      qc.setQueryData<SprintTicketDetailResponse>(sprintTicketKey(data.workspaceId, data.ident), (prev) =>
+        prev?.repos == null
+          ? prev
+          : { ...prev, repos: { accepted: data.accepted, suggested: prev.repos.suggested.filter((s) => !accepted.has(s.repoId)), defaulted: false } },
       );
       // Suggestions and the assessment's currency both move with the accepted set.
-      void qc.invalidateQueries({ queryKey: sprintStoriesKey(data.workspaceId) });
+      invalidateSprint(qc, data.workspaceId);
     },
-    onError: () => {
-      void qc.invalidateQueries({ queryKey: sprintStoriesKey(workspaceId) });
-    },
+    onError: () => invalidateSprint(qc, workspaceId),
   });
 }
 
@@ -168,14 +150,14 @@ export function useSprintReposSaving(ident: string): boolean {
   return useIsMutating({ mutationKey: sprintReposMutationKey(ident) }) > 0;
 }
 
-/** True when "Check against code" may show at all (Pro + agentic AI on). */
+/** True when the agentic sprint features may show at all (Pro + agentic AI on). */
 export function useSprintAssessOn(): boolean {
   const { periodReports } = useProCapabilities();
   const ai = useAiCapabilities();
   return periodReports && ai.enabled;
 }
 
-/** Polls one run every 2 s while it is queued or running; on a terminal status re-reads the list
+/** Polls one run every 2 s while it is queued or running; on a terminal status re-reads the sprint
  *  (the stored body lands there) and the AI usage. */
 export function useSprintAssessment(id: number | null, workspaceId: number | null) {
   const qc = useQueryClient();
@@ -189,7 +171,7 @@ export function useSprintAssessment(id: number | null, workspaceId: number | nul
             const res = await api.sprintAssessment(id);
             const r = res.assessment;
             if (r.status !== 'queued' && r.status !== 'running') {
-              void qc.invalidateQueries({ queryKey: sprintStoriesKey(workspaceId) });
+              invalidateSprint(qc, workspaceId);
               void qc.invalidateQueries({ queryKey: ['ai-usage'] });
             }
             return res;
@@ -215,14 +197,12 @@ export function useStartSprintAssess(workspaceId: number | null, ident: string) 
     onSuccess: (data) => {
       const r = data.assessment;
       qc.setQueryData<SprintAssessmentResponse>(sprintAssessmentKey(r.id), { assessment: r, currency: null });
-      qc.setQueryData<SprintStoriesResponse>(sprintStoriesKey(r.workspaceId), (prev) =>
-        patchTicket(prev, r.ident, (t) => ({ ...t, assessment: { record: r, currency: null } })),
+      qc.setQueryData<SprintTicketDetailResponse>(sprintTicketKey(r.workspaceId, r.ident), (prev) =>
+        prev == null ? prev : { ...prev, assessment: { record: r, currency: null } },
       );
     },
-    // A refusal (busy, no repos any more, ticket gone) means the list is out of date.
-    onError: () => {
-      void qc.invalidateQueries({ queryKey: sprintStoriesKey(workspaceId) });
-    },
+    // A refusal (busy, no repos any more, ticket gone) means the drawer is out of date.
+    onError: () => invalidateSprint(qc, workspaceId),
   });
 }
 
@@ -237,38 +217,57 @@ export function useCancelSprintAssess(workspaceId: number | null) {
     mutationFn: (id) => api.sprintAssessCancel(id),
     onSuccess: (data) => {
       qc.setQueryData<SprintAssessmentResponse>(sprintAssessmentKey(data.assessment.id), data);
-      void qc.invalidateQueries({ queryKey: sprintStoriesKey(workspaceId) });
+      invalidateSprint(qc, workspaceId);
       void qc.invalidateQueries({ queryKey: ['ai-usage'] });
     },
   });
 }
 
-/** The write-back. ONE ticket per POST, the exact text the dialog showed; never retried here. */
-export function useSprintWrite(workspaceId: number | null, ident: string) {
+/** "Ask Claude about this sprint": one billed answer per turn. The caller owns the transcript and sends
+ *  its prior turns; the server caps how many it reads (`SPRINT_ASK_MAX_TURNS`). Shared mutation key per
+ *  workspace, so a second mount cannot fire a second billed ask. */
+export function useSprintAsk(workspaceId: number | null) {
   const qc = useQueryClient();
-  return useMutation<SprintWriteResponse, Error, Omit<SprintWriteRequest, 'workspaceId' | 'ident'>>({
-    mutationKey: sprintWriteMutationKey(ident),
-    // ⚠ NO `retry`: the claim makes a repeat harmless, but a client retry would still be a second
-    // press nobody made. The query client's mutation default is no retry; keep it explicit.
+  return useMutation<SprintAskResponse, Error, { question: string; history: SprintAskTurn[] }>({
+    mutationKey: ['sprint-ask', workspaceKey(workspaceId)],
     retry: false,
-    mutationFn: (body) => {
+    mutationFn: ({ question, history }) => {
       if (workspaceId == null) return Promise.reject(new Error('No workspace selected'));
-      return api.sprintWrite({ ...body, workspaceId, ident });
+      return api.sprintAsk({ workspaceId, question, history });
     },
-    onSuccess: (data) => {
-      qc.setQueryData<SprintStoriesResponse>(sprintStoriesKey(workspaceId), (prev) =>
-        patchTicket(prev, data.write.ident, (t) => ({ ...t, lastWrite: data.write })),
-      );
-      // A successful write forces the ticket's re-read; the list picks up the new text and labels.
-      void qc.invalidateQueries({ queryKey: sprintStoriesKey(workspaceId) });
-    },
-    onError: () => {
-      void qc.invalidateQueries({ queryKey: sprintStoriesKey(workspaceId) });
+    // ⚠ The completed turn is appended HERE, in the hook-level onSuccess, never in a `mutate()`
+    // callback: observer teardown (the panel closing mid-answer) kills mutate-scoped callbacks and would
+    // lose a billed answer. The transcript lives in a module store, so it outlives the panel too.
+    onSuccess: (data, vars) => {
+      useSprintAskTranscript.getState().append(data.workspaceId, {
+        question: vars.question,
+        answer: data.answer,
+        costUsd: data.costUsd,
+        trimmedTurns: data.trimmedTurns,
+      });
+      void qc.invalidateQueries({ queryKey: ['ai-usage'] });
     },
   });
 }
 
-/** A write in flight on ANY mount of this ticket. */
-export function useSprintWriting(ident: string): boolean {
-  return useIsMutating({ mutationKey: sprintWriteMutationKey(ident) }) > 0;
+/** One finished turn of "Ask Claude about this sprint", as the panel shows it. */
+export interface SprintAskShownTurn extends SprintAskTurn {
+  costUsd: number | null;
+  /** Earlier turns the server did not read for this answer. */
+  trimmedTurns: number;
+}
+
+/** The conversation per workspace, for the visit only (memory, never storage or the URL). */
+export const useSprintAskTranscript = create<{
+  turns: Record<number, SprintAskShownTurn[]>;
+  append: (workspaceId: number, turn: SprintAskShownTurn) => void;
+  clear: (workspaceId: number) => void;
+}>((set) => ({
+  turns: {},
+  append: (ws, turn) => set((s) => ({ turns: { ...s.turns, [ws]: [...(s.turns[ws] ?? []), turn] } })),
+  clear: (ws) => set((s) => ({ turns: { ...s.turns, [ws]: [] } })),
+}));
+
+export function useSprintAsking(workspaceId: number | null): boolean {
+  return useIsMutating({ mutationKey: ['sprint-ask', workspaceKey(workspaceId)] }) > 0;
 }
