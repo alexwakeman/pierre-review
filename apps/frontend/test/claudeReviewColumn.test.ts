@@ -272,14 +272,20 @@ describe('the wiring', () => {
     // NO Pro read on the cards at all: the ticket row is the CORE tracker's (apiVersion 23), gated
     // on whether THIS workspace has one — never the Claude panel's gate.
     expect(cards).not.toMatch(/useProCapabilities\(/);
-    expect(cards).toMatch(/const ticketsOn = useTrackerOn\(/);
-    expect(cards).toMatch(/useTicketLinks\(prIds, ticketsOn\)/);
+    // The ticket answer is read by the first-paint gate (one hook, list level), on THIS workspace's
+    // tracker — never on the Claude panel's gate.
+    expect(cards).toMatch(/useOpenPrsTicketGate\(livePrs, workspaceId/);
+    const gate = src('hooks/useOpenPrsTicketGate.ts');
+    expect(gate).toMatch(/const \{ on: ticketsOn, known: trackerKnown \} = useTrackerState\(workspaceId\)/);
+    expect(gate).toMatch(/useTicketLinks\(prIds, ticketsOn\)/);
+    expect(gate).not.toMatch(/useAiCapabilities|useProCapabilities/);
     expect(cards).toMatch(/useClaudeReviewStates\(prIds, claudeOn\)/);
     expect(cards).toMatch(/claudeOn \? \(\s*<ClaudeReviewPanel/);
     // One batched request for the list — never a states hook inside the card.
     expect(src('components/Activity/ClaudeReviewCell.tsx')).not.toMatch(/useClaudeReviewStates/);
     // …and one for the ticket row, at list level, never inside a card.
-    expect(cards.match(/useTicketLinks\(/g)).toHaveLength(1);
+    expect(cards).not.toMatch(/useTicketLinks\(/);
+    expect(gate.match(/useTicketLinks\(/g)).toHaveLength(1);
     expect(src('components/Activity/ClaudeReviewCell.tsx')).not.toMatch(/useTicketLinks/);
   });
 
@@ -311,7 +317,8 @@ describe('the wiring', () => {
 
   it('the card header carries the work-in-progress chip, read off the batched answers', () => {
     const cards = src('components/Activity/OpenPrsCards.tsx');
-    expect(cards).toMatch(/end=\{working\}/);
+    expect(cards).toMatch(/working=\{/);
+    expect(cards).toMatch(/\{working\}/);
     expect(cards).toMatch(/<ClaudeWorkChip/);
   });
 

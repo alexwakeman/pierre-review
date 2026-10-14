@@ -1,5 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import {
+  continuedTweenMs as g1ContinuedTweenMs,
+  edgeBends as g1EdgeBends,
+  edgeCurve as g1EdgeCurve,
+  edgeId as g1EdgeId,
+  layoutAnimates as g1LayoutAnimates,
+  noOverlaps as g1NoOverlaps,
+  restPositions as g1RestPositions,
+  sprintProgress as g1SprintProgress,
+} from '../src/components/Activity/sprintGraphModel.js';
+import {
+  CHAIN_COL as g2ChainCol,
+  NO_FILTERS as g2NoFilters,
+  NO_GROUP as g2NoGroup,
+  SPRINT_GROUP_MODES as g2Modes,
+  assignGroups as g2AssignGroups,
+  canSplitByAssignee as g2CanSplitByAssignee,
+  canSplitByStatus as g2CanSplitByStatus,
+  chainKey as g2ChainKey,
+  chainLayout as g2ChainLayout,
+  dependencyChains as g2DependencyChains,
+  dependencyLayers as g2DependencyLayers,
+  filterGraph as g2FilterGraph,
+  chainLabel as g2ChainLabel,
+  groupLabelMax as g2GroupLabelMax,
+  filterKey as g2FilterKey,
+  groupList as g2GroupList,
+  introGroupMode as g2IntroGroupMode,
+  readGroupMode as g2ReadGroupMode,
+} from '../src/components/Activity/sprintGraphModel.js';
+import {
   PERSON_GAP,
   PERSON_UNASSIGNED,
   canSplitByAssignee,
@@ -90,6 +120,23 @@ import {
   pinnedStorageKey,
   readPinned,
   satellitesOf,
+  satelliteOrbit,
+  satelliteScale,
+  nodeExtent,
+  storyHighlightSet,
+  fadedBy,
+  badgeCentre,
+  ringWidth as ringWidthOf,
+  SATELLITE_R,
+  SATELLITE_GAP,
+  SATELLITE_MIN_SCREEN_R,
+  SATELLITE_SCALE_MAX,
+  STORY_HIGHLIGHT,
+  STAGE_RING as STAGE_RING_COLOURS,
+  SATELLITE_FILL as SAT_FILL,
+  SATELLITE_FAILING_RING as SAT_FAILING,
+  BADGE_R as BADGE_RADIUS,
+  discScale as discScaleOf,
   stageRing,
   starField,
   toggleStage,
@@ -247,6 +294,80 @@ describe('satellites', () => {
     const s = satellitesOf(many);
     expect(s).toHaveLength(12);
     expect(s[1]!.angle - s[0]!.angle).toBeCloseTo((2 * Math.PI) / 12);
+  });
+});
+
+describe('satellites: size, orbit and the assignee badge', () => {
+  it('sits the dots wholly outside the thickest status ring', () => {
+    for (const r of [14, 22, 34]) {
+      const o = satelliteOrbit(r, 3, false);
+      expect(o - SATELLITE_R).toBeGreaterThanOrEqual(r + ringWidthOf(false, true) / 2 + SATELLITE_GAP - 1e-9);
+    }
+  });
+  it('widens the orbit rather than let many dots touch', () => {
+    const r = 14;
+    const o = satelliteOrbit(r, 12, true);
+    const s = satellitesOf(Array.from({ length: 12 }, (_, i) => pr({ prId: i })), { r, badge: true });
+    const step = s[1]!.angle - s[0]!.angle;
+    expect(2 * o * Math.sin(step / 2)).toBeGreaterThanOrEqual(2 * SATELLITE_R + SATELLITE_GAP - 1e-6);
+  });
+  it('keeps every dot clear of the assignee badge', () => {
+    for (const r of [14, 20, 34]) {
+      for (const count of [1, 2, 5, 12]) {
+        const o = satelliteOrbit(r, count, true);
+        const c = badgeCentre(r, 1.25);
+        const s = satellitesOf(Array.from({ length: count }, (_, i) => pr({ prId: i })), { r, badge: true });
+        for (const d of s) {
+          const dist = Math.hypot(Math.cos(d.angle) * o - c.x, Math.sin(d.angle) * o - c.y);
+          expect(dist).toBeGreaterThanOrEqual((BADGE_RADIUS + 1) * 1.25 + SATELLITE_R);
+        }
+      }
+    }
+  });
+  it('without a badge spaces the dots round the whole orbit, as before', () => {
+    const s = satellitesOf([pr({ prId: 1 }), pr({ prId: 2 })], { r: 20 });
+    expect(s.map((d) => d.angle)).toEqual([0, Math.PI]);
+  });
+  it('counter-scales the dots gently when zoomed out, never shrinking them zoomed in', () => {
+    expect(satelliteScale(1)).toBe(1);
+    expect(satelliteScale(2)).toBe(1);
+    const k = 0.25;
+    expect(SATELLITE_R * discScaleOf(k) * k * satelliteScale(k)).toBeCloseTo(SATELLITE_MIN_SCREEN_R);
+    expect(satelliteScale(0.02)).toBe(SATELLITE_SCALE_MAX);
+  });
+  it('a ticket reaches past its dots, so its label clears them', () => {
+    expect(nodeExtent(14, 0, false)).toBeLessThan(nodeExtent(14, 1, false));
+    expect(nodeExtent(14, 2, true)).toBeCloseTo(satelliteOrbit(14, 2, true) + SATELLITE_R);
+  });
+  it('keeps open, draft, merged and failing distinct from each other and from the highlight', () => {
+    const colours = new Set([SAT_FILL.open, SAT_FILL.draft, SAT_FILL.merged, SAT_FAILING]);
+    expect(colours.size).toBe(4);
+    expect([...colours, ...Object.values(STAGE_RING_COLOURS)]).not.toContain(STORY_HIGHLIGHT);
+  });
+});
+
+describe('the storyline highlight', () => {
+  const drawn = new Set(['a', 'b', 'c', 'd']);
+  it('highlights only the drawn tickets, and nothing when none are drawn or the focus is cleared', () => {
+    expect([...(storyHighlightSet(['a', 'x', 'c'], drawn) ?? [])]).toEqual(['a', 'c']);
+    expect(storyHighlightSet(['x'], drawn)).toBeNull();
+    expect(storyHighlightSet([], drawn)).toBeNull();
+    expect(storyHighlightSet(null, drawn)).toBeNull();
+  });
+  it('fades every other ticket, and every link not between two highlighted ones', () => {
+    const f = fadedBy(null, new Set(['a', 'b']));
+    expect(['a', 'b', 'c'].map(f.node)).toEqual([false, false, true]);
+    expect(f.edge('a', 'b')).toBe(false);
+    expect(f.edge('a', 'c')).toBe(true);
+    expect(f.edge('c', 'd')).toBe(true);
+  });
+  it('fades nothing with no highlight and no selection; a selection’s neighbourhood wins over it', () => {
+    const none = fadedBy(null, null);
+    expect(none.node('a')).toBe(false);
+    expect(none.edge('a', 'b')).toBe(false);
+    const both = fadedBy(new Set(['c', 'd']), new Set(['a']));
+    expect(both.node('a')).toBe(true);
+    expect(both.node('c')).toBe(false);
   });
 });
 
@@ -1210,6 +1331,7 @@ describe('split by assignee', () => {
     expect(canSplitByAssignee('theme')).toBe(true);
     expect(canSplitByAssignee('section')).toBe(true);
     expect(canSplitByAssignee('none')).toBe(false);
+    expect(canSplitByAssignee('dependencies')).toBe(false);
   });
 
   it('folds a spelling into the member identity and names it as the member list does', () => {
@@ -1283,5 +1405,265 @@ describe('split by assignee', () => {
     const bad = { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); }, removeItem: () => { throw new Error('x'); } };
     expect(readSplitAssignee(bad)).toBe(false);
     expect(() => writeSplitAssignee(bad, true)).not.toThrow();
+  });
+});
+
+// ── G1: curved links, a layout interrupted mid-flight, the refresh bar ───────────────────────────
+
+describe('edgeBends', () => {
+  it('bends a lone link one lane to its own left', () => {
+    const e = { from: 'A', to: 'B', kind: 'depends_on' as const };
+    expect(g1EdgeBends([e]).get(g1EdgeId(e))).toBe(1);
+  });
+  it('bows two links between one pair apart, whichever way each runs', () => {
+    const ab = { from: 'A', to: 'B', kind: 'depends_on' as const };
+    const ba = { from: 'B', to: 'A', kind: 'concurrent' as const };
+    const ab2 = { from: 'A', to: 'B', kind: 'concurrent' as const };
+    const curve = (e: { from: string; to: string }, lane: number): { cx: number; cy: number } => {
+      const at = { A: { x: 0, y: 0, r: 10 }, B: { x: 200, y: 0, r: 10 } } as const;
+      return g1EdgeCurve(at[e.from as 'A' | 'B'], at[e.to as 'A' | 'B'], lane);
+    };
+    for (const pair of [[ab, ba], [ab, ab2]] as const) {
+      const bends = g1EdgeBends(pair);
+      const c0 = curve(pair[0], bends.get(g1EdgeId(pair[0])) ?? 0);
+      const c1 = curve(pair[1], bends.get(g1EdgeId(pair[1])) ?? 0);
+      // Opposite sides of the A–B axis (y = 0).
+      expect(Math.sign(c0.cy)).not.toBe(0);
+      expect(Math.sign(c0.cy)).toBe(-Math.sign(c1.cy));
+    }
+  });
+  it('is the same whatever order the links arrive in', () => {
+    const l = [
+      { from: 'A', to: 'B', kind: 'depends_on' as const },
+      { from: 'B', to: 'A', kind: 'concurrent' as const },
+      { from: 'A', to: 'B', kind: 'builds_on' as const },
+    ];
+    expect([...g1EdgeBends(l)].sort()).toEqual([...g1EdgeBends([...l].reverse())].sort());
+  });
+});
+
+describe('edgeCurve', () => {
+  const a = { x: 0, y: 0, r: 12 };
+  const b = { x: 300, y: 40, r: 20 };
+  it('starts and ends on the circles’ rims (plus the arrow gap at the end)', () => {
+    const c = g1EdgeCurve(a, b, 1, 2);
+    expect(Math.hypot(c.x1 - a.x, c.y1 - a.y)).toBeCloseTo(12, 5);
+    expect(Math.hypot(c.x2 - b.x, c.y2 - b.y)).toBeCloseTo(22, 5);
+    expect(c.d.startsWith('M')).toBe(true);
+    expect(c.d).toContain('Q');
+  });
+  it('ends along its own end tangent, so the arrowhead points into the ticket', () => {
+    const c = g1EdgeCurve(a, b, 1, 2);
+    // A quadratic's end tangent runs from the control point to the end; extended, it reaches b's centre.
+    const tx = c.x2 - c.cx;
+    const ty = c.y2 - c.cy;
+    const toB = { x: b.x - c.x2, y: b.y - c.y2 };
+    const cross = tx * toB.y - ty * toB.x;
+    expect(Math.abs(cross) / (Math.hypot(tx, ty) * Math.hypot(toB.x, toB.y))).toBeLessThan(1e-6);
+    expect(tx * toB.x + ty * toB.y).toBeGreaterThan(0);
+  });
+  it('bows gently: the apex sits a capped distance off the straight line', () => {
+    const c = g1EdgeCurve({ x: 0, y: 0, r: 0 }, { x: 1000, y: 0, r: 0 }, 1);
+    // Apex of a quadratic = (P0 + 2C + P2) / 4 → |cy| / 2 off the axis.
+    expect(Math.abs(c.cy) / 2).toBeLessThanOrEqual(34);
+    expect(Math.abs(c.cy) / 2).toBeGreaterThan(0);
+  });
+  it('degrades to a point-to-point path for coincident circles', () => {
+    expect(g1EdgeCurve({ x: 5, y: 5, r: 3 }, { x: 5, y: 5, r: 3 }).d).toBe('M5.0,5.0L5.0,5.0');
+  });
+});
+
+describe('a layout interrupted mid-flight', () => {
+  it('starts from where the interrupted layout LANDS, never from a mid-flight position', () => {
+    const drawn = new Map([
+      ['A', { x: 10, y: 10 }],
+      ['B', { x: 12, y: 11 }],
+      ['C', { x: 500, y: 500 }],
+    ]);
+    const landing = new Map([
+      ['A', { x: -100, y: 0 }],
+      ['B', { x: 100, y: 0 }],
+    ]);
+    const rest = g1RestPositions(drawn, landing);
+    expect(rest.get('A')).toEqual({ x: -100, y: 0 });
+    expect(rest.get('B')).toEqual({ x: 100, y: 0 });
+    // Not part of the animation: where it is drawn.
+    expect(rest.get('C')).toEqual({ x: 500, y: 500 });
+    expect(g1RestPositions(drawn, null)).toEqual(drawn);
+  });
+  it('mid-flight positions overlap where the landing does not — the frozen state the bug left on screen', () => {
+    const from = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
+    const to = [{ x: 100, y: 0 }, { x: 0, y: 0 }];
+    const mid = from.map((f, i) => ({ x: (f.x + (to[i]?.x ?? 0)) / 2, y: 0, r: 15 }));
+    expect(g1NoOverlaps(mid)).toBe(false);
+    const landed = g1RestPositions(
+      new Map(mid.map((p, i) => [String(i), p])),
+      new Map(to.map((p, i) => [String(i), p])),
+    );
+    expect(g1NoOverlaps([...landed.values()].map((p) => ({ ...p, r: 15 })))).toBe(true);
+  });
+  it('a quiet (data) re-layout animates only when it interrupts one — and never with reduced motion', () => {
+    expect(g1LayoutAnimates({ reducedMotion: false, quiet: true, interrupted: false })).toBe(false);
+    expect(g1LayoutAnimates({ reducedMotion: false, quiet: true, interrupted: true })).toBe(true);
+    expect(g1LayoutAnimates({ reducedMotion: false, quiet: false, interrupted: false })).toBe(true);
+    expect(g1LayoutAnimates({ reducedMotion: true, quiet: false, interrupted: true })).toBe(false);
+  });
+  it('finishes the interrupted journey in the time it had left, never in a jump', () => {
+    expect(g1ContinuedTweenMs(1500, { start: 0, dur: 2000 })).toBe(500);
+    expect(g1ContinuedTweenMs(1990, { start: 0, dur: 2000 })).toBe(450);
+    // A tab in the background: the old tween is long past its end.
+    expect(g1ContinuedTweenMs(60_000, { start: 0, dur: 2000 })).toBe(450);
+  });
+});
+
+describe('sprintProgress', () => {
+  const idle = { awaitingRead: false, firstRead: false, fetching: false, briefs: null };
+  it('is nothing when nothing is in flight', () => {
+    expect(g1SprintProgress(idle)).toBeNull();
+    expect(g1SprintProgress({ ...idle, briefs: { current: 9, pending: 0 } })).toBeNull();
+  });
+  it('the story being written runs the same indeterminate bar, after a read, a refetch and summaries', () => {
+    expect(g1SprintProgress({ ...idle, storyWriting: true })).toEqual({ kind: 'busy', label: 'Writing the sprint story' });
+    expect(g1SprintProgress({ ...idle, storyWriting: true, briefs: { current: 1, pending: 1 } })).toMatchObject({ kind: 'share' });
+    expect(g1SprintProgress({ ...idle, storyWriting: true, awaitingRead: true })).toEqual({ kind: 'busy', label: 'Reading the sprint' });
+  });
+  it('is indeterminate while a read or a refetch runs (neither reports progress)', () => {
+    expect(g1SprintProgress({ ...idle, awaitingRead: true })).toEqual({ kind: 'busy', label: 'Reading the sprint' });
+    expect(g1SprintProgress({ ...idle, firstRead: true })).toEqual({ kind: 'busy', label: 'Reading the sprint' });
+    expect(g1SprintProgress({ ...idle, fetching: true, briefs: { current: 1, pending: 3 } })).toEqual({
+      kind: 'busy',
+      label: 'Refreshing the graph',
+    });
+  });
+  it('shows the share of tickets summarised while briefs are written', () => {
+    expect(g1SprintProgress({ ...idle, briefs: { current: 1, pending: 3 } })).toEqual({ kind: 'share', label: 'Summarising tickets', value: 0.25 });
+  });
+});
+
+describe('group by dependencies: chains', () => {
+  it('is a group mode, remembered, that splits by nothing and opens from Epic', () => {
+    expect(g2Modes).toContain('dependencies');
+    expect(g2ReadGroupMode({ getItem: () => 'dependencies', setItem: () => undefined, removeItem: () => undefined })).toBe('dependencies');
+    expect(g2CanSplitByStatus('dependencies')).toBe(false);
+    expect(g2CanSplitByAssignee('dependencies')).toBe(false);
+    expect(g2IntroGroupMode('dependencies', true)).toBe('epic');
+  });
+
+  it('finds chains over depends_on links only, ghosts included; the rest are Standalone', () => {
+    const nodes = [
+      node({ ident: 'a', title: 'Auth service' }),
+      node({ ident: 'b' }),
+      node({ ident: 'c' }),
+      node({ ident: 'g', ghost: true, depth: 1 }),
+      node({ ident: 'x' }),
+      node({ ident: 'y' }),
+    ];
+    // b and c both depend on a; a depends on the outside g. x–y are only built alongside.
+    const edges = [edge('b', 'a'), edge('c', 'a'), edge('a', 'g'), edge('x', 'y', 'concurrent')];
+    const { chainOf } = g2DependencyChains(nodes, edges);
+    // Root: the ticket most others depend on (a: two; g: one).
+    expect(chainOf.get('a')).toBe(g2ChainKey('a'));
+    expect(['b', 'c', 'g'].map((id) => chainOf.get(id))).toEqual([g2ChainKey('a'), g2ChainKey('a'), g2ChainKey('a')]);
+    expect(chainOf.has('x')).toBe(false);
+    const groupOf = g2AssignGroups(nodes, edges, 'dependencies');
+    expect(groupOf.get('g')).toBe(g2ChainKey('a'));
+    expect(groupOf.get('x')).toBe(g2NoGroup);
+    const groups = g2GroupList(nodes, groupOf, 'dependencies');
+    expect(groups.map((gr) => [gr.label, gr.count])).toEqual([
+      ['Chain: Auth service', 4],
+      ['Standalone', 2],
+    ]);
+  });
+
+  it('two separate chains are two groups', () => {
+    const nodes = ['a', 'b', 'c', 'd'].map((ident) => node({ ident }));
+    const { chainOf } = g2DependencyChains(nodes, [edge('a', 'b'), edge('c', 'd')]);
+    expect(new Set(chainOf.values()).size).toBe(2);
+  });
+
+  it('layers by longest path: prerequisites first', () => {
+    // d → c → b → a and d → a: d is layer 3 (the longest path), not 1.
+    const { layer } = g2DependencyLayers(['a', 'b', 'c', 'd'], [edge('d', 'c'), edge('c', 'b'), edge('b', 'a'), edge('d', 'a')]);
+    expect(['a', 'b', 'c', 'd'].map((id) => layer.get(id))).toEqual([0, 1, 2, 3]);
+  });
+
+  it('breaks a loop deterministically, so every ticket still gets a layer', () => {
+    const edges = [edge('a', 'b'), edge('b', 'c'), edge('c', 'a')];
+    const one = g2DependencyLayers(['a', 'b', 'c'], edges);
+    const two = g2DependencyLayers(['c', 'b', 'a'], [...edges].reverse());
+    expect(one.kept).toHaveLength(2);
+    expect([...one.layer.entries()].sort()).toEqual([...two.layer.entries()].sort());
+    expect(new Set(one.layer.values())).toEqual(new Set([0, 1, 2]));
+    // A self-link is ignored.
+    expect(g2DependencyLayers(['a'], [edge('a', 'a')]).layer.get('a')).toBe(0);
+  });
+
+  it('lays a chain out left to right in columns, each column stacked', () => {
+    // b and c depend on a; d depends on b.
+    const lay = g2ChainLayout(['a', 'b', 'c', 'd'], [edge('b', 'a'), edge('c', 'a'), edge('d', 'b')]);
+    const o = (id: string): { x: number; y: number } => lay.offsets.get(id) as { x: number; y: number };
+    expect(o('a').x).toBeLessThan(o('b').x);
+    expect(o('b').x).toBe(o('c').x);
+    expect(o('d').x - o('b').x).toBe(g2ChainCol);
+    expect(o('b').y).not.toBe(o('c').y);
+    // Centred on the anchor, and the room holds every spot.
+    expect(o('a').x + o('d').x).toBe(0);
+    for (const p of lay.offsets.values()) expect(Math.hypot(p.x, p.y)).toBeLessThan(lay.r);
+  });
+});
+
+describe('filters hide', () => {
+  const nodes = [
+    node({ ident: 'a', theme: 'Checkout', stage: 'in_review', degree: 1 }),
+    node({ ident: 'b', theme: 'Checkout', stage: 'in_progress', degree: 2 }),
+    node({ ident: 'c', theme: 'Search', stage: 'in_progress', degree: 0 }),
+    node({ ident: 'g', ghost: true, depth: 1, stage: 'in_review', degree: 1 }),
+  ];
+  const edges = [edge('a', 'b'), edge('b', 'g')];
+
+  it('no filter: everything, unchanged', () => {
+    const g = { nodes, edges };
+    expect(g2FilterGraph(g, g2NoFilters)).toBe(g);
+    expect(g2FilterKey(g2NoFilters)).toBe('');
+  });
+
+  it('hides what fails, its links, and an outside ticket left floating; keeps degrees', () => {
+    const f = { ...g2NoFilters, stages: new Set(['in_review'] as const) };
+    const out = g2FilterGraph({ nodes, edges }, f);
+    // g is in review too, but its only link was to b (hidden): it would float alone.
+    expect(out.nodes.map((n) => n.ident)).toEqual(['a']);
+    expect(out.edges).toEqual([]);
+    expect(out.nodes[0]?.degree).toBe(1);
+    expect(g2FilterKey(f)).not.toBe('');
+  });
+
+  it('a halo with nothing left in it goes too', () => {
+    const f = { ...g2NoFilters, stages: new Set(['in_review'] as const) };
+    const out = g2FilterGraph({ nodes, edges }, f);
+    const groupOf = g2AssignGroups(out.nodes, out.edges, 'theme');
+    expect(g2GroupList(out.nodes, groupOf, 'theme').map((g) => g.key)).toEqual(['Checkout']);
+    // Unfiltered, both themes have a halo.
+    const all = g2AssignGroups(nodes, edges, 'theme');
+    expect(g2GroupList(nodes, all, 'theme').map((g) => g.key).sort()).toEqual(['Checkout', 'Search']);
+  });
+
+  it('keeps an outside ticket still joined to a shown sprint ticket', () => {
+    const f = { ...g2NoFilters, theme: 'Checkout' };
+    const out = g2FilterGraph({ nodes, edges }, { ...f, theme: null, stages: new Set(['in_review', 'in_progress'] as const) });
+    expect(out.nodes.map((n) => n.ident)).toEqual(['a', 'b', 'c', 'g']);
+    // ⚠ A ghost has no theme, but it is held to the SECTION filter only: still joined to b (Checkout),
+    // it stays — the outside work a theme or person waits on is the point of the dependency view.
+    expect(g2FilterGraph({ nodes, edges }, f).nodes.map((n) => n.ident)).toEqual(['a', 'b', 'g']);
+    // A person filter keeps it too; a section filter it fails still hides it.
+    const outsideStage = g2FilterGraph({ nodes, edges }, { ...g2NoFilters, theme: 'Checkout', stages: new Set(['in_progress'] as const) });
+    expect(outsideStage.nodes.map((n) => n.ident)).toEqual(['b']);
+  });
+
+  it('a chain name keeps its title\'s whole room; the prefix is extra', () => {
+    const title = 'Links into the payments ledger and the refunds API';
+    const label = g2ChainLabel(title, 'K-1');
+    expect(label.startsWith('Chain: Links into the payments')).toBe(true);
+    expect(label.length).toBeLessThanOrEqual(g2GroupLabelMax(g2ChainKey('a')));
+    expect(g2GroupLabelMax(g2ChainKey('a'))).toBeGreaterThan(g2GroupLabelMax('Checkout'));
   });
 });

@@ -46,6 +46,7 @@ import {
   EyeIcon,
   FeedIcon,
   MagnifierIcon,
+  LinkIcon,
   OctocatIcon,
   RefreshIcon,
   TimelineIcon,
@@ -1258,6 +1259,16 @@ export function PrDetail({
           >
             <RefreshIcon size={14} className={isRefreshing ? 'animate-spin' : undefined} />
           </button>
+          {/* Copy the PR's GitHub link. */}
+          {safeExternalUrl(pr.githubUrl) != null && (
+            <CopyButton
+              text={safeExternalUrl(pr.githubUrl) ?? ''}
+              what="PR link"
+              title="Copy the GitHub link to this PR"
+              icon={<LinkIcon size={14} />}
+              idleClassName="text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+            />
+          )}
           {/* Open on GitHub (Octocat). */}
           <a
             href={pr.githubUrl}

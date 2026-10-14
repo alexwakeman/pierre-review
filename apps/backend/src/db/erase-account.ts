@@ -206,6 +206,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // 0107 / pg 0094). All cascade from workspaces too, and are explicit anyway. Order is free.
     await tx.delete(schema.sprintBriefs).where(eq(schema.sprintBriefs.accountId, accountId)).execute();
     await tx.delete(schema.sprintThemes).where(eq(schema.sprintThemes.accountId, accountId)).execute();
+    await tx.delete(schema.sprintStory).where(eq(schema.sprintStory.accountId, accountId)).execute();
+    await tx.delete(schema.sprintViewSnapshots).where(eq(schema.sprintViewSnapshots.accountId, accountId)).execute();
     await tx.delete(schema.sprintAssessments).where(eq(schema.sprintAssessments.accountId, accountId)).execute();
     await tx.delete(schema.sprintTicketRepos).where(eq(schema.sprintTicketRepos.accountId, accountId)).execute();
     await tx.delete(schema.sprintRefTickets).where(eq(schema.sprintRefTickets.accountId, accountId)).execute();
@@ -340,6 +342,8 @@ export function accountScopedTables(): {
     { name: 'sprintAssessments', col: schema.sprintAssessments.accountId, table: schema.sprintAssessments },
     { name: 'sprintBriefs', col: schema.sprintBriefs.accountId, table: schema.sprintBriefs },
     { name: 'sprintThemes', col: schema.sprintThemes.accountId, table: schema.sprintThemes },
+    { name: 'sprintStory', col: schema.sprintStory.accountId, table: schema.sprintStory },
+    { name: 'sprintViewSnapshots', col: schema.sprintViewSnapshots.accountId, table: schema.sprintViewSnapshots },
     // `myTurnDismissals` sat here until migration 0060 / pg 0047 DROPPED the table. It is named
     // rather than silently absent because this list is a checklist, and a checklist that shortens
     // with no explanation reads as an omission — the exact failure this function guards against.

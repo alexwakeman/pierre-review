@@ -96,10 +96,11 @@ export function MergedPrsView(): JSX.Element {
       <OpenPrsCards
         prs={rows}
         isLoading={isLoading}
+        answered={data != null}
         isError={isError}
         sort={null}
         variant="merged"
-        grouped={ticketsOn && view === 'grouped'}
+        grouped={view === 'grouped'}
         onOpenPr={openTab}
         emptyLabel={
           repoSel != null && prs.length > 0

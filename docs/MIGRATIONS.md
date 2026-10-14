@@ -243,7 +243,7 @@ nothing).
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
 - ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0095` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
+  ⚠ pg `0052`–`0098` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
   note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
   (16.9): core through `db:migrate`
   (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
@@ -1253,3 +1253,35 @@ model, cost/tokens, created_at), unique `(account_id, workspace_id)` (the pass's
 target), named composite FK `sprint_themes_workspace_account_fk` onto `workspaces(id, account_id)` with
 cascade; in `accountScopedTables()` + erasure + `verify:isolation`. Purely additive. Journal `when`
 sqlite `1792051203005` / pg `1792051204004`. ⚠ pg `0095` NOT replayed.
+
+### `0109_sprint_story` (pg `0096`) — the sprint story
+New table `sprint_story` (account, workspace, input_hash, story_version, story_json, model, cost/tokens,
+created_at), unique `(account_id, workspace_id)` (the pass's `onConflictDoUpdate` target), named
+composite FK `sprint_story_workspace_account_fk` onto `workspaces(id, account_id)` with cascade; in
+`accountScopedTables()` + erasure + `verify:isolation`. Purely additive. Journal `when` sqlite
+`1792137603005` / pg `1792137604004`. ⚠ pg `0096` NOT replayed.
+
+### `0110_finding_reminder` (pg `0097`) — Claude Review reminders
+`claude_review_findings.reminder` (sqlite `text` JSON / pg `jsonb`, nullable): the latest "Post reminder"
+of an already-posted finding (`ClaudeFindingReminder`; earlier reminders' comment ids in
+`earlierCommentIds`). NULL = none. Never the finding's own post. Purely additive; no new table, so
+nothing joins `accountScopedTables()` (the column rides the findings' existing delete paths). Journal
+`when` sqlite `1792137603006` / pg `1792137604005`. ⚠ pg `0097` NOT replayed.
+
+### `0111_sprint_dates_story_attempt` (pg `0098`) — the sprint's dates + the story pass's last attempt
+Five nullable columns on `sprint_reads`: `sprint_starts_at` / `sprint_ends_at` (the tracker's own sprint
+dates, written by every good sprint read — docs/TRACKERS.md § The sprint list read) and
+`story_attempt_at` / `story_attempt_hash` / `story_attempt_error` (the sprint story pass's last attempt
+that called Claude and its `SprintStoryFailure` code, NULL = stored — the backoff, docs/CLAUDE-REVIEW.md §
+Sprint story). Purely additive on an already account-scoped table; `resetSprintReadForSite` clears all
+five. Journal `when` sqlite `1792137603007` / pg `1792137604006`. ⚠ pg `0098` NOT replayed.
+
+### `0112_sprint_view_snapshots` (pg `0099`) — "Since you last looked" on This Sprint
+New table `sprint_view_snapshots`: ONE row per (account, workspace) with two slots, `current_json` /
+`current_at` (the latest view's snapshot: each sprint ticket's stage + the merged pull requests on sprint
+tickets) and `baseline_json` / `baseline_at` (the previous visit's last view; NULL until a second visit).
+Written and read only by `db/sprint-signals.ts` (docs/CLAUDE-REVIEW.md § Sprint story → The code cards).
+Account FK (cascade) + the NAMED composite FK `sprint_view_snapshots_workspace_account_fk` onto
+`workspaces (id, account_id)`; unique `(account_id, workspace_id)`; in `accountScopedTables()`, erased,
+checked by `verify:isolation`. Journal `when` sqlite `1792137603008` / pg `1792137604007`. ⚠ pg `0099` NOT
+replayed.

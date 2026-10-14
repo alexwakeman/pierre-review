@@ -10,7 +10,7 @@ import { assigneeOf, isTicketKey, jiraAuthHeader, linksField, statusOf } from '.
 import { JiraFetchError, jiraGetJson } from '../jira/fetch.js';
 import { fieldValueToText, jiraWikiToMarkdown } from '../jira/text.js';
 import { ticketDateFields, trackerDate } from '../dates.js';
-import type { SprintFetchedTicket, SprintListArgs, SprintListResult, SprintLister } from './types.js';
+import { busiestSprintDates, sprintDate, type SprintFetchedTicket, type SprintListArgs, type SprintListDates, type SprintListResult, type SprintLister } from './types.js';
 
 // JIRA — THE SPRINT LIST (docs/TRACKERS.md § The sprint list read).
 //
@@ -83,25 +83,49 @@ const boardIdOf = (v: unknown): number | null => {
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 };
 
-/** A sprint field value → its sprints (with the board each belongs to). Cloud sends objects (with
- *  `boardId`); old Server sends `…Sprint@x[id=1,rapidViewId=2,state=ACTIVE,name=S 1,…]`. */
-export function sprintsOf(raw: unknown): Array<{ name: string; state: string; boardId: number | null }> {
+export interface JiraSprintRef {
+  name: string;
+  state: string;
+  boardId: number | null;
+  /** The sprint's planned start / end (Cloud `startDate`/`endDate`; Server `startDate=…,endDate=…`,
+   *  `<null>` when unset). */
+  startsAt: Date | null;
+  endsAt: Date | null;
+}
+
+/** A sprint field value → its sprints (with the board each belongs to and its dates). Cloud sends
+ *  objects (with `boardId`); old Server sends `…Sprint@x[id=1,rapidViewId=2,state=ACTIVE,name=S 1,
+ *  startDate=2015-04-08T12:00:00.000+02:00,endDate=<null>,…]`. */
+export function sprintsOf(raw: unknown): JiraSprintRef[] {
   if (!Array.isArray(raw)) return [];
-  const out: Array<{ name: string; state: string; boardId: number | null }> = [];
+  const out: JiraSprintRef[] = [];
   for (const v of raw) {
     const o = asRecord(v);
     if (o != null) {
       const name = typeof o.name === 'string' ? o.name.trim() : '';
       if (name !== '') {
-        out.push({ name: name.slice(0, 200), state: String(o.state ?? '').toLowerCase(), boardId: boardIdOf(o.boardId ?? o.originBoardId) });
+        out.push({
+          name: name.slice(0, 200),
+          state: String(o.state ?? '').toLowerCase(),
+          boardId: boardIdOf(o.boardId ?? o.originBoardId),
+          startsAt: sprintDate(o.startDate),
+          endsAt: sprintDate(o.endDate),
+        });
       }
       continue;
     }
     if (typeof v === 'string') {
-      const name = /[[,]name=([^,\]]*)/.exec(v)?.[1]?.trim() ?? '';
-      const state = /[[,]state=([^,\]]*)/.exec(v)?.[1]?.trim().toLowerCase() ?? '';
-      const board = /[[,]rapidViewId=([^,\]]*)/.exec(v)?.[1]?.trim() ?? '';
-      if (name !== '') out.push({ name: name.slice(0, 200), state, boardId: boardIdOf(board) });
+      const field = (k: string): string => new RegExp(`[[,]${k}=([^,\\]]*)`).exec(v)?.[1]?.trim() ?? '';
+      const name = field('name');
+      if (name !== '') {
+        out.push({
+          name: name.slice(0, 200),
+          state: field('state').toLowerCase(),
+          boardId: boardIdOf(field('rapidViewId')),
+          startsAt: sprintDate(field('startDate')),
+          endsAt: sprintDate(field('endDate')),
+        });
+      }
     }
   }
   return out;
@@ -284,7 +308,7 @@ async function search(
   a: SprintListArgs,
   jql: string,
   inSprint: boolean,
-): Promise<{ tickets: SprintFetchedTicket[]; truncated: boolean; names: string[]; boards: Map<number, number> }> {
+): Promise<{ tickets: SprintFetchedTicket[]; truncated: boolean; names: string[]; boards: Map<number, number>; dates: SprintListDates | null }> {
   let v2 = false;
   let first: SearchPage;
   try {
@@ -298,6 +322,8 @@ async function search(
   const sprintNames: string[] = [];
   // board id → tickets in one of its ACTIVE sprints (the order is read off the busiest board).
   const boards = new Map<number, number>();
+  // sprint name → tickets in it + its dates (the header shows the busiest sprint's).
+  const sprints = new Map<string, { count: number; startsAt: Date | null; endsAt: Date | null }>();
   let page: SearchPage = first;
   let truncated = false;
   let names = first.names;
@@ -322,6 +348,9 @@ async function search(
             if (sp.state !== 'active') continue;
             if (!sprintNames.includes(sp.name)) sprintNames.push(sp.name);
             if (sp.boardId != null) ticketBoards.add(sp.boardId);
+            const seen = sprints.get(sp.name);
+            if (seen == null) sprints.set(sp.name, { count: 1, startsAt: sp.startsAt, endsAt: sp.endsAt });
+            else seen.count += 1;
           }
           for (const b of ticketBoards) boards.set(b, (boards.get(b) ?? 0) + 1);
         }
@@ -335,7 +364,7 @@ async function search(
     }
     page = await searchPage(a, jql, page.next, v2);
   }
-  return { tickets, truncated, names: sprintNames, boards };
+  return { tickets, truncated, names: sprintNames, boards, dates: busiestSprintDates([...sprints.values()]) };
 }
 
 /** The busiest board (most tickets; ties → the lowest id, so the pick is stable). Pure. */
@@ -369,6 +398,7 @@ export const listJiraSprint: SprintLister = async (a): Promise<SprintListResult>
         tickets: r.tickets,
         truncated: r.truncated,
         statusOrder,
+        dates: r.dates,
         ...(statusOrderError != null ? { statusOrderError } : {}),
       };
     }

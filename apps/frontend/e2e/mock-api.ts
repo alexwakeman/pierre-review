@@ -530,6 +530,10 @@ const SPRINT_GRAPH: SprintGraphResponse = {
   aiEnabled: true,
   repos: [{ repoId: REPO.id, fullName: REPO.fullName }],
   themes: null,
+  story: null,
+  storyStatus: { state: 'none', stale: false, lastAttemptAt: null, failure: null },
+  sprintDates: { startsAt: iso(3), endsAt: iso(-11), source: 'tracker' },
+  signals: [],
   ghostsTruncated: false,
   briefs: { current: 2, pending: 1 },
   statusLayout: {

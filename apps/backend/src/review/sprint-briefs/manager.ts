@@ -155,7 +155,7 @@ async function onePass(
             model: SPRINT_BRIEF_MODEL,
             system: SPRINT_BRIEF_SYSTEM,
             prompt: sprintBriefPrompt(t.input, nonce),
-            maxTokens: briefMaxTokens(t.input.criteria.length),
+            maxTokens: briefMaxTokens(t.input.criteria.length, t.input.links.length),
           });
           const inputTokens = out.usage?.inputTokens ?? 0;
           const outputTokens = out.usage?.outputTokens ?? 0;
@@ -168,6 +168,7 @@ async function onePass(
             out.text,
             { title: t.input.title, description: t.input.description, criteria: t.input.criteria },
             t.input.criteria.length > 0,
+            t.input.links.map((l) => l.key),
           );
           if (v.ok) {
             await store(accountId, workspaceId, t, {
@@ -175,6 +176,7 @@ async function onePass(
               criteria: v.criteria,
               criteriaDerived: t.input.derived,
               references: v.references,
+              linkReasons: v.linkReasons,
               costUsd,
               inputTokens,
               outputTokens,

@@ -28,7 +28,10 @@ import {
   autoPostSkipLine,
   autoResolveLabel,
   autoVerdictLine,
+  canPostReminder,
+  effectivePost,
   postedChipLabel,
+  reminderChipLabel,
 } from '../lib/autoPost.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
@@ -591,6 +594,7 @@ function FindingRow({
   onToggle,
   onReword,
   onPostComment,
+  onPostReminder,
 }: {
   prId: number;
   finding: ClaudeFinding;
@@ -621,6 +625,8 @@ function FindingRow({
   onToggle: (included: boolean) => void;
   onReword: (editedBody: string) => Promise<unknown>;
   onPostComment: () => Promise<unknown>;
+  // "Post reminder": posts a finding ALREADY on GitHub again, marked as a reminder linking the first.
+  onPostReminder: () => Promise<unknown>;
 }): JSX.Element {
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -653,15 +659,19 @@ function FindingRow({
   // code anchor to show.
   const noFile = finding.path === '';
   // Posted singly, or inside a submitted review. ⚠ A POSTED FINDING IS DONE: no Post again, no
-  // Reword, no Ignore — only its link (and Copy).
-  const isPosted = finding.postedAt != null;
+  // Reword, no Ignore — only its link, Copy and "Post reminder".
+  // ⚠ ALSO POSTED: a finding whose point an earlier finding in its chain (or a matching comment of
+  // Limn's) already put on GitHub (`earlierPost`) — the server refuses a plain Post of it; only an
+  // explicit reminder goes through.
+  const post = effectivePost(finding);
+  const isPosted = post != null;
   // Permalink depends on HOW it was posted: a PR-level issue comment anchors as
   // #issuecomment-<id>, an inline review comment as #discussion_r<id>.
   const commentUrl =
-    finding.githubCommentId != null
-      ? finding.postedCommentKind === 'pr_comment'
-        ? `${prUrl}#issuecomment-${finding.githubCommentId}`
-        : `${prUrl}#discussion_r${finding.githubCommentId}`
+    post?.githubCommentId != null
+      ? post.postedCommentKind === 'pr_comment'
+        ? `${prUrl}#issuecomment-${post.githubCommentId}`
+        : `${prUrl}#discussion_r${post.githubCommentId}`
       : null;
 
   // The PR "Files changed" diff anchor — lands ON the finding's line, in review
@@ -708,6 +718,15 @@ function FindingRow({
   // them onto the file's first change. Only a finding whose file isn't in the diff
   // can't post, and that surfaces as an error on the attempt.
   const canPostComment = editable && !isPosted;
+  // ⚠ REMINDERS ARE ALLOWED, ALWAYS MARKED: a finding already on GitHub never offers the normal Post,
+  // only "Post reminder" (the server marks the body and links the first comment).
+  const canRemind = canPostReminder(post, editable);
+  const reminderUrl =
+    finding.reminder != null
+      ? finding.reminder.postedCommentKind === 'pr_comment'
+        ? `${prUrl}#issuecomment-${finding.reminder.githubCommentId}`
+        : `${prUrl}#discussion_r${finding.reminder.githubCommentId}`
+      : null;
 
   // Copy is CLAUDE'S ORIGINAL COMMENT, as its markdown SOURCE — never the reader's reword
   // (that is theirs, already in their own editor), and never the rendered DOM, so fences,
@@ -741,6 +760,16 @@ function FindingRow({
   // FIRST — the server reads editedBody from the DB, so without this it would post
   // Claude's text instead of the user's words.
   const [working, setWorking] = useState(false);
+  const handleRemind = async (): Promise<void> => {
+    setWorking(true);
+    try {
+      await onPostReminder();
+    } catch {
+      /* surfaced via the postError prop */
+    } finally {
+      setWorking(false);
+    }
+  };
   const handlePost = async (): Promise<void> => {
     setWorking(true);
     try {
@@ -806,7 +835,7 @@ function FindingRow({
                 {RERAISED_CHIP[priorStatus].label}
               </span>
             )}
-            {alreadyPosted && (
+            {alreadyPosted && !isPosted && (
               <span
                 className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${ALREADY_POSTED_CHIP.cls}`}
                 title={ALREADY_POSTED_CHIP.title}
@@ -823,15 +852,26 @@ function FindingRow({
                   className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 hover:underline dark:text-green-400"
                   title="View this comment on GitHub"
                 >
-                  {postedChipLabel(finding)}
+                  {postedChipLabel(post!)}
                   <CheckIcon size={11} />
                 </a>
               ) : (
                 <span className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 dark:text-green-400">
-                  {postedChipLabel(finding)}
+                  {postedChipLabel(post!)}
                   <CheckIcon size={11} />
                 </span>
               ))}
+            {reminderUrl != null && (
+              <a
+                href={safeExternalUrl(reminderUrl)}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 hover:underline dark:text-green-400"
+                title="View the reminder on GitHub"
+              >
+                {reminderChipLabel(finding.reminder)}
+              </a>
+            )}
             {autoResolveLabel(finding.autoResolve) != null && (
               <span
                 className={`rounded px-1.5 py-0.5 text-[11px] ${
@@ -1067,6 +1107,17 @@ function FindingRow({
                 {busy ? 'Posting…' : postsAsPrComment ? 'Post as PR comment' : 'Post as comment'}
               </button>
             )}
+            {canRemind && (
+              <button
+                type="button"
+                onClick={handleRemind}
+                disabled={busy}
+                className={BTN_SECONDARY}
+                title="Post it again on GitHub, marked as a reminder that links the first comment"
+              >
+                {busy ? 'Posting…' : 'Post reminder'}
+              </button>
+            )}
             {editable && !isPosted && !rewording && (
               <button
                 type="button"
@@ -1147,7 +1198,7 @@ function ClaudesReview({
   onOpenThread?: (threadId: number) => void;
   onToggleFinding: (findingId: number, included: boolean) => void;
   onRewordFinding: (findingId: number, editedBody: string) => Promise<unknown>;
-  onPostFinding: (findingId: number) => Promise<unknown>;
+  onPostFinding: (findingId: number, opts?: { reminder?: boolean }) => Promise<unknown>;
   // The Story check section, handed this run's stories that no ticket review covers.
   storyCheck: (legacy: LegacyStories) => ReactNode;
   // The CI check section (its own run), after Story check and before the chat.
@@ -1218,6 +1269,7 @@ function ClaudesReview({
       onToggle={(included) => onToggleFinding(f.id, included)}
       onReword={(editedBody) => onRewordFinding(f.id, editedBody)}
       onPostComment={() => onPostFinding(f.id)}
+      onPostReminder={() => onPostFinding(f.id, { reminder: true })}
     />
   );
   const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
@@ -1900,7 +1952,7 @@ export function ClaudeReviewTab({
           onRewordFinding={(findingId, editedBody) =>
             updateFinding.mutateAsync({ findingId, editedBody })
           }
-          onPostFinding={(findingId) => postFinding.mutateAsync({ findingId })}
+          onPostFinding={(findingId, opts) => postFinding.mutateAsync({ findingId, reminder: opts?.reminder })}
           // The ticket review: one check per TICKET across every PR on it — a separate run from
           // the PR review above, with its own Check button. It also carries this run's stories
           // that no ticket review covers, so there is ONE story section.

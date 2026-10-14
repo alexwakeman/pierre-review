@@ -63,6 +63,35 @@ describe('identOfKey / edgesOutOf', () => {
   });
 });
 
+describe('edge reasons (`why`)', () => {
+  it('a text edge carries its reference’s why, a tracker edge its link reason; a tracker edge beating text keeps the text’s why', () => {
+    const b: SprintBrief = {
+      ...brief([]),
+      references: [
+        { ticketKey: 'C-1', relation: 'depends_on', quote: null, why: 'Needs the C-1 endpoint first.' },
+        { ticketKey: 'B-2', relation: 'depends_on', quote: null, why: 'Uses the B-2 schema.' },
+      ],
+      linkReasons: [{ ticketKey: 'b-1', why: 'Checkout waits on B-1 payments.' }],
+    };
+    const out = edgesOutOf(t('A-1', { links: [link('B-1'), link('B-2')], brief: b }), 'jira', ROOT);
+    expect(out.map((e) => [e.toKey, e.source, e.why])).toEqual([
+      ['B-1', 'tracker', 'Checkout waits on B-1 payments.'],
+      ['B-2', 'tracker', null],
+      ['C-1', 'text', 'Needs the C-1 endpoint first.'],
+      ['B-2', 'text', 'Uses the B-2 schema.'],
+    ]);
+    const r = fold([t('A-1', { links: [link('B-1'), link('B-2')], brief: b })], [t('B-1'), t('B-2'), t('C-1')]);
+    const k = keyOf(r);
+    expect(r.edges.map((e) => [k(e.to), e.source, e.why]).sort()).toEqual(
+      [
+        ['B-1', 'tracker', 'Checkout waits on B-1 payments.'],
+        ['B-2', 'tracker', 'Uses the B-2 schema.'],
+        ['C-1', 'text', 'Needs the C-1 endpoint first.'],
+      ].sort(),
+    );
+  });
+});
+
 describe('foldSprintGraph', () => {
   it('nodes: the sprint, then ghosts breadth-first along outward edges; context-only ghosts are not nodes', () => {
     const r = fold(

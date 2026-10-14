@@ -8,7 +8,7 @@ import {
 import { normalizePrefixKey } from '../detect.js';
 import { JiraFetchError } from '../jira/fetch.js';
 import { linearCategory, linearGraphql, linearRelationsSelection, toLinearTicket } from '../linear/client.js';
-import type { SprintFetchedTicket, SprintListArgs, SprintListResult, SprintLister } from './types.js';
+import { busiestSprintDates, sprintDate, type SprintFetchedTicket, type SprintListArgs, type SprintListResult, type SprintLister } from './types.js';
 
 // LINEAR — THE SPRINT LIST (docs/TRACKERS.md § The sprint list read). Linear's sprint is the team's
 // ACTIVE CYCLE. The teams are those whose keys were seen on this workspace's stored tickets.
@@ -54,7 +54,7 @@ const ISSUE_FIELDS = /* GraphQL */ `
 export const LINEAR_TEAMS_QUERY = /* GraphQL */ `
   query LimnLinearSprintTeams($keys: [String!]!) {
     teams(filter: { key: { in: $keys } }, first: 50) {
-      nodes { id key cyclesEnabled activeCycle { id name number } states(first: 50) { nodes { id name type position } } }
+      nodes { id key cyclesEnabled activeCycle { id name number startsAt endsAt } states(first: 50) { nodes { id name type position } } }
     }
   }
 `;
@@ -99,7 +99,7 @@ export interface Team {
   id?: string | null;
   key?: string | null;
   cyclesEnabled?: boolean | null;
-  activeCycle?: { id?: string | null; name?: string | null; number?: number | null } | null;
+  activeCycle?: { id?: string | null; name?: string | null; number?: number | null; startsAt?: string | null; endsAt?: string | null } | null;
   states?: { nodes?: Array<{ id?: string | null; name?: string | null; type?: string | null; position?: number | null } | null> | null } | null;
 }
 
@@ -210,10 +210,13 @@ export const listLinearCycle: SprintLister = async (a): Promise<SprintListResult
   const into = { tickets: [] as SprintFetchedTicket[], foreign: 0, truncated: false };
   if (active.length > 0) {
     const names: string[] = [];
+    // Each team's cycle → tickets read from it + its dates (the header shows the busiest cycle's).
+    const cycles: Array<{ count: number; startsAt: Date | null; endsAt: Date | null }> = [];
     for (const t of active) {
       const c = t.activeCycle!;
       const name = (c.name ?? '').trim() || `Cycle ${c.number ?? ''}`.trim();
       if (!names.includes(name)) names.push(name);
+      const before = into.tickets.length;
       await readPages(
         a,
         LINEAR_CYCLE_ISSUES_QUERY,
@@ -222,11 +225,18 @@ export const listLinearCycle: SprintLister = async (a): Promise<SprintListResult
         name,
         into,
       );
+      cycles.push({ count: into.tickets.length - before, startsAt: sprintDate(c.startsAt), endsAt: sprintDate(c.endsAt) });
       if (into.truncated) break;
     }
     if (noneOurs(into)) throw new JiraFetchError('bad_url');
     if (into.tickets.length > 0) {
-      return { source: { kind: 'cycle', provider: 'linear', names }, tickets: into.tickets, truncated: into.truncated, statusOrder };
+      return {
+        source: { kind: 'cycle', provider: 'linear', names },
+        tickets: into.tickets,
+        truncated: into.truncated,
+        statusOrder,
+        dates: busiestSprintDates(cycles),
+      };
     }
   }
   await readPages(

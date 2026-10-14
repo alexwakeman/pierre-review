@@ -227,6 +227,21 @@ describe('store rules', () => {
     expect(accepted.map((r: any) => r.ident)).toEqual([ident('ENG-1')]);
   });
 
+  it('stores the sprint\'s own dates on every read; a read with none clears them', async () => {
+    const sr = schema.sprintReads;
+    const datesOf = async () => {
+      const [r] = await db.select({ s: sr.sprintStartsAt, e: sr.sprintEndsAt }).from(sr).where(and(eq(sr.accountId, 1), eq(sr.workspaceId, wsA))).execute();
+      return [r.s?.toISOString() ?? null, r.e?.toISOString() ?? null];
+    };
+    listed.tickets = [ticket('ENG-1')];
+    listed.extra = { dates: { startsAt: new Date('2026-10-14T10:15:00Z'), endsAt: new Date('2026-10-27T17:00:00Z') } };
+    await read.readWorkspaceSprint(ctx, 1, wsA, opts(T0 + 92 * DAY));
+    expect(await datesOf()).toEqual(['2026-10-14T10:15:00.000Z', '2026-10-27T17:00:00.000Z']);
+    listed.extra = {};
+    await read.readWorkspaceSprint(ctx, 1, wsA, opts(T0 + 93 * DAY));
+    expect(await datesOf()).toEqual([null, null]);
+  });
+
   it('a failure records the code, keeps the list and the last good read', async () => {
     const before = await store.readSprintRead(1, wsA);
     const { JiraFetchError } = await import('../jira/fetch.js');

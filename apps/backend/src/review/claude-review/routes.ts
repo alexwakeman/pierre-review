@@ -48,12 +48,14 @@ import {
   listAllClaudeReviews,
   listClaudeReviewHistory,
   markFindingPosted,
+  markFindingReminder,
   markReviewPosted,
   storyOf,
   updateFinding,
   updateReviewDraft,
 } from './persist.js';
 import { getThreadJudgements } from './thread-judgements.js';
+import { findingCommentUrl, reminderLead } from './posted-state.js';
 
 // The Claude Review product API (CORE, free, LOCAL ONLY). The paths are the historical ones
 // (/api/prs/:id/claude-review*, /api/claude-reviews/*, /api/claude-findings/*,
@@ -71,6 +73,18 @@ const reviewIdParam = {
 };
 const findingIdParam = {
   params: { type: 'object', required: ['findingId'], properties: { findingId: { type: 'integer' } } },
+};
+// The single Post. `reminder: true` = "Post reminder" on a finding ALREADY on GitHub (its own post or
+// `earlierPost`); without it such a finding answers 409 AlreadyPosted, so nothing double-posts by
+// accident. The body is optional (the plain Post sends none).
+const postFindingSchema = {
+  ...findingIdParam,
+  body: {
+    anyOf: [
+      { type: 'null' },
+      { type: 'object', additionalProperties: false, properties: { reminder: { type: 'boolean' } } },
+    ],
+  },
 };
 // ⚠ `model` is the OFFERED list (shared CLAUDE_REVIEW_MODELS), so a retired id (the old Opus 4.8)
 // is a 400 here while its old runs still render, their id printed raw. Omitted ⇒ the default.
@@ -459,7 +473,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
   });
 
   // Post a single finding as a standalone comment (destination chosen from the live diff).
-  app.post('/api/claude-findings/:findingId/post', { schema: findingIdParam }, async (req, reply) => {
+  app.post('/api/claude-findings/:findingId/post', { schema: postFindingSchema }, async (req, reply) => {
     if (!AGENTIC_AI_ENABLED) return featureOff(reply);
     const { findingId } = req.params as { findingId: number };
     const accountId = ctx.accountIdOf(req);
@@ -474,8 +488,31 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       return { error: 'AutoPostInProgress', message: 'Posting automatically. Try again in a moment.' };
     }
     const story = storyOf(f);
-    // A story finding's comment opens on its story line, built from the run's tickets.
-    const storyReview = story ? await getClaudeReviewById(ctx, f.reviewId, accountId) : null;
+    // ⚠ NEVER TWICE: the run's read reconciles what is already on GitHub (posted-state.ts) — this
+    // finding's own post whose answer was lost, or its point posted by an earlier finding in its
+    // chain. Either way it is refused, never posted again.
+    // ⚠ A REMINDER is the one deliberate second post: asked for by name (`reminder: true`), only of a
+    // finding that IS on GitHub, and its body says so and links the earlier comment.
+    const storyReview = await getClaudeReviewById(ctx, f.reviewId, accountId);
+    const shown = storyReview?.findings.find((x) => x.id === findingId);
+    const wantsReminder = (req.body as { reminder?: boolean } | null | undefined)?.reminder === true;
+    const onGithub =
+      shown == null
+        ? null
+        : shown.postedAt != null
+          ? { githubCommentId: shown.githubCommentId, postedCommentKind: shown.postedCommentKind, postedAt: shown.postedAt }
+          : (shown.earlierPost ?? null);
+    if (onGithub != null && !wantsReminder) {
+      reply.status(409);
+      return { error: 'AlreadyPosted', message: 'Already on GitHub.' };
+    }
+    if (onGithub == null && wantsReminder) {
+      reply.status(409);
+      return { error: 'NotPosted', message: 'Not on GitHub yet. Post it instead.' };
+    }
+    const lead = onGithub != null
+      ? reminderLead({ url: findingCommentUrl(fctx, onGithub), postedAt: onGithub.postedAt })
+      : null;
     try {
       const outcome = await ctx.review.postFinding({
         owner: fctx.owner,
@@ -491,7 +528,10 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
           fileInDiff: f.fileInDiff,
           body: resolvedBody(f, story),
           suggestion: f.suggestion,
-          storyLead: story ? storyCommentLead({ title: f.title, story }, storyReview?.tickets ?? []) : null,
+          storyLead:
+            [lead, story ? storyCommentLead({ title: f.title, story }, storyReview?.tickets ?? []) : null]
+              .filter((p): p is string => p != null)
+              .join('\n\n') || null,
         },
       });
       if (outcome.headMoved) {
@@ -500,6 +540,12 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
           error: 'HeadMoved',
           message: 'The PR head has moved since this review. Re-review before posting.',
         };
+      }
+      if (lead != null) {
+        // A reminder never becomes the finding's own post: recorded beside it.
+        const r = await markFindingReminder(ctx, findingId, outcome.commentId, outcome.postedCommentKind);
+        const result: PostCommentResult = { githubCommentId: outcome.commentId, postedAt: r.postedAt, reminder: true };
+        return result;
       }
       await markFindingPosted(ctx, findingId, outcome.commentId, outcome.postedCommentKind);
       const result: PostCommentResult = {
@@ -589,7 +635,8 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
         includedFindings: review.findings
           // A finding already on GitHub (posted on its own, or in an earlier submitted review) is
           // DONE: the SPA offers no "Post again", and a re-submitted review must not post it twice.
-          .filter((f) => f.included && f.postedAt == null)
+          // Nor is one whose point an earlier finding in its chain already put there (`earlierPost`).
+          .filter((f) => f.included && f.postedAt == null && f.earlierPost == null)
           .map((f) => ({
             id: f.id,
             path: f.path,

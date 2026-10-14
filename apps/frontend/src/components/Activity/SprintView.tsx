@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SPRINT_GHOST_MAX,
   SPRINT_STAGE_LABEL,
@@ -10,6 +10,8 @@ import { useSprintAssessOn, useSprintGraph, useSprintRefresh, useSprintRefreshin
 import { useFilters } from '../../store/filters.js';
 import { GearIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
+import { SprintStoryStrip } from './SprintStoryStrip.js';
+import { sprintDatesLine, storyWriting } from './sprintStoryModel.js';
 import { TicketRefOpenContext, type TicketRefOpener } from '../TicketRefLink.js';
 import { SprintAskPanel } from './SprintAskPanel.js';
 import { SprintGraph } from './SprintGraph.js';
@@ -27,6 +29,8 @@ import {
   canSplitByAssignee,
   canSplitByStatus,
   effectiveGroupMode,
+  filterGraph,
+  filterKey,
   filterOptions,
   filtersActive,
   groupList,
@@ -35,6 +39,7 @@ import {
   readSplitAssignee,
   readSplitStatus,
   safeLocalStorage,
+  sprintProgress,
   stageRing,
   toggleStage,
   visibleGraph,
@@ -50,9 +55,9 @@ import {
 // graph of tickets (plus the GHOST tickets outside the sprint they reach), their links and their pull
 // requests. Toolbar (title + ⓘ, Ask Claude, statuses, Refresh), filters, the canvas (SprintGraph), the
 // drawer for one ticket (SprintTicketDrawer) and "Ask Claude about this sprint" (SprintAskPanel).
-// Filters FADE what they set aside (the layout never moves); a selected node dims everything beyond one
-// (or two) links. The VIEW row decides what is DRAWN at all — shipped ghosts and the faint link kinds are
-// off by default (`visibleGraph`) — and how tickets GROUP (Epic · Theme · Section · None, remembered per
+// Filters HIDE what they set aside (and any halo left empty); the tickets left re-pack and the view fits
+// them (`filterGraph`, `filterKey`). A selected node dims everything beyond one (or two) links. The VIEW row decides what is DRAWN at all — shipped ghosts and the faint link kinds are
+// off by default (`visibleGraph`) — and how tickets GROUP (Epic · Theme · Section · Dependencies · None, remembered per
 // browser; "Theme" needs the theme pass and falls back to Epic until it has run). Every state of the page is one short sentence. ⚠ Nothing here ranks tickets or people.
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
@@ -61,11 +66,50 @@ const TOOL_BUTTON =
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
+/** After Refresh, how often the graph is re-read while the sprint read runs, and when to stop waiting. */
+const READ_POLL_MS = 2500;
+const READ_WAIT_MS = 90_000;
+/** A refetch shows the bar only once it has run this long, so a quick background poll never flashes it. */
+const FETCH_SHOW_AFTER_MS = 400;
+
+/** `on`, but only once it has stayed true for `afterMs`. */
+function useLingering(on: boolean, afterMs: number): boolean {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!on) {
+      setShown(false);
+      return;
+    }
+    const t = window.setTimeout(() => setShown(true), afterMs);
+    return () => window.clearTimeout(t);
+  }, [on, afterMs]);
+  return on && shown;
+}
+
 export function SprintView(): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
-  const { data, isLoading, isError } = useSprintGraph(workspaceId);
+  const { data, isLoading, isError, isFetching, refetch } = useSprintGraph(workspaceId);
   const refresh = useSprintRefresh(workspaceId);
   const refreshing = useSprintRefreshing(workspaceId);
+  // Refresh asks for a sprint read and returns at once (the read runs in the background). The read has
+  // finished when the graph's `read.checkedAt` (its last attempt) moves; until then the bar shows and the
+  // graph is re-read every few seconds. Given up on after READ_WAIT_MS.
+  const [awaitRead, setAwaitRead] = useState<{ checkedAt: string | null; since: number } | null>(null);
+  const readDone = awaitRead != null && data != null && data.read.checkedAt !== awaitRead.checkedAt;
+  useEffect(() => {
+    if (awaitRead == null) return;
+    if (readDone || refresh.isError) {
+      setAwaitRead(null);
+      return;
+    }
+    const poll = window.setInterval(() => void refetch(), READ_POLL_MS);
+    const stop = window.setTimeout(() => setAwaitRead(null), Math.max(0, awaitRead.since + READ_WAIT_MS - Date.now()));
+    return () => {
+      window.clearInterval(poll);
+      window.clearTimeout(stop);
+    };
+  }, [awaitRead, readDone, refresh.isError, refetch]);
+  const fetchingSlow = useLingering(isFetching && !isLoading, FETCH_SHOW_AFTER_MS);
   const askOn = useSprintAssessOn();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
@@ -74,6 +118,15 @@ export function SprintView(): JSX.Element {
   const [drawer, setDrawer] = useState<string | null>(null);
   /** Bumped on every open, so the graph frames the ticket (and its links) even when it was selected. */
   const [frameRequest, setFrameRequest] = useState(0);
+  /** A storyline clicked (SprintStoryStrip): the graph frames and highlights its tickets; [] = back to Fit, no highlight. */
+  const [focusRequest, setFocusRequest] = useState<{ seq: number; idents: readonly string[] } | null>(null);
+  const graphBox = useRef<HTMLDivElement | null>(null);
+  const focusStory = useCallback((ids: string[]): void => {
+    setFocusRequest((r) => ({ seq: (r?.seq ?? 0) + 1, idents: ids }));
+    // The strip sits above the canvas: bring the canvas into view so the framing is seen.
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+    graphBox.current?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
+  }, []);
   const [hops, setHops] = useState<1 | 2>(1);
   const [visibility, setVisibility] = useState<SprintGraphVisibility>(DEFAULT_VISIBILITY);
   const [groupChoice, setGroupChoice] = useState<SprintGroupMode>(() => readGroupMode(safeLocalStorage()));
@@ -88,8 +141,18 @@ export function SprintView(): JSX.Element {
   const shown = useMemo(() => visibleGraph(nodes, edges, visibility), [nodes, edges, visibility]);
   const themesOn = data?.themes != null && data.themes.length > 0;
   const groupMode = effectiveGroupMode(groupChoice, themesOn);
-  const groupOf = useMemo(() => assignGroups(shown.nodes, shown.edges, groupMode), [shown, groupMode]);
-  const groups = useMemo(() => groupList(shown.nodes, groupOf, groupMode), [shown, groupOf, groupMode]);
+  // The second picker follows the grouping: Theme while grouping by theme, none by dependency chain,
+  // Epic otherwise. The hidden one's choice is kept but not applied (derived here, never written back).
+  const picker: 'theme' | 'epic' | null = groupMode === 'theme' ? 'theme' : groupMode === 'dependencies' ? null : 'epic';
+  const applied = useMemo<SprintGraphFilters>(
+    () => ({ ...filters, epic: picker === 'epic' ? filters.epic : null, theme: picker === 'theme' ? filters.theme : null }),
+    [filters, picker],
+  );
+  // Filters HIDE: the canvas gets only what they leave (`filterGraph`), grouped over that, so a halo with
+  // nothing left in it goes too.
+  const drawn = useMemo(() => filterGraph(shown, applied, members), [shown, applied, members]);
+  const groupOf = useMemo(() => assignGroups(drawn.nodes, drawn.edges, groupMode), [drawn, groupMode]);
+  const groups = useMemo(() => groupList(drawn.nodes, groupOf, groupMode), [drawn, groupOf, groupMode]);
   const chooseGroup = useCallback((m: SprintGroupMode): void => {
     setGroupChoice(m);
     writeGroupMode(safeLocalStorage(), m);
@@ -101,20 +164,13 @@ export function SprintView(): JSX.Element {
     setSplitChoice(on);
     writeSplitStatus(safeLocalStorage(), on);
   }, []);
-  // "Assigned to": one level deeper, under any grouping but None.
+  // "Assigned to": one level deeper, under any grouping but None and Dependencies.
   const canSplitPeople = canSplitByAssignee(groupMode);
   const personOn = personChoice && canSplitPeople;
   const choosePerson = useCallback((on: boolean): void => {
     setPersonChoice(on);
     writeSplitAssignee(safeLocalStorage(), on);
   }, []);
-  // The second picker follows the grouping: Theme while grouping by theme, Epic otherwise. The hidden
-  // one's choice is kept but not applied (derived here, never written back).
-  const themePicker = groupMode === 'theme';
-  const applied = useMemo<SprintGraphFilters>(
-    () => (themePicker ? { ...filters, epic: null } : { ...filters, theme: null }),
-    [filters, themePicker],
-  );
 
   const open = useCallback((ident: string): void => {
     setSelected(ident);
@@ -131,6 +187,20 @@ export function SprintView(): JSX.Element {
       el?.focus();
     });
   }, [drawer]);
+  // Escape closes the drawer and NOTHING ELSE. The app's global Escape (useKeyboard: "leave this tab for
+  // the Timeline") listens on window, so it also fired — closing the drawer threw the reader out to the
+  // Timeline, and coming back re-ran the graph's opening animation. Handled on `document` (bubbling, so a
+  // menu inside the drawer that takes Escape first still wins), which runs before any window listener.
+  useEffect(() => {
+    if (drawer == null) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      e.stopPropagation();
+      closeDrawer();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [drawer, closeDrawer]);
   const opener = useCallback<TicketRefOpener>(
     (t) => {
       if (!idents.has(t.ident)) return false;
@@ -153,9 +223,22 @@ export function SprintView(): JSX.Element {
   const sprintCount = nodes.filter((n) => !n.ghost).length;
   const ghostCount = shown.nodes.length - sprintCount;
   const title = data.source != null ? sprintSourceTitle(data.source) : 'This sprint';
+  // The sprint's dates (the tracker's own, else the cadence's), short, in the reader's locale.
+  const datesLine = sprintDatesLine(data.sprintDates, Date.now());
   const pinKey = pinnedStorageKey(data.workspaceId, title);
   const active = filtersActive(applied);
   const showAsk = askOn && data.aiEnabled;
+  const progress = sprintProgress({
+    awaitingRead: refreshing || (awaitRead != null && !readDone),
+    firstRead: reading,
+    fetching: fetchingSlow,
+    briefs: data.aiEnabled ? data.briefs : null,
+    storyWriting: storyWriting(data.aiEnabled, data.storyStatus),
+  });
+  const startRefresh = (): void => {
+    setAwaitRead({ checkedAt: data.read.checkedAt, since: Date.now() });
+    refresh.mutate();
+  };
 
   return (
     <TicketRefOpenContext.Provider value={opener}>
@@ -167,6 +250,11 @@ export function SprintView(): JSX.Element {
               <GraphInfo />
             </InfoButton>
           </h3>
+          {datesLine != null && (
+            <span data-testid="sprint-dates" className="text-xs text-gray-600 dark:text-gray-300">
+              {datesLine}
+            </span>
+          )}
           {!reading && nodes.length > 0 && (
             <span className={`text-xs ${MUTED}`}>
               {plural(sprintCount, 'ticket')} · {ghostCount} outside the sprint · {plural(shown.edges.length, 'link')}
@@ -189,8 +277,8 @@ export function SprintView(): JSX.Element {
             <GearIcon size={12} />
             Statuses
           </button>
-          <button type="button" onClick={() => refresh.mutate()} disabled={refreshing} className={TOOL_BUTTON}>
-            <RefreshIcon size={12} className={refreshing ? 'animate-spin' : undefined} />
+          <button type="button" onClick={startRefresh} disabled={refreshing || progress?.label === 'Reading the sprint'} className={TOOL_BUTTON}>
+            <RefreshIcon size={12} className={progress?.kind === 'busy' ? 'animate-spin motion-reduce:animate-none' : undefined} />
             Refresh
           </button>
         </div>
@@ -208,6 +296,9 @@ export function SprintView(): JSX.Element {
           </p>
         )}
 
+        {nodes.length > 0 && (
+          <SprintStoryStrip story={data.story} status={data.storyStatus} aiEnabled={data.aiEnabled} signals={data.signals ?? []} onFocus={focusStory} />
+        )}
         {nodes.length === 0 ? (
           !reading && <p className={`text-sm ${MUTED}`}>No tickets in this sprint.</p>
         ) : (
@@ -229,17 +320,19 @@ export function SprintView(): JSX.Element {
               filters={filters}
               setFilters={setFilters}
               options={options}
-              themePicker={themePicker}
+              picker={picker}
               active={active}
+              shownCount={drawn.nodes.filter((n) => !n.ghost).length}
+              totalCount={sprintCount}
               selected={selected}
               hops={hops}
               setHops={setHops}
               onClearSelection={() => setSelected(null)}
             />
-            <div className="relative">
+            <div ref={graphBox} className="relative">
               <SprintGraph
-                nodes={shown.nodes}
-                edges={shown.edges}
+                nodes={drawn.nodes}
+                edges={drawn.edges}
                 groupMode={groupMode}
                 groupOf={groupOf}
                 groups={groups}
@@ -248,15 +341,20 @@ export function SprintView(): JSX.Element {
                 members={members}
                 faintShown={visibility.faint}
                 layoutIntent={`${groupMode}|${splitOn ? 1 : 0}|${personOn ? 1 : 0}|${visibility.history ? 1 : 0}|${visibility.faint ? 1 : 0}`}
+                filterKey={filterKey(applied)}
                 pinKey={pinKey}
-                filters={applied}
                 selected={selected}
                 hops={hops}
                 drawerOpen={drawer != null}
                 frameRequest={frameRequest}
+                focusRequest={focusRequest}
+                progress={progress}
                 onOpen={open}
                 onClearSelection={() => setSelected(null)}
               />
+              {drawn.nodes.length === 0 && (
+                <p className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-sm text-slate-200">No tickets match these filters.</p>
+              )}
               {showAsk && askOpen && <SprintAskPanel workspaceId={data.workspaceId} nodes={nodes} onClose={() => setAskOpen(false)} />}
             </div>
           </>
@@ -385,8 +483,10 @@ function Filters({
   filters,
   setFilters,
   options,
-  themePicker,
+  picker,
   active,
+  shownCount,
+  totalCount,
   selected,
   hops,
   setHops,
@@ -395,9 +495,12 @@ function Filters({
   filters: SprintGraphFilters;
   setFilters: (f: SprintGraphFilters) => void;
   options: ReturnType<typeof filterOptions>;
-  /** The second picker lists themes (grouping by theme) instead of epics. */
-  themePicker: boolean;
+  /** The second picker: themes (grouping by theme), epics, or none (grouping by dependency chain). */
+  picker: 'theme' | 'epic' | null;
   active: boolean;
+  /** Sprint tickets left on the canvas, and in the sprint. */
+  shownCount: number;
+  totalCount: number;
   selected: string | null;
   hops: 1 | 2;
   setHops: (h: 1 | 2) => void;
@@ -447,7 +550,7 @@ function Filters({
         ))}
         {options.anyUnassigned && <option value={UNASSIGNED}>Unassigned</option>}
       </select>
-      {themePicker ? (
+      {picker === 'theme' ? (
         (options.themes.length > 0 || options.anyNoTheme) && (
           <select
             aria-label="Theme"
@@ -465,6 +568,7 @@ function Filters({
           </select>
         )
       ) : (
+        picker === 'epic' &&
         (options.epics.length > 0 || options.anyNoEpic) && (
           <select
             aria-label="Epic"
@@ -489,9 +593,14 @@ function Filters({
         Has dependencies
       </button>
       {active && (
-        <button type="button" onClick={() => setFilters(NO_FILTERS)} className="text-xs text-sky-700 hover:underline dark:text-sky-300">
-          Clear filters
-        </button>
+        <>
+          <span className="text-xs text-gray-600 dark:text-gray-300" data-testid="sprint-filter-count">
+            {shownCount} of {totalCount} tickets
+          </span>
+          <button type="button" onClick={() => setFilters(NO_FILTERS)} className="text-xs text-sky-700 hover:underline dark:text-sky-300">
+            Clear filters
+          </button>
+        </>
       )}
       {selected != null && (
         <span className="ml-auto inline-flex items-center gap-1.5">
@@ -544,13 +653,20 @@ function GraphInfo(): JSX.Element {
           each ticket is in one; until Claude has named them, Theme shows epics. This browser remembers your choice.
         </li>
         <li>
+          <strong>Dependencies</strong> puts each chain of tickets that depend on each other in its own circle, read
+          left to right: what has to happen first is on the left. The chain is named after the ticket most others in
+          it wait on. Tickets with no dependencies sit together in Standalone. Split by status and Assigned to are
+          off in this view, and the epic filter is hidden.
+        </li>
+        <li>
           <strong>Split by status</strong> divides each epic or theme into not started, in progress, in review and complete,
           left to right, each in a small circle of its section&rsquo;s colour. It works with Epic and Theme only. This
           browser remembers it.
         </li>
         <li>
           <strong>Assigned to</strong> puts each person&rsquo;s tickets in a small grey circle with their name, inside
-          the epic, theme or section (and inside the status, when that is split too). It does nothing with None.
+          the epic, theme or section (and inside the status, when that is split too). It does nothing with None or
+          Dependencies.
         </li>
         <li>
           <strong>Member</strong> picks one person: the tickets assigned to them and the tickets carrying a pull request
@@ -566,9 +682,13 @@ function GraphInfo(): JSX.Element {
         this browser remembers it. Scroll or pinch to zoom. Drag the
         background to move around. Fit frames what is shown.
       </p>
-      <p>Opening a ticket zooms to it and the tickets it links to. Picking an epic or theme zooms to its tickets.</p>
+      <p>Opening a ticket zooms to it and the tickets it links to. Clicking a line of the sprint story above the graph zooms to its tickets; click it again to see the whole sprint.</p>
       <p>Where tickets crowd, some names hide. Hover or zoom in to read them.</p>
-      <p>Filters fade what they leave out without moving anything. A selected ticket fades everything more than one link away.</p>
+      <p>
+        Filters hide the tickets they leave out, and any circle left empty. The rest close up and the view fits them;
+        clearing the filters puts everything back. A ticket outside the sprint follows the section filter only, and
+        stays while it is linked to a ticket that is shown. A selected ticket fades everything more than one link away.
+      </p>
     </>
   );
 }

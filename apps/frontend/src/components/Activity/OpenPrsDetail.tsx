@@ -139,9 +139,10 @@ export function OpenPrsDetail(): JSX.Element {
       <OpenPrsCards
         prs={rows}
         isLoading={isLoading}
+        answered={data != null}
         isError={isError}
         sort={sort}
-        grouped={ticketsOn && view === 'grouped'}
+        grouped={view === 'grouped'}
         onOpenPr={openTab}
         emptyLabel={
           emptyWorkspace

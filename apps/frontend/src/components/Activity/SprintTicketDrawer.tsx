@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   SPRINT_REPOS_PER_TICKET_MAX,
   SPRINT_STAGE_LABEL,
+  type SprintReferenceRelation,
   type SprintRepoRef,
   type SprintTicketDetailResponse,
   type SprintTicketReference,
@@ -17,14 +18,14 @@ import { initialsOf } from '../../lib/openPrsStacks.js';
 import { useOpenTicketTab } from '../../lib/ticketTab.js';
 import { indexUsers, safeExternalUrl } from '../../lib/ui.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
-import { CloseIcon, ExternalLinkIcon, TicketIcon } from '../Icons.js';
+import { ChevronIcon, CloseIcon, ExternalLinkIcon, TicketIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { TicketPrsSections } from '../Ticket/TicketPrsSections.js';
 import { CARD_CHIP, CARD_NEUTRAL_CHIP } from './PrCardShell.js';
 import { SprintAssessment, type SprintAssessTicket } from './SprintAssessment.js';
 import { SprintCodeCheck } from './SprintCodeCheck.js';
 import { StackStoryCheck } from './StackStoryCheck.js';
-import { groupReferences } from './sprintGraphModel.js';
+import { drawerReferenceGroups, referenceQuote, referenceWhy } from './sprintReferences.js';
 import { repoPickerOptions } from './sprintModel.js';
 
 // THIS SPRINT'S DRAWER — one ticket of the sprint graph, opened from its node (or from a reference /
@@ -38,7 +39,10 @@ import { repoPickerOptions } from './sprintModel.js';
 //   • the STORY CHECK block: the brief's summary and its criteria, numbered (the Story check's criteria
 //     look) — "Worked out from the description" when the ticket has none of its own — and, where the
 //     ticket has a ticket review, the Open PRs `StackStoryCheck` (per-criterion delivery);
-//   • the references it names or links (in the graph → this drawer moves to it; else its ticket tab);
+//   • the OTHER TICKETS it names or links, right after the story check (dependencies matter): one card
+//     each — key + title (in the graph → this drawer moves to it; else its ticket tab), status, an
+//     assignee pill, then the brief's one-sentence REASON for the tie and, smaller, the ticket's own
+//     words when they add to it (sprintReferences.ts);
 //   • EVERY pull request as the Open PRs cards (`TicketPrsSections`, the ticket tab's fold);
 //   • sprint tickets only: the repos and "Check against code" (plan / verify).
 //
@@ -209,15 +213,17 @@ function DrawerHeader({
   );
 }
 
-function AssigneeAvatar({ name, url }: { name: string; url: string | null }): JSX.Element {
+function AssigneeAvatar({ name, url, small = false }: { name: string; url: string | null; small?: boolean }): JSX.Element {
   const safe = safeExternalUrl(url);
+  const box = small ? 'h-4 w-4' : 'h-5 w-5';
   if (safe != null) {
-    return <img src={safe} alt="" width={20} height={20} referrerPolicy="no-referrer" className="h-5 w-5 shrink-0 rounded-full" />;
+    const px = small ? 16 : 20;
+    return <img src={safe} alt="" width={px} height={px} referrerPolicy="no-referrer" className={`${box} shrink-0 rounded-full`} />;
   }
   return (
     <span
       aria-hidden
-      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-100"
+      className={`decorative-mark inline-flex ${box} shrink-0 items-center justify-center rounded-full bg-gray-200 ${small ? 'text-[9px]' : 'text-[10px]'} font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-100`}
     >
       {initialsOf(name)}
     </span>
@@ -343,7 +349,8 @@ function DrawerBody({
         )}
       </section>
 
-      {data.references.length > 0 && <References refs={data.references} onOpenTicket={onOpenTicket} />}
+      {/* Keyed per ticket: every ticket opens with the shut groups shut (nothing is remembered). */}
+      {data.references.length > 0 && <References key={t.ident} refs={data.references} onOpenTicket={onOpenTicket} />}
 
       <section aria-label="Pull requests" className="space-y-3" data-testid="sprint-drawer-prs">
         {open.length + merged.length + closed.length === 0 ? (
@@ -380,44 +387,134 @@ function References({
   refs: readonly SprintTicketReference[];
   onOpenTicket: (ident: string) => void;
 }): JSX.Element {
-  const openTicketTab = useOpenTicketTab();
-  const groups = groupReferences(refs);
+  const groups = drawerReferenceGroups(refs);
   return (
-    <section aria-label="Other tickets" className="space-y-1.5" data-testid="sprint-drawer-refs">
-      <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Other tickets</h3>
-      <dl className="space-y-1.5">
-        {groups.map((g) => (
-          <div key={g.relation} className="flex flex-wrap items-start gap-x-2 gap-y-1">
-            <dt className={`w-24 shrink-0 pt-0.5 text-xs ${MUTED}`}>{g.label}</dt>
-            <dd className="min-w-0 flex-1 space-y-1">
+    <section aria-label="Other tickets" className="space-y-3" data-testid="sprint-drawer-refs">
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-800 dark:text-gray-100">
+        Other tickets
+        <span className={`text-xs font-normal ${MUTED}`}>{refs.length}</span>
+        <InfoButton title="Other tickets">
+          <p>Tickets this one names in its text, and the links set in the tracker.</p>
+          <p>
+            Each sentence is Claude Haiku&rsquo;s reading of why the two are tied, from this ticket&rsquo;s text and the
+            other ticket&rsquo;s title. Where the text gives no reason, none is shown. The words in quotes are copied from
+            the ticket.
+          </p>
+          <p>Blocked by and Related come from the tracker&rsquo;s links. The other groups come from the ticket text.</p>
+        </InfoButton>
+      </h3>
+      {groups.map((g) =>
+        COLLAPSED_REFERENCE_GROUPS.has(g.relation) ? (
+          <CollapsedReferenceGroup key={g.relation} label={g.label} relation={g.relation}>
+            {g.refs.map((r) => (
+              <ReferenceCard key={r.ident} r={r} onOpenTicket={onOpenTicket} />
+            ))}
+          </CollapsedReferenceGroup>
+        ) : (
+          <div key={g.relation} className="space-y-1.5" data-testid={`sprint-drawer-refs-${g.relation}`}>
+            <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+              {g.label}
+              <span className={`ml-1.5 font-normal ${MUTED}`}>{g.refs.length}</span>
+            </h4>
+            <ul className="space-y-1.5">
               {g.refs.map((r) => (
-                <div key={r.ident} className="min-w-0">
-                  <button
-                    type="button"
-                    onClick={() => (r.inGraph ? onOpenTicket(r.ident) : openTicketTab({ ident: r.ident, key: r.key, title: r.title }))}
-                    className={`inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-left text-[11px] hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:border-gray-500 ${
-                      r.done === true
-                        ? 'border-gray-200 text-gray-500 dark:border-gray-800 dark:text-gray-400'
-                        : 'border-gray-300 text-gray-800 dark:border-gray-700 dark:text-gray-100'
-                    }`}
-                  >
-                    <span className={`shrink-0 whitespace-nowrap font-mono font-semibold ${r.done === true ? 'line-through' : ''}`}>{r.key}</span>
-                    {r.title != null && r.title !== '' && <span className="min-w-0 truncate">{r.title}</span>}
-                    {r.status != null && <span className="shrink-0 text-gray-500 dark:text-gray-400">· {r.status}</span>}
-                    {r.assignee !== undefined && (
-                      <span className="shrink-0 whitespace-nowrap text-gray-500 dark:text-gray-400">
-                        · {r.assignee?.name ?? 'Unassigned'}
-                      </span>
-                    )}
-                  </button>
-                  {r.quote != null && r.quote !== '' && <p className={`mt-0.5 text-xs italic ${MUTED}`}>“{r.quote}”</p>}
-                </div>
+                <ReferenceCard key={r.ident} r={r} onOpenTicket={onOpenTicket} />
               ))}
-            </dd>
+            </ul>
           </div>
-        ))}
-      </dl>
+        ),
+      )}
     </section>
+  );
+}
+
+/** The loose ties start SHUT: "Out of scope" and "Builds on" are history and asides, not what the ticket
+ *  waits on. Every other group is open. Nothing is remembered — each ticket opens this way. */
+const COLLAPSED_REFERENCE_GROUPS: ReadonlySet<SprintReferenceRelation> = new Set<SprintReferenceRelation>(['out_of_scope', 'builds_on']);
+
+function CollapsedReferenceGroup({
+  label,
+  relation,
+  children,
+}: {
+  label: string;
+  relation: SprintReferenceRelation;
+  children: JSX.Element[];
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  return (
+    <div className="space-y-1.5" data-testid={`sprint-drawer-refs-${relation}`}>
+      <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={listId}
+          onClick={() => setOpen((o) => !o)}
+          className="inline-flex items-center gap-1 rounded hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        >
+          <ChevronIcon dir={open ? 'down' : 'right'} size={12} aria-hidden="true" />
+          {label}
+          <span className={`ml-0.5 font-normal ${MUTED}`}>{children.length}</span>
+        </button>
+      </h4>
+      <ul id={listId} hidden={!open} className="space-y-1.5">
+        {open ? children : null}
+      </ul>
+    </div>
+  );
+}
+
+function ReferenceCard({ r, onOpenTicket }: { r: SprintTicketReference; onOpenTicket: (ident: string) => void }): JSX.Element {
+  const openTicketTab = useOpenTicketTab();
+  const why = referenceWhy(r);
+  const quote = referenceQuote(r);
+  const done = r.done === true;
+  return (
+    <li
+      className={`rounded-md border px-2.5 py-2 ${
+        done ? 'border-gray-200 bg-gray-50/60 dark:border-gray-800 dark:bg-gray-900/40' : 'border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-900'
+      }`}
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <button
+          type="button"
+          onClick={() => (r.inGraph ? onOpenTicket(r.ident) : openTicketTab({ ident: r.ident, key: r.key, title: r.title }))}
+          className="inline-flex min-w-0 max-w-full items-baseline gap-1.5 rounded text-left hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        >
+          <span
+            className={`shrink-0 whitespace-nowrap font-mono text-xs font-semibold ${
+              done ? 'text-gray-600 line-through dark:text-gray-400' : 'text-gray-800 dark:text-gray-100'
+            }`}
+          >
+            {r.key}
+          </span>
+          {r.title != null && r.title !== '' && (
+            <span className={`min-w-0 break-words text-[13px] ${done ? 'text-gray-600 dark:text-gray-400' : 'text-gray-900 dark:text-gray-50'}`}>
+              {r.title}
+            </span>
+          )}
+        </button>
+        <span className="ml-auto flex shrink-0 flex-wrap items-center gap-1">
+          {r.status != null && (
+            <span className={done ? `${CARD_CHIP} border-transparent ${STATUS_PILL.done}` : CARD_NEUTRAL_CHIP}>{r.status}</span>
+          )}
+          {r.assignee !== undefined &&
+            (r.assignee != null ? (
+              <span className={`${CARD_NEUTRAL_CHIP} pl-0.5`} data-testid="sprint-ref-assignee">
+                <AssigneeAvatar name={r.assignee.name} url={r.assignee.avatarUrl} small />
+                {r.assignee.name}
+              </span>
+            ) : (
+              <span className={CARD_NEUTRAL_CHIP} data-testid="sprint-ref-assignee">
+                Unassigned
+              </span>
+            ))}
+        </span>
+      </div>
+      {why != null && <p className="mt-1 text-[13px] leading-snug text-gray-800 dark:text-gray-100">{why}</p>}
+      {quote != null && <p className={`mt-0.5 text-xs italic ${MUTED}`}>&ldquo;{quote}&rdquo;</p>}
+    </li>
   );
 }
 

@@ -23,6 +23,8 @@ const submitGithubReview = vi.fn(async (_a: unknown) => ({ reviewId: 'R9' }));
 const submitGithubIssueComment = vi.fn(async (_a: unknown) => ({ commentId: 'IC1' }));
 type Got = Array<{ id: number; path: string; line: number | null; side?: 'LEFT' | 'RIGHT' | null; body: string }>;
 const fetchReviewComments = vi.fn(async (..._a: unknown[]): Promise<Got> => []);
+type Listed = Array<{ id: number; commit_id: string | null; body: string | null; state: string; submitted_at?: string | null }>;
+const fetchPrReviews = vi.fn(async (..._a: unknown[]): Promise<Listed> => []);
 vi.mock('./post-review.js', async (orig) => ({
   ...(await orig<typeof import('./post-review.js')>()),
   fetchCurrentHeadSha: vi.fn(async () => 'HEAD'),
@@ -30,6 +32,7 @@ vi.mock('./post-review.js', async (orig) => ({
   submitGithubReview: (a: unknown) => submitGithubReview(a),
   submitGithubIssueComment: (a: unknown) => submitGithubIssueComment(a),
   fetchReviewComments: (...a: unknown[]) => fetchReviewComments(...a),
+  fetchPrReviews: (...a: unknown[]) => fetchPrReviews(...a),
 }));
 
 const q = (id: number, path: string, line: number | null) => ({
@@ -119,5 +122,80 @@ describe('the review’s inline comment ids are read back', () => {
     expect(out).toMatchObject({ postedReviewId: 'R9', inlineFindingIds: [7], inlineComments: [] });
     // Read once, never retried.
     expect(fetchReviewComments.mock.calls.length - before).toBe(1);
+  });
+});
+
+// ⚠ GitHub answered a review POST with 422 "An internal error occurred" AND published the review
+// (PR 4 of DEFRA/bng-metric-template, 2026-10-14) — the run was recorded failed and the reader posted
+// the same comment again. The seam now looks before it calls it a failure.
+describe('a failed review POST that landed anyway', () => {
+  const args = {
+    owner: 'acme',
+    name: 'api',
+    prNumber: 1,
+    reviewHeadSha: 'HEAD',
+    body: 'Lead.',
+    verdict: 'COMMENT' as const,
+    includedFindings: [q(7, 'src/foo.ts', 11)],
+    dryRun: false,
+  };
+  const internalError = () =>
+    Object.assign(new Error('GitHub REST POST /repos/acme/api/pulls/1/reviews -> 422: An internal error occurred, please try again.'), { status: 422 });
+
+  it('is found by commit + exact body and carries on as a success', async () => {
+    const seam = await import('./post-seam.js');
+    seam.LANDED_READBACK_DELAYS_MS.splice(0, Infinity, 0, 0);
+    let sent = '';
+    submitGithubReview.mockImplementationOnce(async (a: unknown) => {
+      sent = (a as { body: string }).body;
+      throw internalError();
+    });
+    fetchPrReviews.mockImplementationOnce(async () => [
+      // Decoys: an older identical one, another commit, another body, and an EARLIER review with the
+      // same lead on this head inside the clock-skew window (another attempt: another nonce).
+      { id: 10, commit_id: 'HEAD', body: sent, state: 'COMMENTED', submitted_at: '2020-01-01T00:00:00Z' },
+      { id: 11, commit_id: 'OLD', body: sent, state: 'COMMENTED', submitted_at: new Date().toISOString() },
+      { id: 12, commit_id: 'HEAD', body: 'Other.', state: 'COMMENTED', submitted_at: new Date().toISOString() },
+      { id: 13, commit_id: 'HEAD', body: sent.replace(/\n/g, '\r\n'), state: 'COMMENTED', submitted_at: new Date().toISOString() },
+      { id: 14, commit_id: 'HEAD', body: 'Lead.\n\n<!-- pierre:claude-review v=1 a=000000000000 -->', state: 'COMMENTED', submitted_at: new Date().toISOString() },
+    ]);
+    fetchReviewComments.mockImplementationOnce(async () => [{ id: 600, path: 'src/foo.ts', line: 11, side: 'RIGHT', body: '' }]);
+    const out = await seam.postReview(args);
+    expect(sent).toMatch(/^Lead\.\n\n<!-- pierre:claude-review v=1 a=[0-9a-f]{12} -->$/);
+    expect(out).toMatchObject({ postedReviewId: '13', inlineFindingIds: [7] });
+    expect(fetchReviewComments.mock.calls.at(-1)).toEqual(['acme', 'api', 1, '13']);
+  });
+
+  it('⚠ an earlier review with the same body on this head is NEVER adopted (the nonce differs)', async () => {
+    const seam = await import('./post-seam.js');
+    seam.LANDED_READBACK_DELAYS_MS.splice(0, Infinity, 0, 0);
+    submitGithubReview.mockImplementation(async () => {
+      throw internalError();
+    });
+    fetchPrReviews.mockImplementation(async () => [
+      // A summary-less review posted 30s earlier: before the nonce, the bare marker matched.
+      { id: 7, commit_id: 'HEAD', body: 'Lead.\n\n<!-- pierre:claude-review v=1 a=aaaaaaaaaaaa -->', state: 'COMMENTED', submitted_at: new Date(Date.now() - 30_000).toISOString() },
+      { id: 8, commit_id: 'HEAD', body: 'Lead.\n\n<!-- pierre:claude-review v=1 -->', state: 'COMMENTED', submitted_at: new Date(Date.now() - 30_000).toISOString() },
+    ]);
+    try {
+      await expect(seam.postReview(args)).rejects.toThrow(/internal error/);
+    } finally {
+      submitGithubReview.mockReset();
+      submitGithubReview.mockImplementation(async () => ({ reviewId: 'R9' }));
+      fetchPrReviews.mockReset();
+      fetchPrReviews.mockImplementation(async () => []);
+    }
+  });
+
+  it('nothing found (after a second look) ⇒ the original error stands', async () => {
+    const seam = await import('./post-seam.js');
+    seam.LANDED_READBACK_DELAYS_MS.splice(0, Infinity, 0, 0);
+    submitGithubReview.mockImplementationOnce(async () => {
+      throw internalError();
+    });
+    fetchPrReviews.mockClear();
+    fetchPrReviews.mockRejectedValueOnce(new Error('502')).mockResolvedValueOnce([]);
+    await expect(seam.postReview(args)).rejects.toThrow(/internal error/);
+    expect(fetchPrReviews).toHaveBeenCalledTimes(2);
   });
 });

@@ -706,7 +706,19 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
   ticket once), model, cost — CURRENT while `input_hash` (sprint keys + brief summaries) and
   `theme_version` match today's (`db/sprint-themes.ts`). Written only by `review/sprint-themes/`;
   replaced by each pass.
-All seven carry `account_id` (cascade) and a composite FK onto `workspaces(id, account_id)`; all are
+- **`sprint_story`** (sqlite `0109` / pg `0096`) — ONE per (account, workspace): the sprint STORY —
+  `story_json` (`{headline, focus, storylines: [{kind, title, sentence, idents}]}`; kind ∈ chain / risk
+  and idents are CODE's; a pre-v4 row has no `focus` and may hold retired `theme` storylines, dropped on
+  read),
+  model, cost — CURRENT while `input_hash` (everything the pass was sent) and `story_version` match
+  today's (`db/sprint-story.ts`). Written only by `review/sprint-story/`; replaced by each pass. Same
+  account FK, composite workspace FK, `accountScopedTables()`, erasure and `verify:isolation` as above.
+- **`sprint_view_snapshots`** (sqlite `0112` / pg `0099`) — ONE per (account, workspace): "Since you last
+  looked" on This Sprint — `current_json` / `current_at` (the latest view's snapshot: ident → stage, merged
+  PR ids on sprint tickets) and `baseline_json` / `baseline_at` (the previous visit's last view). Every GET
+  `/api/sprint-graph` refreshes current; it rolls current into baseline first only when `current_at` is
+  older than `SPRINT_VISIT_GAP_MS` (30 min). Written and read only by `db/sprint-signals.ts`.
+All eight carry `account_id` (cascade) and a composite FK onto `workspaces(id, account_id)`; all are
 in `accountScopedTables()`, erased explicitly, and checked by `verify:isolation`. `tracker_writes` (the
 write-back log) is DROPPED by sqlite `0107` / pg `0094`.
 

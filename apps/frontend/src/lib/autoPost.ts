@@ -5,15 +5,48 @@ import type {
   AutoPostSkipReason,
   AutoPostStatus,
   ClaudeAutoVerdictRecord,
+  ClaudeFinding,
   FindingAutoResolveRecord,
 } from '@pierre-review/shared';
 import { relativeTime } from './ui.js';
 
 /** A posted finding's / item's chip: "Posted", or "Posted automatically · 3 mins ago". */
-export function postedChipLabel(p: { postedAt: string | null; postedAuto?: boolean }): string {
-  return p.postedAuto === true && p.postedAt != null
-    ? `Posted automatically · ${relativeTime(p.postedAt)}`
-    : 'Posted';
+export function postedChipLabel(p: { postedAt: string | null; postedAuto?: boolean; earlier?: boolean }): string {
+  if (p.postedAuto === true && p.postedAt != null) return `Posted automatically · ${relativeTime(p.postedAt)}`;
+  return p.earlier === true ? 'Posted earlier' : 'Posted';
+}
+
+/** A finding's latest REMINDER chip ("Reminder posted · 3 mins ago"), shown BESIDE the original's
+ *  chip; null when none was posted. */
+export function reminderChipLabel(r: { postedAt: string | null } | null | undefined): string | null {
+  if (r == null) return null;
+  return r.postedAt != null ? `Reminder posted · ${relativeTime(r.postedAt)}` : 'Reminder posted';
+}
+
+/** A finding already on GitHub offers ONE post action, "Post reminder" (never the normal Post), on the
+ *  editable run only. The server refuses a plain Post of it (409 AlreadyPosted). */
+export function canPostReminder(post: EffectivePost | null, editable: boolean): boolean {
+  return editable && post != null;
+}
+
+/** Where a finding is on GitHub: its own post, else `earlierPost` (its chain, or a matching comment of
+ *  Limn's). null = not on GitHub. ⚠ A finding with either is DONE: no Post, no Ignore. */
+export interface EffectivePost {
+  postedAt: string | null;
+  postedAuto: boolean;
+  githubCommentId: string | null;
+  postedCommentKind: 'inline' | 'pr_comment' | null;
+  earlier: boolean;
+}
+export function effectivePost(
+  f: Pick<ClaudeFinding, 'postedAt' | 'postedAuto' | 'githubCommentId' | 'postedCommentKind' | 'earlierPost'>,
+): EffectivePost | null {
+  if (f.postedAt != null) {
+    return { postedAt: f.postedAt, postedAuto: f.postedAuto === true, githubCommentId: f.githubCommentId, postedCommentKind: f.postedCommentKind, earlier: false };
+  }
+  const e = f.earlierPost;
+  if (e == null) return null;
+  return { postedAt: e.postedAt, postedAuto: e.postedAuto, githubCommentId: e.githubCommentId, postedCommentKind: e.postedCommentKind, earlier: true };
 }
 
 /**

@@ -4,8 +4,11 @@ import {
   SPRINT_BRIEF_MODEL,
   SPRINT_BRIEF_VERSION,
   type SprintBrief,
+  parseTicketLinkBlockers,
   type SprintBriefCriterion,
+  type SprintBriefLinkReason,
   type SprintBriefReference,
+  type SprintBriefStoredReference,
   type StoryCriteriaSource,
   type TrackerProvider,
 } from '@pierre-review/shared';
@@ -22,6 +25,9 @@ import { acceptanceSectionOf, extractCriteria } from './story-criteria.js';
 //     none, the brief DERIVES them from the description and is flagged `criteriaDerived` (decided HERE,
 //     from the input, never by the model).
 //   • The description and each criterion are clipped; the clip is inside the hash.
+//   • THE TRACKER LINKS (`blocked_by_json`: key, title, the tracker's phrase) are sent too, so the brief
+//     can say WHY each is there; they are inside the hash, so a link added, dropped or retitled
+//     re-briefs the ticket.
 //
 // ⚠ PURE AT IMPORT: the DB client is reached LAZILY inside the readers (a pure test never opens it).
 
@@ -43,6 +49,14 @@ export function sprintCriteriaOf(
   return { items: [], source: 'none' };
 }
 
+/** One tracker link as the brief is shown it. */
+export interface SprintBriefLink {
+  key: string;
+  title: string | null;
+  /** The tracker's phrase from this ticket's side ("is blocked by", "relates to"). */
+  relation: string;
+}
+
 export interface SprintBriefInput {
   title: string;
   description: string;
@@ -50,6 +64,8 @@ export interface SprintBriefInput {
   criteria: string[];
   /** = criteria.length === 0. */
   derived: boolean;
+  /** The ticket's tracker links as stored (any relation), in stored order. */
+  links: SprintBriefLink[];
   /** sha256 hex of exactly what is sent. */
   textHash: string;
 }
@@ -65,7 +81,9 @@ const clip = (s: string, max: number): string => {
 /** The brief's input for a stored ticket (sprint or ghost). Never null: a ticket with no text still
  *  gets a brief from its title. Pure. */
 export function sprintBriefInput(
-  ticket: { title: string | null; description: string | null; acceptanceCriteria: string | null },
+  // `blockedByJson` is REQUIRED (not optional) on purpose: a caller that forgot it would hash a
+  // different input from the pass and every brief would read as stale there.
+  ticket: { title: string | null; description: string | null; acceptanceCriteria: string | null; blockedByJson: unknown },
   provider: TrackerProvider | string,
 ): SprintBriefInput {
   const title = (ticket.title ?? '').trim();
@@ -74,10 +92,15 @@ export function sprintBriefInput(
     (c) => clip(c, SPRINT_BRIEF_CRITERION_MAX_CHARS),
   );
   const description = clip(rawDescription, SPRINT_BRIEF_DESCRIPTION_MAX_CHARS);
+  const links: SprintBriefLink[] = (parseTicketLinkBlockers(ticket.blockedByJson) ?? []).map((l) => ({
+    key: l.key,
+    title: l.title,
+    relation: l.relation,
+  }));
   const textHash = createHash('sha256')
-    .update(JSON.stringify({ jira: provider === 'jira', title, description, criteria }))
+    .update(JSON.stringify({ jira: provider === 'jira', title, description, criteria, links }))
     .digest('hex');
-  return { title, description, criteria, derived: criteria.length === 0, textHash };
+  return { title, description, criteria, derived: criteria.length === 0, links, textHash };
 }
 
 export type SprintBriefRow = {
@@ -100,15 +123,25 @@ export function sprintBriefOf(r: SprintBriefRow): SprintBrief {
     if (isObj(c) && typeof c.text === 'string' && c.text.trim() !== '') criteria.push({ n: criteria.length + 1, text: c.text });
   }
   const references: SprintBriefReference[] = [];
+  const linkReasons: SprintBriefLinkReason[] = [];
+  const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v : null);
   for (const x of Array.isArray(r.referencesJson) ? r.referencesJson : []) {
-    if (!isObj(x) || typeof x.ticketKey !== 'string' || typeof x.relation !== 'string') continue;
+    if (!isObj(x) || typeof x.ticketKey !== 'string') continue;
+    // A tracker link's reason shares the column, tagged `link: true` (SprintBriefStoredReference).
+    if (x.link === true) {
+      const why = text(x.why);
+      if (why != null) linkReasons.push({ ticketKey: x.ticketKey, why });
+      continue;
+    }
+    if (typeof x.relation !== 'string') continue;
     references.push({
       ticketKey: x.ticketKey,
       relation: x.relation as SprintBriefReference['relation'],
-      quote: typeof x.quote === 'string' && x.quote.trim() !== '' ? x.quote : null,
+      quote: text(x.quote),
+      why: text(x.why),
     });
   }
-  return { summary: r.summary, criteria, criteriaDerived: r.criteriaDerived, references, createdAt: r.createdAt.toISOString() };
+  return { summary: r.summary, criteria, criteriaDerived: r.criteriaDerived, references, linkReasons, createdAt: r.createdAt.toISOString() };
 }
 
 /** Is this stored brief current for today's input? Pure. */
@@ -171,6 +204,8 @@ export interface StoredSprintBrief {
   criteria: SprintBriefCriterion[];
   criteriaDerived: boolean;
   references: SprintBriefReference[];
+  /** Tracker-link reasons ([] / absent: none). */
+  linkReasons?: SprintBriefLinkReason[];
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
@@ -193,7 +228,10 @@ export async function storeSprintBrief(
     summary: b.summary,
     criteriaJson: b.criteria,
     criteriaDerived: b.criteriaDerived,
-    referencesJson: b.references,
+    referencesJson: [
+      ...b.references.map((r) => ({ ticketKey: r.ticketKey, relation: r.relation, quote: r.quote, why: r.why ?? null })),
+      ...(b.linkReasons ?? []).map((l) => ({ ticketKey: l.ticketKey, why: l.why, link: true as const })),
+    ] satisfies SprintBriefStoredReference[],
     model: SPRINT_BRIEF_MODEL,
     costUsd: b.costUsd,
     inputTokens: b.inputTokens,

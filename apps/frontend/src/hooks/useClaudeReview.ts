@@ -282,8 +282,8 @@ export function isAutoReviewHoldError(err: unknown): boolean {
 export function usePostFinding(prId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { findingId: number }) =>
-      api.postClaudeFinding(vars.findingId),
+    mutationFn: (vars: { findingId: number; reminder?: boolean }) =>
+      api.postClaudeFinding(vars.findingId, { reminder: vars.reminder }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
       // A comment on GitHub like any other: THE ONE WRITE SET (prCacheSync.ts).

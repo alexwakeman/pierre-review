@@ -35,11 +35,22 @@ export function useWorkspaceTracker(enabled: boolean, workspaceId: number | null
  * false while unresolved — nothing tracker-shaped renders on a guess.
  */
 export function useTrackerOn(workspaceId: number | null): boolean {
-  const { data } = useWorkspaceTracker(workspaceId != null, workspaceId);
+  return useTrackerState(workspaceId).on;
+}
+
+/**
+ * `useTrackerOn` plus whether the answer is IN: `known` is false until the tracker settings have
+ * answered (or failed) for a resolved workspace. The Open PRs cards wait on it before their first
+ * paint, so a tracker answer landing late cannot regroup the page under the reader.
+ */
+export function useTrackerState(workspaceId: number | null): { on: boolean; known: boolean } {
+  const { data, isError } = useWorkspaceTracker(workspaceId != null, workspaceId);
+  const known = workspaceId != null && (data != null || isError);
   const issue = data?.issue;
-  if (issue == null || issue.provider == null) return false;
+  if (issue == null || issue.provider == null) return { on: false, known };
   // A provider that asks for no base URL (GitHub Issues: github.com) is on as soon as it is chosen.
-  return !TRACKER_PROVIDER_FIELDS[issue.provider].baseUrl || (issue.baseUrl ?? '').trim() !== '';
+  const on = !TRACKER_PROVIDER_FIELDS[issue.provider].baseUrl || (issue.baseUrl ?? '').trim() !== '';
+  return { on, known };
 }
 
 export function useUpdateWorkspaceTracker(workspaceId: number | null) {

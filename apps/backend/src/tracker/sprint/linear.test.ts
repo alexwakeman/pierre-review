@@ -84,8 +84,8 @@ describe('listLinearCycle', () => {
         return {
           teams: {
             nodes: [
-              { id: 't1', key: 'ENG', cyclesEnabled: true, activeCycle: { id: 'c1', name: null, number: 12 } },
-              { id: 't2', key: 'OPS', cyclesEnabled: true, activeCycle: { id: 'c2', name: 'Ops sprint', number: 3 } },
+              { id: 't1', key: 'ENG', cyclesEnabled: true, activeCycle: { id: 'c1', name: null, number: 12, startsAt: '2026-10-12T00:00:00.000Z', endsAt: '2026-10-26T00:00:00.000Z' } },
+              { id: 't2', key: 'OPS', cyclesEnabled: true, activeCycle: { id: 'c2', name: 'Ops sprint', number: 3, startsAt: '2026-10-05T00:00:00.000Z', endsAt: '2026-10-19T00:00:00.000Z' } },
             ],
           },
         };
@@ -98,6 +98,9 @@ describe('listLinearCycle', () => {
     }, log);
     const r = await listLinearCycle(args(t));
     expect(r.source).toEqual({ kind: 'cycle', provider: 'linear', names: ['Cycle 12', 'Ops sprint'] });
+    // ENG's cycle holds 2 of the 3 tickets: its dates.
+    expect(r.dates).toEqual({ startsAt: new Date('2026-10-12T00:00:00.000Z'), endsAt: new Date('2026-10-26T00:00:00.000Z') });
+    expect(log[0]!.query).toContain('activeCycle { id name number startsAt endsAt }');
     expect(r.tickets.map((x) => [x.key, x.sprintName])).toEqual([
       ['ENG-1', 'Cycle 12'],
       ['ENG-2', 'Cycle 12'],

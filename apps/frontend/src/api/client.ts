@@ -1493,10 +1493,13 @@ export const api = {
     fetch(`/api/claude-findings/${findingId}`, jsonBody('PATCH', body)).then((r) =>
       handle<{ status: string }>(r),
     ),
-  postClaudeFinding: (findingId: number) =>
-    fetch(`/api/claude-findings/${findingId}/post`, jsonBody('POST')).then((r) =>
-      handle<PostCommentResult>(r),
-    ),
+  // `reminder: true` = "Post reminder" of a finding already on GitHub (marked as a reminder,
+  // linking the first comment). Without it such a finding answers 409 AlreadyPosted.
+  postClaudeFinding: (findingId: number, opts: { reminder?: boolean } = {}) =>
+    fetch(
+      `/api/claude-findings/${findingId}/post`,
+      jsonBody('POST', opts.reminder === true ? { reminder: true } : undefined),
+    ).then((r) => handle<PostCommentResult>(r)),
   // "Post reply" on a previous-review reply status. The server builds the body and claims the
   // record first, so a second click answers 409, never a second reply.
   postFollowUpReply: (reviewId: number, priorFindingId: number) =>

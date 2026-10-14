@@ -15,7 +15,9 @@ import {
   fallbackAnchor,
   fetchCurrentHeadSha,
   fetchPrDiff,
+  fetchPrReviews,
   fetchReviewComments,
+  findLandedReviewIn,
   findingCommentBody,
   isFindingAnchored,
   matchReviewComments,
@@ -25,6 +27,7 @@ import {
   submitGithubIssueComment,
   submitGithubReview,
 } from './post-review.js';
+import { randomBytes } from 'node:crypto';
 
 // The GitHub-write half of the ctx.review seam. Security-sensitive (per-account gh token +
 // line-anchoring), so it stays CORE — the plugin hands over the user's ticked findings (read
@@ -95,7 +98,11 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
   // DO NOT re-gate this. `PostReviewArgs.pierreMarker?`/`pierreFooter?` remain DECLARED on the
   // contract (both sides, back-compat) but nothing passes them any more; the visible
   // "🤖 Reviewed with Limn + Claude" footer appeared in no detector and is gone.
-  const finalBody = args.body + '\n\n<!-- pierre:claude-review v=1 -->';
+  // ⚠ `a=` is a per-ATTEMPT nonce, so the read-back after a failed POST (`findLandedReview`) can only
+  // ever adopt THIS attempt's review: without it an earlier review with the same body on the same head
+  // (every summary-less review is the bare marker) would be adopted, and its findings stamped posted
+  // although GitHub never received them. Every reader of the marker matches the PREFIX only.
+  const finalBody = args.body + `\n\n<!-- pierre:claude-review v=1 a=${randomBytes(6).toString('hex')} -->`;
 
   const preview: PostReviewPreview = {
     commitId: args.reviewHeadSha,
@@ -106,15 +113,31 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
   };
   if (args.dryRun) return { preview };
 
-  const { reviewId: ghReviewId } = await submitGithubReview({
-    owner: args.owner,
-    name: args.name,
-    prNumber: args.prNumber,
-    commitId: args.reviewHeadSha,
-    body: finalBody,
-    event: args.verdict,
-    comments,
-  });
+  const startedAt = Date.now();
+  let ghReviewId: string;
+  try {
+    ({ reviewId: ghReviewId } = await submitGithubReview({
+      owner: args.owner,
+      name: args.name,
+      prNumber: args.prNumber,
+      commitId: args.reviewHeadSha,
+      body: finalBody,
+      event: args.verdict,
+      comments,
+    }));
+  } catch (err) {
+    // ⚠ AN ERROR IS NOT PROOF NOTHING WAS POSTED. GitHub has answered a review POST with a 422
+    // ("An internal error occurred") AND published the review. Look before calling it a failure:
+    // a review at this commit with exactly this body (it ends in our marker) that is new since we
+    // started (the body carries this attempt's nonce, so no earlier review can match) IS ours, and the rest of the post carries on as if GitHub had said 201.
+    const landed = await findLandedReview(args.owner, args.name, args.prNumber, {
+      commitId: args.reviewHeadSha,
+      body: finalBody,
+      sinceMs: startedAt,
+    });
+    if (landed == null) throw err;
+    ghReviewId = landed;
+  }
 
   // Read back the inline comments GitHub just created and pair each with its finding, so the finding
   // keeps its GitHub comment id (→ its Changes-tab thread). ⚠ BEST-EFFORT AND NEVER RETRIED: GitHub
@@ -159,6 +182,29 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
     commentCount: comments.length,
     prCommentCount: prCommentResults.length,
   };
+}
+
+// How long to wait before each read-back of a failed review POST (GitHub may publish it a moment
+// after answering). Exported so a test can make it instant.
+export const LANDED_READBACK_DELAYS_MS: number[] = [0, 2000];
+
+/** The review a failed POST created anyway, or null. Never throws (a failed read is "not found"). */
+async function findLandedReview(
+  owner: string,
+  name: string,
+  prNumber: number,
+  want: { commitId: string; body: string; sinceMs: number },
+): Promise<string | null> {
+  for (const delay of LANDED_READBACK_DELAYS_MS) {
+    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+    try {
+      const hit = findLandedReviewIn(await fetchPrReviews(owner, name, prNumber), want);
+      if (hit != null) return hit;
+    } catch {
+      /* unreadable: try again, then give up — the original error stands */
+    }
+  }
+  return null;
 }
 
 // ctx.review.postFinding — post ONE finding as a standalone inline / PR-level comment. Uses

@@ -5007,6 +5007,17 @@ export interface ClaudeAutoPostRecord {
   verdict?: ClaudeAutoVerdictRecord | null;
 }
 // On the wire (`ClaudeReview.autoPost`): the record without the id lists.
+// Where a finding's point is already on GitHub (`ClaudeFinding.earlierPost`).
+export interface ClaudeFindingEarlierPost {
+  // The earlier finding that was posted; null when only a comment on GitHub matched.
+  findingId: number | null;
+  githubCommentId: string | null;
+  postedCommentKind: 'inline' | 'pr_comment' | null;
+  postedAt: string | null;
+  // Auto-posting put it there.
+  postedAuto: boolean;
+}
+
 export interface ClaudeAutoPostWire {
   status: AutoPostStatus;
   at: string;
@@ -5075,6 +5086,19 @@ export interface FindingAutoResolveRecord {
 //   posting  claimed; the reply is in flight (or was cut off — counts as posted forever)
 //   posted   GitHub took it (`commentId`)
 //   failed   `error` says what GitHub refused
+// A REMINDER of an already-posted finding (`ClaudeFinding.reminder`, migration 0110 / pg 0097): the
+// latest one a person posted from the tab with "Post reminder". Its body opens "**Reminder:** first
+// raised …" and links the earlier comment. It never replaces the original post: `postedAt` /
+// `earlierPost` stay the finding's post, and the follow-up chain keeps reading those.
+export interface ClaudeFindingReminder {
+  githubCommentId: string;
+  postedCommentKind: 'inline' | 'pr_comment';
+  postedAt: string; // ISO-8601
+  // STORED ONLY (never on the wire): earlier reminders' comment ids, newest first — kept so none of
+  // them is ever read as a finding's own post (claude-review/posted-state.ts).
+  earlierCommentIds?: string[];
+}
+
 export interface FindingPushbackRecord {
   status: 'posting' | 'posted' | 'failed';
   at: string; // ISO-8601
@@ -6914,6 +6938,14 @@ export interface ClaudeFinding {
   postedCommentKind: 'inline' | 'pr_comment' | null;
   // true = auto-posting put it on GitHub ("Posted automatically"); absent/false = a person did.
   postedAuto?: boolean;
+  // COMPUTED ON READ (never stored): this finding is NOT posted itself, but its point is ALREADY ON
+  // GITHUB from Limn — an earlier finding in its follow-up chain (`priorFindingId`, walked back) was
+  // posted, or a comment of Limn's carrying this finding's text is on the PR. The SPA shows it as
+  // posted, linked to that comment, and BOTH post routes refuse it (`claude-review/posted-state.ts`).
+  earlierPost?: ClaudeFindingEarlierPost | null;
+  // The latest REMINDER a person posted of this already-posted finding ("Post reminder"); null/absent
+  // = none. Shown beside the original post, never instead of it.
+  reminder?: ClaudeFindingReminder | null;
   // The local review THREAD this posted inline finding became (`github_comment_id` =
   // `review_comments.database_id` → its thread), computed on read; null when not posted inline or
   // the thread is not synced yet. Lets the SPA open that thread in the Changes tab.
@@ -7629,6 +7661,8 @@ export interface PostReviewResult {
 export interface PostCommentResult {
   githubCommentId: string | null;
   postedAt: string;
+  // true = this was a REMINDER of a finding already on GitHub (recorded as `ClaudeFinding.reminder`).
+  reminder?: boolean;
 }
 
 // ---- request payloads (Claude review) ----

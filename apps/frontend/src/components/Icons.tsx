@@ -43,6 +43,13 @@ import type { ReactNode } from 'react';
 //    bot classification, and no test of ours would fail in an obvious way.
 //  • The landing arcade's ← → key legend, which names physical keys.
 //
+// ── THE ONE OTHER ICON MODULE ────────────────────────────────────────────────────────────────
+//  • `FileTypeIcons.tsx` (`FileTypeIcon`, `FolderTypeIcon`; resolver `lib/fileTypeIcon.ts`): the
+//    Changes tab's file-type marks. They break the contract on purpose — FIXED BRAND FILLS, not
+//    `currentColor` (a JS file is yellow on both themes), copied from Material Icon Theme (MIT,
+//    licence in its header + THIRD_PARTY_NOTICES.md). Every other icon still lives HERE; do not
+//    start a third home.
+//
 // ── TWO MARKS THAT MUST NEVER BE SWAPPED FOR EACH OTHER ──────────────────────────────────────
 //  • `SparkleIcon` means A MODEL PRODUCED THIS, and somebody is paying for it. `WandIcon` is the
 //    merge resolver's deterministic "take the obvious ones" — free, on every tier, no model in
@@ -157,6 +164,17 @@ export function ExternalLinkIcon({ size = 13, ...rest }: IconProps): JSX.Element
       <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
       <polyline points="15 3 21 3 21 9" />
       <line x1="10" y1="14" x2="21" y2="3" />
+    </IconShell>
+  );
+}
+
+// Two chain links — "copy this PR's GitHub link" (CopyButton's icon on the PR header and the
+// Open PRs cards). Distinct from CopyIcon (copy this TEXT) and ExternalLinkIcon (go there).
+export function LinkIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
     </IconShell>
   );
 }

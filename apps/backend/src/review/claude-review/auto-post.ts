@@ -169,7 +169,7 @@ export function selectFindingsToPost(
     }
     // Ignored never posts.
     if (!f.included) continue;
-    if (f.postedAt != null || alreadyOnGithub(f, earlier)) {
+    if (f.postedAt != null || f.earlierPost != null || alreadyOnGithub(f, earlier)) {
       alreadyPosted.push(f);
       continue;
     }
@@ -679,6 +679,10 @@ async function autoPostReview(
  */
 export function isVerdictRefusal(err: unknown): boolean {
   const status = (err as { status?: unknown } | null)?.status;
+  // ⚠ GitHub's 422 "An internal error occurred" is NOT a refusal: it has come back for a review it
+  // went on to publish. Ambiguous, so never retried.
+  const message = (err as { message?: unknown } | null)?.message;
+  if (typeof message === 'string' && /internal error/i.test(message)) return false;
   return typeof status === 'number' && status >= 400 && status < 500 && status !== 429 && status !== 401;
 }
 

@@ -234,14 +234,18 @@ describe('ClaudeFinding.threadId — findings posted INSIDE a review', () => {
     await rootThread(prId, 'fb-unmarked', 'me', 'Guard the null here.');
     await rootThread(prId, 'fb-other-file', 'me', `Guard the null here.\n\n${marker}`, 'src/b.ts');
     const t = await rootThread(prId, 'fb-ours', 'ME', `Guard the null here.\n\n${marker}`);
-    // Never posted, but a matching thread exists: still no link.
-    await rootThread(prId, 'fb-unposted', 'me', `Never posted.\n\n${marker}`);
+    // Recorded as never posted, but a comment of ours with its text was made since the run
+    // started: that is its own post whose answer was lost (posted-state.ts), so it is stamped.
+    const tLost = await rootThread(prId, 'fb-unposted', 'me', `Never posted.\n\n${marker}`);
     await persist.markReviewPosted(ctx, r, 'RV2', [m!.id, twin!.id]);
     const read = (await persist.getClaudeReviewById(ctx, r, 1))!.findings;
     expect(read.find((f) => f.id === m!.id)!.threadId).toBe(t);
     // Two findings never share one thread.
     expect(read.find((f) => f.id === twin!.id)!.threadId).toBeNull();
-    expect(read.find((f) => f.id === unposted!.id)!.threadId).toBeNull();
+    const lost = read.find((f) => f.id === unposted!.id)!;
+    expect(lost.postedAt).not.toBeNull();
+    expect(lost.githubCommentId).toBe('db_fb-unposted');
+    expect(lost.threadId).toBe(tLost);
   });
 });
 

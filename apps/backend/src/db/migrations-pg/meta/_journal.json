@@ -673,6 +673,34 @@
       "when": 1792051204004,
       "tag": "0095_sprint_themes",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1792137604004,
+      "tag": "0096_sprint_story",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1792137604005,
+      "tag": "0097_finding_reminder",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1792137604006,
+      "tag": "0098_sprint_dates_story_attempt",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1792137604007,
+      "tag": "0099_sprint_view_snapshots",
+      "breakpoints": true
     }
   ]
 }

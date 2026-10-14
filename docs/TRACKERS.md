@@ -159,6 +159,13 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only st
   nearest-due open milestone across the workspace's repos (never an overdue one; ≤ 20 repos per pass,
   `truncated` when cut). Project keys / team keys are the ones seen on this workspace's stored
   `tracker_tickets` (+ the tracker's `project_keys`); none → `no_projects`.
+- **The sprint's DATES** (sqlite `0111` / pg `0098`, `sprint_reads.sprint_starts_at / _ends_at`): read
+  off the same answers, never a second call — the Jira sprint field's `startDate` / `endDate` (Cloud
+  objects; Server's `…[startDate=…,endDate=<null>,…]` string, `sprintsOf`), Linear's `activeCycle {
+  startsAt endsAt }`, a GitHub milestone's `dueOn` as the END only. Several active sprints / cycles →
+  the one holding the most read tickets (`busiestSprintDates`, ties to the earliest start). Written on
+  every good read (the status fallback, or none given, clears them). The page header ("14 Oct – 27 Oct ·
+  day 1 of 14") and the sprint story's day facts read them; the cadence window is only the fallback.
 - **Fallback** when the tracker has no sprint concept or none is active: To do + In progress tickets
   touched in the workspace's reporting window (`getReportingWindow`), else the trailing 14 days. The
   `source` says which (`sprint` / `cycle` / `milestone` / `status_fallback` + reason).

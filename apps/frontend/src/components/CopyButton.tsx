@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { CheckIcon, CopyIcon } from './Icons.js';
 
 // Copy one comment's text to the clipboard, VERBATIM.
@@ -63,6 +63,8 @@ export function CopyButton({
   what = 'comment',
   title,
   className = '',
+  icon,
+  idleClassName,
 }: {
   /** The exact string to place on the clipboard — the markdown source, not rendered text. */
   text: string;
@@ -72,6 +74,10 @@ export function CopyButton({
    *  path is not a comment's text. */
   title?: string;
   className?: string;
+  /** The idle icon, when the copied thing is not text — a link copies with LinkIcon. */
+  icon?: ReactNode;
+  /** The idle ink + hover, when the button joins a set that wears another (the PR header's). */
+  idleClassName?: string;
 }): JSX.Element | null {
   const [state, setState] = useState<CopyState>('idle');
   // The pending revert, cleared on unmount: these buttons live in virtualised/paged lists
@@ -118,10 +124,11 @@ export function CopyButton({
           ? 'text-emerald-600 dark:text-emerald-400'
           : state === 'failed'
             ? 'text-amber-600 dark:text-amber-400'
-            : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200'
+            : (idleClassName ??
+              'text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200')
       } ${className}`}
     >
-      {state === 'copied' ? <CheckIcon /> : <CopyIcon />}
+      {state === 'copied' ? <CheckIcon /> : (icon ?? <CopyIcon />)}
       {/* The word only appears once something has happened. At rest this is a bare icon, so it
           can sit in a dense comment header without competing with the author and timestamp;
           `aria-label` carries the full name for assistive tech either way. */}

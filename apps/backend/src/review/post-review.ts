@@ -318,6 +318,56 @@ export async function submitGithubReview(input: {
   return { reviewId: String(res.id) };
 }
 
+// A review as GitHub's `GET /repos/{o}/{r}/pulls/{n}/reviews` lists it (the fields the read-back
+// matches on).
+export interface ListedReview {
+  id: number;
+  commit_id: string | null;
+  body: string | null;
+  state: string;
+  submitted_at?: string | null;
+}
+
+/**
+ * Did a review POST that FAILED land anyway? Pure: the newest listed review at `commitId` whose body
+ * is exactly the one we sent (line endings and outer whitespace aside — it ends in Limn's marker,
+ * which carries a per-attempt nonce, so an earlier review can never match) and that was submitted no earlier than `sinceMs` less a minute of clock skew. null = not found.
+ *
+ * ⚠ GitHub can answer a review POST with an error AND create the review: on PR 4 of
+ * DEFRA/bng-metric-template a 422 "An internal error occurred, please try again." came back for a
+ * review GitHub had already published, the run was recorded as a failure, and the reader posted
+ * the same comment again by hand.
+ */
+export function findLandedReviewIn(
+  listed: readonly ListedReview[],
+  want: { commitId: string; body: string; sinceMs: number },
+): string | null {
+  const body = normBody(want.body);
+  const floor = want.sinceMs - 60_000;
+  let best: ListedReview | null = null;
+  for (const r of listed) {
+    if (r.state === 'PENDING' || r.commit_id !== want.commitId) continue;
+    if (normBody(r.body ?? '') !== body) continue;
+    const at = r.submitted_at != null ? Date.parse(r.submitted_at) : NaN;
+    if (!Number.isFinite(at) || at < floor) continue;
+    if (best == null || r.id > best.id) best = r;
+  }
+  return best != null ? String(best.id) : null;
+}
+
+/** Every review on the PR, oldest first (paged, bounded). */
+export async function fetchPrReviews(owner: string, name: string, prNumber: number): Promise<ListedReview[]> {
+  const out: ListedReview[] = [];
+  for (let page = 1; page <= 10; page += 1) {
+    const rows = await ghRestGet<ListedReview[]>(
+      `/repos/${owner}/${name}/pulls/${prNumber}/reviews?per_page=100&page=${page}`,
+    );
+    out.push(...rows);
+    if (rows.length < 100) break;
+  }
+  return out;
+}
+
 // One inline comment of a submitted review, as GitHub's
 // `GET /repos/{o}/{r}/pulls/{n}/reviews/{review_id}/comments` returns it (the fields we match on).
 export interface SubmittedReviewComment {

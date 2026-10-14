@@ -194,7 +194,7 @@ export interface Satellite {
   prId: number;
   kind: SatelliteKind;
   failing: boolean;
-  /** Angle on the orbit, radians, evenly spaced. */
+  /** Angle on the orbit, radians (SVG: y down, 0 = right), evenly spaced over the free arc. */
   angle: number;
 }
 
@@ -202,16 +202,98 @@ export function isFailingCi(ci: SprintGraphPr['ciState']): boolean {
   return ci === 'failure' || ci === 'error';
 }
 
-/** The ticket's PR dots (at most SATELLITES_MAX, in the wire's order: open first), evenly spaced. */
-export function satellitesOf(prs: readonly SprintGraphPr[]): Satellite[] {
+/** A PR dot's radius at zoom 1 (layout units). */
+export const SATELLITE_R = 5.5;
+/** Room between the ticket's ring and a dot, and between two dots (layout units). */
+export const SATELLITE_GAP = 1.5;
+/** The smallest radius a dot is drawn at on screen (px) when zoomed out... */
+export const SATELLITE_MIN_SCREEN_R = 4;
+/** ...up to this much enlargement, so the far view is not all dots. */
+export const SATELLITE_SCALE_MAX = 2.5;
+
+/** How much a dot is enlarged at zoom `k` (the disc is already scaled by `discScale(k)`): gently, so a
+ *  dot never drops below `SATELLITE_MIN_SCREEN_R` px on screen until `SATELLITE_SCALE_MAX`. */
+export function satelliteScale(k: number): number {
+  const onScreen = SATELLITE_R * discScale(k) * Math.max(1e-3, k);
+  return Math.min(SATELLITE_SCALE_MAX, Math.max(1, SATELLITE_MIN_SCREEN_R / onScreen));
+}
+
+/** The assignee badge's direction from the disc's centre (top right; `badgeCentre`). */
+const BADGE_ANGLE = -Math.PI / 4;
+/** The badge's own scale the dots keep clear of (it is drawn only at zoom ≥ the far threshold, where
+ *  `badgeScale` is at most ~1.25). */
+const BADGE_CLEAR_SCALE = 1.3;
+
+/** Half the angle round the orbit the assignee badge blocks, for dots on an orbit of radius `orbit`
+ *  round a disc of radius `r`. */
+function badgeHalfAngle(r: number, orbit: number): number {
+  const c = badgeCentre(r, BADGE_CLEAR_SCALE);
+  const bd = Math.hypot(c.x, c.y);
+  const need = (BADGE_R + 1) * BADGE_CLEAR_SCALE + SATELLITE_R + SATELLITE_GAP;
+  const cos = (orbit * orbit + bd * bd - need * need) / (2 * orbit * bd);
+  return Math.acos(Math.max(-1, Math.min(1, cos)));
+}
+
+/** The radius the PR dots sit on round a disc of radius `r`: just outside the (thickest) status ring,
+ *  widened when `count` dots would touch on the free arc. */
+export function satelliteOrbit(r: number, count: number, badge: boolean): number {
+  const base = r + ringWidth(false, true) / 2 + SATELLITE_R + SATELLITE_GAP;
+  const arc = badge ? 2 * Math.PI - 2 * badgeHalfAngle(r, base) : 2 * Math.PI;
+  const needed = (Math.max(0, count) * (2 * SATELLITE_R + SATELLITE_GAP)) / arc;
+  return Math.max(base, needed);
+}
+
+/** How far a ticket reaches, dots included (layout units, zoom 1): its label sits outside this. */
+export function nodeExtent(r: number, count: number, badge: boolean): number {
+  const disc = drawnRadius(r, 1);
+  return count > 0 ? Math.max(disc, satelliteOrbit(r, count, badge) + SATELLITE_R) : disc;
+}
+
+/** The ticket's PR dots (at most SATELLITES_MAX, in the wire's order: open first). Evenly spaced round
+ *  the whole orbit, or — when the ticket wears an assignee badge (`badge`) — over the arc the badge
+ *  leaves free, so no dot sits under it. A draft is a HOLLOW dot (closed is filled slate). */
+export function satellitesOf(prs: readonly SprintGraphPr[], opts: { r?: number; badge?: boolean } = {}): Satellite[] {
   const shown = prs.slice(0, SATELLITES_MAX);
+  const n = Math.max(1, shown.length);
+  const r = opts.r ?? NODE_RADIUS_MIN;
+  const badge = opts.badge === true;
+  const half = badge ? badgeHalfAngle(r, satelliteOrbit(r, shown.length, true)) : 0;
+  const arc = 2 * Math.PI - 2 * half;
   return shown.map((p, i) => ({
     prId: p.prId,
     kind: p.state === 'merged' ? 'merged' : p.state === 'closed' ? 'closed' : p.draft ? 'draft' : 'open',
     // CI only matters on a PR that can still land.
     failing: p.state === 'open' && isFailingCi(p.ciState),
-    angle: (2 * Math.PI * i) / Math.max(1, shown.length),
+    angle: badge ? BADGE_ANGLE + half + (arc * (i + 0.5)) / n : (2 * Math.PI * i) / n,
   }));
+}
+
+// ── The storyline highlight ──────────────────────────────────────────────────────────────────────
+// A storyline clicked (SprintStoryStrip) HIGHLIGHTS its tickets: a bright halo ring in a colour no
+// status, PR dot or selection uses, their labels revealed, and everything else faded (a link stays
+// full only when both its ends are highlighted). A VIEW state: it never re-lays the graph out.
+
+/** The highlight ring (non-text, ≥ 3:1 on the canvas; test/textContrast.test.ts). */
+export const STORY_HIGHLIGHT = '#f472b6';
+
+/** The storyline's tickets that are drawn; null when none are (no highlight, nothing fades). */
+export function storyHighlightSet(idents: readonly string[] | null | undefined, drawn: ReadonlySet<string> | ReadonlyMap<string, unknown>): Set<string> | null {
+  if (idents == null) return null;
+  const out = new Set(idents.filter((id) => drawn.has(id)));
+  return out.size > 0 ? out : null;
+}
+
+/** Whether a node / link is set aside (faded). The open ticket's neighbourhood wins while a ticket is
+ *  selected; otherwise the storyline highlight decides. A link is full only with both ends kept. */
+export function fadedBy(
+  focus: ReadonlySet<string> | null,
+  story: ReadonlySet<string> | null,
+): { node: (id: string) => boolean; edge: (from: string, to: string) => boolean } {
+  const keep = focus ?? story;
+  return {
+    node: (id) => keep != null && !keep.has(id),
+    edge: (from, to) => keep != null && !(keep.has(from) && keep.has(to)),
+  };
 }
 
 // ── Edges ────────────────────────────────────────────────────────────────────────────────────────
@@ -256,6 +338,82 @@ export function edgeEndpoints(
   const start = Math.min(a.r, len / 2);
   const end = Math.min(b.r + arrowGap, len / 2);
   return { x1: a.x + ux * start, y1: a.y + uy * start, x2: b.x - ux * end, y2: b.y - uy * end };
+}
+
+// ── Curved links ─────────────────────────────────────────────────────────────────────────────────
+// A link is a gentle quadratic curve that always bends to the LEFT of its own direction (from → to), so
+// two links running opposite ways between one pair bow apart by construction. Two or more links between
+// one pair in the SAME frame (A→B depends on, A→B built alongside) take lanes 1, −1, 2, −2… measured on
+// the pair's canonical side, so they never lie on top of each other.
+
+/** Each link's bend, in lanes on its OWN left (`edgeCurve`'s `lane`). Deterministic. Pure. */
+export function edgeBends(edges: ReadonlyArray<Pick<SprintGraphEdge, 'from' | 'to' | 'kind'>>): Map<string, number> {
+  const byPair = new Map<string, Array<Pick<SprintGraphEdge, 'from' | 'to' | 'kind'>>>();
+  for (const e of edges) {
+    const k = e.from < e.to ? `${e.from}\u0000${e.to}` : `${e.to}\u0000${e.from}`;
+    const l = byPair.get(k);
+    if (l == null) byPair.set(k, [e]);
+    else l.push(e);
+  }
+  const out = new Map<string, number>();
+  for (const list of byPair.values()) {
+    const only = list[0];
+    if (list.length === 1 && only != null) {
+      out.set(edgeId(only), 1);
+      continue;
+    }
+    const sorted = [...list].sort((a, b) => edgeId(a).localeCompare(edgeId(b)));
+    sorted.forEach((e, i) => {
+      // Canonical lanes 1, −1, 2, −2…; a link running against the canonical direction has its left on
+      // the other side, so its own lane flips sign.
+      const lane = (i % 2 === 0 ? 1 : -1) * (Math.floor(i / 2) + 1);
+      out.set(edgeId(e), e.from < e.to ? lane : -lane);
+    });
+  }
+  return out;
+}
+
+/** How far one lane bows a link of length `len` (layout units): a gentle bend, capped. */
+export function laneBow(len: number): number {
+  return Math.min(34, Math.max(8, len * 0.14));
+}
+
+/** The curve from circle `a` to circle `b`: a quadratic Bézier bowed `lane` lanes to its left, cut back
+ *  to each rim ALONG THE CURVE (its end tangents point at the control point), and `arrowGap` more at the
+ *  end where an arrowhead sits. `d` is the SVG path; the arrowhead (`orient="auto"`) follows the end
+ *  tangent. Pure. */
+export function edgeCurve(
+  a: { x: number; y: number; r: number },
+  b: { x: number; y: number; r: number },
+  lane = 1,
+  arrowGap = 0,
+): { d: string; x1: number; y1: number; cx: number; cy: number; x2: number; y2: number } {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) {
+    const d = `M${a.x.toFixed(1)},${a.y.toFixed(1)}L${b.x.toFixed(1)},${b.y.toFixed(1)}`;
+    return { d, x1: a.x, y1: a.y, cx: a.x, cy: a.y, x2: b.x, y2: b.y };
+  }
+  // The left normal of from → to (screen y points down, so "left" is (dy, −dx) / len).
+  const nx = dy / len;
+  const ny = -dx / len;
+  const bow = laneBow(len) * lane;
+  // A quadratic's apex sits half-way to its control point: the control point is twice the bow out.
+  const cx = (a.x + b.x) / 2 + nx * bow * 2;
+  const cy = (a.y + b.y) / 2 + ny * bow * 2;
+  const cut = (p: { x: number; y: number }, by: number): { x: number; y: number } => {
+    const tx = cx - p.x;
+    const ty = cy - p.y;
+    const tl = Math.hypot(tx, ty);
+    if (tl < 1e-6) return { x: p.x, y: p.y };
+    const k = Math.min(by, tl * 0.9);
+    return { x: p.x + (tx / tl) * k, y: p.y + (ty / tl) * k };
+  };
+  const s = cut(a, Math.min(a.r, len / 2));
+  const e = cut(b, Math.min(b.r + arrowGap, len / 2));
+  const d = `M${s.x.toFixed(1)},${s.y.toFixed(1)}Q${cx.toFixed(1)},${cy.toFixed(1)} ${e.x.toFixed(1)},${e.y.toFixed(1)}`;
+  return { d, x1: s.x, y1: s.y, cx, cy, x2: e.x, y2: e.y };
 }
 
 // ── Selection: the neighbourhood ─────────────────────────────────────────────────────────────────
@@ -459,6 +617,54 @@ export function passesFilters(
   if (f.hasPrs && n.prs.length === 0) return false;
   if (f.hasDeps && !deps.has(n.ident)) return false;
   return true;
+}
+
+/** What a FILTER leaves on the canvas: the tickets that pass (`passesFilters`) and the links between
+ *  them. A ticket that does not pass is HIDDEN, not faded — and so is an outside ticket no longer joined
+ *  to a shown sprint ticket by a shown link (it would float alone). Degrees are KEPT, so a ticket keeps
+ *  its size while the rest close up round it. Groups are then listed over what is left (`groupList`), so a
+ *  halo with nothing left in it goes too. Pure. */
+export function filterGraph(
+  g: VisibleGraph,
+  f: SprintGraphFilters,
+  members?: ReadonlyMap<string, Pick<SprintMember, 'names' | 'logins'>>,
+): VisibleGraph {
+  if (!filtersActive(f)) return g;
+  const deps = dependencyIdents(g.edges);
+  // ⚠ An OUTSIDE ticket is held to the SECTION filter only: it has no epic or theme, and the person
+  // filter is about the sprint's work — filtering to one person must keep the outside ticket blocking
+  // their work. It still shows only while linked to a sprint ticket that is shown (below).
+  const keep = new Set(
+    g.nodes
+      .filter((n) => (n.ghost ? f.stages.size >= 4 || (n.stage != null && f.stages.has(n.stage)) : passesFilters(n, f, deps, members)))
+      .map((n) => n.ident),
+  );
+  const edges = g.edges.filter((e) => keep.has(e.from) && keep.has(e.to));
+  const adj = new Map<string, string[]>();
+  for (const e of edges) {
+    adj.set(e.from, [...(adj.get(e.from) ?? []), e.to]);
+    adj.set(e.to, [...(adj.get(e.to) ?? []), e.from]);
+  }
+  const shown = new Set(g.nodes.filter((n) => !n.ghost && keep.has(n.ident)).map((n) => n.ident));
+  let frontier = [...shown];
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      for (const m of adj.get(id) ?? []) {
+        if (shown.has(m)) continue;
+        shown.add(m);
+        next.push(m);
+      }
+    }
+    frontier = next;
+  }
+  return { nodes: g.nodes.filter((n) => shown.has(n.ident)), edges: edges.filter((e) => shown.has(e.from) && shown.has(e.to)) };
+}
+
+/** A key that changes exactly when what the filters SHOW changes (the layout re-packs on it). */
+export function filterKey(f: SprintGraphFilters): string {
+  if (!filtersActive(f)) return '';
+  return [[...f.stages].sort().join(','), f.assignee ?? '', f.epic ?? '', f.theme ?? '', f.hasPrs ? 1 : 0, f.hasDeps ? 1 : 0].join('|');
 }
 
 /** Toggle one section chip; turning the LAST one off turns them all back on. */
@@ -726,6 +932,84 @@ export function driftScale(now: number, liveUntil: number, fadeMs = DRIFT_FADE_M
   return Math.min(1, (liveUntil - now) / Math.max(1, fadeMs));
 }
 
+// ── A re-layout that lands mid-animation ────────────────────────────────────────────────────────
+// ⚠ THE BUG THIS PREVENTS: a re-layout caused by refetched data (`layoutIntent` unchanged — the graph
+// refetches on every return to This Sprint, and every 15 s while briefs land) HOLDS every ticket where
+// it is. Arriving while a layout was still ANIMATING IN (the 2 s opening animation, a re-layout), it held
+// them at their MID-FLIGHT positions — tickets half-way between two groupings, halos ringing half the
+// canvas — and cancelled the animation that would have brought them to rest. Nothing moved them again
+// until a reload. So a layout arriving mid-flight starts from where the old one LANDS, and keeps
+// animating from where each ticket is DRAWN.
+
+/** Where every drawn ticket "is" for a new layout: where the layout still animating in (`landing`, its
+ *  tween's targets; null = none) puts it, else where it is drawn. Pure. */
+export function restPositions(
+  drawn: ReadonlyMap<string, { x: number; y: number }>,
+  landing: ReadonlyMap<string, { x: number; y: number }> | null,
+): Map<string, { x: number; y: number }> {
+  const out = new Map<string, { x: number; y: number }>();
+  for (const [id, p] of drawn) out.set(id, landing?.get(id) ?? p);
+  return out;
+}
+
+/** Whether a new layout animates in: never with reduced motion; a quiet (data-driven) one only when it
+ *  interrupts a layout still animating — it must finish that journey, not freeze mid-flight. Pure. */
+export function layoutAnimates(o: { reducedMotion: boolean; quiet: boolean; interrupted: boolean }): boolean {
+  if (o.reducedMotion) return false;
+  return !o.quiet || o.interrupted;
+}
+
+/** The travel time left for a quiet layout that takes over an interrupted animation (ms): what the old
+ *  one had left, at least `minMs`. Pure. */
+export function continuedTweenMs(now: number, tween: { start: number; dur: number }, minMs = 450): number {
+  return Math.max(minMs, tween.start + tween.dur - now);
+}
+
+/** True when no two circles overlap by more than `slack` of their radii (`(ra + rb) * (1 - slack)`). */
+export function noOverlaps(points: ReadonlyArray<{ x: number; y: number; r: number }>, slack = 0.15): boolean {
+  for (let i = 0; i < points.length; i += 1) {
+    for (let j = i + 1; j < points.length; j += 1) {
+      const a = points[i] as { x: number; y: number; r: number };
+      const b = points[j] as { x: number; y: number; r: number };
+      if (Math.hypot(a.x - b.x, a.y - b.y) < (a.r + b.r) * (1 - slack)) return false;
+    }
+  }
+  return true;
+}
+
+// ── The refresh bar ──────────────────────────────────────────────────────────────────────────────
+// A thin bar across the top of the canvas while the graph is being brought up to date. It says only
+// what the page KNOWS: a sprint read was asked for and has not finished (`read.checkedAt` has not moved
+// since Refresh), the first read is running, or the graph is refetching — an indeterminate bar, since
+// none of those reports progress. Briefs report counts (`briefs.current` / `pending`), so while they
+// are being written the bar is DETERMINATE: the share of tickets summarised.
+
+export type SprintProgress = { kind: 'busy'; label: string } | { kind: 'share'; label: string; value: number } | null;
+
+/** The refresh bar's state. Pure. */
+export function sprintProgress(o: {
+  /** Refresh pressed and the read it asked for has not finished. */
+  awaitingRead: boolean;
+  /** The first sprint read has not finished. */
+  firstRead: boolean;
+  /** The graph is refetching (debounced by the page, so a quick poll does not flash it). */
+  fetching: boolean;
+  /** Briefs, when AI is on. */
+  briefs: { current: number; pending: number } | null;
+  /** The sprint story pass is running now (`storyStatus.state === 'writing'`). */
+  storyWriting?: boolean;
+}): SprintProgress {
+  if (o.awaitingRead || o.firstRead) return { kind: 'busy', label: 'Reading the sprint' };
+  if (o.fetching) return { kind: 'busy', label: 'Refreshing the graph' };
+  const b = o.briefs;
+  if (b != null && b.pending > 0) {
+    const total = b.current + b.pending;
+    return { kind: 'share', label: 'Summarising tickets', value: total > 0 ? b.current / total : 0 };
+  }
+  if (o.storyWriting === true) return { kind: 'busy', label: 'Writing the sprint story' };
+  return null;
+}
+
 /** The grouping the opening animation starts FROM: Epic, unless Epic is the chosen one — then Theme
  *  (when themes exist), else Section. Pure. */
 export function introGroupMode(mode: SprintGroupMode, themesAvailable: boolean): SprintGroupMode {
@@ -926,12 +1210,13 @@ export function visibleGraph(
 // OUTWARD, beyond the others. A ghost follows the group of the sprint ticket it is linked to (the
 // nearest one, through drawn edges).
 
-export type SprintGroupMode = 'epic' | 'theme' | 'section' | 'none';
-export const SPRINT_GROUP_MODES: readonly SprintGroupMode[] = ['epic', 'theme', 'section', 'none'];
+export type SprintGroupMode = 'epic' | 'theme' | 'section' | 'dependencies' | 'none';
+export const SPRINT_GROUP_MODES: readonly SprintGroupMode[] = ['epic', 'theme', 'section', 'dependencies', 'none'];
 export const SPRINT_GROUP_MODE_LABEL: Record<SprintGroupMode, string> = {
   epic: 'Epic',
   theme: 'Theme',
   section: 'Section',
+  dependencies: 'Dependencies',
   none: 'None',
 };
 /** The default view: by THEME — the sprint's areas of work as Claude named them. */
@@ -946,6 +1231,7 @@ const NO_GROUP_LABEL: Record<Exclude<SprintGroupMode, 'none'>, string> = {
   epic: 'No epic',
   theme: 'No theme',
   section: 'Status unknown',
+  dependencies: 'Standalone',
 };
 
 /** The mode actually drawn: "Theme" without themes draws as Epic (derived, never written back — the
@@ -954,9 +1240,12 @@ export function effectiveGroupMode(choice: SprintGroupMode, themesAvailable: boo
   return choice === 'theme' && !themesAvailable ? THEMELESS_GROUP_MODE : choice;
 }
 
-/** A SPRINT ticket's own group key (null when not grouping). */
+/** A SPRINT ticket's own group key (null when not grouping). A dependency chain is a property of the
+ *  EDGES, not of one ticket: `assignGroups` works it out (`dependencyChains`); here it is Standalone. */
 export function groupKeyOf(n: Pick<SprintGraphNode, 'epic' | 'theme' | 'stage'>, mode: SprintGroupMode): string | null {
   switch (mode) {
+    case 'dependencies':
+      return NO_GROUP;
     case 'epic':
       return n.epic?.key ?? NO_GROUP;
     case 'theme':
@@ -972,11 +1261,17 @@ export function groupKeyOf(n: Pick<SprintGraphNode, 'epic' | 'theme' | 'stage'>,
  *  through the drawn edges (ties: the sprint ticket listed first). A ghost no sprint ticket reaches, and
  *  every node when not grouping, → null. Pure. */
 export function assignGroups(
-  nodes: ReadonlyArray<Pick<SprintGraphNode, 'ident' | 'ghost' | 'epic' | 'theme' | 'stage'>>,
-  edges: ReadonlyArray<Pick<SprintGraphEdge, 'from' | 'to'>>,
+  nodes: ReadonlyArray<Pick<SprintGraphNode, 'ident' | 'ghost' | 'epic' | 'theme' | 'stage'> & Partial<Pick<SprintGraphNode, 'key'>>>,
+  edges: ReadonlyArray<Pick<SprintGraphEdge, 'from' | 'to'> & Partial<Pick<SprintGraphEdge, 'kind'>>>,
   mode: SprintGroupMode,
 ): Map<string, string | null> {
   const out = new Map<string, string | null>();
+  if (mode === 'dependencies') {
+    // Every ticket in a chain — an outside one too — is in its chain's group; the rest are Standalone.
+    const { chainOf } = dependencyChains(nodes, edges);
+    for (const n of nodes) out.set(n.ident, chainOf.get(n.ident) ?? NO_GROUP);
+    return out;
+  }
   for (const n of nodes) out.set(n.ident, n.ghost ? null : groupKeyOf(n, mode));
   if (mode === 'none') return out;
   const adj = new Map<string, string[]>();
@@ -1020,7 +1315,7 @@ export interface SprintGroup {
 /** The groups present, in placement order: sections in stage order, otherwise largest first (then by
  *  label); the no-group group last. Pure. */
 export function groupList(
-  nodes: ReadonlyArray<Pick<SprintGraphNode, 'ident' | 'epic' | 'ghost'>>,
+  nodes: ReadonlyArray<Pick<SprintGraphNode, 'ident' | 'epic' | 'ghost'> & Partial<Pick<SprintGraphNode, 'key' | 'title'>>>,
   groupOf: ReadonlyMap<string, string | null>,
   mode: SprintGroupMode,
 ): SprintGroup[] {
@@ -1028,11 +1323,13 @@ export function groupList(
   const counts = new Map<string, number>();
   const drawn = new Map<string, number>();
   const epicTitle = new Map<string, string | null>();
+  const byIdent = new Map(nodes.map((n) => [n.ident, n]));
   for (const n of nodes) {
     const g = groupOf.get(n.ident);
     if (g == null) continue;
     drawn.set(g, (drawn.get(g) ?? 0) + 1);
-    if (n.ghost) continue;
+    // A chain is its tickets, outside ones included (a chain may lie wholly outside the sprint).
+    if (n.ghost && mode !== 'dependencies') continue;
     counts.set(g, (counts.get(g) ?? 0) + 1);
     if (n.epic != null && (epicTitle.get(n.epic.key) ?? null) == null) epicTitle.set(n.epic.key, n.epic.title);
   }
@@ -1040,6 +1337,10 @@ export function groupList(
     if (k === NO_GROUP) return NO_GROUP_LABEL[mode];
     if (mode === 'epic') return epicTitle.get(k) ?? k;
     if (mode === 'section') return SPRINT_STAGE_LABEL[k as SprintStage] ?? k;
+    if (mode === 'dependencies') {
+      const root = byIdent.get(chainRootOf(k) ?? '');
+      return chainLabel(root?.title ?? '', root?.key ?? chainRootOf(k) ?? k);
+    }
     return k;
   };
   const list = [...counts.entries()]
@@ -1054,6 +1355,219 @@ export function groupList(
   const none = counts.get(NO_GROUP);
   if (none != null) list.push({ key: NO_GROUP, label: label(NO_GROUP), count: none, drawn: drawn.get(NO_GROUP) ?? none });
   return list;
+}
+
+// ── Group by Dependencies: one halo per dependency CHAIN ──────────────────────────────────────────
+//
+// A chain is a connected set of tickets over `depends_on` links ONLY (either direction — a tracker
+// blocking link is one), outside tickets included. Inside its halo a chain reads LEFT → RIGHT like a
+// timeline: prerequisites first. A ticket's LAYER is the longest path down to a ticket that depends on
+// nothing; a loop (A needs B needs A) is broken at the link that closes it, deterministically, so every
+// ticket still gets a layer. Tickets in no chain sit together in one "Standalone" halo. The chain is
+// named after the ticket most others in it depend on.
+
+const CHAIN_PREFIX = 'chain:';
+
+/** The key of the chain whose root is `root`. */
+export function chainKey(root: string): string {
+  return `${CHAIN_PREFIX}${root}`;
+}
+
+/** The root ident a chain key names; null for any other key. */
+export function chainRootOf(key: string): string | null {
+  return key.startsWith(CHAIN_PREFIX) ? key.slice(CHAIN_PREFIX.length) : null;
+}
+
+/** "Chain: Sign in with a magic link" (the root's title, else its key). The title keeps the WHOLE
+ *  group-label budget — the prefix is extra (`groupLabelMax`) — because the name is the only thing
+ *  saying what a chain is about. */
+export function chainLabel(title: string, key: string): string {
+  const t = title.trim();
+  return `Chain: ${t !== '' ? truncateLabel(t, GROUP_LABEL_MAX) : key}`;
+}
+
+/** The drawn group name's character budget: a chain's "Chain: " prefix does not eat its title's room. */
+export function groupLabelMax(groupKey: string): number {
+  return chainRootOf(groupKey) != null ? GROUP_LABEL_MAX + 'Chain: '.length : GROUP_LABEL_MAX;
+}
+
+const natural = (a: string, b: string): number => a.localeCompare(b, undefined, { numeric: true });
+
+/** Each ticket's layer within its depends_on links: 0 = depends on nothing; else one more than the
+ *  deepest ticket it depends on. Loops are broken deterministically (tickets and links visited in
+ *  `order`, a link back into the path being walked is dropped). Returns the layers and the links kept.
+ *  Pure. */
+export function dependencyLayers(
+  idents: readonly string[],
+  edges: ReadonlyArray<Pick<SprintGraphEdge, 'from' | 'to'>>,
+  order: (a: string, b: string) => number = natural,
+): { layer: Map<string, number>; kept: Array<{ from: string; to: string }> } {
+  const set = new Set(idents);
+  const needs = new Map<string, string[]>();
+  for (const e of edges) {
+    if (!set.has(e.from) || !set.has(e.to) || e.from === e.to) continue;
+    const l = needs.get(e.from);
+    if (l == null) needs.set(e.from, [e.to]);
+    else if (!l.includes(e.to)) l.push(e.to);
+  }
+  for (const l of needs.values()) l.sort(order);
+  const sorted = [...set].sort(order);
+  // Drop back links (iterative DFS: white 0, on the path 1, done 2).
+  const colour = new Map<string, number>();
+  const kept: Array<{ from: string; to: string }> = [];
+  for (const s of sorted) {
+    if ((colour.get(s) ?? 0) !== 0) continue;
+    const stack: Array<{ id: string; i: number }> = [{ id: s, i: 0 }];
+    colour.set(s, 1);
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1] as { id: string; i: number };
+      const next = needs.get(top.id)?.[top.i];
+      if (next == null) {
+        colour.set(top.id, 2);
+        stack.pop();
+        continue;
+      }
+      top.i += 1;
+      const c = colour.get(next) ?? 0;
+      if (c === 1) continue; // closes a loop: dropped
+      kept.push({ from: top.id, to: next });
+      if (c === 0) {
+        colour.set(next, 1);
+        stack.push({ id: next, i: 0 });
+      }
+    }
+  }
+  const keptNeeds = new Map<string, string[]>();
+  for (const e of kept) keptNeeds.set(e.from, [...(keptNeeds.get(e.from) ?? []), e.to]);
+  const layer = new Map<string, number>();
+  const depth = (id: string): number => {
+    const known = layer.get(id);
+    if (known != null) return known;
+    // Iterative post-order (a chain can be long).
+    const stack = [id];
+    while (stack.length > 0) {
+      const cur = stack[stack.length - 1] as string;
+      const pending = (keptNeeds.get(cur) ?? []).filter((p) => !layer.has(p));
+      if (pending.length > 0) {
+        stack.push(...pending);
+        continue;
+      }
+      stack.pop();
+      if (!layer.has(cur)) layer.set(cur, (keptNeeds.get(cur) ?? []).reduce((m, p) => Math.max(m, (layer.get(p) ?? 0) + 1), 0));
+    }
+    return layer.get(id) ?? 0;
+  };
+  for (const s of sorted) depth(s);
+  return { layer, kept };
+}
+
+/** The dependency chains: every ticket in one (two or more tickets joined by `depends_on` links, either
+ *  direction) → its chain key, named by its ROOT — the ticket most others in it depend on (ties: a
+ *  sprint ticket, then the earliest layer, then the key). Pure. */
+export function dependencyChains(
+  nodes: ReadonlyArray<Pick<SprintGraphNode, 'ident' | 'ghost'> & Partial<Pick<SprintGraphNode, 'key'>>>,
+  edges: ReadonlyArray<Pick<SprintGraphEdge, 'from' | 'to'> & Partial<Pick<SprintGraphEdge, 'kind'>>>,
+): { chainOf: Map<string, string>; members: Map<string, string[]> } {
+  const present = new Map(nodes.map((n) => [n.ident, n]));
+  const deps = edges.filter((e) => (e.kind ?? 'depends_on') === 'depends_on' && e.from !== e.to && present.has(e.from) && present.has(e.to));
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    let r = x;
+    while (parent.get(r) != null && parent.get(r) !== r) r = parent.get(r) as string;
+    let c = x;
+    while (c !== r) {
+      const nx = parent.get(c) as string;
+      parent.set(c, r);
+      c = nx;
+    }
+    return r;
+  };
+  for (const e of deps) {
+    if (!parent.has(e.from)) parent.set(e.from, e.from);
+    if (!parent.has(e.to)) parent.set(e.to, e.to);
+    const a = find(e.from);
+    const b = find(e.to);
+    if (a !== b) parent.set(a < b ? b : a, a < b ? a : b);
+  }
+  const comps = new Map<string, string[]>();
+  for (const n of nodes) {
+    if (!parent.has(n.ident)) continue;
+    const r = find(n.ident);
+    comps.set(r, [...(comps.get(r) ?? []), n.ident]);
+  }
+  const keyOf = (id: string): string => present.get(id)?.key ?? id;
+  const order = (a: string, b: string): number => natural(keyOf(a), keyOf(b)) || natural(a, b);
+  const chainOf = new Map<string, string>();
+  const members = new Map<string, string[]>();
+  for (const ids of comps.values()) {
+    if (ids.length < 2) continue;
+    const inSet = new Set(ids);
+    const indeg = new Map<string, number>();
+    for (const e of deps) if (inSet.has(e.to)) indeg.set(e.to, (indeg.get(e.to) ?? 0) + 1);
+    const { layer } = dependencyLayers(ids, deps, order);
+    const root = [...ids].sort(
+      (a, b) =>
+        (indeg.get(b) ?? 0) - (indeg.get(a) ?? 0) ||
+        Number(present.get(a)?.ghost === true) - Number(present.get(b)?.ghost === true) ||
+        (layer.get(a) ?? 0) - (layer.get(b) ?? 0) ||
+        order(a, b),
+    )[0] as string;
+    const k = chainKey(root);
+    members.set(k, [...ids].sort(order));
+    for (const id of ids) chainOf.set(id, k);
+  }
+  return { chainOf, members };
+}
+
+/** Columns and rows of a chain's layout (layout units): wide enough for a ticket and its name. */
+export const CHAIN_COL = 190;
+export const CHAIN_ROW = 120;
+
+export interface ChainLayout {
+  /** The chain's room: a circle round its columns. */
+  r: number;
+  /** Each ticket's spot, as an offset from the chain's anchor. */
+  offsets: Map<string, { x: number; y: number }>;
+  layer: Map<string, number>;
+}
+
+/** A chain laid out as a timeline: one COLUMN per layer, prerequisites on the left, each column stacked
+ *  top to bottom (ordered by where the tickets they depend on sit, so links cross less; then by key),
+ *  centred on the anchor. Pure. */
+export function chainLayout(
+  idents: readonly string[],
+  edges: ReadonlyArray<Pick<SprintGraphEdge, 'from' | 'to'> & Partial<Pick<SprintGraphEdge, 'kind'>>>,
+  keyOf: (ident: string) => string = (id) => id,
+): ChainLayout {
+  const order = (a: string, b: string): number => natural(keyOf(a), keyOf(b)) || natural(a, b);
+  const deps = edges.filter((e) => (e.kind ?? 'depends_on') === 'depends_on');
+  const { layer, kept } = dependencyLayers(idents, deps, order);
+  const cols: string[][] = [];
+  for (const id of [...idents].sort(order)) {
+    const l = layer.get(id) ?? 0;
+    while (cols.length <= l) cols.push([]);
+    (cols[l] as string[]).push(id);
+  }
+  const row = new Map<string, number>();
+  cols.forEach((col, ci) => {
+    if (ci > 0) {
+      const bary = (id: string): number => {
+        const ps = kept.filter((e) => e.from === id && row.has(e.to)).map((e) => row.get(e.to) as number);
+        return ps.length === 0 ? Infinity : ps.reduce((a, b) => a + b, 0) / ps.length;
+      };
+      const b = new Map(col.map((id) => [id, bary(id)]));
+      col.sort((x, y) => (b.get(x) as number) - (b.get(y) as number) || order(x, y));
+    }
+    col.forEach((id, i) => row.set(id, i - (col.length - 1) / 2));
+  });
+  const offsets = new Map<string, { x: number; y: number }>();
+  const mid = (cols.length - 1) / 2;
+  for (const [id, r] of row) offsets.set(id, { x: Math.round(((layer.get(id) ?? 0) - mid) * CHAIN_COL), y: Math.round(r * CHAIN_ROW) });
+  const tallest = cols.reduce((m, c) => Math.max(m, c.length), 1);
+  const halfW = (mid * CHAIN_COL);
+  const halfH = ((tallest - 1) / 2) * CHAIN_ROW;
+  const r = Math.max(groupRadius(idents.length), Math.round(Math.hypot(halfW, halfH) + 70));
+  return { r, offsets, layer };
 }
 
 /** A group's anchor radius: its AREA grows with its member count — room for `count` tickets at the
@@ -1386,9 +1900,10 @@ export function writeSplitStatus(storage: StorageLike | null | undefined, on: bo
 // "Johny Farrar" and "johny.farrar" are one halo) and named as it is there; a ticket with no assignee —
 // or a ghost whose assignee is not known — sits in "Unassigned", always last.
 
-/** Any grouping splits by person — Section too (status, then person); None has no circle to split. */
+/** Any grouping splits by person — Section too (status, then person); None has no circle to split, and
+ *  a dependency chain is laid out in its own order (a timeline), which a person split would break. */
 export function canSplitByAssignee(mode: SprintGroupMode): boolean {
-  return mode !== 'none';
+  return mode !== 'none' && mode !== 'dependencies';
 }
 
 /** The person room key for "no assignee". */

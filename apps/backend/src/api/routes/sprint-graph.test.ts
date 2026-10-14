@@ -150,7 +150,7 @@ beforeAll(async () => {
 
   const briefs = await import('../../db/sprint-briefs.js');
   const brief = async (key: string, row: { title: string; description: string; acceptanceCriteria: string }, refs: any[], summary = `Brief ${key}`) =>
-    briefs.storeSprintBrief(1, ownWs, id(key), briefs.sprintBriefInput(row, 'jira').textHash, {
+    briefs.storeSprintBrief(1, ownWs, id(key), briefs.sprintBriefInput({ ...row, blockedByJson: null }, 'jira').textHash, {
       summary,
       criteria: [{ n: 1, text: 'The basket survives a reload' }],
       criteriaDerived: false,
@@ -161,7 +161,7 @@ beforeAll(async () => {
     });
   const eng1Text = { title: 'Story ENG-1', description: VALUE, acceptanceCriteria: '- Basket survives a reload\n- Basket expires after 30 days' };
   await brief('ENG-1', eng1Text, [
-    { ticketKey: 'ENG-7', relation: 'depends_on', quote: 'once ENG-7 ships' },
+    { ticketKey: 'ENG-7', relation: 'depends_on', quote: 'once ENG-7 ships', why: 'Needs the saved-basket API ENG-7 adds.' },
     { ticketKey: 'ENG-2', relation: 'concurrent', quote: null },
     { ticketKey: 'ENG-60', relation: 'out_of_scope', quote: null },
   ]);
@@ -263,6 +263,7 @@ describe('GET /api/sprint-graph', () => {
       ].sort(),
     );
     expect(body.edges.find((e: any) => key(e.to) === 'ENG-7').quote).toBe('once ENG-7 ships');
+    expect(body.edges.find((e: any) => key(e.to) === 'ENG-7').why).toBe('Needs the saved-basket API ENG-7 adds.');
     const n = (k: string) => body.nodes.find((x: any) => x.key === k);
     expect(n('ENG-1').degree).toBe(2);
     expect(n('ENG-7').degree).toBe(2);
@@ -321,6 +322,147 @@ describe('GET /api/sprint-graph', () => {
   });
 });
 
+describe('the sprint story on the graph', () => {
+  it('the last story shows even after its input moved, marked stale; the status says where the pass stands', async () => {
+    const st = await import('../../db/sprint-story.js');
+    st.resetSprintStoryFlight();
+    const before = await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), storyCanRun: true });
+    // The fixture sprint has enough tickets for a story: AI on + a credential ⇒ waiting for the next read.
+    expect(before).toMatchObject({ story: null, storyStatus: { state: 'waiting', stale: false, lastAttemptAt: null, failure: null } });
+    // No credential: never "waiting" for ever.
+    const noCred = await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), storyCanRun: false });
+    expect(noCred).toMatchObject({ story: null, storyStatus: { state: 'none' } });
+    // In flight: queued by the after-read chain, then writing while the pass holds its slot.
+    st.markSprintStoryQueued(1, ownWs, true);
+    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), storyCanRun: true })).storyStatus.state).toBe('queued');
+    expect(st.claimSprintStoryPass(1, ownWs)).toBe(true);
+    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), storyCanRun: true })).storyStatus.state).toBe('writing');
+    st.releaseSprintStoryPass(1, ownWs);
+    st.markSprintStoryQueued(1, ownWs, false);
+    // A failed pass for TODAY's input: 'failed' with its reason (the backoff holds it).
+    const hash = (await graph.sprintStoryTodo(1, ownWs))!.inputHash;
+    await st.recordSprintStoryAttempt(1, ownWs, hash, 'number', new Date('2026-10-14T19:00:00Z'));
+    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), storyCanRun: true })).storyStatus).toEqual({
+      state: 'failed',
+      stale: false,
+      lastAttemptAt: '2026-10-14T19:00:00.000Z',
+      failure: 'number',
+    });
+    // Another tenant's attempt row is not ours.
+    expect(await st.sprintStoryAttempt(2, ownWs)).toBeNull();
+    // A story stored for an OLDER input (a PR merged since): still shown, marked stale.
+    await st.storeSprintStory(1, ownWs, 'an-older-input-hash', {
+      headline: 'Baskets are under way.',
+      focus: 'The sprint is about baskets.',
+      storylines: [{ kind: 'chain', title: 'Baskets', sentence: 'ENG-1 waits on ENG-2.', idents: [id('ENG-1')] }],
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    const after = await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), storyCanRun: true });
+    expect(after.story?.headline).toBe('Baskets are under way.');
+    expect(after.storyStatus).toMatchObject({ state: 'failed', stale: true });
+    // Written for today's input: current.
+    await st.storeSprintStory(1, ownWs, hash, {
+      headline: 'Baskets are under way.',
+      focus: 'The sprint is about baskets.',
+      storylines: [{ kind: 'chain', title: 'Baskets', sentence: 'ENG-1 waits on ENG-2.', idents: [id('ENG-1')] }],
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), storyCanRun: true })).storyStatus).toMatchObject({ state: 'current', stale: false });
+    // AI off: no story at all.
+    expect(await graph.getSprintGraph(1, ownWs, { aiEnabled: false, now: Date.now() })).toMatchObject({ story: null, storyStatus: { state: 'none' } });
+    const { and, eq } = await import('drizzle-orm');
+    await db.delete(schema.sprintStory).where(and(eq(schema.sprintStory.accountId, 1), eq(schema.sprintStory.workspaceId, ownWs))).execute();
+    await db
+      .update(schema.sprintReads)
+      .set({ storyAttemptAt: null, storyAttemptHash: null, storyAttemptError: null })
+      .where(and(eq(schema.sprintReads.accountId, 1), eq(schema.sprintReads.workspaceId, ownWs)))
+      .execute();
+  });
+
+  it('sprintDates: the tracker\'s own dates; none → null (no cadence in OSS)', async () => {
+    const { and, eq } = await import('drizzle-orm');
+    const where = and(eq(schema.sprintReads.accountId, 1), eq(schema.sprintReads.workspaceId, ownWs));
+    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: false, now: Date.now() })).sprintDates).toBeNull();
+    await db
+      .update(schema.sprintReads)
+      .set({ sourceJson: { kind: 'sprint', provider: 'jira', names: ['Sprint 15'] }, sprintStartsAt: new Date('2026-10-14T10:15:00Z'), sprintEndsAt: new Date('2026-10-27T17:00:00Z') })
+      .where(where)
+      .execute();
+    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: false, now: Date.now() })).sprintDates).toEqual({
+      startsAt: '2026-10-14T10:15:00.000Z',
+      endsAt: '2026-10-27T17:00:00.000Z',
+      source: 'tracker',
+    });
+    // The story's day facts come from them.
+    const t = await graph.sprintTimingFor(1, ownWs, { kind: 'sprint', provider: 'jira', names: ['S'] }, Date.parse('2026-10-20T12:00:00Z'), {
+      sprintStartsAt: new Date('2026-10-14T10:15:00Z'),
+      sprintEndsAt: new Date('2026-10-27T17:00:00Z'),
+    });
+    expect(t).toEqual({ day: 7, days: 14, daysLeft: 7 });
+    // Never for the status fallback.
+    expect(await graph.sprintTimingFor(1, ownWs, { kind: 'status_fallback', provider: 'jira', reason: 'none_active', from: 'x', to: 'y' }, Date.now(), {
+      sprintStartsAt: new Date('2026-10-14T10:15:00Z'),
+      sprintEndsAt: new Date('2026-10-27T17:00:00Z'),
+    })).toBeNull();
+    await db.update(schema.sprintReads).set({ sourceJson: null, sprintStartsAt: null, sprintEndsAt: null }).where(where).execute();
+  });
+});
+
+describe('the code cards (signals) on the graph', () => {
+  it('pace, out of step, blocked outside; "since you last looked" only after a visit gap, and it survives refetches', async () => {
+    const { and, eq } = await import('drizzle-orm');
+    const where = and(eq(schema.sprintReads.accountId, 1), eq(schema.sprintReads.workspaceId, ownWs));
+    await db.delete(schema.sprintViewSnapshots).execute();
+    await db
+      .update(schema.sprintReads)
+      .set({ sourceJson: { kind: 'sprint', provider: 'jira', names: ['Sprint 15'] }, sprintStartsAt: new Date('2026-10-14T10:15:00Z'), sprintEndsAt: new Date('2026-10-27T17:00:00Z') })
+      .where(where)
+      .execute();
+    const T = Date.parse('2026-10-20T12:00:00Z');
+    const get = (now: number) => graph.getSprintGraph(1, ownWs, { aiEnabled: true, now });
+    const first = await get(T);
+    const kinds = (x: { signals: Array<{ kind: string }> }) => x.signals.map((s) => s.kind);
+    // A first-ever view: no "since you last looked".
+    expect(kinds(first)).toEqual(['pace', 'out_of_step', 'blocked_outside']);
+    const by = (k: string) => first.signals.find((s) => s.kind === k)!;
+    expect(by('pace')).toMatchObject({ title: 'Day 7 of 14', sentence: "50% of the sprint's time has gone and 25% of its tickets are complete (1 of 4)." });
+    expect(by('pace').idents.sort()).toEqual([id('ENG-1'), id('ENG-2'), id('ENG-3')].sort());
+    expect(by('out_of_step')).toEqual({
+      kind: 'out_of_step',
+      title: 'Tracker and code disagree',
+      sentence: '1 ticket: 1 not started with a draft pull request open.',
+      idents: [id('ENG-1')],
+    });
+    expect(by('blocked_outside').sentence).toBe('2 sprint tickets wait on 2 tickets outside the sprint that are not complete; 1 of them has not started.');
+    expect(by('blocked_outside').idents.sort()).toEqual([id('ENG-1'), id('ENG-3'), id('ENG-7'), id('ENG-8')].sort());
+    // ENG-2 moves to Done; a refetch inside the gap shows nothing yet (the baseline has not rolled).
+    const st = schema.sprintTickets;
+    await db.update(st).set({ statusName: 'Done', statusCategory: 'done' }).where(and(eq(st.accountId, 1), eq(st.issueKey, 'ENG-2'))).execute();
+    expect(kinds(await get(T + 60_000))).not.toContain('since_last');
+    // A new visit after the gap compares against the previous visit's LAST view (T + 1 min, which already
+    // saw ENG-2 done — a move seen while looking is not news). ENG-4 moves back while nobody looks.
+    await db.update(st).set({ statusName: 'To Do', statusCategory: 'new' }).where(and(eq(st.accountId, 1), eq(st.issueKey, 'ENG-4'))).execute();
+    const later = await get(T + 60_000 + 31 * 60_000);
+    const since = later.signals.find((s) => s.kind === 'since_last')!;
+    expect(later.signals[0]?.kind).toBe('since_last');
+    expect(since).toEqual({ kind: 'since_last', title: 'Since 31 minutes ago', sentence: '1 ticket moved to Not started.', idents: [id('ENG-4')] });
+    // ⚠ Refetches inside the visit keep the diff (the baseline holds).
+    const refetch = await get(T + 60_000 + 33 * 60_000);
+    expect(refetch.signals.find((s) => s.kind === 'since_last')?.sentence).toBe('1 ticket moved to Not started.');
+    // No sprint dates: no pace.
+    await db.update(schema.sprintReads).set({ sprintStartsAt: null, sprintEndsAt: null }).where(where).execute();
+    expect(kinds(await get(T + 60_000 + 34 * 60_000))).not.toContain('pace');
+    await db.update(st).set({ statusName: 'In Progress', statusCategory: 'indeterminate' }).where(and(eq(st.accountId, 1), eq(st.issueKey, 'ENG-2'))).execute();
+    await db.update(st).set({ statusName: 'Done', statusCategory: 'done' }).where(and(eq(st.accountId, 1), eq(st.issueKey, 'ENG-4'))).execute();
+    await db.update(schema.sprintReads).set({ sourceJson: null }).where(where).execute();
+    await db.delete(schema.sprintViewSnapshots).execute();
+  });
+});
+
 describe('GET /api/sprint-graph/ticket', () => {
   const get = (ident: string, ws = ownWs) =>
     app.inject({ method: 'GET', url: `/api/sprint-graph/ticket?workspace=${ws}&ident=${encodeURIComponent(ident)}` });
@@ -338,6 +480,12 @@ describe('GET /api/sprint-graph/ticket', () => {
       ['ENG-2', 'concurrent', true, 'In Progress'],
       // Out of scope: listed in the drawer, no node.
       ['ENG-60', 'out_of_scope', false, 'In Progress'],
+    ]);
+    // Each reference carries the brief's reason (null when it gave none).
+    expect(body.references.map((r: any) => [r.key, r.why])).toEqual([
+      ['ENG-7', 'Needs the saved-basket API ENG-7 adds.'],
+      ['ENG-2', null],
+      ['ENG-60', null],
     ]);
     // Each reference carries its assignee from the stored rows (null = unassigned).
     expect(body.references.map((r: any) => [r.key, r.assignee])).toEqual([

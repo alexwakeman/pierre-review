@@ -270,6 +270,9 @@ export async function readWorkspaceSprint(
         nextReadAt: new Date(done + SPRINT_READ_INTERVAL_MS),
         // The automatic status order: undefined = not read this time (a failed order read) → kept.
         ...(result.statusOrder !== undefined ? { statusOrderJson: result.statusOrder } : {}),
+        // The sprint's own dates, every read (a fallback list / a sprint with none clears them).
+        sprintStartsAt: result.dates?.startsAt ?? null,
+        sprintEndsAt: result.dates?.endsAt ?? null,
       })
       .where(and(eq(t.accountId, accountId), eq(t.workspaceId, workspaceId)))
       .execute();

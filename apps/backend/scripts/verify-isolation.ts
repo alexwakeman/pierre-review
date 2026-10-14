@@ -3949,7 +3949,7 @@ check(
   // accountId predicate from `storedSprintBriefs` and the last check here goes red.
   {
     const briefs = await import('../src/db/sprint-briefs.js');
-    const textHash = briefs.sprintBriefInput({ title: 'A sprint ticket', description: '', acceptanceCriteria: '' }, 'jira').textHash;
+    const textHash = briefs.sprintBriefInput({ title: 'A sprint ticket', description: '', acceptanceCriteria: '', blockedByJson: null }, 'jira').textHash;
     const brief = { summary: 'B brief', criteria: [], criteriaDerived: true, references: [], costUsd: 0, inputTokens: 0, outputTokens: 0 };
     await briefs.storeSprintBrief(2, defaultB, ident, textHash, brief);
     let briefFk = false;
@@ -3989,6 +3989,54 @@ check(
     check("storedSprintThemes(B, B's workspace) holds B's themes", (await themes.storedSprintThemes(2, defaultB))?.inputHash === 'hash-b');
     const graphA = await getSprintGraph(1, defaultA, { aiEnabled: true, now: now.getTime() });
     check("getSprintGraph(A) never shows B's themes", graphA.themes === null && graphA.nodes.every((n) => n.theme === null));
+  }
+  // The sprint story: ONE row per (account, workspace), same composite FK. MUTATION CHECK: drop the
+  // accountId predicate from `storedSprintStory` (db/sprint-story.ts) and the cross check goes red.
+  {
+    const story = await import('../src/db/sprint-story.js');
+    const v = { headline: 'B story', focus: 'B focus.', storylines: [{ kind: 'chain' as const, title: 'B', sentence: 'B.', idents: [ident] }], costUsd: 0, inputTokens: 0, outputTokens: 0 };
+    await story.storeSprintStory(2, defaultB, 'hash-b', v);
+    let storyFk = false;
+    try {
+      await story.storeSprintStory(2, defaultA, 'hash-b', v);
+    } catch {
+      storyFk = true;
+    }
+    check("the composite FK refuses B's story in A's workspace", storyFk);
+    check("storedSprintStory(A, B's workspace) is null", (await story.storedSprintStory(1, defaultB)) === null);
+    check("storedSprintStory(B, B's workspace) holds B's story", (await story.storedSprintStory(2, defaultB))?.inputHash === 'hash-b');
+    const graphA = await getSprintGraph(1, defaultA, { aiEnabled: true, now: now.getTime() });
+    check("getSprintGraph(A) never shows B's story", graphA.story === null);
+    // The story pass's last ATTEMPT (sprint_reads.story_attempt_*). MUTATION CHECK: drop the accountId
+    // predicate from `sprintStoryAttempt` / `recordSprintStoryAttempt` and these go red.
+    const { noteSprintViewed } = await import('../src/db/sprint-store.js');
+    await noteSprintViewed(2, defaultB, now);
+    await story.recordSprintStoryAttempt(2, defaultB, 'hash-b', 'number', now);
+    await story.recordSprintStoryAttempt(1, defaultB, 'hash-a', 'shape', now);
+    check("sprintStoryAttempt(A, B's workspace) is null", (await story.sprintStoryAttempt(1, defaultB)) === null);
+    const attemptB = await story.sprintStoryAttempt(2, defaultB);
+    check("recordSprintStoryAttempt(A, B's workspace) never writes B's row", attemptB?.inputHash === 'hash-b' && attemptB.error === 'number');
+  }
+  // "Since you last looked" (sprint_view_snapshots): ONE row per (account, workspace), same composite FK.
+  // MUTATION CHECK: drop the accountId predicate from `readSprintViewSlots` (db/sprint-signals.ts) and the
+  // cross check goes red.
+  {
+    const sig = await import('../src/db/sprint-signals.js');
+    const snapB = { v: 1 as const, stages: { [ident]: 'done' as const }, merged: [] };
+    const slotsB = { current: snapB, currentAt: now, baseline: snapB, baselineAt: now };
+    await sig.writeSprintViewSlots(2, defaultB, slotsB);
+    let snapFk = false;
+    try {
+      await sig.writeSprintViewSlots(2, defaultA, slotsB);
+    } catch {
+      snapFk = true;
+    }
+    check("the composite FK refuses B's view snapshot in A's workspace", snapFk);
+    check("readSprintViewSlots(A, B's workspace) is null", (await sig.readSprintViewSlots(1, defaultB)) === null);
+    check("readSprintViewSlots(B, B's workspace) holds B's snapshot", (await sig.readSprintViewSlots(2, defaultB))?.current.stages[ident] === 'done');
+    const graphCross = await getSprintGraph(1, defaultB, { aiEnabled: true, now: now.getTime() });
+    check("getSprintGraph(A, B's workspace) never shows a card from B's snapshot", !graphCross.signals.some((x) => x.kind === 'since_last'));
+    check("getSprintGraph(A, B's workspace) never rewrites B's snapshot", (await sig.readSprintViewSlots(2, defaultB))?.current.stages[ident] === 'done');
   }
   check("readSprintTicket(A, B's workspace) is null", (await readSprintTicket(1, defaultB, ident)) === null);
   // A label's named key resolves through STORED tickets: A must see A's row only, never B's title.

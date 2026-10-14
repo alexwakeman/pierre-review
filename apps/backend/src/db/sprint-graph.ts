@@ -3,12 +3,14 @@ import {
   isBlockingRelation,
   parseTicketIdent,
   sprintAssessModeOf,
+  sprintSourceTitle,
   parseTicketLinkBlockers,
   trackerTicketIdent,
   type CiStatus,
   type JiraStatusCategory,
   type SprintBrief,
   type SprintBriefState,
+  type SprintDates,
   type SprintGraphPr,
   type SprintGraphResponse,
   type SprintSource,
@@ -21,12 +23,27 @@ import {
 import { globalAutomationUserIds } from './automation-ids.js';
 import { db, schema } from './client.js';
 import { currentSprintBriefs, sprintBriefInput, type SprintBriefInput } from './sprint-briefs.js';
-import { foldSprintGraph, identOfKey, type GraphTicketInput } from './sprint-graph-fold.js';
+import { foldSprintGraph, identOfKey, type GraphFoldResult, type GraphTicketInput } from './sprint-graph-fold.js';
+import {
+  isSprintStoryQueued,
+  isSprintStoryRunning,
+  sprintStoryAttempt,
+  sprintStoryInput,
+  sprintStoryOf,
+  sprintStoryStatusOf,
+  sprintTimingOf,
+  sprintTimingOfDates,
+  storedSprintStory,
+  type SprintStoryInput,
+  type SprintTiming,
+} from './sprint-story.js';
+import { sprintSignalsFor } from './sprint-signals.js';
 import { currentSprintThemes, sprintThemeInput, type SprintThemeInput } from './sprint-themes.js';
 import {
   kickSprintRead,
   latestSprintAssessments,
   noteSprintViewed,
+  readSprintRead,
   resetSprintReadForSite,
   sprintAssessmentRecordOf,
   sprintReadStateOf,
@@ -286,7 +303,13 @@ async function layoutFor(
 export async function getSprintGraph(
   accountId: number,
   workspaceId: number,
-  opts: { aiEnabled: boolean; now: number },
+  opts: {
+    aiEnabled: boolean;
+    now: number;
+    /** A story pass could run here (AI on AND a Claude credential). Absent = `aiEnabled`. Only
+     *  `storyStatus` reads it: with no credential "waiting for the next read" would show for ever. */
+    storyCanRun?: boolean;
+  },
 ): Promise<SprintGraphResponse> {
   const [{ workspaceSite }, { sprintReadErrorMessage }] = await Promise.all([
     import('./stories.js'),
@@ -309,6 +332,10 @@ export async function getSprintGraph(
       aiEnabled: opts.aiEnabled,
       repos,
       themes: null,
+      story: null,
+      storyStatus: { state: 'none', stale: false, lastAttemptAt: null, failure: null },
+      sprintDates: null,
+      signals: [],
     };
   }
   const readRow = await viewHeader(accountId, workspaceId, site, opts.now);
@@ -328,6 +355,38 @@ export async function getSprintGraph(
     prs,
     ...(themes != null ? { themes: themes.byIdent } : {}),
   });
+  // THE STORY: the LAST one written (any version), even when its input hash has moved — marked STALE.
+  // ⚠ The hash covers GitHub-synced facts (PR counts, failing checks) that change between sprint reads,
+  // and the pass runs only after a read (~20 min), so "current only" blanked the strip on every merge.
+  // The hash stays the RE-BILL gate (review/sprint-story/manager.ts), never the display gate.
+  // `storyStatus` says where the pass stands for TODAY's input (`sprintStoryStatusOf`, the ONE fold).
+  const timing = await sprintTimingFor(accountId, workspaceId, source, opts.now, readRow);
+  const storyInput = opts.aiEnabled ? sprintStoryInputOf(source, g, timing) : null;
+  const storyRow = storyInput?.eligible ? await storedSprintStory(accountId, workspaceId) : null;
+  const storyNow = storyRow != null ? sprintStoryOf(storyRow) : null;
+  const story = {
+    story: storyNow,
+    storyStatus: sprintStoryStatusOf({
+      aiEnabled: opts.aiEnabled,
+      canRun: opts.storyCanRun ?? opts.aiEnabled,
+      eligible: storyInput?.eligible === true,
+      inputHash: storyInput?.inputHash ?? null,
+      row: storyRow,
+      hasStory: storyNow != null,
+      attempt: storyInput?.eligible ? await sprintStoryAttempt(accountId, workspaceId) : null,
+      running: isSprintStoryRunning(accountId, workspaceId),
+      queued: isSprintStoryQueued(accountId, workspaceId),
+    }),
+    sprintDates: await sprintDatesFor(accountId, workspaceId, source, opts.now, readRow),
+  };
+  // THE CODE CARDS (db/sprint-signals.ts): free, DB only. The view's snapshot is recorded only once a
+  // sprint read has produced tickets — an empty list must never become the "since you last looked" baseline.
+  const signals = await sprintSignalsFor(
+    accountId,
+    workspaceId,
+    { nodes: g.nodes, edges: g.edges, timing, record: source != null && g.nodes.some((n) => !n.ghost) },
+    opts.now,
+  );
   return {
     workspaceId,
     trackerOn: true,
@@ -345,6 +404,8 @@ export async function getSprintGraph(
     aiEnabled: opts.aiEnabled,
     repos,
     themes: themes?.themes ?? null,
+    ...story,
+    signals,
   };
 }
 
@@ -361,8 +422,94 @@ export async function sprintThemeTodo(accountId: number, workspaceId: number): P
   return sprintThemeInputOf(await loadGraphTickets(accountId, workspaceId, site, true));
 }
 
+/** The story pass's input from a folded graph — the ONE builder the GET and the pass share. */
+export function sprintStoryInputOf(
+  source: SprintSource | null,
+  g: Pick<GraphFoldResult, 'nodes' | 'edges'>,
+  timing: SprintTiming | null = null,
+): SprintStoryInput {
+  return sprintStoryInput({ sprintName: source != null ? sprintSourceTitle(source) : null, nodes: g.nodes, edges: g.edges, timing });
+}
+
+/**
+ * Where today sits in the workspace's sprint, in whole days. FIRST the TRACKER's own sprint dates (the
+ * sprint read stores them on `sprint_reads.sprint_starts_at/_ends_at`; both ends needed), else the
+ * workspace's STORED cadence + phase anchor resolved through the ONE reporting-window resolver
+ * (`getReportingWindow`; the plugin's `resolveComparisonWindow`) when its mode is 'sprint'. Null when
+ * neither is a real sprint (OSS, no cadence, a rolling mode — the trailing-14-day fallback is never a
+ * sprint), and when the list is the tracker's STATUS FALLBACK (no sprint was read, so the tickets are
+ * not the sprint's). Never throws: no timing on a failure.
+ */
+export async function sprintTimingFor(
+  accountId: number,
+  workspaceId: number,
+  source: SprintSource | null,
+  nowMs: number,
+  readRow: Pick<SprintReadRow, 'sprintStartsAt' | 'sprintEndsAt'> | null = null,
+): Promise<SprintTiming | null> {
+  if (source == null || source.kind === 'status_fallback') return null;
+  const fromTracker = sprintTimingOfDates(readRow?.sprintStartsAt, readRow?.sprintEndsAt, nowMs);
+  if (fromTracker != null) return fromTracker;
+  try {
+    const { getReportingWindow } = await import('./reporting-window.js');
+    return sprintTimingOf(await getReportingWindow(accountId, workspaceId, nowMs), nowMs);
+  } catch {
+    return null;
+  }
+}
+
+/** The page header's sprint dates: the tracker's own (either end), else the cadence's sprint window
+ *  (reporting-window mode 'sprint'), else null. Never for the status fallback. Never throws. */
+export async function sprintDatesFor(
+  accountId: number,
+  workspaceId: number,
+  source: SprintSource | null,
+  nowMs: number,
+  readRow: Pick<SprintReadRow, 'sprintStartsAt' | 'sprintEndsAt'> | null,
+): Promise<SprintDates | null> {
+  if (source == null || source.kind === 'status_fallback') return null;
+  const s = readRow?.sprintStartsAt ?? null;
+  const e = readRow?.sprintEndsAt ?? null;
+  if (s != null || e != null) return { startsAt: s?.toISOString() ?? null, endsAt: e?.toISOString() ?? null, source: 'tracker' };
+  try {
+    const { getReportingWindow } = await import('./reporting-window.js');
+    const w = await getReportingWindow(accountId, workspaceId, nowMs);
+    if (w.mode !== 'sprint' || sprintTimingOf(w, nowMs) == null) return null;
+    return { startsAt: new Date(w.fromMs).toISOString(), endsAt: new Date(w.toMs).toISOString(), source: 'cadence' };
+  } catch {
+    return null;
+  }
+}
+
+/** The story pass's input for this workspace's current sprint (null: no tracker), folded exactly as
+ *  `getSprintGraph` folds it — WITHOUT stamping the view or kicking a read (a background pass is not a
+ *  view). AI on by construction: the pass only runs where it is. */
+export async function sprintStoryTodo(accountId: number, workspaceId: number): Promise<SprintStoryInput | null> {
+  const { workspaceSite } = await import('./stories.js');
+  const site = await workspaceSite(accountId, workspaceId);
+  if (site == null) return null;
+  const readRow = await readSprintRead(accountId, workspaceId);
+  const t = await loadGraphTickets(accountId, workspaceId, site, true);
+  const statusLayout = await layoutFor(accountId, workspaceId, t, readRow);
+  const stageOf = (s: GraphTicketInput['status']) => (s == null ? null : sprintStageOf(statusLayout, s));
+  const prs = await graphPrsFor(accountId, workspaceId, site, [...t.sprintRows.map((r) => r.issueKey), ...t.refRows.map((r) => r.issueKey)]);
+  const themes = await currentSprintThemes(accountId, workspaceId, sprintThemeInputOf(t).inputHash);
+  const g = foldSprintGraph({
+    provider: site.provider,
+    apiRoot: site.apiRoot,
+    sprint: t.sprint,
+    ghosts: t.ghosts,
+    stageOf,
+    prs,
+    ...(themes != null ? { themes: themes.byIdent } : {}),
+  });
+  const source = readRow?.sourceJson ?? null;
+  return sprintStoryInputOf(source, g, await sprintTimingFor(accountId, workspaceId, source, Date.now(), readRow));
+}
+
 /** The references of one ticket for the drawer: its tracker links, then its brief's references —
- *  one per (key, relation), itself excluded. Pure (exported for its test). */
+ *  one per (key, relation), itself excluded. Each carries the brief's `why` (a tracker link: the brief's
+ *  `linkReasons` entry for its key; none → null). Pure (exported for its test). */
 export function ticketReferencesOf(
   t: Pick<GraphTicketInput, 'ident' | 'links' | 'brief'>,
   provider: TrackerProvider,
@@ -372,7 +519,7 @@ export function ticketReferencesOf(
 ): SprintTicketReference[] {
   const out: SprintTicketReference[] = [];
   const seen = new Set<string>();
-  const push = (raw: string, relation: SprintTicketReference['relation'], quote: string | null, fallback: { title: string | null; status: string | null; category: JiraStatusCategory | null; url: string | null } | null): void => {
+  const push = (raw: string, relation: SprintTicketReference['relation'], quote: string | null, why: string | null, fallback: { title: string | null; status: string | null; category: JiraStatusCategory | null; url: string | null } | null): void => {
     const id = identOfKey(provider, apiRoot, raw);
     if (id == null || id.ident === t.ident) return;
     const k = `${id.ident}\u0000${relation}`;
@@ -388,16 +535,23 @@ export function ticketReferencesOf(
       done: category == null ? null : category === 'done',
       relation,
       quote,
+      why,
       inGraph: inGraph.has(id.ident),
       url: row?.url ?? fallback?.url ?? null,
       // A ticket we hold a row for: its assignee or null (unassigned). One we never read: no claim.
       ...(row != null ? { assignee: row.assignee ?? null } : {}),
     });
   };
+  const linkWhy = new Map((t.brief?.linkReasons ?? []).map((l) => [l.ticketKey.toUpperCase(), l.why] as const));
   for (const l of t.links ?? []) {
-    push(l.key, isBlockingRelation(l.relation) ? 'blocked_by' : 'linked', null, { title: l.title, status: l.status, category: l.category, url: l.url });
+    push(l.key, isBlockingRelation(l.relation) ? 'blocked_by' : 'linked', null, linkWhy.get(l.key.toUpperCase()) ?? null, {
+      title: l.title,
+      status: l.status,
+      category: l.category,
+      url: l.url,
+    });
   }
-  for (const r of t.brief?.references ?? []) push(r.ticketKey, r.relation, r.quote, null);
+  for (const r of t.brief?.references ?? []) push(r.ticketKey, r.relation, r.quote, r.why ?? null, null);
   return out;
 }
 

@@ -62,6 +62,7 @@ import { MentionTextarea } from '../MentionTextarea.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { ThreadCountChips, rollupCounts } from '../ThreadList/ThreadCountChips.js';
 import { SELECTED_BORDER, STATUS_META, UNSELECTED_BORDER } from './status.js';
+import { FileTypeIcon } from '../FileTypeIcons.js';
 
 // The shared per-file diff renderer used by BOTH the Changes tab (with inline
 // commenting) and the AI Fix tab (read-only, pre-push). Per-file collapsible blocks
@@ -1379,6 +1380,7 @@ function FileDiffBlock({
           >
             {meta.icon}
           </span>
+          <FileTypeIcon path={file.path} />
           <code className="min-w-0 flex-1 truncate font-mono">{path}</code>
         </button>
         {/* Beside the name button, never inside it (nested buttons). Copies the CURRENT path —

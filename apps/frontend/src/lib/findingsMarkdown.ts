@@ -16,9 +16,10 @@ type CopyableFinding = Pick<
   'severity' | 'title' | 'path' | 'line' | 'body' | 'editedBody' | 'suggestion' | 'included' | 'postedAt'
 >;
 
-/** The card's own Ignore rule: only the editable run, only an unposted finding, can be ignored. */
-export function isIgnoredFinding(f: Pick<ClaudeFinding, 'included' | 'postedAt'>, editable: boolean): boolean {
-  return editable && f.postedAt == null && !f.included;
+/** The card's own Ignore rule: only the editable run, only a finding not already on GitHub (itself
+ *  or through `earlierPost`), can be ignored. */
+export function isIgnoredFinding(f: Pick<ClaudeFinding, 'included' | 'postedAt' | 'earlierPost'>, editable: boolean): boolean {
+  return editable && f.postedAt == null && f.earlierPost == null && !f.included;
 }
 
 /** The findings "Copy all" carries: not praise, not ignored. Order is the caller's (on-screen). */

@@ -20,11 +20,11 @@ import {
 } from '@pierre-review/shared';
 import { initialsOf } from '../../lib/openPrsStacks.js';
 import { safeExternalUrl } from '../../lib/ui.js';
+import { SprintProgressBar } from './SprintProgressBar.js';
 import { CheckIcon, EyeIcon, MinusIcon, PlusIcon, QuestionIcon, StageInProgressIcon, StageNotStartedIcon } from '../Icons.js';
 import {
   BADGE_R,
   DIMMED_OPACITY,
-  FILTERED_OPACITY,
   DISC_GROUND,
   badgeCentre,
   badgeScale,
@@ -51,13 +51,18 @@ import {
   withNeighbours,
   GROUP_HALO,
   GROUP_LABEL_MAX,
+  NO_GROUP,
   SATELLITE_FAILING_RING,
   SATELLITE_FILL,
   SPRINT_CANVAS,
   collidePadding,
-  dependencyIdents,
-  edgeEndpoints,
+  chainLayout,
+  continuedTweenMs,
+  edgeBends,
+  edgeCurve,
   edgeId,
+  layoutAnimates,
+  restPositions,
   discScale,
   drawnRadius,
   HALO_LAYOUT_SCALE,
@@ -83,7 +88,6 @@ import {
   nodeAriaLabel,
   nodeBaseOpacity,
   nodeRadius,
-  passesFilters,
   pinchTransform,
   personGroupCounts,
   personOf,
@@ -97,6 +101,14 @@ import {
   readPinned,
   safeLocalStorage,
   satellitesOf,
+  satelliteOrbit,
+  satelliteScale,
+  nodeExtent,
+  SATELLITE_R,
+  SATELLITES_MAX,
+  STORY_HIGHLIGHT,
+  storyHighlightSet,
+  fadedBy,
   stageRing,
   starField,
   statusSlotOf,
@@ -110,6 +122,7 @@ import {
   subHaloColour,
   subLabelColour,
   truncateLabel,
+  groupLabelMax,
   wheelZoomFactor,
   writePinned,
   zoomAbout,
@@ -118,14 +131,16 @@ import {
   type LabelSide,
   type PersonSplit,
   type PinnedPositions,
+  type ChainLayout,
   type ScreenBox,
-  type SprintGraphFilters,
+  type SprintProgress,
   type SprintGroup,
   type SprintGroupMode,
   type SprintMember,
   type StatusSplit,
   type ViewTransform,
 } from './sprintGraphModel.js';
+import { referenceQuote, referenceWhy } from './sprintReferences.js';
 
 // THE SPRINT GRAPH (Activity → This Sprint): the sprint's tickets and the GHOST tickets they reach, on an
 // always-navy "space" canvas. d3-force is the physics ONLY; the SVG is drawn here by hand.
@@ -144,7 +159,9 @@ import {
 // everything pauses while a ticket is selected. `prefers-reduced-motion`: no animation, no loop — each
 // layout jumps to rest.
 // Opening a ticket animates the view to it and its linked tickets, framed in the strip of canvas the
-// drawer leaves visible (`uncoveredSpan`); picking an epic or theme in the filter frames those tickets.
+// drawer leaves visible (`uncoveredSpan`).
+// FILTERS HIDE (the page passes only what they leave, `filterGraph`): a filter change re-packs the tickets
+// left, animated, and the view follows Fit (`filterKey`). Only the SELECTION fades (its neighbourhood).
 // Drag a node to PIN it (fx/fy); pins are remembered per browser for this workspace and sprint
 // (localStorage, try/catch — the page works without it); "Reset layout" clears them.
 //
@@ -162,6 +179,9 @@ import {
 // section in fixed order (`statusSplitLayout`): tickets are pulled to their SUB-anchor, each sub-group
 // gets its own faint halo tinted with its section's ring colour and a small name, the group's halo
 // encloses its sub-halos (`enclosingHalo`), and sub-halos inside one group are pushed apart like groups.
+// GROUP BY DEPENDENCIES: one halo per depends_on CHAIN (`assignGroups`), each laid out as a timeline —
+// a column per layer, prerequisites on the left (`chainLayout`); a chained ticket is held firmly at its own
+// spot (forceX per layer). Unchained tickets share one "Standalone" halo. No status or person split here.
 // "SPLIT BY ASSIGNEE" goes one level deeper: inside each group (or each status sub-group) one room per
 // person (`personSplitLayout`), a faint NEUTRAL halo named with the person, pushed apart within its
 // parent ('separate-people'); the parent's halo encloses its person halos.
@@ -194,8 +214,6 @@ type SimLink = SimulationLinkDatum<SimNode> & { id: string; kind: SprintGraphEdg
 
 /** Radians per tick of the drift's rotation (about one turn in ten minutes at 60 fps). */
 const DRIFT_ROTATION = 1.75e-4;
-/** Radians per second the PR satellites orbit their ticket. */
-const ORBIT_SPEED = 0.25;
 /** Below this zoom only ticket keys are labelled. */
 const FAR_ZOOM = 0.8;
 /** Placing labels while the canvas moves: once every this many frames. */
@@ -274,7 +292,6 @@ export function SprintGraph({
   nodes,
   edges,
   pinKey,
-  filters,
   selected,
   hops,
   groupMode,
@@ -285,8 +302,11 @@ export function SprintGraph({
   members,
   faintShown,
   layoutIntent = '',
+  filterKey = '',
   drawerOpen = false,
   frameRequest = 0,
+  focusRequest = null,
+  progress = null,
   onOpen,
   onClearSelection,
 }: {
@@ -310,9 +330,12 @@ export function SprintGraph({
    *  this changed; a re-layout caused by refetched DATA (a sync, the sprint re-read, briefs or themes
    *  landing) keeps every ticket on screen exactly where it is — no tween, no view move, no drift. */
   layoutIntent?: string;
+  /** Changes exactly when what the FILTERS show changes (`filterKey`). The page has already HIDDEN what
+   *  they leave out (`filterGraph`); a change here RE-PACKS the tickets left — each starts from its
+   *  group's room again, animated from where it is — and the view follows Fit, like a grouping switch. */
+  filterKey?: string;
   /** localStorage key for pinned positions (`pinnedStorageKey`). */
   pinKey: string;
-  filters: SprintGraphFilters;
   /** The selected node (the drawer's ticket, and kept after it closes); null = none. */
   selected: string | null;
   hops: 1 | 2;
@@ -320,6 +343,11 @@ export function SprintGraph({
   drawerOpen?: boolean;
   /** Bumped on every ticket OPEN (click, Enter, a link in the drawer): frame `selected` and its links. */
   frameRequest?: number;
+  /** A storyline click (SprintStoryStrip): frame these tickets; `idents: []` = back to Fit. `seq` is
+   *  bumped per click so the same storyline frames again. */
+  focusRequest?: { seq: number; idents: readonly string[] } | null;
+  /** The refresh bar across the top of the canvas (`sprintProgress`); null = nothing in flight. */
+  progress?: SprintProgress;
   onOpen: (ident: string) => void;
   onClearSelection: () => void;
 }): JSX.Element {
@@ -328,8 +356,9 @@ export function SprintGraph({
   const svgRef = useRef<SVGSVGElement | null>(null);
   const viewRef = useRef<SVGGElement | null>(null);
   const nodeEls = useRef(new Map<string, SVGGElement>());
-  const satEls = useRef(new Map<string, SVGGElement>());
-  const edgeEls = useRef(new Map<string, { line: SVGLineElement | null; hit: SVGLineElement | null }>());
+  const edgeEls = useRef(new Map<string, { line: SVGPathElement | null; hit: SVGPathElement | null }>());
+  /** Each link's bend, in lanes (`edgeBends`): read by the rAF loop. */
+  const bendsRef = useRef(new Map<string, number>());
   const haloEls = useRef(
     new Map<string, { g: SVGGElement | null; circle: SVGCircleElement | null; label: SVGGElement | null; text: SVGTextElement | null }>(),
   );
@@ -376,7 +405,6 @@ export function SprintGraph({
   const size = useRef({ w: 0, h: 0 });
   const pointerInside = useRef(false);
   const dragging = useRef<string | null>(null);
-  const orbit = useRef(0);
   const pins = useRef<PinnedPositions>({});
   const [hasPins, setHasPins] = useState(false);
   const [hover, setHover] = useState<Hover>(null);
@@ -391,12 +419,8 @@ export function SprintGraph({
   reducedRef.current = reducedMotion;
 
   const byId = useMemo(() => new Map(nodes.map((n) => [n.ident, n])), [nodes]);
-  const deps = useMemo(() => dependencyIdents(edges), [edges]);
-  const passes = useMemo(() => {
-    const m = new Map<string, boolean>();
-    for (const n of nodes) m.set(n.ident, passesFilters(n, filters, deps, members));
-    return m;
-  }, [nodes, filters, deps, members]);
+  const bends = useMemo(() => edgeBends(edges), [edges]);
+  bendsRef.current = bends;
   const focusSet = useMemo(() => (selected != null && byId.has(selected) ? neighbourhood(edges, selected, hops) : null), [
     selected,
     byId,
@@ -404,6 +428,9 @@ export function SprintGraph({
     hops,
   ]);
   const hoverNode = hover?.type === 'node' ? hover.id : null;
+  // The storyline highlight (a VIEW state: nothing re-lays out): its drawn tickets, or null.
+  const storySet = useMemo(() => storyHighlightSet(focusRequest?.idents, byId), [focusRequest, byId]);
+  const fade = useMemo(() => fadedBy(focusSet, storySet), [focusSet, storySet]);
 
   // "Split by status": each group's sub-group rooms (a row, in section order), sized by the DRAWN
   // members per status — ghosts included, so "Show shipped history" re-spaces them.
@@ -481,9 +508,10 @@ export function SprintGraph({
   labelCtx.current = {
     byId,
     groupDrawn: new Map(groups.map((g) => [g.key, g.drawn])),
-    promoted: new Set([selected, hoverNode, focusId].filter((x): x is string => x != null)),
-    faded: new Set(nodes.filter((n) => passes.get(n.ident) === false || (focusSet != null && !focusSet.has(n.ident))).map((n) => n.ident)),
-    groupLabels: new Map(groupMode === 'none' ? [] : groups.map((g) => [g.key, truncateLabel(g.label, GROUP_LABEL_MAX)])),
+    // A storyline's tickets are REVEALED like a hovered one (placed after every other label, so none moves).
+    promoted: new Set([selected, hoverNode, focusId, ...(storySet ?? [])].filter((x): x is string => x != null)),
+    faded: new Set(nodes.filter((n) => fade.node(n.ident)).map((n) => n.ident)),
+    groupLabels: new Map(groupMode === 'none' ? [] : groups.map((g) => [g.key, truncateLabel(g.label, groupLabelMax(g.key))])),
     subDrawn: subSizeRef.current,
     personLabels: new Map(
       [...personSizeRef.current.keys()].map((k) => {
@@ -633,7 +661,8 @@ export function SprintGraph({
         id,
         x,
         y,
-        R: drawnRadius(n.r, disc) * t.k,
+        // Past the PR dots too, so a label never covers one.
+        R: (nodeExtentOf(node, n.r) / drawnRadius(n.r, 1)) * drawnRadius(n.r, disc) * t.k,
         w: d.w,
         h: d.h,
         // Hover / focus / selection only REVEALS a hidden label; it never re-ranks or moves one.
@@ -743,6 +772,7 @@ export function SprintGraph({
       svg.style.setProperty('--sg-inv', String(1 / t.k));
       svg.style.setProperty('--sg-disc', String(discScale(t.k)));
       svg.style.setProperty('--sg-badge', badgeScale(t.k).toFixed(3));
+      svg.style.setProperty('--sg-sat', satelliteScale(t.k).toFixed(3));
       svg.setAttribute('data-zoom', t.k < FAR_ZOOM ? 'far' : 'near');
     }
     applyHalos();
@@ -770,23 +800,18 @@ export function SprintGraph({
       const a = l.source as SimNode;
       const b = l.target as SimNode;
       if (a.x == null || a.y == null || b.x == null || b.y == null) continue;
-      const p = edgeEndpoints({ x: a.x, y: a.y, r: a.r + 4 }, { x: b.x, y: b.y, r: b.r + 4 }, l.kind === 'depends_on' ? 2 : 0);
-      for (const line of [els.line, els.hit]) {
-        if (line == null) continue;
-        line.setAttribute('x1', p.x1.toFixed(1));
-        line.setAttribute('y1', p.y1.toFixed(1));
-        line.setAttribute('x2', p.x2.toFixed(1));
-        line.setAttribute('y2', p.y2.toFixed(1));
-      }
+      const { d } = edgeCurve(
+        { x: a.x, y: a.y, r: a.r + 4 },
+        { x: b.x, y: b.y, r: b.r + 4 },
+        bendsRef.current.get(l.id) ?? 1,
+        l.kind === 'depends_on' ? 2 : 0,
+      );
+      els.line?.setAttribute('d', d);
+      els.hit?.setAttribute('d', d);
     }
     labelFrame.current += 1;
     if (labelFrame.current % LABEL_EVERY === 0) placeLabelsNow();
   }, [applyHalos, placeLabelsNow]);
-
-  const applyOrbit = useCallback((): void => {
-    const deg = ((orbit.current * 180) / Math.PI) % 360;
-    for (const el of satEls.current.values()) el.setAttribute('transform', `rotate(${deg.toFixed(2)})`);
-  }, []);
 
   // The open key covers the bottom-left corner: leave it room.
   const fitPad = useCallback(
@@ -858,10 +883,41 @@ export function SprintGraph({
       `${nodes.map((n) => `${n.ident}:${n.degree}:${n.ghost ? 1 : 0}`).join('|')}#${edges.map((e) => edgeId(e)).join('|')}`,
     [nodes, edges],
   );
+  // Group by Dependencies: each chain's timeline (`chainLayout`) — its room, and each ticket's spot in it.
+  const chains = useMemo((): Map<string, ChainLayout> | null => {
+    if (groupMode !== 'dependencies') return null;
+    const byChain = new Map<string, string[]>();
+    for (const n of nodes) {
+      const g = groupOf.get(n.ident);
+      if (g == null || g === NO_GROUP) continue;
+      byChain.set(g, [...(byChain.get(g) ?? []), n.ident]);
+    }
+    const keyOf = (id: string): string => byId.get(id)?.key ?? id;
+    const out = new Map<string, ChainLayout>();
+    for (const [g, ids] of byChain) {
+      const inChain = new Set(ids);
+      out.set(g, chainLayout(ids, edges.filter((e) => inChain.has(e.from) && inChain.has(e.to)), keyOf));
+    }
+    return out;
+  }, [groupMode, nodes, edges, groupOf, byId]);
   // Split: a group's room is the circle round its row of sub-groups.
   const anchors = useMemo(
-    () => groupAnchors(groups.map((g) => ({ ...g, radius: splits?.get(g.key)?.r ?? persons?.splits.get(g.key)?.r })), aspect ?? 1),
-    [groups, aspect, splits, persons],
+    () =>
+      groupAnchors(
+        groups.map((g) => ({ ...g, radius: chains?.get(g.key)?.r ?? splits?.get(g.key)?.r ?? persons?.splits.get(g.key)?.r })),
+        aspect ?? 1,
+      ),
+    [groups, aspect, splits, persons, chains],
+  );
+  /** A chained ticket's own spot (its chain's anchor plus its place in the timeline); else undefined. */
+  const chainSpot = useCallback(
+    (ident: string): { x: number; y: number } | undefined => {
+      const g = groupOf.get(ident);
+      const a = g != null ? anchors.get(g) : undefined;
+      const o = g != null ? chains?.get(g)?.offsets.get(ident) : undefined;
+      return a != null && o != null ? { x: a.x + o.x, y: a.y + o.y } : undefined;
+    },
+    [groupOf, anchors, chains],
   );
   const subAnchors = useMemo(() => (splits != null ? subGroupAnchors(anchors, splits) : new Map<string, { x: number; y: number; r: number }>()), [
     anchors,
@@ -876,32 +932,61 @@ export function SprintGraph({
   const layoutMode = `${groupMode}${splits != null ? ':split' : ''}${persons != null ? ':person' : ''}`;
   const lastMode = useRef<string | null>(null);
   const lastIntent = useRef<string | null>(null);
+  const lastFilter = useRef<string | null>(null);
+  /** A layout has been shown (the opening animation runs once; a filter that hides everything does not
+   *  make the next layout a "first"). */
+  const laidOut = useRef(false);
   const grouping = useMemo(
     () =>
       `${aspect == null ? '?' : 'm'}#${layoutMode}#${[...anchors].map(([k, a]) => `${k}:${a.x},${a.y}`).join('|')}#${[...subAnchors]
         .map(([k, a]) => `${k}:${a.x},${a.y}`)
         .join('|')}#${[...personAnchors].map(([k, a]) => `${k}:${a.x},${a.y}`).join('|')}#${nodes
-        .map((n) => `${n.ident}=${groupOf.get(n.ident) ?? ''}/${subOf(n.ident, n.stage) ?? ''}/${personRoomOf(n.ident) ?? ''}`)
+        .map((n) => {
+          const c = chainSpot(n.ident);
+          return `${n.ident}=${groupOf.get(n.ident) ?? ''}/${subOf(n.ident, n.stage) ?? ''}/${personRoomOf(n.ident) ?? ''}${c != null ? `@${c.x},${c.y}` : ''}`;
+        })
         .join('|')}`,
-    [layoutMode, anchors, subAnchors, personAnchors, nodes, groupOf, subOf, personRoomOf, aspect],
+    [layoutMode, anchors, subAnchors, personAnchors, nodes, groupOf, subOf, personRoomOf, chainSpot, aspect],
   );
 
   useLayoutEffect(() => {
     // Wait for the canvas's measured shape: the group anchors are laid out in it.
     if (aspect == null) return;
     const prev = simNodes.current;
-    const first = prev.size === 0;
+    const first = !laidOut.current;
+    // A layout still ANIMATING IN (the opening animation, a re-layout): this one starts from where that
+    // one LANDS — every ticket is moved to its landing spot first, so nothing below (the held positions
+    // of a quiet re-layout, a returning neighbour's seat) ever reads a mid-flight position — and it
+    // animates on from where each ticket is DRAWN now (`restPositions`, sprintGraphModel.ts).
+    const interrupted = tween.current;
+    const drawnAt = new Map<string, { x: number; y: number }>();
+    for (const [id, n] of prev) if (n.x != null && n.y != null) drawnAt.set(id, { x: n.x, y: n.y });
+    if (interrupted != null) {
+      for (const [id, p] of restPositions(drawnAt, interrupted.to)) {
+        const n = prev.get(id);
+        if (n == null) continue;
+        n.x = p.x;
+        n.y = p.y;
+      }
+      tween.current = null;
+    }
     // A new grouping is a new arrangement: the view follows Fit again while it settles, and the
     // tickets start from their new groups (not from the old arrangement, which would have to pass
     // through itself and could jam).
     const modeChanged = lastMode.current != null && lastMode.current !== layoutMode;
+    // A filter picked or cleared: the tickets left RE-PACK (each starts from its room again), animated
+    // from where they are drawn, and the view follows Fit.
+    const refiltered = lastFilter.current != null && lastFilter.current !== filterKey;
+    lastFilter.current = filterKey;
+    const repack = modeChanged || refiltered;
     // Data-driven (not first, not a reader choice): hold every ticket already drawn in place.
     // (A resize that changes the canvas's shape re-lays the groups, so it still animates.)
-    const intent = `${layoutIntent}@${aspect}`;
-    const quiet = !first && !modeChanged && lastIntent.current === intent;
+    const intent = `${layoutIntent}|${filterKey}@${aspect}`;
+    const quiet = !first && !repack && lastIntent.current === intent;
     lastIntent.current = intent;
-    if (modeChanged) viewTouched.current = false;
+    if (repack) viewTouched.current = false;
     lastMode.current = layoutMode;
+    if (nodes.length > 0) laidOut.current = true;
     pins.current = readPinned(safeLocalStorage(), pinKey);
     setHasPins(Object.keys(pins.current).length > 0);
     const grouped = groupMode !== 'none';
@@ -928,7 +1013,7 @@ export function SprintGraph({
     }
     const fresh = new Map<string, SimNode>();
     nodes.forEach((n, i) => {
-      const old = modeChanged ? undefined : prev.get(n.ident);
+      const old = repack ? undefined : prev.get(n.ident);
       const pin = pins.current[n.ident];
       const group = groupOf.get(n.ident) ?? null;
       const sub = grouped ? subOf(n.ident, n.stage) : null;
@@ -936,6 +1021,7 @@ export function SprintGraph({
       const seat = person ?? sub ?? group;
       const anchor =
         person != null ? personAnchors.get(person) : sub != null ? subAnchors.get(sub) : group != null ? anchors.get(group) : undefined;
+      const spot = grouped ? chainSpot(n.ident) : undefined;
       // A node already on the canvas stays where it is; a returning one starts beside a drawn
       // neighbour that is already placed, else inside its group, else on the ring.
       let x: number;
@@ -944,6 +1030,16 @@ export function SprintGraph({
       if (old?.x != null && old.y != null) {
         x = old.x;
         y = old.y;
+      } else if (spot != null) {
+        // A chained ticket starts on its own spot in the timeline.
+        x = spot.x + Math.cos(i * 2.4) * 6;
+        y = spot.y + Math.sin(i * 2.4) * 6;
+      } else if (repack && grouped && anchor != null) {
+        // A re-pack: every ticket starts inside its own room (not beside an old neighbour).
+        const j = seatInGroup.get(n.ident) ?? 0;
+        const rr = anchor.r * 0.8 * Math.sqrt((j + 0.5) / Math.max(1, groupCount.get(seat as string) ?? 1));
+        x = anchor.x + Math.cos(j * 2.39996) * rr;
+        y = anchor.y + Math.sin(j * 2.39996) * rr;
       } else {
         const nb = (adj.get(n.ident) ?? []).map((id) => prev.get(id)).find((m) => m?.x != null && m.y != null);
         if (nb != null) {
@@ -978,14 +1074,31 @@ export function SprintGraph({
     const links: SimLink[] = edges
       .filter((e) => fresh.has(e.from) && fresh.has(e.to))
       .map((e) => ({ id: edgeId(e), source: e.from, target: e.to, kind: e.kind }));
-    const anchorOf = (d: SimNode): { x: number; y: number } | undefined =>
-      d.person != null
-        ? personAnchors.get(d.person)
-        : d.sub != null
-          ? subAnchors.get(d.sub)
-          : d.group != null
-            ? anchors.get(d.group)
-            : undefined;
+    // A chained ticket is held at its own spot in its chain's timeline (`chainSpot`).
+    const spotOf = new Map<string, { x: number; y: number }>();
+    if (grouped) for (const id of fresh.keys()) {
+      const c = chainSpot(id);
+      if (c != null) spotOf.set(id, c);
+    }
+    // How far the halo separation has moved each GROUP's anchor (and every spot inside it). A push on the
+    // tickets alone is undone every tick by a strong pull back to a FIXED spot (a chain's timeline holds its
+    // tickets firmly), and the two settle with the halos still overlapping — so the push moves the anchor.
+    const groupShift = new Map<string, { x: number; y: number }>();
+    const anchorOf = (d: SimNode): { x: number; y: number } | undefined => {
+      const base =
+        spotOf.get(d.id) ??
+        (d.person != null
+          ? personAnchors.get(d.person)
+          : d.sub != null
+            ? subAnchors.get(d.sub)
+            : d.group != null
+              ? anchors.get(d.group)
+              : undefined);
+      const sh = d.group != null ? groupShift.get(d.group) : undefined;
+      return base == null || sh == null ? base : { x: base.x + sh.x, y: base.y + sh.y };
+    };
+    const anchorX = (d: SimNode): number => anchorOf(d)?.x ?? 0;
+    const anchorY = (d: SimNode): number => anchorOf(d)?.y ?? 0;
     // The room a ticket shares: its person room, else its status sub-group, else its group.
     const roomOf = (d: SimNode): string | null => d.person ?? d.sub ?? d.group;
     const split = (d: SimNode): boolean => d.sub != null || d.person != null;
@@ -1002,6 +1115,9 @@ export function SprintGraph({
           .strength((l) => {
             const a = l.source as SimNode;
             const b = l.target as SimNode;
+            // Inside a dependency chain the timeline places both ends: a link that pulled them together
+            // would drag a ticket out of its column.
+            if (spotOf.has(a.id) && spotOf.has(b.id)) return 0.02;
             if (!grouped || roomOf(a) === roomOf(b)) return l.kind === 'depends_on' ? 0.5 : 0.25;
             if (split(a) && a.group === b.group) return 0.03 * Math.min(1, 2 / Math.max(1, a.degree, b.degree));
             return 0.03;
@@ -1027,14 +1143,39 @@ export function SprintGraph({
       )
       .force(
         'x',
-        forceX<SimNode>((d) => anchorOf(d)?.x ?? 0).strength((d) =>
-          grouped ? (anchorOf(d) != null ? (d.person != null ? 0.14 : d.sub != null ? 0.12 : 0.1) : 0.02) : d.degree > 0 ? 0.045 : 0,
+        // A chained ticket is held firmly in its column (its layer) and loosely in its row.
+        forceX<SimNode>(anchorX).strength((d) =>
+          spotOf.has(d.id)
+            ? 0.4
+            : grouped
+              ? anchorOf(d) != null
+                ? d.person != null
+                  ? 0.14
+                  : d.sub != null
+                    ? 0.12
+                    : 0.1
+                : 0.02
+              : d.degree > 0
+                ? 0.045
+                : 0,
         ),
       )
       .force(
         'y',
-        forceY<SimNode>((d) => anchorOf(d)?.y ?? 0).strength((d) =>
-          grouped ? (anchorOf(d) != null ? (d.person != null ? 0.14 : d.sub != null ? 0.12 : 0.1) : 0.02) : d.degree > 0 ? 0.045 : 0,
+        forceY<SimNode>(anchorY).strength((d) =>
+          spotOf.has(d.id)
+            ? 0.3
+            : grouped
+              ? anchorOf(d) != null
+                ? d.person != null
+                  ? 0.14
+                  : d.sub != null
+                    ? 0.12
+                    : 0.1
+                : 0.02
+              : d.degree > 0
+                ? 0.045
+                : 0,
         ),
       )
       // Ungrouped: tickets with no links orbit loosely on a wide ring around the linked ones.
@@ -1058,6 +1199,13 @@ export function SprintGraph({
           n.vx = (n.vx ?? 0) + p.dx * 0.06;
           n.vy = (n.vy ?? 0) + p.dy * 0.06;
         }
+        for (const [g, p] of push) {
+          const cur = groupShift.get(g) ?? { x: 0, y: 0 };
+          groupShift.set(g, { x: cur.x + p.dx * 0.05, y: cur.y + p.dy * 0.05 });
+        }
+        // d3's forceX / forceY read their targets once, when (re)initialised: hand the accessors back.
+        (sim.force('x') as ReturnType<typeof forceX<SimNode>> | undefined)?.x(anchorX);
+        (sim.force('y') as ReturnType<typeof forceY<SimNode>> | undefined)?.y(anchorY);
       });
     }
     // Split by status: the sub-halos inside one group are pushed apart the same way, each sub-group as a
@@ -1118,7 +1266,7 @@ export function SprintGraph({
     }
     // Every layout is computed to rest before it is shown, then ANIMATED in: on first load from another
     // grouping (`introGroupMode`), on a re-layout from where each ticket was. Reduced motion: it appears.
-    const animate = !reducedRef.current && !quiet;
+    const animate = layoutAnimates({ reducedMotion: reducedRef.current, quiet, interrupted: interrupted != null });
     const from = new Map<string, { x: number; y: number }>();
     if (first) {
       const introMode = introGroupMode(groupMode, nodes.some((n) => !n.ghost && n.theme != null));
@@ -1134,10 +1282,7 @@ export function SprintGraph({
         from.set(id, n.fx != null && n.fy != null ? { x: n.fx, y: n.fy } : seeds.get(id) ?? { x: n.x as number, y: n.y as number });
       }
     } else {
-      for (const [id, n] of fresh) {
-        const old = prev.get(id);
-        from.set(id, old?.x != null && old.y != null ? { x: old.x, y: old.y } : { x: n.x as number, y: n.y as number });
-      }
+      for (const [id, n] of fresh) from.set(id, drawnAt.get(id) ?? { x: n.x as number, y: n.y as number });
     }
     // Quiet: the tickets already drawn are held where they are while only new ones find a place.
     const held: SimNode[] = [];
@@ -1149,7 +1294,7 @@ export function SprintGraph({
         held.push(n);
       }
     }
-    sim.alpha(first || modeChanged ? 1 : quiet ? 0.3 : 0.7);
+    sim.alpha(first || repack ? 1 : quiet ? 0.3 : 0.7);
     for (let i = 0; i < (first ? 420 : quiet ? 120 : 320); i += 1) sim.tick();
     for (const n of held) {
       n.fx = null;
@@ -1171,7 +1316,8 @@ export function SprintGraph({
       }
     });
     simRef.current = sim;
-    viewAnim.current = null;
+    // A quiet re-layout leaves a zoom / pan in progress alone (it moves nothing the reader chose).
+    if (!quiet) viewAnim.current = null;
     if (animate) {
       const to = new Map<string, { x: number; y: number }>();
       for (const [id, n] of fresh) to.set(id, { x: n.x as number, y: n.y as number });
@@ -1197,7 +1343,17 @@ export function SprintGraph({
         view.current = viewFrom;
         applyView();
       }
-      tween.current = { from, to, start: performance.now(), dur: first ? INTRO_MS : RELAYOUT_MS, viewFrom, viewTo, fadeHalos: first || modeChanged };
+      const now = performance.now();
+      tween.current = {
+        from,
+        to,
+        start: now,
+        // A quiet layout taking over an interrupted one finishes that journey in the time it had left.
+        dur: first ? INTRO_MS : quiet && interrupted != null ? continuedTweenMs(now, interrupted) : RELAYOUT_MS,
+        viewFrom,
+        viewTo,
+        fadeHalos: first || modeChanged || (interrupted?.fadeHalos ?? false),
+      };
       if (tween.current.fadeHalos && haloLayerRef.current != null) haloLayerRef.current.style.opacity = '0';
       applyPositions();
       wake(SETTLE_MS);
@@ -1218,7 +1374,7 @@ export function SprintGraph({
   // Promoting a label (hover, focus, selection) or fading one (a filter) re-decides who shows.
   useEffect(() => {
     placeLabelsNow();
-  }, [placeLabelsNow, hoverNode, focusId, selected, passes, focusSet, groupMode]);
+  }, [placeLabelsNow, hoverNode, focusId, selected, focusSet, storySet, groupMode]);
 
   // ── The loop: one frame of whatever is moving; it stops itself when nothing is ───────────────────
   frameRef.current = (t: number): void => {
@@ -1259,9 +1415,7 @@ export function SprintGraph({
       moved = true;
     }
     if (moved) {
-      orbit.current += dt * ORBIT_SPEED;
       applyPositions();
-      applyOrbit();
       // After a layout lands, an untouched view eases toward Fit while the forces finish.
       if (tw == null && !viewTouched.current && viewAnim.current == null && size.current.w > 0) {
         view.current = lerpView(view.current, fitTarget(), 0.06);
@@ -1310,10 +1464,9 @@ export function SprintGraph({
       }
       if (haloLayerRef.current != null) haloLayerRef.current.style.opacity = '';
       applyPositions();
-      applyOrbit();
       applyView();
     }
-  }, [reducedMotion, applyPositions, applyOrbit, applyView]);
+  }, [reducedMotion, applyPositions, applyView]);
   useEffect(
     () => () => {
       cancelAnimationFrame(rafId.current);
@@ -1373,43 +1526,21 @@ export function SprintGraph({
     frameIdents(withNeighbours(edgesRef.current, [id]), drawerOpenRef.current);
   }, [frameRequest, frameIdents]);
 
-  // An epic or theme picked in the filter: its tickets and their linked tickets. Cleared: Fit.
-  const groupFilter = filters.theme ?? filters.epic;
-  const lastGroupFilter = useRef(groupFilter);
+  // A storyline clicked: frame its tickets that are drawn (a filter may hide some); none / cleared → Fit.
   useEffect(() => {
-    if (lastGroupFilter.current === groupFilter) return;
-    lastGroupFilter.current = groupFilter;
-    pendingFrame.current = null;
-    if (groupFilter == null) {
-      // A grouping switch cleared it: the re-layout's own view tween already ends on Fit over the
-      // LANDED layout — a second animation measured now would read the old positions and fight it.
-      if (tween.current != null && !viewTouched.current) return;
-      const toFit = (): void => animateView(fitTarget(), false);
-      if (tween.current != null) pendingFrame.current = toFit;
-      else toFit();
+    if (focusRequest == null) return;
+    const ids = new Set(focusRequest.idents.filter((id) => simNodes.current.has(id)));
+    if (ids.size === 0) {
+      const t = fitTarget();
+      viewTouched.current = false;
+      animateView(t);
       return;
     }
-    const ids = nodes.filter((n) => passes.get(n.ident) === true).map((n) => n.ident);
-    if (ids.length === 0) return;
-    // The picked epic / theme is a group on screen (the picker follows the grouping): frame its halo,
-    // with its name inside it — measured once the layout has landed. (Zooming in only shrinks the room the
-    // name needs, so the halo measured now holds the one drawn at the framed zoom.)
-    // The room the halo makes for its name depends on the zoom the framing picks: framed with the room
-    // at the closest zoom, then again with the room at the zoom that gave (as Fit does).
-    const frame = (): void => {
-      const want = withNeighbours(edges, ids);
-      const haloAt = (k: number): Array<{ x: number; y: number; r: number }> => {
-        const h = currentHalos(discScale(k), k).get(groupFilter);
-        return h != null ? [{ x: h.x, y: h.y, r: h.r }] : [];
-      };
-      const first = frameTarget(want, false, haloAt(FRAME_ZOOM_MAX));
-      if (first == null) return;
-      const t = frameTarget(want, false, haloAt(first.k)) ?? first;
-      animateView(t);
-    };
-    if (tween.current != null) pendingFrame.current = frame;
-    else frame();
-  }, [groupFilter, nodes, edges, passes, frameTarget, animateView, fitTarget, currentHalos]);
+    frameIdents(ids, drawerOpenRef.current);
+  }, [focusRequest, frameIdents, fitTarget, animateView]);
+
+  // A filter needs no framing of its own: it HIDES what it leaves out and the tickets left re-pack, and
+  // the view follows Fit while they do (`filterKey`).
 
   // ── Size ────────────────────────────────────────────────────────────────────────────────────────
   useLayoutEffect(() => {
@@ -1672,11 +1803,7 @@ export function SprintGraph({
         labelSides.current.delete(id);
       } else labelEls.current.set(id, el);
     },
-    registerSat: (id: string, el: SVGGElement | null): void => {
-      if (el == null) satEls.current.delete(id);
-      else satEls.current.set(id, el);
-    },
-    registerEdge: (id: string, part: 'line' | 'hit', el: SVGLineElement | null): void => {
+    registerEdge: (id: string, part: 'line' | 'hit', el: SVGPathElement | null): void => {
       const cur = edgeEls.current.get(id) ?? { line: null, hit: null };
       cur[part] = el;
       if (cur.line == null && cur.hit == null) edgeEls.current.delete(id);
@@ -1725,7 +1852,6 @@ export function SprintGraph({
   // reduced motion there is no next frame, so write them now.
   useLayoutEffect(() => {
     applyPositions();
-    applyOrbit();
   });
 
   // The tooltip's anchor: a node's screen position (stable — the canvas is frozen under the pointer).
@@ -1741,13 +1867,14 @@ export function SprintGraph({
   const edgeById = useMemo(() => new Map(edges.map((e) => [edgeId(e), e])), [edges]);
   // The label layer's order: the promoted labels last (drawn on top).
   const labelOrder = useMemo(() => {
-    const top = [selected, focusId, hoverNode].filter((x): x is string => x != null);
+    // A storyline's tickets above the rest; the selected / focused / hovered one above those.
+    const top = [...(storySet ?? []), selected, focusId, hoverNode].filter((x): x is string => x != null);
     if (top.length === 0) return nodes;
     const set = new Set(top);
     return [...nodes.filter((n) => !set.has(n.ident)), ...top.flatMap((id) => (byId.get(id) != null ? [byId.get(id) as SprintGraphNode] : []))].filter(
       (n, i, a) => a.findIndex((m) => m.ident === n.ident) === i,
     );
-  }, [nodes, byId, selected, focusId, hoverNode]);
+  }, [nodes, byId, selected, focusId, hoverNode, storySet]);
   const hovered = hover?.type === 'edge' ? edgeById.get(hover.id) : undefined;
 
   return (
@@ -1843,7 +1970,7 @@ export function SprintGraph({
                         strokeWidth={3}
                         paintOrder="stroke"
                       >
-                        {truncateLabel(g.label, GROUP_LABEL_MAX)}
+                        {truncateLabel(g.label, groupLabelMax(g.key))}
                       </text>
                     </g>
                   </g>
@@ -1935,11 +2062,10 @@ export function SprintGraph({
             {edges.map((e) => {
               const id = edgeId(e);
               const st = edgeStyle(e.kind);
-              const ok = passes.get(e.from) !== false && passes.get(e.to) !== false;
-              const inFocus = focusSet == null || (focusSet.has(e.from) && focusSet.has(e.to));
+              const inFocus = !fade.edge(e.from, e.to);
               const lit = hoverNode != null && (e.from === hoverNode || e.to === hoverNode);
               const isHover = hover?.type === 'edge' && hover.id === id;
-              const opacity = !ok ? 0.03 : !inFocus ? 0.06 : lit || isHover ? 1 : st.opacity;
+              const opacity = !inFocus ? 0.06 : lit || isHover ? 1 : st.opacity;
               return (
                 <EdgeView
                   key={id}
@@ -1949,7 +2075,7 @@ export function SprintGraph({
                   dash={st.dash}
                   arrow={st.arrow}
                   opacity={opacity}
-                  interactive={ok && inFocus}
+                  interactive={inFocus}
                   handlers={handlers.current}
                 />
               );
@@ -1957,19 +2083,18 @@ export function SprintGraph({
           </g>
           <g>
             {nodes.map((n) => {
-              const ok = passes.get(n.ident) !== false;
-              const inFocus = focusSet == null || focusSet.has(n.ident);
-              const shown = ok && inFocus;
+              const inFocus = !fade.node(n.ident);
               return (
                 <NodeView
                   key={n.ident}
                   node={n}
-                  bodyOpacity={!ok ? FILTERED_OPACITY : !inFocus ? DIMMED_OPACITY : nodeBaseOpacity(n)}
+                  bodyOpacity={!inFocus ? DIMMED_OPACITY : nodeBaseOpacity(n)}
                   glow={n.ident === selected || n.ident === hoverNode || n.ident === focusId}
                   selected={n.ident === selected}
-                  focusable={ok}
+                  highlighted={storySet?.has(n.ident) === true}
+                  focusable
                   avatarFailed={n.assignee?.avatarUrl != null && failedAvatars.has(safeExternalUrl(n.assignee.avatarUrl) ?? '')}
-                  dimmed={!shown}
+                  dimmed={!inFocus}
                   handlers={handlers.current}
                 />
               );
@@ -1979,13 +2104,12 @@ export function SprintGraph({
               selected ticket's label is drawn LAST (on top) — raised, never moved. */}
           <g pointerEvents="none">
             {labelOrder.map((n) => {
-              const ok = passes.get(n.ident) !== false;
-              const inFocus = focusSet == null || focusSet.has(n.ident);
+              const inFocus = !fade.node(n.ident);
               return (
                 <LabelView
                   key={n.ident}
                   node={n}
-                  opacity={!ok ? FILTERED_OPACITY : !inFocus ? DIMMED_OPACITY : labelOpacity(n)}
+                  opacity={!inFocus ? DIMMED_OPACITY : labelOpacity(n)}
                   handlers={handlers.current}
                 />
               );
@@ -2009,10 +2133,23 @@ export function SprintGraph({
             {SPRINT_EDGE_LABEL[hovered.kind].toLowerCase()}{' '}
             <span className="font-mono font-semibold">{byId.get(hovered.to)?.key ?? ''}</span>
           </div>
-          {hovered.quote != null && hovered.quote !== '' && <div className="mt-0.5 italic">“{hovered.quote}”</div>}
+          {(() => {
+            // The brief's one-sentence reason leads; the quote follows only when it adds words.
+            const r = { why: hovered.why ?? null, quote: hovered.quote };
+            const why = referenceWhy(r);
+            const quote = referenceQuote(r);
+            return (
+              <>
+                {why != null && <div className="mt-0.5">{why}</div>}
+                {quote != null && <div className="mt-0.5 italic">“{quote}”</div>}
+              </>
+            );
+          })()}
           {hovered.source === 'tracker' && <div className="mt-0.5">A blocking link in the tracker</div>}
         </div>
       )}
+
+      <SprintProgressBar progress={progress} className="pointer-events-none absolute inset-x-0 top-0 z-10 h-[3px]" />
 
       {/* Canvas controls, top right. */}
       <div className="absolute right-2 top-2 flex items-center gap-1">
@@ -2033,7 +2170,7 @@ export function SprintGraph({
         {hasPins && <CanvasButton onClick={resetLayout}>Reset layout</CanvasButton>}
       </div>
 
-      <Legend open={legendOpen} onToggle={() => setLegendOpen((o) => !o)} faintShown={faintShown} groupMode={groupMode} />
+      <Legend open={legendOpen} onToggle={() => setLegendOpen((o) => !o)} faintShown={faintShown} groupMode={groupMode} storyShown={storySet != null} />
 
       {/* The screen-reader alternative: every ticket, in the wire's order. */}
       <ul className="sr-only" aria-label="Tickets in the graph">
@@ -2058,10 +2195,9 @@ type Handlers = {
   key: (id: string) => void;
   avatarFailed: (url: string) => void;
   registerNode: (id: string, el: SVGGElement | null) => void;
-  registerSat: (id: string, el: SVGGElement | null) => void;
   registerLabel: (id: string, el: SVGGElement | null) => void;
   registerLabelAnchor: (id: string, el: SVGGElement | null) => void;
-  registerEdge: (id: string, part: 'line' | 'hit', el: SVGLineElement | null) => void;
+  registerEdge: (id: string, part: 'line' | 'hit', el: SVGPathElement | null) => void;
 };
 
 const EdgeView = memo(function EdgeView({
@@ -2085,8 +2221,9 @@ const EdgeView = memo(function EdgeView({
 }): JSX.Element {
   return (
     <g>
-      <line
+      <path
         ref={(el) => handlers.registerEdge(id, 'line', el)}
+        fill="none"
         stroke={stroke}
         strokeWidth={width}
         strokeDasharray={dash ?? undefined}
@@ -2097,8 +2234,9 @@ const EdgeView = memo(function EdgeView({
         pointerEvents="none"
       />
       {interactive && (
-        <line
+        <path
           ref={(el) => handlers.registerEdge(id, 'hit', el)}
+          fill="none"
           stroke="transparent"
           strokeWidth={10}
           vectorEffect="non-scaling-stroke"
@@ -2115,6 +2253,7 @@ const NodeView = memo(function NodeView({
   bodyOpacity,
   glow,
   selected,
+  highlighted = false,
   focusable,
   avatarFailed,
   dimmed,
@@ -2124,6 +2263,8 @@ const NodeView = memo(function NodeView({
   bodyOpacity: number;
   glow: boolean;
   selected: boolean;
+  /** One of the clicked storyline's tickets: the highlight halo (`STORY_HIGHLIGHT`). */
+  highlighted?: boolean;
   focusable: boolean;
   avatarFailed: boolean;
   dimmed: boolean;
@@ -2131,10 +2272,11 @@ const NodeView = memo(function NodeView({
 }): JSX.Element {
   const r = nodeRadius(n.degree, n.ghost);
   const ring = stageRing(n.stage);
-  const sats = satellitesOf(n.prs);
-  const orbitR = r + 7;
   const avatarUrl = safeExternalUrl(n.assignee?.avatarUrl ?? null) ?? null;
   const showAvatar = !n.ghost && n.assignee != null;
+  // The PR dots: outside the ring, never under the assignee badge (`satellitesOf`), still.
+  const sats = satellitesOf(n.prs, { r, badge: showAvatar });
+  const orbitR = satelliteOrbit(r, sats.length, showAvatar);
   const ar = BADGE_R;
   // The badge's anchor: the disc's top-right rim; it grows OUTWARD from there (`badgeCentre`).
   const rim = r * Math.SQRT1_2;
@@ -2162,6 +2304,14 @@ const NodeView = memo(function NodeView({
       }}
     >
       <g opacity={bodyOpacity} className="sg-body">
+        {/* A storyline's ticket: a soft pink corona (pulsing briefly, still under reduced motion) and a
+            crisp pink ring just outside the status ring — a colour no status, PR dot or selection uses. */}
+        {highlighted && (
+          <g aria-hidden="true" data-sg-highlight="">
+            <circle className="sg-highlight-glow" r={r + 9} fill="none" stroke={STORY_HIGHLIGHT} strokeWidth={14} filter="url(#sg-glow)" />
+            <circle r={r + ringWidth(false, true) / 2 + 2.5} fill="none" stroke={STORY_HIGHLIGHT} strokeWidth={3} />
+          </g>
+        )}
         {/* The disc: an opaque fill (a dark tint of its status) so lines pass BEHIND the ticket, the
             status ring around it, and the status's centre mark — status is colour AND shape. */}
         <circle
@@ -2176,17 +2326,24 @@ const NodeView = memo(function NodeView({
           <StatusMark glyph={statusGlyph(n.stage)} size={gs} />
         </g>
         {sats.length > 0 && (
-          <g ref={(el) => handlers.registerSat(n.ident, el)}>
+          <g aria-hidden="true">
+            {/* Each dot is placed and counter-scaled by CSS (`.sg-sat`, `--sg-sat`): zoomed out it grows a
+                little about its own centre and moves out by as much, so it stays clear of the ring. */}
             {sats.map((s) => (
-              <circle
+              <g
                 key={s.prId}
-                cx={Math.cos(s.angle) * orbitR}
-                cy={Math.sin(s.angle) * orbitR}
-                r={2.8}
-                fill={SATELLITE_FILL[s.kind]}
-                stroke={s.failing ? SATELLITE_FAILING_RING : DISC_GROUND}
-                strokeWidth={s.failing ? 1.4 : 0.6}
-              />
+                className="sg-sat"
+                style={{ '--ox': Math.cos(s.angle).toFixed(4), '--oy': Math.sin(s.angle).toFixed(4), '--o': orbitR.toFixed(2), '--sr': SATELLITE_R } as CSSProperties}
+              >
+                <circle
+                  r={SATELLITE_R}
+                  // A draft is HOLLOW (its colour as the rim), so it never reads as a closed one.
+                  fill={s.kind === 'draft' ? DISC_GROUND : SATELLITE_FILL[s.kind]}
+                  stroke={s.failing ? SATELLITE_FAILING_RING : s.kind === 'draft' ? SATELLITE_FILL.draft : DISC_GROUND}
+                  strokeWidth={s.failing ? 2.4 : s.kind === 'draft' ? 2 : 1.2}
+                />
+                {s.failing && s.kind === 'draft' && <circle r={SATELLITE_R - 2.6} fill={SATELLITE_FILL.draft} />}
+              </g>
             ))}
           </g>
         )}
@@ -2222,6 +2379,11 @@ const NodeView = memo(function NodeView({
     </g>
   );
 });
+
+/** How far a ticket reaches at zoom 1, its PR dots included (`nodeExtent`): its label sits outside it. */
+function nodeExtentOf(n: Pick<SprintGraphNode, 'ghost' | 'assignee' | 'prs'>, r: number): number {
+  return nodeExtent(r, Math.min(n.prs.length, SATELLITES_MAX), !n.ghost && n.assignee != null);
+}
 
 /** A status's centre mark (Icons.tsx), sized in layout units. */
 function StatusMark({ glyph, size }: { glyph: StatusGlyph; size: number }): JSX.Element {
@@ -2260,7 +2422,7 @@ const LabelView = memo(function LabelView({
   return (
     <g ref={anchorRef}>
       <g opacity={opacity}>
-        <g ref={labelRef} data-sg-label={id} className="sg-label" style={{ '--r': drawnRadius(r, 1) } as CSSProperties}>
+        <g ref={labelRef} data-sg-label={id} className="sg-label" style={{ '--r': nodeExtentOf(n, r) } as CSSProperties}>
           <text
             y={11}
             textAnchor="middle"
@@ -2376,6 +2538,7 @@ const GROUP_KEY_TEXT: Record<Exclude<SprintGroupMode, 'none'>, string> = {
   epic: 'Tickets in one epic',
   theme: 'Tickets in one theme',
   section: 'Tickets in one section',
+  dependencies: 'Tickets in one chain',
 };
 
 function Legend({
@@ -2383,11 +2546,14 @@ function Legend({
   onToggle,
   faintShown,
   groupMode,
+  storyShown,
 }: {
   open: boolean;
   onToggle: () => void;
   faintShown: boolean;
   groupMode: SprintGroupMode;
+  /** A storyline is highlighted: the key names its ring. */
+  storyShown: boolean;
 }): JSX.Element {
   const swatchText = { color: SPRINT_CANVAS.legendText };
   return (
@@ -2434,9 +2600,17 @@ function Legend({
               const st = edgeStyle(k);
               return (
                 <span key={k} className="inline-flex items-center gap-1">
-                  <svg width="22" height="8" aria-hidden="true">
-                    <line x1="1" y1="4" x2={st.arrow ? 16 : 21} y2="4" stroke={st.stroke} strokeWidth={Math.max(1, st.width)} strokeDasharray={st.dash ?? undefined} opacity={Math.max(0.6, st.opacity)} />
-                    {st.arrow && <path d="M15,1 L21,4 L15,7 z" fill={st.stroke} />}
+                  <svg width="24" height="10" aria-hidden="true">
+                    <path
+                      d={st.arrow ? 'M1,8 Q10,1 18,6' : 'M1,8 Q12,0 23,8'}
+                      fill="none"
+                      stroke={st.stroke}
+                      strokeWidth={Math.max(1, st.width)}
+                      strokeDasharray={st.dash ?? undefined}
+                      strokeLinecap="round"
+                      opacity={Math.max(0.6, st.opacity)}
+                      markerEnd={st.arrow ? 'url(#sg-arrow)' : undefined}
+                    />
                   </svg>
                   {k === 'builds_on' ? 'Builds on or replaces' : SPRINT_EDGE_LABEL[k]}
                 </span>
@@ -2446,18 +2620,30 @@ function Legend({
           <div className="flex flex-wrap gap-x-3 gap-y-1">
             {(['open', 'draft', 'merged'] as const).map((k) => (
               <span key={k} className="inline-flex items-center gap-1">
-                <svg width="8" height="8" aria-hidden="true">
-                  <circle cx="4" cy="4" r="3" fill={SATELLITE_FILL[k]} />
+                <svg width="12" height="12" aria-hidden="true">
+                  {k === 'draft' ? (
+                    <circle cx="6" cy="6" r="4.5" fill={DISC_GROUND} stroke={SATELLITE_FILL.draft} strokeWidth="1.8" />
+                  ) : (
+                    <circle cx="6" cy="6" r="5" fill={SATELLITE_FILL[k]} />
+                  )}
                 </svg>
                 {k === 'open' ? 'Open PR' : k === 'draft' ? 'Draft PR' : 'Merged PR'}
               </span>
             ))}
             <span className="inline-flex items-center gap-1">
-              <svg width="10" height="10" aria-hidden="true">
-                <circle cx="5" cy="5" r="3" fill={SATELLITE_FILL.open} stroke={SATELLITE_FAILING_RING} strokeWidth="1.5" />
+              <svg width="12" height="12" aria-hidden="true">
+                <circle cx="6" cy="6" r="4.6" fill={SATELLITE_FILL.open} stroke={SATELLITE_FAILING_RING} strokeWidth="2" />
               </svg>
               Checks failing
             </span>
+            {storyShown && (
+              <span className="inline-flex items-center gap-1">
+                <svg width="14" height="14" aria-hidden="true">
+                  <circle cx="7" cy="7" r="5.5" fill="none" stroke={STORY_HIGHLIGHT} strokeWidth="2" />
+                </svg>
+                In the storyline
+              </span>
+            )}
           </div>
         </div>
       )}

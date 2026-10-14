@@ -615,8 +615,8 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   `selectedPrId === prId`, or a PR opened via tab inherits a stale preset.
 - `UserName`'s returned tree SHAPE must not depend on popover-open state — React remounts the
   anchor and the popover lands in the top-left corner.
-- **EVERY RENDERED ICON IS A COMPONENT IN `components/Icons.tsx`** — the SPA ships no icon library
-  and no icon emoji. An emoji paints its own colour (so it cannot be dimmed, hovered or themed), a
+- **EVERY RENDERED ICON IS A COMPONENT IN `components/Icons.tsx`** (ONE exception, brand-coloured:
+  `FileTypeIcons.tsx`) — no icon library, no icon emoji. An emoji paints its own colour (so it cannot be dimmed, hovered or themed), a
   glyph's metrics are a font lookup, and neither can be sized. ⚠ **What stayed a character is a
   DECISION, listed at the bottom of that file's header**: regex matchers against vendor comment
   bodies (`sync/review-fingerprint.ts`, `bot-resolution-markers.ts`, the bot-theme classifiers —
@@ -1190,18 +1190,18 @@ last 13 weeks' stories (`db/story-health.ts`); This Sprint makes BRIEFS, not lab
 § Story labels.
 
 **Activity → This Sprint** (FREE — its own rail line under Pending, `?activityRepo=sprint`; legacy
-`?insightsTab=sprint|merged` lands there): two tabs, the GRAPH and "Merged so far" (`?sprintTab=merged`).
-The graph (`GET /api/sprint-graph` + `…/ticket`, DB only, shared `sprint-graph.ts`): nodes = the sprint's
-tickets + GHOSTS (outside tickets ≤ 3 hops / 60 along edges), staged by the status layout
-(`db/sprint-status-layout.ts`; four stages, the last "Complete", key `'done'`) + PRs; edges = a
-blocking tracker link or a CURRENT BRIEF's depends_on / concurrent / builds_on / supersedes — ONE fold for page, briefs and ghosts (`db/sprint-graph-fold.ts`).
-The BRIEF (Haiku, `review/sprint-briefs/`, after each read, never a view) = summary + criteria + rubric 4's
-references; current on text hash + `SPRINT_BRIEF_VERSION`. Halos nest group → status → person
-("Assigned to"), sized round the DRAWN disc.
-"Check against code" (Sonnet 5, `review/sprint-assess/`, PLAN or VERIFY over the brief's criteria) and
-"Ask Claude about this sprint" (Haiku, `review/sprint-ask/`, the stored graph nonce-fenced, server-side
-turn cap) are LOCAL, gated on `me.ai`, not Pro. ⚠ No chips, findings, checks or write-back.
-[docs/FRONTEND.md](docs/FRONTEND.md) § Activity → This Sprint · [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint briefs.
+`?insightsTab=sprint|merged` lands there): the GRAPH and "Merged so far" (`?sprintTab=merged`).
+`GET /api/sprint-graph` + `…/ticket` (DB only): nodes = sprint tickets + GHOSTS
+(≤ 3 hops / 60), staged by `db/sprint-status-layout.ts`, + PRs; edges = a blocking tracker link or a
+CURRENT BRIEF's depends_on / concurrent / builds_on / supersedes, each with the brief's one-sentence
+`why` — ONE fold (`db/sprint-graph-fold.ts`). The BRIEF (Haiku, `review/sprint-briefs/`, after each read,
+never a view): summary + criteria + references + a `why` per reference AND tracker link; current on
+text hash + `SPRINT_BRIEF_VERSION`. The STORY strip (Haiku, `review/sprint-story/`): code-built
+candidates, model words, a click frames them; ⚠ the LAST story is shown (its hash is the
+re-bill gate, not the display gate). Filters HIDE (ghosts follow the section filter only); Group by
+adds Dependencies (chains, left to right). "Check against code" (Sonnet 5) and "Ask Claude" (Haiku)
+are LOCAL, on `me.ai`. ⚠ No chips, findings, checks or write-back.
+[docs/FRONTEND.md](docs/FRONTEND.md) § Activity → This Sprint · [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint briefs / story.
 
 **The People report** (Reports → People) — a multi-select picker of humans AND bots, one report
 with a SECTION per pick; contract in
@@ -1541,7 +1541,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0095` and plugin `0034`–`0037` + `0040` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0099` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

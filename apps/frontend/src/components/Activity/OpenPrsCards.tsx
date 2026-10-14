@@ -7,10 +7,9 @@ import { useClaudeReviewStarting, useClaudeReviewStates } from '../../hooks/useC
 import { useWorkspaceAutoReview } from '../../hooks/useWorkspaceAutoReview.js';
 import { reviewWorkInProgress } from '../../lib/claudeReviewColumn.js';
 import { useCiReviewStates } from '../../hooks/useCiReview.js';
-import { useTicketLinks } from '../../hooks/useTicketLinks.js';
+import { useOpenPrsTicketGate } from '../../hooks/useOpenPrsTicketGate.js';
 import { useMergedPanelOpen, useTicketMergedPrs } from '../../hooks/useTicketMergedPrs.js';
 import { useStartTicketReview, useTicketReviewStarting, useTicketReviewStates } from '../../hooks/useTicketReview.js';
-import { useTrackerOn } from '../../hooks/useWorkspaceTracker.js';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
@@ -35,7 +34,9 @@ import {
   type OpenPrsSort,
 } from '../../lib/openPrsSort.js';
 import { Avatar } from '../CommentCard.js';
-import { ArrowIcon, CaretIcon, CheckCircleIcon, CheckIcon, ChevronIcon, MergeIcon, TicketIcon } from '../Icons.js';
+import { CopyButton } from '../CopyButton.js';
+import { githubPrUrl } from '../../lib/prLink.js';
+import { ArrowIcon, CaretIcon, CheckCircleIcon, CheckIcon, ChevronIcon, LinkIcon, MergeIcon, TicketIcon } from '../Icons.js';
 import { cardTicketLabel, cardTickets, type CardTicket } from '../../lib/cardTickets.js';
 import { TicketStoryModal } from '../TicketStory.js';
 import {
@@ -318,8 +319,9 @@ export function OpenPrsViewToggle(): JSX.Element {
 // ---- the list ----
 
 export function OpenPrsCards({
-  prs,
+  prs: livePrs,
   isLoading,
+  answered,
   isError,
   sort,
   grouped = false,
@@ -334,10 +336,13 @@ export function OpenPrsCards({
 }: {
   prs: TimelinePr[];
   isLoading: boolean;
+  /** The PR query has answered (its data is here); absent = `!isLoading` (a list handed in whole). */
+  answered?: boolean;
   isError: boolean;
   /** The header's Sort menu choice; null = the default activity order. */
   sort: OpenPrsSort | null;
-  /** The reader picked "Group by ticket". Honoured only once tickets are known (see below). */
+  /** The reader picked "Group by ticket". Honoured only where the workspace has a tracker, once
+   *  its tickets are known (see below). */
   grouped?: boolean;
   /** 'merged' = Reports → "Merged so far": the same cards and stacks over MERGED PRs. It drops
    *  what means nothing once a PR has landed — the CI and merge-readiness chips, the stack
@@ -363,6 +368,13 @@ export function OpenPrsCards({
   const merged = variant === 'merged';
   const aiOn = useAiCapabilities().enabled;
   const claudeOn = aiOn && !merged;
+  // The TICKETS: where THIS workspace has a tracker (core, free — apiVersion 23), ONE request for
+  // every listed PR. The first paint WAITS for them, and what is painted is the PRs and their
+  // tickets taken together, so the page never redraws into ticket stacks under the reader
+  // (hooks/useOpenPrsTicketGate.ts).
+  const workspaceId = useFilters((s) => s.workspaceId);
+  const ticketGate = useOpenPrsTicketGate(livePrs, workspaceId, isLoading, answered ?? !isLoading);
+  const { prs, ticketData, ticketsOn } = ticketGate;
   const prIds = useMemo(() => prs.map((p) => p.id), [prs]);
   const { data: claudeData } = useClaudeReviewStates(prIds, claudeOn);
   const claudeStates = useMemo(
@@ -372,10 +384,6 @@ export function OpenPrsCards({
   // The CI review (its own run): ONE batched request for every listed PR, like the states above.
   const { data: ciData } = useCiReviewStates(prIds, claudeOn);
   const ciStates = useMemo(() => new Map((ciData?.states ?? []).map((st) => [st.prId, st])), [ciData]);
-  // The ticket row: wherever THIS workspace has a tracker (core, free — apiVersion 23), ONE request
-  // for every listed PR.
-  const ticketsOn = useTrackerOn(useFilters((s) => s.workspaceId));
-  const { data: ticketData } = useTicketLinks(prIds, ticketsOn);
   const detectedTickets = useMemo(
     () => new Map((ticketData?.prs ?? []).map((t) => [t.prId, t])),
     [ticketData],
@@ -423,13 +431,15 @@ export function OpenPrsCards({
     return sortOpenPrs(prs, shownSort, { usersById, repoNameById, claudeStates });
   }, [prs, merged, shownSort, maintainersByRepo, usersById, repoNameById, claudeStates]);
 
-  // GROUPED only once the ticket answer is HERE: before it, the plain list (no skeleton, no wait
-  // on Jira); after it, the list again if no PR names a ticket (a lone "No ticket" header says
-  // nothing). A failed ticket request is the list too. Folded ABOVE the early returns because the
-  // merged panel's ONE batched request (below) reads its keys.
+  // GROUPED only with the ticket answer in hand (the first paint waits for it, above); the list if
+  // no PR names a ticket (a lone "No ticket" header says nothing), and the list when the ticket
+  // answer failed or was too slow for the first paint — until the reader asks for the groups.
+  // Folded ABOVE the early returns because the merged panel's ONE batched request (below) reads its
+  // keys.
+  const wantsStacks = grouped && ticketsOn;
   const stacked = useMemo(
     () =>
-      grouped && ticketsOn && ticketData != null
+      wantsStacks && !ticketGate.heldList && ticketData != null
         ? stackOpenPrs(
             rows,
             (pr) => cardTickets(detectedTickets.get(pr.id)),
@@ -438,12 +448,11 @@ export function OpenPrsCards({
             merged ? (pr) => pr.mergedAt ?? pr.updatedAt : undefined,
           )
         : null,
-    [grouped, ticketsOn, ticketData, rows, detectedTickets, merged],
+    [wantsStacks, ticketGate.heldList, ticketData, rows, detectedTickets, merged],
   );
   const showStacks = stacked != null && stacksWorthShowing(stacked);
   // Each stack's "Merged (n)" panel: ONE request for every stack on the board, only while the
   // stacks are on screen.
-  const workspaceId = useFilters((s) => s.workspaceId);
   const mergedKeys = useMemo(() => (showStacks && stacked != null ? mergedPanelKeys(stacked.stacks) : []), [showStacks, stacked]);
   const { data: mergedData } = useTicketMergedPrs(workspaceId, mergedKeys, ticketsOn && showStacks && !merged);
   const mergedStacks = useMemo(
@@ -479,9 +488,9 @@ export function OpenPrsCards({
       { fromActivity: true },
     );
 
-  if (isLoading) {
+  if (isLoading || ticketGate.waiting) {
     return (
-      <div className="space-y-2">
+      <div className="space-y-2" aria-busy="true" aria-label={merged ? 'Loading merged pull requests' : 'Loading open pull requests'}>
         {[0, 1, 2, 3].map((i) => (
           <div key={i} className="h-24 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-900/40" />
         ))}
@@ -585,10 +594,28 @@ export function OpenPrsCards({
     );
   }
 
+  // The first paint fell back to the list and the tickets have since arrived: grouping is the
+  // reader's call now, never a redraw that happens to them.
+  const offerGroups = wantsStacks && ticketGate.heldList && ticketData != null;
   return (
-    <ul aria-label={merged ? 'Merged pull requests' : 'Open pull requests'} className="space-y-2">
-      {rows.map((pr) => renderCard(pr))}
-    </ul>
+    <>
+      {offerGroups && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+          <TicketIcon size={13} className="shrink-0 text-sky-700 dark:text-sky-300" />
+          <span>Tickets loaded.</span>
+          <button
+            type="button"
+            onClick={ticketGate.release}
+            className="rounded border border-gray-300 px-1.5 py-0.5 font-medium hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+          >
+            Group by ticket
+          </button>
+        </div>
+      )}
+      <ul aria-label={merged ? 'Merged pull requests' : 'Open pull requests'} className="space-y-2">
+        {rows.map((pr) => renderCard(pr))}
+      </ul>
+    </>
   );
 }
 
@@ -1062,13 +1089,23 @@ function OpenPrCard({
   claude: ReactNode;
 }): JSX.Element {
   const titleId = useId();
+  const prUrl = githubPrUrl(repoName, pr.number);
   return (
     <PrCardFrame labelledBy={titleId} onOpen={onOpen} nested={headingLevel === 4}>
       {/* 1 — the title. */}
       <PrCardTitle
         id={titleId}
         level={headingLevel}
-        end={working}
+        end={
+          working != null || prUrl != null ? (
+            <>
+              {working}
+              {prUrl != null && (
+                <CopyButton text={prUrl} what="PR link" title="Copy the GitHub link to this PR" icon={<LinkIcon />} />
+              )}
+            </>
+          ) : null
+        }
         after={
           pr.isDraft ? (
             <span className="shrink-0 rounded border border-gray-300 px-1.5 text-[11px] font-medium text-gray-600 dark:border-gray-600 dark:text-gray-300">

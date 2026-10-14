@@ -80,12 +80,26 @@ describe('JQL', () => {
 
 describe('sprint field values', () => {
   it('reads Cloud objects and old Server strings', () => {
-    expect(sprintsOf([{ name: 'S1', state: 'ACTIVE' }])).toEqual([{ name: 'S1', state: 'active', boardId: null }]);
-    expect(sprintsOf([{ name: 'S2', state: 'active', boardId: 12 }])).toEqual([{ name: 'S2', state: 'active', boardId: 12 }]);
+    expect(sprintsOf([{ name: 'S1', state: 'ACTIVE' }])).toEqual([{ name: 'S1', state: 'active', boardId: null, startsAt: null, endsAt: null }]);
+    expect(sprintsOf([{ name: 'S2', state: 'active', boardId: 12 }])).toEqual([{ name: 'S2', state: 'active', boardId: 12, startsAt: null, endsAt: null }]);
     expect(sprintsOf(['com.atlassian.greenhopper.service.sprint.Sprint@1a[id=3,rapidViewId=1,state=ACTIVE,name=Sprint 7,startDate=x]'])).toEqual([
-      { name: 'Sprint 7', state: 'active', boardId: 1 },
+      { name: 'Sprint 7', state: 'active', boardId: 1, startsAt: null, endsAt: null },
     ]);
     expect(sprintsOf(null)).toEqual([]);
+  });
+
+  it('reads the sprint dates: Cloud startDate/endDate, Server strings (with <null>)', () => {
+    expect(
+      sprintsOf([{ name: 'Sprint 15 (Oct 14-27)', state: 'active', boardId: 4, startDate: '2026-10-14T10:15:35.000Z', endDate: '2026-10-27T17:00:00.000Z' }]),
+    ).toEqual([
+      { name: 'Sprint 15 (Oct 14-27)', state: 'active', boardId: 4, startsAt: new Date('2026-10-14T10:15:35.000Z'), endsAt: new Date('2026-10-27T17:00:00.000Z') },
+    ]);
+    const [server] = sprintsOf([
+      'com.atlassian.greenhopper.service.sprint.Sprint@1a[id=3,rapidViewId=1,state=ACTIVE,name=Sprint 7,startDate=2015-04-08T12:00:00.000+02:00,endDate=<null>,completeDate=<null>,sequence=3]',
+    ]);
+    expect(server!.startsAt?.toISOString()).toBe('2015-04-08T10:00:00.000Z');
+    expect(server!.endsAt).toBeNull();
+    expect(sprintsOf([{ name: 'S', state: 'active', startDate: 'not a date', endDate: '' }])[0]).toMatchObject({ startsAt: null, endsAt: null });
   });
 });
 
@@ -232,6 +246,22 @@ describe('the board order', () => {
     expect(r.statusOrderError).toBe('forbidden');
   });
 
+  it('the list carries the BUSIEST active sprint\'s dates', async () => {
+    const sp = (n: number, name: string, startDate: string, endDate: string) =>
+      issue(n, { customfield_10020: [{ id: n, name, state: 'active', boardId: 5, startDate, endDate }] });
+    const t: JiraTransport = async (url) =>
+      url.pathname.includes('/agile/') || url.pathname.includes('/status')
+        ? json({}, 403)
+        : json({
+            issues: [sp(1, 'Small', '2026-10-01T09:00:00Z', '2026-10-15T09:00:00Z'), sp(2, 'Big', '2026-10-14T09:00:00Z', '2026-10-28T09:00:00Z'), sp(3, 'Big', '2026-10-14T09:00:00Z', '2026-10-28T09:00:00Z')],
+            names: NAMES,
+            schema: SCHEMA,
+            isLast: true,
+          });
+    const r = await listJiraSprint(args(t));
+    expect(r.dates).toEqual({ startsAt: new Date('2026-10-14T09:00:00Z'), endsAt: new Date('2026-10-28T09:00:00Z') });
+  });
+
   it('no board on the sprint objects, or the status fallback → null', async () => {
     const t: JiraTransport = async () => json({ issues: [issue(1)], names: NAMES, schema: SCHEMA, isLast: true });
     expect((await listJiraSprint(args(t))).statusOrder).toBeNull();
@@ -247,6 +277,7 @@ describe('listJiraSprint', () => {
     };
     const r = await listJiraSprint(args(t));
     expect(r.source).toEqual({ kind: 'sprint', provider: 'jira', names: ['Sprint 42'] });
+    expect(r.dates).toBeNull(); // the fixture's sprint objects carry no dates
     expect(r.tickets.map((x) => x.key)).toEqual(['ENG-1', 'ENG-2']);
     expect(r.truncated).toBe(false);
     expect(seen).toHaveLength(1);

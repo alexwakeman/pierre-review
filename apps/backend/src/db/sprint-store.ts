@@ -118,6 +118,12 @@ export async function resetSprintReadForSite(
       errorCode: null,
       truncated: false,
       nextReadAt: EPOCH,
+      // Another tracker: its sprint, its dates, its story attempts.
+      sprintStartsAt: null,
+      sprintEndsAt: null,
+      storyAttemptAt: null,
+      storyAttemptHash: null,
+      storyAttemptError: null,
     })
     .where(and(eq(t.accountId, accountId), eq(t.workspaceId, workspaceId)))
     .execute();

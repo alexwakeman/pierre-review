@@ -28,8 +28,9 @@ import type {
   SprintStatusSettings,
   TicketLinkBlocker,
   SprintBriefCriterion,
+  SprintStoryline,
   SprintTheme,
-  SprintBriefReference,
+  SprintBriefStoredReference,
   BranchCheckRun,
   CheckRun,
   ClaudeReviewFollowUpRecord,
@@ -37,6 +38,7 @@ import type {
   ClaudeCiFailuresRecord,
   CiAutoPostRecord,
   FindingAutoResolveRecord,
+  ClaudeFindingReminder,
   FindingPushbackRecord,
   ClaudeReviewChatPin,
   ClaudeReviewChatExplanation,
@@ -1331,6 +1333,10 @@ export const claudeReviewFindings = sqliteTable(
     // on this finding's thread, the ONE reply it posted there. FindingPushbackRecord, claimed by
     // compare-and-set from NULL before any GitHub write — at most one per thread, ever, never retried.
     pushback: text('pushback', { mode: 'json' }).$type<FindingPushbackRecord>(),
+    // REMINDER (migration 0110 / pg 0097): the latest "Post reminder" of this already-posted finding —
+    // ClaudeFindingReminder. Display + dedupe only: posted-state.ts counts its comment as claimed, so it
+    // is never read as another finding's post. NULL = none.
+    reminder: text('reminder', { mode: 'json' }).$type<ClaudeFindingReminder>(),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );
@@ -2866,6 +2872,19 @@ export const sprintReads = sqliteTable(
     // `SprintStatusAutoOrder`): Jira board columns, Linear workflow states, GitHub Open/Closed. NULL =
     // not readable — the page falls back to category order. A failed order read never fails the read.
     statusOrderJson: text('status_order_json', { mode: 'json' }).$type<SprintStatusAutoOrder>(),
+    // The current sprint's own dates as the TRACKER gave them (migration 0111 / pg 0098): the Jira
+    // sprint's startDate/endDate, the Linear cycle's startsAt/endsAt, the GitHub milestone's dueOn (end
+    // only). Written on every successful read (null = the tracker gave none, or the status fallback).
+    // The page header and the sprint story's day facts read them; never a tracker call on a view.
+    sprintStartsAt: integer('sprint_starts_at', { mode: 'timestamp' }),
+    sprintEndsAt: integer('sprint_ends_at', { mode: 'timestamp' }),
+    // The SPRINT STORY pass's last attempt that called Claude (migration 0111 / pg 0098;
+    // review/sprint-story/manager.ts): when, for which input hash, and why it stored nothing (a
+    // `SprintStoryFailure` code; null = it stored a story). A failure for today's input hash is not
+    // retried until the hash moves — the BACKOFF — and the page says why instead of "Writing…" for ever.
+    storyAttemptAt: integer('story_attempt_at', { mode: 'timestamp' }),
+    storyAttemptHash: text('story_attempt_hash'),
+    storyAttemptError: text('story_attempt_error'),
   },
   (t) => ({
     accountWorkspaceUx: uniqueIndex('sprint_reads_account_workspace').on(t.accountId, t.workspaceId),
@@ -3016,7 +3035,7 @@ export const sprintBriefs = sqliteTable(
     summary: text('summary').notNull(),
     criteriaJson: text('criteria_json', { mode: 'json' }).$type<SprintBriefCriterion[]>().notNull(),
     criteriaDerived: integer('criteria_derived', { mode: 'boolean' }).notNull().default(false),
-    referencesJson: text('references_json', { mode: 'json' }).$type<SprintBriefReference[]>().notNull(),
+    referencesJson: text('references_json', { mode: 'json' }).$type<SprintBriefStoredReference[]>().notNull(),
     model: text('model').notNull(),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
@@ -3066,6 +3085,72 @@ export const sprintThemes = sqliteTable(
     accountWsUx: uniqueIndex('sprint_themes_account_ws').on(t.accountId, t.workspaceId),
     workspaceAccountFk: foreignKey({
       name: 'sprint_themes_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_story — THE SPRINT STORY (migration 0109 / pg 0096): ONE sprint-wide Haiku call after the
+// theme pass writes a headline + 3–5 storylines picked from candidates the CODE built out of the graph
+// (db/sprint-story.ts). ONE row per (account, workspace), replaced by each new pass; CURRENT while
+// `input_hash` = today's hash of everything the pass was sent AND `story_version` = SPRINT_STORY_VERSION.
+// Written ONLY by review/sprint-story/ (local, agentic); read by db/sprint-graph.ts. Tenancy via the
+// named composite FK onto `workspaces (id, account_id)`.
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId].
+export const sprintStory = sqliteTable(
+  'sprint_story',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    inputHash: text('input_hash').notNull(),
+    storyVersion: integer('story_version').notNull(),
+    storyJson: text('story_json', { mode: 'json' }).$type<{ headline: string; focus?: string; storylines: SprintStoryline[] }>().notNull(),
+    model: text('model').notNull(),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountWsUx: uniqueIndex('sprint_story_account_ws').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_story_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_view_snapshots — "SINCE YOU LAST LOOKED" (migration 0112 / pg 0099; db/sprint-signals.ts).
+// ONE row per (account, workspace) with TWO slots: `current_json` (what the latest view of This Sprint saw:
+// each sprint ticket's stage + the merged pull requests on sprint tickets) and `baseline_json` (the
+// previous VISIT's last view). Every GET /api/sprint-graph refreshes CURRENT; it rolls CURRENT into
+// BASELINE first only when `current_at` is older than SPRINT_VISIT_GAP_MS. Written and read only by
+// db/sprint-signals.ts. Tenancy via the named composite FK onto `workspaces (id, account_id)`.
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId].
+export const sprintViewSnapshots = sqliteTable(
+  'sprint_view_snapshots',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    currentJson: text('current_json', { mode: 'json' }).$type<unknown>().notNull(),
+    currentAt: integer('current_at', { mode: 'timestamp' }).notNull(),
+    baselineJson: text('baseline_json', { mode: 'json' }).$type<unknown>(),
+    baselineAt: integer('baseline_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    accountWsUx: uniqueIndex('sprint_view_snapshots_account_ws').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_view_snapshots_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),

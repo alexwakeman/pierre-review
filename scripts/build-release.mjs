@@ -284,7 +284,7 @@ const manifest = {
     // globally: npm refuses to link a global bin another package owns. The CLI still prints the
     // rename notice when the stub starts it under the old name.
   },
-  files: ['dist', 'public', 'public-landing', 'README.md', 'LICENSE'],
+  files: ['dist', 'public', 'public-landing', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md'],
   engines: { node: '>=20' },
   // NO AI SDK IS A DEPENDENCY. The agentic features ship as code, but the four SDKs they run on
   // (@anthropic-ai/claude-agent-sdk, @anthropic-ai/sdk, @modelcontextprotocol/sdk, zod) are
@@ -352,6 +352,11 @@ cpSync(join(scriptDir, 'release-README.md'), join(releaseDir, 'README.md'));
 const licenseSrc = join(repoRoot, 'LICENSE');
 if (!existsSync(licenseSrc)) fail('LICENSE missing at repo root');
 cpSync(licenseSrc, join(releaseDir, 'LICENSE'));
+// Third-party notices: the SPA bundle carries vendored MIT material (the Changes tab's file-type
+// icons), whose licence requires the notice to travel with every copy.
+const noticesSrc = join(repoRoot, 'THIRD_PARTY_NOTICES.md');
+if (!existsSync(noticesSrc)) fail('THIRD_PARTY_NOTICES.md missing at repo root');
+cpSync(noticesSrc, join(releaseDir, 'THIRD_PARTY_NOTICES.md'));
 
 // 9. Sanity asserts.
 log('verifying release contents');

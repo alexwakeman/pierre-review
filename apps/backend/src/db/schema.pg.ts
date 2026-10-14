@@ -33,8 +33,9 @@ import type {
   SprintStatusSettings,
   TicketLinkBlocker,
   SprintBriefCriterion,
+  SprintStoryline,
   SprintTheme,
-  SprintBriefReference,
+  SprintBriefStoredReference,
   BranchCheckRun,
   CheckRun,
   ClaudeReviewFollowUpRecord,
@@ -42,6 +43,7 @@ import type {
   ClaudeCiFailuresRecord,
   CiAutoPostRecord,
   FindingAutoResolveRecord,
+  ClaudeFindingReminder,
   FindingPushbackRecord,
   ClaudeReviewChatPin,
   ClaudeReviewChatExplanation,
@@ -1007,6 +1009,8 @@ export const claudeReviewFindings = pgTable(
     autoResolve: jsonb('auto_resolve').$type<FindingAutoResolveRecord>(),
     // Pushback (migration 0092 / pg 0079). Twin of schema.sqlite.ts, where the contract lives.
     pushback: jsonb('pushback').$type<FindingPushbackRecord>(),
+    // Reminder (migration pg 0097 / sqlite 0110). Twin of schema.sqlite.ts, where the contract lives.
+    reminder: jsonb('reminder').$type<ClaudeFindingReminder>(),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );
@@ -2032,6 +2036,12 @@ export const sprintReads = pgTable(
     viewedAt: timestamp('viewed_at', { withTimezone: true, mode: 'date' }).notNull(),
     // See the sqlite twin (migration pg 0090).
     statusOrderJson: jsonb('status_order_json').$type<SprintStatusAutoOrder>(),
+    // See the sqlite twin (migration pg 0098).
+    sprintStartsAt: timestamp('sprint_starts_at', { withTimezone: true, mode: 'date' }),
+    sprintEndsAt: timestamp('sprint_ends_at', { withTimezone: true, mode: 'date' }),
+    storyAttemptAt: timestamp('story_attempt_at', { withTimezone: true, mode: 'date' }),
+    storyAttemptHash: text('story_attempt_hash'),
+    storyAttemptError: text('story_attempt_error'),
   },
   (t) => ({
     accountWorkspaceUx: uniqueIndex('sprint_reads_account_workspace').on(t.accountId, t.workspaceId),
@@ -2149,7 +2159,7 @@ export const sprintBriefs = pgTable(
     summary: text('summary').notNull(),
     criteriaJson: jsonb('criteria_json').$type<SprintBriefCriterion[]>().notNull(),
     criteriaDerived: boolean('criteria_derived').notNull().default(false),
-    referencesJson: jsonb('references_json').$type<SprintBriefReference[]>().notNull(),
+    referencesJson: jsonb('references_json').$type<SprintBriefStoredReference[]>().notNull(),
     model: text('model').notNull(),
     costUsd: doublePrecision('cost_usd'),
     inputTokens: integer('input_tokens'),
@@ -2189,6 +2199,58 @@ export const sprintThemes = pgTable(
     accountWsUx: uniqueIndex('sprint_themes_account_ws').on(t.accountId, t.workspaceId),
     workspaceAccountFk: foreignKey({
       name: 'sprint_themes_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_story — see the sqlite twin (migration pg 0096).
+export const sprintStory = pgTable(
+  'sprint_story',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    inputHash: text('input_hash').notNull(),
+    storyVersion: integer('story_version').notNull(),
+    storyJson: jsonb('story_json').$type<{ headline: string; focus?: string; storylines: SprintStoryline[] }>().notNull(),
+    model: text('model').notNull(),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (t) => ({
+    accountWsUx: uniqueIndex('sprint_story_account_ws').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_story_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_view_snapshots — see the sqlite twin (migration pg 0099).
+export const sprintViewSnapshots = pgTable(
+  'sprint_view_snapshots',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    currentJson: jsonb('current_json').$type<unknown>().notNull(),
+    currentAt: timestamp('current_at', { withTimezone: true, mode: 'date' }).notNull(),
+    baselineJson: jsonb('baseline_json').$type<unknown>(),
+    baselineAt: timestamp('baseline_at', { withTimezone: true, mode: 'date' }),
+  },
+  (t) => ({
+    accountWsUx: uniqueIndex('sprint_view_snapshots_account_ws').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_view_snapshots_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),

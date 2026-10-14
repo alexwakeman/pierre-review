@@ -2,7 +2,7 @@ import { SPRINT_TICKETS_MAX } from '@pierre-review/shared';
 import { JiraFetchError } from '../jira/fetch.js';
 import { githubGraphql, noteGithubBudget, SUB_ISSUE_CAP, githubStatusOrder, toFetchedTicket } from '../github/reader.js';
 import type { GithubCallAccess } from '../types.js';
-import type { SprintFetchedTicket, SprintListResult, SprintLister } from './types.js';
+import type { SprintFetchedTicket, SprintListDates, SprintListResult, SprintLister } from './types.js';
 
 // GITHUB ISSUES — THE SPRINT LIST (docs/TRACKERS.md § The sprint list read). GitHub's nearest thing
 // to a sprint is a MILESTONE: the open milestone with the NEAREST due date (today or later) across
@@ -117,6 +117,12 @@ export function pickMilestone(
   return best == null ? null : { title: best.title, dueOn: best.dueOn };
 }
 
+/** A milestone's dates: its due date as the end, no start. null when it has no due date. Pure. */
+export function milestoneDates(dueOn: string | null): SprintListDates | null {
+  const end = isoDate(dueOn);
+  return end == null ? null : { startsAt: null, endsAt: end };
+}
+
 export function toGithubSprintTicket(repo: string, issue: GqlIssue, sprintName: string | null): SprintFetchedTicket | null {
   if (typeof issue.number !== 'number') return null;
   const key = `${repo.toLowerCase()}#${issue.number}`;
@@ -214,6 +220,8 @@ export function makeGithubLister(now: () => number = Date.now): SprintLister {
         tickets: into.tickets,
         truncated: into.truncated || cut,
         statusOrder: githubStatusOrder(new Date().toISOString()),
+        // A milestone has a due date and no start: the end only.
+        dates: milestoneDates(pick.dueOn),
       };
     }
     for (const r of byRepo) {

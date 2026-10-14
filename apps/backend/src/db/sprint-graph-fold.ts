@@ -80,6 +80,8 @@ export interface EdgeOut {
   kind: SprintEdgeKind;
   source: 'tracker' | 'text';
   quote: string | null;
+  /** The brief's one-sentence reason (null: none given). */
+  why: string | null;
 }
 
 /** A key on this site → its ident (the ONE shared spelling). null for a key that is not a key. */
@@ -97,17 +99,18 @@ export function identOfKey(provider: TrackerProvider, apiRoot: string, raw: stri
 /** The edges OUT of one ticket (unfiltered by node membership). Pure. */
 export function edgesOutOf(t: Pick<GraphTicketInput, 'ident' | 'links' | 'brief'>, provider: TrackerProvider, apiRoot: string): EdgeOut[] {
   const out: EdgeOut[] = [];
+  const linkWhy = new Map((t.brief?.linkReasons ?? []).map((l) => [l.ticketKey.toUpperCase(), l.why] as const));
   for (const l of t.links ?? []) {
     if (!isBlockingRelation(l.relation)) continue;
     const id = identOfKey(provider, apiRoot, l.key);
     if (id == null || id.ident === t.ident) continue;
-    out.push({ toKey: id.key, toIdent: id.ident, kind: 'depends_on', source: 'tracker', quote: null });
+    out.push({ toKey: id.key, toIdent: id.ident, kind: 'depends_on', source: 'tracker', quote: null, why: linkWhy.get(l.key.toUpperCase()) ?? null });
   }
   for (const r of t.brief?.references ?? []) {
     if (!isSprintEdgeRelation(r.relation)) continue;
     const id = identOfKey(provider, apiRoot, r.ticketKey);
     if (id == null || id.ident === t.ident) continue;
-    out.push({ toKey: id.key, toIdent: id.ident, kind: r.relation, source: 'text', quote: r.quote });
+    out.push({ toKey: id.key, toIdent: id.ident, kind: r.relation, source: 'text', quote: r.quote, why: r.why ?? null });
   }
   return out;
 }
@@ -175,13 +178,17 @@ export function foldSprintGraph(input: GraphFoldInput): GraphFoldResult {
     const t = sprintById.get(ident) ?? ghostById.get(ident)!;
     for (const e of edgesFor(t)) {
       if (!depth.has(e.toIdent)) continue;
-      const edge: SprintGraphEdge = { from: ident, to: e.toIdent, kind: e.kind, source: e.source, quote: e.quote };
+      const edge: SprintGraphEdge = { from: ident, to: e.toIdent, kind: e.kind, source: e.source, quote: e.quote, why: e.why };
       // `concurrent` is symmetric: one per unordered pair. Every other kind: one per ordered pair.
       const k = `${ident}\u0000${e.toIdent}`;
       const rev = `${e.toIdent}\u0000${ident}`;
       if (edge.kind === 'concurrent' && best.get(rev)?.kind === 'concurrent') continue;
       const prev = best.get(k);
-      if (prev == null || better(edge, prev)) best.set(k, edge);
+      // ONE edge per tie: the stronger one wins, and when both read the SAME kind the winner without a
+      // reason of its own keeps the loser's (a tracker link the text also explains).
+      const winner = prev == null || better(edge, prev) ? edge : prev;
+      const loser = winner === edge ? prev : edge;
+      best.set(k, winner.why == null && loser != null && loser.kind === winner.kind && loser.why != null ? { ...winner, why: loser.why } : winner);
     }
   }
   const edges = [...best.values()].sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));

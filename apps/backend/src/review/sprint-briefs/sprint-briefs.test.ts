@@ -15,7 +15,16 @@ import { SPRINT_BRIEF_SYSTEM, sprintBriefPrompt, sprintBriefUntrusted } from './
 import { validateSprintBrief } from './validate.js';
 import { resetSprintBriefPasses, runSprintBriefPass, type BriefTodo } from './manager.js';
 
-const TEXT = { title: 'Save the basket', description: 'Shoppers keep their basket. Uses ENG-7 once it ships.', acceptanceCriteria: '- Basket survives a reload\n- Basket expires after 30 days' };
+const TEXT = {
+  title: 'Save the basket',
+  description: 'Shoppers keep their basket. Uses ENG-7 once it ships.',
+  acceptanceCriteria: '- Basket survives a reload\n- Basket expires after 30 days',
+  blockedByJson: null as unknown,
+};
+const LINKS = [
+  { key: 'ENG-8', title: 'Payments API', status: 'To Do', category: 'new', relation: 'is blocked by', url: null },
+  { key: 'ENG-6', title: 'Old spike', status: 'Done', category: 'done', relation: 'relates to', url: null },
+];
 
 describe('sprintBriefInput', () => {
   it('criteria from the field; none → derived; the hash moves with the text, not the call', () => {
@@ -27,10 +36,27 @@ describe('sprintBriefInput', () => {
     const none = sprintBriefInput({ ...TEXT, acceptanceCriteria: '' }, 'jira');
     expect(none).toMatchObject({ criteria: [], derived: true });
     // The description's own "Acceptance criteria" section counts.
-    expect(sprintBriefInput({ title: 't', description: 'Intro\n\nAcceptance criteria\n- One\n- Two', acceptanceCriteria: null }, 'github').criteria).toEqual(['One', 'Two']);
+    expect(sprintBriefInput({ title: 't', description: 'Intro\n\nAcceptance criteria\n- One\n- Two', acceptanceCriteria: null, blockedByJson: null }, 'github').criteria).toEqual(['One', 'Two']);
     // A clipped tail does not move the hash (nothing new was sent).
     const long = 'x'.repeat(5000);
     expect(sprintBriefInput({ ...TEXT, description: long }, 'jira').textHash).toBe(sprintBriefInput({ ...TEXT, description: `${long}tail` }, 'jira').textHash);
+  });
+
+  it('the tracker links are sent and hashed: a link added, dropped or retitled re-briefs', () => {
+    const none = sprintBriefInput(TEXT, 'jira');
+    const linked = sprintBriefInput({ ...TEXT, blockedByJson: LINKS }, 'jira');
+    expect(none.links).toEqual([]);
+    expect(linked.links).toEqual([
+      { key: 'ENG-8', title: 'Payments API', relation: 'is blocked by' },
+      { key: 'ENG-6', title: 'Old spike', relation: 'relates to' },
+    ]);
+    expect(linked.textHash).not.toBe(none.textHash);
+    expect(sprintBriefInput({ ...TEXT, blockedByJson: [LINKS[0]] }, 'jira').textHash).not.toBe(linked.textHash);
+    expect(sprintBriefInput({ ...TEXT, blockedByJson: [{ ...LINKS[0], title: 'Payments API v2' }, LINKS[1]] }, 'jira').textHash).not.toBe(linked.textHash);
+    // A status change of the linked ticket is not text: no re-brief.
+    expect(sprintBriefInput({ ...TEXT, blockedByJson: [{ ...LINKS[0], status: 'Done', category: 'done' }, LINKS[1]] }, 'jira').textHash).toBe(linked.textHash);
+    // An empty list and "not read" send the same thing.
+    expect(sprintBriefInput({ ...TEXT, blockedByJson: [] }, 'jira').textHash).toBe(none.textHash);
   });
 
   it('currency: text hash AND version', () => {
@@ -49,7 +75,12 @@ describe('sprintBriefInput', () => {
       summary: 'S',
       criteriaJson: [{ n: 4, text: 'A' }, { text: '' }, 'junk', { text: 'B' }],
       criteriaDerived: true,
-      referencesJson: [{ ticketKey: 'ENG-7', relation: 'depends_on', quote: '' }, { nope: 1 }],
+      referencesJson: [
+        { ticketKey: 'ENG-7', relation: 'depends_on', quote: '', why: 'Needs the export first.' },
+        { nope: 1 },
+        { ticketKey: 'ENG-8', link: true, why: 'Payments must exist before checkout.' },
+        { ticketKey: 'ENG-6', link: true, why: '' },
+      ],
       createdAt: new Date(0),
     });
     expect(b).toEqual({
@@ -59,7 +90,8 @@ describe('sprintBriefInput', () => {
         { n: 2, text: 'B' },
       ],
       criteriaDerived: true,
-      references: [{ ticketKey: 'ENG-7', relation: 'depends_on', quote: null }],
+      references: [{ ticketKey: 'ENG-7', relation: 'depends_on', quote: null, why: 'Needs the export first.' }],
+      linkReasons: [{ ticketKey: 'ENG-8', why: 'Payments must exist before checkout.' }],
       createdAt: '1970-01-01T00:00:00.000Z',
     });
   });
@@ -81,6 +113,20 @@ describe('the prompt', () => {
     expect(p.endsWith('---END TICKET n0nce---')).toBe(true);
     expect(sprintBriefPrompt(sprintBriefInput(TEXT, 'jira'), 'n0nce')).toContain('Acceptance criteria:\n1. Basket survives a reload\n2. Basket expires after 30 days\n---END');
     expect(sprintBriefUntrusted(input)).toContain(input.description);
+  });
+
+  it('asks for a why per reference and per tracker link; the links sit INSIDE the fence', () => {
+    expect(SPRINT_BRIEF_SYSTEM).toContain(`"why": one plain sentence, at most ${SPRINT_BRIEF_CAPS.why} characters`);
+    expect(SPRINT_BRIEF_SYSTEM).toContain('Never add a reason the text, the title or the link type does not support');
+    expect(SPRINT_BRIEF_SYSTEM).toContain('"links":[{"ticketKey":"…","why":string|null}]');
+    const input = sprintBriefInput({ ...TEXT, blockedByJson: [{ ...LINKS[0], title: 'Payments\nAPI' }, LINKS[1]] }, 'jira');
+    const p = sprintBriefPrompt(input, 'n0nce');
+    const fenced = p.slice(p.indexOf('---BEGIN TICKET n0nce---'), p.indexOf('---END TICKET n0nce---'));
+    // Whitespace folded: a title cannot forge a line of its own.
+    expect(fenced).toContain('Tracker links:\n- ENG-8 (is blocked by): Payments API\n- ENG-6 (relates to): Old spike');
+    expect(sprintBriefUntrusted(input)).toEqual(expect.arrayContaining(['ENG-8', 'is blocked by', 'Payments\nAPI']));
+    // No links: no block.
+    expect(sprintBriefPrompt(sprintBriefInput(TEXT, 'jira'), 'n0nce')).not.toContain('Tracker links:');
   });
 });
 
@@ -111,11 +157,50 @@ describe('validateSprintBrief', () => {
         { n: 2, text: 'B' },
       ],
       references: [
-        { ticketKey: 'ENG-7', relation: 'depends_on', quote: 'once it ships' },
+        { ticketKey: 'ENG-7', relation: 'depends_on', quote: 'once it ships', why: null },
         // ENG-99 is never named in the text: dropped. The unverified quote is null.
-        { ticketKey: 'ENG-7', relation: 'context', quote: null },
+        { ticketKey: 'ENG-7', relation: 'context', quote: null, why: null },
       ],
+      linkReasons: [],
     });
+  });
+
+  it('reads `why` per reference: cleaned, an over-long one dropped alone, never cut', () => {
+    const long = 'w'.repeat(SPRINT_BRIEF_CAPS.why + 1);
+    const v = validateSprintBrief(
+      ok({
+        references: [
+          { ticketKey: 'ENG-7', relation: 'depends_on', quote: null, why: '  Needs  ENG-7\u0007 shipped first. ' },
+          { ticketKey: 'ENG-7', relation: 'context', quote: null, why: long },
+          { ticketKey: 'ENG-7', relation: 'builds_on', quote: null, why: 42 },
+        ],
+      }),
+      sources,
+      true,
+    );
+    expect(v.ok && v.references.map((r) => r.why)).toEqual(['Needs ENG-7 shipped first.', null, null]);
+  });
+
+  it('reads one reason per LISTED tracker link: unknown keys dropped, repeats once, null = no entry', () => {
+    const v = validateSprintBrief(
+      ok({
+        links: [
+          { ticketKey: 'eng-8', why: 'Checkout calls the payments API that ENG-8 builds.' },
+          { ticketKey: 'ENG-8', why: 'A second answer for the same link.' },
+          { ticketKey: 'ENG-6', why: null },
+          { ticketKey: 'ENG-404', why: 'A link the input never listed.' },
+          { ticketKey: 'ENG-6', why: 'x'.repeat(SPRINT_BRIEF_CAPS.why + 1) },
+          'junk',
+        ],
+      }),
+      sources,
+      true,
+      ['ENG-8', 'ENG-6'],
+    );
+    expect(v).toMatchObject({ ok: true, linkReasons: [{ ticketKey: 'ENG-8', why: 'Checkout calls the payments API that ENG-8 builds.' }] });
+    // Absent `links` reads as none; a non-array is the wrong shape.
+    expect(validateSprintBrief(ok({}), sources, true, ['ENG-8'])).toMatchObject({ ok: true, linkReasons: [] });
+    expect(validateSprintBrief(ok({ links: 'ENG-8' }), sources, true, ['ENG-8'])).toEqual({ ok: false, reason: 'shape' });
   });
 
   it('refuses rather than repairs', () => {
@@ -141,7 +226,7 @@ describe('runSprintBriefPass', () => {
   const todo = (key: string, criteria = true): BriefTodo => ({
     ident: `jira:x#${key}`,
     provider: 'jira',
-    input: sprintBriefInput({ title: key, description: 'd', acceptanceCriteria: criteria ? '- One' : '' }, 'jira'),
+    input: sprintBriefInput({ title: key, description: 'd', acceptanceCriteria: criteria ? '- One' : '', blockedByJson: null }, 'jira'),
   });
   const answer = JSON.stringify({ summary: 'S.', criteria: ['One thing'], references: [] });
   beforeEach(() => resetSprintBriefPasses());
@@ -175,6 +260,32 @@ describe('runSprintBriefPass', () => {
     expect(complete).toHaveBeenCalledTimes(3);
     expect(c.recordAiUsage).toHaveBeenCalledWith(expect.objectContaining({ accountId: 1, feature: 'sprint_briefs', model: 'claude-haiku-5-5' }));
     expect(res.costUsd).toBeCloseTo(3 * (1000 * 0.1 + 200 * 0.5) / 1_000_000);
+  });
+
+  it('hands the tracker links to the model and stores their reasons with the brief', async () => {
+    const t: BriefTodo = {
+      ident: 'jira:x#A-9',
+      provider: 'jira',
+      input: sprintBriefInput({ title: 'A-9', description: 'd', acceptanceCriteria: '- One', blockedByJson: LINKS }, 'jira'),
+    };
+    const prompts: string[] = [];
+    const stored: unknown[] = [];
+    await runSprintBriefPass(ctx() as never, 1, 5, {
+      aiEnabled: true,
+      entitled: async () => true,
+      complete: async (req) => {
+        prompts.push(req.prompt);
+        return { text: JSON.stringify({ summary: 'S.', criteria: ['One'], references: [], links: [{ ticketKey: 'ENG-8', why: 'Needs payments first.' }, { ticketKey: 'ENG-1', why: 'Invented.' }] }) };
+      },
+      todo: (() => {
+        let n = 0;
+        return async () => (n++ === 0 ? [t] : []);
+      })(),
+      store: async (_a, _w, _t, b) => void stored.push(b.linkReasons),
+      expand: async () => 0,
+    });
+    expect(prompts[0]).toContain('- ENG-8 (is blocked by): Payments API');
+    expect(stored).toEqual([[{ ticketKey: 'ENG-8', why: 'Needs payments first.' }]]);
   });
 
   it('one retry on a refused answer; a second refusal is a failed brief, not stored', async () => {

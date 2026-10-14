@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type {
   ClaudeFinding,
+  ClaudeFindingEarlierPost,
+  ClaudeFindingReminder,
   ClaudeFindingLens,
   ClaudeFindingSeverity,
   ClaudeFindingSide,
@@ -35,6 +37,7 @@ import type { ClaudeSettledFinding, FindingAutoResolveRecord, FindingPushbackRec
 import type { ReviewFinding } from '../../pro/contract.js';
 import { ticketEntriesOf } from './ticket.js';
 import { findFindingThread, type ThreadComment } from './finding-thread.js';
+import { earlierPostsFor, landedAutoPosts, stampsFor, type PostedStateInput } from './posted-state.js';
 import {
   acceptedReplyFindings,
   unjudgedReplyCandidateIds,
@@ -104,6 +107,8 @@ interface FindingRow {
   autoResolve?: FindingAutoResolveRecord | null;
   // The one pushback reply on this finding's thread (migration 0092 / pg 0079).
   pushback?: FindingPushbackRecord | null;
+  // The latest "Post reminder" of this already-posted finding (migration 0110 / pg 0097).
+  reminder?: ClaudeFindingReminder | null;
 }
 
 // A story finding's origin off its row; null unless BOTH columns hold a value.
@@ -214,8 +219,14 @@ export function isReaderIgnoredFinding(f: IncludedFacts): boolean {
   return f.included === false && !isAlreadyPostedReraise(f);
 }
 
-function mapFinding(r: FindingRow, threadIds?: ReadonlyMap<number, number>): ClaudeFinding {
+function mapFinding(
+  r: FindingRow,
+  threadIds?: ReadonlyMap<number, number>,
+  earlier?: ReadonlyMap<number, ClaudeFindingEarlierPost>,
+): ClaudeFinding {
+  const earlierPost = r.postedAt == null ? earlier?.get(r.id) : undefined;
   return {
+    ...(earlierPost ? { earlierPost } : {}),
     id: r.id,
     reviewId: r.reviewId,
     path: r.path,
@@ -242,6 +253,7 @@ function mapFinding(r: FindingRow, threadIds?: ReadonlyMap<number, number>): Cla
     lens: asLens(r.lens),
     story: storyOf(r),
     autoResolve: r.autoResolve ?? null,
+    reminder: r.reminder == null ? null : { githubCommentId: r.reminder.githubCommentId, postedCommentKind: r.reminder.postedCommentKind, postedAt: r.reminder.postedAt },
     // COMPUTED ON READ, never stored: a posted INLINE finding's comment is a synced review comment
     // (`review_comments.database_id`), whose thread is the Changes tab's jump target. A finding
     // posted inside a review before its comment id was read back matches by its root comment
@@ -284,6 +296,7 @@ function mapReview(
   findings: FindingRow[],
   head: ClaudeReviewHeadState | null = null,
   threadIds?: ReadonlyMap<number, number>,
+  earlier?: ReadonlyMap<number, ClaudeFindingEarlierPost>,
 ): ClaudeReview {
   const tickets = ticketEntriesOf(r.ticket, r.ticketAssessment);
   return {
@@ -313,7 +326,7 @@ function mapReview(
     postedAt: iso(r.postedAt),
     createdAt: isoReq(r.createdAt),
     finishedAt: iso(r.finishedAt),
-    findings: findings.map((f) => mapFinding(f, threadIds)),
+    findings: findings.map((f) => mapFinding(f, threadIds, earlier)),
     tickets,
     ticket: tickets[0]?.ticket ?? null,
     ticketAssessment: tickets[0]?.assessment ?? null,
@@ -379,8 +392,13 @@ export async function getClaudeReviewById(
     .orderBy(asc(crf.id))
     .execute()) as FindingRow[]).filter(isShownFinding);
   const head = await reviewHeadState(ctx, row.prId, row.headSha, rows[0]!.prHeadSha);
+  // What is already on GitHub (posted-state.ts): stamps this run's lost posts, derives the rest.
+  const earlier = await reconcilePostedState(ctx, row, accountId, findings).catch((err) => {
+    ctx.log?.warn?.(`claude review ${reviewId}: could not read what is already on GitHub: ${err instanceof Error ? err.message : String(err)}`);
+    return new Map<number, ClaudeFindingEarlierPost>();
+  });
   const threadIds = await postedFindingThreadIds(ctx, row.prId, accountId, findings);
-  const review = mapReview(row, findings, head, threadIds);
+  const review = mapReview(row, findings, head, threadIds, earlier);
   if (review.followUp) review.followUp = await withThreadState(ctx, row.prId, review.followUp);
   if (row.status === 'succeeded') review.settledEarlier = await settledEarlierFor(ctx, row.prId, accountId, row.id, review.followUp ?? null);
   return review;
@@ -464,6 +482,154 @@ async function withThreadState(
       };
     }),
   };
+}
+
+/**
+ * WHAT IS ALREADY ON GITHUB for this run's unposted findings (`posted-state.ts`). Reads the PR's
+ * findings (every run), its synced threads and PR comments, and the account's login. STAMPS a
+ * finding whose own post is on GitHub though the run never recorded it (GitHub's answer was lost),
+ * mutating `findings` in place and correcting the run's auto-post record; returns `earlierPost`
+ * for the rest. DB-only, no GitHub call. Nothing unposted ⇒ no read.
+ */
+async function reconcilePostedState(
+  ctx: AgentContext,
+  row: ReviewRow,
+  accountId: number,
+  findings: FindingRow[],
+): Promise<Map<number, ClaudeFindingEarlierPost>> {
+  const failedAutoPost = row.autoPost != null && (row.autoPost.status === 'failed' || row.autoPost.status === 'partial') && (row.autoPost.findingIds ?? []).length > 0;
+  if (row.status !== 'succeeded' || (!findings.some((f) => f.postedAt == null) && !failedAutoPost)) return new Map();
+  const { cr, crf } = tables(ctx);
+  const { reviewThreads: rt, reviewComments: rc, prComments: pc, users, accounts } = ctx.schema as any;
+  const runs = (await ctx.db
+    .select({ id: cr.id, createdAt: cr.createdAt })
+    .from(cr)
+    .where(and(eq(cr.prId, row.prId), eq(cr.accountId, accountId)))
+    .execute()) as Array<{ id: number; createdAt: unknown }>;
+  const runIds = runs.map((r) => r.id);
+  const all = (await ctx.db
+    .select({
+      id: crf.id,
+      reviewId: crf.reviewId,
+      path: crf.path,
+      line: crf.line,
+      body: crf.body,
+      editedBody: crf.editedBody,
+      priorFindingId: crf.priorFindingId,
+      postedAt: crf.postedAt,
+      githubCommentId: crf.githubCommentId,
+      postedCommentKind: crf.postedCommentKind,
+      postedAuto: crf.postedAuto,
+      reminder: crf.reminder,
+      severity: crf.severity,
+    })
+    .from(crf)
+    .where(inArray(crf.reviewId, runIds))
+    .execute()) as Array<Omit<PostedStateInput['findings'][number], 'reminderCommentIds'> & { severity: ClaudeFindingSeverity; reminder: ClaudeFindingReminder | null }>;
+  const threads = (await ctx.db
+    .select({ id: rt.id, path: rt.path, line: rt.line })
+    .from(rt)
+    .where(eq(rt.prId, row.prId))
+    .execute()) as Array<{ id: number; path: string; line: number | null }>;
+  const threadCommentRows = threads.length === 0
+    ? []
+    : ((await ctx.db
+        .select({ threadId: rc.threadId, databaseId: rc.databaseId, body: rc.body, authorLogin: users.githubLogin, createdAt: rc.createdAt })
+        .from(rc)
+        .leftJoin(users, eq(users.id, rc.authorId))
+        .where(eq(rc.prId, row.prId))
+        .execute()) as Array<Omit<ThreadComment, 'createdAt'> & { createdAt: unknown }>);
+  const prCommentRows = (await ctx.db
+    .select({ databaseId: pc.databaseId, body: pc.body, authorLogin: users.githubLogin, createdAt: pc.createdAt })
+    .from(pc)
+    .leftJoin(users, eq(users.id, pc.authorId))
+    .where(eq(pc.prId, row.prId))
+    .execute()) as Array<{ databaseId: string | null; body: string | null; authorLogin: string | null; createdAt: unknown }>;
+  const login = (
+    (await ctx.db
+      .select({ login: accounts.githubLogin })
+      .from(accounts)
+      .where(eq(accounts.id, accountId))
+      .limit(1)
+      .execute()) as Array<{ login: string | null }>
+  )[0]?.login ?? null;
+  const ms = (d: unknown): number => (d instanceof Date ? d.getTime() : d == null ? 0 : new Date(d as string | number).getTime());
+  const input: PostedStateInput = {
+    // Praise is never shown or posted (`isShownFinding`).
+    findings: all
+      .filter((f) => f.severity !== 'praise')
+      .map(({ reminder, ...f }) => ({
+        ...f,
+        postedAt: f.postedAt == null ? null : new Date(ms(f.postedAt)),
+        reminderCommentIds: reminder == null ? [] : [reminder.githubCommentId, ...(reminder.earlierCommentIds ?? [])],
+      })),
+    runStartedAt: new Map(runs.map((r) => [r.id, ms(r.createdAt)])),
+    threads,
+    threadComments: threadCommentRows.map((c) => ({ ...c, createdAt: ms(c.createdAt) })),
+    prComments: prCommentRows.map((c) => ({ ...c, createdAt: ms(c.createdAt) })),
+    accountLogin: login,
+  };
+
+  const stamps = stampsFor(input, row.id);
+  if (stamps.length > 0) {
+    for (const st of stamps) {
+      // Compare-and-set: a post recorded meanwhile wins.
+      const done = (await ctx.db
+        .update(crf)
+        .set({
+          postedAt: st.postedAt,
+          githubCommentId: st.githubCommentId,
+          postedCommentKind: st.postedCommentKind,
+          ...(st.postedAuto ? { postedAuto: true } : {}),
+        })
+        .where(and(eq(crf.id, st.findingId), isNull(crf.postedAt)))
+        .returning({ id: crf.id })
+        .execute()) as Array<{ id: number }>;
+      if (done.length === 0) continue;
+      ctx.log?.info?.(`claude review ${row.id}: finding ${st.findingId} is already on GitHub (comment ${st.githubCommentId}); recorded as posted`);
+      for (const f of findings) {
+        if (f.id !== st.findingId) continue;
+        f.postedAt = st.postedAt;
+        f.githubCommentId = st.githubCommentId;
+        f.postedCommentKind = st.postedCommentKind;
+        if (st.postedAuto) f.postedAuto = true;
+      }
+      for (const f of input.findings as PostedStateInput['findings'][number][]) {
+        if (f.id !== st.findingId) continue;
+        f.postedAt = st.postedAt;
+        f.githubCommentId = st.githubCommentId;
+        f.postedCommentKind = st.postedCommentKind;
+        if (st.postedAuto) f.postedAuto = true;
+      }
+    }
+  }
+  if (failedAutoPost) await correctAutoPostRecord(ctx, row, landedAutoPosts(input, row.id, row.autoPost!.findingIds ?? []));
+  return earlierPostsFor(input, row.id);
+}
+
+/**
+ * A FAILED / PARTIAL auto-post record whose findings turned out to be on GitHub after all (a lost
+ * answer, found by `reconcilePostedState`): rewritten to what GitHub holds, so the tab stops saying
+ * "Couldn't post automatically" over comments that are there.
+ */
+async function correctAutoPostRecord(ctx: AgentContext, row: ReviewRow, landed: readonly number[]): Promise<void> {
+  const rec = row.autoPost;
+  if (rec == null || (rec.status !== 'failed' && rec.status !== 'partial')) return;
+  const tried = rec.findingIds ?? [];
+  if (tried.length === 0) return;
+  const landedSet = new Set(landed);
+  const posted = tried.filter((id) => landedSet.has(id));
+  if (posted.length === 0 || posted.length === (rec.postedFindingIds ?? []).length) return;
+  const all = posted.length === tried.length;
+  const next: ClaudeAutoPostRecord = {
+    ...rec,
+    status: all ? 'posted' : 'partial',
+    error: all ? null : rec.error,
+    postedFindingIds: posted,
+  };
+  const { cr } = tables(ctx);
+  await ctx.db.update(cr).set({ autoPost: next }).where(eq(cr.id, row.id)).execute();
+  row.autoPost = next;
 }
 
 /**
@@ -1735,6 +1901,34 @@ export async function markFindingPosted(
     })
     .where(eq(crf.id, findingId))
     .execute();
+}
+
+/**
+ * Record a REMINDER of an already-posted finding ("Post reminder"). Overwrites the previous one: the
+ * tab shows the latest. Never touches the finding's own post (`posted_at` / `github_comment_id`).
+ */
+export async function markFindingReminder(
+  ctx: AgentContext,
+  findingId: number,
+  githubCommentId: string,
+  kind: 'inline' | 'pr_comment',
+): Promise<ClaudeFindingReminder> {
+  const { crf } = tables(ctx);
+  const prev = (
+    (await ctx.db.select({ reminder: crf.reminder }).from(crf).where(eq(crf.id, findingId)).limit(1).execute()) as Array<{
+      reminder: ClaudeFindingReminder | null;
+    }>
+  )[0]?.reminder;
+  // Earlier reminders' comments stay listed, so posted-state.ts keeps them claimed.
+  const earlierCommentIds = prev == null ? [] : [prev.githubCommentId, ...(prev.earlierCommentIds ?? [])];
+  const reminder: ClaudeFindingReminder = {
+    githubCommentId,
+    postedCommentKind: kind,
+    postedAt: new Date().toISOString(),
+    ...(earlierCommentIds.length > 0 ? { earlierCommentIds } : {}),
+  };
+  await ctx.db.update(crf).set({ reminder }).where(eq(crf.id, findingId)).execute();
+  return reminder;
 }
 
 // On startup, heal runs left mid-flight by a crash/restart.

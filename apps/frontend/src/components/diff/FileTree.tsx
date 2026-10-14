@@ -4,6 +4,7 @@ import type { FileTreeNode } from '../../lib/diff.js';
 import { isLockFile } from '../../lib/diff.js';
 import { ThreadCountChips } from '../ThreadList/ThreadCountChips.js';
 import { ChevronIcon } from '../Icons.js';
+import { FileTypeIcon, FolderTypeIcon } from '../FileTypeIcons.js';
 import { SELECTED_BORDER, STATUS_META, UNSELECTED_BORDER } from './status.js';
 
 // The Changes tab's navigation rail: the PR's CHANGED FILES ONLY, arranged in their real
@@ -97,6 +98,7 @@ function TreeRow({
           <span className="flex w-3 shrink-0 select-none justify-center text-gray-400">
             <ChevronIcon dir={open ? 'down' : 'right'} />
           </span>
+          <FolderTypeIcon open={open} />
           <span className="min-w-0 flex-1 truncate font-mono text-gray-500 dark:text-gray-400">
             {node.name}/
           </span>
@@ -158,6 +160,7 @@ function TreeRow({
       >
         {meta ? meta.icon : '·'}
       </span>
+      <FileTypeIcon path={node.path} />
       <span className="min-w-0 flex-1 truncate font-mono">{node.name}</span>
       <span className="ml-auto flex shrink-0 items-center gap-1.5">
         <ThreadCountChips counts={node.threadCounts} compact />

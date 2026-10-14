@@ -133,7 +133,7 @@ posts **one** GitHub review (inline + body + verdict).
     changed since", `0` "history rewritten since"; an older server falls back to comparing SHAs.
   - ⚠ **A POSTED FINDING IS DONE.** `postedAt != null` (posted singly OR inside a submitted review —
     `markReviewPosted` stamps every included finding) removes Post, Reword and Ignore; only the
-    "Posted" link and Copy remain. The post route matches it: `POST …/post` sends included findings
+    "Posted" link, Copy and **"Post reminder"** remain (§ Auto-posting, "Reminders"). The post route matches it: `POST …/post` sends included findings
     with `postedAt == null` only, so a re-submitted review cannot post a comment twice
     (`post-review-skips-posted.test.ts`). There is NO per-finding "Ask Claude" — the review's one
     chat thread covers every finding. A finding from a deep-review specialist wears a small lens chip
@@ -446,8 +446,10 @@ review, with no "Previous review" prompt section, no `follow_up` record and no f
   default, and Post review sends every included finding with no duplicate check, so a same-commit
   re-run (the "Run anyway" path, e.g. to add a user story) would put the same inline comments on
   the same lines of the same commit a second time. The item stores `priorPosted` and the finding
-  wears "Already posted"; the reader can still un-ignore it. On a moved head the reminder is the
-  point, so it stays included.
+  wears "Already posted"; the reader can still un-ignore it. On a moved head it stays included, but
+  ⚠ since 2026-10-14 it is still NOT POSTED AGAIN by hand: its chain is on GitHub, so it carries
+  `earlierPost` and reads as posted (§ Auto-posting, "What is already on GitHub") — except as an explicit,
+  marked REMINDER ("Reminders").
 - **The sentence is TEMPLATED** (`followUpSentence` in shared, e.g. "Last review's 5 comments:
   3 addressed, 1 partly addressed, 1 not addressed.", or "Last review's 3 comments and 2 older
   ones: …" when some were carried — a carried comment is not the last review's) from the
@@ -1306,6 +1308,48 @@ auto-posting: claim before any GitHub write, never retried.
   for good. Nothing left ⇒ `skipped` and no GitHub call: `already_posted` (+ `alreadyPostedFindingIds`,
   wire `alreadyPostedCount`) when the dedupe alone emptied it — shown as "Not posted automatically:
   all N comments are already on GitHub." — else `nothing_new`, shown nowhere.
+- ⚠ **WHAT IS ALREADY ON GITHUB — ONE ANSWER FOR THE TAB, BOTH POST ROUTES AND AUTO-POSTING**
+  (`claude-review/posted-state.ts`, applied inside `getClaudeReviewById`; DB-only). Measured on PR 4
+  of DEFRA/bng-metric-template (2026-10-14): GitHub answered an auto post's review POST with **422
+  "An internal error occurred" AND PUBLISHED THE REVIEW**, so the run read `failed`; and a re-raise
+  (`prior_finding_id`) of an auto-posted nit, which auto-posting rightly skipped, showed a Post
+  button. The reader posted both again by hand. Three nets now: (1) the seam reads a failed review
+  POST back (`post-seam.ts` `findLandedReview`: a review at the commit with EXACTLY the sent body,
+  new since the attempt — then it carries on as a 201; ⚠ the body's hidden marker carries a
+  per-ATTEMPT nonce, `<!-- pierre:claude-review v=1 a=<hex> -->`, so an earlier review with the same
+  body — every summary-less review was the bare marker — can never be adopted and have this attempt's
+  findings stamped onto it; every marker reader matches the PREFIX), and a 422 "internal error" is never a
+  verdict refusal (`isVerdictRefusal`), so it is never retried; (2) on read, an unposted finding
+  whose text is on a comment of Limn's (own login + marker) made since its run started and owned by
+  no posted finding is STAMPED posted — ⚠ matched on the ANCHOR too: an inline thread's current line
+  must be the finding's (skipped when GitHub reports none, or the comment sat on the file's first change
+  with the fallback note), a PR-level comment must name `path:line`, so the same words on another line
+  ("Unused import." twice) are another finding — (auto when the comment has the footer), and a `failed` /
+  `partial` record is corrected to what GitHub took (`landedAutoPosts`); (3) an unposted finding
+  whose chain has a posted finding, or whose text AND anchor match an older comment of Limn's that no
+  sibling in its own run owns, carries
+  `ClaudeFinding.earlierPost` (derived, never stored — stamping a re-raise would hand two rows one
+  thread): the SPA shows it posted and linked (`effectivePost`), single Post answers `409
+  AlreadyPosted`, Post review leaves it out, auto-posting counts it `already_posted`. Pinned by
+  `posted-state.test.ts` (the exact timeline) and `post-seam.test.ts`.
+- **REMINDERS ARE ALLOWED, ALWAYS MARKED** (user decision 2026-10-14). A finding already on GitHub (its
+  own post OR `earlierPost`) keeps its "Posted automatically · <ago>" / "Posted earlier" chip linking the
+  earlier comment, and offers ONE post action: **"Post reminder"** (never the normal Post;
+  `lib/autoPost.ts` `canPostReminder`, editable run only). The single route takes an explicit
+  `{ reminder: true }`: WITHOUT it an already-posted finding still answers `409 AlreadyPosted` (nothing
+  double-posts by accident); with it on an unposted finding → `409 NotPosted`. The reminder's comment
+  opens on `**Reminder:** first raised [on 12 Oct 2026](<permalink of the earlier comment>).`
+  (`posted-state.ts` `reminderLead` / `findingCommentUrl`, riding as the comment's LEAD before any story
+  lead), then the finding's text, the footer when there is one and Limn's hidden marker — so
+  `isLimnPostedComment` holds. It is RECORDED BESIDE the original, never instead of it:
+  `claude_review_findings.reminder` (sqlite `0110` / pg `0097`, `ClaudeFindingReminder`; the latest one,
+  earlier reminders' comment ids kept in `earlierCommentIds`, stored only) → the tab adds "Reminder posted
+  · <ago>" linking it. `posted_at` / `github_comment_id` / `earlierPost` are untouched, so the follow-up
+  chain, auto resolve and pushback keep reading the original thread; ⚠ every reminder comment is CLAIMED
+  in `posted-state.ts`, or it would be stamped as the next run's re-raise's "lost post" (same text, same
+  line, made after that run started). Bulk "Post review" and auto-posting still skip the finding. A reply
+  on the reminder's own thread is not followed up (Limn's marker keeps it out of "other reviewers'
+  threads" too).
 - ⚠ **THE CLAIM BEFORE ANY WRITE, AND NO RETRY.** `claude_reviews.auto_post` is written by a
   compare-and-set from NULL (`status:'posting'`, the finding ids it will try) before GitHub is
   touched, so a second call or a restart can never post the run twice. After a 201 nothing throws:
@@ -1833,8 +1877,10 @@ criteriaDerived, references}`. The graph's text edges and its ghost chains come 
   `missing`, docs/TRACKERS.md) and briefs what that stored: ≤ `SPRINT_GHOST_DEPTH_MAX` + 1 rounds,
   stopping when a round briefs nothing and stores nothing.
 - **CURRENCY**: a brief counts while its `text_hash` = today's `sprintBriefInput` hash (title,
-  colour-stripped description ≤ 4,000, the criteria as written — the ONE extractor, each ≤ 500 — and the
-  provider's text rule) AND `brief_version` = `SPRINT_BRIEF_VERSION`. ⚠ Changing one word of the prompt
+  colour-stripped description ≤ 4,000, the criteria as written — the ONE extractor, each ≤ 500 — the
+  ticket's TRACKER LINKS (key, title, the tracker's phrase; never their status) and the provider's text
+  rule) AND `brief_version` = `SPRINT_BRIEF_VERSION`. ⚠ `sprintBriefInput` REQUIRES `blockedByJson`: a
+  caller that dropped it would hash a different input from the pass and read every brief as stale. ⚠ Changing one word of the prompt
   is a new version.
 - **THE PROMPT** (`SPRINT_BRIEF_SYSTEM`): the summary (one or two sentences, ≤ 400); the CRITERIA itemised
   in the Open PRs Story check's words ("one entry per testable requirement, whether written as bullets,
@@ -1842,13 +1888,21 @@ criteriaDerived, references}`. The graph's text edges and its ghost chains come 
   200 each, ≤ 40) — DERIVED from the title and description when the ticket has none, and then
   `criteriaDerived` is set by the SERVER from the input, never the model; the REFERENCES are rubric 4's
   rule word for word (`STORY_REFERENCE_RULES`, exported from the story labels' prompt so the two can
-  never drift). The ticket sits inside a per-call NONCE fence; the "has / has no criteria" note sits
+  never drift), each plus a **`why`** (version 3/4): one plain sentence (≤ `SPRINT_BRIEF_CAPS.why` 160) on
+  WHAT the ticket needs from / shares with the other — never a restatement of the relation ("Listed under
+  Dependencies" was 3's failure, hence 4); null when the text says no more. The TRACKER LINKS are listed
+  inside the fence too and come back as `links: [{ticketKey, why}]` — a reason only where the text or the
+  linked title supports one, never invented from the link type. The ticket sits inside a per-call NONCE fence; the "has / has no criteria" note sits
   outside it.
 - **VALIDATION** (`validateSprintBrief`): JSON with a non-empty summary and both arrays; over a cap →
   refused, never cut; criteria renumbered 1..k, blanks dropped, a ticket WITH criteria must get ≥ 1 back;
   references through the story labels' OWN `reference` rule (relation from the vocabulary, a key the
-  text never names dropped, every quote verified, (key, relation) repeats once). ONE retry on a refused
-  answer, both calls billed.
+  text never names dropped, every quote verified, (key, relation) repeats once). A `why` over the cap is
+  DROPPED alone (null — never cut, never a refused brief); a link reason for a key the input did not list
+  is dropped. Link reasons share `references_json`, tagged `link: true` (`SprintBriefStoredReference`, no
+  migration); `sprintBriefOf` splits them into `linkReasons`. The drawer's references and the graph's
+  edges carry `why` (a tracker edge that wins over the text's reading of the same tie keeps its reason).
+  ONE retry on a refused answer, both calls billed.
 - **COST**: one `cheapComplete` per ticket (Haiku 5.5, tool-less, connectors isolated), 4 at a time,
   recorded under feature `sprint_briefs`; the pass stops STARTING calls at `SPRINT_BRIEF_BUDGET_USD`
   (env, default $1).
@@ -1886,6 +1940,133 @@ ticket in exactly one, so the graph can cluster by area of work rather than by e
 - **READ**: `getSprintGraph` returns `themes` and each node's `theme` only while the stored row is
   CURRENT for today's hash and version — otherwise null, and the SPA disables "Theme" with "Themes
   appear after Claude reads the sprint".
+
+## Sprint story (Activity → This Sprint, the strip above the graph)
+
+ONE sprint-wide Haiku 5.5 call that writes a one-line HEADLINE, a one-sentence **SPRINT FOCUS** (what the
+sprint is focused on — its main areas of work) and 0–4 STORYLINES (dependency paths and risks only) so a
+reader gets the sprint at a glance; beside them sit FOUR CODE CARDS Limn writes itself (below). ⚠ CODE
+BUILDS THE STORY'S SKELETON; the model only picks and words.
+
+- **Where**: `src/review/sprint-story/` — `prompt.ts`, `validate.ts`, `manager.ts`; the input and store
+  are core `db/sprint-story.ts`, the to-do is `db/sprint-graph.ts` `sprintStoryTodo` (folds exactly as
+  `getSprintGraph` does, WITHOUT stamping the view or kicking a read) / `sprintStoryInputOf` (the ONE
+  builder both share). Table `sprint_story` (sqlite `0109` / pg `0096`), ONE row per (account, workspace).
+  The SPA half is `components/Activity/SprintStoryStrip.tsx` (+ `sprintStoryModel.ts`), MOUNTED above the
+  view controls in `SprintView`; a click frames the storyline's tickets on the graph, a second click goes
+  back to Fit.
+- **WHEN**: after the theme pass, from the same after-read seam (`review/sprint-briefs/index.ts`; local
+  only, `config.aiEnabled`, a credential) — never on a view. It CALLS THE MODEL ONLY WHEN THE INPUT HASH
+  CHANGED: the hash covers exactly what is sent + `SPRINT_STORY_VERSION` (4). ⚠ ONE `now`-derived thing
+  reaches it ON PURPOSE: the SPRINT DAY — whole days counted from the sprint's own start instant, so it
+  changes exactly once per 24 h (at most ONE re-run per workspace per day, and only when a sprint read
+  kicks the pass). Leaving it out would let a stored headline say "day 3 of 14" on day 12 and never
+  raise the late risk, because the page shows the LAST story whatever its hash. Nothing finer than the
+  day index may enter. Fewer than `SPRINT_STORY_CAPS.minTickets` (4) sprint tickets → no story (a sprint
+  with no candidate still gets a headline + focus).
+- **THE INPUT (graph data only)**: the sprint-wide facts (ticket count by stage, open / merged PRs,
+  tickets with failing checks), the **AREAS OF WORK** block the focus is written from (one line per THEME —
+  or per EPIC with ≥ 2 tickets when no current theme pass covers the sprint — with its stage counts and ≤ 6
+  ticket lines; with neither, the sprint's tickets), then numbered CANDIDATES, each with its kind, its
+  idents and its fact lines: the ≤ 3 longest `depends_on` CHAINS touching an unfinished sprint ticket
+  (delivery order, each link with the edge's `why` else its quote), and RISKS — tickets waiting on
+  unfinished work INSIDE the sprint, failing checks on open PRs, work not started (≥ 2 and ≥ 20% of the
+  sprint), unfinished unassigned work (≥ 2). ⚠ (v4) A CHAIN NEVER WALKS AN EDGE ONTO A DONE TICKET: a
+  prerequisite that is done is no dependency any more ("BMD-1028 depends on BMD-994, which is done
+  outside the sprint" was offered — and worded — as a risk on workspace 1). ⚠ (v4) The theme candidates
+  are GONE (the "Area of work" cards became the focus sentence), and a wait on a ticket OUTSIDE the sprint
+  is the code card "Blocked outside the sprint", never a model risk — one fact, one card. ⚠ NO PERSON IS NAMED: assignees enter only as unassigned
+  counts.
+- **TIME FACTS — ONLY FROM A REAL SPRINT WINDOW** (`sprintTimingFor` in `db/sprint-graph.ts`, pure
+  `sprintTimingOf` / `isLateInSprint` in `db/sprint-story.ts`): the workspace's STORED cadence + phase
+  anchor, resolved through the ONE `getReportingWindow` (the plugin's `resolveComparisonWindow`). Only
+  `mode === 'sprint'` is a sprint; the trailing-14-day fallback (OSS, no cadence, or a ROLLING comparison
+  mode — the default, so a cadence alone is not enough: the workspace's Reports window must be set to
+  "This sprint") gets NO day facts and NO late risk, and neither does a tracker STATUS FALLBACK list (not
+  the sprint's tickets). With a sprint: a facts line "Sprint day: 10 of 14; days left after today: 4"
+  (calendar days, day 1 = the start day), and the "work not started" risk becomes **"work not started
+  late in the sprint"** when ≥ `SPRINT_STORY_LATE.minNotStarted` (2) tickets are not started and ≤
+  `SPRINT_STORY_LATE.maxLeftPct` (40) % of the days are left — the same tickets, with the days beside
+  them (it REPLACES the plain risk, never a second candidate over the same tickets). The headline and
+  storylines may use those numbers (they are code's).
+- **VALIDATION** (`validateSprintStory`): JSON; headline ≤ 200 chars; a FOCUS sentence is REQUIRED
+  (missing / empty → `shape`, > `focusChars` 240 → `too_long`; the prompt asks ≤ 30 words) and its numbers
+  may come only from the sprint-wide facts and the AREAS OF WORK block; 0–4 storylines, each a candidate id
+  at most once, at least one chain / one risk when such a candidate exists (`coverage`); title ≤ 6 words / 56 chars, sentence ≤ 280 chars (the prompt asks for
+  25 / 5 / 30 WORDS, so a small overshoot still stands — refused, never cut). KIND and IDENTS are copied from the candidate. ⚠ THE NUMBER GATE (the D4 rule): any non-ASCII
+  numeral (`\p{Nd}\p{No}\p{Nl}`) → refused; a ticket-key-shaped token that is not a key handed in →
+  refused; any number not in the facts → refused (a storyline may use the sprint-wide facts and ITS OWN
+  candidate's; the headline any). ⚠ The ALLOWED numbers are CODE'S COUNTS only: tracker-authored names
+  (`SprintStoryInput.verbatim` — sprint name, theme / epic names, ticket titles) and the quoted brief
+  reasons are removed before the facts are read for numbers, so "Handle 500 errors" never lets "500
+  tickets are blocked" through and a model-written `why` never launders a figure; the same names are
+  removed from the model's text first, so quoting a title whole ("UTF-8 uploads", "Sprint 15") passes.
+  ⚠ DIGITS ONLY: a spelled-out count of two or more (`two`…`twenty`, `thirty`…`ninety`, `hundred`,
+  `thousand`, `dozen`; whole words, any case — "twenty-one" matches) → `number_word`, so every count
+  reaches the number gate. "one" / "a single" stay allowed (ordinary English); a tracker name quoted whole
+  ("Two-factor login") is removed first. The prompt asks for digits. ⚠ THE SPRINT NAME'S SHORT FORMS are
+  quotable too (`sprintNameForms`): "Sprint 15 (Oct 14-27)" also yields "Sprint 15" and "Oct 14-27". Before
+  v3 a headline saying "Sprint 15" failed `number` on EVERY pass for a sprint named with a bracket — the
+  real cause of workspace 1's strip sitting on "Writing the sprint story…" (2026-10-14; ws 5 / 12 got lucky
+  draws). ONE retry, both billed, and the retry is TOLD WHY the first was refused (`sprintStoryRetryNote`,
+  appended after the fence); a failed pass stores no story.
+- **THE ATTEMPT + THE BACKOFF** (v3, sqlite `0111` / pg `0098`): every pass that called Claude records
+  `sprint_reads.story_attempt_at / _hash / _error` (the `SprintStoryFailure` code, or null = stored; a
+  thrown call is `error`). ⚠ A failure for TODAY's input hash is never run again (`storyBackedOff` →
+  state `backoff`, no call) until the hash moves — new facts, or the next sprint day. It used to re-bill
+  two refused calls on every read for ever, record nothing, and leave the page on "Writing…".
+- **TIMING** (v3): the day facts and the late risk come FIRST from the tracker's own sprint dates
+  (`sprint_reads.sprint_starts_at / _ends_at`, stored by the sprint read — docs/TRACKERS.md), then from the
+  cadence (`getReportingWindow` mode 'sprint'). Both ends needed; ONE day count, shared `sprintDayOf`
+  (whole days from the start instant, a part day counts: Jira's 14 Oct 10:15 → 27 Oct 17:00 is 14 days).
+  A GitHub milestone (end only) gives no day facts.
+- **OLD STORIES** (v3 and before): still SHOWN (a stale story beats a blank strip), but their `theme`
+  storylines are DROPPED on read (`sprintStoryOf` keeps chain / risk only) and they carry `focus: null`, so
+  no focus line shows until the next pass rewrites the story. A v4 story with no storyline still shows its
+  headline + focus.
+- **THE CODE CARDS** (`SprintGraphResponse.signals`, `db/sprint-signals.ts`; shared `SprintSignal`,
+  `SPRINT_SIGNAL_LABEL`): FREE on every tier, NO model, templated sentences in digits over counts taken from
+  the SAME folded graph, computed on every GET from the DB only (never a tracker or GitHub call), shown with
+  AI off too. Each carries its idents (click = frame + highlight, exactly like a storyline). Strip order
+  (`stripCards`): **Since you last looked**, **Pace**, Claude's storylines, **Out of step**, **Blocked outside
+  the sprint**; each omitted when it has nothing to say.
+  - *Out of step* (`outOfStepSignal`): sprint tickets whose stage disagrees with their PRs — In review with
+    open PR (said apart: "with their code already merged" vs "with no pull request" — on workspace 1, 11 of
+    the 14 had merged code: that team moves a ticket to In review AFTER the merge, so one count read as 14
+    problems) · Complete with a PR still open · Not started with a PR open (a draft-only one said apart).
+    "3 tickets: 1 in review with no pull request, 1 in review with its code already merged, 1 complete with
+    a pull request still open."
+  - *Pace* (`paceSignal`): "Day 9 of 14" + "64% of the sprint's time has gone and 35% of its tickets are
+    complete (27 of 77)." — time share = day / days of shared `sprintDayOf` (today counts), from the SAME
+    real sprint window as the story's day facts (`sprintTimingFor`); none → no card. NEUTRAL: no "behind" /
+    "on track" verdict, so no threshold exists. idents = the unfinished sprint tickets.
+  - *Blocked outside the sprint* (`blockedOutsideSignal`): unfinished sprint tickets with a `depends_on`
+    edge (tracker blocking link or a current brief's reading) onto a GHOST that is not Complete (status
+    unknown counts as not complete), and how many of those outside tickets have not started. idents = both
+    sides.
+  - *Since you last looked* (`sinceLastLookedSignal`): stage moves grouped by the new stage (Complete
+    first), tickets added to the sprint, PRs merged on sprint tickets — against a per-(account, workspace)
+    BASELINE in `sprint_view_snapshots` (sqlite `0112` / pg `0099`). Two slots: CURRENT is refreshed on
+    every view; ⚠ it rolls into BASELINE only when it is ≥ `SPRINT_VISIT_GAP_MS` (30 min) old, i.e. the
+    previous VISIT ended — so the page's own refetches (every 5 s while a pass runs) never erase the diff,
+    and a move that happened while the reader was looking is not news. The title is "Since 3 hours ago"
+    (the baseline's time). No card on a first-ever visit, when nothing moved, or when the baseline shares
+    no ticket with today's sprint (a new sprint). ⚠ The snapshot is recorded only once a sprint read has
+    produced sprint tickets — an empty list must never become a baseline that makes every ticket "added".
+    A store failure only loses this card (never throws).
+- **COST**: one `cheapComplete` per changed graph, feature `sprint_story`. Every status move, PR merge or
+  check turning red changes the hash, so an active sprint is re-storied at most once per sprint read
+  (≤ every 20 min while viewed).
+- **READ**: `getSprintGraph` returns the LAST story written — ANY `SPRINT_STORY_VERSION`, even when its
+  input hash has moved — the hash covers GitHub-synced facts (PR counts, failing checks) that change
+  between sprint reads, so "current only" blanked the strip on every merge, and a version bump blanked it
+  until a new pass stored (for ever, when every pass was refused). The hash is the RE-BILL gate, never
+  the display gate. `storyStatus` (`sprintStoryStatusOf`, the ONE fold) says where the pass stands for
+  today's input: `current` · `writing` (the pass holds its in-process slot, `claimSprintStoryPass`) ·
+  `queued` (the after-read chain — summaries, themes, story — holds the workspace) · `failed` (the
+  backoff holds today's input; `failure` names the code) · `waiting` (the next read starts one) · `none`
+  (AI off, no Claude credential — `storyCanRun`, from the route — or not eligible); `stale` marks a shown
+  story that is not current, `lastAttemptAt` the last pass that called Claude.
 
 ## Ask about this sprint (Activity → This Sprint)
 

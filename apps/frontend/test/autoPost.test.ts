@@ -21,8 +21,12 @@ import {
   autoPostSkipLine,
   autoResolveLabel,
   autoVerdictLine,
+  canPostReminder,
+  effectivePost,
   postedChipLabel,
+  reminderChipLabel,
 } from '../src/lib/autoPost.js';
+import { isIgnoredFinding } from '../src/lib/findingsMarkdown.js';
 import { notRequestedPostedLabel, postedLabel } from '../src/lib/ticketReview.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -144,7 +148,7 @@ describe('the mounts', () => {
 
   it('the Claude Review tab and Story check render the chip and the failure line', () => {
     const tab = src('components/ClaudeReviewTab.tsx');
-    expect(tab).toContain('postedChipLabel(finding)');
+    expect(tab).toContain('postedChipLabel(post!)');
     expect(tab).toContain('autoPostFailureLine(review.autoPost)');
     expect(tab).toContain('autoPostSkipLine(review.autoPost)');
     expect(tab).toContain('autoVerdictLine(review.autoPost)');
@@ -152,5 +156,63 @@ describe('the mounts', () => {
     const parts = src('components/TicketReviewParts.tsx');
     expect(parts).toContain('autoPostFailureLine(review.autoPost)');
     expect(parts).toContain('notRequestedPostedLabel(review, i)');
+  });
+});
+
+// PR 163508: a re-raise of an auto-posted nit showed a Post button, and the reader posted it again.
+// A finding whose point is already on GitHub (`earlierPost`) is shown POSTED, linked, and never ignored.
+describe('a finding already on GitHub through an earlier post', () => {
+  const unposted = { postedAt: null, postedAuto: false, githubCommentId: null, postedCommentKind: null } as const;
+
+  it('its own post wins; else the earlier post; else nothing', () => {
+    const at = minsAgo(30);
+    expect(effectivePost({ ...unposted, earlierPost: null })).toBeNull();
+    expect(effectivePost({ postedAt: at, postedAuto: true, githubCommentId: '9', postedCommentKind: 'inline', earlierPost: null })).toEqual({
+      postedAt: at, postedAuto: true, githubCommentId: '9', postedCommentKind: 'inline', earlier: false,
+    });
+    const e = effectivePost({
+      ...unposted,
+      earlierPost: { findingId: 748, githubCommentId: '4272298808', postedCommentKind: 'inline', postedAt: at, postedAuto: true },
+    })!;
+    expect(e).toMatchObject({ githubCommentId: '4272298808', earlier: true });
+    expect(postedChipLabel(e)).toBe('Posted automatically · 30 mins ago');
+    expect(postedChipLabel({ postedAt: at, postedAuto: false, earlier: true })).toBe('Posted earlier');
+  });
+
+  it('is never "ignored", and the card reads it through effectivePost', () => {
+    const earlierPost = { findingId: 1, githubCommentId: '1', postedCommentKind: 'inline' as const, postedAt: minsAgo(5), postedAuto: false };
+    expect(isIgnoredFinding({ included: false, postedAt: null, earlierPost }, true)).toBe(false);
+    expect(isIgnoredFinding({ included: false, postedAt: null, earlierPost: null }, true)).toBe(true);
+    expect(src('components/ClaudeReviewTab.tsx')).toContain('const post = effectivePost(finding);');
+  });
+});
+
+describe('Post reminder (a finding already on GitHub)', () => {
+  it('offers only the reminder, on the editable run, for a posted or earlier-posted finding', () => {
+    const own = effectivePost({ postedAt: minsAgo(5), postedAuto: true, githubCommentId: '9', postedCommentKind: 'inline', earlierPost: null });
+    const earlier = effectivePost({
+      postedAt: null,
+      postedAuto: false,
+      githubCommentId: null,
+      postedCommentKind: null,
+      earlierPost: { findingId: 1, githubCommentId: '1', postedCommentKind: 'inline', postedAt: minsAgo(30), postedAuto: true },
+    });
+    const none = effectivePost({ postedAt: null, postedAuto: false, githubCommentId: null, postedCommentKind: null, earlierPost: null });
+    expect(canPostReminder(own, true)).toBe(true);
+    expect(canPostReminder(earlier, true)).toBe(true);
+    expect(canPostReminder(none, true)).toBe(false);
+    expect(canPostReminder(own, false)).toBe(false);
+    // The original chip is unchanged beside the reminder's.
+    expect(postedChipLabel(earlier!)).toBe('Posted automatically · 30 mins ago');
+  });
+  it('says the reminder was posted, beside the original', () => {
+    expect(reminderChipLabel(null)).toBeNull();
+    expect(reminderChipLabel(undefined)).toBeNull();
+    expect(reminderChipLabel({ postedAt: new Date(Date.now() - 2 * 60_000).toISOString() })).toBe('Reminder posted · 2 mins ago');
+    expect(reminderChipLabel({ postedAt: null })).toBe('Reminder posted');
+    const tab = src('components/ClaudeReviewTab.tsx');
+    expect(tab).toContain('canPostReminder(post, editable)');
+    expect(tab).toContain('reminderChipLabel(finding.reminder)');
+    expect(tab).toContain("onPostFinding(f.id, { reminder: true })");
   });
 });

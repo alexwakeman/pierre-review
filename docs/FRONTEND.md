@@ -334,9 +334,23 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   it). **The Sort menu orders the PRs WITHIN each stack** (the list is sorted first, then grouped
   in that order); **the stacks themselves are in a FIXED order**: open tickets first, then `done`
   ones; within each, the stack whose latest PR update is most recent leads; ties by key,
-  numerically; an unknown status counts as open. ⚠ **Jira never blocks the board**: until the
-  ticket answer arrives, after a failed one, and whenever no PR names a ticket, the page is the
-  plain list (cards keep their ticket row) — no skeleton, no lone "No ticket" header. The view and
+  numerically; an unknown status counts as open. ⚠ **THE FIRST PAINT WAITS FOR THE TICKETS, ONCE**
+  (2026-10-14; it used to paint the list and then redraw into stacks): where the workspace has a
+  tracker, the cards' skeleton stays up until the tracker settings AND the `POST /api/ticket-links`
+  answer are in (`hooks/useOpenPrsTicketGate.ts`, pure rule `lib/openPrsTicketGate.ts`
+  `ticketGate`). What is painted is a SNAPSHOT of PRs + tickets taken together, so a background
+  refetch, a repo-filter change or a new PR keeps the last pair on screen until the new pair is
+  complete — the loader never flashes again and the stacks never regroup mid-read. ⚠ That hold is
+  BOUNDED too: a refetch's ticket answer gets `TICKET_WAIT_MS`, then the new PRs paint with the tickets
+  already known; a PR the live list no longer has leaves AT ONCE (`paintedPrs`); and an ANSWERED empty
+  list paints the empty state (the hook takes `answered` = the PR query's data is here — a query not
+  started yet also reads as "no PRs, not loading"). The latch is pure (`nextTicketSnapshot`, tested).
+  ⚠ **But the tracker never blocks the board for long**: a failed answer, or none within `TICKET_WAIT_MS` (6s),
+  paints the plain list; if the tickets land later the list STAYS and a "Tickets loaded. Group by
+  ticket" line offers the regroup (the reader's jump, never one that happens to them). No PR naming
+  a ticket is still the list — no lone "No ticket" header. Every card (and the PR-detail header)
+  carries a "Copy PR link" `CopyButton` (`LinkIcon`; `lib/prLink.ts` `githubPrUrl` on the cards,
+  which carry no URL of their own). The view and
   the collapsed stacks (ids `ticket:<KEY>` / `none`) are PER-VIEWER conveniences in
   `store/openPrsView.ts` — localStorage only (try/catch), never the URL and never
   `FilterDefaults`. List mode is exactly the cards described above.
@@ -793,6 +807,15 @@ the header and the rail can never disagree about what "R" means.
   All on GitHub ↗", rendered when `data.truncated`), because a tree implies a completeness a
   scrolling list does not. The pre-existing "Large diff — not all files are shown" line under the
   diff stays.
+- **File-type marks** (rail rows, folder rows, and every `FileDiffView` heading) come from
+  `components/FileTypeIcons.tsx` — paths COPIED from MIT-licensed Material Icon Theme
+  (`material-icon-theme@5.39.0`; notice in the file header and `THIRD_PARTY_NOTICES.md`, which
+  `build-release.mjs` ships). Brand-coloured on purpose, NOT `currentColor`, which is why they
+  are not in `Icons.tsx`; `aria-hidden`, the file name is the label. The mark is picked by the
+  pure `lib/fileTypeIcon.ts` (name, then name families, then extension, then a generic file) —
+  ⚠ DISPLAY ONLY, a FIFTH path table that must never be folded into or read by the four path
+  classifiers (its own lock-file and test-file lists). The status letter (A/M/D/R) stays: it is
+  a status, not a type. pnpm and TOML swap to upstream's `_light` drawing on the light theme.
 
 **One focus mechanism, two grains that are not interchangeable.** `FileDiffView` takes
 `focus?: DiffFocusTarget` (`{path, line?, side?, nonce}`) addressing a **FILE (optionally a
@@ -2102,7 +2125,41 @@ Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the 
     (`visibleGraph` recounts `degree`; the wire's `degree` counts every edge). Measured on workspace 1
     (Sprint 14, 77 tickets, 136 nodes / 181 edges on the wire): the default draws 78 nodes / 15 edges;
     history 87 / 31; builds-on 80 / 34; both 136 / 181. The header counts what is drawn.
-  - **"Group by"** — Epic · Theme (DEFAULT) · Section · None; a stored per-browser choice wins
+  - **THE SPRINT STORY** (`SprintStoryStrip.tsx`, fold `sprintStoryModel.ts`) sits between the header
+    and the view controls: the response's `story` headline (ⓘ beside it), its focus sentence under a
+    visible "Sprint focus" label (none for a pre-v4 story), then ONE row of cards in the ONE order
+    (`stripCards`): Limn's code cards "Since you last looked" (eye) and "Pace" (timer), Claude's 0–4
+    storylines "Dependency path" (link) / "At risk" (warning), then Limn's "Out of step" (scales) and
+    "Blocked outside the sprint" (lock) — each card labelled with its kind + mark, a title and one
+    sentence; definitions live in the strip's ⓘ only. The code cards (`signals`) are free and render with
+    AI off too (Claude's half then renders nothing). Selection is by card KEY; the reset signature
+    (`stripCardsSig`) is keys + idents, never titles ("Since 31 minutes ago" moves every minute). Clicking a card FRAMES its tickets (SprintView's
+    `focusRequest` → `SprintGraph` `frameIdents` over the ones drawn) AND HIGHLIGHTS them: a pink
+    `STORY_HIGHLIGHT` corona + ring (no status, PR dot or selection uses pink; contrast-tested), their labels
+    REVEALED like a hovered one (never moving another), every other ticket and every link not between two of
+    them faded (`storyHighlightSet` / `fadedBy`; an open ticket's neighbourhood wins while selected). A VIEW
+    state — no re-layout; the corona breathes three times, still under reduced motion. The card is
+    `aria-pressed` (pink); clicking it again, "Clear" beside the headline, or a new story clears it, and another
+    card replaces it, animating back to Fit on clear. It renders NOTHING when AI is off or no pass can run (`storyStatus.state` `none`).
+    The fold (`sprintStoryView`) reads the server's `storyStatus`: with NO story, one short line — the
+    canvas's own indeterminate bar (`SprintProgressBar`, ONE component with the canvas's top-edge bar,
+    styles `.sg-progress*`) + "Writing the sprint story…" only while `writing`; else when it will be
+    written (`queued` / `waiting`) or why it could not be (`failed`, "Couldn't write the sprint story.
+    <reason> Limn tries again when the sprint changes."). ⚠ A STALE story (older input or version) is
+    ALWAYS shown — never blanked — with a quiet "Updating" beside the headline while `writing` / `queued`,
+    or the failure line under it. While writing the canvas bar reads "Writing the sprint story"
+    (`sprintProgress({storyWriting})`, after read / refetch / summaries), and the graph polls every 5 s
+    while `writing` / `queued`. The story shown is the LAST one written (docs/CLAUDE-REVIEW.md § Sprint story).
+  - **THE SPRINT'S DATES** beside the title (`sprintDatesLine`, `sprintStoryModel.ts`): "14 Oct – 27 Oct ·
+    day 1 of 14" from `sprintDates` (the tracker's own, else the cadence's), short dates in the reader's
+    locale, the day count from shared `sprintDayOf` (the story's own count); an end on midnight shows the
+    day before; end only → "due 28 Oct"; before / after → "starts in 2 days" / "ended"; none → nothing.
+  - **"Group by"** — Epic · Theme (DEFAULT) · Section · Dependencies · None. **Dependencies** puts each
+    `depends_on` chain (ghosts included, tracker blocking links counted) in its own halo, named
+    "Chain: <title>" after the ticket most others in it wait on (`chainLabel`; the prefix does not eat
+    the title's room, `groupLabelMax`), laid out LEFT TO RIGHT by longest path to a ticket that depends
+    on nothing (`chainLayout`; a loop is broken at a fixed point); tickets with no dependency share
+    "Standalone". Split by status and Assigned to are off in it and the epic/theme picker is hidden. A stored per-browser choice wins
     (`sprint-graph-group`, `readGroupMode` / `writeGroupMode`, try/catch). SOFT clusters: each group gets
     an ANCHOR (`groupAnchors`: placed in `groupList` order — largest first, sections in stage order —
     along a spiral STRETCHED to the canvas's measured aspect, at the first spot overlapping no placed
@@ -2177,11 +2234,17 @@ Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the 
     top-right rim (image through `safeExternalUrl`, initials when it fails), counter-scaled by CSS
     `--sg-badge` (`badgeScale`) so it never drops below an 18px picture on screen, and an obstacle to
     every label and name; HIDDEN when zoomed far out (`data-zoom='far'`, below `FAR_ZOOM`), where it
-    also reserves no halo room and blocks nothing (`hasBadge(id, k)`); PR satellites orbiting (open / draft / merged, a red ring for failing checks on an
-    OPEN PR; at most 12). **Edges**: `depends_on` a directed arrow (from → to), `concurrent` dashed,
+    also reserves no halo room and blocks nothing (`hasBadge(id, k)`); PR satellites (open / merged filled, draft HOLLOW, a red ring for failing checks on an
+    OPEN PR; at most 12) — `SATELLITE_R` 5.5, STILL (no rotation), on `satelliteOrbit` just outside the
+    thickest ring (widened before dots touch), spaced over the arc the assignee badge leaves free
+    (`satellitesOf(prs, { r, badge })`), counter-scaled zoomed out (`.sg-sat`, `--sg-sat`, `satelliteScale`:
+    ≥ 4px on screen, at most ×2.5); a label sits past the dots (`nodeExtent`). **Edges**: `depends_on` a directed arrow (from → to), `concurrent` dashed,
     `builds_on` / `supersedes` faint and thin (only with "Show builds on / replaces"; the key lists them
-    then); hovering a node or an edge shows a tooltip-popover
-    (status, relations; an edge's label and quote) — never `title=`.
+    then). Every link is a gentle CURVE bowing to the left of its own direction (two opposite links
+    between one pair bow apart; parallel ones get alternating lanes), ending at the circle's edge with
+    the arrowhead along the curve. Hovering a node or an edge shows a tooltip-popover (status,
+    relations; an edge's label, then the brief's one-sentence `why`, then its quote only when it adds
+    words — `referenceWhy` / `referenceQuote`) — never `title=`.
   - ⚠ **POSITIONS NEVER GO THROUGH REACT.** d3-force is the physics only (`d3-force`, no other graph
     library); React renders each node / edge when what it SHOWS changes, and one rAF loop writes the
     simulation's positions straight to the DOM. A JSX `transform` on a node (or `x1…y2` on an edge) would
@@ -2200,8 +2263,15 @@ Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the 
     ⚠ **Opening a ticket FRAMES it and its one-link neighbours in the strip the drawer leaves visible**
     (`uncoveredSpan` + `fitBoxIn`, the drawer's measured width; on a phone the drawer is full width, so
     the whole canvas). SprintView bumps `frameRequest` on every open, so re-opening the selected ticket
-    re-frames it. Picking an epic or theme in the filter frames those tickets, their links and the
-    group's halo; clearing it animates back to Fit. Any reader zoom / pan cancels an animated framing.
+    re-frames it. Any reader zoom / pan cancels an animated framing.
+    ⚠ **A refetch that lands MID-ANIMATION** (returning to the tab, the 15s brief poll, a refresh) used
+    to hold every ticket at its half-way spot and cancel the tween — stranded tickets and overlapping
+    halos until a reload. Now a redraw first moves each ticket to where the running animation would
+    land, keeps animating from where it is drawn for the time left (≥ 450 ms), and never cancels a
+    view animation. **The refresh bar** (3px, top of the canvas, `sprintProgress`): moving after
+    Refresh until the read's `read.checkedAt` moves (polled every 2.5s, 90s cap), during the first read
+    and a refetch slower than 400 ms; FILLING with the summarised share while briefs run; still under
+    reduced motion.
     Drag a node to PIN it — per browser, per (workspace, sprint source) in localStorage through
     `readPinned` / `writePinned` (try/catch; works without storage); "Reset layout" clears them.
     The wheel and a trackpad pinch (sent as Ctrl + wheel) ZOOM about the pointer (`wheelZoomFactor`,
@@ -2209,8 +2279,13 @@ Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the 
     finger scrolls the page unless it starts on a ticket (a drag; nodes are `touch-action: none` and a
     non-passive touchstart claims it); two fingers pinch-zoom (`pinchTransform`). Mouse drag on the
     background pans; "Fit", +, −.
-  - **Filters** (section chips, assignee, epic, Has PRs, Has dependencies) FADE what they set aside —
-    nothing re-lays out. **Selecting** a node dims everything beyond one link ("2 hops" widens it); a
+  - **Filters** (section chips, assignee, epic/theme, Has PRs, Has dependencies) HIDE what they leave
+    out (`filterGraph`): the tickets, their links, an outside ticket no longer linked to a shown sprint
+    ticket, and any halo left empty (groups are recomputed over what is left). ⚠ An OUTSIDE ticket is
+    held to the SECTION filter only (it has no epic or theme; filtering to a person must keep the
+    outside work blocking them). A filter change re-packs what is left (`filterKey`) and the view follows
+    Fit; clearing restores the exact earlier layout. "N of M tickets" sits by Clear filters; nothing
+    left prints "No tickets match these filters." **Selecting** a node dims everything beyond one link ("2 hops" widens it); a
     background click or "Show all" clears it. The selection outlives the drawer.
   - **Accessibility**: every node is a focusable `<g role="button">` with "KEY title, status, N PRs";
     Enter / Space opens the drawer; a visually hidden list repeats every ticket.
@@ -2218,12 +2293,17 @@ Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the 
     `space-y-*` top margin — a gap above a `fixed inset-0` panel) and slides in from the right over the
     graph, NON-MODAL — no scrim, no focus trap, the panel alone takes pointer events — so the graph
     beside it stays live: pan, zoom, click another ticket to switch (user decision 2026-10-13). Escape
-    (a window listener, skipped when already handled) or close; focus returns to the node. It is built from the Open PRs
+    or close; focus returns to the node. ⚠ SprintView handles that Escape on `document` and stops it,
+    because the app's window-level Escape ("leave for the Timeline") used to fire too. It is built from the Open PRs
     pieces: the header (key, title, status pill, assignee, epic, tracker link, "Open ticket tab"), the
     "Story check" block (the brief's summary and numbered criteria, the first 10 then "Show all";
     "Worked out from the description" when derived) plus the Open PRs `StackStoryCheck` when the
-    ticket has a ticket review (ONE `useTicketReviewStates` read), the references grouped by relation
-    (a ticket on the graph moves the drawer, any other opens its tab), EVERY PR as the Open PRs cards via
+    ticket has a ticket review (ONE `useTicketReviewStates` read), "Other tickets" as CARDS grouped
+    Blocked by · Depends on · Built alongside · Builds on · Replaces · Related · Context · Out of scope
+    (`sprintReferences.ts`; "Builds on" and "Out of scope" start COLLAPSED behind a chevron disclosure
+    with their count, the rest open, nothing remembered — `References` is keyed per ticket): key + title (a ticket on the graph moves the drawer, any other opens its
+    tab), a status pill, an ASSIGNEE pill, the brief's one-sentence `why` as the row's sentence and the
+    quote under it only when it adds words, EVERY PR as the Open PRs cards via
     `Ticket/TicketPrsSections.tsx` — the SAME component the ticket tab renders — and, sprint tickets
     only, the repo picker + `SprintAssessment` / `SprintCodeCheck`.
   - **"Ask Claude about this sprint"** (`SprintAskPanel`, docked over the canvas's bottom-right corner;

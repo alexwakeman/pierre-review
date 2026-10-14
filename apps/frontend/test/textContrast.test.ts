@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { DISC_GROUND, GROUP_HALO, PERSON_HALO, SPRINT_CANVAS, STAGE_RING, STATUS_SLOTS, SUB_HALO, blendHex, discFill, glyphColour, subHaloColour, subLabelColour } from '../src/components/Activity/sprintGraphModel.js';
+import { DISC_GROUND, GROUP_HALO, STORY_HIGHLIGHT, SATELLITE_FILL, SATELLITE_FAILING_RING, PERSON_HALO, SPRINT_CANVAS, STAGE_RING, STATUS_SLOTS, SUB_HALO, blendHex, discFill, glyphColour, subHaloColour, subLabelColour } from '../src/components/Activity/sprintGraphModel.js';
 
 // TEXT CONTRAST, ENFORCED FROM THE SOURCE.
 //
@@ -264,5 +264,12 @@ describe('text contrast', () => {
       if (stage != null) expect(contrastRatio(STAGE_RING[stage], fill)).toBeGreaterThanOrEqual(3);
     }
     expect(contrastRatio(SPRINT_CANVAS.labelKey, DISC_GROUND)).toBeGreaterThanOrEqual(AA_BODY);
+    // The storyline highlight ring (non-text, 3:1) on the canvas and on the disc ground it rings.
+    expect(contrastRatio(STORY_HIGHLIGHT, ground)).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(STORY_HIGHLIGHT, DISC_GROUND)).toBeGreaterThanOrEqual(3);
+    // The PR dots (non-text, 3:1) on the canvas — the draft is a hollow rim, the failing ring a rim too.
+    for (const c of [SATELLITE_FILL.open, SATELLITE_FILL.draft, SATELLITE_FILL.merged, SATELLITE_FAILING_RING]) {
+      expect(contrastRatio(c, ground)).toBeGreaterThanOrEqual(3);
+    }
   });
 });

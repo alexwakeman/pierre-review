@@ -5,7 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import { SPRINT_TICKETS_MAX } from '@pierre-review/shared';
 import type { GithubCallAccess, GithubGqlResult, TrackerCall } from '../types.js';
-import { makeGithubLister, pickMilestone } from './github.js';
+import { makeGithubLister, milestoneDates, pickMilestone } from './github.js';
+import { busiestSprintDates } from './types.js';
 
 const NOW = Date.UTC(2026, 9, 10, 12);
 
@@ -89,6 +90,8 @@ describe('listGithubMilestone', () => {
     }, log);
     const r = await list(args(g));
     expect(r.source).toEqual({ kind: 'milestone', provider: 'github', name: 'v2.3', dueOn: '2026-10-20T00:00:00Z', repos: ['acme/web', 'acme/api'] });
+    // A milestone has an end (its due date) and no start.
+    expect(r.dates).toEqual({ startsAt: null, endsAt: new Date('2026-10-20T00:00:00Z') });
     expect(r.tickets.map((t) => [t.key, t.projectKey, t.sprintName])).toEqual([
       ['acme/web#1', 'acme/web', 'v2.3'],
       ['acme/api#2', 'acme/api', 'v2.3'],
@@ -142,3 +145,23 @@ describe('listGithubMilestone', () => {
   });
 });
 
+
+describe('sprint dates', () => {
+  it('milestoneDates: the due date is the end; none → null', () => {
+    expect(milestoneDates('2026-10-20T00:00:00Z')).toEqual({ startsAt: null, endsAt: new Date('2026-10-20T00:00:00Z') });
+    expect(milestoneDates(null)).toBeNull();
+    expect(milestoneDates('nope')).toBeNull();
+  });
+  it('busiestSprintDates: most tickets, ties to the earliest start; a dateless pick is null', () => {
+    const d = (s: string) => new Date(s);
+    expect(
+      busiestSprintDates([
+        { count: 2, startsAt: d('2026-10-05T00:00:00Z'), endsAt: d('2026-10-19T00:00:00Z') },
+        { count: 2, startsAt: d('2026-10-01T00:00:00Z'), endsAt: d('2026-10-15T00:00:00Z') },
+        { count: 1, startsAt: d('2026-09-01T00:00:00Z'), endsAt: null },
+      ]),
+    ).toEqual({ startsAt: d('2026-10-01T00:00:00Z'), endsAt: d('2026-10-15T00:00:00Z') });
+    expect(busiestSprintDates([{ count: 3, startsAt: null, endsAt: null }, { count: 1, startsAt: d('2026-10-01T00:00:00Z'), endsAt: null }])).toBeNull();
+    expect(busiestSprintDates([])).toBeNull();
+  });
+});
