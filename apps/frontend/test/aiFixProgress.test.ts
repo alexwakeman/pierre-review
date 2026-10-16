@@ -52,8 +52,15 @@ describe('fixProgressPct', () => {
     expect(busy).toBeLessThan(fixProgressPct(status('running', 'capturing'))!);
   });
 
+  it('a plan pass (plan mode) advances with activity and stays under the cap', () => {
+    const quiet = fixProgressPct(status('running', 'planning', []));
+    const busy = fixProgressPct(status('running', 'planning', Array(40).fill('x')));
+    expect(quiet).toBeLessThan(busy!);
+    expect(busy).toBeLessThanOrEqual(90);
+  });
+
   it('has a label for every phase it scores', () => {
-    for (const phase of ['fetching_diff', 'cloning', 'fixing', 'capturing', 'persisting']) {
+    for (const phase of ['fetching_diff', 'cloning', 'fixing', 'capturing', 'persisting', 'planning']) {
       expect(PHASE_LABEL[phase]).toBeTruthy();
     }
     // An unknown phase scores, but leaves the label to the caller's fallback.

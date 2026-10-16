@@ -320,6 +320,22 @@ describe('maybeStartAutoFix — the skips', () => {
     expect(started).toEqual([]);
   });
 
+  it('⚠ a person’s open PLAN (plan mode) counts as a fix in progress; a discarded or approved one does not', async () => {
+    const { eq } = await import('drizzle-orm');
+    const prId = await seedPr(viewerId);
+    await fix(prId, { status: 'planned', trigger: 'manual', patch: null });
+    const setPlan = (planStatus: string, status: string) =>
+      db.update(schema.aiFixes).set({ planStatus, status }).where(eq(schema.aiFixes.prId, prId)).execute();
+    for (const ps of ['planning', 'plan_ready']) {
+      await setPlan(ps, 'planned');
+      expect(await go(prId)).toMatchObject({ reason: 'fix_in_progress' });
+    }
+    await setPlan('discarded', 'cancelled');
+    expect(await go(prId)).toMatchObject({ status: 'started' });
+    // ⚠ AN AUTO FIX NEVER PLANS: the one entry it calls carries no plan option at all.
+    expect(Object.keys(started[0] ?? {}).sort()).toEqual(['accountId', 'include', 'model', 'prId', 'reviewId', 'trigger']);
+  });
+
   it('a finished fix waits unpushed on this head — but not a pushed, empty or older-head one', async () => {
     const waiting = await seedPr(viewerId);
     await fix(waiting, { trigger: 'manual' });

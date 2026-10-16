@@ -103,3 +103,34 @@ describe('the scan actually catches the shell coming back', () => {
     expect(toolList('FIX_TOOLS', mutated).filter(isShell)).toEqual([]);
   });
 });
+
+// PLAN MODE (ai-fix/plan.ts): the planning pass is READ-ONLY. Its allow list carries no write tool
+// and no shell, and every write tool is ALSO denied outright — so even a later edit re-adding one to
+// the allow list cannot let a plan pass change the worktree the build is about to edit.
+const WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
+
+describe('the plan pass reads and cannot write', () => {
+  it('allows only reading tools and submit_plan', () => {
+    expect(toolList('PLAN_TOOLS')).toEqual(['Read', 'Glob', 'Grep', 'mcp__plan__submit_plan']);
+  });
+
+  it('denies Bash and every write tool outright', () => {
+    const denied = toolList('PLAN_DISALLOWED_TOOLS');
+    for (const t of ['Bash', ...WRITE_TOOLS]) expect(denied).toContain(t);
+    expect(denied.filter(isPattern)).toEqual([]);
+  });
+
+  it('runs through the same worktree runner, behind the same path guard', () => {
+    // runPlanAgent hands its lists to runAgentInWorktree, whose `hooks:` line the fixer test above
+    // pins — one runner, one guard.
+    expect(SRC).toContain('allowedTools: PLAN_TOOLS,');
+    expect(SRC).toContain('disallowedTools: PLAN_DISALLOWED_TOOLS,');
+  });
+
+  it('the scan catches a write tool coming back to the plan allow list', () => {
+    const at = SRC.indexOf('const PLAN_TOOLS = [');
+    const open = SRC.indexOf('[', at) + 1;
+    const mutated = `${SRC.slice(0, open)}'Edit',${SRC.slice(open)}`;
+    expect(toolList('PLAN_TOOLS', mutated).filter((t) => WRITE_TOOLS.includes(t))).toEqual(['Edit']);
+  });
+});

@@ -1285,3 +1285,12 @@ Account FK (cascade) + the NAMED composite FK `sprint_view_snapshots_workspace_a
 `workspaces (id, account_id)`; unique `(account_id, workspace_id)`; in `accountScopedTables()`, erased,
 checked by `verify:isolation`. Journal `when` sqlite `1792137603008` / pg `1792137604007`. ⚠ pg `0099` NOT
 replayed.
+
+### `0113_ai_fix_plan` (pg `0100`) — AI Fix plan mode
+Six nullable columns on `ai_fixes`, no backfill: `plan` (JSON `AiFixPlan`), `plan_transcript` (JSON
+`AiFixPlanMessage[]`), `plan_status` (`planning | plan_ready | approved | discarded | failed`; NULL = never
+planned), `plan_revision` (integer), `plan_seed` (JSON `{kind, text}`, server-only) and `plan_cost_usd`
+(sqlite `real` / pg `double precision`). Text JSON like the table's other JSON columns. A plan row carries
+the new `status = 'planned'` until it is approved or discarded (docs/CLAUDE-REVIEW.md § Plan mode). No new
+table, so `accountScopedTables()` / erasure / both delete paths already cover it. Journal `when` sqlite
+`1792137603009` / pg `1792137604008`. ⚠ pg `0100` NOT replayed.

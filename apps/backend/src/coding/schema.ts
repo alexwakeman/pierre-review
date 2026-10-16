@@ -54,3 +54,34 @@ export async function submitFixSchema(): Promise<
   const z = await loadZod();
   return z.object(buildSubmitFixShape(z));
 }
+
+// ---- PLAN MODE: the `submit_plan` tool (a read-only planning pass; ai-fix/plan.ts validates) ----
+// Lenient at the schema level on purpose: the tool's HANDLER checks the limits (at most five short
+// bullets, refs the pass was shown) and answers the model with what to fix, which a zod refusal
+// would phrase far less usefully. The stored plan is normalised again (ai-fix/plan.ts).
+export function buildSubmitPlanShape(z: ZodNs) {
+  return {
+    // 1–5 short bullets: the plan at a glance.
+    summary: z.array(z.string()),
+    // The detailed plan, one entry per change.
+    steps: z.array(
+      z.object({
+        title: z.string(),
+        files: z.array(z.string()).optional(),
+        change: z.string(),
+        refs: z.array(z.string()).optional(),
+      }),
+    ),
+    // Items the plan will NOT address, each with the reason.
+    notAddressed: z.array(z.object({ ref: z.string(), reason: z.string() })).optional(),
+    // One or two sentences answering the person's latest steering message (what changed and why).
+    reply: z.string().optional(),
+  };
+}
+
+export type SubmitPlanShape = ReturnType<typeof buildSubmitPlanShape>;
+export type SubmitPlanPayload = Zod.infer<Zod.ZodObject<SubmitPlanShape>>;
+
+export async function submitPlanShape(): Promise<SubmitPlanShape> {
+  return buildSubmitPlanShape(await loadZod());
+}

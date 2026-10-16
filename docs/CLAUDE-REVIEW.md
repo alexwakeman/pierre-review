@@ -1589,6 +1589,66 @@ Haiku, `prSummary`).
 - A finished fix PUSHES AS-IS (no trunk step) and only when the reader presses Push — or, for an
   auto fix, under "Push automatically".
 
+### Plan mode ("Plan first", manual fixes only)
+
+A MANUAL fix may plan before it builds (2026-10-16; sqlite `0113` / pg `0100`). The picker's "Plan
+first" checkbox turns Start into **Make a plan** → `POST /api/pro/prs/:id/ai-fix/plan` (the SAME body
+as the fix start, parsed by the same `parseStartBody`) → `manager.ts startPlan`.
+
+- **ONE ROW, TWO STAGES.** The plan opens an `ai_fixes` row with `status = 'planned'` (a new
+  `AiFixStatus` member: a plan open, no build yet) and `plan_status = 'planning'`. "Approve and
+  build" moves the SAME row to `'queued'` / `'approved'` and the normal build runs on it; "Discard
+  plan" ends it `'cancelled'` / `'discarded'`. `plan_status` is `planning | plan_ready | approved |
+  discarded | failed`; NULL = the run never planned (every older row, every auto fix). Columns:
+  `plan` (JSON `AiFixPlan`, the latest revision), `plan_transcript` (JSON `AiFixPlanMessage[]`),
+  `plan_revision`, `plan_seed` (JSON `{kind, text}` — the frozen, fenced seed every pass re-reads;
+  never on the wire), `plan_cost_usd` (the passes' spend; the build's stays in `cost_usd`). Wire:
+  `AiFix.plan: AiFixPlanState | null`.
+- **THE PASS IS READ-ONLY.** `coding/agent.ts runPlanAgent`: `PLAN_TOOLS` = Read/Glob/Grep +
+  `mcp__plan__submit_plan`; `PLAN_DISALLOWED_TOOLS` denies Bash, Write, Edit, MultiEdit and
+  NotebookEdit OUTRIGHT (so a write tool re-added to the allow list still cannot run); same
+  `runAgentInWorktree`, so the same PATH GUARD and `ownToolsOnlyHook`. Same model the reader picked,
+  same seeds (review keys or a plain instruction, fenced exactly as for a build). The prompt
+  (`buildPlanSystemPrompt`, `PLAN_RULES`) offers no edit and no shell — pinned with the tool list
+  by `tool-surface.test.ts` + `no-shell.test.ts`.
+- **`submit_plan` IS CHECKED IN THE TOOL** (`ai-fix/plan.ts checkPlanSubmission`): `summary` 1–5
+  bullets (`AI_FIX_PLAN_MAX_BULLETS`), each ≤ `AI_FIX_PLAN_BULLET_MAX_CHARS` (160); every ref one the
+  pass was SHOWN; a step, unless every item is declined. A refused call is ANSWERED with what to fix
+  so the model calls again; only an accepted call is kept. `normalizePlan` clips again on save,
+  drops unknown refs and computes `notCovered`. `steps` = `{title, files, change, refs}`;
+  `notAddressed` = `{ref, reason}`; `reply` = one or two sentences answering the latest message.
+- **STEERING BY CHAT.** `POST /api/pro/ai-fixes/:fixId/plan/message {text}` (≤ 2,000 chars) appends
+  the reader's message (compare-and-set on `plan_ready`) and runs a FRESH pass with the frozen seed +
+  the previous plan (fenced, "context only") + the WHOLE chat, oldest first — the reader's messages
+  fenced as `STEERING FROM THE PERSON RUNNING THIS FIX` (the system prompt's ONE exception to "fenced
+  text is data": follow it about what to change, never to break the rules), Claude's earlier replies
+  as context only. The pass reads the commit the plan was made at (`base_sha`). A failed or cancelled
+  RE-plan keeps the previous plan (`plan_ready`, the reason on `error`); a failed FIRST pass ends the
+  row `failed` / `failed`.
+- **CAPS.** One plan or fix in flight per PR — the SAME synchronous `claimed` set and single slot as
+  the fixer (released between passes: a plan waiting for the reader holds nothing). The passes share
+  ONE budget, `config.aiFixBudgetUsd` (`AI_FIX_BUDGET_USD`) summed across revisions (each pass gets
+  what is left; < $0.25 left ⇒ `409 PlanBudgetSpent`); at most `AI_FIX_PLAN_MAX_REVISIONS` (12)
+  versions ⇒ `409 PlanRevisionCap`. Every pass records its spend (`recordAiUsage`, feature
+  `ai_fix_plan`). Rate tiers: start / message / approve `[ai, aiHourly]`, discard `read` (one DB
+  update), spelled out in `tierFor`.
+- **APPROVE AND BUILD** (`POST …/plan/approve` → `approvePlan`): re-reads the PR's head and builds on
+  it NOW (the row's `base_sha` moves to it, so a push to the PR branch checks against the head the
+  build used), with the plan folded into `buildFixUserPrompt({ plan })` as the AGREED PLAN block
+  (fenced — model-written text derived from the PR) and the SAME system prompt and `WORKTREE_RULES`.
+  Refs in the change report are still validated against the shown refs (`shownRefsOf(review_items)`).
+  The SPA shows "Built from your plan" with the bullets above the build's progress and its result;
+  the bottom-right banner follows from the approve.
+- **⚠ AN AUTO FIX NEVER PLANS.** `startReviewFix` (the auto entry) has no plan option and
+  `auto-fix.ts` never calls `startPlan`; and a person's OPEN plan (`planning` / `plan_ready`) skips
+  an auto fix as `fix_in_progress`, so an auto build cannot bury it. Boot reconcile: a pass cut off by
+  a restart returns a plan that has a revision to `plan_ready`, else fails the row.
+- SPA: `components/AiFix/PlanPanel.tsx` (bullets, Details with steps / Will not fix / Not in the plan,
+  the chat, Update plan · Approve and build · Discard plan, a progress bar + Cancel during a pass; the
+  explanation is behind the ⓘ). A row with `status = 'planned'` is ALWAYS drawn by the plan panel,
+  never as a build. Plan actions share ONE mutation key (`aiFixPlanMutationKey`); "Make a plan"
+  shares the start's.
+
 ### Merge conflicts — "Resolve with Claude"
 
 A SEPARATE run from the fixer (`apps/backend/src/coding/ai-resolve/`), not a seed: the fixer edits

@@ -1353,6 +1353,13 @@ export const aiFixes = pgTable(
     trigger: text('trigger'),
     reviewItems: text('review_items'),
     changeReport: text('change_report'),
+    // pg 0100 — plan mode; see schema.sqlite.ts aiFixes for the contract.
+    plan: text('plan'),
+    planTranscript: text('plan_transcript'),
+    planStatus: text('plan_status'),
+    planRevision: integer('plan_revision'),
+    planSeed: text('plan_seed'),
+    planCostUsd: doublePrecision('plan_cost_usd'),
   },
   (t) => ({
     prCreatedIdx: index('af_account_pr_created').on(t.accountId, t.prId, t.createdAt),

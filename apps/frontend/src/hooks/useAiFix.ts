@@ -70,6 +70,53 @@ export function useStartFix(prId: number) {
   });
 }
 
+// PLAN MODE. "Plan first" shares the start's mutation key on purpose: one in-flight read covers
+// both buttons, so neither can be pressed twice while the other's POST is out.
+export function useStartPlan(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: aiFixStartMutationKey(prId),
+    mutationFn: (body: GenerateFixBody) => api.startAiFixPlan(prId, body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ai-fix', prId] }),
+  });
+}
+
+// Every plan action (message, approve, discard) shares ONE key per PR, read with `useIsMutating`,
+// so a tab switch mid-POST cannot offer a second billed pass.
+export function aiFixPlanMutationKey(prId: number): [string, number] {
+  return ['ai-fix-plan', prId];
+}
+
+export function usePlanMessage(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: aiFixPlanMutationKey(prId),
+    mutationFn: (vars: { fixId: number; text: string }) => api.sendAiFixPlanMessage(vars.fixId, { text: vars.text }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ai-fix', prId] }),
+  });
+}
+
+export function useApprovePlan(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: aiFixPlanMutationKey(prId),
+    mutationFn: (fixId: number) => api.approveAiFixPlan(fixId),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ai-fix', prId] }),
+  });
+}
+
+export function useDiscardPlan(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: aiFixPlanMutationKey(prId),
+    mutationFn: (fixId: number) => api.discardAiFixPlan(fixId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['ai-fix', prId] });
+      void qc.invalidateQueries({ queryKey: ['ai-fix-preview', prId] });
+    },
+  });
+}
+
 export function useCancelFix(prId: number) {
   const qc = useQueryClient();
   return useMutation({

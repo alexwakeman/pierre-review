@@ -23,6 +23,7 @@ import {
   type ReviewThreadsForReview,
 } from '../db/review-threads-for-review.js';
 import type { CheckLogsResponse } from '@pierre-review/shared';
+import type { GeneratePlanArgs, GeneratePlanResult } from '../coding/ai-fix/plan.js';
 import type {
   ApplyAndPushArgs,
   ApplyAndPushResult,
@@ -71,6 +72,8 @@ export interface AgentContext {
   >;
   coding: {
     generateFix(args: GenerateFixArgs): Promise<GenerateFixResult>;
+    // PLAN MODE: the read-only planning pass (coding/agent.ts runPlanAgent).
+    generatePlan(args: GeneratePlanArgs): Promise<GeneratePlanResult>;
     applyAndPush(args: ApplyAndPushArgs): Promise<ApplyAndPushResult>;
   };
   review: ReviewSeam;
@@ -174,6 +177,7 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
     coding: {
       // Lazy: coding/agent.ts pulls in the Claude Agent SDK.
       generateFix: async (fixArgs) => (await import('../coding/agent.js')).runCodingAgent(fixArgs),
+      generatePlan: async (planArgs) => (await import('../coding/agent.js')).runPlanAgent(planArgs),
       applyAndPush: (pushArgs) => applyAndPush(pushArgs),
     },
     review: {

@@ -17,6 +17,11 @@ describe('tierFor — AI generation', () => {
     expect(tiers('POST', '/api/pro/insights/ask')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/sprint-report/refresh')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/prs/12/ai-fix')).toEqual(['ai', 'ai_hourly']);
+    // AI Fix plan mode: every pass and the approve spend an agent run; discard is one DB update.
+    expect(tiers('POST', '/api/pro/prs/12/ai-fix/plan')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/pro/ai-fixes/7/plan/message')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/pro/ai-fixes/7/plan/approve')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/pro/ai-fixes/7/plan/discard')).toEqual(['read']);
     // The surviving per-ITEM addressed checks (one thread / one PR comment). The PR-WIDE twins
     // (`/api/pro/prs/:id/addressed/check` and its SSE stream) were removed — they were a second
     // whole-PR sweep billing one call per target, up to 50.

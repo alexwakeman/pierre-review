@@ -21,6 +21,7 @@ import type {
   RequestReviewersBody,
   RequestReviewersResult,
   AiFixPickerPreview,
+  AiFixPlanMessageBody,
   AiFixPushBody,
   AiFixPushResult,
   AiFixResponse,
@@ -1605,6 +1606,24 @@ export const api = {
     ),
   cancelAiFix: (prId: number) =>
     fetch(`/api/pro/prs/${prId}/ai-fix/cancel`, jsonBody('POST')).then((r) =>
+      handle<{ status: string }>(r),
+    ),
+  // PLAN MODE ("Plan first", manual only): a read-only planning pass over the same body; then the
+  // steering chat, "Approve and build" and "Discard plan" on the plan's own row.
+  startAiFixPlan: (prId: number, body: GenerateFixBody) =>
+    fetch(`/api/pro/prs/${prId}/ai-fix/plan`, jsonBody('POST', body)).then((r) =>
+      handle<{ fixId: number; status: string }>(r),
+    ),
+  sendAiFixPlanMessage: (fixId: number, body: AiFixPlanMessageBody) =>
+    fetch(`/api/pro/ai-fixes/${fixId}/plan/message`, jsonBody('POST', body)).then((r) =>
+      handle<{ fixId: number; status: string }>(r),
+    ),
+  approveAiFixPlan: (fixId: number) =>
+    fetch(`/api/pro/ai-fixes/${fixId}/plan/approve`, jsonBody('POST')).then((r) =>
+      handle<{ fixId: number; status: string }>(r),
+    ),
+  discardAiFixPlan: (fixId: number) =>
+    fetch(`/api/pro/ai-fixes/${fixId}/plan/discard`, jsonBody('POST')).then((r) =>
       handle<{ status: string }>(r),
     ),
   // Push a fix as-is (synchronous, never a force push) → the full result.

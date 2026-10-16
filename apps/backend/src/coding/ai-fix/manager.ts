@@ -1,5 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
+import { AI_FIX_PLAN_MAX_REVISIONS } from '@pierre-review/shared';
 import type {
+  AiFixPlanMessage,
   AiFixPickerPreview,
   AiFixProgress,
   AiFixReviewItem,
@@ -27,15 +29,40 @@ import { loadSeedThreads } from './thread-candidates.js';
 import { maybeAutoPushFix } from './auto-push.js';
 import { getOwnedTicketItemsForPr } from '../../review/ticket-review/persist.js';
 import { getFixableCiItemsForPr } from '../../review/ci-review/persist.js';
-import { buildFixSystemPrompt, buildFixUserPrompt, type FixSeed } from './prompts.js';
 import {
+  buildFixSystemPrompt,
+  buildFixUserPrompt,
+  buildPlanSystemPrompt,
+  buildPlanUserPrompt,
+  renderPlanText,
+  type FixSeed,
+} from './prompts.js';
+import {
+  appendPlanMessage,
+  getFixById,
   insertQueuedFix,
   markFixCancelled,
   markFixFailed,
   markFixRunning,
+  markPlanApproved,
+  markPlanDiscarded,
+  markPlanPassEnded,
+  parseReviewItems,
   reconcileOrphanedFixes,
   saveFixSuccess,
+  savePlanSuccess,
 } from './persist.js';
+import {
+  normalizePlan,
+  parsePlan,
+  parsePlanSeed,
+  parsePlanStatus,
+  parseTranscript,
+  planReply,
+  shownRefsOf,
+  type PlanRunProgress,
+} from './plan.js';
+import { config } from '../../config.js';
 
 // In-memory job manager for AI Fix's agentic fixer (CORE, free, local-only — it left the plugin
 // with Claude Review; the PR summary and the CI-failure analysis stayed Pro). A SINGLE global slot (concurrency 1) carries every
@@ -89,6 +116,9 @@ function pump(): void {
 const fixIdByPr = new Map<number, number>();
 const progressByFix = new Map<number, AiFixProgress>();
 const controllers = new Map<number, AbortController>(); // fixId → controller
+// PLAN MODE: fixIds whose in-flight job is a PLANNING pass, → whether the row already had a plan
+// (a re-plan keeps it when the pass is cancelled or fails; a first pass ends the row).
+const planPasses = new Map<number, boolean>();
 const fixStreamSubs = new Map<number, Set<(e: AiFixStreamEvent) => void>>();
 
 export function subscribeFixStream(
@@ -275,6 +305,27 @@ export async function startFix(
   ctx: AgentContext,
   input: StartFixInput,
 ): Promise<StartFixResult> {
+  return startRun(ctx, input, 'fix');
+}
+
+/**
+ * PLAN MODE ("Plan first", MANUAL fixes only — `startReviewFix`, the auto path, never calls this):
+ * the same seed, claim, slot and guards as `startFix`, but the run is a READ-ONLY planning pass. The
+ * row opens as 'planned' / 'planning' and holds its frozen seed, so every re-plan and the build read
+ * exactly the items this pass saw. docs/CLAUDE-REVIEW.md § AI Fix "Plan mode".
+ */
+export async function startPlan(
+  ctx: AgentContext,
+  input: StartFixInput,
+): Promise<StartFixResult> {
+  return startRun(ctx, { ...input, trigger: 'manual' }, 'plan');
+}
+
+async function startRun(
+  ctx: AgentContext,
+  input: StartFixInput,
+  mode: 'fix' | 'plan',
+): Promise<StartFixResult> {
   const { accountId, prId } = input;
 
   const auth = ctx.llm.detectAuth();
@@ -349,9 +400,48 @@ export async function startFix(
       .fetchPrDiff(accountId, pr.owner, pr.name, pr.number)
       .catch(() => '');
 
+    const trigger: AiFixTrigger = input.trigger ?? 'manual';
+
+    if (mode === 'plan') {
+      const systemPrompt = buildPlanSystemPrompt();
+      const nonce = pickReviewNonce([seed.text, pr.title, pr.body ?? '']);
+      const prompt = buildPlanUserPrompt({ pr, diff, seed, nonce });
+      const fixId = await insertQueuedFix(ctx, {
+        accountId,
+        repoId: pr.repoId,
+        prId,
+        baseSha,
+        model: input.model,
+        seed: input.seed,
+        sourceReviewId: input.seed === 'review' ? (input.sourceReviewId ?? null) : null,
+        // The first pass's prompt; "Approve and build" overwrites it with the BUILD's.
+        prompt,
+        trigger,
+        reviewItems,
+        planSeed: seed,
+      });
+      fixIdByPr.set(prId, fixId);
+      queuePlanPass(ctx, {
+        fixId,
+        accountId,
+        prId,
+        owner: pr.owner,
+        name: pr.name,
+        prNumber: pr.number,
+        baseSha,
+        model: input.model,
+        systemPrompt,
+        prompt,
+        shownRefs: sentRefs,
+        revision: 1,
+        maxBudgetUsd: config.aiFixBudgetUsd,
+        hadPlan: false,
+      });
+      return { status: 'queued', fixId };
+    }
+
     const systemPrompt = buildFixSystemPrompt();
     const prompt = buildFixUserPrompt({ pr, diff, seed });
-    const trigger: AiFixTrigger = input.trigger ?? 'manual';
 
     const fixId = await insertQueuedFix(ctx, {
       accountId,
@@ -367,7 +457,7 @@ export async function startFix(
     });
     fixIdByPr.set(prId, fixId);
 
-    const job: FixJob = {
+    queueFixJob(ctx, {
       fixId,
       accountId,
       prId,
@@ -380,23 +470,25 @@ export async function startFix(
       prompt,
       sentRefs,
       trigger,
-    };
-
-    const immediate = enqueue(prId, () => launchFix(ctx, job));
-    if (!immediate) {
-      emitFixStream(prId, {
-        type: 'progress',
-        status: 'queued',
-        fixId,
-        progress: { phase: 'fetching_diff' },
-      });
-    }
+    });
     return { status: 'queued', fixId };
   } catch (err) {
     claimed.delete(prId);
     fixIdByPr.delete(prId);
     ctx.log.warn({ err }, 'ai-fix startFix failed');
     return { status: 'not_found' };
+  }
+}
+
+function queueFixJob(ctx: AgentContext, job: FixJob): void {
+  const immediate = enqueue(job.prId, () => launchFix(ctx, job));
+  if (!immediate) {
+    emitFixStream(job.prId, {
+      type: 'progress',
+      status: 'queued',
+      fixId: job.fixId,
+      progress: { phase: 'fetching_diff' },
+    });
   }
 }
 
@@ -497,6 +589,302 @@ async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {
   }
 }
 
+// ---- PLAN MODE: planning passes, the steering chat, approve and discard ----
+// docs/CLAUDE-REVIEW.md § AI Fix "Plan mode". A planning pass is a job like any fix: the SAME
+// one-per-PR claim (taken synchronously), the SAME single global slot, the SAME cancel. Between
+// passes the claim is released — a plan waiting for the reader holds nothing.
+
+interface PlanJob {
+  fixId: number;
+  accountId: number;
+  prId: number;
+  owner: string;
+  name: string;
+  prNumber: number;
+  baseSha: string;
+  model: string;
+  systemPrompt: string;
+  prompt: string;
+  shownRefs: readonly string[];
+  // The revision this pass will write.
+  revision: number;
+  // What is left of the plan's budget (config.aiFixBudgetUsd across ALL its passes).
+  maxBudgetUsd: number;
+  // The row already holds a plan (this is a re-plan).
+  hadPlan: boolean;
+}
+
+function queuePlanPass(ctx: AgentContext, job: PlanJob): void {
+  planPasses.set(job.fixId, job.hadPlan);
+  const immediate = enqueue(job.prId, () => launchPlanPass(ctx, job));
+  if (!immediate) {
+    emitFixStream(job.prId, {
+      type: 'progress',
+      status: 'queued',
+      fixId: job.fixId,
+      progress: { phase: 'planning' },
+    });
+  }
+}
+
+async function launchPlanPass(ctx: AgentContext, job: PlanJob): Promise<void> {
+  const controller = new AbortController();
+  controllers.set(job.fixId, controller);
+  const first: AiFixProgress = { phase: 'cloning' };
+  progressByFix.set(job.fixId, first);
+  emitFixStream(job.prId, { type: 'progress', status: 'running', fixId: job.fixId, progress: first });
+
+  const onProgress = (p: PlanRunProgress): void => {
+    const prog: AiFixProgress = {
+      phase: p.phase === 'cloning' ? 'cloning' : 'planning',
+      ...(p.recentActivity ? { recentActivity: p.recentActivity } : {}),
+      ...(p.usage ? { usage: p.usage } : {}),
+    };
+    progressByFix.set(job.fixId, prog);
+    emitFixStream(job.prId, { type: 'progress', status: 'running', fixId: job.fixId, progress: prog });
+  };
+
+  // What the row reads after the pass: a plan to look at, or a run that ended.
+  let finalStatus: AiFixStatus = job.hadPlan ? 'planned' : 'failed';
+  try {
+    const result = await ctx.coding.generatePlan({
+      accountId: job.accountId,
+      owner: job.owner,
+      name: job.name,
+      prNumber: job.prNumber,
+      baseSha: job.baseSha,
+      model: job.model,
+      systemPrompt: job.systemPrompt,
+      prompt: job.prompt,
+      shownRefs: job.shownRefs,
+      maxBudgetUsd: job.maxBudgetUsd,
+      abortController: controller,
+      onProgress,
+    });
+    const pass = { costUsd: result.costUsd, usage: result.usage };
+    if (result.aborted || controller.signal.aborted) {
+      await markPlanPassEnded(ctx, job.fixId, { kind: 'cancelled' }, pass);
+      finalStatus = job.hadPlan ? 'planned' : 'cancelled';
+    } else if (!result.plan) {
+      await markPlanPassEnded(
+        ctx,
+        job.fixId,
+        { kind: 'failed', message: 'Claude did not hand in a plan. Try again.' },
+        pass,
+      );
+      finalStatus = job.hadPlan ? 'planned' : 'failed';
+    } else {
+      const plan = normalizePlan(result.plan, job.shownRefs, job.revision);
+      // The reply answers a steering message; the first pass has none to answer.
+      const reply = job.hadPlan ? planReply(result.plan) : null;
+      await savePlanSuccess(ctx, job.fixId, { plan, reply, ...pass });
+      finalStatus = 'planned';
+    }
+  } catch (err) {
+    if (controller.signal.aborted) {
+      await markPlanPassEnded(ctx, job.fixId, { kind: 'cancelled' }).catch(() => {});
+      finalStatus = job.hadPlan ? 'planned' : 'cancelled';
+    } else {
+      const m = err instanceof Error ? err.message : String(err);
+      await markPlanPassEnded(ctx, job.fixId, { kind: 'failed', message: m }).catch(() => {});
+      finalStatus = job.hadPlan ? 'planned' : 'failed';
+      ctx.log.warn({ err }, 'ai-fix plan pass failed');
+    }
+  } finally {
+    claimed.delete(job.prId);
+    controllers.delete(job.fixId);
+    progressByFix.delete(job.fixId);
+    fixIdByPr.delete(job.prId);
+    planPasses.delete(job.fixId);
+    emitFixStream(job.prId, { type: 'done', status: finalStatus, fixId: job.fixId });
+  }
+}
+
+export type PlanActionResult =
+  | { status: 'queued'; fixId: number }
+  | { status: 'not_found' }
+  // The row is not an open plan in the state this action needs (already approved, discarded, a
+  // pass in flight, never a plan).
+  | { status: 'not_ready' }
+  | { status: 'already_running' }
+  | { status: 'busy' }
+  | { status: 'no_auth'; message?: string }
+  | { status: 'credits_exhausted' }
+  | { status: 'no_head' }
+  | { status: 'revision_cap' }
+  | { status: 'budget_spent' };
+
+// Below this much budget left, a re-plan is refused rather than started with too little to finish.
+const MIN_PLAN_PASS_BUDGET_USD = 0.25;
+
+/**
+ * The reader's steering message: appended to the chat, then a FRESH planning pass with the frozen
+ * seed + the previous plan (context only) + the whole chat (the reader's messages fenced as their
+ * steering, Claude's replies as context). The plan card shows the new revision when it lands.
+ */
+export async function sendPlanMessage(
+  ctx: AgentContext,
+  input: { accountId: number; fixId: number; text: string },
+): Promise<PlanActionResult> {
+  const row = await getFixById(ctx, input.accountId, input.fixId);
+  if (!row) return { status: 'not_found' };
+  const plan = parsePlan(row.plan);
+  const seed = parsePlanSeed(row.planSeed);
+  if (row.status !== 'planned' || parsePlanStatus(row.planStatus) !== 'plan_ready' || !plan || !seed)
+    return { status: 'not_ready' };
+  const revision = row.planRevision ?? plan.revision;
+  if (revision >= AI_FIX_PLAN_MAX_REVISIONS) return { status: 'revision_cap' };
+  const left = config.aiFixBudgetUsd - (row.planCostUsd ?? 0);
+  if (left < MIN_PLAN_PASS_BUDGET_USD) return { status: 'budget_spent' };
+
+  const auth = ctx.llm.detectAuth();
+  if (auth.status !== 'ok') return { status: 'no_auth', message: auth.message };
+  if ((await ctx.aiCredits.check(input.accountId)).agentBlocked) return { status: 'credits_exhausted' };
+
+  const prId = row.prId;
+  if (claimed.has(prId)) return { status: 'already_running' };
+  if (pending.length >= MAX_QUEUED) return { status: 'busy' };
+  // Same tick as the check above (no await between them) — see startRun.
+  claimed.add(prId);
+  let appended = false;
+  try {
+    const pr = await getFixPrContext(ctx, input.accountId, prId);
+    if (!pr) {
+      claimed.delete(prId);
+      return { status: 'not_found' };
+    }
+    const message: AiFixPlanMessage = {
+      role: 'reader',
+      text: input.text,
+      revision,
+      at: new Date().toISOString(),
+    };
+    appended = await appendPlanMessage(ctx, row.id, message);
+    if (!appended) {
+      claimed.delete(prId);
+      return { status: 'not_ready' };
+    }
+    const transcript = [...parseTranscript(row.planTranscript), message];
+    const diff = await ctx.github.fetchPrDiff(input.accountId, pr.owner, pr.name, pr.number).catch(() => '');
+    const nonce = pickReviewNonce([
+      seed.text,
+      pr.title,
+      pr.body ?? '',
+      renderPlanText(plan),
+      ...transcript.map((m) => m.text),
+    ]);
+    const prompt = buildPlanUserPrompt({ pr, diff, seed, previous: plan, transcript, nonce });
+    fixIdByPr.set(prId, row.id);
+    queuePlanPass(ctx, {
+      fixId: row.id,
+      accountId: input.accountId,
+      prId,
+      owner: pr.owner,
+      name: pr.name,
+      prNumber: pr.number,
+      // The pass reads the commit the plan was made at.
+      baseSha: row.baseSha,
+      model: row.model,
+      systemPrompt: buildPlanSystemPrompt(),
+      prompt,
+      shownRefs: shownRefsOf(parseReviewItems(row.reviewItems)),
+      revision: revision + 1,
+      maxBudgetUsd: left,
+      hadPlan: true,
+    });
+    return { status: 'queued', fixId: row.id };
+  } catch (err) {
+    claimed.delete(prId);
+    fixIdByPr.delete(prId);
+    planPasses.delete(row.id);
+    // The message reopened the plan; with no pass behind it, put it back so it is not stuck.
+    if (appended)
+      await markPlanPassEnded(ctx, row.id, { kind: 'failed', message: 'the request failed' }).catch(() => {});
+    ctx.log.warn({ err }, 'ai-fix plan message failed');
+    return { status: 'not_found' };
+  }
+}
+
+/**
+ * "Approve and build": the SAME row becomes a normal fix run whose prompt carries the approved plan
+ * as the agreed brief (prompts.ts `buildFixUserPrompt({ plan })`; WORKTREE_RULES unchanged). Built
+ * on the PR's head NOW — the plan was read at the head it was made on, and a head that moved since
+ * is what a push to the PR branch checks against.
+ */
+export async function approvePlan(
+  ctx: AgentContext,
+  input: { accountId: number; fixId: number },
+): Promise<PlanActionResult> {
+  const row = await getFixById(ctx, input.accountId, input.fixId);
+  if (!row) return { status: 'not_found' };
+  const plan = parsePlan(row.plan);
+  const seed = parsePlanSeed(row.planSeed);
+  if (row.status !== 'planned' || parsePlanStatus(row.planStatus) !== 'plan_ready' || !plan || !seed)
+    return { status: 'not_ready' };
+
+  const auth = ctx.llm.detectAuth();
+  if (auth.status !== 'ok') return { status: 'no_auth', message: auth.message };
+  if ((await ctx.aiCredits.check(input.accountId)).agentBlocked) return { status: 'credits_exhausted' };
+
+  const prId = row.prId;
+  if (claimed.has(prId)) return { status: 'already_running' };
+  if (pending.length >= MAX_QUEUED) return { status: 'busy' };
+  claimed.add(prId);
+  try {
+    const pr = await getFixPrContext(ctx, input.accountId, prId);
+    if (!pr) {
+      claimed.delete(prId);
+      return { status: 'not_found' };
+    }
+    const headInfo = await ctx.github.fetchPrHeadInfo(input.accountId, pr.owner, pr.name, pr.number);
+    const baseSha = headInfo.headSha;
+    if (!baseSha) {
+      claimed.delete(prId);
+      return { status: 'no_head' };
+    }
+    const diff = await ctx.github.fetchPrDiff(input.accountId, pr.owner, pr.name, pr.number).catch(() => '');
+    const planText = renderPlanText(plan);
+    const nonce = pickReviewNonce([seed.text, pr.title, pr.body ?? '', planText]);
+    const prompt = buildFixUserPrompt({ pr, diff, seed, plan: { plan, nonce } });
+    if (!(await markPlanApproved(ctx, row.id, { prompt, baseSha }))) {
+      claimed.delete(prId);
+      return { status: 'not_ready' };
+    }
+    fixIdByPr.set(prId, row.id);
+    queueFixJob(ctx, {
+      fixId: row.id,
+      accountId: input.accountId,
+      prId,
+      owner: pr.owner,
+      name: pr.name,
+      prNumber: pr.number,
+      baseSha,
+      model: row.model,
+      systemPrompt: buildFixSystemPrompt(),
+      prompt,
+      sentRefs: shownRefsOf(parseReviewItems(row.reviewItems)),
+      trigger: 'manual',
+    });
+    return { status: 'queued', fixId: row.id };
+  } catch (err) {
+    claimed.delete(prId);
+    fixIdByPr.delete(prId);
+    ctx.log.warn({ err }, 'ai-fix plan approve failed');
+    return { status: 'not_found' };
+  }
+}
+
+/** "Discard plan": ends a plan waiting for the reader. A pass in flight is cancelled first (Cancel). */
+export async function discardPlan(
+  ctx: AgentContext,
+  input: { accountId: number; fixId: number },
+): Promise<'discarded' | 'not_found' | 'not_ready'> {
+  const row = await getFixById(ctx, input.accountId, input.fixId);
+  if (!row) return 'not_found';
+  if (planPasses.has(row.id)) return 'not_ready';
+  return (await markPlanDiscarded(ctx, input.accountId, row.id)) ? 'discarded' : 'not_ready';
+}
+
 export function requestFixCancel(ctx: AgentContext, prId: number): boolean {
   const fixId = fixIdByPr.get(prId);
   if (fixId != null && running.has(prId)) {
@@ -508,6 +896,14 @@ export function requestFixCancel(ctx: AgentContext, prId: number): boolean {
     pending.splice(idx, 1);
     claimed.delete(prId);
     fixIdByPr.delete(prId);
+    const hadPlan = planPasses.get(fixId);
+    if (hadPlan !== undefined) {
+      // A queued PLANNING pass: a re-plan goes back to its ready plan, a first pass ends the row.
+      planPasses.delete(fixId);
+      void markPlanPassEnded(ctx, fixId, { kind: 'cancelled' }).catch(() => {});
+      emitFixStream(prId, { type: 'done', status: hadPlan ? 'planned' : 'cancelled', fixId });
+      return true;
+    }
     void markFixCancelled(ctx, fixId).catch(() => {});
     emitFixStream(prId, { type: 'done', status: 'cancelled', fixId });
     return true;
@@ -547,15 +943,16 @@ export async function getFixStatus(
   // Live in-memory state, but only for a fix id this account actually owns.
   const liveFixId = fixIdByPr.get(prId) ?? null;
   if (liveFixId === row.id) {
+    const planning = planPasses.has(row.id);
     if (running.has(prId)) {
       return {
         status: 'running',
         fixId: row.id,
-        progress: progressByFix.get(row.id) ?? { phase: 'cloning' },
+        progress: progressByFix.get(row.id) ?? { phase: planning ? 'planning' : 'cloning' },
       };
     }
     if (claimed.has(prId)) {
-      return { status: 'queued', fixId: row.id, progress: { phase: 'fetching_diff' } };
+      return { status: 'queued', fixId: row.id, progress: { phase: planning ? 'planning' : 'fetching_diff' } };
     }
   }
   return { status: row.status, fixId: row.id, progress: null };

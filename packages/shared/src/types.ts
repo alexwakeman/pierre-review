@@ -8480,7 +8480,10 @@ export type AiFixStatus =
   | 'running'
   | 'succeeded'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
+  // PLAN MODE: the row holds an open plan (being made, or waiting for the reader) and no build has
+  // started. "Approve and build" moves the SAME row to 'queued'; "Discard plan" to 'cancelled'.
+  | 'planned';
 
 // What seeded the fix prompt. TWO entry points: 'review' (a Claude review, every non-praise item
 // of it — server-built from the STORED run, coding/ai-fix/review-seed.ts) and 'plain' (the
@@ -8558,7 +8561,71 @@ export type AiFixPhase =
   | 'cloning'
   | 'fixing'
   | 'capturing'
-  | 'persisting';
+  | 'persisting'
+  // A plan-mode pass (read-only): the first plan or a re-plan after a chat message.
+  | 'planning';
+
+// ---- Plan mode (manual fixes only; docs/CLAUDE-REVIEW.md § AI Fix "Plan mode") ----
+// A MANUAL fix may plan first: a READ-ONLY agent pass (Read/Glob/Grep + submit_plan, no edits, no
+// shell) over the same seed the build would get. The reader steers it by chat — each message runs a
+// fresh pass with the seed, the previous plan and the whole chat — then approves it, and the SAME
+// row runs the normal build with the approved plan folded into its prompt. An auto fix never plans.
+
+// 'planning' (a pass in flight) | 'plan_ready' (waiting for the reader) | 'approved' (the build took
+// it) | 'discarded' | 'failed' (the FIRST pass produced no plan; a failed re-plan keeps the old one).
+export type AiFixPlanStatus = 'planning' | 'plan_ready' | 'approved' | 'discarded' | 'failed';
+
+// At most this many summary bullets, each at most AI_FIX_PLAN_BULLET_MAX_CHARS (validated server-side:
+// the submit_plan tool refuses a longer list and the stored plan is clipped again).
+export const AI_FIX_PLAN_MAX_BULLETS = 5;
+export const AI_FIX_PLAN_BULLET_MAX_CHARS = 160;
+// The longest steering message the chat route takes, and how many re-plans one plan may have.
+export const AI_FIX_PLAN_MAX_MESSAGE_CHARS = 2_000;
+export const AI_FIX_PLAN_MAX_REVISIONS = 12;
+
+// One step of the detailed plan. `refs` are the seed refs it covers (F1, T2, S1-AC2 …), checked
+// against the refs the pass was SHOWN — an unknown ref is dropped.
+export interface AiFixPlanStep {
+  title: string;
+  files: string[];
+  change: string;
+  refs: string[];
+}
+
+export interface AiFixPlan {
+  revision: number;
+  // 1–5 short bullets for quick reference.
+  summary: string[];
+  steps: AiFixPlanStep[];
+  // Items the plan will NOT address, with why.
+  notAddressed: AiFixUnaddressed[];
+  // Shown refs the plan neither covers nor declines.
+  notCovered: string[];
+}
+
+// One line of the steering chat. 'reader' = the person's message (sent against `revision`);
+// 'claude' = the pass's one-line answer, written with plan `revision`.
+export interface AiFixPlanMessage {
+  role: 'reader' | 'claude';
+  text: string;
+  revision: number;
+  at: string;
+}
+
+export interface AiFixPlanState {
+  status: AiFixPlanStatus;
+  revision: number;
+  // The latest plan; null until the first pass succeeds.
+  plan: AiFixPlan | null;
+  transcript: AiFixPlanMessage[];
+  // The planning passes' spend so far (the build's is AiFix.costUsd).
+  costUsd: number | null;
+}
+
+// POST /api/pro/ai-fixes/:fixId/plan/message
+export interface AiFixPlanMessageBody {
+  text: string;
+}
 
 export interface AiFixProgress {
   phase: AiFixPhase;
@@ -8614,6 +8681,9 @@ export interface AiFix {
   reviewItems: AiFixReviewItem[] | null;
   // The agent's per-change report, validated. null until a run succeeds, and on older rows.
   changeReport: AiFixChangeReport | null;
+  // Plan mode: the plan, its chat and its status. null when the run never planned (every auto fix,
+  // every older row).
+  plan: AiFixPlanState | null;
   costUsd: number | null;
   numTurns: number | null;
   error: string | null;
@@ -8673,7 +8743,8 @@ export type AiFixStreamEvent =
   | { type: 'done'; status: AiFixStatus | 'idle'; fixId: number | null };
 
 // Start a fix run. ⚠ The body has NO ajv schema (Fastify's removeAdditional would strip
-// undeclared keys); every field is validated in the handler.
+// undeclared keys); every field is validated in the handler. `POST …/ai-fix/plan` ("Plan first")
+// takes the SAME body and starts a read-only planning pass instead of the build.
 export interface GenerateFixBody {
   // One of CLAUDE_REVIEW_MODELS. Omitted ⇒ DEFAULT_AI_FIX_MODEL. Anything else (a retired id
   // such as the old Opus, or a non-string) is a 400 { error: 'ModelNotOffered' }.

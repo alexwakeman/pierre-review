@@ -1734,7 +1734,7 @@ export const aiFixes = sqliteTable(
     sourceReviewId: integer('source_review_id'),
     // The commit the patch applies onto (the live PR head at generate time).
     baseSha: text('base_sha').notNull(),
-    // 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+    // 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'planned' (a plan open, no build yet)
     status: text('status').notNull(),
     model: text('model').notNull(),
     // AiFixSeed: 'ci_analysis' | 'review' | 'plain' | 'comments'
@@ -1771,6 +1771,19 @@ export const aiFixes = sqliteTable(
     // 0078. JSON AiFixChangeReport — the agent's per-change report, validated (refs checked
     // against the shown set, text clipped). Written on success; NULL before and on older rows.
     changeReport: text('change_report'),
+    // 0113 — PLAN MODE (a manual fix may plan first; docs/CLAUDE-REVIEW.md § AI Fix "Plan mode").
+    // JSON AiFixPlan, the latest revision. NULL = the run never planned.
+    plan: text('plan'),
+    // JSON AiFixPlanMessage[] — the steering chat, oldest first.
+    planTranscript: text('plan_transcript'),
+    // AiFixPlanStatus: 'planning' | 'plan_ready' | 'approved' | 'discarded' | 'failed'. NULL = no
+    // plan (every older row, every auto fix). While a plan is open the row's `status` is 'planned'.
+    planStatus: text('plan_status'),
+    planRevision: integer('plan_revision'),
+    // JSON { kind, text } — the frozen, fenced seed every pass re-reads. Server-only, never on the wire.
+    planSeed: text('plan_seed'),
+    // The planning passes' spend, summed (the build's own spend stays in cost_usd).
+    planCostUsd: real('plan_cost_usd'),
   },
   (t) => ({
     prCreatedIdx: index('af_account_pr_created').on(t.accountId, t.prId, t.createdAt),

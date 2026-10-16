@@ -22,7 +22,13 @@ import type {
   GenerateFixArgs,
   GenerateFixResult,
 } from '../pro/contract.js';
-import { submitFixShape, type SubmitFixPayload } from './schema.js';
+import { submitFixShape, submitPlanShape, type SubmitFixPayload } from './schema.js';
+import {
+  checkPlanSubmission,
+  type GeneratePlanArgs,
+  type GeneratePlanResult,
+  type RawPlanSubmission,
+} from './ai-fix/plan.js';
 import { captureWorktreeDiff } from './git.js';
 import { describeAssistantBlocks } from './activity.js';
 import { ISOLATED_MCP, ownToolsOnlyHook } from '../ai/agent-isolation.js';
@@ -75,6 +81,16 @@ const FIX_TOOLS = [
 // Denied OUTRIGHT rather than by command pattern, for the reasons above. Belt and braces: Bash is
 // also absent from the allow list, so there are two independent reasons it cannot run.
 const DISALLOWED_TOOLS = ['Bash', 'NotebookEdit'];
+
+// PLAN MODE (ai-fix/plan.ts; docs/CLAUDE-REVIEW.md § AI Fix "Plan mode"): the planning pass is
+// READ-ONLY. It reads the same worktree the build will edit, and nothing it does may change it: the
+// allow list carries no write tool, and every write tool is ALSO denied outright, so a plan pass
+// cannot edit a file even if a later change re-adds one to the allow list by mistake. The path guard
+// still confines its reads to the worktree (runAgentInWorktree). Pinned by tool-surface.test.ts.
+const PLAN_TOOLS = ['Read', 'Glob', 'Grep', 'mcp__plan__submit_plan'];
+const PLAN_DISALLOWED_TOOLS = ['Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
+// A plan reads and writes nothing, so it needs far fewer turns than a build.
+const PLAN_MAX_TURNS = 25;
 
 // Per-model effort + thinking options: ONE table in review/model-options.ts, shared with the
 // review agent (Opus 5.5 gets explicit adaptive thinking and 400s on
@@ -367,6 +383,94 @@ export async function runCodingAgent(
       await removeWorktreeLocked(owner, name, repoCloneDir, worktreePath).catch(
         () => {},
       );
+    }
+    if (repoCloneDir) {
+      setImmediate(() => {
+        try {
+          cleanupCloneCache();
+        } catch {
+          /* advisory cleanup — never surface */
+        }
+      });
+    }
+  }
+}
+
+/**
+ * PLAN MODE: run the READ-ONLY planning agent against the PR's head in an ephemeral worktree and
+ * return its accepted `submit_plan` call. Nothing in the worktree may change (PLAN_TOOLS /
+ * PLAN_DISALLOWED_TOOLS above); the worktree is torn down after, exactly like a fix run's.
+ *
+ * `submit_plan` is checked IN THE TOOL (ai-fix/plan.ts `checkPlanSubmission`: at most five short
+ * bullets, only refs the pass was shown); a refused call is answered with what to fix so the model
+ * can call again, and only an accepted call is kept.
+ */
+export async function runPlanAgent(args: GeneratePlanArgs): Promise<GeneratePlanResult> {
+  const { owner, name, prNumber, baseSha, abortController, onProgress } = args;
+  const token = await getAccessToken(args.accountId);
+
+  let repoCloneDir: string | null = null;
+  let worktreePath: string | null = null;
+  try {
+    onProgress({ phase: 'cloning' });
+    ({ repoCloneDir, worktreePath } = await prepWorktree(owner, name, prNumber, baseSha, token));
+
+    const { createSdkMcpServer, tool } = await loadAgentSdk();
+    const planShape = await submitPlanShape();
+    let accepted: RawPlanSubmission | null = null;
+    const server = createSdkMcpServer({
+      name: 'plan',
+      version: '1.0.0',
+      tools: [
+        tool(
+          'submit_plan',
+          'Submit the plan. Call this once, at the end, after reading the code.',
+          planShape,
+          async (a) => {
+            const p = a as unknown as RawPlanSubmission;
+            const problems = checkPlanSubmission(p, args.shownRefs);
+            if (problems.length > 0) {
+              return {
+                content: [
+                  { type: 'text', text: `The plan was not recorded. Fix this and call submit_plan again:\n- ${problems.join('\n- ')}` },
+                ],
+              };
+            }
+            accepted = { summary: p.summary, steps: p.steps, notAddressed: p.notAddressed, reply: p.reply };
+            return { content: [{ type: 'text', text: 'Plan recorded.' }] };
+          },
+        ),
+      ],
+    });
+
+    onProgress({ phase: 'planning' });
+    const outcome = await runAgentInWorktree({
+      worktreePath,
+      model: args.model,
+      systemPrompt: args.systemPrompt,
+      prompt: args.prompt,
+      allowedTools: PLAN_TOOLS,
+      disallowedTools: PLAN_DISALLOWED_TOOLS,
+      mcpServers: { plan: server },
+      maxTurns: args.maxTurns ?? PLAN_MAX_TURNS,
+      maxBudgetUsd: args.maxBudgetUsd,
+      abortController,
+      onActivity: (activity, usage) => onProgress({ phase: 'planning', recentActivity: activity, usage }),
+    });
+
+    if (outcome.aborted || abortController.signal.aborted) {
+      return { plan: null, usage: emptyUsage(), costUsd: null, numTurns: null, aborted: true };
+    }
+    return {
+      plan: accepted as RawPlanSubmission | null,
+      usage: outcome.usage,
+      costUsd: outcome.costUsd,
+      numTurns: outcome.numTurns,
+      aborted: false,
+    };
+  } finally {
+    if (repoCloneDir && worktreePath) {
+      await removeWorktreeLocked(owner, name, repoCloneDir, worktreePath).catch(() => {});
     }
     if (repoCloneDir) {
       setImmediate(() => {

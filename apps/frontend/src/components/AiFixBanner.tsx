@@ -36,6 +36,8 @@ const TERMINAL: ReadonlySet<AiFixStatus | 'idle'> = new Set([
   'failed',
   'cancelled',
   'idle',
+  // A plan pass ended: the plan waits for the reader in the AI Fix tab.
+  'planned',
 ] as const);
 
 function doneLine(status: AiFixStatus | 'idle'): string | null {
@@ -48,6 +50,8 @@ function doneLine(status: AiFixStatus | 'idle'): string | null {
       return 'Cancelled';
     case 'idle':
       return 'The fix did not start';
+    case 'planned':
+      return 'Plan ready';
     default:
       return null;
   }

@@ -558,6 +558,16 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (path.startsWith('/api/ci-reviews')) return [TIERS.read];
   // "Post reply" on a follow-up reply status: ONE GitHub thread reply (+ a resolve), no model.
   if (mutating && /^\/api\/claude-reviews\/\d+\/follow-up\/\d+\/reply$/.test(path)) return [TIERS.githubWrite];
+  // AI Fix PLAN MODE (coding/ai-fix/routes.ts, LOCAL ONLY). Spelled out so the family cannot drift
+  // with the /api/pro/ catch-all below, which would also have parked the DB-only discard on `ai`:
+  //   POST /api/pro/prs/:id/ai-fix/plan             starts a planning agent pass  → ai + ai_hourly
+  //   POST /api/pro/ai-fixes/:fixId/plan/message    one re-plan agent pass        → ai + ai_hourly
+  //   POST /api/pro/ai-fixes/:fixId/plan/approve    starts the build agent run    → ai + ai_hourly
+  //   POST /api/pro/ai-fixes/:fixId/plan/discard    one DB update, no model       → read
+  if (mutating && /^\/api\/pro\/prs\/\d+\/ai-fix\/plan$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
+  if (mutating && /^\/api\/pro\/ai-fixes\/\d+\/plan\/(message|approve)$/.test(path))
+    return [TIERS.ai, TIERS.aiHourly];
+  if (/^\/api\/pro\/ai-fixes\/\d+\/plan\/discard$/.test(path)) return [TIERS.read];
   if (/^\/api\/claude-reviews\/[^/]+\/chat$/.test(path)) {
     return mutating ? [TIERS.ai, TIERS.aiHourly] : [TIERS.read];
   }

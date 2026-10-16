@@ -7,7 +7,12 @@
 // that still offers a shell spends a refused tool call — one of the 40 turns and a slice of the $3
 // budget — every time the model reaches for one.
 import { describe, expect, it } from 'vitest';
-import { buildFixSystemPrompt } from './prompts.js';
+import {
+  buildFixSystemPrompt,
+  buildFixUserPrompt,
+  buildPlanSystemPrompt,
+  buildPlanUserPrompt,
+} from './prompts.js';
 
 describe('the fix prompts offer no shell', () => {
   // ONE fix system prompt now (both seeds share it); WORKTREE_RULES is the constant it carries.
@@ -42,3 +47,81 @@ describe('the fix prompts offer no shell', () => {
   });
 });
 
+
+// PLAN MODE: the planning pass's prompt is the prompt half of PLAN_TOOLS (Read/Glob/Grep +
+// submit_plan) — it offers no shell AND no edit, and it carries none of WORKTREE_RULES' write text.
+describe('the plan prompt offers neither a shell nor an edit', () => {
+  const plan = buildPlanSystemPrompt();
+
+  it('says it cannot edit and has no shell, and never names Bash or the write tools', () => {
+    expect(plan).not.toMatch(/\bBash\b/);
+    expect(plan).toContain('You CANNOT edit files and you have NO shell here');
+    expect(plan).not.toMatch(/Write\/Edit\/MultiEdit/);
+    expect(plan).toContain('Nothing is installed, built or tested here');
+  });
+
+  it('caps the summary at five short bullets in the instructions too', () => {
+    expect(plan).toContain('5 bullets at most');
+  });
+});
+
+describe('approve and build: the agreed plan reaches the build prompt', () => {
+  const pr = {
+    prId: 7,
+    repoId: 3,
+    owner: 'acme',
+    name: 'app',
+    number: 12,
+    repoFullName: 'acme/app',
+    title: 'Fix auth',
+    body: null,
+  } as unknown as Parameters<typeof buildFixUserPrompt>[0]['pr'];
+  const plan = {
+    revision: 2,
+    summary: ['Guard the null user'],
+    steps: [{ title: 'Null guard', files: ['src/auth.ts'], change: 'Return early.', refs: ['F1'] }],
+    notAddressed: [{ ref: 'F2', reason: 'Already handled.' }],
+    notCovered: [],
+  };
+
+  it('fences the plan as the agreed brief, and the system prompt keeps WORKTREE_RULES', () => {
+    const p = buildFixUserPrompt({ pr, diff: '', seed: { kind: 'plain', text: 'Fix it' }, plan: { plan, nonce: 'n0nce' } });
+    expect(p).toContain('The agreed plan.');
+    expect(p).toContain('---BEGIN AGREED PLAN n0nce---');
+    expect(p).toContain('1. Null guard (src/auth.ts) [F1]');
+    expect(p).toContain('- F2: Already handled.');
+    expect(buildFixSystemPrompt()).toContain('You have NO shell here');
+  });
+
+  it('a build with no plan carries none', () => {
+    const p = buildFixUserPrompt({ pr, diff: '', seed: { kind: 'plain', text: 'Fix it' } });
+    expect(p).not.toContain('AGREED PLAN');
+  });
+});
+
+describe('a re-plan carries the chat', () => {
+  it('fences the reader as steering and earlier replies and the previous plan as context', () => {
+    const pr = { number: 12, repoFullName: 'acme/app', title: 'T', body: null } as unknown as Parameters<
+      typeof buildPlanUserPrompt
+    >[0]['pr'];
+    const p = buildPlanUserPrompt({
+      pr,
+      diff: '',
+      seed: { kind: 'plain', text: 'Fix it' },
+      previous: { revision: 1, summary: ['Old idea'], steps: [], notAddressed: [], notCovered: [] },
+      transcript: [
+        { role: 'reader', text: 'Do not touch the API', revision: 1, at: '' },
+        { role: 'claude', text: 'Kept the API as is.', revision: 2, at: '' },
+        { role: 'reader', text: 'Also add a test', revision: 2, at: '' },
+      ],
+      nonce: 'abc',
+    });
+    expect(p).toContain('---BEGIN PREVIOUS PLAN abc---');
+    expect(p).toContain('- Old idea');
+    expect(p.match(/---BEGIN STEERING FROM THE PERSON RUNNING THIS FIX abc---/g)).toHaveLength(2);
+    expect(p).toContain('Do not touch the API');
+    expect(p).toContain('Also add a test');
+    expect(p).toContain('---BEGIN YOUR EARLIER REPLY (context only) abc---');
+    expect(p).toContain("LATEST steering message");
+  });
+});

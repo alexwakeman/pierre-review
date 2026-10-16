@@ -19,6 +19,7 @@ import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { AiCloudNote, AiRunGate } from './AiSetup.js';
 import { useFilters } from '../store/filters.js';
 import {
+  aiFixPlanMutationKey,
   aiFixStartMutationKey,
   useAiFix,
   useAiFixPreview,
@@ -26,7 +27,9 @@ import {
   useCancelFix,
   usePushFix,
   useStartFix,
+  useStartPlan,
 } from '../hooks/useAiFix.js';
+import { ApprovedPlanNote, PlanPanel } from './AiFix/PlanPanel.js';
 import { useClaudeReview, useClaudeReviewById } from '../hooks/useClaudeReview.js';
 import { fixSourceReviewId, olderSourceNote } from '../lib/aiFixSource.js';
 import { ApiError } from '../api/client.js';
@@ -126,7 +129,11 @@ function FixerSection({
   // constant the start route falls back to.
   const [model, setModel] = useState<AiFixModel>(DEFAULT_AI_FIX_MODEL);
   const startFix = useStartFix(pr.id);
+  const startPlan = useStartPlan(pr.id);
   const cancelFix = useCancelFix(pr.id);
+  // "Plan first" (plan mode, manual only): a read-only planning pass the reader steers and approves
+  // before anything is built. Off by default.
+  const [planFirst, setPlanFirst] = useState(false);
 
   const noteAiFixRun = useFilters((s) => s.noteAiFixRun);
   // In-flight read off the SHARED start key, not this mount's `startFix.isPending` — a per-mount
@@ -134,12 +141,21 @@ function FixerSection({
   const fixStarting =
     useIsMutating({ mutationKey: aiFixStartMutationKey(pr.id) }) > 0;
 
+  const planMutating = useIsMutating({ mutationKey: aiFixPlanMutationKey(pr.id) }) > 0;
+
   const dbStatus = data?.fix?.status ?? null;
-  const active = dbStatus === 'running' || dbStatus === 'queued' || fixStarting;
+  // A row holding an open plan ('planned'): its passes are shown by the plan panel, never as a build.
+  const planRow = dbStatus === 'planned';
+  const planPassInDb = planRow && data?.fix?.plan?.status === 'planning';
+  const active = dbStatus === 'running' || dbStatus === 'queued' || fixStarting || planPassInDb || planMutating;
   const { status: liveStatus } = useAiFixStream(pr.id, active);
   const displayStatus: AiFixStatus | 'idle' =
     liveStatus?.status ?? dbStatus ?? 'idle';
-  const isRunning = displayStatus === 'running' || displayStatus === 'queued';
+  const liveRunning = displayStatus === 'running' || displayStatus === 'queued';
+  const isRunning = liveRunning && !planRow;
+  const planPassRunning = planRow && (planPassInDb || liveRunning);
+  // An open plan: being made, or waiting for the reader. The picker stays shut until it ends.
+  const planOpen = planRow && (data?.fix?.plan?.status === 'planning' || data?.fix?.plan?.status === 'plan_ready');
 
   const fix = data?.fix ?? null;
 
@@ -155,7 +171,7 @@ function FixerSection({
   useEffect(() => setOverrides({}), [reviewId]);
   // With a finished fix on screen the picker folds away behind "New fix"; it is open otherwise.
   const [pickerOpen, setPickerOpen] = useState(false);
-  const showPicker = pickerOpen || !fix || fix.status !== 'succeeded';
+  const showPicker = !planOpen && (pickerOpen || !fix || fix.status !== 'succeeded');
 
   // "Resolve with Claude", offered beside a review fix ONLY when the branch conflicts (the
   // resolver entry's own gate). OFF by default; a separate run with a separate result — the merge
@@ -168,17 +184,20 @@ function FixerSection({
 
   const startFromReview = (): void => {
     if (reviewId == null || !preview.data || picked.length === 0) return;
-    // The bottom-right AiFixBanner follows the run once the reader leaves this tab.
-    noteAiFixRun({
-      prId: pr.id,
-      repoFullName: pr.repoFullName,
-      prNumber: pr.number,
-      prTitle: pr.title,
-    });
-    startFix.mutate(
-      { model, seed: 'review', sourceReviewId: reviewId, include: picked },
-      { onSuccess: () => setPickerOpen(false) },
-    );
+    const body = { model, seed: 'review' as const, sourceReviewId: reviewId, include: picked };
+    if (planFirst) {
+      // A plan is read in this tab; the banner follows the BUILD, from "Approve and build".
+      startPlan.mutate(body, { onSuccess: () => setPickerOpen(false) });
+    } else {
+      // The bottom-right AiFixBanner follows the run once the reader leaves this tab.
+      noteAiFixRun({
+        prId: pr.id,
+        repoFullName: pr.repoFullName,
+        prNumber: pr.number,
+        prTitle: pr.title,
+      });
+      startFix.mutate(body, { onSuccess: () => setPickerOpen(false) });
+    }
     // The merge half: its own run, opening the resolver when Claude's answer is ready. Started on
     // the PRESS, not in a mutate()-scoped callback (lost if this tab unmounts before the fix POST
     // answers) — it does not depend on the fix's result.
@@ -199,6 +218,9 @@ function FixerSection({
               earlier findings still open, threads Claude says need a fix, unanswered threads, CI
               failures and ticket gaps are ticked; style bot comments are not.
             </p>
+            <p>
+              Tick Plan first to read Claude's plan, steer it and approve it before anything changes.
+            </p>
             <p>Claude reports what it changed in each file and what it left alone, and why.</p>
             <p>
               Nothing is pushed until you press Push. An automatic fix on your own PR is pushed for
@@ -217,7 +239,7 @@ function FixerSection({
           </p>
         ) : (
           <>
-            {!isRunning && reviewId == null && !reviewLoading && (
+            {!isRunning && !planOpen && reviewId == null && !reviewLoading && (
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-xs text-gray-600 dark:text-gray-300">
                   {latest?.status === 'running' || latest?.status === 'queued'
@@ -234,7 +256,7 @@ function FixerSection({
               </div>
             )}
 
-            {!isRunning && reviewId != null && !showPicker && (
+            {!isRunning && !planOpen && reviewId != null && !showPicker && (
               <button type="button" className={BTN_SECONDARY} onClick={() => setPickerOpen(true)}>
                 New fix
               </button>
@@ -292,6 +314,15 @@ function FixerSection({
                         </option>
                       ))}
                     </select>
+                    <label className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-800 dark:text-gray-100">
+                      <input
+                        type="checkbox"
+                        checked={planFirst}
+                        disabled={fixStarting}
+                        onChange={(e) => setPlanFirst(e.target.checked)}
+                      />
+                      Plan first
+                    </label>
                     {/* No AI runtime or no Claude credential: one line (or the one-time setup) in
                         place of the start button. */}
                     <AiRunGate auth={data?.auth}>
@@ -301,7 +332,7 @@ function FixerSection({
                         disabled={fixStarting || picked.length === 0}
                         onClick={startFromReview}
                       >
-                        Start fix
+                        {planFirst ? 'Make a plan' : 'Start fix'}
                       </button>
                     </AiRunGate>
                     <span className="text-xs text-gray-500 dark:text-gray-400">
@@ -328,14 +359,25 @@ function FixerSection({
                 Cancel
               </button>
             )}
-            {startFix.isError && (
+            {(startFix.isError || startPlan.isError) && (
               <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">
-                {errText(startFix.error)}
+                {errText(startFix.error ?? startPlan.error)}
               </p>
+            )}
+
+            {fix && planRow && (
+              <PlanPanel
+                pr={pr}
+                fix={fix}
+                liveStatus={liveStatus}
+                passRunning={planPassRunning}
+                auth={data?.auth}
+              />
             )}
 
             {isRunning && (
               <div className="mt-3">
+                {fix && <ApprovedPlanNote fix={fix} />}
                 <RegenProgressBar
                   active
                   label="Running AI fix"
@@ -355,7 +397,7 @@ function FixerSection({
               </div>
             )}
 
-            {!isRunning && fix && (
+            {!isRunning && fix && !planRow && (
               <FixResult
                 pr={pr}
                 fix={fix}
@@ -403,6 +445,17 @@ function FixResult({
     [fix.patch],
   );
 
+  // Plan mode: a first planning pass that produced no plan, and a plan the reader discarded.
+  if (fix.status === 'failed' && fix.plan?.status === 'failed') {
+    return (
+      <div className="mt-3 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
+        Claude could not make a plan: {fix.error ?? 'unknown error'}
+      </div>
+    );
+  }
+  if (fix.status === 'cancelled' && fix.plan?.status === 'discarded') {
+    return <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">The plan was discarded.</p>;
+  }
   if (fix.status === 'failed') {
     return (
       <div className="mt-3 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
@@ -437,6 +490,7 @@ function FixResult({
           {fix.error}
         </p>
       )}
+      <ApprovedPlanNote fix={fix} />
       {fix.summary && (
         <div className="prose prose-sm max-w-none dark:prose-invert">
           <Markdown>{fix.summary}</Markdown>

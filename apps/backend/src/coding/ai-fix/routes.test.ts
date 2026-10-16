@@ -39,8 +39,20 @@ const PREVIEW = {
 };
 const loadFixPreview = vi.fn(async (..._args: unknown[]): Promise<typeof PREVIEW | null> => PREVIEW);
 
+const startPlan = vi.fn(async (..._args: unknown[]) => ({ status: 'queued' as const, fixId: 56 }));
+const sendPlanMessage = vi.fn(async (..._args: unknown[]): Promise<{ status: string; fixId?: number }> => ({
+  status: 'queued',
+  fixId: 56,
+}));
+const approvePlan = vi.fn(async (..._args: unknown[]) => ({ status: 'queued' as const, fixId: 56 }));
+const discardPlan = vi.fn(async (..._args: unknown[]): Promise<string> => 'discarded');
+
 vi.mock('./manager.js', () => ({
   startFix: (...args: unknown[]) => startFix(...args),
+  startPlan: (...args: unknown[]) => startPlan(...args),
+  sendPlanMessage: (...args: unknown[]) => sendPlanMessage(...args),
+  approvePlan: (...args: unknown[]) => approvePlan(...args),
+  discardPlan: (...args: unknown[]) => discardPlan(...args),
   loadFixPreview: (...args: unknown[]) => loadFixPreview(...args),
   getFixStatus: vi.fn(),
   requestFixCancel: vi.fn(() => false),
@@ -447,6 +459,61 @@ describe('the fix picker — preview and selection', () => {
     const res = await start(app, { seed: 'review', sourceReviewId: 4, include: [] });
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ error: 'NothingToFix', message: 'Nothing is ticked.' });
+    await app.close();
+  });
+});
+
+describe('plan mode routes', () => {
+  it('"Plan first" takes the start body and reaches startPlan — never startFix', async () => {
+    const app = await build();
+    startPlan.mockClear();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/pro/prs/7/ai-fix/plan',
+      payload: { seed: 'review', sourceReviewId: 41, include: ['finding:31'], model: 'claude-sonnet-5' },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({ fixId: 56, status: 'queued' });
+    expect(startFix).not.toHaveBeenCalled();
+    expect((startPlan.mock.calls[0] as unknown[])[1]).toMatchObject({
+      seed: 'review',
+      sourceReviewId: 41,
+      model: 'claude-sonnet-5',
+      trigger: 'manual',
+      selection: { kind: 'keys', keys: ['finding:31'] },
+    });
+    // The same body validation as the fix start.
+    const bad = await app.inject({ method: 'POST', url: '/api/pro/prs/7/ai-fix/plan', payload: { model: 'claude-opus-4-8' } });
+    expect(bad.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('a steering message must be non-blank and short; the text reaches the manager trimmed', async () => {
+    const app = await build();
+    sendPlanMessage.mockClear();
+    const msg = (text: unknown) =>
+      app.inject({ method: 'POST', url: '/api/pro/ai-fixes/56/plan/message', payload: { text } as object });
+    expect((await msg('   ')).statusCode).toBe(400);
+    expect((await msg(7)).statusCode).toBe(400);
+    expect((await msg('x'.repeat(2_001))).json().error).toBe('MessageTooLong');
+    expect(sendPlanMessage).not.toHaveBeenCalled();
+    expect((await msg('  Leave the API alone. ')).statusCode).toBe(202);
+    expect((sendPlanMessage.mock.calls[0] as unknown[])[1]).toEqual({ accountId: 1, fixId: 56, text: 'Leave the API alone.' });
+    sendPlanMessage.mockResolvedValueOnce({ status: 'revision_cap' });
+    expect((await msg('again')).json().error).toBe('PlanRevisionCap');
+    await app.close();
+  });
+
+  it('approve starts the build; discard of a plan not waiting is a 409', async () => {
+    const app = await build();
+    const ok = await app.inject({ method: 'POST', url: '/api/pro/ai-fixes/56/plan/approve' });
+    expect(ok.statusCode).toBe(202);
+    expect((approvePlan.mock.calls[0] as unknown[])[1]).toEqual({ accountId: 1, fixId: 56 });
+    discardPlan.mockResolvedValueOnce('not_ready');
+    const no = await app.inject({ method: 'POST', url: '/api/pro/ai-fixes/56/plan/discard' });
+    expect(no.statusCode).toBe(409);
+    const yes = await app.inject({ method: 'POST', url: '/api/pro/ai-fixes/56/plan/discard' });
+    expect(yes.json()).toEqual({ status: 'discarded' });
     await app.close();
   });
 });

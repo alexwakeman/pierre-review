@@ -11,6 +11,7 @@ export const PHASE_LABEL: Record<string, string> = {
   fixing: 'Applying the fix',
   capturing: 'Capturing changes',
   persisting: 'Saving',
+  planning: 'Making the plan',
 };
 
 /** Map the live phase (+ activity depth) to a determinate 0–100 reading. */
@@ -30,6 +31,9 @@ export function fixProgressPct(status: AiFixStatusResponse | null): number | nul
       return 92;
     case 'persisting':
       return 96;
+    // A plan pass reads and writes nothing, so its ladder is the activity alone.
+    case 'planning':
+      return Math.min(90, 35 + (p.recentActivity?.length ?? 0) * 4);
     default:
       return 20;
   }

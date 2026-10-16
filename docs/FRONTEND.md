@@ -1191,6 +1191,13 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   shows only where `ai.enabled`. Credits stay on the Pro one-shot Haiku features.
 - **The Pro CI-analysis card is DELETED** (Claude Review diagnoses failing CI). The AI summary, the
   CI list and the instruction box LEFT the AI Fix tab; the tab is the fixer and its picker only.
+- **Plan mode in the AI Fix tab** ("Plan first" beside the model, then `AiFix/PlanPanel.tsx`;
+  contract docs/CLAUDE-REVIEW.md § Plan mode). ⚠ A row with `status === 'planned'` is ALWAYS drawn by
+  the plan panel — the tab's `isRunning` excludes it, so a planning pass never shows as a build — and
+  the picker stays shut while a plan is open. The stream stays on while `plan.status === 'planning'`
+  or a plan action is in flight. The plan actions share `aiFixPlanMutationKey`; "Make a plan"
+  shares the start's key. Only "Approve and build" seeds the bottom-right banner (`noteAiFixRun`);
+  the banner treats `'planned'` as terminal ("Plan ready").
 - **STORIES ARE THE TICKET REVIEW'S NOW, in its own "Story check" section** (`TicketCoverage.tsx`,
   pure half `lib/ticketReview.ts`, hooks `hooks/useTicketReview.ts`; contract docs/CLAUDE-REVIEW.md
   § Ticket review). "Run a review" sends `{model}` only. One block per ticket the PR is on: key,

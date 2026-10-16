@@ -1,6 +1,8 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   AI_FIX_MAX_INSTRUCTION_CHARS,
+  AI_FIX_PLAN_MAX_MESSAGE_CHARS,
+  AI_FIX_PLAN_MAX_REVISIONS,
   CLAUDE_REVIEW_MODELS,
   DEFAULT_AI_FIX_MODEL,
 } from '@pierre-review/shared';
@@ -8,6 +10,7 @@ import type {
   AiFix,
   AiFixModel,
   AiFixPickerPreview,
+  AiFixPlanMessageBody,
   AiFixPushBody,
   AiFixPushResult,
   AiFixResponse,
@@ -22,12 +25,18 @@ import type { AgentContext } from '../../review/agent-context.js';
 import { config } from '../../config.js';
 import { getFixPrContext, getViewerCanPush } from './pr-context.js';
 import {
+  approvePlan,
+  discardPlan,
   getFixStatus,
   loadFixPreview,
   requestFixCancel,
+  sendPlanMessage,
   startFix,
+  startPlan,
   subscribeFixStream,
+  type PlanActionResult,
 } from './manager.js';
+import { planStateOf } from './plan.js';
 import { pushFix } from './push.js';
 import { getLatestSucceededReviewId } from '../../review/claude-review/persist.js';
 import {
@@ -92,6 +101,7 @@ function rowToAiFix(row: AiFixRow): AiFix {
     trigger: parseTrigger(row.trigger),
     reviewItems: parseReviewItems(row.reviewItems),
     changeReport: parseChangeReport(row.changeReport),
+    plan: planStateOf(row),
     sourceReviewId: row.sourceReviewId,
     costUsd: row.costUsd,
     numTurns: row.numTurns,
@@ -126,6 +136,97 @@ function rowToSummary(row: AiFixRow): AiFixSummary {
 function suggestBranch(headRef: string): string {
   const base = headRef.replace(/[^A-Za-z0-9._/-]/g, '-').replace(/^-+|-+$/g, '');
   return `${base || 'pr'}-ai-fix`;
+}
+
+type ParsedStartBody =
+  | {
+      model: AiFixModel;
+      seed: AiFixSeed;
+      instruction: string | undefined;
+      sourceReviewId: number | null;
+      include: string[] | null;
+    }
+  | { error: string; message: string };
+
+// The start body, validated in the handler (no ajv schema — see resolveFixModel). Shared by the
+// fix start and the "Plan first" start, which take the same body.
+function parseStartBody(rawBody: GenerateFixBody | undefined): ParsedStartBody {
+  const body = rawBody ?? ({} as GenerateFixBody);
+  const model = resolveFixModel((body as { model?: unknown }).model);
+  if (model == null) return { error: 'ModelNotOffered', message: 'That model is no longer offered.' };
+  // Two entry points. The removed ones get a sentence a stale tab can show, not a run.
+  const rawSeed = (body as { seed?: unknown }).seed ?? 'plain';
+  if (rawSeed === 'comments' || rawSeed === 'ci_analysis') {
+    return { error: 'SeedRemoved', message: 'That kind of fix is no longer offered. Reload the page.' };
+  }
+  if (rawSeed !== 'review' && rawSeed !== 'plain') return { error: 'UnknownSeed', message: 'Unknown fix type.' };
+  const seed: AiFixSeed = rawSeed;
+
+  if (seed === 'plain') {
+    const raw = (body as { instruction?: unknown }).instruction;
+    const instruction = typeof raw === 'string' ? raw.trim() : '';
+    if (instruction === '') return { error: 'InstructionRequired', message: 'Say what to fix.' };
+    if (instruction.length > AI_FIX_MAX_INSTRUCTION_CHARS) {
+      return {
+        error: 'InstructionTooLong',
+        message: `Keep the instruction under ${AI_FIX_MAX_INSTRUCTION_CHARS.toLocaleString('en-US')} characters.`,
+      };
+    }
+    return { model, seed, instruction, sourceReviewId: null, include: null };
+  }
+  const raw = (body as { sourceReviewId?: unknown }).sourceReviewId;
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0) {
+    return { error: 'ReviewRequired', message: 'Pick a Claude review to fix from.' };
+  }
+  // The fix picker's selection: picker keys. Absent ⇒ the server's defaults. Anything but an
+  // array of short strings is a 400; an unknown key is ignored (it selects nothing).
+  const inc = (body as { include?: unknown }).include;
+  let include: string[] | null = null;
+  if (inc !== undefined) {
+    if (
+      !Array.isArray(inc) ||
+      inc.length > MAX_INCLUDE_KEYS ||
+      !inc.every((k) => typeof k === 'string' && k.length > 0 && k.length <= 200)
+    ) {
+      return { error: 'BadSelection', message: 'Pick what to fix again.' };
+    }
+    include = inc as string[];
+  }
+  return { model, seed, instruction: undefined, sourceReviewId: raw, include };
+}
+
+function sendPlanResult(reply: FastifyReply, res: PlanActionResult) {
+  switch (res.status) {
+    case 'queued':
+      return reply.code(202).send({ fixId: res.fixId, status: 'queued' });
+    case 'not_found':
+      return reply.code(404).send({ error: 'not found' });
+    case 'not_ready':
+      return reply.code(409).send({ error: 'PlanNotReady', message: 'This plan is not waiting for you any more.' });
+    case 'already_running':
+      return reply.code(409).send({ error: 'AlreadyRunning' });
+    case 'busy':
+      return reply.code(409).send({ error: 'Busy' });
+    case 'no_auth':
+      return reply.code(400).send({ error: 'NoClaudeAuth', message: res.message });
+    case 'credits_exhausted':
+      return reply.code(402).send({
+        error: 'CreditsExhausted',
+        message: 'Out of monthly agentic AI credits — resets on the 1st.',
+      });
+    case 'no_head':
+      return reply.code(400).send({ error: 'NoHead' });
+    case 'revision_cap':
+      return reply.code(409).send({
+        error: 'PlanRevisionCap',
+        message: `This plan has been revised ${AI_FIX_PLAN_MAX_REVISIONS} times. Approve it or start again.`,
+      });
+    case 'budget_spent':
+      return reply.code(409).send({
+        error: 'PlanBudgetSpent',
+        message: 'This plan has used its budget. Approve it or start again.',
+      });
+  }
 }
 
 export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): void {
@@ -195,127 +296,114 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
     },
   );
 
-  // Start a fix run.
-  app.post<{ Params: { id: string }; Body?: GenerateFixBody }>(
-    '/api/pro/prs/:id/ai-fix',
+  // Start a fix run — or, with "Plan first", a read-only planning pass over the SAME body
+  // (manager.ts startPlan; docs/CLAUDE-REVIEW.md § AI Fix "Plan mode"). Manual only: the auto path
+  // calls startReviewFix and never plans.
+  for (const mode of ['fix', 'plan'] as const) {
+    app.post<{ Params: { id: string }; Body?: GenerateFixBody }>(
+      mode === 'fix' ? '/api/pro/prs/:id/ai-fix' : '/api/pro/prs/:id/ai-fix/plan',
+      async (req, reply) => {
+        const accountId = ctx.accountIdOf(req);
+        const prId = parseId(req.params.id);
+        if (prId == null) return reply.code(404).send({ error: 'not found' });
+        if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
+
+        const parsed = parseStartBody(req.body);
+        if ('error' in parsed) return reply.code(400).send(parsed);
+
+        const input = {
+          accountId,
+          prId,
+          model: parsed.model,
+          seed: parsed.seed,
+          instruction: parsed.instruction,
+          // The SERVER builds the review seed from the stored run (manager.ts `loadReviewSeed`,
+          // which also checks it is THIS PR's succeeded review). No review text travels in the body.
+          sourceReviewId: parsed.sourceReviewId,
+          trigger: 'manual' as const,
+          selection: parsed.include ? { kind: 'keys' as const, keys: parsed.include } : undefined,
+        };
+        const res = mode === 'fix' ? await startFix(ctx, input) : await startPlan(ctx, input);
+
+        switch (res.status) {
+          case 'queued':
+            return reply.code(202).send({ fixId: res.fixId, status: 'queued' });
+          case 'already_running':
+            return reply.code(409).send({ error: 'AlreadyRunning' });
+          case 'busy':
+            return reply.code(409).send({ error: 'Busy' });
+          case 'no_auth':
+            return reply.code(400).send({ error: 'NoClaudeAuth', message: res.message });
+          case 'credits_exhausted':
+            return reply.code(402).send({
+              error: 'CreditsExhausted',
+              message: 'Out of monthly agentic AI credits — resets on the 1st.',
+            });
+          case 'no_head':
+            return reply.code(400).send({ error: 'NoHead' });
+          case 'no_instruction':
+            return reply.code(400).send({ error: 'InstructionRequired', message: 'Say what to fix.' });
+          case 'review_unavailable':
+            return reply.code(409).send({
+              error: 'ReviewUnavailable',
+              message: 'That review is not available. Run a Claude review on this PR first.',
+            });
+          case 'nothing_to_fix':
+            return reply.code(409).send({
+              error: 'NothingToFix',
+              message: parsed.include ? 'Nothing is ticked.' : 'The review found nothing to fix.',
+            });
+          default:
+            return reply.code(404).send({ error: 'not found' });
+        }
+      },
+    );
+  }
+
+  // ---- Plan mode: steer, approve, discard (one open plan = one ai_fixes row) ----
+
+  // A steering message: appended to the plan's chat, then a fresh planning pass (202).
+  app.post<{ Params: { fixId: string }; Body?: AiFixPlanMessageBody }>(
+    '/api/pro/ai-fixes/:fixId/plan/message',
     async (req, reply) => {
       const accountId = ctx.accountIdOf(req);
-      const prId = parseId(req.params.id);
-      if (prId == null) return reply.code(404).send({ error: 'not found' });
-      if (!AIFIX_ENABLED)
-        return reply.code(404).send({ error: 'AiFixDisabled' });
-
-      const body = req.body ?? ({} as GenerateFixBody);
-      const model = resolveFixModel((body as { model?: unknown }).model);
-      if (model == null) {
+      const fixId = parseId(req.params.fixId);
+      if (fixId == null) return reply.code(404).send({ error: 'not found' });
+      if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
+      const raw = (req.body as { text?: unknown } | undefined)?.text;
+      const text = typeof raw === 'string' ? raw.trim() : '';
+      if (text === '') return reply.code(400).send({ error: 'MessageRequired', message: 'Say how to change the plan.' });
+      if (text.length > AI_FIX_PLAN_MAX_MESSAGE_CHARS) {
         return reply.code(400).send({
-          error: 'ModelNotOffered',
-          message: 'That model is no longer offered.',
+          error: 'MessageTooLong',
+          message: `Keep the message under ${AI_FIX_PLAN_MAX_MESSAGE_CHARS.toLocaleString('en-US')} characters.`,
         });
       }
-      // Two entry points. The removed ones get a sentence a stale tab can show, not a run.
-      const rawSeed = (body as { seed?: unknown }).seed ?? 'plain';
-      if (rawSeed === 'comments' || rawSeed === 'ci_analysis') {
-        return reply.code(400).send({
-          error: 'SeedRemoved',
-          message: 'That kind of fix is no longer offered. Reload the page.',
-        });
-      }
-      if (rawSeed !== 'review' && rawSeed !== 'plain') {
-        return reply.code(400).send({ error: 'UnknownSeed', message: 'Unknown fix type.' });
-      }
-      const seed: AiFixSeed = rawSeed;
-
-      let instruction: string | undefined;
-      let sourceReviewId: number | null = null;
-      let include: string[] | null = null;
-      if (seed === 'plain') {
-        const raw = (body as { instruction?: unknown }).instruction;
-        instruction = typeof raw === 'string' ? raw.trim() : '';
-        if (instruction === '') {
-          return reply.code(400).send({
-            error: 'InstructionRequired',
-            message: 'Say what to fix.',
-          });
-        }
-        if (instruction.length > AI_FIX_MAX_INSTRUCTION_CHARS) {
-          return reply.code(400).send({
-            error: 'InstructionTooLong',
-            message: `Keep the instruction under ${AI_FIX_MAX_INSTRUCTION_CHARS.toLocaleString('en-US')} characters.`,
-          });
-        }
-      } else {
-        const raw = (body as { sourceReviewId?: unknown }).sourceReviewId;
-        if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0) {
-          return reply.code(400).send({
-            error: 'ReviewRequired',
-            message: 'Pick a Claude review to fix from.',
-          });
-        }
-        sourceReviewId = raw;
-        // The fix picker's selection: picker keys. Absent ⇒ the server's defaults. Anything but an
-        // array of short strings is a 400; an unknown key is ignored (it selects nothing).
-        const inc = (body as { include?: unknown }).include;
-        if (inc !== undefined) {
-          if (
-            !Array.isArray(inc) ||
-            inc.length > MAX_INCLUDE_KEYS ||
-            !inc.every((k) => typeof k === 'string' && k.length > 0 && k.length <= 200)
-          ) {
-            return reply.code(400).send({ error: 'BadSelection', message: 'Pick what to fix again.' });
-          }
-          include = inc as string[];
-        }
-      }
-
-      const res = await startFix(ctx, {
-        accountId,
-        prId,
-        model,
-        seed,
-        instruction,
-        // The SERVER builds the review seed from the stored run (manager.ts `loadReviewSeed`,
-        // which also checks it is THIS PR's succeeded review). No review text travels in the body.
-        sourceReviewId,
-        trigger: 'manual',
-        selection: include ? { kind: 'keys', keys: include } : undefined,
-      });
-
-      switch (res.status) {
-        case 'queued':
-          return reply.code(202).send({ fixId: res.fixId, status: 'queued' });
-        case 'already_running':
-          return reply.code(409).send({ error: 'AlreadyRunning' });
-        case 'busy':
-          return reply.code(409).send({ error: 'Busy' });
-        case 'no_auth':
-          return reply
-            .code(400)
-            .send({ error: 'NoClaudeAuth', message: res.message });
-        case 'credits_exhausted':
-          return reply.code(402).send({
-            error: 'CreditsExhausted',
-            message: 'Out of monthly agentic AI credits — resets on the 1st.',
-          });
-        case 'no_head':
-          return reply.code(400).send({ error: 'NoHead' });
-        case 'no_instruction':
-          return reply.code(400).send({ error: 'InstructionRequired', message: 'Say what to fix.' });
-        case 'review_unavailable':
-          return reply.code(409).send({
-            error: 'ReviewUnavailable',
-            message: 'That review is not available. Run a Claude review on this PR first.',
-          });
-        case 'nothing_to_fix':
-          return reply.code(409).send({
-            error: 'NothingToFix',
-            message: include ? 'Nothing is ticked.' : 'The review found nothing to fix.',
-          });
-        default:
-          return reply.code(404).send({ error: 'not found' });
-      }
+      return sendPlanResult(reply, await sendPlanMessage(ctx, { accountId, fixId, text }));
     },
   );
+
+  // "Approve and build": the plan becomes the brief of a normal fix run on the same row (202).
+  app.post<{ Params: { fixId: string } }>('/api/pro/ai-fixes/:fixId/plan/approve', async (req, reply) => {
+    const accountId = ctx.accountIdOf(req);
+    const fixId = parseId(req.params.fixId);
+    if (fixId == null) return reply.code(404).send({ error: 'not found' });
+    if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
+    return sendPlanResult(reply, await approvePlan(ctx, { accountId, fixId }));
+  });
+
+  // "Discard plan". DB-only.
+  app.post<{ Params: { fixId: string } }>('/api/pro/ai-fixes/:fixId/plan/discard', async (req, reply) => {
+    const accountId = ctx.accountIdOf(req);
+    const fixId = parseId(req.params.fixId);
+    if (fixId == null) return reply.code(404).send({ error: 'not found' });
+    if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
+    const out = await discardPlan(ctx, { accountId, fixId });
+    if (out === 'not_found') return reply.code(404).send({ error: 'not found' });
+    if (out === 'not_ready')
+      return reply.code(409).send({ error: 'PlanNotReady', message: 'This plan is not waiting for you any more.' });
+    return reply.send({ status: 'discarded' });
+  });
 
   // The fix picker: every item a review-seeded fix would include, with stable keys and defaults.
   // DB-only (no GitHub call, no model).

@@ -12,7 +12,9 @@
 //                          true is on, and a repo with no membership row reads OFF;
 //   1. `nothing_to_fix`  — the review's seed is empty (the same refusal as the button's NothingToFix);
 //   2. `head_moved`      — the PR's synced head is no longer the reviewed one (the next review decides);
-//   3. `fix_in_progress` — a fix for this PR (auto or manual) is queued or running;
+//   3. `fix_in_progress` — a fix for this PR (auto or manual) is queued or running, OR a person's
+//                          PLAN is open (being made or waiting for their approval — plan mode,
+//                          docs/CLAUDE-REVIEW.md § AI Fix "Plan mode"; an auto fix would bury it);
 //   4. `fix_waiting`     — a finished fix with changes, never pushed, sits on the PR's CURRENT head
 //                          (the synced head, the REVIEWED head, or — only when an unpushed fix sits
 //                          on neither — the LIVE head, so a lagging sync cannot hide one);
@@ -20,6 +22,8 @@
 //   6. `already_tried`   — the latest auto fix AT THIS HEAD reported every item this review would
 //                          send as not addressed (nobody has pushed since, so nothing changed).
 // Then `startReviewFix(…, trigger: 'auto')` — the same queue, slot and worktree as the button.
+// ⚠ AN AUTO FIX NEVER PLANS: plan mode is a person steering and approving, so only the manual
+// "Plan first" route calls `startPlan`; `startReviewFix` always builds straight away.
 //
 // ⚠ WHAT IT CARRIES is the workspace's "Always include" sections (`workspaces.auto_fix_settings`,
 // `resolveAutoFixSettings`; default every section but style-bot threads) — the same sections as the
@@ -132,6 +136,7 @@ interface FixRow {
   createdAt: Date | number | null;
   reviewItems: string | null;
   changeReport: string | null;
+  planStatus?: string | null;
 }
 
 const toMs = (v: Date | number | null): number =>
@@ -219,11 +224,16 @@ export async function maybeStartAutoFix(
         createdAt: af.createdAt,
         reviewItems: af.reviewItems,
         changeReport: af.changeReport,
+        planStatus: af.planStatus,
       })
       .from(af)
       .where(and(eq(af.accountId, accountId), eq(af.prId, prId)))
       .orderBy(desc(af.id))
       .execute()) as FixRow[];
+
+    // A person's open plan (being made, or waiting for their approval) is a fix in progress.
+    if (fixes.some((f) => f.status === 'planned' && (f.planStatus === 'planning' || f.planStatus === 'plan_ready')))
+      return skip('fix_in_progress');
 
     // "Nobody has pushed since": the fix was built on the head the PR still has. The SYNCED head
     // can lag (or be unsynced) while the fixer builds on the LIVE head, so the reviewed head counts

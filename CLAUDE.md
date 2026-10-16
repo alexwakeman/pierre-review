@@ -1015,6 +1015,10 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   `comments` and `ci_analysis` seeds are REMOVED (`400 SeedRemoved`) but their stored rows still
   READ as history (`AiFixStoredSeed`). `startReviewFix` is the one entry the auto-review agent calls.
   ⚠ A finished fix PUSHES AS-IS ([docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § AI Fix).
+  ⚠ **PLAN MODE ("Plan first") is MANUAL ONLY and READ-ONLY** (sqlite `0113` / pg `0100`): one row,
+  `status 'planned'` until "Approve and build" runs the SAME row's build with the plan as its brief;
+  `PLAN_DISALLOWED_TOOLS` denies Bash AND every write tool; an auto fix never plans and skips an open
+  plan as `fix_in_progress` (§ Plan mode).
 - ⚠ **THE FIX AGENT HAS NO SHELL** — `FIX_TOOLS` is Read/Glob/Grep + Write/Edit/MultiEdit +
   `submit_fix`, and `DISALLOWED_TOOLS` is `['Bash','NotebookEdit']` (Claude Review denies `Bash`
   too). It reads and edits; **it installs nothing, builds nothing and runs
@@ -1541,7 +1545,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0099` and plugin `0034`–`0037` + `0040` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0100` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.
