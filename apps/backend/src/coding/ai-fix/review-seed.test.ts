@@ -529,6 +529,43 @@ describe('the fix picker — sections, stable keys, defaults, selection, budget'
     expect(s.items.map((i) => i.threadId).filter(Boolean)).toEqual([7, 70, 72]);
   });
 
+  it('each item names the Claude Review card it draws as; an unjudged thread gets a not-checked judgement', () => {
+    const p = buildPickerPreview(rich(), {
+      ciItems: [ciItem],
+      threads: threads(),
+      ticketItems: [
+        {
+          ticketKey: 'ABC-1',
+          ticketTitle: 'Story',
+          ticketReviewId: 40,
+          item: { id: 401, ref: 'AC2', status: 'not_met', title: 'Do X', body: '', path: null, line: null },
+        },
+        {
+          ticketKey: 'ABC-1',
+          ticketTitle: 'Story',
+          ticketReviewId: 40,
+          item: { ref: 'M1', status: 'missing', title: 'Do Y', body: '', path: null, line: null },
+        },
+      ],
+    });
+    const card = (key: string) => p.items.find((i) => i.key === key)?.card;
+    expect(card('finding:31')).toEqual({ kind: 'finding', findingId: 31 });
+    expect(card('finding:55')).toEqual({ kind: 'earlier_finding', priorFindingId: 55 });
+    expect(card('thread:7')).toMatchObject({ kind: 'thread', inReview: true, assessment: { threadId: 7 } });
+    // Judged (not right) but still untouched: its OWN judgement draws.
+    expect(card('thread:70')).toMatchObject({ kind: 'thread', inReview: true, assessment: { explanation: 'Not a bug.' } });
+    // Never judged: synthesized, both verdicts not_checked, never sent.
+    expect(card('thread:72')).toMatchObject({
+      kind: 'thread',
+      inReview: false,
+      assessment: { threadId: 72, validity: 'not_checked', addressed: 'not_checked', sent: false, authorLogin: 'sonarcloud' },
+    });
+    expect(card('ci:900')).toEqual({ kind: 'ci', item: ciItem });
+    expect(card('story:0:AC2')).toEqual({ kind: 'story', ticketReviewId: 40, itemId: 401 });
+    // No stored id ⇒ no card (the picker draws its plain row).
+    expect(card('story:0:M1')).toBeUndefined();
+  });
+
   it('⚠ the budget is applied AFTER selection: an item the defaults would cut fits once others are unticked', () => {
     const big = (id: number, severity: 'blocker' | 'nit') =>
       finding({ id, severity, title: `t${id}`, body: 'x'.repeat(2_000) });

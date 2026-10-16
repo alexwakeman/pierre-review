@@ -1,11 +1,11 @@
-// THE FIX PICKER'S FOLDS (components/AiFix/FixPicker.tsx): which keys a Start sends, and which
+// THE FIX PICKER'S FOLDS (components/AiFix/fixPickerModel.ts): which keys a Start sends, and which
 // ticked items the prompt budget will leave out — the same fold as the server's `budgetCut`, over
 // the preview's order (already priority order), the first ticked item always fitting.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend fixPicker
 import { describe, expect, it } from 'vitest';
 import type { AiFixPickerItem, AiFixPickerPreview } from '@pierre-review/shared';
-import { budgetCutKeys, pickedKeys } from '../src/components/AiFix/FixPicker.js';
+import { budgetCutKeys, pickedKeys } from '../src/components/AiFix/fixPickerModel.js';
 
 const item = (key: string, chars: number, defaultIncluded = true): AiFixPickerItem => ({
   key,

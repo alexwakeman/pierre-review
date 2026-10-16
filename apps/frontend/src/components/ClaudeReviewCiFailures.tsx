@@ -8,7 +8,7 @@
 //    never sends one).
 //  - Causes come from the server's reconcile step, which never invents one; ordering, pills and
 //    sentences live in lib/claudeReviewCi.ts.
-import { useId, useState } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import type { ClaudeCiFailure, ClaudeFindingSide } from '@pierre-review/shared';
 import { CI_CATEGORY_CLASS, CI_CATEGORY_LABEL, ciNotCheckedSentence } from '../lib/claudeReviewCi.js';
 import { anchorLabel } from '../lib/claudeReviewFollowUp.js';
@@ -54,12 +54,15 @@ export function CiFailureRow({
   suggestion = null,
   changedPaths,
   onOpenInChanges,
+  selection = null,
 }: {
   f: ClaudeCiFailure;
   // A CI review item's short description of the fix (null on history rows and when Claude has none).
   suggestion?: string | null;
   changedPaths: ReadonlySet<string>;
   onOpenInChanges?: OpenInChanges;
+  // A leading control in the card's header (the AI Fix picker's tick box). The row has no buttons.
+  selection?: ReactNode;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const explanationId = useId();
@@ -73,6 +76,7 @@ export function CiFailureRow({
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">
+        {selection}
         {diagnosed && f.category != null ? (
           <span className={`${CHIP} ${CI_CATEGORY_CLASS[f.category]}`}>
             {CI_CATEGORY_LABEL[f.category]}

@@ -102,6 +102,13 @@ interface RowContext {
   onOpenInChanges?: OpenInChanges;
 }
 
+// The AI Fix picker draws CriterionRow / MissingRow with `actions={false}` (no Post, no chat pin)
+// and its tick box in `selection`. Story check passes neither.
+interface PickerRowProps {
+  actions?: boolean;
+  selection?: ReactNode;
+}
+
 /** A code location: into the Changes tab when it is the viewed PR's file, else plain text. */
 function EvidenceRef({
   ev,
@@ -233,7 +240,9 @@ export function CriterionRow({
   viewedPrId,
   changedPaths,
   onOpenInChanges,
-}: RowContext & { c: TicketCriterion; item: TicketReviewItem | undefined }): JSX.Element {
+  actions = true,
+  selection = null,
+}: RowContext & PickerRowProps & { c: TicketCriterion; item: TicketReviewItem | undefined }): JSX.Element {
   const done = deliveredByLabel(c, review.members);
   const belongs = expectedInLabel(c.expectedIn, review.members);
   const refProps = { viewedPrId, members: review.members, changedPaths, onOpenInChanges };
@@ -260,6 +269,7 @@ export function CriterionRow({
   return (
     <li className={REVIEW_ITEM_CARD}>
       <div className="flex items-start gap-2">
+        {selection}
         <span className={`${CHIP} ${TICKET_CRITERION_STATUS_CLASS[c.status]}`}>
           {TICKET_CRITERION_STATUS_LABEL[c.status]}
         </span>
@@ -283,7 +293,7 @@ export function CriterionRow({
           <PrRefText text={c.explanation} />
         </p>
       )}
-      {item != null && <ItemAction item={item} review={review} viewedPrId={viewedPrId} />}
+      {actions && item != null && <ItemAction item={item} review={review} viewedPrId={viewedPrId} />}
     </li>
   );
 }
@@ -294,11 +304,14 @@ export function MissingRow({
   viewedPrId,
   changedPaths,
   onOpenInChanges,
-}: RowContext & { item: TicketReviewItem }): JSX.Element {
+  actions = true,
+  selection = null,
+}: RowContext & PickerRowProps & { item: TicketReviewItem }): JSX.Element {
   const owner = item.ownerPrId != null ? review.members.find((m) => m.prId === item.ownerPrId) : undefined;
   return (
     <li className={REVIEW_ITEM_CARD}>
       <div className="flex items-start gap-2">
+        {selection}
         <span className={`${CHIP} ${TICKET_CRITERION_STATUS_CLASS.not_met}`}>Not done</span>
         <span className={`shrink-0 font-mono text-xs leading-5 ${MUTED}`}>{item.ref}</span>
         <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{item.title}</span>
@@ -324,7 +337,7 @@ export function MissingRow({
           <PrRefText text={item.body} />
         </p>
       )}
-      <ItemAction item={item} review={review} viewedPrId={viewedPrId} />
+      {actions && <ItemAction item={item} review={review} viewedPrId={viewedPrId} />}
     </li>
   );
 }

@@ -1436,7 +1436,14 @@ Backend contract: [docs/CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § AI Fix.
   section; the reader's ticks are OVERRIDES over each item's `defaultIncluded` (reset when the
   review changes), and Start sends `{seed:'review', sourceReviewId, include: pickedKeys(…)}`.
   `budgetCutKeys` re-folds the server's budget over the ticked items in the preview's order and marks
-  the cut ones "Won't fit". With a finished fix on screen the picker folds behind "New fix". The CI
+  the cut ones "Won't fit". With a finished fix on screen the picker folds behind "New fix".
+  ⚠ **EACH ITEM IS THE CLAUDE REVIEW TAB'S OWN CARD** — `FindingRow`, `FollowUpRow`, `ThreadRow`,
+  `CiFailureRow`, `CriterionRow`/`MissingRow`, each with `actions={false}` (no Post / Reword / Copy /
+  chat pin / Ignore / reply buttons) and a real, `aria-label`led checkbox in its `selection` slot.
+  Never copy a card's markup into the picker. The server names the card (`AiFixPickerItem.card`);
+  findings and earlier findings join the SOURCE review (the latest, or `useClaudeReviewById` for a
+  hand-over), ticket gaps join Story check's `useTicketReviews` query, and an item whose data is not
+  on hand draws the old plain row. The folds live in `AiFix/fixPickerModel.ts` (no JSX). The CI
   list, the AI summary and the "Or say what to fix…" box are GONE (the route still takes `plain`).
 - **An automatic push that failed** shows the succeeded row's `error` ("Automatic push failed: …")
   in an amber line above the summary; Push still works and clears it.

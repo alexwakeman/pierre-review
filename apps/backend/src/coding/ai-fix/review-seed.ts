@@ -1,6 +1,7 @@
 import { isThreadToFix } from '@pierre-review/shared';
 import type {
   AiFixChangeReport,
+  AiFixPickerCard,
   AiFixPickerItem,
   AiFixPickerPreview,
   AiFixPickerSection,
@@ -99,6 +100,8 @@ export interface SeedCandidate {
   /** The label line, given the ref. Our own vocabulary only. */
   label: (ref: string) => string;
   body: string;
+  /** The picker's card (AiFixPickerItem.card). Display only — never read by selection or the prompt. */
+  card: AiFixPickerCard | null;
 }
 
 export interface ReviewSeed {
@@ -116,7 +119,8 @@ export interface SeedTicketItem {
   ticketTitle: string | null;
   // The ticket review run it came from: items of one run share one S<t>.
   ticketReviewId: number;
-  item: Pick<TicketReviewItem, 'ref' | 'status' | 'title' | 'body' | 'path' | 'line'>;
+  // `id` (the stored item's) lets the picker draw Story check's card for it; absent ⇒ a plain row.
+  item: Pick<TicketReviewItem, 'ref' | 'status' | 'title' | 'body' | 'path' | 'line'> & { id?: number };
 }
 
 /** One OPEN review thread on the PR, as the untouched / style-bot sections need it (thread-candidates.ts). */
@@ -131,6 +135,8 @@ export interface SeedThread {
   rootAuthorIsBot: boolean;
   // The root author's role in the PR's workspace is quality_check (stored role beats the login seed).
   rootIsStyleBot: boolean;
+  // github.com link to the root comment (display only, the picker's card); absent/null ⇒ none.
+  url?: string | null;
   // Oldest first, Limn's own posted comments left out.
   comments: Array<{ authorLogin: string | null; body: string }>;
 }
@@ -213,6 +219,7 @@ export function collectSeedCandidates(
     threadId: null,
     ticketIndex: null,
     defaultIncluded: true,
+    card: null,
   } as const;
 
   // F — the review's findings. A RE-RAISE (`priorFindingId` set) left out only because the same
@@ -240,6 +247,7 @@ export function collectSeedCandidates(
       line: f.line,
       severity: f.severity,
       findingId: f.id,
+      card: { kind: 'finding', findingId: f.id },
       priority: SEVERITY_PRIORITY[f.severity] ?? 4,
       label: (ref) => `Finding ${ref} (${f.severity})`,
       body: [
@@ -273,6 +281,7 @@ export function collectSeedCandidates(
       line: p.line,
       severity: p.severity,
       findingId: p.priorFindingId,
+      card: { kind: 'earlier_finding', priorFindingId: p.priorFindingId },
       priority: p.severity === 'blocker' ? 1 : 3,
       label: (ref) => `Earlier finding ${ref} (${p.severity})`,
       body: [
@@ -309,6 +318,7 @@ export function collectSeedCandidates(
       path: t.path,
       line: t.line,
       threadId: t.threadId,
+      card: { kind: 'thread', assessment: t, inReview: true },
       priority: 3,
       label: (ref) => `Reviewer thread ${ref}`,
       body: [
@@ -354,6 +364,7 @@ export function collectSeedCandidates(
       path: t.path,
       line: t.line,
       threadId: t.threadId,
+      card: { kind: 'thread', assessment: judgement ?? unjudgedAssessment(t), inReview: judgement != null },
       priority: section === 'style_bots' ? 6 : 4,
       label: (ref) => (section === 'style_bots' ? `Style bot thread ${ref}` : `Unanswered thread ${ref}`),
       body: [
@@ -383,6 +394,7 @@ export function collectSeedCandidates(
       detail: f.explanation ? oneLine(f.explanation, 240) : null,
       path: first?.path ?? null,
       line: first?.line ?? null,
+      card: { kind: 'ci', item: f },
       priority: 0,
       label: (ref) => `CI failure ${ref}`,
       body: [
@@ -426,6 +438,7 @@ export function collectSeedCandidates(
       path: item.path,
       line: item.line,
       ticketIndex: ti,
+      card: item.id != null ? { kind: 'story', ticketReviewId: t.ticketReviewId, itemId: item.id } : null,
       priority: 2,
       label: (r) => `Ticket item ${r}`,
       body: [
@@ -441,6 +454,41 @@ export function collectSeedCandidates(
   }
 
   return out;
+}
+
+/** How much of an unjudged thread's first comment the picker's card shows (display only). */
+const UNJUDGED_EXCERPT_MAX = 500;
+
+function clipDisplay(s: string, max: number): string {
+  const t = s.trim();
+  return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
+}
+
+/**
+ * An open thread the review did NOT judge, in the judgement's shape so the picker draws the same
+ * review-thread card: both verdicts 'not_checked', never sent, never carried. Display only.
+ */
+function unjudgedAssessment(t: SeedThread): ClaudeThreadAssessment {
+  const root = t.comments[0];
+  return {
+    ref: null,
+    threadId: t.threadId,
+    sent: false,
+    carried: false,
+    authorLogin: t.rootAuthorLogin,
+    authorIsBot: t.rootAuthorIsBot,
+    path: t.path,
+    line: t.line,
+    excerpt: clipDisplay(root?.body ?? '', UNJUDGED_EXCERPT_MAX),
+    commentCount: t.comments.length,
+    lastCommentAt: null,
+    url: t.url ?? null,
+    validity: 'not_checked',
+    addressed: 'not_checked',
+    explanation: null,
+    draftReply: null,
+    assessedAtHead: '',
+  };
 }
 
 /** Is a candidate selected? */
@@ -623,6 +671,7 @@ export function buildPickerPreview(
     severity: c.severity,
     defaultIncluded: c.defaultIncluded,
     chars,
+    ...(c.card != null ? { card: c.card } : {}),
   }));
   const defaults = items.filter((i) => i.defaultIncluded);
   const cut = budgetCut(

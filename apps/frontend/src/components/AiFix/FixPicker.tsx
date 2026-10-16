@@ -1,36 +1,51 @@
+import { useMemo } from 'react';
 import type {
   AiFixPickerItem,
   AiFixPickerPreview,
   AiFixPickerSection,
   ClaudeFindingSeverity,
+  ClaudeReview,
+  PrDetail,
+  TicketReview,
 } from '@pierre-review/shared';
+import { useTicketReviews } from '../../hooks/useTicketReview.js';
+import {
+  alreadyPostedReraiseIds,
+  reraisedStatusByFindingId,
+  withoutPraise,
+} from '../../lib/claudeReviewFollowUp.js';
+import { FindingRow } from '../ClaudeReviewTab.js';
+import { FollowUpRow } from '../ClaudeReviewFollowUp.js';
+import { ThreadRow } from '../ClaudeReviewThreads.js';
+import { CiFailureRow } from '../ClaudeReviewCiFailures.js';
+import { CriterionRow, MissingRow } from '../TicketReviewParts.js';
+import {
+  PICKER_SECTION_LABEL,
+  PICKER_SECTION_ORDER,
+  budgetCutKeys,
+  isPicked,
+  type PickerOverrides,
+} from './fixPickerModel.js';
 
-// THE FIX PICKER — what a manual "Fix from review" will hand the fixer, before it starts. One card
-// per item, grouped by section, each ticked or not. The SERVER builds the list
-// (`GET …/ai-fix/preview`) with stable keys and its defaults (everything except style-bot threads);
-// the reader's ticks travel as `include` keys on the start, and the server applies the prompt
-// budget AFTER that selection. The budget fold here mirrors the server's (`budgetCut`): items in
-// the preview's order (already priority order), the first ticked one always fits.
+// THE FIX PICKER — what a manual "Fix from review" will hand the fixer, before it starts. Grouped by
+// section, each item ticked or not. The folds (defaults, ticks, the budget) live in
+// `fixPickerModel.ts`; this file only draws.
+//
+// ⚠ EACH ITEM IS DRAWN WITH THE CLAUDE REVIEW TAB'S OWN CARD for its kind — FindingRow,
+// FollowUpRow, ThreadRow, CiFailureRow, CriterionRow / MissingRow — with `actions={false}` and the
+// tick box in the card's `selection` slot. Never a copy of a card's markup here: a second copy is a
+// card that drifts. The server names the card (`AiFixPickerItem.card`); findings and earlier
+// findings are joined against the source review, ticket gaps against Story check's own query. An
+// item whose card data is not on hand (still loading, or an older server) draws the plain row.
 
-export const PICKER_SECTION_ORDER: readonly AiFixPickerSection[] = [
-  'findings',
-  'earlier_findings',
-  'judged_threads',
-  'untouched_threads',
-  'ci_failures',
-  'style_bots',
-  'story',
-];
-
-export const PICKER_SECTION_LABEL: Record<AiFixPickerSection, string> = {
-  findings: 'Claude’s findings',
-  earlier_findings: 'Earlier findings still open',
-  judged_threads: 'Threads Claude says need a fix',
-  untouched_threads: 'Unanswered threads',
-  ci_failures: 'CI failures',
-  style_bots: 'Style bot comments',
-  story: 'Ticket gaps',
-};
+export {
+  PICKER_SECTION_LABEL,
+  PICKER_SECTION_ORDER,
+  budgetCutKeys,
+  isPicked,
+  pickedKeys,
+  type PickerOverrides,
+} from './fixPickerModel.js';
 
 const SEVERITY_LABEL: Record<ClaudeFindingSeverity, string> = {
   blocker: 'Blocker',
@@ -44,37 +59,95 @@ const SEVERITY_CLASS: Partial<Record<ClaudeFindingSeverity, string>> = {
   warning: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
   nit: 'bg-gray-500/10 text-gray-600 dark:text-gray-300',
 };
-
-/** The reader's ticks: an override per key over the server's default. */
-export type PickerOverrides = Record<string, boolean>;
-
-export function isPicked(item: AiFixPickerItem, overrides: PickerOverrides): boolean {
-  return overrides[item.key] ?? item.defaultIncluded;
-}
-
-/** The keys that will be sent, in the preview's order. */
-export function pickedKeys(preview: AiFixPickerPreview, overrides: PickerOverrides): string[] {
-  return preview.items.filter((i) => isPicked(i, overrides)).map((i) => i.key);
-}
-
-/** Which ticked keys the prompt budget will leave out — the server's fold over the same order. */
-export function budgetCutKeys(preview: AiFixPickerPreview, overrides: PickerOverrides): Set<string> {
-  const cut = new Set<string>();
-  let used = 0;
-  for (const i of preview.items) {
-    if (!isPicked(i, overrides)) continue;
-    if (used > 0 && used + i.chars > preview.budgetChars) {
-      cut.add(i.key);
-      continue;
-    }
-    used += i.chars;
-  }
-  return cut;
-}
+const WONT_FIT_CHIP =
+  'whitespace-nowrap rounded bg-amber-500/10 px-1 py-px text-[11px] text-amber-700 dark:text-amber-300';
+const NO_PATHS: ReadonlySet<string> = new Set();
 
 function where(path: string | null, line: number | null): string | null {
   if (!path) return null;
   return line != null ? `${path}:${line}` : path;
+}
+
+/** The tick box every card carries in its header, plus "Won't fit" when the budget cuts it. */
+function PickCheck({
+  item,
+  picked,
+  cut,
+  disabled,
+  onToggle,
+}: {
+  item: AiFixPickerItem;
+  picked: boolean;
+  cut: boolean;
+  disabled?: boolean;
+  onToggle: (on: boolean) => void;
+}): JSX.Element {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5 pt-0.5">
+      <input
+        type="checkbox"
+        checked={picked}
+        disabled={disabled}
+        onChange={(e) => onToggle(e.target.checked)}
+        aria-label={`Include in the fix: ${item.label}`}
+      />
+      {picked && cut && <span className={WONT_FIT_CHIP}>Won’t fit</span>}
+    </span>
+  );
+}
+
+/** The fallback when an item's card data is not on hand: the label, its place and one line. */
+function PlainRow({
+  item,
+  picked,
+  cut,
+  disabled,
+  onToggle,
+}: {
+  item: AiFixPickerItem;
+  picked: boolean;
+  cut: boolean;
+  disabled?: boolean;
+  onToggle: (on: boolean) => void;
+}): JSX.Element {
+  const loc = where(item.path, item.line);
+  return (
+    <li>
+      <label
+        className={`flex cursor-pointer items-start gap-2 rounded border px-2 py-1.5 text-xs ${
+          picked
+            ? 'border-blue-300 bg-blue-50/50 dark:border-blue-800 dark:bg-blue-950/20'
+            : 'border-gray-200 dark:border-gray-800'
+        }`}
+      >
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={picked}
+          disabled={disabled}
+          onChange={(e) => onToggle(e.target.checked)}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-1.5">
+            {item.severity && SEVERITY_CLASS[item.severity] && (
+              <span className={`rounded px-1 py-px text-[11px] font-medium ${SEVERITY_CLASS[item.severity]}`}>
+                {SEVERITY_LABEL[item.severity]}
+              </span>
+            )}
+            <span className="break-words text-gray-800 dark:text-gray-100">{item.label}</span>
+            {picked && cut && <span className={WONT_FIT_CHIP}>Won’t fit</span>}
+          </span>
+          {(loc || item.detail) && (
+            <span className="mt-0.5 block break-words text-[11px] text-gray-500 dark:text-gray-400">
+              {loc && <span className="font-mono">{loc}</span>}
+              {loc && item.detail ? ' · ' : ''}
+              {item.detail}
+            </span>
+          )}
+        </span>
+      </label>
+    </li>
+  );
 }
 
 export function FixPicker({
@@ -82,11 +155,17 @@ export function FixPicker({
   overrides,
   onChange,
   disabled,
+  pr,
+  review,
 }: {
   preview: AiFixPickerPreview;
   overrides: PickerOverrides;
   onChange: (next: PickerOverrides) => void;
   disabled?: boolean;
+  pr: PrDetail;
+  // The review the preview was built from (`preview.sourceReviewId`). null while it loads: the
+  // finding cards draw as plain rows until then.
+  review: ClaudeReview | null;
 }): JSX.Element {
   const cut = budgetCutKeys(preview, overrides);
   const bySection = new Map<AiFixPickerSection, AiFixPickerItem[]>();
@@ -101,9 +180,125 @@ export function FixPicker({
     onChange(next);
   };
 
+  // The source review, as the Claude Review tab shows it: praise hidden, and the two re-raise chips
+  // worked out by the same helpers.
+  const source = review != null && review.id === preview.sourceReviewId ? review : null;
+  const shown = useMemo(() => (source != null ? withoutPraise(source) : null), [source]);
+  const findingsById = useMemo(() => new Map((shown?.findings ?? []).map((f) => [f.id, f])), [shown]);
+  const followUpById = useMemo(
+    () => new Map((shown?.followUp?.items ?? []).map((it) => [it.priorFindingId, it])),
+    [shown],
+  );
+  const priorStatusById = useMemo(() => (shown != null ? reraisedStatusByFindingId(shown) : new Map()), [shown]);
+  const alreadyPostedIds = useMemo(() => (shown != null ? alreadyPostedReraiseIds(shown) : new Set<number>()), [shown]);
+
+  // Ticket gaps: Story check's own query (same key, so usually already cached).
+  const hasStory = preview.items.some((i) => i.card?.kind === 'story');
+  const tickets = useTicketReviews(pr.id, hasStory);
+  const ticketRuns = useMemo(() => {
+    const m = new Map<number, TicketReview>();
+    for (const t of tickets.data?.tickets ?? []) if (t.review != null) m.set(t.review.id, t.review);
+    return m;
+  }, [tickets.data]);
+
   if (preview.items.length === 0) {
     return <p className="text-xs text-gray-500 dark:text-gray-400">The review found nothing to fix.</p>;
   }
+
+  const headSha = source?.headSha ?? pr.headSha;
+
+  const renderItem = (item: AiFixPickerItem): JSX.Element => {
+    const picked = isPicked(item, overrides);
+    const isCut = cut.has(item.key);
+    const onToggle = (on: boolean): void => set([item.key], on);
+    const selection = (
+      <PickCheck item={item} picked={picked} cut={isCut} disabled={disabled} onToggle={onToggle} />
+    );
+    const card = item.card;
+    switch (card?.kind) {
+      case 'finding': {
+        const f = findingsById.get(card.findingId);
+        if (f == null) break;
+        return (
+          <FindingRow
+            key={item.key}
+            prId={pr.id}
+            finding={f}
+            editable={false}
+            prUrl={pr.githubUrl}
+            repoFullName={pr.repoFullName}
+            headSha={headSha}
+            posting={false}
+            postError={null}
+            inChangeset={f.fileInDiff}
+            priorStatus={priorStatusById.get(f.id)}
+            alreadyPosted={alreadyPostedIds.has(f.id)}
+            actions={false}
+            selection={selection}
+          />
+        );
+      }
+      case 'earlier_finding': {
+        const it = followUpById.get(card.priorFindingId);
+        if (it == null) break;
+        return (
+          <FollowUpRow
+            key={item.key}
+            item={it}
+            muted={false}
+            findingsById={findingsById}
+            headMoved={shown?.followUp?.headMoved ?? false}
+            changedPaths={NO_PATHS}
+            actions={false}
+            selection={selection}
+          />
+        );
+      }
+      case 'thread':
+        return (
+          <ThreadRow
+            key={item.key}
+            t={card.assessment}
+            muted={false}
+            actions={false}
+            selection={selection}
+            notCheckedNote={card.inReview ? undefined : 'Claude didn’t check this one.'}
+          />
+        );
+      case 'ci':
+        return (
+          <CiFailureRow
+            key={item.key}
+            f={card.item}
+            suggestion={card.item.suggestion}
+            changedPaths={NO_PATHS}
+            selection={selection}
+          />
+        );
+      case 'story': {
+        const run = ticketRuns.get(card.ticketReviewId);
+        const ti = run?.items.find((x) => x.id === card.itemId);
+        if (run == null || ti == null) break;
+        const ctx = { review: run, viewedPrId: pr.id, changedPaths: NO_PATHS, actions: false, selection };
+        if (ti.status === 'missing') return <MissingRow key={item.key} item={ti} {...ctx} />;
+        const c = run.assessment?.criteria.find((x) => x.ref === ti.ref);
+        if (c == null || c.status === 'met') break;
+        return <CriterionRow key={item.key} c={c} item={ti} {...ctx} />;
+      }
+      default:
+        break;
+    }
+    return (
+      <PlainRow
+        key={item.key}
+        item={item}
+        picked={picked}
+        cut={isCut}
+        disabled={disabled}
+        onToggle={onToggle}
+      />
+    );
+  };
 
   return (
     <div className="space-y-3">
@@ -134,55 +329,7 @@ export function FixPicker({
                 {all ? 'Untick all' : 'Tick all'}
               </button>
             </div>
-            <ul className="space-y-1">
-              {items.map((i) => {
-                const picked = isPicked(i, overrides);
-                const loc = where(i.path, i.line);
-                return (
-                  <li key={i.key}>
-                    <label
-                      className={`flex cursor-pointer items-start gap-2 rounded border px-2 py-1.5 text-xs ${
-                        picked
-                          ? 'border-blue-300 bg-blue-50/50 dark:border-blue-800 dark:bg-blue-950/20'
-                          : 'border-gray-200 dark:border-gray-800'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        className="mt-0.5"
-                        checked={picked}
-                        disabled={disabled}
-                        onChange={(e) => set([i.key], e.target.checked)}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-1.5">
-                          {i.severity && SEVERITY_CLASS[i.severity] && (
-                            <span
-                              className={`rounded px-1 py-px text-[11px] font-medium ${SEVERITY_CLASS[i.severity]}`}
-                            >
-                              {SEVERITY_LABEL[i.severity]}
-                            </span>
-                          )}
-                          <span className="break-words text-gray-800 dark:text-gray-100">{i.label}</span>
-                          {picked && cut.has(i.key) && (
-                            <span className="rounded bg-amber-500/10 px-1 py-px text-[11px] text-amber-700 dark:text-amber-300">
-                              Won’t fit
-                            </span>
-                          )}
-                        </span>
-                        {(loc || i.detail) && (
-                          <span className="mt-0.5 block break-words text-[11px] text-gray-500 dark:text-gray-400">
-                            {loc && <span className="font-mono">{loc}</span>}
-                            {loc && i.detail ? ' · ' : ''}
-                            {i.detail}
-                          </span>
-                        )}
-                      </span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
+            <ul className="space-y-1.5">{items.map(renderItem)}</ul>
           </section>
         );
       })}

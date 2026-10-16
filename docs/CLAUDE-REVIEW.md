@@ -1484,7 +1484,9 @@ Haiku, `prSummary`).
 - **THE FIX PICKER** (`components/AiFix/FixPicker.tsx`, `GET /api/pro/prs/:id/ai-fix/preview
   ?sourceReviewId=` → `AiFixPickerPreview`, DB-only). The server lists every candidate (`buildPickerPreview`)
   with a STABLE key (`finding:<id>`, `thread:<id>`, `ci:<ciReviewItemId>`, `story:<ticketIndex>:<ref>`),
-  its section and its default; the reader ticks cards; Start sends `include: <keys>` and the server
+  its section, its default and its CARD (`AiFixPickerCard`: which Claude Review card draws it — a
+  thread the review never judged gets a synthesized `not_checked` judgement, display only); the
+  reader ticks cards; Start sends `include: <keys>` and the server
   builds the seed from exactly those (`SeedSelection`). Sections: Claude's findings (never an
   ignored one), earlier findings still open, threads Claude judged to fix, UNANSWERED threads
   (`derived_state = 'untouched'`, judged or not), CI failures, STYLE BOT threads (root author's

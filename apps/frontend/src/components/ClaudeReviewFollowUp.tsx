@@ -1250,7 +1250,9 @@ function ReplyBlock({
   );
 }
 
-function FollowUpRow({
+// EXPORTED FOR THE AI FIX PICKER (AiFix/FixPicker.tsx): the same card with `actions={false}` (no
+// Post reply / Resolve, no "Raised again below") and its tick box in `selection`.
+export function FollowUpRow({
   item,
   muted,
   findingsById,
@@ -1259,6 +1261,8 @@ function FollowUpRow({
   onOpenInChanges,
   prId,
   reviewId,
+  actions = true,
+  selection = null,
 }: {
   item: ClaudeFollowUpItem;
   muted: boolean;
@@ -1268,6 +1272,10 @@ function FollowUpRow({
   onOpenInChanges?: OpenInChanges;
   prId?: number;
   reviewId?: number;
+  // false ⇒ no buttons. Default true.
+  actions?: boolean;
+  // A leading control in the card's header (the fix picker's tick box).
+  selection?: ReactNode;
 }): JSX.Element {
   const replyHeading = replyStatusHeading(item);
   const anchor = followUpAnchor(item, findingsById, headMoved, changedPaths);
@@ -1282,6 +1290,7 @@ function FollowUpRow({
   return (
     <li className={`rounded border px-3 py-2 text-sm ${border}`}>
       <div className="flex flex-wrap items-center gap-2">
+        {selection}
         <span className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS[item.status]}`}>
           {replyHeading ?? FOLLOW_UP_STATUS_LABEL[item.status]}
         </span>
@@ -1314,8 +1323,9 @@ function FollowUpRow({
       ) : item.status === 'not_checked' ? (
         <p className={`mt-1 text-xs ${MUTED}`}>{notCheckedReason(item)}</p>
       ) : null}
-      <ReplyBlock item={item} prId={prId} reviewId={reviewId} />
-      {reraised != null && (
+      {/* Without actions the block keeps its text and drops its buttons (they need prId + reviewId). */}
+      <ReplyBlock item={item} prId={actions ? prId : undefined} reviewId={actions ? reviewId : undefined} />
+      {actions && reraised != null && (
         <button
           type="button"
           onClick={() =>

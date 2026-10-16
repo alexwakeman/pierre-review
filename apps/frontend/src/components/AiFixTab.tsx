@@ -27,11 +27,12 @@ import {
   usePushFix,
   useStartFix,
 } from '../hooks/useAiFix.js';
-import { useClaudeReview } from '../hooks/useClaudeReview.js';
+import { useClaudeReview, useClaudeReviewById } from '../hooks/useClaudeReview.js';
 import { fixSourceReviewId, olderSourceNote } from '../lib/aiFixSource.js';
 import { ApiError } from '../api/client.js';
 import { FixReport, fixSourceLine } from './AiFix/FixReport.js';
-import { FixPicker, budgetCutKeys, pickedKeys, type PickerOverrides } from './AiFix/FixPicker.js';
+import { FixPicker } from './AiFix/FixPicker.js';
+import { budgetCutKeys, pickedKeys, type PickerOverrides } from './AiFix/fixPickerModel.js';
 import { Markdown } from './Markdown.js';
 import { DiffWrapToggle, FileDiffView, type DiffFile } from './diff/FileDiffView.js';
 import { parseGitPatch } from '../lib/diff.js';
@@ -145,6 +146,11 @@ function FixerSection({
   // The picker: the server's items for this review, the reader's ticks on top. A new review (or a
   // hand-over) starts from the defaults again.
   const preview = useAiFixPreview(pr.id, reviewId, data?.enabled !== false);
+  // The source review in full, so the picker can draw each item with the Claude Review tab's own
+  // card: the latest is already loaded; an older hand-over is one DB-only read (the history
+  // selector's query).
+  const olderSource = useClaudeReviewById(reviewId != null && latest?.id !== reviewId ? reviewId : null);
+  const sourceReview = reviewId != null && latest?.id === reviewId ? latest : (olderSource.data ?? null);
   const [overrides, setOverrides] = useState<PickerOverrides>({});
   useEffect(() => setOverrides({}), [reviewId]);
   // With a finished fix on screen the picker folds away behind "New fix"; it is open otherwise.
@@ -251,6 +257,8 @@ function FixerSection({
                     overrides={overrides}
                     onChange={setOverrides}
                     disabled={fixStarting}
+                    pr={pr}
+                    review={sourceReview}
                   />
                 )}
                 {preview.data && preview.data.items.length > 0 && conflictsResolvable && (

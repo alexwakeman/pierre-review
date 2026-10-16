@@ -8729,7 +8729,24 @@ export interface AiFixPickerItem {
   defaultIncluded: boolean;
   // Characters it adds to the prompt (for the budget preview).
   chars: number;
+  // What the SPA needs to draw this item with the SAME card the Claude Review tab draws for it
+  // (minus its buttons). Absent ⇒ the picker falls back to `label` / `detail`.
+  card?: AiFixPickerCard;
 }
+// Which Claude Review card an item is, and the data that card reads that the source review alone
+// does not carry:
+//   finding / earlier_finding  joined by the SPA against the source review (findings / followUp)
+//   thread                     the review's judgement of it; an open thread the review did not judge
+//                              carries a synthesized one (`inReview: false`, both verdicts
+//                              'not_checked') so it still draws as a review-thread card
+//   ci                         the CI review's item
+//   story                      joined by the SPA against the PR's ticket reviews (Story check's query)
+export type AiFixPickerCard =
+  | { kind: 'finding'; findingId: number }
+  | { kind: 'earlier_finding'; priorFindingId: number }
+  | { kind: 'thread'; assessment: ClaudeThreadAssessment; inReview: boolean }
+  | { kind: 'ci'; item: CiReviewItem }
+  | { kind: 'story'; ticketReviewId: number; itemId: number };
 export interface AiFixPickerPreview {
   sourceReviewId: number;
   items: AiFixPickerItem[];

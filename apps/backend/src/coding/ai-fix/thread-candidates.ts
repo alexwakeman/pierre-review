@@ -76,6 +76,7 @@ export async function loadSeedThreads(
         rootAuthorLogin: login,
         rootAuthorIsBot: root?.authorIsBot ?? false,
         rootIsStyleBot,
+        url: t.url,
         comments: t.comments.map((c) => ({ authorLogin: c.authorLogin, body: c.body })),
       };
     });

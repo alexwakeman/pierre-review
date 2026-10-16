@@ -7,7 +7,7 @@
 //  - Verdicts and counts come from the server's reconcile step, which never invents "addressed";
 //    ordering and colours live in lib/claudeReviewFollowUp.ts.
 //  - `draftReply` is a suggestion only. There is no route that posts it, so it offers Copy.
-import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   THREAD_ADDRESSED_LABEL,
   THREAD_VALIDITY_LABEL,
@@ -34,14 +34,25 @@ import { REVIEW_CHIP, REVIEW_PROSE } from '../lib/reviewStyles.js';
 const CHIP = REVIEW_CHIP;
 const MUTED = 'text-gray-500 dark:text-gray-400';
 
-function ThreadRow({
+// EXPORTED FOR THE AI FIX PICKER (AiFix/FixPicker.tsx): the same card with `actions={false}` (no
+// Copy on the suggested reply) and its tick box in `selection`.
+export function ThreadRow({
   t,
   muted,
   onOpenThread,
+  actions = true,
+  selection = null,
+  notCheckedNote,
 }: {
   t: ClaudeThreadAssessment;
   muted: boolean;
   onOpenThread?: (threadId: number) => void;
+  // false ⇒ no buttons. Default true.
+  actions?: boolean;
+  // A leading control in the card's header (the fix picker's tick box).
+  selection?: ReactNode;
+  // Replaces the not-checked sentence (a thread the review never looked at has its own reason).
+  notCheckedNote?: string;
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
@@ -64,6 +75,7 @@ function ThreadRow({
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">
+        {selection}
         {t.validity !== 'not_checked' && (
           <span className={`${CHIP} ${THREAD_VALIDITY_CLASS[t.validity]}`}>
             {THREAD_VALIDITY_LABEL[t.validity]}
@@ -148,7 +160,7 @@ function ThreadRow({
           <PrRefText text={t.explanation} />
         </p>
       ) : !judged ? (
-        <p className={`mt-1 text-xs ${MUTED}`}>{threadNotCheckedReason(t)}</p>
+        <p className={`mt-1 text-xs ${MUTED}`}>{notCheckedNote ?? threadNotCheckedReason(t)}</p>
       ) : null}
       {t.draftReply != null && t.draftReply !== '' && (
         <div className="mt-1">
@@ -163,7 +175,7 @@ function ThreadRow({
               <ChevronIcon dir={replyOpen ? 'down' : 'right'} size={11} />
               Suggested reply
             </button>
-            <CopyButton text={t.draftReply} what="suggested reply" />
+            {actions && <CopyButton text={t.draftReply} what="suggested reply" />}
           </div>
           {replyOpen && (
             <p

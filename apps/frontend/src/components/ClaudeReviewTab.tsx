@@ -577,7 +577,11 @@ function SuggestionBlock({
 // suggestion, and a single control bar — Post as comment / Reword / Copy / Ignore.
 // Findings are INCLUDED by default; "Ignore" sets one aside (collapsed + faded,
 // excluded from a submitted review) and it can be re-expanded and un-ignored.
-function FindingRow({
+//
+// EXPORTED FOR THE AI FIX PICKER (AiFix/FixPicker.tsx), which draws the SAME card with
+// `actions={false}` (no control bar, no reword editor; pass `editable={false}`) and its tick box in
+// `selection`. The Claude Review tab passes neither, so it renders exactly as before.
+export function FindingRow({
   prId,
   finding,
   editable,
@@ -595,6 +599,8 @@ function FindingRow({
   onReword,
   onPostComment,
   onPostReminder,
+  actions = true,
+  selection = null,
 }: {
   prId: number;
   finding: ClaudeFinding;
@@ -622,11 +628,16 @@ function FindingRow({
   // card differs: it posts, rewords and ignores like any finding.
   storyLabel?: string | null;
   onOpenInChanges?: OpenInChanges;
-  onToggle: (included: boolean) => void;
-  onReword: (editedBody: string) => Promise<unknown>;
-  onPostComment: () => Promise<unknown>;
+  // The four handlers are needed only with `actions` (the default); the picker passes none.
+  onToggle?: (included: boolean) => void;
+  onReword?: (editedBody: string) => Promise<unknown>;
+  onPostComment?: () => Promise<unknown>;
   // "Post reminder": posts a finding ALREADY on GitHub again, marked as a reminder linking the first.
-  onPostReminder: () => Promise<unknown>;
+  onPostReminder?: () => Promise<unknown>;
+  // false ⇒ no control bar (Post / Reword / Copy / chat / Ignore). Default true.
+  actions?: boolean;
+  // A leading control in the card's header (the fix picker's tick box). null ⇒ none.
+  selection?: ReactNode;
 }): JSX.Element {
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -745,11 +756,11 @@ function FindingRow({
   };
 
   const saveReword = (): void => {
-    void onReword(draft).catch(() => {});
+    void onReword?.(draft).catch(() => {});
     setRewording(false);
   };
   const clearReword = (): void => {
-    void onReword('').catch(() => {});
+    void onReword?.('').catch(() => {});
     setDraft('');
     setRewording(false);
   };
@@ -763,7 +774,7 @@ function FindingRow({
   const handleRemind = async (): Promise<void> => {
     setWorking(true);
     try {
-      await onPostReminder();
+      await onPostReminder?.();
     } catch {
       /* surfaced via the postError prop */
     } finally {
@@ -774,10 +785,10 @@ function FindingRow({
     setWorking(true);
     try {
       if (pendingReword != null) {
-        await onReword(pendingReword);
+        await onReword?.(pendingReword);
         setRewording(false);
       }
-      await onPostComment();
+      await onPostComment?.();
     } catch {
       /* surfaced via the postError prop */
     } finally {
@@ -807,6 +818,7 @@ function FindingRow({
       className={`${REVIEW_ITEM_CARD} ${ignored ? 'opacity-50' : ''}`}
     >
       <div className="flex items-start gap-2">
+        {selection}
         <span
           className={`mt-0.5 inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[11px] font-semibold capitalize ${SEVERITY_CLASS[finding.severity]}`}
         >
@@ -1071,6 +1083,7 @@ function FindingRow({
       {/* One control bar for every per-finding action: Post / Reword / Copy /
           Ignore, plus posted/error status. Ignored findings show only the
           re-expand + un-ignore controls. */}
+      {actions && (
       <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
         {ignored ? (
           <>
@@ -1083,7 +1096,7 @@ function FindingRow({
             </button>
             <button
               type="button"
-              onClick={() => onToggle(true)}
+              onClick={() => onToggle?.(true)}
               title="Re-include this finding in the review"
               className={BTN_PRIMARY}
             >
@@ -1143,7 +1156,7 @@ function FindingRow({
             {canIgnore && (
               <button
                 type="button"
-                onClick={() => onToggle(false)}
+                onClick={() => onToggle?.(false)}
                 title="Set aside — exclude this finding from the submitted review"
                 className={BTN_SECONDARY}
               >
@@ -1156,6 +1169,7 @@ function FindingRow({
           </>
         )}
       </div>
+      )}
     </li>
   );
 }
