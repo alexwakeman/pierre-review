@@ -216,6 +216,15 @@ posts **one** GitHub review (inline + body + verdict).
   `apps/backend/src/ai/runtime.ts`, value-imports them. [PACKAGING.md](PACKAGING.md) owns the
   details and the guardrail. The product modules import no SDK themselves.
 
+## Reference docs in a review
+
+When the PR's workspace has "Use reference docs in Claude Review" on and its library has a built
+document, the PR review, the ticket review and This Sprint's "Check against code" may READ the library
+(a read-only path-guard root), get the navigation block in their system prompt, and report the passages
+they relied on in `docReferences` (a PR finding also carries `docRefs`). The server checks every one (the
+link names a built section; the quote is in it) and drops the rest. Off ⇒ prompts, tools and shapes are
+byte-for-byte unchanged. Full contract: [REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Use in reviews.
+
 ## SonarCloud in a review
 
 When the PR's workspace has SonarCloud set up, a run takes (or reuses) the head's stored snapshot before

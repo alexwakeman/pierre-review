@@ -1,6 +1,7 @@
 import type { z as Zod } from 'zod';
 import { SPRINT_ASSESS_CAPS, type SprintAssessMode } from '@pierre-review/shared';
 import { loadZod } from '../../ai/runtime.js';
+import { buildDocReferencesField } from '../../reference-docs/review-refs.js';
 
 // The structured-output contract for the sprint assessment's in-process `submit_assessment` tool.
 // BUILT from a zod namespace handed in (the AI runtime's own install — review/schema.ts explains why
@@ -66,7 +67,14 @@ function verifyShape(z: ZodNs) {
   };
 }
 
-export function buildSubmitAssessmentShape(z: ZodNs, mode: SprintAssessMode) {
+// `opts.docs`: the run reads the workspace's reference library (docs/REFERENCE-DOCS.md § Use in
+// reviews) and the shape gains `docReferences`. Without it the shape is exactly the base one.
+export function buildSubmitAssessmentShape(z: ZodNs, mode: SprintAssessMode, opts: { docs?: boolean } = {}) {
+  const base = buildBaseAssessmentShape(z, mode);
+  return opts.docs ? { ...base, docReferences: buildDocReferencesField(z) } : base;
+}
+
+function buildBaseAssessmentShape(z: ZodNs, mode: SprintAssessMode) {
   return {
     summary: z
       .string()
@@ -79,6 +87,6 @@ export function buildSubmitAssessmentShape(z: ZodNs, mode: SprintAssessMode) {
 export type SubmitAssessmentShape = ReturnType<typeof buildSubmitAssessmentShape>;
 
 /** The raw shape `tool()` wants for one mode, built from the runtime's zod. */
-export async function submitAssessmentShape(mode: SprintAssessMode): Promise<SubmitAssessmentShape> {
-  return buildSubmitAssessmentShape(await loadZod(), mode);
+export async function submitAssessmentShape(mode: SprintAssessMode, opts: { docs?: boolean } = {}): Promise<SubmitAssessmentShape> {
+  return buildSubmitAssessmentShape(await loadZod(), mode, opts);
 }

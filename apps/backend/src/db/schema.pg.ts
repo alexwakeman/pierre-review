@@ -46,6 +46,7 @@ import type {
   SonarPostRecord,
   SequenceDiagramMember,
   ReferenceDocSectionEntry,
+  ReviewDocReference,
   ReferenceDocCitation,
   SonarQualityGate,
   FindingAutoResolveRecord,
@@ -950,6 +951,8 @@ export const claudeReviews = pgTable(
     ciFailures: jsonb('ci_failures').$type<ClaudeCiFailuresRecord>(),
     // What auto-posting did with this run (migration 0087 / pg 0074). Twin of schema.sqlite.ts.
     autoPost: jsonb('auto_post').$type<ClaudeAutoPostRecord>(),
+    // Reference-library passages, server-checked (twin of schema.sqlite.ts; migration pg 0104).
+    docReferences: jsonb('doc_references').$type<ReviewDocReference[]>(),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
@@ -1017,6 +1020,8 @@ export const claudeReviewFindings = pgTable(
     pushback: jsonb('pushback').$type<FindingPushbackRecord>(),
     // Reminder (migration pg 0097 / sqlite 0110). Twin of schema.sqlite.ts, where the contract lives.
     reminder: jsonb('reminder').$type<ClaudeFindingReminder>(),
+    // Reference-library citations, server-checked (twin of schema.sqlite.ts; migration pg 0104).
+    docCitations: jsonb('doc_citations').$type<ReferenceDocCitation[]>(),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );

@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react';
+import { parseDocsDeepLink } from '../lib/docReferences.js';
+import { useDocsView } from '../store/docsView.js';
 import {
   ALL_CATEGORIES,
   ALL_PR_STATUSES,
@@ -1013,6 +1015,9 @@ export function useUrlState(): void {
       const hasUrlParams = window.location.search.length > 1;
       if (hasUrlParams) {
         useFilters.getState().hydrate(readFromUrl());
+        // A reference-library deep link (`&doc=…&section=…`, lib/docReferences.ts): seated for the
+        // Docs pane to open once the workspace resolves. Not emitted by the serializer — one-shot.
+        useDocsView.getState().seatDeepLink(parseDocsDeepLink(window.location.search));
       } else {
         const persisted = loadPersistedFilters();
         if (persisted) useFilters.getState().hydrate(persisted);

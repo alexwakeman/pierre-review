@@ -15,6 +15,7 @@
 // acceptance criteria are met is the ticket review's job (review/ticket-review/), across every PR on
 // the ticket, and why a check failed is the CI review's (review/ci-review/). The related-PRs block
 // exists for cross-repo INTERACTIONS only and says so.
+import { docsReviewPromptBlock } from '../../reference-docs/review-refs.js';
 import { randomBytes } from 'node:crypto';
 import type { ClaudeFindingLens, SonarIssue, SonarQualityGate } from '@pierre-review/shared';
 import type { CompareDiffResult } from '../../github/compare.js';
@@ -138,10 +139,15 @@ export function systemPromptForMode(
   // The specialists offered on a deep review (specialists.ts `offeredSpecialists`). Ignored for a
   // diff-only run, which never gets sub-agents. None ⇒ the worktree prompt is byte-identical.
   specialists: readonly ClaudeFindingLens[] = [],
+  // The workspace's reference library folder when the review reads it (docs/REFERENCE-DOCS.md § Use
+  // in reviews). None ⇒ the prompt is byte-identical to a run without the feature.
+  docsDir: string | null = null,
 ): string {
-  if (mode === 'diff_only') return REVIEW_SYSTEM_PROMPT_DIFF_ONLY;
+  const docs = docsDir != null ? docsReviewPromptBlock(docsDir, mode === 'diff_only' ? 'pr_diff_only' : 'pr') : null;
+  if (mode === 'diff_only') return docs ? `${REVIEW_SYSTEM_PROMPT_DIFF_ONLY}\n\n${docs}` : REVIEW_SYSTEM_PROMPT_DIFF_ONLY;
   const section = specialistsPromptSection(specialists);
-  return section ? `${REVIEW_SYSTEM_PROMPT_WORKTREE}\n\n${section}` : REVIEW_SYSTEM_PROMPT_WORKTREE;
+  const base = section ? `${REVIEW_SYSTEM_PROMPT_WORKTREE}\n\n${section}` : REVIEW_SYSTEM_PROMPT_WORKTREE;
+  return docs ? `${base}\n\n${docs}` : base;
 }
 
 const BODY_CHAR_LIMIT = 4000;

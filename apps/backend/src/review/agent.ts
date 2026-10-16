@@ -99,8 +99,19 @@ export const DISALLOWED_TOOLS = [
 export function reviewToolPolicy(
   mode: 'diff_only' | 'worktree',
   offered: readonly ClaudeFindingLens[] | undefined,
+  // THE REFERENCE LIBRARY is in use (docs/REFERENCE-DOCS.md § Use in reviews). It changes ONE thing
+  // here: a diff-only run, otherwise tool-less, gets Read/Glob/Grep — which the path guard confines
+  // to its empty scratch folder and the library (read-only). Without it, the policy is unchanged.
+  docs = false,
 ): { allowedTools: string[]; disallowedTools: string[]; specialists: ClaudeFindingLens[] } {
   const specialists = mode === 'worktree' ? [...(offered ?? [])] : [];
+  if (mode === 'diff_only' && docs) {
+    return {
+      allowedTools: [...WORKTREE_TOOLS],
+      disallowedTools: [...DISALLOWED_TOOLS, ...DISPATCH_TOOL_NAMES],
+      specialists,
+    };
+  }
   if (specialists.length > 0) {
     return {
       allowedTools: [...WORKTREE_TOOLS, ...DISPATCH_TOOL_NAMES],
@@ -167,7 +178,9 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     let prompt = args.prompt;
     // The ticket peers' checkouts, readable beside cwd (empty unless a deep run was handed peers).
     const peerDirs: string[] = [];
-    const policy = reviewToolPolicy(mode, args.specialists);
+    // The workspace's reference library, READ-ONLY, when the manager handed one (null ⇒ unchanged run).
+    const docsDir = args.docsDir ?? null;
+    const policy = reviewToolPolicy(mode, args.specialists, docsDir != null);
     if (mode === 'worktree') {
       onProgress({ phase: 'cloning', reviewMode: mode });
       ({ repoCloneDir, worktreePath } = await prepWorktree(
@@ -209,7 +222,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     // The SDK and zod come from the AI runtime (ai/runtime.ts) — downloaded on first use for an
     // npm install. A missing runtime throws here and lands in the catch as a readable failure.
     const { createSdkMcpServer, query, tool } = await loadAgentSdk();
-    const reviewShape = await submitReviewShape();
+    const reviewShape = await submitReviewShape({ docs: docsDir != null });
     let captured: SubmitReviewPayload | null = null;
     const server = createSdkMcpServer({
       name: 'review',
@@ -234,7 +247,9 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     // confines an absolute path, and the prompt is attacker-authored. The file tools may read cwd
     // and the peers' checkouts, nothing else. (A diff-only run has no file tools; it is guarded
     // anyway, so a future tool is never unconfined by default.)
-    const pathGuard = createPathGuard(cwd, peerDirs);
+    // The library is a READ-ONLY root: Read/Glob/Grep may reach it, nothing else may name it.
+    const pathGuard = createPathGuard(cwd, peerDirs, { readOnlyRoots: docsDir != null ? [docsDir] : [] });
+    const extraDirs = docsDir != null ? [...peerDirs, docsDir] : peerDirs;
 
     const q = query({
       prompt,
@@ -247,7 +262,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
         allowedTools: policy.allowedTools,
         disallowedTools: policy.disallowedTools,
         maxTurns,
-        ...(peerDirs.length > 0 ? { additionalDirectories: peerDirs } : {}),
+        ...(extraDirs.length > 0 ? { additionalDirectories: extraDirs } : {}),
         ...(guard ? { agents: specialistAgents(policy.specialists) } : {}),
         // PreToolUse hooks run before the tool, and their deny holds under bypassPermissions
         // (canUseTool would never be asked). Every hook must allow a call for it to run.

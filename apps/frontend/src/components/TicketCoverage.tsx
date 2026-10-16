@@ -32,6 +32,7 @@
 // lives in the ⓘ.
 // ⚠ Posting follows the post-write copy contract: once GitHub answered with a comment id, the
 // button never comes back (a retry double-posts).
+import { DocReferencesBlock } from './DocReferences.js';
 import { useMemo, useState, type ReactNode } from 'react';
 import {
   TICKET_ALIGNMENT_LABEL,
@@ -146,6 +147,7 @@ function TicketShare({
       )}
       <MissingList items={share.missing} {...ctx} />
       <NotRequestedList items={share.notRequested} {...ctx} />
+      <DocReferencesBlock references={a?.references} />
       {card != null && <PrCardDisclosure card={card} />}
       <p className={`text-xs ${MUTED}`}>
         {rest != null && <>{rest} </>}

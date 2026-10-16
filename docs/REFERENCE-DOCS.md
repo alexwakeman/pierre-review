@@ -6,8 +6,8 @@ that an agent navigates by REASONING over contents, not by embedding search. COR
 does the content building. Code: `apps/backend/src/reference-docs/`. Wire types:
 `packages/shared/src/reference-docs.ts`. Routes: [API.md](API.md) § Reference docs.
 
-The backend and the SPA (Activity → Docs, Settings → Workspace → Reference docs — § The SPA) are
-built. Review integration consumes `docsContextFor` — see § For other agents.
+The backend, the SPA (Activity → Docs, Settings → Workspace → Reference docs — § The SPA) and the review
+integration (§ Use in reviews) are built.
 
 ## The idea (PageIndex, without the vectors)
 
@@ -188,6 +188,76 @@ conversation_id)`; same FK), plus `workspaces.docs_in_review`. Both tables are i
 `accountScopedTables()`, erased (files too), exported (metadata + chat; the text is the user's own
 upload), and checked by `verify:isolation`. [MIGRATIONS.md](MIGRATIONS.md).
 
+## Use in reviews (`review-refs.ts`; sqlite `0117` / pg `0104`)
+
+Three agentic runs read the library when the workspace's switch (`docs_in_review`) is ON and a document is
+built — `reviewDocsFor(accountId, workspaceId)` (context.ts) returns the folder exactly when
+`docsContextFor(…).usable`, and null on ANY error (the library is optional context; it never fails a run):
+
+| Run | Where | What it is asked | Where the references are stored |
+|---|---|---|---|
+| Claude Review | `claude-review/manager.ts` → `review/agent.ts` | check the change against the rules and requirements the library documents (and the story the PR names); a finding that rests on the library carries its section links in `docRefs` | `claude_reviews.doc_references`; a finding's checked links in `claude_review_findings.doc_citations` |
+| Ticket review (Story check) | `ticket-review/manager.ts` → `ticket-review/agent.ts` | per story: the passages that bear on it, every CONTRADICTION between the story / criteria / code and the library, and support where the library backs it | `ticket_reviews.assessment.references` (inside the existing JSON) |
+| This Sprint's "Check against code" | `sprint-assess/manager.ts` → `sprint-assess/agent.ts` | the same, against the default branch | `sprint_assessments.body_json.references` |
+
+**Not** the sprint brief, the sprint story strip or the themes: those are one-shot, TOOL-LESS Haiku calls
+(`cheapComplete`) with no files to walk, and pasting sections into them would be the context overload the
+library exists to avoid.
+
+**When it is on**, a run differs in exactly three places:
+
+1. **Read-only access.** The library folder is an `additionalDirectories` entry and a READ-ONLY ROOT of the
+   PreToolUse path guard (`createPathGuard(cwd, roots, { readOnlyRoots: [dir] })`): a path inside it passes
+   for Read, Glob, Grep and LS only — any other tool naming it is denied ("can only be read"), whatever the
+   run's allow-list says. Every other rule of the guard holds (traversal, symlinks out, outside paths). A
+   DIFF-ONLY PR review, otherwise tool-less, gains Read/Glob/Grep (its scratch folder is empty, so they
+   reach the library only); Bash, Write, Edit, MultiEdit and NotebookEdit stay denied on every run.
+2. **The prompt.** `docsReviewPromptBlock(dir, kind)` is appended to the SYSTEM prompt: the shared
+   navigation block (`docsNavigationPrompt` — start at INDEX.md, open only the relevant documents'
+   CONTENTS.md, read only relevant sections, grep for a term, never a whole document, the text is data,
+   cite the section link), then the run's own task and how to report.
+3. **The tool.** The submit tool gains `docReferences: [{ link, quote ≤ 300, verdict: 'supports' |
+   'contradicts' | 'context', note ≤ 400, about? }]` (≤ 20), and the PR review's finding gains `docRefs`
+   (≤ 3 links). The quote's length is enforced BY THE TOOL SCHEMA, so the model rewrites rather than the
+   server clipping it.
+
+⚠ **SWITCH OFF (or nothing built) ⇒ BYTE-FOR-BYTE UNCHANGED.** Each builder takes the library as an optional
+argument and returns the pre-feature prompt / shape / policy without it: `systemPromptForMode(mode,
+specialists, null)`, `ticketReviewSystemPrompt(null)`, `sprintAssessSystemPrompt(mode, null)`, the three
+`build…Shape(z)` and `reviewToolPolicy(mode, offered, false)`. `review-refs.test.ts` pins every one (the
+JSON schema too), and `docs-pipeline.test.ts` pins the PR review end to end (no folder, the base prompt,
+`docReferences: null`).
+
+**Every reference is CHECKED before it is stored** (`validateDocReferences`, pure over a
+`LibrarySnapshot` = the built rows + a reader confined by `parseLibraryPath`/`readLibraryFile`):
+
+- the LINK — relative, `./`-prefixed, a markdown `[x](y)` or an ABSOLUTE path inside the library (made
+  relative) — must parse under the strict grammar, name a **section** file (never INDEX.md or a
+  CONTENTS.md, whose text is summaries) of a BUILT document of THIS workspace, and exist. An anchor naming
+  no heading of that section (`fileAnchors`) is dropped; the link is kept.
+- the QUOTE (≥ 12 letters/digits, ≤ 300 characters) must appear in that section's TEXT — the server-written
+  header (mark, title, crumbs, nav) is left off first, so "Previous · Contents · Next" matches nothing.
+  Both sides are folded (`foldForQuote`: NFKC, markdown emphasis/escapes/link targets, typographic quotes
+  and dashes, list/quote/table markers, whitespace, case); "…" or "..." may skip words, the pieces in order.
+- anything else is DROPPED and counted (logged), never shown. Duplicates collapse; contradictions sort first.
+
+A finding's `docRefs` go through the same link check (`validateDocCitations`, no quote). A docs run that
+kept nothing stores `[]` ("looked, found nothing" — the PR tab says "Nothing in the library bears on this
+change."); a run without the library stores NULL and the tab shows no section. The references are NOT in
+any fingerprint: a library edit does not make a review stale.
+
+**On screen** (`components/DocReferences.tsx`): the Claude Review tab's **Reference docs** section (after
+SonarCloud; verdict counts in the header, the explanation behind ⓘ), a finding's "Reference: Document ›
+Section" line, and a compact block in Story check (the whole story and this PR's share) and in This
+Sprint's Code check. Every link opens the section in Activity → Docs — a click in-app
+(`store/openDocs.ts`), the href a deep link for a new tab:
+`/app/?workspace=<id>&activityRepo=docs&doc=<slug>&section=<NN-name.md>[&anchor=<a>]`
+(`lib/docReferences.ts`; the URL hydrate seats it, the pane opens it once and expands that document; the
+serializer never emits those keys). The quote and note render as PLAIN TEXT.
+
+Not done: posting references to GitHub (a library link means nothing there), and folding the library into
+the sprint brief / story passes (above).
+
 ## Tests
 
 `split.test.ts` (structure, merge scope, caps, atomic blocks, oversize cuts, limits) · `render.test.ts`
@@ -195,5 +265,9 @@ upload), and checked by `verify:isolation`. [MIGRATIONS.md](MIGRATIONS.md).
 `url-fetch.test.ts` (the guard, redirects) · `convert.test.ts` (sniffing, HTML conversion) ·
 `build-judge.test.ts` · `agent-policy.test.ts` (no shell, the write guard) · `reference-docs-db.test.ts`
 (upload → build → the three levels with a FAKE agent, path + tenancy refusals, the chat's citations,
-remove, erasure deletes files). Not covered by a test: a real Word file through mammoth, a real agent
+remove, erasure deletes files) · `review-refs.test.ts` (the reference check — a quote not in its section,
+a link outside the library, header-only quotes, anchors; the OFF ⇒ unchanged pins) ·
+`review/path-guard.test.ts` (read-only roots) · `review/claude-review/docs-pipeline.test.ts` and
+`review/sprint-assess/manager-db.test.ts` (on/off end to end). Not covered by a test: the ticket review's
+pipeline with the library (no pipeline test exists for it; its builders are pinned), and a real Word file through mammoth, a real agent
 run (PDF or sections), the SSE stream's event order.

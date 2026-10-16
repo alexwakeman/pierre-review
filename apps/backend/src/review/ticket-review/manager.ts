@@ -13,6 +13,7 @@ import {
   type TicketReviewStatus,
   type TicketReviewStreamEvent,
   type TicketReviewTrigger,
+  type ReviewDocReference,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { cleanupCloneCache, prepDefaultBranchCheckouts } from '../clone-manager.js';
@@ -57,7 +58,7 @@ import {
   resolveTicketInputs,
 } from './prepare.js';
 import {
-  TICKET_REVIEW_SYSTEM_PROMPT,
+  ticketReviewSystemPrompt,
   buildTicketReviewPrompt,
   capMemberDiffs,
   membersIndex,
@@ -536,6 +537,10 @@ async function runPipeline(
     });
     scratch = mkdtempSync(join(tmpdir(), 'pierre-ticket-review-'));
     writeFileSync(join(scratch, 'MEMBERS.md'), membersIndex(promptMembers), 'utf8');
+    // The workspace's reference library, read-only (docs/REFERENCE-DOCS.md § Use in reviews). null ⇒
+    // prompt, tools and output exactly as before.
+    const { reviewDocsFor } = await import('../../reference-docs/context.js');
+    const docs = await reviewDocsFor(accountId, job.workspaceId);
 
     // ---- the run ----
     progress({ phase: 'reviewing' });
@@ -548,8 +553,9 @@ async function runPipeline(
         ...promptMembers.map((m) => m.worktreePath).filter((p): p is string => p != null),
         ...defaultBranches.map((b) => b.path),
       ],
-      systemPrompt: TICKET_REVIEW_SYSTEM_PROMPT,
+      systemPrompt: ticketReviewSystemPrompt(docs?.dir ?? null),
       prompt,
+      ...(docs != null ? { docsDir: docs.dir } : {}),
       applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
       abortController: controller,
       onProgress: (p) => progress({ phase: 'reviewing', recentActivity: p.recentActivity, usage: p.usage }),
@@ -604,6 +610,11 @@ async function runPipeline(
       })),
       res.payload as TicketReport | null,
     );
+    // The library passages, CHECKED (a bad link or a quote not in its section is dropped). Only a run
+    // that read the library carries `references` at all.
+    if (docs != null) {
+      assessment.references = await checkTicketDocReferences(ctx, accountId, job.workspaceId, runId, res.payload?.docReferences);
+    }
     await saveTicketReviewSuccess(ctx, accountId, runId, {
       alignment: assessment.alignment,
       summary: assessment.summary,
@@ -630,6 +641,28 @@ async function runPipeline(
         }
       });
     }
+  }
+}
+
+/** A ticket run's `docReferences` → the checked list (review-refs.ts); [] on any error. */
+async function checkTicketDocReferences(
+  ctx: AgentContext,
+  accountId: number,
+  workspaceId: number,
+  runId: number,
+  raw: unknown,
+): Promise<ReviewDocReference[]> {
+  try {
+    const [{ loadLibrarySnapshot }, { validateDocReferences }] = await Promise.all([
+      import('../../reference-docs/context.js'),
+      import('../../reference-docs/review-refs.js'),
+    ]);
+    const { references, dropped } = validateDocReferences(raw, await loadLibrarySnapshot(accountId, workspaceId));
+    if (dropped > 0) ctx.log.info(`ticket review ${runId}: dropped ${dropped} reference(s) that did not check out`);
+    return references;
+  } catch (err) {
+    ctx.log.warn(`ticket review ${runId}: references not checked: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
   }
 }
 

@@ -41,6 +41,7 @@ import type {
   SonarPostRecord,
   SequenceDiagramMember,
   ReferenceDocSectionEntry,
+  ReviewDocReference,
   ReferenceDocCitation,
   SonarQualityGate,
   FindingAutoResolveRecord,
@@ -1251,6 +1252,11 @@ export const claudeReviews = sqliteTable(
     // mid-post can never lead to a retry), then settled to posted / partial / failed / skipped.
     // NULL = auto-posting never looked at this run (a manual run, or the switch was off).
     autoPost: text('auto_post', { mode: 'json' }).$type<ClaudeAutoPostRecord>(),
+    // The REFERENCE-LIBRARY passages the run used (docs/REFERENCE-DOCS.md § Use in reviews), each
+    // server-checked: the link names a built section of the workspace's library and the quote is in it.
+    // NULL = the run did not read the library (switch off, empty library, older row). Migration 0117
+    // (pg 0104).
+    docReferences: text('doc_references', { mode: 'json' }).$type<ReviewDocReference[]>(),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
@@ -1343,6 +1349,9 @@ export const claudeReviewFindings = sqliteTable(
     // ClaudeFindingReminder. Display + dedupe only: posted-state.ts counts its comment as claimed, so it
     // is never read as another finding's post. NULL = none.
     reminder: text('reminder', { mode: 'json' }).$type<ClaudeFindingReminder>(),
+    // The reference-library sections this finding rests on, server-checked (migration 0117 / pg 0104).
+    // NULL = none.
+    docCitations: text('doc_citations', { mode: 'json' }).$type<ReferenceDocCitation[]>(),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );

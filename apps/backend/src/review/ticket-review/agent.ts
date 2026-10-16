@@ -39,6 +39,9 @@ export interface RunTicketAgentArgs {
   prompt: string;
   applyAuthEnv: boolean;
   abortController: AbortController;
+  // The workspace's reference library, READ-ONLY (docs/REFERENCE-DOCS.md § Use in reviews). Absent ⇒
+  // the run is exactly as before (no extra root, no `references` field).
+  docsDir?: string | null;
   onProgress(p: { recentActivity: string[]; usage: { inputTokens: number; outputTokens: number; costUsd: number } }): void;
 }
 
@@ -87,7 +90,8 @@ export async function runTicketReviewAgent(args: RunTicketAgentArgs): Promise<Ru
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
     const { createSdkMcpServer, query, tool } = await loadAgentSdk();
-    const shape = await submitTicketReviewShape();
+    const docsDir = args.docsDir ?? null;
+    const shape = await submitTicketReviewShape({ docs: docsDir != null });
     let captured: SubmitTicketReviewPayload | null = null;
     const server = createSdkMcpServer({
       name: 'ticket',
@@ -104,7 +108,8 @@ export async function runTicketReviewAgent(args: RunTicketAgentArgs): Promise<Ru
         ),
       ],
     });
-    const guard = createPathGuard(args.cwd, args.worktrees);
+    // The library is a READ-ONLY root: Read/Glob/Grep may reach it, nothing else may name it.
+    const guard = createPathGuard(args.cwd, args.worktrees, { readOnlyRoots: docsDir != null ? [docsDir] : [] });
     const policy = ticketToolPolicy();
     const q = query({
       prompt: args.prompt,
@@ -113,7 +118,7 @@ export async function runTicketReviewAgent(args: RunTicketAgentArgs): Promise<Ru
         ...sdkModelOptions(model, 'worktree'),
         systemPrompt: args.systemPrompt,
         cwd: args.cwd,
-        additionalDirectories: [...args.worktrees],
+        additionalDirectories: docsDir != null ? [...args.worktrees, docsDir] : [...args.worktrees],
         permissionMode: 'bypassPermissions',
         allowedTools: policy.allowedTools,
         disallowedTools: policy.disallowedTools,

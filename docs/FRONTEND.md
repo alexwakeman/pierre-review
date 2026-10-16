@@ -4555,3 +4555,15 @@ conversation on screen, the narrow-width Read / Ask tab) per WORKSPACE in the mo
   Citations render as "Document › Section" buttons that open the section (at its anchor).
 - **Settings → Workspace → Reference docs** (`settings/ReferenceDocsSection.tsx`, beside Auto review,
   only on `me.ai.enabled`): "Use reference docs in Claude Review", draft + Save, OFF by default.
+
+**Reference links from reviews.** `components/DocReferences.tsx` draws a run's checked `docReferences`
+(the Claude Review tab's "Reference docs" section after SonarCloud; a compact block in Story check — the
+whole story and this PR's share — and in This Sprint's Code check) and a finding's `docCitations`
+("Reference: Document › Section"). A plain click opens the section in-app (`store/openDocs.ts`:
+`openPath` → `showActivity()` → `setActivityRepo('docs')`, the "See the whole story in Open PRs" move); the
+href is a DEEP LINK (`lib/docReferences.ts` `docsDeepLink`:
+`/app/?workspace=&activityRepo=docs&doc=<slug>&section=<NN-name.md>&anchor=`) for a modified click / new
+tab. ⚠ The URL hydrate seats it in `useDocsView.pendingDeepLink` (`parseDocsDeepLink`, the strict
+grammar again) and the pane opens it ONCE, where the workspace is known, then expands that document; the
+serializer never emits `doc`/`section`/`anchor`, so the link is one-shot by design. Quotes and notes render
+as plain text.

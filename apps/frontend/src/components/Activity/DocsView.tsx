@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import { REFERENCE_DOC_MAX_BYTES, type ReferenceDoc } from '@pierre-review/shared';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import {
@@ -353,6 +353,27 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
   const narrowPane = useDocsView((s) => s.narrowPane);
   const setNarrowPane = useDocsView((s) => s.setNarrowPane);
   const onOpen = useCallback((path: string, anchor: string | null) => openPath(workspaceId, path, anchor), [openPath, workspaceId]);
+
+  // A DEEP LINK (`&doc=…&section=…`, lib/docReferences.ts — a review's reference opened in a new tab):
+  // opened ONCE, here, where the workspace is known; its document's contents are expanded when the
+  // list arrives.
+  const pending = useDocsView((s) => s.pendingDeepLink);
+  const seatDeepLink = useDocsView((s) => s.seatDeepLink);
+  const setExpanded = useDocsView((s) => s.setExpanded);
+  const expandSlug = useRef<string | null>(null);
+  useEffect(() => {
+    if (pending == null) return;
+    openPath(workspaceId, pending.path, pending.anchor);
+    expandSlug.current = pending.slug;
+    seatDeepLink(null);
+  }, [pending, openPath, seatDeepLink, workspaceId]);
+  useEffect(() => {
+    const slug = expandSlug.current;
+    if (slug == null || library.data == null) return;
+    const doc = library.data.docs.find((d) => d.slug === slug);
+    if (doc != null) setExpanded(workspaceId, doc.id, true);
+    expandSlug.current = null;
+  }, [library.data, pending, setExpanded, workspaceId]);
 
   const docs = library.data?.docs ?? [];
   const sorted = [...docs].sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));

@@ -15,6 +15,7 @@
 // ("api#12") is an in-app button via ReviewPrRefs.tsx. ⚠ Posting follows the post-write copy
 // contract: once GitHub answered with a comment id, the button never comes back (a retry
 // double-posts).
+import { DocReferencesBlock } from './DocReferences.js';
 import { useId, useMemo, useState, type ReactNode } from 'react';
 import {
   TICKET_CRITERION_STATUS_LABEL,
@@ -433,6 +434,7 @@ export function TicketResults({
       )}
       <MissingList items={missing} {...ctx} />
       <NotRequestedList items={a.notRequested} {...ctx} />
+      <DocReferencesBlock references={a.references} />
       {review.members.some((m) => !m.checkedOut) && (
         <p className={`text-xs ${MUTED}`}>
           Not checked out:{' '}

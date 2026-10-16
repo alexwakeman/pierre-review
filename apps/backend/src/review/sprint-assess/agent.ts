@@ -43,6 +43,9 @@ export interface SprintAssessRunArgs {
   applyAuthEnv: boolean;
   /** Called on the FIRST submit_assessment attempt (the manager's 'writing' phase). */
   onSubmit?: () => void;
+  /** The workspace's reference library, READ-ONLY (docs/REFERENCE-DOCS.md § Use in reviews). Absent ⇒
+   *  the run is exactly as before. */
+  docsDir?: string | null;
 }
 
 export interface SprintAssessRunResult {
@@ -95,7 +98,8 @@ export const runSprintAssessAgent: SprintAssessRunner = async (args) => {
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
     const { createSdkMcpServer, query, tool } = await loadAgentSdk();
-    const shape = await submitAssessmentShape(args.mode);
+    const docsDir = args.docsDir ?? null;
+    const shape = await submitAssessmentShape(args.mode, { docs: docsDir != null });
     let attempted = false;
     const server = createSdkMcpServer({
       name: 'sprint',
@@ -122,7 +126,8 @@ export const runSprintAssessAgent: SprintAssessRunner = async (args) => {
         ),
       ],
     });
-    const guard = createPathGuard(args.cwd, args.worktrees);
+    // The library is a READ-ONLY root: Read/Glob/Grep may reach it, nothing else may name it.
+    const guard = createPathGuard(args.cwd, args.worktrees, { readOnlyRoots: docsDir != null ? [docsDir] : [] });
     const policy = sprintAssessToolPolicy();
     const q = query({
       prompt: args.prompt,
@@ -131,7 +136,7 @@ export const runSprintAssessAgent: SprintAssessRunner = async (args) => {
         ...sdkModelOptions(model, 'worktree'),
         systemPrompt: args.systemPrompt,
         cwd: args.cwd,
-        additionalDirectories: [...args.worktrees],
+        additionalDirectories: docsDir != null ? [...args.worktrees, docsDir] : [...args.worktrees],
         permissionMode: 'bypassPermissions',
         allowedTools: policy.allowedTools,
         disallowedTools: policy.disallowedTools,

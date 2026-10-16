@@ -28,6 +28,7 @@ import {
   type TicketReviewPrState,
 } from '@pierre-review/shared';
 import { capDiff } from '../post-review.js';
+import { docsReviewPromptBlock } from '../../reference-docs/review-refs.js';
 import { cardText } from './cards.js';
 
 /** The shared budget for every member's inlined diff, in characters. */
@@ -120,6 +121,15 @@ For EVERY pull request shown to you as a DIFF, add one entry to \`cards\` (by it
 
 # Finishing
 When you are done, call submit_ticket_review EXACTLY ONCE with { alignment, summary, criteria, missing, notRequested, cards }. 'summary' is markdown: ONE plain sentence on how far the pull requests, together, deliver the ticket, then, only when something is unmet, partly met or missing, a short bullet list (one "- " line per gap, naming where it belongs). No headings, no tables. Each unmet or partly met criterion and each missing item may be posted as a comment on the PR you name in \`expectedIn\`, so give each a clear, short explanation. Do not write prose outside the tool call.`;
+
+/**
+ * The system prompt for one run: the base prompt, plus the reference-library block when the
+ * workspace's library is in use (docs/REFERENCE-DOCS.md § Use in reviews). No library ⇒ exactly
+ * TICKET_REVIEW_SYSTEM_PROMPT.
+ */
+export function ticketReviewSystemPrompt(docsDir: string | null = null): string {
+  return docsDir != null ? `${TICKET_REVIEW_SYSTEM_PROMPT}\n\n${docsReviewPromptBlock(docsDir, 'ticket')}` : TICKET_REVIEW_SYSTEM_PROMPT;
+}
 
 function fence(lines: string[], label: string, nonce: string, body: string): void {
   lines.push(`---BEGIN ${label} ${nonce}---`);

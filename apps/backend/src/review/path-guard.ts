@@ -24,8 +24,15 @@ import type { DispatchDecision } from './claude-review/specialists.js';
 // EXISTING ancestor (a path that does not exist yet still resolves through a symlinked parent), so a
 // link inside a worktree pointing outside it is denied. Roots are resolved the same way (on macOS
 // /tmp is /private/tmp). Anything that cannot be resolved is denied.
+//
+// READ-ONLY ROOTS (`opts.readOnlyRoots`): a folder the run may READ but never write — the workspace's
+// reference library (docs/REFERENCE-DOCS.md § Use in reviews). A path inside one passes ONLY for the
+// read tools (Read, Glob, Grep, LS); any other tool naming it is denied, whatever else the run's
+// allow-list says. A path inside an ordinary root is decided as before.
 
 const PATH_KEYS = ['file_path', 'path', 'notebook_path'] as const;
+/** The tools that may name a path inside a read-only root. */
+export const READ_ONLY_ROOT_TOOLS: ReadonlySet<string> = new Set(['Read', 'Glob', 'Grep', 'LS']);
 const GLOB_CHARS = /[*?[\]{}]/;
 
 /** Follow symlinks on the deepest existing ancestor of `abs`, re-appending the missing tail. */
@@ -62,15 +69,22 @@ export interface PathGuard {
   decide(toolName: string, toolInput: unknown): DispatchDecision;
   /** The resolved allow-list (for tests and logs). */
   roots(): string[];
+  /** The resolved read-only roots (for tests and logs). */
+  readOnlyRoots(): string[];
 }
 
 /**
  * A guard allowing `cwd` and `extraRoots` (e.g. member worktrees). Roots are resolved once, at
  * creation; create the guard after the directories exist.
  */
-export function createPathGuard(cwd: string, extraRoots: readonly string[] = []): PathGuard {
+export function createPathGuard(
+  cwd: string,
+  extraRoots: readonly string[] = [],
+  opts: { readOnlyRoots?: readonly string[] } = {},
+): PathGuard {
   const base = resolve(cwd);
   const roots = [base, ...extraRoots.map((r) => resolve(base, expandHome(r)))].map(resolveReal);
+  const readOnly = (opts.readOnlyRoots ?? []).map((r) => resolveReal(resolve(base, expandHome(r))));
   const deny = (reason: string): DispatchDecision => ({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -78,14 +92,25 @@ export function createPathGuard(cwd: string, extraRoots: readonly string[] = [])
       permissionDecisionReason: reason,
     },
   });
-  const allowed = (raw: string, from: string): boolean => {
-    if (raw.includes('\u0000')) return false;
+  // 'rw' = inside an ordinary root; 'ro' = inside a read-only root only; null = outside every root.
+  const placed = (raw: string, from: string): 'rw' | 'ro' | null => {
+    if (raw.includes('\u0000')) return null;
     const abs = resolve(from, expandHome(raw));
     const real = resolveReal(abs);
-    return roots.some((r) => isWithin(r, real));
+    if (roots.some((r) => isWithin(r, real))) return 'rw';
+    if (readOnly.some((r) => isWithin(r, real))) return 'ro';
+    return null;
   };
   const outside = (raw: string): DispatchDecision =>
     deny(`${raw} is outside the checked-out repositories. Only files under them can be read.`);
+  const readOnlyDenied = (raw: string): DispatchDecision =>
+    deny(`${raw} is in the reference library, which can only be read (Read, Glob, Grep).`);
+  const check = (toolName: string, raw: string, from: string): DispatchDecision | null => {
+    const where = placed(raw, from);
+    if (where === 'rw') return null;
+    if (where === 'ro') return READ_ONLY_ROOT_TOOLS.has(toolName) ? null : readOnlyDenied(raw);
+    return outside(raw);
+  };
 
   return {
     decide(toolName, toolInput) {
@@ -95,7 +120,8 @@ export function createPathGuard(cwd: string, extraRoots: readonly string[] = [])
         const v = input[key];
         if (v == null || v === '') continue;
         if (typeof v !== 'string') return deny(`The ${key} argument must be a path.`);
-        if (!allowed(v, base)) return outside(v);
+        const refused = check(toolName, v, base);
+        if (refused) return refused;
       }
       if (toolName === 'Glob' && typeof input.pattern === 'string') {
         const pattern = expandHome(input.pattern);
@@ -107,11 +133,14 @@ export function createPathGuard(cwd: string, extraRoots: readonly string[] = [])
         const firstGlob = segments.findIndex((s) => GLOB_CHARS.test(s));
         const literal = (firstGlob === -1 ? segments : segments.slice(0, firstGlob)).join('/');
         const prefix = literal === '' ? (isAbsolute(pattern) ? '/' : '.') : literal;
-        if (!allowed(prefix, from)) return outside(input.pattern);
+        const where = placed(prefix, from);
+        if (where == null) return outside(input.pattern);
+        if (where === 'ro' && !READ_ONLY_ROOT_TOOLS.has(toolName)) return readOnlyDenied(input.pattern);
       }
       return { continue: true };
     },
     roots: () => [...roots],
+    readOnlyRoots: () => [...readOnly],
   };
 }
 

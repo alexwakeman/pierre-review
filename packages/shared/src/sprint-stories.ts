@@ -1,4 +1,5 @@
 import type { JiraStatusCategory, TrackerProvider } from './types.js';
+import type { ReviewDocReference } from './reference-docs.js';
 
 // REPORTS → THIS SPRINT — the shared constants and the pieces the SPRINT GRAPH (`sprint-graph.ts`)
 // builds on: where the list came from, the read state, candidate repos, the status layout (four
@@ -257,6 +258,9 @@ export interface SprintAssessmentBody {
   criterionChecks: SprintCriterionCheck[];
   /** VERIFY mode: one sentence on which criteria have tests; null in plan mode. */
   coverage: string | null;
+  /** The reference-library passages the check used (docs/REFERENCE-DOCS.md § Use in reviews). Absent
+   *  = it did not read the library. */
+  references?: ReviewDocReference[];
 }
 
 /** What validation removed — stored, behind an ⓘ. */

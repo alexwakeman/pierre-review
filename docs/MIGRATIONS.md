@@ -1329,3 +1329,12 @@ precision) and `created_at` / `updated_at` / `build_started_at` / `built_at`. `r
 The text lives as FILES under `<docsDir>/<accountId>/<workspaceId>/`, removed by erasure and the workspace
 delete route. Both tables in `accountScopedTables()`, erased, and checked by `verify:isolation`. Journal
 `when` sqlite `1792137603012` / pg `1792137604011`. ⚠ pg `0103` NOT replayed.
+
+### `0117_review_doc_references` (pg `0104`) — reference docs in reviews
+Two nullable JSON columns, no index (docs/REFERENCE-DOCS.md § Use in reviews). `claude_reviews.doc_references`
+(sqlite text / pg jsonb): the reference-library passages a PR review used, each server-checked — NULL = the
+run did not read the library, `[]` = it read it and kept nothing. `claude_review_findings.doc_citations`
+(sqlite text / pg jsonb): the library sections one finding rests on, NULL = none. The ticket review and the
+sprint check need NO column: theirs ride their existing JSON (`ticket_reviews.assessment.references`,
+`sprint_assessments.body_json.references`). Both columns sit on tables already in the delete paths and
+erasure. Journal `when` sqlite `1792137604013` / pg `1792137604014`. ⚠ pg `0104` NOT replayed.

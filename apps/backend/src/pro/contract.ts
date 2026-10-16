@@ -418,6 +418,9 @@ export interface ReviewFinding {
   // The specialist lens on a deep review (review/claude-review/specialists.ts); null/absent ⇒ a
   // general finding. Core-only (Claude Review left the plugin), so no apiVersion question.
   lens?: ClaudeFindingLens | null;
+  // A docs run only: the library section links the model said this finding rests on, RAW (the
+  // manager checks them into `docCitations` before storing).
+  docRefs?: unknown;
   // (A STORY FINDING's origin used to ride here. Stories left the PR review for the ticket review
   // (review/ticket-review/), so a run makes none; old rows keep theirs in the story_* columns.)
 }
@@ -527,6 +530,11 @@ export interface RunReviewArgs {
   // name the prompt's "Related PRs" block gives it; core appends where each one sits on disk (or
   // that it could not be checked out). Core-only, so no apiVersion question.
   peers?: Array<{ ref: string; owner: string; name: string; prNumber: number; headSha: string }>;
+  // The workspace's REFERENCE LIBRARY folder when the review should read it (docs/REFERENCE-DOCS.md
+  // § Use in reviews): a READ-ONLY root of the run's path guard, and the tool gains `docReferences` /
+  // a finding's `docRefs`. Absent/null ⇒ the run is exactly as before. Core-only (Claude Review left
+  // the plugin), so no apiVersion question.
+  docsDir?: string | null;
 }
 
 export interface RunReviewResult {
@@ -550,6 +558,9 @@ export interface RunReviewResult {
   threads?: ReviewThreadReport[];
   // Present only when the prompt carried a "CI failures" section and the model reported.
   ciFailures?: ReviewCiFailureReport[];
+  // A docs run only (RunReviewArgs.docsDir): the model's `docReferences`, RAW — the manager checks each
+  // against the library before anything is stored.
+  docReferences?: unknown;
 }
 
 // The ticked findings the plugin hands to postReview (the plugin read them from the core

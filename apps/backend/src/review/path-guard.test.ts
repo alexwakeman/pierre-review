@@ -106,3 +106,58 @@ describe('path guard', () => {
     expect(isWithin('/a/b', '/a/b/..c/d')).toBe(true);
   });
 });
+
+// READ-ONLY ROOTS — the workspace's reference library (docs/REFERENCE-DOCS.md § Use in reviews).
+describe('path guard: a read-only root (the reference library)', () => {
+  let lib = '';
+  beforeAll(() => {
+    lib = join(top, 'docs', '1', '1', 'library');
+    mkdirSync(join(lib, 'handbook', 'sections'), { recursive: true });
+    writeFileSync(join(lib, 'INDEX.md'), '# Index');
+    writeFileSync(join(lib, 'handbook', 'sections', '01-refunds.md'), '# Refunds');
+    symlinkSync(secret, join(lib, 'handbook', 'escape'));
+  });
+
+  it('the read tools may reach it, by absolute path or by Glob / Grep', () => {
+    const g = createPathGuard(cwd, [wtA], { readOnlyRoots: [lib] });
+    expect(g.decide('Read', { file_path: join(lib, 'INDEX.md') })).toEqual({ continue: true });
+    expect(g.decide('Read', { file_path: join(lib, 'handbook', 'sections', '01-refunds.md') })).toEqual({ continue: true });
+    expect(g.decide('Grep', { pattern: 'refund', path: lib })).toEqual({ continue: true });
+    expect(g.decide('Glob', { pattern: `${lib}/**/*.md` })).toEqual({ continue: true });
+    expect(g.decide('Glob', { pattern: '**/*.md', path: lib })).toEqual({ continue: true });
+    expect(g.readOnlyRoots().length).toBe(1);
+  });
+
+  it('every write (or any other tool) naming it is refused', () => {
+    const g = createPathGuard(cwd, [wtA], { readOnlyRoots: [lib] });
+    for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) {
+      expect(denied(g.decide(tool, { file_path: join(lib, 'INDEX.md') }))).toBe(true);
+      expect(denied(g.decide(tool, { file_path: join(lib, 'handbook', 'new.md') }))).toBe(true);
+    }
+    expect(denied(g.decide('NotebookEdit', { notebook_path: join(lib, 'x.ipynb') }))).toBe(true);
+    expect(denied(g.decide('mcp__other__write', { path: lib }))).toBe(true);
+    const d = g.decide('Write', { file_path: join(lib, 'INDEX.md') }) as {
+      hookSpecificOutput: { permissionDecisionReason: string };
+    };
+    expect(d.hookSpecificOutput.permissionDecisionReason).toContain('can only be read');
+  });
+
+  it('a write inside an ordinary root is decided as before', () => {
+    const g = createPathGuard(cwd, [wtA], { readOnlyRoots: [lib] });
+    expect(g.decide('Write', { file_path: join(cwd, 'notes.md') })).toEqual({ continue: true });
+  });
+
+  it('it does not widen anything else: outside paths, traversal and links out stay refused', () => {
+    const g = createPathGuard(cwd, [wtA], { readOnlyRoots: [lib] });
+    expect(denied(g.decide('Read', { file_path: join(secret, 'key') }))).toBe(true);
+    expect(denied(g.decide('Read', { file_path: join(lib, '..', '..', 'staging', 'x.md') }))).toBe(true);
+    expect(denied(g.decide('Read', { file_path: join(lib, 'handbook', 'escape', 'key') }))).toBe(true);
+    expect(denied(g.decide('Glob', { pattern: '../**', path: lib }))).toBe(true);
+  });
+
+  it('without the option the library is outside like any other folder', () => {
+    const g = createPathGuard(cwd, [wtA]);
+    expect(denied(g.decide('Read', { file_path: join(lib, 'INDEX.md') }))).toBe(true);
+    expect(g.readOnlyRoots()).toEqual([]);
+  });
+});

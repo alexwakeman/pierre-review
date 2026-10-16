@@ -33,6 +33,8 @@ import type {
 } from '@pierre-review/shared';
 import { CLAUDE_FINDING_LENSES, threadAssessmentCounts } from '@pierre-review/shared';
 import { storedList, stripStoredStoryLead } from '@pierre-review/shared';
+import { referenceDocCitationsFromStored, reviewDocReferencesFromStored } from '@pierre-review/shared';
+import type { ReferenceDocCitation, ReviewDocReference } from '@pierre-review/shared';
 import type { ClaudeSettledFinding, FindingAutoResolveRecord, FindingPushbackRecord } from '@pierre-review/shared';
 import type { ReviewFinding } from '../../pro/contract.js';
 import { ticketEntriesOf } from './ticket.js';
@@ -109,6 +111,8 @@ interface FindingRow {
   pushback?: FindingPushbackRecord | null;
   // The latest "Post reminder" of this already-posted finding (migration 0110 / pg 0097).
   reminder?: ClaudeFindingReminder | null;
+  // The reference-library sections it rests on, server-checked (migration 0117 / pg 0104).
+  docCitations?: unknown;
 }
 
 // A story finding's origin off its row; null unless BOTH columns hold a value.
@@ -158,6 +162,9 @@ interface ReviewRow {
   ciFailures?: ClaudeCiFailuresRecord | null;
   // What auto-posting did with this run (migration 0087 / pg 0074). null on every other row.
   autoPost?: ClaudeAutoPostRecord | null;
+  // The reference-library passages the run used, server-checked (migration 0117 / pg 0104). NULL =
+  // the run did not read the library.
+  docReferences?: unknown;
 }
 
 /** The stored auto-post record → the wire (ids dropped). null for anything malformed. */
@@ -259,7 +266,15 @@ function mapFinding(
     // posted inside a review before its comment id was read back matches by its root comment
     // (`postedFindingThreadIds`).
     threadId: r.postedCommentKind === 'inline' ? (threadIds?.get(r.id) ?? null) : null,
+    ...docCitationsWireOf(r.docCitations),
   };
+}
+
+// A finding's library citations — the key only when it has some, so a run without the library reads
+// exactly as before.
+function docCitationsWireOf(v: unknown): Pick<ClaudeFinding, 'docCitations'> {
+  const list = referenceDocCitationsFromStored(v);
+  return list.length > 0 ? { docCitations: list } : {};
 }
 
 // A stored lens outside today's list reads as a general finding, never a made-up label.
@@ -341,6 +356,7 @@ function mapReview(
     // null = this run did not look at CI (older row, skip, not succeeded, checks unreadable).
     ...ciWireOf(r.ciFailures),
     autoPost: autoPostWireOf(r.autoPost),
+    docReferences: reviewDocReferencesFromStored(r.docReferences),
   };
 }
 
@@ -1676,7 +1692,11 @@ export interface ReviewSuccessData {
   excludedFiles: string[];
   // `priorFindingId` set on a finding that re-raises a still-open earlier one; `included: false`
   // only on a re-raise of a comment already posted on this commit (absent ⇒ included).
-  findings: Array<ReviewFinding & { priorFindingId?: number | null; included?: boolean }>;
+  findings: Array<
+    ReviewFinding & { priorFindingId?: number | null; included?: boolean; docCitations?: ReferenceDocCitation[] }
+  >;
+  // The reference-library passages (checked). Absent/null = the run did not read the library.
+  docReferences?: ReviewDocReference[] | null;
   followUp?: ClaudeReviewFollowUpRecord | null;
   // (No story assessment: stories left the PR review, so `ticket_assessment` and the findings'
   // story_* columns stay NULL on every new run. Old rows keep theirs as read-only history.)
@@ -1712,6 +1732,7 @@ export async function saveReviewSuccess(
         followUp: data.followUp ?? null,
         threadAssessments: data.threadAssessments ?? null,
         ciFailures: data.ciFailures ?? null,
+        docReferences: data.docReferences ?? null,
         finishedAt: new Date(),
       })
       .where(eq(cr.id, id))
@@ -1738,6 +1759,7 @@ export async function saveReviewSuccess(
           included: f.included ?? true,
           priorFindingId: f.priorFindingId ?? null,
           lens: f.lens ?? null,
+          docCitations: f.docCitations != null && f.docCitations.length > 0 ? f.docCitations : null,
         })
         .execute();
     }

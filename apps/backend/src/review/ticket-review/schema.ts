@@ -1,5 +1,6 @@
 import type { z as Zod } from 'zod';
 import { loadZod } from '../../ai/runtime.js';
+import { buildDocReferencesField } from '../../reference-docs/review-refs.js';
 
 // The structured-output contract for the ticket review's in-process `submit_ticket_review` tool.
 // Built from a zod namespace handed in (the AI runtime's own install — review/schema.ts explains
@@ -58,7 +59,14 @@ export async function submitPrCardShape(): Promise<SubmitPrCardShape> {
   return buildSubmitPrCardShape(await loadZod());
 }
 
-export function buildSubmitTicketReviewShape(z: ZodNs) {
+// THE REFERENCE LIBRARY (`opts.docs`, docs/REFERENCE-DOCS.md § Use in reviews): only a run that reads
+// the workspace's library gets `docReferences`; without it the shape is exactly the base one.
+export function buildSubmitTicketReviewShape(z: ZodNs, opts: { docs?: boolean } = {}) {
+  const base = buildBaseTicketReviewShape(z);
+  return opts.docs ? { ...base, docReferences: buildDocReferencesField(z) } : base;
+}
+
+function buildBaseTicketReviewShape(z: ZodNs) {
   const memberRef = z.string().describe("A pull request's ref from the 'Pull requests' section, e.g. 'PR2'.");
   const expectedIn = z
     .object({
@@ -131,10 +139,11 @@ export function buildSubmitTicketReviewShape(z: ZodNs) {
   };
 }
 
-export type SubmitTicketReviewShape = ReturnType<typeof buildSubmitTicketReviewShape>;
-export type SubmitTicketReviewPayload = Zod.infer<Zod.ZodObject<SubmitTicketReviewShape>>;
+export type SubmitTicketReviewShape = ReturnType<typeof buildBaseTicketReviewShape>;
+// A docs run's payload may also carry `docReferences` (raw; the manager checks them).
+export type SubmitTicketReviewPayload = Zod.infer<Zod.ZodObject<SubmitTicketReviewShape>> & { docReferences?: unknown };
 
 /** The raw shape `tool()` wants, built from the runtime's zod. */
-export async function submitTicketReviewShape(): Promise<SubmitTicketReviewShape> {
-  return buildSubmitTicketReviewShape(await loadZod());
+export async function submitTicketReviewShape(opts: { docs?: boolean } = {}): Promise<ReturnType<typeof buildSubmitTicketReviewShape>> {
+  return buildSubmitTicketReviewShape(await loadZod(), opts);
 }

@@ -293,3 +293,82 @@ describe('sprint assessment manager', () => {
     expect(row).toMatchObject({ status: 'failed', error: 'interrupted', phase: null });
   });
 });
+
+// THE REFERENCE LIBRARY (docs/REFERENCE-DOCS.md § Use in reviews): with the workspace's switch ON and
+// a built document, the check is handed the library folder and the block, and only references that
+// CHECK OUT are stored; OFF, the run is exactly as before and stores none.
+describe('sprint assessment and the reference library', () => {
+  const SECTION = 'basket-rules/sections/01-basket.md';
+  let docsRoot = '';
+  let docsStore: typeof import('../../reference-docs/store.js');
+
+  beforeAll(async () => {
+    docsRoot = mkdtempSync(join(tmpdir(), 'sprint-assess-docs-'));
+    const paths = await import('../../reference-docs/paths.js');
+    paths.setDocsRootForTest(docsRoot);
+    docsStore = await import('../../reference-docs/store.js');
+    const { renderSection } = await import('../../reference-docs/render.js');
+    const { writeIndex } = await import('../../reference-docs/library.js');
+    const doc = await docsStore.insertDocRow({
+      accountId: 1, workspaceId: ws, slug: 'basket-rules', title: 'Basket rules', sourceKind: 'markdown',
+      sourceName: 'basket.md', sourceUrl: null, byteSize: 10, pageCount: null,
+    });
+    await docsStore.saveDocBuilt(1, doc.id, {
+      title: 'Basket rules', summary: 's', topics: ['basket'],
+      sections: [{ path: SECTION, title: 'Basket', summary: '', depth: 1, trail: [], headings: [], words: 10 }],
+    }, {});
+    const lib = paths.libraryDir(1, ws);
+    mkdirSync(join(lib, 'basket-rules', 'sections'), { recursive: true });
+    writeFileSync(join(lib, 'basket-rules', 'CONTENTS.md'), '# Basket rules\n');
+    writeFileSync(
+      join(lib, SECTION),
+      renderSection({ docTitle: 'Basket rules', index: 0, total: 1, section: { title: 'Basket', trail: [], body: 'A basket is kept for thirty days on the device.' }, prevFile: null, nextFile: null }),
+    );
+    await writeIndex(1, ws);
+  });
+
+  afterAll(async () => {
+    (await import('../../reference-docs/paths.js')).setDocsRootForTest(null);
+    rmSync(docsRoot, { recursive: true, force: true });
+  });
+
+  const submitted = {
+    ...goodSubmit,
+    docReferences: [
+      { link: SECTION, quote: 'kept for thirty days on the device', verdict: 'supports', note: 'Local storage keeps it.' },
+      { link: SECTION, quote: 'kept for ninety days on the server', verdict: 'contradicts', note: 'Not in the text.' },
+      { link: '../../../etc/hosts', quote: 'kept for thirty days on the device', verdict: 'context', note: 'Outside.' },
+    ],
+  };
+
+  it('OFF: no folder, the plain prompt, and no references stored', async () => {
+    await docsStore.writeDocsInReview(1, ws, false);
+    let args: any = null;
+    mgr.setSprintAssessRunnerForTests(async (a) => {
+      args = a;
+      return result({ submitted });
+    });
+    const row = await start('plan');
+    expect(args.docsDir).toBeUndefined();
+    expect(args.systemPrompt).not.toContain('reference library');
+    expect(row.bodyJson).not.toHaveProperty('references');
+  });
+
+  it('ON: the folder + block are handed over, and only the references that check out are stored', async () => {
+    await docsStore.writeDocsInReview(1, ws, true);
+    let args: any = null;
+    mgr.setSprintAssessRunnerForTests(async (a) => {
+      args = a;
+      return result({ submitted });
+    });
+    const row = await start('plan');
+    expect(row.status).toBe('succeeded');
+    expect(args.docsDir).toBe(join(docsRoot, '1', String(ws), 'library'));
+    expect(args.systemPrompt).toContain('# Checking the story against the library');
+    expect(row.bodyJson!.references).toEqual([
+      expect.objectContaining({ path: SECTION, verdict: 'supports', quote: 'kept for thirty days on the device', docTitle: 'Basket rules' }),
+    ]);
+    expect(store.sprintAssessmentRecordOf(row).body?.references).toHaveLength(1);
+    await docsStore.writeDocsInReview(1, ws, false);
+  });
+});

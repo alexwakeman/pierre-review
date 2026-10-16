@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { LibraryLocation } from '../lib/referenceDocs.js';
 
 // Activity → Docs: what the reader has open, PER WORKSPACE, for the visit (not in the URL, not
 // persisted). A module store rather than component state so leaving the rail line and coming back
@@ -25,6 +26,13 @@ interface DocsViewState {
   setExpanded: (workspaceId: number, docId: number, on: boolean) => void;
   setConversation: (workspaceId: number, conversationId: string | null) => void;
   setNarrowPane: (pane: 'viewer' | 'chat') => void;
+  /**
+   * A DEEP LINK's target (`?activityRepo=docs&doc=…&section=…`, lib/docReferences.ts), seated by the
+   * URL hydrate before the workspace resolves and consumed ONCE by the pane (which knows the
+   * workspace). The serializer does not emit those keys, so the link is a one-shot by design.
+   */
+  pendingDeepLink: LibraryLocation | null;
+  seatDeepLink: (loc: LibraryLocation | null) => void;
 }
 
 let seq = 0;
@@ -51,4 +59,6 @@ export const useDocsView = create<DocsViewState>((set) => ({
   setConversation: (workspaceId, conversationId) =>
     set((s) => ({ conversation: { ...s.conversation, [workspaceId]: conversationId } })),
   setNarrowPane: (pane) => set({ narrowPane: pane }),
+  pendingDeepLink: null,
+  seatDeepLink: (loc) => set({ pendingDeepLink: loc }),
 }));

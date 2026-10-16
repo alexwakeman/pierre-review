@@ -3,6 +3,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import {
   SPRINT_ASSESS_FORMAT_VERSION,
   SPRINT_ASSESS_MODEL,
+  reviewDocReferencesFromStored,
   type SprintAssessmentBody,
   type SprintAssessmentErrorCode,
   type SprintAssessmentPhase,
@@ -200,6 +201,8 @@ export function sprintAssessmentBodyFromStored(raw: unknown): SprintAssessmentBo
     plan: raw.mode === 'plan' ? plan : [],
     criterionChecks: raw.mode === 'verify' ? criterionChecks : [],
     coverage: raw.mode === 'verify' && typeof raw.coverage === 'string' && raw.coverage.trim() !== '' ? raw.coverage : null,
+    // Only a check that read the reference library stored any (docs/REFERENCE-DOCS.md § Use in reviews).
+    ...(Array.isArray(raw.references) ? { references: reviewDocReferencesFromStored(raw.references) ?? [] } : {}),
   };
 }
 

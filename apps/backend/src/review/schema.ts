@@ -1,5 +1,6 @@
 import type { z as Zod } from "zod";
 import { loadZod } from "../ai/runtime.js";
+import { buildDocCitationsField, buildDocReferencesField } from "../reference-docs/review-refs.js";
 
 // ⚠ zod is NOT imported here as a value. It comes from the AI runtime (ai/runtime.ts), the SAME
 // install the Agent SDK uses — a second zod instance silently breaks the SDK's tool-schema
@@ -24,7 +25,20 @@ type ZodNs = typeof Zod;
 // There is NO `ciFailures` field either: failing CI left the PR review for the CI review
 // (review/ci-review/, its own `submit_ci_review`). A stray `ciFailures` key is stripped the same way.
 
-export function buildSubmitReviewShape(z: ZodNs) {
+// THE REFERENCE LIBRARY (`opts.docs`, docs/REFERENCE-DOCS.md § Use in reviews): only when the
+// workspace's library is in use does the shape gain `docReferences` and a finding's `docRefs`. Without
+// it the shape is EXACTLY the one below — the tool schema a run without the library sees is unchanged.
+export function buildSubmitReviewShape(z: ZodNs, opts: { docs?: boolean } = {}) {
+  const base = buildBaseReviewShape(z);
+  if (!opts.docs) return base;
+  return {
+    ...base,
+    findings: z.array(base.findings.element.extend({ docRefs: buildDocCitationsField(z) })),
+    docReferences: buildDocReferencesField(z),
+  };
+}
+
+function buildBaseReviewShape(z: ZodNs) {
   return {
     summary: z.string(),
     verdict: z.enum(["COMMENT", "REQUEST_CHANGES", "APPROVE"]),
@@ -118,12 +132,18 @@ export function buildSubmitReviewShape(z: ZodNs) {
   };
 }
 
-export type SubmitReviewShape = ReturnType<typeof buildSubmitReviewShape>;
-export type SubmitReviewPayload = Zod.infer<Zod.ZodObject<SubmitReviewShape>>;
+export type SubmitReviewShape = ReturnType<typeof buildBaseReviewShape>;
+// The payload as the base shape types it, plus the two library fields a docs run may carry (raw:
+// the manager validates them against the library before anything is stored).
+type BaseSubmitReviewPayload = Zod.infer<Zod.ZodObject<SubmitReviewShape>>;
+export type SubmitReviewPayload = Omit<BaseSubmitReviewPayload, 'findings'> & {
+  findings: Array<BaseSubmitReviewPayload['findings'][number] & { docRefs?: unknown }>;
+  docReferences?: unknown;
+};
 
 /** The raw shape `tool()` wants, built from the runtime's zod. */
-export async function submitReviewShape(): Promise<SubmitReviewShape> {
-  return buildSubmitReviewShape(await loadZod());
+export async function submitReviewShape(opts: { docs?: boolean } = {}): Promise<ReturnType<typeof buildSubmitReviewShape>> {
+  return buildSubmitReviewShape(await loadZod(), opts);
 }
 
 /** The assembled object schema, for validation. */
@@ -131,5 +151,5 @@ export async function submitReviewSchema(): Promise<
   Zod.ZodObject<SubmitReviewShape>
 > {
   const z = await loadZod();
-  return z.object(buildSubmitReviewShape(z));
+  return z.object(buildBaseReviewShape(z));
 }

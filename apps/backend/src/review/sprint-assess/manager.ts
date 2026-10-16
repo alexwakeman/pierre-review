@@ -13,6 +13,7 @@ import {
   type SprintRepoRef,
   type SprintTicketReference,
   type TrackerProvider,
+  type ReviewDocReference,
 } from '@pierre-review/shared';
 import { db, schema } from '../../db/client.js';
 import {
@@ -261,6 +262,23 @@ export function sprintAssessFailureOf(res: SprintAssessRunResult): SprintAssessm
   return 'no_assessment';
 }
 
+/** A check's `docReferences` (from the raw submit payload) → the checked list; [] on any error. */
+async function checkSprintDocReferences(accountId: number, workspaceId: number, id: number, submitted: unknown): Promise<ReviewDocReference[]> {
+  try {
+    const raw = submitted != null && typeof submitted === 'object' ? (submitted as { docReferences?: unknown }).docReferences : undefined;
+    const [{ loadLibrarySnapshot }, { validateDocReferences }] = await Promise.all([
+      import('../../reference-docs/context.js'),
+      import('../../reference-docs/review-refs.js'),
+    ]);
+    const { references } = validateDocReferences(raw, await loadLibrarySnapshot(accountId, workspaceId));
+    return references;
+  } catch (err) {
+    void id;
+    void err;
+    return [];
+  }
+}
+
 async function finish(id: number, set: Partial<typeof schema.sprintAssessments.$inferInsert>, cas: boolean): Promise<void> {
   await db
     .update(t())
@@ -320,6 +338,10 @@ async function runAssessment(job: Job): Promise<void> {
       ctx.log.warn({ assessmentId: id, err: String(err).slice(0, 200) }, 'sprint assess: references read failed');
       return [] as PromptReference[];
     });
+    // The workspace's reference library, read-only (docs/REFERENCE-DOCS.md § Use in reviews), read
+    // BEFORE the last abort check too. null ⇒ prompt, tools and output exactly as before.
+    const { reviewDocsFor } = await import('../../reference-docs/context.js');
+    const docs = await reviewDocsFor(job.accountId, job.workspaceId);
     if (job.abort.signal.aborted) return;
 
     // ---- the agent ----
@@ -338,7 +360,8 @@ async function runAssessment(job: Job): Promise<void> {
     const runner = runnerOverride ?? (await import('./agent.js')).runSprintAssessAgent;
     const res = await runner({
       prompt: buildSprintAssessPrompt(promptTicket, promptRepos, nonce, job.mode),
-      systemPrompt: sprintAssessSystemPrompt(job.mode),
+      systemPrompt: sprintAssessSystemPrompt(job.mode, docs?.dir ?? null),
+      ...(docs != null ? { docsDir: docs.dir } : {}),
       mode: job.mode,
       cwd: scratch,
       worktrees: ok.map((x) => x.path),
@@ -385,7 +408,12 @@ async function runAssessment(job: Job): Promise<void> {
       return;
     }
     if (v.dropped.paths + v.dropped.items > 0) ctx.log.info({ assessmentId: id, dropped: v.dropped }, 'sprint assess: validation removed items');
-    await finish(id, { status: 'succeeded', bodyJson: v.body, droppedJson: v.dropped, error: null, ...usage }, true);
+    // The library passages, CHECKED (review-refs.ts). Only a check that read the library carries them.
+    const body =
+      docs != null
+        ? { ...v.body, references: await checkSprintDocReferences(job.accountId, job.workspaceId, id, res.submitted) }
+        : v.body;
+    await finish(id, { status: 'succeeded', bodyJson: body, droppedJson: v.dropped, error: null, ...usage }, true);
   } catch (err) {
     ctx.log.warn({ err, assessmentId: id }, 'sprint assess: run threw');
     await finish(id, { status: 'failed', error: 'failed' }, true).catch(() => {});

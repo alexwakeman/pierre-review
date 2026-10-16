@@ -200,3 +200,93 @@ export interface ReferenceDocsSettings {
 export interface SetReferenceDocsSettingsBody {
   docsInReview: boolean;
 }
+
+// ---- the library in reviews (docs/REFERENCE-DOCS.md § Use in reviews) ----
+//
+// When a workspace's `docsInReview` switch is on and its library has a built document, Claude Review,
+// the ticket review and This Sprint's "Check against code" may READ the library (read-only, behind the
+// path guard) and report the passages they used. Every reference is SERVER-CHECKED before it is
+// stored: its link must name a section file of a built document of THAT workspace, and its quote must
+// appear in that section. A reference that fails either is dropped, never shown.
+
+export type ReviewDocVerdict = 'supports' | 'contradicts' | 'context';
+
+export const REVIEW_DOC_VERDICT_LABEL: Record<ReviewDocVerdict, string> = {
+  supports: 'Supports',
+  contradicts: 'Contradicts',
+  context: 'Context',
+};
+
+/** A quote is copied from the section, at most this long. */
+export const REVIEW_DOC_QUOTE_MAX_CHARS = 300;
+/** …and at least this long (letters and digits), so "the" cannot match every section. */
+export const REVIEW_DOC_QUOTE_MIN_CHARS = 12;
+export const REVIEW_DOC_NOTE_MAX_CHARS = 400;
+export const REVIEW_DOC_ABOUT_MAX_CHARS = 120;
+/** At most this many references are kept per run. */
+export const REVIEW_DOC_REFERENCES_MAX = 20;
+/** At most this many library citations per finding. */
+export const REVIEW_DOC_FINDING_CITATIONS_MAX = 3;
+
+/** One passage a review used, as stored (`references` on the run). */
+export interface ReviewDocReference {
+  /** Library-relative section path: `<slug>/sections/NN-name.md`. */
+  path: string;
+  /** A heading anchor inside it, when the run named one that exists. */
+  anchor: string | null;
+  docSlug: string;
+  docTitle: string;
+  sectionTitle: string | null;
+  /** Copied from the section (server-checked). */
+  quote: string;
+  verdict: ReviewDocVerdict;
+  /** One sentence: what it means for the change or the story. */
+  note: string;
+  /** What it bears on, when the run said: a criterion ('AC2'), a finding title, a file. */
+  about: string | null;
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => v != null && typeof v === 'object' && !Array.isArray(v);
+const VERDICTS: readonly string[] = ['supports', 'contradicts', 'context'];
+
+/** A stored run's references, re-read defensively; null when the run stored none. */
+export function reviewDocReferencesFromStored(raw: unknown): ReviewDocReference[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: ReviewDocReference[] = [];
+  for (const r of raw) {
+    if (!isObj(r)) continue;
+    if (typeof r.path !== 'string' || typeof r.docSlug !== 'string' || typeof r.docTitle !== 'string') continue;
+    if (typeof r.quote !== 'string' || typeof r.verdict !== 'string' || !VERDICTS.includes(r.verdict)) continue;
+    out.push({
+      path: r.path,
+      anchor: typeof r.anchor === 'string' && r.anchor !== '' ? r.anchor : null,
+      docSlug: r.docSlug,
+      docTitle: r.docTitle,
+      sectionTitle: typeof r.sectionTitle === 'string' && r.sectionTitle !== '' ? r.sectionTitle : null,
+      quote: r.quote,
+      verdict: r.verdict as ReviewDocVerdict,
+      note: typeof r.note === 'string' ? r.note : '',
+      about: typeof r.about === 'string' && r.about !== '' ? r.about : null,
+    });
+    if (out.length >= REVIEW_DOC_REFERENCES_MAX) break;
+  }
+  return out;
+}
+
+/** A finding's stored library citations, re-read defensively ([] when none). */
+export function referenceDocCitationsFromStored(raw: unknown): ReferenceDocCitation[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ReferenceDocCitation[] = [];
+  for (const c of raw) {
+    if (!isObj(c) || typeof c.path !== 'string' || typeof c.docSlug !== 'string' || typeof c.docTitle !== 'string') continue;
+    out.push({
+      path: c.path,
+      anchor: typeof c.anchor === 'string' && c.anchor !== '' ? c.anchor : null,
+      docSlug: c.docSlug,
+      docTitle: c.docTitle,
+      sectionTitle: typeof c.sectionTitle === 'string' && c.sectionTitle !== '' ? c.sectionTitle : null,
+    });
+    if (out.length >= REVIEW_DOC_FINDING_CITATIONS_MAX) break;
+  }
+  return out;
+}

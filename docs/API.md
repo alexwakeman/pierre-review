@@ -293,6 +293,16 @@ CreditsExhausted`).
 | `GET` / `DELETE /api/docs/chats/:conversationId?workspace=` | `ReferenceDocsConversationResponse {messages}` / `{deleted}`; `404` when the workspace holds no such conversation. Tier `read` |
 | `GET` / `PUT /api/workspaces/:id/docs-settings` | `ReferenceDocsSettings {workspaceId, docsInReview}`; PUT body `{docsInReview}`. Another account's workspace → `404`. Tier `read` |
 
+**The library in reviews — wire fields, no new route** ([REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Use in
+reviews). With `docsInReview` on and a document built, three existing payloads carry SERVER-CHECKED
+`ReviewDocReference {path, anchor, docSlug, docTitle, sectionTitle, quote, verdict: 'supports' |
+'contradicts' | 'context', note, about}` lists (the link names a built section of the workspace's library,
+the quote is in it; anything else was dropped before storage):
+`ClaudeReview.docReferences` (null/absent = the run did not read the library; `[]` = it read it and kept
+nothing), `ClaudeFinding.docCitations` (`ReferenceDocCitation[]`, absent when none),
+`TicketAssessment.references` and `SprintAssessmentBody.references` (absent = not read). Every `path` is
+the same library-relative path `GET /api/docs/section` takes.
+
 ### CI review (CORE, local-only)
 
 Why checks FAILED on a PR's head, as its own Claude process — the PR review no longer looks at CI

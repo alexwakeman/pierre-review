@@ -4,6 +4,7 @@ import {
   type SprintCodeRef,
   type SprintCriterionStatus,
 } from '@pierre-review/shared';
+import { DocReferencesBlock } from '../DocReferences.js';
 import { sprintCodeCheckMarkdown } from '../../lib/copy.js';
 import { relativeTime } from '../../lib/ui.js';
 import { SparkleIcon } from '../Icons.js';
@@ -72,6 +73,7 @@ export function SprintCodeCheck({ ticket: t }: { ticket: SprintAssessTicket }): 
       </div>
       {body.summary.trim() !== '' && <p className="text-sm text-gray-800 dark:text-gray-100">{body.summary}</p>}
       {body.mode === 'plan' ? <PlanList body={body} multiRepo={multiRepo} /> : <CriteriaChecks body={body} criteria={t.criteria} />}
+      <DocReferencesBlock references={body.references} />
     </section>
   );
 }

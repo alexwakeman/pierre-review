@@ -8,7 +8,10 @@ import {
   type ClaudeReviewStatusResponse,
   type ClaudeReviewStreamEvent,
   type ClaudeReviewTrigger,
+  type ReferenceDocCitation,
+  type ReviewDocReference,
 } from '@pierre-review/shared';
+import type { RunReviewResult } from '../../pro/contract.js';
 import type { CompareDiffResult } from '../../github/compare.js';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
@@ -621,9 +624,13 @@ async function runPipeline(
 
   const nonce = pickReviewNonce(untrustedTexts(plan, since, threadPlan, peers, settled, sonar));
 
+  // ---- the workspace's reference library (docs/REFERENCE-DOCS.md § Use in reviews) ----
+  // Only when its switch is on and something is built; null ⇒ prompt, tools and output unchanged.
+  const docs = await reviewDocsForPr(item);
+
   // A deep review offers the lead its specialist sub-agents (specialists.ts); a diff-only one none.
   const specialists = mode === 'worktree' ? offeredSpecialists(prep.changedFiles) : [];
-  const systemPrompt = systemPromptForMode(mode, specialists);
+  const systemPrompt = systemPromptForMode(mode, specialists, docs?.dir ?? null);
   const prompt = buildUserPrompt({
     repoFullName: prCtx.repoFullName,
     prNumber: prCtx.number,
@@ -662,6 +669,7 @@ async function runPipeline(
       prNumber: p.number,
       headSha: p.headSha,
     })),
+    ...(docs != null ? { docsDir: docs.dir } : {}),
     applyAuthEnv: APPLY_AUTH_ENV,
     abortController: controller,
     onProgress: (p) =>
@@ -715,13 +723,18 @@ async function runPipeline(
       );
     }
     const threadAssessments = threadPlan ? reconcileThreads(threadPlan, res.threads) : null;
+    // The library passages + each finding's citations, CHECKED against the library (a bad link or a
+    // quote not in its section is dropped). A docs run with nothing usable stores [] — "looked, found
+    // nothing" — and a run without the library stores NULL.
+    const checked = docs != null ? await checkReviewDocs(ctx, item, docs.workspaceId, res, findings) : null;
     await saveReviewSuccess(ctx, reviewId, {
       scope: res.scope,
       summary: res.summary,
       verdict: res.verdict,
       ...telemetry,
       excludedFiles: prep.excludedFiles,
-      findings,
+      findings: checked != null ? checked.findings : findings,
+      ...(checked != null ? { docReferences: checked.references } : {}),
       followUp:
         plan && items
           ? {
@@ -737,6 +750,54 @@ async function runPipeline(
     return true;
   }
   return false;
+}
+
+/**
+ * The PR's workspace library for this run, or null (switch off, nothing built, no workspace, any
+ * error — the library is optional context and never fails a review).
+ */
+async function reviewDocsForPr(
+  item: Pick<QueueItem, 'ctx' | 'accountId' | 'prId'>,
+): Promise<{ dir: string; workspaceId: number } | null> {
+  try {
+    const { workspaceOfPr } = await import('../ticket-review/prepare.js');
+    const workspaceId = await workspaceOfPr(item.ctx, item.accountId, item.prId);
+    if (workspaceId == null) return null;
+    const { reviewDocsFor } = await import('../../reference-docs/context.js');
+    const docs = await reviewDocsFor(item.accountId, workspaceId);
+    return docs != null ? { dir: docs.dir, workspaceId } : null;
+  } catch (err) {
+    item.ctx.log.warn(
+      `claude review pr ${item.prId}: reference docs not read: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+}
+
+/** Check a docs run's references and each finding's `docRefs` against the library (review-refs.ts). */
+async function checkReviewDocs<F extends { docRefs?: unknown }>(
+  ctx: AgentContext,
+  item: Pick<QueueItem, 'accountId' | 'prId'>,
+  workspaceId: number,
+  res: Pick<RunReviewResult, 'docReferences'>,
+  findings: F[],
+): Promise<{ references: ReviewDocReference[]; findings: Array<F & { docCitations: ReferenceDocCitation[] }> }> {
+  try {
+    const [{ loadLibrarySnapshot }, { validateDocReferences, validateDocCitations }] = await Promise.all([
+      import('../../reference-docs/context.js'),
+      import('../../reference-docs/review-refs.js'),
+    ]);
+    const lib = await loadLibrarySnapshot(item.accountId, workspaceId);
+    const { references, dropped } = validateDocReferences(res.docReferences, lib);
+    if (dropped > 0) ctx.log.info(`claude review pr ${item.prId}: dropped ${dropped} reference(s) that did not check out`);
+    return {
+      references,
+      findings: findings.map((f) => ({ ...f, docCitations: validateDocCitations(f.docRefs, lib) })),
+    };
+  } catch (err) {
+    ctx.log.warn(`claude review pr ${item.prId}: references not checked: ${err instanceof Error ? err.message : String(err)}`);
+    return { references: [], findings: findings.map((f) => ({ ...f, docCitations: [] })) };
+  }
 }
 
 /** A ticket peer ready for the prompt (`PromptPeer`) and for its checkout. */

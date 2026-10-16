@@ -17,6 +17,8 @@ export interface MappedReview {
   // Passed through VERBATIM; the plugin validates coverage against what it sent.
   followUp?: ReviewFollowUpReport[];
   threads?: ReviewThreadReport[];
+  // A docs run's `docReferences`, raw.
+  docReferences?: unknown;
 }
 
 /**
@@ -48,6 +50,8 @@ export function mapSubmittedReview(payload: SubmitReviewPayload, strippedDiff: s
       fileInDiff: index.has(f.path),
       priorRef: f.priorRef ?? null,
       lens: f.lens ?? null,
+      // Only a docs run's shape has it; carried raw, checked by the manager.
+      ...(f.docRefs !== undefined ? { docRefs: f.docRefs } : {}),
     };
   });
   return {
@@ -57,5 +61,6 @@ export function mapSubmittedReview(payload: SubmitReviewPayload, strippedDiff: s
     findings,
     ...(payload.followUp !== undefined ? { followUp: payload.followUp } : {}),
     ...(payload.threads !== undefined ? { threads: payload.threads } : {}),
+    ...(payload.docReferences !== undefined ? { docReferences: payload.docReferences } : {}),
   };
 }

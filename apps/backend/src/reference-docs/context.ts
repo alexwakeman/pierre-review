@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from '../config.js';
-import { readIndex } from './library.js';
-import { libraryDir } from './paths.js';
+import { readIndex, readLibraryFile } from './library.js';
+import { libraryDir, parseLibraryPath } from './paths.js';
 import { docsNavigationPrompt } from './prompts.js';
-import { countBuiltDocs, readDocsInReview } from './store.js';
+import type { LibrarySnapshot } from './review-refs.js';
+import { countBuiltDocs, listDocRows, readDocsInReview } from './store.js';
 
 // THE LIBRARY, FOR OTHER AGENTS (Claude Review, the ticket review, This Sprint's checks —
 // docs/REFERENCE-DOCS.md § For other agents). A run that should consult the workspace's reference
@@ -51,3 +52,36 @@ export async function docsContextFor(accountId: number, workspaceId: number): Pr
 }
 
 export { docsNavigationPrompt };
+
+// ---- for a review run (review-refs.ts) ----
+
+/**
+ * The library a review should read, or null: null whenever `usable` is false (switch off, nothing
+ * built, agentic AI off here, no workspace) — and on ANY error, because the library is optional
+ * context and must never fail a review. Callers pass the result straight through: null ⇒ the run is
+ * built exactly as before.
+ */
+export async function reviewDocsFor(accountId: number, workspaceId: number | null | undefined): Promise<{ dir: string } | null> {
+  if (workspaceId == null || !Number.isInteger(workspaceId) || workspaceId <= 0) return null;
+  try {
+    const c = await docsContextFor(accountId, workspaceId);
+    return c.usable ? { dir: c.dir } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The built documents and a reader confined to the library — what `validateDocReferences` checks against. */
+export async function loadLibrarySnapshot(accountId: number, workspaceId: number): Promise<LibrarySnapshot> {
+  const rows = await listDocRows(accountId, workspaceId);
+  return {
+    dir: libraryDir(accountId, workspaceId),
+    docs: rows
+      .filter((r) => r.builtAt != null)
+      .map((r) => ({ slug: r.slug, title: r.title, sections: r.sections ?? null })),
+    read: (path) => {
+      const parsed = parseLibraryPath(path);
+      return parsed ? readLibraryFile(accountId, workspaceId, parsed.path) : null;
+    },
+  };
+}

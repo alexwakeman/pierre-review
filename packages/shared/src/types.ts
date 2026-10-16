@@ -11,6 +11,7 @@ import type {
 import type { FlowBudgetMeasure, FlowSettings, ResolvedFlowSettings } from './flow-settings.js';
 import type { MyTurnSettings } from './my-turn-settings.js';
 import type { SonarIssue } from './sonar.js';
+import type { ReferenceDocCitation, ReviewDocReference } from './reference-docs.js';
 
 export type DerivedState =
   | 'resolved'
@@ -6975,6 +6976,9 @@ export interface ClaudeFinding {
   // not done. null/absent ⇒ an ordinary finding (and every row before migration 0079 / pg 0066).
   // Otherwise it is a finding like any other — Post, Reword, Ignore, Submit review, follow-up.
   story?: ClaudeFindingStory | null;
+  // The reference-library sections this finding rests on (docs/REFERENCE-DOCS.md § Use in reviews),
+  // server-checked to name a built section of the workspace's library. Absent/[] = none.
+  docCitations?: ReferenceDocCitation[];
 }
 
 // Which story item a story finding stands for. `index` is the ticket's 0-based position on the run
@@ -7443,6 +7447,10 @@ export interface ClaudeReview {
   // What auto-posting did with this run (migration 0087 / pg 0074). null/absent = it never looked
   // (a manual run, or auto-posting was off).
   autoPost?: ClaudeAutoPostWire | null;
+  // The reference-library passages this run used (docs/REFERENCE-DOCS.md § Use in reviews), each
+  // server-checked. null/absent = the run did not read the library (switch off, empty library, or a
+  // run from before the feature).
+  docReferences?: ReviewDocReference[] | null;
 }
 
 // The reviewed commit against the PR's current head (the SYNCED head — DB-only, no GitHub call).
@@ -8013,6 +8021,9 @@ export interface TicketAssessment {
   criteria: TicketCriterion[];
   missing: TicketMissingItem[];
   notRequested: TicketNotRequestedItem[];
+  // The reference-library passages the run used for this story: supporting, contradicting or context
+  // (docs/REFERENCE-DOCS.md § Use in reviews). Absent = the run did not read the library.
+  references?: ReviewDocReference[];
 }
 
 // One unmet / partly met criterion or missing item — the thing that can be posted to GitHub.

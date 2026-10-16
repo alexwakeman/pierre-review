@@ -81,6 +81,7 @@ import { CiCheckSection } from './CiCheckSection.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
 import { ClaudeReviewSonarSection } from './ClaudeReviewSonar.js';
 import { ClaudeReviewDiagramsSection } from './ClaudeReviewDiagrams.js';
+import { DocCitationLinks, DocReferencesSection } from './DocReferences.js';
 import { PrRefText, ReviewPrRefsProvider } from './ReviewPrRefs.js';
 import { REVIEW_ITEM_CARD, REVIEW_ITEM_TITLE, REVIEW_META } from '../lib/reviewStyles.js';
 import { reviewTexts, type KnownPr } from '../lib/reviewPrRefs.js';
@@ -936,6 +937,8 @@ export function FindingRow({
               ignored finding is collapsed; the action bar can re-expand it. */}
           {!detailsHidden && (
           <>
+          {/* The reference-library sections this finding rests on (server-checked). */}
+          <DocCitationLinks citations={finding.docCitations} />
           {/* Code anchor → reveals this finding's file/line in the Changes tab when the
               file is in the PR's changeset, else (as before) opens it on GitHub. The small
               ↗ beside it always exits to the PR diff line on GitHub — today's behaviour,
@@ -1393,6 +1396,9 @@ function ClaudesReview({
         changedPaths={changedPaths}
         onOpenInChanges={onOpenInChanges}
       />
+      {/* The reference-library passages this run used (docs/REFERENCE-DOCS.md § Use in reviews).
+          Absent when the run did not read the library. */}
+      <DocReferencesSection references={review.docReferences} />
       {/* The flow this change touches (+ the whole story's, on a multi-PR ticket) — a separate Sonnet
           run after each review (docs/CLAUDE-REVIEW.md § Sequence diagrams). Absent without agentic AI. */}
       <ClaudeReviewDiagramsSection prId={review.prId} reviewFinishedAt={review.finishedAt ?? null} />
