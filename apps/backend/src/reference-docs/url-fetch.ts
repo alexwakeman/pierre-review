@@ -3,17 +3,22 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 import { REFERENCE_DOC_MAX_BYTES } from '@pierre-review/shared';
-import { JiraFetchError, guardedLookup, isBlockedAddress, type LookupFn } from '../tracker/jira/fetch.js';
+import { config } from '../config.js';
+import { JiraFetchError, guardedLookup, isBlockedAddress, isPrivateNetworkAddress, type LookupFn } from '../tracker/jira/fetch.js';
 
 // FETCHING A WEB PAGE FOR THE LIBRARY — a server-side request to an address the reader typed
 // (docs/REFERENCE-DOCS.md § Adding a web page). The reader is the only caller (the route is local
 // only), but the page is a stranger's, and a URL is the classic way to make a server reach what it
-// should not, so the guard is the tracker's (tracker/jira/fetch.ts), STRICTER, in BOTH modes:
+// should not, so the guard is the tracker's (tracker/jira/fetch.ts), STRICTER:
 //
 //   • http and https only; no user:password@ in the address;
-//   • NO PRIVATE ADDRESSES: loopback, RFC1918, CGNAT, link-local (the cloud metadata address),
-//     unique-local, multicast and reserved — for an IP-literal host up front, and for a name AT
-//     CONNECT TIME through the socket's own `lookup`, so DNS rebinding has no second answer to give;
+//   • NO LOOPBACK, LINK-LOCAL (the cloud metadata address), MULTICAST OR RESERVED addresses, in
+//     either mode — for an IP-literal host up front, and for a name AT CONNECT TIME through the
+//     socket's own `lookup`, so DNS rebinding has no second answer to give;
+//   • PRIVATE NETWORKS (RFC1918, CGNAT, unique-local) and intranet names (single-label, `.local`)
+//     are ALLOWED IN LOCAL MODE ONLY — the reader's own company wiki is the point, and Limn runs on
+//     the reader's machine, on the reader's network. Cloud refuses them. `localhost` stays refused
+//     in both: it is Limn's own unauthenticated API in local mode;
 //   • redirects are followed ONLY on the same host (at most 3; http → https allowed), each one
 //     re-checked; a redirect to another host is refused;
 //   • a hard TIMEOUT for each exchange and a SIZE CAP (the upload cap) while reading the body.
@@ -33,7 +38,7 @@ export type UrlFetchErrorCode =
 
 export const URL_FETCH_MESSAGES: Record<UrlFetchErrorCode, string> = {
   bad_url: 'That is not a web address Limn can read. Use an http or https address.',
-  blocked: 'That address points at a private or local network, which Limn does not read.',
+  blocked: 'Limn does not read pages at that address.',
   redirect_off_host: 'That page redirects to another site. Add the address it redirects to instead.',
   too_many_redirects: 'That page redirects too many times.',
   timeout: 'The page took too long to answer.',
@@ -52,8 +57,19 @@ export class UrlFetchError extends Error {
   }
 }
 
+export interface PagePolicy {
+  /** Local: private networks + intranet names allowed. Cloud: public addresses only. */
+  privateNetwork: boolean;
+}
+
+export const defaultPagePolicy = (): PagePolicy => ({ privateNetwork: !config.isCloud });
+
+function blockedFor(policy: PagePolicy): (ip: string) => boolean {
+  return (ip) => isBlockedAddress(ip) && !(policy.privateNetwork && isPrivateNetworkAddress(ip));
+}
+
 /** Parse and vet an address before any socket opens. */
-export function checkPageUrl(raw: string): URL {
+export function checkPageUrl(raw: string, policy: PagePolicy = defaultPagePolicy()): URL {
   let url: URL;
   try {
     url = new URL(raw.trim());
@@ -64,10 +80,12 @@ export function checkPageUrl(raw: string): URL {
   if (url.username !== '' || url.password !== '') throw new UrlFetchError('bad_url');
   const host = url.hostname.replace(/^\[|\]$/g, '');
   if (host === '') throw new UrlFetchError('bad_url');
-  if (isIP(host) !== 0 && isBlockedAddress(host)) throw new UrlFetchError('blocked');
-  const lowered = host.toLowerCase();
-  if (lowered === 'localhost' || lowered.endsWith('.localhost') || lowered.endsWith('.local') || !lowered.includes('.')) {
-    if (isIP(host) === 0) throw new UrlFetchError('blocked');
+  if (isIP(host) !== 0) {
+    if (blockedFor(policy)(host)) throw new UrlFetchError('blocked');
+  } else {
+    const lowered = host.toLowerCase();
+    if (lowered === 'localhost' || lowered.endsWith('.localhost')) throw new UrlFetchError('blocked');
+    if (!policy.privateNetwork && (lowered.endsWith('.local') || !lowered.includes('.'))) throw new UrlFetchError('blocked');
   }
   url.hash = '';
   return url;
@@ -150,13 +168,17 @@ export interface FetchedPage {
 }
 
 /** GET a page under the guard above. Throws UrlFetchError (its message is safe to show). */
-export async function fetchPage(raw: string, transport: PageTransport = nodePageTransport): Promise<FetchedPage> {
-  let url = checkPageUrl(raw);
+export async function fetchPage(
+  raw: string,
+  transport: PageTransport = nodePageTransport,
+  policy: PagePolicy = defaultPagePolicy(),
+): Promise<FetchedPage> {
+  let url = checkPageUrl(raw, policy);
   const host = url.hostname.toLowerCase();
   for (let hop = 0; ; hop++) {
     let res: PageResponse;
     try {
-      res = await transport(url, { lookup: guardedLookup(), timeoutMs: URL_FETCH_TIMEOUT_MS, maxBytes: REFERENCE_DOC_MAX_BYTES });
+      res = await transport(url, { lookup: guardedLookup(undefined, blockedFor(policy)), timeoutMs: URL_FETCH_TIMEOUT_MS, maxBytes: REFERENCE_DOC_MAX_BYTES });
     } catch (err) {
       if (err instanceof UrlFetchError) throw err;
       throw new UrlFetchError(err instanceof JiraFetchError && err.code === 'blocked' ? 'blocked' : 'network');
@@ -166,7 +188,7 @@ export async function fetchPage(raw: string, transport: PageTransport = nodePage
       if (!res.location) throw new UrlFetchError('http', res.status);
       let next: URL;
       try {
-        next = checkPageUrl(new URL(res.location, url).href);
+        next = checkPageUrl(new URL(res.location, url).href, policy);
       } catch (err) {
         throw err instanceof UrlFetchError ? err : new UrlFetchError('bad_url');
       }

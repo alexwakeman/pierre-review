@@ -126,6 +126,36 @@ export function isBlockedAddress(ip: string): boolean {
   return true;
 }
 
+const PRIVATE_V4 = new BlockList();
+for (const [net, prefix] of [
+  ['10.0.0.0', 8],
+  ['100.64.0.0', 10],
+  ['172.16.0.0', 12],
+  ['192.168.0.0', 16],
+] as const) {
+  PRIVATE_V4.addSubnet(net, prefix, 'ipv4');
+}
+const PRIVATE_V6 = new BlockList();
+PRIVATE_V6.addSubnet('fc00::', 7, 'ipv6');
+PRIVATE_V6.addSubnet('fec0::', 10, 'ipv6');
+
+/**
+ * True when `ip` is on a PRIVATE NETWORK — RFC1918, CGNAT, unique-local, site-local — and nothing
+ * else: loopback, link-local (incl. the cloud metadata address), multicast and reserved are NOT
+ * private-network addresses. The reference-docs URL fetch lets these through in LOCAL mode only.
+ */
+export function isPrivateNetworkAddress(ip: string): boolean {
+  const bare = ip.replace(/^\[|\]$/g, '').replace(/%.*$/, '');
+  const family = isIP(bare);
+  if (family === 4) return PRIVATE_V4.check(bare, 'ipv4');
+  if (family === 6) {
+    const v4 = embeddedV4(bare);
+    if (v4 != null) return PRIVATE_V4.check(v4, 'ipv4');
+    return PRIVATE_V6.check(bare, 'ipv6');
+  }
+  return false;
+}
+
 export interface JiraFetchPolicy {
   /** Cloud: https only + public addresses only. Local: http and LAN allowed. */
   cloud: boolean;
@@ -169,12 +199,15 @@ export type LookupFn = (
  * refuses if ANY is blocked — a name answering one public and one private address is not a Jira
  * site, it is a rebinding setup. Exported for its test.
  */
-export function guardedLookup(resolve: typeof dnsLookup = dnsLookup): LookupFn {
+export function guardedLookup(
+  resolve: typeof dnsLookup = dnsLookup,
+  isBlocked: (ip: string) => boolean = isBlockedAddress,
+): LookupFn {
   return (hostname, options, callback) => {
     resolve(hostname, { ...options, all: true }, (err, addresses) => {
       if (err) return callback(err, '');
       const list = addresses as LookupAddress[];
-      if (list.length === 0 || list.some((a) => isBlockedAddress(a.address))) {
+      if (list.length === 0 || list.some((a) => isBlocked(a.address))) {
         const e = new JiraFetchError('blocked') as unknown as NodeJS.ErrnoException;
         return callback(e, '');
       }

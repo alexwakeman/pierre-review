@@ -18,6 +18,9 @@ const codeAsync = async (p: Promise<unknown>): Promise<string | null> => {
   }
 };
 
+const CLOUD = { privateNetwork: false };
+const LOCAL = { privateNetwork: true };
+
 describe('checkPageUrl — before any socket opens', () => {
   it.each([
     ['file:///etc/passwd', 'bad_url'],
@@ -34,8 +37,26 @@ describe('checkPageUrl — before any socket opens', () => {
     ['http://localhost:4000/api/me', 'blocked'],
     ['http://printer.local/', 'blocked'],
     ['http://intranet/', 'blocked'],
-  ])('%s → %s', (raw, want) => {
-    expect(code(() => checkPageUrl(raw))).toBe(want);
+  ])('cloud: %s → %s', (raw, want) => {
+    expect(code(() => checkPageUrl(raw, CLOUD))).toBe(want);
+  });
+
+  it.each([
+    ['http://10.1.2.3/wiki', null],
+    ['http://192.168.0.20/', null],
+    ['http://[::ffff:192.168.0.1]/', null],
+    ['http://[fd00::1]/', null],
+    ['http://printer.local/', null],
+    ['http://intranet/handbook', null],
+    ['http://127.0.0.1/', 'blocked'],
+    ['http://[::1]/', 'blocked'],
+    ['http://2130706433/', 'blocked'],
+    ['http://169.254.169.254/latest/meta-data', 'blocked'],
+    ['http://[fe80::1]/', 'blocked'],
+    ['http://localhost:4000/api/me', 'blocked'],
+    ['http://app.localhost/', 'blocked'],
+  ])('local: %s → %s', (raw, want) => {
+    expect(code(() => checkPageUrl(raw, LOCAL))).toBe(want);
   });
 
   it('allows an ordinary public page and drops its fragment', () => {
@@ -63,6 +84,7 @@ describe('fetchPage — redirects, statuses and the guarded lookup', () => {
   it('refuses a redirect to another host, to a private address, or downgrading to http', async () => {
     expect(await codeAsync(fetchPage('https://example.com/a', async () => redirect('https://evil.example.net/')))).toBe('redirect_off_host');
     expect(await codeAsync(fetchPage('https://example.com/a', async () => redirect('http://127.0.0.1/')))).toBe('blocked');
+    expect(await codeAsync(fetchPage('https://example.com/a', async () => redirect('http://10.0.0.5/'), CLOUD))).toBe('blocked');
     expect(await codeAsync(fetchPage('https://example.com/a', async () => redirect('http://example.com/b')))).toBe('redirect_off_host');
   });
 

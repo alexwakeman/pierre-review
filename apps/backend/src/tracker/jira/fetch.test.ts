@@ -18,6 +18,7 @@ import {
   JiraFetchError,
   checkJiraUrl,
   guardedLookup,
+  isPrivateNetworkAddress,
   isBlockedAddress,
   jiraGetJson,
   nodeTransport,
@@ -115,6 +116,19 @@ describe('guardedLookup — the check runs on the address the socket dials (no r
         resolve({ err, address }),
       );
     });
+
+  it('a caller-supplied predicate decides (the reference-docs local policy)', async () => {
+    const localPolicy = (ip: string) => isBlockedAddress(ip) && !isPrivateNetworkAddress(ip);
+    const via = (addrs: LookupAddress[]) =>
+      new Promise<unknown>((resolve) =>
+        guardedLookup(fakeResolve(addrs), localPolicy)('wiki', { all: false } as never, (err) => resolve(err)),
+      );
+    expect(await via([{ address: '10.0.0.8', family: 4 }])).toBeNull();
+    expect(await via([{ address: 'fd12::5', family: 6 }])).toBeNull();
+    expect(await via([{ address: '127.0.0.1', family: 4 }])).toBeInstanceOf(JiraFetchError);
+    expect(await via([{ address: '169.254.169.254', family: 4 }])).toBeInstanceOf(JiraFetchError);
+    expect(await via([{ address: '10.0.0.8', family: 4 }, { address: '::1', family: 6 }])).toBeInstanceOf(JiraFetchError);
+  });
 
   it('refuses a name that resolves to a private or link-local address', async () => {
     const r1 = await run([{ address: '10.0.0.8', family: 4 }]);

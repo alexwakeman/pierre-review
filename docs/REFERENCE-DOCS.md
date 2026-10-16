@@ -80,11 +80,13 @@ NULs) — then the NAME tells markdown (`.md`/`.markdown`/`.mdx`) from HTML (`.h
   dependency: core registers an `application/octet-stream` buffer parser, and only this route raises
   its `bodyLimit` (25 MB + 1 KiB); every other route keeps the 256 KiB default.
 - **Web page**: `POST /api/docs/url`. The page is fetched by the BUILD (its converting stage), so the
-  route answers at once and a Rebuild re-fetches. `url-fetch.ts`, in BOTH modes: http/https only, no
-  `user:pass@`; **no private addresses** — loopback, RFC1918, CGNAT, link-local (cloud metadata),
-  unique-local, multicast, reserved, `localhost`/`.local`/single-label names — judged up front for an IP
-  literal and AT CONNECT TIME through the tracker's `guardedLookup` for a name (no DNS-rebinding second
-  answer); redirects followed **only on the same host** (≤ 3, never https → http), each re-checked; 20s
+  route answers at once and a Rebuild re-fetches. `url-fetch.ts`: http/https only, no `user:pass@`;
+  **never loopback, link-local (cloud metadata), multicast, reserved or `localhost`** in either mode
+  (`localhost` is Limn's own unauthenticated API locally); **private networks — RFC1918, CGNAT,
+  unique-local — and intranet names (`.local`, single-label) are allowed in LOCAL mode only**
+  (`PagePolicy.privateNetwork = !isCloud`; the reader's company wiki is the point), refused in cloud.
+  Judged up front for an IP literal and AT CONNECT TIME through the tracker's `guardedLookup` with the
+  policy's predicate for a name (no DNS-rebinding second answer; ANY blocked answer refuses); redirects followed **only on the same host** (≤ 3, never https → http), each re-checked; 20s
   per exchange; the 25 MB cap while reading. A URL may serve a PDF, text or markdown as well as HTML.
 - **Conversion**: text/markdown as is. Word: `mammoth` → HTML → `turndown` (+ `turndown-plugin-gfm`
   tables). HTML: narrowed to `<main>`/`<article>` when present; `script`/`style`/`nav`/`footer`/forms/
