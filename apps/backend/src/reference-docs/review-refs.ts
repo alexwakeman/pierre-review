@@ -13,7 +13,7 @@ import {
   type ReviewDocReference,
   type ReviewDocVerdict,
 } from '@pierre-review/shared';
-import { parseLibraryPath } from './paths.js';
+import { parseLibraryPath, SECTION_FILE } from './paths.js';
 import { docsNavigationPrompt } from './prompts.js';
 import { fileAnchors, SECTION_HEADER_MARK } from './render.js';
 
@@ -30,7 +30,9 @@ import { fileAnchors, SECTION_HEADER_MARK } from './render.js';
 //     finding's `docRefs`).
 //   • EVERY REFERENCE IS CHECKED HERE before it is stored (`validateDocReferences`): the link must
 //     parse under the library's strict grammar, name a SECTION file of a BUILT document of THIS
-//     workspace and exist; the quote must appear in that section (whitespace, markdown emphasis and
+//     workspace and exist (a DOCUMENT-RELATIVE link, as CONTENTS.md and a section's nav write it, is
+//     resolved when exactly one document has that file, or exactly one such section holds the
+//     quote); the quote must appear in that section (whitespace, markdown emphasis and
 //     typographic quotes folded; "…" may skip words). Anything else is DROPPED and counted, never
 //     shown. An anchor that names no heading of the section is dropped (the link is kept).
 //
@@ -91,7 +93,7 @@ export function buildDocCitationsField(z: ZodNs) {
 
 export type DocsReviewKind = 'pr' | 'pr_diff_only' | 'ticket' | 'sprint';
 
-const REPORTING = `- Report each passage you relied on in \`docReferences\`: the section link; a quote copied EXACTLY from the section (at most ${REVIEW_DOC_QUOTE_MAX_CHARS} characters; use … to skip words inside it); the verdict; and a one-sentence note. Contradictions first.
+const REPORTING = `- Report each passage you relied on in \`docReferences\`: the section link, written from the library root (\`<document>/sections/NN-name.md#anchor\`, not the shorter form CONTENTS.md uses); a quote copied EXACTLY from the section (at most ${REVIEW_DOC_QUOTE_MAX_CHARS} characters; use … to skip words inside it); the verdict; and a one-sentence note. Contradictions first.
 - The server checks every reference: one whose link is not a section of the library, or whose quote is not in that section, is thrown away. Copy the words; do not paraphrase inside the quote.
 - Leave \`docReferences\` out when nothing in the library bears on this.`;
 
@@ -105,14 +107,18 @@ export function docsReviewPromptBlock(dir: string, kind: DocsReviewKind): string
     return `${nav}
 
 # Checking the change against the library
-${kind === 'pr_diff_only' ? '- This review has no checkout of the repository: Read, Glob and Grep reach the library only. Use them for nothing else.\n' : ''}- Look up what the library says about the behaviour, rules and requirements this change touches, and about the story when the title or description names one. Read only those sections.
+${kind === 'pr_diff_only' ? '- This review has no checkout of the repository: Read, Glob and Grep reach the library only. Use them for nothing else.\n' : ''}- \`docReferences\` is a field of your submit_review call; \`docRefs\` is a field of a finding.
+- Look up what the library says about the behaviour, rules and requirements this change touches, and about the story when the title or description names one. Read only those sections.
 - Where a finding rests on the library, put its section links in that finding's \`docRefs\` and say in the body what the document requires.
 ${REPORTING}`;
   }
   const subject = kind === 'ticket' ? 'the code in the pull requests' : 'the code on the default branch';
+  const tool = kind === 'ticket' ? 'submit_ticket_review' : 'submit_assessment';
   return `${nav}
 
 # Checking the story against the library
+- The library folder is one more READ-ONLY directory you may read, beside the ones named above. Read, Glob and Grep reach it; nothing else does.
+- \`docReferences\` is a field of your ${tool} call, beside the others it lists.
 For this ticket:
 - Find the passages that bear on the story: the rules, definitions and requirements it relies on. Read only those sections.
 - Flag every CONTRADICTION: where the story's text, its acceptance criteria or ${subject} goes against the library. Use the verdict 'contradicts' and say which side in the note.
@@ -125,6 +131,8 @@ ${REPORTING}`;
 
 /** What the validator needs to know about the workspace's library. */
 export interface LibrarySnapshot {
+  /** The workspace whose library this is — stamped on every checked reference, so its link opens it. */
+  workspaceId: number;
   /** The library folder as the run was told it (absolute). */
   dir: string;
   /** Built documents only. */
@@ -219,29 +227,57 @@ export function libraryRelativeLink(raw: unknown, dir: string): string | null {
   return `${bare.startsWith('./') ? bare.slice(2) : bare}${anchor}`;
 }
 
-/** One link → a citation of a built section of this library, or null. */
-export function citationOf(raw: unknown, lib: LibrarySnapshot): { citation: ReferenceDocCitation; text: string } | null {
-  const rel = libraryRelativeLink(raw, lib.dir);
-  if (rel == null) return null;
-  const parsed = parseLibraryPath(rel);
-  if (parsed == null || parsed.path.kind !== 'section') return null;
-  const path = parsed.path;
-  const doc = lib.docs.find((d) => d.slug === path.slug);
+type CitationHit = { citation: ReferenceDocCitation; text: string };
+
+function hitFor(path: string, slug: string, anchorRaw: string | null, lib: LibrarySnapshot): CitationHit | null {
+  const doc = lib.docs.find((d) => d.slug === slug);
   if (doc == null) return null;
-  const text = lib.read(path.path);
+  const text = lib.read(path);
   if (text == null) return null;
-  const anchor = parsed.anchor != null && fileAnchors(text).has(parsed.anchor) ? parsed.anchor : null;
-  const section = (doc.sections ?? []).find((s) => s.path === path.path);
+  const anchor = anchorRaw != null && fileAnchors(text).has(anchorRaw) ? anchorRaw : null;
+  const section = (doc.sections ?? []).find((s) => s.path === path);
   return {
-    citation: {
-      path: path.path,
-      anchor,
-      docSlug: doc.slug,
-      docTitle: doc.title,
-      sectionTitle: section?.title ?? null,
-    },
+    citation: { path, workspaceId: lib.workspaceId, anchor, docSlug: doc.slug, docTitle: doc.title, sectionTitle: section?.title ?? null },
     text,
   };
+}
+
+/**
+ * Every built section one link could name. A library-root link (`slug/sections/NN-name.md`) names at
+ * most one. The DOCUMENT-RELATIVE forms the library's own files show the model — CONTENTS.md writes
+ * `sections/NN-name.md`, a section's nav a bare `NN-name.md` — name a file in EVERY document that has
+ * one, so each built document holding that file is a candidate; the caller decides (a lone candidate,
+ * or the one whose text holds the quote).
+ */
+export function citationCandidates(raw: unknown, lib: LibrarySnapshot): CitationHit[] {
+  const rel = libraryRelativeLink(raw, lib.dir);
+  if (rel == null) return [];
+  const parsed = parseLibraryPath(rel);
+  if (parsed != null) {
+    if (parsed.path.kind !== 'section') return [];
+    const hit = hitFor(parsed.path.path, parsed.path.slug, parsed.anchor, lib);
+    return hit ? [hit] : [];
+  }
+  const hash = rel.indexOf('#');
+  const bare = hash >= 0 ? rel.slice(0, hash) : rel;
+  const anchorRaw = hash >= 0 ? rel.slice(hash + 1) : null;
+  const file = bare.startsWith('sections/') ? bare.slice('sections/'.length) : bare;
+  if (!SECTION_FILE.test(file)) return [];
+  const out: CitationHit[] = [];
+  for (const d of lib.docs) {
+    // Re-parse the library-root spelling: the strict grammar stays the only gate on a path.
+    const p = parseLibraryPath(`${d.slug}/sections/${file}${anchorRaw != null ? `#${anchorRaw}` : ''}`);
+    if (p == null || p.path.kind !== 'section') continue;
+    const hit = hitFor(p.path.path, p.path.slug, p.anchor, lib);
+    if (hit) out.push(hit);
+  }
+  return out;
+}
+
+/** One link → a citation of a built section of this library, or null (none, or more than one). */
+export function citationOf(raw: unknown, lib: LibrarySnapshot): CitationHit | null {
+  const hits = citationCandidates(raw, lib);
+  return hits.length === 1 ? hits[0]! : null;
 }
 
 export interface DocReferencesResult {
@@ -275,8 +311,10 @@ export function validateDocReferences(raw: unknown, lib: LibrarySnapshot): DocRe
       dropped += 1;
       continue;
     }
-    const hit = citationOf(e.link, lib);
-    if (hit == null || !quoteAppearsIn(sectionBodyOf(hit.text), quote)) {
+    // A document-relative link may name a file in several documents: the quote picks the one.
+    const matching = citationCandidates(e.link, lib).filter((h) => quoteAppearsIn(sectionBodyOf(h.text), quote));
+    const hit = matching.length === 1 ? matching[0]! : null;
+    if (hit == null) {
       dropped += 1;
       continue;
     }

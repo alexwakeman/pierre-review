@@ -71,7 +71,7 @@ import {
   ticketCurrency,
   ticketProgressPct,
 } from '../lib/ticketReview.js';
-import { prCardOf, prTicketShare, shareRestLine, slimStoryCheck } from '../lib/ticketShare.js';
+import { prCardOf, prTicketShare, shareDocReferences, shareRestLine, slimStoryCheck } from '../lib/ticketShare.js';
 import { jiraRefFor, storyUrlOf } from '../lib/ticketStory.js';
 import { showStoryInOpenPrs } from '../store/stackStoryCheck.js';
 import { AiRunGate } from './AiSetup.js';
@@ -147,7 +147,7 @@ function TicketShare({
       )}
       <MissingList items={share.missing} {...ctx} />
       <NotRequestedList items={share.notRequested} {...ctx} />
-      <DocReferencesBlock references={a?.references} />
+      <DocReferencesBlock references={shareDocReferences(a?.references, share)} />
       {card != null && <PrCardDisclosure card={card} />}
       <p className={`text-xs ${MUTED}`}>
         {rest != null && <>{rest} </>}

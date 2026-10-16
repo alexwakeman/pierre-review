@@ -75,6 +75,7 @@ export async function reviewDocsFor(accountId: number, workspaceId: number | nul
 export async function loadLibrarySnapshot(accountId: number, workspaceId: number): Promise<LibrarySnapshot> {
   const rows = await listDocRows(accountId, workspaceId);
   return {
+    workspaceId,
     dir: libraryDir(accountId, workspaceId),
     docs: rows
       .filter((r) => r.builtAt != null)

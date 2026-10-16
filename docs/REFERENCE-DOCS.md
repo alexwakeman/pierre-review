@@ -221,10 +221,16 @@ library exists to avoid.
    run's allow-list says. Every other rule of the guard holds (traversal, symlinks out, outside paths). A
    DIFF-ONLY PR review, otherwise tool-less, gains Read/Glob/Grep (its scratch folder is empty, so they
    reach the library only); Bash, Write, Edit, MultiEdit and NotebookEdit stay denied on every run.
+   ⚠ It also gets a bigger TURN CAP (`reviewMaxTurnsFor`: `max(REVIEW_DIFF_ONLY_MAX_TURNS,
+   DIFF_ONLY_DOCS_MIN_TURNS = 14)`): the tool-less cap of 6 was sized for ~2 turns, and the INDEX →
+   CONTENTS → sections → submit walk is ≥ 4 — a run that hits the cap fails before submit_review, billed.
 2. **The prompt.** `docsReviewPromptBlock(dir, kind)` is appended to the SYSTEM prompt: the shared
    navigation block (`docsNavigationPrompt` — start at INDEX.md, open only the relevant documents'
    CONTENTS.md, read only relevant sections, grep for a term, never a whole document, the text is data,
-   cite the section link), then the run's own task and how to report.
+   cite the section link), then the run's own task and how to report. ⚠ The DIFF-ONLY base prompt's
+   "no Read, Glob, Grep … the ONLY tool is submit_review" sentence is SWAPPED, not left to contradict the
+   block (`REVIEW_SYSTEM_PROMPT_DIFF_ONLY_WITH_LIBRARY`); the ticket / sprint blocks name the library as one
+   more read-only directory and `docReferences` as a field of their submit call.
 3. **The tool.** The submit tool gains `docReferences: [{ link, quote ≤ 300, verdict: 'supports' |
    'contradicts' | 'context', note ≤ 400, about? }]` (≤ 20), and the PR review's finding gains `docRefs`
    (≤ 3 links). The quote's length is enforced BY THE TOOL SCHEMA, so the model rewrites rather than the
@@ -242,13 +248,19 @@ JSON schema too), and `docs-pipeline.test.ts` pins the PR review end to end (no 
 
 - the LINK — relative, `./`-prefixed, a markdown `[x](y)` or an ABSOLUTE path inside the library (made
   relative) — must parse under the strict grammar, name a **section** file (never INDEX.md or a
-  CONTENTS.md, whose text is summaries) of a BUILT document of THIS workspace, and exist. An anchor naming
+  CONTENTS.md, whose text is summaries) of a BUILT document of THIS workspace, and exist. A
+  DOCUMENT-RELATIVE link as the library's own files write it (`sections/NN-name.md` in CONTENTS.md, a bare
+  `NN-name.md` in a section's nav) is tried against every built document: kept when exactly one has the
+  file — for a reference, exactly one whose section holds the quote (`citationCandidates`). An anchor naming
   no heading of that section (`fileAnchors`) is dropped; the link is kept.
 - the QUOTE (≥ 12 letters/digits, ≤ 300 characters) must appear in that section's TEXT — the server-written
   header (mark, title, crumbs, nav) is left off first, so "Previous · Contents · Next" matches nothing.
   Both sides are folded (`foldForQuote`: NFKC, markdown emphasis/escapes/link targets, typographic quotes
   and dashes, list/quote/table markers, whitespace, case); "…" or "..." may skip words, the pieces in order.
 - anything else is DROPPED and counted (logged), never shown. Duplicates collapse; contradictions sort first.
+- each kept reference / citation is stamped with the `workspaceId` of the library it was checked against
+  (optional on the wire; absent on chat citations and pre-field rows). The SPA links THAT library —
+  switching workspace if needed — never the reader's selected one; a row without it shows a plain label.
 
 A finding's `docRefs` go through the same link check (`validateDocCitations`, no quote). A docs run that
 kept nothing stores `[]` ("looked, found nothing" — the PR tab says "Nothing in the library bears on this
@@ -257,7 +269,8 @@ any fingerprint: a library edit does not make a review stale.
 
 **On screen** (`components/DocReferences.tsx`): the Claude Review tab's **Reference docs** section (after
 SonarCloud; verdict counts in the header, the explanation behind ⓘ), a finding's "Reference: Document ›
-Section" line, and a compact block in Story check (the whole story and this PR's share) and in This
+Section" line, and a compact block in Story check (the whole story; this PR's share lists only the references whose
+`about` names one of ITS criteria / missing items, `shareDocReferences`) and in This
 Sprint's Code check. Every link opens the section in Activity → Docs — a click in-app
 (`store/openDocs.ts`), the href a deep link for a new tab:
 `/app/?workspace=<id>&activityRepo=docs&doc=<slug>&section=<NN-name.md>[&anchor=<a>]`

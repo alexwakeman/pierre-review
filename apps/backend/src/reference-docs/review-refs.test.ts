@@ -62,6 +62,7 @@ beforeAll(() => {
     ['billing-handbook/sections/04-refunds.md', REFUNDS],
   ]);
   lib = {
+    workspaceId: 7,
     dir,
     docs: [
       {
@@ -96,6 +97,7 @@ describe('validateDocReferences', () => {
     expect(references).toEqual([
       {
         path: 'billing-handbook/sections/04-refunds.md',
+        workspaceId: 7,
         anchor: 'partial-refunds',
         docSlug: 'billing-handbook',
         docTitle: 'Billing handbook',
@@ -175,6 +177,58 @@ describe('validateDocReferences', () => {
     ]);
   });
 
+  // CONTENTS.md writes `sections/NN-name.md` and a section's nav a bare `NN-name.md`: a model that
+  // copies a link as the file shows it must not lose a valid reference.
+  it('resolves a DOCUMENT-RELATIVE link when one document has that section', () => {
+    const r = validateDocReferences(
+      [ref({ link: 'sections/04-refunds.md#partial-refunds' }), ref({ link: '04-refunds.md', verdict: 'supports', quote: 'Refunds are paid within fourteen days' })],
+      lib,
+    );
+    expect(r.dropped).toBe(0);
+    expect(r.references.map((x) => [x.path, x.anchor])).toEqual([
+      ['billing-handbook/sections/04-refunds.md', 'partial-refunds'],
+      ['billing-handbook/sections/04-refunds.md', null],
+    ]);
+    expect(validateDocCitations(['sections/04-refunds.md#partial-refunds'], lib).map((c) => c.path)).toEqual([
+      'billing-handbook/sections/04-refunds.md',
+    ]);
+  });
+
+  it('a document-relative link in TWO documents: the quote picks one, a citation alone refuses', () => {
+    const other = renderSection({
+      docTitle: 'Support guide',
+      index: 3,
+      total: 5,
+      section: { title: 'Refunds', trail: [], body: '## Refunds\n\nSupport may refund a customer once per order.' },
+      prevFile: null,
+      nextFile: null,
+    });
+    const files = new Map<string, string>([
+      ['billing-handbook/sections/04-refunds.md', REFUNDS],
+      ['support-guide/sections/04-refunds.md', other],
+    ]);
+    const two: LibrarySnapshot = {
+      workspaceId: 7,
+      dir,
+      docs: [
+        lib.docs[0]!,
+        { slug: 'support-guide', title: 'Support guide', sections: [{ path: 'support-guide/sections/04-refunds.md', title: 'Refunds', summary: '', depth: 1, trail: [], headings: [], words: 9 }] },
+      ],
+      read: (p) => (parseLibraryPath(p) != null ? (files.get(p) ?? null) : null),
+    };
+    const r = validateDocReferences(
+      [
+        ref({ link: 'sections/04-refunds.md', verdict: 'supports', quote: 'refund a customer once per order' }),
+        ref({ link: 'sections/04-refunds.md', verdict: 'context', quote: 'Refunds' + ' are paid within thirty days' }),
+      ],
+      two,
+    );
+    expect(r.references.map((x) => x.path)).toEqual(['support-guide/sections/04-refunds.md']);
+    expect(r.dropped).toBe(1);
+    expect(validateDocCitations(['sections/04-refunds.md'], two)).toEqual([]);
+    expect(validateDocCitations(['support-guide/sections/04-refunds.md'], two).map((c) => c.docSlug)).toEqual(['support-guide']);
+  });
+
   it('drops an anchor that names no heading, keeping the link', () => {
     const r = validateDocReferences([ref({ link: 'billing-handbook/sections/04-refunds.md#nowhere' })], lib);
     expect(r.references[0]?.anchor).toBeNull();
@@ -217,6 +271,7 @@ describe('validateDocCitations (a finding’s docRefs)', () => {
     expect(c).toEqual([
       {
         path: 'billing-handbook/sections/04-refunds.md',
+        workspaceId: 7,
         anchor: 'partial-refunds',
         docSlug: 'billing-handbook',
         docTitle: 'Billing handbook',
@@ -255,6 +310,32 @@ describe('the prompt block and the tool field', () => {
     expect(docsReviewPromptBlock('/lib', 'ticket')).toContain('CONTRADICTION');
     expect(docsReviewPromptBlock('/lib', 'pr')).toContain('docRefs');
     expect(docsReviewPromptBlock('/lib', 'pr_diff_only')).toContain('reach the library only');
+    // The ticket and sprint blocks name the library as an extra readable directory and the field's tool.
+    expect(docsReviewPromptBlock('/lib', 'ticket')).toContain('one more READ-ONLY directory');
+    expect(docsReviewPromptBlock('/lib', 'ticket')).toContain('field of your submit_ticket_review call');
+    expect(docsReviewPromptBlock('/lib', 'sprint')).toContain('field of your submit_assessment call');
+    expect(docsReviewPromptBlock('/lib', 'pr')).toContain('field of your submit_review call');
+  });
+
+  it('the diff-only PR prompt with the library does not also say it has no Read/Glob/Grep', async () => {
+    const p = await import('../review/claude-review/prompts.js');
+    const on = p.systemPromptForMode('diff_only', [], '/lib');
+    expect(on).not.toContain('no Read, Glob, Grep');
+    expect(on).not.toContain('The ONLY tool available to you is submit_review');
+    expect(on).toContain('Read, Glob and Grep reach ONLY');
+    expect(on.startsWith(`${p.REVIEW_SYSTEM_PROMPT_DIFF_ONLY_WITH_LIBRARY}\n\n`)).toBe(true);
+    expect(p.REVIEW_SYSTEM_PROMPT_DIFF_ONLY).toContain('no Read, Glob, Grep');
+  });
+
+  it('a diff-only run reading the library gets room for the INDEX → CONTENTS → sections walk', async () => {
+    const { reviewMaxTurnsFor, DIFF_ONLY_DOCS_MIN_TURNS } = await import('../review/agent.js');
+    const caps = { worktree: 30, diffOnly: 6 };
+    expect(reviewMaxTurnsFor('diff_only', false, caps)).toBe(6);
+    expect(reviewMaxTurnsFor('diff_only', true, caps)).toBe(DIFF_ONLY_DOCS_MIN_TURNS);
+    expect(DIFF_ONLY_DOCS_MIN_TURNS).toBeGreaterThanOrEqual(12);
+    expect(reviewMaxTurnsFor('diff_only', true, { worktree: 30, diffOnly: 40 })).toBe(40);
+    expect(reviewMaxTurnsFor('worktree', true, caps)).toBe(30);
+    expect(reviewMaxTurnsFor('worktree', false, caps)).toBe(30);
   });
 
   it('the field refuses an over-long quote at the tool, so the model rewrites it', () => {

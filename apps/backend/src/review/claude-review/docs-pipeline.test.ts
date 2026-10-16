@@ -199,11 +199,13 @@ describe('Claude Review and the reference library', () => {
     const r = await runToEnd();
     expect(r.status).toBe('succeeded');
     expect(lastArgs?.docsDir).toBe(join(docsRoot, '1', String(ws), 'library'));
-    expect(lastArgs?.systemPrompt.startsWith(`${prompts.REVIEW_SYSTEM_PROMPT_DIFF_ONLY}\n\n# The reference library`)).toBe(true);
+    expect(lastArgs?.systemPrompt.startsWith(`${prompts.REVIEW_SYSTEM_PROMPT_DIFF_ONLY_WITH_LIBRARY}\n\n# The reference library`)).toBe(true);
     expect(lastArgs?.systemPrompt).toContain(lastArgs!.docsDir!);
     expect(r.docReferences).toEqual([
       {
         path: SECTION,
+        // The library it was checked against travels with it, so the link opens THAT library.
+        workspaceId: ws,
         anchor: 'partial-refunds',
         docSlug: 'refund-policy',
         docTitle: 'Refund policy',
@@ -215,7 +217,7 @@ describe('Claude Review and the reference library', () => {
       },
     ]);
     expect(r.findings[0]?.docCitations).toEqual([
-      { path: SECTION, anchor: 'partial-refunds', docSlug: 'refund-policy', docTitle: 'Refund policy', sectionTitle: 'Refunds' },
+      { path: SECTION, workspaceId: ws, anchor: 'partial-refunds', docSlug: 'refund-policy', docTitle: 'Refund policy', sectionTitle: 'Refunds' },
     ]);
   });
 });

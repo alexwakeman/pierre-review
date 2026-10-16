@@ -141,6 +141,23 @@ Some parts of the user message are wrapped in \`---BEGIN … <tag>---\` / \`---E
 
 ${FINDINGS_AND_FINISHING}`;
 
+// The diff-only prompt's tool sentence says there is NO Read/Glob/Grep — true without the library,
+// false with it (the run gains them, confined to the library by the path guard). Appending the docs
+// block after it would leave two contradicting instructions, so the docs case swaps that ONE
+// sentence. The no-docs prompt is untouched (byte-identical, tested).
+const DIFF_ONLY_NO_TOOLS =
+  '- You have NO file-system or repository access: no Read, Glob, Grep, Bash, and no checked-out worktree. The ONLY tool available to you is submit_review.';
+const DIFF_ONLY_LIBRARY_TOOLS =
+  "- You have NO repository access: no checked-out worktree and no Bash. Read, Glob and Grep reach ONLY the team's reference library (described below), never the repository. Your other tool is submit_review.";
+if (!REVIEW_SYSTEM_PROMPT_DIFF_ONLY.includes(DIFF_ONLY_NO_TOOLS)) {
+  throw new Error('claude-review prompts: the diff-only tool sentence moved; update DIFF_ONLY_NO_TOOLS');
+}
+/** The diff-only prompt for a run that reads the reference library (the tool sentence swapped). */
+export const REVIEW_SYSTEM_PROMPT_DIFF_ONLY_WITH_LIBRARY = REVIEW_SYSTEM_PROMPT_DIFF_ONLY.replace(
+  DIFF_ONLY_NO_TOOLS,
+  DIFF_ONLY_LIBRARY_TOOLS,
+);
+
 /** The system prompt for a given review mode. */
 export function systemPromptForMode(
   mode: PromptMode,
@@ -152,7 +169,7 @@ export function systemPromptForMode(
   docsDir: string | null = null,
 ): string {
   const docs = docsDir != null ? docsReviewPromptBlock(docsDir, mode === 'diff_only' ? 'pr_diff_only' : 'pr') : null;
-  if (mode === 'diff_only') return docs ? `${REVIEW_SYSTEM_PROMPT_DIFF_ONLY}\n\n${docs}` : REVIEW_SYSTEM_PROMPT_DIFF_ONLY;
+  if (mode === 'diff_only') return docs ? `${REVIEW_SYSTEM_PROMPT_DIFF_ONLY_WITH_LIBRARY}\n\n${docs}` : REVIEW_SYSTEM_PROMPT_DIFF_ONLY;
   const section = specialistsPromptSection(specialists);
   const base = section ? `${REVIEW_SYSTEM_PROMPT_WORKTREE}\n\n${section}` : REVIEW_SYSTEM_PROMPT_WORKTREE;
   return docs ? `${base}\n\n${docs}` : base;

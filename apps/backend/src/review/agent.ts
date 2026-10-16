@@ -126,6 +126,24 @@ export function reviewToolPolicy(
   };
 }
 
+/**
+ * A diff-only run that reads the reference library walks INDEX.md → a CONTENTS.md → its sections
+ * before submit_review: at least four sequential turns, more with a Grep or a second document. The
+ * tool-less cap (config.reviewDiffOnlyMaxTurns, 6 by default) was sized for ~2 turns, and a run that
+ * hits it stops BEFORE submit_review — failed, and still billed.
+ */
+export const DIFF_ONLY_DOCS_MIN_TURNS = 14;
+
+/** The turn cap for one run. Pure, so the docs case is pinned without the SDK. */
+export function reviewMaxTurnsFor(
+  mode: 'diff_only' | 'worktree',
+  docs: boolean,
+  caps: { worktree: number; diffOnly: number } = { worktree: config.reviewMaxTurns, diffOnly: config.reviewDiffOnlyMaxTurns },
+): number {
+  if (mode === 'worktree') return caps.worktree;
+  return docs ? Math.max(caps.diffOnly, DIFF_ONLY_DOCS_MIN_TURNS) : caps.diffOnly;
+}
+
 // How many recent-activity lines to keep in the live progress ring buffer.
 const ACTIVITY_LOG_CAP = 25;
 
@@ -190,7 +208,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
         args.headSha,
       ));
       cwd = worktreePath;
-      maxTurns = config.reviewMaxTurns;
+      maxTurns = reviewMaxTurnsFor(mode, docsDir != null);
       // OTHER PRs ON THE SAME TICKET, read-only, for cross-repo interactions (claude-review/
       // prompts.ts "Related PRs"). A peer that fails to check out is said so in the prompt and the
       // review goes on: peer context is optional, the review of THIS PR is not.
@@ -207,7 +225,8 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     } else {
       tempCwd = mkdtempSync(join(tmpdir(), 'pierre-review-'));
       cwd = tempCwd;
-      maxTurns = config.reviewDiffOnlyMaxTurns;
+      // With the library, the cap leaves room for the INDEX → CONTENTS → sections walk.
+      maxTurns = reviewMaxTurnsFor(mode, docsDir != null);
     }
     // Effort guides thinking depth + token spend — the dominant cost knob. Per-mode, and only
     // for the offered models (EFFORT_CAPABLE_MODELS). Opus 5.5 also gets an

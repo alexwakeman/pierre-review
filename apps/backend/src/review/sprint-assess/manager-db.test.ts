@@ -369,6 +369,8 @@ describe('sprint assessment and the reference library', () => {
       expect.objectContaining({ path: SECTION, verdict: 'supports', quote: 'kept for thirty days on the device', docTitle: 'Basket rules' }),
     ]);
     expect(store.sprintAssessmentRecordOf(row).body?.references).toHaveLength(1);
+    // The checked library's workspace survives the stored read, so the link opens THAT library.
+    expect(store.sprintAssessmentRecordOf(row).body?.references?.[0]?.workspaceId).toBe(ws);
     await docsStore.writeDocsInReview(1, ws, false);
   });
 });

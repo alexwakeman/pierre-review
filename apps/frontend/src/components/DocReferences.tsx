@@ -20,7 +20,6 @@ import {
 import { docsDeepLink } from '../lib/docReferences.js';
 import { citationLabel } from '../lib/referenceDocs.js';
 import { REVIEW_CHIP, REVIEW_META } from '../lib/reviewStyles.js';
-import { useFilters } from '../store/filters.js';
 import { openDocsSection } from '../store/openDocs.js';
 import { BookIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
@@ -34,19 +33,26 @@ const VERDICT_TONE: Record<ReviewDocVerdict, string> = {
 
 const SPA_BASE = '/app/';
 
-function DocLink({
-  workspaceId,
-  target,
-  children,
-}: {
-  workspaceId: number | null;
-  target: ReferenceDocCitation;
-  children: ReactNode;
-}): JSX.Element {
+/**
+ * One library link. ⚠ The workspace is the one whose library the SERVER checked this against
+ * (`target.workspaceId`), never the reader's selected workspace: a PR opened from search, a pinned tab
+ * or a deep link may belong to another workspace, whose library has other documents under the same
+ * slugs. A reference stored before the field existed has no workspace, and is shown as a plain label.
+ */
+function DocLink({ target, children }: { target: ReferenceDocCitation; children: ReactNode }): JSX.Element {
+  const workspaceId = target.workspaceId ?? null;
+  if (workspaceId == null) {
+    return (
+      <span className="inline-flex items-center gap-1 break-words text-left text-xs text-gray-700 dark:text-gray-300">
+        <BookIcon size={12} />
+        {children}
+      </span>
+    );
+  }
   const href = docsDeepLink(SPA_BASE, workspaceId, target);
   const onClick = (e: MouseEvent<HTMLAnchorElement>): void => {
     // A plain click opens it in-app; a modified click (new tab / window) follows the deep link.
-    if (workspaceId == null || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
     openDocsSection(workspaceId, target.path, target.anchor);
   };
@@ -63,15 +69,7 @@ function DocLink({
 }
 
 /** The compact list of references. Nothing at all when there are none. */
-export function DocReferenceList({
-  references,
-  workspaceId: wsProp,
-}: {
-  references: readonly ReviewDocReference[];
-  workspaceId?: number | null;
-}): JSX.Element | null {
-  const current = useFilters((s) => s.workspaceId);
-  const workspaceId = wsProp ?? current;
+export function DocReferenceList({ references }: { references: readonly ReviewDocReference[] }): JSX.Element | null {
   if (references.length === 0) return null;
   return (
     <ul className="space-y-1.5">
@@ -79,7 +77,7 @@ export function DocReferenceList({
         <li key={`${r.path}#${r.anchor ?? ''}-${i}`} className="rounded border border-gray-100 px-3 py-2 dark:border-gray-800">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`${REVIEW_CHIP} ${VERDICT_TONE[r.verdict]}`}>{REVIEW_DOC_VERDICT_LABEL[r.verdict]}</span>
-            <DocLink workspaceId={workspaceId} target={r}>
+            <DocLink target={r}>
               {citationLabel(r)}
             </DocLink>
             {r.about != null && <span className={REVIEW_META}>{r.about}</span>}
@@ -159,13 +157,12 @@ export function DocReferencesBlock({ references }: { references: readonly Review
 
 /** A finding's library citations: "Reference: Document › Section". Nothing when it has none. */
 export function DocCitationLinks({ citations }: { citations: readonly ReferenceDocCitation[] | undefined }): JSX.Element | null {
-  const workspaceId = useFilters((s) => s.workspaceId);
   if (citations == null || citations.length === 0) return null;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
       <span className={REVIEW_META}>Reference:</span>
       {citations.map((c) => (
-        <DocLink key={`${c.path}#${c.anchor ?? ''}`} workspaceId={workspaceId} target={c}>
+        <DocLink key={`${c.path}#${c.anchor ?? ''}`} target={c}>
           {citationLabel(c)}
         </DocLink>
       ))}

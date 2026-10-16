@@ -11,6 +11,7 @@
 // this PR's too: its Post already lands on the PR being viewed (`postTargetOf`), and leaving it out
 // would leave it postable nowhere (the stack view has no Post buttons).
 import type {
+  ReviewDocReference,
   TicketAssessment,
   TicketCriterion,
   TicketPrCard,
@@ -81,6 +82,26 @@ export function prTicketShare(
   }
   const notRequested = assessment.notRequested.filter((g) => g.prId === pr.id);
   return { criteria, missing, notRequested, metElsewhere, todoElsewhere };
+}
+
+/**
+ * The library references that belong in THIS PR's share: those whose `about` names one of the share's
+ * criteria or missing items ('AC2', 'M1', as a whole word, any case). A reference about another PR's
+ * criterion, or about nothing in particular, is the whole story's — listed once, in Open PRs.
+ */
+export function shareDocReferences(
+  references: readonly ReviewDocReference[] | null | undefined,
+  share: Pick<PrTicketShare, 'criteria' | 'missing'>,
+): ReviewDocReference[] {
+  if (references == null || references.length === 0) return [];
+  const refs = new Set([...share.criteria.map((c) => c.ref), ...share.missing.map((m) => m.ref)].map((r) => r.toLowerCase()));
+  if (refs.size === 0) return [];
+  return references.filter((r) =>
+    (r.about ?? '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .some((w) => w !== '' && refs.has(w)),
+  );
 }
 
 /**

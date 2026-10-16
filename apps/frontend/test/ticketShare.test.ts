@@ -11,12 +11,13 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { TicketAssessment, TicketCriterion, TicketReviewItem } from '@pierre-review/shared';
+import type { ReviewDocReference, TicketAssessment, TicketCriterion, TicketReviewItem } from '@pierre-review/shared';
 import {
   STORY_TARGET_TTL_MS,
   prCardOf,
   prTicketShare,
   resolveStoryTarget,
+  shareDocReferences,
   shareRestLine,
   slimStoryCheck,
   storyTargetExpired,
@@ -216,6 +217,40 @@ describe('the wiring', () => {
   it('the Post button only renders with a viewed PR', () => {
     const parts = src('components/TicketReviewParts.tsx');
     expect(parts).toMatch(/if \(viewedPrId != null\) \{\s*return \(\s*<div className="mt-1\.5[^"]*">\s*<ItemPost /);
+  });
+});
+
+// A ticket review's library references are the WHOLE ticket's; the PR share lists only the ones
+// about its own criteria / missing items, so a contradiction about another PR's AC is not shown here.
+describe('shareDocReferences', () => {
+  const docRef = (about: string | null): ReviewDocReference => ({
+    path: 'h/sections/01-a.md',
+    workspaceId: 3,
+    anchor: null,
+    docSlug: 'h',
+    docTitle: 'H',
+    sectionTitle: null,
+    quote: 'some quoted words here',
+    verdict: 'contradicts',
+    note: '',
+    about,
+  });
+  const share = { criteria: [crit('AC1')], missing: [item('M2')] };
+
+  it('keeps references about this share’s criteria and missing items, as whole words', () => {
+    const refs = [docRef('AC1'), docRef('ac1: refunds'), docRef('M2'), docRef('AC3'), docRef('AC10'), docRef(null), docRef('src/a.ts')];
+    expect(shareDocReferences(refs, share).map((r) => r.about)).toEqual(['AC1', 'ac1: refunds', 'M2']);
+  });
+
+  it('a share with no criteria and no missing items lists none', () => {
+    expect(shareDocReferences([docRef('AC1')], { criteria: [], missing: [] })).toEqual([]);
+    expect(shareDocReferences(undefined, share)).toEqual([]);
+  });
+
+  it('the PR share filters; the whole story does not', () => {
+    const src = readFileSync(join(__dirname, '../src/components/TicketCoverage.tsx'), 'utf8');
+    expect(src).toContain('<DocReferencesBlock references={shareDocReferences(a?.references, share)} />');
+    expect(src).not.toContain('<DocReferencesBlock references={a?.references} />');
   });
 });
 

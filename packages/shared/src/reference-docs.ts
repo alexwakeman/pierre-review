@@ -141,6 +141,12 @@ export type ReferenceDocStreamEvent =
 export interface ReferenceDocCitation {
   /** Library-relative, as GET /api/docs/section takes it. */
   path: string;
+  /**
+   * The workspace whose library a REVIEW checked this against (stamped by the server's validator), so
+   * a link opens THAT library — not whichever workspace the reader has selected. Absent on a chat
+   * citation (the chat lives in its own library) and on a review stored before the field existed.
+   */
+  workspaceId?: number;
   anchor: string | null;
   docSlug: string;
   docTitle: string;
@@ -232,6 +238,8 @@ export const REVIEW_DOC_FINDING_CITATIONS_MAX = 3;
 export interface ReviewDocReference {
   /** Library-relative section path: `<slug>/sections/NN-name.md`. */
   path: string;
+  /** The workspace whose library the server checked it against (see ReferenceDocCitation). */
+  workspaceId?: number;
   /** A heading anchor inside it, when the run named one that exists. */
   anchor: string | null;
   docSlug: string;
@@ -248,6 +256,9 @@ export interface ReviewDocReference {
 
 const isObj = (v: unknown): v is Record<string, unknown> => v != null && typeof v === 'object' && !Array.isArray(v);
 const VERDICTS: readonly string[] = ['supports', 'contradicts', 'context'];
+// The stored workspace id, only when it is a real one; the key is left off otherwise.
+const workspaceIdOf = (v: unknown): { workspaceId?: number } =>
+  typeof v === 'number' && Number.isInteger(v) && v > 0 ? { workspaceId: v } : {};
 
 /** A stored run's references, re-read defensively; null when the run stored none. */
 export function reviewDocReferencesFromStored(raw: unknown): ReviewDocReference[] | null {
@@ -259,6 +270,7 @@ export function reviewDocReferencesFromStored(raw: unknown): ReviewDocReference[
     if (typeof r.quote !== 'string' || typeof r.verdict !== 'string' || !VERDICTS.includes(r.verdict)) continue;
     out.push({
       path: r.path,
+      ...workspaceIdOf(r.workspaceId),
       anchor: typeof r.anchor === 'string' && r.anchor !== '' ? r.anchor : null,
       docSlug: r.docSlug,
       docTitle: r.docTitle,
@@ -281,6 +293,7 @@ export function referenceDocCitationsFromStored(raw: unknown): ReferenceDocCitat
     if (!isObj(c) || typeof c.path !== 'string' || typeof c.docSlug !== 'string' || typeof c.docTitle !== 'string') continue;
     out.push({
       path: c.path,
+      ...workspaceIdOf(c.workspaceId),
       anchor: typeof c.anchor === 'string' && c.anchor !== '' ? c.anchor : null,
       docSlug: c.docSlug,
       docTitle: c.docTitle,
