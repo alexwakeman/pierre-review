@@ -1316,6 +1316,14 @@ precision) and three timestamps; index `(account_id, created_at)` for the daily 
 account. In `accountScopedTables()`, erased, and checked by `verify:isolation`. Journal `when` sqlite
 `1792137603011` / pg `1792137604010`. ⚠ pg `0102` NOT replayed.
 
+### `0118_sequence_diagram_runs` (pg `0105`) — one sequence-diagram row per run
+Drops the unique `sequence_diagrams_subject_fp` and creates the plain index
+`sequence_diagrams_subject_fp_idx` on the same columns. A Redraw at the same fingerprint used to REWRITE
+the row holding the good diagram (clearing it, for good if the redraw failed); every queued run is now
+its own row and nothing writes `ON CONFLICT` on this table any more. Story rows now also go with a
+deleted member PR in both delete paths (`db/sequence-diagram-prune.ts`; code, not DDL). Journal `when`
+sqlite `1792137605014` / pg `1792137605015`. ⚠ pg `0105` NOT replayed.
+
 ### `0116_reference_docs` (pg `0103`) — the reference docs library
 One column and two tables (docs/REFERENCE-DOCS.md). `workspaces.docs_in_review` (sqlite integer / pg
 boolean, nullable, no default — NULL/false = off). `reference_docs`: one row per document — `slug`

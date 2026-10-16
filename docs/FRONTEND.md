@@ -4501,8 +4501,9 @@ SonarCloud, absent without `me.ai`) shows the PR's slot and each multi-PR ticket
 `me.ai`, and only when the ticket has 2+ pull requests or a stored diagram). The pure folds live in
 `lib/sequenceDiagrams.ts` (test/sequenceDiagram.test.ts). ⚠ POLLING: the reads poll every 5 s only while
 a run is queued or running, and the PR read also for 90 s after the shown review's `finishedAt` while
-nothing is stored at the current head (the server queues the diagram a moment AFTER the review is
-saved). The Redraw buttons share one mutation key per subject (`useIsMutating`). `uuid` is pinned to
+nothing is stored at the current head for the PR OR for any story of 2+ pull requests (the server
+queues them a moment AFTER the review is saved; a docs-only PR's `no_code` row is current at once, so
+the PR slot alone would stop the wait before the story's row exists). The Redraw buttons share one mutation key per subject (`useIsMutating`). `uuid` is pinned to
 `^11` in the frontend's dependencies so vis-data's peer range and Mermaid's agree on one copy.
 
 ## SonarCloud (review tab section, picker card, Settings)

@@ -29,7 +29,10 @@ export function prDiagramsPollMs(
 ): number | false {
   if (data == null) return false;
   if (slotDrawing(data.pr) || data.stories.some((s) => slotDrawing(s))) return DIAGRAM_POLL_MS;
-  if (waitingSinceMs != null && nowMs - waitingSinceMs < AFTER_REVIEW_WAIT_MS && !slotHasCurrent(data.pr)) return DIAGRAM_POLL_MS;
+  // After a review the trigger queues the PR's diagram AND each multi-PR ticket's story diagram, so
+  // keep polling until every one of them has a row for the current head / member set.
+  const awaiting = !slotHasCurrent(data.pr) || data.stories.some((s) => s.memberCount >= 2 && !slotHasCurrent(s));
+  if (waitingSinceMs != null && nowMs - waitingSinceMs < AFTER_REVIEW_WAIT_MS && awaiting) return DIAGRAM_POLL_MS;
   return false;
 }
 

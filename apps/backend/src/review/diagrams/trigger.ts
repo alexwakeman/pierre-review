@@ -18,7 +18,7 @@ import {
   getDiagramPrContext,
   getPrFileStats,
   markDiagramRefused,
-  upsertQueuedDiagram,
+  insertQueuedDiagram,
 } from './persist.js';
 
 // "A REVIEW JUST FINISHED — DRAW ITS DIAGRAMS?" The one hook between Claude Review and this process.
@@ -77,7 +77,7 @@ const defaultDeps: TriggerDeps = {
   fileStats: getPrFileStats,
   enqueue: async (ctx, a) => (await manager()).startDiagram(ctx, a),
   refuseNoCode: async (ctx, a) => {
-    const id = await upsertQueuedDiagram(ctx, { ...a, model: 'claude-sonnet-5' });
+    const id = await insertQueuedDiagram(ctx, { ...a, model: 'claude-sonnet-5' });
     await markDiagramRefused(ctx, a.accountId, id, 'no_code');
   },
   dailyCap: config.sequenceDiagramDailyCap,

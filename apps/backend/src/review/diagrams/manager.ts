@@ -39,7 +39,7 @@ import {
   reconcileOrphanedDiagrams,
   recordDiagramUsage,
   saveDiagramSuccess,
-  upsertQueuedDiagram,
+  insertQueuedDiagram,
   type Telemetry,
 } from './persist.js';
 import {
@@ -138,7 +138,7 @@ export async function startDiagram(ctx: AgentContext, a: StartDiagramArgs): Prom
 
   let diagramId: number;
   try {
-    diagramId = await upsertQueuedDiagram(ctx, { ...a, model: DIAGRAM_MODEL });
+    diagramId = await insertQueuedDiagram(ctx, { ...a, model: DIAGRAM_MODEL });
   } catch (err) {
     claimed.delete(key);
     throw err;

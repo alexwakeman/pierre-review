@@ -888,7 +888,7 @@ Haiku 5.5). Details:
   story per ticket for every caller (`jiraStoryFor` → core's `ticketStory`, the freshest stored
   row), and the source (`tracker/ticket-source.ts`) reads STORED rows only — no tracker call on a view.
   [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Ticket review.
-- **SEQUENCE DIAGRAMS ARE A SEPARATE PROCESS** (`src/review/diagrams/`; sqlite `0115` / pg `0102`):
+- **SEQUENCE DIAGRAMS ARE A SEPARATE PROCESS** (`src/review/diagrams/`; sqlite `0115`+`0118` / pg `0102`+`0105`; ONE ROW PER RUN — a Redraw never rewrites the good diagram's row):
   Sonnet 5, queued fire-and-forget after EVERY succeeded review (manual or auto) only when the change
   has CODE (`isNonCodeFile`) and the head moved since its last diagram; a story diagram too when the
   ticket has MORE THAN ONE PR. A slot peer, own `SEQUENCE_DIAGRAM_DAILY_CAP`. ⚠ The Mermaid source is

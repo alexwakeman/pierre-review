@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, notInArray, or } from 'drizzle-orm';
 import type {
   SequenceDiagramKind,
   SequenceDiagramMember,
@@ -13,7 +13,7 @@ import type { AgentContext } from '../agent-context.js';
 
 // THE SEQUENCE DIAGRAMS' STORAGE (`sequence_diagrams`, migration 0115 / pg 0102). Every read and
 // write is scoped by accountId; an id from another account reads as null and writes nothing.
-// Portable terminals only (`.execute()`, `.returning().execute()`, `onConflictDoUpdate`).
+// Portable terminals only (`.execute()`, `.returning().execute()`).
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const t = (ctx: Pick<AgentContext, 'schema'>): any => (ctx.schema as any).sequenceDiagrams;
@@ -134,38 +134,29 @@ export interface QueueDiagramArgs {
 }
 
 /**
- * Queue a diagram. ONE row per (account, kind, subject, fingerprint): a Redraw at the same
- * fingerprint REWRITES it (every output cleared), so "is it drawn at this head?" stays one lookup.
+ * Queue a diagram as a NEW row — one row per RUN. A Redraw at the same fingerprint never touches the
+ * row holding the diagram it redraws, so the slot keeps showing that diagram while the run works and
+ * after it fails, is cancelled or is cut off by a restart. "Is it drawn at this head?" stays one
+ * lookup (any row at the fingerprint), and the slot reads the newest row and the newest SUCCEEDED row.
  */
-export async function upsertQueuedDiagram(ctx: Ctx, a: QueueDiagramArgs): Promise<number> {
+export async function insertQueuedDiagram(ctx: Ctx, a: QueueDiagramArgs): Promise<number> {
   const d = t(ctx);
-  const now = new Date();
-  const reset = {
-    prId: a.prId,
-    ticketKey: a.ticketKey,
-    headSha: a.headSha,
-    members: a.members,
-    trigger: a.trigger,
-    status: 'queued' as const,
-    model: a.model,
-    title: null,
-    caption: null,
-    diagramType: null,
-    source: null,
-    refusal: null,
-    error: null,
-    costUsd: null,
-    inputTokens: null,
-    outputTokens: null,
-    numTurns: null,
-    createdAt: now,
-    startedAt: null,
-    completedAt: null,
-  };
   const rows = (await ctx.db
     .insert(d)
-    .values({ accountId: a.accountId, kind: a.kind, subject: a.subject, fingerprint: a.fingerprint, ...reset })
-    .onConflictDoUpdate({ target: [d.accountId, d.kind, d.subject, d.fingerprint], set: reset })
+    .values({
+      accountId: a.accountId,
+      kind: a.kind,
+      subject: a.subject,
+      fingerprint: a.fingerprint,
+      prId: a.prId,
+      ticketKey: a.ticketKey,
+      headSha: a.headSha,
+      members: a.members,
+      trigger: a.trigger,
+      status: 'queued',
+      model: a.model,
+      createdAt: new Date(),
+    })
     .returning({ id: d.id })
     .execute()) as Array<{ id: number }>;
   return rows[0]!.id;
@@ -348,7 +339,12 @@ export async function latestSucceededDiagram(
   return rows[0] ?? null;
 }
 
-/** Diagrams a finished review queued since `dayStartMs` (refusals cost nothing and do not count). */
+// The refusals the SERVER decides before any model runs: free, so they do not use up the cap. Every
+// other row counts — queued and running ones (they will spend), failures, and 'invalid_diagram', which
+// is a billed run whose answer failed validation.
+const FREE_REFUSALS: readonly SequenceDiagramRefusal[] = ['no_code', 'head_moved', 'unreadable', 'too_few_prs', 'too_many_prs'];
+
+/** Diagrams a finished review queued since `dayStartMs` that ran (or will run) the model. */
 export async function countReviewDiagramsSince(ctx: Ctx, accountId: number, dayStartMs: number): Promise<number> {
   const d = t(ctx);
   const rows = (await ctx.db
@@ -358,7 +354,7 @@ export async function countReviewDiagramsSince(ctx: Ctx, accountId: number, dayS
       and(
         eq(d.accountId, accountId),
         eq(d.trigger, 'review'),
-        isNull(d.refusal),
+        or(isNull(d.refusal), notInArray(d.refusal, [...FREE_REFUSALS])),
         gte(d.createdAt, new Date(dayStartMs)),
       ),
     )

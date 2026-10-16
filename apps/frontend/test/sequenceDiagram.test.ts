@@ -76,6 +76,20 @@ describe('polling', () => {
     expect(prDiagramsPollMs(resp({ diagram: view(), latest: null }), 1_000, 2_000)).toBe(false);
     expect(prDiagramsPollMs(undefined, 1_000, 2_000)).toBe(false);
   });
+
+  it('after a review, keeps waiting for a multi-PR story whose current diagram is not stored yet', () => {
+    const prDone = { diagram: view(), latest: null };
+    const staleStory = { ident: 'T', ticketKey: null, memberCount: 2, diagram: view({ kind: 'story', current: false }), latest: null };
+    expect(prDiagramsPollMs(resp(prDone, [staleStory]), 1_000, 2_000)).toBe(DIAGRAM_POLL_MS);
+    // A docs-only PR's refused row is current, but the story still waits.
+    const prRefused = { diagram: null, latest: view({ status: 'refused', refusal: 'no_code', source: null }) };
+    expect(prDiagramsPollMs(resp(prRefused, [{ ...staleStory, diagram: null }]), 1_000, 2_000)).toBe(DIAGRAM_POLL_MS);
+    // A single-PR ticket is never drawn, so it never holds the poll open.
+    expect(prDiagramsPollMs(resp(prDone, [{ ...staleStory, memberCount: 1 }]), 1_000, 2_000)).toBe(false);
+    const doneStory = { ...staleStory, diagram: view({ kind: 'story' }) };
+    expect(prDiagramsPollMs(resp(prDone, [doneStory]), 1_000, 2_000)).toBe(false);
+    expect(prDiagramsPollMs(resp(prDone, [staleStory]), 1_000, 1_000 + AFTER_REVIEW_WAIT_MS + 1)).toBe(false);
+  });
 });
 
 describe('the status line', () => {

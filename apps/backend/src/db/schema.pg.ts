@@ -2426,7 +2426,7 @@ export const sequenceDiagrams = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
   },
   (t) => ({
-    subjectFpUx: uniqueIndex('sequence_diagrams_subject_fp').on(t.accountId, t.kind, t.subject, t.fingerprint),
+    subjectFpIdx: index('sequence_diagrams_subject_fp_idx').on(t.accountId, t.kind, t.subject, t.fingerprint),
     accountCreatedIdx: index('sequence_diagrams_account_created').on(t.accountId, t.createdAt),
   }),
 );

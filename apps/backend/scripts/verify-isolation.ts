@@ -4231,7 +4231,7 @@ check(
     [2, B.prId],
   ] as const) {
     for (const kind of ['pr', 'story'] as const) {
-      const id = await dp.upsertQueuedDiagram(dc, {
+      const id = await dp.insertQueuedDiagram(dc, {
         accountId: acct,
         kind,
         subject: kind === 'pr' ? String(prId) : IDENT,

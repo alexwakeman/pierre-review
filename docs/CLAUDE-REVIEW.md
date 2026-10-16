@@ -788,17 +788,23 @@ the wire picks the model. Wire contract: [API.md](API.md) § Sequence diagrams.
   (stored file list through `db/code-loc.ts`'s `isNonCodeFile` — docs/config/lockfile-only ⇒ none;
   unknown ⇒ the pipeline decides from the diff with the same classifier), a row already at this
   fingerprint (any status — a click redraws a failure), one in flight, or the daily cap
-  (`SEQUENCE_DIAGRAM_DAILY_CAP`, default 30, review-started non-refused rows per ACCOUNT per UTC day;
-  a Redraw never counts). A no-code change is STORED as a `refused/no_code` row (no model, no cost)
+  (`SEQUENCE_DIAGRAM_DAILY_CAP`, default 30, review-started rows per ACCOUNT per UTC day that ran or
+  will run the model — every row EXCEPT the server-decided free refusals `no_code`, `head_moved`,
+  `unreadable`, `too_few_prs`, `too_many_prs`; ⚠ `invalid_diagram` COUNTS, it was billed; a Redraw
+  never counts). A no-code change is STORED as a `refused/no_code` row (no model, no cost)
   so the pane can say why and the same head is never judged twice.
 - **Fingerprints** (clock-free): PR = sha256(version, prId, headSha) — only a push redraws it;
   story = sha256(version, ident, sorted `prId:headSha:state`) — a member pushed, merged, joined or
   left. ⚠ The ticket TEXT is deliberately NOT in it (rewording does not change the flow). Bump
   `SEQUENCE_DIAGRAM_VERSION` when the prompt or validator changes what a run produces.
-- **Storage** `sequence_diagrams` (sqlite `0115` / pg `0102`): ONE row per (account, kind, subject,
-  fingerprint) — subject = the PR id or the ticket ident. A Redraw at the same fingerprint REWRITES the
-  row; a new head is a new row, so the older diagram stays readable as "Drawn for an earlier commit".
-  No FK on `pr_id`: both delete paths take PR rows; story rows (pr_id NULL) go with the account.
+- **Storage** `sequence_diagrams` (sqlite `0115`+`0118` / pg `0102`+`0105`): ONE row per RUN — subject =
+  the PR id or the ticket ident. ⚠ A Redraw at the same fingerprint is a NEW row, never a rewrite: the
+  slot (`routes.ts` `slotFor`) shows the newest SUCCEEDED row under the newest run, so the good diagram
+  stays up while a redraw runs and after it fails, is cancelled or is cut off by a restart (0115's
+  rewrite cleared it). "Drawn at this head?" is any row at the fingerprint. An older head's diagram
+  reads "Drawn for an earlier commit". No FK on `pr_id`: both delete paths take PR rows AND every story
+  row whose `members` names a deleted PR (`db/sequence-diagram-prune.ts`, run before the PRs go — it
+  finds the stories through their accounts and filters the JSON in code).
   `accountScopedTables()`, erasure, `verify:isolation`.
 - **The slot pool.** A registered PEER of the ONE `REVIEW_CONCURRENCY` (`registerReviewSlotPeer`): a
   diagram starts only when no PR-review click waits, a review-started diagram only when the PR-review

@@ -3339,11 +3339,12 @@ export const sonarSnapshots = sqliteTable(
 );
 
 // ---- SEQUENCE DIAGRAMS (migration 0115 / pg 0102; docs/CLAUDE-REVIEW.md § Sequence diagrams) ----
-// ONE row per (account, kind, subject, fingerprint): kind 'pr' (subject = the PR id) or 'story'
-// (subject = the tracker ident). A Redraw at the same fingerprint REWRITES that row; a new head (or
-// a changed member set) is a new row, so the older diagram stays readable as "not current". No FK on
-// pr_id (the sonar_snapshots precedent): both delete paths and the erasure take it. Story rows carry
-// pr_id NULL and are erased with the account.
+// ONE row per RUN (since migration 0118 / pg 0105): kind 'pr' (subject = the PR id) or 'story'
+// (subject = the tracker ident). A Redraw at the same fingerprint is a NEW row, so the last good
+// diagram stays shown while it runs and after it fails; an older head's diagram reads "not current".
+// No FK on pr_id (the sonar_snapshots precedent): both delete paths and the erasure take it. Story
+// rows carry pr_id NULL; both delete paths take the ones whose `members` name a deleted PR
+// (db/sequence-diagram-prune.ts).
 export const sequenceDiagrams = sqliteTable(
   'sequence_diagrams',
   {
@@ -3380,7 +3381,9 @@ export const sequenceDiagrams = sqliteTable(
     completedAt: integer('completed_at', { mode: 'timestamp' }),
   },
   (t) => ({
-    subjectFpUx: uniqueIndex('sequence_diagrams_subject_fp').on(t.accountId, t.kind, t.subject, t.fingerprint),
+    // One row PER RUN (migration 0118 / pg 0105): a redraw at the same fingerprint is a new row, so a
+    // failed redraw never clears the last good diagram. Not unique.
+    subjectFpIdx: index('sequence_diagrams_subject_fp_idx').on(t.accountId, t.kind, t.subject, t.fingerprint),
     // The latest row per subject, and the daily cap (review-triggered rows since a UTC day start).
     accountCreatedIdx: index('sequence_diagrams_account_created').on(t.accountId, t.createdAt),
   }),

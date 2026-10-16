@@ -4,6 +4,7 @@ import { db, runTransaction, schema } from './client.js';
 import { config } from '../config.js';
 import { pruneTicketReviewsForPrs } from './ticket-review-prune.js';
 import { pruneCiReviewsForPrs } from './ci-review-prune.js';
+import { pruneSequenceDiagramsForPrs } from './sequence-diagram-prune.js';
 
 // Time-based retention sweep. Per-account server data (events, PRs + their whole subtree)
 // accumulates forever otherwise; this prunes anything past the retention window so the DB
@@ -126,8 +127,9 @@ async function deletePrSubtree(
   await tx.delete(schema.trackerTickets).where(inArray(schema.trackerTickets.prId, prIds)).execute();
   // SonarCloud snapshots (migration 0114 / pg 0101). No FKs — explicit, pr-keyed.
   await tx.delete(schema.sonarSnapshots).where(inArray(schema.sonarSnapshots.prId, prIds)).execute();
-  // Sequence diagrams of these PRs (migration 0115 / pg 0102). No FKs — explicit, pr-keyed.
-  await tx.delete(schema.sequenceDiagrams).where(inArray(schema.sequenceDiagrams.prId, prIds)).execute();
+  // Sequence diagrams of these PRs, and the story diagrams naming any of them (migration 0115 / pg
+  // 0102). No FKs. Before the PRs go: it reads their accounts.
+  await pruneSequenceDiagramsForPrs(tx, prIds);
   await tx.delete(pullRequests).where(inArray(pullRequests.id, prIds)).execute();
   // NB: commitFiles is GLOBAL (sha-keyed, shared across PRs/tenants) — deliberately NOT
   // pruned here. users + syncState are likewise out of scope.
