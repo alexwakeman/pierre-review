@@ -36,8 +36,8 @@ import { DocsViewer } from './DocsViewer.js';
 //   centre  one library file at a time (DocsViewer), every link followed in-app
 //   right   the docs chat (DocsChat) — beside the viewer when wide, a second tab when narrow
 //
-// Build progress is live: one SSE stream per building document (useReferenceDocs), the list polled
-// as the fallback.
+// Build progress is live: an SSE stream per document being built — never a queued one, at most
+// MAX_DOC_STREAMS (useReferenceDocs) — the list polled as the fallback.
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const SMALL_BUTTON = 'text-xs text-sky-700 hover:underline disabled:opacity-50 dark:text-sky-300';

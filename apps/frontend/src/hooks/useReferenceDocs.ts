@@ -20,7 +20,7 @@ import type {
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
-import { isDocBuilding } from '../lib/referenceDocs.js';
+import { docsListPollMs, docsToStream, isDocBuilding } from '../lib/referenceDocs.js';
 import { useDocsView } from '../store/docsView.js';
 
 // ACTIVITY → DOCS, the server half (docs/REFERENCE-DOCS.md § The SPA). Every key carries the
@@ -51,27 +51,43 @@ function patchDoc(qc: QueryClient, workspaceId: number, docId: number, patch: Pa
 }
 
 /**
- * The library list, with LIVE build progress: one SSE stream per building document patches its row
- * in place (`GET /api/docs/:id/stream`), and the list is polled as the fallback — every 3s while a
- * stream has failed, every 15s as a safety net while they are healthy, never when nothing builds.
+ * The library list, with LIVE build progress: an SSE stream per document the server is ACTUALLY
+ * building (`GET /api/docs/:id/stream`, never a `queued` one, at most `MAX_DOC_STREAMS`) patches its
+ * row in place, and the list is polled as the fallback (`docsListPollMs`).
+ * ⚠ TROUBLE IS PER DOCUMENT: a stream that fails or ends without `done` puts ITS id in `trouble`
+ * (the list then polls every 3s for it) and the id leaves the set when the document stops building —
+ * one shared flag let a later healthy stream clear an earlier failure, or one failure keep fast
+ * polling on for every later build.
  */
 export function useReferenceDocs(workspaceId: number | null) {
   const qc = useQueryClient();
-  const [streamTrouble, setStreamTrouble] = useState(false);
+  const [trouble, setTrouble] = useState<ReadonlySet<number>>(() => new Set());
   const query = useQuery<ReferenceDocsResponse>({
     queryKey: referenceDocsKey(workspaceId),
     queryFn: workspaceId != null ? () => api.referenceDocs(workspaceId) : skipToken,
-    refetchInterval: (q) =>
-      (q.state.data?.docs ?? []).some((d) => isDocBuilding(d.status)) ? (streamTrouble ? 3_000 : 15_000) : false,
+    refetchInterval: (q) => docsListPollMs(q.state.data?.docs ?? [], trouble),
   });
 
-  const building = (query.data?.docs ?? []).filter((d) => isDocBuilding(d.status)).map((d) => d.id);
-  const buildingKey = building.join(',');
+  const docs = query.data?.docs ?? [];
+  const buildingKey = docs
+    .filter((d) => isDocBuilding(d.status))
+    .map((d) => d.id)
+    .join(',');
+  const streamKey = docsToStream(docs, trouble).join(',');
   const streams = useRef(new Map<number, AbortController>());
+
+  // An id leaves `trouble` once its document is no longer building (ready, failed, removed).
+  useEffect(() => {
+    const ids = new Set(buildingKey === '' ? [] : buildingKey.split(',').map(Number));
+    setTrouble((prev) => {
+      const next = new Set([...prev].filter((id) => ids.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [buildingKey]);
 
   useEffect(() => {
     if (workspaceId == null) return;
-    const ids = buildingKey === '' ? [] : buildingKey.split(',').map(Number);
+    const ids = streamKey === '' ? [] : streamKey.split(',').map(Number);
     const open = streams.current;
     for (const [id, ctl] of open) {
       if (!ids.includes(id)) {
@@ -79,6 +95,8 @@ export function useReferenceDocs(workspaceId: number | null) {
         open.delete(id);
       }
     }
+    const markTrouble = (id: number): void =>
+      setTrouble((prev) => (prev.has(id) ? prev : new Set([...prev, id])));
     for (const id of ids) {
       if (open.has(id)) continue;
       const ctl = new AbortController();
@@ -96,16 +114,19 @@ export function useReferenceDocs(workspaceId: number | null) {
           }
         },
       })
-        // A stream that ends with no `done` (a restart, a dropped socket) hands over to fast polling.
-        .then(() => setStreamTrouble(!sawDone))
+        // A stream that ends with no `done` (a restart, a dropped socket) hands THIS document over to
+        // fast polling.
+        .then(() => {
+          if (!sawDone && !ctl.signal.aborted) markTrouble(id);
+        })
         .catch((err: unknown) => {
-          if (!(err instanceof DOMException && err.name === 'AbortError')) setStreamTrouble(true);
+          if (!(err instanceof DOMException && err.name === 'AbortError') && !ctl.signal.aborted) markTrouble(id);
         })
         .finally(() => {
           if (open.get(id) === ctl) open.delete(id);
         });
     }
-  }, [buildingKey, workspaceId, qc]);
+  }, [streamKey, workspaceId, qc]);
 
   // Close every stream when the pane goes away (or the workspace changes).
   useEffect(() => {

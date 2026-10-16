@@ -171,6 +171,46 @@ export function isDocBuilding(status: ReferenceDocStatus): boolean {
   return status === 'queued' || status === 'converting' || status === 'sectioning' || status === 'indexing';
 }
 
+/**
+ * ⚠ THE HARD CAP ON CONCURRENT BUILD STREAMS. Each stream holds an HTTP/1.1 connection open (the
+ * browser allows ~6 per origin), and the pane's uploads, list poll, tree/section reads and chat all
+ * queue behind them. The server builds ONE document per account at a time, so a QUEUED row is never
+ * streamed — the list poll covers it.
+ */
+export const MAX_DOC_STREAMS = 2;
+
+/**
+ * Which documents get a live stream: those the server is actually working on (building, not
+ * `queued`), minus any whose stream already failed or ended without `done` (`trouble` — the fast
+ * poll covers those), at most `MAX_DOC_STREAMS`.
+ */
+export function docsToStream(
+  docs: ReadonlyArray<{ id: number; status: ReferenceDocStatus }>,
+  trouble: ReadonlySet<number>,
+): number[] {
+  return docs
+    .filter((d) => isDocBuilding(d.status) && d.status !== 'queued' && !trouble.has(d.id))
+    .slice(0, MAX_DOC_STREAMS)
+    .map((d) => d.id);
+}
+
+/**
+ * The library list's poll interval: never when nothing builds; 3s while a building document has no
+ * healthy stream (it failed, or ended without `done`); 5s while a building document is not streamed
+ * at all (queued, or past the cap) so its start is noticed; else a 15s safety net.
+ */
+export function docsListPollMs(
+  docs: ReadonlyArray<{ id: number; status: ReferenceDocStatus }>,
+  trouble: ReadonlySet<number>,
+): number | false {
+  const building = docs.filter((d) => isDocBuilding(d.status));
+  if (building.length === 0) return false;
+  if (building.some((d) => trouble.has(d.id))) return 3_000;
+  const streamed = new Set(docsToStream(docs, trouble));
+  if (building.some((d) => !streamed.has(d.id))) return 5_000;
+  return 15_000;
+}
+
 /** The progress bar's words for a build's stage. */
 export function docStageLabel(status: ReferenceDocStatus): string {
   switch (status) {

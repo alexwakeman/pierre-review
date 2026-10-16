@@ -183,8 +183,9 @@ columns: the library (every document with its status, each expandable into its c
 documents" opens INDEX.md), a viewer that shows one library file at a time with every link followed
 in-app, and the chat (beside the viewer when wide, a Read / Ask tab when narrow). Adding: drag and
 drop or a file picker (PDF, .docx, .txt, .md, HTML), or "Add web page". A building document shows a
-progress bar with its stage (Converting, Splitting into sections, Indexing) from its SSE stream, the
-list polled as the fallback; a failed one shows its error and "Try again". Remove confirms inline. The
+progress bar with its stage (Converting, Splitting into sections, Indexing) from its SSE stream
+(only while the server is working on it — a queued row is polled, at most 2 streams open), the list
+polled as the fallback; a failed one shows its error and "Try again". Remove confirms inline. The
 Settings switch is "Use reference docs in Claude Review" (draft + Save, off by default). Detail and the
 landmines: [FRONTEND.md](FRONTEND.md) § Activity → Docs.
 

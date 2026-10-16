@@ -4543,10 +4543,15 @@ conversation on screen, the narrow-width Read / Ask tab) per WORKSPACE in the mo
 - The left tree is built from the structured `sections` (`docTreeRows`, the shape of CONTENTS.md),
   never by parsing CONTENTS.md; it is fetched only while that document is expanded, keyed on
   `builtAt` so a finished rebuild shows its new tree.
-- **Build progress**: one SSE stream per BUILDING document (`GET /api/docs/:id/stream`) patches its row
-  in the list cache; `done` patches the status and invalidates the list, trees and sections. The list
-  polls as the fallback — 3 s once a stream failed or ended without `done`, 15 s while streams are
-  healthy, never when nothing builds. The bar's words come from the STATUS (`docStageLabel`: Waiting
+- **Build progress**: an SSE stream per document the server is WORKING ON (`GET /api/docs/:id/stream`)
+  patches its row in the list cache; `done` patches the status and invalidates the list, trees and
+  sections. ⚠ **A `queued` row is NEVER streamed and at most `MAX_DOC_STREAMS` (2) are open**: each
+  stream holds an HTTP/1.1 connection (~6 per origin), so a 20-file drop that streamed every queued row
+  starved the uploads, the list poll and the chat, and the pane froze. The list polls as the fallback
+  (`docsListPollMs`) — 3 s while a building document's stream failed or ended without `done`, 5 s while
+  one is unstreamed (queued or past the cap), 15 s otherwise, never when nothing builds. ⚠ That
+  "trouble" is PER DOCUMENT (a set of ids, pruned when one stops building), never one shared flag a
+  later healthy stream would clear. The bar's words come from the STATUS (`docStageLabel`: Waiting
   to start / Converting / Splitting into sections / Indexing).
 - **Adding**: a drop zone + file picker (each file sent as the raw body, one at a time; per-file
   refusals listed by name) and "Add web page". `AiRunGate` swaps the add controls (and Ask) when the
