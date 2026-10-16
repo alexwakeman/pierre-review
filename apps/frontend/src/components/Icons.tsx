@@ -1104,6 +1104,28 @@ export function TicketIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// An open book — the workspace's reference library (Activity → Docs). Purpose-built: the docs rail
+// line must not borrow the ticket stub or the feed mark beside it.
+export function BookIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M12 6.5C10.3 5.2 7.8 4.6 4 4.8v12.6c3.8-.2 6.3.4 8 1.7 1.7-1.3 4.2-1.9 8-1.7V4.8c-3.8-.2-6.3.4-8 1.7z" />
+      <line x1="12" y1="6.5" x2="12" y2="19.1" />
+    </IconShell>
+  );
+}
+
+// An arrow up out of a tray — adding a file (the Docs drop zone).
+export function UploadIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      <path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" />
+      <polyline points="7.5 8.5 12 4 16.5 8.5" />
+      <line x1="12" y1="4" x2="12" y2="15" />
+    </IconShell>
+  );
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────────────────────
    Pending card types — one purpose-built mark per card type, leading each card's heading and
    each tab / kind chip (`Activity/PendingKindIcon.tsx` maps a card to its mark). Decorative

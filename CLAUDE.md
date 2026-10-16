@@ -909,6 +909,9 @@ Haiku 5.5). Details:
   from the rows, never a model) and checked by `validateDocFolder`; one Sonnet 5 build per doc, one per
   account at a time, a review-slot peer; library paths only through `parseLibraryPath`'s strict grammar.
   Other agents read it via `docsContextFor(...).usable` (folds the per-workspace OFF-by-default switch).
+  SPA: Activity → **Docs** (`?activityRepo=docs`, rail entry on `me.ai.enabled` only); ⚠ every link in
+  it goes through ONE resolver, `lib/referenceDocs.ts` `resolveDocLink` ([docs/FRONTEND.md](docs/FRONTEND.md)
+  § Activity → Docs).
 - **No Pro input any more**: the ticket review's members and story come from CORE's tracker
   (`tracker/ticket-source.ts`; `registerAgenticProviders` left the contract at apiVersion 23). Both AI
   Fix seeds are free.

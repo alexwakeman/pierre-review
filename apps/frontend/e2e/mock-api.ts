@@ -1,5 +1,10 @@
 import type { Page, Route } from '@playwright/test';
 import type {
+  ReferenceDocSectionResponse,
+  ReferenceDocTreeResponse,
+  ReferenceDocsConversationsResponse,
+  ReferenceDocsResponse,
+  ReferenceDocsSettings,
   AttentionCardsResponse,
   AttentionLivenessResponse,
   AwaitingReviewItem,
@@ -1018,6 +1023,45 @@ export async function installMockApi(page: Page): Promise<void> {
           diagram: null,
           latest: null,
         } satisfies TicketSequenceDiagramResponse);
+      }
+      // REFERENCE DOCS (core, local-only; docs/REFERENCE-DOCS.md). `ai.enabled` is false here, so the
+      // Docs rail line and its Settings switch are absent — these answer an EMPTY library for a spec
+      // that flips it on, with the real shapes rather than the untyped catch-all `{}`.
+      if (path.endsWith('/api/docs')) {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          docs: [],
+          docsInReview: false,
+          maxBytes: 25 * 1024 * 1024,
+        } satisfies ReferenceDocsResponse);
+      }
+      if (path.endsWith('/api/docs/tree')) {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          index: '# Reference library\n\nNo documents yet.\n',
+          doc: null,
+          contents: null,
+          sections: [],
+        } satisfies ReferenceDocTreeResponse);
+      }
+      if (path.endsWith('/api/docs/section')) {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          path: 'INDEX.md',
+          docId: null,
+          docSlug: null,
+          docTitle: null,
+          title: 'Reference library',
+          markdown: '# Reference library\n\nNo documents yet.\n',
+          prev: null,
+          next: null,
+        } satisfies ReferenceDocSectionResponse);
+      }
+      if (path.endsWith('/api/docs/chats')) {
+        return json(route, { workspaceId: WORKSPACE.id, conversations: [] } satisfies ReferenceDocsConversationsResponse);
+      }
+      if (/\/api\/workspaces\/\d+\/docs-settings$/.test(path)) {
+        return json(route, { workspaceId: WORKSPACE.id, docsInReview: false } satisfies ReferenceDocsSettings);
       }
       if (path.endsWith('/api/ticket-links')) {
         return json(route, { prs: [], titlesComplete: true } satisfies TicketLinksResponse);

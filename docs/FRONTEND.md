@@ -4514,3 +4514,44 @@ section and the AI Fix picker both draw it; the picker passes its tick box as `s
 project keys with SonarCloud's `<owner>_<repo>` as the placeholder, and a click-gated "Test connection"
 that asks for a save first. Contract: [SONARCLOUD.md](SONARCLOUD.md).
 
+
+## Activity → Docs (the reference library; local only)
+
+A rail line under This Sprint, `activityRepoId: 'docs'` / `?activityRepo=docs` (parsed AND emitted —
+pinned by test/docsRailUrl.test.ts). The rail ENTRY renders only on `me.ai.enabled`
+(`useAiCapabilities`); a `?activityRepo=docs` link opened where AI is off still selects the pane, which
+says in one line why it is empty. FREE, no ProBadge. Contract: [REFERENCE-DOCS.md](REFERENCE-DOCS.md)
+§ The SPA.
+
+`Activity/DocsView.tsx` (library column + layout), `DocsViewer.tsx` (one library file), `DocsChat.tsx`
+(the chat); server half `hooks/useReferenceDocs.ts`; view state (open file, expanded docs, the
+conversation on screen, the narrow-width Read / Ask tab) per WORKSPACE in the module store
+`store/docsView.ts` — not in the URL, not persisted. Pure folds in `lib/referenceDocs.ts`
+(test/referenceDocsLinks.test.ts).
+
+- ⚠ **ONE LINK RESOLVER, `resolveDocLink(fromPath, href)`**, for INDEX.md, CONTENTS.md, a section AND
+  a chat answer (which speaks from the library root). It joins the relative link onto the file's
+  folder, refuses `..` past the root, `/`, `%`, `?` and `\`, then holds the result to the client copy
+  of the server's strict grammar (`parseLibraryPath`). Library → opens in the viewer; `#anchor` →
+  scrolls the viewer's OWN box (never `scrollIntoView`); absolute → `safeExternalUrl`, new tab;
+  anything else → plain text. It reaches the shared `Markdown` through its `renderLink` prop.
+- Headings get `data-doc-anchor` from a rehype plugin run AFTER the sanitizer (which prefixes every
+  `id`), using a copy of the server's `headingAnchor` + duplicate numbering, so `#anchor` lands.
+- The left tree is built from the structured `sections` (`docTreeRows`, the shape of CONTENTS.md),
+  never by parsing CONTENTS.md; it is fetched only while that document is expanded, keyed on
+  `builtAt` so a finished rebuild shows its new tree.
+- **Build progress**: one SSE stream per BUILDING document (`GET /api/docs/:id/stream`) patches its row
+  in the list cache; `done` patches the status and invalidates the list, trees and sections. The list
+  polls as the fallback — 3 s once a stream failed or ended without `done`, 15 s while streams are
+  healthy, never when nothing builds. The bar's words come from the STATUS (`docStageLabel`: Waiting
+  to start / Converting / Splitting into sections / Indexing).
+- **Adding**: a drop zone + file picker (each file sent as the raw body, one at a time; per-file
+  refusals listed by name) and "Add web page". `AiRunGate` swaps the add controls (and Ask) when the
+  runtime or credential is missing; Rebuild / Try again show only when `ai.ready`. Reading never needs
+  either. Remove and Delete conversation confirm INLINE (no `window.confirm`).
+- **The chat**: one shared mutation key per workspace (`useIsMutating`), and the completed turn is
+  written in `useAskDocs`' HOOK-level onSuccess, which also seats a NEW conversation's id in
+  `store/docsView.ts` (only while the reader is still on "new") — never a `mutate()` callback.
+  Citations render as "Document › Section" buttons that open the section (at its anchor).
+- **Settings → Workspace → Reference docs** (`settings/ReferenceDocsSection.tsx`, beside Auto review,
+  only on `me.ai.enabled`): "Use reference docs in Claude Review", draft + Save, OFF by default.

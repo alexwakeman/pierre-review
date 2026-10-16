@@ -795,7 +795,9 @@ export interface FilterState {
   //
   // 'sprint' is the FREE **This Sprint** rail line (under Pending): the sprint graph and "Merged so
   // far" (`?activityRepo=sprint`, its sub-tab `sprintInnerTab`).
-  activityRepoId: number | 'open-prs' | 'feed' | 'attention' | 'sprint' | 'insights' | 'bots' | null;
+  // 'docs' is the **Docs** rail line (the workspace reference library, `?activityRepo=docs`): CORE,
+  // free, LOCAL ONLY — the rail entry renders only on `me.ai.enabled` (docs/REFERENCE-DOCS.md § The SPA).
+  activityRepoId: number | 'open-prs' | 'feed' | 'attention' | 'sprint' | 'docs' | 'insights' | 'bots' | null;
   // Soft thread-state filter inside an Activity repo console: clicking a thread-state
   // segment narrows the PRs-by-author list to PRs carrying that derived state.
   // null = no filter. Transient, URL-silent.
@@ -1203,7 +1205,7 @@ export interface FilterState {
   bumpClaudeReviewKickoff: () => void;
   // Select an Activity detail target (a repo id, or one of the pseudo-rows: 'feed' for the
   // cross-repo consolidated Feed, 'bots', 'attention', 'insights').
-  setActivityRepo: (id: number | 'open-prs' | 'feed' | 'attention' | 'sprint' | 'insights' | 'bots') => void;
+  setActivityRepo: (id: number | 'open-prs' | 'feed' | 'attention' | 'sprint' | 'docs' | 'insights' | 'bots') => void;
   // Set/clear the Activity repo console's soft thread-state filter (toggles off when
   // the same state is re-selected).
   setActivityThreadFilter: (s: DerivedState | null) => void;

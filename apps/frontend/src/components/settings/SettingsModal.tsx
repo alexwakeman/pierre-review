@@ -13,6 +13,7 @@ import { MyTurnSection, MY_TURN_SECTION_HEADING_ID } from './MyTurnSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
 import { DependencyAutoMergeSection } from './DependencyAutoMergeSection.js';
 import { SonarSection } from './SonarSection.js';
+import { ReferenceDocsSection } from './ReferenceDocsSection.js';
 import { FlowSettingsSection } from './FlowSettingsSection.js';
 import { GithubAppInstallSection } from './GithubAppInstallSection.js';
 import { YourDataSection } from './YourDataSection.js';
@@ -292,6 +293,9 @@ export function SettingsModal({
                     the workspace row (core migration 0074), so it does NOT wait on the plugin
                     gate. Claude Review is local-only, so this appears only where it can run. */}
                 {aiEnabled && <AutoReviewSection />}
+                {/* Reference docs in Claude Review — CORE, local-only like the review itself, read
+                    from the workspace row (`docs_in_review`), OFF by default. */}
+                {aiEnabled && <ReferenceDocsSection />}
               </div>
             )}
           </section>

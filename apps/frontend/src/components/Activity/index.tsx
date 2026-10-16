@@ -9,6 +9,7 @@ import { useFilters } from '../../store/filters.js';
 import { MaintainerShield } from '../MaintainerShield.js';
 import { relativeTime, DERIVED_STATE_META } from '../../lib/ui.js';
 import {
+  BookIcon,
   BotIcon,
   PullRequestIcon,
   SparkleIcon,
@@ -27,6 +28,8 @@ import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { HumanThemesPanel } from './HumanThemesPanel.js';
 import { InsightsView } from './InsightsView.js';
 import { SprintRailView } from './SprintRailView.js';
+import { DocsView } from './DocsView.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { AttentionView } from './AttentionView.js';
 import { BotsView } from './BotsView.js';
 import { BotSettingsPanel } from './BotSettingsPanel.js';
@@ -274,6 +277,11 @@ export function ActivityView(): JSX.Element {
   const showingInsights = activityRepoId === 'insights';
   // This Sprint — the sprint graph + "Merged so far". FREE on every tier (no ProBadge, no lock).
   const showingSprint = activityRepoId === 'sprint';
+  // Docs — the workspace reference library. CORE, free, LOCAL ONLY: the rail entry exists only where
+  // agentic AI runs (`me.ai.enabled`). A `?activityRepo=docs` link opened elsewhere still selects the
+  // pane, which then says in one line why there is nothing to show.
+  const showingDocs = activityRepoId === 'docs';
+  const aiEnabled = useAiCapabilities().enabled;
   // Bots Monitoring (BotsView) — Pro as a whole on `botDepth`. The RAIL ENTRY is listed on every
   // tier (visible-but-locked); BotsView renders the lock for the whole pane when unentitled.
   const showingBots = activityRepoId === 'bots';
@@ -398,7 +406,7 @@ export function ActivityView(): JSX.Element {
             isFetching && data != null ? 'opacity-60 transition-opacity' : ''
           }`}
         >
-          {/* RAIL ORDER, top to bottom: Open PRs · Pending · This Sprint · Feed · Reports (store
+          {/* RAIL ORDER, top to bottom: Open PRs · Pending · This Sprint · Docs (local only) · Feed · Reports (store
               value still 'insights') · Bots Monitoring — then the per-repo rows BENEATH the whole
               block. Open PRs leads because it is where the app opens; Pending, the ranked worklist,
               is next, and This Sprint (the sprint graph + Merged so far, FREE) sits directly under
@@ -492,6 +500,30 @@ export function ActivityView(): JSX.Element {
               This Sprint
             </span>
           </button>
+
+          {/* DOCS pseudo-row — under This Sprint, LOCAL ONLY (`me.ai.enabled`): the workspace's
+              reference library (DocsView) — the documents, their contents, a section viewer and the
+              docs chat. `?activityRepo=docs`. FREE: no ProBadge. */}
+          {aiEnabled && (
+            <button
+              type="button"
+              onClick={() => setActivityRepo('docs')}
+              aria-pressed={showingDocs}
+              className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
+                showingDocs
+                  ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                  : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+              }`}
+              title="Reference documents for this workspace, and a chat that answers from them"
+            >
+              <span className="shrink-0 text-sky-600 dark:text-sky-400">
+                <BookIcon />
+              </span>
+              <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
+                Docs
+              </span>
+            </button>
+          )}
 
           {/* FEED pseudo-row — under This Sprint. This workspace's consolidated state of play,
               across every repo in it. A Feed link carries `?activityRepo=feed` (it is no longer
@@ -642,6 +674,9 @@ export function ActivityView(): JSX.Element {
           // This Sprint — FREE; the sprint graph (landing) and Merged so far. Workspace-scoped, with
           // its own empty states (no tracker, no sprint), so it renders before repo data loads.
           <SprintRailView />
+        ) : showingDocs ? (
+          // Docs — the reference library. Needs no repos; owns its own empty and AI-off states.
+          <DocsView />
         ) : noRepos ? (
           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-400">
             {hasAnyRepo

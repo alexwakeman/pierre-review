@@ -1,4 +1,15 @@
 import type {
+  ReferenceDocMutationResponse,
+  ReferenceDocSectionResponse,
+  ReferenceDocTreeResponse,
+  ReferenceDocsChatBody,
+  ReferenceDocsChatResponse,
+  ReferenceDocsConversationResponse,
+  ReferenceDocsConversationsResponse,
+  ReferenceDocsResponse,
+  ReferenceDocsSettings,
+  AddReferenceDocUrlBody,
+  SetReferenceDocsSettingsBody,
   PrSequenceDiagramsResponse,
   RedrawSequenceDiagramResponse,
   RedrawStoryDiagramBody,
@@ -1636,6 +1647,55 @@ export const api = {
     fetch('/api/sequence-diagrams/story/redraw', jsonBody('POST', { ident } satisfies RedrawStoryDiagramBody)).then((r) =>
       handle<RedrawSequenceDiagramResponse>(r),
     ),
+
+  // ---- REFERENCE DOCS (CORE, local-only; docs/REFERENCE-DOCS.md, docs/API.md § Reference docs) ----
+  // Every read is the workspace's stored library; only upload / url / rebuild / chat run a model.
+  referenceDocs: (workspaceId: number) => get<ReferenceDocsResponse>(`/api/docs?${workspaceParam(workspaceId)}`),
+  // The file IS the body (no multipart): octet-stream, the name URI-encoded in X-Limn-Filename.
+  uploadReferenceDoc: (workspaceId: number, file: File) =>
+    fetch(`/api/docs/upload?${workspaceParam(workspaceId)}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/octet-stream', 'x-limn-filename': encodeURIComponent(file.name) },
+      body: file,
+    }).then((r) => handle<ReferenceDocMutationResponse>(r)),
+  addReferenceDocUrl: (workspaceId: number, url: string) =>
+    fetch('/api/docs/url', jsonBody('POST', { workspaceId, url } satisfies AddReferenceDocUrlBody)).then((r) =>
+      handle<ReferenceDocMutationResponse>(r),
+    ),
+  rebuildReferenceDoc: (docId: number) =>
+    fetch(`/api/docs/${docId}/rebuild`, jsonBody('POST')).then((r) => handle<ReferenceDocMutationResponse>(r)),
+  cancelReferenceDoc: (docId: number) =>
+    fetch(`/api/docs/${docId}/cancel`, jsonBody('POST')).then((r) => handle<ReferenceDocMutationResponse>(r)),
+  deleteReferenceDoc: (docId: number) =>
+    fetch(`/api/docs/${docId}`, jsonBody('DELETE')).then((r) => handle<{ deleted: true; id: number }>(r)),
+  referenceDocTree: (workspaceId: number, docId: number | null) =>
+    get<ReferenceDocTreeResponse>(
+      `/api/docs/tree?${workspaceParam(workspaceId)}${docId != null ? `&doc=${docId}` : ''}`,
+    ),
+  // `path` is library-relative and server-validated (a strict grammar; anything else is a 400).
+  referenceDocSection: (workspaceId: number, path: string) =>
+    get<ReferenceDocSectionResponse>(`/api/docs/section?${workspaceParam(workspaceId)}&path=${encodeURIComponent(path)}`),
+  askReferenceDocs: (body: ReferenceDocsChatBody) =>
+    fetch('/api/docs/chat', jsonBody('POST', body)).then((r) => handle<ReferenceDocsChatResponse>(r)),
+  referenceDocsConversations: (workspaceId: number) =>
+    get<ReferenceDocsConversationsResponse>(`/api/docs/chats?${workspaceParam(workspaceId)}`),
+  referenceDocsConversation: (workspaceId: number, conversationId: string) =>
+    get<ReferenceDocsConversationResponse>(
+      `/api/docs/chats/${encodeURIComponent(conversationId)}?${workspaceParam(workspaceId)}`,
+    ),
+  deleteReferenceDocsConversation: (workspaceId: number, conversationId: string) =>
+    fetch(`/api/docs/chats/${encodeURIComponent(conversationId)}?${workspaceParam(workspaceId)}`, jsonBody('DELETE')).then(
+      (r) => handle<{ deleted: number }>(r),
+    ),
+  // PATH id ⇒ another tenant's workspace is a 404.
+  referenceDocsSettings: (workspaceId: number) =>
+    get<ReferenceDocsSettings>(`/api/workspaces/${workspaceId}/docs-settings`),
+  setReferenceDocsSettings: (workspaceId: number, docsInReview: boolean) =>
+    fetch(
+      `/api/workspaces/${workspaceId}/docs-settings`,
+      jsonBody('PUT', { docsInReview } satisfies SetReferenceDocsSettingsBody),
+    ).then((r) => handle<ReferenceDocsSettings>(r)),
 
   // ---- AI Fix (Pro) ----
   aiFixSummary: (prId: number) =>

@@ -348,6 +348,9 @@ export function readFromUrl(): Partial<FilterState> {
     else if (activityRepo === 'insights') out.activityRepoId = 'insights';
     // The FREE This Sprint rail line (the sprint graph + "Merged so far").
     else if (activityRepo === 'sprint') out.activityRepoId = 'sprint';
+    // The local-only Docs rail line (the reference library). Parsed on every build: a link opened
+    // where agentic AI is off lands on the pane's own one line, never on a guess.
+    else if (activityRepo === 'docs') out.activityRepoId = 'docs';
     else {
       const n = Number.parseInt(activityRepo, 10);
       if (Number.isFinite(n)) out.activityRepoId = n;
@@ -677,6 +680,8 @@ export function writeToUrl(s: FilterState): void {
       p.set('activityRepo', 'sprint');
       // ⚠ THE OMITTED VALUE IS THE CURRENT DEFAULT ('graph') — a bare `?activityRepo=sprint` means it.
       if (s.sprintInnerTab !== 'graph') p.set('sprintTab', s.sprintInnerTab);
+    } else if (s.activityRepoId === 'docs') {
+      p.set('activityRepo', 'docs');
     } else if (s.activityRepoId === 'insights') {
       p.set('activityRepo', 'insights');
       // The pane's sub-tab, on the same "only where the strip is on screen" gate as `feedTab` /

@@ -1,4 +1,4 @@
-import { memo, type CSSProperties } from 'react';
+import { memo, type CSSProperties, type ReactNode } from 'react';
 import ReactMarkdown, { type Options as MarkdownOptions } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -146,6 +146,7 @@ export const Markdown = memo(function Markdown({
   prRefs = false,
   ticketLinks = false,
   rehypeExtra,
+  renderLink,
 }: {
   children: string;
   prRefs?: boolean;
@@ -154,6 +155,9 @@ export const Markdown = memo(function Markdown({
   /** More rehype plugins, run AFTER the sanitizer (the This sprint card's highlights). Pass a
    *  memoised array — a new one per render re-parses the body. */
   rehypeExtra?: RehypePlugins;
+  /** Draw a link yourself (Activity → Docs: library links open in the viewer). Return `undefined`
+   *  for the default new-tab link. Pass a memoised function — a new one per render re-parses. */
+  renderLink?: (href: string | undefined, children: ReactNode) => ReactNode | undefined;
 }): JSX.Element {
   const base = prRefs ? WITH_PR_REFS : BASE_REHYPE;
   // Tracker text: an empty bullet holding a list prints as that list (lib/ticketMarkdown.ts).
@@ -188,6 +192,10 @@ export const Markdown = memo(function Markdown({
                   {props.children}
                 </TicketRefLink>
               );
+            }
+            if (renderLink != null) {
+              const own = renderLink(typeof props.href === 'string' ? props.href : undefined, props.children);
+              if (own !== undefined) return <>{own}</>;
             }
             return <a {...props} target="_blank" rel="noreferrer noopener" />;
           },

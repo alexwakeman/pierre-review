@@ -6,8 +6,8 @@ that an agent navigates by REASONING over contents, not by embedding search. COR
 does the content building. Code: `apps/backend/src/reference-docs/`. Wire types:
 `packages/shared/src/reference-docs.ts`. Routes: [API.md](API.md) § Reference docs.
 
-The BACKEND is built (this doc). The SPA rail line (Activity → Docs), the Settings switch and the
-review integration consume the API below and `docsContextFor` — see § For other agents.
+The backend and the SPA (Activity → Docs, Settings → Workspace → Reference docs — § The SPA) are
+built. Review integration consumes `docsContextFor` — see § For other agents.
 
 ## The idea (PageIndex, without the vectors)
 
@@ -167,6 +167,18 @@ alone. A run that consults the library:
 
 The switch is per workspace, `workspaces.docs_in_review` (NULL/false = OFF), via
 `GET`/`PUT /api/workspaces/:id/docs-settings`; the ONE reader/writer is `store.ts`.
+
+## The SPA
+
+A rail line under Activity, **Docs** (`?activityRepo=docs`), shown only on `me.ai.enabled`. Three
+columns: the library (every document with its status, each expandable into its contents tree; "All
+documents" opens INDEX.md), a viewer that shows one library file at a time with every link followed
+in-app, and the chat (beside the viewer when wide, a Read / Ask tab when narrow). Adding: drag and
+drop or a file picker (PDF, .docx, .txt, .md, HTML), or "Add web page". A building document shows a
+progress bar with its stage (Converting, Splitting into sections, Indexing) from its SSE stream, the
+list polled as the fallback; a failed one shows its error and "Try again". Remove confirms inline. The
+Settings switch is "Use reference docs in Claude Review" (draft + Save, off by default). Detail and the
+landmines: [FRONTEND.md](FRONTEND.md) § Activity → Docs.
 
 ## Storage (migration 0116 / pg 0103)
 
