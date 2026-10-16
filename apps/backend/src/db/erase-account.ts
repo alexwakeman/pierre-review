@@ -189,6 +189,11 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.trackerTickets).where(eq(schema.trackerTickets.accountId, accountId)).execute();
     await tx.delete(schema.jiraAcFields).where(eq(schema.jiraAcFields.accountId, accountId)).execute();
     await tx.delete(schema.workspaceTrackers).where(eq(schema.workspaceTrackers.accountId, accountId)).execute();
+    // SonarCloud (migration 0114 / pg 0101): the workspace rows hold the SEALED token; the snapshots
+    // hold third-party analysis of the account's code. No FK on the snapshots, so this is the whole
+    // guarantee; workspace_sonar cascades from workspaces too, and is explicit anyway.
+    await tx.delete(schema.sonarSnapshots).where(eq(schema.sonarSnapshots.accountId, accountId)).execute();
+    await tx.delete(schema.workspaceSonar).where(eq(schema.workspaceSonar.accountId, accountId)).execute();
     // Workspace settings history (migration 0096 / pg 0083) — cascades from workspaces too, and is
     // explicit anyway.
     await tx
@@ -324,6 +329,9 @@ export function accountScopedTables(): {
     { name: 'trackerTickets', col: schema.trackerTickets.accountId, table: schema.trackerTickets },
     { name: 'jiraAcFields', col: schema.jiraAcFields.accountId, table: schema.jiraAcFields },
     { name: 'workspaceTrackers', col: schema.workspaceTrackers.accountId, table: schema.workspaceTrackers },
+    // SonarCloud (migration 0114 / pg 0101), erased explicitly above; `workspaceSonar` holds a credential.
+    { name: 'sonarSnapshots', col: schema.sonarSnapshots.accountId, table: schema.sonarSnapshots },
+    { name: 'workspaceSonar', col: schema.workspaceSonar.accountId, table: schema.workspaceSonar },
     // Chronology's settings history (migration 0096 / pg 0083), erased explicitly above.
     {
       name: 'workspaceSettingEvents',

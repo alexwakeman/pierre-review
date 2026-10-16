@@ -18,6 +18,7 @@ import { FindingRow } from '../ClaudeReviewTab.js';
 import { FollowUpRow } from '../ClaudeReviewFollowUp.js';
 import { ThreadRow } from '../ClaudeReviewThreads.js';
 import { CiFailureRow } from '../ClaudeReviewCiFailures.js';
+import { SonarIssueRow } from '../ClaudeReviewSonar.js';
 import { CriterionRow, MissingRow } from '../TicketReviewParts.js';
 import {
   PICKER_SECTION_LABEL,
@@ -32,7 +33,7 @@ import {
 // `fixPickerModel.ts`; this file only draws.
 //
 // ⚠ EACH ITEM IS DRAWN WITH THE CLAUDE REVIEW TAB'S OWN CARD for its kind — FindingRow,
-// FollowUpRow, ThreadRow, CiFailureRow, CriterionRow / MissingRow — with `actions={false}` and the
+// FollowUpRow, ThreadRow, CiFailureRow, SonarIssueRow, CriterionRow / MissingRow — with `actions={false}` and the
 // tick box in the card's `selection` slot. Never a copy of a card's markup here: a second copy is a
 // card that drifts. The server names the card (`AiFixPickerItem.card`); findings and earlier
 // findings are joined against the source review, ticket gaps against Story check's own query. An
@@ -275,6 +276,8 @@ export function FixPicker({
             selection={selection}
           />
         );
+      case 'sonar':
+        return <SonarIssueRow key={item.key} issue={card.issue} selection={selection} />;
       case 'story': {
         const run = ticketRuns.get(card.ticketReviewId);
         const ti = run?.items.find((x) => x.id === card.itemId);

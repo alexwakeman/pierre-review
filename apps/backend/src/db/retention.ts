@@ -124,6 +124,8 @@ async function deletePrSubtree(
   // Stored tracker tickets (core since migration 0088 / pg 0075; the plugin's `pruneProByPrIds`
   // used to take them). No FKs — explicit, pr-keyed.
   await tx.delete(schema.trackerTickets).where(inArray(schema.trackerTickets.prId, prIds)).execute();
+  // SonarCloud snapshots (migration 0114 / pg 0101). No FKs — explicit, pr-keyed.
+  await tx.delete(schema.sonarSnapshots).where(inArray(schema.sonarSnapshots.prId, prIds)).execute();
   await tx.delete(pullRequests).where(inArray(pullRequests.id, prIds)).execute();
   // NB: commitFiles is GLOBAL (sha-keyed, shared across PRs/tenants) — deliberately NOT
   // pruned here. users + syncState are likewise out of scope.

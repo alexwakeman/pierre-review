@@ -9,6 +9,7 @@ import type {
   ClaudeReview,
   ClaudeReviewTicketEntry,
   ClaudeThreadAssessment,
+  SonarIssue,
 } from '@pierre-review/shared';
 import { AUTO_FIX_DEFAULT_INCLUDE } from '@pierre-review/shared';
 import {
@@ -581,5 +582,82 @@ describe('the fix picker — sections, stable keys, defaults, selection, budget'
       ['F1', 1, true],
       ['F2', 3, true],
     ]);
+  });
+});
+
+// ---- SonarCloud items (docs/SONARCLOUD.md § AI Fix) ----
+describe('SonarCloud items', () => {
+  const sonar = (key: string, severity: 'blocker' | 'major' | 'info', over: Partial<SonarIssue> = {}): SonarIssue =>
+    ({
+      key,
+      kind: 'issue',
+      rule: 'typescript:S1854',
+      ruleName: 'Unused assignments should be removed',
+      severity,
+      type: 'CODE_SMELL',
+      message: `Remove this useless assignment (${key}).`,
+      path: 'src/a.ts',
+      line: 12,
+      endLine: 12,
+      effort: '5min',
+      tags: [],
+      securityCategory: null,
+      whyIsThisAnIssue: 'Dead stores waste work.',
+      howToFix: 'Delete the assignment.',
+      code: [{ line: 12, code: 'let x = 1;', flagged: true }],
+      url: 'https://sonarcloud.io/project/issues?id=p&pullRequest=1&open=' + key,
+      ...over,
+    });
+
+  it('numbers them Q1.. with stable keys, fences the rule guidance and the code', () => {
+    const seed = buildReviewSeed(review({ findings: [] }), {
+      nonce,
+      sonarIssues: [sonar('AX1', 'blocker'), sonar('AX2', 'major') ],
+    });
+    expect(seed.items.map((i) => [i.ref, i.kind])).toEqual([
+      ['Q1', 'sonar_issue'],
+      ['Q2', 'sonar_issue'],
+    ]);
+    expect(seed.sentRefs).toEqual(['Q1', 'Q2']);
+    expect(seed.text).toContain(`---BEGIN ITEM Q1 ${NONCE}---`);
+    expect(seed.text).toContain('How to fix (SonarCloud\'s guidance):\nDelete the assignment.');
+    expect(seed.text).toContain('> 12 | let x = 1;');
+    expect(seed.text).toContain('Rule: typescript:S1854');
+  });
+
+  it('the picker lists them under "sonar" with their card; info is offered, not ticked', () => {
+    const preview = buildPickerPreview(review({ findings: [] }), {
+      sonarIssues: [sonar('AX1', 'blocker'), sonar('AX3', 'info') ],
+    });
+    expect(preview.items.map((i) => [i.key, i.section, i.defaultIncluded, i.card?.kind])).toEqual([
+      ['sonar:AX1', 'sonar', true, 'sonar'],
+      ['sonar:AX3', 'sonar', false, 'sonar'],
+    ]);
+  });
+
+  it('selection keys on the SonarCloud key, and an auto fix follows its switch', () => {
+    const items = [sonar('AX1', 'blocker'), sonar('AX2', 'major') ];
+    const picked = buildReviewSeed(review({ findings: [] }), {
+      nonce,
+      sonarIssues: items,
+      selection: { kind: 'keys', keys: ['sonar:AX2'] },
+    });
+    expect(picked.items.map((i) => i.title)).toEqual(['Remove this useless assignment (AX2).']);
+    expect(picked.items[0]!.ref).toBe('Q1');
+    const off = buildReviewSeed(review({ findings: [] }), {
+      nonce,
+      sonarIssues: items,
+      selection: { kind: 'sections', include: { ...AUTO_FIX_DEFAULT_INCLUDE, sonar: false } },
+    });
+    expect(off.items).toEqual([]);
+  });
+
+  it("a report citing a Q ref it was shown is kept; an unknown one is dropped", () => {
+    const r = normalizeChangeReport(
+      { changes: [{ path: 'src/a.ts', summary: 'Removed it.', refs: ['Q1', 'Q9'] }], unaddressed: [] },
+      ['Q1'],
+      ['src/a.ts'],
+    );
+    expect(r.changes[0]!.refs).toEqual(['Q1']);
   });
 });

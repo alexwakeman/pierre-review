@@ -82,6 +82,7 @@ const KIND_ROWS: Array<{ key: keyof AutoPostKinds; label: string }> = [
   { key: 'nits', label: 'Nits' },
   { key: 'questions', label: 'Questions, on the line they ask about where possible' },
   { key: 'ciFailures', label: 'CI failure reasons, in one PR comment' },
+  { key: 'sonar', label: 'SonarCloud issues, in one PR comment' },
   { key: 'storyGaps', label: 'Story gaps, on the PR they belong to' },
   { key: 'notAskedFor', label: 'Work the story did not ask for' },
 ];
@@ -95,6 +96,7 @@ const FIX_ROWS: Array<{ key: keyof AutoFixInclude; label: string }> = [
   { key: 'judgedThreads', label: 'Threads Claude says to fix' },
   { key: 'untouchedThreads', label: 'Threads nobody has answered' },
   { key: 'ciFailures', label: 'CI failure reasons' },
+  { key: 'sonar', label: 'SonarCloud issues' },
   { key: 'styleBots', label: 'Style bot comments (SonarCloud, Codecov…)' },
 ];
 const sameInclude = (a: AutoFixInclude, b: AutoFixInclude): boolean =>

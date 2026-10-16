@@ -1,4 +1,9 @@
 import type {
+  SonarConnectionCheck,
+  SonarPostResponse,
+  SonarPrResponse,
+  WorkspaceSonarSettings,
+  WorkspaceSonarUpdate,
   ActiveReviewsResponse,
   DependencyMergeAllBody,
   DependencyMergeAllResponse,
@@ -1309,6 +1314,33 @@ export const api = {
       withQuery('/api/pro/settings/workspace', workspaceParam(workspaceId)),
       jsonBody('PUT', patch),
     ).then((r) => handle<WorkspaceProSettings>(r)),
+
+  // ---- SONARCLOUD (CORE, free; docs/SONARCLOUD.md) ----
+  // The workspace's SonarCloud settings: organization, whether a token is saved (`hasToken` — the
+  // token is WRITE-ONLY and never comes back) and each repo's project key. PATH id ⇒ another
+  // tenant's id is a 404. The PUT is a partial patch.
+  workspaceSonar: (workspaceId: number) => get<WorkspaceSonarSettings>(`/api/workspaces/${workspaceId}/sonar`),
+  updateWorkspaceSonar: (workspaceId: number, patch: WorkspaceSonarUpdate) =>
+    fetch(`/api/workspaces/${workspaceId}/sonar`, jsonBody('PUT', patch)).then((r) =>
+      handle<WorkspaceSonarSettings>(r),
+    ),
+  // "Test connection" with the SAVED token. Click-gated (calls SonarCloud).
+  checkWorkspaceSonar: (workspaceId: number) =>
+    fetch(`/api/workspaces/${workspaceId}/sonar/check`, { method: 'POST' }).then((r) =>
+      handle<SonarConnectionCheck>(r),
+    ),
+  // A PR's STORED snapshot at `head` (or its synced head) — never calls SonarCloud.
+  prSonar: (prId: number, head: string | null) =>
+    get<SonarPrResponse>(`/api/prs/${prId}/sonar${head ? `?head=${encodeURIComponent(head)}` : ''}`),
+  // Read SonarCloud for that head NOW and store it.
+  refreshPrSonar: (prId: number, headSha: string | null) =>
+    fetch(`/api/prs/${prId}/sonar/refresh`, jsonBody('POST', headSha ? { headSha } : {})).then((r) =>
+      handle<SonarPrResponse>(r),
+    ),
+  // ONE PR comment with the head's SonarCloud findings, once per (PR, head). Never retry on a
+  // `visible: false` answer: the comment IS on GitHub.
+  postPrSonar: (prId: number, headSha: string) =>
+    fetch(`/api/prs/${prId}/sonar/post`, jsonBody('POST', { headSha })).then((r) => handle<SonarPostResponse>(r)),
 
   // ---- THE ISSUE TRACKER (CORE, free — apiVersion 23; docs/TRACKERS.md) ----
   // The workspace's tracker: provider, base URL, project keys, match scope, and the Jira email +

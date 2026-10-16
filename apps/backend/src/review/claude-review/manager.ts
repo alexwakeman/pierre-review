@@ -56,6 +56,7 @@ import {
   type ReviewPrContext,
 } from './persist.js';
 import { emitClaudeReviewCompleted } from '../../pro/event-hooks.js';
+import { ensureSonarSnapshot } from '../../sonar/snapshot.js';
 
 // The Claude Review queue/concurrency/SSE manager (CORE, free, local-only) — the analog of the
 // AI-Fix manager. It owns the product pipeline (prepare → route → prompt → run → persist), calling
@@ -432,6 +433,12 @@ function launch(item: QueueItem): void {
           .catch((err) =>
             ctx.log.warn(`auto post pr ${prId}: ${err instanceof Error ? err.message : String(err)}`),
           );
+        // The head's SonarCloud issues as ONE PR comment, under the same switch (its own kind).
+        void import('../../sonar/post.js')
+          .then((m) => m.maybeAutoPostSonar(ctx, { accountId: item.accountId, prId, headSha: item.headSha }))
+          .catch((err) =>
+            ctx.log.warn(`sonar auto post pr ${prId}: ${err instanceof Error ? err.message : String(err)}`),
+          );
         void import('../../coding/ai-fix/auto-fix.js')
           .then((m) =>
             m.maybeStartAutoFix(ctx, { accountId: item.accountId, prId, reviewId }),
@@ -592,7 +599,15 @@ async function runPipeline(
   // ---- other PRs on the same ticket (a DEEP review only; read-only, for cross-repo interactions) ----
   const peers = mode === 'worktree' ? await reviewPeersFor(item) : [];
 
-  const nonce = pickReviewNonce(untrustedTexts(plan, since, threadPlan, peers, settled));
+  // ---- SonarCloud (docs/SONARCLOUD.md § Claude Review): the head's snapshot, read now or reused.
+  // Only when the PR's workspace has SonarCloud set up; never throws — a failure is a stored, named
+  // state the tab shows, and costs this block only. ----
+  const sonarSnap = await ensureSonarSnapshot(ctx, item.accountId, item.prId, item.headSha, {
+    log: { warn: (m) => ctx.log.warn(m) },
+  });
+  const sonar = sonarSnap?.state === 'ok' && sonarSnap.issues.length > 0 ? sonarSnap : null;
+
+  const nonce = pickReviewNonce(untrustedTexts(plan, since, threadPlan, peers, settled, sonar));
 
   // A deep review offers the lead its specialist sub-agents (specialists.ts); a diff-only one none.
   const specialists = mode === 'worktree' ? offeredSpecialists(prep.changedFiles) : [];
@@ -613,6 +628,7 @@ async function runPipeline(
     threads: threadPlan,
     peers,
     settled,
+    sonar,
     nonce,
   });
 

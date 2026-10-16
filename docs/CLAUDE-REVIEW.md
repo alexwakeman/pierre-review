@@ -216,6 +216,15 @@ posts **one** GitHub review (inline + body + verdict).
   `apps/backend/src/ai/runtime.ts`, value-imports them. [PACKAGING.md](PACKAGING.md) owns the
   details and the guardrail. The product modules import no SDK themselves.
 
+## SonarCloud in a review
+
+When the PR's workspace has SonarCloud set up, a run takes (or reuses) the head's stored snapshot before
+it builds the prompt and adds a fenced "SonarCloud analysis of this commit" block (the 25 most severe of
+up to 50 items, as evidence, never to be copied). The tab shows a **SonarCloud** section after CI check
+with a "Post SonarCloud findings" button: ONE PR comment per (PR, head), claimed before the write, never
+retried; an auto review posts it under auto-posting's `sonar` kind. AI Fix seeds the same items as
+`Q<n>`. Contract: [SONARCLOUD.md](SONARCLOUD.md).
+
 ## No praise findings
 
 A review posts only what the author should act on or answer. `praise` is OUT of `submit_review`'s

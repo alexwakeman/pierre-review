@@ -79,6 +79,7 @@ import { ClaudeReviewThreadsSection } from './ClaudeReviewThreads.js';
 import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine } from '../lib/claudeAutoReview.js';
 import { CiCheckSection } from './CiCheckSection.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
+import { ClaudeReviewSonarSection } from './ClaudeReviewSonar.js';
 import { PrRefText, ReviewPrRefsProvider } from './ReviewPrRefs.js';
 import { REVIEW_ITEM_CARD, REVIEW_ITEM_TITLE, REVIEW_META } from '../lib/reviewStyles.js';
 import { reviewTexts, type KnownPr } from '../lib/reviewPrRefs.js';
@@ -1382,6 +1383,15 @@ function ClaudesReview({
         finishedAt: review.finishedAt,
       })}
       {ciCheck}
+      {/* SonarCloud's analysis of the reviewed head (docs/SONARCLOUD.md). Absent when the
+          workspace has no SonarCloud set up and nothing was stored. */}
+      <ClaudeReviewSonarSection
+        prId={review.prId}
+        headSha={headSha}
+        canPost={ai.enabled}
+        changedPaths={changedPaths}
+        onOpenInChanges={onOpenInChanges}
+      />
       {/* The chat sits UNDER Story check and CI check and opens expanded, so a question about the
           review or the story is one click from both. */}
       {chatReviewId != null && <ReviewChatSection reviewId={chatReviewId} prId={review.prId} />}

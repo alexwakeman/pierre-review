@@ -1294,3 +1294,13 @@ planned), `plan_revision` (integer), `plan_seed` (JSON `{kind, text}`, server-on
 the new `status = 'planned'` until it is approved or discarded (docs/CLAUDE-REVIEW.md § Plan mode). No new
 table, so `accountScopedTables()` / erasure / both delete paths already cover it. Journal `when` sqlite
 `1792137603009` / pg `1792137604008`. ⚠ pg `0100` NOT replayed.
+
+### `0114_sonarcloud` (pg `0101`) — SonarCloud
+Two new tables (docs/SONARCLOUD.md). `workspace_sonar`: one row per workspace — `organization`, the SEALED
+write-only `auth_token` (tracker/secret.ts forms), `project_keys` (JSON map repoId → key, overrides only),
+`updated_at`; the named COMPOSITE FK `workspace_sonar_workspace_account_fk` onto `workspaces (id, account_id)`
+and unique `(account_id, workspace_id)`. `sonar_snapshots`: one row per `(account_id, pr_id, head_sha)`
+(unique) — `state`, `message`, `project_key`, `quality_gate` / `issues` / `post` JSON (sqlite text, pg
+jsonb), `total_issues`, `total_hotspots`, `fetched_at`. No FK on `pr_id` (the tracker_tickets precedent),
+so BOTH delete paths delete it explicitly. Both tables are in `accountScopedTables()`, erased, and checked
+by `verify:isolation`. Journal `when` sqlite `1792137603010` / pg `1792137604009`. ⚠ pg `0101` NOT replayed.

@@ -146,6 +146,24 @@ describe('tierFor — Slack digest', () => {
   });
 });
 
+// SonarCloud (sonar/routes.ts). Reading SonarCloud spends THEIR quota (`search`); the stored reads
+// are DB-only (`read`); the one PR comment is a GitHub write.
+describe('tierFor — SonarCloud', () => {
+  it('each route is on its own tier, by exact verb + path', () => {
+    expect(tiers('GET', '/api/prs/42/sonar')).toEqual(['read']);
+    expect(tiers('POST', '/api/prs/42/sonar/refresh')).toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/prs/42/sonar/post')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/workspaces/3/sonar/check')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/workspaces/3/sonar')).toEqual(['read']);
+    expect(tiers('PUT', '/api/workspaces/3/sonar')).toEqual(['read']);
+  });
+  it('a near-miss is not swept in', () => {
+    expect(tiers('GET', '/api/prs/42/sonar/refresh')).not.toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/prs/42/sonar/posts')).not.toEqual(['github_write']);
+    expect(tiers('GET', '/api/workspaces/3/sonar/check')).toEqual(['read']);
+  });
+});
+
 // The issue tracker (CORE since apiVersion 23). The routes that can read the CUSTOMER'S tracker
 // (one outbound call each, up to a 10s wait) take `search`, not the blanket 600/min `read`.
 describe('tierFor — the issue tracker', () => {

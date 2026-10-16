@@ -172,6 +172,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (!mutating && /^\/api\/workspaces\/\d+\/tracker\/(jira-fields|linear-check)$/.test(path)) {
     return [TIERS.search, TIERS.read];
   }
+  // SONARCLOUD (sonar/routes.ts): "Test connection" calls SonarCloud with the saved token (one call
+  // for the organization + one per repo, ≤ 20) — a THIRD-PARTY quota, so `search`. GET/PUT
+  // `…/sonar` are DB-only and fall to `read` on the next line, decided rather than inherited.
+  if (method === 'POST' && /^\/api\/workspaces\/\d+\/sonar\/check$/.test(path)) return [TIERS.search, TIERS.read];
   if (path === '/api/workspaces' || path.startsWith('/api/workspaces/')) return [TIERS.read];
 
   // ---- Per-account settings writes: `read`, RECORDED rather than inherited ----
@@ -466,6 +470,14 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // the token: theirs, not ours, so the 60/min `search` bucket. Anchored at BOTH ends, so a sibling
   // `/api/prs/:id/*` route is not swept in — and the segment is `tracker-ticket`, never a prefix of
   // `ticket-reviews` (the ticket review's own, `read`-tier family below).
+  // ---- SonarCloud's PR routes (sonar/routes.ts), anchored at BOTH ends ----
+  //   GET  /api/prs/:id/sonar          the STORED snapshot, no SonarCloud call        → read
+  //   POST /api/prs/:id/sonar/refresh  reads SonarCloud now (issues, hotspots, gate, rules,
+  //                                    flagged lines — up to ~100 calls on THEIR quota) → search
+  //   POST /api/prs/:id/sonar/post     ONE GitHub comment                            → github_write
+  if (!mutating && /^\/api\/prs\/\d+\/sonar$/.test(path)) return [TIERS.read];
+  if (method === 'POST' && /^\/api\/prs\/\d+\/sonar\/refresh$/.test(path)) return [TIERS.search, TIERS.read];
+  if (method === 'POST' && /^\/api\/prs\/\d+\/sonar\/post$/.test(path)) return [TIERS.githubWrite];
   if (!mutating && /^\/api\/prs\/\d+\/tracker-ticket$/.test(path)) return [TIERS.search, TIERS.read];
   if (method === 'POST' && /^\/api\/prs\/\d+\/tracker-ticket\/refresh$/.test(path)) {
     return [TIERS.search, TIERS.read];

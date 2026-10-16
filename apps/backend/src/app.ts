@@ -28,6 +28,7 @@ import { healthRoutes } from './api/routes/health.js';
 import { aiRuntimeRoutes } from './api/routes/ai-runtime.js';
 import { registerAgenticRoutes } from './review/agentic.js';
 import { registerTracker } from './tracker/index.js';
+import { registerSonar } from './sonar/index.js';
 import { repoRoutes } from './api/routes/repos.js';
 import { workspaceRoutes } from './api/routes/workspaces.js';
 import { userRoutes } from './api/routes/users.js';
@@ -311,6 +312,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   // tracker settings, the stored-ticket routes behind the PR pane's story panel, the Open PRs ticket
   // row and stacks. Unconditional: no capability, no plugin.
   registerTracker(app);
+  // SONARCLOUD (CORE, FREE; docs/SONARCLOUD.md): the workspace's SonarCloud settings + connection
+  // check, a PR's stored snapshot, a refresh, and (local only) the one PR comment.
+  registerSonar(app);
 
   return app;
 }

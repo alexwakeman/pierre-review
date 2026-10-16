@@ -43,6 +43,8 @@ import type {
   TicketLinksResponse,
   TicketMergedPrsResponse,
   WorkspaceTrackerSettings,
+  WorkspaceSonarSettings,
+  SonarPrResponse,
   SprintGraphResponse,
 } from '@pierre-review/shared';
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
@@ -979,6 +981,22 @@ export async function installMockApi(page: Page): Promise<void> {
           providerChosen: false,
           githubIssuesRepos: [],
         } satisfies WorkspaceTrackerSettings);
+      }
+      // SONARCLOUD (core, free; docs/SONARCLOUD.md). Not set up in e2e: the settings answer "no
+      // organization, no token", and a PR's stored read answers "not configured, nothing stored" —
+      // so the review tab's SonarCloud section stays absent.
+      if (/\/api\/workspaces\/\d+\/sonar$/.test(path)) {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          organization: null,
+          hasToken: false,
+          tokenUnreadable: false,
+          repos: [],
+        } satisfies WorkspaceSonarSettings);
+      }
+      const sonarMatch = path.match(/\/api\/prs\/(\d+)\/sonar$/);
+      if (sonarMatch) {
+        return json(route, { prId: Number(sonarMatch[1]), configured: false, snapshot: null } satisfies SonarPrResponse);
       }
       if (path.endsWith('/api/ticket-links')) {
         return json(route, { prs: [], titlesComplete: true } satisfies TicketLinksResponse);

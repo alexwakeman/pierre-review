@@ -37,6 +37,9 @@ import type {
   ClaudeAutoPostRecord,
   ClaudeCiFailuresRecord,
   CiAutoPostRecord,
+  SonarIssue,
+  SonarPostRecord,
+  SonarQualityGate,
   FindingAutoResolveRecord,
   ClaudeFindingReminder,
   FindingPushbackRecord,
@@ -3260,3 +3263,61 @@ export const sprintAssessments = sqliteTable(
   }),
 );
 
+
+// ── SonarCloud (migration 0114 / pg 0101; docs/SONARCLOUD.md) ────────────────────────────────────
+// workspace_sonar — ONE row per workspace: the SonarCloud organization, the SEALED write-only token
+// (tracker/secret.ts's `sealed:v1:` / `plain:` forms) and per-repo project-key OVERRIDES
+// (`{ "<repoId>": "<key>" }`; a repo absent from the map uses `<owner>_<repo>`). `workspace_id`
+// arrives in a request PATH, so its FK is the named COMPOSITE one onto `workspaces (id, account_id)`.
+export const workspaceSonar = sqliteTable(
+  'workspace_sonar',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    organization: text('organization'),
+    authToken: text('auth_token'),
+    projectKeys: text('project_keys', { mode: 'json' }).$type<Record<string, string>>(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountWorkspaceUx: uniqueIndex('workspace_sonar_account_workspace').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_sonar_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sonar_snapshots — ONE row per (account, PR, head): what SonarCloud said about that head, so every
+// read (the review tab, the prompt, AI Fix's seed, the comment) is a DB read. `post` is the ONE PR
+// comment's record, CLAIMED (compare-and-set from NULL) before the GitHub write and never retried.
+// No FK on pr_id (the tracker_tickets precedent): BOTH delete paths (deleteRepo, retention's
+// deletePrSubtree) and the erasure delete it explicitly.
+export const sonarSnapshots = sqliteTable(
+  'sonar_snapshots',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    prId: integer('pr_id').notNull(),
+    headSha: text('head_sha').notNull(),
+    // SonarSnapshotState.
+    state: text('state').notNull(),
+    message: text('message'),
+    projectKey: text('project_key'),
+    qualityGate: text('quality_gate', { mode: 'json' }).$type<SonarQualityGate>(),
+    issues: text('issues', { mode: 'json' }).$type<SonarIssue[]>(),
+    totalIssues: integer('total_issues').notNull().default(0),
+    totalHotspots: integer('total_hotspots').notNull().default(0),
+    fetchedAt: integer('fetched_at', { mode: 'timestamp' }).notNull(),
+    post: text('post', { mode: 'json' }).$type<SonarPostRecord>(),
+  },
+  (t) => ({
+    accountPrHeadUx: uniqueIndex('sonar_snapshots_account_pr_head').on(t.accountId, t.prId, t.headSha),
+  }),
+);

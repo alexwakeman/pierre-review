@@ -42,6 +42,9 @@ import type {
   ClaudeAutoPostRecord,
   ClaudeCiFailuresRecord,
   CiAutoPostRecord,
+  SonarIssue,
+  SonarPostRecord,
+  SonarQualityGate,
   FindingAutoResolveRecord,
   ClaudeFindingReminder,
   FindingPushbackRecord,
@@ -2335,3 +2338,49 @@ export const sprintAssessments = pgTable(
   }),
 );
 
+
+// ── SonarCloud (migration 0114 / pg 0101; docs/SONARCLOUD.md). Contracts in schema.sqlite.ts. ──
+export const workspaceSonar = pgTable(
+  'workspace_sonar',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    organization: text('organization'),
+    authToken: text('auth_token'),
+    projectKeys: jsonb('project_keys').$type<Record<string, string>>(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (t) => ({
+    accountWorkspaceUx: uniqueIndex('workspace_sonar_account_workspace').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_sonar_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+export const sonarSnapshots = pgTable(
+  'sonar_snapshots',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id').notNull(),
+    prId: integer('pr_id').notNull(),
+    headSha: text('head_sha').notNull(),
+    state: text('state').notNull(),
+    message: text('message'),
+    projectKey: text('project_key'),
+    qualityGate: jsonb('quality_gate').$type<SonarQualityGate>(),
+    issues: jsonb('issues').$type<SonarIssue[]>(),
+    totalIssues: integer('total_issues').notNull().default(0),
+    totalHotspots: integer('total_hotspots').notNull().default(0),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true, mode: 'date' }).notNull(),
+    post: jsonb('post').$type<SonarPostRecord>(),
+  },
+  (t) => ({
+    accountPrHeadUx: uniqueIndex('sonar_snapshots_account_pr_head').on(t.accountId, t.prId, t.headSha),
+  }),
+);

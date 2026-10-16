@@ -4481,3 +4481,15 @@ Each of these is a decision, not an oversight, and "finishing the migration" wou
   **reference**, rendered `<m.icon size={11} />`. Its seven states each keep their own mark:
   "it decided nothing", "it never ran" and "GitHub told us nothing" are three different facts, and
   collapsing any into the failure mark would report a red nobody observed.
+
+## SonarCloud (review tab section, picker card, Settings)
+
+`components/ClaudeReviewSonar.tsx` holds `SonarIssueRow` (the ONE SonarCloud card — the review tab's
+section and the AI Fix picker both draw it; the picker passes its tick box as `selection`) and
+`ClaudeReviewSonarSection` (mounted in `ClaudesReview` after CI check, reading the STORED snapshot —
+`usePrSonar`, never SonarCloud on mount; Refresh and "Post SonarCloud findings" are buttons, the post's
+"Posting…" read off the shared mutation key with `useIsMutating`). Settings → Workspace → SonarCloud is
+`settings/SonarSection.tsx`: draft + Save, a write-only token ("Saved" with Replace / Remove), per-repo
+project keys with SonarCloud's `<owner>_<repo>` as the placeholder, and a click-gated "Test connection"
+that asks for a save first. Contract: [SONARCLOUD.md](SONARCLOUD.md).
+

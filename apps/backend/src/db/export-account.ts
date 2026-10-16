@@ -97,6 +97,13 @@ export interface AccountExport {
    * of the customer's tracker, regenerable from it.
    */
   workspaceTrackers: Record<string, unknown>[];
+  /**
+   * Each workspace's SonarCloud settings (core `workspace_sonar`, migration 0114 / pg 0101): the
+   * organization and project-key overrides the user TYPED. ⚠ THE TOKEN IS WITHHELD (`hasToken`
+   * only), like every credential here. The snapshots are not exported: a cache of SonarCloud's
+   * analysis, regenerable from it.
+   */
+  workspaceSonar: Record<string, unknown>[];
 }
 
 /** Build the full export document for one account. Returns null if the account is gone. */
@@ -170,6 +177,19 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     })
     .from(schema.workspaceTrackers)
     .where(eq(schema.workspaceTrackers.accountId, accountId))
+    .execute();
+
+  // The SonarCloud rows — explicit columns, the token reduced to its presence below.
+  const sonarRows = await db
+    .select({
+      workspaceId: schema.workspaceSonar.workspaceId,
+      organization: schema.workspaceSonar.organization,
+      projectKeys: schema.workspaceSonar.projectKeys,
+      hasToken: schema.workspaceSonar.authToken,
+      updatedAt: schema.workspaceSonar.updatedAt,
+    })
+    .from(schema.workspaceSonar)
+    .where(eq(schema.workspaceSonar.accountId, accountId))
     .execute();
 
   const [
@@ -306,5 +326,6 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     autoMergeRequests: autoMergeRows,
     // ⚠ PRESENCE ONLY — never the stored token, in any form.
     workspaceTrackers: trackerRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
+    workspaceSonar: sonarRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
   };
 }

@@ -10,6 +10,7 @@ import type {
 } from './pending-rules.js';
 import type { FlowBudgetMeasure, FlowSettings, ResolvedFlowSettings } from './flow-settings.js';
 import type { MyTurnSettings } from './my-turn-settings.js';
+import type { SonarIssue } from './sonar.js';
 
 export type DerivedState =
   | 'resolved'
@@ -4852,6 +4853,10 @@ export interface AutoPostKinds {
   ciFailures: boolean;
   // A ticket review's unmet / partly met criteria and missing pieces.
   storyGaps: boolean;
+  // The PR's SonarCloud issues at the reviewed head, as ONE PR comment per (PR, head) — after an AUTO
+  // review, when the workspace has SonarCloud set up (docs/SONARCLOUD.md). Default ON, inside
+  // auto-posting. Stored record: `sonar_snapshots.post` (`SonarPostRecord`).
+  sonar: boolean;
   // A ticket review's "Not asked for" items.
   notAskedFor: boolean;
 }
@@ -4862,6 +4867,7 @@ export const AUTO_POST_DEFAULT_KINDS: AutoPostKinds = {
   questions: true,
   ciFailures: true,
   storyGaps: true,
+  sonar: true,
   notAskedFor: false,
 };
 export const AUTO_POST_DEFAULT_SCOPE: AutoPostScope = 'mine';
@@ -4916,6 +4922,7 @@ export interface AutoFixInclude {
   judgedThreads: boolean;     // other reviewers' threads Claude judged to fix
   untouchedThreads: boolean;  // unresolved threads nobody has answered (derived_state 'untouched')
   ciFailures: boolean;        // the latest CI review's causes at the current head
+  sonar: boolean;             // SonarCloud issues at the current head (docs/SONARCLOUD.md)
   styleBots: boolean;         // threads opened by style / quality bots (role quality_check)
 }
 export interface AutoFixSettings {
@@ -4931,6 +4938,7 @@ export const AUTO_FIX_DEFAULT_INCLUDE: AutoFixInclude = {
   judgedThreads: true,
   untouchedThreads: true,
   ciFailures: true,
+  sonar: true,
   styleBots: false,
 };
 export const AUTO_FIX_DEFAULT_AUTO_PUSH = false;
@@ -8505,6 +8513,7 @@ export type AiFixReviewItemKind =
   | 'thread' // another reviewer's thread the review judged still needs a fix (T1…)
   | 'story' // an unmet / partly met acceptance criterion, or a missing piece, of a user story (S1-AC2, S1-M1…)
   | 'ci_failure' // a CI failure the review judged fixable in this PR (C1…)
+  | 'sonar_issue' // a SonarCloud issue or hotspot at the PR's current head (Q1…)
   | 'earlier_finding'; // an earlier review's finding still not (fully) addressed (P1…)
 
 export const AI_FIX_REVIEW_ITEM_LABELS: Record<AiFixReviewItemKind, string> = {
@@ -8512,6 +8521,7 @@ export const AI_FIX_REVIEW_ITEM_LABELS: Record<AiFixReviewItemKind, string> = {
   thread: 'Reviewer thread',
   story: 'User story',
   ci_failure: 'CI failure',
+  sonar_issue: 'SonarCloud issue',
   earlier_finding: 'Earlier finding',
 };
 
@@ -8773,6 +8783,7 @@ export interface GenerateFixBody {
 //   judged_threads    other reviewers' threads Claude judged to fix
 //   untouched_threads unresolved threads nobody answered (derived_state 'untouched'), judged or not
 //   ci_failures       the latest CI review's causes at the current head
+//   sonar             SonarCloud issues + hotspots at the current head (the stored snapshot)
 //   style_bots        threads opened by style / quality bots (role quality_check) — default OFF
 //   story             story items, when the run has any
 export type AiFixPickerSection =
@@ -8781,6 +8792,7 @@ export type AiFixPickerSection =
   | 'judged_threads'
   | 'untouched_threads'
   | 'ci_failures'
+  | 'sonar'
   | 'style_bots'
   | 'story';
 export interface AiFixPickerItem {
@@ -8811,12 +8823,14 @@ export interface AiFixPickerItem {
 //                              carries a synthesized one (`inReview: false`, both verdicts
 //                              'not_checked') so it still draws as a review-thread card
 //   ci                         the CI review's item
+//   sonar                      the SonarCloud issue, as the review tab's SonarCloud section draws it
 //   story                      joined by the SPA against the PR's ticket reviews (Story check's query)
 export type AiFixPickerCard =
   | { kind: 'finding'; findingId: number }
   | { kind: 'earlier_finding'; priorFindingId: number }
   | { kind: 'thread'; assessment: ClaudeThreadAssessment; inReview: boolean }
   | { kind: 'ci'; item: CiReviewItem }
+  | { kind: 'sonar'; issue: SonarIssue }
   | { kind: 'story'; ticketReviewId: number; itemId: number };
 export interface AiFixPickerPreview {
   sourceReviewId: number;

@@ -13,6 +13,7 @@ export const PICKER_SECTION_ORDER: readonly AiFixPickerSection[] = [
   'judged_threads',
   'untouched_threads',
   'ci_failures',
+  'sonar',
   'style_bots',
   'story',
 ];
@@ -23,6 +24,7 @@ export const PICKER_SECTION_LABEL: Record<AiFixPickerSection, string> = {
   judged_threads: 'Threads Claude says need a fix',
   untouched_threads: 'Unanswered threads',
   ci_failures: 'CI failures',
+  sonar: 'SonarCloud issues',
   style_bots: 'Style bot comments',
   story: 'Ticket gaps',
 };

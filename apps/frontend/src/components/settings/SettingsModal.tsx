@@ -12,6 +12,7 @@ import { BlastRadiusSection } from './BlastRadiusSection.js';
 import { MyTurnSection, MY_TURN_SECTION_HEADING_ID } from './MyTurnSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
 import { DependencyAutoMergeSection } from './DependencyAutoMergeSection.js';
+import { SonarSection } from './SonarSection.js';
 import { FlowSettingsSection } from './FlowSettingsSection.js';
 import { GithubAppInstallSection } from './GithubAppInstallSection.js';
 import { YourDataSection } from './YourDataSection.js';
@@ -257,6 +258,9 @@ export function SettingsModal({
                     modes, read from core's `workspace_trackers` row (apiVersion 23), so it sits
                     above the pro-settings gate with the other free sections. */}
                 <IssueLinksSection />
+                {/* SonarCloud for THIS workspace — CORE, free, both modes, its own core row
+                    (`workspace_sonar`), so it too sits above the pro-settings gate. */}
+                <SonarSection />
                 {/* Dependency auto-merge — CORE, free, both modes, read from the workspace row. */}
                 <DependencyAutoMergeSection />
                 {/* ⚠ ONLY THE PAID SECTIONS WAIT ON THE PLUGIN, and this line speaks for them

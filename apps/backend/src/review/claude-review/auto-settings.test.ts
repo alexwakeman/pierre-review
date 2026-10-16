@@ -353,6 +353,7 @@ describe('auto-posting — off by default, overrides only', () => {
       questions: true,
       ciFailures: true,
       storyGaps: true,
+      sonar: true,
       notAskedFor: false,
     });
     // Nothing stored for a workspace nobody changed.
@@ -452,6 +453,7 @@ describe('auto verdict, auto resolve and auto fix settings (0091)', () => {
       judgedThreads: true,
       untouchedThreads: true,
       ciFailures: true,
+      sonar: true,
       styleBots: false,
     });
     const on = await s.setWorkspaceAutoReview(ctx, 1, wsA2, {

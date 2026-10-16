@@ -31,6 +31,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 | [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports -> "Chronology", its working-hours budgets, request history and Pro pointers |
 | [BLAST-RADIUS](docs/BLAST-RADIUS.md) | how far a PR can REACH — the Low/Medium/High chip, the co-change index, the Pro impact note |
 | [TRACKERS](docs/TRACKERS.md) | the issue tracker (CORE, free): the adapter seam, Jira, GitHub Issues, Linear, stored tickets + worker, idents, the sealed token |
+| [SONARCLOUD](docs/SONARCLOUD.md) | the SonarCloud integration (CORE, free): per-workspace sealed token, the per-(PR, head) snapshot, the review block, the one PR comment, AI Fix's `Q<n>` items |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) | ML severity/category of bot comments (`packages/ml`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
 | [PRO-PLUGIN-AND-ACTIVITY](docs/PRO-PLUGIN-AND-ACTIVITY.md) | plugin seam/apiVersion, Activity, Feed, the bot platform, annotations, digests, the work plan |
@@ -890,6 +891,11 @@ Haiku 5.5). Details:
   built from direct core imports — never `ProContext`. Their tests pass a fake one; the queue
   managers carry it on each item. URL paths did NOT move (the fixer keeps its historical
   `/api/pro/prs/:id/ai-fix*` and `/api/pro/ai-fixes/*`).
+- **SONARCLOUD IS CORE** (`src/sonar/`, sqlite `0114` / pg `0101`, [docs/SONARCLOUD.md](docs/SONARCLOUD.md)):
+  a per-workspace SEALED write-only token to the FIXED host through the tracker's guarded GET; ONE
+  stored snapshot per (account, PR, head) that every reader uses (only a review run and Refresh call
+  SonarCloud), capped at 50 with the cut stated; fenced into the review prompt, AI Fix's `Q<n>` items,
+  and ONE PR comment per (PR, head), claimed before the write, never retried (auto: the `sonar` kind).
 - **No Pro input any more**: the ticket review's members and story come from CORE's tracker
   (`tracker/ticket-source.ts`; `registerAgenticProviders` left the contract at apiVersion 23). Both AI
   Fix seeds are free.
@@ -1545,7 +1551,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0100` and plugin `0034`–`0037` + `0040` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0101` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

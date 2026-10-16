@@ -4132,6 +4132,91 @@ check(
   }
 }
 
+// ── SONARCLOUD (sonar/, CORE; docs/SONARCLOUD.md) ─────────────────────────────────────────────
+// `workspace_sonar` (a credential per workspace) and `sonar_snapshots` (per PR + head). BOTH accounts
+// save a token and BOTH PRs get a snapshot at the same head, so a dropped account predicate has
+// something to leak (the mutation checks prove B's own reads see B's rows). Workspace ids arrive in
+// a request PATH (→ 404) and the composite FK refuses a cross-account pair in the database.
+{
+  const sset = await import('../src/sonar/settings.js');
+  const sstore = await import('../src/sonar/store.js');
+  const { registerSonarRoutes } = await import('../src/sonar/routes.js');
+  const sc = { db, schema: schema as unknown as Record<string, any> };
+  const SHA = 'f'.repeat(40);
+  // The workspace that HOLDS each seeded PR's repo (earlier sections move repos between workspaces).
+  const homeA = (await sset.readSonarAccessForPr(sc, 1, A.prId))?.workspaceId ?? defaultA;
+  const homeB = (await sset.readSonarAccessForPr(sc, 2, B.prId))?.workspaceId ?? defaultB;
+  for (const [acct, ws, prId] of [
+    [1, homeA, A.prId],
+    [2, homeB, B.prId],
+  ] as const) {
+    const w = await sset.writeWorkspaceSonar(sc, acct, ws, { organization: `org${acct}`, token: `sonar-token-of-${acct}` });
+    check(`writeWorkspaceSonar(${acct}, own workspace) succeeds`, w.ok);
+    await sstore.upsertSonarSnapshot(sc, acct, prId, SHA, `key${acct}`, {
+      state: 'ok',
+      message: null,
+      qualityGate: null,
+      issues: [],
+      totalIssues: acct,
+      totalHotspots: 0,
+    });
+  }
+  check("readSonarAccessForPr(A, B's PR) is null", (await sset.readSonarAccessForPr(sc, 1, B.prId)) === null);
+  const bAccess = await sset.readSonarAccessForPr(sc, 2, B.prId);
+  check("readSonarAccessForPr(B, B's PR) sees B's org (mutation check)", bAccess?.organization === 'org2');
+  check("readSonarSnapshot(A, B's PR) is null", (await sstore.readSonarSnapshot(sc, 1, B.prId, SHA)) === null);
+  check("readSonarSnapshot(B, B's PR) is B's (mutation check)", (await sstore.readSonarSnapshot(sc, 2, B.prId, SHA))?.totalIssues === 2);
+  check("getSonarIssuesForPrHead(A, B's PR) is empty", (await sstore.getSonarIssuesForPrHead(sc, 1, B.prId)).length === 0);
+  const rec = { status: 'posting' as const, at: new Date().toISOString(), trigger: 'manual' as const, commentId: null, error: null, issueCount: 0, truncated: false };
+  check("claimSonarPost(A, B's PR) claims nothing", (await sstore.claimSonarPost(sc, 1, B.prId, SHA, rec)) === false);
+  check("B's snapshot is still unclaimed", (await sstore.readSonarSnapshot(sc, 2, B.prId, SHA))?.post === null);
+  let sonarRefused = false;
+  try {
+    await sset.writeWorkspaceSonar(sc, 1, homeB, { organization: 'evil' });
+  } catch {
+    sonarRefused = true;
+  }
+  check("a sonar row naming B's workspace under account A is refused by the composite FK", sonarRefused);
+  check("B's organization is intact", (await sset.readSonarAccessForPr(sc, 2, B.prId))?.organization === 'org2');
+
+  const Fastify = (await import('fastify')).default;
+  const sapp = Fastify({ logger: false });
+  registerSonarRoutes(sapp, {
+    ...sc,
+    accountIdOf: () => 1,
+    log: { info() {}, warn() {}, error() {} } as any,
+    isCloud: false,
+    transport: async () => {
+      throw new Error('no SonarCloud call may be made by an isolation check');
+    },
+  });
+  await sapp.ready();
+  check("GET /api/workspaces/<B's>/sonar as A → 404", (await sapp.inject({ method: 'GET', url: `/api/workspaces/${homeB}/sonar` })).statusCode === 404);
+  check(
+    "PUT /api/workspaces/<B's>/sonar as A → 404",
+    (await sapp.inject({ method: 'PUT', url: `/api/workspaces/${homeB}/sonar`, payload: { clearToken: true } })).statusCode === 404,
+  );
+  check("POST /api/workspaces/<B's>/sonar/check as A → 404", (await sapp.inject({ method: 'POST', url: `/api/workspaces/${homeB}/sonar/check` })).statusCode === 404);
+  check("GET /api/prs/<B's>/sonar as A → 404", (await sapp.inject({ method: 'GET', url: `/api/prs/${B.prId}/sonar` })).statusCode === 404);
+  check(
+    "POST /api/prs/<B's>/sonar/refresh as A → 404",
+    (await sapp.inject({ method: 'POST', url: `/api/prs/${B.prId}/sonar/refresh`, payload: {} })).statusCode === 404,
+  );
+  check(
+    "POST /api/prs/<B's>/sonar/post as A → 404",
+    (await sapp.inject({ method: 'POST', url: `/api/prs/${B.prId}/sonar/post`, payload: { headSha: SHA } })).statusCode === 404,
+  );
+  const ownGet = await sapp.inject({ method: 'GET', url: `/api/prs/${A.prId}/sonar?head=${SHA}` });
+  check("GET /api/prs/<A's>/sonar as A → A's snapshot", ownGet.statusCode === 200 && ownGet.json().snapshot?.totalIssues === 1);
+  const ownSettings = await sapp.inject({ method: 'GET', url: `/api/workspaces/${homeA}/sonar` });
+  check("GET /api/workspaces/<A's>/sonar never carries a token", ownSettings.statusCode === 200 && !ownSettings.body.includes('sonar-token-of'));
+  check(
+    "B's token still opens after A's refused writes",
+    (await sset.readWorkspaceSonarToken(sc, 2, homeB)).token.state === 'ok',
+  );
+  await sapp.close();
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

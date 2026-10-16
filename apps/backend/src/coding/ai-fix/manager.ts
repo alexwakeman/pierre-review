@@ -29,6 +29,7 @@ import { loadSeedThreads } from './thread-candidates.js';
 import { maybeAutoPushFix } from './auto-push.js';
 import { getOwnedTicketItemsForPr } from '../../review/ticket-review/persist.js';
 import { getFixableCiItemsForPr } from '../../review/ci-review/persist.js';
+import { getSonarIssuesForPrHead } from '../../sonar/store.js';
 import {
   buildFixSystemPrompt,
   buildFixUserPrompt,
@@ -203,7 +204,7 @@ async function loadSeedInputs(
   prId: number,
   withTicketItems: boolean,
 ) {
-  const [ticketItems, ciItems, threads] = await Promise.all([
+  const [ticketItems, ciItems, threads, sonarIssues] = await Promise.all([
     withTicketItems
       ? getOwnedTicketItemsForPr(ctx, accountId, prId).catch((err: unknown): SeedTicketItem[] => {
           ctx.log.warn({ err }, 'ai-fix: loading ticket items failed');
@@ -217,8 +218,14 @@ async function loadSeedInputs(
     }),
     // The PR's open threads (untouched + style-bot sections). Never throws.
     loadSeedThreads(ctx, accountId, prId),
+    // SonarCloud's issues from the snapshot AT THE PR'S CURRENT HEAD (a stored read, never a call to
+    // SonarCloud; docs/SONARCLOUD.md § AI Fix).
+    getSonarIssuesForPrHead(ctx, accountId, prId).catch((err: unknown) => {
+      ctx.log.warn({ err }, 'ai-fix: loading SonarCloud issues failed');
+      return [];
+    }),
   ]);
-  return { ticketItems, ciItems, threads };
+  return { ticketItems, ciItems, threads, sonarIssues };
 }
 
 /**

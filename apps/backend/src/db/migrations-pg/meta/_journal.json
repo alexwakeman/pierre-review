@@ -708,6 +708,13 @@
       "when": 1792137604008,
       "tag": "0100_ai_fix_plan",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1792137604009,
+      "tag": "0101_sonarcloud",
+      "breakpoints": true
     }
   ]
 }
