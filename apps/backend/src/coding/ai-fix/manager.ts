@@ -30,6 +30,7 @@ import { maybeAutoPushFix } from './auto-push.js';
 import { getOwnedTicketItemsForPr } from '../../review/ticket-review/persist.js';
 import { getFixableCiItemsForPr } from '../../review/ci-review/persist.js';
 import { getSonarIssuesForPrHead } from '../../sonar/store.js';
+import { freshenSonarForPrHead } from '../../sonar/snapshot.js';
 import { partialSpendOf } from '../partial-spend.js';
 import {
   buildFixSystemPrompt,
@@ -198,6 +199,9 @@ async function loadSourceReview(
   return review;
 }
 
+/** How long opening / starting a fix waits for a SonarCloud read of the current head. */
+const SONAR_FRESHEN_WAIT_MS = 8_000;
+
 /** Everything a seed is built from besides the review. Each read fails soft (costs its items only). */
 async function loadSeedInputs(
   ctx: AgentContext,
@@ -219,9 +223,11 @@ async function loadSeedInputs(
     }),
     // The PR's open threads (untouched + style-bot sections). Never throws.
     loadSeedThreads(ctx, accountId, prId),
-    // SonarCloud's issues from the snapshot AT THE PR'S CURRENT HEAD (a stored read, never a call to
-    // SonarCloud; docs/SONARCLOUD.md § AI Fix).
-    getSonarIssuesForPrHead(ctx, accountId, prId).catch((err: unknown) => {
+    // SonarCloud's items from the snapshot AT THE PR'S CURRENT HEAD — read first when that head has
+    // no good read yet (bounded wait; a reuse otherwise; docs/SONARCLOUD.md § AI Fix).
+    freshenSonarForPrHead(ctx, accountId, prId, SONAR_FRESHEN_WAIT_MS, {
+      log: { warn: (m) => ctx.log.warn(m) },
+    }).then(() => getSonarIssuesForPrHead(ctx, accountId, prId)).catch((err: unknown) => {
       ctx.log.warn({ err }, 'ai-fix: loading SonarCloud issues failed');
       return [];
     }),

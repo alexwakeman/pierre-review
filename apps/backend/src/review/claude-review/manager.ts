@@ -24,6 +24,7 @@ import {
   peerRef,
   pickReviewNonce,
   skipSummary,
+  sonarHasContent,
   systemPromptForMode,
   untrustedTexts,
   type PromptPeer,
@@ -620,7 +621,8 @@ async function runPipeline(
   const sonarSnap = await ensureSonarSnapshot(ctx, item.accountId, item.prId, item.headSha, {
     log: { warn: (m) => ctx.log.warn(m) },
   });
-  const sonar = sonarSnap?.state === 'ok' && sonarSnap.issues.length > 0 ? sonarSnap : null;
+  // Issues, or a gate that did not pass (its conditions and their files are evidence too).
+  const sonar = sonarSnap?.state === 'ok' && sonarHasContent(sonarSnap) ? sonarSnap : null;
 
   const nonce = pickReviewNonce(untrustedTexts(plan, since, threadPlan, peers, settled, sonar));
 

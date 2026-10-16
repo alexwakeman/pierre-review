@@ -1,7 +1,8 @@
 // THE SONARCLOUD PR COMMENT (comment.ts). What is pinned: each issue carries what a fix needs
 // (rule, location, message, code, fix guidance); third-party text cannot ping or forge a marker; the
 // body stays under the budget and STATES what it left out; the hidden marker always closes it and
-// the "posted automatically" footer appears on an auto post only.
+// the "posted automatically" footer appears on an auto post only; PROSE outside a fence is
+// HTML-escaped (a rule's quoted `</details>` or `<a href>` must not render), code is not.
 import { describe, expect, it } from 'vitest';
 import { AUTO_POST_FOOTER, type SonarIssue, type SonarSnapshot } from '@pierre-review/shared';
 import { SONAR_COMMENT_MARKER, sonarCommentBody, sonarHasSomethingToPost } from './comment.js';
@@ -49,7 +50,10 @@ describe('sonarCommentBody', () => {
     expect(issueCount).toBe(1);
     expect(truncated).toBe(false);
     expect(body).toContain('1 of 9 issues, highest severity first');
-    expect(body).toContain('Quality gate: failed on new coverage 40 (limit 80).');
+    expect(body).toContain('Quality gate: failed:\n- Coverage on new code is 40%. The quality gate needs at least 80%.');
+    // The failing coverage condition is a block of its own, before the issues (which keep their count).
+    expect(body).toContain('#### 1. Critical · Quality gate: Coverage on new code');
+    expect(body).toContain('#### 2. Major · Bug: A rule');
     expect(body).toContain('Rule `ts:S1`');
     expect(body).toContain('`src/a.ts:1-2`');
     expect(body).toContain('Do the thing.');
@@ -81,5 +85,25 @@ describe('sonarCommentBody', () => {
     expect(sonarHasSomethingToPost(snap([]))).toBe(true);
     expect(sonarHasSomethingToPost(snap([], { qualityGate: { status: 'OK', conditions: [] } }))).toBe(false);
     expect(sonarHasSomethingToPost(snap([issue(1)], { state: 'error' }))).toBe(false);
+  });
+
+  it('escapes tags in third-party prose so a quoted example never renders, and leaves code literal', () => {
+    const it0 = issue(1, {
+      message: 'Add a <title> element',
+      howToFix: 'Noncompliant:\n<a href="https://evil.example" target="_blank">x</a>\n</details><table>',
+      ruleName: 'Links & <a> tags',
+      code: [{ line: 1, code: '<div>&nbsp;</div>', flagged: true }],
+    });
+    const { body } = sonarCommentBody(snap([it0], { qualityGate: null }), { auto: false });
+    expect(body).toContain('> Add a &lt;title&gt; element');
+    expect(body).toContain('&lt;a href="https://evil.example" target="_blank"&gt;x&lt;/a&gt;');
+    expect(body).toContain('&lt;/details&gt;&lt;table&gt;');
+    expect(body).toContain('Links &amp; &lt;a&gt; tags');
+    // Exactly our own <details> open and close survive as markup.
+    expect(body.match(/<details>/g)).toHaveLength(1);
+    expect(body.match(/<\/details>/g)).toHaveLength(1);
+    expect(body).not.toContain('<a href');
+    // Inside the fence the code is printed as written.
+    expect(body).toContain('> 1 | <div>&nbsp;</div>');
   });
 });

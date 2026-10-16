@@ -20,8 +20,17 @@ SonarCloud analysis and feeds it to Claude Review, AI Fix and one PR comment. Co
   one function that opens it, and its callers send it to SonarCloud only.
 - **Reads never call SonarCloud.** A snapshot per (account, PR, head) is stored in
   `sonar_snapshots`; the review tab, the review prompt, AI Fix's seed and the comment all read that row.
-  Only two things take a snapshot: a Claude Review run (before it builds the prompt) and the Refresh
-  button.
+  Only four things take a snapshot: a Claude Review run (before it builds the prompt), the Refresh
+  button, an auto post (re-reading a head whose earlier read found no analysis of it) and opening /
+  starting an AI Fix (waits at most 8 s; a slower read lands for the next open).
+- **ONLY AN ANALYSIS OF THIS COMMIT IS STORED.** Every SonarCloud PR call is keyed by PR NUMBER and
+  answers the LATEST analysis, whatever commit it was of — and SonarCloud usually finishes minutes after
+  the push an auto review starts on. So `gather.ts` asks `api/project_pull_requests/list` which commit it
+  analysed, BEFORE and AFTER reading; any other commit is `not_analyzed` with NOTHING kept (never the
+  previous commit's issues under the new head). The one other sha accepted is GitHub's test merge commit
+  whose SECOND parent is the head (a CI checkout of `refs/pull/N/merge`), proven by one GitHub REST read
+  (`githubIsMergeOfHead`). A read that finds another commit never replaces an earlier `ok` read of this
+  head (a Refresh in an older review's tab must not wipe it).
 - **Nothing throws out of a review.** Every outcome is a NAMED state (`SonarSnapshotState`) with a
   sentence we wrote: `ok`, `not_configured` (nothing stored), `token_unreadable`, `no_project`,
   `not_analyzed`, `unauthorized`, `error`.
@@ -50,8 +59,16 @@ marks each repo "Found" / "Not found".
    analysis for this PR yet (`not_analyzed`).
 2. `api/issues/search?componentKeys&pullRequest&resolved=false&additionalFields=_all&s=SEVERITY` — up to
    2 pages of 500. Rule names come from the response's `rules`.
-3. `api/hotspots/search?projectKey&pullRequest&status=TO_REVIEW` — one page of 500. A failure here costs
-   the hotspots only.
+1b. `api/project_pull_requests/list?project` — the PR's analysed `commit.sha` (see the rule above). Not
+   listed, no sha, or another commit ⇒ `not_analyzed`; read again after step 3b, and an analysis that
+   landed mid-read is refused the same way.
+3. `api/hotspots/search?projectKey&pullRequest&status=TO_REVIEW` — up to 2 pages of 500. A failure here
+   costs the hotspots only (pages already read are kept).
+3b. **Measures and the gate's files** (enrichments): `api/measures/component` (new-code coverage, lines to
+   cover, uncovered lines, duplication density and lines, new lines) onto `qualityGate.measures`; and for
+   each FAILING coverage / duplication condition, `api/measures/component_tree` sorted by
+   `new_uncovered_lines` / `new_duplicated_lines` — the 10 worst files onto that condition's `files`. Both
+   live inside the stored gate JSON, so no migration; old rows simply lack them.
 4. **Rank + cap**: severity first (`blocker > critical > major > minor > info`), an issue before a
    hotspot of the same severity, then file and line. An issue's severity is its legacy `severity`, else
    the highest of its `impacts` (`BLOCKER/HIGH/MEDIUM/LOW/INFO` → blocker/critical/major/minor/info). A
@@ -65,14 +82,16 @@ marks each repo "Found" / "Not found".
    costs that item its guidance or its code, never the snapshot.
 
 **Reuse** (`sonar/snapshot.ts`): a head that read `ok` is not read again unless the reader presses
-Refresh; a failed read is retried once it is 10 minutes old, because SonarCloud's PR analysis often
-finishes after the push a review starts on. Concurrent calls for one (account, PR, head) share one read.
+Refresh; `not_analyzed` is retried once it is 2 minutes old and any other failed read once it is 10,
+because SonarCloud's PR analysis often finishes after the push a review starts on. Concurrent calls for one (account, PR, head) share one read.
 A re-read replaces the issues but **never touches `post`**.
 
 ## Claude Review
 
 `runPipeline` (claude-review/manager.ts) takes or reuses the head's snapshot after the thread plan.
-When it read `ok` with items, the prompt gains "SonarCloud analysis of this commit": the gate, the total,
+When it read `ok` with items OR a gate that did not pass, the prompt gains "SonarCloud analysis of this
+commit": the gate, the total, a fenced "SONARCLOUD QUALITY GATE" block (each failing condition in words —
+"Coverage on new code is 40%. The quality gate needs at least 80%." — with its files, and the measures),
 and the 25 most severe items (`SONAR_PROMPT_MAX`), each FENCED with the run's nonce as untrusted data
 (rule, severity, place, message, a short "why"). The model is told to use them as evidence, to raise a
 finding only when it agrees, and not to copy the list. The texts join the nonce-collision scan
@@ -97,10 +116,14 @@ ONE PR-level comment per (PR, head):
    `settlePrAfterWrite`. **Never retried.** A post cut off mid-flight stays `posting` for good.
 
 The body: a lead line ("SonarCloud on abc1234: 50 of 132 issues, highest severity first"), the gate's
-failing conditions, a link to the analysis, then per item: severity, type and rule name; the rule key,
+failing conditions in words, the new-code measures, a link to the analysis, then one block per failing
+coverage / duplication condition (with its files; not counted as issues), then per item: severity, type and rule name; the rule key,
 place, effort and a link; SonarCloud's message; the flagged lines in a fence longer than any backtick run
 in them; and "How to fix" in a `<details>`. Every SonarCloud string is made safe (`safeCommentText`: no
-`@` pings, no `<!--`). Built under 60,000 characters (GitHub's limit is 65,536); items that do not fit
+`@` pings, no `<!--`). ⚠ **PROSE OUTSIDE A FENCE IS HTML-ESCAPED** (`safeProse`: `&`, `<`, `>`): rule
+guidance quotes its own code examples, `htmlToText` decodes them back to tags, and GitHub renders tags in
+a comment — a quoted `</details>` closed our block early and a quoted `<a href>` became a live link posted
+under the reader's name. Code spans and fences are literal and are NOT escaped. Built under 60,000 characters (GitHub's limit is 65,536); items that do not fit
 are COUNTED in a closing line. The hidden marker `<!-- pierre:claude-review-sonar v=1 -->` always ends
 it, so `isLimnPostedComment` knows it and it never re-triggers an auto review. An auto post adds
 `AUTO_POST_FOOTER`; a manual one does not (the same as every other manual post).
@@ -115,8 +138,13 @@ Claude Review post.
 
 ## AI Fix
 
-`loadSeedInputs` (coding/ai-fix/manager.ts) reads `getSonarIssuesForPrHead`: the snapshot AT THE PR'S
-SYNCED HEAD, when it read `ok` (`[]` once the head moves). Each item is a seed candidate:
+`loadSeedInputs` (coding/ai-fix/manager.ts) first makes sure the PR's synced head has a read
+(`freshenSonarForPrHead`, at most 8 s), then reads `getSonarIssuesForPrHead`: the snapshot AT THAT HEAD,
+when it read `ok` (`[]` once the head moves) — its FAILING coverage / duplication gate conditions first
+(`sonarGateItems`, shared, derived on read and never stored, so the counts stay SonarCloud's; kind
+`'gate'`, key `sonar:gate:<metric>`, the files behind it in "how to fix"; ratings and issue counts are not
+items, the issues behind them are), then the issues and hotspots. The review tab draws the same gate
+cards above the issues. Each item is a seed candidate:
 
 - key `sonar:<SonarCloud's key>` (stable, what `include` names), section `sonar`, kind `sonar_issue`;
 - ref **`Q<n>`** — positional after selection like F/P/T/C. Not `S`: `S<t>-AC<n>` is the story's;

@@ -12,6 +12,9 @@ import { useId, useState, type ReactNode } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import {
   SONAR_SEVERITY_LABEL,
+  sonarGateItems,
+  sonarMetricLabel,
+  sonarMetricValue,
   type ClaudeFindingSide,
   type SonarIssue,
   type SonarSeverity,
@@ -37,6 +40,7 @@ const TYPE_LABEL: Record<string, string> = {
   VULNERABILITY: 'Vulnerability',
   CODE_SMELL: 'Code smell',
   SECURITY_HOTSPOT: 'Security hotspot',
+  QUALITY_GATE: 'Quality gate',
 };
 const BTN =
   'rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
@@ -145,6 +149,13 @@ function gatePill(s: SonarSnapshot): JSX.Element | null {
   return <span className={`${REVIEW_CHIP} ${tone}`}>{word}</span>;
 }
 
+/** "New code: Coverage 42.1% · New lines 120" — SonarCloud's measures, when read. */
+function measuresText(s: SonarSnapshot): string | null {
+  const ms = s.qualityGate?.measures ?? [];
+  if (ms.length === 0) return null;
+  return `New code: ${ms.map((m) => `${sonarMetricLabel(m.metric).replace(/ on new code$/, '')} ${sonarMetricValue(m.metric, m.value)}`).join(' · ')}`;
+}
+
 function countLabel(s: SonarSnapshot): string {
   const total = s.totalIssues + s.totalHotspots;
   if (s.issues.length < total) return `${s.issues.length} of ${total} issues`;
@@ -190,6 +201,9 @@ export function ClaudeReviewSonarSection({
     canPost && snap != null && snap.state === 'ok' && snap.post == null && (snap.issues.length > 0 || snap.qualityGate?.status === 'ERROR');
   const visible = post.data?.visible ?? null;
   const line = snap ? postLine(snap, visible) : null;
+  // A failing coverage / duplication gate condition draws as a card of its own (the same card AI
+  // Fix's picker draws for it).
+  const gateItems = snap?.state === 'ok' ? sonarGateItems(snap.qualityGate, snap.dashboardUrl) : [];
 
   return (
     <ReviewSection
@@ -207,8 +221,10 @@ export function ClaudeReviewSonarSection({
           <div className="space-y-2">
             <p>
               Limn reads this commit’s SonarCloud analysis: open issues, security hotspots to review, the
-              quality gate, and each rule’s advice on how to fix it.
+              quality gate with the files behind a coverage or duplication shortfall, and each rule’s advice
+              on how to fix it.
             </p>
+            <p>Only an analysis of this exact commit is used. Until SonarCloud has analysed it, nothing shows.</p>
             <p>
               The 50 most severe are kept. Claude Review sees them as evidence and AI Fix can take them on.
             </p>
@@ -251,14 +267,19 @@ export function ClaudeReviewSonarSection({
         <p className={REVIEW_META}>Not read for this commit yet.</p>
       ) : snap.state !== 'ok' ? (
         <p className={REVIEW_META}>{snap.message ?? 'SonarCloud could not be read.'}</p>
-      ) : snap.issues.length === 0 ? (
-        <p className={REVIEW_META}>No open issues on this commit.</p>
       ) : (
-        <ul className="space-y-2">
-          {snap.issues.map((it) => (
-            <SonarIssueRow key={it.key} issue={it} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
-          ))}
-        </ul>
+        <>
+          {measuresText(snap) != null && <p className={REVIEW_META}>{measuresText(snap)}</p>}
+          {gateItems.length + snap.issues.length === 0 ? (
+            <p className={REVIEW_META}>No open issues on this commit.</p>
+          ) : (
+            <ul className="space-y-2">
+              {[...gateItems, ...snap.issues].map((it) => (
+                <SonarIssueRow key={it.key} issue={it} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
+              ))}
+            </ul>
+          )}
+        </>
       )}
       {line != null && <p className={REVIEW_META}>{line}</p>}
       {refresh.isError && <p className="text-xs text-red-600 dark:text-red-400">{refresh.error.message}</p>}

@@ -5,7 +5,12 @@
 //      the cut is STATED ("50 of 132"), never silent;
 //   4. each distinct rule is read ONCE and cached per (account, organization, rule);
 //   5. a missing analysis is told apart from a missing project; a refused token is `unauthorized`;
-//      nothing throws.
+//      nothing throws;
+//   6. THE ANALYSED COMMIT: an analysis of another commit keeps NOTHING (`not_analyzed`, retryable)
+//      — never the previous commit's issues under the new head; GitHub's test merge commit of the
+//      head counts only when the caller proves it; an analysis landing mid-read is refused too;
+//   7. measures, the files behind a failing coverage / duplication condition, and a second page of
+//      hotspots are read.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SONAR_ISSUE_CAP, type SonarIssue } from '@pierre-review/shared';
 import { SonarError, sonarUrl, type SonarClient, type SonarParams } from './client.js';
@@ -54,6 +59,11 @@ function fakeClient(handler: (path: string, params: SonarParams) => unknown, cal
   };
 }
 
+const HEAD = 'c0ffee'.padEnd(40, '0');
+const prList = (sha: string | null, key = '7') => ({
+  pullRequests: [{ key: '99', commit: { sha: 'f'.repeat(40) } }, { key, ...(sha ? { commit: { sha } } : {}), analysisDate: '2026-10-16T10:00:00+0000' }],
+});
+
 const gate = { projectStatus: { status: 'ERROR', conditions: [{ metricKey: 'new_coverage', status: 'ERROR', actualValue: '40', errorThreshold: '80', comparator: 'LT' }] } };
 
 function standard(issues: unknown[], hotspots: unknown[] = [], total?: number) {
@@ -61,6 +71,8 @@ function standard(issues: unknown[], hotspots: unknown[] = [], total?: number) {
     switch (path) {
       case 'api/qualitygates/project_status':
         return gate;
+      case 'api/project_pull_requests/list':
+        return prList(HEAD);
       case 'api/issues/search':
         return { paging: { total: total ?? issues.length }, issues, rules: [{ key: 'typescript:S1', name: 'Rule one' }] };
       case 'api/hotspots/search':
@@ -83,7 +95,7 @@ function standard(issues: unknown[], hotspots: unknown[] = [], total?: number) {
   };
 }
 
-const input = { accountId: 1, organization: 'acme', projectKey: PK, prNumber: 7 };
+const input = { accountId: 1, organization: 'acme', projectKey: PK, prNumber: 7, headSha: HEAD };
 
 beforeEach(() => _clearSonarRuleCache());
 
@@ -217,5 +229,110 @@ describe('gatherSonarForPr', () => {
     await gatherSonarForPr(fakeClient(standard([issue(1, 'MAJOR')]), calls), { ...input, now: () => 0, deadline: -1 });
     expect(calls['api/rules/show']).toBeUndefined();
     expect(calls['api/sources/lines']).toBeUndefined();
+  });
+
+  it('keeps nothing when SonarCloud analysed another commit — the old head\'s issues never land on the new one', async () => {
+    const old = 'b'.repeat(40);
+    const calls: Calls = {};
+    const res = await gatherSonarForPr(
+      fakeClient((p) => (p === 'api/project_pull_requests/list' ? prList(old) : standard([issue(1, 'MAJOR')])(p)), calls),
+      input,
+    );
+    expect(res.state).toBe('not_analyzed');
+    expect(res.message).toBe('SonarCloud has not analysed this commit yet. Its latest analysis is of bbbbbbb.');
+    expect(res.otherCommit).toBe(old);
+    expect(res.issues).toEqual([]);
+    expect(res.qualityGate).toBeNull();
+    expect(calls['api/issues/search']).toBeUndefined();
+    expect(calls['api/project_pull_requests/list']![0]).toMatchObject({ project: PK });
+  });
+
+  it('accepts GitHub\'s test merge commit only when the caller proves it is of this head', async () => {
+    const merge = 'd'.repeat(40);
+    const handler = (p: string) => (p === 'api/project_pull_requests/list' ? prList(merge) : standard([issue(1, 'MAJOR')])(p));
+    const asked: string[] = [];
+    const yes = await gatherSonarForPr(fakeClient(handler), {
+      ...input,
+      isAnalysisOfHead: async (sha) => {
+        asked.push(sha);
+        return true;
+      },
+    });
+    expect(asked).toEqual([merge]);
+    expect(yes.state).toBe('ok');
+    expect(yes.issues).toHaveLength(1);
+    const no = await gatherSonarForPr(fakeClient(handler), { ...input, isAnalysisOfHead: async () => false });
+    expect(no.state).toBe('not_analyzed');
+    const throws = await gatherSonarForPr(fakeClient(handler), {
+      ...input,
+      isAnalysisOfHead: async () => {
+        throw new Error('github down');
+      },
+    });
+    expect(throws.state).toBe('not_analyzed');
+  });
+
+  it('a PR SonarCloud does not list, or lists with no commit, is not analysed', async () => {
+    const missing = await gatherSonarForPr(
+      fakeClient((p) => (p === 'api/project_pull_requests/list' ? prList(HEAD, '8') : standard([])(p))),
+      input,
+    );
+    expect(missing.state).toBe('not_analyzed');
+    const noSha = await gatherSonarForPr(
+      fakeClient((p) => (p === 'api/project_pull_requests/list' ? prList(null) : standard([])(p))),
+      input,
+    );
+    expect(noSha.state).toBe('not_analyzed');
+    expect(noSha.issues).toEqual([]);
+  });
+
+  it('refuses an analysis that landed while it was reading', async () => {
+    let n = 0;
+    const res = await gatherSonarForPr(
+      fakeClient((p) => {
+        if (p === 'api/project_pull_requests/list') return prList(n++ === 0 ? HEAD : 'e'.repeat(40));
+        return standard([issue(1, 'MAJOR')])(p);
+      }),
+      input,
+    );
+    expect(res.state).toBe('not_analyzed');
+    expect(res.issues).toEqual([]);
+  });
+
+  it('reads the measures, the files behind a failing coverage condition, and a second page of hotspots', async () => {
+    const hs = (from: number, count: number) =>
+      Array.from({ length: count }, (_, i) => ({ key: `H${from + i}`, ruleKey: 'ts:S5332', component: `${PK}:src/h.ts`, vulnerabilityProbability: 'LOW', line: from + i, message: 'm' }));
+    const calls: Calls = {};
+    const res = await gatherSonarForPr(
+      fakeClient((p, params) => {
+        if (p === 'api/hotspots/search') return { paging: { total: 503 }, hotspots: params.p === 1 ? hs(0, 500) : hs(500, 3) };
+        if (p === 'api/measures/component') {
+          return { component: { measures: [{ metric: 'new_coverage', period: { value: '40.04' } }, { metric: 'new_lines', value: '120' }] } };
+        }
+        if (p === 'api/measures/component_tree') {
+          return {
+            components: [
+              { key: `${PK}:src/a.ts`, path: 'src/a.ts', measures: [{ metric: 'new_uncovered_lines', period: { value: '3' } }] },
+              { key: `${PK}:src/b.ts`, path: 'src/b.ts', measures: [{ metric: 'new_uncovered_lines', period: { value: '12' } }] },
+              { key: `${PK}:src/c.ts`, path: 'src/c.ts', measures: [{ metric: 'new_uncovered_lines', period: { value: '0' } }] },
+            ],
+          };
+        }
+        return standard([])(p);
+      }, calls),
+      input,
+    );
+    expect(res.state).toBe('ok');
+    expect(res.totalHotspots).toBe(503);
+    expect(calls['api/hotspots/search']).toHaveLength(2);
+    expect(res.qualityGate?.measures).toEqual([
+      { metric: 'new_coverage', value: '40.04' },
+      { metric: 'new_lines', value: '120' },
+    ]);
+    expect(res.qualityGate?.conditions[0]?.files).toEqual([
+      { path: 'src/b.ts', lines: 12 },
+      { path: 'src/a.ts', lines: 3 },
+    ]);
+    expect(calls['api/measures/component_tree']![0]).toMatchObject({ metricKeys: 'new_uncovered_lines', metricPeriodSort: 1, asc: 'false' });
   });
 });

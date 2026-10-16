@@ -1,4 +1,5 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
+import { sonarGateItems } from '@pierre-review/shared';
 import type {
   SonarIssue,
   SonarPostRecord,
@@ -147,10 +148,20 @@ export async function writeSonarPost(
 }
 
 /**
- * AI Fix's SonarCloud half: the issues of the snapshot AT THE PR'S SYNCED HEAD, when that read
- * succeeded. [] when the head moved since, or nothing was read. Account-scoped.
+ * AI Fix's SonarCloud half: the snapshot AT THE PR'S SYNCED HEAD, when that read succeeded — its
+ * failing coverage / duplication gate conditions first (`sonarGateItems`, derived on read), then its
+ * issues and hotspots. [] when the head moved since, or nothing was read. Account-scoped.
  */
 export async function getSonarIssuesForPrHead(c: SonarDb, accountId: number, prId: number): Promise<SonarIssue[]> {
+  const head = await sonarPrHead(c, accountId, prId);
+  if (!head) return [];
+  const snap = await readSonarSnapshot(c, accountId, prId, head);
+  if (!snap || snap.state !== 'ok') return [];
+  return [...sonarGateItems(snap.qualityGate, snap.dashboardUrl), ...snap.issues];
+}
+
+/** The PR's synced head, for a caller that wants a fresh read of it first. Account-scoped. */
+export async function sonarPrHead(c: SonarDb, accountId: number, prId: number): Promise<string | null> {
   const prs = c.schema.pullRequests;
   const rows = (await c.db
     .select({ headSha: prs.headSha })
@@ -158,8 +169,5 @@ export async function getSonarIssuesForPrHead(c: SonarDb, accountId: number, prI
     .where(and(eq(prs.id, prId), eq(prs.accountId, accountId)))
     .limit(1)
     .execute()) as Array<{ headSha: string | null }>;
-  const head = rows[0]?.headSha;
-  if (!head) return [];
-  const row = await readRow(c, accountId, prId, head);
-  return row && row.state === 'ok' && Array.isArray(row.issues) ? row.issues : [];
+  return rows[0]?.headSha ?? null;
 }

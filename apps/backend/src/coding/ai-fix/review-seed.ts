@@ -42,7 +42,9 @@ import type { FixAgentReport } from '../../pro/contract.js';
 //               `getFixableCiItemsForPr`), never from the code review's own (legacy) `ciFailures`.
 //   Q<n>        a SonarCloud issue or security hotspot from the snapshot AT THE PR'S CURRENT HEAD
 //               (`sonarIssues`, the caller's `getSonarIssuesForPrHead`; docs/SONARCLOUD.md) — its rule,
-//               message, the flagged lines and the rule's own fix guidance. Q, not S: S is the story's.
+//               message, the flagged lines and the rule's own fix guidance — or a FAILING coverage /
+//               duplication quality-gate condition with the files behind it (kind 'gate', listed
+//               first). Q, not S: S is the story's.
 //   S<t>-AC<n>  an acceptance criterion of ticket t judged not met or partly met, and
 //   S<t>-M<n>   something ticket t asked for that is missing — BOTH from the TICKET review
 //               (review/ticket-review/), never from the PR review, and ONLY the items whose owner is
@@ -474,6 +476,7 @@ const SONAR_TYPE: Record<string, string> = {
   VULNERABILITY: 'vulnerability',
   CODE_SMELL: 'code smell',
   SECURITY_HOTSPOT: 'security hotspot',
+  QUALITY_GATE: 'quality gate',
 };
 const SONAR_HOW_TO_FIX_MAX = 1_500;
 
@@ -498,11 +501,19 @@ export function sonarCandidate(
     line: it.line,
     card: { kind: 'sonar', issue: it },
     priority: SONAR_PRIORITY[it.severity] ?? 5,
-    label: (ref) => `SonarCloud ${it.kind === 'hotspot' ? 'hotspot' : 'issue'} ${ref} (${it.severity} ${kind})`,
+    label: (ref) =>
+      it.kind === 'gate'
+        ? `SonarCloud quality gate ${ref}`
+        : `SonarCloud ${it.kind === 'hotspot' ? 'hotspot' : 'issue'} ${ref} (${it.severity} ${kind})`,
     body: [
-      `Rule: ${it.rule}${it.ruleName ? ` (${it.ruleName})` : ''}`,
-      `Where: ${loc}`,
+      it.kind === 'gate'
+        ? `Quality gate condition: ${it.ruleName ?? it.rule} (${it.rule})`
+        : `Rule: ${it.rule}${it.ruleName ? ` (${it.ruleName})` : ''}`,
+      it.kind === 'gate' ? '' : `Where: ${loc}`,
       `Message: ${it.message}`,
+      it.kind === 'gate'
+        ? 'This condition is about the whole pull request, not one line. You cannot run tests or measure it here: make the change it asks for in the files named, and say what you changed.'
+        : '',
       it.kind === 'hotspot'
         ? 'This is a security hotspot: SonarCloud asks for the code to be reviewed. Change it only if it really is unsafe here, and say why either way.'
         : '',

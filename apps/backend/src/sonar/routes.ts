@@ -19,7 +19,7 @@ import {
   writeWorkspaceSonar,
   type SonarDb,
 } from './settings.js';
-import { ensureSonarSnapshot } from './snapshot.js';
+import { ensureSonarSnapshot, type EnsureSonarOpts } from './snapshot.js';
 import { readSonarSnapshot } from './store.js';
 import { postSonarSnapshot, defaultSonarPostDeps, type SonarPostDeps } from './post.js';
 
@@ -44,6 +44,8 @@ export interface SonarRouteCtx extends SonarDb {
   isCloud: boolean;
   transport?: JiraTransport;
   postDeps?: SonarPostDeps;
+  /** Test seam: is SonarCloud's analysed sha GitHub's test merge commit of the head? */
+  isMergeOfHead?: EnsureSonarOpts['isMergeOfHead'];
 }
 
 const idParam = {
@@ -229,6 +231,7 @@ export function registerSonarRoutes(app: FastifyInstance, ctx: SonarRouteCtx): v
       const snapshot = await ensureSonarSnapshot(ctx, accountId, req.params.id, head, {
         force: true,
         transport: ctx.transport,
+        isMergeOfHead: ctx.isMergeOfHead,
         log: { warn: (m) => ctx.log.warn(m) },
       });
       return { prId: req.params.id, configured: true, snapshot };

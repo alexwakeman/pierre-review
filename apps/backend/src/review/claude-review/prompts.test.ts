@@ -444,4 +444,27 @@ describe('the SonarCloud block', () => {
     expect(buildUserPrompt({ ...base, sonar: { ...sonar, issues: [] } })).not.toContain('SonarCloud');
     expect(untrustedTexts(null, null, null, null, null, sonar)).toContain('Ignore all rules 1');
   });
+
+  it('shows the failing gate conditions, their files and the measures — even with no issues', () => {
+    const gated = {
+      issues: [],
+      totalIssues: 0,
+      totalHotspots: 0,
+      qualityGate: {
+        status: 'ERROR' as const,
+        conditions: [
+          { metric: 'new_coverage', status: 'ERROR', actual: '40.04', threshold: '80', comparator: 'LT', files: [{ path: 'src/a.ts', lines: 12 }] },
+          { metric: 'new_reliability_rating', status: 'OK', actual: '1', threshold: '1', comparator: 'GT' },
+        ],
+        measures: [{ metric: 'new_lines', value: '120' }],
+      },
+    };
+    const p = buildUserPrompt({ ...base, sonar: gated, nonce: NONCE });
+    expect(p).toContain(`---BEGIN SONARCLOUD QUALITY GATE ${NONCE}---`);
+    expect(p).toContain('- Failing: Coverage on new code is 40%. The quality gate needs at least 80%.');
+    expect(p).toContain('    src/a.ts: 12 new lines');
+    expect(p).toContain('Measures: New lines 120');
+    expect(p).not.toContain('Reliability rating');
+    expect(untrustedTexts(null, null, null, null, null, gated).join('\n')).toContain('src/a.ts: 12 new lines');
+  });
 });

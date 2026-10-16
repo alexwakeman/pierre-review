@@ -4,7 +4,9 @@
 //      it is sent to SonarCloud as `Bearer <token>` and nowhere else.
 //   2. Settings: per-repo project keys default to `<owner>_<repo>`, an override sticks, a key for a
 //      repo outside the workspace is refused, another account's workspace is a 404.
-//   3. A refresh stores ONE snapshot per (PR, head); the stored read never calls SonarCloud.
+//   3. A refresh stores ONE snapshot per (PR, head); the stored read never calls SonarCloud; an
+//      analysis of ANOTHER commit never replaces a good read of this head, and is stored as
+//      `not_analyzed` (no issues) when there is none.
 //   4. POSTING ONCE PER (PR, head): two presses at once post once; a re-read of the same head keeps
 //      the claim; a GitHub failure is recorded and never retried; a moved head posts nothing; the
 //      body carries the hidden marker `isLimnPostedComment` reads.
@@ -35,6 +37,8 @@ const TOKEN = 'squ_secret_token_value';
 
 const seen: Array<{ path: string; auth: string | undefined }> = [];
 let issueTotal = 3;
+// The commit SonarCloud says it analysed for PR 7 (`project_pull_requests/list`).
+let analysedSha = HEAD;
 const transport: JiraTransport = async (url, headers) => {
   seen.push({ path: url.pathname, auth: headers.authorization });
   const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
@@ -47,6 +51,8 @@ const transport: JiraTransport = async (url, headers) => {
         : { status: 404, contentType: 'application/json', body: '{}' };
     case '/api/qualitygates/project_status':
       return json({ projectStatus: { status: 'ERROR', conditions: [] } });
+    case '/api/project_pull_requests/list':
+      return json({ pullRequests: [{ key: '7', commit: { sha: analysedSha } }] });
     case '/api/issues/search':
       return json({
         paging: { total: issueTotal },
@@ -123,6 +129,7 @@ beforeAll(async () => {
     isCloud: false,
     transport,
     postDeps,
+    isMergeOfHead: async () => false,
   });
   await app.ready();
 });
@@ -195,6 +202,8 @@ describe('snapshots and the one comment', () => {
     expect(snap).toMatchObject({ state: 'ok', headSha: HEAD, totalIssues: 3, projectKey: 'acme_api' });
     expect(snap.issues[0]).toMatchObject({ severity: 'blocker', howToFix: 'Do X' });
     expect(r.body).not.toContain(TOKEN);
+    // The read asked SonarCloud which commit it analysed — before and after reading it.
+    expect(seen.filter((x) => x.path === '/api/project_pull_requests/list')).toHaveLength(2);
     seen.length = 0;
     const after = await app.inject({ method: 'GET', url: `/api/prs/${prA}/sonar` });
     expect(after.json().snapshot.issues).toHaveLength(3);
@@ -202,6 +211,23 @@ describe('snapshots and the one comment', () => {
     const rows = await db.select().from(schema.sonarSnapshots).execute();
     expect(rows).toHaveLength(1);
     expect(JSON.stringify(rows)).not.toContain(TOKEN);
+  });
+
+  it('an analysis of another commit never lands under this head, and never wipes a good read', async () => {
+    const { eq } = await import('drizzle-orm');
+    analysedSha = 'f'.repeat(40);
+    // A forced refresh of HEAD (already read OK): the earlier read stands.
+    const kept = await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/refresh`, payload: {} });
+    expect(kept.json().snapshot).toMatchObject({ state: 'ok', headSha: HEAD });
+    expect(kept.json().snapshot.issues).toHaveLength(3);
+    // A head with no read yet: stored as not analysed, with nothing of the other commit's.
+    const H9 = '9'.repeat(40);
+    await db.update(schema.pullRequests).set({ headSha: H9 }).where(eq(schema.pullRequests.id, prA)).execute();
+    const fresh = await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/refresh`, payload: {} });
+    expect(fresh.json().snapshot).toMatchObject({ state: 'not_analyzed', headSha: H9, issues: [], qualityGate: null });
+    expect(fresh.json().snapshot.message).toContain('Its latest analysis is of fffffff.');
+    await db.update(schema.pullRequests).set({ headSha: HEAD }).where(eq(schema.pullRequests.id, prA)).execute();
+    analysedSha = HEAD;
   });
 
   it("another account's PR is a 404 on every PR route", async () => {
@@ -243,6 +269,7 @@ describe('snapshots and the one comment', () => {
   it('a GitHub failure is recorded and never retried; a moved head posts nothing', async () => {
     const H2 = 'b'.repeat(40);
     await db.update(schema.pullRequests).set({ headSha: H2 }).where((await import('drizzle-orm')).eq(schema.pullRequests.id, prA)).execute();
+    analysedSha = H2;
     await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/refresh`, payload: {} });
     liveHead = 'c'.repeat(40);
     const moved = await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/post`, payload: { headSha: H2 } });
@@ -283,6 +310,7 @@ describe('auto-posting after an auto review', () => {
     const H3 = 'e'.repeat(40);
     await db.update(schema.pullRequests).set({ headSha: H3 }).where(eq(schema.pullRequests.id, prA)).execute();
     liveHead = H3;
+    analysedSha = H3;
     await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/refresh`, payload: {} });
     const ctx = { db, schema, isPg: false, log: { info() {}, warn() {}, error() {} } } as any;
     const settings = await import('../review/claude-review/auto-settings.js');

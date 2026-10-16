@@ -128,6 +128,11 @@ export async function maybeAutoPostSonar(
     if (!facts) return { kind: 'not_found' };
     const notEligible = ap.autoPostEligibility(facts, ws.settings.scope);
     if (notEligible) return { kind: 'skipped', reason: notEligible };
+    // The review started on receipt of the head, usually before SonarCloud finished analysing it:
+    // read again now when that read found no analysis of this commit (snapshot.ts decides; a good
+    // read is reused, and only an analysis OF THIS COMMIT is ever stored).
+    const { ensureSonarSnapshot } = await import('./snapshot.js');
+    await ensureSonarSnapshot(ctx, a.accountId, a.prId, a.headSha, { log: { warn: (m) => ctx.log.warn(m) } });
     return await postSonarSnapshot(ctx, { ...a, trigger: 'auto' }, deps);
   } catch (err) {
     ctx.log.warn(`sonar auto post pr ${a.prId}: ${errText(err)}`);

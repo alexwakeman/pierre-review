@@ -11,7 +11,7 @@ import type {
   ClaudeThreadAssessment,
   SonarIssue,
 } from '@pierre-review/shared';
-import { AUTO_FIX_DEFAULT_INCLUDE } from '@pierre-review/shared';
+import { AUTO_FIX_DEFAULT_INCLUDE, sonarGateItems } from '@pierre-review/shared';
 import {
   buildPickerPreview,
   buildReviewSeed,
@@ -623,6 +623,33 @@ describe('SonarCloud items', () => {
     expect(seed.text).toContain('How to fix (SonarCloud\'s guidance):\nDelete the assignment.');
     expect(seed.text).toContain('> 12 | let x = 1;');
     expect(seed.text).toContain('Rule: typescript:S1854');
+  });
+
+  it('a failing coverage condition is a Q item with the files behind it; ratings are not', () => {
+    const gate = {
+      status: 'ERROR' as const,
+      conditions: [
+        { metric: 'new_coverage', status: 'ERROR', actual: '40', threshold: '80', comparator: 'LT', files: [{ path: 'src/b.ts', lines: 9 }] },
+        { metric: 'new_duplicated_lines_density', status: 'OK', actual: '1', threshold: '3', comparator: 'GT' },
+        { metric: 'new_reliability_rating', status: 'ERROR', actual: '3', threshold: '1', comparator: 'GT' },
+      ],
+    };
+    const gateItems = sonarGateItems(gate, 'https://sonarcloud.io/summary/new_code?id=p&pullRequest=1');
+    expect(gateItems.map((g) => [g.key, g.kind, g.severity])).toEqual([['gate:new_coverage', 'gate', 'critical']]);
+    const seed = buildReviewSeed(review({ findings: [] }), { nonce, sonarIssues: [...gateItems, sonar('AX1', 'major')] });
+    expect(seed.items.map((i) => [i.ref, i.kind])).toEqual([
+      ['Q1', 'sonar_issue'],
+      ['Q2', 'sonar_issue'],
+    ]);
+    expect(seed.text).toContain('SonarCloud quality gate Q1');
+    expect(seed.text).toContain('Quality gate condition: Coverage on new code (new_coverage)');
+    expect(seed.text).toContain('Message: Coverage on new code is 40%. The quality gate needs at least 80%.');
+    expect(seed.text).toContain('- src/b.ts: 9 lines');
+    expect(seed.text).not.toContain('Where: (project level)\nMessage: Coverage');
+    const preview = buildPickerPreview(review({ findings: [] }), { sonarIssues: gateItems });
+    expect(preview.items.map((i) => [i.key, i.section, i.defaultIncluded, i.card?.kind])).toEqual([
+      ['sonar:gate:new_coverage', 'sonar', true, 'sonar'],
+    ]);
   });
 
   it('the picker lists them under "sonar" with their card; info is offered, not ticked', () => {

@@ -36,7 +36,10 @@ export interface SonarCodeLine {
 export interface SonarIssue {
   // SonarCloud's issue or hotspot key — stable across reads of the same analysis.
   key: string;
-  kind: 'issue' | 'hotspot';
+  // 'gate' = a FAILING QUALITY-GATE CONDITION SonarCloud can be acted on in code (coverage or
+  // duplication on new code). Never stored in a snapshot's `issues`: derived on read from the stored
+  // gate by `sonarGateItems`, so the counts ("50 of 132 issues") stay SonarCloud's own.
+  kind: 'issue' | 'hotspot' | 'gate';
   // e.g. 'typescript:S1854'.
   rule: string;
   ruleName: string | null;
@@ -62,17 +65,36 @@ export interface SonarIssue {
   url: string;
 }
 
+/** A file a failing coverage / duplication condition points at, with its count of new lines. */
+export interface SonarGateFile {
+  path: string;
+  // Uncovered new lines (a coverage condition) or duplicated new lines (a duplication condition).
+  lines: number;
+}
+
 export interface SonarGateCondition {
   metric: string;
   status: string; // OK | WARN | ERROR | NONE
   actual: string | null;
   threshold: string | null;
   comparator: string | null; // GT | LT
+  // A failing coverage or duplication condition: the files with the most such new lines (≤ 10,
+  // most first). Absent when not read (another metric, a passing condition, or a failed read).
+  files?: SonarGateFile[];
+}
+
+/** One PR measure as SonarCloud gave it (coverage, duplication, size of the new code). */
+export interface SonarMeasure {
+  metric: string;
+  value: string;
 }
 
 export interface SonarQualityGate {
   status: 'OK' | 'WARN' | 'ERROR' | 'NONE';
   conditions: SonarGateCondition[];
+  // The PR's coverage / duplication / new-lines measures (`api/measures/component`). Absent on
+  // rows stored before they were read, or when the read failed.
+  measures?: SonarMeasure[];
 }
 
 // What reading SonarCloud for one PR head came to. Everything but 'ok' is a NAMED, non-fatal state:
@@ -194,3 +216,128 @@ export function defaultSonarProjectKey(owner: string, name: string): string {
 
 // A project key / organization as SonarCloud allows them (letters, digits, '-', '_', '.', ':').
 export const SONAR_KEY_PATTERN = '^[A-Za-z0-9_.:-]{1,400}$';
+
+// ---- quality-gate conditions, in words (the review tab, the prompt, the comment, AI Fix) ----
+
+const METRIC_LABEL: Record<string, string> = {
+  new_coverage: 'Coverage on new code',
+  coverage: 'Coverage',
+  new_line_coverage: 'Line coverage on new code',
+  line_coverage: 'Line coverage',
+  new_branch_coverage: 'Branch coverage on new code',
+  branch_coverage: 'Branch coverage',
+  new_uncovered_lines: 'Uncovered new lines',
+  uncovered_lines: 'Uncovered lines',
+  new_lines_to_cover: 'New lines to cover',
+  new_duplicated_lines_density: 'Duplicated lines on new code',
+  duplicated_lines_density: 'Duplicated lines',
+  new_duplicated_lines: 'Duplicated new lines',
+  duplicated_lines: 'Duplicated lines',
+  new_lines: 'New lines',
+  new_reliability_rating: 'Reliability rating on new code',
+  new_security_rating: 'Security rating on new code',
+  new_maintainability_rating: 'Maintainability rating on new code',
+  new_security_review_rating: 'Security review rating on new code',
+  new_security_hotspots_reviewed: 'Security hotspots reviewed',
+  new_violations: 'Issues on new code',
+  new_bugs: 'Bugs on new code',
+  new_vulnerabilities: 'Vulnerabilities on new code',
+  new_code_smells: 'Code smells on new code',
+};
+
+/** A metric key in words ("new_coverage" → "Coverage on new code"). */
+export function sonarMetricLabel(metric: string): string {
+  return METRIC_LABEL[metric] ?? metric.replace(/^new_/, '').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+}
+
+const isRating = (metric: string): boolean => /_rating$/.test(metric);
+const isPercent = (metric: string): boolean => /(coverage|density|hotspots_reviewed)$/.test(metric);
+
+/** A metric value as a reader expects it: "42.1%", rating "A"…"E", else as given. */
+export function sonarMetricValue(metric: string, value: string): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return value;
+  if (isRating(metric)) return 'ABCDE'[Math.round(n) - 1] ?? value;
+  if (isPercent(metric)) return `${Math.round(n * 10) / 10}%`;
+  return String(n);
+}
+
+/** "Coverage on new code is 42.1%. The quality gate needs at least 80%." */
+export function sonarConditionSentence(c: SonarGateCondition): string {
+  const label = sonarMetricLabel(c.metric);
+  const actual = c.actual != null ? sonarMetricValue(c.metric, c.actual) : null;
+  const limit = c.threshold != null ? sonarMetricValue(c.metric, c.threshold) : null;
+  const head = actual != null ? `${label} is ${actual}.` : `${label} fails.`;
+  if (limit == null) return head;
+  const need = isRating(c.metric)
+    ? `${limit} or better`
+    : c.comparator === 'LT'
+      ? `at least ${limit}`
+      : c.comparator === 'GT'
+        ? `at most ${limit}`
+        : limit;
+  return `${head} The quality gate needs ${need}.`;
+}
+
+/** The conditions that did not pass. */
+export function sonarFailingConditions(gate: SonarQualityGate | null | undefined): SonarGateCondition[] {
+  return (gate?.conditions ?? []).filter((c) => c.status === 'ERROR' || c.status === 'WARN');
+}
+
+const coverageMetric = (m: string): boolean => /coverage|uncovered_lines|lines_to_cover/.test(m);
+const duplicationMetric = (m: string): boolean => /duplicat/.test(m);
+
+/** Is this a condition code can fix directly (coverage or duplication)? Ratings, issue counts and
+ *  hotspot review follow from the issues and hotspots, which are items of their own. */
+export function sonarConditionIsActionable(metric: string): boolean {
+  return coverageMetric(metric) || duplicationMetric(metric);
+}
+
+/** The per-file metric a failing condition's files are ranked by (null: not a file-level fix). */
+export function sonarConditionFileMetric(metric: string): string | null {
+  const fresh = metric.startsWith('new_');
+  if (coverageMetric(metric)) return fresh ? 'new_uncovered_lines' : 'uncovered_lines';
+  if (duplicationMetric(metric)) return fresh ? 'new_duplicated_lines' : 'duplicated_lines';
+  return null;
+}
+
+/**
+ * Every FAILING coverage / duplication condition of a gate as an item — the same card, the same
+ * AI Fix candidate (ref Q) and the same comment block as an issue. Pure; derived on read, never stored.
+ */
+export function sonarGateItems(gate: SonarQualityGate | null | undefined, url: string | null): SonarIssue[] {
+  return sonarFailingConditions(gate)
+    .filter((c) => sonarConditionIsActionable(c.metric))
+    .map((c) => {
+      const coverage = coverageMetric(c.metric);
+      const files = c.files ?? [];
+      const list =
+        files.length > 0
+          ? `\n\nFiles with the most ${coverage ? 'uncovered' : 'duplicated'} new lines:\n${files
+              .map((f) => `- ${f.path}: ${f.lines} ${f.lines === 1 ? 'line' : 'lines'}`)
+              .join('\n')}`
+          : '';
+      const howToFix = coverage
+        ? `Write tests that run the new and changed lines SonarCloud reports as not covered, then let CI measure coverage again.${list}`
+        : `Move the repeated new code into one shared function or module and call it from each place.${list}`;
+      return {
+        key: `gate:${c.metric}`,
+        kind: 'gate' as const,
+        rule: c.metric,
+        ruleName: sonarMetricLabel(c.metric),
+        severity: c.status === 'ERROR' ? ('critical' as const) : ('major' as const),
+        type: 'QUALITY_GATE',
+        message: sonarConditionSentence(c),
+        path: null,
+        line: null,
+        endLine: null,
+        effort: null,
+        tags: [],
+        securityCategory: null,
+        whyIsThisAnIssue: null,
+        howToFix,
+        code: [],
+        url: url ?? SONARCLOUD_HOST,
+      };
+    });
+}

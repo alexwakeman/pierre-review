@@ -473,7 +473,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // ---- SonarCloud's PR routes (sonar/routes.ts), anchored at BOTH ends ----
   //   GET  /api/prs/:id/sonar          the STORED snapshot, no SonarCloud call        → read
   //   POST /api/prs/:id/sonar/refresh  reads SonarCloud now (issues, hotspots, gate, rules,
-  //                                    flagged lines — up to ~100 calls on THEIR quota) → search
+  //                                    flagged lines — up to ~100 calls on THEIR quota;
+  //                                    + ONE GitHub REST read when SonarCloud analysed
+  //                                    another sha, to check it is the head's merge commit) → search
   //   POST /api/prs/:id/sonar/post     ONE GitHub comment                            → github_write
   if (!mutating && /^\/api\/prs\/\d+\/sonar$/.test(path)) return [TIERS.read];
   if (method === 'POST' && /^\/api\/prs\/\d+\/sonar\/refresh$/.test(path)) return [TIERS.search, TIERS.read];

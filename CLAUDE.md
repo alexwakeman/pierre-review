@@ -903,6 +903,9 @@ Haiku 5.5). Details:
   stored snapshot per (account, PR, head) that every reader uses (only a review run and Refresh call
   SonarCloud), capped at 50 with the cut stated; fenced into the review prompt, AI Fix's `Q<n>` items,
   and ONE PR comment per (PR, head), claimed before the write, never retried (auto: the `sonar` kind).
+  ⚠ Every PR call is keyed by PR NUMBER (latest analysis, any commit): a read is stored only when
+  `project_pull_requests/list` says it analysed THIS head (or GitHub's merge commit of it), else
+  `not_analyzed` with nothing kept. ⚠ Prose in the comment is HTML-escaped (`safeProse`).
 - **REFERENCE DOCS ARE CORE, LOCAL-ONLY** (`src/reference-docs/`, sqlite `0116` / pg `0103`,
   [docs/REFERENCE-DOCS.md](docs/REFERENCE-DOCS.md)): markdown FILES under `<docsDir>/<acct>/<ws>/library/`
   (INDEX.md → `<slug>/CONTENTS.md` → `sections/NN-name.md`), ⚠ every linkable file SERVER-written (INDEX

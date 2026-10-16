@@ -2,7 +2,11 @@ import {
   SONARCLOUD_HOST,
   SONAR_ISSUE_CAP,
   SONAR_SEVERITY_ORDER,
+  sonarConditionFileMetric,
+  sonarFailingConditions,
   type SonarCodeLine,
+  type SonarGateFile,
+  type SonarMeasure,
   type SonarIssue,
   type SonarQualityGate,
   type SonarSeverity,
@@ -14,9 +18,21 @@ import { SonarError, sonarErrorMessage, type SonarClient } from './client.js';
 // automated fix needs, in this order:
 //   1. the quality gate for the PR      api/qualitygates/project_status?projectKey&pullRequest
 //      (a 404 here is told apart by    api/components/show — no project vs no analysis yet)
+//   1b. WHICH COMMIT WAS ANALYSED        api/project_pull_requests/list?project — the PR's
+//      `commit.sha`. ⚠ Every other call is keyed by PR NUMBER and answers SonarCloud's LATEST
+//      analysis, whatever commit that was; SonarCloud usually finishes minutes AFTER the push a
+//      review starts on. So an analysis of another commit is `not_analyzed` (retryable) and NOTHING
+//      of it is kept — never the previous commit's issues filed under the new head. The one other
+//      sha accepted is GitHub's test MERGE commit whose second parent is the head (a CI checkout of
+//      `refs/pull/N/merge`), proven by the caller's `isAnalysisOfHead`. Read again at the end: an
+//      analysis that landed mid-read is refused the same way.
 //   2. the open issues on the PR        api/issues/search?componentKeys&pullRequest&resolved=false
 //                                       &additionalFields=_all (≤ ISSUE_PAGES pages of 500)
 //   3. the security hotspots to review  api/hotspots/search?projectKey&pullRequest&status=TO_REVIEW
+//                                       (≤ HOTSPOT_PAGES pages of 500)
+//   3b. the PR's measures                api/measures/component (coverage, duplication, new lines) and,
+//      for each FAILING coverage / duplication condition, the files with the most uncovered /
+//      duplicated new lines (api/measures/component_tree). Enrichments: a failure costs them only.
 //   4. RANK both together (severity, issues before hotspots, then file and line) and CAP at
 //      SONAR_ISSUE_CAP. The totals SonarCloud reported travel with the list, so every screen can
 //      say "50 of 132" — nothing is cut silently.
@@ -31,6 +47,17 @@ import { SonarError, sonarErrorMessage, type SonarClient } from './client.js';
 const ISSUE_PAGE_SIZE = 500;
 const ISSUE_PAGES = 2;
 const HOTSPOT_PAGE_SIZE = 500;
+const HOTSPOT_PAGES = 2;
+/** Files listed per failing coverage / duplication condition. */
+const GATE_FILES = 10;
+const MEASURE_KEYS = [
+  'new_coverage',
+  'new_lines_to_cover',
+  'new_uncovered_lines',
+  'new_duplicated_lines_density',
+  'new_duplicated_lines',
+  'new_lines',
+];
 /** Lines of context either side of an issue's text range, and the most lines kept per issue. */
 const CONTEXT_LINES = 2;
 const MAX_CODE_LINES = 14;
@@ -54,6 +81,13 @@ export interface SonarGatherInput {
   organization: string;
   projectKey: string;
   prNumber: number;
+  /** The head the snapshot will be filed under. SonarCloud's analysis must be of THIS commit. */
+  headSha: string;
+  /**
+   * Is SonarCloud's analysed commit (≠ headSha) GitHub's test merge commit of this head? Absent ⇒
+   * only an exact match counts. Must not throw (a failure answers false).
+   */
+  isAnalysisOfHead?: (analysedSha: string) => Promise<boolean>;
   /** Absolute ms; defaults to now + SONAR_GATHER_DEADLINE_MS. */
   deadline?: number;
   now?: () => number;
@@ -66,6 +100,11 @@ export interface SonarGatherResult {
   issues: SonarIssue[];
   totalIssues: number;
   totalHotspots: number;
+  /**
+   * Set when SonarCloud's latest analysis is of ANOTHER commit (state `not_analyzed`): that sha.
+   * The snapshot step keeps an earlier successful read of this head rather than overwrite it.
+   */
+  otherCommit?: string;
 }
 
 // ---- pure ----
@@ -288,6 +327,43 @@ export function parseGate(raw: Json): SonarQualityGate | null {
   return { status, conditions };
 }
 
+const measureValue = (m: Json): string | null =>
+  str(m?.value) ?? str(m?.period?.value) ?? (Array.isArray(m?.periods) ? str(m.periods[0]?.value) : null);
+
+/** `measures/component` → our measures (only the ones with a value). */
+export function parseMeasures(raw: Json): SonarMeasure[] {
+  const list: Json[] = Array.isArray(raw?.component?.measures) ? raw.component.measures : [];
+  const out: SonarMeasure[] = [];
+  for (const m of list) {
+    const metric = str(m?.metric);
+    const value = measureValue(m);
+    if (metric && value != null) out.push({ metric, value });
+  }
+  return out;
+}
+
+/** `measures/component_tree` → the files with a positive count, most first, at most GATE_FILES. */
+export function parseGateFiles(raw: Json, projectKey: string): SonarGateFile[] {
+  const list: Json[] = Array.isArray(raw?.components) ? raw.components : [];
+  const out: SonarGateFile[] = [];
+  for (const c of list) {
+    const path = str(c?.path) ?? componentPath(c?.key, projectKey);
+    const m = Array.isArray(c?.measures) ? c.measures[0] : null;
+    const v = Number(m ? measureValue(m) : NaN);
+    if (path && Number.isFinite(v) && v > 0) out.push({ path, lines: Math.round(v) });
+  }
+  return out.sort((a, b) => b.lines - a.lines || a.path.localeCompare(b.path)).slice(0, GATE_FILES);
+}
+
+/** `project_pull_requests/list` → this PR's analysed commit. `found: false` = no analysis listed. */
+export function parseAnalysedCommit(raw: Json, prNumber: number): { found: boolean; sha: string | null } {
+  const list: Json[] = Array.isArray(raw?.pullRequests) ? raw.pullRequests : [];
+  const hit = list.find((p) => String(p?.key) === String(prNumber));
+  if (!hit) return { found: false, sha: null };
+  const sha = str(hit?.commit?.sha);
+  return { found: true, sha: sha ? sha.toLowerCase() : null };
+}
+
 /** Lines `sources/lines` returned → the issue's window, as plain text. */
 export function codeWindow(
   sources: Json,
@@ -372,6 +448,16 @@ const empty = (state: SonarSnapshotState, message: string | null): SonarGatherRe
   totalHotspots: 0,
 });
 
+const otherCommit = (sha: string): SonarGatherResult => ({
+  ...empty(
+    'not_analyzed',
+    sha === 'unknown'
+      ? 'SonarCloud has not analysed this commit yet.'
+      : `SonarCloud has not analysed this commit yet. Its latest analysis is of ${sha.slice(0, 7)}.`,
+  ),
+  otherCommit: sha,
+});
+
 /** Read one PR's analysis. Never throws. */
 export async function gatherSonarForPr(client: SonarClient, input: SonarGatherInput): Promise<SonarGatherResult> {
   const now = input.now ?? Date.now;
@@ -398,6 +484,24 @@ export async function gatherSonarForPr(client: SonarClient, input: SonarGatherIn
     }
     const s = stateOf(err);
     return empty(s.state, s.message);
+  }
+
+  // 1b. Which commit SonarCloud analysed. Not this head ⇒ nothing is kept.
+  const head = input.headSha.toLowerCase();
+  const readCommit = async (): Promise<{ found: boolean; sha: string | null }> =>
+    parseAnalysedCommit(await client.get('api/project_pull_requests/list', { project: projectKey, organization }), prNumber);
+  let analysed: { found: boolean; sha: string | null };
+  try {
+    analysed = await readCommit();
+  } catch (err) {
+    const s = stateOf(err);
+    return empty(s.state, s.message);
+  }
+  if (!analysed.found) return empty('not_analyzed', 'SonarCloud has not analysed this pull request yet.');
+  if (analysed.sha == null) return empty('not_analyzed', 'SonarCloud did not say which commit it analysed.');
+  if (analysed.sha !== head) {
+    const merge = input.isAnalysisOfHead ? await input.isAnalysisOfHead(analysed.sha).catch(() => false) : false;
+    if (!merge) return otherCommit(analysed.sha);
   }
 
   // 2. Issues.
@@ -436,21 +540,61 @@ export async function gatherSonarForPr(client: SonarClient, input: SonarGatherIn
   // 3. Hotspots — a failure here costs the hotspots only (some tokens may not browse them).
   let totalHotspots = 0;
   try {
-    const res = (await client.get('api/hotspots/search', {
-      projectKey,
-      pullRequest: pr,
-      status: 'TO_REVIEW',
-      ps: HOTSPOT_PAGE_SIZE,
-      p: 1,
-    })) as Json;
-    const list: Json[] = Array.isArray(res?.hotspots) ? res.hotspots : [];
-    for (const raw of list) {
-      const it = parseHotspot(raw, projectKey, prNumber);
-      if (it) parsed.push(it);
+    let got = 0;
+    for (let p = 1; p <= HOTSPOT_PAGES; p += 1) {
+      const res = (await client.get('api/hotspots/search', {
+        projectKey,
+        pullRequest: pr,
+        status: 'TO_REVIEW',
+        ps: HOTSPOT_PAGE_SIZE,
+        p,
+      })) as Json;
+      const list: Json[] = Array.isArray(res?.hotspots) ? res.hotspots : [];
+      for (const raw of list) {
+        const it = parseHotspot(raw, projectKey, prNumber);
+        if (it) parsed.push(it);
+      }
+      got += list.length;
+      totalHotspots = num(res?.paging?.total) ?? got;
+      if (list.length < HOTSPOT_PAGE_SIZE || got >= totalHotspots) break;
     }
-    totalHotspots = num(res?.paging?.total) ?? list.length;
   } catch {
-    totalHotspots = 0;
+    // Whatever pages arrived are kept; the total never drops below them (step 4).
+  }
+
+  // 3b. Measures and the files behind each failing coverage / duplication condition.
+  if (qualityGate) {
+    try {
+      const measures = parseMeasures(
+        await client.get('api/measures/component', { component: projectKey, pullRequest: pr, metricKeys: MEASURE_KEYS.join(',') }),
+      );
+      if (measures.length > 0) qualityGate.measures = measures;
+    } catch {
+      /* an enrichment */
+    }
+    for (const c of sonarFailingConditions(qualityGate)) {
+      const metric = sonarConditionFileMetric(c.metric);
+      if (metric == null || now() >= deadline) continue;
+      try {
+        const res = await client.get('api/measures/component_tree', {
+          component: projectKey,
+          pullRequest: pr,
+          metricKeys: metric,
+          strategy: 'leaves',
+          qualifiers: 'FIL,UTS',
+          s: 'metric',
+          metricSort: metric,
+          metricPeriodSort: metric.startsWith('new_') ? 1 : undefined,
+          metricSortFilter: 'withMeasuresOnly',
+          asc: 'false',
+          ps: GATE_FILES,
+        });
+        const files = parseGateFiles(res, projectKey);
+        if (files.length > 0) c.files = files;
+      } catch {
+        /* an enrichment */
+      }
+    }
   }
 
   // 4. Rank + cap. The totals never shrink below what was actually received.
@@ -494,6 +638,15 @@ export async function gatherSonarForPr(client: SonarClient, input: SonarGatherIn
       }
     },
   );
+
+  // The analysed commit again: an analysis that landed mid-read is refused like any other commit.
+  try {
+    const after = await readCommit();
+    if (after.sha !== analysed.sha) return otherCommit(after.sha ?? 'unknown');
+  } catch (err) {
+    const s = stateOf(err);
+    return empty(s.state, s.message);
+  }
 
   return { state: 'ok', message: null, qualityGate, issues: kept, totalIssues, totalHotspots };
 }

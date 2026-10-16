@@ -1,4 +1,14 @@
-import { AUTO_POST_FOOTER, SONAR_SEVERITY_LABEL, type SonarIssue, type SonarSnapshot } from '@pierre-review/shared';
+import {
+  AUTO_POST_FOOTER,
+  SONAR_SEVERITY_LABEL,
+  sonarConditionSentence,
+  sonarFailingConditions,
+  sonarGateItems,
+  sonarMetricLabel,
+  sonarMetricValue,
+  type SonarIssue,
+  type SonarSnapshot,
+} from '@pierre-review/shared';
 import { sonarCutSentence } from './gather.js';
 
 // THE ONE PR-LEVEL COMMENT carrying a snapshot's SonarCloud issues (docs/SONARCLOUD.md § Posting).
@@ -9,7 +19,11 @@ import { sonarCutSentence } from './gather.js';
 // ⚠ GITHUB'S LIMIT IS 65,536 CHARACTERS. The body is built under COMMENT_BUDGET; issues that do not
 // fit are COUNTED in a closing line ("12 more on SonarCloud"), never silently dropped.
 // ⚠ Every SonarCloud string is made safe for our comment (no @-mention pings, no forged marker) —
-// the message and code are third-party text.
+// the message and code are third-party text. ⚠ PROSE OUTSIDE A CODE FENCE IS HTML-ESCAPED
+// (`safeProse`): a rule's guidance quotes its own code examples (`<a target="_blank">`, `</div>`),
+// and GitHub renders raw tags in a comment — a quoted `</details>` closed our block early and a
+// quoted `<a href>` became a real link posted under the reader's name. Code spans and fences are
+// literal already and are NOT escaped (an `&lt;` there would print as typed).
 
 export const SONAR_COMMENT_MARKER = '<!-- pierre:claude-review-sonar v=1 -->';
 export const COMMENT_BUDGET = 60_000;
@@ -30,10 +44,16 @@ const TYPE_LABEL: Record<string, string> = {
   VULNERABILITY: 'Vulnerability',
   CODE_SMELL: 'Code smell',
   SECURITY_HOTSPOT: 'Security hotspot',
+  QUALITY_GATE: 'Quality gate',
 };
 
-const oneLine = (t: string): string => safeCommentText(t, true);
-const codeSpan = (t: string): string => `\`${oneLine(t).replace(/`/g, "'")}\``;
+/** Third-party PROSE for outside a code fence: escaped so no tag renders, then made safe. */
+export function safeProse(t: string, oneLine = false): string {
+  return safeCommentText(t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'), oneLine);
+}
+
+const oneLine = (t: string): string => safeProse(t, true);
+const codeSpan = (t: string): string => `\`${safeCommentText(t, true).replace(/`/g, "'")}\``;
 
 function fenceFor(text: string): string {
   const runs = text.match(/`+/g) ?? [];
@@ -52,9 +72,9 @@ export function issueBlock(it: SonarIssue, n: number): string {
   const lines: string[] = [];
   const type = it.type ? TYPE_LABEL[it.type] ?? it.type : null;
   const head = [SONAR_SEVERITY_LABEL[it.severity], type].filter(Boolean).join(' · ');
-  const title = it.ruleName ? oneLine(it.ruleName) : it.rule;
+  const title = it.ruleName ? oneLine(it.ruleName) : oneLine(it.rule);
   lines.push(`#### ${n}. ${head}: ${title}`);
-  const meta = [`Rule ${codeSpan(it.rule)}`];
+  const meta = it.kind === 'gate' ? [] : [`Rule ${codeSpan(it.rule)}`];
   const loc = where(it);
   if (loc) meta.push(codeSpan(loc));
   if (it.effort) meta.push(`about ${oneLine(it.effort)} to fix`);
@@ -78,14 +98,14 @@ export function issueBlock(it: SonarIssue, n: number): string {
     lines.push('');
     lines.push('<details><summary>How to fix</summary>');
     lines.push('');
-    lines.push(safeCommentText(it.howToFix));
+    lines.push(safeProse(it.howToFix));
     lines.push('');
     lines.push('</details>');
   } else if (it.whyIsThisAnIssue) {
     lines.push('');
     lines.push('<details><summary>Why this is an issue</summary>');
     lines.push('');
-    lines.push(safeCommentText(it.whyIsThisAnIssue));
+    lines.push(safeProse(it.whyIsThisAnIssue));
     lines.push('');
     lines.push('</details>');
   }
@@ -96,12 +116,15 @@ function gateLine(s: SonarSnapshot): string | null {
   const g = s.qualityGate;
   if (!g || g.status === 'NONE') return null;
   if (g.status === 'OK') return 'Quality gate: passed.';
-  const failed = g.conditions.filter((c) => c.status === 'ERROR' || c.status === 'WARN');
-  const parts = failed.map((c) => {
-    const metric = c.metric.replace(/_/g, ' ');
-    return c.actual != null && c.threshold != null ? `${metric} ${c.actual} (limit ${c.threshold})` : metric;
-  });
-  return `Quality gate: ${g.status === 'ERROR' ? 'failed' : 'warning'}${parts.length > 0 ? ` on ${parts.map(oneLine).join(', ')}` : ''}.`;
+  const failed = sonarFailingConditions(g).map((c) => `- ${oneLine(sonarConditionSentence(c))}`);
+  const head = `Quality gate: ${g.status === 'ERROR' ? 'failed' : 'warning'}${failed.length > 0 ? ':' : '.'}`;
+  return failed.length > 0 ? `${head}\n${failed.join('\n')}` : head;
+}
+
+function measuresLine(s: SonarSnapshot): string | null {
+  const ms = s.qualityGate?.measures ?? [];
+  if (ms.length === 0) return null;
+  return `New code: ${ms.map((m) => oneLine(`${sonarMetricLabel(m.metric).replace(/ on new code$/, '')} ${sonarMetricValue(m.metric, m.value)}`)).join(' · ')}.`;
 }
 
 /** Is there anything worth a comment? Issues, or a gate that did not pass. */
@@ -122,6 +145,8 @@ export function sonarCommentBody(s: SonarSnapshot, opts: { auto: boolean; budget
   head.push(`**SonarCloud** on ${s.headSha.slice(0, 7)}: ${sonarCutSentence(s.issues.length, s.totalIssues, s.totalHotspots)}.`);
   const gate = gateLine(s);
   if (gate) head.push(gate);
+  const measures = measuresLine(s);
+  if (measures) head.push(measures);
   if (s.dashboardUrl) head.push(`[See the analysis on SonarCloud](${s.dashboardUrl})`);
   const tail: string[] = [];
   if (opts.auto) tail.push(AUTO_POST_FOOTER);
@@ -129,9 +154,17 @@ export function sonarCommentBody(s: SonarSnapshot, opts: { auto: boolean; budget
 
   const blocks: string[] = [];
   let used = head.join('\n\n').length + tail.join('\n\n').length + 200;
+  // The failing coverage / duplication conditions first, with the files behind each (not counted
+  // as issues: the counts are SonarCloud's own).
+  const gateItems = sonarGateItems(s.qualityGate, s.dashboardUrl);
+  gateItems.forEach((it, i) => {
+    const b = issueBlock(it, i + 1);
+    blocks.push(b);
+    used += b.length + 2;
+  });
   let n = 0;
   for (const it of s.issues) {
-    const b = issueBlock(it, n + 1);
+    const b = issueBlock(it, gateItems.length + n + 1);
     if (n > 0 && used + b.length + 2 > budget) break;
     // The first block always goes in, clipped if it alone is over the budget.
     blocks.push(b.length + used > budget ? `${b.slice(0, Math.max(0, budget - used - 20))}\n…(cut)` : b);
