@@ -1012,7 +1012,8 @@ workspace's bot maps, the same resolution the Dependencies tab's membership read
   Renovate branch makes the bot stop maintaining it (same as the policy sweep). Outcomes come back per PR and land as
   ONE card in the toast column; the SPA refetches through `invalidateAfterPrWrite`.
 - **"Merge dependency updates automatically"** (`workspaces.dependency_auto_merge`, NULL = OFF,
-  Settings → Workspace). `runDependencyPolicyTick` runs on the watcher's cron just before it
+  Settings → Workspace; a draft + Save like every other section — ticking the box writes nothing).
+  `runDependencyPolicyTick` runs on the watcher's cron just before it
   (≤ 10 arms per tick) and arms each open, non-draft, non-conflicting, not-queued dependency PR in
   a repo the account can push to — pinned to its LIVE head, `armedByPolicy: true`, update strategy
   GitHub's merge-in. The UI says "Armed automatically (dependency setting)".
