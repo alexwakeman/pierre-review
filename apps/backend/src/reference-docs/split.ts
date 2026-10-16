@@ -95,10 +95,19 @@ export function headingAnchor(title: string): string {
 
 /** Clean a heading's text: inline markup and trailing `#`s off, one line, ≤ 160 characters. */
 export function cleanHeadingTitle(raw: string): string {
+  // Backslash escapes (turndown writes `1\. Introduction`, `snake\_case`, `\[beta\]`) are HELD as
+  // placeholders while markup is stripped, then put back as the plain character — so an escaped `*`
+  // is never read as emphasis and no backslash survives into a title.
+  const held: string[] = [];
   const t = raw
+    .replace(/\\([\\`*_{}[\]()#+.!<>|~-])/g, (_m, c: string) => `${held.push(c) - 1}`)
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[*_`]/g, '')
+    .replace(/`+/g, '')
+    // Paired emphasis only: `**x**`, `*x*`, and `_x_` / `__x__` at word edges (snake_case keeps its `_`).
+    .replace(/(\*\*?)(?=\S)(.+?)(?<=\S)\1/g, '$2')
+    .replace(/(?<![\p{L}\p{N}_])(__?)(?=\S)(.+?)(?<=\S)\1(?![\p{L}\p{N}_])/gu, '$2')
     .replace(/<[^>]*>/g, '')
+    .replace(/(\d+)/g, (_m, i: string) => held[Number(i)] ?? '')
     .replace(/\s+/g, ' ')
     .trim();
   return t.length > 160 ? `${t.slice(0, 157).trimEnd()}…` : t;

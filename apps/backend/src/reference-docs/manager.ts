@@ -237,6 +237,21 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
         writeFileSync(join(sectionsDir, names[i]!), `# ${d.title}\n\n${crumb}${d.body}\n`);
       });
       await patchDoc(accountId, docId, { byteSize: body.length });
+      // The folder check, run on the server's own split BEFORE the paid run: whatever it would refuse
+      // here it would refuse after the agent too, so a refusal costs nothing. Removed before the agent
+      // starts (its cwd is `staging`).
+      const precheckDir = join(staging, 'precheck', row.slug);
+      renderDocFolder(
+        precheckDir,
+        { slug: row.slug, title: trimTitle(convertedTitle ?? row.title) || row.title, summary: '', sourceLabel: row.sourceUrl ?? row.sourceName },
+        drafts.map((d) => ({ ...d, summary: '' })),
+      );
+      const pre = validateDocFolder(precheckDir);
+      rmSync(join(staging, 'precheck'), { recursive: true, force: true });
+      if (!pre.ok) {
+        ctx.log.warn(`reference doc ${docId}: pre-build folder check failed: ${pre.problems.slice(0, 5).join(' | ')}`);
+        throw new BuildRefusal(`This document could not be split into sections: ${pre.problems[0]}`);
+      }
     }
     if (controller.signal.aborted) throw new BuildRefusal('Cancelled.');
 

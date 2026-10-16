@@ -130,7 +130,13 @@ const titleFromName = (name: string): string =>
   name.replace(/\.[a-z0-9]{1,8}$/i, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160) || 'Document';
 
 const titleFromUrl = (u: URL): string => {
-  const path = decodeURIComponent(u.pathname).replace(/\/+$/, '');
+  let path = u.pathname;
+  try {
+    path = decodeURIComponent(path); // a malformed escape (`%zz`) keeps the raw path
+  } catch {
+    /* keep raw */
+  }
+  path = path.replace(/\/+$/, '');
   const last = path.split('/').pop() ?? '';
   return (last ? `${u.hostname} – ${last.replace(/\.[a-z0-9]{1,8}$/i, '').replace(/[-_]+/g, ' ')}` : u.hostname).slice(0, 160);
 };

@@ -42,7 +42,15 @@ a temp folder** unless a suite sets one (`setDocsRootForTest`): `erase-account.t
 INDEX.md from the stored rows (`renderIndex`, deterministic, title order — never a model), CONTENTS.md
 and every section header from the build's section list. So a link in the tree always resolves, and
 `validateDocFolder` re-reads each built folder and refuses it otherwise (a missing file or anchor, a
-section over the cap, an unlisted or stray file).
+section over the cap, an unlisted or stray file). ⚠ It checks ONLY the links the server wrote: a
+section's HEADER (marker, title, trail, nav — `sectionHeader`) and CONTENTS.md. The document's own text
+keeps its links as written, so a numbered doc's `[Deploy](05-deploy.md)` is the author's link, never a
+refusal. Every model-written or third-party string the server prints (summaries, topics, source labels,
+titles on `#` lines) goes through `inlineText`, which escapes `[ ] ( )`, so a summary saying
+`See [RFC](https://…)` is text, not a link to chase. In the `sections` build the same check runs on the
+server's own split (empty summaries) BEFORE the paid run, so a refusal costs nothing.
+`cleanHeadingTitle` unescapes markdown backslash escapes (turndown writes `1\. Intro`, `snake\_case`)
+and strips only PAIRED emphasis, so `snake_case` keeps its underscore.
 
 ## Sections (`split.ts`, deterministic)
 

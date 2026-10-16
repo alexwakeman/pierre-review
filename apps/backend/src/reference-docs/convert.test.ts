@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { REFERENCE_DOC_MAX_BYTES } from '@pierre-review/shared';
-import { UNSUPPORTED_MESSAGE, convertToMarkdown, pdfPageCount, sniffFetched, sniffUpload } from './convert.js';
+import { splitMarkdown } from './split.js';
+import { UNSUPPORTED_MESSAGE, convertToMarkdown, htmlToMarkdown, pdfPageCount, sniffFetched, sniffUpload } from './convert.js';
 
 const b = (s: string): Buffer => Buffer.from(s, 'utf8');
 
@@ -68,5 +69,14 @@ describe('convertToMarkdown (the workspace has the converters installed)', () =>
   it('passes markdown through and takes its first heading as the title', async () => {
     const out = await convertToMarkdown('markdown', b('﻿# Guide\r\n\r\ntext'));
     expect(out).toEqual({ markdown: '# Guide\n\ntext', title: 'Guide' });
+  });
+});
+
+describe('headings from HTML', () => {
+  it('lose turndown’s escapes but keep their characters', async () => {
+    const md = await htmlToMarkdown('<h1>1. Introduction</h1><p>x y</p><h2>Using snake_case [beta]</h2><p>z</p>');
+    const s = splitMarkdown(md, 'Doc');
+    expect(s[0]!.title).toBe('1. Introduction');
+    expect(s[0]!.subheadings.map((h) => h.title)).toEqual(['Using snake_case [beta]']);
   });
 });

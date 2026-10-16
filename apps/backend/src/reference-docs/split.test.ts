@@ -5,6 +5,7 @@ import {
   HARD_CAP_WORDS,
   MAX_DOC_WORDS,
   MAX_WORDS,
+  cleanHeadingTitle,
   countWords,
   headingAnchor,
   parseBlocks,
@@ -160,5 +161,16 @@ describe('helpers', () => {
   });
   it('counts words', () => {
     expect(countWords('  one two\nthree ')).toBe(3);
+  });
+});
+
+describe('cleanHeadingTitle', () => {
+  it('unescapes markdown escapes and strips only paired emphasis', () => {
+    expect(cleanHeadingTitle('1\\. Introduction')).toBe('1. Introduction');
+    expect(cleanHeadingTitle('Using snake\\_case \\[beta\\]')).toBe('Using snake_case [beta]');
+    expect(cleanHeadingTitle('Using snake_case_name')).toBe('Using snake_case_name');
+    expect(cleanHeadingTitle('**Bold** and _em_ and `code`')).toBe('Bold and em and code');
+    expect(cleanHeadingTitle('A \\*literal\\* star')).toBe('A *literal* star');
+    expect(cleanHeadingTitle('See [the guide](x.md)')).toBe('See the guide');
   });
 });

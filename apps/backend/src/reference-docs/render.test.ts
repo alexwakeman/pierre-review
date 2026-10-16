@@ -68,6 +68,30 @@ describe('a rendered document folder', () => {
     expect(problems).toMatch(/sections\/02-b\.md is not in CONTENTS\.md/);
   });
 
+  it('ignores links in the document text and keeps model-written summaries from becoming links', () => {
+    const md = `# 01 Intro\n\nSee [Deploy](05-deploy.md) and [ops](./ops/02-run.md#x).\n\n# 02 Setup\n\n${para(50)}`;
+    const drafts = splitMarkdown(md, 'Doc').map((d) => ({ ...d, summary: 'See [RFC 7231](https://example.com/rfc) (HTTP).' }));
+    const out = join(dir, 'numbered');
+    renderDocFolder(out, { slug: 'numbered', title: 'Ops [v2](x)', summary: 'Per [RFC](https://example.com).', sourceLabel: 'a(b).md' }, drafts);
+    expect(validateDocFolder(out)).toEqual({ ok: true });
+    const contents = readFileSync(join(out, 'CONTENTS.md'), 'utf8');
+    expect(markdownLinkTargets(contents).every((t) => t.startsWith('sections/'))).toBe(true);
+    expect(contents).toContain('See \\[RFC 7231\\]\\(https://example.com/rfc\\) \\(HTTP\\).');
+    const idx = renderIndex([{ slug: 'numbered', title: 'T', summary: 'Per [RFC](https://x)', topics: ['[a](b)'], sourceName: 's', sectionCount: 2 }]);
+    expect(markdownLinkTargets(idx)).toEqual(['numbered/CONTENTS.md']);
+  });
+
+  it('still refuses a header link to a section that is not there', () => {
+    const out = join(dir, 'nav');
+    mkdirSync(join(out, 'sections'), { recursive: true });
+    writeFileSync(
+      join(out, 'sections', '01-a.md'),
+      '<!-- limn reference section 1 of 2 -->\n# A\n\n> **[Doc](../CONTENTS.md)**\n> [Contents](../CONTENTS.md) · [Next](02-b.md)\n\ntext\n',
+    );
+    writeFileSync(join(out, 'CONTENTS.md'), '- [A](sections/01-a.md)\n');
+    expect(JSON.stringify(validateDocFolder(out))).toMatch(/links to a missing section: 02-b\.md/);
+  });
+
   it('refuses a section over the size cap', () => {
     const out = join(dir, 'big');
     mkdirSync(join(out, 'sections'), { recursive: true });

@@ -18,6 +18,12 @@ import { HARD_CAP_CHARS, HARD_CAP_WORDS, countWords, headingAnchor, parseBlocks,
 const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim();
 /** Text safe inside a markdown link label. */
 const label = (s: string): string => oneLine(s).replace(/([\\[\]])/g, '\\$1');
+/**
+ * Free text (a model-written summary, a topic, a source label) on one line, with every character
+ * that could start a link escaped — so `See [RFC](https://…)` in a summary is text, never a link
+ * the folder check would chase.
+ */
+const inlineText = (s: string): string => oneLine(s).replace(/([\\[\]()])/g, '\\$1');
 
 /** `NN-<name>.md` for each section, NN zero-padded to the count's width (at least 2). */
 export function sectionFileNames(titles: readonly string[]): string[] {
@@ -37,7 +43,7 @@ export interface SectionRender {
 export const SECTION_HEADER_MARK = '<!-- limn reference section -->';
 
 export function renderSection(r: SectionRender): string {
-  const crumbs = [`**[${label(r.docTitle)}](../CONTENTS.md)**`, ...r.section.trail.map(oneLine)].join(' › ');
+  const crumbs = [`**[${label(r.docTitle)}](../CONTENTS.md)**`, ...r.section.trail.map(inlineText)].join(' › ');
   const nav = [
     r.prevFile ? `[Previous](${r.prevFile})` : null,
     '[Contents](../CONTENTS.md)',
@@ -47,7 +53,7 @@ export function renderSection(r: SectionRender): string {
     .join(' · ');
   return [
     `${SECTION_HEADER_MARK.replace('section', `section ${r.index + 1} of ${r.total}`)}`,
-    `# ${oneLine(r.section.title)}`,
+    `# ${inlineText(r.section.title)}`,
     '',
     `> ${crumbs}`,
     `> ${nav}`,
@@ -70,9 +76,9 @@ export interface ContentsRender {
  * for a heading that has no text of its own (its title survives only in the trails below it).
  */
 export function renderContents(r: ContentsRender): string {
-  const lines: string[] = [`# ${oneLine(r.docTitle)}`, ''];
-  if (r.summary) lines.push(oneLine(r.summary), '');
-  lines.push(`Source: ${oneLine(r.sourceLabel)} · ${r.entries.length} section${r.entries.length === 1 ? '' : 's'}`, '');
+  const lines: string[] = [`# ${inlineText(r.docTitle)}`, ''];
+  if (r.summary) lines.push(inlineText(r.summary), '');
+  lines.push(`Source: ${inlineText(r.sourceLabel)} · ${r.entries.length} section${r.entries.length === 1 ? '' : 's'}`, '');
   lines.push('## Contents', '');
   const indent = (depth: number): string => '  '.repeat(Math.max(0, depth - 1));
   let prevTrail: string[] = [];
@@ -89,7 +95,7 @@ export function renderContents(r: ContentsRender): string {
     });
     emitted.add([...e.trail, e.title].join('\u0000'));
     const depth = Math.min(e.depth, e.trail.length + 1);
-    const summary = oneLine(e.summary);
+    const summary = inlineText(e.summary);
     lines.push(`${indent(depth)}- [${label(e.title)}](${rel})${summary ? ` — ${summary}` : ''}`);
     for (const h of e.headings) {
       lines.push(`${indent(depth + Math.max(1, h.depth - e.depth))}- [${label(h.title)}](${rel}#${h.anchor})`);
@@ -125,10 +131,10 @@ export function renderIndex(entries: readonly IndexEntry[]): string {
   );
   for (const e of sorted) {
     lines.push(`## [${label(e.title)}](${e.slug}/CONTENTS.md)`, '');
-    if (e.summary) lines.push(oneLine(e.summary), '');
+    if (e.summary) lines.push(inlineText(e.summary), '');
     const meta = [
-      e.topics.length > 0 ? `Topics: ${e.topics.map(oneLine).join(', ')}` : null,
-      `Source: ${oneLine(e.sourceName)}`,
+      e.topics.length > 0 ? `Topics: ${e.topics.map(inlineText).join(', ')}` : null,
+      `Source: ${inlineText(e.sourceName)}`,
       `${e.sectionCount} section${e.sectionCount === 1 ? '' : 's'}`,
     ].filter(Boolean);
     lines.push(meta.join(' · '), '');
@@ -138,10 +144,10 @@ export function renderIndex(entries: readonly IndexEntry[]): string {
 
 // ---- validation ----
 
-/** Every link target in a markdown text (`[x](target)`), in order. */
+/** Every link target in a markdown text (`[x](target)`), in order. An escaped `\[` opens nothing. */
 export function markdownLinkTargets(md: string): string[] {
   const out: string[] = [];
-  const re = /\[(?:\\.|[^\]\\])*\]\(([^)\s]+)\)/g;
+  const re = /(?<!\\)\[(?:\\.|[^\]\\])*\]\(([^)\s]+)\)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(md)) != null) out.push(m[1]!);
   return out;
@@ -159,6 +165,16 @@ export function fileAnchors(text: string): Set<string> {
     out.add(n === 0 ? base : `${base}-${n}`);
   }
   return out;
+}
+
+/**
+ * The header `renderSection` wrote (marker, title, blank, trail line, nav line), or null when the file
+ * does not start with one.
+ */
+export function sectionHeader(text: string): string | null {
+  const lines = text.split('\n');
+  if (!lines[0]?.startsWith('<!-- limn reference section ')) return null;
+  return lines.slice(0, 5).join('\n');
 }
 
 // A section file may carry this much beyond its body (the header: title, trail, links).
@@ -188,14 +204,17 @@ export function validateDocFolder(dir: string): { ok: true } | { ok: false; prob
       problems.push(`sections/${f} is over the size cap.`);
     }
     anchors.set(f, fileAnchors(text));
-    // A section's own links (previous / next / contents) must resolve too.
-    for (const t of markdownLinkTargets(text)) {
-      if (/^[a-z][a-z0-9+.-]*:/i.test(t)) continue; // an external link in the document's own text
+    // The header's own links (document / previous / contents / next) must resolve. ONLY the header:
+    // the document's text keeps its own links as written, and a numbered doc's `[Deploy](05-deploy.md)`
+    // naming a file we never made is the author's link, not a broken build.
+    const header = sectionHeader(text);
+    if (header == null) {
+      problems.push(`sections/${f} has no section header.`);
+      continue;
+    }
+    for (const t of markdownLinkTargets(header)) {
       if (t === '../CONTENTS.md') continue;
-      const bare = t.split('#')[0]!;
-      if (bare !== '' && SECTION_FILE.test(bare) && !files.includes(bare)) {
-        problems.push(`sections/${f} links to a missing section: ${bare}`);
-      }
+      if (!SECTION_FILE.test(t) || !files.includes(t)) problems.push(`sections/${f} links to a missing section: ${t}`);
     }
   }
   const contents = readFileSync(contentsPath, 'utf8');
