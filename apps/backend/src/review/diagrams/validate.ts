@@ -19,6 +19,11 @@ import {
 //                      Mermaid's config, securityLevel included); `click` / `link` / `links` / `href` /
 //                      `callback` lines (handlers and links); `style` / `classDef` / `linkStyle` lines
 //                      (raw CSS); control characters.
+//   REJOINED           (sequenceDiagram only) a line that starts no statement — not a keyword, a
+//                      message arrow or a comment — is the model wrapping a long label, which Mermaid
+//                      refuses to parse: it is joined back onto the line above with a space. A `;`
+//                      (Mermaid's statement separator, so a semicolon in a note cut it in two) becomes
+//                      the `#59;` entity, which Mermaid draws as `;`.
 //   NEUTRALISED        any HTML tag in a label: `<br>` becomes a space, every other tag becomes
 //                      Mermaid's `#lt;…#gt;` entity text, so it shows as text and never as markup.
 //
@@ -46,6 +51,32 @@ const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
 const TYPE_LINE = new RegExp(
   `^(${[...SEQUENCE_DIAGRAM_TYPES].sort((a, b) => b.length - a.length).map((t) => t.replace(/-/g, '\\-')).join('|')})(?=\\s|$)`,
 );
+
+// The statements a sequenceDiagram line can start with; anything else is a wrapped label.
+const SEQUENCE_STATEMENT =
+  /^(?:participant|actor|note|loop|alt|else|opt|par|and|critical|option|break|end|rect|autonumber|activate|deactivate|box|create|destroy|title|acctitle|accdescr)\b/i;
+// A message: `A->>B: text`, `A-->>B`, `A-xB`, `A-)B`, `A<<->>B` — an arrow before the first colon.
+const SEQUENCE_MESSAGE = /^[^:]*?(?:<<)?--?(?:>>|>|x|\))/;
+
+/** Join wrapped sequenceDiagram lines back onto the statement they belong to. */
+export function rejoinSequenceLines(lines: readonly string[], head: number): { lines: string[]; joined: boolean } {
+  const out = lines.slice(0, head + 1);
+  let joined = false;
+  for (const line of lines.slice(head + 1)) {
+    const t = line.trim();
+    const prev = out.length - 1;
+    const continuation =
+      t !== '' && !t.startsWith('%%') && !SEQUENCE_STATEMENT.test(t) && !SEQUENCE_MESSAGE.test(t) && prev > head && out[prev]!.trim() !== '';
+    if (continuation) {
+      out[prev] = `${out[prev]} ${t}`;
+      joined = true;
+    } else out.push(line);
+  }
+  // Not inside an entity this validator (or the model) wrote: `#lt;`, `#59;`.
+  // A literal `\n` the model typed into a label prints as backslash-n: it becomes a space.
+  const clean = (l: string): string => l.replace(/\\n/g, ' ').replace(/(?<!#[a-z0-9]+);/gi, '#59;');
+  return { lines: out.map((l) => (l.trim().startsWith('%%') ? l : clean(l))), joined };
+}
 
 const refuse = (reason: MermaidRefusal, message: string): MermaidValidation => ({ ok: false, reason, message });
 
@@ -118,10 +149,16 @@ export function validateMermaid(raw: unknown): MermaidValidation {
       `Start the diagram with one of: ${SEQUENCE_DIAGRAM_TYPES.join(', ')}. Prefer sequenceDiagram.`,
     );
   }
-  const body = out.slice(head + 1).filter((l) => l.trim() !== '' && !l.trim().startsWith('%%'));
+  let lines = out;
+  if (m[1] === 'sequenceDiagram') {
+    const r = rejoinSequenceLines(out, head);
+    lines = r.lines;
+    if (r.joined) removed.add('line breaks inside labels');
+  }
+  const body = lines.slice(head + 1).filter((l) => l.trim() !== '' && !l.trim().startsWith('%%'));
   if (body.length === 0) return refuse('empty', 'The diagram has no steps.');
 
-  return { ok: true, source: out.join('\n'), diagramType: m[1] as SequenceDiagramType, removed: [...removed] };
+  return { ok: true, source: lines.join('\n'), diagramType: m[1] as SequenceDiagramType, removed: [...removed] };
 }
 
 /** One line of plain text, at most `max` characters (the title). */

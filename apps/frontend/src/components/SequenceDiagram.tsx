@@ -21,6 +21,16 @@ function loadMermaid(): Promise<MermaidApi> {
   return loading;
 }
 
+// Mermaid's render() keeps module state between its parse and layout passes, so two diagrams drawn at
+// once (the Claude Review tab shows the PR's and the story's together) can break each other: every
+// render goes through ONE chain, in order.
+let chain: Promise<unknown> = Promise.resolve();
+function renderInTurn<T>(job: () => Promise<T>): Promise<T> {
+  const next = chain.then(job, job);
+  chain = next.catch(() => undefined);
+  return next;
+}
+
 let seq = 0;
 const isDark = (): boolean => document.documentElement.classList.contains('dark');
 
@@ -40,6 +50,8 @@ export function SequenceDiagram({ source, label }: { source: string; label: stri
   const dark = useDarkClass();
   const [state, setState] = useState<RenderState>({ status: 'loading' });
   const [showSource, setShowSource] = useState(false);
+  // Actual size by default (a wide flow shrunk to the pane is unreadable); Fit shows the whole shape.
+  const [fit, setFit] = useState(false);
   const idRef = useRef<string>('');
   if (idRef.current === '') idRef.current = `limn-mmd-${(seq += 1)}`;
 
@@ -47,7 +59,7 @@ export function SequenceDiagram({ source, label }: { source: string; label: stri
     let cancelled = false;
     setState({ status: 'loading' });
     const id = `${idRef.current}-${dark ? 'd' : 'l'}`;
-    void loadMermaid()
+    void renderInTurn(() => loadMermaid()
       .then(async (mermaid) => {
         const css = getComputedStyle(document.documentElement);
         mermaid.initialize(
@@ -59,14 +71,15 @@ export function SequenceDiagram({ source, label }: { source: string; label: stri
         const { svg } = await mermaid.render(id, source);
         if (!cancelled) setState({ status: 'ok', svg });
       })
-      .catch(() => {
+      .catch((err: unknown) => {
+        console.warn('sequence diagram did not render', err);
         if (!cancelled) setState({ status: 'error' });
       })
       .finally(() => {
         // Mermaid leaves its scratch element behind on a parse error.
         document.getElementById(`d${id}`)?.remove();
         document.getElementById(id)?.remove();
-      });
+      }));
     return () => {
       cancelled = true;
     };
@@ -82,13 +95,23 @@ export function SequenceDiagram({ source, label }: { source: string; label: stri
         <div
           role="img"
           aria-label={label}
-          className="overflow-x-auto rounded border border-gray-200 bg-[rgb(var(--ai-surface))] p-2 dark:border-gray-800 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
+          className={`max-h-[70vh] overflow-auto rounded border border-gray-200 bg-[rgb(var(--ai-surface))] p-2 dark:border-gray-800 [&_svg]:mx-auto [&_svg]:h-auto ${fit ? '[&_svg]:max-w-full' : '[&_svg]:max-w-none'}`}
           // Mermaid's own output at securityLevel 'strict' (sanitised by its DOMPurify pass), from a
           // source the server validated.
           dangerouslySetInnerHTML={{ __html: state.svg }}
         />
       )}
       <div className="flex flex-wrap items-center gap-2">
+        {state.status === 'ok' && (
+          <button
+            type="button"
+            aria-pressed={fit}
+            onClick={() => setFit((v) => !v)}
+            className="text-xs text-sky-700 hover:underline dark:text-sky-300"
+          >
+            {fit ? 'Actual size' : 'Fit to width'}
+          </button>
+        )}
         {state.status === 'ok' && (
           <button
             type="button"

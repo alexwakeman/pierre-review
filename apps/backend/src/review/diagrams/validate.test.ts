@@ -133,3 +133,54 @@ describe('cleanTitle / cleanCaption', () => {
     expect(cleanCaption('No full stop')).toBe('No full stop');
   });
 });
+
+describe('wrapped sequence labels', () => {
+  it('joins a wrapped participant name, message and note back onto their statement', () => {
+    const r = validateMermaid(
+      [
+        'sequenceDiagram',
+        '    participant Norm as normaliseImported /',
+        'normaliseProposed',
+        '    participant DB',
+        '    Norm->>DB: write the',
+        'whole document',
+        '    Note over DB: nulls units,',
+        'not just status',
+        '    alt missing input',
+        '      DB-->>Norm: null',
+        '    end',
+      ].join('\n'),
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.source.split('\n')).toEqual([
+      'sequenceDiagram',
+      '    participant Norm as normaliseImported / normaliseProposed',
+      '    participant DB',
+      '    Norm->>DB: write the whole document',
+      '    Note over DB: nulls units, not just status',
+      '    alt missing input',
+      '      DB-->>Norm: null',
+      '    end',
+    ]);
+    expect(r.removed).toContain('line breaks inside labels');
+  });
+
+  it("turns a label's semicolon into Mermaid's entity, and leaves entities alone", () => {
+    const r = validateMermaid('sequenceDiagram\n  Note over A: timing-aware; nulls #lt;b#gt; #59; ok\n  A->>B: x');
+    expect(r.ok && r.source.split('\n')[1]).toBe('  Note over A: timing-aware#59; nulls #lt;b#gt; #59; ok');
+  });
+
+  it('turns a typed backslash-n in a label into a space', () => {
+    const r = validateMermaid('sequenceDiagram\n  Note over A: final guard\\nnot just status\n  A->>B: x');
+    expect(r.ok && r.source.split('\n')[1]).toBe('  Note over A: final guard not just status');
+  });
+
+  it('leaves a well-formed diagram alone', () => {
+    const src = ['sequenceDiagram', '  autonumber', '  A->>B: hi', '  B-)A: async', '  A-xB: lost', '  %% note to self', '  par one', '    A->>B: x', '  and two', '    B->>A: y', '  end'].join('\n');
+    const r = validateMermaid(src);
+    expect(r.ok && r.source).toBe(src);
+    expect(r.ok && r.removed).toEqual([]);
+  });
+});
+

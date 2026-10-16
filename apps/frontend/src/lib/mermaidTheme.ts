@@ -64,7 +64,10 @@ export function mermaidConfig(t: MermaidTokens, dark: boolean) {
     securityLevel: 'strict' as const,
     // Labels as plain SVG text — no HTML labels inside <foreignObject>.
     htmlLabels: false,
-    flowchart: { htmlLabels: false },
+    flowchart: { htmlLabels: false, useMaxWidth: false },
+    // Drawn at its natural size and scrolled: shrinking a twelve-participant flow to the pane's
+    // width made every label unreadable.
+    sequence: { useMaxWidth: false },
     theme: 'base' as const,
     darkMode: dark,
     fontFamily: 'inherit',

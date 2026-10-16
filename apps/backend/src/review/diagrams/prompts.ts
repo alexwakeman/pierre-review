@@ -34,6 +34,7 @@ Parts of the user message are wrapped in \`---BEGIN … <tag>---\` / \`---END �
 - Show DEPENDENCIES: every call one participant makes on another, every read and write to a store, every message to a queue or external API, in the order they happen. Use \`alt\`/\`opt\`/\`loop\`/\`par\` for branches, optional steps, retries and parallel work. Mark what THIS change adds or alters with a \`Note over …: new\` or \`Note over …: changed\` line.
 - Keep it readable: at most 12 participants and about 40 messages. Leave out logging, metrics and trivial getters.
 - Plain labels only. NO \`click\`, \`link\` or \`href\` lines, NO \`%%{init}%%\` or other directives, NO \`style\`/\`classDef\` lines, NO HTML tags (those are removed or refused), and no URLs.
+- ONE statement per line: never break a participant name, message or note across lines (a line break inside a label stops the diagram drawing). Keep labels short — at most about 60 characters — and use a short alias with \`participant X as …\`.
 - At most ${SEQUENCE_DIAGRAM_MAX_CHARS} characters. Do not wrap it in a code fence.
 - Every name in it must come from code you read. Never invent a service, table or call; when you could not find where something goes, show the last step you did find and say so in the caption.
 

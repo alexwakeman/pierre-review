@@ -170,6 +170,10 @@ describe('storage', () => {
     const rows = await db.select().from(schema.sequenceDiagrams).execute();
     expect(rows.find((r: any) => r.fingerprint === 'fp3')?.status).toBe('failed');
     expect(rows.some((r: any) => r.status === 'queued' || r.status === 'running')).toBe(false);
+    // A restart-killed run does not count as drawn, so the next review draws that head again …
+    expect(await persist.diagramExistsAt(ctx, 1, 'pr', String(prA), 'fp3')).toBe(false);
+    // … while a run that failed on its own still does (only a click redraws it).
+    expect(await persist.diagramExistsAt(ctx, 1, 'pr', String(prA), 'fp4')).toBe(true);
   });
 });
 

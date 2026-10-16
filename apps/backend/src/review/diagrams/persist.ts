@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull, notInArray, or } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, ne, notInArray, or } from 'drizzle-orm';
 import type {
   SequenceDiagramKind,
   SequenceDiagramMember,
@@ -257,12 +257,15 @@ export async function recordDiagramUsage(
     .catch(() => {});
 }
 
-/** A restart orphaned these: fail them (a click redraws). */
+/** The error a restart stamps on an orphaned run — NOT a judgement on the subject (see diagramExistsAt). */
+export const INTERRUPTED_ERROR = 'Interrupted by a restart.';
+
+/** A restart orphaned these: fail them (the next review, or a click, redraws). */
 export async function reconcileOrphanedDiagrams(ctx: Ctx): Promise<number> {
   const d = t(ctx);
   const changed = (await ctx.db
     .update(d)
-    .set({ status: 'failed', error: 'Interrupted by a restart.', completedAt: new Date() })
+    .set({ status: 'failed', error: INTERRUPTED_ERROR, completedAt: new Date() })
     .where(inArray(d.status, ['queued', 'running']))
     .returning({ id: d.id })
     .execute()) as Array<{ id: number }>;
@@ -294,7 +297,18 @@ export async function diagramExistsAt(
   const rows = (await ctx.db
     .select({ id: d.id })
     .from(d)
-    .where(and(eq(d.accountId, accountId), eq(d.kind, kind), eq(d.subject, subject), eq(d.fingerprint, fingerprint)))
+    .where(
+      and(
+        eq(d.accountId, accountId),
+        eq(d.kind, kind),
+        eq(d.subject, subject),
+        eq(d.fingerprint, fingerprint),
+        // A run a RESTART killed never finished, so it says nothing about this fingerprint: the next
+        // review draws again. Any other failure still counts (a click redraws it), so a run that
+        // fails on its own is not re-billed on every review.
+        or(ne(d.status, 'failed'), isNull(d.error), ne(d.error, INTERRUPTED_ERROR)),
+      ),
+    )
     .limit(1)
     .execute()) as Array<{ id: number }>;
   return rows.length > 0;
