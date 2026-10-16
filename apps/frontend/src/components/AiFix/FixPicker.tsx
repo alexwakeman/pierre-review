@@ -8,7 +8,7 @@ import type {
   PrDetail,
   TicketReview,
 } from '@pierre-review/shared';
-import { useTicketReviews } from '../../hooks/useTicketReview.js';
+import { useTicketReviews, useTicketReviewsByIds } from '../../hooks/useTicketReview.js';
 import {
   alreadyPostedReraiseIds,
   reraisedStatusByFindingId,
@@ -193,14 +193,31 @@ export function FixPicker({
   const priorStatusById = useMemo(() => (shown != null ? reraisedStatusByFindingId(shown) : new Map()), [shown]);
   const alreadyPostedIds = useMemo(() => (shown != null ? alreadyPostedReraiseIds(shown) : new Set<number>()), [shown]);
 
-  // Ticket gaps: Story check's own query (same key, so usually already cached).
-  const hasStory = preview.items.some((i) => i.card?.kind === 'story');
-  const tickets = useTicketReviews(pr.id, hasStory);
-  const ticketRuns = useMemo(() => {
+  // Ticket gaps: Story check's own query (same key, so usually already cached). That query carries
+  // each ticket's LATEST run of any status, while the items come from the latest SUCCEEDED one — so
+  // while a newer run is queued, running or failed, the item's own run is fetched by id.
+  const storyRunIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const i of preview.items) if (i.card?.kind === 'story') ids.add(i.card.ticketReviewId);
+    return [...ids].sort((a, b) => a - b);
+  }, [preview.items]);
+  const tickets = useTicketReviews(pr.id, storyRunIds.length > 0);
+  const latestRuns = useMemo(() => {
     const m = new Map<number, TicketReview>();
     for (const t of tickets.data?.tickets ?? []) if (t.review != null) m.set(t.review.id, t.review);
     return m;
   }, [tickets.data]);
+  // Only once the per-PR list has answered, so the common case costs no extra request.
+  const missingRunIds = useMemo(
+    () => (tickets.data == null ? [] : storyRunIds.filter((id) => !latestRuns.has(id))),
+    [tickets.data, storyRunIds, latestRuns],
+  );
+  const fetchedRuns = useTicketReviewsByIds(missingRunIds);
+  const ticketRuns = useMemo(() => {
+    const m = new Map(latestRuns);
+    for (const r of fetchedRuns) m.set(r.id, r);
+    return m;
+  }, [latestRuns, fetchedRuns]);
 
   if (preview.items.length === 0) {
     return <p className="text-xs text-gray-500 dark:text-gray-400">The review found nothing to fix.</p>;

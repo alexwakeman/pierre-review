@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useIsMutating, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useIsMutating, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type {
   ClaudeReviewTicketInput,
   PostTicketItemResponse,
@@ -102,6 +102,25 @@ export function useTicketReviewById(id: number | null) {
     queryFn: () => api.ticketReview(id as number),
     enabled: id != null,
   });
+}
+
+/**
+ * Several runs by id, on the same `['ticket-review', id]` key as `useTicketReviewById`. Returns the
+ * runs that have loaded; an id still loading or failed is simply absent.
+ */
+export function useTicketReviewsByIds(ids: readonly number[]): TicketReview[] {
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: ['ticket-review', id],
+      queryFn: () => api.ticketReview(id),
+    })),
+    combine: loadedRuns,
+  });
+}
+
+// Module-level so its identity is stable and React Query re-runs it only when a result changes.
+function loadedRuns(results: readonly { data?: TicketReview }[]): TicketReview[] {
+  return results.flatMap((r) => (r.data != null ? [r.data] : []));
 }
 
 /**
