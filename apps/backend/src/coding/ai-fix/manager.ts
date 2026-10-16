@@ -30,6 +30,7 @@ import { maybeAutoPushFix } from './auto-push.js';
 import { getOwnedTicketItemsForPr } from '../../review/ticket-review/persist.js';
 import { getFixableCiItemsForPr } from '../../review/ci-review/persist.js';
 import { getSonarIssuesForPrHead } from '../../sonar/store.js';
+import { partialSpendOf } from '../partial-spend.js';
 import {
   buildFixSystemPrompt,
   buildFixUserPrompt,
@@ -688,12 +689,14 @@ async function launchPlanPass(ctx: AgentContext, job: PlanJob): Promise<void> {
       finalStatus = 'planned';
     }
   } catch (err) {
+    // A pass that threw still billed for the turns it ran (agent.ts attaches them).
+    const spent = partialSpendOf(err);
     if (controller.signal.aborted) {
-      await markPlanPassEnded(ctx, job.fixId, { kind: 'cancelled' }).catch(() => {});
+      await markPlanPassEnded(ctx, job.fixId, { kind: 'cancelled' }, spent).catch(() => {});
       finalStatus = job.hadPlan ? 'planned' : 'cancelled';
     } else {
       const m = err instanceof Error ? err.message : String(err);
-      await markPlanPassEnded(ctx, job.fixId, { kind: 'failed', message: m }).catch(() => {});
+      await markPlanPassEnded(ctx, job.fixId, { kind: 'failed', message: m }, spent).catch(() => {});
       finalStatus = job.hadPlan ? 'planned' : 'failed';
       ctx.log.warn({ err }, 'ai-fix plan pass failed');
     }
@@ -751,13 +754,26 @@ export async function sendPlanMessage(
   const prId = row.prId;
   if (claimed.has(prId)) return { status: 'already_running' };
   if (pending.length >= MAX_QUEUED) return { status: 'busy' };
-  // Same tick as the check above (no await between them) — see startRun.
+  // Same tick as the check above (no await between them) — see startRun. The row is known, so it
+  // is registered as this PR's live job in the SAME tick: a stream snapshot taken while the awaits
+  // below run reads 'queued', not the row's persisted 'planned' (which the stream treats as an
+  // ending and closes on).
   claimed.add(prId);
+  fixIdByPr.set(prId, row.id);
+  planPasses.set(row.id, true);
+  // Every bail path: drop the claim and tell any stream that opened in the gap (it read 'queued')
+  // that nothing is running — the row is still the plan it was.
+  const release = (): void => {
+    claimed.delete(prId);
+    fixIdByPr.delete(prId);
+    planPasses.delete(row.id);
+    emitFixStream(prId, { type: 'done', status: 'planned', fixId: row.id });
+  };
   let appended = false;
   try {
     const pr = await getFixPrContext(ctx, input.accountId, prId);
     if (!pr) {
-      claimed.delete(prId);
+      release();
       return { status: 'not_found' };
     }
     const message: AiFixPlanMessage = {
@@ -768,7 +784,7 @@ export async function sendPlanMessage(
     };
     appended = await appendPlanMessage(ctx, row.id, message);
     if (!appended) {
-      claimed.delete(prId);
+      release();
       return { status: 'not_ready' };
     }
     const transcript = [...parseTranscript(row.planTranscript), message];
@@ -781,7 +797,6 @@ export async function sendPlanMessage(
       ...transcript.map((m) => m.text),
     ]);
     const prompt = buildPlanUserPrompt({ pr, diff, seed, previous: plan, transcript, nonce });
-    fixIdByPr.set(prId, row.id);
     queuePlanPass(ctx, {
       fixId: row.id,
       accountId: input.accountId,
@@ -801,12 +816,11 @@ export async function sendPlanMessage(
     });
     return { status: 'queued', fixId: row.id };
   } catch (err) {
-    claimed.delete(prId);
-    fixIdByPr.delete(prId);
-    planPasses.delete(row.id);
-    // The message reopened the plan; with no pass behind it, put it back so it is not stuck.
+    // The message reopened the plan; with no pass behind it, put it back so it is not stuck —
+    // BEFORE the release's 'done', so the refetch it triggers reads the plan back.
     if (appended)
       await markPlanPassEnded(ctx, row.id, { kind: 'failed', message: 'the request failed' }).catch(() => {});
+    release();
     ctx.log.warn({ err }, 'ai-fix plan message failed');
     return { status: 'not_found' };
   }
@@ -836,17 +850,25 @@ export async function approvePlan(
   const prId = row.prId;
   if (claimed.has(prId)) return { status: 'already_running' };
   if (pending.length >= MAX_QUEUED) return { status: 'busy' };
+  // Claimed AND registered in one tick (see sendPlanMessage): the two GitHub calls below take
+  // seconds, and a snapshot in that gap must read 'queued', not the row's 'planned'.
   claimed.add(prId);
+  fixIdByPr.set(prId, row.id);
+  const release = (): void => {
+    claimed.delete(prId);
+    fixIdByPr.delete(prId);
+    emitFixStream(prId, { type: 'done', status: 'planned', fixId: row.id });
+  };
   try {
     const pr = await getFixPrContext(ctx, input.accountId, prId);
     if (!pr) {
-      claimed.delete(prId);
+      release();
       return { status: 'not_found' };
     }
     const headInfo = await ctx.github.fetchPrHeadInfo(input.accountId, pr.owner, pr.name, pr.number);
     const baseSha = headInfo.headSha;
     if (!baseSha) {
-      claimed.delete(prId);
+      release();
       return { status: 'no_head' };
     }
     const diff = await ctx.github.fetchPrDiff(input.accountId, pr.owner, pr.name, pr.number).catch(() => '');
@@ -854,10 +876,9 @@ export async function approvePlan(
     const nonce = pickReviewNonce([seed.text, pr.title, pr.body ?? '', planText]);
     const prompt = buildFixUserPrompt({ pr, diff, seed, plan: { plan, nonce } });
     if (!(await markPlanApproved(ctx, row.id, { prompt, baseSha }))) {
-      claimed.delete(prId);
+      release();
       return { status: 'not_ready' };
     }
-    fixIdByPr.set(prId, row.id);
     queueFixJob(ctx, {
       fixId: row.id,
       accountId: input.accountId,
@@ -874,8 +895,7 @@ export async function approvePlan(
     });
     return { status: 'queued', fixId: row.id };
   } catch (err) {
-    claimed.delete(prId);
-    fixIdByPr.delete(prId);
+    release();
     ctx.log.warn({ err }, 'ai-fix plan approve failed');
     return { status: 'not_found' };
   }

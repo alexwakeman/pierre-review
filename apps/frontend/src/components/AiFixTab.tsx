@@ -19,7 +19,6 @@ import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { AiCloudNote, AiRunGate } from './AiSetup.js';
 import { useFilters } from '../store/filters.js';
 import {
-  aiFixPlanMutationKey,
   aiFixStartMutationKey,
   useAiFix,
   useAiFixPreview,
@@ -141,13 +140,15 @@ function FixerSection({
   const fixStarting =
     useIsMutating({ mutationKey: aiFixStartMutationKey(pr.id) }) > 0;
 
-  const planMutating = useIsMutating({ mutationKey: aiFixPlanMutationKey(pr.id) }) > 0;
-
   const dbStatus = data?.fix?.status ?? null;
   // A row holding an open plan ('planned'): its passes are shown by the plan panel, never as a build.
   const planRow = dbStatus === 'planned';
   const planPassInDb = planRow && data?.fix?.plan?.status === 'planning';
-  const active = dbStatus === 'running' || dbStatus === 'queued' || fixStarting || planPassInDb || planMutating;
+  // ⚠ NOT while a plan action's POST is in flight (message, approve): the row still reads
+  // 'planned' until it answers, a stream opened then closes on that, and `active` would stay true
+  // through the refetch, so it never reopened for the pass or the build. The POST's refetch
+  // (planning / queued) is what opens the stream; the plan panel shows the wait meanwhile.
+  const active = dbStatus === 'running' || dbStatus === 'queued' || fixStarting || planPassInDb;
   const { status: liveStatus } = useAiFixStream(pr.id, active);
   const displayStatus: AiFixStatus | 'idle' =
     liveStatus?.status ?? dbStatus ?? 'idle';

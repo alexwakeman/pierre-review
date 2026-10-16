@@ -32,6 +32,7 @@ import {
 import { captureWorktreeDiff } from './git.js';
 import { describeAssistantBlocks } from './activity.js';
 import { ISOLATED_MCP, ownToolsOnlyHook } from '../ai/agent-isolation.js';
+import { withPartialSpend } from './partial-spend.js';
 
 // The WRITE tool surface for the fixer: Read/Glob/Grep to explore, Write/Edit/MultiEdit to
 // make the change, and the submit_fix MCP tool for the prose summary. NO SHELL.
@@ -206,6 +207,15 @@ export async function runAgentInWorktree(
     if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
   };
 
+  // What the run has spent so far, from the streamed assistant turns. A cancelled or failed run
+  // still bills: the caller records this (a planning pass counts it against the plan's budget).
+  const spentSoFar = (): { usage: LiveUsage; costUsd: number | null } => {
+    const u = sumUsageMap(usageByUuid);
+    const has = u.inputTokens + u.outputTokens + u.cacheReadTokens > 0;
+    return { usage: u, costUsd: has ? estimateCostUsd(model, u) : null };
+  };
+
+  try {
   for await (const message of q) {
     if (message.type === 'assistant') {
       try {
@@ -227,12 +237,18 @@ export async function runAgentInWorktree(
       result = message;
     }
   }
+  } catch (err) {
+    // A cancel may surface as a throw from the iterator: fall through to the aborted result.
+    // Any other failure carries what was spent so far (`partialSpendOf`).
+    if (!opts.abortController.signal.aborted) throw withPartialSpend(err, spentSoFar());
+  }
 
   if (opts.abortController.signal.aborted) {
+    const spent = spentSoFar();
     return {
       result,
-      usage: emptyUsage(),
-      costUsd: null,
+      usage: spent.usage,
+      costUsd: spent.costUsd,
       numTurns: null,
       aborted: true,
     };
@@ -458,8 +474,10 @@ export async function runPlanAgent(args: GeneratePlanArgs): Promise<GeneratePlan
       onActivity: (activity, usage) => onProgress({ phase: 'planning', recentActivity: activity, usage }),
     });
 
+    // A cancelled pass still hands back what it spent, so the manager records it and counts it
+    // against the plan's budget.
     if (outcome.aborted || abortController.signal.aborted) {
-      return { plan: null, usage: emptyUsage(), costUsd: null, numTurns: null, aborted: true };
+      return { plan: null, usage: outcome.usage, costUsd: outcome.costUsd, numTurns: null, aborted: true };
     }
     return {
       plan: accepted as RawPlanSubmission | null,

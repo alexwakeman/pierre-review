@@ -1700,7 +1700,10 @@ as the fix start, parsed by the same `parseStartBody`) → `manager.ts startPlan
   ONE budget, `config.aiFixBudgetUsd` (`AI_FIX_BUDGET_USD`) summed across revisions (each pass gets
   what is left; < $0.25 left ⇒ `409 PlanBudgetSpent`); at most `AI_FIX_PLAN_MAX_REVISIONS` (12)
   versions ⇒ `409 PlanRevisionCap`. Every pass records its spend (`recordAiUsage`, feature
-  `ai_fix_plan`). Rate tiers: start / message / approve `[ai, aiHourly]`, discard `read` (one DB
+  `ai_fix_plan`) and adds it to `plan_cost_usd` — a CANCELLED pass too (`runAgentInWorktree`
+  returns the usage streamed so far, priced by `estimateCostUsd`, instead of null), and a pass that
+  THREW (the run core attaches that spend to the error, `coding/partial-spend.ts`), or a late
+  cancel would slip under the shared budget. Rate tiers: start / message / approve `[ai, aiHourly]`, discard `read` (one DB
   update), spelled out in `tierFor`.
 - **APPROVE AND BUILD** (`POST …/plan/approve` → `approvePlan`): re-reads the PR's head and builds on
   it NOW (the row's `base_sha` moves to it, so a push to the PR branch checks against the head the
@@ -1718,6 +1721,14 @@ as the fix start, parsed by the same `parseStartBody`) → `manager.ts startPlan
   explanation is behind the ⓘ). A row with `status = 'planned'` is ALWAYS drawn by the plan panel,
   never as a build. Plan actions share ONE mutation key (`aiFixPlanMutationKey`); "Make a plan"
   shares the start's.
+- **⚠ THE STREAM GAP.** The stream route ends on any snapshot that is not `running`/`queued`, and a
+  plan row's PERSISTED status stays `'planned'` while a pass or an approve is being set up (GitHub
+  calls). So `sendPlanMessage` and `approvePlan` set `fixIdByPr` (and `planPasses`) in the SAME tick
+  as `claimed.add`, before any await — a snapshot then reads `queued` — and every bail path emits
+  `done: planned` to the stream it may have opened. Client side, the tab does NOT open the stream
+  while a plan POST is in flight (its refetch, reading `planning`/`queued`, opens it), and the
+  banner holds a row's stream while EITHER the start key or the plan key is mutating ("Approve and
+  build" notes the row before its POST).
 
 ### Merge conflicts — "Resolve with Claude"
 

@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import type { AiFixStatus } from '@pierre-review/shared';
 import { useIsMutating } from '@tanstack/react-query';
-import { aiFixStartMutationKey, useAiFixStream } from '../hooks/useAiFix.js';
+import { aiFixPlanMutationKey, aiFixStartMutationKey, useAiFixStream } from '../hooks/useAiFix.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { useFilters, type AiFixRunEntry } from '../store/filters.js';
 import { PHASE_LABEL, fixProgressPct } from '../lib/aiFixProgress.js';
@@ -109,7 +109,12 @@ function AiFixBannerRow({
   // survives the reader navigating away in the same breath), and the fix row does not exist
   // until the POST returns — a stream opened in that gap gets an `idle` snapshot and closes,
   // which reads as "the fix did not start" about a fix that is about to.
-  const starting = useIsMutating({ mutationKey: aiFixStartMutationKey(run.prId) }) > 0;
+  // The same holds for "Approve and build", which notes this row before its POST under the PLAN
+  // key: until approve answers, the row still reads 'planned', a terminal status here.
+  const starting =
+    useIsMutating({ mutationKey: aiFixStartMutationKey(run.prId) }) +
+      useIsMutating({ mutationKey: aiFixPlanMutationKey(run.prId) }) >
+    0;
   // The AI Fix tab may be streaming the same PR at the same time. That is fine — the manager
   // fans out to every subscriber — and de-duplicating the two subscriptions is out of scope;
   // the 4-stream cap is what bounds the connection count.

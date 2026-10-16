@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AiFixPlan } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
 import { config } from '../../config.js';
+import { aiFixes as aiFixesTable } from '../../db/schema.sqlite.js';
 
 const PR = { prId: 0, repoId: 3, owner: 'acme', name: 'app', number: 12, repoFullName: 'acme/app', title: 'Fix auth', body: null };
 vi.mock('./pr-context.js', () => ({
@@ -189,6 +190,103 @@ describe('sendPlanMessage — steering re-plans with the whole chat', () => {
     row = readyRow(23, { planCostUsd: config.aiFixBudgetUsd });
     expect((await sendPlanMessage(ctx, { accountId: 1, fixId: 1, text: 'x' })).status).toBe('budget_spent');
     expect(calls.append).not.toHaveBeenCalled();
+  });
+});
+
+// The stream's snapshot (getFixStatus) reads the latest row for the PR; a fake db hands back the
+// row under test with its PERSISTED status ('planned' while a plan is open).
+function withRowDb(ctx: AgentContext, persisted: { id: number; status: string }): AgentContext {
+  const chain = {
+    select: () => chain,
+    from: () => chain,
+    where: () => chain,
+    orderBy: () => chain,
+    limit: () => chain,
+    execute: async () => [persisted],
+  };
+  return { ...(ctx as Any), db: chain, schema: { aiFixes: aiFixesTable } } as Any as AgentContext;
+}
+
+describe('a plan action is live from its first tick', () => {
+  it('approve: a snapshot taken while GitHub is asked reads queued, and a bail ends that stream', async () => {
+    const { approvePlan, getFixStatus, subscribeFixStream } = await import('./manager.js');
+    row = readyRow(41);
+    let answer: (v: { headSha: string | null }) => void = () => {};
+    const base = fakeCtx();
+    (base.github.fetchPrHeadInfo as Any) = vi.fn(() => new Promise((r) => (answer = r)));
+    const ctx = withRowDb(base, { id: row.id, status: 'planned' });
+    const done: string[] = [];
+    subscribeFixStream(41, (e) => {
+      if (e.type === 'done') done.push(e.status);
+    });
+    const p = approvePlan(ctx, { accountId: 1, fixId: row.id });
+    await vi.waitFor(() => expect(base.github.fetchPrHeadInfo).toHaveBeenCalled());
+    expect((await getFixStatus(ctx, 1, 41)).status).toBe('queued');
+    answer({ headSha: null });
+    expect((await p).status).toBe('no_head');
+    // The stream that read 'queued' is told the row is still the plan.
+    expect(done).toEqual(['planned']);
+    expect((await getFixStatus(ctx, 1, 41)).status).toBe('planned');
+  });
+
+  it('a steering message: a snapshot during the diff fetch reads queued (planning), not the stored plan', async () => {
+    const { sendPlanMessage, getFixStatus } = await import('./manager.js');
+    row = readyRow(42);
+    let answer: (v: string) => void = () => {};
+    const base = fakeCtx({
+      generatePlan: vi.fn(async () => ({
+        plan: null,
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        costUsd: null,
+        numTurns: null,
+        aborted: true,
+      })),
+    });
+    (base.github.fetchPrDiff as Any) = vi.fn(() => new Promise((r) => (answer = r)));
+    const ctx = withRowDb(base, { id: row.id, status: 'planned' });
+    const p = sendPlanMessage(ctx, { accountId: 1, fixId: row.id, text: 'Smaller change please' });
+    await vi.waitFor(() => expect(base.github.fetchPrDiff).toHaveBeenCalled());
+    const snap = await getFixStatus(ctx, 1, 42);
+    expect(snap.status).toBe('queued');
+    expect(snap.progress?.phase).toBe('planning');
+    answer('');
+    expect((await p).status).toBe('queued');
+    await vi.waitFor(() => expect(calls.ended).toHaveBeenCalled());
+  });
+});
+
+describe('a pass that ends early still records what it spent', () => {
+  it('a cancelled pass hands its spend to the row (recorded, and counted against the budget)', async () => {
+    const { sendPlanMessage } = await import('./manager.js');
+    row = readyRow(43);
+    const ctx = fakeCtx({
+      generatePlan: vi.fn(async () => ({
+        plan: null,
+        usage: { inputTokens: 900, outputTokens: 80, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        costUsd: 0.21,
+        numTurns: null,
+        aborted: true,
+      })),
+    });
+    await sendPlanMessage(ctx, { accountId: 1, fixId: row.id, text: 'x' });
+    await vi.waitFor(() => expect(calls.ended).toHaveBeenCalled());
+    expect(calls.ended.mock.calls[0]?.[2]).toEqual({ kind: 'cancelled' });
+    expect(calls.ended.mock.calls[0]?.[3]).toMatchObject({ costUsd: 0.21 });
+  });
+
+  it('a pass that THROWS passes on the spend the agent attached to the error', async () => {
+    const { sendPlanMessage } = await import('./manager.js');
+    const { withPartialSpend } = await import('../partial-spend.js');
+    row = readyRow(44);
+    const ctx = fakeCtx({
+      generatePlan: vi.fn(async () => {
+        throw withPartialSpend(new Error('SDK fell over'), { usage: { inputTokens: 500, outputTokens: 20 }, costUsd: 0.12 });
+      }),
+    });
+    await sendPlanMessage(ctx, { accountId: 1, fixId: row.id, text: 'x' });
+    await vi.waitFor(() => expect(calls.ended).toHaveBeenCalled());
+    expect(calls.ended.mock.calls[0]?.[2]).toMatchObject({ kind: 'failed', message: 'SDK fell over' });
+    expect(calls.ended.mock.calls[0]?.[3]).toMatchObject({ costUsd: 0.12 });
   });
 });
 
