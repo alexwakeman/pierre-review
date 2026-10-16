@@ -22,3 +22,4 @@ export * from './story-rules.js';
 export * from './blast-radius.js';
 export * from './sonar.js';
 export * from './sequence-diagrams.js';
+export * from './reference-docs.js';

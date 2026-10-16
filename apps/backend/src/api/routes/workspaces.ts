@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { removeWorkspaceDocs } from '../../reference-docs/library.js';
 import {
   validateFlowSettings,
   type FlowSettings,
@@ -248,6 +249,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     const accountId = accountIdOf(req);
     const { id } = req.params as { id: number };
     const outcome = await deleteWorkspace(id, accountId);
+    // The workspace's reference library on disk (its rows went with the workspace's cascade).
+    if (outcome === 'deleted') removeWorkspaceDocs(accountId, id);
     if (outcome === 'not_found') {
       reply.status(404);
       return { error: 'NotFound', message: `Workspace ${id} not found` };

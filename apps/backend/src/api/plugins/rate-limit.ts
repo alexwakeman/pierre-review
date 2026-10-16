@@ -487,6 +487,21 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (method === 'POST' && /^\/api\/prs\/\d+\/sequence-diagrams\/redraw$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
   if (!mutating && path === '/api/sequence-diagrams/story') return [TIERS.read];
   if (method === 'POST' && path === '/api/sequence-diagrams/story/redraw') return [TIERS.ai, TIERS.aiHourly];
+
+  // ---- REFERENCE DOCS (reference-docs/routes.ts, LOCAL ONLY), anchored at BOTH ends ----
+  //   POST   /api/docs/upload           stores a file (≤ 25 MB) + queues ONE Sonnet 5 build  → ai + ai_hourly
+  //   POST   /api/docs/url              queues ONE build (which fetches the page)            → ai + ai_hourly
+  //   POST   /api/docs/:id/rebuild      queues ONE build                                     → ai + ai_hourly
+  //   POST   /api/docs/chat             ONE Sonnet 5 agent answer                            → ai + ai_hourly
+  //   everything else (list, tree, section, stream, cancel, delete, chats, settings)         → read
+  // The upload's bytes ride the same `ai` bucket: twenty 25 MB files a minute is far past a person
+  // adding reference material, and a script hits the hourly window long before the disk notices.
+  if (method === 'POST' && (path === '/api/docs/upload' || path === '/api/docs/url' || path === '/api/docs/chat')) {
+    return [TIERS.ai, TIERS.aiHourly];
+  }
+  if (method === 'POST' && /^\/api\/docs\/\d+\/rebuild$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
+  if (path === '/api/docs' || path.startsWith('/api/docs/')) return [TIERS.read];
+  if (/^\/api\/workspaces\/\d+\/docs-settings$/.test(path)) return [TIERS.read];
   if (!mutating && /^\/api\/prs\/\d+\/tracker-ticket$/.test(path)) return [TIERS.search, TIERS.read];
   if (method === 'POST' && /^\/api\/prs\/\d+\/tracker-ticket\/refresh$/.test(path)) {
     return [TIERS.search, TIERS.read];

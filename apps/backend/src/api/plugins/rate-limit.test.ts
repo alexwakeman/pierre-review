@@ -180,6 +180,33 @@ describe('tierFor — sequence diagrams', () => {
   });
 });
 
+// Reference docs (reference-docs/routes.ts). Only the upload, the URL add, a rebuild and a chat turn
+// start a model run.
+describe('tierFor — reference docs', () => {
+  it('bills the builds and the chat as AI generation', () => {
+    expect(tiers('POST', '/api/docs/upload')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/docs/url')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/docs/7/rebuild')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/docs/chat')).toEqual(['ai', 'ai_hourly']);
+  });
+  it('keeps the stored reads and the housekeeping on read', () => {
+    expect(tiers('GET', '/api/docs')).toEqual(['read']);
+    expect(tiers('GET', '/api/docs/tree')).toEqual(['read']);
+    expect(tiers('GET', '/api/docs/section')).toEqual(['read']);
+    expect(tiers('GET', '/api/docs/7/stream')).toEqual(['read']);
+    expect(tiers('POST', '/api/docs/7/cancel')).toEqual(['read']);
+    expect(tiers('DELETE', '/api/docs/7')).toEqual(['read']);
+    expect(tiers('GET', '/api/docs/chats')).toEqual(['read']);
+    expect(tiers('DELETE', '/api/docs/chats/abcdef0123456789')).toEqual(['read']);
+    expect(tiers('PUT', '/api/workspaces/3/docs-settings')).toEqual(['read']);
+  });
+  it('a near-miss is not swept in', () => {
+    expect(tiers('GET', '/api/docs/upload')).not.toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/docs/7/rebuilds')).not.toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/docsx/chat')).not.toEqual(['ai', 'ai_hourly']);
+  });
+});
+
 // The issue tracker (CORE since apiVersion 23). The routes that can read the CUSTOMER'S tracker
 // (one outbound call each, up to a 10s wait) take `search`, not the blanket 600/min `read`.
 describe('tierFor — the issue tracker', () => {

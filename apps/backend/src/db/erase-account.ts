@@ -1,4 +1,5 @@
 import { and, eq } from 'drizzle-orm';
+import { removeAccountDocs } from '../reference-docs/library.js';
 import { db, runTransaction, schema } from './client.js';
 import { deleteRepo } from './queries.js';
 
@@ -197,6 +198,11 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // Sequence diagrams (migration 0115 / pg 0102): no FKs, so this is the whole guarantee (story rows
     // carry no pr_id and are reached ONLY here).
     await tx.delete(schema.sequenceDiagrams).where(eq(schema.sequenceDiagrams.accountId, accountId)).execute();
+    // Reference docs (migration 0116 / pg 0103): the library's rows and the docs chat (questions a
+    // person typed, answers they paid for). Both cascade from workspaces too, and are explicit anyway.
+    // The FILES (the markdown tree and the stored uploads) are removed after the transaction below.
+    await tx.delete(schema.referenceDocChatMessages).where(eq(schema.referenceDocChatMessages.accountId, accountId)).execute();
+    await tx.delete(schema.referenceDocs).where(eq(schema.referenceDocs.accountId, accountId)).execute();
     // Workspace settings history (migration 0096 / pg 0083) — cascades from workspaces too, and is
     // explicit anyway.
     await tx
@@ -272,6 +278,11 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(accounts).where(eq(accounts.id, accountId)).execute();
   });
 
+  // 4. The reference library ON DISK (`<docsDir>/<accountId>/`): the markdown tree and the original
+  //    uploads. After the rows, so a failure here leaves files the boot janitor removes — never rows
+  //    pointing at deleted files.
+  removeAccountDocs(accountId);
+
   return { reposDeleted };
 }
 
@@ -337,6 +348,13 @@ export function accountScopedTables(): {
     { name: 'workspaceSonar', col: schema.workspaceSonar.accountId, table: schema.workspaceSonar },
     // Sequence diagrams (migration 0115 / pg 0102), erased explicitly above.
     { name: 'sequenceDiagrams', col: schema.sequenceDiagrams.accountId, table: schema.sequenceDiagrams },
+    // Reference docs (migration 0116 / pg 0103), erased explicitly above (their files too).
+    { name: 'referenceDocs', col: schema.referenceDocs.accountId, table: schema.referenceDocs },
+    {
+      name: 'referenceDocChatMessages',
+      col: schema.referenceDocChatMessages.accountId,
+      table: schema.referenceDocChatMessages,
+    },
     // Chronology's settings history (migration 0096 / pg 0083), erased explicitly above.
     {
       name: 'workspaceSettingEvents',

@@ -104,6 +104,14 @@ export interface AccountExport {
    * analysis, regenerable from it.
    */
   workspaceSonar: Record<string, unknown>[];
+  /**
+   * The reference library (core `reference_docs`, migration 0116 / pg 0103): each document's
+   * metadata, summary, topics and section list. The text itself lives as markdown files under the
+   * data directory, built from the user's own upload, and is not repeated here.
+   */
+  referenceDocs: Record<string, unknown>[];
+  /** The docs chat: the questions the user typed and the answers (`reference_doc_chat_messages`). */
+  referenceDocChatMessages: Record<string, unknown>[];
 }
 
 /** Build the full export document for one account. Returns null if the account is gone. */
@@ -190,6 +198,39 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     })
     .from(schema.workspaceSonar)
     .where(eq(schema.workspaceSonar.accountId, accountId))
+    .execute();
+
+  // The reference library's metadata and the docs chat.
+  const referenceDocRows = await db
+    .select({
+      id: schema.referenceDocs.id,
+      workspaceId: schema.referenceDocs.workspaceId,
+      slug: schema.referenceDocs.slug,
+      title: schema.referenceDocs.title,
+      sourceKind: schema.referenceDocs.sourceKind,
+      sourceName: schema.referenceDocs.sourceName,
+      sourceUrl: schema.referenceDocs.sourceUrl,
+      byteSize: schema.referenceDocs.byteSize,
+      status: schema.referenceDocs.status,
+      summary: schema.referenceDocs.summary,
+      topics: schema.referenceDocs.topics,
+      sections: schema.referenceDocs.sections,
+      createdAt: schema.referenceDocs.createdAt,
+      builtAt: schema.referenceDocs.builtAt,
+    })
+    .from(schema.referenceDocs)
+    .where(eq(schema.referenceDocs.accountId, accountId))
+    .execute();
+  const docChatRows = await db
+    .select({
+      workspaceId: schema.referenceDocChatMessages.workspaceId,
+      conversationId: schema.referenceDocChatMessages.conversationId,
+      role: schema.referenceDocChatMessages.role,
+      content: schema.referenceDocChatMessages.content,
+      createdAt: schema.referenceDocChatMessages.createdAt,
+    })
+    .from(schema.referenceDocChatMessages)
+    .where(eq(schema.referenceDocChatMessages.accountId, accountId))
     .execute();
 
   const [
@@ -327,5 +368,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     // ⚠ PRESENCE ONLY — never the stored token, in any form.
     workspaceTrackers: trackerRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
     workspaceSonar: sonarRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
+    referenceDocs: referenceDocRows,
+    referenceDocChatMessages: capped('referenceDocChatMessages', docChatRows),
   };
 }

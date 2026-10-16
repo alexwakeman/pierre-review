@@ -1315,3 +1315,17 @@ precision) and three timestamps; index `(account_id, created_at)` for the daily 
 (the sonar_snapshots precedent): BOTH delete paths delete PR rows explicitly; story rows go with the
 account. In `accountScopedTables()`, erased, and checked by `verify:isolation`. Journal `when` sqlite
 `1792137603011` / pg `1792137604010`. ⚠ pg `0102` NOT replayed.
+
+### `0116_reference_docs` (pg `0103`) — the reference docs library
+One column and two tables (docs/REFERENCE-DOCS.md). `workspaces.docs_in_review` (sqlite integer / pg
+boolean, nullable, no default — NULL/false = off). `reference_docs`: one row per document — `slug`
+(unique `(account_id, workspace_id, slug)`), `title`, `source_kind`, `source_name`, `source_url`,
+`byte_size`, `status`, `progress`, `stage`, `error`, `section_count`, `sections` / `topics` JSON (sqlite
+text, pg jsonb), `summary`, `page_count`, the latest build's telemetry (`cost_usd` sqlite real / pg double
+precision) and `created_at` / `updated_at` / `build_started_at` / `built_at`. `reference_doc_chat_messages`:
+`conversation_id`, `role`, `content`, `citations` JSON, telemetry, `created_at`; index
+`(account_id, workspace_id, conversation_id)`. Both take the named COMPOSITE FK onto
+`workspaces (id, account_id)` (`reference_docs_workspace_account_fk`, `reference_doc_chat_workspace_account_fk`).
+The text lives as FILES under `<docsDir>/<accountId>/<workspaceId>/`, removed by erasure and the workspace
+delete route. Both tables in `accountScopedTables()`, erased, and checked by `verify:isolation`. Journal
+`when` sqlite `1792137603012` / pg `1792137604011`. ⚠ pg `0103` NOT replayed.

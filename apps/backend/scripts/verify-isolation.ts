@@ -4283,6 +4283,116 @@ check(
   await dapp.close();
 }
 
+// ── REFERENCE DOCS (reference-docs/, CORE, local-only; docs/REFERENCE-DOCS.md) ──────────────────
+// `reference_docs` + `reference_doc_chat_messages`, keyed by (account, workspace). BOTH accounts get a
+// built document under the SAME slug and a chat turn under the SAME conversation id, so a dropped
+// account predicate has something to leak (the mutation checks prove B's own reads see B's rows).
+// Document ids arrive in a PATH (→ 404); `?workspace=` falls back to the caller's default; the
+// composite FK refuses a cross-account workspace. The files go to a throwaway folder.
+{
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join: joinPath } = await import('node:path');
+  const paths = await import('../src/reference-docs/paths.js');
+  const docsTmp = mkdtempSync(joinPath(tmpdir(), 'pierre-iso-docs-'));
+  paths.setDocsRootForTest(docsTmp);
+  const ds = await import('../src/reference-docs/store.js');
+  const { registerReferenceDocsRoutes } = await import('../src/reference-docs/routes.js');
+  const CONV = 'abcdef0123456789abcdef01';
+  const ids: Record<number, number> = {};
+  for (const [acct, ws] of [
+    [1, defaultA],
+    [2, defaultB],
+  ] as const) {
+    const row = await ds.insertDocRow({
+      accountId: acct,
+      workspaceId: ws,
+      slug: 'handbook',
+      title: `Handbook ${acct}`,
+      sourceKind: 'markdown',
+      sourceName: 'handbook.md',
+      sourceUrl: null,
+      byteSize: 10,
+      pageCount: null,
+    });
+    ids[acct] = row.id;
+    await ds.saveDocBuilt(acct, row.id, { title: `Handbook ${acct}`, summary: `s${acct}`, topics: [], sections: [] }, {});
+    await ds.insertChatTurn(acct, ws, CONV, `q${acct}`, { text: `a${acct}`, citations: [] });
+  }
+  await ds.writeDocsInReview(2, defaultB, true);
+  const bId = ids[2]!;
+  check("getDocRow(A, B's doc id) is null", (await ds.getDocRow(1, bId)) === null);
+  check("getDocRow(B, B's doc id) is B's (mutation check)", (await ds.getDocRow(2, bId))?.title === 'Handbook 2');
+  check("listDocRows(A, B's workspace) is empty", (await ds.listDocRows(1, defaultB)).length === 0);
+  check("getDocBySlug(A, B's workspace, shared slug) is null", (await ds.getDocBySlug(1, defaultB, 'handbook')) === null);
+  check("getDocBySlug(A, A's workspace, shared slug) is A's", (await ds.getDocBySlug(1, defaultA, 'handbook'))?.id === ids[1]);
+  check("patchDoc(A, B's doc id) writes nothing", (await ds.patchDoc(1, bId, { stage: 'x' })) === false);
+  check("requeueDoc(A, B's doc id) writes nothing", (await ds.requeueDoc(1, bId)) === false);
+  await ds.markDocFailed(1, bId, 'cross-account write');
+  check("markDocFailed(A, B's doc id) wrote nothing", (await ds.getDocRow(2, bId))?.status === 'ready');
+  check("deleteDocRow(A, B's doc id) deletes nothing", (await ds.deleteDocRow(1, bId)) === null);
+  check("B's doc survives A's delete", (await ds.getDocRow(2, bId)) !== null);
+  check("indexEntries(A, B's workspace) is empty", (await ds.indexEntries(1, defaultB)).length === 0);
+  check("countBuiltDocs(B, B's workspace) counts B's (mutation check)", (await ds.countBuiltDocs(2, defaultB)) === 1);
+  check("readDocsInReview(A, B's workspace) is false though B switched it on", (await ds.readDocsInReview(1, defaultB)) === false);
+  check("writeDocsInReview(A, B's workspace) writes nothing", (await ds.writeDocsInReview(1, defaultB, false)) === false);
+  check("B's switch is still on", (await ds.readDocsInReview(2, defaultB)) === true);
+  check("conversationRows(A, B's workspace, shared id) is empty", (await ds.conversationRows(1, defaultB, CONV)).length === 0);
+  check("conversationRows(A, A's workspace, shared id) is A's only", (await ds.conversationRows(1, defaultA, CONV)).every((r) => r.accountId === 1));
+  check("listConversations(A, B's workspace) is empty", (await ds.listConversations(1, defaultB)).length === 0);
+  check("deleteConversation(A, B's workspace) deletes nothing", (await ds.deleteConversation(1, defaultB, CONV)) === 0);
+  check("B's conversation survives", (await ds.conversationRows(2, defaultB, CONV)).length === 2);
+  let docFkRefused = false;
+  try {
+    await ds.insertDocRow({ accountId: 1, workspaceId: defaultB, slug: 'evil', title: 'x', sourceKind: 'text', sourceName: 'x', sourceUrl: null, byteSize: 1, pageCount: null });
+  } catch {
+    docFkRefused = true;
+  }
+  check("a reference doc naming B's workspace under account A is refused by the composite FK", docFkRefused);
+  let chatFkRefused = false;
+  try {
+    await ds.insertChatTurn(1, defaultB, CONV, 'evil', { text: 'x', citations: [] });
+  } catch {
+    chatFkRefused = true;
+  }
+  check("a docs-chat row naming B's workspace under account A is refused by the composite FK", chatFkRefused);
+
+  const Fastify = (await import('fastify')).default;
+  const rapp = Fastify({ logger: false });
+  registerReferenceDocsRoutes(rapp, {
+    accountIdOf: () => 1,
+    log: { info() {}, warn() {}, error() {} },
+    llm: { detectAuth: () => ({ status: 'ok' }) },
+    aiCredits: { check: async () => ({ agentBlocked: false }) },
+    recordAiUsage: async () => {},
+  } as any);
+  await rapp.ready();
+  for (const [method, url] of [
+    ['POST', `/api/docs/${bId}/rebuild`],
+    ['POST', `/api/docs/${bId}/cancel`],
+    ['DELETE', `/api/docs/${bId}`],
+    ['GET', `/api/docs/${bId}/stream`],
+    ['GET', `/api/docs/tree?doc=${bId}`],
+    ['GET', `/api/workspaces/${defaultB}/docs-settings`],
+    ['PUT', `/api/workspaces/${defaultB}/docs-settings`],
+    ['GET', `/api/docs/chats/${CONV}?workspace=${defaultB}`],
+  ] as const) {
+    const res = await rapp.inject({ method, url, ...(method === 'PUT' ? { payload: { docsInReview: false } } : {}) });
+    // The conversation lookup falls back to A's default workspace, where A has its own turn: 200 with A's.
+    if (url.startsWith('/api/docs/chats/')) {
+      check(`${method} ${url} as A → A's own conversation, never B's`, res.statusCode === 200 && !res.body.includes('"q2"'));
+    } else {
+      check(`${method} ${url} as A → 404`, res.statusCode === 404);
+    }
+  }
+  const list = await rapp.inject({ method: 'GET', url: `/api/docs?workspace=${defaultB}` });
+  check("GET /api/docs?workspace=<B's> as A → A's default, never B's docs", list.statusCode === 200 && list.json().workspaceId === defaultA && !list.body.includes('Handbook 2'));
+  check("B's doc is still built after A's refused calls", (await ds.getDocRow(2, bId))?.status === 'ready');
+  await rapp.close();
+  paths.setDocsRootForTest(null);
+  rmSync(docsTmp, { recursive: true, force: true });
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

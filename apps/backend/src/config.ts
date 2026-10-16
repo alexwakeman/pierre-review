@@ -591,6 +591,19 @@ export const config = {
   // Diagrams STARTED BY A FINISHED REVIEW per account per UTC day (PR + story together). A Redraw
   // click never counts. Not shared with any review's cap.
   sequenceDiagramDailyCap: intFromEnv('SEQUENCE_DIAGRAM_DAILY_CAP', 30),
+  // ---- Reference docs (the per-workspace library — reference-docs/, docs/REFERENCE-DOCS.md) ----
+  // Where the markdown tree lives: `<docsDir>/<accountId>/<workspaceId>/library/` (+ `sources/`).
+  // LIMN_DOCS_DIR overrides; default `<dataDir>/docs`.
+  docsDir: process.env.LIMN_DOCS_DIR ?? join(resolveDataDir(), 'docs'),
+  // One Sonnet 5 build per document: its OWN spend and turn caps (a long PDF is read in 20-page
+  // slices and written out section by section). Env only — no route sets them.
+  docsBuildBudgetUsd: floatFromEnv('DOCS_BUILD_BUDGET_USD', 6),
+  docsBuildMaxTurns: intFromEnv('DOCS_BUILD_MAX_TURNS', 250),
+  // A PDF longer than this is refused before any model runs (when its page count can be read).
+  docsPdfMaxPages: intFromEnv('DOCS_PDF_MAX_PAGES', 300),
+  // One docs-chat answer (Sonnet 5, read-only over the library).
+  docsChatBudgetUsd: floatFromEnv('DOCS_CHAT_BUDGET_USD', 1),
+  docsChatMaxTurns: intFromEnv('DOCS_CHAT_MAX_TURNS', 30),
   // ---- Story report (one Haiku run across 10-20 picked stories — review/story-report/) ----
   // Its OWN spend and turn caps (the trial run cost $0.02 in 21 turns). Env only — no route sets it.
   storyReportBudgetUsd: floatFromEnv('STORY_REPORT_BUDGET_USD', 1),

@@ -19,6 +19,9 @@ const PINS = {
   '@anthropic-ai/sdk': '0.90.0',
   '@modelcontextprotocol/sdk': '1.2.3',
   zod: '4.0.1',
+  mammoth: '1.13.0',
+  turndown: '7.2.4',
+  'turndown-plugin-gfm': '1.0.2',
 } as const;
 
 const PLATFORM_PKG = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`;
@@ -55,9 +58,16 @@ const write = (file: string, text: string): void => {
 function seedPackages(
   prefix: string,
   versions: Record<string, string> = PINS,
-  { binary = true }: { binary?: boolean } = {},
+  { binary = true, later = true }: { binary?: boolean; later?: boolean } = {},
 ): void {
   const nm = join(prefix, 'node_modules');
+  // The reference-docs converters: plain CommonJS, `main` only, like the real ones.
+  if (later) {
+    for (const name of ['mammoth', 'turndown', 'turndown-plugin-gfm'] as const) {
+      write(join(nm, name, 'package.json'), JSON.stringify({ name, version: versions[name], main: './lib/index.js' }));
+      write(join(nm, name, 'lib', 'index.js'), `module.exports = { which: '${name}' };\n`);
+    }
+  }
   // The Agent SDK's native program: an OPTIONAL dependency, one package per platform.
   if (binary) {
     const exe = process.platform === 'win32' ? 'claude.exe' : 'claude';
@@ -316,8 +326,24 @@ await new Promise((r) => setTimeout(r, 50));
     expect(npmCalls()).toBe(0);
   });
 
-  it('lists exactly the four packages', () => {
+  it('lists exactly the four SDKs and the three docs converters', () => {
     expect([...AI_RUNTIME_PACKAGES].sort()).toEqual(Object.keys(PINS).sort());
+  });
+
+  it('an install from before the docs converters is STALE, still loads the SDK, and refuses only a converter', async () => {
+    seedPackages(join(dataDir, 'ai-runtime'), PINS, { later: false });
+    const rt = runtime();
+    expect(rt.status().runtime).toBe('absent');
+    expect(rt.status().runtimeMessage).toMatch(/Set up AI again/);
+    const sdk = (await rt.load('@anthropic-ai/claude-agent-sdk')) as { query(): string };
+    expect(sdk.query()).toBe('fake');
+    await expect(rt.load('mammoth')).rejects.toBeInstanceOf(AiRuntimeMissingError);
+  });
+
+  it('loads a CommonJS converter from the runtime directory by its main file', async () => {
+    seedPackages(join(dataDir, 'ai-runtime'));
+    const mod = (await runtime().load('turndown')) as { default?: { which: string } };
+    expect(mod.default?.which).toBe('turndown');
   });
 });
 

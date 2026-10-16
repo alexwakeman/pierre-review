@@ -40,6 +40,8 @@ import type {
   SonarIssue,
   SonarPostRecord,
   SequenceDiagramMember,
+  ReferenceDocSectionEntry,
+  ReferenceDocCitation,
   SonarQualityGate,
   FindingAutoResolveRecord,
   ClaudeFindingReminder,
@@ -1887,6 +1889,10 @@ export const workspaces = sqliteTable(
     // has to name it. The setting IS the consent, so a bot's new head is re-armed; a reader's
     // cancel is recorded in `auto_merge_policy_skips` and never overridden.
     dependencyAutoMerge: integer('dependency_auto_merge', { mode: 'boolean' }),
+    // REFERENCE DOCS IN REVIEW (migration 0116 / pg 0103; docs/REFERENCE-DOCS.md): may Claude Review
+    // read this workspace's reference library? NULL/false = OFF, the default; nullable with no
+    // default, so no insert has to name it. The ONE reader/writer is reference-docs/store.ts.
+    docsInReview: integer('docs_in_review', { mode: 'boolean' }),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -3368,5 +3374,86 @@ export const sequenceDiagrams = sqliteTable(
     subjectFpUx: uniqueIndex('sequence_diagrams_subject_fp').on(t.accountId, t.kind, t.subject, t.fingerprint),
     // The latest row per subject, and the daily cap (review-triggered rows since a UTC day start).
     accountCreatedIdx: index('sequence_diagrams_account_created').on(t.accountId, t.createdAt),
+  }),
+);
+
+// ---- REFERENCE DOCS (migration 0116 / pg 0103; docs/REFERENCE-DOCS.md) ----
+// reference_docs — ONE row per uploaded document in a workspace's library: its metadata, the
+// latest build's status + progress, and (from the last SUCCESSFUL build) its summary, topics and
+// section list. The TEXT lives as markdown files under `<docsDir>/<accountId>/<workspaceId>/`;
+// INDEX.md is rebuilt from these rows after every change. `built_at` non-null = a built version is
+// on disk (and listed in INDEX.md), even while a rebuild runs or after one fails. `workspace_id`
+// arrives in request bodies and query strings, so its FK is the named COMPOSITE one.
+export const referenceDocs = sqliteTable(
+  'reference_docs',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    slug: text('slug').notNull(),
+    title: text('title').notNull(),
+    // ReferenceDocSourceKind.
+    sourceKind: text('source_kind').notNull(),
+    sourceName: text('source_name').notNull(),
+    sourceUrl: text('source_url'),
+    byteSize: integer('byte_size').notNull().default(0),
+    // ReferenceDocStatus.
+    status: text('status').notNull(),
+    progress: integer('progress').notNull().default(0),
+    stage: text('stage'),
+    error: text('error'),
+    sectionCount: integer('section_count').notNull().default(0),
+    sections: text('sections', { mode: 'json' }).$type<ReferenceDocSectionEntry[]>(),
+    summary: text('summary'),
+    topics: text('topics', { mode: 'json' }).$type<string[]>(),
+    pageCount: integer('page_count'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    buildStartedAt: integer('build_started_at', { mode: 'timestamp' }),
+    builtAt: integer('built_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    workspaceSlugUx: uniqueIndex('reference_docs_workspace_slug').on(t.accountId, t.workspaceId, t.slug),
+    workspaceAccountFk: foreignKey({
+      name: 'reference_docs_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// reference_doc_chat_messages — the docs chat: one row per question and per answer, grouped by a
+// server-minted `conversation_id`. The transcript a turn re-sends is REBUILT from these rows.
+export const referenceDocChatMessages = sqliteTable(
+  'reference_doc_chat_messages',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    conversationId: text('conversation_id').notNull(),
+    // 'user' | 'assistant'.
+    role: text('role').notNull(),
+    content: text('content').notNull(),
+    citations: text('citations', { mode: 'json' }).$type<ReferenceDocCitation[]>(),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    conversationIdx: index('reference_doc_chat_conversation').on(t.accountId, t.workspaceId, t.conversationId),
+    workspaceAccountFk: foreignKey({
+      name: 'reference_doc_chat_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
   }),
 );

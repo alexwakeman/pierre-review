@@ -212,7 +212,13 @@ const AI_RUNTIME_PACKAGES = [
   '@anthropic-ai/sdk',
   '@modelcontextprotocol/sdk',
   'zod',
+  // The reference-docs converters (docs/REFERENCE-DOCS.md) ride the same first-use download: only
+  // the agentic docs library uses them. ai/runtime.ts AI_RUNTIME_LATER_PACKAGES mirrors these three.
+  'mammoth',
+  'turndown',
+  'turndown-plugin-gfm',
 ];
+const DOC_CONVERTERS = ['mammoth', 'turndown', 'turndown-plugin-gfm'];
 const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 function parseVersion(v) {
@@ -502,8 +508,8 @@ if (sharedHits.length > 0) {
 // deliberate dependency for the paid plugin's metered summary path; the AGENTIC SDKs and zod stay
 // forbidden even there, since agentic AI is off in cloud.
 const AI_DEPS = withPro
-  ? ['@anthropic-ai/claude-agent-sdk', '@modelcontextprotocol/sdk', 'zod']
-  : ['@anthropic-ai/claude-agent-sdk', '@anthropic-ai/sdk', '@modelcontextprotocol/sdk', 'zod'];
+  ? ['@anthropic-ai/claude-agent-sdk', '@modelcontextprotocol/sdk', 'zod', ...DOC_CONVERTERS]
+  : ['@anthropic-ai/claude-agent-sdk', '@anthropic-ai/sdk', '@modelcontextprotocol/sdk', 'zod', ...DOC_CONVERTERS];
 for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
   const leaked = AI_DEPS.filter((d) => d in (manifest[field] ?? {}));
   if (leaked.length > 0) fail(`AI SDK(s) leaked into release/package.json ${field}: ${leaked.join(', ')}`);
@@ -529,7 +535,7 @@ if (!runtimeSrc.includes(`AI_RUNTIME_MANIFEST_FIELD = '${AI_RUNTIME_FIELD}'`)) {
 // imports are erased at emit, so any specifier left in the JS is a real one. Subpaths
 // (`zod/v4`, `@anthropic-ai/sdk/resources`) count.
 const AI_SPECIFIER = new RegExp(
-  String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s*)(['"])(?:@anthropic-ai\/claude-agent-sdk|@anthropic-ai\/sdk|@modelcontextprotocol\/sdk|zod)(?:\/[^'"]*)?\1`,
+  String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s*)(['"])(?:@anthropic-ai\/claude-agent-sdk|@anthropic-ai\/sdk|@modelcontextprotocol\/sdk|zod|mammoth|turndown|turndown-plugin-gfm)(?:\/[^'"]*)?\1`,
   'm',
 );
 const runtimeJs = join(releaseDist, 'ai', 'runtime.js');

@@ -150,6 +150,14 @@ them by default, and a dependent package cannot switch off its dependency's plat
   reads `absent` with "Set up AI again", but still loads until replaced.
 - The SDKs are Anthropic's, under Anthropic's terms — installed from npm on the user's machine,
   never vendored into our tarball (that would be redistribution).
+- **The reference-docs converters ride the same download** — `mammoth` (Word → HTML), `turndown` and
+  `turndown-plugin-gfm` (HTML → markdown with tables): small, pure JS, used ONLY by the agentic docs
+  library ([REFERENCE-DOCS.md](REFERENCE-DOCS.md)). They are in `AI_RUNTIME_PACKAGES` (both spellings:
+  `ai/runtime.ts` and `build-release.mjs`), declared in `apps/backend/package.json` so the pins are
+  generated like the SDKs', forbidden in the manifest's dependency fields, and value-imported ONLY by
+  `ai/runtime.ts` (`loadMammoth` / `loadTurndown` / `loadTurndownGfm` — the dist grep covers them). ⚠ A
+  runtime installed BEFORE them is **stale, not absent** (`AI_RUNTIME_LATER_PACKAGES`): every agent
+  still loads, the status says "Set up AI again", and only a Word or web-page build refuses until then.
 
 **`--with-pro` (the PAID cloud image ONLY).** `build-release.mjs --with-pro` additionally: builds
 `@pierre/pro` to `packages/pro/dist` (via the new `tsconfig.build.json` + `pnpm --filter @pierre/pro

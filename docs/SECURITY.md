@@ -99,7 +99,7 @@ correctly on `read`: `/bot-behaviour`, `/bot-dedup`, `/mention-candidates`, the 
 
 **Fastify factory hardening** (`app.ts`): `trustProxy: config.isCloud` (Railway proxies — without
 it the limiter's IP fallback collapses into one bucket; NOT set locally, where it would let a
-client choose its own key), `bodyLimit` 256 KiB, `requestTimeout` 60s,
+client choose its own key), `bodyLimit` 256 KiB (one route raises it: the 25 MB reference-docs upload), `requestTimeout` 60s,
 `routerOptions.maxParamLength` 200 (top-level is FSTDEP022-deprecated), and a pino **`redact`**
 list — an `err` from a failed HTTP call carries the outgoing `Authorization: token gho_…` /
 `x-api-key: sk-ant-…` headers and pino serializes errors deeply.
@@ -295,6 +295,16 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   sockets) and `tracker/routes.test.ts`. Rate tiers: every route that can reach the customer's Jira
   (the ticket GET/refresh/ac-field, the connection check, the tracker PUT and `POST
   /api/ticket-links`, whose kicks spend it) is on `search`, by exact path in `tierFor`.
+- **Reference-docs web pages (core `reference-docs/url-fetch.ts`, LOCAL ONLY) — a page address the
+  reader typed, fetched by the docs build.** STRICTER than the Jira guard and in BOTH modes: http/https
+  only, no credentials in the URL, **no private or local addresses ever** (the same blocklist, plus
+  `localhost`/`.local`/single-label names; an IP literal up front, a name at connect time through the
+  tracker's `guardedLookup`), redirects followed ONLY on the same host (≤ 3, never https → http, each
+  re-vetted), 20s per exchange, 25 MB while reading. Pinned in `url-fetch.test.ts`. The upload route
+  is the ONE route that raises `bodyLimit` (25 MB + 1 KiB, an `application/octet-stream` buffer
+  parser); the file's kind is sniffed from its bytes. The docs agents deny Bash, run under the path
+  guard, and the PDF build's Write/Edit are confined to `staging/sections/*.md` by a second hook
+  ([REFERENCE-DOCS.md](REFERENCE-DOCS.md)).
 - **`resolution-check` fan-out (plugin)**: `MAX_TARGETS_PER_BATCH` 50 + per-account in-flight set
   + 30s interval + abort wiring on the JSON twin. One billed LLM call per thread, uncapped, on an
   app built for bot-flooded PRs.

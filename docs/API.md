@@ -267,6 +267,32 @@ Mermaid, succeeded rows only), `refusal` (`SequenceDiagramRefusal`, server-writt
 | `GET /api/sequence-diagrams/story?ident=` | `TicketSequenceDiagramResponse {ident, ticketKey, memberCount, diagram, latest}` — members are read WITHIN the account, so another account's ident has none. A pasted (`manual:`) or malformed ident → `400 BadIdent`. Tier `read` |
 | `POST /api/sequence-diagrams/story/redraw {ident}` | Queue the story diagram now. Fewer than 2 members → `200 {outcome:'refused', refusal:'too_few_prs'}`; more than 12 → `too_many_prs`; otherwise as the PR redraw. Tiers **`ai` + `ai_hourly`** |
 
+### Reference docs (CORE, local-only)
+
+`reference-docs/routes.ts`, registered by `registerAgenticRoutes` (absent in cloud and under
+`LIMN_AI_DISABLED` → `404`). [REFERENCE-DOCS.md](REFERENCE-DOCS.md). Wire types:
+`packages/shared/src/reference-docs.ts`. `?workspace=` (or a body's `workspaceId`) resolves through
+`resolveWorkspaceScope` — absent / unknown / another account's ⇒ the caller's DEFAULT workspace, never a
+404; every list echoes `workspaceId`. A document id in a PATH is resolved within the account (`404`).
+The build-starting routes preflight the credential (`400 NoClaudeAuth`) and credits (`402
+CreditsExhausted`).
+
+| Route | Contract |
+|---|---|
+| `GET /api/docs?workspace=` | `ReferenceDocsResponse {workspaceId, docs: ReferenceDoc[], docsInReview, maxBytes}` — status, `progress` 0–100, `stage` label, `error`, `available` (a built version is on disk + in INDEX.md). DB-only. Tier `read` |
+| `POST /api/docs/upload?workspace=` | The FILE IS THE BODY: `Content-Type: application/octet-stream`, name URI-encoded in `X-Limn-Filename`. Kind sniffed from the bytes. `400 NoFileName`, `415 BadBody` (not octet-stream), `415 Unsupported` (sentence), `413` over 25 MB or a PDF over the page limit, `409 LibraryFull` (200 per workspace). → `202 ReferenceDocMutationResponse {doc}` (queued). Tiers **`ai` + `ai_hourly`** |
+| `POST /api/docs/url {workspaceId?, url}` | Vets the address (`400 BadUrl` with the guard's sentence: scheme, credentials, private / local host); the BUILD fetches it. → `202 {doc}`. Tiers **`ai` + `ai_hourly`** |
+| `POST /api/docs/:id/rebuild` | Rebuild from the stored source (a URL is fetched again). `409 Building` while one runs (compare-and-set on `ready`/`failed`). → `202 {doc}`. Tiers **`ai` + `ai_hourly`** |
+| `POST /api/docs/:id/cancel` | Stop a queued or running build (the last built version stays). → `{doc}`. Tier `read` |
+| `DELETE /api/docs/:id` | Cancel, delete the row, the library folder and the source, rewrite INDEX.md. → `{deleted: true, id}`. Tier `read` |
+| `GET /api/docs/:id/stream` | SSE `ReferenceDocStreamEvent`: one `snapshot`, `progress` events, one terminal `done {status, error}` then close; a document not building answers `snapshot` + `done` at once. Ownership checked BEFORE the hijack. Tier `read` |
+| `GET /api/docs/tree?workspace=&doc=` | `ReferenceDocTreeResponse {workspaceId, index, doc, contents, sections}` — INDEX.md verbatim; with `doc=<id>` (this workspace's) also its CONTENTS.md and `ReferenceDocSectionEntry[]` (path, title, summary, depth, trail, merged headings + anchors, words). Tier `read` |
+| `GET /api/docs/section?workspace=&path=` | One library file by its library-relative path (`INDEX.md`, `<slug>/CONTENTS.md`, `<slug>/sections/NN-name.md`, optional `#anchor` ignored) — the same paths the chat cites. STRICT grammar (`400 BadPath` for `..`, absolute, encoded, other files); a slug not BUILT in this workspace → `404`. → `ReferenceDocSectionResponse {path, docId, docSlug, docTitle, title, markdown, prev, next}`. Tier `read` |
+| `POST /api/docs/chat {workspaceId?, conversationId?, question}` | ONE Sonnet 5 answer (synchronous, ≤ 5 min; closing the request cancels it). Absent `conversationId` ⇒ a new one (server-minted, 24 hex). → `ReferenceDocsChatResponse {workspaceId, conversationId, question, answer}`; `answer.citations` = only links naming a real file of this library. `409 EmptyLibrary`, `409 Busy` (one turn per account), `400 BadConversation`, `502 NoAnswer`, `499 Cancelled`. Tiers **`ai` + `ai_hourly`** |
+| `GET /api/docs/chats?workspace=` | `ReferenceDocsConversationsResponse {conversations: {conversationId, title, messageCount, updatedAt}[]}`, newest first. Tier `read` |
+| `GET` / `DELETE /api/docs/chats/:conversationId?workspace=` | `ReferenceDocsConversationResponse {messages}` / `{deleted}`; `404` when the workspace holds no such conversation. Tier `read` |
+| `GET` / `PUT /api/workspaces/:id/docs-settings` | `ReferenceDocsSettings {workspaceId, docsInReview}`; PUT body `{docsInReview}`. Another account's workspace → `404`. Tier `read` |
+
 ### CI review (CORE, local-only)
 
 Why checks FAILED on a PR's head, as its own Claude process — the PR review no longer looks at CI

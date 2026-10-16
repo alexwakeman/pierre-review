@@ -45,6 +45,8 @@ import type {
   SonarIssue,
   SonarPostRecord,
   SequenceDiagramMember,
+  ReferenceDocSectionEntry,
+  ReferenceDocCitation,
   SonarQualityGate,
   FindingAutoResolveRecord,
   ClaudeFindingReminder,
@@ -1419,6 +1421,8 @@ export const workspaces = pgTable(
     autoFixSettings: jsonb('auto_fix_settings').$type<StoredAutoFixSettings>(),
     // Dependency auto-merge (migration 0093 / pg 0080). NULL/false = off. Rationale in the sqlite twin.
     dependencyAutoMerge: boolean('dependency_auto_merge'),
+    // Reference docs in review (migration 0116 / pg 0103). NULL/false = off. Rationale in the sqlite twin.
+    docsInReview: boolean('docs_in_review'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),
@@ -2419,5 +2423,75 @@ export const sequenceDiagrams = pgTable(
   (t) => ({
     subjectFpUx: uniqueIndex('sequence_diagrams_subject_fp').on(t.accountId, t.kind, t.subject, t.fingerprint),
     accountCreatedIdx: index('sequence_diagrams_account_created').on(t.accountId, t.createdAt),
+  }),
+);
+
+// Reference docs (migration 0116 / pg 0103). Rationale in the sqlite twin.
+export const referenceDocs = pgTable(
+  'reference_docs',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    slug: text('slug').notNull(),
+    title: text('title').notNull(),
+    sourceKind: text('source_kind').notNull(),
+    sourceName: text('source_name').notNull(),
+    sourceUrl: text('source_url'),
+    byteSize: integer('byte_size').notNull().default(0),
+    status: text('status').notNull(),
+    progress: integer('progress').notNull().default(0),
+    stage: text('stage'),
+    error: text('error'),
+    sectionCount: integer('section_count').notNull().default(0),
+    sections: jsonb('sections').$type<ReferenceDocSectionEntry[]>(),
+    summary: text('summary'),
+    topics: jsonb('topics').$type<string[]>(),
+    pageCount: integer('page_count'),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    buildStartedAt: timestamp('build_started_at', { withTimezone: true, mode: 'date' }),
+    builtAt: timestamp('built_at', { withTimezone: true, mode: 'date' }),
+  },
+  (t) => ({
+    workspaceSlugUx: uniqueIndex('reference_docs_workspace_slug').on(t.accountId, t.workspaceId, t.slug),
+    workspaceAccountFk: foreignKey({
+      name: 'reference_docs_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+export const referenceDocChatMessages = pgTable(
+  'reference_doc_chat_messages',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    conversationId: text('conversation_id').notNull(),
+    role: text('role').notNull(),
+    content: text('content').notNull(),
+    citations: jsonb('citations').$type<ReferenceDocCitation[]>(),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (t) => ({
+    conversationIdx: index('reference_doc_chat_conversation').on(t.accountId, t.workspaceId, t.conversationId),
+    workspaceAccountFk: foreignKey({
+      name: 'reference_doc_chat_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
   }),
 );
