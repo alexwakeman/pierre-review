@@ -806,6 +806,13 @@
       "when": 1792137603010,
       "tag": "0114_sonarcloud",
       "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "6",
+      "when": 1792137603011,
+      "tag": "0115_sequence_diagrams",
+      "breakpoints": true
     }
   ]
 }

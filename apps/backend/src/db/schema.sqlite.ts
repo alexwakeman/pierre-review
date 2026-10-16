@@ -39,6 +39,7 @@ import type {
   CiAutoPostRecord,
   SonarIssue,
   SonarPostRecord,
+  SequenceDiagramMember,
   SonarQualityGate,
   FindingAutoResolveRecord,
   ClaudeFindingReminder,
@@ -3319,5 +3320,53 @@ export const sonarSnapshots = sqliteTable(
   },
   (t) => ({
     accountPrHeadUx: uniqueIndex('sonar_snapshots_account_pr_head').on(t.accountId, t.prId, t.headSha),
+  }),
+);
+
+// ---- SEQUENCE DIAGRAMS (migration 0115 / pg 0102; docs/CLAUDE-REVIEW.md § Sequence diagrams) ----
+// ONE row per (account, kind, subject, fingerprint): kind 'pr' (subject = the PR id) or 'story'
+// (subject = the tracker ident). A Redraw at the same fingerprint REWRITES that row; a new head (or
+// a changed member set) is a new row, so the older diagram stays readable as "not current". No FK on
+// pr_id (the sonar_snapshots precedent): both delete paths and the erasure take it. Story rows carry
+// pr_id NULL and are erased with the account.
+export const sequenceDiagrams = sqliteTable(
+  'sequence_diagrams',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    // SequenceDiagramKind.
+    kind: text('kind').notNull(),
+    subject: text('subject').notNull(),
+    // 'pr' rows: the PR. 'story' rows: NULL.
+    prId: integer('pr_id'),
+    // 'story' rows: the ticket's display key.
+    ticketKey: text('ticket_key'),
+    fingerprint: text('fingerprint').notNull(),
+    headSha: text('head_sha'),
+    members: text('members', { mode: 'json' }).$type<SequenceDiagramMember[]>(),
+    // SequenceDiagramTrigger.
+    trigger: text('trigger').notNull(),
+    // SequenceDiagramStatus.
+    status: text('status').notNull(),
+    model: text('model').notNull(),
+    title: text('title'),
+    caption: text('caption'),
+    diagramType: text('diagram_type'),
+    source: text('source'),
+    // SequenceDiagramRefusal — server-written.
+    refusal: text('refusal'),
+    error: text('error'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    subjectFpUx: uniqueIndex('sequence_diagrams_subject_fp').on(t.accountId, t.kind, t.subject, t.fingerprint),
+    // The latest row per subject, and the daily cap (review-triggered rows since a UTC day start).
+    accountCreatedIdx: index('sequence_diagrams_account_created').on(t.accountId, t.createdAt),
   }),
 );

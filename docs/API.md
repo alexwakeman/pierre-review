@@ -250,6 +250,23 @@ the items this PR owns (`getOwnedTicketItemsForPr`: the latest succeeded run per
 Automatic runs (`trigger` `auto` / `cascade`) count against the starting workspace's
 `TICKET_REVIEW_DAILY_CAP` (default 20, `countAutoTicketReviewsSince`); manual runs never do.
 
+### Sequence diagrams (CORE, local-only)
+
+`review/diagrams/routes.ts`, registered by `registerAgenticRoutes` (absent in cloud and under
+`LIMN_AI_DISABLED` → `404`). [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Sequence diagrams. Wire types:
+`packages/shared/src/sequence-diagrams.ts`. A **slot** is `SequenceDiagramSlot {diagram, latest}`:
+`diagram` = the newest SUCCEEDED `SequenceDiagramView` (what to draw), `latest` = the newest run of any
+status when it is a different one (drawing, refused, failed) — a failed redraw never hides the last
+good diagram. Each view carries `current` (its fingerprint is the live one), `source` (validated
+Mermaid, succeeded rows only), `refusal` (`SequenceDiagramRefusal`, server-written) and `members` (story).
+
+| Route | Contract |
+|---|---|
+| `GET /api/prs/:id/sequence-diagrams` | `PrSequenceDiagramsResponse {prId, pr: slot, stories: StorySequenceDiagramSlot[]}` — the PR's diagram and, for each of its tracker tickets (≤ 3; STORED rows only) with 2+ open or merged PRs or a stored diagram, `{ident, ticketKey, memberCount, …slot}`. DB-only. Another account's PR → `404`. Tier `read` |
+| `POST /api/prs/:id/sequence-diagrams/redraw` | Queue the PR's diagram at its synced head NOW (trigger `manual`, never counted against the daily cap; rewrites the row at that fingerprint). → `202 RedrawSequenceDiagramResponse {outcome: 'queued'\|'already_running', diagramId}`, or `200 {outcome:'refused', diagramId:null, refusal:'no_code'}` when the stored file list shows no code. `404` another account's PR, `409 NoHead`, `400 NoClaudeAuth`, `402 CreditsExhausted`, `409 Busy`. Tiers **`ai` + `ai_hourly`** |
+| `GET /api/sequence-diagrams/story?ident=` | `TicketSequenceDiagramResponse {ident, ticketKey, memberCount, diagram, latest}` — members are read WITHIN the account, so another account's ident has none. A pasted (`manual:`) or malformed ident → `400 BadIdent`. Tier `read` |
+| `POST /api/sequence-diagrams/story/redraw {ident}` | Queue the story diagram now. Fewer than 2 members → `200 {outcome:'refused', refusal:'too_few_prs'}`; more than 12 → `too_many_prs`; otherwise as the PR redraw. Tiers **`ai` + `ai_hourly`** |
+
 ### CI review (CORE, local-only)
 
 Why checks FAILED on a PR's head, as its own Claude process — the PR review no longer looks at CI

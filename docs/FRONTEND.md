@@ -4482,6 +4482,27 @@ Each of these is a decision, not an oversight, and "finishing the migration" wou
   "it decided nothing", "it never ran" and "GitHub told us nothing" are three different facts, and
   collapsing any into the failure mark would report a red nobody observed.
 
+## Sequence diagrams (review tab section, This Sprint's ticket drawer)
+
+`components/SequenceDiagram.tsx` is the ONE Mermaid renderer: `mermaid` is a DYNAMIC import (its own
+chunks — the initial bundle only carries the chunk's path), initialised from `lib/mermaidTheme.ts`
+(`securityLevel: 'strict'`, `htmlLabels: false`, the `'base'` theme fed from the `--ai-*` tokens,
+re-rendered when the `dark` class on `<html>` flips). A render error shows the SOURCE in a code block;
+"Show source" and a Copy button (the Mermaid source, verbatim) are always there. The SVG is Mermaid's
+own strict output from a source the server validated (review/diagrams/validate.ts). The CSP needed no
+change: no third-party origin, and Mermaid's inline `<style>` rides the existing `style-src
+'unsafe-inline'`.
+
+`components/ClaudeReviewDiagrams.tsx` — `ClaudeReviewDiagramsSection` (mounted in `ClaudesReview` after
+SonarCloud, absent without `me.ai`) shows the PR's slot and each multi-PR ticket's story slot through
+`DiagramSlotView`; `Activity/SprintStoryDiagram.tsx` shows the story slot in the ticket drawer (only with
+`me.ai`, and only when the ticket has 2+ pull requests or a stored diagram). The pure folds live in
+`lib/sequenceDiagrams.ts` (test/sequenceDiagram.test.ts). ⚠ POLLING: the reads poll every 5 s only while
+a run is queued or running, and the PR read also for 90 s after the shown review's `finishedAt` while
+nothing is stored at the current head (the server queues the diagram a moment AFTER the review is
+saved). The Redraw buttons share one mutation key per subject (`useIsMutating`). `uuid` is pinned to
+`^11` in the frontend's dependencies so vis-data's peer range and Mermaid's agree on one copy.
+
 ## SonarCloud (review tab section, picker card, Settings)
 
 `components/ClaudeReviewSonar.tsx` holds `SonarIssueRow` (the ONE SonarCloud card — the review tab's

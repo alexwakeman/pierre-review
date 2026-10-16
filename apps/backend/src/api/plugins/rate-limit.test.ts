@@ -164,6 +164,22 @@ describe('tierFor — SonarCloud', () => {
   });
 });
 
+// Sequence diagrams (review/diagrams/routes.ts). Only the two Redraw POSTs start a model run.
+describe('tierFor — sequence diagrams', () => {
+  it('bills only the redraws as AI generation', () => {
+    expect(tiers('POST', '/api/prs/42/sequence-diagrams/redraw')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/sequence-diagrams/story/redraw')).toEqual(['ai', 'ai_hourly']);
+  });
+  it('keeps the stored reads on read', () => {
+    expect(tiers('GET', '/api/prs/42/sequence-diagrams')).toEqual(['read']);
+    expect(tiers('GET', '/api/sequence-diagrams/story')).toEqual(['read']);
+  });
+  it('a near-miss is not swept in', () => {
+    expect(tiers('GET', '/api/prs/42/sequence-diagrams/redraw')).not.toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/prs/42/sequence-diagram/redraw')).not.toEqual(['ai', 'ai_hourly']);
+  });
+});
+
 // The issue tracker (CORE since apiVersion 23). The routes that can read the CUSTOMER'S tracker
 // (one outbound call each, up to a 10s wait) take `search`, not the blanket 600/min `read`.
 describe('tierFor — the issue tracker', () => {

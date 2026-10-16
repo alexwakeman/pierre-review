@@ -44,6 +44,7 @@ import type {
   CiAutoPostRecord,
   SonarIssue,
   SonarPostRecord,
+  SequenceDiagramMember,
   SonarQualityGate,
   FindingAutoResolveRecord,
   ClaudeFindingReminder,
@@ -2382,5 +2383,41 @@ export const sonarSnapshots = pgTable(
   },
   (t) => ({
     accountPrHeadUx: uniqueIndex('sonar_snapshots_account_pr_head').on(t.accountId, t.prId, t.headSha),
+  }),
+);
+
+// ---- SEQUENCE DIAGRAMS (migration 0115 / pg 0102). Twin of schema.sqlite.ts, where the contract lives.
+export const sequenceDiagrams = pgTable(
+  'sequence_diagrams',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id').notNull(),
+    kind: text('kind').notNull(),
+    subject: text('subject').notNull(),
+    prId: integer('pr_id'),
+    ticketKey: text('ticket_key'),
+    fingerprint: text('fingerprint').notNull(),
+    headSha: text('head_sha'),
+    members: jsonb('members').$type<SequenceDiagramMember[]>(),
+    trigger: text('trigger').notNull(),
+    status: text('status').notNull(),
+    model: text('model').notNull(),
+    title: text('title'),
+    caption: text('caption'),
+    diagramType: text('diagram_type'),
+    source: text('source'),
+    refusal: text('refusal'),
+    error: text('error'),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }),
+    completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
+  },
+  (t) => ({
+    subjectFpUx: uniqueIndex('sequence_diagrams_subject_fp').on(t.accountId, t.kind, t.subject, t.fingerprint),
+    accountCreatedIdx: index('sequence_diagrams_account_created').on(t.accountId, t.createdAt),
   }),
 );

@@ -1304,3 +1304,14 @@ and unique `(account_id, workspace_id)`. `sonar_snapshots`: one row per `(accoun
 jsonb), `total_issues`, `total_hotspots`, `fetched_at`. No FK on `pr_id` (the tracker_tickets precedent),
 so BOTH delete paths delete it explicitly. Both tables are in `accountScopedTables()`, erased, and checked
 by `verify:isolation`. Journal `when` sqlite `1792137603010` / pg `1792137604009`. ⚠ pg `0101` NOT replayed.
+
+### `0115_sequence_diagrams` (pg `0102`) — sequence diagrams
+One new table (docs/CLAUDE-REVIEW.md § Sequence diagrams). `sequence_diagrams`: one row per
+`(account_id, kind, subject, fingerprint)` (unique `sequence_diagrams_subject_fp`) — `kind` `pr|story`,
+`subject` (the PR id as text, or the ticket ident), `pr_id` (pr rows; NULL on story rows), `ticket_key`,
+`head_sha`, `members` JSON (sqlite text, pg jsonb), `trigger`, `status`, `model`, `title`, `caption`,
+`diagram_type`, `source`, `refusal`, `error`, the run's telemetry (`cost_usd` sqlite real / pg double
+precision) and three timestamps; index `(account_id, created_at)` for the daily cap. No FK on `pr_id`
+(the sonar_snapshots precedent): BOTH delete paths delete PR rows explicitly; story rows go with the
+account. In `accountScopedTables()`, erased, and checked by `verify:isolation`. Journal `when` sqlite
+`1792137603011` / pg `1792137604010`. ⚠ pg `0102` NOT replayed.

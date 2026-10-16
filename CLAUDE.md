@@ -887,6 +887,12 @@ Haiku 5.5). Details:
   story per ticket for every caller (`jiraStoryFor` → core's `ticketStory`, the freshest stored
   row), and the source (`tracker/ticket-source.ts`) reads STORED rows only — no tracker call on a view.
   [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Ticket review.
+- **SEQUENCE DIAGRAMS ARE A SEPARATE PROCESS** (`src/review/diagrams/`; sqlite `0115` / pg `0102`):
+  Sonnet 5, queued fire-and-forget after EVERY succeeded review (manual or auto) only when the change
+  has CODE (`isNonCodeFile`) and the head moved since its last diagram; a story diagram too when the
+  ticket has MORE THAN ONE PR. A slot peer, own `SEQUENCE_DIAGRAM_DAILY_CAP`. ⚠ The Mermaid source is
+  validated + stripped SERVER-side before storing (`validate.ts`) and rendered `securityLevel: 'strict'`
+  from a LAZY `mermaid` import. [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sequence diagrams.
 - **The moved modules take ONE context argument, `AgentContext`** (`review/agent-context.ts`),
   built from direct core imports — never `ProContext`. Their tests pass a fake one; the queue
   managers carry it on each item. URL paths did NOT move (the fixer keeps its historical
@@ -1551,7 +1557,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0101` and plugin `0034`–`0037` + `0040` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0102` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

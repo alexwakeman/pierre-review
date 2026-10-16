@@ -583,6 +583,14 @@ export const config = {
   // AUTOMATIC CI reviews per workspace per UTC day. Not shared with the PR or ticket review caps.
   // Manual runs never count. Default = shared CI_REVIEW_DAILY_CAP.
   ciReviewDailyCap: intFromEnv('CI_REVIEW_DAILY_CAP', 20),
+  // ---- Sequence diagrams (one Sonnet 5 run per PR head / per ticket's member set —
+  // review/diagrams/, docs/CLAUDE-REVIEW.md § Sequence diagrams) ----
+  // Its OWN spend and turn caps. Env only — no route sets them.
+  sequenceDiagramBudgetUsd: floatFromEnv('SEQUENCE_DIAGRAM_BUDGET_USD', 1.5),
+  sequenceDiagramMaxTurns: intFromEnv('SEQUENCE_DIAGRAM_MAX_TURNS', 30),
+  // Diagrams STARTED BY A FINISHED REVIEW per account per UTC day (PR + story together). A Redraw
+  // click never counts. Not shared with any review's cap.
+  sequenceDiagramDailyCap: intFromEnv('SEQUENCE_DIAGRAM_DAILY_CAP', 30),
   // ---- Story report (one Haiku run across 10-20 picked stories — review/story-report/) ----
   // Its OWN spend and turn caps (the trial run cost $0.02 in 21 turns). Env only — no route sets it.
   storyReportBudgetUsd: floatFromEnv('STORY_REPORT_BUDGET_USD', 1),

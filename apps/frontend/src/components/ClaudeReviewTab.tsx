@@ -80,6 +80,7 @@ import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine } from '../lib/claudeAuto
 import { CiCheckSection } from './CiCheckSection.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
 import { ClaudeReviewSonarSection } from './ClaudeReviewSonar.js';
+import { ClaudeReviewDiagramsSection } from './ClaudeReviewDiagrams.js';
 import { PrRefText, ReviewPrRefsProvider } from './ReviewPrRefs.js';
 import { REVIEW_ITEM_CARD, REVIEW_ITEM_TITLE, REVIEW_META } from '../lib/reviewStyles.js';
 import { reviewTexts, type KnownPr } from '../lib/reviewPrRefs.js';
@@ -1392,6 +1393,9 @@ function ClaudesReview({
         changedPaths={changedPaths}
         onOpenInChanges={onOpenInChanges}
       />
+      {/* The flow this change touches (+ the whole story's, on a multi-PR ticket) — a separate Sonnet
+          run after each review (docs/CLAUDE-REVIEW.md § Sequence diagrams). Absent without agentic AI. */}
+      <ClaudeReviewDiagramsSection prId={review.prId} reviewFinishedAt={review.finishedAt ?? null} />
       {/* The chat sits UNDER Story check and CI check and opens expanded, so a question about the
           review or the story is one click from both. */}
       {chatReviewId != null && <ReviewChatSection reviewId={chatReviewId} prId={review.prId} />}

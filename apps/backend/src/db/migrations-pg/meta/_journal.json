@@ -715,6 +715,13 @@
       "when": 1792137604009,
       "tag": "0101_sonarcloud",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1792137604010,
+      "tag": "0102_sequence_diagrams",
+      "breakpoints": true
     }
   ]
 }

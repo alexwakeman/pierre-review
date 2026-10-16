@@ -4217,6 +4217,72 @@ check(
   await sapp.close();
 }
 
+// ── SEQUENCE DIAGRAMS (review/diagrams/, CORE, local-only; docs/CLAUDE-REVIEW.md § Sequence diagrams) ──
+// `sequence_diagrams`: BOTH accounts get a 'pr' row at the same fingerprint for their own PR, and a
+// 'story' row under the SAME ident, so a dropped account predicate has something to leak (the
+// mutation checks prove B's own reads see B's rows). PR ids arrive in a request PATH (→ 404).
+{
+  const dp = await import('../src/review/diagrams/persist.js');
+  const { slotFor, registerSequenceDiagramRoutes } = await import('../src/review/diagrams/routes.js');
+  const dc = { db, schema: schema as unknown as Record<string, any> };
+  const IDENT = 'jira:https://acme.atlassian.net#ISO-1';
+  for (const [acct, prId] of [
+    [1, A.prId],
+    [2, B.prId],
+  ] as const) {
+    for (const kind of ['pr', 'story'] as const) {
+      const id = await dp.upsertQueuedDiagram(dc, {
+        accountId: acct,
+        kind,
+        subject: kind === 'pr' ? String(prId) : IDENT,
+        prId: kind === 'pr' ? prId : null,
+        ticketKey: kind === 'story' ? `ISO-${acct}` : null,
+        fingerprint: 'iso-fp',
+        headSha: null,
+        members: null,
+        trigger: 'review',
+        model: 'claude-sonnet-5',
+      });
+      await dp.saveDiagramSuccess(dc, acct, id, { title: `T${acct}`, caption: null, diagramType: 'sequenceDiagram', source: 'sequenceDiagram\n  A->>B: x' }, {});
+    }
+  }
+  const bStory = await dp.latestDiagram(dc, 2, 'story', IDENT);
+  check("latestDiagram(A, B's PR subject) is null", (await dp.latestDiagram(dc, 1, 'pr', String(B.prId))) === null);
+  check("latestDiagram(B, B's PR) is B's (mutation check)", (await dp.latestDiagram(dc, 2, 'pr', String(B.prId)))?.title === 'T2');
+  check("the shared story ident reads A's own row for A", (await dp.latestDiagram(dc, 1, 'story', IDENT))?.title === 'T1');
+  check("getDiagramRow(A, B's row id) is null", bStory != null && (await dp.getDiagramRow(dc, 1, bStory.id)) === null);
+  check("diagramExistsAt(A, B's PR subject) is false", !(await dp.diagramExistsAt(dc, 1, 'pr', String(B.prId), 'iso-fp')));
+  check("slotFor(A, B's PR subject) draws nothing", (await slotFor(dc as any, 1, 'pr', String(B.prId), 'iso-fp')).diagram === null);
+  check("getDiagramPrContext(A, B's PR) is null", (await dp.getDiagramPrContext(dc, 1, B.prId)) === null);
+  check("getPrFileStats(A, [B's PR]) is empty", (await dp.getPrFileStats(dc, 1, [B.prId])).size === 0);
+  await dp.markDiagramFailed(dc, 1, bStory!.id, 'cross-account write');
+  check("markDiagramFailed(A, B's row id) wrote nothing", (await dp.getDiagramRow(dc, 2, bStory!.id))?.status === 'succeeded');
+  const before = await dp.countReviewDiagramsSince(dc, 2, 0);
+  check("countReviewDiagramsSince(B) counts B's own rows (mutation check)", before === 2);
+
+  const Fastify = (await import('fastify')).default;
+  const dapp = Fastify({ logger: false });
+  registerSequenceDiagramRoutes(dapp, {
+    ...dc,
+    accountIdOf: () => 1,
+    log: { info() {}, warn() {}, error() {} },
+    llm: { detectAuth: () => ({ status: 'ok' }) },
+    aiCredits: { check: async () => ({ agentBlocked: false }) },
+    recordAiUsage: async () => {},
+  } as any);
+  await dapp.ready();
+  check("GET /api/prs/<B's>/sequence-diagrams as A → 404", (await dapp.inject({ method: 'GET', url: `/api/prs/${B.prId}/sequence-diagrams` })).statusCode === 404);
+  check(
+    "POST /api/prs/<B's>/sequence-diagrams/redraw as A → 404",
+    (await dapp.inject({ method: 'POST', url: `/api/prs/${B.prId}/sequence-diagrams/redraw` })).statusCode === 404,
+  );
+  const ownPr = await dapp.inject({ method: 'GET', url: `/api/prs/${A.prId}/sequence-diagrams` });
+  check("GET /api/prs/<A's>/sequence-diagrams as A → A's diagram", ownPr.statusCode === 200 && ownPr.json().pr.diagram?.title === 'T1');
+  const story = await dapp.inject({ method: 'GET', url: `/api/sequence-diagrams/story?ident=${encodeURIComponent(IDENT)}` });
+  check("GET /api/sequence-diagrams/story as A → A's row, never B's", story.statusCode === 200 && story.json().diagram?.title === 'T1');
+  await dapp.close();
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

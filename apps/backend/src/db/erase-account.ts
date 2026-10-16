@@ -194,6 +194,9 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // guarantee; workspace_sonar cascades from workspaces too, and is explicit anyway.
     await tx.delete(schema.sonarSnapshots).where(eq(schema.sonarSnapshots.accountId, accountId)).execute();
     await tx.delete(schema.workspaceSonar).where(eq(schema.workspaceSonar.accountId, accountId)).execute();
+    // Sequence diagrams (migration 0115 / pg 0102): no FKs, so this is the whole guarantee (story rows
+    // carry no pr_id and are reached ONLY here).
+    await tx.delete(schema.sequenceDiagrams).where(eq(schema.sequenceDiagrams.accountId, accountId)).execute();
     // Workspace settings history (migration 0096 / pg 0083) — cascades from workspaces too, and is
     // explicit anyway.
     await tx
@@ -332,6 +335,8 @@ export function accountScopedTables(): {
     // SonarCloud (migration 0114 / pg 0101), erased explicitly above; `workspaceSonar` holds a credential.
     { name: 'sonarSnapshots', col: schema.sonarSnapshots.accountId, table: schema.sonarSnapshots },
     { name: 'workspaceSonar', col: schema.workspaceSonar.accountId, table: schema.workspaceSonar },
+    // Sequence diagrams (migration 0115 / pg 0102), erased explicitly above.
+    { name: 'sequenceDiagrams', col: schema.sequenceDiagrams.accountId, table: schema.sequenceDiagrams },
     // Chronology's settings history (migration 0096 / pg 0083), erased explicitly above.
     {
       name: 'workspaceSettingEvents',

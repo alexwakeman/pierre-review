@@ -12,6 +12,8 @@ import { registerTicketReviewSweep } from './ticket-review/sweep.js';
 import { registerCiReviewRoutes } from './ci-review/routes.js';
 import { reconcileCiReviewsOnStartup } from './ci-review/manager.js';
 import { registerCiReviewSweep } from './ci-review/sweep.js';
+import { registerSequenceDiagramRoutes } from './diagrams/routes.js';
+import { reconcileDiagramsOnStartup } from './diagrams/manager.js';
 import { registerAiFixRoutes } from '../coding/ai-fix/routes.js';
 import { reconcileFixesOnStartup } from '../coding/ai-fix/manager.js';
 import { registerAiResolveRoutes } from '../coding/ai-resolve/routes.js';
@@ -54,6 +56,8 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   registerAutoReviewSettingsRoutes(app, ctx);
   registerTicketReviewRoutes(app, ctx);
   registerCiReviewRoutes(app, ctx);
+  // SEQUENCE DIAGRAMS: a separate Sonnet process queued after every finished review (and by Redraw).
+  registerSequenceDiagramRoutes(app, ctx);
   registerAiFixRoutes(app, ctx);
   // "Resolve with Claude" — the agentic half of the merge-conflict resolver. The resolver's own
   // routes stay in both modes (app.ts); this one is agentic and follows this function's rule.
@@ -106,6 +110,11 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
     await reconcileCiReviewsOnStartup(ctx);
   } catch (err) {
     app.log.warn({ err }, 'ci review: startup reconcile failed');
+  }
+  try {
+    await reconcileDiagramsOnStartup(ctx);
+  } catch (err) {
+    app.log.warn({ err }, 'sequence diagrams: startup reconcile failed');
   }
   await reconcileFixesOnStartup(ctx);
   try {

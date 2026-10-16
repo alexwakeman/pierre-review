@@ -422,6 +422,18 @@ function launch(item: QueueItem): void {
           trigger: item.trigger,
         });
       }
+      // SEQUENCE DIAGRAMS (review/diagrams/): every SUCCEEDED run, manual OR auto, may queue the PR's
+      // diagram and its stories' — a SEPARATE process in the shared slot pool. Fire-and-forget; the
+      // trigger never throws and only queues, so it can neither block nor fail this review.
+      if (succeeded) {
+        void import('../diagrams/trigger.js')
+          .then((m) =>
+            m.maybeDrawDiagramsAfterReview(ctx, { accountId: item.accountId, prId, reviewTrigger: item.trigger }),
+          )
+          .catch((err) =>
+            ctx.log.warn(`sequence diagrams pr ${prId}: ${err instanceof Error ? err.message : String(err)}`),
+          );
+      }
       // AUTO FIX: a SUCCEEDED auto run may start a review-seeded fix on the reader's OWN PR
       // (coding/ai-fix/auto-fix.ts decides; nothing is pushed). Fire-and-forget, never awaited and
       // never thrown into the review: a fix that fails to start costs the fix only.

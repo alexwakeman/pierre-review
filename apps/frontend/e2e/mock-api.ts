@@ -45,6 +45,8 @@ import type {
   WorkspaceTrackerSettings,
   WorkspaceSonarSettings,
   SonarPrResponse,
+  PrSequenceDiagramsResponse,
+  TicketSequenceDiagramResponse,
   SprintGraphResponse,
 } from '@pierre-review/shared';
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
@@ -997,6 +999,25 @@ export async function installMockApi(page: Page): Promise<void> {
       const sonarMatch = path.match(/\/api\/prs\/(\d+)\/sonar$/);
       if (sonarMatch) {
         return json(route, { prId: Number(sonarMatch[1]), configured: false, snapshot: null } satisfies SonarPrResponse);
+      }
+      // SEQUENCE DIAGRAMS (core, local-only; docs/CLAUDE-REVIEW.md § Sequence diagrams). Nothing drawn in
+      // e2e: the PR read answers an empty slot and no stories, the ticket read an empty slot.
+      const diagramsMatch = path.match(/\/api\/prs\/(\d+)\/sequence-diagrams$/);
+      if (diagramsMatch) {
+        return json(route, {
+          prId: Number(diagramsMatch[1]),
+          pr: { diagram: null, latest: null },
+          stories: [],
+        } satisfies PrSequenceDiagramsResponse);
+      }
+      if (path.endsWith('/api/sequence-diagrams/story')) {
+        return json(route, {
+          ident: new URL(route.request().url()).searchParams.get('ident') ?? '',
+          ticketKey: null,
+          memberCount: 0,
+          diagram: null,
+          latest: null,
+        } satisfies TicketSequenceDiagramResponse);
       }
       if (path.endsWith('/api/ticket-links')) {
         return json(route, { prs: [], titlesComplete: true } satisfies TicketLinksResponse);

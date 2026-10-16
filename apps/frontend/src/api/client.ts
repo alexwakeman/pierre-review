@@ -1,4 +1,8 @@
 import type {
+  PrSequenceDiagramsResponse,
+  RedrawSequenceDiagramResponse,
+  RedrawStoryDiagramBody,
+  TicketSequenceDiagramResponse,
   SonarConnectionCheck,
   SonarPostResponse,
   SonarPrResponse,
@@ -1617,6 +1621,20 @@ export const api = {
   ciReviewStates: (prIds: number[]) =>
     fetch('/api/ci-reviews/states', jsonBody('POST', { prIds } satisfies CiReviewStatesBody)).then((r) =>
       handle<CiReviewStatesResponse>(r),
+    ),
+
+  // ---- SEQUENCE DIAGRAMS (CORE, local-only): a Sonnet run of its own after each finished review ----
+  // docs/API.md § Sequence diagrams. Both GETs read STORED rows; the two Redraws queue one run each.
+  prSequenceDiagrams: (prId: number) => get<PrSequenceDiagramsResponse>(`/api/prs/${prId}/sequence-diagrams`),
+  redrawPrSequenceDiagram: (prId: number) =>
+    fetch(`/api/prs/${prId}/sequence-diagrams/redraw`, { method: 'POST' }).then((r) =>
+      handle<RedrawSequenceDiagramResponse>(r),
+    ),
+  storySequenceDiagram: (ident: string) =>
+    get<TicketSequenceDiagramResponse>(`/api/sequence-diagrams/story?ident=${encodeURIComponent(ident)}`),
+  redrawStorySequenceDiagram: (ident: string) =>
+    fetch('/api/sequence-diagrams/story/redraw', jsonBody('POST', { ident } satisfies RedrawStoryDiagramBody)).then((r) =>
+      handle<RedrawSequenceDiagramResponse>(r),
     ),
 
   // ---- AI Fix (Pro) ----

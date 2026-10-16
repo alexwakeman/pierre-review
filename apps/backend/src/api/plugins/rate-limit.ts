@@ -478,6 +478,15 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (!mutating && /^\/api\/prs\/\d+\/sonar$/.test(path)) return [TIERS.read];
   if (method === 'POST' && /^\/api\/prs\/\d+\/sonar\/refresh$/.test(path)) return [TIERS.search, TIERS.read];
   if (method === 'POST' && /^\/api\/prs\/\d+\/sonar\/post$/.test(path)) return [TIERS.githubWrite];
+  // ---- SEQUENCE DIAGRAMS (review/diagrams/routes.ts, LOCAL ONLY), anchored at BOTH ends ----
+  //   GET  /api/prs/:id/sequence-diagrams          stored rows, no model                → read
+  //   POST /api/prs/:id/sequence-diagrams/redraw   queues ONE Sonnet 5 agent run         → ai + ai_hourly
+  //   GET  /api/sequence-diagrams/story            stored rows, no model                → read
+  //   POST /api/sequence-diagrams/story/redraw     queues ONE Sonnet 5 agent run         → ai + ai_hourly
+  if (!mutating && /^\/api\/prs\/\d+\/sequence-diagrams$/.test(path)) return [TIERS.read];
+  if (method === 'POST' && /^\/api\/prs\/\d+\/sequence-diagrams\/redraw$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
+  if (!mutating && path === '/api/sequence-diagrams/story') return [TIERS.read];
+  if (method === 'POST' && path === '/api/sequence-diagrams/story/redraw') return [TIERS.ai, TIERS.aiHourly];
   if (!mutating && /^\/api\/prs\/\d+\/tracker-ticket$/.test(path)) return [TIERS.search, TIERS.read];
   if (method === 'POST' && /^\/api\/prs\/\d+\/tracker-ticket\/refresh$/.test(path)) {
     return [TIERS.search, TIERS.read];

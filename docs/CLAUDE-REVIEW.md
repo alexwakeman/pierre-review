@@ -761,6 +761,58 @@ CURRENT head — an earlier commit's is hidden whether the head is green or red
   succeeded CI review AT THE PR'S CURRENT SYNCED HEAD (`getFixableCiItemsForPr`), manual and auto
   fixes alike — never the code review's legacy `ciFailures` (§ AI Fix).
 
+## Sequence diagrams (the flow a change touches — its own process)
+
+A SEPARATE agentic process (`src/review/diagrams/`), never inside the PR review, the ticket review or
+the CI review: own table, own claim, own lane, own cap, own budget. CORE, free, LOCAL ONLY (routes in
+`registerAgenticRoutes`; the SPA gates on `me.ai`). **Sonnet 5 always** (`DIAGRAM_MODEL`); nothing on
+the wire picks the model. Wire contract: [API.md](API.md) § Sequence diagrams.
+
+- **Two kinds.** `'pr'` — ONE diagram of the process flow this PR's change touches, at its head.
+  `'story'` — when the PR is on a TRACKER ticket (core tracker, STORED rows only via
+  `tracker/ticket-source.ts`; a pasted `manual:` story never counts) with **more than one** open or
+  merged PR, ONE diagram of the whole story across every participating repository (at most
+  `SEQUENCE_DIAGRAM_STORY_MAX_PRS` = 12 members, else refused `too_many_prs`; at most 3 tickets per PR).
+- **The trigger** (`trigger.ts` `maybeDrawDiagramsAfterReview`): `claude-review/manager.ts` calls it
+  fire-and-forget after EVERY SUCCEEDED review, manual or auto. It only QUEUES and never throws, so it
+  can neither block nor fail the review. Skip rules (`fingerprint.ts` `diagramSkipReason`): no CODE
+  (stored file list through `db/code-loc.ts`'s `isNonCodeFile` — docs/config/lockfile-only ⇒ none;
+  unknown ⇒ the pipeline decides from the diff with the same classifier), a row already at this
+  fingerprint (any status — a click redraws a failure), one in flight, or the daily cap
+  (`SEQUENCE_DIAGRAM_DAILY_CAP`, default 30, review-started non-refused rows per ACCOUNT per UTC day;
+  a Redraw never counts). A no-code change is STORED as a `refused/no_code` row (no model, no cost)
+  so the pane can say why and the same head is never judged twice.
+- **Fingerprints** (clock-free): PR = sha256(version, prId, headSha) — only a push redraws it;
+  story = sha256(version, ident, sorted `prId:headSha:state`) — a member pushed, merged, joined or
+  left. ⚠ The ticket TEXT is deliberately NOT in it (rewording does not change the flow). Bump
+  `SEQUENCE_DIAGRAM_VERSION` when the prompt or validator changes what a run produces.
+- **Storage** `sequence_diagrams` (sqlite `0115` / pg `0102`): ONE row per (account, kind, subject,
+  fingerprint) — subject = the PR id or the ticket ident. A Redraw at the same fingerprint REWRITES the
+  row; a new head is a new row, so the older diagram stays readable as "Drawn for an earlier commit".
+  No FK on `pr_id`: both delete paths take PR rows; story rows (pr_id NULL) go with the account.
+  `accountScopedTables()`, erasure, `verify:isolation`.
+- **The slot pool.** A registered PEER of the ONE `REVIEW_CONCURRENCY` (`registerReviewSlotPeer`): a
+  diagram starts only when no PR-review click waits, a review-started diagram only when the PR-review
+  auto lane is empty too. Claim `${account}:${kind}:${subject}`, taken synchronously. Spend is recorded
+  (`recordAiUsage`, feature `sequence_diagram`); budget `SEQUENCE_DIAGRAM_BUDGET_USD` ($1.50), turns
+  `SEQUENCE_DIAGRAM_MAX_TURNS` (30). A restart fails what it orphaned.
+- **The pipeline.** PR: the synced head (moved since queued ⇒ `head_moved`) → the diff (no code ⇒
+  `no_code`; unreadable ⇒ `unreadable`) → a read-only worktree at the head. Story: the live members
+  (changed since queued ⇒ `head_moved`) → every member's diff → a worktree per OPEN member + ONE
+  default-branch checkout per repository for MERGED ones (the ticket review's approach) + the stored
+  ticket text. Then the agent: Read/Glob/Grep + `submit_diagram` only, `Bash` and every write tool
+  denied, the PreToolUse PATH GUARD over the checkouts, `ownToolsOnlyHook`. Every untrusted string
+  (titles, file names, diffs, ticket text) is nonce-fenced.
+- **Validation** (`validate.ts`, run INSIDE the tool — a refusal answers with what to fix, at most 3
+  attempts — and AGAIN before storing): one block of an allowed type (`SEQUENCE_DIAGRAM_TYPES`,
+  sequenceDiagram preferred), ≤ 20,000 characters / 600 lines. REFUSED: `<script`, `javascript:` /
+  `vbscript:`, `data:text/html`, `<iframe>`/`<object>`/`<embed>`/`<foreignObject>`, more than one
+  fence. STRIPPED: `%%{init}%%` directives and YAML front matter (they can change Mermaid's config,
+  securityLevel included), `click`/`link`/`links`/`href`/`callback`, `style`/`classDef`/`linkStyle`
+  lines, control characters. NEUTRALISED: `<br>` → a space, any other tag → `#lt;…#gt;` entity text.
+- **The SPA** (docs/FRONTEND.md § Sequence diagrams) renders with Mermaid at securityLevel `'strict'`,
+  plain-text labels, the app's theme tokens, and falls back to the source on a render error.
+
 ## Starting from the Open PRs tab
 
 The Open PRs cards (`OpenPrsCards`, Activity → Open PRs) carry a **Claude review** panel on every card

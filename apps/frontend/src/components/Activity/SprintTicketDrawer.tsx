@@ -24,6 +24,7 @@ import { TicketPrsSections } from '../Ticket/TicketPrsSections.js';
 import { CARD_CHIP, CARD_NEUTRAL_CHIP } from './PrCardShell.js';
 import { SprintAssessment, type SprintAssessTicket } from './SprintAssessment.js';
 import { SprintCodeCheck } from './SprintCodeCheck.js';
+import { StoryDiagramSection } from './SprintStoryDiagram.js';
 import { StackStoryCheck } from './StackStoryCheck.js';
 import { drawerReferenceGroups, referenceQuote, referenceWhy } from './sprintReferences.js';
 import { repoPickerOptions } from './sprintModel.js';
@@ -348,6 +349,10 @@ function DrawerBody({
           </div>
         )}
       </section>
+
+      {/* The whole story's sequence diagram (docs/CLAUDE-REVIEW.md § Sequence diagrams): only where agentic AI
+          runs and the ticket has more than one open or merged pull request. */}
+      {ai.enabled && anyPr != null && <StoryDiagramSection key={`diagram:${t.ident}`} ident={t.ident} />}
 
       {/* Keyed per ticket: every ticket opens with the shut groups shut (nothing is remembered). */}
       {data.references.length > 0 && <References key={t.ident} refs={data.references} onOpenTicket={onOpenTicket} />}
