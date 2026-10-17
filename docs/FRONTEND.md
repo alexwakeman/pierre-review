@@ -4490,13 +4490,22 @@ Each of these is a decision, not an oversight, and "finishing the migration" wou
 `mermaid` or `uuid` dependency, no lazy chunk). A CSS grid: a narrow layer-label column plus one
 `minmax(0, 1fr)` column per act, so it shrinks to the pane (Claude Review tab; the ticket drawer,
 `max-w-2xl` ≈ 620px of content) with NO horizontal scroll, labels wrapping and nothing under 11px.
-Only the layers some card uses get a row; empty slots stay empty. The pure fold lives in
-`lib/designGrid.ts` (`layoutDesign`, `memberForRef`, `arrowPath`; test/designGrid.test.ts).
-- **Cards**: label (13px, ≤ 2 lines), pattern chip (11px), PR badge on story designs (`#N`, or
-  `repo#N` when the story spans repositories), and the change mark as a WORD + icon (`New` + PlusIcon,
+Under 760px wide (NARROW) the layer names become a band heading above each layer instead of a side
+column, so the stages get the width. Every card sits in a PADDED slot inside wide gaps — the space
+the arrows run through. Only the layers some card uses get a row; empty slots stay empty. The pure
+fold lives in `lib/designGrid.ts` (`layoutDesign`, `memberForRef`, `routeArrow`, `prBadgeTexts`;
+test/designGrid.test.ts).
+- **Cards**: change mark, pattern chip (11px) and PR badge on one line, then the label (13px, ≤ 2
+  lines). The badge is `#N`, or `<repo part> #N` across repositories with the repos' shared word
+  prefix dropped (`backend #498`, `harness #170`). The change mark is a WORD + icon (`New` + PlusIcon,
   `Changed` + PencilIcon) AND a border style (solid / dashed / plain) — never colour alone.
-- **Arrows**: an SVG layer UNDER the cards, from the cards' DOM rects, re-measured by a
-  ResizeObserver; `aria-hidden`, and the same hand-offs are an sr-only list. Cards read row by row.
+- **Arrows**: RIGHT-ANGLED lines with arrowheads in an SVG layer under the cards, routed by
+  `routeArrow` ONLY through the slot padding and the grid gaps — out of the source's side, down the
+  column gap beside the target, into its side; a card in the way sends the line to the row gap first
+  (leaving off-centre, so it never shares a straight arrow's line). Re-measured by a ResizeObserver.
+  A labelled arrow carries a NUMBER on its longest run, keyed in one line under the grid (a 20-40px
+  gap is too narrow for words, and a label there covered card text). `aria-hidden`; the same
+  hand-offs are an sr-only list. Cards read row by row.
 - **Click-through**: a card with files is a button. One file opens it; several open a small list
   (a floating-ui popover, the ONE open popover via `claimActivePopover`), each row opening its file.
   THIS PR's file → the review tab's `onOpenInChanges` (PrDetail's `openInChanges`: Changes tab, then

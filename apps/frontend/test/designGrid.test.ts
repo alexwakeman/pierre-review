@@ -4,7 +4,7 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/designGrid.test.ts
 import { describe, expect, it } from 'vitest';
 import type { DesignDiagram, SequenceDiagramMember } from '@pierre-review/shared';
-import { CHANGE_WORD, arrowPath, layoutDesign, memberForRef, prBadgeTexts } from '../src/lib/designGrid.js';
+import { CHANGE_WORD, layoutDesign, memberForRef, prBadgeTexts, routeArrow } from '../src/lib/designGrid.js';
 
 const design = (over: Partial<DesignDiagram> = {}): DesignDiagram => ({
   acts: [
@@ -83,22 +83,33 @@ describe('memberForRef', () => {
   });
 });
 
-describe('arrowPath', () => {
-  it('side by side: leaves the right edge and stops short of the left edge', () => {
-    const g = arrowPath({ x: 0, y: 0, w: 100, h: 40 }, { x: 140, y: 0, w: 100, h: 40 });
-    expect(g.d.startsWith('M 100 20')).toBe(true);
-    expect(g.d.endsWith('137 20')).toBe(true);
-    expect(g.lx).toBe(118.5);
+describe('routeArrow', () => {
+  // Two columns of 100px cards in 120px slots, a 40px column gap and a 20px row gap.
+  const at = (row: number, col: number) => {
+    const sx = col * 160;
+    const sy = row * 80;
+    return { slot: { x: sx, y: sy, w: 120, h: 60 }, card: { x: sx + 10, y: sy + 10, w: 100, h: 40 }, row, col };
+  };
+  const none = () => false;
+  it('neighbours in a row: one straight run between the cards', () => {
+    const g = routeArrow(at(0, 0), at(0, 1), none, 40, 20);
+    expect(g.d).toBe('M 110 30 L 167 30');
+    expect([g.lx, g.ly]).toEqual([138.5, 30]);
   });
-  it('stacked: leaves the bottom edge and lands on the top', () => {
-    const g = arrowPath({ x: 0, y: 0, w: 100, h: 40 }, { x: 0, y: 80, w: 100, h: 40 });
-    expect(g.d.startsWith('M 50 40')).toBe(true);
-    expect(g.d.endsWith('50 77')).toBe(true);
+  it('another row and column: along the row, down the gap beside the target, into its side', () => {
+    const g = routeArrow(at(0, 0), at(2, 1), none, 40, 20);
+    expect(g.d).toBe('M 110 30 L 140 30 L 140 190 L 167 190');
   });
-  it('right to left points the other way', () => {
-    const g = arrowPath({ x: 140, y: 0, w: 100, h: 40 }, { x: 0, y: 0, w: 100, h: 40 });
-    expect(g.d.startsWith('M 140 20')).toBe(true);
-    expect(g.d.endsWith('103 20')).toBe(true);
+  it('a card in the way in the row: drops to the row gap first', () => {
+    const g = routeArrow(at(0, 0), at(1, 2), (r, c) => r === 0 && c === 1, 40, 20);
+    expect(g.d).toBe('M 85 50 L 85 70 L 300 70 L 300 110 L 327 110');
+  });
+  it('stacked and clear: straight down', () => {
+    expect(routeArrow(at(0, 0), at(1, 0), none, 40, 20).d).toBe('M 60 50 L 60 87');
+  });
+  it('stacked with a card between: round the column gap on the right', () => {
+    const g = routeArrow(at(0, 0), at(2, 0), (r, c) => r === 1 && c === 0, 40, 20);
+    expect(g.d).toBe('M 110 30 L 140 30 L 140 190 L 113 190');
   });
 });
 

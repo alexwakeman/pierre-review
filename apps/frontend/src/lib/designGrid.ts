@@ -92,33 +92,100 @@ interface Box {
   h: number;
 }
 
+/** One card as drawn: its own box, the padded slot around it, and its 0-based grid position. */
+export interface PlacedCard {
+  card: Box;
+  slot: Box;
+  row: number;
+  col: number;
+}
+
+const right = (b: Box): number => b.x + b.w;
+const bottom = (b: Box): number => b.y + b.h;
+const midX = (b: Box): number => b.x + b.w / 2;
+const midY = (b: Box): number => b.y + b.h / 2;
+
 /**
- * One arrow's path between two card rectangles (relative to the grid): horizontal when the cards are
- * side by side, vertical when stacked, a gentle S-curve otherwise. Ends stop a few pixels short of the
- * card so the arrowhead shows.
+ * One arrow as a RIGHT-ANGLED line that runs only through the space between cards — the padding
+ * around each card and the grid's gaps — so it never passes behind another card:
+ *
+ *   other column   out of the source's side, along its row, down the column gap beside the target,
+ *                  into the target's side; when a card sits between them in the source's row, the line
+ *                  first drops to the gap below (or above) the source and runs along that instead.
+ *   same column    straight down (or up); when a card sits between them, round the column gap to the
+ *                  right of both.
+ *
+ * Ends stop `end` px short of the card so the arrowhead shows. The label point is the middle of the
+ * longest straight run (where the numbered marker sits).
  */
-export function arrowPath(a: Box, b: Box, gap = 3): ArrowGeometry {
-  const acx = a.x + a.w / 2;
-  const acy = a.y + a.h / 2;
-  const bcx = b.x + b.w / 2;
-  const bcy = b.y + b.h / 2;
-  const sideBySide = a.x + a.w <= b.x || b.x + b.w <= a.x;
-  if (sideBySide) {
-    const right = bcx > acx;
-    const x1 = right ? a.x + a.w : a.x;
-    const x2 = right ? b.x - gap : b.x + b.w + gap;
-    const y1 = acy;
-    const y2 = bcy;
-    const mx = (x1 + x2) / 2;
-    return { d: `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`, lx: mx, ly: (y1 + y2) / 2 };
+export function routeArrow(
+  a: PlacedCard,
+  b: PlacedCard,
+  occupied: (row: number, col: number) => boolean,
+  gapX: number,
+  gapY: number,
+  end = 3,
+): ArrowGeometry {
+  const pts: Array<[number, number]> = [];
+  if (a.col !== b.col) {
+    const toRight = b.col > a.col;
+    const lo = Math.min(a.col, b.col);
+    const hi = Math.max(a.col, b.col);
+    const xc = toRight ? b.slot.x - gapX / 2 : right(b.slot) + gapX / 2;
+    const yT = midY(b.card);
+    const entryX = toRight ? b.card.x - end : right(b.card) + end;
+    let rowClear = true;
+    for (let c = lo + 1; c < hi; c++) if (occupied(a.row, c)) rowClear = false;
+    if (rowClear) {
+      const y0 = midY(a.card);
+      pts.push([toRight ? right(a.card) : a.card.x, y0], [xc, y0], [xc, yT], [entryX, yT]);
+    } else {
+      const down = b.row >= a.row;
+      const yr = down ? bottom(a.slot) + gapY / 2 : a.slot.y - gapY / 2;
+      // Leave three quarters of the way toward the target, not the middle: a straight up/down arrow
+      // uses the middle, and two lines sharing it read as one arrow from the wrong card.
+      const x0 = a.card.x + a.card.w * (toRight ? 0.75 : 0.25);
+      pts.push([x0, down ? bottom(a.card) : a.card.y], [x0, yr], [xc, yr], [xc, yT], [entryX, yT]);
+    }
+  } else {
+    const down = b.row > a.row;
+    const lo = Math.min(a.row, b.row);
+    const hi = Math.max(a.row, b.row);
+    let colClear = true;
+    for (let r = lo + 1; r < hi; r++) if (occupied(r, a.col)) colClear = false;
+    if (colClear) {
+      const x = midX(b.card);
+      pts.push([x, down ? bottom(a.card) : a.card.y], [x, down ? b.card.y - end : bottom(b.card) + end]);
+    } else {
+      const xc = right(a.slot) + gapX / 2;
+      pts.push([right(a.card), midY(a.card)], [xc, midY(a.card)], [xc, midY(b.card)], [right(b.card) + end, midY(b.card)]);
+    }
   }
-  const down = bcy > acy;
-  const y1 = down ? a.y + a.h : a.y;
-  const y2 = down ? b.y - gap : b.y + b.h + gap;
-  const x1 = acx;
-  const x2 = bcx;
-  const my = (y1 + y2) / 2;
-  return { d: `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`, lx: (x1 + x2) / 2, ly: my };
+  // Drop zero-length runs (an elbow whose two ends share a coordinate).
+  const dedup = pts.filter((p, i) => i === 0 || p[0] !== pts[i - 1]![0] || p[1] !== pts[i - 1]![1]);
+  // …and merge a point that sits on a straight line between its neighbours.
+  const clean = dedup.filter((p, i) => {
+    if (i === 0 || i === dedup.length - 1) return true;
+    const [px, py] = dedup[i - 1]!;
+    const [nx, ny] = dedup[i + 1]!;
+    return !((px === p[0] && p[0] === nx) || (py === p[1] && p[1] === ny));
+  });
+  let best = 0;
+  let lx = clean[0]![0];
+  let ly = clean[0]![1];
+  for (let i = 1; i < clean.length; i++) {
+    const [x1, y1] = clean[i - 1]!;
+    const [x2, y2] = clean[i]!;
+    const len = Math.abs(x2 - x1) + Math.abs(y2 - y1);
+    if (len > best) {
+      best = len;
+      lx = (x1 + x2) / 2;
+      ly = (y1 + y2) / 2;
+    }
+  }
+  const r1 = (n: number): number => Math.round(n * 10) / 10;
+  const d = clean.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${r1(x)} ${r1(y)}`).join(' ');
+  return { d, lx: r1(lx), ly: r1(ly) };
 }
 
 /**

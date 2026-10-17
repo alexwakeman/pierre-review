@@ -5,8 +5,10 @@
 //   LAYOUT   a CSS grid: a narrow layer-label column + one `minmax(0, 1fr)` column per act, so it
 //            shrinks to the pane (the drawer is ~620px) with NO horizontal scroll; labels wrap, and no
 //            text is smaller than 11px. Only the layers some card uses get a row (lib/designGrid.ts).
-//   ARROWS   an SVG layer UNDER the cards, computed from the cards' DOM rects and re-measured by a
-//            ResizeObserver. Purely visual (aria-hidden): the same arrows are an sr-only list.
+//   ARROWS   right-angled lines in an SVG layer under the cards, routed ONLY through the padding round
+//            each card and the grid gaps (lib/designGrid.ts routeArrow), so a line never passes behind
+//            a card; re-measured by a ResizeObserver. A labelled arrow carries a number, keyed below.
+//            Purely visual (aria-hidden): the same arrows are an sr-only list.
 //   CHANGE   new / changed / unchanged is a WORD + icon on the card AND a border style (solid, dashed,
 //            plain) — never colour alone.
 //   CLICK    a card with files is a button: one file opens it in the Changes tab; several open a small
@@ -27,7 +29,7 @@ import {
 } from '@floating-ui/react';
 import type { DesignCell, DesignDiagram, SequenceDiagramMember } from '@pierre-review/shared';
 import { claimActivePopover } from '../lib/activePopover.js';
-import { CHANGE_WORD, arrowPath, layoutDesign, memberForRef, prBadgeTexts, type ArrowGeometry } from '../lib/designGrid.js';
+import { CHANGE_WORD, layoutDesign, memberForRef, prBadgeTexts, routeArrow, type ArrowGeometry, type PlacedCard } from '../lib/designGrid.js';
 import { PencilIcon, PlusIcon } from './Icons.js';
 
 export type OpenDesignFile = (cell: DesignCell, path: string) => void;
@@ -56,6 +58,8 @@ export function DesignGrid({
   const markerId = useId().replace(/:/g, '');
   const gridRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef(new Map<string, HTMLElement>());
+  // The padded slot around each card — the space the arrows run through.
+  const slotRefs = useRef(new Map<string, HTMLElement>());
   const [paths, setPaths] = useState<Array<ArrowGeometry & { key: string; label: string | null }>>([]);
   // NARROW (the ticket drawer, ~620px): the layer names move from a side column to a band heading
   // above each layer's cards, giving the stages the width — otherwise every card wraps to six lines
@@ -74,18 +78,29 @@ export function DesignGrid({
     if (grid == null) return;
     const g = grid.getBoundingClientRect();
     setNarrow(g.width > 0 && g.width < NARROW_PX);
-    const box = (id: string) => {
-      const el = cardRefs.current.get(id);
-      if (el == null) return null;
+    const rel = (el: HTMLElement) => {
       const r = el.getBoundingClientRect();
       return { x: r.left - g.left, y: r.top - g.top, w: r.width, h: r.height };
     };
+    const css = getComputedStyle(grid);
+    const gapX = parseFloat(css.columnGap) || 0;
+    const gapY = parseFloat(css.rowGap) || 0;
+    const at = new Map(layout.cells.map((c) => [c.cell.id, c]));
+    const taken = new Set(layout.cells.map((c) => `${c.row}:${c.col}`));
+    const placed = (id: string): PlacedCard | null => {
+      const card = cardRefs.current.get(id);
+      const slot = slotRefs.current.get(id);
+      const c = at.get(id);
+      if (card == null || slot == null || c == null) return null;
+      return { card: rel(card), slot: rel(slot), row: c.row, col: c.col };
+    };
     const next: Array<ArrowGeometry & { key: string; label: string | null }> = [];
     for (const a of layout.arrows) {
-      const from = box(a.from);
-      const to = box(a.to);
+      const from = placed(a.from);
+      const to = placed(a.to);
       if (from == null || to == null) continue;
-      next.push({ ...arrowPath(from, to), key: `${a.from}>${a.to}`, label: a.label });
+      const geo = routeArrow(from, to, (r, c) => taken.has(`${r}:${c}`), gapX, gapY);
+      next.push({ ...geo, key: `${a.from}>${a.to}`, label: a.label });
     }
     setPaths(next);
   }, [layout]);
@@ -113,22 +128,30 @@ export function DesignGrid({
     <div role="group" aria-label={label} className="w-full">
       <div
         ref={gridRef}
-        className={`relative grid pr-1 ${narrow ? 'gap-x-4 gap-y-1.5' : 'gap-x-5 gap-y-3'}`}
+        className={`relative grid pr-1 ${narrow ? 'gap-x-4 gap-y-2' : 'gap-x-8 gap-y-5'}`}
         style={{
           gridTemplateColumns: narrow
             ? `repeat(${nActs}, minmax(0, 1fr))`
             : `minmax(3.25rem, 6.5rem) repeat(${nActs}, minmax(0, 1fr))`,
         }}
       >
-        <svg aria-hidden className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible text-gray-400 dark:text-gray-500">
+        <svg aria-hidden className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible text-gray-500 dark:text-gray-400">
           <defs>
-            <marker id={markerId} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M0,0 L8,4 L0,8 z" fill="currentColor" />
+            <marker id={markerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
             </marker>
           </defs>
           {paths.map((p) => (
             <g key={p.key}>
-              <path d={p.d} fill="none" stroke="currentColor" strokeWidth={1.5} markerEnd={`url(#${markerId})`} />
+              <path
+                d={p.d}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.75}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                markerEnd={`url(#${markerId})`}
+              />
             </g>
           ))}
         </svg>
@@ -173,7 +196,15 @@ export function DesignGrid({
               {r.label}
             </div>
             {r.cells.map((g) => (
-              <div key={g.cell.id} className="relative z-10 min-w-0" style={{ gridRow: rowOf(row), gridColumn: g.col + col0 }}>
+              <div
+                key={g.cell.id}
+                ref={(el) => {
+                  if (el) slotRefs.current.set(g.cell.id, el);
+                  else slotRefs.current.delete(g.cell.id);
+                }}
+                className={`relative z-10 min-w-0 ${narrow ? 'p-1.5' : 'p-2.5'}`}
+                style={{ gridRow: rowOf(row), gridColumn: g.col + col0 }}
+              >
                 <DesignCard
                   cell={g.cell}
                   stage={layout.acts[g.col]!.title}
