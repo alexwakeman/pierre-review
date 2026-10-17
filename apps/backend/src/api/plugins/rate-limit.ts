@@ -572,21 +572,15 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (path === '/api/story-health/label') return [TIERS.read];
   // THIS SPRINT (Activity → This Sprint), matched EXPLICITLY by exact path, FOLLOWING THE TOKEN:
   //   POST /api/sprint-stories/refresh               kicks a third-party tracker read  → search + read
-  //   POST /api/sprint-stories/assess                starts ONE Sonnet agent run        → ai + ai_hourly
   //   POST /api/sprint-graph/ask                     ONE Haiku completion per turn       → ai + ai_hourly
-  //   GET  /api/sprint-graph, …/ticket, PUT …/repos, …/statuses, GET …/assessments/:id, …/cancel → read
+  //   GET  /api/sprint-graph, PUT …/statuses, GET /api/ticket-story (the story view)  → read
+  // ("Check against code" — POST /api/sprint-stories/assess and its assessments/repos routes — is
+  // REMOVED; nothing answers those paths any more.)
   if (mutating && path === '/api/sprint-stories/refresh') return [TIERS.search, TIERS.read];
-  if (mutating && path === '/api/sprint-stories/assess') return [TIERS.ai, TIERS.aiHourly];
   if (mutating && path === '/api/sprint-graph/ask') return [TIERS.ai, TIERS.aiHourly];
-  if (
-    path === '/api/sprint-graph' ||
-    path === '/api/sprint-graph/ticket' ||
-    path === '/api/sprint-stories/repos' ||
-    path === '/api/sprint-stories/statuses'
-  ) {
+  if (path === '/api/sprint-graph' || path === '/api/sprint-stories/statuses' || path === '/api/ticket-story') {
     return [TIERS.read];
   }
-  if (/^\/api\/sprint-stories\/assessments\/\d+(\/cancel)?$/.test(path)) return [TIERS.read];
   // CI REVIEW (review/ci-review/routes.ts), matched EXPLICITLY by exact path for the same reason:
   //   POST /api/ci-reviews          starts an agent run (reads the head's checks + logs) → ai + ai_hourly
   //   POST /api/ci-reviews/states   batched DB read of the SYNCED head + failing names   → read

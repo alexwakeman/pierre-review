@@ -300,7 +300,7 @@ describe('helpers', () => {
 
 describe('the prompt block and the tool field', () => {
   it('the block carries the navigation rules and how to report', () => {
-    for (const kind of ['pr', 'pr_diff_only', 'ticket', 'sprint'] as const) {
+    for (const kind of ['pr', 'pr_diff_only', 'ticket'] as const) {
       const b = docsReviewPromptBlock('/lib', kind);
       expect(b).toContain('Start at INDEX.md');
       expect(b).toContain('Never read a whole document');
@@ -310,10 +310,9 @@ describe('the prompt block and the tool field', () => {
     expect(docsReviewPromptBlock('/lib', 'ticket')).toContain('CONTRADICTION');
     expect(docsReviewPromptBlock('/lib', 'pr')).toContain('docRefs');
     expect(docsReviewPromptBlock('/lib', 'pr_diff_only')).toContain('reach the library only');
-    // The ticket and sprint blocks name the library as an extra readable directory and the field's tool.
+    // The ticket block names the library as an extra readable directory and the field's tool.
     expect(docsReviewPromptBlock('/lib', 'ticket')).toContain('one more READ-ONLY directory');
     expect(docsReviewPromptBlock('/lib', 'ticket')).toContain('field of your submit_ticket_review call');
-    expect(docsReviewPromptBlock('/lib', 'sprint')).toContain('field of your submit_assessment call');
     expect(docsReviewPromptBlock('/lib', 'pr')).toContain('field of your submit_review call');
   });
 
@@ -389,19 +388,5 @@ describe('without the library, every review run is unchanged', () => {
     expect(Object.keys(buildSubmitTicketReviewShape(z, { docs: true }))).toContain('docReferences');
     const { ticketToolPolicy } = await import('../review/ticket-review/agent.js');
     expect(ticketToolPolicy().allowedTools).toEqual(['Read', 'Glob', 'Grep', 'mcp__ticket__submit_ticket_review']);
-  });
-
-  it('This Sprint’s check: the system prompt and the submit_assessment shape', async () => {
-    const p = await import('../review/sprint-assess/prompts.js');
-    for (const mode of ['plan', 'verify'] as const) {
-      const off = p.sprintAssessSystemPrompt(mode);
-      expect(p.sprintAssessSystemPrompt(mode, null)).toBe(off);
-      expect(off).not.toContain('reference library');
-      expect(p.sprintAssessSystemPrompt(mode, '/lib').startsWith(`${off}\n\n`)).toBe(true);
-    }
-    const { buildSubmitAssessmentShape } = await import('../review/sprint-assess/schema.js');
-    expect(Object.keys(buildSubmitAssessmentShape(z, 'verify'))).toEqual(['summary', 'criterionChecks', 'coverage']);
-    expect(Object.keys(buildSubmitAssessmentShape(z, 'plan'))).toEqual(['summary', 'plan']);
-    expect(Object.keys(buildSubmitAssessmentShape(z, 'plan', { docs: true }))).toEqual(['summary', 'plan', 'docReferences']);
   });
 });

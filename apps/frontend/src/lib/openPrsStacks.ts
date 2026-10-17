@@ -131,6 +131,57 @@ export function stackOpenPrs(
   return { stacks, prCount: seen.size, ticketedPrCount: ticketed };
 }
 
+// ── THE STORY VIEW'S ONE STACK ───────────────────────────────────────────────────────────────────
+// The story view (the ticket tab) draws ONE ticket through the same `TicketStack`. Its rows are every PR
+// the view's read says is on the ticket — membership is the read's, never detection's — and the stack
+// exists with NO PR at all. The header's facts are the view's ticket, with gaps filled from the PRs' own
+// ticket links (the same `fillGaps` rule as the board); each row's `alsoIn` is its OTHER tickets.
+
+export interface StoryStackInput {
+  /** The ticket (header facts; `ident` is the story view's key). */
+  ticket: CardTicket & { ident: string };
+  /** The ticket's MERGED PRs — the stack's "Merged (n)" panel. */
+  merged: readonly TicketMergedPr[];
+}
+
+/** The story view's stack id — apart from the board's `ticket:<KEY>`, so open state never crosses. */
+export const storyStackId = (ident: string): string => `story:${ident}`;
+
+export function storyStack(
+  input: StoryStackInput,
+  sortedPrs: readonly TimelinePr[],
+  ticketsOf: (pr: TimelinePr) => readonly CardTicket[],
+): StackedOpenPrs {
+  const norm = (k: string): string => canonicalTicketKey(k) ?? k.trim().toUpperCase();
+  const own = norm(input.ticket.key);
+  const ticket: CardTicket = { ...input.ticket, key: own };
+  const rows: StackRow[] = [];
+  const seen = new Set<number>();
+  let latestActivity = '';
+  for (const pr of sortedPrs) {
+    if (seen.has(pr.id)) continue;
+    seen.add(pr.id);
+    const ts = ticketsOf(pr);
+    const same = ts.find((t) => norm(t.key) === own);
+    if (same != null) fillGaps(ticket, same);
+    const alsoIn: CardTicket[] = [];
+    const keys = new Set<string>([own]);
+    for (const t of ts) {
+      const k = norm(t.key);
+      if (k === '' || keys.has(k)) continue;
+      keys.add(k);
+      alsoIn.push(t.key === k ? t : { ...t, key: k });
+    }
+    rows.push({ pr, alsoIn });
+    if (pr.updatedAt > latestActivity) latestActivity = pr.updatedAt;
+  }
+  return {
+    stacks: [{ id: storyStackId(input.ticket.ident), ticket, rows, latestActivity }],
+    prCount: seen.size,
+    ticketedPrCount: seen.size,
+  };
+}
+
 // ── THE "MERGED (n)" PANEL ───────────────────────────────────────────────────────────────────
 // Under a stack's open PRs, every MERGED PR Limn has linked to the same ticket (any repo of the
 // account on the workspace's Jira site; ONE batched `GET /api/ticket-merged-prs`). It never

@@ -1,6 +1,6 @@
 // ONE PR'S SHARE OF A TICKET REVIEW — the pure half of the PR pane's slim Story check
 // (TicketCoverage.tsx) and of the "See the whole story in Open PRs" jump (the Open PRs ticket
-// stack's Story check panel, Activity/StackStoryCheck.tsx).
+// stack's Story check panel, Activity/TicketStorySection.tsx).
 //
 // A ticket review judges the ticket across EVERY PR that names it. The PR pane shows only the part
 // that is this PR's: the criteria it delivers, and the unmet criteria / missing items that belong in

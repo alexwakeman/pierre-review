@@ -1,31 +1,21 @@
 import type { FastifyInstance } from 'fastify';
-import {
-  SPRINT_REPOS_PER_TICKET_MAX,
-  type SprintGraphResponse,
-  type SprintReposResponse,
-  type SprintStatusesResponse,
-  type SprintTicketDetailResponse,
-} from '@pierre-review/shared';
+import { type SprintGraphResponse, type SprintStatusesResponse, type TicketStoryResponse } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
-import { getSprintGraph, getSprintTicketDetail } from '../../db/sprint-graph.js';
+import { getSprintGraph, getTicketStory } from '../../db/sprint-graph.js';
 import { resolveSprintStatusLayout, sprintLayoutFor } from '../../db/sprint-status-layout.js';
 import { parseSprintStatusSettingsStrict, setSprintStatusSettings } from '../../db/sprint-status-settings.js';
-import { suggestSprintRepos, suggestTicketOf } from '../../db/sprint-repo-suggest.js';
-import { readSprintTicket } from '../../db/sprint-store.js';
-import { setSprintRepos } from '../../db/sprint-ticket-repos.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 // THIS SPRINT (its own Activity rail line) — the CORE routes (both modes; docs/API.md § This sprint).
-// Nothing agentic lives here: "Check against code" is review/sprint-assess/routes.ts and "Ask Claude
-// about this sprint" review/sprint-ask/routes.ts (local only). Nothing here, or anywhere, writes to a
+// Nothing agentic lives here: "Ask Claude about this sprint" is review/sprint-ask/routes.ts (local
+// only). Nothing here, or anywhere, writes to a
 // tracker. FREE on every tier — no `periodReports` 402 (it left Reports). The workspace goes
 // through `resolveWorkspaceScope`: absent / unknown / another tenant's id ⇒ the caller's Default,
 // never a 404.
 //
 //   GET /api/sprint-graph?workspace=<id>                the graph (DB only; stamps the view, kicks a due read) → read
-//   GET /api/sprint-graph/ticket?workspace=<id>&ident=  the drawer for one node (DB only)                    → read
-//   PUT /api/sprint-stories/repos                       replace ONE ticket's accepted candidate repos        → read
+//   GET /api/ticket-story?workspace=<id>&ident=         the story view: one ticket's sprint text + brief     → read
 //   PUT /api/sprint-stories/statuses                    replace the workspace's status buckets               → read
 
 const IDENT_MAX = 600;
@@ -42,9 +32,9 @@ export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
     return getSprintGraph(accountId, scope.workspaceId, { aiEnabled: config.aiEnabled, now: Date.now(), pathsCanRun });
   });
 
-  // The drawer: one node's brief, references, PRs (the ticket tab's fold), repos and assessment. An
-  // ident that is not a node answers `found: false` — never a 404.
-  app.get('/api/sprint-graph/ticket', async (req, reply): Promise<SprintTicketDetailResponse | ErrorBody> => {
+  // The STORY VIEW's lean read: one ticket's stored sprint text and its CURRENT brief (no graph fold,
+  // no PRs — those are GET /api/ticket-prs). Not one Limn holds → `found: false`, never a 404.
+  app.get('/api/ticket-story', async (req, reply): Promise<TicketStoryResponse | ErrorBody> => {
     const q = req.query as { workspace?: string; ident?: string };
     const ident = typeof q.ident === 'string' ? q.ident : '';
     if (ident === '' || ident.length > IDENT_MAX) {
@@ -53,13 +43,7 @@ export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
     }
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
-    // LAZY: tracker/runtime.ts opens the DB at import.
-    const [{ trackerContext }, { ticketPrs }] = await Promise.all([import('../../tracker/runtime.js'), import('../../tracker/ticket-prs.js')]);
-    return getSprintTicketDetail(accountId, scope.workspaceId, ident, {
-      aiEnabled: config.aiEnabled,
-      now: Date.now(),
-      prsOf: (i) => ticketPrs(trackerContext(), accountId, scope.workspaceId, i),
-    });
+    return getTicketStory(accountId, scope.workspaceId, ident, { aiEnabled: config.aiEnabled });
   });
 
   // The status buckets override (shared `SprintStatusesUpdate`). ⚠ Status names belong to ONE
@@ -90,55 +74,5 @@ export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
       (await sprintLayoutFor(accountId, scope.workspaceId)) ??
       resolveSprintStatusLayout({ autoOrder: null, settings, tickets: [], evidence: new Map() });
     return { workspaceId: scope.workspaceId, settings: statusLayout.settings, statusLayout };
-  });
-
-  app.put('/api/sprint-stories/repos', async (req, reply): Promise<SprintReposResponse | ErrorBody> => {
-    const body = (req.body ?? {}) as { workspaceId?: unknown; ident?: unknown; repoIds?: unknown };
-    if (
-      typeof body.workspaceId !== 'number' ||
-      !Number.isSafeInteger(body.workspaceId) ||
-      typeof body.ident !== 'string' ||
-      body.ident === '' ||
-      body.ident.length > IDENT_MAX ||
-      !Array.isArray(body.repoIds) ||
-      !body.repoIds.every((id) => typeof id === 'number' && Number.isSafeInteger(id) && id > 0)
-    ) {
-      reply.status(400);
-      return { error: 'bad_request', message: 'Send a workspaceId, a ticket and a list of repo ids.' };
-    }
-    const repoIds = [...new Set(body.repoIds as number[])];
-    if (repoIds.length > SPRINT_REPOS_PER_TICKET_MAX) {
-      reply.status(400);
-      return { error: 'too_many', message: `Choose at most ${SPRINT_REPOS_PER_TICKET_MAX} repos.` };
-    }
-    const ident = body.ident;
-    const accountId = accountIdOf(req);
-    const scope = await resolveWorkspaceScope(accountId, body.workspaceId);
-    const ticket = await readSprintTicket(accountId, scope.workspaceId, ident);
-    if (ticket == null) {
-      reply.status(404);
-      return { error: 'no_ticket', message: 'This ticket is not in the sprint list.' };
-    }
-    // 'suggested' = the id was one of the ticket's current suggestions (a one-click accept).
-    // Computed with NO accepted exclusion, so a kept repo that was accepted from a suggestion stays
-    // 'suggested' across a replace.
-    const suggested = (await suggestSprintRepos(accountId, scope.workspaceId, [suggestTicketOf(ticket)], new Map())).get(ident) ?? [];
-    const suggestedIds = new Set(suggested.map((s) => s.repoId));
-    const res = await setSprintRepos(accountId, scope.workspaceId, ident, repoIds, (id) =>
-      suggestedIds.has(id) ? 'suggested' : 'manual',
-    );
-    if (!res.ok) {
-      reply.status(res.error === 'no_ticket' ? 404 : 400);
-      return {
-        error: res.error,
-        message:
-          res.error === 'bad_repo'
-            ? 'Choose repos from this workspace.'
-            : res.error === 'too_many'
-              ? `Choose at most ${SPRINT_REPOS_PER_TICKET_MAX} repos.`
-              : 'This ticket is not in the sprint list.',
-      };
-    }
-    return { workspaceId: scope.workspaceId, ident, accepted: res.accepted };
   });
 }

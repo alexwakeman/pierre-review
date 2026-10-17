@@ -44,7 +44,7 @@ import {
   splitPersonRoomKey,
   writeSplitAssignee,
 } from '../src/components/Activity/sprintGraphModel.js';
-import type { SprintGraphEdge, SprintGraphNode, SprintGraphPr, SprintTicketReference } from '@pierre-review/shared';
+import type { SprintGraphEdge, SprintGraphNode, SprintGraphPr } from '@pierre-review/shared';
 import {
   BADGE_MIN_SCREEN_R,
   BADGE_R,
@@ -109,7 +109,6 @@ import {
   filterOptions,
   filtersActive,
   fitTransform,
-  groupReferences,
   labelOpacity,
   neighbourhood,
   nodeAriaLabel,
@@ -815,25 +814,6 @@ describe('view', () => {
   });
   it('the star field is fixed (seeded)', () => {
     expect(starField(5)).toEqual(starField(5));
-  });
-});
-
-describe('references', () => {
-  const ref = (key: string, relation: SprintTicketReference['relation'], done: boolean | null = false): SprintTicketReference => ({
-    ident: `jira:x#${key}`,
-    key,
-    title: null,
-    status: null,
-    done,
-    relation,
-    quote: null,
-    inGraph: true,
-    url: null,
-  });
-  it('groups blockers first, loose mentions last, done last within a group', () => {
-    const g = groupReferences([ref('A-2', 'context'), ref('A-9', 'depends_on', true), ref('A-3', 'blocked_by'), ref('A-10', 'depends_on')]);
-    expect(g.map((x) => x.label)).toEqual(['Blocked by', 'Depends on', 'Related']);
-    expect(g[1]!.refs.map((r) => r.key)).toEqual(['A-10', 'A-9']);
   });
 });
 

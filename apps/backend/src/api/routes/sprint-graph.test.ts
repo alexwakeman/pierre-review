@@ -1,6 +1,6 @@
 // Activity → This Sprint as a GRAPH — the CORE routes (api/routes/sprint-stories.ts) and the graph fold's
 // DB half (db/sprint-graph.ts), on a THROWAWAY sqlite DB with a real Fastify instance. Pinned:
-//   1. FREE: no `periodReports` 402 (GET graph, GET ticket, PUT repos) — This Sprint left Reports.
+//   1. FREE: no `periodReports` 402 (GET graph, GET ticket-story) — This Sprint left Reports.
 //   2. Another tenant's workspace id resolves to the caller's Default (never theirs, never a 404).
 //   3. Nodes: the sprint (stage, then key) then GHOSTS reached through an EDGE (a blocking tracker
 //      link, a CURRENT brief's depends_on / concurrent / builds_on / supersedes) — chains followed
@@ -12,9 +12,9 @@
 //   6. PRs: every PR on the ticket in THIS workspace's repos (open first), draft + CI.
 //   7. A view stamps `sprint_reads.viewed_at` and kicks a due read; a stored read of another site is
 //      reset.
-//   8. The drawer: brief, references (links + brief, `inGraph`), the ticket tab's PR fold, repos and
-//      `found: false` for a non-node.
-//   9. PUT /api/sprint-stories/repos: replace, too_many, bad_repo, no_ticket, bad_request.
+//   8. The story view's lean read (GET /api/ticket-story): a sprint ticket's facts, text and CURRENT
+//      brief; a ghost's 'pending'; a ticket that left the sprint says nothing will brief it ('none');
+//      `found: false` for a ticket Limn holds no text for, another tenant's, or an unparseable ident.
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
@@ -221,14 +221,11 @@ describe('no Pro gate (This Sprint is free)', () => {
     try {
       for (const r of [
         { method: 'GET' as const, url: '/api/sprint-graph' },
-        { method: 'GET' as const, url: `/api/sprint-graph/ticket?ident=${encodeURIComponent(id('ENG-1'))}` },
+        { method: 'GET' as const, url: `/api/ticket-story?ident=${encodeURIComponent(id('ENG-1'))}` },
       ]) {
         const res = await app.inject(r);
         expect(res.statusCode).toBe(200);
       }
-      // A ticket that is not in the list: the route ran (404 no_ticket), it was not paywalled.
-      const put = await app.inject({ method: 'PUT', url: '/api/sprint-stories/repos', payload: { workspaceId: ownWs, ident: 'x', repoIds: [] } });
-      expect(put.statusCode).not.toBe(402);
     } finally {
       setCaps?.(fullCaps);
     }
@@ -288,7 +285,7 @@ describe('GET /api/sprint-graph', () => {
     ]);
     expect(body.briefs).toEqual({ current: 3, pending: 5 });
     expect(body.statusLayout.order.map((o: any) => o.name)).toEqual(['To Do', 'In Progress', 'Done']);
-    expect(body.repos).toEqual([{ repoId: ownRepo, fullName: 'acme/web' }]);
+    expect('repos' in body).toBe(false);
     expect(kicks).toContainEqual([1, ownWs]);
     expect(await store.readSprintRead(1, ownWs)).not.toBeNull();
     expect(await store.readSprintRead(1, foreignWs)).toBeNull();
@@ -506,88 +503,42 @@ describe('the code cards (signals) on the graph', () => {
   });
 });
 
-describe('GET /api/sprint-graph/ticket', () => {
+describe('GET /api/ticket-story', () => {
   const get = (ident: string, ws = ownWs) =>
-    app.inject({ method: 'GET', url: `/api/sprint-graph/ticket?workspace=${ws}&ident=${encodeURIComponent(ident)}` });
+    app.inject({ method: 'GET', url: `/api/ticket-story?workspace=${ws}&ident=${encodeURIComponent(ident)}` });
 
-  it('a sprint ticket: brief, references, the ticket tab PR fold, repos', async () => {
+  it('a sprint ticket: its facts, its text and its CURRENT brief', async () => {
     const res = await get(id('ENG-1'));
     expect(res.statusCode).toBe(200);
     const body = res.json() as any;
-    expect(body.found).toBe(true);
-    expect(body.ticket).toMatchObject({ key: 'ENG-1', ghost: false, depth: 0, stage: 'not_started' });
-    expect(body.briefState).toBe('current');
+    expect(body).toMatchObject({ workspaceId: ownWs, ident: id('ENG-1'), found: true, briefState: 'current' });
+    expect(body.ticket).toMatchObject({
+      key: 'ENG-1',
+      title: 'Story ENG-1',
+      provider: 'jira',
+      assignee: { name: 'Amy', avatarUrl: null },
+      epic: { key: 'ENG-100', title: 'Baskets' },
+      inSprint: true,
+    });
     expect(body.brief).toMatchObject({ summary: 'Brief ENG-1', criteria: [{ n: 1, text: 'The basket survives a reload' }], criteriaDerived: false });
-    expect(body.references.map((r: any) => [r.key, r.relation, r.inGraph, r.status])).toEqual([
-      ['ENG-7', 'depends_on', true, 'In Progress'],
-      ['ENG-2', 'concurrent', true, 'In Progress'],
-      // Out of scope: listed in the drawer, no node.
-      ['ENG-60', 'out_of_scope', false, 'In Progress'],
-    ]);
-    // Each reference carries the brief's reason (null when it gave none).
-    expect(body.references.map((r: any) => [r.key, r.why])).toEqual([
-      ['ENG-7', 'Needs the saved-basket API ENG-7 adds.'],
-      ['ENG-2', null],
-      ['ENG-60', null],
-    ]);
-    // Each reference carries its assignee from the stored rows (null = unassigned).
-    expect(body.references.map((r: any) => [r.key, r.assignee])).toEqual([
-      ['ENG-7', null],
-      ['ENG-2', { name: 'Zed', avatarUrl: null }],
-      ['ENG-60', null],
-    ]);
-    expect(body.prs.found).toBe(true);
-    expect(body.prs.open.map((p: any) => p.number)).toEqual([12]);
-    expect(body.prs.merged.map((p: any) => p.number)).toEqual([11]);
-    expect(body.repos).toEqual({ accepted: [{ repoId: ownRepo, fullName: 'acme/web' }], suggested: [], defaulted: true });
-    expect(body.assessment).toBeNull();
+    expect(body.story.acceptanceCriteria).toContain('Basket survives a reload');
+    // Lean: no PRs, references, repos or assessment ride this read.
+    for (const k of ['prs', 'references', 'repos', 'assessment']) expect(k in body).toBe(false);
   });
 
-  it('a ghost: no repos, links as references; a non-node and a foreign ident answer found:false', async () => {
+  it('a ghost is pending; a ticket that left the sprint says nothing will brief it; the rest is found:false', async () => {
     const ghost = (await get(id('ENG-70'))).json() as any;
-    expect(ghost).toMatchObject({ found: true, repos: null, assessment: null, briefState: 'pending', brief: null });
-    expect(ghost.ticket).toMatchObject({ key: 'ENG-70', ghost: true, depth: 2 });
-    expect(ghost.references.map((r: any) => [r.key, r.relation, r.inGraph])).toEqual([['ENG-700', 'blocked_by', true]]);
-    const eng3 = (await get(id('ENG-3'))).json() as any;
-    expect(eng3.references.map((r: any) => [r.key, r.relation, r.done])).toEqual([
-      ['ENG-8', 'blocked_by', false],
-      ['ENG-6', 'linked', true],
-    ]);
-    // A ticket Limn never read (ENG-6, only a tracker link) makes no assignee claim at all.
-    expect(eng3.references.map((r: any) => [r.key, 'assignee' in r])).toEqual([
-      ['ENG-8', true],
-      ['ENG-6', false],
-    ]);
-    for (const ident of [id('ENG-60'), id('ENG-5'), id('ENG-9'), 'not an ident']) {
-      const r = (await get(ident)).json() as any;
-      expect(r).toMatchObject({ found: false, ticket: null, brief: null, references: [] });
+    expect(ghost).toMatchObject({ found: true, briefState: 'pending', brief: null });
+    expect(ghost.ticket).toMatchObject({ key: 'ENG-70', epic: null, inSprint: false });
+    const left = (await get(id('ENG-5'))).json() as any;
+    expect(left).toMatchObject({ found: true, briefState: 'none', brief: null });
+    expect(left.ticket.inSprint).toBe(false);
+    // ENG-6: only a tracker link (no row). ENG-9: another tenant's. And an unparseable ident.
+    for (const ident of [id('ENG-6'), id('ENG-9'), 'not an ident']) {
+      expect((await get(ident)).json()).toMatchObject({ found: false, ticket: null, brief: null, story: null, briefState: 'none' });
     }
-    expect((await app.inject({ method: 'GET', url: '/api/sprint-graph/ticket' })).statusCode).toBe(400);
-  });
-});
-
-describe('PUT /api/sprint-stories/repos', () => {
-  const put = (payload: unknown) => app.inject({ method: 'PUT', url: '/api/sprint-stories/repos', payload: payload as any });
-  const repos = async () =>
-    ((await app.inject({ method: 'GET', url: `/api/sprint-graph/ticket?ident=${encodeURIComponent(id('ENG-1'))}` })).json() as any).repos;
-
-  it('replaces the accepted set; the drawer then shows it', async () => {
-    const res = await put({ workspaceId: ownWs, ident: id('ENG-1'), repoIds: [ownRepo] });
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ workspaceId: ownWs, ident: id('ENG-1'), accepted: [{ repoId: ownRepo, fullName: 'acme/web' }] });
-    expect(await repos()).toMatchObject({ accepted: [{ repoId: ownRepo, fullName: 'acme/web' }], defaulted: false });
-  });
-
-  it('refusals', async () => {
-    expect((await put({ workspaceId: ownWs, ident: id('ENG-1'), repoIds: [1, 2, 3, 4, 5, 6, 7] })).json().error).toBe('too_many');
-    const foreign = await put({ workspaceId: foreignWs, ident: id('ENG-1'), repoIds: [foreignRepo] });
-    expect(foreign.statusCode).toBe(400);
-    expect(foreign.json().error).toBe('bad_repo');
-    const missing = await put({ workspaceId: ownWs, ident: id('NOPE-1'), repoIds: [] });
-    expect(missing.statusCode).toBe(404);
-    expect(missing.json().error).toBe('no_ticket');
-    expect((await put({ workspaceId: 'x', ident: id('ENG-1'), repoIds: [] })).statusCode).toBe(400);
-    expect((await put({ workspaceId: ownWs, ident: id('ENG-1'), repoIds: ['1'] })).statusCode).toBe(400);
-    expect((await repos()).accepted).toEqual([{ repoId: ownRepo, fullName: 'acme/web' }]);
+    // Another tenant's workspace id lands on the caller's Default (never theirs).
+    expect(((await get(id('ENG-1'), foreignWs)).json() as any).workspaceId).toBe(ownWs);
+    expect((await app.inject({ method: 'GET', url: '/api/ticket-story' })).statusCode).toBe(400);
   });
 });

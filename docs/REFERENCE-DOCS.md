@@ -209,7 +209,7 @@ built — `reviewDocsFor(accountId, workspaceId)` (context.ts) returns the folde
 |---|---|---|---|
 | Claude Review | `claude-review/manager.ts` → `review/agent.ts` | check the change against the rules and requirements the library documents (and the story the PR names); a finding that rests on the library carries its section links in `docRefs` | `claude_reviews.doc_references`; a finding's checked links in `claude_review_findings.doc_citations` |
 | Ticket review (Story check) | `ticket-review/manager.ts` → `ticket-review/agent.ts` | per story: the passages that bear on it, every CONTRADICTION between the story / criteria / code and the library, and support where the library backs it | `ticket_reviews.assessment.references` (inside the existing JSON) |
-| This Sprint's "Check against code" | `sprint-assess/manager.ts` → `sprint-assess/agent.ts` | the same, against the default branch | `sprint_assessments.body_json.references` |
+| ~~This Sprint's "Check against code"~~ | REMOVED 2026-10-18 | — | old rows keep `sprint_assessments.body_json.references` (dormant table) |
 
 **Not** the sprint brief, the themes or the sprint builder: the brief and themes are one-shot, TOOL-LESS
 Haiku calls (`cheapComplete`) and the builder's only tool is `submit_paths`; none has files to walk, and
@@ -291,7 +291,7 @@ the sprint brief / story passes (above).
 (upload → build → the three levels with a FAKE agent, path + tenancy refusals, the chat's citations,
 remove, erasure deletes files) · `review-refs.test.ts` (the reference check — a quote not in its section,
 a link outside the library, header-only quotes, anchors; the OFF ⇒ unchanged pins) ·
-`review/path-guard.test.ts` (read-only roots) · `review/claude-review/docs-pipeline.test.ts` and
-`review/sprint-assess/manager-db.test.ts` (on/off end to end). Not covered by a test: the ticket review's
+`review/path-guard.test.ts` (read-only roots) · `review/claude-review/docs-pipeline.test.ts` (on/off
+end to end). Not covered by a test: the ticket review's
 pipeline with the library (no pipeline test exists for it; its builders are pinned), and a real Word file through mammoth, a real agent
 run (PDF or sections), the SSE stream's event order.

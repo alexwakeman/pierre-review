@@ -47,6 +47,7 @@ import type {
   SecurityCard,
   TicketLinksResponse,
   TicketMergedPrsResponse,
+  TicketStoryResponse,
   WorkspaceTrackerSettings,
   WorkspaceSonarSettings,
   SonarPrResponse,
@@ -537,7 +538,6 @@ const SPRINT_GRAPH: SprintGraphResponse = {
   source: { kind: 'sprint', provider: 'jira', names: ['Sprint 42'] },
   read: { readAt: iso(0.01), checkedAt: iso(0.01), error: null, truncated: false },
   aiEnabled: true,
-  repos: [{ repoId: REPO.id, fullName: REPO.fullName }],
   themes: null,
   paths: null,
   pathsStatus: { state: 'none', stale: false, lastAttemptAt: null, failure: null },
@@ -1123,6 +1123,18 @@ export async function installMockApi(page: Page): Promise<void> {
         return json(route, { prs: [], titlesComplete: true } satisfies TicketLinksResponse);
       }
       if (path.endsWith('/api/sprint-graph')) return json(route, SPRINT_GRAPH);
+      // The story view's lean read (a story tab restored from the URL asks it at boot).
+      if (path.endsWith('/api/ticket-story')) {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          ident: new URL(route.request().url()).searchParams.get('ident') ?? '',
+          found: false,
+          ticket: null,
+          briefState: 'none',
+          brief: null,
+          story: null,
+        } satisfies TicketStoryResponse);
+      }
       if (path.endsWith('/api/merged-prs')) return json(route, MERGED_PRS);
       if (path.endsWith('/api/ticket-merged-prs')) {
         return json(route, { workspaceId: WORKSPACE.id, tickets: [] } satisfies TicketMergedPrsResponse);

@@ -1,12 +1,7 @@
 import type { CiStatus, JiraStatusCategory, TrackerProvider } from './types.js';
 import type { StoryReferenceRelation } from './story-health.js';
-import type { TicketPrsResponse } from './ticket-prs.js';
 import type {
-  SprintAssessmentCurrency,
-  SprintAssessmentRecord,
   SprintReadState,
-  SprintRepoRef,
-  SprintRepoSuggestion,
   SprintSource,
   SprintStage,
   SprintStatusLayout,
@@ -17,7 +12,7 @@ import type {
 // Reports (`periodReports`): every route 402s before any DB work.
 //
 //   GET  /api/sprint-graph?workspace=<id>                 → SprintGraphResponse    (DB only, stamps the view)
-//   GET  /api/sprint-graph/ticket?workspace=<id>&ident=…  → SprintTicketDetailResponse (DB only)
+//   GET  /api/ticket-story?workspace=<id>&ident=…         → TicketStoryResponse (ticket-prs.ts; DB only)
 //   POST /api/sprint-graph/ask                            → SprintAskResponse      (Haiku, LOCAL ONLY)
 //
 //   • NODES are the sprint's tickets plus GHOSTS: tickets outside the sprint that a sprint ticket (or a
@@ -25,7 +20,7 @@ import type {
 //     hops, ≤ SPRINT_GHOST_MAX tickets). Never a tracker call on a view.
 //   • EDGES come from two places: a BLOCKING tracker link (`source: 'tracker'`, kind `depends_on`) and
 //     the ticket's BRIEF — Haiku's reading of which tickets the text names and how (`source: 'text'`,
-//     the rubric-4 relation vocabulary). `out_of_scope` and `context` draw NO edge (drawer only).
+//     the rubric-4 relation vocabulary). `out_of_scope` and `context` draw NO edge.
 //     Direction is always FROM the ticket TO what it depends on / runs alongside / builds on / replaces.
 //   • THE BRIEF (`SprintBrief`) is a cheap Haiku pass per ticket after each sprint read: a short
 //     summary, the acceptance criteria ITEMISED one short sentence each (DERIVED from the description
@@ -77,7 +72,7 @@ export const SPRINT_EDGE_LABEL: Record<SprintEdgeKind, string> = {
   supersedes: 'Replaces',
 };
 
-/** Is this reference relation one the graph draws? (`out_of_scope` / `context` are drawer-only.) */
+/** Is this reference relation one the graph draws? (`out_of_scope` / `context` draw no edge.) */
 export function isSprintEdgeRelation(r: string): r is SprintEdgeKind {
   return (SPRINT_EDGE_KINDS as readonly string[]).includes(r);
 }
@@ -99,7 +94,7 @@ export interface SprintBriefReference {
   relation: StoryReferenceRelation;
   quote: string | null;
   /** One plain sentence (≤ SPRINT_BRIEF_CAPS.why) on why this ticket names that one — what it needs
-   *  from it or shares with it. null when the text gives no reason (the drawer then shows none). Always
+   *  from it or shares with it. null when the text gives no reason. Always
    *  set by the server since SPRINT_BRIEF_VERSION 3; optional so older literals still type. */
   why?: string | null;
 }
@@ -237,10 +232,8 @@ export interface SprintGraphResponse {
   ghostsTruncated: boolean;
   /** Briefs: how many nodes have a current one / are waiting for one. */
   briefs: { current: number; pending: number };
-  /** `MeResponse.ai.enabled` on the server: briefs, "Check against code" and Ask exist. */
+  /** `MeResponse.ai.enabled` on the server: briefs, the sprint builder and Ask exist. */
   aiEnabled: boolean;
-  /** The workspace's repos, for the picker. */
-  repos: SprintRepoRef[];
   /** The sprint's THEMES (largest first), from the CURRENT theme pass; null when there is none (AI
    *  off, not run yet, or the sprint changed since and the next pass has not finished). */
   themes: SprintTheme[] | null;
@@ -500,7 +493,7 @@ export interface SprintPerson {
   reviewsWaiting: number | null;
 }
 
-// ── The drawer ───────────────────────────────────────────────────────────────────────────────────
+// ── References (the graph's edge popovers) ───────────────────────────────────────────────────────
 
 /** How a referenced ticket is tied to the opened one: a brief relation, or a tracker link
  *  ('blocked_by' = a blocking link, 'linked' = any other). */
@@ -518,49 +511,12 @@ export interface SprintTicketReference {
   /** The brief's one sentence on why the two are tied (a reference's `why`, or a tracker link's
    *  reason); null when the brief gave none or there is no current brief. */
   why: string | null;
-  /** It is a node of the graph (the drawer can move to it). */
+  /** It is a node of the graph (the graph can move to it). */
   inGraph: boolean;
   url: string | null;
   /** Its assignee, from the stored sprint / referenced-ticket rows: null = unassigned; ABSENT = Limn has
    *  not read that ticket (never shown as "Unassigned"). */
   assignee?: { name: string; avatarUrl: string | null } | null;
-}
-
-/** GET /api/sprint-graph/ticket?workspace=<id>&ident=<ident> — Pro (402), DB ONLY. An ident that is not
- *  a node of this workspace's graph answers `found: false` with nulls — never a 404. The ticket review
- *  (per-criterion delivery) is the existing `POST /api/ticket-reviews/states` + `GET
- *  /api/ticket-reviews/:id`, keyed by the same ident. */
-export interface SprintTicketDetailResponse {
-  workspaceId: number;
-  ident: string;
-  found: boolean;
-  ticket: {
-    ident: string;
-    key: string;
-    title: string;
-    url: string | null;
-    provider: TrackerProvider;
-    ghost: boolean;
-    depth: number;
-    status: { name: string; category: JiraStatusCategory | null } | null;
-    stage: SprintStage | null;
-    issueType: string | null;
-    assignee: { name: string; avatarUrl: string | null } | null;
-    epic: { key: string; title: string | null } | null;
-  } | null;
-  briefState: SprintBriefState;
-  /** The CURRENT brief; null when pending / off. */
-  brief: SprintBrief | null;
-  /** Every ticket it names or links (brief references + tracker links), deduped, itself excluded. */
-  references: SprintTicketReference[];
-  /** The SAME fold as the ticket tab (`GET /api/ticket-prs`): `TimelinePr` rows the Open PRs cards
-   *  draw. Empty lists for a ticket with no PR. */
-  prs: TicketPrsResponse;
-  /** Sprint tickets only (null for a ghost): the accepted + suggested repos for "Check against code". */
-  repos: { accepted: SprintRepoRef[]; suggested: SprintRepoSuggestion[]; defaulted: boolean } | null;
-  /** The latest "Check against code" run of any status; sprint tickets only. */
-  assessment: { record: SprintAssessmentRecord; currency: SprintAssessmentCurrency } | null;
-  aiEnabled: boolean;
 }
 
 // ── Ask Claude about this sprint ─────────────────────────────────────────────────────────────────

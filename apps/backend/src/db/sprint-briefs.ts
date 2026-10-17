@@ -18,7 +18,7 @@ import { acceptanceSectionOf, extractCriteria } from './story-criteria.js';
 // of what the brief pass is SENT (`sprintBriefInput`) and therefore of which stored brief is CURRENT:
 // a brief counts only while its `text_hash` equals today's hash of today's text AND its
 // `brief_version` is SPRINT_BRIEF_VERSION. The pass (review/sprint-briefs/, local + agentic) writes;
-// the graph (db/sprint-graph.ts) and "Check against code" read.
+// the graph (db/sprint-graph.ts) and the story view (`getTicketStory`) read.
 //
 //   • THE CRITERIA SENT are the ONE extractor's (`extractCriteria`) over the tracker's criteria field,
 //     else the description's "Acceptance criteria" section — the same rule as the story labels. With

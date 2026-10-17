@@ -3,8 +3,8 @@ import { resolveStoryTarget, storyTargetExpired, storyTargetFor, type StoryTarge
 import { useOpenPrsView } from './openPrsView.js';
 import { useFilters } from './filters.js';
 
-// The Open PRs ticket stacks' "Story check" panel: which stacks have it OPEN, and a pending jump to
-// one from the PR pane ("See the whole story in Open PRs"). Collapsed by default; remembered for
+// The Open PRs ticket stacks' Story section (Activity/TicketStorySection.tsx): which stacks have it
+// OPEN, and a pending jump to one from the PR pane ("See the whole story in Open PRs"). Collapsed by default; remembered for
 // the session only (in memory, never storage or the URL), like the "Merged (n)" panel. The jump is
 // a TRANSIENT request the Open PRs list answers once its stack is on the page (`takeTarget`).
 

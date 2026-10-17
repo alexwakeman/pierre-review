@@ -916,7 +916,7 @@ Haiku 5.5). Details:
   Other agents read it via `docsContextFor(...).usable` (folds the per-workspace OFF-by-default switch).
   SPA: Activity → **Docs** (`?activityRepo=docs`, rail entry on `me.ai.enabled` only); ⚠ every link in
   it goes through ONE resolver, `lib/referenceDocs.ts` `resolveDocLink` ([docs/FRONTEND.md](docs/FRONTEND.md)
-  § Activity → Docs). ⚠ **In reviews** (PR review, ticket review, "Check against code"; sqlite `0117` / pg
+  § Activity → Docs). ⚠ **In reviews** (PR review, ticket review; sqlite `0117` / pg
   `0104`): the library is a READ-ONLY path-guard root (`readOnlyRoots`), every `docReferences` entry is
   CHECKED by `reference-docs/review-refs.ts` (link = a built section of THAT workspace, quote in it) or
   dropped, and switch OFF ⇒ prompt, tools and shape byte-for-byte unchanged (pinned in `review-refs.test.ts`).
@@ -1225,7 +1225,7 @@ last 13 weeks' stories (`db/story-health.ts`); This Sprint makes BRIEFS, not lab
 
 **Activity → This Sprint** (FREE — its own rail line under Pending, `?activityRepo=sprint`; legacy
 `?insightsTab=sprint|merged` lands there): the GRAPH and "Merged so far" (`?sprintTab=merged`).
-`GET /api/sprint-graph` + `…/ticket` (DB only): nodes = sprint tickets + GHOSTS
+`GET /api/sprint-graph` (DB only): nodes = sprint tickets + GHOSTS
 (≤ 3 hops / 60), + PRs, each placed in the workspace's STATUS BUCKETS (`db/sprint-status-layout.ts`;
 user-defined name + meaning, meanings non-decreasing; `stage` = the bucket's meaning) and given ONE
 `column` in the fold — its bucket, or the derived "Merged, not signed off" (all PRs merged, none open);
@@ -1239,9 +1239,15 @@ code-built map: only listed keys, ⚠ NO digit in its text, hash blind to the da
 `SPRINT_PATHS_DAILY_CAP`; the LAST answer is shown (the hash is the re-bill gate). The response also
 carries CODE's `pace` and `people` (shared `sprintMembers`; `reviewsWaiting` null when unmapped, never 0).
 The Haiku story pass is retired (`sprint_story` dormant). Filters HIDE (ghosts follow the section filter only); Group by
-adds Dependencies (chains, left to right). "Check against code" (Sonnet 5) and "Ask Claude" (Haiku)
-are LOCAL, on `me.ai`. ⚠ No chips, findings, checks or write-back.
-[docs/FRONTEND.md](docs/FRONTEND.md) § Activity → This Sprint · [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint briefs / paths.
+adds Dependencies (chains, left to right). "Ask Claude" (Haiku) is LOCAL, on `me.ai`. ⚠ No chips,
+findings, checks or write-back. ⚠ **A ticket opens the STORY VIEW** — the ticket tab (chip "KEY · Story",
+internal kind/key `ticket:<ident>` kept), ONLY through `useOpenStory()`: the SAME Open PRs ticket stack
+(`OpenPrsCards` `story`, never a copy), drawn even with no PR, its Story section OPEN. The Story section
+(`TicketStorySection`, collapsed in Open PRs, body mounted only when open) is: the ticket review's result,
+else the CURRENT brief (`GET /api/ticket-story`, lean, DB only), then the ticket as written, then the
+design (`me.ai` + ≥ 1 PR) — NO dependency or reference cards. The drawer and "Check against code" are
+REMOVED (`sprint_assessments` / `sprint_ticket_repos` DORMANT, never dropped).
+[docs/FRONTEND.md](docs/FRONTEND.md) § Activity → This Sprint, § The story view · [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint briefs / paths.
 
 **The People report** (Reports → People) — a multi-select picker of humans AND bots, one report
 with a SECTION per pick; contract in

@@ -1,5 +1,5 @@
 // THE TICKET REVIEW'S RESULT PIECES — shared by the PR pane's Story check (TicketCoverage.tsx) and
-// the Open PRs ticket stack's Story check panel (Activity/StackStoryCheck.tsx), so both draw one
+// the Open PRs ticket stack's Story section and the story view (Activity/TicketStorySection.tsx), so both draw one
 // criterion, one missing item and one currency pill the same way.
 //
 // `viewedPrId` is the PR the reader is looking at, or null in the Open PRs stack, where no PR is

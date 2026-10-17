@@ -1234,9 +1234,9 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
     not offered as "Pull KEY from Jira".
   - **THE WHOLE STORY LIVES ONCE, IN THE OPEN PRs STACK; the pane shows its own share.** The stack
     header carries the coverage pill, "reviewed X ago" (`state.checkedAt`) and Re-check; below it a
-    "Story check" disclosure (`Activity/StackStoryCheck.tsx`), COLLAPSED by default (per-session
-    open set, `store/stackStoryCheck.ts`), whose body reads the run by the states' `latestRunId`
-    ONLY once expanded: summary, every criterion with "Done in api#88" / "Belongs in …", missing and
+    "Story" section (`Activity/TicketStorySection.tsx`, § The story view), COLLAPSED by default
+    (per-session open set, `store/stackStoryCheck.ts`), whose body reads the run by the states'
+    `latestRunId` ONLY once expanded: summary, every criterion with "Done in api#88" / "Belongs in …", missing and
     not-asked-for items, currency pill, the Story — and NO Post buttons (`viewedPrId: null` in the
     shared `TicketReviewParts.tsx`). The pane's block goes SLIM where such a stack exists
     (`slimStoryCheck`, `lib/ticketShare.ts`: a tracker ident, `trackerOn` — `PrDetail.tickets !=
@@ -2106,8 +2106,8 @@ to removable chips.
 This Sprint is its OWN Activity rail line (`activityRepo: 'sprint'`, `?activityRepo=sprint`), directly
 under Pending: Open PRs · Pending · This Sprint · Feed · Reports · Bots Monitoring. It is FREE — no
 `ProBadge`, no `ProLockPanel`, and none of its routes 402 (`/api/sprint-graph*`, `/api/merged-prs`,
-the sprint refresh / statuses / repos routes). The agentic parts ("Ask Claude", "Check against code")
-stay LOCAL-ONLY and gate on `me.ai.enabled` through `useAiCapabilities()`, never a Pro capability.
+the sprint refresh / statuses routes, `GET /api/ticket-story`). The agentic part ("Ask Claude")
+stays LOCAL-ONLY and gate on `me.ai.enabled` through `useAiCapabilities()`, never a Pro capability.
 Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the worker read the sprint.
 
 - **Two tabs, DERIVED, never written back**: "Sprint graph" (the landing tab) and "Merged so far".
@@ -2121,12 +2121,14 @@ Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the 
   THREE tabs: Overview · Stories · Chronology.
 
 - **Sprint graph** (`?activityRepo=sprint`, the landing tab) — THE SPRINT GRAPH
-  (`SprintView.tsx`: toolbar, filters, `SprintGraph`, `SprintTicketDrawer`, `SprintAskPanel`; pure folds
-  in `sprintGraphModel.ts`, test/sprintGraphModel.test.ts). Data: `GET /api/sprint-graph` (nodes = the
-  sprint's tickets + GHOST tickets outside it, edges, status layout, repos) and, per opened ticket only,
-  `GET /api/sprint-graph/ticket` (docs/API.md § This sprint). Hooks in `hooks/useSprintStories.ts` — NO
-  capability gate; the agentic ones (Ask Claude, Check against code) AND `me.ai.enabled` alone; shared mutation keys `['sprint-assess',
-  ident]`, `['sprint-repos', ident]`, `['sprint-ask', ws]` read through `useIsMutating`.
+  (`SprintView.tsx`: toolbar, filters, `SprintGraph`, `SprintAskPanel`; pure folds in
+  `sprintGraphModel.ts`, test/sprintGraphModel.test.ts). Data: `GET /api/sprint-graph` (nodes = the
+  sprint's tickets + GHOST tickets outside it, edges, status layout; docs/API.md § This sprint). Hooks in
+  `hooks/useSprintStories.ts` — NO capability gate; Ask Claude ANDs `me.ai.enabled` alone
+  (`useSprintAiOn`); its shared mutation key `['sprint-ask', ws]` is read through `useIsMutating`.
+  ⚠ **A ticket clicked (or Enter / Space) opens its STORY VIEW** through `useOpenStory` (§ The story
+  view) and selects it on the canvas; the sprint DRAWER, its reference cards, the repo picker and "Check
+  against code" are REMOVED (2026-10-18).
   - **The canvas is ALWAYS deep navy** (`.sprint-canvas` in index.css, a radial gradient + a seeded,
     static star field) in BOTH themes, so its colours live in `SPRINT_CANVAS` / `STAGE_RING` /
     `edgeStyle` / `SATELLITE_FILL`, never the page's tokens. ⚠ The label colours are measured against the
@@ -2240,7 +2242,7 @@ Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the 
     (Epic + history) keys shown.
   - **Nodes**: radius by degree (`nodeRadius`, 14–34, sized to read at Fit); the fourth stage is labelled
     "Complete" (`SPRINT_STAGE_LABEL.done`; the key stays `'done'`, and a tracker status named "Done" keeps
-    its own word — the hover tip, like the drawer, never adds the Complete stage); status THREE ways — a thick
+    its own word — the hover tip never adds the Complete stage); status THREE ways — a thick
     ring (`ringWidth`), a dark tint of the ring colour as the fill (`discFill`; ghosts keep the plain
     ground) and a centre mark from Icons.tsx (`statusGlyph`: empty circle, half circle, eye, tick, question
     mark); Complete faded; ghosts smaller, dashed, fainter with depth; assignee avatar badge outside the
@@ -2273,10 +2275,10 @@ Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the 
     `driftScale`; none under the pointer, nothing while a ticket is selected); then the rAF loop STOPS
     itself — ⚠ there is no perpetual loop any more, so anything that moves must `wake()` it (or
     `animateView`). `prefers-reduced-motion`: no tween, no loop — every layout and framing jumps.
-    ⚠ **Opening a ticket FRAMES it and its one-link neighbours in the strip the drawer leaves visible**
-    (`uncoveredSpan` + `fitBoxIn`, the drawer's measured width; on a phone the drawer is full width, so
-    the whole canvas). SprintView bumps `frameRequest` on every open, so re-opening the selected ticket
-    re-frames it. Any reader zoom / pan cancels an animated framing.
+    ⚠ **Opening a ticket FRAMES it and its one-link neighbours** (`fitBoxIn`; the `uncoveredSpan` /
+    `drawerOpen` half that left room for the drawer is now always "no drawer"). SprintView bumps
+    `frameRequest` on every open, so re-opening the selected ticket re-frames it. Any reader zoom / pan
+    cancels an animated framing.
     ⚠ **A refetch that lands MID-ANIMATION** (returning to the tab, the 15s brief poll, a refresh) used
     to hold every ticket at its half-way spot and cancel the tween — stranded tickets and overlapping
     halos until a reload. Now a redraw first moves each ticket to where the running animation would
@@ -2299,39 +2301,24 @@ Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the 
     outside work blocking them). A filter change re-packs what is left (`filterKey`) and the view follows
     Fit; clearing restores the exact earlier layout. "N of M tickets" sits by Clear filters; nothing
     left prints "No tickets match these filters." **Selecting** a node dims everything beyond one link ("2 hops" widens it); a
-    background click or "Show all" clears it. The selection outlives the drawer.
+    background click or "Show all" clears it.
   - **Accessibility**: every node is a focusable `<g role="button">` with "KEY title, status, N PRs";
-    Enter / Space opens the drawer; a visually hidden list repeats every ticket.
-  - **The drawer** (`SprintTicketDrawer`) is PORTALED to `<body>` (in place it inherited the parent's
-    `space-y-*` top margin — a gap above a `fixed inset-0` panel) and slides in from the right over the
-    graph, NON-MODAL — no scrim, no focus trap, the panel alone takes pointer events — so the graph
-    beside it stays live: pan, zoom, click another ticket to switch (user decision 2026-10-13). Escape
-    or close; focus returns to the node. ⚠ SprintView handles that Escape on `document` and stops it,
-    because the app's window-level Escape ("leave for the Timeline") used to fire too. It is built from the Open PRs
-    pieces: the header (key, title, status pill, assignee, epic, tracker link, "Open ticket tab"), the
-    "Story check" block (the brief's summary and numbered criteria, the first 10 then "Show all";
-    "Worked out from the description" when derived) plus the Open PRs `StackStoryCheck` when the
-    ticket has a ticket review (ONE `useTicketReviewStates` read), "Other tickets" as CARDS grouped
-    Blocked by · Depends on · Built alongside · Builds on · Replaces · Related · Context · Out of scope
-    (`sprintReferences.ts`; "Builds on" and "Out of scope" start COLLAPSED behind a chevron disclosure
-    with their count, the rest open, nothing remembered — `References` is keyed per ticket): key + title (a ticket on the graph moves the drawer, any other opens its
-    tab), a status pill, an ASSIGNEE pill, the brief's one-sentence `why` as the row's sentence and the
-    quote under it only when it adds words, EVERY PR as the Open PRs cards via
-    `Ticket/TicketPrsSections.tsx` — the SAME component the ticket tab renders — and, sprint tickets
-    only, the repo picker + `SprintAssessment` / `SprintCodeCheck`.
+    Enter / Space opens its story view; a visually hidden list repeats every ticket.
   - **"Ask Claude about this sprint"** (`SprintAskPanel`, docked over the canvas's bottom-right corner;
     shown only where `me.ai.enabled` and the response's `aiEnabled`): the transcript lives in the module
     store `useSprintAskTranscript` (per workspace, memory only) and ⚠ the completed turn is appended in
     `useSprintAsk`'s HOOK-level `onSuccess`. Answers render through `Markdown` with `ticketLinks` +
-    `rehypeTicketLinks` over the graph's keys; `TicketRefOpenContext` (TicketRefLink.tsx) lets a key on
-    the graph open in the drawer. Each answer shows its cost in US$.
+    `rehypeTicketLinks` over the graph's keys; a key opens its story view (TicketRefLink.tsx →
+    `useOpenStory`). Each answer shows its cost in US$.
   - Kept from the list era: `SprintStatusSettings` — now the BUCKET editor (add / rename / delete /
     reorder buckets, a meaning select per bucket, statuses moved by drag and drop or the keyboard Move up /
     down buttons across buckets, ticket counts, "not placed yet" on a status the buckets do not name,
     the "Merged, not signed off" switch with its ⓘ, Save / Cancel / Reset to automatic; Save waits on
     shared `sprintBucketsProblem`'s sentence; pure helpers in `sprintModel.ts`; docs/TRACKERS.md § The
     status order and buckets),
-    `SprintCopyButton` + `lib/copy.ts`, pure `sprintModel.ts`. DELETED with the chips, findings,
+    pure `sprintModel.ts`. DELETED with the drawer (2026-10-18): `SprintTicketDrawer`,
+    `SprintAssessment`, `SprintCodeCheck`, `SprintCopyButton`, `lib/copy.ts`, the drawer's grouped
+    references and `Ticket/TicketPrsSections.tsx`. DELETED with the chips, findings,
     highlights, checks and write-back: `SprintTicketCard`, `SprintTicketReview`, `SprintUpdatePanel`,
     `SprintChecksPanel`, `SprintDiffText`, `useTicketDraft`, `lib/ticketDraft.ts`,
     `lib/storyHighlights.ts`, `lib/wordDiff.ts` and the `.story-mark` / `.story-rev` CSS.
@@ -2344,10 +2331,9 @@ Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the 
   stack IS the merged work); default order is newest merge first, and there is no Sort menu.
   ⚠ It KEEPS the TICKET review (where AI runs and the tracker is on): the ONE batched
   `useTicketReviewStates`, the card's coverage pills (`TicketPillsRow`, the pills without the code
-  review's Review/Fix), the stack's coverage pill + Check story, and the collapsed Story check
-  (criteria met, the story, "What each PR adds"). A ticket with no review run — or no AI at all —
-  still offers its STORY alone (`StackStoryCheck storyWithoutReview`, read only when opened), so
-  nothing fetches on mount. The
+  review's Review/Fix), the stack's coverage pill + Check story, and the collapsed Story section
+  (§ The story view: the review's result or the brief, the ticket as written, the design). Every
+  ticket stack carries it, reviewed or not, and nothing in it fetches until it is opened. The
   Group by ticket / List choice (and stack collapse) is the SAME per-viewer `store/openPrsView.ts`
   state as Open PRs; the repo dropdown is the tab's own local state.
 
@@ -2413,8 +2399,8 @@ convention this file has to remember.
     (`pointIssueLabel` — null for an absent OR retired id); empty sections are not headings
     (`storyReportSections`). ⚠ **A point's / action's ticket chips read "KEY · Title"**
     (`ticketChipLabel`, the title off `record.picked` by key; the chip WRAPS, never truncated behind a
-    `title=`), keep their tracker link, and a picked ticket gains a "PRs" button that opens the ticket
-    tab (`useOpenTicketTab`). "Not covered (N)"
+    `title=`), keep their tracker link, and a picked ticket gains a "PRs" button that opens its story
+    view (`useOpenStory`). "Not covered (N)"
     sits behind a toggle and stays OUT of the export. ⚠ **A key is a link only when it is one of the
     run's picks** (`linkifyTicketKeys`: whole tokens only, so `BMD-12` never matches inside
     `BMD-123`), always through `safeExternalUrl`. "Copy as Markdown" (`storyReportMarkdown`,
@@ -2429,7 +2415,7 @@ convention this file has to remember.
     (a hollow SQUARE — shape, not hue alone — for a story in `shortfall`); an unknown size or a null
     criteria count is LISTED under the chart, never plotted at zero. The old call site
     (`RepoAnalyticsModal`) passes none of them and is unchanged. ⚠ Each "Time and pull requests" row
-    and each story row carries a named "Pull requests" button opening the ticket tab — through
+    and each story row carries a named "Pull requests" button opening the story view — through
     `RepoRows`' optional `rowAction` (one labelled control under the name; the row and its bars stay
     unclickable). The key still opens the tracker.
   - Every explanation sits behind an `InfoButton`; no caption paragraphs. No e2e spec mounts
@@ -3326,28 +3312,57 @@ phrase it two ways.
   prose stays ON THE WIRE — it is the fallback for a client that does not know the phase — and is
   simply not drawn beneath its own restatement.
 
-## The ticket tab (`kind: 'ticket'`, CORE/free)
+## The story view (the ticket tab, `kind: 'ticket'`, CORE/free)
 
-One ticket's pull requests in isolation — its open PRs (the Open PRs cards) and its merged ones (the
-Merged so far cards), plus the ticket's title, status and tracker link. Key `ticket:<ident>`
-(`TICKET_TAB_PREFIX`; the ident verbatim, `URLSearchParams` escapes it in `view=`); SELF-DESCRIBING
-from the URL like a bot-detail key, and NOT persisted across reloads (like user-activity). Data is
-`GET /api/ticket-prs` (shared `ticket-prs.ts`; `useTicketPrs`, key `['ticket-prs','ws:<id>',ident]`).
+ONE ticket, Open PRs style: `Ticket/TicketTabView.tsx` renders the SAME ticket stack the Open PRs board
+draws — `OpenPrsCards` with `story={{ticket, merged}}` (`storyStack`, `lib/openPrsStacks.ts`) — never a
+copy. In order: the stack header (key — the story modal or the tracker link —, title, status, type,
+assignee, PR count, the ticket review's coverage pill + Re-check), the **Story section OPEN**, the open
+PRs as the Open PRs cards, "Merged (n)", and under the stack "Closed without merging (n)", collapsed. It
+works for a ticket with NO pull request (the stack is drawn with no rows; "No pull requests for this
+ticket yet."). In the single-ticket stack nothing collapses and the Story section's open state is local
+(always open on mount); the board's stacks keep their session stores.
 
-- ⚠ **Opened ONLY through `useOpenTicketTab()`** (`lib/ticketTab.ts`) — Reports → Stories' "Time and
-  pull requests" rows and story rows ("Pull requests"), the story report's ticket chips ("PRs"), This
-  sprint's drawer ("Open ticket tab", and a reference that is not on the graph). Never call the store
-  action from a component.
-- The PR lists are `Ticket/TicketPrsSections.tsx`, shared with This sprint's drawer — one component, so
-  a ticket's PRs never render two ways.
-- FREE core wherever it is opened from: it lists PR data only (a Pro surface's button still needs that
-  surface to be open).
-- Lists only THIS workspace's repos and counts the rest ("N in other workspaces"). An ident on another
-  tracker or site answers `found: false` → one sentence, never a 404. `workspaceId === null` renders
-  nothing. A ticket the worker never read lists no PRs (`ticketMembers` needs a read row) and heads
-  with the key/title captured when the tab opened.
-- `['ticket-prs']` is in `invalidateAfterPrWrite`'s workspace half, so a merge from the tab's own
-  cards repaints it; only an open tab refetches.
+- **Tab words** (`storyTabLabels`, `lib/ticketTab.ts`): chip "KEY · Story", tooltip "KEY: story and
+  pull requests", close "Close story tab". Internally it stays `kind: 'ticket'` with key
+  `ticket:<ident>` (`TICKET_TAB_PREFIX`; the ident verbatim, `URLSearchParams` escapes it in `view=`)
+  for old links; SELF-DESCRIBING from the URL, NOT persisted across reloads.
+- ⚠ **Opened ONLY through `useOpenStory()`** (`lib/ticketTab.ts`) — This Sprint's ticket clicks, Reports
+  → Stories' "Time and pull requests" rows and story rows, the story report's ticket chips, a ticket key
+  in any text (`TicketRefLink`, e.g. an "Ask Claude" answer). Never call the store action from a
+  component. The sprint drawer and its reference cards are GONE.
+- **Two DB-only reads, both free**: `GET /api/ticket-prs` (`useTicketPrs`, key
+  `['ticket-prs','ws:<id>',ident]`: the PRs + the freshest tracker row) and `GET /api/ticket-story`
+  (`useTicketStory`, key `['ticket-story','ws:<id>',ident]`: the sprint read's row — type, assignee,
+  epic, the text — and the CURRENT brief). The header ticket is `storyViewTicket` (`lib/ticketStory.ts`):
+  a sprint ticket leads with the sprint row, any other with the PR row, each field falling back.
+- Lists only THIS workspace's repos and counts the rest ("N in other workspaces"). Neither read finding
+  the ticket → "This ticket isn't on this workspace's tracker." — never a 404. `workspaceId === null`
+  renders nothing.
+- `['ticket-prs']` is in `invalidateAfterPrWrite`'s workspace half, so a merge from the view's own
+  cards repaints it; the sprint refresh invalidates `['ticket-story', ws]`.
+
+### The Story section (`Activity/TicketStorySection.tsx`) — ONE component, two mounts
+
+Collapsed in the Open PRs stacks (the per-session `store/stackStoryCheck.ts` open set; the PR pane's
+"See the whole story in Open PRs" opens it), OPEN in the story view. Every ticket stack with an ident
+has it — not only reviewed ones. ⚠ **The body (and every read in it) mounts only while open**, so a
+board of stacks makes no request per stack. In order, and NOTHING else (no dependency or reference
+cards or pills):
+
+1. **Claude's summary and criteria** — `storySummaryOf` (`lib/ticketStory.ts`, test/storyView.test.ts):
+   the ticket review's result when one exists (currency pill, `TicketResults`, `MemberCards`, read by
+   the states' `latestRunId`); else the CURRENT sprint brief's summary + numbered criteria ("Worked out
+   from the description" when derived; the ⓘ explains it; "Show all N criteria" past 10); else
+   "Reading this ticket…" while the brief pass will still read it; else nothing. `GET /api/ticket-story`
+   is asked only when there is no ticket review. A ticket that is not in a sprint read has no brief:
+   "for any story not already summarised", the sprint builder's brief pass is what writes one.
+2. **The ticket as written** — `StoryDisclosure` labelled "As written in Jira" (the tracker's name): the
+   stored tracker row read through any PR on the ticket, else the ticket review's snapshot, else the
+   sprint read's text (`storyFallbackTicket`, for a ticket with no PR).
+3. **The story's design** — `StoryDesignSection` (`Activity/StoryDesignSection.tsx`), only with `me.ai`
+   and ≥ 1 PR (`storyDesignOffered`); it draws only when a design is stored or the ticket has 2+ PRs
+   (the server's `too_few_prs`).
 
 ## The merge-conflict resolver (`components/conflicts/`, CORE/free, BOTH MODES)
 
@@ -4486,12 +4501,12 @@ Each of these is a decision, not an oversight, and "finishing the migration" wou
   "it decided nothing", "it never ran" and "GitHub told us nothing" are three different facts, and
   collapsing any into the failure mark would report a red nobody observed.
 
-## Design diagrams (review tab section, This Sprint's ticket drawer)
+## Design diagrams (review tab section, the Story section)
 
 `components/DesignGrid.tsx` is the ONE renderer of a stored `DesignDiagram` (Mermaid is GONE — no
 `mermaid` or `uuid` dependency, no lazy chunk). A CSS grid: a narrow layer-label column plus one
-`minmax(0, 1fr)` column per act, so it shrinks to the pane (Claude Review tab; the ticket drawer,
-`max-w-2xl` ≈ 620px of content) with NO horizontal scroll, labels wrapping and nothing under 11px.
+`minmax(0, 1fr)` column per act, so it shrinks to the pane (Claude Review tab; the Story section of an
+Open PRs stack or the story view) with NO horizontal scroll, labels wrapping and nothing under 11px.
 Under 760px wide (NARROW) the layer names become a band heading above each layer instead of a side
 column, so the stages get the width. Every card sits in a PADDED slot inside wide gaps — the space
 the arrows run through. Only the layers some card uses get a row; empty slots stay empty. The pure
@@ -4511,16 +4526,16 @@ test/designGrid.test.ts).
 - **Click-through**: a card with files is a button. One file opens it; several open a small list
   (a floating-ui popover, the ONE open popover via `claimActivePopover`), each row opening its file.
   THIS PR's file → the review tab's `onOpenInChanges` (PrDetail's `openInChanges`: Changes tab, then
-  the focus). ANOTHER PR's (a story card, or any card in the drawer) → the store's `openPrChangesAt`
+  the focus). ANOTHER PR's (a story card, or any card in the Story section) → the store's `openPrChangesAt`
   (mounts that PR's pane like `openClaudeReview`, and sets the transient `prChangesFocus`), which
   PrDetail consumes through the same `openInChanges` as a URL correction.
 - The legend lives behind the heading's ⓘ (`DesignLegend`), never on the surface.
 
 `components/ClaudeReviewDiagrams.tsx` — `ClaudeReviewDiagramsSection` ("Design", mounted in
 `ClaudesReview` after SonarCloud, absent without `me.ai`) shows the PR's slot and each multi-PR
-ticket's "Story design" slot through `DiagramSlotView`; `Activity/SprintStoryDiagram.tsx` shows the
-story slot in the ticket drawer (only with `me.ai`, and only when the ticket has 2+ pull requests or a
-stored design). The status folds live in `lib/sequenceDiagrams.ts` (test/sequenceDiagram.test.ts). ⚠
+ticket's "Story design" slot through `DiagramSlotView`; `Activity/StoryDesignSection.tsx` shows the
+story slot as the last part of the Story section (only with `me.ai` and a PR on the ticket, and it draws
+only when the ticket has 2+ pull requests or a stored design). The status folds live in `lib/sequenceDiagrams.ts` (test/sequenceDiagram.test.ts). ⚠
 POLLING: the reads poll every 5 s only while a run is queued or running, and the PR read also for 90 s
 after the shown review's `finishedAt` while nothing is stored at the current head for the PR OR for
 any story of 2+ pull requests (the server queues them a moment AFTER the review is saved; a docs-only

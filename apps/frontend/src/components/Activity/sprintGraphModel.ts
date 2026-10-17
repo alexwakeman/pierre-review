@@ -1,13 +1,11 @@
 import type {
-  SprintReferenceRelation,
-  SprintTicketReference,
   SprintEdgeKind,
   SprintGraphEdge,
   SprintGraphNode,
   SprintGraphPr,
   SprintStage,
 } from '@pierre-review/shared';
-import { SPRINT_EDGE_LABEL, SPRINT_STAGE_LABEL, SPRINT_STAGES, STORY_REFERENCE_RELATION_LABEL, isSprintEdgeRelation } from '@pierre-review/shared';
+import { SPRINT_STAGE_LABEL, SPRINT_STAGES } from '@pierre-review/shared';
 import { memberMatches, personNameKey, sprintMembers, type SprintMember } from '@pierre-review/shared';
 
 // Activity → This Sprint as a GRAPH: the pure folds behind SprintGraph.tsx (test/sprintGraphModel.test.ts).
@@ -1000,40 +998,6 @@ export function zoomAbout(t: ViewTransform, factor: number, px: number, py: numb
   const k = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, t.k * factor));
   const f = k / t.k;
   return { k, x: px - (px - t.x) * f, y: py - (py - t.y) * f };
-}
-
-// ── The drawer's references ──────────────────────────────────────────────────────────────────────
-
-/** The order the drawer lists references in: what blocks it first, loose mentions last. */
-export const REFERENCE_ORDER: readonly SprintReferenceRelation[] = [
-  'blocked_by',
-  'depends_on',
-  'concurrent',
-  'builds_on',
-  'supersedes',
-  'linked',
-  'out_of_scope',
-  'context',
-];
-
-export function referenceRelationLabel(r: SprintReferenceRelation): string {
-  if (r === 'blocked_by') return 'Blocked by';
-  if (r === 'linked') return 'Linked';
-  return isSprintEdgeRelation(r) ? SPRINT_EDGE_LABEL[r] : STORY_REFERENCE_RELATION_LABEL[r];
-}
-
-/** References grouped by relation, in REFERENCE_ORDER; within a group, not-done first, then by key. */
-export function groupReferences(
-  refs: readonly SprintTicketReference[],
-): Array<{ relation: SprintReferenceRelation; label: string; refs: SprintTicketReference[] }> {
-  const out: Array<{ relation: SprintReferenceRelation; label: string; refs: SprintTicketReference[] }> = [];
-  for (const relation of REFERENCE_ORDER) {
-    const list = refs
-      .filter((r) => r.relation === relation)
-      .sort((a, b) => Number(a.done === true) - Number(b.done === true) || a.key.localeCompare(b.key, undefined, { numeric: true }));
-    if (list.length > 0) out.push({ relation, label: referenceRelationLabel(relation), refs: list });
-  }
-  return out;
 }
 
 // ── What is DRAWN: the toolbar's two toggles ─────────────────────────────────────────────────────

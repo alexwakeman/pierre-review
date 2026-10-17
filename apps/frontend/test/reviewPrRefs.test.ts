@@ -166,7 +166,7 @@ describe('the Review tab wiring', () => {
     for (const f of [
       'components/TicketCoverage.tsx',
       'components/TicketReviewParts.tsx',
-      'components/Activity/StackStoryCheck.tsx',
+      'components/Activity/TicketStorySection.tsx',
       'components/ClaudeReviewThreads.tsx',
       'components/ClaudeReviewCiFailures.tsx',
       'components/ClaudeReviewFollowUp.tsx',

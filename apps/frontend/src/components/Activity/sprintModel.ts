@@ -8,13 +8,7 @@ import {
   isTrackerIdent,
   parseTicketIdent,
   trackerTicketRow,
-  type SprintAssessmentCurrency,
-  type SprintAssessmentPhase,
-  type SprintAssessmentRecord,
-  type SprintAssessmentStatus,
-  type SprintAssessMode,
   type SprintBucket,
-  type SprintRepoRef,
   type SprintStage,
   type SprintStatusEvidence,
   type SprintStatusLayout,
@@ -22,8 +16,8 @@ import {
   type TicketSite,
 } from '@pierre-review/shared';
 
-// Activity → This Sprint: the pure folds behind the tab that survive the move to the GRAPH (status
-// settings, the "Check against code" progress, the repo picker). test/sprintModel.test.ts.
+// Activity → This Sprint: the pure folds behind the tab that survive the move to the GRAPH (the status
+// settings, the ticket's site). test/sprintModel.test.ts.
 // ⚠ Nothing here ranks tickets or people.
 
 const normStatus = (s: string): string => s.trim().toLowerCase();
@@ -280,94 +274,6 @@ export function reviewRuleSentence(): string {
 /** "Ready for QA · 4 of 6 merged". */
 export function statusEvidenceLine(e: SprintStatusEvidence): string {
   return `${e.status} · ${e.allMerged} of ${e.withPrs} merged`;
-}
-
-export function assessmentActive(status: SprintAssessmentStatus | null | undefined): boolean {
-  return status === 'queued' || status === 'running';
-}
-
-/** The progress line under a running assessment, in the run's own words (plan / verify). */
-export function assessmentProgressLine(
-  status: SprintAssessmentStatus,
-  phase: SprintAssessmentPhase | null,
-  mode: SprintAssessMode | null = null,
-): string {
-  if (status === 'queued') return 'Waiting for a free slot…';
-  switch (phase) {
-    case 'checking_out':
-      return 'Checking out the repos…';
-    case 'writing':
-      return mode === 'verify' ? 'Writing up the check…' : mode === 'plan' ? 'Writing up the plan…' : 'Writing the assessment…';
-    case 'reading':
-    default:
-      return mode === 'verify'
-        ? 'Checking each criterion against the code…'
-        : mode === 'plan'
-          ? 'Reading the code to plan the work…'
-          : 'Reading the code…';
-  }
-}
-
-/**
- * The progress bar's fill (0–100) for a running check. NOT a measure of work done — the agent reports
- * no fraction — so it is PHASE-BASED with a slow ease inside the long reading phase, and never
- * reaches 100 before the run ends: queued ≤ 5, checking out 5–20, reading 20–85 (easing on the time
- * since the run was created, ~90 s time constant), writing 90.
- */
-export function assessmentProgressPct(status: SprintAssessmentStatus, phase: SprintAssessmentPhase | null, elapsedMs: number): number {
-  const t = Math.max(0, elapsedMs) / 1000;
-  const ease = (tau: number): number => 1 - Math.exp(-t / tau);
-  if (status === 'queued') return 2 + 3 * ease(30);
-  switch (phase) {
-    case 'checking_out':
-      return 5 + 15 * ease(20);
-    case 'writing':
-      return 90;
-    case 'reading':
-    default:
-      return 20 + 65 * ease(90);
-  }
-}
-
-/** Elapsed time as "45s" / "2m 05s". */
-export function elapsedLabel(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  if (s < 60) return `${s}s`;
-  return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
-}
-
-/** The assess button's word, or null when no button belongs there (a current assessment, or one in
- *  flight). An outdated-format run offers a fresh check, not "again". */
-export function assessButtonLabel(t: {
-  assessment: { record: SprintAssessmentRecord; currency: SprintAssessmentCurrency } | null;
-}): 'Check against code' | 'Check again' | null {
-  const a = t.assessment;
-  if (a == null) return 'Check against code';
-  if (assessmentActive(a.record.status)) return null;
-  if (a.record.status === 'succeeded') {
-    if (a.record.outdated) return 'Check against code';
-    return a.currency === 'stale' ? 'Check again' : null;
-  }
-  return 'Check against code';
-}
-
-/** The repo picker's options: every workspace repo not accepted — the suggested ones first (in the
- *  server's order, tagged), then the rest by name. */
-export function repoPickerOptions(
-  repos: readonly SprintRepoRef[],
-  accepted: readonly SprintRepoRef[],
-  suggested: readonly SprintRepoRef[],
-): Array<{ repoId: number; text: string }> {
-  const taken = new Set(accepted.map((r) => r.repoId));
-  const sugg = suggested.filter((r) => !taken.has(r.repoId));
-  const suggIds = new Set(sugg.map((r) => r.repoId));
-  const rest = repos
-    .filter((r) => !taken.has(r.repoId) && !suggIds.has(r.repoId))
-    .sort((a, b) => a.fullName.localeCompare(b.fullName));
-  return [
-    ...sugg.map((r) => ({ repoId: r.repoId, text: `${r.fullName} · suggested` })),
-    ...rest.map((r) => ({ repoId: r.repoId, text: r.fullName })),
-  ];
 }
 
 /** The ticket's tracker site, from its ident (shared `parseTicketIdent` → `trackerTicketRow`); null for

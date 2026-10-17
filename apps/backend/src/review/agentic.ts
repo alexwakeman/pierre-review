@@ -20,8 +20,6 @@ import { registerAiResolveRoutes } from '../coding/ai-resolve/routes.js';
 import { registerStoryReportRoutes } from './story-report/routes.js';
 import { reconcileStoryReportsOnStartup } from './story-report/manager.js';
 import { registerStoryLabelRoutes } from './story-labels/routes.js';
-import { registerSprintAssessRoutes } from './sprint-assess/routes.js';
-import { reconcileSprintAssessmentsOnStartup } from './sprint-assess/manager.js';
 import { registerSprintBriefs } from './sprint-briefs/index.js';
 import { registerSprintAskRoutes } from './sprint-ask/routes.js';
 import { runOpen } from '../api/routes/conflicts.js';
@@ -70,11 +68,11 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // STORY LABELS (Reports → Stories): Haiku labels each story's criteria against a
   // fixed rubric. Pro on `periodReports` too, and agentic — so here and nowhere else.
   registerStoryLabelRoutes(app, ctx);
-  // THIS SPRINT (its own rail line): "Check against code" (one Sonnet run per ticket over read-only default-branch
-  // checkouts, the shared review pool), the BRIEF pass the sprint read hands each workspace to (Haiku:
-  // summary, itemised criteria, references → the graph's edges and ghost chains) and "Ask Claude about
-  // this sprint" (Haiku over the stored graph). FREE (no Pro gate) — local-only and agentic, like the rest.
-  registerSprintAssessRoutes(app, ctx);
+  // THIS SPRINT (its own rail line): the BRIEF pass the sprint read hands each workspace to (Haiku:
+  // summary, itemised criteria, references → the graph's edges and ghost chains, then the themes and
+  // the sprint builder) and "Ask Claude about this sprint" (Haiku over the stored graph). FREE (no Pro
+  // gate) — local-only and agentic, like the rest. ("Check against code" was REMOVED 2026-10-18; its
+  // tables are dormant.)
   registerSprintBriefs(ctx);
   registerSprintAskRoutes(app, ctx);
   // THE REFERENCE DOCS LIBRARY (Activity → Docs): upload / URL → a Sonnet 5 build into a markdown
@@ -131,10 +129,5 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
     await reconcileStoryReportsOnStartup();
   } catch (err) {
     app.log.warn({ err }, 'story report: startup reconcile failed');
-  }
-  try {
-    await reconcileSprintAssessmentsOnStartup();
-  } catch (err) {
-    app.log.warn({ err }, 'sprint assessment: startup reconcile failed');
   }
 }

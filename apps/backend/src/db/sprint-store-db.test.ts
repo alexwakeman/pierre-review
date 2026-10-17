@@ -2,7 +2,7 @@ import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // The This-sprint foundation store (db/sprint-store.ts) on a SCRATCH SQLite — never apps/backend/data.
-// Pins: the demand-gate upsert, the latest-per-ticket reads (tenant-scoped), the pure hashes, and the
+// Pins: the demand-gate upsert and the
 // STRUCTURAL tenancy of sprint_ticket_repos (a cross-account (repo, account) pair fails in the DB).
 
 const DB_PATH = '/private/tmp/claude-501/pierre-sprint-store-test.sqlite';
@@ -94,110 +94,7 @@ describe('sprint store', () => {
     expect(after.statusOrderJson).toBeNull();
   });
 
-  it('latest-per-ticket reads are newest-first and tenant-scoped', async () => {
-    const base = { workspaceId: wsA, ident: 'jira:https://acme.atlassian.net#ENG-1', model: 'claude-sonnet-5', fingerprint: 'f', textHash: 'h', reposJson: [] };
-    await db.insert(schema.sprintAssessments).values({ ...base, accountId: 1, status: 'failed', createdAt: new Date(1_000_000) }).execute();
-    await db.insert(schema.sprintAssessments).values({ ...base, accountId: 1, status: 'succeeded', createdAt: new Date(2_000_000) }).execute();
-    await db.insert(schema.sprintAssessments).values({ ...base, workspaceId: wsB, accountId: 2, status: 'running', createdAt: new Date(3_000_000) }).execute();
-    const mine = await store.latestSprintAssessments(1, wsA, [base.ident]);
-    expect(mine.get(base.ident)?.status).toBe('succeeded');
-    expect((await store.latestSprintAssessments(2, wsA, [base.ident])).size).toBe(0);
-    const rec = store.sprintAssessmentRecordOf(mine.get(base.ident)!);
-    expect(rec.phase).toBeNull();
-    expect(rec.body).toBeNull();
-    expect(rec.outdated).toBe(true);
-  });
-
-  it('a stored body serves when it has a mode and a summary; an older shape is outdated, never thrown on', () => {
-    const row = (status: string, bodyJson: unknown) =>
-      ({
-        id: 1, workspaceId: wsA, ident: 'x', model: 'm', status, phase: null, reposJson: [], bodyJson,
-        droppedJson: null, error: null, costUsd: null, numTurns: null, createdAt: new Date(0), completedAt: null,
-      }) as any;
-    const v1 = { criteria: [{ n: 1, existing: 'missing' }], gaps: { missing: [] }, suggestion: { addedCriteria: [] }, questions: [] };
-    expect(store.sprintAssessmentRecordOf(row('succeeded', v1))).toMatchObject({ body: null, outdated: true });
-    expect(store.sprintAssessmentRecordOf(row('failed', null))).toMatchObject({ body: null, outdated: false });
-    // Format 3 (`issues`, one sentence per issue): an older shape → outdated.
-    const v3 = { summary: 'S', issues: [{ id: 'spec_gaps', text: 'No behaviour when the upload fails.', ref: null }], revisedCriteria: [] };
-    expect(store.sprintAssessmentRecordOf(row('succeeded', v3))).toMatchObject({ body: null, outdated: true });
-    // Format 4 (`findings`, no `mode`): an older shape → outdated (BMD-1056's real run reads this way).
-    const v4old = { summary: 'S', findings: [], revisedCriteria: [], revisedDescription: null };
-    expect(store.sprintAssessmentRecordOf(row('succeeded', v4old))).toMatchObject({ body: null, outdated: true });
-    const v4 = {
-      mode: 'verify',
-      coverage: 'Criterion 1 has a test.',
-      criterionChecks: [
-        { n: 2, status: 'partly', evidence: 'Half done.', ref: { repo: 'acme/web', path: 'src/a.ts' }, tests: null },
-        { n: 1, status: 'met', evidence: 'Done.', ref: null, tests: { repo: 'acme/web', path: 'test/a.test.ts' } },
-        { n: 0, status: 'met', evidence: 'bad n' },
-        { n: 3, status: 'maybe', evidence: 'bad status' },
-      ],
-      plan: [{ repo: 'acme/web', path: 'src', newPath: null, change: 'ignored in verify mode' }],
-      summary: 'This may already be done.',
-      findings: [
-        { issue: 'spec_gaps', rule: 'error_handling', quote: 'upload a file', where: 'description', text: 'No behaviour when the upload fails.', suggestion: 'upload a CSV file', ref: null },
-        // A retired issue id, a rule of another issue, an unknown rule: dropped, never thrown on.
-        { issue: 'too_big', rule: 'vague_term', quote: null, where: null, text: 'dropped', suggestion: null, ref: null },
-        { issue: 'blocked', rule: 'edge_case', quote: null, where: null, text: 'dropped', suggestion: null, ref: null },
-        { issue: 'blocked', rule: 'nope', quote: null, where: null, text: 'dropped', suggestion: null, ref: null },
-        { issue: 'unclear_done', rule: 'vague_term', quote: null, where: 'title', text: 'Criterion 2 cannot be checked.', suggestion: 'orphan', ref: { repo: 'acme/web', path: 'src/a.ts' } },
-        { issue: 'unclear_done', rule: 'bundled', quote: 'x', where: 'nowhere', text: '  ', suggestion: null, ref: null },
-        'junk',
-      ],
-      revisedCriteria: ['One', 7, ''],
-      revisedDescription: 'A new description.',
-    };
-    expect(store.sprintAssessmentRecordOf(row('succeeded', v4))).toMatchObject({
-      outdated: false,
-      body: {
-        mode: 'verify',
-        plan: [],
-        coverage: 'Criterion 1 has a test.',
-        criterionChecks: [
-          { n: 2, status: 'partly', evidence: 'Half done.', ref: { repo: 'acme/web', path: 'src/a.ts' }, tests: null },
-          { n: 1, status: 'met', evidence: 'Done.', ref: null, tests: { repo: 'acme/web', path: 'test/a.test.ts' } },
-        ],
-        summary: 'This may already be done.',
-      },
-    });
-    // Format 6: a format-5 body still reads, its findings and revisions ignored (the run is stale anyway).
-    const body = store.sprintAssessmentRecordOf(row('succeeded', v4)).body!;
-    expect(Object.keys(body).sort()).toEqual(['coverage', 'criterionChecks', 'mode', 'plan', 'summary']);
-  });
-
-  it('a run fingerprinted in the old format reads stale', async () => {
-    const { createHash } = await import('node:crypto');
-    const fold = await import('./sprint-stories.js');
-    const ticket = { title: 'T', description: 'D', acceptanceCriteria: 'A' };
-    const h = store.sprintTicketTextHash(ticket);
-    const accepted = [{ repoId: 1, syncedSha: 'a' }];
-    const v1 = createHash('sha256').update(['sprint-assess-v1', h, '1:a'].join('\u0000'), 'utf8').digest('hex');
-    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: v1 }, ticket, accepted, 'plan')).toBe('stale');
-    // A run from the four-issue format (v2) reads stale too: its issues were the old vocabulary.
-    const v2 = createHash('sha256').update(['sprint-assess-v2', h, '1:a'].join('\u0000'), 'utf8').digest('hex');
-    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: v2 }, ticket, accepted, 'plan')).toBe('stale');
-    // Format 3 (one sentence per issue, no quotes) reads stale too.
-    const v3 = createHash('sha256').update(['sprint-assess-v3', h, '1:a'].join('\u0000'), 'utf8').digest('hex');
-    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: v3 }, ticket, accepted, 'plan')).toBe('stale');
-    // Format 4 (no mode) reads stale too.
-    const v4 = createHash('sha256').update(['sprint-assess-v4', h, '1:a'].join('\u0000'), 'utf8').digest('hex');
-    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: v4 }, ticket, accepted, 'plan')).toBe('stale');
-    const now = store.sprintAssessFingerprint(h, [{ repoId: 1, sha: 'a' }], 'plan');
-    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: now }, ticket, accepted, 'plan')).toBe('current');
-    // The ticket moved to In review: the plan is stale (the check to run now is a verify).
-    expect(fold.sprintAssessmentCurrencyFrom({ status: 'succeeded', fingerprint: now }, ticket, accepted, 'verify')).toBe('stale');
-  });
-
-  it('hashes are pure and order-free', () => {
-    const h = store.sprintTicketTextHash({ title: 'T', description: 'D', acceptanceCriteria: 'A' });
-    expect(h).toBe(store.sprintTicketTextHash({ title: 'T', description: 'D', acceptanceCriteria: 'A' }));
-    expect(h).not.toBe(store.sprintTicketTextHash({ title: 'T', description: 'D', acceptanceCriteria: 'B' }));
-    const a = store.sprintAssessFingerprint(h, [{ repoId: 2, sha: 'b' }, { repoId: 1, sha: 'a' }], 'plan');
-    expect(a).toBe(store.sprintAssessFingerprint(h, [{ repoId: 1, sha: 'a' }, { repoId: 2, sha: 'b' }], 'plan'));
-    expect(a).not.toBe(store.sprintAssessFingerprint(h, [{ repoId: 1, sha: 'a' }, { repoId: 2, sha: 'c' }], 'plan'));
-    expect(a).not.toBe(store.sprintAssessFingerprint(h, [{ repoId: 1, sha: 'a' }, { repoId: 2, sha: 'b' }], 'verify'));
-  });
-
+  // The table is DORMANT ("Check against code" was removed); its structural tenancy still holds.
   it('sprint_ticket_repos refuses another account’s repo in the database', async () => {
     const row = { workspaceId: wsA, ident: 'jira:https://acme.atlassian.net#ENG-1', via: 'manual', acceptedAt: new Date() };
     await db.insert(schema.sprintTicketRepos).values({ ...row, accountId: 1, repoId: repoA }).execute();

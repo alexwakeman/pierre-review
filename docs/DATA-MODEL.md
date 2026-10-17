@@ -689,13 +689,16 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
   (`tracker/sprint/ref-status.ts`) and REPLACED by each finished full lookup; `knownTicketsFor`'s last
   source. Workspace via the named composite
   FK (cascade); in `accountScopedTables()` + erasure; `verify:isolation` checks `knownTicketsFor` reads.
-- **`sprint_ticket_repos`** — the repos the reader ACCEPTED for a ticket, unique (account, workspace,
-  ident, repo). ⚠ Ids arrive in a BODY, so tenancy is STRUCTURAL: NAMED composite FKs onto
-  `repos(id, account_id)` and `workspaces(id, account_id)`. `deleteRepo` deletes its rows explicitly.
-- **`sprint_assessments`** — one row per "Check against code" run (no unique): status/phase/mode, the
-  validated body (format 6: `{mode, summary, plan, criterionChecks, coverage}`; an unreadable shape is
-  served as `outdated`), `fingerprint` (format version + mode + text hash + sorted repo SHAs),
-  `repos_json` (the SHAs read), cost.
+- **`sprint_ticket_repos`** — ⚠ **DORMANT since 2026-10-18** ("Check against code" and its repo picker
+  were removed with the sprint drawer; nothing reads or writes it — only `deleteRepo`, the sprint
+  read's prune and erasure still DELETE its rows; kept, never dropped). It held the repos the reader
+  ACCEPTED for a ticket, unique (account, workspace, ident, repo), with NAMED composite FKs onto
+  `repos(id, account_id)` and `workspaces(id, account_id)` (still pinned by `verify:isolation`).
+  `sprint_tickets.repos_saved_at` is dormant with it.
+- **`sprint_assessments`** — ⚠ **DORMANT since 2026-10-18** (same removal; never read or written,
+  still in `accountScopedTables()` + erasure; kept, never dropped). One row per "Check against code"
+  run: status/phase/mode, the validated body (format 6), `fingerprint`, `repos_json`, cost. A run left
+  `running` when the feature was removed stays so — nothing sweeps it any more.
 - **`sprint_briefs`** (sqlite `0107` / pg `0094`) — one per (account, workspace, `ident`): the Haiku BRIEF
   of a sprint ticket or ghost — `summary`, `criteria_json` (`[{n, text}]`), `criteria_derived`,
   `references_json` (rubric-4 relations, verified quotes), model, cost — CURRENT while `text_hash` and

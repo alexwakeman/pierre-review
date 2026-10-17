@@ -1369,3 +1369,12 @@ run), the last attempt `attempt_at` / `attempt_hash` / `attempt_error`, today's 
 `sprint_reads.story_attempt_at / _hash / _error` (`0111` / pg `0098`) are DORMANT from here — never
 written or read, kept for their rows (`sprint_story` is still erased). Journal `when` sqlite
 `1792137607016` / pg `1792137607017`. ⚠ pg `0107` NOT replayed.
+
+### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
+
+The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with
+the story view. NO drop migration: `sprint_ticket_repos` (`0100` / pg `0087`), `sprint_assessments`
+(`0100` / pg `0087`, `mode` from `0105` / pg `0092`) and `sprint_tickets.repos_saved_at` (`0104` / pg
+`0091`) stay in both schemas, both journals and `accountScopedTables()` + erasure; nothing reads or
+writes them (`deleteRepo` and the sprint read's prune still delete `sprint_ticket_repos` rows). The two
+json columns of `sprint_assessments` are typed `unknown` now that the shared body types are gone.

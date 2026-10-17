@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { TICKET_ALIGNMENT_LABEL, type StoryRow } from '@pierre-review/shared';
 import { useStories } from '../../hooks/useStories.js';
-import { useOpenTicketTab } from '../../lib/ticketTab.js';
+import { useOpenStory } from '../../lib/ticketTab.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
 import { PALETTE } from '../charts/common.js';
@@ -35,7 +35,7 @@ import {
 // re-ranks them.
 // ⚠ EVERY EXPLANATION SITS BEHIND AN ⓘ — the page carries facts and labels, no caption paragraphs.
 // ⚠ UNKNOWN IS NEVER ZERO: an unsized story is listed under the size chart, never plotted at 0.
-// ⚠ A STORY'S PULL REQUESTS OPEN IN THE TICKET TAB (`useOpenTicketTab`): the "Time and pull requests"
+// ⚠ A STORY'S PULL REQUESTS OPEN IN THE STORY VIEW (`useOpenStory`): the "Time and pull requests"
 // rows and every story row carry a named "Pull requests" button; the key still opens the tracker.
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
@@ -69,13 +69,13 @@ function TimeChartInfo(): JSX.Element {
   );
 }
 
-/** Opens the ticket tab: this story's pull requests, open and merged, on their own. */
+/** Opens the story view: this story and its pull requests, open and merged. */
 function TicketPrsButton({ story, label }: { story: Pick<StoryRow, 'ident' | 'key' | 'title'>; label: string }): JSX.Element {
-  const openTicketTab = useOpenTicketTab();
+  const openStory = useOpenStory();
   return (
     <button
       type="button"
-      onClick={() => openTicketTab({ ident: story.ident, key: story.key, title: story.title })}
+      onClick={() => openStory({ ident: story.ident, key: story.key, title: story.title })}
       aria-label={`${label} for ${story.key}`}
       className="mt-0.5 inline-flex items-center gap-1 rounded border border-gray-300 px-1.5 py-px text-[11px] text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
     >

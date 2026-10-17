@@ -19,7 +19,7 @@ import { fileAnchors, SECTION_HEADER_MARK } from './render.js';
 
 // THE LIBRARY IN REVIEWS (docs/REFERENCE-DOCS.md § Use in reviews) — the shared half every review
 // that may read the workspace's reference library uses: Claude Review (claude-review/), the ticket
-// review (ticket-review/) and This Sprint's "Check against code" (sprint-assess/).
+// review (ticket-review/).
 //
 //   • THE GATE is `docsContextFor(…).usable` (context.ts): the workspace's `docsInReview` switch, a
 //     built document, and agentic AI on here. Off ⇒ the caller passes no `docs` and its prompts, tool
@@ -91,7 +91,7 @@ export function buildDocCitationsField(z: ZodNs) {
 
 // ---- the prompt block ----
 
-export type DocsReviewKind = 'pr' | 'pr_diff_only' | 'ticket' | 'sprint';
+export type DocsReviewKind = 'pr' | 'pr_diff_only' | 'ticket';
 
 const REPORTING = `- Report each passage you relied on in \`docReferences\`: the section link, written from the library root (\`<document>/sections/NN-name.md#anchor\`, not the shorter form CONTENTS.md uses); a quote copied EXACTLY from the section (at most ${REVIEW_DOC_QUOTE_MAX_CHARS} characters; use … to skip words inside it); the verdict; and a one-sentence note. Contradictions first.
 - The server checks every reference: one whose link is not a section of the library, or whose quote is not in that section, is thrown away. Copy the words; do not paraphrase inside the quote.
@@ -112,8 +112,8 @@ ${kind === 'pr_diff_only' ? '- This review has no checkout of the repository: Re
 - Where a finding rests on the library, put its section links in that finding's \`docRefs\` and say in the body what the document requires.
 ${REPORTING}`;
   }
-  const subject = kind === 'ticket' ? 'the code in the pull requests' : 'the code on the default branch';
-  const tool = kind === 'ticket' ? 'submit_ticket_review' : 'submit_assessment';
+  const subject = 'the code in the pull requests';
+  const tool = 'submit_ticket_review';
   return `${nav}
 
 # Checking the story against the library

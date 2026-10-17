@@ -261,7 +261,7 @@ interface TabsState {
   // `bot` is the chip/header label metadata, captured at open time from the ROI row.
   openBotDetailTab: (userId: number, bot: TabBotMeta | null, opts?: OpenOpts) => void;
   // Ensure (and activate) one ticket's PR tab. Keyed per ticket ident. Callers go through
-  // `useOpenTicketTab()` (lib/ticketTab.ts), never this action directly.
+  // `useOpenStory()` (lib/ticketTab.ts), never this action directly.
   openTicketTab: (ticket: TabTicketMeta, opts?: OpenOpts) => void;
 
   syncMeta: (meta: TabMeta) => void; // backfill label on every tab with this prId

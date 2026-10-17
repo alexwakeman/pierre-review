@@ -7,8 +7,8 @@ import { effectiveSprintTab, SPRINT_RAIL_TABS } from './sprintRailModel.js';
 // under Pending. FREE on every tier — no ProBadge, no ProLockPanel, and none of its routes 402:
 //   • Sprint graph   — the tracker's current sprint as a graph (SprintView, GET /api/sprint-graph).
 //     The landing panel. Viewing it stamps `sprint_reads.viewed_at`, which is what lets the worker
-//     read the sprint at all. "Ask Claude" and "Check against code" inside it are agentic and
-//     LOCAL-ONLY, gated on `me.ai` (useSprintAssessOn), never on a Pro capability.
+//     read the sprint at all. "Ask Claude" inside it is agentic and LOCAL-ONLY, gated on `me.ai`
+//     (useSprintAiOn), never on a Pro capability. A ticket opens in its story view.
 //   • Merged so far  — every PR merged in the reporting window (MergedPrsView, GET /api/merged-prs).
 // Both used to be Reports tabs; a legacy `?insightsTab=sprint|merged` lands here (useUrlState).
 //

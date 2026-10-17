@@ -23,7 +23,7 @@ import {
 } from '../../hooks/useStories.js';
 import { AiRunGate } from '../AiSetup.js';
 import { writeClipboard } from '../CopyButton.js';
-import { useOpenTicketTab } from '../../lib/ticketTab.js';
+import { useOpenStory } from '../../lib/ticketTab.js';
 import { CheckIcon, ChevronIcon, CopyIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { RegenProgressBar } from './RegenProgressBar.js';
@@ -54,7 +54,7 @@ import {
 // ⚠ A KEY IS A LINK ONLY WHEN IT IS ONE OF THE RUN'S PICKS (`linkifyTicketKeys`).
 // ⚠ A POINT'S / ACTION'S TICKET CHIP reads "KEY · Title" (the pick's title, wrapping — never cut behind
 // a `title=`), keeps its tracker link, and a picked ticket gains a "PRs" button that opens the ticket
-// tab (`useOpenTicketTab`).
+// view (`useOpenStory`).
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const BODY = 'text-gray-700 dark:text-gray-200';
@@ -478,7 +478,7 @@ function LinkedText({ text, index }: { text: string; index: CandidateIndex }): J
 
 const LINK = 'text-sky-700 hover:underline dark:text-sky-300';
 
-/** A ticket key in the report: opens the ticket tab (its merged and open pull requests) when the key is a
+/** A ticket key in the report: opens its story view (the story and its pull requests) when the key is a
  *  picked candidate; else the tracker link; else plain text. */
 function TicketLink({
   ticket,
@@ -491,14 +491,14 @@ function TicketLink({
   className?: string;
   children?: ReactNode;
 }): JSX.Element {
-  const openTicketTab = useOpenTicketTab();
+  const openStory = useOpenStory();
   const c = index.get(ticket);
   const label = children ?? ticket;
   if (c != null) {
     return (
       <button
         type="button"
-        onClick={() => openTicketTab({ ident: c.ident, key: c.key, title: c.title })}
+        onClick={() => openStory({ ident: c.ident, key: c.key, title: c.title })}
         aria-label={`Pull requests for ${c.key}`}
         className={`${className} ${LINK} text-left`}
       >

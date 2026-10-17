@@ -1,11 +1,8 @@
 import type { JiraStatusCategory, TrackerProvider } from './types.js';
-import type { ReviewDocReference } from './reference-docs.js';
 
 // REPORTS → THIS SPRINT — the shared constants and the pieces the SPRINT GRAPH (`sprint-graph.ts`)
-// builds on: where the list came from, the read state, candidate repos, the status layout (status
-// buckets) and "Check against code" (docs/API.md § This sprint; docs/TRACKERS.md § The sprint list
-// read; docs/CLAUDE-REVIEW.md § Sprint assessment). Pro with the rest of Reports (`periodReports`):
-// every route 402s before any DB work.
+// builds on: where the list came from, the read state and the status layout (status buckets)
+// (docs/API.md § This sprint; docs/TRACKERS.md § The sprint list read). FREE core: no route 402s.
 //
 //   • THE POPULATION is the workspace tracker's CURRENT SPRINT, read by the tracker worker (the FIRST
 //     tracker read that is not triggered by a received pull request — deliberately, and only for a
@@ -16,10 +13,9 @@ import type { ReviewDocReference } from './reference-docs.js';
 //     meaning one of four stages — Not started, In progress, In review, Complete — plus the derived
 //     "Merged, not signed off" column. AUTOMATIC (category, a review/QA name vocabulary, PR evidence;
 //     the tracker's board / workflow order) unless the workspace sets its own (`SprintStatusSettings`).
-//   • THE ASSESSMENT ("Check against code") is a local-only Sonnet 5 agent run over read-only default
-//     branch checkouts of the repos the reader ACCEPTED for the ticket: PLAN (not started / in
-//     progress) or VERIFY (in review / done) against the ticket's itemised criteria (its brief). Its
-//     cited paths are VERIFIED by the server against the checkout; an unverified path is DROPPED.
+//   • "Check against code" (a Sonnet run per ticket over default-branch checkouts) was REMOVED on
+//     2026-10-18 with the sprint drawer; its tables (`sprint_ticket_repos`, `sprint_assessments`) are
+//     dormant (docs/DATA-MODEL.md).
 //   • NOTHING HERE WRITES TO A TRACKER. The write-back was removed (2026-10-12).
 //
 // ⚠ There is no team or person score anywhere on this surface.
@@ -43,35 +39,6 @@ export const SPRINT_TEXT_MAX = {
   title: 300,
   description: 20_000,
   criteria: 20_000,
-} as const;
-
-/** Candidate repos a reader may accept for one ticket. */
-export const SPRINT_REPOS_PER_TICKET_MAX = 6;
-
-/** Suggested (not yet accepted) repos shown per ticket. */
-export const SPRINT_REPO_SUGGESTIONS_MAX = 4;
-
-/** The assessment's model (a user decision). */
-export const SPRINT_ASSESS_MODEL = 'claude-sonnet-5';
-
-/** Default per-run spending cap (US$); `SPRINT_ASSESS_BUDGET_USD` overrides it on the server. */
-export const SPRINT_ASSESS_BUDGET_USD_DEFAULT = 1.5;
-
-/** Agent turns one assessment may take. */
-export const SPRINT_ASSESS_MAX_TURNS = 60;
-
-/** The assessment's caps — the server's validator; the SPA never re-checks. */
-export const SPRINT_ASSESS_CAPS = {
-  /** Characters, after trimming. The tool's schema refuses over-long text (the model rewrites it);
-   *  the server's validator cuts anything that still gets through (with "…"). Two or three sentences. */
-  summary: 400,
-  /** PLAN mode: high-level changes one run may store, and one change's sentence. */
-  planSteps: 6,
-  planChange: 200,
-  /** VERIFY mode: criteria one run may check, one check's evidence sentence, the coverage line. */
-  criterionChecks: 30,
-  evidence: 220,
-  coverage: 300,
 } as const;
 
 // ── Where the list came from ─────────────────────────────────────────────────────────────────────
@@ -122,235 +89,6 @@ export interface SprintReadState {
   error: string | null;
   /** The read hit `SPRINT_TICKETS_MAX`. */
   truncated: boolean;
-}
-
-// ── Candidate repos ──────────────────────────────────────────────────────────────────────────────
-
-export interface SprintRepoRef {
-  repoId: number;
-  /** owner/name */
-  fullName: string;
-}
-
-/** Why code suggested a repo. Shown as the suggestion's reason, plain English. */
-export type SprintRepoReason =
-  /** The GitHub issue lives in this repo. */
-  | 'issue_repo'
-  /** Earlier PRs on tickets in the same epic landed here. */
-  | 'same_epic'
-  /** Earlier PRs on tickets with the same component landed here. */
-  | 'same_component'
-  /** Earlier PRs on tickets in the same Jira project / Linear team landed here. */
-  | 'same_project'
-  /** The repo's name appears in the ticket text. */
-  | 'named_in_ticket'
-  /** A PR on this very ticket is in this repo. */
-  | 'ticket_pr';
-
-export const SPRINT_REPO_REASON_LABEL: Record<SprintRepoReason, string> = {
-  issue_repo: 'The issue is in this repo',
-  same_epic: 'Same epic’s PRs landed here',
-  same_component: 'Same component’s PRs landed here',
-  same_project: 'Same project’s PRs landed here',
-  named_in_ticket: 'Named in the ticket',
-  ticket_pr: 'This ticket has a PR here',
-};
-
-export interface SprintRepoSuggestion extends SprintRepoRef {
-  /** Strongest first; [] only for the workspace's ONLY repo when nothing else points at it. */
-  reasons: SprintRepoReason[];
-  /** Earlier merged PRs behind the history reasons (0 for a text-only reason). */
-  prCount: number;
-  /** Strong enough to be accepted by default: a `ticket_pr`, `issue_repo` or `named_in_ticket` reason,
-   *  a history reason over ≥ SPRINT_REPO_CONFIDENT_MIN_PRS merged PRs, or the workspace's only repo. */
-  confident: boolean;
-}
-
-/** Merged PRs a history reason needs for its suggestion to be confident. */
-export const SPRINT_REPO_CONFIDENT_MIN_PRS = 3;
-
-/** PUT /api/sprint-stories/repos — replace the ACCEPTED set for one ticket (≤ SPRINT_REPOS_PER_TICKET_MAX).
- *  Every id must be a repo of THIS workspace; anything else 400s (`bad_repo`) and nothing is written. */
-export interface SprintReposUpdate {
-  workspaceId: number;
-  ident: string;
-  repoIds: number[];
-}
-
-export interface SprintReposResponse {
-  workspaceId: number;
-  ident: string;
-  accepted: SprintRepoRef[];
-}
-
-// ── The assessment ("Check against code") ────────────────────────────────────────────────────────
-
-/** Bumped when the stored body's SHAPE changes: folded into the run's fingerprint (old runs read
- *  'stale') and a stored body of another shape is served as `body: null, outdated: true`.
- *  Format 6 (2026-10-12): the findings and the revised criteria / description are GONE — the run is
- *  the plan or the criteria check only, over the brief's itemised criteria. */
-export const SPRINT_ASSESS_FORMAT_VERSION = 6;
-
-/** "Check against code" is STAGE-AWARE (format 5). The server picks the mode from the ticket's stage
- *  at start (`sprintAssessModeOf`), stores it on the run and folds it into the fingerprint, so a stage
- *  change makes the run stale.
- *   • 'plan'   (Not started, In progress): no code is expected yet — the run lists the few high-level
- *              changes needed and where (`plan`), never "this may already be done".
- *   • 'verify' (In review, Complete): the code is expected on the default branch — the run checks each
- *              criterion against it and names a covering test (`criterionChecks`, `coverage`). */
-export type SprintAssessMode = 'plan' | 'verify';
-
-export function sprintAssessModeOf(stage: SprintStage): SprintAssessMode {
-  return stage === 'in_review' || stage === 'done' ? 'verify' : 'plan';
-}
-
-/** PLAN mode: one high-level change the ticket needs. */
-export interface SprintPlanStep {
-  /** owner/name — one of the run's accepted repos. */
-  repo: string;
-  /** An existing file or directory the change touches, VERIFIED in the checkout; null when the step
-   *  names a new file (`newPath`) or the path did not verify. */
-  path: string | null;
-  /** A proposed repo-relative path for a NEW file (not verified — it does not exist yet); null otherwise. */
-  newPath: string | null;
-  /** One sentence, ≤ SPRINT_ASSESS_CAPS.planChange. */
-  change: string;
-}
-
-export type SprintCriterionStatus = 'met' | 'partly' | 'not_met' | 'unclear';
-
-export const SPRINT_CRITERION_STATUS_LABEL: Record<SprintCriterionStatus, string> = {
-  met: 'Met',
-  partly: 'Partly met',
-  not_met: 'Not met',
-  unclear: 'Unclear',
-};
-
-/** VERIFY mode: one numbered criterion checked against the default branch. */
-export interface SprintCriterionCheck {
-  /** 1-based: the brief's criterion number (`SprintBrief.criteria[].n`). */
-  n: number;
-  status: SprintCriterionStatus;
-  /** One sentence, ≤ SPRINT_ASSESS_CAPS.evidence. */
-  evidence: string;
-  /** The file showing it, VERIFIED; null when none was cited or it did not verify. */
-  ref: SprintCodeRef | null;
-  /** A test file covering it, VERIFIED; null = no covering test found (or it did not verify). */
-  tests: SprintCodeRef | null;
-}
-
-export interface SprintCodeRef {
-  /** owner/name — one of the run's accepted repos. */
-  repo: string;
-  /** Repo-relative POSIX path, VERIFIED to exist in the checkout. */
-  path: string;
-}
-
-/** Field names are the `submit_assessment` tool's (after server validation). */
-export interface SprintAssessmentBody {
-  /** Which check this was (format 5). */
-  mode: SprintAssessMode;
-  /** The most important things, two or three sentences at most. */
-  summary: string;
-  /** PLAN mode only (≤ SPRINT_ASSESS_CAPS.planSteps); [] in verify mode. */
-  plan: SprintPlanStep[];
-  /** VERIFY mode only, by criterion number; [] in plan mode. */
-  criterionChecks: SprintCriterionCheck[];
-  /** VERIFY mode: one sentence on which criteria have tests; null in plan mode. */
-  coverage: string | null;
-  /** The reference-library passages the check used (docs/REFERENCE-DOCS.md § Use in reviews). Absent
-   *  = it did not read the library. */
-  references?: ReviewDocReference[];
-}
-
-/** What validation removed — stored, behind an ⓘ. */
-export interface SprintAssessmentDropped {
-  /** Cited paths that do not exist in the checkout (or name an unaccepted repo); the text is kept. */
-  paths: number;
-  /** Plan steps / criterion checks that were empty, named an unknown repo or criterion, or were over a
-   *  cap. */
-  items: number;
-}
-
-export type SprintAssessmentStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
-
-export type SprintAssessmentPhase = 'checking_out' | 'reading' | 'writing';
-
-export type SprintAssessmentErrorCode =
-  | 'no_assessment' // the agent finished without calling submit_assessment
-  | 'invalid_assessment' // nothing usable left after validation
-  | 'no_checkout' // no accepted repo could be checked out
-  | 'budget_exceeded'
-  | 'max_turns'
-  | 'auth'
-  | 'runtime'
-  | 'interrupted'
-  | 'failed';
-
-export const SPRINT_ASSESSMENT_ERROR_LABEL: Record<SprintAssessmentErrorCode, string> = {
-  no_assessment: 'Claude finished without an assessment.',
-  invalid_assessment: 'The assessment came back empty.',
-  no_checkout: 'None of the chosen repos could be checked out.',
-  budget_exceeded: 'The run hit its spending limit.',
-  max_turns: 'The run took too many steps.',
-  auth: 'No Claude login or API key found.',
-  runtime: 'The AI runtime is not set up.',
-  interrupted: 'The server restarted during the run.',
-  failed: 'The assessment could not be finished.',
-};
-
-export interface SprintAssessmentRecord {
-  id: number;
-  workspaceId: number;
-  ident: string;
-  model: string;
-  status: SprintAssessmentStatus;
-  /** The check this run does (from the ticket's stage at start); null on runs stored before format 5. */
-  mode: SprintAssessMode | null;
-  /** While queued/running; null once finished. */
-  phase: SprintAssessmentPhase | null;
-  /** The repos and the default-branch commits the run read. */
-  repos: Array<SprintRepoRef & { sha: string | null }>;
-  /** Set only on 'succeeded' AND when the stored body is this format (`SPRINT_ASSESS_FORMAT_VERSION`). */
-  body: SprintAssessmentBody | null;
-  /** 'succeeded', but stored in an older format: the card says it is out of date and offers
-   *  "Check against code" again. Never true for any other status. */
-  outdated: boolean;
-  dropped: SprintAssessmentDropped | null;
-  error: SprintAssessmentErrorCode | null;
-  costUsd: number | null;
-  numTurns: number | null;
-  createdAt: string;
-  completedAt: string | null;
-}
-
-/** 'current' = same ticket text, same default-branch commits and same format as the run read; 'stale'
- *  = the button reads "Check again". null for an unfinished or failed run. */
-export type SprintAssessmentCurrency = 'current' | 'stale' | null;
-
-/** POST /api/sprint-stories/assess — local only (registerAgenticRoutes), Pro. */
-export interface SprintAssessRequest {
-  workspaceId: number;
-  ident: string;
-}
-
-export interface SprintAssessResponse {
-  assessment: SprintAssessmentRecord;
-}
-
-/** GET /api/sprint-stories/assessments/:id (the SPA polls while queued/running) and …/cancel. */
-export interface SprintAssessmentResponse {
-  assessment: SprintAssessmentRecord;
-  currency: SprintAssessmentCurrency;
-}
-
-export type SprintAssessRefusal = 'busy' | 'no_repos' | 'no_ticket' | 'bad_request';
-
-export interface SprintAssessErrorBody {
-  error: SprintAssessRefusal;
-  message: string;
-  /** For 'busy': the run already in flight on this ticket. */
-  runningId?: number;
 }
 
 // ── The list ─────────────────────────────────────────────────────────────────────────────────────

@@ -1821,25 +1821,6 @@ body {
     transition: none;
   }
 }
-/* This sprint's drawer slides in from the right (SprintTicketDrawer.tsx); still where motion is reduced. */
-@keyframes sprint-drawer-in {
-  from {
-    transform: translateX(24px);
-    opacity: 0;
-  }
-  to {
-    transform: none;
-    opacity: 1;
-  }
-}
-.sprint-drawer-in {
-  animation: sprint-drawer-in 160ms ease-out;
-}
-@media (prefers-reduced-motion: reduce) {
-  .sprint-drawer-in {
-    animation: none;
-  }
-}
 .sprint-canvas .sg-label {
   /* To the side of the (possibly enlarged) disc that label placement picked (`--sx`/`--sy` in radii,
      below by default), then at a fixed screen size, then the block's own offset in screen px

@@ -14,8 +14,7 @@ import { sprintTicketSite } from './sprintModel.js';
 // runs). One Haiku answer per question, grounded in the stored graph; the conversation is kept for the
 // visit in a module store, and the completed turn is appended in `useSprintAsk`'s HOOK-level onSuccess
 // (never a `mutate()` callback — closing the panel mid-answer must not lose a billed answer).
-// Ticket keys in an answer are links: a ticket on the graph opens in the drawer (the caller's
-// `TicketRefOpenContext`), any other in its tab.
+// Ticket keys in an answer are links: each opens its story view (`useOpenStory`, via TicketRefLink).
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const EMPTY: SprintAskShownTurn[] = [];

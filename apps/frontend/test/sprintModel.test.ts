@@ -8,16 +8,9 @@ import {
   SPRINT_STATUS_ORDER_MAX,
   type SprintStage,
   type SprintStatusLayoutEntry,
-  type SprintAssessmentBody,
-  type SprintAssessmentCurrency,
-  type SprintAssessmentRecord,
   type SprintStatusLayout,
 } from '@pierre-review/shared';
 import {
-  assessButtonLabel,
-  assessmentProgressLine,
-  assessmentProgressPct,
-  elapsedLabel,
   reviewRuleSentence,
   addBucket,
   bucketsDraftChanged,
@@ -42,46 +35,6 @@ import {
 import { effectiveInsightsTab } from '../src/components/Activity/bottlenecksModel.js';
 import { INSIGHTS_INNER_TABS, SPRINT_INNER_TABS } from '../src/store/filters.js';
 import { effectiveSprintTab, SPRINT_RAIL_TABS } from '../src/components/Activity/sprintRailModel.js';
-
-type Assessed = { assessment: { record: SprintAssessmentRecord; currency: SprintAssessmentCurrency } | null };
-
-function ticket(): Assessed {
-  return { assessment: null };
-}
-
-const BODY: SprintAssessmentBody = { mode: 'plan', summary: 'Summary.', plan: [], criterionChecks: [], coverage: null };
-
-function withAssessment(
-  t: Assessed,
-  status: 'succeeded' | 'running' | 'failed',
-  currency: 'current' | 'stale' | null,
-  opts: { body?: SprintAssessmentBody; outdated?: boolean } = {},
-): Assessed {
-  return {
-    ...t,
-    assessment: {
-      currency,
-      record: {
-        id: 9,
-        workspaceId: 1,
-        ident: 'jira:https://acme.atlassian.net#ACME-1',
-        model: 'claude-sonnet-5',
-        status,
-        mode: 'plan',
-        phase: status === 'running' ? 'reading' : null,
-        repos: [],
-        body: status === 'succeeded' && opts.outdated !== true ? (opts.body ?? BODY) : null,
-        outdated: status === 'succeeded' && opts.outdated === true,
-        dropped: null,
-        error: status === 'failed' ? 'failed' : null,
-        costUsd: null,
-        numTurns: null,
-        createdAt: '2026-10-01T00:00:00Z',
-        completedAt: null,
-      },
-    },
-  };
-}
 
 describe('tab', () => {
   // The sprint graph LEFT Reports for the free This Sprint rail line: it is no Reports tab, and a stray
@@ -293,47 +246,5 @@ describe('status buckets', () => {
     expect(statusOrderSourceLabel('jira_board')).toBe('Your board’s columns');
     expect(statusOrderSourceLabel('fallback')).toBe('Status category, then name');
     expect(statusOrderSourceLabel('override')).toBe('Your buckets');
-  });
-});
-
-describe('assessment button and progress', () => {
-  it('Check against code / Check again / nothing', () => {
-    expect(assessButtonLabel(ticket())).toBe('Check against code');
-    expect(assessButtonLabel(withAssessment(ticket(), 'succeeded', 'current'))).toBeNull();
-    expect(assessButtonLabel(withAssessment(ticket(), 'succeeded', 'stale'))).toBe('Check again');
-    expect(assessButtonLabel(withAssessment(ticket(), 'running', null))).toBeNull();
-    expect(assessButtonLabel(withAssessment(ticket(), 'failed', null))).toBe('Check against code');
-    // An old-format run is offered a fresh check, not "again".
-    expect(assessButtonLabel(withAssessment(ticket(), 'succeeded', 'stale', { outdated: true }))).toBe('Check against code');
-  });
-
-  it('progress line per phase', () => {
-    expect(assessmentProgressLine('queued', null)).toBe('Waiting for a free slot…');
-    expect(assessmentProgressLine('running', 'checking_out')).toBe('Checking out the repos…');
-    expect(assessmentProgressLine('running', 'reading')).toBe('Reading the code…');
-    expect(assessmentProgressLine('running', 'writing')).toBe('Writing the assessment…');
-    // In the run's own mode.
-    expect(assessmentProgressLine('running', 'reading', 'plan')).toBe('Reading the code to plan the work…');
-    expect(assessmentProgressLine('running', 'reading', 'verify')).toBe('Checking each criterion against the code…');
-    expect(assessmentProgressLine('running', 'writing', 'verify')).toBe('Writing up the check…');
-  });
-
-  it('progress bar: phase-based, monotone within a phase, never 100 while running', () => {
-    const q = assessmentProgressPct('queued', null, 10_000);
-    const c = assessmentProgressPct('running', 'checking_out', 10_000);
-    const r0 = assessmentProgressPct('running', 'reading', 0);
-    const r1 = assessmentProgressPct('running', 'reading', 60_000);
-    const r2 = assessmentProgressPct('running', 'reading', 3_600_000);
-    const w = assessmentProgressPct('running', 'writing', 0);
-    expect(q).toBeLessThanOrEqual(5);
-    expect(c).toBeGreaterThan(5);
-    expect(c).toBeLessThanOrEqual(20);
-    expect(r0).toBe(20);
-    expect(r1).toBeGreaterThan(r0);
-    expect(r2).toBeLessThanOrEqual(85);
-    expect(w).toBe(90);
-    expect(elapsedLabel(45_400)).toBe('45s');
-    expect(elapsedLabel(125_000)).toBe('2m 05s');
-    expect(elapsedLabel(-5)).toBe('0s');
   });
 });

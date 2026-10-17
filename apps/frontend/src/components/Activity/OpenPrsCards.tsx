@@ -57,13 +57,15 @@ import {
   stackRollupParts,
   stackIdFor,
   stacksWorthShowing,
+  storyStack,
   type OpenPrsStack,
   type OpenPrsView,
+  type StoryStackInput,
 } from '../../lib/openPrsStacks.js';
 import { useOpenPrsView } from '../../store/openPrsView.js';
 import { useStackStoryCheck } from '../../store/stackStoryCheck.js';
 import { ReviewedAgo } from '../ReviewedAgo.js';
-import { StackStoryCheck } from './StackStoryCheck.js';
+import { TicketStorySection } from './TicketStorySection.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { ClaudeReviewPanel, TicketPillsRow } from './ClaudeReviewCell.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
@@ -119,9 +121,15 @@ import {
 // "Merged (n)" panel lists every MERGED PR linked to the same ticket (any repo, same Jira site),
 // from ONE batched `GET /api/ticket-merged-prs` for the whole board; it never makes a stack of
 // its own, and the header's "n PRs" stays the open count.
-// Between the header and the cards, a collapsed "Story check" panel (StackStoryCheck.tsx) holds the
-// ticket review's WHOLE story — read by `latestRunId` only once expanded; the header adds
-// "reviewed X ago" from the batched states. The PR pane shows only its own share and jumps here.
+// Between the header and the cards, a collapsed "Story" section (TicketStorySection.tsx) holds the
+// WHOLE story — the ticket review's result (else the sprint brief), the ticket as written and the
+// design — read only once expanded; the header adds "reviewed X ago" from the batched states. The PR
+// pane shows only its own share and jumps here.
+//
+// ONE TICKET (`story`): the STORY VIEW (Ticket/TicketTabView.tsx) renders this same component for one
+// ticket — exactly ONE stack, every PR handed in as its rows (detection is not asked which ticket they
+// belong to), drawn even with NO pull request, its Story section OPEN, no collapse, and its "Merged (n)"
+// panel fed from the view's own read. Never a copy of the stack: change the look here, once.
 
 // The chip classes and the CI chip are the shared card shell's (PrCardShell.tsx), so the Pending
 // board's cards wear the same chips.
@@ -333,6 +341,7 @@ export function OpenPrsCards({
       No open PRs here.
     </>
   ),
+  story,
 }: {
   prs: TimelinePr[];
   isLoading: boolean;
@@ -357,6 +366,8 @@ export function OpenPrsCards({
   // ReactNode, not string: the DEFAULT is the all-clear state and leads with a muted tick, while
   // an override ("adjust the repo filter") is plain prose that must NOT wear one.
   emptyLabel?: ReactNode;
+  /** The STORY VIEW: one ticket's stack, drawn even with no PR (see the header). */
+  story?: StoryStackInput;
 }): JSX.Element {
   const { data: users } = useUsers();
   const { data: repos } = useRepos();
@@ -394,8 +405,11 @@ export function OpenPrsCards({
   // reader wants to know about LANDED work (the code review and CI panels are not).
   const ticketReviewOn = aiOn && ticketsOn;
   const ticketIdents = useMemo(
-    () => (ticketData?.prs ?? []).flatMap((p) => cardTickets(p).map((t) => t.ident)),
-    [ticketData],
+    () => [
+      ...(story != null ? [story.ticket.ident] : []),
+      ...(ticketData?.prs ?? []).flatMap((p) => cardTickets(p).map((t) => t.ident)),
+    ],
+    [ticketData, story],
   );
   const { data: ticketStatesData } = useTicketReviewStates(ticketIdents, ticketReviewOn);
   const ticketStates = useMemo(
@@ -439,7 +453,9 @@ export function OpenPrsCards({
   const wantsStacks = grouped && ticketsOn;
   const stacked = useMemo(
     () =>
-      wantsStacks && !ticketGate.heldList && ticketData != null
+      story != null
+        ? storyStack(story, rows, (pr) => cardTickets(detectedTickets.get(pr.id)))
+        : wantsStacks && !ticketGate.heldList && ticketData != null
         ? stackOpenPrs(
             rows,
             (pr) => cardTickets(detectedTickets.get(pr.id)),
@@ -448,16 +464,21 @@ export function OpenPrsCards({
             merged ? (pr) => pr.mergedAt ?? pr.updatedAt : undefined,
           )
         : null,
-    [wantsStacks, ticketGate.heldList, ticketData, rows, detectedTickets, merged],
+    [story, wantsStacks, ticketGate.heldList, ticketData, rows, detectedTickets, merged],
   );
-  const showStacks = stacked != null && stacksWorthShowing(stacked);
+  const showStacks = stacked != null && (story != null || stacksWorthShowing(stacked));
   // Each stack's "Merged (n)" panel: ONE request for every stack on the board, only while the
   // stacks are on screen.
   const mergedKeys = useMemo(() => (showStacks && stacked != null ? mergedPanelKeys(stacked.stacks) : []), [showStacks, stacked]);
-  const { data: mergedData } = useTicketMergedPrs(workspaceId, mergedKeys, ticketsOn && showStacks && !merged);
+  const { data: mergedData } = useTicketMergedPrs(workspaceId, mergedKeys, ticketsOn && showStacks && !merged && story == null);
   const mergedStacks = useMemo(
-    () => (stacked != null ? mergedByStack(stacked.stacks, mergedData) : new Map<string, TicketMergedPr[]>()),
-    [stacked, mergedData],
+    () =>
+      story != null && stacked != null
+        ? new Map(stacked.stacks.map((st) => [st.id, [...story.merged]] as const))
+        : stacked != null
+          ? mergedByStack(stacked.stacks, mergedData)
+          : new Map<string, TicketMergedPr[]>(),
+    [story, stacked, mergedData],
   );
   // "See the whole story in Open PRs" from a PR pane: once that ticket's stack is on the page,
   // open its Story check panel and scroll to it (store/stackStoryCheck.ts). The store opens the
@@ -500,7 +521,7 @@ export function OpenPrsCards({
   if (isError) {
     return <div className="text-sm text-red-500">{merged ? 'Couldn’t load the merged PRs.' : 'Couldn’t load the open PRs.'}</div>;
   }
-  if (rows.length === 0) {
+  if (rows.length === 0 && story == null) {
     return (
       <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
         {emptyLabel}
@@ -570,17 +591,19 @@ export function OpenPrsCards({
             merged={merged ? [] : (mergedStacks.get(stack.id) ?? [])}
             onOpenMerged={openMerged}
             showRollup={!merged}
-            storyWithoutReview={merged}
+            single={story != null}
             review={
-              (ticketReviewOn || merged) && stack.ticket?.ident != null && stack.rows[0] != null
+              // Who starts the check: any PR on the ticket (the story view's merged ones count too).
+              (ticketReviewOn || merged) && stack.ticket?.ident != null && (stack.rows[0]?.pr.id ?? story?.merged[0]?.prId) != null
                 ? {
                     ident: stack.ticket.ident,
                     state: ticketReviewOn ? ticketStates.get(stack.ticket.ident) : undefined,
-                    prId: stack.rows[0].pr.id,
+                    prId: (stack.rows[0]?.pr.id ?? story?.merged[0]?.prId) as number,
                     canCheck: ticketReviewOn,
                   }
                 : null
             }
+            storyState={stack.ticket?.ident != null && ticketReviewOn ? ticketStates.get(stack.ticket.ident) : undefined}
           >
             {stack.rows.map((r) =>
               renderCard(r.pr, {
@@ -755,15 +778,18 @@ function StackCoverage({
 function TicketStack({
   stack,
   review,
+  storyState,
   merged,
   onOpenMerged,
   showRollup = true,
-  storyWithoutReview = false,
+  single = false,
   children,
 }: {
   stack: OpenPrsStack;
-  /** Merged so far: a ticket never reviewed still offers its story (read only when opened). */
-  storyWithoutReview?: boolean;
+  /** The ticket review's state for the Story section (undefined = none / no AI here). */
+  storyState: TicketReviewState | undefined;
+  /** The story view's ONE stack: the Story section starts open, the stack never collapses. */
+  single?: boolean;
   /** false on Reports → "Merged so far": failing CI / ready to merge say nothing about landed work. */
   showRollup?: boolean;
   /** Every merged PR linked to this ticket (the "Merged (n)" panel); [] = no panel. */
@@ -774,8 +800,19 @@ function TicketStack({
   review: { ident: string; state: TicketReviewState | undefined; prId: number; canCheck?: boolean } | null;
   children: ReactNode;
 }): JSX.Element {
-  const collapsed = useOpenPrsView((s) => s.collapsed.includes(stack.id));
-  const toggle = useOpenPrsView((s) => s.toggleCollapsed);
+  const collapsedStored = useOpenPrsView((s) => s.collapsed.includes(stack.id));
+  const collapsed = !single && collapsedStored;
+  const toggleStored = useOpenPrsView((s) => s.toggleCollapsed);
+  const toggle = (id: string): void => {
+    if (!single) toggleStored(id);
+  };
+  // The Story section: the session store's open set in Open PRs (collapsed by default, and the PR
+  // pane's jump opens it); OPEN by default in the story view, local to that mount.
+  const storyStored = useStackStoryCheck((s) => s.open.has(stack.id));
+  const toggleStoryStored = useStackStoryCheck((s) => s.toggle);
+  const [storyLocal, setStoryLocal] = useState(true);
+  const storyOpen = single ? storyLocal : storyStored;
+  const toggleStory = (): void => (single ? setStoryLocal((v) => !v) : toggleStoryStored(stack.id));
   const headingId = useId();
   const listId = useId();
   const t = stack.ticket;
@@ -784,7 +821,7 @@ function TicketStack({
   const rollup = showRollup ? stackRollupParts(stackRollup(stack.rows)) : [];
   const name = t != null ? t.key : 'No ticket';
   // Any PR on the ticket reads its stored row; only a Jira ticket (it has an ident) has one.
-  const storyPrId = t?.ident != null ? (stack.rows[0]?.pr.id ?? null) : null;
+  const storyPrId = t?.ident != null ? (stack.rows[0]?.pr.id ?? merged[0]?.prId ?? null) : null;
 
   // A click on the header's empty space toggles too (the chevron button is the keyboard route).
   const onHeaderClick = (e: MouseEvent<HTMLDivElement>): void => {
@@ -800,18 +837,23 @@ function TicketStack({
         t == null ? 'border-dashed border-gray-300 dark:border-gray-700' : 'border-gray-200 dark:border-gray-800'
       }`}
     >
-      <div onClick={onHeaderClick} className="flex cursor-pointer flex-wrap items-start gap-x-2 gap-y-1.5 px-3 py-3">
-        <button
-          type="button"
-          data-stack-toggle
-          aria-expanded={!collapsed}
-          aria-controls={listId}
-          aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${name}`}
-          onClick={() => toggle(stack.id)}
-          className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-500 hover:bg-gray-200 hover:text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
-        >
-          <ChevronIcon dir={collapsed ? 'right' : 'down'} size={12} />
-        </button>
+      <div
+        onClick={single ? undefined : onHeaderClick}
+        className={`flex flex-wrap items-start gap-x-2 gap-y-1.5 px-3 py-3 ${single ? '' : 'cursor-pointer'}`}
+      >
+        {!single && (
+          <button
+            type="button"
+            data-stack-toggle
+            aria-expanded={!collapsed}
+            aria-controls={listId}
+            aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${name}`}
+            onClick={() => toggle(stack.id)}
+            className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-500 hover:bg-gray-200 hover:text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+          >
+            <ChevronIcon dir={collapsed ? 'right' : 'down'} size={12} />
+          </button>
+        )}
         <div className="min-w-0 flex-1 basis-[16rem]">
           <h3 id={headingId} className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
             {t == null ? (
@@ -893,18 +935,21 @@ function TicketStack({
               ))}
             </span>
           )}
-          <span className="whitespace-nowrap rounded-full bg-white px-2 py-px text-[11px] font-medium text-gray-600 ring-1 ring-gray-200 dark:bg-gray-900 dark:text-gray-300 dark:ring-gray-700">
-            {prCountLabel(stack.rows.length)}
-          </span>
+          {(!single || stack.rows.length > 0) && (
+            <span className="whitespace-nowrap rounded-full bg-white px-2 py-px text-[11px] font-medium text-gray-600 ring-1 ring-gray-200 dark:bg-gray-900 dark:text-gray-300 dark:ring-gray-700">
+              {prCountLabel(stack.rows.length)}
+            </span>
+          )}
         </div>
       </div>
-      {t != null && review != null && (review.state != null || storyWithoutReview) && !collapsed && (
-        <StackStoryCheck
-          stackId={stack.id}
-          ticket={t}
-          state={review.state}
-          storyPrId={review.prId}
-          storyWithoutReview={storyWithoutReview}
+      {t?.ident != null && !collapsed && (
+        <TicketStorySection
+          ticket={{ ...t, ident: t.ident }}
+          state={storyState}
+          storyPrId={storyPrId}
+          prCount={stack.rows.length + merged.length}
+          open={storyOpen}
+          onToggle={toggleStory}
         />
       )}
       <ul

@@ -1,8 +1,9 @@
 // A TICKET'S OWN STORY, read-only, as markdown — two mounts of one body:
 //
-//   StoryDisclosure  — the collapsible "Story" in each Story check block (TicketCoverage.tsx): the
-//                      key linked to Jira, the title, description and acceptance criteria, and for
-//                      a Jira ticket the field the criteria come from, with the picker.
+//   StoryDisclosure  — the collapsible "Story" in each Story check block (TicketCoverage.tsx) and the
+//                      "As written in Jira" of the Story section (Activity/TicketStorySection.tsx):
+//                      the key linked to Jira, the title, description and acceptance criteria, and
+//                      for a Jira ticket the field the criteria come from, with the picker.
 //   TicketStoryModal — the Open PRs ticket key's modal: status, type, assignee, the story, and a
 //                      small "Open in Jira".
 //
@@ -144,16 +145,20 @@ export function StoryDisclosure({
   jiraRef,
   stored,
   url,
+  label = 'Story',
 }: {
-  prId: number;
+  /** Any PR on the ticket (the stored tracker row is read through it); null = none, so only `stored`. */
+  prId: number | null;
   jiraRef: TicketRef | null;
   // In order of preference: the latest ticket review's snapshot, then an older run's ticket.
   stored: readonly (ClaudeReviewTicket | null | undefined)[];
   url: string | null;
+  /** The toggle's words. */
+  label?: string;
 }): JSX.Element | null {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
-  const source = storySourceOf(jiraRef, stored);
+  const source = storySourceOf(prId != null ? jiraRef : null, stored);
   if (source.kind === 'none') return null;
   const fallback = stored.find((t): t is ClaudeReviewTicket => t != null) ?? null;
   return (
@@ -166,12 +171,13 @@ export function StoryDisclosure({
         className="inline-flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-50"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} className="shrink-0" />
-        Story
+        {label}
       </button>
       {open && (
         <div id={bodyId} className="mt-1.5 rounded border border-gray-200 p-2 dark:border-gray-800">
           {source.kind === 'jira' ? (
-            <JiraStory prId={prId} jiraRef={source.ref} fallback={fallback} />
+            // `source` is 'jira' only with a PR to read through (above).
+            prId != null && <JiraStory prId={prId} jiraRef={source.ref} fallback={fallback} />
           ) : (
             <StoredStory ticket={source.ticket} url={url} />
           )}

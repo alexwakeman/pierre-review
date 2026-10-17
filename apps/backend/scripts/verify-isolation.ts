@@ -3893,10 +3893,11 @@ check(
 // Workspace ids arrive in BODIES, so `sprint_ticket_repos` carries named composite FKs onto
 // repos(id, account_id) and workspaces(id, account_id): a cross-account pair fails in the database.
 // MUTATION CHECK: drop the accountId predicate from `loadGraphTickets` (db/sprint-graph.ts) /
-// `storedSprintBriefs` / `graphPrsFor` / `acceptedSprintRepos` / `loadSprintAssessment` /
-// `readSprintTicket` and the matching check goes red.
+// `storedSprintBriefs` / `graphPrsFor` / `readSprintTicket` and the matching check goes red
+// (`getTicketStory` is guarded upstream — see its checks). (`sprint_ticket_repos` / `sprint_assessments` are DORMANT since "Check against code" was
+// removed; only their structural FK is still pinned here.)
 {
-  console.log('\nsprint_tickets + sprint_ref_tickets + sprint_briefs + sprint_ticket_repos + sprint_assessments');
+  console.log('\nsprint_tickets + sprint_ref_tickets + sprint_briefs + sprint_ticket_repos (dormant)');
   const { trackerTicketIdent } = await import('@pierre-review/shared');
   const SITE = 'https://acme.atlassian.net';
   const ident = trackerTicketIdent('jira', SITE, 'SPR-1');
@@ -3932,10 +3933,8 @@ check(
       })
       .execute();
   }
-  const { getSprintGraph, getSprintTicketDetail } = await import('../src/db/sprint-graph.js');
-  const { acceptedSprintRepos, setSprintRepos } = await import('../src/db/sprint-ticket-repos.js');
+  const { getSprintGraph, getTicketStory } = await import('../src/db/sprint-graph.js');
   const { readSprintTicket } = await import('../src/db/sprint-store.js');
-  const { loadSprintAssessment, cancelSprintAssessment } = await import('../src/review/sprint-assess/manager.js');
   const ssA = await getSprintGraph(1, defaultA, { aiEnabled: true, now: now.getTime() });
   check(
     "getSprintGraph(A) lists A's ticket only",
@@ -3961,14 +3960,15 @@ check(
     check("the composite FK refuses B's brief in A's workspace", briefFk);
     const graphA = await getSprintGraph(1, defaultA, { aiEnabled: true, now: now.getTime() });
     check("getSprintGraph(A) never shows B's brief on the shared ident", graphA.nodes[0]?.brief.summary == null);
-    const detailCross = await getSprintTicketDetail(1, defaultB, ident, {
-      aiEnabled: true,
-      now: now.getTime(),
-      prsOf: async () => {
-        throw new Error('must not be asked');
-      },
-    });
-    check("getSprintTicketDetail(A, B's workspace) is found:false", detailCross.found === false);
+    // The story view's lean read (GET /api/ticket-story). ⚠ NOT a mutation check of its own row
+    // predicate (tried: dropping `getTicketStory`'s accountId leaves these green). The guard that holds is
+    // UPSTREAM — the tracker site is read through the account (`workspaceSite`, so A asking about B's
+    // workspace gets no site → found:false) and B's row cannot sit in A's workspace (the composite FK);
+    // the row read's own accountId is defence in depth.
+    const storyCross = await getTicketStory(1, defaultB, ident, { aiEnabled: true });
+    check("getTicketStory(A, B's workspace) is found:false", storyCross.found === false && storyCross.brief == null);
+    const storyA = await getTicketStory(1, defaultA, ident, { aiEnabled: true });
+    check("getTicketStory(A) reads A's ticket, never B's brief", storyA.ticket?.title === 'A sprint ticket' && storyA.brief == null);
     check("storedSprintBriefs(A, B's workspace) is empty", (await briefs.storedSprintBriefs(1, defaultB, [ident])).size === 0);
     check("storedSprintBriefs(B, B's workspace) holds B's brief", (await briefs.storedSprintBriefs(2, defaultB, [ident])).size === 1);
   }
@@ -4063,19 +4063,6 @@ check(
   }
   check("knownTicketsFor(A) reads A's referenced ticket, never B's", (await knownTicketsFor(1, 'jira', SITE, ['REF-9'])).get('REF-9')?.status === 'A status');
   check("knownTicketsFor(B) reads B's referenced ticket, never A's", (await knownTicketsFor(2, 'jira', SITE, ['REF-9'])).get('REF-9')?.status === 'B status');
-  check(
-    "setSprintRepos(A, wsA, ident, [B.repo]) → bad_repo",
-    (await setSprintRepos(1, defaultA, ident, [B.repoId], () => 'manual')).ok === false,
-  );
-  await setSprintRepos(1, defaultA, ident, [A.repoId], () => 'manual');
-  check("acceptedSprintRepos(A) holds A's repo", (await acceptedSprintRepos(1, defaultA, [ident])).get(ident)?.[0]?.repoId === A.repoId);
-  check("acceptedSprintRepos(B, wsA) is empty", (await acceptedSprintRepos(2, defaultA, [ident])).size === 0);
-  {
-    const { effectiveSprintRepos } = await import('../src/db/sprint-ticket-repos.js');
-    check("effectiveSprintRepos(B, wsA) sees no ticket and no repo", (await effectiveSprintRepos(2, defaultA, [ident])).size === 0);
-    check("effectiveSprintRepos(A) is A's SAVED set", (await effectiveSprintRepos(1, defaultA, [ident])).get(ident)?.defaulted === false);
-  }
-  check("acceptedSprintRepos(B, wsB) never reads A's accepted repo", (await acceptedSprintRepos(2, defaultB, [ident])).size === 0);
   let fkRefused = false;
   try {
     await db
@@ -4086,16 +4073,6 @@ check(
     fkRefused = true;
   }
   check("the composite FK refuses A's ticket accepting B's repo", fkRefused);
-  const [asA] = await db
-    .insert(schema.sprintAssessments)
-    .values({ accountId: 1, workspaceId: defaultA, ident, model: 'claude-sonnet-5', status: 'running', fingerprint: 'f', textHash: 'h', reposJson: [] })
-    .returning()
-    .execute();
-  check("loadSprintAssessment(B, A's id) is null (IDOR blocked)", (await loadSprintAssessment(2, asA!.id)) === null);
-  check(
-    "cancelSprintAssessment(B, A's id) is null and leaves A's run alone",
-    (await cancelSprintAssessment(2, asA!.id)) === null && (await loadSprintAssessment(1, asA!.id))?.status === 'running',
-  );
   // The status layout override (workspaces.sprint_statuses; db/sprint-status-settings.ts). A write by
   // A naming B's workspace must touch nothing — at the query layer AND over HTTP, where the route
   // refuses rather than writing onto A's Default. MUTATION CHECK: drop the accountId predicate from

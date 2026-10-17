@@ -219,7 +219,7 @@ posts **one** GitHub review (inline + body + verdict).
 ## Reference docs in a review
 
 When the PR's workspace has "Use reference docs in Claude Review" on and its library has a built
-document, the PR review, the ticket review and This Sprint's "Check against code" may READ the library
+document, the PR review and the ticket review may READ the library
 (a read-only path-guard root), get the navigation block in their system prompt, and report the passages
 they relied on in `docReferences` (a PR finding also carries `docRefs`). The server checks every one (the
 link names a built section; the quote is in it) and drops the rest. Off ⇒ prompts, tools and shapes are
@@ -1987,50 +1987,15 @@ DELETED (2026-10-11, "not adding anything"): no `GET /api/story-health`, no pane
   report (`STORY_ISSUE_RATES_HELD`: Spec gaps — saturated, gap types κ 0.13–0.47); the cards still show
   it.
 
-## Sprint assessment (Activity → This Sprint → "Check against code")
+## Sprint assessment — REMOVED (2026-10-18)
 
-One Sonnet 5 run per ticket, on demand, that checks the ticket against the code. LOCAL ONLY
-(`registerAgenticRoutes`); free — no Pro gate, the SPA gates it on `me.ai`.
-
-- **STAGE-AWARE**: the SERVER picks the MODE from the stored ticket's stage under the workspace's status
-  layout (`sprintTicketStage` → shared `sprintAssessModeOf`), never the client. It is stored on the run
-  (`sprint_assessments.mode`), folded into the fingerprint (a ticket moving from In progress to In
-  review makes a plan STALE) and picks the system prompt, the tool's shape and what the validator keeps.
-  - **PLAN** (Not started, In progress): no code is expected. The prompt FORBIDS looking for an existing
-    implementation or saying the work "may already be done". It returns `plan` — ≤ 6 high-level changes
-    `{repo, path | newPath, change}`: `path` an EXISTING file or directory, verified in the checkout;
-    `newPath` a proposed new file (a clean relative path that does NOT exist).
-  - **VERIFY** (In review, Complete): it returns `criterionChecks` — one per numbered criterion `{n, status:
-    met | partly | not_met | unclear, evidence, ref, tests}`, `ref` and `tests` verified like any cited
-    path — and `coverage`, one sentence on which criteria have tests.
-  - `summary` is two or three sentences (≤ 400). The SPA shows the result as the **Code check**
-    (`SprintCodeCheck.tsx`; Copy via `lib/copy.ts` `sprintCodeCheckMarkdown`) and a running check as a
-    PHASE-BASED progress bar with the phase in words, the elapsed time and Cancel.
-- ⚠ **FORMAT 6 (2026-10-12): NO FINDINGS, NO REVISIONS.** The anchored findings, `revisedCriteria` and
-  `revisedDescription` are gone from the prompt, the tool's shape, the validator and the wire (anything of
-  the kind in an answer is ignored); `SPRINT_ASSESS_FORMAT_VERSION` 6 makes every older run `stale`. A
-  stored format-5 body still READS (its extra fields ignored).
-- **THE CRITERIA ARE THE BRIEF'S** (§ Sprint briefs): the ticket's CURRENT brief — itemised one short
-  sentence each, DERIVED from the description when the ticket has none (the prompt says so) — else the
-  ticket's own as written. `n` numbers them.
-- **Where**: `src/review/sprint-assess/` — `agent.ts`, `prompts.ts`, `schema.ts`, `validate.ts`,
-  `manager.ts`, `routes.ts`. Contract: `packages/shared/src/sprint-stories.ts`. Routes: docs/API.md §
-  This sprint.
-- **Input**: the ticket (title, description, criteria) NONCE-FENCED as untrusted, read-only
-  DEFAULT-BRANCH checkouts of the ticket's EFFECTIVE repos (`effectiveSprintRepos`: the reader's saved
-  set, else the CONFIDENT suggestions; none → `422 no_repos`), and a fenced **Referenced tickets** block
-  (`referencesForPrompt`: the drawer's references — tracker links, then the brief's — with the status
-  Limn holds), treated as facts; a `concurrent` ticket may be named "coordinate with KEY".
-- **The agent**: Read/Glob/Grep behind the path guard, `Bash` denied, `...ISOLATED_MCP` +
-  `ownToolsOnlyHook(['sprint'])`, ONE `submit_assessment` tool (first submit wins). Budget
-  `SPRINT_ASSESS_BUDGET_USD` (default $1.50), `SPRINT_ASSESS_MAX_TURNS` (60). It shares the review
-  pool (`registerReviewSlotPeer`; a PR-review click goes first). Spend: feature `sprint_assess`.
-- **Validation** (`SPRINT_ASSESS_CAPS`): the tool's zod `.max` caps refuse over-long text; whatever still
-  gets through is cut with "…"; a cited path must exist inside an accepted checkout, else the PATH is
-  dropped and the sentence kept (counted, shown only behind an ⓘ). Nothing left → `invalid_assessment`.
-- **Currency**: fingerprint = `SPRINT_ASSESS_FORMAT_VERSION` + the MODE today's stage asks for + ticket
-  text hash + sorted (repoId, synced default-branch SHA), checkable from the DB; stale → "Check again".
-  One run per (account, ticket), claimed synchronously; a crash orphan is failed `interrupted` at boot.
+"Check against code" (one Sonnet 5 run per ticket over default-branch checkouts, PLAN / VERIFY) was
+REMOVED with the sprint drawer: `src/review/sprint-assess/`, its three routes, its rate-limit tiers, the
+repo picker (`PUT /api/sprint-stories/repos`, `db/sprint-ticket-repos.ts`, `db/sprint-repo-suggest.ts`),
+`SPRINT_ASSESS_*` and the SPA's `SprintAssessment` / `SprintCodeCheck` are gone. A ticket now opens in the
+STORY VIEW (docs/FRONTEND.md § The story view), whose Story section shows the ticket review's result or
+the sprint brief. Its tables `sprint_assessments` + `sprint_ticket_repos` are DORMANT (docs/DATA-MODEL.md;
+no drop migration). Old `sprint_assess` rows in `ai_usage` stay as history.
 
 ## Sprint briefs (Activity → This Sprint, the graph)
 
@@ -2075,15 +2040,13 @@ criteriaDerived, references}`. The graph's text edges and its ghost chains come 
   text never names dropped, every quote verified, (key, relation) repeats once). A `why` over the cap is
   DROPPED alone (null — never cut, never a refused brief); a link reason for a key the input did not list
   is dropped. Link reasons share `references_json`, tagged `link: true` (`SprintBriefStoredReference`, no
-  migration); `sprintBriefOf` splits them into `linkReasons`. The drawer's references and the graph's
-  edges carry `why` (a tracker edge that wins over the text's reading of the same tie keeps its reason).
+  migration); `sprintBriefOf` splits them into `linkReasons`. The graph's edges carry `why` (a tracker edge that wins over the text's reading of the same tie keeps its reason).
   ONE retry on a refused answer, both calls billed.
 - **COST**: one `cheapComplete` per ticket (Haiku 5.5, tool-less, connectors isolated), 4 at a time,
   recorded under feature `sprint_briefs`; the pass stops STARTING calls at `SPRINT_BRIEF_BUDGET_USD`
   (env, default $1).
 - **EDGES** (`db/sprint-graph-fold.ts`): a reference `depends_on` / `concurrent` / `builds_on` /
-  `supersedes` draws an edge from the ticket to the named one; `out_of_scope` / `context` draw none (the
-  drawer lists them). A blocking tracker link draws `depends_on` with `source: 'tracker'`.
+  `supersedes` draws an edge from the ticket to the named one; `out_of_scope` / `context` draw none. A blocking tracker link draws `depends_on` with `source: 'tracker'`.
 
 ## Sprint themes (Activity → This Sprint, "Group by → Theme")
 

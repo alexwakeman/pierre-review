@@ -543,20 +543,16 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/story-health/label/cancel')).toEqual(['read']);
   });
 
-  // This sprint: the refresh kicks a tracker read, the assess POST bills a Sonnet run, Ask bills one
-  // Haiku completion per turn; everything else is a DB read. Nothing writes to a tracker.
+  // This sprint: the refresh kicks a tracker read, Ask bills one Haiku completion per turn; everything
+  // else is a DB read. Nothing writes to a tracker. "Check against code" is gone.
   it('tiers This sprint per route', () => {
     expect(tiers('GET', '/api/sprint-graph')).toEqual(['read']);
-    expect(tiers('GET', '/api/sprint-graph/ticket')).toEqual(['read']);
     expect(tiers('POST', '/api/sprint-graph/ask')).toEqual(['ai', 'ai_hourly']);
-    expect(tiers('PUT', '/api/sprint-stories/repos')).toEqual(['read']);
     expect(tiers('PUT', '/api/sprint-stories/statuses')).toEqual(['read']);
-    // The ticket tab: DB-only, decided.
+    // The story view (the ticket tab): DB-only, decided.
     expect(tiers('GET', '/api/ticket-prs')).toEqual(['read']);
+    expect(tiers('GET', '/api/ticket-story')).toEqual(['read']);
     expect(tiers('POST', '/api/sprint-stories/refresh')).toEqual(['search', 'read']);
-    expect(tiers('POST', '/api/sprint-stories/assess')).toEqual(['ai', 'ai_hourly']);
-    expect(tiers('GET', '/api/sprint-stories/assessments/7')).toEqual(['read']);
-    expect(tiers('POST', '/api/sprint-stories/assessments/7/cancel')).toEqual(['read']);
   });
 
   // /api/pro/bot-themes — the revived Bots "What they're flagging" panel. Both tiers land via

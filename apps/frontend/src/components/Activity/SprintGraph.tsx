@@ -195,7 +195,7 @@ import { referenceQuote, referenceWhy } from './sprintReferences.js';
 // two fingers pinch-zoom. Until the reader moves the view themselves, it FOLLOWS Fit while a re-layout
 // animates (a grouping switch re-arms that), so a new arrangement opens framed.
 //
-// Every node is a focusable `<g role="button">` (Enter / Space opens the drawer), and a visually hidden
+// Every node is a focusable `<g role="button">` (Enter / Space opens its story view), and a visually hidden
 // list repeats the tickets for screen readers.
 
 interface SimNode extends SimulationNodeDatum {

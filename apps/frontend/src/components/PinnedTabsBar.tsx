@@ -26,6 +26,7 @@ import {
   ResolveIcon,
   ThreadsIcon,
 } from './Icons.js';
+import { storyTabLabels } from '../lib/ticketTab.js';
 
 const MetricsIcon = (
   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -274,19 +275,20 @@ function TabChip({
       ),
     };
   } else if (tab.kind === 'ticket') {
-    // One ticket's PRs (the ticket tab) — labelled with the tracker key captured at open time (or
-    // parsed off the ident when the tab was re-created from a URL).
+    // The STORY VIEW (the ticket tab: one ticket's story and pull requests) — labelled with the tracker
+    // key captured at open time (or parsed off the ident when the tab was re-created from a URL). The
+    // words are `storyTabLabels` (lib/ticketTab.ts): "KEY · Story", tooltip "KEY: story and pull requests".
     // ⚠ Not cosmetic: without this branch the tab falls through to the PR ladder below.
-    const key = tab.ticketMeta?.key ?? 'Ticket';
+    const words = storyTabLabels(tab.ticketMeta?.key);
     cfg = {
-      title: `${key} — pull requests`,
-      closeAria: 'Close ticket tab',
+      title: words.title,
+      closeAria: words.closeAria,
       body: (
         <>
           <span aria-hidden="true" className="shrink-0">
             <TicketIcon />
           </span>
-          <span className={chipLabelClass(active, 'sky')}>{key}</span>
+          <span className={chipLabelClass(active, 'sky')}>{words.chip}</span>
         </>
       ),
     };

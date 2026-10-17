@@ -19,7 +19,6 @@ import {
   storyUnclearCriteriaShown,
   storyReferencesByKey,
   type KnownTicket,
-  type SprintAssessmentRecord,
   type StoryCriterionLabel,
   type StoryDependencyKind,
   type StoryIssueInput,

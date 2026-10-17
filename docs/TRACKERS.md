@@ -189,8 +189,8 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only st
   - **Depth 1** (`sprintReferencedKeys`, pure): every key the in-sprint rows NAME — every tracker link,
     plus shared `ticketMentionsInText` over description + criteria (a link on this site always, a bare
     key only in a project the workspace reads or the ticket's own) — minus the sprint's own keys,
-    ≤ `SPRINT_REF_LOOKUP_MAX` (200). All of them, so the drawer can say "BMD-343 · Done" for a ticket
-    named only as context.
+    ≤ `SPRINT_REF_LOOKUP_MAX` (200). All of them, so a ticket named only as context still has its status
+    and title (and the story view its text).
   - **Depth 2–3**: what a GHOST points at through an EDGE (a blocking link, or its CURRENT brief's
     depends_on / concurrent / builds_on / supersedes reference) that nothing stores yet — the graph
     fold's `missing` (`db/sprint-graph-fold.ts`, the SAME fold the page draws), bounded so the graph

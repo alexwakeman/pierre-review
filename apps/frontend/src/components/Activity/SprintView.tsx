@@ -6,17 +6,16 @@ import {
   SPRINT_TICKETS_MAX,
   sprintSourceTitle,
 } from '@pierre-review/shared';
-import { useSprintAssessOn, useSprintGraph, useSprintRefresh, useSprintRefreshing } from '../../hooks/useSprintStories.js';
+import { useSprintAiOn, useSprintGraph, useSprintRefresh, useSprintRefreshing } from '../../hooks/useSprintStories.js';
+import { useOpenStory } from '../../lib/ticketTab.js';
 import { useFilters } from '../../store/filters.js';
 import { GearIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { SprintPathsStrip } from './SprintPathsStrip.js';
 import { pathsWriting, sprintDatesLine } from './sprintPathsModel.js';
-import { TicketRefOpenContext, type TicketRefOpener } from '../TicketRefLink.js';
 import { SprintAskPanel } from './SprintAskPanel.js';
 import { SprintGraph } from './SprintGraph.js';
 import { SprintStatusSettings } from './SprintStatusSettings.js';
-import { SprintTicketDrawer } from './SprintTicketDrawer.js';
 import {
   DEFAULT_VISIBILITY,
   NO_EPIC,
@@ -53,8 +52,9 @@ import {
 
 // This Sprint (its own rail line, FREE) — THE SPRINT GRAPH (GET /api/sprint-graph): the tracker's current sprint as a
 // graph of tickets (plus the GHOST tickets outside the sprint they reach), their links and their pull
-// requests. Toolbar (title + ⓘ, Ask Claude, statuses, Refresh), filters, the canvas (SprintGraph), the
-// drawer for one ticket (SprintTicketDrawer) and "Ask Claude about this sprint" (SprintAskPanel).
+// requests. Toolbar (title + ⓘ, Ask Claude, statuses, Refresh), filters, the canvas (SprintGraph) and
+// "Ask Claude about this sprint" (SprintAskPanel). A ticket clicked on the canvas opens its STORY VIEW
+// (`useOpenStory`, the ticket tab with its Story section open) — the drawer is gone.
 // Filters HIDE what they set aside (and any halo left empty); the tickets left re-pack and the view fits
 // them (`filterGraph`, `filterKey`). A selected node dims everything beyond one (or two) links. The VIEW row decides what is DRAWN at all — shipped ghosts and the faint link kinds are
 // off by default (`visibleGraph`) — and how tickets GROUP (Epic · Theme · Section · Dependencies · None, remembered per
@@ -110,12 +110,12 @@ export function SprintView(): JSX.Element {
     };
   }, [awaitRead, readDone, refresh.isError, refetch]);
   const fetchingSlow = useLingering(isFetching && !isLoading, FETCH_SHOW_AFTER_MS);
-  const askOn = useSprintAssessOn();
+  const askOn = useSprintAiOn();
+  const openStory = useOpenStory();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [filters, setFilters] = useState<SprintGraphFilters>(NO_FILTERS);
   const [selected, setSelected] = useState<string | null>(null);
-  const [drawer, setDrawer] = useState<string | null>(null);
   /** Bumped on every open, so the graph frames the ticket (and its links) even when it was selected. */
   const [frameRequest, setFrameRequest] = useState(0);
   /** A card clicked (SprintPathsStrip): the graph frames and highlights its tickets; [] = back to Fit, no highlight. */
@@ -172,42 +172,15 @@ export function SprintView(): JSX.Element {
     writeSplitAssignee(safeLocalStorage(), on);
   }, []);
 
-  const open = useCallback((ident: string): void => {
-    setSelected(ident);
-    setDrawer(ident);
-    setFrameRequest((n) => n + 1);
-  }, []);
-  const closeDrawer = useCallback((): void => {
-    const ident = drawer;
-    setDrawer(null);
-    if (ident == null) return;
-    // Hand focus back to the node the drawer was opened for.
-    requestAnimationFrame(() => {
-      const el = document.querySelector<SVGGElement>(`[data-sg-node="${CSS.escape(ident)}"]`);
-      el?.focus();
-    });
-  }, [drawer]);
-  // Escape closes the drawer and NOTHING ELSE. The app's global Escape (useKeyboard: "leave this tab for
-  // the Timeline") listens on window, so it also fired — closing the drawer threw the reader out to the
-  // Timeline, and coming back re-ran the graph's opening animation. Handled on `document` (bubbling, so a
-  // menu inside the drawer that takes Escape first still wins), which runs before any window listener.
-  useEffect(() => {
-    if (drawer == null) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape' || e.defaultPrevented) return;
-      e.stopPropagation();
-      closeDrawer();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [drawer, closeDrawer]);
-  const opener = useCallback<TicketRefOpener>(
-    (t) => {
-      if (!idents.has(t.ident)) return false;
-      open(t.ident);
-      return true;
+  // A ticket clicked on the canvas: select it there (so Back finds it framed) and open its story view.
+  const open = useCallback(
+    (ident: string): void => {
+      setSelected(ident);
+      setFrameRequest((n) => n + 1);
+      const node = nodes.find((n) => n.ident === ident);
+      if (node != null) openStory({ ident, key: node.key, title: node.title !== '' ? node.title : null });
     },
-    [idents, open],
+    [nodes, openStory],
   );
 
   if (isError) return <p className="text-sm text-rose-700 dark:text-rose-400">Could not load this sprint.</p>;
@@ -241,135 +214,123 @@ export function SprintView(): JSX.Element {
   };
 
   return (
-    <TicketRefOpenContext.Provider value={opener}>
-      <div data-testid="sprint-view" className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-800 dark:text-gray-100">
-            {title}
-            <InfoButton title="Reading the sprint graph">
-              <GraphInfo />
-            </InfoButton>
-          </h3>
-          {datesLine != null && (
-            <span data-testid="sprint-dates" className="text-xs text-gray-600 dark:text-gray-300">
-              {datesLine}
-            </span>
-          )}
-          {!reading && nodes.length > 0 && (
-            <span className={`text-xs ${MUTED}`}>
-              {plural(sprintCount, 'ticket')} · {ghostCount} outside the sprint · {plural(shown.edges.length, 'link')}
-            </span>
-          )}
-          {reading && <span className={`text-xs ${MUTED}`}>Reading the sprint…</span>}
-          <span className="ml-auto" />
-          {showAsk && (
-            <button
-              type="button"
-              onClick={() => setAskOpen((o) => !o)}
-              aria-pressed={askOpen}
-              className="inline-flex items-center gap-1 rounded border border-ai-border px-2 py-0.5 text-xs font-medium text-ai-ink hover:bg-ai-surface-2"
-            >
-              <SparkleIcon size={12} className="text-ai-signal" />
-              Ask Claude
-            </button>
-          )}
-          <button type="button" onClick={() => setSettingsOpen((o) => !o)} aria-expanded={settingsOpen} className={TOOL_BUTTON}>
-            <GearIcon size={12} />
-            Statuses
-          </button>
-          <button type="button" onClick={startRefresh} disabled={refreshing || progress?.label === 'Reading the sprint'} className={TOOL_BUTTON}>
-            <RefreshIcon size={12} className={progress?.kind === 'busy' ? 'animate-spin motion-reduce:animate-none' : undefined} />
-            Refresh
-          </button>
-        </div>
-        {settingsOpen && data.statusLayout != null && <SprintStatusSettings workspaceId={data.workspaceId} layout={data.statusLayout} />}
-        {data.read.error != null && <p className="text-xs text-rose-700 dark:text-rose-400">{data.read.error}</p>}
-        {(data.read.truncated || data.ghostsTruncated || (data.aiEnabled && data.briefs.pending > 0)) && (
-          <p className={`text-xs ${MUTED}`}>
-            {[
-              data.read.truncated ? `Showing the first ${SPRINT_TICKETS_MAX} tickets.` : null,
-              data.ghostsTruncated ? `Showing ${SPRINT_GHOST_MAX} tickets outside the sprint.` : null,
-              data.aiEnabled && data.briefs.pending > 0 ? `Summarising ${plural(data.briefs.pending, 'ticket')}…` : null,
-            ]
-              .filter(Boolean)
-              .join(' ')}
-          </p>
+    <div data-testid="sprint-view" className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-800 dark:text-gray-100">
+          {title}
+          <InfoButton title="Reading the sprint graph">
+            <GraphInfo />
+          </InfoButton>
+        </h3>
+        {datesLine != null && (
+          <span data-testid="sprint-dates" className="text-xs text-gray-600 dark:text-gray-300">
+            {datesLine}
+          </span>
         )}
+        {!reading && nodes.length > 0 && (
+          <span className={`text-xs ${MUTED}`}>
+            {plural(sprintCount, 'ticket')} · {ghostCount} outside the sprint · {plural(shown.edges.length, 'link')}
+          </span>
+        )}
+        {reading && <span className={`text-xs ${MUTED}`}>Reading the sprint…</span>}
+        <span className="ml-auto" />
+        {showAsk && (
+          <button
+            type="button"
+            onClick={() => setAskOpen((o) => !o)}
+            aria-pressed={askOpen}
+            className="inline-flex items-center gap-1 rounded border border-ai-border px-2 py-0.5 text-xs font-medium text-ai-ink hover:bg-ai-surface-2"
+          >
+            <SparkleIcon size={12} className="text-ai-signal" />
+            Ask Claude
+          </button>
+        )}
+        <button type="button" onClick={() => setSettingsOpen((o) => !o)} aria-expanded={settingsOpen} className={TOOL_BUTTON}>
+          <GearIcon size={12} />
+          Statuses
+        </button>
+        <button type="button" onClick={startRefresh} disabled={refreshing || progress?.label === 'Reading the sprint'} className={TOOL_BUTTON}>
+          <RefreshIcon size={12} className={progress?.kind === 'busy' ? 'animate-spin motion-reduce:animate-none' : undefined} />
+          Refresh
+        </button>
+      </div>
+      {settingsOpen && data.statusLayout != null && <SprintStatusSettings workspaceId={data.workspaceId} layout={data.statusLayout} />}
+      {data.read.error != null && <p className="text-xs text-rose-700 dark:text-rose-400">{data.read.error}</p>}
+      {(data.read.truncated || data.ghostsTruncated || (data.aiEnabled && data.briefs.pending > 0)) && (
+        <p className={`text-xs ${MUTED}`}>
+          {[
+            data.read.truncated ? `Showing the first ${SPRINT_TICKETS_MAX} tickets.` : null,
+            data.ghostsTruncated ? `Showing ${SPRINT_GHOST_MAX} tickets outside the sprint.` : null,
+            data.aiEnabled && data.briefs.pending > 0 ? `Summarising ${plural(data.briefs.pending, 'ticket')}…` : null,
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        </p>
+      )}
 
-        {nodes.length > 0 && (
-          <SprintPathsStrip paths={data.paths ?? null} status={data.pathsStatus} aiEnabled={data.aiEnabled} signals={data.signals ?? []} onFocus={focusStory} />
-        )}
-        {nodes.length === 0 ? (
-          !reading && <p className={`text-sm ${MUTED}`}>No tickets in this sprint.</p>
-        ) : (
-          <>
-            <ViewControls
+      {nodes.length > 0 && (
+        <SprintPathsStrip paths={data.paths ?? null} status={data.pathsStatus} aiEnabled={data.aiEnabled} signals={data.signals ?? []} onFocus={focusStory} />
+      )}
+      {nodes.length === 0 ? (
+        !reading && <p className={`text-sm ${MUTED}`}>No tickets in this sprint.</p>
+      ) : (
+        <>
+          <ViewControls
+            groupMode={groupMode}
+            onGroup={chooseGroup}
+            split={splitOn}
+            canSplit={canSplit}
+            onSplit={chooseSplit}
+            splitPeople={personOn}
+            canSplitPeople={canSplitPeople}
+            onSplitPeople={choosePerson}
+            themesOn={themesOn}
+            visibility={visibility}
+            setVisibility={setVisibility}
+          />
+          <Filters
+            filters={filters}
+            setFilters={setFilters}
+            options={options}
+            picker={picker}
+            active={active}
+            shownCount={drawn.nodes.filter((n) => !n.ghost).length}
+            totalCount={sprintCount}
+            selected={selected}
+            hops={hops}
+            setHops={setHops}
+            onClearSelection={() => setSelected(null)}
+          />
+          <div ref={graphBox} className="relative">
+            <SprintGraph
+              nodes={drawn.nodes}
+              edges={drawn.edges}
               groupMode={groupMode}
-              onGroup={chooseGroup}
-              split={splitOn}
-              canSplit={canSplit}
-              onSplit={chooseSplit}
-              splitPeople={personOn}
-              canSplitPeople={canSplitPeople}
-              onSplitPeople={choosePerson}
-              themesOn={themesOn}
-              visibility={visibility}
-              setVisibility={setVisibility}
-            />
-            <Filters
-              filters={filters}
-              setFilters={setFilters}
-              options={options}
-              picker={picker}
-              active={active}
-              shownCount={drawn.nodes.filter((n) => !n.ghost).length}
-              totalCount={sprintCount}
+              groupOf={groupOf}
+              groups={groups}
+              splitStatus={splitOn}
+              splitAssignee={personOn}
+              members={members}
+              faintShown={visibility.faint}
+              layoutIntent={`${groupMode}|${splitOn ? 1 : 0}|${personOn ? 1 : 0}|${visibility.history ? 1 : 0}|${visibility.faint ? 1 : 0}`}
+              filterKey={filterKey(applied)}
+              pinKey={pinKey}
               selected={selected}
               hops={hops}
-              setHops={setHops}
+              frameRequest={frameRequest}
+              focusRequest={focusRequest}
+              progress={progress}
+              onOpen={open}
               onClearSelection={() => setSelected(null)}
             />
-            <div ref={graphBox} className="relative">
-              <SprintGraph
-                nodes={drawn.nodes}
-                edges={drawn.edges}
-                groupMode={groupMode}
-                groupOf={groupOf}
-                groups={groups}
-                splitStatus={splitOn}
-                splitAssignee={personOn}
-                members={members}
-                faintShown={visibility.faint}
-                layoutIntent={`${groupMode}|${splitOn ? 1 : 0}|${personOn ? 1 : 0}|${visibility.history ? 1 : 0}|${visibility.faint ? 1 : 0}`}
-                filterKey={filterKey(applied)}
-                pinKey={pinKey}
-                selected={selected}
-                hops={hops}
-                drawerOpen={drawer != null}
-                frameRequest={frameRequest}
-                focusRequest={focusRequest}
-                progress={progress}
-                onOpen={open}
-                onClearSelection={() => setSelected(null)}
-              />
-              {drawn.nodes.length === 0 && (
-                <p className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-sm text-slate-200">No tickets match these filters.</p>
-              )}
-              {showAsk && askOpen && <SprintAskPanel workspaceId={data.workspaceId} nodes={nodes} onClose={() => setAskOpen(false)} />}
-            </div>
-          </>
-        )}
-      </div>
-      {drawer != null && (
-        <SprintTicketDrawer
-          workspaceId={data.workspaceId}
-          ident={drawer}
-          repos={data.repos}
-          onClose={closeDrawer}
-          onOpenTicket={open}
-        />
+            {drawn.nodes.length === 0 && (
+              <p className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-sm text-slate-200">No tickets match these filters.</p>
+            )}
+            {showAsk && askOpen && <SprintAskPanel workspaceId={data.workspaceId} nodes={nodes} onClose={() => setAskOpen(false)} />}
+          </div>
+        </>
       )}
-    </TicketRefOpenContext.Provider>
+    </div>
   );
 }
 

@@ -2,7 +2,6 @@ import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import {
   isBlockingRelation,
   parseTicketIdent,
-  sprintAssessModeOf,
   sprintSourceTitle,
   parseTicketLinkBlockers,
   trackerTicketIdent,
@@ -16,9 +15,8 @@ import {
   type SprintColumn,
   type SprintSource,
   type SprintStatusLayout,
-  type SprintTicketDetailResponse,
-  type SprintTicketReference,
-  type TicketPrsResponse,
+  type TicketStoryResponse,
+  type TicketStoryTicket,
   type TrackerProvider,
 } from '@pierre-review/shared';
 import { globalAutomationUserIds } from './automation-ids.js';
@@ -45,20 +43,16 @@ import { sprintSignalsFor } from './sprint-signals.js';
 import { currentSprintThemes, sprintThemeInput, type SprintThemeInput } from './sprint-themes.js';
 import {
   kickSprintRead,
-  latestSprintAssessments,
   noteSprintViewed,
   readSprintRead,
   resetSprintReadForSite,
-  sprintAssessmentRecordOf,
   sprintReadStateOf,
   type SprintReadRow,
   type SprintTicketDbRow,
 } from './sprint-store.js';
-import { sprintAssessmentCurrencyFrom, workspaceRepoRefs } from './sprint-stories.js';
 import { getSprintStatusLayout, sprintPlacementOf } from './sprint-status-layout.js';
-import { effectiveSprintRepos } from './sprint-ticket-repos.js';
 
-// REPORTS → THIS SPRINT AS A GRAPH (`GET /api/sprint-graph`, `GET /api/sprint-graph/ticket`;
+// REPORTS → THIS SPRINT AS A GRAPH (`GET /api/sprint-graph`; and the story view's `GET /api/ticket-story`;
 // docs/API.md § This sprint). DB ONLY — no tracker, GitHub or model call: a view STAMPS the workspace
 // as viewed (the sprint read's demand gate) and kicks a read that is due, nothing else.
 //
@@ -320,7 +314,6 @@ export async function getSprintGraph(
     import('./stories.js'),
     import('../tracker/sprint/read.js'),
   ]);
-  const repos = await workspaceRepoRefs(accountId, workspaceId);
   const site = await workspaceSite(accountId, workspaceId);
   if (site == null) {
     return {
@@ -335,7 +328,6 @@ export async function getSprintGraph(
       ghostsTruncated: false,
       briefs: { current: 0, pending: 0 },
       aiEnabled: opts.aiEnabled,
-      repos,
       themes: null,
       paths: null,
       pathsStatus: { state: 'none', stale: false, lastAttemptAt: null, failure: null },
@@ -414,7 +406,6 @@ export async function getSprintGraph(
       pending: g.nodes.filter((n) => n.brief.state === 'pending').length,
     },
     aiEnabled: opts.aiEnabled,
-    repos,
     themes: themes?.themes ?? null,
     ...builder,
     signals,
@@ -530,155 +521,65 @@ export async function sprintPathsTodo(accountId: number, workspaceId: number): P
   return sprintPathsInputOf(source, g, statusLayout.columns, await sprintTimingFor(accountId, workspaceId, source, Date.now(), readRow));
 }
 
-/** The references of one ticket for the drawer: its tracker links, then its brief's references —
- *  one per (key, relation), itself excluded. Each carries the brief's `why` (a tracker link: the brief's
- *  `linkReasons` entry for its key; none → null). Pure (exported for its test). */
-export function ticketReferencesOf(
-  t: Pick<GraphTicketInput, 'ident' | 'links' | 'brief'>,
-  provider: TrackerProvider,
-  apiRoot: string,
-  known: ReadonlyMap<string, { key: string; title: string; status: GraphTicketInput['status']; url: string | null; assignee?: GraphTicketInput['assignee'] }>,
-  inGraph: ReadonlySet<string>,
-): SprintTicketReference[] {
-  const out: SprintTicketReference[] = [];
-  const seen = new Set<string>();
-  const push = (raw: string, relation: SprintTicketReference['relation'], quote: string | null, why: string | null, fallback: { title: string | null; status: string | null; category: JiraStatusCategory | null; url: string | null } | null): void => {
-    const id = identOfKey(provider, apiRoot, raw);
-    if (id == null || id.ident === t.ident) return;
-    const k = `${id.ident}\u0000${relation}`;
-    if (seen.has(k)) return;
-    seen.add(k);
-    const row = known.get(id.ident);
-    const category = row?.status?.category ?? fallback?.category ?? null;
-    out.push({
-      ident: id.ident,
-      key: id.key,
-      title: row != null && row.title !== '' ? row.title : (fallback?.title ?? null),
-      status: row?.status?.name ?? fallback?.status ?? null,
-      done: category == null ? null : category === 'done',
-      relation,
-      quote,
-      why,
-      inGraph: inGraph.has(id.ident),
-      url: row?.url ?? fallback?.url ?? null,
-      // A ticket we hold a row for: its assignee or null (unassigned). One we never read: no claim.
-      ...(row != null ? { assignee: row.assignee ?? null } : {}),
-    });
-  };
-  const linkWhy = new Map((t.brief?.linkReasons ?? []).map((l) => [l.ticketKey.toUpperCase(), l.why] as const));
-  for (const l of t.links ?? []) {
-    push(l.key, isBlockingRelation(l.relation) ? 'blocked_by' : 'linked', null, linkWhy.get(l.key.toUpperCase()) ?? null, {
-      title: l.title,
-      status: l.status,
-      category: l.category,
-      url: l.url,
-    });
-  }
-  for (const r of t.brief?.references ?? []) push(r.ticketKey, r.relation, r.quote, r.why ?? null, null);
-  return out;
-}
-
-/** GET /api/sprint-graph/ticket — the drawer. `prsOf` is the ticket tab's fold (`ticketPrs`), handed in
- *  by the route so this module never imports the tracker context. */
-export async function getSprintTicketDetail(
+/** GET /api/ticket-story — the STORY VIEW's lean read (docs/API.md § GET /api/ticket-story). DB only:
+ *  ONE ticket's stored sprint text — this workspace's `sprint_tickets` row (in the sprint or not), else
+ *  its `sprint_ref_tickets` row — on the tracker's CURRENT site, and its CURRENT brief (text hash +
+ *  SPRINT_BRIEF_VERSION, the graph's own rule). No graph fold, no PRs (the view reads those from
+ *  `GET /api/ticket-prs`). A ticket Limn holds no sprint text for answers `found: false`. */
+export async function getTicketStory(
   accountId: number,
   workspaceId: number,
   ident: string,
-  opts: { aiEnabled: boolean; now: number; prsOf: (ident: string) => Promise<TicketPrsResponse> },
-): Promise<SprintTicketDetailResponse> {
-  const emptyPrs: TicketPrsResponse = {
-    workspaceId,
-    ident,
-    found: false,
-    ticket: null,
-    open: [],
-    merged: [],
-    closed: [],
-    outsideWorkspace: 0,
-    truncated: false,
-  };
-  const none: SprintTicketDetailResponse = {
-    workspaceId,
-    ident,
-    found: false,
-    ticket: null,
-    briefState: opts.aiEnabled ? 'pending' : 'off',
-    brief: null,
-    references: [],
-    prs: emptyPrs,
-    repos: null,
-    assessment: null,
-    aiEnabled: opts.aiEnabled,
-  };
+  opts: { aiEnabled: boolean },
+): Promise<TicketStoryResponse> {
+  const none: TicketStoryResponse = { workspaceId, ident, found: false, ticket: null, briefState: 'none', brief: null, story: null };
   if (parseTicketIdent(ident) == null) return none;
   const { workspaceSite } = await import('./stories.js');
   const site = await workspaceSite(accountId, workspaceId);
   if (site == null) return none;
-  const t = await loadGraphTickets(accountId, workspaceId, site, opts.aiEnabled);
-  const sr = schema.sprintReads;
-  const readRow = (
-    await db
-      .select({ statusOrderJson: sr.statusOrderJson })
-      .from(sr)
-      .where(and(eq(sr.accountId, accountId), eq(sr.workspaceId, workspaceId)))
+  const st = schema.sprintTickets;
+  const own = (
+    (await db
+      .select()
+      .from(st)
+      .where(and(eq(st.accountId, accountId), eq(st.workspaceId, workspaceId), eq(st.ident, ident), eq(st.provider, site.provider), eq(st.apiRoot, site.apiRoot)))
       .limit(1)
-      .execute()
-  )[0] as Pick<SprintReadRow, 'statusOrderJson'> | undefined;
-  const statusLayout = await layoutFor(accountId, workspaceId, t, readRow ?? null);
-  const placeOf = (s: GraphTicketInput['status']) => (s == null ? null : sprintPlacementOf(statusLayout, s));
-  const placing = { stageOf: (s: GraphTicketInput['status']) => placeOf(s)?.stage ?? null, placeOf, mergedColumn: statusLayout.settings.mergedColumn };
-  const g = foldSprintGraph({ provider: site.provider, apiRoot: site.apiRoot, sprint: t.sprint, ghosts: t.ghosts, ...placing });
-  const node = g.nodes.find((n) => n.ident === ident);
-  if (node == null) return none;
-  const input = (node.ghost ? t.ghosts : t.sprint).find((x) => x.ident === ident)!;
-  const known = new Map(
-    [...t.sprint, ...t.ghosts].map((x) => [x.ident, { key: x.key, title: x.title, status: x.status, url: x.url, assignee: x.assignee }] as const),
-  );
-  const references = ticketReferencesOf(input, site.provider, site.apiRoot, known, new Set(g.nodes.map((n) => n.ident)));
-  const prs = await opts.prsOf(ident);
-  let repos: SprintTicketDetailResponse['repos'] = null;
-  let assessment: SprintTicketDetailResponse['assessment'] = null;
-  if (!node.ghost) {
-    const row = t.sprintRows.find((r) => r.ident === ident)!;
-    const eff = (await effectiveSprintRepos(accountId, workspaceId, [ident], { rows: [row], nowMs: opts.now })).get(ident);
-    const acc = eff?.accepted ?? [];
-    repos = {
-      accepted: acc.map((d) => ({ repoId: d.repoId, fullName: d.fullName })),
-      suggested: eff?.suggested ?? [],
-      defaulted: eff?.defaulted ?? false,
-    };
-    const a = (await latestSprintAssessments(accountId, workspaceId, [ident])).get(ident);
-    if (a != null) {
-      const mode = sprintAssessModeOf(node.stage ?? 'not_started');
-      assessment = { record: sprintAssessmentRecordOf(a), currency: sprintAssessmentCurrencyFrom(a, row, acc, mode) };
-    }
-  }
-  return {
-    workspaceId,
-    ident,
-    found: true,
-    ticket: {
-      ident: node.ident,
-      key: node.key,
-      title: node.title,
-      url: node.url,
-      provider: node.provider,
-      ghost: node.ghost,
-      depth: node.depth,
-      status: node.status,
-      stage: node.stage,
-      issueType: node.issueType,
-      assignee: node.assignee,
-      epic: node.epic,
-    },
-    briefState: node.brief.state,
-    brief: input.brief,
-    references,
-    prs,
-    repos,
-    assessment,
-    aiEnabled: opts.aiEnabled,
+      .execute()) as SprintTicketDbRow[]
+  )[0];
+  const rt = schema.sprintRefTickets;
+  const ref =
+    own == null
+      ? (
+          (await db
+            .select()
+            .from(rt)
+            .where(and(eq(rt.accountId, accountId), eq(rt.workspaceId, workspaceId), eq(rt.ident, ident), eq(rt.provider, site.provider), eq(rt.apiRoot, site.apiRoot)))
+            .limit(1)
+            .execute()) as RefRow[]
+        )[0]
+      : undefined;
+  const row = own ?? ref;
+  if (row == null) return none;
+  const status = row.statusName != null ? { name: row.statusName, category: categoryOf(row.statusCategory) } : null;
+  const ticket: TicketStoryTicket = {
+    key: row.issueKey,
+    title: row.title != null && row.title.trim() !== '' ? row.title : null,
+    url: row.url ?? null,
+    provider: site.provider,
+    status,
+    issueType: row.issueTypeName ?? null,
+    assignee: row.assigneeName != null ? { name: row.assigneeName, avatarUrl: row.assigneeAvatarUrl ?? null } : null,
+    epic: own?.epicKey != null ? { key: own.epicKey, title: own.epicTitle ?? null } : null,
+    inSprint: own?.inSprint === true,
   };
+  const story = { description: row.description ?? '', acceptanceCriteria: row.acceptanceCriteria ?? '' };
+  if (!opts.aiEnabled) return { workspaceId, ident, found: true, ticket, briefState: 'off', brief: null, story };
+  const input = sprintBriefInput(row, site.provider);
+  const brief = (await currentSprintBriefs(accountId, workspaceId, [{ ident, input }])).get(ident) ?? null;
+  // The brief pass reads the graph: a sprint ticket and the tickets it leads to. A ticket that has
+  // left the sprint is not read again, so "pending" would wait for ever — it says nothing instead.
+  const briefState: TicketStoryResponse['briefState'] = brief != null ? 'current' : own == null || own.inSprint ? 'pending' : 'none';
+  return { workspaceId, ident, found: true, ticket, briefState, brief, story };
 }
 
 /** The brief pass's to-do list: graph NODES (sprint first, then ghosts by depth) with no current

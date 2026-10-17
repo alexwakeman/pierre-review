@@ -69,8 +69,6 @@ import type {
   StoryReportRange,
   StoryCriterionLabel,
   StoryLevelLabels,
-  SprintAssessmentBody,
-  SprintAssessmentDropped,
   SprintSource,
   TicketAssessment,
 } from '@pierre-review/shared';
@@ -2984,7 +2982,8 @@ export const sprintTickets = sqliteTable(
     // When the reader last SAVED this ticket's candidate repos (migration 0104 / pg 0091; PUT
     // /api/sprint-stories/repos). NULL = never saved: the CONFIDENT suggestions are the accepted set
     // by default. Set even when the saved set is EMPTY — that is what tells "none" from "never chosen".
-    // Insert-only from the reader's write; the sprint read's upsert never touches it.
+    // Insert-only from the reader's write; the sprint read's upsert never touches it. ⚠ DORMANT since
+    // 2026-10-18 (the repo picker went with "Check against code"); kept, never dropped.
     reposSavedAt: integer('repos_saved_at', { mode: 'timestamp' }),
   },
   (t) => ({
@@ -3242,6 +3241,9 @@ export const sprintViewSnapshots = sqliteTable(
 // `repos (id, account_id)` (the `repos_id_account` parent key), and the workspace one likewise.
 // ⚠ Every `onConflictDoUpdate` / `onConflictDoNothing` on this table targets exactly
 // [accountId, workspaceId, ident, repoId].
+// ⚠ DORMANT since 2026-10-18: "Check against code" and its repo picker were REMOVED with the sprint
+// drawer. Nothing reads or writes this table any more (only the delete paths and erasure clear it);
+// kept, never dropped (docs/DATA-MODEL.md).
 export const sprintTicketRepos = sqliteTable(
   'sprint_ticket_repos',
   {
@@ -3278,6 +3280,9 @@ export const sprintTicketRepos = sqliteTable(
 // `body_json` is the server-VALIDATED `submit_assessment` body (paths verified), set only on
 // 'succeeded'. queued → running → succeeded | failed | cancelled; the terminal write is a
 // compare-and-set on queued/running. Interrupted runs are swept to failed('interrupted') at boot.
+// ⚠ DORMANT since 2026-10-18: "Check against code" and its repo picker were REMOVED with the sprint
+// drawer. Nothing reads or writes this table any more (only the delete paths and erasure clear it);
+// kept, never dropped (docs/DATA-MODEL.md).
 export const sprintAssessments = sqliteTable(
   'sprint_assessments',
   {
@@ -3298,8 +3303,8 @@ export const sprintAssessments = sqliteTable(
     reposJson: text('repos_json', { mode: 'json' })
       .$type<Array<{ repoId: number; fullName: string; sha: string | null }>>()
       .notNull(),
-    bodyJson: text('body_json', { mode: 'json' }).$type<SprintAssessmentBody>(),
-    droppedJson: text('dropped_json', { mode: 'json' }).$type<SprintAssessmentDropped>(),
+    bodyJson: text('body_json', { mode: 'json' }).$type<unknown>(),
+    droppedJson: text('dropped_json', { mode: 'json' }).$type<unknown>(),
     // A SprintAssessmentErrorCode; never a stack.
     error: text('error'),
     costUsd: real('cost_usd'),

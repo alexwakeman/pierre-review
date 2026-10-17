@@ -74,8 +74,6 @@ import type {
   StoryReportRange,
   StoryCriterionLabel,
   StoryLevelLabels,
-  SprintAssessmentBody,
-  SprintAssessmentDropped,
   SprintSource,
   TicketAssessment,
 } from '@pierre-review/shared';
@@ -2312,6 +2310,9 @@ export const sprintViewSnapshots = pgTable(
   }),
 );
 
+// ⚠ DORMANT since 2026-10-18: "Check against code" and its repo picker were REMOVED with the sprint
+// drawer. Nothing reads or writes this table any more (only the delete paths and erasure clear it);
+// kept, never dropped (docs/DATA-MODEL.md).
 export const sprintTicketRepos = pgTable(
   'sprint_ticket_repos',
   {
@@ -2340,6 +2341,9 @@ export const sprintTicketRepos = pgTable(
   }),
 );
 
+// ⚠ DORMANT since 2026-10-18: "Check against code" and its repo picker were REMOVED with the sprint
+// drawer. Nothing reads or writes this table any more (only the delete paths and erasure clear it);
+// kept, never dropped (docs/DATA-MODEL.md).
 export const sprintAssessments = pgTable(
   'sprint_assessments',
   {
@@ -2358,8 +2362,8 @@ export const sprintAssessments = pgTable(
     reposJson: jsonb('repos_json')
       .$type<Array<{ repoId: number; fullName: string; sha: string | null }>>()
       .notNull(),
-    bodyJson: jsonb('body_json').$type<SprintAssessmentBody>(),
-    droppedJson: jsonb('dropped_json').$type<SprintAssessmentDropped>(),
+    bodyJson: jsonb('body_json').$type<unknown>(),
+    droppedJson: jsonb('dropped_json').$type<unknown>(),
     error: text('error'),
     costUsd: doublePrecision('cost_usd'),
     inputTokens: integer('input_tokens'),

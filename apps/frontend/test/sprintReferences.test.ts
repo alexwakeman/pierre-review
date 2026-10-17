@@ -1,11 +1,8 @@
-// The drawer's "Other tickets" model (components/Activity/sprintReferences.ts) — pure. Pinned: the group
-// order (what the ticket waits on first), the labels, the within-group sort, and when a quote is shown
+// A reference's words (components/Activity/sprintReferences.ts) — pure. Pinned: when a quote is shown
 // under the reason.
 import { describe, expect, it } from 'vitest';
 import type { SprintTicketReference } from '@pierre-review/shared';
 import {
-  DRAWER_REFERENCE_ORDER,
-  drawerReferenceGroups,
   referenceQuote,
   referenceWhy,
 } from '../src/components/Activity/sprintReferences.js';
@@ -22,31 +19,6 @@ const ref = (key: string, relation: SprintTicketReference['relation'], o: Partia
   inGraph: false,
   url: null,
   ...o,
-});
-
-describe('drawerReferenceGroups', () => {
-  it('waits-on first, then alongside, history, and the loose ties last', () => {
-    expect(DRAWER_REFERENCE_ORDER).toEqual(['blocked_by', 'depends_on', 'concurrent', 'builds_on', 'supersedes', 'linked', 'context', 'out_of_scope']);
-    const g = drawerReferenceGroups([
-      ref('A-1', 'out_of_scope'),
-      ref('A-2', 'context'),
-      ref('A-3', 'linked'),
-      ref('A-9', 'depends_on', { done: true }),
-      ref('A-10', 'depends_on'),
-      ref('A-4', 'blocked_by'),
-      ref('A-5', 'concurrent'),
-    ]);
-    expect(g.map((x) => [x.label, x.refs.map((r) => r.key)])).toEqual([
-      ['Blocked by', ['A-4']],
-      // Not-done first, then by key.
-      ['Depends on', ['A-10', 'A-9']],
-      ['Built alongside', ['A-5']],
-      ['Related', ['A-3']],
-      ['Context', ['A-2']],
-      ['Out of scope', ['A-1']],
-    ]);
-    expect(drawerReferenceGroups([])).toEqual([]);
-  });
 });
 
 describe('the reason and the quote', () => {

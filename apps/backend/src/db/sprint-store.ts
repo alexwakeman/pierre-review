@@ -1,27 +1,10 @@
-import { createHash } from 'node:crypto';
-import { and, desc, eq, inArray } from 'drizzle-orm';
-import {
-  SPRINT_ASSESS_FORMAT_VERSION,
-  SPRINT_ASSESS_MODEL,
-  reviewDocReferencesFromStored,
-  type SprintAssessmentBody,
-  type SprintAssessmentErrorCode,
-  type SprintAssessmentPhase,
-  type SprintAssessmentRecord,
-  type SprintAssessmentStatus,
-  type SprintAssessMode,
-  type SprintCodeRef,
-  type SprintCriterionCheck,
-  type SprintCriterionStatus,
-  type SprintPlanStep,
-  type SprintReadState,
-} from '@pierre-review/shared';
+import { and, eq } from 'drizzle-orm';
+import { type SprintReadState } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 
 // REPORTS → THIS SPRINT — the SHARED STORE HALF (foundation module; the tracker sprint read, the
-// graph and the assessment all import it, none of them owns it). Row → wire mappers, the
-// demand gate (`sprint_reads.viewed_at`), the "read me again now" marks, the two currency hashes and
-// the latest-per-ticket reads. Schema + rationale: db/schema.sqlite.ts § REPORTS → THIS SPRINT.
+// graph and the story view import it, none of them owns it). The demand gate
+// (`sprint_reads.viewed_at`), the "read me again now" marks and the one-ticket read. Schema + rationale: db/schema.sqlite.ts § REPORTS → THIS SPRINT.
 //
 // Every query predicates on accountId (and workspaceId where the table has one). Portable Drizzle
 // only (`.execute()` terminals, `onConflictDoUpdate`), no transactions needed: each write is one
@@ -29,32 +12,8 @@ import { db, schema } from './client.js';
 
 export type SprintReadRow = typeof schema.sprintReads.$inferSelect;
 export type SprintTicketDbRow = typeof schema.sprintTickets.$inferSelect;
-export type SprintAssessmentRow = typeof schema.sprintAssessments.$inferSelect;
 
 const EPOCH = new Date(0);
-const sha256 = (s: string): string => createHash('sha256').update(s, 'utf8').digest('hex');
-
-// ── currency ─────────────────────────────────────────────────────────────────────────────────────
-
-/** sha256(title | description | acceptance criteria) of a sprint ticket — the SAME fold as
- *  tracker/peers.ts `storyHash` and ticket-review `ticketHash`, so one ticket text has one hash. */
-export function sprintTicketTextHash(t: { title: string | null; description: string | null; acceptanceCriteria: string | null }): string {
-  return sha256([t.title ?? '', t.description ?? '', t.acceptanceCriteria ?? ''].join('\u0000'));
-}
-
-/** The assessment's currency input: the body format (`SPRINT_ASSESS_FORMAT_VERSION`, so a run stored
- *  in an older shape reads 'stale'), the MODE (plan / verify, from the ticket's stage — so a ticket
- *  moving from In progress to In review makes a plan stale), the ticket text hash + sorted
- *  "repoId:defaultBranchHeadSha" (the SYNCED `repos.default_branch_head_sha`; null → ''). Pure and
- *  clock-free. */
-export function sprintAssessFingerprint(
-  textHash: string,
-  repos: ReadonlyArray<{ repoId: number; sha: string | null }>,
-  mode: SprintAssessMode,
-): string {
-  const parts = [...repos].sort((a, b) => a.repoId - b.repoId).map((r) => `${r.repoId}:${r.sha ?? ''}`);
-  return sha256([`sprint-assess-v${SPRINT_ASSESS_FORMAT_VERSION}`, `mode:${mode}`, textHash, ...parts].join('\u0000'));
-}
 
 // ── the demand gate + due marks ─────────────────────────────────────────────────────────────────
 
@@ -158,100 +117,6 @@ export function kickSprintRead(accountId: number, workspaceId: number): void {
   } catch {
     /* a kick is best effort; the tick reads it anyway */
   }
-}
-
-// ── row → wire ───────────────────────────────────────────────────────────────────────────────────
-
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v != null && !Array.isArray(v);
-
-/** A stored `body_json` as the CURRENT body shape, or null when it is another shape (an older
- *  format, or damaged). Re-checked defensively — a malformed entry is dropped, never thrown on. A
- *  format-5 body still reads (its findings and revisions are ignored); its run is stale anyway — the
- *  format is folded into the fingerprint. */
-export function sprintAssessmentBodyFromStored(raw: unknown): SprintAssessmentBody | null {
-  if (!isObj(raw) || (raw.mode !== 'plan' && raw.mode !== 'verify') || typeof raw.summary !== 'string') return null;
-  const refOf = (v: unknown): SprintCodeRef | null =>
-    isObj(v) && typeof v.repo === 'string' && typeof v.path === 'string' ? { repo: v.repo, path: v.path } : null;
-  const plan: SprintPlanStep[] = [];
-  for (const it of Array.isArray(raw.plan) ? raw.plan : []) {
-    if (!isObj(it) || typeof it.repo !== 'string' || typeof it.change !== 'string' || it.change.trim() === '') continue;
-    plan.push({
-      repo: it.repo,
-      path: typeof it.path === 'string' && it.path !== '' ? it.path : null,
-      newPath: typeof it.newPath === 'string' && it.newPath !== '' ? it.newPath : null,
-      change: it.change,
-    });
-  }
-  const statuses: readonly string[] = ['met', 'partly', 'not_met', 'unclear'];
-  const criterionChecks: SprintCriterionCheck[] = [];
-  for (const it of Array.isArray(raw.criterionChecks) ? raw.criterionChecks : []) {
-    if (!isObj(it) || typeof it.n !== 'number' || !Number.isInteger(it.n) || it.n < 1) continue;
-    if (typeof it.status !== 'string' || !statuses.includes(it.status) || typeof it.evidence !== 'string') continue;
-    criterionChecks.push({
-      n: it.n,
-      status: it.status as SprintCriterionStatus,
-      evidence: it.evidence,
-      ref: refOf(it.ref),
-      tests: refOf(it.tests),
-    });
-  }
-  return {
-    mode: raw.mode,
-    summary: raw.summary,
-    plan: raw.mode === 'plan' ? plan : [],
-    criterionChecks: raw.mode === 'verify' ? criterionChecks : [],
-    coverage: raw.mode === 'verify' && typeof raw.coverage === 'string' && raw.coverage.trim() !== '' ? raw.coverage : null,
-    // Only a check that read the reference library stored any (docs/REFERENCE-DOCS.md § Use in reviews).
-    ...(Array.isArray(raw.references) ? { references: reviewDocReferencesFromStored(raw.references) ?? [] } : {}),
-  };
-}
-
-export function sprintAssessmentRecordOf(r: SprintAssessmentRow): SprintAssessmentRecord {
-  const live = r.status === 'queued' || r.status === 'running';
-  const succeeded = r.status === 'succeeded';
-  const body = succeeded ? sprintAssessmentBodyFromStored(r.bodyJson) : null;
-  return {
-    id: r.id,
-    workspaceId: r.workspaceId,
-    ident: r.ident,
-    model: r.model || SPRINT_ASSESS_MODEL,
-    status: r.status as SprintAssessmentStatus,
-    mode: r.mode === 'plan' || r.mode === 'verify' ? r.mode : null,
-    phase: live ? ((r.phase as SprintAssessmentPhase | null) ?? null) : null,
-    repos: r.reposJson ?? [],
-    body,
-    outdated: succeeded && body == null,
-    dropped: r.droppedJson ?? null,
-    error: (r.error as SprintAssessmentErrorCode | null) ?? null,
-    costUsd: r.costUsd ?? null,
-    numTurns: r.numTurns ?? null,
-    createdAt: r.createdAt.toISOString(),
-    completedAt: r.completedAt != null ? r.completedAt.toISOString() : null,
-  };
-}
-
-// ── latest per ticket ────────────────────────────────────────────────────────────────────────────
-
-/** The newest assessment (any status) per ident, this account + workspace only. */
-export async function latestSprintAssessments(
-  accountId: number,
-  workspaceId: number,
-  idents: readonly string[],
-): Promise<Map<string, SprintAssessmentRow>> {
-  const out = new Map<string, SprintAssessmentRow>();
-  const list = [...new Set(idents)];
-  if (list.length === 0) return out;
-  const t = schema.sprintAssessments;
-  for (let i = 0; i < list.length; i += 500) {
-    const rows = await db
-      .select()
-      .from(t)
-      .where(and(eq(t.accountId, accountId), eq(t.workspaceId, workspaceId), inArray(t.ident, list.slice(i, i + 500))))
-      .orderBy(desc(t.createdAt), desc(t.id))
-      .execute();
-    for (const r of rows) if (!out.has(r.ident)) out.set(r.ident, r);
-  }
-  return out;
 }
 
 /** One stored sprint ticket of this workspace (in the list or not), or null. */

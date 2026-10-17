@@ -12,10 +12,16 @@ import type {
   ClaudeReviewTicketEntry,
   JiraStatusCategory,
   JiraTicketDetails,
+  SprintBrief,
   TicketAssignee,
   TicketRef,
+  TicketPrsTicket,
+  TicketReviewState,
+  TicketStoryResponse,
+  TicketStoryTicket,
 } from '@pierre-review/shared';
 import { isReadingTrackerProvider } from '@pierre-review/shared';
+import type { CardTicket } from './cardTickets.js';
 
 const normKey = (k: string | null | undefined): string | null => {
   const s = k?.trim().toUpperCase() ?? '';
@@ -150,4 +156,93 @@ export function ticketModalFacts(
 /** The modal's title: "BMD-1040 · New designs", or the key alone. */
 export function ticketModalTitle(f: Pick<TicketModalFacts, 'key' | 'title'>): string {
   return f.title != null ? `${f.key} · ${f.title}` : f.key;
+}
+
+// ── THE STORY SECTION (Activity/TicketStorySection.tsx): which summary leads it ─────────────────────
+//
+// ONE fold for both mounts (the Open PRs ticket stack, collapsed; the story view, open):
+//   1. the TICKET REVIEW's result when one exists (per-criterion delivery across every PR);
+//   2. else the sprint BRIEF's summary + numbered criteria when it is CURRENT;
+//   3. else "Reading this ticket…" while the brief pass will still read it ('pending');
+//   4. else nothing.
+// Then the ticket's own text (`storyFallbackTicket` when no PR can read the tracker row), then the
+// design diagram (`storyDesignOffered`). No dependency or reference cards, ever.
+
+export type StorySummarySource =
+  | { kind: 'review'; runId: number }
+  | { kind: 'brief'; brief: SprintBrief }
+  | { kind: 'reading' }
+  | { kind: 'none' };
+
+export function storySummaryOf(
+  review: Pick<TicketReviewState, 'latestRunId'> | null | undefined,
+  story: Pick<TicketStoryResponse, 'briefState' | 'brief'> | null | undefined,
+): StorySummarySource {
+  if (review?.latestRunId != null) return { kind: 'review', runId: review.latestRunId };
+  if (story?.briefState === 'current' && story.brief != null) return { kind: 'brief', brief: story.brief };
+  if (story?.briefState === 'pending') return { kind: 'reading' };
+  return { kind: 'none' };
+}
+
+/** The ticket's text as the sprint read stored it, shaped as a stored story (for the "As written"
+ *  disclosure when no pull request can read the tracker row); null when there is no text. */
+export function storyFallbackTicket(
+  story: Pick<TicketStoryResponse, 'story' | 'ticket'> | null | undefined,
+  key: string,
+  url: string | null,
+): ClaudeReviewTicket | null {
+  const s = story?.story;
+  if (s == null) return null;
+  if (s.description.trim() === '' && s.acceptanceCriteria.trim() === '') return null;
+  return {
+    key,
+    url,
+    title: story?.ticket?.title ?? null,
+    description: s.description,
+    acceptanceCriteria: s.acceptanceCriteria,
+    source: 'jira',
+  };
+}
+
+/** The story's design diagram is offered only where agentic AI runs and the ticket has a pull request
+ *  (the diagram section itself decides whether one exists or can be drawn). */
+export function storyDesignOffered(aiEnabled: boolean, prCount: number): boolean {
+  return aiEnabled && prCount >= 1;
+}
+
+// ── THE STORY VIEW'S HEADER TICKET ────────────────────────────────────────────────────────────────
+//
+// The story view (Ticket/TicketTabView.tsx) knows a ticket from two stored reads: the sprint read's row
+// (`GET /api/ticket-story` — read every 20 minutes while the ticket is in the sprint, and the only
+// source for a ticket with no pull request) and the freshest tracker row on its PRs (`GET
+// /api/ticket-prs`). A sprint ticket leads with the sprint row; any other with the PR row; each field
+// falls back to the other, then to what the tab captured when it was opened. Pure.
+
+export function storyViewTicket(
+  ident: string,
+  opened: { key: string; title: string | null },
+  prsTicket: TicketPrsTicket | null | undefined,
+  storyTicket: TicketStoryTicket | null | undefined,
+): CardTicket & { ident: string } {
+  const lead = storyTicket?.inSprint === true ? storyTicket : (prsTicket ?? storyTicket ?? null);
+  const other = lead === storyTicket ? prsTicket : storyTicket;
+  const pick = <T,>(f: (t: TicketPrsTicket | TicketStoryTicket) => T | null | undefined): T | null =>
+    (lead != null ? f(lead) : null) ?? (other != null ? f(other) : null) ?? null;
+  const out: CardTicket & { ident: string } = {
+    ident,
+    key: pick((t) => t.key) ?? opened.key,
+    title: pick((t) => t.title) ?? opened.title,
+    url: pick((t) => t.url),
+  };
+  const provider = pick((t) => t.provider);
+  if (provider != null) out.provider = provider;
+  const status = pick((t) => t.status);
+  if (status != null) {
+    out.status = status.name;
+    if (status.category != null) out.statusCategory = status.category;
+  }
+  // Only the sprint row carries the type and the assignee.
+  if (storyTicket?.issueType != null) out.issueType = storyTicket.issueType;
+  if (storyTicket?.assignee != null) out.assignee = { name: storyTicket.assignee.name, avatarUrl: storyTicket.assignee.avatarUrl };
+  return out;
 }

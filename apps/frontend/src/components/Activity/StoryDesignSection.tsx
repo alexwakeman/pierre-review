@@ -1,5 +1,7 @@
-// THE WHOLE STORY'S DESIGN in This Sprint's ticket drawer (docs/FRONTEND.md § Design diagrams): one
-// design grid across every open and merged pull request on the ticket, in every repository involved.
+// THE WHOLE STORY'S DESIGN — the last part of the Story section (TicketStorySection.tsx), in the Open
+// PRs ticket stack and the story view alike (docs/FRONTEND.md § Design diagrams): one design grid across
+// every open and merged pull request on the ticket, in every repository involved. Mounted only inside an
+// OPEN Story section (never on a board's mount), only where agentic AI runs and the ticket has a PR.
 // Drawn after a review of any of its pull requests; Redraw queues one now. The read is the STORED row
 // (no model, no tracker call) and polls only while a run is queued or running. A card opens its
 // pull request's Changes tab at the file.
@@ -18,7 +20,7 @@ const MUTED = 'text-gray-500 dark:text-gray-400';
 const BTN =
   'rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
 
-export function StoryDiagramSection({ ident }: { ident: string }): JSX.Element | null {
+export function StoryDesignSection({ ident }: { ident: string }): JSX.Element | null {
   const ai = useAiCapabilities();
   const q = useStorySequenceDiagram(ident, ai.enabled);
   const redraw = useRedrawStoryDiagram(ident);
@@ -31,9 +33,9 @@ export function StoryDiagramSection({ ident }: { ident: string }): JSX.Element |
   const drawing = redrawing || slotDrawing(data);
   const refusal = redrawRefusalText(redraw.data);
   return (
-    <section aria-label="Story design" className="space-y-2" data-testid="sprint-drawer-diagram">
+    <section aria-label="Story design" className="space-y-2" data-testid="story-design">
       <div className="flex items-center gap-1.5">
-        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Story design</h3>
+        <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">Story design</h4>
         <InfoButton title="Story design">
           <DesignLegend story />
         </InfoButton>

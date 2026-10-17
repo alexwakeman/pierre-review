@@ -1,6 +1,7 @@
 import type { JiraStatusCategory, TimelinePr, TrackerProvider } from './types.js';
+import type { SprintBrief, SprintBriefState } from './sprint-graph.js';
 
-// THE TICKET TAB — one ticket's pull requests, in isolation (docs/FRONTEND.md § The ticket tab;
+// THE STORY VIEW (the ticket tab) — one ticket's story and pull requests, in isolation (docs/FRONTEND.md § The story view;
 // docs/API.md § GET /api/ticket-prs). CORE and FREE: PR data is free, so the tab is free wherever it
 // is opened from (a Pro surface's button still needs that surface to be open).
 //
@@ -52,4 +53,43 @@ export interface TicketPrsResponse {
   outsideWorkspace: number;
   /** A list hit TICKET_PRS_MAX. */
   truncated: boolean;
+}
+
+// ── The story view's ticket text and brief ───────────────────────────────────────────────────────
+//
+//   GET /api/ticket-story?workspace=<id>&ident=<trackerTicketIdent>  →  TicketStoryResponse
+//
+// DB-only (`read` tier), CORE and FREE. ONE ticket's stored SPRINT text (this workspace's
+// `sprint_tickets` row, in the sprint or not, else its `sprint_ref_tickets` row) on the tracker's
+// CURRENT site, and its CURRENT sprint brief (Claude's summary + itemised criteria; text hash +
+// SPRINT_BRIEF_VERSION). It is how a ticket with NO pull request still gets its header facts, its
+// story and its summary. Workspace resolution as above; an ident Limn holds no sprint text for answers
+// `found: false` with nulls — never a 404.
+
+export interface TicketStoryTicket {
+  key: string;
+  title: string | null;
+  url: string | null;
+  provider: TrackerProvider;
+  status: { name: string; category: JiraStatusCategory | null } | null;
+  issueType: string | null;
+  assignee: { name: string; avatarUrl: string | null } | null;
+  epic: { key: string; title: string | null } | null;
+  /** In this workspace's current sprint. */
+  inSprint: boolean;
+}
+
+export interface TicketStoryResponse {
+  workspaceId: number;
+  ident: string;
+  found: boolean;
+  ticket: TicketStoryTicket | null;
+  /** 'current' = `brief` is today's; 'pending' = the brief pass will read this text after the next
+   *  sprint read; 'off' = agentic AI does not run here; 'none' = nothing will summarise it (not found,
+   *  or it left the sprint). */
+  briefState: SprintBriefState | 'none';
+  /** The CURRENT brief only; null otherwise. */
+  brief: SprintBrief | null;
+  /** The ticket's text as the sprint read stored it ('' when empty); null when not found. */
+  story: { description: string; acceptanceCriteria: string } | null;
 }

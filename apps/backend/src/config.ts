@@ -2,8 +2,6 @@ import { existsSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { migrateLegacyDataDir, resolveDataDir } from './data-dir.js';
 import {
-  SPRINT_ASSESS_BUDGET_USD_DEFAULT,
-  SPRINT_ASSESS_MAX_TURNS,
   SPRINT_PATHS_BUDGET_USD_DEFAULT,
   SPRINT_PATHS_DAILY_CAP_DEFAULT,
   SPRINT_PATHS_MAX_TURNS_DEFAULT,
@@ -617,10 +615,6 @@ export const config = {
   // ---- Story labels (the label run — review/story-labels/) ----
   // The per-RUN spending cap (US$). Default = shared STORY_LABEL_BUDGET_USD_DEFAULT (1). Env only.
   storyLabelBudgetUsd: floatFromEnv('STORY_LABEL_BUDGET_USD', 1),
-  // ---- Sprint assessment (Activity → This Sprint, "Check against code" — review/sprint-assess/) ----
-  // Per-RUN spending and turn caps. Env only — no route sets them.
-  sprintAssessBudgetUsd: floatFromEnv('SPRINT_ASSESS_BUDGET_USD', SPRINT_ASSESS_BUDGET_USD_DEFAULT),
-  sprintAssessMaxTurns: intFromEnv('SPRINT_ASSESS_MAX_TURNS', SPRINT_ASSESS_MAX_TURNS),
   // ---- Sprint briefs (Activity → This Sprint, the graph — review/sprint-briefs/) ----
   // The per-PASS spending cap (US$) of the Haiku brief pass after each sprint read. Env only.
   sprintBriefBudgetUsd: floatFromEnv('SPRINT_BRIEF_BUDGET_USD', 1),

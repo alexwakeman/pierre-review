@@ -175,18 +175,13 @@ import type {
   StartStoryLabelRunBody,
   StoryLabelRunResponse,
   SprintGraphResponse,
-  SprintTicketDetailResponse,
   SprintAskRequest,
   SprintAskResponse,
   SprintRefreshResponse,
-  SprintReposUpdate,
   SprintStatusesUpdate,
   SprintStatusesResponse,
   TicketPrsResponse,
-  SprintReposResponse,
-  SprintAssessRequest,
-  SprintAssessResponse,
-  SprintAssessmentResponse,
+  TicketStoryResponse,
   PostCommentResult,
   FollowUpReplyResult,
   PostReviewPreview,
@@ -973,10 +968,6 @@ export const api = {
   // are DB only.
   sprintGraph: (workspaceId: number) =>
     get<SprintGraphResponse>(withQuery('/api/sprint-graph', workspaceParam(workspaceId))),
-  sprintTicket: (workspaceId: number, ident: string) =>
-    get<SprintTicketDetailResponse>(
-      withQuery('/api/sprint-graph/ticket', workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`),
-    ),
   // "Ask Claude about this sprint" (agentic, LOCAL-ONLY): one Haiku answer per turn, grounded in the
   // stored graph; the server caps the turns it reads.
   sprintAsk: (body: SprintAskRequest) =>
@@ -985,24 +976,18 @@ export const api = {
     fetch('/api/sprint-stories/refresh', jsonBody('POST', { workspaceId })).then((r) =>
       handle<SprintRefreshResponse>(r),
     ),
-  sprintSetRepos: (body: SprintReposUpdate) =>
-    fetch('/api/sprint-stories/repos', jsonBody('PUT', body)).then((r) => handle<SprintReposResponse>(r)),
-  // The status layout override (statuses per stage, in order); `{sections: null}` resets.
+  // The status buckets override; `{buckets: null, mergedColumn: true}` resets.
   sprintSetStatuses: (body: SprintStatusesUpdate) =>
     fetch('/api/sprint-stories/statuses', jsonBody('PUT', body)).then((r) => handle<SprintStatusesResponse>(r)),
-  // The ticket tab (core, FREE): one ticket's open / merged / closed PRs as TimelinePr rows. DB-only.
+  // The story view (the ticket tab; core, FREE): one ticket's open / merged / closed PRs as TimelinePr
+  // rows, and its stored sprint text + CURRENT brief. Both DB-only.
   ticketPrs: (workspaceId: number, ident: string) =>
     get<TicketPrsResponse>(
       withQuery('/api/ticket-prs', workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`),
     ),
-  // "Check against code" (core, agentic, LOCAL-ONLY — not registered in cloud). The POST is the ONE
-  // path that runs Claude; the GET polls one run; cancel is account-scoped.
-  sprintAssess: (body: SprintAssessRequest) =>
-    fetch('/api/sprint-stories/assess', jsonBody('POST', body)).then((r) => handle<SprintAssessResponse>(r)),
-  sprintAssessment: (id: number) => get<SprintAssessmentResponse>(`/api/sprint-stories/assessments/${id}`),
-  sprintAssessCancel: (id: number) =>
-    fetch(`/api/sprint-stories/assessments/${id}/cancel`, jsonBody('POST')).then((r) =>
-      handle<SprintAssessmentResponse>(r),
+  ticketStory: (workspaceId: number, ident: string) =>
+    get<TicketStoryResponse>(
+      withQuery('/api/ticket-story', workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`),
     ),
   // The story label run (core, agentic, LOCAL-ONLY; one in flight per account; the path keeps the
   // retired Story health prefix). No screen starts it since Story health was removed. The POST is the

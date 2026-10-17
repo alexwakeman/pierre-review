@@ -180,18 +180,18 @@ describe('the jump to Open PRs', () => {
 describe('the wiring', () => {
   const src = (p: string) => readFileSync(join(__dirname, '..', 'src', p), 'utf8');
 
-  it('the stack panel reads the run only while expanded, by the states’ latestRunId', () => {
-    const panel = src('components/Activity/StackStoryCheck.tsx');
+  it('the Story section reads the run only while expanded, by the states’ latestRunId', () => {
+    const panel = src('components/Activity/TicketStorySection.tsx');
     expect(panel).toMatch(/\{open && \(/);
-    expect(panel).toMatch(/<StoryCheckBody runId=\{state\.latestRunId\}/);
+    expect(panel).toMatch(/<ReviewSummary runId=\{summary\.runId\}/);
     expect(panel.match(/useTicketReviewById\(/g)).toHaveLength(1);
     expect(panel).toMatch(/<TicketResults review=\{review\} viewedPrId=\{null\} \/>/);
-    // No Post anywhere in the stack.
-    expect(panel).not.toMatch(/usePostTicketItem|ItemPost/);
+    // No Post anywhere in the stack, and no dependency or reference cards.
+    expect(panel).not.toMatch(/usePostTicketItem|ItemPost|references|Other tickets/);
     // The per-stack request never sits on the cards list itself.
     const cards = src('components/Activity/OpenPrsCards.tsx');
     expect(cards).not.toMatch(/useTicketReviewById|useTicketReviews\(/);
-    expect(cards).toMatch(/<StackStoryCheck\s+stackId=\{stack\.id\}/);
+    expect(cards).toMatch(/<TicketStorySection\s/);
   });
 
   it('the pane shows only this PR’s share where a stack exists, and links to it', () => {
@@ -203,7 +203,7 @@ describe('the wiring', () => {
   });
 
   it('"What this PR adds" rides the loaded review: the stack lists every card, the pane this PR’s', () => {
-    const panel = src('components/Activity/StackStoryCheck.tsx');
+    const panel = src('components/Activity/TicketStorySection.tsx');
     expect(panel).toMatch(/<MemberCards members=\{members\} \/>/);
     const cov = src('components/TicketCoverage.tsx');
     expect(cov).toMatch(/prCardOf\(review\.members, pr\.id\)/);
