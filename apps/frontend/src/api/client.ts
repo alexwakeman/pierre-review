@@ -1634,8 +1634,8 @@ export const api = {
       handle<CiReviewStatesResponse>(r),
     ),
 
-  // ---- SEQUENCE DIAGRAMS (CORE, local-only): a Sonnet run of its own after each finished review ----
-  // docs/API.md § Sequence diagrams. Both GETs read STORED rows; the two Redraws queue one run each.
+  // ---- DESIGN DIAGRAMS (CORE, local-only): a Sonnet run of its own after each finished review ----
+  // docs/API.md § Design diagrams. Both GETs read STORED rows; the two Redraws queue one run each.
   prSequenceDiagrams: (prId: number) => get<PrSequenceDiagramsResponse>(`/api/prs/${prId}/sequence-diagrams`),
   redrawPrSequenceDiagram: (prId: number) =>
     fetch(`/api/prs/${prId}/sequence-diagrams/redraw`, { method: 'POST' }).then((r) =>

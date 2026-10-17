@@ -40,6 +40,7 @@ import type {
   SonarIssue,
   SonarPostRecord,
   SequenceDiagramMember,
+  DesignDiagram,
   ReferenceDocSectionEntry,
   ReviewDocReference,
   ReferenceDocCitation,
@@ -3338,7 +3339,8 @@ export const sonarSnapshots = sqliteTable(
   }),
 );
 
-// ---- SEQUENCE DIAGRAMS (migration 0115 / pg 0102; docs/CLAUDE-REVIEW.md § Sequence diagrams) ----
+// ---- SEQUENCE (now DESIGN) DIAGRAMS (migrations 0115/0118/0119 / pg 0102/0105/0106;
+// docs/CLAUDE-REVIEW.md § Design diagrams) ----
 // ONE row per RUN (since migration 0118 / pg 0105): kind 'pr' (subject = the PR id) or 'story'
 // (subject = the tracker ident). A Redraw at the same fingerprint is a NEW row, so the last good
 // diagram stays shown while it runs and after it fails; an older head's diagram reads "not current".
@@ -3367,8 +3369,12 @@ export const sequenceDiagrams = sqliteTable(
     model: text('model').notNull(),
     title: text('title'),
     caption: text('caption'),
+    // 'design' on every design-era row (stamped at queue time); a Mermaid type on retired rows.
     diagramType: text('diagram_type'),
+    // The retired Mermaid source — kept, never written.
     source: text('source'),
+    // The validated design grid (succeeded design-era rows; migration 0119).
+    design: text('design', { mode: 'json' }).$type<DesignDiagram>(),
     // SequenceDiagramRefusal — server-written.
     refusal: text('refusal'),
     error: text('error'),

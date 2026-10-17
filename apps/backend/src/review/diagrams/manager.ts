@@ -50,7 +50,7 @@ import {
   diagramUntrustedTexts,
   type DiagramPromptPr,
 } from './prompts.js';
-import { validateMermaid } from './validate.js';
+import { validateDesign, type DesignContext } from './validate.js';
 
 // THE SEQUENCE-DIAGRAM QUEUE — a SEPARATE agentic process beside the PR review's queue
 // (claude-review/manager.ts), the ticket review's and the CI review's: its own rows, its own claim,
@@ -73,7 +73,8 @@ import { validateMermaid } from './validate.js';
 //          a changed member set ⇒ head_moved) → every member's diff (none with code ⇒ no_code) → a
 //          worktree per OPEN member + ONE default-branch checkout per repository for the MERGED ones
 //          (the ticket review's approach) → the prompt (+ the stored ticket text) → the agent.
-// Every answer is validated (validate.ts) before it is stored. The `finally` removes every checkout
+// Every answer is a DESIGN GRID validated (validate.ts `validateDesign`, against the run's PR refs and
+// changed files) inside the tool and again before it is stored. The `finally` removes every checkout
 // and the scratch directory, then runs a deferred clone-cache eviction.
 //
 // ⚠ NEVER BLOCKS OR FAILS A REVIEW: the review's manager reaches this module only through a
@@ -206,7 +207,7 @@ function launch(job: DiagramJob): void {
 async function finishWithAgent(
   job: DiagramJob,
   controller: AbortController,
-  args: { roots: string[]; systemPrompt: string; prompt: string; prId: number | null },
+  args: { roots: string[]; systemPrompt: string; prompt: string; prId: number | null; design: DesignContext },
 ): Promise<void> {
   const { ctx, accountId, diagramId } = job;
   let scratch: string | null = null;
@@ -219,6 +220,7 @@ async function finishWithAgent(
       roots: args.roots,
       systemPrompt: args.systemPrompt,
       prompt: args.prompt,
+      design: args.design,
       applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
       abortController: controller,
     });
@@ -234,7 +236,10 @@ async function finishWithAgent(
       return;
     }
     // ⚠ Validated AGAIN here: the tool's acceptance is not the storage gate.
-    const v = res.diagram != null ? validateMermaid(res.diagram.source) : null;
+    const v =
+      res.diagram != null
+        ? validateDesign({ ...res.diagram.design, title: res.diagram.title, caption: res.diagram.caption }, args.design)
+        : null;
     if (res.diagram == null || v == null || !v.ok) {
       await markDiagramFailed(
         ctx,
@@ -250,7 +255,7 @@ async function finishWithAgent(
       ctx,
       accountId,
       diagramId,
-      { title: res.diagram.title, caption: res.diagram.caption, diagramType: v.diagramType, source: v.source },
+      { title: v.value.title, caption: v.value.caption, design: v.value.design },
       telemetry,
     );
   } finally {
@@ -262,6 +267,11 @@ async function finishWithAgent(
       }
     }
   }
+}
+
+/** What a run's answer is validated against: its PR refs, in order, and their changed files. */
+export function designContextFor(kind: 'pr' | 'story', prs: readonly DiagramPromptPr[]): DesignContext {
+  return { kind, prs: prs.map((p) => ({ ref: p.ref, changedFiles: p.changedFiles })) };
 }
 
 async function runPipeline(job: DiagramJob, controller: AbortController): Promise<void> {
@@ -328,6 +338,7 @@ async function runPrPipeline(job: DiagramJob, controller: AbortController): Prom
       systemPrompt: PR_DIAGRAM_SYSTEM_PROMPT,
       prompt: buildPrDiagramPrompt({ pr: promptPr, nonce }),
       prId,
+      design: designContextFor('pr', [promptPr]),
     });
   } finally {
     await worktrees.cleanup().catch(() => {});
@@ -413,6 +424,7 @@ async function runStoryPipeline(job: DiagramJob, controller: AbortController): P
       systemPrompt: STORY_DIAGRAM_SYSTEM_PROMPT,
       prompt: buildStoryDiagramPrompt({ ticket: promptTicket, prs, nonce }),
       prId: null,
+      design: designContextFor('story', prs),
     });
   } finally {
     await worktrees.cleanup().catch(() => {});

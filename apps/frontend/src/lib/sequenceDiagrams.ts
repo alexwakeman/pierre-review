@@ -1,5 +1,5 @@
-// SEQUENCE DIAGRAMS — the SPA's pure folds (test/sequenceDiagram.test.ts): when to poll, and the one
-// status line under a slot. docs/FRONTEND.md § Sequence diagrams.
+// DESIGN DIAGRAMS — the SPA's pure folds (test/sequenceDiagram.test.ts): when to poll, and the one
+// status line under a slot. docs/FRONTEND.md § Design diagrams.
 import {
   SEQUENCE_DIAGRAM_REFUSAL_TEXT,
   type PrSequenceDiagramsResponse,
@@ -40,7 +40,7 @@ export function prDiagramsPollMs(
 export function slotStatusLine(slot: SequenceDiagramSlot, redrawing: boolean): string | null {
   if (redrawing || slotDrawing(slot)) return 'Drawing…';
   const l = slot.latest;
-  if (l == null) return slot.diagram == null ? 'No diagram yet.' : null;
+  if (l == null) return slot.diagram == null ? 'No design yet.' : null;
   if (l.status === 'refused' && l.refusal != null) return SEQUENCE_DIAGRAM_REFUSAL_TEXT[l.refusal];
   if (l.status === 'failed') {
     return l.refusal != null ? SEQUENCE_DIAGRAM_REFUSAL_TEXT[l.refusal] : 'Drawing failed.';

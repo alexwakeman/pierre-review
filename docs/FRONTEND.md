@@ -4484,27 +4484,37 @@ Each of these is a decision, not an oversight, and "finishing the migration" wou
   "it decided nothing", "it never ran" and "GitHub told us nothing" are three different facts, and
   collapsing any into the failure mark would report a red nobody observed.
 
-## Sequence diagrams (review tab section, This Sprint's ticket drawer)
+## Design diagrams (review tab section, This Sprint's ticket drawer)
 
-`components/SequenceDiagram.tsx` is the ONE Mermaid renderer: `mermaid` is a DYNAMIC import (its own
-chunks — the initial bundle only carries the chunk's path), initialised from `lib/mermaidTheme.ts`
-(`securityLevel: 'strict'`, `htmlLabels: false`, the `'base'` theme fed from the `--ai-*` tokens,
-re-rendered when the `dark` class on `<html>` flips). A render error shows the SOURCE in a code block;
-"Show source" and a Copy button (the Mermaid source, verbatim) are always there. The SVG is Mermaid's
-own strict output from a source the server validated (review/diagrams/validate.ts). The CSP needed no
-change: no third-party origin, and Mermaid's inline `<style>` rides the existing `style-src
-'unsafe-inline'`.
+`components/DesignGrid.tsx` is the ONE renderer of a stored `DesignDiagram` (Mermaid is GONE — no
+`mermaid` or `uuid` dependency, no lazy chunk). A CSS grid: a narrow layer-label column plus one
+`minmax(0, 1fr)` column per act, so it shrinks to the pane (Claude Review tab; the ticket drawer,
+`max-w-2xl` ≈ 620px of content) with NO horizontal scroll, labels wrapping and nothing under 11px.
+Only the layers some card uses get a row; empty slots stay empty. The pure fold lives in
+`lib/designGrid.ts` (`layoutDesign`, `memberForRef`, `arrowPath`; test/designGrid.test.ts).
+- **Cards**: label (13px, ≤ 2 lines), pattern chip (11px), PR badge on story designs (`#N`, or
+  `repo#N` when the story spans repositories), and the change mark as a WORD + icon (`New` + PlusIcon,
+  `Changed` + PencilIcon) AND a border style (solid / dashed / plain) — never colour alone.
+- **Arrows**: an SVG layer UNDER the cards, from the cards' DOM rects, re-measured by a
+  ResizeObserver; `aria-hidden`, and the same hand-offs are an sr-only list. Cards read row by row.
+- **Click-through**: a card with files is a button. One file opens it; several open a small list
+  (a floating-ui popover, the ONE open popover via `claimActivePopover`), each row opening its file.
+  THIS PR's file → the review tab's `onOpenInChanges` (PrDetail's `openInChanges`: Changes tab, then
+  the focus). ANOTHER PR's (a story card, or any card in the drawer) → the store's `openPrChangesAt`
+  (mounts that PR's pane like `openClaudeReview`, and sets the transient `prChangesFocus`), which
+  PrDetail consumes through the same `openInChanges` as a URL correction.
+- The legend lives behind the heading's ⓘ (`DesignLegend`), never on the surface.
 
-`components/ClaudeReviewDiagrams.tsx` — `ClaudeReviewDiagramsSection` (mounted in `ClaudesReview` after
-SonarCloud, absent without `me.ai`) shows the PR's slot and each multi-PR ticket's story slot through
-`DiagramSlotView`; `Activity/SprintStoryDiagram.tsx` shows the story slot in the ticket drawer (only with
-`me.ai`, and only when the ticket has 2+ pull requests or a stored diagram). The pure folds live in
-`lib/sequenceDiagrams.ts` (test/sequenceDiagram.test.ts). ⚠ POLLING: the reads poll every 5 s only while
-a run is queued or running, and the PR read also for 90 s after the shown review's `finishedAt` while
-nothing is stored at the current head for the PR OR for any story of 2+ pull requests (the server
-queues them a moment AFTER the review is saved; a docs-only PR's `no_code` row is current at once, so
-the PR slot alone would stop the wait before the story's row exists). The Redraw buttons share one mutation key per subject (`useIsMutating`). `uuid` is pinned to
-`^11` in the frontend's dependencies so vis-data's peer range and Mermaid's agree on one copy.
+`components/ClaudeReviewDiagrams.tsx` — `ClaudeReviewDiagramsSection` ("Design", mounted in
+`ClaudesReview` after SonarCloud, absent without `me.ai`) shows the PR's slot and each multi-PR
+ticket's "Story design" slot through `DiagramSlotView`; `Activity/SprintStoryDiagram.tsx` shows the
+story slot in the ticket drawer (only with `me.ai`, and only when the ticket has 2+ pull requests or a
+stored design). The status folds live in `lib/sequenceDiagrams.ts` (test/sequenceDiagram.test.ts). ⚠
+POLLING: the reads poll every 5 s only while a run is queued or running, and the PR read also for 90 s
+after the shown review's `finishedAt` while nothing is stored at the current head for the PR OR for
+any story of 2+ pull requests (the server queues them a moment AFTER the review is saved; a docs-only
+PR's `no_code` row is current at once, so the PR slot alone would stop the wait before the story's row
+exists). The Redraw buttons share one mutation key per subject (`useIsMutating`).
 
 ## SonarCloud (review tab section, picker card, Settings)
 

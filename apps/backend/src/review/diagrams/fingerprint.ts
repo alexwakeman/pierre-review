@@ -4,22 +4,27 @@ import { codeLocFor, isNonCodeFile } from '../../db/code-loc.js';
 
 // "IS THIS DIAGRAM STILL TRUE?" and "SHOULD A FINISHED REVIEW DRAW ONE?" — PURE, clock-free.
 //
-//   PR       sha256(version | 'pr' | prId | headSha). A push makes it stale; nothing else does
+//   PR       sha256(versions | 'pr' | prId | headSha). A push makes it stale; nothing else does
 //            (a comment, a CI result or a re-review on the same head never redraws it).
-//   STORY    sha256(version | 'story' | ident | sorted "prId:headSha:state"). A member pushed, merged,
+//   STORY    sha256(versions | 'story' | ident | sorted "prId:headSha:state"). A member pushed, merged,
 //            joined or left. ⚠ The ticket TEXT is deliberately not in it: a reworded description does
 //            not change the code's flow.
 //
 // ⚠ Nothing derived from `Date.now()` may enter a fingerprint, or a PR nobody touched would redraw
 // (and re-bill) on a timer. Bump SEQUENCE_DIAGRAM_VERSION when what a run produces for the same
 // inputs changes (the prompt's rules, the validator) — every stored diagram then reads stale once.
+// DESIGN_DIAGRAM_VERSION is the design grid's own number (folded in beside it): its arrival made
+// every Mermaid-era fingerprint stale, so every current head is drawn once more, as a design. Bump it
+// when the design prompt, the validator or the layer vocabulary changes what a run produces.
 
 export const SEQUENCE_DIAGRAM_VERSION = 1;
+export const DESIGN_DIAGRAM_VERSION = 1;
+const VERSION = `v${SEQUENCE_DIAGRAM_VERSION}.d${DESIGN_DIAGRAM_VERSION}`;
 
 const sha256 = (s: string): string => createHash('sha256').update(s, 'utf8').digest('hex');
 
 export function prDiagramFingerprint(prId: number, headSha: string): string {
-  return sha256([`v${SEQUENCE_DIAGRAM_VERSION}`, 'pr', String(prId), headSha].join('\n'));
+  return sha256([VERSION, 'pr', String(prId), headSha].join('\n'));
 }
 
 export interface StoryFingerprintMember {
@@ -31,7 +36,7 @@ export interface StoryFingerprintMember {
 /** Member order does not matter. */
 export function storyDiagramFingerprint(ident: string, members: readonly StoryFingerprintMember[]): string {
   const parts = members.map((m) => `${m.prId}:${m.headSha}:${m.state}`).sort();
-  return sha256([`v${SEQUENCE_DIAGRAM_VERSION}`, 'story', ident, ...parts].join('\n'));
+  return sha256([VERSION, 'story', ident, ...parts].join('\n'));
 }
 
 // ---- does the change touch CODE? ----

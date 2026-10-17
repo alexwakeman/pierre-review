@@ -23,7 +23,7 @@ import {
 } from './persist.js';
 import { MAX_TICKETS, toDiagramMembers } from './trigger.js';
 
-// THE SEQUENCE-DIAGRAM API (CORE, free, LOCAL ONLY) — docs/API.md § Sequence diagrams. Registered by
+// THE DESIGN-DIAGRAM API (CORE, free, LOCAL ONLY; paths keep "sequence-diagrams") — docs/API.md § Design diagrams. Registered by
 // `registerAgenticRoutes` (review/agentic.ts), so absent in cloud and under LIMN_AI_DISABLED; the
 // AGENTIC_AI_ENABLED checks are the second guard. Every read is the STORED rows (no model, no GitHub,
 // no tracker call); the two Redraw POSTs queue ONE Sonnet 5 run each.
@@ -57,7 +57,7 @@ const storyBody = {
 
 function featureOff(reply: FastifyReply): { error: string; message: string } {
   reply.status(404);
-  return { error: 'NotFound', message: 'Sequence diagrams are off here. They run on your machine: npx limn-review' };
+  return { error: 'NotFound', message: 'Design diagrams are off here. They run on your machine: npx limn-review' };
 }
 
 /** What to draw and, beside it, the newest run when that is another one. `liveFp` null ⇒ not current. */

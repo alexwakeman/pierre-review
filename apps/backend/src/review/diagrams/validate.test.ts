@@ -1,186 +1,237 @@
+// THE DESIGN VALIDATOR: every cap refuses with what to do about it, ids and slots are checked, text
+// is plain, and `files` is FILTERED (never refused) to the change.
 import { describe, expect, it } from 'vitest';
-import { SEQUENCE_DIAGRAM_MAX_CHARS } from '@pierre-review/shared';
-import { MAX_LINES, cleanCaption, cleanTitle, validateMermaid } from './validate.js';
+import {
+  DESIGN_ACT_TITLE_MAX,
+  DESIGN_ARROW_LABEL_MAX,
+  DESIGN_CAPTION_MAX,
+  DESIGN_CELL_FILES_MAX,
+  DESIGN_CELL_LABEL_MAX,
+  DESIGN_MAX_ACTS,
+  DESIGN_MAX_ARROWS,
+  DESIGN_MAX_CELLS,
+  DESIGN_MAX_LAYERS,
+  DESIGN_PATTERN_MAX,
+  DESIGN_TITLE_MAX,
+} from '@pierre-review/shared';
+import { validateDesign, type DesignContext } from './validate.js';
 
-const OK = `sequenceDiagram
-  participant U as User
-  participant API as Orders API
-  U->>API: POST /orders
-  API-->>U: 201`;
+const PR: DesignContext = { kind: 'pr', prs: [{ ref: 'PR1', changedFiles: ['src/import.ts', 'src/rates.ts', 'test/rates.test.ts'] }] };
+const STORY: DesignContext = {
+  kind: 'story',
+  prs: [
+    { ref: 'PR1', changedFiles: ['api/routes/rates.ts', 'api/db/rates.ts'] },
+    { ref: 'PR2', changedFiles: ['web/src/RatesPage.tsx'] },
+  ],
+};
 
-describe('validateMermaid — accepts one allowed diagram', () => {
-  it('accepts a plain sequence diagram and names its type', () => {
-    const v = validateMermaid(OK);
-    expect(v).toMatchObject({ ok: true, diagramType: 'sequenceDiagram', removed: [] });
-    if (v.ok) expect(v.source).toBe(OK);
-  });
-
-  it('unwraps ONE surrounding ```mermaid fence', () => {
-    const v = validateMermaid('```mermaid\n' + OK + '\n```');
-    expect(v.ok && v.source).toBe(OK);
-  });
-
-  it('accepts the other allowed types (stateDiagram-v2 before stateDiagram)', () => {
-    expect(validateMermaid('flowchart TD\n  A --> B')).toMatchObject({ ok: true, diagramType: 'flowchart' });
-    expect(validateMermaid('stateDiagram-v2\n  [*] --> Open')).toMatchObject({ ok: true, diagramType: 'stateDiagram-v2' });
-    expect(validateMermaid('erDiagram\n  ORDER ||--o{ LINE : has')).toMatchObject({ ok: true, diagramType: 'erDiagram' });
-  });
-
-  it('keeps arrows that contain < and > (they are not tags)', () => {
-    const v = validateMermaid('sequenceDiagram\n  A<<->>B: sync\n  A-->>B: ok');
-    expect(v.ok && v.source).toContain('A<<->>B: sync');
-  });
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const base = (): any => ({
+  title: 'Rate import',
+  caption: 'Rows are checked, then each rate is stored once.',
+  acts: [
+    { id: 'imp', title: 'Import' },
+    { id: 'chk', title: 'Check' },
+  ],
+  layers: ['domain', 'data'],
+  cells: [
+    { id: 'c1', act: 'imp', layer: 'domain', label: 'Parse rows', pattern: 'Pipeline', change: 'new', files: ['src/import.ts'] },
+    { id: 'c2', act: 'chk', layer: 'domain', label: 'Reject rows with no account', pattern: 'Guard clause', change: 'changed', files: [] },
+    { id: 'c3', act: 'chk', layer: 'data', label: 'Store each rate once', pattern: null, change: 'unchanged', files: [] },
+  ],
+  arrows: [{ from: 'c1', to: 'c2', label: 'rows' }],
 });
+const refused = (raw: unknown, ctx: DesignContext = PR): string => {
+  const v = validateDesign(raw, ctx);
+  expect(v.ok).toBe(false);
+  return v.ok ? '' : v.message;
+};
 
-describe('validateMermaid — refuses', () => {
-  it('empty, a header with no steps, and non-strings', () => {
-    expect(validateMermaid('')).toMatchObject({ ok: false, reason: 'empty' });
-    expect(validateMermaid('sequenceDiagram\n')).toMatchObject({ ok: false, reason: 'empty' });
-    expect(validateMermaid(42)).toMatchObject({ ok: false, reason: 'empty' });
-  });
-
-  it('a type that is not on the list (pie, gantt, prose)', () => {
-    expect(validateMermaid('pie\n  "a": 1')).toMatchObject({ ok: false, reason: 'unknown_type' });
-    expect(validateMermaid('Here is the diagram:\nsequenceDiagram\n A->>B: x')).toMatchObject({
-      ok: false,
-      reason: 'unknown_type',
-    });
-  });
-
-  it('more than one fenced block, or prose around a fence', () => {
-    const two = '```mermaid\n' + OK + '\n```\n```mermaid\n' + OK + '\n```';
-    expect(validateMermaid(two)).toMatchObject({ ok: false, reason: 'not_one_block' });
-    expect(validateMermaid('Look:\n```mermaid\n' + OK + '\n```')).toMatchObject({ ok: false, reason: 'not_one_block' });
-  });
-
-  it('script, javascript: links and embedded documents, anywhere', () => {
-    for (const bad of [
-      'sequenceDiagram\n  A->>B: <script>alert(1)</script>',
-      'sequenceDiagram\n  A->>B: JavaScript:alert(1)',
-      'sequenceDiagram\n  A->>B: <iframe src=x>',
-      'flowchart TD\n  A["<foreignObject>"] --> B',
-      'sequenceDiagram\n  A->>B: data:text/html;base64,xx',
-    ]) {
-      expect(validateMermaid(bad)).toMatchObject({ ok: false, reason: 'unsafe' });
-    }
-  });
-
-  it('over the size caps', () => {
-    const big = 'sequenceDiagram\n' + '  A->>B: x\n'.repeat(Math.ceil(SEQUENCE_DIAGRAM_MAX_CHARS / 10));
-    expect(validateMermaid(big)).toMatchObject({ ok: false, reason: 'too_large' });
-    const long = 'sequenceDiagram\n' + 'A->>B:x\n'.repeat(MAX_LINES + 1);
-    expect(validateMermaid(long)).toMatchObject({ ok: false, reason: 'too_large' });
-  });
-});
-
-describe('validateMermaid — strips what could change config, link out or style', () => {
-  it('drops %%{init}%% directives, even across lines, and front matter', () => {
-    const v = validateMermaid(
-      "%%{init: {'securityLevel': 'loose'}}%%\nsequenceDiagram\n  A->>B: x\n%%{\n  init: {}\n}%%",
-    );
+describe('validateDesign — accepts and cleans', () => {
+  it('accepts a small design and keeps its shape', () => {
+    const v = validateDesign(base(), PR);
     expect(v.ok).toBe(true);
-    if (v.ok) {
-      expect(v.source).not.toContain('%%{');
-      expect(v.source).not.toContain('securityLevel');
-      expect(v.removed).toContain('directives');
-    }
-    const fm = validateMermaid('---\nconfig:\n  securityLevel: loose\n---\nsequenceDiagram\n  A->>B: x');
-    expect(fm.ok && fm.source).toBe('sequenceDiagram\n  A->>B: x');
+    if (!v.ok) return;
+    expect(v.value.title).toBe('Rate import');
+    expect(v.value.design.cells).toHaveLength(3);
+    expect(v.value.design.cells[0]).toMatchObject({ pr: null, files: ['src/import.ts'], change: 'new' });
+    expect(v.value.design.arrows).toEqual([{ from: 'c1', to: 'c2', label: 'rows' }]);
   });
 
-  it('drops click, link, links, href, callback, style, classDef and linkStyle lines', () => {
-    const v = validateMermaid(
-      [
-        'flowchart TD',
-        '  A --> B',
-        '  click A href "https://evil.example"',
-        '  click B call alert()',
-        '  style A fill:url(https://evil.example/x)',
-        '  classDef red fill:#f00',
-        '  linkStyle 0 stroke:red',
-      ].join('\n'),
-    );
-    expect(v.ok && v.source).toBe('flowchart TD\n  A --> B');
-    const s = validateMermaid('sequenceDiagram\n  participant A\n  link A: Docs @ https://x\n  links A: {"x":"https://y"}\n  A->>A: x');
-    expect(s.ok && s.source).toBe('sequenceDiagram\n  participant A\n  A->>A: x');
-  });
-
-  it('neutralises HTML in labels: <br> to a space, other tags to entity text', () => {
-    const v = validateMermaid('sequenceDiagram\n  A->>B: first<br/>second\n  A->>B: returns Map<string> <b>bold</b>');
+  it('puts layers in canonical order, strips control characters and nulls empty strings', () => {
+    const d = base();
+    d.layers = ['data', 'domain'];
+    d.cells[0].label = 'Parse\u0007 rows\n';
+    d.cells[1].pattern = '  ';
+    d.arrows[0].label = '';
+    const v = validateDesign(d, PR);
     expect(v.ok).toBe(true);
-    if (v.ok) {
-      expect(v.source).toContain('first second');
-      expect(v.source).toContain('Map#lt;string#gt;');
-      expect(v.source).not.toMatch(/<b>|<\/b>/);
-      expect(v.removed).toContain('html');
-    }
+    if (!v.ok) return;
+    expect(v.value.design.layers).toEqual(['domain', 'data']);
+    expect(v.value.design.cells[0]!.label).toBe('Parse rows');
+    expect(v.value.design.cells[1]!.pattern).toBeNull();
+    expect(v.value.design.arrows[0]!.label).toBeNull();
   });
 
-  it('strips control characters', () => {
-    const v = validateMermaid('sequenceDiagram\n  A->>B: x\u0007y');
-    expect(v.ok && v.source).toBe('sequenceDiagram\n  A->>B: xy');
+  it('is idempotent: the cleaned answer validates to itself (the second, storage-time pass)', () => {
+    const v = validateDesign(base(), PR);
+    if (!v.ok) throw new Error('expected ok');
+    const again = validateDesign({ ...v.value.design, title: v.value.title, caption: v.value.caption }, PR);
+    expect(again.ok && again.value).toEqual(v.value);
   });
 });
 
-describe('cleanTitle / cleanCaption', () => {
-  it('one line, clipped', () => {
-    expect(cleanTitle('  Checkout\n  flow ')).toBe('Checkout flow');
-    expect(cleanTitle('x'.repeat(200))?.length).toBe(120);
-    expect(cleanTitle('   ')).toBeNull();
+describe('validateDesign — every cap refuses with its fix', () => {
+  it('acts', () => {
+    const d = base();
+    d.acts = Array.from({ length: DESIGN_MAX_ACTS + 1 }, (_, i) => ({ id: `a${i}`, title: `Act ${i}` }));
+    d.cells = d.acts.map((a: any, i: number) => ({ id: `x${i}`, act: a.id, layer: 'domain', label: 'L', pattern: 'P', change: 'new' }));
+    d.layers = ['domain'];
+    d.arrows = [];
+    expect(refused(d)).toContain(`${DESIGN_MAX_ACTS + 1} acts; merge stages so there are at most ${DESIGN_MAX_ACTS}`);
+    expect(refused({ ...base(), acts: [] })).toMatch(/acts is empty/);
   });
-  it('at most three sentences', () => {
-    expect(cleanCaption('One. Two! Three? Four.')).toBe('One. Two! Three?');
-    expect(cleanCaption('No full stop')).toBe('No full stop');
+
+  it('layers: too many, unknown, duplicate, listed with no cell, used but not listed', () => {
+    const d = base();
+    d.layers = ['ui', 'api', 'domain', 'data', 'external', 'tests'];
+    const m = refused(d);
+    expect(m).toContain(`6 layers; use at most ${DESIGN_MAX_LAYERS}`);
+    expect(m).toContain('layer "ui" has no cell; drop it from layers');
+    expect(refused({ ...base(), layers: ['domain', 'data', 'infra'] })).toMatch(/unknown layer "infra"; use only: ui, api, domain, data, external, tests/);
+    expect(refused({ ...base(), layers: ['domain', 'data', 'data'] })).toMatch(/layer "data" is listed twice/);
+    const unlisted = base();
+    unlisted.layers = ['domain'];
+    expect(refused(unlisted)).toMatch(/cell "c3" uses layer "data"; add it to layers/);
+    const unknownCell = base();
+    unknownCell.cells[2].layer = 'cache';
+    expect(refused(unknownCell)).toMatch(/cell "c3" has unknown layer "cache"/);
+  });
+
+  it('cells: count, one per slot, unknown act, act with no cell, no pattern anywhere', () => {
+    const d = base();
+    d.cells = Array.from({ length: DESIGN_MAX_CELLS + 1 }, (_, i) => ({ id: `c${i}`, act: 'imp', layer: 'domain', label: 'L', pattern: 'P', change: 'new' }));
+    expect(refused(d)).toContain(`${DESIGN_MAX_CELLS + 1} cells; merge or drop cells so there are at most ${DESIGN_MAX_CELLS}`);
+    const twin = base();
+    twin.cells[1].act = 'imp';
+    expect(refused(twin)).toMatch(/cells "c1" and "c2" are both in act "imp", layer "domain"; merge them into one cell/);
+    const lost = base();
+    lost.cells[0].act = 'nope';
+    const m = refused(lost);
+    expect(m).toMatch(/cell "c1" names act "nope", which is not in acts/);
+    const empty = base();
+    empty.acts.push({ id: 'save', title: 'Save' });
+    expect(refused(empty)).toMatch(/act "save" has no cell; drop it or give it one/);
+    const plain = base();
+    for (const c of plain.cells) c.pattern = null;
+    expect(refused(plain)).toMatch(/no cell names a pattern/);
+    const badChange = base();
+    badChange.cells[0].change = 'added';
+    expect(refused(badChange)).toMatch(/change "added" must be one of: new, changed, unchanged/);
+  });
+
+  it('ids: malformed and duplicate', () => {
+    const d = base();
+    d.cells[1].id = 'c1';
+    expect(refused(d)).toMatch(/cell id "c1" is used twice/);
+    const a = base();
+    a.acts[1].id = 'has space';
+    expect(refused(a)).toMatch(/act 2 id "has space" must be 1-24 letters/);
+  });
+
+  it('string lengths: title, caption, act title, label, pattern, arrow label, files per cell', () => {
+    const d = base();
+    d.title = 'x'.repeat(DESIGN_TITLE_MAX + 1);
+    d.caption = 'One. Two. Three.';
+    d.acts[0].title = 'y'.repeat(DESIGN_ACT_TITLE_MAX + 1);
+    d.cells[0].label = 'z'.repeat(DESIGN_CELL_LABEL_MAX + 1);
+    d.cells[1].pattern = 'p'.repeat(DESIGN_PATTERN_MAX + 1);
+    d.arrows[0].label = 'one two three four';
+    d.cells[2].files = Array.from({ length: DESIGN_CELL_FILES_MAX + 1 }, (_, i) => `f${i}.ts`);
+    const v = validateDesign(d, PR);
+    expect(v.ok).toBe(false);
+    if (v.ok) return;
+    const all = v.problems.join('\n');
+    expect(all).toContain(`title is ${DESIGN_TITLE_MAX + 1} characters; shorten it to at most ${DESIGN_TITLE_MAX}`);
+    expect(all).toContain('caption has 3 sentences; keep at most 2');
+    expect(all).toContain(`act "imp" title is ${DESIGN_ACT_TITLE_MAX + 1} characters`);
+    expect(all).toContain(`cell "c1" label is ${DESIGN_CELL_LABEL_MAX + 1} characters`);
+    expect(all).toContain(`cell "c2" pattern is ${DESIGN_PATTERN_MAX + 1} characters`);
+    expect(all).toContain('label has more than 3 words');
+    expect(all).toContain(`cell "c3" lists ${DESIGN_CELL_FILES_MAX + 1} files; keep the ${DESIGN_CELL_FILES_MAX} most important`);
+    expect(refused({ ...base(), caption: 'c'.repeat(DESIGN_CAPTION_MAX + 1) })).toContain(`at most ${DESIGN_CAPTION_MAX}`);
+    const longArrow = base();
+    longArrow.arrows[0].label = 'a'.repeat(DESIGN_ARROW_LABEL_MAX + 1);
+    expect(refused(longArrow)).toContain(`at most ${DESIGN_ARROW_LABEL_MAX}`);
+  });
+
+  it('arrows: count, missing ends, self-loops, duplicates', () => {
+    const d = base();
+    d.arrows = Array.from({ length: DESIGN_MAX_ARROWS + 1 }, () => ({ from: 'c1', to: 'c2' }));
+    const m = refused(d);
+    expect(m).toContain(`${DESIGN_MAX_ARROWS + 1} arrows; keep only the ${DESIGN_MAX_ARROWS}`);
+    expect(m).toMatch(/is drawn twice/);
+    expect(refused({ ...base(), arrows: [{ from: 'c1', to: 'zz' }] })).toMatch(/must join two existing cell ids/);
+    expect(refused({ ...base(), arrows: [{ from: 'c1', to: 'c1' }] })).toMatch(/points at itself/);
+  });
+
+  it('plain text only: tags and URLs refused anywhere', () => {
+    const t = base();
+    t.cells[0].label = 'Parse <script>';
+    expect(refused(t)).toMatch(/tag-like/);
+    const u = base();
+    u.caption = 'See https://evil.example for more.';
+    expect(refused(u)).toMatch(/link or URL/);
+    const j = base();
+    j.acts[0].title = 'javascript:alert(1)';
+    expect(refused(j)).toMatch(/link or URL/);
+    // A comparison is not a tag.
+    const ok = base();
+    ok.cells[0].label = 'Keep rates < 100';
+    expect(validateDesign(ok, PR).ok).toBe(true);
+  });
+
+  it('lists every problem at once, capped', () => {
+    const d = base();
+    d.cells = Array.from({ length: 20 }, (_, i) => ({ id: 'dup', act: 'x', layer: 'nope', label: '', change: '?' }));
+    const v = validateDesign(d, PR);
+    expect(v.ok).toBe(false);
+    if (v.ok) return;
+    expect(v.problems.length).toBeGreaterThan(8);
+    expect(v.message).toMatch(/and \d+ more problem\(s\)\./);
   });
 });
 
-describe('wrapped sequence labels', () => {
-  it('joins a wrapped participant name, message and note back onto their statement', () => {
-    const r = validateMermaid(
-      [
-        'sequenceDiagram',
-        '    participant Norm as normaliseImported /',
-        'normaliseProposed',
-        '    participant DB',
-        '    Norm->>DB: write the',
-        'whole document',
-        '    Note over DB: nulls units,',
-        'not just status',
-        '    alt missing input',
-        '      DB-->>Norm: null',
-        '    end',
-      ].join('\n'),
-    );
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.source.split('\n')).toEqual([
-      'sequenceDiagram',
-      '    participant Norm as normaliseImported / normaliseProposed',
-      '    participant DB',
-      '    Norm->>DB: write the whole document',
-      '    Note over DB: nulls units, not just status',
-      '    alt missing input',
-      '      DB-->>Norm: null',
-      '    end',
-    ]);
-    expect(r.removed).toContain('line breaks inside labels');
+describe('validateDesign — files and PR refs', () => {
+  it('PR design: unknown paths are dropped (never refused); a prefixed path matches; pr is forced null', () => {
+    const d = base();
+    d.cells[0].files = ['src/import.ts', 'src/nope.ts', '/repo/checkout/src/rates.ts', './test/rates.test.ts'];
+    d.cells[0].pr = 'PR1';
+    const v = validateDesign(d, PR);
+    expect(v.ok).toBe(true);
+    if (!v.ok) return;
+    expect(v.value.design.cells[0]).toMatchObject({ pr: null, files: ['src/import.ts', 'src/rates.ts', 'test/rates.test.ts'] });
   });
 
-  it("turns a label's semicolon into Mermaid's entity, and leaves entities alone", () => {
-    const r = validateMermaid('sequenceDiagram\n  Note over A: timing-aware; nulls #lt;b#gt; #59; ok\n  A->>B: x');
-    expect(r.ok && r.source.split('\n')[1]).toBe('  Note over A: timing-aware#59; nulls #lt;b#gt; #59; ok');
+  it('story: files are filtered to the named PR; an unknown ref is refused', () => {
+    const d = base();
+    d.cells[0] = { ...d.cells[0], pr: 'pr2', files: ['web/src/RatesPage.tsx', 'api/routes/rates.ts'] };
+    const v = validateDesign(d, STORY);
+    expect(v.ok).toBe(true);
+    if (!v.ok) return;
+    expect(v.value.design.cells[0]).toMatchObject({ pr: 'PR2', files: ['web/src/RatesPage.tsx'] });
+    const bad = base();
+    bad.cells[0].pr = 'PR9';
+    expect(refused(bad, STORY)).toMatch(/names pr "PR9"; use one of: PR1, PR2, or null/);
   });
 
-  it('turns a typed backslash-n in a label into a space', () => {
-    const r = validateMermaid('sequenceDiagram\n  Note over A: final guard\\nnot just status\n  A->>B: x');
-    expect(r.ok && r.source.split('\n')[1]).toBe('  Note over A: final guard not just status');
-  });
-
-  it('leaves a well-formed diagram alone', () => {
-    const src = ['sequenceDiagram', '  autonumber', '  A->>B: hi', '  B-)A: async', '  A-xB: lost', '  %% note to self', '  par one', '    A->>B: x', '  and two', '    B->>A: y', '  end'].join('\n');
-    const r = validateMermaid(src);
-    expect(r.ok && r.source).toBe(src);
-    expect(r.ok && r.removed).toEqual([]);
+  it('story: a cell with no pr takes the member owning its first kept file', () => {
+    const d = base();
+    d.cells[0] = { ...d.cells[0], pr: null, files: ['nope.ts', 'api/db/rates.ts', 'web/src/RatesPage.tsx'] };
+    const v = validateDesign(d, STORY);
+    expect(v.ok).toBe(true);
+    if (!v.ok) return;
+    expect(v.value.design.cells[0]).toMatchObject({ pr: 'PR1', files: ['api/db/rates.ts'] });
+    expect(v.value.design.cells[1]).toMatchObject({ pr: null, files: [] });
   });
 });
-

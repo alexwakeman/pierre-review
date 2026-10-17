@@ -923,6 +923,8 @@ export function PrDetail({
   const claudeTabFocus = useFilters((s) => s.claudeTabFocus);
   const consumeClaudeTabFocus = useFilters((s) => s.consumeClaudeTabFocus);
   const aiFixTabFocus = useFilters((s) => s.aiFixTabFocus);
+  const prChangesFocus = useFilters((s) => s.prChangesFocus);
+  const consumePrChangesFocus = useFilters((s) => s.consumePrChangesFocus);
   const commentFocusForPr =
     commentFocus && pr && commentFocus.prId === pr.id ? commentFocus.commentId : null;
 
@@ -978,6 +980,18 @@ export function PrDetail({
       consumeClaudeTabFocus();
     }
   }, [claudeTabFocus, pr, claudeReviewEnabled, consumeClaudeTabFocus, seedTab]);
+
+  // A design-grid card for ANOTHER PR (a story design) deep-links here: the Changes tab, focused on
+  // its file. Routed through `openInChanges` (the one helper that sets the tab THEN the focus), as a
+  // URL correction — the open that mounted this pane already pushed the history entry.
+  useEffect(() => {
+    if (prChangesFocus && pr && prChangesFocus.prId === pr.id) {
+      markUrlCorrection();
+      openInChanges(prChangesFocus.path, null, 'RIGHT');
+      consumePrChangesFocus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- openInChanges is a fresh closure each render
+  }, [prChangesFocus, pr, consumePrChangesFocus]);
 
   // "Generate fix from this review" (or any deep link) → open the AI Fix tab for the
   // matching PR. The signal is NOT consumed here — AiFixTab reads its `reviewId`, then

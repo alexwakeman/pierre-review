@@ -680,6 +680,11 @@ export interface FilterState {
   // Matched against the loaded PR by `prId`; cleared by PrDetail once it switches.
   claudeTabFocus: { prId: number } | null;
 
+  // transient: a design-grid card (Claude Review's story design, This Sprint's ticket drawer) → open
+  // a PR's Changes tab focused on one file. Matched by `prId`; PrDetail consumes it once it has
+  // routed the jump through its own `openInChanges`.
+  prChangesFocus: { prId: number; path: string } | null;
+
   // transient: "Generate fix from this review" → open the PR's AI Fix tab, seeded
   // with the review text. Matched by `prId`; cleared by PrDetail once it switches.
   aiFixTabFocus: { prId: number; reviewId?: number } | null;
@@ -1095,6 +1100,10 @@ export interface FilterState {
     opts?: { fromActivity?: boolean; returnItemId?: string | null },
   ) => void;
   consumeClaudeTabFocus: () => void;
+  // Open a PR's Changes tab at one file (a design-grid card). Ensures a pr-detail tab is mounted,
+  // exactly like openClaudeReview, so the signal always has a PrDetail to consume it.
+  openPrChangesAt: (meta: TabMeta, path: string, opts?: { fromActivity?: boolean }) => void;
+  consumePrChangesFocus: () => void;
   // Open a PR's AI Fix tab with a Claude review to fix from. AiFixTab consumes it. `reviewId`
   // names the review; the server builds the whole seed from the stored run.
   openAiFixFromReview: (prId: number, reviewId?: number) => void;
@@ -1446,6 +1455,7 @@ function freshDefaults(): FilterData {
     activityFocus: null,
     commentFocus: null,
     claudeTabFocus: null,
+    prChangesFocus: null,
     aiFixTabFocus: null,
     metricsFocus: null,
     botPrsFocusKey: null,
@@ -1830,6 +1840,16 @@ export const useFilters = create<FilterState>((set, get) => ({
     });
   },
   consumeClaudeTabFocus: () => set({ claudeTabFocus: null }),
+  openPrChangesAt: (meta, path, opts) => {
+    usePinnedTabs.getState().openPrDetailTab(meta, opts);
+    set({
+      selectedPrId: meta.id,
+      selectedThreadId: null,
+      selectedCommentId: null,
+      prChangesFocus: { prId: meta.id, path },
+    });
+  },
+  consumePrChangesFocus: () => set({ prChangesFocus: null }),
   openAiFixFromReview: (prId, reviewId) =>
     set({
       selectedPrId: prId,

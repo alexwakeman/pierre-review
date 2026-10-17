@@ -350,8 +350,8 @@ function DrawerBody({
         )}
       </section>
 
-      {/* The whole story's sequence diagram (docs/CLAUDE-REVIEW.md § Sequence diagrams): only where agentic AI
-          runs and the ticket has more than one open or merged pull request. */}
+      {/* The whole story's design (docs/CLAUDE-REVIEW.md § Design diagrams): only where agentic AI runs
+          and the ticket has more than one open or merged pull request. */}
       {ai.enabled && anyPr != null && <StoryDiagramSection key={`diagram:${t.ident}`} ident={t.ident} />}
 
       {/* Keyed per ticket: every ticket opens with the shut groups shut (nothing is remembered). */}

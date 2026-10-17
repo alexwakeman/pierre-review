@@ -1,19 +1,26 @@
-import { and, desc, eq, gte, inArray, isNull, ne, notInArray, or } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, notInArray, or } from 'drizzle-orm';
 import type {
+  DesignDiagram,
   SequenceDiagramKind,
   SequenceDiagramMember,
   SequenceDiagramRefusal,
   SequenceDiagramStatus,
   SequenceDiagramTrigger,
-  SequenceDiagramType,
   SequenceDiagramView,
   StoredPrFile,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
-// THE SEQUENCE DIAGRAMS' STORAGE (`sequence_diagrams`, migration 0115 / pg 0102). Every read and
-// write is scoped by accountId; an id from another account reads as null and writes nothing.
-// Portable terminals only (`.execute()`, `.returning().execute()`).
+// THE DESIGN DIAGRAMS' STORAGE (`sequence_diagrams`, migrations 0115+0118+0119 / pg 0102+0105+0106).
+// Every read and write is scoped by accountId; an id from another account reads as null and writes
+// nothing. Portable terminals only (`.execute()`, `.returning().execute()`).
+//
+// ⚠ ONLY DESIGN-ERA ROWS ARE READ. The table also holds the retired Mermaid diagrams (`source`, a
+// Mermaid `diagram_type`). Every run queued now is stamped `diagram_type = DESIGN_DIAGRAM_TYPE` at
+// INSERT, and a succeeded one carries `design`; the slot reads (`latestDiagram`,
+// `latestSucceededDiagram`) take only stamped rows, and a succeeded row only with a design — so an
+// old Mermaid row is "no diagram yet" and the next review (its fingerprint version moved) or a Redraw
+// draws a design. `source` is kept (no column drops) and never written.
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const t = (ctx: Pick<AgentContext, 'schema'>): any => (ctx.schema as any).sequenceDiagrams;
@@ -39,6 +46,7 @@ export interface DiagramRow {
   caption: string | null;
   diagramType: string | null;
   source: string | null;
+  design: DesignDiagram | null;
   refusal: string | null;
   error: string | null;
   costUsd: number | null;
@@ -56,6 +64,9 @@ export interface Telemetry {
   outputTokens?: number | null;
   numTurns?: number | null;
 }
+
+/** The `diagram_type` every design-era row carries from the moment it is queued. */
+export const DESIGN_DIAGRAM_TYPE = 'design';
 
 // ---- the PR the pipeline reads ----
 
@@ -153,6 +164,7 @@ export async function insertQueuedDiagram(ctx: Ctx, a: QueueDiagramArgs): Promis
       headSha: a.headSha,
       members: a.members,
       trigger: a.trigger,
+      diagramType: DESIGN_DIAGRAM_TYPE,
       status: 'queued',
       model: a.model,
       createdAt: new Date(),
@@ -222,15 +234,15 @@ export async function saveDiagramSuccess(
   ctx: Ctx,
   accountId: number,
   id: number,
-  d: { title: string | null; caption: string | null; diagramType: SequenceDiagramType; source: string },
+  d: { title: string | null; caption: string | null; design: DesignDiagram },
   t0: Telemetry,
 ): Promise<void> {
   await update(ctx, accountId, id, {
     status: 'succeeded',
     title: d.title,
     caption: d.caption,
-    diagramType: d.diagramType,
-    source: d.source,
+    diagramType: DESIGN_DIAGRAM_TYPE,
+    design: d.design,
     completedAt: new Date(),
     ...tel(t0),
   });
@@ -314,7 +326,12 @@ export async function diagramExistsAt(
   return rows.length > 0;
 }
 
-/** The newest row of one subject (any status), or null. */
+/** A design-era row: stamped at queue time, and a succeeded one carries its design. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const designEra = (d: any) =>
+  and(eq(d.diagramType, DESIGN_DIAGRAM_TYPE), or(ne(d.status, 'succeeded'), isNotNull(d.design)));
+
+/** The newest design-era row of one subject (any status), or null. */
 export async function latestDiagram(
   ctx: Ctx,
   accountId: number,
@@ -325,7 +342,7 @@ export async function latestDiagram(
   const rows = (await ctx.db
     .select()
     .from(d)
-    .where(and(eq(d.accountId, accountId), eq(d.kind, kind), eq(d.subject, subject)))
+    .where(and(eq(d.accountId, accountId), eq(d.kind, kind), eq(d.subject, subject), designEra(d)))
     .orderBy(desc(d.createdAt), desc(d.id))
     .limit(1)
     .execute()) as DiagramRow[];
@@ -333,7 +350,7 @@ export async function latestDiagram(
 }
 
 /**
- * The newest SUCCEEDED row of one subject, or null — shown under a newer run that refused or failed,
+ * The newest SUCCEEDED design of one subject, or null — shown under a newer run that refused or failed,
  * so a failed redraw never hides the last good diagram.
  */
 export async function latestSucceededDiagram(
@@ -346,7 +363,9 @@ export async function latestSucceededDiagram(
   const rows = (await ctx.db
     .select()
     .from(d)
-    .where(and(eq(d.accountId, accountId), eq(d.kind, kind), eq(d.subject, subject), eq(d.status, 'succeeded')))
+    .where(
+      and(eq(d.accountId, accountId), eq(d.kind, kind), eq(d.subject, subject), eq(d.status, 'succeeded'), designEra(d)),
+    )
     .orderBy(desc(d.createdAt), desc(d.id))
     .limit(1)
     .execute()) as DiagramRow[];
@@ -391,8 +410,7 @@ export function toDiagramView(row: DiagramRow, current: boolean): SequenceDiagra
     trigger: row.trigger,
     title: row.title,
     caption: row.caption,
-    diagramType: (row.diagramType as SequenceDiagramType | null) ?? null,
-    source: row.status === 'succeeded' ? row.source : null,
+    design: row.status === 'succeeded' ? (row.design ?? null) : null,
     headSha: row.headSha,
     members: row.members ?? [],
     refusal: (row.refusal as SequenceDiagramRefusal | null) ?? null,

@@ -584,7 +584,7 @@ export const config = {
   // Manual runs never count. Default = shared CI_REVIEW_DAILY_CAP.
   ciReviewDailyCap: intFromEnv('CI_REVIEW_DAILY_CAP', 20),
   // ---- Sequence diagrams (one Sonnet 5 run per PR head / per ticket's member set —
-  // review/diagrams/, docs/CLAUDE-REVIEW.md § Sequence diagrams) ----
+  // review/diagrams/, docs/CLAUDE-REVIEW.md § Design diagrams) ----
   // Its OWN spend and turn caps. Env only — no route sets them.
   sequenceDiagramBudgetUsd: floatFromEnv('SEQUENCE_DIAGRAM_BUDGET_USD', 1.5),
   sequenceDiagramMaxTurns: intFromEnv('SEQUENCE_DIAGRAM_MAX_TURNS', 30),

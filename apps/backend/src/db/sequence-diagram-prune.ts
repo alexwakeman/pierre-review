@@ -3,10 +3,10 @@ import type { SequenceDiagramMember } from '@pierre-review/shared';
 import { schema, type Executor } from './client.js';
 
 // THE SEQUENCE-DIAGRAM HALF OF BOTH PR DELETE PATHS (deleteRepo in queries.ts, retention's
-// deletePrSubtree). Migration 0115 / pg 0102 / 0118 / pg 0105; no FKs, so nothing cascades.
+// deletePrSubtree). Migration 0115 / pg 0102 / 0118 / pg 0105 / 0119 / pg 0106; no FKs, so nothing cascades.
 //   • 'pr' rows carry pr_id: they go with their PR.
 //   • 'story' rows carry pr_id NULL, but their `members` JSON names every member PR (title, repo, head)
-//     and their Mermaid source is drawn from that code. A story row naming ANY deleted PR goes too —
+//     and their design is drawn from that code. A story row naming ANY deleted PR goes too —
 //     the next review of a surviving member draws the story again from what is left.
 // The story rows are found through the deleted PRs' ACCOUNTS (read before the PRs go, so the caller
 // must run this BEFORE it deletes pull_requests), then filtered on `members` in code: the JSON column

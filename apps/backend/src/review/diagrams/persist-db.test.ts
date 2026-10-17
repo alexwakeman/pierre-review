@@ -11,6 +11,7 @@
 //   DATABASE_URL=<scratch> pnpm --filter @pierre-review/backend test diagrams/persist-db
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 
 const DB_PATH = `${process.env.DATABASE_URL ?? '/tmp/pierre-diagrams'}.diagrams-db.sqlite`;
@@ -30,6 +31,14 @@ let prA = 0;
 let prB = 0;
 const HEAD = 'a'.repeat(40);
 const HEAD2 = 'b'.repeat(40);
+const DESIGN = {
+  acts: [{ id: 'a1', title: 'Import' }],
+  layers: ['domain' as const],
+  cells: [
+    { id: 'c1', act: 'a1', layer: 'domain' as const, label: 'Parse rows', pattern: 'Pipeline', change: 'new' as const, pr: null, files: ['src/a.ts'] },
+  ],
+  arrows: [],
+};
 
 beforeAll(async () => {
   for (const x of ['', '-shm', '-wal']) rmSync(DB_PATH + x, { force: true });
@@ -119,16 +128,16 @@ describe('storage', () => {
   it('one row per run: a redraw at the same head never clears the good diagram, even when it fails', async () => {
     const { slotFor } = await import('./routes.js');
     const id = await queue(1, prA, 'fp1');
-    await persist.saveDiagramSuccess(ctx, 1, id, { title: 'T', caption: 'C', diagramType: 'sequenceDiagram', source: 'sequenceDiagram\n A->>B: x' }, { costUsd: 0.1 });
+    await persist.saveDiagramSuccess(ctx, 1, id, { title: 'T', caption: 'C', design: DESIGN }, { costUsd: 0.1 });
     const again = await queue(1, prA, 'fp1', 'manual');
     expect(again).not.toBe(id);
-    expect(await persist.getDiagramRow(ctx, 1, id)).toMatchObject({ status: 'succeeded', source: 'sequenceDiagram\n A->>B: x' });
+    expect(await persist.getDiagramRow(ctx, 1, id)).toMatchObject({ status: 'succeeded', design: DESIGN, source: null, diagramType: 'design' });
     const drawing = await slotFor(ctx, 1, 'pr', String(prA), 'fp1');
-    expect(drawing.diagram).toMatchObject({ id, status: 'succeeded', current: true, source: 'sequenceDiagram\n A->>B: x' });
+    expect(drawing.diagram).toMatchObject({ id, status: 'succeeded', current: true, design: DESIGN });
     expect(drawing.latest).toMatchObject({ id: again, status: 'queued', trigger: 'manual', current: true });
     await persist.markDiagramFailed(ctx, 1, again, 'boom', { costUsd: 0.05 }, 'invalid_diagram');
     const failed = await slotFor(ctx, 1, 'pr', String(prA), 'fp1');
-    expect(failed.diagram).toMatchObject({ id, source: 'sequenceDiagram\n A->>B: x' });
+    expect(failed.diagram).toMatchObject({ id, design: DESIGN });
     expect(failed.latest).toMatchObject({ id: again, status: 'failed', refusal: 'invalid_diagram' });
     expect(await persist.diagramExistsAt(ctx, 1, 'pr', String(prA), 'fp1')).toBe(true);
     expect(await persist.diagramExistsAt(ctx, 2, 'pr', String(prA), 'fp1')).toBe(false);
@@ -142,8 +151,8 @@ describe('storage', () => {
     const latest = await persist.latestDiagram(ctx, 1, 'pr', String(prA));
     await persist.markDiagramRefused(ctx, 1, latest!.id, 'head_moved');
     const slot = await slotFor(ctx, 1, 'pr', String(prA), 'fp2');
-    expect(slot.diagram).toMatchObject({ status: 'succeeded', current: false, source: 'sequenceDiagram\n A->>B: x' });
-    expect(slot.latest).toMatchObject({ status: 'refused', refusal: 'head_moved', current: true, source: null });
+    expect(slot.diagram).toMatchObject({ status: 'succeeded', current: false, design: DESIGN });
+    expect(slot.latest).toMatchObject({ status: 'refused', refusal: 'head_moved', current: true, design: null });
     const cur = await slotFor(ctx, 1, 'pr', String(prA), 'fp1');
     expect(cur.diagram?.current).toBe(true);
     expect((await slotFor(ctx, 2, 'pr', String(prA), 'fp1')).diagram).toBeNull();
@@ -165,6 +174,32 @@ describe('storage', () => {
     expect(await persist.countReviewDiagramsSince(ctx, 2, 0)).toBe(0);
   });
 
+  it('a Mermaid-era row (no design) is no diagram: the slot reads past it, both succeeded and failed', async () => {
+    const { slotFor } = await import('./routes.js');
+    // A PR with only a retired Mermaid diagram (and a later Mermaid-era failure) reads as nothing.
+    const [legacy] = await db
+      .insert(schema.sequenceDiagrams)
+      .values([
+        { accountId: 1, kind: 'pr', subject: '9999', prId: 9999, fingerprint: 'old', trigger: 'review', status: 'succeeded', model: 'm', diagramType: 'sequenceDiagram', source: 'sequenceDiagram\n A->>B: x', createdAt: new Date(Date.now() - 2000) },
+        { accountId: 1, kind: 'pr', subject: '9999', prId: 9999, fingerprint: 'old', trigger: 'review', status: 'failed', model: 'm', error: 'x', createdAt: new Date(Date.now() - 1000) },
+      ])
+      .returning()
+      .execute();
+    expect(legacy.id).toBeGreaterThan(0);
+    expect(await slotFor(ctx, 1, 'pr', '9999', 'new')).toEqual({ diagram: null, latest: null });
+    expect(await persist.latestDiagram(ctx, 1, 'pr', '9999')).toBeNull();
+    // A design-era run on the same subject shows, with the old rows still ignored beneath it.
+    const id = await persist.insertQueuedDiagram(ctx, {
+      accountId: 1, kind: 'pr', subject: '9999', prId: 9999, ticketKey: null, fingerprint: 'new', headSha: HEAD, members: null, trigger: 'manual', model: 'claude-sonnet-5',
+    });
+    const queued = await slotFor(ctx, 1, 'pr', '9999', 'new');
+    expect(queued.diagram).toBeNull();
+    expect(queued.latest).toMatchObject({ id, status: 'queued', design: null });
+    await persist.saveDiagramSuccess(ctx, 1, id, { title: 'T', caption: null, design: DESIGN }, {});
+    expect((await slotFor(ctx, 1, 'pr', '9999', 'new')).diagram).toMatchObject({ id, design: DESIGN, current: true });
+    await db.delete(schema.sequenceDiagrams).where(eq(schema.sequenceDiagrams.subject, '9999')).execute();
+  });
+
   it('a restart fails what it orphaned', async () => {
     expect(await persist.reconcileOrphanedDiagrams(ctx)).toBeGreaterThanOrEqual(1);
     const rows = await db.select().from(schema.sequenceDiagrams).execute();
@@ -182,7 +217,8 @@ describe('routes', () => {
     const ok = await app.inject({ method: 'GET', url: `/api/prs/${prA}/sequence-diagrams` });
     expect(ok.statusCode).toBe(200);
     expect(ok.json()).toMatchObject({ prId: prA, stories: [] });
-    expect(ok.json().pr.diagram.source).toContain('sequenceDiagram');
+    expect(ok.json().pr.diagram.design).toEqual(DESIGN);
+    expect(ok.json().pr.diagram).not.toHaveProperty('source');
     expect((await app.inject({ method: 'GET', url: `/api/prs/${prB}/sequence-diagrams` })).statusCode).toBe(404);
     expect((await app.inject({ method: 'POST', url: `/api/prs/${prB}/sequence-diagrams/redraw` })).statusCode).toBe(404);
   });

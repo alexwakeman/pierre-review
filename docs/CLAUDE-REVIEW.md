@@ -770,17 +770,31 @@ CURRENT head — an earlier commit's is hidden whether the head is green or red
   succeeded CI review AT THE PR'S CURRENT SYNCED HEAD (`getFixableCiItemsForPr`), manual and auto
   fixes alike — never the code review's legacy `ciFailures` (§ AI Fix).
 
-## Sequence diagrams (the flow a change touches — its own process)
+## Design diagrams (how a change is built — its own process)
 
 A SEPARATE agentic process (`src/review/diagrams/`), never inside the PR review, the ticket review or
 the CI review: own table, own claim, own lane, own cap, own budget. CORE, free, LOCAL ONLY (routes in
 `registerAgenticRoutes`; the SPA gates on `me.ai`). **Sonnet 5 always** (`DIAGRAM_MODEL`); nothing on
-the wire picks the model. Wire contract: [API.md](API.md) § Sequence diagrams.
+the wire picks the model. Wire contract: [API.md](API.md) § Design diagrams. It REPLACED the Mermaid
+sequence diagrams (2026-10-17): those were stack-trace detailed (12 participants, 5000px wide); a
+design is the stages, layers and patterns used to deliver the change, readable without zooming. The
+table, the routes' paths, the queue and the `SEQUENCE_DIAGRAM_*` env names keep "sequence diagram".
 
-- **Two kinds.** `'pr'` — ONE diagram of the process flow this PR's change touches, at its head.
+- **What a run produces — a `DesignDiagram`** (`packages/shared/src/sequence-diagrams.ts`, where
+  every cap is spelled ONCE for the validator, the prompt and the renderer): `acts` (1–4 columns, the
+  stages as a reader tells them, titles ≤ 24), `layers` (1–5 rows from the FIXED vocabulary
+  `DESIGN_LAYERS`: `ui` UI · `api` API / route · `domain` Domain / service · `data` Data / store ·
+  `external` External / integration · `tests` Tests / CI; canonical order), `cells` (≤ 14, at most
+  ONE per (act, layer): a RESPONSIBILITY ≤ 40 chars, never a function name; `pattern` ≤ 24 or null;
+  `change` new / changed / unchanged; `pr` 'PR1'… on story designs only; `files` ≤ 6) and `arrows`
+  (≤ 8, between existing cells, labels ≤ 3 words / 24 chars). Plus a title (≤ 80) and a caption
+  (≤ 2 sentences, ≤ 220). ⚠ **The layer vocabulary is PROVISIONAL** — the user is trialling it; a
+  change to it bumps `DESIGN_DIAGRAM_VERSION`.
+- **Two kinds.** `'pr'` — ONE design of how this PR's change is built, at its head.
   `'story'` — when the PR is on a TRACKER ticket (core tracker, STORED rows only via
   `tracker/ticket-source.ts`; a pasted `manual:` story never counts) with **more than one** open or
-  merged PR, ONE diagram of the whole story across every participating repository (at most
+  merged PR, ONE design of the whole story across every participating repository — how the PRs fit
+  together, each cell tagged with its PR, arrows free to cross repositories (at most
   `SEQUENCE_DIAGRAM_STORY_MAX_PRS` = 12 members, else refused `too_many_prs`; at most 3 tickets per PR).
 - **The trigger** (`trigger.ts` `maybeDrawDiagramsAfterReview`): `claude-review/manager.ts` calls it
   fire-and-forget after EVERY SUCCEEDED review, manual or auto. It only QUEUES and never throws, so it
@@ -795,9 +809,11 @@ the wire picks the model. Wire contract: [API.md](API.md) § Sequence diagrams.
   so the pane can say why and the same head is never judged twice.
 - **Fingerprints** (clock-free): PR = sha256(version, prId, headSha) — only a push redraws it;
   story = sha256(version, ident, sorted `prId:headSha:state`) — a member pushed, merged, joined or
-  left. ⚠ The ticket TEXT is deliberately NOT in it (rewording does not change the flow). Bump
-  `SEQUENCE_DIAGRAM_VERSION` when the prompt or validator changes what a run produces.
-- **Storage** `sequence_diagrams` (sqlite `0115`+`0118` / pg `0102`+`0105`): ONE row per RUN — subject =
+  left. ⚠ The ticket TEXT is deliberately NOT in it (rewording does not change the design). Both fold
+  `SEQUENCE_DIAGRAM_VERSION` AND `DESIGN_DIAGRAM_VERSION` — the latter's arrival made every
+  Mermaid-era fingerprint stale, so every current head draws once more as a design. Bump it when the
+  prompt, the validator or the vocabulary changes what a run produces.
+- **Storage** `sequence_diagrams` (sqlite `0115`+`0118`+`0119` / pg `0102`+`0105`+`0106`): ONE row per RUN — subject =
   the PR id or the ticket ident. ⚠ A Redraw at the same fingerprint is a NEW row, never a rewrite: the
   slot (`routes.ts` `slotFor`) shows the newest SUCCEEDED row under the newest run, so the good diagram
   stays up while a redraw runs and after it fails, is cancelled or is cut off by a restart (0115's
@@ -805,7 +821,11 @@ the wire picks the model. Wire contract: [API.md](API.md) § Sequence diagrams.
   reads "Drawn for an earlier commit". No FK on `pr_id`: both delete paths take PR rows AND every story
   row whose `members` names a deleted PR (`db/sequence-diagram-prune.ts`, run before the PRs go — it
   finds the stories through their accounts and filters the JSON in code).
-  `accountScopedTables()`, erasure, `verify:isolation`.
+  `accountScopedTables()`, erasure, `verify:isolation`. ⚠ **ONLY DESIGN-ERA ROWS ARE READ**: every run
+  queued now is stamped `diagram_type = 'design'` at INSERT and a succeeded one carries the `design`
+  JSON column (`0119`/pg `0106`); the slot reads take only stamped rows, and a succeeded one only with
+  a design — so a stored Mermaid row is "No design yet" and the next review (or Redraw) draws a design.
+  `source` is KEPT (no column drops) and never written.
 - **The slot pool.** A registered PEER of the ONE `REVIEW_CONCURRENCY` (`registerReviewSlotPeer`): a
   diagram starts only when no PR-review click waits, a review-started diagram only when the PR-review
   auto lane is empty too. Claim `${account}:${kind}:${subject}`, taken synchronously. Spend is recorded
@@ -815,18 +835,24 @@ the wire picks the model. Wire contract: [API.md](API.md) § Sequence diagrams.
   `no_code`; unreadable ⇒ `unreadable`) → a read-only worktree at the head. Story: the live members
   (changed since queued ⇒ `head_moved`) → every member's diff → a worktree per OPEN member + ONE
   default-branch checkout per repository for MERGED ones (the ticket review's approach) + the stored
-  ticket text. Then the agent: Read/Glob/Grep + `submit_diagram` only, `Bash` and every write tool
+  ticket text. Then the agent: Read/Glob/Grep + `submit_design` only, `Bash` and every write tool
   denied, the PreToolUse PATH GUARD over the checkouts, `ownToolsOnlyHook`. Every untrusted string
   (titles, file names, diffs, ticket text) is nonce-fenced.
-- **Validation** (`validate.ts`, run INSIDE the tool — a refusal answers with what to fix, at most 3
-  attempts — and AGAIN before storing): one block of an allowed type (`SEQUENCE_DIAGRAM_TYPES`,
-  sequenceDiagram preferred), ≤ 20,000 characters / 600 lines. REFUSED: `<script`, `javascript:` /
-  `vbscript:`, `data:text/html`, `<iframe>`/`<object>`/`<embed>`/`<foreignObject>`, more than one
-  fence. STRIPPED: `%%{init}%%` directives and YAML front matter (they can change Mermaid's config,
-  securityLevel included), `click`/`link`/`links`/`href`/`callback`, `style`/`classDef`/`linkStyle`
-  lines, control characters. NEUTRALISED: `<br>` → a space, any other tag → `#lt;…#gt;` entity text.
-- **The SPA** (docs/FRONTEND.md § Sequence diagrams) renders with Mermaid at securityLevel `'strict'`,
-  plain-text labels, the app's theme tokens, and falls back to the source on a render error.
+- **The prompt** (`prompts.ts`) asks for the DESIGN — the stages, which layer does the work, the
+  pattern, what is new vs changed; one cell = one responsibility, never a stack frame or a function
+  list; fewer cells preferred, empty cells good. Story: how the PRs/repos fit together, every cell
+  tagged with its PR, `files` from THAT PR's changed files.
+- **Validation** (`validate.ts` `validateDesign`, run INSIDE the tool — a refusal lists EVERY problem
+  with its fix, e.g. "5 acts; merge stages so there are at most 4", at most 3 attempts — and AGAIN
+  before storing): every cap above; unique, well-formed ids; every cell's act and layer listed; layers
+  only from the vocabulary; ONE cell per slot; every listed act and layer has a cell; ≥ 1 cell names a
+  pattern; arrows between existing cells, no self-loops, no duplicates; story `pr` refs only the
+  prompt's. Plain text only: control characters stripped, anything tag-like (`<x`) or a URL / scheme
+  REFUSED. ⚠ `files` is FILTERED server-side, never refused — kept only when the path is in the PR's
+  changed files (story: the member the cell's `pr` names, else any member, and a story cell with no
+  `pr` then takes the member owning its first kept file, so a click knows which PR to open).
+- **The SPA** (docs/FRONTEND.md § Design diagrams) draws it as a CSS grid (`components/DesignGrid.tsx`),
+  every string as React text; a card with files opens its PR's Changes tab at that file.
 
 ## Starting from the Open PRs tab
 

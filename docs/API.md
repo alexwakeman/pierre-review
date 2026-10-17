@@ -250,15 +250,18 @@ the items this PR owns (`getOwnedTicketItemsForPr`: the latest succeeded run per
 Automatic runs (`trigger` `auto` / `cascade`) count against the starting workspace's
 `TICKET_REVIEW_DAILY_CAP` (default 20, `countAutoTicketReviewsSince`); manual runs never do.
 
-### Sequence diagrams (CORE, local-only)
+### Design diagrams (CORE, local-only; the paths keep "sequence-diagrams")
 
 `review/diagrams/routes.ts`, registered by `registerAgenticRoutes` (absent in cloud and under
-`LIMN_AI_DISABLED` → `404`). [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Sequence diagrams. Wire types:
+`LIMN_AI_DISABLED` → `404`). [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Design diagrams. Wire types:
 `packages/shared/src/sequence-diagrams.ts`. A **slot** is `SequenceDiagramSlot {diagram, latest}`:
 `diagram` = the newest SUCCEEDED `SequenceDiagramView` (what to draw), `latest` = the newest run of any
 status when it is a different one (drawing, refused, failed) — a failed redraw never hides the last
-good diagram. Each view carries `current` (its fingerprint is the live one), `source` (validated
-Mermaid, succeeded rows only), `refusal` (`SequenceDiagramRefusal`, server-written) and `members` (story).
+good design. Each view carries `current` (its fingerprint is the live one), `design` (the validated
+`DesignDiagram {acts, layers, cells, arrows}`, succeeded rows only — the Mermaid `source` and
+`diagramType` left the wire), `refusal` (`SequenceDiagramRefusal`, server-written) and `members`
+(story, in ref order: a cell's `pr: 'PR2'` is `members[1]`). Only design-era rows are read: a stored
+Mermaid diagram answers as no diagram.
 
 | Route | Contract |
 |---|---|

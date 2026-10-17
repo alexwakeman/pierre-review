@@ -27,7 +27,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 | [API](docs/API.md) | any route — the per-route contract reference |
 | [FRONTEND](docs/FRONTEND.md) | stores, tabs/overlays, FilterBar scoping, timeline internals, PrDetail |
 | [MERGE-CI-TRUNK](docs/MERGE-CI-TRUNK.md) | merge verdict/queue, auto-merge runner, the in-app conflict resolver, CI logs, trunk status |
-| [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) | the agentic PR-review feature |
+| [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) | the agentic PR-review feature (+ its design diagrams) |
 | [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports -> "Chronology", its working-hours budgets, request history and Pro pointers |
 | [BLAST-RADIUS](docs/BLAST-RADIUS.md) | how far a PR can REACH — the Low/Medium/High chip, the co-change index, the Pro impact note |
 | [TRACKERS](docs/TRACKERS.md) | the issue tracker (CORE, free): the adapter seam, Jira, GitHub Issues, Linear, stored tickets + worker, idents, the sealed token |
@@ -888,12 +888,14 @@ Haiku 5.5). Details:
   story per ticket for every caller (`jiraStoryFor` → core's `ticketStory`, the freshest stored
   row), and the source (`tracker/ticket-source.ts`) reads STORED rows only — no tracker call on a view.
   [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Ticket review.
-- **SEQUENCE DIAGRAMS ARE A SEPARATE PROCESS** (`src/review/diagrams/`; sqlite `0115`+`0118` / pg `0102`+`0105`; ONE ROW PER RUN — a Redraw never rewrites the good diagram's row):
+- **DESIGN DIAGRAMS ARE A SEPARATE PROCESS** (`src/review/diagrams/`; table/routes keep "sequence diagram"; sqlite `0115`+`0118`+`0119` / pg `0102`+`0105`+`0106`; ONE ROW PER RUN — a Redraw never rewrites the good design's row):
   Sonnet 5, queued fire-and-forget after EVERY succeeded review (manual or auto) only when the change
-  has CODE (`isNonCodeFile`) and the head moved since its last diagram; a story diagram too when the
-  ticket has MORE THAN ONE PR. A slot peer, own `SEQUENCE_DIAGRAM_DAILY_CAP`. ⚠ The Mermaid source is
-  validated + stripped SERVER-side before storing (`validate.ts`) and rendered `securityLevel: 'strict'`
-  from a LAZY `mermaid` import. [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sequence diagrams.
+  has CODE (`isNonCodeFile`) and the head moved since its last design; a story design too when the
+  ticket has MORE THAN ONE PR. A slot peer, own `SEQUENCE_DIAGRAM_DAILY_CAP`. It draws a small GRID —
+  ≤ 4 acts × ≤ 5 layers of the FIXED (provisional) `DESIGN_LAYERS`, one card per responsibility +
+  pattern — validated SERVER-side (`validateDesign`, every cap in shared, `files` filtered to the
+  change) and drawn by `DesignGrid` (no Mermaid). ⚠ Only `diagram_type = 'design'` rows are read.
+  [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Design diagrams.
 - **The moved modules take ONE context argument, `AgentContext`** (`review/agent-context.ts`),
   built from direct core imports — never `ProContext`. Their tests pass a fake one; the queue
   managers carry it on each item. URL paths did NOT move (the fixer keeps its historical

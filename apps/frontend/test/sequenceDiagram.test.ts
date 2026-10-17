@@ -1,10 +1,9 @@
-// SEQUENCE DIAGRAMS in the SPA: Mermaid's config stays STRICT and follows the app's tokens; the reads
-// poll only while something is drawing (or just after a review); the status line names refusals.
+// DESIGN DIAGRAMS in the SPA: the reads poll only while something is drawing (or just after a review);
+// the status line names refusals. (The grid's own fold is test/designGrid.test.ts.)
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/sequenceDiagram.test.ts
 import { describe, expect, it } from 'vitest';
 import type { PrSequenceDiagramsResponse, SequenceDiagramSlot, SequenceDiagramView } from '@pierre-review/shared';
-import { channelsToHex, mermaidConfig, readMermaidTokens } from '../src/lib/mermaidTheme.js';
 import {
   AFTER_REVIEW_WAIT_MS,
   DIAGRAM_POLL_MS,
@@ -23,8 +22,7 @@ const view = (over: Partial<SequenceDiagramView> = {}): SequenceDiagramView => (
   trigger: 'review',
   title: 'Flow',
   caption: null,
-  diagramType: 'sequenceDiagram',
-  source: 'sequenceDiagram\n A->>B: x',
+  design: { acts: [{ id: 'a', title: 'Import' }], layers: ['domain'], cells: [{ id: 'c', act: 'a', layer: 'domain', label: 'Parse rows', pattern: 'Pipeline', change: 'new', pr: null, files: [] }], arrows: [] },
   headSha: 'a'.repeat(40),
   members: [],
   refusal: null,
@@ -41,30 +39,9 @@ const resp = (pr: SequenceDiagramSlot, stories: PrSequenceDiagramsResponse['stor
   stories,
 });
 
-describe('mermaid config', () => {
-  it('is strict, with plain-text labels and no auto start', () => {
-    const c = mermaidConfig(readMermaidTokens(() => '', false), false);
-    expect(c.securityLevel).toBe('strict');
-    expect(c.htmlLabels).toBe(false);
-    expect(c.flowchart.htmlLabels).toBe(false);
-    expect(c.startOnLoad).toBe(false);
-    expect(c.theme).toBe('base');
-  });
-
-  it('reads the --ai-* channels, falling back per theme', () => {
-    expect(channelsToHex('250 250 248', '#000000')).toBe('#fafaf8');
-    expect(channelsToHex('nope', '#123456')).toBe('#123456');
-    const dark = readMermaidTokens(() => '', true);
-    expect(dark.ink).toBe('#dcdcd6');
-    const live = readMermaidTokens((n) => (n === '--ai-ink' ? '1 2 3' : ''), false);
-    expect(live.ink).toBe('#010203');
-    expect(mermaidConfig(dark, true).themeVariables.darkMode).toBe(true);
-  });
-});
-
 describe('polling', () => {
   it('polls while a run is queued or running, in the PR slot or a story', () => {
-    expect(prDiagramsPollMs(resp({ diagram: null, latest: view({ status: 'running', source: null }) }), null)).toBe(DIAGRAM_POLL_MS);
+    expect(prDiagramsPollMs(resp({ diagram: null, latest: view({ status: 'running', design: null }) }), null)).toBe(DIAGRAM_POLL_MS);
     const story = { ident: 'T', ticketKey: null, memberCount: 2, diagram: null, latest: view({ kind: 'story', status: 'queued' }) };
     expect(prDiagramsPollMs(resp({ diagram: view(), latest: null }, [story]), null)).toBe(DIAGRAM_POLL_MS);
   });
@@ -82,7 +59,7 @@ describe('polling', () => {
     const staleStory = { ident: 'T', ticketKey: null, memberCount: 2, diagram: view({ kind: 'story', current: false }), latest: null };
     expect(prDiagramsPollMs(resp(prDone, [staleStory]), 1_000, 2_000)).toBe(DIAGRAM_POLL_MS);
     // A docs-only PR's refused row is current, but the story still waits.
-    const prRefused = { diagram: null, latest: view({ status: 'refused', refusal: 'no_code', source: null }) };
+    const prRefused = { diagram: null, latest: view({ status: 'refused', refusal: 'no_code', design: null }) };
     expect(prDiagramsPollMs(resp(prRefused, [{ ...staleStory, diagram: null }]), 1_000, 2_000)).toBe(DIAGRAM_POLL_MS);
     // A single-PR ticket is never drawn, so it never holds the poll open.
     expect(prDiagramsPollMs(resp(prDone, [{ ...staleStory, memberCount: 1 }]), 1_000, 2_000)).toBe(false);
@@ -95,12 +72,12 @@ describe('polling', () => {
 describe('the status line', () => {
   it('names drawing, refusals and failures; says nothing under a good diagram', () => {
     expect(slotStatusLine({ diagram: view(), latest: null }, false)).toBeNull();
-    expect(slotStatusLine({ diagram: null, latest: null }, false)).toBe('No diagram yet.');
+    expect(slotStatusLine({ diagram: null, latest: null }, false)).toBe('No design yet.');
     expect(slotStatusLine({ diagram: view(), latest: null }, true)).toBe('Drawing…');
-    expect(slotStatusLine({ diagram: null, latest: view({ status: 'refused', refusal: 'no_code', source: null }) }, false)).toBe(
-      'No code changed, so there is no flow to draw.',
+    expect(slotStatusLine({ diagram: null, latest: view({ status: 'refused', refusal: 'no_code', design: null }) }, false)).toBe(
+      'No code changed, so there is no design to draw.',
     );
-    expect(slotStatusLine({ diagram: view(), latest: view({ status: 'failed', source: null }) }, false)).toBe('Drawing failed.');
+    expect(slotStatusLine({ diagram: view(), latest: view({ status: 'failed', design: null }) }, false)).toBe('Drawing failed.');
     expect(redrawRefusalText({ outcome: 'refused', diagramId: null, refusal: 'too_few_prs' })).toBe(
       'The story has only one pull request.',
     );

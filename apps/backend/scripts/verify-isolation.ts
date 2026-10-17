@@ -4243,7 +4243,16 @@ check(
         trigger: 'review',
         model: 'claude-sonnet-5',
       });
-      await dp.saveDiagramSuccess(dc, acct, id, { title: `T${acct}`, caption: null, diagramType: 'sequenceDiagram', source: 'sequenceDiagram\n  A->>B: x' }, {});
+      await dp.saveDiagramSuccess(dc, acct, id, {
+        title: `T${acct}`,
+        caption: null,
+        design: {
+          acts: [{ id: 'a1', title: 'Import' }],
+          layers: ['domain'],
+          cells: [{ id: 'c1', act: 'a1', layer: 'domain', label: 'Parse rows', pattern: 'Pipeline', change: 'new', pr: null, files: [] }],
+          arrows: [],
+        },
+      }, {});
     }
   }
   const bStory = await dp.latestDiagram(dc, 2, 'story', IDENT);

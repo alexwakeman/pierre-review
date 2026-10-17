@@ -1399,9 +1399,13 @@ function ClaudesReview({
       {/* The reference-library passages this run used (docs/REFERENCE-DOCS.md § Use in reviews).
           Absent when the run did not read the library. */}
       <DocReferencesSection references={review.docReferences} />
-      {/* The flow this change touches (+ the whole story's, on a multi-PR ticket) — a separate Sonnet
-          run after each review (docs/CLAUDE-REVIEW.md § Sequence diagrams). Absent without agentic AI. */}
-      <ClaudeReviewDiagramsSection prId={review.prId} reviewFinishedAt={review.finishedAt ?? null} />
+      {/* How this change is built (+ the whole story's, on a multi-PR ticket) — a separate Sonnet run
+          after each review (docs/CLAUDE-REVIEW.md § Design diagrams). Absent without agentic AI. */}
+      <ClaudeReviewDiagramsSection
+        prId={review.prId}
+        reviewFinishedAt={review.finishedAt ?? null}
+        onOpenInChanges={onOpenInChanges}
+      />
       {/* The chat sits UNDER Story check and CI check and opens expanded, so a question about the
           review or the story is one click from both. */}
       {chatReviewId != null && <ReviewChatSection reviewId={chatReviewId} prId={review.prId} />}

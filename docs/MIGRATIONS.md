@@ -1324,6 +1324,13 @@ its own row and nothing writes `ON CONFLICT` on this table any more. Story rows 
 deleted member PR in both delete paths (`db/sequence-diagram-prune.ts`; code, not DDL). Journal `when`
 sqlite `1792137605014` / pg `1792137605015`. ⚠ pg `0105` NOT replayed.
 
+### `0119_design_diagrams` (pg `0106`) — the design grid replaces Mermaid
+One nullable JSON column on `sequence_diagrams`: `design` (sqlite `text` json mode / pg `jsonb`) — the
+validated `DesignDiagram` (docs/CLAUDE-REVIEW.md § Design diagrams). `source` is KEPT and no longer
+written. No backfill and no row deletes: design-era rows are told apart by `diagram_type = 'design'`
+(stamped at queue time, code not DDL), and the reads ignore every other row. pg twin uses
+`ADD COLUMN IF NOT EXISTS`; NOT replayed on Postgres yet.
+
 ### `0116_reference_docs` (pg `0103`) — the reference docs library
 One column and two tables (docs/REFERENCE-DOCS.md). `workspaces.docs_in_review` (sqlite integer / pg
 boolean, nullable, no default — NULL/false = off). `reference_docs`: one row per document — `slug`

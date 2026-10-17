@@ -1005,13 +1005,48 @@ export async function installMockApi(page: Page): Promise<void> {
       if (sonarMatch) {
         return json(route, { prId: Number(sonarMatch[1]), configured: false, snapshot: null } satisfies SonarPrResponse);
       }
-      // SEQUENCE DIAGRAMS (core, local-only; docs/CLAUDE-REVIEW.md § Sequence diagrams). Nothing drawn in
-      // e2e: the PR read answers an empty slot and no stories, the ticket read an empty slot.
+      // DESIGN DIAGRAMS (core, local-only; docs/CLAUDE-REVIEW.md § Design diagrams; the paths keep
+      // "sequence-diagrams"). `ai.enabled` is false here, so nothing renders them; the PR read answers
+      // ONE succeeded design (the real wire shape, typed) and no stories, the ticket read an empty slot.
       const diagramsMatch = path.match(/\/api\/prs\/(\d+)\/sequence-diagrams$/);
       if (diagramsMatch) {
+        const prId = Number(diagramsMatch[1]);
         return json(route, {
-          prId: Number(diagramsMatch[1]),
-          pr: { diagram: null, latest: null },
+          prId,
+          pr: {
+            diagram: {
+              id: 1,
+              kind: 'pr',
+              prId,
+              ticketIdent: null,
+              ticketKey: null,
+              status: 'succeeded',
+              trigger: 'review',
+              title: 'Rate import',
+              caption: 'Rows are checked, then each rate is stored once.',
+              design: {
+                acts: [
+                  { id: 'imp', title: 'Import' },
+                  { id: 'save', title: 'Save' },
+                ],
+                layers: ['domain', 'data'],
+                cells: [
+                  { id: 'c1', act: 'imp', layer: 'domain', label: 'Reject rows with no account', pattern: 'Guard clause', change: 'new', pr: null, files: ['src/import.ts'] },
+                  { id: 'c2', act: 'save', layer: 'data', label: 'Store each rate once', pattern: 'Repository', change: 'changed', pr: null, files: [] },
+                ],
+                arrows: [{ from: 'c1', to: 'c2', label: 'valid rows' }],
+              },
+              headSha: 'a'.repeat(40),
+              members: [],
+              refusal: null,
+              error: null,
+              current: true,
+              createdAt: '2026-10-17T00:00:00.000Z',
+              completedAt: '2026-10-17T00:01:00.000Z',
+              costUsd: 0.4,
+            },
+            latest: null,
+          },
           stories: [],
         } satisfies PrSequenceDiagramsResponse);
       }

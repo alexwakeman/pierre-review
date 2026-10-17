@@ -1,5 +1,5 @@
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { ClaudeReviewModel, SequenceDiagramType } from '@pierre-review/shared';
+import type { ClaudeReviewModel } from '@pierre-review/shared';
 import { claudeExecutableOptions, loadAgentSdk } from '../../ai/runtime.js';
 import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
 import { config } from '../../config.js';
@@ -10,24 +10,25 @@ import { sdkModelOptions } from '../model-options.js';
 import { createPathGuard, pathGuardHook } from '../path-guard.js';
 import { estimateCostUsd } from '../pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
-import { submitDiagramShape, type SubmitDiagramPayload } from './schema.js';
-import { cleanCaption, cleanTitle, validateMermaid } from './validate.js';
+import { submitDesignShape, type SubmitDesignPayload } from './schema.js';
+import { validateDesign, type AcceptedDesign, type DesignContext } from './validate.js';
 
-// THE SEQUENCE-DIAGRAM AGENT RUN — the SDK half. The manager (manager.ts) reads the diffs, prepares
+// THE DESIGN-DIAGRAM AGENT RUN — the SDK half. The manager (manager.ts) reads the diffs, prepares
 // the scratch working directory and the read-only checkouts, builds the prompt and cleans up; this
-// module only runs the agent and returns the diagram it submitted. It never touches the DB and never
+// module only runs the agent and returns the design it submitted. It never touches the DB and never
 // throws for an expected failure.
 //
-// THE TOOL SURFACE is the CI review's: Read, Glob, Grep and the in-process `submit_diagram`; the PR
+// THE TOOL SURFACE is the CI review's: Read, Glob, Grep and the in-process `submit_design`; the PR
 // review's DISALLOWED_TOOLS (Bash outright, every write tool, the web tools) plus the sub-agent
 // dispatch tools are denied. Every checkout is an `additionalDirectories` root, and the PreToolUse
 // PATH GUARD (path-guard.ts) denies any path outside them and the working directory.
 //
-// `submit_diagram` VALIDATES before it accepts (validate.ts): a refused diagram is answered with what
-// to fix and the model may call again, at most MAX_SUBMIT_ATTEMPTS times. Only a diagram that passed
-// is returned — the manager validates it once more before storing.
+// `submit_design` VALIDATES before it accepts (validate.ts `validateDesign`, against the run's
+// `DesignContext` — its PR refs and changed files): a refused design is answered with EVERY problem
+// and what to do about it, and the model may call again, at most MAX_SUBMIT_ATTEMPTS times. Only a
+// design that passed is returned — the manager validates it once more before storing.
 
-export const DIAGRAM_TOOL_NAME = 'mcp__diagram__submit_diagram';
+export const DIAGRAM_TOOL_NAME = 'mcp__diagram__submit_design';
 const ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', DIAGRAM_TOOL_NAME];
 const ACTIVITY_LOG_CAP = 25;
 export const MAX_SUBMIT_ATTEMPTS = 3;
@@ -38,21 +39,16 @@ export interface RunDiagramAgentArgs {
   roots: readonly string[];
   systemPrompt: string;
   prompt: string;
+  // What the answer is validated against (PR refs + their changed files).
+  design: DesignContext;
   applyAuthEnv: boolean;
   abortController: AbortController;
   onProgress?(p: { recentActivity: string[] }): void;
 }
 
-export interface AcceptedDiagram {
-  title: string | null;
-  caption: string | null;
-  diagramType: SequenceDiagramType;
-  source: string;
-}
-
 export interface RunDiagramAgentResult {
-  diagram: AcceptedDiagram | null;
-  // The last validation refusal, when the model never sent a usable diagram.
+  diagram: AcceptedDesign | null;
+  // The last validation refusal, when the model never sent a usable design.
   lastRefusal: string | null;
   failureReason?: string;
   aborted: boolean;
@@ -71,30 +67,22 @@ export function diagramToolPolicy(): { allowedTools: string[]; disallowedTools: 
 }
 
 /**
- * The `submit_diagram` handler's decision, pure: accept a valid diagram, or answer with what to fix.
+ * The `submit_design` handler's decision, pure: accept a valid design, or answer with what to fix.
  * After MAX_SUBMIT_ATTEMPTS refusals the tool says to stop.
  */
 export function judgeSubmission(
-  payload: Partial<SubmitDiagramPayload>,
+  payload: Partial<SubmitDesignPayload>,
   attempt: number,
-): { accepted: AcceptedDiagram } | { reply: string; refusal: string } {
-  const v = validateMermaid(payload.diagram);
-  if (v.ok) {
-    return {
-      accepted: {
-        title: cleanTitle(payload.title),
-        caption: cleanCaption(payload.caption),
-        diagramType: v.diagramType,
-        source: v.source,
-      },
-    };
-  }
+  ctx: DesignContext,
+): { accepted: AcceptedDesign } | { reply: string; refusal: string } {
+  const v = validateDesign(payload, ctx);
+  if (v.ok) return { accepted: v.value };
   const last = attempt >= MAX_SUBMIT_ATTEMPTS;
   return {
-    refusal: v.message,
+    refusal: v.problems.join(' '),
     reply: last
-      ? `Refused: ${v.message} That was the last attempt; stop now.`
-      : `Refused: ${v.message} Fix it and call submit_diagram again.`,
+      ? `Refused:\n${v.message}\nThat was the last attempt; stop now.`
+      : `Refused:\n${v.message}\nFix every point and call submit_design again with the whole design.`,
   };
 }
 
@@ -103,7 +91,7 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
   let result: SDKResultMessage | null = null;
   let restoreEnv: (() => void) | null = null;
   const usageByUuid = new Map<string, UsageTokens>();
-  let accepted: AcceptedDiagram | null = null;
+  let accepted: AcceptedDesign | null = null;
   let lastRefusal: string | null = null;
   const telemetry = (): Pick<RunDiagramAgentResult, 'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns'> => {
     const usage = sumModelUsage(result) ?? sumUsageMap(usageByUuid);
@@ -126,26 +114,26 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
     const { createSdkMcpServer, query, tool } = await loadAgentSdk();
-    const shape = await submitDiagramShape();
+    const shape = await submitDesignShape();
     let attempts = 0;
     const server = createSdkMcpServer({
       name: 'diagram',
       version: '1.0.0',
       tools: [
         tool(
-          'submit_diagram',
-          'Submit the one Mermaid diagram. It is checked at once: a refusal says what to fix.',
+          'submit_design',
+          'Submit the one design grid. It is checked at once: a refusal lists what to fix.',
           shape,
           async (a) => {
-            if (accepted != null) return { content: [{ type: 'text', text: 'Diagram already recorded.' }] };
+            if (accepted != null) return { content: [{ type: 'text', text: 'Design already recorded.' }] };
             if (attempts >= MAX_SUBMIT_ATTEMPTS) {
               return { content: [{ type: 'text', text: 'No more attempts. Stop now.' }], isError: true };
             }
             attempts += 1;
-            const j = judgeSubmission(a as unknown as Partial<SubmitDiagramPayload>, attempts);
+            const j = judgeSubmission(a as unknown as Partial<SubmitDesignPayload>, attempts, args.design);
             if ('accepted' in j) {
               accepted = j.accepted;
-              return { content: [{ type: 'text', text: 'Diagram recorded.' }] };
+              return { content: [{ type: 'text', text: 'Design recorded.' }] };
             }
             lastRefusal = j.refusal;
             return { content: [{ type: 'text', text: j.reply }], isError: true };
@@ -189,7 +177,7 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
         }
         try {
           for (const line of describeAssistantBlocks(message)) {
-            activity.push(line.startsWith(DIAGRAM_TOOL_NAME) ? 'Submitting the diagram…' : line);
+            activity.push(line.startsWith(DIAGRAM_TOOL_NAME) ? 'Submitting the design…' : line);
             if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
           }
           args.onProgress?.({ recentActivity: [...activity] });
@@ -204,10 +192,10 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
     if (accepted == null) {
       const reason =
         lastRefusal != null
-          ? `no usable diagram: ${lastRefusal}`
+          ? `no usable design: ${lastRefusal}`
           : result && result.subtype !== 'success'
-            ? `agent stopped (${result.subtype}) without submitting a diagram`
-            : 'agent finished without calling submit_diagram';
+            ? `agent stopped (${result.subtype}) without submitting a design`
+            : 'agent finished without calling submit_design';
       return fail(reason, false);
     }
     return { diagram: accepted, lastRefusal, aborted: false, ...telemetry() };
