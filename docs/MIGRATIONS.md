@@ -1257,7 +1257,7 @@ target), named composite FK `sprint_themes_workspace_account_fk` onto `workspace
 cascade; in `accountScopedTables()` + erasure + `verify:isolation`. Purely additive. Journal `when`
 sqlite `1792051203005` / pg `1792051204004`. ⚠ pg `0095` NOT replayed.
 
-### `0109_sprint_story` (pg `0096`) — the sprint story
+### `0109_sprint_story` (pg `0096`) — the sprint story (⚠ DORMANT since `0120` / pg `0107`)
 New table `sprint_story` (account, workspace, input_hash, story_version, story_json, model, cost/tokens,
 created_at), unique `(account_id, workspace_id)` (the pass's `onConflictDoUpdate` target), named
 composite FK `sprint_story_workspace_account_fk` onto `workspaces(id, account_id)` with cascade; in
@@ -1271,19 +1271,18 @@ of an already-posted finding (`ClaudeFindingReminder`; earlier reminders' commen
 nothing joins `accountScopedTables()` (the column rides the findings' existing delete paths). Journal
 `when` sqlite `1792137603006` / pg `1792137604005`. ⚠ pg `0097` NOT replayed.
 
-### `0111_sprint_dates_story_attempt` (pg `0098`) — the sprint's dates + the story pass's last attempt
+### `0111_sprint_dates_story_attempt` (pg `0098`) — the sprint's dates + the story pass's last attempt (the three `story_attempt_*` columns DORMANT since `0120` / pg `0107`)
 Five nullable columns on `sprint_reads`: `sprint_starts_at` / `sprint_ends_at` (the tracker's own sprint
 dates, written by every good sprint read — docs/TRACKERS.md § The sprint list read) and
 `story_attempt_at` / `story_attempt_hash` / `story_attempt_error` (the sprint story pass's last attempt
-that called Claude and its `SprintStoryFailure` code, NULL = stored — the backoff, docs/CLAUDE-REVIEW.md §
-Sprint story). Purely additive on an already account-scoped table; `resetSprintReadForSite` clears all
+that called Claude and its failure code, NULL = stored — the backoff of the retired story pass). Purely additive on an already account-scoped table; `resetSprintReadForSite` clears all
 five. Journal `when` sqlite `1792137603007` / pg `1792137604006`. ⚠ pg `0098` NOT replayed.
 
 ### `0112_sprint_view_snapshots` (pg `0099`) — "Since you last looked" on This Sprint
 New table `sprint_view_snapshots`: ONE row per (account, workspace) with two slots, `current_json` /
 `current_at` (the latest view's snapshot: each sprint ticket's stage + the merged pull requests on sprint
 tickets) and `baseline_json` / `baseline_at` (the previous visit's last view; NULL until a second visit).
-Written and read only by `db/sprint-signals.ts` (docs/CLAUDE-REVIEW.md § Sprint story → The code cards).
+Written and read only by `db/sprint-signals.ts` (docs/CLAUDE-REVIEW.md § Sprint paths → The code cards).
 Account FK (cascade) + the NAMED composite FK `sprint_view_snapshots_workspace_account_fk` onto
 `workspaces (id, account_id)`; unique `(account_id, workspace_id)`; in `accountScopedTables()`, erased,
 checked by `verify:isolation`. Journal `when` sqlite `1792137603008` / pg `1792137604007`. ⚠ pg `0099` NOT
@@ -1356,3 +1355,17 @@ run did not read the library, `[]` = it read it and kept nothing. `claude_review
 sprint check need NO column: theirs ride their existing JSON (`ticket_reviews.assessment.references`,
 `sprint_assessments.body_json.references`). Both columns sit on tables already in the delete paths and
 erasure. Journal `when` sqlite `1792137604013` / pg `1792137604014`. ⚠ pg `0104` NOT replayed.
+
+### `0120_sprint_paths` (pg `0107`) — the sprint builder's critical paths
+New table `sprint_paths`: ONE row per (account, workspace) — `input_hash`, `paths_version`, `paths_json`
+(sqlite text JSON / pg jsonb; ticket KEYS only), `model`, `cost_usd` (sqlite real / pg double precision),
+`input_tokens`, `output_tokens`, `written_at` (all nullable: a row may hold only an attempt or a counted
+run), the last attempt `attempt_at` / `attempt_hash` / `attempt_error`, today's run count `runs_day`
+('YYYY-MM-DD' UTC) + `runs_today` (not null, default 0), `created_at` / `updated_at`. Unique
+`(account_id, workspace_id)` — EVERY `onConflictDoUpdate` on it targets exactly that; account FK (cascade)
++ the NAMED composite FK `sprint_paths_workspace_account_fk` onto `workspaces (id, account_id)`; in
+`accountScopedTables()`, erased, checked by `verify:isolation` (docs/CLAUDE-REVIEW.md § Sprint paths).
+⚠ It REPLACES the Haiku sprint story: `sprint_story` (`0109` / pg `0096`) and
+`sprint_reads.story_attempt_at / _hash / _error` (`0111` / pg `0098`) are DORMANT from here — never
+written or read, kept for their rows (`sprint_story` is still erased). Journal `when` sqlite
+`1792137607016` / pg `1792137607017`. ⚠ pg `0107` NOT replayed.

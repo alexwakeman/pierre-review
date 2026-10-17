@@ -211,9 +211,9 @@ built — `reviewDocsFor(accountId, workspaceId)` (context.ts) returns the folde
 | Ticket review (Story check) | `ticket-review/manager.ts` → `ticket-review/agent.ts` | per story: the passages that bear on it, every CONTRADICTION between the story / criteria / code and the library, and support where the library backs it | `ticket_reviews.assessment.references` (inside the existing JSON) |
 | This Sprint's "Check against code" | `sprint-assess/manager.ts` → `sprint-assess/agent.ts` | the same, against the default branch | `sprint_assessments.body_json.references` |
 
-**Not** the sprint brief, the sprint story strip or the themes: those are one-shot, TOOL-LESS Haiku calls
-(`cheapComplete`) with no files to walk, and pasting sections into them would be the context overload the
-library exists to avoid.
+**Not** the sprint brief, the themes or the sprint builder: the brief and themes are one-shot, TOOL-LESS
+Haiku calls (`cheapComplete`) and the builder's only tool is `submit_paths`; none has files to walk, and
+pasting sections into them would be the context overload the library exists to avoid.
 
 **When it is on**, a run differs in exactly three places:
 

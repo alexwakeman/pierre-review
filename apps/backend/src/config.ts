@@ -1,7 +1,13 @@
 import { existsSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { migrateLegacyDataDir, resolveDataDir } from './data-dir.js';
-import { SPRINT_ASSESS_BUDGET_USD_DEFAULT, SPRINT_ASSESS_MAX_TURNS } from '@pierre-review/shared';
+import {
+  SPRINT_ASSESS_BUDGET_USD_DEFAULT,
+  SPRINT_ASSESS_MAX_TURNS,
+  SPRINT_PATHS_BUDGET_USD_DEFAULT,
+  SPRINT_PATHS_DAILY_CAP_DEFAULT,
+  SPRINT_PATHS_MAX_TURNS_DEFAULT,
+} from '@pierre-review/shared';
 
 // apps/backend as the base for relative paths regardless of cwd.
 const backendRoot = resolve(import.meta.dirname, '..');
@@ -618,6 +624,13 @@ export const config = {
   // ---- Sprint briefs (Activity → This Sprint, the graph — review/sprint-briefs/) ----
   // The per-PASS spending cap (US$) of the Haiku brief pass after each sprint read. Env only.
   sprintBriefBudgetUsd: floatFromEnv('SPRINT_BRIEF_BUDGET_USD', 1),
+  // ---- The sprint builder (Activity → This Sprint, critical paths — review/sprint-paths/) ----
+  // One agentic Sonnet 5 pass after the theme pass. Its OWN spend and turn caps, and the passes per
+  // workspace per UTC day (a pass runs only when its input hash moved; this bounds a flapping one).
+  // Env only — no route sets them.
+  sprintPathsBudgetUsd: floatFromEnv('SPRINT_PATHS_BUDGET_USD', SPRINT_PATHS_BUDGET_USD_DEFAULT),
+  sprintPathsMaxTurns: intFromEnv('SPRINT_PATHS_MAX_TURNS', SPRINT_PATHS_MAX_TURNS_DEFAULT),
+  sprintPathsDailyCap: intFromEnv('SPRINT_PATHS_DAILY_CAP', SPRINT_PATHS_DAILY_CAP_DEFAULT),
 
   // ---- Diff-size cap ----
   // A very large inlined diff is the dominant cost on a big PR (it's the cached

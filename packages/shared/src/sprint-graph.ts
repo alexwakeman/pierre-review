@@ -244,18 +244,23 @@ export interface SprintGraphResponse {
   /** The sprint's THEMES (largest first), from the CURRENT theme pass; null when there is none (AI
    *  off, not run yet, or the sprint changed since and the next pass has not finished). */
   themes: SprintTheme[] | null;
-  /** The LAST sprint STORY written (any SPRINT_STORY_VERSION), even when the sprint has moved since —
-   *  the next pass replaces it (`storyStatus.stale` says so); null when AI is off, the sprint is too
-   *  small for one, or none has been written. */
-  story: SprintStory | null;
-  /** Where the story pass stands for TODAY's sprint (db/sprint-story.ts `sprintStoryStatusOf`). */
-  storyStatus: SprintStoryStatus;
+  /** The LAST critical paths the sprint builder wrote (any SPRINT_PATHS_VERSION), even when the sprint
+   *  has moved since — the next pass replaces them (`pathsStatus.stale` says so); null when AI is off,
+   *  the sprint is too small, or none have been written. */
+  paths: SprintPaths | null;
+  /** Where the sprint builder stands for TODAY's sprint (db/sprint-paths.ts `sprintPathsStatusOf`). */
+  pathsStatus: SprintPathsStatus;
+  /** CODE's pace facts (db/sprint-paths.ts `sprintPaceOf`), free, no model. null with no tracker. */
+  pace: SprintPace | null;
+  /** One entry per distinct sprint ASSIGNEE (db/sprint-paths.ts `sprintPeopleOf`), alphabetical.
+   *  [] with no tracker or no assigned ticket. */
+  people: SprintPerson[];
   /** The current sprint's dates — the TRACKER's own (Jira sprint, Linear cycle, GitHub milestone due
    *  date; stored on `sprint_reads` by the read), else the workspace's sprint cadence (reporting-window
    *  mode 'sprint'); null when neither gives any. Day counts: `sprintDayOf`. */
   sprintDates: SprintDates | null;
   /** The strip's CODE-WRITTEN cards (`SprintSignal`; db/sprint-signals.ts), free, from the DB only — in
-   *  strip order: since you last looked, pace, then (after the model's storylines) out of step, blocked
+   *  strip order: since you last looked, pace, then (after the builder's critical paths) out of step, blocked
    *  outside the sprint. Each is omitted when it has nothing to say; [] with no tracker. */
   signals: SprintSignal[];
 }
@@ -264,7 +269,7 @@ export interface SprintGraphResponse {
 //
 // Four cards Limn writes itself (templated sentences, digits, no model, free on every tier), computed
 // on every GET /api/sprint-graph from what is stored (db/sprint-signals.ts). Each carries the idents it
-// is about: clicking it frames and highlights them exactly like a storyline card.
+// is about: clicking it frames and highlights them exactly like a critical-path card.
 //   • 'since_last'      — what moved since the reader's previous visit (stage changes, tickets added,
 //                         pull requests merged), against a per-(account, workspace) BASELINE snapshot
 //                         rolled forward only after a gap of SPRINT_VISIT_GAP_MS between views.
@@ -308,8 +313,8 @@ export interface SprintDates {
 
 /** Where `nowMs` sits in a sprint, in WHOLE days counted from its start instant: `day` is the day you
  *  are in (1-based, clamped to the sprint), `days` its length (a part day counts; at least 1), `daysLeft` the days
- *  after today. null when the window is not a real span. The ONE day count: the story's facts and the
- *  page header both use it. Pure. */
+ *  after today. null when the window is not a real span. The ONE day count: the pace, the code cards
+ *  and the page header all use it. Pure. */
 export function sprintDayOf(startMs: number, endMs: number, nowMs: number): { day: number; days: number; daysLeft: number } | null {
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null;
   // A part day counts as a day (Jira's "Oct 14 10:15 → Oct 27 17:00" is 14 days, not 13); a sliver over
@@ -317,68 +322,6 @@ export function sprintDayOf(startMs: number, endMs: number, nowMs: number): { da
   const days = Math.max(1, Math.ceil((endMs - startMs) / 86_400_000 - 0.05));
   const day = Math.min(days, Math.max(1, Math.floor((nowMs - startMs) / 86_400_000) + 1));
   return { day, days, daysLeft: days - day };
-}
-
-/** Why the last story pass stored nothing. Validation codes are review/sprint-story/validate.ts';
- *  'error' = the call itself failed. */
-export type SprintStoryFailure =
-  | 'not_json'
-  | 'shape'
-  | 'too_long'
-  | 'count'
-  | 'unknown_id'
-  | 'duplicate'
-  | 'coverage'
-  | 'numeral'
-  | 'number_word'
-  | 'unknown_key'
-  | 'number'
-  | 'error';
-
-/**
- * The story pass for TODAY's input:
- *   • 'current' — the story shown was written for today's input.
- *   • 'writing' — a pass is running now.
- *   • 'queued'  — a sprint read just finished; the pass runs after the ticket summaries.
- *   • 'waiting' — no pass yet for today's input; the next sprint read starts one.
- *   • 'failed'  — the pass for today's input could not write one (`failure`); it is not retried until
- *                 the input changes (a later sprint read with new facts, or the next sprint day).
- *   • 'none'    — no pass can run (AI off, no Claude credential, too few tickets).
- */
-export type SprintStoryState = 'current' | 'writing' | 'queued' | 'waiting' | 'failed' | 'none';
-
-export interface SprintStoryStatus {
-  state: SprintStoryState;
-  /** A story is shown but was written for an older input (or an older SPRINT_STORY_VERSION). */
-  stale: boolean;
-  /** ISO-8601 of the last pass that called Claude (stored or not); null = none recorded. */
-  lastAttemptAt: string | null;
-  /** The failure of the last pass, when it stored nothing; null otherwise. */
-  failure: SprintStoryFailure | null;
-}
-
-/** The plain-English reason for a failed story pass. */
-export function sprintStoryFailureText(f: SprintStoryFailure): string {
-  switch (f) {
-    case 'number':
-    case 'number_word':
-    case 'numeral':
-      return 'Claude used a number Limn did not count.';
-    case 'unknown_key':
-      return 'Claude named a ticket that is not in the sprint.';
-    case 'too_long':
-      return 'Claude\u2019s answer was too long.';
-    case 'count':
-    case 'unknown_id':
-    case 'duplicate':
-    case 'coverage':
-      return 'Claude did not pick the storylines it was asked for.';
-    case 'not_json':
-    case 'shape':
-      return 'Claude\u2019s answer was not in the expected shape.';
-    case 'error':
-      return 'The call to Claude failed.';
-  }
 }
 
 // ── Themes ───────────────────────────────────────────────────────────────────────────────────────
@@ -406,73 +349,155 @@ export interface SprintTheme {
   name: string;
 }
 
-// ── The sprint story ─────────────────────────────────────────────────────────────────────────────
+// ── The sprint builder: critical paths ───────────────────────────────────────────────────────────
 //
-// ONE sprint-wide Haiku call (review/sprint-story/, LOCAL + aiEnabled) after the theme pass: a one-line
-// HEADLINE, a one-sentence SPRINT FOCUS (its main areas of work, from the AREAS the code lists — themes or
-// epics and their stages) and 0–4 STORYLINES picked from CANDIDATES the code built out of the graph
-// (dependency chains with an unfinished prerequisite; risks: tickets waiting inside the sprint, failing
-// checks, work not started, unassigned work). ⚠ CODE owns every count, every ticket and every kind — the model picks candidates by id and
-// words them, and its text may carry no number the code did not hand it (validate.ts). Stored per
-// (account, workspace) with an INPUT HASH over everything it was sent + SPRINT_STORY_VERSION.
+// ONE agentic Sonnet 5 run per sprint (review/sprint-paths/, LOCAL + aiEnabled) after the theme pass:
+// up to SPRINT_PATHS_CAPS.maxPaths CRITICAL PATHS ranked by risk to the sprint (each an ordered list of
+// ticket keys, a short title, one sentence of advice and a risk level) and up to
+// SPRINT_PATHS_CAPS.maxCallouts CALL-OUTS (a short title and the tickets it is about). ⚠ CODE owns every
+// ticket, column and number: the model reads a code-built, nonce-fenced map (db/sprint-paths.ts
+// `sprintPathsInput`), may name only the keys it listed, and its titles and advice carry NO digit at all
+// (the D4 gate, review/sprint-paths/validate.ts). Stored per (account, workspace) in `sprint_paths` with
+// an INPUT HASH over everything it was sent except the now-derived day facts + SPRINT_PATHS_VERSION.
 
-/** Bumped when the story prompt, candidates or shape change: the stored story stops counting.
- *  2 = digits only (spelled-out counts refused) + the sprint day / days left + the late risk.
- *  3 = the tracker's own sprint dates drive the day facts; the sprint name's short forms are quotable;
- *      a refused first answer is told why on its retry.
- *  4 = the theme storylines become ONE "Sprint focus" sentence; chains only with an unfinished
- *      prerequisite; the waiting risk only for blockers inside the sprint (outside ones are a code card). */
-export const SPRINT_STORY_VERSION = 4;
+/** The sprint builder's model. */
+export const SPRINT_PATHS_MODEL = 'claude-sonnet-5';
 
-/** "NOT STARTED LATE IN THE SPRINT" (db/sprint-story.ts): a risk candidate when at least
- *  `minNotStarted` sprint tickets are not started and at most `maxLeftPct`% of the sprint's days are
- *  left. Needs a REAL sprint window (the tracker's own sprint dates, else the workspace's cadence in mode 'sprint'); the
- *  trailing-14-day fallback is not a sprint and earns no day facts and no late risk. */
-export const SPRINT_STORY_LATE = {
-  minNotStarted: 2,
-  maxLeftPct: 40,
-} as const;
+/** Bumped when the builder's prompt, input or answer shape changes: the stored paths stop counting
+ *  (still shown, marked stale, until the next pass replaces them). */
+export const SPRINT_PATHS_VERSION = 1;
 
-export const SPRINT_STORY_CAPS = {
-  /** A sprint with fewer tickets gets no story. */
+export const SPRINT_PATHS_CAPS = {
+  /** A sprint with fewer tickets gets no paths. */
   minTickets: 4,
-  /** Storylines are chains and risks only, and a sprint may have none worth telling. */
-  minStorylines: 0,
-  maxStorylines: 4,
-  /** The validator's hard caps (refuse, never cut). The prompt asks for less (the `ask*` targets), so an
-   *  answer that overshoots the target a little still stands. */
-  headlineChars: 200,
-  focusChars: 240,
-  titleWords: 6,
-  titleChars: 56,
-  sentenceChars: 280,
-  askHeadlineWords: 25,
-  askFocusWords: 30,
-  askTitleWords: 5,
-  askSentenceWords: 30,
+  maxPaths: 5,
+  maxCallouts: 3,
+  /** A path's or call-out's title (characters). */
+  titleChars: 40,
+  /** A path's one sentence of advice (characters). */
+  adviceChars: 200,
+  /** Tickets one path may list. */
+  pathTickets: 12,
+  /** Tickets one call-out may list. */
+  calloutTickets: 20,
+  /** `submit_paths` calls one run may make (a refusal answers with what to fix). */
+  maxSubmits: 3,
 } as const;
 
-/** 'chain' = a dependency path with an unfinished prerequisite; 'risk' = what may slip. (The retired
- *  'theme' kind became `SprintStory.focus`; a stored theme storyline is dropped on read.) */
-export type SprintStorylineKind = 'chain' | 'risk';
+/** Defaults of the env-only knobs (config.ts): SPRINT_PATHS_DAILY_CAP — passes per workspace per UTC
+ *  day; SPRINT_PATHS_BUDGET_USD — one pass's spend cap; SPRINT_PATHS_MAX_TURNS. */
+export const SPRINT_PATHS_DAILY_CAP_DEFAULT = 12;
+export const SPRINT_PATHS_BUDGET_USD_DEFAULT = 1;
+export const SPRINT_PATHS_MAX_TURNS_DEFAULT = 8;
 
-export interface SprintStoryline {
-  kind: SprintStorylineKind;
+export type SprintPathRisk = 'high' | 'medium' | 'low';
+export const SPRINT_PATH_RISKS: readonly SprintPathRisk[] = ['high', 'medium', 'low'];
+export const SPRINT_PATH_RISK_LABEL: Record<SprintPathRisk, string> = {
+  high: 'High risk',
+  medium: 'Medium risk',
+  low: 'Low risk',
+};
+
+export interface SprintPath {
+  /** ≤ SPRINT_PATHS_CAPS.titleChars, no digits. */
   title: string;
-  sentence: string;
-  /** The node idents it covers (code-chosen, never the model's) — the graph zooms to them. */
+  /** Ordered ticket keys (sprint or outside the sprint), as the input spelled them. */
+  tickets: string[];
+  /** The node idents of `tickets`, same order — resolved by CODE, never the model's. */
+  idents: string[];
+  /** One sentence, ≤ SPRINT_PATHS_CAPS.adviceChars, no digits. */
+  advice: string;
+  risk: SprintPathRisk;
+}
+
+export interface SprintCallout {
+  title: string;
+  tickets: string[];
   idents: string[];
 }
 
-export interface SprintStory {
-  headline: string;
-  /** One sentence on what the sprint is focused on (its main areas of work). null for a story written
-   *  before SPRINT_STORY_VERSION 4 — no focus line until the next pass rewrites it. */
-  focus: string | null;
-  /** Most important first, as the model ordered them. */
-  storylines: SprintStoryline[];
-  /** ISO-8601 of the pass that wrote it. */
+export interface SprintPaths {
+  /** Highest risk first (code sorts by `risk`, keeping the model's order within one level). */
+  paths: SprintPath[];
+  callouts: SprintCallout[];
+  /** ISO-8601 of the pass that wrote them. */
   createdAt: string;
+}
+
+/** Why the last builder pass stored nothing. */
+export type SprintPathsFailure = 'refused' | 'no_submit' | 'stopped' | 'daily_cap' | 'error';
+
+/**
+ * The builder for TODAY's input:
+ *   • 'current' — the paths shown were written for today's input.
+ *   • 'writing' — a pass is running now.
+ *   • 'queued'  — a sprint read just finished; the pass runs after the summaries and themes.
+ *   • 'waiting' — no pass yet for today's input; the next sprint read starts one.
+ *   • 'failed'  — the pass for today's input stored nothing (`failure`); not retried until the input
+ *                 changes ('daily_cap': not before the next UTC day).
+ *   • 'none'    — no pass can run (AI off, no Claude credential, too few tickets).
+ */
+export type SprintPathsState = 'current' | 'writing' | 'queued' | 'waiting' | 'failed' | 'none';
+
+export interface SprintPathsStatus {
+  state: SprintPathsState;
+  /** Paths are shown but were written for an older input (or an older SPRINT_PATHS_VERSION). */
+  stale: boolean;
+  /** ISO-8601 of the last pass that called Claude (stored or not); null = none recorded. */
+  lastAttemptAt: string | null;
+  failure: SprintPathsFailure | null;
+}
+
+/** The plain-English reason for a failed builder pass. */
+export function sprintPathsFailureText(f: SprintPathsFailure): string {
+  switch (f) {
+    case 'refused':
+      return 'Claude’s answer did not pass Limn’s checks.';
+    case 'no_submit':
+      return 'Claude finished without an answer.';
+    case 'stopped':
+      return 'Claude ran out of turns or budget.';
+    case 'daily_cap':
+      return 'Today’s limit is used up.';
+    case 'error':
+      return 'The call to Claude failed.';
+  }
+}
+
+/** THE PACE — counted by CODE from the same fold the page draws (db/sprint-paths.ts `sprintPaceOf`).
+ *  Sprint tickets only (never an outside ticket). */
+export interface SprintPace {
+  /** The day the sprint is in (1-based, today counts) and its length (`sprintDayOf`); null with no
+   *  real sprint window. */
+  daysElapsed: number | null;
+  daysTotal: number | null;
+  /** round(100 × daysElapsed ÷ daysTotal); null with no real sprint window. */
+  timeUsedPct: number | null;
+  tickets: number;
+  /** Not in a bucket meaning Complete (status unknown counts as live). */
+  live: number;
+  /** In a bucket meaning Complete. */
+  done: number;
+  /** In the derived "Merged, not signed off" column. */
+  mergedNotSignedOff: number;
+  /** At least one merged pull request and none open, whatever the column. */
+  codeMerged: number;
+  /** `depends_on` edges from a live sprint ticket onto a ticket (sprint or outside) not Complete. */
+  openDependencies: number;
+  /** Dependency chains code found (two or more tickets, each link waiting on unfinished work). */
+  chains: number;
+}
+
+/** One sprint assignee (shared `sprintMembers`, the Members filter's identity). */
+export interface SprintPerson {
+  /** The member's label (a real name where one is on offer). */
+  name: string;
+  /** The assignee names, as the tracker spells them, that are this person — what tickets carry. */
+  names: string[];
+  /** Open pull requests in this workspace's repos with an outstanding review request for this
+   *  person's GitHub account(s) (`review_requests`, the same population as the People report's
+   *  "reviews waiting"). null when the person has no GitHub account mapped — never 0. */
+  reviewsWaiting: number | null;
 }
 
 // ── The drawer ───────────────────────────────────────────────────────────────────────────────────

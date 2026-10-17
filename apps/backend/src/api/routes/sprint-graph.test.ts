@@ -322,65 +322,108 @@ describe('GET /api/sprint-graph', () => {
   });
 });
 
-describe('the sprint story on the graph', () => {
-  it('the last story shows even after its input moved, marked stale; the status says where the pass stands', async () => {
-    const st = await import('../../db/sprint-story.js');
-    st.resetSprintStoryFlight();
-    const before = await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), storyCanRun: true });
-    // The fixture sprint has enough tickets for a story: AI on + a credential ⇒ waiting for the next read.
-    expect(before).toMatchObject({ story: null, storyStatus: { state: 'waiting', stale: false, lastAttemptAt: null, failure: null } });
+describe('the sprint builder on the graph', () => {
+  it('the last paths show even after their input moved, marked stale; the status says where the pass stands', async () => {
+    const st = await import('../../db/sprint-paths.js');
+    st.resetSprintPathsFlight();
+    const before = await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), pathsCanRun: true });
+    // The fixture sprint has enough tickets: AI on + a credential ⇒ waiting for the next read.
+    expect(before).toMatchObject({ paths: null, pathsStatus: { state: 'waiting', stale: false, lastAttemptAt: null, failure: null } });
     // No credential: never "waiting" for ever.
-    const noCred = await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), storyCanRun: false });
-    expect(noCred).toMatchObject({ story: null, storyStatus: { state: 'none' } });
+    expect(await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), pathsCanRun: false })).toMatchObject({ pathsStatus: { state: 'none' } });
     // In flight: queued by the after-read chain, then writing while the pass holds its slot.
-    st.markSprintStoryQueued(1, ownWs, true);
-    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), storyCanRun: true })).storyStatus.state).toBe('queued');
-    expect(st.claimSprintStoryPass(1, ownWs)).toBe(true);
-    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), storyCanRun: true })).storyStatus.state).toBe('writing');
-    st.releaseSprintStoryPass(1, ownWs);
-    st.markSprintStoryQueued(1, ownWs, false);
+    st.markSprintPathsQueued(1, ownWs, true);
+    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), pathsCanRun: true })).pathsStatus.state).toBe('queued');
+    expect(st.claimSprintPathsPass(1, ownWs)).toBe(true);
+    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), pathsCanRun: true })).pathsStatus.state).toBe('writing');
+    st.releaseSprintPathsPass(1, ownWs);
+    st.markSprintPathsQueued(1, ownWs, false);
+    // The todo builds the SAME input the GET hashes.
+    const input = (await graph.sprintPathsTodo(1, ownWs))!;
+    expect(input.keys).toEqual(expect.arrayContaining(['ENG-1', 'ENG-2', 'ENG-3', 'ENG-4', 'ENG-7', 'ENG-8']));
+    expect(input.keys).not.toContain('ENG-70');
     // A failed pass for TODAY's input: 'failed' with its reason (the backoff holds it).
-    const hash = (await graph.sprintStoryTodo(1, ownWs))!.inputHash;
-    await st.recordSprintStoryAttempt(1, ownWs, hash, 'number', new Date('2026-10-14T19:00:00Z'));
-    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), storyCanRun: true })).storyStatus).toEqual({
+    await st.recordSprintPathsAttempt(1, ownWs, input.inputHash, 'refused', new Date('2026-10-14T19:00:00Z'));
+    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), pathsCanRun: true })).pathsStatus).toEqual({
       state: 'failed',
       stale: false,
       lastAttemptAt: '2026-10-14T19:00:00.000Z',
-      failure: 'number',
+      failure: 'refused',
     });
-    // Another tenant's attempt row is not ours.
-    expect(await st.sprintStoryAttempt(2, ownWs)).toBeNull();
-    // A story stored for an OLDER input (a PR merged since): still shown, marked stale.
-    await st.storeSprintStory(1, ownWs, 'an-older-input-hash', {
-      headline: 'Baskets are under way.',
-      focus: 'The sprint is about baskets.',
-      storylines: [{ kind: 'chain', title: 'Baskets', sentence: 'ENG-1 waits on ENG-2.', idents: [id('ENG-1')] }],
-      costUsd: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-    });
-    const after = await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), storyCanRun: true });
-    expect(after.story?.headline).toBe('Baskets are under way.');
-    expect(after.storyStatus).toMatchObject({ state: 'failed', stale: true });
+    expect(await st.storedSprintPaths(2, ownWs)).toBeNull();
+    // Paths stored for an OLDER input: still shown (idents resolved from the keys), marked stale.
+    const v = {
+      paths: [{ title: 'Saved baskets', tickets: ['ENG-7', 'ENG-1'], advice: 'Land the basket API first.', risk: 'high' as const }],
+      callouts: [{ title: 'Nobody owns these', tickets: ['ENG-3'] }],
+      costUsd: 0.2,
+      inputTokens: 1,
+      outputTokens: 1,
+    };
+    await st.storeSprintPaths(1, ownWs, 'an-older-input-hash', v);
+    const after = await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), pathsCanRun: true });
+    expect(after.paths?.paths).toEqual([{ title: 'Saved baskets', tickets: ['ENG-7', 'ENG-1'], idents: [id('ENG-7'), id('ENG-1')], advice: 'Land the basket API first.', risk: 'high' }]);
+    expect(after.paths?.callouts).toEqual([{ title: 'Nobody owns these', tickets: ['ENG-3'], idents: [id('ENG-3')] }]);
+    expect(after.pathsStatus).toMatchObject({ state: 'failed', stale: true });
     // Written for today's input: current.
-    await st.storeSprintStory(1, ownWs, hash, {
-      headline: 'Baskets are under way.',
-      focus: 'The sprint is about baskets.',
-      storylines: [{ kind: 'chain', title: 'Baskets', sentence: 'ENG-1 waits on ENG-2.', idents: [id('ENG-1')] }],
-      costUsd: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-    });
-    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), storyCanRun: true })).storyStatus).toMatchObject({ state: 'current', stale: false });
-    // AI off: no story at all.
-    expect(await graph.getSprintGraph(1, ownWs, { aiEnabled: false, now: Date.now() })).toMatchObject({ story: null, storyStatus: { state: 'none' } });
+    await st.storeSprintPaths(1, ownWs, input.inputHash, v);
+    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now(), pathsCanRun: true })).pathsStatus).toMatchObject({ state: 'current', stale: false });
+    // AI off: no paths at all.
+    expect(await graph.getSprintGraph(1, ownWs, { aiEnabled: false, now: Date.now() })).toMatchObject({ paths: null, pathsStatus: { state: 'none' } });
     const { and, eq } = await import('drizzle-orm');
-    await db.delete(schema.sprintStory).where(and(eq(schema.sprintStory.accountId, 1), eq(schema.sprintStory.workspaceId, ownWs))).execute();
-    await db
-      .update(schema.sprintReads)
-      .set({ storyAttemptAt: null, storyAttemptHash: null, storyAttemptError: null })
-      .where(and(eq(schema.sprintReads.accountId, 1), eq(schema.sprintReads.workspaceId, ownWs)))
-      .execute();
+    await db.delete(schema.sprintPaths).where(and(eq(schema.sprintPaths.accountId, 1), eq(schema.sprintPaths.workspaceId, ownWs))).execute();
+  });
+
+  it('the daily cap: today\'s runs used up reads as failed (daily_cap) until the UTC day turns', async () => {
+    const st = await import('../../db/sprint-paths.js');
+    const { config } = await import('../../config.js');
+    const now = new Date();
+    for (let i = 0; i < config.sprintPathsDailyCap; i += 1) await st.noteSprintPathsRun(1, ownWs, now);
+    expect((await st.storedSprintPaths(1, ownWs))?.runsToday).toBe(config.sprintPathsDailyCap);
+    expect((await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: now.getTime(), pathsCanRun: true })).pathsStatus).toMatchObject({ state: 'failed', failure: 'daily_cap' });
+    // The next UTC day: the count starts again.
+    expect(st.runsTodayOf(await st.storedSprintPaths(1, ownWs), new Date(now.getTime() + 86_400_000))).toBe(0);
+    const { and, eq } = await import('drizzle-orm');
+    await db.delete(schema.sprintPaths).where(and(eq(schema.sprintPaths.accountId, 1), eq(schema.sprintPaths.workspaceId, ownWs))).execute();
+  });
+
+  it('pace and people: code counts; reviews waiting through the member mapping, null when unmapped', async () => {
+    const g = await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now() });
+    // ENG-1 (To Do), ENG-2 (In Progress), ENG-3 (To Do), ENG-4 (Done); no sprint dates in OSS. Open
+    // dependencies: ENG-1 → ENG-7 (a brief's depends_on) and ENG-3 → ENG-8 (a tracker link).
+    expect(g.pace).toEqual({
+      daysElapsed: null,
+      daysTotal: null,
+      timeUsedPct: null,
+      tickets: 4,
+      live: 3,
+      done: 1,
+      mergedNotSignedOff: 0,
+      codeMerged: 0,
+      openDependencies: 2,
+      chains: 2,
+    });
+    // Amy maps to amy-sg (her PR on ENG-1); Zed has no GitHub account mapped → null, never 0.
+    expect(g.people).toEqual([
+      { name: 'Amy', names: ['Amy'], reviewsWaiting: 0 },
+      { name: 'Zed', names: ['Zed'], reviewsWaiting: null },
+    ]);
+    // An open PR in this workspace waiting on Amy's review counts; a merged one does not.
+    const [amy] = await db.select({ id: schema.users.id }).from(schema.users).where((await import('drizzle-orm')).eq(schema.users.githubLogin, 'amy-sg')).execute();
+    const mk = async (n: number, state: string) => {
+      const [row] = await db
+        .insert(schema.pullRequests)
+        .values({ accountId: 1, repoId: ownRepo, githubNodeId: `PR_sg_rr_${n}`, number: n, title: `Other ${n}`, state, openedAt: new Date(), updatedAt: new Date() })
+        .returning({ id: schema.pullRequests.id })
+        .execute();
+      await db.insert(schema.reviewRequests).values({ prId: row.id, userId: amy.id }).execute();
+      return row.id as number;
+    };
+    const ids = [await mk(901, 'open'), await mk(902, 'merged')];
+    const again = await graph.getSprintGraph(1, ownWs, { aiEnabled: false, now: Date.now() });
+    expect(again.people.find((p) => p.name === 'Amy')?.reviewsWaiting).toBe(1);
+    const { inArray } = await import('drizzle-orm');
+    await db.delete(schema.reviewRequests).where(inArray(schema.reviewRequests.prId, ids)).execute();
+    await db.delete(schema.pullRequests).where(inArray(schema.pullRequests.id, ids)).execute();
   });
 
   it('sprintDates: the tracker\'s own dates; none → null (no cadence in OSS)', async () => {
@@ -397,7 +440,7 @@ describe('the sprint story on the graph', () => {
       endsAt: '2026-10-27T17:00:00.000Z',
       source: 'tracker',
     });
-    // The story's day facts come from them.
+    // The pace's day facts come from them.
     const t = await graph.sprintTimingFor(1, ownWs, { kind: 'sprint', provider: 'jira', names: ['S'] }, Date.parse('2026-10-20T12:00:00Z'), {
       sprintStartsAt: new Date('2026-10-14T10:15:00Z'),
       sprintEndsAt: new Date('2026-10-27T17:00:00Z'),

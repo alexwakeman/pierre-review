@@ -3886,8 +3886,8 @@ check(
   check("createdDatesFor(A) reads A's created date, never B's", dA?.ms === Date.parse('2026-01-01T00:00:00Z'));
 }
 
-// ── REPORTS → THIS SPRINT (sprint_reads / sprint_tickets / sprint_ref_tickets / sprint_briefs / sprint_themes /
-// sprint_ticket_repos / sprint_assessments; migration 0100 / pg 0087, 0107 / pg 0094). BOTH accounts
+// ── REPORTS → THIS SPRINT (sprint_reads / sprint_tickets / sprint_ref_tickets / sprint_briefs / sprint_themes / sprint_paths /
+// sprint_ticket_repos / sprint_assessments; migration 0100 / pg 0087, 0107 / pg 0094, 0120 / pg 0107). BOTH accounts
 // hold the SAME ticket ident on the SAME Jira
 // site (the tracker section above wrote both trackers), so every read must answer only for the caller.
 // Workspace ids arrive in BODIES, so `sprint_ticket_repos` carries named composite FKs onto
@@ -3990,32 +3990,38 @@ check(
     const graphA = await getSprintGraph(1, defaultA, { aiEnabled: true, now: now.getTime() });
     check("getSprintGraph(A) never shows B's themes", graphA.themes === null && graphA.nodes.every((n) => n.theme === null));
   }
-  // The sprint story: ONE row per (account, workspace), same composite FK. MUTATION CHECK: drop the
-  // accountId predicate from `storedSprintStory` (db/sprint-story.ts) and the cross check goes red.
+  // The sprint builder's critical paths (sprint_paths): ONE row per (account, workspace), same composite
+  // FK. MUTATION CHECK: drop the accountId predicate from `storedSprintPaths` (db/sprint-paths.ts) and the
+  // cross checks go red; drop it from `recordSprintPathsAttempt`'s upsert target and B's attempt is
+  // overwritten.
   {
-    const story = await import('../src/db/sprint-story.js');
-    const v = { headline: 'B story', focus: 'B focus.', storylines: [{ kind: 'chain' as const, title: 'B', sentence: 'B.', idents: [ident] }], costUsd: 0, inputTokens: 0, outputTokens: 0 };
-    await story.storeSprintStory(2, defaultB, 'hash-b', v);
-    let storyFk = false;
+    const paths = await import('../src/db/sprint-paths.js');
+    const v = { paths: [{ title: 'B path', tickets: ['ENG-1'], advice: 'Finish it.', risk: 'high' as const }], callouts: [], costUsd: 0, inputTokens: 0, outputTokens: 0 };
+    await paths.storeSprintPaths(2, defaultB, 'hash-b', v);
+    let pathsFk = false;
     try {
-      await story.storeSprintStory(2, defaultA, 'hash-b', v);
+      await paths.storeSprintPaths(2, defaultA, 'hash-b', v);
     } catch {
-      storyFk = true;
+      pathsFk = true;
     }
-    check("the composite FK refuses B's story in A's workspace", storyFk);
-    check("storedSprintStory(A, B's workspace) is null", (await story.storedSprintStory(1, defaultB)) === null);
-    check("storedSprintStory(B, B's workspace) holds B's story", (await story.storedSprintStory(2, defaultB))?.inputHash === 'hash-b');
+    check("the composite FK refuses B's paths in A's workspace", pathsFk);
+    check("storedSprintPaths(A, B's workspace) is null", (await paths.storedSprintPaths(1, defaultB)) === null);
+    check("storedSprintPaths(B, B's workspace) holds B's paths", (await paths.storedSprintPaths(2, defaultB))?.inputHash === 'hash-b');
     const graphA = await getSprintGraph(1, defaultA, { aiEnabled: true, now: now.getTime() });
-    check("getSprintGraph(A) never shows B's story", graphA.story === null);
-    // The story pass's last ATTEMPT (sprint_reads.story_attempt_*). MUTATION CHECK: drop the accountId
-    // predicate from `sprintStoryAttempt` / `recordSprintStoryAttempt` and these go red.
-    const { noteSprintViewed } = await import('../src/db/sprint-store.js');
-    await noteSprintViewed(2, defaultB, now);
-    await story.recordSprintStoryAttempt(2, defaultB, 'hash-b', 'number', now);
-    await story.recordSprintStoryAttempt(1, defaultB, 'hash-a', 'shape', now);
-    check("sprintStoryAttempt(A, B's workspace) is null", (await story.sprintStoryAttempt(1, defaultB)) === null);
-    const attemptB = await story.sprintStoryAttempt(2, defaultB);
-    check("recordSprintStoryAttempt(A, B's workspace) never writes B's row", attemptB?.inputHash === 'hash-b' && attemptB.error === 'number');
+    check("getSprintGraph(A) never shows B's paths", graphA.paths === null);
+    await paths.recordSprintPathsAttempt(2, defaultB, 'hash-b', 'refused', now);
+    let attemptFk = false;
+    try {
+      await paths.recordSprintPathsAttempt(1, defaultB, 'hash-a', 'error', now);
+    } catch {
+      attemptFk = true;
+    }
+    check("the composite FK refuses A's attempt row in B's workspace", attemptFk);
+    const rowB = await paths.storedSprintPaths(2, defaultB);
+    check("recordSprintPathsAttempt(A, B's workspace) never writes B's row", rowB?.attemptHash === 'hash-b' && rowB.attemptError === 'refused');
+    // People: "reviews waiting" reads only this workspace's PRs (an id from another account never counts).
+    const waiting = await paths.reviewsWaitingByLogin(1, defaultB, ['sg-b', 'someone']);
+    check("reviewsWaitingByLogin(A, B's workspace) is empty", waiting.size === 0);
   }
   // "Since you last looked" (sprint_view_snapshots): ONE row per (account, workspace), same composite FK.
   // MUTATION CHECK: drop the accountId predicate from `readSprintViewSlots` (db/sprint-signals.ts) and the

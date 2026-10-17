@@ -1787,7 +1787,7 @@ body {
 .sprint-canvas .sg-node:focus-visible .sg-focus {
   opacity: 1;
 }
-/* The refresh bar across the canvas's top edge (SprintProgressBar.tsx; also the sprint story strip's
+/* The refresh bar across the canvas's top edge (SprintProgressBar.tsx; also the critical-paths strip's
    "Writing" bar): a sky segment sliding
    across while the graph refreshes; a filled share while tickets are summarised. Non-text marks on the
    navy ground (both well over 3:1). Reduced motion: a still, partly-filled bar. */
@@ -1886,7 +1886,7 @@ body {
     )
     scale(var(--sg-sat, 1));
 }
-/* A storyline's ticket (SprintStoryStrip → the graph): its pink corona breathes three times, then is
+/* A strip card's ticket (SprintPathsStrip → the graph): its pink corona breathes three times, then is
    still; under reduced motion it never moves. */
 .sprint-canvas .sg-highlight-glow {
   opacity: 0.45;

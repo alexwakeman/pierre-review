@@ -7,10 +7,10 @@ import {
   type SprintSignal,
   type SprintStage,
 } from '@pierre-review/shared';
-import type { SprintTiming } from './sprint-story.js';
+import type { SprintTiming } from './sprint-paths.js';
 
 // ACTIVITY → THIS SPRINT — THE STRIP'S CODE-WRITTEN CARDS (`SprintGraphResponse.signals`;
-// docs/CLAUDE-REVIEW.md § Sprint story → The code cards). FREE, no model: every sentence is a template
+// docs/CLAUDE-REVIEW.md § Sprint paths → The code cards). FREE, no model: every sentence is a template
 // filled with counts taken here, from the SAME folded graph the page draws (db/sprint-graph.ts). Computed
 // on every GET /api/sprint-graph — DB only, never a tracker or GitHub call.
 //

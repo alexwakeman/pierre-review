@@ -2141,34 +2141,31 @@ Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the 
     (`visibleGraph` recounts `degree`; the wire's `degree` counts every edge). Measured on workspace 1
     (Sprint 14, 77 tickets, 136 nodes / 181 edges on the wire): the default draws 78 nodes / 15 edges;
     history 87 / 31; builds-on 80 / 34; both 136 / 181. The header counts what is drawn.
-  - **THE SPRINT STORY** (`SprintStoryStrip.tsx`, fold `sprintStoryModel.ts`) sits between the header
-    and the view controls: the response's `story` headline (ⓘ beside it), its focus sentence under a
-    visible "Sprint focus" label (none for a pre-v4 story), then ONE row of cards in the ONE order
-    (`stripCards`): Limn's code cards "Since you last looked" (eye) and "Pace" (timer), Claude's 0–4
-    storylines "Dependency path" (link) / "At risk" (warning), then Limn's "Out of step" (scales) and
-    "Blocked outside the sprint" (lock) — each card labelled with its kind + mark, a title and one
-    sentence; definitions live in the strip's ⓘ only. The code cards (`signals`) are free and render with
-    AI off too (Claude's half then renders nothing). Selection is by card KEY; the reset signature
-    (`stripCardsSig`) is keys + idents, never titles ("Since 31 minutes ago" moves every minute). Clicking a card FRAMES its tickets (SprintView's
-    `focusRequest` → `SprintGraph` `frameIdents` over the ones drawn) AND HIGHLIGHTS them: a pink
-    `STORY_HIGHLIGHT` corona + ring (no status, PR dot or selection uses pink; contrast-tested), their labels
-    REVEALED like a hovered one (never moving another), every other ticket and every link not between two of
-    them faded (`storyHighlightSet` / `fadedBy`; an open ticket's neighbourhood wins while selected). A VIEW
-    state — no re-layout; the corona breathes three times, still under reduced motion. The card is
-    `aria-pressed` (pink); clicking it again, "Clear" beside the headline, or a new story clears it, and another
-    card replaces it, animating back to Fit on clear. It renders NOTHING when AI is off or no pass can run (`storyStatus.state` `none`).
-    The fold (`sprintStoryView`) reads the server's `storyStatus`: with NO story, one short line — the
-    canvas's own indeterminate bar (`SprintProgressBar`, ONE component with the canvas's top-edge bar,
-    styles `.sg-progress*`) + "Writing the sprint story…" only while `writing`; else when it will be
-    written (`queued` / `waiting`) or why it could not be (`failed`, "Couldn't write the sprint story.
-    <reason> Limn tries again when the sprint changes."). ⚠ A STALE story (older input or version) is
-    ALWAYS shown — never blanked — with a quiet "Updating" beside the headline while `writing` / `queued`,
-    or the failure line under it. While writing the canvas bar reads "Writing the sprint story"
-    (`sprintProgress({storyWriting})`, after read / refetch / summaries), and the graph polls every 5 s
-    while `writing` / `queued`. The story shown is the LAST one written (docs/CLAUDE-REVIEW.md § Sprint story).
-  - **THE SPRINT'S DATES** beside the title (`sprintDatesLine`, `sprintStoryModel.ts`): "14 Oct – 27 Oct ·
+  - **THE CRITICAL-PATHS STRIP** (`SprintPathsStrip.tsx`, fold `sprintPathsModel.ts`; until the Critical
+    path / Theme / People boards replace the graph) sits between the header and the view controls: a
+    "Critical paths" heading (ⓘ beside it; "No critical paths in this sprint." when the builder found
+    none), then ONE row of cards in the ONE order (`stripCards`): Limn's code cards "Since you last looked"
+    (eye) and "Pace" (timer), the sprint builder's paths labelled by risk ("High risk" / "Medium risk" /
+    "Low risk", link mark tinted rose / amber / grey) with their ticket keys in order (`A → B → C`) and the
+    one-sentence advice, its call-outs ("Call-out", pin) with their keys, then Limn's "Out of step" (scales)
+    and "Blocked outside the sprint" (lock); definitions live in the strip's ⓘ only. The code cards
+    (`signals`) are free and render with AI off too (Claude's half then renders nothing). Selection is by
+    card KEY; the reset signature (`stripCardsSig`) is keys + idents, never titles ("Since 31 minutes ago"
+    moves every minute). Clicking a card FRAMES its tickets (SprintView's `focusRequest` → `SprintGraph`
+    `frameIdents` over the ones drawn) AND HIGHLIGHTS them: a pink `STORY_HIGHLIGHT` corona + ring, labels
+    REVEALED like a hovered one, everything else faded (`storyHighlightSet` / `fadedBy`). A VIEW state — no
+    re-layout. The card is `aria-pressed` (pink); clicking it again, "Clear", or a new card set clears it.
+    The fold (`sprintPathsView`) reads the server's `pathsStatus`: with NO paths, one short line — the
+    canvas's indeterminate bar (`SprintProgressBar`) + "Finding the critical paths…" only while `writing`;
+    else when they will come (`queued` / `waiting`) or why they could not ("Couldn't find the critical
+    paths. <reason> Limn tries again when the sprint changes." — "…tomorrow." for `daily_cap`). ⚠ STALE
+    paths are ALWAYS shown, with a quiet "Updating" while `writing` / `queued`, or the failure line under
+    them. While writing the canvas bar reads "Finding the critical paths" (`sprintProgress({pathsWriting})`)
+    and the graph polls every 5 s while `writing` / `queued` (docs/CLAUDE-REVIEW.md § Sprint paths).
+    `SprintGraphResponse.pace` and `.people` ride the same response for the boards; nothing draws them yet.
+  - **THE SPRINT'S DATES** beside the title (`sprintDatesLine`, `sprintPathsModel.ts`): "14 Oct – 27 Oct ·
     day 1 of 14" from `sprintDates` (the tracker's own, else the cadence's), short dates in the reader's
-    locale, the day count from shared `sprintDayOf` (the story's own count); an end on midnight shows the
+    locale, the day count from shared `sprintDayOf` (the pace's own count); an end on midnight shows the
     day before; end only → "due 28 Oct"; before / after → "starts in 2 days" / "ended"; none → nothing.
   - **"Group by"** — Epic · Theme (DEFAULT) · Section · Dependencies · None. **Dependencies** puts each
     `depends_on` chain (ghosts included, tracker blocking links counted) in its own halo, named

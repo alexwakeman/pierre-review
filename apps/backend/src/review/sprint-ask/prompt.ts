@@ -13,7 +13,8 @@ import {
 // this sprint). Pure (prompt.test.ts).
 //
 //   • GROUNDED IN THE STORED GRAPH ONLY: nodes (key, sprint or outside, stage + status, assignee, epic,
-//     title, brief summary, criteria count, PRs) and edges. No tracker, GitHub or tool call.
+//     title, brief summary, criteria count, PRs), edges, and the sprint builder's stored critical paths
+//     and call-outs. No tracker, GitHub or tool call.
 //   • ⚠ NONCE FENCES: titles, summaries, names and statuses come from the tracker (typed by anyone) or a
 //     model that read it, so the whole map sits inside one `---BEGIN SPRINT MAP <nonce>---` block, and
 //     the prior turns inside another — a previous ANSWER is model text over the same data.
@@ -60,6 +61,17 @@ export function sprintMapText(g: SprintGraphResponse): string {
     const a = byIdent.get(e.from)?.key ?? e.from;
     const b = byIdent.get(e.to)?.key ?? e.to;
     lines.push(`- ${a} ${SPRINT_EDGE_LABEL[e.kind].toLowerCase()} ${b}${e.source === 'tracker' ? ' (tracker link)' : ''}`);
+  }
+  // The sprint builder's critical paths and call-outs (model text over the same map — inside the fence).
+  if (g.paths != null && (g.paths.paths.length > 0 || g.paths.callouts.length > 0)) {
+    lines.push('');
+    lines.push('Critical paths (riskiest first):');
+    if (g.paths.paths.length === 0) lines.push('- none');
+    for (const p of g.paths.paths) lines.push(`- ${one(p.title, 60)} (${p.risk} risk): ${p.tickets.join(' → ')}. ${one(p.advice, 240)}`);
+    if (g.paths.callouts.length > 0) {
+      lines.push('Call-outs:');
+      for (const c of g.paths.callouts) lines.push(`- ${one(c.title, 60)}: ${c.tickets.join(', ')}`);
+    }
   }
   return lines.join('\n');
 }

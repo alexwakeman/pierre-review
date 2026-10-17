@@ -750,6 +750,13 @@
       "when": 1792137606017,
       "tag": "0106_design_diagrams",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1792137607017,
+      "tag": "0107_sprint_paths",
+      "breakpoints": true
     }
   ]
 }

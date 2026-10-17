@@ -28,7 +28,6 @@ import type {
   SprintStatusSettings,
   TicketLinkBlocker,
   SprintBriefCriterion,
-  SprintStoryline,
   SprintTheme,
   SprintBriefStoredReference,
   BranchCheckRun,
@@ -2909,13 +2908,12 @@ export const sprintReads = sqliteTable(
     // The current sprint's own dates as the TRACKER gave them (migration 0111 / pg 0098): the Jira
     // sprint's startDate/endDate, the Linear cycle's startsAt/endsAt, the GitHub milestone's dueOn (end
     // only). Written on every successful read (null = the tracker gave none, or the status fallback).
-    // The page header and the sprint story's day facts read them; never a tracker call on a view.
+    // The page header, the pace and the sprint builder's day facts read them; never a tracker call on a view.
     sprintStartsAt: integer('sprint_starts_at', { mode: 'timestamp' }),
     sprintEndsAt: integer('sprint_ends_at', { mode: 'timestamp' }),
-    // The SPRINT STORY pass's last attempt that called Claude (migration 0111 / pg 0098;
-    // review/sprint-story/manager.ts): when, for which input hash, and why it stored nothing (a
-    // `SprintStoryFailure` code; null = it stored a story). A failure for today's input hash is not
-    // retried until the hash moves — the BACKOFF — and the page says why instead of "Writing…" for ever.
+    // ⚠ DORMANT since migration 0120 / pg 0107: the retired SPRINT STORY pass's last attempt (migration
+    // 0111 / pg 0098). The sprint builder keeps its attempt on its own `sprint_paths` row. Nothing
+    // writes or reads these three columns now.
     storyAttemptAt: integer('story_attempt_at', { mode: 'timestamp' }),
     storyAttemptHash: text('story_attempt_hash'),
     storyAttemptError: text('story_attempt_error'),
@@ -3125,12 +3123,10 @@ export const sprintThemes = sqliteTable(
   }),
 );
 
-// sprint_story — THE SPRINT STORY (migration 0109 / pg 0096): ONE sprint-wide Haiku call after the
-// theme pass writes a headline + 3–5 storylines picked from candidates the CODE built out of the graph
-// (db/sprint-story.ts). ONE row per (account, workspace), replaced by each new pass; CURRENT while
-// `input_hash` = today's hash of everything the pass was sent AND `story_version` = SPRINT_STORY_VERSION.
-// Written ONLY by review/sprint-story/ (local, agentic); read by db/sprint-graph.ts. Tenancy via the
-// named composite FK onto `workspaces (id, account_id)`.
+// sprint_story — THE SPRINT STORY (migration 0109 / pg 0096). ⚠ DORMANT since migration 0120 / pg 0107:
+// the Haiku story pass that wrote it was REPLACED by the sprint builder (`sprint_paths` below). Nothing
+// writes or reads it; the rows stay (still erased with the account). Was: a headline + storylines per
+// (account, workspace). Tenancy via the named composite FK onto `workspaces (id, account_id)`.
 // ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId].
 export const sprintStory = sqliteTable(
   'sprint_story',
@@ -3142,7 +3138,7 @@ export const sprintStory = sqliteTable(
     workspaceId: integer('workspace_id').notNull(),
     inputHash: text('input_hash').notNull(),
     storyVersion: integer('story_version').notNull(),
-    storyJson: text('story_json', { mode: 'json' }).$type<{ headline: string; focus?: string; storylines: SprintStoryline[] }>().notNull(),
+    storyJson: text('story_json', { mode: 'json' }).$type<{ headline: string; focus?: string; storylines: unknown[] }>().notNull(),
     model: text('model').notNull(),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
@@ -3155,6 +3151,55 @@ export const sprintStory = sqliteTable(
     accountWsUx: uniqueIndex('sprint_story_account_ws').on(t.accountId, t.workspaceId),
     workspaceAccountFk: foreignKey({
       name: 'sprint_story_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_paths — THE SPRINT BUILDER'S CRITICAL PATHS (migration 0120 / pg 0107; docs/CLAUDE-REVIEW.md §
+// Sprint paths): ONE agentic Sonnet 5 pass after the theme pass writes up to 5 critical paths and 3
+// call-outs over a code-built map of the sprint (db/sprint-paths.ts). ONE row per (account, workspace),
+// holding the last stored answer (`paths_json` — ticket KEYS only; idents are resolved on read — with
+// `input_hash` + `paths_version`, its spend and `written_at`), the last ATTEMPT (`attempt_*`: when, for
+// which input hash, the failure code or NULL) and today's run count against SPRINT_PATHS_DAILY_CAP
+// (`runs_day` 'YYYY-MM-DD' UTC + `runs_today`). A row may exist with NO paths (an attempt or a counted
+// run came first). Written ONLY by review/sprint-paths/ (local, agentic); read by db/sprint-graph.ts.
+// It REPLACED `sprint_story` (dormant since, kept for its rows). Tenancy via the named composite FK
+// onto `workspaces (id, account_id)`.
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId].
+export const sprintPaths = sqliteTable(
+  'sprint_paths',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    inputHash: text('input_hash'),
+    pathsVersion: integer('paths_version'),
+    pathsJson: text('paths_json', { mode: 'json' }).$type<{ paths: unknown[]; callouts: unknown[] }>(),
+    model: text('model'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    writtenAt: integer('written_at', { mode: 'timestamp' }),
+    attemptAt: integer('attempt_at', { mode: 'timestamp' }),
+    attemptHash: text('attempt_hash'),
+    attemptError: text('attempt_error'),
+    runsDay: text('runs_day'),
+    runsToday: integer('runs_today').notNull().default(0),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountWsUx: uniqueIndex('sprint_paths_account_ws').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_paths_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),

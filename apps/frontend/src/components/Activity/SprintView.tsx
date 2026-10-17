@@ -10,8 +10,8 @@ import { useSprintAssessOn, useSprintGraph, useSprintRefresh, useSprintRefreshin
 import { useFilters } from '../../store/filters.js';
 import { GearIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
-import { SprintStoryStrip } from './SprintStoryStrip.js';
-import { sprintDatesLine, storyWriting } from './sprintStoryModel.js';
+import { SprintPathsStrip } from './SprintPathsStrip.js';
+import { pathsWriting, sprintDatesLine } from './sprintPathsModel.js';
 import { TicketRefOpenContext, type TicketRefOpener } from '../TicketRefLink.js';
 import { SprintAskPanel } from './SprintAskPanel.js';
 import { SprintGraph } from './SprintGraph.js';
@@ -118,7 +118,7 @@ export function SprintView(): JSX.Element {
   const [drawer, setDrawer] = useState<string | null>(null);
   /** Bumped on every open, so the graph frames the ticket (and its links) even when it was selected. */
   const [frameRequest, setFrameRequest] = useState(0);
-  /** A storyline clicked (SprintStoryStrip): the graph frames and highlights its tickets; [] = back to Fit, no highlight. */
+  /** A card clicked (SprintPathsStrip): the graph frames and highlights its tickets; [] = back to Fit, no highlight. */
   const [focusRequest, setFocusRequest] = useState<{ seq: number; idents: readonly string[] } | null>(null);
   const graphBox = useRef<HTMLDivElement | null>(null);
   const focusStory = useCallback((ids: string[]): void => {
@@ -233,7 +233,7 @@ export function SprintView(): JSX.Element {
     firstRead: reading,
     fetching: fetchingSlow,
     briefs: data.aiEnabled ? data.briefs : null,
-    storyWriting: storyWriting(data.aiEnabled, data.storyStatus),
+    pathsWriting: pathsWriting(data.aiEnabled, data.pathsStatus),
   });
   const startRefresh = (): void => {
     setAwaitRead({ checkedAt: data.read.checkedAt, since: Date.now() });
@@ -297,7 +297,7 @@ export function SprintView(): JSX.Element {
         )}
 
         {nodes.length > 0 && (
-          <SprintStoryStrip story={data.story} status={data.storyStatus} aiEnabled={data.aiEnabled} signals={data.signals ?? []} onFocus={focusStory} />
+          <SprintPathsStrip paths={data.paths ?? null} status={data.pathsStatus} aiEnabled={data.aiEnabled} signals={data.signals ?? []} onFocus={focusStory} />
         )}
         {nodes.length === 0 ? (
           !reading && <p className={`text-sm ${MUTED}`}>No tickets in this sprint.</p>
@@ -682,7 +682,7 @@ function GraphInfo(): JSX.Element {
         this browser remembers it. Scroll or pinch to zoom. Drag the
         background to move around. Fit frames what is shown.
       </p>
-      <p>Opening a ticket zooms to it and the tickets it links to. Clicking a line of the sprint story above the graph zooms to its tickets; click it again to see the whole sprint.</p>
+      <p>Opening a ticket zooms to it and the tickets it links to. Clicking a card above the graph zooms to its tickets; click it again to see the whole sprint.</p>
       <p>Where tickets crowd, some names hide. Hover or zoom in to read them.</p>
       <p>
         Filters hide the tickets they leave out, and any circle left empty. The rest close up and the view fits them;

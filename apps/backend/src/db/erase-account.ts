@@ -221,6 +221,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.sprintBriefs).where(eq(schema.sprintBriefs.accountId, accountId)).execute();
     await tx.delete(schema.sprintThemes).where(eq(schema.sprintThemes.accountId, accountId)).execute();
     await tx.delete(schema.sprintStory).where(eq(schema.sprintStory.accountId, accountId)).execute();
+    // The sprint builder's critical paths (migration 0120 / pg 0107) — model prose about the tickets.
+    await tx.delete(schema.sprintPaths).where(eq(schema.sprintPaths.accountId, accountId)).execute();
     await tx.delete(schema.sprintViewSnapshots).where(eq(schema.sprintViewSnapshots.accountId, accountId)).execute();
     await tx.delete(schema.sprintAssessments).where(eq(schema.sprintAssessments.accountId, accountId)).execute();
     await tx.delete(schema.sprintTicketRepos).where(eq(schema.sprintTicketRepos.accountId, accountId)).execute();
@@ -374,6 +376,7 @@ export function accountScopedTables(): {
     { name: 'sprintBriefs', col: schema.sprintBriefs.accountId, table: schema.sprintBriefs },
     { name: 'sprintThemes', col: schema.sprintThemes.accountId, table: schema.sprintThemes },
     { name: 'sprintStory', col: schema.sprintStory.accountId, table: schema.sprintStory },
+    { name: 'sprintPaths', col: schema.sprintPaths.accountId, table: schema.sprintPaths },
     { name: 'sprintViewSnapshots', col: schema.sprintViewSnapshots.accountId, table: schema.sprintViewSnapshots },
     // `myTurnDismissals` sat here until migration 0060 / pg 0047 DROPPED the table. It is named
     // rather than silently absent because this list is a checklist, and a checklist that shortens

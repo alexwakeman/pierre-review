@@ -1,27 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
-import { SPRINT_VISIT_GAP_MS, type SprintSignal, type SprintStory, type SprintStoryStatus } from '@pierre-review/shared';
-import { EyeIcon, LinkIcon, LockIcon, ScalesIcon, TimerIcon, WarningIcon } from '../Icons.js';
+import { SPRINT_VISIT_GAP_MS, type SprintPaths, type SprintPathsStatus, type SprintSignal } from '@pierre-review/shared';
+import { EyeIcon, LinkIcon, LockIcon, PinIcon, ScalesIcon, TimerIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { SprintProgressBar } from './SprintProgressBar.js';
-import { storylineFocus, sprintStoryView, stripCards, stripCardsSig, type SprintStripCard } from './sprintStoryModel.js';
+import { cardFocus, sprintPathsView, stripCards, stripCardsSig, type SprintStripCard } from './sprintPathsModel.js';
 
-// ACTIVITY → THIS SPRINT: THE SPRINT STORY STRIP (`SprintGraphResponse.story` + `.signals`;
-// docs/CLAUDE-REVIEW.md § Sprint story). Claude's headline, then its "Sprint focus" sentence under a
-// visible label, then ONE row of cards in the ONE order (`stripCards`): Limn's own "Since you last
-// looked" and "Pace", Claude's storylines (Dependency path / At risk), then Limn's "Out of step" and
-// "Blocked outside the sprint". Every card is labelled with what it is, and clicking it hands its tickets
-// to `onFocus` (the graph zooms to them and HIGHLIGHTS them, fading the rest); clicking it again, or
-// "Clear", hands [] (clear); another card replaces it. A changed card set clears it.
-// Claude's half renders nothing while AI is off — Limn's cards still show (free, no model). With no story
-// yet: one short line from `storyStatus` (the thin indeterminate bar while the pass is writing — the
-// canvas bar runs with it — else when it will be written, or why it could not be). An OLDER story stays on
-// screen, with a quiet "Updating" or the failure line. Every number in Claude's text was counted by Limn
-// and checked against what Claude was given; Limn's cards are templates over its own counts.
+// ACTIVITY → THIS SPRINT: THE CRITICAL-PATHS STRIP (`SprintGraphResponse.paths` + `.signals`;
+// docs/CLAUDE-REVIEW.md § Sprint paths). ONE row of cards in the ONE order (`stripCards`): Limn's own
+// "Since you last looked" and "Pace", the sprint builder's critical paths (riskiest first, each labelled
+// with its risk and listing its tickets in order) and call-outs, then Limn's "Out of step" and "Blocked
+// outside the sprint". Clicking a card hands its tickets to `onFocus` (the graph zooms to them and
+// HIGHLIGHTS them); clicking it again, or "Clear", hands [] (clear). A changed card set clears it.
+// Claude's half renders nothing while AI is off — Limn's cards still show (free, no model). With no paths
+// yet: one short line from `pathsStatus`. OLDER paths stay on screen, with a quiet "Updating" or the
+// failure line. Claude's text carries no number: every number on the page is Limn's.
 
-export interface SprintStoryStripProps {
-  story: SprintStory | null;
-  /** `SprintGraphResponse.storyStatus`. */
-  status: SprintStoryStatus;
+export interface SprintPathsStripProps {
+  paths: SprintPaths | null;
+  /** `SprintGraphResponse.pathsStatus`. */
+  status: SprintPathsStatus;
   /** `SprintGraphResponse.aiEnabled`. */
   aiEnabled: boolean;
   /** `SprintGraphResponse.signals` — Limn's own cards. */
@@ -35,34 +32,34 @@ const MUTED = 'text-gray-500 dark:text-gray-400';
 const KIND_ICON: Record<SprintStripCard['kind'], (p: { size?: number; className?: string }) => JSX.Element> = {
   since_last: EyeIcon,
   pace: TimerIcon,
-  chain: LinkIcon,
-  risk: WarningIcon,
+  path: LinkIcon,
+  callout: PinIcon,
   out_of_step: ScalesIcon,
   blocked_outside: LockIcon,
 };
-const KIND_TINT: Record<SprintStripCard['kind'], string> = {
-  since_last: 'text-emerald-600 dark:text-emerald-400',
-  pace: 'text-gray-500 dark:text-gray-400',
-  chain: 'text-sky-600 dark:text-sky-400',
-  risk: 'text-amber-600 dark:text-amber-400',
-  out_of_step: 'text-amber-600 dark:text-amber-400',
-  blocked_outside: 'text-amber-600 dark:text-amber-400',
+const tintOf = (c: SprintStripCard): string => {
+  if (c.kind === 'path') {
+    if (c.risk === 'high') return 'text-rose-600 dark:text-rose-400';
+    if (c.risk === 'medium') return 'text-amber-600 dark:text-amber-400';
+    return 'text-gray-500 dark:text-gray-400';
+  }
+  if (c.kind === 'since_last') return 'text-emerald-600 dark:text-emerald-400';
+  if (c.kind === 'pace') return 'text-gray-500 dark:text-gray-400';
+  if (c.kind === 'callout') return 'text-sky-600 dark:text-sky-400';
+  return 'text-amber-600 dark:text-amber-400';
 };
 
 const GAP_MINUTES = Math.round(SPRINT_VISIT_GAP_MS / 60_000);
 
-function StoryInfo({ aiEnabled }: { aiEnabled: boolean }): JSX.Element {
+function PathsInfo({ aiEnabled }: { aiEnabled: boolean }): JSX.Element {
   return (
     <div className="space-y-2 text-sm">
       {aiEnabled && (
-        <>
-          <p>
-            Claude writes the headline, the <strong>Sprint focus</strong> (the sprint&rsquo;s main areas of work) and the{' '}
-            <strong>Dependency path</strong> and <strong>At risk</strong> cards from the sprint graph, after a sprint read that changed something.
-            Limn picks the tickets for each card and counts every number; an answer with a number Limn did not give Claude is thrown away.
-          </p>
-          <p>A dependency path is shown only while a ticket on it still waits on unfinished work.</p>
-        </>
+        <p>
+          Claude picks the <strong>critical paths</strong> &mdash; the chains of tickets that most put the sprint at risk, riskiest first, each
+          listed in the order the work must happen &mdash; and up to three <strong>call-outs</strong>, after a sprint read that changed something.
+          Limn builds the map Claude reads and counts every number; Claude&rsquo;s words carry none.
+        </p>
       )}
       <p>Limn writes the other cards itself, from what it has stored:</p>
       <ul className="list-disc space-y-1 pl-5">
@@ -87,10 +84,10 @@ function StoryInfo({ aiEnabled }: { aiEnabled: boolean }): JSX.Element {
   );
 }
 
-export function SprintStoryStrip({ story, status, aiEnabled, signals, onFocus }: SprintStoryStripProps): JSX.Element | null {
+export function SprintPathsStrip({ paths, status, aiEnabled, signals, onFocus }: SprintPathsStripProps): JSX.Element | null {
   const [selected, setSelected] = useState<string | null>(null);
-  const view = sprintStoryView({ aiEnabled, story, status });
-  const cards = stripCards(view.kind === 'story' ? view.story.storylines : [], signals);
+  const view = sprintPathsView({ aiEnabled, paths, status });
+  const cards = stripCards(view.kind === 'paths' ? view.paths : null, signals);
   // A different card set (a new pass, the sprint moved): the pick may name a card that is gone or changed.
   const sig = stripCardsSig(cards);
   const lastSig = useRef(sig);
@@ -104,9 +101,10 @@ export function SprintStoryStrip({ story, status, aiEnabled, signals, onFocus }:
       onFocus([]);
     }
   }, [sig, onFocus]);
-  const hasHead = view.kind === 'story' || view.kind === 'message';
+  const hasHead = view.kind === 'paths' || view.kind === 'message';
   if (!hasHead && cards.length === 0) return null;
-  const note = view.kind === 'story' ? view.note : null;
+  const note = view.kind === 'paths' ? view.note : null;
+  const calm = view.kind === 'paths' && view.paths.paths.length === 0 && view.paths.callouts.length === 0;
   const clear =
     selected != null ? (
       <button
@@ -121,18 +119,18 @@ export function SprintStoryStrip({ story, status, aiEnabled, signals, onFocus }:
       </button>
     ) : null;
   const info = (
-    <InfoButton title="The sprint story">
-      <StoryInfo aiEnabled={aiEnabled} />
+    <InfoButton title="Critical paths">
+      <PathsInfo aiEnabled={aiEnabled} />
     </InfoButton>
   );
   return (
-    <section data-testid="sprint-story" data-state={status.state} data-stale={status.stale ? 'true' : undefined} aria-label="Sprint story" className="space-y-2">
-      {view.kind === 'story' ? (
-        <p className="flex items-start gap-1.5 text-sm font-medium text-gray-800 dark:text-gray-100">
-          <span>{view.story.headline}</span>
+    <section data-testid="sprint-paths" data-state={status.state} data-stale={status.stale ? 'true' : undefined} aria-label="Critical paths" className="space-y-2">
+      {view.kind === 'paths' ? (
+        <p className="flex items-center gap-1.5 text-sm font-medium text-gray-800 dark:text-gray-100">
+          <span>{calm ? 'No critical paths in this sprint.' : 'Critical paths'}</span>
           {info}
           {note?.kind === 'updating' && (
-            <span data-testid="sprint-story-updating" className={`mt-0.5 shrink-0 text-xs font-normal ${MUTED}`}>
+            <span data-testid="sprint-paths-updating" className={`shrink-0 text-xs font-normal ${MUTED}`}>
               Updating
             </span>
           )}
@@ -142,8 +140,8 @@ export function SprintStoryStrip({ story, status, aiEnabled, signals, onFocus }:
         <p className={`flex items-center gap-2 text-xs ${MUTED}`}>
           {view.writing && (
             <SprintProgressBar
-              progress={{ kind: 'busy', label: 'Writing the sprint story' }}
-              testId="sprint-story-progress"
+              progress={{ kind: 'busy', label: 'Finding the critical paths' }}
+              testId="sprint-paths-progress"
               className="h-[3px] w-16 shrink-0 rounded-full"
             />
           )}
@@ -155,12 +153,6 @@ export function SprintStoryStrip({ story, status, aiEnabled, signals, onFocus }:
         <p className="flex items-center gap-1.5">
           {info}
           {clear}
-        </p>
-      )}
-      {view.kind === 'story' && view.story.focus != null && (
-        <p data-testid="sprint-story-focus" className="text-xs text-gray-700 dark:text-gray-200">
-          <span className={`mr-1 text-[11px] font-medium ${MUTED}`}>Sprint focus</span>{' '}
-          {view.story.focus}
         </p>
       )}
       {note?.kind === 'failed' && <p className={`text-xs ${MUTED}`}>{note.text}</p>}
@@ -176,7 +168,7 @@ export function SprintStoryStrip({ story, status, aiEnabled, signals, onFocus }:
                   aria-pressed={on}
                   data-card={c.kind}
                   onClick={() => {
-                    const next = storylineFocus(selected, c.key, c.idents);
+                    const next = cardFocus(selected, c.key, c.idents);
                     setSelected(next.selected);
                     onFocus(next.idents);
                   }}
@@ -188,11 +180,12 @@ export function SprintStoryStrip({ story, status, aiEnabled, signals, onFocus }:
                 >
                   {/* The card's function, visible: what KIND of card this is. */}
                   <span className="flex items-center gap-1 text-[11px] font-medium text-gray-500 dark:text-gray-400">
-                    <Icon size={12} className={`shrink-0 ${KIND_TINT[c.kind]}`} />
+                    <Icon size={12} className={`shrink-0 ${tintOf(c)}`} />
                     {c.label}
                   </span>
                   <span className="text-xs font-semibold text-gray-800 dark:text-gray-100">{c.title}</span>
-                  <span className="text-xs text-gray-600 dark:text-gray-300">{c.sentence}</span>
+                  {c.tickets.length > 0 && <span className="text-[11px] text-gray-600 dark:text-gray-300">{c.tickets.join(c.kind === 'path' ? ' → ' : ', ')}</span>}
+                  {c.sentence != null && <span className="text-xs text-gray-600 dark:text-gray-300">{c.sentence}</span>}
                 </button>
               </li>
             );

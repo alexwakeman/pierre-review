@@ -1233,12 +1233,15 @@ docs/TRACKERS.md § The status order and buckets. Edges = a blocking tracker lin
 CURRENT BRIEF's depends_on / concurrent / builds_on / supersedes, each with the brief's one-sentence
 `why` — ONE fold (`db/sprint-graph-fold.ts`). The BRIEF (Haiku, `review/sprint-briefs/`, after each read,
 never a view): summary + criteria + references + a `why` per reference AND tracker link; current on
-text hash + `SPRINT_BRIEF_VERSION`. The STORY strip (Haiku, `review/sprint-story/`): code-built
-candidates, model words, a click frames them; ⚠ the LAST story is shown (its hash is the
-re-bill gate, not the display gate). Filters HIDE (ghosts follow the section filter only); Group by
+text hash + `SPRINT_BRIEF_VERSION`. After briefs → themes, the SPRINT BUILDER (Sonnet 5, agentic,
+`review/sprint-paths/`, its ONE tool `submit_paths`) picks ≤ 5 critical paths + ≤ 3 call-outs over a
+code-built map: only listed keys, ⚠ NO digit in its text, hash blind to the day, backoff +
+`SPRINT_PATHS_DAILY_CAP`; the LAST answer is shown (the hash is the re-bill gate). The response also
+carries CODE's `pace` and `people` (shared `sprintMembers`; `reviewsWaiting` null when unmapped, never 0).
+The Haiku story pass is retired (`sprint_story` dormant). Filters HIDE (ghosts follow the section filter only); Group by
 adds Dependencies (chains, left to right). "Check against code" (Sonnet 5) and "Ask Claude" (Haiku)
 are LOCAL, on `me.ai`. ⚠ No chips, findings, checks or write-back.
-[docs/FRONTEND.md](docs/FRONTEND.md) § Activity → This Sprint · [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint briefs / story.
+[docs/FRONTEND.md](docs/FRONTEND.md) § Activity → This Sprint · [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint briefs / paths.
 
 **The People report** (Reports → People) — a multi-select picker of humans AND bots, one report
 with a SECTION per pick; contract in
@@ -1578,7 +1581,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0104` and plugin `0034`–`0037` + `0040` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0107` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

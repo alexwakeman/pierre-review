@@ -37,9 +37,9 @@ export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
     const q = req.query as { workspace?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
-    // A story pass needs a credential too; without one `storyStatus` would promise a story for ever.
-    const storyCanRun = config.aiEnabled && (await import('../../review/auth.js')).detectClaudeAuth().status === 'ok';
-    return getSprintGraph(accountId, scope.workspaceId, { aiEnabled: config.aiEnabled, now: Date.now(), storyCanRun });
+    // A builder pass needs a credential too; without one `pathsStatus` would promise paths for ever.
+    const pathsCanRun = config.aiEnabled && (await import('../../review/auth.js')).detectClaudeAuth().status === 'ok';
+    return getSprintGraph(accountId, scope.workspaceId, { aiEnabled: config.aiEnabled, now: Date.now(), pathsCanRun });
   });
 
   // The drawer: one node's brief, references, PRs (the ticket tab's fold), repos and assessment. An

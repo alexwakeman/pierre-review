@@ -165,7 +165,7 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only st
   startsAt endsAt }`, a GitHub milestone's `dueOn` as the END only. Several active sprints / cycles →
   the one holding the most read tickets (`busiestSprintDates`, ties to the earliest start). Written on
   every good read (the status fallback, or none given, clears them). The page header ("14 Oct – 27 Oct ·
-  day 1 of 14") and the sprint story's day facts read them; the cadence window is only the fallback.
+  day 1 of 14") and the pace's and the sprint builder's day facts read them; the cadence window is only the fallback.
 - **Fallback** when the tracker has no sprint concept or none is active: To do + In progress tickets
   touched in the workspace's reporting window (`getReportingWindow`), else the trailing 14 days. The
   `source` says which (`sprint` / `cycle` / `milestone` / `status_fallback` + reason).

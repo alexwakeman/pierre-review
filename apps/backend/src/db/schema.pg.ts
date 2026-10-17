@@ -33,7 +33,6 @@ import type {
   SprintStatusSettings,
   TicketLinkBlocker,
   SprintBriefCriterion,
-  SprintStoryline,
   SprintTheme,
   SprintBriefStoredReference,
   BranchCheckRun,
@@ -2237,7 +2236,7 @@ export const sprintStory = pgTable(
     workspaceId: integer('workspace_id').notNull(),
     inputHash: text('input_hash').notNull(),
     storyVersion: integer('story_version').notNull(),
-    storyJson: jsonb('story_json').$type<{ headline: string; focus?: string; storylines: SprintStoryline[] }>().notNull(),
+    storyJson: jsonb('story_json').$type<{ headline: string; focus?: string; storylines: unknown[] }>().notNull(),
     model: text('model').notNull(),
     costUsd: doublePrecision('cost_usd'),
     inputTokens: integer('input_tokens'),
@@ -2248,6 +2247,41 @@ export const sprintStory = pgTable(
     accountWsUx: uniqueIndex('sprint_story_account_ws').on(t.accountId, t.workspaceId),
     workspaceAccountFk: foreignKey({
       name: 'sprint_story_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// sprint_paths — see the sqlite twin (migration pg 0107).
+export const sprintPaths = pgTable(
+  'sprint_paths',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    inputHash: text('input_hash'),
+    pathsVersion: integer('paths_version'),
+    pathsJson: jsonb('paths_json').$type<{ paths: unknown[]; callouts: unknown[] }>(),
+    model: text('model'),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    writtenAt: timestamp('written_at', { withTimezone: true, mode: 'date' }),
+    attemptAt: timestamp('attempt_at', { withTimezone: true, mode: 'date' }),
+    attemptHash: text('attempt_hash'),
+    attemptError: text('attempt_error'),
+    runsDay: text('runs_day'),
+    runsToday: integer('runs_today').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (t) => ({
+    accountWsUx: uniqueIndex('sprint_paths_account_ws').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_paths_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),

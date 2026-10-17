@@ -1523,9 +1523,9 @@ describe('sprintProgress', () => {
     expect(g1SprintProgress({ ...idle, briefs: { current: 9, pending: 0 } })).toBeNull();
   });
   it('the story being written runs the same indeterminate bar, after a read, a refetch and summaries', () => {
-    expect(g1SprintProgress({ ...idle, storyWriting: true })).toEqual({ kind: 'busy', label: 'Writing the sprint story' });
-    expect(g1SprintProgress({ ...idle, storyWriting: true, briefs: { current: 1, pending: 1 } })).toMatchObject({ kind: 'share' });
-    expect(g1SprintProgress({ ...idle, storyWriting: true, awaitingRead: true })).toEqual({ kind: 'busy', label: 'Reading the sprint' });
+    expect(g1SprintProgress({ ...idle, pathsWriting: true })).toEqual({ kind: 'busy', label: 'Finding the critical paths' });
+    expect(g1SprintProgress({ ...idle, pathsWriting: true, briefs: { current: 1, pending: 1 } })).toMatchObject({ kind: 'share' });
+    expect(g1SprintProgress({ ...idle, pathsWriting: true, awaitingRead: true })).toEqual({ kind: 'busy', label: 'Reading the sprint' });
   });
   it('is indeterminate while a read or a refetch runs (neither reports progress)', () => {
     expect(g1SprintProgress({ ...idle, awaitingRead: true })).toEqual({ kind: 'busy', label: 'Reading the sprint' });

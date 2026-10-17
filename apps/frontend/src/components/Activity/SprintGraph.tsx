@@ -343,7 +343,7 @@ export function SprintGraph({
   drawerOpen?: boolean;
   /** Bumped on every ticket OPEN (click, Enter, a link in the drawer): frame `selected` and its links. */
   frameRequest?: number;
-  /** A storyline click (SprintStoryStrip): frame these tickets; `idents: []` = back to Fit. `seq` is
+  /** A card click (SprintPathsStrip): frame these tickets; `idents: []` = back to Fit. `seq` is
    *  bumped per click so the same storyline frames again. */
   focusRequest?: { seq: number; idents: readonly string[] } | null;
   /** The refresh bar across the top of the canvas (`sprintProgress`); null = nothing in flight. */

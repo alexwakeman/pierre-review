@@ -63,8 +63,8 @@ export function useSprintGraph(workspaceId: number | null) {
     refetchInterval: (q) => {
       const d = q.state.data;
       if (d != null && d.trackerOn && d.read.readAt == null && d.read.error == null) return 5_000;
-      // The story is being written (or is next in line after the summaries): see it land.
-      if (d != null && d.aiEnabled && (d.storyStatus?.state === 'writing' || d.storyStatus?.state === 'queued')) return 5_000;
+      // The critical paths are being written (or are next in line after the summaries): see them land.
+      if (d != null && d.aiEnabled && (d.pathsStatus?.state === 'writing' || d.pathsStatus?.state === 'queued')) return 5_000;
       if (d != null && d.aiEnabled && d.briefs.pending > 0) return 15_000;
       return 60_000;
     },

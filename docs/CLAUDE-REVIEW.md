@@ -2116,95 +2116,81 @@ ticket in exactly one, so the graph can cluster by area of work rather than by e
   CURRENT for today's hash and version — otherwise null, and the SPA disables "Theme" with "Themes
   appear after Claude reads the sprint".
 
-## Sprint story (Activity → This Sprint, the strip above the graph)
+## Sprint paths (Activity → This Sprint, the sprint builder)
 
-ONE sprint-wide Haiku 5.5 call that writes a one-line HEADLINE, a one-sentence **SPRINT FOCUS** (what the
-sprint is focused on — its main areas of work) and 0–4 STORYLINES (dependency paths and risks only) so a
-reader gets the sprint at a glance; beside them sit FOUR CODE CARDS Limn writes itself (below). ⚠ CODE
-BUILDS THE STORY'S SKELETON; the model only picks and words.
+ONE agentic Sonnet 5 run per changed sprint — the SPRINT BUILDER — that picks up to 5 **CRITICAL PATHS**
+(ordered ticket chains, ranked by risk to the sprint, each with a ≤ 40-character title, ONE sentence of
+advice and a risk level) and up to 3 **CALL-OUTS** (a title + the tickets worth a look). It REPLACED the
+Haiku sprint story (2026-10-17): `review/sprint-story/`, `db/sprint-story.ts` and `SprintStoryStrip` are
+deleted; table `sprint_story` and `sprint_reads.story_attempt_*` are DORMANT. ⚠ CODE BUILDS THE MAP AND
+COUNTS EVERY NUMBER; the model picks and words, with NO digit anywhere in its text.
 
-- **Where**: `src/review/sprint-story/` — `prompt.ts`, `validate.ts`, `manager.ts`; the input and store
-  are core `db/sprint-story.ts`, the to-do is `db/sprint-graph.ts` `sprintStoryTodo` (folds exactly as
-  `getSprintGraph` does, WITHOUT stamping the view or kicking a read) / `sprintStoryInputOf` (the ONE
-  builder both share). Table `sprint_story` (sqlite `0109` / pg `0096`), ONE row per (account, workspace).
-  The SPA half is `components/Activity/SprintStoryStrip.tsx` (+ `sprintStoryModel.ts`), MOUNTED above the
-  view controls in `SprintView`; a click frames the storyline's tickets on the graph, a second click goes
-  back to Fit.
-- **WHEN**: after the theme pass, from the same after-read seam (`review/sprint-briefs/index.ts`; local
-  only, `config.aiEnabled`, a credential) — never on a view. It CALLS THE MODEL ONLY WHEN THE INPUT HASH
-  CHANGED: the hash covers exactly what is sent + `SPRINT_STORY_VERSION` (4). ⚠ ONE `now`-derived thing
-  reaches it ON PURPOSE: the SPRINT DAY — whole days counted from the sprint's own start instant, so it
-  changes exactly once per 24 h (at most ONE re-run per workspace per day, and only when a sprint read
-  kicks the pass). Leaving it out would let a stored headline say "day 3 of 14" on day 12 and never
-  raise the late risk, because the page shows the LAST story whatever its hash. Nothing finer than the
-  day index may enter. Fewer than `SPRINT_STORY_CAPS.minTickets` (4) sprint tickets → no story (a sprint
-  with no candidate still gets a headline + focus).
-- **THE INPUT (graph data only)**: the sprint-wide facts (ticket count by stage, open / merged PRs,
-  tickets with failing checks), the **AREAS OF WORK** block the focus is written from (one line per THEME —
-  or per EPIC with ≥ 2 tickets when no current theme pass covers the sprint — with its stage counts and ≤ 6
-  ticket lines; with neither, the sprint's tickets), then numbered CANDIDATES, each with its kind, its
-  idents and its fact lines: the ≤ 3 longest `depends_on` CHAINS touching an unfinished sprint ticket
-  (delivery order, each link with the edge's `why` else its quote), and RISKS — tickets waiting on
-  unfinished work INSIDE the sprint, failing checks on open PRs, work not started (≥ 2 and ≥ 20% of the
-  sprint), unfinished unassigned work (≥ 2). ⚠ (v4) A CHAIN NEVER WALKS AN EDGE ONTO A DONE TICKET: a
-  prerequisite that is done is no dependency any more ("BMD-1028 depends on BMD-994, which is done
-  outside the sprint" was offered — and worded — as a risk on workspace 1). ⚠ (v4) The theme candidates
-  are GONE (the "Area of work" cards became the focus sentence), and a wait on a ticket OUTSIDE the sprint
-  is the code card "Blocked outside the sprint", never a model risk — one fact, one card. ⚠ NO PERSON IS NAMED: assignees enter only as unassigned
-  counts.
-- **TIME FACTS — ONLY FROM A REAL SPRINT WINDOW** (`sprintTimingFor` in `db/sprint-graph.ts`, pure
-  `sprintTimingOf` / `isLateInSprint` in `db/sprint-story.ts`): the workspace's STORED cadence + phase
-  anchor, resolved through the ONE `getReportingWindow` (the plugin's `resolveComparisonWindow`). Only
-  `mode === 'sprint'` is a sprint; the trailing-14-day fallback (OSS, no cadence, or a ROLLING comparison
-  mode — the default, so a cadence alone is not enough: the workspace's Reports window must be set to
-  "This sprint") gets NO day facts and NO late risk, and neither does a tracker STATUS FALLBACK list (not
-  the sprint's tickets). With a sprint: a facts line "Sprint day: 10 of 14; days left after today: 4"
-  (calendar days, day 1 = the start day), and the "work not started" risk becomes **"work not started
-  late in the sprint"** when ≥ `SPRINT_STORY_LATE.minNotStarted` (2) tickets are not started and ≤
-  `SPRINT_STORY_LATE.maxLeftPct` (40) % of the days are left — the same tickets, with the days beside
-  them (it REPLACES the plain risk, never a second candidate over the same tickets). The headline and
-  storylines may use those numbers (they are code's).
-- **VALIDATION** (`validateSprintStory`): JSON; headline ≤ 200 chars; a FOCUS sentence is REQUIRED
-  (missing / empty → `shape`, > `focusChars` 240 → `too_long`; the prompt asks ≤ 30 words) and its numbers
-  may come only from the sprint-wide facts and the AREAS OF WORK block; 0–4 storylines, each a candidate id
-  at most once, at least one chain / one risk when such a candidate exists (`coverage`); title ≤ 6 words / 56 chars, sentence ≤ 280 chars (the prompt asks for
-  25 / 5 / 30 WORDS, so a small overshoot still stands — refused, never cut). KIND and IDENTS are copied from the candidate. ⚠ THE NUMBER GATE (the D4 rule): any non-ASCII
-  numeral (`\p{Nd}\p{No}\p{Nl}`) → refused; a ticket-key-shaped token that is not a key handed in →
-  refused; any number not in the facts → refused (a storyline may use the sprint-wide facts and ITS OWN
-  candidate's; the headline any). ⚠ The ALLOWED numbers are CODE'S COUNTS only: tracker-authored names
-  (`SprintStoryInput.verbatim` — sprint name, theme / epic names, ticket titles) and the quoted brief
-  reasons are removed before the facts are read for numbers, so "Handle 500 errors" never lets "500
-  tickets are blocked" through and a model-written `why` never launders a figure; the same names are
-  removed from the model's text first, so quoting a title whole ("UTF-8 uploads", "Sprint 15") passes.
-  ⚠ DIGITS ONLY: a spelled-out count of two or more (`two`…`twenty`, `thirty`…`ninety`, `hundred`,
-  `thousand`, `dozen`; whole words, any case — "twenty-one" matches) → `number_word`, so every count
-  reaches the number gate. "one" / "a single" stay allowed (ordinary English); a tracker name quoted whole
-  ("Two-factor login") is removed first. The prompt asks for digits. ⚠ THE SPRINT NAME'S SHORT FORMS are
-  quotable too (`sprintNameForms`): "Sprint 15 (Oct 14-27)" also yields "Sprint 15" and "Oct 14-27". Before
-  v3 a headline saying "Sprint 15" failed `number` on EVERY pass for a sprint named with a bracket — the
-  real cause of workspace 1's strip sitting on "Writing the sprint story…" (2026-10-14; ws 5 / 12 got lucky
-  draws). ONE retry, both billed, and the retry is TOLD WHY the first was refused (`sprintStoryRetryNote`,
-  appended after the fence); a failed pass stores no story.
-- **THE ATTEMPT + THE BACKOFF** (v3, sqlite `0111` / pg `0098`): every pass that called Claude records
-  `sprint_reads.story_attempt_at / _hash / _error` (the `SprintStoryFailure` code, or null = stored; a
-  thrown call is `error`). ⚠ A failure for TODAY's input hash is never run again (`storyBackedOff` →
-  state `backoff`, no call) until the hash moves — new facts, or the next sprint day. It used to re-bill
-  two refused calls on every read for ever, record nothing, and leave the page on "Writing…".
-- **TIMING** (v3): the day facts and the late risk come FIRST from the tracker's own sprint dates
-  (`sprint_reads.sprint_starts_at / _ends_at`, stored by the sprint read — docs/TRACKERS.md), then from the
-  cadence (`getReportingWindow` mode 'sprint'). Both ends needed; ONE day count, shared `sprintDayOf`
-  (whole days from the start instant, a part day counts: Jira's 14 Oct 10:15 → 27 Oct 17:00 is 14 days).
-  A GitHub milestone (end only) gives no day facts.
-- **OLD STORIES** (v3 and before): still SHOWN (a stale story beats a blank strip), but their `theme`
-  storylines are DROPPED on read (`sprintStoryOf` keeps chain / risk only) and they carry `focus: null`, so
-  no focus line shows until the next pass rewrites the story. A v4 story with no storyline still shows its
-  headline + focus.
+- **Where**: `src/review/sprint-paths/` — `prompt.ts`, `validate.ts`, `agent.ts` (the SDK half),
+  `manager.ts`; the input, store, pace and people are core `db/sprint-paths.ts`; the to-do is
+  `db/sprint-graph.ts` `sprintPathsTodo` (folds exactly as `getSprintGraph` does, WITHOUT stamping the view or
+  kicking a read) / `sprintPathsInputOf` (the ONE builder both share). Table `sprint_paths` (sqlite `0120` /
+  pg `0107`), ONE row per (account, workspace). The SPA half (until the boards land) is
+  `components/Activity/SprintPathsStrip.tsx` (+ `sprintPathsModel.ts`), above the view controls.
+- **WHEN — THE AFTER-READ CHAIN** (`review/sprint-briefs/index.ts` `runSprintAfterRead`; local only,
+  registered by `registerAgenticRoutes`, never on a view): briefs (Haiku — every sprint ticket and ghost gets
+  a summary) → themes (Haiku) → paths. A brief pass that did not finish starts nothing after it. The page
+  reads `queued` while the chain holds the workspace (`markSprintPathsQueued`, released on every path).
+- **THE INPUT** (`sprintPathsInput`, inside a per-run NONCE fence): the sprint name; the COLUMNS left to
+  right (`statusLayout.columns`, the derived "Merged, not signed off" one marked); counts (tickets, complete,
+  merged-not-signed-off, not complete, open dependencies, chains); every SPRINT ticket as one line — key,
+  short title, theme, column name + its meaning, assigned / unassigned (⚠ NO PERSON IS NAMED), PR states
+  (open / draft / failing checks / merged), the CURRENT brief's summary; the OUTSIDE tickets a sprint ticket
+  `depends_on` or `builds_on` (key, title, status, complete or not); those LINKS with the brief's `why` (else
+  the quote); the dependency CHAINS code found (`sprintChains`, delivery order, cut at the first unlisted
+  ghost and marked "(more work outside the sprint)", ≤ 8 listed). Plus ONE day line ("Sprint day: 4 of 14;
+  days left after today: 10", from `sprintTimingFor`).
+- **THE HASH**: sha256 over `[SPRINT_PATHS_VERSION, everything sent EXCEPT the day line]`. ⚠ The day line is
+  now-derived and stays OUT (CLAUDE.md: a dormant sprint must not re-bill every day); the stored text carries
+  no digit, so an older day never shows through. PR states and CI ARE in it, so a merge moves it — the next
+  sprint read re-runs, bounded by the daily cap. Current only while `input_hash` matches AND `paths_version`
+  is `SPRINT_PATHS_VERSION` (1).
+- **THE RUN** (`agent.ts`): ONE in-process tool, `submit_paths` on the `paths` MCP server; `tools: []`, Bash
+  and every file / web tool on the deny list, the PreToolUse PATH GUARD over a throwaway cwd plus the
+  `ownToolsOnlyHook` backstop and `ISOLATED_MCP`, `settingSources: []`. Agentic only so a refused answer can be
+  fixed in the same run — it reads nothing from disk. Effort: `sdkModelOptions(model, 'diff_only')`.
+- **VALIDATION** (`validateSprintPaths`, inside the tool — a refusal lists EVERY problem and what to do, ≤
+  `SPRINT_PATHS_CAPS.maxSubmits` 3 calls — and AGAIN before storing): ≤ 5 paths, ≤ 3 call-outs (empty lists
+  are valid); every ticket a key the INPUT listed (sprint or outside ticket, case-blind, stored as the input
+  spells it; an unlisted ghost of a ghost is refused), none twice in one list, no empty list, ≤ 12 per path /
+  20 per call-out; titles 1–40 chars, advice 1–200; risk `high` | `medium` | `low`. ⚠ THE DIGIT GATE: titles
+  and advice must match `/^[^\p{Nd}\p{No}\p{Nl}]*$/u` — no number, no ticket key, no date, no other Unicode
+  numeral; spelled-out counts are a prompt-only rule. PLAIN TEXT: no Markdown / HTML characters, no links.
+  Paths are re-ordered high → medium → low, the model's order kept within a level.
+- **STORE + READ**: `paths_json` holds KEYS only; `getSprintGraph` resolves idents on read against today's
+  nodes (else `identOfKey`), dropping a key that no longer resolves. The page shows the LAST paths written
+  (any version, marked `stale`) — the hash is the RE-BILL gate, never the display gate.
+- **THE ATTEMPT, THE BACKOFF, THE DAILY CAP**: every run records `attempt_at / _hash / _error` on its own
+  row (`SprintPathsFailure`: `refused` · `no_submit` · `stopped` (turns / budget) · `error`; null = stored). A
+  failure for TODAY's hash is never run again until the hash moves — never a retry loop. At most
+  `SPRINT_PATHS_DAILY_CAP` (default 12) runs per workspace per UTC day (`runs_day` + `runs_today`, counted
+  BEFORE Claude is called); over it the pass answers `capped` and the status reads `failed` / `daily_cap`.
+- **STATUS** (`sprintPathsStatusOf`, the ONE fold → `pathsStatus`): `current` · `writing`
+  (`claimSprintPathsPass`, claimed SYNCHRONOUSLY) · `queued` · `failed` (backoff or cap) · `waiting` · `none`
+  (AI off, no credential — `pathsCanRun` from the route — or fewer than 4 sprint tickets).
+- **COST**: `SPRINT_PATHS_BUDGET_USD` (default $1) and `SPRINT_PATHS_MAX_TURNS` (8) per run, env only; spend
+  recorded under feature `sprint_paths`, seam `agent`.
+- **THE PACE** (`SprintGraphResponse.pace`, `sprintPaceOf`; free, code only, AI off too): `daysElapsed` /
+  `daysTotal` / `timeUsedPct` from the real sprint window (null without one), and over SPRINT tickets:
+  `tickets`, `live` (not in a Complete bucket), `done`, `mergedNotSignedOff` (the derived column),
+  `codeMerged` (≥ 1 merged PR, none open, any column), `openDependencies` (`depends_on` edges from a live
+  sprint ticket onto anything not Complete), `chains`.
+- **THE PEOPLE** (`SprintGraphResponse.people`, `sprintPeopleOf`): one entry per distinct sprint ASSIGNEE
+  through the ONE assignee → GitHub mapping, shared `sprintMembers` (`sprint-members.ts` — the Members
+  filter's: an exact name match after case, accents and `. _ -`, or the name run together; a login matching
+  two assignees joins neither). `reviewsWaiting` = open PRs in this workspace's repos with an outstanding
+  `review_requests` row for any mapped login (`reviewsWaitingByLogin` — the People report's "reviews waiting"
+  population). ⚠ No mapped login → `null`, never 0. GitHub-only members are not assignees and are left out.
 - **THE CODE CARDS** (`SprintGraphResponse.signals`, `db/sprint-signals.ts`; shared `SprintSignal`,
   `SPRINT_SIGNAL_LABEL`): FREE on every tier, NO model, templated sentences in digits over counts taken from
   the SAME folded graph, computed on every GET from the DB only (never a tracker or GitHub call), shown with
-  AI off too. Each carries its idents (click = frame + highlight, exactly like a storyline). Strip order
-  (`stripCards`): **Since you last looked**, **Pace**, Claude's storylines, **Out of step**, **Blocked outside
-  the sprint**; each omitted when it has nothing to say.
+  AI off too. Each carries its idents (click = frame + highlight, exactly like a critical path). Strip order
+  (`stripCards`): **Since you last looked**, **Pace**, Claude's critical paths and call-outs, **Out of step**,
+  **Blocked outside the sprint**; each omitted when it has nothing to say.
   - *Out of step* (`outOfStepSignal`): sprint tickets whose stage disagrees with their PRs — In review with
     open PR (said apart: "with their code already merged" vs "with no pull request" — on workspace 1, 11 of
     the 14 had merged code: that team moves a ticket to In review AFTER the merge, so one count read as 14
@@ -2213,7 +2199,7 @@ BUILDS THE STORY'S SKELETON; the model only picks and words.
     a pull request still open."
   - *Pace* (`paceSignal`): "Day 9 of 14" + "64% of the sprint's time has gone and 35% of its tickets are
     complete (27 of 77)." — time share = day / days of shared `sprintDayOf` (today counts), from the SAME
-    real sprint window as the story's day facts (`sprintTimingFor`); none → no card. NEUTRAL: no "behind" /
+    real sprint window as the pace (`sprintTimingFor`); none → no card. NEUTRAL: no "behind" /
     "on track" verdict, so no threshold exists. idents = the unfinished sprint tickets.
   - *Blocked outside the sprint* (`blockedOutsideSignal`): unfinished sprint tickets with a `depends_on`
     edge (tracker blocking link or a current brief's reading) onto a GHOST that is not Complete (status
@@ -2229,26 +2215,13 @@ BUILDS THE STORY'S SKELETON; the model only picks and words.
     no ticket with today's sprint (a new sprint). ⚠ The snapshot is recorded only once a sprint read has
     produced sprint tickets — an empty list must never become a baseline that makes every ticket "added".
     A store failure only loses this card (never throws).
-- **COST**: one `cheapComplete` per changed graph, feature `sprint_story`. Every status move, PR merge or
-  check turning red changes the hash, so an active sprint is re-storied at most once per sprint read
-  (≤ every 20 min while viewed).
-- **READ**: `getSprintGraph` returns the LAST story written — ANY `SPRINT_STORY_VERSION`, even when its
-  input hash has moved — the hash covers GitHub-synced facts (PR counts, failing checks) that change
-  between sprint reads, so "current only" blanked the strip on every merge, and a version bump blanked it
-  until a new pass stored (for ever, when every pass was refused). The hash is the RE-BILL gate, never
-  the display gate. `storyStatus` (`sprintStoryStatusOf`, the ONE fold) says where the pass stands for
-  today's input: `current` · `writing` (the pass holds its in-process slot, `claimSprintStoryPass`) ·
-  `queued` (the after-read chain — summaries, themes, story — holds the workspace) · `failed` (the
-  backoff holds today's input; `failure` names the code) · `waiting` (the next read starts one) · `none`
-  (AI off, no Claude credential — `storyCanRun`, from the route — or not eligible); `stale` marks a shown
-  story that is not current, `lastAttemptAt` the last pass that called Claude.
 
 ## Ask about this sprint (Activity → This Sprint)
 
 `POST /api/sprint-graph/ask` — one Haiku 5.5 answer per turn (`review/sprint-ask/`), LOCAL ONLY
 (`registerAgenticRoutes`); free — no Pro gate, the SPA gates it on `me.ai`. Grounded ONLY in the stored graph
 (`getSprintGraph`: tickets with stage, status, assignee, epic, brief summary, criteria count and PRs; the
-links), the whole map inside ONE nonce fence and the prior turns inside another — a previous answer is
+links; the sprint builder's stored critical paths and call-outs), the whole map inside ONE nonce fence and the prior turns inside another — a previous answer is
 model text over the same data. ⚠ The turn cap is SERVER-side (`capAskHistory`: the newest
 `SPRINT_ASK_MAX_TURNS` − 1 pairs, each re-capped; `trimmedTurns` counts the rest). Short Markdown naming
 ticket keys; no ranking of people. Spend: feature `sprint_ask`. Tier `ai` + `ai_hourly`.
