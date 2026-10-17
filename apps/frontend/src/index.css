@@ -1748,60 +1748,28 @@ body {
   border-color: #111827;
 }
 
-/* ---- Activity → This Sprint: the SPRINT GRAPH canvas (Activity/SprintGraph.tsx) ----
-   ALWAYS deep navy, in both themes: a radial gradient whose centre (#0f1b3d) is the lightest ground a
-   label sits on — the label colours are measured against it (sprintGraphModel.ts `SPRINT_CANVAS`,
-   test/textContrast.test.ts). */
-.sprint-canvas {
-  background: radial-gradient(ellipse at 50% 45%, #0f1b3d 0%, #0a1330 45%, #050a1a 100%);
-}
-.sprint-canvas .sg-focus {
-  opacity: 0;
-}
-/* The drifting star layers (SprintGraph.tsx STAR_LAYERS): transform-only, so they run on the
-   compositor at no CPU cost; the graph's own physics still stops after 5 s. */
-.sprint-canvas .sg-stars {
-  width: 200%;
-  will-change: transform;
-  animation: sg-star-drift linear infinite;
-}
-.sprint-canvas .sg-stars-0 {
-  animation-duration: 600s;
-}
-.sprint-canvas .sg-stars-1 {
-  animation-duration: 300s;
-}
-@keyframes sg-star-drift {
-  from {
-    transform: translate3d(0, 0, 0);
-  }
-  to {
-    transform: translate3d(-50%, 0, 0);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .sprint-canvas .sg-stars {
-    animation: none;
-  }
-}
-.sprint-canvas .sg-node:focus-visible .sg-focus {
-  opacity: 1;
-}
-/* The refresh bar across the canvas's top edge (SprintProgressBar.tsx; also the critical-paths strip's
-   "Writing" bar): a sky segment sliding
-   across while the graph refreshes; a filled share while tickets are summarised. Non-text marks on the
-   navy ground (both well over 3:1). Reduced motion: a still, partly-filled bar. */
+/* ---- Activity → This Sprint: the page's progress bar (Activity/SprintProgressBar.tsx) ----
+   Under the toolbar (a sprint read, refreshing, ticket summaries, the sprint builder) and beside the
+   Critical path view's "Working out the critical paths": a sky segment sliding across while the page
+   waits; a filled share while tickets are summarised. Non-text marks, over 3:1 on the page in both
+   themes. Reduced motion: a still, partly-filled bar. */
 .sg-progress {
-  background: rgba(148, 163, 184, 0.18);
+  background: rgba(148, 163, 184, 0.25);
 }
 .sg-progress-share {
-  background: #38bdf8;
+  background: #0284c7;
   transition: width 400ms ease-out;
 }
 .sg-progress-busy {
   width: 35%;
-  background: linear-gradient(90deg, rgba(56, 189, 248, 0), #38bdf8 40%, #7dd3fc 60%, rgba(56, 189, 248, 0));
+  background: linear-gradient(90deg, rgba(2, 132, 199, 0), #0284c7 40%, #0369a1 60%, rgba(2, 132, 199, 0));
   animation: sg-progress-slide 1.2s ease-in-out infinite;
+}
+.dark .sg-progress-share {
+  background: #38bdf8;
+}
+.dark .sg-progress-busy {
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0), #38bdf8 40%, #7dd3fc 60%, rgba(56, 189, 248, 0));
 }
 @keyframes sg-progress-slide {
   from {
@@ -1812,82 +1780,13 @@ body {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sg-progress-busy {
+  .sg-progress-busy,
+  .dark .sg-progress-busy {
     width: 100%;
     animation: none;
-    background: rgba(56, 189, 248, 0.6);
+    background: rgba(2, 132, 199, 0.6);
   }
   .sg-progress-share {
     transition: none;
   }
-}
-.sprint-canvas .sg-label {
-  /* To the side of the (possibly enlarged) disc that label placement picked (`--sx`/`--sy` in radii,
-     below by default), then at a fixed screen size, then the block's own offset in screen px
-     (`--lx`/`--ly`; sprintGraphModel.ts `labelOffset`). */
-  transform: translate(
-      calc(var(--sx, 0) * var(--r, 0) * var(--sg-disc, 1) * 1px),
-      calc(var(--sy, 1) * var(--r, 0) * var(--sg-disc, 1) * 1px)
-    )
-    scale(var(--sg-inv, 1)) translate(calc(var(--lx, 0) * 1px), calc(var(--ly, 3) * 1px));
-}
-/* No free spot on screen: hidden until hover, focus or zoom gives it room (`placeLabels`). */
-.sprint-canvas .sg-label[data-side='none'],
-.sprint-canvas svg[data-zoom='far'] .sg-title,
-.sprint-canvas svg[data-zoom='far'] .sg-badge {
-  display: none;
-}
-/* A halo name with no room inside its halo at this zoom, or crowded by a neighbour: hidden (`placeHaloNames`). */
-.sprint-canvas .sg-group-name[data-place='none'] {
-  display: none;
-}
-/* One finger scrolls the PAGE over the canvas; a ticket takes its own touch (a drag), and the canvas
-   handles the two-finger pinch (SprintGraph.tsx). */
-.sprint-canvas .sg-surface {
-  touch-action: pan-x pan-y;
-}
-.sprint-canvas .sg-node {
-  touch-action: none;
-}
-.sprint-canvas .sg-body {
-  transform: scale(var(--sg-disc, 1));
-}
-/* The assignee badge: counter-scaled when zoomed out so it never drops below a readable size on screen
-   (sprintGraphModel.ts `badgeScale`); it grows outward from the disc's rim. */
-.sprint-canvas .sg-badge {
-  transform: scale(var(--sg-badge, 1));
-}
-/* A PR dot (SprintGraph.tsx `.sg-sat`): on its orbit (`--o`, along `--ox`/`--oy`), counter-scaled when
-   zoomed out (`--sg-sat`, sprintGraphModel.ts `satelliteScale`) and moved out by what it grew, so it
-   stays clear of the status ring. */
-.sprint-canvas .sg-sat {
-  transform: translate(
-      calc(var(--ox, 0) * (var(--o, 0) + var(--sr, 0) * (var(--sg-sat, 1) - 1)) * 1px),
-      calc(var(--oy, 0) * (var(--o, 0) + var(--sr, 0) * (var(--sg-sat, 1) - 1)) * 1px)
-    )
-    scale(var(--sg-sat, 1));
-}
-/* A strip card's ticket (SprintPathsStrip → the graph): its pink corona breathes three times, then is
-   still; under reduced motion it never moves. */
-.sprint-canvas .sg-highlight-glow {
-  opacity: 0.45;
-  animation: sg-highlight-pulse 1.4s ease-in-out 3;
-}
-@keyframes sg-highlight-pulse {
-  0%,
-  100% {
-    opacity: 0.45;
-  }
-  50% {
-    opacity: 0.85;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .sprint-canvas .sg-highlight-glow {
-    animation: none;
-  }
-}
-/* A group halo's label: at a fixed screen size at any zoom, like the ticket labels. */
-.sprint-canvas .sg-group-label {
-  transform: scale(var(--sg-inv, 1));
 }

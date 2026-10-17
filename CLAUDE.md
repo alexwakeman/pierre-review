@@ -1224,8 +1224,9 @@ last 13 weeks' stories (`db/story-health.ts`); This Sprint makes BRIEFS, not lab
 § Story labels.
 
 **Activity → This Sprint** (FREE — its own rail line under Pending, `?activityRepo=sprint`; legacy
-`?insightsTab=sprint|merged` lands there): the GRAPH and "Merged so far" (`?sprintTab=merged`).
-`GET /api/sprint-graph` (DB only): nodes = sprint tickets + GHOSTS
+`?insightsTab=sprint|merged` and `?sprintTab=graph` land there): THREE independent views — Critical path
+(default) · Theme · People (`?sprintTab=themes|people`) — then "Merged so far" (`?sprintTab=merged`).
+`GET /api/sprint-graph` (DB only; the name stayed): nodes = sprint tickets + GHOSTS
 (≤ 3 hops / 60), + PRs, each placed in the workspace's STATUS BUCKETS (`db/sprint-status-layout.ts`;
 user-defined name + meaning, meanings non-decreasing; `stage` = the bucket's meaning) and given ONE
 `column` in the fold — its bucket, or the derived "Merged, not signed off" (all PRs merged, none open);
@@ -1238,15 +1239,20 @@ text hash + `SPRINT_BRIEF_VERSION`. After briefs → themes, the SPRINT BUILDER 
 code-built map: only listed keys, ⚠ NO digit in its text, hash blind to the day, backoff +
 `SPRINT_PATHS_DAILY_CAP`; the LAST answer is shown (the hash is the re-bill gate). The response also
 carries CODE's `pace` and `people` (shared `sprintMembers`; `reviewsWaiting` null when unmapped, never 0).
-The Haiku story pass is retired (`sprint_story` dormant). Filters HIDE (ghosts follow the section filter only); Group by
-adds Dependencies (chains, left to right). "Ask Claude" (Haiku) is LOCAL, on `me.ai`. ⚠ No chips,
-findings, checks or write-back. ⚠ **A ticket opens the STORY VIEW** — the ticket tab (chip "KEY · Story",
-internal kind/key `ticket:<ident>` kept), ONLY through `useOpenStory()`: the SAME Open PRs ticket stack
-(`OpenPrsCards` `story`, never a copy), drawn even with no PR, its Story section OPEN. The Story section
-(`TicketStorySection`, collapsed in Open PRs, body mounted only when open) is: the ticket review's result,
-else the CURRENT brief (`GET /api/ticket-story`, lean, DB only), then the ticket as written, then the
-design (`me.ai` + ≥ 1 PR) — NO dependency or reference cards. The drawer and "Check against code" are
-REMOVED (`sprint_assessments` / `sprint_ticket_repos` DORMANT, never dropped).
+⚠ **ONE LANE BOARD draws all three views** (`components/LaneBoard.tsx`, pure `lib/laneBoard.ts`):
+columns = `statusLayout.columns` verbatim (Complete buckets COLLAPSED to counts by default; "Outside the
+sprint" at the left on Critical path only), lanes = a path / a theme ("Other" last) / a person
+(ALPHABETICAL, Unassigned last — never by load), ONE `TicketCard` (tags as WORDS; 2px solid accent = on
+a path, dashed = waiting), `depends_on` arrows routed by the design grid's `routeArrow`, numbered and
+keyed. Its arrow pieces are SHARED with `DesignGrid`. The force graph, its strip and every group-by /
+filter control are DELETED — never bring a canvas back. "Ask Claude" (Haiku) is LOCAL, on `me.ai`.
+⚠ No chips, findings, checks or write-back. ⚠ **A ticket opens the STORY VIEW** — the ticket tab (chip
+"KEY · Story", internal kind/key `ticket:<ident>` kept), ONLY through `useOpenStory()`: the SAME Open PRs
+ticket stack (`OpenPrsCards` `story`, never a copy), drawn even with no PR, its Story section OPEN. The
+Story section (`TicketStorySection`, collapsed in Open PRs, body mounted only when open) is: the ticket
+review's result, else the CURRENT brief (`GET /api/ticket-story`, lean, DB only), then the ticket as
+written, then the design (`me.ai` + ≥ 1 PR) — NO dependency or reference cards. The drawer and "Check
+against code" are REMOVED (`sprint_assessments` / `sprint_ticket_repos` DORMANT, never dropped).
 [docs/FRONTEND.md](docs/FRONTEND.md) § Activity → This Sprint, § The story view · [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint briefs / paths.
 
 **The People report** (Reports → People) — a multi-select picker of humans AND bots, one report

@@ -527,10 +527,10 @@ const MERGED_PRS: MergedPrsResponse = {
   truncated: false,
 };
 
-// This Sprint (its own rail line) → the sprint graph (GET /api/sprint-graph). Typed so `pnpm typecheck` covers the shape, and
+// This Sprint (its own rail line) → the three lane boards (GET /api/sprint-graph). Typed so `pnpm typecheck` covers the shape, and
 // served explicitly — the catch-all `{}` has no `nodes`/`read`, and the tab would blank. Two sprint
-// tickets and one ghost: ACME-2 depends on ACME-9 (a tracker link) and is built alongside ACME-1 (its
-// brief); ACME-2 carries an open PR.
+// tickets and one outside the sprint: ACME-2 depends on ACME-9 (a tracker link, on the stored critical
+// path) and is built alongside ACME-1 (its brief); ACME-2 carries an open PR with failing CI.
 const SPRINT_GRAPH: SprintGraphResponse = {
   workspaceId: WORKSPACE.id,
   trackerOn: true,
@@ -539,10 +539,24 @@ const SPRINT_GRAPH: SprintGraphResponse = {
   read: { readAt: iso(0.01), checkedAt: iso(0.01), error: null, truncated: false },
   aiEnabled: true,
   themes: null,
-  paths: null,
-  pathsStatus: { state: 'none', stale: false, lastAttemptAt: null, failure: null },
-  pace: { daysElapsed: null, daysTotal: null, timeUsedPct: null, tickets: 0, live: 0, done: 0, mergedNotSignedOff: 0, codeMerged: 0, openDependencies: 0, chains: 0 },
-  people: [],
+  // One stored critical path, through the ticket outside the sprint (the Critical path view's
+  // "Outside the sprint" column).
+  paths: {
+    paths: [
+      {
+        title: 'Magic link waits on email',
+        tickets: ['ACME-9', 'ACME-2'],
+        idents: ['jira:https://acme.atlassian.net#ACME-9', 'jira:https://acme.atlassian.net#ACME-2'],
+        advice: 'Finish the email service before the sign-in work.',
+        risk: 'high',
+      },
+    ],
+    callouts: [{ title: 'Nobody owns this', tickets: ['ACME-2'], idents: ['jira:https://acme.atlassian.net#ACME-2'] }],
+    createdAt: iso(0.02),
+  },
+  pathsStatus: { state: 'current', stale: false, lastAttemptAt: iso(0.02), failure: null },
+  pace: { daysElapsed: 4, daysTotal: 14, timeUsedPct: 29, tickets: 2, live: 2, done: 0, mergedNotSignedOff: 0, codeMerged: 0, openDependencies: 1, chains: 1 },
+  people: [{ name: 'Amy', names: ['Amy'], reviewsWaiting: null }],
   sprintDates: { startsAt: iso(3), endsAt: iso(-11), source: 'tracker' },
   signals: [],
   ghostsTruncated: false,

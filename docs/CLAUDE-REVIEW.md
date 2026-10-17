@@ -1997,7 +1997,7 @@ STORY VIEW (docs/FRONTEND.md § The story view), whose Story section shows the t
 the sprint brief. Its tables `sprint_assessments` + `sprint_ticket_repos` are DORMANT (docs/DATA-MODEL.md;
 no drop migration). Old `sprint_assess` rows in `ai_usage` stay as history.
 
-## Sprint briefs (Activity → This Sprint, the graph)
+## Sprint briefs (Activity → This Sprint)
 
 A cheap Haiku 5.5 pass that turns every node of the sprint graph — each sprint ticket and each GHOST
 (an outside ticket reached through an edge) — into a BRIEF: `{summary, criteria: [{n, text}],
@@ -2048,10 +2048,11 @@ criteriaDerived, references}`. The graph's text edges and its ghost chains come 
 - **EDGES** (`db/sprint-graph-fold.ts`): a reference `depends_on` / `concurrent` / `builds_on` /
   `supersedes` draws an edge from the ticket to the named one; `out_of_scope` / `context` draw none. A blocking tracker link draws `depends_on` with `source: 'tracker'`.
 
-## Sprint themes (Activity → This Sprint, "Group by → Theme")
+## Sprint themes (Activity → This Sprint → Theme)
 
 ONE sprint-wide Haiku 5.5 call that names 3–8 short shared THEMES for the sprint and puts every sprint
-ticket in exactly one, so the graph can cluster by area of work rather than by epic.
+ticket in exactly one, so the Theme view can lay the sprint out by area of work rather than by epic (one
+lane per theme, "Other" last; the Critical path view's count table rows too).
 
 - **Where**: `src/review/sprint-themes/` — `prompt.ts`, `validate.ts`, `manager.ts`; the input and store
   are core `db/sprint-themes.ts`, the to-do is `db/sprint-graph.ts` `sprintThemeTodo` /
@@ -2092,8 +2093,10 @@ COUNTS EVERY NUMBER; the model picks and words, with NO digit anywhere in its te
   `manager.ts`; the input, store, pace and people are core `db/sprint-paths.ts`; the to-do is
   `db/sprint-graph.ts` `sprintPathsTodo` (folds exactly as `getSprintGraph` does, WITHOUT stamping the view or
   kicking a read) / `sprintPathsInputOf` (the ONE builder both share). Table `sprint_paths` (sqlite `0120` /
-  pg `0107`), ONE row per (account, workspace). The SPA half (until the boards land) is
-  `components/Activity/SprintPathsStrip.tsx` (+ `sprintPathsModel.ts`), above the view controls.
+  pg `0107`), ONE row per (account, workspace). The SPA half is This Sprint's **Critical path** view
+  (`components/Activity/SprintBoards.tsx` `SprintPathsView`, state fold `sprintPathsModel.ts`; one lane per
+  path on the lane board — docs/FRONTEND.md § Activity → This Sprint); the stored paths also mark the
+  critical cards and arrows on the Theme and People views.
 - **WHEN — THE AFTER-READ CHAIN** (`review/sprint-briefs/index.ts` `runSprintAfterRead`; local only,
   registered by `registerAgenticRoutes`, never on a view): briefs (Haiku — every sprint ticket and ghost gets
   a summary) → themes (Haiku) → paths. A brief pass that did not finish starts nothing after it. The page
@@ -2151,9 +2154,10 @@ COUNTS EVERY NUMBER; the model picks and words, with NO digit anywhere in its te
 - **THE CODE CARDS** (`SprintGraphResponse.signals`, `db/sprint-signals.ts`; shared `SprintSignal`,
   `SPRINT_SIGNAL_LABEL`): FREE on every tier, NO model, templated sentences in digits over counts taken from
   the SAME folded graph, computed on every GET from the DB only (never a tracker or GitHub call), shown with
-  AI off too. Each carries its idents (click = frame + highlight, exactly like a critical path). Strip order
-  (`stripCards`): **Since you last looked**, **Pace**, Claude's critical paths and call-outs, **Out of step**,
-  **Blocked outside the sprint**; each omitted when it has nothing to say.
+  AI off too. Each carries its idents, drawn as ticket-key buttons that open the story view. On the Critical
+  path view they follow Claude's call-outs, in order **Since you last looked**, **Out of step**, **Blocked
+  outside the sprint**; **Pace** is not repeated there (the pace strip draws `SprintGraphResponse.pace`).
+  Each is omitted when it has nothing to say.
   - *Out of step* (`outOfStepSignal`): sprint tickets whose stage disagrees with their PRs — In review with
     open PR (said apart: "with their code already merged" vs "with no pull request" — on workspace 1, 11 of
     the 14 had merged code: that team moves a ticket to In review AFTER the merge, so one count read as 14

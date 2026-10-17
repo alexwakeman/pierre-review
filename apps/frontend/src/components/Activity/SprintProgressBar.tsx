@@ -1,7 +1,8 @@
-import type { SprintProgress } from './sprintGraphModel.js';
+import type { SprintProgress } from './sprintPathsModel.js';
 
-// THIS SPRINT'S THIN PROGRESS BAR (styles: index.css `.sg-progress*`) — ONE component for the canvas's
-// top edge (SprintGraph.tsx: refresh, ticket summaries, the story) and the story strip's "Writing" line.
+// THIS SPRINT'S THIN PROGRESS BAR (styles: index.css `.sg-progress*`) — under the page's toolbar
+// (SprintView.tsx: a sprint read, refreshing, ticket summaries, the sprint builder) and beside the
+// Critical path view's "Working out the critical paths" line.
 // Indeterminate (a sliding segment) for 'busy', a filled share for 'share'. Never blocks what it sits on;
 // the caller positions and sizes it through `className`.
 

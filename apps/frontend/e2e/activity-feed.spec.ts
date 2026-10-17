@@ -115,13 +115,17 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(railButton(page, 'This Sprint')).toBeVisible();
   });
 
-  test('This Sprint opens on the sprint graph, with Merged so far beside it', async ({ page }) => {
+  test('This Sprint opens on Critical path, with Theme, People and Merged so far beside it', async ({ page }) => {
     await gotoActivity(page);
     await railButton(page, 'This Sprint').click();
     const view = page.getByTestId('sprint-rail-view');
     await expect(view).toBeVisible();
     await expect(page).toHaveURL(/activityRepo=sprint/);
-    await expect(view.getByRole('tab', { name: 'Sprint graph' })).toHaveAttribute('aria-selected', 'true');
+    await expect(view.getByRole('tab', { name: 'Critical path' })).toHaveAttribute('aria-selected', 'true');
+    await view.getByRole('tab', { name: 'People' }).click();
+    await expect(page).toHaveURL(/sprintTab=people/);
+    // A card opens the ticket's story view.
+    await expect(view.getByRole('button', { name: /^ACME-1: Export a report as CSV/ })).toBeVisible();
 
     await view.getByRole('tab', { name: 'Merged so far' }).click();
     await expect(view.getByRole('tab', { name: 'Merged so far' })).toHaveAttribute('aria-selected', 'true');
@@ -129,7 +133,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
   });
 
   for (const [legacy, tab] of [
-    ['sprint', 'Sprint graph'],
+    ['sprint', 'Critical path'],
     ['merged', 'Merged so far'],
   ] as const) {
     test(`a legacy ?insightsTab=${legacy} link lands on This Sprint → ${tab}`, async ({ page }) => {

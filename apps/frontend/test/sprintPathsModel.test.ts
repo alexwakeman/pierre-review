@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { SprintPaths, SprintPathsStatus, SprintSignal } from '@pierre-review/shared';
-import { cardFocus, pathsWriting, sprintDatesLine, sprintPathsView, stripCards, stripCardsSig } from '../src/components/Activity/sprintPathsModel.js';
+import type { SprintPaths, SprintPathsStatus } from '@pierre-review/shared';
+import { pathsWriting, sprintDatesLine, sprintPathsView, sprintProgress } from '../src/components/Activity/sprintPathsModel.js';
 
-// The critical-paths strip's fold: what it draws, and what a card click focuses.
+// The Critical path view's state, the page's progress bar and the header's dates line.
 
 const paths: SprintPaths = {
   paths: [
@@ -26,7 +26,7 @@ describe('sprintPathsView', () => {
     expect(sprintPathsView({ aiEnabled: false, paths, status: st('writing') })).toEqual({ kind: 'off' });
   });
   it('no paths: one short line per state; nothing when no pass can run', () => {
-    expect(sprintPathsView({ aiEnabled: true, paths: null, status: st('writing') })).toEqual({ kind: 'message', writing: true, text: 'Finding the critical paths…' });
+    expect(sprintPathsView({ aiEnabled: true, paths: null, status: st('writing') })).toEqual({ kind: 'message', writing: true, text: 'Working out the critical paths…' });
     expect(sprintPathsView({ aiEnabled: true, paths: null, status: st('queued') })).toMatchObject({ kind: 'message', writing: false });
     expect(sprintPathsView({ aiEnabled: true, paths: null, status: st('waiting') })).toEqual({
       kind: 'message',
@@ -84,33 +84,23 @@ describe('sprintDatesLine', () => {
   });
 });
 
-describe('cardFocus', () => {
-  it('focuses a card, switches to another, and clears on a second click', () => {
-    expect(cardFocus(null, 'k0', ['a'])).toEqual({ selected: 'k0', idents: ['a'] });
-    expect(cardFocus('k0', 'k1', ['b', 'c'])).toEqual({ selected: 'k1', idents: ['b', 'c'] });
-    expect(cardFocus('k1', 'k1', ['b', 'c'])).toEqual({ selected: null, idents: [] });
+describe('sprintProgress', () => {
+  const idle = { awaitingRead: false, firstRead: false, fetching: false, briefs: null };
+  it('is nothing when nothing is in flight', () => {
+    expect(sprintProgress(idle)).toBeNull();
+    expect(sprintProgress({ ...idle, briefs: { current: 9, pending: 0 } })).toBeNull();
   });
-});
-
-describe('stripCards', () => {
-  const sig = (kind: SprintSignal['kind'], title = kind): SprintSignal => ({ kind, title, sentence: `${kind}.`, idents: [kind] });
-  const signals = [sig('blocked_outside'), sig('out_of_step'), sig('pace'), sig('since_last')];
-  it('the ONE order: since you last looked, pace, the paths, the call-outs, out of step, blocked outside; labels visible', () => {
-    const cards = stripCards(paths, signals);
-    expect(cards.map((c) => c.kind)).toEqual(['since_last', 'pace', 'path', 'path', 'callout', 'out_of_step', 'blocked_outside']);
-    expect(cards.map((c) => c.label)).toEqual(['Since you last looked', 'Pace', 'High risk', 'Low risk', 'Call-out', 'Out of step', 'Blocked outside the sprint']);
-    expect(cards.map((c) => c.by)).toEqual(['limn', 'limn', 'claude', 'claude', 'claude', 'limn', 'limn']);
-    expect(cards[2]).toMatchObject({ tickets: ['A-2', 'A-1'], idents: ['a2', 'a1'], sentence: 'Review the writer.', risk: 'high' });
-    expect(cards[4]).toMatchObject({ sentence: null, tickets: ['A-4', 'A-5'] });
+  it('the sprint builder runs the same indeterminate bar, after a read, a refetch and summaries', () => {
+    expect(sprintProgress({ ...idle, pathsWriting: true })).toEqual({ kind: 'busy', label: 'Working out the critical paths' });
+    expect(sprintProgress({ ...idle, pathsWriting: true, briefs: { current: 1, pending: 1 } })).toMatchObject({ kind: 'share' });
+    expect(sprintProgress({ ...idle, pathsWriting: true, awaitingRead: true })).toEqual({ kind: 'busy', label: 'Reading the sprint' });
   });
-  it('no paths (AI off): the code cards alone; nothing at all → []', () => {
-    expect(stripCards(null, [sig('pace')]).map((c) => c.label)).toEqual(['Pace']);
-    expect(stripCards(null, [])).toEqual([]);
+  it('is indeterminate while a read or a refetch runs (neither reports progress)', () => {
+    expect(sprintProgress({ ...idle, awaitingRead: true })).toEqual({ kind: 'busy', label: 'Reading the sprint' });
+    expect(sprintProgress({ ...idle, firstRead: true })).toEqual({ kind: 'busy', label: 'Reading the sprint' });
+    expect(sprintProgress({ ...idle, fetching: true, briefs: { current: 1, pending: 3 } })).toEqual({ kind: 'busy', label: 'Refreshing the sprint' });
   });
-  it('⚠ the selection signature ignores titles ("Since 31 minutes ago" moves every minute)', () => {
-    const a = stripCards(null, [sig('since_last', 'Since 31 minutes ago')]);
-    const b = stripCards(null, [sig('since_last', 'Since 32 minutes ago')]);
-    expect(stripCardsSig(a)).toBe(stripCardsSig(b));
-    expect(stripCardsSig(a)).not.toBe(stripCardsSig(stripCards(null, [{ ...sig('since_last'), idents: ['x'] }])));
+  it('shows the share of tickets summarised while briefs are written', () => {
+    expect(sprintProgress({ ...idle, briefs: { current: 1, pending: 3 } })).toEqual({ kind: 'share', label: 'Summarising tickets', value: 0.25 });
   });
 });

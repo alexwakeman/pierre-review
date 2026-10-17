@@ -5,12 +5,15 @@ import { effectiveSprintTab, SPRINT_RAIL_TABS } from './sprintRailModel.js';
 
 // The **This Sprint** rail line (`activityRepoId === 'sprint'`, `?activityRepo=sprint`), directly
 // under Pending. FREE on every tier — no ProBadge, no ProLockPanel, and none of its routes 402:
-//   • Sprint graph   — the tracker's current sprint as a graph (SprintView, GET /api/sprint-graph).
-//     The landing panel. Viewing it stamps `sprint_reads.viewed_at`, which is what lets the worker
-//     read the sprint at all. "Ask Claude" inside it is agentic and LOCAL-ONLY, gated on `me.ai`
-//     (useSprintAiOn), never on a Pro capability. A ticket opens in its story view.
+//   • Critical path · Theme · People — three independent views of the tracker's current sprint, each
+//     a lane board over the same status-bucket columns (SprintView → SprintBoards, GET
+//     /api/sprint-graph). Critical path is the landing panel. Viewing any of them stamps
+//     `sprint_reads.viewed_at`, which is what lets the worker read the sprint at all. "Ask Claude"
+//     inside is agentic and LOCAL-ONLY, gated on `me.ai` (useSprintAiOn), never on a Pro capability.
+//     A ticket opens in its story view.
 //   • Merged so far  — every PR merged in the reporting window (MergedPrsView, GET /api/merged-prs).
-// Both used to be Reports tabs; a legacy `?insightsTab=sprint|merged` lands here (useUrlState).
+// The sprint and Merged so far used to be Reports tabs; a legacy `?insightsTab=sprint|merged` lands
+// here (useUrlState), and the retired `?sprintTab=graph` lands on Critical path.
 //
 // ⚠ THE VISIBLE TAB IS DERIVED, NEVER WRITTEN BACK (`effectiveSprintTab`).
 export function SprintRailView(): JSX.Element {
@@ -41,7 +44,7 @@ export function SprintRailView(): JSX.Element {
           );
         })}
       </div>
-      {tab === 'merged' ? <MergedPrsView /> : <SprintView />}
+      {tab === 'merged' ? <MergedPrsView /> : <SprintView view={tab} />}
     </div>
   );
 }

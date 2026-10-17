@@ -11,7 +11,7 @@ import {
   BOTS_INNER_TABS,
   FEED_INNER_TABS,
   INSIGHTS_INNER_TABS,
-  SPRINT_INNER_TABS,
+  sprintTabFromUrl,
   PR_DETAIL_TABS,
   freshFilterDefaults,
   freshUrlOwnedDefaults,
@@ -24,7 +24,6 @@ import {
   type FeedInnerTab,
   type FilterState,
   type InsightsInnerTab,
-  type SprintInnerTab,
   type PrDetailTab,
   type RangePreset,
 } from '../store/filters.js';
@@ -450,13 +449,12 @@ export function readFromUrl(): Partial<FilterState> {
     (activityRepo == null || activityRepo === 'insights')
   ) {
     out.activityRepoId = 'sprint';
-    out.sprintInnerTab = insightsTab === 'merged' ? 'merged' : 'graph';
+    out.sprintInnerTab = insightsTab === 'merged' ? 'merged' : 'paths';
   }
   // The This Sprint strip. Same raw-seat rule as `insightsTab`.
-  const sprintTab = p.get('sprintTab');
-  if ((SPRINT_INNER_TABS as readonly string[]).includes(sprintTab ?? '')) {
-    out.sprintInnerTab = sprintTab as SprintInnerTab;
-  }
+  // The retired `graph` (the force graph) lands on the Critical path view (`sprintTabFromUrl`).
+  const sprintTab = sprintTabFromUrl(p.get('sprintTab'));
+  if (sprintTab != null) out.sprintInnerTab = sprintTab;
   // PrDetail's inner tab, and it is only meaningful PAIRED with the PR tab `view=` names — the
   // store field is a {prId, tab} pair precisely so one PR's tab cannot be read on another's
   // screen. A `?prTab=` with no PR view (or on a `pr-focus`, which renders a timeline) seats
@@ -680,8 +678,8 @@ export function writeToUrl(s: FilterState): void {
       p.set('activityRepo', 'bots');
     } else if (s.activityRepoId === 'sprint') {
       p.set('activityRepo', 'sprint');
-      // ⚠ THE OMITTED VALUE IS THE CURRENT DEFAULT ('graph') — a bare `?activityRepo=sprint` means it.
-      if (s.sprintInnerTab !== 'graph') p.set('sprintTab', s.sprintInnerTab);
+      // ⚠ THE OMITTED VALUE IS THE CURRENT DEFAULT ('paths') — a bare `?activityRepo=sprint` means it.
+      if (s.sprintInnerTab !== 'paths') p.set('sprintTab', s.sprintInnerTab);
     } else if (s.activityRepoId === 'docs') {
       p.set('activityRepo', 'docs');
     } else if (s.activityRepoId === 'insights') {

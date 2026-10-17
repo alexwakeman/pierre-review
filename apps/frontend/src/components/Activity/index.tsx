@@ -478,9 +478,9 @@ export function ActivityView(): JSX.Element {
             </span>
           </button>
 
-          {/* THIS SPRINT pseudo-row — directly UNDER Pending. The tracker's current sprint as a graph
-              (the landing panel) and "Merged so far" (every PR merged in the reporting window), as
-              two tabs (SprintRailView). FREE on every tier: no ProBadge, and nothing inside locks.
+          {/* THIS SPRINT pseudo-row — directly UNDER Pending. The tracker's current sprint as three
+              lane boards (Critical path, the landing panel; Theme; People) and "Merged so far" (every
+              PR merged in the reporting window), as four tabs (SprintRailView). FREE on every tier: no ProBadge, and nothing inside locks.
               `?activityRepo=sprint`; a legacy `?insightsTab=sprint|merged` lands here. */}
           <button
             type="button"
@@ -491,7 +491,7 @@ export function ActivityView(): JSX.Element {
                 ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
                 : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
             }`}
-            title="This sprint's tickets, their links and pull requests, and what has merged so far"
+            title="This sprint's critical paths, themes and people, and what has merged so far"
           >
             <span className="shrink-0 text-sky-600 dark:text-sky-400">
               <TicketIcon />

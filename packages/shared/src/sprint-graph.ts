@@ -252,17 +252,17 @@ export interface SprintGraphResponse {
    *  date; stored on `sprint_reads` by the read), else the workspace's sprint cadence (reporting-window
    *  mode 'sprint'); null when neither gives any. Day counts: `sprintDayOf`. */
   sprintDates: SprintDates | null;
-  /** The strip's CODE-WRITTEN cards (`SprintSignal`; db/sprint-signals.ts), free, from the DB only — in
-   *  strip order: since you last looked, pace, then (after the builder's critical paths) out of step, blocked
-   *  outside the sprint. Each is omitted when it has nothing to say; [] with no tracker. */
+  /** Limn's CODE-WRITTEN cards (`SprintSignal`; db/sprint-signals.ts), free, from the DB only — in
+   *  order: since you last looked, pace, out of step, blocked outside the sprint. Each is omitted when it has nothing to say; [] with no tracker. */
   signals: SprintSignal[];
 }
 
-// ── The strip's code-written cards ───────────────────────────────────────────────────────────────
+// ── Limn's code-written cards ────────────────────────────────────────────────────────────────────
 //
 // Four cards Limn writes itself (templated sentences, digits, no model, free on every tier), computed
 // on every GET /api/sprint-graph from what is stored (db/sprint-signals.ts). Each carries the idents it
-// is about: clicking it frames and highlights them exactly like a critical-path card.
+// is about; the Critical path view draws them as call-outs (pace excepted: that is the pace strip), each
+// ticket key a button that opens its story view.
 //   • 'since_last'      — what moved since the reader's previous visit (stage changes, tickets added,
 //                         pull requests merged), against a per-(account, workspace) BASELINE snapshot
 //                         rolled forward only after a gap of SPRINT_VISIT_GAP_MS between views.
@@ -283,7 +283,7 @@ export interface SprintSignal {
   kind: SprintSignalKind;
   title: string;
   sentence: string;
-  /** The node idents it is about — the graph frames and highlights them. */
+  /** The node idents it is about — drawn as ticket-key buttons. */
   idents: string[];
 }
 
@@ -322,7 +322,7 @@ export function sprintDayOf(startMs: number, endMs: number, nowMs: number): { da
 // ONE sprint-wide Haiku call (review/sprint-themes/, LOCAL + aiEnabled) after the brief pass names 3–8
 // short shared THEMES over the sprint tickets' titles + brief summaries and puts each ticket in exactly
 // one. Stored per (account, workspace) with an INPUT HASH (keys + summaries) and SPRINT_THEME_VERSION;
-// it runs again only when that hash changes. The SPA groups the graph by it ("Group by → Theme").
+// it runs again only when that hash changes. The SPA lays the Theme view out by it (one lane per theme).
 
 /** Bumped when the theme prompt or shape changes: the stored themes stop counting. */
 export const SPRINT_THEME_VERSION = 1;
@@ -491,32 +491,6 @@ export interface SprintPerson {
    *  person's GitHub account(s) (`review_requests`, the same population as the People report's
    *  "reviews waiting"). null when the person has no GitHub account mapped — never 0. */
   reviewsWaiting: number | null;
-}
-
-// ── References (the graph's edge popovers) ───────────────────────────────────────────────────────
-
-/** How a referenced ticket is tied to the opened one: a brief relation, or a tracker link
- *  ('blocked_by' = a blocking link, 'linked' = any other). */
-export type SprintReferenceRelation = StoryReferenceRelation | 'blocked_by' | 'linked';
-
-export interface SprintTicketReference {
-  ident: string;
-  key: string;
-  title: string | null;
-  status: string | null;
-  /** The status category is done; null when not known. */
-  done: boolean | null;
-  relation: SprintReferenceRelation;
-  quote: string | null;
-  /** The brief's one sentence on why the two are tied (a reference's `why`, or a tracker link's
-   *  reason); null when the brief gave none or there is no current brief. */
-  why: string | null;
-  /** It is a node of the graph (the graph can move to it). */
-  inGraph: boolean;
-  url: string | null;
-  /** Its assignee, from the stored sprint / referenced-ticket rows: null = unassigned; ABSENT = Limn has
-   *  not read that ticket (never shown as "Unassigned"). */
-  assignee?: { name: string; avatarUrl: string | null } | null;
 }
 
 // ── Ask Claude about this sprint ─────────────────────────────────────────────────────────────────

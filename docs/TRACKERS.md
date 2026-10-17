@@ -182,9 +182,10 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only st
   view (no source, no read time, due now). It also stores the automatic status order (§ The status
   order) and each ticket's blocking links + status id (§ Blocking links).
 - **Referenced tickets and GHOST CHAINS** (`tracker/sprint/ref-status.ts`, `sprint_ref_tickets`,
-  sqlite `0106` + `0107` / pg `0093` + `0094`): the sprint graph draws the tickets a sprint ticket
-  depends on, runs alongside, builds on or replaces — inside the sprint or not — and follows the chain
-  outside it (A → B → C). So after storing the list the read asks the tracker for them **WITH THEIR
+  sqlite `0106` + `0107` / pg `0093` + `0094`): the sprint's fold (`GET /api/sprint-graph`) carries the
+  tickets a sprint ticket depends on, runs alongside, builds on or replaces — inside the sprint or not —
+  and follows the chain outside it (A → B → C); the Critical path view draws the ones a path names in
+  "Outside the sprint". So after storing the list the read asks the tracker for them **WITH THEIR
   TEXT** (description, the workspace's criteria field, type, assignee, links):
   - **Depth 1** (`sprintReferencedKeys`, pure): every key the in-sprint rows NAME — every tracker link,
     plus shared `ticketMentionsInText` over description + criteria (a link on this site always, a bare

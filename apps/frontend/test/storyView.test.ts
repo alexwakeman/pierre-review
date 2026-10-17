@@ -179,6 +179,23 @@ describe('what was removed stays removed', () => {
     expect(hits).toEqual([]);
   });
 
+  it('the force graph is gone: no module imports it, its model, its strip or its CSS', () => {
+    const gone = /\/(SprintGraph|sprintGraphModel|SprintPathsStrip|SprintStoryStrip|sprintReferences)\.js'|sprint-canvas/;
+    const hits = files.filter((f) => gone.test(readFileSync(f, 'utf8'))).map((f) => f.slice(root.length + 1));
+    expect(hits).toEqual([]);
+    expect(readFileSync(join(root, 'index.css'), 'utf8')).not.toMatch(/\.sprint-canvas/);
+  });
+
+  it('every sprint view draws ONE card, TicketCard, on the shared lane board', () => {
+    const boards = readFileSync(join(root, 'components/Activity/SprintBoards.tsx'), 'utf8');
+    expect(boards).toMatch(/<LaneBoard\b/);
+    expect(boards.match(/<TicketCard\b/g)).toHaveLength(1);
+    // The design grid routes its arrows through the board's shared pieces.
+    const grid = readFileSync(join(root, 'components/DesignGrid.tsx'), 'utf8');
+    expect(grid).toMatch(/useRoutedArrows\(/);
+    expect(grid).toMatch(/<ArrowLayer\b/);
+  });
+
   it('the story view draws the Open PRs stack, never a copy', () => {
     const view = readFileSync(join(root, 'components/Ticket/TicketTabView.tsx'), 'utf8');
     expect(view).toMatch(/<OpenPrsCards[^>]*story=\{story\}/);

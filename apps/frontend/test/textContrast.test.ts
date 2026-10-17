@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { DISC_GROUND, GROUP_HALO, STORY_HIGHLIGHT, SATELLITE_FILL, SATELLITE_FAILING_RING, PERSON_HALO, SPRINT_CANVAS, STAGE_RING, STATUS_SLOTS, SUB_HALO, blendHex, discFill, glyphColour, subHaloColour, subLabelColour } from '../src/components/Activity/sprintGraphModel.js';
 
 // TEXT CONTRAST, ENFORCED FROM THE SOURCE.
 //
@@ -218,58 +217,5 @@ describe('text contrast', () => {
       .map((v) => `${v.file}:${v.line}  ${v.cls}  ${v.theme} ${v.ratio.toFixed(2)}:1`)
       .join('\n');
     expect(report).toBe('');
-  });
-  it('the sprint graph’s labels are legible on its always-navy canvas, in both themes', () => {
-    // ⚠ THE CANVAS DOES NOT FOLLOW THE THEME (Activity/SprintGraph.tsx), so its text is measured
-    // against the canvas, not the page — at its LIGHTEST point, the gradient's centre, which index.css
-    // must keep as the lightest stop.
-    const css = readFileSync(join(SRC, 'index.css'), 'utf8');
-    const rule = css.slice(css.indexOf('.sprint-canvas {'), css.indexOf('}', css.indexOf('.sprint-canvas {')));
-    const stops = [...rule.matchAll(/#[0-9a-f]{6}/gi)].map((m) => m[0]);
-    expect(stops[0]?.toLowerCase()).toBe(SPRINT_CANVAS.groundCentre);
-    for (const st of stops) expect(luminance(st)).toBeLessThanOrEqual(luminance(SPRINT_CANVAS.groundCentre));
-    const ground = SPRINT_CANVAS.groundCentre;
-    // A label is drawn at full opacity, or at `labelMinAlpha` for a done / ghost ticket: measure what
-    // the reader sees, the colour blended over the ground.
-    for (const fg of [SPRINT_CANVAS.labelKey, SPRINT_CANVAS.labelTitle, SPRINT_CANVAS.legendText]) {
-      expect(contrastRatio(fg, ground)).toBeGreaterThanOrEqual(AA_BODY);
-      expect(contrastRatio(blendHex(fg, ground, SPRINT_CANVAS.labelMinAlpha), ground)).toBeGreaterThanOrEqual(AA_BODY);
-    }
-    // A group halo's label sits on the halo's rim: measured on the ground AND on the ground lightened by
-    // the halo's fill.
-    const haloGround = blendHex(GROUP_HALO.fill, ground, GROUP_HALO.fillAlpha);
-    expect(contrastRatio(GROUP_HALO.label, ground)).toBeGreaterThanOrEqual(AA_BODY);
-    expect(contrastRatio(GROUP_HALO.label, haloGround)).toBeGreaterThanOrEqual(AA_BODY);
-    // "Split by status": a sub-group's name (11px, its section's colour) sits inside the group halo, on
-    // the ground lightened by BOTH halos' fills.
-    for (const slot of STATUS_SLOTS) {
-      const subGround = blendHex(subHaloColour(slot), haloGround, SUB_HALO.fillAlpha);
-      expect(contrastRatio(subLabelColour(slot), ground)).toBeGreaterThanOrEqual(AA_BODY);
-      expect(contrastRatio(subLabelColour(slot), subGround)).toBeGreaterThanOrEqual(AA_BODY);
-      // "Split by assignee": a person's name (11px, neutral) inside a status sub-halo — three fills deep.
-      const personGround = blendHex(PERSON_HALO.fill, subGround, PERSON_HALO.fillAlpha);
-      expect(contrastRatio(PERSON_HALO.label, personGround)).toBeGreaterThanOrEqual(AA_BODY);
-    }
-    // Split by assignee alone: the person halo sits straight inside the group halo.
-    const personOnGroup = blendHex(PERSON_HALO.fill, haloGround, PERSON_HALO.fillAlpha);
-    expect(contrastRatio(PERSON_HALO.label, ground)).toBeGreaterThanOrEqual(AA_BODY);
-    expect(contrastRatio(PERSON_HALO.label, personOnGroup)).toBeGreaterThanOrEqual(AA_BODY);
-    // The stage rings are non-text marks (WCAG 1.4.11: 3:1).
-    for (const ring of Object.values(STAGE_RING)) expect(contrastRatio(ring, ground)).toBeGreaterThanOrEqual(3);
-    // Each disc is filled with a dark tint of its status: the ring and the centre mark (non-text, 3:1)
-    // are measured against that fill, and the assignee initials (text) against the badge's ground.
-    for (const stage of [...(Object.keys(STAGE_RING) as Array<keyof typeof STAGE_RING>), null]) {
-      const fill = discFill(stage, false);
-      expect(contrastRatio(glyphColour(stage), fill)).toBeGreaterThanOrEqual(3);
-      if (stage != null) expect(contrastRatio(STAGE_RING[stage], fill)).toBeGreaterThanOrEqual(3);
-    }
-    expect(contrastRatio(SPRINT_CANVAS.labelKey, DISC_GROUND)).toBeGreaterThanOrEqual(AA_BODY);
-    // The storyline highlight ring (non-text, 3:1) on the canvas and on the disc ground it rings.
-    expect(contrastRatio(STORY_HIGHLIGHT, ground)).toBeGreaterThanOrEqual(3);
-    expect(contrastRatio(STORY_HIGHLIGHT, DISC_GROUND)).toBeGreaterThanOrEqual(3);
-    // The PR dots (non-text, 3:1) on the canvas — the draft is a hollow rim, the failing ring a rim too.
-    for (const c of [SATELLITE_FILL.open, SATELLITE_FILL.draft, SATELLITE_FILL.merged, SATELLITE_FAILING_RING]) {
-      expect(contrastRatio(c, ground)).toBeGreaterThanOrEqual(3);
-    }
   });
 });

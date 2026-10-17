@@ -1,6 +1,6 @@
 // THE DESIGN GRID (docs/FRONTEND.md § Design diagrams): how a change (or a whole story) is built —
 // stages across, layers down, one card per responsibility. The ONE renderer of a stored
-// `DesignDiagram`; the Claude Review tab's Design section and This Sprint's ticket drawer both draw it.
+// `DesignDiagram`; the Claude Review tab's Design section and the Story section both draw it.
 //
 //   LAYOUT   a CSS grid: a narrow layer-label column + one `minmax(0, 1fr)` column per act, so it
 //            shrinks to the pane (the drawer is ~620px) with NO horizontal scroll; labels wrap, and no
@@ -8,14 +8,16 @@
 //   ARROWS   right-angled lines in an SVG layer under the cards, routed ONLY through the padding round
 //            each card and the grid gaps (lib/designGrid.ts routeArrow), so a line never passes behind
 //            a card; re-measured by a ResizeObserver. A labelled arrow carries a number, keyed below.
-//            Purely visual (aria-hidden): the same arrows are an sr-only list.
+//            Purely visual (aria-hidden): the same arrows are an sr-only list. The router hook, the arrow
+//            layer, the key and the list are the LANE BOARD's (components/LaneBoard.tsx), shared so
+//            This Sprint's boards and this grid draw one way.
 //   CHANGE   new / changed / unchanged is a WORD + icon on the card AND a border style (solid, dashed,
 //            plain) — never colour alone.
 //   CLICK    a card with files is a button: one file opens it in the Changes tab; several open a small
 //            list, each row opening its file. Which PR's Changes tab is the caller's `openFile`.
 //
 // Every string is the server's validated plain text, rendered as React text.
-import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useMemo, useState } from 'react';
 import {
   autoUpdate,
   flip,
@@ -29,7 +31,8 @@ import {
 } from '@floating-ui/react';
 import type { DesignCell, DesignDiagram, SequenceDiagramMember } from '@pierre-review/shared';
 import { claimActivePopover } from '../lib/activePopover.js';
-import { CHANGE_WORD, layoutDesign, memberForRef, prBadgeTexts, routeArrow, type ArrowGeometry, type PlacedCard } from '../lib/designGrid.js';
+import { CHANGE_WORD, layoutDesign, memberForRef, prBadgeTexts } from '../lib/designGrid.js';
+import { ArrowKey, ArrowLayer, ArrowList, useRoutedArrows } from './LaneBoard.js';
 import { PencilIcon, PlusIcon } from './Icons.js';
 
 export type OpenDesignFile = (cell: DesignCell, path: string) => void;
@@ -55,65 +58,24 @@ export function DesignGrid({
   openFile?: OpenDesignFile;
 }): JSX.Element {
   const layout = useMemo(() => layoutDesign(design), [design]);
-  const markerId = useId().replace(/:/g, '');
-  const gridRef = useRef<HTMLDivElement | null>(null);
-  const cardRefs = useRef(new Map<string, HTMLElement>());
-  // The padded slot around each card — the space the arrows run through.
-  const slotRefs = useRef(new Map<string, HTMLElement>());
-  const [paths, setPaths] = useState<Array<ArrowGeometry & { key: string; label: string | null }>>([]);
-  // NARROW (the ticket drawer, ~620px): the layer names move from a side column to a band heading
-  // above each layer's cards, giving the stages the width — otherwise every card wraps to six lines
-  // and the grid stops fitting on a laptop screen.
-  const [narrow, setNarrow] = useState(false);
   const badges = useMemo(() => prBadgeTexts(members), [members]);
+  // The router's inputs (the lane board's shared hook, components/LaneBoard.tsx).
+  const cells = useMemo(() => layout.cells.map((c) => ({ id: c.cell.id, row: c.row, col: c.col })), [layout]);
+  const arrows = useMemo(() => layout.arrows.map((a) => ({ ...a, key: `${a.from}>${a.to}` })), [layout]);
+  // NARROW (a narrow pane): the layer names move from a side column to a band heading above each
+  // layer's cards, giving the stages the width — otherwise every card wraps to six lines and the grid
+  // stops fitting on a laptop screen.
+  const { gridRef, cardRef, slotRef, paths, narrow } = useRoutedArrows(cells, arrows, NARROW_PX);
   // 1, 2, 3… for the arrows that carry a label, in the design's own order.
   const labelNumbers = useMemo(() => {
     const m = new Map<string, number>();
-    for (const a of layout.arrows) if (a.label != null) m.set(`${a.from}>${a.to}`, m.size + 1);
+    for (const a of arrows) if (a.label != null) m.set(a.key, m.size + 1);
     return m;
-  }, [layout]);
-
-  const measure = useCallback((): void => {
-    const grid = gridRef.current;
-    if (grid == null) return;
-    const g = grid.getBoundingClientRect();
-    setNarrow(g.width > 0 && g.width < NARROW_PX);
-    const rel = (el: HTMLElement) => {
-      const r = el.getBoundingClientRect();
-      return { x: r.left - g.left, y: r.top - g.top, w: r.width, h: r.height };
-    };
-    const css = getComputedStyle(grid);
-    const gapX = parseFloat(css.columnGap) || 0;
-    const gapY = parseFloat(css.rowGap) || 0;
-    const at = new Map(layout.cells.map((c) => [c.cell.id, c]));
-    const taken = new Set(layout.cells.map((c) => `${c.row}:${c.col}`));
-    const placed = (id: string): PlacedCard | null => {
-      const card = cardRefs.current.get(id);
-      const slot = slotRefs.current.get(id);
-      const c = at.get(id);
-      if (card == null || slot == null || c == null) return null;
-      return { card: rel(card), slot: rel(slot), row: c.row, col: c.col };
-    };
-    const next: Array<ArrowGeometry & { key: string; label: string | null }> = [];
-    for (const a of layout.arrows) {
-      const from = placed(a.from);
-      const to = placed(a.to);
-      if (from == null || to == null) continue;
-      const geo = routeArrow(from, to, (r, c) => taken.has(`${r}:${c}`), gapX, gapY);
-      next.push({ ...geo, key: `${a.from}>${a.to}`, label: a.label });
-    }
-    setPaths(next);
-  }, [layout]);
-
-  useLayoutEffect(() => {
-    measure();
-    const grid = gridRef.current;
-    if (grid == null || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => measure());
-    ro.observe(grid);
-    for (const el of cardRefs.current.values()) ro.observe(el);
-    return () => ro.disconnect();
-  }, [measure]);
+  }, [arrows]);
+  const keyItems = useMemo(
+    () => arrows.flatMap((a) => (a.label != null && labelNumbers.has(a.key) ? [{ n: labelNumbers.get(a.key)!, label: a.label }] : [])),
+    [arrows, labelNumbers],
+  );
 
   const nActs = layout.acts.length;
   const col0 = narrow ? 1 : 2; // the first stage's grid column
@@ -135,42 +97,7 @@ export function DesignGrid({
             : `minmax(3.25rem, 6.5rem) repeat(${nActs}, minmax(0, 1fr))`,
         }}
       >
-        <svg aria-hidden className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible text-gray-500 dark:text-gray-400">
-          <defs>
-            <marker id={markerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
-              <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
-            </marker>
-          </defs>
-          {paths.map((p) => (
-            <g key={p.key}>
-              <path
-                d={p.d}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.75}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                markerEnd={`url(#${markerId})`}
-              />
-            </g>
-          ))}
-        </svg>
-
-        {/* A labelled arrow carries a small NUMBER on top of the line, keyed below the grid: a gap
-            between two cards is ~20px, too narrow for words, and a label there covered card text. */}
-        {paths.map((p) => {
-          const n = labelNumbers.get(p.key);
-          return n == null ? null : (
-            <span
-              key={`l:${p.key}`}
-              aria-hidden
-              className="pointer-events-none absolute z-20 flex h-4 min-w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-gray-400 bg-white px-0.5 text-[11px] font-semibold leading-none text-gray-800 dark:border-gray-500 dark:bg-gray-950 dark:text-gray-100"
-              style={{ left: p.lx, top: p.ly }}
-            >
-              {n}
-            </span>
-          );
-        })}
+        <ArrowLayer paths={paths} numbers={labelNumbers} />
 
         {/* Header row: the stages. */}
         {!narrow && <div aria-hidden />}
@@ -198,10 +125,7 @@ export function DesignGrid({
             {r.cells.map((g) => (
               <div
                 key={g.cell.id}
-                ref={(el) => {
-                  if (el) slotRefs.current.set(g.cell.id, el);
-                  else slotRefs.current.delete(g.cell.id);
-                }}
+                ref={slotRef(g.cell.id)}
                 className={`relative z-10 min-w-0 ${narrow ? 'p-1.5' : 'p-2.5'}`}
                 style={{ gridRow: rowOf(row), gridColumn: g.col + col0 }}
               >
@@ -212,38 +136,15 @@ export function DesignGrid({
                   member={memberForRef(g.cell.pr, members)}
                   badges={badges}
                   openFile={openFile}
-                  cardRef={(el) => {
-                    if (el) cardRefs.current.set(g.cell.id, el);
-                    else cardRefs.current.delete(g.cell.id);
-                  }}
+                  cardRef={cardRef(g.cell.id)}
                 />
               </div>
             ))}
           </Fragment>
         ))}
       </div>
-      {labelNumbers.size > 0 && (
-        <ol aria-hidden className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-gray-700 dark:text-gray-300">
-          {layout.arrows.map((a) => {
-            const n = labelNumbers.get(`${a.from}>${a.to}`);
-            return n == null ? null : (
-              <li key={`${a.from}>${a.to}`} className="inline-flex items-center gap-1">
-                <span className="flex h-4 min-w-4 items-center justify-center rounded-full border border-gray-400 px-0.5 text-[11px] font-semibold leading-none dark:border-gray-500">
-                  {n}
-                </span>
-                {a.label}
-              </li>
-            );
-          })}
-        </ol>
-      )}
-      {layout.arrows.length > 0 && (
-        <ul className="sr-only" aria-label="Hand-offs">
-          {layout.arrows.map((a) => (
-            <li key={`${a.from}>${a.to}`}>{a.text}</li>
-          ))}
-        </ul>
-      )}
+      <ArrowKey items={keyItems} />
+      <ArrowList label="Hand-offs" items={layout.arrows.map((a) => ({ key: `${a.from}>${a.to}`, text: a.text }))} />
     </div>
   );
 }

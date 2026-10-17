@@ -81,13 +81,22 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // so useUrlState's READ maps them onto the new rail line + tab; they are never emitted again.
 export type InsightsInnerTab = 'overview' | 'stories' | 'bottlenecks';
 export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'stories', 'bottlenecks'];
-// The This Sprint rail line's sub-tab strip (FREE on every tier): `'graph'` is the sprint graph (the
-// landing panel, SprintView) and `'merged'` is "Merged so far" (MergedPrsView — every PR merged in
-// the reporting window). URL: `?sprintTab=merged`, the `'graph'` default omitted, emitted ONLY
-// alongside `activityRepo=sprint`. The visible tab is DERIVED (`effectiveSprintTab`), never written
-// back. Transient like its siblings — no FILTER_STORAGE_VERSION bump is owed.
-export type SprintInnerTab = 'graph' | 'merged';
-export const SPRINT_INNER_TABS: readonly SprintInnerTab[] = ['graph', 'merged'];
+// The This Sprint rail line's sub-tab strip (FREE on every tier): three independent views of the
+// sprint on one lane board — `'paths'` (Critical path, the landing panel), `'themes'` (Theme) and
+// `'people'` (People) — then `'merged'` ("Merged so far", MergedPrsView — every PR merged in the
+// reporting window). URL: `?sprintTab=themes|people|merged`, the `'paths'` default omitted, emitted
+// ONLY alongside `activityRepo=sprint`. ⚠ The retired `?sprintTab=graph` (the force graph, deleted
+// 2026-10-18) still sits in bookmarks and history: `sprintTabFromUrl` reads it as `'paths'`. The
+// visible tab is DERIVED (`effectiveSprintTab`), never written back. Transient like its siblings — no
+// FILTER_STORAGE_VERSION bump is owed.
+export type SprintInnerTab = 'paths' | 'themes' | 'people' | 'merged';
+export const SPRINT_INNER_TABS: readonly SprintInnerTab[] = ['paths', 'themes', 'people', 'merged'];
+/** The `?sprintTab=` value a link carries, as a tab to SEAT: a member as itself, the retired `graph`
+ *  as the Critical path view, anything else nothing (the store keeps what it has). Pure. */
+export function sprintTabFromUrl(raw: string | null | undefined): SprintInnerTab | null {
+  if (raw === 'graph') return 'paths';
+  return (SPRINT_INNER_TABS as readonly string[]).includes(raw ?? '') ? (raw as SprintInnerTab) : null;
+}
 // The Bots rail's sub-tab strip. ⚠ TWO POSTURES IN ONE UNION, both deliberate:
 //   • `'advisor'` (`botAdvisor`) and `'themes'` (`activityDigest`) are only LISTED when entitled,
 //     and BotsView's `effectiveBotsTab` degrades either to `'roi'` when it is not — the older
@@ -588,7 +597,7 @@ export interface FilterState {
   // DERIVES what it renders; a corrective write-back would permanently forget the choice.
   insightsInnerTab: InsightsInnerTab;
   // Which inner sub-tab the This Sprint rail line shows (see SprintInnerTab). Transient,
-  // URL-serialized (`?sprintTab=merged`) only alongside `activityRepo=sprint`.
+  // URL-serialized (`?sprintTab=themes`) only alongside `activityRepo=sprint`.
   sprintInnerTab: SprintInnerTab;
   // Which inner tab the PR-detail overlay shows (see PrDetailTab), PAIRED WITH THE PR IT BELONGS
   // TO. null = nothing chosen yet → 'overview'.
@@ -1440,7 +1449,7 @@ function freshDefaults(): FilterData {
     // needing to know anything about the report key.
     insightsInnerTab: 'overview',
     // The This Sprint rail line opens on the graph.
-    sprintInnerTab: 'graph',
+    sprintInnerTab: 'paths',
     prDetailTab: null,
     sprintChatDraft: { question: '', wantChart: false, wantBots: false },
     sprintChatThreads: {},

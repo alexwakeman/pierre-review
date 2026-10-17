@@ -1,27 +1,22 @@
 import {
-  SPRINT_PATH_RISK_LABEL,
-  SPRINT_SIGNAL_LABEL,
   sprintDayOf,
   sprintPathsFailureText,
   type SprintDates,
-  type SprintPathRisk,
   type SprintPaths,
   type SprintPathsStatus,
-  type SprintSignal,
-  type SprintSignalKind,
 } from '@pierre-review/shared';
 
-// THE CRITICAL-PATHS STRIP'S FOLD (SprintPathsStrip.tsx; test/sprintPathsModel.test.ts). What the strip
-// draws is decided here, once, from `SprintGraphResponse.pathsStatus` (the server's ONE fold):
-//   • 'off'     — AI is off: Claude's half renders nothing (no upsell, no placeholder).
+// THE CRITICAL PATH VIEW'S STATE (Activity/SprintBoards.tsx; test/sprintPathsModel.test.ts). What the
+// view says about the stored paths is decided here, once, from `SprintGraphResponse.pathsStatus` (the
+// server's ONE fold):
+//   • 'off'     — AI is off: one plain line saying so; the pace strip and the count table still show.
 //   • 'paths'   — paths to show. `note` is the one quiet line beside them when they are not current:
 //                 'updating' (being written now / next in line), or the failure sentence. STALE paths
-//                 always beat a blank strip.
-//   • 'message' — no paths yet: one short line ('writing' while the builder runs — the canvas bar runs
+//                 always beat a blank board.
+//   • 'message' — no paths yet: one short line ('writing' while the builder runs — the page bar runs
 //                 with it — else when they will be written, or why they could not be).
-//   • 'none'    — nothing to show (too few tickets, no tracker, no credential).
-// The CARDS are a second, independent input: the code's own cards (`SprintGraphResponse.signals`, free,
-// shown with AI off too) around the builder's paths and call-outs (`stripCards`, the ONE order).
+//   • 'none'    — nothing to say (too few tickets, no tracker, no credential).
+// Also here: the page's progress bar (`sprintProgress`) and the header's dates line.
 
 export type SprintPathsNote = { kind: 'updating' } | { kind: 'failed'; text: string } | null;
 
@@ -50,7 +45,7 @@ export function sprintPathsView(p: { aiEnabled: boolean; paths: SprintPaths | nu
   }
   switch (s.state) {
     case 'writing':
-      return { kind: 'message', writing: true, text: 'Finding the critical paths…' };
+      return { kind: 'message', writing: true, text: 'Working out the critical paths…' };
     case 'queued':
       return { kind: 'message', writing: false, text: 'Critical paths come after the ticket summaries.' };
     case 'waiting':
@@ -62,80 +57,42 @@ export function sprintPathsView(p: { aiEnabled: boolean; paths: SprintPaths | nu
   }
 }
 
-/** The builder is running now — the canvas bar's "Finding the critical paths". */
+/** The builder is running now — the page bar's "Working out the critical paths". */
 export function pathsWriting(aiEnabled: boolean, status: SprintPathsStatus | null | undefined): boolean {
   return aiEnabled && status?.state === 'writing';
 }
 
-/** One card on the strip: a critical path, a call-out or a code card. `key` is stable across refetches. */
-export interface SprintStripCard {
-  key: string;
-  kind: 'path' | 'callout' | SprintSignalKind;
-  /** Who wrote it: 'claude' (a path or call-out) or 'limn' (a code card). */
-  by: 'claude' | 'limn';
-  /** The card's visible label: its kind ("High risk", "Call-out", "Pace"…). */
-  label: string;
-  title: string;
-  /** null = no sentence (a call-out). */
-  sentence: string | null;
-  /** Paths only: the ticket keys in order. */
-  tickets: string[];
-  risk: SprintPathRisk | null;
-  idents: string[];
-}
+// ── The page's progress bar ──────────────────────────────────────────────────────────────────────
+//
+// What the page KNOWS: a sprint read was asked for and has not finished (`read.checkedAt` has not moved
+// since Refresh), the first read is running, or the board is refetching — an indeterminate bar, since
+// none of those reports progress. Briefs report counts (`briefs.current` / `pending`), so while they
+// are being written the bar is DETERMINATE: the share of tickets summarised.
 
-/**
- * The strip's cards in their ONE order: since you last looked, pace, then Claude's critical paths
- * (riskiest first) and call-outs, then out of step and blocked outside the sprint. Pure.
- */
-export function stripCards(paths: SprintPaths | null, signals: readonly SprintSignal[]): SprintStripCard[] {
-  const code = (k: SprintSignalKind): SprintStripCard[] =>
-    signals
-      .filter((s) => s.kind === k)
-      .map((s) => ({ key: `signal:${s.kind}`, kind: s.kind, by: 'limn', label: SPRINT_SIGNAL_LABEL[s.kind], title: s.title, sentence: s.sentence, tickets: [], risk: null, idents: [...s.idents] }));
-  return [
-    ...code('since_last'),
-    ...code('pace'),
-    ...(paths?.paths ?? []).map(
-      (p, i): SprintStripCard => ({
-        key: `path:${i}:${p.title}`,
-        kind: 'path',
-        by: 'claude',
-        label: SPRINT_PATH_RISK_LABEL[p.risk],
-        title: p.title,
-        sentence: p.advice,
-        tickets: [...p.tickets],
-        risk: p.risk,
-        idents: [...p.idents],
-      }),
-    ),
-    ...(paths?.callouts ?? []).map(
-      (c, i): SprintStripCard => ({
-        key: `callout:${i}:${c.title}`,
-        kind: 'callout',
-        by: 'claude',
-        label: 'Call-out',
-        title: c.title,
-        sentence: null,
-        tickets: [...c.tickets],
-        risk: null,
-        idents: [...c.idents],
-      }),
-    ),
-    ...code('out_of_step'),
-    ...code('blocked_outside'),
-  ];
-}
+export type SprintProgress = { kind: 'busy'; label: string } | { kind: 'share'; label: string; value: number } | null;
 
-/** What identifies the card set for the selection: keys + idents (never a title — "Since 31 minutes
- *  ago" moves every minute and must not drop the reader's pick). */
-export function stripCardsSig(cards: readonly SprintStripCard[]): string {
-  return cards.map((c) => `${c.key}\u0000${c.idents.join(',')}`).join('\u0001');
-}
-
-/** A card's click: the idents to focus, or [] to clear when it is the one already focused. */
-export function cardFocus(selected: string | null, key: string, idents: readonly string[]): { selected: string | null; idents: string[] } {
-  return selected === key ? { selected: null, idents: [] } : { selected: key, idents: [...idents] };
+/** The progress bar's state. Pure. */
+export function sprintProgress(o: {
+  /** Refresh pressed and the read it asked for has not finished. */
+  awaitingRead: boolean;
+  /** The first sprint read has not finished. */
+  firstRead: boolean;
+  /** The board is refetching (debounced by the page, so a quick poll does not flash it). */
+  fetching: boolean;
+  /** Briefs, when AI is on. */
+  briefs: { current: number; pending: number } | null;
+  /** The sprint builder is running now (`pathsStatus.state === 'writing'`). */
+  pathsWriting?: boolean;
+}): SprintProgress {
+  if (o.awaitingRead || o.firstRead) return { kind: 'busy', label: 'Reading the sprint' };
+  if (o.fetching) return { kind: 'busy', label: 'Refreshing the sprint' };
+  const b = o.briefs;
+  if (b != null && b.pending > 0) {
+    const total = b.current + b.pending;
+    return { kind: 'share', label: 'Summarising tickets', value: total > 0 ? b.current / total : 0 };
+  }
+  if (o.pathsWriting === true) return { kind: 'busy', label: 'Working out the critical paths' };
+  return null;
 }
 
 // ── The header's sprint dates ────────────────────────────────────────────────────────────────────

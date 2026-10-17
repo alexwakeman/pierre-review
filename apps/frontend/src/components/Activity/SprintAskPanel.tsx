@@ -9,9 +9,9 @@ import { InfoButton } from '../InfoModal.js';
 import { Markdown, type RehypePlugins } from '../Markdown.js';
 import { sprintTicketSite } from './sprintModel.js';
 
-// "Ask Claude about this sprint" (Activity → This Sprint): a compact chat docked over the graph's
-// bottom-right corner. LOCAL ONLY and Pro, like the route (the caller mounts it only where agentic AI
-// runs). One Haiku answer per question, grounded in the stored graph; the conversation is kept for the
+// "Ask Claude about this sprint" (Activity → This Sprint): a compact chat under the page's toolbar,
+// above the board. LOCAL ONLY and Pro, like the route (the caller mounts it only where agentic AI
+// runs). One Haiku answer per question, grounded in the stored sprint; the conversation is kept for the
 // visit in a module store, and the completed turn is appended in `useSprintAsk`'s HOOK-level onSuccess
 // (never a `mutate()` callback — closing the panel mid-answer must not lose a billed answer).
 // Ticket keys in an answer are links: each opens its story view (`useOpenStory`, via TicketRefLink).
@@ -37,7 +37,7 @@ export function SprintAskPanel({
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Ticket keys in an answer → links (the graph's keys only: a key's shape alone is not enough).
+  // Ticket keys in an answer → links (the sprint's keys only: a key's shape alone is not enough).
   const rehype = useMemo<RehypePlugins>(() => {
     const first = nodes[0];
     const site = first != null ? sprintTicketSite(first) : null;
@@ -67,7 +67,7 @@ export function SprintAskPanel({
   return (
     <section
       aria-label="Ask Claude about this sprint"
-      className="absolute bottom-2 right-2 z-20 flex max-h-[80%] w-[min(26rem,calc(100%-1rem))] flex-col rounded-lg border border-ai-border bg-white shadow-2xl dark:bg-gray-950"
+      className="flex max-h-[28rem] w-full max-w-2xl flex-col rounded-lg border border-ai-border bg-white shadow-sm dark:bg-gray-950"
       data-testid="sprint-ask"
     >
       <div className="flex items-center gap-1.5 border-b border-gray-200 px-3 py-2 dark:border-gray-800">

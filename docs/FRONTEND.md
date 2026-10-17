@@ -2107,221 +2107,115 @@ This Sprint is its OWN Activity rail line (`activityRepo: 'sprint'`, `?activityR
 under Pending: Open PRs · Pending · This Sprint · Feed · Reports · Bots Monitoring. It is FREE — no
 `ProBadge`, no `ProLockPanel`, and none of its routes 402 (`/api/sprint-graph*`, `/api/merged-prs`,
 the sprint refresh / statuses routes, `GET /api/ticket-story`). The agentic part ("Ask Claude")
-stays LOCAL-ONLY and gate on `me.ai.enabled` through `useAiCapabilities()`, never a Pro capability.
-Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the worker read the sprint.
+stays LOCAL-ONLY and gated on `me.ai.enabled` through `useAiCapabilities()`, never a Pro capability.
+Viewing any of the three views stamps `sprint_reads.viewed_at`, which is what lets the worker read the
+sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA's wording changed.
 
-- **Two tabs, DERIVED, never written back**: "Sprint graph" (the landing tab) and "Merged so far".
-  The store's `sprintInnerTab` is mirrored to `?sprintTab=merged` (the `'graph'` default omitted, the
-  key emitted ONLY beside `activityRepo=sprint`); the render reads `effectiveSprintTab`
-  (`Activity/sprintRailModel.ts`), the `feedInnerTab` / `insightsTab` rule. Both values live in the URL
-  only, so no `FILTER_STORAGE_VERSION` bump.
-- ⚠ **Legacy links still land**: `?insightsTab=sprint` and `?insightsTab=merged` shipped as Reports
-  tabs and are in bookmarks and in history entries Back replays. `useUrlState` reads them as
-  `activityRepo=sprint` + the matching tab, and never writes either value back. Reports itself is now
-  THREE tabs: Overview · Stories · Chronology.
+- **Four tabs, DERIVED, never written back**: Critical path (the landing tab) · Theme · People · Merged
+  so far. The store's `sprintInnerTab` (`'paths' | 'themes' | 'people' | 'merged'`) is mirrored to
+  `?sprintTab=themes|people|merged` (the `'paths'` default omitted, the key emitted ONLY beside
+  `activityRepo=sprint`); the render reads `effectiveSprintTab` (`Activity/sprintRailModel.ts`), the
+  `feedInnerTab` / `insightsTab` rule. URL only, so no `FILTER_STORAGE_VERSION` bump.
+- ⚠ **Legacy links still land**: `?insightsTab=sprint|merged` (old Reports tabs) read as
+  `activityRepo=sprint` + Critical path / Merged so far, and the retired force graph's
+  `?sprintTab=graph` reads as Critical path (`sprintTabFromUrl`, store/filters.ts). None is written back.
 
-- **Sprint graph** (`?activityRepo=sprint`, the landing tab) — THE SPRINT GRAPH
-  (`SprintView.tsx`: toolbar, filters, `SprintGraph`, `SprintAskPanel`; pure folds in
-  `sprintGraphModel.ts`, test/sprintGraphModel.test.ts). Data: `GET /api/sprint-graph` (nodes = the
-  sprint's tickets + GHOST tickets outside it, edges, status layout; docs/API.md § This sprint). Hooks in
-  `hooks/useSprintStories.ts` — NO capability gate; Ask Claude ANDs `me.ai.enabled` alone
-  (`useSprintAiOn`); its shared mutation key `['sprint-ask', ws]` is read through `useIsMutating`.
-  ⚠ **A ticket clicked (or Enter / Space) opens its STORY VIEW** through `useOpenStory` (§ The story
-  view) and selects it on the canvas; the sprint DRAWER, its reference cards, the repo picker and "Check
-  against code" are REMOVED (2026-10-18).
-  - **The canvas is ALWAYS deep navy** (`.sprint-canvas` in index.css, a radial gradient + a seeded,
-    static star field) in BOTH themes, so its colours live in `SPRINT_CANVAS` / `STAGE_RING` /
-    `edgeStyle` / `SATELLITE_FILL`, never the page's tokens. ⚠ The label colours are measured against the
-    gradient's CENTRE (its lightest stop) at the lowest label opacity in test/textContrast.test.ts, which
-    also checks index.css keeps the centre the lightest stop.
-  - **WHAT IS DRAWN** (`visibleGraph`, the toolbar's "View" row): hidden things are REMOVED from the
-    simulation, not faded, so the layout only places what is shown. Outside tickets: by default only
-    ghosts that are NOT done (status category not `done`; unknown counts as open); **"Show shipped
-    history"** adds the complete ghosts and the chains behind them. Links: by default only `depends_on` +
-    `concurrent`; **"Show builds on / replaces"** adds the faint two. A ghost is drawn only while a drawn
-    edge chain reaches it from a sprint ticket. ⚠ A node's SIZE counts only the DRAWN edges
-    (`visibleGraph` recounts `degree`; the wire's `degree` counts every edge). Measured on workspace 1
-    (Sprint 14, 77 tickets, 136 nodes / 181 edges on the wire): the default draws 78 nodes / 15 edges;
-    history 87 / 31; builds-on 80 / 34; both 136 / 181. The header counts what is drawn.
-  - **THE CRITICAL-PATHS STRIP** (`SprintPathsStrip.tsx`, fold `sprintPathsModel.ts`; until the Critical
-    path / Theme / People boards replace the graph) sits between the header and the view controls: a
-    "Critical paths" heading (ⓘ beside it; "No critical paths in this sprint." when the builder found
-    none), then ONE row of cards in the ONE order (`stripCards`): Limn's code cards "Since you last looked"
-    (eye) and "Pace" (timer), the sprint builder's paths labelled by risk ("High risk" / "Medium risk" /
-    "Low risk", link mark tinted rose / amber / grey) with their ticket keys in order (`A → B → C`) and the
-    one-sentence advice, its call-outs ("Call-out", pin) with their keys, then Limn's "Out of step" (scales)
-    and "Blocked outside the sprint" (lock); definitions live in the strip's ⓘ only. The code cards
-    (`signals`) are free and render with AI off too (Claude's half then renders nothing). Selection is by
-    card KEY; the reset signature (`stripCardsSig`) is keys + idents, never titles ("Since 31 minutes ago"
-    moves every minute). Clicking a card FRAMES its tickets (SprintView's `focusRequest` → `SprintGraph`
-    `frameIdents` over the ones drawn) AND HIGHLIGHTS them: a pink `STORY_HIGHLIGHT` corona + ring, labels
-    REVEALED like a hovered one, everything else faded (`storyHighlightSet` / `fadedBy`). A VIEW state — no
-    re-layout. The card is `aria-pressed` (pink); clicking it again, "Clear", or a new card set clears it.
-    The fold (`sprintPathsView`) reads the server's `pathsStatus`: with NO paths, one short line — the
-    canvas's indeterminate bar (`SprintProgressBar`) + "Finding the critical paths…" only while `writing`;
-    else when they will come (`queued` / `waiting`) or why they could not ("Couldn't find the critical
-    paths. <reason> Limn tries again when the sprint changes." — "…tomorrow." for `daily_cap`). ⚠ STALE
-    paths are ALWAYS shown, with a quiet "Updating" while `writing` / `queued`, or the failure line under
-    them. While writing the canvas bar reads "Finding the critical paths" (`sprintProgress({pathsWriting})`)
-    and the graph polls every 5 s while `writing` / `queued` (docs/CLAUDE-REVIEW.md § Sprint paths).
-    `SprintGraphResponse.pace` and `.people` ride the same response for the boards; nothing draws them yet.
-  - **THE SPRINT'S DATES** beside the title (`sprintDatesLine`, `sprintPathsModel.ts`): "14 Oct – 27 Oct ·
-    day 1 of 14" from `sprintDates` (the tracker's own, else the cadence's), short dates in the reader's
-    locale, the day count from shared `sprintDayOf` (the pace's own count); an end on midnight shows the
-    day before; end only → "due 28 Oct"; before / after → "starts in 2 days" / "ended"; none → nothing.
-  - **"Group by"** — Epic · Theme (DEFAULT) · Section · Dependencies · None. **Dependencies** puts each
-    `depends_on` chain (ghosts included, tracker blocking links counted) in its own halo, named
-    "Chain: <title>" after the ticket most others in it wait on (`chainLabel`; the prefix does not eat
-    the title's room, `groupLabelMax`), laid out LEFT TO RIGHT by longest path to a ticket that depends
-    on nothing (`chainLayout`; a loop is broken at a fixed point); tickets with no dependency share
-    "Standalone". Split by status and Assigned to are off in it and the epic/theme picker is hidden. A stored per-browser choice wins
-    (`sprint-graph-group`, `readGroupMode` / `writeGroupMode`, try/catch). SOFT clusters: each group gets
-    an ANCHOR (`groupAnchors`: placed in `groupList` order — largest first, sections in stage order —
-    along a spiral STRETCHED to the canvas's measured aspect, at the first spot overlapping no placed
-    group; the no-epic / no-theme group placed OUTWARD) and a weak forceX / forceY toward it; a link
-    BETWEEN groups pulls lightly so clusters hold while lines still cross. ⚠ A group's ROOM
-    (`groupRadius`, area ∝ members) is sized by its DRAWN members (`SprintGroup.drawn`, ghosts included),
-    while the ORDER keys on `count` (sprint tickets only) — so "Show shipped history" re-spaces the
-    groups instead of pushing one halo into the next. A large group is a spread disc (`collidePadding`
-    grows with group size), and halos that still touch are pushed apart as wholes (`haloSeparation`, a
-    custom force). A faint labelled HALO (`groupHalo`, recomputed
-    from the members' positions in the rAF loop; label at a fixed screen size, `.sg-group-label`) sits
-    behind each group, and its label is contrast-tested on the ground lightened by the halo's fill
-    (`GROUP_HALO`, test/textContrast.test.ts). A ghost joins the group of the NEAREST sprint ticket
-    through drawn edges (`assignGroups`). ⚠ `groupList` counts SPRINT tickets only, so a toggle never
-    re-orders or moves the anchors. "Theme" needs the response's `themes` (the theme pass, docs/CLAUDE-REVIEW.md
-    § Sprint themes); without them the button is disabled with "Themes appear after Claude reads the
-    sprint" beside it, and a stored (or default) "theme" choice DRAWS as Epic (`effectiveGroupMode` —
-    derived, never written back). A toggle or a grouping switch REBUILDS the simulation, computes the new
-    layout TO REST, then eases every node from where it was to where it lands over `SETTLE_FRAMES` (a
-    `tween`, even while frozen); a grouping switch seeds each node inside its NEW group (starting from the
-    old arrangement jammed groups that had to pass through each other). With reduced motion it simply
-    appears. **Fit** frames the drawn nodes, their halos and names, leaving room for the open key; until
-    the reader zooms or pans (`viewTouched`), the view FOLLOWS Fit through every re-layout, and a grouping
-    switch re-arms that — so Section never opens zoomed in.
-  - **"Assigned to"** (any grouping but None — Section too, as status then person — `canSplitByAssignee`;
-    per browser, `sprint-graph-split-assignee`) nests ONE level below "Split by status": inside each group —
-    or each status sub-group when that is on too — one PERSON room per assignee (`personSplitLayout`: busiest first,
-    Unassigned last, rows of ~√n; a split status room is sized ROUND its people via `statusSplitLayout`'s
-    `roomOf`). A person is the Members filter's identity (`personOf` → `p:<personNameKey>`, labelled as
-    `sprintMembers` labels it), so two spellings are one halo; a ghost uses its own assignee, else
-    Unassigned. Person halos are NEUTRAL (`PERSON_HALO`, contrast-tested three fills deep) so the status
-    tint still reads; siblings are pushed apart within their parent (`separate-people`), and the parent
-    halo encloses them. It is part of `layoutIntent`, so toggling animates and a refetch stays quiet.
-  - ⚠ **Every halo name (group, status, person) sits INSIDE the top of its OWN halo**, centred, cut with an
-    ellipsis to the chord (`haloName`) — outside, a zoom into one group put its name off screen. The halo
-    makes the ROOM (`haloNameRoom` + `withNameRoom`: top raised by the name's height plus the depth where the
-    chord fits, same bottom), and since the name is a constant SCREEN size the room is px ÷ zoom, recomputed
-    in `applyHalos`; a parent is sized round its children's roomy halos, and the halos hold the assignee
-    badges too (`badgeCircle`), so a name never sits on a ticket, a badge or a child halo. Too small on
-    screen (chord < `HALO_NAME_MIN_W`, or room > `HALO_NAME_MAX_PAD` × radius — nested bulges compound) ⇒
-    no room and no name; a name crowded by a neighbour hides (`placeHaloNames`, groups then status then
-    person). The forces make room at `HALO_NAME_LAYOUT_ZOOM` (0.4, ~Fit) for groups and
-    `HALO_SUBNAME_LAYOUT_ZOOM` (1) inside them; Fit and the epic/theme pick frame twice (room at the zoom
-    the first pass gave). Never driven by hover.
-  - ⚠ **Every halo is sized round the tickets AS DRAWN** (`drawnRadius`: disc + half the thickest ring,
-    times the zoom's `discScale`), and re-applied on every zoom (`applyHalos` in `applyView`). Sized from
-    the layout radius, 60 of 78 tickets spilled out of their person halo at Fit (zoom 0.25, discs ×2). The
-    separation forces and Fit size halos at `HALO_LAYOUT_SCALE` (the largest enlargement), so no two halos
-    overlap at any zoom; zoomed in, the gaps between them are wider than the halos need.
-  - **Labels** keep a fixed SCREEN size, so collisions are decided on screen (`placeLabels`, after every
-    zoom and every `LABEL_EVERY` frames while moving): each tries below / above / right / left / the
-    four corners of its ticket (keeping its previous side while free, so nothing flickers), clear of every
-    placed label, of the group names and of other tickets' discs (grazing a rim is allowed, the middle
-    never); one with no free spot is HIDDEN (`data-side="none"`) until zoom gives it room, or hover,
-    focus or selection REVEALS it (`LabelItem.reveal`). ⚠ **Hover never moves a label**: a revealed label
-    is placed exactly as if it were not (same priority, same side), and only a label that would be hidden
-    is then shown — after every other label, so none moves — at its last side, else the first clear one.
-    Promoting it to `LABEL_ALWAYS` (placed first) made it jump sides and pushed its neighbours round; a
-    second cause was an inline label ref, re-run with null on every hover re-render, which dropped its
-    remembered side — `LabelView`'s refs are stable. Labels live in their own LAYER above every disc
-    (`LabelView`), the promoted ones drawn last (on top). Group names are not promoted either. Priority:
-    readable before faded, sprint before ghost, more links, larger. The side is written as CSS variables on `.sg-label` (`labelOffset`), never
-    by React. Halo names are placed first and are obstacles for every ticket label. Measured on workspace 1 at Fit, 1440×900: overlapping label pairs
-    went from 32 (Theme) / 33 (Epic) / 22 (Section) to 0 everywhere, with 69/78, 69/78, 76/78 and 74/87
-    (Epic + history) keys shown.
-  - **Nodes**: radius by degree (`nodeRadius`, 14–34, sized to read at Fit); the fourth stage is labelled
-    "Complete" (`SPRINT_STAGE_LABEL.done`; the key stays `'done'`, and a tracker status named "Done" keeps
-    its own word — the hover tip never adds the Complete stage); status THREE ways — a thick
-    ring (`ringWidth`), a dark tint of the ring colour as the fill (`discFill`; ghosts keep the plain
-    ground) and a centre mark from Icons.tsx (`statusGlyph`: empty circle, half circle, eye, tick, question
-    mark); Complete faded; ghosts smaller, dashed, fainter with depth; assignee avatar badge outside the
-    top-right rim (image through `safeExternalUrl`, initials when it fails), counter-scaled by CSS
-    `--sg-badge` (`badgeScale`) so it never drops below an 18px picture on screen, and an obstacle to
-    every label and name; HIDDEN when zoomed far out (`data-zoom='far'`, below `FAR_ZOOM`), where it
-    also reserves no halo room and blocks nothing (`hasBadge(id, k)`); PR satellites (open / merged filled, draft HOLLOW, a red ring for failing checks on an
-    OPEN PR; at most 12) — `SATELLITE_R` 5.5, STILL (no rotation), on `satelliteOrbit` just outside the
-    thickest ring (widened before dots touch), spaced over the arc the assignee badge leaves free
-    (`satellitesOf(prs, { r, badge })`), counter-scaled zoomed out (`.sg-sat`, `--sg-sat`, `satelliteScale`:
-    ≥ 4px on screen, at most ×2.5); a label sits past the dots (`nodeExtent`). **Edges**: `depends_on` a directed arrow (from → to), `concurrent` dashed,
-    `builds_on` / `supersedes` faint and thin (only with "Show builds on / replaces"; the key lists them
-    then). Every link is a gentle CURVE bowing to the left of its own direction (two opposite links
-    between one pair bow apart; parallel ones get alternating lanes), ending at the circle's edge with
-    the arrowhead along the curve. Hovering a node or an edge shows a tooltip-popover (status,
-    relations; an edge's label, then the brief's one-sentence `why`, then its quote only when it adds
-    words — `referenceWhy` / `referenceQuote`) — never `title=`.
-  - ⚠ **POSITIONS NEVER GO THROUGH REACT.** d3-force is the physics only (`d3-force`, no other graph
-    library); React renders each node / edge when what it SHOWS changes, and one rAF loop writes the
-    simulation's positions straight to the DOM. A JSX `transform` on a node (or `x1…y2` on an edge) would
-    be overwritten every frame — and re-rendering 125 nodes per frame is the jank this avoids (measured
-    ~60 fps on the real 136-node sprint). Labels and discs keep a readable SCREEN size at any zoom (CSS
-    `--sg-inv` / `--sg-disc` on the svg); zoomed out the titles hide (`data-zoom="far"`); which KEYS show is
-    the label placement's call (below), not a zoom threshold.
-  - **Motion is BRIEF, then the canvas is STILL.** Every layout is computed to rest before it is shown
-    and then ANIMATED in: on first load the tickets travel from another grouping (`introGroupMode`: Epic,
-    or Theme/Section when Epic is chosen; seeds `introSeeds`) over `INTRO_MS`, the halos fading in only
-    as they arrive; a re-layout eases each ticket from where it was (`RELAYOUT_MS`). For `SETTLE_MS` (5 s)
-    after load, a re-layout or a drag release the forces run and a drift turns the graph (fading,
-    `driftScale`; none under the pointer, nothing while a ticket is selected); then the rAF loop STOPS
-    itself — ⚠ there is no perpetual loop any more, so anything that moves must `wake()` it (or
-    `animateView`). `prefers-reduced-motion`: no tween, no loop — every layout and framing jumps.
-    ⚠ **Opening a ticket FRAMES it and its one-link neighbours** (`fitBoxIn`; the `uncoveredSpan` /
-    `drawerOpen` half that left room for the drawer is now always "no drawer"). SprintView bumps
-    `frameRequest` on every open, so re-opening the selected ticket re-frames it. Any reader zoom / pan
-    cancels an animated framing.
-    ⚠ **A refetch that lands MID-ANIMATION** (returning to the tab, the 15s brief poll, a refresh) used
-    to hold every ticket at its half-way spot and cancel the tween — stranded tickets and overlapping
-    halos until a reload. Now a redraw first moves each ticket to where the running animation would
-    land, keeps animating from where it is drawn for the time left (≥ 450 ms), and never cancels a
-    view animation. **The refresh bar** (3px, top of the canvas, `sprintProgress`): moving after
-    Refresh until the read's `read.checkedAt` moves (polled every 2.5s, 90s cap), during the first read
-    and a refetch slower than 400 ms; FILLING with the summarised share while briefs run; still under
-    reduced motion.
-    Drag a node to PIN it — per browser, per (workspace, sprint source) in localStorage through
-    `readPinned` / `writePinned` (try/catch; works without storage); "Reset layout" clears them.
-    The wheel and a trackpad pinch (sent as Ctrl + wheel) ZOOM about the pointer (`wheelZoomFactor`,
-    one notch capped) — the page is short, so the canvas may take the wheel (user decision 2026-10-13). Touch: the surface is `touch-action: pan-x pan-y`, so one
-    finger scrolls the page unless it starts on a ticket (a drag; nodes are `touch-action: none` and a
-    non-passive touchstart claims it); two fingers pinch-zoom (`pinchTransform`). Mouse drag on the
-    background pans; "Fit", +, −.
-  - **Filters** (section chips, assignee, epic/theme, Has PRs, Has dependencies) HIDE what they leave
-    out (`filterGraph`): the tickets, their links, an outside ticket no longer linked to a shown sprint
-    ticket, and any halo left empty (groups are recomputed over what is left). ⚠ An OUTSIDE ticket is
-    held to the SECTION filter only (it has no epic or theme; filtering to a person must keep the
-    outside work blocking them). A filter change re-packs what is left (`filterKey`) and the view follows
-    Fit; clearing restores the exact earlier layout. "N of M tickets" sits by Clear filters; nothing
-    left prints "No tickets match these filters." **Selecting** a node dims everything beyond one link ("2 hops" widens it); a
-    background click or "Show all" clears it.
-  - **Accessibility**: every node is a focusable `<g role="button">` with "KEY title, status, N PRs";
-    Enter / Space opens its story view; a visually hidden list repeats every ticket.
-  - **"Ask Claude about this sprint"** (`SprintAskPanel`, docked over the canvas's bottom-right corner;
-    shown only where `me.ai.enabled` and the response's `aiEnabled`): the transcript lives in the module
-    store `useSprintAskTranscript` (per workspace, memory only) and ⚠ the completed turn is appended in
-    `useSprintAsk`'s HOOK-level `onSuccess`. Answers render through `Markdown` with `ticketLinks` +
-    `rehypeTicketLinks` over the graph's keys; a key opens its story view (TicketRefLink.tsx →
-    `useOpenStory`). Each answer shows its cost in US$.
-  - Kept from the list era: `SprintStatusSettings` — now the BUCKET editor (add / rename / delete /
-    reorder buckets, a meaning select per bucket, statuses moved by drag and drop or the keyboard Move up /
-    down buttons across buckets, ticket counts, "not placed yet" on a status the buckets do not name,
-    the "Merged, not signed off" switch with its ⓘ, Save / Cancel / Reset to automatic; Save waits on
-    shared `sprintBucketsProblem`'s sentence; pure helpers in `sprintModel.ts`; docs/TRACKERS.md § The
-    status order and buckets),
-    pure `sprintModel.ts`. DELETED with the drawer (2026-10-18): `SprintTicketDrawer`,
-    `SprintAssessment`, `SprintCodeCheck`, `SprintCopyButton`, `lib/copy.ts`, the drawer's grouped
-    references and `Ticket/TicketPrsSections.tsx`. DELETED with the chips, findings,
-    highlights, checks and write-back: `SprintTicketCard`, `SprintTicketReview`, `SprintUpdatePanel`,
-    `SprintChecksPanel`, `SprintDiffText`, `useTicketDraft`, `lib/ticketDraft.ts`,
-    `lib/storyHighlights.ts`, `lib/wordDiff.ts` and the `.story-mark` / `.story-rev` CSS.
+- **THE FORCE GRAPH IS DELETED (2026-10-18)** — `SprintGraph.tsx`, `sprintGraphModel.ts`,
+  `SprintPathsStrip.tsx`, `sprintReferences.ts`, the `.sprint-canvas` CSS and their tests, with the
+  group-by, split, filter, "2 hops", pinning and zoom controls. ⚠ Do not bring a canvas back: the three
+  views below are the ONE way the sprint is drawn. test/storyView.test.ts scans that nothing imports them.
+
+- **THE LANE BOARD** (`components/LaneBoard.tsx`, pure layout `lib/laneBoard.ts`,
+  test/laneBoard.test.ts) — ONE renderer for all three views, built from the DESIGN GRID's pieces (§ Design
+  diagrams), so the app draws one way:
+  - **COLUMNS are `statusLayout.columns`, verbatim** — the workspace's status buckets in order (the gear's
+    bucket editor) plus the derived "Merged, not signed off" (`SprintGraphNode.column`, computed ONCE in
+    the server's fold — the SPA never re-derives it). Two pseudo-columns appear only when a card needs
+    one: "Outside the sprint" at the LEFT (Critical path only) and "Status not known" at the right.
+    Each header shows its card count. ⚠ **A Complete bucket (meaning `done`, never the derived column) is
+    COLLAPSED by default** — a narrow column of per-lane counts ("4 tickets") and a "Show" button
+    (`aria-expanded`); each view keeps its own open set, in component state. A collapsed column draws no
+    arrows.
+  - **LANES** down, each as many grid rows as its fullest cell (cards stack inside a cell; `layoutBoard`).
+    An empty lane is not drawn. Lanes alternate a faint ground under a rule. The lane label is a side
+    column; below 760px it moves to a band heading above the lane's cards, as the design grid's layer
+    names do. Below the columns' minimum widths the board scrolls INSIDE its own box, never the page.
+  - **ARROWS** are `depends_on` edges between two DRAWN cards, FROM the ticket waited on TO the one that
+    waits, routed by `routeArrow` (lib/designGrid.ts) through the padded slots and grid gaps and
+    re-measured by a ResizeObserver (`useRoutedArrows`; it re-renders only when the drawing changes, so a
+    caller's un-memoised arrays cannot loop). A critical arrow is the accent (`--ai-signal-fill`). A
+    labelled arrow carries a number keyed in ONE line under the board (`ArrowKey`); arrows with the SAME
+    words share a number. An sr-only list ("Dependencies") reads every arrow as "B waits on A: why".
+    ⚠ `useRoutedArrows`, `ArrowLayer`, `ArrowKey` and `ArrowList` are SHARED with `DesignGrid`, which
+    kept its look; change them for both or neither.
+  - **ONE CARD, `TicketCard`** (`components/TicketCard.tsx`), for every view: the key (mono), the title
+    (two lines), the theme (People), then the tags as WORDS (`ticketCardTags`: "CI failing" on an open
+    PR's red checks, "No PR" or "n PRs · m open" — closed unmerged ones ignored —, "No owner") and the
+    assignee's initials (Critical path, Theme). The BORDER marks state by style (`ticketCardBorder`): 2px
+    solid accent = on a stored critical path; dashed = waiting on another unfinished ticket
+    (`waitingIdents`); both = dashed accent; outside the sprint = FAINT, 1px dashed on a tinted ground,
+    whatever else it is. Its accessible name says all of it. ⚠ **The card is a button that opens the
+    STORY VIEW** (`useOpenStory`, § The story view); nothing else opens from the board.
+
+- **CRITICAL PATH** (`SprintPathsView`, `Activity/SprintBoards.tsx`; state fold `sprintPathsModel.ts`):
+  1. **The pace strip** — CODE's `pace` (`paceItems`), every figure with its denominator: "Day 4 of 14"
+     with a time bar, "Code merged 21 of 55", "Merged, not signed off 15 of 55" (only while that column
+     is on), "Complete 17 of 55", "Open dependencies 6 in 3 chains".
+  2. **"Critical paths"** (ⓘ beside it) — one lane per STORED path (`pathsBoard`; riskiest first as
+     stored), its header the risk as a WORD chip ("High risk" / "Medium risk" / "Low risk"), the title and
+     the one sentence of advice; its tickets on their columns, every arrow on it critical. A ticket
+     outside the sprint sits faint in "Outside the sprint". The state line (`sprintPathsView`, the server's
+     `pathsStatus`): "Working out the critical paths…" with a small bar while `writing`; when they will
+     come (`queued` / `waiting`) or why they could not ("Couldn't find the critical paths. <reason> Limn
+     tries again …"); AI off → "Claude is off here, so there are no critical paths."; none found → the
+     heading reads "No critical paths in this sprint." ⚠ STALE paths are ALWAYS shown, with "Updating" or
+     the failure line.
+  3. **Call-outs** — Claude's (≤ 3, "Call-out") then Limn's own code cards from `signals` ("Since you last
+     looked", "Out of step", "Blocked outside the sprint"; "Pace" is the strip, so it is not repeated),
+     each with its ticket keys as buttons that open the story view.
+  4. **The count table** (`countTable`) — every sprint ticket once, by theme (+ Other) and column, with
+     totals.
+  With no paths stored the pace strip, call-outs and table still show.
+- **THEME** (`SprintThemesView`, `themesBoard`) — one lane per stored theme (the theme pass's order,
+  largest first), then "Other" for tickets no theme holds; no themes at all → one "All tickets" lane and
+  one line saying why ("Themes appear after Claude reads the sprint." / Claude is off). Header: "n live ·
+  m merged" (live = not Complete; merged = ≥ 1 merged PR and none open) and a small segmented bar per
+  column (`role="img"`, its name lists every part; the words carry the numbers). Sprint tickets only.
+  An arrow is critical when its two tickets sit next to each other on a stored path; its key is the
+  brief's `why`.
+- **PEOPLE** (`SprintPeopleView`, `peopleBoard`) — one lane per assignee, ⚠ **ALPHABETICAL, Unassigned
+  last, never sorted by load** (prep, not scoring — the People report's guardrail). A person is
+  `SprintGraphResponse.people`'s (shared `sprintMembers`), matched on the tracker spelling. Header: "n
+  tickets" and, ONLY when `reviewsWaiting` is a number, "n reviews waiting" — null prints nothing, never
+  0. Cards carry their theme. An arrow BETWEEN two lanes is a hand-off keyed "<person> waits on
+  <person>"; one inside a lane keys the brief's `why`.
+
+- **The toolbar**: the sprint's title + ⓘ ("Reading this sprint": the views, columns, borders, arrows),
+  its dates (`sprintDatesLine`: "14 Oct – 27 Oct · day 1 of 14" from `sprintDates`, the day count from
+  shared `sprintDayOf`; an end on midnight shows the day before; "due 28 Oct" / "starts in 2 days" /
+  "ended"), "n tickets", Ask Claude, Statuses (the gear) and Refresh. Under it ONE thin progress bar
+  (`SprintProgressBar`, `sprintProgress`): moving after Refresh until `read.checkedAt` moves (polled every
+  2.5 s, 90 s cap), during the first read and a refetch slower than 400 ms; FILLING with the summarised
+  share while briefs run; "Working out the critical paths" while the builder runs; still under reduced
+  motion. Truncation and "Summarising n tickets…" are one muted line.
+- **"Ask Claude about this sprint"** (`SprintAskPanel`, inline under the toolbar — never a fixed
+  bottom-right element; shown only where `me.ai.enabled` and the response's `aiEnabled`): the transcript
+  lives in the module store `useSprintAskTranscript` (per workspace, memory only) and ⚠ the completed turn
+  is appended in `useSprintAsk`'s HOOK-level `onSuccess`. Answers render through `Markdown` with
+  `ticketLinks` + `rehypeTicketLinks` over the sprint's keys; a key opens its story view (TicketRefLink.tsx
+  → `useOpenStory`). Each answer shows its cost in US$.
+- **Statuses** (`SprintStatusSettings`) — the BUCKET editor (add / rename / delete / reorder buckets, a
+  meaning select per bucket, statuses moved by drag and drop or the keyboard Move up / down buttons across
+  buckets, ticket counts, "not placed yet" on a status the buckets do not name, the "Merged, not signed
+  off" switch with its ⓘ, Save / Cancel / Reset to automatic; Save waits on shared
+  `sprintBucketsProblem`'s sentence; pure helpers in `sprintModel.ts`; docs/TRACKERS.md § The status
+  order and buckets). A save moves every view's columns at once.
+- DELETED with the drawer (2026-10-18): `SprintTicketDrawer`, `SprintAssessment`, `SprintCodeCheck`,
+  `SprintCopyButton`, `lib/copy.ts`, the drawer's grouped references and `Ticket/TicketPrsSections.tsx`.
+  DELETED with the chips, findings, highlights, checks and write-back: `SprintTicketCard`,
+  `SprintTicketReview`, `SprintUpdatePanel`, `SprintChecksPanel`, `SprintDiffText`, `useTicketDraft`,
+  `lib/ticketDraft.ts`, `lib/storyHighlights.ts`, `lib/wordDiff.ts` and the `.story-mark` / `.story-rev`
+  CSS.
 - **Merged so far** (`?activityRepo=sprint&sprintTab=merged`, `MergedPrsView.tsx`) — the Open PRs
   page over the work that LANDED: every PR merged in the
   REPORTING WINDOW from `GET /api/merged-prs` (`useMergedPrs`, `ws:<id>` key, no capability gate), header named through `reportingWindowText.ts` + "N pull requests merged".
@@ -4522,7 +4416,10 @@ test/designGrid.test.ts).
   (leaving off-centre, so it never shares a straight arrow's line). Re-measured by a ResizeObserver.
   A labelled arrow carries a NUMBER on its longest run, keyed in one line under the grid (a 20-40px
   gap is too narrow for words, and a label there covered card text). `aria-hidden`; the same
-  hand-offs are an sr-only list. Cards read row by row.
+  hand-offs are an sr-only list. Cards read row by row. ⚠ The router hook (`useRoutedArrows`), the arrow
+  layer with its numbered markers (`ArrowLayer`), the key (`ArrowKey`) and the sr-only list (`ArrowList`)
+  live in `components/LaneBoard.tsx` and are SHARED with This Sprint's lane board (§ Activity → This
+  Sprint), so the two draw one way; change them for both.
 - **Click-through**: a card with files is a button. One file opens it; several open a small list
   (a floating-ui popover, the ONE open popover via `claimActivePopover`), each row opening its file.
   THIS PR's file → the review tab's `onOpenInChanges` (PrDetail's `openInChanges`: Changes tab, then

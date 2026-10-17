@@ -26,7 +26,7 @@ export function sprintGraphKey(workspaceId: number | null): [string, string] {
   return ['sprint-graph', workspaceKey(workspaceId)];
 }
 
-/** Everything that reads the sprint for this workspace: the graph and every story view's ticket text. */
+/** Everything that reads the sprint for this workspace: the sprint boards and every story view's ticket text. */
 function invalidateSprint(qc: ReturnType<typeof useQueryClient>, workspaceId: number | null): void {
   void qc.invalidateQueries({ queryKey: sprintGraphKey(workspaceId) });
   void qc.invalidateQueries({ queryKey: ['ticket-story', workspaceKey(workspaceId)] });
@@ -71,7 +71,7 @@ export function useSprintRefreshing(workspaceId: number | null): boolean {
 }
 
 /** Replace the workspace's status buckets override (`{buckets, mergedColumn}`). `{buckets: null,
- *  mergedColumn: true}` = back to automatic. The layout lands at once; the graph refetches because
+ *  mergedColumn: true}` = back to automatic. The layout lands at once; the sprint refetches because
  *  every node's stage and column move with it. */
 export function useSprintSetStatuses(workspaceId: number | null) {
   const qc = useQueryClient();
