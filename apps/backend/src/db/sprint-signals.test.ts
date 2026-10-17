@@ -35,6 +35,8 @@ const N = (key: string, stage: SprintStage | null, o: Partial<SprintGraphNode> =
   depth: 0,
   status: null,
   stage,
+  bucketId: stage,
+  column: stage,
   issueType: null,
   assignee: null,
   epic: null,

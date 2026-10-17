@@ -4095,15 +4095,23 @@ check(
   // refuses rather than writing onto A's Default. MUTATION CHECK: drop the accountId predicate from
   // `setSprintStatusSettings` and the first check goes red.
   const statusSettings = await import('../src/db/sprint-status-settings.js');
-  const bOrder = { sections: { not_started: ['To Do'], in_progress: [], in_review: ['Doing'], done: ['Done'] } };
-  const bReview = async () => (await statusSettings.getSprintStatusSettings(2, defaultB)).sections?.in_review[0];
+  const bucketsOf = (review: string) => ({
+    buckets: [
+      { id: 'todo', name: 'To do', meaning: 'not_started' as const, statuses: ['To Do'] },
+      { id: 'review', name: 'Review', meaning: 'in_review' as const, statuses: [review] },
+      { id: 'done', name: 'Done', meaning: 'done' as const, statuses: ['Done'] },
+    ],
+    mergedColumn: true,
+  });
+  const bOrder = bucketsOf('Doing');
+  const bReview = async () => (await statusSettings.getSprintStatusSettings(2, defaultB)).buckets?.find((b) => b.id === 'review')?.statuses[0];
   await statusSettings.setSprintStatusSettings(2, defaultB, bOrder);
   check(
     "setSprintStatusSettings(A, B's workspace) writes nothing",
-    (await statusSettings.setSprintStatusSettings(1, defaultB, { sections: { not_started: [], in_progress: [], in_review: ['X'], done: [] } })) === false &&
+    (await statusSettings.setSprintStatusSettings(1, defaultB, bucketsOf('X'))) === false &&
       (await bReview()) === 'Doing',
   );
-  check("getSprintStatusSettings(A, B's workspace) never reads B's order", (await statusSettings.getSprintStatusSettings(1, defaultB)).sections == null);
+  check("getSprintStatusSettings(A, B's workspace) never reads B's order", (await statusSettings.getSprintStatusSettings(1, defaultB)).buckets == null);
   const contract = await import('../src/pro/contract.js');
   const savedCaps = contract.getProCapabilities();
   contract.setProCapabilities({ ...contract.EMPTY_CAPABILITIES, periodReports: true });
@@ -4120,7 +4128,8 @@ check(
     const res = await sapp.inject({
       method: 'PUT',
       url: '/api/sprint-stories/statuses',
-      payload: { workspaceId: defaultB, settings: { sections: { not_started: [], in_progress: [], in_review: ['X'], done: [] } } },
+      // A VALID body, so the 400 can only be the workspace refusal.
+      payload: { workspaceId: defaultB, settings: bucketsOf('X') },
     });
     check(
       "PUT /api/sprint-stories/statuses with B's workspace as A → 400, B's override intact",

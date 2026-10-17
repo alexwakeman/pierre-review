@@ -231,16 +231,37 @@ pg `0090`. They feed the "Blocked" story issue (docs/CLAUDE-REVIEW.md § Story i
 - `status_id` (both tables) stores the tracker's own status id (Jira `status.id`, Linear state id) —
   a board's column order is written in ids. GitHub has none.
 
-## The status order — This sprint's four stages and their sections (`sprint_reads.status_order_json`)
+## The status order and buckets — This sprint's columns (`sprint_reads.status_order_json`)
 
-Statuses are per project and per tracker, so nothing hard-codes a name. Every status sits in ONE of four
-stages — Not started, In progress, In review, Complete — in an order. The sprint list read stores the
-AUTOMATIC order (shared `SprintStatusAutoOrder`) with the list; a person may place any status in any
-stage, in any order, per workspace (`workspaces.sprint_statuses` = `{sections}`,
-`db/sprint-status-settings.ts`, `PUT /api/sprint-stories/statuses`). ⚠ Placement beats category, and a
-status the override does not name keeps its automatic stage and position. A stored value of the
-retired `{order, deliveredFrom}` shape is converted on read (no migration). "Coding begins" / "Coding
-ends" = the first status of In progress / In review, derived.
+Statuses are per project and per tracker, so nothing hard-codes a name. The sprint list read stores the
+AUTOMATIC order (shared `SprintStatusAutoOrder`) with the list. Every status sits in ONE **bucket**; a
+bucket has an id, a name (≤ 24 characters) and a **meaning** — one of the four stages Not started, In
+progress, In review, Complete. A ticket's `stage` is its bucket's meaning, so every reader of `stage`
+works whatever the buckets are.
+
+- **Automatic** (`buckets: null`): four buckets, one per stage (id = the stage, named
+  `SPRINT_STAGE_LABEL`), each status in the bucket of its automatic stage (below). "Won't do" is a
+  done-category status, so it lands in Complete.
+- **The workspace's buckets** (`workspaces.sprint_statuses` = `{buckets, mergedColumn}`,
+  `db/sprint-status-settings.ts`, `PUT /api/sprint-stories/statuses`, edited from This Sprint's gear):
+  1–10 buckets in reading order; meanings must be NON-DECREASING (two In review buckets are fine, a Not
+  started bucket after a Complete one is not); a status in at most one bucket; ≤ 60 statuses in all.
+  Every refusal is ONE plain sentence from shared `sprintBucketsProblem`, which the editor runs before
+  Save and the route returns as the 400's `message`. ⚠ Placement beats category. ⚠ A status no bucket
+  names (new on the board since) keeps its automatic stage and joins the FIRST bucket with that
+  meaning; with none, the bucket of the NEAREST meaning (the earlier one on a tie); either way it is
+  `auto: true` and the editor marks it "not placed yet".
+- **The merged column** (`mergedColumn`, default on): a DERIVED column, "Merged, not signed off" (id
+  `merged`, never a bucket id), drawn after the last In review bucket — else after the last In progress
+  bucket, else before the first Complete bucket, else last. A ticket is drawn there when its bucket
+  means In progress or In review and it has ≥ 1 merged PR and none open (closed unmerged ones
+  ignored). `SprintGraphNode.column` carries it, computed ONCE in the graph fold
+  (`sprintColumnOf`); `statusLayout.columns` is the drawn x axis.
+- **Retired shapes are converted on read, no migration**: `{sections}` (per-stage lists) and the older
+  `{order, deliveredFrom}` both become four buckets named `SPRINT_STAGE_LABEL`. Only the new shape may
+  be POSTED. The default (`{buckets: null, mergedColumn: true}`) is stored as NULL.
+- "Coding begins" / "Coding ends" = the first status of the first In progress / In review bucket,
+  derived.
 
 - **Jira** (`tracker/sprint/jira.ts`): the board of the active sprints holding the most tickets
   (`boardId` on a Cloud sprint object, `rapidViewId=` in an old Server string) →

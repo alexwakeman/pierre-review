@@ -2328,7 +2328,12 @@ Viewing the graph still stamps `sprint_reads.viewed_at`, which is what lets the 
     `useSprintAsk`'s HOOK-level `onSuccess`. Answers render through `Markdown` with `ticketLinks` +
     `rehypeTicketLinks` over the graph's keys; `TicketRefOpenContext` (TicketRefLink.tsx) lets a key on
     the graph open in the drawer. Each answer shows its cost in US$.
-  - Kept from the list era: `SprintStatusSettings` (four lists, drag and drop + Move up / down),
+  - Kept from the list era: `SprintStatusSettings` — now the BUCKET editor (add / rename / delete /
+    reorder buckets, a meaning select per bucket, statuses moved by drag and drop or the keyboard Move up /
+    down buttons across buckets, ticket counts, "not placed yet" on a status the buckets do not name,
+    the "Merged, not signed off" switch with its ⓘ, Save / Cancel / Reset to automatic; Save waits on
+    shared `sprintBucketsProblem`'s sentence; pure helpers in `sprintModel.ts`; docs/TRACKERS.md § The
+    status order and buckets),
     `SprintCopyButton` + `lib/copy.ts`, pure `sprintModel.ts`. DELETED with the chips, findings,
     highlights, checks and write-back: `SprintTicketCard`, `SprintTicketReview`, `SprintUpdatePanel`,
     `SprintChecksPanel`, `SprintDiffText`, `useTicketDraft`, `lib/ticketDraft.ts`,

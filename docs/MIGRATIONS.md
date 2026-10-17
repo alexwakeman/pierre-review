@@ -1224,6 +1224,9 @@ suggestions are the accepted set by default (`effectiveSprintRepos`); a ticket w
 `sprint_ticket_repos` rows but no stamp counts as saved. The sprint read's upsert never sets it; a
 pruned row takes it with it. The same release changes the SHAPE of `workspaces.sprint_statuses` to
 `{sections}` (four stages) with NO migration: a stored `{order, deliveredFrom}` is converted on read.
+(2026-10-17: the shape moved again, to `{buckets, mergedColumn}` — user-defined status buckets — also
+with NO migration; both older shapes are converted on read. docs/TRACKERS.md § The status order and
+buckets.)
 Journal `when` `1792051204000`. ⚠ pg `0091` NOT replayed.
 
 ### `0106_sprint_ref_tickets` (pg `0093`) — referenced tickets' status

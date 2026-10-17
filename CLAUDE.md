@@ -1226,7 +1226,10 @@ last 13 weeks' stories (`db/story-health.ts`); This Sprint makes BRIEFS, not lab
 **Activity → This Sprint** (FREE — its own rail line under Pending, `?activityRepo=sprint`; legacy
 `?insightsTab=sprint|merged` lands there): the GRAPH and "Merged so far" (`?sprintTab=merged`).
 `GET /api/sprint-graph` + `…/ticket` (DB only): nodes = sprint tickets + GHOSTS
-(≤ 3 hops / 60), staged by `db/sprint-status-layout.ts`, + PRs; edges = a blocking tracker link or a
+(≤ 3 hops / 60), + PRs, each placed in the workspace's STATUS BUCKETS (`db/sprint-status-layout.ts`;
+user-defined name + meaning, meanings non-decreasing; `stage` = the bucket's meaning) and given ONE
+`column` in the fold — its bucket, or the derived "Merged, not signed off" (all PRs merged, none open);
+docs/TRACKERS.md § The status order and buckets. Edges = a blocking tracker link or a
 CURRENT BRIEF's depends_on / concurrent / builds_on / supersedes, each with the brief's one-sentence
 `why` — ONE fold (`db/sprint-graph-fold.ts`). The BRIEF (Haiku, `review/sprint-briefs/`, after each read,
 never a view): summary + criteria + references + a `why` per reference AND tracker link; current on

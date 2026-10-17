@@ -10,7 +10,7 @@ import { config } from '../../config.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
 import { getSprintGraph, getSprintTicketDetail } from '../../db/sprint-graph.js';
 import { resolveSprintStatusLayout, sprintLayoutFor } from '../../db/sprint-status-layout.js';
-import { parseSprintStatusSettings, setSprintStatusSettings } from '../../db/sprint-status-settings.js';
+import { parseSprintStatusSettingsStrict, setSprintStatusSettings } from '../../db/sprint-status-settings.js';
 import { suggestSprintRepos, suggestTicketOf } from '../../db/sprint-repo-suggest.js';
 import { readSprintTicket } from '../../db/sprint-store.js';
 import { setSprintRepos } from '../../db/sprint-ticket-repos.js';
@@ -26,7 +26,7 @@ import { accountIdOf } from '../plugins/auth.js';
 //   GET /api/sprint-graph?workspace=<id>                the graph (DB only; stamps the view, kicks a due read) → read
 //   GET /api/sprint-graph/ticket?workspace=<id>&ident=  the drawer for one node (DB only)                    → read
 //   PUT /api/sprint-stories/repos                       replace ONE ticket's accepted candidate repos        → read
-//   PUT /api/sprint-stories/statuses                    replace the workspace's status stages and order      → read
+//   PUT /api/sprint-stories/statuses                    replace the workspace's status buckets               → read
 
 const IDENT_MAX = 600;
 
@@ -62,16 +62,22 @@ export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  // The status layout override (shared `SprintStatusesUpdate`). ⚠ Status names belong to ONE
+  // The status buckets override (shared `SprintStatusesUpdate`). ⚠ Status names belong to ONE
   // workspace's tracker, so an id that does not resolve to itself (unknown, another tenant's) is
   // refused rather than written onto the caller's Default.
   app.put('/api/sprint-stories/statuses', async (req, reply): Promise<SprintStatusesResponse | ErrorBody> => {
     const body = (req.body ?? {}) as { workspaceId?: unknown; settings?: unknown };
-    const settings = parseSprintStatusSettings(body.settings, true);
-    if (typeof body.workspaceId !== 'number' || !Number.isSafeInteger(body.workspaceId) || settings == null) {
+    if (typeof body.workspaceId !== 'number' || !Number.isSafeInteger(body.workspaceId)) {
       reply.status(400);
       return { error: 'bad_request', message: 'Send a workspaceId and the status settings.' };
     }
+    // The problem in plain words (shared `sprintBucketsProblem`) is the message the editor shows.
+    const parsed = parseSprintStatusSettingsStrict(body.settings);
+    if (!parsed.ok) {
+      reply.status(400);
+      return { error: 'bad_request', message: parsed.message };
+    }
+    const settings = parsed.settings;
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, String(body.workspaceId));
     if (scope.workspaceId !== body.workspaceId) {

@@ -2,8 +2,9 @@ import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // Activity → This Sprint — the status layout's DB half on a SCRATCH SQLite (never apps/backend/data):
-//   • parseSprintStatusSettings: strict on a post (not the four stage keys, a non-array stage, bad /
-//     long / control-character names, one name in two stages, too many), tolerant on a stored value;
+//   • parseSprintStatusSettings: strict on a post (each refusal's plain message: no buckets, too many,
+//     ids, names, meanings going backwards, a status in two buckets, bad / long / control-character
+//     names, too many), tolerant on a stored value (the retired {sections} and {order, deliveredFrom});
 //   • get/set: the default stored as NULL, account + workspace predicated (another tenant's
 //     workspace → false, nothing written);
 //   • loadSprintStatusEvidence: this workspace + site only, closed-unmerged PRs ignored, another
@@ -139,56 +140,82 @@ afterAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
 });
 
+type Stage = 'not_started' | 'in_progress' | 'in_review' | 'done';
+const B = (id: string, name: string, meaning: Stage, statuses: unknown[] = []) => ({ id, name, meaning, statuses });
+const sec = (s: { buckets: Array<{ id: string; statuses: string[] }> | null } | null) =>
+  s?.buckets == null ? null : Object.fromEntries(s.buckets.map((b) => [b.id, b.statuses]));
+
 describe('parseSprintStatusSettings', () => {
   const strict = (v: unknown) => settings.parseSprintStatusSettings(v, true);
+  const why = (v: unknown) => {
+    const p = settings.parseSprintStatusSettingsStrict(v);
+    return p.ok ? null : p.message;
+  };
   const tolerant = (v: unknown) => settings.parseSprintStatusSettings(v, false);
-  const sec = (o: Partial<Record<'not_started' | 'in_progress' | 'in_review' | 'done', unknown>>) => ({
-    sections: { not_started: [], in_progress: [], in_review: [], done: [], ...o },
-  });
 
-  it('accepts a clean post, trimming names; nothing named or null → automatic', () => {
-    expect(strict(sec({ not_started: [' To Do '], in_review: ['In Dev'] }))).toEqual({
-      sections: { not_started: ['To Do'], in_progress: [], in_review: ['In Dev'], done: [] },
+  it('accepts a clean post, trimming names; buckets null → automatic; mergedColumn defaults on', () => {
+    expect(strict({ buckets: [B('a', ' To do ', 'not_started', [' To Do ']), B('b', 'QA', 'in_review', ['In Dev'])], mergedColumn: false })).toEqual({
+      buckets: [B('a', 'To do', 'not_started', ['To Do']), B('b', 'QA', 'in_review', ['In Dev'])],
+      mergedColumn: false,
     });
-    expect(strict({ sections: null })).toEqual({ sections: null });
-    expect(strict(sec({}))).toEqual({ sections: null });
+    expect(strict({ buckets: null })).toEqual({ buckets: null, mergedColumn: true });
+    // Two review buckets; no bucket of some meaning is fine.
+    expect(strict({ buckets: [B('r1', 'QA', 'in_review'), B('r2', 'PO review', 'in_review')], mergedColumn: true })).not.toBeNull();
   });
 
-  it('refuses a malformed post', () => {
+  it('refuses a malformed post, saying what is wrong in plain words', () => {
     expect(strict(null)).toBeNull();
     expect(strict([])).toBeNull();
     expect(strict({})).toBeNull();
     expect(strict({ order: ['To Do'], deliveredFrom: null })).toBeNull();
-    expect(strict({ sections: [] })).toBeNull();
-    expect(strict({ sections: { not_started: [], in_progress: [], in_review: [] } })).toBeNull();
-    expect(strict({ sections: { not_started: [], in_progress: [], in_review: [], done: [], extra: [] } })).toBeNull();
-    expect(strict(sec({ done: 'Done' }))).toBeNull();
-    expect(strict(sec({ not_started: ['To Do'], done: ['to do'] }))).toBeNull();
-    expect(strict(sec({ done: [''] }))).toBeNull();
-    expect(strict(sec({ done: [3] }))).toBeNull();
-    expect(strict(sec({ done: ['a\u0000b'] }))).toBeNull();
-    expect(strict(sec({ done: ['x'.repeat(101)] }))).toBeNull();
-    expect(strict(sec({ in_progress: Array.from({ length: 31 }, (_, i) => `S${i}`), in_review: Array.from({ length: 30 }, (_, i) => `R${i}`) }))).toBeNull();
+    expect(strict({ sections: null })).toBeNull();
+    expect(why({ buckets: {} })).toBe('Send the buckets as a list.');
+    expect(why({ buckets: [] })).toBe('Keep at least one bucket.');
+    expect(why({ buckets: Array.from({ length: 11 }, (_, i) => B(`b${i}`, `B${i}`, 'done')) })).toBe('Use at most 10 buckets.');
+    expect(why({ buckets: [B('a', 'A', 'done'), B('a', 'B', 'done')] })).toBe('Each bucket needs its own id.');
+    expect(why({ buckets: [B('merged', 'A', 'done')] })).toBe('Each bucket needs its own id.');
+    expect(why({ buckets: [B('a', '  ', 'done')] })).toBe('Give every bucket a name.');
+    expect(why({ buckets: [B('a', 'x'.repeat(25), 'done')] })).toBe('Keep bucket names to 24 characters.');
+    expect(why({ buckets: [B('a', 'Same', 'done'), B('b', 'same', 'done')] })).toBe('Two buckets are called “same”.');
+    expect(why({ buckets: [B('a', 'A', 'nope' as Stage)] })).toBe('Choose what “A” means.');
+    expect(why({ buckets: [B('a', 'Done', 'done'), B('b', 'To do', 'not_started')] })).toBe(
+      '“To do” means Not started, so it cannot come after a bucket that means Complete.',
+    );
+    expect(why({ buckets: [B('a', 'A', 'done', ['To Do']), B('b', 'B', 'done', ['to do'])] })).toBe('“to do” is in two buckets.');
+    expect(why({ buckets: [B('a', 'A', 'done', [''])] })).toBe('A status name is not valid.');
+    expect(why({ buckets: [B('a', 'A', 'done', [3])] })).toBe('A status name is not valid.');
+    expect(why({ buckets: [B('a', 'A', 'done', ['a\u0000b'])] })).toBe('A status name is not valid.');
+    expect(why({ buckets: [B('a', 'A', 'done', ['x'.repeat(101)])] })).toBe('A status name is not valid.');
+    expect(why({ buckets: [B('a', 'A', 'done', Array.from({ length: 61 }, (_, i) => `S${i}`))] })).toBe('Place at most 60 statuses.');
+    expect(why({ buckets: null, mergedColumn: 'yes' })).toBe('Say whether to show the merged column.');
   });
 
-  it('reads a stored value tolerantly, the retired shape included', () => {
-    expect(tolerant(null)).toEqual({ sections: null });
-    expect(tolerant('junk')).toEqual({ sections: null });
-    expect(tolerant({ sections: { done: ['A', 'a', 3, ''] } })).toEqual({ sections: { not_started: [], in_progress: [], in_review: [], done: ['A'] } });
+  it('reads a stored value tolerantly, the retired shapes included', () => {
+    expect(tolerant(null)).toEqual({ buckets: null, mergedColumn: true });
+    expect(tolerant('junk')).toEqual({ buckets: null, mergedColumn: true });
+    expect(sec(tolerant({ sections: { done: ['A', 'a', 3, ''] } }))).toEqual({ not_started: [], in_progress: [], in_review: [], done: ['A'] });
     // No categories handed in: every retired status reads as in progress until deliveredFrom.
-    expect(tolerant({ order: ['A', 'B'], deliveredFrom: 'b' })).toEqual({ sections: { not_started: [], in_progress: ['A'], in_review: ['B'], done: [] } });
+    expect(sec(tolerant({ order: ['A', 'B'], deliveredFrom: 'b' }))).toEqual({ not_started: [], in_progress: ['A'], in_review: ['B'], done: [] });
+    // Bad buckets dropped, good ones kept.
+    expect(tolerant({ buckets: [B('a', 'A', 'in_progress', ['X', 'x']), { id: 'B!', name: 'B', meaning: 'done', statuses: [] }], mergedColumn: false })).toEqual({
+      buckets: [B('a', 'A', 'in_progress', ['X'])],
+      mergedColumn: false,
+    });
   });
 });
 
 describe('get / set', () => {
-  const S = { not_started: [], in_progress: ['In Development'], in_review: ['Ready for QA'], done: [] };
+  const S = { buckets: [B('dev', 'Building', 'in_progress', ['In Development']), B('qa', 'QA', 'in_review', ['Ready for QA'])], mergedColumn: true };
   it('stores overrides, the default as NULL, and refuses another tenant’s workspace', async () => {
-    expect(await settings.setSprintStatusSettings(1, wsA, { sections: S })).toBe(true);
-    expect(await settings.getSprintStatusSettings(1, wsA)).toEqual({ sections: S });
-    expect(await settings.getSprintStatusSettings(1, wsA2)).toEqual({ sections: null });
-    expect(await settings.setSprintStatusSettings(1, wsB, { sections: S })).toBe(false);
-    expect(await settings.getSprintStatusSettings(2, wsB)).toEqual({ sections: null });
-    expect(await settings.setSprintStatusSettings(1, wsA, { sections: null })).toBe(true);
+    expect(await settings.setSprintStatusSettings(1, wsA, S as any)).toBe(true);
+    expect(await settings.getSprintStatusSettings(1, wsA)).toEqual(S);
+    expect(await settings.getSprintStatusSettings(1, wsA2)).toEqual({ buckets: null, mergedColumn: true });
+    expect(await settings.setSprintStatusSettings(1, wsB, S as any)).toBe(false);
+    expect(await settings.getSprintStatusSettings(2, wsB)).toEqual({ buckets: null, mergedColumn: true });
+    // Automatic buckets with the merged column off is NOT the default: it is stored.
+    expect(await settings.setSprintStatusSettings(1, wsA, { buckets: null, mergedColumn: false })).toBe(true);
+    expect(await settings.getSprintStatusSettings(1, wsA)).toEqual({ buckets: null, mergedColumn: false });
+    expect(await settings.setSprintStatusSettings(1, wsA, { buckets: null, mergedColumn: true })).toBe(true);
     const [r] = await db.select({ v: schema.workspaces.sprintStatuses }).from(schema.workspaces).where((await import('drizzle-orm')).eq(schema.workspaces.id, wsA)).execute();
     expect(r.v).toBeNull();
   });
@@ -211,7 +238,10 @@ describe('evidence and the layout', () => {
       'Done:1:done',
     ]);
     expect([l?.codingBegins, l?.codingEnds]).toEqual(['In Development', 'Ready for QA']);
-    await settings.setSprintStatusSettings(1, wsA, { sections: { not_started: [], in_progress: [], in_review: ['In Development'], done: [] } });
+    await settings.setSprintStatusSettings(1, wsA, {
+      buckets: settings.sectionsToBuckets({ not_started: [], in_progress: [], in_review: ['In Development'], done: [] }),
+      mergedColumn: true,
+    });
     const set = await layout.sprintLayoutFor(1, wsA);
     expect(set?.orderSource).toBe('override');
     expect(set?.codingBegins).toBeNull();
@@ -224,8 +254,8 @@ describe('evidence and the layout', () => {
       .where(eq(schema.workspaces.id, wsA))
       .execute();
     const legacy = await layout.sprintLayoutFor(1, wsA);
-    expect(legacy?.settings.sections).toEqual({ not_started: ['To Do'], in_progress: [], in_review: ['In Development', 'Ready for QA'], done: ['Done'] });
-    await settings.setSprintStatusSettings(1, wsA, { sections: null });
+    expect(sec(legacy?.settings ?? null)).toEqual({ not_started: ['To Do'], in_progress: [], in_review: ['In Development', 'Ready for QA'], done: ['Done'] });
+    await settings.setSprintStatusSettings(1, wsA, { buckets: null, mergedColumn: true });
     // Never read: no site, no layout.
     expect(await layout.sprintLayoutFor(1, wsA2)).toBeNull();
   });

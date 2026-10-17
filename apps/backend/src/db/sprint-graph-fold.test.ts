@@ -165,4 +165,27 @@ describe('foldSprintGraph', () => {
     expect(r.nodes[0]!.brief).toEqual({ state: 'current', summary: 's', criteriaCount: 0, criteriaDerived: false });
     expect(r.nodes[1]!.epic).toBeNull();
   });
+
+  it('places each node through placeOf and derives its column ONCE (merged column on / off)', () => {
+    const pr = (prId: number, state: 'open' | 'merged' | 'closed') =>
+      ({ prId, number: prId, repoFullName: 'o/r', title: 't', state, draft: false, ciState: null, url: 'u', author: null }) as const;
+    const status = (name: string) => ({ name, category: 'indeterminate' as const });
+    const placeOf = (s: GraphTicketInput['status']) => (s == null ? null : { stage: 'in_review' as const, bucketId: 'qa' });
+    const sprint = [t('A-1', { status: status('QA') }), t('A-2', { status: status('QA') }), t('A-3', { status: status('QA') }), t('A-4')];
+    const prs = new Map([
+      [id('A-1'), [pr(1, 'merged'), pr(2, 'closed')]],
+      [id('A-2'), [pr(3, 'merged'), pr(4, 'open')]],
+    ]);
+    const on = foldSprintGraph({ provider: 'jira', apiRoot: ROOT, sprint, ghosts: [], stageOf: () => null, placeOf, mergedColumn: true, prs });
+    expect(on.nodes.map((n) => [n.key, n.stage, n.bucketId, n.column])).toEqual([
+      ['A-1', 'in_review', 'qa', 'merged'],
+      ['A-2', 'in_review', 'qa', 'qa'],
+      ['A-3', 'in_review', 'qa', 'qa'],
+      ['A-4', null, null, null],
+    ]);
+    const off = foldSprintGraph({ provider: 'jira', apiRoot: ROOT, sprint, ghosts: [], stageOf: () => null, placeOf, mergedColumn: false, prs });
+    expect(off.nodes[0]!.column).toBe('qa');
+    // No placeOf (the brief pass, the ghost lookup): no bucket, no column.
+    expect(fold(sprint, []).nodes[0]).toMatchObject({ stage: null, bucketId: null, column: null });
+  });
 });

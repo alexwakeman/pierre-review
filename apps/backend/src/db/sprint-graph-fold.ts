@@ -18,6 +18,7 @@ import {
   type TicketLinkBlocker,
   type TrackerProvider,
 } from '@pierre-review/shared';
+import { sprintColumnOf } from './sprint-status-layout.js';
 
 // THE SPRINT GRAPH FOLD — pure (sprint-graph-fold.test.ts). ONE fold, three callers: the graph route
 // (db/sprint-graph.ts), the brief pass (which ghosts are nodes and need a brief) and the sprint read's
@@ -59,6 +60,11 @@ export interface GraphFoldInput {
   sprint: readonly GraphTicketInput[];
   ghosts: readonly GraphTicketInput[];
   stageOf: (status: GraphTicketInput['status']) => SprintStage | null;
+  /** The status layout's placement (`sprintPlacementOf`): bucket + its meaning. Given → it decides
+   *  `stage` too (stageOf is then unused); absent → `bucketId` and `column` are null. */
+  placeOf?: (status: GraphTicketInput['status']) => { stage: SprintStage; bucketId: string } | null;
+  /** The layout's "Merged, not signed off" column is on (`sprintColumnOf`). */
+  mergedColumn?: boolean;
   prs?: ReadonlyMap<string, SprintGraphPr[]>;
   /** Sprint ticket ident → its theme name (the current theme pass); ghosts never carry one. */
   themes?: ReadonlyMap<string, string>;
@@ -199,7 +205,11 @@ export function foldSprintGraph(input: GraphFoldInput): GraphFoldResult {
   }
 
   // ---- nodes ----
-  const node = (t: GraphTicketInput, ghost: boolean): SprintGraphNode => ({
+  // THE COLUMN is computed here, ONCE (`sprintColumnOf`), so every view draws the same x axis.
+  const node = (t: GraphTicketInput, ghost: boolean): SprintGraphNode => {
+    const place = input.placeOf?.(t.status) ?? null;
+    const prs = input.prs?.get(t.ident) ?? [];
+    return {
     ident: t.ident,
     key: t.key,
     title: t.title,
@@ -208,7 +218,9 @@ export function foldSprintGraph(input: GraphFoldInput): GraphFoldResult {
     ghost,
     depth: depth.get(t.ident) ?? 0,
     status: t.status,
-    stage: input.stageOf(t.status),
+    stage: input.placeOf != null ? (place?.stage ?? null) : input.stageOf(t.status),
+    bucketId: place?.bucketId ?? null,
+    column: sprintColumnOf(place, prs, input.mergedColumn ?? false),
     issueType: t.issueType,
     assignee: t.assignee,
     epic: ghost ? null : t.epic,
@@ -218,10 +230,11 @@ export function foldSprintGraph(input: GraphFoldInput): GraphFoldResult {
       criteriaCount: t.brief?.criteria.length ?? 0,
       criteriaDerived: t.brief?.criteriaDerived ?? false,
     },
-    prs: input.prs?.get(t.ident) ?? [],
+    prs,
     degree: degree.get(t.ident) ?? 0,
     theme: ghost ? null : (input.themes?.get(t.ident) ?? null),
-  });
+    };
+  };
   const sprintNodes = input.sprint
     .map((t) => node(t, false))
     .sort((a, b) => (a.stage == null ? 9 : STAGE_RANK[a.stage]) - (b.stage == null ? 9 : STAGE_RANK[b.stage]) || byKey(a, b));

@@ -100,9 +100,9 @@ export function useSprintRefreshing(workspaceId: number | null): boolean {
   return useIsMutating({ mutationKey: ['sprint-refresh', workspaceKey(workspaceId)] }) > 0;
 }
 
-/** Replace the workspace's status layout override (the four stages' statuses, in order).
- *  `{sections: null}` = back to automatic. The layout lands at once; the graph refetches because
- *  every node's stage moves with it. */
+/** Replace the workspace's status buckets override (`{buckets, mergedColumn}`). `{buckets: null,
+ *  mergedColumn: true}` = back to automatic. The layout lands at once; the graph refetches because
+ *  every node's stage and column move with it. */
 export function useSprintSetStatuses(workspaceId: number | null) {
   const qc = useQueryClient();
   return useMutation<SprintStatusesResponse, Error, SprintStatusSettings>({

@@ -2,8 +2,8 @@ import type { JiraStatusCategory, TrackerProvider } from './types.js';
 import type { ReviewDocReference } from './reference-docs.js';
 
 // REPORTS → THIS SPRINT — the shared constants and the pieces the SPRINT GRAPH (`sprint-graph.ts`)
-// builds on: where the list came from, the read state, candidate repos, the status layout (four
-// stages) and "Check against code" (docs/API.md § This sprint; docs/TRACKERS.md § The sprint list
+// builds on: where the list came from, the read state, candidate repos, the status layout (status
+// buckets) and "Check against code" (docs/API.md § This sprint; docs/TRACKERS.md § The sprint list
 // read; docs/CLAUDE-REVIEW.md § Sprint assessment). Pro with the rest of Reports (`periodReports`):
 // every route 402s before any DB work.
 //
@@ -12,10 +12,10 @@ import type { ReviewDocReference } from './reference-docs.js';
 //     workspace whose This sprint tab was opened in the last `SPRINT_VIEW_TTL_DAYS`): Jira's open
 //     sprints, Linear's active cycle, GitHub's nearest-due open milestone, else the status fallback
 //     (To do + In progress tickets touched in the reporting window). The `source` says which.
-//   • THE SECTIONS follow the workspace's STATUS LAYOUT (`SprintStatusLayout`): FOUR stages — Not
-//     started, In progress, In review, Complete. Which stage a status sits in, and the order, are
-//     AUTOMATIC (category, a review/QA name vocabulary, PR evidence; the tracker's board / workflow
-//     order) unless the workspace places them itself (`SprintStatusSettings`).
+//   • THE COLUMNS follow the workspace's STATUS LAYOUT (`SprintStatusLayout`): BUCKETS of statuses, each
+//     meaning one of four stages — Not started, In progress, In review, Complete — plus the derived
+//     "Merged, not signed off" column. AUTOMATIC (category, a review/QA name vocabulary, PR evidence;
+//     the tracker's board / workflow order) unless the workspace sets its own (`SprintStatusSettings`).
 //   • THE ASSESSMENT ("Check against code") is a local-only Sonnet 5 agent run over read-only default
 //     branch checkouts of the repos the reader ACCEPTED for the ticket: PLAN (not started / in
 //     progress) or VERIFY (in review / done) against the ticket's itemised criteria (its brief). Its
@@ -365,29 +365,40 @@ export const SPRINT_PHASE_LABEL: Record<SprintPhase, string> = {
   done: 'Complete',
 };
 
-// ── The status layout (four stages, sections by status) ───────────────────────────────────────────
+// ── The status layout (buckets of statuses) ───────────────────────────────────────────────────────
 //
-// Statuses are per PROJECT and per TRACKER, so nothing here hard-codes a status name. Each status is
-// placed in ONE of four stages and given a position; both are worked out automatically and the
-// workspace may place any status itself:
+// Statuses are per PROJECT and per TRACKER, so nothing here hard-codes a status name. The workspace
+// groups its statuses into BUCKETS (1–SPRINT_BUCKETS_MAX, in reading order), each with a name and a
+// MEANING — one of the four stages (Not started, In progress, In review, Complete). A ticket's `stage` is
+// its bucket's meaning, so everything that reads a stage keeps working whatever the buckets are. Both
+// the buckets and which status sits where are worked out automatically until the workspace sets them:
 //
 //   • THE ORDER — Jira: the board's column order (the sprint's `boardId` →
 //     `/rest/agile/1.0/board/{id}/configuration`, status ids → names via `/rest/api/2/status`);
 //     Linear: the team's workflow states (type, then `position`); GitHub Issues: Open, Closed. Stored
 //     on `sprint_reads.status_order_json` by the sprint read. Unreadable → null, and the fallback is
 //     the statuses on the tickets sorted by category (new → indeterminate → done), then name.
-//   • THE AUTOMATIC STAGE — category `new` → Not started, `done` → Complete. An in-progress (or
-//     unknown-category) status is In review when its NAME reads as review / QA / test / release
-//     (`SPRINT_REVIEW_STATUS_RE`), or when it sits at or after the PR-evidence boundary: the FIRST
-//     in-progress status, in order, where at least SPRINT_DELIVERED_MIN_SHARE of the tickets that have
-//     ≥ 1 pull request have ALL of them merged and none open, with at least
+//   • THE AUTOMATIC STAGE — category `new` → Not started, `done` → Complete (so "Won't do" lands there).
+//     An in-progress (or unknown-category) status is In review when its NAME reads as review / QA /
+//     test / release (`SPRINT_REVIEW_STATUS_RE`), or when it sits at or after the PR-evidence
+//     boundary: the FIRST in-progress status, in order, where at least SPRINT_DELIVERED_MIN_SHARE of the
+//     tickets that have ≥ 1 pull request have ALL of them merged and none open, with at least
 //     SPRINT_DELIVERED_MIN_TICKETS such tickets. Otherwise In progress.
-//   • THE OVERRIDE (`SprintStatusSettings.sections`) lists, per stage, the statuses the reader placed,
-//     in order. ⚠ PLACEMENT BEATS CATEGORY: a `done`-category status the reader put in In review is In
-//     review. A status the override does not name (new on the board since) keeps its AUTOMATIC stage
-//     and position.
-//   • "Coding begins" = the first status of In progress; "Coding ends" = the first of In review
-//     (`codingBegins` / `codingEnds`) — derived, never stored.
+//   • AUTOMATIC BUCKETS (`buckets: null`) — four, one per stage, id = the stage, named
+//     SPRINT_STAGE_LABEL; every status sits in the bucket of its automatic stage.
+//   • THE WORKSPACE'S BUCKETS (`SprintStatusSettings.buckets`) — meanings NON-DECREASING in order
+//     (`sprintBucketsProblem`); each lists the statuses placed there, in order; a status sits in at
+//     most one. ⚠ PLACEMENT BEATS CATEGORY. A status no bucket names (new on the board since) keeps
+//     its automatic stage and joins the FIRST bucket with that meaning; with none, the bucket of the
+//     NEAREST meaning (the earlier one on a tie) — marked `auto` either way.
+//   • THE COLUMNS (`SprintStatusLayout.columns`) — the x axis of every This Sprint view: the buckets in
+//     order, plus the DERIVED "Merged, not signed off" column (id SPRINT_MERGED_COLUMN_ID) while
+//     `mergedColumn` is on (the default): after the last In review bucket, else after the last In
+//     progress bucket, else before the first Complete bucket, else last. A ticket sits there when its
+//     bucket means In progress or In review and it has ≥ 1 merged pull request and none open (closed
+//     unmerged ones ignored) — `SprintGraphNode.column`, computed once in the graph fold.
+//   • "Coding begins" = the first status of the first In progress bucket; "Coding ends" = the first
+//     of the first In review bucket (`codingBegins` / `codingEnds`) — derived, never stored.
 //
 // A status NAME is matched case-insensitively (trimmed).
 
@@ -395,16 +406,23 @@ export const SPRINT_PHASE_LABEL: Record<SprintPhase, string> = {
 export const SPRINT_DELIVERED_MIN_SHARE = 0.6;
 /** Fully-merged tickets a status needs at least, for that share to count. */
 export const SPRINT_DELIVERED_MIN_TICKETS = 2;
-/** Statuses an override may list at most (over all four stages); a status name's longest spelling. */
+/** Statuses the buckets may list at most (over all of them); a status name's longest spelling. */
 export const SPRINT_STATUS_ORDER_MAX = 60;
 export const SPRINT_STATUS_NAME_MAX = 100;
+/** Buckets a workspace may have; a bucket name's longest spelling; a bucket id's pattern. */
+export const SPRINT_BUCKETS_MAX = 10;
+export const SPRINT_BUCKET_NAME_MAX = 24;
+export const SPRINT_BUCKET_ID_RE = /^[a-z0-9_-]{1,32}$/;
+/** The DERIVED column's id (never a bucket id) and its name. */
+export const SPRINT_MERGED_COLUMN_ID = 'merged';
+export const SPRINT_MERGED_COLUMN_LABEL = 'Merged, not signed off';
 
 /** An in-progress status whose NAME matches this is automatically In review ("Code Review", "Ready for
  *  QA", "In Test", "Awaiting Deployment", "UAT", "Sign-off", "Staging", "Demo", "Release"). */
 export const SPRINT_REVIEW_STATUS_RE =
   /\b(?:review|qa|tests?|testing|verif\w*|uat|accept\w*|sign.?off|staging|ready for|demo|deploy\w*|release\w*)\b/i;
 
-/** The four stages, in page order. */
+/** The four stages, in page order — a bucket's MEANING. */
 export type SprintStage = 'not_started' | 'in_progress' | 'in_review' | 'done';
 
 export const SPRINT_STAGES: readonly SprintStage[] = ['not_started', 'in_progress', 'in_review', 'done'];
@@ -430,15 +448,77 @@ export interface SprintStatusAutoOrder {
   readAt: string;
 }
 
-/** The workspace's override (`workspaces.sprint_statuses`). OVERRIDES ONLY: `sections: null` =
- *  automatic (stored as NULL). Each stage lists the statuses the reader placed there, in order; names
- *  are matched case-insensitively. (A stored value of the retired `{order, deliveredFrom}` shape is
- *  read into this one.) */
-export interface SprintStatusSettings {
-  sections: Record<SprintStage, string[]> | null;
+/** One bucket of statuses, as the workspace set it. */
+export interface SprintBucket {
+  /** SPRINT_BUCKET_ID_RE, unique, never SPRINT_MERGED_COLUMN_ID. */
+  id: string;
+  /** 1–SPRINT_BUCKET_NAME_MAX characters. */
+  name: string;
+  meaning: SprintStage;
+  /** The status names placed here, in order. */
+  statuses: string[];
 }
 
-export const SPRINT_STATUS_SETTINGS_DEFAULT: SprintStatusSettings = { sections: null };
+/** The workspace's override (`workspaces.sprint_statuses`). OVERRIDES ONLY: the default (automatic
+ *  buckets, merged column on) is stored as NULL. A stored value of the retired `{sections}` or
+ *  `{order, deliveredFrom}` shape is read into four buckets named SPRINT_STAGE_LABEL. */
+export interface SprintStatusSettings {
+  /** null = automatic. */
+  buckets: SprintBucket[] | null;
+  /** Draw the "Merged, not signed off" column. */
+  mergedColumn: boolean;
+}
+
+export const SPRINT_STATUS_SETTINGS_DEFAULT: SprintStatusSettings = { buckets: null, mergedColumn: true };
+
+/** The four automatic buckets (no statuses named). */
+export function sprintAutomaticBuckets(): SprintBucket[] {
+  return SPRINT_STAGES.map((s) => ({ id: s, name: SPRINT_STAGE_LABEL[s], meaning: s, statuses: [] }));
+}
+
+const STAGE_RANK: Record<SprintStage, number> = { not_started: 0, in_progress: 1, in_review: 2, done: 3 };
+
+/** What is wrong with a set of buckets, in plain words; null when it may be saved. The server's
+ *  validator (strict, on PUT) and the editor's (before Save) are this ONE function. */
+export function sprintBucketsProblem(buckets: ReadonlyArray<SprintBucket>): string | null {
+  if (buckets.length === 0) return 'Keep at least one bucket.';
+  if (buckets.length > SPRINT_BUCKETS_MAX) return `Use at most ${SPRINT_BUCKETS_MAX} buckets.`;
+  const ids = new Set<string>();
+  const names = new Set<string>();
+  const statuses = new Set<string>();
+  let total = 0;
+  for (let i = 0; i < buckets.length; i += 1) {
+    const b = buckets[i]!;
+    if (typeof b.id !== 'string' || !SPRINT_BUCKET_ID_RE.test(b.id) || b.id === SPRINT_MERGED_COLUMN_ID || ids.has(b.id)) {
+      return 'Each bucket needs its own id.';
+    }
+    ids.add(b.id);
+    const name = typeof b.name === 'string' ? b.name.trim() : '';
+    if (name === '') return 'Give every bucket a name.';
+    // eslint-disable-next-line no-control-regex
+    if (name.length > SPRINT_BUCKET_NAME_MAX || /[\u0000-\u001f\u007f]/.test(name)) {
+      return `Keep bucket names to ${SPRINT_BUCKET_NAME_MAX} characters.`;
+    }
+    if (names.has(name.toLowerCase())) return `Two buckets are called “${name}”.`;
+    names.add(name.toLowerCase());
+    if (!SPRINT_STAGES.includes(b.meaning)) return `Choose what “${name}” means.`;
+    const prev = buckets[i - 1];
+    if (prev != null && STAGE_RANK[b.meaning] < STAGE_RANK[prev.meaning]) {
+      return `“${name}” means ${SPRINT_STAGE_LABEL[b.meaning]}, so it cannot come after a bucket that means ${SPRINT_STAGE_LABEL[prev.meaning]}.`;
+    }
+    if (!Array.isArray(b.statuses)) return 'Each bucket needs a list of statuses.';
+    for (const s of b.statuses) {
+      const t = typeof s === 'string' ? s.trim() : '';
+      // eslint-disable-next-line no-control-regex
+      if (t === '' || t.length > SPRINT_STATUS_NAME_MAX || /[\u0000-\u001f\u007f]/.test(t)) return 'A status name is not valid.';
+      if (statuses.has(t.toLowerCase())) return `“${t}” is in two buckets.`;
+      statuses.add(t.toLowerCase());
+      total += 1;
+    }
+  }
+  if (total > SPRINT_STATUS_ORDER_MAX) return `Place at most ${SPRINT_STATUS_ORDER_MAX} statuses.`;
+  return null;
+}
 
 /** One status in the resolved order. */
 export interface SprintStatusLayoutEntry {
@@ -446,10 +526,29 @@ export interface SprintStatusLayoutEntry {
   category: JiraStatusCategory | null;
   /** Tickets in this status right now (Done ones included); 0 for a known status with none. */
   count: number;
-  /** Its stage AND position came from the automatic layout (true) or the override (false). */
+  /** No bucket names it: it sits where the automatic rule put it ("not placed yet" in the editor). */
   auto: boolean;
-  /** The stage tickets in this status are listed under. */
+  /** Its bucket's meaning — the stage tickets in this status are listed under. */
   stage: SprintStage;
+  /** The bucket it sits in. */
+  bucketId: string;
+}
+
+/** One resolved bucket: the workspace's (or an automatic one) with every status it holds. */
+export interface SprintStatusLayoutBucket {
+  id: string;
+  name: string;
+  meaning: SprintStage;
+  /** In order (a slice of `order`). */
+  statuses: SprintStatusLayoutEntry[];
+}
+
+/** One column of the x axis. `derived` = the "Merged, not signed off" column. */
+export interface SprintColumn {
+  id: string;
+  name: string;
+  meaning: SprintStage;
+  derived: boolean;
 }
 
 /** Per in-progress status: the PR evidence behind the automatic In review boundary. */
@@ -462,10 +561,13 @@ export interface SprintStatusEvidence {
 }
 
 export interface SprintStatusLayout {
-  /** Every known status (automatic order ∪ statuses on the tickets ∪ the override's names), grouped
-   *  by stage in SPRINT_STAGES order, in order within a stage. The page renders a section per entry
-   *  with `count > 0`. */
+  /** Every known status (automatic order ∪ statuses on the tickets ∪ the buckets' names), grouped by
+   *  bucket in bucket order, in order within a bucket. */
   order: SprintStatusLayoutEntry[];
+  /** The resolved buckets, in order (four automatic ones when none are set). */
+  buckets: SprintStatusLayoutBucket[];
+  /** The drawn x axis: the buckets, plus the merged column when on. */
+  columns: SprintColumn[];
   /** Where the order came from: the override, the tracker, or the category fallback. */
   orderSource: 'override' | SprintStatusAutoOrder['source'] | 'fallback';
   /** The first status of In progress / of In review (null when that stage is empty). */
@@ -477,12 +579,11 @@ export interface SprintStatusLayout {
   settings: SprintStatusSettings;
 }
 
-/** PUT /api/sprint-stories/statuses — replace the workspace's override (Pro, `periodReports`; the
- *  `read` tier; scope via `resolveWorkspaceScope`). Strict: `sections` not null and not an object with
- *  exactly the four stage keys, each an array of names; a name over SPRINT_STATUS_NAME_MAX, empty, or
- *  with NUL / control characters; more than SPRINT_STATUS_ORDER_MAX names in all; or one name in two
- *  places (case-insensitive) → 400 and nothing is written. `{sections: null}` = "Reset to automatic"
- *  (stored as NULL). */
+/** PUT /api/sprint-stories/statuses — replace the workspace's override (FREE; the `read` tier; scope
+ *  via `resolveWorkspaceScope`, an id that does not resolve to itself → 400 `bad_workspace`). Strict:
+ *  `buckets` null or an array passing `sprintBucketsProblem`; `mergedColumn` a boolean → otherwise 400
+ *  `bad_request` with the problem in `message`, and nothing is written. `{buckets: null, mergedColumn:
+ *  true}` = "Reset to automatic" (stored as NULL). */
 export interface SprintStatusesUpdate {
   workspaceId: number;
   settings: SprintStatusSettings;

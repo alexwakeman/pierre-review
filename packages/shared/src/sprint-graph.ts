@@ -170,9 +170,16 @@ export interface SprintGraphNode {
   /** 0 = in the sprint; 1–SPRINT_GHOST_DEPTH_MAX = hops from the sprint. */
   depth: number;
   status: { name: string; category: JiraStatusCategory | null } | null;
-  /** The four configured stages (`statusLayout`) — a ghost's status is placed by the same rule. null
-   *  when its status is not known. */
+  /** Its bucket's MEANING (`statusLayout`) — a ghost's status is placed by the same rule. null when
+   *  its status is not known. */
   stage: SprintStage | null;
+  /** The bucket its status sits in (`statusLayout.buckets`); null when its status is not known. */
+  bucketId: string | null;
+  /** The column it is drawn in (`statusLayout.columns`): its bucket, or SPRINT_MERGED_COLUMN_ID when
+   *  that column is on, its bucket means In progress or In review, and it has ≥ 1 merged pull request
+   *  and none open (closed unmerged ones ignored). Computed ONCE, in the graph fold. null when its
+   *  status is not known. */
+  column: string | null;
   issueType: string | null;
   assignee: { name: string; avatarUrl: string | null } | null;
   /** Sprint tickets only (a ghost's epic is not read). */
@@ -220,7 +227,7 @@ export interface SprintGraphResponse {
   /** null until the first read finished. */
   source: SprintSource | null;
   read: SprintReadState;
-  /** The four stages and their statuses. null when there is no tracker. */
+  /** The status buckets, their statuses and the drawn columns. null when there is no tracker. */
   statusLayout: SprintStatusLayout | null;
   /** Sprint tickets first (stage, then key), then ghosts (depth, then key). */
   nodes: SprintGraphNode[];

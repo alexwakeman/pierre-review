@@ -1,6 +1,6 @@
 // This Sprint — PUT /api/sprint-stories/statuses (api/routes/sprint-stories.ts) on a
 // THROWAWAY sqlite DB with a real Fastify instance. Pinned: free (no 402 without Reports);
-// 400 bad_request on a malformed body (nothing written); 400 bad_workspace for an id that does not
+// 400 bad_request on a malformed body with the problem in plain words (nothing written); 400 bad_workspace for an id that does not
 // resolve to itself (another tenant's, unknown) — never written onto the caller's Default; 200 with the
 // stored settings and the recomputed layout; "Reset to automatic" stores NULL.
 //
@@ -110,7 +110,8 @@ afterAll(async () => {
 
 const put = (payload: unknown) => app.inject({ method: 'PUT', url: '/api/sprint-stories/statuses', payload: payload as any });
 
-const sections = (o: Record<string, unknown> = {}) => ({ sections: { not_started: [], in_progress: [], in_review: [], done: [], ...o } });
+const B = (id: string, name: string, meaning: string, statuses: unknown) => ({ id, name, meaning, statuses });
+const buckets = (...bs: unknown[]) => ({ buckets: bs, mergedColumn: true });
 
 describe('PUT /api/sprint-stories/statuses', () => {
   it('is FREE: no 402 without Reports', async () => {
@@ -121,25 +122,28 @@ describe('PUT /api/sprint-stories/statuses', () => {
     expect(await stored(ownWs)).toBeNull();
   });
 
-  it('400 bad_request on a malformed body (the retired shape included)', async () => {
+  it('400 bad_request on a malformed body (the retired shapes included), with the problem as the message', async () => {
     for (const body of [
       {},
-      { workspaceId: 'x', settings: { sections: null } },
+      { workspaceId: 'x', settings: { buckets: null } },
       { workspaceId: ownWs },
       { workspaceId: ownWs, settings: { order: ['Ready for QA'], deliveredFrom: null } },
-      { workspaceId: ownWs, settings: sections({ in_review: 'Ready' }) },
-      { workspaceId: ownWs, settings: sections({ in_progress: ['A'], in_review: ['a'] }) },
+      { workspaceId: ownWs, settings: { sections: null } },
+      { workspaceId: ownWs, settings: buckets(B('r', 'Review', 'in_review', 'Ready')) },
+      { workspaceId: ownWs, settings: buckets(B('p', 'P', 'in_progress', ['A']), B('r', 'R', 'in_review', ['a'])) },
     ]) {
       const res = await put(body);
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe('bad_request');
     }
+    const back = await put({ workspaceId: ownWs, settings: buckets(B('d', 'Done', 'done', []), B('t', 'To do', 'not_started', [])) });
+    expect(back.json().message).toBe('“To do” means Not started, so it cannot come after a bucket that means Complete.');
     expect(await stored(ownWs)).toBeNull();
   });
 
   it('400 bad_workspace for another tenant’s or an unknown id — never written onto the Default', async () => {
     for (const id of [foreignWs, 99_999]) {
-      const res = await put({ workspaceId: id, settings: sections({ in_review: ['Ready for QA'] }) });
+      const res = await put({ workspaceId: id, settings: buckets(B('r', 'Review', 'in_review', ['Ready for QA'])) });
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe('bad_workspace');
     }
@@ -148,25 +152,34 @@ describe('PUT /api/sprint-stories/statuses', () => {
   });
 
   it('200: stores the override and answers the recomputed layout; Reset stores NULL', async () => {
-    const S = { not_started: [], in_progress: ['Ready for QA', 'In Development'], in_review: [], done: [] };
-    const res = await put({ workspaceId: ownWs, settings: { sections: S } });
+    const S = {
+      buckets: [
+        B('todo', 'To do', 'not_started', ['To Do']),
+        B('dev', 'Building', 'in_progress', ['Ready for QA', 'In Development']),
+        B('done', 'Done', 'done', ['Done']),
+      ],
+      mergedColumn: true,
+    };
+    const res = await put({ workspaceId: ownWs, settings: S });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.workspaceId).toBe(ownWs);
-    expect(body.settings).toEqual({ sections: S });
+    expect(body.settings).toEqual(S);
     expect(body.statusLayout.orderSource).toBe('override');
     expect([body.statusLayout.codingBegins, body.statusLayout.codingEnds]).toEqual(['Ready for QA', null]);
-    expect(body.statusLayout.order.map((o: any) => `${o.name}:${o.stage}`)).toEqual([
-      'To Do:not_started',
-      'Ready for QA:in_progress',
-      'In Development:in_progress',
-      'Done:done',
+    expect(body.statusLayout.order.map((o: any) => `${o.name}:${o.bucketId}:${o.stage}`)).toEqual([
+      'To Do:todo:not_started',
+      'Ready for QA:dev:in_progress',
+      'In Development:dev:in_progress',
+      'Done:done:done',
     ]);
-    expect(await stored(ownWs)).toEqual({ sections: S });
+    expect(body.statusLayout.columns.map((c: any) => c.id)).toEqual(['todo', 'dev', 'merged', 'done']);
+    expect(await stored(ownWs)).toEqual(S);
 
-    const reset = await put({ workspaceId: ownWs, settings: { sections: null } });
+    const reset = await put({ workspaceId: ownWs, settings: { buckets: null, mergedColumn: true } });
     expect(reset.statusCode).toBe(200);
     expect(reset.json().statusLayout.orderSource).toBe('jira_board');
+    expect(reset.json().statusLayout.buckets.map((b: any) => b.name)).toEqual(['Not started', 'In progress', 'In review', 'Complete']);
     expect(await stored(ownWs)).toBeNull();
   });
 });

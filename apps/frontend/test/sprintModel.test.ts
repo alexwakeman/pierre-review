@@ -3,7 +3,11 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/sprintModel.test.ts
 import { describe, expect, it } from 'vitest';
 import {
+  SPRINT_BUCKETS_MAX,
+  SPRINT_STAGE_LABEL,
   SPRINT_STATUS_ORDER_MAX,
+  type SprintStage,
+  type SprintStatusLayoutEntry,
   type SprintAssessmentBody,
   type SprintAssessmentCurrency,
   type SprintAssessmentRecord,
@@ -15,17 +19,25 @@ import {
   assessmentProgressPct,
   elapsedLabel,
   reviewRuleSentence,
-  canMoveInSections,
+  addBucket,
+  bucketsDraftChanged,
+  bucketsDraftOf,
+  bucketsDraftProblem,
+  bucketsToSave,
+  canMoveStatusStep,
   codingBoundsOf,
-  moveInSections,
+  moveBucket,
+  moveStatusStep,
   moveStatusTo,
-  statusDraftChanged,
+  newBucketId,
+  removeBucket,
+  renameBucket,
+  setBucketMeaning,
   statusPlaceOf,
   shareWords,
   statusEvidenceLine,
   statusOrderSourceLabel,
-  statusSectionsOf,
-  statusSettingsToSave,
+  unplacedStatuses,
 } from '../src/components/Activity/sprintModel.js';
 import { effectiveInsightsTab } from '../src/components/Activity/bottlenecksModel.js';
 import { INSIGHTS_INNER_TABS, SPRINT_INNER_TABS } from '../src/store/filters.js';
@@ -92,15 +104,35 @@ describe('tab', () => {
   });
 });
 
+const E = (name: string, stage: SprintStage, count = 0, auto = true, bucketId: string = stage): SprintStatusLayoutEntry => ({
+  name,
+  category: stage === 'not_started' ? 'new' : stage === 'done' ? 'done' : 'indeterminate',
+  count,
+  auto,
+  stage,
+  bucketId,
+});
+
+/** A layout with the four automatic buckets (or `order`'s own bucket ids, in first-seen order). */
 function layout(over: Partial<SprintStatusLayout> = {}): SprintStatusLayout {
+  const order = over.order ?? [
+    E('To Do', 'not_started', 1),
+    E('In Development', 'in_progress', 2),
+    E('Ready for QA', 'in_review', 1),
+    E('In PO Review', 'in_review', 1),
+    E('Done', 'done', 0),
+  ];
+  const ids = [...new Set(order.map((o) => o.bucketId))];
+  const buckets =
+    over.buckets ??
+    ids.map((id) => {
+      const st = order.find((o) => o.bucketId === id)!.stage;
+      return { id, name: SPRINT_STAGE_LABEL[st], meaning: st, statuses: order.filter((o) => o.bucketId === id) };
+    });
   return {
-    order: [
-      { name: 'To Do', category: 'new', count: 1, auto: true, stage: 'not_started' },
-      { name: 'In Development', category: 'indeterminate', count: 2, auto: true, stage: 'in_progress' },
-      { name: 'Ready for QA', category: 'indeterminate', count: 1, auto: true, stage: 'in_review' },
-      { name: 'In PO Review', category: 'indeterminate', count: 1, auto: true, stage: 'in_review' },
-      { name: 'Done', category: 'done', count: 0, auto: true, stage: 'done' },
-    ],
+    order,
+    buckets,
+    columns: [],
     orderSource: 'jira_board',
     codingBegins: 'In Development',
     codingEnds: 'Ready for QA',
@@ -109,80 +141,140 @@ function layout(over: Partial<SprintStatusLayout> = {}): SprintStatusLayout {
       { status: 'Ready for QA', withPrs: 6, allMerged: 4 },
       { status: 'In PO Review', withPrs: 11, allMerged: 11 },
     ],
-    settings: { sections: null },
+    settings: { buckets: null, mergedColumn: true },
     ...over,
   };
 }
 
+const lists = (d: ReturnType<typeof bucketsDraftOf>) => d.buckets.map((b) => b.statuses);
 
-describe('status settings', () => {
-  it('the draft is the layout’s placement', () => {
-    expect(statusSectionsOf(layout())).toEqual({
-      not_started: ['To Do'],
-      in_progress: ['In Development'],
-      in_review: ['Ready for QA', 'In PO Review'],
-      done: ['Done'],
-    });
+describe('status buckets', () => {
+  it('the draft is the layout’s buckets, every status in place, and the switch', () => {
+    const d = bucketsDraftOf(layout());
+    expect(d.buckets.map((b) => `${b.id}:${b.name}:${b.meaning}`)).toEqual([
+      'not_started:Not started:not_started',
+      'in_progress:In progress:in_progress',
+      'in_review:In review:in_review',
+      'done:Complete:done',
+    ]);
+    expect(lists(d)).toEqual([['To Do'], ['In Development'], ['Ready for QA', 'In PO Review'], ['Done']]);
+    expect(d.mergedColumn).toBe(true);
   });
 
-  it('move up / down within a stage, and across a stage boundary; the two ends are no-ops', () => {
-    const d = statusSectionsOf(layout());
-    expect(moveInSections(d, 'in_review', 1, -1).in_review).toEqual(['In PO Review', 'Ready for QA']);
-    const up = moveInSections(d, 'in_review', 0, -1);
-    expect([up.in_progress, up.in_review]).toEqual([['In Development', 'Ready for QA'], ['In PO Review']]);
-    const down = moveInSections(d, 'in_progress', 0, 1);
-    expect([down.in_progress, down.in_review]).toEqual([[], ['In Development', 'Ready for QA', 'In PO Review']]);
-    expect(canMoveInSections(d, 'not_started', 0, -1)).toBe(false);
-    expect(canMoveInSections(d, 'done', 0, 1)).toBe(false);
-    expect(moveInSections(d, 'not_started', 0, -1)).toEqual(d);
-    expect(canMoveInSections(d, 'done', 0, -1)).toBe(true);
+  it('move up / down within a bucket, and across a bucket boundary; the two ends are no-ops', () => {
+    const d = bucketsDraftOf(layout());
+    expect(lists(moveStatusStep(d, 2, 1, -1))[2]).toEqual(['In PO Review', 'Ready for QA']);
+    expect(lists(moveStatusStep(d, 2, 0, -1)).slice(1, 3)).toEqual([['In Development', 'Ready for QA'], ['In PO Review']]);
+    expect(lists(moveStatusStep(d, 1, 0, 1)).slice(1, 3)).toEqual([[], ['In Development', 'Ready for QA', 'In PO Review']]);
+    expect(canMoveStatusStep(d, 0, 0, -1)).toBe(false);
+    expect(canMoveStatusStep(d, 3, 0, 1)).toBe(false);
+    expect(moveStatusStep(d, 0, 0, -1)).toEqual(d);
+    expect(canMoveStatusStep(d, 3, 0, -1)).toBe(true);
   });
 
-  it('drag: insert at a slot of any list — within a list, across stages, into an empty list', () => {
-    const d = statusSectionsOf(layout());
-    // Within a list: slot counted before the move.
-    expect(moveStatusTo(d, { stage: 'in_review', index: 0 }, 'in_review', 2).in_review).toEqual(['In PO Review', 'Ready for QA']);
-    expect(moveStatusTo(d, { stage: 'in_review', index: 1 }, 'in_review', 0).in_review).toEqual(['In PO Review', 'Ready for QA']);
-    // The slots just above and below the row itself are no-ops.
-    expect(moveStatusTo(d, { stage: 'in_review', index: 0 }, 'in_review', 0)).toEqual(d);
-    expect(moveStatusTo(d, { stage: 'in_review', index: 0 }, 'in_review', 1)).toEqual(d);
-    // Across stages, at any slot.
-    const x = moveStatusTo(d, { stage: 'not_started', index: 0 }, 'in_review', 1);
-    expect([x.not_started, x.in_review]).toEqual([[], ['Ready for QA', 'To Do', 'In PO Review']]);
-    // Into an empty list.
-    const y = moveStatusTo(x, { stage: 'done', index: 0 }, 'not_started', 0);
-    expect([y.not_started, y.done]).toEqual([['Done'], []]);
-    // Bad indexes leave it unchanged, and the input is never mutated.
-    expect(moveStatusTo(d, { stage: 'done', index: 5 }, 'in_review', 0)).toEqual(d);
-    expect(moveStatusTo(d, { stage: 'done', index: 0 }, 'in_review', 9)).toEqual(d);
-    expect(d.in_review).toEqual(['Ready for QA', 'In PO Review']);
+  it('drag: insert at a slot of any bucket — within one, across buckets, into an empty one', () => {
+    const d = bucketsDraftOf(layout());
+    expect(lists(moveStatusTo(d, { bucket: 2, index: 0 }, 2, 2))[2]).toEqual(['In PO Review', 'Ready for QA']);
+    expect(lists(moveStatusTo(d, { bucket: 2, index: 1 }, 2, 0))[2]).toEqual(['In PO Review', 'Ready for QA']);
+    expect(moveStatusTo(d, { bucket: 2, index: 0 }, 2, 0)).toEqual(d);
+    expect(moveStatusTo(d, { bucket: 2, index: 0 }, 2, 1)).toEqual(d);
+    const x = moveStatusTo(d, { bucket: 0, index: 0 }, 2, 1);
+    expect([lists(x)[0], lists(x)[2]]).toEqual([[], ['Ready for QA', 'To Do', 'In PO Review']]);
+    const y = moveStatusTo(x, { bucket: 3, index: 0 }, 0, 0);
+    expect([lists(y)[0], lists(y)[3]]).toEqual([['Done'], []]);
+    expect(moveStatusTo(d, { bucket: 3, index: 5 }, 2, 0)).toEqual(d);
+    expect(moveStatusTo(d, { bucket: 3, index: 0 }, 2, 9)).toEqual(d);
+    expect(moveStatusTo(d, { bucket: 9, index: 0 }, 2, 0)).toEqual(d);
+    expect(d.buckets[2]!.statuses).toEqual(['Ready for QA', 'In PO Review']);
+  });
+
+  it('add, rename, set the meaning, reorder and delete buckets', () => {
+    const d = bucketsDraftOf(layout());
+    const added = addBucket(d);
+    expect(added.buckets[4]).toEqual({ id: 'b1', name: 'New bucket', meaning: 'done', statuses: [] });
+    expect(addBucket(added).buckets[5]).toMatchObject({ id: 'b2', name: 'New bucket 2' });
+    let full = d;
+    while (full.buckets.length < SPRINT_BUCKETS_MAX) full = addBucket(full);
+    expect(addBucket(full)).toEqual(full);
+    expect(newBucketId({ mergedColumn: true, buckets: [{ id: 'b1', name: 'x', meaning: 'done', statuses: [] }] })).toBe('b2');
+
+    // Two review stages: split In review, rename.
+    const two = renameBucket(setBucketMeaning(moveBucket(addBucket(d), 4, -1), 'b1', 'in_review'), 'b1', 'PO review');
+    const split = moveStatusTo(two, { bucket: 2, index: 1 }, 3, 0);
+    expect(split.buckets.map((b) => `${b.name}:${b.meaning}:${b.statuses.join('|')}`)).toEqual([
+      'Not started:not_started:To Do',
+      'In progress:in_progress:In Development',
+      'In review:in_review:Ready for QA',
+      'PO review:in_review:In PO Review',
+      'Complete:done:Done',
+    ]);
+    expect(bucketsDraftProblem(split)).toBeNull();
+
+    // Delete: statuses move to the first other bucket of the same meaning, else the one before.
+    expect(lists(removeBucket(split, 'b1'))).toEqual([['To Do'], ['In Development'], ['Ready for QA', 'In PO Review'], ['Done']]);
+    expect(lists(removeBucket(split, 'in_progress'))).toEqual([['To Do', 'In Development'], ['Ready for QA'], ['In PO Review'], ['Done']]);
+    expect(lists(removeBucket(split, 'not_started'))[0]).toEqual(['In Development', 'To Do']);
+    const one = { mergedColumn: true, buckets: [split.buckets[0]!] };
+    expect(removeBucket(one, 'not_started')).toEqual(one);
+    expect(moveBucket(d, 0, -1)).toEqual(d);
+  });
+
+  it('Won’t do moves into the Complete bucket; plain-English problems block Save', () => {
+    const l = layout({ order: [...layout().order, E('Won’t do', 'not_started', 3)] });
+    const d = bucketsDraftOf(l);
+    const moved = moveStatusTo(d, statusPlaceOf(d, 'Won’t do') as { bucket: number; index: number }, 3, 1);
+    expect(lists(moved)[3]).toEqual(['Done', 'Won’t do']);
+    expect(bucketsDraftProblem(moveBucket(d, 3, -1))).toBe(
+      '“In review” means In review, so it cannot come after a bucket that means Complete.',
+    );
+    expect(bucketsDraftProblem(renameBucket(d, 'done', '  '))).toBe('Give every bucket a name.');
+    expect(bucketsDraftProblem(renameBucket(d, 'done', 'in review'))).toBe('Two buckets are called “in review”.');
   });
 
   it('coding begins / ends read off the draft; where a status sits; changed or not', () => {
-    const d = statusSectionsOf(layout());
+    const d = bucketsDraftOf(layout());
     expect(codingBoundsOf(d)).toEqual({ begins: 'In Development', ends: 'Ready for QA' });
-    const moved = moveStatusTo(d, { stage: 'in_progress', index: 0 }, 'in_review', 0);
+    const moved = moveStatusTo(d, { bucket: 1, index: 0 }, 2, 0);
     expect(codingBoundsOf(moved)).toEqual({ begins: null, ends: 'In Development' });
-    expect(statusPlaceOf(moved, 'In PO Review')).toEqual({ stage: 'in_review', index: 2 });
+    expect(statusPlaceOf(moved, 'In PO Review')).toEqual({ bucket: 2, index: 2 });
     expect(statusPlaceOf(moved, 'Nope')).toBeNull();
-    expect(statusDraftChanged(layout(), d)).toBe(false);
-    expect(statusDraftChanged(layout(), moved)).toBe(true);
+    expect(bucketsDraftChanged(layout(), d)).toBe(false);
+    expect(bucketsDraftChanged(layout(), moved)).toBe(true);
+    expect(bucketsDraftChanged(layout(), { ...d, mergedColumn: false })).toBe(true);
+    expect(bucketsDraftChanged(layout(), renameBucket(d, 'done', 'Complete '))).toBe(false);
   });
 
-  it('save payload: nothing moved → the stored override as it was; moved → every name per stage', () => {
+  it('save payload: buckets untouched → the stored buckets (automatic stays automatic); changed → every bucket, names trimmed', () => {
     const l = layout();
-    expect(statusSettingsToSave(l, statusSectionsOf(l))).toEqual({ sections: null });
-    const moved = moveInSections(statusSectionsOf(l), 'in_review', 0, -1);
-    expect(statusSettingsToSave(l, moved)).toEqual({ sections: moved });
+    const d = bucketsDraftOf(l);
+    expect(bucketsToSave(l, d)).toEqual({ buckets: null, mergedColumn: true });
+    expect(bucketsToSave(l, { ...d, mergedColumn: false })).toEqual({ buckets: null, mergedColumn: false });
+    const moved = renameBucket(moveStatusStep(d, 2, 0, -1), 'done', ' Shipped ');
+    const out = bucketsToSave(l, moved);
+    expect(out.buckets?.map((b) => `${b.id}:${b.name}:${b.statuses.join('|')}`)).toEqual([
+      'not_started:Not started:To Do',
+      'in_progress:In progress:In Development|Ready for QA',
+      'in_review:In review:In PO Review',
+      'done:Shipped:Done',
+    ]);
   });
 
-  it('save payload caps the names at the route’s limit', () => {
-    const many = Array.from({ length: SPRINT_STATUS_ORDER_MAX + 1 }, (_, i) => `S${i}`);
-    const l = layout({ order: many.map((name) => ({ name, category: 'indeterminate', count: 0, auto: true, stage: 'in_progress' })) });
-    const out = statusSettingsToSave(l, moveInSections(statusSectionsOf(l), 'in_progress', 1, -1));
-    const all = Object.values(out.sections ?? {}).flat();
+  it('save payload caps the statuses at the route’s limit', () => {
+    const many = Array.from({ length: SPRINT_STATUS_ORDER_MAX + 1 }, (_, i) => E(`S${i}`, 'in_progress'));
+    const l = layout({ order: many });
+    const out = bucketsToSave(l, moveStatusStep(bucketsDraftOf(l), 0, 1, -1));
+    const all = (out.buckets ?? []).flatMap((b) => b.statuses);
     expect(all).toHaveLength(SPRINT_STATUS_ORDER_MAX);
     expect(all[0]).toBe('S1');
+  });
+
+  it('"not placed yet" only once buckets are set', () => {
+    expect(unplacedStatuses(layout()).size).toBe(0);
+    const set = layout({
+      order: [E('To Do', 'not_started', 1, false), E('Blocked', 'in_progress', 2, true)],
+      settings: { buckets: [{ id: 'not_started', name: 'To do', meaning: 'not_started', statuses: ['To Do'] }], mergedColumn: true },
+    });
+    expect([...unplacedStatuses(set)]).toEqual(['Blocked']);
   });
 
   it('the source label keeps proper nouns mid-sentence', () => {
@@ -200,6 +292,7 @@ describe('status settings', () => {
     expect(statusEvidenceLine({ status: 'Ready for QA', withPrs: 6, allMerged: 4 })).toBe('Ready for QA · 4 of 6 merged');
     expect(statusOrderSourceLabel('jira_board')).toBe('Your board’s columns');
     expect(statusOrderSourceLabel('fallback')).toBe('Status category, then name');
+    expect(statusOrderSourceLabel('override')).toBe('Your buckets');
   });
 });
 

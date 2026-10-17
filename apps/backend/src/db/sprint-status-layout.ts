@@ -1,14 +1,19 @@
 import {
   SPRINT_DELIVERED_MIN_SHARE,
   SPRINT_DELIVERED_MIN_TICKETS,
+  SPRINT_MERGED_COLUMN_ID,
+  SPRINT_MERGED_COLUMN_LABEL,
   SPRINT_REVIEW_STATUS_RE,
-  SPRINT_STAGES,
   SPRINT_STATUS_SETTINGS_DEFAULT,
+  sprintAutomaticBuckets,
   type JiraStatusCategory,
+  type SprintBucket,
+  type SprintColumn,
   type SprintStage,
   type SprintStatusAutoOrder,
   type SprintStatusEvidence,
   type SprintStatusLayout,
+  type SprintStatusLayoutBucket,
   type SprintStatusLayoutEntry,
   type SprintStatusSettings,
   type TrackerProvider,
@@ -23,11 +28,11 @@ const dbMods = async () => {
   return { db: client.db, schema: client.schema, getSprintStatusSettingsRaw: settings.getSprintStatusSettingsRaw };
 };
 
-// REPORTS → THIS SPRINT — THE STATUS LAYOUT (shared sprint-stories.ts § The status layout; docs/API.md
-// § This sprint). Which of the FOUR stages (Not started, In progress, In review, Complete) each status
-// sits in, and in what order. The PURE half is here (sprint-status-layout.test.ts); the DB half — the
-// stored override (db/sprint-status-settings.ts) and the PR evidence (`loadSprintStatusEvidence`) —
-// feeds it.
+// ACTIVITY → THIS SPRINT — THE STATUS LAYOUT (shared sprint-stories.ts § The status layout;
+// docs/TRACKERS.md § This Sprint statuses; docs/API.md § This sprint). Which BUCKET each status sits in
+// (and so which of the four stages — the bucket's meaning), in what order, and the drawn COLUMNS. The
+// PURE half is here (sprint-status-layout.test.ts); the DB half — the stored override
+// (db/sprint-status-settings.ts) and the PR evidence (`loadSprintStatusEvidence`) — feeds it.
 //
 //   AUTOMATIC ORDER: the tracker's board / workflow order, else the category fallback (new →
 //   indeterminate → done, then name); a status on the tickets the tracker did not list is placed by
@@ -35,9 +40,12 @@ const dbMods = async () => {
 //   AUTOMATIC STAGE: new → Not started, done → Complete; an in-progress (or unknown) status → In review
 //   when its name reads as review / QA (`SPRINT_REVIEW_STATUS_RE`) or it sits at / after the PR
 //   evidence boundary (`inferReviewFrom`), else In progress.
-//   OVERRIDE: the reader's sections, in their order. ⚠ PLACEMENT BEATS CATEGORY. A status it does not
-//   name keeps its automatic stage, right after its nearest automatic predecessor in that stage (else
-//   first). A status it names that nobody has seen is kept (count 0) so the settings list can show it.
+//   AUTOMATIC BUCKETS: four, one per stage (shared `sprintAutomaticBuckets`).
+//   OVERRIDE: the reader's buckets, in their order. ⚠ PLACEMENT BEATS CATEGORY. A status no bucket
+//   names keeps its automatic stage and joins the FIRST bucket meaning it, else the bucket of the
+//   NEAREST meaning (the earlier on a tie), right after its nearest automatic predecessor there (else
+//   first) — `auto: true`. A status a bucket names that nobody has seen is kept (count 0) so the
+//   settings list can show it.
 
 const norm = (s: string): string => s.trim().toLowerCase();
 const CAT_RANK: Record<string, number> = { new: 0, indeterminate: 1, done: 2 };
@@ -136,24 +144,53 @@ export function automaticStages(
   });
 }
 
-type Placed = { name: string; category: JiraStatusCategory | null; auto: boolean; stage: SprintStage };
+type Placed = { name: string; category: JiraStatusCategory | null; auto: boolean; stage: SprintStage; bucketId: string };
 
-/** Merge the override's sections onto the automatic placement, grouped in SPRINT_STAGES order. Pure. */
-export function applySectionsOverride(
+const STAGE_RANK: Record<SprintStage, number> = { not_started: 0, in_progress: 1, in_review: 2, done: 3 };
+
+/** The bucket a status of this automatic stage joins when no bucket names it: the FIRST bucket with
+ *  that meaning, else the bucket of the NEAREST meaning (the earlier one on a tie — never claim more
+ *  progress than the status shows), the first bucket of that meaning. Pure. */
+export function bucketForStage<B extends Pick<SprintBucket, 'id' | 'meaning'>>(buckets: readonly B[], stage: SprintStage): B | null {
+  const exact = buckets.find((b) => b.meaning === stage);
+  if (exact != null) return exact;
+  let best: B | null = null;
+  let bestD = Infinity;
+  for (const b of buckets) {
+    const d = Math.abs(STAGE_RANK[b.meaning] - STAGE_RANK[stage]);
+    const below = STAGE_RANK[b.meaning] < STAGE_RANK[stage];
+    if (best == null || d < bestD) {
+      best = b;
+      bestD = d;
+    } else if (d === bestD) {
+      const bestBelow = STAGE_RANK[best.meaning] < STAGE_RANK[stage];
+      // A tie: prefer the earlier meaning; within one meaning, keep the first bucket.
+      if (below && !bestBelow) best = b;
+    }
+  }
+  return best;
+}
+
+/** Place every status in a bucket: the buckets' named statuses first (in their order), then each
+ *  unnamed automatic status in `bucketForStage`'s bucket. Grouped in bucket order. Pure. `buckets:
+ *  null` = the four automatic buckets, every status in its automatic stage's, in automatic order. */
+export function applyBuckets(
   auto: ReadonlyArray<{ name: string; category: JiraStatusCategory | null; stage: SprintStage }>,
-  sections: SprintStatusSettings['sections'],
+  buckets: readonly SprintBucket[] | null,
 ): Placed[] {
-  const byStage = new Map<SprintStage, Placed[]>(SPRINT_STAGES.map((k) => [k, []]));
-  const placed = new Map<string, SprintStage>();
+  const set = buckets != null && buckets.length > 0;
+  const list = set ? buckets : sprintAutomaticBuckets();
+  const byBucket = new Map<string, Placed[]>(list.map((b) => [b.id, []]));
+  const placed = new Set<string>();
   const autoByKey = new Map(auto.map((s) => [norm(s.name), s]));
-  if (sections != null) {
-    for (const stage of SPRINT_STAGES) {
-      for (const n of sections[stage] ?? []) {
+  if (set) {
+    for (const b of list) {
+      for (const n of b.statuses) {
         const k = norm(n);
         if (k === '' || placed.has(k)) continue;
         const known = autoByKey.get(k);
-        byStage.get(stage)!.push({ name: known?.name ?? n.trim(), category: known?.category ?? null, auto: false, stage });
-        placed.set(k, stage);
+        byBucket.get(b.id)!.push({ name: known?.name ?? n.trim(), category: known?.category ?? null, auto: false, stage: b.meaning, bucketId: b.id });
+        placed.add(k);
       }
     }
   }
@@ -161,42 +198,92 @@ export function applySectionsOverride(
     const s = auto[i]!;
     const k = norm(s.name);
     if (placed.has(k)) continue;
-    const list = byStage.get(s.stage)!;
-    // After the nearest automatic predecessor already placed in the SAME stage; else first.
+    const b = bucketForStage(list, s.stage)!;
+    const into = byBucket.get(b.id)!;
+    // After the nearest automatic predecessor already placed in the SAME bucket; else first. With no
+    // override, keep the automatic order exactly (append).
     let at = 0;
-    for (let j = i - 1; j >= 0; j -= 1) {
-      const idx = list.findIndex((o) => norm(o.name) === norm(auto[j]!.name));
-      if (idx >= 0) {
-        at = idx + 1;
-        break;
+    if (!set) at = into.length;
+    else {
+      for (let j = i - 1; j >= 0; j -= 1) {
+        const idx = into.findIndex((o) => norm(o.name) === norm(auto[j]!.name));
+        if (idx >= 0) {
+          at = idx + 1;
+          break;
+        }
       }
     }
-    // With no override, keep the automatic order exactly (append).
-    if (sections == null) at = list.length;
-    list.splice(at, 0, { name: s.name, category: s.category, auto: true, stage: s.stage });
-    placed.set(k, s.stage);
+    into.splice(at, 0, { name: s.name, category: s.category, auto: true, stage: b.meaning, bucketId: b.id });
+    placed.add(k);
   }
-  return SPRINT_STAGES.flatMap((k) => byStage.get(k)!);
+  return list.flatMap((b) => byBucket.get(b.id)!);
 }
 
-/** The stage a ticket in this status is listed under. Pure; THE ONE stage rule: the layout's
- *  placement; a status the layout does not know falls back to its category (done → Complete, new or none
- *  → Not started, else In review by name, else In progress). */
-export function sprintStageOf(
-  layout: Pick<SprintStatusLayout, 'order'>,
-  status: { name: string; category: string | null } | null,
-): SprintStage {
-  if (status != null) {
-    const hit = layout.order.find((o) => norm(o.name) === norm(status.name));
-    if (hit != null) return hit.stage;
-  }
+/** The drawn x axis: the buckets in order, with the derived merged column (when on) after the last In
+ *  review bucket, else after the last In progress bucket, else before the first Complete bucket, else
+ *  last. Pure. */
+export function sprintColumnsOf(buckets: ReadonlyArray<Pick<SprintBucket, 'id' | 'name' | 'meaning'>>, mergedColumn: boolean): SprintColumn[] {
+  const cols: SprintColumn[] = buckets.map((b) => ({ id: b.id, name: b.name, meaning: b.meaning, derived: false }));
+  if (!mergedColumn) return cols;
+  const merged: SprintColumn = { id: SPRINT_MERGED_COLUMN_ID, name: SPRINT_MERGED_COLUMN_LABEL, meaning: 'in_review', derived: true };
+  const lastOf = (m: SprintStage): number => cols.map((c) => c.meaning).lastIndexOf(m);
+  const review = lastOf('in_review');
+  const progress = lastOf('in_progress');
+  const done = cols.findIndex((c) => c.meaning === 'done');
+  const at = review >= 0 ? review + 1 : progress >= 0 ? progress + 1 : done >= 0 ? done : cols.length;
+  cols.splice(at, 0, merged);
+  return cols;
+}
+
+/** The column a ticket is drawn in: its bucket, or the merged column when that column is on, its stage
+ *  is In progress or In review, and it has ≥ 1 merged pull request and none open (closed unmerged ones
+ *  ignored). Pure; THE ONE column rule (the graph fold calls it). */
+export function sprintColumnOf(
+  place: { stage: SprintStage; bucketId: string } | null,
+  prs: ReadonlyArray<{ state: string }>,
+  mergedColumn: boolean,
+): string | null {
+  if (place == null) return null;
+  if (!mergedColumn || (place.stage !== 'in_progress' && place.stage !== 'in_review')) return place.bucketId;
+  const open = prs.some((p) => p.state === 'open');
+  const merged = prs.some((p) => p.state === 'merged');
+  return merged && !open ? SPRINT_MERGED_COLUMN_ID : place.bucketId;
+}
+
+/** The category fallback for a status the layout does not know: done → Complete, new or none → Not
+ *  started, else In review by name, else In progress. */
+function fallbackStage(status: { name: string; category: string | null } | null): SprintStage {
   const cat = asCategory(status?.category ?? null);
   if (cat === 'done') return 'done';
   if (cat === 'new' || status == null) return 'not_started';
   return isReviewStatusName(status.name) ? 'in_review' : 'in_progress';
 }
 
-/** A status's section index in the layout (the sort key within a stage); unknown → after all. */
+/** Where a ticket in this status sits: its bucket and that bucket's meaning. Pure; THE ONE placement
+ *  rule: the layout's placement; a status the layout does not know falls back to its category's stage,
+ *  in `bucketForStage`'s bucket (with no buckets at all: the stage's automatic bucket id). */
+export function sprintPlacementOf(
+  layout: Pick<SprintStatusLayout, 'order'> & Partial<Pick<SprintStatusLayout, 'buckets'>>,
+  status: { name: string; category: string | null } | null,
+): { stage: SprintStage; bucketId: string } {
+  if (status != null) {
+    const hit = layout.order.find((o) => norm(o.name) === norm(status.name));
+    if (hit != null) return { stage: hit.stage, bucketId: hit.bucketId };
+  }
+  const stage = fallbackStage(status);
+  const b = bucketForStage(layout.buckets ?? [], stage);
+  return b == null ? { stage, bucketId: stage } : { stage: b.meaning, bucketId: b.id };
+}
+
+/** The stage a ticket in this status is listed under (its bucket's meaning). Pure. */
+export function sprintStageOf(
+  layout: Pick<SprintStatusLayout, 'order'> & Partial<Pick<SprintStatusLayout, 'buckets'>>,
+  status: { name: string; category: string | null } | null,
+): SprintStage {
+  return sprintPlacementOf(layout, status).stage;
+}
+
+/** A status's index in the layout (the sort key within a bucket); unknown → after all. */
 export function sprintStatusSectionIndex(layout: Pick<SprintStatusLayout, 'order'>, statusName: string | null): number {
   if (statusName == null) return layout.order.length;
   const i = layout.order.findIndex((o) => norm(o.name) === norm(statusName));
@@ -208,9 +295,10 @@ export function resolveSprintStatusLayout(input: StatusLayoutInput): SprintStatu
   const settings = input.settings ?? SPRINT_STATUS_SETTINGS_DEFAULT;
   const autoOrder = automaticStatusOrder(input.autoOrder, input.tickets);
   const stages = automaticStages(autoOrder, input.evidence);
-  const merged = applySectionsOverride(
+  const bucketList = settings.buckets != null && settings.buckets.length > 0 ? settings.buckets : sprintAutomaticBuckets();
+  const merged = applyBuckets(
     autoOrder.map((s, i) => ({ ...s, stage: stages[i]! })),
-    settings.sections,
+    settings.buckets,
   );
   const counts = new Map<string, number>();
   for (const t of input.tickets) {
@@ -223,6 +311,13 @@ export function resolveSprintStatusLayout(input: StatusLayoutInput): SprintStatu
     count: counts.get(norm(s.name)) ?? 0,
     auto: s.auto,
     stage: s.stage,
+    bucketId: s.bucketId,
+  }));
+  const buckets: SprintStatusLayoutBucket[] = bucketList.map((b) => ({
+    id: b.id,
+    name: b.name,
+    meaning: b.meaning,
+    statuses: order.filter((o) => o.bucketId === b.id),
   }));
   const ev = new Map([...input.evidence].map(([k, v]) => [norm(k), v]));
   const evidence: SprintStatusEvidence[] = autoOrder
@@ -230,7 +325,9 @@ export function resolveSprintStatusLayout(input: StatusLayoutInput): SprintStatu
     .map((s) => ({ status: s.name, withPrs: ev.get(norm(s.name))?.withPrs ?? 0, allMerged: ev.get(norm(s.name))?.allMerged ?? 0 }));
   return {
     order,
-    orderSource: settings.sections != null ? 'override' : (input.autoOrder?.source ?? 'fallback'),
+    buckets,
+    columns: sprintColumnsOf(bucketList, settings.mergedColumn),
+    orderSource: settings.buckets != null ? 'override' : (input.autoOrder?.source ?? 'fallback'),
     codingBegins: order.find((o) => o.stage === 'in_progress')?.name ?? null,
     codingEnds: order.find((o) => o.stage === 'in_review')?.name ?? null,
     evidence,

@@ -740,11 +740,14 @@ Sqlite `0103` / pg `0090` (status sections + blockers; no new table):
 - **`sprint_reads.status_order_json`** — the AUTOMATIC status order (`SprintStatusAutoOrder`: Jira board
   columns, Linear workflow states, or GitHub's Open → Closed), written by the sprint read; a failed read
   leaves the previous value. NULL → statuses by category, then name.
-- **`workspaces.sprint_statuses`** — the per-workspace OVERRIDE (`SprintStatusSettings` = `{sections}`:
-  status names per stage — not_started / in_progress / in_review / done — in order; NULL = automatic),
-  the ONE reader/writer `db/sprint-status-settings.ts`. Names match case-insensitively; placement beats
-  category; a status the override does not name keeps its automatic stage and place. A stored value of
-  the RETIRED `{order, deliveredFrom}` shape is converted on read (no migration).
+- **`workspaces.sprint_statuses`** — the per-workspace OVERRIDE (`SprintStatusSettings` =
+  `{buckets: SprintBucket[] | null, mergedColumn: boolean}`; a bucket is `{id, name, meaning, statuses}`,
+  meaning one of not_started / in_progress / in_review / done, non-decreasing; NULL = the default,
+  automatic buckets with the merged column on), the ONE reader/writer `db/sprint-status-settings.ts`.
+  Names match case-insensitively; placement beats category; a status no bucket names joins the first
+  bucket of its automatic stage (else the nearest). Stored values of the RETIRED `{sections}` and
+  `{order, deliveredFrom}` shapes are converted on read into four buckets (no migration). Contract:
+  [TRACKERS.md](TRACKERS.md) § The status order and buckets.
 
 ## The automation vocabulary — `AUTOMATION_VENDORS`, `ReviewerRole`, `AutomatedReviewerKind`
 

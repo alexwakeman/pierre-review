@@ -51,7 +51,7 @@ import {
   type SprintTicketDbRow,
 } from './sprint-store.js';
 import { sprintAssessmentCurrencyFrom, workspaceRepoRefs } from './sprint-stories.js';
-import { getSprintStatusLayout, sprintStageOf } from './sprint-status-layout.js';
+import { getSprintStatusLayout, sprintPlacementOf } from './sprint-status-layout.js';
 import { effectiveSprintRepos } from './sprint-ticket-repos.js';
 
 // REPORTS → THIS SPRINT AS A GRAPH (`GET /api/sprint-graph`, `GET /api/sprint-graph/ticket`;
@@ -61,7 +61,8 @@ import { effectiveSprintRepos } from './sprint-ticket-repos.js';
 //   • POPULATION: this workspace's `sprint_tickets` with `in_sprint` on the tracker's CURRENT site,
 //     plus the ghosts the sprint read stored (`sprint_ref_tickets`) that the fold reaches
 //     (db/sprint-graph-fold.ts — the ONE fold the brief pass and the ghost lookup use too).
-//   • STAGES: the workspace's status layout places every node, ghosts included (`sprintStageOf`).
+//   • BUCKETS: the workspace's status layout places every node, ghosts included (`sprintPlacementOf`:
+//     bucket + its meaning as `stage`), and the fold derives each node's `column` (`sprintColumnOf`).
 //   • BRIEFS: CURRENT only (text hash + SPRINT_BRIEF_VERSION, db/sprint-briefs.ts). `aiEnabled` false
 //     → every node's brief is 'off' and no text edge is drawn (tracker links still are).
 //   • THEMES: CURRENT only (input hash over the sprint keys + brief summaries + SPRINT_THEME_VERSION,
@@ -342,7 +343,8 @@ export async function getSprintGraph(
   const source: SprintSource | null = readRow.sourceJson ?? null;
   const t = await loadGraphTickets(accountId, workspaceId, site, opts.aiEnabled);
   const statusLayout = await layoutFor(accountId, workspaceId, t, readRow);
-  const stageOf = (s: GraphTicketInput['status']) => (s == null ? null : sprintStageOf(statusLayout, s));
+  const placeOf = (s: GraphTicketInput['status']) => (s == null ? null : sprintPlacementOf(statusLayout, s));
+  const placing = { stageOf: (s: GraphTicketInput['status']) => placeOf(s)?.stage ?? null, placeOf, mergedColumn: statusLayout.settings.mergedColumn };
   // PRs only for what can be a node: the sprint plus the stored ghosts.
   const prs = await graphPrsFor(accountId, workspaceId, site, [...t.sprintRows.map((r) => r.issueKey), ...t.refRows.map((r) => r.issueKey)]);
   const themes = opts.aiEnabled ? await currentSprintThemes(accountId, workspaceId, sprintThemeInputOf(t).inputHash) : null;
@@ -351,7 +353,7 @@ export async function getSprintGraph(
     apiRoot: site.apiRoot,
     sprint: t.sprint,
     ghosts: t.ghosts,
-    stageOf,
+    ...placing,
     prs,
     ...(themes != null ? { themes: themes.byIdent } : {}),
   });
@@ -491,7 +493,8 @@ export async function sprintStoryTodo(accountId: number, workspaceId: number): P
   const readRow = await readSprintRead(accountId, workspaceId);
   const t = await loadGraphTickets(accountId, workspaceId, site, true);
   const statusLayout = await layoutFor(accountId, workspaceId, t, readRow);
-  const stageOf = (s: GraphTicketInput['status']) => (s == null ? null : sprintStageOf(statusLayout, s));
+  const placeOf = (s: GraphTicketInput['status']) => (s == null ? null : sprintPlacementOf(statusLayout, s));
+  const placing = { stageOf: (s: GraphTicketInput['status']) => placeOf(s)?.stage ?? null, placeOf, mergedColumn: statusLayout.settings.mergedColumn };
   const prs = await graphPrsFor(accountId, workspaceId, site, [...t.sprintRows.map((r) => r.issueKey), ...t.refRows.map((r) => r.issueKey)]);
   const themes = await currentSprintThemes(accountId, workspaceId, sprintThemeInputOf(t).inputHash);
   const g = foldSprintGraph({
@@ -499,7 +502,7 @@ export async function sprintStoryTodo(accountId: number, workspaceId: number): P
     apiRoot: site.apiRoot,
     sprint: t.sprint,
     ghosts: t.ghosts,
-    stageOf,
+    ...placing,
     prs,
     ...(themes != null ? { themes: themes.byIdent } : {}),
   });
@@ -602,8 +605,9 @@ export async function getSprintTicketDetail(
       .execute()
   )[0] as Pick<SprintReadRow, 'statusOrderJson'> | undefined;
   const statusLayout = await layoutFor(accountId, workspaceId, t, readRow ?? null);
-  const stageOf = (s: GraphTicketInput['status']) => (s == null ? null : sprintStageOf(statusLayout, s));
-  const g = foldSprintGraph({ provider: site.provider, apiRoot: site.apiRoot, sprint: t.sprint, ghosts: t.ghosts, stageOf });
+  const placeOf = (s: GraphTicketInput['status']) => (s == null ? null : sprintPlacementOf(statusLayout, s));
+  const placing = { stageOf: (s: GraphTicketInput['status']) => placeOf(s)?.stage ?? null, placeOf, mergedColumn: statusLayout.settings.mergedColumn };
+  const g = foldSprintGraph({ provider: site.provider, apiRoot: site.apiRoot, sprint: t.sprint, ghosts: t.ghosts, ...placing });
   const node = g.nodes.find((n) => n.ident === ident);
   if (node == null) return none;
   const input = (node.ghost ? t.ghosts : t.sprint).find((x) => x.ident === ident)!;
