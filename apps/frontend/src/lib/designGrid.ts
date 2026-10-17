@@ -120,3 +120,26 @@ export function arrowPath(a: Box, b: Box, gap = 3): ArrowGeometry {
   const my = (y1 + y2) / 2;
   return { d: `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`, lx: (x1 + x2) / 2, ly: my };
 }
+
+/**
+ * The short PR badge per member: `#498` when every member is in one repo, else the repo's own part of
+ * its name (`backend #498`, `harness #170` for bng-metric-backend / bng-metric-harness) — the
+ * shared prefix says nothing that tells two cards apart, and the full name wrapped in a narrow card.
+ */
+export function prBadgeTexts(members: readonly SequenceDiagramMember[]): Map<number, string> {
+  const names = members.map((m) => m.repo.split('/').pop() ?? m.repo);
+  const out = new Map<number, string>();
+  if (new Set(names).size <= 1) {
+    for (const m of members) out.set(m.prId, `#${m.number}`);
+    return out;
+  }
+  let prefix = names[0] ?? '';
+  for (const n of names) while (!n.startsWith(prefix)) prefix = prefix.slice(0, -1);
+  const cut = prefix.lastIndexOf('-') + 1; // only cut at a word boundary
+  for (const [i, m] of members.entries()) {
+    const n = names[i]!;
+    const short = n.slice(cut) || n;
+    out.set(m.prId, `${short} #${m.number}`);
+  }
+  return out;
+}

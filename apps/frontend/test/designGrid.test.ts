@@ -4,7 +4,7 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/designGrid.test.ts
 import { describe, expect, it } from 'vitest';
 import type { DesignDiagram, SequenceDiagramMember } from '@pierre-review/shared';
-import { CHANGE_WORD, arrowPath, layoutDesign, memberForRef } from '../src/lib/designGrid.js';
+import { CHANGE_WORD, arrowPath, layoutDesign, memberForRef, prBadgeTexts } from '../src/lib/designGrid.js';
 
 const design = (over: Partial<DesignDiagram> = {}): DesignDiagram => ({
   acts: [
@@ -101,3 +101,21 @@ describe('arrowPath', () => {
     expect(g.d.endsWith('103 20')).toBe(true);
   });
 });
+
+describe('prBadgeTexts', () => {
+  const m = (prId: number, repo: string, number: number) =>
+    ({ prId, repo, number, title: '', state: 'open', headSha: 'x' }) as SequenceDiagramMember;
+  it('drops the shared word prefix between repos', () => {
+    const b = prBadgeTexts([m(1, 'DEFRA/bng-metric-backend', 498), m(2, 'DEFRA/bng-metric-harness', 170)]);
+    expect([b.get(1), b.get(2)]).toEqual(['backend #498', 'harness #170']);
+  });
+  it('is just the number in one repo', () => {
+    const b = prBadgeTexts([m(1, 'o/api', 3), m(2, 'o/api', 4)]);
+    expect([b.get(1), b.get(2)]).toEqual(['#3', '#4']);
+  });
+  it('never cuts mid-word, and keeps a name the prefix would empty', () => {
+    const b = prBadgeTexts([m(1, 'o/app', 1), m(2, 'o/apple', 2), m(3, 'o/app-web', 3)]);
+    expect([b.get(1), b.get(2), b.get(3)]).toEqual(['app #1', 'apple #2', 'app-web #3']);
+  });
+});
+

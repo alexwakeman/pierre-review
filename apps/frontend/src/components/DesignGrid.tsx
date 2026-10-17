@@ -27,7 +27,7 @@ import {
 } from '@floating-ui/react';
 import type { DesignCell, DesignDiagram, SequenceDiagramMember } from '@pierre-review/shared';
 import { claimActivePopover } from '../lib/activePopover.js';
-import { CHANGE_WORD, arrowPath, layoutDesign, memberForRef, type ArrowGeometry } from '../lib/designGrid.js';
+import { CHANGE_WORD, arrowPath, layoutDesign, memberForRef, prBadgeTexts, type ArrowGeometry } from '../lib/designGrid.js';
 import { PencilIcon, PlusIcon } from './Icons.js';
 
 export type OpenDesignFile = (cell: DesignCell, path: string) => void;
@@ -57,12 +57,23 @@ export function DesignGrid({
   const gridRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef(new Map<string, HTMLElement>());
   const [paths, setPaths] = useState<Array<ArrowGeometry & { key: string; label: string | null }>>([]);
-  const oneRepo = new Set(members.map((m) => m.repo)).size <= 1;
+  // NARROW (the ticket drawer, ~620px): the layer names move from a side column to a band heading
+  // above each layer's cards, giving the stages the width — otherwise every card wraps to six lines
+  // and the grid stops fitting on a laptop screen.
+  const [narrow, setNarrow] = useState(false);
+  const badges = useMemo(() => prBadgeTexts(members), [members]);
+  // 1, 2, 3… for the arrows that carry a label, in the design's own order.
+  const labelNumbers = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of layout.arrows) if (a.label != null) m.set(`${a.from}>${a.to}`, m.size + 1);
+    return m;
+  }, [layout]);
 
   const measure = useCallback((): void => {
     const grid = gridRef.current;
     if (grid == null) return;
     const g = grid.getBoundingClientRect();
+    setNarrow(g.width > 0 && g.width < NARROW_PX);
     const box = (id: string) => {
       const el = cardRefs.current.get(id);
       if (el == null) return null;
@@ -90,6 +101,8 @@ export function DesignGrid({
   }, [measure]);
 
   const nActs = layout.acts.length;
+  const col0 = narrow ? 1 : 2; // the first stage's grid column
+  const rowOf = (layerRow: number): number => (narrow ? 3 + layerRow * 2 : layerRow + 2);
   // Row-major DOM order, so a screen reader reads each layer across its stages.
   const byRow = layout.rows.map((r, row) => ({
     ...r,
@@ -100,8 +113,12 @@ export function DesignGrid({
     <div role="group" aria-label={label} className="w-full">
       <div
         ref={gridRef}
-        className="relative grid gap-x-5 gap-y-3"
-        style={{ gridTemplateColumns: `minmax(3.25rem, 6.5rem) repeat(${nActs}, minmax(0, 1fr))` }}
+        className={`relative grid pr-1 ${narrow ? 'gap-x-4 gap-y-1.5' : 'gap-x-5 gap-y-3'}`}
+        style={{
+          gridTemplateColumns: narrow
+            ? `repeat(${nActs}, minmax(0, 1fr))`
+            : `minmax(3.25rem, 6.5rem) repeat(${nActs}, minmax(0, 1fr))`,
+        }}
       >
         <svg aria-hidden className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible text-gray-400 dark:text-gray-500">
           <defs>
@@ -112,31 +129,33 @@ export function DesignGrid({
           {paths.map((p) => (
             <g key={p.key}>
               <path d={p.d} fill="none" stroke="currentColor" strokeWidth={1.5} markerEnd={`url(#${markerId})`} />
-              {p.label != null && (
-                <text
-                  x={p.lx}
-                  y={p.ly}
-                  dy="-0.35em"
-                  textAnchor="middle"
-                  fontSize={11}
-                  paintOrder="stroke"
-                  strokeWidth={4}
-                  className="fill-gray-700 stroke-white dark:fill-gray-200 dark:stroke-gray-950"
-                >
-                  {p.label}
-                </text>
-              )}
             </g>
           ))}
         </svg>
 
+        {/* A labelled arrow carries a small NUMBER on top of the line, keyed below the grid: a gap
+            between two cards is ~20px, too narrow for words, and a label there covered card text. */}
+        {paths.map((p) => {
+          const n = labelNumbers.get(p.key);
+          return n == null ? null : (
+            <span
+              key={`l:${p.key}`}
+              aria-hidden
+              className="pointer-events-none absolute z-20 flex h-4 min-w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-gray-400 bg-white px-0.5 text-[11px] font-semibold leading-none text-gray-800 dark:border-gray-500 dark:bg-gray-950 dark:text-gray-100"
+              style={{ left: p.lx, top: p.ly }}
+            >
+              {n}
+            </span>
+          );
+        })}
+
         {/* Header row: the stages. */}
-        <div aria-hidden />
+        {!narrow && <div aria-hidden />}
         {layout.acts.map((a, i) => (
           <div
             key={a.id}
             className="relative z-10 min-w-0 self-end break-words text-[12px] font-semibold text-gray-800 dark:text-gray-100"
-            style={{ gridRow: 1, gridColumn: i + 2 }}
+            style={{ gridRow: 1, gridColumn: i + col0 }}
           >
             <span className="sr-only">Stage {i + 1}: </span>
             {a.title}
@@ -146,19 +165,21 @@ export function DesignGrid({
         {byRow.map((r, row) => (
           <Fragment key={r.layer}>
             <div
-              className="relative z-10 min-w-0 self-center break-words text-[11px] font-medium text-gray-600 dark:text-gray-300"
-              style={{ gridRow: row + 2, gridColumn: 1 }}
+              className={`relative z-10 min-w-0 break-words text-[11px] font-medium text-gray-600 dark:text-gray-300 ${
+                narrow ? 'mt-1 border-t border-gray-200 pt-1 dark:border-gray-800' : 'self-center'
+              }`}
+              style={narrow ? { gridRow: rowOf(row) - 1, gridColumn: '1 / -1' } : { gridRow: rowOf(row), gridColumn: 1 }}
             >
               {r.label}
             </div>
             {r.cells.map((g) => (
-              <div key={g.cell.id} className="relative z-10 min-w-0" style={{ gridRow: row + 2, gridColumn: g.col + 2 }}>
+              <div key={g.cell.id} className="relative z-10 min-w-0" style={{ gridRow: rowOf(row), gridColumn: g.col + col0 }}>
                 <DesignCard
                   cell={g.cell}
                   stage={layout.acts[g.col]!.title}
                   layerLabel={r.label}
                   member={memberForRef(g.cell.pr, members)}
-                  oneRepo={oneRepo}
+                  badges={badges}
                   openFile={openFile}
                   cardRef={(el) => {
                     if (el) cardRefs.current.set(g.cell.id, el);
@@ -170,6 +191,21 @@ export function DesignGrid({
           </Fragment>
         ))}
       </div>
+      {labelNumbers.size > 0 && (
+        <ol aria-hidden className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-gray-700 dark:text-gray-300">
+          {layout.arrows.map((a) => {
+            const n = labelNumbers.get(`${a.from}>${a.to}`);
+            return n == null ? null : (
+              <li key={`${a.from}>${a.to}`} className="inline-flex items-center gap-1">
+                <span className="flex h-4 min-w-4 items-center justify-center rounded-full border border-gray-400 px-0.5 text-[11px] font-semibold leading-none dark:border-gray-500">
+                  {n}
+                </span>
+                {a.label}
+              </li>
+            );
+          })}
+        </ol>
+      )}
       {layout.arrows.length > 0 && (
         <ul className="sr-only" aria-label="Hand-offs">
           {layout.arrows.map((a) => (
@@ -181,16 +217,15 @@ export function DesignGrid({
   );
 }
 
-function prBadgeText(m: SequenceDiagramMember, oneRepo: boolean): string {
-  return oneRepo ? `#${m.number}` : `${m.repo.split('/').pop() ?? m.repo}#${m.number}`;
-}
+const NARROW_PX = 760;
+
 
 function DesignCard({
   cell,
   stage,
   layerLabel,
   member,
-  oneRepo,
+  badges,
   openFile,
   cardRef,
 }: {
@@ -198,7 +233,7 @@ function DesignCard({
   stage: string;
   layerLabel: string;
   member: SequenceDiagramMember | null;
-  oneRepo: boolean;
+  badges: Map<number, string>;
   openFile?: OpenDesignFile;
   cardRef: (el: HTMLElement | null) => void;
 }): JSX.Element {
@@ -235,20 +270,20 @@ function DesignCard({
             {word}
           </span>
         )}
+        {cell.pattern != null && (
+          <span className="inline-block max-w-full break-words rounded bg-gray-100 px-1 text-[11px] text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+            {cell.pattern}
+          </span>
+        )}
         {member != null && (
-          <span className="rounded border border-gray-300 px-1 font-mono text-[11px] text-gray-700 dark:border-gray-700 dark:text-gray-200">
-            {prBadgeText(member, oneRepo)}
+          <span className="whitespace-nowrap rounded border border-gray-300 px-1 text-[11px] text-gray-700 dark:border-gray-700 dark:text-gray-200">
+            {badges.get(member.prId) ?? `#${member.number}`}
           </span>
         )}
       </span>
-      <span className="mt-0.5 line-clamp-2 block break-words text-[13px] leading-snug text-gray-900 [overflow-wrap:anywhere] dark:text-gray-50">
+      <span className="mt-0.5 line-clamp-2 block break-words text-[13px] leading-snug text-gray-900 dark:text-gray-50">
         {cell.label}
       </span>
-      {cell.pattern != null && (
-        <span className="mt-1 inline-block max-w-full break-words rounded bg-gray-100 px-1 text-[11px] text-gray-700 dark:bg-gray-800 dark:text-gray-200">
-          {cell.pattern}
-        </span>
-      )}
     </>
   );
   // What a screen reader hears for the card as a whole.
