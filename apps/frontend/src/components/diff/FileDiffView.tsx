@@ -61,7 +61,7 @@ import { CopyButton } from '../CopyButton.js';
 import { MentionTextarea } from '../MentionTextarea.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { ThreadCountChips, rollupCounts } from '../ThreadList/ThreadCountChips.js';
-import { SELECTED_BORDER, STATUS_META, UNSELECTED_BORDER } from './status.js';
+import { SELECTED_BORDER, SELECTED_FILL, STATUS_META, UNSELECTED_BORDER } from './status.js';
 import { FileTypeIcon } from '../FileTypeIcons.js';
 
 // The shared per-file diff renderer used by BOTH the Changes tab (with inline
@@ -1353,7 +1353,7 @@ function FileDiffBlock({
     ) : null;
 
   return (
-    // The same 2px sky line the rail's selected row carries, so a click marks the file in the
+    // The same 2px cyan line (and the same fill behind the sticky name row) the rail's selected row carries, so a click marks the file in the
     // code view too. Fires whenever this file is the focus target — including a reveal from
     // outside the tab that carries no line to flash. `border-l-2` is unconditional and only
     // the colour changes, so no block moves when the selection does.
@@ -1364,7 +1364,13 @@ function FileDiffBlock({
       {/* Sticky per-file header (mirrors the Changes-tab behaviour): the name stays
           pinned as you scroll and is pushed up by the next file's header. Needs an
           opaque background + a z-index above the diff table. */}
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-gray-100 bg-white px-3 py-1.5 text-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:hover:bg-gray-900">
+      <div
+        className={`sticky top-0 z-10 flex items-center gap-2 border-b px-3 py-1.5 text-xs ${
+          focus != null
+            ? `${SELECTED_FILL} border-cyan-300 dark:border-cyan-600`
+            : 'border-gray-100 bg-white hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:hover:bg-gray-900'
+        }`}
+      >
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}

@@ -5,7 +5,7 @@ import { isLockFile } from '../../lib/diff.js';
 import { ThreadCountChips } from '../ThreadList/ThreadCountChips.js';
 import { ChevronIcon } from '../Icons.js';
 import { FileTypeIcon, FolderTypeIcon } from '../FileTypeIcons.js';
-import { SELECTED_BORDER, STATUS_META, UNSELECTED_BORDER } from './status.js';
+import { SELECTED_BORDER, SELECTED_FILL, STATUS_META, UNSELECTED_BORDER } from './status.js';
 
 // The Changes tab's navigation rail: the PR's CHANGED FILES ONLY, arranged in their real
 // project directory hierarchy so you can see where each file sits. Clicking a file reveals it
@@ -143,7 +143,7 @@ function TreeRow({
       style={pad}
       className={`flex w-full items-center gap-1.5 rounded border-l-2 py-0.5 pr-2 text-left text-xs ${
         selected
-          ? `${SELECTED_BORDER} bg-sky-50 dark:bg-sky-950/30`
+          ? `${SELECTED_BORDER} ${SELECTED_FILL}`
           : `${UNSELECTED_BORDER} hover:bg-gray-50 dark:hover:bg-gray-800/50`
       } ${noise && !selected ? 'opacity-60' : ''}`}
       title={
