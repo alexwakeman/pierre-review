@@ -6295,6 +6295,20 @@ export interface MyTurnReply {
  *  Built server-side from stored bodies (no GitHub call): markdown and HTML stripped, whitespace
  *  collapsed, at most `CARD_EXCERPT_MAX_CHARS`, cut on a word boundary. ⚠ Third-party text:
  *  render as a text node. ⚠ DISPLAY ONLY — never in a `detail`, a payload hash or a model payload. */
+/** WHICH COMMENT a `mention` / `comment_reply` card is about — where a click on the card lands.
+ *  ⚠ THREE id spaces, so the kind always travels with the id:
+ *   • `review_comment` — a comment on a line of code: the PR's Changes tab, at the thread's file
+ *     and line (`line` null = the thread no longer anchors to one; the file is revealed), with the
+ *     thread's inline pill opened;
+ *   • `pr_comment` (`pr_comments.id`) and `review` (a review BODY, `reviews.id`) — the PR's
+ *     conversation, on the Overview tab, scrolled to that entry.
+ *  DISPLAY ONLY, folded from synced rows (no fetch). Absent = not known — the card opens the PR's
+ *  Activity tab as before. */
+export type MyTurnCommentRef =
+  | { kind: 'review_comment'; threadId: number; path: string; line: number | null }
+  | { kind: 'pr_comment'; id: number }
+  | { kind: 'review'; id: number };
+
 export interface CardExcerpt {
   text: string;
   /** The comment was longer than the excerpt (or the excerpt starts mid-comment, "…" marked). */
@@ -6341,6 +6355,9 @@ export interface CommentReplyItem extends MyTurnPr {
    *  stored body is missing. Feeds `MyTurnCard.reply`. Trailing optional. */
   replyBody?: string | null;
   replyTruncated?: boolean;
+  /** The reply's `pr_comments.id` — where a click on the card lands (`MyTurnCard.comment`).
+   *  Trailing optional. */
+  replyCommentId?: number;
 }
 
 /** S6 — a person @-mentioned you on an open PR after your last action on it. `since` is the newest
@@ -9730,6 +9747,9 @@ export interface MyTurnCard extends InsightCardBase, InsightPrRef {
   /** `mention` only: the comment that mentioned you, as typed (quoted lines dropped), centred on
    *  the mention when it sits deep in a long comment. Absent when the comment cannot be found. */
   mentionExcerpt?: CardExcerpt;
+  /** `mention` and `comment_reply`: the comment the card is about (the mentioning comment; the
+   *  comment that came after yours) — see `MyTurnCommentRef`. Board fact, like `mentionExcerpt`. */
+  comment?: MyTurnCommentRef;
   /** Thread-grained reasons (`thread` — a reply or `likely_addressed` — `thread_reply`,
    *  `own_thread`): the file the thread is on. */
   threadPath?: string;

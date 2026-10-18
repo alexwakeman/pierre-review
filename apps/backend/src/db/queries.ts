@@ -64,6 +64,7 @@ import type {
   NewPrBall,
   PushedCommit,
   MyTurnReply,
+  MyTurnCommentRef,
   NewSinceLastViewed,
   PrCommentDetail,
   PrDetail,
@@ -307,7 +308,7 @@ import {
 } from './failing-checks.js';
 import {
   addressedCommitAuthors,
-  mentionExcerpts,
+  mentionFacts as mentionCommentFacts,
   reviewRequesters,
   threadFirstComments,
   yourPrNewActors,
@@ -4824,6 +4825,9 @@ export async function getWorkspaceInsights(
         /** `likely_addressed`: the viewer's comment the touching commit must follow. */
         addressedAfter?: Date;
         mention?: { byId: number | null; at: Date };
+        /** `comment_reply`: the reply comment (`MyTurnCard.comment`) — already known from the
+         *  fold, so no read; applied with the other board facts. */
+        comment?: MyTurnCommentRef;
         yourPr?: true;
         /** `review_request`: read who asked (`requesterId`). */
         reviewRequest?: true;
@@ -5050,6 +5054,9 @@ export async function getWorkspaceInsights(
               }
             : undefined,
         extraActorIds: [i.replyAuthorId],
+        ...(i.replyCommentId != null
+          ? { facts: { comment: { kind: 'pr_comment' as const, id: i.replyCommentId } } }
+          : {}),
       });
     }
     // ── THE FOUR PR-GRAINED PROMOTIONS. Each card carries its HOME kind's facts on `own`, so the
@@ -5331,7 +5338,7 @@ export async function getWorkspaceInsights(
             mentionSeeds.length > 0
               ? ((await getAccountById(accountId))?.githubLogin ?? '').toLowerCase()
               : '';
-          const mentionFacts = await mentionExcerpts(
+          const mentionFacts = await mentionCommentFacts(
             mentionSeeds.map((s) => ({ prId: s.prId, ...s.facts!.mention! })),
             mentionLogin,
           );
@@ -5383,11 +5390,13 @@ export async function getWorkspaceInsights(
           for (const { card, s } of targets) {
             const f = s.facts!;
             if (f.threadPath != null) card.threadPath = f.threadPath;
+            if (f.comment != null) card.comment = f.comment;
             if (f.threadLine != null) card.threadLine = f.threadLine;
             if (f.mention != null) {
               if (f.mention.byId != null) card.mentionedById = f.mention.byId;
-              const ex = mentionFacts.get(s.prId);
-              if (ex != null) card.mentionExcerpt = ex;
+              const mf = mentionFacts.get(s.prId);
+              if (mf?.excerpt != null) card.mentionExcerpt = mf.excerpt;
+              if (mf?.comment != null) card.comment = mf.comment;
             }
             if (s.threadId != null) {
               const by = committerFacts.get(s.threadId);
@@ -8146,6 +8155,7 @@ export async function getMyTurn(
   if (replyCandidates.length > 0) {
     const comments = await db
       .select({
+        id: prComments.id,
         prId: prComments.prId,
         authorId: prComments.authorId,
         body: prComments.body,
@@ -8179,6 +8189,7 @@ export async function getMyTurn(
       found.push({
         ...toMyTurnPr(t, reply.createdAt),
         replyAuthorId: reply.authorId,
+        replyCommentId: reply.id,
         replyExcerpt: truncate(reply.body ?? '', 140),
         ...(() => {
           const capped = capMyTurnReply(reply.body);

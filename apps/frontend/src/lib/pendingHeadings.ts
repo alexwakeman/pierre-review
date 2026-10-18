@@ -1,4 +1,5 @@
 import type {
+  MyTurnCommentRef,
   AutomatedReviewerKind,
   CiFailingCard,
   InsightCard,
@@ -926,6 +927,9 @@ export function factDropsNoReviews(card: InsightCard): boolean {
 /** What a WHOLE-CARD click opens: the event, never just "the PR". */
 export type PendingCardEvent =
   | { kind: 'thread'; threadId: number }
+  // A mention / comment-after-yours card that knows WHICH comment: land on it — a comment on a
+  // line of code in Changes (its thread opened), a conversation comment on Overview.
+  | { kind: 'comment'; comment: MyTurnCommentRef }
   | { kind: 'pr'; tab: 'overview' | 'activity' }
   | { kind: 'claude_review' }
   | { kind: 'external' }
@@ -943,6 +947,9 @@ export function pendingCardEvent(card: InsightCard): PendingCardEvent {
         return { kind: 'thread', threadId: card.threadId };
       }
       if (card.reason === 'claude_review') return { kind: 'claude_review' };
+      if ((card.reason === 'mention' || card.reason === 'comment_reply') && card.comment != null) {
+        return { kind: 'comment', comment: card.comment };
+      }
       if (
         card.reason === 'pushed_since' ||
         card.reason === 'comment_reply' ||

@@ -264,6 +264,44 @@ beforeAll(async () => {
       .execute();
   }
 
+  // ── MENTION in a comment on a line of code: the card lands on that thread ──
+  {
+    const id = await seedPr('mention-inline');
+    const at = MY_ACTION + 3 * HOUR;
+    await addThread(
+      id,
+      'inline-mention',
+      aliceId,
+      'untouched',
+      [{ authorId: aliceId, body: '@viewer-me is this line right?', at }],
+      42,
+    );
+    await db
+      .insert(schema.prMentions)
+      .values({
+        accountId: 1,
+        repoId,
+        prId: id,
+        login: 'viewer-me',
+        mentionedAt: new Date(at),
+        mentionedByUserId: aliceId,
+      })
+      .execute();
+  }
+
+  // ── COMMENT REPLY: I commented on the PR, then Bob commented after me ──
+  {
+    const id = await seedPr('comment-reply');
+    await db
+      .insert(schema.prComments)
+      .values([
+        { githubNodeId: 'PC_cr_mine', prId: id, authorId: viewerId, body: 'Is this ready?', createdAt: new Date(MY_ACTION) },
+        { githubNodeId: 'PC_cr_bob', prId: id, authorId: bobId, body: 'Not yet, one more fix.', createdAt: new Date(MY_ACTION + HOUR) },
+        { githubNodeId: 'PC_cr_carol', prId: id, authorId: carolId, body: 'Agreed.', createdAt: new Date(MY_ACTION + 2 * HOUR) },
+      ])
+      .execute();
+  }
+
   // ── THREAD REPLY in my thread: path + line ──
   {
     const id = await seedPr('thread-reply');
@@ -447,6 +485,39 @@ describe('each fact lands on its card (board fold)', () => {
     });
   });
 
+  it('mention in a PR comment: the card names that comment, so a click lands on it', async () => {
+    const card = myTurnByKey((await insights(true)).cards).get('mention')!;
+    const [row] = await db
+      .select({ id: schema.prComments.id })
+      .from(schema.prComments)
+      .where((await import('drizzle-orm')).eq(schema.prComments.githubNodeId, 'PC_mention'))
+      .execute();
+    expect(card.comment).toEqual({ kind: 'pr_comment', id: row.id });
+  });
+
+  it('mention in a comment on a line of code: the thread, its file and its line', async () => {
+    const card = myTurnByKey((await insights(true)).cards).get('mention-inline')!;
+    expect(card.reason).toBe('mention');
+    expect(card.mentionExcerpt?.text).toBe('@viewer-me is this line right?');
+    expect(card.comment).toEqual({
+      kind: 'review_comment',
+      threadId: threadIdByTag.get('inline-mention'),
+      path: 'src/inline-mention.ts',
+      line: 42,
+    });
+  });
+
+  it('comment reply: the FIRST comment after mine, by id', async () => {
+    const card = myTurnByKey((await insights(true)).cards).get('comment-reply')!;
+    expect(card.reason).toBe('comment_reply');
+    const [row] = await db
+      .select({ id: schema.prComments.id })
+      .from(schema.prComments)
+      .where((await import('drizzle-orm')).eq(schema.prComments.githubNodeId, 'PC_cr_bob'))
+      .execute();
+    expect(card.comment).toEqual({ kind: 'pr_comment', id: row.id });
+  });
+
   it('thread reply: the file and line', async () => {
     const card = myTurnByKey((await insights(true)).cards).get('thread-reply')!;
     expect(card.reason).toBe('thread');
@@ -553,6 +624,7 @@ describe('board only, display only', () => {
         for (const k of [
           'mentionedById',
           'mentionExcerpt',
+          'comment',
           'threadPath',
           'threadLine',
           'committerId',

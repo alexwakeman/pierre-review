@@ -342,3 +342,21 @@ describe('under the Critical path board', () => {
     expect(t.columns.map((c) => c.id)).toEqual(COLUMNS.map((c) => c.id));
   });
 });
+
+describe('layoutBoard — linked cards sit near each other', () => {
+  const cols = [
+    { id: 'a', name: 'A', meaning: 'not_started' as const, derived: false },
+    { id: 'b', name: 'B', meaning: 'in_progress' as const, derived: false },
+  ];
+  const card = (id: string, column: string) => ({ id, lane: 'L', column, data: null });
+  it('a card follows the row of the card it is linked to; no arrows keeps the input order', () => {
+    const cards = [card('x1', 'a'), card('x2', 'a'), card('x3', 'a'), card('y1', 'b'), card('y2', 'b'), card('y3', 'b')];
+    const base = { columns: cols, lanes: [{ id: 'L', data: null }], cards, collapsed: new Set<string>() };
+    const rowOf = (l: ReturnType<typeof layoutBoard>, id: string) => l.cards.find((c) => c.id === id)!.row;
+    const plain = layoutBoard({ ...base, arrows: [] });
+    expect(['x1', 'x2', 'x3'].map((id) => rowOf(plain, id))).toEqual([0, 1, 2]);
+    // y1 (row 0) waits on x3; y3 (row 2) waits on x1 — the linked cards should swap to face them.
+    const l = layoutBoard({ ...base, arrows: [{ from: 'x3', to: 'y1', label: null, text: '' }, { from: 'x1', to: 'y3', label: null, text: '' }] });
+    expect(rowOf(l, 'x3')).toBeLessThan(rowOf(l, 'x1'));
+  });
+});

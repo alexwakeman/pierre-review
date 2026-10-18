@@ -2111,6 +2111,11 @@ stays LOCAL-ONLY and gated on `me.ai.enabled` through `useAiCapabilities()`, nev
 Viewing any of the three views stamps `sprint_reads.viewed_at`, which is what lets the worker read the
 sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA's wording changed.
 
+- **The scroll position is REMEMBERED per tab** for the session (`hooks/useRememberedScroll.ts`, keyed
+  `sprint:<tab>`): Activity's content pane is one scroll box shared by every rail entry and the board
+  unmounts when another screen shows, so Back or re-opening Activity used to land at the top. It
+  restores once the box is tall enough (the board arrives after mount) and stops the moment the reader
+  scrolls, or after 4s. Module memory only — not persisted, not in the URL.
 - **Four tabs, DERIVED, never written back**: Theme (the landing tab, since 2026-10-18) · Critical path · People · Merged
   so far. The store's `sprintInnerTab` (`'paths' | 'themes' | 'people' | 'merged'`) is mirrored to
   `?sprintTab=paths|people|merged` (the `'themes'` default omitted, the key emitted ONLY beside
@@ -2855,7 +2860,12 @@ FETCH, so they mount only while Details is open** — the untouched-thread card 
 thread on mount, which broke the board's no-fetch rule (`e2e/pending-cards.spec.ts` pins it).
 
 **Whole-card click opens the EVENT** (`pendingCardEvent`): a thread card its thread, pushed
-commits / a comment / a mention / your PR's new activity the PR's Activity tab, a Claude card the
+commits / your PR's new activity the PR's Activity tab, a mention / comment-after-yours card THE
+COMMENT when it carries `comment` (`board.openComment`: a comment on a line of code → Changes via
+`openPrChangesAt` with `threadId` + `line`, which PrDetail runs through `openInChangesFor` — the
+thread → Changes ladder that opens its inline pill — falling back to Threads when the file left the
+diff; a PR comment or review body → Overview via `showPrComment(prId, id, kind)`, keyed
+`comment:<id>` / `review:<id>` in `PrCommentsList`; without `comment`, Activity), a Claude card the
 review, a red trunk its checks page on GitHub (the "at <sha>" link is the commit itself); the title
 always opens Overview (it seats `prDetailTab` explicitly). A red build on YOUR PR (`ci_failing`'s
 `your_pr` arm, no `InsightPrRef`) still prints "on <title> · repo#N" from its own fields.
@@ -4424,9 +4434,13 @@ test/designGrid.test.ts).
   `routeArrow` ONLY through the slot padding and the grid gaps — out of the source's side, down the
   column gap beside the target, into its side; a card in the way sends the line to the row gap first
   (leaving off-centre, so it never shares a straight arrow's line). Re-measured by a ResizeObserver.
+  ⚠ **LINKED CARDS SIT NEAR EACH OTHER** (lane boards, `orderByLinks` in `lib/laneBoard.ts`): within
+  a lane the order of a column's cards is free, so each is placed at the mean row of the cards it is
+  linked to (a barycentre sweep across the columns, both ways, four rounds); a card with no links
+  keeps its place, and with no arrows the input order stands.
   ⚠ **NO TWO LINES SHARE A RUN** (`separateArrowRuns`, run on ALL the arrows after routing): runs on
   the same x (or y) whose ranges overlap are a BUNDLE, and each arrow in it gets its own parallel track
-  (≤ `ARROW_TRACK_PX` = 12 apart, narrower to fit the gap + slot padding); which arrow takes which
+  (≤ `ARROW_TRACK_PX` = 17 apart, narrower to fit the gap + slot padding — the boards use a 48px column gap for it; an entry into a card's side spreads over half the card's height); which arrow takes which
   track is the order with the FEWEST crossings (`crossings`; every order for ≤ 5 lines), or lines
   turning out of the bundle cross at the arrowhead. The numbered marker sits on its own line clear of
   every OTHER line and marker (`placeArrowLabels`), so it never hides another arrow's head.

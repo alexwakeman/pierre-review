@@ -683,7 +683,9 @@ export interface FilterState {
   // scrolls to + flashes a specific issue-level PR comment (the pr_comment
   // marker's "Open in detail pane"). Matched against the loaded PR by `prId`;
   // cleared by PrCommentsList once it scrolls.
-  commentFocus: { prId: number; commentId: number } | null;
+  // `kind` (default 'comment'): the conversation also lists review BODIES, a separate id space —
+  // a Pending mention card can point at one.
+  commentFocus: { prId: number; commentId: number; kind?: 'comment' | 'review' } | null;
 
   // transient: the Claude-review progress banner → open a PR's Claude Review tab.
   // Matched against the loaded PR by `prId`; cleared by PrDetail once it switches.
@@ -692,7 +694,14 @@ export interface FilterState {
   // transient: a design-grid card (Claude Review's story design, This Sprint's ticket drawer) → open
   // a PR's Changes tab focused on one file. Matched by `prId`; PrDetail consumes it once it has
   // routed the jump through its own `openInChanges`.
-  prChangesFocus: { prId: number; path: string } | null;
+  // `threadId` (+ `line`): a Pending comment card about a comment on a line of code — the jump
+  // lands on that thread's line with its inline pill opened (PrDetail's thread → Changes leg).
+  prChangesFocus: {
+    prId: number;
+    path: string;
+    threadId?: number;
+    line?: number | null;
+  } | null;
 
   // transient: "Generate fix from this review" → open the PR's AI Fix tab, seeded
   // with the review text. Matched by `prId`; cleared by PrDetail once it switches.
@@ -1100,7 +1109,7 @@ export interface FilterState {
   // Open the selected PR's Overview tab scrolled to a specific issue-level PR
   // comment (timeline pr_comment popover → "Open in detail pane"). PrCommentsList
   // consumes it once it has scrolled to + flashed the card.
-  showPrComment: (prId: number, commentId: number) => void;
+  showPrComment: (prId: number, commentId: number, kind?: 'comment' | 'review') => void;
   consumeCommentFocus: () => void;
   // Open a PR's Claude Review tab (the global progress banner → a running/finished
   // review). PrDetail consumes it once it has switched tabs.
@@ -1111,7 +1120,16 @@ export interface FilterState {
   consumeClaudeTabFocus: () => void;
   // Open a PR's Changes tab at one file (a design-grid card). Ensures a pr-detail tab is mounted,
   // exactly like openClaudeReview, so the signal always has a PrDetail to consume it.
-  openPrChangesAt: (meta: TabMeta, path: string, opts?: { fromActivity?: boolean }) => void;
+  openPrChangesAt: (
+    meta: TabMeta,
+    path: string,
+    opts?: {
+      fromActivity?: boolean;
+      returnItemId?: string | null;
+      threadId?: number;
+      line?: number | null;
+    },
+  ) => void;
   consumePrChangesFocus: () => void;
   // Open a PR's AI Fix tab with a Claude review to fix from. AiFixTab consumes it. `reviewId`
   // names the review; the server builds the whole seed from the stored run.
@@ -1827,12 +1845,13 @@ export const useFilters = create<FilterState>((set, get) => ({
   consumeActivityFocus: () => set({ activityFocus: null }),
   // Select the comment (permanent amber highlight) AND fire the transient scroll/
   // flash signal — the highlight persists, the flash plays once.
-  showPrComment: (prId, commentId) =>
+  showPrComment: (prId, commentId, kind = 'comment') =>
     set({
       selectedPrId: prId,
       selectedThreadId: null,
-      selectedCommentId: commentId,
-      commentFocus: { prId, commentId },
+      // The permanent highlight addresses issue comments only.
+      selectedCommentId: kind === 'comment' ? commentId : null,
+      commentFocus: { prId, commentId, kind },
     }),
   consumeCommentFocus: () => set({ commentFocus: null }),
   // Open the PR's Claude Review pane. Crucially, ensure a pr-detail TAB is mounted first
@@ -1850,12 +1869,17 @@ export const useFilters = create<FilterState>((set, get) => ({
   },
   consumeClaudeTabFocus: () => set({ claudeTabFocus: null }),
   openPrChangesAt: (meta, path, opts) => {
-    usePinnedTabs.getState().openPrDetailTab(meta, opts);
+    const { threadId, line, ...open } = opts ?? {};
+    usePinnedTabs.getState().openPrDetailTab(meta, open);
     set({
       selectedPrId: meta.id,
       selectedThreadId: null,
       selectedCommentId: null,
-      prChangesFocus: { prId: meta.id, path },
+      prChangesFocus: {
+        prId: meta.id,
+        path,
+        ...(threadId != null ? { threadId, line: line ?? null } : {}),
+      },
     });
   },
   consumePrChangesFocus: () => set({ prChangesFocus: null }),

@@ -6,6 +6,9 @@
 // facts this module folds onto the cards:
 //
 //   • `mentionExcerpt`   — the comment that @-mentioned you                       (mention)
+//   • `comment`          — WHICH comment that was (kind + id / thread + file +
+//                          line), so a click lands on it                          (mention; comment_reply
+//                          rides its own seed)
 //   • `committerId`      — who wrote the first commit after your comment that
 //                          changed the thread's file                               (thread, likely_addressed)
 //   • `firstComment`     — the opening comment of an unanswered thread            (own_thread, untouched_thread)
@@ -29,6 +32,7 @@ import {
   YOUR_PR_NEW_ACTORS_SHOWN,
   type CardExcerpt,
   type CardThreadComment,
+  type MyTurnCommentRef,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { mentionPattern, mentionsLogin, withoutQuotedLines } from './pr-mentions.js';
@@ -36,6 +40,7 @@ import { mentionPattern, mentionsLogin, withoutQuotedLines } from './pr-mentions
 const {
   prComments,
   reviewComments,
+  reviewThreads,
   reviews,
   commits,
   commitFiles,
@@ -139,28 +144,47 @@ export interface MentionFactInput {
   at: Date;
 }
 
+/** What `mentionFacts` knows about one mention card: the quote, and which comment it is. */
+export interface MentionFact {
+  /** Absent when the comment's typed text yields no excerpt. */
+  excerpt?: CardExcerpt;
+  /** Absent when a review comment's thread row is missing. */
+  comment?: MyTurnCommentRef;
+}
+
 /**
- * The comment that @-mentioned the viewer, per PR. Looked up in the SAME three tables the mention
+ * The comment that @-mentioned the viewer, per PR — its quote AND its identity. Looked up in the SAME three tables the mention
  * scanner reads (a PR comment, an inline review comment, a review body), by the scanner's author,
  * through the scanner's own match rule on the TYPED lines — so the quote is the comment that made
  * the card, not a quote-reply of it. Prefers the row at exactly the stamped time; falls back to that
  * author's newest matching comment (the scanner may not have re-stamped yet). Missing ⇒ absent.
  */
-export async function mentionExcerpts(
+export async function mentionFacts(
   inputs: readonly MentionFactInput[],
   login: string,
-): Promise<Map<number, CardExcerpt>> {
-  const out = new Map<number, CardExcerpt>();
+): Promise<Map<number, MentionFact>> {
+  const out = new Map<number, MentionFact>();
   const wanted = inputs.filter((i) => i.byId != null);
   if (wanted.length === 0 || login === '') return out;
   const prIds = [...new Set(wanted.map((i) => i.prId))];
   const byIds = [...new Set(wanted.map((i) => i.byId as number))];
-  type Row = { prId: number; authorId: number | null; body: string | null; at: Date };
+  // `kind` + `id` name the row in its OWN table (three id spaces); `threadId` is a review
+  // comment's thread.
+  type Row = {
+    kind: 'pr_comment' | 'review_comment' | 'review';
+    id: number;
+    threadId: number | null;
+    prId: number;
+    authorId: number | null;
+    body: string | null;
+    at: Date;
+  };
   const rows: Row[] = [];
   for (const ids of chunks(prIds)) {
     const [pc, rc, rv] = await Promise.all([
       db
         .select({
+          id: prComments.id,
           prId: prComments.prId,
           authorId: prComments.authorId,
           body: prComments.body,
@@ -171,6 +195,8 @@ export async function mentionExcerpts(
         .execute(),
       db
         .select({
+          id: reviewComments.id,
+          threadId: reviewComments.threadId,
           prId: reviewComments.prId,
           authorId: reviewComments.authorId,
           body: reviewComments.body,
@@ -181,6 +207,7 @@ export async function mentionExcerpts(
         .execute(),
       db
         .select({
+          id: reviews.id,
           prId: reviews.prId,
           authorId: reviews.authorId,
           body: reviews.body,
@@ -190,7 +217,11 @@ export async function mentionExcerpts(
         .where(and(inArray(reviews.prId, ids), inArray(reviews.authorId, byIds)))
         .execute(),
     ]);
-    rows.push(...pc, ...rc, ...rv);
+    rows.push(
+      ...pc.map((r) => ({ ...r, kind: 'pr_comment' as const, threadId: null })),
+      ...rc.map((r) => ({ ...r, kind: 'review_comment' as const })),
+      ...rv.map((r) => ({ ...r, kind: 'review' as const, threadId: null })),
+    );
   }
   const byPr = new Map<number, Row[]>();
   for (const r of rows) {
@@ -198,6 +229,7 @@ export async function mentionExcerpts(
     arr.push(r);
     byPr.set(r.prId, arr);
   }
+  const hits: { prId: number; hit: Row & { typed: string } }[] = [];
   for (const i of wanted) {
     const typed = (byPr.get(i.prId) ?? [])
       .filter((r) => r.authorId === i.byId && r.body != null)
@@ -205,9 +237,40 @@ export async function mentionExcerpts(
       .filter((r) => mentionsLogin(r.typed, login))
       .sort((a, b) => b.at.getTime() - a.at.getTime());
     const hit = typed.find((r) => r.at.getTime() === i.at.getTime()) ?? typed[0];
-    if (hit == null) continue;
+    if (hit != null) hits.push({ prId: i.prId, hit });
+  }
+  // A review comment lands on its THREAD's file and line (the live anchor), so read those — one
+  // batched select over the hit threads only.
+  const threadAnchor = new Map<number, { path: string; line: number | null }>();
+  const threadIds = [
+    ...new Set(hits.flatMap(({ hit }) => (hit.kind === 'review_comment' && hit.threadId != null ? [hit.threadId] : []))),
+  ];
+  for (const ids of chunks(threadIds)) {
+    for (const t of await db
+      .select({ id: reviewThreads.id, path: reviewThreads.path, line: reviewThreads.line })
+      .from(reviewThreads)
+      .where(inArray(reviewThreads.id, ids))
+      .execute()) {
+      threadAnchor.set(t.id, { path: t.path, line: t.line });
+    }
+  }
+  for (const { prId, hit } of hits) {
+    let comment: MyTurnCommentRef | null = null;
+    if (hit.kind === 'review_comment') {
+      const anchor = hit.threadId != null ? threadAnchor.get(hit.threadId) : undefined;
+      if (hit.threadId != null && anchor != null) {
+        comment = { kind: 'review_comment', threadId: hit.threadId, path: anchor.path, line: anchor.line };
+      }
+    } else {
+      comment = { kind: hit.kind, id: hit.id };
+    }
     const excerpt = cardExcerpt(hit.typed, { focusLogin: login });
-    if (excerpt != null) out.set(i.prId, excerpt);
+    if (comment == null && excerpt == null) continue;
+    // A review comment whose thread is gone still quotes; it just has nowhere precise to land.
+    out.set(prId, {
+      ...(excerpt != null ? { excerpt } : {}),
+      ...(comment != null ? { comment } : {}),
+    });
   }
   return out;
 }

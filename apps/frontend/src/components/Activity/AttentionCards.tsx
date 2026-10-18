@@ -15,6 +15,7 @@ import type {
   MyTurnCardReason,
   MyTurnOwnWork,
   MyTurnReply,
+  MyTurnCommentRef,
   MyTurnTrunkCard,
   NewPrBall,
   PrAutomation,
@@ -2218,6 +2219,9 @@ interface PendingBoardApi {
   openPr: (card: PrCardRef & { id: string }, tab?: PrDetailTab) => void;
   openMeta: (meta: PinnedPr, returnItemId?: string) => void;
   openThreadOn: (card: InsightPrRef & { id: string }, threadId: number) => void;
+  /** Land on ONE comment: a comment on a line of code → Changes at its thread; a conversation
+   *  comment or review body → Overview, scrolled to it. */
+  openComment: (card: PrCardRef & { id: string }, comment: MyTurnCommentRef) => void;
   openReview: (card: PrCardRef) => void;
   openFix: (meta: PinnedPr) => void;
   claudeOn: boolean;
@@ -2635,6 +2639,8 @@ function PendingCard({ card, board }: { card: InsightCard; board: PendingBoardAp
     switch (event.kind) {
       case 'thread':
         return prRef != null ? () => board.openThreadOn(prRef, event.threadId) : undefined;
+      case 'comment':
+        return prRef != null ? () => board.openComment(prRef, event.comment) : undefined;
       case 'pr':
         return prRef != null ? () => board.openPr(prRef, event.tab) : undefined;
       case 'claude_review':
@@ -2708,14 +2714,18 @@ function PendingCard({ card, board }: { card: InsightCard; board: PendingBoardAp
       if (card.reason === 'trunk_red') break;
       const threadOpen =
         card.threadId != null ? () => board.openThreadOn(card, card.threadId as number) : undefined;
+      // A mention / comment-after-yours card that names its comment lands ON it; without one,
+      // the PR's Activity tab as before.
+      const commentOpen =
+        card.comment != null ? () => board.openComment(card, card.comment as MyTurnCommentRef) : undefined;
       if (card.reply != null && replyBlockShown(heading, card.reply)) {
         content.push(
           <MyTurnReplyBody
             key="reply"
             reply={card.reply}
             byline={replyByline(card.reply)}
-            openLabel={card.threadId != null ? 'Open thread' : 'Open PR'}
-            onOpen={threadOpen ?? (() => board.openPr(card, 'activity'))}
+            openLabel={card.threadId != null ? 'Open thread' : commentOpen != null ? 'Open comment' : 'Open PR'}
+            onOpen={threadOpen ?? commentOpen ?? (() => board.openPr(card, 'activity'))}
           />,
         );
       }
@@ -2739,10 +2749,10 @@ function PendingCard({ card, board }: { card: InsightCard; board: PendingBoardAp
           resolveButton(card.threadId);
           break;
         case 'comment_reply':
-          primary('Answer', () => board.openPr(card, 'activity'));
+          primary('Answer', commentOpen ?? (() => board.openPr(card, 'activity')));
           break;
         case 'mention':
-          primary('Read it', () => board.openPr(card, 'activity'));
+          primary('Read it', commentOpen ?? (() => board.openPr(card, 'activity')));
           break;
         case 'review_request':
           primary('Start review', () => board.openPr(card, 'changes'));
@@ -3105,6 +3115,24 @@ export function AttentionCards({
     openPrDetailTab(metaFor(card, usersById), { fromActivity: true, returnItemId: card.id });
     selectThread(card.prId, threadId);
   };
+  const openPrChangesAt = useFilters((s) => s.openPrChangesAt);
+  const showPrComment = useFilters((s) => s.showPrComment);
+  const openComment = (card: PrCardRef & { id: string }, comment: MyTurnCommentRef): void => {
+    if (comment.kind === 'review_comment') {
+      // PrDetail resolves the thread → Changes jump (and falls back to Threads when the file has
+      // left the diff).
+      openPrChangesAt(metaFor(card, usersById), comment.path, {
+        fromActivity: true,
+        returnItemId: card.id,
+        threadId: comment.threadId,
+        line: comment.line,
+      });
+      return;
+    }
+    open(metaFor(card, usersById), card.id);
+    setPrDetailTab(card.prId, 'overview');
+    showPrComment(card.prId, comment.id, comment.kind === 'review' ? 'review' : 'comment');
+  };
 
   // CLAUDE — ONLY where agentic AI runs (`me.ai.enabled`), and fed by ONE batched states request
   // for every PR card on the board, never one per card. Without it: no line and no request.
@@ -3157,6 +3185,7 @@ export function AttentionCards({
     openPr,
     openMeta: open,
     openThreadOn,
+    openComment,
     openReview: (pr) => openClaudeReview(metaFor(pr, usersById), { fromActivity: true }),
     openFix: (meta) => openAiFix(meta),
     claudeOn,

@@ -95,6 +95,7 @@ export function useRoutedArrows(
     const routes: Array<Array<[number, number]>> = [];
     let padX = 0;
     let padY = 0;
+    let minCardH = Infinity;
     for (const a of arrows) {
       const from = placed(a.from);
       const to = placed(a.to);
@@ -102,10 +103,14 @@ export function useRoutedArrows(
       keys.push(a.key);
       padX = Math.max(padX, from.card.x - from.slot.x);
       padY = Math.max(padY, from.card.y - from.slot.y);
+      minCardH = Math.min(minCardH, from.card.h, to.card.h);
       routes.push(routePoints(from, to, (r, c) => taken.has(`${r}:${c}`), gapX, gapY));
     }
     // Lines that would share a run get their own parallel tracks (lib/designGrid.ts separateArrowRuns).
-    const separated = separateArrowRuns(routes, gapX + 2 * padX - 4, gapY + 2 * padY - 4);
+    // Sideways runs are mostly the ENTRIES into a card's side, which have the card's height to spread
+    // over — so two arrowheads meeting at one box land well apart, not only the row gap's width.
+    const roomY = Math.max(gapY + 2 * padY - 4, Number.isFinite(minCardH) ? minCardH * 0.5 : 0);
+    const separated = separateArrowRuns(routes, gapX + 2 * padX - 4, roomY);
     // …and each numbered marker sits clear of every other line, so it never hides an arrowhead.
     const labels = placeArrowLabels(separated);
     const next: RoutedPath[] = separated.map((pts, i) => ({
@@ -482,7 +487,7 @@ export function LaneBoard<L, C>({
   return (
     <div role="group" aria-label={label} className="w-full">
       <div className="w-full overflow-x-auto">
-        <div ref={gridRef} className="relative grid gap-x-5 gap-y-1 pb-1 pr-1" style={{ gridTemplateColumns: template }}>
+        <div ref={gridRef} className="relative grid gap-x-12 gap-y-2 pb-1 pr-1" style={{ gridTemplateColumns: template }}>
           {/* Lane stripes, under everything: a rule above each lane and a faint ground on every other. */}
           {layout.lanes.map((l, i) => (
             <div

@@ -295,6 +295,25 @@ describe('My turn — people events', () => {
     expect(pendingHeading(bare, ctx()).quote).toBeNull();
   });
 
+  it('a mention / comment-after-yours card that names its comment lands ON it', () => {
+    const inline = { kind: 'review_comment' as const, threadId: 31, path: 'src/a.ts', line: 12 };
+    expect(pendingCardEvent(myTurn({ reason: 'mention', comment: inline }))).toEqual({
+      kind: 'comment',
+      comment: inline,
+    });
+    const conv = { kind: 'pr_comment' as const, id: 77 };
+    expect(pendingCardEvent(myTurn({ reason: 'comment_reply', comment: conv }))).toEqual({
+      kind: 'comment',
+      comment: conv,
+    });
+    expect(
+      pendingCardEvent(myTurn({ reason: 'mention', comment: { kind: 'review', id: 5 } })),
+    ).toEqual({ kind: 'comment', comment: { kind: 'review', id: 5 } });
+    // Not known: the PR's Activity tab, as before.
+    expect(pendingCardEvent(myTurn({ reason: 'mention' }))).toEqual({ kind: 'pr', tab: 'activity' });
+    expect(pendingCardEvent(myTurn({ reason: 'comment_reply' }))).toEqual({ kind: 'pr', tab: 'activity' });
+  });
+
   it('a review request: the author on line two, and how many others were asked', () => {
     const card = myTurn({
       reason: 'review_request',

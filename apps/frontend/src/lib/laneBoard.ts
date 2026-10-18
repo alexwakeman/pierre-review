@@ -96,6 +96,56 @@ export function collapsedColumns(columns: ReadonlyArray<BoardColumn>, shown: Rea
   return new Set(columns.filter((c) => isCollapsible(c) && !shown.has(c.id)).map((c) => c.id));
 }
 
+/**
+ * LINKED CARDS SIT NEAR EACH OTHER. Within a lane, the order of a column's cards is free (the column
+ * is the status, the lane the group), so it is chosen to shorten the arrows: each card is placed by
+ * the mean row of the cards it is linked to (a barycentre sweep, left to right then back, a few
+ * times), a card with no links keeping its place. Stable, so with no arrows the input order stands.
+ * Mutates the lists in `stacks` in place.
+ */
+function orderByLinks<C>(
+  stacks: Array<{ start: number; cols: Map<string, Array<BoardCardDef<C>>> }>,
+  arrows: ReadonlyArray<BoardArrowDef>,
+  columnOrder: readonly string[],
+): void {
+  const links = new Map<string, string[]>();
+  const link = (a: string, b: string): void => {
+    if (a === b) return;
+    const l = links.get(a);
+    if (l == null) links.set(a, [b]);
+    else l.push(b);
+  };
+  for (const a of arrows) {
+    link(a.from, a.to);
+    link(a.to, a.from);
+  }
+  if (links.size === 0) return;
+  const rowOf = new Map<string, number>();
+  const reindex = (): void => {
+    for (const st of stacks) for (const list of st.cols.values()) list.forEach((c, k) => rowOf.set(c.id, st.start + k));
+  };
+  reindex();
+  const sweep = [...columnOrder, ...[...columnOrder].reverse()];
+  for (let round = 0; round < 4; round++) {
+    for (const column of sweep) {
+      for (const st of stacks) {
+        const list = st.cols.get(column);
+        if (list == null || list.length < 2) continue;
+        const keyed = list.map((c, k) => {
+          const rows = (links.get(c.id) ?? []).map((n) => rowOf.get(n)).filter((r): r is number => r != null);
+          const key = rows.length > 0 ? rows.reduce((x, y) => x + y, 0) / rows.length : st.start + k;
+          return { c, key, k };
+        });
+        keyed.sort((a, b) => a.key - b.key || a.k - b.k);
+        keyed.forEach((e, k) => {
+          list[k] = e.c;
+          rowOf.set(e.c.id, st.start + k);
+        });
+      }
+    }
+  }
+}
+
 /** Where every card, lane and arrow goes. Pure. */
 export function layoutBoard<L, C>(input: {
   columns: ReadonlyArray<BoardColumn>;
@@ -129,8 +179,9 @@ export function layoutBoard<L, C>(input: {
     else l.push(c);
   }
   const lanes: BoardLayout<L, C>['lanes'] = [];
-  const cards: BoardLayout<L, C>['cards'] = [];
   const seen = new Set<string>();
+  // Pass 1: each lane's cards per shown column (input order), its start row and its span.
+  const stacks: Array<{ start: number; cols: Map<string, Array<BoardCardDef<C>>> }> = [];
   let row = 0;
   for (const lane of input.lanes) {
     const mine = (byLane.get(lane.id) ?? []).filter((c) => {
@@ -140,19 +191,27 @@ export function layoutBoard<L, C>(input: {
     });
     if (mine.length === 0) continue;
     const hidden = new Map<string, number>();
-    const stack = new Map<string, number>();
+    const cols = new Map<string, Array<BoardCardDef<C>>>();
     for (const c of mine) {
       if (isCollapsed.has(c.column)) {
         hidden.set(c.column, (hidden.get(c.column) ?? 0) + 1);
         continue;
       }
-      const k = stack.get(c.column) ?? 0;
-      stack.set(c.column, k + 1);
-      cards.push({ ...c, row: row + k, col: colIndex.get(c.column)! });
+      const list = cols.get(c.column);
+      if (list == null) cols.set(c.column, [c]);
+      else list.push(c);
     }
-    const span = Math.max(1, ...stack.values());
+    const span = Math.max(1, ...[...cols.values()].map((l) => l.length));
     lanes.push({ ...lane, row, span, size: mine.length, hidden });
+    stacks.push({ start: row, cols });
     row += span;
+  }
+  orderByLinks(stacks, input.arrows, input.columns.map((c) => c.id));
+  const cards: BoardLayout<L, C>['cards'] = [];
+  for (const st of stacks) {
+    for (const [column, list] of st.cols) {
+      list.forEach((c, k) => cards.push({ ...c, row: st.start + k, col: colIndex.get(column)! }));
+    }
   }
   const placed = new Set(cards.map((c) => c.id));
   const arrows: BoardLayout<L, C>['arrows'] = [];

@@ -141,7 +141,7 @@ describe('separateArrowRuns — no two lines share a run', () => {
     const xa = sa![1]![0];
     const xb = sb![1]![0];
     expect(xa).not.toBe(xb);
-    expect(Math.abs(xa - xb)).toBeGreaterThanOrEqual(ARROW_TRACK_PX);
+    expect(Math.abs(xa - xb)).toBeCloseTo(Math.min(ARROW_TRACK_PX, 40 / 3), 5);
     // The run's two corners moved together, so it is still vertical…
     expect(sa![1]![0]).toBe(sa![2]![0]);
     expect(sb![1]![0]).toBe(sb![2]![0]);

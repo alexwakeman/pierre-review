@@ -493,6 +493,7 @@ optional facts that `db/my-turn-card-facts.ts` adds to the cards:
 | Field | Card | From (synced rows only) |
 |---|---|---|
 | `mentionedById`, `mentionExcerpt` | `mention` | the `pr_mentions` author; their comment in `pr_comments` / `review_comments` / `reviews` that matches `mentionsLogin` on the TYPED lines (quote-replies do not count), at the stamped time, else their newest match |
+| `comment` (`MyTurnCommentRef`) | `mention`, `comment_reply` | WHICH comment the card is about, so a click lands on it: the mention's matched row above (`pr_comment` / `review` by id; a review comment as `review_comment` + its thread's id, `path` and live `line`, one batched `review_threads` read over the hit threads); for `comment_reply` the first person's PR comment after yours (`CommentReplyItem.replyCommentId`, already in the fold — no read). Absent ⇒ the SPA opens Activity as before |
 | `threadPath`, `threadLine` | `thread`, `thread_reply`, `own_thread` | the thread row the section already carries |
 | `committerId` | `thread` with a `likely_addressed` ball | the author of the FIRST commit after your comment whose `commit_files` list holds the path (the `derive-thread-state.ts` predicate), passing over bots (`globalAutomationUserIds`), you and unattributed commits — the ball rule's exclusions |
 | `firstComment` | `own_thread`, `untouched_thread` (+ `line`) | the thread's oldest stored review comment (one body read per thread; a blank one moves on to the next) |

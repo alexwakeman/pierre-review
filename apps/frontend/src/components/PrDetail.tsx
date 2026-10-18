@@ -422,7 +422,7 @@ function PrCommentsList({
   pr,
   usersById,
   viewedSince,
-  focusCommentId,
+  focusKey,
   selectedCommentId,
   onFocusConsumed,
 }: {
@@ -431,14 +431,16 @@ function PrCommentsList({
   viewedSince: string | null;
   // Deep link from the timeline (pr_comment popover → "Open in detail pane"):
   // scroll to + flash this comment card, then consume the request.
-  focusCommentId: number | null;
+  // `${kind}:${id}` — `comment:<pr_comments.id>` or `review:<reviews.id>` (a Pending mention can
+  // point at a review body), the same key the rows render under.
+  focusKey: string | null;
   // The selected comment gets a PERMANENT amber border (mirrors a selected thread),
   // distinct from the one-shot flash above.
   selectedCommentId: number | null;
   onFocusConsumed: () => void;
 }): JSX.Element {
-  const cardRefs = useRef(new Map<number, HTMLDivElement>());
-  const [flashId, setFlashId] = useState<number | null>(null);
+  const cardRefs = useRef(new Map<string, HTMLDivElement>());
+  const [flashId, setFlashId] = useState<string | null>(null);
   // The item whose expand-in-place reply composer is open (only one at a time). Keyed by
   // `${kind}:${id}` so a review id can't collide with a comment id.
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
@@ -446,13 +448,13 @@ function PrCommentsList({
   // Scroll to + flash the deep-linked comment once it's rendered, then consume the
   // request (the flash lives on its own state so consuming can't cancel it early).
   useEffect(() => {
-    if (focusCommentId == null) return;
+    if (focusKey == null) return;
     onFocusConsumed();
-    const el = cardRefs.current.get(focusCommentId);
+    const el = cardRefs.current.get(focusKey);
     if (!el) return;
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setFlashId(focusCommentId);
-  }, [focusCommentId, onFocusConsumed]);
+    setFlashId(focusKey);
+  }, [focusKey, onFocusConsumed]);
 
   useEffect(() => {
     if (flashId == null) return;
@@ -511,22 +513,17 @@ function PrCommentsList({
         const isNew = isNewComment(it.at, viewedSince);
         const isComment = it.kind === 'comment';
         const rowKey = `${it.kind}:${it.id}`;
-        // Timeline focus/selection deep links target comment ids only (from the
-        // pr_comment popover); reviews don't participate, so they never register a
-        // cardRef or take the selected/flash styling.
+        // The permanent selection targets comment ids only (the pr_comment popover); the
+        // one-shot scroll + flash takes either kind (a Pending mention in a review body).
         const selected = isComment && it.id === selectedCommentId;
-        const flashing = isComment && it.id === flashId;
+        const flashing = rowKey === flashId;
         return (
           <div
             key={rowKey}
-            ref={
-              isComment
-                ? (el) => {
-                    if (el) cardRefs.current.set(it.id, el);
-                    else cardRefs.current.delete(it.id);
-                  }
-                : undefined
-            }
+            ref={(el) => {
+              if (el) cardRefs.current.set(rowKey, el);
+              else cardRefs.current.delete(rowKey);
+            }}
             className={`rounded-md border px-2.5 py-2 ${
               selected
                 ? 'border-amber-400 bg-amber-400/5'
@@ -926,7 +923,9 @@ export function PrDetail({
   const prChangesFocus = useFilters((s) => s.prChangesFocus);
   const consumePrChangesFocus = useFilters((s) => s.consumePrChangesFocus);
   const commentFocusForPr =
-    commentFocus && pr && commentFocus.prId === pr.id ? commentFocus.commentId : null;
+    commentFocus && pr && commentFocus.prId === pr.id
+      ? `${commentFocus.kind ?? 'comment'}:${commentFocus.commentId}`
+      : null;
 
   // Keep a full-screen pr-detail tab's label fresh if the PR (re)loads renamed.
   const syncPinnedMeta = usePinnedTabs((s) => s.syncMeta);
@@ -987,7 +986,18 @@ export function PrDetail({
   useEffect(() => {
     if (prChangesFocus && pr && prChangesFocus.prId === pr.id) {
       markUrlCorrection();
-      openInChanges(prChangesFocus.path, null, 'RIGHT');
+      const { threadId } = prChangesFocus;
+      // A Pending comment card names a THREAD: take the same thread → Changes ladder the Threads
+      // tab's "In Changes" uses (live line, else the anchor hunk's, else the file), and when the
+      // file has left the diff, land on the thread in Threads instead.
+      const thread = threadId != null ? pr.threads.find((t) => t.id === threadId) : undefined;
+      if (thread != null) {
+        const jump = openInChangesFor(thread);
+        if (jump != null) jump.run();
+        else useFilters.getState().selectThread(prId, thread.id);
+      } else {
+        openInChanges(prChangesFocus.path, prChangesFocus.line ?? null, 'RIGHT', threadId);
+      }
       consumePrChangesFocus();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- openInChanges is a fresh closure each render
@@ -1494,7 +1504,7 @@ export function PrDetail({
                 pr={pr}
                 usersById={usersById}
                 viewedSince={pr.lastViewedAt}
-                focusCommentId={commentFocusForPr}
+                focusKey={commentFocusForPr}
                 selectedCommentId={selectedCommentId}
                 onFocusConsumed={consumeCommentFocus}
               />

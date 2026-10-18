@@ -294,7 +294,7 @@ export function crossings(routes: ReadonlyArray<ReadonlyArray<readonly [number, 
 }
 
 /** The most room two parallel lines get between them, px. */
-export const ARROW_TRACK_PX = 12;
+export const ARROW_TRACK_PX = 17;
 
 /**
  * NO TWO LINES SHARE A RUN. Routed one at a time, arrows into the same column (or along the same row
