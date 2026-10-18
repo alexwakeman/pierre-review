@@ -48,24 +48,24 @@ describe('tab', () => {
     expect(effectiveInsightsTab('merged')).toBe('overview');
   });
 
-  it('This Sprint opens on Critical path; Theme, People and Merged so far follow; anything else derives to Critical path', () => {
-    expect(SPRINT_INNER_TABS).toEqual(['paths', 'themes', 'people', 'merged']);
-    expect(SPRINT_RAIL_TABS.map((t) => t.label)).toEqual(['Critical path', 'Theme', 'People', 'Merged so far']);
+  it('This Sprint opens on Theme; Critical path, People and Merged so far follow; anything else derives to Theme', () => {
+    expect(SPRINT_INNER_TABS).toEqual(['themes', 'paths', 'people', 'merged']);
+    expect(SPRINT_RAIL_TABS.map((t) => t.label)).toEqual(['Theme', 'Critical path', 'People', 'Merged so far']);
     expect(effectiveSprintTab('merged')).toBe('merged');
-    expect(effectiveSprintTab('themes')).toBe('themes');
+    expect(effectiveSprintTab('paths')).toBe('paths');
     expect(effectiveSprintTab('people')).toBe('people');
     // The retired force graph, a hand-edited value and nothing at all: the landing view.
-    expect(effectiveSprintTab('graph')).toBe('paths');
-    expect(effectiveSprintTab('nonsense')).toBe('paths');
-    expect(effectiveSprintTab(null)).toBe('paths');
+    expect(effectiveSprintTab('graph')).toBe('themes');
+    expect(effectiveSprintTab('nonsense')).toBe('themes');
+    expect(effectiveSprintTab(null)).toBe('themes');
   });
 
-  it('?sprintTab= seats a member as itself and the retired graph as Critical path; anything else seats nothing', () => {
+  it('?sprintTab= seats a member as itself and the retired graph as Theme; anything else seats nothing', () => {
     expect(sprintTabFromUrl('people')).toBe('people');
     expect(sprintTabFromUrl('themes')).toBe('themes');
     expect(sprintTabFromUrl('merged')).toBe('merged');
     expect(sprintTabFromUrl('paths')).toBe('paths');
-    expect(sprintTabFromUrl('graph')).toBe('paths');
+    expect(sprintTabFromUrl('graph')).toBe('themes');
     expect(sprintTabFromUrl('nonsense')).toBeNull();
     expect(sprintTabFromUrl(null)).toBeNull();
   });

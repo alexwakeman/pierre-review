@@ -90,11 +90,11 @@ export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'st
 // visible tab is DERIVED (`effectiveSprintTab`), never written back. Transient like its siblings — no
 // FILTER_STORAGE_VERSION bump is owed.
 export type SprintInnerTab = 'paths' | 'themes' | 'people' | 'merged';
-export const SPRINT_INNER_TABS: readonly SprintInnerTab[] = ['paths', 'themes', 'people', 'merged'];
+export const SPRINT_INNER_TABS: readonly SprintInnerTab[] = ['themes', 'paths', 'people', 'merged'];
 /** The `?sprintTab=` value a link carries, as a tab to SEAT: a member as itself, the retired `graph`
  *  as the Critical path view, anything else nothing (the store keeps what it has). Pure. */
 export function sprintTabFromUrl(raw: string | null | undefined): SprintInnerTab | null {
-  if (raw === 'graph') return 'paths';
+  if (raw === 'graph') return 'themes';
   return (SPRINT_INNER_TABS as readonly string[]).includes(raw ?? '') ? (raw as SprintInnerTab) : null;
 }
 // The Bots rail's sub-tab strip. ⚠ TWO POSTURES IN ONE UNION, both deliberate:
@@ -1449,7 +1449,7 @@ function freshDefaults(): FilterData {
     // needing to know anything about the report key.
     insightsInnerTab: 'overview',
     // The This Sprint rail line opens on the graph.
-    sprintInnerTab: 'paths',
+    sprintInnerTab: 'themes',
     prDetailTab: null,
     sprintChatDraft: { question: '', wantChart: false, wantBots: false },
     sprintChatThreads: {},

@@ -899,7 +899,7 @@ describe('the Activity sub-tab strips', () => {
   // ⚠ LEGACY: the two tabs' old Reports links still sit in bookmarks and history; they land on the
   // new rail line + tab, never on a Reports tab that no longer exists.
   it.each([
-    ['sprint', 'paths'],
+    ['sprint', 'themes'],
     ['merged', 'merged'],
   ] as const)('a legacy ?insightsTab=%s link lands on This Sprint → %s', (legacy, tab) => {
     seat(`/app/?workspace=5&view=activity&activityRepo=insights&insightsTab=${legacy}`);
@@ -916,23 +916,23 @@ describe('the Activity sub-tab strips', () => {
     expect(useFilters.getState().sprintInnerTab).toBe('merged');
   });
 
-  // The three views each have a link; the retired force graph's `?sprintTab=graph` lands on Critical path.
-  it('round-trips the Theme and People views through ?sprintTab=', () => {
+  // The three views each have a link; the retired force graph's `?sprintTab=graph` lands on Theme.
+  it('round-trips the Critical path and People views through ?sprintTab=', () => {
     gesture(() => useFilters.getState().setActivityRepo('sprint'));
     gesture(() => useFilters.getState().setSprintInnerTab('people'));
     expect(location.search).toContain('sprintTab=people');
-    gesture(() => useFilters.getState().setSprintInnerTab('themes'));
-    expect(location.search).toContain('sprintTab=themes');
     gesture(() => useFilters.getState().setSprintInnerTab('paths'));
+    expect(location.search).toContain('sprintTab=paths');
+    gesture(() => useFilters.getState().setSprintInnerTab('themes'));
     expect(location.search).not.toContain('sprintTab');
   });
 
-  it('a retired ?sprintTab=graph link lands on Critical path', () => {
+  it('a retired ?sprintTab=graph link lands on Theme', () => {
     useFilters.getState().setSprintInnerTab('people');
     seat('/app/?workspace=5&view=activity&activityRepo=sprint&sprintTab=graph');
     applyUrlToStores({ fromPop: true });
     expect(useFilters.getState().activityRepoId).toBe('sprint');
-    expect(useFilters.getState().sprintInnerTab).toBe('paths');
+    expect(useFilters.getState().sprintInnerTab).toBe('themes');
   });
 
   it('does not emit sprintTab from a rail entry that has no This Sprint strip', () => {

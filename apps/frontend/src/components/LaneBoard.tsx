@@ -30,7 +30,7 @@ import {
   useRole,
 } from '@floating-ui/react';
 import { claimActivePopover } from '../lib/activePopover.js';
-import { routeArrow, type ArrowGeometry, type PlacedCard } from '../lib/designGrid.js';
+import { geometryOf, placeArrowLabels, routePoints, separateArrowRuns, type ArrowGeometry, type PlacedCard } from '../lib/designGrid.js';
 import type { BoardLayout } from '../lib/laneBoard.js';
 import { ChevronIcon } from './Icons.js';
 
@@ -91,13 +91,29 @@ export function useRoutedArrows(
       if (card == null || slot == null || c == null) return null;
       return { card: rel(card), slot: rel(slot), row: c.row, col: c.col };
     };
-    const next: RoutedPath[] = [];
+    const keys: string[] = [];
+    const routes: Array<Array<[number, number]>> = [];
+    let padX = 0;
+    let padY = 0;
     for (const a of arrows) {
       const from = placed(a.from);
       const to = placed(a.to);
       if (from == null || to == null) continue;
-      next.push({ ...routeArrow(from, to, (r, c) => taken.has(`${r}:${c}`), gapX, gapY), key: a.key });
+      keys.push(a.key);
+      padX = Math.max(padX, from.card.x - from.slot.x);
+      padY = Math.max(padY, from.card.y - from.slot.y);
+      routes.push(routePoints(from, to, (r, c) => taken.has(`${r}:${c}`), gapX, gapY));
     }
+    // Lines that would share a run get their own parallel tracks (lib/designGrid.ts separateArrowRuns).
+    const separated = separateArrowRuns(routes, gapX + 2 * padX - 4, gapY + 2 * padY - 4);
+    // …and each numbered marker sits clear of every other line, so it never hides an arrowhead.
+    const labels = placeArrowLabels(separated);
+    const next: RoutedPath[] = separated.map((pts, i) => ({
+      ...geometryOf(pts),
+      lx: labels[i]![0],
+      ly: labels[i]![1],
+      key: keys[i]!,
+    }));
     // Only a CHANGED drawing re-renders — a resize that moves nothing must not loop.
     const sig = next.map((p) => `${p.key}:${p.d}`).join('|');
     if (sig !== lastSig.current) {

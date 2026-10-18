@@ -4,7 +4,7 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/designGrid.test.ts
 import { describe, expect, it } from 'vitest';
 import type { DesignDiagram, SequenceDiagramMember } from '@pierre-review/shared';
-import { CHANGE_WORD, layoutDesign, memberForRef, prBadgeTexts, routeArrow } from '../src/lib/designGrid.js';
+import { ARROW_TRACK_PX, CHANGE_WORD, crossings, layoutDesign, memberForRef, placeArrowLabels, prBadgeTexts, routeArrow, separateArrowRuns } from '../src/lib/designGrid.js';
 
 const design = (over: Partial<DesignDiagram> = {}): DesignDiagram => ({
   acts: [
@@ -130,3 +130,63 @@ describe('prBadgeTexts', () => {
   });
 });
 
+
+describe('separateArrowRuns — no two lines share a run', () => {
+  // Two arrows from the right column into two left-column cards, both down the SAME gap at x = 100.
+  const a: Array<[number, number]> = [[300, 50], [100, 50], [100, 200], [80, 200]];
+  const b: Array<[number, number]> = [[300, 120], [100, 120], [100, 300], [80, 300]];
+
+  it('gives each arrow in a shared up/down run its own track, keeping every line right-angled', () => {
+    const [sa, sb] = separateArrowRuns([a, b], 40, 20);
+    const xa = sa![1]![0];
+    const xb = sb![1]![0];
+    expect(xa).not.toBe(xb);
+    expect(Math.abs(xa - xb)).toBeGreaterThanOrEqual(ARROW_TRACK_PX);
+    // The run's two corners moved together, so it is still vertical…
+    expect(sa![1]![0]).toBe(sa![2]![0]);
+    expect(sb![1]![0]).toBe(sb![2]![0]);
+    // …and the ends on the cards did not move.
+    expect(sa![0]).toEqual([300, 50]);
+    expect(sb![3]).toEqual([80, 300]);
+  });
+
+  it('separates two arrows entering on the same sideways line', () => {
+    const c: Array<[number, number]> = [[300, 200], [80, 200]];
+    const [sa, sc] = separateArrowRuns([a, c], 40, 20);
+    expect(sa![3]![1]).not.toBe(sc![1]![1]);
+  });
+
+  it('leaves runs alone that only share a line without overlapping, and never moves a lone arrow', () => {
+    const far: Array<[number, number]> = [[300, 400], [100, 400], [100, 500], [80, 500]];
+    expect(separateArrowRuns([a, far], 40, 20)).toEqual([a, far]);
+    expect(separateArrowRuns([a], 40, 20)).toEqual([a]);
+  });
+
+  it('narrows the tracks to fit a narrow channel', () => {
+    const c: Array<[number, number]> = [[300, 80], [100, 80], [100, 250], [80, 250]];
+    const xs = separateArrowRuns([a, b, c], 12, 20).map((r) => r[1]![0]);
+    expect(new Set(xs).size).toBe(3);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeLessThanOrEqual(12);
+  });
+});
+
+describe('separateArrowRuns — the track order avoids crossings', () => {
+  it('lines turning out of a shared run in opposite order do not cross after separation', () => {
+    // Both come up the gap at x = 100 from below and turn left into one card's side; the one that
+    // starts lower must take the INNER track or it crosses the other's turn.
+    const short: Array<[number, number]> = [[300, 200], [100, 200], [100, 50], [80, 50]];
+    const long: Array<[number, number]> = [[300, 400], [100, 400], [100, 50], [80, 50]];
+    expect(crossings(separateArrowRuns([short, long], 40, 40))).toBe(0);
+    expect(crossings(separateArrowRuns([long, short], 40, 40))).toBe(0);
+  });
+});
+
+describe('placeArrowLabels', () => {
+  it('keeps a marker off another line', () => {
+    const v: Array<[number, number]> = [[100, 0], [100, 200]];
+    const h: Array<[number, number]> = [[0, 100], [200, 100]];
+    const [lv, lh] = placeArrowLabels([v, h]);
+    expect(Math.abs(lv![1] - 100)).toBeGreaterThanOrEqual(13); // not on the crossing
+    expect(Math.hypot(lv![0] - lh![0], lv![1] - lh![1])).toBeGreaterThanOrEqual(26);
+  });
+});

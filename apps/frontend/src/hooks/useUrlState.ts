@@ -449,10 +449,10 @@ export function readFromUrl(): Partial<FilterState> {
     (activityRepo == null || activityRepo === 'insights')
   ) {
     out.activityRepoId = 'sprint';
-    out.sprintInnerTab = insightsTab === 'merged' ? 'merged' : 'paths';
+    out.sprintInnerTab = insightsTab === 'merged' ? 'merged' : 'themes';
   }
   // The This Sprint strip. Same raw-seat rule as `insightsTab`.
-  // The retired `graph` (the force graph) lands on the Critical path view (`sprintTabFromUrl`).
+  // The retired `graph` (the force graph) lands on the Theme view, the landing view (`sprintTabFromUrl`).
   const sprintTab = sprintTabFromUrl(p.get('sprintTab'));
   if (sprintTab != null) out.sprintInnerTab = sprintTab;
   // PrDetail's inner tab, and it is only meaningful PAIRED with the PR tab `view=` names — the
@@ -678,8 +678,8 @@ export function writeToUrl(s: FilterState): void {
       p.set('activityRepo', 'bots');
     } else if (s.activityRepoId === 'sprint') {
       p.set('activityRepo', 'sprint');
-      // ⚠ THE OMITTED VALUE IS THE CURRENT DEFAULT ('paths') — a bare `?activityRepo=sprint` means it.
-      if (s.sprintInnerTab !== 'paths') p.set('sprintTab', s.sprintInnerTab);
+      // ⚠ THE OMITTED VALUE IS THE CURRENT DEFAULT ('themes') — a bare `?activityRepo=sprint` means it.
+      if (s.sprintInnerTab !== 'themes') p.set('sprintTab', s.sprintInnerTab);
     } else if (s.activityRepoId === 'docs') {
       p.set('activityRepo', 'docs');
     } else if (s.activityRepoId === 'insights') {

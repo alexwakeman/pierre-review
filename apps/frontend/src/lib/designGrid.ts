@@ -126,6 +126,18 @@ export function routeArrow(
   gapY: number,
   end = 3,
 ): ArrowGeometry {
+  return geometryOf(routePoints(a, b, occupied, gapX, gapY, end));
+}
+
+/** routeArrow's corner points (cleaned: no zero-length runs, no point mid-way along a straight run). */
+export function routePoints(
+  a: PlacedCard,
+  b: PlacedCard,
+  occupied: (row: number, col: number) => boolean,
+  gapX: number,
+  gapY: number,
+  end = 3,
+): Array<[number, number]> {
   const pts: Array<[number, number]> = [];
   if (a.col !== b.col) {
     const toRight = b.col > a.col;
@@ -161,15 +173,23 @@ export function routeArrow(
       pts.push([right(a.card), midY(a.card)], [xc, midY(a.card)], [xc, midY(b.card)], [right(b.card) + end, midY(b.card)]);
     }
   }
+  return cleanPoints(pts);
+}
+
+function cleanPoints(pts: Array<[number, number]>): Array<[number, number]> {
   // Drop zero-length runs (an elbow whose two ends share a coordinate).
   const dedup = pts.filter((p, i) => i === 0 || p[0] !== pts[i - 1]![0] || p[1] !== pts[i - 1]![1]);
   // …and merge a point that sits on a straight line between its neighbours.
-  const clean = dedup.filter((p, i) => {
+  return dedup.filter((p, i) => {
     if (i === 0 || i === dedup.length - 1) return true;
     const [px, py] = dedup[i - 1]!;
     const [nx, ny] = dedup[i + 1]!;
     return !((px === p[0] && p[0] === nx) || (py === p[1] && p[1] === ny));
   });
+}
+
+/** A path's `d` and its label point: the middle of its longest straight run. */
+export function geometryOf(clean: ReadonlyArray<readonly [number, number]>): ArrowGeometry {
   let best = 0;
   let lx = clean[0]![0];
   let ly = clean[0]![1];
@@ -186,6 +206,176 @@ export function routeArrow(
   const r1 = (n: number): number => Math.round(n * 10) / 10;
   const d = clean.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${r1(x)} ${r1(y)}`).join(' ');
   return { d, lx: r1(lx), ly: r1(ly) };
+}
+
+/** How far a numbered marker keeps from every OTHER line and marker, px (its radius is ~8). */
+const LABEL_CLEAR_PX = 13;
+
+const distToRoute = (x: number, y: number, pts: ReadonlyArray<readonly [number, number]>): number => {
+  let best = Infinity;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const [x1, y1] = pts[i]!;
+    const [x2, y2] = pts[i + 1]!;
+    const cx = Math.max(Math.min(x1, x2), Math.min(Math.max(x1, x2), x));
+    const cy = Math.max(Math.min(y1, y2), Math.min(Math.max(y1, y2), y));
+    best = Math.min(best, Math.hypot(x - cx, y - cy));
+  }
+  return best;
+};
+
+/**
+ * Where each arrow's numbered marker sits: on its own line, as near the middle of its longest run as
+ * it can be while staying clear of every OTHER line (so it never hides another arrow's head or
+ * corner) and of the markers placed before it. Runs are tried longest first, positions from the
+ * middle out; a line with no clear spot keeps the middle of its longest run. Pure.
+ */
+export function placeArrowLabels(routes: ReadonlyArray<ReadonlyArray<readonly [number, number]>>): Array<[number, number]> {
+  const placed: Array<[number, number]> = [];
+  const FRACTIONS = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8];
+  routes.forEach((pts, i) => {
+    const runs: Array<{ a: readonly [number, number]; b: readonly [number, number]; len: number }> = [];
+    for (let k = 0; k + 1 < pts.length; k++) {
+      const a = pts[k]!;
+      const b = pts[k + 1]!;
+      runs.push({ a, b, len: Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]) });
+    }
+    runs.sort((r, s) => s.len - r.len);
+    const clear = (x: number, y: number): boolean =>
+      routes.every((other, j) => j === i || distToRoute(x, y, other) >= LABEL_CLEAR_PX) &&
+      placed.every(([px, py]) => Math.hypot(px - x, py - y) >= 2 * LABEL_CLEAR_PX);
+    let at: [number, number] | null = null;
+    for (const r of runs) {
+      if (r.len < 2 * LABEL_CLEAR_PX) continue;
+      for (const f of FRACTIONS) {
+        const x = r.a[0] + (r.b[0] - r.a[0]) * f;
+        const y = r.a[1] + (r.b[1] - r.a[1]) * f;
+        if (clear(x, y)) {
+          at = [x, y];
+          break;
+        }
+      }
+      if (at != null) break;
+    }
+    if (at == null) {
+      const g = geometryOf(pts);
+      at = [g.lx, g.ly];
+    }
+    const r1 = (n: number): number => Math.round(n * 10) / 10;
+    placed.push([r1(at[0]), r1(at[1])]);
+  });
+  return placed;
+}
+
+function permutations<T>(xs: readonly T[]): T[][] {
+  if (xs.length <= 1) return [xs.slice()];
+  return xs.flatMap((x, i) => permutations([...xs.slice(0, i), ...xs.slice(i + 1)]).map((p) => [x, ...p]));
+}
+
+/** How many times two DIFFERENT arrows cross (a run of one passing through a run of another). */
+export function crossings(routes: ReadonlyArray<ReadonlyArray<readonly [number, number]>>): number {
+  type Seg = { r: number; x1: number; y1: number; x2: number; y2: number };
+  const v: Seg[] = [];
+  const h: Seg[] = [];
+  routes.forEach((pts, r) => {
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const [x1, y1] = pts[i]!;
+      const [x2, y2] = pts[i + 1]!;
+      const seg = { r, x1: Math.min(x1, x2), y1: Math.min(y1, y2), x2: Math.max(x1, x2), y2: Math.max(y1, y2) };
+      if (Math.abs(x1 - x2) < 0.5) v.push(seg);
+      else if (Math.abs(y1 - y2) < 0.5) h.push(seg);
+    }
+  });
+  let n = 0;
+  for (const a of v) for (const b of h) {
+    if (a.r === b.r) continue;
+    if (a.x1 > b.x1 + 0.5 && a.x1 < b.x2 - 0.5 && b.y1 > a.y1 + 0.5 && b.y1 < a.y2 - 0.5) n++;
+  }
+  return n;
+}
+
+/** The most room two parallel lines get between them, px. */
+export const ARROW_TRACK_PX = 12;
+
+/**
+ * NO TWO LINES SHARE A RUN. Routed one at a time, arrows into the same column (or along the same row
+ * gap) run down the SAME channel and overlap, and nobody can tell which line goes where. This pass
+ * finds every straight run that lies on another arrow's run — same x for an up/down run, same y for a
+ * sideways one, ranges overlapping — and gives each arrow in that bundle its own parallel TRACK,
+ * spread evenly about the channel's centre (`ARROW_TRACK_PX` apart at most, less when the channel —
+ * the gap plus the padding either side, `roomX` / `roomY` — is narrow). Moving a run moves its two corners, so the neighbouring runs stretch to meet it and every
+ * line stays right-angled. Runs of ONE arrow never bundle with each other. Pure; input is not mutated.
+ */
+export function separateArrowRuns(
+  routes: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
+  roomX: number,
+  roomY: number,
+): Array<Array<[number, number]>> {
+  const out = routes.map((r) => r.map(([x, y]) => [x, y] as [number, number]));
+  const pass = (axis: 0 | 1): void => {
+    // axis 0: up/down runs (shared x, spread along x); axis 1: sideways runs (shared y, spread along y).
+    const other = axis === 0 ? 1 : 0;
+    const room = axis === 0 ? roomX : roomY;
+    type Run = { route: number; seg: number; at: number; lo: number; hi: number };
+    const runs: Run[] = [];
+    out.forEach((pts, route) => {
+      for (let seg = 0; seg + 1 < pts.length; seg++) {
+        const p = pts[seg]!;
+        const q = pts[seg + 1]!;
+        if (Math.abs(p[axis] - q[axis]) > 0.5) continue; // not a run along this axis
+        runs.push({ route, seg, at: p[axis], lo: Math.min(p[other], q[other]), hi: Math.max(p[other], q[other]) });
+      }
+    });
+    runs.sort((r, s) => r.at - s.at || r.lo - s.lo || r.hi - s.hi || r.route - s.route);
+    const used = new Set<Run>();
+    for (const r of runs) {
+      if (used.has(r)) continue;
+      // The bundle: every run on this line that overlaps the bundle so far (a chain of overlaps).
+      const bundle: Run[] = [r];
+      used.add(r);
+      let hi = r.hi;
+      for (const s of runs) {
+        if (used.has(s) || Math.abs(s.at - r.at) > 0.5) continue;
+        if (s.lo < hi - 0.5) {
+          bundle.push(s);
+          used.add(s);
+          hi = Math.max(hi, s.hi);
+        }
+      }
+      const routesIn = [...new Set(bundle.map((b) => b.route))];
+      if (routesIn.length < 2) continue;
+      const step = Math.min(ARROW_TRACK_PX, room > 0 ? room / (routesIn.length + 1) : ARROW_TRACK_PX);
+      const apply = (order: readonly number[], sign: 1 | -1): void =>
+        order.forEach((route, k) => {
+          const shift = sign * (k - (order.length - 1) / 2) * step;
+          if (shift === 0) return;
+          for (const b of bundle) {
+            if (b.route !== route) continue;
+            out[route]![b.seg]![axis] += shift;
+            out[route]![b.seg + 1]![axis] += shift;
+          }
+        });
+      // WHICH line takes WHICH track: the order with the FEWEST crossings (lines turning out of a
+      // bundle in the wrong order cross each other at the turn, often right at an arrowhead). Small
+      // bundles try every order; a big one keeps the sorted order.
+      let bestOrder = routesIn;
+      if (routesIn.length <= 5) {
+        let bestCross = Infinity;
+        for (const order of permutations(routesIn)) {
+          apply(order, 1);
+          const c = crossings(out);
+          apply(order, -1);
+          if (c < bestCross) {
+            bestCross = c;
+            bestOrder = order;
+          }
+        }
+      }
+      apply(bestOrder, 1);
+    }
+  };
+  pass(0);
+  pass(1);
+  return out;
 }
 
 /**

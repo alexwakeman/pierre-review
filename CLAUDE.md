@@ -1224,8 +1224,8 @@ story report gone no screen triggers or reads them. [docs/CLAUDE-REVIEW.md](docs
 § Story labels.
 
 **Activity → This Sprint** (FREE — its own rail line under Pending, `?activityRepo=sprint`; legacy
-`?insightsTab=sprint|merged` and `?sprintTab=graph` land there): THREE independent views — Critical path
-(default) · Theme · People (`?sprintTab=themes|people`) — then "Merged so far" (`?sprintTab=merged`).
+`?insightsTab=sprint|merged` and `?sprintTab=graph` land there): THREE independent views — Theme
+(default) · Critical path · People (`?sprintTab=paths|people`) — then "Merged so far" (`?sprintTab=merged`).
 `GET /api/sprint-graph` (DB only; the name stayed): nodes = sprint tickets + GHOSTS
 (≤ 3 hops / 60), + PRs, each placed in the workspace's STATUS BUCKETS (`db/sprint-status-layout.ts`;
 user-defined name + meaning, meanings non-decreasing; `stage` = the bucket's meaning) and given ONE

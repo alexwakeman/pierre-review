@@ -2111,14 +2111,14 @@ stays LOCAL-ONLY and gated on `me.ai.enabled` through `useAiCapabilities()`, nev
 Viewing any of the three views stamps `sprint_reads.viewed_at`, which is what lets the worker read the
 sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA's wording changed.
 
-- **Four tabs, DERIVED, never written back**: Critical path (the landing tab) · Theme · People · Merged
+- **Four tabs, DERIVED, never written back**: Theme (the landing tab, since 2026-10-18) · Critical path · People · Merged
   so far. The store's `sprintInnerTab` (`'paths' | 'themes' | 'people' | 'merged'`) is mirrored to
-  `?sprintTab=themes|people|merged` (the `'paths'` default omitted, the key emitted ONLY beside
+  `?sprintTab=paths|people|merged` (the `'themes'` default omitted, the key emitted ONLY beside
   `activityRepo=sprint`); the render reads `effectiveSprintTab` (`Activity/sprintRailModel.ts`), the
   `feedInnerTab` / `insightsTab` rule. URL only, so no `FILTER_STORAGE_VERSION` bump.
 - ⚠ **Legacy links still land**: `?insightsTab=sprint|merged` (old Reports tabs) read as
-  `activityRepo=sprint` + Critical path / Merged so far, and the retired force graph's
-  `?sprintTab=graph` reads as Critical path (`sprintTabFromUrl`, store/filters.ts). None is written back.
+  `activityRepo=sprint` + Theme / Merged so far, and the retired force graph's
+  `?sprintTab=graph` reads as Theme (`sprintTabFromUrl`, store/filters.ts). None is written back.
 
 - **THE FORCE GRAPH IS DELETED (2026-10-18)** — `SprintGraph.tsx`, `sprintGraphModel.ts`,
   `SprintPathsStrip.tsx`, `sprintReferences.ts`, the `.sprint-canvas` CSS and their tests, with the
@@ -4424,7 +4424,13 @@ test/designGrid.test.ts).
   `routeArrow` ONLY through the slot padding and the grid gaps — out of the source's side, down the
   column gap beside the target, into its side; a card in the way sends the line to the row gap first
   (leaving off-centre, so it never shares a straight arrow's line). Re-measured by a ResizeObserver.
-  A labelled arrow carries a NUMBER on its longest run, keyed in one line under the grid (a 20-40px
+  ⚠ **NO TWO LINES SHARE A RUN** (`separateArrowRuns`, run on ALL the arrows after routing): runs on
+  the same x (or y) whose ranges overlap are a BUNDLE, and each arrow in it gets its own parallel track
+  (≤ `ARROW_TRACK_PX` = 12 apart, narrower to fit the gap + slot padding); which arrow takes which
+  track is the order with the FEWEST crossings (`crossings`; every order for ≤ 5 lines), or lines
+  turning out of the bundle cross at the arrowhead. The numbered marker sits on its own line clear of
+  every OTHER line and marker (`placeArrowLabels`), so it never hides another arrow's head.
+  A labelled arrow carries a NUMBER near the middle of its longest run, keyed in one line under the grid (a 20-40px
   gap is too narrow for words, and a label there covered card text). `aria-hidden`; the same
   hand-offs are an sr-only list. Cards read row by row.
 - **Arrow popovers** (`ArrowLayer` / `ArrowMarker` in `components/LaneBoard.tsx`, shared by the design
