@@ -5,7 +5,9 @@ import type {
   SearchHitKind,
   SearchPerson,
   SearchResponse,
+  SearchStory,
 } from '@pierre-review/shared';
+import { SEARCH_STORIES_MAX, trackerTicketIdent, type TrackerProvider } from '@pierre-review/shared';
 import { db, schema, runTransaction } from './client.js';
 
 // Cross-repo text search over the local `search_index` (CORE, no AI), scoped to ONE workspace's
@@ -107,6 +109,9 @@ export interface SearchOpts {
   kinds?: SearchHitKind[];
   limit: number;
   offset: number;
+  // The resolved workspace — its sprint tickets join the Stories facet (a ticket with no PR still has
+  // a story). Absent ⇒ stories come from the searched repos' PRs only.
+  workspaceId?: number | null;
 }
 
 export async function searchPrs(accountId: number, opts: SearchOpts): Promise<SearchResponse> {
@@ -114,7 +119,7 @@ export async function searchPrs(accountId: number, opts: SearchOpts): Promise<Se
   const terms = parseTerms(query);
   // No terms, or an empty workspace → nothing to match.
   if (terms.length === 0 || opts.repoIds.length === 0) {
-    return { query, hits: [], people: [], total: 0 };
+    return { query, hits: [], people: [], stories: [], total: 0 };
   }
 
   // Each term must match the body OR the author's login/display name (ANDed across terms).
@@ -136,7 +141,7 @@ export async function searchPrs(accountId: number, opts: SearchOpts): Promise<Se
     ...terms.map(termMatch),
   );
 
-  const [rows, totalRows, people] = await Promise.all([
+  const [rows, totalRows, people, stories] = await Promise.all([
     db
       .select({
         kind: searchIndex.kind,
@@ -173,6 +178,7 @@ export async function searchPrs(accountId: number, opts: SearchOpts): Promise<Se
       .where(where)
       .execute(),
     findPeople(accountId, opts.repoIds, terms),
+    opts.offset === 0 ? findStories(accountId, opts.repoIds, opts.workspaceId ?? null, query) : Promise.resolve([]),
   ]);
 
   const hits: SearchHit[] = rows.map((r) => ({
@@ -192,7 +198,110 @@ export async function searchPrs(accountId: number, opts: SearchOpts): Promise<Se
     createdAt: toIso(r.createdAt),
   }));
 
-  return { query, hits, people, total: Number(totalRows[0]?.n ?? 0) };
+  return { query, hits, people, stories, total: Number(totalRows[0]?.n ?? 0) };
+}
+
+// The "Stories" facet: tickets whose KEY matches the query (exact, then prefix) or, for a query of
+// 3+ characters, whose TITLE contains it. Two stored sources, no tracker call: the tickets the
+// searched repos' PRs name (`tracker_tickets`, scoped by the same repo list as the hits) and the
+// workspace's sprint tickets (`sprint_tickets`, which may have no PR). One row per ticket (its ident).
+const TICKET_KEY_QUERY = /^[A-Za-z][A-Za-z0-9_]*-\d*$|^[^\s]+#\d*$/;
+const MATCH_RANK: Record<SearchStory['match'], number> = { key: 0, key_prefix: 1, title: 2 };
+
+export async function findStories(
+  accountId: number,
+  repoIds: number[],
+  workspaceId: number | null,
+  rawQuery: string,
+): Promise<SearchStory[]> {
+  const q = rawQuery.trim().replace(/^"|"$/g, '');
+  if (q.length < 2 || q.length > 120) return [];
+  const lower = q.toLowerCase();
+  const keyish = TICKET_KEY_QUERY.test(q);
+  const keyPat = `${lower.replace(/([\\%_])/g, '\\$1')}%`;
+  const titlePat = likePattern(lower);
+  const byTitle = q.length >= 3;
+  if (!keyish && !byTitle) return [];
+
+  const tt = schema.trackerTickets;
+  const st = schema.sprintTickets;
+  const keyMatch = (col: unknown): SQL => likeCol(col, keyPat);
+  const matchOf = (key: string, title: string | null): SearchStory['match'] | null => {
+    const k = key.toLowerCase();
+    if (k === lower) return 'key';
+    if (keyish && k.startsWith(lower)) return 'key_prefix';
+    if (byTitle && title != null && title.toLowerCase().includes(lower)) return 'title';
+    return null;
+  };
+  const cond = (keyCol: unknown, titleCol: unknown): SQL =>
+    byTitle ? or(keyish ? keyMatch(keyCol) : sql`false`, likeCol(titleCol, titlePat))! : keyMatch(keyCol);
+
+  const [prRows, sprintRows] = await Promise.all([
+    repoIds.length === 0
+      ? Promise.resolve([])
+      : db
+          .select({
+            provider: tt.provider,
+            apiRoot: tt.apiRoot,
+            issueKey: tt.issueKey,
+            title: tt.title,
+            status: tt.statusName,
+            prId: tt.prId,
+            prState: pullRequests.state,
+          })
+          .from(tt)
+          .innerJoin(pullRequests, eq(tt.prId, pullRequests.id))
+          .where(and(eq(tt.accountId, accountId), eq(pullRequests.accountId, accountId), inArray(pullRequests.repoId, repoIds), cond(tt.issueKey, tt.title)))
+          .limit(200)
+          .execute(),
+    workspaceId == null
+      ? Promise.resolve([])
+      : db
+          .select({ ident: st.ident, issueKey: st.issueKey, title: st.title, status: st.statusName })
+          .from(st)
+          .where(and(eq(st.accountId, accountId), eq(st.workspaceId, workspaceId), cond(st.issueKey, st.title)))
+          .limit(50)
+          .execute(),
+  ]);
+
+  const out = new Map<string, SearchStory>();
+  const prIds = new Map<string, Set<number>>();
+  const openIds = new Map<string, Set<number>>();
+  for (const r of prRows) {
+    const match = matchOf(r.issueKey, r.title ?? null);
+    if (match == null) continue;
+    const ident = trackerTicketIdent(r.provider as TrackerProvider, r.apiRoot, r.issueKey);
+    const prs = prIds.get(ident) ?? new Set<number>();
+    const open = openIds.get(ident) ?? new Set<number>();
+    prs.add(r.prId);
+    if (r.prState === 'open') open.add(r.prId);
+    prIds.set(ident, prs);
+    openIds.set(ident, open);
+    const prev = out.get(ident);
+    out.set(ident, {
+      ident,
+      key: r.issueKey,
+      title: prev?.title ?? r.title ?? null,
+      status: prev?.status ?? r.status ?? null,
+      prCount: prs.size,
+      openPrCount: open.size,
+      match,
+    });
+  }
+  for (const r of sprintRows) {
+    const match = matchOf(r.issueKey, r.title);
+    if (match == null) continue;
+    const prev = out.get(r.ident);
+    if (prev != null) {
+      prev.title ??= r.title;
+      prev.status = r.status ?? prev.status;
+      continue;
+    }
+    out.set(r.ident, { ident: r.ident, key: r.issueKey, title: r.title, status: r.status ?? null, prCount: 0, openPrCount: 0, match });
+  }
+  return [...out.values()]
+    .sort((a, b) => MATCH_RANK[a.match] - MATCH_RANK[b.match] || b.openPrCount - a.openPrCount || b.prCount - a.prCount || a.key.localeCompare(b.key, undefined, { numeric: true }))
+    .slice(0, SEARCH_STORIES_MAX);
 }
 
 // The "People" facet: authors whose login/display name matches ANY term AND who have indexed

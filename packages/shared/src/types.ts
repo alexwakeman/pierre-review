@@ -5847,6 +5847,9 @@ export interface TicketRef {
    *  would not name it — the PR pane offers to remove it (`DELETE /api/prs/:id/tracker-ticket/manual`).
    *  Absent = detected. */
   manual?: boolean;
+  /** The ticket's tracker ident (`trackerTicketIdent`) — what opens its story tab in Limn. Absent when
+   *  the tracker's site root cannot be folded (the chip then only links out). */
+  ident?: string;
 }
 
 // ── The Open PRs cards' ticket row (CORE, free) ─────────────────────────────────────────────────
@@ -6706,10 +6709,26 @@ export interface SearchPerson {
   matchCount: number; // indexed items in scope this person authored
 }
 
+// A TICKET whose key (or title) matches the query — the "Stories" facet, listed FIRST by both the
+// dropdown and the results tab; a click opens the ticket's story tab. Ranked: exact key, then a key
+// that starts with the query, then a title match. First page only (`offset` 0); never counted in
+// `total`.
+export interface SearchStory {
+  ident: string; // shared trackerTicketIdent — what opens the story tab
+  key: string; // "PROJ-123"
+  title: string | null;
+  status: string | null; // the tracker's status name
+  prCount: number; // PRs in the searched repos that name it
+  openPrCount: number;
+  match: 'key' | 'key_prefix' | 'title';
+}
+export const SEARCH_STORIES_MAX = 5;
+
 export interface SearchResponse {
   query: string;
   hits: SearchHit[];
   people: SearchPerson[];
+  stories: SearchStory[];
   total: number; // total hits matching the query in scope (drives pagination)
 }
 

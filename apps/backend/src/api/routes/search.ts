@@ -13,6 +13,10 @@ import { accountIdOf } from '../plugins/auth.js';
 // empty workspace resolves to `[]` → no hits, rather than the whole account. `kinds`
 // (comma-separated) optionally narrows to one or more hit kinds. Account-scoped in the query layer
 // → no cross-tenant leak.
+//
+// `stories` (first page only): tickets whose key matches the query (exact, then prefix) or whose title
+// contains it, from the stored ticket rows of the searched repos' PRs + the workspace's sprint tickets
+// (`findStories`, db/search.ts). The SPA lists them FIRST; a click opens the ticket's story tab.
 const VALID_KINDS: ReadonlySet<string> = new Set(['pr', 'review', 'review_comment', 'pr_comment']);
 const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 25;
@@ -28,7 +32,7 @@ export async function searchRoutes(app: FastifyInstance): Promise<void> {
     };
     const accountId = accountIdOf(req);
     const query = (q.q ?? '').trim();
-    if (query === '') return { query: '', hits: [], people: [], total: 0 };
+    if (query === '') return { query: '', hits: [], people: [], stories: [], total: 0 };
 
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
     const kinds = (q.kinds ?? '')
@@ -44,6 +48,7 @@ export async function searchRoutes(app: FastifyInstance): Promise<void> {
     return searchPrs(accountId, {
       query,
       repoIds: scope.repoIds,
+      workspaceId: scope.workspaceId,
       kinds: kinds.length > 0 ? kinds : undefined,
       limit,
       offset,

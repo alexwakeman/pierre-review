@@ -1,6 +1,6 @@
 import { skipToken, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import type { SearchHit, SearchHitKind, SearchPerson, SearchResponse } from '@pierre-review/shared';
+import type { SearchHit, SearchHitKind, SearchPerson, SearchResponse, SearchStory } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { useFilters } from '../store/filters.js';
 import { workspaceKey } from './useActivity.js';
@@ -40,6 +40,7 @@ export function useSearchDropdown(query: string): {
 export function useSearchResults(query: string, kinds: SearchHitKind[]): {
   hits: SearchHit[];
   people: SearchPerson[];
+  stories: SearchStory[];
   total: number;
   isLoading: boolean;
   isFetching: boolean;
@@ -86,6 +87,8 @@ export function useSearchResults(query: string, kinds: SearchHitKind[]): {
   return {
     hits,
     people: enabled ? query$.data?.pages[0]?.people ?? [] : [],
+    // First page only (the server lists them at offset 0), so paging never repeats them.
+    stories: enabled ? query$.data?.pages[0]?.stories ?? [] : [],
     total: enabled ? query$.data?.pages[0]?.total ?? 0 : 0,
     isLoading: enabled && query$.isLoading,
     isFetching: enabled && query$.isFetching,

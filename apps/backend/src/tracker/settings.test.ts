@@ -148,13 +148,13 @@ describe('3. the PR finds its own workspace', () => {
   it('⚠ USES THE WORKSPACE THAT OWNS THE PR’S REPO', async () => {
     expect(await prTicketRefs(ctx, pr({ repoId: 100, title: 'Fix ENG-1' }))).toEqual([
       // A reading provider's tickets carry `canFetchDetails` — false here, no token saved.
-      { key: 'ENG-1', url: 'https://acme.atlassian.net/browse/ENG-1', provider: 'jira', canFetchDetails: false },
+      { key: 'ENG-1', url: 'https://acme.atlassian.net/browse/ENG-1', provider: 'jira', canFetchDetails: false, ident: 'jira:https://acme.atlassian.net#ENG-1' },
     ]);
     // The SAME title against a repo in the other workspace resolves against the OTHER tracker.
     expect(await prTicketRefs(ctx, pr({ repoId: 200, title: 'Fix ENG-1' }))).toEqual([]);
     // Linear reads too (phase 3): a link, and `canFetchDetails` false until an API key is saved.
     expect(await prTicketRefs(ctx, pr({ repoId: 200, title: 'Fix OPS-9' }))).toEqual([
-      { key: 'OPS-9', url: 'https://linear.app/acme/issue/OPS-9', provider: 'linear', canFetchDetails: false },
+      { key: 'OPS-9', url: 'https://linear.app/acme/issue/OPS-9', provider: 'linear', canFetchDetails: false, ident: 'linear:https://linear.app/acme#OPS-9' },
     ]);
   });
 

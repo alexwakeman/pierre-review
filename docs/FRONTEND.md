@@ -3231,8 +3231,11 @@ ticket yet."). In the single-ticket stack nothing collapses and the Story sectio
   for old links; SELF-DESCRIBING from the URL, NOT persisted across reloads.
 - ⚠ **Opened ONLY through `useOpenStory()`** (`lib/ticketTab.ts`) — This Sprint's ticket clicks, Reports
   → Stories' "Time and pull requests" rows and story rows, the story report's ticket chips, a ticket key
-  in any text (`TicketRefLink`, e.g. an "Ask Claude" answer). Never call the store action from a
-  component. The sprint drawer and its reference cards are GONE.
+  in any text (`TicketRefLink`, e.g. an "Ask Claude" answer), the PR pane's Ticket row chips (`PrTicketChip`
+  in ChecksTab.tsx: the key opens the story, a small icon opens the tracker; needs `TicketRef.ident`, set
+  by the server's `prTicketView`, else the chip only links out), and a search's **Stories** facet (dropdown
+  and results tab, listed FIRST; `openSearchStory` in Search/searchNav.ts, the one non-hook caller of
+  `openTicketTab`). Never call the store action from a component. The sprint drawer and its reference cards are GONE.
 - **Two DB-only reads, both free**: `GET /api/ticket-prs` (`useTicketPrs`, key
   `['ticket-prs','ws:<id>',ident]`: the PRs + the freshest tracker row) and `GET /api/ticket-story`
   (`useTicketStory`, key `['ticket-story','ws:<id>',ident]`: the sprint read's row — type, assignee,

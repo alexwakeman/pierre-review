@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import type { TrackerProvider } from '@pierre-review/shared';
+import { trackerTicketIdent, type TrackerProvider } from '@pierre-review/shared';
 import type { TicketRef } from '@pierre-review/shared';
 import type { TrackerContext } from './context.js';
 import { buildTicketRefs, maybeAdapterFor } from './registry.js';
@@ -257,9 +257,13 @@ export async function prTicketView(
     const addable = reader != null;
     if (found.linksUnknown) return { tickets: null, addable };
     const manualOnly = new Set(found.manualOnlyKeys);
-    const refs = buildTicketRefs(issue.provider, baseUrl, found.keys).map((r) =>
-      manualOnly.has(r.key) ? { ...r, manual: true } : r,
-    );
+    // The ident opens the ticket's story tab (the SAME site-root fold the stored ticket rows use).
+    const apiRoot = maybeAdapterFor(issue.provider)?.siteRoot(issue.baseUrl) ?? null;
+    const refs = buildTicketRefs(issue.provider, baseUrl, found.keys).map((r) => ({
+      ...r,
+      ...(manualOnly.has(r.key) ? { manual: true } : {}),
+      ...(apiRoot != null ? { ident: trackerTicketIdent(issue.provider, apiRoot, r.key) } : {}),
+    }));
     if (reader == null) return { tickets: refs, addable };
     const canFetchDetails = reader.credential === 'none' || found.access.token.state !== 'none';
     return { tickets: refs.map((r) => ({ ...r, canFetchDetails })), addable };

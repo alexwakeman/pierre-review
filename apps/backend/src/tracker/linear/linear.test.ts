@@ -551,7 +551,7 @@ describe('3b. linking — Linear’s attachments, read in one batch, stored with
 
   it('the PR pane: links first, then detection; never "unknown" before a read', async () => {
     const before = await prTicketRefs(ctx, { accountId: A, prId: 10, repoId: 200, title: 'Reset flow', headRefName: 'alex/eng-6-reset' });
-    expect(before).toEqual([{ key: 'ENG-6', url: `${ROOT}/issue/ENG-6`, provider: 'linear', canFetchDetails: true }]);
+    expect(before).toEqual([{ key: 'ENG-6', url: `${ROOT}/issue/ENG-6`, provider: 'linear', canFetchDetails: true, ident: `linear:${ROOT}#ENG-6` }]);
     await pass();
     const after = await prTicketRefs(ctx, { accountId: A, prId: 10, repoId: 200, title: 'Reset flow', headRefName: 'alex/eng-6-reset' });
     expect(after?.map((r) => r.key)).toEqual(['ENG-2', 'ENG-6']);
@@ -701,7 +701,7 @@ describe('6. cost — zero Linear calls for every other workspace', () => {
     expect(calls.filter((c) => c.host !== 'api.linear.app')).toEqual([]); // Jira had no token either
     // The no-key Linear workspace still LINKS by detection (chips), with nothing to fill from.
     expect(await prTicketRefs(ctx, { accountId: A, prId: 50, repoId: 500, title: 'ENG-2 no key', headRefName: null })).toEqual([
-      { key: 'ENG-2', url: `${ROOT}/issue/ENG-2`, provider: 'linear', canFetchDetails: false },
+      { key: 'ENG-2', url: `${ROOT}/issue/ENG-2`, provider: 'linear', canFetchDetails: false, ident: `linear:${ROOT}#ENG-2` },
     ]);
   });
 

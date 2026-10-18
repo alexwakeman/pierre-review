@@ -202,3 +202,57 @@ describe('searchPrs', () => {
     expect(found.hits.some((h: any) => h.prNumber === 7)).toBe(true);
   });
 });
+
+describe('findStories — the Stories facet (ticket matches lead the search)', () => {
+  let findStories: any;
+  let otherRepoId = 0;
+  beforeAll(async () => {
+    ({ findStories } = await import('./search.js'));
+    const { repos, pullRequests, trackerTickets } = schema;
+    const [other] = await db.insert(repos).values({ accountId: 1, owner: 'acme', name: 'stories-web', githubNodeId: 'R_t' }).returning().execute();
+    otherRepoId = other.id;
+    const [merged] = await db
+      .insert(pullRequests)
+      .values({ githubNodeId: 'PR_t1', accountId: 1, repoId: repoIds[0], number: 43, title: 'BMD-1051 part two', state: 'merged', isDraft: false, openedAt: now, updatedAt: now })
+      .returning()
+      .execute();
+    const [elsewhere] = await db
+      .insert(pullRequests)
+      .values({ githubNodeId: 'PR_t2', accountId: 1, repoId: other.id, number: 7, title: 'BMD-1099 web', state: 'open', isDraft: false, openedAt: now, updatedAt: now })
+      .returning()
+      .execute();
+    const row = (pr: number, key: string, title: string) => ({
+      accountId: 1, workspaceId: 1, prId: pr, provider: 'jira', issueKey: key, detectedFrom: 'title', detectOrder: 0,
+      apiRoot: 'https://acme.atlassian.net', url: `https://acme.atlassian.net/browse/${key}`, state: 'ok', title, statusName: 'In Progress',
+      checkedAt: now, nextCheckAt: now,
+    });
+    await db.insert(trackerTickets).values([
+      row(prId, 'BMD-1051', 'Strategic significance import'),
+      row(merged.id, 'BMD-1051', 'Strategic significance import'),
+      row(prId, 'BMD-10512', 'A longer key'),
+      row(merged.id, 'BMD-2000', 'Handle null import data'),
+      row(elsewhere.id, 'BMD-1099', 'Outside the searched repos'),
+    ]).execute();
+  });
+
+  it('puts the exact key first, counts its PRs once each, and builds the story ident', async () => {
+    const s = await findStories(1, repoIds, null, 'bmd-1051');
+    expect(s.map((x: any) => [x.key, x.match])).toEqual([['BMD-1051', 'key'], ['BMD-10512', 'key_prefix']]);
+    expect(s[0]).toMatchObject({ ident: 'jira:https://acme.atlassian.net#BMD-1051', prCount: 2, openPrCount: 1, status: 'In Progress' });
+  });
+  it('matches a title for a 3+ character query, after any key match', async () => {
+    const s = await findStories(1, repoIds, null, 'null import');
+    expect(s.map((x: any) => [x.key, x.match])).toEqual([['BMD-2000', 'title']]);
+  });
+  it('never reaches a ticket only named by a PR outside the searched repos', async () => {
+    expect(await findStories(1, repoIds, null, 'BMD-1099')).toEqual([]);
+    expect((await findStories(1, [otherRepoId], null, 'BMD-1099')).map((x: any) => x.key)).toEqual(['BMD-1099']);
+    expect(await findStories(2, repoIds, null, 'BMD-1051')).toEqual([]);
+  });
+  it('rides searchPrs on the first page only', async () => {
+    const first = await searchPrs(1, { query: 'BMD-1051', repoIds, limit: 25, offset: 0 });
+    expect(first.stories[0]?.key).toBe('BMD-1051');
+    const later = await searchPrs(1, { query: 'BMD-1051', repoIds, limit: 25, offset: 25 });
+    expect(later.stories).toEqual([]);
+  });
+});

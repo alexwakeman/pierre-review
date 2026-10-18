@@ -27,6 +27,7 @@ import {
 // an ejection "in the merge queue".
 import { pendingQueueBadge } from './Activity/pendingLabels.js';
 import { useFilters } from '../store/filters.js';
+import { useOpenStory } from '../lib/ticketTab.js';
 import { Avatar } from './CommentCard.js';
 import { UserName } from './UserName.js';
 import { CopyButton } from './CopyButton.js';
@@ -1006,23 +1007,56 @@ export function ChecksTab({
   );
 }
 
-/** One ticket chip on the Ticket row. A ticket a person ADDED BY HAND (`manual`) carries a remove
- *  control — a detected one does not (detection would name it again). */
+/** One ticket chip on the Ticket row. The key opens the ticket's STORY TAB in Limn (`useOpenStory`,
+ *  the same story view This Sprint and Open PRs open); the small icon beside it opens the tracker. A
+ *  ticket with no ident (its tracker site cannot be folded) only links out. A ticket a person ADDED
+ *  BY HAND (`manual`) carries a remove control — a detected one does not (detection would name it
+ *  again). */
 function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }): JSX.Element {
   const remove = useRemoveManualTicket(prId);
-  const link = (
-    <a
-      href={safeExternalUrl(t.url)}
-      target="_blank"
-      rel="noreferrer noopener"
-      className={`inline-flex items-center px-1.5 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-100 dark:text-sky-300 ${
-        t.manual ? 'rounded-l' : 'rounded'
-      }`}
-      title={`Open ${t.key} in ${TRACKER_PROVIDER_LABEL[t.provider]}`}
-    >
-      {t.key}
-    </a>
-  );
+  const openStory = useOpenStory();
+  const external = safeExternalUrl(t.url);
+  const trackerLabel = TRACKER_PROVIDER_LABEL[t.provider];
+  const link =
+    t.ident != null ? (
+      <>
+        <button
+          type="button"
+          onClick={() => openStory({ ident: t.ident!, key: t.key, title: null })}
+          className="inline-flex items-center rounded-l px-1.5 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-sky-300 dark:hover:bg-sky-900"
+          title={`Open the ${t.key} story`}
+          data-testid="pr-ticket-story"
+        >
+          {t.key}
+        </button>
+        {external != null && (
+          <a
+            href={external}
+            target="_blank"
+            rel="noreferrer noopener"
+            aria-label={`Open ${t.key} in ${trackerLabel}`}
+            title={`Open ${t.key} in ${trackerLabel}`}
+            className={`inline-flex items-center self-stretch px-1 text-sky-700 hover:bg-sky-100 dark:text-sky-300 dark:hover:bg-sky-900 ${
+              t.manual ? '' : 'rounded-r'
+            }`}
+          >
+            <ExternalLinkIcon size={10} />
+          </a>
+        )}
+      </>
+    ) : (
+      <a
+        href={external}
+        target="_blank"
+        rel="noreferrer noopener"
+        className={`inline-flex items-center px-1.5 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-100 dark:text-sky-300 ${
+          t.manual ? 'rounded-l' : 'rounded'
+        }`}
+        title={`Open ${t.key} in ${trackerLabel}`}
+      >
+        {t.key}
+      </a>
+    );
   return (
     <span className="inline-flex items-center rounded border border-sky-200 bg-sky-50 dark:border-sky-900 dark:bg-sky-950">
       {link}

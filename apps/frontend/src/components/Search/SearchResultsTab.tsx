@@ -6,10 +6,10 @@ import { usePr, useThread } from '../../hooks/usePr.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { indexUsers, PR_STATE_META } from '../../lib/ui.js';
-import { MagnifierIcon } from '../Icons.js';
+import { MagnifierIcon, TicketIcon } from '../Icons.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { PrMetaRow, InsightPrSummary, type PrMetaFields } from '../Activity/AttentionCards.js';
-import { KIND_ICON, KIND_LABEL, openHitPr, openSearchHit } from './searchNav.js';
+import { KIND_ICON, KIND_LABEL, openHitPr, openSearchHit, openSearchStory, storyPrWords } from './searchNav.js';
 import { highlightTerms } from './highlight.js';
 
 // The full cross-repo search-results tab (a singleton drill-down overlay). Reads the query from the
@@ -48,7 +48,7 @@ export function SearchResultsTab(): JSX.Element {
     }
   }, [debounced]);
 
-  const { hits, people, total, isLoading, isFetching, hasMore, fetchMore, isFetchingMore } =
+  const { hits, people, stories, total, isLoading, isFetching, hasMore, fetchMore, isFetchingMore } =
     useSearchResults(debounced, kinds);
 
   // Resolve author/commenter metadata for the embedded thread cards once (useUsers is cached, so
@@ -116,6 +116,36 @@ export function SearchResultsTab(): JSX.Element {
         </span>
       </div>
 
+      {/* Ticket matches FIRST: each opens the ticket's story tab. */}
+      {stories.length > 0 && (
+        <section aria-label="Stories" className="mb-3">
+          <h3 className="mb-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400">Stories</h3>
+          <ul className="space-y-2">
+            {stories.map((st) => (
+              <li key={st.ident}>
+                <button
+                  type="button"
+                  data-testid="search-story"
+                  onClick={() => openSearchStory(st)}
+                  className="flex w-full items-start gap-2 rounded-lg border border-sky-200 bg-sky-50/60 px-3 py-2 text-left hover:bg-sky-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:border-sky-900 dark:bg-sky-950/40 dark:hover:bg-sky-950"
+                >
+                  <TicketIcon size={14} className="mt-0.5 shrink-0 text-sky-700 dark:text-sky-300" />
+                  <span className="min-w-0">
+                    <span className="flex flex-wrap items-baseline gap-x-2 text-xs">
+                      <span className="font-semibold text-sky-700 dark:text-sky-300">{highlightTerms(st.key, debounced)}</span>
+                      {st.title != null && <span className="font-medium text-gray-900 dark:text-gray-50">{highlightTerms(st.title, debounced)}</span>}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] text-gray-500 dark:text-gray-400">
+                      {[st.status, storyPrWords(st)].filter(Boolean).join(' · ')} · Open the story
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {people.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
@@ -140,7 +170,7 @@ export function SearchResultsTab(): JSX.Element {
         </div>
       )}
 
-      {debounced.length >= 1 && !isLoading && hits.length === 0 ? (
+      {debounced.length >= 1 && !isLoading && hits.length === 0 && stories.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 py-10 text-center text-sm text-gray-500 dark:text-gray-400 dark:border-gray-700">
           No matches for “{debounced}”{kinds.length > 0 ? ' with the selected filters' : ''}.
         </div>

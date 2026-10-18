@@ -500,8 +500,8 @@ describe('3. linking — GitHub’s closing references, stored on the PR', () =>
     await pass();
     expect(await prTicketRefs(ctx, { accountId: A, prId: 12, repoId: 200, title: 'Unlinked', headRefName: null })).toEqual([]);
     expect(await prTicketRefs(ctx, { accountId: A, prId: 10, repoId: 200, title: 'x', headRefName: null })).toEqual([
-      { key: 'acme/web#12', url: 'https://github.com/acme/web/issues/12', provider: 'github', canFetchDetails: true },
-      { key: 'acme/lib#4', url: 'https://github.com/acme/lib/issues/4', provider: 'github', canFetchDetails: true },
+      { key: 'acme/web#12', url: 'https://github.com/acme/web/issues/12', provider: 'github', canFetchDetails: true, ident: 'github:https://github.com/acme/web#12' },
+      { key: 'acme/lib#4', url: 'https://github.com/acme/lib/issues/4', provider: 'github', canFetchDetails: true, ident: 'github:https://github.com/acme/lib#4' },
     ]);
   });
 });

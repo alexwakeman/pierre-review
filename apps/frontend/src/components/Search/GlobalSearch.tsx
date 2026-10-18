@@ -3,8 +3,8 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue.js';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
 import { useSearchDropdown } from '../../hooks/useSearch.js';
 import { useFilters } from '../../store/filters.js';
-import { MagnifierIcon } from '../Icons.js';
-import { KIND_ICON, KIND_LABEL, openSearchHit } from './searchNav.js';
+import { MagnifierIcon, TicketIcon } from '../Icons.js';
+import { KIND_ICON, KIND_LABEL, openSearchHit, openSearchStory, storyPrWords } from './searchNav.js';
 import { highlightTerms } from './highlight.js';
 
 // The global cross-repo search box (in the FilterBar). Debounced; a query ≥ 2 chars pops a panel of
@@ -31,6 +31,8 @@ export function GlobalSearch(): JSX.Element {
 
   const hits = data?.hits ?? [];
   const people = data?.people ?? [];
+  // Ticket matches lead the panel: a search for "BMD-1051" opens that story first.
+  const stories = data?.stories ?? [];
   const total = data?.total ?? 0;
   // The panel opens on the LIVE query (>= 2 chars) but results track the LAGGING debounced value,
   // so between a keystroke and the 300ms settle the query hasn't fired yet — treat that as pending
@@ -75,12 +77,39 @@ export function GlobalSearch(): JSX.Element {
       />
       {showPanel && (
         <div className="absolute left-0 top-full z-[60] mt-1 max-h-[70vh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-          {hits.length === 0 && people.length === 0 ? (
+          {hits.length === 0 && people.length === 0 && stories.length === 0 ? (
             <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
               {pending ? 'Searching…' : 'No matches.'}
             </div>
           ) : (
             <>
+              {stories.length > 0 && (
+                <div className="border-b border-gray-100 py-1 dark:border-gray-800">
+                  <div className="px-3 pb-0.5 pt-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400">Stories</div>
+                  {stories.map((st) => (
+                    <button
+                      key={st.ident}
+                      type="button"
+                      data-testid="search-story"
+                      onClick={() => {
+                        openSearchStory(st);
+                        setOpen(false);
+                      }}
+                      className="flex w-full flex-col gap-0.5 px-3 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
+                    >
+                      <span className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        <TicketIcon size={11} className="text-sky-700 dark:text-sky-300" />
+                        <span className="font-medium text-sky-700 dark:text-sky-300">{highlightTerms(st.key, debounced)}</span>
+                        <span aria-hidden>·</span>
+                        <span className="truncate">
+                          {[st.status, storyPrWords(st)].filter(Boolean).join(' · ')}
+                        </span>
+                      </span>
+                      {st.title != null && <span className="truncate text-xs font-medium">{highlightTerms(st.title, debounced)}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
               {people.length > 0 && (
                 <div className="border-b border-gray-100 py-1 dark:border-gray-800">
                   <div className="px-3 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">

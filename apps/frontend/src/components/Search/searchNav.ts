@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import type { SearchHit, SearchHitKind } from '@pierre-review/shared';
+import type { SearchHit, SearchHitKind, SearchStory } from '@pierre-review/shared';
 import type { TabMeta } from '../../store/pinnedTabs.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
@@ -31,6 +31,19 @@ export function openSearchHit(hit: SearchHit): void {
     // opens on its Overview.
     useFilters.getState().selectPr(hit.prId);
   }
+}
+
+// A ticket match opens the ticket's STORY TAB — the same story view This Sprint and the PR pane's
+// ticket chips open (`openTicketTab`, which `useOpenStory` wraps; this file is not a hook).
+export function openSearchStory(s: SearchStory): void {
+  usePinnedTabs.getState().openTicketTab({ ident: s.ident, key: s.key, title: s.title }, { fromActivity: true });
+}
+
+/** "2 open PRs" / "3 PRs, none open" / "No PR" — the story row's count, in words. */
+export function storyPrWords(s: Pick<SearchStory, 'prCount' | 'openPrCount'>): string {
+  if (s.prCount === 0) return 'No PR';
+  if (s.openPrCount > 0) return `${s.openPrCount} open PR${s.openPrCount === 1 ? '' : 's'}`;
+  return `${s.prCount} PR${s.prCount === 1 ? '' : 's'}, none open`;
 }
 
 // Open a hit's PR on its Overview (the "#N" reference link), regardless of hit kind — so a thread
