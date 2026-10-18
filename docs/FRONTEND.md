@@ -2264,52 +2264,15 @@ convention this file has to remember.
 - The store key lives in `freshDefaults()` only, so **no `FILTER_STORAGE_VERSION` bump is owed**,
   and `'overview'` — the current default — is the OMITTED URL value.
 - **Stories** (`?insightsTab=stories`, `StoriesView.tsx` + pure `storiesModel.ts`,
-  `test/storiesModel.test.ts`) — how well the TICKETS were written. TOP: **the story report**
-  (`StoryReportCard.tsx` + pure `storyReportModel.ts`, `test/storyReportModel.test.ts`). BELOW: the two
-  charts, then every story behind ONE "All N stories" disclosure (Fell short · Not reviewed · Reviewed,
+  `test/storiesModel.test.ts`) — how well the TICKETS were written: the two charts, then every story behind ONE "All N stories" disclosure (Fell short · Not reviewed · Reviewed,
   no gaps), over the REPORTING WINDOW (`GET /api/stories`, `useStories`, key `['stories','ws:<id>']`,
-  `periodReports` ANDed into `enabled`). The two windows are labelled apart (the report card names its
-  own; the lists carry the reporting-window caption). No tracker → one sentence and no card. The
-  server orders `shortfall` / `unchecked`; the SPA never re-ranks them. The per-story AI notes, their
-  "Write note" buttons and the pattern chips are DELETED (replaced by the report).
-  - **The story report** (core, agentic, LOCAL-ONLY, Pro): `useStoryReportsOn()` =
-    `periodReports && me.ai.enabled` (`useAiCapabilities`, never `useProCapabilities` alone) is ANDed
-    into every report hook's `enabled`, and without it the card renders NOTHING (cloud, or
-    `LIMN_AI_DISABLED=true`) — the tab keeps its lists and charts. A missing runtime or credential
-    swaps only the button, through `AiRunGate`.
-  - Keys: `['story-reports','ws:<id>',window]` (the list: stored runs + what a run would pick, code
-    only), `['story-report',id]` (one run, polled every 2 s while queued/running; a terminal status
-    invalidates the list and `['ai-usage']`). ⚠ **"Write report" / "Re-write" is the ONE billing
-    path**: mutation key `['story-report-start','ws:<id>',window]`, read through `useIsMutating`
-    (`useStoryReportStarting`), never a per-mount `isPending`; the queued run is written into the list
-    cache (`latest` + `running`) in the HOOK-level `onSuccess`, never a `mutate()` callback. The run is
-    stored server-side, so a tab switch mid-run loses nothing.
-  - The window picker (`STORY_REPORT_WINDOW_CHOICES`, default `STORY_REPORT_DEFAULT_WINDOW` = 60 days;
-    the 'reporting' option is named by `reportingWindowShortTitle` off `/api/stories`' echo) is local
-    state keyed by workspace and derived for the render, URL-silent. A run in flight elsewhere
-    (`running` names another window/workspace) REPLACES the button with one line (+ "Show it" in the
-    same workspace) — never a disabled button; the list re-reads every 5 s until it ends.
-  - The report renders as a news piece: headline, summary, a FIGURES row (`storyReportFigures`, from
-    the run's STORED `population` — code, styled apart from Claude's text, each count with its
-    denominator, plus one row per story issue from `issueRates` when present and `of > 0`
-    (`issueRateFigure`: "Criteria that can’t be checked · 12 of 81 criteria", "Stories with a linked
-    blocker · 3 of 40 stories"; a rate with no `unit` is an older report's and keeps its old label,
-    "… of N read"; a retired id on an old stored report is dropped through `isStoryIssueId`),
-    then What we do well (green edge) / Where stories fall short (red edge) /
-    Spotlights (edge + "Good/Weak example" words, not hue alone) / Emerging themes / Next sprint
-    actions (numbered); a point with an `issue` wears that issue's label as a small chip
-    (`pointIssueLabel` — null for an absent OR retired id); empty sections are not headings
-    (`storyReportSections`). ⚠ **A point's / action's ticket chips read "KEY · Title"**
-    (`ticketChipLabel`, the title off `record.picked` by key; the chip WRAPS, never truncated behind a
-    `title=`), keep their tracker link, and a picked ticket gains a "PRs" button that opens its story
-    view (`useOpenStory`). "Not covered (N)"
-    sits behind a toggle and stays OUT of the export. ⚠ **A key is a link only when it is one of the
-    run's picks** (`linkifyTicketKeys`: whole tokens only, so `BMD-12` never matches inside
-    `BMD-123`), always through `safeExternalUrl`. "Copy as Markdown" (`storyReportMarkdown`,
-    `writeClipboard` with its fallback) emits a clean document with links and one line labelling the
-    figures apart from the model text. A stale report wears "Out of date: stories changed since";
-    nothing re-runs by itself. How the stories were picked, the model, cost and what validation
-    dropped all sit behind ⓘs.
+  `periodReports` ANDed into `enabled`), named by the reporting-window caption. No tracker → one
+  sentence. The server orders `shortfall` / `unchecked`; the SPA never re-ranks them. The per-story
+  AI notes, their "Write note" buttons and the pattern chips are DELETED.
+  - ⚠ **The agentic story report is REMOVED (2026-10-18)** — `StoryReportCard.tsx`,
+    `storyReportModel.ts` + its test, the `useStoryReport*` hooks and the `api.storyReport*` methods
+    are gone, and so are its window picker and "Write report". Do not re-add a model-written narrative
+    here; its `story_reports` table is dormant (docs/DATA-MODEL.md).
   - Charts: "Time and pull requests" is `RepoRows` with two single-segment columns on SEPARATE scales
     (working time via `formatWorkingTime` over `workingDayHours`; PR count), top
     `STORY_TIME_CHART_ROWS` by working hours + "N more not shown". "Size and criteria" is `ScatterChart`
@@ -2321,9 +2284,9 @@ convention this file has to remember.
     `RepoRows`' optional `rowAction` (one labelled control under the name; the row and its bars stay
     unclickable). The key still opens the tracker.
   - Every explanation sits behind an `InfoButton`; no caption paragraphs. No e2e spec mounts
-    Reports (the mock's `periodReports` is false), so `e2e/mock-api.ts` has no `/api/stories` or
-    `/api/story-reports` fixture; add typed ones if a spec ever opens the tab (today the catch-all `{}`
-    reads as "no tracker": the card hides and the tab prints one sentence).
+    Reports (the mock's `periodReports` is false), so `e2e/mock-api.ts` has no `/api/stories`
+    fixture; add a typed one if a spec ever opens the tab (today the catch-all `{}` reads as "no
+    tracker": the tab prints one sentence).
   - ⚠ **Story health is DELETED** (2026-10-11, "not adding anything"): no `StoryHealth.tsx`, no
     `useStoryHealth`, no `GET /api/story-health`. Do not re-add a weekly-chart panel here. The label
     run's client methods (`api.startStoryLabelRun` etc.) remain with no screen calling them.
@@ -3230,7 +3193,7 @@ ticket yet."). In the single-ticket stack nothing collapses and the Story sectio
   `ticket:<ident>` (`TICKET_TAB_PREFIX`; the ident verbatim, `URLSearchParams` escapes it in `view=`)
   for old links; SELF-DESCRIBING from the URL, NOT persisted across reloads.
 - ⚠ **Opened ONLY through `useOpenStory()`** (`lib/ticketTab.ts`) — This Sprint's ticket clicks, Reports
-  → Stories' "Time and pull requests" rows and story rows, the story report's ticket chips, a ticket key
+  → Stories' "Time and pull requests" rows and story rows, a ticket key
   in any text (`TicketRefLink`, e.g. an "Ask Claude" answer), the PR pane's Ticket row chips (`PrTicketChip`
   in ChecksTab.tsx: the key opens the story, a small icon opens the tracker; needs `TicketRef.ident`, set
   by the server's `prTicketView`, else the chip only links out), and a search's **Stories** facet (dropdown

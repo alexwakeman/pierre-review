@@ -1,4 +1,4 @@
-// db/stories.ts + db/story-selection.ts — Reports → Stories, on a THROWAWAY sqlite DB. Pinned:
+// db/stories.ts — Reports → Stories, on a THROWAWAY sqlite DB. Pinned:
 //  • the population: a ticket on the WORKSPACE'S tracker site with a PR in the workspace's repos
 //    merged in `[from, min(end, now))` — two-sided, half-open; another site, an unread row and
 //    another account's rows never count;
@@ -6,8 +6,7 @@
 //  • working hours through the workspace calendar, clock hours beside them;
 //  • UNKNOWN IS NEVER ZERO: an unsized merged PR nulls the story's size and is counted;
 //  • criteria: the latest SUCCEEDED review wins, else the text rule, source labelled;
-//  • the two lists; no tracker → `trackerOn: false`;
-//  • the story report's async selection: the window choice, the picks, the whole-window figures.
+//  • the two lists; no tracker → `trackerOn: false`.
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
@@ -23,7 +22,6 @@ let db: any;
 let schema: any;
 let closeDb: (() => void) | undefined;
 let st: typeof import('./stories.js');
-let sel: typeof import('./story-selection.js');
 
 const at = (iso: string) => new Date(iso);
 // Mon 2026-09-07 → Mon 2026-09-21; "now" is Sun 2026-09-20 00:00 UTC.
@@ -52,7 +50,6 @@ beforeAll(async () => {
   const { runMigrations } = await import('./run-migrations.js');
   await runMigrations();
   st = await import('./stories.js');
-  sel = await import('./story-selection.js');
   const { accounts, workspaces, workspaceRepos, workspaceTrackers, repos, pullRequests, trackerTickets, ticketReviews, ticketReviewMembers } = schema;
 
   const mkAccount = async (login: string): Promise<number> => {
@@ -298,34 +295,5 @@ describe('foldStories — one story', () => {
     expect(f.unchecked).toEqual([ident('ENG-2')]);
     // Newest last merge first.
     expect(f.stories.map((s) => s.key)).toEqual(['ENG-4', 'ENG-2', 'ENG-1']);
-  });
-});
-
-describe('loadStorySelection — the story report’s window choice', () => {
-  it("'reporting' asks the reporting window (trailing 14 days in OSS) and echoes it", async () => {
-    const out = await sel.loadStorySelection(A1, { workspaceId: WS, repoIds: [r1] }, 'reporting', NOW);
-    expect(out.trackerOn).toBe(true);
-    expect(out.range.choice).toBe('reporting');
-    expect(out.range.reporting).toMatchObject({ mode: 'rolling_14', days: 14 });
-    expect(out.population.storiesInWindow).toBe(3);
-    expect(out.population).toMatchObject({
-      withWrittenCriteria: 1,
-      criteriaOnlyInDescription: 0,
-      noCriteriaFound: 0,
-      checkedByTicketReview: 2,
-      checkedAndFullyMet: 1,
-      checkedWithGaps: 1,
-      truncated: false,
-    });
-    const one = out.candidates.find((c) => c.key === 'ENG-1')!;
-    expect(one.group).toBe('fell_short');
-    expect(one.whyPicked).toContain('3 criteria unmet or missing in the review');
-    expect(out.internalsByKey.get('ENG-1')?.row.ident).toBe(ident('ENG-1'));
-  });
-
-  it("a day choice is a trailing span ending now: '30' admits the story merged before the sprint", async () => {
-    const out = await sel.loadStorySelection(A1, { workspaceId: WS, repoIds: [r1] }, '30', NOW);
-    expect(out.range).toMatchObject({ choice: '30', days: 30, reporting: null, to: new Date(NOW).toISOString() });
-    expect(out.population.storiesInWindow).toBe(4); // + ENG-3 (merged 2026-09-05; its at-now merge is excluded)
   });
 });

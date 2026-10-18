@@ -170,11 +170,6 @@ import type {
   OpenPrsResponse,
   MergedPrsResponse,
   StoriesResponse,
-  StoryReportsResponse,
-  StoryReportResponse,
-  StoryReportWindowChoice,
-  StartStoryReportBody,
-  StartStoryReportResponse,
   StartStoryLabelRunBody,
   StoryLabelRunResponse,
   SprintGraphResponse,
@@ -955,17 +950,6 @@ export const api = {
   // Reports → Stories (core, Pro on `periodReports`): every ticket with a PR merged in the window.
   stories: (workspaceId: number) =>
     get<StoriesResponse>(withQuery('/api/stories', workspaceParam(workspaceId))),
-  // The story report (core, agentic, LOCAL-ONLY, Pro on `periodReports`). The GET is code only (the
-  // picks + figures a run would use, and the stored runs); the POST is the ONE path that runs Claude.
-  storyReports: (workspaceId: number, window: StoryReportWindowChoice) =>
-    get<StoryReportsResponse>(
-      withQuery('/api/story-reports', workspaceParam(workspaceId), `window=${encodeURIComponent(window)}`),
-    ),
-  startStoryReport: (body: StartStoryReportBody) =>
-    fetch('/api/story-reports', jsonBody('POST', body)).then((r) => handle<StartStoryReportResponse>(r)),
-  storyReport: (id: number) => get<StoryReportResponse>(`/api/story-reports/${id}`),
-  cancelStoryReport: (id: number) =>
-    fetch(`/api/story-reports/${id}/cancel`, jsonBody('POST')).then((r) => handle<StoryReportResponse>(r)),
   // This Sprint (its own rail line; core, FREE — no route here 402s). The graph GET
   // stamps the workspace as viewed, which is what lets the worker read its sprint at all. Both GETs
   // are DB only.

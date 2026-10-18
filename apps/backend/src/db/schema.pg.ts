@@ -70,11 +70,6 @@ import type {
   ReviewRouteReason,
   StoredPrFile,
   StoredTicketPrCard,
-  StoryReportBody,
-  StoryReportCandidate,
-  StoryReportDropped,
-  StoryReportPopulation,
-  StoryReportRange,
   StoryCriterionLabel,
   StoryLevelLabels,
   SprintSource,
@@ -1969,7 +1964,10 @@ export const workspaceSettingEvents = pgTable(
   }),
 );
 
-// THE STORY REPORT — see the sqlite twin (migration pg 0084).
+// story_reports — see the sqlite twin (migration pg 0084).
+// ⚠ DORMANT since 2026-10-18: the agentic story report (Reports → Stories) was REMOVED. Nothing
+// reads or writes this table any more (only erasure clears it); kept, never dropped
+// (docs/DATA-MODEL.md). The JSON columns are typed `unknown` — their shapes left `shared` with it.
 export const storyReports = pgTable(
   'story_reports',
   {
@@ -1981,14 +1979,14 @@ export const storyReports = pgTable(
     windowChoice: text('window_choice').notNull(),
     fromAt: timestamp('from_at', { withTimezone: true, mode: 'date' }).notNull(),
     toAt: timestamp('to_at', { withTimezone: true, mode: 'date' }).notNull(),
-    rangeJson: jsonb('range_json').$type<StoryReportRange>().notNull(),
+    rangeJson: jsonb('range_json').$type<unknown>().notNull(),
     model: text('model').notNull(),
     status: text('status').notNull(),
     fingerprint: text('fingerprint').notNull(),
-    pickedJson: jsonb('picked_json').$type<StoryReportCandidate[]>().notNull(),
-    populationJson: jsonb('population_json').$type<StoryReportPopulation>().notNull(),
-    reportJson: jsonb('report_json').$type<StoryReportBody>(),
-    droppedJson: jsonb('dropped_json').$type<StoryReportDropped>(),
+    pickedJson: jsonb('picked_json').$type<unknown>().notNull(),
+    populationJson: jsonb('population_json').$type<unknown>().notNull(),
+    reportJson: jsonb('report_json').$type<unknown>(),
+    droppedJson: jsonb('dropped_json').$type<unknown>(),
     error: text('error'),
     costUsd: doublePrecision('cost_usd'),
     inputTokens: integer('input_tokens'),

@@ -1155,6 +1155,8 @@ window_choice, created_at), and the named COMPOSITE FK `story_reports_workspace_
 `workspaces (id, account_id)` with cascade (`workspace_id` arrives in a POST body; a report is
 regenerable). In `accountScopedTables()` and erased explicitly. Journal `when` `1791792000000` in
 both folders (after `0096` / pg `0083`). Contract: docs/CLAUDE-REVIEW.md § Story report.
+⚠ **DORMANT since 2026-10-18** — the story report was removed; the table is kept, never dropped
+(no read or write; still erased).
 It REPLACED the per-story notes, whose plugin migration `0041_story_notes` was never committed and is
 DELETED (both dialects). A dev DB that ran it keeps an orphan `pro_story_notes` table (harmless) and
 its `pro_migrations` record — never reuse the file name `0041_story_notes.sql`.

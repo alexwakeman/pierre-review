@@ -17,8 +17,6 @@ import { reconcileDiagramsOnStartup } from './diagrams/manager.js';
 import { registerAiFixRoutes } from '../coding/ai-fix/routes.js';
 import { reconcileFixesOnStartup } from '../coding/ai-fix/manager.js';
 import { registerAiResolveRoutes } from '../coding/ai-resolve/routes.js';
-import { registerStoryReportRoutes } from './story-report/routes.js';
-import { reconcileStoryReportsOnStartup } from './story-report/manager.js';
 import { registerStoryLabelRoutes } from './story-labels/routes.js';
 import { registerSprintBriefs } from './sprint-briefs/index.js';
 import { registerSprintAskRoutes } from './sprint-ask/routes.js';
@@ -30,8 +28,7 @@ import { reconcileStoryDocsOnStartup } from './story-docs/manager.js';
 
 // THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, the chat, auto
 // review), the ticket review (one run per ticket across its PRs, + its cascade sweeper), the CI
-// review (why checks failed on a PR's head, + its sweeper), AI Fix's fixer and the story report
-// (Reports → Stories — the one agentic run that is ALSO Pro, on `periodReports`). CORE and FREE
+// review (why checks failed on a PR's head, + its sweeper) and AI Fix's fixer. CORE and FREE
 // since apiVersion 22 (they were the plugin's "pro+" tier); they run on the user's OWN Claude Code session or
 // ANTHROPIC_API_KEY (review/auth.ts), and Limn stores no key and charges nothing for them.
 //
@@ -64,9 +61,6 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // "Resolve with Claude" — the agentic half of the merge-conflict resolver. The resolver's own
   // routes stay in both modes (app.ts); this one is agentic and follows this function's rule.
   registerAiResolveRoutes(app, ctx, { runOpen });
-  // The STORY REPORT (Reports → Stories): one Haiku run across 10-20 code-picked stories. Pro on
-  // `periodReports` as well (its routes 402), and agentic, so it registers here and nowhere else.
-  registerStoryReportRoutes(app, ctx);
   // STORY LABELS (Reports → Stories): Haiku labels each story's criteria against a
   // fixed rubric. Pro on `periodReports` too, and agentic — so here and nowhere else.
   registerStoryLabelRoutes(app, ctx);
@@ -134,10 +128,5 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
     await reconcileStoryDocsOnStartup(ctx);
   } catch (err) {
     app.log.warn({ err }, 'story docs: startup reconcile failed');
-  }
-  try {
-    await reconcileStoryReportsOnStartup();
-  } catch (err) {
-    app.log.warn({ err }, 'story report: startup reconcile failed');
   }
 }

@@ -38,7 +38,7 @@ function Answer({
   return (
     <div className="space-y-1.5">
       <div className="text-[13px] text-gray-800 dark:text-gray-100">
-        <Markdown renderLink={renderLink}>{message.text}</Markdown>
+        <Markdown renderLink={renderLink} wideTables>{message.text}</Markdown>
       </div>
       {message.citations.length > 0 && (
         <div className="space-y-0.5">

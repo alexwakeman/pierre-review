@@ -3,8 +3,8 @@ import { usePinnedTabs } from '../store/pinnedTabs.js';
 
 // THE ONE WAY TO OPEN A STORY (docs/FRONTEND.md § The story view). The story view is the ticket tab:
 // one ticket's header, its Story section (OPEN here) and its pull requests, drawn as the Open PRs ticket
-// stack. Every entry point — This Sprint's tickets, Reports → Stories' "Time and pull requests", the
-// story report's ticket chips, a ticket key in a Claude answer — calls the function this hook returns:
+// stack. Every entry point — This Sprint's tickets, Reports → Stories' "Time and pull requests", a
+// ticket key in a Claude answer — calls the function this hook returns:
 //
 //   const openStory = useOpenStory();
 //   openStory({ ident, key, title });

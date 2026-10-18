@@ -2909,7 +2909,7 @@ try), each citing the pull requests behind it. Full contract: docs/BOTTLENECKS.m
 
 The per-story Haiku notes (`/api/pro/story-notes`, `pro_story_notes`, `ProHostQueries.getStoryNoteInputs`)
 were replaced by the CORE story report — one agentic report across 10-20 picked stories
-([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Story report). Nothing of them remains in the plugin.
+([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Story report), itself removed 2026-10-18. Nothing of them remains in the plugin.
 
 ## The work plan — "what should I work on today"
 

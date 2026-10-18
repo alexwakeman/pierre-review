@@ -297,9 +297,7 @@ praise comment already on GitHub is still Limn's own comment. The ticket review 
   deleted). Nothing stores a model as a SETTING, so there was nothing to migrate: stored runs and
   fixes keep their id and print it raw, both generate routes 400 the two ids, and the review chat's
   `chatModelFor` already falls back to the default for a stored run on an unoffered model.
-- **THE ONE EXCEPTION IS THE STORY REPORT, ON HAIKU 5.5 (`STORY_REPORT_MODEL` = `claude-haiku-5-5`).**
-  It is not a reader-picked model and never enters `ClaudeReviewModel`: the run is fixed to Haiku
-  (§ Story report). Every other agentic run is Opus 5.5 or Sonnet 5.
+- The story report, once the one agentic run on Haiku 5.5, was REMOVED 2026-10-18 (§ Story report).
 
 ## Deep-review specialists
 
@@ -1789,8 +1787,8 @@ names (`knownTicketsFor`, account-predicated, same tracker site):
 | Spec gaps | the label lists missing details | ≤ 3 gaps, each typed (rule, edge case, design, data, non-functional) |
 
 - ⚠ **This sprint no longer raises the issues** (2026-10-12: the chips, findings, highlights and checks
-  were "not actually useful" and left with the sprint GRAPH). The issues live on in the story report's
-  rates and points (`STORY_CHIP_ISSUE_IDS` survives for those folds).
+  were "not actually useful" and left with the sprint GRAPH). They lived on in the story report's
+  rates and points — REMOVED 2026-10-18, so nothing consumes them now (§ Story report).
 - ⚠ **BLOCKED IS REAL BLOCKERS ONLY** (2026-10-11, the review of all 42 BNG sprint tickets: of 63
   dependency items, 13 were done tickets, 15 tickets of unknown status, 14 open and 21 had no ticket,
   mostly inputs — Figma nodes, spreadsheets, reference files). `isRealStoryBlocker` (shared) keeps an
@@ -1822,73 +1820,21 @@ names (`knownTicketsFor`, account-predicated, same tracker site):
   more": "Criterion 3: no expected result · …", "Waits on BMD-568 cookie banner (To Do) · BMD-9 (status
   unknown) · Sign-off on the copy, product owner, no ticket".
 
-## Story report (Reports → Stories)
+## Story report (Reports → Stories) — REMOVED 2026-10-18
 
-ONE agentic report, for an engineering manager to take upstairs, on how well the team writes user
-stories: what it does well, where stories fall short, odd ones out, emerging themes and actions for
-next sprint. It REPLACED the plugin's per-story Haiku notes (`/api/pro/story-notes`,
-`pro_story_notes`, `ProHostQueries.getStoryNoteInputs` — all deleted; a dev DB may still hold an
-orphan `pro_story_notes` table from the never-committed plugin migration 0041, which is harmless).
+The agentic story report (one Haiku 5.5 run across 10-20 code-picked stories, the narrative at the
+top of Reports → Stories) is GONE: `StoryReportCard`, its hooks and client methods, the
+`/api/story-reports*` routes, `src/review/story-report/`, `db/story-selection.ts`, its rate-limit tiers,
+`STORY_REPORT_BUDGET_USD` / `STORY_REPORT_MAX_TURNS`, and its shared types. Reports → Stories keeps its
+charts and lists (`GET /api/stories`, `db/stories.ts`). ⚠ The `story_reports` table (sqlite `0097` /
+pg `0084`) is DORMANT — kept, never dropped, still in `accountScopedTables()` + erasure; nothing reads
+or writes it (docs/DATA-MODEL.md). It had replaced the plugin's per-story notes (`pro_story_notes`,
+deleted; a dev DB may still hold an orphan `pro_story_notes` table, which is harmless).
 
-- **Where**: `src/review/story-report/` — `routes.ts`, `manager.ts`, `agent.ts`, `validate.ts`,
-  `fingerprint.ts`, `story-detail.ts`; the picks are core `db/story-selection.ts` over the same
-  `foldStories` population `GET /api/stories` lists. Contract: `packages/shared/src/stories.ts`
-  § THE STORY REPORT. Routes: docs/API.md.
-- **Gating**: agentic, so LOCAL-ONLY — registered only through `registerAgenticRoutes` (its
-  explicit `isCloud` check) — AND Pro with the rest of Reports (`periodReports`, 402 before any DB
-  work). The SPA shows the controls only when `me.ai.enabled`; `AiRunGate` covers a missing runtime
-  or credential. The credential ladder is the usual one (`applyClaudeReviewAuth`, applied to the
-  environment only when no Claude Review run is in flight — the review chat's rule).
-- **CODE PICKS, THE MODEL WRITES.** `selectStories` files each story in the chosen window
-  (`reporting` / `30` / `60` / `90`, default `60`) into done_well (≤6), fell_short (≤6), no_criteria
-  (≤4) or outlier (≤3) with code-written `whyPicked` reasons, plus WHOLE-WINDOW figures
-  (`StoryReportPopulation`). The rules are the trial harness's verbatim with ONE change: ⚠ a story
-  with no criteria is NEVER fell_short (its outcome is unknown, not bad). The picks are a sample, so
-  the prompt forbids quoting a rate from them; the card prints code's figures in their own row.
-- **The three story issues**: each pick carries `issues` and `issueStates` AS WRITTEN
-  (`storyIssuesAsWritten` over the ONE input builder — criteria, CURRENT label, links, named tickets;
-  null = ticket never read), and the population carries `issueRates` (`storyIssueRateUnits`, Story
-  health's measures: `unit: 'criteria'` for criteria that can't be checked, `'stories'` for linked
-  blockers; held spec gaps and a linked-blocker rate with no link anywhere are dropped,
-  `reportableIssueRates`; a stored rate with no `unit` is an older report's, shown under its old label). The agent sees all three issues per pick with `present: true | false | null` and,
-  when present, the SPECIFIC detail (`issueDetailForAgent`: criterion + reason; what / kind / ticket /
-  owner / status / finished / source; gap type + text) — ticket-derived strings, fenced, and in
-  `storyUntrustedTexts`. ⚠ null is NOT KNOWN, never "the team avoids it", and an unlabelled pick never
-  reads as `issues: []`. The prompt asks every point to say what the detail says and never "depends on
-  other work" without naming it; it sets an optional `issue` per point (kept only when
-  `isStoryIssueId`; otherwise the field is dropped, never the point), at most one shortfall and one
-  action per issue (`STORY_REPORT_LEAN`: ≤ 3 doingWell, ≤ 3 fallingShort, ≤ 3 actions). BRIEF: a point's
-  detail is ONE sentence (`STORY_REPORT_TEXT_MAX.pointDetail`, 200) naming ONE example ticket
-  (`STORY_REPORT_TICKETS_PER_POINT_MAX`); an action names ≤ 2 (`…_PER_ACTION_MAX`). The tool schema's
-  `.max` makes the model rewrite; the validator's cut is the backstop. It may quote issue rates from
-  `wholeWindow.issueRates` only (`{measure, count, of, unit}`), each in its own unit
-  (`STORY_REPORT_FORMAT` v6).
-  Old rows lack all three fields and render without them.
-- **The run**: Haiku 5.5, an in-process `stories` MCP server with `list_candidates`, `get_story` and
-  `submit_report` (the trial harness's descriptions, zod shapes and SYSTEM text verbatim, plus the
-  three-issues paragraph and ONE sentence naming the nonce fence), `tools: []`, the built-ins denied, `ISOLATED_MCP` +
-  `ownToolsOnlyHook(['stories'])`, `settingSources: []`, a throwaway cwd, `maxTurns`
-  `STORY_REPORT_MAX_TURNS` (40), `maxBudgetUsd` `STORY_REPORT_BUDGET_USD` ($1). The trial read all 18
-  stories in 21 turns, 46 s, about $0.02. ⚠ Every tool answer is inside a per-run nonce fence: ticket
-  text, PR titles and the ticket review's prose are all attacker-authored.
-- **THE FIRST `submit_report` WINS**; a later call is answered "Already recorded." and changes
-  nothing. The server then VALIDATES it (`validateStoryReport`): every ticket key must be a picked
-  key (unknown keys removed and counted in `dropped`), an item left with no ticket is dropped, a
-  spotlight/leftOut on an unknown key or a bad tone is dropped, text trimmed and capped, ≤6 items per
-  section, ≤8 tickets per item. No headline or summary left → the run FAILS (`invalid_report`).
-- **One run in flight per ACCOUNT**, claimed synchronously in the POST before any await (`409 busy`
-  otherwise) and released on every path. ⚠ It does NOT share `REVIEW_CONCURRENCY`: the run is short
-  and cheap, and parking it behind an Opus review would buy nothing.
-- **Storage**: `story_reports` (sqlite `0097` / pg `0084`, composite FK onto `workspaces (id,
-  account_id)`, in `accountScopedTables()`), one row per run: queued → running → succeeded / failed /
-  cancelled. The latest per (workspace, window choice) is shown. Cancel aborts the run and writes
-  `cancelled` at once; the run's own terminal write is a compare-and-set, so the cancel wins. The boot
-  sweep marks an orphaned in-flight row failed `interrupted`. Spend: `recordAiUsage`, feature
-  `story_report`.
-- **Currency**: sha256 over a format tag (`STORY_REPORT_FORMAT`, `story-report-v4` since the three
-  specific issues — older reports read stale) + the window choice + the picked idents + each pick's latest ticket review
-  id and its PRs' `[id, state, mergedAt]` — nothing derived from now. A different fingerprint today
-  shows the stored report as `stale`; nothing re-runs it by itself.
+⚠ **What it leaves without a consumer** (kept, not deleted): the three story issues' folds (§ Story
+issues — `foldStoryIssues`, `storyIssueRateUnits`, `storyIssuesAsWritten`, the chip/bullet text) and
+`db/story-issue-input.ts`'s `buildStoryIssueInput`; and the story labels (§ Story labels), whose only
+automatic trigger it was.
 
 ## Story labels (Reports → Stories)
 
@@ -1901,8 +1847,10 @@ DELETED (2026-10-11, "not adding anything"): no `GET /api/story-health`, no pane
   (`currentLabelRowsFor`) and the run's population are `db/story-health.ts` + `db/story-health-fold.ts`
   (names kept). Contract: `packages/shared/src/story-health.ts`. Routes: docs/API.md § The story label
   run. (This sprint no longer labels: its tickets get a BRIEF instead — § Sprint briefs.)
-- **LABELLING IS AUTOMATIC — NO BUTTON** (2026-10-11, after Story health's "Label N stories" went):
-  (1) a **story report run labels first** — before its agent starts, the window's stories with
+- **LABELLING WAS AUTOMATIC — NO BUTTON** (2026-10-11, after Story health's "Label N stories" went).
+  ⚠ **Since the story report's removal (2026-10-18) NOTHING triggers it**: the route stays, no screen
+  calls it, and `runStoryLabelsToEnd` has no caller but its tests. What it did: (1) a **story report
+  run labelled first** — before its agent starts, the window's stories with
   criteria and no CURRENT label go through the label run (`runStoryLabelsToEnd`, which claims the
   account's label slot, waits ONCE for a run already in flight, reads its list AFTER the claim, and
   waits for its own run; picked stories first, then newest; ≤ `STORY_LABEL_RUN_CAP`, its own

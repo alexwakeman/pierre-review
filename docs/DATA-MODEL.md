@@ -639,6 +639,11 @@ repo by its arrival. Nothing else reads the column.
 
 ## `story_reports` — the story report's runs (CORE; sqlite `0097` / pg `0084`)
 
+⚠ **DORMANT since 2026-10-18** — the agentic story report was REMOVED (UI, routes, agent). Never read
+or written; still in `accountScopedTables()` + erasure (and `verify:isolation` still pins its composite
+FK); kept, never dropped. Its JSON columns are typed `unknown` (the shapes left `shared`). A run left
+`running` at removal stays so — nothing sweeps it. What it held:
+
 One row per agentic story-report run (Reports → Stories; docs/CLAUDE-REVIEW.md § Story report):
 `window_choice` (`reporting` · `30` · `60` · `90`), the span (`from_at`/`to_at` + `range_json`),
 `model` (Haiku 5.5), `status` (queued · running · succeeded · failed · cancelled), the code-computed
@@ -647,8 +652,7 @@ server-validated report (`report_json`, set only on succeeded) and what validati
 (`dropped_json`), an error code (never a stack), and the run's cost / tokens / turns. The LATEST row
 per (account, workspace, window_choice) is what the card shows. `fingerprint` is the currency input
 (the window choice + picked idents + each pick's latest ticket review id and PR states) — nothing
-derived from now, so a dormant workspace's report stays current. ⚠ Every read predicates on
-`account_id` (`review/story-report/manager.ts`). Named composite FK onto `workspaces (id,
+derived from now. Named composite FK onto `workspaces (id,
 account_id)`, cascade (a report is regenerable); in `accountScopedTables()` and erased explicitly.
 
 ## `story_labels` — the story labels (CORE; sqlite `0099` / pg `0086`)

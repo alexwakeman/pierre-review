@@ -263,6 +263,76 @@ body {
   border: 1px solid rgba(127, 127, 127, 0.3);
   padding: 0.3em 0.6em;
 }
+/* WIDE TABLES (Activity → Docs only — `Markdown wideTables`): a table scrolls inside its own box
+   instead of squashing every column to a word, with the header row and the first column STICKY.
+   The box caps its height so the header has something to stick within (an overflow-x box is a
+   scroll container on both axes, so a page-level sticky top would never engage). Opaque cell
+   backgrounds, or the scrolled cells show through the sticky ones. */
+.md-table-scroll {
+  max-height: 70vh;
+  overflow: auto;
+  margin: 0.5em 0;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  border-radius: 0.375rem;
+}
+.md-table-scroll:focus-visible {
+  outline: 2px solid #0ea5e9;
+  outline-offset: 2px;
+}
+.md-table-scroll table {
+  margin: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  /* Natural column widths (each capped below), so a wide table SCROLLS rather than wrapping every
+     cell to a word to fit the pane; a narrow one still fills it. */
+  width: max-content;
+  min-width: 100%;
+}
+.md-table-scroll th,
+.md-table-scroll td {
+  @apply bg-white dark:bg-gray-950;
+  border: 0;
+  border-right: 1px solid rgba(127, 127, 127, 0.3);
+  border-bottom: 1px solid rgba(127, 127, 127, 0.3);
+  min-width: 7rem;
+  max-width: 26rem;
+  vertical-align: top;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+.md-table-scroll th {
+  @apply bg-gray-50 dark:bg-gray-900;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  text-align: left;
+}
+.md-table-scroll th:first-child,
+.md-table-scroll td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  box-shadow: 1px 0 0 rgba(127, 127, 127, 0.45);
+}
+.md-table-scroll td:first-child {
+  @apply bg-gray-50 dark:bg-gray-900;
+  font-weight: 500;
+}
+/* A sticky column wider than the box would cover every column scrolled under it. */
+.md-table-scroll th:first-child,
+.md-table-scroll td:first-child {
+  min-width: 6rem;
+  max-width: 11rem;
+}
+.md-table-scroll th:first-child {
+  z-index: 3;
+}
+.md-table-scroll tr > :last-child {
+  border-right: 0;
+}
+.md-table-scroll tbody tr:last-child > * {
+  border-bottom: 0;
+}
 .md-body img {
   /* Restore the HTML/GitHub default of inline images. Tailwind's preflight
      resets `img { display: block }`, which would drop every image onto its own

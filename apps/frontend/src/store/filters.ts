@@ -72,7 +72,7 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // one predates the visible-but-locked posture; do not copy it here, and note that BotsView's own
 // `'roi'` member is now handled this way too (selectable, body locks).
 // `'stories'` is the "Stories" tab (`?insightsTab=stories`): every tracker ticket with a PR merged in
-// the reporting window, how well it was written, and the story report (agentic, local-only). Same
+// the reporting window and how well it was written. Same
 // one Reports gate.
 //
 // ⚠ `'merged'` AND `'sprint'` LEFT THIS UNION. "Merged so far" and "This sprint" moved to their own

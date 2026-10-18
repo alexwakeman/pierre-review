@@ -528,15 +528,9 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/pro/flow-pointers')).not.toContain('ai');
   });
 
-  // Reports → Stories: the core list is DB-only (`read` fall-through); the story report's POST
-  // starts a Haiku agent run (the `ai` pair), its GETs and cancel spend nothing.
-  it('tiers Reports → Stories: the list on read, the story report per verb', () => {
+  // Reports → Stories: the core list is DB-only (`read` fall-through).
+  it('tiers Reports → Stories: the list on read', () => {
     expect(tiers('GET', '/api/stories')).toEqual(['read']);
-    expect(tiers('POST', '/api/story-reports')).toEqual(['ai', 'ai_hourly']);
-    expect(tiers('GET', '/api/story-reports')).toEqual(['read']);
-    expect(tiers('GET', '/api/story-reports/12')).toEqual(['read']);
-    expect(tiers('POST', '/api/story-reports/12/cancel')).toEqual(['read']);
-    expect(tiers('POST', '/api/story-reports/12/cancel')).not.toContain('ai');
   });
 
   // The story label run: the run's status is a memory read; only the label run's POST bills.

@@ -10,8 +10,8 @@ import {
 } from '@pierre-review/shared';
 
 // THE ONE STORY-ISSUE INPUT BUILDER (shared `story-issues.ts` folds it). Every surface that raises or
-// counts a story issue — the story
-// report (db/story-selection.ts) and the label run (db/story-health.ts) — hands the fold the same four
+// counts a story issue — the label run (db/story-health.ts); the story report that also did was
+// removed 2026-10-18 — hands the fold the same four
 // things, built here:
 //
 //   • the ticket's numbered criteria (the ONE extractor, the caller's),

@@ -17,11 +17,6 @@ const ROUTES: Array<{ method: 'GET' | 'POST' | 'PUT'; url: string }> = [
   { method: 'PUT', url: '/api/workspaces/:id/auto-review' },
   { method: 'POST', url: '/api/pro/prs/:id/ai-fix' },
   { method: 'POST', url: '/api/pro/ai-fixes/:fixId/push' },
-  // The story report (Reports → Stories) — agentic AND Pro: cloud must register none of it.
-  { method: 'GET', url: '/api/story-reports' },
-  { method: 'POST', url: '/api/story-reports' },
-  { method: 'GET', url: '/api/story-reports/:id' },
-  { method: 'POST', url: '/api/story-reports/:id/cancel' },
   // "Ask Claude about this sprint" (Activity → This Sprint) — agentic: cloud must register none of it.
   // ("Check against code" is REMOVED in both modes.)
   { method: 'POST', url: '/api/sprint-graph/ask' },

@@ -211,7 +211,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .delete(schema.workspaceSettingEvents)
       .where(eq(schema.workspaceSettingEvents.accountId, accountId))
       .execute();
-    // The story report (migration 0097 / pg 0084) — model prose about the account's own tickets.
+    // The story report (migration 0097 / pg 0084; DORMANT since 2026-10-18) — model prose about the
+    // account's own tickets.
     // Cascades from workspaces too, and is explicit anyway.
     await tx.delete(schema.storyReports).where(eq(schema.storyReports.accountId, accountId)).execute();
     // Story labels (migration 0099 / pg 0086) — model answers about the account's tickets.

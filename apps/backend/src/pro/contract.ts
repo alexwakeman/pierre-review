@@ -474,7 +474,7 @@ export interface ReviewCiFailureReport {
   confidence?: number | null;
 }
 
-// The story-report shapes (one ticket's criteria / gaps as the model reports them). No longer a
+// The ticket-report shapes (one ticket's criteria / gaps as the model reports them). No longer a
 // RunReviewResult field — stories left the PR review for the ticket review — but still the input
 // shape of claude-review/ticket.ts's reconcile.
 export interface ReviewTicketItemReport {

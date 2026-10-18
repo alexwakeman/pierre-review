@@ -182,7 +182,7 @@ export function DocsViewer({
           <p className="text-xs text-rose-700 dark:text-rose-400">{section.error.message}</p>
         ) : (
           <div className="text-[13px] text-gray-800 dark:text-gray-100">
-            <Markdown rehypeExtra={HEADING_ANCHORS} renderLink={renderLink}>
+            <Markdown rehypeExtra={HEADING_ANCHORS} renderLink={renderLink} wideTables>
               {body}
             </Markdown>
           </div>

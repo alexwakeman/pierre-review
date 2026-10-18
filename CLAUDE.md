@@ -812,8 +812,7 @@ plugin): Claude Review (run, follow-up, auto review, the review chat, and the se
 review; a DEEP review consults up to five specialist sub-agents, the cap a PreToolUse hook, never
 the prompt) in `src/review/claude-review/`, AI Fix's agentic fixer + push in `src/coding/ai-fix/`.
 Review memory is DELETED (`review_learnings` dropped by sqlite `0075` / pg `0062`); the depth is
-always the router's; the models are Opus 5.5 and Sonnet 5 only (the story report alone runs on
-Haiku 5.5). Details:
+always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
 [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md). Non-negotiables:
 
 - **ONE switch, `config.aiEnabled` = `!isCloud && LIMN_AI_DISABLED !== 'true'`** — on and always
@@ -1204,26 +1203,24 @@ a refusable forecast. **Metrics are CORE** (`db/period-metrics.ts`, `db/forecast
   and **an explicit `toMs` must reach EVERY fold of a windowed getter — and only an explicit
   one** (`typeof window === 'string' ? null : to`, half-open `lt`, never `lte`).
 
-**Reports → Stories** — core `GET /api/stories` (stories merged in the reporting window) + the **story report**: ONE agentic Haiku 5.5 run across 10-20 stories
-CODE picks (`db/story-selection.ts`) over a chosen window (sprint / 30 / 60 / 90 days, default 60),
-local-only AND Pro (`periodReports`, 402), stored in `story_reports` (sqlite `0097` / pg `0084`). Its
-points group under the THREE STORY ISSUES (below). ⚠ The figures — issue rates included — are CODE's,
-over the whole window; the picks are a sample the agent may never quote a rate from. ⚠ Every ticket
-key must be a picked key; the first `submit_report` wins. [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Story report.
+**Reports → Stories** — core `GET /api/stories` (stories merged in the reporting window): two charts
+and the lists. ⚠ The agentic **story report** that headed it was REMOVED 2026-10-18 (UI, routes,
+agent, `db/story-selection.ts`); its `story_reports` table (sqlite `0097` / pg `0084`) is DORMANT —
+kept, never dropped, still erased.
 
 **THE THREE STORY ISSUES** (shared `story-issues.ts`) — Unclear when done (which criterion, why) ·
 Blocked (only an unfinished ticket or open decision, `isRealStoryBlocker`; a ticket the TEXT names
 blocks ONLY when the label's rubric-4 `references` read it `depends_on` — never out of scope, built
 alongside, builds on, supersedes or context) · Spec gaps (no chip).
-Input via `db/story-issue-input.ts`; retired ids drop through `isStoryIssueId`. They feed the story
-report only — This Sprint raises NO issues since 2026-10-12. RATES use `storyIssueRateUnits` (unclear =
+Input via `db/story-issue-input.ts`; retired ids drop through `isStoryIssueId`. They fed only the
+story report, so NOTHING consumes them since 2026-10-18 (This Sprint raises none since 2026-10-12). RATES use `storyIssueRateUnits` (unclear =
 % of CRITERIA; blocked = tracker LINKS, any status; "no criteria" apart). Every sentence is templated.
 
 **Story labels** — the Story health charts are DELETED (2026-10-11; no `GET /api/story-health`, no
 UI); the labels stay. The label run (`POST /api/story-health/label`, path kept, local-only) labels the
 last 13 weeks' stories (`db/story-health.ts`); This Sprint makes BRIEFS, not labels.
-⚠ Labels count ONLY when CURRENT (rubric version AND text hash, `db/story-label-input.ts`). A HELD rate
-(`STORY_ISSUE_RATES_HELD`) never reaches the story report. [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md)
+⚠ Labels count ONLY when CURRENT (rubric version AND text hash, `db/story-label-input.ts`). With the
+story report gone no screen triggers or reads them. [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md)
 § Story labels.
 
 **Activity → This Sprint** (FREE — its own rail line under Pending, `?activityRepo=sprint`; legacy

@@ -161,8 +161,7 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
   // folded to counts (db/stories.ts). PAID on `periodReports` with the rest of Reports, the 402
   // checked before any DB work. Same scope rule as /api/merged-prs (no `?repoIds=`) and the same
   // window, resolved once and echoed. DB-only (stored ticket rows, PRs, reviews — no tracker, no
-  // GitHub, no model), so it stays on the `read` tier. The agentic story report
-  // (review/story-report/, local-only) folds the SAME population over its own chosen window.
+  // GitHub, no model), so it stays on the `read` tier.
   app.get(
     '/api/stories',
     async (req, reply): Promise<StoriesResponse | { error: string }> => {

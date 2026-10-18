@@ -614,10 +614,6 @@ export const config = {
   storyDocsDailyCap: intFromEnv('STORY_DOCS_ALIGNMENT_DAILY_CAP', 30),
   storyDocsBudgetUsd: floatFromEnv('STORY_DOCS_ALIGNMENT_BUDGET_USD', 1.5),
   storyDocsMaxTurns: intFromEnv('STORY_DOCS_ALIGNMENT_MAX_TURNS', 16),
-  // ---- Story report (one Haiku run across 10-20 picked stories — review/story-report/) ----
-  // Its OWN spend and turn caps (the trial run cost $0.02 in 21 turns). Env only — no route sets it.
-  storyReportBudgetUsd: floatFromEnv('STORY_REPORT_BUDGET_USD', 1),
-  storyReportMaxTurns: intFromEnv('STORY_REPORT_MAX_TURNS', 40),
   // ---- Story labels (the label run — review/story-labels/) ----
   // The per-RUN spending cap (US$). Default = shared STORY_LABEL_BUDGET_USD_DEFAULT (1). Env only.
   storyLabelBudgetUsd: floatFromEnv('STORY_LABEL_BUDGET_USD', 1),

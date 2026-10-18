@@ -32,9 +32,8 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 //
 // ── THE PANE IS THREE TABS ──────────────────────────────────────────────────────────────────
 //   • Overview   — flow metrics, the two "where the work is happening" cards, period reports.
-//   • Stories    — the agentic story report (local-only, its own window picker, GET/POST
-//     /api/story-reports), then every tracker ticket with a PR merged in the REPORTING WINDOW: two
-//     charts and the lists (StoriesView, GET /api/stories).
+//   • Stories    — every tracker ticket with a PR merged in the REPORTING WINDOW: two charts and
+//     the lists (StoriesView, GET /api/stories).
 //   • Chronology — the COURT LEDGER (BottlenecksPanel). PRO on `periodReports`; still
 //     deterministic (no model anywhere behind it) and still the twin of the Bots rail — that
 //     surface measures automation, this one measures where people's time went.

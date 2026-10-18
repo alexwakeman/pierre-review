@@ -147,8 +147,12 @@ export const Markdown = memo(function Markdown({
   ticketLinks = false,
   rehypeExtra,
   renderLink,
+  wideTables = false,
 }: {
   children: string;
+  /** A table scrolls sideways in its own box, header row and first column sticky (Activity → Docs,
+   *  whose documents carry wide tables; index.css `.md-table-scroll`). */
+  wideTables?: boolean;
   prRefs?: boolean;
   /** A link `lib/ticketLinks.ts` marked (`data-ticket-ident`) opens that ticket's tab (This sprint). */
   ticketLinks?: boolean;
@@ -199,6 +203,17 @@ export const Markdown = memo(function Markdown({
             }
             return <a {...props} target="_blank" rel="noreferrer noopener" />;
           },
+          ...(wideTables
+            ? {
+                table: ({ node, ...props }: { node?: unknown } & JSX.IntrinsicElements['table']) => (
+                  // Focusable so a keyboard can scroll it; named so a screen reader says what it is.
+                  // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+                  <div className="md-table-scroll" tabIndex={0} role="region" aria-label="Table (scrolls sideways)">
+                    <table {...props} />
+                  </div>
+                ),
+              }
+            : {}),
           // `width`/`height` stay ON the element as well as feeding the CSS bounds: they are
           // what gives the browser an aspect ratio before the bytes arrive, which is what
           // reserves the right box and keeps the surrounding text from reflowing on load.

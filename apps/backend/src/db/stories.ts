@@ -19,10 +19,9 @@ import { buildWorkingCalendar } from './working-hours.js';
 import { textCriteriaCount } from './story-criteria.js';
 import type { StoredTicketRow } from '../tracker/store.js';
 
-// REPORTS → STORIES — the population fold (docs/API.md § GET /api/stories). ONE fold, two callers:
-// `GET /api/stories` (the rows the SPA lists and charts, over the reporting window) and the story
-// report's picks (db/story-selection.ts, over the window the reader chose), so the report and the
-// lists read the SAME stories the same way.
+// REPORTS → STORIES — the population fold (docs/API.md § GET /api/stories), read by
+// `GET /api/stories` (the rows the SPA lists and charts, over the reporting window). Its second
+// caller, the story report's picks, was removed 2026-10-18.
 //
 //   • THE WORKSPACE'S TRACKER decides the site: its provider + canonical `api_root` (the adapter's
 //     `siteRoot`, as tracker/merged.ts reads it). No reading tracker → `trackerOn: false`, no rows.
@@ -51,7 +50,8 @@ import type { StoredTicketRow } from '../tracker/store.js';
 const HOUR_MS = 3_600_000;
 const CHUNK = 400;
 
-/** Everything one story carries beyond its wire row — what the story report's `get_story` reads. */
+/** Everything one story carries beyond its wire row (`getStories` strips it; its only reader, the
+ *  removed story report, is gone). */
 export interface StoryInternals {
   row: StoryRow;
   /** Freshest stored ticket row with content (null when no row has content). */

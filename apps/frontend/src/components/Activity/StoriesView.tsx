@@ -10,7 +10,6 @@ import { ScatterChart } from '../charts/ScatterChart.js';
 import { ChevronIcon, PullRequestIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { reportingWindowCaption, reportingWindowPhrase, windowDates } from './reportingWindowText.js';
-import { StoryReportCard } from './StoryReportCard.js';
 import {
   buildSizeModel,
   buildTimeRows,
@@ -24,11 +23,9 @@ import {
 
 // Reports → "Stories" — how well the team's TICKETS were written.
 //
-//   • TOP: THE STORY REPORT (StoryReportCard) — one agentic report over stories code picked, with
-//     its own window picker (default the last 60 days). Local-only: hidden without agentic AI.
-//   • BELOW: the two charts and every story, over the workspace's REPORTING WINDOW (GET
-//     /api/stories, core, Pro on `periodReports`), named by its own caption — the two windows are
-//     labelled apart, never implied to be one.
+//   • The two charts and every story, over the workspace's REPORTING WINDOW (GET /api/stories,
+//     core, Pro on `periodReports`), named by its own caption. (The agentic story report that used
+//     to head this tab was removed 2026-10-18.)
 //
 // ⚠ THE WINDOW AND THE LISTS ARE THE SERVER'S. The response echoes the window (named through the
 // shared reporting-window spelling) and orders `shortfall` / `unchecked` itself; nothing here
@@ -105,11 +102,9 @@ function SizeChartInfo(): JSX.Element {
 export function StoriesView(): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
   const { data, isLoading, isError } = useStories(workspaceId);
-  const w = data?.window ?? null;
 
   return (
     <div data-testid="stories-view" className="space-y-4">
-      {(data == null || data.trackerOn) && <StoryReportCard workspaceId={workspaceId} reportingWindow={w} />}
       <StoriesBlock data={data} isLoading={isLoading} isError={isError} />
     </div>
   );
