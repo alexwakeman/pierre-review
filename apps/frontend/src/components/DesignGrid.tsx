@@ -72,6 +72,8 @@ export function DesignGrid({
     for (const a of arrows) if (a.label != null) m.set(a.key, m.size + 1);
     return m;
   }, [arrows]);
+  // What each arrow means, for its popover (hover the line or the number; click the number to pin).
+  const arrowDetails = useMemo(() => new Map(arrows.map((a) => [a.key, { label: a.label, text: a.text }])), [arrows]);
   const keyItems = useMemo(
     () => arrows.flatMap((a) => (a.label != null && labelNumbers.has(a.key) ? [{ n: labelNumbers.get(a.key)!, label: a.label }] : [])),
     [arrows, labelNumbers],
@@ -97,7 +99,7 @@ export function DesignGrid({
             : `minmax(3.25rem, 6.5rem) repeat(${nActs}, minmax(0, 1fr))`,
         }}
       >
-        <ArrowLayer paths={paths} numbers={labelNumbers} />
+        <ArrowLayer paths={paths} numbers={labelNumbers} details={arrowDetails} />
 
         {/* Header row: the stages. */}
         {!narrow && <div aria-hidden />}

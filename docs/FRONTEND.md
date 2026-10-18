@@ -4424,7 +4424,14 @@ test/designGrid.test.ts).
   (leaving off-centre, so it never shares a straight arrow's line). Re-measured by a ResizeObserver.
   A labelled arrow carries a NUMBER on its longest run, keyed in one line under the grid (a 20-40px
   gap is too narrow for words, and a label there covered card text). `aria-hidden`; the same
-  hand-offs are an sr-only list. Cards read row by row. ⚠ The router hook (`useRoutedArrows`), the arrow
+  hand-offs are an sr-only list. Cards read row by row.
+- **Arrow popovers** (`ArrowLayer` / `ArrowMarker` in `components/LaneBoard.tsx`, shared by the design
+  grid and This Sprint's boards): hovering an arrow's LINE (a 12px invisible hit stroke) or its NUMBER,
+  or focusing the number, shows what the arrow means beside the number (floating-ui, `safePolygon`, so
+  the pointer can move onto it). CLICKING the number PINS it (`aria-expanded`) — an outside click leaves
+  it; clicking the number again or Escape hides it, and the marker stays QUIET until the pointer leaves
+  or focus moves, or the still-hovered number would reopen it at once. One pinned at a time
+  (`claimActivePopover`). The numbers are buttons in the tab order, named "Dependency n: <words>". ⚠ The router hook (`useRoutedArrows`), the arrow
   layer with its numbered markers (`ArrowLayer`), the key (`ArrowKey`) and the sr-only list (`ArrowList`)
   live in `components/LaneBoard.tsx` and are SHARED with This Sprint's lane board (§ Activity → This
   Sprint), so the two draw one way; change them for both.

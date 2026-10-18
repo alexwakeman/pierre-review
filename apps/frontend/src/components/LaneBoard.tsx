@@ -10,9 +10,26 @@
 //            the columns' minimum widths the board scrolls inside its own box, never the page.
 //   ARROWS   routed by lib/designGrid.ts `routeArrow` through the padding round each card and the grid's
 //            gaps, re-measured by a ResizeObserver. A critical arrow is drawn in the accent. A labelled
-//            arrow carries a number, keyed below the board. Purely visual (aria-hidden): the same arrows
-//            are an sr-only list.
-import { Fragment, useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+//            arrow carries a number, keyed below the board. HOVERING an arrow's line or its number (or
+//            focusing the number) shows what the arrow means in a popover beside the number; CLICKING
+//            the number pins it there until the number is clicked again (or Escape). The numbers are
+//            buttons in the tab order. The same arrows are also an sr-only list.
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  autoUpdate,
+  flip,
+  FloatingPortal,
+  offset,
+  safePolygon,
+  shift,
+  useDismiss,
+  useFloating,
+  useFocus,
+  useHover,
+  useInteractions,
+  useRole,
+} from '@floating-ui/react';
+import { claimActivePopover } from '../lib/activePopover.js';
 import { routeArrow, type ArrowGeometry, type PlacedCard } from '../lib/designGrid.js';
 import type { BoardLayout } from '../lib/laneBoard.js';
 import { ChevronIcon } from './Icons.js';
@@ -121,21 +138,54 @@ export function useRoutedArrows(
 const NUMBER_CLASS =
   'flex h-4 min-w-4 items-center justify-center rounded-full border border-gray-400 px-0.5 text-[11px] font-semibold leading-none dark:border-gray-500';
 
+/** What an arrow means, for its popover: the keyed words and the full sentence. */
+export interface ArrowDetail {
+  label: string | null;
+  text: string;
+}
+
 /** The arrows under the cards, and the numbered markers on top of the labelled ones. Inside the grid. */
 export function ArrowLayer({
   paths,
   numbers,
   critical,
+  details,
 }: {
   paths: readonly RoutedPath[];
   /** Arrow key → its number, for the labelled arrows. */
   numbers: ReadonlyMap<string, number>;
   /** Arrow keys drawn in the accent. */
   critical?: ReadonlySet<string>;
+  /** Arrow key → what it means. An arrow with no entry shows no popover. */
+  details?: ReadonlyMap<string, ArrowDetail>;
 }): JSX.Element {
   const id = useId().replace(/:/g, '');
   const plain = `${id}-a`;
   const accent = `${id}-c`;
+  // The arrow whose LINE the pointer is over (its popover shows at its marker while it stays there).
+  const [lineHover, setLineHover] = useState<string | null>(null);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
+  const onShown = useCallback((key: string, open: boolean) => {
+    setShown((prev) => {
+      if (prev.has(key) === open) return prev;
+      const next = new Set(prev);
+      if (open) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
+  useEffect(() => () => {
+    if (leaveTimer.current != null) clearTimeout(leaveTimer.current);
+  }, []);
+  const enterLine = (key: string): void => {
+    if (leaveTimer.current != null) clearTimeout(leaveTimer.current);
+    setLineHover(key);
+  };
+  const leaveLine = (): void => {
+    if (leaveTimer.current != null) clearTimeout(leaveTimer.current);
+    leaveTimer.current = setTimeout(() => setLineHover(null), 150);
+  };
   return (
     <>
       <svg aria-hidden className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible text-gray-500 dark:text-gray-400">
@@ -159,36 +209,183 @@ export function ArrowLayer({
         </defs>
         {paths.map((p) => {
           const on = critical?.has(p.key) === true;
+          const lit = shown.has(p.key) || lineHover === p.key;
           return (
-            <path
-              key={p.key}
-              d={p.d}
-              fill="none"
-              stroke="currentColor"
-              className={on ? 'text-ai-signal-fill' : undefined}
-              strokeWidth={on ? 2.25 : 1.75}
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              markerEnd={`url(#${on ? accent : plain})`}
-            />
+            <g key={p.key}>
+              <path
+                d={p.d}
+                fill="none"
+                stroke="currentColor"
+                className={on ? 'text-ai-signal-fill' : lit ? 'text-gray-800 dark:text-gray-100' : undefined}
+                strokeWidth={(on ? 2.25 : 1.75) + (lit ? 1 : 0)}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                markerEnd={`url(#${on ? accent : plain})`}
+              />
+              {details?.has(p.key) === true && (
+                // A wide invisible stroke: the line's hover target (a 1.75px line is too thin to hit).
+                <path
+                  d={p.d}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={12}
+                  style={{ pointerEvents: 'stroke' }}
+                  onMouseEnter={() => enterLine(p.key)}
+                  onMouseLeave={leaveLine}
+                />
+              )}
+            </g>
           );
         })}
       </svg>
       {/* A labelled arrow carries a small NUMBER on top of the line, keyed below: a gap between two
-          cards is ~20px, too narrow for words, and a label there covered card text. */}
+          cards is ~20px, too narrow for words, and a label there covered card text. An arrow with a
+          detail but no number still gets an invisible anchor, so hovering its line shows the popover. */}
       {paths.map((p) => {
-        const n = numbers.get(p.key);
-        return n == null ? null : (
-          <span
+        const n = numbers.get(p.key) ?? null;
+        const detail = details?.get(p.key);
+        if (detail == null) {
+          return n == null ? null : (
+            <span
+              key={`l:${p.key}`}
+              aria-hidden
+              className={`pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2 bg-white text-gray-800 dark:bg-gray-950 dark:text-gray-100 ${NUMBER_CLASS}`}
+              style={{ left: p.lx, top: p.ly }}
+            >
+              {n}
+            </span>
+          );
+        }
+        return (
+          <ArrowMarker
             key={`l:${p.key}`}
-            aria-hidden
-            className={`pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2 bg-white text-gray-800 dark:bg-gray-950 dark:text-gray-100 ${NUMBER_CLASS}`}
-            style={{ left: p.lx, top: p.ly }}
-          >
-            {n}
-          </span>
+            n={n}
+            x={p.lx}
+            y={p.ly}
+            detail={detail}
+            lineHovered={lineHover === p.key}
+            onShown={(open) => onShown(p.key, open)}
+          />
         );
       })}
+    </>
+  );
+}
+
+/**
+ * One arrow's number and its popover. Hover or focus shows it while the pointer or focus stays (moving
+ * onto the popover keeps it open); a click PINS it beside the number until the number is clicked again
+ * or Escape is pressed; an outside click leaves a pinned popover where it is. One pinned at a time.
+ */
+function ArrowMarker({
+  n,
+  x,
+  y,
+  detail,
+  lineHovered,
+  onShown,
+}: {
+  n: number | null;
+  x: number;
+  y: number;
+  detail: ArrowDetail;
+  lineHovered: boolean;
+  onShown: (open: boolean) => void;
+}): JSX.Element {
+  const [pinned, setPinned] = useState(false);
+  const [transient, setTransient] = useState(false);
+  // After a click HIDES the popover, the pointer is still on the number and it still has focus — both
+  // would reopen it at once. Stay quiet until the pointer leaves or focus moves on.
+  const [quiet, setQuiet] = useState(false);
+  const open = pinned || (!quiet && (transient || lineHovered));
+  const popId = useId();
+  const { refs, floatingStyles, context } = useFloating({
+    open,
+    onOpenChange: (next, _e, reason) => {
+      if (reason === 'escape-key') {
+        setPinned(false);
+        setTransient(false);
+        return;
+      }
+      if (next && quiet) return;
+      setTransient(next);
+    },
+    placement: 'right',
+    strategy: 'fixed',
+    middleware: [offset(8), flip({ fallbackPlacements: ['left', 'top', 'bottom'] }), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
+  const hover = useHover(context, { delay: { open: 60, close: 120 }, handleClose: safePolygon() });
+  const focus = useFocus(context);
+  const dismiss = useDismiss(context, { outsidePress: false });
+  const role = useRole(context, { role: 'tooltip' });
+  const { getReferenceProps, getFloatingProps } = useInteractions([hover, focus, dismiss, role]);
+  useEffect(() => {
+    if (!pinned) return;
+    return claimActivePopover(() => setPinned(false));
+  }, [pinned]);
+  useEffect(() => onShown(open), [open, onShown]);
+
+  const name = n != null ? `Dependency ${n}${detail.label != null ? `: ${detail.label}` : ''}` : detail.label ?? 'Dependency';
+  return (
+    <>
+      {n != null ? (
+        <button
+          ref={refs.setReference}
+          type="button"
+          {...getReferenceProps({
+            onClick: () => {
+              // Clicking a pinned number hides it, even while the pointer is still on it.
+              if (pinned) {
+                setTransient(false);
+                setQuiet(true);
+              } else setQuiet(false);
+              setPinned(!pinned);
+            },
+            onMouseLeave: () => setQuiet(false),
+            onBlur: () => setQuiet(false),
+          })}
+          aria-label={name}
+          aria-expanded={pinned}
+          aria-describedby={open ? popId : undefined}
+          className={`absolute z-20 -translate-x-1/2 -translate-y-1/2 cursor-pointer bg-white text-gray-800 hover:border-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:bg-gray-950 dark:text-gray-100 dark:hover:border-gray-300 ${NUMBER_CLASS} ${
+            pinned ? 'border-gray-800 dark:border-gray-100' : ''
+          }`}
+          style={{ left: x, top: y }}
+        >
+          {n}
+        </button>
+      ) : (
+        // No number: an invisible anchor at the arrow's label point, so the line's hover has a place to show.
+        <span ref={refs.setReference} aria-hidden className="pointer-events-none absolute h-0 w-0" style={{ left: x, top: y }} />
+      )}
+      {open && (
+        <FloatingPortal>
+          <div
+            ref={refs.setFloating}
+            id={popId}
+            style={floatingStyles}
+            {...getFloatingProps()}
+            className="z-[60] max-w-[min(20rem,90vw)] rounded-md border border-gray-200 bg-white px-2.5 py-2 text-[12px] leading-snug text-gray-800 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          >
+            {/* The sentence usually ends with the keyed words; a heading repeating them says it twice. */}
+            {detail.label != null && !detail.text.includes(detail.label) ? (
+              <>
+                <p className="flex items-center gap-1.5 font-semibold">
+                  {n != null && <span className={NUMBER_CLASS}>{n}</span>}
+                  {detail.label}
+                </p>
+                <p className="mt-1 text-gray-700 dark:text-gray-300">{detail.text}</p>
+              </>
+            ) : (
+              <p className="flex items-start gap-1.5">
+                {n != null && <span className={`mt-px shrink-0 ${NUMBER_CLASS}`}>{n}</span>}
+                <span>{detail.text}</span>
+              </p>
+            )}
+          </div>
+        </FloatingPortal>
+      )}
     </>
   );
 }
@@ -251,6 +448,7 @@ export function LaneBoard<L, C>({
   }, [layout.columns, layout.lanes]);
   const { gridRef, cardRef, slotRef, paths, narrow } = useRoutedArrows(cells, arrows, NARROW_PX, occupied);
   const numbers = useMemo(() => new Map(arrows.filter((a) => a.n != null).map((a) => [a.key, a.n!])), [arrows]);
+  const details = useMemo(() => new Map(arrows.map((a) => [a.key, { label: a.label, text: a.text }])), [arrows]);
   const critical = useMemo(() => new Set(arrows.filter((a) => a.critical).map((a) => a.key)), [arrows]);
   const col0 = narrow ? 1 : 2;
   // Grid rows (1-based; row 1 is the header). Narrow: each lane gets a band row above its cards.
@@ -279,7 +477,7 @@ export function LaneBoard<L, C>({
             />
           ))}
 
-          <ArrowLayer paths={paths} numbers={numbers} critical={critical} />
+          <ArrowLayer paths={paths} numbers={numbers} critical={critical} details={details} />
 
           {/* Header row: the columns. */}
           {!narrow && <div aria-hidden style={{ gridRow: 1, gridColumn: 1 }} />}
