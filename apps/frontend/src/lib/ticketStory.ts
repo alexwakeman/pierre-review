@@ -109,7 +109,7 @@ export function storyUrlOf(
 
 // ── THE STORY SECTION (Activity/TicketStorySection.tsx): which summary leads it ─────────────────────
 //
-// ONE fold for both mounts (the Open PRs ticket stack, collapsed; the story view, open):
+// ONE fold for its one mount (the story view, always open; the Open PRs board draws no Story section):
 //   1. the TICKET REVIEW's result when one exists (per-criterion delivery across every PR);
 //   2. else the sprint BRIEF's summary + numbered criteria when it is CURRENT;
 //   3. else "Reading this ticket…" while the brief pass will still read it ('pending');

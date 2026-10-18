@@ -10,11 +10,11 @@
 //   - a currency pill the SERVER computed ("Checked against 3 PRs", "web#412 pushed since"), and
 //     how long ago the shown run finished ("reviewed 2 hours ago");
 //   - criteria with status and attribution; one Post per unmet item, on the PR it belongs to;
-//   - SLIM where an Open PRs ticket stack holds the whole story (`slimStoryCheck`: a tracker ticket,
+//   - SLIM where the story view holds the whole story (`slimStoryCheck`: a tracker ticket,
 //     tracker on, an open PR on it): only THIS PR's share (`prTicketShare`, lib/ticketShare.ts) —
 //     what it delivers, what belongs in it, each with its Post — "What this PR adds" (its contribution
 //     card at its current head, when it has one), a count of the rest, and "See the
-//     whole story in Open PRs" (`showStoryInOpenPrs`). A pasted (`manual:`) story keeps the full
+//     whole story", which opens the ticket's STORY VIEW tab (`useOpenStory`). A pasted (`manual:`) story keeps the full
 //     view: no stack exists for it. The result pieces are shared with the stack
 //     (TicketReviewParts.tsx);
 //   - a collapsible "Story" per block (TicketStory.tsx): the ticket as markdown, read on open;
@@ -73,7 +73,7 @@ import {
 } from '../lib/ticketReview.js';
 import { prCardOf, prTicketShare, shareDocReferences, shareRestLine, slimStoryCheck } from '../lib/ticketShare.js';
 import { jiraRefFor, storyUrlOf } from '../lib/ticketStory.js';
-import { showStoryInOpenPrs } from '../store/stackStoryCheck.js';
+import { useOpenStory } from '../lib/ticketTab.js';
 import { AiRunGate } from './AiSetup.js';
 import { ClaudeReviewTicketPanel, ClaudeReviewTicketResults, storyLabel } from './ClaudeReviewFollowUp.js';
 import { TicketPasteBox } from './TicketPasteBox.js';
@@ -109,18 +109,22 @@ const storyDrafts = createTicketDraftStore<TicketDraft[]>();
 /**
  * THIS PR's share of a ticket review (the slim block): the criteria it delivers, the unmet
  * criteria and missing items that belong in it (each with its Post), what it does that was not
- * asked for, a count of the rest, and the jump to the whole story in Open PRs.
+ * asked for, a count of the rest, and the link that opens the whole story (the story view tab).
  */
 function TicketShare({
   review,
   pr,
+  ident,
   ticketKey,
+  ticketTitle,
   changedPaths,
   onOpenInChanges,
 }: {
   review: TicketReview;
   pr: PrDetail;
+  ident: string;
   ticketKey: string;
+  ticketTitle: string | null;
   changedPaths: ReadonlySet<string>;
   onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
@@ -131,6 +135,7 @@ function TicketShare({
   );
   const byRef = useMemo(() => itemsByRef(review.items), [review.items]);
   const card = prCardOf(review.members, pr.id);
+  const openStory = useOpenStory();
   if (share == null) return <p className={`text-xs ${MUTED}`}>No result stored.</p>;
   const ctx = { review, viewedPrId: pr.id, changedPaths, onOpenInChanges };
   const rest = shareRestLine(share);
@@ -153,10 +158,10 @@ function TicketShare({
         {rest != null && <>{rest} </>}
         <button
           type="button"
-          onClick={() => showStoryInOpenPrs(ticketKey)}
+          onClick={() => openStory({ ident, key: ticketKey, title: ticketTitle })}
           className="text-blue-600 hover:underline dark:text-blue-400"
         >
-          See the whole story in Open PRs
+          See the whole story
         </button>
       </p>
     </div>
@@ -204,7 +209,7 @@ function TicketBlock({
   const snapshot = shown?.ticket ?? review?.ticket ?? null;
   const jiraRef = jiraRefFor(pr.tickets, entry.ticketKey);
   const url = storyUrlOf(jiraRef, [snapshot]);
-  // Where the Open PRs stack holds the whole story, the pane shows only THIS PR's share of it.
+  // Where the story view holds the whole story, the pane shows only THIS PR's share of it.
   // `pr.tickets` is null exactly when the PR's workspace has no tracker (core, free since
   // apiVersion 23) — the same fact the Open PRs stacks need, with no extra request.
   const slim = slimStoryCheck({
@@ -274,7 +279,9 @@ function TicketBlock({
           <TicketShare
             review={shown}
             pr={pr}
+            ident={ident}
             ticketKey={entry.ticketKey}
+            ticketTitle={title}
             changedPaths={changedPaths}
             onOpenInChanges={onOpenInChanges}
           />

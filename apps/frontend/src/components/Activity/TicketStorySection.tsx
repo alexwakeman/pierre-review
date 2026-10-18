@@ -1,9 +1,12 @@
-// THE STORY SECTION — one ticket's story, in ONE component for both of its mounts (docs/FRONTEND.md §
-// The story view):
+// THE STORY SECTION — one ticket's story, in the STORY VIEW only (the ticket tab, Ticket/TicketTabView.tsx,
+// through OpenPrsCards' `TicketStack` with `single`; docs/FRONTEND.md § The story view). The Open PRs
+// board does NOT render it: a reader opens the ticket (its key and title are one button) to see the
+// story. Here it is ALWAYS OPEN — a plain "Story" heading, no disclosure.
 //
-//   • the Open PRs ticket stack (OpenPrsCards' `TicketStack`), COLLAPSED by default (open state per
-//     session, store/stackStoryCheck.ts — the PR pane's "See the whole story in Open PRs" opens it);
-//   • the story view (the ticket tab, Ticket/TicketTabView.tsx), OPEN by default.
+// THE HEADING ROW carries the STORY'S ACTIONS, right-aligned: the docs check ("Check against docs" /
+// "Check again", StoryDocsAlignment.tsx `StoryDocsButton`) and the story design ("Draw" / "Redraw",
+// StoryDesignSection.tsx `StoryDesignButton`). The section owns ONE start mutation for each, handed to
+// both the button and its block, so a refusal or error from a heading click shows in that block.
 //
 // In order, and nothing else (no dependency or reference cards, ever):
 //   1. CLAUDE'S SUMMARY AND CRITERIA (`storySummaryOf`, lib/ticketStory.ts): the ticket review's result
@@ -14,14 +17,14 @@
 //      through any PR on the ticket, else the ticket review's snapshot, else the sprint read's text.
 //   3. THE STORY'S DESIGN (StoryDesignSection.tsx) — only where agentic AI runs and the ticket has a PR.
 //
-// Between 1 and 2, where agentic AI runs: the DOCS CHECK (StoryDocsAlignment.tsx) — a click checks the
-// story against the workspace's reference docs. Its per-criterion notes sit UNDER the criteria rows of
-// 1 (both lists, through `docsItems`) only when the run was written against that same list
-// (`criteriaMatch`, lib/storyDocsAlignment.ts); otherwise the docs block draws its own numbered list.
+// Between 1 and 2, where agentic AI runs: the DOCS CHECK block (StoryDocsAlignment.tsx). Its
+// per-criterion notes sit UNDER the criteria rows of 1 (both lists, through `docsItems`) only when the
+// run was written against that same list (`criteriaMatch`, lib/storyDocsAlignment.ts); otherwise the
+// docs block draws its own numbered list.
 //
-// ⚠ NOTHING FETCHES ON MOUNT. The body (and every read in it) is mounted only while the section is open,
-// so a board of stacks makes no request per stack. The brief read (`GET /api/ticket-story`) runs only
-// when there is no ticket review to show.
+// ⚠ NOTHING HERE MAY MOUNT ON A BOARD. Every read (brief, review, docs, design) starts on mount, which
+// is fine in one story tab and would be one request per stack on Open PRs. The brief read
+// (`GET /api/ticket-story`) runs only when there is no ticket review to show.
 import { useId, useMemo, useState, type ReactNode } from 'react';
 import {
   TRACKER_PROVIDER_LABEL,
@@ -42,13 +45,12 @@ import { memberLabel, ticketCurrency } from '../../lib/ticketReview.js';
 import { reviewTexts, type KnownPr } from '../../lib/reviewPrRefs.js';
 import { storyDesignOffered, storyFallbackTicket, storySummaryOf } from '../../lib/ticketStory.js';
 import { useFilters } from '../../store/filters.js';
-import { ChevronIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { ReviewPrRefsProvider } from '../ReviewPrRefs.js';
 import { CurrencyPill, MemberCards, TicketResults } from '../TicketReviewParts.js';
 import { StoryDisclosure } from '../TicketStory.js';
-import { StoryDesignSection } from './StoryDesignSection.js';
-import { StoryDocsAlignmentBlock, StoryDocsCriterionDetail } from './StoryDocsAlignment.js';
+import { StoryDesignButton, StoryDesignSection, useStoryDesign, type StoryDesign } from './StoryDesignSection.js';
+import { StoryDocsAlignmentBlock, StoryDocsButton, StoryDocsCriterionDetail } from './StoryDocsAlignment.js';
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 /** Criteria listed before "Show all" (real stories itemise up to ~35). */
@@ -60,8 +62,6 @@ export function TicketStorySection({
   state,
   storyPrId,
   prCount,
-  open,
-  onToggle,
 }: {
   /** The ticket; only one with an `ident` has a story section. */
   ticket: CardTicket & { ident: string };
@@ -71,31 +71,32 @@ export function TicketStorySection({
   storyPrId: number | null;
   /** Open + merged PRs on the ticket (the design needs one). */
   prCount: number;
-  open: boolean;
-  onToggle: () => void;
 }): JSX.Element {
-  const bodyId = useId();
+  const ai = useAiCapabilities();
+  const workspaceId = useFilters((s) => s.workspaceId);
+  // THE DOCS CHECK and THE DESIGN: one read + one start mutation each, shared by the heading's
+  // buttons and the blocks below.
+  const docsQ = useStoryDocsAlignment(workspaceId, ticket.ident);
+  const docsStart = useStartStoryDocsAlignment(workspaceId, ticket.ident);
+  const docsStarting = useStoryDocsStarting(workspaceId, ticket.ident);
+  const docs: DocsCheck | null = ai.enabled ? { q: docsQ, start: docsStart, starting: docsStarting } : null;
+  const design = useStoryDesign(ticket.ident, storyDesignOffered(ai.enabled, prCount));
+  const headingId = useId();
   return (
-    <div className="px-3 pb-2" data-testid="story-section">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={bodyId}
-        onClick={onToggle}
-        className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-xs font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-50"
-      >
-        <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
-        Story
-      </button>
-      {open && (
-        <div
-          id={bodyId}
-          className="mt-1.5 space-y-3 rounded-md border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-950"
-        >
-          <StoryBody ticket={ticket} state={state} storyPrId={storyPrId} prCount={prCount} />
-        </div>
-      )}
-    </div>
+    <section aria-labelledby={headingId} className="px-3 pb-2" data-testid="story-section">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 py-0.5">
+        <h4 id={headingId} className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+          Story
+        </h4>
+        <span className="ml-auto flex flex-wrap items-center gap-1.5" data-testid="story-actions">
+          {docs != null && <StoryDocsButton q={docs.q} start={docs.start} starting={docs.starting} />}
+          <StoryDesignButton design={design} />
+        </span>
+      </div>
+      <div className="mt-1.5 space-y-3 rounded-md border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-950">
+        <StoryBody ticket={ticket} state={state} storyPrId={storyPrId} docs={docs} design={design} />
+      </div>
+    </section>
   );
 }
 
@@ -103,14 +104,15 @@ function StoryBody({
   ticket,
   state,
   storyPrId,
-  prCount,
+  docs,
+  design,
 }: {
   ticket: CardTicket & { ident: string };
   state: TicketReviewState | undefined;
   storyPrId: number | null;
-  prCount: number;
+  docs: DocsCheck | null;
+  design: StoryDesign;
 }): JSX.Element {
-  const ai = useAiCapabilities();
   const workspaceId = useFilters((s) => s.workspaceId);
   const reviewed = state?.latestRunId != null;
   // The brief (and the sprint read's text) only when there is no ticket review to lead with.
@@ -122,12 +124,8 @@ function StoryBody({
   );
   const tracker = TRACKER_PROVIDER_LABEL[ticket.provider ?? 'jira'];
   const fallback = useMemo(() => storyFallbackTicket(storyQ.data, ticket.key, ticket.url), [storyQ.data, ticket.key, ticket.url]);
-  // THE DOCS CHECK. Read only here, in the open body. The review's criteria are known only inside
-  // ReviewSummary (its own read), so each summary folds `useDocsNotes` against the list it renders.
-  const docsQ = useStoryDocsAlignment(workspaceId, ticket.ident);
-  const docsStart = useStartStoryDocsAlignment(workspaceId, ticket.ident);
-  const docsStarting = useStoryDocsStarting(workspaceId, ticket.ident);
-  const docs: DocsCheck | null = ai.enabled ? { q: docsQ, start: docsStart, starting: docsStarting } : null;
+  // The review's criteria are known only inside ReviewSummary (its own read), so each summary folds
+  // `useDocsNotes` against the list it renders.
   const brief = summary.kind === 'brief' ? summary.brief : null;
   const briefCriteria = useMemo<StoryDocsCriterion[] | null>(
     () => brief?.criteria.map((c) => ({ n: c.n, text: c.text })) ?? null,
@@ -152,12 +150,13 @@ function StoryBody({
           />
         </>
       )}
-      {storyDesignOffered(ai.enabled, prCount) && <StoryDesignSection key={ticket.ident} ident={ticket.ident} />}
+      <StoryDesignSection design={design} />
     </>
   );
 }
 
-/** The docs check's server state, read once per open body and handed to whichever summary leads. */
+/** The docs check's server state, read once per Story section and handed to the heading's button and
+ *  whichever summary leads. */
 interface DocsCheck {
   q: ReturnType<typeof useStoryDocsAlignment>;
   start: ReturnType<typeof useStartStoryDocsAlignment>;

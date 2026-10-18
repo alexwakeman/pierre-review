@@ -13,8 +13,8 @@ import { usePinnedTabs } from '../store/pinnedTabs.js';
 // tracker key printed on the chip; `title` may be null. Opening from Activity arms the Back entry
 // exactly like a PR tab (`fromActivity: true`). The view is FREE core.
 //
-// ⚠ The Story section opens EXPANDED because the view mounts it so (it is collapsed only in Open PRs),
-// not because of anything stored: re-opening a story tab always shows the section open. The internal
+// ⚠ The Story section is ALWAYS OPEN, and only here: the Open PRs board does not draw it (its ticket
+// key + title open this view instead). The internal
 // TabKind stays 'ticket' and the key/URL `ticket:<ident>`, so old links still land here.
 export interface OpenStoryArgs {
   ident: string;

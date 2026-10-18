@@ -10,10 +10,10 @@ import { useAiCapabilities } from './useAiCapabilities.js';
 // CHECK A STORY AGAINST THE DOCS — server state (docs/API.md § Check a story against the docs; CORE,
 // free, LOCAL ONLY). Gated on `me.ai.enabled`: the routes are absent in the cloud.
 //
-// ⚠ NOTHING FETCHES ON A BOARD'S MOUNT: the only caller is the Story section's BODY, which is mounted
-// only while the section is open. The GET reads the stored run (no model, no tracker call) and polls
+// ⚠ NOTHING FETCHES ON A BOARD'S MOUNT: the only caller is the Story section, which only the story view
+// mounts (never the Open PRs board). The GET reads the stored run (no model, no tracker call) and polls
 // only while the newest run is queued, choosing sections or reading. ONE mutation key per (workspace,
-// ticket), so the Open PRs stack and the story tab show the same "Checking…" while a click is in flight.
+// ticket), so every story tab of the ticket shows the same "Checking…" while a click is in flight.
 
 const POLL_MS = 4000;
 

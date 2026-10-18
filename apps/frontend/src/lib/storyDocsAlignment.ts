@@ -3,7 +3,7 @@
 //
 //   shownRun             the run whose result is drawn: the newest when it SUCCEEDED, else the last good
 //                        one, so a re-run in flight (or a failed one) never hides a result
-//   docsButtonLabel      "Check against docs" / "Checking…" / "Check again"
+//   docsButtonLabel      "Check against docs" / "Checking…" / "Check docs again"
 //   docsProgressText     the words while a run is in flight (status-derived, no counts)
 //   clickMessageStale    is this mount's refusal / error older than the newest run? (then hide it)
 //   criteriaMatch        may the run's per-criterion notes sit UNDER the criteria the section shows now?
@@ -37,7 +37,7 @@ export function docsChecking(resp: Pick<StoryDocsAlignmentResponse, 'run'> | nul
 
 export function docsButtonLabel(resp: Pick<StoryDocsAlignmentResponse, 'run' | 'lastSucceeded'> | null | undefined, pending: boolean): string {
   if (docsChecking(resp, pending)) return 'Checking…';
-  return shownRun(resp) != null ? 'Check again' : 'Check against docs';
+  return shownRun(resp) != null ? 'Check docs again' : 'Check against docs';
 }
 
 const PROGRESS: Partial<Record<StoryDocsAlignmentStatus, string>> = {

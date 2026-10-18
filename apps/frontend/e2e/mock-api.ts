@@ -1095,7 +1095,7 @@ export async function installMockApi(page: Page): Promise<void> {
           latest: null,
         } satisfies TicketSequenceDiagramResponse);
       }
-      // The Story section's docs check (asked only from an OPEN Story section, and only with AI on).
+      // The Story section's docs check (asked only from the story view's Story section).
       if (path.endsWith('/api/docs/story-alignment') && route.request().method() === 'GET') {
         return json(route, {
           workspaceId: WORKSPACE.id,

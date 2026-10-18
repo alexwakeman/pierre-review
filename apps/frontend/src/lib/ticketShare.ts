@@ -1,10 +1,10 @@
 // ONE PR'S SHARE OF A TICKET REVIEW — the pure half of the PR pane's slim Story check
-// (TicketCoverage.tsx) and of the "See the whole story in Open PRs" jump (the Open PRs ticket
-// stack's Story check panel, Activity/TicketStorySection.tsx).
+// (TicketCoverage.tsx), whose "See the whole story" opens the ticket's STORY VIEW tab
+// (Activity/TicketStorySection.tsx holds the whole story there).
 //
 // A ticket review judges the ticket across EVERY PR that names it. The PR pane shows only the part
 // that is this PR's: the criteria it delivers, and the unmet criteria / missing items that belong in
-// it — each with its Post button. The whole story lives once, in the Open PRs stack.
+// it — each with its Post button. The whole story lives once, in the story view.
 //
 // Ownership of an unmet item, in order: the item's `ownerPrId`, else the criterion's
 // `expectedIn.prId`, else `expectedIn.repoId` against this PR's repo. An item that names NO owner is
@@ -19,7 +19,6 @@ import type {
   TicketReviewItem,
   TicketReviewMember,
 } from '@pierre-review/shared';
-import { stackIdFor } from './openPrsStacks.js';
 
 export interface PrTicketShare {
   /** Criteria this PR delivers, or unmet ones that belong in it — in Claude's order. */
@@ -123,10 +122,9 @@ export function shareRestLine(share: Pick<PrTicketShare, 'metElsewhere' | 'todoE
 }
 
 /**
- * Does the PR pane show the SLIM block (this PR's share + a link to Open PRs)? Only where the Open
- * PRs stack exists to hold the whole story: a tracker ticket (never a pasted `manual:` story), the
- * tracker on for the PR's workspace (`PrDetail.tickets != null`; stacks need one), a key to find the
- * stack by, and an open PR on it.
+ * Does the PR pane show the SLIM block (this PR's share + a link to the story view)? Only where the
+ * story view holds the whole story: a tracker ticket (never a pasted `manual:` story), the tracker on
+ * for the PR's workspace (`PrDetail.tickets != null`), a key to name the tab by, and an open PR on it.
  */
 export function slimStoryCheck(o: {
   ident: string;
@@ -138,36 +136,4 @@ export function slimStoryCheck(o: {
   if (!o.trackerOn || o.ident.startsWith('manual:')) return false;
   if (o.ticketKey == null || o.ticketKey.trim() === '') return false;
   return o.prOpen || o.members.some((m) => m.state === 'open');
-}
-
-// ---- the jump to Open PRs ----
-
-/** A request to scroll to a ticket's stack and open its Story check panel. */
-export interface StoryTarget {
-  stackId: string;
-  /** When it was asked for (ms). An answer that never comes must not jump on a later visit. */
-  at: number;
-}
-
-/** A target older than this is dropped unanswered (the stack is in another Workspace, say). */
-export const STORY_TARGET_TTL_MS = 30_000;
-
-/** The stack id a ticket key lands on — the same fold `stackOpenPrs` uses (`ticket:<KEY>`). */
-export function storyTargetFor(ticketKey: string, now: number): StoryTarget {
-  return { stackId: stackIdFor(ticketKey.trim().toUpperCase()), at: now };
-}
-
-export function storyTargetExpired(target: StoryTarget, now: number): boolean {
-  return now - target.at > STORY_TARGET_TTL_MS;
-}
-
-/** The stack on the page the target names (case-insensitive), or null — not here yet, or expired. */
-export function resolveStoryTarget(
-  target: StoryTarget | null,
-  stackIds: readonly string[],
-  now: number,
-): string | null {
-  if (target == null || storyTargetExpired(target, now)) return null;
-  const want = target.stackId.toUpperCase();
-  return stackIds.find((id) => id.toUpperCase() === want) ?? null;
 }

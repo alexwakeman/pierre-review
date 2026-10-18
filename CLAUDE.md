@@ -1249,7 +1249,7 @@ filter control are DELETED — never bring a canvas back. "Ask Claude" (Haiku) i
 ⚠ No chips, findings, checks or write-back. ⚠ **A ticket opens the STORY VIEW** — the ticket tab (chip
 "KEY · Story", internal kind/key `ticket:<ident>` kept), ONLY through `useOpenStory()`: the SAME Open PRs
 ticket stack (`OpenPrsCards` `story`, never a copy), drawn even with no PR, its Story section OPEN. The
-Story section (`TicketStorySection`, collapsed in Open PRs, body mounted only when open) is: the ticket
+Story section (`TicketStorySection`, story view ONLY — never on the Open PRs board, whose stacks never collapse and whose ticket key + title open the story tab; always open, its heading carrying Draw/Redraw + Check against docs) is: the ticket
 review's result, else the CURRENT brief (`GET /api/ticket-story`, lean, DB only), then the ticket as
 written, then the design (`me.ai` + ≥ 1 PR) — NO dependency or reference cards. The drawer and "Check
 against code" are REMOVED (`sprint_assessments` / `sprint_ticket_repos` DORMANT, never dropped).

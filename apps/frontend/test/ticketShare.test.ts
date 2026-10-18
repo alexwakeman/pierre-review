@@ -3,9 +3,10 @@
 //   1. THE SPLIT: the criteria this PR delivers and the unmet work that belongs in it; the rest is
 //      counted, never listed. An item that names no owner stays postable (it is this PR's).
 //   2. THE COUNT LINE: plain words, singular/plural, null when nothing else exists.
-//   3. SLIM OR FULL: only where an Open PRs stack can hold the whole story.
-//   4. THE JUMP: a target resolves case-insensitively, once, and expires.
-//   5. WIRING: the stack's panel fetches only when expanded; no Post buttons there.
+//   3. SLIM OR FULL: only where the story view can hold the whole story.
+//   4. WIRING: the Story section is the story view's alone (the board never mounts it), always open,
+//      its heading carrying the two run buttons; no Post buttons there; "See the whole story" opens
+//      the story view tab.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/ticketShare.test.ts
 import { describe, expect, it } from 'vitest';
@@ -13,15 +14,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ReviewDocReference, TicketAssessment, TicketCriterion, TicketReviewItem } from '@pierre-review/shared';
 import {
-  STORY_TARGET_TTL_MS,
   prCardOf,
   prTicketShare,
-  resolveStoryTarget,
   shareDocReferences,
   shareRestLine,
   slimStoryCheck,
-  storyTargetExpired,
-  storyTargetFor,
 } from '../src/lib/ticketShare.js';
 
 const THIS = { id: 10, repoId: 1 };
@@ -161,46 +158,71 @@ describe('slimStoryCheck', () => {
   });
 });
 
-describe('the jump to Open PRs', () => {
-  it('lands on the stack id the stacks use, case-insensitively', () => {
-    const t = storyTargetFor(' bmd-7 ', 1000);
-    expect(t.stackId).toBe('ticket:BMD-7');
-    expect(resolveStoryTarget(t, ['ticket:BMD-6', 'ticket:bmd-7', 'none'], 1000)).toBe('ticket:bmd-7');
-    expect(resolveStoryTarget(t, ['ticket:BMD-6'], 1000)).toBeNull();
-    expect(resolveStoryTarget(null, ['ticket:BMD-7'], 1000)).toBeNull();
-  });
-  it('expires, so a later visit does not jump', () => {
-    const t = storyTargetFor('BMD-7', 0);
-    expect(storyTargetExpired(t, STORY_TARGET_TTL_MS)).toBe(false);
-    expect(storyTargetExpired(t, STORY_TARGET_TTL_MS + 1)).toBe(true);
-    expect(resolveStoryTarget(t, ['ticket:BMD-7'], STORY_TARGET_TTL_MS + 1)).toBeNull();
-  });
-});
-
 describe('the wiring', () => {
   const src = (p: string) => readFileSync(join(__dirname, '..', 'src', p), 'utf8');
 
-  it('the Story section reads the run only while expanded, by the states’ latestRunId', () => {
+  it('the Story section is always open and reads the run by the states’ latestRunId', () => {
     const panel = src('components/Activity/TicketStorySection.tsx');
-    expect(panel).toMatch(/\{open && \(/);
+    // No disclosure: a plain heading, no open/onToggle props.
+    expect(panel).not.toMatch(/onToggle|ChevronIcon|open: boolean/);
+    expect(panel).toMatch(/>\s*Story\s*<\/h4>/);
     expect(panel).toMatch(/<ReviewSummary runId=\{summary\.runId\}/);
     expect(panel.match(/useTicketReviewById\(/g)).toHaveLength(1);
     // The docs check's notes ride along (empty unless written against this same list).
     expect(panel).toMatch(/<TicketResults review=\{review\} viewedPrId=\{null\} docsItems=\{docsNotes\.items\} \/>/);
     // No Post anywhere in the stack, and no dependency or reference cards.
     expect(panel).not.toMatch(/usePostTicketItem|ItemPost|references|Other tickets/);
-    // The per-stack request never sits on the cards list itself.
+    // The per-stack request never sits on the cards list itself, and the board never mounts the
+    // section (every read in it starts on mount): only the story view's single stack does.
     const cards = src('components/Activity/OpenPrsCards.tsx');
     expect(cards).not.toMatch(/useTicketReviewById|useTicketReviews\(/);
-    expect(cards).toMatch(/<TicketStorySection\s/);
+    expect(cards).toMatch(/\{single && t\?\.ident != null && \(\s*<TicketStorySection\s/);
+    expect(cards.match(/<TicketStorySection\s/g)).toHaveLength(1);
   });
 
-  it('the pane shows only this PR’s share where a stack exists, and links to it', () => {
+  it('a board stack never collapses, and its key + title are ONE button to the story view', () => {
+    const cards = src('components/Activity/OpenPrsCards.tsx');
+    expect(cards).not.toMatch(/data-stack-toggle|toggleCollapsed|collapsed\.includes|hidden=\{collapsed\}/);
+    const header = cards.slice(cards.indexOf('function TicketStack('), cards.indexOf('function MergedPanel('));
+    expect(header).toMatch(
+      /!single && t\.ident != null \? \([\s\S]*?<TicketKeyButton[\s\S]*?\{t\.key\}[\s\S]*?\{t\.title\}[\s\S]*?<\/TicketKeyButton>/,
+    );
+    expect(header).not.toMatch(/onHeaderClick|cursor-pointer/);
+    const store = src('store/openPrsView.ts');
+    expect(store).not.toMatch(/collapsed|COLLAPSED_KEY/);
+  });
+
+  it('the Story heading carries both run buttons; the blocks share their mutations and carry none', () => {
+    const panel = src('components/Activity/TicketStorySection.tsx');
+    expect(panel).toMatch(/<StoryDocsButton q=\{docs\.q\} start=\{docs\.start\} starting=\{docs\.starting\} \/>/);
+    expect(panel).toMatch(/<StoryDesignButton design=\{design\} \/>/);
+    expect(panel).toMatch(/<StoryDesignSection design=\{design\} \/>/);
+    // ONE start mutation each, owned by the section.
+    expect(panel.match(/useStartStoryDocsAlignment\(/g)).toHaveLength(1);
+    expect(panel.match(/useStoryDesign\(/g)).toHaveLength(1);
+    const design = src('components/Activity/StoryDesignSection.tsx');
+    expect(design.match(/useRedrawStoryDiagram\(/g)).toHaveLength(1);
+    expect(design).toContain("'Redraw design'");
+    expect(design).toContain("'Draw design'");
+    expect(design).toMatch(/data\.memberCount < 2\) return null/);
+    // The block draws no button of its own.
+    const block = design.slice(design.indexOf('export function StoryDesignSection'));
+    expect(block).not.toMatch(/<button/);
+    const docs = src('components/Activity/StoryDocsAlignment.tsx');
+    const docsBlock = docs.slice(docs.indexOf('export function StoryDocsAlignmentBlock'), docs.indexOf('function StoryDocsResultView'));
+    expect(docsBlock).not.toMatch(/<button|AiRunGate/);
+    const docsBtn = docs.slice(docs.indexOf('export function StoryDocsButton'), docs.indexOf('export function StoryDocsAlignmentBlock'));
+    expect(docsBtn).toMatch(/!ai\.enabled \|\| data == null \|\| !data\.available\) return null/);
+    expect(docsBtn).toMatch(/<AiRunGate>/);
+  });
+
+  it('the pane shows only this PR’s share where the story view holds the story, and opens it', () => {
     const cov = src('components/TicketCoverage.tsx');
     expect(cov).toMatch(/slimStoryCheck\(\{/);
     expect(cov).toMatch(/prTicketShare\(a, review\.items, \{ id: pr\.id, repoId: pr\.repoId \}\)/);
-    expect(cov).toMatch(/onClick=\{\(\) => showStoryInOpenPrs\(ticketKey\)\}/);
-    expect(cov).toContain('See the whole story in Open PRs');
+    expect(cov).toMatch(/onClick=\{\(\) => openStory\(\{ ident, key: ticketKey, title: ticketTitle \}\)\}/);
+    expect(cov).toContain('See the whole story');
+    expect(cov).not.toContain('See the whole story in Open PRs');
   });
 
   it('"What this PR adds" rides the loaded review: the stack lists every card, the pane this PR’s', () => {

@@ -3,7 +3,9 @@
 // sections of the workspace's reference library that could matter, then Claude Sonnet reads only those
 // documents and says where the story matches them and where it does not.
 //
-//   StoryDocsAlignmentBlock   the heading, the ⓘ, the button, progress, failure, and the whole-story
+//   StoryDocsButton           "Check against docs" / "Check again" — one of the STORY'S ACTIONS, in the
+//                             Story section's heading row (TicketStorySection.tsx), not in the block
+//   StoryDocsAlignmentBlock   the heading, the ⓘ, progress, failure, refusal, and the whole-story
 //                             result: verdict, 2-3 sentences, actionable bullets, points on other parts
 //                             of the story, and — when the notes cannot sit under the section's own
 //                             criteria — the run's own numbered list
@@ -12,7 +14,8 @@
 //   StoryDocsRefLinks         every reference: the in-app library link (DocLink) and its quote beneath
 //
 // Every point was kept by the server only because its quote was found in the linked section, so the
-// lists are drawn as stored. All text is PLAIN TEXT. A verdict is a WORD and an icon, never a colour alone.
+// lists are drawn as stored. The button and the block share the section's ONE start mutation, so a
+// refusal or error from the heading click shows in the block. All text is PLAIN TEXT. A verdict is a WORD and an icon, never a colour alone.
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import {
   STORY_DOCS_ITEM_VERDICT_LABEL,
@@ -117,6 +120,29 @@ function StoryDocsInfo(): JSX.Element {
   );
 }
 
+/** The Story heading's docs action. Only where agentic AI runs and the workspace has docs to check
+ *  against (`available`), behind the one AiRunGate. */
+export function StoryDocsButton({
+  q,
+  start,
+  starting,
+}: {
+  q: UseQueryResult<StoryDocsAlignmentResponse>;
+  start: UseMutationResult<StartStoryDocsAlignmentResponse, Error, void>;
+  starting: boolean;
+}): JSX.Element | null {
+  const ai = useAiCapabilities();
+  const data = q.data;
+  if (!ai.enabled || data == null || !data.available) return null;
+  return (
+    <AiRunGate>
+      <button type="button" className={BTN} disabled={docsChecking(data, starting)} onClick={() => start.mutate()}>
+        {docsButtonLabel(data, starting)}
+      </button>
+    </AiRunGate>
+  );
+}
+
 export function StoryDocsAlignmentBlock({
   q,
   start,
@@ -151,15 +177,6 @@ export function StoryDocsAlignmentBlock({
           <span className={`${REVIEW_CHIP} ${OUTDATED_CLASS}`}>
             <WarningIcon size={11} aria-hidden />
             Out of date
-          </span>
-        )}
-        {data.available && (
-          <span className="ml-auto">
-            <AiRunGate>
-              <button type="button" className={BTN} disabled={checking} onClick={() => start.mutate()}>
-                {docsButtonLabel(data, starting)}
-              </button>
-            </AiRunGate>
           </span>
         )}
       </div>

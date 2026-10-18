@@ -319,17 +319,18 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   apiVersion 23); header toggle "Group by ticket / List", `OpenPrsViewToggle`, hidden without one). The page becomes
   one STACK per ticket — a `<section>` landmark with an `h3` header over its cards (which drop to
   `h4`). Membership and order are the pure `lib/openPrsStacks.ts` `stackOpenPrs` (pinned in
-  `test/openPrsStacks.test.ts`). **Header anatomy**: collapse chevron (the keyboard route —
-  `aria-expanded`/`aria-controls`; a click on the header's empty space toggles too) · ticket KEY
-  (mono, linked through `safeExternalUrl`) · ticket TITLE (`text-base`, the heaviest text on the
-  page) / next line: STATUS pill coloured by `statusCategory` (new grey, indeterminate blue, done
+  `test/openPrsStacks.test.ts`). ⚠ **A stack NEVER collapses** (2026-10-18): no chevron, no header
+  toggle — its PR list is always shown (only "Merged (n)" keeps its own disclosure). **Header
+  anatomy**: ticket KEY (mono) + ticket TITLE (`text-base`, the heaviest text on the page) as ONE
+  button that opens the ticket's STORY VIEW tab (`TicketKeyButton` → `useOpenStory`; a ticket with no
+  ident keeps the tracker link on its key, through `safeExternalUrl`, and a plain title) / next line: STATUS pill coloured by `statusCategory` (new grey, indeterminate blue, done
   green; the site's own status words, else To do / In progress / Complete) · issue type (11px) ·
   assignee as INITIALS + name (Jira avatar URLs are third-party and the CSP blocks them — do not
   loosen it) or "Unassigned" when the status is known / right: a quiet roll-up over the stack's
   cards from fields they already carry ("N failing CI · N changes requested · N ready to merge",
   `stackRollup`, zero parts omitted) · "N PRs". **Rules**: a PR naming two tickets sits in BOTH
-  stacks and each copy says "Also in BMD-1040" — a button that opens and scrolls to that stack and
-  focuses its toggle; the header's "N open" still counts each PR ONCE. PRs with no ticket go in a
+  stacks and each copy says "Also in BMD-1040" — a button that scrolls to that stack and focuses
+  it; the header's "N open" still counts each PR ONCE. PRs with no ticket go in a
   final dashed "No ticket" stack. Inside a stack the card's own ticket row is GONE (the header says
   it). **The Sort menu orders the PRs WITHIN each stack** (the list is sorted first, then grouped
   in that order); **the stacks themselves are in a FIXED order**: open tickets first, then `done`
@@ -350,10 +351,11 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   ticket" line offers the regroup (the reader's jump, never one that happens to them). No PR naming
   a ticket is still the list — no lone "No ticket" header. Every card (and the PR-detail header)
   carries a "Copy PR link" `CopyButton` (`LinkIcon`; `lib/prLink.ts` `githubPrUrl` on the cards,
-  which carry no URL of their own). The view and
-  the collapsed stacks (ids `ticket:<KEY>` / `none`) are PER-VIEWER conveniences in
+  which carry no URL of their own). The view is a PER-VIEWER convenience in
   `store/openPrsView.ts` — localStorage only (try/catch), never the URL and never
-  `FilterDefaults`. List mode is exactly the cards described above.
+  `FilterDefaults` (the retired collapsed-stacks key, `pierre:openPrsCollapsedStacks`, is no longer
+  read). ⚠ **The board draws NO Story section** — every story read (brief, review, docs, design) starts
+  on mount, so it lives in the story view alone, one click on the header away. List mode is exactly the cards described above.
   3. **Meta line** (11px): #number · repo · avatar + author · opened · updated (only when it
      differs) · files +/− · `LargePrFlag` · `BlastRadiusChip` — the same pieces `PrMetaRow` uses.
   4. **The Claude Review panel** (`ClaudeReviewPanel` in `ClaudeReviewCell.tsx`) ONLY where agentic
@@ -1232,23 +1234,20 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
     "None of these"); a change invalidates `['ticket-reviews']` + the states so the block shows
     "Story edited since". "+ Add story" is only for pasting: a ticket already listed as a block is
     not offered as "Pull KEY from Jira".
-  - **THE WHOLE STORY LIVES ONCE, IN THE OPEN PRs STACK; the pane shows its own share.** The stack
-    header carries the coverage pill, "reviewed X ago" (`state.checkedAt`) and Re-check; below it a
-    "Story" section (`Activity/TicketStorySection.tsx`, § The story view), COLLAPSED by default
-    (per-session open set, `store/stackStoryCheck.ts`), whose body reads the run by the states'
-    `latestRunId` ONLY once expanded: summary, every criterion with "Done in api#88" / "Belongs in …", missing and
+  - **THE WHOLE STORY LIVES ONCE, IN THE STORY VIEW; the pane shows its own share.** The Open PRs
+    stack header carries the coverage pill, "reviewed X ago" (`state.checkedAt`) and Re-check; the
+    story view (§ The story view) adds the "Story" section (`Activity/TicketStorySection.tsx`, always
+    open), which reads the run by the states' `latestRunId`: summary, every criterion with "Done in api#88" / "Belongs in …", missing and
     not-asked-for items, currency pill, the Story — and NO Post buttons (`viewedPrId: null` in the
-    shared `TicketReviewParts.tsx`). The pane's block goes SLIM where such a stack exists
+    shared `TicketReviewParts.tsx`). The pane's block goes SLIM where the story view holds the story
     (`slimStoryCheck`, `lib/ticketShare.ts`: a tracker ident, `trackerOn` — `PrDetail.tickets !=
     null`, the PR's own workspace has a tracker, no extra request — an open PR on the ticket): alignment + currency + reviewed-ago + Re-check, then only `prTicketShare` — criteria
     this PR delivers, unmet criteria / missing items owned by it (item `ownerPrId`, else
     `expectedIn.prId`, else `expectedIn.repoId` against its repo; an item naming NO owner stays here,
-    since its Post lands on the viewed PR and the stack has none), its not-asked-for work — a count
-    of the rest (`shareRestLine`) and "See the whole story in Open PRs". ⚠ That link is a TRANSIENT
-    target (`showStoryInOpenPrs`: grouped view, stack expanded, Open PRs repo filter cleared, tab
-    shown); the list answers it ONCE when the stack is on the page (`takeTarget`, case-insensitive
-    on `ticket:<KEY>`) and it expires after `STORY_TARGET_TTL_MS` so a later visit never jumps. A
-    pasted `manual:` story keeps the full view in the pane.
+    since its Post lands on the viewed PR and the story view has none), its not-asked-for work — a
+    count of the rest (`shareRestLine`) and "See the whole story", which opens the ticket's story
+    view tab (`useOpenStory` with the block's ident, key and title). A pasted `manual:` story keeps
+    the full view in the pane.
   - **"What this PR adds" — each member's CONTRIBUTION CARD** (`TicketReviewMember.card`, the card at
     the PR's CURRENT synced head; docs/CLAUDE-REVIEW.md § Ticket review). The stack's body lists
     "What each PR adds" (`MemberCards`): one collapsed `PrCardDisclosure` per member that HAS a card,
@@ -1257,13 +1256,13 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
     summary, interfaces (Added/Changed/Removed chip, kind word, the exact name, its note), loose ends.
     The slim pane shows THIS PR's card only (`prCardOf`, `lib/ticketShare.ts`) above the rest line.
     ⚠ A member with no card renders NOTHING (`membersWithCards` drops it) — never a placeholder claim.
-    Both ride the review already loaded: no request of their own, and the stack still fetches nothing
-    until expanded. Card text is model prose about untrusted input: PLAIN TEXT through `PrRefText`.
-  - **Open PRs: a ticket key opens its STORY VIEW in a tab** (`TicketKeyButton` → `useOpenStory`), on
-    the stack header and on each card's ticket row — any ticket with an ident (Jira, GitHub Issues,
-    Linear); one without stays a tracker link. The ticket-text MODAL is GONE (2026-10-18): the story
-    view's Story section carries "As written in Jira". In the story view itself (`single`) the header
-    key is plain text. ⚠ The button stops the click, or the card / header beneath opens the PR / toggles.
+    Both ride the review already loaded: no request of their own, and the board fetches none of it. Card text is model prose about untrusted input: PLAIN TEXT through `PrRefText`.
+  - **Open PRs: a ticket opens its STORY VIEW in a tab** (`TicketKeyButton` → `useOpenStory`): the
+    stack header's key AND title (one button), and each card's ticket row — any ticket with an ident
+    (Jira, GitHub Issues, Linear); one without stays a tracker link on the key. The ticket-text MODAL
+    is GONE (2026-10-18): the story view's Story section carries "As written in Jira". In the story
+    view itself (`single`) the header key and title are plain text. ⚠ The button stops the click, or
+    the card beneath opens the PR.
   - **No "Claude: " lead** on generated text anywhere in the pane — it is all Claude's.
   - **The stack pill** (`StackCoverage`, `OpenPrsCards.tsx`): ONE chip in the `TicketStack` header —
     "4 of 6 met" toned by alignment (a pulse while running) — then the currency words when stale
@@ -2238,10 +2237,9 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   stack IS the merged work); default order is newest merge first, and there is no Sort menu.
   ⚠ It KEEPS the TICKET review (where AI runs and the tracker is on): the ONE batched
   `useTicketReviewStates`, the card's coverage pills (`TicketPillsRow`, the pills without the code
-  review's Review/Fix), the stack's coverage pill + Check story, and the collapsed Story section
-  (§ The story view: the review's result or the brief, the ticket as written, the design). Every
-  ticket stack carries it, reviewed or not, and nothing in it fetches until it is opened. The
-  Group by ticket / List choice (and stack collapse) is the SAME per-viewer `store/openPrsView.ts`
+  review's Review/Fix), the stack's coverage pill + Check story; the Story section itself is the
+  story view's (§ The story view), one click on the stack header away. The
+  Group by ticket / List choice is the SAME per-viewer `store/openPrsView.ts`
   state as Open PRs; the repo dropdown is the tab's own local state.
 
 ## The Reports pane is three tabs, and the Pending board can now merge
@@ -3192,11 +3190,11 @@ phrase it two ways.
 ONE ticket, Open PRs style: `Ticket/TicketTabView.tsx` renders the SAME ticket stack the Open PRs board
 draws — `OpenPrsCards` with `story={{ticket, merged}}` (`storyStack`, `lib/openPrsStacks.ts`) — never a
 copy. In order: the stack header (key — on the board it opens this story view in a tab, else the tracker link; in the story view itself it is plain text —, title, status, type,
-assignee, PR count, the ticket review's coverage pill + Re-check), the **Story section OPEN**, the open
-PRs as the Open PRs cards, "Merged (n)", and under the stack "Closed without merging (n)", collapsed. It
-works for a ticket with NO pull request (the stack is drawn with no rows; "No pull requests for this
-ticket yet."). In the single-ticket stack nothing collapses and the Story section's open state is local
-(always open on mount); the board's stacks keep their session stores.
+assignee, PR count, the ticket review's coverage pill + Re-check), the **Story section, ALWAYS OPEN**
+(a plain "Story" heading, no disclosure), the open PRs as the Open PRs cards, "Merged (n)", and under
+the stack "Closed without merging (n)", collapsed. It works for a ticket with NO pull request (the stack
+is drawn with no rows; "No pull requests for this ticket yet."). Stacks never collapse, here or on the
+board.
 
 - **Tab words** (`storyTabLabels`, `lib/ticketTab.ts`): chip "KEY · Story", tooltip "KEY: story and
   pull requests", close "Close story tab". Internally it stays `kind: 'ticket'` with key
@@ -3220,13 +3218,19 @@ ticket yet."). In the single-ticket stack nothing collapses and the Story sectio
 - `['ticket-prs']` is in `invalidateAfterPrWrite`'s workspace half, so a merge from the view's own
   cards repaints it; the sprint refresh invalidates `['ticket-story', ws]`.
 
-### The Story section (`Activity/TicketStorySection.tsx`) — ONE component, two mounts
+### The Story section (`Activity/TicketStorySection.tsx`) — the story view only
 
-Collapsed in the Open PRs stacks (the per-session `store/stackStoryCheck.ts` open set; the PR pane's
-"See the whole story in Open PRs" opens it), OPEN in the story view. Every ticket stack with an ident
-has it — not only reviewed ones. ⚠ **The body (and every read in it) mounts only while open**, so a
-board of stacks makes no request per stack. In order, and NOTHING else (no dependency or reference
-cards or pills):
+Mounted ONLY in the story view (`TicketStack` with `single`), ALWAYS OPEN — a plain "Story" heading, no
+toggle. ⚠ **The Open PRs board does not render it** (2026-10-18): every read in it starts on mount, so
+on a board it would be one request per stack; a reader opens the ticket to see the story. Every ticket
+with an ident has it — not only reviewed ones. **The heading row carries the STORY'S ACTIONS**,
+right-aligned: the docs check (`StoryDocsButton`) and the story design ("Draw" / "Redraw" / "Drawing…",
+`StoryDesignButton`, labelled "Draw design" / "Redraw design" / "Drawing design…"). The
+section owns ONE start mutation for each (`useStartStoryDocsAlignment`; `useStoryDesign` over
+`useRedrawStoryDiagram`) and hands it to both the button and its block, so a refusal or error from a
+heading click shows in that block; the blocks keep their headings, ⓘ, status lines, results, errors
+and refusals, and carry no button. In order, and NOTHING else (no dependency or reference cards or
+pills):
 
 1. **Claude's summary and criteria** — `storySummaryOf` (`lib/ticketStory.ts`, test/storyView.test.ts):
    the ticket review's result when one exists (currency pill, `TicketResults`, `MemberCards`, read by
@@ -3247,16 +3251,17 @@ only: **the docs check** — `Activity/StoryDocsAlignment.tsx`, the SPA half of 
 docs" ([docs/REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Check a story against the docs, [docs/API.md](API.md)
 § Check a story against the docs). It is the Story section's ONE new block, not a reference card.
 
-- **Reads only in the open body.** `useStoryDocsAlignment` (`hooks/useStoryDocsAlignment.ts`, key
+- **Reads only in the story view.** `useStoryDocsAlignment` (`hooks/useStoryDocsAlignment.ts`, key
   `['story-docs-alignment','ws:<id>',ident]`, `enabled = ai.enabled && workspaceId != null`, staleTime
-  10 s) is called from `StoryBody`, so a collapsed stack asks nothing. It polls (4 s) ONLY while the
+  10 s) is called from `TicketStorySection`, which the board never mounts. It polls (4 s) ONLY while the
   newest run is `queued`/`shortlisting`/`reading`. The start mutation carries ONE key
   `['story-docs-alignment-start','ws:<id>',ident]` (`useStoryDocsStarting` reads it with
-  `useIsMutating`), so the stack and the story tab show the same "Checking…"; `onSettled` invalidates the read.
+  `useIsMutating`), so every story tab of the ticket shows the same "Checking…"; `onSettled` invalidates the read.
 - **The block** renders nothing when `available` is false and nothing was ever run. Heading "Docs check" +
   the ⓘ (Haiku shortlist, then Sonnet over only those documents; only linked points are kept; where the
-  criteria come from; manual only; what "Out of date" means) + the button inside `AiRunGate`, shown only
-  when `available` ("Check against docs" / "Checking…" / "Check again", `docsButtonLabel`). Progress words
+  criteria come from; manual only; what "Out of date" means). Its button sits in the Story heading row
+  (`StoryDocsButton`), inside `AiRunGate`, shown only when `available` ("Check against docs" /
+  "Checking…" / "Check docs again", `docsButtonLabel`). Progress words
   are status-derived (`docsProgressText`: "Choosing sections…", "Reading the docs…"), a failed run's
   `error` is a red line, a refusal prints `STORY_DOCS_REFUSAL_TEXT`. The drawn run is `shownRun`: the newest
   when it succeeded, else `lastSucceeded`, so a re-run in flight or a failure never hides the last good
@@ -4468,8 +4473,9 @@ test/designGrid.test.ts).
 `components/ClaudeReviewDiagrams.tsx` — `ClaudeReviewDiagramsSection` ("Design", mounted in
 `ClaudesReview` after SonarCloud, absent without `me.ai`) shows the PR's slot and each multi-PR
 ticket's "Story design" slot through `DiagramSlotView`; `Activity/StoryDesignSection.tsx` shows the
-story slot as the last part of the Story section (only with `me.ai` and a PR on the ticket, and it draws
-only when the ticket has 2+ pull requests or a stored design). The status folds live in `lib/sequenceDiagrams.ts` (test/sequenceDiagram.test.ts). ⚠
+story slot as the last part of the story view's Story section (only with `me.ai` and a PR on the ticket, and it draws
+only when the ticket has 2+ pull requests or a stored design; its Draw / Redraw button sits in the Story
+heading row). The status folds live in `lib/sequenceDiagrams.ts` (test/sequenceDiagram.test.ts). ⚠
 POLLING: the reads poll every 5 s only while a run is queued or running, and the PR read also for 90 s
 after the shown review's `finishedAt` while nothing is stored at the current head for the PR OR for
 any story of 2+ pull requests (the server queues them a moment AFTER the review is saved; a docs-only
@@ -4538,7 +4544,7 @@ conversation on screen, the narrow-width Read / Ask tab) per WORKSPACE in the mo
 (the Claude Review tab's "Reference docs" section after SonarCloud; a compact block in Story check — the
 whole story and this PR's share — and in This Sprint's Code check) and a finding's `docCitations`
 ("Reference: Document › Section"). A plain click opens the section in-app (`store/openDocs.ts`:
-`openPath` → `showActivity()` → `setActivityRepo('docs')`, the "See the whole story in Open PRs" move); the
+`openPath` → `showActivity()` → `setActivityRepo('docs')`); the
 href is a DEEP LINK (`lib/docReferences.ts` `docsDeepLink`:
 `/app/?workspace=&activityRepo=docs&doc=<slug>&section=<NN-name.md>&anchor=`) for a modified click / new
 tab. ⚠ The URL hydrate seats it in `useDocsView.pendingDeepLink` (`parseDocsDeepLink`, the strict

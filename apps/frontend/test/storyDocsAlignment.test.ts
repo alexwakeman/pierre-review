@@ -47,7 +47,7 @@ describe('shownRun', () => {
 describe('the button and the progress words', () => {
   it('names the first check, a re-check and a check in flight', () => {
     expect(docsButtonLabel({ run: null, lastSucceeded: null }, false)).toBe('Check against docs');
-    expect(docsButtonLabel({ run: run('succeeded'), lastSucceeded: null }, false)).toBe('Check again');
+    expect(docsButtonLabel({ run: run('succeeded'), lastSucceeded: null }, false)).toBe('Check docs again');
     expect(docsButtonLabel({ run: run('shortlisting'), lastSucceeded: null }, false)).toBe('Checking…');
     expect(docsButtonLabel({ run: null, lastSucceeded: null }, true)).toBe('Checking…');
   });

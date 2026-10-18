@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ClaudeReviewPrState, TicketMergedPr, TicketReviewState, TimelinePr, User } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
@@ -63,7 +63,6 @@ import {
   type StoryStackInput,
 } from '../../lib/openPrsStacks.js';
 import { useOpenPrsView } from '../../store/openPrsView.js';
-import { useStackStoryCheck } from '../../store/stackStoryCheck.js';
 import { ReviewedAgo } from '../ReviewedAgo.js';
 import { TicketStorySection } from './TicketStorySection.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
@@ -112,8 +111,10 @@ import {
 // control inside it stops propagation, so a click there never opens the PR.
 //
 // GROUPED BY TICKET (the default where the workspace has a tracker — core, free): the same cards, in
-// one STACK per ticket (`lib/openPrsStacks.ts` decides membership and order). The stack header
-// carries the ticket — key (the same modal), title, status, type, assignee, PR count, a quiet roll-up, and (where
+// one STACK per ticket (`lib/openPrsStacks.ts` decides membership and order). A stack NEVER collapses:
+// its PR list is always shown. The stack header carries the ticket — key AND title as ONE button that
+// opens the ticket's STORY VIEW tab (`TicketKeyButton`; a ticket with no ident keeps the tracker link
+// on its key and a plain title), status, type, assignee, PR count, a quiet roll-up, and (where
 // agentic AI runs) the TICKET REVIEW's coverage pill + Re-check — so a
 // card inside a stack drops its own ticket row and keeps only "Also in <other ticket>" when the
 // PR names two. Until the ticket answer arrives, and whenever no PR names a ticket, the page is
@@ -121,15 +122,17 @@ import {
 // "Merged (n)" panel lists every MERGED PR linked to the same ticket (any repo, same Jira site),
 // from ONE batched `GET /api/ticket-merged-prs` for the whole board; it never makes a stack of
 // its own, and the header's "n PRs" stays the open count.
-// Between the header and the cards, a collapsed "Story" section (TicketStorySection.tsx) holds the
-// WHOLE story — the ticket review's result (else the sprint brief), the ticket as written and the
-// design — read only once expanded; the header adds "reviewed X ago" from the batched states. The PR
-// pane shows only its own share and jumps here.
+// The board draws NO Story section: the whole story (TicketStorySection.tsx — the ticket review's
+// result, else the sprint brief, the ticket as written, the docs check and the design) is in the story
+// view, one click on the header away. ⚠ So nothing on the board reads a brief, a design or a docs check.
+// The header adds "reviewed X ago" from the batched states. The PR pane shows only its own share and
+// links to the story view.
 //
 // ONE TICKET (`story`): the STORY VIEW (Ticket/TicketTabView.tsx) renders this same component for one
 // ticket — exactly ONE stack, every PR handed in as its rows (detection is not asked which ticket they
-// belong to), drawn even with NO pull request, its Story section OPEN, no collapse, and its "Merged (n)"
-// panel fed from the view's own read. Never a copy of the stack: change the look here, once.
+// belong to), drawn even with NO pull request, its key and title plain text, its Story section ALWAYS
+// OPEN (heading row = the story's actions), and its "Merged (n)" panel fed from the view's own read.
+// Never a copy of the stack: change the look here, once.
 
 // The chip classes and the CI chip are the shared card shell's (PrCardShell.tsx), so the Pending
 // board's cards wear the same chips.
@@ -480,20 +483,6 @@ export function OpenPrsCards({
           : new Map<string, TicketMergedPr[]>(),
     [story, stacked, mergedData],
   );
-  // "See the whole story in Open PRs" from a PR pane: once that ticket's stack is on the page,
-  // open its Story check panel and scroll to it (store/stackStoryCheck.ts). The store opens the
-  // panel; the jump helper expanded the stack before switching tabs.
-  const storyTarget = useStackStoryCheck((s) => s.target);
-  const takeStoryTarget = useStackStoryCheck((s) => s.takeTarget);
-  useEffect(() => {
-    if (storyTarget == null || !showStacks || stacked == null) return;
-    const hit = takeStoryTarget(stacked.stacks.map((st) => st.id));
-    if (hit == null) return;
-    useOpenPrsView.getState().expand(hit);
-    requestAnimationFrame(() => {
-      document.getElementById(stackDomId(hit))?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    });
-  }, [storyTarget, showStacks, stacked, takeStoryTarget]);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const openMerged = (m: TicketMergedPr): void =>
     openPrDetailTab(
@@ -645,10 +634,10 @@ export function OpenPrsCards({
 // ---- a ticket key that opens the ticket's story tab ----
 
 /**
- * A ticket's key (and title): a click opens its STORY VIEW in a tab (`useOpenStory` — the same
- * standalone view This Sprint, search and the PR pane open). The ticket's text is in that view's
- * Story section, so there is no modal. ⚠ The card / stack header beneath it open the PR / toggle on
- * click, so the button stops the event.
+ * A ticket's key and title, as ONE button: a click opens its STORY VIEW in a tab (`useOpenStory` —
+ * the same standalone view This Sprint, search and the PR pane open). The ticket's text is in that
+ * view's Story section, so there is no modal. ⚠ The card beneath it opens the PR on click, so the
+ * button stops the event.
  */
 function TicketKeyButton({
   ticket,
@@ -687,14 +676,13 @@ const STATUS_WORD: Record<'new' | 'indeterminate' | 'done', string> = {
   indeterminate: 'In progress',
   done: 'Complete',
 };
-/** Move to another stack on the page (opening it if collapsed) — the "Also in" link. */
+/** Move to another stack on the page — the "Also in" link. */
 function jumpToStack(stackId: string): void {
-  useOpenPrsView.getState().expand(stackId);
   requestAnimationFrame(() => {
     const el = document.getElementById(stackDomId(stackId));
     if (el == null) return;
     el.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    el.querySelector<HTMLElement>('[data-stack-toggle]')?.focus({ preventScroll: true });
+    el.focus({ preventScroll: true });
   });
 }
 
@@ -771,7 +759,7 @@ function TicketStack({
   stack: OpenPrsStack;
   /** The ticket review's state for the Story section (undefined = none / no AI here). */
   storyState: TicketReviewState | undefined;
-  /** The story view's ONE stack: the Story section starts open, the stack never collapses. */
+  /** The story view's ONE stack: plain key and title, and the Story section (always open). */
   single?: boolean;
   /** false on Reports → "Merged so far": failing CI / ready to merge say nothing about landed work. */
   showRollup?: boolean;
@@ -783,78 +771,50 @@ function TicketStack({
   review: { ident: string; state: TicketReviewState | undefined; prId: number; canCheck?: boolean } | null;
   children: ReactNode;
 }): JSX.Element {
-  const collapsedStored = useOpenPrsView((s) => s.collapsed.includes(stack.id));
-  const collapsed = !single && collapsedStored;
-  const toggleStored = useOpenPrsView((s) => s.toggleCollapsed);
-  const toggle = (id: string): void => {
-    if (!single) toggleStored(id);
-  };
-  // The Story section: the session store's open set in Open PRs (collapsed by default, and the PR
-  // pane's jump opens it); OPEN by default in the story view, local to that mount.
-  const storyStored = useStackStoryCheck((s) => s.open.has(stack.id));
-  const toggleStoryStored = useStackStoryCheck((s) => s.toggle);
-  const [storyLocal, setStoryLocal] = useState(true);
-  const storyOpen = single ? storyLocal : storyStored;
-  const toggleStory = (): void => (single ? setStoryLocal((v) => !v) : toggleStoryStored(stack.id));
   const headingId = useId();
-  const listId = useId();
   const t = stack.ticket;
   const cat = t?.statusCategory ?? null;
   const href = t != null ? safeExternalUrl(t.url) : null;
   const rollup = showRollup ? stackRollupParts(stackRollup(stack.rows)) : [];
-  const name = t != null ? t.key : 'No ticket';
   // Any PR on the ticket reads its stored row; only a Jira ticket (it has an ident) has one.
   const storyPrId = t?.ident != null ? (stack.rows[0]?.pr.id ?? merged[0]?.prId ?? null) : null;
-
-  // A click on the header's empty space toggles too (the chevron button is the keyboard route).
-  const onHeaderClick = (e: MouseEvent<HTMLDivElement>): void => {
-    if ((e.target as HTMLElement).closest('a,button')) return;
-    toggle(stack.id);
-  };
 
   return (
     <section
       id={stackDomId(stack.id)}
       aria-labelledby={headingId}
-      className={`scroll-mt-4 rounded-xl border bg-gray-50 dark:bg-gray-900/70 ${
+      tabIndex={-1}
+      className={`scroll-mt-4 rounded-xl focus:outline-none border bg-gray-50 dark:bg-gray-900/70 ${
         t == null ? 'border-dashed border-gray-300 dark:border-gray-700' : 'border-gray-200 dark:border-gray-800'
       }`}
     >
-      <div
-        onClick={single ? undefined : onHeaderClick}
-        className={`flex flex-wrap items-start gap-x-2 gap-y-1.5 px-3 py-3 ${single ? '' : 'cursor-pointer'}`}
-      >
-        {!single && (
-          <button
-            type="button"
-            data-stack-toggle
-            aria-expanded={!collapsed}
-            aria-controls={listId}
-            aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${name}`}
-            onClick={() => toggle(stack.id)}
-            className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-500 hover:bg-gray-200 hover:text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
-          >
-            <ChevronIcon dir={collapsed ? 'right' : 'down'} size={12} />
-          </button>
-        )}
+      <div className="flex flex-wrap items-start gap-x-2 gap-y-1.5 px-3 py-3">
         <div className="min-w-0 flex-1 basis-[16rem]">
           <h3 id={headingId} className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
             {t == null ? (
               <span className="text-base font-semibold text-gray-700 dark:text-gray-200">No ticket</span>
+            ) : !single && t.ident != null ? (
+              // On the board the key AND title are ONE button: it opens the ticket's story view.
+              <TicketKeyButton
+                ticket={{ ...t, ident: t.ident }}
+                className="group inline-flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5"
+              >
+                <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[13px] font-semibold text-sky-700 group-hover:underline dark:text-sky-300">
+                  <TicketIcon size={13} className="shrink-0" />
+                  {t.key}
+                  <span className="sr-only">:</span>
+                </span>
+                {t.title != null && (
+                  <span className="min-w-0 text-base font-semibold leading-snug text-gray-900 group-hover:underline dark:text-gray-50">
+                    {t.title}
+                  </span>
+                )}
+              </TicketKeyButton>
             ) : (
               <>
                 {/* In the standalone story view the key is plain text (this IS its story); on the board
-                    it opens that view. */}
-                {!single && t.ident != null ? (
-                  <TicketKeyButton
-                    ticket={{ ...t, ident: t.ident }}
-                    className="inline-flex shrink-0 items-center gap-1 font-mono text-[13px] font-semibold text-sky-700 hover:underline dark:text-sky-300"
-                  >
-                    <TicketIcon size={13} className="shrink-0" />
-                    {t.key}
-                    <span className="sr-only">:</span>
-                  </TicketKeyButton>
-                ) : !single && href != null ? (
+                    a ticket with no ident links its key to the tracker. */}
+                {!single && href != null ? (
                   <a
                     href={href}
                     target="_blank"
@@ -903,7 +863,7 @@ function TicketStack({
             )}
           </div>
         </div>
-        <div className="ml-7 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 sm:ml-0 sm:mt-0.5">
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 sm:mt-0.5">
           {review != null && review.canCheck !== false && (
             <StackCoverage ident={review.ident} state={review.state} prId={review.prId} />
           )}
@@ -926,25 +886,24 @@ function TicketStack({
           )}
         </div>
       </div>
-      {t?.ident != null && !collapsed && (
+      {/* The Story section is the story view's alone: on the board it would start every story read
+          per stack on mount. */}
+      {single && t?.ident != null && (
         <TicketStorySection
+          key={t.ident}
           ticket={{ ...t, ident: t.ident }}
           state={storyState}
           storyPrId={storyPrId}
           prCount={stack.rows.length + merged.length}
-          open={storyOpen}
-          onToggle={toggleStory}
         />
       )}
       <ul
-        id={listId}
         aria-label={t != null ? `Pull requests for ${t.key}` : 'Pull requests with no ticket'}
-        hidden={collapsed}
         className="space-y-2 px-3 pb-3"
       >
         {children}
       </ul>
-      {merged.length > 0 && !collapsed && <MergedPanel stackId={stack.id} prs={merged} onOpen={onOpenMerged} />}
+      {merged.length > 0 && <MergedPanel stackId={stack.id} prs={merged} onOpen={onOpenMerged} />}
     </section>
   );
 }

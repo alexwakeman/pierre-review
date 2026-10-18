@@ -3,8 +3,7 @@ import { useFilters } from './filters.js';
 import { usePinnedTabs } from './pinnedTabs.js';
 
 // Open one reference-library file in Activity → Docs from anywhere (a review's "Reference docs"
-// section, a finding's citation): seat it in the docs store, then switch to the Docs rail line — the
-// same move "See the whole story in Open PRs" makes (store/stackStoryCheck.ts).
+// section, a finding's citation): seat it in the docs store, then switch to the Docs rail line.
 //
 // ⚠ `workspaceId` is the library the reference was checked against. The Docs pane shows the SELECTED
 // workspace's library, so a reference from another workspace's PR switches to that workspace first
