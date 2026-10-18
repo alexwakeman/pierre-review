@@ -920,6 +920,9 @@ Haiku 5.5). Details:
   `0104`): the library is a READ-ONLY path-guard root (`readOnlyRoots`), every `docReferences` entry is
   CHECKED by `reference-docs/review-refs.ts` (link = a built section of THAT workspace, quote in it) or
   dropped, and switch OFF ⇒ prompt, tools and shape byte-for-byte unchanged (pinned in `review-refs.test.ts`).
+  **Check against docs** (a story, MANUAL only, `review/story-docs/`, sqlite `0121` / pg `0108`): Haiku shortlists
+  ≤ 8 sections, then Sonnet reads ONLY those documents; every point needs a checked quote or is dropped;
+  criteria = the Story section's (ticket review, else brief, else derived).
 - **No Pro input any more**: the ticket review's members and story come from CORE's tracker
   (`tracker/ticket-source.ts`; `registerAgenticProviders` left the contract at apiVersion 23). Both AI
   Fix seeds are free.
@@ -1593,7 +1596,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0107` and plugin `0034`–`0037` + `0040` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0108` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

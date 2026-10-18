@@ -721,6 +721,12 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
   paths. Written only by `review/sprint-paths/` (+ `noteSprintPathsRun` / `recordSprintPathsAttempt`);
   ⚠ every `onConflictDoUpdate` targets exactly `[accountId, workspaceId]`. Same account FK, composite
   workspace FK, `accountScopedTables()`, erasure and `verify:isolation` as above.
+- **`story_docs_alignments`** (sqlite `0121` / pg `0108`) — "Check against docs" on a story: ONE ROW PER RUN
+  (a click), keyed for reads by (account, workspace, ident). The run's input hashes (story, criteria, built
+  library, version), the criteria it checked, the Haiku shortlist and — on success only — the GROUNDED result
+  (`StoryDocsAlignmentResult`). No unique index. Same account FK, composite workspace FK (ON DELETE cascade —
+  ⚠ NOT re-homed by `deleteWorkspace`: its links name that workspace's library), `accountScopedTables()`,
+  erasure and `verify:isolation`. Written only by `review/story-docs/` (docs/REFERENCE-DOCS.md).
 - **`sprint_view_snapshots`** (sqlite `0112` / pg `0099`) — ONE per (account, workspace): "Since you last
   looked" on This Sprint — `current_json` / `current_at` (the latest view's snapshot: ident → stage, merged
   PR ids on sprint tickets) and `baseline_json` / `baseline_at` (the previous visit's last view). Every GET

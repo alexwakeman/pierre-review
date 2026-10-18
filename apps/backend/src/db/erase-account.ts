@@ -203,6 +203,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // The FILES (the markdown tree and the stored uploads) are removed after the transaction below.
     await tx.delete(schema.referenceDocChatMessages).where(eq(schema.referenceDocChatMessages.accountId, accountId)).execute();
     await tx.delete(schema.referenceDocs).where(eq(schema.referenceDocs.accountId, accountId)).execute();
+    // Story docs checks (migration 0121 / pg 0108): cascade from workspaces too, and are explicit anyway.
+    await tx.delete(schema.storyDocsAlignments).where(eq(schema.storyDocsAlignments.accountId, accountId)).execute();
     // Workspace settings history (migration 0096 / pg 0083) — cascades from workspaces too, and is
     // explicit anyway.
     await tx
@@ -357,6 +359,8 @@ export function accountScopedTables(): {
       col: schema.referenceDocChatMessages.accountId,
       table: schema.referenceDocChatMessages,
     },
+    // Story docs checks (migration 0121 / pg 0108), erased explicitly above.
+    { name: 'storyDocsAlignments', col: schema.storyDocsAlignments.accountId, table: schema.storyDocsAlignments },
     // Chronology's settings history (migration 0096 / pg 0083), erased explicitly above.
     {
       name: 'workspaceSettingEvents',

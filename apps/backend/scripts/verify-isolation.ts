@@ -4394,6 +4394,95 @@ check(
   rmSync(docsTmp, { recursive: true, force: true });
 }
 
+// ── STORY DOCS CHECKS (review/story-docs/, CORE, local-only; docs/REFERENCE-DOCS.md § Check a story
+// against the docs) ──
+// `story_docs_alignments`, keyed by (account, workspace, ident). BOTH accounts get a succeeded run under
+// the SAME ident in their own Default workspace, so a dropped account predicate has something to leak
+// (the mutation checks prove B's own reads see B's rows). `?workspace=` falls back to the caller's
+// Default; the composite FK refuses a cross-account workspace.
+{
+  const sp = await import('../src/review/story-docs/persist.js');
+  const sm = await import('../src/review/story-docs/manager.js');
+  const { registerStoryDocsRoutes } = await import('../src/review/story-docs/routes.js');
+  const dc = { db, schema: schema as unknown as Record<string, any> };
+  const IDENT = 'jira:https://acme.atlassian.net#ISODOCS-1';
+  const runIds: Record<number, number> = {};
+  const queue = (acct: number, ws: number) =>
+    sp.insertQueuedStoryDocs(dc, {
+      accountId: acct,
+      workspaceId: ws,
+      ident: IDENT,
+      ticketKey: `ISO-${acct}`,
+      fingerprint: 'iso-fp',
+      storyHash: 's',
+      criteriaHash: 'c',
+      libraryHash: 'l',
+      version: 1,
+      criteriaSource: 'derived',
+      criteria: [],
+    });
+  for (const [acct, ws] of [
+    [1, defaultA],
+    [2, defaultB],
+  ] as const) {
+    const id = await queue(acct, ws);
+    runIds[acct] = id;
+    await sp.saveStoryDocsSuccess(
+      dc,
+      acct,
+      id,
+      { result: { outcome: 'no_relevant_docs', overall: null, criteria: [], storyParts: [], shortlist: [], dropped: acct }, criteria: null },
+      {},
+    );
+  }
+  const bRun = runIds[2]!;
+  check("latestStoryDocsRun(A, B's workspace, shared ident) is null", (await sp.latestStoryDocsRun(dc, 1, defaultB, IDENT)) === null);
+  check("latestStoryDocsRun(B, B's workspace, shared ident) is B's (mutation check)", (await sp.latestStoryDocsRun(dc, 2, defaultB, IDENT))?.id === bRun);
+  check("latestStoryDocsRun(A, A's workspace, shared ident) is A's", (await sp.latestStoryDocsRun(dc, 1, defaultA, IDENT))?.id === runIds[1]);
+  check("latestSucceededStoryDocsRun(A, B's workspace) is null", (await sp.latestSucceededStoryDocsRun(dc, 1, defaultB, IDENT)) === null);
+  check("getStoryDocsRow(A, B's run id) is null", (await sp.getStoryDocsRow(dc, 1, bRun)) === null);
+  await sp.markStoryDocsFailed(dc, 1, bRun, 'hacked');
+  check("markStoryDocsFailed(A, B's run id) writes nothing", (await sp.getStoryDocsRow(dc, 2, bRun))?.status === 'succeeded');
+  check(
+    'countStoryDocsRunsSince(A) counts A only',
+    (await sp.countStoryDocsRunsSince(dc, 1, 0)) === (await db.select().from(schema.storyDocsAlignments).where(eq(schema.storyDocsAlignments.accountId, 1)).execute()).length,
+  );
+  let storyDocsFkRefused = false;
+  try {
+    await queue(1, defaultB);
+  } catch {
+    storyDocsFkRefused = true;
+  }
+  check("a story docs run naming B's workspace under account A is refused by the composite FK", storyDocsFkRefused);
+
+  sm._setStoryDocsSeamsForTest({
+    inputs: {
+      latestTicketReview: async () => null,
+      ticketReviewTicket: async () => null,
+      trackerStory: async () => ({ title: 't', description: 'd', acceptanceCriteria: '' }),
+      sprintStory: async () => null,
+    },
+  });
+  const Fastify = (await import('fastify')).default;
+  const sapp = Fastify({ logger: false });
+  registerStoryDocsRoutes(sapp, {
+    ...dc,
+    accountIdOf: () => 1,
+    log: { info() {}, warn() {}, error() {} },
+    llm: { detectAuth: () => ({ status: 'ok' }) },
+    aiCredits: { check: async () => ({ agentBlocked: false }) },
+    recordAiUsage: async () => {},
+  } as any);
+  await sapp.ready();
+  const res = await sapp.inject({ method: 'GET', url: `/api/docs/story-alignment?workspace=${defaultB}&ident=${encodeURIComponent(IDENT)}` });
+  check(
+    "GET /api/docs/story-alignment?workspace=<B's> as A → A's default and A's run, never B's",
+    res.statusCode === 200 && res.json().workspaceId === defaultA && res.json().run?.id === runIds[1],
+  );
+  await sapp.close();
+  sm._setStoryDocsSeamsForTest(null);
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

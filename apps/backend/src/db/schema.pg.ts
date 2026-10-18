@@ -48,6 +48,9 @@ import type {
   ReferenceDocSectionEntry,
   ReviewDocReference,
   ReferenceDocCitation,
+  StoryDocsAlignmentResult,
+  StoryDocsCriterion,
+  StoryDocsShortlistEntry,
   SonarQualityGate,
   FindingAutoResolveRecord,
   ClaudeFindingReminder,
@@ -2535,6 +2538,49 @@ export const referenceDocChatMessages = pgTable(
     conversationIdx: index('reference_doc_chat_conversation').on(t.accountId, t.workspaceId, t.conversationId),
     workspaceAccountFk: foreignKey({
       name: 'reference_doc_chat_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// Check a story against the docs (migration 0121 / pg 0108). Rationale in the sqlite twin.
+export const storyDocsAlignments = pgTable(
+  'story_docs_alignments',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    ident: text('ident').notNull(),
+    ticketKey: text('ticket_key'),
+    status: text('status').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    storyHash: text('story_hash').notNull(),
+    criteriaHash: text('criteria_hash').notNull(),
+    libraryHash: text('library_hash').notNull(),
+    version: integer('version').notNull(),
+    criteriaSource: text('criteria_source').notNull(),
+    criteriaJson: jsonb('criteria_json').$type<StoryDocsCriterion[]>(),
+    shortlistJson: jsonb('shortlist_json').$type<StoryDocsShortlistEntry[]>(),
+    resultJson: jsonb('result_json').$type<StoryDocsAlignmentResult>(),
+    error: text('error'),
+    shortlistModel: text('shortlist_model'),
+    model: text('model'),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }),
+    completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
+  },
+  (t) => ({
+    subjectIdx: index('story_docs_alignments_subject_idx').on(t.accountId, t.workspaceId, t.ident, t.id),
+    accountCreatedIdx: index('story_docs_alignments_account_created').on(t.accountId, t.createdAt),
+    workspaceAccountFk: foreignKey({
+      name: 'story_docs_alignments_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),

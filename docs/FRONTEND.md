@@ -3266,6 +3266,42 @@ cards or pills):
    and ≥ 1 PR (`storyDesignOffered`); it draws only when a design is stored or the ticket has 2+ PRs
    (the server's `too_few_prs`).
 
+Between 1 and 2 (after `MemberCards` on the review path, after the brief on the other), with `me.ai`
+only: **the docs check** — `Activity/StoryDocsAlignment.tsx`, the SPA half of "Check a story against the
+docs" ([docs/REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Check a story against the docs, [docs/API.md](API.md)
+§ Check a story against the docs). It is the Story section's ONE new block, not a reference card.
+
+- **Reads only in the open body.** `useStoryDocsAlignment` (`hooks/useStoryDocsAlignment.ts`, key
+  `['story-docs-alignment','ws:<id>',ident]`, `enabled = ai.enabled && workspaceId != null`, staleTime
+  10 s) is called from `StoryBody`, so a collapsed stack asks nothing. It polls (4 s) ONLY while the
+  newest run is `queued`/`shortlisting`/`reading`. The start mutation carries ONE key
+  `['story-docs-alignment-start','ws:<id>',ident]` (`useStoryDocsStarting` reads it with
+  `useIsMutating`), so the stack and the story tab show the same "Checking…"; `onSettled` invalidates the read.
+- **The block** renders nothing when `available` is false and nothing was ever run. Heading "Docs check" +
+  the ⓘ (Haiku shortlist, then Sonnet over only those documents; only linked points are kept; where the
+  criteria come from; manual only; what "Out of date" means) + the button inside `AiRunGate`, shown only
+  when `available` ("Check against docs" / "Checking…" / "Check again", `docsButtonLabel`). Progress words
+  are status-derived (`docsProgressText`: "Choosing sections…", "Reading the docs…"), a failed run's
+  `error` is a red line, a refusal prints `STORY_DOCS_REFUSAL_TEXT`. The drawn run is `shownRun`: the newest
+  when it succeeded, else `lastSucceeded`, so a re-run in flight or a failure never hides the last good
+  result; "Out of date" when its `current` is false. The result: a verdict chip (WORD + icon, never colour
+  alone; the ticket review's measured met/partly/not-met chip classes), the 2-3 sentence summary, "What to
+  do" bullets, "Other parts of the story" rows, or one line for `no_relevant_docs` / `nothing_grounded`.
+- **Per-criterion notes sit UNDER the existing criteria rows**, through an optional prop on BOTH lists:
+  `BriefSummary`'s `docsItems` (keyed by `c.n`) and `TicketResults`' `docsItems` → `CriterionRow`'s `docs`
+  (looked up by array position `i + 1`, i.e. `AC{n}`; drawn in BOTH branches — the compact met line and the
+  card). A criterion with no item draws nothing. The PR pane's `TicketCoverage` passes nothing. ⚠ **Notes
+  attach ONLY to the list they were written against** — `criteriaMatch` (`lib/storyDocsAlignment.ts`,
+  test/storyDocsAlignment.test.ts): the run's `criteriaSource` equals the section's summary kind (review ⇒
+  `ticket_review`, brief ⇒ `brief`) AND each checked criterion reads like the shown row at its number
+  (whitespace/case-folded; a server-clipped text matches the row's start). Each summary folds this against
+  its OWN list (`useDocsNotes`): the review's criteria are known only inside `ReviewSummary`, which keeps
+  the section's single `useTicketReviewById` read. Otherwise — and always for a `derived` run — the block
+  draws the run's own numbered list with the notes under it.
+- **Every reference is the existing in-app opener**, `DocLink` (now exported from
+  `components/DocReferences.tsx`): plain click ⇒ `openDocsSection(ref.workspaceId, path, anchor)`, modified
+  click ⇒ the `docsDeepLink` href, with the quote as the same italic blockquote beneath. Never a raw href.
+
 ## The merge-conflict resolver (`components/conflicts/`, CORE/free, BOTH MODES)
 
 The three-pane overlay behind **Resolve conflicts**. What it is, what the wand does and how it

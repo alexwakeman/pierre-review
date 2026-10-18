@@ -185,7 +185,8 @@ describe('the wiring', () => {
     expect(panel).toMatch(/\{open && \(/);
     expect(panel).toMatch(/<ReviewSummary runId=\{summary\.runId\}/);
     expect(panel.match(/useTicketReviewById\(/g)).toHaveLength(1);
-    expect(panel).toMatch(/<TicketResults review=\{review\} viewedPrId=\{null\} \/>/);
+    // The docs check's notes ride along (empty unless written against this same list).
+    expect(panel).toMatch(/<TicketResults review=\{review\} viewedPrId=\{null\} docsItems=\{docsNotes\.items\} \/>/);
     // No Post anywhere in the stack, and no dependency or reference cards.
     expect(panel).not.toMatch(/usePostTicketItem|ItemPost|references|Other tickets/);
     // The per-stack request never sits on the cards list itself.

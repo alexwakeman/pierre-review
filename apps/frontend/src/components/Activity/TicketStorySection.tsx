@@ -14,13 +14,28 @@
 //      through any PR on the ticket, else the ticket review's snapshot, else the sprint read's text.
 //   3. THE STORY'S DESIGN (StoryDesignSection.tsx) — only where agentic AI runs and the ticket has a PR.
 //
+// Between 1 and 2, where agentic AI runs: the DOCS CHECK (StoryDocsAlignment.tsx) — a click checks the
+// story against the workspace's reference docs. Its per-criterion notes sit UNDER the criteria rows of
+// 1 (both lists, through `docsItems`) only when the run was written against that same list
+// (`criteriaMatch`, lib/storyDocsAlignment.ts); otherwise the docs block draws its own numbered list.
+//
 // ⚠ NOTHING FETCHES ON MOUNT. The body (and every read in it) is mounted only while the section is open,
 // so a board of stacks makes no request per stack. The brief read (`GET /api/ticket-story`) runs only
 // when there is no ticket review to show.
-import { useId, useMemo, useState } from 'react';
-import { TRACKER_PROVIDER_LABEL, type SprintBrief, type TicketRef, type TicketReviewState } from '@pierre-review/shared';
+import { useId, useMemo, useState, type ReactNode } from 'react';
+import {
+  TRACKER_PROVIDER_LABEL,
+  storyDocsItemsByN,
+  type SprintBrief,
+  type StoryDocsCriterion,
+  type StoryDocsCriterionItem,
+  type TicketRef,
+  type TicketReviewState,
+} from '@pierre-review/shared';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { useStartStoryDocsAlignment, useStoryDocsAlignment, useStoryDocsStarting } from '../../hooks/useStoryDocsAlignment.js';
 import { useTicketReviewById } from '../../hooks/useTicketReview.js';
+import { criteriaMatch, shownRun, type StorySummaryKind } from '../../lib/storyDocsAlignment.js';
 import { useTicketStory } from '../../hooks/useTicketPrs.js';
 import type { CardTicket } from '../../lib/cardTickets.js';
 import { memberLabel, ticketCurrency } from '../../lib/ticketReview.js';
@@ -33,10 +48,12 @@ import { ReviewPrRefsProvider } from '../ReviewPrRefs.js';
 import { CurrencyPill, MemberCards, TicketResults } from '../TicketReviewParts.js';
 import { StoryDisclosure } from '../TicketStory.js';
 import { StoryDesignSection } from './StoryDesignSection.js';
+import { StoryDocsAlignmentBlock, StoryDocsCriterionDetail } from './StoryDocsAlignment.js';
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 /** Criteria listed before "Show all" (real stories itemise up to ~35). */
 const CRITERIA_SHOWN = 10;
+const NO_DOCS_ITEMS: ReadonlyMap<number, StoryDocsCriterionItem> = new Map();
 
 export function TicketStorySection({
   ticket,
@@ -105,14 +122,27 @@ function StoryBody({
   );
   const tracker = TRACKER_PROVIDER_LABEL[ticket.provider ?? 'jira'];
   const fallback = useMemo(() => storyFallbackTicket(storyQ.data, ticket.key, ticket.url), [storyQ.data, ticket.key, ticket.url]);
+  // THE DOCS CHECK. Read only here, in the open body. The review's criteria are known only inside
+  // ReviewSummary (its own read), so each summary folds `useDocsNotes` against the list it renders.
+  const docsQ = useStoryDocsAlignment(workspaceId, ticket.ident);
+  const docsStart = useStartStoryDocsAlignment(workspaceId, ticket.ident);
+  const docsStarting = useStoryDocsStarting(workspaceId, ticket.ident);
+  const docs: DocsCheck | null = ai.enabled ? { q: docsQ, start: docsStart, starting: docsStarting } : null;
+  const brief = summary.kind === 'brief' ? summary.brief : null;
+  const briefCriteria = useMemo<StoryDocsCriterion[] | null>(
+    () => brief?.criteria.map((c) => ({ n: c.n, text: c.text })) ?? null,
+    [brief],
+  );
+  const briefNotes = useDocsNotes(docs, summary.kind, briefCriteria);
   return (
     <>
       {summary.kind === 'review' && state != null ? (
-        <ReviewSummary runId={summary.runId} ticket={ticket} state={state} storyPrId={storyPrId} jiraRef={jiraRef} tracker={tracker} />
+        <ReviewSummary runId={summary.runId} ticket={ticket} state={state} storyPrId={storyPrId} jiraRef={jiraRef} tracker={tracker} docs={docs} />
       ) : (
         <>
-          {summary.kind === 'brief' && <BriefSummary brief={summary.brief} />}
+          {summary.kind === 'brief' && <BriefSummary brief={summary.brief} docsItems={briefNotes.items} />}
           {summary.kind === 'reading' && <p className={`text-xs ${MUTED}`}>Reading this ticket…</p>}
+          {briefNotes.block}
           <StoryDisclosure
             prId={storyPrId}
             jiraRef={jiraRef}
@@ -127,10 +157,41 @@ function StoryBody({
   );
 }
 
+/** The docs check's server state, read once per open body and handed to whichever summary leads. */
+interface DocsCheck {
+  q: ReturnType<typeof useStoryDocsAlignment>;
+  start: ReturnType<typeof useStartStoryDocsAlignment>;
+  starting: boolean;
+}
+
+/** The docs check's notes for the criteria list a summary renders (empty unless `criteriaMatch`), and
+ *  the block itself (null where agentic AI is off). */
+function useDocsNotes(
+  docs: DocsCheck | null,
+  kind: StorySummaryKind,
+  shownCriteria: readonly StoryDocsCriterion[] | null,
+): { items: ReadonlyMap<number, StoryDocsCriterionItem>; block: ReactNode } {
+  const run = shownRun(docs?.q.data);
+  const attached = criteriaMatch(run, kind, shownCriteria);
+  const items = useMemo(() => (attached ? storyDocsItemsByN(run?.result) : NO_DOCS_ITEMS), [attached, run]);
+  const block =
+    docs != null ? <StoryDocsAlignmentBlock q={docs.q} start={docs.start} starting={docs.starting} attached={attached} /> : null;
+  return { items, block };
+}
+
 /** The sprint brief: Claude Haiku's summary and the criteria, numbered, one sentence each. */
-function BriefSummary({ brief }: { brief: SprintBrief }): JSX.Element {
+function BriefSummary({
+  brief,
+  docsItems = NO_DOCS_ITEMS,
+}: {
+  brief: SprintBrief;
+  /** The docs check's notes by criterion number, when written against this list. */
+  docsItems?: ReadonlyMap<number, StoryDocsCriterionItem>;
+}): JSX.Element {
   const [all, setAll] = useState(false);
-  const shown = all ? brief.criteria : brief.criteria.slice(0, CRITERIA_SHOWN);
+  // Collapsed, a row past CRITERIA_SHOWN still shows when it carries a docs note — the note is drawn
+  // only under its row here (the block's own list is empty when attached), so hiding the row hides it.
+  const shown = all ? brief.criteria : brief.criteria.filter((c, i) => i < CRITERIA_SHOWN || docsItems.has(c.n));
   return (
     <div className="space-y-2" data-testid="story-brief">
       <div className="flex items-start gap-1.5">
@@ -152,12 +213,22 @@ function BriefSummary({ brief }: { brief: SprintBrief }): JSX.Element {
         <>
           {brief.criteriaDerived && <p className={`text-xs ${MUTED}`}>Worked out from the description</p>}
           <ol className="space-y-1" aria-label="Acceptance criteria">
-            {shown.map((c) => (
-              <li key={c.n} className="flex items-baseline gap-2 px-1 text-[13px] text-gray-800 dark:text-gray-100">
-                <span className={`w-5 shrink-0 text-right font-mono text-xs ${MUTED}`}>{c.n}</span>
-                <span className="min-w-0 break-words">{c.text}</span>
-              </li>
-            ))}
+            {shown.map((c) => {
+              const docs = docsItems.get(c.n);
+              return (
+                <li key={c.n} className="flex flex-col px-1 text-[13px] text-gray-800 dark:text-gray-100">
+                  <div className="flex items-baseline gap-2">
+                    <span className={`w-5 shrink-0 text-right font-mono text-xs ${MUTED}`}>{c.n}</span>
+                    <span className="min-w-0 break-words">{c.text}</span>
+                  </div>
+                  {docs != null && (
+                    <div className="pl-7">
+                      <StoryDocsCriterionDetail item={docs} />
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ol>
           {brief.criteria.length > CRITERIA_SHOWN && (
             <button
@@ -186,6 +257,7 @@ function ReviewSummary({
   storyPrId,
   jiraRef,
   tracker,
+  docs,
 }: {
   runId: number;
   ticket: CardTicket;
@@ -193,8 +265,15 @@ function ReviewSummary({
   storyPrId: number | null;
   jiraRef: TicketRef | null;
   tracker: string;
+  /** The docs check (null where agentic AI is off), drawn after the result, before the ticket as written. */
+  docs: DocsCheck | null;
 }): JSX.Element {
   const { data: review, isLoading, isError } = useTicketReviewById(runId);
+  const reviewCriteria = useMemo<StoryDocsCriterion[] | null>(() => {
+    const a = review?.status === 'succeeded' ? review.assessment : null;
+    return a != null ? a.criteria.map((c, i) => ({ n: i + 1, text: c.text })) : null;
+  }, [review]);
+  const docsNotes = useDocsNotes(docs, 'review', reviewCriteria);
   const members = useMemo(() => review?.members ?? [], [review]);
   const known = useMemo<KnownPr[]>(
     () => members.map((m) => ({ prId: m.prId, repoFullName: m.repo, number: m.number, title: m.title })),
@@ -202,7 +281,15 @@ function ReviewSummary({
   );
   const texts = useMemo(() => (review != null ? reviewTexts(null, [review]) : []), [review]);
   if (isLoading) return <p className={`text-xs ${MUTED}`}>Loading…</p>;
-  if (isError || review == null) return <p className="text-xs text-red-600 dark:text-red-400">Could not load the story.</p>;
+  if (isError || review == null) {
+    // The docs check does not need the review: with no criteria it draws the run's own numbered list.
+    return (
+      <div className="space-y-2">
+        <p className="text-xs text-red-600 dark:text-red-400">Could not load the story.</p>
+        {docsNotes.block}
+      </div>
+    );
+  }
   const labelOf = (prId: number): string | null => {
     const m = members.find((x) => x.prId === prId);
     return m != null ? memberLabel(m) : null;
@@ -225,11 +312,12 @@ function ReviewSummary({
           </div>
         )}
         {review.status === 'succeeded' ? (
-          <TicketResults review={review} viewedPrId={null} />
+          <TicketResults review={review} viewedPrId={null} docsItems={docsNotes.items} />
         ) : (
           <p className={`text-xs ${MUTED}`}>No result stored.</p>
         )}
         <MemberCards members={members} />
+        {docsNotes.block}
         <StoryDisclosure
           prId={storyPrId ?? review.originPrId}
           jiraRef={jiraRef}

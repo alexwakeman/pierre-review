@@ -188,6 +188,7 @@ describe('tierFor — reference docs', () => {
     expect(tiers('POST', '/api/docs/url')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/docs/7/rebuild')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/docs/chat')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/docs/story-alignment')).toEqual(['ai', 'ai_hourly']);
   });
   it('keeps the stored reads and the housekeeping on read', () => {
     expect(tiers('GET', '/api/docs')).toEqual(['read']);
@@ -197,6 +198,7 @@ describe('tierFor — reference docs', () => {
     expect(tiers('POST', '/api/docs/7/cancel')).toEqual(['read']);
     expect(tiers('DELETE', '/api/docs/7')).toEqual(['read']);
     expect(tiers('GET', '/api/docs/chats')).toEqual(['read']);
+    expect(tiers('GET', '/api/docs/story-alignment')).toEqual(['read']);
     expect(tiers('DELETE', '/api/docs/chats/abcdef0123456789')).toEqual(['read']);
     expect(tiers('PUT', '/api/workspaces/3/docs-settings')).toEqual(['read']);
   });
@@ -204,6 +206,7 @@ describe('tierFor — reference docs', () => {
     expect(tiers('GET', '/api/docs/upload')).not.toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/docs/7/rebuilds')).not.toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/docsx/chat')).not.toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/docs/story-alignments')).not.toEqual(['ai', 'ai_hourly']);
   });
 });
 

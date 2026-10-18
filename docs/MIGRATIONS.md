@@ -1370,6 +1370,18 @@ run), the last attempt `attempt_at` / `attempt_hash` / `attempt_error`, today's 
 written or read, kept for their rows (`sprint_story` is still erased). Journal `when` sqlite
 `1792137607016` / pg `1792137607017`. ⚠ pg `0107` NOT replayed.
 
+### `0121_story_docs_alignments` (pg `0108`) — check a story against the docs
+New table `story_docs_alignments`: ONE row PER RUN (a click) — `ident`, `ticket_key`, `status`, the
+`fingerprint` + its parts `story_hash` / `criteria_hash` / `library_hash` / `version`, `criteria_source`,
+`criteria_json` / `shortlist_json` / `result_json` (sqlite text JSON / pg jsonb), `error`, `shortlist_model`,
+`model`, `cost_usd` (both calls), tokens, turns, `created_at` / `started_at` / `completed_at`. NO unique
+index (so no `onConflictDoUpdate` target to keep in step); indexes `(account_id, workspace_id, ident, id)`
+and `(account_id, created_at)` (the daily cap). Account FK (cascade) + the NAMED composite FK
+`story_docs_alignments_workspace_account_fk` onto `workspaces (id, account_id)`, ON DELETE cascade — a
+deleted workspace takes its runs (their links name THAT library; NOT re-homed to Default by
+`deleteWorkspace`). In `accountScopedTables()`, erased, checked by `verify:isolation`; not exported (model
+output, regenerable). Journal `when` sqlite `1792137608016` / pg `1792137608017`. ⚠ pg `0108` NOT replayed.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

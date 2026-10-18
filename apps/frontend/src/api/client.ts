@@ -10,6 +10,9 @@ import type {
   ReferenceDocsSettings,
   AddReferenceDocUrlBody,
   SetReferenceDocsSettingsBody,
+  StartStoryDocsAlignmentBody,
+  StartStoryDocsAlignmentResponse,
+  StoryDocsAlignmentResponse,
   PrSequenceDiagramsResponse,
   RedrawSequenceDiagramResponse,
   RedrawStoryDiagramBody,
@@ -1632,6 +1635,13 @@ export const api = {
     fetch('/api/sequence-diagrams/story/redraw', jsonBody('POST', { ident } satisfies RedrawStoryDiagramBody)).then((r) =>
       handle<RedrawSequenceDiagramResponse>(r),
     ),
+
+  // ---- CHECK A STORY AGAINST THE DOCS (CORE, local-only; docs/API.md § Check a story against the docs) ----
+  // The GET reads the STORED run (no model, no tracker call); the POST queues one on a click.
+  storyDocsAlignment: (workspaceId: number, ident: string) =>
+    get<StoryDocsAlignmentResponse>(`/api/docs/story-alignment?${workspaceParam(workspaceId)}&ident=${encodeURIComponent(ident)}`),
+  startStoryDocsAlignment: (body: StartStoryDocsAlignmentBody) =>
+    fetch('/api/docs/story-alignment', jsonBody('POST', body)).then((r) => handle<StartStoryDocsAlignmentResponse>(r)),
 
   // ---- REFERENCE DOCS (CORE, local-only; docs/REFERENCE-DOCS.md, docs/API.md § Reference docs) ----
   // Every read is the workspace's stored library; only upload / url / rebuild / chat run a model.

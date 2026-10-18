@@ -1,0 +1,263 @@
+// CHECK A STORY AGAINST THE DOCS — the Story section's docs block (TicketStorySection.tsx; docs/FRONTEND.md
+// § The story view). CORE, free, LOCAL ONLY (`me.ai.enabled`), and only on a CLICK: Claude Haiku picks the
+// sections of the workspace's reference library that could matter, then Claude Sonnet reads only those
+// documents and says where the story matches them and where it does not.
+//
+//   StoryDocsAlignmentBlock   the heading, the ⓘ, the button, progress, failure, and the whole-story
+//                             result: verdict, 2-3 sentences, actionable bullets, points on other parts
+//                             of the story, and — when the notes cannot sit under the section's own
+//                             criteria — the run's own numbered list
+//   StoryDocsCriterionDetail  ONE criterion's note, drawn UNDER that criterion's row (both criteria
+//                             lists of the Story section take it through an optional prop)
+//   StoryDocsRefLinks         every reference: the in-app library link (DocLink) and its quote beneath
+//
+// Every point was kept by the server only because its quote was found in the linked section, so the
+// lists are drawn as stored. All text is PLAIN TEXT. A verdict is a WORD and an icon, never a colour alone.
+import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
+import {
+  STORY_DOCS_ITEM_VERDICT_LABEL,
+  STORY_DOCS_OVERALL_VERDICT_LABEL,
+  STORY_DOCS_REFUSAL_TEXT,
+  type StartStoryDocsAlignmentResponse,
+  type StoryDocsAlignmentResponse,
+  type StoryDocsAlignmentRun,
+  type StoryDocsCriterionItem,
+  type StoryDocsItemVerdict,
+  type StoryDocsOverallVerdict,
+  type StoryDocsRef,
+} from '@pierre-review/shared';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { TICKET_CRITERION_STATUS_CLASS, OUTDATED_CLASS } from '../../lib/claudeReviewFollowUp.js';
+import { citationLabel } from '../../lib/referenceDocs.js';
+import { REVIEW_CHIP, REVIEW_PROSE } from '../../lib/reviewStyles.js';
+import { clickMessageStale, docsButtonLabel, docsChecking, docsProgressText, shownRun } from '../../lib/storyDocsAlignment.js';
+import { AiRunGate } from '../AiSetup.js';
+import { DocLink } from '../DocReferences.js';
+import { CheckCircleIcon, PartialCircleIcon, WarningIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
+
+const MUTED = 'text-gray-500 dark:text-gray-400';
+const BTN =
+  'rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
+
+type Tone = 'good' | 'mid' | 'bad';
+const OVERALL_TONE: Record<StoryDocsOverallVerdict, Tone> = { aligned: 'good', mixed: 'mid', diverges: 'bad' };
+const ITEM_TONE: Record<StoryDocsItemVerdict, Tone> = { aligned: 'good', partly: 'mid', diverges: 'bad' };
+// The measured chip palette the ticket review's criteria already wear (met / partly met / not met).
+const TONE_CLASS: Record<Tone, string> = {
+  good: TICKET_CRITERION_STATUS_CLASS.met,
+  mid: TICKET_CRITERION_STATUS_CLASS.partly_met,
+  bad: TICKET_CRITERION_STATUS_CLASS.not_met,
+};
+
+function ToneIcon({ tone }: { tone: Tone }): JSX.Element {
+  if (tone === 'good') return <CheckCircleIcon size={11} aria-hidden />;
+  if (tone === 'mid') return <PartialCircleIcon size={11} aria-hidden />;
+  return <WarningIcon size={11} aria-hidden />;
+}
+
+/** Every reference: the library link, then the quote it rests on. */
+export function StoryDocsRefLinks({ refs }: { refs: readonly StoryDocsRef[] }): JSX.Element | null {
+  if (refs.length === 0) return null;
+  return (
+    <ul className="mt-1 space-y-1">
+      {refs.map((r, i) => (
+        <li key={`${r.path}#${r.anchor ?? ''}-${i}`}>
+          <DocLink target={r}>{citationLabel(r)}</DocLink>
+          <blockquote className="mt-0.5 border-l-2 border-gray-300 pl-2 text-xs italic text-gray-700 dark:border-gray-600 dark:text-gray-300">
+            {r.quote}
+          </blockquote>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** One criterion's note against the docs, drawn under the criterion's own row. */
+export function StoryDocsCriterionDetail({ item }: { item: StoryDocsCriterionItem }): JSX.Element {
+  const tone = ITEM_TONE[item.verdict];
+  return (
+    <div className="mt-1 rounded border-l-2 border-gray-200 py-0.5 pl-2 dark:border-gray-700" data-testid="story-docs-criterion">
+      <div className="flex flex-wrap items-baseline gap-1.5">
+        <span className={`${REVIEW_CHIP} ${TONE_CLASS[tone]}`}>
+          <ToneIcon tone={tone} />
+          {`Docs: ${STORY_DOCS_ITEM_VERDICT_LABEL[item.verdict]}`}
+        </span>
+        {item.note !== '' && <span className="min-w-0 break-words text-xs text-gray-800 dark:text-gray-200">{item.note}</span>}
+      </div>
+      <StoryDocsRefLinks refs={item.refs} />
+    </div>
+  );
+}
+
+function StoryDocsInfo(): JSX.Element {
+  return (
+    <InfoButton title="Check against the docs">
+      <p>
+        Claude reads this story — its description and acceptance criteria — against the workspace's reference docs
+        (Activity → Docs).
+      </p>
+      <p>
+        First Claude Haiku picks up to 8 sections that could matter. Then Claude Sonnet reads only those documents and says
+        where the story matches the docs and where it does not.
+      </p>
+      <p>
+        It only comments on criteria the docs say something about. Every point links to the passage it rests on; anything it
+        could not back with an exact quote is left out.
+      </p>
+      <p>
+        The criteria are the ones shown here: from Claude's check against the pull requests, else from the sprint summary,
+        else worked out from the description.
+      </p>
+      <p>
+        It runs only when you press the button, on your own Claude. Out of date means the story, its criteria or the docs
+        changed since.
+      </p>
+    </InfoButton>
+  );
+}
+
+export function StoryDocsAlignmentBlock({
+  q,
+  start,
+  starting,
+  attached,
+}: {
+  q: UseQueryResult<StoryDocsAlignmentResponse>;
+  start: UseMutationResult<StartStoryDocsAlignmentResponse, Error, void>;
+  /** A click for this ticket is in flight in any mount. */
+  starting: boolean;
+  /** The per-criterion notes sit under the section's own criteria rows (else they are drawn here). */
+  attached: boolean;
+}): JSX.Element | null {
+  const ai = useAiCapabilities();
+  const data = q.data;
+  if (!ai.enabled || data == null) return null;
+  const shown = shownRun(data);
+  if (!data.available && data.run == null && shown == null) return null;
+  const checking = docsChecking(data, starting);
+  const progress = checking ? docsProgressText(data.run?.status, starting) : null;
+  // While a click is pending the old run is still `data.run`: never show its failure under "Starting…".
+  const failed = !starting && data.run?.status === 'failed' ? data.run : null;
+  // This mount's own click answer, hidden while a click is pending and once a newer run exists.
+  const clickStale = starting || clickMessageStale(data.run, start.submittedAt);
+  const refusal = !clickStale && start.data?.outcome === 'refused' ? STORY_DOCS_REFUSAL_TEXT[start.data.refusal] : null;
+  return (
+    <section aria-label="Docs check" className="space-y-2" data-testid="story-docs">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">Docs check</h4>
+        <StoryDocsInfo />
+        {shown != null && !shown.current && !checking && (
+          <span className={`${REVIEW_CHIP} ${OUTDATED_CLASS}`}>
+            <WarningIcon size={11} aria-hidden />
+            Out of date
+          </span>
+        )}
+        {data.available && (
+          <span className="ml-auto">
+            <AiRunGate>
+              <button type="button" className={BTN} disabled={checking} onClick={() => start.mutate()}>
+                {docsButtonLabel(data, starting)}
+              </button>
+            </AiRunGate>
+          </span>
+        )}
+      </div>
+      {progress != null && <p className={`text-xs ${MUTED}`}>{progress}</p>}
+      {failed != null && <p className="text-xs text-red-600 dark:text-red-400">{failed.error ?? 'The docs check failed.'}</p>}
+      {refusal != null && <p className={`text-xs ${MUTED}`}>{refusal}</p>}
+      {start.isError && !clickStale && <p className="text-xs text-red-600 dark:text-red-400">{start.error.message}</p>}
+      {shown != null && <StoryDocsResultView run={shown} attached={attached} />}
+    </section>
+  );
+}
+
+function StoryDocsResultView({ run, attached }: { run: StoryDocsAlignmentRun; attached: boolean }): JSX.Element | null {
+  const result = run.result;
+  if (result == null) return null;
+  if (result.outcome === 'no_relevant_docs') {
+    return <p className={`text-xs ${MUTED}`}>Nothing in the reference docs bears on this story.</p>;
+  }
+  if (result.outcome === 'nothing_grounded' || result.overall == null) {
+    return <p className={`text-xs ${MUTED}`}>Claude found nothing it could back with a quote from the docs.</p>;
+  }
+  const overall = result.overall;
+  const tone = OVERALL_TONE[overall.verdict];
+  // The notes not drawn under the section's own rows: the run's own numbered list. A derived run lists
+  // every criterion Claude worked out; any other only the ones with a note.
+  const derived = run.criteriaSource === 'derived';
+  const itemsByN = new Map(result.criteria.map((c) => [c.n, c]));
+  const ownList = attached ? [] : run.criteria.filter((c) => derived || itemsByN.has(c.n));
+  return (
+    <div className="space-y-2">
+      <div>
+        <span className={`${REVIEW_CHIP} ${TONE_CLASS[tone]}`}>
+          <ToneIcon tone={tone} />
+          {STORY_DOCS_OVERALL_VERDICT_LABEL[overall.verdict]}
+        </span>
+      </div>
+      <p className={`${REVIEW_PROSE} text-gray-800 dark:text-gray-100`}>{overall.summary}</p>
+      {overall.actions.length > 0 && (
+        <div className="space-y-1">
+          <h5 className="text-xs font-semibold text-gray-700 dark:text-gray-200">What to do</h5>
+          <ul className="list-disc space-y-1.5 pl-5">
+            {overall.actions.map((a, i) => (
+              <li key={i} className="text-[13px] text-gray-800 dark:text-gray-100">
+                <span className="break-words">{a.text}</span>
+                <StoryDocsRefLinks refs={a.refs} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {result.storyParts.length > 0 && (
+        <div className="space-y-1">
+          <h5 className="text-xs font-semibold text-gray-700 dark:text-gray-200">Other parts of the story</h5>
+          <ul className="space-y-1.5">
+            {result.storyParts.map((p, i) => {
+              const t = ITEM_TONE[p.verdict];
+              return (
+                <li key={i} className="rounded border border-gray-100 px-3 py-2 dark:border-gray-800">
+                  <div className="flex flex-wrap items-baseline gap-1.5">
+                    <span className="text-[13px] font-semibold text-gray-800 dark:text-gray-100">{p.part}</span>
+                    <span className={`${REVIEW_CHIP} ${TONE_CLASS[t]}`}>
+                      <ToneIcon tone={t} />
+                      {STORY_DOCS_ITEM_VERDICT_LABEL[p.verdict]}
+                    </span>
+                  </div>
+                  {p.note !== '' && <p className="mt-0.5 break-words text-xs text-gray-800 dark:text-gray-200">{p.note}</p>}
+                  <StoryDocsRefLinks refs={p.refs} />
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+      {ownList.length > 0 && (
+        <div className="space-y-1">
+          <h5 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+            {derived ? 'Criteria worked out from the description' : 'Criteria as they read when checked'}
+          </h5>
+          <ol className="space-y-1" aria-label="Criteria checked against the docs">
+            {ownList.map((c) => {
+              const item = itemsByN.get(c.n);
+              return (
+                <li key={c.n} className="flex flex-col px-1">
+                  <div className="flex items-baseline gap-2 text-[13px] text-gray-800 dark:text-gray-100">
+                    <span className={`w-5 shrink-0 text-right font-mono text-xs ${MUTED}`}>{c.n}</span>
+                    <span className="min-w-0 break-words">{c.text}</span>
+                  </div>
+                  {item != null && (
+                    <div className="pl-7">
+                      <StoryDocsCriterionDetail item={item} />
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      )}
+    </div>
+  );
+}

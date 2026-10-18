@@ -608,6 +608,12 @@ export const config = {
   // One docs-chat answer (Sonnet 5, read-only over the library).
   docsChatBudgetUsd: floatFromEnv('DOCS_CHAT_BUDGET_USD', 1),
   docsChatMaxTurns: intFromEnv('DOCS_CHAT_MAX_TURNS', 30),
+  // "Check against docs" on a story (review/story-docs/, docs/REFERENCE-DOCS.md § Check a story
+  // against the docs): a Haiku shortlist, then ONE Sonnet 5 read of only those documents. Every run is
+  // a click, so every run counts toward the daily cap (per account, per UTC day). Env only.
+  storyDocsDailyCap: intFromEnv('STORY_DOCS_ALIGNMENT_DAILY_CAP', 30),
+  storyDocsBudgetUsd: floatFromEnv('STORY_DOCS_ALIGNMENT_BUDGET_USD', 1.5),
+  storyDocsMaxTurns: intFromEnv('STORY_DOCS_ALIGNMENT_MAX_TURNS', 16),
   // ---- Story report (one Haiku run across 10-20 picked stories — review/story-report/) ----
   // Its OWN spend and turn caps (the trial run cost $0.02 in 21 turns). Env only — no route sets it.
   storyReportBudgetUsd: floatFromEnv('STORY_REPORT_BUDGET_USD', 1),

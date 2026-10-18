@@ -25,6 +25,9 @@ const ROUTES: Array<{ method: 'GET' | 'POST' | 'PUT'; url: string }> = [
   // "Ask Claude about this sprint" (Activity → This Sprint) — agentic: cloud must register none of it.
   // ("Check against code" is REMOVED in both modes.)
   { method: 'POST', url: '/api/sprint-graph/ask' },
+  // "Check against docs" on a story — agentic: cloud must register none of it.
+  { method: 'GET', url: '/api/docs/story-alignment' },
+  { method: 'POST', url: '/api/docs/story-alignment' },
 ];
 
 const saved = { ...process.env };

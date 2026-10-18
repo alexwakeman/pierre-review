@@ -43,6 +43,9 @@ import type {
   ReferenceDocSectionEntry,
   ReviewDocReference,
   ReferenceDocCitation,
+  StoryDocsAlignmentResult,
+  StoryDocsCriterion,
+  StoryDocsShortlistEntry,
   SonarQualityGate,
   FindingAutoResolveRecord,
   ClaudeFindingReminder,
@@ -3522,6 +3525,64 @@ export const referenceDocChatMessages = sqliteTable(
     conversationIdx: index('reference_doc_chat_conversation').on(t.accountId, t.workspaceId, t.conversationId),
     workspaceAccountFk: foreignKey({
       name: 'reference_doc_chat_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- CHECK A STORY AGAINST THE DOCS (migration 0121 / pg 0108; docs/REFERENCE-DOCS.md § Check a story
+// against the docs) ----
+// story_docs_alignments — ONE row per RUN (a click): a Haiku shortlist of library sections, then a
+// Sonnet read of only those documents, checked against the story's text and acceptance criteria. A
+// re-run is a NEW row, so the last good result stays shown while it runs and after it fails.
+// `workspace_id` arrives in request bodies, so its FK is the named COMPOSITE one; the rows go with the
+// workspace (their links point into THAT workspace's library — never re-homed to Default).
+export const storyDocsAlignments = sqliteTable(
+  'story_docs_alignments',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    // The tracker ticket ident (never a manual one).
+    ident: text('ident').notNull(),
+    ticketKey: text('ticket_key'),
+    // StoryDocsAlignmentStatus.
+    status: text('status').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    storyHash: text('story_hash').notNull(),
+    criteriaHash: text('criteria_hash').notNull(),
+    libraryHash: text('library_hash').notNull(),
+    // STORY_DOCS_ALIGNMENT_VERSION when the run was queued.
+    version: integer('version').notNull(),
+    // StoryDocsCriteriaSource.
+    criteriaSource: text('criteria_source').notNull(),
+    // The criteria checked: as given at queue time, or Claude's (derived) at success.
+    criteriaJson: text('criteria_json', { mode: 'json' }).$type<StoryDocsCriterion[]>(),
+    shortlistJson: text('shortlist_json', { mode: 'json' }).$type<StoryDocsShortlistEntry[]>(),
+    // Set only on success.
+    resultJson: text('result_json', { mode: 'json' }).$type<StoryDocsAlignmentResult>(),
+    error: text('error'),
+    shortlistModel: text('shortlist_model'),
+    model: text('model'),
+    // Both model calls, US$.
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    // The newest row (and the newest succeeded row) per story.
+    subjectIdx: index('story_docs_alignments_subject_idx').on(t.accountId, t.workspaceId, t.ident, t.id),
+    // The daily cap (rows since a UTC day start).
+    accountCreatedIdx: index('story_docs_alignments_account_created').on(t.accountId, t.createdAt),
+    workspaceAccountFk: foreignKey({
+      name: 'story_docs_alignments_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),

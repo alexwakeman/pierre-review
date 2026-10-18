@@ -25,6 +25,8 @@ import { registerSprintAskRoutes } from './sprint-ask/routes.js';
 import { runOpen } from '../api/routes/conflicts.js';
 import { registerReferenceDocsRoutes } from '../reference-docs/routes.js';
 import { reconcileReferenceDocsOnStartup } from '../reference-docs/startup.js';
+import { registerStoryDocsRoutes } from './story-docs/routes.js';
+import { reconcileStoryDocsOnStartup } from './story-docs/manager.js';
 
 // THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, the chat, auto
 // review), the ticket review (one run per ticket across its PRs, + its cascade sweeper), the CI
@@ -78,6 +80,9 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // THE REFERENCE DOCS LIBRARY (Activity → Docs): upload / URL → a Sonnet 5 build into a markdown
   // tree (INDEX → CONTENTS → sections) + the docs chat. Agentic and local-only, so here and nowhere else.
   registerReferenceDocsRoutes(app, ctx);
+  // CHECK A STORY AGAINST THE DOCS: on a click only, a Haiku shortlist of library sections, then a
+  // Sonnet read of ONLY those documents (review/story-docs/). Agentic and local-only.
+  registerStoryDocsRoutes(app, ctx);
   return ctx;
 }
 
@@ -124,6 +129,11 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
     await reconcileReferenceDocsOnStartup(ctx);
   } catch (err) {
     app.log.warn({ err }, 'reference docs: startup reconcile failed');
+  }
+  try {
+    await reconcileStoryDocsOnStartup(ctx);
+  } catch (err) {
+    app.log.warn({ err }, 'story docs: startup reconcile failed');
   }
   try {
     await reconcileStoryReportsOnStartup();

@@ -6,6 +6,7 @@
 //   DocReferenceList        the compact list: verdict chip, "Document › Section" link, quote, note
 //   DocReferencesSection    the Claude Review tab's section shell around it
 //   DocCitationLinks        a finding's "Reference: Document › Section" links
+//   DocLink                 one library link (also the story docs check, Activity/StoryDocsAlignment.tsx)
 //
 // Every link opens the section in Activity → Docs: a click seats it in-app (store/openDocs.ts), and the
 // href is a real deep link (lib/docReferences.ts) for a new tab. All text is PLAIN TEXT — a quote is the
@@ -39,7 +40,7 @@ const SPA_BASE = '/app/';
  * or a deep link may belong to another workspace, whose library has other documents under the same
  * slugs. A reference stored before the field existed has no workspace, and is shown as a plain label.
  */
-function DocLink({ target, children }: { target: ReferenceDocCitation; children: ReactNode }): JSX.Element {
+export function DocLink({ target, children }: { target: ReferenceDocCitation; children: ReactNode }): JSX.Element {
   const workspaceId = target.workspaceId ?? null;
   if (workspaceId == null) {
     return (

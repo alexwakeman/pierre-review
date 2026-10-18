@@ -27,7 +27,9 @@ import {
   type TicketReview,
   type TicketReviewItem,
   type TicketReviewMember,
+  type StoryDocsCriterionItem,
 } from '@pierre-review/shared';
+import { StoryDocsCriterionDetail } from './Activity/StoryDocsAlignment.js';
 import { ApiError } from '../api/client.js';
 import { usePostTicketItem } from '../hooks/useTicketReview.js';
 import {
@@ -243,14 +245,21 @@ export function CriterionRow({
   onOpenInChanges,
   actions = true,
   selection = null,
-}: RowContext & PickerRowProps & { c: TicketCriterion; item: TicketReviewItem | undefined }): JSX.Element {
+  docs,
+}: RowContext &
+  PickerRowProps & {
+    c: TicketCriterion;
+    item: TicketReviewItem | undefined;
+    /** The story docs check's note on this criterion (Story section only); absent ⇒ nothing drawn. */
+    docs?: StoryDocsCriterionItem;
+  }): JSX.Element {
   const done = deliveredByLabel(c, review.members);
   const belongs = expectedInLabel(c.expectedIn, review.members);
   const refProps = { viewedPrId, members: review.members, changedPaths, onOpenInChanges };
   // MET is one compact line: tick, ref, criterion, who delivered it.
   if (c.status === 'met') {
-    return (
-      <li className="flex items-baseline gap-2 px-1 text-[13px]">
+    const line = (
+      <>
         <span className="shrink-0 self-center text-green-700 dark:text-green-400" aria-label="Met">
           <CheckIcon size={12} />
         </span>
@@ -264,6 +273,15 @@ export function CriterionRow({
             </span>
           )}
         </span>
+      </>
+    );
+    if (docs == null) return <li className="flex items-baseline gap-2 px-1 text-[13px]">{line}</li>;
+    return (
+      <li className="flex flex-col px-1 text-[13px]">
+        <div className="flex items-baseline gap-2">{line}</div>
+        <div className="pl-5">
+          <StoryDocsCriterionDetail item={docs} />
+        </div>
       </li>
     );
   }
@@ -295,6 +313,7 @@ export function CriterionRow({
         </p>
       )}
       {actions && item != null && <ItemAction item={item} review={review} viewedPrId={viewedPrId} />}
+      {docs != null && <StoryDocsCriterionDetail item={docs} />}
     </li>
   );
 }
@@ -409,11 +428,15 @@ export function TicketResults({
   viewedPrId,
   changedPaths = NO_PATHS,
   onOpenInChanges,
+  docsItems,
 }: {
   review: TicketReview;
   viewedPrId: number | null;
   changedPaths?: ReadonlySet<string>;
   onOpenInChanges?: OpenInChanges;
+  /** The story docs check's notes by criterion number (`AC{n}` = array position n); the Story section
+   *  passes them only when they were written against THIS list. The PR pane passes nothing. */
+  docsItems?: ReadonlyMap<number, StoryDocsCriterionItem>;
 }): JSX.Element {
   const a = review.assessment;
   const byRef = useMemo(() => itemsByRef(review.items), [review.items]);
@@ -427,8 +450,8 @@ export function TicketResults({
       {a.summary != null && a.summary !== '' && <Markdown prRefs>{a.summary}</Markdown>}
       {a.criteria.length > 0 && (
         <ul className="space-y-1.5">
-          {a.criteria.map((c) => (
-            <CriterionRow key={c.ref} c={c} item={byRef.get(c.ref)} {...ctx} />
+          {a.criteria.map((c, i) => (
+            <CriterionRow key={c.ref} c={c} item={byRef.get(c.ref)} docs={docsItems?.get(i + 1)} {...ctx} />
           ))}
         </ul>
       )}

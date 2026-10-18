@@ -53,6 +53,7 @@ import type {
   SonarPrResponse,
   PrSequenceDiagramsResponse,
   TicketSequenceDiagramResponse,
+  StoryDocsAlignmentResponse,
   SprintGraphResponse,
 } from '@pierre-review/shared';
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
@@ -1093,6 +1094,17 @@ export async function installMockApi(page: Page): Promise<void> {
           diagram: null,
           latest: null,
         } satisfies TicketSequenceDiagramResponse);
+      }
+      // The Story section's docs check (asked only from an OPEN Story section, and only with AI on).
+      if (path.endsWith('/api/docs/story-alignment') && route.request().method() === 'GET') {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          ident: new URL(route.request().url()).searchParams.get('ident') ?? '',
+          available: false,
+          docCount: 0,
+          run: null,
+          lastSucceeded: null,
+        } satisfies StoryDocsAlignmentResponse);
       }
       // REFERENCE DOCS (core, local-only; docs/REFERENCE-DOCS.md). `ai.enabled` is false here, so the
       // Docs rail line and its Settings switch are absent — these answer an EMPTY library for a spec

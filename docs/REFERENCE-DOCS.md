@@ -282,6 +282,54 @@ serializer never emits those keys). The quote and note render as PLAIN TEXT.
 Not done: posting references to GitHub (a library link means nothing there), and folding the library into
 the sprint brief / story passes (above).
 
+## Check a story against the docs (`review/story-docs/`; sqlite `0121` / pg `0108`)
+
+A per-story button in the Story section (Open PRs ticket stack and the story view). MANUAL ONLY — never
+automatic, never on view. CORE, free, LOCAL ONLY: `registerAgenticRoutes` registers the two routes (docs/API.md
+§ Check a story against the docs). Contract: `packages/shared/src/story-docs-alignment.ts`.
+
+- **The gate** is `docCount > 0` (a built document in THIS workspace) + agentic AI on. It IGNORES the
+  `docs_in_review` switch (that switch is about reviews; the click is the consent) — so it does NOT use
+  `docsContextFor(...).usable`.
+- **The inputs** are the Story section's (`inputs.ts`): criteria = the latest succeeded ticket review's
+  (array order = AC1…, an empty list still wins), else the CURRENT sprint brief's numbered ones, else
+  `derived` (Claude works up to 12 out of the description, stored with the run). Text = the tracker's stored
+  story (`jiraStoryFor`), else the review's ticket snapshot, else the sprint read's text. No criteria and no
+  description / acceptance-criteria text ⇒ `no_story`. DB + disk only.
+- **Step 1, the shortlist** (`shortlist.ts`, Haiku 5.5, one `cheapComplete`, one retry on an unparseable
+  answer — including a non-empty list of which no entry survives the check): the fenced story + INDEX.md + each built document's CONTENTS.md (≤ 60 000 chars in all; the rest
+  are listed by section title) → ≤ 8 section links. Every entry is checked (`citationOf` → strict grammar, a
+  section of a BUILT document, listed in its stored sections, on disk) or dropped. Only a genuinely EMPTY
+  `sections: []` ends the run `no_relevant_docs` with NO second call; a list that drops to nothing retries,
+  then fails ("Claude could not pick the sections to read.") — never a false "nothing bears on it".
+- **Step 2, the read** (`agent.ts`, Sonnet 5, ≤ `STORY_DOCS_ALIGNMENT_MAX_TURNS` 16 turns,
+  `STORY_DOCS_ALIGNMENT_BUDGET_USD` $1.50): Read/Glob/Grep + `submit_alignment`; Bash, every write tool, the
+  web and dispatch denied. ⚠ **The path guard's ONLY read-only roots are the SHORTLISTED documents' folders**
+  (`storyDocsRoots`, the same list the prompt names) — never the library folder, so INDEX.md and every other
+  document are unreachable. The working directory is an empty scratch dir.
+- **Grounding = DROP** (`validate.ts`): every reference goes through `validateDocReferences` against the
+  library snapshot FILTERED to the shortlisted documents; a criterion note, story point or action left with no
+  checked reference is discarded. The tool refuses SHAPE only (verdicts, a 2-3 sentence summary, 2-6
+  actions, criterion numbers, every item has a reference, no quote under `REVIEW_DOC_QUOTE_MIN_CHARS` letters —
+  the grounding minimum, also stated in the prompt and the tool schema), ≤ 3 attempts; a quote that does not check out is
+  never sent back, so it cannot loop. At storage only an unusable overall fails the run; a malformed item is
+  dropped. Nothing survives ⇒ `nothing_grounded` (no overall summary is stored or shown).
+- **Currency** (`fingerprint.ts`): `story_hash` / `criteria_hash` / `library_hash` (built docs'
+  slug:builtAt:sectionCount) / version. The GET recomputes the live ones per read and reports
+  `current` + `staleBecause`. A click re-resolves the inputs at start ("check what is there now").
+- **Storage**: `story_docs_alignments`, ONE ROW PER RUN — a re-run never rewrites the good row, and the GET
+  returns `lastSucceeded` beside a newer failed or in-flight run. Composite FK onto `workspaces`; a deleted
+  workspace takes its runs with it (their links name THAT library — never re-homed to Default). In
+  `accountScopedTables()`, erased, checked by `verify:isolation`.
+- **The queue** (`manager.ts`): one claim per (account, workspace, ident), one FIFO lane (≤ 10 waiting ⇒ 409),
+  the shared review slot as a PEER (a PR-review click goes first). Per-account daily cap
+  `STORY_DOCS_ALIGNMENT_DAILY_CAP` (30, every row counts — every row is a click); a POST for a story already
+  held answers `already_running` with its id BEFORE the cap or any preflight. A wall-clock
+  `STORY_DOCS_TIMEOUT_MS` (10 min) aborts a wedged run ("Claude took too long. Run it again."), freeing the
+  claim and the slot. A restart fails every
+  in-flight run ("Stopped when Limn restarted. Run it again."). Usage: `story_docs_shortlist` (seam
+  `summary`) + `story_docs_alignment` (seam `agent`); the row's `cost_usd` is both.
+
 ## Tests
 
 `split.test.ts` (structure, merge scope, caps, atomic blocks, oversize cuts, limits) · `render.test.ts`
@@ -292,6 +340,10 @@ the sprint brief / story passes (above).
 remove, erasure deletes files) · `review-refs.test.ts` (the reference check — a quote not in its section,
 a link outside the library, header-only quotes, anchors; the OFF ⇒ unchanged pins) ·
 `review/path-guard.test.ts` (read-only roots) · `review/claude-review/docs-pipeline.test.ts` (on/off
-end to end). Not covered by a test: the ticket review's
+end to end) · `review/story-docs/` — `shortlist.test.ts` (bad / unbuilt / unlisted sections dropped, the
+retry, the CONTENTS budget), `validate.test.ts` (shape refused, ungrounded and out-of-range items dropped,
+`nothing_grounded`), `agent-policy.test.ts` (no shell or write tool; roots = the shortlisted documents only),
+`inputs.test.ts` (the criteria and text order), `routes-db.test.ts` (refusals, a run end to end with fake
+models, out of date, last good kept, tenancy, cap, restart), `routes-off.test.ts` (404 off). Not covered by a test: the ticket review's
 pipeline with the library (no pipeline test exists for it; its builders are pinned), and a real Word file through mammoth, a real agent
 run (PDF or sections), the SSE stream's event order.

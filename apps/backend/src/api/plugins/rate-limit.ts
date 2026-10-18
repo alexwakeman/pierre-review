@@ -495,10 +495,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //   POST   /api/docs/url              queues ONE build (which fetches the page)            → ai + ai_hourly
   //   POST   /api/docs/:id/rebuild      queues ONE build                                     → ai + ai_hourly
   //   POST   /api/docs/chat             ONE Sonnet 5 agent answer                            → ai + ai_hourly
+  //   POST   /api/docs/story-alignment  ONE Haiku shortlist + ONE Sonnet 5 read of a story   → ai + ai_hourly
+  //   GET    /api/docs/story-alignment  the stored runs (DB + disk)                          → read
   //   everything else (list, tree, section, stream, cancel, delete, chats, settings)         → read
   // The upload's bytes ride the same `ai` bucket: twenty 25 MB files a minute is far past a person
   // adding reference material, and a script hits the hourly window long before the disk notices.
-  if (method === 'POST' && (path === '/api/docs/upload' || path === '/api/docs/url' || path === '/api/docs/chat')) {
+  if (method === 'POST' && (path === '/api/docs/upload' || path === '/api/docs/url' || path === '/api/docs/chat' || path === '/api/docs/story-alignment')) {
     return [TIERS.ai, TIERS.aiHourly];
   }
   if (method === 'POST' && /^\/api\/docs\/\d+\/rebuild$/.test(path)) return [TIERS.ai, TIERS.aiHourly];

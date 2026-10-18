@@ -308,6 +308,19 @@ nothing), `ClaudeFinding.docCitations` (`ReferenceDocCitation[]`, absent when no
 against code", 2026-10-18). Every `path` is
 the same library-relative path `GET /api/docs/section` takes.
 
+### Check a story against the docs (CORE, local-only)
+
+`review/story-docs/routes.ts`, registered by `registerAgenticRoutes` (absent in cloud and under
+`LIMN_AI_DISABLED` → `404`). [REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Check a story against the docs. Wire
+types: `packages/shared/src/story-docs-alignment.ts`. The workspace resolves through
+`resolveWorkspaceScope` (absent / unknown / another account's ⇒ the caller's Default, echoed). A manual
+(`manual:`) or malformed ident → `400 BadIdent`.
+
+| Route | Contract |
+|---|---|
+| `GET /api/docs/story-alignment?workspace=&ident=` | `StoryDocsAlignmentResponse {workspaceId, ident, available, docCount, run, lastSucceeded}` — `available` = a BUILT document in this workspace (the `docsInReview` switch is not read); `run` = the newest run (any status), `lastSucceeded` = the newest succeeded one when `run` is not it. Each `StoryDocsAlignmentRun` carries `current` + `staleBecause` (`story` / `criteria` / `library` / `version`), recomputed per read; in flight ⇒ current. DB + disk only, no model, no tracker call. Tier `read` |
+| `POST /api/docs/story-alignment {workspaceId?, ident}` | Queue ONE check. In order: `200 {outcome:'refused', runId:null, refusal:'no_docs'}` (no built document), `'no_story'` (no text and no criteria), `400 NoClaudeAuth`, `402 CreditsExhausted`, `'daily_cap'` (`STORY_DOCS_ALIGNMENT_DAILY_CAP` per account per UTC day; no row). → `202 {outcome:'queued', runId}`, or `200 {outcome:'already_running', runId}` while one is held. `409 Busy` (> 10 waiting). Tiers **`ai` + `ai_hourly`** (matched ABOVE the `/api/docs/` `read` catch-all) |
+
 ### CI review (CORE, local-only)
 
 Why checks FAILED on a PR's head, as its own Claude process — the PR review no longer looks at CI
