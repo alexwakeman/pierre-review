@@ -201,7 +201,7 @@ upload), and checked by `verify:isolation`. [MIGRATIONS.md](MIGRATIONS.md).
 
 ## Use in reviews (`review-refs.ts`; sqlite `0117` / pg `0104`)
 
-Three agentic runs read the library when the workspace's switch (`docs_in_review`) is ON and a document is
+Two agentic runs read the library when the workspace's switch (`docs_in_review`) is ON and a document is
 built — `reviewDocsFor(accountId, workspaceId)` (context.ts) returns the folder exactly when
 `docsContextFor(…).usable`, and null on ANY error (the library is optional context; it never fails a run):
 
@@ -240,7 +240,7 @@ pasting sections into them would be the context overload the library exists to a
 
 ⚠ **SWITCH OFF (or nothing built) ⇒ BYTE-FOR-BYTE UNCHANGED.** Each builder takes the library as an optional
 argument and returns the pre-feature prompt / shape / policy without it: `systemPromptForMode(mode,
-specialists, null)`, `ticketReviewSystemPrompt(null)`, `sprintAssessSystemPrompt(mode, null)`, the three
+specialists, null)`, `ticketReviewSystemPrompt(null)`, the two
 `build…Shape(z)` and `reviewToolPolicy(mode, offered, false)`. `review-refs.test.ts` pins every one (the
 JSON schema too), and `docs-pipeline.test.ts` pins the PR review end to end (no folder, the base prompt,
 `docReferences: null`).

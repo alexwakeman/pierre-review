@@ -1,12 +1,12 @@
 import type { SprintGraphNode } from './sprint-graph.js';
 
 // THIS SPRINT'S PEOPLE — ONE entry per person, across the tracker and GitHub. The ONE mapping from a
-// tracker assignee to GitHub logins: the SPA's Members filter / person rooms (sprintGraphModel.ts
-// re-exports it) and the server's `SprintGraphResponse.people` (db/sprint-paths.ts `sprintPeopleOf`)
+// tracker assignee to GitHub logins: the SPA's People lanes (lib/laneBoard.ts `peopleBoard`)
+// and the server's `SprintGraphResponse.people` (db/sprint-paths.ts `sprintPeopleOf`)
 // both fold through it, so they can never disagree about who a person is.
 //
 // A ticket names its assignee as the TRACKER spells them ("Johny Farrar", "johny.farrar"); a PR names
-// its author by GitHub login and profile name ("jbfarrar" / "Johny Farrar"). The Members filter lists a
+// its author by GitHub login and profile name ("jbfarrar" / "Johny Farrar"). A People lane lists a
 // person ONCE and matches both their tickets and their PRs. The join is EXACT after setting aside case,
 // accents, spacing and the punctuation people use between name parts (`personNameKey`): an assignee
 // joins a GitHub author whose profile name or login reads the same, or whose login is the name run

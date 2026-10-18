@@ -1,5 +1,5 @@
 // THE LIBRARY IN REVIEWS — the shared validator, prompt block and tool fields (review-refs.ts), plus
-// the "switch off ⇒ nothing changes" guarantee for the three review runs that use it.
+// the "switch off ⇒ nothing changes" guarantee for the two review runs that use it.
 //
 //   ./node_modules/.bin/vitest run src/reference-docs/review-refs.test.ts   (from apps/backend)
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';

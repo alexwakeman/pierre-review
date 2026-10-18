@@ -304,7 +304,8 @@ reviews). With `docsInReview` on and a document built, three existing payloads c
 the quote is in it; anything else was dropped before storage):
 `ClaudeReview.docReferences` (null/absent = the run did not read the library; `[]` = it read it and kept
 nothing), `ClaudeFinding.docCitations` (`ReferenceDocCitation[]`, absent when none),
-`TicketAssessment.references` and `SprintAssessmentBody.references` (absent = not read). Every `path` is
+`TicketAssessment.references` (absent = not read; `SprintAssessmentBody.references` went with "Check
+against code", 2026-10-18). Every `path` is
 the same library-relative path `GET /api/docs/section` takes.
 
 ### CI review (CORE, local-only)
