@@ -19,6 +19,8 @@ import { ChevronIcon } from './Icons.js';
 
 // ── The shared arrow pieces (the design grid draws with these too) ───────────────────────────────
 
+const NONE_OCCUPIED: ReadonlyArray<{ row: number; col: number }> = [];
+
 export interface RoutedPath extends ArrowGeometry {
   key: string;
 }
@@ -26,12 +28,15 @@ export interface RoutedPath extends ArrowGeometry {
 /**
  * Measure every card and its padded slot, and route each arrow between two of them. Returns the refs to
  * hang on the grid, the cards and the slots, the routed paths, and whether the grid's box is narrower
- * than `narrowPx`. `cells` and `arrows` must be memoised by the caller (they key the re-measure).
+ * than `narrowPx`. `cells`, `arrows` and `occupied` must be memoised by the caller (they key the
+ * re-measure). `occupied` = other grid cells that hold something an arrow must not run through (the
+ * lane board's "n tickets" in a collapsed column).
  */
 export function useRoutedArrows(
   cells: ReadonlyArray<{ id: string; row: number; col: number }>,
   arrows: ReadonlyArray<{ key: string; from: string; to: string }>,
   narrowPx: number,
+  occupied: ReadonlyArray<{ row: number; col: number }> = NONE_OCCUPIED,
 ): {
   gridRef: React.MutableRefObject<HTMLDivElement | null>;
   cardRef: (id: string) => (el: HTMLElement | null) => void;
@@ -61,7 +66,7 @@ export function useRoutedArrows(
     const gapX = parseFloat(css.columnGap) || 0;
     const gapY = parseFloat(css.rowGap) || 0;
     const at = new Map(cells.map((c) => [c.id, c]));
-    const taken = new Set(cells.map((c) => `${c.row}:${c.col}`));
+    const taken = new Set([...cells, ...occupied].map((c) => `${c.row}:${c.col}`));
     const placed = (id: string): PlacedCard | null => {
       const card = cards.current.get(id);
       const slot = slots.current.get(id);
@@ -82,7 +87,7 @@ export function useRoutedArrows(
       lastSig.current = sig;
       setPaths(next);
     }
-  }, [cells, arrows, narrowPx]);
+  }, [cells, arrows, narrowPx, occupied]);
 
   useLayoutEffect(() => {
     measure();
@@ -239,7 +244,12 @@ export function LaneBoard<L, C>({
 }): JSX.Element {
   const cells = layout.cards;
   const arrows = layout.arrows;
-  const { gridRef, cardRef, slotRef, paths, narrow } = useRoutedArrows(cells, arrows, NARROW_PX);
+  // A collapsed column's "n tickets" sits in its lane's first row: an arrow routes round it, never through.
+  const occupied = useMemo(() => {
+    const colOf = new Map(layout.columns.map((c) => [c.id, c.index]));
+    return layout.lanes.flatMap((l) => [...l.hidden.keys()].flatMap((id) => (colOf.has(id) ? [{ row: l.row, col: colOf.get(id)! }] : [])));
+  }, [layout.columns, layout.lanes]);
+  const { gridRef, cardRef, slotRef, paths, narrow } = useRoutedArrows(cells, arrows, NARROW_PX, occupied);
   const numbers = useMemo(() => new Map(arrows.filter((a) => a.n != null).map((a) => [a.key, a.n!])), [arrows]);
   const critical = useMemo(() => new Set(arrows.filter((a) => a.critical).map((a) => a.key)), [arrows]);
   const col0 = narrow ? 1 : 2;

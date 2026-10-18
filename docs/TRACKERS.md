@@ -254,7 +254,7 @@ works whatever the buckets are.
   `auto: true` and the editor marks it "not placed yet".
 - **The merged column** (`mergedColumn`, default on): a DERIVED column, "Merged, not signed off" (id
   `merged`, never a bucket id), drawn after the last In review bucket — else after the last In progress
-  bucket, else before the first Complete bucket, else last. A ticket is drawn there when its bucket
+  bucket; with neither, it is not drawn (no ticket could sit in it). A ticket is drawn there when its bucket
   means In progress or In review and it has ≥ 1 merged PR and none open (closed unmerged ones
   ignored). `SprintGraphNode.column` carries it, computed ONCE in the graph fold
   (`sprintColumnOf`); `statusLayout.columns` is the drawn x axis.

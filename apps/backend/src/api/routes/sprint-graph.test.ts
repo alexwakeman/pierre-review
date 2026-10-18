@@ -541,4 +541,31 @@ describe('GET /api/ticket-story', () => {
     expect(((await get(id('ENG-1'), foreignWs)).json() as any).workspaceId).toBe(ownWs);
     expect((await app.inject({ method: 'GET', url: '/api/ticket-story' })).statusCode).toBe(400);
   });
+
+  it('a ticket that left the sprint but is still linked from it reads like the graph\'s ghost: the ref row\'s text and brief', async () => {
+    const { and, eq } = await import('drizzle-orm');
+    const briefs = await import('../../db/sprint-briefs.js');
+    const fresh = { title: 'ENG-5 (renamed since)', description: 'New text', acceptanceCriteria: '' };
+    await db
+      .insert(schema.sprintRefTickets)
+      .values({ accountId: 1, workspaceId: ownWs, ident: id('ENG-5'), provider: 'jira', apiRoot: ROOT, issueKey: 'ENG-5', ...fresh, statusName: 'In Review', statusCategory: 'indeterminate', url: null, readAt: new Date(), depth: 1 })
+      .execute();
+    const pending = (await get(id('ENG-5'))).json() as any;
+    expect(pending).toMatchObject({ found: true, briefState: 'pending', brief: null, story: { description: 'New text' } });
+    expect(pending.ticket).toMatchObject({ title: 'ENG-5 (renamed since)', status: { name: 'In Review' }, inSprint: false });
+    await briefs.storeSprintBrief(1, ownWs, id('ENG-5'), briefs.sprintBriefInput({ ...fresh, blockedByJson: null }, 'jira').textHash, {
+      summary: 'Brief of the ref text',
+      criteria: [],
+      criteriaDerived: true,
+      references: [],
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    expect((await get(id('ENG-5'))).json()).toMatchObject({ briefState: 'current', brief: { summary: 'Brief of the ref text' } });
+    const rt = schema.sprintRefTickets;
+    await db.delete(rt).where(and(eq(rt.accountId, 1), eq(rt.issueKey, 'ENG-5'))).execute();
+    // With no ref row, the old out-of-sprint row again: nothing will brief it.
+    expect((await get(id('ENG-5'))).json()).toMatchObject({ briefState: 'none', ticket: { title: 'Story ENG-5' } });
+  });
 });

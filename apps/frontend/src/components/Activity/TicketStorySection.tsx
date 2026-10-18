@@ -202,7 +202,7 @@ function ReviewSummary({
   );
   const texts = useMemo(() => (review != null ? reviewTexts(null, [review]) : []), [review]);
   if (isLoading) return <p className={`text-xs ${MUTED}`}>Loading…</p>;
-  if (isError || review == null) return <p className="text-xs text-red-600 dark:text-red-400">Could not load the story check.</p>;
+  if (isError || review == null) return <p className="text-xs text-red-600 dark:text-red-400">Could not load the story.</p>;
   const labelOf = (prId: number): string | null => {
     const m = members.find((x) => x.prId === prId);
     return m != null ? memberLabel(m) : null;

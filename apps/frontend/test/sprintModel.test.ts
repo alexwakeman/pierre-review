@@ -27,6 +27,7 @@ import {
   renameBucket,
   setBucketMeaning,
   statusPlaceOf,
+  statusesLeftOutOnSave,
   shareWords,
   statusEvidenceLine,
   statusOrderSourceLabel,
@@ -174,7 +175,7 @@ describe('status buckets', () => {
       'PO review:in_review:In PO Review',
       'Complete:done:Done',
     ]);
-    expect(bucketsDraftProblem(split)).toBeNull();
+    expect(bucketsDraftProblem(layout(), split)).toBeNull();
 
     // Delete: statuses move to the first other bucket of the same meaning, else the one before.
     expect(lists(removeBucket(split, 'b1'))).toEqual([['To Do'], ['In Development'], ['Ready for QA', 'In PO Review'], ['Done']]);
@@ -190,11 +191,11 @@ describe('status buckets', () => {
     const d = bucketsDraftOf(l);
     const moved = moveStatusTo(d, statusPlaceOf(d, 'Won’t do') as { bucket: number; index: number }, 3, 1);
     expect(lists(moved)[3]).toEqual(['Done', 'Won’t do']);
-    expect(bucketsDraftProblem(moveBucket(d, 3, -1))).toBe(
+    expect(bucketsDraftProblem(l, moveBucket(d, 3, -1))).toBe(
       '“In review” means In review, so it cannot come after a bucket that means Complete.',
     );
-    expect(bucketsDraftProblem(renameBucket(d, 'done', '  '))).toBe('Give every bucket a name.');
-    expect(bucketsDraftProblem(renameBucket(d, 'done', 'in review'))).toBe('Two buckets are called “in review”.');
+    expect(bucketsDraftProblem(l, renameBucket(d, 'done', '  '))).toBe('Give every bucket a name.');
+    expect(bucketsDraftProblem(l, renameBucket(d, 'done', 'in review'))).toBe('Two buckets are called “in review”.');
   });
 
   it('coding begins / ends read off the draft; where a status sits; changed or not', () => {
@@ -225,13 +226,28 @@ describe('status buckets', () => {
     ]);
   });
 
-  it('save payload caps the statuses at the route’s limit', () => {
-    const many = Array.from({ length: SPRINT_STATUS_ORDER_MAX + 1 }, (_, i) => E(`S${i}`, 'in_progress'));
+  it('over the route’s limit: Save leaves out 0-count statuses first, then the last ones; it is never blocked by the cap', () => {
+    // 61 statuses with tickets: the last is left out, and Save is open.
+    const many = Array.from({ length: SPRINT_STATUS_ORDER_MAX + 1 }, (_, i) => E(`S${i}`, 'in_progress', 1));
     const l = layout({ order: many });
-    const out = bucketsToSave(l, moveStatusStep(bucketsDraftOf(l), 0, 1, -1));
-    const all = (out.buckets ?? []).flatMap((b) => b.statuses);
+    const moved = moveStatusStep(bucketsDraftOf(l), 0, 1, -1);
+    const all = (bucketsToSave(l, moved).buckets ?? []).flatMap((b) => b.statuses);
     expect(all).toHaveLength(SPRINT_STATUS_ORDER_MAX);
     expect(all[0]).toBe('S1');
+    expect([...statusesLeftOutOnSave(l, moved)]).toEqual([`S${SPRINT_STATUS_ORDER_MAX}`]);
+    expect(bucketsDraftProblem(l, moved)).toBeNull();
+
+    // 58 with tickets and 5 retired (0 tickets) — 63: three retired ones go, every live one stays.
+    const live = Array.from({ length: 58 }, (_, i) => E(`L${i}`, 'in_progress', 2));
+    const dead = Array.from({ length: 5 }, (_, i) => E(`Old${i}`, 'in_progress', 0));
+    const l2 = layout({ order: [...dead, ...live] });
+    const d2 = renameBucket(bucketsDraftOf(l2), 'in_progress', 'Building');
+    expect([...statusesLeftOutOnSave(l2, d2)].sort()).toEqual(['Old2', 'Old3', 'Old4']);
+    const kept = (bucketsToSave(l2, d2).buckets ?? []).flatMap((b) => b.statuses);
+    expect(kept).toHaveLength(SPRINT_STATUS_ORDER_MAX);
+    expect(live.every((e) => kept.includes(e.name))).toBe(true);
+    expect(bucketsDraftProblem(l2, d2)).toBeNull();
+    expect(statusesLeftOutOnSave(layout(), bucketsDraftOf(layout())).size).toBe(0);
   });
 
   it('"not placed yet" only once buckets are set', () => {

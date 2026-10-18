@@ -42,6 +42,13 @@ describe('sprintPathsView', () => {
       text: expect.stringContaining('Limn tries again tomorrow.'),
     });
     expect(sprintPathsView({ aiEnabled: true, paths: null, status: st('none') })).toEqual({ kind: 'none' });
+    // Too few tickets is said, never a heading with nothing under it.
+    expect(sprintPathsView({ aiEnabled: true, paths: null, status: st('none'), sprintTickets: 3 })).toEqual({
+      kind: 'message',
+      writing: false,
+      text: 'Critical paths need at least 4 tickets in the sprint.',
+    });
+    expect(sprintPathsView({ aiEnabled: true, paths: null, status: st('none'), sprintTickets: 4 })).toEqual({ kind: 'none' });
   });
   it('⚠ STALE paths stay on screen: quiet "Updating" while in flight, the failure line when it failed', () => {
     expect(sprintPathsView({ aiEnabled: true, paths, status: st('current') })).toEqual({ kind: 'paths', paths, note: null });

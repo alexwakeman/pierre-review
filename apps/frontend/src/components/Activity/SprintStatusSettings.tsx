@@ -5,6 +5,7 @@ import {
   SPRINT_MERGED_COLUMN_LABEL,
   SPRINT_STAGE_LABEL,
   SPRINT_STAGES,
+  SPRINT_STATUS_ORDER_MAX,
   SPRINT_STATUS_SETTINGS_DEFAULT,
   type SprintStage,
   type SprintStatusLayout,
@@ -30,6 +31,7 @@ import {
   statusEvidenceLine,
   statusOrderSourceLabel,
   statusPlaceOf,
+  statusesLeftOutOnSave,
   unplacedStatuses,
   type StatusBucketsDraft,
 } from './sprintModel.js';
@@ -47,7 +49,8 @@ import {
 //     bucket at either end (`moveStatusStep`). Focus follows the moved status, and a polite live region
 //     says where it landed.
 // Buckets move with their own earlier / later buttons. What blocks Save is the server's own check
-// (`bucketsDraftProblem` → shared `sprintBucketsProblem`), printed in its words. ⚠ Explanations live
+// (`bucketsDraftProblem` → shared `sprintBucketsProblem`, on what Save would send), printed in its words.
+// Over the 60-status cap Save leaves 0-count statuses out first (`statusesLeftOutOnSave`) and says so. ⚠ Explanations live
 // behind the ⓘ only.
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
@@ -75,7 +78,8 @@ export function SprintStatusSettings({
     layout.settings.buckets == null && layout.settings.mergedColumn === SPRINT_STATUS_SETTINGS_DEFAULT.mergedColumn;
   const empty = draft.buckets.every((b) => b.statuses.length === 0);
   const changed = bucketsDraftChanged(layout, draft);
-  const problem = changed ? bucketsDraftProblem(draft) : null;
+  const problem = changed ? bucketsDraftProblem(layout, draft) : null;
+  const leftOut = changed ? statusesLeftOutOnSave(layout, draft) : new Set<string>();
   const bounds = codingBoundsOf(draft);
 
   // Keep focus on the moved status's button (a move across buckets remounts its row).
@@ -213,7 +217,7 @@ export function SprintStatusSettings({
                   type="text"
                   value={bucket.name}
                   maxLength={SPRINT_BUCKET_NAME_MAX}
-                  aria-label="Bucket name"
+                  aria-label={`Name of bucket ${bi + 1}`}
                   onChange={(e) => setDraft(renameBucket(draft, bucket.id, e.target.value))}
                   className={`${field} min-w-0 flex-1 font-semibold`}
                 />
@@ -255,6 +259,7 @@ export function SprintStatusSettings({
               <label className={`flex items-center gap-1 text-xs ${MUTED}`}>
                 Means
                 <select
+                  aria-label={`What ${label} means`}
                   value={bucket.meaning}
                   onChange={(e) => setDraft(setBucketMeaning(draft, bucket.id, e.target.value as SprintStage))}
                   className={field}
@@ -368,9 +373,17 @@ export function SprintStatusSettings({
             A ticket moves to this column when its bucket means In progress or In review, and every pull request on it is
             merged. Closed pull requests that were never merged do not count.
           </p>
-          <p>It sits after your last In review bucket, so you can see code that is in but not yet signed off.</p>
+          <p>
+            It sits after your last In review bucket, or your last In progress bucket when you have no In review one.
+            With neither, it is not shown.
+          </p>
         </InfoButton>
       </div>
+      {leftOut.size > 0 && (
+        <p className={`text-xs ${MUTED}`} data-testid="sprint-status-left-out">
+          Save keeps {SPRINT_STATUS_ORDER_MAX} statuses at most, so it leaves out {[...leftOut].map((n) => `“${n}”`).join(', ')}.
+        </p>
+      )}
       {problem != null && <p className="text-xs text-rose-700 dark:text-rose-400">{problem}</p>}
       {save.isError && <p className="text-xs text-rose-700 dark:text-rose-400">{save.error.message}</p>}
       <div className="flex flex-wrap items-center gap-2">

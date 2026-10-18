@@ -22,7 +22,7 @@ import {
 import { globalAutomationUserIds } from './automation-ids.js';
 import { db, schema } from './client.js';
 import { currentSprintBriefs, sprintBriefInput, type SprintBriefInput } from './sprint-briefs.js';
-import { foldSprintGraph, identOfKey, type GraphFoldResult, type GraphTicketInput } from './sprint-graph-fold.js';
+import { foldSprintGraph, type GraphFoldResult, type GraphTicketInput } from './sprint-graph-fold.js';
 import {
   isSprintPathsQueued,
   isSprintPathsRunning,
@@ -364,7 +364,9 @@ export async function getSprintGraph(
   const pathsInput = opts.aiEnabled ? sprintPathsInputOf(source, g, statusLayout.columns, timing) : null;
   const pathsRow = pathsInput?.eligible ? await storedSprintPaths(accountId, workspaceId) : null;
   const keyIdent = new Map(g.nodes.map((n) => [n.key.toUpperCase(), n.ident] as const));
-  const pathsNow = pathsRow != null ? sprintPathsOf(pathsRow, (k) => keyIdent.get(k.toUpperCase()) ?? identOfKey(site.provider, site.apiRoot, k)?.ident ?? null) : null;
+  // Resolved against TODAY's nodes only: a key that left the sprint and the ghost set is dropped (a
+  // path left with no ticket goes with it), never handed out as an ident no node carries.
+  const pathsNow = pathsRow != null ? sprintPathsOf(pathsRow, (k) => keyIdent.get(k.toUpperCase()) ?? null) : null;
   const { config } = await import('../config.js');
   const builder = {
     paths: pathsNow,
@@ -522,9 +524,11 @@ export async function sprintPathsTodo(accountId: number, workspaceId: number): P
 }
 
 /** GET /api/ticket-story — the STORY VIEW's lean read (docs/API.md § GET /api/ticket-story). DB only:
- *  ONE ticket's stored sprint text — this workspace's `sprint_tickets` row (in the sprint or not), else
- *  its `sprint_ref_tickets` row — on the tracker's CURRENT site, and its CURRENT brief (text hash +
- *  SPRINT_BRIEF_VERSION, the graph's own rule). No graph fold, no PRs (the view reads those from
+ *  ONE ticket's stored sprint text on the tracker's CURRENT site, read by the GRAPH's own rule
+ *  (`loadGraphTickets`): this workspace's `sprint_tickets` row while it is IN the sprint; otherwise its
+ *  `sprint_ref_tickets` row (the fresh text a ghost is built and briefed from); only with neither, the
+ *  old out-of-sprint `sprint_tickets` row (briefState 'none' — nothing reads it again). Its CURRENT
+ *  brief (text hash + SPRINT_BRIEF_VERSION). No graph fold, no PRs (the view reads those from
  *  `GET /api/ticket-prs`). A ticket Limn holds no sprint text for answers `found: false`. */
 export async function getTicketStory(
   accountId: number,
@@ -548,7 +552,7 @@ export async function getTicketStory(
   )[0];
   const rt = schema.sprintRefTickets;
   const ref =
-    own == null
+    own?.inSprint !== true
       ? (
           (await db
             .select()
@@ -558,7 +562,10 @@ export async function getTicketStory(
             .execute()) as RefRow[]
         )[0]
       : undefined;
-  const row = own ?? ref;
+  // In the sprint → its own row; else the ref row (what the graph's ghost shows); else the old row.
+  const inSprint = own?.inSprint === true;
+  const sprintRow = inSprint ? own : undefined;
+  const row = sprintRow ?? ref ?? own;
   if (row == null) return none;
   const status = row.statusName != null ? { name: row.statusName, category: categoryOf(row.statusCategory) } : null;
   const ticket: TicketStoryTicket = {
@@ -569,16 +576,16 @@ export async function getTicketStory(
     status,
     issueType: row.issueTypeName ?? null,
     assignee: row.assigneeName != null ? { name: row.assigneeName, avatarUrl: row.assigneeAvatarUrl ?? null } : null,
-    epic: own?.epicKey != null ? { key: own.epicKey, title: own.epicTitle ?? null } : null,
-    inSprint: own?.inSprint === true,
+    epic: row === own && own.epicKey != null ? { key: own.epicKey, title: own.epicTitle ?? null } : null,
+    inSprint,
   };
   const story = { description: row.description ?? '', acceptanceCriteria: row.acceptanceCriteria ?? '' };
   if (!opts.aiEnabled) return { workspaceId, ident, found: true, ticket, briefState: 'off', brief: null, story };
   const input = sprintBriefInput(row, site.provider);
   const brief = (await currentSprintBriefs(accountId, workspaceId, [{ ident, input }])).get(ident) ?? null;
-  // The brief pass reads the graph: a sprint ticket and the tickets it leads to. A ticket that has
-  // left the sprint is not read again, so "pending" would wait for ever — it says nothing instead.
-  const briefState: TicketStoryResponse['briefState'] = brief != null ? 'current' : own == null || own.inSprint ? 'pending' : 'none';
+  // The brief pass reads the graph: a sprint ticket and the tickets it leads to (ref rows). An old
+  // out-of-sprint row is not read again, so "pending" would wait for ever — it says nothing instead.
+  const briefState: TicketStoryResponse['briefState'] = brief != null ? 'current' : row === own && !inSprint ? 'none' : 'pending';
   return { workspaceId, ident, found: true, ticket, briefState, brief, story };
 }
 

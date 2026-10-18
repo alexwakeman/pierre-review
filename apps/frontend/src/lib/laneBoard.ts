@@ -56,6 +56,9 @@ export interface BoardCardDef<C> {
   id: string;
   lane: string;
   column: string;
+  /** What a column's header count counts: cards sharing one (the same ticket on two paths) count once.
+   *  Absent = the card's id. */
+  unit?: string;
   data: C;
 }
 
@@ -103,8 +106,14 @@ export function layoutBoard<L, C>(input: {
 }): BoardLayout<L, C> {
   const colIndex = new Map(input.columns.map((c, i) => [c.id, i]));
   const known = input.cards.filter((c) => colIndex.has(c.column));
-  const count = new Map<string, number>();
-  for (const c of known) count.set(c.column, (count.get(c.column) ?? 0) + 1);
+  // Distinct UNITS per column (a ticket drawn on two paths is one ticket in that column's count).
+  const units = new Map<string, Set<string>>();
+  for (const c of known) {
+    const u = units.get(c.column) ?? new Set<string>();
+    u.add(c.unit ?? c.id);
+    units.set(c.column, u);
+  }
+  const count = new Map([...units].map(([k, v]) => [k, v.size] as const));
   const columns = input.columns.map((c, index) => ({
     ...c,
     index,
@@ -311,6 +320,7 @@ function cardsFor(nodes: ReadonlyArray<SprintGraphNode>, lane: string, view: Spr
     id: cardIdOf(lane, node.ident),
     lane,
     column: columnOfNode(node, view),
+    unit: node.ident,
     data: { node, critical: critical.has(node.ident), waiting: waiting.has(node.ident) },
   }));
 }
@@ -334,6 +344,8 @@ export function pathsBoard(i: BoardInput): SprintBoard {
   (i.paths?.paths ?? []).forEach((p, idx) => {
     const id = `path:${idx}`;
     const mine = [...new Set(p.idents)].map((x) => byIdent.get(x)).filter((n): n is SprintGraphNode => n != null);
+    // A path none of whose tickets is on today's map draws no lane (never a header-only board).
+    if (mine.length === 0) return;
     lanes.push({ id, label: p.title, data: { kind: 'path', risk: p.risk, advice: p.advice } });
     cards.push(...cardsFor(mine, id, 'paths', critical, waiting));
     const here = new Set(mine.map((n) => n.ident));
@@ -383,8 +395,9 @@ function sprintArrows(
 
 const sprintOnly = (nodes: ReadonlyArray<SprintGraphNode>): SprintGraphNode[] => nodes.filter((n) => !n.ghost);
 
-/** "Other" — the lane for tickets no theme holds; "All tickets" when there are no themes at all. */
-export const OTHER_THEME_LABEL = 'Other';
+/** "No theme" — the lane for tickets no theme holds; "All tickets" when there are no themes at all.
+ *  ⚠ Not "Other": the theme prompt invites a catch-all theme of that name, and two lanes would share it. */
+export const OTHER_THEME_LABEL = 'No theme';
 export const ALL_TICKETS_LABEL = 'All tickets';
 
 /** Has a ticket's code merged? At least one merged pull request and none open (the pace's rule). */
@@ -512,7 +525,7 @@ export function paceItems(pace: SprintPace, o: { mergedColumn: boolean }): PaceI
 /** The theme × column count table under the Critical path board: every sprint ticket, once. */
 export interface CountTable {
   columns: BoardColumn[];
-  rows: Array<{ label: string; counts: number[]; total: number }>;
+  rows: Array<{ id: string; label: string; counts: number[]; total: number }>;
   totals: number[];
   total: number;
 }
@@ -528,7 +541,7 @@ export function countTable(
     .map((l) => {
       const mine = board.cards.filter((c) => c.lane === l.id);
       const counts = columns.map((c) => mine.filter((m) => m.column === c.id).length);
-      return { label: l.label, counts, total: mine.length };
+      return { id: l.id, label: l.label, counts, total: mine.length };
     })
     .filter((r) => r.total > 0);
   const totals = columns.map((_, i) => rows.reduce((s, r) => s + (r.counts[i] ?? 0), 0));

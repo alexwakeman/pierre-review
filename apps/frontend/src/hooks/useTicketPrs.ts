@@ -1,5 +1,5 @@
 import { skipToken, useQuery } from '@tanstack/react-query';
-import type { TicketPrsResponse, TicketStoryResponse } from '@pierre-review/shared';
+import { SPRINT_READ_INTERVAL_MS, type TicketPrsResponse, type TicketStoryResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 
@@ -25,8 +25,13 @@ export function useTicketStory(workspaceId: number | null, ident: string | null)
   return useQuery<TicketStoryResponse>({
     queryKey: ['ticket-story', workspaceKey(workspaceId), ident],
     queryFn: workspaceId == null || ident == null ? skipToken : () => api.ticketStory(workspaceId, ident),
-    // A pending brief lands after the next sprint read's brief pass; look again now and then.
-    refetchInterval: (q) => (q.state.data?.briefState === 'pending' ? 60_000 : 5 * 60_000),
+    // A pending brief lands after the next sprint read's brief pass: look again each minute. 'off' (no
+    // agentic AI here) never moves. Anything else moves only with a sprint read — a manual refresh
+    // invalidates this key, and the worker reads every SPRINT_READ_INTERVAL_MS, so look that often.
+    refetchInterval: (q) => {
+      const s = q.state.data?.briefState;
+      return s === 'pending' ? 60_000 : s === 'off' ? false : SPRINT_READ_INTERVAL_MS;
+    },
     refetchIntervalInBackground: false,
     staleTime: 60_000,
   });

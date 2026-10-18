@@ -1,4 +1,5 @@
 import {
+  SPRINT_PATHS_CAPS,
   sprintDayOf,
   sprintPathsFailureText,
   type SprintDates,
@@ -15,7 +16,9 @@ import {
 //                 always beat a blank board.
 //   • 'message' — no paths yet: one short line ('writing' while the builder runs — the page bar runs
 //                 with it — else when they will be written, or why they could not be).
-//   • 'none'    — nothing to say (too few tickets, no tracker, no credential).
+//                 Too few sprint tickets is one of these: it says so.
+//   • 'none'    — nothing to say here (no tracker, no credential — the view prints the AiRunGate line
+//                 for the latter, else hides the heading).
 // Also here: the page's progress bar (`sprintProgress`) and the header's dates line.
 
 export type SprintPathsNote = { kind: 'updating' } | { kind: 'failed'; text: string } | null;
@@ -33,7 +36,13 @@ export function pathsFailureLine(status: SprintPathsStatus): string {
   return `Couldn’t find the critical paths.${why} ${when}`;
 }
 
-export function sprintPathsView(p: { aiEnabled: boolean; paths: SprintPaths | null; status: SprintPathsStatus }): SprintPathsView {
+export function sprintPathsView(p: {
+  aiEnabled: boolean;
+  paths: SprintPaths | null;
+  status: SprintPathsStatus;
+  /** Tickets IN the sprint (ghosts not counted); absent = not known. */
+  sprintTickets?: number;
+}): SprintPathsView {
   if (!p.aiEnabled) return { kind: 'off' };
   const s = p.status;
   // Paths with nothing in them (a calm sprint) still stand: the strip says so.
@@ -53,6 +62,9 @@ export function sprintPathsView(p: { aiEnabled: boolean; paths: SprintPaths | nu
     case 'failed':
       return { kind: 'message', writing: false, text: pathsFailureLine(s) };
     default:
+      if (p.sprintTickets != null && p.sprintTickets < SPRINT_PATHS_CAPS.minTickets) {
+        return { kind: 'message', writing: false, text: `Critical paths need at least ${SPRINT_PATHS_CAPS.minTickets} tickets in the sprint.` };
+      }
       return { kind: 'none' };
   }
 }

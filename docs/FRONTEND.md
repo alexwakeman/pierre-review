@@ -2168,16 +2168,21 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
      `pathsStatus`): "Working out the critical paths…" with a small bar while `writing`; when they will
      come (`queued` / `waiting`) or why they could not ("Couldn't find the critical paths. <reason> Limn
      tries again …"); AI off → "Claude is off here, so there are no critical paths."; none found → the
-     heading reads "No critical paths in this sprint." ⚠ STALE paths are ALWAYS shown, with "Updating" or
-     the failure line.
+     heading reads "No critical paths in this sprint."; fewer than 4 sprint tickets → "Critical paths need
+     at least 4 tickets in the sprint."; no Claude credential / runtime → the `AiRunGate` line; any other
+     `none` → no heading at all (never a heading with nothing under it). A stored path none of whose
+     tickets is on today's map draws no lane, and the board mounts only with a card on it. A column's
+     header count is DISTINCT tickets (`BoardCardDef.unit`): a ticket on two paths is two cards, one
+     ticket. ⚠ STALE paths are ALWAYS shown, with "Updating" or the failure line.
   3. **Call-outs** — Claude's (≤ 3, "Call-out") then Limn's own code cards from `signals` ("Since you last
      looked", "Out of step", "Blocked outside the sprint"; "Pace" is the strip, so it is not repeated),
      each with its ticket keys as buttons that open the story view.
-  4. **The count table** (`countTable`) — every sprint ticket once, by theme (+ Other) and column, with
-     totals.
+  4. **The count table** (`countTable`) — every sprint ticket once, by theme (+ No theme) and column,
+     with totals; rows key on the lane id.
   With no paths stored the pace strip, call-outs and table still show.
 - **THEME** (`SprintThemesView`, `themesBoard`) — one lane per stored theme (the theme pass's order,
-  largest first), then "Other" for tickets no theme holds; no themes at all → one "All tickets" lane and
+  largest first), then "No theme" for tickets no theme holds (⚠ never "Other": the theme prompt invites a
+  catch-all theme of that name); no themes at all → one "All tickets" lane and
   one line saying why ("Themes appear after Claude reads the sprint." / Claude is off). Header: "n live ·
   m merged" (live = not Complete; merged = ≥ 1 merged PR and none open) and a small segmented bar per
   column (`role="img"`, its name lists every part; the words carry the numbers). Sprint tickets only.
@@ -2208,8 +2213,11 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   meaning select per bucket, statuses moved by drag and drop or the keyboard Move up / down buttons across
   buckets, ticket counts, "not placed yet" on a status the buckets do not name, the "Merged, not signed
   off" switch with its ⓘ, Save / Cancel / Reset to automatic; Save waits on shared
-  `sprintBucketsProblem`'s sentence; pure helpers in `sprintModel.ts`; docs/TRACKERS.md § The status
-  order and buckets). A save moves every view's columns at once.
+  `sprintBucketsProblem`'s sentence, run on what Save SENDS; over the 60-status cap Save leaves out
+  0-count statuses first — a renamed or retired tracker status lingers as one — and says which
+  (`statusesLeftOutOnSave`), so the cap never locks the editor; each bucket's name field and meaning
+  select carry their own accessible name; pure helpers in `sprintModel.ts`; docs/TRACKERS.md § The
+  status order and buckets). A save moves every view's columns at once.
 - DELETED with the drawer (2026-10-18): `SprintTicketDrawer`, `SprintAssessment`, `SprintCodeCheck`,
   `SprintCopyButton`, `lib/copy.ts`, the drawer's grouped references and `Ticket/TicketPrsSections.tsx`.
   DELETED with the chips, findings, highlights, checks and write-back: `SprintTicketCard`,

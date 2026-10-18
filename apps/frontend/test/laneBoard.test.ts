@@ -118,14 +118,34 @@ describe('the ghost column is the Critical path view only', () => {
   it('a path with no paths stored draws no lane', () => {
     expect(pathsBoard({ nodes, edges: [], paths: null, columns: COLUMNS }).lanes).toEqual([]);
   });
+  it('a stored path none of whose tickets is on today\'s map draws no lane (never a header-only board)', () => {
+    const gone: SprintPaths = { ...paths, paths: [{ ...paths.paths[0]!, idents: [] }, ...paths.paths] };
+    const b = pathsBoard({ nodes, edges: [], paths: gone, columns: COLUMNS });
+    expect(b.lanes.map((l) => l.label)).toEqual(['Writer first']);
+    expect(pathsBoard({ nodes, edges: [], paths: { ...paths, paths: [{ ...paths.paths[0]!, idents: [id('GONE-1')] }] }, columns: COLUMNS }).lanes).toEqual([]);
+  });
+  it('a ticket on two paths is two cards but one ticket in its column\'s count', () => {
+    const two: SprintPaths = { ...paths, paths: [paths.paths[0]!, { ...paths.paths[0]!, title: 'Again', idents: [id('A-2')] }] };
+    const b = pathsBoard({ nodes, edges: [], paths: two, columns: COLUMNS });
+    expect(b.cards.filter((c) => c.data.node.key === 'A-2')).toHaveLength(2);
+    const l = layoutBoard({ ...b, collapsed: new Set() });
+    expect(l.columns.find((c) => c.id === 'doing')!.count).toBe(1);
+  });
 });
 
 describe('lanes per view', () => {
-  it('Theme: the stored theme order, then "Other" for tickets no theme holds', () => {
+  it('Theme: the stored theme order, then "No theme" for tickets no theme holds', () => {
     const nodes = [node('A-1', { theme: 'Search' }), node('A-2', { theme: 'Import' }), node('A-3', { theme: 'Gone' }), node('A-4')];
     const b = themesBoard({ nodes, edges: [], paths: null, columns: COLUMNS, themes: [{ name: 'Import' }, { name: 'Search' }] });
-    expect(b.lanes.map((l) => l.label)).toEqual(['Import', 'Search', 'Other']);
+    expect(b.lanes.map((l) => l.label)).toEqual(['Import', 'Search', 'No theme']);
     expect(b.cards.filter((c) => c.lane === 'other').map((c) => c.data.node.key)).toEqual(['A-3', 'A-4']);
+  });
+  it('Theme: a theme Claude named "Other" never shares a label with the code\'s lane; count rows key on the lane', () => {
+    const nodes = [node('A-1', { theme: 'Other' }), node('A-2')];
+    const b = themesBoard({ nodes, edges: [], paths: null, columns: COLUMNS, themes: [{ name: 'Other' }] });
+    expect(b.lanes.map((l) => [l.id, l.label])).toEqual([['theme:Other', 'Other'], ['other', 'No theme']]);
+    const t = countTable(nodes, [{ name: 'Other' }], COLUMNS);
+    expect(new Set(t.rows.map((r) => r.id)).size).toBe(t.rows.length);
   });
   it('Theme: no themes → one "All tickets" lane; live and merged counted per lane', () => {
     const nodes = [
@@ -315,7 +335,7 @@ describe('under the Critical path board', () => {
     const t = countTable(nodes, [{ name: 'Import' }, { name: 'Search' }], COLUMNS);
     expect(t.rows.map((r) => [r.label, r.total])).toEqual([
       ['Import', 2],
-      ['Other', 1],
+      ['No theme', 1],
     ]);
     expect(t.total).toBe(3);
     expect(t.totals.reduce((a, b) => a + b, 0)).toBe(3);

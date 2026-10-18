@@ -196,24 +196,49 @@ export function bucketsDraftChanged(layout: Pick<SprintStatusLayout, 'buckets' |
   return shown.mergedColumn !== draft.mergedColumn || !sameBuckets(shown.buckets, draft.buckets);
 }
 
+/** The statuses Save leaves out to stay within SPRINT_STATUS_ORDER_MAX overall: none while the draft
+ *  fits; over it, statuses with NO tickets first (the last placed first — a renamed or retired tracker
+ *  status lingers as a 0-count row), then from the end. A status left out that is still on the board
+ *  comes back "not placed yet". */
+export function statusesLeftOutOnSave(layout: Pick<SprintStatusLayout, 'order'>, draft: StatusBucketsDraft): Set<string> {
+  const all = draft.buckets.flatMap((b) => b.statuses);
+  const out = new Set<string>();
+  let over = all.length - SPRINT_STATUS_ORDER_MAX;
+  if (over <= 0) return out;
+  const counts = new Map(layout.order.map((o) => [normStatus(o.name), o.count]));
+  for (let i = all.length - 1; i >= 0 && over > 0; i -= 1) {
+    if ((counts.get(normStatus(all[i]!)) ?? 0) > 0) continue;
+    out.add(all[i]!);
+    over -= 1;
+  }
+  for (let i = all.length - 1; i >= 0 && over > 0; i -= 1) {
+    if (out.has(all[i]!)) continue;
+    out.add(all[i]!);
+    over -= 1;
+  }
+  return out;
+}
+
 /** What Save sends: buckets unchanged from what was shown → the stored buckets as they were (automatic
- *  stays automatic when only the switch moved); changed → every bucket with every status, names
- *  trimmed, statuses capped at the route's limit overall. */
-export function bucketsToSave(layout: Pick<SprintStatusLayout, 'buckets' | 'settings'>, draft: StatusBucketsDraft): SprintStatusSettings {
+ *  stays automatic when only the switch moved); changed → every bucket with its statuses, names
+ *  trimmed, less `statusesLeftOutOnSave`. */
+export function bucketsToSave(layout: Pick<SprintStatusLayout, 'buckets' | 'settings' | 'order'>, draft: StatusBucketsDraft): SprintStatusSettings {
   if (sameBuckets(bucketsDraftOf(layout).buckets, draft.buckets)) return { buckets: layout.settings.buckets, mergedColumn: draft.mergedColumn };
-  let room = SPRINT_STATUS_ORDER_MAX;
-  const buckets: SprintBucket[] = draft.buckets.map((b) => {
-    const statuses = b.statuses.slice(0, Math.max(0, room));
-    room -= statuses.length;
-    return { id: b.id, name: b.name.trim(), meaning: b.meaning, statuses };
-  });
+  const leftOut = statusesLeftOutOnSave(layout, draft);
+  const buckets: SprintBucket[] = draft.buckets.map((b) => ({
+    id: b.id,
+    name: b.name.trim(),
+    meaning: b.meaning,
+    statuses: b.statuses.filter((n) => !leftOut.has(n)),
+  }));
   return { buckets, mergedColumn: draft.mergedColumn };
 }
 
-/** What stops Save, in plain words (the server's own check, shared `sprintBucketsProblem`); null when
- *  the draft may be saved. */
-export function bucketsDraftProblem(draft: StatusBucketsDraft): string | null {
-  return sprintBucketsProblem(draft.buckets.map((b) => ({ ...b, name: b.name.trim() })));
+/** What stops Save, in plain words (the server's own check, shared `sprintBucketsProblem`, run on what
+ *  Save would SEND); null when the draft may be saved. */
+export function bucketsDraftProblem(layout: Pick<SprintStatusLayout, 'buckets' | 'settings' | 'order'>, draft: StatusBucketsDraft): string | null {
+  const buckets = bucketsToSave(layout, draft).buckets;
+  return buckets == null ? null : sprintBucketsProblem(buckets);
 }
 
 /** Statuses the reader's buckets do not name yet ("not placed yet"): only when buckets are set — under

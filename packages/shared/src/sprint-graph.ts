@@ -358,7 +358,7 @@ export const SPRINT_PATHS_MODEL = 'claude-sonnet-5';
 
 /** Bumped when the builder's prompt, input or answer shape changes: the stored paths stop counting
  *  (still shown, marked stale, until the next pass replaces them). */
-export const SPRINT_PATHS_VERSION = 1;
+export const SPRINT_PATHS_VERSION = 2;
 
 export const SPRINT_PATHS_CAPS = {
   /** A sprint with fewer tickets gets no paths. */

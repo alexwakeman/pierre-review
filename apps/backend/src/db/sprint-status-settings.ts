@@ -85,12 +85,14 @@ function cleanNames(raw: unknown, seen: Set<string>, room: { left: number }): st
   return out;
 }
 
-/** A STORED value's buckets, tolerantly: bad buckets and names dropped, names cut to length, repeats
- *  renamed off; null (automatic) when nothing usable is left or the meanings go backwards. */
+/** A STORED value's buckets, tolerantly: bad buckets and names dropped, names cut to length, a bucket
+ *  whose name repeats an earlier one's (case-insensitive) dropped; null (automatic) when nothing usable
+ *  is left or the meanings go backwards. */
 function tolerantBuckets(raw: unknown): SprintBucket[] | null {
   if (!Array.isArray(raw)) return null;
   const out: SprintBucket[] = [];
   const ids = new Set<string>();
+  const names = new Set<string>();
   const seen = new Set<string>();
   const room = { left: SPRINT_STATUS_ORDER_MAX };
   for (const b of raw.slice(0, SPRINT_BUCKETS_MAX)) {
@@ -99,8 +101,9 @@ function tolerantBuckets(raw: unknown): SprintBucket[] | null {
     if (typeof r.id !== 'string' || !SPRINT_BUCKET_ID_RE.test(r.id) || r.id === SPRINT_MERGED_COLUMN_ID || ids.has(r.id)) continue;
     if (!isStage(r.meaning)) continue;
     const name = typeof r.name === 'string' ? r.name.trim().slice(0, SPRINT_BUCKET_NAME_MAX) : '';
-    if (name === '' || CONTROL.test(name)) continue;
+    if (name === '' || CONTROL.test(name) || names.has(name.toLowerCase())) continue;
     ids.add(r.id);
+    names.add(name.toLowerCase());
     out.push({ id: r.id, name, meaning: r.meaning, statuses: cleanNames(r.statuses, seen, room) });
   }
   if (out.length === 0) return null;

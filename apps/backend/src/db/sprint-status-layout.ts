@@ -220,8 +220,8 @@ export function applyBuckets(
 }
 
 /** The drawn x axis: the buckets in order, with the derived merged column (when on) after the last In
- *  review bucket, else after the last In progress bucket, else before the first Complete bucket, else
- *  last. Pure. */
+ *  review bucket, else after the last In progress bucket. With neither, no merged column: no ticket
+ *  could ever sit in it (`sprintColumnOf` needs an In progress or In review stage). Pure. */
 export function sprintColumnsOf(buckets: ReadonlyArray<Pick<SprintBucket, 'id' | 'name' | 'meaning'>>, mergedColumn: boolean): SprintColumn[] {
   const cols: SprintColumn[] = buckets.map((b) => ({ id: b.id, name: b.name, meaning: b.meaning, derived: false }));
   if (!mergedColumn) return cols;
@@ -229,9 +229,8 @@ export function sprintColumnsOf(buckets: ReadonlyArray<Pick<SprintBucket, 'id' |
   const lastOf = (m: SprintStage): number => cols.map((c) => c.meaning).lastIndexOf(m);
   const review = lastOf('in_review');
   const progress = lastOf('in_progress');
-  const done = cols.findIndex((c) => c.meaning === 'done');
-  const at = review >= 0 ? review + 1 : progress >= 0 ? progress + 1 : done >= 0 ? done : cols.length;
-  cols.splice(at, 0, merged);
+  if (review < 0 && progress < 0) return cols;
+  cols.splice(review >= 0 ? review + 1 : progress + 1, 0, merged);
   return cols;
 }
 
@@ -346,7 +345,7 @@ export function storedSettingsFor(
   return parseSprintStatusSettings(raw, false, (n) => cats.get(norm(n)) ?? null) ?? { ...SPRINT_STATUS_SETTINGS_DEFAULT };
 }
 
-// ── The DB half (signatures are the contract db/sprint-stories.ts calls) ─────────────────────────
+// ── The DB half (signatures are the contract db/sprint-graph.ts and the statuses route call) ─────────────────────────
 
 export interface SprintStatusLayoutArgs {
   provider: TrackerProvider;

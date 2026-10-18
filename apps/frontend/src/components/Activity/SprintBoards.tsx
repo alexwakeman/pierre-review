@@ -23,6 +23,8 @@ import {
   type SprintCardData,
   type SprintLaneData,
 } from '../../lib/laneBoard.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { AiRunGate } from '../AiSetup.js';
 import { InfoButton } from '../InfoModal.js';
 import { LaneBoard } from '../LaneBoard.js';
 import { TicketCard } from '../TicketCard.js';
@@ -163,7 +165,16 @@ function SegmentBar({ segments }: { segments: readonly LaneSegment[] }): JSX.Ele
 // ── Critical path ────────────────────────────────────────────────────────────────────────────────
 
 export function SprintPathsView({ data, onOpen }: { data: SprintGraphResponse; onOpen: OpenTicket }): JSX.Element {
-  const view = sprintPathsView({ aiEnabled: data.aiEnabled, paths: data.paths, status: data.pathsStatus });
+  const view = sprintPathsView({
+    aiEnabled: data.aiEnabled,
+    paths: data.paths,
+    status: data.pathsStatus,
+    sprintTickets: data.nodes.filter((n) => !n.ghost).length,
+  });
+  // 'none' with AI on: the one credential / set-up line when that is why, else no heading at all.
+  const ai = useAiCapabilities();
+  const gateLine = ai.enabled && (ai.runtime !== 'ready' || ai.auth === 'none');
+  const heading = view.kind !== 'none' || gateLine;
   const paths = view.kind === 'paths' ? view.paths : null;
   const columns = data.statusLayout?.columns ?? null;
   const board = useMemo(() => pathsBoard({ nodes: data.nodes, edges: data.edges, paths, columns }), [data.nodes, data.edges, paths, columns]);
@@ -172,28 +183,31 @@ export function SprintPathsView({ data, onOpen }: { data: SprintGraphResponse; o
   return (
     <section aria-label="Critical path" className="space-y-3" data-testid="sprint-paths" data-state={data.pathsStatus.state}>
       {data.pace != null && <PaceStrip pace={data.pace} mergedColumn={mergedColumn} />}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <h4 className="text-sm font-medium text-gray-800 dark:text-gray-100">{calm ? 'No critical paths in this sprint.' : 'Critical paths'}</h4>
-        <InfoButton title="Critical paths">
-          <PathsInfo aiEnabled={data.aiEnabled} />
-        </InfoButton>
-        {view.kind === 'paths' && view.note?.kind === 'updating' && <span className={`text-xs ${MUTED}`}>Updating</span>}
-        {view.kind === 'message' && (
-          <span className={`inline-flex items-center gap-2 text-xs ${MUTED}`}>
-            {view.writing && (
-              <SprintProgressBar
-                progress={{ kind: 'busy', label: 'Working out the critical paths' }}
-                testId="sprint-paths-progress"
-                className="h-[3px] w-16 shrink-0 rounded-full"
-              />
-            )}
-            {view.text}
-          </span>
-        )}
-        {view.kind === 'off' && <span className={`text-xs ${MUTED}`}>Claude is off here, so there are no critical paths.</span>}
-      </div>
+      {heading && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <h4 className="text-sm font-medium text-gray-800 dark:text-gray-100">{calm ? 'No critical paths in this sprint.' : 'Critical paths'}</h4>
+          <InfoButton title="Critical paths">
+            <PathsInfo aiEnabled={data.aiEnabled} />
+          </InfoButton>
+          {view.kind === 'paths' && view.note?.kind === 'updating' && <span className={`text-xs ${MUTED}`}>Updating</span>}
+          {view.kind === 'message' && (
+            <span className={`inline-flex items-center gap-2 text-xs ${MUTED}`}>
+              {view.writing && (
+                <SprintProgressBar
+                  progress={{ kind: 'busy', label: 'Working out the critical paths' }}
+                  testId="sprint-paths-progress"
+                  className="h-[3px] w-16 shrink-0 rounded-full"
+                />
+              )}
+              {view.text}
+            </span>
+          )}
+          {view.kind === 'off' && <span className={`text-xs ${MUTED}`}>Claude is off here, so there are no critical paths.</span>}
+          {view.kind === 'none' && <AiRunGate>{null}</AiRunGate>}
+        </div>
+      )}
       {view.kind === 'paths' && view.note?.kind === 'failed' && <p className={`text-xs ${MUTED}`}>{view.note.text}</p>}
-      {board.lanes.length > 0 && <SprintLaneBoard board={board} label="Critical paths" laneWidth="minmax(9rem, 13rem)" show="initials" onOpen={onOpen} />}
+      {board.cards.length > 0 && <SprintLaneBoard board={board} label="Critical paths" laneWidth="minmax(9rem, 13rem)" show="initials" onOpen={onOpen} />}
       <Callouts data={data} onOpen={onOpen} />
       <CountTableView data={data} />
     </section>
@@ -334,7 +348,7 @@ function CountTableView({ data }: { data: SprintGraphResponse }): JSX.Element | 
         </thead>
         <tbody>
           {t.rows.map((r) => (
-            <tr key={r.label} className="border-b border-gray-100 dark:border-gray-800/60">
+            <tr key={r.id} className="border-b border-gray-100 dark:border-gray-800/60">
               <th scope="row" className="px-2 py-1 text-left font-normal">
                 {r.label}
               </th>

@@ -10,7 +10,7 @@ import { Markdown, type RehypePlugins } from '../Markdown.js';
 import { sprintTicketSite } from './sprintModel.js';
 
 // "Ask Claude about this sprint" (Activity → This Sprint): a compact chat under the page's toolbar,
-// above the board. LOCAL ONLY and Pro, like the route (the caller mounts it only where agentic AI
+// above the board. LOCAL ONLY and free (gated on me.ai), like the route (the caller mounts it only where agentic AI
 // runs). One Haiku answer per question, grounded in the stored sprint; the conversation is kept for the
 // visit in a module store, and the completed turn is appended in `useSprintAsk`'s HOOK-level onSuccess
 // (never a `mutate()` callback — closing the panel mid-answer must not lose a billed answer).

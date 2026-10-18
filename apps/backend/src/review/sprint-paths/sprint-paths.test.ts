@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   SPRINT_MERGED_COLUMN_ID,
   SPRINT_PATHS_CAPS,
+  SPRINT_PATHS_VERSION,
   type SprintColumn,
   type SprintGraphEdge,
   type SprintGraphNode,
@@ -111,13 +112,14 @@ describe('sprintPathsInput', () => {
     expect(input.identByKey['BMD-1096']).toBe(I('BMD-1096'));
     expect(input.text).toContain('Sprint day: 4 of 14; days left after today: 10');
     expect(input.text).toContain('Columns, left to right: To do · Doing · PO review · Merged, not signed off (code merged, ticket not signed off) · Done');
-    expect(input.text).toContain('- BMD-1080 | title: Title of BMD-1080 | theme: GeoPackage | column: Doing (in progress) | assigned | pull requests: 1 open, 1 with failing checks');
+    expect(input.text).toContain('- BMD-1080 | title: Title of BMD-1080 | type: not known | theme: GeoPackage | column: Doing (in progress) | assigned | pull requests: 1 open, 1 with failing checks');
     expect(input.text).toContain('column: Merged, not signed off (in review)');
     expect(input.text).toContain('summary: Export layers.');
     expect(input.text).toContain('- BMD-1081 depends on BMD-1080: Needs the GeoPackage writer.');
     expect(input.text).toContain('- BMD-1090 builds on BMD-1091');
     expect(input.text).toContain('- BMD-1096 | title: Title of BMD-1096 | status: In Progress (not complete) | outside the sprint');
     expect(input.text).toContain('- (more work outside the sprint) → BMD-1096 → BMD-1080 → BMD-1081');
+    expect(input.text).toContain('dependency chains: 1 found, 1 listed below');
     // No person is named to the model.
     expect(input.text).not.toContain('Sinan');
     expect(input.text).not.toContain('Colin');
@@ -133,6 +135,24 @@ describe('sprintPathsInput', () => {
     const moved = nodes.map((n) => (n.key === 'BMD-1080' ? { ...n, prs: [pr(1, 'merged')] } : n));
     expect(sprintPathsInput({ sprintName: 'Sprint 15', nodes: moved, edges, columns: COLUMNS }).inputHash).not.toBe(a.inputHash);
     expect(inputOf({ sprintName: 'Sprint 16' }).inputHash).not.toBe(a.inputHash);
+  });
+
+  it('a ticket’s type and epic are stated, so code supplies "design work" rather than the title', () => {
+    const { nodes, edges } = fixture();
+    const typed = nodes.map((n) => (n.key === 'BMD-1081' ? { ...n, issueType: 'Design', epic: { key: 'BMD-1', title: 'Offline maps' } } : n));
+    const text = sprintPathsInput({ sprintName: null, nodes: typed, edges, columns: COLUMNS }).text;
+    expect(text).toContain('- BMD-1081 | title: Title of BMD-1081 | type: Design | epic: Offline maps | theme: GeoPackage');
+    expect(sprintPathsInput({ sprintName: null, nodes: typed, edges, columns: COLUMNS }).inputHash).not.toBe(inputOf({ timing: null, sprintName: null }).inputHash);
+  });
+
+  it('a chain with an unlisted ticket at its DEPENDENT end keeps its listed run, both cut ends marked', () => {
+    const { nodes, edges } = fixture();
+    // A ghost three hops out that depends on a sprint ticket: the longest chain starts there.
+    const more = [...nodes, N('BMD-3000', 'not_started', { ghost: true, depth: 2 })];
+    const text = sprintPathsInput({ sprintName: null, nodes: more, edges: [...edges, edge('BMD-3000', 'BMD-1081')], columns: COLUMNS }).text;
+    expect(text).not.toContain('- BMD-3000 |');
+    expect(text).toContain('- (more work outside the sprint) → BMD-1096 → BMD-1080 → BMD-1081 → (more work outside the sprint)');
+    expect(text).toContain('dependency chains: 1 found, 1 listed below');
   });
 
   it('too few sprint tickets: not eligible', () => {
@@ -230,7 +250,7 @@ describe('validateSprintPaths', () => {
 describe('the stored row → the wire', () => {
   const row = (o: Partial<SprintPathsRow> = {}): SprintPathsRow => ({
     inputHash: 'h',
-    pathsVersion: 1,
+    pathsVersion: SPRINT_PATHS_VERSION,
     pathsJson: { paths: [{ title: 'A', tickets: ['K-1', 'K-404'], advice: 'Do it.', risk: 'high' }, { title: 'B', tickets: ['K-404'], advice: 'x', risk: 'low' }], callouts: [] },
     writtenAt: new Date('2026-10-17T10:00:00Z'),
     attemptAt: null,
@@ -360,7 +380,7 @@ describe('runSprintPathsPass', () => {
   });
 
   it('current, backed off and capped inputs never call Claude', async () => {
-    const stored = { inputHash: input.inputHash, pathsVersion: 1, pathsJson: { paths: [], callouts: [] }, writtenAt: new Date(), attemptAt: null, attemptHash: null, attemptError: null, runsDay: null, runsToday: 0 };
+    const stored = { inputHash: input.inputHash, pathsVersion: SPRINT_PATHS_VERSION, pathsJson: { paths: [], callouts: [] }, writtenAt: new Date(), attemptAt: null, attemptHash: null, attemptError: null, runsDay: null, runsToday: 0 };
     for (const [row, state] of [
       [stored, 'current'],
       [{ ...stored, inputHash: 'old', attemptHash: input.inputHash, attemptError: 'refused' }, 'backoff'],

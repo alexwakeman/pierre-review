@@ -2103,18 +2103,20 @@ COUNTS EVERY NUMBER; the model picks and words, with NO digit anywhere in its te
   reads `queued` while the chain holds the workspace (`markSprintPathsQueued`, released on every path).
 - **THE INPUT** (`sprintPathsInput`, inside a per-run NONCE fence): the sprint name; the COLUMNS left to
   right (`statusLayout.columns`, the derived "Merged, not signed off" one marked); counts (tickets, complete,
-  merged-not-signed-off, not complete, open dependencies, chains); every SPRINT ticket as one line — key,
-  short title, theme, column name + its meaning, assigned / unassigned (⚠ NO PERSON IS NAMED), PR states
+  merged-not-signed-off, not complete, open dependencies, chains as "N found, M listed below"); every SPRINT
+  ticket as one line — key, short title, issue type, epic (when it has one — so "design work" is a code fact,
+  not a guess from a title), theme, column name + its meaning, assigned / unassigned (⚠ NO PERSON IS NAMED), PR states
   (open / draft / failing checks / merged), the CURRENT brief's summary; the OUTSIDE tickets a sprint ticket
   `depends_on` or `builds_on` (key, title, status, complete or not); those LINKS with the brief's `why` (else
-  the quote); the dependency CHAINS code found (`sprintChains`, delivery order, cut at the first unlisted
-  ghost and marked "(more work outside the sprint)", ≤ 8 listed). Plus ONE day line ("Sprint day: 4 of 14;
+  the quote); the dependency CHAINS code found (`sprintChains`, delivery order, each cut to its LONGEST RUN
+  of listed tickets — an unlisted ghost may sit at either end — with each cut end marked "(more work outside
+  the sprint)", ≤ 8 listed). Plus ONE day line ("Sprint day: 4 of 14;
   days left after today: 10", from `sprintTimingFor`).
 - **THE HASH**: sha256 over `[SPRINT_PATHS_VERSION, everything sent EXCEPT the day line]`. ⚠ The day line is
   now-derived and stays OUT (CLAUDE.md: a dormant sprint must not re-bill every day); the stored text carries
   no digit, so an older day never shows through. PR states and CI ARE in it, so a merge moves it — the next
   sprint read re-runs, bounded by the daily cap. Current only while `input_hash` matches AND `paths_version`
-  is `SPRINT_PATHS_VERSION` (1).
+  is `SPRINT_PATHS_VERSION` (2: issue type + epic joined the ticket lines).
 - **THE RUN** (`agent.ts`): ONE in-process tool, `submit_paths` on the `paths` MCP server; `tools: []`, Bash
   and every file / web tool on the deny list, the PreToolUse PATH GUARD over a throwaway cwd plus the
   `ownToolsOnlyHook` backstop and `ISOLATED_MCP`, `settingSources: []`. Agentic only so a refused answer can be

@@ -3305,7 +3305,8 @@ export const sprintAssessments = sqliteTable(
       .notNull(),
     bodyJson: text('body_json', { mode: 'json' }).$type<unknown>(),
     droppedJson: text('dropped_json', { mode: 'json' }).$type<unknown>(),
-    // A SprintAssessmentErrorCode; never a stack.
+    // HISTORICAL (dormant table — "Check against code" was removed 2026-10-18): what was a
+    // SprintAssessmentErrorCode, a type no longer in shared; never a stack.
     error: text('error'),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),

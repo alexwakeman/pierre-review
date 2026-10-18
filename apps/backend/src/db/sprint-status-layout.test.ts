@@ -214,10 +214,10 @@ describe('sprintColumnsOf', () => {
     expect(ids(sprintColumnsOf([...four.slice(0, 3), B('r2', 'R2', 'in_review', []), four[3]!], true))).toEqual(['n', 'p', 'r', 'r2', 'merged*', 'd']);
     expect(ids(sprintColumnsOf(four, false))).toEqual(['n', 'p', 'r', 'd']);
   });
-  it('no review bucket → after the last In progress; none either → before the first Complete; none → last', () => {
+  it('no review bucket → after the last In progress; neither → no merged column (nothing could sit in it)', () => {
     expect(ids(sprintColumnsOf([four[0]!, four[1]!, four[3]!], true))).toEqual(['n', 'p', 'merged*', 'd']);
-    expect(ids(sprintColumnsOf([four[0]!, four[3]!, B('d2', 'D2', 'done', [])], true))).toEqual(['n', 'merged*', 'd', 'd2']);
-    expect(ids(sprintColumnsOf([four[0]!], true))).toEqual(['n', 'merged*']);
+    expect(ids(sprintColumnsOf([four[0]!, four[3]!, B('d2', 'D2', 'done', [])], true))).toEqual(['n', 'd', 'd2']);
+    expect(ids(sprintColumnsOf([four[0]!], true))).toEqual(['n']);
   });
   it('the merged column is named and means In review', () => {
     expect(sprintColumnsOf(four, true).find((c) => c.derived)).toEqual({ id: 'merged', name: 'Merged, not signed off', meaning: 'in_review', derived: true });
@@ -371,6 +371,11 @@ describe('storedSettingsFor (the retired shapes)', () => {
   it('a stored bucket list whose meanings go backwards reads as automatic; mergedColumn kept', () => {
     const back = { buckets: [B('d', 'Done', 'done', []), B('t', 'Todo', 'not_started', [])], mergedColumn: false };
     expect(storedSettingsFor(back, BOARD, [])).toEqual({ buckets: null, mergedColumn: false });
+  });
+
+  it('a stored bucket whose name repeats an earlier one (any case) is dropped, its statuses with it', () => {
+    const twice = { buckets: [B('a', 'Review', 'in_review', ['Code Review']), B('b', 'review', 'in_review', ['PO Review'])], mergedColumn: true };
+    expect(storedSettingsFor(twice, BOARD, [])).toEqual({ buckets: [B('a', 'Review', 'in_review', ['Code Review'])], mergedColumn: true });
   });
 });
 

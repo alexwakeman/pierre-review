@@ -271,16 +271,44 @@ export function sprintPathsInput(g: {
     return n.stage != null ? SPRINT_STAGE_LABEL[n.stage].toLowerCase() : 'status unknown';
   };
   const pace = sprintPaceOf(g.nodes, g.edges, null);
+  // Each chain cut to its LONGEST RUN of listed tickets (a ghost of a ghost may sit at EITHER end, or
+  // in the middle), in DELIVERY order (what is needed first, first); an end that was cut says so. A
+  // chain is listed from its dependent end first, so ids AFTER the run are prerequisites and ids
+  // BEFORE it are dependents.
+  const chains = sprintChains(g.nodes, g.edges)
+    .map((p) => {
+      let best = { from: 0, to: 0 };
+      for (let i = 0; i < p.length; ) {
+        if (!listed.has(p[i]!)) {
+          i += 1;
+          continue;
+        }
+        let j = i;
+        while (j < p.length && listed.has(p[j]!)) j += 1;
+        if (j - i > best.to - best.from) best = { from: i, to: j };
+        i = j;
+      }
+      return { keep: p.slice(best.from, best.to), needsMore: best.to < p.length, feedsMore: best.from > 0 };
+    })
+    .filter((c) => c.keep.length >= 2);
+  const chainLines = chains
+    .slice(0, SPRINT_PATHS_CHAINS_LISTED)
+    .map(
+      (c) =>
+        `- ${c.needsMore ? '(more work outside the sprint) → ' : ''}${[...c.keep].reverse().map((id) => byIdent.get(id)!.key).join(' → ')}${c.feedsMore ? ' → (more work outside the sprint)' : ''}`,
+    );
   const facts = [
     `Sprint: ${g.sprintName != null && g.sprintName.trim() !== '' ? oneLine(g.sprintName, TITLE_MAX) : 'This sprint'}`,
     `Columns, left to right: ${g.columns.map((c) => `${oneLine(c.name, 40)}${c.derived ? ' (code merged, ticket not signed off)' : ''}`).join(' · ') || 'none'}`,
     `Tickets in the sprint: ${pace.tickets}; complete: ${pace.done}; merged but not signed off: ${pace.mergedNotSignedOff}; not complete: ${pace.live}`,
-    `Open dependencies: ${pace.openDependencies}; dependency chains: ${pace.chains}`,
+    `Open dependencies: ${pace.openDependencies}; dependency chains: ${chains.length} found, ${chainLines.length} listed below`,
   ];
   const ticketLines = sprint.map((n) =>
     [
       `- ${n.key}`,
       `title: ${n.title !== '' ? oneLine(n.title, TITLE_MAX) : '(not read)'}`,
+      `type: ${n.issueType != null && n.issueType.trim() !== '' ? oneLine(n.issueType, 40) : 'not known'}`,
+      ...(n.epic != null ? [`epic: ${n.epic.title != null && n.epic.title.trim() !== '' ? oneLine(n.epic.title, TITLE_MAX) : n.epic.key}`] : []),
       `theme: ${n.theme != null ? oneLine(n.theme, 40) : 'none'}`,
       `column: ${columnOf(n)}`,
       n.assignee != null ? 'assigned' : 'unassigned',
@@ -301,16 +329,6 @@ export function sprintPathsInput(g: {
       return `- ${a.key} ${SPRINT_EDGE_LABEL[e.kind].toLowerCase()} ${b.key}${why != null && why.trim() !== '' ? `: ${oneLine(why, WHY_MAX)}` : ''}`;
     })
     .sort();
-  // Each chain cut at its first ticket the map does not list (a ghost of a ghost), in DELIVERY order
-  // (what is needed first, first); a cut chain says so.
-  const chainLines = sprintChains(g.nodes, g.edges)
-    .map((p) => {
-      const cut = p.findIndex((id) => !listed.has(id));
-      return { keep: cut < 0 ? p : p.slice(0, cut), more: cut >= 0 };
-    })
-    .filter((c) => c.keep.length >= 2)
-    .slice(0, SPRINT_PATHS_CHAINS_LISTED)
-    .map((c) => `- ${c.more ? '(more work outside the sprint) → ' : ''}${[...c.keep].reverse().map((id) => byIdent.get(id)!.key).join(' → ')}`);
   const stable = [
     ...facts,
     '',

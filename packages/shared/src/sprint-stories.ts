@@ -132,7 +132,7 @@ export const SPRINT_PHASE_LABEL: Record<SprintPhase, string> = {
 //   • THE COLUMNS (`SprintStatusLayout.columns`) — the x axis of every This Sprint view: the buckets in
 //     order, plus the DERIVED "Merged, not signed off" column (id SPRINT_MERGED_COLUMN_ID) while
 //     `mergedColumn` is on (the default): after the last In review bucket, else after the last In
-//     progress bucket, else before the first Complete bucket, else last. A ticket sits there when its
+//     progress bucket; with neither, none (nothing could sit in it). A ticket sits there when its
 //     bucket means In progress or In review and it has ≥ 1 merged pull request and none open (closed
 //     unmerged ones ignored) — `SprintGraphNode.column`, computed once in the graph fold.
 //   • "Coding begins" = the first status of the first In progress bucket; "Coding ends" = the first
