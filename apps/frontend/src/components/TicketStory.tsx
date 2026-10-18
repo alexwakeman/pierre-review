@@ -4,32 +4,24 @@
 //                      "As written in Jira" of the Story section (Activity/TicketStorySection.tsx):
 //                      the key linked to Jira, the title, description and acceptance criteria, and
 //                      for a Jira ticket the field the criteria come from, with the picker.
-//   TicketStoryModal — the Open PRs ticket key's modal: status, type, assignee, the story, and a
-//                      small "Open in Jira".
+//   (The Open PRs ticket-key modal is GONE, 2026-10-18: the key opens the story view instead,
+//    whose Story section carries this disclosure.)
 //
 // ⚠ CLICK-GATED. The stored Jira row (`GET /api/prs/:id/tracker-ticket?key=`, written by the
 // plugin's worker when the PR was received — no Jira call) is fetched only once the disclosure is
-// opened or the modal is mounted. Nothing here fetches on a list's or a card's mount. Pure half:
+// opened. Nothing here fetches on a list's or a card's mount. Pure half:
 // lib/ticketStory.ts. Every href goes through `safeExternalUrl`.
 import { useId, useState } from 'react';
 import type { ClaudeReviewTicket, TicketRef } from '@pierre-review/shared';
-import { TRACKER_PROVIDER_LABEL } from '@pierre-review/shared';
 import { hasFixedAcSource, jiraSiteOf } from '../lib/jiraTicket.js';
 import { pulledAcField, jiraStoryFromDetails, acFieldText } from '../lib/storyTabs.js';
 import { ticketDraftFromStored } from '../lib/claudeReviewFollowUp.js';
-import {
-  storySourceOf,
-  ticketModalFacts,
-  ticketModalTitle,
-  type TicketModalFacts,
-} from '../lib/ticketStory.js';
-import type { CardTicket } from '../lib/cardTickets.js';
+import { storySourceOf } from '../lib/ticketStory.js';
 import { safeExternalUrl } from '../lib/ui.js';
 import { useSetJiraAcField, useStoredJiraTicket } from '../hooks/useJiraTicket.js';
 import { AcFieldPicker } from './ClaudeReviewFollowUp.js';
 import { JiraStoryView, StoryText } from './ClaudeReviewTickets.js';
 import { ChevronIcon, ExternalLinkIcon } from './Icons.js';
-import { InfoModal } from './InfoModal.js';
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const ERROR_TEXT = 'text-red-600 dark:text-red-400';
@@ -184,75 +176,5 @@ export function StoryDisclosure({
         </div>
       )}
     </div>
-  );
-}
-
-const STATUS_PILL: Record<'new' | 'indeterminate' | 'done', string> = {
-  new: 'bg-gray-500/10 text-gray-700 dark:text-gray-300',
-  indeterminate: 'bg-blue-500/10 text-blue-700 dark:text-blue-300',
-  done: 'bg-green-500/15 text-green-700 dark:text-green-400',
-};
-const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[11px] font-medium';
-
-function FactsRow({ f, href, tracker }: { f: TicketModalFacts; href: string | null; tracker: string }): JSX.Element {
-  return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
-      {f.status != null && (
-        <span className={`${CHIP} ${f.statusCategory != null ? STATUS_PILL[f.statusCategory] : STATUS_PILL.new}`}>
-          {f.status}
-        </span>
-      )}
-      {f.issueType != null && <span>{f.issueType}</span>}
-      {f.assignee != null ? <span>{f.assignee.name}</span> : f.read && <span>Unassigned</span>}
-      {href != null && (
-        <a
-          href={href}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="ml-auto inline-flex items-center gap-1 text-xs text-blue-700 hover:underline dark:text-blue-300"
-        >
-          Open in {tracker}
-          <ExternalLinkIcon size={11} />
-        </a>
-      )}
-    </div>
-  );
-}
-
-/**
- * The Open PRs ticket modal. Mounted only while open, so the stored row is read on the click.
- * `prId` is any PR that names the ticket (the route reads the row through that PR's workspace).
- */
-export function TicketStoryModal({
-  ticket,
-  prId,
-  onClose,
-}: {
-  ticket: CardTicket;
-  prId: number;
-  onClose: () => void;
-}): JSX.Element {
-  const { data, isLoading, isError, error } = useStoredJiraTicket(prId, ticket.key, true);
-  const facts = ticketModalFacts(ticket, data);
-  const href = safeExternalUrl(ticket.url) ?? null;
-  const tracker = ticket.provider != null ? TRACKER_PROVIDER_LABEL[ticket.provider] : 'Jira';
-  return (
-    <InfoModal title={ticketModalTitle(facts)} onClose={onClose} width="lg">
-      <FactsRow f={facts} href={href} tracker={tracker} />
-      {isLoading ? (
-        <p className={`text-xs ${MUTED}`}>Reading {ticket.key}…</p>
-      ) : isError || data == null ? (
-        // GitHub Issues / Linear: the server's own sentence ("Can't read this issue…") — never "no story".
-        <p className={`text-xs ${MUTED}`}>
-          {(ticket.provider === 'github' || ticket.provider === 'linear') && error instanceof Error && error.message !== ''
-            ? error.message
-            : `Limn has not read this ticket from ${tracker}.`}
-        </p>
-      ) : (
-        <div className="space-y-3">
-          <StoryText description={data.description} acceptanceCriteria={data.acceptanceCriteria ?? ''} capHeight={false} />
-        </div>
-      )}
-    </InfoModal>
   );
 }

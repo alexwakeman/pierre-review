@@ -12,6 +12,7 @@ import { useMergedPanelOpen, useTicketMergedPrs } from '../../hooks/useTicketMer
 import { useStartTicketReview, useTicketReviewStarting, useTicketReviewStates } from '../../hooks/useTicketReview.js';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
 import { useFilters } from '../../store/filters.js';
+import { useOpenStory } from '../../lib/ticketTab.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import {
   MERGE_TONE_CHIP,
@@ -38,7 +39,6 @@ import { CopyButton } from '../CopyButton.js';
 import { githubPrUrl } from '../../lib/prLink.js';
 import { ArrowIcon, CaretIcon, CheckCircleIcon, CheckIcon, ChevronIcon, LinkIcon, MergeIcon, TicketIcon } from '../Icons.js';
 import { cardTicketLabel, cardTickets, type CardTicket } from '../../lib/cardTickets.js';
-import { TicketStoryModal } from '../TicketStory.js';
 import {
   cardTicketPills,
   refusalSentence,
@@ -95,8 +95,8 @@ import {
 //      column, which the user found harder to scan) — CI, review standing, threads, merge
 //      readiness. Each renders only when it has something true to say (no "no checks", no "—").
 //   3. the TICKET ROW (only when the PR names a ticket): each ticket, "BMD-1043 · <its title>",
-//      wrapping when there are several. A Jira ticket opens its story in a MODAL (read on the
-//      click, `TicketKeyButton`), with "Open in Jira" inside (any ticket with an ident — Jira, GitHub Issues, Linear). Below the chips so status is
+//      wrapping when there are several. A ticket with an ident (Jira, GitHub Issues, Linear) opens
+//      its STORY VIEW in a tab (`TicketKeyButton` → `useOpenStory`); no modal. Below the chips so status is
 //      still the first thing read, above the grey meta line because it says what the PR is FOR.
 //      Data: ONE batched `POST /api/ticket-links` (core, free; detection + stored Jira
 //      titles), folded by `lib/cardTickets.ts`.
@@ -642,53 +642,36 @@ export function OpenPrsCards({
   );
 }
 
-// ---- a ticket key that opens the ticket's story in a modal ----
+// ---- a ticket key that opens the ticket's story tab ----
 
 /**
- * A Jira ticket's key (and title): a click opens its STORY in a modal (TicketStory.tsx) instead of
- * leaving for Jira — "Open in Jira" is inside it. The modal is MOUNTED ONLY WHILE OPEN, so the
- * stored row is read on the click, never on the card's mount. ⚠ The modal is portalled but its
- * React events still bubble to the card / stack header (which open the PR / toggle), so the
- * wrapper stops them.
+ * A ticket's key (and title): a click opens its STORY VIEW in a tab (`useOpenStory` — the same
+ * standalone view This Sprint, search and the PR pane open). The ticket's text is in that view's
+ * Story section, so there is no modal. ⚠ The card / stack header beneath it open the PR / toggle on
+ * click, so the button stops the event.
  */
 function TicketKeyButton({
   ticket,
-  prId,
   className,
   children,
 }: {
-  ticket: CardTicket;
-  prId: number;
+  ticket: CardTicket & { ident: string };
   className: string;
   children: ReactNode;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
+  const openStory = useOpenStory();
   return (
-    <>
-      <button
-        type="button"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        title={`Show ${cardTicketLabel(ticket)}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen(true);
-        }}
-        className={`${className} rounded text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500`}
-      >
-        {children}
-      </button>
-      {open && (
-        <span
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
-          className="contents"
-        >
-          <TicketStoryModal ticket={ticket} prId={prId} onClose={close} />
-        </span>
-      )}
-    </>
+    <button
+      type="button"
+      title={`Open the ${ticket.key} story`}
+      onClick={(e) => {
+        e.stopPropagation();
+        openStory({ ident: ticket.ident, key: ticket.key, title: ticket.title ?? null });
+      }}
+      className={`${className} rounded text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -860,17 +843,18 @@ function TicketStack({
               <span className="text-base font-semibold text-gray-700 dark:text-gray-200">No ticket</span>
             ) : (
               <>
-                {storyPrId != null ? (
+                {/* In the standalone story view the key is plain text (this IS its story); on the board
+                    it opens that view. */}
+                {!single && t.ident != null ? (
                   <TicketKeyButton
-                    ticket={t}
-                    prId={storyPrId}
+                    ticket={{ ...t, ident: t.ident }}
                     className="inline-flex shrink-0 items-center gap-1 font-mono text-[13px] font-semibold text-sky-700 hover:underline dark:text-sky-300"
                   >
                     <TicketIcon size={13} className="shrink-0" />
                     {t.key}
                     <span className="sr-only">:</span>
                   </TicketKeyButton>
-                ) : href != null ? (
+                ) : !single && href != null ? (
                   <a
                     href={href}
                     target="_blank"
@@ -1198,8 +1182,7 @@ function OpenPrCard({
             return t.ident != null ? (
               <TicketKeyButton
                 key={t.key}
-                ticket={t}
-                prId={pr.id}
+                ticket={{ ...t, ident: t.ident }}
                 className="inline-flex min-w-0 max-w-full items-center gap-1 text-sky-700 hover:underline dark:text-sky-300 sm:max-w-[32rem]"
               >
                 {body}

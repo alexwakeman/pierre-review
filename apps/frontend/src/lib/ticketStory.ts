@@ -1,19 +1,15 @@
 // THE TICKET'S OWN STORY, shown to the reader — the pure half of the Story check's "Story"
-// disclosure (components/TicketStory.tsx) and the Open PRs ticket modal.
+// disclosure (components/TicketStory.tsx).
 //
 //   - ONE Story check section: a ticket with a ticket review shows only that; a story known ONLY
 //     from an older PR review's verdicts is a block of its own (`legacyOnlyEntries`).
 //   - Where the story text comes from, in order: the STORED Jira row (read on receipt by the
 //     plugin's worker, fetched here only when the reader opens it), else the ticket as the latest
 //     ticket review judged it, else the older run's stored ticket (`storySourceOf`).
-//   - The modal's facts (status, type, assignee, title): the stored row's, else the card's.
 import type {
   ClaudeReviewTicket,
   ClaudeReviewTicketEntry,
-  JiraStatusCategory,
-  JiraTicketDetails,
   SprintBrief,
-  TicketAssignee,
   TicketRef,
   TicketPrsTicket,
   TicketReviewState,
@@ -109,53 +105,6 @@ export function storyUrlOf(
   if (jiraRef?.url) return jiraRef.url;
   for (const t of stored) if (t?.url) return t.url;
   return null;
-}
-
-/** The facts the Open PRs ticket modal shows above the story. */
-export interface TicketModalFacts {
-  key: string;
-  title: string | null;
-  status: string | null;
-  statusCategory: JiraStatusCategory | null;
-  issueType: string | null;
-  assignee: TicketAssignee | null;
-  /** True only when these facts come from a read of the ticket (the stored row, or a card that
-   *  carries a status) — so a null `assignee` may be printed as "Unassigned". */
-  read: boolean;
-}
-
-const clean = (s: string | null | undefined): string | null => {
-  const t = s?.replace(/\s+/g, ' ').trim() ?? '';
-  return t === '' ? null : t;
-};
-
-/** The stored row's facts where it has them, else what the card already knew. */
-export function ticketModalFacts(
-  card: {
-    key: string;
-    title: string | null;
-    status?: string;
-    statusCategory?: JiraStatusCategory;
-    issueType?: string;
-    assignee?: TicketAssignee;
-  },
-  details: JiraTicketDetails | null | undefined,
-): TicketModalFacts {
-  const assignee = details?.assignee ?? card.assignee ?? null;
-  return {
-    key: card.key,
-    title: clean(details?.title) ?? card.title,
-    status: clean(details?.status) ?? clean(card.status),
-    statusCategory: details?.statusCategory ?? card.statusCategory ?? null,
-    issueType: clean(details?.issueType?.name) ?? clean(card.issueType),
-    assignee: assignee != null && assignee.name.trim() !== '' ? assignee : null,
-    read: details != null || clean(card.status) != null,
-  };
-}
-
-/** The modal's title: "BMD-1040 · New designs", or the key alone. */
-export function ticketModalTitle(f: Pick<TicketModalFacts, 'key' | 'title'>): string {
-  return f.title != null ? `${f.key} · ${f.title}` : f.key;
 }
 
 // ── THE STORY SECTION (Activity/TicketStorySection.tsx): which summary leads it ─────────────────────

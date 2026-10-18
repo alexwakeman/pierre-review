@@ -9,14 +9,12 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ClaudeReviewTicket, ClaudeReviewTicketEntry, JiraTicketDetails, TicketRef } from '@pierre-review/shared';
+import type { ClaudeReviewTicket, ClaudeReviewTicketEntry, TicketRef } from '@pierre-review/shared';
 import {
   jiraRefFor,
   legacyOnlyEntries,
   storySourceOf,
   storyUrlOf,
-  ticketModalFacts,
-  ticketModalTitle,
 } from '../src/lib/ticketStory.js';
 
 const ticket = (over: Partial<ClaudeReviewTicket> = {}): ClaudeReviewTicket => ({
@@ -86,58 +84,18 @@ describe('storySourceOf', () => {
   });
 });
 
-describe('ticketModalFacts', () => {
-  const card = { key: 'BMD-1', title: 'Card title', status: 'To Do', issueType: 'Story' };
-
-  it('the card answers before the stored row loads', () => {
-    const f = ticketModalFacts(card, null);
-    expect(f).toMatchObject({ title: 'Card title', status: 'To Do', issueType: 'Story', assignee: null });
-    expect(ticketModalTitle(f)).toBe('BMD-1 · Card title');
-  });
-
-  it('an unread ticket never claims "Unassigned"', () => {
-    expect(ticketModalFacts({ key: 'BMD-2', title: null }, null).read).toBe(false);
-    expect(ticketModalFacts({ key: 'BMD-2', title: null }, undefined).read).toBe(false);
-    expect(ticketModalFacts(card, null).read).toBe(true);
-  });
-
-  it('the stored row wins once it is here', () => {
-    const details = {
-      prId: 1,
-      key: 'BMD-1',
-      title: 'Row title',
-      description: '',
-      issueType: { id: '1', name: 'Bug' },
-      candidates: [],
-      omittedCandidates: 0,
-      status: 'In Review',
-      statusCategory: 'indeterminate',
-      assignee: { name: 'Ada' },
-    } satisfies JiraTicketDetails;
-    expect(ticketModalFacts(card, details)).toMatchObject({
-      title: 'Row title',
-      status: 'In Review',
-      statusCategory: 'indeterminate',
-      issueType: 'Bug',
-      assignee: { name: 'Ada' },
-    });
-    expect(ticketModalTitle({ key: 'K-1', title: null })).toBe('K-1');
-  });
-});
-
 describe('the wiring', () => {
   const src = (p: string) => readFileSync(join(__dirname, '..', 'src', p), 'utf8');
 
-  it('the stored row is read only when the disclosure opens or the modal mounts', () => {
+  it('the stored row is read only when the disclosure opens; a card key opens the story tab, no modal', () => {
     const story = src('components/TicketStory.tsx');
     // The disclosure renders the reader only inside `open &&`.
     expect(story).toMatch(/\{open && \(/);
     expect(story).toMatch(/useStoredJiraTicket\(prId, jiraRef\.key, true\)/);
+    expect(story).not.toMatch(/TicketStoryModal/);
     const cards = src('components/Activity/OpenPrsCards.tsx');
-    // The modal mounts only while open; no stored-row read anywhere else on the cards.
-    expect(cards).toMatch(/\{open && \(/);
-    expect(cards).toMatch(/<TicketStoryModal ticket=\{ticket\} prId=\{prId\} onClose=\{close\} \/>/);
-    expect(cards).not.toMatch(/useStoredJiraTicket|api\.jiraTicket/);
+    expect(cards).toMatch(/openStory\(\{ ident: ticket\.ident/);
+    expect(cards).not.toMatch(/TicketStoryModal|useStoredJiraTicket|api\.jiraTicket/);
   });
 
   it('a field change re-reads the ticket reviews so the block can say the story changed', () => {

@@ -1259,11 +1259,11 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
     ⚠ A member with no card renders NOTHING (`membersWithCards` drops it) — never a placeholder claim.
     Both ride the review already loaded: no request of their own, and the stack still fetches nothing
     until expanded. Card text is model prose about untrusted input: PLAIN TEXT through `PrRefText`.
-  - **Open PRs: a Jira ticket key opens a MODAL, not Jira** (`TicketKeyButton` → `TicketStoryModal`
-    on the `InfoModal` shell): status, type, assignee, the story as markdown, "Open in Jira" inside.
-    Mounted only while open, so the stored row is read on the click (any PR of the stack). ⚠ The
-    modal is portalled but its React events bubble to the card / stack header, so the wrapper stops
-    them. Linear tickets stay links.
+  - **Open PRs: a ticket key opens its STORY VIEW in a tab** (`TicketKeyButton` → `useOpenStory`), on
+    the stack header and on each card's ticket row — any ticket with an ident (Jira, GitHub Issues,
+    Linear); one without stays a tracker link. The ticket-text MODAL is GONE (2026-10-18): the story
+    view's Story section carries "As written in Jira". In the story view itself (`single`) the header
+    key is plain text. ⚠ The button stops the click, or the card / header beneath opens the PR / toggles.
   - **No "Claude: " lead** on generated text anywhere in the pane — it is all Claude's.
   - **The stack pill** (`StackCoverage`, `OpenPrsCards.tsx`): ONE chip in the `TicketStack` header —
     "4 of 6 met" toned by alignment (a pulse while running) — then the currency words when stale
@@ -3181,7 +3181,7 @@ phrase it two ways.
 
 ONE ticket, Open PRs style: `Ticket/TicketTabView.tsx` renders the SAME ticket stack the Open PRs board
 draws — `OpenPrsCards` with `story={{ticket, merged}}` (`storyStack`, `lib/openPrsStacks.ts`) — never a
-copy. In order: the stack header (key — the story modal or the tracker link —, title, status, type,
+copy. In order: the stack header (key — on the board it opens this story view in a tab, else the tracker link; in the story view itself it is plain text —, title, status, type,
 assignee, PR count, the ticket review's coverage pill + Re-check), the **Story section OPEN**, the open
 PRs as the Open PRs cards, "Merged (n)", and under the stack "Closed without merging (n)", collapsed. It
 works for a ticket with NO pull request (the stack is drawn with no rows; "No pull requests for this
