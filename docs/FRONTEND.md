@@ -3224,8 +3224,8 @@ Mounted ONLY in the story view (`TicketStack` with `single`), ALWAYS OPEN — a 
 toggle. ⚠ **The Open PRs board does not render it** (2026-10-18): every read in it starts on mount, so
 on a board it would be one request per stack; a reader opens the ticket to see the story. Every ticket
 with an ident has it — not only reviewed ones. **The heading row carries the STORY'S ACTIONS**,
-right-aligned: the docs check (`StoryDocsButton`) and the story design ("Draw" / "Redraw" / "Drawing…",
-`StoryDesignButton`, labelled "Draw design" / "Redraw design" / "Drawing design…"). The
+right-aligned: the docs check (`StoryDocsButton`) and the story design
+(`StoryDesignButton`, labelled "Draw design" / "Redraw design" / "Drawing design…"). The
 section owns ONE start mutation for each (`useStartStoryDocsAlignment`; `useStoryDesign` over
 `useRedrawStoryDiagram`) and hands it to both the button and its block, so a refusal or error from a
 heading click shows in that block; the blocks keep their headings, ⓘ, status lines, results, errors
@@ -3242,7 +3242,7 @@ pills):
 2. **The ticket as written** — `StoryDisclosure` labelled "As written in Jira" (the tracker's name): the
    stored tracker row read through any PR on the ticket, else the ticket review's snapshot, else the
    sprint read's text (`storyFallbackTicket`, for a ticket with no PR).
-3. **The story's design** — `StoryDesignSection` (`Activity/StoryDesignSection.tsx`), only with `me.ai`
+3. **The story's design** — drawn RIGHT UNDER 1's SUMMARY AND CRITERIA (`afterCriteria` on `TicketResults` / `BriefSummary`; before the missing / not-asked-for lists), listed here for its rules: `StoryDesignSection` (`Activity/StoryDesignSection.tsx`), only with `me.ai`
    and ≥ 1 PR (`storyDesignOffered`); it draws only when a design is stored or the ticket has 2+ PRs
    (the server's `too_few_prs`).
 

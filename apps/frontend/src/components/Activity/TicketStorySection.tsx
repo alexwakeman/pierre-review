@@ -4,7 +4,7 @@
 // story. Here it is ALWAYS OPEN — a plain "Story" heading, no disclosure.
 //
 // THE HEADING ROW carries the STORY'S ACTIONS, right-aligned: the docs check ("Check against docs" /
-// "Check again", StoryDocsAlignment.tsx `StoryDocsButton`) and the story design ("Draw" / "Redraw",
+// "Check docs again", StoryDocsAlignment.tsx `StoryDocsButton`) and the story design ("Draw design" / "Redraw design",
 // StoryDesignSection.tsx `StoryDesignButton`). The section owns ONE start mutation for each, handed to
 // both the button and its block, so a refusal or error from a heading click shows in that block.
 //
@@ -13,9 +13,10 @@
 //      when one exists — the currency pill, the summary, every criterion with who delivers it, the
 //      missing and not-asked-for items, and "What each PR adds"; otherwise the sprint brief's summary
 //      and numbered criteria ("Worked out from the description" when derived); otherwise nothing.
+//      THE STORY'S DESIGN (StoryDesignSection.tsx) sits RIGHT UNDER THE SUMMARY AND ITS CRITERIA
+//      (`afterCriteria`) — only where agentic AI runs and the ticket has a PR.
 //   2. THE TICKET AS WRITTEN — the StoryDisclosure ("As written in Jira"): the stored tracker row read
 //      through any PR on the ticket, else the ticket review's snapshot, else the sprint read's text.
-//   3. THE STORY'S DESIGN (StoryDesignSection.tsx) — only where agentic AI runs and the ticket has a PR.
 //
 // Between 1 and 2, where agentic AI runs: the DOCS CHECK block (StoryDocsAlignment.tsx). Its
 // per-criterion notes sit UNDER the criteria rows of 1 (both lists, through `docsItems`) only when the
@@ -132,14 +133,26 @@ function StoryBody({
     [brief],
   );
   const briefNotes = useDocsNotes(docs, summary.kind, briefCriteria);
+  // The design sits RIGHT UNDER THE SUMMARY AND ITS CRITERIA, wherever they come from.
+  const designNode = <StoryDesignSection design={design} />;
   return (
     <>
       {summary.kind === 'review' && state != null ? (
-        <ReviewSummary runId={summary.runId} ticket={ticket} state={state} storyPrId={storyPrId} jiraRef={jiraRef} tracker={tracker} docs={docs} />
+        <ReviewSummary
+          runId={summary.runId}
+          ticket={ticket}
+          state={state}
+          storyPrId={storyPrId}
+          jiraRef={jiraRef}
+          tracker={tracker}
+          docs={docs}
+          design={designNode}
+        />
       ) : (
         <>
-          {summary.kind === 'brief' && <BriefSummary brief={summary.brief} docsItems={briefNotes.items} />}
+          {summary.kind === 'brief' && <BriefSummary brief={summary.brief} docsItems={briefNotes.items} afterCriteria={designNode} />}
           {summary.kind === 'reading' && <p className={`text-xs ${MUTED}`}>Reading this ticket…</p>}
+          {summary.kind !== 'brief' && designNode}
           {briefNotes.block}
           <StoryDisclosure
             prId={storyPrId}
@@ -150,7 +163,6 @@ function StoryBody({
           />
         </>
       )}
-      <StoryDesignSection design={design} />
     </>
   );
 }
@@ -182,8 +194,11 @@ function useDocsNotes(
 function BriefSummary({
   brief,
   docsItems = NO_DOCS_ITEMS,
+  afterCriteria,
 }: {
   brief: SprintBrief;
+  /** Drawn right under the criteria (the story's design). */
+  afterCriteria?: ReactNode;
   /** The docs check's notes by criterion number, when written against this list. */
   docsItems?: ReadonlyMap<number, StoryDocsCriterionItem>;
 }): JSX.Element {
@@ -243,6 +258,7 @@ function BriefSummary({
       ) : (
         <p className={`text-xs ${MUTED}`}>No acceptance criteria.</p>
       )}
+      {afterCriteria}
     </div>
   );
 }
@@ -257,6 +273,7 @@ function ReviewSummary({
   jiraRef,
   tracker,
   docs,
+  design,
 }: {
   runId: number;
   ticket: CardTicket;
@@ -266,6 +283,8 @@ function ReviewSummary({
   tracker: string;
   /** The docs check (null where agentic AI is off), drawn after the result, before the ticket as written. */
   docs: DocsCheck | null;
+  /** The story's design, drawn right under the summary and its criteria. */
+  design: ReactNode;
 }): JSX.Element {
   const { data: review, isLoading, isError } = useTicketReviewById(runId);
   const reviewCriteria = useMemo<StoryDocsCriterion[] | null>(() => {
@@ -285,6 +304,7 @@ function ReviewSummary({
     return (
       <div className="space-y-2">
         <p className="text-xs text-red-600 dark:text-red-400">Could not load the story.</p>
+        {design}
         {docsNotes.block}
       </div>
     );
@@ -311,9 +331,12 @@ function ReviewSummary({
           </div>
         )}
         {review.status === 'succeeded' ? (
-          <TicketResults review={review} viewedPrId={null} docsItems={docsNotes.items} />
+          <TicketResults review={review} viewedPrId={null} docsItems={docsNotes.items} afterCriteria={design} />
         ) : (
-          <p className={`text-xs ${MUTED}`}>No result stored.</p>
+          <>
+            <p className={`text-xs ${MUTED}`}>No result stored.</p>
+            {design}
+          </>
         )}
         <MemberCards members={members} />
         {docsNotes.block}

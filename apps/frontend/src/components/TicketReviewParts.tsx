@@ -429,6 +429,7 @@ export function TicketResults({
   changedPaths = NO_PATHS,
   onOpenInChanges,
   docsItems,
+  afterCriteria,
 }: {
   review: TicketReview;
   viewedPrId: number | null;
@@ -437,6 +438,8 @@ export function TicketResults({
   /** The story docs check's notes by criterion number (`AC{n}` = array position n); the Story section
    *  passes them only when they were written against THIS list. The PR pane passes nothing. */
   docsItems?: ReadonlyMap<number, StoryDocsCriterionItem>;
+  /** Drawn right under the criteria (the story view's design). */
+  afterCriteria?: ReactNode;
 }): JSX.Element {
   const a = review.assessment;
   const byRef = useMemo(() => itemsByRef(review.items), [review.items]);
@@ -455,6 +458,7 @@ export function TicketResults({
           ))}
         </ul>
       )}
+      {afterCriteria}
       <MissingList items={missing} {...ctx} />
       <NotRequestedList items={a.notRequested} {...ctx} />
       <DocReferencesBlock references={a.references} />

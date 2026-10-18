@@ -1250,8 +1250,8 @@ filter control are DELETED — never bring a canvas back. "Ask Claude" (Haiku) i
 "KEY · Story", internal kind/key `ticket:<ident>` kept), ONLY through `useOpenStory()`: the SAME Open PRs
 ticket stack (`OpenPrsCards` `story`, never a copy), drawn even with no PR, its Story section OPEN. The
 Story section (`TicketStorySection`, story view ONLY — never on the Open PRs board, whose stacks never collapse and whose ticket key + title open the story tab; always open, its heading carrying Draw/Redraw + Check against docs) is: the ticket
-review's result, else the CURRENT brief (`GET /api/ticket-story`, lean, DB only), then the ticket as
-written, then the design (`me.ai` + ≥ 1 PR) — NO dependency or reference cards. The drawer and "Check
+review's result, else the CURRENT brief (`GET /api/ticket-story`, lean, DB only) — the design (`me.ai` +
+≥ 1 PR) right under its summary AND CRITERIA — then the ticket as written. NO dependency or reference cards. The drawer and "Check
 against code" are REMOVED (`sprint_assessments` / `sprint_ticket_repos` DORMANT, never dropped).
 [docs/FRONTEND.md](docs/FRONTEND.md) § Activity → This Sprint, § The story view · [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint briefs / paths.
 

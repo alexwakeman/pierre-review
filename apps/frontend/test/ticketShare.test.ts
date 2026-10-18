@@ -166,10 +166,13 @@ describe('the wiring', () => {
     // No disclosure: a plain heading, no open/onToggle props.
     expect(panel).not.toMatch(/onToggle|ChevronIcon|open: boolean/);
     expect(panel).toMatch(/>\s*Story\s*<\/h4>/);
-    expect(panel).toMatch(/<ReviewSummary runId=\{summary\.runId\}/);
+    expect(panel).toMatch(/<ReviewSummary\s+runId=\{summary\.runId\}/);
     expect(panel.match(/useTicketReviewById\(/g)).toHaveLength(1);
     // The docs check's notes ride along (empty unless written against this same list).
-    expect(panel).toMatch(/<TicketResults review=\{review\} viewedPrId=\{null\} docsItems=\{docsNotes\.items\} \/>/);
+    // …and the story's design sits right under the criteria (both summaries).
+    expect(panel).toMatch(/<TicketResults review=\{review\} viewedPrId=\{null\} docsItems=\{docsNotes\.items\} afterCriteria=\{design\} \/>/);
+    expect(panel).toMatch(/<BriefSummary brief=\{summary\.brief\} docsItems=\{briefNotes\.items\} afterCriteria=\{designNode\} \/>/);
+    expect(panel.match(/<StoryDesignSection\s/g)).toHaveLength(1);
     // No Post anywhere in the stack, and no dependency or reference cards.
     expect(panel).not.toMatch(/usePostTicketItem|ItemPost|references|Other tickets/);
     // The per-stack request never sits on the cards list itself, and the board never mounts the
