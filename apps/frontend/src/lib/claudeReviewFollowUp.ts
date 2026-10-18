@@ -260,11 +260,17 @@ export function threadAddressedClass(
   return t.validity === 'not_valid' ? CHIP_GREY : THREAD_ADDRESSED_CLASS[t.addressed];
 }
 
-/** A thread the reader can stop looking at: dealt with, or Claude found the comment wrong. */
+/**
+ * A thread the reader can stop looking at: resolved on GitHub (Claude judges those too, but its
+ * pill reads "Resolved" and it is never to fix), dealt with, or Claude found the comment wrong.
+ */
 export function isThreadSettled(
-  t: Pick<ClaudeThreadAssessment, 'validity' | 'addressed'>,
+  t: Pick<ClaudeThreadAssessment, 'validity' | 'addressed' | 'resolved'>,
 ): boolean {
-  return !isThreadToFix(t) && (t.addressed === 'addressed' || t.validity === 'not_valid');
+  return (
+    t.resolved === true ||
+    (!isThreadToFix(t) && (t.addressed === 'addressed' || t.validity === 'not_valid'))
+  );
 }
 
 /**
@@ -298,8 +304,9 @@ export interface ThreadCountPill {
 export function threadCountPills(c: ClaudeThreadAssessmentCounts): ThreadCountPill[] {
   const pills: ThreadCountPill[] = [
     { key: 'toFix', label: `${c.validUnaddressed} still to fix`, cls: CHIP_RED },
+    // The thread pills' ONE vocabulary (lib/claudeThreadMarker.ts): "Addressed", "Doesn't hold".
     { key: 'addressed', label: `${c.addressed} addressed`, cls: CHIP_GREEN },
-    { key: 'notValid', label: `${c.notValid} not valid`, cls: CHIP_GREY },
+    { key: 'notValid', label: `${c.notValid} ${c.notValid === 1 ? 'doesn’t' : 'don’t'} hold up`, cls: CHIP_GREY },
     { key: 'notChecked', label: `${c.notChecked} not checked`, cls: CHIP_GREY },
   ];
   const n: Record<ThreadCountPill['key'], number> = {

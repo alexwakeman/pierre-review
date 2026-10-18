@@ -237,6 +237,10 @@ export interface SprintGraphResponse {
   /** The sprint's THEMES (largest first), from the CURRENT theme pass; null when there is none (AI
    *  off, not run yet, or the sprint changed since and the next pass has not finished). */
   themes: SprintTheme[] | null;
+  /** Which Claude passes are running for this workspace RIGHT NOW (in memory), for the status line.
+   *  Briefs progress is `briefs` (current / pending); the builder's is `pathsStatus.state`. Absent on
+   *  a response with no tracker. */
+  passes?: { briefsRunning: boolean; themesRunning: boolean };
   /** The LAST critical paths the sprint builder wrote (any SPRINT_PATHS_VERSION), even when the sprint
    *  has moved since — the next pass replaces them (`pathsStatus.stale` says so); null when AI is off,
    *  the sprint is too small, or none have been written. */

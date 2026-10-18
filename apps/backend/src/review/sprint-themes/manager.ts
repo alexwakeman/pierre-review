@@ -1,3 +1,4 @@
+import { setSprintPassRunning } from '../../db/sprint-pass-flights.js';
 import { SPRINT_BRIEF_MODEL, SPRINT_THEME_CAPS } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import {
@@ -70,6 +71,7 @@ export async function runSprintThemePass(
   // ⚠ CLAIMED SYNCHRONOUSLY — no await between the check and the claim.
   if (running.has(k)) return { ...res, state: 'busy' };
   running.add(k);
+  setSprintPassRunning('themes', accountId, workspaceId, true);
   try {
     if (ctx.llm.detectAuth().status !== 'ok') return { ...res, state: 'no_credential' };
     if (!(await (seams.entitled ?? accountHasReports)(accountId))) return { ...res, state: 'not_entitled' };
@@ -118,5 +120,6 @@ export async function runSprintThemePass(
     return { ...res, state: 'failed' };
   } finally {
     running.delete(k);
+    setSprintPassRunning('themes', accountId, workspaceId, false);
   }
 }

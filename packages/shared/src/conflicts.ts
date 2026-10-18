@@ -364,7 +364,7 @@ export interface ConflictCommitBody {
  * THE ONE REQUEST IN THIS FAMILY THAT CARRIES TYPED TEXT — see the ⚠ in the file header for
  * which half of the old invariant moved and which half did not.
  *
- * It is scoped to ONE region of ONE file, pinned exactly as `ConflictHunkSuggestBody` is: `id`
+ * It is scoped to ONE region of ONE file, pinned by two fields: `id`
  * is the ADDRESS, `fingerprint` is the CONTENT. Without the fingerprint a handle minted against
  * one region's bytes could be redeemed, after a rebuild, against a region that kept its id and
  * changed its content — "text nobody read, in the place it lands", which is the sentence the
@@ -470,7 +470,7 @@ export type ConflictSessionEvent =
     }
   | { type: 'done' };
 
-/* ---- PRO: the per-hunk model suggestion (plugin route; wire type lives here) ---- */
+/* ---- the suggestion refusal vocabulary (core validators + the optional plugin seam) ---- */
 
 /** Why a suggestion was refused. Every member is a REFUSAL, not a degraded answer —
  *  a suggestion that fails validation never reaches the centre pane. */
@@ -487,28 +487,6 @@ export type ConflictSuggestionRefusal =
   | 'model_error'
   | 'no_credits';
 
-export interface ConflictHunkSuggestBody {
-  sessionId: string;
-  fileIndex: number;
-  regionId: number;
-  /** The region's `fingerprint`, as the CONTENT pin beside the id's ADDRESS. */
-  fingerprint: string;
-}
-
-export interface ConflictHunkSuggestion {
-  fileIndex: number;
-  regionId: number;
-  /** For the user to READ before accepting. Accepting sends `suggestionId`, never these. */
-  lines: string[];
-  /** CODE-derived, not model-derived: lines both versions already had that survived. */
-  keptCommonLines: number;
-  /** The handle the commit body uses. Valid only within this session. */
-  suggestionId: string;
-  model: string;
-  generatedAt: string;
-}
-
-export type ConflictHunkSuggestResponse =
-  | { enabled: true; ok: true; suggestion: ConflictHunkSuggestion }
-  | { enabled: true; ok: false; refusal: ConflictSuggestionRefusal; message: string }
-  | { enabled: false };
+// (REMOVED: the per-hunk "Ask Claude" wire types — `ConflictHunkSuggestBody` / `…Suggestion` /
+// `…SuggestResponse`. The refusal vocabulary above stays: core's suggestion validators and the
+// optional `ProContext.conflicts` seam still speak it.)

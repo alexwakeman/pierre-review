@@ -1357,9 +1357,7 @@ export interface BotAnalyticsMlTotals {
 // 'workspace-bots' kind and REVIVED merged with the deterministic Bots layer: BotThemesResult is
 // the wire result of GET/POST /api/pro/bot-themes (the panel that replaced the SynthesisCard
 // mount on the main Bots view — the three drill-down synthesis cards are unaffected). The same
-// vocabulary also serves the HUMAN sibling — the Feed "Discussion themes" summary
-// (HumanThemesResult reuses BotTheme + the category/severity/area/coverage shapes below) — and
-// the plugin's tolerant theme parse (parseThemes), which both prompts share.
+// vocabulary also serves the plugin's tolerant theme parse (parseThemes).
 export type BotThemeCategory =
   | 'correctness'
   | 'security'
@@ -1460,43 +1458,6 @@ export interface BotThemesResponse {
   throttled?: boolean;          // a generation was already in flight (or inside the min interval)
   creditsExhausted?: boolean;   // out of the monthly AI-credit allowance
   empty?: boolean;              // no bot comments in scope/window → nothing to summarize
-}
-
-// ── Human "Discussion" THEMES (Pro, AI) — GET/POST /api/pro/human-themes ─────────────────────
-// The HUMAN sibling of the (revived) Bot "Themes" summary: the same themed AI read, but over PEOPLE'S
-// review comments (non-bot authors, INCLUDING human replies inside bot threads) rather than the bots'. It
-// answers "what are people actually discussing / raising in review?" — recurring concerns, debates,
-// decisions, questions. STRICTLY Pro (activityDigest tier), workspace-scoped, surfaced as a Feed
-// sub-tab.
-// UNLIKE the bot version it does NO deterministic categorisation of the input: the funnel just
-// PRIORITISES (PR-level comments, then threads that have responses, then recency) up to a safe cap —
-// the categorisation/severity is the model's alone. Reuses BotTheme + the category/severity/area/
-// coverage shapes; only the reviewer rollup differs (people, not bots).
-export interface HumanThemeParticipant {
-  userId: number;
-  login: string | null;
-  displayName: string | null;
-  comments: number; // the participant's comment count in the analyzed set (deterministic)
-}
-
-export interface HumanThemesResult {
-  narrative: string;                    // markdown — the 2–3 sentence overview
-  themes: BotTheme[];                   // most-critical-first (LLM-assigned category + severity)
-  participants: HumanThemeParticipant[]; // per-author volume (deterministic), most-active-first
-  byCategory: BotThemeCategoryCount[];  // aggregated from themes (approximate)
-  bySeverity: BotThemeSeverityCount[];  // aggregated from themes (approximate)
-  byArea: BotThemeAreaCount[];          // top-level-dir distribution (deterministic)
-  coverage: BotThemeCoverage;           // `deduped` == totalComments here (the human funnel does NOT dedup)
-  generatedAt: string;                  // ISO
-  model: string;
-}
-
-export interface HumanThemesResponse {
-  enabled: boolean;
-  result: HumanThemesResult | null;
-  throttled?: boolean;
-  creditsExhausted?: boolean;
-  empty?: boolean;
 }
 
 // ── Bot BEHAVIOUR analytics — GET /api/pro/bot-behaviour (plugin, `botDepth`; the compute
@@ -2958,8 +2919,9 @@ export interface WorkspacesResponse {
   workspaces: Workspace[];
 }
 
-// ---- Preset prompts (declared now; implemented later by Pro + the frontend) ----
-// The fixed set of one-click "ask about this scope" questions the AI answer surface offers.
+// ---- Quick questions for the Insights chat ----
+// The fixed set of one-click questions the chat offers as pills (the separate cached "preset
+// prompt" answers are REMOVED; only the questions survive).
 export type PresetPromptKey =
   | 'attention_now'
   | 'blocked_threads'
@@ -3010,27 +2972,6 @@ export const PRESET_PROMPTS: PresetPrompt[] = [
     question: 'Which open PRs look ready to ship?',
   },
 ];
-
-// One preset-prompt answer (Markdown), keyed by preset + the model that produced it.
-export interface PresetPromptResult {
-  key: PresetPromptKey;
-  markdown: string;
-  generatedAt: string; // ISO-8601
-  model: string;
-  // Resolved `owner/name#N` PR references mentioned in `markdown`, for linkification —
-  // re-derived on read from the answer text (same treatment as Sprint/Retro reports), so
-  // preset answers render clickable PR links/tables. Empty when the answer names no PRs.
-  prRefs: DigestPrRef[];
-}
-
-// GET /api/pro/preset-prompt?key=&workspace= and its refresh POST. `enabled` false = the capability
-// is off (plugin absent / not entitled); `throttled` / `creditsExhausted` mirror the digest gates.
-export interface PresetPromptResponse {
-  enabled: boolean;
-  result: PresetPromptResult | null;
-  throttled?: boolean;
-  creditsExhausted?: boolean;
-}
 
 // ── Ad-hoc "Ask about the sprint" chat (Pro, Haiku) ──────────────────────────────────────────
 // A free-text question answered from the SAME workspace-insights snapshot the Sprint summary uses,
@@ -7310,6 +7251,9 @@ export interface ClaudeThreadAssessment {
   authorIsBot: boolean;
   path: string;
   line: number | null;
+  // Marked resolved on GitHub when judged. Absent on rows stored before resolved threads were judged
+  // (those were all unresolved). A resolved thread is never "to fix".
+  resolved?: boolean;
   // The first comment, clipped (plain text, as written — render it as text).
   excerpt: string;
   commentCount: number;
@@ -7321,6 +7265,8 @@ export interface ClaudeThreadAssessment {
   addressed: ClaudeThreadAddressed;
   // Claude's one- or two-sentence explanation. null when not reported.
   explanation: string | null;
+  // ONE line (≤ 120 chars) saying why — shown under the two pills. Absent/null on older rows.
+  reason?: string | null;
   // Claude's suggested reply to the thread, when it offered one. Never posted by the server.
   draftReply: string | null;
   // The head the judgement was made at. A carried item keeps the head it was judged at.
@@ -7574,6 +7520,14 @@ export interface ClaudeReviewResponse {
   // What happened after the LATEST review if it was an auto review on the reader's own PR: an auto
   // fix was started, or skipped and why. In memory (a restart forgets it). null/absent = nothing.
   autoFix?: ClaudeAutoFixOutcome | null;
+  // THE THREAD JUDGEMENTS AS THEY STAND NOW: the latest review's `threadAssessments` with every
+  // later Check threads run folded over it (the newer judgement wins, per thread). Render the tab's
+  // Review threads section from this, not from `review.threadAssessments`. null/absent = none.
+  currentThreadAssessments?: ClaudeThreadAssessment[] | null;
+  // Counts over `currentThreadAssessments` (server-folded). null exactly when that is null.
+  currentThreadAssessmentCounts?: ClaudeThreadAssessmentCounts | null;
+  // The PR's newest Check threads run (any status). null/absent = never run.
+  threadCheck?: ThreadCheckRun | null;
 }
 
 /** Why an auto review is waiting: the head's CI is still running, or new comments / new pushes are
@@ -7856,6 +7810,11 @@ export interface ClaudeThreadJudgement {
   validity: ClaudeThreadValidity;
   addressed: ClaudeThreadAddressed;
   explanation: string | null;
+  /** ONE line (≤ 120 chars) saying why, shown under the pills. null on older judgements. */
+  reason: string | null;
+  /** The thread was resolved on GitHub when judged (false on older judgements, which only covered
+   *  unresolved threads). Read the thread's CURRENT resolved state from the thread itself. */
+  resolved: boolean;
   /** The head the judgement was made at (a carried judgement keeps its own). */
   assessedAtHead: string;
   /** Copied from an earlier run unchanged (no new commits, no new comments since). */
@@ -7864,9 +7823,13 @@ export interface ClaudeThreadJudgement {
 
 export interface ClaudeThreadJudgementsForPr {
   prId: number;
-  reviewId: number;
-  /** The head that run reviewed. */
+  /** The latest Claude review that judged threads; null when only a Check threads run has. */
+  reviewId: number | null;
+  /** The newest Check threads run folded over that review (it judged threads since); null = none. */
+  checkId: number | null;
+  /** The head the newest of the two judged at. */
   reviewedHeadSha: string;
+  /** When the newest of the two finished. */
   finishedAt: string | null; // ISO-8601
   /** The PR's head as last synced; null = not synced (then no judgement is called out of date). */
   currentHeadSha: string | null;
@@ -7876,6 +7839,59 @@ export interface ClaudeThreadJudgementsForPr {
 export interface ClaudeThreadJudgementsResponse {
   prs: ClaudeThreadJudgementsForPr[];
 }
+
+// ---- Check threads: a light, threads-only Claude pass (docs/CLAUDE-REVIEW.md § Check threads) ----
+// Judges ONLY the review threads that changed since their last judgement (a new thread, a new
+// comment, a resolve or unresolve, or new commits since), carries the rest, and stores the whole set
+// in `claude_thread_checks`. The thread cards read the newer of it and the latest Claude review, per
+// thread. CORE, free, LOCAL ONLY. A click, or the auto-review sweeper on a comment burst.
+export type ThreadCheckStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type ThreadCheckTrigger = 'manual' | 'auto';
+/** The server declined to run Claude (stored on a failed row, or answered by the start route). */
+export type ThreadCheckRefusal = 'no_threads' | 'nothing_changed';
+
+/** Where a run is. `queued` = waiting for a free review slot. */
+export type ThreadCheckPhase = 'queued' | 'preparing' | 'checking' | 'saving';
+
+export interface ThreadCheckProgress {
+  phase: ThreadCheckPhase;
+  /** How many threads Claude is judging (the changed set within the cap). */
+  threadsSent?: number;
+  /** How many were carried unchanged. */
+  threadsCarried?: number;
+  recentActivity?: string[];
+  usage?: { inputTokens: number; outputTokens: number; costUsd: number };
+}
+
+export interface ThreadCheckRun {
+  id: number;
+  prId: number;
+  headSha: string;
+  trigger: ThreadCheckTrigger;
+  status: ThreadCheckStatus;
+  refused: ThreadCheckRefusal | null;
+  error: string | null;
+  threadsSent: number | null;
+  costUsd: number | null;
+  createdAt: string; // ISO-8601
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+/** `GET /api/prs/:id/claude-review/thread-check` — poll it every few seconds while queued/running. */
+export interface ThreadCheckStatusResponse {
+  prId: number;
+  /** The newest run of the PR, or null when none ever ran. */
+  check: ThreadCheckRun | null;
+  /** Live progress while it is queued or running (in memory); null otherwise. */
+  progress: ThreadCheckProgress | null;
+}
+
+/** `POST /api/prs/:id/claude-review/thread-check`. */
+export type StartThreadCheckResponse =
+  | { outcome: 'queued'; checkId: number; threadsSent: number }
+  | { outcome: 'already_running'; checkId: number | null }
+  | { outcome: 'refused'; reason: ThreadCheckRefusal };
 
 // ---- Ticket review: one review per TICKET, across every PR on it ----
 // Claude Review is split in two. The PR review (above) looks for code defects in ONE pull request.
@@ -8512,21 +8528,6 @@ export type AiFixModel = ClaudeReviewModel;
 // pane's summary is a separate, cheap Haiku call.
 export const DEFAULT_AI_FIX_MODEL: AiFixModel = 'claude-opus-5-5';
 
-// ---- read-only analyses (aiAnalysis capability) ----
-
-export interface PrSummaryResponse {
-  enabled: boolean;
-  // The generated overview (markdown), or null if never generated.
-  summary: string | null;
-  model: string | null;
-  // The head SHA the summary was generated against; lets the UI flag staleness.
-  headSha: string | null;
-  generatedAt: string | null;
-  // Metered (paid cloud) plan out of credits: generation is refused and the last summary is
-  // served unchanged. Absent (undefined) for unmetered/local accounts. Drives the disabled
-  // Generate button + "out of credits" note (mirrors the digest/sprint report).
-  creditsExhausted?: boolean;
-}
 
 // ---- the agentic fixer (aiFix capability) ----
 
@@ -8996,6 +8997,18 @@ export type ApprovePrResult = ReviewDetail;
 // Request-changes result: the submitted review (state 'changes_requested').
 export type RequestChangesResult = ReviewDetail;
 
+// `POST /api/prs/:id/withdraw-approval` — dismisses the viewer's own APPROVED review on GitHub. The
+// message GitHub shows on the PR's timeline. A refusal is a 4xx `{ error, message }`:
+//   409 NotApproved     the viewer's latest decisive review is not an approval (nothing to withdraw)
+//   403 / 422 GitHubRefused  GitHub said no; `message` is "GitHub didn't let you withdraw this
+//                       approval: <GitHub's own words>"
+export const WITHDRAW_APPROVAL_MESSAGE = 'Approval withdrawn in Limn.';
+export interface WithdrawApprovalResult {
+  // The local `reviews` row now marked dismissed.
+  reviewId: number;
+  state: 'dismissed';
+}
+
 export interface AddReviewCommentResult {
   commentId: number | null;
   url: string | null;
@@ -9193,62 +9206,6 @@ export interface DigestPrRef {
   openedAt: string | null; // ISO-8601
 }
 
-export interface RepoDigest {
-  repoId: number;
-  repoFullName: string;
-  // Markdown change-report: a bulleted list of key events. May contain "#123" PR
-  // tokens (resolved in `prRefs`). Chained from the prior digest to highlight change.
-  summary: string;
-  // Resolved "#N" references mentioned in `summary`, for linkification.
-  prRefs: DigestPrRef[];
-  model: string;
-  generatedAt: string; // ISO-8601
-  costUsd: number | null;
-  stale: boolean;
-}
-
-export interface RepoDigestsResponse {
-  enabled: boolean;
-  model: string;
-  digests: RepoDigest[];
-  generatedAt: string; // ISO-8601
-  budgetReached?: boolean;
-  // The account's month-to-date credit allowance is spent (metered cloud plan). Set when a
-  // refresh was skipped without billing; the already-stored `digests` still render, and the
-  // Generate/Regenerate controls disable with an "out of AI credits" message.
-  creditsExhausted?: boolean;
-}
-
-// Server-Sent-Events payload streamed by POST /api/pro/activity/digests/refresh/stream.
-// `start` announces the repo denominator; one `repo` event fires as EACH repo's digest
-// finishes (cache hits arrive instantly, regenerations as their Haiku call returns),
-// carrying the fresh digest so the client can drop it straight into the cache — this is
-// what makes the UI update live instead of only after a manual reload. `done` closes the
-// stream. `throttled` means the min-interval/in-flight guard served cache without billing.
-export type DigestRefreshEvent =
-  // `creditsExhausted` closes the stream immediately (metered cloud plan out of credits) —
-  // nothing regenerates and the stored digests are left intact.
-  | { type: 'start'; throttled?: boolean; creditsExhausted?: boolean }
-  // Sent once, after a cheap payload-hash pass, listing ONLY the repos whose content
-  // actually changed since their last digest — the repos that will really regenerate.
-  // Everything else is already up to date and is left untouched (no LLM, no skeleton).
-  // `toRegenerate.length` is the honest progress denominator.
-  | { type: 'plan'; toRegenerate: number[] }
-  | {
-      type: 'repo';
-      index: number; // 1-based position among the repos being regenerated
-      total: number; // == toRegenerate.length
-      digest: RepoDigest;
-      // true = served from the payload-hash cache (unchanged repo, $0, no LLM call);
-      // false = freshly regenerated.
-      cached: boolean;
-    }
-  | { type: 'error'; repoId: number; message: string }
-  | { type: 'done'; total: number; completed: number; budgetReached?: boolean };
-
-// NOTE: the old cross-repo "Feed digest" (FeedDigest*) was removed. The Activity "Feed"
-// entry now renders the COLLECTION of per-repo RepoDigests directly (scoped to the active
-// workspace's repos), each in a collapsible card — one source of truth, no aggregate LLM pass.
 
 // ---- Consolidated Feed (CORE, no AI; the Activity "Feed" entry's main list) ----
 // One flat, purely-chronological (newest-first) stream of real activity events (opens /
@@ -11223,112 +11180,8 @@ export interface PeriodReportModelInfo {
   estimates: PeriodReportCostEstimate[];
 }
 
-// ---- Comment-validity assessment (Pro; reuses the prSummary capability) ----
-// A Haiku "is this review comment valid, given the thread + diff context?" assessment,
-// keyed to a review thread's ORIGINATING (root) comment and retained after generation.
-// `verdict` is a short at-a-glance label; `assessment` is the full Markdown rationale
-// (critical but not dismissive). One row per (account, root comment).
-export type CommentAssessmentVerdict =
-  | 'valid' // the comment holds up — worth acting on
-  | 'partly' // partially valid / needs nuance or scoping
-  | 'weak' // shaky — likely a false positive / low value
-  | 'unclear'; // not enough context to judge
-
-export interface CommentAssessment {
-  threadId: number;
-  commentId: number; // the root comment the assessment is about
-  verdict: CommentAssessmentVerdict;
-  assessment: string; // Markdown rationale
-  model: string;
-  generatedAt: string; // ISO-8601
-}
-
-// GET /api/pro/threads/:id/assessment and its POST refresh. `enabled` false = capability off;
-// `creditsExhausted` mirrors the other AI gates; `noAuth` = no resolvable Claude/Anthropic auth.
-export interface CommentAssessmentResponse {
-  enabled: boolean;
-  assessment: CommentAssessment | null;
-  creditsExhausted?: boolean;
-  noAuth?: boolean;
-}
-
-// ── Pro: "was this thread / PR comment TRULY addressed?" check ───────
-// A Haiku verdict on whether the concern a review thread or PR-level comment raised was actually
-// resolved by later changes — the SEMANTIC layer above the deterministic addressedConfidence
-// (Part A). Works for review threads (bot OR human) AND PR-level comments (which carry no
-// derivedState at all). One row per (account, targetKind, targetId), retained + $0-on-unchanged.
-export type AddressedVerdict =
-  | 'addressed' // clearly resolved by a later change
-  | 'likely' // probably resolved, some uncertainty
-  | 'partial' // partially addressed
-  | 'not_addressed' // no evidence the concern was handled
-  | 'unclear'; // insufficient context to judge
-
-export const ADDRESSED_VERDICTS: AddressedVerdict[] = [
-  'addressed',
-  'likely',
-  'partial',
-  'not_addressed',
-  'unclear',
-];
-
-export type AddressedTargetKind = 'thread' | 'pr_comment';
-
-export interface AddressedCheck {
-  targetKind: AddressedTargetKind;
-  targetId: number; // reviewThreads.id (thread) or prComments.id (pr_comment)
-  prId: number;
-  verdict: AddressedVerdict;
-  confidence: number; // 0-100
-  rationale: string; // Markdown
-  model: string;
-  generatedAt: string; // ISO-8601
-}
-
-// GET /api/pro/threads/:id/addressed | /api/pro/pr-comments/:id/addressed and their POST refresh.
-export interface AddressedCheckResponse {
-  enabled: boolean;
-  check: AddressedCheck | null;
-  creditsExhausted?: boolean;
-  noAuth?: boolean;
-}
-
-// PR-wide batch (one item at a time). The rollup answers "can I safely resolve these?".
-export interface AddressedCheckSummary {
-  addressed: number;
-  likely: number;
-  partial: number;
-  not_addressed: number;
-  unclear: number;
-}
-export interface PrAddressedCheckResponse {
-  enabled: boolean;
-  prId: number;
-  checks: AddressedCheck[];
-  summary: AddressedCheckSummary;
-  creditsExhausted?: boolean;
-  noAuth?: boolean;
-  generatedAt: string;
-}
-// SSE progress events for the PR-wide batch (mirrors the digest refresh stream).
-export type AddressedCheckProgress =
-  | { type: 'start'; total: number }
-  | {
-      type: 'item';
-      targetKind: AddressedTargetKind;
-      targetId: number;
-      verdict: AddressedVerdict;
-      confidence: number;
-      done: number;
-      total: number;
-    }
-  | { type: 'error'; message: string }
-  | {
-      type: 'done';
-      summary: AddressedCheckSummary;
-      creditsExhausted?: boolean;
-      noAuth?: boolean;
-    };
+// (REMOVED: the single-thread validity check and the "was this addressed" check — their wire
+// types went with their routes. Claude Review's thread judgements replaced both.)
 
 // ---- AI usage tracking (Pro; transparency) ----
 // The two AI seams are metered DIFFERENTLY:
@@ -11523,80 +11376,27 @@ export interface BranchTrendsResponse {
   daily: BranchTrendDay[];
 }
 
-// ---- Comment annotations platform (Pro; plugin-owned storage) ------------------------------
+// ---- The blast-radius IMPACT NOTE (Pro; plugin-owned storage) ------------------------------
 //
-// The generalisation of the one-off `comment_assessments` table: any AI judgement ABOUT a
-// review comment/thread, keyed uniformly by (kind, targetKind, targetId) so a new judgement
-// type is a new `kind` rather than a new table + route + hook. The rows live in the plugin's
-// `pr_comment_annotations`; these are only the wire shapes.
+// The plugin's `pr_comment_annotations` table once held several AI judgements about review
+// comments (validity / addressed / simplify — the "Check review" button). Those kinds are REMOVED
+// (Claude Review's own thread judgements replaced them); their stored rows are DORMANT and the read
+// skips them. What is left is ONE kind:
 //
-//   addressed — was the concern actually dealt with by later changes?
-//   validity  — is the comment itself well-founded, given the thread + diff? (the old
-//               comment_assessments; its rows are backfilled into this table)
-//   simplify  — could the change this comment asks for be made simpler / smaller?
-//   impact    — what could this pull request BREAK, and what should a reviewer look at first?
-//               The Pro half of BLAST RADIUS, and the one kind whose target is the PULL REQUEST
-//               rather than a comment. See the warning under `AnnotationTargetKind` below.
-export type AnnotationKind = 'addressed' | 'validity' | 'simplify' | 'impact';
+//   impact — what could this pull request BREAK, and what should a reviewer look at first?
+//            The Pro half of BLAST RADIUS. Its target is the PULL REQUEST (`pullRequests.id`).
+export type AnnotationKind = 'impact';
 
-// What an annotation hangs off. `targetId` is that entity's own primary key:
-//   thread         → reviewThreads.id
-//   review_comment → reviewComments.id
-//   pr_comment     → prComments.id
-//   pull_request   → pullRequests.id
-//
-// ⚠ `pull_request` IS THE ONE NON-COMMENT TARGET, added for the `impact` kind. It fits the stored
-// table with NO schema change — the unique index is already `(accountId, kind, targetKind,
-// targetId)` — and both members here are additive union members on a `packages/shared` WIRE type,
-// not `ProContext`, so the plugin `apiVersion` STAYS 21.
-export type AnnotationTargetKind = 'thread' | 'review_comment' | 'pr_comment' | 'pull_request';
+// What an annotation hangs off. `pull_request` → `pullRequests.id`. (The comment target kinds
+// left with the comment judgements.)
+export type AnnotationTargetKind = 'pull_request';
 
-// A RUN kind — deliberately NOT an `AnnotationKind`, and the distinction is load-bearing.
-//
-// `AnnotationKind` is the STORED discriminator: it is the `kind` column, the per-kind payload-hash
-// cache, the `counts` map, the `kinds=` filter on the cached GET, and the key of every per-kind
-// prompt/vocabulary record in the plugin. `'review'` is none of those things — it asks for ONE
-// combined model call per target that returns all three judgements at once, and it writes the SAME
-// rows a run of each kind would write. So there is no `review` row, no `review` payload hash and
-// no `counts.review`: a combined run and three separate runs are INDISTINGUISHABLE in storage,
-// which is exactly what keeps each kind's staleness (and its $0-on-unchanged cache) independent.
-export type AnnotationRunKind = AnnotationKind | 'review';
+// The kind a RUN may ask for — the same single member now.
+export type AnnotationRunKind = AnnotationKind;
 
-// One anchor a run may be narrowed to — the per-thread / per-comment "check this one" button, as
-// opposed to a whole-PR sweep.
-//
-// The anchor is the ENTITY THE USER CLICKED, not the row that gets written: for a review thread it
-// is `{'thread', reviewThreads.id}` even though the run also writes rows keyed on that thread's
-// ROOT `reviewComments.id`. Absent or empty on the request body means the whole PR.
-//
-// TWO RULES GOVERN HOW THE SERVER APPLIES THIS, and getting either wrong is a silent bug rather
-// than an error:
-//
-// 1. EXPANSION — an anchor selects every enumerated target BELONGING to it, not the one whose ids
-//    happen to match. The three kinds key their rows on DIFFERENT pairs for the same thread:
-//    `addressed` on `('thread', threadId)`, `validity` on the thread's ROOT `('review_comment', id)`,
-//    and `simplify` on `('review_comment', id)` for EVERY comment in the thread. So an equality
-//    match on `(targetKind, targetId)` finds only the `addressed` target: a "Check review" on one
-//    thread would report `generated: 1`, render a single chip, and silently produce neither a
-//    validity nor a simplify verdict — with no error to notice. A `{'thread', T}` anchor therefore
-//    selects `('thread', T)` PLUS every `('review_comment', C)` whose comment C sits in thread T.
-//    `{'pr_comment', P}` and `{'review_comment', C}` select just themselves.
-//
-// 2. INTERSECTION ONLY — `targets` is a POST-FILTER over the targets enumerated from the
-//    already-account-scoped PR corpus. It is NEVER a fetch key: nothing may be loaded BY these
-//    ids. They arrive from the client, and a "load the named targets" implementation would let
-//    `{'review_comment', <another tenant's comment id>}` on a PR I own read a foreign comment
-//    body, spend my credits summarising it, and store the result where my own cached GET serves
-//    it back. An anchor matching nothing in the corpus is counted `skipped`, never fetched.
-export interface AnnotationRunTarget {
-  targetKind: AnnotationTargetKind;
-  targetId: number;
-}
-
-// One stored judgement. `verdict` is kind-specific free text (the client maps it to a chip),
-// `confidence` is 0-100 or null when the kind doesn't produce one, `body` is markdown
-// rationale. `stale` is computed on READ: the target has changed since the annotation was
-// generated (a newer reply, a newer commit), so the verdict may no longer hold.
+// One stored note. `verdict` is `concern` | `none`, `confidence` is always null for `impact`,
+// `body` is the note's prose. `stale` is computed on READ: the pull request has changed since the
+// note was written.
 export interface CommentAnnotation {
   kind: AnnotationKind;
   targetKind: AnnotationTargetKind;
@@ -11606,28 +11406,11 @@ export interface CommentAnnotation {
   confidence: number | null;
   body: string;
   model: string;
-  /**
-   * The GROUNDING DIFF the verdict was actually judged against, as the JSON written by the
-   * plugin's `annotations/evidence.ts#encodeEvidence`:
-   *   {"v":1,"baseSha":…,"headSha":…,"path":…,"outcome":"changed"|"untouched"|"unavailable",
-   *    "patch":…|null,"previousPath":…|null,"note":…|null}
-   *
-   * Populated for `addressed` on a THREAD target only — that is the one judgement about later
-   * code. Every other row stores null (a PR-level comment has no file anchor; simplify/validity
-   * judge the comment, not the code that followed it), as does any row written before the
-   * plugin's migration 0022.
-   *
-   * OPTIONAL because it is produced by the private plugin: a core-only (OSS) build serves
-   * annotations routes that never set it, and rows predating 0022 have nothing to show.
-   */
-  evidence?: string | null;
   createdAt: string; // ISO-8601
   stale: boolean;
 }
 
-// GET /api/pro/prs/:id/annotations?kinds= — every annotation the account holds for one PR.
-// `counts` is per-kind over the returned set (every AnnotationKind is present, 0 when none),
-// `staleCount` is how many of them are stale.
+// GET /api/pro/prs/:id/annotations — the stored impact note for one PR (or none).
 export interface PrAnnotationsResponse {
   prId: number;
   annotations: CommentAnnotation[];
@@ -11636,37 +11419,13 @@ export interface PrAnnotationsResponse {
   generatedAt: string; // ISO-8601 — when this response was assembled
 }
 
-// POST /api/pro/prs/:id/annotations/run — generate across a PR. `kind` is a RUN kind, so it can
-// be one `AnnotationKind` or `'review'` (all three in one call per target — see
-// `AnnotationRunKind`). `targetKinds` narrows which entity TYPES to consider (default: all
-// three); `targets` narrows to specific anchors (one thread, one comment) and is what the
-// per-item "Check review" button sends.
-//
-// An absent/empty `targets` still MEANS the whole PR on the wire — the server contract is
-// unchanged — but no UI sends that any more: the PR-wide sweep bar was removed, so in practice
-// every run is one anchor. Keep the whole-PR path working; it is what `planRun`'s
-// `anchors.length === 0` branch covers and what the run-gate clock still bounds.
-//
-// REMOVED: `onlyStale`. It only ever had one sender (the sweep bar's "Re-check stale" control),
-// and with the bar gone there is no surface that asks for "just the ones that moved" — the
-// per-item button always re-checks exactly what was clicked. A client that still posts the field
-// is now silently ignored rather than honoured, which is the acceptable failure here (the run it
-// gets is a superset of the one it asked for, and the payload-hash cache makes the unchanged
-// targets free anyway).
+// POST /api/pro/prs/:id/annotations/run — write (or refresh) the impact note. Billed.
 export interface AnnotationRunBody {
   kind: AnnotationRunKind;
-  targetKinds?: AnnotationTargetKind[];
-  targets?: AnnotationRunTarget[];
 }
 
-// The outcome of a run. `cached` = a payload-hash hit ($0); `skipped` = ineligible targets
-// (nothing to judge); `truncated` = the per-run target cap was hit, so a second run would do
-// more; `creditsExhausted` = the metered plan ran out mid-run and the rest was refused.
-//
-// The counting UNIT differs by run kind, which matters when a caller sums across runs: a per-kind
-// run counts TARGETS, which is exactly one stored row each; a combined `'review'` run also counts
-// targets (a thread or a comment), but each one is up to THREE rows. So `generated` is "how many
-// things did we judge", never "how many rows did we write".
+// The outcome of a run. `cached` = a payload-hash hit ($0); `skipped` = nothing to explain (an
+// unmeasured PR); `creditsExhausted` = the metered plan ran out.
 export interface AnnotationRunResponse {
   kind: AnnotationRunKind;
   requested: number;
@@ -11676,13 +11435,8 @@ export interface AnnotationRunResponse {
   failed: number;
   truncated: boolean;
   creditsExhausted: boolean;
-  // No usable Anthropic credential, so the run returned before billing anything. This is a
-  // SUCCESSFUL 200 carrying zero work — the run was refused, not attempted and failed, so
-  // `failed` stays 0 and there is nothing in the other counters to distinguish it from
-  // "everything was already cached". Without this flag the button can only say "nothing was
-  // produced", which reads as a broken feature rather than an unconfigured one; the client
-  // infers the difference from counters otherwise, and an inference is not something to make a
-  // user act on. Optional so an older plugin build simply omits it.
+  // No usable Anthropic credential, so the run returned before billing anything (a refusal, not
+  // a failure). Optional so an older plugin build simply omits it.
   noAuth?: boolean;
 }
 
@@ -12538,21 +12292,17 @@ export type ReactionWriteResponse = ReactionState;
 // (core `db/synthesis-input.ts` getSynthesisInput). A synthesis over a second predicate would
 // summarise a different population than the receipt list below it.
 
-/** The P2.1 drill-down grains plus the ORDERING grains: 'brief' (the daily-brief narration,
- *  N1), 'rollup' (the cross-workspace roll-up, N5 — both DORMANT: still served, but no SPA
- *  surface requests them since the Feed's brief strip was deleted) and 'person' (the 1:1-prep
- *  narration, N4 — one digit-free phrase per person-vector line), plus the SECTIONS grain
+/** The P2.1 drill-down grains plus the ORDERING grain 'person' (the 1:1-prep narration, N4 — one
+ *  digit-free phrase per person-vector line), plus the SECTIONS grain
  *  'person_report' (the People report's per-person narrative — digit-free prose per fixed
  *  section id over the person vector + its evidence rows; see SynthesisSectionItem). Every
  *  widening here was additive — no version change (exactly the growth path the P2.1 comment
- *  promised). */
+ *  promised). (REMOVED: the 'brief' / 'rollup' ordering grains; their stored rows are DORMANT.) */
 export type SynthesisScopeKind =
   | 'bot-flagging'
   | 'bot-threads'
   | 'bot-volume'
   | 'workspace-bots'
-  | 'brief'
-  | 'rollup'
   | 'person'
   | 'person_report';
 
@@ -12604,10 +12354,8 @@ export interface SynthesisScope {
   toMs?: number;
 }
 
-/** The item family a synthesis row belongs to — the prefix of its `id` ref. `brief_line` is the
- *  brief/rollup ordering grains' family: one line of the deterministic daily brief (or one
- *  workspace of the roll-up), whose id ENCODES its computed counts (see the daily-brief section
- *  below). `person_metric` is the 'person' grain's family: one non-null line of the 1:1 person
+/** The item family a synthesis row belongs to — the prefix of its `id` ref. `brief_line` is a
+ *  figure line whose id ENCODES its computed counts (the person_report grain's figure lines). `person_metric` is the 'person' grain's family: one non-null line of the 1:1 person
  *  vector, its id encoding the metric key + computed value + PERSON_METRICS_SCHEMA_VERSION for
  *  the same content-hash reason. `path_area` is the 'person_report' grain's path-area family:
  *  one top directory bucket of the subject's windowed commits, its id encoding
@@ -12669,7 +12417,7 @@ export interface SynthesisCluster {
   configFixable?: boolean;
 }
 
-/** A Phase-3 ordering-mode item ('brief'/'rollup'): a ref from the input set plus a DIGIT-FREE
+/** An ordering-mode item ('person'): a ref from the input set plus a DIGIT-FREE
  *  phrase (regex-validated server-side; a digit or unknown ref rejects the item and the caller
  *  falls back to its templated line). Numbers are appended by the CALLER from computed values. */
 export interface SynthesisOrderingItem {
@@ -12704,7 +12452,7 @@ export interface StoredSynthesis {
    *  mutation-key segment, so two mounts of one scope share in-flight state). */
   scopeKey: string;
   clusters: SynthesisCluster[];
-  /** ORDERING mode only ('brief'/'rollup'): the validated {ref, phrase} list, model order.
+  /** ORDERING mode only ('person'): the validated {ref, phrase} list, model order.
    *  Every ref ∈ the input set, every phrase digit-free (server-validated; a rejected item is
    *  simply absent — the caller renders its templated line). Empty/absent for cluster kinds. */
   ordering?: SynthesisOrderingItem[];

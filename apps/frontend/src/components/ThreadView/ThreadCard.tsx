@@ -1,5 +1,4 @@
 import type { ThreadDetail, User } from '@pierre-review/shared';
-import { ReviewCheckButton, ThreadCheckOutput } from '../CommentAnnotations.js';
 import { MlSeverityBadge, worstSeverity } from '../MlSeverityBadge.js';
 import { mlLabelKey, useMlLabelIndex, useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
 import { ShowOnTimeline } from '../ShowOnTimeline.js';
@@ -10,7 +9,7 @@ import { ArrowIcon, ExternalLinkIcon } from '../Icons.js';
 import { ResolveThread } from './ResolveThread.js';
 import { ReplyComposer } from './ReplyComposer.js';
 import { isNewComment } from './NewCommentHighlight.js';
-import { ThreadStatePill } from './ClaudeThreadBadge.js';
+import { ClaudeThreadReason, ThreadStatePill } from './ClaudeThreadBadge.js';
 
 // A single review thread rendered conversation-first: the code it's anchored to
 // sits inside the opening comment, replies follow as plain conversation.
@@ -135,9 +134,8 @@ export function ThreadCard({
       >
         {/* State pill anchored top-LEFT on every thread card — so a resolved (or otherwise-
             stateful) thread is legible at a glance without expanding it, and all thread cards
-            read uniformly. The latest Claude review's judgement REPLACES the state pill and the
-            confidence marker when it made one (lib/claudeThreadMarker.ts); a resolved thread
-            keeps "Resolved". */}
+            read uniformly. The freshest Claude judgement REPLACES the state pill and the confidence
+            marker with TWO pills when there is one (lib/claudeThreadMarker.ts). */}
         <ThreadStatePill thread={thread} withConfidence />
         {/* The worst ML severity anywhere in this conversation (summaries excluded). Renders
             nothing when no comment in the thread is labelled — which is also the state of every
@@ -201,15 +199,6 @@ export function ThreadCard({
             In Threads
           </button>
         )}
-        {/* Pro (prSummary): the ONE AI check, spent on this thread alone — rewrite its wall of bot
-            text, sanity-check the point, and judge what is actually still open. Deliberately NOT
-            gated on `!thread.isResolved`: the rewrite and the validity read are still worth having
-            on a resolved thread, and the server omits the addressed judgement for one, so no extra
-            judgement is billed that the PR-wide run would not have produced anyway. */}
-        <ReviewCheckButton
-          prId={thread.prId}
-          target={{ targetKind: 'thread', targetId: thread.id }}
-        />
         <span className="ml-auto flex items-center">
           <ResolveThread
             prId={thread.prId}
@@ -218,6 +207,9 @@ export function ThreadCard({
           />
         </span>
       </div>
+
+      {/* Claude's one-line reason under its two pills; the longer explanation opens on demand. */}
+      <ClaudeThreadReason thread={thread} />
 
       <div className="space-y-3">
         {thread.comments.map((c, i) => (
@@ -257,19 +249,6 @@ export function ThreadCard({
           />
         ))}
       </div>
-
-      {/* Pro (prSummary): the WHOLE "Check review" output for this thread, in ONE block, directly
-          under the conversation — i.e. under the last reply, which is where the old standalone
-          "Comment check" panel sat. The three judgements key on three different ids (a rewrite per
-          comment, validity on the root comment, addressed on the thread), so they cannot be one
-          <CommentAnnotations>; ThreadCheckOutput assembles them off the same shared per-PR query.
-          Renders NOTHING — and issues no request of its own — when the thread has none.
-
-          COUPLED TO THE BUTTON ABOVE by the anchor, not by a prop: while a check is in flight
-          against ('thread', thread.id) this block drops the previous result for a placeholder
-          sweep, so changing the button's target without changing that would silently leave the
-          stale judgements on screen for the whole re-run. */}
-      <ThreadCheckOutput thread={thread} usersById={usersById} />
 
       <div className="mt-2 space-y-1.5 pl-2 text-[11px]">
         <ReplyComposer prId={thread.prId} threadId={thread.id} />

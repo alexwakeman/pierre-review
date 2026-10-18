@@ -656,7 +656,18 @@ Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix
   **docs/MERGE-CI-TRUNK.md § Why a blocked PR is blocked**), **Reviewers** (all who
   submitted a review, badged by latest state) above **Approvers** (latest decisive review =
   `approved`), then **Merged by**, **Requested** reviewers, labels, meta, an **Actions** row
-  (the review verdicts in `ApproveControl` — **Approve** posts at once with no text box, **Approve
+  (⚠ **HIDDEN BY DEFAULT behind ONE reveal button**, "Show actions" / "Hide actions", in
+  `PrActionControls` itself so the Overview and the Claude Review tab's "Reviews and actions" get the
+  same gate; the choice is remembered for the browser session (`sessionStorage`
+  `limn.prActions.open`, read through `readPrActionsOpen`, closed when unset or unreadable). Only the
+  BUTTONS hide: the closed row still states "You approved" / "You requested changes" and "Merging…"
+  (read off the shared mutation keys), and the merge facts stay on the Status row. ⚠ The Claude
+  Review tab's "Post to GitHub" composer (its Verdict select + Post) is NOT behind this reveal — it
+  has its own "Post as …?" confirm (pending the user's confirmation of that exemption). Inside it, the
+  review verdicts in `ApproveControl` — while YOUR approval stands, **Withdraw approval** asks
+  inline ("Withdraw your approval?" Yes, withdraw / Cancel), calls `POST /api/prs/:id/withdraw-approval`
+  through `useWithdrawApproval` → `invalidateAfterPrWrite`, bridges the standing locally until the
+  refetch agrees, and prints GitHub's refusal sentence as the server wrote it; **Approve** posts at once with no text box, **Approve
   with comment** alone opens one and stays shut until something is typed, **Request changes** always
   opens an optional one and a blank box sends "Changes requested." (GitHub refuses an empty one);
   after approving, Request changes stays, and the standing chip reads the server's
@@ -672,10 +683,9 @@ Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix
   ceremony around a reversible act. It prints GitHub's own refusal sentence when the 409 comes back
   — normally the head branch was deleted after the close) — then the PR **Summary** (markdown,
   clamped to 3 lines, tall images hidden when collapsed). **PR comments** (oldest first) round the
-  tab off — each with a "Show" link, a per-comment "Check review", and its AI annotations **BELOW**
-  the comment (a judgement read before the thing it judges is backwards; it also matches the
-  per-thread block) — but that list is rendered by **`PrDetail` itself**, not `ChecksTab`, which is
-  why the per-comment `CommentAnnotations`/`ReviewCheckButton` call sites are there. The **Checks
+  tab off — each with a "Show" link — but that list is rendered by **`PrDetail` itself**, not
+  `ChecksTab`. (The AI PR summary under the description and the per-comment "Check review" + its
+  annotations are REMOVED 2026-10-18.) The **Checks
   row** lists the checks + re-run control and opens only when there are checks to list
   (`checksRowVisible` is DELETED with the Pro `CiAnalysisCard`: why CI failed is the CI review's
   job now — docs/CLAUDE-REVIEW.md § CI review).
@@ -696,11 +706,22 @@ Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix
   pills** (Untouched/Replied/Likely-addressed/Resolved, `store.threadStateFilter: Set<DerivedState>`)
   ANDed with the vendor `threadBotFilter`; the pills' badge counts come from the full loaded set
   (stable), and the bulk "Resolve N addressed" set is derived from the full list (independent of
-  the visible filter). Each card renders its whole "Check review" output as ONE block under the
-  conversation (`ThreadCheckOutput` — the three judgements key on three DIFFERENT ids, so no single
-  `<CommentAnnotations>` can express a thread: `simplify` per comment, `validity` on the root,
-  `addressed` on the thread; each rewrite is sublabelled with whose comment it rewrites since it is
-  no longer adjacent to it). The bulk-resolve OFFER now goes through `ThreadList/resolvable.ts`,
+  the visible filter). (The per-thread "Check review" button and its output block are REMOVED
+  2026-10-18; a thread's AI judgement is Claude Review's or a later **Check threads** run's, read
+  through `useClaudeThreadJudgements`.) ⚠ **TWO PILLS AND ONE VOCABULARY** (`lib/claudeThreadMarker.ts`,
+  the only place the words live): a judged thread wears **validity** (Holds up / Partly / Doesn't hold
+  / Unclear) and **state** (Resolved / Addressed / Partly addressed / Open, "· earlier commit" when the
+  head moved) in place of the derived pill + confidence marker, then Claude's ONE-LINE reason
+  (`ClaudeThreadReason`); the longer explanation opens only on "More". "Resolved" is read off the
+  thread NOW (a GitHub fact). No judgement ⇒ the derived pill, unchanged. Every surface — ThreadCard,
+  the Timeline popover, the Feed's collapsed row and the Changes tab's inline pill (both inside a
+  button, so `noInfo` drops the ⓘ), the Claude Review tab's Review threads rows — prints these words.
+  The state chips put an UNRESOLVED judged thread under "Claude judged"; a resolved one stays under
+  Resolved. **Check threads** (`CheckThreadsButton`, above the list and in the Claude Review tab's
+  Review threads header) starts the threads-only pass; ONE `['thread-check', prId]` status read polls
+  every 3s only while queued/running, and a finish it SAW invalidates `['claude-review', prId]` (the
+  judgements key sits under it). Gated like Claude Review: `ai.enabled` + `AiRunGate`. The Claude
+  Review tab renders its Review threads from `currentThreadAssessments` (latest run only). The bulk-resolve OFFER now goes through `ThreadList/resolvable.ts`,
   which consults the unscoped `useDetectedReviewers` listing filtered to the PR's OWN `repoId` —
   matching what the server re-derives (a bot is judged per repo), since classifying by vendor login
   alone offered a count the server then refused, leaving a dead button with an unchanged count. Arriving from the
@@ -756,11 +777,9 @@ Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix
     the SAME string. When they match the badge reads "slower than usual" with no number and the
     Stat carries the magnitude; when they differ the number stays.
 
-**There is no PR-wide "Check review" bar any more.** `ReviewCheckBar` (which sat above the tab
-content, spanning threads + PR comments) is DELETED: a whole-PR sweep on a bot-flooded PR is many
-billed calls and tens of seconds before anything appears, and the question a reader has is about
-the one thread in front of them. The only run surface is the per-item **`ReviewCheckButton`**
-(thread-card header / PR-comment actions row) — one anchor, one combined call.
+**There is no "Check review" any more** — neither the PR-wide bar nor the per-item
+`ReviewCheckButton` (REMOVED 2026-10-18). The BotTriageCard's "N real issues" reads Claude Review's
+thread judgements (`useClaudeThreadJudgements` + the shared `isThreadToFix`, never a run).
 
 Keyboard (`useKeyboard.ts`): `/` focuses the filter, `j`/`k` cycle the board's PRs (board
 only), `i` opens Insights, `esc` leaves any tab/overlay → the board (else clears the
@@ -1191,6 +1210,12 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
 - **Money, not credits.** Local agent runs show US$ (`formatUsd` in `lib/ui.ts`) — a credit figure
   would invent a Limn price for the reader's own spend. Track usage's agentic row does the same and
   shows only where `ai.enabled`. Credits stay on the Pro one-shot Haiku features.
+- **ONE STATUS LINE FOR EVERY AGENTIC PASS** — `components/AiStatusLine.tsx`: the stage in words,
+  an optional "N of M", and the elapsed clock; no spinner, and it fetches nothing (each surface feeds
+  it what it has: Claude Review's SSE phase, Check threads' poll, the sprint read's `briefs` +
+  `passes` via `sprintAiPass`, or a single request's pending state — the impact note, the work-plan
+  wording, sprint Ask, the docs check). A new agentic pass uses it; `test/aiStatusAndPrActions.test.ts`
+  pins the mounts.
 - **The Pro CI-analysis card is DELETED** (Claude Review diagnoses failing CI). The AI summary, the
   CI list and the instruction box LEFT the AI Fix tab; the tab is the fixer and its picker only.
 - **Plan mode in the AI Fix tab** ("Plan first" beside the model, then `AiFix/PlanPanel.tsx`;
@@ -1554,9 +1579,10 @@ but broken deep links).
   (`/api/bot-analytics*`, `/api/bot-threads/*`) and every hook ANDs `botDepth`. ⚠ Bot HIDING on the
   Feed/Timeline and bot CLASSIFICATION are NOT this screen and stay free: `/api/bot-reviewers` and
   its writes are ungated (only `PUT …/cost` 402s).
-- **Bot classification is a FEED sub-tab, FREE on every tier** — the Feed strip is `Feed | Themes
-  (Pro, listed only on activityDigest) | Bot classification` (`feedInnerTab` ∈ `FEED_INNER_TABS`,
-  `?feedTab=classification`; the visible tab is DERIVED by `effectiveFeedTab` in
+- **Bot classification is a FEED sub-tab, FREE on every tier** — the Feed strip is `Feed | Bot
+  classification` (`feedInnerTab` ∈ `FEED_INNER_TABS`, `?feedTab=classification`; the Pro "Discussion
+  themes" tab is REMOVED 2026-10-18 and a legacy `?feedTab=themes` lands on the Feed, because the
+  URL reader seats only listed values; the visible tab is DERIVED by `effectiveFeedTab` in
   `Activity/feedTabsModel.ts`, never written back). It mounts `BotSettingsPanel` →
   `DetectedReviewersTable`: one CARD per bot in a responsive grid (1 column on a phone, 2 from `md`,
   3 at `2xl`) — the account's own GitHub avatar (an App bot's avatar IS its vendor logo; `... on Bot
@@ -1940,7 +1966,7 @@ is the Feed's, not ROI's. A listed-and-locked Themes body would be a SEVENTH vis
 surface, and `components/ProGate.tsx` keeps that set at six with a written argument that the next
 one needs its own; and on the OSS build the panel returns `null`, so an always-listed tab would
 draw a blank pane. The panel's gate is therefore a single `if (!activityDigest) return null` —
-`HumanThemesPanel`'s exactly. The free-cloud Pro nudge it inherited from `SynthesisCard` is
+The free-cloud Pro nudge it inherited from `SynthesisCard` is
 DELETED, not disabled: on a conditionally-listed tab it was unreachable, and reviving it would
 quietly re-open the seventh-surface argument.
 
@@ -3426,7 +3452,7 @@ landmines:
   mount. The STORE keeps the opaque handle and deliberately not the text.
 - ⚠ **THE CENTRE PANE IS EDITABLE, AND THE EDITOR IS A PANEL UNDER THE CELL — never a
   `contenteditable`, never a textarea replacing `CodeCell`.** `RegionEditPanel` mounts in the slot
-  `HunkSuggestionPanel` uses, for three reasons that each cost something if ignored: `data-mr-cell`
+  under the centre cell (the per-hunk "Ask Claude" panel that shared it is REMOVED), for three reasons that each cost something if ignored: `data-mr-cell`
   stays on a CONTENT-SIZED box (the ribbon overlay measures that rectangle, so an editor inside it
   points every ribbon in the file at a textarea-sized rect); `CodeCell` stays a pure memo with no
   local state; and hljs output never goes under a caret (`hljsLines.ts` allows only hljs output to
@@ -3749,9 +3775,8 @@ and the `.code-hl` palette above — with exactly one deliberate exception, `Mar
 | Thread code anchor (collapsed line and expanded hunk) | `ThreadView/CodeAnchor.tsx` → `DiffHunk.tsx` | `thread.path` |
 | Timeline marker popover's anchor line | `Timeline/MarkerPopover.tsx` | `thread.path` |
 | Claude Review finding hunk + its suggestion | `ClaudeReviewTab.tsx` | `finding.path` |
-| Addressed-check evidence patch | `components/CommentAnnotations.tsx` | `evidence.path` |
 | Bot Advisor's generated config file | `Activity/BotAdvisorPanel.tsx` | `f.path` |
-| Conflict resolver's three panes, compare-base popover, Ask-Claude suggestion | `conflicts/CodeCell.tsx`, `BasePopover.tsx` | the session's file |
+| Conflict resolver's three panes, compare-base popover | `conflicts/CodeCell.tsx`, `BasePopover.tsx` | the session's file |
 
 - ⚠ **A DIFF IS NOT SOURCE, SO IT GOES THROUGH `highlightDiffRows` (`lib/diff.ts`), NEVER
   `highlightLines`.** Consecutive `-`/`+` rows are two versions of ONE line; one lexer pass over
@@ -3770,8 +3795,7 @@ and the `.code-hl` palette above — with exactly one deliberate exception, `Mar
 - ⚠ **WHERE A SURFACE SET BOTH A BACKGROUND AND AN ADD/DEL TEXT COLOUR, THE TEXT COLOUR IS DROPPED
   ON HIGHLIGHTED ROWS ONLY.** The tint already carries add/del on its own (`FileDiffView` has always
   relied on it); green ink under green tokens is two claims fighting for the same characters.
-  `DiffHunk`, `CodeAnchor`, `ClaudeReviewTab`'s `hunkLineClass` and `CommentAnnotations`'
-  `diffLineClass` each keep their `@@` and context styling, which is not an add/del claim.
+  `DiffHunk`, `CodeAnchor` and `ClaudeReviewTab`'s `hunkLineClass` each keep their `@@` and context styling, which is not an add/del claim.
 - ⚠ **A ONE-LINE-FROM-A-HUNK SURFACE HIGHLIGHTS THE WHOLE HUNK AND TAKES THE LAST ENTRY**
   (`useHunkHighlight`, exported from `DiffHunk.tsx`). Highlighting that line alone is the mid-file
   lexer start `hljsLines.ts` forbids: a line inside a block comment comes back coloured as code.

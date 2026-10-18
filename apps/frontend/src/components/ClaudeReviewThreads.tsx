@@ -8,12 +8,7 @@
 //    ordering and colours live in lib/claudeReviewFollowUp.ts.
 //  - `draftReply` is a suggestion only. There is no route that posts it, so it offers Copy.
 import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import {
-  THREAD_ADDRESSED_LABEL,
-  THREAD_VALIDITY_LABEL,
-  isThreadToFix,
-  threadAssessmentCounts,
-} from '@pierre-review/shared';
+import { THREAD_VALIDITY_LABEL, isThreadToFix, threadAssessmentCounts } from '@pierre-review/shared';
 import type { ClaudeThreadAssessment, ClaudeThreadAssessmentCounts } from '@pierre-review/shared';
 import {
   THREAD_VALIDITY_CLASS,
@@ -23,6 +18,12 @@ import {
   threadCountPills,
   threadNotCheckedReason,
 } from '../lib/claudeReviewFollowUp.js';
+import {
+  CLAUDE_STATE_LABEL,
+  CLAUDE_VALIDITY_LABEL,
+  claudeStatePill,
+  claudeValidityPill,
+} from '../lib/claudeThreadMarker.js';
 import { safeExternalUrl } from '../lib/ui.js';
 import { CopyButton } from './CopyButton.js';
 import { BotIcon, ChevronIcon, ExternalLinkIcon } from './Icons.js';
@@ -68,6 +69,13 @@ export function ThreadRow({
     if (el != null && !expanded) setClamped(el.scrollHeight > el.clientHeight + 1);
   }, [t.excerpt, expanded]);
   const judged = t.validity !== 'not_checked' || t.addressed !== 'not_checked';
+  const validityPill = claudeValidityPill(t.validity);
+  const statePill = claudeStatePill(t.addressed, t.resolved === true);
+  // The one-line reason sits under the pills; the longer explanation opens on demand (or stands in
+  // for the reason on an older judgement that has none).
+  const reason = t.reason != null && t.reason.trim() !== '' ? t.reason.trim() : null;
+  const explanation = t.explanation != null && t.explanation !== '' ? t.explanation : null;
+  const [whyOpen, setWhyOpen] = useState(false);
   return (
     <li
       className={`rounded border px-3 py-2 text-sm ${
@@ -76,14 +84,21 @@ export function ThreadRow({
     >
       <div className="flex flex-wrap items-center gap-2">
         {selection}
-        {t.validity !== 'not_checked' && (
+        {/* The ONE thread vocabulary (lib/claudeThreadMarker.ts): validity, then state. */}
+        {validityPill != null && (
           <span className={`${CHIP} ${THREAD_VALIDITY_CLASS[t.validity]}`}>
-            {THREAD_VALIDITY_LABEL[t.validity]}
+            {CLAUDE_VALIDITY_LABEL[validityPill]}
           </span>
         )}
-        {t.addressed !== 'not_checked' && (
-          <span className={`${CHIP} ${threadAddressedClass(t)}`}>
-            {THREAD_ADDRESSED_LABEL[t.addressed]}
+        {judged && statePill != null && (
+          <span
+            className={`${CHIP} ${
+              t.resolved === true
+                ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                : threadAddressedClass(t)
+            }`}
+          >
+            {CLAUDE_STATE_LABEL[statePill]}
           </span>
         )}
         {!judged && (
@@ -155,9 +170,32 @@ export function ThreadRow({
           )}
         </div>
       )}
-      {t.explanation != null && t.explanation !== '' ? (
+      {reason != null ? (
+        <div className="mt-1">
+          <p className={REVIEW_PROSE}>
+            <PrRefText text={reason} />
+          </p>
+          {explanation != null && explanation !== reason && (
+            <>
+              <button
+                type="button"
+                onClick={() => setWhyOpen((o) => !o)}
+                aria-expanded={whyOpen}
+                className={`text-xs ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
+              >
+                {whyOpen ? 'Less' : 'More'}
+              </button>
+              {whyOpen && (
+                <p className={`mt-0.5 ${REVIEW_PROSE}`}>
+                  <PrRefText text={explanation} />
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      ) : explanation != null ? (
         <p className={`mt-1 ${REVIEW_PROSE}`}>
-          <PrRefText text={t.explanation} />
+          <PrRefText text={explanation} />
         </p>
       ) : !judged ? (
         <p className={`mt-1 text-xs ${MUTED}`}>{notCheckedNote ?? threadNotCheckedReason(t)}</p>
@@ -199,11 +237,14 @@ export function ClaudeReviewThreadsSection({
   items,
   counts,
   onOpenThread,
+  actions,
 }: {
   items: readonly ClaudeThreadAssessment[] | null | undefined;
   counts: ClaudeThreadAssessmentCounts | null | undefined;
   // Opens the thread in the PR's Threads tab (PrDetail). Absent ⇒ path:line is plain text.
   onOpenThread?: (threadId: number) => void;
+  // Right-aligned header controls ("Check threads").
+  actions?: ReactNode;
 }): JSX.Element | null {
   const [moreOpen, setMoreOpen] = useState(false);
   const parts = useMemo(() => partitionThreads(items ?? []), [items]);
@@ -212,6 +253,7 @@ export function ClaudeReviewThreadsSection({
   return (
     <ReviewSection
       title="Review threads"
+      actions={actions}
       pills={pills.map((p) => (
         <span key={p.key} className={`${CHIP} ${p.cls}`}>
           {p.label}
@@ -220,8 +262,9 @@ export function ClaudeReviewThreadsSection({
       info={
         <InfoButton title="Review threads">
           <p>
-            Open comments from people and other review bots. Claude checks each one against the
-            code: is it right, and has it been dealt with.
+            Comments from people and other review bots. Claude checks each one against the code:
+            does the comment hold up, and where does the code stand. Each carries a one-line reason;
+            More opens the longer one.
           </p>
           <p className="mt-2">
             &ldquo;Generate fix from this review&rdquo; includes the ones still to fix.

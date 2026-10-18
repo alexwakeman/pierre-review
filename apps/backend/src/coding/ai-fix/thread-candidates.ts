@@ -6,7 +6,7 @@ import type { SeedThread } from './review-seed.js';
 // THE PR'S OPEN THREADS, AS THE FIX SEED'S "untouched" AND "style bot" SECTIONS NEED THEM.
 //
 // Rides the SAME loader the review run reads (`ctx.queries.loadReviewThreads` →
-// db/review-threads-for-review.ts): unresolved threads only, threads rooted on Limn's own posted
+// db/review-threads-for-review.ts), RESOLVED ones filtered out here, threads rooted on Limn's own posted
 // findings left out, Limn's own comments left out. Absent on the context ⇒ no threads.
 //
 // ⚠ A STYLE BOT IS DECIDED BY THE PR'S WORKSPACE, STORED ROLE FIRST. A `workspace_reviewers` row for
@@ -63,7 +63,8 @@ export async function loadSeedThreads(
       load(accountId, prId),
       storedStyleRoles(ctx, accountId, prId),
     ]);
-    return threads.map((t) => {
+    // The loader returns resolved threads too (the review judges them); the seed offers OPEN ones.
+    return threads.filter((t) => !t.isResolved).map((t) => {
       const root = t.comments[0];
       const login = root?.authorLogin ?? null;
       const key = login ? normLogin(login) : null;

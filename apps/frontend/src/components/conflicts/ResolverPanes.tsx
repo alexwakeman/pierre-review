@@ -21,7 +21,6 @@ import { regionKey, useConflictResolverStore, useResolverSession } from '../../s
 import { RegionRibbons } from './RegionRibbons.js';
 import { ResolverToolbar } from './ResolverToolbar.js';
 import { SlotRow } from './SlotRow.js';
-import { useHunkSuggestion } from './useHunkSuggestion.js';
 import { useRegionEdit } from './useRegionEdit.js';
 import {
   FILE_NOW_OURS,
@@ -125,12 +124,8 @@ export function ResolverPanes({
   onLand?: () => void;
 }): JSX.Element {
   const stored = useResolverSession(sessionKey);
-  // "Ask Claude" — the one PAID control on this screen, and ABSENT rather than locked when the
-  // reader is not entitled. It owns its own pending state: nothing reaches `decisions` until the
-  // reader presses "Use this".
-  const claude = useHunkSuggestion(session.prId, session.sessionId);
-  // The resolver's one text box — CORE, free, both modes, no tier check anywhere near it. Like
-  // the Ask above, it owns its own pending state: nothing reaches `decisions` until a save comes
+  // The resolver's one text box — CORE, free, both modes, no tier check anywhere near it. It owns
+  // its own pending state: nothing reaches `decisions` until a save comes
   // back with a handle.
   const edits = useRegionEdit(session.prId, session.sessionId);
   const decideRegion = useConflictResolverStore((s) => s.decideRegion);
@@ -247,14 +242,10 @@ export function ResolverPanes({
   // merge for every region sitting on `disjoint_merge`, and `centreLines` folds every region;
   // recreating the slot objects on every render would redo both on every keystroke AND break
   // `SlotRow`'s own memos, which key on the slot's identity.
-  // The lines an ACCEPTED suggestion renders with. The store holds only the opaque handle (the
-  // text lives in the server's session), so the centre pane reads them from the Ask hook — plus
-  // anything the caller handed in, which nothing does today and which is kept so a second source
-  // of accepted lines cannot silently win over this one.
-  const acceptedLines = useMemo(
-    () => ({ ...suggestionLines, ...claude.acceptedLines }),
-    [suggestionLines, claude.acceptedLines],
-  );
+  // The lines an ACCEPTED suggestion renders with — only what the caller hands in. (The per-hunk
+  // "Ask Claude" that produced them is REMOVED; a `'suggestion'` decision is now unreachable from
+  // this screen, and one whose lines are not to hand renders as undecided.)
+  const acceptedLines = useMemo(() => ({ ...suggestionLines }), [suggestionLines]);
 
   const held = useMemo(
     () => ({
@@ -303,11 +294,10 @@ export function ResolverPanes({
       undoStack.current = [...undoStack.current, entry].slice(-UNDO_STACK_LIMIT);
       setUndoDepth(undoStack.current.length);
       for (const m of moves) {
-        // ⚠ ANY OTHER CONTROL ON A REGION DISCARDS ITS PENDING SUGGESTION AND CLOSES ITS TEXT
-        // BOX. Neither may sit under the cell still offering to replace something the decision
-        // beneath them has already changed. Closing the box drops an unsaved draft, which is the
-        // right trade: the reader just pressed a different answer for this very region.
-        if (m.decision !== 'suggestion') claude.clear(m.fileIndex, m.regionId);
+        // ⚠ ANY OTHER CONTROL ON A REGION CLOSES ITS TEXT BOX. It may not sit under the cell still
+        // offering to replace something the decision beneath it has already changed. Closing the
+        // box drops an unsaved draft, which is the right trade: the reader just pressed a
+        // different answer for this very region.
         if (m.decision !== 'edited') edits.close(m.fileIndex, m.regionId);
         decideRegion({
           key: sessionKey,
@@ -319,10 +309,9 @@ export function ResolverPanes({
         });
       }
     },
-    // `claude.clear` and `edits.close` are stable `useCallback`s; depending on either whole hook
-    // object would rebuild this callback (and the three that close over it) on every Ask or save
-    // state change.
-    [decisions, suggestionIds, editIds, decideRegion, sessionKey, claude.clear, edits.close],
+    // `edits.close` is a stable `useCallback`; depending on the whole hook object would rebuild
+    // this callback (and the three that close over it) on every save state change.
+    [decisions, suggestionIds, editIds, decideRegion, sessionKey, edits.close],
   );
 
   const decideActive = useCallback(
@@ -858,35 +847,6 @@ export function ResolverPanes({
                     language={language}
                     narrow={narrow}
                     active={region.id === activeRegionId}
-                    ask={claude.states[regionKey(activeFile.index, region.id)]}
-                    onAskClaude={
-                      claude.enabled
-                        ? () =>
-                            claude.ask({
-                              fileIndex: activeFile.index,
-                              regionId: region.id,
-                              // The CONTENT pin beside the id's ADDRESS: the server refuses if the
-                              // region's bytes moved under the id it was asked about.
-                              fingerprint: region.fingerprint,
-                            })
-                        : undefined
-                    }
-                    onUseSuggestion={(suggestion) => {
-                      setActiveRegionId(region.id);
-                      claude.accept(activeFile.index, region.id, suggestion);
-                      // ⚠ THE HANDLE, NEVER THE TEXT. The lines the commit splices are the ones the
-                      // server holds; the store keeps the id and the panes keep the lines to read.
-                      apply([
-                        {
-                          fileIndex: activeFile.index,
-                          regionId: region.id,
-                          decision: 'suggestion',
-                          suggestionId: suggestion.suggestionId,
-                        },
-                      ]);
-                      setAnnouncement('Took Claude’s suggestion.');
-                    }}
-                    onDiscardSuggestion={() => claude.clear(activeFile.index, region.id)}
                     edit={edits.states[regionKey(activeFile.index, region.id)]}
                     editDraft={edits.draftFor(activeFile.index, region.id)}
                     onEditDraft={(text) => edits.noteDraft(activeFile.index, region.id, text)}
@@ -898,9 +858,6 @@ export function ResolverPanes({
                         ? undefined
                         : () => {
                             setActiveRegionId(region.id);
-                            // A pending suggestion under the same cell is something the reader
-                            // has just moved past, exactly as `apply` treats it.
-                            claude.clear(activeFile.index, region.id);
                             edits.open(activeFile.index, region.id);
                           }
                     }
@@ -911,7 +868,7 @@ export function ResolverPanes({
                         .save({
                           fileIndex: activeFile.index,
                           regionId: region.id,
-                          // The CONTENT pin beside the id's ADDRESS, the same one the Ask sends:
+                          // The CONTENT pin beside the id's ADDRESS, the same one every region write sends:
                           // the server refuses if this region's bytes moved under its id while
                           // the box was open.
                           fingerprint: region.fingerprint,

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { isThreadToFix } from '@pierre-review/shared';
 import type {
   PrDetail as PrDetailT,
   ThreadDetail,
@@ -8,8 +9,7 @@ import type {
 import { useRepos } from '../hooks/useTimeline.js';
 import { useDetectedReviewers } from '../hooks/useBotTriage.js';
 import { useResolveBotThreads } from '../hooks/usePrWrites.js';
-import { useProCapabilities } from '../hooks/useTriage.js';
-import { annotationKey, useAnnotationIndex } from '../hooks/useAnnotations.js';
+import { useClaudeThreadJudgements } from '../hooks/useClaudeThreadJudgements.js';
 import { useMlLabelIndex, useMlSeverityEnabled } from '../hooks/useMlLabels.js';
 import { rollupCounts, threadSeverities } from './ThreadList/ThreadCountChips.js';
 import {
@@ -28,8 +28,8 @@ import { BotIcon } from './Icons.js';
 // threshold (or before its inputs load) it renders NOTHING and enables NO extra query — the
 // ThreadAssessment 60-empty-boxes lesson. Everything it reads is a query the SPA already shares:
 // the workspace reviewer listing (FeedView/useBotColors keep the unnarrowed key warm), the ONE
-// per-PR ML label index, and the ONE per-PR annotation index (a pure cached GET — this card can
-// never bill).
+// per-PR ML label index, and Claude Review's thread judgements (the ONE batched DB read the thread
+// cards share — this card can never start a run).
 //
 // Bot membership is the CLIENT MIRROR OF THE SERVER'S UNION SET (`hiddenBotUserIds`): the
 // workspace's stored judgement wins in both directions (`automated` adds, a manual "human"
@@ -78,7 +78,7 @@ export function BotTriageCard({
   pr: PrDetailT;
   usersById: Map<number, User>;
   variant: 'full' | 'compact';
-  /** Compact (Overview) only: open the Threads tab, where the threads + per-thread "Check review" buttons live. */
+  /** Compact (Overview) only: open the Threads tab, where the threads live. */
   onOpenThreads?: () => void;
 }): JSX.Element | null {
   // ── hooks first, unconditionally (early returns come after) ──────────────────────────────
@@ -137,8 +137,9 @@ export function BotTriageCard({
 
   const mlEnabled = useMlSeverityEnabled();
   const mlIndex = useMlLabelIndex(pr.id, mlEnabled && show);
-  const proEnabled = useProCapabilities().prSummary;
-  const annIndex = useAnnotationIndex(pr.id, proEnabled && show);
+  // Claude Review's thread judgements — gated on `me.ai` inside the hook, batched with every other
+  // card on screen into one DB read. Never a run.
+  const judgements = useClaudeThreadJudgements(show ? pr.id : null);
 
   // Free grade: the Threads tab's own state fold over the bot subset.
   const stateCounts = useMemo(() => rollupCounts(botThreads), [botThreads]);
@@ -148,25 +149,22 @@ export function BotTriageCard({
     [botThreads, mlIndex],
   );
 
-  // Pro fold, where verdicts are STORED (the cached free GET — no generation from this card):
-  // "real issues" = validity says the point holds up AND nothing says it was dealt with.
+  // The latest Claude review's judgements (stored — this card never runs one): "real issues" =
+  // the point holds up (fully or partly) AND the thread is neither resolved nor dealt with — the
+  // ONE shared `isThreadToFix` rule AI Fix and the counts read.
   const proFold = useMemo(() => {
-    if (annIndex == null) return null;
+    if (judgements == null) return null;
+    const byThread = new Map(judgements.judgements.map((j) => [j.threadId, j]));
     let judged = 0;
     let real = 0;
     for (const t of botThreads) {
-      const root = t.comments[0];
-      if (root == null) continue;
-      const validity = annIndex.get(annotationKey('validity', 'review_comment', root.id));
-      if (validity?.verdict == null) continue;
+      const j = byThread.get(t.id);
+      if (j == null || j.validity === 'not_checked') continue;
       judged += 1;
-      const addressed = annIndex.get(annotationKey('addressed', 'thread', t.id));
-      const dealtWith =
-        t.isResolved || addressed?.verdict === 'addressed' || addressed?.verdict === 'likely';
-      if (validity.verdict === 'valid' && !dealtWith) real += 1;
+      if (!t.isResolved && isThreadToFix(j)) real += 1;
     }
     return { judged, real, unjudged: botThreads.length - judged };
-  }, [annIndex, botThreads]);
+  }, [judgements, botThreads]);
 
   // The resolve offer — the EXACT predicate the server re-derives (and the Threads tab's own
   // vendor-scoped button uses), over the full thread list with no vendor narrowing.
@@ -276,15 +274,9 @@ export function BotTriageCard({
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {headline}
-        {/* The remainder is judged with each thread's own "Check review" button below — the one
-            existing (billed, per-item) annotation surface; this card never generates. */}
+        {/* Threads the latest Claude review did not judge; this card never runs one. */}
         {hasProFold && proFold.unjudged > 0 && (
-          <span
-            className="text-gray-400"
-            title="Judge the rest with the “Check review” button on each thread below — one judgement per click, nothing runs automatically."
-          >
-            {proFold.unjudged} unjudged
-          </span>
+          <span className="text-gray-500 dark:text-gray-400">{proFold.unjudged} not judged</span>
         )}
         {resolvableIds.length > 0 && !confirming && (
           <button

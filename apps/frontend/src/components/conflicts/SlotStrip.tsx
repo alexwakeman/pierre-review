@@ -27,7 +27,7 @@ import { EDIT_REGION, INK_CLASS, actionLabels, regionGroupLabel, stateWord } fro
 // not change; the control that has to obey it did.
 //
 // What is left here is every verb that is NOT about one side: both orders, the order swap, the
-// wand, ignore, Ask Claude, Edit and undo — plus the state word, which is the encoding that
+// wand, ignore, Edit and undo — plus the state word, which is the encoding that
 // survives a reader who cannot separate the hues, and the only thing that still tells `Ignored`
 // from `Needs a decision` now that neither paints a side, or `Your text` from a taken side now
 // that both wear the applied green in the centre.
@@ -67,8 +67,6 @@ export function SlotStrip({
   baseRef,
   active,
   sideTakes,
-  onAskClaude,
-  askInFlight,
   onEdit,
   editOpen,
   onActivate,
@@ -86,12 +84,6 @@ export function SlotStrip({
   /** The panes are stacked, so there are no gutter tracks and the two single-side takes have
    *  nowhere else to live. See the header: a relocation, never a second copy. */
   sideTakes: boolean;
-  /** Offer "Ask Claude" on this region. Absent ⇒ the control does not render AT ALL — the reader
-   *  is unentitled, or the resolver is running somewhere the plugin is not. ABSENT, NEVER LOCKED:
-   *  a lock inside a screen already doing its whole job would advertise into a working feature. */
-  onAskClaude?: (() => void) | undefined;
-  /** An Ask is in flight for this region. */
-  askInFlight?: boolean;
   /** Open the text box for this region's result. Offered on EVERY decidable region — it is not a
    *  side, so there is no kind that withholds it — and absent only on `unchanged`, which is
    *  context and which this strip never renders for anyway. CORE and free: no tier check. */
@@ -201,29 +193,7 @@ export function SlotStrip({
         button('wand', slot.kind === 'wand', WAND_LABEL, <WandIcon size={13} />, 'disjoint_merge')}
       {allows('base') &&
         button('ignore', slot.kind === 'ignored', labels.ignore, <IgnoreHunkIcon size={13} />, 'base')}
-      {/* ⚠ THE ONE PAID CONTROL ON THIS SCREEN, and the only one that is not a decision: it asks,
-          it does not apply. Nothing enters the reader's decisions until they press "Use this" on
-          the suggestion the centre cell then shows. `SparkleIcon` because a model produced it —
-          `WandIcon` beside it is the DETERMINISTIC word merge, which is free, and the two marks
-          must not be swapped. */}
-      {onAskClaude != null && region.kind === 'conflict' && (
-        <button
-          type="button"
-          tabIndex={tab}
-          disabled={askInFlight === true}
-          title={ASK_LABEL}
-          aria-label={ASK_LABEL}
-          onClick={() => {
-            onActivate();
-            onAskClaude();
-          }}
-          className={`${BTN} disabled:opacity-60`}
-        >
-          <SparkleIcon size={13} />
-          <span>{askInFlight === true ? 'Asking…' : 'Ask Claude'}</span>
-        </button>
-      )}
-      {/* ⚠ NOT A DECISION, LIKE "Ask Claude" BESIDE IT — it opens a box, and the region stays
+      {/* ⚠ NOT A DECISION — it opens a box, and the region stays
           exactly as it was until the reader presses Save. So it does NOT go through `onDecide`
           (which would also refuse it: `'edited'` is deliberately absent from `region.allowed`,
           being a session fact rather than a model one) and it carries `aria-expanded` rather
@@ -262,5 +232,3 @@ export function SlotStrip({
  *  sentence: the toolbar's wand does the file, this one does this region. */
 const WAND_LABEL = 'Merge both edits — they don’t overlap';
 
-/** ⚠ IT NAMES WHAT HAPPENS NEXT, not what it produces. The button asks; the reader decides. */
-const ASK_LABEL = 'Ask Claude to merge this change';

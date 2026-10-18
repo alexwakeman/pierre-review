@@ -18,20 +18,18 @@ import { prRefToMeta } from './ThemeThreadsDetail.js';
 //
 // ── IT OWNS THE `Bots → Themes` SUB-TAB ────────────────────────────────────────────────────────
 // It used to be a card at the TOP of the Measure (`roi`) surface, above the caution banners, the
-// ROI table, the charts and the bot feed. It is now the whole body of its own sub-tab, mirroring
-// the Feed rail's `Feed | Themes` strip — one report, one gate, two rails.
+// ROI table, the charts and the bot feed. It is now the whole body of its own sub-tab.
 //   • STRICTLY Pro, on `activityDigest` (the AI-summary capability, NOT `botDepth`), and the ONE
 //     gate is `return null`: the tab is LISTED only when entitled, so an unentitled reader never
-//     mounts this. `HumanThemesPanel`'s posture exactly. The free-cloud nudge this panel carried
-//     over from `SynthesisCard` is DELETED — see the gate below for why it may not come back.
+//     mounts this. The free-cloud nudge this panel carried over from `SynthesisCard` is DELETED — see the gate below for why it may not come back.
 //   • Scoped to the current WORKSPACE + window + `repoIds` narrowing: the per-repo Bots console tab
 //     passes `[repoId]` so it measures that repo alone (the cached report is keyed with the same
 //     narrowing on both sides — the client's repoKeySlot and the plugin's scope_key `|r:` suffix).
 //   • ⚠ NO HEIGHT CAP ANY MORE. The body used to scroll inside a fixed `max-h-[32rem]` region for
 //     one reason: the deterministic Measure surface sat directly beneath it and must not be pushed
 //     off-screen. Nothing sits beneath it on its own tab, so the cap became a scrollbar around the
-//     only thing on the page. `HumanThemesPanel` has never had one.
-// The report BODY is shared with the Feed "Discussion themes" panel (`ThemesReportBody`).
+//     only thing on the page.
+// The report BODY is `ThemesReportBody` (ThemesReportView.tsx).
 
 // The deterministic per-bot volume + acted-on rollup (from the read layer, not the model).
 function BotRollup({ result }: { result: BotThemesResult }): JSX.Element | null {
@@ -89,7 +87,7 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
   const outOfCredits = usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
 
   // Capability off: nothing, on EVERY deployment mode — absence, never an error, and nothing is
-  // fetched either way. `HumanThemesPanel`'s single `return null`, and the same reason: the tab
+  // fetched either way. A single `return null`: the tab
   // that mounts this panel is LISTED ONLY when `activityDigest` holds, so an unentitled reader
   // never reaches this component at all.
   //
@@ -181,7 +179,7 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
            existed to keep the deterministic Measure surface below — caution banners, ROI table,
            charts, bot feed — from being pushed off-screen while this panel sat above it. On its own
            sub-tab there is nothing below it, so the cap only added a scrollbar inside the page's
-           one piece of content. `HumanThemesPanel`, the Feed's twin, has never had one. */
+           one piece of content. */
         <div key={result.generatedAt} className="digest-fade-in">
           <ThemesReportBody
             narrative={result.narrative}

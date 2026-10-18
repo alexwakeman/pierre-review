@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { SPRINT_GHOST_MAX, SPRINT_TICKETS_MAX, sprintSourceTitle, type SprintGraphNode } from '@pierre-review/shared';
+import { SPRINT_GHOST_MAX, SPRINT_TICKETS_MAX, sprintSourceTitle, type SprintGraphNode, type SprintGraphResponse } from '@pierre-review/shared';
 import { useSprintAiOn, useSprintGraph, useSprintRefresh, useSprintRefreshing } from '../../hooks/useSprintStories.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
 import type { SprintBoardView } from '../../lib/laneBoard.js';
 import { useFilters } from '../../store/filters.js';
 import { GearIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
+import { AiStatusLine } from '../AiStatusLine.js';
 import { SprintAskPanel } from './SprintAskPanel.js';
 import { SprintPathsView, SprintPeopleView, SprintThemesView } from './SprintBoards.js';
 import { SprintProgressBar } from './SprintProgressBar.js';
@@ -100,6 +101,7 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
     briefs: data.aiEnabled ? data.briefs : null,
     pathsWriting: pathsWriting(data.aiEnabled, data.pathsStatus),
   });
+  const aiPass = sprintAiPass(data);
   const startRefresh = (): void => {
     setAwaitRead({ checkedAt: data.read.checkedAt, since: Date.now() });
     refresh.mutate();
@@ -145,17 +147,19 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
       {progress != null && <SprintProgressBar progress={progress} className="h-[3px] w-full rounded-full" />}
       {settingsOpen && data.statusLayout != null && <SprintStatusSettings workspaceId={data.workspaceId} layout={data.statusLayout} />}
       {data.read.error != null && <p className="text-xs text-rose-700 dark:text-rose-400">{data.read.error}</p>}
-      {(data.read.truncated || data.ghostsTruncated || (data.aiEnabled && data.briefs.pending > 0)) && (
+      {(data.read.truncated || (data.ghostsTruncated && view === 'paths')) && (
         <p className={`text-xs ${MUTED}`}>
           {[
             data.read.truncated ? `Showing the first ${SPRINT_TICKETS_MAX} tickets.` : null,
             data.ghostsTruncated && view === 'paths' ? `Showing ${SPRINT_GHOST_MAX} tickets outside the sprint.` : null,
-            data.aiEnabled && data.briefs.pending > 0 ? `Summarising ${plural(data.briefs.pending, 'ticket')}…` : null,
           ]
             .filter(Boolean)
             .join(' ')}
         </p>
       )}
+      {/* The ONE agentic status line (components/AiStatusLine): the passes run in order — ticket
+          summaries, then themes, then the critical paths — so at most one is named at a time. */}
+      {aiPass != null && <AiStatusLine stage={aiPass.stage} count={aiPass.count} />}
       {showAsk && askOpen && <SprintAskPanel workspaceId={data.workspaceId} nodes={data.nodes} onClose={() => setAskOpen(false)} />}
 
       {sprintCount === 0 ? (
@@ -205,4 +209,23 @@ function BoardInfo(): JSX.Element {
       </ul>
     </>
   );
+}
+
+/**
+ * Which agentic pass the header names, if any. Briefs first (with "N of M"), then themes, then the
+ * critical paths. `passes` is absent on an older server: then pending briefs stand for a run.
+ * Exported for tests.
+ */
+export function sprintAiPass(
+  data: Pick<SprintGraphResponse, 'aiEnabled' | 'briefs' | 'passes' | 'pathsStatus'>,
+): { stage: string; count: { done: number; total: number } | null } | null {
+  if (!data.aiEnabled) return null;
+  const briefsRunning = data.passes?.briefsRunning ?? data.briefs.pending > 0;
+  if (briefsRunning && data.briefs.pending > 0) {
+    const total = data.briefs.current + data.briefs.pending;
+    return { stage: 'Summarising tickets', count: { done: data.briefs.current, total } };
+  }
+  if (data.passes?.themesRunning === true) return { stage: 'Grouping tickets into themes', count: null };
+  if (pathsWriting(data.aiEnabled, data.pathsStatus)) return { stage: 'Working out the critical paths', count: null };
+  return null;
 }

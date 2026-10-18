@@ -260,6 +260,39 @@ beforeAll(async () => {
       { authorId: aliceId, at: AFTER + 60_000, body: 'Fixed, thanks.' },
     ]);
   }
+  // A burst a CHECK THREADS run at this head already covered: settled in the read, never offered
+  // (it used to sit in `reReview` until the head moved, using up a slot on every tick).
+  const check = (prId: number, headSha: string, through: number) =>
+    db
+      .insert(schema.claudeThreadChecks)
+      .values({
+        accountId: 1,
+        workspaceId,
+        prId,
+        repoId,
+        headSha,
+        status: 'succeeded',
+        model: 'claude-sonnet-5',
+        commentsThrough: new Date(through),
+      })
+      .execute();
+  await run(await seedPr('check-covered'), 'head_check-covered');
+  await threadWith(pr['check-covered']!, [{ authorId: bobId, at: AFTER, body: 'seen by the check' }]);
+  await check(pr['check-covered']!, 'head_check-covered', AFTER);
+  // …but a check at an OLDER head covers nothing at this one.
+  await run(await seedPr('check-old-head'), 'head_check-old-head');
+  await threadWith(pr['check-old-head']!, [{ authorId: bobId, at: AFTER, body: 'new' }]);
+  await check(pr['check-old-head']!, 'head_somewhere-else', AFTER);
+  // …and a reply on one of Limn's OWN findings still needs a full review, whatever a check covered.
+  {
+    const id = await run(await seedPr('check-own-reply'), 'head_check-own-reply');
+    await postedFinding(id, 'Unchecked return value.');
+    await threadWith(pr['check-own-reply']!, [
+      { authorId: viewerId, at: AFTER, body: 'Unchecked return value.' },
+      { authorId: aliceId, at: AFTER + 60_000, body: 'Disagree — it cannot fail.' },
+    ]);
+    await check(pr['check-own-reply']!, 'head_check-own-reply', AFTER + 60_000);
+  }
 
   // ONLY REAL REVIEWERS RE-TRIGGER: a CI bot and a coverage bot commented after the run.
   const ciBot = await user('github-actions[bot]', true);
@@ -316,14 +349,33 @@ describe('getAutoReviewCandidates — re-review on new review comments', () => {
       limit: 50,
     }))!;
     const offered = new Map(res.reReview.map((r) => [r.prId, r]));
-    expect(offered.get(pr.human!)).toEqual({ prId: pr.human, headSha: 'head_human', commentsAtMs: AFTER, reason: 'comments', lastRunAtMs: null });
+    expect(offered.get(pr.human!)).toMatchObject({ prId: pr.human, headSha: 'head_human', commentsAtMs: AFTER, reason: 'comments', lastRunAtMs: null });
+    expect(typeof offered.get(pr.human!)?.coveredMs).toBe('number');
     expect(offered.get(pr.bot!)?.commentsAtMs).toBe(AFTER);
     expect(offered.get(pr['late-sync']!)?.commentsAtMs).toBe(BEFORE);
     expect(offered.get(pr['reply-to-own']!)?.commentsAtMs).toBe(AFTER + 60_000);
     expect(offered.get(pr['foreign-marker']!)?.commentsAtMs).toBe(AFTER);
-    for (const k of ['own-body', 'own-id', 'marker', 'finding-marker', 'ticket-marker', 'before', 'covered', 'resolved', 'in-flight']) {
+    for (const k of ['own-body', 'own-id', 'marker', 'finding-marker', 'ticket-marker', 'before', 'covered', 'resolved', 'in-flight', 'check-covered']) {
       expect([k, offered.has(pr[k]!)]).toEqual([k, false]);
     }
+  });
+
+  it('folds Check threads coverage at the head into the read, and carries what the sweeper routes on', async () => {
+    const res = (await q.getAutoReviewCandidates(1, workspaceId, {
+      openedSinceMs: FLOOR,
+      dayStartMs: now - 24 * HOUR,
+      limit: 50,
+    }))!;
+    const offered = new Map(res.reReview.map((r) => [r.prId, r]));
+    expect(offered.has(pr['check-covered']!)).toBe(false);
+    expect(offered.get(pr['check-old-head']!)).toMatchObject({ checkCoveredMs: null, newestOwnThreadCommentAtMs: null });
+    expect(offered.get(pr['check-own-reply']!)).toMatchObject({
+      commentsAtMs: AFTER + 60_000,
+      checkCoveredMs: AFTER + 60_000,
+      newestOwnThreadCommentAtMs: AFTER + 60_000,
+    });
+    expect(offered.get(pr['reply-to-own']!)?.newestOwnThreadCommentAtMs).toBe(AFTER + 60_000);
+    expect(offered.get(pr.human!)?.newestOwnThreadCommentAtMs).toBeNull();
   });
 });
 
@@ -409,7 +461,7 @@ describe('isAutoReReviewSettled — the waiting item’s re-check', () => {
 });
 
 describe('loadReviewThreadsForReview', () => {
-  it('sends other reviewers’ threads, never one rooted on Limn’s own finding, nor a resolved one', async () => {
+  it('sends other reviewers’ threads, resolved ones too, never one rooted on Limn’s own finding', async () => {
     const prId = await seedPr('load');
     const id = await run(prId, 'head_load');
     await postedFinding(id, 'Own finding body.');
@@ -422,14 +474,17 @@ describe('loadReviewThreadsForReview', () => {
       { authorId: viewerId, at: AFTER + 3000, body: 'Own finding body.' },
       { authorId: aliceId, at: AFTER + 700_000, body: 'Disagree.' },
     ]);
-    await threadWith(prId, [{ authorId: bobId, at: AFTER + 5000, body: 'resolved one' }], { resolved: true });
+    const resolved = await threadWith(prId, [{ authorId: bobId, at: AFTER + 5000, body: 'resolved one' }], { resolved: true });
+    // A late reply on the resolved thread must NOT move the auto re-review trigger.
+    await threadWith(prId, [{ authorId: bobId, at: AFTER + 900_000, body: 'late, resolved' }], { resolved: true });
     await db
       .insert(schema.commits)
       .values({ sha: 'c1', prId, authorId: aliceId, committedAt: new Date(AFTER + 300_000) })
       .execute();
 
     const out = await threadsDb.loadReviewThreadsForReview(1, prId);
-    expect(out.threads.map((t) => t.threadId)).toEqual([human, bot]);
+    expect(out.threads.map((t) => t.threadId)).toEqual([human, bot, resolved, resolved + 1]);
+    expect(out.threads.map((t) => t.isResolved)).toEqual([false, false, true, true]);
     const h = out.threads[0]!;
     expect(h.comments.map((c) => c.authorLogin)).toEqual(['bob-dev', 'alice-dev']);
     expect(h.url).toBe(`https://github.com/acme/api/pull/${prNumber - 1}#discussion_r555`);

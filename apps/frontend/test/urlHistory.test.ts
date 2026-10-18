@@ -814,12 +814,12 @@ describe('the Activity sub-tab strips', () => {
     expect(useFilters.getState().botsInnerTab).toBe('roi');
   });
 
-  // ⚠ The RAW choice is seated on a pop; the visible tab stays DERIVED in the components. A
-  // corrective write here would permanently forget a choice the moment a capability blinked.
-  it('seats a sub-tab the current tier may not render, rather than correcting it', () => {
+  // The retired Feed "Discussion themes" tab: its bookmark is not a member any more, so the reader
+  // seats nothing and the Feed's default stands.
+  it('lands a retired ?feedTab=themes on the Feed', () => {
     seat('/app/?workspace=5&view=activity&feedTab=themes');
     applyUrlToStores({ fromPop: true });
-    expect(useFilters.getState().feedInnerTab).toBe('themes');
+    expect(useFilters.getState().feedInnerTab).toBe('feed');
   });
 
   // Bot classification is a FEED sub-tab, free on every tier: it pushes, is emitted only beside

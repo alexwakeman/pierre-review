@@ -26,9 +26,14 @@ features: Claude Review (run, follow-up, ticket check against a pasted story, au
 and AI Fix's fixer (review memory went with them and was later deleted). They LEFT this plugin at **apiVersion 22** and live in core
 (`apps/backend/src/review/`, `src/coding/ai-fix/`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)), gated on
 the top-level `MeResponse.ai` and off in cloud by an explicit `isCloud` check. **pro** = every
-ONE-SHOT Haiku feature on the Anthropic API (PR summary, comment
-validity / addressed / simplify annotations, the blast impact note, conflict-assist — the
-`prSummary` capability), Insights and all the reporting. (The issue tracker — Jira/Linear links,
+ONE-SHOT Haiku feature on the Anthropic API (the blast impact note is now the whole `prSummary`
+capability), Insights and all the reporting. ⚠ **REMOVED 2026-10-18:** the AI PR summary, the
+per-comment "Check review" annotations (validity / addressed / simplify), the single-thread assess
+and addressed checks, the per-hunk conflict suggestion, the per-repo digest, the Feed "Discussion
+themes", the preset prompts and the synthesis `brief` / `rollup` kinds — code, routes and SPA gone,
+tables DORMANT ([DATA-MODEL.md](DATA-MODEL.md) § Dormant Pro plugin tables). The shared constants
+they exported (`DIGEST_ENABLED`, `DIGEST_MODEL`, `MIN_INTERVAL_SEC`, `tsToIso`, `tsToMs`) now live
+in `packages/pro/src/llm/gate.ts`; `activityDigest` and `prSummary` stay as capabilities. (The issue tracker — Jira/Linear links,
 the stored tickets, the Open PRs ticket stacks — is FREE CORE since apiVersion 23:
 [TRACKERS.md](TRACKERS.md).) The old **pro+** tier and
 its flag `PRO_ADVANCED_AI_ENABLED` (alias `PRO_CLAUDE_REVIEW_ENABLED`, `src/tier.ts`) are DELETED.
@@ -672,7 +677,7 @@ are all gone.)
 `trunk_ci_failed` / `claude_review` feed kinds, their builders and their pills are DELETED — Pending
 owns those. Every feed item is an `events` row.
 
-**Pro: Haiku digests — per-repo, rendered as a COLLECTION** (`packages/pro/src/activity-digest/`).
+**⚠ REMOVED 2026-10-18 — the paragraph below is history.** **Pro: Haiku digests — per-repo, rendered as a COLLECTION** (`packages/pro/src/activity-digest/`).
 The flagged AI panel: a per-repo banner in each repo's console (`DigestBanner` → `RepoDigestCard`,
 collapsible) AND, atop the Activity "Feed" entry, the **COLLECTION of per-repo digest cards**
 (`FeedDigestList` → `useRepoDigests`) — one collapsible `RepoDigestCard` per repo. Each digest is a
@@ -710,7 +715,7 @@ deliberately asks
 only for what `buildChatPayload` HOLDS — merged PRs, flow metrics, CI failure reasons, attention
 items — **not themes or sentiment**, which needed the retro's own 50-item corpus of raw comment
 bodies; asking would just trip the chat's "the JSON doesn't hold the answer" decline. Discussion
-themes live in the Feed's Pro **Themes** tab. A third frontend-local catch-all pill, **"About this
+themes lived in the Feed's Pro **Themes** tab (REMOVED 2026-10-18). A third frontend-local catch-all pill, **"About this
 Workspace"** (`WORKSPACE_ABOUT_PROMPT`), asks purpose-per-repo then current priorities; its
 grounding is the payload's `repos` map (owner/name → the repo's GitHub "About" description,
 truncated ~200 chars, null when unset — the payload's ONLY repo-purpose text). The description is
@@ -726,11 +731,10 @@ orphaned** because it carried `account_id`: an orphan would have to stay in `era
 checklist (and keep both drizzle definitions alive) forever — deleting the feature while keeping
 100% of its schema surface. Historical `ai_usage` rows with `feature='retro_report'` survive on
 purpose: that money was really spent and must keep counting toward month-to-date credits (the
-column is free text, so no migration). `PresetPromptPanel` is likewise **importer-less** but kept,
-because its server side (`preset-prompt.ts` + its cache rows/throttles) is still live and this is
-its only client — delete both together or neither.
+column is free text, so no migration). `PresetPromptPanel` and its server side (`preset-prompt.ts`) were deleted TOGETHER on 2026-10-18;
+`preset_reports` is DORMANT. `PRESET_PROMPTS` (the questions) stays — the chat's quick pills read it.
 
-**Pro: Comment annotations — the "Check review" platform** (`packages/pro/src/annotations/`,
+**⚠ REMOVED 2026-10-18 except the `impact` kind** (the blast-radius impact note, BLAST-RADIUS.md): the module now holds only that kind, `{kind:'impact'}` is the only run body, the read skips the DORMANT comment-kind rows, and the history below is kept for its lessons. **Pro: Comment annotations — the "Check review" platform** (`packages/pro/src/annotations/`,
 capability `prSummary`). ONE plugin-owned table `pr_comment_annotations` (migration `0017`) holds
 any AI judgement ABOUT a review comment, discriminated by **`(accountId, kind, targetKind,
 targetId)`** — that key exists because targets span `thread` / `review_comment` / `pr_comment`
@@ -2478,6 +2482,8 @@ quiet plain push the reader did not click; `autoResolve` and `model` are ignored
   [docs/MIGRATIONS.md](MIGRATIONS.md).
 
 ### The evidence window anchors on the ROOT comment (`t3|` → `t4|`)
+
+⚠ **This and the next two sections are HISTORY** — the `addressed` annotation, its evidence window, hydration and compare grounding were REMOVED on 2026-10-18 (`annotations/evidence.ts` deleted). `GithubSeam.fetchCompareDiff` / `fetchReviewCommentHunks` stay on the contract, unread, so `apiVersion` did not move.
 
 The grounded `addressed` check reported **"Still open"** on a comment that had demonstrably been
 fixed, and the cause was the window, not the model.

@@ -39,7 +39,7 @@ import { MlSeverityBadge } from '../MlSeverityBadge.js';
 //     could not serve this surface even if the per-row cost were acceptable. `mlLabel` ships on
 //     the row instead.
 //   • `useThread` / `InlineThread` / `ThreadCard` — a conversation per card, N requests.
-//   • `useAnnotationIndex` / `CommentAnnotations` / `ReactionBar` — per-target fetches, and the
+//   • `ReactionBar` — per-target fetches, and the
 //     drill-down is a read-only survey, not a place to act on one comment. "Open thread" hands
 //     the reader to the PR tab, which already owns all of that.
 //   • `useBotColors()` — one query, but it belongs to the SCREEN, not to a row: the parent calls

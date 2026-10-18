@@ -55,12 +55,12 @@ import {
 } from './Icons.js';
 import { VerdictIcon } from './VerdictIcon.js';
 import { ThreadList } from './ThreadList/index.js';
+import { CheckThreadsButton } from './CheckThreadsButton.js';
 import { BotTriageCard } from './BotTriageCard.js';
 import { LargePrFlag } from './Activity/LargePrFlag.js';
 import { BlastRadiusChip } from './Activity/BlastRadiusChip.js';
 import { BlastImpactNote } from './Activity/BlastImpactNote.js';
 import { ChecksTab } from './ChecksTab.js';
-import { CommentAnnotations, ReviewCheckButton } from './CommentAnnotations.js';
 import type { MlSeverity } from '@pierre-review/shared';
 import { MlSeverityBadge } from './MlSeverityBadge.js';
 import { ReactionBar } from './ReactionBar.js';
@@ -609,25 +609,7 @@ function PrCommentsList({
                   {isComment ? 'View comment on GitHub' : 'View review on GitHub'}
                 </a>
               )}
-              {/* Pro (prSummary): spend one combined AI check on THIS comment alone — rewrite,
-                  is-it-well-founded, and was-it-addressed. Its output renders directly BELOW,
-                  under the comment card's body + actions. */}
-              {isComment && (
-                <ReviewCheckButton
-                  prId={pr.id}
-                  target={{ targetKind: 'pr_comment', targetId: it.id }}
-                />
-              )}
             </div>
-            {/* AI annotations for a PR-level comment, UNDER the comment they judge (all three
-                kinds key on the same ('pr_comment', id), so one component covers them). They used
-                to sit above the body; a judgement you read before the thing it judges is
-                backwards, and it now matches the per-thread block. Reviews are not annotatable
-                targets (only issue comments are), hence the isComment gate. Renders nothing when
-                the comment has no stored judgements. */}
-            {isComment && (
-              <CommentAnnotations prId={pr.id} targetKind="pr_comment" targetId={it.id} />
-            )}
             {replyingTo === rowKey && (
               <div className="mt-2">
                 <PrCommentComposer
@@ -1461,12 +1443,6 @@ export function PrDetail({
         <AiCloudNote className="ml-auto self-center" />
       </div>
 
-      {/* There is deliberately NO PR-wide "Check review" bar here any more. A whole-PR sweep on a
-          bot-flooded PR is many billed calls and tens of seconds before anything appears, and the
-          question a reader actually has is about the one thread or comment in front of them. The
-          run surface is now the per-item ReviewCheckButton (thread card header / PR-comment
-          actions row) — one anchor, one combined call. */}
-
       <div className="min-h-0 flex-1 overflow-auto">
         <Suspense
           fallback={<div className="px-4 py-6 text-sm text-gray-400">Loading…</div>}
@@ -1517,6 +1493,12 @@ export function PrDetail({
                 own folds. Its state counts are the DERIVED states (`rollupCounts`); the list's
                 state chips count what the cards show (`threadStateBucket`, "Claude judged"). */}
             <BotTriageCard pr={pr} usersById={usersById} variant="full" />
+            {/* Check threads: Claude re-judges only the threads that changed (local, me.ai). */}
+            {aiEnabled && pr.threads.length > 0 && (
+              <div className="px-3 pt-2">
+                <CheckThreadsButton prId={pr.id} />
+              </div>
+            )}
             <ThreadList
             threads={pr.threads}
             usersById={usersById}

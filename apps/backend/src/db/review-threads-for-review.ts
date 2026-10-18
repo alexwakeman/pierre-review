@@ -1,7 +1,7 @@
 // CLAUDE REVIEW — the OTHER reviewers' open threads on a PR (CORE, DB-only, no GitHub call).
 //
 // Two readers, ONE predicate:
-//   • the review run loads every unresolved review thread that is NOT rooted on one of Limn's own
+//   • the review run loads every review thread (resolved ones too) that is NOT rooted on one of Limn's own
 //     posted findings (`loadReviewThreadsForReview`) and asks Claude, per thread, whether the
 //     comment is right and whether the code has dealt with it (review/claude-review/threads.ts);
 //   • the auto-review sweeper re-reviews the SAME head when a newer qualifying comment arrives
@@ -127,12 +127,28 @@ export async function newestReviewCommentAt(
   // TRAILING: only these authors' comments count (see the header). Absent ⇒ every author.
   countsAuthor?: CountsAuthor,
 ): Promise<Map<number, Date>> {
-  const out = new Map<number, Date>();
+  const times = await newestReviewCommentTimes(accountId, prIds, since, countsAuthor);
+  return new Map([...times].map(([prId, t]) => [prId, t.newest]));
+}
+
+/**
+ * `newestReviewCommentAt`, plus `newestOwn`: the newest of those comments inside a thread ROOTED on
+ * one of Limn's own posted findings (the loader's `newestOwnThreadCommentAt`, same filter) — the
+ * sweeper's "a reply on a Limn finding needs a full review" test, read in the same scan.
+ */
+export async function newestReviewCommentTimes(
+  accountId: number,
+  prIds: readonly number[],
+  since: Date,
+  countsAuthor?: CountsAuthor,
+): Promise<Map<number, { newest: Date; newestOwn: Date | null }>> {
+  const out = new Map<number, { newest: Date; newestOwn: Date | null }>();
   if (prIds.length === 0) return out;
   const { reviewComments: rc, reviewThreads: rt, pullRequests: prs, users } = schema;
   const rows = await db
     .select({
       prId: rc.prId,
+      threadId: rc.threadId,
       createdAt: rc.createdAt,
       body: rc.body,
       databaseId: rc.databaseId,
@@ -157,11 +173,52 @@ export async function newestReviewCommentAt(
     ownPostedCommentsForPrs(accountId, [...new Set(rows.map((r) => r.prId))]),
     accountGithubLogin(accountId),
   ]);
-  for (const r of rows) {
-    if (isLimnPostedComment(r, own.get(r.prId), login)) continue;
-    if (countsAuthor && !countsAuthor(r.authorId ?? null)) continue;
+  const kept = rows.filter(
+    (r) => !isLimnPostedComment(r, own.get(r.prId), login) && (!countsAuthor || countsAuthor(r.authorId ?? null)),
+  );
+  if (kept.length === 0) return out;
+  // Which of those threads are rooted on Limn's own finding: the root is the thread's FIRST comment
+  // (oldest, then lowest id — the loader's order), which may predate `since`.
+  const ownRooted = new Set<number>();
+  if (login && own.size > 0) {
+    const threadIds = [...new Set(kept.filter((r) => own.has(r.prId) && r.threadId != null).map((r) => r.threadId!))];
+    if (threadIds.length > 0) {
+      const all = await db
+        .select({
+          id: rc.id,
+          prId: rc.prId,
+          threadId: rc.threadId,
+          createdAt: rc.createdAt,
+          body: rc.body,
+          databaseId: rc.databaseId,
+          authorLogin: users.githubLogin,
+        })
+        .from(rc)
+        .innerJoin(prs, eq(prs.id, rc.prId))
+        .leftJoin(users, eq(users.id, rc.authorId))
+        .where(and(eq(prs.accountId, accountId), inArray(rc.threadId, threadIds)))
+        .execute();
+      const roots = new Map<number, (typeof all)[number]>();
+      for (const c of all) {
+        if (c.threadId == null) continue;
+        const r = roots.get(c.threadId);
+        if (!r || c.createdAt.getTime() < r.createdAt.getTime() || (c.createdAt.getTime() === r.createdAt.getTime() && c.id < r.id))
+          roots.set(c.threadId, c);
+      }
+      for (const [threadId, root] of roots) {
+        if (isLimnPostedComment(root, own.get(root.prId), login)) ownRooted.add(threadId);
+      }
+    }
+  }
+  for (const r of kept) {
     const prev = out.get(r.prId);
-    if (!prev || r.createdAt.getTime() > prev.getTime()) out.set(r.prId, r.createdAt);
+    const isOwn = r.threadId != null && ownRooted.has(r.threadId);
+    if (!prev) {
+      out.set(r.prId, { newest: r.createdAt, newestOwn: isOwn ? r.createdAt : null });
+      continue;
+    }
+    if (r.createdAt.getTime() > prev.newest.getTime()) prev.newest = r.createdAt;
+    if (isOwn && (!prev.newestOwn || r.createdAt.getTime() > prev.newestOwn.getTime())) prev.newestOwn = r.createdAt;
   }
   return out;
 }
@@ -178,8 +235,11 @@ export interface ReviewThreadForReview {
   path: string;
   line: number | null;
   isOutdated: boolean;
-  // The sync heuristic's state (resolved never appears here — unresolved threads only).
+  // The sync heuristic's state.
   derivedState: string;
+  // Marked resolved on GitHub. Resolved threads are loaded too (judged after the open ones, within
+  // the same cap): resolving is a click, not evidence that the code dealt with it.
+  isResolved: boolean;
   // github.com link to the first comment, when its id is synced.
   url: string | null;
   // Oldest first. Limn's own posted comments are left out.
@@ -195,11 +255,16 @@ export interface ReviewThreadsForReview {
   // thread rooted on Limn's own finding, which the sweeper also treats as new — by an author the
   // `countsAuthor` filter keeps (a person or a review bot). null = none.
   newestCommentAt: Date | null;
+  // The same, inside UNRESOLVED threads rooted on Limn's OWN posted findings only — a reply there
+  // needs a full review (finding replies, pushback); the auto sweeper routes on it. null = none.
+  newestOwnThreadCommentAt: Date | null;
 }
 
 /**
- * Every unresolved review thread on the PR that is NOT rooted on one of Limn's own posted findings,
- * with its comments. Account-scoped (a foreign PR reads as no threads). `authorIsBot` is the GLOBAL
+ * Every review thread on the PR — resolved or not — that is NOT rooted on one of Limn's own posted
+ * findings, with its comments. ⚠ `newestCommentAt` still counts UNRESOLVED threads only: it is the
+ * auto re-review trigger, and a reply on a resolved thread must not start a full review (the auto
+ * Check threads pass covers it). Account-scoped (a foreign PR reads as no threads). `authorIsBot` is the GLOBAL
  * automation set (`globalAutomationUserIds`) — the ball rule's set, which needs no workspace.
  */
 export async function loadReviewThreadsForReview(
@@ -218,7 +283,7 @@ export async function loadReviewThreadsForReview(
       .limit(1)
       .execute()
   )[0];
-  if (!pr) return { threads: [], newestCommentAt: null };
+  if (!pr) return { threads: [], newestCommentAt: null, newestOwnThreadCommentAt: null };
 
   const rows = await db
     .select({
@@ -227,6 +292,7 @@ export async function loadReviewThreadsForReview(
       line: rt.line,
       isOutdated: rt.isOutdated,
       derivedState: rt.derivedState,
+      isResolved: rt.isResolved,
       commentId: rc.id,
       body: rc.body,
       excerpt: rc.excerpt,
@@ -238,9 +304,9 @@ export async function loadReviewThreadsForReview(
     .from(rt)
     .innerJoin(rc, eq(rc.threadId, rt.id))
     .leftJoin(users, eq(users.id, rc.authorId))
-    .where(and(eq(rt.prId, prId), eq(rt.isResolved, false)))
+    .where(eq(rt.prId, prId))
     .execute();
-  if (rows.length === 0) return { threads: [], newestCommentAt: null };
+  if (rows.length === 0) return { threads: [], newestCommentAt: null, newestOwnThreadCommentAt: null };
 
   const [ownMap, bots, commitRows, login] = await Promise.all([
     ownPostedCommentsForPrs(accountId, [prId]),
@@ -260,6 +326,7 @@ export async function loadReviewThreadsForReview(
   }
 
   let newest: Date | null = null;
+  let newestOwn: Date | null = null;
   const threads: ReviewThreadForReview[] = [];
   for (const list of byThread.values()) {
     list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.commentId - b.commentId);
@@ -267,8 +334,10 @@ export async function loadReviewThreadsForReview(
     const rootIsOwn = isLimnPostedComment(root, own, login);
     const kept = list.filter((c) => !isLimnPostedComment(c, own, login));
     for (const c of kept) {
+      if (root.isResolved) continue;
       if (countsAuthor && !countsAuthor(c.authorId ?? null)) continue;
       if (!newest || c.createdAt > newest) newest = c.createdAt;
+      if (rootIsOwn && (!newestOwn || c.createdAt > newestOwn)) newestOwn = c.createdAt;
     }
     // A thread rooted on Limn's own posted finding belongs to the follow-up, not here.
     if (rootIsOwn || kept.length === 0) continue;
@@ -280,6 +349,7 @@ export async function loadReviewThreadsForReview(
       line: root.line,
       isOutdated: root.isOutdated,
       derivedState: root.derivedState,
+      isResolved: root.isResolved === true,
       url: root.databaseId
         ? `https://github.com/${pr.owner}/${pr.name}/pull/${pr.number}#discussion_r${root.databaseId}`
         : null,
@@ -294,5 +364,5 @@ export async function loadReviewThreadsForReview(
     });
   }
   threads.sort((a, b) => a.threadId - b.threadId);
-  return { threads, newestCommentAt: newest };
+  return { threads, newestCommentAt: newest, newestOwnThreadCommentAt: newestOwn };
 }

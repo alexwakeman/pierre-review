@@ -35,7 +35,7 @@ const NOTICE_MS = 5000;
 // Generate/regenerate the themes report (the only billing path). Writes the fresh result into the
 // shared cache so the panel updates in place; surfaces a transient `notice` when the server
 // throttled, the account is out of credits, or the scope/window is empty — so a no-op click
-// doesn't read as a silent failure. Mirrors useRefreshHumanThemes.
+// doesn't read as a silent failure.
 //
 // ⚠ The `setQueryData` key must be built the SAME way as the read above (one `workspaceKey` +
 // one `repoKeySlot` call each): writing the generated report under a hand-spelled key is how a

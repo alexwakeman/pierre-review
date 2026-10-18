@@ -594,7 +594,7 @@ const DEFAULT_MAX_HUNK_CHARS = 4000;
  * while the SPA renders the hunk directly above that verdict from this very cache.
  *
  * ONE GraphQL call covers the WHOLE PR, and it is the SAME cached + coalesced call the SPA
- * already makes when the PR is opened (`fetchGhPrText`, 60s TTL) — so a "Check review" click on
+ * already makes when the PR is opened (`fetchGhPrText`, 60s TTL) — so a hydration on
  * a PR the user is looking at is normally free. It is NOT guaranteed free: `refresh-pr.ts` busts
  * the cache on every walk it performs, up to ~twice a minute while a PR pane is open. Budget it
  * as one PR_DETAIL_QUERY, not as zero.

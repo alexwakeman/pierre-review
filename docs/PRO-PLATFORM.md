@@ -3,6 +3,8 @@
 > ⚠️ **HISTORICAL DESIGN DOC — the plan, not the shipped state.** This is the original
 > open-core design (2026-06-29) and it has been **built and evolved substantially** since.
 > For the current architecture, **CLAUDE.md is authoritative** (see "Open-core Pro plugin").
+> ⚠ **The per-repo digest this plan centres on is REMOVED (2026-10-18)** — with the AI PR summary,
+> the comment annotations bar the impact note, and the preset prompts. Read it as history.
 > Notable drift to keep in mind while reading:
 >
 > - The **contract `apiVersion` is now 14** (not 1). Four literals must agree —

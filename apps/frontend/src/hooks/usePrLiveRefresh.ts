@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { PrDetail, PrRefreshResponse } from '@pierre-review/shared';
 import { api, ApiError } from '../api/client.js';
 import { prMlLabelsKey } from './useMlLabels.js';
+import { threadCheckKey } from './useThreadCheck.js';
 
 // Live PR-detail freshness: while a PR is OPEN and its pane is actually VISIBLE, poll
 // POST /api/prs/:id/refresh every ~5s. The server is probe-gated (a quiet tick is one
@@ -93,6 +94,9 @@ export function usePrLiveRefresh(prId: number, enabled: boolean): PrLiveRefresh 
     // and whether the latest run reviewed the current code. Runs starting and ending reach it
     // through the active list instead (useClaudeReviewActiveSync).
     void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
+    // The Check threads status (DB-only): a comment burst may already have an automatic check
+    // queued; once the read sees it queued or running it polls itself and refreshes the judgements.
+    void qc.invalidateQueries({ queryKey: threadCheckKey(prId) });
     // ⚠ AND THE MERGE CONTROL'S KEY, which ['pr', prId] does NOT cover. `useMergeOptions`
     // (usePrWrites.ts) holds the LIVE GitHub read — allowed merge methods, current mergeability,
     // and merge-queue membership, position and entry state — none of which the sync persists, so

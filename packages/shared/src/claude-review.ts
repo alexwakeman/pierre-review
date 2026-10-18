@@ -259,10 +259,16 @@ export const THREAD_ADDRESSED_LABEL: Record<ClaudeThreadAddressed, string> = {
 
 /**
  * THE ONE "still needs a fix" rule for a judged review thread: Claude found the comment right (or
- * partly right) and the code has not (or only partly) dealt with it. AI Fix's review seed, the
- * counts and the Open PRs column all read this — never retype it.
+ * partly right) and the code has not (or only partly) dealt with it — and the thread is NOT resolved
+ * on GitHub (a resolved thread is judged, never fixed). AI Fix's review seed, the counts and the Open
+ * PRs column all read this — never retype it. `resolved` absent (an older stored row) reads as open.
  */
-export function isThreadToFix(t: { validity: ClaudeThreadValidity; addressed: ClaudeThreadAddressed }): boolean {
+export function isThreadToFix(t: {
+  validity: ClaudeThreadValidity;
+  addressed: ClaudeThreadAddressed;
+  resolved?: boolean | null;
+}): boolean {
+  if (t.resolved === true) return false;
   return (
     (t.validity === 'valid' || t.validity === 'partly_valid') &&
     (t.addressed === 'not_addressed' || t.addressed === 'partly_addressed')
@@ -271,7 +277,11 @@ export function isThreadToFix(t: { validity: ClaudeThreadValidity; addressed: Cl
 
 /** Counts over a run's thread assessments (code-derived). */
 export function threadAssessmentCounts(
-  items: ReadonlyArray<{ validity: ClaudeThreadValidity; addressed: ClaudeThreadAddressed }>,
+  items: ReadonlyArray<{
+    validity: ClaudeThreadValidity;
+    addressed: ClaudeThreadAddressed;
+    resolved?: boolean | null;
+  }>,
 ): ClaudeThreadAssessmentCounts {
   const c: ClaudeThreadAssessmentCounts = {
     total: items.length,

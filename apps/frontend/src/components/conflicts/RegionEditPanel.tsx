@@ -12,7 +12,7 @@ import type { RegionEditState } from './useRegionEdit.js';
 // ── THE ONE TEXT BOX IN THE RESOLVER ─────────────────────────────────────────────────────────
 //
 // ⚠ A PANEL UNDER THE CENTRE CELL — NOT A `contenteditable`, AND NOT A TEXTAREA REPLACING THE
-// CELL. It mounts in the same slot `HunkSuggestionPanel` uses, and the placement is three
+// CELL. It mounts in the slot under the centre cell, and the placement is three
 // decisions at once:
 //
 //   1. `data-mr-cell` STAYS ON A CONTENT-SIZED BOX. The ribbon overlay measures that rectangle

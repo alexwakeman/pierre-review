@@ -1722,6 +1722,60 @@ export const ciReviewItems = sqliteTable(
   }),
 );
 
+// CHECK THREADS (migration 0122 / pg 0109; docs/CLAUDE-REVIEW.md § Check threads). ONE row per light,
+// threads-only Claude pass over a PR: judges ONLY the threads that changed since their last judgement
+// and stores the WHOLE reconciled set (changed + carried) — the thread cards read the newer of this
+// and the latest Claude review per thread (review/claude-review/thread-judgements.ts). Tenancy is
+// the composite FK onto pull_requests (cascade), exactly like ci_reviews.
+export const claudeThreadChecks = sqliteTable(
+  'claude_thread_checks',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // The per-workspace daily cap on automatic checks.
+    workspaceId: integer('workspace_id').notNull(),
+    // Composite FK below (no single-column one).
+    prId: integer('pr_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    headSha: text('head_sha').notNull(),
+    trigger: text('trigger', { enum: ['manual', 'auto'] }).notNull().default('manual'),
+    status: text('status', {
+      enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
+    }).notNull(),
+    // Stored model id. No drizzle `enum:` for the same reason as claude_reviews.model.
+    model: text('model').notNull(),
+    // How many threads were shown to Claude (the changed set, within the cap).
+    threadsSent: integer('threads_sent'),
+    // ClaudeThreadAssessment[] — the WHOLE reconciled set. Set on success only.
+    threadAssessments: text('thread_assessments', { mode: 'json' }).$type<ClaudeThreadAssessment[]>(),
+    // The newest qualifying review comment this check covered (the auto re-review key's comment half).
+    commentsThrough: integer('comments_through', { mode: 'timestamp' }),
+    // ThreadCheckRefusal — server-written (no model ran).
+    refused: text('refused'),
+    error: text('error'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountPrIdx: index('ctc_account_pr_created_idx').on(t.accountId, t.prId, t.createdAt),
+    accountWsIdx: index('ctc_account_ws_created_idx').on(t.accountId, t.workspaceId, t.createdAt),
+    prAccountFk: foreignKey({
+      name: 'ctc_pr_account_fk',
+      columns: [t.prId, t.accountId],
+      foreignColumns: [pullRequests.id, pullRequests.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
 // ---- AI Fix (CORE since migration 0074 / pg 0061) ----
 // Created by the private plugin (plugin migrations 0002 / 0003 / 0024) and ADOPTED IN PLACE by
 // 0074's CREATE … IF NOT EXISTS — same name, same columns, same index names, and NO foreign keys

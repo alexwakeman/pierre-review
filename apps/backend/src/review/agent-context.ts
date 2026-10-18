@@ -91,7 +91,18 @@ export interface AgentContext {
       // Absent on an older host ⇒ none.
       // `lastRunAtMs` is the latest start or finish of any run of the PR (the "immediately on
       // receipt" test; absent ⇒ treated as none).
-      reReview?: Array<{ prId: number; headSha: string; commentsAtMs?: number | null; lastRunAtMs?: number | null }>;
+      // `coveredMs` (comment re-reviews): the newest qualifying comment the reviews at this head saw.
+      reReview?: Array<{
+        prId: number;
+        headSha: string;
+        commentsAtMs?: number | null;
+        lastRunAtMs?: number | null;
+        coveredMs?: number | null;
+        // How far the latest Check threads row at this head reached, and the newest qualifying reply
+        // on one of Limn's own findings (null: none). Absent ⇒ the sweeper reads them itself.
+        checkCoveredMs?: number | null;
+        newestOwnThreadCommentAtMs?: number | null;
+      }>;
       // PRs whose run is queued or running while their synced head has moved past it: never
       // cancelled — the sweeper only starts the new head's settle clock. Absent ⇒ none.
       inFlightMoved?: Array<{ prId: number; headSha: string }>;

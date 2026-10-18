@@ -57,6 +57,7 @@ import {
 } from '../Icons.js';
 import { useClaudeThreadJudgements } from '../../hooks/useClaudeThreadJudgements.js';
 import { threadPillFor } from '../../lib/claudeThreadMarker.js';
+import { ClaudeThreadPills } from '../ThreadView/ClaudeThreadBadge.js';
 import { CopyButton } from '../CopyButton.js';
 import { MentionTextarea } from '../MentionTextarea.js';
 import { ThreadCard } from '../ThreadView/index.js';
@@ -478,7 +479,8 @@ function InlineThread({
             className="shrink-0 text-emerald-600 dark:text-emerald-400"
           />
         ) : claude != null ? (
-          <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
+          // Shut, the Claude pills below carry the mark themselves.
+          open ? <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" /> : null
         ) : (
           <span
             className="inline-block h-2 w-2 shrink-0 rounded-full"
@@ -503,9 +505,7 @@ function InlineThread({
             ⚠ SCOPED TO `open`. Do NOT drop them outright: the shut pill is the only description of
             the thread a reader gets while scrolling the diff, and a bare state dot describes
             nothing. */}
-        {!open && claude != null && (
-          <span className="shrink-0 font-medium text-ai-ink">{claude.label} ·</span>
-        )}
+        {!open && claude != null && <ClaudeThreadPills marker={claude} noInfo />}
         {!open && (
           <>
             <span className="shrink-0 font-medium">{author}</span>

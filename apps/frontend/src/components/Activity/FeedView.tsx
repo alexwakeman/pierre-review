@@ -49,7 +49,6 @@ import {
 import { nearestScrollParent } from '../../lib/scrollParent.js';
 import { formatBehind } from '../GlobalLoadingBar.js';
 import { Avatar } from '../CommentCard.js';
-import { CommentAnnotations, ReviewCheckButton } from '../CommentAnnotations.js';
 import {
   BotIcon,
   CommentIcon,
@@ -60,7 +59,7 @@ import {
 } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { PrCommentComposer } from '../PrCommentComposer.js';
-import { StateBadge } from '../StateBadge.js';
+import { ThreadStatePill } from '../ThreadView/ClaudeThreadBadge.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { LargePrFlag } from './LargePrFlag.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
@@ -1584,7 +1583,7 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
               fact, not a repeat. */}
           {!expanded && (
             <span className="shrink-0">
-              <StateBadge state={thread.derivedState} />
+              <ThreadStatePill thread={thread} noInfo />
             </span>
           )}
           <code className="truncate font-mono text-gray-600 group-hover/rt:text-sky-600 dark:text-gray-300">
@@ -2183,11 +2182,7 @@ function FeedRowImpl({
         )}
 
         {/* A PR (issue-level) comment card can be replied to — a new comment
-            prefilled with the original quoted + its author @mentioned — and (Pro, prSummary)
-            "Check review"-ed inline, same target as PrDetail's per-comment mount. Both AI
-            pieces read the ONE shared per-PR annotations index (no per-card requests), and
-            the outcome span next to the button MUST stay visible — it carries the one-run
-            429 message, without which a second click mid-run looks like it did nothing. */}
+            prefilled with the original quoted + its author @mentioned. */}
         {isPrCommentCard && item.prId != null && (
           <div className="mt-1.5">
             {!replyOpen ? (
@@ -2202,12 +2197,6 @@ function FeedRowImpl({
                 >
                   Reply
                 </button>
-                {item.commentId != null && (
-                  <ReviewCheckButton
-                    prId={item.prId}
-                    target={{ targetKind: 'pr_comment', targetId: item.commentId }}
-                  />
-                )}
               </div>
             ) : (
               <div onClick={(e) => e.stopPropagation()}>
@@ -2217,18 +2206,6 @@ function FeedRowImpl({
                   autoFocus
                   onCancel={() => onSetReplyOpen(item.id, false)}
                   onDone={() => onSetReplyOpen(item.id, false)}
-                />
-              </div>
-            )}
-            {/* Stored judgements for this comment, under the body they judge (renders nothing
-                and requests nothing when the comment has none). The card is a clickable
-                region, so interacting with a panel must not open the tab. */}
-            {item.commentId != null && (
-              <div className="cursor-default" onClick={(e) => e.stopPropagation()}>
-                <CommentAnnotations
-                  prId={item.prId}
-                  targetKind="pr_comment"
-                  targetId={item.commentId}
                 />
               </div>
             )}

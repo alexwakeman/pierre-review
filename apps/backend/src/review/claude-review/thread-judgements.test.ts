@@ -41,6 +41,12 @@ let never = 0;
 let foreign = 0;
 let judgedReview = 0;
 let olderReview = 0;
+let checkOnly = 0;
+let staleCheck = 0;
+let plannedEarly = 0;
+let withCheck = 0;
+let withCheckId = 0;
+let checkOnlyId = 0;
 
 const HEAD = 'a'.repeat(40);
 const OLD = 'b'.repeat(40);
@@ -154,6 +160,49 @@ beforeAll(async () => {
   // `foreign`: another account's run.
   await succeed(await persist.insertQueuedReview(ctx, foreign, HEAD, 'claude-opus-5-5', 2), [assessment(5)]);
 
+  // CHECK THREADS (claude_thread_checks): folded over the latest review, per thread, when newer.
+  const later = new Date(Date.now() + 60_000);
+  const check = async (
+    prId: number,
+    accountId: number,
+    items: ClaudeThreadAssessment[],
+    completedAt: Date,
+    startedAt: Date = completedAt,
+  ) =>
+    (
+      await db
+        .insert(schema.claudeThreadChecks)
+        .values({
+          accountId,
+          workspaceId: 0,
+          prId,
+          repoId: r1,
+          headSha: HEAD,
+          status: 'succeeded',
+          model: 'claude-sonnet-5',
+          threadAssessments: items,
+          startedAt,
+          completedAt,
+        })
+        .returning({ id: schema.claudeThreadChecks.id })
+        .execute()
+    )[0].id as number;
+  withCheck = await pr(1, r1, 'with-check', 4);
+  const wcReview = await persist.insertQueuedReview(ctx, withCheck, HEAD, 'claude-opus-5-5', 1);
+  await succeed(wcReview, [assessment(11, { addressed: 'not_addressed' }), assessment(12)]);
+  withCheckId = await check(withCheck, 1, [assessment(11, { addressed: 'addressed', reason: 'Fixed in the rename.', resolved: true })], later);
+  checkOnly = await pr(1, r1, 'check-only', 5);
+  checkOnlyId = await check(checkOnly, 1, [assessment(21)], later);
+  // A check that finished BEFORE the review it would overlay does not apply.
+  staleCheck = await pr(1, r1, 'stale-check', 6);
+  await check(staleCheck, 1, [assessment(31, { validity: 'not_valid' })], new Date(Date.now() - 3_600_000));
+  await succeed(await persist.insertQueuedReview(ctx, staleCheck, HEAD, 'claude-opus-5-5', 1), [assessment(31)]);
+  // A check that STARTED before the review finished (planned against an older review) but finished
+  // after it does not apply either: its carried items are the older review's.
+  plannedEarly = await pr(1, r1, 'planned-early', 7);
+  await check(plannedEarly, 1, [assessment(41, { validity: 'not_valid', carried: true })], later, new Date(Date.now() - 3_600_000));
+  await succeed(await persist.insertQueuedReview(ctx, plannedEarly, HEAD, 'claude-opus-5-5', 1), [assessment(41)]);
+
   const { default: Fastify } = await import('fastify');
   const { registerClaudeReviewRoutes } = await import('./routes.js');
   app = Fastify({ logger: false });
@@ -189,6 +238,8 @@ describe('POST /api/claude-review/thread-judgements', () => {
         validity: 'valid',
         addressed: 'addressed',
         explanation: 'The rename covers it.',
+        reason: null,
+        resolved: false,
         assessedAtHead: HEAD,
         carried: false,
       },
@@ -197,6 +248,8 @@ describe('POST /api/claude-review/thread-judgements', () => {
         validity: 'not_valid',
         addressed: 'addressed',
         explanation: 'The rename covers it.',
+        reason: null,
+        resolved: false,
         assessedAtHead: OLD,
         carried: true,
       },
@@ -220,5 +273,34 @@ describe('POST /api/claude-review/thread-judgements', () => {
     const ids = Array.from({ length: 1001 }, (_, i) => i + 1);
     expect((await read(ids)).statusCode).toBe(400);
     expect((await read(['x'])).statusCode).toBe(400);
+  });
+
+  it('folds a later Check threads run over the review, per thread (newer wins)', async () => {
+    const p = ((await read([withCheck])).json().prs as any[])[0];
+    expect(p).toMatchObject({ checkId: withCheckId, reviewedHeadSha: HEAD });
+    expect(p.reviewId).toBeGreaterThan(0);
+    const byId = new Map((p.judgements as any[]).map((j) => [j.threadId, j]));
+    expect(byId.get(11)).toMatchObject({ addressed: 'addressed', reason: 'Fixed in the rename.', resolved: true });
+    expect(byId.get(12)).toMatchObject({ addressed: 'addressed', reason: null, resolved: false });
+  });
+
+  it('a PR with only a check reads as the check; a check older than the review does not apply', async () => {
+    const prs = (await read([checkOnly, staleCheck])).json().prs as any[];
+    const only = prs.find((p) => p.prId === checkOnly);
+    expect(only).toMatchObject({ reviewId: null, checkId: checkOnlyId });
+    expect(only.judgements.map((j: any) => j.threadId)).toEqual([21]);
+    const stale = prs.find((p) => p.prId === staleCheck);
+    expect(stale.checkId).toBeNull();
+    expect(stale.judgements[0]).toMatchObject({ threadId: 31, validity: 'valid' });
+  });
+
+  it('a check planned before the review finished does not overlay it, even when it finished later', async () => {
+    const p = ((await read([plannedEarly])).json().prs as any[])[0];
+    expect(p.checkId).toBeNull();
+    expect(p.judgements[0]).toMatchObject({ threadId: 41, validity: 'valid' });
+  });
+
+  it("never serves a check to another account", async () => {
+    expect((await read([checkOnly], 2)).json().prs).toEqual([]);
   });
 });

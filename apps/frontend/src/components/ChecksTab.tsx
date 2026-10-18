@@ -36,7 +36,6 @@ import { ResolveConflictsButton } from './conflicts/ResolveConflictsButton.js';
 import { PrActionControls, prActionsVisible, prBlockFacts } from './pr/PrActionsRow.js';
 import { ReviewsChips, reviewsRowVisible } from './pr/ReviewsRow.js';
 import { ChecksList, CiRerunControl } from './CheckList.js';
-import { AiSummary } from './AiSummary.js';
 import { useRequestReviewers } from '../hooks/usePrWrites.js';
 import { TERMINAL_LABEL } from './AutoMergeBanner.js';
 import { usePrArmedIntent, usePrStoppedIntent } from '../hooks/useAutoMerge.js';
@@ -939,8 +938,6 @@ export function ChecksTab({
       )}
 
       {pr.body != null && pr.body.trim() !== '' && <PrSummary body={pr.body} />}
-
-      <AiSummary pr={pr} />
 
       {/* Why CI failed is Claude Review's job now (its "CI failures" section); this row only
           lists the checks. */}

@@ -27,7 +27,6 @@ export type IconComponent = (props: {
 
 import type {
   AddressedConfidence,
-  AddressedVerdict,
   AutomatedReviewerKind,
   CheckRunState,
   CiStatus,
@@ -127,16 +126,6 @@ export const CONFIDENCE_META: Record<AddressedConfidence, StateMeta> = {
     color: '#94a3b8',
     description: 'No addressed signal.',
   },
-};
-
-// Pro Haiku "was it TRULY addressed?" verdict vocabulary (Part C). The SEMANTIC layer — rendered
-// with a ✨ to distinguish it from the deterministic CONFIDENCE_META.
-export const ADDRESSED_VERDICT_META: Record<AddressedVerdict, { label: string; color: string }> = {
-  addressed: { label: 'Addressed', color: '#16a34a' },
-  likely: { label: 'Likely addressed', color: '#3b82f6' },
-  partial: { label: 'Partially addressed', color: '#d97706' },
-  not_addressed: { label: 'Not addressed', color: '#ef4444' },
-  unclear: { label: 'Unclear', color: '#94a3b8' },
 };
 
 // ML severity of a BOT comment (CORE, free tier) — the `severity-api` model's four classes.

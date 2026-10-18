@@ -23,8 +23,7 @@
 // When the PRIVATE @pierre/pro submodule is checked out (packages/pro), the
 // seeder also applies the plugin's own migrations (with pro_migrations
 // bookkeeping, so the backend's boot-time plugin migration is a no-op) and
-// seeds the Pro tables: repo_digests (per-repo AI digest), sprint_reports,
-// pro_settings, ai_pr_analyses + ai_fixes. Without the submodule those steps
+// seeds the Pro tables: sprint_reports, pro_settings, ai_fixes. Without the submodule those steps
 // are skipped cleanly.
 //
 // It also seeds ONE stored "Check review" result — an `addressed` verdict on a
@@ -2008,8 +2007,7 @@ console.log(
 // Applies the plugin's own migrations EXACTLY the way the backend boot does
 // (src/pro/migrate.ts, incl. the pro_migrations bookkeeping — so the boot-time
 // plugin migration is a no-op), then seeds demo-quality rows into the plugin
-// tables so the marketing shots show rich Pro state: repo_digests (per-repo AI
-// digest), sprint_reports, pro_settings, ai_pr_analyses + ai_fixes (#114).
+// tables so the marketing shots show rich Pro state: sprint_reports, pro_settings, ai_fixes (#114).
 // ===========================================================================
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const PRO_DIR = join(REPO_ROOT, 'packages', 'pro');
@@ -2074,51 +2072,6 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
       1, 7, null,
       hoursAgo(48), hoursAgo(2),
     );
-
-  // 3. repo_digests — one realistic bulleted change-report per repo, referencing
-  //    seeded PRs as bare #N tokens (the app resolves + linkifies them). Format per
-  //    packages/pro/src/activity-digest/prompt.ts: throughput bullet first (no refs),
-  //    then multi-PR bullets, then one bullet per single PR. latest_event_at is set to
-  //    the repo's real max event time so the digest is NOT flagged stale.
-  const DIGESTS: Record<number, string> = {
-    [WEB]: [
-      '- Steady week: three PRs merged and two still open, with reviews keeping pace with new work.',
-      '- The open-PR strip got a focused round of polish across #101 and #112 — the layout-shift fix is through review, keyboard navigation is still waiting on e2e.',
-      '- #102 merged — the timeline lane packer now lives in its own module.',
-      '- #110 merged — the detail-pane height persists across reloads.',
-      '- #103 landed the routine vite bump within a day.',
-    ].join('\n'),
-    [API]: [
-      '- Throughput is rising: two merges this week with three PRs open, all under active review.',
-      '- The sync-performance track converged in #104 and #106 — commit-file caching and the mergedBy backfill both merged.',
-      '- #113 drew the deepest review of the week: five inline threads on the transaction boundaries, two already addressed in follow-up pushes.',
-      '- #105 is conflicting with main after recent merges — needs a rebase before it can land.',
-      '- #111 has review notes and is awaiting a requested review.',
-    ].join('\n'),
-    [INFRA]: [
-      '- A quieter but consequential week: one merge and two open PRs, both infrastructure-critical.',
-      '- #114 is red — `terraform plan` fails on the staging workspace after the autoscaling bounds were inverted in the latest push.',
-      '- #115 merged — the ingress Helm values are now split per environment.',
-      '- #116 adds CloudWatch alarms for queue depth and DLQ age; awaiting review.',
-    ].join('\n'),
-  };
-  const maxEventAt = (repoId: number): number => {
-    const row = raw
-      .prepare('SELECT MAX(occurred_at) AS m FROM events WHERE repo_id = ?')
-      .get(repoId) as { m: number | null };
-    return row.m ?? hoursAgo(2);
-  };
-  const insDigest = raw.prepare(
-    `INSERT INTO repo_digests (account_id, repo_id, payload_hash, latest_event_at,
-       model, summary, cost_usd, input_tokens, output_tokens, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
-  for (const repoId of [WEB, API, INFRA]) {
-    insDigest.run(
-      1, repoId, `demo-digest-${repoId}`, maxEventAt(repoId),
-      'claude-haiku-5-5', DIGESTS[repoId]!, 0.0031, 6214, 342, hoursAgo(2),
-    );
-  }
 
   // 4. sprint_reports — ONE cross-repo report. The stored insights_hash must match
   //    what the live GET recomputes (structural hash of the current Insight cards +
@@ -2207,36 +2160,8 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
       hoursAgo(2),
     );
 
-  // 5. ai_pr_analyses + ai_fixes — a rich "AI Analysis & Fix" tab on #114 (the failing
-  //    infra PR): a PR summary, a succeeded CI-failure analysis (the CONFIDENCE first
-  //    line is machine-parsed into the confidence chips), and one succeeded, not-yet-
-  //    pushed fix run with a small readable patch.
-  const insAnalysis = raw.prepare(
-    `INSERT INTO ai_pr_analyses (account_id, repo_id, pr_id, kind, head_sha,
-       payload_hash, summary, model, cost_usd, input_tokens, output_tokens, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
-  insAnalysis.run(
-    1, INFRA, 114, 'summary', 'sha114headcommit', 'demo-summary-114',
-    [
-      '**What this PR does** — Right-sizes the EKS node-group autoscaling for the worker pool: new min/max bounds in `terraform/eks/node-groups.tf` plus matching staging workspace variables, so queue-depth scaling stops thrashing at the old ceiling.',
-      '',
-      '**Risk** — Low blast radius (staging first, prod behind a separate apply), but the current revision inverts the min/max bounds — which is exactly why `terraform plan` fails validation.',
-    ].join('\n'),
-    'claude-haiku-5-5', 0.0018, 3120, 214, hoursAgo(3),
-  );
-  insAnalysis.run(
-    1, INFRA, 114, 'ci_analysis', 'sha114headcommit', 'demo-ci-114',
-    [
-      'CONFIDENCE root=high fix=high',
-      '**Root cause** — `terraform plan` fails validation on `module.workers`: `scaling_config.min_size = 6` is greater than `max_size = 4`. The last push raised the minimum while leaving the maximum at its old value, and Terraform rejects the inverted range before it even plans.',
-      '',
-      '**Failing check** — `terraform plan` (staging workspace). `tflint` and `checkov` pass, so this is a semantic bounds error, not a style or security finding.',
-      '',
-      '**Suggested fix** — restore `min_size = 2` and raise `max_size = 8` for the intended head-room; `desired_size = 4` stays valid inside the corrected range.',
-    ].join('\n'),
-    'claude-haiku-5-5', 0.0021, 4480, 296, hoursAgo(2),
-  );
+  // 5. ai_fixes — one succeeded, not-yet-pushed fix run on #114 (the failing infra PR) with a
+  //    small readable patch.
   raw
     .prepare(
       `INSERT INTO ai_fixes (account_id, repo_id, pr_id, base_sha, status, model, seed,
@@ -2286,7 +2211,7 @@ console.log('  open PRs:', prRows.filter((p) => p.state === 'open').map((p) => p
 console.log('  stale open PRs (one per repo): 140 (web), 141 (api), 142 (infra)');
 console.log(
   proSeeded
-    ? '  pro tables: repo_digests (3), sprint_reports (1), pro_settings (1), ai analyses + fix on #114'
+    ? '  pro tables: sprint_reports (1), pro_settings (1), ai fix on #114'
     : '  pro tables: SKIPPED (packages/pro submodule not checked out)',
 );
 console.log(
@@ -2317,15 +2242,6 @@ if (proSeeded) {
   });
   console.log(`  period reports: ${periodRows} rows (14-day cadence, newest narrated)`);
 
-  // ONE SEEDED "Check review" result — a stored `addressed` verdict (plus the
-  // `validity` row that button always writes with it) on a real estate thread, so
-  // the demo can film a feature whose only other path is a live Haiku call the
-  // demo stack cannot make (ANTHROPIC_API_KEY=dummy). Read back through the REAL
-  // cached GET; nothing is stubbed. The words are hand-written, the payload hash
-  // is not — it comes from the plugin's own reader. See the file's header.
-  const { seedAddressedCheck } = await import('./seed-addressed-check.js');
-  const addressed = await seedAddressedCheck({ db, schema, now });
-  console.log(`  ${addressed.note}`);
 }
 
 await closeDb();

@@ -855,6 +855,13 @@
       "when": 1792137608016,
       "tag": "0121_story_docs_alignments",
       "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "6",
+      "when": 1792137609016,
+      "tag": "0122_claude_thread_checks",
+      "breakpoints": true
     }
   ]
 }

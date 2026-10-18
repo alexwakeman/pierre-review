@@ -1,4 +1,8 @@
+import { useState } from 'react';
+import { useIsMutating } from '@tanstack/react-query';
 import type { MergeBlockFacts, PrDetail as PrDetailT } from '@pierre-review/shared';
+import { mergePrMutationKey, updateBranchMutationKey } from '../../hooks/usePrWrites.js';
+import { ChevronIcon } from '../Icons.js';
 import { useQueryDataUpdatedAt } from '../../hooks/useMergeQueueStatus.js';
 import { usePrArmedIntent } from '../../hooks/useAutoMerge.js';
 import { ApproveControl } from '../ApproveControl.js';
@@ -8,10 +12,35 @@ import { ClosePrControl } from '../ClosePrControl.js';
 import { ReopenPrControl } from '../ReopenPrControl.js';
 
 /**
- * THE ACTIONS ROW — every viewer write action on the PR: approve, merge, "merge when ready",
- * close without merging, reopen. Shared by the Overview tab (ChecksTab) and the top of the Claude
- * Review tab. Each caller supplies its own row chrome; this renders the controls only.
+ * THE ACTIONS ROW — every viewer write action on the PR: approve (and withdraw an approval), merge,
+ * "merge when ready", close without merging, reopen. Shared by the Overview tab (ChecksTab) and the
+ * top of the Claude Review tab. Each caller supplies its own row chrome; this renders the controls.
+ *
+ * ⚠ HIDDEN BY DEFAULT behind ONE reveal button ("Show actions"), so a write is never one stray
+ * click away while reading. The choice is remembered for the browser session (sessionStorage, both
+ * places at once); a fresh session starts closed. Only the BUTTONS hide: the merge facts stay on
+ * the Overview's Status row, and the closed row still says where the viewer stands ("You
+ * approved") and whether a merge is in flight.
  */
+
+export const PR_ACTIONS_OPEN_KEY = 'limn.prActions.open';
+
+/** The reveal's starting state: closed unless this session opened it. Exported for tests. */
+export function readPrActionsOpen(storage: Pick<Storage, 'getItem'> | null): boolean {
+  try {
+    return storage?.getItem(PR_ACTIONS_OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function sessionStore(): Storage | null {
+  try {
+    return typeof window === 'undefined' ? null : window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The facts the blocked-reason derivation reads. Built here so the Overview's Status row verdict
@@ -68,8 +97,51 @@ export function PrActionControls({
   const prSyncedAt = useQueryDataUpdatedAt(['pr', pr.id]);
   const armedIntent = usePrArmedIntent(pr.id);
   const facts = blockFacts ?? prBlockFacts(pr);
+  const [open, setOpen] = useState(() => readPrActionsOpen(sessionStore()));
+  // A merge or branch update started here keeps running while the buttons are hidden; say so.
+  const merging = useIsMutating({ mutationKey: mergePrMutationKey(pr.id) }) > 0;
+  const updating = useIsMutating({ mutationKey: updateBranchMutationKey(pr.id) }) > 0;
+  const toggle = (): void => {
+    const next = !open;
+    setOpen(next);
+    try {
+      sessionStore()?.setItem(PR_ACTIONS_OPEN_KEY, next ? '1' : '0');
+    } catch {
+      /* private window: the choice just isn't remembered */
+    }
+  };
+  const standing =
+    pr.viewerReviewStanding === 'approved'
+      ? 'You approved'
+      : pr.viewerReviewStanding === 'changes_requested'
+        ? 'You requested changes'
+        : null;
+  const reveal = (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-expanded={open}
+      className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
+    >
+      {open ? 'Hide actions' : 'Show actions'}
+      <ChevronIcon dir={open ? 'up' : 'down'} size={11} />
+    </button>
+  );
+  if (!open) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="pr-actions-closed">
+        {reveal}
+        {standing != null && <span className="text-xs text-gray-600 dark:text-gray-300">{standing}</span>}
+        {merging && <span className="text-xs text-gray-600 dark:text-gray-300">Merging…</span>}
+        {!merging && updating && (
+          <span className="text-xs text-gray-600 dark:text-gray-300">Updating the branch…</span>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+      {reveal}
       {pr.viewerCanApprove && <ApproveControl prId={pr.id} standing={pr.viewerReviewStanding} />}
       {pr.viewerCanPush && pr.state === 'open' && !pr.isDraft && (
         <>

@@ -358,7 +358,8 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
     // OPEN PRODUCT DECISION about a paid AI route, not a structural impossibility. Enabling it in
     // cloud means a per-hunk LLM call billed per tenant, so it wants the same deliberate gating
     // the other advanced-AI surfaces get — decide it there, not by deleting this line.
-    // `undefined` means the plugin registers no conflict-assist route at all, the OSS shape.
+    // (The plugin's per-hunk conflict suggestion that read this seam is REMOVED; the optional
+    // seam stays on the contract, unread, so `apiVersion` did not move.)
     conflicts: config.isCloud ? undefined : makeConflictSeam(),
   };
 

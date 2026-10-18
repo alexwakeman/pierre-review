@@ -297,17 +297,10 @@ const CODE_GROUNDS: { name: string; light: RGB; dark: RGB }[] = [
   // ClaudeReviewTab: FindingHunk, then the suggestion block.
   { name: 'finding hunk', light: tw('gray-50'), dark: over(tw('gray-900'), 0.6, DARK_BG) },
   { name: 'suggestion block', light: tw('gray-100'), dark: tw('gray-800') },
-  // CommentAnnotations' evidence patch: the container, then its add/del rows.
-  { name: 'evidence patch', light: tw('white'), dark: tw('gray-900') },
-  { name: 'evidence add row', light: tw('emerald-50'), dark: over(tw('emerald-950'), 0.4, tw('gray-900')) },
-  { name: 'evidence del row', light: tw('rose-50'), dark: over(tw('rose-950'), 0.4, tw('gray-900')) },
   // BotAdvisorPanel's generated config file.
   { name: 'generated config', light: tw('gray-50'), dark: over(tw('gray-900'), 0.4, DARK_BG) },
   // BasePopover (the resolver's compare-base view) sits on the popover card, not on a wash.
   { name: 'popover card', light: tw('white'), dark: tw('gray-900') },
-  // HunkSuggestionPanel: Claude's proposed lines sit on `bg-ai-surface-2`, the AI surface's raised
-  // step (`--ai-surface-2` in index.css), not on a merge wash.
-  { name: 'ai suggestion panel', light: hexToRgb('#f4f4ef'), dark: hexToRgb('#1c1c21') },
 ];
 
 describe('the shared syntax colours', () => {

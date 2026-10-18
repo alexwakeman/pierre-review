@@ -426,7 +426,7 @@ contract: [ML-SEVERITY.md](ML-SEVERITY.md).
   that entity's own PK **within its kind**. THREE DIFFERENT ID SPACES — which is why the unique
   `mcl_account_target` is `(account_id, target_kind, target_id)` and why every lookup, server or
   client, must carry the kind. `target_id` is deliberately NOT a foreign key (no single FK can
-  express three parents; the plugin's `pr_comment_annotations` has the same shape).
+  express three parents).
 - `severity` (`nit|minor|major|critical`) + `severity_ord` (0–3) + `severity_prob`;
   `categories` (multi-label, never empty) + `category_probs` (all eight keys);
   `is_summary` (a PR walkthrough rather than a finding — a separate axis, NOT a category).
@@ -766,6 +766,25 @@ Sqlite `0103` / pg `0090` (status sections + blockers; no new table):
   bucket of its automatic stage (else the nearest). Stored values of the RETIRED `{sections}` and
   `{order, deliveredFrom}` shapes are converted on read into four buckets (no migration). Contract:
   [TRACKERS.md](TRACKERS.md) § The status order and buckets.
+
+## Dormant Pro plugin tables (since 2026-10-18)
+
+The one-shot Haiku features below were REMOVED; their plugin tables are **DORMANT** — never read or
+written, still declared in the plugin's schema modules, still erased with the account, pruned by
+retention and pinned by the plugin's isolation test. Never drop them.
+
+| Table | Was |
+|---|---|
+| `repo_digests` | the per-repo activity digest |
+| `human_theme_reports` | the Feed "Discussion themes" |
+| `comment_assessments` | the single-thread validity check |
+| `addressed_checks` | the "was this addressed" check |
+| `ai_pr_analyses` | the AI PR summary (and the older CI analysis) |
+| `preset_reports` | the Insights preset prompts |
+
+DORMANT **rows** inside live tables: `pr_comment_annotations` kinds `validity` / `addressed` /
+`simplify` (the table stays live for `impact`, the blast-radius impact note; the read skips other
+kinds), and `pro_synthesis` kinds `brief` / `rollup`.
 
 ## The automation vocabulary — `AUTOMATION_VENDORS`, `ReviewerRole`, `AutomatedReviewerKind`
 

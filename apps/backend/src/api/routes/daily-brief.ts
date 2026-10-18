@@ -4,9 +4,9 @@ import { getDailyBriefCounts, getDailyBriefEntry } from '../../db/daily-brief.js
 import { listWorkspaces, resolveWorkspaceScope } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
 
-// The daily brief (plan P3.1/N1 + the P3.3/N5 roll-up) — CORE / FREE, counts only. The Pro
-// narration lives entirely on the plugin's synthesis seam (`kind: 'brief'` / `'rollup'`) and is
-// fetched separately by the SPA; this route never touches AI and never carries cost/money.
+// The daily brief (plan P3.1/N1 + the P3.3/N5 roll-up) — CORE / FREE, counts only. (Its Pro
+// narration, the synthesis seam's 'brief' / 'rollup' kinds, is REMOVED.) This route never touches
+// AI and never carries cost/money.
 //
 // `?workspace=` is the ONE scope parameter (resolveWorkspaceScope: absent/unknown/foreign →
 // Default, never a 404) and the resolved id is echoed. `?rollup=1` additionally returns one

@@ -135,15 +135,16 @@ describe('both surfaces mount the shared shell', () => {
     expect(src('components/Activity/PendingClaude.tsx')).not.toMatch(/useClaudeReviewStates/);
   });
 
-  it('the Pending card fetches nothing on mount: the thread and PR summary wait for Details', () => {
+  it('the Pending card fetches nothing on mount: the thread waits for Details; no PR summary', () => {
     const pending = src('components/Activity/AttentionCards.tsx');
-    // The two fetching readers mount ONLY inside `PrDetails`, which renders only while open.
+    // The one fetching reader mounts ONLY inside `PrDetails`, which renders only while open.
     expect(pending).toMatch(/hasDetails && detailsOpen && prRef != null && \(\s*<PrDetails/);
     const details = pending.slice(pending.indexOf('function PrDetails('), pending.indexOf('function InsightThreadById('));
     expect(details).toMatch(/<InsightThreadById/);
-    expect(details).toMatch(/<InsightPrSummaryBody/);
+    // The AI PR summary is removed, and the expanded card no longer fetches the PR at all.
+    expect(details).not.toMatch(/<PrDescriptionBody|<InsightPrSummaryBody|usePr\(/);
     const card = pending.slice(pending.indexOf('function PendingCard('), pending.indexOf('export function AttentionCards('));
-    expect(card).not.toMatch(/<InsightThreadById|<InsightPrSummaryBody|useThread\(|usePr\(/);
+    expect(card).not.toMatch(/<InsightThreadById|<PrDescriptionBody|<InsightPrSummaryBody|useThread\(|usePr\(/);
   });
 });
 

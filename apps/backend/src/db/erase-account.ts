@@ -179,6 +179,12 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .where(eq(schema.ciReviewItems.accountId, accountId))
       .execute();
     await tx.delete(schema.ciReviews).where(eq(schema.ciReviews.accountId, accountId)).execute();
+    // Check threads runs (migration 0122 / pg 0109) — the stored thread judgements. Cascades from
+    // the PR; explicit, like every agentic table.
+    await tx
+      .delete(schema.claudeThreadChecks)
+      .where(eq(schema.claudeThreadChecks.accountId, accountId))
+      .execute();
     // AI Fix runs (patches of the user's code + the prompts they were built from). Core since
     // migration 0074 / pg 0061 — the plugin's erasure hook used to own them.
     await tx.delete(schema.aiFixes).where(eq(schema.aiFixes.accountId, accountId)).execute();
@@ -338,6 +344,8 @@ export function accountScopedTables(): {
     // own accountId; both are erased explicitly above.
     { name: 'ciReviews', col: schema.ciReviews.accountId, table: schema.ciReviews },
     { name: 'ciReviewItems', col: schema.ciReviewItems.accountId, table: schema.ciReviewItems },
+    // Check threads runs (migration 0122 / pg 0109); erased explicitly above.
+    { name: 'claudeThreadChecks', col: schema.claudeThreadChecks.accountId, table: schema.claudeThreadChecks },
     { name: 'aiUsage', col: aiUsage.accountId, table: aiUsage },
     // Adopted from the plugin (migration 0074 / pg 0061) with AI Fix's fixer. No FKs, so nothing
     // cascades: the explicit delete above is the whole guarantee. (`reviewLearnings`, review

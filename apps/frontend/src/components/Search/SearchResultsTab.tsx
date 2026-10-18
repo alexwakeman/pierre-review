@@ -8,7 +8,7 @@ import { useFilters } from '../../store/filters.js';
 import { indexUsers, PR_STATE_META } from '../../lib/ui.js';
 import { MagnifierIcon, TicketIcon } from '../Icons.js';
 import { ThreadCard } from '../ThreadView/index.js';
-import { PrMetaRow, InsightPrSummary, type PrMetaFields } from '../Activity/AttentionCards.js';
+import { PrMetaRow, PrDescriptionToggle, type PrMetaFields } from '../Activity/AttentionCards.js';
 import { KIND_ICON, KIND_LABEL, openHitPr, openSearchHit, openSearchStory, storyPrWords } from './searchNav.js';
 import { highlightTerms } from './highlight.js';
 
@@ -369,7 +369,7 @@ function PrHitCard({ hit, query }: { hit: SearchHit; query: string }): JSX.Eleme
             {highlightTerms(hit.snippet, query)}
           </div>
         ) : null}
-        <InsightPrSummary prId={hit.prId} />
+        <PrDescriptionToggle prId={hit.prId} />
       </div>
     </li>
   );

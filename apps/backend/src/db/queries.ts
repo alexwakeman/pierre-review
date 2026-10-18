@@ -272,7 +272,7 @@ import { hubReadingFor, loadRepoCoupling, type RepoCoupling } from './file-coupl
 import { DAYS_PER_MONTH, botWindowMs } from './bot-window.js';
 import { detectChangepoints } from './changepoint.js';
 import { dormantBotUserIds } from './bot-dormancy.js';
-import { newestReviewCommentAt, type CountsAuthor } from './review-threads-for-review.js';
+import { newestReviewCommentTimes, type CountsAuthor } from './review-threads-for-review.js';
 import {
   automationVendorUserIds,
   exactAutomationVendorUsers,
@@ -337,6 +337,7 @@ const {
   prViews,
   claudeReviews,
   claudeReviewFindings,
+  claudeThreadChecks,
   ciStatusEvents,
   // The TRUNK twin of ciStatusEvents (migration 0052 / pg 0039). Separate table, not a nullable
   // prId on the PR one: it is repo-scoped, has no PR to anchor retention to, and stores the
@@ -10075,24 +10076,65 @@ export async function getAutoReviewCandidates(
   // unresolved thread, never one Limn posted — db/review-threads-for-review.ts) newer than what
   // every run at this head covered. The key is (head, newest comment time); the sweeper debounces
   // it exactly like a moved head, so a burst of comments costs one run.
+  // ⚠ A burst is usually answered by a CHECK THREADS run, not a review, so the check's coverage
+  // counts too: the latest `claude_thread_checks` row at this head (any status — the sweeper never
+  // retries one) reaching the newest comment settles the burst HERE. Otherwise a covered PR sat in
+  // `reReview` until its head moved, using up a slot of `opts.limit` on every tick and hiding later
+  // PRs' bursts. The ONE exception mirrors the sweeper's routing: a reply on one of Limn's own
+  // findings newer than the REVIEWS saw still needs a full review, whatever a check covered.
   if (reReview.length < opts.limit && sameHead.length > 0) {
     const since = new Date(Math.min(...sameHead.map((p) => p.coveredMs)));
-    const newest = await newestReviewCommentAt(
-      accountId,
-      sameHead.map((p) => p.prId),
-      since,
-      // ⚠ Only a PERSON or a REVIEW bot re-triggers (CI / coverage / deploy / dependency bots never).
-      countsAuthorFrom(botSet, new Set(reviewerBots)),
-    );
+    const [newest, checkRows] = await Promise.all([
+      newestReviewCommentTimes(
+        accountId,
+        sameHead.map((p) => p.prId),
+        since,
+        // ⚠ Only a PERSON or a REVIEW bot re-triggers (CI / coverage / deploy / dependency bots never).
+        countsAuthorFrom(botSet, new Set(reviewerBots)),
+      ),
+      db
+        .select({
+          id: claudeThreadChecks.id,
+          prId: claudeThreadChecks.prId,
+          headSha: claudeThreadChecks.headSha,
+          commentsThrough: claudeThreadChecks.commentsThrough,
+          createdAt: claudeThreadChecks.createdAt,
+        })
+        .from(claudeThreadChecks)
+        .where(
+          and(
+            eq(claudeThreadChecks.accountId, accountId),
+            inArray(
+              claudeThreadChecks.prId,
+              sameHead.map((p) => p.prId),
+            ),
+          ),
+        )
+        .execute(),
+    ]);
+    const latestCheck = new Map<number, (typeof checkRows)[number]>();
+    for (const c of checkRows) {
+      const prev = latestCheck.get(c.prId);
+      if (!prev || c.id > prev.id) latestCheck.set(c.prId, c);
+    }
     for (const p of sameHead) {
-      const at = newest.get(p.prId);
-      if (!at || at.getTime() <= p.coveredMs) continue;
+      const t = newest.get(p.prId);
+      if (!t) continue;
+      const at = t.newest.getTime();
+      const ck = latestCheck.get(p.prId);
+      const checkCoveredMs = ck && ck.headSha === p.headSha ? (ck.commentsThrough ?? ck.createdAt).getTime() : null;
+      const ownMs = t.newestOwn?.getTime() ?? null;
+      const ownNeedsReview = ownMs != null && ownMs > p.coveredMs;
+      if (at <= Math.max(p.coveredMs, checkCoveredMs ?? 0) && !ownNeedsReview) continue;
       reReview.push({
         prId: p.prId,
         headSha: p.headSha,
-        commentsAtMs: at.getTime(),
+        commentsAtMs: at,
         reason: 'comments',
         lastRunAtMs: null,
+        coveredMs: p.coveredMs,
+        checkCoveredMs,
+        newestOwnThreadCommentAtMs: ownMs,
       });
       if (reReview.length >= opts.limit) break;
     }
@@ -10143,6 +10185,15 @@ export interface AutoReReviewCandidate {
   reason: 'head' | 'comments';
   // The latest start or finish of any run of this PR (head re-reviews; null for comments).
   lastRunAtMs: number | null;
+  // Comment re-reviews only: the newest qualifying comment the REVIEWS at this head covered. The
+  // sweeper compares a reply on one of Limn's own findings against it (such a reply needs a full
+  // review; anything else a light Check threads pass). Absent for a moved head.
+  coveredMs?: number;
+  // Comment re-reviews only: how far the latest Check threads row AT THIS HEAD reached (null: none),
+  // and the newest qualifying reply inside a thread rooted on Limn's own finding (null: none). With
+  // both present the sweeper routes the burst without reading the PR's threads again.
+  checkCoveredMs?: number | null;
+  newestOwnThreadCommentAtMs?: number | null;
 }
 
 // ---- PR write-action contexts (reply / resolve / comment / approve / inline) ----
@@ -10535,6 +10586,10 @@ export interface PrWriteContext {
   state: 'open' | 'merged' | 'closed';
   viewerPermission: string | null;
   prUrl: string;
+  // The SYNCED merge state and review decision (lowercased as stored; null = unknown). Read by the
+  // withdraw-approval route to decide whether a settle ladder has anything to wait for.
+  mergeStateStatus?: string | null;
+  reviewDecision?: string | null;
 }
 
 // Resolve a PR to the coordinates the write actions need: GitHub node id, repo
@@ -10556,6 +10611,8 @@ export async function getPrWriteContext(
       authorId: pullRequests.authorId,
       state: pullRequests.state,
       viewerPermission: repos.viewerPermission,
+      mergeStateStatus: pullRequests.mergeStateStatus,
+      reviewDecision: pullRequests.reviewDecision,
     })
     .from(pullRequests)
     .innerJoin(repos, eq(repos.id, pullRequests.repoId))
@@ -10575,6 +10632,8 @@ export async function getPrWriteContext(
     state: row.state,
     viewerPermission: row.viewerPermission,
     prUrl: `https://github.com/${row.owner}/${row.name}/pull/${row.number}`,
+    mergeStateStatus: row.mergeStateStatus ?? null,
+    reviewDecision: row.reviewDecision ?? null,
   };
 }
 
@@ -10921,7 +10980,7 @@ export async function upsertLocalReview(
   // The verdict the viewer just submitted. Approve and Request changes both stamp through here;
   // a later verdict overwrites the earlier one's row only if GitHub reused the node id (it
   // never does), so the viewer's standing is the LATEST row, read by getPrDetail.
-  state: 'approved' | 'changes_requested' = 'approved',
+  state: 'approved' | 'changes_requested' | 'dismissed' = 'approved',
 ): Promise<number> {
   // The conflict target is the GitHub node id; if GitHub didn't return one, fall
   // back to the numeric id so the row is still keyed stably for the next sync.
@@ -10953,6 +11012,29 @@ export async function upsertLocalReview(
       .execute()
   )[0]!;
   return row.id;
+}
+
+/**
+ * WITHDRAW APPROVAL's stamp: the viewer's APPROVED review was just DISMISSED on GitHub. Marks the
+ * local row `dismissed` (matched by node id OR numeric id, within THIS PR), so `viewerReviewStanding`
+ * and the review-decision fold drop the approval before the next sync. No local row yet (the approval
+ * was never synced) ⇒ one is written in the dismissed state. Returns the local row id.
+ */
+export async function markLocalReviewDismissed(
+  prId: number,
+  authorId: number | null,
+  gh: StampGithubReview,
+): Promise<number> {
+  const conds = [eq(reviews.databaseId, String(gh.databaseId))];
+  if (gh.nodeId) conds.push(eq(reviews.githubNodeId, gh.nodeId));
+  const updated = await db
+    .update(reviews)
+    .set({ state: 'dismissed' })
+    .where(and(eq(reviews.prId, prId), or(...conds)))
+    .returning({ id: reviews.id })
+    .execute();
+  if (updated.length > 0) return updated[0]!.id;
+  return upsertLocalReview(prId, authorId, gh, 'dismissed');
 }
 
 /**
@@ -13125,11 +13207,11 @@ export async function getBotOnlyReviewPrs(
 // ── Human THEMES source rows (Pro) — the raw HUMAN review-comment CONTENT ─────────────────────
 // The sibling of getBotReviewComments for people, NOT bots: comments authored by non-bot users
 // (excludes every automated reviewer + any is_bot user), which INCLUDES human replies inside
-// bot-initiated threads. Powers the Pro "Discussion themes" Feed summary. Account- + WORKSPACE-scoped +
+// bot-initiated threads. It powered the Pro "Discussion themes" Feed summary, which is REMOVED; the
+// seam (`ProHostQueries.getHumanReviewComments`) stays on the contract, unread. Account- + WORKSPACE-scoped +
 // windowed; capped most-recent per source (a `truncated` flag). Returns the thread's derivedState so
 // the plugin funnel can prioritise threads that have responses (derivedState != 'untouched'). The
-// row shape is RE-DECLARED verbatim in packages/pro/src/human-themes/build.ts (open-core boundary);
-// KEEP THE TWO IN LOCKSTEP.
+// row shape was re-declared in the plugin's (now deleted) human-themes module.
 export interface HumanReviewCommentRow {
   id: number;
   source: 'review' | 'issue';

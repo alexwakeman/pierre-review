@@ -60,12 +60,6 @@ export function CommentBlock({
         <CopyButton text={comment.body} className="ml-auto" />
       </div>
       {anchor && <div className="mt-1.5">{anchor}</div>}
-      {/* NO annotation surface here any more. The AI "Simplified" rewrite used to sit above each
-          comment body, which scattered up to five panels through one conversation; all of a
-          thread's judgements now render as ONE block under the whole conversation
-          (ThreadCheckOutput in ThreadCard). The "original is below, unchanged" invariant survives
-          — the entire conversation is above that block — and each rewrite is sublabelled with
-          whose comment it rewrites, since it is no longer adjacent to it. */}
       <div className="mt-1 text-sm">
         <Markdown>{comment.body}</Markdown>
       </div>

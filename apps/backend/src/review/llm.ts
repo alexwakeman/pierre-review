@@ -9,7 +9,14 @@
 // (it may skip thinking entirely on a simple prompt) with THINKING_HEADROOM added to the cap. It
 // also 400s on a non-default temperature/top_p/top_k and on an assistant prefill: send neither.
 //
-// AUTH is CALLER-OWNED (this is deliberate — it keeps each feature's auth discrete):
+// ⚠ ONE LOCAL ROUTE FOR THE ONE-SHOT FEATURES. LOCALLY (not cloud) a call with no key, or one
+// marked `localRoute: 'agent'` (the impact note, the work-plan wording, the Slack sprint report —
+// and every core caller, none of which passes a key), goes through the Agent SDK: the reader's own
+// Claude Code login, else the environment's ANTHROPIC_API_KEY, with `opts.apiKey` IGNORED. ⚠ The
+// Pro Reports and Bots Monitoring clients do NOT mark it, so they keep SUMMARY_ANTHROPIC_API_KEY
+// locally too. Cloud ignores `localRoute`.
+//
+// AUTH (otherwise) is CALLER-OWNED (this is deliberate — it keeps each feature's auth discrete):
 //   • `opts.apiKey` given → the raw, metered `@anthropic-ai/sdk` with THAT key. The
 //     key is passed EXPLICITLY and this seam never reads/writes process.env, so a
 //     summary key can never leak into (or force metering on) Claude Review, which
@@ -26,6 +33,7 @@
 
 import { claudeExecutableOptions, loadAgentSdk, loadAnthropicSdk } from '../ai/runtime.js';
 import { ISOLATED_MCP, ownToolsOnlyHook } from '../ai/agent-isolation.js';
+import { config } from '../config.js';
 
 export interface CheapCompleteOpts {
   model?: string;
@@ -43,6 +51,9 @@ export interface CheapCompleteOpts {
   // resolves BOTH through the Agent SDK. So this option resolves to exactly the same thing as
   // omitting it. Do not re-add a resolver behind it; the ladder it named is gone.
   credential?: 'local-review-key';
+  // 'agent' ⇒ LOCALLY this call takes the Agent SDK even when `apiKey` is passed (see the header).
+  // Ignored in cloud. Absent ⇒ the key decides, as before.
+  localRoute?: 'agent';
 }
 
 export interface CheapCompleteResult {
@@ -78,8 +89,25 @@ export async function cheapComplete(
   //
   // ⚠ `opts.credential` IS NO LONGER BRANCHED ON. The stored BYO key it named is retired, so
   // its rung would resolve to nothing; the two-rung ladder IS `agentComplete`.
-  if (opts.apiKey) return rawComplete(opts.apiKey, model, opts);
-  return agentComplete(model, opts);
+  // Locally the Agent SDK reaches the reader's own Claude, so the local off switch
+  // (LIMN_AI_DISABLED) must hold on that route: a one-shot call may not reach it behind the switch.
+  const route = cheapRoute(config.isCloud, opts.apiKey, opts.localRoute);
+  if (route === 'agent' && !config.isCloud && !config.aiEnabled) throw new Error('Claude is switched off here.');
+  return route === 'api' ? rawComplete(opts.apiKey!, model, opts) : agentComplete(model, opts);
+}
+
+/**
+ * Which path one cheap completion takes (exported for the test). A passed key takes the API —
+ * except LOCALLY on a call marked `localRoute: 'agent'`, which stays on the Agent SDK.
+ */
+export function cheapRoute(
+  isCloud: boolean,
+  apiKey: string | undefined,
+  localRoute?: 'agent',
+): 'api' | 'agent' {
+  if (!apiKey) return 'agent';
+  if (!isCloud && localRoute === 'agent') return 'agent';
+  return 'api';
 }
 
 // ---- raw @anthropic-ai/sdk path (explicit API key) ----------------------------

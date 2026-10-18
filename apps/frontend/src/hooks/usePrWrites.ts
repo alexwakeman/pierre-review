@@ -86,6 +86,16 @@ export function useApprovePr(prId: number) {
   });
 }
 
+// Withdraw the viewer's own approval (GitHub dismisses that review). The same cascade as approve:
+// the PR's standing and its Pending cards are re-read through the one post-write helper.
+export function useWithdrawApproval(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.withdrawApproval(prId),
+    onSuccess: () => void invalidateAfterPrWrite(qc, prId),
+  });
+}
+
 export function useRequestChangesPr(prId: number) {
   const qc = useQueryClient();
   return useMutation({

@@ -1,5 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 import type {
+  ThreadCheckStatusResponse,
   ReferenceDocSectionResponse,
   ReferenceDocTreeResponse,
   ReferenceDocsConversationsResponse,
@@ -282,7 +283,7 @@ const ME_RESPONSE: MeResponse = {
   largePrCodeLocThreshold: LARGE_PR_CODE_LOC_DEFAULT,
   largePrCodeLocThresholdIsDefault: true,
   blastRadius: null,
-  // Pro tier for e2e: every Pro AI feature (digests, summaries) stays off so the console renders
+  // Pro tier for e2e: every Pro AI feature stays off so the console renders
   // without the AI panels. (Claude Review and AI Fix are free now and gate on `ai` above.)
   // "My Turn" is CORE / free (not a Pro capability), so the Feed's isMyTurn cards/toggle render
   // regardless of these flags. `workspaceInsights` (the
@@ -1004,6 +1005,14 @@ export async function installMockApi(page: Page): Promise<void> {
       // The thread cards' Claude marker (one batched POST per screen): no judged run here.
       if (path.endsWith('/api/claude-review/thread-judgements'))
         return json(route, { prs: [] } satisfies ClaudeThreadJudgementsResponse);
+      // The Threads tab's Check threads status (PR detail): never run here.
+      const threadCheckMatch = path.match(/\/api\/prs\/(\d+)\/claude-review\/thread-check$/);
+      if (threadCheckMatch && route.request().method() === 'GET')
+        return json(route, {
+          prId: Number(threadCheckMatch[1]),
+          check: null,
+          progress: null,
+        } satisfies ThreadCheckStatusResponse);
       if (path.endsWith('/api/ticket-reviews/states')) return json(route, TICKET_REVIEW_STATES);
       const ticketReviewsMatch = path.match(/\/api\/prs\/(\d+)\/ticket-reviews$/);
       if (ticketReviewsMatch) return json(route, prTicketReviewsFor(Number(ticketReviewsMatch[1])));
@@ -1165,9 +1174,9 @@ export async function installMockApi(page: Page): Promise<void> {
       if (path.endsWith('/api/ticket-merged-prs')) {
         return json(route, { workspaceId: WORKSPACE.id, tickets: [] } satisfies TicketMergedPrsResponse);
       }
-      // Pro digest endpoints — disabled in e2e (pro:{activityDigest:false}); harmless stub.
+      // Pro endpoints — disabled in e2e (pro:{activityDigest:false}); harmless stub.
       if (path.includes('/api/pro/')) {
-        return json(route, { enabled: false, model: 'claude-haiku-5-5', digests: [], digest: null, generatedAt: iso(0) });
+        return json(route, { enabled: false, model: 'claude-haiku-5-5', generatedAt: iso(0) });
       }
       if (prDetailMatch) return json(route, prDetailFor(Number(prDetailMatch[1])));
       // mark-viewed, insights, and anything else: a harmless empty 200. (The two dismissal stubs

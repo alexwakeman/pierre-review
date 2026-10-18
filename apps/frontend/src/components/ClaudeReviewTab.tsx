@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type {
   ClaudeFinding,
+  ClaudeThreadAssessment,
+  ClaudeThreadAssessmentCounts,
   ClaudeFindingSeverity,
   ClaudeFindingSide,
   ClaudeReview,
@@ -76,6 +78,8 @@ import { VERDICT_PILL } from './Activity/ClaudeReviewCell.js';
 import { ReviewedAgo } from './ReviewedAgo.js';
 import { ClaudeReviewFollowUpSection } from './ClaudeReviewFollowUp.js';
 import { ClaudeReviewThreadsSection } from './ClaudeReviewThreads.js';
+import { CheckThreadsButton } from './CheckThreadsButton.js';
+import { AiStatusLine } from './AiStatusLine.js';
 import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine } from '../lib/claudeAutoReview.js';
 import { CiCheckSection } from './CiCheckSection.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
@@ -1199,9 +1203,18 @@ function ClaudesReview({
   onPostFinding,
   storyCheck,
   ciCheck,
+  currentThreads = null,
+  checkThreadsPrId = null,
 }: {
   review: ClaudeReview;
   editable: boolean;
+  /** The server's current thread judgements; null ⇒ read the run's own. */
+  currentThreads?: {
+    items: ClaudeThreadAssessment[] | null;
+    counts: ClaudeThreadAssessmentCounts | null;
+  } | null;
+  /** Show "Check threads" beside the Review threads section (the latest run only). */
+  checkThreadsPrId?: number | null;
   prUrl: string;
   // "owner/name" + the PR's current head SHA (the per-finding blob link prefers
   // the run's own headSha, falling back to this).
@@ -1349,9 +1362,10 @@ function ClaudesReview({
         />
       )}
       <ClaudeReviewThreadsSection
-        items={review.threadAssessments}
-        counts={review.threadAssessmentCounts}
+        items={currentThreads != null ? currentThreads.items : review.threadAssessments}
+        counts={currentThreads != null ? currentThreads.counts : review.threadAssessmentCounts}
         onOpenThread={onOpenThread}
+        actions={checkThreadsPrId != null ? <CheckThreadsButton prId={checkThreadsPrId} /> : undefined}
       />
       <ReviewSection
         title="Findings"
@@ -1864,8 +1878,15 @@ export function ClaudeReviewTab({
       {isRunning && (
         <div>
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500" />
-            <span>{phaseLabel}…</span>
+            {/* The ONE status line every agentic pass shows (components/AiStatusLine). The clock
+                runs from the run's own row when the latest one is this run, else from mount. */}
+            <AiStatusLine
+              stage={phaseLabel}
+              since={
+                review != null && status?.reviewId === review.id ? review.createdAt : null
+              }
+              className="text-sm"
+            />
             {review?.trigger === 'auto' && (
               <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-500 dark:text-gray-400">
                 {AUTO_REVIEW_LABEL}
@@ -1975,6 +1996,17 @@ export function ClaudeReviewTab({
         <ClaudesReview
           review={shownReview}
           editable={canEdit}
+          // The thread judgements AS THEY STAND (later Check threads runs folded over the latest
+          // review) — only for the latest run; a past run shows what it said then.
+          currentThreads={
+            canEdit && data?.currentThreadAssessments !== undefined
+              ? {
+                  items: data.currentThreadAssessments,
+                  counts: data.currentThreadAssessmentCounts ?? null,
+                }
+              : null
+          }
+          checkThreadsPrId={canEdit ? pr.id : null}
           prUrl={pr.githubUrl}
           repoFullName={pr.repoFullName}
           prHeadSha={pr.headSha}

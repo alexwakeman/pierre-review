@@ -23,6 +23,7 @@ import {
   DEFAULT_CLAUDE_REVIEW_MODEL,
   storyCommentLead,
   stripStoredStoryLead,
+  threadAssessmentCounts,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { autoReviewWaiting } from './auto.js';
@@ -54,7 +55,8 @@ import {
   updateFinding,
   updateReviewDraft,
 } from './persist.js';
-import { getThreadJudgements } from './thread-judgements.js';
+import { currentThreadAssessmentsForPrs, getThreadJudgements } from './thread-judgements.js';
+import { getLatestThreadCheck, threadCheckWire } from './thread-check-persist.js';
 import { findingCommentUrl, reminderLead } from './posted-state.js';
 
 // The Claude Review product API (CORE, free, LOCAL ONLY). The paths are the historical ones
@@ -201,6 +203,8 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     const auth = ctx.llm.detectAuth();
     const review = await getLatestClaudeReview(ctx, id, accountId);
     const autoReview = autoReviewHold(id, accountId);
+    // The judgements as they stand now: the latest review's, with later Check threads runs over it.
+    const current = (await currentThreadAssessmentsForPrs(ctx, accountId, [id])).get(id)?.assessments ?? null;
     return {
       enabled: true,
       auth: auth.status,
@@ -211,6 +215,10 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       // A hold in the lane outranks the sweeper's wait (it is already past it).
       autoReviewWaiting: autoReview ? null : autoReviewWaiting(id, accountId),
       autoFix: review ? autoFixOutcomeFor(review.id, accountId) : null,
+      currentThreadAssessments: current,
+      currentThreadAssessmentCounts: current ? threadAssessmentCounts(current) : null,
+      // The stored row only (live progress is the thread-check GET's — this route stays DB-only).
+      threadCheck: await getLatestThreadCheck(ctx, accountId, id).then((r) => (r ? threadCheckWire(r) : null)),
     };
   });
 

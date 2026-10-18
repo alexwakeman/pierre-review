@@ -1384,6 +1384,17 @@ deleted workspace takes its runs (their links name THAT library; NOT re-homed to
 `deleteWorkspace`). In `accountScopedTables()`, erased, checked by `verify:isolation`; not exported (model
 output, regenerable). Journal `when` sqlite `1792137608016` / pg `1792137608017`. ⚠ pg `0108` NOT replayed.
 
+### `0122_claude_thread_checks` (pg `0109`) — Check threads
+New table `claude_thread_checks`: ONE row PER RUN of the light threads-only pass — `workspace_id`
+(the auto daily cap), `pr_id`, `repo_id`, `head_sha`, `trigger` (`manual|auto`), `status`, `model`,
+`threads_sent`, `thread_assessments` (the WHOLE reconciled set; sqlite text JSON / pg jsonb),
+`comments_through`, `refused`, `error`, cost/tokens/turns, `started_at` / `completed_at` / `created_at`.
+NO unique index (no `onConflictDoUpdate` target). Indexes `(account_id, pr_id, created_at)` and
+`(account_id, workspace_id, created_at)`. Account FK (cascade) + the NAMED composite FK
+`ctc_pr_account_fk` onto `pull_requests (id, account_id)`, ON DELETE cascade (the `ci_reviews`
+pattern, so neither delete path needs an entry). In `accountScopedTables()`, erased, checked by
+`verify:isolation`. Journal `when` sqlite `1792137609016` / pg `1792137609017`. ⚠ pg `0109` NOT replayed.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with
@@ -1392,3 +1403,12 @@ the story view. NO drop migration: `sprint_ticket_repos` (`0100` / pg `0087`), `
 `0091`) stay in both schemas, both journals and `accountScopedTables()` + erasure; nothing reads or
 writes them (`deleteRepo` and the sprint read's prune still delete `sprint_ticket_repos` rows). The two
 json columns of `sprint_assessments` are typed `unknown` now that the shared body types are gone.
+
+## 2026-10-18 — six plugin tables made DORMANT (no migration)
+
+Removing the one-shot Haiku features (AI PR summary, "Check review", assess / addressed checks,
+the per-hunk conflict suggestion, the per-repo digest, "Discussion themes", preset prompts) took
+**no migration in either repo**: `repo_digests`, `human_theme_reports`, `comment_assessments`,
+`addressed_checks`, `ai_pr_analyses` and `preset_reports` stay declared, erased and pruned; nothing
+reads or writes them. `pr_comment_annotations` stays live for `impact`; its comment-kind rows and
+`pro_synthesis`'s `brief` / `rollup` rows are dormant. See DATA-MODEL.md § Dormant Pro plugin tables.

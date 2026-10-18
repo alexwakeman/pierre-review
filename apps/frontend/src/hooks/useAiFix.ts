@@ -7,7 +7,6 @@ import type {
   AiFixStatusResponse,
   AiFixStreamEvent,
   GenerateFixBody,
-  PrSummaryResponse,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
@@ -32,22 +31,6 @@ export function useAiFixPreview(prId: number, reviewId: number | null, enabled: 
     queryKey: ['ai-fix-preview', prId, reviewId],
     queryFn: () => api.aiFixPreview(prId, reviewId as number),
     enabled: enabled && reviewId != null,
-  });
-}
-
-export function usePrSummary(prId: number | null, enabled: boolean) {
-  return useQuery<PrSummaryResponse>({
-    queryKey: ['ai-fix-summary', prId],
-    queryFn: () => api.aiFixSummary(prId as number),
-    enabled: prId != null && enabled,
-  });
-}
-
-export function useRefreshSummary(prId: number) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => api.refreshAiFixSummary(prId),
-    onSuccess: (data) => qc.setQueryData(['ai-fix-summary', prId], data),
   });
 }
 

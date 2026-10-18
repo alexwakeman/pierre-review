@@ -25,7 +25,6 @@ import { RepoInsightsPanel } from './RepoInsightsPanel.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
-import { HumanThemesPanel } from './HumanThemesPanel.js';
 import { InsightsView } from './InsightsView.js';
 import { SprintRailView } from './SprintRailView.js';
 import { DocsView } from './DocsView.js';
@@ -226,9 +225,9 @@ export function ActivityView(): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
   const activityRepoId = useFilters((s) => s.activityRepoId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
-  const { workspaceInsights, activityDigest } = useProCapabilities();
-  // The cross-repo Feed's inner sub-tab: 'feed' (the consolidated stream), the Pro "Discussion
-  // themes" AI summary (listed only on the AI-summary tier) and the FREE "Bot classification".
+  const { workspaceInsights } = useProCapabilities();
+  // The cross-repo Feed's inner sub-tab: 'feed' (the consolidated stream) and the FREE "Bot
+  // classification". (The Pro "Discussion themes" tab is REMOVED.)
   // ('compare' is NOT a member — cross-workspace comparison is Reports' "By workspace" axis.)
   const feedInnerTab = useFilters((s) => s.feedInnerTab);
   const setFeedInnerTab = useFilters((s) => s.setFeedInnerTab);
@@ -289,11 +288,10 @@ export function ActivityView(): JSX.Element {
   // (The one-shot "default to Insights when Pro is on" effect lived here — removed with P3.1:
   // Pending is the default landing; see the note at the top.)
 
-  // The cross-repo Feed's sub-tab bar: Feed | Themes (Pro, listed only on `activityDigest`) |
-  // Bot classification (FREE on every tier). The rules live in `feedTabsModel.ts`.
-  const feedTabs = useMemo(() => feedTabsFor({ activityDigest }), [activityDigest]);
-  // DERIVED, never written back to the store: Pro going away must not strand the pane on Themes,
-  // and a corrective `setFeedInnerTab` would FORGET the choice so Themes would not come back.
+  // The cross-repo Feed's sub-tab bar: Feed | Bot classification (FREE on every tier). The rules
+  // live in `feedTabsModel.ts`.
+  const feedTabs = useMemo(() => feedTabsFor(), []);
+  // DERIVED, never written back to the store.
   const visibleFeedTab = effectiveFeedTab(feedInnerTab, feedTabs);
 
   const generatedAt = data?.generatedAt ?? null;
@@ -684,8 +682,7 @@ export function ActivityView(): JSX.Element {
               : 'Detecting the repos you work on…'}
           </div>
         ) : showingFeed ? (
-          // The workspace Feed — a STREAM and nothing else. Beside it: a "Discussion themes"
-          // sub-tab with Pro (the human sibling of Bots → Themes), and the FREE "Bot
+          // The workspace Feed — a STREAM and nothing else. Beside it: the FREE "Bot
           // classification" tab (who counts as a bot here — the Bots hiding on this Feed reads it).
           //
           // ⚠ Every survey panel has left it and none may come back: the work plan (the Pending
@@ -711,19 +708,11 @@ export function ActivityView(): JSX.Element {
                     }`}
                   >
                     {t.label}
-                    {/* Only Themes is Pro; the Feed and Bot classification are core. */}
-                    {t.key === 'themes' && (
-                      <span className="rounded bg-ai-signal/10 px-1 text-[11px] font-semibold uppercase text-ai-signal">
-                        pro
-                      </span>
-                    )}
                   </button>
                 );
               })}
             </div>
-            {visibleFeedTab === 'themes' ? (
-              <HumanThemesPanel />
-            ) : visibleFeedTab === 'classification' ? (
+            {visibleFeedTab === 'classification' ? (
               // FREE on every tier — who counts as a bot in this Workspace. The price editor on
               // each card renders only with `botDepth`; nothing else here is gated.
               <BotSettingsPanel />

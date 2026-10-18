@@ -21,16 +21,8 @@
 //                      Pro Themes fold has always read (the C6 union of the workspace's bot
 //                      comments). It is ALREADY core, so the "smaller honest change" of the two
 //                      the plan offered is simply calling it — no lift, no new seam.
-//   'brief'          → daily-brief.ts `getDailyBriefCounts` — the strip's OWN fold (which itself
-//                      reuses each line's owning-surface fold). ORDERING grain: one item per
-//                      NONZERO brief line, and the item id ENCODES the computed count
-//                      (`myTurn:3`) so the plugin's unchanged hash formula (sorted ids +
-//                      created-at) IS "the counts + item ids" — content-hash, never the date
-//                      (`createdAt` is pinned to epoch 0: an unchanged workspace is a $0 cache
-//                      hit however many days pass).
-//   'rollup'         → the same fold looped over the account's OTHER workspaces (listWorkspaces
-//                      order, nonzero lines only, capped) — one item per workspace, its id
-//                      encoding that workspace's count vector for the same content-hash reason.
+//   (REMOVED: the 'brief' / 'rollup' ordering grains — the morning-brief narration. Their stored
+//    `pro_synthesis` rows are DORMANT; GET /api/daily-brief still serves the counts.)
 //   'person'         → person-period.ts `getPersonPeriod` — the 1:1 tab's OWN vector (the person
 //                      route serves the same fold). ORDERING grain: one item per NON-NULL vector
 //                      line, ids `pm<schema-version>:<key>:<value>` so the hash IS "the vector
@@ -55,7 +47,6 @@
 import type {
   BotFlaggingRefine,
   BotFlaggingSelector,
-  DailyBriefCounts,
   PersonMetricValue,
   PersonPeriod,
   SynthesisInput,
@@ -72,12 +63,10 @@ import {
   hydrateFlaggingPage,
 } from './ml-labels.js';
 import { foldPrBotVolumePopulation, loadBotIdentities } from './bot-volume.js';
-import { getDailyBriefCounts } from './daily-brief.js';
 import {
   getBotReviewComments,
   getResolvableBotThreadPrs,
   getResolvableBotThreadsForScope,
-  listWorkspaces,
   type BotScope,
 } from './queries.js';
 
@@ -305,126 +294,13 @@ async function workspaceBotsInput(
   };
 }
 
-// ── The ORDERING grains ('brief' / 'rollup' — plan P3.1/P3.3) ───────────────────────────────
-//
-// These two are NOT drill-down populations: their "items" are the deterministic brief's LINES,
-// their refs are what the model orders + phrases (digit-free, validated plugin-side), and the
-// figures are appended by the CLIENT from GET /api/daily-brief (D4 — the model authors no
-// number). The unchanged plugin hash formula folds sorted item ids + created-at, so:
-//   - each id ENCODES its computed count(s) — a count change changes the id changes the hash;
-//   - `createdAt` is EPOCH ZERO, a constant — the hash is a CONTENT hash, never a date hash. An
-//     unchanged workspace is a permanent $0 cache hit and the strip says "unchanged since <day>"
-//     from the stored row's generatedAt.
-// Bodies are the templated lines (numbers included — that is model INPUT, not output).
-
-/** Epoch-zero createdAt: the per-item "stable field" slot, deliberately date-free. */
+/** Epoch-zero createdAt: the per-item "stable field" slot, deliberately date-free — the person
+ *  grains' content-hash trick (an unchanged vector is a $0 cache hit however many days pass). */
 const BRIEF_EPOCH = new Date(0).toISOString();
-
-function briefLine(id: string, body: string): SynthesisInputItem {
-  return { id, kind: 'brief_line', authorLabel: 'brief', createdAt: BRIEF_EPOCH, body };
-}
-
-/** One item per NONZERO line, ids count-encoded (`myTurn:3` / `anomaly:u42` / `trunk:r7`). */
-export function briefLineItems(counts: DailyBriefCounts): SynthesisInputItem[] {
-  const items: SynthesisInputItem[] = [];
-  if (counts.myTurn > 0)
-    items.push(briefLine(`myTurn:${counts.myTurn}`, `${counts.myTurn} items need your review or reply (My Turn)`));
-  if (counts.stalled > 0)
-    items.push(briefLine(`stalled:${counts.stalled}`, `${counts.stalled} PRs stalled awaiting review`));
-  if (counts.untouchedThreads > 0)
-    items.push(briefLine(`untouched:${counts.untouchedThreads}`, `${counts.untouchedThreads} review threads untouched`));
-  if (counts.needsReviewer > 0)
-    items.push(briefLine(`needsReviewer:${counts.needsReviewer}`, `${counts.needsReviewer} PRs still need a reviewer`));
-  if (counts.resolveBacklog > 0)
-    items.push(briefLine(`resolveBacklog:${counts.resolveBacklog}`, `${counts.resolveBacklog} likely-addressed bot threads ready to resolve`));
-  for (const a of counts.botAnomalies)
-    items.push(briefLine(`anomaly:u${a.userId}`, `${a.label}'s comment volume is unusual this week`));
-  for (const r of counts.trunkRed)
-    items.push(briefLine(`trunk:r${r.repoId}`, `the default branch of ${r.name} is red`));
-  return items;
-}
-
-async function briefInput(accountId: number, scope: SynthesisScope): Promise<SynthesisInput> {
-  const counts = await getDailyBriefCounts(accountId, scope.workspaceId);
-  const items = briefLineItems(counts);
-  return {
-    kind: 'brief',
-    workspaceId: scope.workspaceId,
-    items,
-    totalCount: items.length,
-    analyzedCount: items.length,
-    truncated: false,
-  };
-}
-
-/** Matches the roll-up route's own cap (workspaces are few; bounded all the same). */
-const ROLLUP_WORKSPACE_CAP = 12;
-
-/** A stable one-token signature of a workspace's count vector — the content the ws item's id
- *  carries into the hash. Anomalies/trunk fold as their id lists (membership changes count). */
-function rollupSig(c: DailyBriefCounts): string {
-  return [
-    c.myTurn,
-    c.stalled,
-    c.untouchedThreads,
-    c.needsReviewer,
-    c.resolveBacklog,
-    c.botAnomalies.map((a) => `u${a.userId}`).join('+') || '-',
-    c.trunkRed.map((r) => `r${r.repoId}`).join('+') || '-',
-  ].join('.');
-}
-
-function rollupHasAnything(c: DailyBriefCounts): boolean {
-  return (
-    c.myTurn > 0 ||
-    c.stalled > 0 ||
-    c.untouchedThreads > 0 ||
-    c.needsReviewer > 0 ||
-    c.resolveBacklog > 0 ||
-    c.botAnomalies.length > 0 ||
-    c.trunkRed.length > 0
-  );
-}
-
-async function rollupInput(accountId: number, scope: SynthesisScope): Promise<SynthesisInput> {
-  // The OTHER workspaces relative to the viewed one — the Elsewhere line's population. Counts
-  // ride the brief fold's own TTL cache; NO cost fields exist anywhere in the vector (§8.18).
-  const others = (await listWorkspaces(accountId))
-    .filter((w) => w.id !== scope.workspaceId)
-    .slice(0, ROLLUP_WORKSPACE_CAP);
-  const items: SynthesisInputItem[] = [];
-  for (const w of others) {
-    const counts = await getDailyBriefCounts(accountId, w.id);
-    if (!rollupHasAnything(counts)) continue;
-    const bits: string[] = [];
-    if (counts.myTurn > 0) bits.push(`${counts.myTurn} need you`);
-    if (counts.stalled > 0) bits.push(`${counts.stalled} stalled`);
-    if (counts.untouchedThreads > 0) bits.push(`${counts.untouchedThreads} untouched threads`);
-    if (counts.needsReviewer > 0) bits.push(`${counts.needsReviewer} need a reviewer`);
-    if (counts.resolveBacklog > 0) bits.push(`${counts.resolveBacklog} resolvable bot threads`);
-    if (counts.botAnomalies.length > 0) bits.push(`${counts.botAnomalies.length} bot anomalies`);
-    if (counts.trunkRed.length > 0) bits.push(`trunk red on ${counts.trunkRed.map((r) => r.name).join(', ')}`);
-    items.push({
-      id: `ws:${w.id}:${rollupSig(counts)}`,
-      kind: 'brief_line',
-      authorLabel: w.name,
-      createdAt: BRIEF_EPOCH,
-      body: `${w.name}: ${bits.join(' · ')}`,
-    });
-  }
-  return {
-    kind: 'rollup',
-    workspaceId: scope.workspaceId,
-    items,
-    totalCount: items.length,
-    analyzedCount: items.length,
-    truncated: false,
-  };
-}
 
 // ── The 'person' ORDERING grain (plan P4.2 / N4 — the 1:1-prep narration) ───────────────────
 //
-// The third ordering grain, and the brief's content-hash trick at the person grain: one item per
+// The ordering grain, with a content-hash trick: one item per
 // NON-NULL vector line, each id encoding `pm<PERSON_METRICS_SCHEMA_VERSION>:<key>:<value>` — so
 // the plugin's unchanged hash formula (sorted ids + created-at) IS "the vector values + the
 // schema version", and the WINDOW rides the scope key (the plugin appends the person grain's
@@ -664,8 +540,8 @@ async function personReportInput(
  * declared-inert throw for this). `scope.workspaceId` decides who counts as a bot;
  * `scope.repoIds` narrows what is measured and is resolver-produced (`⊆` the workspace's
  * membership — the plugin route intersects exactly as core's resolveWorkspaceScope does).
- * The ordering grains ('brief'/'rollup') take the WHOLE workspace/account — `repoIds` and
- * `window` are canonicalised out of their scope keys plugin-side and ignored here.
+ * The person grains take the WHOLE workspace — `repoIds` and `window` are canonicalised out of
+ * their scope keys plugin-side and ignored here.
  */
 export async function getSynthesisInput(
   accountId: number,
@@ -681,10 +557,6 @@ export async function getSynthesisInput(
       return volumeInput(accountId, scope, botScope);
     case 'workspace-bots':
       return workspaceBotsInput(accountId, scope, botScope);
-    case 'brief':
-      return briefInput(accountId, scope);
-    case 'rollup':
-      return rollupInput(accountId, scope);
     case 'person':
       return personInput(accountId, scope);
     case 'person_report':

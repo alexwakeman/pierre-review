@@ -19,6 +19,7 @@ import {
   useWorkPlan,
   useWorkPlanGenerating,
 } from '../../hooks/useWorkPlan.js';
+import { AiStatusLine } from '../AiStatusLine.js';
 import { useFilters, type AttentionRelevanceLens } from '../../store/filters.js';
 import { useSettingsModal } from '../../store/settingsModal.js';
 import {
@@ -489,10 +490,12 @@ export function AttentionView(): JSX.Element {
                 written {relativeTime(plan.generatedAt)}
               </span>
             )}
+            {busy && <AiStatusLine stage="Writing the plan" />}
+            {!busy && (
             <button
               type="button"
               onClick={() => generate.mutate()}
-              disabled={busy || outOfCredits}
+              disabled={outOfCredits}
               className="rounded bg-ai-signal px-2.5 py-0.5 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
               title={
                 outOfCredits
@@ -500,9 +503,7 @@ export function AttentionView(): JSX.Element {
                   : 'Have the model say why some items are worth doing now. The tabs, figures and order are computed either way.'
               }
             >
-              {busy ? (
-                'Planning…'
-              ) : plan != null ? (
+              {plan != null ? (
                 <span className="inline-flex items-center gap-1">
                   <RefreshIcon size={11} />
                   Re-plan my day
@@ -511,6 +512,7 @@ export function AttentionView(): JSX.Element {
                 'Plan my day'
               )}
             </button>
+            )}
           </div>
         )}
         {/* Capability off: cloud gets ONE line, OSS/local gets nothing at all (absence, never an

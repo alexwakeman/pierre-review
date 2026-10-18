@@ -35,8 +35,10 @@ import type {
   SuggestedReviewersResponse,
   UpdateBranchBody,
   UpdateBranchResult,
+  WithdrawApprovalResult,
 } from '@pierre-review/shared';
-import { REQUEST_CHANGES_DEFAULT_BODY } from '@pierre-review/shared';
+import { REQUEST_CHANGES_DEFAULT_BODY, WITHDRAW_APPROVAL_MESSAGE } from '@pierre-review/shared';
+import { accountGithubLogin } from '../../db/review-threads-for-review.js';
 import { config } from '../../config.js';
 import { stampPrMergeQueueStateNonFatal } from '../../db/pr-merge-queue-stamp.js';
 import { getAccessToken, getAccountUserId } from '../../auth/account.js';
@@ -62,6 +64,7 @@ import {
   markPrReopenedLocally,
   markPrViewed,
   stampReviewRequests,
+  markLocalReviewDismissed,
   upsertLocalPrComment,
   upsertLocalReview,
 } from '../../db/queries.js';
@@ -81,6 +84,7 @@ import {
 import {
   addIssueComment,
   closePullRequest,
+  dismissPrReview,
   dequeuePullRequestFromQueue,
   enqueuePullRequestOnQueue,
   fetchHeadShaFor,
@@ -89,6 +93,7 @@ import {
   fetchPrFilesWithPatch,
   fetchPrHeadInfo,
   fetchRepoMergeConfig,
+  fetchViewerLatestDecisiveReview,
   mergePullRequest,
   postInlineComment,
   reopenPullRequest,
@@ -696,6 +701,99 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
           message: err instanceof Error ? err.message : String(err),
         };
       }
+    },
+  );
+
+  // WITHDRAW APPROVAL — dismiss the viewer's OWN latest review when it is an APPROVAL (GitHub's
+  // "Dismiss review", REST `PUT …/reviews/{id}/dismissals`, which needs a message and shows it on the
+  // PR's timeline). The SAME permission re-check as approve. The review is found LIVE (the local
+  // rows can lag): no approval ⇒ 409 NotApproved, nothing written. GitHub's refusal (403: branch
+  // protection restricts who may dismiss; 422: not dismissable) is answered with GitHub's own words
+  // and its status — never a 502, never retried.
+  //
+  // Post-write (CLAUDE.md "STAMP or SETTLE-AND-VERIFY, THEN CASCADE"): STAMP the local row
+  // `dismissed` (the standing chip drops at once), re-read the PR once (reviewDecision is written
+  // synchronously), then SETTLE on `mergeStateNot: 'clean'` ONLY when the PR was synced clean AND
+  // GitHub's review decision read `approved` (null = the repo requires no review): an approval
+  // leaving can flip such a PR clean → blocked asynchronously, while on any other PR the expectation
+  // could never be met and every rung would be a wasted GitHub re-read — and raise the change signal. The SPA refetches through `invalidateAfterPrWrite`.
+  app.post(
+    '/api/prs/:id/withdraw-approval',
+    { schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'integer' } } } } },
+    async (req, reply) => {
+      const { id } = req.params as { id: number };
+      const accountId = accountIdOf(req);
+      const ctx = await getPrWriteContext(id, accountId);
+      if (!ctx) {
+        reply.status(404);
+        return { error: 'NotFound', message: `PR ${id} not found` };
+      }
+      const viewerUserId = await getAccountUserId(accountId);
+      const canReview =
+        viewerUserId != null &&
+        viewerUserId !== ctx.authorId &&
+        ['WRITE', 'MAINTAIN', 'ADMIN'].includes(ctx.viewerPermission ?? '');
+      if (!canReview) {
+        reply.status(403);
+        return { error: 'NotPermitted', message: 'You need write access to this repo to withdraw an approval.' };
+      }
+      if (ctx.state !== 'open') {
+        reply.status(409);
+        return { error: 'NotOpen', message: 'This pull request is no longer open.' };
+      }
+      const login = await accountGithubLogin(accountId);
+      if (!login) {
+        reply.status(409);
+        return { error: 'NotApproved', message: 'You have no approval here to withdraw.' };
+      }
+      let token: string;
+      let review: Awaited<ReturnType<typeof fetchViewerLatestDecisiveReview>>;
+      try {
+        token = await getAccessToken(accountId);
+        review = await fetchViewerLatestDecisiveReview(token, ctx.owner, ctx.name, ctx.number, login);
+      } catch (err) {
+        reply.status(502);
+        return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
+      }
+      if (!review || review.state !== 'APPROVED') {
+        reply.status(409);
+        return { error: 'NotApproved', message: 'You have no approval here to withdraw.' };
+      }
+      let res: Awaited<ReturnType<typeof dismissPrReview>>;
+      try {
+        res = await dismissPrReview(token, ctx.owner, ctx.name, ctx.number, review.databaseId, WITHDRAW_APPROVAL_MESSAGE);
+      } catch (err) {
+        reply.status(502);
+        return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
+      }
+      if (!res.ok) {
+        const refused = res.status === 403 || res.status === 422 || res.status === 404;
+        reply.status(refused ? (res.status === 404 ? 403 : res.status) : 502);
+        return {
+          error: refused ? 'GitHubRefused' : 'GitHubError',
+          message: `GitHub didn't let you withdraw this approval: ${res.message}`,
+        };
+      }
+      // GitHub has accepted it: from here the route may not fail.
+      let rowId = 0;
+      try {
+        rowId = await markLocalReviewDismissed(ctx.prId, viewerUserId, {
+          nodeId: review.nodeId,
+          databaseId: review.databaseId,
+          body: review.body,
+          submittedAt: review.submittedAt,
+          state: 'DISMISSED',
+        });
+      } catch (err) {
+        req.log.warn({ err }, 'withdraw approval: local stamp failed (the next sync reconciles)');
+      }
+      await resyncPrAfterWrite({ prId: ctx.prId, accountId, log: req.log });
+      if (ctx.mergeStateStatus === 'clean' && ctx.reviewDecision === 'approved') {
+        schedulePrSettle(accountId, ctx.prId, asSyncLogger(req.log), { mergeStateNot: 'clean' });
+      }
+      await notePrChangedForPr(accountId, ctx.prId);
+      const result: WithdrawApprovalResult = { reviewId: rowId, state: 'dismissed' };
+      return result;
     },
   );
 

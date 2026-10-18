@@ -1,3 +1,4 @@
+import { isSprintPassRunning } from './sprint-pass-flights.js';
 import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import {
   isBlockingRelation,
@@ -409,6 +410,11 @@ export async function getSprintGraph(
     },
     aiEnabled: opts.aiEnabled,
     themes: themes?.themes ?? null,
+    // The status line's "now" half: which Claude passes are running for this workspace right now.
+    passes: {
+      briefsRunning: isSprintPassRunning('briefs', accountId, workspaceId),
+      themesRunning: isSprintPassRunning('themes', accountId, workspaceId),
+    },
     ...builder,
     signals,
   };

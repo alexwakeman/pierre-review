@@ -456,6 +456,8 @@ export interface ReviewThreadReport {
   validity: 'valid' | 'partly_valid' | 'not_valid' | 'unclear';
   addressed: 'addressed' | 'partly_addressed' | 'not_addressed' | 'unclear';
   explanation: string;
+  // One line (≤ 120 chars): why. Optional here — the server clips it and stores null when absent.
+  reason?: string | null;
   draftReply?: string | null;
 }
 
@@ -1235,6 +1237,11 @@ export interface ProContext {
       // stored key no longer exists, local advanced-AI auth is ambient-session-then-env, and
       // the ambient path resolves both. Passing it is identical to omitting it.
       credential?: 'local-review-key';
+      // 'agent' ⇒ LOCALLY this call runs on the reader's Claude Code login (the Agent SDK) even
+      // with `apiKey` passed; cloud ignores it. OPTIONAL and additive — apiVersion stays 23. Set by
+      // the impact note, the work-plan wording and the Slack sprint report; Reports and Bots
+      // Monitoring leave it off and keep their key.
+      localRoute?: 'agent';
     }): Promise<{
       text: string;
       usage?: { inputTokens: number; outputTokens: number };

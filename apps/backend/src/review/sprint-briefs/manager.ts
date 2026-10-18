@@ -1,3 +1,4 @@
+import { setSprintPassRunning } from '../../db/sprint-pass-flights.js';
 import { SPRINT_BRIEF_MODEL, SPRINT_BRIEF_RUN_CAP, SPRINT_GHOST_DEPTH_MAX, type TrackerProvider } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { storeSprintBrief, type SprintBriefInput, type StoredSprintBrief } from '../../db/sprint-briefs.js';
@@ -107,6 +108,7 @@ export async function runSprintBriefPass(
     return empty('busy');
   }
   running.add(k);
+  setSprintPassRunning('briefs', accountId, workspaceId, true);
   const p = (async (): Promise<SprintBriefPassResult> => {
     let last: SprintBriefPassResult = empty('done');
     try {
@@ -119,6 +121,7 @@ export async function runSprintBriefPass(
       running.delete(k);
       again.delete(k);
       passes.delete(k);
+      setSprintPassRunning('briefs', accountId, workspaceId, false);
     }
   })();
   passes.set(k, p);

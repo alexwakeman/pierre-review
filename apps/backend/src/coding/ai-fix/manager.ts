@@ -17,6 +17,7 @@ import type { CodingProgress } from '../../pro/contract.js';
 import type { AgentContext } from '../../review/agent-context.js';
 import { getFixPrContext } from './pr-context.js';
 import { getClaudeReviewById } from '../../review/claude-review/persist.js';
+import { currentThreadAssessmentsForPrs } from '../../review/claude-review/thread-judgements.js';
 import { pickReviewNonce } from '../../review/claude-review/prompts.js';
 import {
   buildPickerPreview,
@@ -196,6 +197,16 @@ async function loadSourceReview(
   if (reviewId == null) return null;
   const review = await getClaudeReviewById(ctx, reviewId, accountId);
   if (!review || review.prId !== prId || review.status !== 'succeeded') return null;
+  // A later Check threads run judged threads since this review: when this IS the latest review,
+  // its thread items come from THE ONE FOLD (the newer judgement per thread). Fails soft.
+  try {
+    const current = (await currentThreadAssessmentsForPrs(ctx, accountId, [prId])).get(prId);
+    if (current && current.reviewId === review.id && current.checkId != null) {
+      return { ...review, threadAssessments: current.assessments };
+    }
+  } catch (err) {
+    ctx.log.warn({ err }, 'ai-fix: folding the thread checks failed');
+  }
   return review;
 }
 

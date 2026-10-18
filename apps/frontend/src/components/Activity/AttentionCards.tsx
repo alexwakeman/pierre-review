@@ -115,7 +115,6 @@ import {
 } from '../Icons.js';
 import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
-import { AiSummary } from '../AiSummary.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { armedPhaseHeadline, TERMINAL_LABEL } from '../AutoMergeBanner.js';
 import { MergeControl } from '../MergeControl.js';
@@ -1175,18 +1174,18 @@ function PushedCommitList({
   );
 }
 
-// Collapsible PR summary: the plain description (markdown) + the Pro AI summary with its own inline
-// Generate/Regenerate action (AiSummary self-gates on the prSummary capability). Lazy: the PR detail
-// is fetched only when expanded.
-export function InsightPrSummary({ prId }: { prId: number }): JSX.Element {
+// Collapsible PR description (markdown). Lazy: the PR detail is fetched only when expanded. Search
+// results are its one caller — a Pending card no longer shows it (its expanded details fetch
+// nothing for it).
+export function PrDescriptionToggle({ prId }: { prId: number }): JSX.Element {
   const [open, setOpen] = useState(false);
   return (
-    // data-noactivate: on a Pending card the whole card opens the PR, and reading the summary must
-    // not navigate away.
+    // data-noactivate: inside a clickable card, reading the description must not navigate away.
     <div className="mt-2" data-noactivate>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
         className="text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
       >
         <ChevronIcon
@@ -1194,14 +1193,14 @@ export function InsightPrSummary({ prId }: { prId: number }): JSX.Element {
           size={10}
           className="inline-block align-[-0.1em]"
         />{' '}
-        PR summary
+        PR description
       </button>
-      {open && <InsightPrSummaryBody prId={prId} />}
+      {open && <PrDescriptionBody prId={prId} />}
     </div>
   );
 }
 
-function InsightPrSummaryBody({ prId }: { prId: number }): JSX.Element {
+function PrDescriptionBody({ prId }: { prId: number }): JSX.Element {
   const { data: pr, isLoading } = usePr(prId);
   if (isLoading) return <div className="mt-1 text-[11px] text-gray-400">Loading…</div>;
   if (!pr) return <div className="mt-1 text-[11px] text-gray-400">Couldn’t load this PR.</div>;
@@ -1213,9 +1212,8 @@ function InsightPrSummaryBody({ prId }: { prId: number }): JSX.Element {
           <Markdown>{pr.body as string}</Markdown>
         </div>
       ) : (
-        <div className="text-[11px] italic text-gray-400">No PR description.</div>
+        <div className="text-[11px] italic text-gray-500 dark:text-gray-400">No PR description.</div>
       )}
-      <AiSummary pr={pr} />
     </div>
   );
 }
@@ -2498,8 +2496,7 @@ function ReviewerChipsRow({
 
 /**
  * DETAILS for a PR card — everything the first glance leaves out. Rendered ONLY while open, so the
- * two parts that fetch (the PR summary, the thread's conversation) fetch on the CLICK, never on
- * mount.
+ * one part that fetches (the thread's conversation) fetches on the CLICK, never on mount.
  */
 function PrDetails({
   card,
@@ -2552,7 +2549,6 @@ function PrDetails({
         <ClaudeReviewExtras state={board.claudeStates.get(card.prId)} ciState={board.ciStates.get(card.prId)} />
       )}
       {threadId != null && <InsightThreadById threadId={threadId} card={card} />}
-      <InsightPrSummaryBody prId={card.prId} />
     </div>
   );
 }

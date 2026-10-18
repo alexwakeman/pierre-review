@@ -51,6 +51,9 @@ import type {
   AiFixStatusResponse,
   ApprovePrBody,
   ApprovePrResult,
+  WithdrawApprovalResult,
+  StartThreadCheckResponse,
+  ThreadCheckStatusResponse,
   RequestChangesBody,
   RequestChangesResult,
   CheckLogsResponse,
@@ -58,7 +61,6 @@ import type {
   CiRerunResult,
   GenerateFixBody,
   GenerateReviewBody,
-  PrSummaryResponse,
   ClaudeReview,
   ClaudeReviewListResponse,
   ClaudeReviewModel,
@@ -100,7 +102,6 @@ import type {
   AutomationOutputResponse,
   BotAnalyticsResponse,
   BotThemesResponse,
-  HumanThemesResponse,
   BotBehaviourResponse,
   BotBenchmarkPlacementResponse,
   BotBenchmarkResponse,
@@ -165,8 +166,6 @@ import type {
   MyTurnSettingsResponse,
   RepoAnalytics,
   RepoClaudeReviewsResponse,
-  RepoDigest,
-  RepoDigestsResponse,
   OpenPrsResponse,
   MergedPrsResponse,
   StoriesResponse,
@@ -191,8 +190,6 @@ import type {
   PrRefreshBody,
   PrRefreshResponse,
   SuggestedReviewersResponse,
-  PresetPromptKey,
-  PresetPromptResponse,
   SprintChatBody,
   SprintChatResponse,
   SprintChatHistoryResponse,
@@ -720,6 +717,12 @@ export const api = {
     fetch(`/api/prs/${prId}/approve`, jsonBody('POST', body ?? {})).then((r) =>
       handle<ApprovePrResult>(r),
     ),
+  // Withdraw the viewer's own approval: GitHub dismisses that APPROVED review with the shared
+  // WITHDRAW_APPROVAL_MESSAGE. A refusal is a 4xx whose `message` is shown as written.
+  withdrawApproval: (prId: number) =>
+    fetch(`/api/prs/${prId}/withdraw-approval`, jsonBody('POST', {})).then((r) =>
+      handle<WithdrawApprovalResult>(r),
+    ),
   // Request changes. A blank or absent body is sent by the server as "Changes requested."
   // (GitHub refuses a request-changes review with no text).
   requestChanges: (prId: number, body?: RequestChangesBody) =>
@@ -1052,40 +1055,6 @@ export const api = {
     get<RepoClaudeReviewsResponse>(`/api/repos/${repoId}/claude-reviews`),
 
   // ---- Pro per-repo digest (Workstream 2; @pierre/pro, flagged) ----
-  // Cached per-repo LLM headline digests. Only fetched when pro.activityDigest is true (absent
-  // plugin → 404 / enabled:false).
-  //
-  // ⚠ THESE TWO TAKE NO WORKSPACE ID, and that is not an oversight. A digest is a per-REPO object:
-  // the routes are keyed by `repoIds` alone and always were — the `scope` fragment the client used
-  // to append was read by nothing on the server. The caller passes the repo set it wants (the
-  // workspace's repos) and folds the workspace into its own CACHE KEY, which is where the
-  // scope actually matters: two workspaces' repo sets must not share a cache slot.
-  repoDigests: (search: string) =>
-    get<RepoDigestsResponse>(withQuery('/api/pro/activity/digests', search)),
-  refreshRepoDigests: (search?: string) =>
-    fetch(
-      withQuery('/api/pro/activity/digests/refresh', search),
-      jsonBody('POST'),
-    ).then((r) => handle<{ status: string }>(r)),
-  // ---- Preset prompts (Pro) ----
-  // One-click "ask about this workspace" answers (Markdown), grounded in that workspace's repos.
-  presetPrompt: (key: PresetPromptKey, workspaceId: number) =>
-    get<PresetPromptResponse>(
-      withQuery(
-        '/api/pro/preset-prompt',
-        `key=${encodeURIComponent(key)}`,
-        workspaceParam(workspaceId),
-      ),
-    ),
-  refreshPresetPrompt: (key: PresetPromptKey, workspaceId: number) =>
-    fetch(
-      withQuery(
-        '/api/pro/preset-prompt/refresh',
-        `key=${encodeURIComponent(key)}`,
-        workspaceParam(workspaceId),
-      ),
-      jsonBody('POST'),
-    ).then((r) => handle<PresetPromptResponse>(r)),
   // ---- Ad-hoc "Ask about the sprint" chat (Pro Haiku; activityDigest capability) ----
   // A free-text question answered from the workspace's snapshot.
   //
@@ -1194,28 +1163,9 @@ export const api = {
         evidence ? 'evidence=1' : undefined,
       ),
     ),
-  // A single repo's digest (lazy per-repo so a slow Haiku call never blocks the grid).
-  repoDigest: (repoId: number) =>
-    get<RepoDigest>(`/api/pro/activity/digests/${repoId}`),
-
-  // ---- "Was this TRULY addressed?" check (Pro; reuses the prSummary capability) ----
-  // NOTHING is left here on purpose. The per-item one-offs were all callerless:
-  // `threadAssessment`/`assessThread` (the standalone comment-validity panel is gone — its
-  // `validity` row is the SAME row the annotations reader returns, so it renders through
-  // CommentAnnotations now) and `threadAddressed`/`checkThreadAddressed`/`prCommentAddressed`/
-  // `checkPrCommentAddressed` (dead before that change). Their per-item server routes
-  // (`/api/pro/{threads,pr-comments}/:id/addressed[/check]`) STAY registered as alternate
-  // writers into the same `upsertAnnotation` rows.
-  //
-  // `prAddressedCheck` went with them, and its removal was NOT cosmetic: the PR-wide sweep it
-  // posted to — `POST /api/pro/prs/:id/addressed/check` and its `/stream` twin — was deleted
-  // along with the "Check review" bar, so the method was calling a 404. Do not reintroduce a
-  // whole-PR batch here: that route was one billed LLM call per thread on a PR built to hold
-  // bot-flooded thread counts, which is exactly why it was cut.
-
-  // ---- Comment annotations platform (Pro) ----
-  // Every stored AI judgement about this PR's comments/threads, optionally narrowed to
-  // certain kinds. A pure cache read (free); the run POST below is the only billing path.
+  // ---- The blast-radius impact note (Pro, prSummary) ----
+  // The stored note for this PR. A pure cache read (free); the run POST below is the only billing
+  // path.
   prAnnotations: (prId: number, kinds?: AnnotationKind[]) =>
     get<PrAnnotationsResponse>(
       withQuery(
@@ -1223,14 +1173,8 @@ export const api = {
         kinds && kinds.length > 0 ? `kinds=${kinds.join(',')}` : '',
       ),
     ),
-  // Generate annotations for the body's explicit `targets` (one comment / one thread — the
-  // per-item "Check review" button). This is now the ONLY run path: the SSE twin
-  // `…/annotations/run/stream` and the PR-wide sweep that needed its progress events are gone,
-  // and `AnnotationRunBody.onlyStale` (the sweep's "re-check stale" control) went with them.
-  //
-  // Pass `signal` — without it the server's `reply.raw.on('close')` abort never fires, so a
-  // cancelled run keeps billing to completion. A fat thread anchor still expands past
-  // COMBINED_CHUNK_SIZE into several LLM calls, so this is not hypothetical.
+  // Write (or refresh) the impact note. Pass `signal` — without it the server's
+  // `reply.raw.on('close')` abort never fires, so a cancelled run keeps billing to completion.
   runPrAnnotations: (prId: number, body: AnnotationRunBody, signal?: AbortSignal) =>
     fetch(`/api/pro/prs/${prId}/annotations/run`, {
       ...jsonBody('POST', body),
@@ -1493,6 +1437,18 @@ export const api = {
       '/api/claude-review/thread-judgements',
       jsonBody('POST', { prIds } satisfies ClaudeThreadJudgementsBody),
     ).then((r) => handle<ClaudeThreadJudgementsResponse>(r)),
+  // Check threads: the light, threads-only Claude pass (local only). Start answers queued /
+  // already_running / refused; poll the status every few seconds while queued or running.
+  startThreadCheck: (prId: number) =>
+    fetch(`/api/prs/${prId}/claude-review/thread-check`, jsonBody('POST', {})).then((r) =>
+      handle<StartThreadCheckResponse>(r),
+    ),
+  threadCheckStatus: (prId: number) =>
+    get<ThreadCheckStatusResponse>(`/api/prs/${prId}/claude-review/thread-check`),
+  cancelThreadCheck: (prId: number) =>
+    fetch(`/api/prs/${prId}/claude-review/thread-check/cancel`, jsonBody('POST', {})).then((r) =>
+      handle<{ cancelled: boolean }>(r),
+    ),
   claudeReviewStatus: (prId: number) =>
     get<ClaudeReviewStatusResponse>(`/api/prs/${prId}/claude-review/status`),
   cancelClaudeReview: (prId: number) =>
@@ -1677,12 +1633,6 @@ export const api = {
     ).then((r) => handle<ReferenceDocsSettings>(r)),
 
   // ---- AI Fix (Pro) ----
-  aiFixSummary: (prId: number) =>
-    get<PrSummaryResponse>(`/api/pro/prs/${prId}/summary`),
-  refreshAiFixSummary: (prId: number) =>
-    fetch(`/api/pro/prs/${prId}/summary/refresh`, jsonBody('POST')).then((r) =>
-      handle<PrSummaryResponse>(r),
-    ),
   aiFix: (prId: number) => get<AiFixResponse>(`/api/pro/prs/${prId}/ai-fix`),
   aiFixStatus: (prId: number) =>
     get<AiFixStatusResponse>(`/api/pro/prs/${prId}/ai-fix/status`),
@@ -1998,26 +1948,6 @@ export const api = {
       ),
       jsonBody('POST'),
     ).then((r) => handle<BotThemesResponse>(r)),
-  // The Feed "Discussion themes" AI summary (Pro Haiku) — the HUMAN sibling of bot-themes: what
-  // PEOPLE are raising in review, over the current WORKSPACE + window. GET is a pure cache read;
-  // the refresh POST is the only billing path.
-  humanThemes: (window: BotWindowKind, workspaceId: number) =>
-    get<HumanThemesResponse>(
-      withQuery(
-        '/api/pro/human-themes',
-        `window=${encodeURIComponent(window)}`,
-        workspaceParam(workspaceId),
-      ),
-    ),
-  humanThemesRefresh: (window: BotWindowKind, workspaceId: number) =>
-    fetch(
-      withQuery(
-        '/api/pro/human-themes/refresh',
-        `window=${encodeURIComponent(window)}`,
-        workspaceParam(workspaceId),
-      ),
-      jsonBody('POST'),
-    ).then((r) => handle<HumanThemesResponse>(r)),
   // Bot behaviour analytics (TTFR / LoC-to-comments / week×hour heatmap / follow-ups). MOVED to
   // the plugin behind the `botDepth` capability (plan P0.2) — callers gate on it via
   // useProCapabilities, so with botDepth false this is never fetched (in OSS the route does not

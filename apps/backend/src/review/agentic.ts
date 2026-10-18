@@ -6,6 +6,8 @@ import { registerClaudeReviewChatRoutes } from './claude-review/chat.js';
 import { registerAutoReviewSettingsRoutes } from './claude-review/auto-settings.js';
 import { registerAutoReview } from './claude-review/auto.js';
 import { reconcileReviewsOnStartup } from './claude-review/manager.js';
+import { registerThreadCheckRoutes } from './claude-review/thread-check-routes.js';
+import { reconcileThreadChecksOnStartup } from './claude-review/thread-check.js';
 import { registerTicketReviewRoutes } from './ticket-review/routes.js';
 import { reconcileTicketReviewsOnStartup } from './ticket-review/manager.js';
 import { registerTicketReviewSweep } from './ticket-review/sweep.js';
@@ -53,6 +55,9 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   registerClaudeReviewRoutes(app, ctx);
   registerClaudeReviewChatRoutes(app, ctx);
   registerAutoReviewSettingsRoutes(app, ctx);
+  // CHECK THREADS: a light, threads-only pass over the review threads changed since their last
+  // judgement (claude-review/thread-check.ts) — a click, or the auto-review sweeper on a comment burst.
+  registerThreadCheckRoutes(app, ctx);
   registerTicketReviewRoutes(app, ctx);
   registerCiReviewRoutes(app, ctx);
   // SEQUENCE DIAGRAMS: a separate Sonnet process queued after every finished review (and by Redraw).
@@ -102,6 +107,11 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
     await reconcileReviewsOnStartup(ctx);
   } catch (err) {
     app.log.warn({ err }, 'claude review: startup reconcile failed');
+  }
+  try {
+    await reconcileThreadChecksOnStartup(ctx);
+  } catch (err) {
+    app.log.warn({ err }, 'thread checks: startup reconcile failed');
   }
   try {
     await reconcileTicketReviewsOnStartup(ctx);

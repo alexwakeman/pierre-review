@@ -339,8 +339,9 @@ entitlement**, so a reader who turns it off stays off if they later gain the cap
 **The code decides the level, free. The model explains the consequence, paid.** The same split the
 work plan and Chronology live by.
 
-- Rides **`prSummary`** — the cheap Haiku tier `review-assess`, `resolution-check` and
-  `annotations` already reuse. **No new capability; `apiVersion` stays 21.**
+- Rides **`prSummary`** — now its ONLY feature (the comment checks that shared the tier and the
+  annotations module were REMOVED 2026-10-18; the module holds `impact` alone, and the read skips
+  their DORMANT rows). **No new capability.**
 - Lands as `kind: 'impact'`, `targetKind: 'pull_request'`, `targetId = prId` on the **existing**
   `pr_comment_annotations` table — whose unique index is already
   `(accountId, kind, targetKind, targetId)`, so **no plugin migration**.
@@ -357,10 +358,6 @@ unparseable response must not raise an alarm the model never raised.
 
 ⚠ **PR detail only, click-gated.** Never on a Pending card or the timeline: the board may not fetch
 on mount, and a board that *billed* on mount would be worse.
-
-⚠ **`DEFAULT_ANCHOR_KINDS` deliberately excludes `pull_request`.** That is a billing guarantee: the
-combined `'review'` run is what the per-thread "Check review" button sends, and if impact were
-reachable from there, every click on a comment would also bill a whole-PR call.
 
 ⚠ **The payload hash folds only stored facts** — head sha, the file list, title, body, and the
 signal vector including the hub fields. Nothing hydrated, nothing `Date.now()`-derived. The free

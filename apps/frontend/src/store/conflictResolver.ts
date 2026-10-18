@@ -20,9 +20,9 @@ import type { ConflictCommitState, ConflictDecision } from '@pierre-review/share
 // ids and enum members even though one route now accepts typed text.
 //
 // ⚠ A HANDLE'S LINES THEREFORE LIVE SOMEWHERE ELSE, AND "somewhere else" MUST OUTLIVE A
-// COMPONENT. `useHunkSuggestion` and `useRegionEdit` each keep a module-level map keyed by SERVER
-// session, because `ResolverPanes` unmounts the moment the reader presses Continue — see those
-// files' headers for what breaks when the handle survives and the lines do not.
+// COMPONENT. `useRegionEdit` keeps a module-level map keyed by SERVER
+// session, because `ResolverPanes` unmounts the moment the reader presses Continue — see that
+// file's header for what breaks when the handle survives and the lines do not.
 //
 // ⚠ THE PINS ARE PART OF THE KEY. A session is consent to ONE three-way merge, so decisions are
 // filed under `${prId}:${headSha}:${baseSha}:${modelHash}`. Somebody pushing to the branch, or

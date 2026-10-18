@@ -191,15 +191,15 @@ what that costs a player.
 
 ⚠ **THE DEMO'S AI OUTPUT IS SEEDED, NOT COMPUTED, AND A FUTURE READER MUST NOT MISTAKE IT FOR
 LIVE MODEL OUTPUT.** The demo stack runs with `ANTHROPIC_API_KEY=dummy`, so no model call in it
-can succeed and none is made. Two things on screen would otherwise look like model output:
+can succeed and none is made. One thing on screen would otherwise look like model output:
 
-- the **addressed check** in the "Was it dealt with?" chapter — one hand-written row seeded by
-  `apps/backend/scripts/seed-addressed-check.ts` into the plugin's `pr_comment_annotations`,
-  read back through the ordinary cached-read route;
 - the **ML severity labels** on bot comments — 2,945 `ml_comment_labels` rows seeded by
   `seed-demo.ts` / `seed-estate.ts`, which no `severity-api` ever scored.
 
-Nothing is stubbed, intercepted or special-cased to achieve either: the rows are real rows and
+(The "Was it dealt with?" chapter was filmed against a seeded per-comment "Check review" row. That
+feature and its seeder are REMOVED; a re-shoot must show Claude Review's thread judgements instead.)
+
+Nothing is stubbed, intercepted or special-cased to achieve it: the rows are real rows and
 the app reads them by its real route. What is seeded is the *content*, not the mechanism.
 
 ### The chapters

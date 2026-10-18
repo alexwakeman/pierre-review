@@ -1,13 +1,12 @@
 // The Feed rail's sub-tab strip, as pure decisions so they can be tested without a renderer.
 //
-// Three members: `feed` (the stream, the default), `themes` (Pro, LISTED only on `activityDigest`
-// — the "absent, never upsold" posture) and `classification` ("Bot classification", FREE on every
-// tier — who counts as a bot in this Workspace, its role and its vendor).
+// Two members: `feed` (the stream, the default) and `classification` ("Bot classification", FREE
+// on every tier — who counts as a bot in this Workspace, its role and its vendor). (The Pro
+// `themes` member — "Discussion themes" — is REMOVED; a legacy `?feedTab=themes` lands on the
+// Feed because the URL reader seats only listed values.)
 //
-// ⚠ THE VISIBLE TAB IS DERIVED, NEVER WRITTEN BACK. A capability blinking off must not strand the
-// pane on a tab that is not listed — but a corrective `setFeedInnerTab` would also FORGET the
-// reader's choice, so the capability returning would not restore it. `effectiveFeedTab` falls back
-// for the render only.
+// ⚠ THE VISIBLE TAB IS DERIVED, NEVER WRITTEN BACK. `effectiveFeedTab` falls back for the render
+// only.
 import type { FeedInnerTab } from '../../store/filters.js';
 
 export interface FeedTab {
@@ -15,12 +14,12 @@ export interface FeedTab {
   label: string;
 }
 
-/** The strip, in order. `classification` is listed on every tier; `themes` only with the AI tier. */
-export function feedTabsFor(opts: { activityDigest: boolean }): FeedTab[] {
-  const tabs: FeedTab[] = [{ key: 'feed', label: 'Feed' }];
-  if (opts.activityDigest) tabs.push({ key: 'themes', label: 'Themes' });
-  tabs.push({ key: 'classification', label: 'Bot classification' });
-  return tabs;
+/** The strip, in order. Both members are listed on every tier. */
+export function feedTabsFor(): FeedTab[] {
+  return [
+    { key: 'feed', label: 'Feed' },
+    { key: 'classification', label: 'Bot classification' },
+  ];
 }
 
 /** The member to RENDER: the raw choice when it is listed, else the Feed. */

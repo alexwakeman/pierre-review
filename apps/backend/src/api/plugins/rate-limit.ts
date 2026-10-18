@@ -58,8 +58,8 @@ function tier(name: string, perWindow: number, windowMs: number): Tier {
 }
 
 const TIERS = {
-  // Anthropic-spending generation. A digest refresh, a sprint report, an Insights
-  // chat turn, a themes rebuild, a PR summary, an agentic review or fix. The most
+  // Anthropic-spending generation. A sprint report, an Insights chat turn, a themes
+  // rebuild, an impact note, an agentic review or fix. The most
   // expensive thing in the app and the tightest bucket.
   ai: tier('ai', 20, MINUTE),
   // A second, longer window on the same routes: 20/min would still be 1200/hour.
@@ -447,8 +447,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //                               calling it 404s, which is the catch-all's problem, not a tier's.
   //   POST /api/pro/slack/test    "Send test" — and it is NOT a probe. It runs the SAME billed
   //                               path the cron does: `refreshSprintReport` (one Haiku call unless
-  //                               the payload hash is unchanged) plus the account-wide repo-digest
-  //                               refresh, then an outbound POST to a user-supplied host. It stays
+  //                               the payload hash is unchanged), then an outbound POST to a user-supplied host. It stays
   //                               on `ai` + `aiHourly` — where the catch-all would have put it
   //                               anyway, spelled here so the family's two tiers are DECIDED
   //                               together rather than one of them being inherited. ⚠ It takes ONE
@@ -531,12 +530,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (!mutating && path === '/api/ticket-prs') return [TIERS.read];
 
   // ---- AI generation ----
-  // ⚠ RE-DECIDED, not inherited: `POST /api/pro/prs/:id/annotations/run` now spends GITHUB quota
-  // as well as model tokens — one PR_DETAIL_QUERY per uncached PR for the anchor hunks
-  // (sync/hydrate-detail.ts) on top of the two-sha compares. It stays on `ai` (20/min), which is
-  // TIGHTER than `prDetail`'s 60/min, so the GitHub exposure is already bounded more
-  // conservatively than a plain `GET /api/prs/:id`. Nothing to change — but the decision is
-  // recorded, because this file's failure mode is a tier nobody re-examined.
+  // `POST /api/pro/prs/:id/annotations/run` (the blast-radius impact note — the one kind left;
+  // the comment kinds that hydrated hunks and compared shas are REMOVED) stays on `ai` (20/min).
   // The PAIRED `GET /api/pro/prs/:id/annotations` must STAY on `read`: it is a pure DB read fired
   // on every PR open, and it must never grow a hydration leg (see the prDetail note above for
   // what that cost the first time).
@@ -885,11 +880,13 @@ function tierFor(method: string, path: string): readonly Tier[] {
     // `/api/dependencies/merge-all` is Pending → Dependencies' "Merge or arm all": up to one
     // merge (or a live probe + arm) per listed PR, sequentially, on the account's quota. Spelled
     // EXACTLY; its dry run hits no GitHub but shares the bucket rather than a second rule.
+    // `withdraw-approval` (dismiss the viewer's own APPROVED review: a live reviews list + one REST
+    // dismissal) is spelled out — `approve` is ANCHORED after the id and does not prefix-match it.
     const hitsGithub =
       path === '/api/dependencies/merge-all' ||
       path.startsWith('/api/threads/') ||
       path.startsWith('/api/bot-threads/') ||
-      /^\/api\/prs\/\d+\/(review-comment|comments?|approve|request-changes|close|reopen|ci\/rerun|request-reviewers|merge-queue|merge|auto-merge|update-branch|resolve-bot-threads|reviews)/.test(
+      /^\/api\/prs\/\d+\/(review-comment|comments?|approve|withdraw-approval|request-changes|close|reopen|ci\/rerun|request-reviewers|merge-queue|merge|auto-merge|update-branch|resolve-bot-threads|reviews)/.test(
         path,
       );
     if (hitsGithub) return [TIERS.githubWrite];

@@ -563,15 +563,18 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
 
 ## Other reviewers' threads (people and review bots)
 
-Every run that reads code (diff-only or deep) also judges **every unresolved review thread on the
-PR that is not rooted on one of Limn's own posted findings** — comments from people and from other
+Every run that reads code (diff-only or deep) also judges **every review thread on the PR —
+RESOLVED ones too (2026-10-18) — that is not rooted on one of Limn's own posted findings** — comments from people and from other
 review bots (CodeRabbit, Copilot, …). Limn's own posted findings stay in the follow-up above. After
 a run the reader has the PR against the user stories, Claude's findings, the follow-up AND every
 other open comment, so "Generate fix from this review" can produce one fix for all of it.
 
 - **Loader (CORE, DB-only):** `db/review-threads-for-review.ts` `loadReviewThreadsForReview`,
-  reached as `ctx.queries.loadReviewThreads` (absent ⇒ no thread block). Unresolved threads only
-  (resolved ones are not sent — cheap to add later, not obviously useful). Per thread: path, line,
+  reached as `ctx.queries.loadReviewThreads` (absent ⇒ no thread block). Resolved threads are
+  loaded too (`isResolved`) — resolving is a click, not evidence — and sent AFTER every unresolved
+  one inside the same cap. ⚠ `newestCommentAt` (the auto re-review key) still counts UNRESOLVED
+  threads only, and AI Fix's seed threads (`thread-candidates.ts`) filter resolved ones out. Per
+  thread: path, line,
   outdated, the comments (author login, `authorIsBot` from the GLOBAL automation set
   `globalAutomationUserIds`, time, body), a github.com link, and how many synced commits are dated
   after its first and its latest comment — the "has the code moved since this comment" evidence.
@@ -593,7 +596,10 @@ other open comment, so "Generate fix from this review" can produce one fix for a
   ones (`THREAD_COMMENTS_SHOWN` = 6, each clipped to 1,500 characters, "(N more replies not shown)").
   People's threads go before bots', then oldest first. Caps: 40 threads and ~24k characters; the rest
   are `not_checked` with `sent:false, ref:null`. The model reports `threads: [{ref, validity, addressed,
-  explanation, draftReply?}]` — validity `valid | partly_valid | not_valid | unclear`, addressed
+  explanation, reason, draftReply?}]` — `reason` is ONE line, at most `THREAD_REASON_CHARS` (120),
+  REQUIRED and `max`-capped by the tool schema (the ONE `buildThreadReportItem`, review/schema.ts,
+  shared with Check threads), whitespace-collapsed and clipped again on reconcile; older stored
+  rows read it as null. Each thread says `Resolved on GitHub: yes|no`. Validity `valid | partly_valid | not_valid | unclear`, addressed
   `addressed | partly_addressed | not_addressed | unclear`; `not_checked` is server-only. It is told
   to judge the comment on the code, not on who wrote it, to leave out a ref whose code it cannot see
   rather than guess, and NOT to repeat a thread as a finding (it is already on the PR).
@@ -610,10 +616,11 @@ other open comment, so "Generate fix from this review" can produce one fix for a
   **null = the run did not assess threads** — an older row, a skip, a failed run — never `[]`), plus
   `ClaudeReview.threadAssessmentCounts` folded server-side by shared `threadAssessmentCounts`. The
   "still needs a fix" rule is ONE shared function, `isThreadToFix` (valid / partly valid AND not /
-  partly addressed). `draftReply` is a suggestion only; nothing posts it.
-- **The Pro Haiku per-thread annotations stay** (validity / addressed / simplify, `prSummary`). They
-  answer one thread at a time on demand; the review now covers every open thread in one agentic
-  pass with the code checked out. The two are independent and may disagree.
+  partly addressed AND NOT resolved — `resolved` is stored on the assessment; absent = an older,
+  unresolved-only row). `draftReply` is a suggestion only; nothing posts it.
+- **The Pro Haiku per-thread annotations are REMOVED (2026-10-18)** (validity / addressed / simplify,
+  the "Check review" button). This review's thread judgements are the ONE AI judgement of a thread;
+  the BotTriageCard's "real issues" count reads them too.
 - **AI Fix.** "Generate fix from this review" sends ONLY the review id
   (`GenerateFixBody.sourceReviewId`); the server builds the seed from the stored run, and the
   threads `isThreadToFix` keeps are its `T` items (see § AI Fix). One fix covers the findings and
@@ -638,6 +645,44 @@ CODE, not by prompt:
   the model still is. ⚠ This deliberately overrides the older "the server does NOT coerce statuses
   on an unmoved head" rule for the same-head case only (product decision, 2026-10).
 
+### Check threads — a light, threads-only pass (2026-10-18)
+
+`review/claude-review/thread-check.ts` (+ `-agent`, `-persist`, `-routes`). CORE, free, LOCAL ONLY
+(registered by `registerAgenticRoutes`). Wire: [API.md](API.md) § Check threads.
+
+- **WHAT IT JUDGES: only the threads that CHANGED since their last judgement** — never judged, a
+  comment newer than the judgement, a resolve or unresolve since, or new commits (judged at another
+  head). "Changed" is exactly what `planThreadReview` SENDS against THE ONE FOLD
+  (`currentThreadAssessmentsForPrs`, below), so a check and a same-head review agree on what is new.
+  Nothing changed ⇒ refused `nothing_changed`, no thread ⇒ `no_threads` — no model (a click's
+  refusal is only answered; an AUTO one is stored, so it covers the burst).
+- **THE RUN:** Sonnet 5; Read/Glob/Grep in the PR's read-only worktree behind the PATH GUARD (the
+  diff alone when no checkout can be made); `Bash`, the write/web tools and the dispatch tools
+  DENIED; connectors isolated; ONE tool `submit_threads` whose item is the review's. The prompt is
+  `pushReviewThreadsSection` (nonce-fenced) + the fenced title. Reconcile is the review's
+  (`reconcileThreads`: never invents "addressed", locks `addressed` at the same head). Caps:
+  `THREAD_CHECK_BUDGET_USD` ($1), `THREAD_CHECK_MAX_TURNS` (20), auto `THREAD_CHECK_DAILY_CAP` (30
+  per workspace per UTC day; clicks never count). One run per PR (claimed synchronously), the ONE
+  shared `REVIEW_CONCURRENCY` slot (`registerReviewSlotPeer`; a PR-review click goes first).
+- **STORED** in `claude_thread_checks` (sqlite `0122` / pg `0109`): one row per run, the WHOLE
+  reconciled set (changed + carried) in `thread_assessments`, `comments_through` = the newest
+  qualifying comment it covered. Composite FK onto `pull_requests (id, account_id)` (cascade, like
+  `ci_reviews`); erased; in `accountScopedTables()`; checked by `verify:isolation`.
+- ⚠ **THE ONE FOLD** — `currentThreadAssessmentsForPrs` (thread-judgements.ts): the latest
+  succeeded non-skip review's `thread_assessments`, with the newest succeeded check that finished
+  AFTER it folded over it per thread (newer wins). Readers: the thread cards
+  (`getThreadJudgements`), the Claude Review tab (`currentThreadAssessments` on
+  `GET /api/prs/:id/claude-review`), the next REVIEW's carry (`manager.ts`, `beforeReviewId`), the
+  next check's plan, and AI Fix's seed when the named review is the latest. Never read
+  `review.threadAssessments` for "what Claude says now".
+- **AUTO** (when the workspace's auto review is on): a SAME-HEAD comment burst — the code has not
+  moved — now starts a CHECK, not a full re-review (`commentBurstRoute`, auto.ts), under the same
+  settle rule. ⚠ ONE exception keeps the full review: a reply on one of Limn's OWN posted findings
+  newer than what the reviews at this head saw (`newestOwnThreadCommentAt` vs the candidate's
+  `coveredMs`) — finding replies and the one pushback live in the review. A check row at the head
+  whose `comments_through` reaches the burst covers it (any status, one attempt per burst). A moved
+  head still gets a full review.
+
 ### The judgement on the thread cards
 
 Wherever a thread wears a state pill — the PR's Threads tab and every `ThreadCard` (Feed, Pending
@@ -654,8 +699,10 @@ unknown synced head is never "moved". The run, commit and reason sit behind the 
 batched `POST /api/claude-review/thread-judgements` per screen (`hooks/useClaudeThreadJudgements.ts`,
 microtask-batched like reactions), keyed under `['claude-review', prId]` so a run finishing refreshes
 it with the review's own invalidations — never a per-card fetch. "Latest" is the newest succeeded,
-non-skip run with `thread_assessments`; a run in flight, failed or skipped leaves the previous
-judgements standing. The Pro Haiku "addressed" check panel is an explicit, separate output and is
+non-skip run with `thread_assessments`, with any later Check threads run folded over it (THE ONE
+FOLD above; the response adds `checkId`, and `reviewId` is null for a check-only PR); a run in
+flight, failed or skipped leaves the previous judgements standing. Each judgement now carries
+`reason` (one line) and `resolved`; the SPA's two pills (validity + state) read them. The Pro Haiku "addressed" check panel is an explicit, separate output and is
 NOT replaced. ⚠ **The Threads tab's State chips count and filter what the CARDS show**
 (`threadStateBucket` / `threadStateBucketCounts`, same module): a thread wearing a Claude marker sits
 under its own "Claude judged" chip (shown only when one exists), never under the derived state its

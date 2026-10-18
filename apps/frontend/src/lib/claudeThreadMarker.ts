@@ -5,93 +5,137 @@ import type {
   DerivedState,
 } from '@pierre-review/shared';
 
-// WHICH PILL A THREAD CARD WEARS: its own derived state ("Likely addressed" + the confidence
-// marker), or the latest Claude review's judgement in their place.
+// WHICH PILLS A THREAD WEARS: its own derived state ("Likely addressed" + the confidence marker),
+// or the freshest Claude judgement (the latest Claude review, or a later Check threads run — the
+// server folds the two per thread) as TWO pills in their place, plus Claude's one-line reason.
+//
+// THE ONE VOCABULARY. Every thread surface (ThreadCard, the Feed's collapsed thread row, search,
+// the Timeline popover, the Changes tab's inline pill) prints these words and no others:
+//
+//   validity  Holds up · Partly · Doesn't hold · Unclear       (is the comment right?)
+//   state     Resolved · Addressed · Partly addressed · Open   (where does the code stand?)
+//             + "· earlier commit" when the PR's head has moved since the judgement
 //
 // The rule, in order:
-//   1. A RESOLVED thread keeps "Resolved". Resolving is a fact on GitHub, not a judgement.
-//   2. A thread the latest review JUDGED wears ONE Claude marker, replacing the derived-state pill
-//      AND the confidence marker (the two are the heuristic's answer to the same question).
-//   3. Anything else — no review, a review that did not look at threads, a thread it did not
-//      judge, data still loading — keeps the derived pills. A missing judgement never makes a claim.
+//   1. No judgement for the thread (no run, the run did not judge it, both halves `not_checked`,
+//      data still loading) keeps the derived pills. A missing judgement never makes a claim.
+//   2. A judged thread wears the Claude pills, replacing the derived-state pill AND the confidence
+//      marker (the two are the heuristic's answer to the same question).
+//   3. "Resolved" is read off the THREAD as it is NOW (a GitHub fact, not a judgement) — so a
+//      thread resolved after it was judged reads "Resolved", and one unresolved since reads the
+//      judged state of its code.
 //
 // A judgement made at an older head is still shown, marked as from an earlier commit.
 
-export type ClaudeThreadVerdict =
-  | 'addressed'
-  | 'partly_addressed'
-  | 'not_addressed'
-  | 'not_valid'
-  | 'unsure';
+export type ClaudeValidityPill = 'holds_up' | 'partly' | 'doesnt_hold' | 'unclear';
+export type ClaudeStatePill = 'resolved' | 'addressed' | 'partly_addressed' | 'open';
+
+export const CLAUDE_VALIDITY_LABEL: Record<ClaudeValidityPill, string> = {
+  holds_up: 'Holds up',
+  partly: 'Partly',
+  doesnt_hold: 'Doesn’t hold',
+  unclear: 'Unclear',
+};
+
+export const CLAUDE_STATE_LABEL: Record<ClaudeStatePill, string> = {
+  resolved: 'Resolved',
+  addressed: 'Addressed',
+  partly_addressed: 'Partly addressed',
+  open: 'Open',
+};
+
+/** The validity pill, or null when Claude did not judge the comment itself. */
+export function claudeValidityPill(v: ClaudeThreadValidity): ClaudeValidityPill | null {
+  switch (v) {
+    case 'valid':
+      return 'holds_up';
+    case 'partly_valid':
+      return 'partly';
+    case 'not_valid':
+      return 'doesnt_hold';
+    case 'unclear':
+      return 'unclear';
+    case 'not_checked':
+      return null;
+  }
+}
+
+/**
+ * The state pill. `resolvedNow` is the thread's CURRENT GitHub state and always wins. null when
+ * Claude did not read the code for this thread (`not_checked`): "Open" would claim a reading it
+ * never made (rule 1), so only the validity pill shows.
+ */
+export function claudeStatePill(a: ClaudeThreadAddressed, resolvedNow: boolean): ClaudeStatePill | null {
+  if (resolvedNow) return 'resolved';
+  if (a === 'addressed') return 'addressed';
+  if (a === 'partly_addressed') return 'partly_addressed';
+  if (a === 'not_checked') return null;
+  return 'open';
+}
 
 export interface ClaudeThreadMarker {
-  verdict: ClaudeThreadVerdict;
-  /** The pill's words, e.g. "Claude: addressed". */
+  /** null when Claude judged only the code, not the comment. */
+  validity: ClaudeValidityPill | null;
+  /** null when Claude judged only the comment, not the code (never both null). */
+  state: ClaudeStatePill | null;
+  /** Both pills as words, e.g. "Holds up · Open" — for a title or a one-line summary. */
   label: string;
   /** Judged at a head other than the PR's synced head. */
   stale: boolean;
-  reviewId: number;
+  /** ONE line (≤ 120 chars) saying why. null on older judgements. */
+  reason: string | null;
+  /** The longer explanation, shown only when the reader expands the Claude row. */
+  explanation: string | null;
+  /** null when only a Check threads run has judged the PR's threads. */
+  reviewId: number | null;
+  checkId: number | null;
   finishedAt: string | null;
   assessedAtHead: string;
-  validity: ClaudeThreadValidity;
-  addressed: ClaudeThreadAddressed;
-  explanation: string | null;
 }
 
 export type ThreadPill = { kind: 'derived' } | { kind: 'claude'; marker: ClaudeThreadMarker };
 
-export const CLAUDE_THREAD_VERDICT_LABEL: Record<ClaudeThreadVerdict, string> = {
-  addressed: 'Claude: addressed',
-  partly_addressed: 'Claude: partly addressed',
-  not_addressed: 'Claude: not addressed',
-  not_valid: 'Claude: not valid',
-  unsure: 'Claude: unsure',
-};
-
-export function claudeThreadVerdict(
-  validity: ClaudeThreadValidity,
-  addressed: ClaudeThreadAddressed,
-): ClaudeThreadVerdict | null {
-  if (validity === 'not_checked' && addressed === 'not_checked') return null;
-  // A comment Claude judged wrong is not "still to fix", whatever the code did since.
-  if (validity === 'not_valid') return 'not_valid';
-  if (addressed === 'addressed') return 'addressed';
-  if (addressed === 'partly_addressed') return 'partly_addressed';
-  if (addressed === 'not_addressed') return 'not_addressed';
-  return 'unsure';
+export function claudeMarkerLabel(m: Pick<ClaudeThreadMarker, 'validity' | 'state'>): string {
+  return [
+    m.validity != null ? CLAUDE_VALIDITY_LABEL[m.validity] : null,
+    m.state != null ? CLAUDE_STATE_LABEL[m.state] : null,
+  ]
+    .filter((x): x is string => x != null)
+    .join(' · ');
 }
 
 export function threadPillFor(
   thread: { id: number; derivedState: DerivedState },
   pr: ClaudeThreadJudgementsForPr | null | undefined,
 ): ThreadPill {
-  if (thread.derivedState === 'resolved') return { kind: 'derived' };
   if (pr == null) return { kind: 'derived' };
   const j = pr.judgements.find((x) => x.threadId === thread.id);
   if (j == null) return { kind: 'derived' };
-  const verdict = claudeThreadVerdict(j.validity, j.addressed);
-  if (verdict == null) return { kind: 'derived' };
+  if (j.validity === 'not_checked' && j.addressed === 'not_checked') return { kind: 'derived' };
+  const validity = claudeValidityPill(j.validity);
+  const state = claudeStatePill(j.addressed, thread.derivedState === 'resolved');
   return {
     kind: 'claude',
     marker: {
-      verdict,
-      label: CLAUDE_THREAD_VERDICT_LABEL[verdict],
+      validity,
+      state,
+      label: claudeMarkerLabel({ validity, state }),
       // An unknown synced head is never "moved" (the Open PRs column's rule).
       stale: pr.currentHeadSha != null && j.assessedAtHead !== pr.currentHeadSha,
+      reason: j.reason?.trim() ? j.reason.trim() : null,
+      explanation: j.explanation,
       reviewId: pr.reviewId,
+      checkId: pr.checkId,
       finishedAt: pr.finishedAt,
       assessedAtHead: j.assessedAtHead,
-      validity: j.validity,
-      addressed: j.addressed,
-      explanation: j.explanation,
     },
   };
 }
 
 /**
- * The Threads tab's state chips count and filter by what the card SHOWS: a thread wearing a Claude
- * marker sits under "Claude judged", never under the derived state its card no longer displays
- * (a "Likely addressed" chip listing cards that read "Claude: not addressed" contradicts itself).
+ * The Threads tab's state chips count and filter by what the card SHOWS: an UNRESOLVED thread
+ * wearing Claude pills sits under "Claude judged", never under the derived state its card no longer
+ * displays. A resolved thread stays under "Resolved" — its state pill still says so.
  */
 export type ThreadStateBucket = DerivedState | 'claude';
 
@@ -99,6 +143,7 @@ export function threadStateBucket(
   thread: { id: number; derivedState: DerivedState },
   pr: ClaudeThreadJudgementsForPr | null | undefined,
 ): ThreadStateBucket {
+  if (thread.derivedState === 'resolved') return 'resolved';
   return threadPillFor(thread, pr).kind === 'claude' ? 'claude' : thread.derivedState;
 }
 

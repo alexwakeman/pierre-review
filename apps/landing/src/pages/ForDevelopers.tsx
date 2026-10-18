@@ -561,11 +561,9 @@ export default function ForDevelopers(): JSX.Element {
             <p className="mb-6 max-w-[58ch] text-pretty">
               What it adds is writing. On Pending, <span className="text-ink">Plan my day</span>{' '}
               writes a headline for the day, a line on what can wait, and one line on each
-              planned card saying why it comes now — it never changes the order. A short
-              summary at the top of a long pull request. A read on what a red build actually
-              broke, rather than a link to a log. A check on whether a review comment was
-              really addressed, judged from the commits since the thread started rather than
-              from whether somebody clicked resolve.
+              planned card saying why it comes now — it never changes the order. And on a
+              pull request, a short note on what the change could break and what to read
+              first.
             </p>
             <p className="max-w-[58ch] text-pretty">
               On a quiet week you will not miss it. On the week you come back to two hundred

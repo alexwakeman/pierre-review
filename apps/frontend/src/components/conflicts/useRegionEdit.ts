@@ -32,7 +32,6 @@ import { regionKey } from '../../store/conflictResolver.js';
 // undecided WHILE THE COMMIT STILL CARRIED ITS HANDLE. The counter would say decided, the pane
 // would say "Needs a decision", and the push would land text the reader could no longer see. So
 // the lines live in a module map keyed by SERVER SESSION, pruned to the live one on every mount.
-// `useHunkSuggestion` keeps its accepted suggestions the same way and for the same reason.
 
 /** What one region's editor is doing. Keyed `${fileIndex}:${regionId}`; ABSENT means closed. */
 export type RegionEditState =
@@ -186,8 +185,8 @@ export function useRegionEdit(prId: number, sessionId: string | null): RegionEdi
           settle({ status: 'refused', message: res.message });
           return null;
         }
-        // ⚠ DID THE READER MOVE ON WHILE THIS WAS IN FLIGHT? `settle` asks the same question and
-        // `useHunkSuggestion` asks it of an Ask answer, and this path did not: pressing Save and
+        // ⚠ DID THE READER MOVE ON WHILE THIS WAS IN FLIGHT? `settle` asks the same question,
+        // and this path did not: pressing Save and
         // then the gutter arrow on the same region ran `close` (which clears this key), stored
         // `'ours'`, and then let the late answer overwrite it with `'edited'` — silently undoing
         // the side the reader had just taken, and filing an undo entry built from a `decisions`

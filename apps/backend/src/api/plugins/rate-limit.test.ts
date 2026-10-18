@@ -13,7 +13,6 @@ const tiers = (method: string, path: string): string[] =>
 
 describe('tierFor — AI generation', () => {
   it('puts the Pro generators in the ai tier (minute AND hour windows)', () => {
-    expect(tiers('POST', '/api/pro/activity/digests/refresh')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/insights/ask')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/sprint-report/refresh')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/prs/12/ai-fix')).toEqual(['ai', 'ai_hourly']);
@@ -22,14 +21,8 @@ describe('tierFor — AI generation', () => {
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/message')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/approve')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/discard')).toEqual(['read']);
-    // The surviving per-ITEM addressed checks (one thread / one PR comment). The PR-WIDE twins
-    // (`/api/pro/prs/:id/addressed/check` and its SSE stream) were removed — they were a second
-    // whole-PR sweep billing one call per target, up to 50.
-    expect(tiers('POST', '/api/pro/threads/12/addressed/check')).toEqual(['ai', 'ai_hourly']);
-    expect(tiers('POST', '/api/pro/pr-comments/12/addressed/check')).toEqual(['ai', 'ai_hourly']);
-    // The comment-annotations platform: the run POST is the ONLY billing path, and now the only
-    // AI entry point the whole feature has (its SSE twin went with the PR-wide sweep bar), so it
-    // must not be left uncovered.
+    // The blast-radius impact note: the annotations run POST is its ONLY billing path, so it must
+    // not be left uncovered.
     expect(tiers('POST', '/api/pro/prs/12/annotations/run')).toEqual(['ai', 'ai_hourly']);
   });
 
@@ -53,7 +46,7 @@ describe('tierFor — AI generation', () => {
     expect(tiers('GET', '/api/prs/42/claude-review')).toEqual(['read']);
     expect(tiers('GET', '/api/prs/42/claude-review/status')).toEqual(['read']);
     expect(tiers('GET', '/api/claude-reviews')).toEqual(['read']);
-    // Reading stored annotations is a pure cache hit — it must NOT land on the ai tier, or
+    // Reading the stored impact note is a pure cache hit — it must NOT land on the ai tier, or
     // simply opening a PR would burn the 20/min generation budget.
     expect(tiers('GET', '/api/pro/prs/12/annotations')).toEqual(['read']);
   });
@@ -68,6 +61,10 @@ describe('tierFor — AI generation', () => {
     expect(tiers('POST', '/api/claude-review/states/x')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/claude-review/thread-judgements')).toEqual(['read']);
     expect(tiers('POST', '/api/claude-review/thread-judgements/x')).toEqual(['ai', 'ai_hourly']);
+    // Check threads: the start spends an agent run; the status poll and the cancel do not.
+    expect(tiers('POST', '/api/prs/42/claude-review/thread-check')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('GET', '/api/prs/42/claude-review/thread-check')).toEqual(['read']);
+    expect(tiers('POST', '/api/prs/42/claude-review/thread-check/cancel')).toEqual(['read']);
     expect(tiers('PUT', '/api/pro/settings')).toEqual(['read']);
     // ⚠ AND EVERY SETTINGS WRITE BENEATH IT. The per-workspace sprint cadence is one DB upsert —
     // no model, no GitHub quota — but its path does not END in `/settings`, so the catch-all's
@@ -133,8 +130,8 @@ describe('tierFor — Slack digest', () => {
   });
 
   it('"Send test" stays on the AI tier — it runs the cron\'s billed path', () => {
-    // NOT a probe: refreshSprintReport (a Haiku call unless the payload hash is unchanged) plus
-    // the account-wide repo-digest refresh, then an outbound POST to a user-supplied host.
+    // NOT a probe: refreshSprintReport (a Haiku call unless the payload hash is unchanged), then
+    // an outbound POST to a user-supplied host.
     expect(tiers('POST', '/api/pro/slack/test')).toEqual(['ai', 'ai_hourly']);
   });
 
@@ -731,6 +728,8 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/threads/9/reply')).toEqual(['github_write']);
     expect(tiers('POST', '/api/bot-threads/resolve')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/42/approve')).toEqual(['github_write']);
+    // Spelled out in hitsGithub: `approve` is anchored after the id and does NOT prefix-match it.
+    expect(tiers('POST', '/api/prs/42/withdraw-approval')).toEqual(['github_write']);
     // Spelled out in hitsGithub: `request-reviewers` does NOT prefix-match it.
     expect(tiers('POST', '/api/prs/42/request-changes')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/42/merge')).toEqual(['github_write']);
@@ -871,13 +870,6 @@ describe('tierFor — merge-conflict resolver', () => {
     expect(tiers('POST', '/api/prs/12/merge')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/12/update-branch')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/12/refresh')).toEqual(['pr_detail', 'read']);
-  });
-
-  // The Pro per-hunk suggestion needs no line of its own — `/api/pro/` + mutating already
-  // returns [ai, ai_hourly] — but it is pinned HERE so a future `isSettingsWrite`-style
-  // exemption on that prefix cannot silently un-bill a Haiku call.
-  it('bills the Pro per-hunk suggestion as generation', () => {
-    expect(tiers('POST', '/api/pro/prs/12/conflict-hunk/suggest')).toEqual(['ai', 'ai_hourly']);
   });
 });
 

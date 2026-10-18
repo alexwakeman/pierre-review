@@ -39,6 +39,7 @@ import {
   type FollowUpPlan,
 } from './follow-up.js';
 import { planThreadReview, reconcileThreads, type ThreadPlan } from './threads.js';
+import { currentThreadAssessmentsForPrs } from './thread-judgements.js';
 import { dropSettledReraises, similarTitles } from './settled-by-reply.js';
 import { attachFindingThreads } from './finding-replies.js';
 import {
@@ -565,9 +566,9 @@ async function runPipeline(
   }
   const plan: FollowUpPlan | null =
     prior && prior.findings.length > 0 ? selectPriorFindings(prior, item.headSha) : null;
-  // "What changed since that review" — ONE compare call (never throws; wrapped anyway, the
-  // annotations/evidence.ts precedent), only when the head actually moved. Nothing is stored;
-  // a failure (force-push, 404, rate limit) degrades to judging against the full diff.
+  // "What changed since that review" — ONE compare call (never throws; wrapped anyway), only
+  // when the head actually moved. Nothing is stored; a failure (force-push, 404, rate limit)
+  // degrades to judging against the full diff.
   // ⚠ The path filter is CLIENT-side (github/compare.ts), so widening it costs nothing — and it
   // must include the earlier findings' own files: a push that REVERTS a flagged file drops it
   // out of the PR's changed files, and filtering on those alone would hide the revert and tell
@@ -600,7 +601,16 @@ async function runPipeline(
       const loaded = await loadThreads(item.accountId, item.prId);
       // The comment half of the auto re-review key: what this run saw (auto.ts).
       await markReviewCommentsSeen(ctx, reviewId, loaded.newestCommentAt);
-      threadPlan = planThreadReview(loaded.threads, item.headSha, priorRun?.threadAssessments ?? null);
+      // The prior judgements are THE ONE FOLD (the previous review with any later Check threads run
+      // over it), so a check's newer judgement carries and locks exactly like a review's.
+      const current = (
+        await currentThreadAssessmentsForPrs(ctx, item.accountId, [item.prId], { beforeReviewId: reviewId })
+      ).get(item.prId);
+      threadPlan = planThreadReview(
+        loaded.threads,
+        item.headSha,
+        current?.assessments ?? priorRun?.threadAssessments ?? null,
+      );
     } catch (err) {
       ctx.log.warn(
         `claude review pr ${item.prId}: review threads not loaded: ${err instanceof Error ? err.message : String(err)}`,

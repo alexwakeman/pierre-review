@@ -6,7 +6,7 @@
 // ⚠ NONCE FENCES. Every optional block — the previous review (+ the "changes since" diff), the
 // other reviewers' open threads (threads.ts) and the related PRs on the same ticket — is wrapped in `---BEGIN … <nonce>---` / `---END … <nonce>---` markers whose
 // nonce is random per run (`pickReviewNonce`, re-rolled while any fenced text contains it —
-// conflict-assist's `nonceCollides`). The earlier findings were written by a model reading this same
+// the removed conflict-assist's `nonceCollides`). The earlier findings were written by a model reading this same
 // attacker-influenced PR, the compare patches are repo-authored, and the threads and related PRs
 // were written by other people: all of it is data. With NO optional block present the user prompt
 // is BYTE-IDENTICAL to the old one (a test pins it).

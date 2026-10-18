@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import type {
   ConflictDecision,
-  ConflictHunkSuggestion,
   ConflictLine,
   ConflictRegion,
 } from '@pierre-review/shared';
@@ -16,10 +15,8 @@ import {
 import { highlightLines } from '../../lib/hljsLines.js';
 import { AcceptLeftIcon, AcceptRightIcon, ChevronIcon } from '../Icons.js';
 import { CodeCell, type CellRow } from './CodeCell.js';
-import { HunkSuggestionPanel } from './HunkSuggestionPanel.js';
 import { RegionEditPanel } from './RegionEditPanel.js';
 import { SlotStrip } from './SlotStrip.js';
-import type { HunkAskState } from './useHunkSuggestion.js';
 import type { RegionEditState } from './useRegionEdit.js';
 import {
   HIDE_UNCHANGED,
@@ -95,10 +92,6 @@ export function SlotRow({
   language,
   narrow,
   active,
-  ask,
-  onAskClaude,
-  onUseSuggestion,
-  onDiscardSuggestion,
   edit,
   editDraft,
   onEditDraft,
@@ -118,12 +111,6 @@ export function SlotRow({
   language: string | null;
   narrow: boolean;
   active: boolean;
-  /** What this region's "Ask Claude" is doing, or undefined when nothing is pending. */
-  ask?: HunkAskState | undefined;
-  /** Absent ⇒ no Ask control renders at all (unentitled, or no plugin). */
-  onAskClaude?: (() => void) | undefined;
-  onUseSuggestion?: ((suggestion: ConflictHunkSuggestion) => void) | undefined;
-  onDiscardSuggestion?: (() => void) | undefined;
   /** This region's text box, or undefined when it is closed. */
   edit?: RegionEditState | undefined;
   /** What the reader had typed when this row last unmounted — a file switch, on an editor that
@@ -301,8 +288,6 @@ export function SlotRow({
       active={active}
       // Stacked ⇒ no gutter tracks exist, so the two side verbs go back on the strip.
       sideTakes={narrow}
-      onAskClaude={onAskClaude}
-      askInFlight={ask?.status === 'asking'}
       onEdit={onOpenEdit}
       editOpen={edit != null}
       onActivate={onActivate}
@@ -310,22 +295,8 @@ export function SlotRow({
     />
   );
 
-  // ⚠ THE PENDING SUGGESTION SITS UNDER THE CENTRE CELL AND THE TWO SIDE PANES STAY VISIBLE. It
-  // is a sixth state of this cell, read against the left and right panes already aligned to it —
-  // not a modal, not a fourth column, and not a side-by-side against the deterministic merge
-  // (which on the common case has nothing to show, since that is why the button was pressed).
-  const pending =
-    ask == null || onUseSuggestion == null || onDiscardSuggestion == null ? null : (
-      <HunkSuggestionPanel
-        state={ask}
-        language={language}
-        onUse={onUseSuggestion}
-        onDiscard={onDiscardSuggestion}
-      />
-    );
-
-  // ⚠ THE TEXT BOX SITS IN THE SAME SLOT, FOR THE SAME REASONS. It is another state of this
-  // cell, read against the two side panes already aligned to it — and putting it here rather
+  // ⚠ THE TEXT BOX SITS UNDER THE CENTRE CELL AND THE TWO SIDE PANES STAY VISIBLE. It is a state
+  // of this cell, read against the two side panes already aligned to it — and putting it here rather
   // than inside `CodeCell` is what keeps `data-mr-cell` on a content-sized box, so the ribbon
   // geometry never learns about it. See `RegionEditPanel`'s header.
   //
@@ -374,7 +345,6 @@ export function SlotRow({
             rule={rule}
             anchor={anchor('centre')}
           />
-          {pending}
           {editor}
           <StackedSide
             label={paneTheirs(baseRef)}
@@ -396,7 +366,6 @@ export function SlotRow({
           <div className="min-w-0 border-t border-gray-200 dark:border-gray-800">
             {strip}
             <CodeCell rows={middle} paint={centrePaint} rule={rule} anchor={anchor('centre')} />
-            {pending}
             {editor}
           </div>
           <div className="border-t border-gray-200 dark:border-gray-800">

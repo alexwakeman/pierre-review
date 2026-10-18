@@ -412,7 +412,7 @@ describe('editing a region by hand', () => {
     const ROW = read('../src/components/conflicts/SlotRow.tsx');
     expect(PANEL, 'the panel never renders a cell anchor').not.toContain('data-mr-cell');
     expect(ROW, 'the editor follows the CodeCell, it does not go inside it').toMatch(
-      /<CodeCell rows=\{middle\}[^/]*\/>\s*\{pending\}\s*\{editor\}/,
+      /<CodeCell rows=\{middle\}[^/]*\/>\s*\{editor\}/,
     );
   });
 
@@ -458,7 +458,7 @@ describe('editing a region by hand', () => {
     // clears the in-flight key) and stored `'ours'`, and the late answer then overwrote it with
     // `'edited'` — undoing the side the reader had just taken, and filing an undo entry from a
     // `decisions` snapshot that predated it, so Ctrl+Z cleared the region instead of restoring it.
-    // `settle` and `useHunkSuggestion` both ask this question; the success path did not.
+    // `settle` asks this question; the success path did not.
     const HOOK = stripComments(read('../src/components/conflicts/useRegionEdit.ts'));
     const save = HOOK.slice(HOOK.indexOf('const save = useCallback('));
     const answered = save.indexOf('api.editConflictRegion');

@@ -3486,6 +3486,49 @@ check(
     runRefused = true;
   }
   check("a run naming B's PR under account A is refused by the composite FK", runRefused);
+
+  // ── CHECK THREADS (claude_thread_checks, migration 0122 / pg 0109) ──
+  // A check per account on the SAME head; every getter and the fold answer for the caller only.
+  const tcp = await import('../src/review/claude-review/thread-check-persist.js');
+  const { currentThreadAssessmentsForPrs } = await import('../src/review/claude-review/thread-judgements.js');
+  const judged = (threadId: number) => ({
+    ref: 'R1', threadId, sent: true, carried: false, authorLogin: 'x', authorIsBot: false, path: 'a.ts',
+    line: 1, excerpt: 'e', commentCount: 1, lastCommentAt: null, url: null, validity: 'valid' as const,
+    addressed: 'addressed' as const, explanation: null, draftReply: null, assessedAtHead: SHA,
+  });
+  const checkFor = async (accountId: number, ws: number, prId: number, repoId: number) => {
+    const id = await tcp.insertQueuedThreadCheck(cctx, {
+      accountId, workspaceId: ws, prId, repoId, headSha: SHA, trigger: 'auto', model: 'claude-sonnet-5', commentsThrough: null,
+    });
+    await tcp.saveThreadCheckSuccess(cctx, accountId, id, { assessments: [judged(accountId * 100)] });
+    return id;
+  };
+  const tcA = await checkFor(1, defaultA, A.prId, A.repoId);
+  const tcB = await checkFor(2, defaultB, B.prId, B.repoId);
+  check("getThreadCheckRow(A's check, A) returns it", (await tcp.getThreadCheckRow(cctx, 1, tcA))?.id === tcA);
+  check("getThreadCheckRow(B's check, A) is null (IDOR blocked)", (await tcp.getThreadCheckRow(cctx, 1, tcB)) === null);
+  check("getLatestThreadCheck(A, B.pr) is null", (await tcp.getLatestThreadCheck(cctx, 1, B.prId)) === null);
+  check("countAutoThreadChecksSince(A, B's workspace) is 0", (await tcp.countAutoThreadChecksSince(cctx, 1, defaultB, 0)) === 0);
+  check("countAutoThreadChecksSince(A, A's workspace) counts A's check", (await tcp.countAutoThreadChecksSince(cctx, 1, defaultA, 0)) === 1);
+  check("currentThreadAssessmentsForPrs(A, B.pr) reads nothing", !(await currentThreadAssessmentsForPrs(cctx, 1, [B.prId])).has(B.prId));
+  check(
+    "currentThreadAssessmentsForPrs(A, A.pr) reads A's check",
+    (await currentThreadAssessmentsForPrs(cctx, 1, [A.prId])).get(A.prId)?.checkId === tcA,
+  );
+  await tcp.markThreadCheckFailed(cctx, 1, tcB, 'hijack');
+  check("markThreadCheckFailed(B's check, A) leaves it succeeded", (await tcp.getThreadCheckRow(cctx, 2, tcB))?.status === 'succeeded');
+  const ctcAll = await db.select().from(schema.claudeThreadChecks).where(eq(schema.claudeThreadChecks.headSha, SHA)).execute();
+  check('MUTATION: without the account predicate both checks share the head', ctcAll.length === 2);
+  let checkRefused = false;
+  try {
+    await db
+      .insert(schema.claudeThreadChecks)
+      .values({ accountId: 1, workspaceId: defaultA, prId: B.prId, repoId: B.repoId, headSha: SHA, status: 'queued', model: 'm' })
+      .execute();
+  } catch {
+    checkRefused = true;
+  }
+  check("a check naming B's PR under account A is refused by the composite FK", checkRefused);
 }
 
 // ── THE ISSUE TRACKER (tracker/, CORE since apiVersion 23) ─────────────────────────────────────

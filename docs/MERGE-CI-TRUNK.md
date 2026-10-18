@@ -338,7 +338,7 @@ of that was protecting:
   correspondence nothing can state. The strip's word, `Your text`, is what says whose it is.
   Undo clears it like any other decision.
 - ⚠ **THE UI IS A PANEL UNDER THE CENTRE CELL, NOT A `contenteditable` AND NOT A TEXTAREA REPLACING
-  THE CELL** — the slot `HunkSuggestionPanel` already uses. That keeps `data-mr-cell` on a
+  THE CELL**. That keeps `data-mr-cell` on a
   content-sized box (so ribbon geometry never learns about it), keeps `CodeCell` a pure memo with no
   local state, and keeps hljs output out from under a caret. The draft is RENDERED in the panel and
   REMEMBERED in `useRegionEdit`'s ref, keyed `${fileIndex}:${regionId}`; the store holds the handle;

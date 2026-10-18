@@ -25,6 +25,29 @@ modes**):
   `assertCloudConfig()` fails loud at boot on a missing cloud env var; DB is a node-postgres
   `Pool`.
 
+### One-shot model calls (`review/llm.ts` `cheapComplete`)
+
+Every tool-less, one-shot model call (the plugin's impact note, work-plan wording and Slack report
+via `ctx.llm.complete`; core's sprint briefs, themes and Ask, story labels and the docs-check
+shortlist) goes through `cheapComplete`. ⚠ **LOCALLY THESE HAVE ONE ROUTE: the Agent SDK** — the
+reader's Claude Code login, else the environment's `ANTHROPIC_API_KEY`. Core callers pass no key; the
+plugin marks those three calls `localRoute: 'agent'` (its `localLlm` client, an OPTIONAL field on
+`ctx.llm.complete` — no apiVersion bump), so a passed `apiKey` (`SUMMARY_ANTHROPIC_API_KEY`) is
+IGNORED for them (`cheapRoute`, pinned by `llm.test.ts` + `llm-local-route.test.ts`). ⚠ The Pro
+**Reports** and **Bots Monitoring** clients (period-report narration, the insights chat, syntheses,
+bot themes, the advisor refine, Chronology pointers) leave it unmarked and keep the key locally too.
+The Agent-SDK route throws "Claude is switched off here." under `LIMN_AI_DISABLED`. CLOUD ignores
+`localRoute` and keeps the metered key route. Same model (Haiku 5.5) both ways.
+
+### Status for the agentic passes
+
+Every agentic pass exposes enough state for the SPA's ONE status line: Claude Review (SSE progress),
+Check threads (`GET /api/prs/:id/claude-review/thread-check` → `progress.phase` + `threadsSent` /
+`threadsCarried`), the sprint passes (`SprintGraphResponse.briefs {current, pending}` for progress,
+`passes {briefsRunning, themesRunning}` — the in-memory `db/sprint-pass-flights.ts` — and
+`pathsStatus.state`), the docs check (its run's `status`). The impact note, work-plan wording and
+sprint Ask are request/response — the mutation's pending state is the status.
+
 ### Sync pipeline (`src/sync/`)
 
 Pulls PR activity from GitHub into the DB; fully idempotent. **See
@@ -225,7 +248,8 @@ one-line swap rather than a redesign.
 ### What was fixed, and what must NOT be "fixed"
 
 Fixed at four sites: the plugin's annotations run routes (**JSON and SSE**), the
-digest-regenerate SSE, and the per-item resolution-check route.
+digest-regenerate SSE, and the per-item resolution-check route. (Only the annotations run route —
+now the impact note's — survives; the others were REMOVED 2026-10-18.)
 
 ⚠ **The `…/stream` endpoints that are GETs are unaffected and must not be changed.** Claude
 Review and AI Fix stream over a **GET with no body**, correctly using the hijacked `raw`; a
@@ -233,9 +257,8 @@ GET's `req.raw` does not close early (see the probe above), so "harmonising" the
 change with no upside and a real risk of reintroducing the asymmetry.
 
 **Any NEW POST that wants a client-disconnect abort needs this** — it is the shape every billed
-loop here uses. The in-code comments at `packages/pro/src/annotations/routes.ts` and
-`packages/pro/src/activity-digest/routes.ts` restate the reasoning at the call site so a reader
-of either does not have to find this doc first.
+loop here uses. The in-code comment at `packages/pro/src/annotations/routes.ts` restates the reasoning at the call
+site so a reader does not have to find this doc first.
 
 ## My Turn — the ball rule
 

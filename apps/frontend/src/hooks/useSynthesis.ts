@@ -65,13 +65,10 @@ export function synthesisKeySlots(
   const person = d.kind === 'person' || d.kind === 'person_report';
   const select = flagging ? (d.select ?? 'findings') : null;
   // The windowless kinds mirror the server's canonicalisation: 'bot-threads' (current-state
-  // backlog) and the ordering/sections grains 'brief'/'rollup'/'person'/'person_report' — the
-  // first two are "now" folds (plan P3.1/P3.3) and the person grains carry REAL bounds in their
-  // own slot below (P4.2); all of them take the whole workspace (no repo narrowing slot
-  // variation).
-  const windowless =
-    d.kind === 'bot-threads' || d.kind === 'brief' || d.kind === 'rollup' || person;
-  const ordering = d.kind === 'brief' || d.kind === 'rollup' || person;
+  // backlog) and the person grains, which carry REAL bounds in their own slot below (P4.2) and
+  // take the whole workspace (no repo narrowing slot variation).
+  const windowless = d.kind === 'bot-threads' || person;
+  const ordering = person;
   return [
     d.kind,
     windowless ? 'w:-' : `w:${d.window}`,
@@ -159,7 +156,7 @@ export function useSynthesisGenerating(
 }
 
 /**
- * LAZY-ON-READ narration for the ORDERING grains ('brief'/'rollup'/'person'): the cached
+ * LAZY-ON-READ narration for the ORDERING grain ('person'): the cached
  * synthesis when present, plus at most ONE auto-generation attempt per (scope identity +
  * staleness observation). (Written for the deleted daily-brief strip; the 1:1 section reuses the
  * exact same guard rather than a second spelling of it — the digest pattern, per-scope.)

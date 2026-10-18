@@ -15,7 +15,7 @@ import { useLocalStorage } from '../../hooks/useLocalStorage.js';
 import { useFilters } from '../../store/filters.js';
 import { relativeTime, safeExternalUrl, userLabel } from '../../lib/ui.js';
 import { markerVisual } from './markerTemplate.js';
-import { ThreadStatePill } from '../ThreadView/ClaudeThreadBadge.js';
+import { ClaudeThreadReason, ThreadStatePill } from '../ThreadView/ClaudeThreadBadge.js';
 import { hunkLineMarker, useHunkHighlight } from '../DiffHunk.js';
 import { Markdown } from '../Markdown.js';
 import { CloseIcon, ExternalLinkIcon } from '../Icons.js';
@@ -212,6 +212,7 @@ function SingleEvent({
           </span>
         </div>
       )}
+      {thread && <ClaudeThreadReason thread={thread} />}
 
       {anchor && (
         <pre className="overflow-x-auto rounded border border-gray-200 bg-gray-50 px-2 py-1 font-mono text-[11px] leading-snug text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">

@@ -587,6 +587,12 @@ export const config = {
   // AUTOMATIC CI reviews per workspace per UTC day. Not shared with the PR or ticket review caps.
   // Manual runs never count. Default = shared CI_REVIEW_DAILY_CAP.
   ciReviewDailyCap: intFromEnv('CI_REVIEW_DAILY_CAP', 20),
+  // ---- Check threads (a light, threads-only pass — review/claude-review/thread-check.ts) ----
+  // Its OWN spend and turn caps (Sonnet 5, read-only). Env only — no route sets them.
+  threadCheckBudgetUsd: floatFromEnv('THREAD_CHECK_BUDGET_USD', 1),
+  threadCheckMaxTurns: intFromEnv('THREAD_CHECK_MAX_TURNS', 20),
+  // AUTOMATIC checks per workspace per UTC day. Not shared with any review's cap; clicks never count.
+  threadCheckDailyCap: intFromEnv('THREAD_CHECK_DAILY_CAP', 30),
   // ---- Sequence diagrams (one Sonnet 5 run per PR head / per ticket's member set —
   // review/diagrams/, docs/CLAUDE-REVIEW.md § Design diagrams) ----
   // Its OWN spend and turn caps. Env only — no route sets them.

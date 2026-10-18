@@ -1,10 +1,11 @@
 import { useCallback, useState } from 'react';
 import type { CommentAnnotation } from '@pierre-review/shared';
 import { ChevronIcon, SparkleIcon, WarningIcon } from '../Icons.js';
+import { AiStatusLine } from '../AiStatusLine.js';
 import {
   annotationKey,
   useAnnotationIndex,
-  useRunAnnotations,
+  useRunImpactNote,
 } from '../../hooks/useAnnotations.js';
 import { useBlastConfig } from '../../hooks/useBlastRadius.js';
 import { useProCapabilities } from '../../hooks/useTriage.js';
@@ -25,10 +26,10 @@ import { useProCapabilities } from '../../hooks/useTriage.js';
 // ⚠ PR DETAIL ONLY, AND CLICK-GATED. It is a billed call, so it may not appear on a Pending card
 // or in the timeline — the board may not fetch on mount, and a board that billed on mount would
 // be worse still. Nothing here requests anything until the button is pressed; the stored note is
-// read from the ONE shared per-PR annotation query every other annotation surface uses.
+// read from the ONE shared per-PR annotation query.
 //
 // ⚠ A PR WITH NOTHING STORED RENDERS THE BUTTON AND NOTHING ELSE — no placeholder box, no
-// "not generated yet" chrome. Same rule as `CommentAnnotations`, and for the same reason.
+// "not generated yet" chrome.
 
 // WHERE THE COLLAPSED STATE LIVES BETWEEN PAGE LOADS.
 //
@@ -102,7 +103,7 @@ export function BlastImpactNote({
     writeCollapsed(!collapsed);
   }, [collapsed]);
   const note = useImpactNote(prId, canAsk && hasBlast && wanted);
-  const { state, run } = useRunAnnotations(prId);
+  const { state, run } = useRunImpactNote(prId);
 
   if (!canAsk || !hasBlast || !wanted) return null;
 
@@ -110,15 +111,20 @@ export function BlastImpactNote({
 
   return (
     <div className="mt-1.5 flex flex-col items-start gap-1">
-      {note == null && (
+      {note == null && state.running && (
+        // The ONE status line every agentic pass shows; this run is a single request, so its
+        // pending state is the status.
+        <AiStatusLine stage="Reading the change" />
+      )}
+      {note == null && !state.running && (
         <button
           type="button"
-          onClick={() => run('impact')}
+          onClick={() => run()}
           disabled={state.running}
           className="inline-flex items-center gap-1 rounded text-[11px] text-gray-500 hover:text-gray-700 disabled:opacity-60 dark:text-gray-400 dark:hover:text-gray-200"
         >
           <SparkleIcon size={11} />
-          {state.running ? 'Reading the change…' : 'What could this break?'}
+          What could this break?
         </button>
       )}
 
@@ -171,16 +177,17 @@ export function BlastImpactNote({
             {/* ⚠ NO "hide for good" LINK HERE ANY MORE. It wrote the server preference, which made
                 one click a one-way trip that could only be undone in Settings. The caret above is
                 the reversible control; Settings keeps the permanent switch. */}
-            {note.stale && (
+            {note.stale && state.running && <AiStatusLine stage="Re-reading the change" />}
+            {note.stale && !state.running && (
               // The pull request has changed since this was written. ⚠ The re-run is the SAME
               // billed path; it is offered, never taken automatically.
               <button
                 type="button"
-                onClick={() => run('impact')}
+                onClick={() => run()}
                 disabled={state.running}
                 className="underline hover:text-gray-600 disabled:opacity-60 dark:hover:text-gray-300"
               >
-                {state.running ? 'Re-reading…' : 'Out of date — read again'}
+                Out of date — read again
               </button>
             )}
           </div>

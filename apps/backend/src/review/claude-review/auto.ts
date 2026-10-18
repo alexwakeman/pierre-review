@@ -41,6 +41,15 @@
 // "addressed" — follow-up.ts, threads.ts); the new work is
 // the new and changed threads.
 //
+// A COMMENT BURST AT THE SAME HEAD IS A LIGHT CHECK, NOT A FULL REVIEW (2026-10-18). When the only
+// news is review comments (the head has not moved), the code has not changed, so a full review would
+// re-judge the same diff: the sweeper starts a CHECK THREADS pass instead (thread-check.ts — only the
+// changed threads, its own THREAD_CHECK_DAILY_CAP, the same settle rule). ONE exception keeps the full
+// review: a reply on one of Limn's OWN posted findings newer than what the reviews at this head saw —
+// finding replies and the one pushback live in the review (`commentBurstRoute`). A check row at the
+// head whose `comments_through` reaches the burst COVERS it (any status: one attempt per burst, like
+// the review's "any row at the head settles it").
+//
 // WHEN A RUN STARTS — THE ONE RULE (`autoReviewDue`, both re-review reasons and first reviews):
 //
 //     FIRST REVIEW     → start now (no settle)
@@ -71,6 +80,7 @@
 // one flag. It is OFF PER WORKSPACE until someone switches it on: it spends the user's own Claude
 // in the background.
 import type { ClaudeAutoReviewWaiting } from '@pierre-review/shared';
+import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
 import { agenticRunReady } from './ai-ready.js';
 import { listAutoReviewWorkspaces } from './auto-settings.js';
@@ -137,6 +147,24 @@ export function autoReviewDue(input: {
   return quiet || ceiling ? { due: true } : { due: false, reason };
 }
 
+/**
+ * Where a same-head comment burst goes (see the header). Pure.
+ *   'review'   a reply on one of Limn's own findings is newer than the reviews at this head saw
+ *   'covered'  a Check threads row at this head already reached the burst's newest comment
+ *   'check'    otherwise: a light Check threads pass
+ */
+export function commentBurstRoute(input: {
+  commentsAtMs: number;
+  reviewCoveredMs: number | null;
+  newestOwnThreadCommentAtMs: number | null;
+  checkCoveredMs: number | null;
+}): 'review' | 'check' | 'covered' {
+  const own = input.newestOwnThreadCommentAtMs;
+  if (own != null && own > (input.reviewCoveredMs ?? 0)) return 'review';
+  if (input.checkCoveredMs != null && input.checkCoveredMs >= input.commentsAtMs) return 'covered';
+  return 'check';
+}
+
 /** Can auto review run in this process at all? The Settings toggle and the sweeper both ask. */
 export function autoReviewAvailable(ctx: AgentContext): boolean {
   return AGENTIC_AI_ENABLED && !ctx.host.isCloud;
@@ -148,10 +176,46 @@ export function utcDayStartMs(nowMs: number): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
+/** `commentBurstRoute`'s DB half. Never throws: a failed read keeps the full review (the old path). */
+async function routeCommentBurst(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  headSha: string,
+  commentsAtMs: number,
+  reviewCoveredMs: number | null,
+): Promise<'review' | 'check' | 'covered'> {
+  const load = ctx.queries.loadReviewThreads?.bind(ctx.queries);
+  if (!load) return 'review';
+  try {
+    const [loaded, { getLatestThreadCheck }] = await Promise.all([
+      load(accountId, prId),
+      import('./thread-check-persist.js'),
+    ]);
+    const latest = await getLatestThreadCheck(ctx, accountId, prId);
+    const atHead = latest && latest.headSha === headSha ? latest : null;
+    return commentBurstRoute({
+      commentsAtMs,
+      reviewCoveredMs,
+      newestOwnThreadCommentAtMs: loaded.newestOwnThreadCommentAt?.getTime() ?? null,
+      checkCoveredMs: atHead ? (atHead.commentsThrough ?? atHead.createdAt).getTime() : null,
+    });
+  } catch {
+    return 'review';
+  }
+}
+
+async function repoOfPr(ctx: AgentContext, accountId: number, prId: number): Promise<number> {
+  const { getCiPrContext } = await import('../ci-review/persist.js');
+  return (await getCiPrContext(ctx, accountId, prId))?.repoId ?? 0;
+}
+
 export interface AutoSweepResult {
   queued: number;
   // Of `queued`, how many were RE-reviews (a moved head, or new review comments).
   reQueued: number;
+  // Check threads passes started instead of a full review (a same-head comment burst).
+  checksQueued?: number;
   // Why the sweep stopped early, if it did.
   stopped: 'lane_full' | 'ai_not_ready' | null;
 }
@@ -254,11 +318,69 @@ export async function runAutoReviewSweep(
       }
 
       // ---- re-reviews: a moved head, or new review comments ----
-      for (const { prId, headSha, commentsAtMs, lastRunAtMs } of res.reReview ?? []) {
+      let checkBudget: number | null = null;
+      for (const cand of res.reReview ?? []) {
+        const { prId, headSha, commentsAtMs, lastRunAtMs, coveredMs } = cand;
         const k = `${ws.accountId}:${prId}`;
         liveHeads.add(k);
         livePrs.add(k);
         if (waiting.has(prId)) continue;
+        // A same-head comment burst: a light Check threads pass, unless a Limn finding got a reply.
+        // The candidate read already carries the check's coverage and the own-finding reply time
+        // (both filtered like the trigger); an older host without them falls back to the DB read.
+        const route =
+          commentsAtMs == null
+            ? 'review'
+            : cand.checkCoveredMs !== undefined && cand.newestOwnThreadCommentAtMs !== undefined
+              ? commentBurstRoute({
+                  commentsAtMs,
+                  reviewCoveredMs: coveredMs ?? null,
+                  newestOwnThreadCommentAtMs: cand.newestOwnThreadCommentAtMs,
+                  checkCoveredMs: cand.checkCoveredMs,
+                })
+              : await routeCommentBurst(ctx, ws.accountId, prId, headSha, commentsAtMs, coveredMs ?? null);
+        if (route === 'covered') {
+          headSeen.delete(k);
+          waitingNow.delete(k);
+          continue;
+        }
+        if (route === 'check') {
+          const seen = clock(k, `${headSha}|${commentsAtMs ?? ''}`);
+          const due = autoReviewDue({
+            nowMs,
+            settle: { quietSinceMs: seen.firstSeenMs, burstStartMs: seen.burstStartMs, reason: 'comments' },
+            lastRunAtMs: null,
+          });
+          if (!due.due) {
+            waitingNow.set(k, due.reason);
+            continue;
+          }
+          waitingNow.delete(k);
+          const tcm = await import('./thread-check.js');
+          if (tcm.threadCheckHeld(ws.accountId, prId)) continue;
+          if (checkBudget == null) {
+            const { countAutoThreadChecksSince } = await import('./thread-check-persist.js');
+            checkBudget =
+              config.threadCheckDailyCap -
+              (await countAutoThreadChecksSince(ctx, ws.accountId, ws.workspaceId, dayStartMs));
+          }
+          if (checkBudget <= 0 || tcm.threadCheckAutoRoom() === 0) continue;
+          const r = await tcm.startThreadCheck(ctx, {
+            accountId: ws.accountId,
+            workspaceId: ws.workspaceId,
+            prId,
+            repoId: await repoOfPr(ctx, ws.accountId, prId),
+            headSha,
+            trigger: 'auto',
+            commentsThrough: new Date(commentsAtMs!),
+          });
+          if (r.outcome === 'queued' || r.outcome === 'already_running' || r.outcome === 'refused') headSeen.delete(k);
+          if (r.outcome === 'queued') {
+            checkBudget -= 1;
+            result.checksQueued = (result.checksQueued ?? 0) + 1;
+          }
+          continue;
+        }
         const seen = clock(k, `${headSha}|${commentsAtMs ?? ''}`);
         const due = autoReviewDue({
           nowMs,

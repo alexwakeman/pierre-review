@@ -307,7 +307,7 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   ([REFERENCE-DOCS.md](REFERENCE-DOCS.md)).
 - **`resolution-check` fan-out (plugin)**: `MAX_TARGETS_PER_BATCH` 50 + per-account in-flight set
   + 30s interval + abort wiring on the JSON twin. One billed LLM call per thread, uncapped, on an
-  app built for bot-flooded PRs.
+  app built for bot-flooded PRs. (The route itself was REMOVED 2026-10-18.)
 - **402 entitlement gate** (`plugins/auth.ts` `isProPath`) now covers the non-`/api/pro/`
   Claude-Review paths. Latent today (agentic is off in cloud) — real the day it is enabled.
 - **`assertCloudConfig`** now rejects a `SESSION_SECRET` under 32 bytes or a placeholder (it is
@@ -404,8 +404,7 @@ decision (each would touch the root lockfile, which is why neither was taken uni
 - `apps/frontend/test/` — **9 files / 127 tests**, same arrangement (`apps/frontend/vitest.config.ts`,
   `include` pinned to `test/**` so vitest can't collect the Playwright `e2e/*.spec.ts` and fail).
   Kept OUTSIDE `src/` so `pnpm typecheck` never tries to resolve the uninstalled vitest types.
-  Where the pure logic extracted from components is pinned: `annotationRun.test.ts`
-  (`annotationRunMessage`), **`workspaceScope.test.ts`** (persistence of `workspaceId` — that all
+  Where the pure logic extracted from components is pinned: **`workspaceScope.test.ts`** (persistence of `workspaceId` — that all
   five legacy `teamScope` shapes are DISCARDED not coerced, that it is absent from
   `pickFilterBarState` so "Clear filters" can't teleport you into Default, and that the wire emits
   `?workspace=` always-once-resolved and `repoIds` **including when empty**),

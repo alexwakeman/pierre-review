@@ -245,8 +245,8 @@ export default function HowWeMeasure(): JSX.Element {
               <div>
                 <p className="mb-6">
                   There is a third place {SITE_NAME} uses AI, and it is separate from both models
-                  on this page: writing. Short summaries — a paragraph on a long pull request, a
-                  read on a red build, the reason beside an item in your queue — and, on your own
+                  on this page: writing. Short notes — what a change could break, the reason
+                  beside an item in your queue — and, on your own
                   machine, Claude&rsquo;s review of a pull request and its fix for the comments
                   you pick. Those are language, not measurement, and they are clearly marked
                   wherever they appear.

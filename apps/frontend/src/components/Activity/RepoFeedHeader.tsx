@@ -3,11 +3,10 @@ import { MaintainerShield } from '../MaintainerShield.js';
 import { WarningIcon } from '../Icons.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { BranchStatusPanel } from './BranchStatusPanel.js';
-import { DigestBanner } from './DigestBanner.js';
 import { RepoStatsLine } from './RepoStats.js';
 
 // The compact console header shown above a single repo's feed (when a repo is selected
-// in the rail): the Pro digest banner (null in OSS), the repo name + maintainer / open
+// in the rail): the repo name + maintainer / open
 // counts, the one-line stats summary, and a display-only thread-state bar.
 export function RepoFeedHeader({ repo }: { repo: ActivityRepo }): JSX.Element {
   const maintainerCount = repo.maintainerIds.length;
@@ -51,10 +50,6 @@ export function RepoFeedHeader({ repo }: { repo: ActivityRepo }): JSX.Element {
           drops the redundant repo-name column and the strip's own scroll. Renders nothing
           until the repo has been branch-synced. */}
       <BranchStatusPanel repoIds={[repo.repoId]} compact />
-
-      {/* Pro per-repo digest — BELOW the name + stats, within the same card (renders
-          nothing in OSS mode; collapsible when present). */}
-      <DigestBanner repoId={repo.repoId} />
     </div>
   );
 }

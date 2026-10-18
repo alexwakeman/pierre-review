@@ -116,12 +116,13 @@ export function sprintTabFromUrl(raw: string | null | undefined): SprintInnerTab
 // that shares this one scalar (the per-repo console's Bots tab).
 export type BotsInnerTab = 'roi' | 'themes' | 'advisor' | 'benchmark';
 export const BOTS_INNER_TABS: readonly BotsInnerTab[] = ['roi', 'themes', 'advisor', 'benchmark'];
-// The Feed rail's sub-tab strip: 'feed' (the stream, the default), 'themes' (Pro, LISTED only on
-// `activityDigest`) and 'classification' — "Bot classification", FREE on every tier: who counts as
-// a bot in this Workspace, its role and vendor (and, with `botDepth`, its price). The visible member
-// is DERIVED per render (`effectiveFeedTab` in `Activity/feedTabsModel.ts`), never written back.
-export type FeedInnerTab = 'feed' | 'themes' | 'classification';
-export const FEED_INNER_TABS: readonly FeedInnerTab[] = ['feed', 'themes', 'classification'];
+// The Feed rail's sub-tab strip: 'feed' (the stream, the default) and 'classification' — "Bot
+// classification", FREE on every tier: who counts as a bot in this Workspace, its role and vendor
+// (and, with `botDepth`, its price). The visible member is DERIVED per render (`effectiveFeedTab` in
+// `Activity/feedTabsModel.ts`), never written back. ('themes' — the Pro "Discussion themes" — is
+// REMOVED; a legacy `?feedTab=themes` is not a member, so the URL reader leaves the Feed default.)
+export type FeedInnerTab = 'feed' | 'classification';
+export const FEED_INNER_TABS: readonly FeedInnerTab[] = ['feed', 'classification'];
 // PrDetail's inner tab strip. It lives HERE, not in PrDetail's local state, because it is
 // URL-ADDRESSABLE: `?view=pr:<id>&prTab=changes` names one screen, so browser Back/Forward can
 // move between "the PR's diff" and "the PR's threads" like every other view. Which member is
@@ -563,24 +564,19 @@ export interface FilterState {
   // (There is no `botSettingsTeamId` / per-repo judgement picker. The judgement is keyed by the
   // active WORKSPACE, so the panel just reads `workspaceId` like every other Bots panel.)
   //
-  // Which inner sub-tab the cross-repo Feed rail shows: 'feed' (the metrics header + consolidated
-  // feed) or 'themes' (the Pro "Discussion themes" AI summary). Transient, URL-silent.
+  // Which inner sub-tab the cross-repo Feed rail shows: 'feed' (the consolidated feed) or
+  // 'classification' (Bot classification).
   //
   // 'compare' is NOT a member: cross-workspace comparison is the Reports "By workspace" axis
   // (inside PeriodReportsPanel), no longer a surface of its own anywhere.
   //
-  // Landmine (still live for 'themes'): it is capability-gated, so this scalar can hold a key
-  // whose tab isn't currently rendered. The consumer must DERIVE an effective tab from the
-  // visible tab list rather than writing a correction back into the store — a write permanently
-  // forgets the user's choice, so losing the capability for a moment would silently forget
-  // Themes instead of restoring it when the capability returns. Being transient (freshDefaults
-  // only, never persisted, never URL-parsed) a stale value cannot outlive the session, which is
-  // why removing 'compare' from the union needs no migration.
+  // The consumer DERIVES an effective tab from the visible tab list rather than writing a
+  // correction back into the store. Transient (freshDefaults only, never persisted), so removing a
+  // member ('compare', then 'themes') needs no migration.
   //
-  // ⚠ URL-SERIALIZED (`?feedTab=themes|classification`, the 'feed' default omitted) and a NAVIGATION key, but
-  // ONLY alongside the cross-repo Feed rail entry, where the strip is on screen. The READ seats
-  // this RAW value; the derived-effective-tab rule above is unchanged — a URL naming 'themes' on
-  // an account without the capability must not be written back as a correction.
+  // ⚠ URL-SERIALIZED (`?feedTab=classification`, the 'feed' default omitted) and a NAVIGATION key,
+  // but ONLY alongside the cross-repo Feed rail entry, where the strip is on screen. The READ seats
+  // only a listed value, so the retired `?feedTab=themes` lands on the Feed.
   feedInnerTab: FeedInnerTab;
   // Which inner sub-tab the Reports pane shows: 'overview' (free Flow metrics + the Pro Period
   // reports) or 'bottlenecks' — labelled "Chronology" on screen, the court ledger, Pro on

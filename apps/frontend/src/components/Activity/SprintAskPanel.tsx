@@ -6,6 +6,7 @@ import { formatUsd } from '../../lib/ui.js';
 import { AiRunGate } from '../AiSetup.js';
 import { CloseIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
+import { AiStatusLine } from '../AiStatusLine.js';
 import { Markdown, type RehypePlugins } from '../Markdown.js';
 import { sprintTicketSite } from './sprintModel.js';
 
@@ -117,7 +118,7 @@ export function SprintAskPanel({
         {pending != null && (
           <div className="space-y-1">
             <p className="ml-6 rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-800 dark:bg-gray-800 dark:text-gray-100">{pending}</p>
-            <p className={`text-xs ${MUTED}`}>Thinking…</p>
+            <AiStatusLine stage="Thinking" />
           </div>
         )}
         {ask.isError && !asking && <p className="text-xs text-rose-700 dark:text-rose-400">{ask.error.message}</p>}

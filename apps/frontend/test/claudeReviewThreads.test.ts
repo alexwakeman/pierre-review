@@ -80,6 +80,24 @@ describe('partitionThreads', () => {
   it('is empty for an empty list', () => {
     expect(partitionThreads([])).toEqual({ shown: [], more: [] });
   });
+
+  it('puts a resolved thread behind more, whatever Claude judged its code', () => {
+    const resolvedOpen = thread('valid', 'not_addressed', { resolved: true });
+    const resolvedPartly = thread('partly_valid', 'partly_addressed', { resolved: true });
+    const open = thread('valid', 'not_addressed');
+    expect(isThreadSettled(resolvedOpen)).toBe(true);
+    const { shown, more } = partitionThreads([resolvedOpen, open, resolvedPartly]);
+    expect(shown.map((t) => t.threadId)).toEqual([open.threadId]);
+    expect(more.map((t) => t.threadId)).toEqual([resolvedOpen.threadId, resolvedPartly.threadId]);
+  });
+});
+
+describe('threadCountPills wording', () => {
+  it("uses the pills' words: doesn't / don't hold up", () => {
+    const base = { total: 3, assessed: 3, validUnaddressed: 0, addressed: 0, notChecked: 0 };
+    expect(threadCountPills({ ...base, notValid: 1 }).map((p) => p.label)).toEqual(['1 doesn’t hold up']);
+    expect(threadCountPills({ ...base, notValid: 2 }).map((p) => p.label)).toEqual(['2 don’t hold up']);
+  });
 });
 
 describe('threadCountPills', () => {

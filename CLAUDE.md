@@ -35,7 +35,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 | [REFERENCE-DOCS](docs/REFERENCE-DOCS.md) | the workspace reference library (CORE, local-only, agentic): upload / URL ingest, the INDEX → CONTENTS → section tree, the Sonnet build, the docs chat, `docsContextFor` |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) | ML severity/category of bot comments (`packages/ml`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
-| [PRO-PLUGIN-AND-ACTIVITY](docs/PRO-PLUGIN-AND-ACTIVITY.md) | plugin seam/apiVersion, Activity, Feed, the bot platform, annotations, digests, the work plan |
+| [PRO-PLUGIN-AND-ACTIVITY](docs/PRO-PLUGIN-AND-ACTIVITY.md) | plugin seam/apiVersion, Activity, Feed, the bot platform, the impact note, the work plan |
 | [PRO-PLATFORM](docs/PRO-PLATFORM.md) | the Pro platform's own deep-dive |
 | [SECURITY](docs/SECURITY.md) | app.ts, CORS/CSP, rate limits, GDPR, dependency posture |
 | [PACKAGING](docs/PACKAGING.md) · [RELEASE](docs/RELEASE.md) | build-release, CLI, landing prerender · CI publishing |
@@ -677,6 +677,13 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
 
 Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 
+- **WITHDRAW APPROVAL** (`POST /api/prs/:id/withdraw-approval`, CORE, both modes): dismisses the
+  viewer's OWN latest decisive review when it is APPROVED (read LIVE; else `409 NotApproved`);
+  GitHub's refusal is returned in its own words with its status, never retried. STAMP
+  (`markLocalReviewDismissed`) → resync → settle `mergeStateNot:'clean'` (only on a PR synced clean
+  with `reviewDecision` approved) → signal. Tier `githubWrite`.
+  SPA: inside `PrActionControls`, whose buttons are HIDDEN by default behind ONE "Show actions"
+  reveal (session-remembered; Overview AND Claude Review tab) — only buttons hide, never facts.
 - **Every "can this land?" surface resolves through the pure `mergeVerdict()`** (`lib/ui.ts`).
   GitHub's `mergeable` reports ONLY conflict state; `mergeStateStatus` is the protection-aware
   field to lead with. ⚠ **`unstable` IS mergeable** (only non-required checks are red); `behind`
@@ -823,7 +830,8 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   credential swaps the Run button for ONE line, never hides the feature. Auto review is OFF per
   workspace until switched on (`workspaces.auto_review_enabled[_at]`, `GET`/`PUT
   /api/workspaces/:id/auto-review`, the floor moves only on an off → on flip); it re-reviews an
-  already-reviewed PR once per new HEAD or new burst of review comments — only a PERSON's or a
+  already-reviewed PR once per new HEAD (a same-head comment burst runs CHECK THREADS instead, unless
+  a Limn finding got a reply — `commentBurstRoute`) or new burst of review comments — only a PERSON's or a
   REVIEW bot's (role `=== 'review'`, stored role beats the seed; CI/coverage/dependency bots never),
   never Limn's own (`isLimnPostedComment`, ONE predicate). ⚠ ONE start rule (`autoReviewDue`):
   a first review or a new head after a quiet spell starts ON RECEIPT; a push during a run (never
@@ -842,6 +850,20 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   accepted for a blocker, enforced in code) or disputed (stays open; an auto run pushes back ONCE per
   thread, ever) (docs/CLAUDE-REVIEW.md § Other reviewers' threads, § Replies to Limn's findings,
   § Auto review).
+- **THREAD JUDGEMENTS** (docs/CLAUDE-REVIEW.md § Other reviewers' threads, § Check threads): a review
+  judges RESOLVED threads too (sent after the open ones, never "to fix" — `isThreadToFix` checks
+  `resolved`) and writes a ONE-LINE `reason` (≤ 120, the shared `buildThreadReportItem`). **Check
+  threads** (`POST /api/prs/:id/claude-review/thread-check`) is a light Sonnet pass over ONLY the
+  threads changed since their last judgement (`claude_thread_checks`, sqlite `0122` / pg `0109`).
+  ⚠ "What Claude says now" is ONE fold, `currentThreadAssessmentsForPrs` (latest review + later
+  checks, newer wins per thread) — cards, the tab, the next review's carry and AI Fix all read it.
+  SPA: TWO pills (validity + state) + the one-line reason, words ONLY from
+  `lib/claudeThreadMarker.ts`; every agentic pass shows ONE `components/AiStatusLine.tsx`.
+- **ONE LOCAL ROUTE FOR THE ONE-SHOT FEATURES**: locally `cheapComplete` (review/llm.ts) runs on the
+  Agent SDK (the reader's Claude login) for every core caller and for a plugin call marked
+  `localRoute: 'agent'` (impact note, work-plan wording, Slack sprint report — the plugin's
+  `localLlm`), IGNORING `SUMMARY_ANTHROPIC_API_KEY`; that route refuses under LIMN_AI_DISABLED.
+  ⚠ Reports and Bots Monitoring leave it unmarked and KEEP the key. Cloud keeps the key. Same model.
 - **AUTO-POSTING IS OFF BY DEFAULT, AUTO RUNS ONLY, NEVER TWICE** (`claude-review/
   auto-post.ts`, `ticket-review/auto-post.ts`; sqlite `0087` / pg `0074`): a per-workspace switch
   (`workspaces.auto_post_enabled`, NULL = off) + overrides-only scope/kinds on the auto-review route.
@@ -998,8 +1020,12 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   Inflation, ML flagging, volume, seat prices, Benchmark, triage — NOT classification, which is free
   on Feed → Bot classification), `activityDigest`,
   `periodReports` (the WHOLE **Reports** entry — flow metrics, reach cards, period reports,
-  by-workspace axis, the People report, **Chronology**), and `prSummary` — every ONE-SHOT Haiku feature on
-  the Anthropic API (PR summary, comment validity/addressed/simplify annotations, the blast impact note, conflict-assist) plus all reporting narration. There is no
+  by-workspace axis, the People report, **Chronology**), and `prSummary` — now the blast impact note
+  ONLY. ⚠ **REMOVED 2026-10-18** (plugin code + routes gone, tables DORMANT — DATA-MODEL.md § Dormant
+  Pro plugin tables): the AI PR summary, the per-comment "Check review" (validity/addressed/simplify),
+  the single-thread assess / addressed checks, the per-hunk conflict "Ask Claude", the per-repo
+  digest, the Feed "Discussion themes", the preset prompts and the synthesis `brief`/`rollup` kinds.
+  Claude Review's own thread judgements replaced the comment checks. There is no
   "pro+" tier any more (apiVersion 22). The issue tracker (ticket links, stored tickets, the Open PRs
   ticket stacks) is FREE CORE since apiVersion 23.
 - ⚠ **Bots Monitoring, Reports and Settings → Slack are VISIBLE-BUT-LOCKED, reversing the app's
@@ -1025,12 +1051,8 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
 - ⚠ **A hydrated or derived value must NEVER enter a payload hash.** The free cached-read GET
   recomputes every stored row's hash on a path that hydrates nothing, so a hydrated field
   makes the GET and the run disagree forever — every judgement permanently `stale`, re-billed
-  on every click. Both writers of a shared row must hash the SAME fields (the ONE exported
-  `addressedThreadPayloadHash` / `addressedWindowFor`), and a GitHub fetch belongs INSIDE the
-  batch loop AFTER the hash-cache filter.
-- ⚠ **The evidence window's base anchors on the thread's ROOT comment, never its last** —
-  last-comment anchoring collapses it to `base === head` exactly when the fix WORKED. A
-  RESOLVED thread is still judged: resolving is a click, not evidence.
+  on every click. Both writers of a shared row must hash the SAME fields, and a GitHub fetch
+  belongs INSIDE the batch loop AFTER the hash-cache filter.
 - ⚠ **The D4 digit gate rejects UNICODE numerals, not `[0-9]`** — the synthesis prompt's input
   is attacker-authored. It is `/^[^\p{Nd}\p{No}\p{Nl}]*$/u`; spelled-out counts stay a
   prompt-only rule.
@@ -1449,8 +1471,8 @@ auth plumbing, or any AI route.** Two zero-dependency core plugins own the postu
   neither half may be written. Inside it, `role` is **DERIVED**, never round-tripped off the
   caller's classification (`ReviewerClassification` is role-LESS on purpose), and it **reads
   the stored rows and NARROWS the write list** rather than using a `setWhere`.
-- **A target with no stored annotations must render NOTHING and issue NO request** — read the
-  ONE per-PR `useAnnotationIndex` query, never a per-target hook behind a tier flag.
+- **A PR with no stored impact note renders only its button and issues NO request of its own** —
+  read the ONE per-PR `useAnnotationIndex` query, never a per-target hook behind a tier flag.
 - **A feature can be built, gated and UNREACHABLE — grep for the mount** (`grep '<Component'`).
 - **Two mounts of one paid-generation card must share the MUTATION key, not just the query key**
   (`useIsMutating({mutationKey})`) — per-mount `isPending` resets to "Generate" on a tab switch

@@ -1,6 +1,7 @@
 import type { z as Zod } from "zod";
 import { loadZod } from "../ai/runtime.js";
 import { buildDocCitationsField, buildDocReferencesField } from "../reference-docs/review-refs.js";
+import { THREAD_REASON_CHARS } from "./claude-review/threads.js";
 
 // ⚠ zod is NOT imported here as a value. It comes from the AI runtime (ai/runtime.ts), the SAME
 // install the Agent SDK uses — a second zod instance silently breaks the SDK's tool-schema
@@ -110,26 +111,41 @@ function buildBaseReviewShape(z: ZodNs) {
         "One entry per finding in the 'Previous review' section, each ref at most once. Leave out a ref whose code you cannot see rather than guess. Leave the whole field out when there is no such section.",
       ),
     threads: z
-      .array(
-        z.object({
-          ref: z.string().describe("The thread's ref from the 'Review threads' section, e.g. 'R2'."),
-          validity: z.enum(["valid", "partly_valid", "not_valid", "unclear"]),
-          addressed: z.enum(["addressed", "partly_addressed", "not_addressed", "unclear"]),
-          explanation: z
-            .string()
-            .describe("One or two sentences that name the code you checked."),
-          draftReply: z
-            .string()
-            .nullable()
-            .optional()
-            .describe("Optional: a short reply the author could post on the thread."),
-        }),
-      )
+      .array(buildThreadReportItem(z))
       .optional()
       .describe(
         "Only when the user message has a 'Review threads' section: one entry per thread there, each ref once. Leave out a ref whose code you cannot see rather than guess. Leave the whole field out otherwise.",
       ),
   };
+}
+
+/**
+ * ONE review-thread report — the PR review's `threads` items AND the Check threads pass's
+ * `submit_threads` items (review/claude-review/thread-check.ts), so the two can never drift.
+ * `reason` is asked for (≤ THREAD_REASON_CHARS) but never schema-enforced: the server clips it on reconcile.
+ */
+export function buildThreadReportItem(z: ZodNs) {
+  return z.object({
+    ref: z.string().describe("The thread's ref from the 'Review threads' section, e.g. 'R2'."),
+    validity: z.enum(["valid", "partly_valid", "not_valid", "unclear"]),
+    addressed: z.enum(["addressed", "partly_addressed", "not_addressed", "unclear"]),
+    explanation: z
+      .string()
+      .describe("One or two sentences that name the code you checked."),
+    // ⚠ NO zod `.max()` and not required: a reason a few characters over (or missing) would reject
+    // the WHOLE submit call — findings and story too — when the server's `oneLineReason` clips it
+    // anyway. The limit lives in the description and the clip.
+    reason: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(`One line, at most ${THREAD_REASON_CHARS} characters: why. Shown under the verdict.`),
+    draftReply: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Optional: a short reply the author could post on the thread."),
+  });
 }
 
 export type SubmitReviewShape = ReturnType<typeof buildBaseReviewShape>;

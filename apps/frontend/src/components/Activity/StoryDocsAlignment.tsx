@@ -38,6 +38,7 @@ import { AiRunGate } from '../AiSetup.js';
 import { DocLink } from '../DocReferences.js';
 import { CheckCircleIcon, PartialCircleIcon, WarningIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
+import { AiStatusLine } from '../AiStatusLine.js';
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const BTN =
@@ -180,7 +181,12 @@ export function StoryDocsAlignmentBlock({
           </span>
         )}
       </div>
-      {progress != null && <p className={`text-xs ${MUTED}`}>{progress}</p>}
+      {progress != null && (
+        <AiStatusLine
+          stage={progress}
+          since={!starting && data.run != null ? data.run.createdAt : null}
+        />
+      )}
       {failed != null && <p className="text-xs text-red-600 dark:text-red-400">{failed.error ?? 'The docs check failed.'}</p>}
       {refusal != null && <p className={`text-xs ${MUTED}`}>{refusal}</p>}
       {start.isError && !clickStale && <p className="text-xs text-red-600 dark:text-red-400">{start.error.message}</p>}

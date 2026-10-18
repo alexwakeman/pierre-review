@@ -257,7 +257,7 @@ an immutable parent (a comment never changes PR or author), not a second writabl
 live fact, so the "one fact, one grain" rule is not in play.
 
 **`target_id` is not a foreign key** — it lives in three id spaces, so no single FK can express
-it (the same shape the plugin's `pr_comment_annotations` uses). Cleanup rides the cascading
+it. Cleanup rides the cascading
 `pr_id` FK, which is why this table is deliberately **absent from `deleteRepo` and
 `deletePrSubtree`** (the `search_index` precedent). It **is** in `accountScopedTables()` and is
 deleted explicitly in `eraseAccountData`, because erasure must not depend on which dialect

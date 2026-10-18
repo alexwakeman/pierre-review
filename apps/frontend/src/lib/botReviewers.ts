@@ -31,7 +31,7 @@ import type { WorkspaceReviewer } from '@pierre-review/shared';
 // refactor claims to have closed.
 //
 // Pure and exported so each rule is a test rather than a comment (test/botReviewers.test.ts) —
-// the established pattern here (see lib/annotationRun.ts, lib/prRef.ts, lib/botCost.ts).
+// the established pattern here (see lib/prRef.ts, lib/botCost.ts).
 
 // ── Buckets ─────────────────────────────────────────────────────────────────────────────────
 

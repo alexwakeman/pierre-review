@@ -33,6 +33,8 @@ const setReviewThreadResolved = vi.fn();
 const fetchHeadShaFor = vi.fn();
 const fetchPrFilesWithPatch = vi.fn();
 const postInlineComment = vi.fn();
+const fetchViewerLatestDecisiveReview = vi.fn();
+const dismissPrReview = vi.fn();
 vi.mock('../../github/mutations.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   closePullRequest,
@@ -45,6 +47,8 @@ vi.mock('../../github/mutations.js', async (importOriginal) => ({
   fetchHeadShaFor,
   fetchPrFilesWithPatch,
   postInlineComment,
+  fetchViewerLatestDecisiveReview,
+  dismissPrReview,
 }));
 // ⚠ SPREAD: `getAccountUserId` must stay real — it resolves the viewer for the permission checks.
 vi.mock('../../auth/account.js', async (importOriginal) => ({
@@ -299,6 +303,64 @@ describe('PR write routes raise the change signal before replying', () => {
     const res = await inject('POST', `/api/prs/${openPr}/approve`, {});
     expect(res.statusCode).toBe(200);
     expectSignalledBeforeReply(repoA);
+  });
+
+  it('withdraw approval: dismisses the viewer\'s approval, stamps it dismissed, signals', async () => {
+    fetchViewerLatestDecisiveReview.mockResolvedValue({
+      databaseId: 77,
+      nodeId: 'PRR_wd',
+      state: 'APPROVED',
+      body: '',
+      submittedAt: new Date(now).toISOString(),
+    });
+    dismissPrReview.mockResolvedValue({ ok: true });
+    const res = await inject('POST', `/api/prs/${openPr}/withdraw-approval`);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ state: 'dismissed' });
+    expect(dismissPrReview).toHaveBeenCalledWith('tok', expect.anything(), expect.anything(), expect.anything(), 77, 'Approval withdrawn in Limn.');
+    expect(fetchViewerLatestDecisiveReview.mock.calls[0]![4]).toBe(VIEWER_LOGIN);
+    const rows = await db.select().from(schema.reviews).where(eq(schema.reviews.githubNodeId, 'PRR_wd')).execute();
+    expect(rows.map((r: any) => r.state)).toEqual(['dismissed']);
+    expectSignalledBeforeReply(repoA);
+  });
+
+  it('withdraw approval with no approval to withdraw: 409, nothing dismissed, no signal', async () => {
+    fetchViewerLatestDecisiveReview.mockResolvedValue({
+      databaseId: 78,
+      nodeId: 'PRR_rc2',
+      state: 'CHANGES_REQUESTED',
+      body: '',
+      submittedAt: new Date(now).toISOString(),
+    });
+    const res = await inject('POST', `/api/prs/${openPr}/withdraw-approval`);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('NotApproved');
+    expect(dismissPrReview).not.toHaveBeenCalled();
+    expectNoSignal();
+  });
+
+  it("withdraw approval refused by GitHub: GitHub's status and words, no signal", async () => {
+    fetchViewerLatestDecisiveReview.mockResolvedValue({
+      databaseId: 79,
+      nodeId: 'PRR_no',
+      state: 'APPROVED',
+      body: '',
+      submittedAt: new Date(now).toISOString(),
+    });
+    dismissPrReview.mockResolvedValue({ ok: false, status: 422, message: 'Only admins can dismiss reviews.' });
+    const res = await inject('POST', `/api/prs/${openPr}/withdraw-approval`);
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toEqual({
+      error: 'GitHubRefused',
+      message: "GitHub didn't let you withdraw this approval: Only admins can dismiss reviews.",
+    });
+    expectNoSignal();
+  });
+
+  it('withdraw approval on another tenant\'s PR is a 404', async () => {
+    const res = await inject('POST', `/api/prs/${foreignPrId}/withdraw-approval`);
+    expect(res.statusCode).toBe(404);
+    expect(fetchViewerLatestDecisiveReview).not.toHaveBeenCalled();
   });
 
   it('a request-changes review (a blank message is sent as the default text)', async () => {

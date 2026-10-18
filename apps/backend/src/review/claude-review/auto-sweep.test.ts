@@ -512,3 +512,74 @@ describe('runAutoReviewSweep — the 20-minute ceiling', () => {
     expect(enqueued).toEqual([]); // a fresh burst: the 5-minute quiet applies again
   });
 });
+
+// A SAME-HEAD COMMENT BURST IS A LIGHT CHECK THREADS PASS (2026-10-18), unless a Limn finding got a
+// reply (that needs the full review), and a check that already reached the burst covers it.
+const checkStarts: any[] = [];
+let latestCheck: any = null;
+vi.mock('./thread-check.js', () => ({
+  threadCheckHeld: () => false,
+  threadCheckAutoRoom: () => 20,
+  startThreadCheck: async (_ctx: unknown, a: any) => {
+    checkStarts.push(a);
+    return { outcome: 'queued', checkId: 1, threadsSent: 1 };
+  },
+}));
+vi.mock('./thread-check-persist.js', () => ({
+  getLatestThreadCheck: async () => latestCheck,
+  countAutoThreadChecksSince: async () => 0,
+}));
+vi.mock('../ci-review/persist.js', () => ({ getCiPrContext: async () => ({ repoId: 3 }) }));
+
+const { commentBurstRoute } = await import('./auto.js');
+describe('comment bursts → Check threads', () => {
+  it('routes: own-finding reply ⇒ review; covered ⇒ nothing; otherwise a check', () => {
+    expect(commentBurstRoute({ commentsAtMs: 10, reviewCoveredMs: 5, newestOwnThreadCommentAtMs: 8, checkCoveredMs: 10 })).toBe('review');
+    expect(commentBurstRoute({ commentsAtMs: 10, reviewCoveredMs: 9, newestOwnThreadCommentAtMs: 8, checkCoveredMs: 10 })).toBe('covered');
+    expect(commentBurstRoute({ commentsAtMs: 10, reviewCoveredMs: 5, newestOwnThreadCommentAtMs: null, checkCoveredMs: 9 })).toBe('check');
+    expect(commentBurstRoute({ commentsAtMs: 10, reviewCoveredMs: null, newestOwnThreadCommentAtMs: null, checkCoveredMs: null })).toBe('check');
+  });
+
+  const ctxWithThreads = (ownAt: number | null) =>
+    makeCtx({
+      queries: {
+        getAutoReviewCandidates: async () => answers.get(7) ?? null,
+        loadReviewThreads: async () => ({
+          threads: [],
+          newestCommentAt: null,
+          newestOwnThreadCommentAt: ownAt == null ? null : new Date(ownAt),
+        }),
+      },
+    });
+
+  it('starts a check (not a review) once the burst settles', async () => {
+    checkStarts.length = 0;
+    latestCheck = null;
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [{ prId: 40, headSha: 'h', commentsAtMs: NOW - 1000, coveredMs: NOW - 5000 } as any] });
+    const ctx = ctxWithThreads(null);
+    await runAutoReviewSweep(ctx, NOW);
+    expect(checkStarts).toHaveLength(0); // settling
+    expect(autoReviewWaiting(40, 1)).toBe('comments');
+    const r = await runAutoReviewSweep(ctx, NOW + AUTO_REREVIEW_SETTLE_MS);
+    expect(r.checksQueued).toBe(1);
+    expect(enqueued).toEqual([]);
+    expect(checkStarts[0]).toMatchObject({ prId: 40, trigger: 'auto', repoId: 3, commentsThrough: new Date(NOW - 1000) });
+  });
+
+  it('a reply on a Limn finding keeps the full review; a covering check does nothing', async () => {
+    checkStarts.length = 0;
+    latestCheck = null;
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [{ prId: 41, headSha: 'h', commentsAtMs: NOW - 1000, coveredMs: NOW - 5000 } as any] });
+    await runAutoReviewSweep(ctxWithThreads(NOW - 2000), NOW);
+    await runAutoReviewSweep(ctxWithThreads(NOW - 2000), NOW + AUTO_REREVIEW_SETTLE_MS);
+    expect(enqueued).toEqual([[1, 41]]);
+    expect(checkStarts).toHaveLength(0);
+
+    _resetAutoReReviewForTest();
+    latestCheck = { headSha: 'h', commentsThrough: new Date(NOW - 1000), createdAt: new Date(NOW - 900) };
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [{ prId: 42, headSha: 'h', commentsAtMs: NOW - 1000, coveredMs: NOW - 5000 } as any] });
+    await runAutoReviewSweep(ctxWithThreads(null), NOW + AUTO_REREVIEW_MAX_WAIT_MS);
+    expect(checkStarts).toHaveLength(0);
+    expect(autoReviewWaiting(42, 1)).toBeNull();
+  });
+});

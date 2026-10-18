@@ -111,8 +111,7 @@ export function usePrStoppedIntent(prId: number | null): ArmedMergeRequest | nul
 //
 // ⚠ KEYED BY prId, NEVER BY CARD ID — the card id is the thing that changes.
 //
-// A module-level store rather than a `store/filters.ts` slice, following `useAnnotations`' RUNNING
-// set: this is per-PR interaction state with one reader and one writer, it never reaches the URL,
+// A module-level store rather than a `store/filters.ts` slice: this is per-PR interaction state with one reader and one writer, it never reaches the URL,
 // and it must never be persisted (a confirmation left open yesterday is not consent today). The
 // filters store is persisted AND mirrored to the URL, so putting a consent step in it would make
 // both true by accident.

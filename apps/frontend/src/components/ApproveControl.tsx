@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { REQUEST_CHANGES_DEFAULT_BODY } from '@pierre-review/shared';
-import { useApprovePr, useRequestChangesPr } from '../hooks/usePrWrites.js';
+import { useApprovePr, useRequestChangesPr, useWithdrawApproval } from '../hooks/usePrWrites.js';
 import { ApiError } from '../api/client.js';
 import { MentionTextarea } from './MentionTextarea.js';
 import { CheckIcon, CommentIcon, WarningIcon } from './Icons.js';
 
 type Standing = 'approved' | 'changes_requested' | null;
-type Panel = 'approve-comment' | 'request-changes' | null;
+type Panel = 'approve-comment' | 'request-changes' | 'withdraw' | null;
 
 const GREEN_BTN =
   'inline-flex items-center gap-1 whitespace-nowrap rounded border border-green-500 px-2 py-0.5 text-sm font-medium text-green-700 hover:bg-green-50 disabled:opacity-50 dark:border-green-600 dark:text-green-400 dark:hover:bg-green-900/30';
@@ -25,9 +25,13 @@ const GREY_BTN =
 //                         "Changes requested." (GitHub refuses an empty request-changes review),
 //                         and the placeholder says so.
 //
+//   Withdraw approval     only while YOUR approval stands. Asks first ("Withdraw your approval?"),
+//                         then GitHub dismisses that review. GitHub's refusal is shown as written.
+//
 // One panel open at a time. After an approval both approve buttons collapse to a disabled
-// "Approved" chip and Request changes stays — GitHub lets you change your verdict. After a
-// request for changes a "Changes requested" chip shows and all three buttons stay.
+// "Approved" chip beside "Withdraw approval", and Request changes stays — GitHub lets you change
+// your verdict. After a request for changes a "Changes requested" chip shows and all three
+// buttons stay.
 //
 // `standing` is the server's (PrDetail.viewerReviewStanding), so it survives a reload. The local
 // `verdict` bridges the gap between the POST resolving and the ['pr', id] refetch landing —
@@ -43,22 +47,32 @@ export function ApproveControl({
   const [panel, setPanel] = useState<Panel>(null);
   const [message, setMessage] = useState('');
   const [verdict, setVerdict] = useState<Standing>(null);
+  // Set when a withdrawal lands, until the server's standing stops saying "approved" (the same
+  // bridge as `verdict`, for the one write that takes a standing AWAY).
+  const [withdrawn, setWithdrawn] = useState(false);
   const approve = useApprovePr(prId);
   const requestChanges = useRequestChangesPr(prId);
+  const withdraw = useWithdrawApproval(prId);
 
   useEffect(() => {
     if (verdict != null && verdict === standing) setVerdict(null);
   }, [verdict, standing]);
+  useEffect(() => {
+    if (withdrawn && standing !== 'approved') setWithdrawn(false);
+  }, [withdrawn, standing]);
 
-  const effective: Standing = verdict ?? standing;
-  const busy = approve.isPending || requestChanges.isPending;
+  // A newer local verdict always beats the withdrawal bridge (withdraw, then approve again).
+  const effective: Standing = verdict ?? (withdrawn ? null : standing);
+  const busy = approve.isPending || requestChanges.isPending || withdraw.isPending;
 
-  const failed = approve.error ?? requestChanges.error;
+  const failed = approve.error ?? requestChanges.error ?? withdraw.error;
   const error =
     failed instanceof ApiError
       ? failed.message
       : failed
-        ? 'GitHub did not accept the review.'
+        ? withdraw.error != null
+          ? 'GitHub did not withdraw the approval.'
+          : 'GitHub did not accept the review.'
         : null;
 
   const close = (): void => {
@@ -66,11 +80,13 @@ export function ApproveControl({
     setMessage('');
     approve.reset();
     requestChanges.reset();
+    withdraw.reset();
   };
 
   const open = (next: Panel): void => {
     approve.reset();
     requestChanges.reset();
+    withdraw.reset();
     setMessage('');
     setPanel(next);
   };
@@ -81,6 +97,7 @@ export function ApproveControl({
     approve.mutate(body, {
       onSuccess: () => {
         setVerdict('approved');
+        setWithdrawn(false);
         setPanel(null);
         setMessage('');
       },
@@ -94,13 +111,42 @@ export function ApproveControl({
     requestChanges.mutate(trimmed || undefined, {
       onSuccess: () => {
         setVerdict('changes_requested');
+        setWithdrawn(false);
         setPanel(null);
         setMessage('');
       },
     });
   };
 
-  const errorLine = error && <span className="text-xs text-red-500">{error}</span>;
+  const doWithdraw = (): void => {
+    if (busy) return;
+    withdraw.mutate(undefined, {
+      onSuccess: () => {
+        setVerdict(null);
+        setWithdrawn(true);
+        setPanel(null);
+      },
+    });
+  };
+
+  const errorLine = error && (
+    <span className="text-xs text-red-600 dark:text-red-400">{error}</span>
+  );
+
+  if (panel === 'withdraw') {
+    return (
+      <div className="flex flex-wrap items-center gap-2" data-testid="withdraw-approval-confirm">
+        <span className="text-sm">Withdraw your approval?</span>
+        <button type="button" onClick={doWithdraw} disabled={busy} className={AMBER_BTN}>
+          {withdraw.isPending ? 'Withdrawing…' : 'Yes, withdraw'}
+        </button>
+        <button type="button" onClick={close} disabled={busy} className={GREY_BTN}>
+          Cancel
+        </button>
+        {errorLine}
+      </div>
+    );
+  }
 
   if (panel != null) {
     const isApprove = panel === 'approve-comment';
@@ -131,12 +177,7 @@ export function ApproveControl({
               <CheckIcon /> {approve.isPending ? 'Approving…' : 'Approve'}
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={doRequestChanges}
-              disabled={busy}
-              className={AMBER_BTN}
-            >
+            <button type="button" onClick={doRequestChanges} disabled={busy} className={AMBER_BTN}>
               <WarningIcon /> {requestChanges.isPending ? 'Sending…' : 'Request changes'}
             </button>
           )}
@@ -152,14 +193,24 @@ export function ApproveControl({
   return (
     <div className="flex flex-wrap items-center gap-2">
       {effective === 'approved' ? (
-        <button
-          type="button"
-          disabled
-          title="Your approval stands"
-          className="inline-flex cursor-default items-center gap-1 rounded border border-green-500/40 px-2 py-0.5 text-sm font-medium text-green-700/70 dark:border-green-700/50 dark:text-green-400/70"
-        >
-          <CheckIcon /> Approved
-        </button>
+        <>
+          <button
+            type="button"
+            disabled
+            title="Your approval stands"
+            className="inline-flex cursor-default items-center gap-1 rounded border border-green-500/40 px-2 py-0.5 text-sm font-medium text-green-700/70 dark:border-green-700/50 dark:text-green-400/70"
+          >
+            <CheckIcon /> Approved
+          </button>
+          <button
+            type="button"
+            onClick={() => open('withdraw')}
+            disabled={busy}
+            className={GREY_BTN}
+          >
+            Withdraw approval
+          </button>
+        </>
       ) : (
         <>
           {effective === 'changes_requested' && (

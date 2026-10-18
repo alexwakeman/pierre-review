@@ -1321,6 +1321,50 @@ export const ciReviewItems = pgTable(
   }),
 );
 
+// CHECK THREADS (migration 0122 / pg 0109). Twin of schema.sqlite.ts — read its comment.
+export const claudeThreadChecks = pgTable(
+  'claude_thread_checks',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    // Composite FK below (no single-column one).
+    prId: integer('pr_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    headSha: text('head_sha').notNull(),
+    trigger: text('trigger', { enum: ['manual', 'auto'] }).notNull().default('manual'),
+    status: text('status', {
+      enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
+    }).notNull(),
+    model: text('model').notNull(),
+    threadsSent: integer('threads_sent'),
+    threadAssessments: jsonb('thread_assessments').$type<ClaudeThreadAssessment[]>(),
+    commentsThrough: timestamp('comments_through', { withTimezone: true, mode: 'date' }),
+    refused: text('refused'),
+    error: text('error'),
+    costUsd: doublePrecision('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }),
+    completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    accountPrIdx: index('ctc_account_pr_created_idx').on(t.accountId, t.prId, t.createdAt),
+    accountWsIdx: index('ctc_account_ws_created_idx').on(t.accountId, t.workspaceId, t.createdAt),
+    prAccountFk: foreignKey({
+      name: 'ctc_pr_account_fk',
+      columns: [t.prId, t.accountId],
+      foreignColumns: [pullRequests.id, pullRequests.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
 // ---- AI Fix (CORE since pg 0061 / sqlite 0074) ----
 // Twin of schema.sqlite.ts aiFixes, where the contract lives. Adopted in place from the plugin;
 // same index names, no foreign keys. (review_learnings was dropped by pg 0062 / sqlite 0075.)

@@ -631,7 +631,7 @@ resolveSprintCadence(ctx, accountId, workspaceId) -> { cadenceDays, startAtMs }
 
 in `packages/pro/src/settings/store.ts`. Every consumer goes through it: `getComparisonWindow`,
 `getInsightsRangeWindow`, `periodGrid` (via `currentSprintWindow`), the People report's grid, the
-sprint report, the preset prompts and the Slack digest.
+sprint report and the Slack digest.
 
 ⚠ **THE ACCOUNT-LEVEL FALLBACK IS GONE (plugin migration 0031).** The resolver reads the workspace
 row or answers "no cadence" — TWO STATES, NO CHAIN. `pro_settings.sprint_cadence_days` /

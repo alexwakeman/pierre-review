@@ -199,6 +199,87 @@ interface RestReview {
   user: { login: string } | null;
 }
 
+// ---- Withdraw approval: the viewer's own latest DECISIVE review, and its dismissal ----
+
+/** A review that decides the viewer's standing (a COMMENTED one never changes it). */
+const DECISIVE_REVIEW_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
+const REVIEW_PAGES_MAX = 10;
+
+export interface ViewerReview {
+  databaseId: number;
+  nodeId: string | null;
+  state: string;
+  body: string;
+  submittedAt: string;
+}
+
+/**
+ * The viewer's LATEST decisive review on a PR, read LIVE (REST, oldest first, 100 per page, at most
+ * REVIEW_PAGES_MAX pages). null when the viewer has none. Its `state` is GitHub's
+ * (APPROVED / CHANGES_REQUESTED / DISMISSED); only an APPROVED one can be withdrawn.
+ */
+export async function fetchViewerLatestDecisiveReview(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+  viewerLogin: string,
+): Promise<ViewerReview | null> {
+  const login = viewerLogin.toLowerCase();
+  let latest: ViewerReview | null = null;
+  for (let page = 1; page <= REVIEW_PAGES_MAX; page += 1) {
+    const rows = await ghRestGetFor<RestReview[]>(
+      token,
+      `/repos/${owner}/${name}/pulls/${number}/reviews?per_page=100&page=${page}`,
+    );
+    for (const r of rows) {
+      if (r.user?.login?.toLowerCase() !== login || !DECISIVE_REVIEW_STATES.has(r.state)) continue;
+      latest = {
+        databaseId: r.id,
+        nodeId: r.node_id,
+        state: r.state,
+        body: r.body ?? '',
+        submittedAt: r.submitted_at ?? new Date().toISOString(),
+      };
+    }
+    if (rows.length < 100) break;
+  }
+  return latest;
+}
+
+/** GitHub's own words from an error body: `message`, plus any `errors[].message`. */
+export function githubErrorMessage(json: unknown, text: string): string {
+  const j = (json ?? {}) as { message?: unknown; errors?: Array<{ message?: unknown } | string> };
+  const parts: string[] = [];
+  if (typeof j.message === 'string' && j.message.trim()) parts.push(j.message.trim());
+  for (const e of Array.isArray(j.errors) ? j.errors : []) {
+    const m = typeof e === 'string' ? e : typeof e?.message === 'string' ? e.message : null;
+    if (m && m.trim() && !parts.includes(m.trim())) parts.push(m.trim());
+  }
+  return parts.length > 0 ? parts.join(' ') : text.slice(0, 300);
+}
+
+/**
+ * Dismiss one review (REST `PUT …/reviews/{id}/dismissals`; GitHub requires a message, and shows it
+ * on the PR's timeline). Never throws on a non-2xx: GitHub refuses with 403 (branch protection
+ * restricts who may dismiss) or 422 (not dismissable), and the caller shows its words.
+ */
+export async function dismissPrReview(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+  reviewId: number,
+  message: string,
+): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
+  const res = await ghRestPutStatus(token, `/repos/${owner}/${name}/pulls/${number}/reviews/${reviewId}/dismissals`, {
+    message,
+    event: 'DISMISS',
+  });
+  if (res.ok) return { ok: true };
+  return { ok: false, status: res.status, message: githubErrorMessage(res.json, res.text) };
+}
+
 // Submit ONE PR review (inline comments + body + verdict) in a single call. The
 // REST reviews endpoint is required for inline line comments. `commitId` pins the
 // review to a head SHA so it 409s/422s if the head moved. `comments` are inline

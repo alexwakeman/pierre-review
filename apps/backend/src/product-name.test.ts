@@ -85,10 +85,10 @@ describe('the product name is Limn', () => {
 // ⚠ SKIPPED, NOT SILENTLY PASSED, when the submodule is absent — and every scan inside uses
 // `read()`, which THROWS on a path that has moved. See `hasPlugin`.
 describe.skipIf(!hasPlugin)('no user-visible "Pierre" in the plugin\'s rendered strings', () => {
-  // The plugin's one-shot prompts. (The CI-analysis prompt, whose `##` headings once said
-  // "Fixability by Pierre", is gone: Claude Review diagnoses failing CI in core.)
+  // The plugin's one-shot prompts — the impact note's, the one per-PR prompt left. (The CI-analysis
+  // and PR-summary prompts in `ai-fix/prompts.ts` are gone.)
   it('the plugin prompts carry no old brand outside comments', () => {
-    const src = read('packages/pro/src/ai-fix/prompts.ts');
+    const src = read('packages/pro/src/annotations/prompts.ts');
     const emitted = src.split('\n').filter((l) => !l.trimStart().startsWith('//'));
     expect(emitted.length).toBeGreaterThan(0); // the scan found the file, not an empty one
     for (const l of emitted) expect(l).not.toMatch(OLD_BRAND);

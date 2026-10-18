@@ -56,7 +56,7 @@ const ROWS: Row[] = [
   {
     q: 'What happened on this pull request?',
     free: 'Every thread triaged — untouched, replied, likely addressed, resolved. Blast radius, blockers, merge verdict.',
-    pro: 'A short written summary, a read on what a red build means, and a check on whether a comment was really addressed.',
+    pro: 'A short note on what the change could break and what to read first.',
   },
   {
     q: 'Can I act without leaving?',

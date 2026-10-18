@@ -19,7 +19,10 @@ import {
   THREADS_MAX,
   THREAD_COMMENTS_SHOWN,
   THREAD_EXPLANATION_CHARS,
+  THREAD_REASON_CHARS,
+  oneLineReason,
   planThreadReview,
+  pushReviewThreadsSection,
   reconcileThreads,
   threadFixSeedBlock,
 } from './threads.js';
@@ -37,6 +40,7 @@ function thread(id: number, over: Partial<ReviewThreadForReview> & { bot?: boole
     line: id,
     isOutdated: false,
     derivedState: 'untouched',
+    isResolved: false,
     url: `https://github.com/acme/api/pull/1#discussion_r${id}`,
     comments: [
       { authorLogin: bot ? 'coderabbitai[bot]' : 'alice', authorIsBot: bot, createdAt: new Date(at), body },
@@ -246,3 +250,59 @@ describe('AI Fix seed block', () => {
     expect(threadFixSeedBlock([judged(2, { validity: 'not_valid' })], NONCE, isThreadToFix)).toBe('');
   });
 });
+
+// RESOLVED THREADS + THE ONE-LINE REASON (2026-10-18).
+describe('resolved threads and the reason', () => {
+  it('sends resolved threads AFTER every unresolved one, and marks them resolved', () => {
+    const plan = planThreadReview(
+      [thread(1, { isResolved: true }), thread(2), thread(3, { bot: true }), thread(4, { isResolved: true, bot: true })],
+      HEAD,
+      null,
+    );
+    expect(plan.sent.map((s) => s.thread.threadId)).toEqual([2, 3, 1, 4]);
+    const out = reconcileThreads(plan, []);
+    expect(out.find((a) => a.threadId === 1)?.resolved).toBe(true);
+    expect(out.find((a) => a.threadId === 2)?.resolved).toBe(false);
+  });
+
+  it('a resolve since the judgement is news: the thread is sent again, not carried', () => {
+    const prior = [judged(1, { resolved: false })];
+    const plan = planThreadReview([thread(1, { isResolved: true })], HEAD, prior);
+    expect(plan.carried).toHaveLength(0);
+    expect(plan.sent.map((s) => s.thread.threadId)).toEqual([1]);
+    // An older stored item has no `resolved` flag: it reads as unresolved, so an open thread carries.
+    const { resolved: _r, ...legacy } = judged(1);
+    expect(planThreadReview([thread(1)], HEAD, [legacy as ClaudeThreadAssessment]).carried).toHaveLength(1);
+  });
+
+  it('stores the reason on one line, clipped to THREAD_REASON_CHARS', () => {
+    expect(oneLineReason('  The fix\n  covers   it. ')).toBe('The fix covers it.');
+    expect(oneLineReason('')).toBeNull();
+    expect(oneLineReason(undefined)).toBeNull();
+    const long = oneLineReason('x'.repeat(THREAD_REASON_CHARS + 30))!;
+    expect(long.length).toBe(THREAD_REASON_CHARS + 1); // + the ellipsis
+    const plan = planThreadReview([thread(1)], HEAD, null);
+    const [a] = reconcileThreads(plan, [
+      { ref: 'R1', validity: 'valid', addressed: 'addressed', explanation: 'Done.', reason: 'Renamed\nin a.ts.' },
+    ]);
+    expect(a!.reason).toBe('Renamed in a.ts.');
+    // Not reported ⇒ no reason.
+    expect(reconcileThreads(plan, [])[0]!.reason).toBeNull();
+  });
+
+  it('the prompt says which threads are resolved and asks for the reason', () => {
+    const lines: string[] = [];
+    pushReviewThreadsSection(lines, planThreadReview([thread(1), thread(2, { isResolved: true })], HEAD, null), 'worktree', NONCE);
+    const text = lines.join('\n');
+    expect(text).toContain('Resolved on GitHub: no.');
+    expect(text).toContain('Resolved on GitHub: yes.');
+    expect(text).toContain(`at most ${THREAD_REASON_CHARS} characters`);
+  });
+
+  it('a resolved thread is never to fix, and never seeds AI Fix', () => {
+    expect(isThreadToFix(judged(1, { resolved: true }))).toBe(false);
+    expect(isThreadToFix(judged(1))).toBe(true);
+    expect(threadFixSeedBlock([judged(1, { resolved: true })], NONCE, () => true)).toBe('');
+  });
+});
+
