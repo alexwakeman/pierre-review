@@ -138,8 +138,7 @@ function LaneHeader({ lane }: { lane: BoardLayout<SprintLaneData, SprintCardData
       <div className="space-y-1">
         {name}
         {d.summary != null && <p className="text-[12px] leading-snug text-gray-700 dark:text-gray-200">{d.summary}</p>}
-        <LaneLine progress={d.progress} code={d.code} />
-        <SegmentBar segments={d.segments} lane={lane.label} />
+        <SegmentBar segments={d.segments} lane={lane.label} progress={d.progress} code={d.code} />
       </div>
     );
   }
@@ -151,21 +150,8 @@ function LaneHeader({ lane }: { lane: BoardLayout<SprintLaneData, SprintCardData
         {/* null = no GitHub account mapped: say nothing, never 0. */}
         {d.reviewsWaiting != null && ` · ${d.reviewsWaiting} ${d.reviewsWaiting === 1 ? 'review' : 'reviews'} waiting`}
       </p>
-      <LaneLine progress={d.progress} code={d.code} />
-      <SegmentBar segments={d.segments} lane={lane.label} />
+      <SegmentBar segments={d.segments} lane={lane.label} progress={d.progress} code={d.code} />
     </div>
-  );
-}
-
-/** CODE's row line: the lane's tickets by column, then how many have a pull request. */
-function LaneLine({ progress, code }: { progress: string; code: string }): JSX.Element | null {
-  if (progress === '' && code === '') return null;
-  return (
-    <p className={`text-[11px] leading-snug ${MUTED}`}>
-      {progress}
-      {progress !== '' && code !== '' && <br />}
-      {code}
-    </p>
   );
 }
 
@@ -178,13 +164,25 @@ const SEGMENT_FILL: Record<SprintStage | 'unknown', string> = {
   unknown: 'bg-gray-200 dark:bg-gray-700',
 };
 
-/** A lane's tickets per column, as one bar. Hovering or focusing it shows its key (each part's colour,
- *  column and count) beside it, clear of the cards where it can be. */
-function SegmentBar({ segments, lane }: { segments: readonly LaneSegment[]; lane: string }): JSX.Element | null {
+/** A lane's tickets per column, as one bar. Hovering or focusing it shows CODE's row lines (the
+ *  lane's tickets by column, then how many have a pull request) and the bar's colour key beside it,
+ *  clear of the cards where it can be. ⚠ Those lines live HERE ONLY, never inline under the row's
+ *  name: the header carries the name (and a theme's summary), the popover carries the counts. */
+function SegmentBar({
+  segments,
+  lane,
+  progress,
+  code,
+}: {
+  segments: readonly LaneSegment[];
+  lane: string;
+  progress: string;
+  code: string;
+}): JSX.Element | null {
   const obstacles = useBoardObstacles();
   const total = segments.reduce((s, x) => s + x.count, 0);
   if (total === 0) return null;
-  const words = segments.map((s) => `${s.count} ${s.name}`).join(', ');
+  const words = [progress || segments.map((s) => `${s.count} ${s.name}`).join(', '), code].filter((w) => w !== '').join('. ');
   return (
     <HoverPopover
       label={`${lane}: ${words}`}
@@ -193,8 +191,9 @@ function SegmentBar({ segments, lane }: { segments: readonly LaneSegment[]; lane
       className="block w-full max-w-[9rem] py-1"
       content={
         <div data-testid="segment-key">
-          <p className="font-semibold">Tickets by column</p>
-          <ul className="mt-1 space-y-0.5">
+          {progress !== '' && <p data-testid="lane-progress">{progress}</p>}
+          {code !== '' && <p data-testid="lane-code">{code}</p>}
+          <ul className="mt-1.5 space-y-0.5">
             {segments.map((s) => (
               <li key={s.column} className="flex items-center gap-1.5">
                 <span aria-hidden className={`inline-block h-2 w-3 shrink-0 rounded-sm ${SEGMENT_FILL[s.meaning ?? 'unknown']}`} />

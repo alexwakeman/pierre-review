@@ -203,6 +203,7 @@ export function ClaudeReviewBanner(): JSX.Element | null {
   return (
     <HeaderToast
       testId="claude-review-toast"
+      tone="ai"
       label="Claude reviews"
       icon={<ReviewIcon size={13} />}
       summary={running.length > 0 ? `${running.length} running` : `${ready} ready`}

@@ -221,6 +221,7 @@ export function DependencyMergeToast(): JSX.Element | null {
   return (
     <HeaderToast
       testId="dependency-merge-toast"
+      tone="merge"
       label="Dependency updates"
       icon={<PendingDependencyIcon size={13} />}
       summary={parts.length > 0 ? parts.join(' · ') : 'Nothing changed.'}

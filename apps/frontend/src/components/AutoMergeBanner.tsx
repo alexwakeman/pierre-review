@@ -532,6 +532,7 @@ export function AutoMergeBanner(): JSX.Element | null {
   return (
     <HeaderToast
       testId="auto-merge-toast"
+      tone="merge"
       label="Merge when ready"
       icon={<MergeIcon size={13} />}
       summary={summary}

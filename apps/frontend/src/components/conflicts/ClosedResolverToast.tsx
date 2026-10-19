@@ -40,6 +40,7 @@ export function ClosedResolverToast(): JSX.Element | null {
   return (
     <HeaderToast
       testId="closed-resolver-toast"
+      tone="conflicts"
       label={where}
       icon={<ConflictIcon size={13} />}
       summary={closedToast(lastClosed.decidedCount)}

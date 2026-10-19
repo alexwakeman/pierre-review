@@ -23,10 +23,16 @@ import { CloseIcon } from './Icons.js';
 //  • ONE LINE BY DEFAULT. The slot has a fixed width and height, so a card appearing, changing
 //    or disappearing never moves the header's other controls; many cards scroll the strip
 //    sideways.
-//  • IT EXPANDS ON HOVER AND ON KEYBOARD FOCUS, only when its content is longer than the line,
-//    and the expanded panel OVERLAYS THE PAGE (`position: fixed` at the slot's own rect) rather
-//    than growing the header. Fixed, not absolute, because the strip is a horizontal scroller and
-//    a scroller clips both axes. Any scroll or resize collapses it (the measured rect is stale).
+//  • IT EXPANDS ON CLICK (or Enter / Space on its focused toggle), NEVER ON HOVER OR FOCUS, and
+//    only when its content is longer than the line. A card that opened under a passing pointer
+//    covered the page the reader was aiming at. The expanded panel OVERLAYS THE PAGE
+//    (`position: fixed` at the slot's own rect) rather than growing the header. Fixed, not
+//    absolute, because the strip is a horizontal scroller and a scroller clips both axes. It
+//    closes on a second click on the card's line, on any click outside the panel, on Escape, and on
+//    any scroll or resize (the measured rect is stale). The X and an on-line action never toggle it.
+//  • ITS BORDER NAMES ITS SOURCE (`tone`): AI vermilion, the merge violet, the sync sky, the
+//    Pending amber, the resolver's conflict red. Border only — the background stays neutral, and
+//    the icon + label still say the same thing in words, so the colour is never the only signal.
 //  • THE X IS THE TOAST'S OWN DISMISS — `onDismiss` absent means the toast is not dismissible
 //    (an indicator, or one whose dismiss is gated, like a running AI fix) and gets no X.
 //  • A PROGRESS BAR STAYS VISIBLE ON THE COLLAPSED LINE.
@@ -76,7 +82,25 @@ interface CommonProps {
   testId?: string;
   /** Extra classes on the slot (e.g. a fade-out opacity). */
   className?: string;
+  /** Where the toast comes from — colours the card's BORDER only. Default `neutral`. */
+  tone?: HeaderToastTone;
 }
+
+/** A toast's source, as a border colour. Each reuses the accent its home surface already wears. */
+export type HeaderToastTone = 'neutral' | 'ai' | 'merge' | 'sync' | 'attention' | 'conflicts';
+
+// Non-text colours only (a border), so none of these carries words and none needs a text-contrast
+// pairing. `ai-signal-fill` is the AI surface's NON-TEXT accent and flips with the theme by itself;
+// violet is the merge family's own (MergeControl's buttons); sky-500 is the sync/selection accent;
+// amber-500 is the Pending rail entry's stopwatch; `--mr-conflict` is the resolver's conflict type.
+export const HEADER_TOAST_TONE_BORDER: Record<HeaderToastTone, string> = {
+  neutral: 'border-gray-200 dark:border-gray-700',
+  ai: 'border-ai-signal-fill',
+  merge: 'border-violet-500 dark:border-violet-600',
+  sync: 'border-sky-500',
+  attention: 'border-amber-500',
+  conflicts: 'border-[rgb(var(--mr-conflict))]',
+};
 
 interface HeaderToastProps extends CommonProps {
   /** The rest of the one line, after the label. */
@@ -104,21 +128,16 @@ const PANEL_MIN_W = 320;
 const GUTTER = 8;
 
 /**
- * The expand/collapse mechanics shared by both card shapes: the slot holds the place in the strip,
- * the panel is the card, and it lifts out to `position: fixed` while expanded.
+ * The expand/collapse mechanics: the slot holds the place in the strip, the panel is the card, and
+ * it lifts out to `position: fixed` while expanded. Opening is a CLICK on the card's line (the
+ * toggle button inside it takes Enter / Space natively, and its click bubbles to the same handler).
  */
 function useExpandable(): {
   slotRef: React.RefObject<HTMLDivElement>;
   panelRef: React.RefObject<HTMLDivElement>;
   expanded: boolean;
   panelStyle: CSSProperties | undefined;
-  handlers: {
-    onMouseEnter: () => void;
-    onMouseLeave: () => void;
-    onFocus: () => void;
-    onBlur: (e: React.FocusEvent) => void;
-    onKeyDown: (e: React.KeyboardEvent) => void;
-  };
+  toggle: () => void;
 } {
   const id = useToastId();
   const ctx = useContext(ExpandedCtx);
@@ -126,8 +145,6 @@ function useExpandable(): {
   const [rect, setRect] = useState<DOMRect | null>(null);
   const slotRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const hoverRef = useRef(false);
-  const focusRef = useRef(false);
 
   // Only one card is expanded at a time across the strip.
   const expanded = localOpen && rect != null && (ctx == null || ctx.openId === id);
@@ -159,17 +176,40 @@ function useExpandable(): {
     ctx?.setOpenId(id);
   };
 
-  // A measured rect goes stale on any scroll (the strip, the page) or resize — collapse rather
-  // than float in the wrong place. A scroll INSIDE the expanded panel is the reader reading.
+  const toggle = (): void => {
+    if (expanded) collapse();
+    else tryExpand();
+  };
+
+  // While open: a press OUTSIDE the panel closes it, and so does Escape wherever focus is. A
+  // measured rect goes stale on any scroll (the strip, the page) or resize — collapse rather than
+  // float in the wrong place. A scroll INSIDE the expanded panel is the reader reading.
+  // `pointerdown`, not `click`: a press on another card's line closes this one before that card's
+  // own click opens it, so the one-open-at-a-time rule never sees two.
   useEffect(() => {
     if (!expanded) return;
+    const inside = (t: EventTarget | null): boolean =>
+      panelRef.current != null && t instanceof Node && panelRef.current.contains(t);
+    const onPointerDown = (e: PointerEvent): void => {
+      if (!inside(e.target)) collapse();
+    };
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        collapse();
+      }
+    };
     const onScroll = (e: Event): void => {
-      if (panelRef.current && e.target instanceof Node && panelRef.current.contains(e.target)) return;
+      if (inside(e.target)) return;
       collapse();
     };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKeyDown);
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', collapse);
     return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', collapse);
     };
@@ -200,44 +240,18 @@ function useExpandable(): {
     };
   }
 
-  return {
-    slotRef,
-    panelRef,
-    expanded,
-    panelStyle,
-    handlers: {
-      onMouseEnter: () => {
-        hoverRef.current = true;
-        tryExpand();
-      },
-      onMouseLeave: () => {
-        hoverRef.current = false;
-        if (!focusRef.current) collapse();
-      },
-      onFocus: () => {
-        focusRef.current = true;
-        if (!expanded) tryExpand();
-      },
-      onBlur: (e) => {
-        const next = e.relatedTarget;
-        if (next instanceof Node && panelRef.current?.contains(next)) return;
-        focusRef.current = false;
-        if (!hoverRef.current) collapse();
-      },
-      onKeyDown: (e) => {
-        if (e.key === 'Escape' && expanded) {
-          e.stopPropagation();
-          collapse();
-        }
-      },
-    },
-  };
+  return { slotRef, panelRef, expanded, panelStyle, toggle };
+}
+
+/** Stop a click on the X or an on-line action from reaching the line's toggle. */
+function stop(e: React.SyntheticEvent): void {
+  e.stopPropagation();
 }
 
 const SLOT =
   'relative h-7 shrink-0 sm:w-56 lg:w-64';
 const PANEL_BASE =
-  'rounded-md border border-gray-200 bg-white text-gray-800 outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100';
+  'rounded-md border border-l-[3px] bg-white text-gray-800 dark:bg-gray-900 dark:text-gray-100';
 const PANEL_COLLAPSED = 'absolute inset-0 overflow-hidden';
 const PANEL_EXPANDED = 'z-50 overflow-y-auto shadow-lg';
 
@@ -253,8 +267,9 @@ export function HeaderToast({
   children,
   testId,
   className = '',
+  tone = 'neutral',
 }: HeaderToastProps): JSX.Element {
-  const { slotRef, panelRef, expanded, panelStyle, handlers } = useExpandable();
+  const { slotRef, panelRef, expanded, panelStyle, toggle } = useExpandable();
   // Narrow widths: the icon (and the X, and an action) only; the line's words return on expand.
   const narrowW = onDismiss != null || action != null ? 'w-[4.5rem]' : 'w-10';
   const pct = progress ? Math.max(0, Math.min(100, Math.round(progress.value))) : 0;
@@ -268,28 +283,42 @@ export function HeaderToast({
         ref={panelRef}
         role="group"
         aria-label={label}
-        tabIndex={0}
+        data-tone={tone}
         style={panelStyle}
-        className={`${PANEL_BASE} ${expanded ? PANEL_EXPANDED : PANEL_COLLAPSED}`}
-        {...handlers}
+        className={`${PANEL_BASE} ${HEADER_TOAST_TONE_BORDER[tone]} ${expanded ? PANEL_EXPANDED : PANEL_COLLAPSED}`}
       >
-        <div className="relative flex h-[26px] items-center gap-1.5 px-2">
+        {/* The LINE is the click target (icon, words, empty space); the button inside it is the
+            keyboard stop and carries aria-expanded. Its own click bubbles here, so Enter / Space
+            and a pointer take the one path. */}
+        <div className="relative flex h-[26px] cursor-pointer items-center gap-1.5 px-2" onClick={toggle}>
           <span className="flex shrink-0 items-center text-gray-600 dark:text-gray-300">{icon}</span>
-          <span
-            data-toast-line
-            className={`${expanded ? 'block' : 'hidden sm:block'} min-w-0 flex-1 truncate text-[12px]`}
+          <button
+            type="button"
+            aria-expanded={expanded}
+            className="flex min-w-0 flex-1 self-stretch items-center rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           >
-            <span className="font-semibold">{label}</span>
-            {summary != null && (
-              <span className="text-gray-600 dark:text-gray-300"> · {summary}</span>
-            )}
-          </span>
-          {!expanded && <span className="flex-1 sm:hidden" aria-hidden />}
-          {action != null && <span className="shrink-0">{action}</span>}
+            <span
+              data-toast-line
+              className={`${expanded ? 'block' : 'sr-only sm:not-sr-only sm:block'} min-w-0 flex-1 truncate text-[12px]`}
+            >
+              <span className="font-semibold">{label}</span>
+              {summary != null && (
+                <span className="text-gray-600 dark:text-gray-300"> · {summary}</span>
+              )}
+            </span>
+          </button>
+          {action != null && (
+            <span className="shrink-0" onClick={stop}>
+              {action}
+            </span>
+          )}
           {onDismiss != null && (
             <button
               type="button"
-              onClick={onDismiss}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDismiss();
+              }}
               aria-label={dismissLabel ?? `Dismiss ${label}`}
               title={dismissLabel ?? `Dismiss ${label}`}
               className="-mr-1 shrink-0 rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
@@ -327,7 +356,7 @@ export function HeaderToast({
 /**
  * The "N more" line under a card's capped list, as a control: it reveals every row inside the
  * expanded panel (which scrolls within its max height), then offers "Show fewer". It lives INSIDE
- * the panel, so focusing it keeps the card open and Escape still collapses the card.
+ * the panel, so clicking it keeps the card open and Escape still collapses the card.
  */
 export function ToastShowMore({
   hidden,

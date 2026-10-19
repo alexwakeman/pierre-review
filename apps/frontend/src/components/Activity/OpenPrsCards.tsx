@@ -38,6 +38,7 @@ import { Avatar } from '../CommentCard.js';
 import { CopyButton } from '../CopyButton.js';
 import { githubPrUrl } from '../../lib/prLink.js';
 import { ArrowIcon, CaretIcon, CheckCircleIcon, CheckIcon, ChevronIcon, LinkIcon, MergeIcon, TicketIcon } from '../Icons.js';
+import { TrackerLinkOut } from '../TrackerLinkOut.js';
 import { cardTicketLabel, cardTickets, type CardTicket } from '../../lib/cardTickets.js';
 import {
   cardTicketPills,
@@ -864,6 +865,9 @@ function TicketStack({
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 sm:mt-0.5">
+          {/* The story view's key is plain text (this IS its story), so the way to the ticket itself
+              is this link out; on the board the key links there already. */}
+          {single && t != null && <TrackerLinkOut url={t.url} provider={t.provider} />}
           {review != null && review.canCheck !== false && (
             <StackCoverage ident={review.ident} state={review.state} prId={review.prId} />
           )}

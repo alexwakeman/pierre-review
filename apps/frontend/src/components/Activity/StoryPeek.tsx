@@ -7,7 +7,8 @@
 //   2. else the sprint BRIEF: its summary and numbered criteria, "Not checked against the code yet";
 //   3. else "Reading this ticket…" while the brief pass will still read it;
 //   4. else the start of the ticket's own text.
-// No docs check, no design, no pull requests — "Open story" goes to the story tab for those.
+// No docs check, no design, no pull requests — "Open story" goes to the story tab for those, and
+// "Open in <tracker>" (TrackerLinkOut) to the ticket itself.
 //
 // The same fold as the Story section (lib/ticketStory.ts `storySummaryOf`); the reads are the Story
 // section's own hooks, on the same query keys.
@@ -22,6 +23,7 @@ import { storySummaryOf } from '../../lib/ticketStory.js';
 import { useFilters } from '../../store/filters.js';
 import { ArrowIcon } from '../Icons.js';
 import { CurrencyPill } from '../TicketReviewParts.js';
+import { TrackerLinkOut } from '../TrackerLinkOut.js';
 
 const MUTED = 'text-gray-600 dark:text-gray-300';
 
@@ -105,14 +107,17 @@ export function StoryPeek({ node, onOpenStory }: { node: SprintGraphNode; onOpen
         <p className="text-[12px] font-semibold leading-snug text-gray-900 dark:text-gray-50">{node.title !== '' ? node.title : 'Not read'}</p>
       </div>
       {body}
-      <button
-        type="button"
-        onClick={onOpenStory}
-        className="inline-flex items-center gap-1 rounded text-[12px] font-medium text-sky-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-sky-300"
-      >
-        Open story
-        <ArrowIcon size={11} />
-      </button>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <button
+          type="button"
+          onClick={onOpenStory}
+          className="inline-flex items-center gap-1 rounded text-[12px] font-medium text-sky-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-sky-300"
+        >
+          Open story
+          <ArrowIcon size={11} />
+        </button>
+        <TrackerLinkOut url={node.url} provider={node.provider} />
+      </div>
     </div>
   );
 }

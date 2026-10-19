@@ -2201,7 +2201,9 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
     "Reading this ticket…", else the start of the ticket's text. NO docs check, NO design, NO PRs. Its
     reads (`useTicketReviewStates` — agentic only — then `useTicketReviewById`, and `useTicketStory`) run
     only while it is open: nothing on the board fetches on mount. **The card's corner arrow** and the
-    peek's "Open story" open the STORY VIEW (`useOpenStory`, § The story view).
+    peek's "Open story" open the STORY VIEW (`useOpenStory`, § The story view); beside it, "Open in
+    Jira / Linear / GitHub" (`components/TrackerLinkOut.tsx`: `TRACKER_PROVIDER_LABEL`, the node's url
+    through `safeExternalUrl`, new tab) goes to the ticket itself — absent when there is no url.
 
 - **CRITICAL PATH** (`SprintPathsView`, `Activity/SprintBoards.tsx`; state fold `sprintPathsModel.ts`):
   1. **The pace strip** — CODE's `pace` (`paceItems`), every figure with its denominator: "Day 4 of 14"
@@ -2232,20 +2234,23 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   one line saying why ("Themes appear after Claude reads the sprint." / Claude is off). Header: the
   theme's ONE-OR-TWO-SENTENCE SUMMARY (`SprintTheme.summary`, written by the themes pass — Claude, no
   numbers, what the work involves and whether it is development work; null on "No theme" / "All
-  tickets"), then CODE's ROW LINE (shared `sprintLaneSummary`: "2 In progress, 3 Product review, 8
-  Complete" / "4 with a pull request, 9 without"), then the colour bar per column. ⚠ The model's sentence
-  and the code's counts are labelled apart in the ⓘ. Sprint tickets only.
+  tickets"), then the colour bar per column. CODE's ROW LINES (shared `sprintLaneSummary`: "2 In
+  progress, 3 Product review, 8 Complete" / "4 with a pull request, 9 without") are NOT printed under
+  the name — ⚠ they live ONLY in the colour bar's popover (below), so the model's sentence is the one
+  line of prose on the row and the code's counts sit apart from it. Sprint tickets only.
   An arrow is critical when its two tickets sit next to each other on a stored path; its key is the
   brief's `why`.
 - **PEOPLE** (`SprintPeopleView`, `peopleBoard`) — one lane per assignee, ⚠ **ALPHABETICAL, Unassigned
   last, never sorted by load** (prep, not scoring — the People report's guardrail). A person is
   `SprintGraphResponse.people`'s (shared `sprintMembers`), matched on the tracker spelling. Header: "n
   tickets" and, ONLY when `reviewsWaiting` is a number, "n reviews waiting" — null prints nothing, never
-  0; then the same CODE row line and colour bar as Theme (no model; nothing about the person the data
-  does not show). Cards carry their theme.
+  0; then the same colour bar as Theme, whose popover carries the same CODE row lines (no model; nothing
+  about the person the data does not show). Cards carry their theme.
 - **THE COLOUR BAR** (Theme and People headers; `SegmentBar`): a lane's tickets per column. Hovering or
   focusing it opens a HOVER-ONLY popover (`components/HoverPopover.tsx` — anchored, never following the
-  mouse, `pointer-events-none`, closes when the pointer leaves) with each part's swatch, column and count.
+  mouse, `pointer-events-none`, closes when the pointer leaves) with CODE's two row lines (tickets by
+  column; with / without a pull request — `data-testid` `lane-progress` / `lane-code`), then each
+  part's swatch, column and count. The bar's accessible name carries the same two lines.
   Placed by `lib/avoidRects.ts` clear of the board's cards (`useBoardObstacles`). An arrow BETWEEN two lanes is a hand-off keyed "<person> waits on
   <person>"; one inside a lane keys the brief's `why`.
 
@@ -3241,7 +3246,7 @@ phrase it two ways.
 ONE ticket, Open PRs style: `Ticket/TicketTabView.tsx` renders the SAME ticket stack the Open PRs board
 draws — `OpenPrsCards` with `story={{ticket, merged}}` (`storyStack`, `lib/openPrsStacks.ts`) — never a
 copy. In order: the stack header (key — on the board it opens this story view in a tab, else the tracker link; in the story view itself it is plain text —, title, status, type,
-assignee, PR count, the ticket review's coverage pill + Re-check), the **Story section, ALWAYS OPEN**
+assignee, "Open in <tracker>" (`TrackerLinkOut`, story view only, absent with no url), PR count, the ticket review's coverage pill + Re-check), the **Story section, ALWAYS OPEN**
 (a plain "Story" heading, no disclosure), the open PRs as the Open PRs cards, "Merged (n)", and under
 the stack "Closed without merging (n)", collapsed. It works for a ticket with NO pull request (the stack
 is drawn with no rows; "No pull requests for this ticket yet."). Stacks never collapse, here or on the
@@ -3727,7 +3732,7 @@ migration".
 | Kept | Why |
 |---|---|
 | the `#8957e5` maintainer shield (`MaintainerShield`, `Timeline/userRow.ts`, `UserSelectPanel`, `PeriodPeopleSection`) | maintainer identity, not AI |
-| `MergeControl` / `MergeWhenReadyControl` / PrDetail's "Auto-merge armed" chip | the merge family |
+| `MergeControl` / `MergeWhenReadyControl` / PrDetail's "Auto-merge armed" chip, `HeaderToasts`' `merge` tone border | the merge family |
 | `lib/ui.ts` event-category colours + `.ev-*` dots, `ML_CATEGORY_COLOR`, `BOT_VENDOR_META` vendor accents, `charts/common.tsx` `PALETTE`/`SERIES_COLORS` | DATA ENCODING — hues must stay identical across every chart |
 | `PeriodReportsPanel`'s `LANE_META` (`ai_review` violet, `release` indigo) | the 7-lane palette needs 7 stable distinct hues; vermilion collides with the red already in charts |
 | `BotRoiPanel`'s inflation under-call violet | direction encoding — the drill-down matrix keys on the same hues |
@@ -4338,15 +4343,28 @@ user). App.tsx mounts, left to right: the Claude reviews frame, `AiFixBanner`,
 - **ONE LINE BY DEFAULT.** Each card sits in a fixed-size slot (`h-7`, `sm:w-56 lg:w-64`; below
   `sm` just the icon, plus the X / one action), so a card arriving or leaving never moves the
   header's controls; the strip takes the flexible space and scrolls sideways when full.
-- **EXPANDS ON HOVER AND KEYBOARD FOCUS, only when its content is longer** (vertical overflow, a
-  truncated line, or words hidden at a narrow width). The panel lifts to `position: fixed` at the
-  slot's measured rect and OVERLAYS the page — fixed, not absolute, because the strip is a
-  horizontal scroller and a scroller clips both axes. Any scroll or resize collapses it (the rect
-  is stale); Escape collapses it; only one card is expanded at a time.
+- **EXPANDS ON CLICK, NEVER ON HOVER OR FOCUS, and only when its content is longer** (vertical
+  overflow, a truncated line, or words hidden at a narrow width). The whole line is the click
+  target; a `<button aria-expanded>` inside it is the keyboard stop (Enter / Space) and its click
+  bubbles to the same toggle. A card that opened under a passing pointer covered the page the reader
+  was aiming at. The panel lifts to `position: fixed` at the slot's measured rect and OVERLAYS the
+  page — fixed, not absolute, because the strip is a horizontal scroller and a scroller clips both
+  axes — growing LEFTWARDS from the slot's right edge so the X stays under the pointer. It closes on
+  a second click on the line, on any press outside the panel (`pointerdown`, capture — so pressing
+  another card closes this one before that one opens), on Escape wherever focus is, and on any
+  scroll or resize (the rect is stale). Only one card is expanded at a time. ⚠ The X and the
+  on-line `action` STOP PROPAGATION, so dismissing or pressing Undo / Reopen never toggles the card.
+- **ITS BORDER NAMES ITS SOURCE** (`tone`, `HEADER_TOAST_TONE_BORDER`): `ai` (`border-ai-signal-fill`
+  — Claude reviews, AI fixes), `merge` (the merge family's violet — merge when ready, dependency
+  results), `sync` (`sky-500` — loading data), `attention` (the Pending rail's `amber-500` — My Turn
+  undo), `conflicts` (`--mr-conflict` — the resolver reopen), `neutral` default. Border ONLY: the
+  background stays neutral, and the icon and label already say the same thing in words. Error states
+  keep their own red text and icon.
 - **`HeaderToast` props**: `label` (leads the line, names the card's `role="group"`), `icon` (from
   `Icons.tsx`), `summary`, `action` (ONE compact control kept on the line — Undo, Reopen — never
   hidden behind a hover), `onDismiss` + `dismissLabel` (the X, named "Dismiss …"; ABSENT = not
-  dismissible, no X), `progress` (a bar that stays on the collapsed line), `children` (the detail).
+  dismissible, no X), `progress` (a bar that stays on the collapsed line), `tone` (the border, above),
+  `children` (the detail).
   Each toast keeps its own dismiss semantics: AI fixes and merge-when-ready offer the X only once
   nothing is still running/armed; the loading bar is an INDICATOR with no X and no action; the
   timed toasts (resolver reopen 20s, dependency results 15s, My Turn undo 10s) still auto-remove.
@@ -4354,7 +4372,7 @@ user). App.tsx mounts, left to right: the Claude reviews frame, `AiFixBanner`,
   (merge when ready: 4; dependency results: 3 failures) puts `ToastShowMore` under the list: a
   button "Show N more" (`aria-expanded`, `aria-controls` the list) that reveals EVERY row inside
   the expanded panel, which scrolls within its max height, and then reads "Show fewer". It sits
-  inside the panel, so focusing it keeps the card open and Escape still collapses it.
+  inside the panel, so clicking it keeps the card open and Escape still collapses it.
 - **Claude reviews** (`ClaudeReviewBanner`) is a `HeaderToast` like the rest: "N running" / "N ready"
   on the line, each review (open it, or its own X once ready) in the expanded panel, the card's X once
   nothing is running.

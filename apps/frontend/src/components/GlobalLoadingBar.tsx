@@ -401,6 +401,7 @@ export function GlobalLoadingBar(): JSX.Element | null {
   return (
     <HeaderToast
       testId="global-loading-bar"
+      tone="sync"
       label="Loading data"
       icon={<RefreshIcon size={13} className={active ? 'animate-spin' : undefined} />}
       summary={

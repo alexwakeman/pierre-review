@@ -79,6 +79,7 @@ export function AiFixBanner(): JSX.Element | null {
   return (
     <HeaderToast
       testId="ai-fix-toast"
+      tone="ai"
       label="AI fixes"
       icon={<WandIcon size={13} className={running.length > 0 ? 'animate-pulse' : undefined} />}
       summary={

@@ -27,6 +27,7 @@ export function MyTurnDismissToast(): JSX.Element | null {
   return (
     <HeaderToast
       testId="my-turn-dismiss-toast"
+      tone="attention"
       label="Dismissed"
       icon={<PendingBallIcon size={13} />}
       summary={`${last.label} — until something new happens on it`}
