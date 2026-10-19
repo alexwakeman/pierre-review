@@ -7819,6 +7819,21 @@ export interface ClaudeThreadJudgement {
   assessedAtHead: string;
   /** Copied from an earlier run unchanged (no new commits, no new comments since). */
   carried: boolean;
+  /** Set when the thread is rooted on one of Claude's OWN posted findings (the follow-up's, never a
+   *  thread judgement): what the newest review that followed it up found. `validity`/`addressed`
+   *  then MIRROR it for readers that know only those two fields. Absent ⇒ an ordinary judgement. */
+  finding?: ClaudeThreadFindingOutcome | null;
+}
+
+/** What a later review found about one of Claude's own posted findings, for its thread card. */
+export interface ClaudeThreadFindingOutcome {
+  status: Exclude<ClaudeFollowUpStatus, 'not_checked'>;
+  /** `reply_accepted` only: how the reply settled it. */
+  acceptKind: ClaudeReplyAcceptKind | null;
+  /** The person whose reply was judged (`reply_accepted` / `reply_disputed`); null otherwise. */
+  replyAuthor: string | null;
+  /** The review whose follow-up said so. */
+  reviewId: number;
 }
 
 export interface ClaudeThreadJudgementsForPr {
@@ -7848,7 +7863,9 @@ export interface ClaudeThreadJudgementsResponse {
 export type ThreadCheckStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 export type ThreadCheckTrigger = 'manual' | 'auto';
 /** The server declined to run Claude (stored on a failed row, or answered by the start route). */
-export type ThreadCheckRefusal = 'no_threads' | 'nothing_changed';
+/** `own_findings_only`: the PR's only threads are rooted on Claude's own posted findings, which a
+ *  Claude review follows up (never Check threads). */
+export type ThreadCheckRefusal = 'no_threads' | 'nothing_changed' | 'own_findings_only';
 
 /** Where a run is. `queued` = waiting for a free review slot. */
 export type ThreadCheckPhase = 'queued' | 'preparing' | 'checking' | 'saving';

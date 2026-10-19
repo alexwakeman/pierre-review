@@ -1,5 +1,6 @@
 import type {
   ClaudeThreadAddressed,
+  ClaudeThreadFindingOutcome,
   ClaudeThreadJudgementsForPr,
   ClaudeThreadValidity,
   DerivedState,
@@ -26,6 +27,13 @@ import type {
 //      judged state of its code.
 //
 // A judgement made at an older head is still shown, marked as from an earlier commit.
+//
+// CLAUDE'S OWN FINDINGS. A thread rooted on a comment Claude posted is never judged like another
+// reviewer's (the next review's follow-up owns it). Its judgement carries `finding`, and the card
+// wears ONE outcome pill instead of the validity pill, plus "Resolved" when GitHub says so:
+//
+//   finding   Addressed · Partly addressed · Not addressed · No longer applies · Reply accepted ·
+//             Fix later · Pushed back
 
 export type ClaudeValidityPill = 'holds_up' | 'partly' | 'doesnt_hold' | 'unclear';
 export type ClaudeStatePill = 'resolved' | 'addressed' | 'partly_addressed' | 'open';
@@ -43,6 +51,51 @@ export const CLAUDE_STATE_LABEL: Record<ClaudeStatePill, string> = {
   partly_addressed: 'Partly addressed',
   open: 'Open',
 };
+
+export type ClaudeFindingPill =
+  | 'addressed'
+  | 'partly_addressed'
+  | 'not_addressed'
+  | 'no_longer_applies'
+  | 'reply_accepted'
+  | 'fix_later'
+  | 'pushed_back';
+
+export const CLAUDE_FINDING_LABEL: Record<ClaudeFindingPill, string> = {
+  addressed: 'Addressed',
+  partly_addressed: 'Partly addressed',
+  not_addressed: 'Not addressed',
+  no_longer_applies: 'No longer applies',
+  reply_accepted: 'Reply accepted',
+  fix_later: 'Fix later',
+  pushed_back: 'Pushed back',
+};
+
+/** The outcome pill of one of Claude's own findings. */
+export function claudeFindingPill(f: Pick<ClaudeThreadFindingOutcome, 'status' | 'acceptKind'>): ClaudeFindingPill {
+  switch (f.status) {
+    case 'addressed':
+      return 'addressed';
+    case 'partly_addressed':
+      return 'partly_addressed';
+    case 'not_addressed':
+      return 'not_addressed';
+    case 'no_longer_applies':
+      return 'no_longer_applies';
+    case 'reply_accepted':
+      return f.acceptKind === 'deferred' ? 'fix_later' : 'reply_accepted';
+    case 'reply_disputed':
+      return 'pushed_back';
+  }
+}
+
+/** The one line under a finding's pills: a templated fact (Claude's own words sit under "More"). */
+export function claudeFindingReason(f: Pick<ClaudeThreadFindingOutcome, 'status' | 'replyAuthor'>): string {
+  const who = f.replyAuthor ? `@${f.replyAuthor}’s reply` : 'the reply';
+  if (f.status === 'reply_accepted') return `Claude’s comment. Claude accepted ${who}.`;
+  if (f.status === 'reply_disputed') return `Claude’s comment. Claude disagreed with ${who}.`;
+  return 'Claude’s comment, checked again by a later review.';
+}
 
 /** The validity pill, or null when Claude did not judge the comment itself. */
 export function claudeValidityPill(v: ClaudeThreadValidity): ClaudeValidityPill | null {
@@ -74,6 +127,9 @@ export function claudeStatePill(a: ClaudeThreadAddressed, resolvedNow: boolean):
 }
 
 export interface ClaudeThreadMarker {
+  /** Set on a thread rooted on one of Claude's own findings: the outcome pill, shown INSTEAD of the
+   *  validity pill (which is then null). */
+  finding: ClaudeFindingPill | null;
   /** null when Claude judged only the code, not the comment. */
   validity: ClaudeValidityPill | null;
   /** null when Claude judged only the comment, not the code (never both null). */
@@ -95,8 +151,11 @@ export interface ClaudeThreadMarker {
 
 export type ThreadPill = { kind: 'derived' } | { kind: 'claude'; marker: ClaudeThreadMarker };
 
-export function claudeMarkerLabel(m: Pick<ClaudeThreadMarker, 'validity' | 'state'>): string {
+export function claudeMarkerLabel(
+  m: Pick<ClaudeThreadMarker, 'validity' | 'state'> & { finding?: ClaudeFindingPill | null },
+): string {
   return [
+    m.finding != null ? CLAUDE_FINDING_LABEL[m.finding] : null,
     m.validity != null ? CLAUDE_VALIDITY_LABEL[m.validity] : null,
     m.state != null ? CLAUDE_STATE_LABEL[m.state] : null,
   ]
@@ -111,17 +170,39 @@ export function threadPillFor(
   if (pr == null) return { kind: 'derived' };
   const j = pr.judgements.find((x) => x.threadId === thread.id);
   if (j == null) return { kind: 'derived' };
+  // An unknown head is never "moved" (the Open PRs column's rule).
+  const stale = pr.currentHeadSha != null && j.assessedAtHead !== pr.currentHeadSha;
+  if (j.finding != null) {
+    const finding = claudeFindingPill(j.finding);
+    const state: ClaudeStatePill | null = thread.derivedState === 'resolved' ? 'resolved' : null;
+    return {
+      kind: 'claude',
+      marker: {
+        finding,
+        validity: null,
+        state,
+        label: claudeMarkerLabel({ finding, validity: null, state }),
+        stale,
+        reason: claudeFindingReason(j.finding),
+        explanation: j.explanation,
+        reviewId: j.finding.reviewId,
+        checkId: null,
+        finishedAt: pr.finishedAt,
+        assessedAtHead: j.assessedAtHead,
+      },
+    };
+  }
   if (j.validity === 'not_checked' && j.addressed === 'not_checked') return { kind: 'derived' };
   const validity = claudeValidityPill(j.validity);
   const state = claudeStatePill(j.addressed, thread.derivedState === 'resolved');
   return {
     kind: 'claude',
     marker: {
+      finding: null,
       validity,
       state,
       label: claudeMarkerLabel({ validity, state }),
-      // An unknown synced head is never "moved" (the Open PRs column's rule).
-      stale: pr.currentHeadSha != null && j.assessedAtHead !== pr.currentHeadSha,
+      stale,
       reason: j.reason?.trim() ? j.reason.trim() : null,
       explanation: j.explanation,
       reviewId: pr.reviewId,

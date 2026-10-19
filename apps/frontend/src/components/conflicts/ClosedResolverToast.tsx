@@ -1,14 +1,14 @@
 import { useEffect } from 'react';
 import { useConflictResolverStore } from '../../store/conflictResolver.js';
-import { CloseIcon } from '../Icons.js';
+import { ConflictIcon } from '../Icons.js';
+import { HeaderToast } from '../HeaderToasts.js';
 import { REOPEN, closedToast } from './copy.js';
 
 // ── THE WAY BACK ─────────────────────────────────────────────────────────────────────────────
 //
-// ⚠ A PLAIN CARD FOR THE ONE BOTTOM-RIGHT TOAST COLUMN IN `App.tsx`, never its own
-// `fixed bottom-4 right-4` element. Three independent ones were painting over each other at the
-// same coordinate; the column owns the position and `pointer-events-none`, and each card
-// re-enables its own.
+// ⚠ A CARD IN THE ONE HEADER TOAST STRIP (`HeaderToasts.tsx`, mounted in `App.tsx`), never its
+// own `fixed` element. Reopen stays ON the card's one line — the only way back must not hide
+// behind a hover.
 //
 // ⚠ IT IS THE ONLY WAY BACK, AND THAT IS WHY IT EXISTS. The resolver has no URL key and no history
 // entry (a `popstate` cannot be cancelled, so a deep link would make Back a way to lose work, and
@@ -36,34 +36,24 @@ export function ClosedResolverToast(): JSX.Element | null {
 
   if (lastClosed == null) return null;
 
+  const where = `${lastClosed.target.repoFullName} #${lastClosed.target.prNumber}`;
   return (
-    <div className="pointer-events-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-      <div className="flex items-start gap-2 px-3 py-2">
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[11px] text-gray-500 dark:text-gray-400">
-            {lastClosed.target.repoFullName} #{lastClosed.target.prNumber}
-          </div>
-          <div className="text-[12px] text-gray-800 dark:text-gray-100">
-            {closedToast(lastClosed.decidedCount)}
-          </div>
-          <button
-            type="button"
-            onClick={() => open(lastClosed.target)}
-            className="mt-1 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
-          >
-            {REOPEN}
-          </button>
-        </div>
+    <HeaderToast
+      testId="closed-resolver-toast"
+      label={where}
+      icon={<ConflictIcon size={13} />}
+      summary={closedToast(lastClosed.decidedCount)}
+      action={
         <button
           type="button"
-          onClick={dismiss}
-          title="Dismiss"
-          aria-label="Dismiss"
-          className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+          onClick={() => open(lastClosed.target)}
+          className="rounded border border-gray-300 px-1.5 py-px text-[11px] text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
         >
-          <CloseIcon size={13} />
+          {REOPEN}
         </button>
-      </div>
-    </div>
+      }
+      onDismiss={dismiss}
+      dismissLabel={`Dismiss the reopen offer for ${where}`}
+    />
   );
 }

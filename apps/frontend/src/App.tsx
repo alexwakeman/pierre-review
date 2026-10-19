@@ -22,6 +22,7 @@ import { AiFixBanner } from './components/AiFixBanner.js';
 import { AutoMergeBanner } from './components/AutoMergeBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
 import { GlobalLoadingBar } from './components/GlobalLoadingBar.js';
+import { HeaderToastStrip } from './components/HeaderToasts.js';
 import { WelcomeBackBanner } from './components/WelcomeBackBanner.js';
 import { HelpModal } from './components/HelpModal.js';
 import { SettingsModal } from './components/settings/SettingsModal.js';
@@ -276,11 +277,35 @@ export default function App(): JSX.Element {
   return (
     <div className="flex h-full flex-col">
       <AuthNoticeBanner notices={me.data?.authNotices ?? []} />
-      <header className="flex items-center gap-3 border-b border-gray-200 px-4 py-2 dark:border-gray-800">
-        <h1 title="Limn — to depict, to make clear">
+      <header className="flex items-center gap-2 border-b sm:gap-3 border-gray-200 px-4 py-2 dark:border-gray-800">
+        <h1 className="shrink-0" title="Limn — to depict, to make clear">
           <Wordmark />
         </h1>
-        <div className="ml-auto flex items-center gap-3">
+        {/* The ONE header toast strip (components/HeaderToasts.tsx). Every toast in the app is a
+            one-line card in here — never an independent `fixed` element, never a second strip.
+            It takes the flexible space between the wordmark and the controls, so a card coming
+            or going never moves them; many cards scroll it sideways, and a card expands on hover
+            or focus OVER the page, never by growing the header. Order = left to right: the
+            agent runs, the one-shot results, then the ambient loading bar. */}
+        <HeaderToastStrip>
+          <ClaudeReviewBanner />
+          {/* Agentic AI-Fix runs started this session — the progress UI for a fix started
+              outside the AI Fix tab. */}
+          <AiFixBanner />
+          {/* The way back into a conflict resolver the reader closed with decisions still in the
+              store. The resolver has no URL and no history entry, so this card is the ONLY route
+              back; it files nothing after a commit, when the pins have already moved. */}
+          <ClosedResolverToast />
+          {/* Undo for the My Turn entry just dismissed from the Pending board. */}
+          <MyTurnDismissToast />
+          {/* The outcome of Pending → Dependencies' "Merge or arm all". */}
+          <DependencyMergeToast />
+          <AutoMergeBanner />
+          {/* Ambient heavy-work indicator (full-mode backfills + ML bot-comment scoring).
+              An indicator, not a dialog: non-dismissible, no action. */}
+          <GlobalLoadingBar />
+        </HeaderToastStrip>
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <SyncStatus />
           {notifSupported && (
             <button
@@ -567,30 +592,6 @@ export default function App(): JSX.Element {
           </div>
         )}
       </main>
-      {/* The ONE bottom-right toast column. Every bottom-right surface renders as a plain
-          card in here — three independent `fixed bottom-4 right-4` elements were painting
-          over each other at the same coordinate. Order = visual stack: banners on top, the
-          ambient loading bar pinned to the corner as the bottom-most card. The column owns
-          pointer-events-none; interactive cards re-enable their own. */}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
-        <ClaudeReviewBanner />
-        {/* Agentic AI-Fix runs started this session — the progress UI for the CI-analysis
-            card's "Fix it" shortcut, which is why that button can now be offered outside the
-            AI Fix tab. */}
-        <AiFixBanner />
-        {/* The way back into a conflict resolver the reader closed with decisions still in the
-            store. The resolver has no URL and no history entry, so this card is the ONLY route
-            back; it files nothing after a commit, when the pins have already moved. */}
-        <ClosedResolverToast />
-        {/* Undo for the My Turn entry just dismissed from the Pending board. */}
-        <MyTurnDismissToast />
-        {/* The outcome of Pending → Dependencies' "Merge or arm all". */}
-        <DependencyMergeToast />
-        <AutoMergeBanner />
-        {/* Ambient heavy-work indicator (full-mode backfills + ML bot-comment scoring).
-            An indicator, not a dialog: non-dismissible, no click target. */}
-        <GlobalLoadingBar />
-      </div>
       {/* Analytics consent. Renders only in cloud, only when a GA4 id was configured at build
           time, and only until the user has chosen — see components/CookieBanner.tsx. */}
       <CookieBanner enabled={isCloud} />

@@ -13,7 +13,8 @@ import { PendingClaudeReviewIcon } from './Icons.js';
 
 const REFUSAL_WORDS: Record<ThreadCheckRefusal, string> = {
   no_threads: 'This pull request has no review threads to check.',
-  nothing_changed: 'No thread has changed since Claude last looked.',
+  nothing_changed: 'Every thread already has a current judgement.',
+  own_findings_only: 'Every thread here is one of Claude’s own comments. A Claude review follows those up.',
 };
 
 /** The status line's stage words for a running check. Exported for tests. */

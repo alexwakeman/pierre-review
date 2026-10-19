@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import type { ThreadDetail } from '@pierre-review/shared';
 import {
+  CLAUDE_FINDING_LABEL,
   CLAUDE_STATE_LABEL,
   CLAUDE_VALIDITY_LABEL,
   threadPillFor,
+  type ClaudeFindingPill,
   type ClaudeStatePill,
   type ClaudeThreadMarker,
   type ClaudeValidityPill,
@@ -34,6 +36,16 @@ const STATE_TONE: Record<ClaudeStatePill, string> = {
   open: 'border-gray-300 text-gray-700 dark:border-gray-600 dark:text-gray-200',
 };
 
+const FINDING_TONE: Record<ClaudeFindingPill, string> = {
+  addressed: 'text-emerald-700 dark:text-emerald-300',
+  no_longer_applies: 'text-emerald-700 dark:text-emerald-300',
+  reply_accepted: 'text-ai-ink',
+  partly_addressed: 'text-amber-800 dark:text-amber-300',
+  fix_later: 'text-ai-ink',
+  not_addressed: 'text-ai-ink',
+  pushed_back: 'text-ai-ink',
+};
+
 export function ClaudeThreadPills({
   marker,
   noInfo = false,
@@ -44,6 +56,18 @@ export function ClaudeThreadPills({
 }): JSX.Element {
   return (
     <span className="inline-flex shrink-0 items-center gap-1" data-noactivate>
+      {marker.finding != null && (
+        <span
+          className={`inline-flex items-center gap-1 rounded-full border border-ai-border bg-ai-surface-2 px-2 py-0.5 text-[11px] font-medium ${FINDING_TONE[marker.finding]}`}
+          data-testid="claude-thread-finding"
+        >
+          <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
+          {CLAUDE_FINDING_LABEL[marker.finding]}
+          {marker.state == null && marker.stale && (
+            <span className="text-gray-500 dark:text-gray-400">· earlier commit</span>
+          )}
+        </span>
+      )}
       {marker.validity != null && (
         <span
           className={`inline-flex items-center gap-1 rounded-full border border-ai-border bg-ai-surface-2 px-2 py-0.5 text-[11px] font-medium ${VALIDITY_TONE[marker.validity]}`}
@@ -61,7 +85,7 @@ export function ClaudeThreadPills({
           className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATE_TONE[marker.state]}`}
           data-testid="claude-thread-state"
         >
-          {marker.validity == null && (
+          {marker.validity == null && marker.finding == null && (
             <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
           )}
           {CLAUDE_STATE_LABEL[marker.state]}
@@ -77,7 +101,12 @@ export function ClaudeThreadPills({
             From Claude, at commit <code className="font-mono">{marker.assessedAtHead.slice(0, 7)}</code>.
           </p>
           {marker.stale && <p>The pull request has new commits since.</p>}
-          {marker.state != null ? (
+          {marker.finding != null ? (
+            <p>
+              Claude posted this comment. The pill says what the latest review that checked it
+              found: in the code, or in a reply on the thread. Resolved is GitHub’s own state.
+            </p>
+          ) : marker.state != null ? (
             <p>
               {marker.validity != null
                 ? 'The first pill says whether the comment holds up. The second says where the code stands: '

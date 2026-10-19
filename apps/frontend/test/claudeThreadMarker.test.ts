@@ -255,3 +255,46 @@ describe('every thread surface goes through the one rule', () => {
     expect(s).not.toContain('THREAD_ADDRESSED_LABEL[');
   });
 });
+
+// ⚠ THE BUG (2026-10-19): a thread rooted on one of Claude's OWN posted findings showed only
+// "Resolved" — the follow-up's word on it never reached the card. It now wears the outcome.
+describe("Claude's own findings on their threads", () => {
+  const finding = (
+    threadId: number,
+    status: NonNullable<ClaudeThreadJudgement['finding']>['status'],
+    extra: Partial<NonNullable<ClaudeThreadJudgement['finding']>> = {},
+  ): ClaudeThreadJudgement =>
+    judgement(threadId, 'not_checked', 'not_checked', {
+      reason: null,
+      explanation: 'Checked again.',
+      finding: { status, acceptKind: null, replyAuthor: null, reviewId: 41, ...extra },
+    });
+
+  it('wears the outcome pill, plus Resolved when GitHub says so', () => {
+    const p = pr([
+      finding(1, 'reply_accepted', { acceptKind: 'deferred', replyAuthor: 'dave' }),
+      finding(2, 'no_longer_applies'),
+      finding(3, 'reply_accepted', { acceptKind: 'not_valid', replyAuthor: 'dave' }),
+      finding(4, 'reply_disputed', { replyAuthor: 'dave' }),
+    ]);
+    const m = (id: number, s: DerivedState) => {
+      const pill = threadPillFor({ id, derivedState: s }, p);
+      if (pill.kind !== 'claude') throw new Error('expected a Claude marker');
+      return pill.marker;
+    };
+    expect(m(1, 'resolved')).toMatchObject({ finding: 'fix_later', validity: null, state: 'resolved', label: 'Fix later · Resolved' });
+    expect(m(1, 'resolved').reason).toBe('Claude’s comment. Claude accepted @dave’s reply.');
+    expect(m(2, 'resolved')).toMatchObject({ finding: 'no_longer_applies', label: 'No longer applies · Resolved' });
+    expect(m(3, 'untouched')).toMatchObject({ finding: 'reply_accepted', state: null, label: 'Reply accepted' });
+    expect(m(4, 'replied_unresolved')).toMatchObject({ finding: 'pushed_back', explanation: 'Checked again.' });
+    // Even with both mirrored halves `not_checked`, a finding outcome is a claim worth showing.
+    expect(threadPillFor({ id: 2, derivedState: 'untouched' }, p).kind).toBe('claude');
+    // A resolved own-finding thread stays under the Resolved chip.
+    expect(threadStateBucket({ id: 2, derivedState: 'resolved' }, p)).toBe('resolved');
+  });
+
+  it('an ordinary judgement carries no finding pill', () => {
+    const pill = threadPillFor({ id: 9, derivedState: 'untouched' }, pr([judgement(9, 'valid', 'addressed')]));
+    expect(pill.kind === 'claude' && pill.marker.finding).toBe(null);
+  });
+});

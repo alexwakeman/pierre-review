@@ -6,11 +6,13 @@ import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { useFilters, type AiFixRunEntry } from '../store/filters.js';
 import { PHASE_LABEL, fixProgressPct } from '../lib/aiFixProgress.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
+import { HeaderToast } from './HeaderToasts.js';
+import { WandIcon } from './Icons.js';
 
 // Where an agentic AI-Fix run is watched from once the reader has left the pane that started
 // it — a paid agent run must never be running with no visible sign of it.
 //
-// A plain card for App.tsx's ONE bottom-right column — never its own `fixed bottom-4 right-4`.
+// A card in the ONE header toast strip (HeaderToasts.tsx) — never its own `fixed` element.
 //
 // ⚠ NO CHIME AND NO BROWSER NOTIFICATION, deliberately, and unlike ClaudeReviewBanner. A CI fix
 // is started from a pane the reader is looking at, seconds earlier, by their own click; the
@@ -60,6 +62,7 @@ function doneLine(status: AiFixStatus | 'idle'): string | null {
 export function AiFixBanner(): JSX.Element | null {
   const enabled = useAiCapabilities().enabled;
   const runs = useFilters((s) => s.aiFixRuns);
+  const dismissRun = useFilters((s) => s.dismissAiFixRun);
 
   // Oldest first: a run that has been going longest is the one whose finish is imminent, so it
   // is the one that keeps its stream when more than MAX_LIVE_STREAMS are open.
@@ -72,24 +75,30 @@ export function AiFixBanner(): JSX.Element | null {
   // a live run left with no stream and no way to clear the finished rows in front of it.
   const streaming = new Set(running.slice(0, MAX_LIVE_STREAMS).map((r) => r.prId));
 
+  const finished = rows.length - running.length;
   return (
-    <div className="pointer-events-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-      <div className="flex items-center justify-between border-b border-gray-100 px-3 py-1.5 dark:border-gray-800">
-        <span className="text-xs font-semibold">
-          AI fixes
-          {running.length > 0 && (
-            <span className="ml-1 font-normal text-gray-400">
-              · {running.length} running
-            </span>
-          )}
-        </span>
-      </div>
-      <ul className="max-h-64 divide-y divide-gray-100 overflow-auto dark:divide-gray-800">
+    <HeaderToast
+      testId="ai-fix-toast"
+      label="AI fixes"
+      icon={<WandIcon size={13} className={running.length > 0 ? 'animate-pulse' : undefined} />}
+      summary={
+        running.length > 0
+          ? `${running.length} running${finished > 0 ? `, ${finished} finished` : ''}`
+          : `${finished} finished`
+      }
+      // Dismiss only once every run is over — a card you can clear mid-run is a card that loses
+      // the only handle on a paid agent turn (the same rule the per-row "dismiss" keeps).
+      onDismiss={
+        running.length === 0 ? () => rows.forEach((r) => dismissRun(r.prId)) : undefined
+      }
+      dismissLabel="Dismiss AI fix results"
+    >
+      <ul className="-mx-2 max-h-64 divide-y divide-gray-100 overflow-auto dark:divide-gray-800">
         {rows.map((r) => (
           <AiFixBannerRow key={r.prId} run={r} live={streaming.has(r.prId)} />
         ))}
       </ul>
-    </div>
+    </HeaderToast>
   );
 }
 
@@ -172,9 +181,10 @@ function AiFixBannerRow({
           <button
             type="button"
             onClick={() => dismiss(run.prId)}
-            className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            aria-label={`Dismiss the AI fix for ${run.repoFullName} #${run.prNumber}`}
+            className="text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
-            dismiss
+            Dismiss
           </button>
         </div>
       ) : starting ? (

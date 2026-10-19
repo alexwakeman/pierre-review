@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react';
 import { REFERENCE_DOC_MAX_BYTES, type ReferenceDoc } from '@pierre-review/shared';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import {
@@ -10,7 +10,11 @@ import {
   useReferenceDocs,
   useUploadReferenceDoc,
 } from '../../hooks/useReferenceDocs.js';
+import { useLocalStorage } from '../../hooks/useLocalStorage.js';
+import { useMediaQuery } from '../../hooks/useMediaQuery.js';
+import { useResizablePane } from '../../hooks/useResizablePane.js';
 import { useMe } from '../../hooks/useTriage.js';
+import { DOCS_CHAT_W, DOCS_LIBRARY_STRIP_W, DOCS_LIBRARY_W, docsPaneBounds } from '../../lib/docsLayout.js';
 import {
   DOC_UPLOAD_ACCEPT,
   LIBRARY_INDEX_PATH,
@@ -36,12 +40,24 @@ import { DocsViewer } from './DocsViewer.js';
 //   centre  one library file at a time (DocsViewer), every link followed in-app
 //   right   the docs chat (DocsChat) — beside the viewer when wide, a second tab when narrow
 //
+// WIDE LAYOUT (lg+): the library can be COLLAPSED to a slim strip (its header's chevron), and the
+// library | viewer | chat widths are DRAGGED on two separators (useResizablePane; ceilings from
+// lib/docsLayout.ts so the viewer keeps its minimum). Both are per-browser localStorage prefs,
+// never the store or the URL. Narrow: the columns stack and the Read / Ask tabs stay as they were.
+//
 // Build progress is live: an SSE stream per document being built — never a queued one, at most
 // MAX_DOC_STREAMS (useReferenceDocs) — the list polled as the fallback.
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const SMALL_BUTTON = 'text-xs text-sky-700 hover:underline disabled:opacity-50 dark:text-sky-300';
 const DEFAULT_OPEN: DocsOpen = { path: LIBRARY_INDEX_PATH, anchor: null, seq: 0 };
+const LIBRARY_W_KEY = 'pierre:docsLibraryWidth';
+const CHAT_W_KEY = 'pierre:docsChatWidth';
+const LIBRARY_COLLAPSED_KEY = 'pierre:docsLibraryCollapsed';
+const SEPARATOR =
+  'mx-1 w-1.5 shrink-0 cursor-col-resize touch-none rounded-full bg-gray-200 transition-colors hover:bg-blue-400 focus-visible:bg-blue-500 focus-visible:outline-none dark:bg-gray-800 dark:hover:bg-blue-500';
+const COLLAPSE_BUTTON =
+  'shrink-0 rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100';
 
 const KIND_LABEL: Record<ReferenceDoc['sourceKind'], string> = {
   pdf: 'PDF',
@@ -380,62 +396,148 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
   const builtCount = docs.filter((d) => d.available).length;
   const maxBytes = library.data?.maxBytes ?? REFERENCE_DOC_MAX_BYTES;
 
+  // Layout: which columns sit side by side (Tailwind's lg / xl), the row's measured width, and the
+  // two dragged widths bounded by it. Each ceiling reads the OTHER column's width.
+  const wide = useMediaQuery('(min-width: 1024px)');
+  const chatBeside = useMediaQuery('(min-width: 1280px)');
+  const [storedCollapsed, setCollapsed] = useLocalStorage<boolean>(LIBRARY_COLLAPSED_KEY, false);
+  const collapsed = wide && storedCollapsed === true; // stacked, the list always shows in full
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [rowW, setRowW] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = rowRef.current;
+    if (el == null) return;
+    const measure = (): void => setRowW(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const [widths, setWidths] = useState<{ lib: number; chat: number }>({ lib: DOCS_LIBRARY_W.default, chat: DOCS_CHAT_W.default });
+  const bounds = docsPaneBounds({
+    rowWidth: wide ? rowW : null,
+    libraryWidth: collapsed ? null : widths.lib,
+    chatWidth: chatBeside ? widths.chat : null,
+  });
+  const lib = useResizablePane({
+    storageKey: LIBRARY_W_KEY,
+    defaultWidth: DOCS_LIBRARY_W.default,
+    minWidth: DOCS_LIBRARY_W.min,
+    maxWidth: bounds.libraryMax,
+    label: 'Resize the document list',
+  });
+  const chat = useResizablePane({
+    storageKey: CHAT_W_KEY,
+    defaultWidth: DOCS_CHAT_W.default,
+    minWidth: DOCS_CHAT_W.min,
+    maxWidth: bounds.chatMax,
+    label: 'Resize the chat',
+    side: 'right',
+  });
+  useEffect(() => {
+    if (widths.lib !== lib.width || widths.chat !== chat.width) setWidths({ lib: lib.width, chat: chat.width });
+  }, [lib.width, chat.width, widths]);
+
   return (
-    <div className="flex h-full min-h-[32rem] flex-col gap-3 lg:flex-row" data-testid="docs-view">
-      {/* LEFT: the library */}
-      <section aria-label="Library" className="flex min-h-0 flex-col gap-3 lg:w-72 lg:shrink-0">
-        <div className="flex items-center gap-1">
-          <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Docs</h2>
-          <InfoButton title="Docs">
-            <p>Reference material for this workspace: PDF, Word, text and markdown files, and web pages.</p>
-            <p>
-              Claude Sonnet turns each one into markdown sections with a contents list, and the library keeps one contents
-              page across every document. Claude reads only the sections a question needs.
-            </p>
-            <p>
-              Ask about the docs in the chat. To have Claude Review check stories against them, switch it on in Settings →
-              Workspace.
-            </p>
-            <p>Everything stays on this machine. Building a document runs on your own Claude Code or Anthropic API key.</p>
-          </InfoButton>
-        </div>
-        <AiRunGate>
-          <AddDocs workspaceId={workspaceId} maxBytes={maxBytes} />
-        </AiRunGate>
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {library.isPending ? (
-            <p className={`text-xs ${MUTED}`}>Loading…</p>
-          ) : library.isError ? (
-            <p className="text-xs text-rose-700 dark:text-rose-400">{library.error.message}</p>
-          ) : (
-            <div className="space-y-1.5">
+    <div ref={rowRef} className="flex h-full min-h-[32rem] flex-col gap-3 lg:flex-row lg:gap-0" data-testid="docs-view">
+      {/* LEFT: the library — or, collapsed, a slim strip with the expand control and the count */}
+      {collapsed ? (
+        <section
+          aria-label="Library"
+          style={{ width: DOCS_LIBRARY_STRIP_W }}
+          className="mr-3 flex shrink-0 flex-col items-center gap-2 rounded-lg border border-gray-200 py-2 dark:border-gray-800"
+        >
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            aria-expanded={false}
+            aria-label={`Show the document list (${docs.length} document${docs.length === 1 ? '' : 's'})`}
+            title="Show the document list"
+            className={COLLAPSE_BUTTON}
+          >
+            <ChevronIcon dir="right" size={12} />
+          </button>
+          <span className="text-gray-500 dark:text-gray-400" aria-hidden="true">
+            <BookIcon size={14} />
+          </span>
+          <span className="font-mono text-[11px] tabular-nums text-gray-600 dark:text-gray-300" aria-hidden="true">
+            {docs.length}
+          </span>
+        </section>
+      ) : (
+        <section
+          ref={lib.paneRef}
+          aria-label="Library"
+          style={wide ? { width: lib.width } : undefined}
+          className="flex min-h-0 flex-col gap-3 lg:shrink-0"
+        >
+          <div className="flex items-center gap-1">
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Docs</h2>
+            <InfoButton title="Docs">
+              <p>Reference material for this workspace: PDF, Word, text and markdown files, and web pages.</p>
+              <p>
+                Claude Sonnet turns each one into markdown sections with a contents list, and the library keeps one contents
+                page across every document. Claude reads only the sections a question needs.
+              </p>
+              <p>
+                Ask about the docs in the chat. To have Claude Review check stories against them, switch it on in Settings →
+                Workspace.
+              </p>
+              <p>Everything stays on this machine. Building a document runs on your own Claude Code or Anthropic API key.</p>
+              <p>Drag the bars between the columns to resize them (or focus one and use the arrow keys). Double-click a bar to reset it.</p>
+            </InfoButton>
+            {wide && (
               <button
                 type="button"
-                onClick={() => onOpen(LIBRARY_INDEX_PATH, null)}
-                aria-current={open.path === LIBRARY_INDEX_PATH ? 'true' : undefined}
-                className={`flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs font-semibold ${
-                  open.path === LIBRARY_INDEX_PATH
-                    ? 'bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'
-                    : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800/50'
-                }`}
+                onClick={() => setCollapsed(true)}
+                aria-expanded={true}
+                aria-label="Hide the document list"
+                title="Hide the document list"
+                className={`ml-auto ${COLLAPSE_BUTTON}`}
               >
-                <BookIcon size={12} />
-                <span className="flex-1">All documents</span>
-                <span className="font-mono text-[11px] tabular-nums text-gray-500 dark:text-gray-400">{docs.length}</span>
+                <ChevronIcon dir="left" size={12} />
               </button>
-              {sorted.length === 0 ? (
-                <p className={`px-2 text-xs ${MUTED}`}>No documents yet.</p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {sorted.map((d) => (
-                    <DocRow key={d.id} workspaceId={workspaceId} doc={d} open={open} onOpen={onOpen} />
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-      </section>
+            )}
+          </div>
+          <AiRunGate>
+            <AddDocs workspaceId={workspaceId} maxBytes={maxBytes} />
+          </AiRunGate>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {library.isPending ? (
+              <p className={`text-xs ${MUTED}`}>Loading…</p>
+            ) : library.isError ? (
+              <p className="text-xs text-rose-700 dark:text-rose-400">{library.error.message}</p>
+            ) : (
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => onOpen(LIBRARY_INDEX_PATH, null)}
+                  aria-current={open.path === LIBRARY_INDEX_PATH ? 'true' : undefined}
+                  className={`flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs font-semibold ${
+                    open.path === LIBRARY_INDEX_PATH
+                      ? 'bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'
+                      : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800/50'
+                  }`}
+                >
+                  <BookIcon size={12} />
+                  <span className="flex-1">All documents</span>
+                  <span className="font-mono text-[11px] tabular-nums text-gray-500 dark:text-gray-400">{docs.length}</span>
+                </button>
+                {sorted.length === 0 ? (
+                  <p className={`px-2 text-xs ${MUTED}`}>No documents yet.</p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {sorted.map((d) => (
+                      <DocRow key={d.id} workspaceId={workspaceId} doc={d} open={open} onOpen={onOpen} />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+      {wide && !collapsed && <div {...lib.separatorProps} className={SEPARATOR} />}
 
       {/* CENTRE + RIGHT: side by side when wide; one at a time, by tab, when narrow */}
       <div className="flex min-h-[28rem] min-w-0 flex-1 flex-col gap-2 lg:min-h-0">
@@ -460,11 +562,16 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
             );
           })}
         </div>
-        <div className="flex min-h-0 flex-1 gap-3">
+        <div className="flex min-h-0 flex-1">
           <div className={`min-h-0 min-w-0 flex-1 ${narrowPane === 'viewer' ? 'flex' : 'hidden xl:flex'}`}>
             <DocsViewer workspaceId={workspaceId} open={open} hasDocs={builtCount > 0} onOpen={onOpen} />
           </div>
-          <div className={`min-h-0 min-w-0 flex-1 xl:flex-none ${narrowPane === 'chat' ? 'flex' : 'hidden xl:flex'}`}>
+          {chatBeside && <div {...chat.separatorProps} className={SEPARATOR} />}
+          <div
+            ref={chat.paneRef}
+            style={chatBeside ? { width: chat.width } : undefined}
+            className={`min-h-0 min-w-0 flex-1 xl:flex-none ${narrowPane === 'chat' ? 'flex' : 'hidden xl:flex'}`}
+          >
             <DocsChat workspaceId={workspaceId} canAsk={builtCount > 0} onOpen={onOpen} />
           </div>
         </div>

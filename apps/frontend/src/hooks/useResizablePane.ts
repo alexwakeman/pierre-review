@@ -68,12 +68,19 @@ export function useResizablePane(opts: {
   label: string;
   /** Arrow-key step in px (Shift multiplies by 4). */
   keyStep?: number;
+  /**
+   * Which side of its separator the pane sits on. `'left'` (default): the separator is the
+   * pane's right edge, so dragging RIGHT widens it. `'right'`: the separator is the pane's left
+   * edge (a right-hand column), so dragging LEFT widens it and the arrow keys follow the edge.
+   */
+  side?: 'left' | 'right';
 }): {
   width: number;
   paneRef: RefObject<HTMLDivElement>;
   separatorProps: ResizablePaneSeparatorProps;
 } {
-  const { storageKey, defaultWidth, minWidth, maxWidth, label, keyStep = 16 } = opts;
+  const { storageKey, defaultWidth, minWidth, maxWidth, label, keyStep = 16, side = 'left' } = opts;
+  const dir = side === 'right' ? -1 : 1;
   const [stored, setStored] = useLocalStorage<number>(storageKey, defaultWidth);
   const paneRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
@@ -100,9 +107,9 @@ export function useResizablePane(opts: {
       const d = dragRef.current;
       const el = paneRef.current;
       if (d == null || el == null) return;
-      el.style.width = `${clamp(d.startW + (e.clientX - d.startX))}px`;
+      el.style.width = `${clamp(d.startW + dir * (e.clientX - d.startX))}px`;
     },
-    [clamp],
+    [clamp, dir],
   );
 
   const onPointerUp = useCallback(
@@ -120,8 +127,8 @@ export function useResizablePane(opts: {
     (e: ReactKeyboardEvent<HTMLDivElement>): void => {
       const step = e.shiftKey ? keyStep * 4 : keyStep;
       let next: number | null = null;
-      if (e.key === 'ArrowLeft') next = width - step;
-      else if (e.key === 'ArrowRight') next = width + step;
+      if (e.key === 'ArrowLeft') next = width - dir * step;
+      else if (e.key === 'ArrowRight') next = width + dir * step;
       else if (e.key === 'Home') next = minWidth;
       else if (e.key === 'End') next = hi;
       else if (e.key === 'Enter' || e.key === ' ') next = defaultWidth; // same reset as dblclick
@@ -129,7 +136,7 @@ export function useResizablePane(opts: {
       e.preventDefault();
       setStored(clamp(next));
     },
-    [width, keyStep, minWidth, hi, defaultWidth, clamp, setStored],
+    [width, keyStep, dir, minWidth, hi, defaultWidth, clamp, setStored],
   );
 
   const onDoubleClick = useCallback((): void => {

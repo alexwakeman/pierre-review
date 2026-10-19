@@ -654,8 +654,17 @@ CODE, not by prompt:
   comment newer than the judgement, a resolve or unresolve since, or new commits (judged at another
   head). "Changed" is exactly what `planThreadReview` SENDS against THE ONE FOLD
   (`currentThreadAssessmentsForPrs`, below), so a check and a same-head review agree on what is new.
-  Nothing changed ⇒ refused `nothing_changed`, no thread ⇒ `no_threads` — no model (a click's
-  refusal is only answered; an AUTO one is stored, so it covers the burst).
+  Nothing changed ⇒ refused `nothing_changed` ("Every thread already has a current judgement."),
+  no thread ⇒ `no_threads`, and ⚠ only threads rooted on Claude's OWN posted findings ⇒
+  `own_findings_only` (the loader's `ownThreadCount`; those are the follow-up's, never a check's) —
+  no model (a click's refusal is only answered; an AUTO one is stored, so it covers the burst).
+  `refusalFor` is the ONE rule. A thread with NO usable judgement — never judged, `not_checked`,
+  judged at another head, or an old unresolved-only judgement of a thread resolved since — is always
+  SENT (pinned in `thread-check.test.ts`).
+- **A MANUAL review routed `skip`** (no textual change, so no thread block) starts a manual check in
+  its place (`startThreadCheckBesideManualReview`, from `manager.ts`): every manual run gets its
+  threads judged. Diff-only and deep runs judge them themselves. Auto runs unchanged
+  (`manual-skip-threads.test.ts`).
 - **THE RUN:** Sonnet 5; Read/Glob/Grep in the PR's read-only worktree behind the PATH GUARD (the
   diff alone when no checkout can be made); `Bash`, the write/web tools and the dispatch tools
   DENIED; connectors isolated; ONE tool `submit_threads` whose item is the review's. The prompt is
@@ -709,6 +718,17 @@ under its own "Claude judged" chip (shown only when one exists), never under the
 card no longer displays — a "Likely addressed" chip listing cards that read "Claude: not addressed"
 contradicted itself. The file-group and Changes-tab count chips (`rollupCounts`) still count the
 derived states.
+- ⚠ **CLAUDE'S OWN FINDINGS ON THEIR THREADS (2026-10-19).** A thread rooted on one of Limn's posted
+  findings is never a thread judgement, so its card used to show only "Resolved" — nothing of what
+  the later reviews found. `getThreadJudgements` now adds, per such thread, the NEWEST succeeded
+  review's follow-up item naming it (`item.threadId`; `not_checked` skipped, so an older word is not
+  hidden) as a judgement with `finding: {status, acceptKind, replyAuthor, reviewId}`
+  (`findingJudgementsFromFollowUps`); `validity`/`addressed` MIRROR it (`findingMirror`) for readers
+  that know only those. A settled finding leaves later follow-ups, so the newest item IS its last
+  word — it may come from an older review than the latest. The card wears ONE outcome pill
+  (Addressed · Partly addressed · Not addressed · No longer applies · Reply accepted · Fix later ·
+  Pushed back, `claudeFindingPill`) plus "Resolved" when GitHub says so, a templated reason line and
+  Claude's explanation under More. A PR whose reviews only followed up findings is listed too.
 
 ## CI review (why checks failed — its own process)
 
@@ -793,6 +813,15 @@ CURRENT head — an earlier commit's is hidden whether the head is green or red
   key. The onboarding floor: only a failure OBSERVED at or after the workspace switched auto review
   on. Its own `CI_REVIEW_DAILY_CAP` (default 20) automatic runs per workspace per UTC day, counted
   from rows (written when QUEUED); manual runs and server REFUSALS (no model ran) never count.
+- **Beside a manual review (2026-10-19)** (`with-review.ts` `startCiReviewBesideManualReview`, called
+  by `POST /api/prs/:id/claude-review` after a successful MANUAL start — the tab's Run and the Open
+  PRs Review button): when the synced rollup is red and `ciReviewDue` holds for the current head's
+  failing set, the CI review starts through `startCiReview` as a click (`trigger: 'manual'`,
+  `triggerKey` = the synced set, so the next click and the sweeper see it as taken). Every
+  workspace, auto review on or off. ⚠ Still its own process: the PR review prompt reads no logs.
+  "No Actions log" is the run's own stored `no_logs` refusal (no model). Awaited (DB reads only; never
+  throws), so the SPA's refetch after the start already shows the CI section's existing status.
+  Auto runs never come here. Pinned in `persist-db.test.ts`.
 - **Currency** (`deriveCiReviewState`, DB-only — the synced head and failing names): `current`,
   `stale` (`pushed` | `checks_changed` | `now_passing`), `running`, `none`; plus `refused` when the
   newest attempt AT THE CURRENT HEAD refused. Served per PR and batched (`POST
@@ -1788,7 +1817,7 @@ as the fix start, parsed by the same `parseStartBody`) → `manager.ts startPlan
   (fenced — model-written text derived from the PR) and the SAME system prompt and `WORKTREE_RULES`.
   Refs in the change report are still validated against the shown refs (`shownRefsOf(review_items)`).
   The SPA shows "Built from your plan" with the bullets above the build's progress and its result;
-  the bottom-right banner follows from the approve.
+  the header toast card follows from the approve.
 - **⚠ AN AUTO FIX NEVER PLANS.** `startReviewFix` (the auto entry) has no plan option and
   `auto-fix.ts` never calls `startPlan`; and a person's OPEN plan (`planning` / `plan_ready`) skips
   an auto fix as `fix_in_progress`, so an auto build cannot bury it. Boot reconcile: a pass cut off by

@@ -258,6 +258,9 @@ export interface ReviewThreadsForReview {
   // The same, inside UNRESOLVED threads rooted on Limn's OWN posted findings only — a reply there
   // needs a full review (finding replies, pushback); the auto sweeper routes on it. null = none.
   newestOwnThreadCommentAt: Date | null;
+  // How many threads were left out because they are rooted on Limn's OWN posted findings (the
+  // follow-up's, never sent here). Lets Check threads say why it has nothing to judge. Absent ⇒ 0.
+  ownThreadCount?: number;
 }
 
 /**
@@ -327,6 +330,7 @@ export async function loadReviewThreadsForReview(
 
   let newest: Date | null = null;
   let newestOwn: Date | null = null;
+  let ownThreads = 0;
   const threads: ReviewThreadForReview[] = [];
   for (const list of byThread.values()) {
     list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.commentId - b.commentId);
@@ -340,6 +344,7 @@ export async function loadReviewThreadsForReview(
       if (rootIsOwn && (!newestOwn || c.createdAt > newestOwn)) newestOwn = c.createdAt;
     }
     // A thread rooted on Limn's own posted finding belongs to the follow-up, not here.
+    if (rootIsOwn) ownThreads += 1;
     if (rootIsOwn || kept.length === 0) continue;
     const first = kept[0]!;
     const last = kept[kept.length - 1]!;
@@ -364,5 +369,5 @@ export async function loadReviewThreadsForReview(
     });
   }
   threads.sort((a, b) => a.threadId - b.threadId);
-  return { threads, newestCommentAt: newest, newestOwnThreadCommentAt: newestOwn };
+  return { threads, newestCommentAt: newest, newestOwnThreadCommentAt: newestOwn, ownThreadCount: ownThreads };
 }

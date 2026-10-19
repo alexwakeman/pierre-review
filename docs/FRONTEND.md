@@ -233,8 +233,7 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   refits). Shows **PrDetail** for the selected PR. **App lands on Activity → Open PRs by
   default** (a bare load → `?view=activity`; Pending is `?view=activity&activityRepo=attention`;
   `?pr=`/`?thread=` deep links keep the timeline).
-- **`AutoMergeBanner`** — the armed-merge PROGRESS STACK, a bottom-right card (same shape as
-  `ClaudeReviewBanner`) fed by `GET /api/auto-merge`. One row per armed PR from the click that
+- **`AutoMergeBanner`** — the armed-merge PROGRESS STACK, a header toast card fed by `GET /api/auto-merge`. One row per armed PR from the click that
   arms, through the watcher's `phase`, to the outcome — see "The armed-merge progress stack"
   below and docs/MERGE-CI-TRUNK.md.
 - **Tabs / board slot** (`PinnedTabsBar` + `App.tsx`). `<main>` renders exactly ONE
@@ -1223,7 +1222,7 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   the plan panel — the tab's `isRunning` excludes it, so a planning pass never shows as a build — and
   the picker stays shut while a plan is open. The stream stays on while `plan.status === 'planning'`
   or a plan action is in flight. The plan actions share `aiFixPlanMutationKey`; "Make a plan"
-  shares the start's key. Only "Approve and build" seeds the bottom-right banner (`noteAiFixRun`);
+  shares the start's key. Only "Approve and build" seeds the header AI-fixes card (`noteAiFixRun`);
   the banner treats `'planned'` as terminal ("Plan ready").
 - **STORIES ARE THE TICKET REVIEW'S NOW, in its own "Story check" section** (`TicketCoverage.tsx`,
   pure half `lib/ticketReview.ts`, hooks `hooks/useTicketReview.ts`; contract docs/CLAUDE-REVIEW.md
@@ -3332,7 +3331,7 @@ landmines:
   `seedEditLines` (`useRegionEdit`'s module map, with a listener so a mounted pane re-reads it).
   ⚠ **HIDE, never disable.**
 - **The overlay mounts in `App.tsx`, not inside `PrDetail`** — it opens from three places and must
-  not unmount when the pane behind it closes. It is OPAQUE (`z-[60]`, above the one toast column's
+  not unmount when the pane behind it closes. It is OPAQUE (`z-[60]`, above an expanded header toast's
   `z-50`), not a scrim: a translucent backdrop over a live timeline is unreadable at 12px.
 - ⚠ **THERE IS NO URL KEY, NO HISTORY ENTRY AND NO `PrDetailTab` MEMBER, DELIBERATELY.** A
   `?prTab=conflicts` would make Back a way to lose work — a `popstate` cannot be cancelled and the
@@ -3499,8 +3498,8 @@ landmines:
   gutter-arrow rule below — the arrow is still the one per-CHANGE route to a side; these name the
   FILE so the two never announce alike. Not the wand either: the wand never picks a side because it
   acts for the reader, and this is the reader picking one.
-- **`ClosedResolverToast` is a plain card in the ONE bottom-right toast column**, never its own
-  `fixed bottom-4 right-4` element.
+- **`ClosedResolverToast` is a card in the ONE header toast strip**, never its own `fixed`
+  element; Reopen stays on its one line.
 - The `--mr-*` state washes and the shared `--code-hl-*` syntax colours, with their hand-run guards:
   see **The AI-surface palette** above.
 
@@ -4014,7 +4013,7 @@ back:
   ("Dismissing…") until `['my-turn']`, `['attention-cards']`, `['daily-brief']` and `['work-plan']`
   have refetched — the My Turn settings save's list — so the card and every count move in one frame
   and `capFor`'s `shown === count` pairing never sees a half-updated board. Per-target mutation key.
-- **Two ways back**: `MyTurnDismissToast` (a plain card in the ONE bottom-right toast column, 10s,
+- **Two ways back**: `MyTurnDismissToast` (a card in the ONE header toast strip, 10s,
   "Undo"), and the **Dismissed** disclosure under the My turn tab (`MyTurnDismissedList`, shut by
   default, fed by `AttentionCardsResponse.myTurnDismissed`, each row "Bring back"). Its count is its
   own length and appears in no tab badge, chip or lens.
@@ -4300,23 +4299,37 @@ shared between the header sync button and the WorkspaceManager's embedded progre
 - **Adding a repo from the manager AUTO-SWITCHES the active workspace to the destination** once
   the move commits — the "synced fine but nothing loaded" fix; the scope used to stay behind.
 
-## There is ONE bottom-right toast column (App.tsx) + `GlobalLoadingBar`
+## There is ONE header toast strip (`HeaderToasts.tsx`) + `GlobalLoadingBar`
 
-⚠ **Never add a new independent `fixed bottom-4 right-4` element.** Three of them were painting
-over each other at the same coordinate. `App.tsx` renders exactly one column —
+⚠ **Never add an independent `fixed` toast element, and never a second strip.** The old
+bottom-right column (itself the fix for three `fixed bottom-4 right-4` elements painting over
+each other) is GONE: every toast is now a horizontal card in the top header, in
+`<HeaderToastStrip>` between the wordmark and the right-hand controls (Sync · bell · ? · theme ·
+user). App.tsx mounts, left to right: the Claude reviews frame, `AiFixBanner`,
+`ClosedResolverToast`, `MyTurnDismissToast`, `DependencyMergeToast`, `AutoMergeBanner`,
+`GlobalLoadingBar`.
 
-```jsx
-<div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
-  <ClaudeReviewBanner /> <AutoMergeBanner /> <GlobalLoadingBar />
-</div>
-```
-
-— and `ClaudeReviewBanner`, `AutoMergeBanner` and the ambient `GlobalLoadingBar` render as
-**plain cards inside it**. `GlobalLoadingBar` is the BOTTOM-MOST card; the two toast stacks sit
-above it rather than over it. The column is `pointer-events-none`: the bar is an **INDICATOR, not
-a dialog** — no close button, no click target, and it must never steal a click from the board
-underneath. The two toast stacks DO take clicks, and each re-enables `pointer-events-auto` on its
-own card rather than on the column.
+- **ONE LINE BY DEFAULT.** Each card sits in a fixed-size slot (`h-7`, `sm:w-56 lg:w-64`; below
+  `sm` just the icon, plus the X / one action), so a card arriving or leaving never moves the
+  header's controls; the strip takes the flexible space and scrolls sideways when full.
+- **EXPANDS ON HOVER AND KEYBOARD FOCUS, only when its content is longer** (vertical overflow, a
+  truncated line, or words hidden at a narrow width). The panel lifts to `position: fixed` at the
+  slot's measured rect and OVERLAYS the page — fixed, not absolute, because the strip is a
+  horizontal scroller and a scroller clips both axes. Any scroll or resize collapses it (the rect
+  is stale); Escape collapses it; only one card is expanded at a time.
+- **`HeaderToast` props**: `label` (leads the line, names the card's `role="group"`), `icon` (from
+  `Icons.tsx`), `summary`, `action` (ONE compact control kept on the line — Undo, Reopen — never
+  hidden behind a hover), `onDismiss` + `dismissLabel` (the X, named "Dismiss …"; ABSENT = not
+  dismissible, no X), `progress` (a bar that stays on the collapsed line), `children` (the detail).
+  Each toast keeps its own dismiss semantics: AI fixes and merge-when-ready offer the X only once
+  nothing is still running/armed; the loading bar is an INDICATOR with no X and no action; the
+  timed toasts (resolver reopen 20s, dependency results 15s, My Turn undo 10s) still auto-remove.
+- **Claude reviews** (`ClaudeReviewBanner`) is a `HeaderToast` like the rest: "N running" / "N ready"
+  on the line, each review (open it, or its own X once ready) in the expanded panel, the card's X once
+  nothing is running.
+- **The strip is the polite live region** (`role="status"`, `aria-atomic="false"`,
+  `aria-relevant="additions"`) — cards are not, so a card (or a row in one) appearing is
+  announced and a percentage ticking in place is not.
 
 ### The armed-merge progress stack (`AutoMergeBanner`)
 
@@ -4561,6 +4574,18 @@ conversation on screen, the narrow-width Read / Ask tab) per WORKSPACE in the mo
   written in `useAskDocs`' HOOK-level onSuccess, which also seats a NEW conversation's id in
   `store/docsView.ts` (only while the reader is still on "new") — never a `mutate()` callback.
   Citations render as "Document › Section" buttons that open the section (at its anchor).
+- **The wide layout is the reader's** (lg+ only; the stacked layout and the xl- Read / Ask tabs are
+  unchanged): the library column COLLAPSES from the chevron in its header to a 40px strip (expand
+  chevron, book mark, document count — the count is in the button's `aria-label`), and the
+  library | viewer | chat widths are dragged on two `role="separator"` handles from
+  `useResizablePane` (arrows / Home / End / Enter, double-click resets). The chat handle uses the
+  hook's `side: 'right'` (the pane sits right of its handle, so dragging LEFT widens it). Ceilings come
+  from the pure `docsPaneBounds` (`lib/docsLayout.ts`, test/docsLayout.test.ts): library 200–480, chat
+  280–720, each capped so the viewer keeps 360px given the OTHER column's width; a floor still wins in
+  a too-narrow row. All three are per-browser localStorage (`pierre:docsLibraryWidth`,
+  `pierre:docsChatWidth`, `pierre:docsLibraryCollapsed`), never the store or the URL. ⚠ Widths are
+  applied inline ONLY while the columns sit side by side (`useMediaQuery`), so a stacked layout is never
+  pinned to a dragged width.
 - **Settings → Workspace → Reference docs** (`settings/ReferenceDocsSection.tsx`, beside Auto review,
   only on `me.ai.enabled`): "Use reference docs in Claude Review", draft + Save, OFF by default.
 

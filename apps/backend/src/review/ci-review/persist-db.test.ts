@@ -293,6 +293,57 @@ describe('the sweeper', () => {
   });
 });
 
+// A MANUAL Claude review also starts the CI review when it is due (with-review.ts): the sweeper's
+// own rule, through the CI review's own door, as a click (never the auto cap).
+describe('the CI review beside a manual review', () => {
+  it('starts once for a red head with no CI review of its failing set; never for green, held or covered', async () => {
+    const wr = await import('./with-review.js');
+    const started: import('./manager.js').StartCiArgs[] = [];
+    let heldNow = false;
+    const d = {
+      start: async (_c: AgentContext, a: import('./manager.js').StartCiArgs) => {
+        started.push(a);
+        return { outcome: 'queued' as const, runId: 1 };
+      },
+      held: () => heldNow,
+    };
+    const id = await addPr('manual-red', { authorId: humanUserId, ciStatus: 'failure' });
+    await event('manual-red', 'h_manual-red', 'failure', ['test'], T0 - 60_000);
+    expect(await wr.startCiReviewBesideManualReview(ctx, 1, id, d)).toBe('queued');
+    expect(started).toEqual([
+      expect.objectContaining({
+        prId: id,
+        workspaceId: ws,
+        headSha: 'h_manual-red',
+        trigger: 'manual',
+        triggerKey: currency.failingKey(['test']),
+      }),
+    ]);
+    // Another account's PR id reads as nothing.
+    expect(await wr.startCiReviewBesideManualReview(ctx, 2, id, d)).toBe('not_due');
+    // Held (queued or running): the running run is never doubled.
+    heldNow = true;
+    expect(await wr.startCiReviewBesideManualReview(ctx, 1, id, d)).toBe('already_running');
+    heldNow = false;
+    // A run already took exactly this (head, failing set) — answered, or refused for no Actions log.
+    const refused = await persist.insertQueuedCiReview(ctx, {
+      accountId: 1,
+      workspaceId: ws,
+      prId: id,
+      repoId,
+      headSha: 'h_manual-red',
+      triggerKey: currency.failingKey(['test']),
+      trigger: 'manual',
+      model: 'm',
+    });
+    await persist.markCiReviewRefused(ctx, 1, refused, { reason: 'no_logs', headSha: 'h_manual-red', failingChecks: ['test'] });
+    expect(await wr.startCiReviewBesideManualReview(ctx, 1, id, d)).toBe('not_due');
+    // A green PR: nothing to explain.
+    expect(await wr.startCiReviewBesideManualReview(ctx, 1, pr.green!, d)).toBe('not_due');
+    expect(started).toHaveLength(1);
+  });
+});
+
 describe("AI Fix's CI half and the delete path", () => {
   it('fixable items come only from the latest succeeded run at the CURRENT head', async () => {
     // red's head is h_red2 now; its only success is at h_red.

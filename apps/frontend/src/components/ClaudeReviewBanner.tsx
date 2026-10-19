@@ -6,6 +6,8 @@ import { useNotificationPref } from '../hooks/useNotificationPref.js';
 import { useFilters } from '../store/filters.js';
 import { playReviewComplete } from '../lib/sound.js';
 import { dateTime } from '../lib/ui.js';
+import { HeaderToast } from './HeaderToasts.js';
+import { CheckIcon, CloseIcon, ReviewIcon } from './Icons.js';
 
 interface CompletedCoord {
   repoFullName: string;
@@ -74,7 +76,7 @@ const PHASE_LABEL: Record<string, string> = {
   persisting: 'Saving findings',
 };
 
-// Floating, global progress banner for in-flight Claude reviews. Polls the active
+// The global progress card for in-flight Claude reviews (in the header toast strip). Polls the active
 // list, keeps a local record (so completed runs linger until dismissed), and lets
 // you jump straight to a review's Claude Review tab. Renders nothing when there's
 // nothing to show.
@@ -194,83 +196,66 @@ export function ClaudeReviewBanner(): JSX.Element | null {
   const dismissOne = (reviewId: number): void =>
     setDismissed((prev) => ({ ...prev, [reviewId]: true }));
 
+  // A card in the ONE header toast strip (HeaderToasts.tsx): one line ("2 running" / "1 ready"),
+  // the reviews in the expanded panel, and the X once nothing is still running (a running review
+  // keeps its card).
+  const ready = visible.length - running.length;
   return (
-    <div className="flex flex-col gap-2">
-      <div className="pointer-events-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-        <div className="flex items-center justify-between border-b border-gray-100 px-3 py-1.5 dark:border-gray-800">
-          <span className="text-xs font-semibold">
-            Claude reviews
-            {running.length > 0 && (
-              <span className="ml-1 font-normal text-gray-400">
-                · {running.length} running
-              </span>
-            )}
-          </span>
-          {allDone && (
+    <HeaderToast
+      testId="claude-review-toast"
+      label="Claude reviews"
+      icon={<ReviewIcon size={13} />}
+      summary={running.length > 0 ? `${running.length} running` : `${ready} ready`}
+      onDismiss={allDone ? dismissAll : undefined}
+      dismissLabel="Dismiss the Claude reviews card"
+    >
+      <ul className="max-h-64 divide-y divide-gray-100 overflow-auto dark:divide-gray-800">
+        {visible.map((e) => (
+          <li key={e.reviewId} className="flex items-start gap-2 px-2 py-1.5 text-xs">
             <button
               type="button"
-              onClick={dismissAll}
-              className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              onClick={() =>
+                openClaudeReview({
+                  id: e.prId,
+                  number: e.prNumber,
+                  title: e.prTitle,
+                  repoFullName: e.repoFullName,
+                  authorLogin: null,
+                  authorDisplayName: null,
+                  authorAvatarUrl: null,
+                })
+              }
+              className="block min-w-0 flex-1 text-left"
+              title="Open this review"
             >
-              Dismiss all
+              <span className="flex items-center gap-1.5">
+                {e.done ? (
+                  <CheckIcon size={11} className="shrink-0 text-green-600 dark:text-green-400" />
+                ) : (
+                  <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500" />
+                )}
+                <span className="truncate font-medium text-blue-600 hover:underline dark:text-blue-400">
+                  {e.repoFullName} #{e.prNumber}
+                </span>
+              </span>
+              <span className="mt-0.5 block truncate text-gray-600 dark:text-gray-300">{e.prTitle}</span>
+              <span className="mt-0.5 block text-gray-600 dark:text-gray-300">
+                {e.done ? 'Ready — open it' : `${e.phase != null ? (PHASE_LABEL[e.phase] ?? e.phase) : 'Starting'}…`}
+              </span>
             </button>
-          )}
-        </div>
-        <ul className="max-h-64 divide-y divide-gray-100 overflow-auto dark:divide-gray-800">
-          {visible.map((e) => (
-            <li key={e.reviewId} className="px-3 py-2 text-xs">
+            {e.done && (
               <button
                 type="button"
-                onClick={() =>
-                  openClaudeReview({
-                    id: e.prId,
-                    number: e.prNumber,
-                    title: e.prTitle,
-                    repoFullName: e.repoFullName,
-                    authorLogin: null,
-                    authorDisplayName: null,
-                    authorAvatarUrl: null,
-                  })
-                }
-                className="block w-full text-left"
-                title="Open this review"
+                onClick={() => dismissOne(e.reviewId)}
+                aria-label={`Dismiss ${e.repoFullName} #${e.prNumber}`}
+                className="shrink-0 rounded p-0.5 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
               >
-                <div className="flex items-center gap-1.5">
-                  {e.done ? (
-                    <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-green-500" />
-                  ) : (
-                    <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500" />
-                  )}
-                  <span className="truncate font-medium text-blue-600 hover:underline dark:text-blue-400">
-                    {e.repoFullName} #{e.prNumber}
-                  </span>
-                </div>
-                <div className="mt-0.5 truncate text-gray-500 dark:text-gray-400">{e.prTitle}</div>
-                <div className="mt-0.5 text-gray-400">
-                  {e.done
-                    ? 'Ready — click to view'
-                    : `${
-                        e.phase != null
-                          ? (PHASE_LABEL[e.phase] ?? e.phase)
-                          : 'Starting'
-                      }…`}
-                </div>
+                <CloseIcon size={10} />
               </button>
-              {e.done && (
-                <div className="mt-1 text-right">
-                  <button
-                    type="button"
-                    onClick={() => dismissOne(e.reviewId)}
-                    className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-                  >
-                    dismiss
-                  </button>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </HeaderToast>
   );
 }

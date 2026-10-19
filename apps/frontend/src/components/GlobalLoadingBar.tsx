@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { SyncActivityRepo, SyncCatchupRepo } from '@pierre-review/shared';
 import { isMlScoring, useMlEnrichmentStatus } from '../hooks/useMlLabels.js';
 import { useSyncActivity } from '../hooks/useSyncActivity.js';
+import { HeaderToast } from './HeaderToasts.js';
+import { RefreshIcon } from './Icons.js';
 
-// The global ambient loading bar — fixed bottom-right, YELLOW, non-dismissible, visible
+// The global ambient loading bar — a card in the header toast strip, YELLOW bar, non-dismissible, visible
 // whenever heavy background work is running: any FULL-MODE sync walk (first-sync
 // backfill / deep re-sync / queued-for-full, via GET /api/sync-activity), a CATCH-UP walk
 // (the same endpoint's `catchups`: an established repo more than 24h behind, which is what a
@@ -26,10 +28,9 @@ import { useSyncActivity } from '../hooks/useSyncActivity.js';
 // ambient indicator anywhere — the board looked dead. This card is the always-there
 // answer; the sync modal remains the detailed one.
 //
-// It is an INDICATOR, not a dialog: no close button, no click target (pointer-events
-// none — it must never steal a click from the board underneath). It renders as the
-// BOTTOM-MOST card of the app's single shared bottom-right toast column (App.tsx) —
-// the auto-merge and Claude-review toasts stack ABOVE it rather than painting over it.
+// It is an INDICATOR, not a dialog: no close button and no action. It renders as the LAST
+// card of the app's ONE header toast strip (HeaderToasts.tsx, mounted in App.tsx); its bar
+// stays on the collapsed line and the per-stage sentences show when the card expands.
 
 // ---- Pure blend/ETA math (kept here, exported, so it is testable by reading) ----------
 
@@ -379,77 +380,59 @@ export function GlobalLoadingBar(): JSX.Element | null {
   const mlWaiting =
     walkActive && !scoring && Boolean(ml?.enabled) && (ml?.pending ?? 0) > 0;
 
+  // The headline — what the one line says after "Loading data · N%".
+  const headline = !active ? (
+    'Done'
+  ) : pausedHeadline ? (
+    <span className="text-amber-700 dark:text-amber-400">
+      {rateLimited
+        ? `Paused — GitHub rate limit, ${resumeLabel(rateLimited.paused?.resumeAt)}`
+        : 'Paused — waiting for another sync'}
+    </span>
+  ) : etaSeconds != null ? (
+    formatEta(etaSeconds)
+  ) : backfillFinishing && !scoring ? (
+    'finishing up…'
+  ) : (
+    'estimating…'
+  );
+  const hasDetail = backfillActive || catchupSentence != null || (scoring && ml) || mlWaiting;
+
   return (
-    <div
-      role="status"
-      aria-label="Background loading"
-      className={`pointer-events-none rounded-lg border border-gray-200 bg-white/95 p-3 shadow-lg backdrop-blur transition-opacity duration-500 dark:border-gray-700 dark:bg-gray-900/95 ${
-        active ? 'opacity-100' : 'opacity-0'
-      }`}
+    <HeaderToast
+      testId="global-loading-bar"
+      label="Loading data"
+      icon={<RefreshIcon size={13} className={active ? 'animate-spin' : undefined} />}
+      summary={
+        <>
+          <span className="tabular-nums">{displayPercent}%</span> · {headline}
+        </>
+      }
+      progress={{ value: displayPercent, label: 'Loading data' }}
+      className={`transition-opacity duration-500 ${active ? 'opacity-100' : 'opacity-0'}`}
     >
-      <div className="mb-1 flex items-baseline justify-between gap-2">
-        <span className="text-xs font-semibold text-gray-800 dark:text-gray-100">
-          Loading data
-        </span>
-        <span className="text-xs font-semibold tabular-nums text-yellow-600 dark:text-yellow-400">
-          {displayPercent}%
-        </span>
-      </div>
-      <div
-        role="progressbar"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={displayPercent}
-        className="h-1.5 w-full overflow-hidden rounded bg-gray-200 dark:bg-gray-800"
-      >
-        <div
-          className="h-1.5 rounded bg-yellow-500 transition-all duration-500 dark:bg-yellow-400"
-          style={{ width: `${displayPercent}%` }}
-        />
-      </div>
-      <div className="mt-1 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
-        {!active ? (
-          'Done'
-        ) : pausedHeadline ? (
-          <span className="text-amber-600 dark:text-amber-400">
-            {rateLimited
-              ? `Paused — GitHub rate limit, ${resumeLabel(rateLimited.paused?.resumeAt)}`
-              : 'Paused — waiting for another sync'}
-          </span>
-        ) : etaSeconds != null ? (
-          formatEta(etaSeconds)
-        ) : backfillFinishing && !scoring ? (
-          'finishing up…'
-        ) : (
-          'estimating…'
-        )}
-      </div>
-      {backfillActive && (
-        <div className="mt-0.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
-          {walkingCount > 0
-            ? `Backfilling ${walkingCount} repo${walkingCount === 1 ? '' : 's'} · ${backfillPercent}%${
-                queuedCount > 0 ? ` · ${queuedCount} waiting` : ''
-              }`
-            : `Backfill queued · ${queuedCount} waiting`}
+      {hasDetail ? (
+        <div className="space-y-0.5 text-[12px] leading-snug text-gray-600 dark:text-gray-300">
+          {backfillActive && (
+            <div>
+              {walkingCount > 0
+                ? `Backfilling ${walkingCount} repo${walkingCount === 1 ? '' : 's'} · ${backfillPercent}%${
+                    queuedCount > 0 ? ` · ${queuedCount} waiting` : ''
+                  }`
+                : `Backfill queued · ${queuedCount} waiting`}
+            </div>
+          )}
+          {catchupSentence != null && <div>{catchupSentence}</div>}
+          {scoring && ml && (
+            <div>
+              {`Classifying bot comments · ${mlDone.toLocaleString()} of ${mlTotal.toLocaleString()} · ${
+                mlTotal > 0 ? Math.round((mlDone / mlTotal) * 100) : 0
+              }%`}
+            </div>
+          )}
+          {mlWaiting && <div>Classification waiting…</div>}
         </div>
-      )}
-      {catchupSentence != null && (
-        <div className="mt-0.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
-          {catchupSentence}
-        </div>
-      )}
-      {scoring && ml && (
-        <div className="mt-0.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
-          {`Classifying bot comments · ${mlDone.toLocaleString()} of ${mlTotal.toLocaleString()} · ${
-            mlTotal > 0 ? Math.round((mlDone / mlTotal) * 100) : 0
-          }%`}
-        </div>
-      )}
-      {mlWaiting && (
-        <div className="mt-0.5 text-[11px] leading-snug text-gray-400 dark:text-gray-500">
-          Classification waiting…
-        </div>
-      )}
-    </div>
+      ) : undefined}
+    </HeaderToast>
   );
 }

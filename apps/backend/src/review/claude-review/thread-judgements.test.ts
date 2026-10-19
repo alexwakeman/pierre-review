@@ -304,3 +304,129 @@ describe('POST /api/claude-review/thread-judgements', () => {
     expect((await read([checkOnly], 2)).json().prs).toEqual([]);
   });
 });
+
+// ⚠ THE BUG (2026-10-19, PR 161889 on the dev DB): every thread was rooted on one of Claude's OWN
+// posted findings. Those are the follow-up's, never thread judgements, so the cards showed only
+// "Resolved" and nothing of what the later reviews found. Each now carries the NEWEST follow-up
+// item that judged it.
+describe("Claude's own findings on their thread cards", () => {
+  let ownOnly = 0;
+  let ownOnlyNewer = 0;
+  let ownForeign = 0;
+  const followUp = (items: Array<Record<string, unknown>>) => ({
+    priorReviewId: 1,
+    priorHeadSha: OLD,
+    headMoved: true,
+    changesSinceShown: false,
+    items: items.map((it, i) => ({
+      ref: `P${i + 1}`,
+      priorFindingId: 100 + i,
+      sent: true,
+      carried: false,
+      explanation: 'Checked the code.',
+      path: 'a.ts',
+      line: 1,
+      side: 'RIGHT',
+      severity: 'warning',
+      title: 't',
+      ...it,
+    })),
+  });
+  const review = async (
+    accountId: number,
+    prId: number,
+    headSha: string,
+    fu: unknown,
+    threadAssessments: ClaudeThreadAssessment[] | null,
+  ) =>
+    (
+      await db
+        .insert(schema.claudeReviews)
+        .values({
+          accountId,
+          prId,
+          headSha,
+          model: 'claude-opus-5-5',
+          status: 'succeeded',
+          reviewMode: 'worktree',
+          followUp: fu,
+          threadAssessments,
+          finishedAt: new Date(),
+        })
+        .returning({ id: schema.claudeReviews.id })
+        .execute()
+    )[0].id as number;
+
+  beforeAll(async () => {
+    const repoId = (await db.select().from(schema.repos).execute()).find((r: any) => r.name === 'tj-a').id;
+    const mk = async (accountId: number, key: string, n: number, repo = repoId) =>
+      (
+        await db
+          .insert(schema.pullRequests)
+          .values({
+            githubNodeId: `PR_own_${key}`,
+            accountId,
+            repoId: repo,
+            number: n,
+            title: key,
+            state: 'open',
+            isDraft: false,
+            openedAt: new Date(),
+            updatedAt: new Date(),
+            headSha: HEAD,
+          })
+          .returning()
+          .execute()
+      )[0].id as number;
+    ownOnly = await mk(1, 'own-only', 50);
+    // The real shape: three reviews, each settling a different finding; the newest judges no thread
+    // of another reviewer (`[]`) and follows up only what is still open.
+    await review(1, ownOnly, OLD, followUp([
+      { threadId: 51, status: 'not_addressed' },
+      { threadId: 52, status: 'no_longer_applies' },
+    ]), []);
+    await review(1, ownOnly, OLD, followUp([
+      { threadId: 53, status: 'not_addressed' },
+      { threadId: 51, status: 'reply_accepted', acceptKind: 'deferred', reply: { author: 'dave', excerpt: 'Later.' }, carried: true },
+    ]), []);
+    ownOnlyNewer = await review(1, ownOnly, HEAD, followUp([
+      { threadId: 53, status: 'reply_accepted', acceptKind: 'not_valid', reply: { author: 'dave', excerpt: 'AC5 says so.' } },
+      // Never judged in this run: an older word on it must not be hidden, nor a claim invented.
+      { threadId: 52, status: 'not_checked', sent: false, ref: null },
+    ]), []);
+    const otherRepo = (await db.select().from(schema.repos).execute()).find((r: any) => r.name === 'tj-foreign').id;
+    ownForeign = await mk(2, 'own-foreign', 51, otherRepo);
+    await review(2, ownForeign, HEAD, followUp([{ threadId: 61, status: 'addressed' }]), null);
+  });
+
+  it('each own-finding thread carries the newest follow-up that judged it', async () => {
+    const p = ((await read([ownOnly])).json().prs as any[])[0];
+    expect(p).toMatchObject({ prId: ownOnly, reviewId: ownOnlyNewer, currentHeadSha: HEAD });
+    const byId = new Map((p.judgements as any[]).map((j) => [j.threadId, j]));
+    expect([...byId.keys()].sort()).toEqual([51, 52, 53]);
+    expect(byId.get(53)).toMatchObject({
+      validity: 'not_valid',
+      assessedAtHead: HEAD,
+      finding: { status: 'reply_accepted', acceptKind: 'not_valid', replyAuthor: 'dave', reviewId: ownOnlyNewer },
+    });
+    expect(byId.get(51)).toMatchObject({
+      validity: 'valid',
+      addressed: 'not_addressed',
+      assessedAtHead: OLD,
+      finding: { status: 'reply_accepted', acceptKind: 'deferred', replyAuthor: 'dave' },
+    });
+    // The newest run's `not_checked` does not hide the older "no longer applies".
+    expect(byId.get(52)).toMatchObject({ addressed: 'addressed', finding: { status: 'no_longer_applies', replyAuthor: null } });
+  });
+
+  it("never serves another account's follow-ups", async () => {
+    expect(((await read([ownForeign])).json().prs as any[])).toEqual([]);
+    const theirs = ((await read([ownForeign], 2)).json().prs as any[])[0];
+    expect(theirs.judgements).toEqual([expect.objectContaining({ threadId: 61, finding: expect.objectContaining({ status: 'addressed' }) })]);
+  });
+
+  it('an ordinary thread judgement carries no `finding`', async () => {
+    const p = ((await read([judged])).json().prs as any[])[0];
+    expect((p.judgements as any[]).every((j) => j.finding === undefined)).toBe(true);
+  });
+});

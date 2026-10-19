@@ -12,7 +12,7 @@ import type { AgentContext } from '../agent-context.js';
 import { cleanupCloneCache } from '../clone-manager.js';
 import { capDiff } from '../post-review.js';
 import { fetchMemberDiffs, prepareMemberWorktrees } from '../ticket-review/prepare.js';
-import { getCiPrContext } from '../ci-review/persist.js';
+import { defaultWorkspaceId, getCiPrContext } from '../ci-review/persist.js';
 import {
   AGENTIC_AI_ENABLED,
   REVIEW_APPLY_AUTH_ENV,
@@ -104,7 +104,7 @@ export async function planThreadCheck(
   accountId: number,
   prId: number,
   headSha: string,
-): Promise<{ plan: ThreadPlan; threadCount: number; newestCommentAt: Date | null } | null> {
+): Promise<{ plan: ThreadPlan; threadCount: number; ownThreadCount: number; newestCommentAt: Date | null } | null> {
   const load = ctx.queries.loadReviewThreads?.bind(ctx.queries);
   if (!load) return null;
   const [loaded, current] = await Promise.all([
@@ -115,8 +115,24 @@ export async function planThreadCheck(
   return {
     plan: planThreadReview(loaded.threads, headSha, prior),
     threadCount: loaded.threads.length,
+    ownThreadCount: loaded.ownThreadCount ?? 0,
     newestCommentAt: loaded.newestCommentAt,
   };
+}
+
+/**
+ * Why a planned check has nothing to send (null ⇒ it does). ⚠ "Nothing changed" is true ONLY when
+ * every thread is carried — judged at this head, nothing newer on it, the same resolved state — so
+ * a thread with no usable judgement (never judged, `not_checked`, judged at another head, or an old
+ * unresolved-only judgement of a thread resolved since) is always SENT (`planThreadReview`).
+ * Exported for the test.
+ */
+export function refusalFor(
+  planned: { plan: ThreadPlan; threadCount: number; ownThreadCount?: number } | null,
+): ThreadCheckRefusal | null {
+  if (!planned) return 'no_threads';
+  if (planned.threadCount === 0) return (planned.ownThreadCount ?? 0) > 0 ? 'own_findings_only' : 'no_threads';
+  return planned.plan.sent.length === 0 ? 'nothing_changed' : null;
 }
 
 export type StartThreadCheckResult =
@@ -166,8 +182,7 @@ export async function startThreadCheck(ctx: AgentContext, a: StartThreadCheckArg
         model: THREAD_CHECK_MODEL,
         commentsThrough: a.commentsThrough ?? planned?.newestCommentAt ?? null,
       });
-    const refusal: ThreadCheckRefusal | null =
-      !planned || planned.threadCount === 0 ? 'no_threads' : planned.plan.sent.length === 0 ? 'nothing_changed' : null;
+    const refusal: ThreadCheckRefusal | null = refusalFor(planned);
     if (refusal) {
       // An AUTO refusal is STORED (a refused row covers the burst's comments, so the sweeper does not
       // ask again every few minutes); a click's is only answered.
@@ -189,6 +204,32 @@ export async function startThreadCheck(ctx: AgentContext, a: StartThreadCheckArg
   progressByRun.set(checkId, { phase: 'queued', threadsSent });
   pump();
   return { outcome: 'queued', checkId, threadsSent };
+}
+
+/**
+ * A manual Claude review that read no code (routed `skip`) judges no thread, so Check threads runs in
+ * its place (manager.ts). Same door and caps as the button; a refusal is only answered. Never throws.
+ */
+export async function startThreadCheckBesideManualReview(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+): Promise<StartThreadCheckResult | null> {
+  try {
+    const pr = await getCiPrContext(ctx, accountId, prId);
+    if (!pr?.headSha) return null;
+    return await startThreadCheck(ctx, {
+      accountId,
+      workspaceId: pr.workspaceId ?? (await defaultWorkspaceId(ctx, accountId)) ?? 0,
+      prId,
+      repoId: pr.repoId,
+      headSha: pr.headSha,
+      trigger: 'manual',
+    });
+  } catch (err) {
+    ctx.log.warn(`thread check beside review pr ${prId}: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
 }
 
 /** Is a check of this PR queued or running in this process? */
@@ -302,15 +343,12 @@ async function runPipeline(
   // `startedAt` is stamped as of THIS read, so the fold can tell which review it was planned against.
   const plannedAt = new Date();
   const planned = await planThreadCheck(ctx, accountId, prId, headSha);
-  if (!planned || planned.threadCount === 0) {
-    await markThreadCheckRefused(ctx, accountId, checkId, 'no_threads');
+  const refused = refusalFor(planned);
+  if (refused || !planned) {
+    await markThreadCheckRefused(ctx, accountId, checkId, refused ?? 'no_threads');
     return;
   }
   const { plan } = planned;
-  if (plan.sent.length === 0) {
-    await markThreadCheckRefused(ctx, accountId, checkId, 'nothing_changed');
-    return;
-  }
   const row = await getThreadCheckRow(ctx, accountId, checkId);
   const through =
     row?.commentsThrough && planned.newestCommentAt

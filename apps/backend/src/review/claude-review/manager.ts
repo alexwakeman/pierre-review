@@ -527,6 +527,17 @@ async function runPipeline(
       excludedFiles: prep.excludedFiles,
       findings: [],
     });
+    // ⚠ A MANUAL run still judges the threads. A skip run reads no code, so it carries no thread
+    // block; a person who pressed Review expects the open threads judged, so Check threads (its own
+    // process, claim and caps — it judges only what changed and refuses with no model when nothing
+    // did) starts in its place. Auto runs are unchanged: their comment bursts already route there.
+    if (item.trigger === 'manual') {
+      void import('./thread-check.js')
+        .then((m) => m.startThreadCheckBesideManualReview(ctx, item.accountId, item.prId))
+        .catch((err) =>
+          ctx.log.warn(`thread check beside skip pr ${item.prId}: ${err instanceof Error ? err.message : String(err)}`),
+        );
+    }
     return true;
   }
 

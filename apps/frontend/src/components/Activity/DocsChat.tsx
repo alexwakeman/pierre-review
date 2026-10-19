@@ -105,7 +105,7 @@ export function DocsChat({
   return (
     <section
       aria-label="Ask about these docs"
-      className="flex min-h-0 min-w-0 flex-1 flex-col rounded-lg border border-ai-border xl:w-96 xl:flex-none"
+      className="flex min-h-0 min-w-0 flex-1 flex-col rounded-lg border border-ai-border"
       data-testid="docs-chat"
     >
       <div className="flex flex-wrap items-center gap-1.5 border-b border-gray-200 px-3 py-2 dark:border-gray-800">

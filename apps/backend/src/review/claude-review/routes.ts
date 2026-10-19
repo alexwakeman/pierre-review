@@ -287,6 +287,14 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
             : 'The review queue is full; try again once some finish.',
       };
     }
+    // A manual review also explains failing CI: the CI review — its own process, door and caps —
+    // starts beside it when this head's failing set has no CI review yet (ci-review/with-review.ts).
+    // AWAITED (a few DB reads; the run itself is queued, never awaited) so the SPA's refetch after
+    // this reply already sees the CI run; it never throws and never fails the review start. (Lazy:
+    // ci-review imports the review manager, so a static import would tie every route test to it.)
+    await import('../ci-review/with-review.js')
+      .then((m) => m.startCiReviewBesideManualReview(ctx, accountId, id))
+      .catch(() => {});
     reply.status(202);
     return { reviewId: result.reviewId, status: 'queued' };
   });

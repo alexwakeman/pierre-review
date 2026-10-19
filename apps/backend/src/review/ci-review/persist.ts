@@ -147,6 +147,19 @@ export async function getCiPrContext(ctx: AgentContext, accountId: number, prId:
   return { ...r, workspaceId: ws[0]?.workspaceId ?? null };
 }
 
+/** The account's Default workspace id (a start's fallback for a repo with no membership). */
+export async function defaultWorkspaceId(ctx: AgentContext, accountId: number): Promise<number | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const w = (ctx.schema as any).workspaces;
+  const rows = (await ctx.db
+    .select({ id: w.id })
+    .from(w)
+    .where(and(eq(w.accountId, accountId), eq(w.isDefault, true)))
+    .limit(1)
+    .execute()) as Array<{ id: number }>;
+  return rows[0]?.id ?? null;
+}
+
 // ---- writes ----
 
 export interface QueueCiReviewArgs {

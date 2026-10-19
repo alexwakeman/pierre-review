@@ -55,6 +55,7 @@ let closeDb: (() => void) | undefined;
 let ctx: AgentContext;
 let repoId = 0;
 const threadsByPr = new Map<number, ReviewThreadForReview[]>();
+const ownByPr = new Map<number, number>();
 
 const HEAD = 'c'.repeat(40);
 const T0 = Date.UTC(2026, 9, 1, 12);
@@ -158,7 +159,7 @@ beforeAll(async () => {
     queries: {
       loadReviewThreads: async (_a: number, prId: number) => {
         const threads = threadsByPr.get(prId) ?? [];
-        return { threads, newestCommentAt: threads.length ? new Date(T0) : null };
+        return { threads, newestCommentAt: threads.length ? new Date(T0) : null, ownThreadCount: ownByPr.get(prId) ?? 0 };
       },
     },
   } as any as AgentContext;
@@ -181,6 +182,43 @@ describe('startThreadCheck', () => {
     const rows = await db.select().from(schema.claudeThreadChecks).execute();
     expect(rows.filter((r: any) => r.prId === empty || r.prId === same)).toEqual([]);
     expect(tc.threadCheckHeld(1, same)).toBe(false);
+  });
+
+  // ⚠ THE BUG (2026-10-19, PR 161889 on the dev DB): its three threads were all rooted on Claude's
+  // own posted findings, which Check threads never judges (the review's follow-up does), and the
+  // button said there was nothing to check. It now says why.
+  it("names a PR whose only threads are Claude's own findings", async () => {
+    const own = await newPr('own-only');
+    ownByPr.set(own, 3);
+    expect(await start(own)).toEqual({ outcome: 'refused', reason: 'own_findings_only' });
+    expect(tc.refusalFor({ plan: { headSha: HEAD, sent: [], omitted: [], carried: [] }, threadCount: 0 })).toBe('no_threads');
+    expect(tc.refusalFor(null)).toBe('no_threads');
+  });
+
+  it('a thread with NO usable judgement is always sent — "nothing changed" only when every one is current', async () => {
+    const pr = await newPr('unusable');
+    const OTHER = 'd'.repeat(40);
+    threadsByPr.set(pr, [
+      thread(1, T0, { isResolved: true, derivedState: 'resolved' }), // never judged, resolved
+      thread(2, T0, { isResolved: true, derivedState: 'resolved' }), // judged before resolved-thread support (no flag)
+      thread(3), // judged not_checked
+      thread(4), // judged at another head
+      thread(5, T0, { isResolved: true, derivedState: 'resolved' }), // judged resolved, at this head: current
+    ]);
+    const { resolved: _r, ...legacy } = judged(2);
+    await reviewWith(pr, [
+      legacy as ClaudeThreadAssessment,
+      judged(3, { validity: 'not_checked', addressed: 'not_checked', sent: false, ref: null }),
+      judged(4, { assessedAtHead: OTHER }),
+      judged(5, { resolved: true }),
+    ]);
+    const planned = await tc.planThreadCheck(ctx, 1, pr, HEAD);
+    expect(planned!.plan.sent.map((x) => x.thread.threadId).sort()).toEqual([1, 2, 3, 4]);
+    expect(planned!.plan.carried.map((c) => c.threadId)).toEqual([5]);
+    expect(tc.refusalFor(planned)).toBeNull();
+    // Only thread 5 left: every thread is current ⇒ the one honest refusal.
+    threadsByPr.set(pr, [thread(5, T0, { isResolved: true, derivedState: 'resolved' })]);
+    expect(await start(pr)).toEqual({ outcome: 'refused', reason: 'nothing_changed' });
   });
 
   it('sends only the changed threads, and takes one run per PR', async () => {

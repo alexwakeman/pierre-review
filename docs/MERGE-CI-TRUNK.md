@@ -968,7 +968,7 @@ on an ADAPTIVE cadence — 8s while any row is `armed`, 45s otherwise, because a
 nothing armed must not pay a per-8s request for a card that renders nothing.
 
 **The armed-merge progress stack (`AutoMergeBanner`)** is the global lifecycle surface, a plain
-card in App.tsx's ONE bottom-right toast column (never a second fixed element — see
+card in App.tsx's ONE header toast strip (never a second fixed element — see
 docs/FRONTEND.md). ONE CARD PER MERGE: a row appears on the CLICK that arms, tracks `phase` while
 the watcher works, and is REPLACED IN PLACE by its outcome — there is no separate terminal toast
 for a PR the stack was already showing. Four rules hold it together:
@@ -1010,7 +1010,7 @@ workspace's bot maps, the same resolution the Dependencies tab's membership read
   or a merge GitHub refuses as not mergeable → armed. Arms use the repo's first enabled method and
   ⚠ ALWAYS GitHub's merge-in update, never the local clone rebase — a force-push onto a Dependabot /
   Renovate branch makes the bot stop maintaining it (same as the policy sweep). Outcomes come back per PR and land as
-  ONE card in the toast column; the SPA refetches through `invalidateAfterPrWrite`.
+  ONE card in the header toast strip; the SPA refetches through `invalidateAfterPrWrite`.
 - **"Merge dependency updates automatically"** (`workspaces.dependency_auto_merge`, NULL = OFF,
   Settings → Workspace; a draft + Save like every other section — ticking the box writes nothing).
   `runDependencyPolicyTick` runs on the watcher's cron just before it

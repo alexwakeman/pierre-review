@@ -1,14 +1,22 @@
 import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, or } from 'drizzle-orm';
 import type {
+  ClaudeFollowUpItemRecord,
+  ClaudeReviewFollowUpRecord,
+  ClaudeThreadAddressed,
   ClaudeThreadAssessment,
+  ClaudeThreadFindingOutcome,
   ClaudeThreadJudgement,
   ClaudeThreadJudgementsForPr,
+  ClaudeThreadValidity,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
 // What the latest Claude review said about each review thread, for the THREAD CARDS
 // (`POST /api/claude-review/thread-judgements`). DB-only, account-scoped, ONE batched read for every
 // PR on screen — a thread card never fetches on its own.
+//
+// Threads rooted on Claude's OWN posted findings are not thread judgements (the follow-up owns
+// them); each carries the newest follow-up's outcome instead (`findingJudgementsFromFollowUps`).
 //
 // "Latest" = the newest SUCCEEDED, non-skip run that assessed threads (`thread_assessments` not
 // null), with any later Check threads run folded over it (`currentThreadAssessmentsForPrs`). A newer
@@ -227,35 +235,165 @@ export async function currentThreadAssessmentsForPrs(
   return out;
 }
 
+/** The two generic fields a finding's outcome MIRRORS (for readers that know only them). Pure. */
+export function findingMirror(
+  o: Pick<ClaudeThreadFindingOutcome, 'status' | 'acceptKind'>,
+): { validity: ClaudeThreadValidity; addressed: ClaudeThreadAddressed } {
+  switch (o.status) {
+    case 'addressed':
+    case 'no_longer_applies':
+      return { validity: 'not_checked', addressed: 'addressed' };
+    case 'partly_addressed':
+      return { validity: 'not_checked', addressed: 'partly_addressed' };
+    case 'not_addressed':
+    case 'reply_disputed':
+      return { validity: 'not_checked', addressed: 'not_addressed' };
+    case 'reply_accepted':
+      return o.acceptKind === 'deferred'
+        ? { validity: 'valid', addressed: 'not_addressed' }
+        : { validity: 'not_valid', addressed: 'not_checked' };
+  }
+}
+
+/**
+ * CLAUDE'S OWN FINDINGS ON THEIR THREADS. A thread rooted on one of Limn's posted findings is never
+ * a thread judgement (the follow-up owns it), so without this its card showed only GitHub's state —
+ * "Resolved" — and nothing of what the later reviews found. Per thread (`item.threadId`, stamped at
+ * run time), the NEWEST review's follow-up item that judged it (`not_checked` skipped: it never made
+ * a claim). A settled finding leaves later follow-ups, so the newest item naming it is its last word.
+ * `reviews` NEWEST FIRST. Pure (exported for the test).
+ */
+export function findingJudgementsFromFollowUps(
+  reviews: ReadonlyArray<{ id: number; headSha: string; followUp: ClaudeReviewFollowUpRecord | null }>,
+): Map<number, ClaudeThreadJudgement> {
+  const out = new Map<number, ClaudeThreadJudgement>();
+  for (const r of reviews) {
+    const items: ClaudeFollowUpItemRecord[] = Array.isArray(r.followUp?.items) ? r.followUp!.items : [];
+    for (const it of items) {
+      const threadId = it?.threadId;
+      if (typeof threadId !== 'number' || out.has(threadId)) continue;
+      if (it.status === 'not_checked' || it.status == null) continue;
+      const finding: ClaudeThreadFindingOutcome = {
+        status: it.status,
+        acceptKind: it.status === 'reply_accepted' ? (it.acceptKind ?? null) : null,
+        replyAuthor:
+          it.status === 'reply_accepted' || it.status === 'reply_disputed' ? (it.reply?.author ?? null) : null,
+        reviewId: r.id,
+      };
+      out.set(threadId, {
+        threadId,
+        ...findingMirror(finding),
+        explanation: it.explanation ?? null,
+        reason: null,
+        // Read the thread's CURRENT resolved state from the thread itself.
+        resolved: false,
+        assessedAtHead: r.headSha,
+        carried: it.statusCarried === true,
+        finding,
+      });
+    }
+  }
+  return out;
+}
+
+/** Every succeeded review's follow-up record per PR, newest first (account-scoped, DB-only). */
+async function followUpsForPrs(
+  ctx: AgentContext,
+  accountId: number,
+  prIds: readonly number[],
+): Promise<
+  Map<number, Array<{ id: number; headSha: string; finishedAt: Date | null; followUp: ClaudeReviewFollowUpRecord | null }>>
+> {
+  const out = new Map<
+    number,
+    Array<{ id: number; headSha: string; finishedAt: Date | null; followUp: ClaudeReviewFollowUpRecord | null }>
+  >();
+  if (prIds.length === 0) return out;
+  const cr = (ctx.schema as any).claudeReviews;
+  const rows = (await ctx.db
+    .select({ id: cr.id, prId: cr.prId, headSha: cr.headSha, finishedAt: cr.finishedAt, followUp: cr.followUp })
+    .from(cr)
+    .where(
+      and(
+        inArray(cr.prId, [...new Set(prIds)]),
+        eq(cr.accountId, accountId),
+        eq(cr.status, 'succeeded'),
+        isNotNull(cr.followUp),
+      ),
+    )
+    .orderBy(desc(cr.id))
+    .execute()) as Array<{
+    id: number;
+    prId: number;
+    headSha: string;
+    finishedAt: Date | null;
+    followUp: ClaudeReviewFollowUpRecord | null;
+  }>;
+  for (const r of rows) {
+    const list = out.get(r.prId) ?? [];
+    list.push(r);
+    out.set(r.prId, list);
+  }
+  return out;
+}
+
 export async function getThreadJudgements(
   ctx: AgentContext,
   prIds: readonly number[],
   accountId: number,
 ): Promise<ClaudeThreadJudgementsForPr[]> {
   if (prIds.length === 0) return [];
-  const current = await currentThreadAssessmentsForPrs(ctx, accountId, prIds);
-  if (current.size === 0) return [];
+  const [current, followUps] = await Promise.all([
+    currentThreadAssessmentsForPrs(ctx, accountId, prIds),
+    followUpsForPrs(ctx, accountId, prIds),
+  ]);
+  const findings = new Map<number, Map<number, ClaudeThreadJudgement>>();
+  for (const [prId, list] of followUps) {
+    const m = findingJudgementsFromFollowUps(list);
+    if (m.size > 0) findings.set(prId, m);
+  }
+  const wanted = [...new Set([...current.keys(), ...findings.keys()])];
+  if (wanted.length === 0) return [];
   const s = ctx.schema as any;
   const prs = s.pullRequests;
   const heads = (await ctx.db
     .select({ id: prs.id, headSha: prs.headSha })
     .from(prs)
-    .where(and(inArray(prs.id, [...current.keys()]), eq(prs.accountId, accountId)))
+    .where(and(inArray(prs.id, wanted), eq(prs.accountId, accountId)))
     .execute()) as Array<{ id: number; headSha: string | null }>;
   const headOf = new Map(heads.map((h) => [h.id, h.headSha]));
   const out: ClaudeThreadJudgementsForPr[] = [];
-  for (const c of current.values()) {
-    if (!headOf.has(c.prId)) continue;
-    const fromCheck = c.checkId != null;
-    out.push({
-      prId: c.prId,
-      reviewId: c.reviewId,
-      checkId: c.checkId,
-      reviewedHeadSha: (fromCheck ? c.checkHeadSha : c.reviewHeadSha) ?? '',
-      finishedAt: iso(fromCheck ? c.checkFinishedAt : c.reviewFinishedAt),
-      currentHeadSha: headOf.get(c.prId) ?? null,
-      judgements: judgementsFromAssessments(c.assessments),
-    });
+  for (const prId of wanted) {
+    if (!headOf.has(prId)) continue;
+    const c = current.get(prId);
+    const judgements = c ? judgementsFromAssessments(c.assessments) : [];
+    // An ordinary thread judgement wins on a thread both somehow name (the two sets are disjoint).
+    const judged = new Set(judgements.map((j) => j.threadId));
+    for (const j of findings.get(prId)?.values() ?? []) if (!judged.has(j.threadId)) judgements.push(j);
+    if (c) {
+      const fromCheck = c.checkId != null;
+      out.push({
+        prId,
+        reviewId: c.reviewId,
+        checkId: c.checkId,
+        reviewedHeadSha: (fromCheck ? c.checkHeadSha : c.reviewHeadSha) ?? '',
+        finishedAt: iso(fromCheck ? c.checkFinishedAt : c.reviewFinishedAt),
+        currentHeadSha: headOf.get(prId) ?? null,
+        judgements,
+      });
+    } else {
+      // Only Claude's own findings were followed up (no run judged other reviewers' threads).
+      const latest = followUps.get(prId)?.[0];
+      out.push({
+        prId,
+        reviewId: latest?.id ?? null,
+        checkId: null,
+        reviewedHeadSha: latest?.headSha ?? '',
+        finishedAt: iso(latest?.finishedAt ?? null),
+        currentHeadSha: headOf.get(prId) ?? null,
+        judgements,
+      });
+    }
   }
   return out;
 }

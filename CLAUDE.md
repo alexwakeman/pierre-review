@@ -650,8 +650,13 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   driver, `SyncStatus`. ⚠ The signal mailbox is an ARRAY, never a scalar (React 18 batches a
   multi-add loop into ONE effect run); an open round's EMPTY `scopeIds` is the all-repos
   sentinel — never append to it; merging into an open round must re-arm `syncing:true`.
-- **There is ONE bottom-right toast column** (App.tsx) — never add another independent
-  `fixed bottom-4 right-4` element. Its `GlobalLoadingBar` covers HEAVY work only: full-mode
+- **There is ONE header toast strip** (`components/HeaderToasts.tsx`, mounted once in App.tsx's
+  header between the wordmark and the controls) — never add an independent `fixed` toast element
+  or a second strip. Every toast is a ONE-LINE `HeaderToast` card (fixed slot width, so the
+  controls never move; many cards scroll sideways) that expands on hover/focus OVER the page via
+  `position: fixed` — never by growing the header. The X is the toast's own dismiss (absent =
+  no X); a progress bar stays on the collapsed line; the strip is the polite live region
+  (`aria-relevant="additions"`). Its `GlobalLoadingBar` covers HEAVY work only: full-mode
   walks + ML scoring strictly under `isMlScoring`.
 - **Reactions are fetched ON DEMAND and NEVER STORED** — no column, no migration, no sync step;
   `useReactions` MICROTASK-BATCHES every bar's registration into ONE

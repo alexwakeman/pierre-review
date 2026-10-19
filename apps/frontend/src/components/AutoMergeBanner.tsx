@@ -8,11 +8,11 @@ import type {
 import { useArmedMerges, useDisarmAutoMerge } from '../hooks/useAutoMerge.js';
 import { invalidateAfterPrWrite } from '../hooks/prCacheSync.js';
 import { usePinnedTabs, type TabMeta } from '../store/pinnedTabs.js';
-import { CheckIcon, WarningIcon } from './Icons.js';
+import { CheckIcon, MergeIcon, WarningIcon } from './Icons.js';
+import { HeaderToast } from './HeaderToasts.js';
 
-// The global auto-merge progress stack, rendered as a plain card inside App.tsx's ONE shared
-// fixed bottom-right toast column (which owns position/width/z and pointer-events-none; the
-// card re-enables its own). Same shape as ClaudeReviewBanner.
+// The global auto-merge progress stack, rendered as ONE card in the app's ONE header toast strip
+// (HeaderToasts.tsx, mounted in App.tsx): a one-line summary, the rows when it expands.
 //
 // ONE CARD PER MERGE, FOR THE WHOLE LIFECYCLE. Arming used to produce nothing global at all
 // and, up to a poll later, a separate terminal toast — two unrelated surfaces for one action.
@@ -26,7 +26,7 @@ import { CheckIcon, WarningIcon } from './Icons.js';
 // card from two hours ago — the FIRST poll seeds a silent baseline, exactly as before.
 
 // How many rows the card draws before collapsing the rest into a "+N more" line. Its own
-// bounded height: the stack is an indicator in the corner, not a board.
+// bounded height: the stack is an indicator in the header, not a board.
 const MAX_ROWS = 4;
 
 // The live sub-state, in the user's words. `phase` is the watcher's enum; `lastReason` carries
@@ -425,9 +425,10 @@ function OutcomeRow({
         <button
           type="button"
           onClick={onDismiss}
-          className="shrink-0 text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+          aria-label={`Dismiss the result for ${outcome.repoFullName} #${outcome.prNumber}`}
+          className="shrink-0 text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
-          dismiss
+          Dismiss
         </button>
       </div>
     </li>
@@ -509,30 +510,39 @@ export function AutoMergeBanner(): JSX.Element | null {
       return next;
     });
 
+  const mergedCount = shownOutcomes.filter((o) => o.state === 'merged').length;
+  const otherOutcomes = shownOutcomes.length - mergedCount;
+  const summary = [
+    live.length > 0 ? `${live.length} armed` : null,
+    mergedCount > 0 ? `${mergedCount} merged` : null,
+    otherOutcomes > 0 ? `${otherOutcomes} not merged` : null,
+  ]
+    .filter((p): p is string => p != null)
+    .join(' · ');
+
   return (
-    <div
-      role="status"
-      aria-label="Auto-merge progress"
-      className="pointer-events-auto rounded-lg border border-gray-200 bg-white/95 shadow-lg backdrop-blur dark:border-gray-700 dark:bg-gray-900/95"
+    <HeaderToast
+      testId="auto-merge-toast"
+      label="Merge when ready"
+      icon={<MergeIcon size={13} />}
+      summary={summary}
+      // The X clears the OUTCOMES (the old "Dismiss all"); a live row is cleared only by its own
+      // Cancel, so the X is offered only once nothing is still armed.
+      onDismiss={live.length === 0 ? dismissAll : undefined}
+      dismissLabel="Dismiss merge-when-ready results"
     >
-      <div className="flex items-center justify-between border-b border-gray-100 px-3 py-1.5 dark:border-gray-800">
-        <span className="text-xs font-semibold">
-          Merge when ready
-          {live.length > 0 && (
-            <span className="ml-1 font-normal text-gray-400">· {live.length} armed</span>
-          )}
-        </span>
-        {shownOutcomes.length > 0 && (
+      {live.length > 0 && shownOutcomes.length > 0 && (
+        <div className="-mt-0.5 mb-1 text-right">
           <button
             type="button"
             onClick={dismissAll}
-            className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            className="text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
-            Dismiss all
+            Dismiss finished
           </button>
-        )}
-      </div>
-      <ul className="max-h-72 divide-y divide-gray-100 overflow-auto dark:divide-gray-800">
+        </div>
+      )}
+      <ul className="-mx-2 max-h-72 divide-y divide-gray-100 overflow-auto dark:divide-gray-800">
         {outcomeRows.map((o) => (
           <OutcomeRow
             key={o.id}
@@ -545,13 +555,13 @@ export function AutoMergeBanner(): JSX.Element | null {
         ))}
       </ul>
       {hidden > 0 && (
-        <div className="border-t border-gray-100 px-3 py-1 text-[11px] text-gray-400 dark:border-gray-800">
+        <div className="border-t border-gray-100 pt-1 text-[11px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
           +{hidden} more
         </div>
       )}
-      <div className="border-t border-gray-100 px-3 py-1 text-[11px] text-gray-400 dark:border-gray-800">
+      <div className="border-t border-gray-100 pt-1 text-[11px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
         Auto-merge only runs while Limn is running.
       </div>
-    </div>
+    </HeaderToast>
   );
 }

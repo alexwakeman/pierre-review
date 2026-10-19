@@ -1,6 +1,7 @@
 import type { ThreadDetail, User } from '@pierre-review/shared';
 import { ChevronIcon } from '../Icons.js';
 import { ThreadCard } from '../ThreadView/index.js';
+import { ThreadStatePill } from '../ThreadView/ClaudeThreadBadge.js';
 import { ThreadCountChips, rollupCounts } from './ThreadCountChips.js';
 import {
   effectiveResolved,
@@ -106,8 +107,10 @@ export function FileGroup({
                     </span>
                   )}
                   <span className="min-w-0 flex-1 truncate">{snippet(t)}</span>
-                  <span className="shrink-0 text-[11px] font-medium text-green-700 dark:text-green-400">
-                    Resolved
+                  {/* Claude's outcome when there is one ("Reply accepted · Resolved"), else the plain
+                      state. No ⓘ: this row is itself a button. */}
+                  <span className="flex shrink-0 items-center gap-1">
+                    <ThreadStatePill thread={t} noInfo />
                   </span>
                 </button>
               </div>

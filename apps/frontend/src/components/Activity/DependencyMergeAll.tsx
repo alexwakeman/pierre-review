@@ -12,7 +12,8 @@ import {
   useDependencyMergePlan,
   useDependencyMergeToast,
 } from '../../hooks/useDependencyMergeAll.js';
-import { CloseIcon } from '../Icons.js';
+import { CloseIcon, PendingDependencyIcon, WarningIcon } from '../Icons.js';
+import { HeaderToast } from '../HeaderToasts.js';
 
 // ── PENDING → DEPENDENCIES: "MERGE OR ARM ALL" ──────────────────────────────────────────────────
 //
@@ -185,7 +186,7 @@ export function DependencyMergeAll({
 const TOAST_MS = 15_000;
 
 /**
- * The run's summary — a plain card for App.tsx's ONE bottom-right toast column, never its own
+ * The run's summary — a card in the ONE header toast strip (HeaderToasts.tsx), never its own
  * `fixed` element.
  */
 export function DependencyMergeToast(): JSX.Element | null {
@@ -212,32 +213,24 @@ export function DependencyMergeToast(): JSX.Element | null {
   ].filter((p): p is string => p != null);
 
   return (
-    <div
-      role="status"
-      className="pointer-events-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900"
+    <HeaderToast
+      testId="dependency-merge-toast"
+      label="Dependency updates"
+      icon={<PendingDependencyIcon size={13} />}
+      summary={parts.length > 0 ? parts.join(' · ') : 'Nothing changed.'}
+      onDismiss={clear}
+      dismissLabel="Dismiss dependency update results"
     >
-      <div className="flex items-start gap-2 px-3 py-2">
-        <div className="min-w-0 flex-1">
-          <div className="text-[11px] text-gray-500 dark:text-gray-400">Dependency updates</div>
-          <div className="text-[12px] text-gray-800 dark:text-gray-100">
-            {parts.length > 0 ? parts.join(' · ') : 'Nothing changed.'}
-          </div>
+      {failed.length > 0 ? (
+        <div className="space-y-0.5">
           {failed.slice(0, 3).map((i) => (
-            <div key={i.prId} className="truncate text-[11px] text-red-600 dark:text-red-400">
-              {label(i)}: {i.outcome.action === 'failed' ? i.outcome.message : ''}
+            <div key={i.prId} className="text-[12px] text-red-700 dark:text-red-400">
+              <WarningIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
+              Failed — {label(i)}: {i.outcome.action === 'failed' ? i.outcome.message : ''}
             </div>
           ))}
         </div>
-        <button
-          type="button"
-          onClick={clear}
-          title="Close"
-          aria-label="Close"
-          className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-        >
-          <CloseIcon size={13} />
-        </button>
-      </div>
-    </div>
+      ) : undefined}
+    </HeaderToast>
   );
 }

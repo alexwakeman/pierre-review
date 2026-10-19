@@ -22,6 +22,7 @@ import { api, ApiError } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
 import { useFilters } from '../store/filters.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
+import { CI_REVIEW_STATES_KEY, ciReviewKey } from './useCiReview.js';
 import { anyReviewInFlight, reviewTabPill, type ReviewTabPill } from '../lib/claudeReviewColumn.js';
 import { anyFixRunning } from '../lib/claudeAutoReview.js';
 import {
@@ -206,6 +207,10 @@ function afterReviewStarted(qc: QueryClient, prId: number): Promise<unknown> {
     qc.invalidateQueries({ queryKey: ['claude-review', prId] }),
     qc.invalidateQueries({ queryKey: ['claude-review-status', prId] }),
     qc.invalidateQueries({ queryKey: CLAUDE_REVIEW_STATES_KEY }),
+    // A manual start also starts the CI review when a check is failing (the server's call), so the
+    // CI section's existing status picks the run up.
+    qc.invalidateQueries({ queryKey: ciReviewKey(prId) }),
+    qc.invalidateQueries({ queryKey: CI_REVIEW_STATES_KEY }),
   ]);
 }
 
