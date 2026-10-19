@@ -323,3 +323,37 @@ export function HeaderToast({
   );
 }
 
+
+/**
+ * The "N more" line under a card's capped list, as a control: it reveals every row inside the
+ * expanded panel (which scrolls within its max height), then offers "Show fewer". It lives INSIDE
+ * the panel, so focusing it keeps the card open and Escape still collapses the card.
+ */
+export function ToastShowMore({
+  hidden,
+  showAll,
+  onToggle,
+  controls,
+}: {
+  /** Rows the cap hides (0 when nothing is hidden). */
+  hidden: number;
+  showAll: boolean;
+  onToggle: () => void;
+  /** The id of the list this control expands. */
+  controls?: string;
+}): JSX.Element | null {
+  if (!showAll && hidden <= 0) return null;
+  return (
+    <div className="border-t border-gray-100 pt-1 dark:border-gray-800">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={showAll}
+        aria-controls={controls}
+        className="rounded text-[11px] font-medium text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-blue-300"
+      >
+        {showAll ? 'Show fewer' : `Show ${hidden} more`}
+      </button>
+    </div>
+  );
+}

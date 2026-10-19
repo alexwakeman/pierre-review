@@ -48,6 +48,12 @@ vi.mock('../github/mutations.js', () => ({
       m.includes('failing')
     );
   },
+  // The back-off's half of the split — also REAL, for the same reason.
+  isFailingEnqueueRefusal: (message: string): boolean => {
+    const m = message.toLowerCase();
+    if (!m.includes('status check') && !m.includes('required statuses')) return false;
+    return m.includes('failing') || m.includes('failure');
+  },
 }));
 vi.mock('../auth/account.js', () => ({
   getAccessToken: vi.fn(async () => 'gho_test'),
@@ -1369,7 +1375,8 @@ describe('the auto-merge watcher lands a repo’s batch one at a time', () => {
     expect(gh.fetchPrHeadCheckRollup.mock.calls[0][3]).toBe(7);
     const yielded = await rowFor(prC);
     expect(yielded.state).toBe('armed'); // ⚠ a yield is NOT a disarm
-    expect(yielded.phase).toBe('queued_local');
+    // ⚠ And it BACKS OFF (rule 6a): the stored phase is the record, so a restart cannot re-try it.
+    expect(yielded.phase).toBe('checks_failed');
     expect(yielded.lastReason).toContain('checks failed');
 
     // Tick 2: the slot passed to prD, which is green — it lands while prC waits for its author.
@@ -1522,7 +1529,7 @@ describe('the auto-merge watcher lands a repo’s batch one at a time', () => {
     gh.fetchPrHeadCheckRollup.mockResolvedValue('FAILURE');
 
     await runner.runAutoMergeTick(log); // prC yields to prD
-    expect((await rowFor(prC)).phase).toBe('queued_local');
+    expect((await rowFor(prC)).phase).toBe('checks_failed');
 
     // prD goes away — merged by a human, say — and prC is the only armed intent on the repo,
     // still marked. `direct.find(r => !yielded.has(r.id))` then finds NOBODY.
@@ -1539,7 +1546,9 @@ describe('the auto-merge watcher lands a repo’s batch one at a time', () => {
     await runner.runAutoMergeTick(log);
     const alone = await rowFor(prC);
     expect(alone.state).toBe('armed');
-    expect(alone.phase).toBe('blocked_protection');
+    // Its real state is the back-off: checks failed, waiting for them to pass.
+    expect(alone.phase).toBe('checks_failed');
+    expect(alone.lastReason).toBe('checks failed — waiting for them to pass');
     expect(alone.lastReason).not.toContain('letting the next armed PR');
     // …and it does NOT pay for a second live rollup read to re-enter a yield that would hand
     // the slot to nobody. One read, on the tick where yielding could still change something.
@@ -1552,10 +1561,16 @@ describe('the auto-merge watcher lands a repo’s batch one at a time', () => {
     snapshotsByNumber({ 7: { mergeableState: 'blocked' }, 8: { mergeableState: 'blocked' } });
     gh.fetchPrHeadCheckRollup.mockResolvedValue('FAILURE');
     await runner.runAutoMergeTick(log);
-    expect((await rowFor(prC)).phase).toBe('queued_local');
+    expect((await rowFor(prC)).phase).toBe('checks_failed');
 
     // A CI re-run goes green with no push (the one repair that does NOT move the head, and so
-    // the one the head pin can't notice for us). The snapshot we already hold is the whole test.
+    // the one the head pin can't notice for us). The back-off is released by the SYNCED CI.
+    const { eq } = await import('drizzle-orm');
+    await db
+      .update(schema.pullRequests)
+      .set({ ciStatus: 'success' })
+      .where(eq(schema.pullRequests.id, prC))
+      .execute();
     snapshotsByNumber({ 7: {}, 8: { mergeableState: 'blocked' } });
     gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed_f2' });
     await runner.runAutoMergeTick(log);
@@ -1569,6 +1584,11 @@ describe('the auto-merge watcher lands a repo’s batch one at a time', () => {
     await runner.runAutoMergeTick(log);
     expect(gh.mergePullRequest).toHaveBeenCalledTimes(1);
     expect(gh.mergePullRequest.mock.calls[0][3]).toBe(7);
+    await db
+      .update(schema.pullRequests)
+      .set({ ciStatus: null })
+      .where(eq(schema.pullRequests.id, prC))
+      .execute();
   });
 });
 
@@ -1660,8 +1680,14 @@ describe('an armed intent survives a merge queue that is not ready for it', () =
       // THE WHOLE POINT: still armed. Before this change the throw reached the tick's strike
       // counter and three of them — about six minutes — resolved the intent `failed`.
       expect(row.state).toBe('armed');
-      expect(row.phase).toBe('awaiting_checks');
-      expect(row.lastReason).toMatch(/won’t take it yet/);
+      if (/failing/.test(message)) {
+        // A FAILING check is not "not yet": it backs off until CI is green (rule 6a).
+        expect(row.phase).toBe('checks_failed');
+        expect(row.lastReason).toBe('checks failed — waiting for them to pass');
+      } else {
+        expect(row.phase).toBe('awaiting_checks');
+        expect(row.lastReason).toMatch(/won’t take it yet/);
+      }
     });
   }
 
@@ -1922,5 +1948,224 @@ describe('the failure budget is CONSECUTIVE, and long enough to outlast a blip',
     await runner.runAutoMergeTick(log);
 
     expect((await rowFor(prC)).state).toBe('merged');
+  });
+});
+
+// ── RULE 6a: THE BACK-OFF ─────────────────────────────────────────────────────────────────────
+//
+// THE REPRO (2026-10-19, the real dev DB): seven dependency PRs on merge-queue repos, armed by the
+// setting while their CI was already red. Each tick paid a REST snapshot + a GraphQL queue probe,
+// the row claimed the checks "haven't finished", every restart re-sent the enqueue, and nothing
+// ended it short of a push or the 72-hour expiry. Now: ONE failed attempt backs the intent off
+// (phase `checks_failed`, stored), no GitHub call is made while the synced CI on that head is not
+// green, and the next attempt happens once it is.
+describe('rule 6a — a red intent backs off until its checks pass', () => {
+  let runner: any;
+  let gh: any;
+  let eq: any;
+  const log = { info: () => {}, warn: () => {}, error: () => {} } as any;
+  const FAILING =
+    'Request failed due to following response errors:\n - Pull request has failing required statuses and Pull request Required status check "Run Pull Request Checks" is failing.';
+
+  const snapshot = (over: Record<string, unknown> = {}) => ({
+    headSha: 'r1',
+    headRef: 'feat',
+    headRepoFullName: 'orgc/repoc',
+    isFork: false,
+    maintainerCanModify: true,
+    mergeable: true,
+    mergeableState: 'blocked',
+    baseRef: 'main',
+    baseSha: 'base0',
+    behindBy: 0,
+    aheadBy: 1,
+    ...over,
+  });
+  const queueState = (over: Record<string, unknown> = {}) => ({
+    enabled: true,
+    inQueue: false,
+    position: null,
+    state: null,
+    estimatedTimeToMergeMs: null,
+    enqueuedAt: null,
+    prState: 'OPEN',
+    reviewDecision: null,
+    ...over,
+  });
+  const rowFor = async (prId: number): Promise<any> => {
+    const rows = await db.select().from(schema.autoMergeRequests).execute();
+    return rows.find((r: any) => r.prId === prId);
+  };
+  const setPr = async (prId: number, values: Record<string, unknown>): Promise<void> => {
+    await db.update(schema.pullRequests).set(values).where(eq(schema.pullRequests.id, prId)).execute();
+  };
+  const allGithub = (): any[] => [
+    gh.fetchPrMergeSnapshot,
+    gh.fetchCommitParents,
+    gh.isCommitContainedInRef,
+    gh.mergePullRequest,
+    gh.updatePullRequestBranch,
+    gh.fetchMergeQueueState,
+    gh.enqueuePullRequestOnQueue,
+    gh.fetchPrHeadCheckRollup,
+  ];
+  const githubCalls = (): number => allGithub().reduce((n, fn) => n + fn.mock.calls.length, 0);
+
+  beforeAll(async () => {
+    runner = await import('../merge/auto-merge-runner.js');
+    gh = await import('../github/mutations.js');
+    ({ eq } = await import('drizzle-orm'));
+  });
+
+  beforeEach(async () => {
+    for (const fn of allGithub()) fn.mockReset();
+    await db.delete(schema.autoMergeRequests).execute();
+    for (const id of [prC, prD]) {
+      await setPr(id, { state: 'open', headSha: null, ciStatus: null, mergeStateStatus: null });
+    }
+  });
+
+  afterAll(async () => {
+    for (const id of [prC, prD]) await setPr(id, { headSha: null, ciStatus: null, mergeStateStatus: null });
+  });
+
+  it('THE LOOP: one refused attempt, then NO GitHub call while red — and one retry once green', async () => {
+    await setPr(prC, { headSha: 'r1', ciStatus: 'pending', mergeStateStatus: 'blocked' });
+    await q.armAutoMerge(A, prC, { ...armArgs('r1'), viaMergeQueue: true, armedByPolicy: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot());
+    gh.fetchMergeQueueState.mockResolvedValue(queueState());
+    gh.enqueuePullRequestOnQueue.mockRejectedValue(new Error(FAILING));
+
+    // Tick 1: the one attempt. GitHub refuses it as FAILING ⇒ back off.
+    await runner.runAutoMergeTick(log);
+    expect(gh.enqueuePullRequestOnQueue).toHaveBeenCalledTimes(1);
+    let row = await rowFor(prC);
+    expect(row).toMatchObject({ state: 'armed', phase: 'checks_failed' });
+    expect(row.lastReason).toBe('checks failed — waiting for them to pass');
+    // ⚠ Never "haven't finished" — they finished, and failed.
+    expect(row.lastReason).not.toMatch(/haven’t finished/);
+
+    // The sync sees the red rollup. Several ticks: ZERO GitHub calls of any kind.
+    await setPr(prC, { ciStatus: 'failure' });
+    for (const fn of allGithub()) fn.mockClear();
+    for (let i = 0; i < 3; i += 1) await runner.runAutoMergeTick(log);
+    expect(githubCalls()).toBe(0);
+    row = await rowFor(prC);
+    expect(row).toMatchObject({ state: 'armed', phase: 'checks_failed' });
+    // …while still stamping `lastCheckedAt`, so the scan's rotation stays fair.
+    expect(row.lastCheckedAt).not.toBeNull();
+
+    // A re-run that has not FINISHED is not green: still nothing to try.
+    await setPr(prC, { ciStatus: 'pending' });
+    await runner.runAutoMergeTick(log);
+    expect(githubCalls()).toBe(0);
+
+    // ⚠ A POLICY intent does not expire while backed off (the setting is the consent).
+    await db
+      .update(schema.autoMergeRequests)
+      .set({ expiresAt: new Date(Date.now() - HOUR) })
+      .where(eq(schema.autoMergeRequests.prId, prC))
+      .execute();
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prC)).state).toBe('armed');
+
+    // Green: ONE real attempt, which lands it in the queue — with a fresh 72-hour window.
+    await setPr(prC, { ciStatus: 'success' });
+    gh.enqueuePullRequestOnQueue.mockReset();
+    gh.enqueuePullRequestOnQueue.mockResolvedValue({ position: 1, state: 'QUEUED', estimatedTimeToMergeMs: null });
+    await runner.runAutoMergeTick(log);
+    expect(gh.enqueuePullRequestOnQueue).toHaveBeenCalledTimes(1);
+    row = await rowFor(prC);
+    expect(row).toMatchObject({ state: 'armed', phase: 'queued' });
+    expect(row.expiresAt.getTime()).toBeGreaterThan(Date.now() + 70 * HOUR);
+  });
+
+  it('backs off a head that is ALREADY red without spending an enqueue', async () => {
+    await setPr(prC, { headSha: 'r2', ciStatus: 'failure', mergeStateStatus: 'blocked' });
+    await q.armAutoMerge(A, prC, { ...armArgs('r2'), viaMergeQueue: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'r2' }));
+    gh.fetchMergeQueueState.mockResolvedValue(queueState());
+    gh.fetchPrHeadCheckRollup.mockResolvedValue('FAILURE');
+
+    await runner.runAutoMergeTick(log);
+    expect(gh.fetchPrHeadCheckRollup).toHaveBeenCalledTimes(1);
+    expect(gh.enqueuePullRequestOnQueue).not.toHaveBeenCalled();
+    expect((await rowFor(prC)).phase).toBe('checks_failed');
+  });
+
+  it('does NOT back off on an unproven red (the live read could not confirm it)', async () => {
+    await setPr(prC, { headSha: 'r3', ciStatus: 'failure', mergeStateStatus: 'blocked' });
+    await q.armAutoMerge(A, prC, armArgs('r3'));
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'r3' }));
+    gh.fetchPrHeadCheckRollup.mockResolvedValue(null);
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prC)).phase).toBe('blocked_protection');
+  });
+
+  it('a lone DIRECT intent backs off too, and a person’s click still expires on time', async () => {
+    await setPr(prC, { headSha: 'r4', ciStatus: 'failure', mergeStateStatus: 'blocked' });
+    await q.armAutoMerge(A, prC, armArgs('r4'));
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'r4' }));
+    gh.fetchPrHeadCheckRollup.mockResolvedValue('FAILURE');
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prC)).phase).toBe('checks_failed');
+
+    for (const fn of allGithub()) fn.mockClear();
+    await runner.runAutoMergeTick(log);
+    expect(githubCalls()).toBe(0);
+
+    await db
+      .update(schema.autoMergeRequests)
+      .set({ expiresAt: new Date(Date.now() - HOUR) })
+      .where(eq(schema.autoMergeRequests.prId, prC))
+      .execute();
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prC)).state).toBe('expired');
+  });
+
+  it('a push while backed off still DISARMS (rule 1 is never skipped)', async () => {
+    await setPr(prC, { headSha: 'r5', ciStatus: 'failure', mergeStateStatus: 'blocked' });
+    await q.armAutoMerge(A, prC, { ...armArgs('r5'), armedByPolicy: true });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'r5' }));
+    gh.fetchPrHeadCheckRollup.mockResolvedValue('FAILURE');
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prC)).phase).toBe('checks_failed');
+
+    // The bot pushed; the sync saw it. The light path is skipped and rule 1 runs live.
+    await setPr(prC, { headSha: 'r6' });
+    gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'r6' }));
+    await runner.runAutoMergeTick(log);
+    expect((await rowFor(prC)).state).toBe('disarmed_head_moved');
+  });
+
+  it('a backed-off intent does not hold its repo’s slot, even after a restart', async () => {
+    // The fold reads the STORED phase, so an empty in-memory mark set (a restart) still hands
+    // the slot to the next armed PR.
+    const mq = await import('./merge-queue.js');
+    const rows = [
+      { id: 1, accountId: 1, repoId: 9, prId: 100, armedAt: new Date(now), viaMergeQueue: false, phase: 'checks_failed' },
+      { id: 2, accountId: 1, repoId: 9, prId: 200, armedAt: new Date(now + 1000), viaMergeQueue: false, phase: null },
+    ];
+    const { byIntentId } = mq.buildArmedRepoQueues(rows, mq.NO_ARMED_QUEUE_MARKS);
+    expect(byIntentId.get(1)).toMatchObject({ holdsSlot: false, position: 1, yieldReason: 'failed_checks' });
+    expect(byIntentId.get(2)).toMatchObject({ holdsSlot: true, position: 2 });
+
+    // And end to end: prC is backed off, prD is green — prD lands on the first tick.
+    await setPr(prC, { headSha: 'h7', ciStatus: 'failure', mergeStateStatus: 'blocked' });
+    await q.armAutoMerge(A, prC, armArgs('h7'));
+    await q.armAutoMerge(A, prD, armArgs('h8'));
+    await db
+      .update(schema.autoMergeRequests)
+      .set({ phase: 'checks_failed' })
+      .where(eq(schema.autoMergeRequests.prId, prC))
+      .execute();
+    gh.fetchPrMergeSnapshot.mockImplementation(async (_t: string, _o: string, _n: string, number: number) =>
+      snapshot({ headSha: `h${number}`, mergeableState: number === 8 ? 'clean' : 'blocked' }),
+    );
+    gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed_6a' });
+    await runner.runAutoMergeTick(log);
+    expect(gh.mergePullRequest).toHaveBeenCalledTimes(1);
+    expect(gh.mergePullRequest.mock.calls[0][3]).toBe(8);
+    expect((await rowFor(prC)).phase).toBe('checks_failed');
   });
 });

@@ -16,6 +16,7 @@ export * from './stories.js';
 export * from './story-health.js';
 export * from './sprint-stories.js';
 export * from './sprint-graph.js';
+export * from './sprint-lanes.js';
 export * from './story-issues.js';
 export * from './ticket-prs.js';
 export * from './story-rules.js';

@@ -2158,13 +2158,18 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   test/laneBoard.test.ts) — ONE renderer for all three views, built from the DESIGN GRID's pieces (§ Design
   diagrams), so the app draws one way:
   - **COLUMNS are `statusLayout.columns`, verbatim** — the workspace's status buckets in order (the gear's
-    bucket editor) plus the derived "Merged, not signed off" (`SprintGraphNode.column`, computed ONCE in
-    the server's fold — the SPA never re-derives it). Two pseudo-columns appear only when a card needs
-    one: "Outside the sprint" at the LEFT (Critical path only) and "Status not known" at the right.
-    Each header shows its card count. ⚠ **A Complete bucket (meaning `done`, never the derived column) is
-    COLLAPSED by default** — a narrow column of per-lane counts ("4 tickets") and a "Show" button
-    (`aria-expanded`); each view keeps its own open set, in component state. A collapsed column draws no
-    arrows.
+    bucket editor): Not started, In progress, **Code review**, **Product review** (QA and other sign-offs —
+    a FIRST-CLASS bucket now; the derived "Merged, not signed off" column is GONE), Complete. A ticket's
+    column is `SprintGraphNode.column`, computed ONCE in the server's fold (its bucket, or the first
+    Product review bucket when the merge rule moves a Code review ticket whose PRs have all merged) — the
+    SPA never re-derives it. Two pseudo-columns appear only when a card needs one: "Outside the sprint"
+    at the LEFT (Critical path only) and "Status not known" at the right. Each header shows its card
+    count. ⚠ **A Complete bucket (meaning `done`) is COLLAPSED by default** — a narrow column of per-lane
+    counts and a "Show" button (`aria-expanded`) that opens the whole column. **Each lane's "n tickets"
+    is its own button** (`onToggleCell`, `layoutBoard`'s `expanded` set of `cellKey(lane, column)`): it
+    opens THAT lane's cell only — the cell's first row becomes "Hide", its cards sit below, the column
+    takes a full track (`widened`) and arrows route to them; every other lane keeps its count. Each view
+    keeps its own open sets, in component state. A collapsed cell draws no arrows.
   - **LANES** down, each as many grid rows as its fullest cell (cards stack inside a cell; `layoutBoard`).
     An empty lane is not drawn. Lanes alternate a faint ground under a rule. The lane label is a side
     column; below 760px it moves to a band heading above the lane's cards, as the design grid's layer
@@ -2175,21 +2180,33 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
     caller's un-memoised arrays cannot loop). A critical arrow is the accent (`--ai-signal-fill`). A
     labelled arrow carries a number keyed in ONE line under the board (`ArrowKey`); arrows with the SAME
     words share a number. An sr-only list ("Dependencies") reads every arrow as "B waits on A: why".
+    Hovering a line or its number shows the popover — HOVER / FOCUS ONLY, no pin (§ Design diagrams →
+    Arrow popovers). Above the arrow key, `CardBorderKey` names each card border style the board draws.
     ⚠ `useRoutedArrows`, `ArrowLayer`, `ArrowKey` and `ArrowList` are SHARED with `DesignGrid`, which
     kept its look; change them for both or neither.
-  - **ONE CARD, `TicketCard`** (`components/TicketCard.tsx`), for every view: the key (mono), the title
-    (two lines), the theme (People), then the tags as WORDS (`ticketCardTags`: "CI failing" on an open
+  - **ONE CARD, `TicketCard`** (`components/TicketCard.tsx`), for every view, ⚠ **ONE HEIGHT whatever
+    it carries** (the title reserves two lines, the theme one, the tag row is one 20px line — a tag that
+    does not fit is cut on the face and stays in the accessible name — and the initials' slot is held open
+    with no assignee; a 2px border gives back 1px of padding): the key (mono), the title, the theme
+    (People), then the tags as WORDS (`ticketCardTags`: "CI failing" on an open
     PR's red checks, "No PR" or "n PRs · m open" — closed unmerged ones ignored —, "No owner") and the
     assignee's initials (Critical path, Theme). The BORDER marks state by style (`ticketCardBorder`): 2px
     solid accent = on a stored critical path; dashed = waiting on another unfinished ticket
     (`waitingIdents`); both = dashed accent; outside the sprint = FAINT, 1px dashed on a tinted ground,
-    whatever else it is. Its accessible name says all of it. ⚠ **The card is a button that opens the
-    STORY VIEW** (`useOpenStory`, § The story view); nothing else opens from the board.
+    whatever else it is. Its accessible name says all of it. ⚠ **A click opens the STORY PEEK IN PLACE**
+    (`Activity/StoryPeek.tsx`, a floating-ui popover anchored to the card, one open at a time via
+    `claimActivePopover`, closed by an outside click or Escape): the ticket review's summary and each
+    criterion with its status chip (Met / Partly met / Not met / …, currency pill when not current), else
+    the CURRENT brief's summary and numbered criteria ("Not checked against the code yet."), else
+    "Reading this ticket…", else the start of the ticket's text. NO docs check, NO design, NO PRs. Its
+    reads (`useTicketReviewStates` — agentic only — then `useTicketReviewById`, and `useTicketStory`) run
+    only while it is open: nothing on the board fetches on mount. **The card's corner arrow** and the
+    peek's "Open story" open the STORY VIEW (`useOpenStory`, § The story view).
 
 - **CRITICAL PATH** (`SprintPathsView`, `Activity/SprintBoards.tsx`; state fold `sprintPathsModel.ts`):
   1. **The pace strip** — CODE's `pace` (`paceItems`), every figure with its denominator: "Day 4 of 14"
-     with a time bar, "Code merged 21 of 55", "Merged, not signed off 15 of 55" (only while that column
-     is on), "Complete 17 of 55", "Open dependencies 6 in 3 chains".
+     with a time bar, "Code merged 21 of 55", "Product review 15 of 55" (`pace.productReview`; only when
+     a Product review bucket exists), "Complete 17 of 55", "Open dependencies 6 in 3 chains".
   2. **"Critical paths"** (ⓘ beside it) — one lane per STORED path (`pathsBoard`; riskiest first as
      stored), its header the risk as a WORD chip ("High risk" / "Medium risk" / "Low risk"), the title and
      the one sentence of advice; its tickets on their columns, every arrow on it critical. A ticket
@@ -2212,16 +2229,24 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
 - **THEME** (`SprintThemesView`, `themesBoard`) — one lane per stored theme (the theme pass's order,
   largest first), then "No theme" for tickets no theme holds (⚠ never "Other": the theme prompt invites a
   catch-all theme of that name); no themes at all → one "All tickets" lane and
-  one line saying why ("Themes appear after Claude reads the sprint." / Claude is off). Header: "n live ·
-  m merged" (live = not Complete; merged = ≥ 1 merged PR and none open) and a small segmented bar per
-  column (`role="img"`, its name lists every part; the words carry the numbers). Sprint tickets only.
+  one line saying why ("Themes appear after Claude reads the sprint." / Claude is off). Header: the
+  theme's ONE-OR-TWO-SENTENCE SUMMARY (`SprintTheme.summary`, written by the themes pass — Claude, no
+  numbers, what the work involves and whether it is development work; null on "No theme" / "All
+  tickets"), then CODE's ROW LINE (shared `sprintLaneSummary`: "2 In progress, 3 Product review, 8
+  Complete" / "4 with a pull request, 9 without"), then the colour bar per column. ⚠ The model's sentence
+  and the code's counts are labelled apart in the ⓘ. Sprint tickets only.
   An arrow is critical when its two tickets sit next to each other on a stored path; its key is the
   brief's `why`.
 - **PEOPLE** (`SprintPeopleView`, `peopleBoard`) — one lane per assignee, ⚠ **ALPHABETICAL, Unassigned
   last, never sorted by load** (prep, not scoring — the People report's guardrail). A person is
   `SprintGraphResponse.people`'s (shared `sprintMembers`), matched on the tracker spelling. Header: "n
   tickets" and, ONLY when `reviewsWaiting` is a number, "n reviews waiting" — null prints nothing, never
-  0. Cards carry their theme. An arrow BETWEEN two lanes is a hand-off keyed "<person> waits on
+  0; then the same CODE row line and colour bar as Theme (no model; nothing about the person the data
+  does not show). Cards carry their theme.
+- **THE COLOUR BAR** (Theme and People headers; `SegmentBar`): a lane's tickets per column. Hovering or
+  focusing it opens a HOVER-ONLY popover (`components/HoverPopover.tsx` — anchored, never following the
+  mouse, `pointer-events-none`, closes when the pointer leaves) with each part's swatch, column and count.
+  Placed by `lib/avoidRects.ts` clear of the board's cards (`useBoardObstacles`). An arrow BETWEEN two lanes is a hand-off keyed "<person> waits on
   <person>"; one inside a lane keys the brief's `why`.
 
 - **The toolbar**: the sprint's title + ⓘ ("Reading this sprint": the views, columns, borders, arrows),
@@ -2240,8 +2265,9 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   → `useOpenStory`). Each answer shows its cost in US$.
 - **Statuses** (`SprintStatusSettings`) — the BUCKET editor (add / rename / delete / reorder buckets, a
   meaning select per bucket, statuses moved by drag and drop or the keyboard Move up / down buttons across
-  buckets, ticket counts, "not placed yet" on a status the buckets do not name, the "Merged, not signed
-  off" switch with its ⓘ, Save / Cancel / Reset to automatic; Save waits on shared
+  buckets, ticket counts, "not placed yet" on a status the buckets do not name, a meaning select that
+  offers Code review and Product review, the "Move tickets whose pull requests have all merged into
+  Product review" switch with its ⓘ (disabled, with one line, when no bucket means Product review), Save / Cancel / Reset to automatic; Save waits on shared
   `sprintBucketsProblem`'s sentence, run on what Save SENDS; over the 60-status cap Save leaves out
   0-count statuses first — a renamed or retired tracker status lingers as one — and says which
   (`statusesLeftOutOnSave`), so the cap never locks the editor; each bucket's name field and meaning
@@ -4324,6 +4350,11 @@ user). App.tsx mounts, left to right: the Claude reviews frame, `AiFixBanner`,
   Each toast keeps its own dismiss semantics: AI fixes and merge-when-ready offer the X only once
   nothing is still running/armed; the loading bar is an INDICATOR with no X and no action; the
   timed toasts (resolver reopen 20s, dependency results 15s, My Turn undo 10s) still auto-remove.
+- **A CAPPED LIST NEVER ENDS IN A DEAD "+N more".** A card that draws only the first few rows
+  (merge when ready: 4; dependency results: 3 failures) puts `ToastShowMore` under the list: a
+  button "Show N more" (`aria-expanded`, `aria-controls` the list) that reveals EVERY row inside
+  the expanded panel, which scrolls within its max height, and then reads "Show fewer". It sits
+  inside the panel, so focusing it keeps the card open and Escape still collapses it.
 - **Claude reviews** (`ClaudeReviewBanner`) is a `HeaderToast` like the rest: "N running" / "N ready"
   on the line, each review (open it, or its own X once ready) in the expanded panel, the card's X once
   nothing is running.
@@ -4354,7 +4385,7 @@ already showing.
   (~3 GitHub calls each) — the row carries its own repo/PR identity precisely so it doesn't.
 - **Indicator + Cancel only.** Arming is consent anchored to `expectedHeadOid` and exactly ONE UI
   path (`MergeWhenReadyControl`) may arm; the stack must never grow a re-arm / "update now" /
-  freshen action. Rows are click-to-open (`openPrDetailTab`), capped at 4 with a "+N more" line.
+  freshen action. Rows are click-to-open (`openPrDetailTab`), capped at 4; a "Show N more" button (`ToastShowMore`, `HeaderToasts.tsx`) reveals every row inside the expanded card, which scrolls within its max height, then reads "Show fewer". Outcomes are still remembered 5 at a time.
 
 ### What the loading bar covers, and why it exists
 
@@ -4491,11 +4522,12 @@ test/designGrid.test.ts).
   hand-offs are an sr-only list. Cards read row by row.
 - **Arrow popovers** (`ArrowLayer` / `ArrowMarker` in `components/LaneBoard.tsx`, shared by the design
   grid and This Sprint's boards): hovering an arrow's LINE (a 12px invisible hit stroke) or its NUMBER,
-  or focusing the number, shows what the arrow means beside the number (floating-ui, `safePolygon`, so
-  the pointer can move onto it). CLICKING the number PINS it (`aria-expanded`) — an outside click leaves
-  it; clicking the number again or Escape hides it, and the marker stays QUIET until the pointer leaves
-  or focus moves, or the still-hovered number would reopen it at once. One pinned at a time
-  (`claimActivePopover`). The numbers are buttons in the tab order, named "Dependency n: <words>". ⚠ The router hook (`useRoutedArrows`), the arrow
+  or focusing the number, shows what the arrow means beside the number. ⚠ **HOVER / FOCUS ONLY — the
+  click-to-pin is REMOVED** (2026-10-19): the panel is `pointer-events-none`, closes ~80ms after the
+  pointer leaves, and Escape closes it. It is placed by `lib/avoidRects.ts` (test/avoidRects.test.ts):
+  each side of the number at three alignments, clamped to the viewport, keeping the one that covers the
+  least of the cards (`useRoutedArrows`' `cardRects`, passed as `ArrowLayer`'s `avoid`). The numbers are
+  focusable (`tabIndex=0`), named "Dependency n: <words>". ⚠ The router hook (`useRoutedArrows`), the arrow
   layer with its numbered markers (`ArrowLayer`), the key (`ArrowKey`) and the sr-only list (`ArrowList`)
   live in `components/LaneBoard.tsx` and are SHARED with This Sprint's lane board (§ Activity → This
   Sprint), so the two draw one way; change them for both.

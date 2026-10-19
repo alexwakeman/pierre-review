@@ -170,9 +170,10 @@ export interface SprintGraphNode {
   stage: SprintStage | null;
   /** The bucket its status sits in (`statusLayout.buckets`); null when its status is not known. */
   bucketId: string | null;
-  /** The column it is drawn in (`statusLayout.columns`): its bucket, or SPRINT_MERGED_COLUMN_ID when
-   *  that column is on, its bucket means In progress or In review, and it has ≥ 1 merged pull request
-   *  and none open (closed unmerged ones ignored). Computed ONCE, in the graph fold. null when its
+  /** The column it is drawn in (`statusLayout.columns`, one per bucket): its bucket, or — while the
+   *  merge rule (`settings.mergedColumn`) is on, its bucket means Code review, and it has ≥ 1 merged
+   *  pull request and none open (closed unmerged ones ignored) — the FIRST bucket meaning Product
+   *  review. Computed ONCE, in the graph fold. `stage` and `bucketId` stay its status's. null when its
    *  status is not known. */
   column: string | null;
   issueType: string | null;
@@ -271,8 +272,9 @@ export interface SprintGraphResponse {
 //                         pull requests merged), against a per-(account, workspace) BASELINE snapshot
 //                         rolled forward only after a gap of SPRINT_VISIT_GAP_MS between views.
 //   • 'pace'            — the share of the sprint's days gone beside the share of its tickets complete.
-//   • 'out_of_step'     — the tracker's stage disagrees with the code (In review with no open pull
-//                         request — merged code or none at all, said apart; Complete with one
+//   • 'out_of_step'     — the tracker's stage disagrees with the code (Code review with no open pull
+//                         request — merged code or none at all, said apart, merged code only when
+//                         the merge rule did not move it to Product review; Complete with one
 //                         still open; Not started with one open).
 //   • 'blocked_outside' — sprint tickets waiting on an unfinished ticket outside the sprint.
 
@@ -324,12 +326,14 @@ export function sprintDayOf(startMs: number, endMs: number, nowMs: number): { da
 // ── Themes ───────────────────────────────────────────────────────────────────────────────────────
 //
 // ONE sprint-wide Haiku call (review/sprint-themes/, LOCAL + aiEnabled) after the brief pass names 3–8
-// short shared THEMES over the sprint tickets' titles + brief summaries and puts each ticket in exactly
-// one. Stored per (account, workspace) with an INPUT HASH (keys + summaries) and SPRINT_THEME_VERSION;
-// it runs again only when that hash changes. The SPA lays the Theme view out by it (one lane per theme).
+// short shared THEMES over the sprint tickets' titles + brief summaries, writes each a one-to-two
+// sentence SUMMARY (what the work is and whether it is development work; NO figures — progress is
+// counted by code, `sprintLaneSummary`), and puts each ticket in exactly one. Stored per (account,
+// workspace) with an INPUT HASH (keys + summaries) and SPRINT_THEME_VERSION; it runs again only when
+// that hash changes. The SPA lays the Theme view out by it (one lane per theme).
 
-/** Bumped when the theme prompt or shape changes: the stored themes stop counting. */
-export const SPRINT_THEME_VERSION = 1;
+/** Bumped when the theme prompt or shape changes: the stored themes stop counting. 2 = summaries. */
+export const SPRINT_THEME_VERSION = 2;
 
 export const SPRINT_THEME_CAPS = {
   /** Themes one pass may name (after empty ones are dropped). */
@@ -340,10 +344,15 @@ export const SPRINT_THEME_CAPS = {
   nameChars: 40,
   /** A sprint with fewer tickets is not themed (nothing to group). */
   minTickets: 6,
+  /** A theme summary's characters. Longer, or carrying a digit, and the summary is dropped (null). */
+  summaryChars: 240,
 } as const;
 
 export interface SprintTheme {
   name: string;
+  /** One or two plain sentences: what the work is and whether it is development work. Model-written,
+   *  never a figure. null when the pass gave none (or a stored pre-summary row). */
+  summary: string | null;
 }
 
 // ── The sprint builder: critical paths ───────────────────────────────────────────────────────────
@@ -475,8 +484,8 @@ export interface SprintPace {
   live: number;
   /** In a bucket meaning Complete. */
   done: number;
-  /** In the derived "Merged, not signed off" column. */
-  mergedNotSignedOff: number;
+  /** Drawn in a Product review column: a status placed there, or moved there by the merge rule. */
+  productReview: number;
   /** At least one merged pull request and none open, whatever the column. */
   codeMerged: number;
   /** `depends_on` edges from a live sprint ticket onto a ticket (sprint or outside) not Complete. */

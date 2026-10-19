@@ -185,6 +185,21 @@ describe('the sweep', () => {
     expect(await intentFor(depPr)).toMatchObject({ state: 'armed', expectedHeadOid: 'h2' });
   });
 
+  it('⚠ never arms a RED head, and arms it on the first sweep after it goes green', async () => {
+    // The 2026-10-19 loop started here: six bumps were already failing a minute before the
+    // setting armed them, and each armed intent then polled GitHub for 72 hours.
+    await policy.setDependencyAutoMerge(A, wsId, true);
+    for (const ci of ['failure', 'error']) {
+      await db.update(schema.pullRequests).set({ ciStatus: ci }).where(eq(schema.pullRequests.id, depPr)).execute();
+      await policy.runDependencyPolicyTick(log);
+      expect(await intentFor(depPr), ci).toBeUndefined();
+    }
+    await db.update(schema.pullRequests).set({ ciStatus: 'success' }).where(eq(schema.pullRequests.id, depPr)).execute();
+    await policy.runDependencyPolicyTick(log);
+    expect(await intentFor(depPr)).toMatchObject({ state: 'armed', armedByPolicy: true });
+    await db.update(schema.pullRequests).set({ ciStatus: null }).where(eq(schema.pullRequests.id, depPr)).execute();
+  });
+
   it('never re-arms a PR a person cancelled', async () => {
     await policy.setDependencyAutoMerge(A, wsId, true);
     await policy.runDependencyPolicyTick(log);

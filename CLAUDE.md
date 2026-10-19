@@ -725,7 +725,9 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 - **Dependency auto-merge** (`merge/dependency-policy.ts`, CORE; sqlite `0093`/pg `0080`): "Merge
   or arm all" + a per-workspace setting, OFF by default. ⚠ A POLICY intent merges like a click (REQUIRED
   checks only — `unstable` lands); the bot's new head is re-armed; a person's cancel is never overridden; both arm with GitHub's
-  merge-in, never a force-push onto the bot's branch. [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md) § Dependency auto-merge.
+  merge-in, never a force-push onto the bot's branch. ⚠ Red CI BACKS OFF any armed intent after ONE
+  live-proven failure (stored phase `checks_failed`: no GitHub call, no slot, until the SYNCED CI is
+  green), and the setting never arms a red head. [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md) § Dependency auto-merge.
 - **A repo's armed intents land ONE AT A TIME** (`db/merge-queue.ts`): one slot per
   `(accountId, repoId)` in `armedAt` order, the rest at phase `queued_local`. ⚠ **RULES 1–4 STILL
   RUN FOR EVERY INTENT** — only freshen/enqueue/merge is gated, or a queued intent whose PR was
@@ -1255,13 +1257,18 @@ story report gone no screen triggers or reads them. [docs/CLAUDE-REVIEW.md](docs
 (default) · Critical path · People (`?sprintTab=paths|people`) — then "Merged so far" (`?sprintTab=merged`).
 `GET /api/sprint-graph` (DB only; the name stayed): nodes = sprint tickets + GHOSTS
 (≤ 3 hops / 60), + PRs, each placed in the workspace's STATUS BUCKETS (`db/sprint-status-layout.ts`;
-user-defined name + meaning, meanings non-decreasing; `stage` = the bucket's meaning) and given ONE
-`column` in the fold — its bucket, or the derived "Merged, not signed off" (all PRs merged, none open);
+user-defined name + meaning — FIVE meanings, Not started · In progress · Code review (id `in_review`) ·
+Product review (QA / sign-offs) · Complete, non-decreasing; `stage` = the bucket's meaning) and given ONE
+`column` in the fold — its bucket, or (the merge rule, `mergedColumn`) a CODE REVIEW ticket with every PR
+merged and none open drawn in the FIRST Product review bucket; columns = buckets, no derived column. ⚠ A
+stored value without `version` gets a Product review bucket ON READ (`withProductReview`);
 docs/TRACKERS.md § The status order and buckets. Edges = a blocking tracker link or a
 CURRENT BRIEF's depends_on / concurrent / builds_on / supersedes, each with the brief's one-sentence
 `why` — ONE fold (`db/sprint-graph-fold.ts`). The BRIEF (Haiku, `review/sprint-briefs/`, after each read,
 never a view): summary + criteria + references + a `why` per reference AND tracker link; current on
-text hash + `SPRINT_BRIEF_VERSION`. After briefs → themes, the SPRINT BUILDER (Sonnet 5, agentic,
+text hash + `SPRINT_BRIEF_VERSION`. After briefs → themes (each with a model SUMMARY: what the work is,
+dev or not, NO figure — a numeral drops it; progress per row is CODE's shared `sprintLaneSummary`, Theme
+AND People), the SPRINT BUILDER (Sonnet 5, agentic,
 `review/sprint-paths/`, its ONE tool `submit_paths`) picks ≤ 5 critical paths + ≤ 3 call-outs over a
 code-built map: only listed keys, ⚠ NO digit in its text, hash blind to the day, backoff +
 `SPRINT_PATHS_DAILY_CAP`; the LAST answer is shown (the hash is the re-bill gate). The response also
@@ -1271,7 +1278,7 @@ columns = `statusLayout.columns` verbatim (Complete buckets COLLAPSED to counts 
 sprint" at the left on Critical path only), lanes = a path / a theme ("Other" last) / a person
 (ALPHABETICAL, Unassigned last — never by load), ONE `TicketCard` (tags as WORDS; 2px solid accent = on
 a path, dashed = waiting), `depends_on` arrows routed by the design grid's `routeArrow`, numbered and
-keyed. Its arrow pieces are SHARED with `DesignGrid`. The force graph, its strip and every group-by /
+keyed; arrow popovers are HOVER-ONLY (no pin), placed clear of the cards (`lib/avoidRects.ts`). Its arrow pieces are SHARED with `DesignGrid`. A card CLICK opens an in-place STORY PEEK (`Activity/StoryPeek.tsx`, read on click — summary + criteria chips, no docs check/design); its corner arrow opens the story view. The force graph, its strip and every group-by /
 filter control are DELETED — never bring a canvas back. "Ask Claude" (Haiku) is LOCAL, on `me.ai`.
 ⚠ No chips, findings, checks or write-back. ⚠ **A ticket opens the STORY VIEW** — the ticket tab (chip
 "KEY · Story", internal kind/key `ticket:<ident>` kept), ONLY through `useOpenStory()`: the SAME Open PRs

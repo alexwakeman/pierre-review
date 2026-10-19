@@ -5,9 +5,16 @@
 // order; the fold matches names case-insensitively.
 //
 // A STORED value is read tolerantly (bad names and bad buckets dropped, a malformed value read as
-// automatic) — and a stored value of a RETIRED shape is read into four buckets named
-// SPRINT_STAGE_LABEL: `{sections}` (per-stage lists) directly, `{order, deliveredFrom}` through
-// `legacyToSections` (which needs each status's category, so the layout fold passes `categoryOf`).
+// automatic) — and a stored value of a RETIRED shape is read into buckets named SPRINT_STAGE_LABEL:
+// `{sections}` (per-stage lists) directly, `{order, deliveredFrom}` through `legacyToSections` (which
+// needs each status's category, so the layout fold passes `categoryOf`).
+// ⚠ PRODUCT REVIEW (a fifth meaning since 2026-10-19) IS ADDED ON READ to every stored value written
+// before it — any value WITHOUT `version: SPRINT_STATUS_SETTINGS_VERSION` (`withProductReview`): a
+// Product review bucket after the last Code review bucket (else after the last In progress one, else
+// before the first Complete one), holding the statuses of that Code review bucket whose names read as
+// QA / test / sign-off / release; a Code review bucket named exactly "In review" reads as "Code review".
+// Nothing is written until the reader saves; a saved value carries the version, so a Product review
+// bucket the reader REMOVED stays removed.
 // Only a POSTED value is strict (`parseSprintStatusSettingsStrict`, whose problem is the 400's message).
 import { and, eq } from 'drizzle-orm';
 import {
@@ -15,11 +22,14 @@ import {
   SPRINT_BUCKET_NAME_MAX,
   SPRINT_BUCKETS_MAX,
   SPRINT_MERGED_COLUMN_ID,
+  SPRINT_PRODUCT_REVIEW_STATUS_RE,
   SPRINT_STAGE_LABEL,
+  SPRINT_STAGE_RANK,
   SPRINT_STAGES,
   SPRINT_STATUS_NAME_MAX,
   SPRINT_STATUS_ORDER_MAX,
   SPRINT_STATUS_SETTINGS_DEFAULT,
+  SPRINT_STATUS_SETTINGS_VERSION,
   sprintBucketsProblem,
   type JiraStatusCategory,
   type SprintBucket,
@@ -38,14 +48,52 @@ const dbMods = async () => {
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const badName = (n: string): boolean => n === '' || n.length > SPRINT_STATUS_NAME_MAX || CONTROL.test(n);
 const norm = (s: string): string => s.trim().toLowerCase();
-const STAGE_RANK: Record<SprintStage, number> = { not_started: 0, in_progress: 1, in_review: 2, done: 3 };
+const STAGE_RANK = SPRINT_STAGE_RANK;
 const isStage = (v: unknown): v is SprintStage => typeof v === 'string' && (SPRINT_STAGES as readonly string[]).includes(v);
 
-const emptySections = (): Record<SprintStage, string[]> => ({ not_started: [], in_progress: [], in_review: [], done: [] });
+const emptySections = (): Record<SprintStage, string[]> => ({ not_started: [], in_progress: [], in_review: [], product_review: [], done: [] });
 
-/** Four buckets named SPRINT_STAGE_LABEL from per-stage lists (the retired shapes). Pure. */
+/** Buckets named SPRINT_STAGE_LABEL from per-stage lists (the retired shapes), one per stage that the
+ *  retired shape knew (Product review is added by `withProductReview`, never here). Pure. */
 export function sectionsToBuckets(sections: Record<SprintStage, string[]>): SprintBucket[] {
-  return SPRINT_STAGES.map((s) => ({ id: s, name: SPRINT_STAGE_LABEL[s], meaning: s, statuses: [...sections[s]] }));
+  return SPRINT_STAGES.filter((s) => s !== 'product_review').map((s) => ({
+    id: s,
+    name: SPRINT_STAGE_LABEL[s],
+    meaning: s,
+    statuses: [...sections[s]],
+  }));
+}
+
+/** A stored value written BEFORE Product review became a meaning, read as it would be now (see the
+ *  header): a Code review bucket named "In review" renamed "Code review"; a Product review bucket added
+ *  (when there is none, there is room, and its name and id are free), taking the QA / sign-off named
+ *  statuses of the Code review bucket it follows. Pure. */
+export function withProductReview(buckets: readonly SprintBucket[]): SprintBucket[] {
+  const out = buckets.map((b) => ({ ...b, statuses: [...b.statuses] }));
+  const nameTaken = (n: string): boolean => out.some((b) => b.name.trim().toLowerCase() === n.toLowerCase());
+  const codeReview = SPRINT_STAGE_LABEL.in_review;
+  for (const b of out) {
+    if (b.meaning === 'in_review' && b.name.trim().toLowerCase() === 'in review' && !nameTaken(codeReview)) b.name = codeReview;
+  }
+  if (out.some((b) => b.meaning === 'product_review') || out.length >= SPRINT_BUCKETS_MAX) return out;
+  const name = SPRINT_STAGE_LABEL.product_review;
+  if (nameTaken(name)) return out;
+  const ids = new Set(out.map((b) => b.id));
+  let id = 'product_review';
+  for (let i = 2; ids.has(id); i += 1) id = `product_review_${i}`;
+  const lastOf = (m: SprintStage): number => out.map((b) => b.meaning).lastIndexOf(m);
+  const review = lastOf('in_review');
+  const progress = lastOf('in_progress');
+  const firstDone = out.findIndex((b) => b.meaning === 'done');
+  const at = review >= 0 ? review + 1 : progress >= 0 ? progress + 1 : firstDone >= 0 ? firstDone : out.length;
+  const statuses: string[] = [];
+  if (review >= 0) {
+    const from = out[review]!;
+    statuses.push(...from.statuses.filter((n) => SPRINT_PRODUCT_REVIEW_STATUS_RE.test(n)));
+    from.statuses = from.statuses.filter((n) => !SPRINT_PRODUCT_REVIEW_STATUS_RE.test(n));
+  }
+  out.splice(at, 0, { id, name, meaning: 'product_review', statuses });
+  return out;
 }
 
 /** The retired `{order, deliveredFrom}` override as sections: the order is kept; category `new` → Not
@@ -121,7 +169,7 @@ export function parseSprintStatusSettingsStrict(
   if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return bad('Send the status settings.');
   const r = raw as { buckets?: unknown; mergedColumn?: unknown };
   if (!('buckets' in r)) return bad('Send the status settings.');
-  if (r.mergedColumn !== undefined && typeof r.mergedColumn !== 'boolean') return bad('Say whether to show the merged column.');
+  if (r.mergedColumn !== undefined && typeof r.mergedColumn !== 'boolean') return bad('Say whether merged tickets move to Product review.');
   const mergedColumn = r.mergedColumn ?? true;
   if (r.buckets === null) return { ok: true, settings: { buckets: null, mergedColumn } };
   if (!Array.isArray(r.buckets)) return bad('Send the buckets as a list.');
@@ -141,8 +189,9 @@ export function parseSprintStatusSettingsStrict(
 
 /** A stored or posted value as clean settings, or null when a POSTED one is malformed (`strict`, see
  *  `parseSprintStatusSettingsStrict`). A stored value never reads as null: malformed → the default; a
- *  RETIRED `{sections}` value → four buckets; a RETIRED `{order, deliveredFrom}` value → four buckets
- *  via `legacyToSections` (with `categoryOf` — absent → every status reads as in progress). */
+ *  RETIRED `{sections}` value → buckets; a RETIRED `{order, deliveredFrom}` value → buckets via
+ *  `legacyToSections` (with `categoryOf` — absent → every status reads as in progress); a stored value
+ *  without the current `version` gets its Product review bucket (`withProductReview`). */
 export function parseSprintStatusSettings(
   raw: unknown,
   strict: boolean,
@@ -154,10 +203,14 @@ export function parseSprintStatusSettings(
   }
   const dflt = (): SprintStatusSettings => ({ ...SPRINT_STATUS_SETTINGS_DEFAULT });
   if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return dflt();
-  const r = raw as { buckets?: unknown; mergedColumn?: unknown; sections?: unknown; order?: unknown; deliveredFrom?: unknown };
+  const r = raw as { buckets?: unknown; mergedColumn?: unknown; sections?: unknown; order?: unknown; deliveredFrom?: unknown; version?: unknown };
   const mergedColumn = typeof r.mergedColumn === 'boolean' ? r.mergedColumn : true;
 
-  if ('buckets' in r) return { buckets: tolerantBuckets(r.buckets), mergedColumn };
+  if ('buckets' in r) {
+    const buckets = tolerantBuckets(r.buckets);
+    const current = r.version === SPRINT_STATUS_SETTINGS_VERSION;
+    return { buckets: buckets == null || current ? buckets : withProductReview(buckets), mergedColumn };
+  }
 
   if ('sections' in r) {
     // The retired per-stage shape (stored before buckets).
@@ -167,7 +220,7 @@ export function parseSprintStatusSettings(
     const room = { left: SPRINT_STATUS_ORDER_MAX };
     const sections = emptySections();
     for (const stage of SPRINT_STAGES) sections[stage] = cleanNames(raws[stage], seen, room);
-    return seen.size === 0 ? dflt() : { buckets: sectionsToBuckets(sections), mergedColumn };
+    return seen.size === 0 ? dflt() : { buckets: withProductReview(sectionsToBuckets(sections)), mergedColumn };
   }
 
   if ('order' in r || 'deliveredFrom' in r) {
@@ -175,7 +228,7 @@ export function parseSprintStatusSettings(
     const order = cleanNames(r.order, new Set(), { left: SPRINT_STATUS_ORDER_MAX });
     const df = typeof r.deliveredFrom === 'string' && !badName(r.deliveredFrom.trim()) ? r.deliveredFrom.trim() : null;
     if (order.length === 0) return dflt();
-    return { buckets: sectionsToBuckets(legacyToSections(order, df, categoryOf)), mergedColumn };
+    return { buckets: withProductReview(sectionsToBuckets(legacyToSections(order, df, categoryOf))), mergedColumn };
   }
   return dflt();
 }
@@ -216,9 +269,15 @@ export async function setSprintStatusSettings(
   settings: SprintStatusSettings,
 ): Promise<boolean> {
   const { db, workspaces } = await dbMods();
+  // `version` marks a value written since Product review became a meaning (see the header).
+  const stored: SprintStatusSettings & { version: number } = {
+    version: SPRINT_STATUS_SETTINGS_VERSION,
+    buckets: settings.buckets,
+    mergedColumn: settings.mergedColumn,
+  };
   const rows = await db
     .update(workspaces)
-    .set({ sprintStatuses: isDefaultSprintStatusSettings(settings) ? null : { buckets: settings.buckets, mergedColumn: settings.mergedColumn } })
+    .set({ sprintStatuses: isDefaultSprintStatusSettings(settings) ? null : stored })
     .where(and(eq(workspaces.id, workspaceId), eq(workspaces.accountId, accountId)))
     .returning({ id: workspaces.id })
     .execute();

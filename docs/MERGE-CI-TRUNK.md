@@ -1017,9 +1017,33 @@ workspace's bot maps, the same resolution the Dependencies tab's membership read
   (≤ 10 arms per tick) and arms each open, non-draft, non-conflicting, not-queued dependency PR in
   a repo the account can push to — pinned to its LIVE head, `armedByPolicy: true`, update strategy
   GitHub's merge-in. The UI says "Armed automatically (dependency setting)".
+  ⚠ **A RED HEAD IS NEVER ARMED BY THE SETTING**: the sweep skips a PR whose SYNCED `ci_status` is
+  `failure` / `error` and arms it on the first sweep after it goes green (a re-run, or the bot's
+  next push). "Merge or arm all" still arms a red PR on a click; the watcher backs it off at once
+  (below).
   ⚠ **ONLY REQUIRED CHECKS GATE A POLICY INTENT**, exactly as they gate a click: it lands on
   clean / has_hooks / `unstable` (a red OPTIONAL check never blocks it). Drafts, conflicts,
   `behind` (freshened first) and `blocked` (bar the merge-queue enqueue rule) never merge.
+  ⚠ **RED CHECKS BACK OFF, THEN RETRY ON GREEN (watcher rule 6a, every intent, click or policy)**.
+  THE LOOP IT ENDS (2026-10-19, seven dependency PRs on merge-queue repos, armed while already
+  red): the enqueue was refused as "failing", `isWaitableEnqueueRefusal` counted that as "not yet",
+  a PROCESS-LOCAL mark parked the row at "required checks haven't finished" (false — they had
+  failed), every restart forgot the mark and re-sent the enqueue, and each tick spent a REST
+  snapshot + a GraphQL queue probe per intent for 72 hours. Nothing ended it short of a push.
+  Now ONE failed attempt backs the intent off: still `armed`, phase **`checks_failed`** (STORED,
+  so a restart does not retry; "Waiting for checks to pass" on the card, pane and banner — a wait,
+  never a spinner). Entered only on LIVE proof — a `fetchPrHeadCheckRollup` of FAILURE/ERROR
+  (paid only when the synced CI already says red, or a slot yield could follow) or a queue refusal
+  `isFailingEnqueueRefusal` names as failing (⚠ never GitHub's "Request failed" envelope). A queue
+  intent whose synced CI is red checks the rollup BEFORE enqueueing, so a red head costs no
+  mutation. While backed off, a tick makes NO GitHub call when the synced head is the pinned one:
+  it is released only when the SYNCED row is green (`ci_status = success`, or a ready merge state
+  — clean / has_hooks / unstable); pending is not green. Then ONE real attempt; a second failure
+  backs it off again. A synced head that differs goes the live path, so rule 1 still disarms a
+  push. ⚠ A backed-off intent NEVER HOLDS ITS REPO'S SLOT — `buildArmedRepoQueues` reads the
+  stored phase as a `failed_checks` yield. ⚠ A POLICY intent does not expire while backed off (the
+  setting is the consent) and gets a fresh 72-hour window on the tick it resumes; a person's
+  click expires on time.
   ⚠ **THE SETTING IS THE CONSENT, SO A NEW HEAD IS RE-ARMED**: the bot's push disarms by rule 1 as
   always, and the next sweep arms the new head. An intent that ENDED on the SAME head (expired,
   failed, lost access, retargeted) is never re-armed on it (`refuseIfHead`).

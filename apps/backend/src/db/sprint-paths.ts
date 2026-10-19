@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 import {
   SPRINT_EDGE_LABEL,
-  SPRINT_MERGED_COLUMN_ID,
   SPRINT_PATHS_CAPS,
   SPRINT_PATHS_MODEL,
   SPRINT_PATHS_VERSION,
@@ -161,7 +160,9 @@ export function sprintPaceOf(
     tickets: sprint.length,
     live: sprint.length - done,
     done,
-    mergedNotSignedOff: sprint.filter((n) => n.column === SPRINT_MERGED_COLUMN_ID).length,
+    // A Product review column: a status placed there (`stage`), or moved there by the merge rule — the
+    // only way a node's column differs from its bucket.
+    productReview: sprint.filter((n) => n.stage === 'product_review' || (n.column != null && n.column !== n.bucketId)).length,
     codeMerged: sprint.filter((n) => n.prs.some((p) => p.state === 'merged') && !n.prs.some((p) => p.state === 'open')).length,
     openDependencies,
     chains: sprintChains(nodes, edges).length,
@@ -251,6 +252,11 @@ export function sprintPathsInput(g: {
   const sprint = g.nodes.filter((n) => !n.ghost).sort(byKey);
   const byIdent = new Map(g.nodes.map((n) => [n.ident, n]));
   const colName = new Map(g.columns.map((c) => [c.id, c]));
+  // A column by its own name, with its meaning when the name does not already say it.
+  const columnLabel = (c: Pick<SprintColumn, 'name' | 'meaning'>): string => {
+    const meaning = SPRINT_STAGE_LABEL[c.meaning].toLowerCase();
+    return c.name.trim().toLowerCase() === meaning ? oneLine(c.name, 40) : `${oneLine(c.name, 40)} (${meaning})`;
+  };
   const listed = new Map<string, SprintGraphNode>();
   for (const n of sprint) listed.set(n.ident, n);
   // The outside tickets a SPRINT ticket depends on or builds on.
@@ -267,7 +273,7 @@ export function sprintPathsInput(g: {
   outside.sort(byKey);
   const columnOf = (n: SprintGraphNode): string => {
     const c = n.column != null ? colName.get(n.column) : undefined;
-    if (c != null) return `${oneLine(c.name, 40)} (${SPRINT_STAGE_LABEL[c.meaning].toLowerCase()})`;
+    if (c != null) return columnLabel(c);
     return n.stage != null ? SPRINT_STAGE_LABEL[n.stage].toLowerCase() : 'status unknown';
   };
   const pace = sprintPaceOf(g.nodes, g.edges, null);
@@ -299,8 +305,8 @@ export function sprintPathsInput(g: {
     );
   const facts = [
     `Sprint: ${g.sprintName != null && g.sprintName.trim() !== '' ? oneLine(g.sprintName, TITLE_MAX) : 'This sprint'}`,
-    `Columns, left to right: ${g.columns.map((c) => `${oneLine(c.name, 40)}${c.derived ? ' (code merged, ticket not signed off)' : ''}`).join(' · ') || 'none'}`,
-    `Tickets in the sprint: ${pace.tickets}; complete: ${pace.done}; merged but not signed off: ${pace.mergedNotSignedOff}; not complete: ${pace.live}`,
+    `Columns, left to right: ${g.columns.map((c) => columnLabel(c)).join(' · ') || 'none'}`,
+    `Tickets in the sprint: ${pace.tickets}; complete: ${pace.done}; in product review: ${pace.productReview}; not complete: ${pace.live}`,
     `Open dependencies: ${pace.openDependencies}; dependency chains: ${chains.length} found, ${chainLines.length} listed below`,
   ];
   const ticketLines = sprint.map((n) =>

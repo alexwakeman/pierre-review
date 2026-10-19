@@ -121,7 +121,7 @@ describe('status buckets', () => {
     expect(d.buckets.map((b) => `${b.id}:${b.name}:${b.meaning}`)).toEqual([
       'not_started:Not started:not_started',
       'in_progress:In progress:in_progress',
-      'in_review:In review:in_review',
+      'in_review:Code review:in_review',
       'done:Complete:done',
     ]);
     expect(lists(d)).toEqual([['To Do'], ['In Development'], ['Ready for QA', 'In PO Review'], ['Done']]);
@@ -165,13 +165,13 @@ describe('status buckets', () => {
     expect(addBucket(full)).toEqual(full);
     expect(newBucketId({ mergedColumn: true, buckets: [{ id: 'b1', name: 'x', meaning: 'done', statuses: [] }] })).toBe('b2');
 
-    // Two review stages: split In review, rename.
+    // Two review stages: split Code review, rename.
     const two = renameBucket(setBucketMeaning(moveBucket(addBucket(d), 4, -1), 'b1', 'in_review'), 'b1', 'PO review');
     const split = moveStatusTo(two, { bucket: 2, index: 1 }, 3, 0);
     expect(split.buckets.map((b) => `${b.name}:${b.meaning}:${b.statuses.join('|')}`)).toEqual([
       'Not started:not_started:To Do',
       'In progress:in_progress:In Development',
-      'In review:in_review:Ready for QA',
+      'Code review:in_review:Ready for QA',
       'PO review:in_review:In PO Review',
       'Complete:done:Done',
     ]);
@@ -192,10 +192,10 @@ describe('status buckets', () => {
     const moved = moveStatusTo(d, statusPlaceOf(d, 'Won’t do') as { bucket: number; index: number }, 3, 1);
     expect(lists(moved)[3]).toEqual(['Done', 'Won’t do']);
     expect(bucketsDraftProblem(l, moveBucket(d, 3, -1))).toBe(
-      '“In review” means In review, so it cannot come after a bucket that means Complete.',
+      '“Code review” means Code review, so it cannot come after a bucket that means Complete.',
     );
     expect(bucketsDraftProblem(l, renameBucket(d, 'done', '  '))).toBe('Give every bucket a name.');
-    expect(bucketsDraftProblem(l, renameBucket(d, 'done', 'in review'))).toBe('Two buckets are called “in review”.');
+    expect(bucketsDraftProblem(l, renameBucket(d, 'done', 'code review'))).toBe('Two buckets are called “code review”.');
   });
 
   it('coding begins / ends read off the draft; where a status sits; changed or not', () => {
@@ -221,7 +221,7 @@ describe('status buckets', () => {
     expect(out.buckets?.map((b) => `${b.id}:${b.name}:${b.statuses.join('|')}`)).toEqual([
       'not_started:Not started:To Do',
       'in_progress:In progress:In Development|Ready for QA',
-      'in_review:In review:In PO Review',
+      'in_review:Code review:In PO Review',
       'done:Shipped:Done',
     ]);
   });
@@ -269,7 +269,7 @@ describe('status buckets', () => {
     expect(shareWords(0.5)).toBe('1 in 2');
     expect(shareWords(0.37)).toBe('37%');
     expect(reviewRuleSentence()).toBe(
-      'In review starts at a status whose name reads as review or QA, or the first in-progress status where at least 3 in 5 tickets with pull requests have them all merged, and at least 2 do.',
+      'Code review starts at a status whose name reads as review, or the first in-progress status where at least 3 in 5 tickets with pull requests have them all merged, and at least 2 do. A status whose name reads as QA, testing, sign-off, staging or release is Product review.',
     );
     expect(statusEvidenceLine({ status: 'Ready for QA', withPrs: 6, allMerged: 4 })).toBe('Ready for QA · 4 of 6 merged');
     expect(statusOrderSourceLabel('jira_board')).toBe('Your board’s columns');

@@ -2,26 +2,30 @@
 // DB half imports db/client lazily, so importing this module opens nothing. Pinned:
 //   • the automatic order: the tracker's order first, then statuses only the tickets carry, placed
 //     by category; no tracker order → category then name;
-//   • the automatic STAGE: new → Not started, done → Complete; a review / QA name → In review; the PR
-//     evidence boundary (first in-progress status at ≥ 60% fully merged with ≥ 2 such tickets) and
-//     every in-progress status after it → In review; the rest In progress;
+//   • the automatic STAGE: new → Not started, done → Complete; a QA / sign-off name → Product review; a
+//     review name → Code review; the PR evidence boundary (first in-progress status at ≥ 60% fully
+//     merged with ≥ 2 such tickets) and every in-progress status after it → Code review; the rest In
+//     progress;
 //   • the buckets: placement beats category, an unnamed status joins the first bucket of its automatic
-//     stage (else the nearest meaning's, auto) after its automatic predecessor, a named status nobody
-//     has seen kept (count 0); a stored RETIRED {sections} / {order, deliveredFrom} value reads into
-//     four buckets;
-//   • the columns (the merged column's place) and a ticket's column (all merged / some open / none);
+//     stage (else the nearest EARLIER meaning's, auto) after its automatic predecessor, a named status
+//     nobody has seen kept (count 0); a stored RETIRED {sections} / {order, deliveredFrom} value reads
+//     into buckets; a stored value without the version gets its Product review bucket;
+//   • the columns (one per bucket) and a ticket's column (the merge rule: Code review + all merged →
+//     the first Product review bucket);
 //   • coding begins / ends; the stage of a ticket; the section index; the evidence fold (closed-
 //     unmerged PRs ignored, the sprint ticket's status beats a stored row's, the freshest otherwise).
 import { describe, expect, it } from 'vitest';
-import { SPRINT_STATUS_SETTINGS_DEFAULT, type SprintBucket, type SprintStage, type SprintStatusAutoOrder } from '@pierre-review/shared';
+import { SPRINT_STATUS_SETTINGS_DEFAULT, SPRINT_STATUS_SETTINGS_VERSION, type SprintBucket, type SprintStage, type SprintStatusAutoOrder } from '@pierre-review/shared';
 import {
   applyBuckets,
   automaticStages,
   automaticStatusOrder,
   foldSprintStatusEvidence,
   inferReviewFrom,
+  isProductReviewStatusName,
   isReviewStatusName,
   bucketForStage,
+  mergeRuleTarget,
   resolveSprintStatusLayout,
   sprintColumnOf,
   sprintColumnsOf,
@@ -58,7 +62,7 @@ const PLAIN: SprintStatusAutoOrder = {
 const t = (statusName: string | null, statusCategory: string | null) => ({ statusName, statusCategory });
 const names = (xs: Array<{ name: string }>) => xs.map((x) => x.name);
 const ev = (o: Record<string, [number, number]>) => new Map(Object.entries(o).map(([k, [w, m]]) => [k, { withPrs: w, allMerged: m }]));
-const noSections = (): Record<SprintStage, string[]> => ({ not_started: [], in_progress: [], in_review: [], done: [] });
+const noSections = (): Record<SprintStage, string[]> => ({ not_started: [], in_progress: [], in_review: [], product_review: [], done: [] });
 const B = (id: string, name: string, meaning: SprintStage, statuses: string[]): SprintBucket => ({ id, name, meaning, statuses });
 
 describe('automaticStatusOrder', () => {
@@ -73,11 +77,15 @@ describe('automaticStatusOrder', () => {
   });
 });
 
-describe('isReviewStatusName', () => {
-  it('reads real review / QA / release names as In review', () => {
+describe('isReviewStatusName / isProductReviewStatusName', () => {
+  it('reads review names as Code review — and not as Product review', () => {
+    for (const n of ['Code Review', 'In Review', 'Ready for review', 'Peer review']) {
+      expect([n, isReviewStatusName(n), isProductReviewStatusName(n)]).toEqual([n, true, false]);
+    }
+  });
+
+  it('reads QA / test / sign-off / release names as Product review — checked first, so never Code review', () => {
     for (const n of [
-      'Code Review',
-      'In Review',
       'Ready for QA',
       'QA',
       'In QA',
@@ -94,14 +102,16 @@ describe('isReviewStatusName', () => {
       'Release',
       'Acceptance',
       'In PO Review',
+      'Product review',
+      'Final PO Check',
     ]) {
-      expect([n, isReviewStatusName(n)]).toEqual([n, true]);
+      expect([n, isProductReviewStatusName(n), isReviewStatusName(n)]).toEqual([n, true, false]);
     }
   });
 
   it('leaves building statuses alone', () => {
-    for (const n of ['In Development', 'In Progress', 'Doing', 'To Do', 'Blocked', 'Coding', 'Contested', 'Protest', 'Qualified']) {
-      expect([n, isReviewStatusName(n)]).toEqual([n, false]);
+    for (const n of ['In Development', 'In Progress', 'Doing', 'To Do', 'Blocked', 'Coding', 'Contested', 'Protest', 'Qualified', 'Poised', 'Production fix']) {
+      expect([n, isReviewStatusName(n), isProductReviewStatusName(n)]).toEqual([n, false, false]);
     }
   });
 });
@@ -124,8 +134,10 @@ describe('inferReviewFrom', () => {
 });
 
 describe('automaticStages', () => {
-  it('category first, then the review vocabulary', () => {
-    expect(automaticStages(automaticStatusOrder(BOARD, []), new Map())).toEqual(['not_started', 'in_progress', 'in_review', 'in_review', 'done']);
+  it('category first, then the Product review vocabulary, then the review one', () => {
+    expect(automaticStages(automaticStatusOrder(BOARD, []), new Map())).toEqual(['not_started', 'in_progress', 'product_review', 'product_review', 'done']);
+    const named: SprintStatusAutoOrder = { ...PLAIN, statuses: [...PLAIN.statuses.slice(0, 2), { id: '9', name: 'Code Review', category: 'indeterminate' }, ...PLAIN.statuses.slice(2)] };
+    expect(automaticStages(automaticStatusOrder(named, []), new Map())).toEqual(['not_started', 'in_progress', 'in_review', 'in_progress', 'in_progress', 'done']);
   });
 
   it('with neutral names, the PR evidence boundary and everything after it is In review', () => {
@@ -140,12 +152,12 @@ describe('applyBuckets', () => {
   const staged = auto.map((s, i) => ({ ...s, stage: automaticStages(auto, new Map())[i]! }));
   const line = (xs: ReturnType<typeof applyBuckets>) => xs.map((s) => `${s.name}:${s.bucketId}:${s.stage}:${s.auto ? 'auto' : 'set'}`);
 
-  it('null → the four automatic buckets, every status in its automatic stage’s', () => {
+  it('null → the five automatic buckets, every status in its automatic stage’s', () => {
     expect(line(applyBuckets(staged, null))).toEqual([
       'To Do:not_started:not_started:auto',
       'In Development:in_progress:in_progress:auto',
-      'Ready for QA:in_review:in_review:auto',
-      'In PO Review:in_review:in_review:auto',
+      'Ready for QA:product_review:product_review:auto',
+      'In PO Review:product_review:product_review:auto',
       'Done:done:done:auto',
     ]);
   });
@@ -185,7 +197,7 @@ describe('applyBuckets', () => {
     ]);
   });
 
-  it('no bucket of its stage → the nearest meaning’s bucket (the earlier on a tie), marked auto', () => {
+  it('no bucket of its stage → the nearest EARLIER meaning’s bucket (never more progress), marked auto', () => {
     const buckets = [B('w', 'Working', 'in_progress', []), B('f', 'Finished', 'done', [])];
     expect(line(applyBuckets(staged, buckets))).toEqual([
       'To Do:w:in_progress:auto',
@@ -208,38 +220,39 @@ describe('bucketForStage', () => {
 });
 
 describe('sprintColumnsOf', () => {
-  const ids = (cols: ReturnType<typeof sprintColumnsOf>) => cols.map((c) => `${c.id}${c.derived ? '*' : ''}`);
-  const four = [B('n', 'N', 'not_started', []), B('p', 'P', 'in_progress', []), B('r', 'R', 'in_review', []), B('d', 'D', 'done', [])];
-  it('after the last In review bucket; off → buckets only', () => {
-    expect(ids(sprintColumnsOf([...four.slice(0, 3), B('r2', 'R2', 'in_review', []), four[3]!], true))).toEqual(['n', 'p', 'r', 'r2', 'merged*', 'd']);
-    expect(ids(sprintColumnsOf(four, false))).toEqual(['n', 'p', 'r', 'd']);
+  it('one column per bucket, in order — no derived column any more', () => {
+    const five = [B('n', 'N', 'not_started', []), B('p', 'P', 'in_progress', []), B('r', 'R', 'in_review', []), B('q', 'Q', 'product_review', []), B('d', 'D', 'done', [])];
+    expect(sprintColumnsOf(five)).toEqual(five.map((b) => ({ id: b.id, name: b.name, meaning: b.meaning })));
   });
-  it('no review bucket → after the last In progress; neither → no merged column (nothing could sit in it)', () => {
-    expect(ids(sprintColumnsOf([four[0]!, four[1]!, four[3]!], true))).toEqual(['n', 'p', 'merged*', 'd']);
-    expect(ids(sprintColumnsOf([four[0]!, four[3]!, B('d2', 'D2', 'done', [])], true))).toEqual(['n', 'd', 'd2']);
-    expect(ids(sprintColumnsOf([four[0]!], true))).toEqual(['n']);
-  });
-  it('the merged column is named and means In review', () => {
-    expect(sprintColumnsOf(four, true).find((c) => c.derived)).toEqual({ id: 'merged', name: 'Merged, not signed off', meaning: 'in_review', derived: true });
+});
+
+describe('mergeRuleTarget', () => {
+  const layout = (buckets: SprintBucket[], mergedColumn: boolean) => ({ buckets: buckets.map((b) => ({ ...b, statuses: [] })), settings: { buckets, mergedColumn } });
+  it('the FIRST Product review bucket while the rule is on; off or none → null', () => {
+    const bs = [B('r', 'R', 'in_review', []), B('q1', 'QA', 'product_review', []), B('q2', 'UAT', 'product_review', [])];
+    expect(mergeRuleTarget(layout(bs, true))).toBe('q1');
+    expect(mergeRuleTarget(layout(bs, false))).toBeNull();
+    expect(mergeRuleTarget(layout([bs[0]!], true))).toBeNull();
   });
 });
 
 describe('sprintColumnOf', () => {
   const pr = (state: string) => ({ state });
-  const review = { stage: 'in_review' as const, bucketId: 'qa' };
-  it('every PR merged (closed unmerged ignored) → merged; one open → its bucket; no PRs → its bucket; off → its bucket', () => {
-    expect(sprintColumnOf(review, [pr('merged'), pr('merged')], true)).toBe('merged');
-    expect(sprintColumnOf(review, [pr('merged'), pr('closed')], true)).toBe('merged');
-    expect(sprintColumnOf(review, [pr('merged'), pr('open')], true)).toBe('qa');
-    expect(sprintColumnOf(review, [], true)).toBe('qa');
-    expect(sprintColumnOf(review, [pr('closed')], true)).toBe('qa');
-    expect(sprintColumnOf(review, [pr('merged')], false)).toBe('qa');
+  const review = { stage: 'in_review' as const, bucketId: 'cr' };
+  it('Code review + every PR merged (closed unmerged ignored) → the Product review bucket; one open, none, or rule off → its bucket', () => {
+    expect(sprintColumnOf(review, [pr('merged'), pr('merged')], 'pr')).toBe('pr');
+    expect(sprintColumnOf(review, [pr('merged'), pr('closed')], 'pr')).toBe('pr');
+    expect(sprintColumnOf(review, [pr('merged'), pr('open')], 'pr')).toBe('cr');
+    expect(sprintColumnOf(review, [], 'pr')).toBe('cr');
+    expect(sprintColumnOf(review, [pr('closed')], 'pr')).toBe('cr');
+    expect(sprintColumnOf(review, [pr('merged')], null)).toBe('cr');
   });
-  it('only In progress / In review tickets move; unknown status → null', () => {
-    expect(sprintColumnOf({ stage: 'in_progress', bucketId: 'dev' }, [pr('merged')], true)).toBe('merged');
-    expect(sprintColumnOf({ stage: 'done', bucketId: 'done' }, [pr('merged')], true)).toBe('done');
-    expect(sprintColumnOf({ stage: 'not_started', bucketId: 'todo' }, [pr('merged')], true)).toBe('todo');
-    expect(sprintColumnOf(null, [pr('merged')], true)).toBeNull();
+  it('only Code review tickets move (In progress stays, by decision); unknown status → null', () => {
+    expect(sprintColumnOf({ stage: 'in_progress', bucketId: 'dev' }, [pr('merged')], 'pr')).toBe('dev');
+    expect(sprintColumnOf({ stage: 'product_review', bucketId: 'uat' }, [pr('merged')], 'pr')).toBe('uat');
+    expect(sprintColumnOf({ stage: 'done', bucketId: 'done' }, [pr('merged')], 'pr')).toBe('done');
+    expect(sprintColumnOf({ stage: 'not_started', bucketId: 'todo' }, [pr('merged')], 'pr')).toBe('todo');
+    expect(sprintColumnOf(null, [pr('merged')], 'pr')).toBeNull();
   });
 });
 
@@ -252,27 +265,30 @@ describe('resolveSprintStatusLayout', () => {
     expect(l.order.map((o) => `${o.name}:${o.count}:${o.stage}`)).toEqual([
       'To Do:1:not_started',
       'In Development:2:in_progress',
-      'Ready for QA:0:in_review',
-      'In PO Review:1:in_review',
+      'Ready for QA:0:product_review',
+      'In PO Review:1:product_review',
       'Done:1:done',
       'Won’t do:1:done',
     ]);
+    // No Code review status: coding ends where Product review begins.
     expect([l.codingBegins, l.codingEnds]).toEqual(['In Development', 'Ready for QA']);
     expect(l.evidence.map((e) => `${e.status}:${e.allMerged}/${e.withPrs}`)).toEqual(['In Development:0/0', 'Ready for QA:0/0', 'In PO Review:3/3']);
   });
 
-  it('automatic → four buckets named by stage, Won’t do in Complete, the merged column after In review', () => {
+  it('automatic → five buckets named by stage, QA names in Product review, Won’t do in Complete; one column per bucket', () => {
     const l = resolveSprintStatusLayout({ autoOrder: BOARD, settings: SPRINT_STATUS_SETTINGS_DEFAULT, tickets, evidence: new Map() });
     expect(l.buckets.map((b) => `${b.id}:${b.name}:${names(b.statuses).join('|')}`)).toEqual([
       'not_started:Not started:To Do',
       'in_progress:In progress:In Development',
-      'in_review:In review:Ready for QA|In PO Review',
+      'in_review:Code review:',
+      'product_review:Product review:Ready for QA|In PO Review',
       'done:Complete:Done|Won’t do',
     ]);
-    expect(l.columns.map((c) => c.id)).toEqual(['not_started', 'in_progress', 'in_review', 'merged', 'done']);
+    expect(l.columns.map((c) => c.id)).toEqual(['not_started', 'in_progress', 'in_review', 'product_review', 'done']);
+    expect(mergeRuleTarget(l)).toBe('product_review');
   });
 
-  it('custom buckets: two review stages, Won’t do moved, the column inserted after the second review bucket', () => {
+  it('custom buckets: two review stages, Won’t do moved; the columns are the buckets', () => {
     const l = resolveSprintStatusLayout({
       autoOrder: BOARD,
       settings: {
@@ -289,7 +305,9 @@ describe('resolveSprintStatusLayout', () => {
       evidence: new Map(),
     });
     expect(l.orderSource).toBe('override');
-    expect(l.columns.map((c) => c.id)).toEqual(['todo', 'dev', 'qa', 'po', 'merged', 'done']);
+    expect(l.columns.map((c) => c.id)).toEqual(['todo', 'dev', 'qa', 'po', 'done']);
+    // No Product review bucket: the merge rule has nowhere to move a ticket.
+    expect(mergeRuleTarget(l)).toBeNull();
     expect(l.order.find((o) => o.name === 'Won’t do')).toMatchObject({ bucketId: 'todo', stage: 'not_started', auto: false, count: 1 });
     expect(sprintPlacementOf(l, { name: 'In PO Review', category: 'indeterminate' })).toEqual({ stage: 'in_review', bucketId: 'po' });
     // Unknown to the layout: by category / name, into the first bucket of that stage.
@@ -343,13 +361,15 @@ describe('storedSettingsFor (the retired shapes)', () => {
       BOARD,
       [],
     );
+    // …and, being stored before Product review, read with one: the QA / sign-off names move into it.
     expect(sec(s)).toEqual({
       not_started: ['To Do'],
       in_progress: ['In Development'],
-      in_review: ['Ready for QA', 'In PO Review'],
+      in_review: [],
+      product_review: ['Ready for QA', 'In PO Review'],
       done: ['Done'],
     });
-    expect(s.buckets?.map((b) => b.name)).toEqual(['Not started', 'In progress', 'In review', 'Complete']);
+    expect(s.buckets?.map((b) => b.name)).toEqual(['Not started', 'In progress', 'Code review', 'Product review', 'Complete']);
     expect(s.mergedColumn).toBe(true);
   });
 
@@ -374,8 +394,43 @@ describe('storedSettingsFor (the retired shapes)', () => {
   });
 
   it('a stored bucket whose name repeats an earlier one (any case) is dropped, its statuses with it', () => {
-    const twice = { buckets: [B('a', 'Review', 'in_review', ['Code Review']), B('b', 'review', 'in_review', ['PO Review'])], mergedColumn: true };
+    const twice = { version: SPRINT_STATUS_SETTINGS_VERSION, buckets: [B('a', 'Review', 'in_review', ['Code Review']), B('b', 'review', 'in_review', ['PO Review'])], mergedColumn: true };
     expect(storedSettingsFor(twice, BOARD, [])).toEqual({ buckets: [B('a', 'Review', 'in_review', ['Code Review'])], mergedColumn: true });
+  });
+
+  it('a stored value WITHOUT the version (saved before Product review) gets one; WITH it, read as saved', () => {
+    // The real dev workspace's shape: QA / PO / release statuses lumped into "In review".
+    const legacy = {
+      buckets: [
+        B('not_started', 'Not started', 'not_started', ['To Do']),
+        B('in_progress', 'In progress', 'in_progress', ['In Progress', 'Deploy to TEST']),
+        B('in_review', 'In review', 'in_review', ['In Code Review', 'Ready for QA', 'In QA', 'In PO Review', 'Awaiting Release', 'Final PO Check']),
+        B('done', 'Complete', 'done', ['Done']),
+      ],
+      mergedColumn: true,
+    };
+    const s = storedSettingsFor(legacy, null, []);
+    expect(s.buckets?.map((b) => `${b.id}:${b.name}:${b.meaning}:${b.statuses.join('|')}`)).toEqual([
+      'not_started:Not started:not_started:To Do',
+      // A status the user placed in In progress stays there, whatever its name.
+      'in_progress:In progress:in_progress:In Progress|Deploy to TEST',
+      'in_review:Code review:in_review:In Code Review',
+      'product_review:Product review:product_review:Ready for QA|In QA|In PO Review|Awaiting Release|Final PO Check',
+      'done:Complete:done:Done',
+    ]);
+    // Saved since: a removed Product review stays removed, a typed "In review" stays typed.
+    const current = { ...legacy, version: SPRINT_STATUS_SETTINGS_VERSION };
+    expect(storedSettingsFor(current, null, []).buckets?.map((b) => b.name)).toEqual(['Not started', 'In progress', 'In review', 'Complete']);
+  });
+
+  it('the added bucket goes after the last In progress bucket with no Code review one, else before Complete; never past the cap or onto a taken name', () => {
+    const ids = (raw: unknown) => storedSettingsFor(raw, null, []).buckets?.map((b) => b.id);
+    expect(ids({ buckets: [B('a', 'A', 'not_started', []), B('b', 'B', 'in_progress', []), B('d', 'D', 'done', [])] })).toEqual(['a', 'b', 'product_review', 'd']);
+    expect(ids({ buckets: [B('a', 'A', 'not_started', []), B('d', 'D', 'done', [])] })).toEqual(['a', 'product_review', 'd']);
+    expect(ids({ buckets: [B('product_review', 'Later', 'done', [])] })).toEqual(['product_review_2', 'product_review']);
+    expect(ids({ buckets: [B('a', 'Product review', 'in_progress', [])] })).toEqual(['a']);
+    const ten = Array.from({ length: 10 }, (_, i) => B(`b${i}`, `B${i}`, 'in_progress', []));
+    expect(ids({ buckets: ten })).toHaveLength(10);
   });
 });
 

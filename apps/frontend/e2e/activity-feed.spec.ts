@@ -124,7 +124,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(view.getByRole('tab', { name: 'Critical path' })).toHaveAttribute('aria-selected', 'true');
     await view.getByRole('tab', { name: 'People' }).click();
     await expect(page).toHaveURL(/sprintTab=people/);
-    // A card opens the ticket's story view.
+    // A card shows its story in place (its corner arrow opens the story view).
     await expect(view.getByRole('button', { name: /^ACME-1: Export a report as CSV/ })).toBeVisible();
 
     await view.getByRole('tab', { name: 'Merged so far' }).click();

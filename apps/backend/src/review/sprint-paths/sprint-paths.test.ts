@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  SPRINT_MERGED_COLUMN_ID,
   SPRINT_PATHS_CAPS,
   SPRINT_PATHS_VERSION,
   type SprintColumn,
@@ -74,18 +73,18 @@ const edge = (from: string, to: string, kind: SprintGraphEdge['kind'] = 'depends
   why,
 });
 const COLUMNS: SprintColumn[] = [
-  { id: 'not_started', name: 'To do', meaning: 'not_started', derived: false },
-  { id: 'in_progress', name: 'Doing', meaning: 'in_progress', derived: false },
-  { id: 'in_review', name: 'PO review', meaning: 'in_review', derived: false },
-  { id: SPRINT_MERGED_COLUMN_ID, name: 'Merged, not signed off', meaning: 'in_review', derived: true },
-  { id: 'done', name: 'Done', meaning: 'done', derived: false },
+  { id: 'not_started', name: 'To do', meaning: 'not_started' },
+  { id: 'in_progress', name: 'Doing', meaning: 'in_progress' },
+  { id: 'in_review', name: 'Code review', meaning: 'in_review' },
+  { id: 'product_review', name: 'QA and sign-off', meaning: 'product_review' },
+  { id: 'done', name: 'Done', meaning: 'done' },
 ];
 
 function fixture() {
   const nodes = [
     N('BMD-1080', 'in_progress', { theme: 'GeoPackage', assignee: { name: 'Sinan Goktas', avatarUrl: null }, prs: [pr(1, 'open', { ciState: 'failure' })] }),
     N('BMD-1081', 'not_started', { theme: 'GeoPackage', brief: { state: 'current', summary: 'Export layers.', criteriaCount: 2, criteriaDerived: false } }),
-    N('BMD-1090', 'in_review', { column: SPRINT_MERGED_COLUMN_ID, prs: [pr(2, 'merged')], assignee: { name: 'Colin', avatarUrl: null } }),
+    N('BMD-1090', 'in_review', { column: 'product_review', prs: [pr(2, 'merged')], assignee: { name: 'Colin', avatarUrl: null } }),
     N('BMD-1091', 'done', { prs: [pr(3, 'merged')] }),
     N('BMD-1096', 'in_progress', { ghost: true, depth: 1, status: { name: 'In Progress', category: 'indeterminate' } }),
     N('BMD-2000', 'not_started', { ghost: true, depth: 2 }),
@@ -111,9 +110,11 @@ describe('sprintPathsInput', () => {
     expect(input.keys).not.toContain('BMD-2000');
     expect(input.identByKey['BMD-1096']).toBe(I('BMD-1096'));
     expect(input.text).toContain('Sprint day: 4 of 14; days left after today: 10');
-    expect(input.text).toContain('Columns, left to right: To do · Doing · PO review · Merged, not signed off (code merged, ticket not signed off) · Done');
+    expect(input.text).toContain('Columns, left to right: To do (not started) · Doing (in progress) · Code review · QA and sign-off (product review) · Done (complete)');
     expect(input.text).toContain('- BMD-1080 | title: Title of BMD-1080 | type: not known | theme: GeoPackage | column: Doing (in progress) | assigned | pull requests: 1 open, 1 with failing checks');
-    expect(input.text).toContain('column: Merged, not signed off (in review)');
+    // Moved there by the merge rule: drawn — and described — in the Product review column.
+    expect(input.text).toContain('column: QA and sign-off (product review)');
+    expect(input.text).toContain('in product review: 1');
     expect(input.text).toContain('summary: Export layers.');
     expect(input.text).toContain('- BMD-1081 depends on BMD-1080: Needs the GeoPackage writer.');
     expect(input.text).toContain('- BMD-1090 builds on BMD-1091');
@@ -294,7 +295,7 @@ describe('the pace', () => {
       tickets: 4,
       live: 3,
       done: 1,
-      mergedNotSignedOff: 1,
+      productReview: 1,
       codeMerged: 2,
       // BMD-1081 → BMD-1080 and BMD-1080 → BMD-1096 (a ghost → ghost link is not the sprint's).
       openDependencies: 2,

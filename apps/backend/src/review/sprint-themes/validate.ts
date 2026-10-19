@@ -4,9 +4,12 @@ import { SPRINT_THEME_CAPS, type SprintTheme } from '@pierre-review/shared';
 // shape; anything else is a FAILED pass — retried once, then again on the next sprint read — never a
 // repaired guess.
 //
-//   • `themes`: strings (or `{name}`), control characters stripped, whitespace folded, a trailing full
-//     stop dropped; blank or a repeat (case-insensitive) → `shape`; over SPRINT_THEME_CAPS.nameWords
-//     words or nameChars characters → `too_long` (never cut).
+//   • `themes`: `{name, summary}` (or a bare name string), control characters stripped, whitespace
+//     folded, a trailing full stop dropped from the NAME; blank or a repeat (case-insensitive) →
+//     `shape`; over SPRINT_THEME_CAPS.nameWords words or nameChars characters → `too_long` (never cut).
+//   • `summary` is OPTIONAL and never fails the pass: missing, blank, over summaryChars characters, or
+//     carrying ANY numeral (a Unicode `\p{Nd}\p{No}\p{Nl}` — figures are code's, beside it on screen)
+//     → null. Kept, it is the cleaned text (its own full stop kept).
 //   • `tickets`: `{key, theme}` with `theme` a 1-based number. A key that is not a sprint key is DROPPED
 //     (case-insensitive match). A sprint key given twice with two themes → `duplicate`; a sprint key
 //     never given → `missing`; a theme number that does not exist → `shape`.
@@ -34,6 +37,17 @@ const clean = (v: unknown): string =>
         .trim()
     : '';
 
+// Any numeral at all, not just [0-9] (the D4 rule's spelling).
+const NUMERAL = /[\p{Nd}\p{No}\p{Nl}]/u;
+
+/** A theme summary, cleaned; null when it is missing, too long or carries a numeral. */
+function summaryOf(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const t = v.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim();
+  if (t === '' || t.length > SPRINT_THEME_CAPS.summaryChars || NUMERAL.test(t)) return null;
+  return t;
+}
+
 /** Parse and validate one completion against the sprint's keys (as sent). */
 export function validateSprintThemes(raw: string, keys: readonly string[]): ThemeValidation {
   const a = raw.indexOf('{');
@@ -50,12 +64,14 @@ export function validateSprintThemes(raw: string, keys: readonly string[]): Them
   const C = SPRINT_THEME_CAPS;
   if (o.themes.length < C.minThemes || o.themes.length > C.maxThemes) return { ok: false, reason: 'count' };
   const names: string[] = [];
+  const summaries: Array<string | null> = [];
   for (const t of o.themes) {
     const name = clean(typeof t === 'string' ? t : asRecord(t)?.name);
     if (name === '') return { ok: false, reason: 'shape' };
     if (name.length > C.nameChars || name.split(' ').length > C.nameWords) return { ok: false, reason: 'too_long' };
     if (names.some((n) => n.toLowerCase() === name.toLowerCase())) return { ok: false, reason: 'shape' };
     names.push(name);
+    summaries.push(typeof t === 'string' ? null : summaryOf(asRecord(t)?.summary));
   }
   const canon = new Map(keys.map((k) => [k.toUpperCase(), k]));
   const assigned = new Map<string, number>();
@@ -72,7 +88,7 @@ export function validateSprintThemes(raw: string, keys: readonly string[]): Them
   }
   if (keys.some((k) => !assigned.has(k))) return { ok: false, reason: 'missing' };
   const used = new Set(assigned.values());
-  const themes = names.filter((_, i) => used.has(i + 1)).map((name) => ({ name }));
+  const themes = names.map((name, i) => ({ name, summary: summaries[i] ?? null })).filter((_, i) => used.has(i + 1));
   if (themes.length < C.minThemes || themes.length > C.maxThemes) return { ok: false, reason: 'count' };
   return { ok: true, themes, assignments: keys.map((key) => ({ key, theme: names[assigned.get(key)! - 1]! })) };
 }

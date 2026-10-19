@@ -178,15 +178,18 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
 function BoardInfo(): JSX.Element {
   return (
     <>
-      <p>Three ways to read the same sprint. Click a ticket to open its story.</p>
+      <p>
+        Three ways to read the same sprint. Click a ticket to see its summary and acceptance criteria here; its corner arrow
+        opens the full story.
+      </p>
       <ul className="list-disc space-y-1 pl-5">
         <li>
           <strong>Critical path</strong>: the chains of tickets that most put the sprint at risk, one per row, with the pace above them
           and a count of every ticket below.
         </li>
         <li>
-          <strong>Theme</strong>: one row per theme Claude named from the tickets; tickets in none sit in Other. &ldquo;Live&rdquo; is
-          not Complete; &ldquo;merged&rdquo; is at least one pull request merged and none open.
+          <strong>Theme</strong>: one row per theme Claude named from the tickets; tickets in none sit in No theme. Under each name,
+          Claude says in a sentence what the work involves. The counts under it are Limn&rsquo;s.
         </li>
         <li>
           <strong>People</strong>: one row per person the tickets are assigned to, in alphabetical order, Unassigned last. Reviews
@@ -194,17 +197,22 @@ function BoardInfo(): JSX.Element {
           arrow between two rows is a hand-off.
         </li>
         <li>
-          <strong>Columns</strong> are your status buckets, in order (change them under Statuses). &ldquo;Merged, not signed
-          off&rdquo; holds tickets still in progress or in review whose pull requests have all merged. Complete columns fold to a
-          count; Show opens them.
+          <strong>Row lines</strong> (Theme and People): the row&rsquo;s tickets by column, then how many have an open or merged pull
+          request. A ticket without one may be design, analysis or other work, or code not opened yet. The colour bar shows the same
+          split; hover it for its key.
         </li>
         <li>
-          <strong>Borders</strong>: a thick red border is a ticket on a critical path; a dashed one is waiting on another unfinished
-          ticket.
+          <strong>Columns</strong> are your status buckets, in order (change them under Statuses). Product review holds QA and
+          other sign-offs, and tickets in Code review whose pull requests have all merged. Complete columns fold to a count;
+          Show opens the column, and a row&rsquo;s own count opens that row only.
         </li>
         <li>
-          <strong>Arrows</strong> run from the ticket waited on to the one that waits. A number on an arrow is explained under the
-          board.
+          <strong>Borders</strong>: a thick orange border is a ticket on a critical path; a dashed one is waiting on another unfinished
+          ticket; a faint dashed one on a grey ground is outside the sprint. The key under each board names them.
+        </li>
+        <li>
+          <strong>Arrows</strong> run from the ticket waited on to the one that waits. Hover an arrow or its number to see why. A
+          number on an arrow is explained under the board.
         </li>
       </ul>
     </>

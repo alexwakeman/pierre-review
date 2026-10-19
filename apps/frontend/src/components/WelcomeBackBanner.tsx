@@ -1,6 +1,18 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
+import {
+  autoUpdate,
+  flip,
+  FloatingPortal,
+  offset,
+  shift,
+  useClick,
+  useDismiss,
+  useFloating,
+  useInteractions,
+  useRole,
+} from '@floating-ui/react';
 import { useMe } from '../hooks/useTriage.js';
-import { useMyTurnByWorkspace } from '../hooks/useMyTurnByWorkspace.js';
+import { useMyTurnByWorkspace, type WorkspaceMyTurnLine } from '../hooks/useMyTurnByWorkspace.js';
 import { useFilters } from '../store/filters.js';
 import { CloseIcon } from './Icons.js';
 
@@ -11,7 +23,7 @@ import { CloseIcon } from './Icons.js';
 // thing the reader actually came for. It used to render a <ul> with a row per workspace, which
 // on an eight-workspace account pushed the timeline most of the way down the viewport. So the
 // workspaces are now inline CHIPS on the headline row, capped at MAX_INLINE_WORKSPACES with a
-// "+N more" summary carrying the rest in its title. The cap is what makes "one line" a
+// "+N more" button that opens the rest in a popover. The cap is what makes "one line" a
 // GUARANTEE rather than a hope: no measurement, no wrapping, no resize observer. `flex-nowrap`
 // + `overflow-hidden` + a per-chip `truncate` are the belt to that braces — a pathological
 // workspace name shortens itself instead of wrapping the row.
@@ -93,16 +105,6 @@ export function WelcomeBackBanner(): JSX.Element | null {
   // because to the reader they are the same sentence: "there is more, and it is not here".
   // They keep separate wording inside the tooltip — one is a display cap, the other is the
   // roll-up's server-side cap, and only the latter means the number is unknown.
-  const restTitle = [
-    overflow.length > 0
-      ? `Also needing you: ${overflow.map((l) => `${l.name} (${l.count}${l.cap != null ? '+' : ''})`).join(', ')}.`
-      : null,
-    uncounted.length > 0
-      ? `Not counted here: ${uncounted.map((w) => w.name).join(', ')}. Switch to one to see its own count.`
-      : null,
-  ]
-    .filter((s): s is string => s != null)
-    .join(' ');
   const restCount = overflow.length + uncounted.length;
 
   return (
@@ -176,15 +178,104 @@ export function WelcomeBackBanner(): JSX.Element | null {
         ))}
         {restCount > 0 && (
           // A banner whose purpose is "work you cannot see from here" does not get to omit
-          // workspaces quietly — even when the reason is only that the row ran out of room.
-          <span
-            className="shrink-0 px-1 text-[11px] text-amber-700/70 dark:text-amber-300/70"
-            title={restTitle}
-          >
-            +{restCount} more
-          </span>
+          // workspaces quietly — even when the reason is only that the row ran out of room. The
+          // "+N more" opens the rest in a popover, so the banner itself stays one line.
+          <MoreWorkspaces
+            restCount={restCount}
+            overflow={overflow}
+            uncounted={uncounted}
+            onOpen={open}
+          />
         )}
       </span>
     </div>
+  );
+}
+
+/**
+ * "+N more" as a control: a click opens the remaining workspaces in a popover (dismissed by a click
+ * outside or Escape), each a button like the inline chips. The banner row itself never grows.
+ */
+function MoreWorkspaces({
+  restCount,
+  overflow,
+  uncounted,
+  onOpen,
+}: {
+  restCount: number;
+  overflow: readonly WorkspaceMyTurnLine[];
+  uncounted: readonly { name: string }[];
+  onOpen: (workspaceId: number) => void;
+}): JSX.Element {
+  const [isOpen, setOpen] = useState(false);
+  const panelId = useId();
+  const { refs, floatingStyles, context } = useFloating({
+    open: isOpen,
+    onOpenChange: setOpen,
+    placement: 'bottom-end',
+    strategy: 'fixed',
+    middleware: [offset(4), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
+  const { getReferenceProps, getFloatingProps } = useInteractions([
+    useClick(context),
+    useDismiss(context),
+    useRole(context, { role: 'dialog' }),
+  ]);
+  return (
+    <>
+      <button
+        ref={refs.setReference}
+        type="button"
+        aria-expanded={isOpen}
+        aria-controls={isOpen ? panelId : undefined}
+        {...getReferenceProps()}
+        className="shrink-0 rounded px-1 text-[11px] text-amber-700/80 hover:bg-amber-100/70 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:text-amber-300/80 dark:hover:bg-amber-900/40"
+      >
+        +{restCount} more
+      </button>
+      {isOpen && (
+        <FloatingPortal>
+          <div
+            ref={refs.setFloating}
+            id={panelId}
+            aria-label="More workspaces needing you"
+            style={floatingStyles}
+            {...getFloatingProps()}
+            className="z-[60] max-h-[60vh] w-64 overflow-y-auto rounded-md border border-amber-200 bg-white p-1.5 text-xs text-gray-800 shadow-lg dark:border-amber-900/50 dark:bg-gray-900 dark:text-gray-100"
+          >
+            {overflow.length > 0 && (
+              <ul>
+                {overflow.map((l) => (
+                  <li key={l.workspaceId}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpen(false);
+                        onOpen(l.workspaceId);
+                      }}
+                      title={l.cap?.title}
+                      className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left hover:bg-amber-50 dark:hover:bg-amber-900/30"
+                    >
+                      <span className="shrink-0 font-semibold tabular-nums">
+                        {l.count}
+                        {l.cap != null ? '+' : ''}
+                      </span>
+                      <span className="min-w-0 truncate">{l.name}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {uncounted.length > 0 && (
+              <p className={`px-1.5 py-1 text-gray-600 dark:text-gray-300 ${overflow.length > 0 ? 'mt-1 border-t border-gray-100 pt-1.5 dark:border-gray-800' : ''}`}>
+                Not counted here: {uncounted.map((w) => w.name).join(', ')}. Switch to one to see its own
+                count.
+              </p>
+            )}
+          </div>
+        </FloatingPortal>
+      )}
+    </>
   );
 }

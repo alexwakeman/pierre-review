@@ -4,6 +4,7 @@ import {
   OUTSIDE_COLUMN_ID,
   UNKNOWN_COLUMN_ID,
   cardIdOf,
+  cellKey,
   collapsedColumns,
   countTable,
   layoutBoard,
@@ -22,14 +23,14 @@ import {
 // collapsed Complete columns, the arrows and their key, and a card's tag words.
 
 // Two review buckets and a done bucket that also holds "Won't do" — the user's own setup, in the
-// columns the server resolved (`statusLayout.columns`), with the derived merged column after review.
+// columns the server resolved (`statusLayout.columns`), with a Product review bucket after review.
 const COLUMNS: SprintColumn[] = [
-  { id: 'todo', name: 'To do', meaning: 'not_started', derived: false },
-  { id: 'doing', name: 'Doing', meaning: 'in_progress', derived: false },
-  { id: 'cr', name: 'Code review', meaning: 'in_review', derived: false },
-  { id: 'po', name: 'PO review', meaning: 'in_review', derived: false },
-  { id: 'merged', name: 'Merged, not signed off', meaning: 'in_review', derived: true },
-  { id: 'done', name: 'Done', meaning: 'done', derived: false },
+  { id: 'todo', name: 'To do', meaning: 'not_started' },
+  { id: 'doing', name: 'Doing', meaning: 'in_progress' },
+  { id: 'cr', name: 'Code review', meaning: 'in_review' },
+  { id: 'po', name: 'PO review', meaning: 'in_review' },
+  { id: 'qa', name: 'Product review', meaning: 'product_review' },
+  { id: 'done', name: 'Done', meaning: 'done' },
 ];
 
 const pr = (o: Partial<SprintGraphPr> = {}): SprintGraphPr => ({
@@ -78,15 +79,15 @@ const dep = (from: string, to: string, why: string | null = null): SprintGraphEd
 });
 
 describe('columns', () => {
-  it('the buckets in order, plus the derived merged column, verbatim', () => {
-    expect(sprintColumns(COLUMNS, { outside: false, unknown: false }).map((c) => c.id)).toEqual(['todo', 'doing', 'cr', 'po', 'merged', 'done']);
+  it('the buckets in order, verbatim', () => {
+    expect(sprintColumns(COLUMNS, { outside: false, unknown: false }).map((c) => c.id)).toEqual(['todo', 'doing', 'cr', 'po', 'qa', 'done']);
   });
   it('"Outside the sprint" only at the left and "Status not known" only at the right, when needed', () => {
     const cols = sprintColumns(COLUMNS, { outside: true, unknown: true }).map((c) => c.id);
     expect(cols[0]).toBe(OUTSIDE_COLUMN_ID);
     expect(cols[cols.length - 1]).toBe(UNKNOWN_COLUMN_ID);
   });
-  it('a Complete bucket collapses by default; the merged column and the pseudo-columns never do', () => {
+  it('a Complete bucket collapses by default; Product review and the pseudo-columns never do', () => {
     const cols = sprintColumns(COLUMNS, { outside: true, unknown: true });
     expect([...collapsedColumns(cols, new Set())]).toEqual(['done']);
     expect([...collapsedColumns(cols, new Set(['done']))]).toEqual([]);
@@ -136,20 +137,20 @@ describe('the ghost column is the Critical path view only', () => {
 describe('lanes per view', () => {
   it('Theme: the stored theme order, then "No theme" for tickets no theme holds', () => {
     const nodes = [node('A-1', { theme: 'Search' }), node('A-2', { theme: 'Import' }), node('A-3', { theme: 'Gone' }), node('A-4')];
-    const b = themesBoard({ nodes, edges: [], paths: null, columns: COLUMNS, themes: [{ name: 'Import' }, { name: 'Search' }] });
+    const b = themesBoard({ nodes, edges: [], paths: null, columns: COLUMNS, themes: [{ name: 'Import', summary: null }, { name: 'Search', summary: null }] });
     expect(b.lanes.map((l) => l.label)).toEqual(['Import', 'Search', 'No theme']);
     expect(b.cards.filter((c) => c.lane === 'other').map((c) => c.data.node.key)).toEqual(['A-3', 'A-4']);
   });
   it('Theme: a theme Claude named "Other" never shares a label with the code\'s lane; count rows key on the lane', () => {
     const nodes = [node('A-1', { theme: 'Other' }), node('A-2')];
-    const b = themesBoard({ nodes, edges: [], paths: null, columns: COLUMNS, themes: [{ name: 'Other' }] });
+    const b = themesBoard({ nodes, edges: [], paths: null, columns: COLUMNS, themes: [{ name: 'Other', summary: null }] });
     expect(b.lanes.map((l) => [l.id, l.label])).toEqual([['theme:Other', 'Other'], ['other', 'No theme']]);
-    const t = countTable(nodes, [{ name: 'Other' }], COLUMNS);
+    const t = countTable(nodes, [{ name: 'Other', summary: null }], COLUMNS);
     expect(new Set(t.rows.map((r) => r.id)).size).toBe(t.rows.length);
   });
   it('Theme: no themes → one "All tickets" lane; live and merged counted per lane', () => {
     const nodes = [
-      node('A-1', { column: 'merged', prs: [pr({ state: 'merged' })] }),
+      node('A-1', { column: 'qa', prs: [pr({ state: 'merged' })] }),
       node('A-2', { column: 'done', stage: 'done' }),
       node('A-3'),
     ];
@@ -158,9 +159,24 @@ describe('lanes per view', () => {
     expect(b.lanes[0]!.data).toMatchObject({ kind: 'theme', live: 2, merged: 1 });
     expect((b.lanes[0]!.data as { segments: Array<{ column: string; count: number }> }).segments.map((s) => [s.column, s.count])).toEqual([
       ['doing', 1],
-      ['merged', 1],
+      ['qa', 1],
       ['done', 1],
     ]);
+    // CODE's row line, over the same cards; no theme sentence on "All tickets".
+    expect(b.lanes[0]!.data).toMatchObject({
+      summary: null,
+      progress: '1 Doing, 1 Product review, 1 Done',
+      code: '1 with a pull request, 2 without',
+    });
+  });
+  it("Theme: each theme lane carries the themes pass's sentence; \"No theme\" carries none", () => {
+    const nodes = [node('A-1', { theme: 'Import', prs: [pr()] }), node('A-2')];
+    const b = themesBoard({ nodes, edges: [], paths: null, columns: COLUMNS, themes: [{ name: 'Import', summary: 'Code changes to the importer.' }] });
+    expect(b.lanes.map((l) => [l.label, (l.data as { summary: string | null }).summary])).toEqual([
+      ['Import', 'Code changes to the importer.'],
+      ['No theme', null],
+    ]);
+    expect(b.lanes[0]!.data).toMatchObject({ progress: '1 Doing', code: 'Has a pull request' });
   });
   it('People: ALPHABETICAL, Unassigned last — never by load; reviews waiting null stays null', () => {
     const people: SprintPerson[] = [
@@ -177,12 +193,14 @@ describe('lanes per view', () => {
     ];
     const b = peopleBoard({ nodes, edges: [], paths: null, columns: COLUMNS, people });
     expect(b.lanes.map((l) => l.label)).toEqual(['Bea', 'Colin Ames', 'Sinan Goktas', 'Unassigned']);
-    expect(b.lanes.map((l) => l.data)).toEqual([
+    expect(b.lanes.map((l) => l.data)).toMatchObject([
       { kind: 'person', unassigned: false, tickets: 1, reviewsWaiting: null },
       { kind: 'person', unassigned: false, tickets: 1, reviewsWaiting: null },
       { kind: 'person', unassigned: false, tickets: 3, reviewsWaiting: 4 },
       { kind: 'person', unassigned: true, tickets: 1, reviewsWaiting: null },
     ]);
+    // CODE's row line and bar: what the data shows, nothing about the person.
+    expect(b.lanes[2]!.data).toMatchObject({ progress: '3 Doing', code: 'None has a pull request', segments: [{ column: 'doing', count: 3 }] });
   });
 });
 
@@ -224,6 +242,27 @@ describe('arrows and their key', () => {
     expect(twice.key).toHaveLength(2);
     expect(twice.arrows[twice.arrows.length - 1]!.n).toBe(1);
   });
+  it("a lane's \"n tickets\" opens THAT lane's cell only: its cards drawn below a toggle row, arrows to them, the column widened", () => {
+    const b = peopleBoard({ nodes, edges, paths: null, columns: COLUMNS, people: [] });
+    const collapsed = collapsedColumns(b.columns, new Set());
+    const shut = layoutBoard({ ...b, collapsed });
+    const laneOfA4 = b.cards.find((c) => c.data.node.key === 'A-4')!.lane;
+    const open = layoutBoard({ ...b, collapsed, expanded: new Set([cellKey(laneOfA4, 'done')]) });
+    const lane = open.lanes.find((l) => l.id === laneOfA4)!;
+    expect(lane.hidden.has('done')).toBe(false);
+    expect(lane.opened.get('done')).toBe(1);
+    const a4 = open.cards.find((c) => c.data.node.key === 'A-4')!;
+    // Row 0 of the cell holds the "Hide" toggle; the card sits under it.
+    expect(a4.row).toBe(lane.row + 1);
+    expect(lane.span).toBeGreaterThanOrEqual(2);
+    expect(open.columns.find((c) => c.id === 'done')).toMatchObject({ collapsed: true, widened: true });
+    expect(shut.columns.find((c) => c.id === 'done')).toMatchObject({ collapsed: true, widened: false });
+    expect(open.arrows.some((a) => a.text.startsWith('A-3 waits on A-4'))).toBe(true);
+    expect(shut.arrows.some((a) => a.text.startsWith('A-3 waits on A-4'))).toBe(false);
+    // Another lane's cell in the same column stays a count.
+    const other = layoutBoard({ ...b, collapsed, expanded: new Set([cellKey('nobody', 'done')]) });
+    expect(other.lanes.find((l) => l.id === laneOfA4)!.hidden.get('done')).toBe(1);
+  });
   it('critical: on a path, every arrow; elsewhere, two tickets next to each other on a stored path', () => {
     const paths: SprintPaths = {
       paths: [{ title: 'Chain', tickets: ['A-1', 'A-2'], idents: [id('A-1'), id('A-2')], advice: 'Go.', risk: 'medium' }],
@@ -248,7 +287,7 @@ describe('layout', () => {
       edges: [],
       paths: null,
       columns: COLUMNS,
-      themes: [{ name: 'T' }, { name: 'Empty' }, { name: 'U' }],
+      themes: [{ name: 'T', summary: null }, { name: 'Empty', summary: null }, { name: 'U', summary: null }],
     });
     const l = layoutBoard({ ...b, collapsed: new Set() });
     expect(l.lanes.map((x) => [x.label, x.row, x.span])).toEqual([
@@ -305,23 +344,23 @@ describe('under the Critical path board', () => {
     tickets: 55,
     live: 38,
     done: 17,
-    mergedNotSignedOff: 15,
+    productReview: 15,
     codeMerged: 21,
     openDependencies: 6,
     chains: 3,
   };
   it('the pace: every figure with its denominator', () => {
-    expect(paceItems(pace, { mergedColumn: true }).map((i) => `${i.label}: ${i.value}`)).toEqual([
+    expect(paceItems(pace, { productReview: true }).map((i) => `${i.label}: ${i.value}`)).toEqual([
       'Time used: Day 4 of 14',
       'Code merged: 21 of 55',
-      'Merged, not signed off: 15 of 55',
+      'Product review: 15 of 55',
       'Complete: 17 of 55',
       'Open dependencies: 6 in 3 chains',
     ]);
-    expect(paceItems(pace, { mergedColumn: true })[0]!.pct).toBe(29);
+    expect(paceItems(pace, { productReview: true })[0]!.pct).toBe(29);
   });
-  it('no sprint window: no time; merged column off: not listed', () => {
-    const items = paceItems({ ...pace, daysElapsed: null, daysTotal: null, timeUsedPct: null, chains: 0 }, { mergedColumn: false });
+  it('no sprint window: no time; no Product review bucket: not listed', () => {
+    const items = paceItems({ ...pace, daysElapsed: null, daysTotal: null, timeUsedPct: null, chains: 0 }, { productReview: false });
     expect(items.map((i) => i.label)).toEqual(['Code merged', 'Complete', 'Open dependencies']);
     expect(items[2]!.value).toBe('6');
   });
@@ -332,7 +371,7 @@ describe('under the Critical path board', () => {
       node('A-3'),
       node('X-1', { ghost: true }),
     ];
-    const t = countTable(nodes, [{ name: 'Import' }, { name: 'Search' }], COLUMNS);
+    const t = countTable(nodes, [{ name: 'Import', summary: null }, { name: 'Search', summary: null }], COLUMNS);
     expect(t.rows.map((r) => [r.label, r.total])).toEqual([
       ['Import', 2],
       ['No theme', 1],
@@ -345,8 +384,8 @@ describe('under the Critical path board', () => {
 
 describe('layoutBoard — linked cards sit near each other', () => {
   const cols = [
-    { id: 'a', name: 'A', meaning: 'not_started' as const, derived: false },
-    { id: 'b', name: 'B', meaning: 'in_progress' as const, derived: false },
+    { id: 'a', name: 'A', meaning: 'not_started' as const },
+    { id: 'b', name: 'B', meaning: 'in_progress' as const },
   ];
   const card = (id: string, column: string) => ({ id, lane: 'L', column, data: null });
   it('a card follows the row of the card it is linked to; no arrows keeps the input order', () => {

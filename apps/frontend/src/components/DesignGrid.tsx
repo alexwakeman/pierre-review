@@ -8,6 +8,8 @@
 //   ARROWS   right-angled lines in an SVG layer under the cards, routed ONLY through the padding round
 //            each card and the grid gaps (lib/designGrid.ts routeArrow), so a line never passes behind
 //            a card; re-measured by a ResizeObserver. A labelled arrow carries a number, keyed below.
+//            Hovering a line or its number shows what it means beside the number, on the side covering
+//            the fewest cards; it closes when the pointer leaves (no click, no pin).
 //            Purely visual (aria-hidden): the same arrows are an sr-only list. The router hook, the arrow
 //            layer, the key and the list are the LANE BOARD's (components/LaneBoard.tsx), shared so
 //            This Sprint's boards and this grid draw one way.
@@ -65,14 +67,14 @@ export function DesignGrid({
   // NARROW (a narrow pane): the layer names move from a side column to a band heading above each
   // layer's cards, giving the stages the width — otherwise every card wraps to six lines and the grid
   // stops fitting on a laptop screen.
-  const { gridRef, cardRef, slotRef, paths, narrow } = useRoutedArrows(cells, arrows, NARROW_PX);
+  const { gridRef, cardRef, slotRef, paths, narrow, cardRects } = useRoutedArrows(cells, arrows, NARROW_PX);
   // 1, 2, 3… for the arrows that carry a label, in the design's own order.
   const labelNumbers = useMemo(() => {
     const m = new Map<string, number>();
     for (const a of arrows) if (a.label != null) m.set(a.key, m.size + 1);
     return m;
   }, [arrows]);
-  // What each arrow means, for its popover (hover the line or the number; click the number to pin).
+  // What each arrow means, for its popover (hover the line or the number; nothing pins).
   const arrowDetails = useMemo(() => new Map(arrows.map((a) => [a.key, { label: a.label, text: a.text }])), [arrows]);
   const keyItems = useMemo(
     () => arrows.flatMap((a) => (a.label != null && labelNumbers.has(a.key) ? [{ n: labelNumbers.get(a.key)!, label: a.label }] : [])),
@@ -99,7 +101,7 @@ export function DesignGrid({
             : `minmax(3.25rem, 6.5rem) repeat(${nActs}, minmax(0, 1fr))`,
         }}
       >
-        <ArrowLayer paths={paths} numbers={labelNumbers} details={arrowDetails} />
+        <ArrowLayer paths={paths} numbers={labelNumbers} details={arrowDetails} avoid={cardRects} />
 
         {/* Header row: the stages. */}
         {!narrow && <div aria-hidden />}

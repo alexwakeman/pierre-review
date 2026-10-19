@@ -1611,7 +1611,8 @@ function PendingMergeActions({
   //     cache.
   //  2. An ARMED auto-merge intent, whose live phase is `armedPhaseHeadline` — THE one spelling,
   //     shared with the global AutoMergeBanner so two surfaces cannot describe one intent two
-  //     ways. It covers all thirteen `ArmedMergePhase` members: pending_first_check /
+  //     ways. It covers all fourteen `ArmedMergePhase` members (checks_failed, the back-off,
+  //     reads "Waiting for checks to pass"): pending_first_check /
   //     waiting_conflicts / waiting_behind / updating_rebase / updating_merge / awaiting_checks /
   //     awaiting_review / blocked_protection / enqueuing / queued (GitHub's merge queue) /
   //     queued_local (⚠ Limn's OWN per-repo hold — a different queue, refined with "N of M on

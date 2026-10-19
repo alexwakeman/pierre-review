@@ -51,7 +51,7 @@ import {
   type SprintReadRow,
   type SprintTicketDbRow,
 } from './sprint-store.js';
-import { getSprintStatusLayout, sprintPlacementOf } from './sprint-status-layout.js';
+import { getSprintStatusLayout, mergeRuleTarget, sprintPlacementOf } from './sprint-status-layout.js';
 
 // REPORTS → THIS SPRINT AS A GRAPH (`GET /api/sprint-graph`; and the story view's `GET /api/ticket-story`;
 // docs/API.md § This sprint). DB ONLY — no tracker, GitHub or model call: a view STAMPS the workspace
@@ -343,7 +343,7 @@ export async function getSprintGraph(
   const t = await loadGraphTickets(accountId, workspaceId, site, opts.aiEnabled);
   const statusLayout = await layoutFor(accountId, workspaceId, t, readRow);
   const placeOf = (s: GraphTicketInput['status']) => (s == null ? null : sprintPlacementOf(statusLayout, s));
-  const placing = { stageOf: (s: GraphTicketInput['status']) => placeOf(s)?.stage ?? null, placeOf, mergedColumn: statusLayout.settings.mergedColumn };
+  const placing = { stageOf: (s: GraphTicketInput['status']) => placeOf(s)?.stage ?? null, placeOf, productReviewId: mergeRuleTarget(statusLayout) };
   // PRs only for what can be a node: the sprint plus the stored ghosts.
   const prs = await graphPrsFor(accountId, workspaceId, site, [...t.sprintRows.map((r) => r.issueKey), ...t.refRows.map((r) => r.issueKey)]);
   const themes = opts.aiEnabled ? await currentSprintThemes(accountId, workspaceId, sprintThemeInputOf(t).inputHash) : null;
@@ -513,7 +513,7 @@ export async function sprintPathsTodo(accountId: number, workspaceId: number): P
   const t = await loadGraphTickets(accountId, workspaceId, site, true);
   const statusLayout = await layoutFor(accountId, workspaceId, t, readRow);
   const placeOf = (s: GraphTicketInput['status']) => (s == null ? null : sprintPlacementOf(statusLayout, s));
-  const placing = { stageOf: (s: GraphTicketInput['status']) => placeOf(s)?.stage ?? null, placeOf, mergedColumn: statusLayout.settings.mergedColumn };
+  const placing = { stageOf: (s: GraphTicketInput['status']) => placeOf(s)?.stage ?? null, placeOf, productReviewId: mergeRuleTarget(statusLayout) };
   const prs = await graphPrsFor(accountId, workspaceId, site, [...t.sprintRows.map((r) => r.issueKey), ...t.refRows.map((r) => r.issueKey)]);
   const themes = await currentSprintThemes(accountId, workspaceId, sprintThemeInputOf(t).inputHash);
   const g = foldSprintGraph({

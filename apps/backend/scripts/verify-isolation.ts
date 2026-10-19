@@ -4010,7 +4010,7 @@ check(
   // predicate from `storedSprintThemes` (db/sprint-themes.ts) and the cross check goes red.
   {
     const themes = await import('../src/db/sprint-themes.js');
-    const v = { themes: [{ name: 'B one' }, { name: 'B two' }, { name: 'B three' }], assignments: [{ ident, theme: 'B one' }], costUsd: 0, inputTokens: 0, outputTokens: 0 };
+    const v = { themes: [{ name: 'B one', summary: null }, { name: 'B two', summary: null }, { name: 'B three', summary: null }], assignments: [{ ident, theme: 'B one' }], costUsd: 0, inputTokens: 0, outputTokens: 0 };
     await themes.storeSprintThemes(2, defaultB, 'hash-b', v);
     let themeFk = false;
     try {
@@ -4062,7 +4062,7 @@ check(
   // cross check goes red.
   {
     const sig = await import('../src/db/sprint-signals.js');
-    const snapB = { v: 1 as const, stages: { [ident]: 'done' as const }, merged: [] };
+    const snapB = { v: 2 as const, stages: { [ident]: 'done' as const }, merged: [] };
     const slotsB = { current: snapB, currentAt: now, baseline: snapB, baselineAt: now };
     await sig.writeSprintViewSlots(2, defaultB, slotsB);
     let snapFk = false;

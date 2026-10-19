@@ -236,33 +236,48 @@ pg `0090`. They feed the "Blocked" story issue (docs/CLAUDE-REVIEW.md § Story i
 
 Statuses are per project and per tracker, so nothing hard-codes a name. The sprint list read stores the
 AUTOMATIC order (shared `SprintStatusAutoOrder`) with the list. Every status sits in ONE **bucket**; a
-bucket has an id, a name (≤ 24 characters) and a **meaning** — one of the four stages Not started, In
-progress, In review, Complete. A ticket's `stage` is its bucket's meaning, so every reader of `stage`
-works whatever the buckets are.
+bucket has an id, a name (≤ 24 characters) and a **meaning** — one of the five stages Not started, In
+progress, Code review, Product review, Complete (`SPRINT_STAGES`; Code review's id stays `in_review`,
+because stored settings and snapshots carry it). A ticket's `stage` is its bucket's meaning, so every
+reader of `stage` works whatever the buckets are.
 
-- **Automatic** (`buckets: null`): four buckets, one per stage (id = the stage, named
+- **Automatic** (`buckets: null`): five buckets, one per stage (id = the stage, named
   `SPRINT_STAGE_LABEL`), each status in the bucket of its automatic stage (below). "Won't do" is a
   done-category status, so it lands in Complete.
-- **The workspace's buckets** (`workspaces.sprint_statuses` = `{buckets, mergedColumn}`,
+- **The workspace's buckets** (`workspaces.sprint_statuses` = `{version, buckets, mergedColumn}`,
   `db/sprint-status-settings.ts`, `PUT /api/sprint-stories/statuses`, edited from This Sprint's gear):
-  1–10 buckets in reading order; meanings must be NON-DECREASING (two In review buckets are fine, a Not
+  1–10 buckets in reading order; meanings must be NON-DECREASING (two Code review buckets are fine, a Not
   started bucket after a Complete one is not); a status in at most one bucket; ≤ 60 statuses in all.
   Every refusal is ONE plain sentence from shared `sprintBucketsProblem`, which the editor runs before
   Save and the route returns as the 400's `message`. ⚠ Placement beats category. ⚠ A status no bucket
   names (new on the board since) keeps its automatic stage and joins the FIRST bucket with that
-  meaning; with none, the bucket of the NEAREST meaning (the earlier one on a tie); either way it is
-  `auto: true` and the editor marks it "not placed yet".
-- **The merged column** (`mergedColumn`, default on): a DERIVED column, "Merged, not signed off" (id
-  `merged`, never a bucket id), drawn after the last In review bucket — else after the last In progress
-  bucket; with neither, it is not drawn (no ticket could sit in it). A ticket is drawn there when its bucket
-  means In progress or In review and it has ≥ 1 merged PR and none open (closed unmerged ones
-  ignored). `SprintGraphNode.column` carries it, computed ONCE in the graph fold
-  (`sprintColumnOf`); `statusLayout.columns` is the drawn x axis.
-- **Retired shapes are converted on read, no migration**: `{sections}` (per-stage lists) and the older
-  `{order, deliveredFrom}` both become four buckets named `SPRINT_STAGE_LABEL`. Only the new shape may
-  be POSTED. The default (`{buckets: null, mergedColumn: true}`) is stored as NULL.
-- "Coding begins" / "Coding ends" = the first status of the first In progress / In review bucket,
-  derived.
+  meaning; with none, the bucket of the nearest EARLIER meaning (never more progress than the status
+  shows), else the nearest later one; either way it is `auto: true` and the editor marks it "not placed
+  yet".
+- **Product review is a first-class bucket** (since 2026-10-19; it replaced the DERIVED "Merged, not
+  signed off" column, id `merged`, which is gone — `merged` is still refused as a bucket id). It holds
+  QA, UAT, PO and other sign-offs: the statuses the workspace places there, and automatically the names
+  that read that way. Columns are now exactly the buckets (`sprintColumnsOf`; `SprintColumn` lost
+  `derived`).
+- **The merge rule** (`mergedColumn`, default on — the key kept its old name): a ticket whose bucket
+  means Code review and that has ≥ 1 merged PR and none open (closed unmerged ones ignored) is DRAWN in
+  the FIRST Product review bucket (`mergeRuleTarget`); with no such bucket, it stays put. ⚠ Only Code
+  review moves — an In progress ticket with everything merged stays In progress (user decision; the old
+  derived column took both). ⚠ Its `stage` and `bucketId` stay its status's; only
+  `SprintGraphNode.column` moves, computed ONCE in the graph fold (`sprintColumnOf`). The pace's
+  `productReview` counts both kinds; Out of step no longer lists such a ticket as "in code review with its
+  code already merged".
+- **Stored values are converted on read, no migration**: `{sections}` (per-stage lists) and the older
+  `{order, deliveredFrom}` become buckets named `SPRINT_STAGE_LABEL`; ⚠ any stored value WITHOUT
+  `version: SPRINT_STATUS_SETTINGS_VERSION` (saved before Product review) is read with a Product review
+  bucket added after its last Code review bucket (else after the last In progress one, else before the
+  first Complete one; not when it already has ten buckets or the name is taken), which takes that Code
+  review bucket's statuses whose names read as Product review; a Code review bucket named exactly "In
+  review" reads as "Code review" (`withProductReview`). Nothing is written until the reader saves; a
+  saved value carries the version, so a Product review bucket the reader removed stays removed. Only the
+  new shape may be POSTED. The default (`{buckets: null, mergedColumn: true}`) is stored as NULL.
+- "Coding begins" / "Coding ends" = the first status of the first In progress / Code review bucket
+  (else the first Product review one), derived.
 
 - **Jira** (`tracker/sprint/jira.ts`): the board of the active sprints holding the most tickets
   (`boardId` on a Cloud sprint object, `rapidViewId=` in an old Server string) →
@@ -277,9 +292,11 @@ works whatever the buckets are.
 - ⚠ **AN ORDER FAILURE NEVER FAILS THE LIST.** A failed board read returns `statusOrder: undefined`
   (the stored order stands) and a code that is logged; `null` (no board) clears it, and the page falls
   back to category then name.
-- **The automatic stage**: category `new` → Not started, `done` → Complete. An in-progress status is In
-  review when its NAME reads as review / QA / test / release (`SPRINT_REVIEW_STATUS_RE`: "Code Review",
-  "Ready for QA", "In Test", "Awaiting Deployment", "UAT"…) or it sits at or after the PR-evidence
+- **The automatic stage**: category `new` → Not started, `done` → Complete. An in-progress status is
+  Product review when its NAME reads as QA / test / sign-off / release (`SPRINT_PRODUCT_REVIEW_STATUS_RE`,
+  checked first: "Ready for QA", "In Test", "UAT", "In PO Review", "Awaiting Deployment", "Release"…);
+  else Code review when its name reads as review (`SPRINT_REVIEW_STATUS_RE`: "Code Review", "In
+  Review", "Ready for review") or it sits at or after the PR-evidence
   boundary — the first in-progress status where at least 60% of the tickets with a PR have every PR
   merged and none open, with at least 2 such tickets (`SPRINT_DELIVERED_MIN_*`); else In progress. Evidence = `tracker_tickets` (state `ok`, this workspace and site) ⨝
   `pull_requests`, closed-unmerged PRs ignored; a ticket's status is the sprint row's where it is in the

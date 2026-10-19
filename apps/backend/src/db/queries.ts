@@ -17471,6 +17471,15 @@ export interface ArmedMergeWork {
   // 'blocked'`, and this is what lets the watcher name which of the two it is without a second
   // live fetch per intent per tick. Advisory only — it never gates the merge.
   syncedCiStatus: CiStatus | null;
+  /** The PR's head SHA as last SYNCED. With `phase` and the two synced verdicts beside it, this is
+   *  what lets a BACKED-OFF intent (`phase === 'checks_failed'`) be checked with NO GitHub call:
+   *  same head, still not green → nothing to try. A different head goes the full live path. */
+  syncedHeadSha: string | null;
+  /** GitHub's merge state as last SYNCED (lower-case `MergeStateStatus`). Advisory, like the CI
+   *  status: it only decides whether a backed-off intent is worth a live look again. */
+  syncedMergeState: string | null;
+  /** The phase the watcher last wrote. Read for ONE thing: `checks_failed` is the back-off. */
+  phase: ArmedMergePhase | null;
 }
 
 /**
@@ -17514,6 +17523,9 @@ export async function listArmedMergeRequestsForRunner(
       expectedBaseRef: autoMergeRequests.expectedBaseRef,
       updateIssuedAgainstOid: autoMergeRequests.updateIssuedAgainstOid,
       syncedCiStatus: pullRequests.ciStatus,
+      syncedHeadSha: pullRequests.headSha,
+      syncedMergeState: pullRequests.mergeStateStatus,
+      phase: autoMergeRequests.phase,
     })
     .from(autoMergeRequests)
     .innerJoin(pullRequests, eq(pullRequests.id, autoMergeRequests.prId))
@@ -17532,6 +17544,8 @@ export async function listArmedMergeRequestsForRunner(
     mergeMethod: r.mergeMethod as MergeMethod,
     armedByPolicy: r.armedByPolicy === true,
     syncedCiStatus: r.syncedCiStatus as CiStatus | null,
+    syncedMergeState: (r.syncedMergeState as string | null) ?? null,
+    phase: (r.phase as ArmedMergePhase | null) ?? null,
   }));
 }
 
@@ -17564,6 +17578,9 @@ export async function updateAutoMergeState(
      * silently converts into "the branch moved for reasons unknown".
      */
     updateIssuedAgainstOid?: string | null;
+    /** Renew the hard stop. ONLY the watcher's resume from a policy intent's back-off writes it
+     *  (the setting is the consent, so a bump whose checks went green gets a full window). */
+    expiresAt?: Date;
   },
 ): Promise<void> {
   const now = new Date();
@@ -17582,6 +17599,7 @@ export async function updateAutoMergeState(
       ...(opts.updateIssuedAgainstOid !== undefined
         ? { updateIssuedAgainstOid: opts.updateIssuedAgainstOid }
         : {}),
+      ...(opts.expiresAt !== undefined ? { expiresAt: opts.expiresAt } : {}),
     })
     .where(eq(autoMergeRequests.id, id))
     .execute();

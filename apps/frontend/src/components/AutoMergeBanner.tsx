@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type {
   ArmedMergePhase,
@@ -9,7 +9,7 @@ import { useArmedMerges, useDisarmAutoMerge } from '../hooks/useAutoMerge.js';
 import { invalidateAfterPrWrite } from '../hooks/prCacheSync.js';
 import { usePinnedTabs, type TabMeta } from '../store/pinnedTabs.js';
 import { CheckIcon, MergeIcon, WarningIcon } from './Icons.js';
-import { HeaderToast } from './HeaderToasts.js';
+import { HeaderToast, ToastShowMore } from './HeaderToasts.js';
 
 // The global auto-merge progress stack, rendered as ONE card in the app's ONE header toast strip
 // (HeaderToasts.tsx, mounted in App.tsx): a one-line summary, the rows when it expands.
@@ -25,8 +25,9 @@ import { HeaderToast } from './HeaderToasts.js';
 // because the list keeps resolved rows for 24h and a page load must not open with a merged
 // card from two hours ago — the FIRST poll seeds a silent baseline, exactly as before.
 
-// How many rows the card draws before collapsing the rest into a "+N more" line. Its own
-// bounded height: the stack is an indicator in the header, not a board.
+// How many rows the card draws before collapsing the rest into a "Show N more" control (which
+// reveals them all inside the expanded panel). Its own bounded height: the stack is an indicator
+// in the header, not a board.
 const MAX_ROWS = 4;
 
 // The live sub-state, in the user's words. `phase` is the watcher's enum; `lastReason` carries
@@ -51,6 +52,9 @@ const PHASE_LABEL: Record<ArmedMergePhase, string> = {
   queued_local: 'Waiting its turn on this repo',
   merging: 'Merging…',
   retrying: 'Retrying after a GitHub error',
+  // The back-off: checks failed once, so Limn stops trying until they pass. A wait, never a
+  // spinner — nothing is being attempted.
+  checks_failed: 'Waiting for checks to pass',
 };
 
 /**
@@ -115,6 +119,7 @@ const STALLED_PHASES: ReadonlySet<ArmedMergePhase> = new Set<ArmedMergePhase>([
   'waiting_behind',
   'blocked_protection',
   'retrying',
+  'checks_failed',
 ]);
 
 // TERMINALS RENDER OFF `state`, NEVER off `lastReason` — the watcher NULLs the reason on a
@@ -454,6 +459,8 @@ export function AutoMergeBanner(): JSX.Element | null {
   const seen = useRef<Map<number, ArmedMergeState> | null>(readSeenStates());
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
   const [dismissed, setDismissed] = useState<Record<string, true>>({});
+  const [showAll, setShowAll] = useState(false);
+  const listId = useId();
 
   const requests: ArmedMergeRequest[] | undefined = data?.requests;
 
@@ -499,8 +506,10 @@ export function AutoMergeBanner(): JSX.Element | null {
 
   // Outcomes first: they are the news, and they are the only rows that need an action from the
   // reader. Live rows below, capped — a hidden live row is still working.
-  const outcomeRows = shownOutcomes.slice(0, MAX_ROWS);
-  const liveRows = live.slice(0, Math.max(0, MAX_ROWS - outcomeRows.length));
+  // "Show N more" lifts the cap; the expanded panel scrolls inside its own max height.
+  const cap = showAll ? Infinity : MAX_ROWS;
+  const outcomeRows = shownOutcomes.slice(0, cap);
+  const liveRows = live.slice(0, Math.max(0, cap - outcomeRows.length));
   const hidden = total - outcomeRows.length - liveRows.length;
 
   const dismissAll = (): void =>
@@ -542,7 +551,10 @@ export function AutoMergeBanner(): JSX.Element | null {
           </button>
         </div>
       )}
-      <ul className="-mx-2 max-h-72 divide-y divide-gray-100 overflow-auto dark:divide-gray-800">
+      <ul
+        id={listId}
+        className="-mx-2 max-h-72 divide-y divide-gray-100 overflow-auto dark:divide-gray-800"
+      >
         {outcomeRows.map((o) => (
           <OutcomeRow
             key={o.id}
@@ -554,11 +566,12 @@ export function AutoMergeBanner(): JSX.Element | null {
           <LiveRow key={r.prId} row={r} />
         ))}
       </ul>
-      {hidden > 0 && (
-        <div className="border-t border-gray-100 pt-1 text-[11px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
-          +{hidden} more
-        </div>
-      )}
+      <ToastShowMore
+        hidden={hidden}
+        showAll={showAll && total > MAX_ROWS}
+        onToggle={() => setShowAll((v) => !v)}
+        controls={listId}
+      />
       <div className="border-t border-gray-100 pt-1 text-[11px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
         Auto-merge only runs while Limn is running.
       </div>

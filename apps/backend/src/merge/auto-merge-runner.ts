@@ -23,6 +23,21 @@
 //   6. blocked / conflicts   → KEEP WAITING, recording `lastReason`. A blocked PR unblocks on
 //                              its own (checks finish, the review lands); that is the entire
 //                              value of arming. Only the head-moved case disarms.
+//   6a. checks FAILED        → BACK OFF (phase `checks_failed`, stored, so it survives a restart):
+//                              still armed, but NO GitHub call is made for it again until the
+//                              SYNCED CI on the same head is green (or GitHub's synced merge state
+//                              says it can land). A new head goes the normal way (rule 1). Proof of
+//                              failure is LIVE — a `fetchPrHeadCheckRollup` of FAILURE/ERROR, or a
+//                              queue refusal naming a failing check — and it is paid for only when
+//                              the synced CI already says red (or a slot yield could follow).
+//                              ⚠ THE LOOP IT ENDS (2026-10-19, 7 dependency PRs on queue repos):
+//                              a red PR was armed, its enqueue refused as "failing", the process-
+//                              local wait mark parked it at "checks haven't finished", every
+//                              restart re-sent the enqueue, and two GitHub calls a tick ran for
+//                              72 hours. A backed-off intent never holds its repo's slot (the
+//                              fold reads the stored phase). A POLICY intent does not expire
+//                              while backed off — the setting is the consent — and gets a fresh
+//                              window when its checks go green; a person's click still expires.
 //   7. clean / unstable      → re-read the intent (the user may have hit Cancel mid-tick) and
 //                              merge. ('unstable' = non-required checks red; GitHub merges it.)
 //                              A POLICY intent (`armedByPolicy`, the dependency setting) is no
@@ -107,6 +122,7 @@ import {
 import {
   enqueuePullRequestOnQueue,
   isWaitableEnqueueRefusal,
+  isFailingEnqueueRefusal,
   fetchCommitParents,
   fetchMergeQueueState,
   fetchPrHeadCheckRollup,
@@ -124,6 +140,7 @@ import { asSyncLogger } from '../sync/resync-after-write.js';
 import { schedulePrSettle } from '../sync/pr-settle.js';
 import { noteMergeLanded } from '../sync/unsettled-prs.js';
 import { stampPrMergeQueueState } from '../db/pr-merge-queue-stamp.js';
+import { AUTO_MERGE_TTL_MS } from './arm-intent.js';
 
 // Cron for the watcher. NOT in `config` on purpose: it is not a deployment knob (the whole
 // feature is "it lands within a couple of minutes of going green"), and a misconfigured value
@@ -232,6 +249,22 @@ const yieldedForConflicts = new Set<number>();
 // re-verified every tick, and cleared the moment the queue answers `enabled` again.
 const queueDisabledIntents = new Set<number>();
 
+// ⚠ A BACK-OFF ENTERED WHILE THE SYNCED ROW ALREADY READ GREEN. Two of rule 6a's three entries
+// prove the failure LIVE without needing a red synced row (the enqueue refusal naming a failing
+// check, the slot-holder's yield read), and CI finishing does not bump `updatedAt`, so the synced
+// `ci_status` / merge state can lag the proof and still say green. Resuming on that stale green
+// meant: resume, try (another enqueue), fail, back off, resume — a live call every second tick.
+// So the synced signature seen AT BACK-OFF is remembered, and a resume needs the synced row to
+// have CHANGED since — or, in case the sync never notices a re-run that ends where the stale row
+// already was, `STALE_GREEN_RETRY_MS` to have passed, which bounds the cost at one attempt per
+// window. Process-local: a restart forgets it, which costs one attempt, the harmless direction.
+const backOffSeen = new Map<number, { signature: string; at: number }>();
+const STALE_GREEN_RETRY_MS = 30 * 60 * 1000;
+
+function syncedSignature(work: ArmedMergeWork): string {
+  return `${work.syncedHeadSha ?? ''}|${work.syncedCiStatus ?? ''}|${work.syncedMergeState ?? ''}`;
+}
+
 /**
  * The live marks, for the fold and for the routes that decorate `ArmedMergeRequest`. Read-only
  * on purpose: the ONE writer is the tick below, which is the only place that has a live
@@ -249,6 +282,7 @@ function forgetIntent(id: number): void {
   yieldedForConflicts.delete(id);
   queueDisabledIntents.delete(id);
   awaitingChecksForEnqueue.delete(id);
+  backOffSeen.delete(id);
 }
 
 /**
@@ -282,6 +316,73 @@ let running = false;
 // payload to separate them. Reading the ALREADY-SYNCED status keeps that free — this path runs
 // for every intent on every tick — and it never gates anything; GitHub is still the authority.
 const CHECKS_PENDING = new Set(['pending', 'expected']);
+
+// The synced CI states that make a live "did the checks fail?" read worth paying for. Advisory
+// only, like CHECKS_PENDING: the BACK-OFF itself is entered on a LIVE answer, never on this.
+const CHECKS_RED = new Set(['failure', 'error']);
+
+// GitHub's "it would land now" merge states (db/triage.ts READY_MERGE_STATES, REST spelling).
+const READY_STATES = new Set(['clean', 'has_hooks', 'unstable']);
+
+/**
+ * May a BACKED-OFF intent be tried again? Only on a green signal from the SYNCED row — the CI
+ * rollup is green, or GitHub's own merge state says it can land (a red OPTIONAL check alone never
+ * blocks, so 'unstable' counts). Pending is NOT green: a re-run that has not finished yet is still
+ * nothing to try. Read off columns the sync keeps fresh, so a backed-off intent costs no GitHub
+ * call per tick.
+ */
+function syncedGreen(work: ArmedMergeWork, now = Date.now()): boolean {
+  const green = work.syncedCiStatus === 'success' || READY_STATES.has(work.syncedMergeState ?? '');
+  if (!green) return false;
+  // The green was already there when the live proof said FAILURE: it is the sync lagging, not CI
+  // passing. Wait for the synced row to move (or the retry window to pass).
+  const mark = backOffSeen.get(work.id);
+  if (mark && mark.signature === syncedSignature(work) && now - mark.at < STALE_GREEN_RETRY_MS) {
+    return false;
+  }
+  return true;
+}
+
+/** The back-off's prose. One sentence, so the card, the pane and the toast say the same thing. */
+function backedOffReason(work: ArmedMergeWork, slot: ArmedQueueSlot | undefined): string {
+  return slot?.canYield
+    ? `checks failed — waiting for them to pass; letting the next armed PR on ${work.owner}/${work.name} through`
+    : 'checks failed — waiting for them to pass';
+}
+
+/**
+ * BACK OFF (rule 6a): the head's checks FAILED, proven live. Still armed; the stored phase is the
+ * record, so a restart does not re-attempt (the old process-local mark is exactly what made every
+ * restart re-send the enqueue). The in-memory yield mark is set too, so THIS process's fold agrees
+ * before the next scan re-reads the phase.
+ */
+async function backOff(work: ArmedMergeWork, slot: ArmedQueueSlot | undefined): Promise<void> {
+  yieldedForFailedChecks.add(work.id);
+  awaitingChecksForEnqueue.delete(work.id);
+  // Only the FIRST back-off of a wait stamps the time; the light path re-enters here every tick.
+  const signature = syncedSignature(work);
+  const prior = backOffSeen.get(work.id);
+  if (prior?.signature !== signature) backOffSeen.set(work.id, { signature, at: Date.now() });
+  await updateAutoMergeState(work.id, {
+    lastReason: backedOffReason(work, slot),
+    phase: 'checks_failed',
+  });
+}
+
+/**
+ * The live "did the checks FAIL?" read, paid for only when the synced CI already says red (or the
+ * caller has its own reason, the head-of-line yield). Null / unreadable is UNPROVEN and never
+ * backs off.
+ */
+async function checksFailedLive(
+  work: ArmedMergeWork,
+  token: string,
+  alsoWhen = false,
+): Promise<boolean> {
+  if (!alsoWhen && !CHECKS_RED.has(work.syncedCiStatus ?? '')) return false;
+  const rollup = await fetchPrHeadCheckRollup(token, work.owner, work.name, work.number);
+  return rollup === 'FAILURE' || rollup === 'ERROR';
+}
 
 function short(sha: string): string {
   return sha.slice(0, 7);
@@ -489,8 +590,17 @@ async function enqueueWhenReady(
   pinnedOid: string,
   /** GitHub's `mergeable_state` from the snapshot this tick already fetched — no extra call. */
   mergeableState: string,
+  slot: ArmedQueueSlot | undefined,
   log: FastifyBaseLogger,
 ): Promise<void> {
+  // ⚠ RED CHECKS FIRST, BEFORE ANY MUTATION (rule 6a). Enqueueing a PR whose head is already red
+  // only buys a "failing" refusal; worse, the refusal used to be waited out as if the checks were
+  // still running. One live read, only when the synced CI already says red.
+  if (mergeableState === 'blocked' && (await checksFailedLive(work, token))) {
+    await backOff(work, slot);
+    return;
+  }
+
   if (queue.reviewDecision === 'REVIEW_REQUIRED' || queue.reviewDecision === 'CHANGES_REQUESTED') {
     await updateAutoMergeState(work.id, {
       lastReason:
@@ -551,6 +661,16 @@ async function enqueueWhenReady(
     // refusals — about six minutes at a two-minute tick — terminally failed an intent whose CI
     // was still running. Everything else still throws, so a genuine error is still a strike.
     if (!isWaitableEnqueueRefusal(message)) throw err;
+    // ⚠ A FAILING check is not "not yet", it is "not until someone fixes it". Back off (rule 6a)
+    // instead of parking on a process-local mark that a restart forgets and re-asks.
+    if (isFailingEnqueueRefusal(message)) {
+      log.info(
+        { prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number, message },
+        'auto-merge: the merge queue refused entry — checks failed; backing off until they pass',
+      );
+      await backOff(work, slot);
+      return;
+    }
     awaitingChecksForEnqueue.add(work.id);
     await updateAutoMergeState(work.id, {
       lastReason: `waiting: the merge queue won’t take it yet — ${firstLine(message)}`,
@@ -600,7 +720,17 @@ async function processOne(
 ): Promise<void> {
   const now = Date.now();
 
-  if (work.expiresAt.getTime() <= now) {
+  // ---- Rule 6a, the back-off: decided off SYNCED columns, before any GitHub call ----------
+  // `resumed` = it was backed off and the synced row now says green: try again (once — a second
+  // failure backs it off again). `backedOff` = still waiting for green.
+  const wasBackedOff = work.phase === 'checks_failed';
+  const resumed = wasBackedOff && syncedGreen(work, now);
+  const backedOff = wasBackedOff && !resumed;
+
+  // ⚠ A POLICY intent does not expire while backed off: the setting is the consent, and a bump
+  // whose CI was re-run green a week later should still land (its resume below renews the
+  // window, so the tick that sees green is exempt too). A person's click keeps its window.
+  if (work.expiresAt.getTime() <= now && !(wasBackedOff && work.armedByPolicy)) {
     await resolve(work.id, 'expired', 'the 72-hour window passed without the PR becoming mergeable');
     return;
   }
@@ -639,6 +769,29 @@ async function processOne(
       'this account no longer has write access to the repository',
     );
     return;
+  }
+
+  // THE BACK-OFF'S WHOLE POINT: no GitHub call while nothing can have changed. Same synced head
+  // as the pin and still not green ⇒ just stamp `lastCheckedAt` (keeps the scan's rotation fair)
+  // and keep the truthful line. A synced head that differs — or that the sync has not read — goes
+  // the live path below, so rule 1 still disarms a push promptly.
+  if (backedOff && work.syncedHeadSha != null && work.syncedHeadSha === work.expectedHeadOid) {
+    await updateAutoMergeState(work.id, {
+      lastReason: backedOffReason(work, slot),
+      phase: 'checks_failed',
+    });
+    return;
+  }
+  if (resumed) {
+    // Green again: forget the wait marks so the next action is a real attempt, and give a POLICY
+    // intent a fresh window from now (its old one may have lapsed while it waited).
+    yieldedForFailedChecks.delete(work.id);
+    awaitingChecksForEnqueue.delete(work.id);
+    // A failure on this attempt must stamp a FRESH back-off, or the retry window never re-arms.
+    backOffSeen.delete(work.id);
+    if (work.armedByPolicy) {
+      await updateAutoMergeState(work.id, { expiresAt: new Date(now + AUTO_MERGE_TTL_MS) });
+    }
   }
 
   // ONE `GET /pulls/{n}` for both the head and the mergeability: they are non-overlapping
@@ -697,6 +850,13 @@ async function processOne(
       'disarmed_blocked',
       `the PR was retargeted (${consentedBaseRef} → ${m.baseRef}) — re-arm to merge into the new base`,
     );
+    return;
+  }
+
+  // Still backed off, on the pinned head (rule 1 above proved it), but the light path could not
+  // be taken because the sync has not caught up with the head. Nothing to try: keep waiting.
+  if (backedOff) {
+    await backOff(work, slot);
     return;
   }
 
@@ -760,7 +920,7 @@ async function processOne(
     }
     await updateAutoMergeState(work.id, {
       lastReason:
-        slot.yieldReason === 'failed_checks'
+        slot.yieldReason === 'failed_checks' && !resumed
           ? `its required checks failed — letting the next armed PR on ${work.owner}/${work.name} through; still armed`
           : `waiting its turn — ${place}`,
       phase: 'queued_local',
@@ -920,7 +1080,7 @@ async function processOne(
   // the green light is different too — the queue runs the checks itself, so only the REVIEW
   // half of branch protection gates entry.
   if (queue) {
-    await enqueueWhenReady(work, queue, token, pinnedOid, m.mergeableState, log);
+    await enqueueWhenReady(work, queue, token, pinnedOid, m.mergeableState, slot, log);
     return;
   }
 
@@ -952,16 +1112,14 @@ async function processOne(
     //
     // (Conflicts yield too, but far earlier — they never reach this branch, and they need no
     // extra read: `mergeable === false` is already in the snapshot every intent pays for.)
-    if (slot?.holdsSlot && slot.canYield) {
-      const rollup = await fetchPrHeadCheckRollup(token, work.owner, work.name, work.number);
-      if (rollup === 'FAILURE' || rollup === 'ERROR') {
-        yieldedForFailedChecks.add(work.id);
-        await updateAutoMergeState(work.id, {
-          lastReason: `its required checks failed — letting the next armed PR on ${work.owner}/${work.name} through; still armed`,
-          phase: 'queued_local',
-        });
-        return;
-      }
+    //
+    // ⚠ AND IT BACKS OFF (rule 6a), yielding or not. The read is now also paid when the SYNCED CI
+    // says red, for every intent — once: a FAILURE parks the intent at `checks_failed`, which
+    // costs no GitHub call per tick until the synced CI turns green. Before, a lone red intent
+    // (nobody to yield to) re-read the snapshot every two minutes for 72 hours.
+    if (await checksFailedLive(work, token, slot?.holdsSlot === true && slot.canYield)) {
+      await backOff(work, slot);
+      return;
     }
     await updateAutoMergeState(work.id, {
       lastReason: 'waiting: branch protection not satisfied (required reviews or checks)',

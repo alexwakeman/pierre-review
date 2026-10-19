@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { splitDiffByFile } from '../review/post-review.js';
-import { filesToUnifiedDiff, reopenPullRequest, isWaitableEnqueueRefusal } from './mutations.js';
+import {
+  filesToUnifiedDiff,
+  reopenPullRequest,
+  isFailingEnqueueRefusal,
+  isWaitableEnqueueRefusal,
+} from './mutations.js';
 
 // filesToUnifiedDiff is the fallback that rebuilds a unified diff from GitHub's per-file
 // /files endpoint when the whole-PR .diff media type 406s (>20,000 lines). The output must
@@ -182,5 +187,32 @@ describe('isWaitableEnqueueRefusal', () => {
 
   it('is case-insensitive — GitHub is not consistent about capitalisation', () => {
     expect(isWaitableEnqueueRefusal('PULL REQUEST 2 OF 3 REQUIRED STATUS CHECKS ARE IN PROGRESS.')).toBe(true);
+  });
+});
+
+// The back-off's half of the split: a FAILED check never finishes on its own, so it parks the
+// intent until CI is green; a RUNNING one is re-asked once GitHub stops saying `blocked`.
+describe('isFailingEnqueueRefusal', () => {
+  it('names a failing check as failing', () => {
+    expect(
+      isFailingEnqueueRefusal(
+        'Request failed due to following response errors:\n - Pull request has failing required statuses and Pull request Required status check "Run Pull Request Checks" is failing.',
+      ),
+    ).toBe(true);
+  });
+
+  it('⚠ does NOT read GitHub’s "Request failed" envelope as a failed check', () => {
+    expect(
+      isFailingEnqueueRefusal(
+        'Request failed due to following response errors:\n - Pull request 1 of 4 required status checks are in progress.',
+      ),
+    ).toBe(false);
+    expect(
+      isFailingEnqueueRefusal('Pull request 2 of 2 required status checks have not succeeded: 1 expected.'),
+    ).toBe(false);
+  });
+
+  it('is never true of a refusal that is not waitable at all', () => {
+    expect(isFailingEnqueueRefusal('Resource not accessible by integration (failure)')).toBe(false);
   });
 });

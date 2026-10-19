@@ -5,31 +5,21 @@
 // (components/DesignGrid.tsx), so the two read as one design.
 //
 //   LAYOUT   a CSS grid: a lane-label column + one column per board column. A collapsed (Complete)
-//            column is narrow and shows counts; "Show" opens it. NARROW (< NARROW_PX): the lane label
+//            column is narrow and shows counts; "Show" opens the whole column, and a lane's own
+//            "n tickets" opens that lane's cell only ("Hide" folds it again). NARROW (< NARROW_PX): the lane label
 //            moves to a band heading above the lane's cards, as the design grid's layer names do. Below
 //            the columns' minimum widths the board scrolls inside its own box, never the page.
 //   ARROWS   routed by lib/designGrid.ts `routeArrow` through the padding round each card and the grid's
 //            gaps, re-measured by a ResizeObserver. A critical arrow is drawn in the accent. A labelled
 //            arrow carries a number, keyed below the board. HOVERING an arrow's line or its number (or
-//            focusing the number) shows what the arrow means in a popover beside the number; CLICKING
-//            the number pins it there until the number is clicked again (or Escape). The numbers are
-//            buttons in the tab order. The same arrows are also an sr-only list.
-import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import {
-  autoUpdate,
-  flip,
-  FloatingPortal,
-  offset,
-  safePolygon,
-  shift,
-  useDismiss,
-  useFloating,
-  useFocus,
-  useHover,
-  useInteractions,
-  useRole,
-} from '@floating-ui/react';
-import { claimActivePopover } from '../lib/activePopover.js';
+//            focusing the number) shows what the arrow means in a popover beside the number, on the
+//            side that covers the fewest cards (lib/avoidRects.ts); it closes
+//            when the pointer leaves. No click, no pin. The numbers are in the tab order. The same
+//            arrows are also an sr-only list.
+import { createContext, Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { autoUpdate, FloatingPortal, useDismiss, useFloating, useFocus, useHover, useInteractions, useRole } from '@floating-ui/react';
+import { avoidRects } from '../lib/avoidRects.js';
+import { HOVER_PANEL_CLASS } from './HoverPopover.js';
 import { geometryOf, placeArrowLabels, routePoints, separateArrowRuns, type ArrowGeometry, type PlacedCard } from '../lib/designGrid.js';
 import type { BoardLayout } from '../lib/laneBoard.js';
 import { ChevronIcon } from './Icons.js';
@@ -60,6 +50,8 @@ export function useRoutedArrows(
   slotRef: (id: string) => (el: HTMLElement | null) => void;
   paths: RoutedPath[];
   narrow: boolean;
+  /** Every card's box on screen now (viewport coordinates) — what a popover should not cover. */
+  cardRects: () => DOMRect[];
 } {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const cards = useRef(new Map<string, HTMLElement>());
@@ -152,8 +144,15 @@ export function useRoutedArrows(
     },
     [],
   );
-  return { gridRef, cardRef, slotRef, paths, narrow };
+  const cardRects = useCallback(() => [...cards.current.values()].map((el) => el.getBoundingClientRect()), []);
+  return { gridRef, cardRef, slotRef, paths, narrow, cardRects };
 }
+
+const NO_RECTS = (): DOMRect[] => [];
+
+/** The board's card boxes, for a popover inside a lane header to keep clear of (LaneBoard provides it). */
+const ObstaclesContext = createContext<() => readonly DOMRect[]>(NO_RECTS);
+export const useBoardObstacles = (): (() => readonly DOMRect[]) => useContext(ObstaclesContext);
 
 /** The numbered marker on an arrow and in its key. */
 const NUMBER_CLASS =
@@ -171,6 +170,7 @@ export function ArrowLayer({
   numbers,
   critical,
   details,
+  avoid = NO_RECTS,
 }: {
   paths: readonly RoutedPath[];
   /** Arrow key → its number, for the labelled arrows. */
@@ -179,6 +179,8 @@ export function ArrowLayer({
   critical?: ReadonlySet<string>;
   /** Arrow key → what it means. An arrow with no entry shows no popover. */
   details?: ReadonlyMap<string, ArrowDetail>;
+  /** The boxes a popover should not cover (the hook's `cardRects`). */
+  avoid?: () => readonly DOMRect[];
 }): JSX.Element {
   const id = useId().replace(/:/g, '');
   const plain = `${id}-a`;
@@ -285,6 +287,7 @@ export function ArrowLayer({
             y={p.ly}
             detail={detail}
             lineHovered={lineHover === p.key}
+            avoid={avoid}
             onShown={(open) => onShown(p.key, open)}
           />
         );
@@ -294,9 +297,9 @@ export function ArrowLayer({
 }
 
 /**
- * One arrow's number and its popover. Hover or focus shows it while the pointer or focus stays (moving
- * onto the popover keeps it open); a click PINS it beside the number until the number is clicked again
- * or Escape is pressed; an outside click leaves a pinned popover where it is. One pinned at a time.
+ * One arrow's number and its popover. Hover or focus shows it, beside the number on the side that covers
+ * the fewest cards; it closes as soon as the pointer leaves (the panel takes no pointer, so it cannot
+ * hold itself open) or focus moves on. Escape closes it. No click, no pin.
  */
 function ArrowMarker({
   n,
@@ -304,6 +307,7 @@ function ArrowMarker({
   y,
   detail,
   lineHovered,
+  avoid,
   onShown,
 }: {
   n: number | null;
@@ -311,84 +315,49 @@ function ArrowMarker({
   y: number;
   detail: ArrowDetail;
   lineHovered: boolean;
+  avoid: () => readonly DOMRect[];
   onShown: (open: boolean) => void;
 }): JSX.Element {
-  const [pinned, setPinned] = useState(false);
   const [transient, setTransient] = useState(false);
-  // After a click HIDES the popover, the pointer is still on the number and it still has focus — both
-  // would reopen it at once. Stay quiet until the pointer leaves or focus moves on.
-  const [quiet, setQuiet] = useState(false);
-  const open = pinned || (!quiet && (transient || lineHovered));
+  const open = transient || lineHovered;
   const popId = useId();
   const { refs, floatingStyles, context } = useFloating({
     open,
-    onOpenChange: (next, _e, reason) => {
-      if (reason === 'escape-key') {
-        setPinned(false);
-        setTransient(false);
-        return;
-      }
-      if (next && quiet) return;
-      setTransient(next);
-    },
-    placement: 'right',
+    onOpenChange: setTransient,
     strategy: 'fixed',
-    middleware: [offset(8), flip({ fallbackPlacements: ['left', 'top', 'bottom'] }), shift({ padding: 8 })],
+    middleware: [avoidRects(avoid)],
     whileElementsMounted: autoUpdate,
   });
-  const hover = useHover(context, { delay: { open: 60, close: 120 }, handleClose: safePolygon() });
+  const hover = useHover(context, { delay: { open: 60, close: 80 } });
   const focus = useFocus(context);
-  const dismiss = useDismiss(context, { outsidePress: false });
+  const dismiss = useDismiss(context);
   const role = useRole(context, { role: 'tooltip' });
   const { getReferenceProps, getFloatingProps } = useInteractions([hover, focus, dismiss, role]);
-  useEffect(() => {
-    if (!pinned) return;
-    return claimActivePopover(() => setPinned(false));
-  }, [pinned]);
   useEffect(() => onShown(open), [open, onShown]);
 
   const name = n != null ? `Dependency ${n}${detail.label != null ? `: ${detail.label}` : ''}` : detail.label ?? 'Dependency';
   return (
     <>
       {n != null ? (
-        <button
+        <span
           ref={refs.setReference}
-          type="button"
-          {...getReferenceProps({
-            onClick: () => {
-              // Clicking a pinned number hides it, even while the pointer is still on it.
-              if (pinned) {
-                setTransient(false);
-                setQuiet(true);
-              } else setQuiet(false);
-              setPinned(!pinned);
-            },
-            onMouseLeave: () => setQuiet(false),
-            onBlur: () => setQuiet(false),
-          })}
+          tabIndex={0}
+          role="img"
+          {...getReferenceProps()}
           aria-label={name}
-          aria-expanded={pinned}
           aria-describedby={open ? popId : undefined}
-          className={`absolute z-20 -translate-x-1/2 -translate-y-1/2 cursor-pointer bg-white text-gray-800 hover:border-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:bg-gray-950 dark:text-gray-100 dark:hover:border-gray-300 ${NUMBER_CLASS} ${
-            pinned ? 'border-gray-800 dark:border-gray-100' : ''
-          }`}
+          className={`absolute z-20 -translate-x-1/2 -translate-y-1/2 cursor-default bg-white text-gray-800 hover:border-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:bg-gray-950 dark:text-gray-100 dark:hover:border-gray-300 ${NUMBER_CLASS}`}
           style={{ left: x, top: y }}
         >
           {n}
-        </button>
+        </span>
       ) : (
         // No number: an invisible anchor at the arrow's label point, so the line's hover has a place to show.
         <span ref={refs.setReference} aria-hidden className="pointer-events-none absolute h-0 w-0" style={{ left: x, top: y }} />
       )}
       {open && (
         <FloatingPortal>
-          <div
-            ref={refs.setFloating}
-            id={popId}
-            style={floatingStyles}
-            {...getFloatingProps()}
-            className="z-[60] max-w-[min(20rem,90vw)] rounded-md border border-gray-200 bg-white px-2.5 py-2 text-[12px] leading-snug text-gray-800 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-          >
+          <div ref={refs.setFloating} id={popId} style={floatingStyles} {...getFloatingProps()} className={HOVER_PANEL_CLASS}>
             {/* The sentence usually ends with the keyed words; a heading repeating them says it twice. */}
             {detail.label != null && !detail.text.includes(detail.label) ? (
               <>
@@ -449,6 +418,8 @@ export function LaneBoard<L, C>({
   renderLane,
   renderCard,
   onToggleColumn,
+  onToggleCell,
+  legend,
 }: {
   /** The accessible name of the whole board. */
   label: string;
@@ -459,15 +430,22 @@ export function LaneBoard<L, C>({
   renderCard: (card: BoardLayout<L, C>['cards'][number], ref: (el: HTMLElement | null) => void) => ReactNode;
   /** Show or hide a collapsible column's cards. */
   onToggleColumn: (id: string) => void;
+  /** Show or hide ONE lane's cards in a collapsed column (its "n tickets"). Absent = a plain count. */
+  onToggleCell?: (laneId: string, columnId: string) => void;
+  /** A key drawn under the board, before the arrows' key (e.g. the card borders). */
+  legend?: ReactNode;
 }): JSX.Element {
   const cells = layout.cards;
   const arrows = layout.arrows;
-  // A collapsed column's "n tickets" sits in its lane's first row: an arrow routes round it, never through.
+  // A collapsed column's "n tickets" (or an opened cell's "Hide") sits in its lane's first row: an arrow
+  // routes round it, never through.
   const occupied = useMemo(() => {
     const colOf = new Map(layout.columns.map((c) => [c.id, c.index]));
-    return layout.lanes.flatMap((l) => [...l.hidden.keys()].flatMap((id) => (colOf.has(id) ? [{ row: l.row, col: colOf.get(id)! }] : [])));
+    return layout.lanes.flatMap((l) =>
+      [...l.hidden.keys(), ...l.opened.keys()].flatMap((id) => (colOf.has(id) ? [{ row: l.row, col: colOf.get(id)! }] : [])),
+    );
   }, [layout.columns, layout.lanes]);
-  const { gridRef, cardRef, slotRef, paths, narrow } = useRoutedArrows(cells, arrows, NARROW_PX, occupied);
+  const { gridRef, cardRef, slotRef, paths, narrow, cardRects } = useRoutedArrows(cells, arrows, NARROW_PX, occupied);
   const numbers = useMemo(() => new Map(arrows.filter((a) => a.n != null).map((a) => [a.key, a.n!])), [arrows]);
   const details = useMemo(() => new Map(arrows.map((a) => [a.key, { label: a.label, text: a.text }])), [arrows]);
   const critical = useMemo(() => new Set(arrows.filter((a) => a.critical).map((a) => a.key)), [arrows]);
@@ -481,10 +459,11 @@ export function LaneBoard<L, C>({
     return m;
   }, [layout.lanes]);
   const gridRow = (logical: number): number => (narrow ? logical + 3 + (laneIndexOfRow[logical] ?? 0) : logical + 2);
-  const track = (c: (typeof layout.columns)[number]): string => (c.collapsed ? 'minmax(4.5rem, 6rem)' : 'minmax(6.5rem, 1fr)');
+  const track = (c: (typeof layout.columns)[number]): string => (c.collapsed && !c.widened ? 'minmax(4.5rem, 6rem)' : 'minmax(6.5rem, 1fr)');
   const template = `${narrow ? '' : `${laneWidth} `}${layout.columns.map(track).join(' ')}`;
 
   return (
+    <ObstaclesContext.Provider value={cardRects}>
     <div role="group" aria-label={label} className="w-full">
       <div className="w-full overflow-x-auto">
         <div ref={gridRef} className="relative grid gap-x-12 gap-y-2 pb-1 pr-1" style={{ gridTemplateColumns: template }}>
@@ -498,7 +477,7 @@ export function LaneBoard<L, C>({
             />
           ))}
 
-          <ArrowLayer paths={paths} numbers={numbers} critical={critical} details={details} />
+          <ArrowLayer paths={paths} numbers={numbers} critical={critical} details={details} avoid={cardRects} />
 
           {/* Header row: the columns. */}
           {!narrow && <div aria-hidden style={{ gridRow: 1, gridColumn: 1 }} />}
@@ -533,18 +512,35 @@ export function LaneBoard<L, C>({
               >
                 {renderLane(l)}
               </div>
-              {[...l.hidden].map(([colId, n]) => {
-                const c = layout.columns.find((x) => x.id === colId);
-                return c == null ? null : (
-                  <div
-                    key={`h:${l.id}:${colId}`}
-                    className="relative z-10 self-center px-1 text-[11px] text-gray-600 dark:text-gray-300"
-                    style={{ gridRow: gridRow(l.row), gridColumn: c.index + col0 }}
-                  >
-                    {n} {n === 1 ? 'ticket' : 'tickets'}
-                  </div>
-                );
-              })}
+              {[...[...l.hidden].map(([colId, n]) => ({ colId, n, open: false })), ...[...l.opened].map(([colId, n]) => ({ colId, n, open: true }))].map(
+                ({ colId, n, open }) => {
+                  const c = layout.columns.find((x) => x.id === colId);
+                  if (c == null) return null;
+                  const words = `${n} ${n === 1 ? 'ticket' : 'tickets'}`;
+                  return (
+                    <div
+                      key={`h:${l.id}:${colId}`}
+                      className="relative z-10 self-center px-1 text-[11px] text-gray-600 dark:text-gray-300"
+                      style={{ gridRow: gridRow(l.row), gridColumn: c.index + col0 }}
+                    >
+                      {onToggleCell == null ? (
+                        words
+                      ) : (
+                        <button
+                          type="button"
+                          aria-expanded={open}
+                          aria-label={`${open ? 'Hide' : 'Show'} ${words} in ${c.name} for ${l.label}`}
+                          onClick={() => onToggleCell(l.id, colId)}
+                          className="inline-flex items-center gap-0.5 rounded px-0.5 font-medium text-sky-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-sky-300"
+                        >
+                          <ChevronIcon size={10} dir={open ? 'down' : 'right'} />
+                          {open ? 'Hide' : words}
+                        </button>
+                      )}
+                    </div>
+                  );
+                },
+              )}
             </Fragment>
           ))}
 
@@ -552,14 +548,16 @@ export function LaneBoard<L, C>({
           {[...cells]
             .sort((a, b) => a.row - b.row || a.col - b.col)
             .map((c) => (
-              <div key={c.id} ref={slotRef(c.id)} className="relative z-10 min-w-0 p-1.5" style={{ gridRow: gridRow(c.row), gridColumn: c.col + col0 }}>
+              <div key={c.id} ref={slotRef(c.id)} className="relative z-10 flex min-w-0 flex-col p-1.5" style={{ gridRow: gridRow(c.row), gridColumn: c.col + col0 }}>
                 {renderCard(c, cardRef(c.id))}
               </div>
             ))}
         </div>
       </div>
+      {legend}
       <ArrowKey items={layout.key} />
       <ArrowList label="Dependencies" items={arrows} />
     </div>
+    </ObstaclesContext.Provider>
   );
 }

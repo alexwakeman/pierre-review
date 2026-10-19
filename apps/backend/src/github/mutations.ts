@@ -1233,6 +1233,24 @@ export function isWaitableEnqueueRefusal(message: string): boolean {
   );
 }
 
+/**
+ * Is this (waitable) enqueue refusal GitHub saying the checks FAILED, rather than "still running"?
+ *
+ * ⚠ THE SPLIT THE BACK-OFF NEEDS. Both are "not yet" (`isWaitableEnqueueRefusal`), but they ask for
+ * different waits: a running check finishes on its own, so re-asking once GitHub stops saying
+ * `blocked` is right; a FAILED one does not, and re-asking every restart for days is the loop this
+ * exists to end. A failing refusal BACKS OFF the intent (phase `checks_failed`) until the synced CI
+ * on that head is green again. "have not succeeded" is deliberately NOT here — GitHub uses it for
+ * an `expected` (not yet reported) check too.
+ */
+export function isFailingEnqueueRefusal(message: string): boolean {
+  if (!isWaitableEnqueueRefusal(message)) return false;
+  const m = message.toLowerCase();
+  // ⚠ NOT the bare word "failed": GitHub's own envelope ("Request failed due to following
+  // response errors") wraps every refusal, the in-progress ones included.
+  return m.includes('failing') || m.includes('failure');
+}
+
 export async function enqueuePullRequestOnQueue(
   token: string,
   prNodeId: string,

@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import {
   SPRINT_STAGE_LABEL,
+  SPRINT_STAGES,
   SPRINT_VISIT_GAP_MS,
   type SprintGraphEdge,
   type SprintGraphNode,
@@ -14,11 +15,12 @@ import type { SprintTiming } from './sprint-paths.js';
 // filled with counts taken here, from the SAME folded graph the page draws (db/sprint-graph.ts). Computed
 // on every GET /api/sprint-graph — DB only, never a tracker or GitHub call.
 //
-//   • OUT OF STEP — a sprint ticket whose tracker stage disagrees with its pull requests: In review with
+//   • OUT OF STEP — a sprint ticket whose tracker stage disagrees with its pull requests: Code review with
 //     no open pull request (said apart: its code already merged, or no pull request at all — on workspace 1
-//     11 of 14 such tickets had merged code, a team that moves a ticket to In review AFTER the merge, so
-//     one undivided count read as 14 problems); Complete with one still open; Not started with one open
-//     (a draft-only one said apart).
+//     11 of 14 such tickets had merged code, a team that moves a ticket to Code review AFTER the merge, so
+//     one undivided count read as 14 problems; ⚠ a merged one is NOT counted when the merge rule drew it
+//     in Product review — `column !== bucketId` — because the board already shows it moved on); Complete
+//     with one still open; Not started with one open (a draft-only one said apart).
 //   • PACE — the share of the sprint's days gone (shared `sprintDayOf`: day / days, the header's count)
 //     beside the share of its tickets Complete. Neutral: no "behind" / "on track" verdict. Needs a REAL
 //     sprint window (`sprintTimingFor`: the tracker's dates, else the cadence in mode 'sprint').
@@ -53,15 +55,20 @@ export function outOfStepSignal(nodes: readonly SprintGraphNode[]): SprintSignal
   for (const n of nodes) {
     if (n.ghost) continue;
     const open = n.prs.filter((p) => p.state === 'open');
-    if (n.stage === 'in_review' && open.length === 0) (n.prs.some((p) => p.state === 'merged') ? reviewMerged : reviewNoPr).push(n.ident);
+    if (n.stage === 'in_review' && open.length === 0) {
+      const merged = n.prs.some((p) => p.state === 'merged');
+      // Moved to Product review by the merge rule: the board already says where it is.
+      if (merged && n.column != null && n.column !== n.bucketId) continue;
+      (merged ? reviewMerged : reviewNoPr).push(n.ident);
+    }
     else if (n.stage === 'done' && open.length > 0) doneOpen.push(n.ident);
     else if (n.stage === 'not_started' && open.length > 0) (open.some((p) => !p.draft) ? notStartedOpen : notStartedDraft).push(n.ident);
   }
   const idents = [...reviewNoPr, ...reviewMerged, ...doneOpen, ...notStartedOpen, ...notStartedDraft];
   if (idents.length === 0) return null;
   const parts: string[] = [];
-  if (reviewNoPr.length > 0) parts.push(`${reviewNoPr.length} in review with no pull request`);
-  if (reviewMerged.length > 0) parts.push(`${reviewMerged.length} in review with ${reviewMerged.length === 1 ? 'its' : 'their'} code already merged`);
+  if (reviewNoPr.length > 0) parts.push(`${reviewNoPr.length} in code review with no pull request`);
+  if (reviewMerged.length > 0) parts.push(`${reviewMerged.length} in code review with ${reviewMerged.length === 1 ? 'its' : 'their'} code already merged`);
   if (doneOpen.length > 0) parts.push(`${doneOpen.length} complete with a pull request still open`);
   if (notStartedOpen.length > 0) parts.push(`${notStartedOpen.length} not started with a pull request open`);
   if (notStartedDraft.length > 0) parts.push(`${notStartedDraft.length} not started with a draft pull request open`);
@@ -126,7 +133,10 @@ export function blockedOutsideSignal(nodes: readonly SprintGraphNode[], edges: r
 
 /** What one view saw: each sprint ticket's stage, and the merged pull requests on sprint tickets. */
 export interface SprintViewSnapshot {
-  v: 1;
+  /** ⚠ 2 since Product review became a stage: a v1 snapshot filed QA / sign-off statuses (and
+   *  merged-not-signed-off tickets) under 'in_review', so diffing one against today reported
+   *  moves to Product review that never happened. A v1 row reads as no snapshot and rolls forward. */
+  v: 2;
   /** ident → stage (null = status unknown). The keys are the sprint's ticket set. */
   stages: Record<string, SprintStage | null>;
   /** prIds merged on sprint tickets. */
@@ -149,19 +159,20 @@ export function sprintViewSnapshotOf(nodes: readonly SprintGraphNode[]): SprintV
     stages[n.ident] = n.stage;
     for (const p of n.prs) if (p.state === 'merged') merged.add(p.prId);
   }
-  return { v: 1, stages, merged: [...merged].sort((a, b) => a - b) };
+  return { v: 2, stages, merged: [...merged].sort((a, b) => a - b) };
 }
 
 /** A tolerant read of a stored snapshot (null when it is not one). Pure. */
 export function parseSprintViewSnapshot(v: unknown): SprintViewSnapshot | null {
   if (typeof v !== 'object' || v == null || Array.isArray(v)) return null;
   const o = v as Record<string, unknown>;
+  if (o.v !== 2) return null;
   if (typeof o.stages !== 'object' || o.stages == null || Array.isArray(o.stages) || !Array.isArray(o.merged)) return null;
   const stages: Record<string, SprintStage | null> = {};
   for (const [k, s] of Object.entries(o.stages as Record<string, unknown>)) {
-    stages[k] = s === 'not_started' || s === 'in_progress' || s === 'in_review' || s === 'done' ? s : null;
+    stages[k] = typeof s === 'string' && (SPRINT_STAGES as readonly string[]).includes(s) ? (s as SprintStage) : null;
   }
-  return { v: 1, stages, merged: o.merged.filter((x): x is number => typeof x === 'number') };
+  return { v: 2, stages, merged: o.merged.filter((x): x is number => typeof x === 'number') };
 }
 
 /**
@@ -190,7 +201,7 @@ export function sinceTitle(atMs: number, nowMs: number): string {
   return d === 1 ? 'Since yesterday' : `Since ${d} days ago`;
 }
 
-const MOVE_ORDER: readonly SprintStage[] = ['done', 'in_review', 'in_progress', 'not_started'];
+const MOVE_ORDER: readonly SprintStage[] = ['done', 'product_review', 'in_review', 'in_progress', 'not_started'];
 
 /** What moved since the baseline. null with no baseline, a baseline sharing no ticket with today's
  *  sprint (a new sprint), or nothing moved. Pure. */

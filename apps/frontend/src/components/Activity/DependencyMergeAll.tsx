@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import {
   DEPENDENCY_MERGE_ALL_MAX,
@@ -13,7 +13,7 @@ import {
   useDependencyMergeToast,
 } from '../../hooks/useDependencyMergeAll.js';
 import { CloseIcon, PendingDependencyIcon, WarningIcon } from '../Icons.js';
-import { HeaderToast } from '../HeaderToasts.js';
+import { HeaderToast, ToastShowMore } from '../HeaderToasts.js';
 
 // ── PENDING → DEPENDENCIES: "MERGE OR ARM ALL" ──────────────────────────────────────────────────
 //
@@ -185,6 +185,9 @@ export function DependencyMergeAll({
 /** Long enough to read the counts; the card closes itself after that. */
 const TOAST_MS = 15_000;
 
+// Failed rows drawn before the rest fold into a "Show N more" control.
+const FAILED_ROWS = 3;
+
 /**
  * The run's summary — a card in the ONE header toast strip (HeaderToasts.tsx), never its own
  * `fixed` element.
@@ -192,7 +195,10 @@ const TOAST_MS = 15_000;
 export function DependencyMergeToast(): JSX.Element | null {
   const last = useDependencyMergeToast((s) => s.last);
   const clear = useDependencyMergeToast((s) => s.clear);
+  const [showAll, setShowAll] = useState(false);
+  const listId = useId();
   useEffect(() => {
+    setShowAll(false);
     if (last == null) return;
     const t = setTimeout(clear, TOAST_MS);
     return () => clearTimeout(t);
@@ -222,14 +228,22 @@ export function DependencyMergeToast(): JSX.Element | null {
       dismissLabel="Dismiss dependency update results"
     >
       {failed.length > 0 ? (
-        <div className="space-y-0.5">
-          {failed.slice(0, 3).map((i) => (
-            <div key={i.prId} className="text-[12px] text-red-700 dark:text-red-400">
-              <WarningIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
-              Failed — {label(i)}: {i.outcome.action === 'failed' ? i.outcome.message : ''}
-            </div>
-          ))}
-        </div>
+        <>
+          <div id={listId} className="max-h-72 space-y-0.5 overflow-auto">
+            {(showAll ? failed : failed.slice(0, FAILED_ROWS)).map((i) => (
+              <div key={i.prId} className="text-[12px] text-red-700 dark:text-red-400">
+                <WarningIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
+                Failed — {label(i)}: {i.outcome.action === 'failed' ? i.outcome.message : ''}
+              </div>
+            ))}
+          </div>
+          <ToastShowMore
+            hidden={Math.max(0, failed.length - FAILED_ROWS)}
+            showAll={showAll && failed.length > FAILED_ROWS}
+            onToggle={() => setShowAll((v) => !v)}
+            controls={listId}
+          />
+        </>
       ) : undefined}
     </HeaderToast>
   );

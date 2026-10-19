@@ -59,6 +59,13 @@ export interface ArmedIntentOrderRow {
   prId: number;
   armedAt: Date;
   viaMergeQueue: boolean;
+  /**
+   * The stored phase. Read for ONE value: `checks_failed`, the PERSISTED back-off (its checks
+   * failed; the watcher is waiting for them to pass). It counts as a `failed_checks` yield even
+   * after a restart has emptied the runner's in-memory marks, so a backed-off intent never holds
+   * its repo's slot. Optional so a test row without it reads as "not backed off".
+   */
+  phase?: string | null;
 }
 
 /**
@@ -85,6 +92,7 @@ export async function listArmedIntentOrder(
       prId: autoMergeRequests.prId,
       armedAt: autoMergeRequests.armedAt,
       viaMergeQueue: autoMergeRequests.viaMergeQueue,
+      phase: autoMergeRequests.phase,
     })
     .from(autoMergeRequests)
     .innerJoin(pullRequests, eq(pullRequests.id, autoMergeRequests.prId))
@@ -208,8 +216,11 @@ export function buildArmedRepoQueues(
     else groups.set(key, [row]);
   }
 
+  // A BACKED-OFF intent (stored phase `checks_failed`) yields exactly like a live failed-checks
+  // mark — durable, so a restart cannot hand it the slot back while its checks are still red.
+  const backedOff = new Set(rows.filter((r) => r.phase === 'checks_failed').map((r) => r.id));
   const reasonOf = (id: number): ArmedYieldReason | null =>
-    marks.yieldedForFailedChecks.has(id)
+    marks.yieldedForFailedChecks.has(id) || backedOff.has(id)
       ? 'failed_checks'
       : marks.yieldedForConflicts.has(id)
         ? 'conflicts'

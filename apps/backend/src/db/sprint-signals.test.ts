@@ -69,13 +69,17 @@ describe('out of step', () => {
       kind: 'out_of_step',
       title: 'Tracker and code disagree',
       sentence:
-        '5 tickets: 1 in review with no pull request, 1 in review with its code already merged, 1 complete with a pull request still open, 1 not started with a pull request open, 1 not started with a draft pull request open.',
+        '5 tickets: 1 in code review with no pull request, 1 in code review with its code already merged, 1 complete with a pull request still open, 1 not started with a pull request open, 1 not started with a draft pull request open.',
       idents: [I('A-1'), I('A-2'), I('A-3'), I('A-4'), I('A-5')],
     });
     expect(outOfStepSignal([N('A-1', 'done', { prs: [pr(1, 'open')] })])?.sentence).toBe('1 ticket: 1 complete with a pull request still open.');
     expect(outOfStepSignal([N('A-1', 'in_review', { prs: [pr(1, 'merged')] }), N('A-2', 'in_review', { prs: [pr(2, 'merged'), pr(3, 'closed')] })])?.sentence).toBe(
-      '2 tickets: 2 in review with their code already merged.',
+      '2 tickets: 2 in code review with their code already merged.',
     );
+    // Moved to Product review by the merge rule (column ≠ bucket): the board already says so — not counted.
+    expect(outOfStepSignal([N('A-1', 'in_review', { column: 'product_review', prs: [pr(1, 'merged')] })])).toBeNull();
+    // …but no pull request at all is still out of step, wherever it is drawn.
+    expect(outOfStepSignal([N('A-1', 'in_review')])?.sentence).toBe('1 ticket: 1 in code review with no pull request.');
   });
   it('none → no card', () => {
     expect(outOfStepSignal([N('A-1', 'in_progress'), N('A-2', 'done')])).toBeNull();
@@ -145,9 +149,12 @@ describe('since you last looked', () => {
   const base = sprintViewSnapshotOf([...then, N('Z-1', 'done', { ghost: true })]);
 
   it('the snapshot: sprint tickets only, merged PR ids', () => {
-    expect(base).toEqual({ v: 1, stages: { [I('A-1')]: 'not_started', [I('A-2')]: 'in_progress', [I('A-3')]: 'in_review', [I('A-4')]: 'in_review' }, merged: [8] });
+    expect(base).toEqual({ v: 2, stages: { [I('A-1')]: 'not_started', [I('A-2')]: 'in_progress', [I('A-3')]: 'in_review', [I('A-4')]: 'in_review' }, merged: [8] });
     expect(parseSprintViewSnapshot(JSON.parse(JSON.stringify(base)))).toEqual(base);
-    expect(parseSprintViewSnapshot({ stages: { x: 'weird' }, merged: [1, 'a'] })).toEqual({ v: 1, stages: { x: null }, merged: [1] });
+    expect(parseSprintViewSnapshot({ v: 2, stages: { x: 'weird' }, merged: [1, 'a'] })).toEqual({ v: 2, stages: { x: null }, merged: [1] });
+    // A pre-Product-review snapshot is no snapshot: its 'in_review' held QA statuses too.
+    expect(parseSprintViewSnapshot({ v: 1, stages: { x: 'in_review' }, merged: [] })).toBeNull();
+    expect(parseSprintViewSnapshot({ stages: { x: 'in_review' }, merged: [] })).toBeNull();
     expect(parseSprintViewSnapshot(null)).toBeNull();
     expect(parseSprintViewSnapshot({ stages: [] , merged: [] })).toBeNull();
   });
@@ -164,7 +171,7 @@ describe('since you last looked', () => {
     expect(sinceLastLookedSignal(base, new Date(T), now, T + 3 * 3_600_000)).toEqual({
       kind: 'since_last',
       title: 'Since 3 hours ago',
-      sentence: '2 tickets moved to Complete, 1 to In review; 2 tickets added to the sprint; 3 pull requests merged.',
+      sentence: '2 tickets moved to Complete, 1 to Code review; 2 tickets added to the sprint; 3 pull requests merged.',
       idents: [I('A-2'), I('A-3'), I('A-1'), I('A-5'), I('A-6')],
     });
   });

@@ -2074,8 +2074,8 @@ criteriaDerived, references}`. The graph's text edges and its ghost chains come 
 
 ## Sprint themes (Activity → This Sprint → Theme)
 
-ONE sprint-wide Haiku 5.5 call that names 3–8 short shared THEMES for the sprint and puts every sprint
-ticket in exactly one, so the Theme view can lay the sprint out by area of work rather than by epic (one
+ONE sprint-wide Haiku 5.5 call that names 3–8 short shared THEMES for the sprint, writes each a one-to-two
+sentence SUMMARY, and puts every sprint ticket in exactly one, so the Theme view can lay the sprint out by area of work rather than by epic (one
 lane per theme, "Other" last; the Critical path view's count table rows too).
 
 - **Where**: `src/review/sprint-themes/` — `prompt.ts`, `validate.ts`, `manager.ts`; the input and store
@@ -2089,18 +2089,28 @@ lane per theme, "Other" last; the Critical path view's count table rows too).
   summary's place, so the brief landing re-runs it) + `SPRINT_THEME_VERSION`. A read that changed nothing
   costs nothing. Fewer than `SPRINT_THEME_CAPS.minTickets` (6) sprint tickets → not themed. Ghosts never.
 - **THE PROMPT** (`SPRINT_THEME_SYSTEM`): every ticket's key, title and summary inside ONE per-call nonce
-  fence; 3–8 themes, each plain English ≤ 4 words with no keys or jargon; every ticket in one theme by
-  NUMBER. ⚠ Changing one word is a new `SPRINT_THEME_VERSION`.
+  fence; 3–8 themes, each plain English ≤ 4 words with no keys or jargon, each with a SUMMARY of one or
+  two short sentences: what the work involves and whether it is development work (code changes) or other
+  work (design, analysis, content, testing, configuration) — no numbers, no keys, nothing about progress
+  or who does it; every ticket in one theme by NUMBER. Answer shape
+  `{"themes":[{"name","summary"}],"tickets":[{"key","theme"}]}`. ⚠ Changing one word is a new
+  `SPRINT_THEME_VERSION` (2 since the summaries, 2026-10-19). ⚠ The model is NOT sent statuses or PRs
+  (they would move the hash on every status change and re-bill the pass): PROGRESS on a theme row is
+  CODE's — shared `sprintLaneSummary` (tickets by column, with / without a pull request), labelled apart
+  from the model's sentence.
 - **VALIDATION** (`validateSprintThemes`): JSON; names cleaned (control characters, whitespace, quotes, a
   trailing full stop), a blank or repeated name refused, over 4 words / 40 characters refused (never
   cut); a key that is not a sprint key DROPPED; a sprint key given twice with two themes → `duplicate`, a
   sprint key never given → `missing`, an unknown theme number → `shape`; unused themes dropped and what
-  remains must number 3–8. ONE retry on a refused answer, both billed; a failed pass stores nothing.
+  remains must number 3–8. ONE retry on a refused answer, both billed; a failed pass stores nothing. The
+  SUMMARY never fails a pass: missing, over `SPRINT_THEME_CAPS.summaryChars` (240), or carrying ANY
+  numeral (`\p{Nd}\p{No}\p{Nl}`, the D4 spelling — figures are code's, beside it) → `summary: null`.
 - **COST**: one `cheapComplete` per changed sprint (tool-less, connectors isolated), recorded under
   feature `sprint_themes` — measured 2026-10-13 on workspace 1 (77 tickets): one call, 3,680 output
   tokens, US$0.0018 as recorded (the ambient-session path under-reports cached input tokens, as for the
   briefs).
-- **READ**: `getSprintGraph` returns `themes` and each node's `theme` only while the stored row is
+- **READ**: `getSprintGraph` returns `themes` (`SprintTheme {name, summary}`; a stored row without a
+  summary reads `null`, `sprintThemesOf`) and each node's `theme` only while the stored row is
   CURRENT for today's hash and version — otherwise null, and the SPA disables "Theme" with "Themes
   appear after Claude reads the sprint".
 
@@ -2126,8 +2136,8 @@ COUNTS EVERY NUMBER; the model picks and words, with NO digit anywhere in its te
   a summary) → themes (Haiku) → paths. A brief pass that did not finish starts nothing after it. The page
   reads `queued` while the chain holds the workspace (`markSprintPathsQueued`, released on every path).
 - **THE INPUT** (`sprintPathsInput`, inside a per-run NONCE fence): the sprint name; the COLUMNS left to
-  right (`statusLayout.columns`, the derived "Merged, not signed off" one marked); counts (tickets, complete,
-  merged-not-signed-off, not complete, open dependencies, chains as "N found, M listed below"); every SPRINT
+  right (`statusLayout.columns`, each with its meaning when the name does not say it); counts (tickets,
+  complete, in product review, not complete, open dependencies, chains as "N found, M listed below"); every SPRINT
   ticket as one line — key, short title, issue type, epic (when it has one — so "design work" is a code fact,
   not a guess from a title), theme, column name + its meaning, assigned / unassigned (⚠ NO PERSON IS NAMED), PR states
   (open / draft / failing checks / merged), the CURRENT brief's summary; the OUTSIDE tickets a sprint ticket
@@ -2168,7 +2178,7 @@ COUNTS EVERY NUMBER; the model picks and words, with NO digit anywhere in its te
   recorded under feature `sprint_paths`, seam `agent`.
 - **THE PACE** (`SprintGraphResponse.pace`, `sprintPaceOf`; free, code only, AI off too): `daysElapsed` /
   `daysTotal` / `timeUsedPct` from the real sprint window (null without one), and over SPRINT tickets:
-  `tickets`, `live` (not in a Complete bucket), `done`, `mergedNotSignedOff` (the derived column),
+  `tickets`, `live` (not in a Complete bucket), `done`, `productReview` (drawn in a Product review column: placed there, or moved by the merge rule),
   `codeMerged` (≥ 1 merged PR, none open, any column), `openDependencies` (`depends_on` edges from a live
   sprint ticket onto anything not Complete), `chains`.
 - **THE PEOPLE** (`SprintGraphResponse.people`, `sprintPeopleOf`): one entry per distinct sprint ASSIGNEE

@@ -33,7 +33,8 @@ export interface BucketDraft {
   statuses: string[];
 }
 
-/** The editor's draft: every bucket with every status, and the merged column switch. */
+/** The editor's draft: every bucket with every status, and the merge rule's switch (move a Code review
+ *  ticket whose pull requests have all merged into Product review). */
 export interface StatusBucketsDraft {
   buckets: BucketDraft[];
   mergedColumn: boolean;
@@ -52,7 +53,7 @@ export function bucketsDraftOf(layout: Pick<SprintStatusLayout, 'buckets' | 'set
   };
 }
 
-/** A fresh bucket id the draft does not use (never the merged column's). */
+/** A fresh bucket id the draft does not use (never the retired merged column's). */
 export function newBucketId(draft: StatusBucketsDraft): string {
   const used = new Set(draft.buckets.map((b) => b.id));
   for (let i = 1; ; i += 1) {
@@ -171,10 +172,11 @@ export function statusPlaceOf(draft: StatusBucketsDraft, name: string): { bucket
 }
 
 /** "Coding begins" / "Coding ends", read off the DRAFT by the server's rule: the first status in a
- *  bucket meaning In progress, and the first in one meaning In review (null when there is none). */
+ *  bucket meaning In progress, and the first in one meaning Code review — else, with no Code review
+ *  status, the first in one meaning Product review (null when there is none). */
 export function codingBoundsOf(draft: StatusBucketsDraft): { begins: string | null; ends: string | null } {
   const first = (m: SprintStage): string | null => draft.buckets.find((b) => b.meaning === m && b.statuses.length > 0)?.statuses[0] ?? null;
-  return { begins: first('in_progress'), ends: first('in_review') };
+  return { begins: first('in_progress'), ends: first('in_review') ?? first('product_review') };
 }
 
 const sameBuckets = (a: readonly BucketDraft[], b: readonly BucketDraft[]): boolean =>
@@ -291,9 +293,9 @@ export function shareWords(share: number): string {
   return `${Math.round(share * 100)}%`;
 }
 
-/** The automatic "In review starts at" rule, read from the shared constants. */
+/** The automatic "Code review starts at" rule, read from the shared constants. */
 export function reviewRuleSentence(): string {
-  return `In review starts at a status whose name reads as review or QA, or the first in-progress status where at least ${shareWords(SPRINT_DELIVERED_MIN_SHARE)} tickets with pull requests have them all merged, and at least ${SPRINT_DELIVERED_MIN_TICKETS} do.`;
+  return `Code review starts at a status whose name reads as review, or the first in-progress status where at least ${shareWords(SPRINT_DELIVERED_MIN_SHARE)} tickets with pull requests have them all merged, and at least ${SPRINT_DELIVERED_MIN_TICKETS} do. A status whose name reads as QA, testing, sign-off, staging or release is Product review.`;
 }
 
 /** "Ready for QA · 4 of 6 merged". */

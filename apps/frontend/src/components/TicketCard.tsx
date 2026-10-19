@@ -1,17 +1,39 @@
 // ONE TICKET CARD for every This Sprint view (Critical path, Theme, People) on the lane board
-// (components/LaneBoard.tsx). The key (mono), the short title (two lines at most), the ticket's theme
-// (People), then its tags as WORDS and the assignee's initials (Critical path, Theme)
+// (components/LaneBoard.tsx). The key (mono), the short title (two lines, always reserved), the ticket's
+// theme (People, one line), then its tags as WORDS and the assignee's initials (Critical path, Theme)
 // (lib/laneBoard.ts `ticketCardTags`: "CI failing", "No PR" or "n PRs · m open", "No owner").
 //
+//   HEIGHT   every card is the same height whatever it carries: the title keeps two lines, the theme
+//            one, and the initials' slot is held open when nobody is assigned. Cards fill their slot,
+//            so a grid row's cards line up.
 //   BORDER   (lib/laneBoard.ts `ticketCardBorder`) solid accent, 2px = on a critical path; dashed = waiting on another unfinished ticket;
 //            both = dashed accent. A ticket outside the sprint is FAINT: a light dashed border on a
 //            tinted ground (its text stays at full contrast). The state is also in the accessible name.
-//   CLICK    the card is a button: it opens the ticket's story view (`onOpen` — the caller's
-//            `useOpenStory`), Open PRs style, with its Story section open.
+//            The board's key (Activity/SprintBoards.tsx `CardBorderKey`) names each style.
+//   CLICK    the card opens a POPOVER IN PLACE (Activity/StoryPeek.tsx — the story's summary and its
+//            criteria, read on click), dismissed by a click outside or Escape. The small arrow in the
+//            corner, and the popover's "Open story", open the story tab (`onOpen` — the caller's
+//            `useOpenStory`).
+import { useEffect, useId, useState } from 'react';
+import {
+  autoUpdate,
+  flip,
+  FloatingFocusManager,
+  FloatingPortal,
+  offset,
+  shift,
+  size,
+  useClick,
+  useDismiss,
+  useFloating,
+  useInteractions,
+} from '@floating-ui/react';
 import type { SprintGraphNode } from '@pierre-review/shared';
+import { claimActivePopover } from '../lib/activePopover.js';
 import { initialsOf } from '../lib/openPrsStacks.js';
 import { ticketCardBorder, ticketCardTags } from '../lib/laneBoard.js';
-import { WarningIcon } from './Icons.js';
+import { StoryPeek } from './Activity/StoryPeek.js';
+import { ArrowIcon, WarningIcon } from './Icons.js';
 
 export function TicketCard({
   node,
@@ -26,11 +48,51 @@ export function TicketCard({
   waiting: boolean;
   /** 'initials' = the assignee (Critical path, Theme); 'theme' = the ticket's theme (People). */
   show: 'initials' | 'theme';
+  /** Open the ticket's story tab. */
   onOpen: (node: SprintGraphNode) => void;
   cardRef?: (el: HTMLElement | null) => void;
 }): JSX.Element {
   const tags = ticketCardTags(node);
   const title = node.title !== '' ? node.title : 'Not read';
+  const [open, setOpen] = useState(false);
+  const popId = useId();
+  const { refs, floatingStyles, context } = useFloating({
+    open,
+    onOpenChange: setOpen,
+    strategy: 'fixed',
+    placement: 'bottom-start',
+    middleware: [
+      offset(6),
+      flip({ fallbackPlacements: ['top-start', 'right-start', 'left-start'] }),
+      shift({ padding: 8 }),
+      size({
+        padding: 8,
+        apply({ availableHeight, elements }) {
+          elements.floating.style.maxHeight = `${Math.max(180, Math.min(availableHeight, 480))}px`;
+        },
+      }),
+    ],
+    whileElementsMounted: autoUpdate,
+  });
+  const click = useClick(context);
+  // Escape is captured below (the global keyboard hook would otherwise also leave the overlay).
+  const dismiss = useDismiss(context, { escapeKey: false });
+  const { getReferenceProps, getFloatingProps } = useInteractions([click, dismiss]);
+  useEffect(() => {
+    if (!open) return;
+    return claimActivePopover(() => setOpen(false));
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return;
+      e.stopImmediatePropagation();
+      setOpen(false);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [open]);
+
   const name = [
     `${node.key}: ${title}`,
     node.status != null ? node.status.name : null,
@@ -40,48 +102,101 @@ export function TicketCard({
     ...tags,
     critical ? 'on a critical path' : null,
     waiting ? 'waiting on another ticket' : null,
-    'opens its story',
+    'shows its story here',
   ]
     .filter(Boolean)
     .join('; ');
+  const openStory = (): void => {
+    setOpen(false);
+    onOpen(node);
+  };
   return (
-    <button
-      ref={cardRef}
-      type="button"
-      aria-label={name}
+    <div
+      ref={(el) => {
+        refs.setReference(el);
+        cardRef?.(el);
+      }}
       data-ticket={node.key}
-      onClick={() => onOpen(node)}
-      className={`block w-full min-w-0 rounded-md px-2 py-1.5 text-left hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${ticketCardBorder({
+      className={`relative flex w-full min-w-0 flex-col rounded-md hover:shadow-md ${open ? 'shadow-md' : ''} ${ticketCardBorder({
         critical,
         waiting,
         ghost: node.ghost,
       })}`}
     >
-      <span className="block break-all font-mono text-[11px] font-semibold leading-snug text-gray-700 dark:text-gray-200">{node.key}</span>
-      <span aria-hidden className="mt-0.5 line-clamp-2 break-words text-[12px] leading-snug text-gray-900 dark:text-gray-50">
-        {title}
-      </span>
-      {show === 'theme' && node.theme != null && (
-        <span aria-hidden className="mt-0.5 inline-block max-w-full break-words rounded bg-gray-100 px-1 text-[11px] leading-snug text-gray-700 dark:bg-gray-800 dark:text-gray-200">
-          {node.theme}
+      <button
+        type="button"
+        aria-label={name}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? popId : undefined}
+        {...getReferenceProps()}
+        // A 2px (critical) border takes 1px of the padding back, so every card is the same size.
+        className={`flex w-full min-w-0 flex-col rounded-md text-left ${critical && !node.ghost ? 'px-[7px] py-[5px]' : 'px-2 py-1.5'} focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500`}
+      >
+        <span className="block truncate pr-4 font-mono text-[11px] font-semibold leading-snug text-gray-700 dark:text-gray-200">{node.key}</span>
+        {/* Two lines held open (12px × leading-snug), so a one-line title is as tall as a two-line one. */}
+        <span aria-hidden className="mt-0.5 line-clamp-2 min-h-[2.75em] break-words text-[12px] leading-snug text-gray-900 dark:text-gray-50">
+          {title}
         </span>
-      )}
-      <span aria-hidden className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px] leading-snug">
-        {tags.map((t) => (
-          <span
-            key={t}
-            className={t === 'CI failing' ? 'inline-flex items-center gap-0.5 font-medium text-rose-700 dark:text-rose-300' : 'text-gray-600 dark:text-gray-300'}
-          >
-            {t === 'CI failing' && <WarningIcon size={10} />}
-            {t}
-          </span>
-        ))}
-        {show === 'initials' && node.assignee != null && (
-          <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-gray-200 px-0.5 text-[11px] font-semibold leading-none text-gray-800 dark:bg-gray-700 dark:text-gray-100">
-            {initialsOf(node.assignee.name)}
+        {show === 'theme' && (
+          <span aria-hidden className="mt-0.5 flex h-[1.375em] min-w-0 text-[11px] leading-snug">
+            {node.theme != null && (
+              <span className="truncate rounded bg-gray-100 px-1 text-gray-700 dark:bg-gray-800 dark:text-gray-200">{node.theme}</span>
+            )}
           </span>
         )}
-      </span>
-    </button>
+        {/* One line, always 20px (the initials' height), never wrapping: only the PR-count tag
+            shrinks and truncates, so "CI failing" and "No owner" can never fall off the face. */}
+        <span aria-hidden className="mt-0.5 flex h-5 w-full items-center gap-x-1.5 text-[11px] leading-5">
+          <span className="flex h-5 min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
+            {tags.map((t) => (
+              <span
+                key={t}
+                className={`h-5 ${t === 'CI failing' || t === 'No owner' ? 'shrink-0' : 'min-w-0 truncate'} ${t === 'CI failing' ? 'inline-flex items-center gap-0.5 font-medium text-rose-700 dark:text-rose-300' : 'text-gray-600 dark:text-gray-300'}`}
+              >
+                {t === 'CI failing' && <WarningIcon size={10} />}
+                {t}
+              </span>
+            ))}
+          </span>
+          {show === 'initials' &&
+            (node.assignee != null ? (
+              <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-gray-200 px-0.5 text-[11px] font-semibold leading-none text-gray-800 dark:bg-gray-700 dark:text-gray-100">
+                {initialsOf(node.assignee.name)}
+              </span>
+            ) : (
+              <span className="h-5 w-5 shrink-0" />
+            ))}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={openStory}
+        aria-label={`Open ${node.key}'s story`}
+        title="Open story"
+        className="absolute right-0.5 top-0.5 rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-50"
+      >
+        <ArrowIcon size={11} />
+      </button>
+      {open && (
+        <FloatingPortal>
+          <FloatingFocusManager context={context} modal={false} returnFocus initialFocus={-1}>
+            <div
+              ref={refs.setFloating}
+              id={popId}
+              role="dialog"
+              aria-label={`${node.key} story`}
+              style={floatingStyles}
+              {...getFloatingProps()}
+              data-noactivate
+              data-testid="story-peek"
+              className="z-[60] w-[26rem] max-w-[92vw] overflow-y-auto rounded-lg border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+            >
+              <StoryPeek node={node} onOpenStory={openStory} />
+            </div>
+          </FloatingFocusManager>
+        </FloatingPortal>
+      )}
+    </div>
   );
 }

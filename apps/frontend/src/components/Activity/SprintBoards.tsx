@@ -10,6 +10,7 @@ import {
   type SprintStage,
 } from '@pierre-review/shared';
 import {
+  cellKey,
   collapsedColumns,
   countTable,
   layoutBoard,
@@ -17,6 +18,7 @@ import {
   pathsBoard,
   peopleBoard,
   themesBoard,
+  ticketCardBorder,
   type BoardLayout,
   type LaneSegment,
   type SprintBoard,
@@ -26,20 +28,25 @@ import {
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { AiRunGate } from '../AiSetup.js';
 import { InfoButton } from '../InfoModal.js';
-import { LaneBoard } from '../LaneBoard.js';
+import { HoverPopover } from '../HoverPopover.js';
+import { LaneBoard, useBoardObstacles } from '../LaneBoard.js';
 import { TicketCard } from '../TicketCard.js';
 import { SprintProgressBar } from './SprintProgressBar.js';
 import { sprintPathsView } from './sprintPathsModel.js';
 
 // ACTIVITY → THIS SPRINT: THE THREE VIEWS (docs/FRONTEND.md § Activity → This Sprint). Three independent
 // angles on the same sprint, each a LANE BOARD (components/LaneBoard.tsx; layout lib/laneBoard.ts) over
-// the SAME columns — the workspace's status buckets in order, plus the derived "Merged, not signed off":
+// the SAME columns — the workspace's status buckets in order (Code review, Product review and the rest):
 //   • CRITICAL PATH (the landing view) — CODE's pace strip, then one lane per stored critical path (the
 //     sprint builder's; riskiest first, each with its risk as a word, its title and its one sentence of
 //     advice), the call-outs (Claude's, then Limn's own), and a theme × column count of every ticket.
-//   • THEME — one lane per theme, "Other" last.
-//   • PEOPLE — one lane per assignee, alphabetical, Unassigned last.
-// Every card is a TicketCard; every click opens the ticket's story view (`onOpen`).
+//   • THEME — one lane per theme, "No theme" last; each header carries Claude's sentence on what the
+//     work involves (the themes pass), then CODE's line: tickets by column and pull-request presence.
+//   • PEOPLE — one lane per assignee, alphabetical, Unassigned last; each header carries CODE's line.
+// Theme and People lanes draw a colour bar of their tickets by column; hovering (or focusing) it shows
+// the key. Under each board, a key to the card borders. Every card is a TicketCard: a click shows its
+// story in place; its corner arrow opens the ticket's story view (`onOpen`). A Complete column's
+// "n tickets" opens that lane's cell only.
 //
 // ⚠ PREP, NOT SCORING. The People view lists people ALPHABETICALLY — never by tickets, load or reviews
 // waiting — and shows no comparison between them (the People report's guardrail, db/person-period.ts).
@@ -49,7 +56,7 @@ const MUTED = 'text-gray-600 dark:text-gray-300';
 type OpenTicket = (node: SprintGraphNode) => void;
 
 /** The Complete columns the reader opened (each view keeps its own). */
-function useShownColumns(): [Set<string>, (id: string) => void] {
+function useToggleSet(): [Set<string>, (id: string) => void] {
   const [shown, setShown] = useState<Set<string>>(() => new Set());
   const toggle = useCallback((id: string) => {
     setShown((s) => {
@@ -75,10 +82,22 @@ function SprintLaneBoard({
   show: 'initials' | 'theme';
   onOpen: OpenTicket;
 }): JSX.Element {
-  const [shown, toggle] = useShownColumns();
+  // The Complete columns the reader opened, and the single lane cells ("n tickets") opened in one.
+  const [shown, toggle] = useToggleSet();
+  const [cells, toggleCellKey] = useToggleSet();
+  const toggleCell = useCallback((lane: string, column: string) => toggleCellKey(cellKey(lane, column)), [toggleCellKey]);
   const layout = useMemo(
-    () => layoutBoard<SprintLaneData, SprintCardData>({ ...board, collapsed: collapsedColumns(board.columns, shown) }),
-    [board, shown],
+    () => layoutBoard<SprintLaneData, SprintCardData>({ ...board, collapsed: collapsedColumns(board.columns, shown), expanded: cells }),
+    [board, shown, cells],
+  );
+  const borders = useMemo(
+    () => ({
+      critical: layout.cards.some((c) => c.data.critical && !c.data.node.ghost),
+      waiting: layout.cards.some((c) => c.data.waiting && !c.data.node.ghost),
+      ghost: layout.cards.some((c) => c.data.node.ghost && !c.data.critical),
+      ghostCritical: layout.cards.some((c) => c.data.node.ghost && c.data.critical),
+    }),
+    [layout.cards],
   );
   return (
     <LaneBoard
@@ -86,6 +105,8 @@ function SprintLaneBoard({
       layout={layout}
       laneWidth={laneWidth}
       onToggleColumn={toggle}
+      onToggleCell={toggleCell}
+      legend={<CardBorderKey {...borders} />}
       renderLane={(l) => <LaneHeader lane={l} />}
       renderCard={(c, ref) => (
         <TicketCard node={c.data.node} critical={c.data.critical} waiting={c.data.waiting} show={show} onOpen={onOpen} cardRef={ref} />
@@ -116,49 +137,117 @@ function LaneHeader({ lane }: { lane: BoardLayout<SprintLaneData, SprintCardData
     return (
       <div className="space-y-1">
         {name}
-        <p className={`text-[11px] ${MUTED}`}>
-          {d.live} live · {d.merged} merged
-        </p>
-        <SegmentBar segments={d.segments} />
+        {d.summary != null && <p className="text-[12px] leading-snug text-gray-700 dark:text-gray-200">{d.summary}</p>}
+        <LaneLine progress={d.progress} code={d.code} />
+        <SegmentBar segments={d.segments} lane={lane.label} />
       </div>
     );
   }
   return (
-    <div className="space-y-0.5">
+    <div className="space-y-1">
       {name}
       <p className={`text-[11px] ${MUTED}`}>
         {d.tickets} {d.tickets === 1 ? 'ticket' : 'tickets'}
         {/* null = no GitHub account mapped: say nothing, never 0. */}
         {d.reviewsWaiting != null && ` · ${d.reviewsWaiting} ${d.reviewsWaiting === 1 ? 'review' : 'reviews'} waiting`}
       </p>
+      <LaneLine progress={d.progress} code={d.code} />
+      <SegmentBar segments={d.segments} lane={lane.label} />
     </div>
   );
 }
 
-const SEGMENT_FILL: Record<SprintStage | 'merged' | 'unknown', string> = {
+/** CODE's row line: the lane's tickets by column, then how many have a pull request. */
+function LaneLine({ progress, code }: { progress: string; code: string }): JSX.Element | null {
+  if (progress === '' && code === '') return null;
+  return (
+    <p className={`text-[11px] leading-snug ${MUTED}`}>
+      {progress}
+      {progress !== '' && code !== '' && <br />}
+      {code}
+    </p>
+  );
+}
+
+const SEGMENT_FILL: Record<SprintStage | 'unknown', string> = {
   not_started: 'bg-gray-300 dark:bg-gray-600',
   in_progress: 'bg-sky-500',
   in_review: 'bg-amber-500',
-  merged: 'bg-emerald-400',
+  product_review: 'bg-emerald-400',
   done: 'bg-emerald-700 dark:bg-emerald-500',
   unknown: 'bg-gray-200 dark:bg-gray-700',
 };
 
-/** A theme lane's tickets per column, as one bar. The words beside it carry the numbers; the bar's
- *  accessible name lists every part. */
-function SegmentBar({ segments }: { segments: readonly LaneSegment[] }): JSX.Element | null {
+/** A lane's tickets per column, as one bar. Hovering or focusing it shows its key (each part's colour,
+ *  column and count) beside it, clear of the cards where it can be. */
+function SegmentBar({ segments, lane }: { segments: readonly LaneSegment[]; lane: string }): JSX.Element | null {
+  const obstacles = useBoardObstacles();
   const total = segments.reduce((s, x) => s + x.count, 0);
   if (total === 0) return null;
+  const words = segments.map((s) => `${s.count} ${s.name}`).join(', ');
   return (
-    <div role="img" aria-label={segments.map((s) => `${s.name} ${s.count}`).join(', ')} className="flex h-1.5 w-full max-w-[9rem] overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
-      {segments.map((s) => (
-        <span
-          key={s.column}
-          className={SEGMENT_FILL[s.derived ? 'merged' : (s.meaning ?? 'unknown')]}
-          style={{ width: `${(100 * s.count) / total}%` }}
-        />
+    <HoverPopover
+      label={`${lane}: ${words}`}
+      obstacles={obstacles}
+      testId="segment-bar"
+      className="block w-full max-w-[9rem] py-1"
+      content={
+        <div data-testid="segment-key">
+          <p className="font-semibold">Tickets by column</p>
+          <ul className="mt-1 space-y-0.5">
+            {segments.map((s) => (
+              <li key={s.column} className="flex items-center gap-1.5">
+                <span aria-hidden className={`inline-block h-2 w-3 shrink-0 rounded-sm ${SEGMENT_FILL[s.meaning ?? 'unknown']}`} />
+                <span className="min-w-0 flex-1">{s.name}</span>
+                <span className="tabular-nums">{s.count}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-gray-600 dark:text-gray-300">Each part is as wide as its share of the row&rsquo;s {total} tickets.</p>
+        </div>
+      }
+    >
+      <span aria-hidden className="flex h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+        {segments.map((s) => (
+          <span key={s.column} className={SEGMENT_FILL[s.meaning ?? 'unknown']} style={{ width: `${(100 * s.count) / total}%` }} />
+        ))}
+      </span>
+    </HoverPopover>
+  );
+}
+
+/** The key to the card borders, under a board: only the styles the board draws. */
+function CardBorderKey({
+  critical,
+  waiting,
+  ghost,
+  ghostCritical,
+}: {
+  critical: boolean;
+  waiting: boolean;
+  ghost: boolean;
+  ghostCritical: boolean;
+}): JSX.Element | null {
+  const items: Array<{ key: string; label: string; swatch: string }> = [];
+  if (critical) items.push({ key: 'c', label: 'On a critical path', swatch: ticketCardBorder({ critical: true, waiting: false, ghost: false }) });
+  if (waiting) items.push({ key: 'w', label: 'Waiting on another ticket', swatch: ticketCardBorder({ critical: false, waiting: true, ghost: false }) });
+  if (critical && waiting) {
+    items.push({ key: 'cw', label: 'On a path and waiting', swatch: ticketCardBorder({ critical: true, waiting: true, ghost: false }) });
+  }
+  if (ghost) items.push({ key: 'g', label: 'Outside the sprint', swatch: ticketCardBorder({ critical: false, waiting: false, ghost: true }) });
+  if (ghostCritical) {
+    items.push({ key: 'gc', label: 'Outside the sprint, on a path', swatch: ticketCardBorder({ critical: true, waiting: false, ghost: true }) });
+  }
+  if (items.length === 0) return null;
+  return (
+    <ul aria-label="Card borders" data-testid="card-border-key" className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-gray-700 dark:text-gray-300">
+      {items.map((it) => (
+        <li key={it.key} className="inline-flex items-center gap-1.5">
+          <span aria-hidden className={`inline-block h-3.5 w-6 rounded ${it.swatch}`} />
+          {it.label}
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }
 
@@ -178,11 +267,11 @@ export function SprintPathsView({ data, onOpen }: { data: SprintGraphResponse; o
   const paths = view.kind === 'paths' ? view.paths : null;
   const columns = data.statusLayout?.columns ?? null;
   const board = useMemo(() => pathsBoard({ nodes: data.nodes, edges: data.edges, paths, columns }), [data.nodes, data.edges, paths, columns]);
-  const mergedColumn = (columns ?? []).some((c) => c.derived);
+  const productReview = (columns ?? []).some((c) => c.meaning === 'product_review');
   const calm = paths != null && paths.paths.length === 0;
   return (
     <section aria-label="Critical path" className="space-y-3" data-testid="sprint-paths" data-state={data.pathsStatus.state}>
-      {data.pace != null && <PaceStrip pace={data.pace} mergedColumn={mergedColumn} />}
+      {data.pace != null && <PaceStrip pace={data.pace} productReview={productReview} />}
       {heading && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <h4 className="text-sm font-medium text-gray-800 dark:text-gray-100">{calm ? 'No critical paths in this sprint.' : 'Critical paths'}</h4>
@@ -214,8 +303,8 @@ export function SprintPathsView({ data, onOpen }: { data: SprintGraphResponse; o
   );
 }
 
-function PaceStrip({ pace, mergedColumn }: { pace: SprintPace; mergedColumn: boolean }): JSX.Element {
-  const items = paceItems(pace, { mergedColumn });
+function PaceStrip({ pace, productReview }: { pace: SprintPace; productReview: boolean }): JSX.Element {
+  const items = paceItems(pace, { productReview });
   return (
     <dl data-testid="sprint-pace" aria-label="Pace" className="flex flex-wrap gap-x-6 gap-y-2 rounded-md border border-gray-200 px-3 py-2 dark:border-gray-800">
       {items.map((it) => (
@@ -260,7 +349,7 @@ function PathsInfo({ aiEnabled }: { aiEnabled: boolean }): JSX.Element {
       </p>
       <p>
         <strong>Pace</strong>: the day of the sprint (today counts), then how many of its tickets have their code merged (at least one
-        pull request merged and none open), sit in &ldquo;Merged, not signed off&rdquo;, or are in a bucket that means Complete. Open
+        pull request merged and none open), sit in a Product review bucket, or are in a bucket that means Complete. Open
         dependencies counts the links from an unfinished ticket to another unfinished one.
       </p>
       <p>Limn writes some call-outs itself, from what it has stored:</p>
@@ -270,7 +359,7 @@ function PathsInfo({ aiEnabled }: { aiEnabled: boolean }): JSX.Element {
           visit. A visit ends after {GAP_MINUTES} minutes away from this page.
         </li>
         <li>
-          <strong>Out of step</strong>: the tracker and the code disagree &mdash; In review with no open pull request, Complete with one
+          <strong>Out of step</strong>: the tracker and the code disagree &mdash; in code review with no open pull request, Complete with one
           still open, or Not started with one open.
         </li>
         <li>

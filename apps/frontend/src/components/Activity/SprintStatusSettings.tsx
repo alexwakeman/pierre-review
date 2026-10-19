@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type DragEvent } from 'react';
 import {
   SPRINT_BUCKET_NAME_MAX,
   SPRINT_BUCKETS_MAX,
-  SPRINT_MERGED_COLUMN_LABEL,
   SPRINT_STAGE_LABEL,
   SPRINT_STAGES,
   SPRINT_STATUS_ORDER_MAX,
@@ -38,9 +37,10 @@ import {
 
 // Activity → This Sprint → Settings → STATUSES: the workspace's BUCKETS of tracker statuses (shared
 // sprint-stories.ts § The status layout). Each bucket has a name and a MEANING (Not started, In
-// progress, In review, Complete) — meanings may not go backwards. AUTOMATIC (four buckets, one per
-// stage) until a reader changes it here, per workspace. A DRAFT until Save; Cancel drops it; "Reset to
-// automatic" clears the override. The "Merged, not signed off" column switch rides the same Save.
+// progress, Code review, Product review, Complete) — meanings may not go backwards. AUTOMATIC (five
+// buckets, one per stage) until a reader changes it here, per workspace. A DRAFT until Save; Cancel
+// drops it; "Reset to automatic" clears the override. The merge rule's switch (a Code review ticket
+// whose pull requests have all merged moves into the first Product review bucket) rides the same Save.
 //
 // TWO WAYS TO MOVE A STATUS, one draft:
 //   • NATIVE HTML5 drag and drop (no library) — within a bucket and between buckets, a drop line at the
@@ -77,6 +77,7 @@ export function SprintStatusSettings({
   const isDefault =
     layout.settings.buckets == null && layout.settings.mergedColumn === SPRINT_STATUS_SETTINGS_DEFAULT.mergedColumn;
   const empty = draft.buckets.every((b) => b.statuses.length === 0);
+  const hasProductReview = draft.buckets.some((b) => b.meaning === 'product_review');
   const changed = bucketsDraftChanged(layout, draft);
   const problem = changed ? bucketsDraftProblem(layout, draft) : null;
   const leftOut = changed ? statusesLeftOutOnSave(layout, draft) : new Set<string>();
@@ -158,14 +159,18 @@ export function SprintStatusSettings({
         <InfoButton title="Statuses">
           <p>
             Each bucket is a column on This Sprint. Put any of your tracker’s statuses in a bucket, and say what the
-            bucket means: Not started, In progress, In review or Complete. Buckets must go in that order, but you can
-            have two of one kind, such as two review stages.
+            bucket means: Not started, In progress, Code review, Product review or Complete. Buckets must go in that
+            order, but you can have two of one kind, such as two review stages. Product review is for QA, testing and
+            other sign-offs after the code is reviewed.
           </p>
           <p>
             Drag a status to move it, within a bucket or into another one. The arrow buttons do the same from the
             keyboard; moving past the top or bottom of a bucket carries it into the next.
           </p>
-          <p>Coding begins at the first In progress status, and ends at the first In review status.</p>
+          <p>
+            Coding begins at the first In progress status, and ends at the first Code review status (or the first
+            Product review status when there is no Code review one).
+          </p>
           <p>Until you save buckets, they come from {statusOrderSourceLabel(layout.orderSource, { inSentence: true })}.</p>
           <p>{reviewRuleSentence()}</p>
           {layout.evidence.length > 0 && (
@@ -364,21 +369,20 @@ export function SprintStatusSettings({
           <input
             type="checkbox"
             checked={draft.mergedColumn}
+            disabled={!hasProductReview}
             onChange={(e) => setDraft({ ...draft, mergedColumn: e.target.checked })}
           />
-          Show a “{SPRINT_MERGED_COLUMN_LABEL}” column
+          Move tickets whose pull requests have all merged into Product review
         </label>
-        <InfoButton title={SPRINT_MERGED_COLUMN_LABEL}>
+        <InfoButton title="Merged tickets">
           <p>
-            A ticket moves to this column when its bucket means In progress or In review, and every pull request on it is
-            merged. Closed pull requests that were never merged do not count.
+            A ticket in a Code review bucket moves to your first Product review bucket when every pull request on it is
+            merged. Closed pull requests that were never merged do not count. Its tracker status does not change.
           </p>
-          <p>
-            It sits after your last In review bucket, or your last In progress bucket when you have no In review one.
-            With neither, it is not shown.
-          </p>
+          <p>With no Product review bucket, nothing moves.</p>
         </InfoButton>
       </div>
+      {!hasProductReview && <p className={`text-xs ${MUTED}`}>Add a bucket meaning Product review to use this.</p>}
       {leftOut.size > 0 && (
         <p className={`text-xs ${MUTED}`} data-testid="sprint-status-left-out">
           Save keeps {SPRINT_STATUS_ORDER_MAX} statuses at most, so it leaves out {[...leftOut].map((n) => `“${n}”`).join(', ')}.

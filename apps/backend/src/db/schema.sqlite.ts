@@ -945,6 +945,8 @@ export const autoMergeRequests = sqliteTable(
         'queued_local',
         'merging',
         'retrying',
+        // The back-off: checks failed, no GitHub call until the synced CI is green again.
+        'checks_failed',
       ],
     }),
     createdAt: integer('created_at', { mode: 'timestamp' })

@@ -1,7 +1,7 @@
 // THE LANE BOARD'S PURE FOLDS (test/laneBoard.test.ts; docs/FRONTEND.md § Activity → This Sprint).
 //
 // ONE board shape draws all three This Sprint views (components/LaneBoard.tsx): COLUMNS across (the
-// workspace's status buckets in order, plus the derived "Merged, not signed off" column), LANES down
+// workspace's status buckets in order — Code review, Product review and the rest), LANES down
 // (a critical path, a theme or a person), one TicketCard per ticket in a padded slot, and right-angled
 // arrows through the gaps (lib/designGrid.ts `routeArrow`, the design grid's router). The first half of
 // this file is the generic layout (which grid row and column each card takes, which arrows can be
@@ -11,7 +11,8 @@
 //   COLUMNS   `statusLayout.columns`, verbatim. "Outside the sprint" is added at the LEFT only for the
 //             Critical path view and only when a path names a ticket outside the sprint; "Status not
 //             known" at the right only when a card has no column. A Complete column is COLLAPSED by
-//             default (a count and "Show"), so a sprint with many done or won't-do tickets still fits.
+//             default (a count and "Show"), so a sprint with many done or won't-do tickets still fits;
+//             a lane's own "n tickets" opens THAT lane's cell only (`expanded`, `cellKey`).
 //   LANES     each lane is as many grid rows as its fullest cell; an empty lane is not drawn.
 //   ARROWS    a `depends_on` edge, drawn FROM the ticket waited on TO the one that waits (the flow of
 //             work). Only between two DRAWN cards — a card in a collapsed column draws no arrow. A
@@ -20,9 +21,9 @@
 // ⚠ NOTHING HERE RANKS PEOPLE. The People view's lanes are alphabetical, Unassigned last — never by
 // load, tickets or reviews (the People report's guardrail: prep, not scoring).
 import {
-  SPRINT_MERGED_COLUMN_LABEL,
   SPRINT_STAGE_LABEL,
   personNameKey,
+  sprintLaneSummary,
   type SprintColumn,
   type SprintGraphEdge,
   type SprintGraphNode,
@@ -41,8 +42,6 @@ export interface BoardColumn {
   name: string;
   /** The bucket's meaning; null for "Outside the sprint" and "Status not known". */
   meaning: SprintStage | null;
-  /** The derived "Merged, not signed off" column. */
-  derived: boolean;
 }
 
 export interface BoardLaneDef<L> {
@@ -75,10 +74,12 @@ export interface BoardArrowDef {
 }
 
 export interface BoardLayout<L, C> {
-  columns: Array<BoardColumn & { index: number; collapsed: boolean; collapsible: boolean; count: number }>;
+  /** `widened`: a collapsed column with at least one lane's cell opened — it takes a full track. */
+  columns: Array<BoardColumn & { index: number; collapsed: boolean; collapsible: boolean; count: number; widened: boolean }>;
   /** `row` is the lane's first grid row (0-based, header not counted); `span` its rows (≥ 1);
-   *  `hidden` the lane's cards per collapsed column. */
-  lanes: Array<BoardLaneDef<L> & { row: number; span: number; size: number; hidden: Map<string, number> }>;
+   *  `hidden` the lane's cards per collapsed column it has not opened; `opened` the collapsed columns
+   *  whose cards this lane shows (with their counts, so the cell can offer "Hide"). */
+  lanes: Array<BoardLaneDef<L> & { row: number; span: number; size: number; hidden: Map<string, number>; opened: Map<string, number> }>;
   cards: Array<BoardCardDef<C> & { row: number; col: number }>;
   arrows: Array<BoardArrowDef & { key: string; n: number | null }>;
   /** The numbered key under the board: one entry per distinct label, in first-seen order. */
@@ -86,10 +87,13 @@ export interface BoardLayout<L, C> {
   rows: number;
 }
 
-/** A Complete bucket folds to a count (never the derived merged column, never a pseudo-column). */
-export function isCollapsible(c: Pick<BoardColumn, 'meaning' | 'derived'>): boolean {
-  return c.meaning === 'done' && !c.derived;
+/** A Complete bucket folds to a count (never a pseudo-column). */
+export function isCollapsible(c: Pick<BoardColumn, 'meaning'>): boolean {
+  return c.meaning === 'done';
 }
+
+/** The key of one lane's cell in one column (the per-lane "n tickets" toggle). */
+export const cellKey = (laneId: string, columnId: string): string => `${laneId}|${columnId}`;
 
 /** The collapsed columns: every collapsible column the reader has not asked to see. */
 export function collapsedColumns(columns: ReadonlyArray<BoardColumn>, shown: ReadonlySet<string>): Set<string> {
@@ -153,7 +157,11 @@ export function layoutBoard<L, C>(input: {
   cards: ReadonlyArray<BoardCardDef<C>>;
   arrows: ReadonlyArray<BoardArrowDef>;
   collapsed: ReadonlySet<string>;
+  /** `cellKey(lane, column)`s of collapsed cells a reader opened: that lane's cards in that column are
+   *  drawn; every other lane keeps its count. */
+  expanded?: ReadonlySet<string>;
 }): BoardLayout<L, C> {
+  const expanded = input.expanded ?? new Set<string>();
   const colIndex = new Map(input.columns.map((c, i) => [c.id, i]));
   const known = input.cards.filter((c) => colIndex.has(c.column));
   // Distinct UNITS per column (a ticket drawn on two paths is one ticket in that column's count).
@@ -170,8 +178,10 @@ export function layoutBoard<L, C>(input: {
     collapsible: isCollapsible(c),
     collapsed: isCollapsible(c) && input.collapsed.has(c.id),
     count: count.get(c.id) ?? 0,
+    widened: false,
   }));
   const isCollapsed = new Set(columns.filter((c) => c.collapsed).map((c) => c.id));
+  const widened = new Set<string>();
   const byLane = new Map<string, Array<BoardCardDef<C>>>();
   for (const c of known) {
     const l = byLane.get(c.lane);
@@ -181,7 +191,7 @@ export function layoutBoard<L, C>(input: {
   const lanes: BoardLayout<L, C>['lanes'] = [];
   const seen = new Set<string>();
   // Pass 1: each lane's cards per shown column (input order), its start row and its span.
-  const stacks: Array<{ start: number; cols: Map<string, Array<BoardCardDef<C>>> }> = [];
+  const stacks: Array<{ start: number; cols: Map<string, Array<BoardCardDef<C>>>; below: Set<string> }> = [];
   let row = 0;
   for (const lane of input.lanes) {
     const mine = (byLane.get(lane.id) ?? []).filter((c) => {
@@ -191,26 +201,34 @@ export function layoutBoard<L, C>(input: {
     });
     if (mine.length === 0) continue;
     const hidden = new Map<string, number>();
+    const opened = new Map<string, number>();
     const cols = new Map<string, Array<BoardCardDef<C>>>();
     for (const c of mine) {
       if (isCollapsed.has(c.column)) {
-        hidden.set(c.column, (hidden.get(c.column) ?? 0) + 1);
-        continue;
+        if (!expanded.has(cellKey(lane.id, c.column))) {
+          hidden.set(c.column, (hidden.get(c.column) ?? 0) + 1);
+          continue;
+        }
+        opened.set(c.column, (opened.get(c.column) ?? 0) + 1);
+        widened.add(c.column);
       }
       const list = cols.get(c.column);
       if (list == null) cols.set(c.column, [c]);
       else list.push(c);
     }
-    const span = Math.max(1, ...[...cols.values()].map((l) => l.length));
-    lanes.push({ ...lane, row, span, size: mine.length, hidden });
-    stacks.push({ start: row, cols });
+    // An opened cell's first row holds its "Hide" toggle; its cards sit below it.
+    const span = Math.max(1, ...[...cols].map(([col, l]) => l.length + (opened.has(col) ? 1 : 0)));
+    lanes.push({ ...lane, row, span, size: mine.length, hidden, opened });
+    stacks.push({ start: row, cols, below: new Set(opened.keys()) });
     row += span;
   }
+  for (const c of columns) c.widened = widened.has(c.id);
   orderByLinks(stacks, input.arrows, input.columns.map((c) => c.id));
   const cards: BoardLayout<L, C>['cards'] = [];
   for (const st of stacks) {
     for (const [column, list] of st.cols) {
-      list.forEach((c, k) => cards.push({ ...c, row: st.start + k, col: colIndex.get(column)! }));
+      const off = st.below.has(column) ? 1 : 0;
+      list.forEach((c, k) => cards.push({ ...c, row: st.start + k + off, col: colIndex.get(column)! }));
     }
   }
   const placed = new Set(cards.map((c) => c.id));
@@ -260,9 +278,9 @@ export function sprintColumns(
   need: { outside: boolean; unknown: boolean },
 ): BoardColumn[] {
   const out: BoardColumn[] = [];
-  if (need.outside) out.push({ id: OUTSIDE_COLUMN_ID, name: OUTSIDE_COLUMN_LABEL, meaning: null, derived: false });
-  for (const c of layoutColumns ?? []) out.push({ id: c.id, name: c.name, meaning: c.meaning, derived: c.derived });
-  if (need.unknown) out.push({ id: UNKNOWN_COLUMN_ID, name: UNKNOWN_COLUMN_LABEL, meaning: null, derived: false });
+  if (need.outside) out.push({ id: OUTSIDE_COLUMN_ID, name: OUTSIDE_COLUMN_LABEL, meaning: null });
+  for (const c of layoutColumns ?? []) out.push({ id: c.id, name: c.name, meaning: c.meaning });
+  if (need.unknown) out.push({ id: UNKNOWN_COLUMN_ID, name: UNKNOWN_COLUMN_LABEL, meaning: null });
   return out;
 }
 
@@ -336,16 +354,52 @@ export interface SprintCardData {
 
 export type SprintLaneData =
   | { kind: 'path'; risk: SprintPathRisk; advice: string }
-  | { kind: 'theme'; other: boolean; live: number; merged: number; segments: LaneSegment[] }
-  | { kind: 'person'; unassigned: boolean; tickets: number; reviewsWaiting: number | null };
+  | {
+      kind: 'theme';
+      other: boolean;
+      live: number;
+      merged: number;
+      segments: LaneSegment[];
+      /** Claude's one or two sentences on what the theme's work involves (the themes pass); null for
+       *  "No theme" / "All tickets", or when the pass wrote none. */
+      summary: string | null;
+      /** CODE's row line (shared `sprintLaneSummary`): progress by column, then pull-request presence. */
+      progress: string;
+      code: string;
+    }
+  | {
+      kind: 'person';
+      unassigned: boolean;
+      tickets: number;
+      reviewsWaiting: number | null;
+      segments: LaneSegment[];
+      progress: string;
+      code: string;
+    };
 
-/** One part of a theme lane's bar: its cards in one column. */
+/** One part of a lane's bar: its cards in one column. */
 export interface LaneSegment {
   column: string;
   name: string;
   meaning: SprintStage | null;
-  derived: boolean;
   count: number;
+}
+
+/** A lane's bar parts: its cards per column, in column order, empty columns left out. */
+function segmentsOf(columns: ReadonlyArray<BoardColumn>, mine: ReadonlyArray<BoardCardDef<SprintCardData>>): LaneSegment[] {
+  return columns
+    .map((c) => ({ column: c.id, name: c.name, meaning: c.meaning, count: mine.filter((m) => m.column === c.id).length }))
+    .filter((s) => s.count > 0);
+}
+
+/** CODE's row line for a lane (shared `sprintLaneSummary`), over the cards it draws. The pseudo-column
+ *  "Status not known" is left out of the column list, so its tickets read as "status unknown". */
+function laneLine(columns: ReadonlyArray<BoardColumn>, mine: ReadonlyArray<BoardCardDef<SprintCardData>>): { progress: string; code: string } {
+  const s = sprintLaneSummary(
+    mine.map((c) => ({ column: c.column, prs: c.data.node.prs })),
+    columns.filter((c) => c.id !== UNKNOWN_COLUMN_ID),
+  );
+  return { progress: s.progress, code: s.code };
 }
 
 export interface SprintBoard {
@@ -471,12 +525,16 @@ export function themesBoard(i: BoardInput & { themes: ReadonlyArray<SprintTheme>
   const waiting = waitingIdents(i.nodes, i.edges);
   const themes = i.themes ?? [];
   const names = new Set(themes.map((t) => t.name));
+  const summaryOf = new Map(themes.map((t) => [t.name, t.summary ?? null]));
   const laneIdOf = (n: SprintGraphNode): string =>
     themes.length === 0 ? 'all' : n.theme != null && names.has(n.theme) ? `theme:${n.theme}` : 'other';
-  const order: Array<{ id: string; label: string; other: boolean }> =
+  const order: Array<{ id: string; label: string; other: boolean; summary: string | null }> =
     themes.length === 0
-      ? [{ id: 'all', label: ALL_TICKETS_LABEL, other: true }]
-      : [...themes.map((t) => ({ id: `theme:${t.name}`, label: t.name, other: false })), { id: 'other', label: OTHER_THEME_LABEL, other: true }];
+      ? [{ id: 'all', label: ALL_TICKETS_LABEL, other: true, summary: null }]
+      : [
+          ...themes.map((t) => ({ id: `theme:${t.name}`, label: t.name, other: false, summary: summaryOf.get(t.name) ?? null })),
+          { id: 'other', label: OTHER_THEME_LABEL, other: true, summary: null },
+        ];
   const laneOf = new Map(nodes.map((n) => [n.ident, laneIdOf(n)]));
   const cards = order.flatMap((l) => cardsFor(nodes.filter((n) => laneOf.get(n.ident) === l.id), l.id, 'themes', critical, waiting));
   const columns = sprintColumns(i.columns, needs(cards));
@@ -490,9 +548,9 @@ export function themesBoard(i: BoardInput & { themes: ReadonlyArray<SprintTheme>
         other: l.other,
         live: mine.filter((c) => c.data.node.stage !== 'done').length,
         merged: mine.filter((c) => codeMerged(c.data.node)).length,
-        segments: columns
-          .map((c) => ({ column: c.id, name: c.name, meaning: c.meaning, derived: c.derived, count: mine.filter((m) => m.column === c.id).length }))
-          .filter((s) => s.count > 0),
+        segments: segmentsOf(columns, mine),
+        summary: l.summary,
+        ...laneLine(columns, mine),
       },
     };
   });
@@ -532,23 +590,29 @@ export function peopleBoard(i: BoardInput & { people: ReadonlyArray<SprintPerson
     (a, b) => Number(a.unassigned) - Number(b.unassigned) || a.label.localeCompare(b.label) || a.id.localeCompare(b.id),
   );
   const cards = order.flatMap((l) => cardsFor(nodes.filter((n) => laneOf.get(n.ident) === l.id), l.id, 'people', critical, waiting));
-  const lanes: SprintBoard['lanes'] = order.map((l) => ({
-    id: l.id,
-    label: l.label,
-    data: {
-      kind: 'person',
-      unassigned: l.unassigned,
-      tickets: cards.filter((c) => c.lane === l.id).length,
-      reviewsWaiting: l.person?.reviewsWaiting ?? null,
-    },
-  }));
+  const columns = sprintColumns(i.columns, needs(cards));
+  const lanes: SprintBoard['lanes'] = order.map((l) => {
+    const mine = cards.filter((c) => c.lane === l.id);
+    return {
+      id: l.id,
+      label: l.label,
+      data: {
+        kind: 'person',
+        unassigned: l.unassigned,
+        tickets: mine.length,
+        reviewsWaiting: l.person?.reviewsWaiting ?? null,
+        segments: segmentsOf(columns, mine),
+        ...laneLine(columns, mine),
+      },
+    };
+  });
   const labelOfLane = new Map(order.map((l) => [l.id, l.label]));
   const arrows = sprintArrows(i, laneOf, (waits, on, e) => {
     const a = laneOf.get(waits.ident)!;
     const b = laneOf.get(on.ident)!;
     return a === b ? why(e) : `${labelOfLane.get(a)} waits on ${labelOfLane.get(b)}`;
   });
-  return { columns: sprintColumns(i.columns, needs(cards)), lanes, cards, arrows };
+  return { columns, lanes, cards, arrows };
 }
 
 // ── Under the Critical path board ────────────────────────────────────────────────────────────────
@@ -561,14 +625,15 @@ export interface PaceItem {
   pct: number | null;
 }
 
-export function paceItems(pace: SprintPace, o: { mergedColumn: boolean }): PaceItem[] {
+/** `productReview`: the board has a Product review bucket (the count shows only then). */
+export function paceItems(pace: SprintPace, o: { productReview: boolean }): PaceItem[] {
   const of = (n: number): string => `${n} of ${pace.tickets}`;
   const out: PaceItem[] = [];
   if (pace.daysElapsed != null && pace.daysTotal != null) {
     out.push({ label: 'Time used', value: `Day ${pace.daysElapsed} of ${pace.daysTotal}`, pct: pace.timeUsedPct });
   }
   out.push({ label: 'Code merged', value: of(pace.codeMerged), pct: null });
-  if (o.mergedColumn) out.push({ label: SPRINT_MERGED_COLUMN_LABEL, value: of(pace.mergedNotSignedOff), pct: null });
+  if (o.productReview) out.push({ label: SPRINT_STAGE_LABEL.product_review, value: of(pace.productReview), pct: null });
   out.push({ label: SPRINT_STAGE_LABEL.done, value: of(pace.done), pct: null });
   out.push({
     label: 'Open dependencies',

@@ -1,5 +1,6 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { SPRINT_STATUS_SETTINGS_VERSION } from '@pierre-review/shared';
 
 // Activity → This Sprint — the status layout's DB half on a SCRATCH SQLite (never apps/backend/data):
 //   • parseSprintStatusSettings: strict on a post (each refusal's plain message: no buckets, too many,
@@ -187,17 +188,17 @@ describe('parseSprintStatusSettings', () => {
     expect(why({ buckets: [B('a', 'A', 'done', ['a\u0000b'])] })).toBe('A status name is not valid.');
     expect(why({ buckets: [B('a', 'A', 'done', ['x'.repeat(101)])] })).toBe('A status name is not valid.');
     expect(why({ buckets: [B('a', 'A', 'done', Array.from({ length: 61 }, (_, i) => `S${i}`))] })).toBe('Place at most 60 statuses.');
-    expect(why({ buckets: null, mergedColumn: 'yes' })).toBe('Say whether to show the merged column.');
+    expect(why({ buckets: null, mergedColumn: 'yes' })).toBe('Say whether merged tickets move to Product review.');
   });
 
   it('reads a stored value tolerantly, the retired shapes included', () => {
     expect(tolerant(null)).toEqual({ buckets: null, mergedColumn: true });
     expect(tolerant('junk')).toEqual({ buckets: null, mergedColumn: true });
-    expect(sec(tolerant({ sections: { done: ['A', 'a', 3, ''] } }))).toEqual({ not_started: [], in_progress: [], in_review: [], done: ['A'] });
+    expect(sec(tolerant({ sections: { done: ['A', 'a', 3, ''] } }))).toEqual({ not_started: [], in_progress: [], in_review: [], product_review: [], done: ['A'] });
     // No categories handed in: every retired status reads as in progress until deliveredFrom.
-    expect(sec(tolerant({ order: ['A', 'B'], deliveredFrom: 'b' }))).toEqual({ not_started: [], in_progress: ['A'], in_review: ['B'], done: [] });
+    expect(sec(tolerant({ order: ['A', 'B'], deliveredFrom: 'b' }))).toEqual({ not_started: [], in_progress: ['A'], in_review: ['B'], product_review: [], done: [] });
     // Bad buckets dropped, good ones kept.
-    expect(tolerant({ buckets: [B('a', 'A', 'in_progress', ['X', 'x']), { id: 'B!', name: 'B', meaning: 'done', statuses: [] }], mergedColumn: false })).toEqual({
+    expect(tolerant({ version: SPRINT_STATUS_SETTINGS_VERSION, buckets: [B('a', 'A', 'in_progress', ['X', 'x']), { id: 'B!', name: 'B', meaning: 'done', statuses: [] }], mergedColumn: false })).toEqual({
       buckets: [B('a', 'A', 'in_progress', ['X'])],
       mergedColumn: false,
     });
@@ -234,12 +235,12 @@ describe('evidence and the layout', () => {
     expect(l?.order.map((o) => `${o.name}:${o.count}:${o.stage}`)).toEqual([
       'To Do:0:not_started',
       'In Development:1:in_progress',
-      'Ready for QA:1:in_review',
+      'Ready for QA:1:product_review',
       'Done:1:done',
     ]);
     expect([l?.codingBegins, l?.codingEnds]).toEqual(['In Development', 'Ready for QA']);
     await settings.setSprintStatusSettings(1, wsA, {
-      buckets: settings.sectionsToBuckets({ not_started: [], in_progress: [], in_review: ['In Development'], done: [] }),
+      buckets: settings.sectionsToBuckets({ not_started: [], in_progress: [], in_review: ['In Development'], product_review: [], done: [] }),
       mergedColumn: true,
     });
     const set = await layout.sprintLayoutFor(1, wsA);
@@ -254,7 +255,14 @@ describe('evidence and the layout', () => {
       .where(eq(schema.workspaces.id, wsA))
       .execute();
     const legacy = await layout.sprintLayoutFor(1, wsA);
-    expect(sec(legacy?.settings ?? null)).toEqual({ not_started: ['To Do'], in_progress: [], in_review: ['In Development', 'Ready for QA'], done: ['Done'] });
+    // …and read with Product review added (stored before it), taking the QA name.
+    expect(sec(legacy?.settings ?? null)).toEqual({
+      not_started: ['To Do'],
+      in_progress: [],
+      in_review: ['In Development'],
+      product_review: ['Ready for QA'],
+      done: ['Done'],
+    });
     await settings.setSprintStatusSettings(1, wsA, { buckets: null, mergedColumn: true });
     // Never read: no site, no layout.
     expect(await layout.sprintLayoutFor(1, wsA2)).toBeNull();

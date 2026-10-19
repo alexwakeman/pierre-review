@@ -76,12 +76,17 @@ export function areThemesCurrent(row: Pick<SprintThemeRow, 'inputHash' | 'themeV
   return row != null && row.themeVersion === SPRINT_THEME_VERSION && row.inputHash === inputHash;
 }
 
-/** A stored row → themes (largest first, then name) + the ident map. Tolerant: malformed entries and
- *  assignments to a theme that is not listed are dropped; a theme no ticket is in is dropped. Pure. */
+/** A stored row → themes (largest first, then name; each with its summary, null when none was
+ *  stored) + the ident map. Tolerant: malformed entries and assignments to a theme that is not listed
+ *  are dropped; a theme no ticket is in is dropped. Pure. */
 export function sprintThemesOf(row: Pick<SprintThemeRow, 'themesJson' | 'assignmentsJson'>): CurrentSprintThemes {
   const names = new Set<string>();
+  const summaries = new Map<string, string | null>();
   for (const t of Array.isArray(row.themesJson) ? row.themesJson : []) {
-    if (isObj(t) && typeof t.name === 'string' && t.name.trim() !== '') names.add(t.name);
+    if (isObj(t) && typeof t.name === 'string' && t.name.trim() !== '' && !names.has(t.name)) {
+      names.add(t.name);
+      summaries.set(t.name, typeof t.summary === 'string' && t.summary.trim() !== '' ? t.summary : null);
+    }
   }
   const byIdent = new Map<string, string>();
   const counts = new Map<string, number>();
@@ -94,7 +99,7 @@ export function sprintThemesOf(row: Pick<SprintThemeRow, 'themesJson' | 'assignm
   const themes = [...names]
     .filter((n) => (counts.get(n) ?? 0) > 0)
     .sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0) || a.localeCompare(b))
-    .map((name) => ({ name }));
+    .map((name) => ({ name, summary: summaries.get(name) ?? null }));
   return { themes, byIdent };
 }
 

@@ -19,6 +19,11 @@
 // watcher disarms (`disarmed_head_moved`) as it always does; the next sweep sees an intent that is
 // not armed on a head that is not the pinned one, and arms the new head. An intent that ENDED on
 // the SAME head (expired, failed, lost access, retargeted) is never re-armed on that head.
+// ⚠ A RED HEAD IS NEVER ARMED BY THE SETTING: the sweep skips a PR whose SYNCED CI is failure /
+// error, and arms it on the first sweep after it goes green (a re-run, or the bot's next push).
+// Arming a red bump bought nothing but a refused merge-queue enqueue and an intent polling GitHub
+// for 72 hours (2026-10-19). An intent that goes red AFTER arming backs off in the watcher (rule
+// 6a, phase `checks_failed`) and is tried again only once its checks pass.
 // ⚠ A PERSON'S CANCEL WINS FOR EVER: the DELETE route records the PR in `auto_merge_policy_skips`
 // and the sweep never arms a PR with a row there.
 import type { FastifyBaseLogger } from 'fastify';
@@ -54,6 +59,9 @@ const { autoMergePolicySkips, autoMergeRequests, pullRequests, repos, users, wor
 /** GitHub's "it would land right now" states — `READY_MERGE_STATES` (db/triage.ts) in the REST
  *  spelling. `unstable` is in it: a click may merge a PR whose only red checks are optional. */
 const LIVE_READY_STATES = new Set(['clean', 'has_hooks', 'unstable']);
+
+/** Synced CI states the policy sweep will not arm on. */
+const RED_CI = new Set(['failure', 'error']);
 
 /** Arms per sweep, across every account — each costs 2–3 GitHub calls, so this bounds a tick. */
 const POLICY_ARMS_PER_TICK = 10;
@@ -126,6 +134,8 @@ export interface DependencyPrRow {
   mergeable: string | null;
   inMergeQueue: boolean | null;
   viewerPermission: string | null;
+  /** The head's CI rollup as last SYNCED. The policy sweep never arms a red head. */
+  ciStatus: string | null;
 }
 
 /**
@@ -153,6 +163,7 @@ export async function listDependencyPrs(
       mergeable: pullRequests.mergeable,
       inMergeQueue: pullRequests.inMergeQueue,
       viewerPermission: repos.viewerPermission,
+      ciStatus: pullRequests.ciStatus,
       authorId: pullRequests.authorId,
       dependencyVendor: pullRequests.dependencyVendor,
     })
@@ -194,6 +205,7 @@ export async function listDependencyPrs(
       mergeStateStatus: r.mergeStateStatus as string | null,
       mergeable: r.mergeable as string | null,
       inMergeQueue: r.inMergeQueue ?? null,
+      ciStatus: (r.ciStatus as string | null) ?? null,
     }));
 }
 
@@ -384,8 +396,9 @@ let sweeping = false;
  * Arm the open dependency updates of every workspace with the setting on. Runs on the auto-merge
  * watcher's cron, just before it. Bounded (`POLICY_ARMS_PER_TICK`), per-account try/catch, never
  * throws. A PR is armed when: open, not a draft, not conflicting, not in GitHub's merge queue, the
- * account can push to the repo, no person cancelled it (`auto_merge_policy_skips`), and it has no
- * intent — or an ended one pinned to a DIFFERENT head (the bot pushed since).
+ * account can push to the repo, its synced CI is not red (failure / error), no person cancelled it
+ * (`auto_merge_policy_skips`), and it has no intent — or an ended one pinned to a DIFFERENT head
+ * (the bot pushed since).
  */
 export async function runDependencyPolicyTick(log: FastifyBaseLogger): Promise<void> {
   if (sweeping) return;
@@ -407,6 +420,8 @@ export async function runDependencyPolicyTick(log: FastifyBaseLogger): Promise<v
             !isConflicting(p) &&
             p.inMergeQueue !== true &&
             p.headSha != null &&
+            // A red head waits for green before the setting arms it (header).
+            !RED_CI.has(p.ciStatus ?? '') &&
             WRITE_PERMISSIONS.has(p.viewerPermission ?? ''),
         );
         if (prs.length === 0) continue;

@@ -3623,6 +3623,10 @@ export type ArmedMergeState =
 //   queued_local        — armed, but another intent on the SAME REPO holds the slot (see below)
 //   merging             — the merge call is in flight
 //   retrying            — a GitHub error, being retried (a persistent one ends in 'failed')
+//   checks_failed       — BACKED OFF: the head's checks failed (proven live, once). Still armed,
+//                         but the watcher makes NO GitHub call for it until the synced CI on the
+//                         SAME head is green again (or GitHub stops calling it blocked); a new
+//                         head goes the normal way (rule 1). It never holds its repo's slot.
 //
 // ⚠ `queued` AND `queued_local` ARE DIFFERENT QUEUES and the copy must not merge them. `queued`
 // means GitHub has the PR in a merge queue and is testing it; `queued_local` means Limn is
@@ -3642,7 +3646,8 @@ export type ArmedMergePhase =
   | 'queued'
   | 'queued_local'
   | 'merging'
-  | 'retrying';
+  | 'retrying'
+  | 'checks_failed';
 
 export interface ArmedMergeRequest {
   prId: number;

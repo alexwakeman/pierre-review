@@ -8,6 +8,7 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { SPRINT_STATUS_SETTINGS_VERSION } from '@pierre-review/shared';
 
 const DB_PATH = '/private/tmp/claude-501/pierre-sprint-statuses-route-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
@@ -173,13 +174,15 @@ describe('PUT /api/sprint-stories/statuses', () => {
       'In Development:dev:in_progress',
       'Done:done:done',
     ]);
-    expect(body.statusLayout.columns.map((c: any) => c.id)).toEqual(['todo', 'dev', 'merged', 'done']);
-    expect(await stored(ownWs)).toEqual(S);
+    // One column per bucket: no derived column, and no Product review bucket added to a saved value.
+    expect(body.statusLayout.columns.map((c: any) => c.id)).toEqual(['todo', 'dev', 'done']);
+    // Stored with the version, so a later read never adds Product review to what the reader saved.
+    expect(await stored(ownWs)).toEqual({ ...S, version: SPRINT_STATUS_SETTINGS_VERSION });
 
     const reset = await put({ workspaceId: ownWs, settings: { buckets: null, mergedColumn: true } });
     expect(reset.statusCode).toBe(200);
     expect(reset.json().statusLayout.orderSource).toBe('jira_board');
-    expect(reset.json().statusLayout.buckets.map((b: any) => b.name)).toEqual(['Not started', 'In progress', 'In review', 'Complete']);
+    expect(reset.json().statusLayout.buckets.map((b: any) => b.name)).toEqual(['Not started', 'In progress', 'Code review', 'Product review', 'Complete']);
     expect(await stored(ownWs)).toBeNull();
   });
 });

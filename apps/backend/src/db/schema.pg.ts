@@ -742,6 +742,8 @@ export const autoMergeRequests = pgTable(
         'queued_local',
         'merging',
         'retrying',
+        // The back-off: checks failed, no GitHub call until the synced CI is green again.
+        'checks_failed',
       ],
     }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })

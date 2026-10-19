@@ -63,8 +63,9 @@ export interface GraphFoldInput {
   /** The status layout's placement (`sprintPlacementOf`): bucket + its meaning. Given → it decides
    *  `stage` too (stageOf is then unused); absent → `bucketId` and `column` are null. */
   placeOf?: (status: GraphTicketInput['status']) => { stage: SprintStage; bucketId: string } | null;
-  /** The layout's "Merged, not signed off" column is on (`sprintColumnOf`). */
-  mergedColumn?: boolean;
+  /** Where the merge rule moves a Code review ticket whose PRs have all merged: the first Product
+   *  review bucket's id (`mergeRuleTarget`); null / absent = the rule is off (`sprintColumnOf`). */
+  productReviewId?: string | null;
   prs?: ReadonlyMap<string, SprintGraphPr[]>;
   /** Sprint ticket ident → its theme name (the current theme pass); ghosts never carry one. */
   themes?: ReadonlyMap<string, string>;
@@ -220,7 +221,7 @@ export function foldSprintGraph(input: GraphFoldInput): GraphFoldResult {
     status: t.status,
     stage: input.placeOf != null ? (place?.stage ?? null) : input.stageOf(t.status),
     bucketId: place?.bucketId ?? null,
-    column: sprintColumnOf(place, prs, input.mergedColumn ?? false),
+    column: sprintColumnOf(place, prs, input.productReviewId ?? null),
     issueType: t.issueType,
     assignee: t.assignee,
     epic: ghost ? null : t.epic,

@@ -394,7 +394,7 @@ describe('the sprint builder on the graph', () => {
       tickets: 4,
       live: 3,
       done: 1,
-      mergedNotSignedOff: 0,
+      productReview: 0,
       codeMerged: 0,
       openDependencies: 2,
       chains: 2,

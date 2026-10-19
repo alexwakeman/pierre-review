@@ -42,7 +42,7 @@ afterAll(async () => {
 });
 
 const v = (names: string[], idents: string[]) => ({
-  themes: names.map((name) => ({ name })),
+  themes: names.map((name) => ({ name, summary: name === 'Delta' ? 'Delta work: code changes to the API.' : null })),
   assignments: idents.map((ident, i) => ({ ident, theme: names[i % names.length]! })),
   costUsd: 0.002,
   inputTokens: 9000,
@@ -60,6 +60,9 @@ describe('sprint themes store', () => {
     const cur = await store.currentSprintThemes(1, wsA, 'h2');
     expect(cur?.themes.map((t) => t.name)).toEqual(['Delta', 'Echo', 'Fox']);
     expect(cur?.byIdent.get('i3')).toBe('Fox');
+    // The summary is stored and read back; a theme with none reads as null.
+    expect(cur?.themes.find((t) => t.name === 'Delta')?.summary).toBe('Delta work: code changes to the API.');
+    expect(cur?.themes.find((t) => t.name === 'Echo')?.summary).toBeNull();
   });
 
   it('reads are tenant-scoped; the composite FK refuses a cross-account pair', async () => {
