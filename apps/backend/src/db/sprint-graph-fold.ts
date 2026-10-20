@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   SPRINT_EDGE_KINDS,
   SPRINT_GHOST_DEPTH_MAX,
@@ -15,6 +16,7 @@ import {
   type SprintGraphNode,
   type SprintGraphPr,
   type SprintStage,
+  type SprintTicketCheck,
   type TicketLinkBlocker,
   type TrackerProvider,
 } from '@pierre-review/shared';
@@ -69,6 +71,8 @@ export interface GraphFoldInput {
   prs?: ReadonlyMap<string, SprintGraphPr[]>;
   /** Sprint ticket ident → its theme name (the current theme pass); ghosts never carry one. */
   themes?: ReadonlyMap<string, string>;
+  /** Sprint ticket ident → its ticket check (db/sprint-ticket-checks.ts); ghosts never carry one. */
+  checks?: ReadonlyMap<string, { check: SprintTicketCheck | null; running: boolean }>;
   ghostMax?: number;
   depthMax?: number;
 }
@@ -228,9 +232,12 @@ export function foldSprintGraph(input: GraphFoldInput): GraphFoldResult {
     brief: {
       state: t.briefState,
       summary: t.brief?.summary ?? null,
+      oneLiner: t.brief?.oneLiner ?? null,
       criteriaCount: t.brief?.criteria.length ?? 0,
       criteriaDerived: t.brief?.criteriaDerived ?? false,
     },
+    check: ghost ? null : (input.checks?.get(t.ident)?.check ?? null),
+    checkRunning: ghost ? false : (input.checks?.get(t.ident)?.running ?? false),
     prs,
     degree: degree.get(t.ident) ?? 0,
     theme: ghost ? null : (input.themes?.get(t.ident) ?? null),
@@ -245,3 +252,37 @@ export function foldSprintGraph(input: GraphFoldInput): GraphFoldResult {
     .sort((a, b) => a.depth - b.depth || byKey(a, b));
   return { nodes: [...sprintNodes, ...ghostNodes], edges, ghostsTruncated: truncated, missing: missingList };
 }
+
+/**
+ * THE CHANGE TOKEN (`SprintGraphResponse.changeToken`, `GET /api/sprint-graph/token`): 16 hex of a sha256
+ * over what the CARDS show — per node (sorted by ident): its column, bucket, status, assignee, theme,
+ * brief state + one-liner + criteria count, ticket check counts / staleness / running, and each PR's
+ * id, state, draft flag and CI; plus every edge. ⚠ CLOCK-FREE: nothing derived from `Date.now()` (pace,
+ * signals, dates) and not the read's time either — a sprint read that changed nothing must not suggest a
+ * refresh. Pure.
+ */
+export function sprintChangeTokenOf(g: Pick<GraphFoldResult, 'nodes' | 'edges'>): string {
+  const nodes = [...g.nodes]
+    .sort((a, b) => (a.ident < b.ident ? -1 : a.ident > b.ident ? 1 : 0))
+    .map((n) => [
+      n.ident,
+      n.ghost,
+      n.title,
+      n.column,
+      n.bucketId,
+      n.status?.name ?? null,
+      n.assignee?.name ?? null,
+      n.theme,
+      n.brief.state,
+      n.brief.oneLiner,
+      n.brief.criteriaCount,
+      n.check == null ? null : [n.check.met, n.check.partlyMet, n.check.notMet, n.check.total, n.check.stale, n.check.checkedAt],
+      n.checkRunning,
+      n.prs.map((p) => [p.prId, p.state, p.draft, p.ciState]),
+    ]);
+  const edges = g.edges.map((e) => [e.from, e.to, e.kind, e.source]).sort((a, b) => (a.join('\u0000') < b.join('\u0000') ? -1 : 1));
+  return createHash('sha256').update(JSON.stringify({ nodes, edges })).digest('hex').slice(0, 16);
+}
+
+/** The token of a workspace with no tracker (nothing to show). */
+export const SPRINT_EMPTY_CHANGE_TOKEN = sprintChangeTokenOf({ nodes: [], edges: [] });

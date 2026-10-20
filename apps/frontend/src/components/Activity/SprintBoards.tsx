@@ -18,6 +18,7 @@ import {
   pathsBoard,
   peopleBoard,
   themesBoard,
+  hasLivePr,
   ticketCardBorder,
   type BoardLayout,
   type LaneSegment,
@@ -90,13 +91,10 @@ function SprintLaneBoard({
     () => layoutBoard<SprintLaneData, SprintCardData>({ ...board, collapsed: collapsedColumns(board.columns, shown), expanded: cells }),
     [board, shown, cells],
   );
+  // Every border style a card on this board actually draws — the same three facts `ticketCardBorder`
+  // reads, so the key can neither miss a style nor show one no card has.
   const borders = useMemo(
-    () => ({
-      critical: layout.cards.some((c) => c.data.critical && !c.data.node.ghost),
-      waiting: layout.cards.some((c) => c.data.waiting && !c.data.node.ghost),
-      ghost: layout.cards.some((c) => c.data.node.ghost && !c.data.critical),
-      ghostCritical: layout.cards.some((c) => c.data.node.ghost && c.data.critical),
-    }),
+    () => new Set(layout.cards.map((c) => cardStyleKey(c.data.node.ghost === true, c.data.critical, c.data.waiting, hasLivePr(c.data.node)))),
     [layout.cards],
   );
   return (
@@ -106,7 +104,7 @@ function SprintLaneBoard({
       laneWidth={laneWidth}
       onToggleColumn={toggle}
       onToggleCell={toggleCell}
-      legend={<CardBorderKey {...borders} />}
+      legend={<CardBorderKey present={borders} />}
       renderLane={(l) => <LaneHeader lane={l} />}
       renderCard={(c, ref) => (
         <TicketCard node={c.data.node} critical={c.data.critical} waiting={c.data.waiting} show={show} onOpen={onOpen} cardRef={ref} />
@@ -215,28 +213,31 @@ function SegmentBar({
   );
 }
 
-/** The key to the card borders, under a board: only the styles the board draws. */
-function CardBorderKey({
-  critical,
-  waiting,
-  ghost,
-  ghostCritical,
-}: {
-  critical: boolean;
-  waiting: boolean;
-  ghost: boolean;
-  ghostCritical: boolean;
-}): JSX.Element | null {
-  const items: Array<{ key: string; label: string; swatch: string }> = [];
-  if (critical) items.push({ key: 'c', label: 'On a critical path', swatch: ticketCardBorder({ critical: true, waiting: false, ghost: false }) });
-  if (waiting) items.push({ key: 'w', label: 'Waiting on another ticket', swatch: ticketCardBorder({ critical: false, waiting: true, ghost: false }) });
-  if (critical && waiting) {
-    items.push({ key: 'cw', label: 'On a path and waiting', swatch: ticketCardBorder({ critical: true, waiting: true, ghost: false }) });
-  }
-  if (ghost) items.push({ key: 'g', label: 'Outside the sprint', swatch: ticketCardBorder({ critical: false, waiting: false, ghost: true }) });
-  if (ghostCritical) {
-    items.push({ key: 'gc', label: 'Outside the sprint, on a path', swatch: ticketCardBorder({ critical: true, waiting: false, ghost: true }) });
-  }
+/** One card's border style, as the key names it. A ticket outside the sprint is faint whatever else it is. */
+function cardStyleKey(ghost: boolean, critical: boolean, waiting: boolean, withPr: boolean): string {
+  if (ghost) return critical ? 'gc' : 'g';
+  return `${critical ? 'c' : ''}${waiting ? 'w' : ''}${withPr ? 'p' : ''}` || 'plain';
+}
+
+const BORDER_KEY: ReadonlyArray<{ key: string; label: string; critical: boolean; waiting: boolean; ghost: boolean; withPr: boolean }> = [
+  { key: 'p', label: 'Has a pull request', critical: false, waiting: false, ghost: false, withPr: true },
+  { key: 'cp', label: 'On a path, with a pull request', critical: true, waiting: false, ghost: false, withPr: true },
+  { key: 'wp', label: 'Waiting, with a pull request', critical: false, waiting: true, ghost: false, withPr: true },
+  { key: 'cwp', label: 'On a path and waiting, with a pull request', critical: true, waiting: true, ghost: false, withPr: true },
+  { key: 'c', label: 'On a critical path', critical: true, waiting: false, ghost: false, withPr: false },
+  { key: 'w', label: 'Waiting on another ticket', critical: false, waiting: true, ghost: false, withPr: false },
+  { key: 'cw', label: 'On a path and waiting', critical: true, waiting: true, ghost: false, withPr: false },
+  { key: 'g', label: 'Outside the sprint', critical: false, waiting: false, ghost: true, withPr: false },
+  { key: 'gc', label: 'Outside the sprint, on a path', critical: true, waiting: false, ghost: true, withPr: false },
+];
+
+/** The key to the card borders, under a board: exactly the styles the board draws. */
+function CardBorderKey({ present }: { present: ReadonlySet<string> }): JSX.Element | null {
+  const items = BORDER_KEY.filter((k) => present.has(k.key)).map((k) => ({
+    key: k.key,
+    label: k.label,
+    swatch: ticketCardBorder({ critical: k.critical, waiting: k.waiting, ghost: k.ghost, withPr: k.withPr }),
+  }));
   if (items.length === 0) return null;
   return (
     <ul aria-label="Card borders" data-testid="card-border-key" className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-gray-700 dark:text-gray-300">

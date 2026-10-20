@@ -47,6 +47,9 @@ const LABEL: Record<TrackerProvider, string> = { jira: 'Jira', linear: 'Linear',
  * governs this workspace's repos and nobody else's — is a different claim and stays here, where
  * the Save button is.
  */
+/** The heading the modal lands on for `openSettings('issue-tracker')` (This Sprint's setup button). */
+export const ISSUE_TRACKER_SECTION_HEADING_ID = 'settings-issue-tracker-heading';
+
 export function IssueLinksSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
   const query = useWorkspaceTracker(workspaceId != null, workspaceId);
@@ -118,6 +121,7 @@ export function IssueLinksSection(): JSX.Element {
   return (
     <SectionShell
       title="Issue tracker"
+      headingId={ISSUE_TRACKER_SECTION_HEADING_ID}
       desc="Links each PR to its tickets. This workspace only: each workspace has its own tracker, or none."
       info={
         <InfoButton title="Issue tracker">

@@ -123,7 +123,8 @@ const NAV_KEYS = [
   // The Reports pane's Overview | Bottlenecks strip. A sub-tab switch is a navigation for the
   // same reason its two siblings above are: it changes what the pane IS, not how it is filtered.
   'insightsTab',
-  // The This Sprint rail line's graph | Merged so far strip — same reason as its siblings.
+  // The This Sprint tab's Theme | Critical path | People | Merged so far strip — same reason as its
+  // siblings.
   'sprintTab',
   'prTab',
 ] as const;
@@ -195,8 +196,10 @@ function namesId(p: URLSearchParams, key: string): boolean {
  * The board is named two ways, and they are checked IN THIS ORDER:
  *
  *  1. `view=` — the AFFIRMATIVE statement, written by `writeToUrl` from the live tab. When it
- *     names a board the app knows (`timeline`, `activity`, or the retired `open-prs`), it wins
- *     outright. (The read and write halves must always
+ *     names a board the app knows (`timeline`, `activity`, `sprint`, or the retired `open-prs`), it
+ *     wins outright. ⚠ This Sprint was an Activity RAIL LINE before it was a tab, so two legacy
+ *     spellings of it land on the tab too: `?activityRepo=sprint` and `?insightsTab=sprint|merged`
+ *     (the older Reports tabs), each only on a URL that names Activity or no view at all. (The read and write halves must always
  *     change together, or a deliberate switch to the board is undone on the next F5.)
  *  2. `?pr=<id>` / `?thread=<id>`, and ONLY when `view=` said nothing — the board INFERRED from a
  *     selection that only the board can render: the DetailPane mounts solely in the board slot
@@ -230,6 +233,22 @@ export function landingTabFromUrl(search: string): ActiveTab {
   const p = new URLSearchParams(search);
   const view = p.get('view');
   if (view === 'timeline') return 'timeline';
+  if (view === 'sprint') return 'sprint';
+  if (view == null || view === 'activity') {
+    // ⚠ LEGACY: This Sprint was an Activity rail line (`?view=activity&activityRepo=sprint`, which
+    // the app emitted), and before that two Reports tabs (`?insightsTab=sprint|merged`). Both sit in
+    // bookmarks and in history entries Back replays, so they land on the tab. The Reports form only
+    // when the link named Reports or no rail at all — a hand-made link naming another rail keeps it.
+    const activityRepo = p.get('activityRepo');
+    if (activityRepo === 'sprint') return 'sprint';
+    const insightsTab = p.get('insightsTab');
+    if (
+      (insightsTab === 'sprint' || insightsTab === 'merged') &&
+      (activityRepo == null || activityRepo === 'insights')
+    ) {
+      return 'sprint';
+    }
+  }
   if (view === 'activity') return 'activity';
   // ⚠ BACK-COMPAT: `view=open-prs` named the retired fixed Open PRs tab and is in bookmarks and
   // history. It lands on Activity, whose default rail line IS Open PRs (readFromUrl seats nothing
@@ -347,8 +366,8 @@ export function readFromUrl(): Partial<FilterState> {
     // auto-select this rail entry for Pro accounts is GONE — the store default is 'open-prs' on
     // every tier.)
     else if (activityRepo === 'insights') out.activityRepoId = 'insights';
-    // The FREE This Sprint rail line (the sprint graph + "Merged so far").
-    else if (activityRepo === 'sprint') out.activityRepoId = 'sprint';
+    // ('sprint' is NOT a rail value any more: This Sprint is a fixed tab, and a legacy
+    // `?activityRepo=sprint` lands on it via landingTabFromUrl. The rail keeps its default.)
     // The local-only Docs rail line (the reference library). Parsed on every build: a link opened
     // where agentic AI is off lands on the pane's own one line, never on a guess.
     else if (activityRepo === 'docs') out.activityRepoId = 'docs';
@@ -439,16 +458,14 @@ export function readFromUrl(): Partial<FilterState> {
   if ((INSIGHTS_INNER_TABS as readonly string[]).includes(insightsTab ?? '')) {
     out.insightsInnerTab = insightsTab as InsightsInnerTab;
   }
-  // ⚠ LEGACY: `?insightsTab=sprint` / `?insightsTab=merged` were Activity → This Sprint / Merged so
-  // far. Both moved to the FREE This Sprint rail line, and the old links sit in bookmarks and in
-  // history entries Back replays, so they land THERE (rail + tab) — never on a Reports tab that no
-  // longer exists. Only when the link named Reports or no rail at all: a hand-made link naming
-  // another rail keeps that rail. Never emitted again.
+  // ⚠ LEGACY: `?insightsTab=sprint` / `?insightsTab=merged` were Reports → This sprint / Merged so
+  // far. Both moved to the FREE This Sprint TAB (landingTabFromUrl seats the tab), and the old links
+  // sit in bookmarks and in history entries Back replays, so they seat the matching SUB-TAB here —
+  // never a Reports tab that no longer exists. Same condition as the landing rule. Never emitted again.
   else if (
     (insightsTab === 'sprint' || insightsTab === 'merged') &&
     (activityRepo == null || activityRepo === 'insights')
   ) {
-    out.activityRepoId = 'sprint';
     out.sprintInnerTab = insightsTab === 'merged' ? 'merged' : 'themes';
   }
   // The This Sprint strip. Same raw-seat rule as `insightsTab`.
@@ -622,6 +639,11 @@ export function writeToUrl(s: FilterState): void {
   const activeTab = usePinnedTabs.getState().activeTab;
   if (activeTab === 'timeline') {
     p.set('view', 'timeline');
+  } else if (activeTab === 'sprint') {
+    p.set('view', 'sprint');
+    // The tab's sub-tab. ⚠ THE OMITTED VALUE IS THE CURRENT DEFAULT ('themes') — a bare
+    // `?view=sprint` means it.
+    if (s.sprintInnerTab !== 'themes') p.set('sprintTab', s.sprintInnerTab);
   } else if (activeTab === 'activity') {
     p.set('view', 'activity');
     // The board's own narrowings, each emitted ONLY on the rail entry that renders it — a lens
@@ -676,10 +698,6 @@ export function writeToUrl(s: FilterState): void {
       p.set('activityRepo', 'feed');
     } else if (s.activityRepoId === 'bots') {
       p.set('activityRepo', 'bots');
-    } else if (s.activityRepoId === 'sprint') {
-      p.set('activityRepo', 'sprint');
-      // ⚠ THE OMITTED VALUE IS THE CURRENT DEFAULT ('themes') — a bare `?activityRepo=sprint` means it.
-      if (s.sprintInnerTab !== 'themes') p.set('sprintTab', s.sprintInnerTab);
     } else if (s.activityRepoId === 'docs') {
       p.set('activityRepo', 'docs');
     } else if (s.activityRepoId === 'insights') {

@@ -190,7 +190,9 @@ export function useUploadReferenceDoc(workspaceId: number | null) {
   return useLibraryMutation(workspaceId, (file: File) => api.uploadReferenceDoc(workspaceId!, file));
 }
 export function useAddReferenceDocUrl(workspaceId: number | null) {
-  return useLibraryMutation(workspaceId, (url: string) => api.addReferenceDocUrl(workspaceId!, url));
+  return useLibraryMutation(workspaceId, (v: { url: string; crawlDepth: number | null }) =>
+    api.addReferenceDocUrl(workspaceId!, v.url, v.crawlDepth),
+  );
 }
 export function useRebuildReferenceDoc(workspaceId: number | null) {
   return useLibraryMutation(workspaceId, (docId: number) => api.rebuildReferenceDoc(docId));

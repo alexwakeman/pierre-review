@@ -176,6 +176,7 @@ async function onePass(
           if (v.ok) {
             await store(accountId, workspaceId, t, {
               summary: v.summary,
+              oneLiner: v.oneLiner,
               criteria: v.criteria,
               criteriaDerived: t.input.derived,
               references: v.references,

@@ -1,13 +1,18 @@
 // ONE TICKET CARD for every This Sprint view (Critical path, Theme, People) on the lane board
-// (components/LaneBoard.tsx). The key (mono), the short title (two lines, always reserved), the ticket's
-// theme (People, one line), then its tags as WORDS and the assignee's initials (Critical path, Theme)
+// (components/LaneBoard.tsx). The key (mono), the short title (two lines, always reserved), the
+// brief's ONE-LINE summary (one line, truncated; the full line is in the accessible name and the
+// card's `title`), the acceptance-criteria line ("3 of 4 criteria met" from the latest ticket check,
+// else "4 criteria" from the brief — lib/laneBoard.ts `ticketCardCriteria`), the ticket's theme
+// (People, one line), then its tags as WORDS and the assignee's initials (Critical path, Theme)
 // (lib/laneBoard.ts `ticketCardTags`: "CI failing", "No PR" or "n PRs · m open", "No owner").
 //
-//   HEIGHT   every card is the same height whatever it carries: the title keeps two lines, the theme
-//            one, and the initials' slot is held open when nobody is assigned. Cards fill their slot,
-//            so a grid row's cards line up.
+//   HEIGHT   every card is the same height whatever it carries: the title keeps two lines, the
+//            one-liner, criteria and theme one each, and the initials' slot is held open when nobody
+//            is assigned. An empty slot stays open. Cards fill their slot, so a grid row's cards line up.
 //   BORDER   (lib/laneBoard.ts `ticketCardBorder`) solid accent, 2px = on a critical path; dashed = waiting on another unfinished ticket;
-//            both = dashed accent. A ticket outside the sprint is FAINT: a light dashed border on a
+//            both = dashed accent. A card with an open or merged pull request has a violet border and
+//            a soft violet glow (a critical-path card keeps its orange border and adds the glow), and
+//            sits first in its cell. A ticket outside the sprint is FAINT: a light dashed border on a
 //            tinted ground (its text stays at full contrast). The state is also in the accessible name.
 //            The board's key (Activity/SprintBoards.tsx `CardBorderKey`) names each style.
 //   CLICK    the card opens a POPOVER IN PLACE (Activity/StoryPeek.tsx — the story's summary and its
@@ -31,9 +36,9 @@ import {
 import type { SprintGraphNode } from '@pierre-review/shared';
 import { claimActivePopover } from '../lib/activePopover.js';
 import { initialsOf } from '../lib/openPrsStacks.js';
-import { ticketCardBorder, ticketCardTags } from '../lib/laneBoard.js';
+import { hasLivePr, ticketCardBorder, ticketCardCriteria, ticketCardTags } from '../lib/laneBoard.js';
 import { StoryPeek } from './Activity/StoryPeek.js';
-import { ArrowIcon, WarningIcon } from './Icons.js';
+import { ArrowIcon, RefreshIcon, WarningIcon } from './Icons.js';
 
 export function TicketCard({
   node,
@@ -53,6 +58,9 @@ export function TicketCard({
   cardRef?: (el: HTMLElement | null) => void;
 }): JSX.Element {
   const tags = ticketCardTags(node);
+  const criteria = ticketCardCriteria(node);
+  const withPr = !node.ghost && hasLivePr(node);
+  const oneLiner = node.brief.oneLiner != null && node.brief.oneLiner.trim() !== '' ? node.brief.oneLiner : null;
   const title = node.title !== '' ? node.title : 'Not read';
   const [open, setOpen] = useState(false);
   const popId = useId();
@@ -95,11 +103,15 @@ export function TicketCard({
 
   const name = [
     `${node.key}: ${title}`,
+    oneLiner,
     node.status != null ? node.status.name : null,
     node.ghost ? 'outside the sprint' : null,
     node.assignee != null ? `assigned to ${node.assignee.name}` : null,
     show === 'theme' && node.theme != null ? `theme ${node.theme}` : null,
+    criteria != null && criteria.text !== '' ? (criteria.stale ? `${criteria.text}, checked before the latest changes` : criteria.text) : null,
+    criteria?.running === true ? 'being checked' : null,
     ...tags,
+    withPr ? 'has a pull request' : null,
     critical ? 'on a critical path' : null,
     waiting ? 'waiting on another ticket' : null,
     'shows its story here',
@@ -117,10 +129,13 @@ export function TicketCard({
         cardRef?.(el);
       }}
       data-ticket={node.key}
+      data-pr={withPr ? 'true' : undefined}
+      data-open={open ? 'true' : undefined}
       className={`relative flex w-full min-w-0 flex-col rounded-md hover:shadow-md ${open ? 'shadow-md' : ''} ${ticketCardBorder({
         critical,
         waiting,
         ghost: node.ghost,
+        withPr,
       })}`}
     >
       <button
@@ -137,6 +152,30 @@ export function TicketCard({
         {/* Two lines held open (12px × leading-snug), so a one-line title is as tall as a two-line one. */}
         <span aria-hidden className="mt-0.5 line-clamp-2 min-h-[2.75em] break-words text-[12px] leading-snug text-gray-900 dark:text-gray-50">
           {title}
+        </span>
+        {/* The brief's one line: always one line held open, so a card without one is as tall. */}
+        <span
+          aria-hidden
+          data-testid="ticket-one-liner"
+          title={oneLiner ?? undefined}
+          className="mt-0.5 block h-[1.375em] truncate text-[11px] leading-snug text-gray-600 dark:text-gray-300"
+        >
+          {oneLiner}
+        </span>
+        {/* Acceptance criteria: "3 of 4 criteria met" (the latest ticket check) or "4 criteria" (the
+            brief). Italic and muted when the check predates the latest pull-request changes (the popover
+            and the accessible name say so in words). One line, held open. */}
+        <span aria-hidden data-testid="ticket-criteria" className="mt-0.5 flex h-[1.375em] min-w-0 items-center gap-1 text-[11px] leading-snug">
+          {criteria != null && criteria.text !== '' && (
+            <span
+              className={`truncate ${criteria.stale ? 'italic text-gray-600 dark:text-gray-300' : 'text-gray-700 dark:text-gray-200'}`}
+            >
+              {criteria.text}
+            </span>
+          )}
+          {criteria?.running === true && (
+            <RefreshIcon size={10} className="shrink-0 animate-spin text-gray-500 motion-reduce:animate-none dark:text-gray-400" />
+          )}
         </span>
         {show === 'theme' && (
           <span aria-hidden className="mt-0.5 flex h-[1.375em] min-w-0 text-[11px] leading-snug">

@@ -13,6 +13,7 @@ import {
   type SprintDates,
   type SprintGraphPr,
   type SprintGraphResponse,
+  type SprintGraphTokenResponse,
   type SprintColumn,
   type SprintSource,
   type SprintStatusLayout,
@@ -23,7 +24,14 @@ import {
 import { globalAutomationUserIds } from './automation-ids.js';
 import { db, schema } from './client.js';
 import { currentSprintBriefs, sprintBriefInput, type SprintBriefInput } from './sprint-briefs.js';
-import { foldSprintGraph, type GraphFoldResult, type GraphTicketInput } from './sprint-graph-fold.js';
+import {
+  SPRINT_EMPTY_CHANGE_TOKEN,
+  foldSprintGraph,
+  sprintChangeTokenOf,
+  type GraphFoldResult,
+  type GraphTicketInput,
+} from './sprint-graph-fold.js';
+import { sprintTicketChecksFor } from './sprint-ticket-checks.js';
 import {
   isSprintPathsQueued,
   isSprintPathsRunning,
@@ -299,6 +307,53 @@ async function layoutFor(
   });
 }
 
+/** The ONE fold of what is stored — the graph GET and the change-token GET share it, so both answer
+ *  the same `changeToken` for the same state. DB only; stamps nothing. */
+async function foldStoredSprint(
+  accountId: number,
+  workspaceId: number,
+  site: { provider: TrackerProvider; apiRoot: string },
+  aiEnabled: boolean,
+  readRow: Pick<SprintReadRow, 'statusOrderJson'> | null,
+): Promise<{ t: GraphTickets; statusLayout: SprintStatusLayout; themes: Awaited<ReturnType<typeof currentSprintThemes>>; g: GraphFoldResult }> {
+  const t = await loadGraphTickets(accountId, workspaceId, site, aiEnabled);
+  const statusLayout = await layoutFor(accountId, workspaceId, t, readRow);
+  const placeOf = (s: GraphTicketInput['status']) => (s == null ? null : sprintPlacementOf(statusLayout, s));
+  const placing = { stageOf: (s: GraphTicketInput['status']) => placeOf(s)?.stage ?? null, placeOf, productReviewId: mergeRuleTarget(statusLayout) };
+  // PRs only for what can be a node: the sprint plus the stored ghosts.
+  const prs = await graphPrsFor(accountId, workspaceId, site, [...t.sprintRows.map((r) => r.issueKey), ...t.refRows.map((r) => r.issueKey)]);
+  const themes = aiEnabled ? await currentSprintThemes(accountId, workspaceId, sprintThemeInputOf(t).inputHash) : null;
+  // THE TICKET CHECKS ("n of m met", db/sprint-ticket-checks.ts): sprint tickets only, batched; the
+  // ticket review is agentic, so AI off reads none.
+  const checks = aiEnabled ? await sprintTicketChecksFor(accountId, t.sprint.map((x) => x.ident), prs) : undefined;
+  const g = foldSprintGraph({
+    provider: site.provider,
+    apiRoot: site.apiRoot,
+    sprint: t.sprint,
+    ghosts: t.ghosts,
+    ...placing,
+    prs,
+    ...(themes != null ? { themes: themes.byIdent } : {}),
+    ...(checks != null ? { checks } : {}),
+  });
+  return { t, statusLayout, themes, g };
+}
+
+/** GET /api/sprint-graph/token — the change token alone. DB ONLY and SIDE-EFFECT FREE: no view stamp
+ *  (the read's demand gate is the graph GET's), no read kick, no "since you last looked" snapshot. */
+export async function getSprintChangeToken(
+  accountId: number,
+  workspaceId: number,
+  opts: { aiEnabled: boolean },
+): Promise<SprintGraphTokenResponse> {
+  const { workspaceSite } = await import('./stories.js');
+  const site = await workspaceSite(accountId, workspaceId);
+  if (site == null) return { workspaceId, changeToken: SPRINT_EMPTY_CHANGE_TOKEN };
+  const readRow = await readSprintRead(accountId, workspaceId);
+  const { g } = await foldStoredSprint(accountId, workspaceId, site, opts.aiEnabled, readRow);
+  return { workspaceId, changeToken: sprintChangeTokenOf(g) };
+}
+
 /** GET /api/sprint-graph — the whole graph, from what is stored. */
 export async function getSprintGraph(
   accountId: number,
@@ -320,6 +375,7 @@ export async function getSprintGraph(
     return {
       workspaceId,
       trackerOn: false,
+      changeToken: SPRINT_EMPTY_CHANGE_TOKEN,
       provider: null,
       source: null,
       read: sprintReadStateOf(null, () => ''),
@@ -340,22 +396,7 @@ export async function getSprintGraph(
   }
   const readRow = await viewHeader(accountId, workspaceId, site, opts.now);
   const source: SprintSource | null = readRow.sourceJson ?? null;
-  const t = await loadGraphTickets(accountId, workspaceId, site, opts.aiEnabled);
-  const statusLayout = await layoutFor(accountId, workspaceId, t, readRow);
-  const placeOf = (s: GraphTicketInput['status']) => (s == null ? null : sprintPlacementOf(statusLayout, s));
-  const placing = { stageOf: (s: GraphTicketInput['status']) => placeOf(s)?.stage ?? null, placeOf, productReviewId: mergeRuleTarget(statusLayout) };
-  // PRs only for what can be a node: the sprint plus the stored ghosts.
-  const prs = await graphPrsFor(accountId, workspaceId, site, [...t.sprintRows.map((r) => r.issueKey), ...t.refRows.map((r) => r.issueKey)]);
-  const themes = opts.aiEnabled ? await currentSprintThemes(accountId, workspaceId, sprintThemeInputOf(t).inputHash) : null;
-  const g = foldSprintGraph({
-    provider: site.provider,
-    apiRoot: site.apiRoot,
-    sprint: t.sprint,
-    ghosts: t.ghosts,
-    ...placing,
-    prs,
-    ...(themes != null ? { themes: themes.byIdent } : {}),
-  });
+  const { statusLayout, themes, g } = await foldStoredSprint(accountId, workspaceId, site, opts.aiEnabled, readRow);
   // THE PATHS: the LAST ones written (any version), even when the input hash has moved — marked STALE.
   // The hash covers GitHub-synced facts (PR states, CI) that change between sprint reads, and the pass
   // runs only after a read, so "current only" would blank them on every merge. The hash stays the
@@ -397,6 +438,7 @@ export async function getSprintGraph(
   return {
     workspaceId,
     trackerOn: true,
+    changeToken: sprintChangeTokenOf(g),
     provider: site.provider,
     source,
     read: sprintReadStateOf(readRow, (code) => sprintReadErrorMessage(site.provider, code)),

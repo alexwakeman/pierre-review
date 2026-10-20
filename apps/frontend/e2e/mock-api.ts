@@ -56,6 +56,7 @@ import type {
   TicketSequenceDiagramResponse,
   StoryDocsAlignmentResponse,
   SprintGraphResponse,
+  SprintGraphTokenResponse,
 } from '@pierre-review/shared';
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
 // build the Pending tabs from the shipped list rather than re-typing it.
@@ -536,6 +537,7 @@ const MERGED_PRS: MergedPrsResponse = {
 const SPRINT_GRAPH: SprintGraphResponse = {
   workspaceId: WORKSPACE.id,
   trackerOn: true,
+  changeToken: 'e2e0000000000001',
   provider: 'jira',
   source: { kind: 'sprint', provider: 'jira', names: ['Sprint 42'] },
   read: { readAt: iso(0.01), checkedAt: iso(0.01), error: null, truncated: false },
@@ -609,7 +611,9 @@ const SPRINT_GRAPH: SprintGraphResponse = {
       issueType: 'Story',
       assignee: { name: 'Amy', avatarUrl: null },
       epic: { key: 'ACME-100', title: 'Reports' },
-      brief: { state: 'current', summary: 'Lets a manager download any report as a CSV file.', criteriaCount: 3, criteriaDerived: true },
+      brief: { state: 'current', summary: 'Lets a manager download any report as a CSV file.', oneLiner: 'Download any report as CSV', criteriaCount: 3, criteriaDerived: true },
+      check: null,
+      checkRunning: false,
       prs: [],
       degree: 1,
       theme: null,
@@ -629,7 +633,9 @@ const SPRINT_GRAPH: SprintGraphResponse = {
       issueType: 'Story',
       assignee: null,
       epic: null,
-      brief: { state: 'current', summary: 'Users sign in from a one-time link sent by email.', criteriaCount: 2, criteriaDerived: false },
+      brief: { state: 'current', summary: 'Users sign in from a one-time link sent by email.', oneLiner: 'Sign in from an email link', criteriaCount: 2, criteriaDerived: false },
+      check: { met: 1, partlyMet: 0, notMet: 1, unsettled: 0, total: 2, checkedAt: '2026-10-19T10:00:00.000Z', stale: false },
+      checkRunning: false,
       prs: [
         {
           prId: PRS[0]!.id,
@@ -661,7 +667,9 @@ const SPRINT_GRAPH: SprintGraphResponse = {
       issueType: 'Story',
       assignee: { name: 'Ben', avatarUrl: null },
       epic: null,
-      brief: { state: 'pending', summary: null, criteriaCount: 0, criteriaDerived: false },
+      brief: { state: 'pending', summary: null, oneLiner: null, criteriaCount: 0, criteriaDerived: false },
+      check: null,
+      checkRunning: false,
       prs: [],
       degree: 1,
       theme: null,
@@ -1159,6 +1167,10 @@ export async function installMockApi(page: Page): Promise<void> {
         return json(route, { prs: [], titlesComplete: true } satisfies TicketLinksResponse);
       }
       if (path.endsWith('/api/sprint-graph')) return json(route, SPRINT_GRAPH);
+      // The change-token poll: the SAME token as the graph, so no "changed since you loaded it" hint.
+      if (path.endsWith('/api/sprint-graph/token')) {
+        return json(route, { workspaceId: WORKSPACE.id, changeToken: SPRINT_GRAPH.changeToken } satisfies SprintGraphTokenResponse);
+      }
       // The story view's lean read (a story tab restored from the URL asks it at boot).
       if (path.endsWith('/api/ticket-story')) {
         return json(route, {

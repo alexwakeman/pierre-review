@@ -4,12 +4,21 @@
 // text) and one per unordered pair for `concurrent`, degree, and `missing` (what the read fetches next).
 import { describe, expect, it } from 'vitest';
 import { trackerTicketIdent, type SprintBrief, type TicketLinkBlocker } from '@pierre-review/shared';
-import { edgesOutOf, foldSprintGraph, identOfKey, type GraphTicketInput } from './sprint-graph-fold.js';
+import {
+  SPRINT_EMPTY_CHANGE_TOKEN,
+  edgesOutOf,
+  foldSprintGraph,
+  identOfKey,
+  sprintChangeTokenOf,
+  type GraphFoldInput,
+  type GraphTicketInput,
+} from './sprint-graph-fold.js';
 
 const ROOT = 'https://acme.atlassian.net';
 const id = (k: string) => trackerTicketIdent('jira', ROOT, k);
 const brief = (refs: Array<[string, string]>): SprintBrief => ({
   summary: 's',
+  oneLiner: 'One line',
   criteria: [],
   criteriaDerived: false,
   references: refs.map(([ticketKey, relation]) => ({ ticketKey, relation: relation as never, quote: null })),
@@ -30,7 +39,7 @@ const t = (key: string, o: Partial<GraphTicketInput> = {}): GraphTicketInput => 
   briefState: 'pending',
   ...o,
 });
-const fold = (sprint: GraphTicketInput[], ghosts: GraphTicketInput[], o: { ghostMax?: number; depthMax?: number } = {}) =>
+const fold = (sprint: GraphTicketInput[], ghosts: GraphTicketInput[], o: Pick<GraphFoldInput, 'ghostMax' | 'depthMax' | 'prs'> = {}) =>
   foldSprintGraph({ provider: 'jira', apiRoot: ROOT, sprint, ghosts, stageOf: () => null, ...o });
 const keyOf = (r: ReturnType<typeof fold>) => (ident: string) => r.nodes.find((n) => n.ident === ident)?.key;
 
@@ -162,8 +171,45 @@ describe('foldSprintGraph', () => {
   it('a ghost has no epic; brief fields fold onto the node', () => {
     const r = fold([t('A-1', { epic: { key: 'E-1', title: 'Epic' }, brief: brief([['G-1', 'depends_on']]), briefState: 'current' })], [t('G-1', { epic: { key: 'E-2', title: null } })]);
     expect(r.nodes[0]!.epic).toEqual({ key: 'E-1', title: 'Epic' });
-    expect(r.nodes[0]!.brief).toEqual({ state: 'current', summary: 's', criteriaCount: 0, criteriaDerived: false });
+    expect(r.nodes[0]!.brief).toEqual({ state: 'current', summary: 's', oneLiner: 'One line', criteriaCount: 0, criteriaDerived: false });
     expect(r.nodes[1]!.epic).toBeNull();
+  });
+
+  it('a sprint ticket carries its ticket check; a ghost never does', () => {
+    const check = { met: 2, partlyMet: 1, notMet: 0, unsettled: 0, total: 3, checkedAt: '2026-10-20T00:00:00.000Z', stale: false };
+    const checks = new Map([
+      [id('A-1'), { check, running: true }],
+      [id('G-1'), { check, running: true }],
+    ]);
+    const r = foldSprintGraph({
+      provider: 'jira',
+      apiRoot: ROOT,
+      sprint: [t('A-1', { links: [link('G-1')] }), t('A-2')],
+      ghosts: [t('G-1')],
+      stageOf: () => null,
+      checks,
+    });
+    const n = (k: string) => r.nodes.find((x) => x.key === k)!;
+    expect([n('A-1').check, n('A-1').checkRunning]).toEqual([check, true]);
+    expect([n('A-2').check, n('A-2').checkRunning]).toEqual([null, false]);
+    expect([n('G-1').ghost, n('G-1').check, n('G-1').checkRunning]).toEqual([true, null, false]);
+  });
+
+  it('the change token moves with what the cards show, never with order or the clock', () => {
+    const base = () => fold([t('A-1', { links: [link('B-1')] }), t('B-1')], []);
+    const a = sprintChangeTokenOf(base());
+    expect(a).toMatch(/^[0-9a-f]{16}$/);
+    // Same state, nodes listed in another order: same token.
+    const g = base();
+    expect(sprintChangeTokenOf({ nodes: [...g.nodes].reverse(), edges: g.edges })).toBe(a);
+    // A PR moving state, a status change, a new one-liner: each moves it.
+    const pr = { prId: 1, number: 1, repoFullName: 'o/r', title: 'x', state: 'open' as const, draft: false, ciState: null, url: '', author: null };
+    const withPr = fold([t('A-1', { links: [link('B-1')] }), t('B-1')], [], { prs: new Map([[id('A-1'), [pr]]]) });
+    const merged = fold([t('A-1', { links: [link('B-1')] }), t('B-1')], [], { prs: new Map([[id('A-1'), [{ ...pr, state: 'merged' as const }]]]) });
+    expect(new Set([a, sprintChangeTokenOf(withPr), sprintChangeTokenOf(merged)]).size).toBe(3);
+    const moved = fold([t('A-1', { links: [link('B-1')], status: { name: 'Done', category: 'done' } }), t('B-1')], []);
+    expect(sprintChangeTokenOf(moved)).not.toBe(a);
+    expect(SPRINT_EMPTY_CHANGE_TOKEN).toBe(sprintChangeTokenOf({ nodes: [], edges: [] }));
   });
 
   it('places each node through placeOf and derives its column ONCE (merge rule on / off)', () => {

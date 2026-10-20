@@ -3,6 +3,7 @@
 // silently falling into the generous `read` tier is exactly the failure this file exists to
 // catch, and it is invisible at runtime until a bill arrives.
 import { beforeEach, describe, expect, it } from 'vitest';
+import { config } from '../../config.js';
 import { __testing } from './rate-limit.js';
 
 const { TIERS, tierFor, consume, buckets } = __testing;
@@ -541,12 +542,17 @@ describe('tierFor — GitHub quota spenders', () => {
   // else is a DB read. Nothing writes to a tracker. "Check against code" is gone.
   it('tiers This sprint per route', () => {
     expect(tiers('GET', '/api/sprint-graph')).toEqual(['read']);
+    // The change token the SPA polls: DB only.
+    expect(tiers('GET', '/api/sprint-graph/token')).toEqual(['read']);
     expect(tiers('POST', '/api/sprint-graph/ask')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('PUT', '/api/sprint-stories/statuses')).toEqual(['read']);
     // The story view (the ticket tab): DB-only, decided.
     expect(tiers('GET', '/api/ticket-prs')).toEqual(['read']);
     expect(tiers('GET', '/api/ticket-story')).toEqual(['read']);
-    expect(tiers('POST', '/api/sprint-stories/refresh')).toEqual(['search', 'read']);
+    // With AI on (local) a refresh may start up to three ticket checks — agent runs.
+    expect(tiers('POST', '/api/sprint-stories/refresh')).toEqual(
+      config.aiEnabled ? ['search', 'ai', 'ai_hourly'] : ['search', 'read'],
+    );
   });
 
   // /api/pro/bot-themes — the revived Bots "What they're flagging" panel. Both tiers land via

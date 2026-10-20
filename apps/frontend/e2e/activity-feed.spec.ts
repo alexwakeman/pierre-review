@@ -96,9 +96,9 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(railButton(page, 'Pending')).toHaveAttribute('aria-pressed', 'true');
   });
 
-  test('the rail reads Open PRs, Pending, This Sprint, Feed, Reports, Bots Monitoring', async ({ page }) => {
+  test('the rail reads Open PRs, Pending, Feed, Reports, Bots Monitoring', async ({ page }) => {
     await gotoActivity(page);
-    // The six pseudo-rows are the first `aria-pressed` buttons in the overlay; the per-repo rows
+    // The pseudo-rows are the first `aria-pressed` buttons in the overlay; the per-repo rows
     // follow them. Polled, because the rail can re-render while the workspace resolves.
     await expect
       .poll(() =>
@@ -107,21 +107,25 @@ test.describe('Activity Feed / click-to-detail flows', () => {
           .evaluateAll((els) =>
             // The LABEL span only: Reports and Bots Monitoring carry a Pro badge after it, and
             // Open PRs a count.
-            els.slice(0, 6).map((el) => (el.querySelector('.truncate')?.textContent ?? '').trim()),
+            els.slice(0, 5).map((el) => (el.querySelector('.truncate')?.textContent ?? '').trim()),
           ),
       )
-      .toEqual(['Open PRs', 'Pending', 'This Sprint', 'Feed', 'Reports', 'Bots Monitoring']);
-    // This Sprint is FREE: its rail line carries no Pro badge.
-    await expect(railButton(page, 'This Sprint')).toBeVisible();
+      .toEqual(['Open PRs', 'Pending', 'Feed', 'Reports', 'Bots Monitoring']);
+    // This Sprint left the rail for a fixed tab of its own.
+    await expect(railButton(page, 'This Sprint')).toHaveCount(0);
   });
 
-  test('This Sprint opens on Critical path, with Theme, People and Merged so far beside it', async ({ page }) => {
+  test('This Sprint is a fixed tab beside Activity, opening on Theme, with Critical path, People and Merged so far', async ({ page }) => {
     await gotoActivity(page);
-    await railButton(page, 'This Sprint').click();
-    const view = page.getByTestId('sprint-rail-view');
+    const chips = page.getByTestId('pinned-tabs').getByRole('tab');
+    await expect(chips.nth(0)).toContainText('Activity');
+    await expect(chips.nth(1)).toContainText('This Sprint');
+    await expect(chips.nth(2)).toContainText('Timeline');
+    await chips.nth(1).click();
+    const view = page.getByTestId('sprint-tab-view');
     await expect(view).toBeVisible();
-    await expect(page).toHaveURL(/activityRepo=sprint/);
-    await expect(view.getByRole('tab', { name: 'Critical path' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page).toHaveURL(/view=sprint/);
+    await expect(view.getByRole('tab', { name: 'Theme' })).toHaveAttribute('aria-selected', 'true');
     await view.getByRole('tab', { name: 'People' }).click();
     await expect(page).toHaveURL(/sprintTab=people/);
     // A card shows its story in place (its corner arrow opens the story view).
@@ -132,18 +136,19 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(page).toHaveURL(/sprintTab=merged/);
   });
 
-  for (const [legacy, tab] of [
-    ['sprint', 'Critical path'],
-    ['merged', 'Merged so far'],
+  for (const [query, tab] of [
+    ['?activityRepo=sprint', 'Theme'],
+    ['?activityRepo=sprint&sprintTab=people', 'People'],
+    ['?activityRepo=insights&insightsTab=sprint', 'Theme'],
+    ['?activityRepo=insights&insightsTab=merged', 'Merged so far'],
   ] as const) {
-    test(`a legacy ?insightsTab=${legacy} link lands on This Sprint → ${tab}`, async ({ page }) => {
-      await gotoActivity(page, `?activityRepo=insights&insightsTab=${legacy}`);
-      await expect(railButton(page, 'This Sprint')).toHaveAttribute('aria-pressed', 'true');
-      await expect(page.getByTestId('sprint-rail-view').getByRole('tab', { name: tab })).toHaveAttribute(
-        'aria-selected',
-        'true',
-      );
-      await expect(page).not.toHaveURL(/insightsTab=/);
+    test(`a legacy ${query} link lands on the This Sprint tab → ${tab}`, async ({ page }) => {
+      await installMockApi(page);
+      await page.goto(`/app/?view=activity&${query.slice(1)}`);
+      const view = page.getByTestId('sprint-tab-view');
+      await expect(view.getByRole('tab', { name: tab })).toHaveAttribute('aria-selected', 'true');
+      await expect(page).toHaveURL(/view=sprint/);
+      await expect(page).not.toHaveURL(/insightsTab=|activityRepo=sprint/);
     });
   }
 
@@ -256,14 +261,15 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(page.getByTestId('open-prs-view')).toBeVisible();
   });
 
-  test('the tab strip is Activity then Timeline; a legacy ?view=open-prs link lands on Open PRs', async ({
+  test('the tab strip is Activity, This Sprint, Timeline; a legacy ?view=open-prs link lands on Open PRs', async ({
     page,
   }) => {
     await gotoActivity(page);
     const strip = tabs(page);
     // Auto-retrying (a one-shot `allTextContents` raced the strip's first paint).
     await expect(strip.getByRole('tab').nth(0)).toHaveText('Activity');
-    await expect(strip.getByRole('tab').nth(1)).toHaveText('Timeline');
+    await expect(strip.getByRole('tab').nth(1)).toHaveText('This Sprint');
+    await expect(strip.getByRole('tab').nth(2)).toHaveText('Timeline');
 
     await installMockApi(page);
     await page.goto('/app/?view=open-prs');

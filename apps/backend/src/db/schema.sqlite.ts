@@ -40,6 +40,7 @@ import type {
   SonarPostRecord,
   SequenceDiagramMember,
   DesignDiagram,
+  ReferenceDocCrawl,
   ReferenceDocSectionEntry,
   ReviewDocReference,
   ReferenceDocCitation,
@@ -3115,6 +3116,8 @@ export const sprintBriefs = sqliteTable(
     textHash: text('text_hash').notNull(),
     briefVersion: integer('brief_version').notNull(),
     summary: text('summary').notNull(),
+    /** One line, ≤ SPRINT_BRIEF_CAPS.oneLiner (SPRINT_BRIEF_VERSION 5; sqlite 0123). NULL on older rows. */
+    oneLiner: text('one_liner'),
     criteriaJson: text('criteria_json', { mode: 'json' }).$type<SprintBriefCriterion[]>().notNull(),
     criteriaDerived: integer('criteria_derived', { mode: 'boolean' }).notNull().default(false),
     referencesJson: text('references_json', { mode: 'json' }).$type<SprintBriefStoredReference[]>().notNull(),
@@ -3529,6 +3532,8 @@ export const referenceDocs = sqliteTable(
     sections: text('sections', { mode: 'json' }).$type<ReferenceDocSectionEntry[]>(),
     summary: text('summary'),
     topics: text('topics', { mode: 'json' }).$type<string[]>(),
+    // A crawl's settings + what the last build read (ReferenceDocCrawl); NULL = one page or a file.
+    crawl: text('crawl_json', { mode: 'json' }).$type<ReferenceDocCrawl>(),
     pageCount: integer('page_count'),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),

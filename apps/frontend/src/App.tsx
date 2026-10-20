@@ -4,6 +4,7 @@ import { PinnedTabsBar } from './components/PinnedTabsBar.js';
 import { PrDetail } from './components/PrDetail.js';
 import { Timeline } from './components/Timeline/index.js';
 import { ActivityView } from './components/Activity/index.js';
+import { SprintTabView } from './components/Sprint/SprintTabView.js';
 import { MetricsDetail } from './components/Activity/MetricsDetail.js';
 import { BotPrsDetail } from './components/Activity/BotPrsDetail.js';
 import { BotOnlyPrsDetail } from './components/Activity/BotOnlyPrsDetail.js';
@@ -133,6 +134,8 @@ export default function App(): JSX.Element {
     ? (tabs.find((t) => t.key === activeTab) ?? null) // stale/closed key → full board
     : null;
   const inboxActive = activeTab === 'activity';
+  // This Sprint — a FIXED tab beside Activity (it was an Activity rail line), its own overlay.
+  const sprintActive = activeTab === 'sprint';
   const prDetailId = activeTabObj?.kind === 'pr-detail' ? activeTabObj.prId : null;
   const metricsActive = activeTabObj?.kind === 'metrics-detail';
   const botPrsActive = activeTabObj?.kind === 'bot-prs';
@@ -161,6 +164,7 @@ export default function App(): JSX.Element {
   const overlayActive =
     prDetailId != null ||
     inboxActive ||
+    sprintActive ||
     metricsActive ||
     botPrsActive ||
     botOnlyActive ||
@@ -467,6 +471,17 @@ export default function App(): JSX.Element {
             className="absolute inset-0 z-20 overflow-clip bg-white dark:bg-gray-950"
           >
             <ActivityView />
+          </div>
+        )}
+
+        {/* This Sprint — a fixed tab, a sibling full-main overlay over the board like Activity.
+            The overlay is the scroll box (useRememberedScroll restores each sub-tab's position). */}
+        {sprintActive && (
+          <div
+            data-testid="sprint-overlay"
+            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
+          >
+            <SprintTabView />
           </div>
         )}
 

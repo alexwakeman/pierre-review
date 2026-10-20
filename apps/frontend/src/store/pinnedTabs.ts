@@ -89,17 +89,22 @@ export interface Tab {
   ticketMeta?: TabTicketMeta | null; // label meta for ticket tabs
 }
 
-// Which "tab" the main area is showing: one of the two FIXED views (the Activity console — the
-// default view, opening on its Open PRs rail line — and the timeline board) or one of the dynamic
-// tabs identified by its `Tab.key`. These are ONE axis — only one renders at a time. (Open PRs was
-// a third fixed view until it moved under Activity as a rail line, `activityRepoId: 'open-prs'`.)
-export type FixedView = 'activity' | 'timeline';
+// Which "tab" the main area is showing: one of the three FIXED views (the Activity console — the
+// default view, opening on its Open PRs rail line — This Sprint, and the timeline board) or one of
+// the dynamic tabs identified by its `Tab.key`. These are ONE axis — only one renders at a time.
+// (Open PRs was a fixed view until it moved under Activity as a rail line, `activityRepoId:
+// 'open-prs'`; This Sprint went the other way — an Activity rail line promoted to a fixed tab.)
+export type FixedView = 'activity' | 'sprint' | 'timeline';
 export type ActiveTab = FixedView | string;
 
 // The fixed views, in tab-strip order. ⚠ Every "is this a fixed view?" test goes through
 // `isFixedView`, never a literal pair — a third view was added once already and a hard-coded
 // `'timeline' || 'activity'` is exactly the check that forgets it.
-export const FIXED_VIEWS: readonly FixedView[] = ['activity', 'timeline'];
+export const FIXED_VIEWS: readonly FixedView[] = ['activity', 'sprint', 'timeline'];
+
+/** The view the app falls back to when nothing else is left to show (closing the last dynamic tab):
+ *  Activity, the default view — the same thing a URL with no `view=` opens. */
+export const DEFAULT_FIXED_VIEW: FixedView = 'activity';
 export function isFixedView(tab: ActiveTab): tab is FixedView {
   return (FIXED_VIEWS as readonly string[]).includes(tab);
 }
@@ -265,7 +270,7 @@ interface TabsState {
   openTicketTab: (ticket: TabTicketMeta, opts?: OpenOpts) => void;
 
   syncMeta: (meta: TabMeta) => void; // backfill label on every tab with this prId
-  closeTab: (key: string) => void; // remove; fall back to 'timeline' if it was active
+  closeTab: (key: string) => void; // remove; if it was active → a neighbour tab, else Activity
   moveTab: (key: string, toIndex: number) => void; // drag-reorder; never touches activeTab
   closeOtherTabs: (key: string) => void; // keep only that tab (context menu)
   closeAllTabs: () => void; // remove every dynamic tab (context menu)
@@ -280,6 +285,7 @@ interface TabsState {
   // as "leave this detail for the board", which is a different intent from a rail click.
   showBoardFromDetail: () => void;
   showActivity: () => void; // idempotent → 'activity'
+  showSprint: () => void; // idempotent → 'sprint'
   /**
    * Seat the tab a URL names (`useUrlState`'s `view=`), on load AND on every browser Back /
    * Forward. `fromPop` distinguishes the two: only a real pop promotes the pending feed
@@ -384,6 +390,7 @@ function sameMeta(a: TabMeta, b: TabMeta): boolean {
     a.authorAvatarUrl === b.authorAvatarUrl
   );
 }
+
 
 export const usePinnedTabs = create<TabsState>((set, get) => {
   // Ensure `tab` exists and activate it. The BROWSER HISTORY ENTRY IS NOT PUSHED HERE any more:
@@ -512,16 +519,19 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
         const tabs = s.tabs.filter((t) => t.key !== key);
         persist(tabs);
         // Closing a non-active tab leaves the active one alone. Closing the ACTIVE tab
-        // moves to a logical neighbour rather than snapping back to the board: the tab
+        // moves to a logical neighbour rather than snapping back to a fixed view: the tab
         // immediately to its LEFT (still present in `tabs` at idx-1), else the one to its
-        // RIGHT (now the leftmost, tabs[0]), else — no dynamic tabs remain — the board.
+        // RIGHT (now the leftmost, tabs[0]), else — no dynamic tabs remain — ACTIVITY, the default
+        // view, wherever the tabs were opened from (the user's rule). It used to be the Timeline
+        // unconditionally, and then "the fixed view the tab was opened from", which still landed on
+        // the Timeline for the commonest case: a tab opened by clicking a bar there.
         if (s.activeTab !== key) return { tabs };
         const nextActive: ActiveTab =
           idx - 1 >= 0
             ? (s.tabs[idx - 1] as Tab).key
             : tabs.length > 0
               ? (tabs[0] as Tab).key
-              : 'timeline';
+              : DEFAULT_FIXED_VIEW;
         return { tabs, activeTab: nextActive };
       }),
     // Drag-to-reorder: move a tab to `toIndex` (clamped) in the strip. Pure presentation —
@@ -553,9 +563,9 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       set((s) => {
         if (s.tabs.length === 0) return s;
         persist([]);
-        // Stay on a fixed view; only fall back to the board when the active tab was one
-        // of the dynamic tabs just destroyed (mirrors closeTab's fallback).
-        const activeTab = isFixedView(s.activeTab) ? s.activeTab : 'timeline';
+        // Stay on a fixed view; when the active tab was one of the dynamic tabs just destroyed,
+        // land on Activity (mirrors closeTab's fallback).
+        const activeTab = isFixedView(s.activeTab) ? s.activeTab : DEFAULT_FIXED_VIEW;
         return { tabs: [], activeTab };
       }),
     unpin: (id) => get().closeTab(prDetailKey(id)),
@@ -574,6 +584,9 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
     },
     showActivity: () => {
       if (get().activeTab !== 'activity') set({ activeTab: 'activity' });
+    },
+    showSprint: () => {
+      if (get().activeTab !== 'sprint') set({ activeTab: 'sprint' });
     },
     applyUrlTab: (tab, opts) =>
       set((s) => {
@@ -632,7 +645,7 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       }
       set({
         tabs: [],
-        activeTab: 'timeline',
+        activeTab: DEFAULT_FIXED_VIEW,
         activityReturnItemId: null,
         activityFlashItemId: null,
       });

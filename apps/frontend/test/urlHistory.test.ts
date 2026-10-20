@@ -880,31 +880,50 @@ describe('the Activity sub-tab strips', () => {
     expect(location.search).not.toContain('insightsTab');
   });
 
-  // "Merged so far" LEFT Reports for the This Sprint rail line: its own key (`sprintTab`), the Critical
-  // path default omitted, and a reload of its link lands back on it.
-  it('round-trips This Sprint and its Merged so far tab through ?activityRepo=sprint&sprintTab=merged', () => {
-    gesture(() => useFilters.getState().setActivityRepo('sprint'));
-    expect(location.search).toContain('activityRepo=sprint');
+  // This Sprint is a FIXED TAB (`view=sprint`), its sub-tab its own key (`sprintTab`), the Theme
+  // default omitted, and a Back / reload of its link lands back on it.
+  it('round-trips This Sprint and its Merged so far tab through ?view=sprint&sprintTab=merged', () => {
+    gesture(() => usePinnedTabs.getState().showSprint());
+    expect(location.search).toContain('view=sprint');
+    expect(location.search).not.toContain('activityRepo=sprint');
     expect(location.search).not.toContain('sprintTab');
     gesture(() => useFilters.getState().setSprintInnerTab('merged'));
     expect(location.search).toContain('sprintTab=merged');
     expect(location.search).not.toContain('insightsTab');
     useFilters.getState().setSprintInnerTab('paths');
-    useFilters.getState().setActivityRepo('feed');
+    usePinnedTabs.getState().showActivity();
     applyUrlToStores({ fromPop: true });
-    expect(useFilters.getState().activityRepoId).toBe('sprint');
+    expect(usePinnedTabs.getState().activeTab).toBe('sprint');
     expect(useFilters.getState().sprintInnerTab).toBe('merged');
   });
 
-  // ⚠ LEGACY: the two tabs' old Reports links still sit in bookmarks and history; they land on the
-  // new rail line + tab, never on a Reports tab that no longer exists.
+  it('switching to the This Sprint tab is a navigation: Back returns to Activity', () => {
+    gesture(() => usePinnedTabs.getState().showActivity());
+    const before = entries.length;
+    gesture(() => usePinnedTabs.getState().showSprint());
+    expect(entries).toHaveLength(before + 1);
+    back();
+    expect(usePinnedTabs.getState().activeTab).toBe('activity');
+  });
+
+  // ⚠ LEGACY: This Sprint was an Activity rail line (`?view=activity&activityRepo=sprint`, which the
+  // app emitted) and before that two Reports tabs. Every one of those links lands on the TAB.
+  it('a legacy ?activityRepo=sprint link lands on the This Sprint tab, keeping its sub-tab', () => {
+    seat('/app/?workspace=5&view=activity&activityRepo=sprint&sprintTab=people');
+    applyUrlToStores({ fromPop: true });
+    expect(usePinnedTabs.getState().activeTab).toBe('sprint');
+    expect(useFilters.getState().sprintInnerTab).toBe('people');
+    // 'sprint' is not a rail value any more; the rail keeps a real one.
+    expect(useFilters.getState().activityRepoId).not.toBe('sprint');
+  });
+
   it.each([
     ['sprint', 'themes'],
     ['merged', 'merged'],
   ] as const)('a legacy ?insightsTab=%s link lands on This Sprint → %s', (legacy, tab) => {
     seat(`/app/?workspace=5&view=activity&activityRepo=insights&insightsTab=${legacy}`);
     applyUrlToStores({ fromPop: true });
-    expect(useFilters.getState().activityRepoId).toBe('sprint');
+    expect(usePinnedTabs.getState().activeTab).toBe('sprint');
     expect(useFilters.getState().sprintInnerTab).toBe(tab);
     expect(useFilters.getState().insightsInnerTab).not.toBe(legacy);
   });
@@ -912,13 +931,13 @@ describe('the Activity sub-tab strips', () => {
   it('a legacy ?insightsTab=merged link with no rail named lands on This Sprint too', () => {
     seat('/app/?workspace=5&view=activity&insightsTab=merged');
     applyUrlToStores({ fromPop: true });
-    expect(useFilters.getState().activityRepoId).toBe('sprint');
+    expect(usePinnedTabs.getState().activeTab).toBe('sprint');
     expect(useFilters.getState().sprintInnerTab).toBe('merged');
   });
 
   // The three views each have a link; the retired force graph's `?sprintTab=graph` lands on Theme.
   it('round-trips the Critical path and People views through ?sprintTab=', () => {
-    gesture(() => useFilters.getState().setActivityRepo('sprint'));
+    gesture(() => usePinnedTabs.getState().showSprint());
     gesture(() => useFilters.getState().setSprintInnerTab('people'));
     expect(location.search).toContain('sprintTab=people');
     gesture(() => useFilters.getState().setSprintInnerTab('paths'));
@@ -929,10 +948,20 @@ describe('the Activity sub-tab strips', () => {
 
   it('a retired ?sprintTab=graph link lands on Theme', () => {
     useFilters.getState().setSprintInnerTab('people');
-    seat('/app/?workspace=5&view=activity&activityRepo=sprint&sprintTab=graph');
+    seat('/app/?workspace=5&view=sprint&sprintTab=graph');
     applyUrlToStores({ fromPop: true });
-    expect(useFilters.getState().activityRepoId).toBe('sprint');
+    expect(usePinnedTabs.getState().activeTab).toBe('sprint');
     expect(useFilters.getState().sprintInnerTab).toBe('themes');
+  });
+
+  it('does not emit sprintTab from Activity or the Timeline', () => {
+    gesture(() => usePinnedTabs.getState().showSprint());
+    gesture(() => useFilters.getState().setSprintInnerTab('people'));
+    gesture(() => usePinnedTabs.getState().showActivity());
+    expect(location.search).not.toContain('sprintTab');
+    gesture(() => usePinnedTabs.getState().showTimeline());
+    expect(location.search).not.toContain('sprintTab');
+    expect(useFilters.getState().sprintInnerTab).toBe('people');
   });
 
   it('does not emit sprintTab from a rail entry that has no This Sprint strip', () => {

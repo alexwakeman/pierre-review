@@ -3,6 +3,7 @@ import { setAfterSprintRead } from '../../tracker/sprint/hooks.js';
 import type { AgentContext } from '../agent-context.js';
 import { runSprintPathsPass } from '../sprint-paths/manager.js';
 import { runSprintThemePass } from '../sprint-themes/manager.js';
+import { registerSprintTicketChecks } from '../ticket-review/sprint-checks.js';
 import { runSprintBriefPass } from './manager.js';
 
 // Registered ONLY from `registerAgenticRoutes` (local; cloud registers nothing agentic): every stored
@@ -51,4 +52,7 @@ export function registerSprintBriefs(ctx: AgentContext): void {
   setAfterSprintRead((accountId, workspaceId) => {
     void runSprintAfterRead(ctx, accountId, workspaceId);
   });
+  // The refresh's ticket checks (≤ SPRINT_REFRESH_TICKET_CHECKS per manual refresh) share this one
+  // agentic registration point.
+  registerSprintTicketChecks(ctx);
 }

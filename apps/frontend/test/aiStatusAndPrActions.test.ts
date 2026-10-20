@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { aiStatusText, formatElapsed } from '../src/components/AiStatusLine.js';
 import { threadCheckStage } from '../src/components/CheckThreadsButton.js';
-import { sprintAiPass } from '../src/components/Activity/SprintView.js';
+import { sprintAiPass, ticketChecksNote } from '../src/components/Activity/SprintView.js';
 import { PR_ACTIONS_OPEN_KEY, readPrActionsOpen } from '../src/components/pr/PrActionsRow.js';
 import { threadCheckActive } from '../src/hooks/useThreadCheck.js';
 
@@ -89,6 +89,17 @@ describe('This Sprint header pass', () => {
     expect(
       sprintAiPass({ ...base, briefs: { current: 4, pending: 8 }, passes: { briefsRunning: false, themesRunning: false } }),
     ).toBeNull();
+  });
+});
+
+describe('This Sprint refresh: the ticket-checks note', () => {
+  it('says how many started, or why none could, and nothing otherwise', () => {
+    expect(ticketChecksNote(undefined)).toBeNull();
+    expect(ticketChecksNote({ started: 0, skipped: null })).toBeNull();
+    expect(ticketChecksNote({ started: 1, skipped: null })).toBe('Checking 1 ticket against its pull requests.');
+    expect(ticketChecksNote({ started: 3, skipped: null })).toBe('Checking 3 tickets against their pull requests.');
+    expect(ticketChecksNote({ started: 0, skipped: 'no_credential' })).toBe('Ticket checks need Claude set up first.');
+    expect(ticketChecksNote({ started: 0, skipped: 'credits' })).toBe('No credits left for ticket checks.');
   });
 });
 

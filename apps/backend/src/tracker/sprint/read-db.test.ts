@@ -323,7 +323,27 @@ describe('POST /api/sprint-stories/refresh', () => {
       expect(kicks).toEqual([[1, wsA]]);
       expect((await store.readSprintRead(1, wsA))?.nextReadAt.getTime()).toBe(0);
       expect(await store.readSprintRead(1, wsB)).toBeNull();
+      // No agentic seam (cloud, AI off): no `ticketChecks` at all.
+      expect('ticketChecks' in body).toBe(false);
+      // With the seam (local, AI on): it runs for the RESOLVED workspace and its answer rides the 202.
+      const asked: Array<[number, number]> = [];
+      hooks.setSprintTicketChecks(async (a, w) => {
+        asked.push([a, w]);
+        return { started: 2, skipped: null };
+      });
+      const withChecks = await app.inject({ method: 'POST', url: '/api/sprint-stories/refresh', payload: { workspaceId: wsA } });
+      expect(withChecks.statusCode).toBe(202);
+      expect(withChecks.json().ticketChecks).toEqual({ started: 2, skipped: null });
+      expect(asked).toEqual([[1, wsA]]);
+      // A throwing seam never fails the refresh.
+      hooks.setSprintTicketChecks(async () => {
+        throw new Error('boom');
+      });
+      const threw = await app.inject({ method: 'POST', url: '/api/sprint-stories/refresh', payload: { workspaceId: wsA } });
+      expect(threw.statusCode).toBe(202);
+      expect(threw.json().ticketChecks).toEqual({ started: 0, skipped: null });
     } finally {
+      hooks.setSprintTicketChecks(null);
       contract.setProCapabilities(before);
       store.setSprintReadKicker(null);
       await app.close();
@@ -442,6 +462,7 @@ describe('referenced tickets and ghost chains (./ref-status.ts)', () => {
     const e81 = rows.find((r) => r.issueKey === 'ENG-81');
     await briefs.storeSprintBrief(1, wsA, e81.ident, briefs.sprintBriefInput(e81, 'jira').textHash, {
       summary: 's',
+      oneLiner: 's',
       criteria: [],
       criteriaDerived: true,
       references: [{ ticketKey: 'ENG-90', relation: 'depends_on', quote: null }],

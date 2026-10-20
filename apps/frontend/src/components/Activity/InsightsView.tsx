@@ -37,8 +37,8 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 //   • Chronology — the COURT LEDGER (BottlenecksPanel). PRO on `periodReports`; still
 //     deterministic (no model anywhere behind it) and still the twin of the Bots rail — that
 //     surface measures automation, this one measures where people's time went.
-// ("Merged so far" and "This sprint" LEFT this pane for the FREE This Sprint rail line —
-// SprintRailView; a legacy `?insightsTab=sprint|merged` lands there.)
+// ("Merged so far" and "This sprint" LEFT this pane for the FREE This Sprint tab —
+// Sprint/SprintTabView; a legacy `?insightsTab=sprint|merged` lands there.)
 //
 // ⚠ IT RIDES `periodReports` RATHER THAN A FLAG OF ITS OWN — one capability, no `apiVersion` bump,
 // no plugin edit. The reasoning is written out on the route (api/routes/flow.ts), which is also

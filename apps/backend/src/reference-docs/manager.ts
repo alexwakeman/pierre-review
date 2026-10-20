@@ -1,6 +1,13 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ReferenceDocSourceKind, ReferenceDocStatus, ReferenceDocStreamEvent } from '@pierre-review/shared';
+import {
+  REFERENCE_DOC_CRAWL_RANK_MODEL,
+  type ReferenceDocCrawl,
+  type ReferenceDocSourceKind,
+  type ReferenceDocStatus,
+  type ReferenceDocStreamEvent,
+} from '@pierre-review/shared';
+import { AiRuntimeMissingError } from '../ai/runtime.js';
 import { config } from '../config.js';
 import type { AgentContext } from '../review/agent-context.js';
 import {
@@ -13,15 +20,17 @@ import {
 } from '../review/claude-review/manager.js';
 import { pickReviewNonce } from '../review/claude-review/prompts.js';
 import { outstanding, type BuildMode } from './build-judge.js';
-import { ConverterMissingError, convertToMarkdown, pdfPageCount, sniffFetched, sniffUpload, type SniffResult } from './convert.js';
+import { ConverterMissingError, convertToMarkdown, htmlToMarkdown, pdfPageCount, sniffFetched, sniffUpload, type SniffResult } from './convert.js';
+import { CrawlRefusal, bundleCrawlMarkdown, crawlSite, type BundlePage } from './crawl.js';
+import { makeLinkRanker } from './crawl-rank.js';
 import { installDocFolder, readSource, saveSource, writeIndex } from './library.js';
 import { stagingRoot } from './paths.js';
 import { BUILD_PDF_SYSTEM_PROMPT, BUILD_SECTIONS_SYSTEM_PROMPT, buildPdfPrompt, buildSectionsPrompt } from './prompts.js';
 import { draftsFromWritten, renderDocFolder, trimTitle } from './assemble.js';
 import { sectionFileNames, validateDocFolder } from './render.js';
 import { DocumentTooLongError, MAX_SECTIONS, splitMarkdown, type DraftSection } from './split.js';
-import { getDocRow, markDocFailed, patchDoc, saveDocBuilt, type DocRow, type Telemetry } from './store.js';
-import { UrlFetchError, fetchPage } from './url-fetch.js';
+import { crawlOf, getDocRow, markDocFailed, patchDoc, saveDocBuilt, type DocRow, type Telemetry } from './store.js';
+import { UrlFetchError, fetchPage, type FetchedPage } from './url-fetch.js';
 
 // THE REFERENCE-DOCS BUILD QUEUE (docs/REFERENCE-DOCS.md § The build). One Sonnet 5 agent run per
 // document, and:
@@ -169,20 +178,99 @@ function progressReporter(accountId: number, docId: number) {
 
 class BuildRefusal extends Error {}
 
+interface SourceRead {
+  body: Buffer;
+  sniff: Extract<SniffResult, { ok: true }>;
+  /** Set when the document is a crawl: what it read, to store once the build succeeds. */
+  crawl?: { stored: ReferenceDocCrawl; costUsd: number };
+}
+
+type Report = ReturnType<typeof progressReporter>;
+
+/** A fetched single page → its kind, stored as the source. */
+function singlePage(row: DocRow, page: FetchedPage): SourceRead {
+  const sniff = sniffFetched(page.body, page.contentType, page.url);
+  if (!sniff.ok) throw new BuildRefusal(sniff.message);
+  saveSource(row.accountId, row.workspaceId, row.slug, page.body, sniff.ext);
+  return { body: page.body, sniff };
+}
+
+/**
+ * "Follow links" (docs/REFERENCE-DOCS.md § Following links): crawl the site from the stored address
+ * (crawl.ts, every request through the guarded `fetchPage`), then bundle the pages into ONE markdown
+ * source — a chapter per page — that the ordinary 'sections' pipeline splits and summarises.
+ */
+async function crawlSource(job: Job, row: DocRow, crawl: ReferenceDocCrawl, report: Report, signal: AbortSignal): Promise<SourceRead> {
+  const { ctx, accountId } = job;
+  const { cheapComplete } = await import('../review/llm.js');
+  const ranker = makeLinkRanker({
+    complete: (o) => cheapComplete(o),
+    onUsage: (u) =>
+      ctx
+        .recordAiUsage({ accountId, seam: 'summary', feature: 'docs_crawl_rank', model: REFERENCE_DOC_CRAWL_RANK_MODEL, ...u })
+        .catch(() => {}),
+  });
+  let outcome;
+  try {
+    outcome = await crawlSite(
+      row.sourceUrl!,
+      crawl.depth,
+      {
+        fetch: (url, maxBytes) => fetchPage(url, undefined, undefined, maxBytes),
+        rank: async (req) => {
+          try {
+            return await ranker(req);
+          } catch (err) {
+            ctx.log.warn(`reference doc ${job.docId}: link ranking failed: ${err instanceof Error ? err.message : String(err)}`);
+            throw new CrawlRefusal(
+              err instanceof AiRuntimeMissingError
+                ? 'Claude is not set up here, so no links were followed. Press "Set up AI", then rebuild.'
+                : 'Claude could not be reached to choose which links to follow.',
+            );
+          }
+        },
+        signal,
+        onProgress: (read, max) => report('converting', 3 + (5 * read) / max, `Crawling ${read} of ${max}`),
+      },
+      crawl.maxPages,
+    );
+  } catch (err) {
+    if (err instanceof CrawlRefusal) throw new BuildRefusal(err.message);
+    if (err instanceof UrlFetchError) throw new BuildRefusal(err.message);
+    throw err;
+  }
+  if (outcome.kind === 'single') return singlePage(row, outcome.page);
+  report('converting', 8, 'Converting pages to markdown', true);
+  const bundled: BundlePage[] = [];
+  for (const p of outcome.pages) {
+    if (signal.aborted) throw new BuildRefusal('Cancelled.');
+    bundled.push({ url: p.url, title: p.title, markdown: await htmlToMarkdown(p.html) });
+  }
+  const body = Buffer.from(bundleCrawlMarkdown(bundled), 'utf8');
+  saveSource(row.accountId, row.workspaceId, row.slug, body, 'md');
+  return {
+    body,
+    sniff: { ok: true, kind: 'markdown', ext: 'md' },
+    crawl: {
+      stored: { ...crawl, pages: outcome.pages.map((p) => ({ url: p.url, title: p.title, depth: p.depth })), skipped: outcome.skipped },
+      costUsd: outcome.costUsd,
+    },
+  };
+}
+
 /** The document's bytes and their kind. A URL is fetched again; anything else reads the stored source. */
-async function readSourceFor(row: DocRow): Promise<{ body: Buffer; sniff: Extract<SniffResult, { ok: true }> }> {
+async function readSourceFor(job: Job, row: DocRow, report: Report, signal: AbortSignal): Promise<SourceRead> {
   if (row.sourceKind === 'url') {
     if (!row.sourceUrl) throw new BuildRefusal('This document has no address to read.');
+    const crawl = crawlOf(row.crawl);
+    if (crawl) return crawlSource(job, row, crawl, report, signal);
     let page;
     try {
       page = await fetchPage(row.sourceUrl);
     } catch (err) {
       throw new BuildRefusal(err instanceof UrlFetchError ? err.message : 'The page could not be read.');
     }
-    const sniff = sniffFetched(page.body, page.contentType, page.url);
-    if (!sniff.ok) throw new BuildRefusal(sniff.message);
-    saveSource(row.accountId, row.workspaceId, row.slug, page.body, sniff.ext);
-    return { body: page.body, sniff };
+    return singlePage(row, page);
   }
   const src = readSource(row.accountId, row.workspaceId, row.slug);
   if (!src) throw new BuildRefusal('The uploaded file is missing. Remove this document and upload it again.');
@@ -201,13 +289,13 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
     publish({ type: 'done', docId, status: 'failed', error: message });
   };
   await patchDoc(accountId, docId, { buildStartedAt: new Date(), error: null });
-  report('converting', 3, 'Reading the file', true);
+  report('converting', 3, row.sourceKind === 'url' ? 'Reading the page' : 'Reading the file', true);
 
   const staging = join(stagingRoot(accountId, row.workspaceId), `${row.slug}-${docId}-${Date.now().toString(36)}`);
   const sectionsDir = join(staging, 'sections');
   try {
     mkdirSync(sectionsDir, { recursive: true });
-    const { body, sniff } = await readSourceFor(row);
+    const { body, sniff, crawl: crawled } = await readSourceFor(job, row, report, controller.signal);
     const effective: Exclude<ReferenceDocSourceKind, 'url'> = sniff.kind;
     let mode: BuildMode;
     let drafts: DraftSection[] = [];
@@ -285,8 +373,9 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
         }
       },
     });
+    const crawlCost = crawled?.costUsd ?? 0;
     const telemetry: Telemetry = {
-      costUsd: res.costUsd,
+      costUsd: res.costUsd != null || crawlCost > 0 ? (res.costUsd ?? 0) + crawlCost : null,
       inputTokens: res.inputTokens,
       outputTokens: res.outputTokens,
       numTurns: res.numTurns,
@@ -339,6 +428,7 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
     if ((await getDocRow(accountId, docId)) == null) return;
     installDocFolder(accountId, row.workspaceId, row.slug, outDir);
     await saveDocBuilt(accountId, docId, { title, summary: res.finish.summary, topics: res.finish.topics, sections: entries }, telemetry);
+    if (crawled) await patchDoc(accountId, docId, { crawl: crawled.stored });
     await writeIndex(accountId, row.workspaceId);
     publish({ type: 'done', docId, status: 'ready', error: null });
   } catch (err) {

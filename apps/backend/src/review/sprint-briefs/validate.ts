@@ -14,6 +14,8 @@ import { reference, Refused } from '../story-labels/validate.js';
 //
 //   • `summary`: control characters stripped, whitespace folded; blank → `shape`; over the cap →
 //     `too_long` (never cut: a cut sentence would be shown as if it were whole).
+//   • `oneLiner` (SPRINT_BRIEF_VERSION 5): the same rule as `summary` against SPRINT_BRIEF_CAPS.oneLiner
+//     — REQUIRED, never cut; one trailing full stop is dropped (the prompt asks for none).
 //   • `criteria`: ≤ SPRINT_BRIEF_CAPS.criteria (else `too_many`); each a string or `{text}`; a blank one is
 //     dropped, one over the cap is `too_long`; RENUMBERED 1..k in the order given (the model's `n` is
 //     ignored). A ticket that HAS criteria must get ≥ 1 back (else `count`).
@@ -34,6 +36,7 @@ export type BriefValidation =
   | {
       ok: true;
       summary: string;
+      oneLiner: string;
       criteria: SprintBriefCriterion[];
       references: SprintBriefReference[];
       linkReasons: SprintBriefLinkReason[];
@@ -76,6 +79,9 @@ export function validateSprintBrief(
   const summary = clean(o.summary);
   if (summary === '') return { ok: false, reason: 'shape' };
   if (summary.length > SPRINT_BRIEF_CAPS.summary) return { ok: false, reason: 'too_long' };
+  const oneLiner = clean(o.oneLiner).replace(/(?<!\.)\.$/, '').trim();
+  if (oneLiner === '') return { ok: false, reason: 'shape' };
+  if (oneLiner.length > SPRINT_BRIEF_CAPS.oneLiner) return { ok: false, reason: 'too_long' };
   if (o.criteria.length > SPRINT_BRIEF_CAPS.criteria || o.references.length > SPRINT_BRIEF_CAPS.references) {
     return { ok: false, reason: 'too_many' };
   }
@@ -100,7 +106,7 @@ export function validateSprintBrief(
           all.findIndex((x) => x.ref.ticketKey.toUpperCase() === r.ref.ticketKey.toUpperCase() && x.ref.relation === r.ref.relation) === i,
       )
       .map(({ ref, why }) => ({ ticketKey: ref.ticketKey, relation: ref.relation, quote: ref.quote, why }));
-    return { ok: true, summary, criteria, references: refs, linkReasons: linkReasonsOf(o.links, linkKeys) };
+    return { ok: true, summary, oneLiner, criteria, references: refs, linkReasons: linkReasonsOf(o.links, linkKeys) };
   } catch (e) {
     if (e instanceof Refused) return { ok: false, reason: e.reason === 'too_long' ? 'too_long' : 'shape' };
     throw e;

@@ -1,8 +1,13 @@
 import type { FastifyInstance } from 'fastify';
-import { type SprintGraphResponse, type SprintStatusesResponse, type TicketStoryResponse } from '@pierre-review/shared';
+import {
+  type SprintGraphResponse,
+  type SprintGraphTokenResponse,
+  type SprintStatusesResponse,
+  type TicketStoryResponse,
+} from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
-import { getSprintGraph, getTicketStory } from '../../db/sprint-graph.js';
+import { getSprintChangeToken, getSprintGraph, getTicketStory } from '../../db/sprint-graph.js';
 import { resolveSprintStatusLayout, sprintLayoutFor } from '../../db/sprint-status-layout.js';
 import { parseSprintStatusSettingsStrict, setSprintStatusSettings } from '../../db/sprint-status-settings.js';
 import { accountIdOf } from '../plugins/auth.js';
@@ -15,6 +20,7 @@ import { accountIdOf } from '../plugins/auth.js';
 // never a 404.
 //
 //   GET /api/sprint-graph?workspace=<id>                the graph (DB only; stamps the view, kicks a due read) → read
+//   GET /api/sprint-graph/token?workspace=<id>          the change token alone (DB only; stamps NOTHING)      → read
 //   GET /api/ticket-story?workspace=<id>&ident=         the story view: one ticket's sprint text + brief     → read
 //   PUT /api/sprint-stories/statuses                    replace the workspace's status buckets               → read
 
@@ -30,6 +36,16 @@ export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
     // A builder pass needs a credential too; without one `pathsStatus` would promise paths for ever.
     const pathsCanRun = config.aiEnabled && (await import('../../review/auth.js')).detectClaudeAuth().status === 'ok';
     return getSprintGraph(accountId, scope.workspaceId, { aiEnabled: config.aiEnabled, now: Date.now(), pathsCanRun });
+  });
+
+  // "Has this sprint changed since the page loaded?" — the SPA polls this while This Sprint is on
+  // screen and suggests a refresh when it differs from the loaded graph's `changeToken`. The SAME fold
+  // as the graph GET, minus every side effect (no view stamp, no read kick, no signals snapshot).
+  app.get('/api/sprint-graph/token', async (req): Promise<SprintGraphTokenResponse> => {
+    const q = req.query as { workspace?: string };
+    const accountId = accountIdOf(req);
+    const scope = await resolveWorkspaceScope(accountId, q.workspace);
+    return getSprintChangeToken(accountId, scope.workspaceId, { aiEnabled: config.aiEnabled });
   });
 
   // The STORY VIEW's lean read: one ticket's stored sprint text and its CURRENT brief (no graph fold,

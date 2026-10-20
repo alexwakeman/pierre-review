@@ -45,6 +45,7 @@ import type {
   SonarPostRecord,
   SequenceDiagramMember,
   DesignDiagram,
+  ReferenceDocCrawl,
   ReferenceDocSectionEntry,
   ReviewDocReference,
   ReferenceDocCitation,
@@ -2222,6 +2223,8 @@ export const sprintBriefs = pgTable(
     textHash: text('text_hash').notNull(),
     briefVersion: integer('brief_version').notNull(),
     summary: text('summary').notNull(),
+    /** One line, ≤ SPRINT_BRIEF_CAPS.oneLiner (SPRINT_BRIEF_VERSION 5; pg 0110). NULL on older rows. */
+    oneLiner: text('one_liner'),
     criteriaJson: jsonb('criteria_json').$type<SprintBriefCriterion[]>().notNull(),
     criteriaDerived: boolean('criteria_derived').notNull().default(false),
     referencesJson: jsonb('references_json').$type<SprintBriefStoredReference[]>().notNull(),
@@ -2541,6 +2544,8 @@ export const referenceDocs = pgTable(
     sections: jsonb('sections').$type<ReferenceDocSectionEntry[]>(),
     summary: text('summary'),
     topics: jsonb('topics').$type<string[]>(),
+    // A crawl's settings + what the last build read (ReferenceDocCrawl); NULL = one page or a file.
+    crawl: jsonb('crawl_json').$type<ReferenceDocCrawl>(),
     pageCount: integer('page_count'),
     costUsd: doublePrecision('cost_usd'),
     inputTokens: integer('input_tokens'),

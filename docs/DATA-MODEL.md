@@ -672,7 +672,7 @@ into the three story issues (shared `story-issues.ts`); the issues are never sto
 fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`); in
 `accountScopedTables()` and erased explicitly.
 
-## Activity → This Sprint — six tables (CORE; sqlite `0100` / pg `0087`, `0107` / pg `0094`)
+## This Sprint — six tables (CORE; sqlite `0100` / pg `0087`, `0107` / pg `0094`)
 
 - **`workspaces.sprint_checks`** — DORMANT since 2026-10-12 (the checks left with This sprint's chips): never read or written; kept rather than rebuilding the table.
 - **`sprint_reads`** — one per (account, workspace): the demand gate (`viewed_at`), `next_read_at`,
@@ -704,7 +704,8 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
   run: status/phase/mode, the validated body (format 6), `fingerprint`, `repos_json`, cost. A run left
   `running` when the feature was removed stays so — nothing sweeps it any more.
 - **`sprint_briefs`** (sqlite `0107` / pg `0094`) — one per (account, workspace, `ident`): the Haiku BRIEF
-  of a sprint ticket or ghost — `summary`, `criteria_json` (`[{n, text}]`), `criteria_derived`,
+  of a sprint ticket or ghost — `summary`, `one_liner` (≤ 90, the card face; sqlite `0123` / pg `0110`,
+  NULL on pre-v5 rows), `criteria_json` (`[{n, text}]`), `criteria_derived`,
   `references_json` (rubric-4 relations, verified quotes), model, cost — CURRENT while `text_hash` and
   `brief_version` match today's (`db/sprint-briefs.ts`). Written only by `review/sprint-briefs/`;
   replaced by each new brief.

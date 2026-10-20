@@ -3983,7 +3983,7 @@ check(
   {
     const briefs = await import('../src/db/sprint-briefs.js');
     const textHash = briefs.sprintBriefInput({ title: 'A sprint ticket', description: '', acceptanceCriteria: '', blockedByJson: null }, 'jira').textHash;
-    const brief = { summary: 'B brief', criteria: [], criteriaDerived: true, references: [], costUsd: 0, inputTokens: 0, outputTokens: 0 };
+    const brief = { summary: 'B brief', oneLiner: 'B line', criteria: [], criteriaDerived: true, references: [], costUsd: 0, inputTokens: 0, outputTokens: 0 };
     await briefs.storeSprintBrief(2, defaultB, ident, textHash, brief);
     let briefFk = false;
     try {

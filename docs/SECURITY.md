@@ -300,7 +300,10 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   only, no credentials in the URL, **no private or local addresses ever** (the same blocklist, plus
   `localhost`/`.local`/single-label names; an IP literal up front, a name at connect time through the
   tracker's `guardedLookup`), redirects followed ONLY on the same host (≤ 3, never https → http, each
-  re-vetted), 20s per exchange, 25 MB while reading. Pinned in `url-fetch.test.ts`. The upload route
+  re-vetted), 20s per exchange, 25 MB while reading. Pinned in `url-fetch.test.ts`. A "Follow links"
+  crawl (`crawl.ts`) sends EVERY hop, robots.txt included, through the same `fetchPage`, and adds a
+  same-host rule (exact host + port), ≤ 25 pages, 2 MB per linked page and a visited set; anchors and
+  page text reach the link-ranking model only inside a nonce fence (REFERENCE-DOCS.md § Following links). The upload route
   is the ONE route that raises `bodyLimit` (25 MB + 1 KiB, an `application/octet-stream` buffer
   parser); the file's kind is sniffed from its bytes. The docs agents deny Bash, run under the path
   guard, and the PDF build's Write/Edit are confined to `staging/sections/*.md` by a second hook

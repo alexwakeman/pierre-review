@@ -88,6 +88,8 @@ NULs) — then the NAME tells markdown (`.md`/`.markdown`/`.mdx`) from HTML (`.h
   Judged up front for an IP literal and AT CONNECT TIME through the tracker's `guardedLookup` with the
   policy's predicate for a name (no DNS-rebinding second answer; ANY blocked answer refuses); redirects followed **only on the same host** (≤ 3, never https → http), each re-checked; 20s
   per exchange; the 25 MB cap while reading. A URL may serve a PDF, text or markdown as well as HTML.
+- **Following links** (optional, the form's "Links to follow" select): the body may carry
+  `crawl: {depth}` (1–3). See § Following links.
 - **Conversion**: text/markdown as is. Word: `mammoth` → HTML → `turndown` (+ `turndown-plugin-gfm`
   tables). HTML: narrowed to `<main>`/`<article>` when present; `script`/`style`/`nav`/`footer`/forms/
   embeds dropped; images become `[Image: alt]` (a Word file's `data:` images would otherwise be
@@ -98,6 +100,78 @@ NULs) — then the NAME tells markdown (`.md`/`.markdown`/`.mdx`) from HTML (`.h
   `loadMammoth`/`loadTurndown`/`loadTurndownGfm`; the build-release guard greps for them). A runtime
   installed before they existed is STALE, not absent (`AI_RUNTIME_LATER_PACKAGES`): every agent still
   runs, and only a Word or web-page build says "Set up AI again" ([PACKAGING.md](PACKAGING.md)).
+
+## Following links (`crawl.ts`, `crawl-rank.ts`, `robots.ts`; sqlite `0124` / pg `0111`)
+
+"Add web page" with **Links to follow** set to 1, 2 or 3 levels stores `reference_docs.crawl_json`
+(`ReferenceDocCrawl`: `depth`, `maxPages` = `REFERENCE_DOC_CRAWL_MAX_PAGES` (25), and — after a
+successful build — the `pages` read and the links `skipped` by reason). "This page only" (the default)
+sends no `crawl` and behaves exactly as before. A Rebuild crawls again at the stored depth.
+
+**ONE DOCUMENT PER CRAWL, a chapter per page.** The crawl's pages are converted (`htmlToMarkdown`,
+the same narrowing) and bundled (`bundleCrawlMarkdown`) into ONE markdown source: `# <page title>`,
+`Source: <url>`, then the page's own headings pushed one level down. It is stored as the doc's `md`
+source and built by the ordinary 'sections' pipeline, so the INDEX → CONTENTS → sections tree, its
+validator and every link resolver are unchanged; the 200-documents-per-workspace cap stays meaningful
+(one crawl is one entry in INDEX.md, not 25); and the contents tree groups by page, because a page's
+chapter heading is the top of its trail. `MAX_SECTIONS` / `MAX_DOC_WORDS` still refuse a crawl too
+long to split, in a sentence.
+
+**The rules** (every one pinned in `crawl.test.ts`):
+
+- **Same site only** — the start page's exact host and port. `www.` is NOT folded (it can be another
+  server). An http link on an https site is upgraded; never https → http. Every request, robots.txt
+  included, goes through `fetchPage` (§ Ingest's guard), so a redirect off the host is still refused.
+- **Web pages only** — an address whose extension names a file (PDF, image, archive, feed, office
+  file, script, font…) or a `/feed`/`/rss` path is dropped BEFORE any request; a fetched linked page
+  must answer `text/html` or `application/xhtml+xml`, and is read under `CRAWL_PAGE_MAX_BYTES` (2 MB).
+  A START page that is not HTML (a PDF, text) is read as one page, as without a crawl.
+- **Each address once** — `normalizeUrl`: resolved (and `<base href>`), fragment dropped, tracking
+  parameters (`utm_*`, `gclid`, `fbclid`, `ref`…) dropped, query sorted, scheme ignored, `index.html`
+  and a trailing slash folded into the KEY (the fetched address keeps its slash). The address a
+  redirect lands on and a page's same-site `<link rel="canonical">` join the visited set; two pages
+  with the same text (sha256 of the readable text) are read once. ⚠ A canonical only stops a LATER
+  read of that address — it never drops the page carrying it: misconfigured sites point every page's
+  canonical at the home page, and dropping on it alone silently ended such a crawl at the start page.
+  The text check decides what is a copy. The address a redirect lands on gets the link checks too
+  (robots, traps, file-shaped addresses); a START page that redirected onto a disallowed path is
+  refused. `mailto:`/`javascript:`/`tel:`,
+  `rel="nofollow"` and `download` links are ignored.
+- **Traps** (`looksLikeTrap`) — over 400 characters, over 12 path segments, a segment repeated three
+  times, over 4 query parameters, pagination past 5 (`?page=`, `/page/N`), a calendar parameter, a
+  dated path deeper than a day.
+- **robots.txt** — read once per crawl (`robots.ts`, RFC 9309: the `limn` group beats `*`, longest
+  match, Allow wins a tie, `*` and `$`). A 4xx, an HTML answer, a redirect off the host or an
+  unreadable body means no rules; a **5xx, timeout or network failure means read nothing** (RFC 9309
+  § 2.3.1.4 — `DISALLOW_ALL`; the crawl is refused in one sentence). The START page is checked too
+  ("This site asks robots not to read that page."). ⚠ **Wildcards are matched by a LINEAR two-pointer
+  glob (`robotsPatternMatches`), NEVER a RegExp**: robots.txt and the paths are both a stranger's, and
+  `.*a.*a.*a.*b` against a 60-character path backtracked for 23 s on the event loop, where neither
+  cancel nor the clock cap can reach. Runs of `*` fold to one; ≤ 2,000 rules, ≤ 512 characters each. Requests are spaced by its
+  `Crawl-delay` (capped at 5 s), else 500 ms.
+- **Every HTML scanner is LINEAR** (`crawl.ts`): a lazy `<a>[\s\S]*?</a>` over 70,000 UNCLOSED `<a>`
+  blocked the server for 5 s, and a page may be 25 MB. Spans are found by a forward search from the
+  open tag — an anchor's or heading's close within `SPAN_WINDOW` (8 KB; the next close of each tag is
+  remembered, so the search only moves forward), script/style/comment drops with one forward pass —
+  and attribute runs stop at the next `<`. Links are read off at most `CRAWL_LINK_SCAN_BYTES` (2 MB) of
+  any page. `crawl.test.ts` § linear scanners pins each shape under a second.
+- **Claude picks the links** — each level's candidate links (anchor text ≤ 120 chars, path, the
+  heading above the link; main-content links first, then the rest of the page, since a docs site's
+  sidebar is its map; ≤ 300 per page, ≤ 160 per level) go to `makeLinkRanker`: ONE Haiku 5.5
+  `cheapComplete` per 80 links (tool-less, connectors isolated), the start page's title, address and
+  first 1,500 characters as the topic, everything inside a per-call NONCE fence (page text and anchors
+  are a stranger's). Scores 0–3; only `REFERENCE_DOC_CRAWL_MIN_SCORE` (2) and up are followed, highest
+  first, document order on a tie. The answer is validated (unknown index / out-of-range score ignored,
+  missing = 0); an unreadable answer is retried once, then its links count as low value. ⚠ **An
+  unranked link is NEVER followed**: no runtime or credential stops the build with one sentence.
+  Each call is recorded (`ai_usage` feature `docs_crawl_rank`, seam `summary`) and added to the
+  document's `costUsd`.
+- **Caps** — `depth` levels, 25 pages (start included), 3 minutes of wall clock, 25 MB of HTML in all;
+  what was left is counted as `overCap`. ⚠ A level checks ALL of these BEFORE it ranks — a level that
+  can read nothing must not pay for a ranking call whose every answer is then thrown away.
+
+Progress: the converting stage reads "Crawling 6 of 25" (the SPA's bar shows the server's stage
+words). Cancel aborts between requests and during the politeness wait.
 
 ## The build (`manager.ts`, `agent.ts`, `build-judge.ts`)
 
@@ -184,8 +258,10 @@ A rail line under Activity, **Docs** (`?activityRepo=docs`), shown only on `me.a
 columns: the library (every document with its status, each expandable into its contents tree; "All
 documents" opens INDEX.md), a viewer that shows one library file at a time with every link followed
 in-app, and the chat (beside the viewer when wide, a Read / Ask tab when narrow). Adding: drag and
-drop or a file picker (PDF, .docx, .txt, .md, HTML), or "Add web page". A building document shows a
-progress bar with its stage (Converting, Splitting into sections, Indexing) from its SSE stream
+drop or a file picker (PDF, .docx, .txt, .md, HTML), or "Add web page" with a "Links to follow"
+select (This page only / 1–3 levels; its ⓘ explains the crawl). A crawled document's line reads
+"Web page · N pages · M sections". A building document shows a progress bar with the server's stage
+words ("Crawling 6 of 25", "Summarising sections (3 of 12)") from its SSE stream
 (only while the server is working on it — a queued row is polled, at most 2 streams open), the list
 polled as the fallback; a failed one shows its error and "Try again". Remove confirms inline. The
 Settings switch is "Use reference docs in Claude Review" (draft + Save, off by default). Detail and the
@@ -197,7 +273,9 @@ landmines: [FRONTEND.md](FRONTEND.md) § Activity → Docs.
 `workspaces (id, account_id)`) and `reference_doc_chat_messages` (index `(account_id, workspace_id,
 conversation_id)`; same FK), plus `workspaces.docs_in_review`. Both tables are in
 `accountScopedTables()`, erased (files too), exported (metadata + chat; the text is the user's own
-upload), and checked by `verify:isolation`. [MIGRATIONS.md](MIGRATIONS.md).
+upload), and checked by `verify:isolation`. `reference_docs.crawl_json` (sqlite `0124` / pg `0111`,
+nullable JSON) is a column on the same row, so it needed no new erasure or isolation entry.
+[MIGRATIONS.md](MIGRATIONS.md).
 
 ## Use in reviews (`review-refs.ts`; sqlite `0117` / pg `0104`)
 
@@ -334,7 +412,10 @@ automatic, never on view. CORE, free, LOCAL ONLY: `registerAgenticRoutes` regist
 
 `split.test.ts` (structure, merge scope, caps, atomic blocks, oversize cuts, limits) · `render.test.ts`
 (INDEX determinism, folder validation, PDF assembly) · `paths.test.ts` (traversal refused) ·
-`url-fetch.test.ts` (the guard, redirects) · `convert.test.ts` (sniffing, HTML conversion) ·
+`url-fetch.test.ts` (the guard, redirects) · `crawl.test.ts` (the normaliser, file and trap filters,
+link extraction, robots.txt, same site, depth and page caps, redirect / canonical / same-text
+duplicates, non-HTML and failing pages skipped, cancel, the ranking fence + validation + retry with a
+fake model, the bundle) · `convert.test.ts` (sniffing, HTML conversion) ·
 `build-judge.test.ts` · `agent-policy.test.ts` (no shell, the write guard) · `reference-docs-db.test.ts`
 (upload → build → the three levels with a FAKE agent, path + tenancy refusals, the chat's citations,
 remove, erasure deletes files) · `review-refs.test.ts` (the reference check — a quote not in its section,

@@ -108,6 +108,8 @@ export type SprintBriefRow = {
   textHash: string;
   briefVersion: number;
   summary: string;
+  /** NULL on a row written before SPRINT_BRIEF_VERSION 5. */
+  oneLiner: string | null;
   criteriaJson: unknown;
   criteriaDerived: boolean;
   referencesJson: unknown;
@@ -141,7 +143,7 @@ export function sprintBriefOf(r: SprintBriefRow): SprintBrief {
       why: text(x.why),
     });
   }
-  return { summary: r.summary, criteria, criteriaDerived: r.criteriaDerived, references, linkReasons, createdAt: r.createdAt.toISOString() };
+  return { summary: r.summary, oneLiner: r.oneLiner ?? null, criteria, criteriaDerived: r.criteriaDerived, references, linkReasons, createdAt: r.createdAt.toISOString() };
 }
 
 /** Is this stored brief current for today's input? Pure. */
@@ -167,6 +169,7 @@ export async function storedSprintBriefs(
         textHash: t.textHash,
         briefVersion: t.briefVersion,
         summary: t.summary,
+        oneLiner: t.oneLiner,
         criteriaJson: t.criteriaJson,
         criteriaDerived: t.criteriaDerived,
         referencesJson: t.referencesJson,
@@ -201,6 +204,8 @@ export async function currentSprintBriefs(
 
 export interface StoredSprintBrief {
   summary: string;
+  /** The card's one line (validated: ≤ SPRINT_BRIEF_CAPS.oneLiner). */
+  oneLiner: string;
   criteria: SprintBriefCriterion[];
   criteriaDerived: boolean;
   references: SprintBriefReference[];
@@ -226,6 +231,7 @@ export async function storeSprintBrief(
     textHash,
     briefVersion: SPRINT_BRIEF_VERSION,
     summary: b.summary,
+    oneLiner: b.oneLiner,
     criteriaJson: b.criteria,
     criteriaDerived: b.criteriaDerived,
     referencesJson: [

@@ -73,6 +73,7 @@ describe('sprintBriefInput', () => {
       textHash: 'h',
       briefVersion: 1,
       summary: 'S',
+      oneLiner: null,
       criteriaJson: [{ n: 4, text: 'A' }, { text: '' }, 'junk', { text: 'B' }],
       criteriaDerived: true,
       referencesJson: [
@@ -85,6 +86,7 @@ describe('sprintBriefInput', () => {
     });
     expect(b).toEqual({
       summary: 'S',
+      oneLiner: null,
       criteria: [
         { n: 1, text: 'A' },
         { n: 2, text: 'B' },
@@ -132,7 +134,7 @@ describe('the prompt', () => {
 
 describe('validateSprintBrief', () => {
   const sources = { title: TEXT.title, description: TEXT.description, criteria: ['Basket survives a reload', 'Basket expires after 30 days'] };
-  const ok = (o: Record<string, unknown>) => JSON.stringify({ summary: 'Keeps the basket.', criteria: [{ n: 1, text: 'The basket survives a reload' }], references: [], ...o });
+  const ok = (o: Record<string, unknown>) => JSON.stringify({ summary: 'Keeps the basket.', oneLiner: 'Basket survives a reload.', criteria: [{ n: 1, text: 'The basket survives a reload' }], references: [], ...o });
 
   it('accepts the shape, renumbers, drops blank criteria, reads references through rubric 4’s rule', () => {
     const v = validateSprintBrief(
@@ -152,6 +154,8 @@ describe('validateSprintBrief', () => {
     expect(v).toEqual({
       ok: true,
       summary: 'Keeps the basket.',
+      // One trailing full stop is dropped (the prompt asks for none).
+      oneLiner: 'Basket survives a reload',
       criteria: [
         { n: 1, text: 'A' },
         { n: 2, text: 'B' },
@@ -208,6 +212,11 @@ describe('validateSprintBrief', () => {
     expect(validateSprintBrief(ok({ summary: ' ' }), sources, true)).toEqual({ ok: false, reason: 'shape' });
     expect(validateSprintBrief(JSON.stringify({ summary: 's', criteria: [] }), sources, true)).toEqual({ ok: false, reason: 'shape' });
     expect(validateSprintBrief(ok({ summary: 's'.repeat(SPRINT_BRIEF_CAPS.summary + 1) }), sources, true)).toEqual({ ok: false, reason: 'too_long' });
+    // The one-liner is REQUIRED and never cut.
+    expect(validateSprintBrief(ok({ oneLiner: undefined }), sources, true)).toEqual({ ok: false, reason: 'shape' });
+    expect(validateSprintBrief(ok({ oneLiner: '  ' }), sources, true)).toEqual({ ok: false, reason: 'shape' });
+    expect(validateSprintBrief(ok({ oneLiner: 'o'.repeat(SPRINT_BRIEF_CAPS.oneLiner + 1) }), sources, true)).toEqual({ ok: false, reason: 'too_long' });
+    expect(validateSprintBrief(ok({ oneLiner: 'o'.repeat(SPRINT_BRIEF_CAPS.oneLiner) }), sources, true)).toMatchObject({ ok: true });
     expect(validateSprintBrief(ok({ criteria: ['c'.repeat(SPRINT_BRIEF_CAPS.criterion + 1)] }), sources, true)).toEqual({ ok: false, reason: 'too_long' });
     expect(validateSprintBrief(ok({ criteria: Array.from({ length: SPRINT_BRIEF_CAPS.criteria + 1 }, (_, i) => `c${i}`) }), sources, true)).toEqual({ ok: false, reason: 'too_many' });
     expect(validateSprintBrief(ok({ references: [{ ticketKey: 'ENG-7', relation: 'blocks' }] }), sources, true)).toEqual({ ok: false, reason: 'shape' });
@@ -228,7 +237,7 @@ describe('runSprintBriefPass', () => {
     provider: 'jira',
     input: sprintBriefInput({ title: key, description: 'd', acceptanceCriteria: criteria ? '- One' : '', blockedByJson: null }, 'jira'),
   });
-  const answer = JSON.stringify({ summary: 'S.', criteria: ['One thing'], references: [] });
+  const answer = JSON.stringify({ summary: 'S.', oneLiner: 'S', criteria: ['One thing'], references: [] });
   beforeEach(() => resetSprintBriefPasses());
 
   it('briefs the to-do list, asks for the next hop after each round, stops when nothing changes', async () => {
@@ -275,7 +284,7 @@ describe('runSprintBriefPass', () => {
       entitled: async () => true,
       complete: async (req) => {
         prompts.push(req.prompt);
-        return { text: JSON.stringify({ summary: 'S.', criteria: ['One'], references: [], links: [{ ticketKey: 'ENG-8', why: 'Needs payments first.' }, { ticketKey: 'ENG-1', why: 'Invented.' }] }) };
+        return { text: JSON.stringify({ summary: 'S.', oneLiner: 'S', criteria: ['One'], references: [], links: [{ ticketKey: 'ENG-8', why: 'Needs payments first.' }, { ticketKey: 'ENG-1', why: 'Invented.' }] }) };
       },
       todo: (() => {
         let n = 0;

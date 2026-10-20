@@ -1185,10 +1185,10 @@ that target. No workspace column (a ticket's story is one fact per account) and 
 `verify:isolation`. Journal `when` `1791964800000` in both folders (after `0098` / pg `0085`).
 Contract: docs/CLAUDE-REVIEW.md § Story labels. ⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS`).
 
-### `0100_sprint_stories` (pg `0087`) — This sprint (then under Reports; now Activity → This Sprint)
+### `0100_sprint_stories` (pg `0087`) — This sprint (then under Reports; now This Sprint, a fixed tab)
 
 Additive: five new tables — `sprint_reads`, `sprint_tickets`, `sprint_ticket_repos`,
-`sprint_assessments`, `tracker_writes` (docs/DATA-MODEL.md § Activity → This Sprint). Uniques (every
+`sprint_assessments`, `tracker_writes` (docs/DATA-MODEL.md § This Sprint). Uniques (every
 `onConflictDo*` uses exactly these): `sprint_reads (account_id, workspace_id)`, `sprint_tickets
 (account_id, workspace_id, ident)`, `sprint_ticket_repos (account_id, workspace_id, ident, repo_id)`,
 `tracker_writes (account_id, request_id)`; `sprint_assessments` has none. NAMED composite FKs onto
@@ -1394,6 +1394,20 @@ NO unique index (no `onConflictDoUpdate` target). Indexes `(account_id, pr_id, c
 `ctc_pr_account_fk` onto `pull_requests (id, account_id)`, ON DELETE cascade (the `ci_reviews`
 pattern, so neither delete path needs an entry). In `accountScopedTables()`, erased, checked by
 `verify:isolation`. Journal `when` sqlite `1792137609016` / pg `1792137609017`. ⚠ pg `0109` NOT replayed.
+
+### `0123_sprint_brief_one_liner` (pg `0110`) — the sprint card's one line
+`ALTER TABLE sprint_briefs ADD one_liner text` (nullable; pg `ADD COLUMN IF NOT EXISTS`). Written by the
+brief pass from `SPRINT_BRIEF_VERSION` 5; a row without it is a pre-v5 brief and no longer current. Column
+only — no new table, so no `accountScopedTables()` / erasure / `verify:isolation` change (`sprint_briefs`
+is already covered). The `onConflictDoUpdate` `set:` in `storeSprintBrief` carries it. Journal `when`
+sqlite `1792137610016` / pg `1792137610017`. ⚠ pg `0110` NOT replayed.
+
+### `0124_reference_doc_crawl` (pg `0111`) — "Follow links" on a web page
+`ALTER TABLE reference_docs ADD COLUMN crawl_json` (sqlite `text` JSON / pg `jsonb`, nullable;
+`ReferenceDocCrawl`). NULL = one page or an uploaded file (every existing row). Column only — no new
+table, so no `accountScopedTables()` / erasure / `verify:isolation` change (`reference_docs` is already
+covered). [REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Following links. Journal `when` sqlite
+`1792137611016` / pg `1792137611017`. ⚠ pg `0111` NOT replayed.
 
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 

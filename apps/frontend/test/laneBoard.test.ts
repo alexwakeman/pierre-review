@@ -13,7 +13,9 @@ import {
   peopleBoard,
   sprintColumns,
   themesBoard,
+  hasLivePr,
   ticketCardBorder,
+  ticketCardCriteria,
   ticketCardTags,
   waitingIdents,
 } from '../src/lib/laneBoard.js';
@@ -61,7 +63,9 @@ const node = (key: string, o: Partial<SprintGraphNode> = {}): SprintGraphNode =>
   issueType: 'Story',
   assignee: { name: 'Sinan Goktas', avatarUrl: null },
   epic: null,
-  brief: { state: 'current', summary: null, criteriaCount: 0, criteriaDerived: false },
+  brief: { state: 'current', summary: null, oneLiner: null, criteriaCount: 0, criteriaDerived: false },
+  check: null,
+  checkRunning: false,
   prs: [],
   degree: 0,
   theme: null,
@@ -333,6 +337,85 @@ describe('TicketCard tags are words', () => {
     // Outside the sprint stays FAINT even on a path: 1px, dashed, tinted.
     expect(ticketCardBorder({ critical: true, waiting: false, ghost: true })).toMatch(/^border border-dashed border-ai-signal-fill\/60 bg-gray-50/);
     expect(ticketCardBorder({ critical: false, waiting: false, ghost: false })).toMatch(/border-solid/);
+  });
+});
+
+describe('cards with a pull request', () => {
+  it('an open or merged PR counts; a closed, unmerged one does not', () => {
+    expect(hasLivePr(node('A-1'))).toBe(false);
+    expect(hasLivePr(node('A-1', { prs: [pr({ state: 'closed' })] }))).toBe(false);
+    expect(hasLivePr(node('A-1', { prs: [pr({ state: 'merged' })] }))).toBe(true);
+    expect(hasLivePr(node('A-1', { prs: [pr()] }))).toBe(true);
+  });
+  it('violet border + glow; a critical card keeps its orange border and adds the glow; a ghost never glows', () => {
+    expect(ticketCardBorder({ critical: false, waiting: false, ghost: false, withPr: true })).toMatch(/border-solid border-violet-400 .*ticket-card-pr$/);
+    expect(ticketCardBorder({ critical: false, waiting: true, ghost: false, withPr: true })).toMatch(/border-dashed border-violet-400/);
+    const crit = ticketCardBorder({ critical: true, waiting: false, ghost: false, withPr: true });
+    expect(crit).toMatch(/border-2 border-solid border-ai-signal-fill/);
+    expect(crit).toMatch(/ticket-card-pr/);
+    expect(crit).not.toMatch(/violet/);
+    expect(ticketCardBorder({ critical: false, waiting: false, ghost: true, withPr: true })).not.toMatch(/ticket-card-pr|violet/);
+    expect(ticketCardBorder({ critical: false, waiting: false, ghost: false })).not.toMatch(/ticket-card-pr/);
+  });
+  it('PR cards sit FIRST in every cell, input order kept within each group', () => {
+    const nodes = [node('A-1'), node('A-2', { prs: [pr()] }), node('A-3'), node('A-4', { prs: [pr({ state: 'merged' })] }), node('A-5', { prs: [pr({ state: 'closed' })] })];
+    const b = themesBoard({ nodes, edges: [], paths: null, columns: COLUMNS, themes: [] });
+    const l = layoutBoard({ ...b, collapsed: new Set() });
+    const order = [...l.cards].sort((x, y) => x.row - y.row).map((c) => c.data.node.key);
+    expect(order).toEqual(['A-2', 'A-4', 'A-1', 'A-3', 'A-5']);
+  });
+  it('the link ordering never lifts a card without a PR above one with a PR', () => {
+    // A-3 (no PR) links to a card in another column at row 0; it would sort to the top on links alone.
+    const nodes = [
+      node('A-1', { prs: [pr()] }),
+      node('A-2', { prs: [pr()] }),
+      node('A-3'),
+      node('B-1', { column: 'cr', stage: 'in_review' }),
+    ];
+    const b = themesBoard({ nodes, edges: [dep('A-3', 'B-1')], paths: null, columns: COLUMNS, themes: [] });
+    const l = layoutBoard({ ...b, collapsed: new Set() });
+    const doing = l.cards.filter((c) => c.column === 'doing').sort((x, y) => x.row - y.row).map((c) => c.data.node.key);
+    expect(doing).toEqual(['A-1', 'A-2', 'A-3']);
+  });
+  it('Critical path: PR cards first within a cell, then path order', () => {
+    const nodes = [node('A-1'), node('A-2', { prs: [pr()] }), node('A-3')];
+    const paths: SprintPaths = {
+      paths: [{ title: 'P', tickets: ['A-1', 'A-2', 'A-3'], idents: [id('A-1'), id('A-2'), id('A-3')], advice: '', risk: 'low' }],
+      callouts: [],
+      createdAt: '2026-10-18T00:00:00.000Z',
+    };
+    const b = pathsBoard({ nodes, edges: [], paths, columns: COLUMNS });
+    const l = layoutBoard({ ...b, collapsed: new Set() });
+    expect([...l.cards].sort((x, y) => x.row - y.row).map((c) => c.data.node.key)).toEqual(['A-2', 'A-1', 'A-3']);
+  });
+});
+
+describe('the criteria line', () => {
+  const check = (o: Partial<NonNullable<SprintGraphNode['check']>> = {}): NonNullable<SprintGraphNode['check']> => ({
+    met: 3,
+    partlyMet: 0,
+    notMet: 1,
+    unsettled: 0,
+    total: 4,
+    checkedAt: '2026-10-19T10:00:00.000Z',
+    stale: false,
+    ...o,
+  });
+  const brief = (criteriaCount: number): SprintGraphNode['brief'] => ({ state: 'current', summary: null, oneLiner: null, criteriaCount, criteriaDerived: false });
+  it('a ticket check wins: "n of m criteria met", stale carried', () => {
+    expect(ticketCardCriteria(node('A-1', { check: check(), brief: brief(5) }))).toEqual({ text: '3 of 4 criteria met', stale: false, running: false });
+    expect(ticketCardCriteria(node('A-1', { check: check({ met: 1, total: 1, stale: true }) }))).toEqual({ text: '1 of 1 criterion met', stale: true, running: false });
+  });
+  it('else the brief count; else nothing', () => {
+    expect(ticketCardCriteria(node('A-1', { brief: brief(4) }))?.text).toBe('4 criteria');
+    expect(ticketCardCriteria(node('A-1', { brief: brief(1) }))?.text).toBe('1 criterion');
+    expect(ticketCardCriteria(node('A-1'))).toBeNull();
+    // A check with no criteria of its own falls back to the brief.
+    expect(ticketCardCriteria(node('A-1', { check: check({ total: 0, met: 0 }), brief: brief(2) }))?.text).toBe('2 criteria');
+  });
+  it('a running check shows even with nothing else to say', () => {
+    expect(ticketCardCriteria(node('A-1', { checkRunning: true }))).toEqual({ text: '', stale: false, running: true });
+    expect(ticketCardCriteria(node('A-1', { checkRunning: true, brief: brief(3) }))).toEqual({ text: '3 criteria', stale: false, running: true });
   });
 });
 

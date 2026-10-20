@@ -361,7 +361,8 @@ on demand, IndexedDB-persisted at `staleTime: Infinity`), **filter/selection** i
 board mounts at a time), **URL** mirrored by `useUrlState.ts` (serializer diffs against
 defaults). App lands on **Activity → Open PRs** (the FIRST rail line, headed by the default-branch
 strip; `activityRepoId: 'open-prs'`, omitted from the URL; legacy `?view=open-prs` lands there).
-Fixed tabs: Activity · Timeline. Pending is `?activityRepo=attention` (a legacy link with only
+Fixed tabs: Activity · This Sprint · Timeline (closing the last dynamic tab lands on ACTIVITY,
+wherever it was opened from — never the Timeline). Pending is `?activityRepo=attention` (a legacy link with only
 `attn*` keys still lands there); the Insights rail entry is
 labelled **"Reports"** (LABEL-ONLY — the store/URL value stays `'insights'`). Cloud renders
 `<SignInGate>` on a 401.
@@ -396,7 +397,7 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   plan (Pending head), flow metrics (`WorkspaceFlowMetrics`, Reports), the daily-brief strip
   (DELETED) and the trunk + Open PRs panels (the trunk strip now heads the Open PRs rail line). Do not re-add
   any. ⚠ **Reports (`periodReports`) and Bots Monitoring (`botDepth`; label-only rename of "Bots")
-  are PRO AS A WHOLE** (This Sprint, its own rail line, is FREE): ONE `ProBadge` on the rail entry, ONE `ProLockPanel` for the pane, no badges
+  are PRO AS A WHOLE** (This Sprint, its own fixed tab, is FREE): ONE `ProBadge` on the rail entry, ONE `ProLockPanel` for the pane, no badges
   inside; their routes 402. ⚠ Bot HIDING and bot CLASSIFICATION stay FREE: classification is the
   Feed rail's **"Bot classification"** sub-tab (`feedInnerTab: 'classification'`; a legacy
   `?botsTab=settings` lands there), one card per bot, and `/api/bot-reviewers*` never 402s — only
@@ -942,6 +943,12 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   from the rows, never a model) and checked by `validateDocFolder`; one Sonnet 5 build per doc, one per
   account at a time, a review-slot peer; library paths only through `parseLibraryPath`'s strict grammar.
   Other agents read it via `docsContextFor(...).usable` (folds the per-workspace OFF-by-default switch).
+  ⚠ **A URL add may FOLLOW LINKS** (`crawl.ts` + `crawl-rank.ts` + `robots.ts`; `reference_docs.crawl_json`,
+  sqlite `0124` / pg `0111`): SAME host+port only, HTML only, depth 1–3, ≤ 25 pages, robots.txt obeyed
+  (a 5xx/unreachable one = read nothing), a Haiku ranking per level and an UNRANKED link is never
+  followed, every request through the guarded `url-fetch`, ONE document per crawl (a chapter per page);
+  every scanner over page or robots text is LINEAR (no backtracking RegExp over untrusted input — it
+  runs on the event loop) — [docs/REFERENCE-DOCS.md](docs/REFERENCE-DOCS.md) § Following links.
   SPA: Activity → **Docs** (`?activityRepo=docs`, rail entry on `me.ai.enabled` only); ⚠ every link in
   it goes through ONE resolver, `lib/referenceDocs.ts` `resolveDocLink` ([docs/FRONTEND.md](docs/FRONTEND.md)
   § Activity → Docs). ⚠ **In reviews** (PR review, ticket review; sqlite `0117` / pg
@@ -1008,7 +1015,7 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   redirects, cloud refuses private addresses at connect time) — never a bare `fetch`. ⚠ **A tracker
   is read when a PR is RECEIVED, never when it is VIEWED**: the pull-based worker stores tickets in
   `tracker_tickets` and every surface reads the rows. ⚠ The ONE exception is the SPRINT LIST read
-  (`tracker/sprint/`, Activity → This Sprint): demand-gated by `sprint_reads.viewed_at` (7 days), every
+  (`tracker/sprint/`, the This Sprint tab): demand-gated by `sprint_reads.viewed_at` (7 days), every
   20 min, its own `sprint_tickets` table, plus the tickets they name and the GHOST CHAINS those lead to
   (`sprint_ref_tickets`, ≤ 3 hops / 60); still never called by a view. ⚠ **Nothing writes to a tracker**
   (the write-back and `tracker_writes` were removed 2026-10-12). ⚠ The plugin-era data was MOVED by a guarded
@@ -1252,7 +1259,8 @@ last 13 weeks' stories (`db/story-health.ts`); This Sprint makes BRIEFS, not lab
 story report gone no screen triggers or reads them. [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md)
 § Story labels.
 
-**Activity → This Sprint** (FREE — its own rail line under Pending, `?activityRepo=sprint`; legacy
+**This Sprint** (FREE — a FIXED TAB beside Activity, `?view=sprint`; with no tracker the boards
+show one setup line + "Set up in Settings" → `openSettings('issue-tracker')`; legacy `?activityRepo=sprint` and
 `?insightsTab=sprint|merged` and `?sprintTab=graph` land there): THREE independent views — Theme
 (default) · Critical path · People (`?sprintTab=paths|people`) — then "Merged so far" (`?sprintTab=merged`).
 `GET /api/sprint-graph` (DB only; the name stayed): nodes = sprint tickets + GHOSTS
@@ -1265,8 +1273,13 @@ stored value without `version` gets a Product review bucket ON READ (`withProduc
 docs/TRACKERS.md § The status order and buckets. Edges = a blocking tracker link or a
 CURRENT BRIEF's depends_on / concurrent / builds_on / supersedes, each with the brief's one-sentence
 `why` — ONE fold (`db/sprint-graph-fold.ts`). The BRIEF (Haiku, `review/sprint-briefs/`, after each read,
-never a view): summary + criteria + references + a `why` per reference AND tracker link; current on
-text hash + `SPRINT_BRIEF_VERSION`. After briefs → themes (each with a model SUMMARY: what the work is,
+never a view): summary + a ≤ 90-char `oneLiner` (the card face, v5) + criteria + references + a `why` per
+reference AND tracker link; current on text hash + `SPRINT_BRIEF_VERSION`. Each node also carries its latest
+succeeded TICKET CHECK (`check`: met / partly / not met of `total`, `stale` = DB-only member compare, never
+ticket text; `db/sprint-ticket-checks.ts`, batched) + `checkRunning`; a MANUAL refresh starts ≤ 3 ticket
+reviews (`'manual'`, no daily cap) for tickets with a PR and no current check (`ticket-review/sprint-checks.ts`).
+`changeToken` (clock-free hash of what the cards show) = `GET /api/sprint-graph/token` (DB only, stamps
+nothing) for the "changed since you loaded it" hint. After briefs → themes (each with a model SUMMARY: what the work is,
 dev or not, NO figure — a numeral drops it; progress per row is CODE's shared `sprintLaneSummary`, Theme
 AND People), the SPRINT BUILDER (Sonnet 5, agentic,
 `review/sprint-paths/`, its ONE tool `submit_paths`) picks ≤ 5 critical paths + ≤ 3 call-outs over a
@@ -1277,17 +1290,20 @@ carries CODE's `pace` and `people` (shared `sprintMembers`; `reviewsWaiting` nul
 columns = `statusLayout.columns` verbatim (Complete buckets COLLAPSED to counts by default; "Outside the
 sprint" at the left on Critical path only), lanes = a path / a theme ("Other" last) / a person
 (ALPHABETICAL, Unassigned last — never by load), ONE `TicketCard` (tags as WORDS; 2px solid accent = on
-a path, dashed = waiting), `depends_on` arrows routed by the design grid's `routeArrow`, numbered and
+a path, dashed = waiting; a card with an open or merged PR wears a violet border + soft glow,
+`.ticket-card-pr` — a critical-path card KEEPS its orange border and adds the glow — and sorts FIRST in its
+cell: `BoardCardDef.group` always beats the link ordering), `depends_on` arrows routed by the design grid's `routeArrow`, numbered and
 keyed; arrow popovers are HOVER-ONLY (no pin), placed clear of the cards (`lib/avoidRects.ts`). Its arrow pieces are SHARED with `DesignGrid`. A card CLICK opens an in-place STORY PEEK (`Activity/StoryPeek.tsx`, read on click — summary + criteria chips, no docs check/design); its corner arrow opens the story view. The force graph, its strip and every group-by /
 filter control are DELETED — never bring a canvas back. "Ask Claude" (Haiku) is LOCAL, on `me.ai`.
-⚠ No chips, findings, checks or write-back. ⚠ **A ticket opens the STORY VIEW** — the ticket tab (chip
+⚠ No finding chips and no write-back; the ONE check a card shows is the ticket review's met count
+(`node.check`, "n of m criteria met"; a manual Refresh starts ≤ 3 missing ones). ⚠ **A ticket opens the STORY VIEW** — the ticket tab (chip
 "KEY · Story", internal kind/key `ticket:<ident>` kept), ONLY through `useOpenStory()`: the SAME Open PRs
 ticket stack (`OpenPrsCards` `story`, never a copy), drawn even with no PR, its Story section OPEN. The
 Story section (`TicketStorySection`, story view ONLY — never on the Open PRs board, whose stacks never collapse and whose ticket key + title open the story tab; always open, its heading carrying Draw/Redraw + Check against docs) is: the ticket
 review's result, else the CURRENT brief (`GET /api/ticket-story`, lean, DB only) — the design (`me.ai` +
 ≥ 1 PR) right under its summary AND CRITERIA — then the ticket as written. NO dependency or reference cards. The drawer and "Check
 against code" are REMOVED (`sprint_assessments` / `sprint_ticket_repos` DORMANT, never dropped).
-[docs/FRONTEND.md](docs/FRONTEND.md) § Activity → This Sprint, § The story view · [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint briefs / paths.
+[docs/FRONTEND.md](docs/FRONTEND.md) § This Sprint, § The story view · [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint briefs / paths.
 
 **The People report** (Reports → People) — a multi-select picker of humans AND bots, one report
 with a SECTION per pick; contract in
@@ -1627,7 +1643,7 @@ how you work:
 
 - **The unit suite runs on SQLite ONLY**, so every pg migration is replayed BY HAND. ✅ Green on
   **PostgreSQL 16.9** through core pg `0051` (52/52, 2026-09-09) and plugin `0033` (33/33, full
-  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0108` and plugin `0034`–`0037` + `0040` are NOT replayed
+  table parity bar `pro_migrations`); ⚠ core pg `0052`–`0111` and plugin `0034`–`0037` + `0040` are NOT replayed
   (plugin `0038`/`0039` are `SELECT 1;` stubs since the tracker moved to core).
   Recipe + the standing local Postgres are in docs/MIGRATIONS.md § Replaying the pg chain. **A new
   pg migration is unreplayed until someone repeats this** — the suite will not tell you.

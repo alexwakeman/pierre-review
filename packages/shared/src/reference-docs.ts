@@ -75,6 +75,9 @@ export interface ReferenceDoc {
   pageCount: number | null;
   /** What the latest build cost (US$), when known. */
   costUsd: number | null;
+  /** A web page added with "Follow links": the crawl's settings and what the last build read. Null
+   *  for a single page or a file. */
+  crawl: ReferenceDocCrawl | null;
   createdAt: string;
   updatedAt: string;
   builtAt: string | null;
@@ -97,6 +100,49 @@ export interface AddReferenceDocUrlBody {
   /** Absent ⇒ the default workspace. */
   workspaceId?: number;
   url: string;
+  /** Absent ⇒ this page only. `depth` = link hops followed from the start page (1 to
+   *  REFERENCE_DOC_CRAWL_MAX_DEPTH), same site only (docs/REFERENCE-DOCS.md § Following links). */
+  crawl?: { depth: number };
+}
+
+// ---- following links from a web page (docs/REFERENCE-DOCS.md § Following links) ----
+
+/** The most link hops a crawl follows from its start page. */
+export const REFERENCE_DOC_CRAWL_MAX_DEPTH = 3;
+/** The most pages one crawl reads, the start page included. */
+export const REFERENCE_DOC_CRAWL_MAX_PAGES = 25;
+/** The model that scores each page's links for relevance to the start page. */
+export const REFERENCE_DOC_CRAWL_RANK_MODEL = 'claude-haiku-5-5';
+/** A link is followed only when Claude scores it at least this (0 = unrelated … 3 = core to the topic). */
+export const REFERENCE_DOC_CRAWL_MIN_SCORE = 2;
+
+/** Links seen but not followed, by reason. */
+export interface ReferenceDocCrawlSkipped {
+  /** Another host than the start page's. */
+  offSite: number;
+  /** Not a web page (a PDF, an image, a feed, a download…), by its address or by what it served. */
+  notHtml: number;
+  /** robots.txt asks robots not to read it. */
+  robots: number;
+  /** Claude scored it below REFERENCE_DOC_CRAWL_MIN_SCORE. */
+  lowValue: number;
+  /** Past the depth, the page cap or the crawl's time limit. */
+  overCap: number;
+  /** An address seen before (a circular link, a redirect to a page already read, the same text twice). */
+  duplicate: number;
+  /** An address shaped like a crawler trap (endless calendars, repeating paths, deep pagination). */
+  trap: number;
+  /** The page could not be read (an error, a timeout, too large). */
+  failed: number;
+}
+
+export interface ReferenceDocCrawl {
+  /** Link hops followed from the start page (1 to REFERENCE_DOC_CRAWL_MAX_DEPTH). */
+  depth: number;
+  maxPages: number;
+  /** Pages read on the LAST successful build, in reading order (null before the first). */
+  pages: Array<{ url: string; title: string | null; depth: number }> | null;
+  skipped: ReferenceDocCrawlSkipped | null;
 }
 
 /** GET /api/docs/tree — the master contents, and one document's contents when `doc=` names one. */

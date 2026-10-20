@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react';
-import { REFERENCE_DOC_MAX_BYTES, type ReferenceDoc } from '@pierre-review/shared';
+import {
+  REFERENCE_DOC_CRAWL_MAX_DEPTH,
+  REFERENCE_DOC_CRAWL_MAX_PAGES,
+  REFERENCE_DOC_MAX_BYTES,
+  type ReferenceDoc,
+} from '@pierre-review/shared';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import {
   useAddReferenceDocUrl,
@@ -70,7 +75,8 @@ const KIND_LABEL: Record<ReferenceDoc['sourceKind'], string> = {
 
 function BuildProgress({ doc }: { doc: ReferenceDoc }): JSX.Element {
   const pct = Math.max(0, Math.min(100, Math.round(doc.progress)));
-  const label = docStageLabel(doc.status);
+  // The server's own words for the step ("Crawling 6 of 25", "Summarising sections (3 of 12)").
+  const label = doc.stage ?? docStageLabel(doc.status);
   return (
     <div className="space-y-0.5" aria-live="polite">
       <div className="flex items-center justify-between gap-2 text-[11px] text-ai-signal">
@@ -187,6 +193,7 @@ function DocRow({
             )}
             <p className={`truncate text-[11px] ${MUTED}`} title={doc.sourceName}>
               {KIND_LABEL[doc.sourceKind]}
+              {doc.crawl?.pages != null && ` · ${doc.crawl.pages.length} page${doc.crawl.pages.length === 1 ? '' : 's'}`}
               {doc.available && ` · ${doc.sectionCount} section${doc.sectionCount === 1 ? '' : 's'}`}
             </p>
           </div>
@@ -252,6 +259,7 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
   const [sending, setSending] = useState<string | null>(null);
   const [problems, setProblems] = useState<Array<{ name: string; message: string }>>([]);
   const [url, setUrl] = useState('');
+  const [crawlDepth, setCrawlDepth] = useState(0);
 
   const send = async (files: File[]): Promise<void> => {
     const found: Array<{ name: string; message: string }> = [];
@@ -332,12 +340,12 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
         </ul>
       )}
       <form
-        className="flex items-center gap-1.5"
+        className="flex flex-wrap items-center gap-1.5"
         onSubmit={(e) => {
           e.preventDefault();
           const u = url.trim();
           if (u === '' || addUrl.isPending) return;
-          addUrl.mutate(u, { onSuccess: () => setUrl('') });
+          addUrl.mutate({ url: u, crawlDepth: crawlDepth > 0 ? crawlDepth : null }, { onSuccess: () => setUrl('') });
         }}
       >
         <input
@@ -347,8 +355,35 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
           aria-label="Web page address"
           placeholder="https://…"
           maxLength={2048}
-          className="min-w-0 flex-1 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-400"
+          className="min-w-0 flex-1 basis-40 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-400"
         />
+        <span className="inline-flex shrink-0 items-center gap-0.5">
+          <select
+            value={crawlDepth}
+            onChange={(e) => setCrawlDepth(Number(e.target.value))}
+            aria-label="Links to follow"
+            className="rounded border border-gray-300 bg-white px-1 py-1 text-xs text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          >
+            <option value={0}>This page only</option>
+            {Array.from({ length: REFERENCE_DOC_CRAWL_MAX_DEPTH }, (_, i) => i + 1).map((d) => (
+              <option key={d} value={d}>
+                Follow links, {d} level{d === 1 ? '' : 's'}
+              </option>
+            ))}
+          </select>
+          <InfoButton title="Follow links">
+            <p>
+              Limn reads the page, then asks Claude Haiku which of its links lead to more about the same topic, and reads
+              only those. Each level follows links from the pages read at the level before.
+            </p>
+            <p>
+              Links are followed on the same site only, to web pages only (not PDFs, images or downloads), and only where
+              the site's robots.txt allows. A crawl reads at most {REFERENCE_DOC_CRAWL_MAX_PAGES} pages, and each address
+              is read once.
+            </p>
+            <p>All the pages become one document, a chapter per page. Rebuild reads the site again.</p>
+          </InfoButton>
+        </span>
         <button
           type="submit"
           disabled={addUrl.isPending || url.trim() === ''}

@@ -152,6 +152,7 @@ beforeAll(async () => {
   const brief = async (key: string, row: { title: string; description: string; acceptanceCriteria: string }, refs: any[], summary = `Brief ${key}`) =>
     briefs.storeSprintBrief(1, ownWs, id(key), briefs.sprintBriefInput({ ...row, blockedByJson: null }, 'jira').textHash, {
       summary,
+      oneLiner: `Line ${key}`,
       criteria: [{ n: 1, text: 'The basket survives a reload' }],
       criteriaDerived: false,
       references: refs,
@@ -265,10 +266,10 @@ describe('GET /api/sprint-graph', () => {
     expect(n('ENG-1').degree).toBe(2);
     expect(n('ENG-7').degree).toBe(2);
     expect(n('ENG-4').degree).toBe(0);
-    expect(n('ENG-1').brief).toEqual({ state: 'current', summary: 'Brief ENG-1', criteriaCount: 1, criteriaDerived: false });
+    expect(n('ENG-1').brief).toEqual({ state: 'current', summary: 'Brief ENG-1', oneLiner: 'Line ENG-1', criteriaCount: 1, criteriaDerived: false });
     // A brief of an older text is pending and draws nothing (no ENG-4 → ENG-1 supersedes edge).
     expect(n('ENG-4').brief.state).toBe('pending');
-    expect(n('ENG-8').brief).toEqual({ state: 'pending', summary: null, criteriaCount: 0, criteriaDerived: false });
+    expect(n('ENG-8').brief).toEqual({ state: 'pending', summary: null, oneLiner: null, criteriaCount: 0, criteriaDerived: false });
     expect(n('ENG-1').epic).toEqual({ key: 'ENG-100', title: 'Baskets' });
     expect(n('ENG-1').assignee).toEqual({ name: 'Amy', avatarUrl: null });
     expect(n('ENG-7').title).toBe('Ghost ENG-7');
@@ -555,6 +556,7 @@ describe('GET /api/ticket-story', () => {
     expect(pending.ticket).toMatchObject({ title: 'ENG-5 (renamed since)', status: { name: 'In Review' }, inSprint: false });
     await briefs.storeSprintBrief(1, ownWs, id('ENG-5'), briefs.sprintBriefInput({ ...fresh, blockedByJson: null }, 'jira').textHash, {
       summary: 'Brief of the ref text',
+      oneLiner: 'Ref text',
       criteria: [],
       criteriaDerived: true,
       references: [],
@@ -567,5 +569,78 @@ describe('GET /api/ticket-story', () => {
     await db.delete(rt).where(and(eq(rt.accountId, 1), eq(rt.issueKey, 'ENG-5'))).execute();
     // With no ref row, the old out-of-sprint row again: nothing will brief it.
     expect((await get(id('ENG-5'))).json()).toMatchObject({ briefState: 'none', ticket: { title: 'Story ENG-5' } });
+  });
+});
+
+describe('ticket checks and the change token', () => {
+  const prIdOf = async (n: number): Promise<number> =>
+    (await db.select().from(schema.pullRequests).execute()).find((r: any) => r.accountId === 1 && r.number === n).id;
+  const graphOf = async () => (await app.inject({ method: 'GET', url: `/api/sprint-graph?workspace=${ownWs}` })).json() as any;
+  const tokenOf = async () => {
+    const res = await app.inject({ method: 'GET', url: `/api/sprint-graph/token?workspace=${ownWs}` });
+    expect(res.statusCode).toBe(200);
+    return res.json() as any;
+  };
+
+  it('the token GET answers the graph GET\'s token and stamps nothing', async () => {
+    const g = await graphOf();
+    expect(g.changeToken).toMatch(/^[0-9a-f]{16}$/);
+    const before = await store.readSprintRead(1, ownWs);
+    const t = await tokenOf();
+    expect(t).toEqual({ workspaceId: ownWs, changeToken: g.changeToken });
+    expect((await store.readSprintRead(1, ownWs))!.viewedAt?.getTime()).toBe(before!.viewedAt?.getTime());
+    // Another tenant's id lands on the caller's Default, never theirs.
+    expect((await app.inject({ method: 'GET', url: `/api/sprint-graph/token?workspace=${foreignWs}` })).json()).toEqual(t);
+  });
+
+  it('a succeeded ticket check reads as "n of m met"; a member push marks it stale; the token moves with both', async () => {
+    const t0 = (await tokenOf()).changeToken;
+    const p11 = await prIdOf(11);
+    const p12 = await prIdOf(12);
+    const assessment = {
+      criteria: [
+        { n: 1, text: 'Basket survives a reload', status: 'met' },
+        { n: 2, text: 'Basket expires after 30 days', status: 'not_met' },
+        { n: 3, text: 'Shown on the page', status: 'partly_met' },
+      ],
+    };
+    const [run] = await db
+      .insert(schema.ticketReviews)
+      .values({ accountId: 1, workspaceId: ownWs, ticketIdent: id('ENG-1'), status: 'succeeded', model: 'claude-opus-5-5', assessment, completedAt: new Date('2026-10-19T10:00:00Z') })
+      .returning({ id: schema.ticketReviews.id })
+      .execute();
+    await db
+      .insert(schema.ticketReviewMembers)
+      .values([
+        { ticketReviewId: run.id, accountId: 1, prId: p11, repoId: ownRepo, headSha: '', prState: 'merged' },
+        { ticketReviewId: run.id, accountId: 1, prId: p12, repoId: ownRepo, headSha: '', prState: 'open' },
+      ])
+      .execute();
+    // Another tenant's run on the same ident is never read.
+    await db.insert(schema.ticketReviews).values({ accountId: 2, workspaceId: foreignWs, ticketIdent: id('ENG-1'), status: 'running', model: 'claude-opus-5-5' }).execute();
+    const g1 = await graphOf();
+    const n1 = g1.nodes.find((x: any) => x.key === 'ENG-1');
+    expect(n1.check).toEqual({ met: 1, partlyMet: 1, notMet: 1, unsettled: 0, total: 3, checkedAt: '2026-10-19T10:00:00.000Z', stale: false });
+    expect(n1.checkRunning).toBe(false);
+    expect(g1.nodes.find((x: any) => x.key === 'ENG-2').check).toBeNull();
+    expect(g1.nodes.filter((x: any) => x.ghost).every((x: any) => x.check == null && x.checkRunning === false)).toBe(true);
+    expect(g1.changeToken).not.toBe(t0);
+    expect((await tokenOf()).changeToken).toBe(g1.changeToken);
+
+    await db.update(schema.pullRequests).set({ headSha: 'abc123' }).where((await import('drizzle-orm')).eq(schema.pullRequests.id, p12)).execute();
+    const g2 = await graphOf();
+    expect(g2.nodes.find((x: any) => x.key === 'ENG-1').check.stale).toBe(true);
+    expect(g2.changeToken).not.toBe(g1.changeToken);
+    // Nothing changed: the token holds across reads (no clock in it).
+    expect((await tokenOf()).changeToken).toBe(g2.changeToken);
+
+    // A queued run reads as running.
+    await db.insert(schema.ticketReviews).values({ accountId: 1, workspaceId: ownWs, ticketIdent: id('ENG-2'), status: 'queued', model: 'claude-opus-5-5' }).execute();
+    expect((await graphOf()).nodes.find((x: any) => x.key === 'ENG-2').checkRunning).toBe(true);
+  });
+
+  it('AI off: no checks are read', async () => {
+    const out = await graph.getSprintGraph(1, ownWs, { aiEnabled: false, now: Date.now() });
+    expect(out.nodes.every((n) => n.check == null && n.checkRunning === false)).toBe(true);
   });
 });

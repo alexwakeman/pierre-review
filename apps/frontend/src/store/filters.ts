@@ -76,23 +76,24 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // one Reports gate.
 //
 // ⚠ `'merged'` AND `'sprint'` LEFT THIS UNION. "Merged so far" and "This sprint" moved to their own
-// FREE rail line, This Sprint (`activityRepoId === 'sprint'`, `SprintInnerTab` below). The two
-// literals still sit in bookmarks and in history entries Back replays (`?insightsTab=sprint|merged`),
-// so useUrlState's READ maps them onto the new rail line + tab; they are never emitted again.
+// FREE view, This Sprint — a FIXED TAB now (`activeTab === 'sprint'`, `SprintInnerTab` below; it was
+// an Activity rail line before that). The two literals still sit in bookmarks and in history entries
+// Back replays (`?insightsTab=sprint|merged`), so useUrlState's READ maps them onto the tab + its
+// sub-tab; they are never emitted again.
 export type InsightsInnerTab = 'overview' | 'stories' | 'bottlenecks';
 export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'stories', 'bottlenecks'];
-// The This Sprint rail line's sub-tab strip (FREE on every tier): three independent views of the
-// sprint on one lane board — `'paths'` (Critical path, the landing panel), `'themes'` (Theme) and
+// The This Sprint tab's sub-tab strip (FREE on every tier): three independent views of the
+// sprint on one lane board — `'themes'` (Theme, the landing panel), `'paths'` (Critical path) and
 // `'people'` (People) — then `'merged'` ("Merged so far", MergedPrsView — every PR merged in the
-// reporting window). URL: `?sprintTab=themes|people|merged`, the `'paths'` default omitted, emitted
-// ONLY alongside `activityRepo=sprint`. ⚠ The retired `?sprintTab=graph` (the force graph, deleted
-// 2026-10-18) still sits in bookmarks and history: `sprintTabFromUrl` reads it as `'paths'`. The
+// reporting window). URL: `?sprintTab=paths|people|merged`, the `'themes'` default omitted, emitted
+// ONLY alongside `view=sprint`. ⚠ The retired `?sprintTab=graph` (the force graph, deleted
+// 2026-10-18) still sits in bookmarks and history: `sprintTabFromUrl` reads it as `'themes'`. The
 // visible tab is DERIVED (`effectiveSprintTab`), never written back. Transient like its siblings — no
 // FILTER_STORAGE_VERSION bump is owed.
 export type SprintInnerTab = 'paths' | 'themes' | 'people' | 'merged';
 export const SPRINT_INNER_TABS: readonly SprintInnerTab[] = ['themes', 'paths', 'people', 'merged'];
 /** The `?sprintTab=` value a link carries, as a tab to SEAT: a member as itself, the retired `graph`
- *  as the Critical path view, anything else nothing (the store keeps what it has). Pure. */
+ *  as the Theme view, anything else nothing (the store keeps what it has). Pure. */
 export function sprintTabFromUrl(raw: string | null | undefined): SprintInnerTab | null {
   if (raw === 'graph') return 'themes';
   return (SPRINT_INNER_TABS as readonly string[]).includes(raw ?? '') ? (raw as SprintInnerTab) : null;
@@ -592,8 +593,8 @@ export interface FilterState {
   // view, the same rule `feedTab` / `botsTab` follow. The READ seats the RAW value and InsightsView
   // DERIVES what it renders; a corrective write-back would permanently forget the choice.
   insightsInnerTab: InsightsInnerTab;
-  // Which inner sub-tab the This Sprint rail line shows (see SprintInnerTab). Transient,
-  // URL-serialized (`?sprintTab=themes`) only alongside `activityRepo=sprint`.
+  // Which inner sub-tab the This Sprint tab shows (see SprintInnerTab). Transient,
+  // URL-serialized (`?sprintTab=paths`) only alongside `view=sprint`.
   sprintInnerTab: SprintInnerTab;
   // Which inner tab the PR-detail overlay shows (see PrDetailTab), PAIRED WITH THE PR IT BELONGS
   // TO. null = nothing chosen yet → 'overview'.
@@ -812,11 +813,11 @@ export interface FilterState {
   // read side's parseInt branch and lands on the 'open-prs' default — normalization by
   // construction.)
   //
-  // 'sprint' is the FREE **This Sprint** rail line (under Pending): the sprint graph and "Merged so
-  // far" (`?activityRepo=sprint`, its sub-tab `sprintInnerTab`).
+  // ('sprint' LEFT this union: This Sprint is a fixed TAB now, `activeTab === 'sprint'`. A legacy
+  // `?activityRepo=sprint` link lands on that tab — useUrlState's landingTabFromUrl.)
   // 'docs' is the **Docs** rail line (the workspace reference library, `?activityRepo=docs`): CORE,
   // free, LOCAL ONLY — the rail entry renders only on `me.ai.enabled` (docs/REFERENCE-DOCS.md § The SPA).
-  activityRepoId: number | 'open-prs' | 'feed' | 'attention' | 'sprint' | 'docs' | 'insights' | 'bots' | null;
+  activityRepoId: number | 'open-prs' | 'feed' | 'attention' | 'docs' | 'insights' | 'bots' | null;
   // Soft thread-state filter inside an Activity repo console: clicking a thread-state
   // segment narrows the PRs-by-author list to PRs carrying that derived state.
   // null = no filter. Transient, URL-silent.
@@ -1237,7 +1238,7 @@ export interface FilterState {
   bumpClaudeReviewKickoff: () => void;
   // Select an Activity detail target (a repo id, or one of the pseudo-rows: 'feed' for the
   // cross-repo consolidated Feed, 'bots', 'attention', 'insights').
-  setActivityRepo: (id: number | 'open-prs' | 'feed' | 'attention' | 'sprint' | 'docs' | 'insights' | 'bots') => void;
+  setActivityRepo: (id: number | 'open-prs' | 'feed' | 'attention' | 'docs' | 'insights' | 'bots') => void;
   // Set/clear the Activity repo console's soft thread-state filter (toggles off when
   // the same state is re-selected).
   setActivityThreadFilter: (s: DerivedState | null) => void;

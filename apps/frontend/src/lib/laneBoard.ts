@@ -58,6 +58,9 @@ export interface BoardCardDef<C> {
   /** What a column's header count counts: cards sharing one (the same ticket on two paths) count once.
    *  Absent = the card's id. */
   unit?: string;
+  /** The card's GROUP within its lane's cell: lower groups sit first (This Sprint: 0 = has a pull
+   *  request). Absent = 0. The link-based ordering works WITHIN a group, never across one. */
+  group?: number;
   data: C;
 }
 
@@ -105,6 +108,8 @@ export function collapsedColumns(columns: ReadonlyArray<BoardColumn>, shown: Rea
  * is the status, the lane the group), so it is chosen to shorten the arrows: each card is placed by
  * the mean row of the cards it is linked to (a barycentre sweep, left to right then back, a few
  * times), a card with no links keeping its place. Stable, so with no arrows the input order stands.
+ * ⚠ A card's `group` always wins over its links: the sort keys on (group, barycentre, place), so
+ * This Sprint's cards with a pull request stay first in their cell whatever the arrows want.
  * Mutates the lists in `stacks` in place.
  */
 function orderByLinks<C>(
@@ -138,9 +143,9 @@ function orderByLinks<C>(
         const keyed = list.map((c, k) => {
           const rows = (links.get(c.id) ?? []).map((n) => rowOf.get(n)).filter((r): r is number => r != null);
           const key = rows.length > 0 ? rows.reduce((x, y) => x + y, 0) / rows.length : st.start + k;
-          return { c, key, k };
+          return { c, key, k, g: c.group ?? 0 };
         });
-        keyed.sort((a, b) => a.key - b.key || a.k - b.k);
+        keyed.sort((a, b) => a.g - b.g || a.key - b.key || a.k - b.k);
         keyed.forEach((e, k) => {
           list[k] = e.c;
           rowOf.set(e.c.id, st.start + k);
@@ -148,6 +153,14 @@ function orderByLinks<C>(
       }
     }
   }
+}
+
+/** A stable sort by `group` (absent = 0). */
+function sortByGroup<C>(list: ReadonlyArray<BoardCardDef<C>>): Array<BoardCardDef<C>> {
+  return list
+    .map((c, k) => ({ c, k }))
+    .sort((a, b) => (a.c.group ?? 0) - (b.c.group ?? 0) || a.k - b.k)
+    .map((e) => e.c);
 }
 
 /** Where every card, lane and arrow goes. Pure. */
@@ -215,6 +228,10 @@ export function layoutBoard<L, C>(input: {
       const list = cols.get(c.column);
       if (list == null) cols.set(c.column, [c]);
       else list.push(c);
+    }
+    // Lower groups first in every cell (stable: input order stands within a group).
+    for (const [col, list] of cols) {
+      if (list.some((c) => (c.group ?? 0) !== 0)) cols.set(col, sortByGroup(list));
     }
     // An opened cell's first row holds its "Hide" toggle; its cards sit below it.
     const span = Math.max(1, ...[...cols].map(([col, l]) => l.length + (opened.has(col) ? 1 : 0)));
@@ -286,6 +303,30 @@ export function sprintColumns(
 
 const isFailingCi = (ci: SprintGraphNode['prs'][number]['ciState']): boolean => ci === 'failure' || ci === 'error';
 
+/** Does a ticket have a pull request that counts — an open or merged one (a closed, unmerged one does
+ *  not)? The same population as `ticketCardTags`' PR tag. Such a card is HIGHLIGHTED (a violet border
+ *  and a soft glow, `ticketCardBorder`) and sits FIRST in its cell (`BoardCardDef.group`). */
+export function hasLivePr(n: Pick<SprintGraphNode, 'prs'>): boolean {
+  return n.prs.some((p) => p.state !== 'closed');
+}
+
+/** A TicketCard's acceptance-criteria line, or null when there is nothing to say.
+ *   - a ticket CHECK (the ticket review) succeeded: "3 of 4 criteria met", from its own criteria list
+ *     (`stale` when its pull requests moved since — the card dims it and says so aloud);
+ *   - else the current brief counted criteria: "4 criteria" / "1 criterion";
+ *   - else nothing.
+ *  `running`: a check of this ticket is queued or running now (a spinner, no extra words). Pure. */
+export function ticketCardCriteria(
+  n: Pick<SprintGraphNode, 'brief' | 'check' | 'checkRunning'>,
+): { text: string; stale: boolean; running: boolean } | null {
+  const running = n.checkRunning === true;
+  const c = n.check;
+  if (c != null && c.total > 0) return { text: `${c.met} of ${c.total} ${c.total === 1 ? 'criterion' : 'criteria'} met`, stale: c.stale, running };
+  const count = n.brief.criteriaCount;
+  if (count > 0) return { text: `${count} ${count === 1 ? 'criterion' : 'criteria'}`, stale: false, running };
+  return running ? { text: '', stale: false, running } : null;
+}
+
 /** A TicketCard's tags, as WORDS (never colour alone): "CI failing" (an open pull request's checks are
  *  red), "No PR" or "n PRs · m open" (open and merged ones; a closed, unmerged one does not count),
  *  "No owner" (a sprint ticket nobody is assigned). Pure. */
@@ -301,13 +342,20 @@ export function ticketCardTags(n: Pick<SprintGraphNode, 'prs' | 'assignee' | 'gh
 
 /** A TicketCard's border, by STYLE as well as colour: on a critical path = 2px solid accent; waiting
  *  on another unfinished ticket = dashed (accent and dashed when both); outside the sprint = a faint
- *  1px dashed border on a tinted ground, whatever else it is (a light accent when on a path). */
-export function ticketCardBorder(o: { critical: boolean; waiting: boolean; ghost: boolean }): string {
+ *  1px dashed border on a tinted ground, whatever else it is (a light accent when on a path).
+ *  HAS A PULL REQUEST (`withPr`, an open or merged one — `hasLivePr`): a violet border (the merge
+ *  family's hue) and a soft violet glow (`.ticket-card-pr`, index.css). A critical-path card KEEPS its
+ *  orange 2px border and only adds the glow. A ticket outside the sprint never glows. */
+export function ticketCardBorder(o: { critical: boolean; waiting: boolean; ghost: boolean; withPr?: boolean }): string {
   // A ticket outside the sprint is FAINT whatever else it is — on a path, its dashed border is the accent, lighter.
   if (o.ghost) {
     return `border border-dashed ${o.critical ? 'border-ai-signal-fill/60' : 'border-gray-300 dark:border-gray-700'} bg-gray-50 dark:bg-gray-900/60`;
   }
-  if (o.critical) return `border-2 ${o.waiting ? 'border-dashed' : 'border-solid'} border-ai-signal-fill bg-white dark:bg-gray-950`;
+  const glow = o.withPr === true ? ' ticket-card-pr' : '';
+  if (o.critical) return `border-2 ${o.waiting ? 'border-dashed' : 'border-solid'} border-ai-signal-fill bg-white dark:bg-gray-950${glow}`;
+  if (o.withPr === true) {
+    return `border ${o.waiting ? 'border-dashed' : 'border-solid'} border-violet-400 bg-white dark:border-violet-500/70 dark:bg-gray-950${glow}`;
+  }
   if (o.waiting) return 'border border-dashed border-gray-500 bg-white dark:border-gray-400 dark:bg-gray-950';
   return 'border border-solid border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950';
 }
@@ -434,7 +482,9 @@ function cardsFor(nodes: ReadonlyArray<SprintGraphNode>, lane: string, view: Spr
     lane,
     column: columnOfNode(node, view),
     unit: node.ident,
-    data: { node, critical: critical.has(node.ident), waiting: waiting.has(node.ident) },
+    // Cards with a pull request sit first in their cell (a ghost is never highlighted, so never grouped).
+    group: !node.ghost && hasLivePr(node) ? 0 : 1,
+    data:{ node, critical: critical.has(node.ident), waiting: waiting.has(node.ident) },
   }));
 }
 

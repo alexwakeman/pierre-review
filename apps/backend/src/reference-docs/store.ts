@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import type {
   ReferenceDoc,
   ReferenceDocCitation,
+  ReferenceDocCrawl,
   ReferenceDocSectionEntry,
   ReferenceDocSourceKind,
   ReferenceDocStatus,
@@ -26,6 +27,19 @@ export const isBuilding = (s: string): boolean => (BUILDING_STATUSES as readonly
 
 const iso = (d: Date | null | undefined): string | null => (d instanceof Date ? d.toISOString() : null);
 
+/** The stored crawl, or null when the row has none (or a shape this build does not read). */
+export function crawlOf(v: unknown): ReferenceDocCrawl | null {
+  if (v == null || typeof v !== 'object') return null;
+  const c = v as Partial<ReferenceDocCrawl>;
+  if (typeof c.depth !== 'number' || typeof c.maxPages !== 'number') return null;
+  return {
+    depth: c.depth,
+    maxPages: c.maxPages,
+    pages: Array.isArray(c.pages) ? c.pages : null,
+    skipped: c.skipped && typeof c.skipped === 'object' ? c.skipped : null,
+  };
+}
+
 export function toReferenceDoc(r: DocRow): ReferenceDoc {
   return {
     id: r.id,
@@ -46,6 +60,7 @@ export function toReferenceDoc(r: DocRow): ReferenceDoc {
     topics: Array.isArray(r.topics) ? r.topics : [],
     pageCount: r.pageCount ?? null,
     costUsd: r.costUsd ?? null,
+    crawl: crawlOf(r.crawl),
     createdAt: iso(r.createdAt)!,
     updatedAt: iso(r.updatedAt)!,
     builtAt: iso(r.builtAt),
@@ -115,6 +130,8 @@ export interface NewDoc {
   sourceUrl: string | null;
   byteSize: number;
   pageCount: number | null;
+  /** A web page added with "Follow links". Absent / null = one page or a file. */
+  crawl?: ReferenceDocCrawl | null;
 }
 
 /** Insert a queued document. The composite FK refuses a workspace of another account. */
@@ -132,6 +149,7 @@ export async function insertDocRow(d: NewDoc): Promise<DocRow> {
       sourceUrl: d.sourceUrl,
       byteSize: d.byteSize,
       pageCount: d.pageCount,
+      crawl: d.crawl ?? null,
       status: 'queued',
       progress: 0,
       stage: 'Waiting to start',
@@ -153,6 +171,7 @@ export interface ProgressPatch {
   buildStartedAt?: Date | null;
   sourceName?: string;
   sourceUrl?: string | null;
+  crawl?: ReferenceDocCrawl | null;
 }
 
 export async function patchDoc(accountId: number, id: number, patch: ProgressPatch): Promise<boolean> {

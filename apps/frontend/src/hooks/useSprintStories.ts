@@ -1,18 +1,22 @@
 import { skipToken, useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type {
-  SprintAskResponse,
-  SprintAskTurn,
-  SprintGraphResponse,
-  SprintRefreshResponse,
-  SprintStatusesResponse,
-  SprintStatusSettings,
+import {
+  SPRINT_CHANGE_TOKEN_POLL_MS,
+  type SprintAskResponse,
+  type SprintAskTurn,
+  type SprintGraphResponse,
+  type SprintGraphTokenResponse,
+  type SprintRefreshResponse,
+  type SprintStatusesResponse,
+  type SprintStatusSettings,
 } from '@pierre-review/shared';
+import { useEffect } from 'react';
 import { create } from 'zustand';
+import { sprintTokenChanged } from '../lib/sprintChangeToken.js';
 import { api } from '../api/client.js';
 import { useAiCapabilities } from './useAiCapabilities.js';
 import { workspaceKey } from './useActivity.js';
 
-// This Sprint (its own Activity rail line) — the sprint GRAPH. FREE on every tier: no route here
+// This Sprint (a fixed tab beside Activity) — the sprint GRAPH. FREE on every tier: no route here
 // 402s, so no hook ANDs a Pro capability into `enabled`. "Ask Claude about this sprint" is agentic and
 // LOCAL-ONLY (its route is not registered in cloud), so it gates on `me.ai.enabled` — the agentic gate,
 // never a Pro one. ("Check against code" and the drawer were REMOVED; a ticket opens in the story view.)
@@ -37,18 +41,74 @@ export function useSprintGraph(workspaceId: number | null) {
     queryKey: sprintGraphKey(workspaceId),
     queryFn: workspaceId == null ? skipToken : () => api.sprintGraph(workspaceId),
     staleTime: 30_000,
-    // The worker re-reads the sprint every 20 minutes and briefs arrive in the background; a minute is
-    // often enough. While the first read has not landed ("Reading…") or briefs are pending, look sooner.
+    // ⚠ IN STEADY STATE THE BOARD DOES NOT REDRAW ITSELF: cards never move under the reader. A cheap
+    // change token is polled instead (`useSprintChangeToken`) and a difference SUGGESTS a Refresh.
+    // Only while something the reader started is still landing does the graph poll: the first read
+    // ("Reading…"), the critical paths being written, pending briefs, a ticket check running.
     refetchInterval: (q) => {
       const d = q.state.data;
       if (d != null && d.trackerOn && d.read.readAt == null && d.read.error == null) return 5_000;
       // The critical paths are being written (or are next in line after the summaries): see them land.
       if (d != null && d.aiEnabled && (d.pathsStatus?.state === 'writing' || d.pathsStatus?.state === 'queued')) return 5_000;
       if (d != null && d.aiEnabled && d.briefs.pending > 0) return 15_000;
-      return 60_000;
+      if (d != null && d.aiEnabled && d.nodes.some((n) => n.checkRunning === true)) return 15_000;
+      return false;
     },
     refetchIntervalInBackground: false,
   });
+}
+
+export function sprintTokenKey(workspaceId: number | null): [string, string] {
+  return ['sprint-graph-token', workspaceKey(workspaceId)];
+}
+
+/**
+ * THE CHANGE TOKEN, polled every SPRINT_CHANGE_TOKEN_POLL_MS while This Sprint is on screen (`enabled`:
+ * the caller is mounted only on the This Sprint tab, and passes false until the graph has loaded) and
+ * the page is visible — never in the background. DB only on the server; stamps nothing.
+ * ⚠ NOTHING ON A BOARD FETCHES ON MOUNT: the answer is SEEDED from the loaded graph's own token, timed
+ * at the graph's fetch — on first mount (`initialData`) AND every time the graph's data changes (the
+ * effect below, so a remount within gcTime holding an older cached token is re-seeded too) — and
+ * `refetchOnMount: false`, so the only request is the interval poll, one interval later.
+ * `changed` is the pure `sprintTokenChanged` rule (lib/sprintChangeToken.ts).
+ */
+export function useSprintChangeToken(
+  workspaceId: number | null,
+  graph: { changeToken: string | undefined; updatedAt: number; fetching: boolean } | null,
+): { changed: boolean } {
+  const qc = useQueryClient();
+  const seed = graph?.changeToken;
+  const graphUpdatedAt = graph?.updatedAt;
+  useEffect(() => {
+    if (workspaceId == null || typeof seed !== 'string' || graphUpdatedAt == null) return;
+    const key = sprintTokenKey(workspaceId);
+    const cached = qc.getQueryState<SprintGraphTokenResponse>(key);
+    // Only ever move the cache FORWARD: a poll answered after this graph stays.
+    if (cached != null && cached.dataUpdatedAt > graphUpdatedAt) return;
+    qc.setQueryData<SprintGraphTokenResponse>(key, { workspaceId, changeToken: seed }, { updatedAt: graphUpdatedAt });
+  }, [qc, workspaceId, seed, graphUpdatedAt]);
+  const q = useQuery<SprintGraphTokenResponse>({
+    queryKey: sprintTokenKey(workspaceId),
+    queryFn: workspaceId == null ? skipToken : () => api.sprintGraphToken(workspaceId),
+    enabled: workspaceId != null && seed != null,
+    initialData: workspaceId != null && seed != null ? { workspaceId, changeToken: seed } : undefined,
+    initialDataUpdatedAt: graphUpdatedAt,
+    staleTime: SPRINT_CHANGE_TOKEN_POLL_MS,
+    refetchInterval: SPRINT_CHANGE_TOKEN_POLL_MS,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+  });
+  const changed =
+    graph != null &&
+    sprintTokenChanged({
+      seed,
+      token: q.data?.changeToken,
+      tokenUpdatedAt: q.dataUpdatedAt,
+      graphUpdatedAt: graph.updatedAt,
+      graphFetching: graph.fetching,
+    });
+  return { changed };
 }
 
 export function useSprintRefresh(workspaceId: number | null) {

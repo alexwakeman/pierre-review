@@ -15,8 +15,9 @@ import { create } from 'zustand';
 // action is referentially stable for the life of the store, so the handler registers once. An
 // inline arrow in its place re-registered it on every App render.
 
-/** Which section the modal should scroll to when it opens. */
-export type SettingsFocus = 'my-turn';
+/** Which section the modal should scroll to when it opens: My Turn (the Pending board's "Customise"),
+ *  or the workspace's issue tracker (This Sprint's "Set up in Settings"). */
+export type SettingsFocus = 'my-turn' | 'issue-tracker';
 
 interface SettingsModalState {
   open: boolean;

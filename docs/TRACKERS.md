@@ -143,7 +143,7 @@ detected ticket in `tracker_tickets`; every consumer reads the row. The ONE exce
 
 ## The sprint list read — the ONE read not triggered by a received PR (`tracker/sprint/`)
 
-⚠ **A deliberate exception to "read when received".** Activity → This Sprint needs the tickets of the
+⚠ **A deliberate exception to "read when received".** This Sprint needs the tickets of the
 tracker's CURRENT sprint, and most of them have no PR yet, so no PR can trigger their read. The rule
 it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only stamps
 `sprint_reads.viewed_at` and kicks; the read runs in the worker.

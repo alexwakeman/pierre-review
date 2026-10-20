@@ -4,7 +4,7 @@ import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useHasProWorkspaceSettings, useProSettings } from '../../hooks/useProSettings.js';
 import { SprintSection } from './SprintSection.js';
 import { SlackSettings } from './SlackSection.js';
-import { IssueLinksSection } from './IssueLinksSection.js';
+import { IssueLinksSection, ISSUE_TRACKER_SECTION_HEADING_ID } from './IssueLinksSection.js';
 import { AutoReviewSection } from './AutoReviewSection.js';
 import { BenchmarkConsentSection } from './BenchmarkConsentSection.js';
 import { LargePrThresholdSection } from './LargePrThresholdSection.js';
@@ -136,16 +136,53 @@ export function SettingsModal({
   useEffect(() => {
     closeActivePopover();
     const returnFocus = focusReturner(document.activeElement, document.body);
-    const raf =
+    // The issue tracker's heading appears only once its own GET answers (a pending shell renders
+    // first), and on a cold cache or a slow local server that can take seconds. So the landing WAITS
+    // for the heading for as long as the modal is open (a DOM observer, no polling), and gives up the
+    // moment the reader does anything themselves — a late jump must never yank someone mid-scroll.
+    const headingId =
       focus === 'my-turn'
-        ? requestAnimationFrame(() => {
-            const heading = document.getElementById(MY_TURN_SECTION_HEADING_ID);
-            heading?.scrollIntoView({ block: 'start' });
-            heading?.focus({ preventScroll: true });
-          })
-        : null;
+        ? MY_TURN_SECTION_HEADING_ID
+        : focus === 'issue-tracker'
+          ? ISSUE_TRACKER_SECTION_HEADING_ID
+          : null;
+    let raf: number | null = null;
+    let observer: MutationObserver | null = null;
+    const INTERACTIONS = ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const;
+    const stopWaiting = (): void => {
+      observer?.disconnect();
+      observer = null;
+      for (const ev of INTERACTIONS) window.removeEventListener(ev, stopWaiting, true);
+    };
+    const land = (): boolean => {
+      if (headingId == null) return true;
+      const heading = document.getElementById(headingId);
+      if (heading == null) return false;
+      stopWaiting();
+      heading.scrollIntoView({ block: 'start' });
+      heading.focus({ preventScroll: true });
+      return true;
+    };
+    if (headingId != null) {
+      // One frame first, so a section that is already there has laid out.
+      raf = requestAnimationFrame(() => {
+        raf = null;
+        if (land()) return;
+        observer = new MutationObserver(() => {
+          if (raf == null) {
+            raf = requestAnimationFrame(() => {
+              raf = null;
+              land();
+            });
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        for (const ev of INTERACTIONS) window.addEventListener(ev, stopWaiting, { capture: true, passive: true });
+      });
+    }
     return () => {
       if (raf != null) cancelAnimationFrame(raf);
+      stopWaiting();
       returnFocus();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

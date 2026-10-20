@@ -13,7 +13,6 @@ import {
   BotIcon,
   PullRequestIcon,
   SparkleIcon,
-  TicketIcon,
   TimerIcon,
   WarningIcon,
   WorkspaceIcon,
@@ -26,7 +25,6 @@ import { RepoOpenPrList } from './RepoOpenPrList.js';
 import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { InsightsView } from './InsightsView.js';
-import { SprintRailView } from './SprintRailView.js';
 import { DocsView } from './DocsView.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { AttentionView } from './AttentionView.js';
@@ -274,8 +272,6 @@ export function ActivityView(): JSX.Element {
   // The CORE/free **Pending** cards console — always available, no Pro gate.
   const showingAttention = activityRepoId === 'attention';
   const showingInsights = activityRepoId === 'insights';
-  // This Sprint — the sprint graph + "Merged so far". FREE on every tier (no ProBadge, no lock).
-  const showingSprint = activityRepoId === 'sprint';
   // Docs — the workspace reference library. CORE, free, LOCAL ONLY: the rail entry exists only where
   // agentic AI runs (`me.ai.enabled`). A `?activityRepo=docs` link opened elsewhere still selects the
   // pane, which then says in one line why there is nothing to show.
@@ -404,11 +400,11 @@ export function ActivityView(): JSX.Element {
             isFetching && data != null ? 'opacity-60 transition-opacity' : ''
           }`}
         >
-          {/* RAIL ORDER, top to bottom: Open PRs · Pending · This Sprint · Docs (local only) · Feed · Reports (store
+          {/* RAIL ORDER, top to bottom: Open PRs · Pending · Docs (local only) · Feed · Reports (store
               value still 'insights') · Bots Monitoring — then the per-repo rows BENEATH the whole
               block. Open PRs leads because it is where the app opens; Pending, the ranked worklist,
-              is next, and This Sprint (the sprint graph + Merged so far, FREE) sits directly under
-              it. The Feed follows as the stream of what happened. Reports sits ABOVE Bots
+              is next. (This Sprint was the line under Pending; it is a fixed TAB now, beside
+              Activity — `activeTab === 'sprint'`.) The Feed follows as the stream of what happened. Reports sits ABOVE Bots
               Monitoring (the user's order); bot classification itself lives on the Feed's own
               "Bot classification" tab, so moving Bots Monitoring down separates nothing that
               filters the stream from the stream.
@@ -476,30 +472,7 @@ export function ActivityView(): JSX.Element {
             </span>
           </button>
 
-          {/* THIS SPRINT pseudo-row — directly UNDER Pending. The tracker's current sprint as three
-              lane boards (Critical path, the landing panel; Theme; People) and "Merged so far" (every
-              PR merged in the reporting window), as four tabs (SprintRailView). FREE on every tier: no ProBadge, and nothing inside locks.
-              `?activityRepo=sprint`; a legacy `?insightsTab=sprint|merged` lands here. */}
-          <button
-            type="button"
-            onClick={() => setActivityRepo('sprint')}
-            aria-pressed={showingSprint}
-            className={`flex w-56 shrink-0 items-center gap-1.5 rounded border-l-2 px-2 py-1.5 text-left text-xs md:w-full ${
-              showingSprint
-                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
-                : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
-            }`}
-            title="This sprint's critical paths, themes and people, and what has merged so far"
-          >
-            <span className="shrink-0 text-sky-600 dark:text-sky-400">
-              <TicketIcon />
-            </span>
-            <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
-              This Sprint
-            </span>
-          </button>
-
-          {/* DOCS pseudo-row — under This Sprint, LOCAL ONLY (`me.ai.enabled`): the workspace's
+          {/* DOCS pseudo-row — under Pending, LOCAL ONLY (`me.ai.enabled`): the workspace's
               reference library (DocsView) — the documents, their contents, a section viewer and the
               docs chat. `?activityRepo=docs`. FREE: no ProBadge. */}
           {aiEnabled && (
@@ -523,7 +496,7 @@ export function ActivityView(): JSX.Element {
             </button>
           )}
 
-          {/* FEED pseudo-row — under This Sprint. This workspace's consolidated state of play,
+          {/* FEED pseudo-row — under Docs. This workspace's consolidated state of play,
               across every repo in it. A Feed link carries `?activityRepo=feed` (it is no longer
               the default). The old "All repos" pseudo-row was removed (redundant with the Feed +
               the per-repo entries below). */}
@@ -668,10 +641,6 @@ export function ActivityView(): JSX.Element {
           <AttentionView />
         ) : showingInsights ? (
           <InsightsView />
-        ) : showingSprint ? (
-          // This Sprint — FREE; the sprint graph (landing) and Merged so far. Workspace-scoped, with
-          // its own empty states (no tracker, no sprint), so it renders before repo data loads.
-          <SprintRailView />
         ) : showingDocs ? (
           // Docs — the reference library. Needs no repos; owns its own empty and AI-off states.
           <DocsView />

@@ -12,6 +12,7 @@ import type {
 // Reports (`periodReports`): every route 402s before any DB work.
 //
 //   GET  /api/sprint-graph?workspace=<id>                 → SprintGraphResponse    (DB only, stamps the view)
+//   GET  /api/sprint-graph/token?workspace=<id>           → SprintGraphTokenResponse (DB only, stamps nothing)
 //   GET  /api/ticket-story?workspace=<id>&ident=…         → TicketStoryResponse (ticket-prs.ts; DB only)
 //   POST /api/sprint-graph/ask                            → SprintAskResponse      (Haiku, LOCAL ONLY)
 //
@@ -32,8 +33,9 @@ import type {
  *  3 (2026-10-14): every reference — and every TRACKER link, now sent in the brief's input — carries
  *  `why`, one plain sentence on why the two tickets are tied.
  *  4 (2026-10-14): `why` must say what is needed or shared, never restate the relation (3's first run
- *  answered "Listed under Dependencies, so the story relies on it"). */
-export const SPRINT_BRIEF_VERSION = 4;
+ *  answered "Listed under Dependencies, so the story relies on it").
+ *  5 (2026-10-20): `oneLiner`, one plain line (≤ SPRINT_BRIEF_CAPS.oneLiner) for the card face. */
+export const SPRINT_BRIEF_VERSION = 5;
 
 /** The brief's model (a user decision: the cheap one). */
 export const SPRINT_BRIEF_MODEL = 'claude-haiku-5-5';
@@ -45,6 +47,9 @@ export const SPRINT_BRIEF_RUN_CAP = 120;
 export const SPRINT_BRIEF_CAPS = {
   /** Characters: one or two sentences. */
   summary: 400,
+  /** Characters: the card's one line. REQUIRED like `summary`: blank → refused, longer → refused
+   *  (never cut), retried once in the pass. */
+  oneLiner: 90,
   /** One criterion's sentence. */
   criterion: 200,
   /** Criteria one brief may itemise (real stories reach ~35). */
@@ -114,6 +119,9 @@ export type SprintBriefStoredReference = SprintBriefReference | (SprintBriefLink
 export interface SprintBrief {
   /** One or two sentences: what the ticket delivers. */
   summary: string;
+  /** One plain line (≤ SPRINT_BRIEF_CAPS.oneLiner) for the card face. Always set by the server since
+   *  SPRINT_BRIEF_VERSION 5; optional so older literals still type. */
+  oneLiner?: string | null;
   /** The acceptance criteria, itemised; [] only when the text gives nothing to derive from. */
   criteria: SprintBriefCriterion[];
   /** The ticket has no acceptance criteria of its own: these were derived from the description. */
@@ -184,9 +192,17 @@ export interface SprintGraphNode {
     state: SprintBriefState;
     /** The CURRENT brief's summary; null otherwise. */
     summary: string | null;
+    /** The CURRENT brief's one line (≤ SPRINT_BRIEF_CAPS.oneLiner); null otherwise. */
+    oneLiner: string | null;
+    /** The CURRENT brief's criteria count (0 when there is no current brief). */
     criteriaCount: number;
     criteriaDerived: boolean;
   };
+  /** The latest SUCCEEDED ticket check (the ticket review, "Story check") of this ticket, from the DB;
+   *  null when none ever succeeded, for a ghost, and whenever AI is off (cloud). */
+  check: SprintTicketCheck | null;
+  /** A ticket check of this ticket is queued or running now. */
+  checkRunning: boolean;
   /** EVERY pull request on the ticket (open, merged and closed) in this workspace's repos, open first,
    *  then merged (newest first), then closed. */
   prs: SprintGraphPr[];
@@ -195,6 +211,39 @@ export interface SprintGraphNode {
   /** The sprint THEME this ticket was put in (`SprintGraphResponse.themes`); null for a ghost, and
    *  when no current theme pass covers it. */
   theme: string | null;
+}
+
+/** A ticket check's criteria verdicts (shared fold `criteriaCounts` over its stored assessment). Its
+ *  criteria list is the CHECK's own itemisation of the ticket, so `total` may differ from the brief's
+ *  `criteriaCount`. */
+export interface SprintTicketCheck {
+  met: number;
+  partlyMet: number;
+  notMet: number;
+  /** Criteria the check could not settle (unclear or not checked). */
+  unsettled: number;
+  total: number;
+  /** ISO-8601 of the run's completion. */
+  checkedAt: string;
+  /** A member PR was added, left, pushed or merged since that run (a DB-only compare of the run's
+   *  stored members against the synced pull requests). ⚠ An edit to the ticket TEXT is not detected
+   *  here — the Story check's own state says so. */
+  stale: boolean;
+}
+
+/** Ticket checks a manual This Sprint refresh starts at most (tickets with ≥ 1 open or merged PR and
+ *  no current check; never-checked first). */
+export const SPRINT_REFRESH_TICKET_CHECKS = 3;
+
+/** How often the SPA may poll `GET /api/sprint-graph/token` while This Sprint is on screen. */
+export const SPRINT_CHANGE_TOKEN_POLL_MS = 60_000;
+
+/** GET /api/sprint-graph/token?workspace=<id> — DB only. Stamps no view, kicks no read, records no
+ *  "since you last looked" snapshot. Equals `SprintGraphResponse.changeToken` for the same stored
+ *  state; a difference means the cards changed since the page loaded. */
+export interface SprintGraphTokenResponse {
+  workspaceId: number;
+  changeToken: string;
 }
 
 export interface SprintGraphEdge {
@@ -219,6 +268,10 @@ export interface SprintGraphResponse {
   workspaceId: number;
   /** false = no tracker: everything else is empty and the page prints one sentence. */
   trackerOn: boolean;
+  /** A hash of what the cards show (tickets, their statuses and columns, assignees, briefs' one-liners
+   *  and counts, ticket checks, PR count/state/draft/CI, edges, the last read) — never anything
+   *  clock-derived. `GET /api/sprint-graph/token` answers the same value for the same stored state. */
+  changeToken: string;
   provider: TrackerProvider | null;
   /** null until the first read finished. */
   source: SprintSource | null;

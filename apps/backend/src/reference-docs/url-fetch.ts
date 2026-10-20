@@ -172,13 +172,15 @@ export async function fetchPage(
   raw: string,
   transport: PageTransport = nodePageTransport,
   policy: PagePolicy = defaultPagePolicy(),
+  /** A tighter body cap than the upload cap (a crawl's linked pages use CRAWL_PAGE_MAX_BYTES). */
+  maxBytes: number = REFERENCE_DOC_MAX_BYTES,
 ): Promise<FetchedPage> {
   let url = checkPageUrl(raw, policy);
   const host = url.hostname.toLowerCase();
   for (let hop = 0; ; hop++) {
     let res: PageResponse;
     try {
-      res = await transport(url, { lookup: guardedLookup(undefined, blockedFor(policy)), timeoutMs: URL_FETCH_TIMEOUT_MS, maxBytes: REFERENCE_DOC_MAX_BYTES });
+      res = await transport(url, { lookup: guardedLookup(undefined, blockedFor(policy)), timeoutMs: URL_FETCH_TIMEOUT_MS, maxBytes: Math.min(maxBytes, REFERENCE_DOC_MAX_BYTES) });
     } catch (err) {
       if (err instanceof UrlFetchError) throw err;
       throw new UrlFetchError(err instanceof JiraFetchError && err.code === 'blocked' ? 'blocked' : 'network');

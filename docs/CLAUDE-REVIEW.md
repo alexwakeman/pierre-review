@@ -996,6 +996,20 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   accepts the ticket's stored members (`ticketMembers`), so a hand-added ticket past the
   `CLAUDE_REVIEW_MAX_TICKETS` story cap still starts. "Input manually" reveals the typed-story form
   (`manual:` idents), unchanged; with no tracker on the PR only that form shows.
+- **Started by a sprint refresh** (`sprint-checks.ts`, 2026-10-20): a MANUAL press of This Sprint's
+  Refresh (`POST /api/sprint-stories/refresh`, through the `startSprintTicketChecks` seam in
+  `tracker/sprint/hooks.ts`, registered only from the agentic registration) starts the ticket review for
+  at most `SPRINT_REFRESH_TICKET_CHECKS` (3) sprint tickets — never ghosts — that have ≥ 1 open or merged
+  PR in the workspace and no CURRENT run (the server fingerprint). Skipped like the sweeper skips: queued
+  / running / held, 0 or > `TICKET_REVIEW_MAX_PRS` members, no stored story, or a failed / refused attempt
+  on the SAME fingerprint since the last success. Order: never checked first, then stale; newest member
+  activity first within each (≤ 40 examined). Each goes through `startTicketReview(…, trigger: 'manual')`:
+  a person pressed the button, so it is ahead of automatic items and NOT counted against
+  `TICKET_REVIEW_DAILY_CAP`. No credential → `skipped: 'no_credential'`; no credits → `'credits'`; the 202
+  carries `ticketChecks {started, skipped}`. The cards read the latest SUCCEEDED run's verdicts from the DB
+  on the graph GET (`db/sprint-ticket-checks.ts`: three batched queries; `stale` = a member PR gone /
+  closed / pushed / merged since, or a new open / merged PR in the workspace — ⚠ a ticket-TEXT edit is
+  NOT seen there).
 - **Tables** `ticket_reviews` / `ticket_review_members` / `ticket_review_items` (sqlite `0080`, pg
   `0067`), tenancy STRUCTURAL via named composite FKs. Deleting a PR prunes its member rows and drops
   a run left with none (`db/ticket-review-prune.ts`, in BOTH delete paths).
@@ -2021,11 +2035,13 @@ STORY VIEW (docs/FRONTEND.md § The story view), whose Story section shows the t
 the sprint brief. Its tables `sprint_assessments` + `sprint_ticket_repos` are DORMANT (docs/DATA-MODEL.md;
 no drop migration). Old `sprint_assess` rows in `ai_usage` stay as history.
 
-## Sprint briefs (Activity → This Sprint)
+## Sprint briefs (This Sprint)
 
 A cheap Haiku 5.5 pass that turns every node of the sprint graph — each sprint ticket and each GHOST
-(an outside ticket reached through an edge) — into a BRIEF: `{summary, criteria: [{n, text}],
-criteriaDerived, references}`. The graph's text edges and its ghost chains come from it.
+(an outside ticket reached through an edge) — into a BRIEF: `{summary, oneLiner, criteria: [{n, text}],
+criteriaDerived, references}`. The graph's text edges and its ghost chains come from it; the card face
+shows `oneLiner` and the criteria count (plus "n of m met" from the TICKET CHECK — § Ticket review →
+Started by a sprint refresh).
 
 - **Where**: `src/review/sprint-briefs/` — `prompt.ts`, `validate.ts`, `manager.ts`, `index.ts`; the
   input and the store are core `db/sprint-briefs.ts`; the to-do list is `db/sprint-graph.ts`
@@ -2046,7 +2062,10 @@ criteriaDerived, references}`. The graph's text edges and its ghost chains come 
   rule) AND `brief_version` = `SPRINT_BRIEF_VERSION`. ⚠ `sprintBriefInput` REQUIRES `blockedByJson`: a
   caller that dropped it would hash a different input from the pass and read every brief as stale. ⚠ Changing one word of the prompt
   is a new version.
-- **THE PROMPT** (`SPRINT_BRIEF_SYSTEM`): the summary (one or two sentences, ≤ 400); the CRITERIA itemised
+- **THE PROMPT** (`SPRINT_BRIEF_SYSTEM`): the summary (one or two sentences, ≤ 400); the **`oneLiner`**
+  (version 5, 2026-10-20: one plain line ≤ `SPRINT_BRIEF_CAPS.oneLiner` 90 naming what the ticket
+  delivers, no full stop, no key — the card face; column `one_liner`, sqlite `0123` / pg `0110`; the bump
+  re-briefs every sprint ticket and ghost ONCE, and the themes re-run only if a summary changed); the CRITERIA itemised
   in the Open PRs Story check's words ("one entry per testable requirement, whether written as bullets,
   numbered lists, Given/When/Then scenarios, tables or prose … the criterion in one short sentence", ≤
   200 each, ≤ 40) — DERIVED from the title and description when the ticket has none, and then
@@ -2058,8 +2077,8 @@ criteriaDerived, references}`. The graph's text edges and its ghost chains come 
   inside the fence too and come back as `links: [{ticketKey, why}]` — a reason only where the text or the
   linked title supports one, never invented from the link type. The ticket sits inside a per-call NONCE fence; the "has / has no criteria" note sits
   outside it.
-- **VALIDATION** (`validateSprintBrief`): JSON with a non-empty summary and both arrays; over a cap →
-  refused, never cut; criteria renumbered 1..k, blanks dropped, a ticket WITH criteria must get ≥ 1 back;
+- **VALIDATION** (`validateSprintBrief`): JSON with a non-empty summary, a non-empty `oneLiner` (one trailing
+  full stop dropped) and both arrays; over a cap → refused, never cut; criteria renumbered 1..k, blanks dropped, a ticket WITH criteria must get ≥ 1 back;
   references through the story labels' OWN `reference` rule (relation from the vocabulary, a key the
   text never names dropped, every quote verified, (key, relation) repeats once). A `why` over the cap is
   DROPPED alone (null — never cut, never a refused brief); a link reason for a key the input did not list
@@ -2072,7 +2091,7 @@ criteriaDerived, references}`. The graph's text edges and its ghost chains come 
 - **EDGES** (`db/sprint-graph-fold.ts`): a reference `depends_on` / `concurrent` / `builds_on` /
   `supersedes` draws an edge from the ticket to the named one; `out_of_scope` / `context` draw none. A blocking tracker link draws `depends_on` with `source: 'tracker'`.
 
-## Sprint themes (Activity → This Sprint → Theme)
+## Sprint themes (This Sprint → Theme)
 
 ONE sprint-wide Haiku 5.5 call that names 3–8 short shared THEMES for the sprint, writes each a one-to-two
 sentence SUMMARY, and puts every sprint ticket in exactly one, so the Theme view can lay the sprint out by area of work rather than by epic (one
@@ -2114,7 +2133,7 @@ lane per theme, "Other" last; the Critical path view's count table rows too).
   CURRENT for today's hash and version — otherwise null, and the SPA disables "Theme" with "Themes
   appear after Claude reads the sprint".
 
-## Sprint paths (Activity → This Sprint, the sprint builder)
+## Sprint paths (This Sprint, the sprint builder)
 
 ONE agentic Sonnet 5 run per changed sprint — the SPRINT BUILDER — that picks up to 5 **CRITICAL PATHS**
 (ordered ticket chains, ranked by risk to the sprint, each with a ≤ 40-character title, ONE sentence of
@@ -2129,7 +2148,7 @@ COUNTS EVERY NUMBER; the model picks and words, with NO digit anywhere in its te
   kicking a read) / `sprintPathsInputOf` (the ONE builder both share). Table `sprint_paths` (sqlite `0120` /
   pg `0107`), ONE row per (account, workspace). The SPA half is This Sprint's **Critical path** view
   (`components/Activity/SprintBoards.tsx` `SprintPathsView`, state fold `sprintPathsModel.ts`; one lane per
-  path on the lane board — docs/FRONTEND.md § Activity → This Sprint); the stored paths also mark the
+  path on the lane board — docs/FRONTEND.md § This Sprint); the stored paths also mark the
   critical cards and arrows on the Theme and People views.
 - **WHEN — THE AFTER-READ CHAIN** (`review/sprint-briefs/index.ts` `runSprintAfterRead`; local only,
   registered by `registerAgenticRoutes`, never on a view): briefs (Haiku — every sprint ticket and ghost gets
@@ -2219,7 +2238,7 @@ COUNTS EVERY NUMBER; the model picks and words, with NO digit anywhere in its te
     produced sprint tickets — an empty list must never become a baseline that makes every ticket "added".
     A store failure only loses this card (never throws).
 
-## Ask about this sprint (Activity → This Sprint)
+## Ask about this sprint (This Sprint)
 
 `POST /api/sprint-graph/ask` — one Haiku 5.5 answer per turn (`review/sprint-ask/`), LOCAL ONLY
 (`registerAgenticRoutes`); free — no Pro gate, the SPA gates it on `me.ai`. Grounded ONLY in the stored graph

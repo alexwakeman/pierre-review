@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   REFERENCE_DOCS_CHAT_MAX_QUESTION_CHARS,
+  REFERENCE_DOC_CRAWL_MAX_DEPTH,
+  REFERENCE_DOC_CRAWL_MAX_PAGES,
   REFERENCE_DOC_MAX_BYTES,
   type AddReferenceDocUrlBody,
   type ReferenceDocMutationResponse,
@@ -225,7 +227,17 @@ export function registerReferenceDocsRoutes(app: FastifyInstance, ctx: AgentCont
           type: 'object',
           required: ['url'],
           additionalProperties: false,
-          properties: { workspaceId: { type: 'integer', minimum: 1 }, url: { type: 'string', minLength: 1, maxLength: 2048 } },
+          properties: {
+            workspaceId: { type: 'integer', minimum: 1 },
+            url: { type: 'string', minLength: 1, maxLength: 2048 },
+            // "Follow links" (docs/REFERENCE-DOCS.md § Following links). Absent = this page only.
+            crawl: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['depth'],
+              properties: { depth: { type: 'integer', minimum: 1, maximum: REFERENCE_DOC_CRAWL_MAX_DEPTH } },
+            },
+          },
         },
       },
     },
@@ -255,6 +267,7 @@ export function registerReferenceDocsRoutes(app: FastifyInstance, ctx: AgentCont
         sourceUrl: url.href,
         byteSize: 0,
         pageCount: null,
+        crawl: b.crawl ? { depth: b.crawl.depth, maxPages: REFERENCE_DOC_CRAWL_MAX_PAGES, pages: null, skipped: null } : null,
       });
       enqueueBuild(ctx, accountId, workspaceId, row.id);
       reply.status(202);

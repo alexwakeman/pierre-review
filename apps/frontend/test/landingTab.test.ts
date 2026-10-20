@@ -89,6 +89,27 @@ describe('landingTabFromUrl — the decision table', () => {
     expect(landingTabFromUrl('?workspace=5&view=open-prs&pr=4123')).toBe('activity');
   });
 
+  // This Sprint is a FIXED TAB. Its own spelling, and both of its legacy spellings: the Activity rail
+  // line it was (`activityRepo=sprint`) and the Reports tabs before that (`insightsTab=sprint|merged`).
+  it('?view=sprint → sprint', () => {
+    expect(landingTabFromUrl('?view=sprint')).toBe('sprint');
+    expect(landingTabFromUrl('?workspace=5&view=sprint&sprintTab=people')).toBe('sprint');
+  });
+
+  it('legacy ?activityRepo=sprint → sprint, with or without view=activity', () => {
+    expect(landingTabFromUrl('?workspace=5&view=activity&activityRepo=sprint')).toBe('sprint');
+    expect(landingTabFromUrl('?activityRepo=sprint&sprintTab=merged')).toBe('sprint');
+    // An explicit other board keeps its board.
+    expect(landingTabFromUrl('?view=timeline&activityRepo=sprint')).toBe('timeline');
+  });
+
+  it('legacy ?insightsTab=sprint|merged → sprint, only when Reports or no rail is named', () => {
+    expect(landingTabFromUrl('?view=activity&activityRepo=insights&insightsTab=sprint')).toBe('sprint');
+    expect(landingTabFromUrl('?view=activity&insightsTab=merged')).toBe('sprint');
+    expect(landingTabFromUrl('?view=activity&activityRepo=feed&insightsTab=merged')).toBe('activity');
+    expect(landingTabFromUrl('?view=activity&activityRepo=insights&insightsTab=stories')).toBe('activity');
+  });
+
   it('?view=activity → activity', () => {
     expect(landingTabFromUrl('?view=activity')).toBe('activity');
     expect(landingTabFromUrl('?workspace=5&view=activity&activityRepo=bots')).toBe('activity');
@@ -176,6 +197,17 @@ describe('writeToUrl emits the board affirmatively (the round trip)', () => {
     writeToUrl(state({ workspaceId: 5 }));
     expect(location.search).toContain('view=activity');
     expect(landingTabFromUrl(location.search)).toBe('activity');
+  });
+
+  it('emits view=sprint (and a non-default sub-tab) while This Sprint is active, and lands back on it', () => {
+    usePinnedTabs.setState({ activeTab: 'sprint' });
+    writeToUrl(state({ workspaceId: 5, sprintInnerTab: 'themes' }));
+    expect(location.search).toContain('view=sprint');
+    expect(location.search).not.toContain('sprintTab');
+    expect(location.search).not.toContain('activityRepo');
+    writeToUrl(state({ workspaceId: 5, sprintInnerTab: 'paths' }));
+    expect(location.search).toContain('sprintTab=paths');
+    expect(landingTabFromUrl(location.search)).toBe('sprint');
   });
 
   // Open PRs is Activity's DEFAULT rail line, so it names no console; Pending names itself.

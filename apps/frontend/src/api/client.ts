@@ -172,6 +172,7 @@ import type {
   StartStoryLabelRunBody,
   StoryLabelRunResponse,
   SprintGraphResponse,
+  SprintGraphTokenResponse,
   SprintAskRequest,
   SprintAskResponse,
   SprintRefreshResponse,
@@ -953,11 +954,15 @@ export const api = {
   // Reports → Stories (core, Pro on `periodReports`): every ticket with a PR merged in the window.
   stories: (workspaceId: number) =>
     get<StoriesResponse>(withQuery('/api/stories', workspaceParam(workspaceId))),
-  // This Sprint (its own rail line; core, FREE — no route here 402s). The graph GET
+  // This Sprint (a fixed tab; core, FREE — no route here 402s). The graph GET
   // stamps the workspace as viewed, which is what lets the worker read its sprint at all. Both GETs
   // are DB only.
   sprintGraph: (workspaceId: number) =>
     get<SprintGraphResponse>(withQuery('/api/sprint-graph', workspaceParam(workspaceId))),
+  // The cards' change token (DB only; stamps nothing): polled while This Sprint is on screen, and
+  // compared with the loaded graph's `changeToken` to suggest a Refresh.
+  sprintGraphToken: (workspaceId: number) =>
+    get<SprintGraphTokenResponse>(withQuery('/api/sprint-graph/token', workspaceParam(workspaceId))),
   // "Ask Claude about this sprint" (agentic, LOCAL-ONLY): one Haiku answer per turn, grounded in the
   // stored graph; the server caps the turns it reads.
   sprintAsk: (body: SprintAskRequest) =>
@@ -1594,8 +1599,12 @@ export const api = {
       headers: { 'content-type': 'application/octet-stream', 'x-limn-filename': encodeURIComponent(file.name) },
       body: file,
     }).then((r) => handle<ReferenceDocMutationResponse>(r)),
-  addReferenceDocUrl: (workspaceId: number, url: string) =>
-    fetch('/api/docs/url', jsonBody('POST', { workspaceId, url } satisfies AddReferenceDocUrlBody)).then((r) =>
+  // `crawlDepth` absent / null = this page only; 1-3 = follow links that many hops (same site).
+  addReferenceDocUrl: (workspaceId: number, url: string, crawlDepth?: number | null) =>
+    fetch(
+      '/api/docs/url',
+      jsonBody('POST', { workspaceId, url, ...(crawlDepth ? { crawl: { depth: crawlDepth } } : {}) } satisfies AddReferenceDocUrlBody),
+    ).then((r) =>
       handle<ReferenceDocMutationResponse>(r),
     ),
   rebuildReferenceDoc: (docId: number) =>

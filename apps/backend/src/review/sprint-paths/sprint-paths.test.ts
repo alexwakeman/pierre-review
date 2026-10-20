@@ -58,7 +58,9 @@ const N = (key: string, stage: SprintStage | null, o: Partial<SprintGraphNode> =
   issueType: null,
   assignee: null,
   epic: null,
-  brief: { state: 'current', summary: null, criteriaCount: 0, criteriaDerived: false },
+  brief: { state: 'current', summary: null, oneLiner: null, criteriaCount: 0, criteriaDerived: false },
+  check: null,
+  checkRunning: false,
   prs: [],
   degree: 0,
   theme: null,
@@ -83,7 +85,7 @@ const COLUMNS: SprintColumn[] = [
 function fixture() {
   const nodes = [
     N('BMD-1080', 'in_progress', { theme: 'GeoPackage', assignee: { name: 'Sinan Goktas', avatarUrl: null }, prs: [pr(1, 'open', { ciState: 'failure' })] }),
-    N('BMD-1081', 'not_started', { theme: 'GeoPackage', brief: { state: 'current', summary: 'Export layers.', criteriaCount: 2, criteriaDerived: false } }),
+    N('BMD-1081', 'not_started', { theme: 'GeoPackage', brief: { state: 'current', summary: 'Export layers.', oneLiner: 'Export layers', criteriaCount: 2, criteriaDerived: false } }),
     N('BMD-1090', 'in_review', { column: 'product_review', prs: [pr(2, 'merged')], assignee: { name: 'Colin', avatarUrl: null } }),
     N('BMD-1091', 'done', { prs: [pr(3, 'merged')] }),
     N('BMD-1096', 'in_progress', { ghost: true, depth: 1, status: { name: 'In Progress', category: 'indeterminate' } }),

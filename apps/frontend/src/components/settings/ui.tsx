@@ -16,9 +16,13 @@ export function SectionShell({
   title,
   desc,
   info,
+  headingId,
   children,
 }: {
   title: string;
+  // Set on a section the modal can be OPENED AT (`SettingsFocus`): the heading gets this id and is
+  // focusable from script (tabIndex -1), so the modal can scroll to it and move focus there.
+  headingId?: string;
   // The control's own one-line consequence. Stays visible.
   desc?: ReactNode;
   // An <InfoButton> beside the title: how the setting works, examples, caveats that apply to every
@@ -29,7 +33,13 @@ export function SectionShell({
   return (
     <section className="border-b border-gray-100 pb-4 last:border-b-0 dark:border-gray-800">
       <div className="flex items-center gap-1">
-        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">{title}</h3>
+        <h3
+          id={headingId}
+          tabIndex={headingId != null ? -1 : undefined}
+          className="text-sm font-semibold text-gray-800 outline-none dark:text-gray-100"
+        >
+          {title}
+        </h3>
         {info}
       </div>
       {desc != null && (

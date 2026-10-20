@@ -45,8 +45,8 @@ Three layers, deliberately separated:
      drops ids that have since left the workspace. The effect body is the exported
      `syncWorkspaceScope()` so the three branches can be exercised by a test with no React
      renderer (`test/urlHistory.test.ts`).
-3. **Tab state** → `store/pinnedTabs.ts` (`usePinnedTabs`): `ActiveTab = 'timeline' | 'activity'
-   | <Tab.key>`; a `Tab{key,kind:'pr-detail'|'pr-focus'}` list. `openPrDetailTab` /
+3. **Tab state** → `store/pinnedTabs.ts` (`usePinnedTabs`): `ActiveTab = 'activity' | 'sprint' |
+   'timeline' | <Tab.key>` (the three FIXED views, `FIXED_VIEWS`, tested only through `isFixedView`); a `Tab{key,kind:'pr-detail'|'pr-focus'}` list. `openPrDetailTab` /
    `openPrFocusTab` / `closeTab`. Exactly one board mounts at a time (App keys the board slot;
    see "focus tabs"). (The old My-Turn tab kind + `openMyTurnTab` + the `m` key were removed —
    situational awareness is the Feed + its "My Turn only" toggle.)
@@ -240,12 +240,16 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   `<Timeline>` "board slot" whose `mode` derives from the active tab: absent = the shared
   board; `{kind:'isolate',prId}` = a **pr-focus** tab's own isolated Timeline. `activity` +
   `pr-detail` render as overlays OVER the warm board; `pr-focus` REPLACES the slot (keyed
-  remount → at most one vis instance live). `PinnedTabsBar` is **always shown**: **Activity**
-  + **Timeline** are the first two chips — permanent, **non-closable** tabs (the header
+  remount → at most one vis instance live). `PinnedTabsBar` is **always shown**: **Activity**,
+  **This Sprint** and **Timeline** are the first three chips — permanent, **non-closable** tabs (the header
   segmented control was removed; the tab strip is now the single place to switch views). The
   dynamic tabs (pr-detail / pr-focus) follow as closable PR-named chips. **Closing the active
-  tab moves to the adjacent tab** (left, else right, else the Timeline board) — it does NOT
-  snap back to the board when other tabs remain (`closeTab` in `store/pinnedTabs.ts`).
+  tab moves to the adjacent tab** (left, else right, else ACTIVITY — `DEFAULT_FIXED_VIEW`,
+  wherever the tabs were opened from) — it does NOT snap back to a fixed view when other tabs
+  remain (`closeTab` in `store/pinnedTabs.ts`). ⚠ The last fallback used to be the Timeline
+  unconditionally, and then "the fixed view the tab was opened from" (`lastFixedView`, DELETED),
+  which still landed on the Timeline for a tab opened by clicking a bar there — the commonest
+  case. The user's rule is unconditional: Activity. `test/closeTabs.test.ts` pins it.
   **Dynamic chips are DRAG-REORDERABLE** (pointer events + 4px threshold, matching the
   splitter/marker-popover precedents — no HTML5 DnD, no dependency; preview order in local
   state, ONE `moveTab` store commit on drop so `persist()`/the URL subscription don't run
@@ -262,13 +266,13 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
   the containing block and clip a `fixed` child to the 42px bar. **Every closable chip is the
   same width** (`w-52` in `ChipShell`, labels absorbing it via `min-w-0 flex-1 truncate`), so the
   ✕ sits at the same offset on every tab — a close button that moves with the label length is a
-  moving target in a row of tabs. The fixed Activity/Timeline chips stay content-sized: they have
+  moving target in a row of tabs. The fixed Activity / This Sprint / Timeline chips stay content-sized: they have
   no ✕ and are not "tabs that open". **Right-click opens a
   context menu** (floating-ui in a `FloatingPortal` — the strip is `overflow-x-auto`, an
   in-flow menu would clip to the 42px bar — virtual reference at the click point): Close this
   tab / Close other tabs / Close all tabs (`closeOtherTabs`/`closeAllTabs` in the store; on
-  the fixed Activity/Timeline chips the menu shows only "Close all tabs"; "close all" keeps
-  you on a fixed view if that's where you are, mirroring `closeTab`'s fallback). ⚠ The menu's
+  the fixed chips the menu shows only "Close all tabs"; "close all" keeps you on a fixed view if
+  that's where you are, else lands on Activity, mirroring `closeTab`'s fallback). ⚠ The menu's
   (and an in-flight drag's) Escape MUST `stopPropagation` or `useKeyboard`'s global Escape
   also yanks the user to the Timeline. TabChip is now one shared `ChipShell` — the nine
   per-kind branches collapsed to a config switch, which is what made the drag/menu handlers a
@@ -2125,29 +2129,44 @@ to removable chips.
   Bot sections are deterministic, no AI. Every per-section query key carries `ws:` + `u:<userId>`
   + `pw:<from>-<to>` fixed-arity slots, so two chips can never share a cache entry.
 
-### Activity → This Sprint (free)
+### This Sprint (free; a fixed tab — formerly "Activity → This Sprint")
 
-This Sprint is its OWN Activity rail line (`activityRepo: 'sprint'`, `?activityRepo=sprint`), directly
-under Pending: Open PRs · Pending · This Sprint · Feed · Reports · Bots Monitoring. It is FREE — no
+(The heading keeps its old name because links point at it.) This Sprint is a **FIXED TAB** beside
+Activity — strip order Activity · This Sprint · Timeline; `activeTab === 'sprint'`, `?view=sprint`,
+rendered by `components/Sprint/SprintTabView.tsx` in its own `sprint-overlay` (App.tsx). It was an
+Activity rail line under Pending (`activityRepo: 'sprint'`) until 2026-10-20; `'sprint'` LEFT the
+`activityRepoId` union and the rail entry is gone. It is FREE — no
 `ProBadge`, no `ProLockPanel`, and none of its routes 402 (`/api/sprint-graph*`, `/api/merged-prs`,
 the sprint refresh / statuses routes, `GET /api/ticket-story`). The agentic part ("Ask Claude")
 stays LOCAL-ONLY and gated on `me.ai.enabled` through `useAiCapabilities()`, never a Pro capability.
 Viewing any of the three views stamps `sprint_reads.viewed_at`, which is what lets the worker read the
 sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA's wording changed.
 
+- **No tracker ⇒ the three boards show ONE line** — "Connect Jira, Linear or GitHub Issues to see this
+  sprint." with a **Set up in Settings** button (`Sprint/SprintTrackerSetup.tsx`), drawn by SprintView on
+  the graph's own `trackerOn: false`. The button calls `openSettings('issue-tracker')`
+  (`store/settingsModal.ts`), and the modal scrolls to and focuses the Issue tracker heading
+  (`ISSUE_TRACKER_SECTION_HEADING_ID`). The section renders a pending shell until its own GET answers,
+  which on a cold cache can take seconds, so the modal WAITS for the heading (a `MutationObserver`, for
+  as long as it is open) and gives up the moment the reader scrolls, clicks or types — a late jump must
+  never yank them mid-scroll. ⚠ A fixed frame budget (the first cut: ~60 frames) silently did nothing
+  on a slow server. The explanation sits behind the ⓘ. **Merged so far needs no
+  tracker** and is unaffected.
 - **The scroll position is REMEMBERED per tab** for the session (`hooks/useRememberedScroll.ts`, keyed
-  `sprint:<tab>`): Activity's content pane is one scroll box shared by every rail entry and the board
-  unmounts when another screen shows, so Back or re-opening Activity used to land at the top. It
+  `sprint:<tab>`): the tab's overlay is one scroll box shared by its sub-tabs and the board unmounts
+  when another screen shows, so Back or re-opening the tab used to land at the top. It
   restores once the box is tall enough (the board arrives after mount) and stops the moment the reader
   scrolls, or after 4s. Module memory only — not persisted, not in the URL.
 - **Four tabs, DERIVED, never written back**: Theme (the landing tab, since 2026-10-18) · Critical path · People · Merged
   so far. The store's `sprintInnerTab` (`'paths' | 'themes' | 'people' | 'merged'`) is mirrored to
   `?sprintTab=paths|people|merged` (the `'themes'` default omitted, the key emitted ONLY beside
-  `activityRepo=sprint`); the render reads `effectiveSprintTab` (`Activity/sprintRailModel.ts`), the
+  `view=sprint`); the render reads `effectiveSprintTab` (`Activity/sprintRailModel.ts`), the
   `feedInnerTab` / `insightsTab` rule. URL only, so no `FILTER_STORAGE_VERSION` bump.
-- ⚠ **Legacy links still land**: `?insightsTab=sprint|merged` (old Reports tabs) read as
-  `activityRepo=sprint` + Theme / Merged so far, and the retired force graph's
-  `?sprintTab=graph` reads as Theme (`sprintTabFromUrl`, store/filters.ts). None is written back.
+- ⚠ **Legacy links still land ON THE TAB** (`landingTabFromUrl`, test/landingTab.test.ts +
+  test/urlHistory.test.ts): the rail line's `?activityRepo=sprint` (with `view=activity` or no view;
+  its `sprintTab` kept), and the older Reports tabs' `?insightsTab=sprint|merged` (only when the link
+  names Reports or no rail) → Theme / Merged so far. The retired force graph's `?sprintTab=graph` reads
+  as Theme (`sprintTabFromUrl`, store/filters.ts). None is written back.
 
 - **THE FORCE GRAPH IS DELETED (2026-10-18)** — `SprintGraph.tsx`, `sprintGraphModel.ts`,
   `SprintPathsStrip.tsx`, `sprintReferences.ts`, the `.sprint-canvas` CSS and their tests, with the
@@ -2185,17 +2204,32 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
     ⚠ `useRoutedArrows`, `ArrowLayer`, `ArrowKey` and `ArrowList` are SHARED with `DesignGrid`, which
     kept its look; change them for both or neither.
   - **ONE CARD, `TicketCard`** (`components/TicketCard.tsx`), for every view, ⚠ **ONE HEIGHT whatever
-    it carries** (the title reserves two lines, the theme one, the tag row is one 20px line — a tag that
+    it carries** (the title reserves two lines, the one-liner, the criteria line and the theme one each —
+    an EMPTY SLOT IS HELD OPEN —, the tag row is one 20px line — a tag that
     does not fit is cut on the face and stays in the accessible name — and the initials' slot is held open
-    with no assignee; a 2px border gives back 1px of padding): the key (mono), the title, the theme
+    with no assignee; a 2px border gives back 1px of padding): the key (mono), the title, the brief's
+    **ONE-LINER** (`brief.oneLiner`, ≤ 90 chars from the brief pass v5; one line, truncated, the full
+    line in the accessible name, the `title` and the peek), the **CRITERIA LINE** (`ticketCardCriteria`:
+    "3 of 4 criteria met" from the latest SUCCEEDED ticket check, `node.check`, whose own criteria list
+    is the denominator; else "4 criteria" / "1 criterion" from the current brief; else empty; ITALIC when
+    `check.stale` — the accessible name and the peek say "checked before the latest changes" in words; a
+    small spinner while `checkRunning`), the theme
     (People), then the tags as WORDS (`ticketCardTags`: "CI failing" on an open
     PR's red checks, "No PR" or "n PRs · m open" — closed unmerged ones ignored —, "No owner") and the
     assignee's initials (Critical path, Theme). The BORDER marks state by style (`ticketCardBorder`): 2px
     solid accent = on a stored critical path; dashed = waiting on another unfinished ticket
     (`waitingIdents`); both = dashed accent; outside the sprint = FAINT, 1px dashed on a tinted ground,
-    whatever else it is. Its accessible name says all of it. ⚠ **A click opens the STORY PEEK IN PLACE**
+    whatever else it is. ⚠ **A CARD WITH A PULL REQUEST** (`hasLivePr`: an open or merged one — the PR
+    tag's population) wears a VIOLET border (`border-violet-400`, the merge family) and a soft violet
+    glow (`.ticket-card-pr` in index.css, with `:hover`/`[data-open]` variants so `hover:shadow-md`
+    cannot replace it); a critical-path card KEEPS its orange 2px border and only ADDS the glow; a ghost
+    never glows. ⚠ **PR cards are GROUPED FIRST in every cell** (`BoardCardDef.group`, 0 = has a PR):
+    `layoutBoard` partitions stably, and `orderByLinks` sorts on (group, barycentre, place) so the
+    link ordering works WITHIN a group and never lifts a card without a PR above one with a PR — on
+    Critical path too, where a cell's PR cards come first and path order follows. `CardBorderKey` names
+    "Has a pull request" and "On a path, with a pull request" when drawn. Its accessible name says all of it. ⚠ **A click opens the STORY PEEK IN PLACE**
     (`Activity/StoryPeek.tsx`, a floating-ui popover anchored to the card, one open at a time via
-    `claimActivePopover`, closed by an outside click or Escape): the ticket review's summary and each
+    `claimActivePopover`, closed by an outside click or Escape): the brief's one-liner in full and the card's criteria line with "checked <date>" (only when the count IS the check's), "before the latest pull-request changes" when stale and "checking now" while one runs — from the node, no read; then the ticket review's summary and each
     criterion with its status chip (Met / Partly met / Not met / …, currency pill when not current), else
     the CURRENT brief's summary and numbered criteria ("Not checked against the code yet."), else
     "Reading this ticket…", else the start of the ticket's text. NO docs check, NO design, NO PRs. Its
@@ -2254,7 +2288,7 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   Placed by `lib/avoidRects.ts` clear of the board's cards (`useBoardObstacles`). An arrow BETWEEN two lanes is a hand-off keyed "<person> waits on
   <person>"; one inside a lane keys the brief's `why`.
 
-- **The toolbar**: the sprint's title + ⓘ ("Reading this sprint": the views, columns, borders, arrows),
+- **The toolbar**: the sprint's title + ⓘ ("Reading this sprint": the views, columns, the card's one-liner and criteria line, borders, Refresh, arrows),
   its dates (`sprintDatesLine`: "14 Oct – 27 Oct · day 1 of 14" from `sprintDates`, the day count from
   shared `sprintDayOf`; an end on midnight shows the day before; "due 28 Oct" / "starts in 2 days" /
   "ended"), "n tickets", Ask Claude, Statuses (the gear) and Refresh. Under it ONE thin progress bar
@@ -2262,6 +2296,19 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   2.5 s, 90 s cap), during the first read and a refetch slower than 400 ms; FILLING with the summarised
   share while briefs run; "Working out the critical paths" while the builder runs; still under reduced
   motion. Truncation and "Summarising n tickets…" are one muted line.
+- ⚠ **THE BOARD DOES NOT REDRAW ITSELF IN STEADY STATE** (`useSprintGraph`'s `refetchInterval` is
+  `false` once nothing is landing; it still polls during the first read, paths writing/queued, pending
+  briefs and a running ticket check). Instead `useSprintChangeToken` polls `GET /api/sprint-graph/token`
+  every `SPRINT_CHANGE_TOKEN_POLL_MS` (60 s), only while the This Sprint tab is mounted and the page is
+  visible (`refetchIntervalInBackground: false`). Its first answer is SEEDED from the loaded graph's own
+  `changeToken` (`initialData`, timed at the graph's fetch), so nothing fetches on mount. A token read
+  AFTER the graph loaded that differs shows ONE quiet line under the toolbar, "The sprint has changed
+  since you loaded it.", with a Refresh that only re-fetches the graph (no tracker read, no ticket
+  checks); an absent token (an older server, the e2e catch-all) never shows it.
+- **The toolbar's Refresh** reads the sprint from the tracker AND, local with AI on, starts up to
+  `SPRINT_REFRESH_TICKET_CHECKS` (3) ticket checks server-side; the response's `ticketChecks` is said
+  for 10 s under the toolbar (`ticketChecksNote`: "Checking 2 tickets against their pull requests.", or
+  why none could start — no Claude credential, no credits; nothing when none needed one).
 - **"Ask Claude about this sprint"** (`SprintAskPanel`, inline under the toolbar — never a fixed
   bottom-right element; shown only where `me.ai.enabled` and the response's `aiEnabled`): the transcript
   lives in the module store `useSprintAskTranscript` (per workspace, memory only) and ⚠ the completed turn
@@ -2284,7 +2331,7 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   `SprintTicketReview`, `SprintUpdatePanel`, `SprintChecksPanel`, `SprintDiffText`, `useTicketDraft`,
   `lib/ticketDraft.ts`, `lib/storyHighlights.ts`, `lib/wordDiff.ts` and the `.story-mark` / `.story-rev`
   CSS.
-- **Merged so far** (`?activityRepo=sprint&sprintTab=merged`, `MergedPrsView.tsx`) — the Open PRs
+- **Merged so far** (`?view=sprint&sprintTab=merged`, `MergedPrsView.tsx`) — the Open PRs
   page over the work that LANDED: every PR merged in the
   REPORTING WINDOW from `GET /api/merged-prs` (`useMergedPrs`, `ws:<id>` key, no capability gate), header named through `reportingWindowText.ts` + "N pull requests merged".
   ⚠ **It REUSES `OpenPrsCards` with `variant="merged"`, never a fork** — that prop drops the CI and
@@ -3732,7 +3779,7 @@ migration".
 | Kept | Why |
 |---|---|
 | the `#8957e5` maintainer shield (`MaintainerShield`, `Timeline/userRow.ts`, `UserSelectPanel`, `PeriodPeopleSection`) | maintainer identity, not AI |
-| `MergeControl` / `MergeWhenReadyControl` / PrDetail's "Auto-merge armed" chip, `HeaderToasts`' `merge` tone border | the merge family |
+| `MergeControl` / `MergeWhenReadyControl` / PrDetail's "Auto-merge armed" chip, `HeaderToasts`' `merge` tone border, This Sprint's "has a pull request" card border + `.ticket-card-pr` glow (`ticketCardBorder`) | the merge family |
 | `lib/ui.ts` event-category colours + `.ev-*` dots, `ML_CATEGORY_COLOR`, `BOT_VENDOR_META` vendor accents, `charts/common.tsx` `PALETTE`/`SERIES_COLORS` | DATA ENCODING — hues must stay identical across every chart |
 | `PeriodReportsPanel`'s `LANE_META` (`ai_review` violet, `release` indigo) | the 7-lane palette needs 7 stable distinct hues; vermilion collides with the red already in charts |
 | `BotRoiPanel`'s inflation under-call violet | direction encoding — the drill-down matrix keys on the same hues |
@@ -4583,7 +4630,7 @@ that asks for a save first. Contract: [SONARCLOUD.md](SONARCLOUD.md).
 
 ## Activity → Docs (the reference library; local only)
 
-A rail line under This Sprint, `activityRepoId: 'docs'` / `?activityRepo=docs` (parsed AND emitted —
+A rail line under Pending, `activityRepoId: 'docs'` / `?activityRepo=docs` (parsed AND emitted —
 pinned by test/docsRailUrl.test.ts). The rail ENTRY renders only on `me.ai.enabled`
 (`useAiCapabilities`); a `?activityRepo=docs` link opened where AI is off still selects the pane, which
 says in one line why it is empty. FREE, no ProBadge. Contract: [REFERENCE-DOCS.md](REFERENCE-DOCS.md)

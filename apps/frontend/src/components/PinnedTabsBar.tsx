@@ -564,6 +564,7 @@ const ActivityIcon = (
     <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
   </svg>
 );
+const SprintTabIcon = <TicketIcon size={13} />;
 const TimelineIcon = (
   <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <line x1="4" y1="7" x2="20" y2="7" />
@@ -689,6 +690,7 @@ export function PinnedTabsBar(): JSX.Element {
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
   const showTimeline = usePinnedTabs((s) => s.showTimeline);
+  const showSprint = usePinnedTabs((s) => s.showSprint);
   const moveTab = usePinnedTabs((s) => s.moveTab);
 
   const stripRef = useRef<HTMLDivElement>(null);
@@ -1006,6 +1008,16 @@ export function PinnedTabsBar(): JSX.Element {
         label="Activity"
         title="Activity — per-repo triage console"
       />
+      {/* This Sprint — the tracker's current sprint (Theme · Critical path · People · Merged so far).
+          A fixed tab since it left the Activity rail; FREE on every tier. */}
+      <FixedChip
+        active={activeTab === 'sprint'}
+        onClick={showSprint}
+        onContextMenu={(e) => openMenu(e, null)}
+        icon={SprintTabIcon}
+        label="This Sprint"
+        title="This Sprint — the tracker's current sprint"
+      />
       <FixedChip
         active={activeTab === 'timeline'}
         onClick={showTimeline}
@@ -1017,7 +1029,8 @@ export function PinnedTabsBar(): JSX.Element {
       {displayTabs.map((t, i) => (
         <Fragment key={t.key}>
           {/* A Chrome-style pipe between adjacent DYNAMIC tabs only — `i > 0`, since index 0 abuts
-              the fixed Timeline chip and the three fixed chips are never separated.
+              the fixed Timeline chip and the fixed chips (Activity · This Sprint · Timeline) are never
+              separated.
               ⚠ It must carry NO `data-tabkey`: `updatePreview` derives the drag drop-slot from
               `strip.querySelectorAll('[data-tabkey]')` midpoints and then maps those elements'
               `dataset.tabkey` into the order committed by `moveTab` — a tagged separator would

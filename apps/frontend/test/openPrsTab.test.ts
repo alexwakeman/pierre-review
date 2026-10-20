@@ -36,8 +36,8 @@ describe('Open PRs is an Activity rail line', () => {
     useFilters.setState({ workspaceId: 5, openPrsRepoFilter: null, activityRepoId: 'feed' });
   });
 
-  it('is not a fixed view: those are Activity then Timeline', () => {
-    expect(FIXED_VIEWS).toEqual(['activity', 'timeline']);
+  it('is not a fixed view: those are Activity, This Sprint, then Timeline', () => {
+    expect(FIXED_VIEWS).toEqual(['activity', 'sprint', 'timeline']);
     expect(isFixedView('open-prs')).toBe(false);
     expect(isFixedView(prDetailKey(1))).toBe(false);
   });

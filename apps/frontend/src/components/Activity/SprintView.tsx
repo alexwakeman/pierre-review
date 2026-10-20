@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { SPRINT_GHOST_MAX, SPRINT_TICKETS_MAX, sprintSourceTitle, type SprintGraphNode, type SprintGraphResponse } from '@pierre-review/shared';
-import { useSprintAiOn, useSprintGraph, useSprintRefresh, useSprintRefreshing } from '../../hooks/useSprintStories.js';
+import {
+  SPRINT_GHOST_MAX,
+  SPRINT_TICKETS_MAX,
+  sprintSourceTitle,
+  type SprintGraphNode,
+  type SprintGraphResponse,
+  type SprintRefreshTicketChecks,
+} from '@pierre-review/shared';
+import { useSprintAiOn, useSprintChangeToken, useSprintGraph, useSprintRefresh, useSprintRefreshing } from '../../hooks/useSprintStories.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
 import type { SprintBoardView } from '../../lib/laneBoard.js';
 import { useFilters } from '../../store/filters.js';
@@ -12,13 +19,21 @@ import { SprintPathsView, SprintPeopleView, SprintThemesView } from './SprintBoa
 import { SprintProgressBar } from './SprintProgressBar.js';
 import { pathsWriting, sprintDatesLine, sprintProgress } from './sprintPathsModel.js';
 import { SprintStatusSettings } from './SprintStatusSettings.js';
+import { SprintTrackerSetup } from '../Sprint/SprintTrackerSetup.js';
 
-// This Sprint (its own rail line, FREE) — THE SPRINT (GET /api/sprint-graph; the route keeps its name):
+// This Sprint (a fixed tab, FREE) — THE SPRINT (GET /api/sprint-graph; the route keeps its name):
 // the toolbar (title + ⓘ, dates, Ask Claude, the status buckets behind the gear, Refresh), the page's
 // progress bar, and ONE of three views on the lane board (SprintBoards.tsx): Critical path, Theme or
-// People — `view`, the rail's DERIVED sub-tab. A ticket clicked anywhere opens its STORY VIEW
+// People — `view`, the tab's DERIVED sub-tab. A ticket clicked anywhere opens its STORY VIEW
 // (`useOpenStory`, the ticket tab with its Story section open). Every state of the page is one short
 // sentence. ⚠ Nothing here ranks tickets or people.
+//
+//   CHANGED SINCE LOADED  the board does not redraw itself in steady state; the cards' change token is
+//            polled (`useSprintChangeToken`, only while this tab is mounted and the page visible) and a
+//            difference shows ONE quiet line, "The sprint has changed since you loaded it.", with a
+//            Refresh that only re-fetches the board (no tracker read, no ticket checks).
+//   TOOLBAR REFRESH  reads the sprint from the tracker now AND (local, AI on) starts up to
+//            SPRINT_REFRESH_TICKET_CHECKS ticket checks; the count started is said briefly after.
 
 const MUTED = 'text-gray-600 dark:text-gray-300';
 const TOOL_BUTTON =
@@ -29,6 +44,8 @@ const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n =
 /** After Refresh, how often the sprint is re-read while the sprint read runs, and when to stop waiting. */
 const READ_POLL_MS = 2500;
 const READ_WAIT_MS = 90_000;
+/** How long the "Checking N tickets" note stays after a Refresh. */
+const CHECKS_NOTE_MS = 10_000;
 /** A refetch shows the bar only once it has run this long, so a quick background poll never flashes it. */
 const FETCH_SHOW_AFTER_MS = 400;
 
@@ -48,8 +65,22 @@ function useLingering(on: boolean, afterMs: number): boolean {
 
 export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
-  const { data, isLoading, isError, isFetching, refetch } = useSprintGraph(workspaceId);
+  const { data, isLoading, isError, isFetching, refetch, dataUpdatedAt } = useSprintGraph(workspaceId);
   const refresh = useSprintRefresh(workspaceId);
+  const { changed } = useSprintChangeToken(
+    workspaceId,
+    data != null && data.trackerOn ? { changeToken: data.changeToken, updatedAt: dataUpdatedAt, fetching: isFetching } : null,
+  );
+  // "Checking N tickets…" after a Refresh, for a few seconds (this mount's own answer only).
+  const [checksNote, setChecksNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!refresh.isSuccess) return;
+    const note = ticketChecksNote(refresh.data.ticketChecks);
+    setChecksNote(note);
+    if (note == null) return;
+    const t = window.setTimeout(() => setChecksNote(null), CHECKS_NOTE_MS);
+    return () => window.clearTimeout(t);
+  }, [refresh.isSuccess, refresh.data]);
   const refreshing = useSprintRefreshing(workspaceId);
   // Refresh asks for a sprint read and returns at once (the read runs in the background). The read has
   // finished when `read.checkedAt` (its last attempt) moves; until then the bar shows and the sprint is
@@ -81,13 +112,8 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
 
   if (isError) return <p className="text-sm text-rose-700 dark:text-rose-400">Could not load this sprint.</p>;
   if (isLoading || data == null || workspaceId == null) return <p className={`text-xs ${MUTED}`}>Loading…</p>;
-  if (!data.trackerOn) {
-    return (
-      <div data-testid="sprint-view" className={`rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm dark:border-gray-700 ${MUTED}`}>
-        No issue tracker is connected to this workspace.
-      </div>
-    );
-  }
+  // No tracker: one line and the way to set one up (Settings → Workspace → Issue tracker).
+  if (!data.trackerOn) return <SprintTrackerSetup />;
   const reading = data.read.readAt == null && data.read.error == null;
   const sprintCount = data.nodes.filter((n) => !n.ghost).length;
   const title = data.source != null ? sprintSourceTitle(data.source) : 'This sprint';
@@ -146,6 +172,20 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
       </div>
       {progress != null && <SprintProgressBar progress={progress} className="h-[3px] w-full rounded-full" />}
       {settingsOpen && data.statusLayout != null && <SprintStatusSettings workspaceId={data.workspaceId} layout={data.statusLayout} />}
+      {changed && !refreshing && awaitRead == null && (
+        <p data-testid="sprint-changed" role="status" className={`flex flex-wrap items-center gap-2 text-xs ${MUTED}`}>
+          The sprint has changed since you loaded it.
+          <button type="button" onClick={() => void refetch()} disabled={isFetching} className={TOOL_BUTTON}>
+            <RefreshIcon size={12} />
+            Refresh
+          </button>
+        </p>
+      )}
+      {checksNote != null && (
+        <p data-testid="sprint-checks-note" role="status" className={`text-xs ${MUTED}`}>
+          {checksNote}
+        </p>
+      )}
       {data.read.error != null && <p className="text-xs text-rose-700 dark:text-rose-400">{data.read.error}</p>}
       {(data.read.truncated || (data.ghostsTruncated && view === 'paths')) && (
         <p className={`text-xs ${MUTED}`}>
@@ -207,8 +247,22 @@ function BoardInfo(): JSX.Element {
           Show opens the column, and a row&rsquo;s own count opens that row only.
         </li>
         <li>
-          <strong>Borders</strong>: a thick orange border is a ticket on a critical path; a dashed one is waiting on another unfinished
+          <strong>Borders</strong>: a violet border with a soft glow is a ticket with an open or merged pull request, and those
+          tickets come first in each cell; a thick orange border is a ticket on a critical path (it keeps the glow when it has a
+          pull request); a dashed one is waiting on another unfinished
           ticket; a faint dashed one on a grey ground is outside the sprint. The key under each board names them.
+        </li>
+        <li>
+          <strong>Under the title</strong>: Claude&rsquo;s one-line summary of the ticket, then its acceptance criteria.
+          &ldquo;3 of 4 criteria met&rdquo; comes from the latest ticket check, which reads the ticket&rsquo;s pull requests against its
+          criteria and lists them itself, so its count can differ from the summary&rsquo;s. Without a check the card shows how many
+          criteria the ticket has; when it names none, Claude works them out from the description. Italics mean the check was made
+          before the pull requests last changed.
+        </li>
+        <li>
+          <strong>Refresh</strong> reads the sprint from your tracker now. It also checks up to three tickets that have pull
+          requests and no current check, on your own Claude. When the board changes after you load it, a line under the toolbar
+          offers to redraw it.
         </li>
         <li>
           <strong>Arrows</strong> run from the ticket waited on to the one that waits. Hover an arrow or its number to see why. A
@@ -236,4 +290,14 @@ export function sprintAiPass(
   if (data.passes?.themesRunning === true) return { stage: 'Grouping tickets into themes', count: null };
   if (pathsWriting(data.aiEnabled, data.pathsStatus)) return { stage: 'Working out the critical paths', count: null };
   return null;
+}
+
+/** The line said briefly after a Refresh about the ticket checks it started; null = say nothing (none
+ *  needed one, or the server does not run them — cloud, AI off). Exported for tests. */
+export function ticketChecksNote(c: SprintRefreshTicketChecks | undefined): string | null {
+  if (c == null) return null;
+  if (c.skipped === 'no_credential') return 'Ticket checks need Claude set up first.';
+  if (c.skipped === 'credits') return 'No credits left for ticket checks.';
+  if (c.started <= 0) return null;
+  return c.started === 1 ? 'Checking 1 ticket against its pull requests.' : `Checking ${c.started} tickets against their pull requests.`;
 }

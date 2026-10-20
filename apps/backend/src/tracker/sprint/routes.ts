@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { SprintRefreshResponse, TrackerProvider } from '@pierre-review/shared';
 import { resolveRequestWorkspaceId, type TrackerContext } from '../context.js';
+import { startSprintTicketChecks } from './hooks.js';
 import { sprintReadErrorMessage } from './read.js';
 
 // POST /api/sprint-stories/refresh {workspaceId} — "read this workspace's sprint list again now".
@@ -8,7 +9,9 @@ import { sprintReadErrorMessage } from './read.js';
 // workspace resolves the `?workspace=` way — an unknown or another tenant's id falls to the caller's
 // Default, never a 404. It stamps the demand
 // gate, marks the list due and kicks the read (fire-and-forget); it never waits on the tracker.
-// Rate-limit tier: the integrator's table (spec §6) — it can start a tracker read.
+// With the agentic seam registered (local, AI on) it ALSO starts up to SPRINT_REFRESH_TICKET_CHECKS
+// ticket checks (review/ticket-review/sprint-checks.ts) and says how many in `ticketChecks`.
+// Rate-limit tier: search (a tracker read), + ai / ai_hourly when AI is on (agent runs).
 
 export function registerSprintReadRoutes(app: FastifyInstance, ctx: TrackerContext): void {
   app.post('/api/sprint-stories/refresh', async (req, reply): Promise<SprintRefreshResponse | { error: string; message?: string }> => {
@@ -24,11 +27,13 @@ export function registerSprintReadRoutes(app: FastifyInstance, ctx: TrackerConte
     await store.noteSprintViewed(accountId, workspaceId);
     await store.markSprintReadDue(accountId, workspaceId);
     store.kickSprintRead(accountId, workspaceId);
+    const ticketChecks = await startSprintTicketChecks(accountId, workspaceId);
     const row = await store.readSprintRead(accountId, workspaceId);
     reply.status(202);
     return {
       workspaceId,
       read: store.sprintReadStateOf(row, (code) => sprintReadErrorMessage((row?.provider as TrackerProvider | null) ?? null, code)),
+      ...(ticketChecks != null ? { ticketChecks } : {}),
     };
   });
 }

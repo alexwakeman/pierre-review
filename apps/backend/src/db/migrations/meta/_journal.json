@@ -862,6 +862,20 @@
       "when": 1792137609016,
       "tag": "0122_claude_thread_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "6",
+      "when": 1792137610016,
+      "tag": "0123_sprint_brief_one_liner",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "6",
+      "when": 1792137611016,
+      "tag": "0124_reference_doc_crawl",
+      "breakpoints": true
     }
   ]
 }

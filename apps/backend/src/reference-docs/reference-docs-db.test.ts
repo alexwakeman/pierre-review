@@ -193,6 +193,25 @@ describe('upload', () => {
   });
 });
 
+describe('a web page with "Follow links"', () => {
+  it('stores the crawl depth and the page cap, and refuses a depth past the limit', async () => {
+    const bad = await app.inject({ method: 'POST', url: '/api/docs/url', headers: as(1), payload: { url: 'https://docs.example.invalid/guide', crawl: { depth: 4 } } });
+    expect(bad.statusCode).toBe(400);
+    // `.invalid` never resolves, so the build fails at once without touching a network.
+    const res = await app.inject({ method: 'POST', url: '/api/docs/url', headers: as(1), payload: { url: 'https://docs.example.invalid/guide', crawl: { depth: 2 } } });
+    expect(res.statusCode).toBe(202);
+    const doc = res.json().doc;
+    expect(doc.crawl).toEqual({ depth: 2, maxPages: 25, pages: null, skipped: null });
+    const row = await waitReady(1, doc.id);
+    expect(row.status).toBe('failed');
+    expect(store.toReferenceDoc(row).crawl?.depth).toBe(2);
+    const single = await app.inject({ method: 'POST', url: '/api/docs/url', headers: as(1), payload: { url: 'https://docs.example.invalid/one' } });
+    expect(single.json().doc.crawl).toBeNull();
+    await waitReady(1, single.json().doc.id);
+    for (const id of [doc.id, single.json().doc.id]) await app.inject({ method: 'DELETE', url: `/api/docs/${id}`, headers: as(1) });
+  });
+});
+
 describe('library paths', () => {
   it.each(['../INDEX.md', 'refund-handbook/../../x/CONTENTS.md', '/etc/passwd', 'refund-handbook/sections/..%2f..%2fx.md'])(
     'refuses %s',
