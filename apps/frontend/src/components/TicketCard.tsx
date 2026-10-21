@@ -135,7 +135,6 @@ export function TicketCard({
         critical,
         waiting,
         ghost: node.ghost,
-        withPr,
       })}`}
     >
       <button
@@ -148,7 +147,11 @@ export function TicketCard({
         // A 2px (critical) border takes 1px of the padding back, so every card is the same size.
         className={`flex w-full min-w-0 flex-col rounded-md text-left ${critical && !node.ghost ? 'px-[7px] py-[5px]' : 'px-2 py-1.5'} focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500`}
       >
-        <span className="block truncate pr-4 font-mono text-[11px] font-semibold leading-snug text-gray-700 dark:text-gray-200">{node.key}</span>
+        <span className="flex min-w-0 items-center gap-1 pr-4">
+          {/* Has an open or merged pull request: a violet dot (the merge family), top left. */}
+          {withPr && <span aria-hidden data-testid="ticket-pr-dot" className="h-2 w-2 shrink-0 rounded-full bg-violet-500 dark:bg-violet-400" />}
+          <span className="truncate font-mono text-[11px] font-semibold leading-snug text-gray-700 dark:text-gray-200">{node.key}</span>
+        </span>
         {/* Two lines held open (12px × leading-snug), so a one-line title is as tall as a two-line one. */}
         <span aria-hidden className="mt-0.5 line-clamp-2 min-h-[2.75em] break-words text-[12px] leading-snug text-gray-900 dark:text-gray-50">
           {title}

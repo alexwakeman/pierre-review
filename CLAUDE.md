@@ -1290,8 +1290,8 @@ carries CODE's `pace` and `people` (shared `sprintMembers`; `reviewsWaiting` nul
 columns = `statusLayout.columns` verbatim (Complete buckets COLLAPSED to counts by default; "Outside the
 sprint" at the left on Critical path only), lanes = a path / a theme ("Other" last) / a person
 (ALPHABETICAL, Unassigned last — never by load), ONE `TicketCard` (tags as WORDS; 2px solid accent = on
-a path, dashed = waiting; a card with an open or merged PR wears a violet border + soft glow,
-`.ticket-card-pr` — a critical-path card KEEPS its orange border and adds the glow — and sorts FIRST in its
+a path, dashed = waiting; a card with an open or merged PR wears a violet DOT before its key
+(top left; never a border or glow) and sorts FIRST in its
 cell: `BoardCardDef.group` always beats the link ordering), `depends_on` arrows routed by the design grid's `routeArrow`, numbered and
 keyed; arrow popovers are HOVER-ONLY (no pin), placed clear of the cards (`lib/avoidRects.ts`). Its arrow pieces are SHARED with `DesignGrid`. A card CLICK opens an in-place STORY PEEK (`Activity/StoryPeek.tsx`, read on click — summary + criteria chips, no docs check/design); its corner arrow opens the story view. The force graph, its strip and every group-by /
 filter control are DELETED — never bring a canvas back. "Ask Claude" (Haiku) is LOCAL, on `me.ai`.

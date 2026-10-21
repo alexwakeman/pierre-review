@@ -1874,23 +1874,3 @@ body {
   }
 }
 
-/* ---- This Sprint: a ticket card with a pull request (lib/laneBoard.ts `ticketCardBorder`) ----
-   A soft violet glow — the merge family's hue (violet-500, #8b5cf6), on the docs/FRONTEND.md
-   keep-list. DECORATIVE (non-text), so no contrast floor applies. Declared after the utilities so
-   it beats `shadow-md`; `:hover` and `[data-open]` repeat it so `hover:shadow-md` (a class + a
-   pseudo-class) cannot replace it — they deepen it instead. A critical-path card keeps its orange
-   border and wears this glow too. */
-.ticket-card-pr {
-  box-shadow: 0 0 0 1px rgb(139 92 246 / 0.18), 0 0 8px 1px rgb(139 92 246 / 0.25);
-}
-.ticket-card-pr:hover,
-.ticket-card-pr[data-open='true'] {
-  box-shadow: 0 0 0 1px rgb(139 92 246 / 0.28), 0 0 12px 2px rgb(139 92 246 / 0.35);
-}
-.dark .ticket-card-pr {
-  box-shadow: 0 0 0 1px rgb(167 139 250 / 0.2), 0 0 10px 1px rgb(139 92 246 / 0.35);
-}
-.dark .ticket-card-pr:hover,
-.dark .ticket-card-pr[data-open='true'] {
-  box-shadow: 0 0 0 1px rgb(167 139 250 / 0.3), 0 0 14px 2px rgb(139 92 246 / 0.45);
-}

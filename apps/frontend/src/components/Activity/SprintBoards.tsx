@@ -94,7 +94,11 @@ function SprintLaneBoard({
   // Every border style a card on this board actually draws — the same three facts `ticketCardBorder`
   // reads, so the key can neither miss a style nor show one no card has.
   const borders = useMemo(
-    () => new Set(layout.cards.map((c) => cardStyleKey(c.data.node.ghost === true, c.data.critical, c.data.waiting, hasLivePr(c.data.node)))),
+    () =>
+      new Set([
+        ...layout.cards.map((c) => cardStyleKey(c.data.node.ghost === true, c.data.critical, c.data.waiting)),
+        ...(layout.cards.some((c) => c.data.node.ghost !== true && hasLivePr(c.data.node)) ? [PR_DOT_KEY] : []),
+      ]),
     [layout.cards],
   );
   return (
@@ -214,21 +218,20 @@ function SegmentBar({
 }
 
 /** One card's border style, as the key names it. A ticket outside the sprint is faint whatever else it is. */
-function cardStyleKey(ghost: boolean, critical: boolean, waiting: boolean, withPr: boolean): string {
+function cardStyleKey(ghost: boolean, critical: boolean, waiting: boolean): string {
   if (ghost) return critical ? 'gc' : 'g';
-  return `${critical ? 'c' : ''}${waiting ? 'w' : ''}${withPr ? 'p' : ''}` || 'plain';
+  return `${critical ? 'c' : ''}${waiting ? 'w' : ''}` || 'plain';
 }
 
-const BORDER_KEY: ReadonlyArray<{ key: string; label: string; critical: boolean; waiting: boolean; ghost: boolean; withPr: boolean }> = [
-  { key: 'p', label: 'Has a pull request', critical: false, waiting: false, ghost: false, withPr: true },
-  { key: 'cp', label: 'On a path, with a pull request', critical: true, waiting: false, ghost: false, withPr: true },
-  { key: 'wp', label: 'Waiting, with a pull request', critical: false, waiting: true, ghost: false, withPr: true },
-  { key: 'cwp', label: 'On a path and waiting, with a pull request', critical: true, waiting: true, ghost: false, withPr: true },
-  { key: 'c', label: 'On a critical path', critical: true, waiting: false, ghost: false, withPr: false },
-  { key: 'w', label: 'Waiting on another ticket', critical: false, waiting: true, ghost: false, withPr: false },
-  { key: 'cw', label: 'On a path and waiting', critical: true, waiting: true, ghost: false, withPr: false },
-  { key: 'g', label: 'Outside the sprint', critical: false, waiting: false, ghost: true, withPr: false },
-  { key: 'gc', label: 'Outside the sprint, on a path', critical: true, waiting: false, ghost: true, withPr: false },
+/** The key entry for the violet dot a card with an open or merged pull request wears (TicketCard). */
+const PR_DOT_KEY = 'pr-dot';
+
+const BORDER_KEY: ReadonlyArray<{ key: string; label: string; critical: boolean; waiting: boolean; ghost: boolean }> = [
+  { key: 'c', label: 'On a critical path', critical: true, waiting: false, ghost: false },
+  { key: 'w', label: 'Waiting on another ticket', critical: false, waiting: true, ghost: false },
+  { key: 'cw', label: 'On a path and waiting', critical: true, waiting: true, ghost: false },
+  { key: 'g', label: 'Outside the sprint', critical: false, waiting: false, ghost: true },
+  { key: 'gc', label: 'Outside the sprint, on a path', critical: true, waiting: false, ghost: true },
 ];
 
 /** The key to the card borders, under a board: exactly the styles the board draws. */
@@ -236,9 +239,10 @@ function CardBorderKey({ present }: { present: ReadonlySet<string> }): JSX.Eleme
   const items = BORDER_KEY.filter((k) => present.has(k.key)).map((k) => ({
     key: k.key,
     label: k.label,
-    swatch: ticketCardBorder({ critical: k.critical, waiting: k.waiting, ghost: k.ghost, withPr: k.withPr }),
+    swatch: ticketCardBorder({ critical: k.critical, waiting: k.waiting, ghost: k.ghost }),
   }));
-  if (items.length === 0) return null;
+  const dot = present.has(PR_DOT_KEY);
+  if (items.length === 0 && !dot) return null;
   return (
     <ul aria-label="Card borders" data-testid="card-border-key" className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-gray-700 dark:text-gray-300">
       {items.map((it) => (
@@ -247,6 +251,12 @@ function CardBorderKey({ present }: { present: ReadonlySet<string> }): JSX.Eleme
           {it.label}
         </li>
       ))}
+      {dot && (
+        <li className="inline-flex items-center gap-1.5">
+          <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-violet-500 dark:bg-violet-400" />
+          Has a pull request
+        </li>
+      )}
     </ul>
   );
 }

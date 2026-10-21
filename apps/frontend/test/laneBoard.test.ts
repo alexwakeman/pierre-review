@@ -347,15 +347,12 @@ describe('cards with a pull request', () => {
     expect(hasLivePr(node('A-1', { prs: [pr({ state: 'merged' })] }))).toBe(true);
     expect(hasLivePr(node('A-1', { prs: [pr()] }))).toBe(true);
   });
-  it('violet border + glow; a critical card keeps its orange border and adds the glow; a ghost never glows', () => {
-    expect(ticketCardBorder({ critical: false, waiting: false, ghost: false, withPr: true })).toMatch(/border-solid border-violet-400 .*ticket-card-pr$/);
-    expect(ticketCardBorder({ critical: false, waiting: true, ghost: false, withPr: true })).toMatch(/border-dashed border-violet-400/);
-    const crit = ticketCardBorder({ critical: true, waiting: false, ghost: false, withPr: true });
-    expect(crit).toMatch(/border-2 border-solid border-ai-signal-fill/);
-    expect(crit).toMatch(/ticket-card-pr/);
-    expect(crit).not.toMatch(/violet/);
-    expect(ticketCardBorder({ critical: false, waiting: false, ghost: true, withPr: true })).not.toMatch(/ticket-card-pr|violet/);
-    expect(ticketCardBorder({ critical: false, waiting: false, ghost: false })).not.toMatch(/ticket-card-pr/);
+  it('a pull request is not a border: no violet, no glow', () => {
+    expect(ticketCardBorder({ critical: false, waiting: false, ghost: false })).toBe(
+      'border border-solid border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950',
+    );
+    expect(ticketCardBorder({ critical: true, waiting: false, ghost: false })).toMatch(/border-2 border-solid border-ai-signal-fill/);
+    expect(ticketCardBorder({ critical: true, waiting: false, ghost: false })).not.toMatch(/violet|ticket-card-pr/);
   });
   it('PR cards sit FIRST in every cell, input order kept within each group', () => {
     const nodes = [node('A-1'), node('A-2', { prs: [pr()] }), node('A-3'), node('A-4', { prs: [pr({ state: 'merged' })] }), node('A-5', { prs: [pr({ state: 'closed' })] })];

@@ -343,19 +343,13 @@ export function ticketCardTags(n: Pick<SprintGraphNode, 'prs' | 'assignee' | 'gh
 /** A TicketCard's border, by STYLE as well as colour: on a critical path = 2px solid accent; waiting
  *  on another unfinished ticket = dashed (accent and dashed when both); outside the sprint = a faint
  *  1px dashed border on a tinted ground, whatever else it is (a light accent when on a path).
- *  HAS A PULL REQUEST (`withPr`, an open or merged one — `hasLivePr`): a violet border (the merge
- *  family's hue) and a soft violet glow (`.ticket-card-pr`, index.css). A critical-path card KEEPS its
- *  orange 2px border and only adds the glow. A ticket outside the sprint never glows. */
-export function ticketCardBorder(o: { critical: boolean; waiting: boolean; ghost: boolean; withPr?: boolean }): string {
+ *  A pull request is NOT a border: the card wears a violet dot by its key (TicketCard). */
+export function ticketCardBorder(o: { critical: boolean; waiting: boolean; ghost: boolean }): string {
   // A ticket outside the sprint is FAINT whatever else it is — on a path, its dashed border is the accent, lighter.
   if (o.ghost) {
     return `border border-dashed ${o.critical ? 'border-ai-signal-fill/60' : 'border-gray-300 dark:border-gray-700'} bg-gray-50 dark:bg-gray-900/60`;
   }
-  const glow = o.withPr === true ? ' ticket-card-pr' : '';
-  if (o.critical) return `border-2 ${o.waiting ? 'border-dashed' : 'border-solid'} border-ai-signal-fill bg-white dark:bg-gray-950${glow}`;
-  if (o.withPr === true) {
-    return `border ${o.waiting ? 'border-dashed' : 'border-solid'} border-violet-400 bg-white dark:border-violet-500/70 dark:bg-gray-950${glow}`;
-  }
+  if (o.critical) return `border-2 ${o.waiting ? 'border-dashed' : 'border-solid'} border-ai-signal-fill bg-white dark:bg-gray-950`;
   if (o.waiting) return 'border border-dashed border-gray-500 bg-white dark:border-gray-400 dark:bg-gray-950';
   return 'border border-solid border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950';
 }

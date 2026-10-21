@@ -2220,14 +2220,13 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
     solid accent = on a stored critical path; dashed = waiting on another unfinished ticket
     (`waitingIdents`); both = dashed accent; outside the sprint = FAINT, 1px dashed on a tinted ground,
     whatever else it is. ⚠ **A CARD WITH A PULL REQUEST** (`hasLivePr`: an open or merged one — the PR
-    tag's population) wears a VIOLET border (`border-violet-400`, the merge family) and a soft violet
-    glow (`.ticket-card-pr` in index.css, with `:hover`/`[data-open]` variants so `hover:shadow-md`
-    cannot replace it); a critical-path card KEEPS its orange 2px border and only ADDS the glow; a ghost
-    never glows. ⚠ **PR cards are GROUPED FIRST in every cell** (`BoardCardDef.group`, 0 = has a PR):
+    tag's population; never a ghost) wears a small VIOLET DOT before its key, top left (the merge family;
+    `data-testid="ticket-pr-dot"`) — NOT a border or glow, which a critical-path card's orange 2px border
+    hid. ⚠ **PR cards are GROUPED FIRST in every cell** (`BoardCardDef.group`, 0 = has a PR):
     `layoutBoard` partitions stably, and `orderByLinks` sorts on (group, barycentre, place) so the
     link ordering works WITHIN a group and never lifts a card without a PR above one with a PR — on
     Critical path too, where a cell's PR cards come first and path order follows. `CardBorderKey` names
-    "Has a pull request" and "On a path, with a pull request" when drawn. Its accessible name says all of it. ⚠ **A click opens the STORY PEEK IN PLACE**
+    the dot "Has a pull request" when any card wears it. Its accessible name says all of it. ⚠ **A click opens the STORY PEEK IN PLACE**
     (`Activity/StoryPeek.tsx`, a floating-ui popover anchored to the card, one open at a time via
     `claimActivePopover`, closed by an outside click or Escape): the brief's one-liner in full and the card's criteria line with "checked <date>" (only when the count IS the check's), "before the latest pull-request changes" when stale and "checking now" while one runs — from the node, no read; then the ticket review's summary and each
     criterion with its status chip (Met / Partly met / Not met / …, currency pill when not current), else
@@ -3779,7 +3778,7 @@ migration".
 | Kept | Why |
 |---|---|
 | the `#8957e5` maintainer shield (`MaintainerShield`, `Timeline/userRow.ts`, `UserSelectPanel`, `PeriodPeopleSection`) | maintainer identity, not AI |
-| `MergeControl` / `MergeWhenReadyControl` / PrDetail's "Auto-merge armed" chip, `HeaderToasts`' `merge` tone border, This Sprint's "has a pull request" card border + `.ticket-card-pr` glow (`ticketCardBorder`) | the merge family |
+| `MergeControl` / `MergeWhenReadyControl` / PrDetail's "Auto-merge armed" chip, `HeaderToasts`' `merge` tone border, This Sprint's "has a pull request" card dot (`TicketCard`) | the merge family |
 | `lib/ui.ts` event-category colours + `.ev-*` dots, `ML_CATEGORY_COLOR`, `BOT_VENDOR_META` vendor accents, `charts/common.tsx` `PALETTE`/`SERIES_COLORS` | DATA ENCODING — hues must stay identical across every chart |
 | `PeriodReportsPanel`'s `LANE_META` (`ai_review` violet, `release` indigo) | the 7-lane palette needs 7 stable distinct hues; vermilion collides with the red already in charts |
 | `BotRoiPanel`'s inflation under-call violet | direction encoding — the drill-down matrix keys on the same hues |
