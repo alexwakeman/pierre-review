@@ -6,7 +6,7 @@ import { useNotificationPref } from '../hooks/useNotificationPref.js';
 import { useFilters } from '../store/filters.js';
 import { playReviewComplete } from '../lib/sound.js';
 import { dateTime } from '../lib/ui.js';
-import { HeaderToast } from './HeaderToasts.js';
+import { HeaderToast, ToastList, ToastRow } from './HeaderToasts.js';
 import { CheckIcon, CloseIcon, ReviewIcon } from './Icons.js';
 
 interface CompletedCoord {
@@ -210,9 +210,10 @@ export function ClaudeReviewBanner(): JSX.Element | null {
       onDismiss={allDone ? dismissAll : undefined}
       dismissLabel="Dismiss the Claude reviews card"
     >
-      <ul className="max-h-64 divide-y divide-gray-100 overflow-auto dark:divide-gray-800">
+      <ToastList>
         {visible.map((e) => (
-          <li key={e.reviewId} className="flex items-start gap-2 px-2 py-1.5 text-xs">
+          <ToastRow key={e.reviewId}>
+          <div className="flex items-start gap-2">
             <button
               type="button"
               onClick={() =>
@@ -254,9 +255,10 @@ export function ClaudeReviewBanner(): JSX.Element | null {
                 <CloseIcon size={10} />
               </button>
             )}
-          </li>
+          </div>
+          </ToastRow>
         ))}
-      </ul>
+      </ToastList>
     </HeaderToast>
   );
 }

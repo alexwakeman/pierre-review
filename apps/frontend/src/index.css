@@ -62,6 +62,19 @@ body,
   margin: 0;
 }
 
+/* ⚠ THE ROOT NEVER SCROLLS, SO IT MUST NEVER RUBBER-BAND. The app is a fixed-height shell: every
+   scroll happens in a pane inside it. A wheel that a pane could not use chains to the ROOT viewport,
+   and on macOS the root answers with ELASTIC OVERSCROLL — the whole shell (header, rail, content)
+   slid up with a blank band at the bottom, and a wheel gesture LATCHES to the scroller it began on,
+   so the pane under the pointer stopped scrolling until the gesture ended. An expanded header toast
+   reached it on every wheel (a `position: fixed` panel's scroll parent is the viewport; the panel
+   itself is `overscroll-behavior: contain`, components/HeaderToasts.tsx); a content pane reached it
+   at its own end. `none` here ends the chain where nothing could ever scroll anyway. */
+html,
+body {
+  overscroll-behavior: none;
+}
+
 body {
   @apply bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100;
   font-family:

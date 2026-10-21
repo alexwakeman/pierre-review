@@ -13,7 +13,7 @@ import {
   useDependencyMergeToast,
 } from '../../hooks/useDependencyMergeAll.js';
 import { CloseIcon, PendingDependencyIcon, WarningIcon } from '../Icons.js';
-import { HeaderToast, ToastShowMore } from '../HeaderToasts.js';
+import { HeaderToast, ToastList, ToastRow, ToastShowMore } from '../HeaderToasts.js';
 
 // ── PENDING → DEPENDENCIES: "MERGE OR ARM ALL" ──────────────────────────────────────────────────
 //
@@ -227,24 +227,28 @@ export function DependencyMergeToast(): JSX.Element | null {
       summary={parts.length > 0 ? parts.join(' · ') : 'Nothing changed.'}
       onDismiss={clear}
       dismissLabel="Dismiss dependency update results"
-    >
-      {failed.length > 0 ? (
-        <>
-          <div id={listId} className="max-h-72 space-y-0.5 overflow-auto">
-            {(showAll ? failed : failed.slice(0, FAILED_ROWS)).map((i) => (
-              <div key={i.prId} className="text-[12px] text-red-700 dark:text-red-400">
-                <WarningIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
-                Failed — {label(i)}: {i.outcome.action === 'failed' ? i.outcome.message : ''}
-              </div>
-            ))}
-          </div>
+      footer={
+        failed.length > FAILED_ROWS ? (
           <ToastShowMore
             hidden={Math.max(0, failed.length - FAILED_ROWS)}
-            showAll={showAll && failed.length > FAILED_ROWS}
+            showAll={showAll}
             onToggle={() => setShowAll((v) => !v)}
             controls={listId}
           />
-        </>
+        ) : undefined
+      }
+    >
+      {failed.length > 0 ? (
+        <ToastList id={listId}>
+          {(showAll ? failed : failed.slice(0, FAILED_ROWS)).map((i) => (
+            <ToastRow key={i.prId}>
+              <span className="text-red-700 dark:text-red-400">
+                <WarningIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
+                Failed — {label(i)}: {i.outcome.action === 'failed' ? i.outcome.message : ''}
+              </span>
+            </ToastRow>
+          ))}
+        </ToastList>
       ) : undefined}
     </HeaderToast>
   );

@@ -6,7 +6,7 @@ import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { useFilters, type AiFixRunEntry } from '../store/filters.js';
 import { PHASE_LABEL, fixProgressPct } from '../lib/aiFixProgress.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
-import { HeaderToast } from './HeaderToasts.js';
+import { HeaderToast, ToastList, ToastRow } from './HeaderToasts.js';
 import { WandIcon } from './Icons.js';
 
 // Where an agentic AI-Fix run is watched from once the reader has left the pane that started
@@ -94,11 +94,11 @@ export function AiFixBanner(): JSX.Element | null {
       }
       dismissLabel="Dismiss AI fix results"
     >
-      <ul className="-mx-2 max-h-64 divide-y divide-gray-100 overflow-auto dark:divide-gray-800">
+      <ToastList>
         {rows.map((r) => (
           <AiFixBannerRow key={r.prId} run={r} live={streaming.has(r.prId)} />
         ))}
-      </ul>
+      </ToastList>
     </HeaderToast>
   );
 }
@@ -141,7 +141,7 @@ function AiFixBannerRow({
   const finished = doneLine(run.status);
 
   return (
-    <li className="px-3 py-2 text-xs">
+    <ToastRow>
       <button
         type="button"
         onClick={() =>
@@ -211,6 +211,6 @@ function AiFixBannerRow({
           Running. Progress not shown.
         </div>
       )}
-    </li>
+    </ToastRow>
   );
 }

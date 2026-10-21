@@ -281,16 +281,19 @@ export default function App(): JSX.Element {
   return (
     <div className="flex h-full flex-col">
       <AuthNoticeBanner notices={me.data?.authNotices ?? []} />
-      <header className="flex items-center gap-2 border-b sm:gap-3 border-gray-200 px-4 py-2 dark:border-gray-800">
+      {/* ⚠ A FIXED HEIGHT (`h-11`, no vertical padding): the toast strip and its cards fit inside
+          it, so a card appearing or disappearing never moves the page below by a pixel. It used to
+          be content-sized (`py-2`), and a 28px card made it 2px taller than the bare controls. */}
+      <header className="flex h-11 shrink-0 items-center gap-2 border-b sm:gap-3 border-gray-200 px-4 dark:border-gray-800">
         <h1 className="shrink-0" title="Limn — to depict, to make clear">
           <Wordmark />
         </h1>
         {/* The ONE header toast strip (components/HeaderToasts.tsx). Every toast in the app is a
             one-line card in here — never an independent `fixed` element, never a second strip.
             It takes the flexible space between the wordmark and the controls, so a card coming
-            or going never moves them; many cards scroll it sideways, and a card expands on hover
-            or focus OVER the page, never by growing the header. Order = left to right: the
-            agent runs, the one-shot results, then the ambient loading bar. */}
+            or going never moves them; many cards scroll it sideways, and a card expands on CLICK
+            OVER the page (anchored at its own top-left), never by growing the header. Order = left
+            to right: the agent runs, the one-shot results, then the ambient loading bar. */}
         <HeaderToastStrip>
           <ClaudeReviewBanner />
           {/* Agentic AI-Fix runs started this session — the progress UI for a fix started

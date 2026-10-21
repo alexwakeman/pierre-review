@@ -4387,36 +4387,63 @@ user). App.tsx mounts, left to right: the Claude reviews frame, `AiFixBanner`,
 `ClosedResolverToast`, `MyTurnDismissToast`, `DependencyMergeToast`, `AutoMergeBanner`,
 `GlobalLoadingBar`.
 
-- **ONE LINE BY DEFAULT.** Each card sits in a fixed-size slot (`h-7`, `sm:w-56 lg:w-64`; below
-  `sm` just the icon, plus the X / one action), so a card arriving or leaving never moves the
-  header's controls; the strip takes the flexible space and scrolls sideways when full.
-- **EXPANDS ON CLICK, NEVER ON HOVER OR FOCUS, and only when its content is longer** (vertical
-  overflow, a truncated line, or words hidden at a narrow width). The whole line is the click
-  target; a `<button aria-expanded>` inside it is the keyboard stop (Enter / Space) and its click
-  bubbles to the same toggle. A card that opened under a passing pointer covered the page the reader
-  was aiming at. The panel lifts to `position: fixed` at the slot's measured rect and OVERLAYS the
-  page — fixed, not absolute, because the strip is a horizontal scroller and a scroller clips both
-  axes — growing LEFTWARDS from the slot's right edge so the X stays under the pointer. It closes on
-  a second click on the line, on any press outside the panel (`pointerdown`, capture — so pressing
-  another card closes this one before that one opens), on Escape wherever focus is, and on any
-  scroll or resize (the rect is stale). Only one card is expanded at a time. ⚠ The X and the
-  on-line `action` STOP PROPAGATION, so dismissing or pressing Undo / Reopen never toggles the card.
-- **ITS BORDER NAMES ITS SOURCE** (`tone`, `HEADER_TOAST_TONE_BORDER`): `ai` (`border-ai-signal-fill`
-  — Claude reviews, AI fixes), `merge` (the merge family's violet — merge when ready, dependency
-  results), `sync` (`sky-500` — loading data), `attention` (the Pending rail's `amber-500` — My Turn
-  undo), `conflicts` (`--mr-conflict` — the resolver reopen), `neutral` default. Border ONLY: the
-  background stays neutral, and the icon and label already say the same thing in words. Error states
-  keep their own red text and icon.
+- **EVERY CARD IS THE SAME CARD.** One `HeaderToast`, one slot size (`h-7`, `w-28 sm:w-56 lg:w-64`;
+  below `sm` the words are `max-sm:sr-only`, leaving the icon, the action and the X), one line
+  layout: icon · label · summary · [one on-line action] · [X]. ⚠ **ONE LINE WHEN COLLAPSED, ALWAYS**
+  — the words are `truncate` (nowrap + ellipsis) and the full text is in the expanded panel and the
+  toggle's accessible name. ⚠ Never `sr-only sm:not-sr-only`: `not-sr-only` sets `white-space:
+  normal` + `overflow: visible`, which beat `truncate` and wrapped "Merge when ready · 2 armed · 4
+  merged" onto a second, clipped line inside the 26px card.
+- **THE HEADER HAS A FIXED HEIGHT** (`h-11`, no vertical padding, App.tsx). It used to be
+  content-sized (`py-2`), so a 28px card made it 45px against 43px with no toast and the whole page
+  jumped as cards came and went; measured 44px both ways now.
+- **EXPANDS ON CLICK, NEVER ON HOVER OR FOCUS, and only when it has more to show** (`children` /
+  `footer`, or a line truncated sideways — including the words hidden at a narrow width). The whole
+  line is the click target; a `<button aria-expanded>` inside it is the keyboard stop (Enter /
+  Space) and its click bubbles to the same toggle. A card that opened under a passing pointer
+  covered the page the reader was aiming at. **The expanded panel is laid out the same on every
+  card**: the card's line again (now wrapping, so the full text shows), then the rows (`ToastList` +
+  `ToastRow`), then the `footer` (secondary actions such as `ToastShowMore` / "Dismiss finished",
+  and a short note). The detail is MOUNTED ONLY WHILE EXPANDED, so nothing focusable hides inside a
+  clipped one-line card. The panel lifts to `position: fixed` and OVERLAYS the page — fixed, not
+  absolute, because the strip is a horizontal scroller and a scroller clips both axes. ⚠ **It
+  anchors at the card's TOP-LEFT** (`anchorToastPanel`, `lib/toastAnchor.ts`): its top-left corner
+  sits exactly on the collapsed card's, it grows RIGHT and DOWN only (at least 320px wide, at most
+  448px tall), and only a panel that would cross the viewport's right gutter shifts left, by just
+  enough. (The old "grow leftwards from the slot's right edge" rule existed for hover-to-expand,
+  which is gone.) It closes on a second click on the line, on any press outside the panel
+  (`pointerdown`, capture — so pressing another card closes this one before that one opens), on
+  Escape wherever focus is, and on any scroll or resize (the rect is stale). Only one card is
+  expanded at a time. ⚠ The X and the on-line `action` (`ToastLineButton`) STOP PROPAGATION, so
+  dismissing or pressing Undo / Reopen never toggles the card.
+- ⚠ **THE PANEL IS ITS OWN ONE SCROLLER, `overscroll-behavior: contain`, AND THE ROOT IS
+  `overscroll-behavior: none`** (`index.css`). A fixed box's scroll parent is the VIEWPORT, not the
+  pane under it, so a wheel the panel could not use chained to the root — and this app's root never
+  scrolls, so on macOS the gesture became the root's ELASTIC OVERSCROLL: the whole shell slid up with
+  a blank band at the bottom, and because a wheel gesture latches to the scroller it began on,
+  wheeling the page afterwards kept rubber-banding it (a content pane reaching its own end did the
+  same). Rows therefore never carry their own `max-h-* overflow-auto` (a second scroller is a second
+  chain), and the strip is `overscroll-contain` too. Reproduced and verified by
+  `scripts/.ui-artifacts/toasts2-verify.mjs` (blank rows at the bottom mid-gesture: 82 before, 0
+  after).
+- **ITS BORDER NAMES ITS SOURCE, AND ITS PROGRESS BAR WEARS THE SAME TONE** (`tone`,
+  `HEADER_TOAST_TONE` — ONE record holding `border` and `fill` per tone): `ai`
+  (`ai-signal-fill` — Claude reviews, AI fixes), `merge` (the merge family's violet — merge when
+  ready, dependency results), `sync` (`sky-500` — loading data), `attention` (the Pending rail's
+  `amber-500` — My Turn undo), `conflicts` (`--mr-conflict` — the resolver reopen), `neutral`
+  default. Border ONLY on the card: the background stays neutral, and the icon and label already say
+  the same thing in words. Error states keep their own red text and icon.
 - **`HeaderToast` props**: `label` (leads the line, names the card's `role="group"`), `icon` (from
-  `Icons.tsx`), `summary`, `action` (ONE compact control kept on the line — Undo, Reopen — never
-  hidden behind a hover), `onDismiss` + `dismissLabel` (the X, named "Dismiss …"; ABSENT = not
-  dismissible, no X), `progress` (a bar that stays on the collapsed line), `tone` (the border, above),
-  `children` (the detail).
+  `Icons.tsx`, `size={13}`), `summary`, `action` (ONE compact `ToastLineButton` kept on the line —
+  Undo, Reopen — never hidden behind a hover), `onDismiss` + `dismissLabel` (the X, named
+  "Dismiss …"; ABSENT = not dismissible, no X), `progress` (a bar along the bottom of the line, which
+  stays on the collapsed card), `tone` (the border and the bar, above), `children` (the rows),
+  `footer` (the panel's last line).
   Each toast keeps its own dismiss semantics: AI fixes and merge-when-ready offer the X only once
   nothing is still running/armed; the loading bar is an INDICATOR with no X and no action; the
   timed toasts (resolver reopen 20s, dependency results 15s, My Turn undo 10s) still auto-remove.
 - **A CAPPED LIST NEVER ENDS IN A DEAD "+N more".** A card that draws only the first few rows
-  (merge when ready: 4; dependency results: 3 failures) puts `ToastShowMore` under the list: a
+  (merge when ready: 4; dependency results: 3 failures) puts `ToastShowMore` in its footer: a
   button "Show N more" (`aria-expanded`, `aria-controls` the list) that reveals EVERY row inside
   the expanded panel, which scrolls within its max height, and then reads "Show fewer". It sits
   inside the panel, so clicking it keeps the card open and Escape still collapses it.

@@ -9,7 +9,13 @@ import { useArmedMerges, useDisarmAutoMerge } from '../hooks/useAutoMerge.js';
 import { invalidateAfterPrWrite } from '../hooks/prCacheSync.js';
 import { usePinnedTabs, type TabMeta } from '../store/pinnedTabs.js';
 import { CheckIcon, MergeIcon, WarningIcon } from './Icons.js';
-import { HeaderToast, ToastShowMore } from './HeaderToasts.js';
+import {
+  HeaderToast,
+  ToastFooterButton,
+  ToastList,
+  ToastRow,
+  ToastShowMore,
+} from './HeaderToasts.js';
 
 // The global auto-merge progress stack, rendered as ONE card in the app's ONE header toast strip
 // (HeaderToasts.tsx, mounted in App.tsx): a one-line summary, the rows when it expands.
@@ -345,7 +351,7 @@ function LiveRow({ row }: { row: ArmedMergeRequest }): JSX.Element {
   const headline = armedPhaseHeadline(row);
 
   return (
-    <li className="px-3 py-2 text-xs">
+    <ToastRow>
       <RowHeader
         repoFullName={repoFullName}
         prNumber={row.prNumber}
@@ -391,7 +397,7 @@ function LiveRow({ row }: { row: ArmedMergeRequest }): JSX.Element {
           {disarm.isPending ? 'Cancelling…' : 'Cancel'}
         </button>
       </div>
-    </li>
+    </ToastRow>
   );
 }
 
@@ -405,7 +411,7 @@ function OutcomeRow({
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const merged = outcome.state === 'merged';
   return (
-    <li className="px-3 py-2 text-xs">
+    <ToastRow>
       <RowHeader
         repoFullName={outcome.repoFullName}
         prNumber={outcome.prNumber}
@@ -436,7 +442,7 @@ function OutcomeRow({
           Dismiss
         </button>
       </div>
-    </li>
+    </ToastRow>
   );
 }
 
@@ -540,22 +546,24 @@ export function AutoMergeBanner(): JSX.Element | null {
       // Cancel, so the X is offered only once nothing is still armed.
       onDismiss={live.length === 0 ? dismissAll : undefined}
       dismissLabel="Dismiss merge-when-ready results"
+      footer={
+        <>
+          <span>Auto-merge only runs while Limn is running.</span>
+          <span className="flex items-center gap-3">
+            <ToastShowMore
+              hidden={hidden}
+              showAll={showAll && total > MAX_ROWS}
+              onToggle={() => setShowAll((v) => !v)}
+              controls={listId}
+            />
+            {live.length > 0 && shownOutcomes.length > 0 && (
+              <ToastFooterButton onClick={dismissAll}>Dismiss finished</ToastFooterButton>
+            )}
+          </span>
+        </>
+      }
     >
-      {live.length > 0 && shownOutcomes.length > 0 && (
-        <div className="-mt-0.5 mb-1 text-right">
-          <button
-            type="button"
-            onClick={dismissAll}
-            className="text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-          >
-            Dismiss finished
-          </button>
-        </div>
-      )}
-      <ul
-        id={listId}
-        className="-mx-2 max-h-72 divide-y divide-gray-100 overflow-auto dark:divide-gray-800"
-      >
+      <ToastList id={listId}>
         {outcomeRows.map((o) => (
           <OutcomeRow
             key={o.id}
@@ -566,16 +574,7 @@ export function AutoMergeBanner(): JSX.Element | null {
         {liveRows.map((r) => (
           <LiveRow key={r.prId} row={r} />
         ))}
-      </ul>
-      <ToastShowMore
-        hidden={hidden}
-        showAll={showAll && total > MAX_ROWS}
-        onToggle={() => setShowAll((v) => !v)}
-        controls={listId}
-      />
-      <div className="border-t border-gray-100 pt-1 text-[11px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
-        Auto-merge only runs while Limn is running.
-      </div>
+      </ToastList>
     </HeaderToast>
   );
 }

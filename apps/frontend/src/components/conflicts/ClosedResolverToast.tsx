@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useConflictResolverStore } from '../../store/conflictResolver.js';
 import { ConflictIcon } from '../Icons.js';
-import { HeaderToast } from '../HeaderToasts.js';
+import { HeaderToast, ToastLineButton } from '../HeaderToasts.js';
 import { REOPEN, closedToast } from './copy.js';
 
 // ── THE WAY BACK ─────────────────────────────────────────────────────────────────────────────
@@ -45,13 +45,7 @@ export function ClosedResolverToast(): JSX.Element | null {
       icon={<ConflictIcon size={13} />}
       summary={closedToast(lastClosed.decidedCount)}
       action={
-        <button
-          type="button"
-          onClick={() => open(lastClosed.target)}
-          className="rounded border border-gray-300 px-1.5 py-px text-[11px] text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
-        >
-          {REOPEN}
-        </button>
+        <ToastLineButton onClick={() => open(lastClosed.target)}>{REOPEN}</ToastLineButton>
       }
       onDismiss={dismiss}
       dismissLabel={`Dismiss the reopen offer for ${where}`}

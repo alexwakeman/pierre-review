@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useMyTurnDismissToast, useRestoreMyTurn } from '../../hooks/useMyTurnDismiss.js';
 import { PendingBallIcon } from '../Icons.js';
-import { HeaderToast } from '../HeaderToasts.js';
+import { HeaderToast, ToastLineButton } from '../HeaderToasts.js';
 
 // ── THE WAY BACK FROM A DISMISS ──────────────────────────────────────────────────────────────
 //
@@ -32,14 +32,9 @@ export function MyTurnDismissToast(): JSX.Element | null {
       icon={<PendingBallIcon size={13} />}
       summary={`${last.label} — until something new happens on it`}
       action={
-        <button
-          type="button"
-          disabled={restore.isPending}
-          onClick={() => restore.mutate(last.target)}
-          className="rounded border border-gray-300 px-1.5 py-px text-[11px] text-gray-800 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
-        >
+        <ToastLineButton disabled={restore.isPending} onClick={() => restore.mutate(last.target)}>
           {restore.isPending ? 'Bringing it back…' : 'Undo'}
-        </button>
+        </ToastLineButton>
       }
       onDismiss={clear}
       dismissLabel="Dismiss the undo offer"

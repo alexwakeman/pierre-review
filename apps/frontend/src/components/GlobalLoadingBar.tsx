@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { SyncActivityRepo, SyncCatchupRepo } from '@pierre-review/shared';
 import { isMlScoring, useMlEnrichmentStatus } from '../hooks/useMlLabels.js';
 import { useSyncActivity } from '../hooks/useSyncActivity.js';
-import { HeaderToast } from './HeaderToasts.js';
+import { HeaderToast, ToastList, ToastRow } from './HeaderToasts.js';
 import { RefreshIcon } from './Icons.js';
 
-// The global ambient loading bar — a card in the header toast strip, YELLOW bar, non-dismissible, visible
+// The global ambient loading bar — a card in the header toast strip, its bar in the card's own `sync` tone, non-dismissible, visible
 // whenever heavy background work is running: any FULL-MODE sync walk (first-sync
 // backfill / deep re-sync / queued-for-full, via GET /api/sync-activity), a CATCH-UP walk
 // (the same endpoint's `catchups`: an established repo more than 24h behind, which is what a
@@ -413,26 +413,26 @@ export function GlobalLoadingBar(): JSX.Element | null {
       className={`transition-opacity duration-500 ${active ? 'opacity-100' : 'opacity-0'}`}
     >
       {hasDetail ? (
-        <div className="space-y-0.5 text-[12px] leading-snug text-gray-600 dark:text-gray-300">
+        <ToastList>
           {backfillActive && (
-            <div>
+            <ToastRow>
               {walkingCount > 0
                 ? `Backfilling ${walkingCount} repo${walkingCount === 1 ? '' : 's'} · ${backfillPercent}%${
                     queuedCount > 0 ? ` · ${queuedCount} waiting` : ''
                   }`
                 : `Backfill queued · ${queuedCount} waiting`}
-            </div>
+            </ToastRow>
           )}
-          {catchupSentence != null && <div>{catchupSentence}</div>}
+          {catchupSentence != null && <ToastRow>{catchupSentence}</ToastRow>}
           {scoring && ml && (
-            <div>
+            <ToastRow>
               {`Classifying bot comments · ${mlDone.toLocaleString()} of ${mlTotal.toLocaleString()} · ${
                 mlTotal > 0 ? Math.round((mlDone / mlTotal) * 100) : 0
               }%`}
-            </div>
+            </ToastRow>
           )}
-          {mlWaiting && <div>Classification waiting…</div>}
-        </div>
+          {mlWaiting && <ToastRow>Classification waiting…</ToastRow>}
+        </ToastList>
       ) : undefined}
     </HeaderToast>
   );
