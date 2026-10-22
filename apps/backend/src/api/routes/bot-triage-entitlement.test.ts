@@ -37,9 +37,6 @@ let closeDb: (() => Promise<void> | void) | undefined;
 let setProCapabilities: (c: any) => void;
 let EMPTY: any;
 
-const FROM = Date.UTC(2026, 6, 1);
-const TO = Date.UTC(2026, 6, 15);
-
 /** Every member true — the pro/contract.test.ts literal. Spelled in full so a NEW capability is a
  *  tsc error here rather than a silently-false flag. */
 const FULL = {
@@ -84,12 +81,11 @@ const BOT_DEPTH_ONLY_ROUTES: readonly string[] = [
   '/api/bot-threads/resolvable',
 ];
 
-/** The routes the ROI panel SHARES with the People report's bot sections, and which therefore take
- *  the UNION. */
+/** The routes the ROI panel SHARED with the People report's bot sections (removed 2026-10-22),
+ *  and which therefore still take the UNION. */
 const UNION_ROUTES: readonly string[] = [
   '/api/bot-analytics?window=rolling_14',
   '/api/bot-analytics/vendor/u999/comments?window=rolling_14',
-  `/api/bot-authoring?userId=999&fromMs=${FROM}&toMs=${TO}`,
 ];
 
 /** Routes that MUST stay 200 on a completely unentitled account. Each one is the data behind a
@@ -277,10 +273,9 @@ describe('The two shared routes take the UNION botDepth || periodReports', () =>
   });
 
   it('200s them with periodReports ALONE — the only witness for the union', async () => {
-    // ⚠ THIS IS THE ASSERTION THE UNION EXISTS FOR. Both routes back the People report's per-bot
-    // evidence: `…/comments` its evidence cards, `/api/bot-authoring` its authoring vector. Gated
-    // on `botDepth` alone, a Reports customer opens a report they paid for with every bot section
-    // blank and nothing on screen explaining why.
+    // ⚠ THIS IS THE ASSERTION THE UNION EXISTS FOR. Both routes backed the People report's per-bot
+    // evidence; the report is gone, but narrowing the gate would take data away from an account
+    // that can read it today, so the union stays and stays pinned.
     setProCapabilities(REPORTS_ONLY);
     for (const url of UNION_ROUTES) {
       expect((await get(url)).status, url).toBe(200);
@@ -292,15 +287,6 @@ describe('The two shared routes take the UNION botDepth || periodReports', () =>
     for (const url of UNION_ROUTES) {
       expect((await get(url)).status, url).toBe(200);
     }
-  });
-
-  it('/api/bot-authoring is gated ABOVE parseWindowBounds (no 400/402 oracle)', async () => {
-    // Bounds are REQUIRED on this route, so a missing pair 400s at the ajv layer once entitled.
-    // Unentitled with VALID bounds it must 402 — the gate is the first statement in the handler.
-    setProCapabilities(EMPTY);
-    expect(
-      (await get(`/api/bot-authoring?userId=999&fromMs=${TO}&toMs=${FROM}`)).status,
-    ).toBe(402);
   });
 });
 

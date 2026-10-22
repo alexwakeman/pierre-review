@@ -4,7 +4,7 @@
 // Every key carries the `ws:<id>` segment and every fetch holds itself idle on `skipToken` while
 // `workspaceId === null`: the scope starts unresolved, and a request sent before it lands is
 // answered from the account's DEFAULT workspace and then cached under whichever key the store
-// eventually settles on. That is the standard rule here (see useAdvisor / useSprintChat); it bites
+// eventually settles on. That is the standard rule here (see useAdvisor); it bites
 // harder on this surface than most, because a report is an artifact people forward — one showing
 // the wrong workspace's numbers under the right workspace's name is not a stale render, it is a
 // wrong document.
@@ -157,10 +157,9 @@ export function useGeneratePeriodReport(workspaceId: number | null, periodKey: s
   });
 }
 
-// `usePeriodReportChat` (the per-report drill-down turn against `POST …/reports/:key/chat`) was
-// REMOVED with the panel's old `ReportChat`: the "Ask about this period" section is the ad-hoc
-// chat now (AdHocChatPanel + `useSprintChat` with explicit period bounds — see plan C5). The
-// server route and its stored `report.suggested` pills still exist and are simply unconsumed.
+// There is no chat on a report: "Ask about this period" and its routes (`POST /api/pro/insights/ask`,
+// `POST …/reports/:key/chat`) were REMOVED 2026-10-22. A stored row's `suggested` field is still
+// served, unread.
 
 // ── Model choice + the PRE-FLIGHT cost estimate ──────────────────────────────────────────────
 //

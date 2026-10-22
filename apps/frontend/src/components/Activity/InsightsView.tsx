@@ -26,10 +26,6 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 // `/api/me`, so the meters would still PAINT over the failed request. A plausible AI-spend panel
 // built from a stale seed is worse than no panel.
 //
-// The ad-hoc chat that WAS the Overview tab lives INSIDE PeriodReportsPanel as the collapsed
-// "Ask about this period" section under the report, grounded in the viewed period's own
-// [fromMs, toMs) rather than a trailing window.
-//
 // ── THE PANE IS THREE TABS ──────────────────────────────────────────────────────────────────
 //   • Overview   — flow metrics, the two "where the work is happening" cards, period reports.
 //   • Stories    — every tracker ticket with a PR merged in the REPORTING WINDOW: two charts and

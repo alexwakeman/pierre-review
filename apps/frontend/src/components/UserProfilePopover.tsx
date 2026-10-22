@@ -16,7 +16,6 @@ import { useFilters } from '../store/filters.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { useUserStats } from '../hooks/useUserStats.js';
-import { useProCapabilities } from '../hooks/useTriage.js';
 import { ExternalLinkIcon } from './Icons.js';
 
 // Where the popover hangs off. `element` is the ordinary case — a real anchor node (the
@@ -64,7 +63,6 @@ export function UserProfilePopover({
 }): JSX.Element {
   const activeWorkspaceId = useFilters((s) => s.workspaceId);
   const openUserActivityTab = usePinnedTabs((s) => s.openUserActivityTab);
-  const { periodReports } = useProCapabilities();
   const { data: repos } = useRepos();
 
   // The repo subset the counts cover + the caption that names it. A single in-context repo wins;
@@ -259,27 +257,6 @@ export function UserProfilePopover({
             >
               {`Last ${FEED_WINDOW_DAYS} days of activity →`}
             </button>
-            {/* 1:1 prep (Pro `periodReports`, plan P4.2): the SAME tab — its header carries the
-                person-period vector. A separate line so the EM's entry point is named; absent
-                (never a nudge, never an error) when the capability is off. */}
-            {periodReports && (
-              <button
-                type="button"
-                onClick={() => {
-                  openUserActivityTab(userId, {
-                    id: userId,
-                    login: user?.githubLogin ?? null,
-                    displayName: user?.displayName ?? null,
-                    avatarUrl: user?.avatarUrl ?? null,
-                  });
-                  onDismiss();
-                }}
-                className="rounded px-1.5 py-1 text-xs font-medium text-ai-signal hover:bg-ai-signal/10"
-                title={`Prep for a 1:1 with ${label} — their period figures, not a scorecard`}
-              >
-                1:1 prep →
-              </button>
-            )}
           </div>
           {login && (
             <a

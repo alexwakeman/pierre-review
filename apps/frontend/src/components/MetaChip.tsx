@@ -6,10 +6,10 @@ import { vendorInk } from '../lib/ui.js';
  * severity — drawn as the tinted-at-10%-opacity chip used wherever one of those records is shown
  * inline in a dense list row or table cell.
  *
- * Promoted here from `Activity/BotCommentCard.tsx`, which is where the form was designed; three
- * other survey surfaces had grown byte-equivalent copies of it (`PeopleReportDetail`'s
- * `StateChip`, `BotPrsDetail`'s inline `<span>`, `ThemeThreadsDetail`'s matched-state chips), so a
- * padding or opacity tweak had to be made in four places to hold.
+ * Promoted here from `Activity/BotCommentCard.tsx`, which is where the form was designed; other
+ * survey surfaces had grown byte-equivalent copies of it (`BotPrsDetail`'s inline `<span>`,
+ * `ThemeThreadsDetail`'s matched-state chips), so a padding or opacity tweak had to be made in
+ * several places to hold.
  *
  * ⚠ THIS IS NOT A REPLACEMENT FOR `StateBadge`, AND THE TWO MUST NOT BE COLLAPSED INTO ONE
  * COMPONENT WITH A SIZE PROP. They are two genuine densities with two audiences: `StateBadge`

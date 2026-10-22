@@ -22,7 +22,7 @@
 //
 // It also cannot live in `queries.ts`: it needs `resolveActorLanes`, and `actor-lanes.ts` imports
 // FROM `queries.ts`. Every other lane-consuming fold (`period-metrics.ts`, `pr-intervals.ts`,
-// `automation-output.ts`, `person-period.ts`) is a module beside them for exactly that reason.
+// `person-period.ts`) is a module beside them for exactly that reason.
 //
 // COST: two indexed scans (one PR window, one repo list) plus `resolveActorLanes`' fixed handful.
 // Nothing multiplies by repo count, which is what keeps `/api/workspace-metrics` honest on the

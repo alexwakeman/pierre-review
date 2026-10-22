@@ -19,8 +19,8 @@ import type { User, WorkspaceReviewer } from '@pierre-review/shared';
 // disagrees with the board about every workspace-classified in-house bot and every manual "human".
 //
 // Pure and exported so the rule is a test, not a comment (test/isolateFilter.test.ts). It is
-// BotTriageCard's `isUnionBot`, lifted out. ⚠ That copy and the other inline ones (FeedView,
-// PeriodPeopleSection) still exist and should import this instead — four
+// BotTriageCard's `isUnionBot`, lifted out. ⚠ That copy and the other inline one (FeedView)
+// still exist and should import this instead — several
 // spellings of one rule can drift, and a drifted one hides different actors from the server.
 
 /** The union verdict for one actor id. */

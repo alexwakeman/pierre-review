@@ -98,11 +98,6 @@ const ROWS: Row[] = [
     pro: 'Chronology: every open hour attributed to a reviewer, an author, or waiting to land. Nobody is named.',
   },
   {
-    q: 'What do I take into a one-to-one?',
-    free: '—',
-    pro: 'A report with a section per person you pick. Preparation, not a ranking — there is no leaderboard anywhere in it.',
-  },
-  {
     q: 'Can I keep the noise down?',
     free: 'Bots hidden by default, notifications only for work that is yours, and a mute per repository or per workspace.',
     pro: 'Everything free does, plus a Slack digest per workspace if you would rather read it there.',

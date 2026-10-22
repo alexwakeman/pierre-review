@@ -9427,69 +9427,6 @@ export async function getMentionCandidates(
     .map((x) => x.user);
 }
 
-// @mention candidates scoped to a REPO SET (a Workspace / the FilterBar-visible repos) rather than one
-// PR — powers the ad-hoc Insights "Ask about the sprint" box, whose questions span the whole
-// scope. `repoIds` null = every repo the account owns (the 'all' scope). People = whoever has
-// MERGED (maintainers, rank 0) or OPENED (rank 1) a PR in the scope's repos; self + bots excluded.
-// Account-scoped: the repo set is intersected with the account's own repos so a foreign repo id
-// can never widen it. Sorted by rank then login; the picker slices client-side.
-export async function getScopeMentionCandidates(
-  accountId: number,
-  repoIds: number[] | null,
-): Promise<MentionCandidate[]> {
-  // Resolve the scope to a bounded set of THIS account's repo ids (never trust caller ids raw).
-  const ownRepoRows = await db
-    .select({ id: repos.id })
-    .from(repos)
-    .where(eq(repos.accountId, accountId))
-    .execute();
-  const ownIds = new Set(ownRepoRows.map((r) => r.id));
-  const scopeIds =
-    repoIds == null ? [...ownIds] : repoIds.filter((id) => ownIds.has(id));
-  if (scopeIds.length === 0) return [];
-
-  const rank = new Map<number, number>();
-  const bump = (id: number | null | undefined, r: number): void => {
-    if (id == null) return;
-    const cur = rank.get(id);
-    if (cur == null || r < cur) rank.set(id, r);
-  };
-
-  const [mergerRows, authorRows] = await Promise.all([
-    db
-      .selectDistinct({ userId: pullRequests.mergedById })
-      .from(pullRequests)
-      .where(and(inArray(pullRequests.repoId, scopeIds), eq(pullRequests.state, 'merged')))
-      .execute(),
-    db
-      .selectDistinct({ authorId: pullRequests.authorId })
-      .from(pullRequests)
-      .where(inArray(pullRequests.repoId, scopeIds))
-      .execute(),
-  ]);
-  const maintainerIds = new Set<number>();
-  for (const r of mergerRows) {
-    bump(r.userId, 0);
-    if (r.userId != null) maintainerIds.add(r.userId);
-  }
-  for (const r of authorRows) bump(r.authorId, 1);
-
-  const viewerUserId = await getAccountUserId(accountId);
-  if (viewerUserId != null) rank.delete(viewerUserId);
-
-  const ids = [...rank.keys()];
-  if (ids.length === 0) return [];
-  const rows = await db.select().from(users).where(inArray(users.id, ids)).execute();
-  return rows
-    .filter((u) => !u.isBot)
-    .map((u) => ({
-      user: { ...mapUser(u), isMaintainer: maintainerIds.has(u.id) },
-      rank: rank.get(u.id) ?? 99,
-    }))
-    .sort((a, b) => a.rank - b.rank || a.user.githubLogin.localeCompare(b.user.githubLogin))
-    .map((x) => x.user);
-}
-
 export async function getThreadDetail(
   id: number,
   accountId: number,

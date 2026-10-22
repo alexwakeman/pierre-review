@@ -43,8 +43,8 @@ fixture tests (see Conventions).
   (pinned, with that exact case, by `db/my-turn-new-prs.test.ts`).
   **`description`** (TEXT, nullable) is the repo's GitHub "About" text, captured by the activity
   sync like `defaultBranch`/`viewerPermission` — the app's ONLY stored repo-purpose text (READMEs
-  are never fetched; PR bodies are lean), added as grounding for the sprint chat's
-  "About this Workspace" preset. ⚠ Its write follows the three-state partial-response policy AND
+  are never fetched; PR bodies are lean), added as grounding for the (since removed)
+  sprint chat's "About this Workspace" preset. ⚠ Its write follows the three-state partial-response policy AND
   the tolerant-partial caveat: a `graphqlTolerant`-salvaged page nulls an ERRORED field with the
   key still present, so `sync-repo.ts` degrades the whole field to `undefined` (preserve) whenever
   `onPartial` fired — only a CLEAN response may clear a stored description.
@@ -782,10 +782,19 @@ retention and pinned by the plugin's isolation test. Never drop them.
 | `addressed_checks` | the "was this addressed" check |
 | `ai_pr_analyses` | the AI PR summary (and the older CI analysis) |
 | `preset_reports` | the Insights preset prompts |
+| `pinned_prompts` | the Reports chat's pinned prompts (DORMANT since 2026-10-22) |
+| `sprint_chat_history` | the Reports chat's stored answers, "Ask about this period" (DORMANT since 2026-10-22) |
 
 DORMANT **rows** inside live tables: `pr_comment_annotations` kinds `validity` / `addressed` /
 `simplify` (the table stays live for `impact`, the blast-radius impact note; the read skips other
-kinds), and `pro_synthesis` kinds `brief` / `rollup`.
+kinds), and `pro_synthesis` kinds `brief` / `rollup` and, since 2026-10-22, `person` / `person_report`
+(the 1:1 prep and People report narrations; their scope keys carry a `u:`/`pw:` tail no live kind
+mints, so no live read can reach them).
+
+Since 2026-10-22 the People report and 1:1 prep are gone with no table of their own to retire: core
+`db/person-period.ts` stays wired behind the REQUIRED, now caller-less `ProHostQueries.getPersonPeriod`
+(removing it is an apiVersion bump), and core `db/automation-output.ts` (the `/api/bot-authoring`
+fold) was deleted outright — it read only live tables.
 
 ## The automation vocabulary — `AUTOMATION_VENDORS`, `ReviewerRole`, `AutomatedReviewerKind`
 

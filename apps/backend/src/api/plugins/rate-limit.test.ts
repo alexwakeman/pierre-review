@@ -14,7 +14,6 @@ const tiers = (method: string, path: string): string[] =>
 
 describe('tierFor — AI generation', () => {
   it('puts the Pro generators in the ai tier (minute AND hour windows)', () => {
-    expect(tiers('POST', '/api/pro/insights/ask')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/sprint-report/refresh')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/prs/12/ai-fix')).toEqual(['ai', 'ai_hourly']);
     // AI Fix plan mode: every pass and the approve spend an agent run; discard is one DB update.
@@ -300,15 +299,14 @@ describe('tierFor — Bot Tuning Advisor', () => {
 // about this family: add `/generate` to that suffix list, or add a fifth route here, and the
 // coincidence breaks silently. These assertions are what turns that into a failing test.
 describe('tierFor — period reports', () => {
-  it('bills the two POSTs as generation (minute AND hour windows)', () => {
+  it('bills the generate POST as generation (minute AND hour windows)', () => {
     expect(tiers('POST', '/api/pro/insights/reports/sprint-2026-08-18/generate')).toEqual([
       'ai',
       'ai_hourly',
     ]);
-    expect(tiers('POST', '/api/pro/insights/reports/sprint-2026-08-18/chat')).toEqual([
-      'ai',
-      'ai_hourly',
-    ]);
+    // The `…/chat` turn was REMOVED 2026-10-22: its arm went with it, so the path is no longer
+    // billed (it would 404 on the read bucket).
+    expect(tiers('POST', '/api/pro/insights/reports/sprint-2026-08-18/chat')).toEqual(['read']);
   });
 
   it('keeps the list GET on read and puts the one-report GET on the search bucket', () => {
@@ -334,10 +332,10 @@ describe('tierFor — period reports', () => {
   });
 
   // The prefix is anchored on the exact family: a sibling under /api/pro/insights/ must keep
-  // falling through to the catch-all, which is what gives `/ask` its AI tier.
+  // falling through to the catch-all (a POST there is billed as generation, a GET is read).
   it('does not sweep in the neighbouring insights routes', () => {
-    expect(tiers('POST', '/api/pro/insights/ask')).toEqual(['ai', 'ai_hourly']);
-    expect(tiers('GET', '/api/pro/insights/chat-history')).toEqual(['read']);
+    expect(tiers('POST', '/api/pro/insights/sibling')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('GET', '/api/pro/insights/sibling')).toEqual(['read']);
     expect(tiers('GET', '/api/pro/insights')).toEqual(['read']);
     // A path that merely STARTS the same must not be captured by the family prefix.
     expect(tiers('POST', '/api/pro/insights/reports-export/generate')).toEqual(['ai', 'ai_hourly']);
@@ -356,22 +354,6 @@ describe('tierFor — period reports', () => {
   });
 });
 
-// GET /api/pro/insights/person/:userId (plan P4.2 — the 1:1-prep vector). DECIDED onto `search`:
-// per request it runs the lane resolver + two capped review scans + ~10 person-scoped aggregates,
-// the one-report GET's shape of cost — never the 600/min blanket read the catch-all would hand a
-// GET. The narration spend is NOT this route: it rides POST /api/pro/synthesis (kind 'person'),
-// whose ai tier is pinned in the synthesis block above.
-describe('tierFor — 1:1 person period', () => {
-  it('puts the person GET on the search bucket, never the blanket read or ai', () => {
-    expect(tiers('GET', '/api/pro/insights/person/42')).toEqual(['search', 'read']);
-    expect(tiers('GET', '/api/pro/insights/person/42')).not.toContain('ai');
-  });
-
-  it('leaves a (nonexistent) mutating spelling to the catch-all rather than blessing it', () => {
-    expect(tiers('POST', '/api/pro/insights/person/42')).toEqual(['ai', 'ai_hourly']);
-  });
-});
-
 describe('tierFor — GitHub quota spenders', () => {
   it('throttles live repo search separately', () => {
     expect(tiers('GET', '/api/repos/search')).toEqual(['search', 'read']);
@@ -381,7 +363,7 @@ describe('tierFor — GitHub quota spenders', () => {
   // POST /api/me/large-pr-threshold — the large-PR flag's per-account threshold. One validated
   // UPDATE of one integer column: no GitHub, no model, no fold. `read` is the right bucket AND
   // the recorded decision, and the near-miss it guards against is the `/api/me` prefix, which
-  // would also swallow `/api/mention-candidates`.
+  // would also swallow a path like `/api/mention-candidates` (a deleted route; the shape stays).
   it('keeps the account settings write on read, without swallowing its neighbours', () => {
     expect(tiers('POST', '/api/me/large-pr-threshold')).toEqual(['read']);
     expect(tiers('POST', '/api/me/large-pr-threshold')).not.toContain('github_write');

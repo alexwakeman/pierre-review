@@ -62,10 +62,10 @@ export interface ProCapabilities {
   // Reports pane's stored, forwardable per-sprint artifact with a coverage-honest comparison, a
   // refusable forecast and a narrated summary. The metric vector itself is CORE compute
   // (db/period-metrics.ts), but it has no free surface.
-  // ⚠ IT NOW GATES FOUR SURFACES, NOT ONE, and three of them are CORE routes rather than plugin
-  // ones: the period report + its by-workspace axis, the People report (`/api/pro/insights/person`
-  // plus the core `/api/bot-authoring` and `…/vendor/:key/comments` its bot sections read), and
-  // CHRONOLOGY (`GET /api/flow-findings`, which carries its own 402). Chronology rides this flag
+  // ⚠ IT GATES MORE THAN ONE SURFACE, and some are CORE routes rather than plugin ones: the
+  // period report + its by-workspace axis, and CHRONOLOGY (`GET /api/flow-findings`, which carries
+  // its own 402). (The People report — `/api/pro/insights/person`, core `/api/bot-authoring` — was
+  // REMOVED 2026-10-22; `/api/bot-analytics` and `…/vendor/:key/comments` keep the union below.) Chronology rides this flag
   // deliberately rather than taking a fifteenth capability member, which would mean bumping
   // apiVersion across four literals in two repositories to gate one route.
   botDepth: boolean; // Non-AI paid DEPTH tier (paid, like workspaceInsights — NOT like
@@ -75,7 +75,7 @@ export interface ProCapabilities {
   // strip, the volume family and every drill-down off them. The compute is CORE (db/queries.ts
   // getBotBehaviourAnalytics etc.); this gates the surfaces AND, now, six core routes in
   // api/routes/bot-triage.ts. Two of those (`/api/bot-analytics`, `…/vendor/:key/comments`) are
-  // shared with the People report and take the UNION `botDepth || periodReports`.
+  // were shared with the (removed) People report and keep the UNION `botDepth || periodReports`.
   workPlan: boolean; // The work plan's NARRATION (paid, like workspaceInsights/periodReports —
   // the plugin returns `digestEnabled`): the headline, the per-row "why" and the "what can wait"
   // line on the Pending board.
@@ -961,7 +961,13 @@ export interface ProHostQueries {
   // Same rule as above, one level down: a count may only ever be qualified by the total folded
   // from the same population, and none of them may be derived by subtracting another.
   getDailyBriefCounts(accountId: number, workspaceId: number): Promise<DailyBriefCounts>;
-  // The 1:1-prep person vector (P4.2 — NOW LIVE: core db/person-period.ts): a small fixed
+  // ⚠ INERT SINCE 2026-10-22 — NO PLUGIN CALLER. The 1:1 prep section, the People report and the
+  // 'person' / 'person_report' synthesis grains that read it were removed. It stays a REQUIRED
+  // member (still wired to core db/person-period.ts) because removing it means bumping apiVersion
+  // across four literals in two repos, and a half-bump silently drops the plugin to OSS mode.
+  // Do not build on it without reading docs/PRO-PLUGIN-AND-ACTIVITY.md § The People report.
+  //
+  // The 1:1-prep person vector (P4.2 — core db/person-period.ts): a small fixed
   // vector for one person in one workspace — merged/opened authored · reviews given · review
   // comments · median request→their-review response · their PRs' first-human-review wait ·
   // threads opened on their PRs vs addressed · waiting-on-them · WIP — seven window-pure keys

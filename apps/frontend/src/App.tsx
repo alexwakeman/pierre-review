@@ -15,7 +15,6 @@ import { UserActivityDetail } from './components/Activity/UserActivityDetail.js'
 import { TicketTabView } from './components/Ticket/TicketTabView.js';
 import { BotDetailPanel } from './components/Activity/BotDetailPanel.js';
 import { ThemeThreadsDetail } from './components/Activity/ThemeThreadsDetail.js';
-import { PeopleReportDetail } from './components/Activity/PeopleReportDetail.js';
 import { SearchResultsTab } from './components/Search/SearchResultsTab.js';
 import { DetailPane } from './components/DetailPane.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
@@ -147,7 +146,6 @@ export default function App(): JSX.Element {
   const searchActive = activeTabObj?.kind === 'search';
   const userActivityActive = activeTabObj?.kind === 'user-activity';
   const botDetailActive = activeTabObj?.kind === 'bot-detail';
-  const peopleReportActive = activeTabObj?.kind === 'people-report';
   const ticketActive = activeTabObj?.kind === 'ticket';
   // null = the full board. The ONE resolver the FilterBar also reads (store/pinnedTabs.ts), so the
   // bar's Focus controls and this slot can never disagree about a stale key.
@@ -175,7 +173,6 @@ export default function App(): JSX.Element {
     searchActive ||
     userActivityActive ||
     botDetailActive ||
-    peopleReportActive ||
     ticketActive;
   // The detail pane is shown at the bottom of any board-slot Timeline (shared or
   // pr-focus) once a PR is selected there.
@@ -555,15 +552,6 @@ export default function App(): JSX.Element {
             className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
           >
             <ThemeThreadsDetail />
-          </div>
-        )}
-        {/* The People report (Reports → People → Begin) — a sibling full-main overlay. */}
-        {peopleReportActive && (
-          <div
-            data-testid="people-report-overlay"
-            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
-          >
-            <PeopleReportDetail />
           </div>
         )}
         {/* One contributor's activity feed — a sibling full-main overlay. Keyed on the tab so

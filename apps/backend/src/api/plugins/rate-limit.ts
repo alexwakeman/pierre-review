@@ -58,7 +58,7 @@ function tier(name: string, perWindow: number, windowMs: number): Tier {
 }
 
 const TIERS = {
-  // Anthropic-spending generation. A sprint report, an Insights chat turn, a themes
+  // Anthropic-spending generation. A sprint report, a period report, a themes
   // rebuild, an impact note, an agentic review or fix. The most
   // expensive thing in the app and the tightest bucket.
   ai: tier('ai', 20, MINUTE),
@@ -194,8 +194,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //
   // EXACT `===`. `/api/me` is a family with an export, an account deletion and a data-subject
   // GET in it, so a `startsWith('/api/me/')` would sweep all of them into one bucket — and a
-  // `startsWith('/api/me')` is worse still: it ALSO matches `/api/mention-candidates`, a live
-  // sibling vocabulary. That is this file's recorded near-miss failure, one character away.
+  // `startsWith('/api/me')` is worse still: it ALSO matched `/api/mention-candidates` (deleted
+  // 2026-10-22), and will match the next sibling spelled that way. That is this file's recorded near-miss failure, one character away.
   if (path === '/api/me/large-pr-threshold') return [TIERS.read];
 
   // PUT /api/me/blast-radius-config — the blast-radius reading settings. Same shape and same
@@ -239,16 +239,15 @@ function tierFor(method: string, path: string): readonly Tier[] {
   }
 
   // ---- Period reports (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
-  // The Insights → Reports family is two free GETs and two spending POSTs under ONE path prefix,
+  // The Insights → Reports family is two free GETs and one spending POST under ONE path prefix,
   // which is exactly the shape the catch-all below gets wrong in both directions: it tiers on the
   // VERB, so `GET …/reports` (a list of stored rows — no model call, no GitHub) would inherit the
   // 600/min blanket read bucket by accident rather than by decision, while a future GET that
   // happened to be a POST would land on `ai` for free. Spelling the family out here also means
-  // the next reader sees the four routes and their costs together:
+  // the next reader sees the three routes and their costs together:
   //   POST …/:periodKey/generate  an Anthropic completion (Haiku OR Sonnet — the one route in the
   //                               app whose per-call price the USER picks) plus, on a first run,
   //                               a bounded 8-period metrics backfill: ~20 indexed scans.
-  //   POST …/:periodKey/chat      one grounded Anthropic completion per turn.
   //   GET  …/reports              stored rows + a bounded per-period coverage read. DB only.
   //   GET  …/reports/:periodKey   one stored row + ONE metric-vector recompute for the staleness
   //                               flag, PLUS the "By workspace" axis (C4): 2 windows ×
@@ -260,7 +259,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //                               `GET /api/pro/prs/:id/annotations` precedent).
   // Anchored on the exact family prefix so no sibling `/api/pro/insights/*` route is swept in.
   if (path === '/api/pro/insights/reports' || path.startsWith('/api/pro/insights/reports/')) {
-    if (mutating && (path.endsWith('/generate') || path.endsWith('/chat'))) {
+    // (`POST …/:periodKey/chat` was REMOVED 2026-10-22; a POST to that path now lands on `read`
+    // and 404s.)
+    if (mutating && path.endsWith('/generate')) {
       return [TIERS.ai, TIERS.aiHourly];
     }
     // The one-report GET carries the by-workspace axis (N × getPeriodMetrics per window) —
@@ -282,29 +283,6 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (!mutating && path === '/api/pro/insights/month-to-date') {
     return [TIERS.search, TIERS.read];
   }
-
-  // ---- 1:1 prep (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
-  // GET /api/pro/insights/person/:userId — the person-period vector (plan P4.2). DECIDED, not
-  // inherited from the catch-all's GET→read branch: per request it runs the lane resolver, the
-  // one-fold first-human-review scan and the request→review scan (two capped candidate walks)
-  // plus ~10 person-scoped aggregates — the reports-GET shape of cost (this event loop and this
-  // database, no GitHub, no Anthropic), so it borrows the same 60/min `search` bucket rather
-  // than the 600/min blanket. Fired once per 1:1 section mount / period switch. The narration
-  // POST is NOT here — it rides the /api/pro/synthesis pair above (kind 'person'). The
-  // `?evidence=1` variant (the People report) is the same event-loop shape — ~8 additional
-  // capped `ORDER BY … LIMIT` selects on the same fold — so it sits on the same tier.
-  if (!mutating && path.startsWith('/api/pro/insights/person/')) {
-    return [TIERS.search, TIERS.read];
-  }
-
-  // GET /api/bot-authoring — the authoring-automation vector, the bot-shaped twin of the person
-  // route above and DECIDED for the identical reason: it runs the lane resolver, a capped
-  // merged-PR walk (AUTOMATION_MERGED_PR_CAP) whose ids then travel as bind parameters into two
-  // more scans, plus ~6 windowed aggregates. It is CORE and free, so it never reaches the
-  // /api/pro/ AI catch-all — without this line it would silently inherit the 600/min blanket
-  // `read` bucket, which is the wrong answer for a fold this size (the "follow the token" rule:
-  // 'DB-only' is not the same as 'cheap').
-  if (!mutating && path === '/api/bot-authoring') return [TIERS.search, TIERS.read];
 
   // ---- Bot behaviour depth (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
   // GET /api/pro/bot-behaviour — the workspace behaviour rollup, MOVED from core's
@@ -611,7 +589,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
     path.startsWith('/api/claude-findings');
   if (isClaudeReviewPath || path.startsWith('/api/pro/')) {
     // A GET is a cheap read of a stored result (poll status, load history) — only
-    // the generation verbs spend. `/refresh` and `/ask` are POSTs; so are the
+    // the generation verbs spend. `/refresh` and `/generate` are POSTs; so are the
     // review/fix starts. The one GET that generates is a `…/stream` SSE subscribe,
     // which attaches to an already-started run, so it stays a read.
     // ⚠ THE SETTINGS EXEMPTIONS ARE A LIST, NOT A SUFFIX. `endsWith('/settings')` covered

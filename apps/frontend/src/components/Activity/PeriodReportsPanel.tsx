@@ -38,8 +38,6 @@ import {
   usePeriodReport,
   usePeriodReportsList,
 } from '../../hooks/usePeriodReports.js';
-import { AdHocChatPanel } from './AdHocChatPanel.js';
-import { PeriodPeopleSection } from './PeriodPeopleSection.js';
 import { CopyButton } from '../CopyButton.js';
 import { InfoButton } from '../InfoModal.js';
 import {
@@ -985,106 +983,6 @@ function Movements({
   );
 }
 
-// ── "Ask about this period" — the ad-hoc chat, grounded in THIS period (plan C5) ────────────
-//
-// The ad-hoc chat (pins, history, @-mentions, optional chart + bot-performance passes) moved
-// here from the deleted Insights Overview tab. It mounts EXPANDED under the report — the
-// conversation is the report's follow-up surface, and a collapsed one-line toggle proved to be
-// where the feature went to die — with the toggle kept for readers who want the report alone
-// (the collapse is session-local, like the panel's other disclosure state). The `periodWindow` prop
-// carries the viewed period's exact [fromMs, toMs) (`periodStart`/`periodEnd` ARE those bounds,
-// ISO-serialised), which `useSprintChat` sends as `SprintChatBody.window`, so every answer is
-// grounded in the period on screen rather than a trailing window ending now.
-//
-// This REPLACED the old `ReportChat` (the pill-driven drill-down grounded in the stored report
-// JSON via `usePeriodReportChat`): two chats titled "Ask about this period" on one report was a
-// coherence bug waiting to ship, and this one is a strict superset of what a reader could do
-// there. Its suggested pills are templated CLIENT-SIDE from the report's own significant deltas —
-// the numbers in a pill are computed (the same `signed`/`changeFmtFor` the table renders), never
-// model-authored (D4).
-//
-// Gated on `activityDigest` — a DIFFERENT capability from the panel's `periodReports`, and one
-// that keeps the ABSENCE posture: no capability → the section renders nothing, no badge, no
-// nudge. That is deliberate and it is NOT an inconsistency to tidy up. The visible-but-locked
-// treatment is scoped to the named panes (this panel, the People report, the by-workspace axis,
-// Chronology, Bots ROI); every reader who gets far enough to see this chat is already inside one
-// they paid for, and a second upsell bolted to a sub-section of a pane they own is an advert.
-// The transcript/draft live in the filters
-// store keyed by WORKSPACE, so an answer asked under one period can survive into another
-// period's view — the answer's own window caption ("Report period · 5 Aug – 19 Aug") is the
-// existing defence, stating what it covered.
-function AskAboutPeriod({ report }: { report: PeriodReport }): JSX.Element | null {
-  const { activityDigest } = useProCapabilities();
-  const [open, setOpen] = useState(true);
-  if (!activityDigest) return null;
-  const fromMs = Date.parse(report.periodStart);
-  // ⚠ AN OPEN PERIOD'S `periodEnd` IS IN THE FUTURE — month-to-date carries the month's true end,
-  // because that is what the period IS. Grounding the chat to that bound would hand the model a
-  // window running past today under a caption saying "to date". `generatedAt` on an in-progress
-  // report is the instant it was computed, which is exactly the upper bound its figures used.
-  const toMs = report.inProgress ? Date.parse(report.generatedAt) : Date.parse(report.periodEnd);
-  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return null;
-  return (
-    <div className="border-t border-gray-200 pt-2 dark:border-gray-800 print:hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-        title="Ask free-form questions grounded in this period's data (Pro, runs your configured report model)"
-      >
-        <ChevronIcon dir={open ? 'down' : 'right'} />
-        Ask about this period
-      </button>
-      {open && (
-        <div className="mt-2">
-          <AdHocChatPanel
-            periodWindow={{ fromMs, toMs }}
-            periodLabel={`${periodTitle(report.periodStart, report.periodEnd, report.grain)}${
-              report.inProgress ? ' · to date' : ''
-            }`}
-            suggestedQuestions={suggestedDeltaQuestions(report)}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-// The chat's suggested pills: "Why did PR size, people only rise +47 lines (+33%)?". Allowed under
-// D4 because every number here is computed — the label, verb and figures come from the same
-// METRIC_META formatters the Movements chips render (`standaloneLabelFor` and
-// `standaloneChangeFmtFor`, because a pill has no neighbouring table row or note to lean on for
-// either the name or the unit).
-//
-// ⚠ THE RANKING IS THE SERVER'S, READ OFF `movements` — not a second sort here. `rankMovements`
-// orders by |percentChange| and has already dropped the insignificant and the null-change rows;
-// the Movements strip two sections up renders exactly that list. The predecessor re-sorted
-// `comparison.deltas` by raw |absoluteChange| ACROSS MIXED UNITS, ranking "+47 lines" above
-// "+18 hours" on the size of the digits alone: measured on 12 real reports, the two orders
-// disagreed on 11, and on 11 the pills offered a metric absent from the visible top five.
-// `median_time_to_first_human_review_hours` is the biggest mover on real reports (once at +536%)
-// and had never once become a pill.
-//
-// Capped at four. The Movements strip shows five.
-function suggestedDeltaQuestions(report: PeriodReport): { label: string; question: string }[] {
-  // `?? []`: a row stored before `movements` existed serves the field absent, and there is no
-  // error boundary above this.
-  return (report.movements ?? []).slice(0, 4).map((m) => {
-    const meta = metaFor(m.key); // report array — old-vocabulary keys possible on stale rows
-    const verb = m.absoluteChange > 0 ? 'rise' : 'fall';
-    const change = signed(m.absoluteChange, standaloneChangeFmtFor(meta));
-    const pct = m.percentChange != null ? ` (${signed(m.percentChange, pctFmt)})` : '';
-    const name = standaloneLabelFor(meta);
-    return {
-      // The percentage is ON THE FACE, not in a tooltip: it is the figure the ranking is made of,
-      // and the chip above the chat already prints it.
-      label: `Why did ${name} ${verb} ${change}${pct}?`,
-      question: `Why did ${name} ${verb} ${change}${pct} over this period? Point to the PRs, repos or people in the data that explain the movement.`,
-    };
-  });
-}
-
 // ── The report body ──────────────────────────────────────────────────────────────────────────
 function ReportBody({
   report,
@@ -1204,8 +1102,6 @@ function ReportBody({
           Not written up yet. Generating adds a write-up; the figures above are final.
         </div>
       )}
-
-      <AskAboutPeriod report={report} />
     </div>
   );
 }
@@ -1803,8 +1699,8 @@ export function PeriodReportsPanel(): JSX.Element | null {
               {(report.error as Error)?.message ?? 'Couldn’t load this report.'}
             </div>
           ) : current ? (
-            // Keyed by the period so switching periods remounts the body — the chat transcript
-            // and every derived map belong to ONE period and must not carry over (including the
+            // Keyed by the period so switching periods remounts the body — every derived map
+            // belongs to ONE period and must not carry over (including the
             // by-workspace expansions, which are per-period readings too).
             <div key={current.periodKey}>
               <ReportBody report={current} byWorkspace={report.data?.byWorkspace ?? null} />
@@ -1819,16 +1715,6 @@ export function PeriodReportsPanel(): JSX.Element | null {
             </div>
           )}
 
-          {/* People (plan P4.2, now the People-report picker): pick people AND bots from the
-              WORKSPACE's own membership, then "Begin report" opens the people-report tab for
-              the period selected above (via `insightsReportKey`). Alphabetical, metric-free,
-              never a leaderboard.
-
-              It sits inside the entitled branch, so an unentitled reader meets the locked pane
-              above and never this — but the section ALSO carries its own `periodReports` guard
-              now, because "safe by where it is mounted" stops being true the first time someone
-              moves the mount, and this one fires eight roster queries on mount. */}
-          <PeriodPeopleSection />
 
           {/* ── EARLIER CADENCES ────────────────────────────────────────────────────────────
               Stored reports the current period grid cannot name. They are here because a report is

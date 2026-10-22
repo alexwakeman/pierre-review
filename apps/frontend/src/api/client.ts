@@ -99,7 +99,6 @@ import type {
   WorkspaceMetricsResponse,
   AiUsageResponse,
   BotWindowKind,
-  AutomationOutputResponse,
   BotAnalyticsResponse,
   BotThemesResponse,
   BotBehaviourResponse,
@@ -191,16 +190,10 @@ import type {
   PrRefreshBody,
   PrRefreshResponse,
   SuggestedReviewersResponse,
-  SprintChatBody,
-  SprintChatResponse,
-  SprintChatHistoryResponse,
   PeriodReportGenerateResponse,
   PeriodReportResponse,
-  PersonPeriodResponse,
   PeriodGrain,
   PeriodReportsListResponse,
-  PinnedPromptsResponse,
-  CreatePinnedPromptBody,
   ProSettings,
   WorkspaceProSettings,
   WorkspaceProSettingsUpdate,
@@ -383,10 +376,6 @@ export interface SynthesisRequestParams {
   select?: SynthesisFlaggingSelect | null;
   severities?: MlSeverity[] | null;
   category?: MlCategory | null;
-  /** 'person' grain only: the 1:1 subject + the period's real epoch-ms bounds. */
-  userId?: number | null;
-  fromMs?: number | null;
-  toMs?: number | null;
 }
 
 function synthesisQueryParts(p: SynthesisRequestParams): (string | undefined)[] {
@@ -402,9 +391,6 @@ function synthesisQueryParts(p: SynthesisRequestParams): (string | undefined)[] 
       ? `severities=${encodeURIComponent(p.severities.join(','))}`
       : undefined,
     p.category ? `category=${encodeURIComponent(p.category)}` : undefined,
-    p.userId != null ? `userId=${p.userId}` : undefined,
-    p.fromMs != null ? `fromMs=${p.fromMs}` : undefined,
-    p.toMs != null ? `toMs=${p.toMs}` : undefined,
   ];
 }
 
@@ -646,13 +632,6 @@ export const api = {
   // flagged `isMaintainer` for this PR's repo.
   mentionCandidates: (prId: number) =>
     get<MentionCandidate[]>(`/api/prs/${prId}/mention-candidates`),
-  // @mention candidates for a whole WORKSPACE, for the ad-hoc Insights box — the scope-wide sibling
-  // of `mentionCandidates` above, which is one PR's. (The name keeps the word "scope" for that
-  // contrast alone; a workspace IS the scope, and there is no other kind left.) The id resolves to
-  // the workspace's repos server-side, so a caller cannot widen it and an empty workspace yields no
-  // candidates rather than the account's whole roster.
-  scopeMentionCandidates: (workspaceId: number) =>
-    get<MentionCandidate[]>(withQuery('/api/mention-candidates', workspaceParam(workspaceId))),
   prFiles: (id: number) => get<PrFilesResponse>(`/api/prs/${id}/files`),
   // "Load next 100 files" — one later page of the same listing (page 2 onward; click-gated).
   prFilesPage: (id: number, page: number) =>
@@ -1052,48 +1031,11 @@ export const api = {
   // (`sprintReport` / `refreshSprintReport` were REMOVED with `SprintReportCard` (the C7 cut
   // list); the `/api/pro/sprint-report*` plugin routes still exist server-side but have no SPA
   // consumer. `retroReport` / `refreshRetroReport` were REMOVED with the Insights "Retro" panel and its
-  // `/api/pro/retro*` routes. The retrospective is now a quick-question pill in the ad-hoc chat,
-  // which needs no route of its own.)
+  // `/api/pro/retro*` routes. The ad-hoc chat that replaced it was removed 2026-10-22.)
   // Repo-scoped Claude review history (all runs per PR, newest-first). Gated on
   // config.claudeReviewEnabled; the response's `enabled` flag reflects that.
   repoClaudeReviews: (repoId: number) =>
     get<RepoClaudeReviewsResponse>(`/api/repos/${repoId}/claude-reviews`),
-
-  // ---- Pro per-repo digest (Workstream 2; @pierre/pro, flagged) ----
-  // ---- Ad-hoc "Ask about the sprint" chat (Pro Haiku; activityDigest capability) ----
-  // A free-text question answered from the workspace's snapshot.
-  //
-  // ⚠ WIRE ODDITY, DELIBERATE: the workspace rides in the POST BODY as `SprintChatBody.scope`, a
-  // STRING holding the workspace id (`String(workspaceId)`) — the field name is frozen in the
-  // shared contract. The sentinel vocabulary it used to accept is gone; the plugin parses it with
-  // `parseWorkspaceId` and persists `ws:<id>` as the cache `scope_key`, whose prefix is what stops
-  // a legacy `'3'` (team 3) aliasing onto workspace 3's different repo set. Absent = the Default.
-  sprintChat: (body: SprintChatBody) =>
-    fetch('/api/pro/insights/ask', jsonBody('POST', body)).then((r) =>
-      handle<SprintChatResponse>(r),
-    ),
-  // The account's paginated chat history (newest-first; stored answers, free to re-open), scoped to
-  // the current workspace.
-  sprintChatHistory: (limit: number, offset: number, workspaceId: number) =>
-    get<SprintChatHistoryResponse>(
-      withQuery(
-        '/api/pro/insights/chat-history',
-        `limit=${limit}`,
-        `offset=${offset}`,
-        workspaceParam(workspaceId),
-      ),
-    ),
-  // Saved, re-runnable ad-hoc prompts (server-stored per account + workspace).
-  pinnedPrompts: (workspaceId: number) =>
-    get<PinnedPromptsResponse>(
-      withQuery('/api/pro/insights/pinned', workspaceParam(workspaceId)),
-    ),
-  createPinnedPrompt: (body: CreatePinnedPromptBody) =>
-    fetch('/api/pro/insights/pinned', jsonBody('POST', body)).then((r) =>
-      handle<{ pinned: PinnedPromptsResponse['prompts'][number] }>(r),
-    ),
-  deletePinnedPrompt: (id: number) =>
-    fetch(`/api/pro/insights/pinned/${id}`, jsonBody('DELETE')).then((r) => handle<void>(r)),
 
   // ---- Period-over-period reports (Pro `periodReports`; /api/pro/insights/reports/*) ----
   // A stored, forwardable artifact for ONE completed sprint-cadence period: its window-pure
@@ -1151,23 +1093,6 @@ export const api = {
       ),
       jsonBody('POST', body),
     ).then((r) => handle<PeriodReportGenerateResponse>(r)),
-  // (`periodReportChat` — the per-report drill-down turn — was removed with the panel's old
-  // ReportChat: "Ask about this period" is the ad-hoc chat now, grounded via `sprintChat` with
-  // explicit period bounds. The `…/reports/:key/chat` route still serves; nothing here calls it.)
-  // The 1:1-prep vector (Pro `periodReports`; plan P4.2): one person, one cadence period, FREE
-  // deterministic read. `person: null` covers unknown/foreign/bot ids and off-grid periods in
-  // one shape. The narration is NOT on this route — it rides the synthesis pair (kind 'person').
-  // `evidence` (the People report) asks the same fold for the receipt rows under the vector
-  // (`person.evidence`) — still free and deterministic; the 1:1 section keeps passing nothing.
-  personPeriod: (workspaceId: number, userId: number, periodKey: string, evidence?: boolean) =>
-    get<PersonPeriodResponse>(
-      withQuery(
-        `/api/pro/insights/person/${userId}`,
-        workspaceParam(workspaceId),
-        `period=${encodeURIComponent(periodKey)}`,
-        evidence ? 'evidence=1' : undefined,
-      ),
-    ),
   // ---- The blast-radius impact note (Pro, prSummary) ----
   // The stored note for this PR. A pure cache read (free); the run POST below is the only billing
   // path.
@@ -1839,26 +1764,6 @@ export const api = {
         repoIdsParam(repoIds),
         bounds ? `fromMs=${bounds.fromMs}` : undefined,
         bounds ? `toMs=${bounds.toMs}` : undefined,
-      ),
-    ),
-  // The AUTHORING half of "what did this automation do" (CORE, free). Bounds are REQUIRED by the
-  // route — the caller always knows its period — so there is no rolling-enum overload here.
-  botAuthoring: (
-    workspaceId: number,
-    userId: number,
-    bounds: { fromMs: number; toMs: number },
-    evidence: boolean,
-    repoIds?: number[] | null,
-  ) =>
-    get<AutomationOutputResponse>(
-      withQuery(
-        '/api/bot-authoring',
-        `userId=${userId}`,
-        `fromMs=${bounds.fromMs}`,
-        `toMs=${bounds.toMs}`,
-        workspaceParam(workspaceId),
-        repoIdsParam(repoIds),
-        evidence ? 'evidence=1' : undefined,
       ),
     ),
   // ── Bot Tuning Advisor (Pro; /api/pro/advisor/*) ─────────────────────────────────────────

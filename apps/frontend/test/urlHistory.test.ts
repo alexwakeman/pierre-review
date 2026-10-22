@@ -928,6 +928,17 @@ describe('the Activity sub-tab strips', () => {
     expect(useFilters.getState().insightsInnerTab).not.toBe(legacy);
   });
 
+  // The People report (Reports → People) and its ephemeral tab were REMOVED 2026-10-22. Neither
+  // ever had a URL value of its own, but a hand-typed or guessed `?insightsTab=people` must still
+  // land on the Reports default (Overview) rather than anywhere surprising.
+  it('a ?insightsTab=people link lands on the Reports default', () => {
+    seat('/app/?workspace=5&view=activity&activityRepo=insights&insightsTab=people');
+    applyUrlToStores({ fromPop: true });
+    expect(useFilters.getState().activityRepoId).toBe('insights');
+    expect(useFilters.getState().insightsInnerTab).toBe('overview');
+    expect(usePinnedTabs.getState().activeTab).not.toBe('people-report');
+  });
+
   it('a legacy ?insightsTab=merged link with no rail named lands on This Sprint too', () => {
     seat('/app/?workspace=5&view=activity&insightsTab=merged');
     applyUrlToStores({ fromPop: true });

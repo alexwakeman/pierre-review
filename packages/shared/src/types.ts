@@ -2973,23 +2973,10 @@ export const PRESET_PROMPTS: PresetPrompt[] = [
   },
 ];
 
-// ── Ad-hoc "Ask about the sprint" chat (Pro, Haiku) ──────────────────────────────────────────
-// A free-text question answered from the SAME workspace-insights snapshot the Sprint summary uses,
-// grounded (answer only from the JSON) with a soft decline for off-topic / unanswerable asks.
-// When `wantChart`, a SECOND constrained Haiku pass emits this narrow spec, rendered by the
-// frontend's zero-dep chart toolkit; validated strictly, dropped (chart:null) on any mismatch.
-// `unit` picks the axis formatter (count→fmtNum, percent→n%, hours→fmtDuration). `type:'line'|
-// 'area'` is for time-series (ISO-date labels); 'bar' for arbitrary categorical labels.
-export interface SprintChatChartSpec {
-  type: 'bar' | 'line' | 'area';
-  title: string;
-  unit: 'count' | 'percent' | 'hours';
-  labels: string[];
-  series: { label: string; values: (number | null)[] }[];
-}
-
-// POST /api/pro/insights/ask body. `wantBots` appends Pierre's deterministic bot-performance data
-// (getBotAnalytics) to the prompt.
+// ── Insights answer windows ──────────────────────────────────────────────────────────────────
+// (The ad-hoc "Ask about this period" chat — `SprintChat*`, `PinnedPrompt*` — was REMOVED
+// 2026-10-22 with its routes. Its tables `sprint_chat_history` and `pinned_prompts` are DORMANT.
+// These two window types stay: the plugin's comparison-window resolver speaks them.)
 // How far back an Insights chat answer reaches. A per-QUESTION override of the account's
 // configured comparison window (Settings → Sprint), picked from the FilterBar's Range chips while
 // the Insights pane is open — it never writes back to Settings.
@@ -3016,127 +3003,6 @@ export interface InsightsAnswerWindow {
   from: string; // ISO-8601
   to: string; // ISO-8601 (in the FUTURE for 'sprint' — the sprint's end, not "now")
   requested?: InsightsRangeKey;
-}
-
-// One prior completed turn of the conversation being continued, oldest→newest on the wire.
-// Strings only — no window/chart/refs travel back: grounding is REBUILT fresh every turn, so what
-// carries forward is the transcript, not stale data.
-export interface SprintChatHistoryTurn {
-  question: string; // what was asked (the server re-caps at its question limit)
-  answer: string; // the grounded markdown the model previously produced
-}
-
-// The conversation depth cap, COUNTING the live question. The server reads at most
-// `SPRINT_CHAT_MAX_TURNS − 1` prior pairs per ask (its own inlined `CHAT_MAX_PRIOR_TURNS = 9` —
-// the plugin only `import type`s from this package, the AI_CREDITS_PER_USD mirror pattern); the
-// frontend value-imports this the way PRESET_PROMPTS already is, to lock the input at depth 10.
-export const SPRINT_CHAT_MAX_TURNS = 10;
-
-export interface SprintChatBody {
-  question: string;
-  // Absent = the WORKSPACE's configured window (its `comparisonMode`, plugin migration 0032).
-  // Present = this one question covers that range instead.
-  range?: InsightsRangeKey;
-  // Explicit bounds for THIS question — the Reports "Ask about this period" mount sends the
-  // viewed period's exact `[fromMs, toMs)` so the answer covers the period on screen, not a
-  // trailing window ending now. Present (and valid) ⇒ wins over `range`; the echoed and stored
-  // `InsightsAnswerWindow.kind` is then `'period'`. Epoch milliseconds. The bounds reach
-  // `getBotAnalytics` through the same explicit-bounds path the `'sprint'` chip uses
-  // (apiVersion 18's `{kind, fromMs, toMs}` widening).
-  window?: { fromMs: number; toMs: number };
-  // Which WORKSPACE to ground the answer in — the wire value is the workspace id (the same plain
-  // integer `?workspace=` carries, as a string on this body). Absent = the account's Default.
-  // The sentinel vocabulary it used to accept ('all' | 'none' | 'teams' | '<teamId>') is gone with
-  // the scope union; the plugin parses this with parseWorkspaceId and persists `ws:<id>` as the
-  // cache `scope_key`, whose prefix is what stops a legacy '3' aliasing workspace 3.
-  scope?: string;
-  wantChart?: boolean;
-  wantBots?: boolean;
-  // Prior turns of THIS conversation, oldest→newest. The server reads AT MOST the newest 9 pairs
-  // (`CHAT_MAX_PRIOR_TURNS`) — with the live question that is conversation depth
-  // SPRINT_CHAT_MAX_TURNS. Anything older, plus anything the token budget cannot fit, is dropped
-  // OLDEST-FIRST and counted in the response's `trimmedTurns`.
-  history?: SprintChatHistoryTurn[];
-}
-
-export interface SprintChatResponse {
-  enabled: boolean;
-  // The grounded Markdown answer (or a one-line decline). Null only when the scope has no data
-  // or the account is out of credits with nothing to serve.
-  answer: string | null;
-  // `owner/name#N` PR references resolved from `answer`, for linkification (same treatment as the
-  // Sprint / Retro / preset cards). Empty when the answer names no PRs.
-  prRefs: DigestPrRef[];
-  // Present (non-null) only when `wantChart` was set AND the second pass produced a valid spec.
-  chart?: SprintChatChartSpec | null;
-  // The window the answer was grounded in. Optional on the wire so a stale persisted response
-  // still parses; absent means "unknown", which the UI states rather than guessing at 14d.
-  window?: InsightsAnswerWindow | null;
-  // The model that actually answered — the account's resolved report model (settings →
-  // config default), the same id the usage ledger and the stored history row carry.
-  model?: string;
-  generatedAt?: string; // ISO-8601
-  throttled?: boolean;
-  creditsExhausted?: boolean;
-  // Model-proposed follow-up questions for the next turn (≤3, each ≤120 chars). Every entry is
-  // DIGIT-FREE — the server drops any candidate containing a digit (D4: the model never authors
-  // a number the UI presents as data; mirrors the synthesis ordering-mode gate). Absent when none
-  // were proposed / the tail failed to parse; never persisted to history.
-  followUps?: string[];
-  // How many Q&A pairs of the SENT history the model did not see (depth cap + token budget
-  // combined). Absent/0 = the model saw the whole transcript. The UI whispers it.
-  trimmedTurns?: number;
-}
-
-// One stored past ad-hoc chat (Pro; server-persisted per account, every workspace). Carries the
-// full grounded answer + chart + PR refs so re-opening a past question is FREE (no re-run/no spend).
-export interface SprintChatHistoryItem {
-  id: number;
-  question: string;
-  answer: string;
-  chart: SprintChatChartSpec | null;
-  prRefs: DigestPrRef[];
-  wantChart: boolean;
-  wantBots: boolean;
-  // The stored cache key of the workspace the answer was grounded in — `ws:<workspaceId>`. Rows
-  // written before the workspace refactor carried a bare team scope string and are re-keyed (or
-  // cleared) by plugin migration 0020; the `ws:` prefix is what makes a legacy value unmatchable
-  // rather than a silent alias onto a workspace with a different repo set.
-  scope: string;
-  // The window this answer covered. NULL on rows written before ranges were selectable (plugin
-  // migration 0023 adds the columns and backfills nothing — a historical answer's window is not
-  // recoverable, and inventing rolling-14 for it would be a fabricated caption).
-  window: InsightsAnswerWindow | null;
-  model: string | null;
-  createdAt: string; // ISO-8601
-}
-// Paginated chat history (newest-first). `total` is the account's whole history size so the
-// client can page (default 10/page). `enabled:false` mirrors the chat itself being flagged off.
-export interface SprintChatHistoryResponse {
-  enabled: boolean;
-  items: SprintChatHistoryItem[];
-  total: number;
-}
-
-// A saved, re-runnable ad-hoc prompt (Pro; server-stored per account + workspace, cross-device).
-export interface PinnedPrompt {
-  id: number;
-  text: string;
-  wantChart: boolean;
-  wantBots: boolean;
-  createdAt: string; // ISO-8601
-}
-export interface PinnedPromptsResponse {
-  enabled: boolean;
-  prompts: PinnedPrompt[];
-}
-export interface CreatePinnedPromptBody {
-  text: string;
-  wantChart?: boolean;
-  wantBots?: boolean;
-  // The workspace this prompt is pinned to — the workspace id as a string, exactly like
-  // SprintChatBody.scope. Absent = the account's Default. Stored as the `ws:<id>` scope key.
-  scope?: string;
 }
 
 export type SyncRunStatus = 'idle' | 'running' | 'ok' | 'error';
@@ -11188,10 +11054,6 @@ export interface PeriodReportSpend {
   inputTokens: number; outputTokens: number;
 }
 
-export interface PeriodChatTurn { question: string; answer: string; createdAt: string; }
-export interface PeriodChatResponse {
-  enabled: boolean; answer: string; creditsExhausted?: boolean;
-}
 
 // Estimated spend BEFORE the user presses generate, shown next to the model selector — a model
 // switch that silently costs 5× is a support ticket. The ACTUAL spend is reported after the run.
@@ -12327,19 +12189,15 @@ export type ReactionWriteResponse = ReactionState;
 // (core `db/synthesis-input.ts` getSynthesisInput). A synthesis over a second predicate would
 // summarise a different population than the receipt list below it.
 
-/** The P2.1 drill-down grains plus the ORDERING grain 'person' (the 1:1-prep narration, N4 — one
- *  digit-free phrase per person-vector line), plus the SECTIONS grain
- *  'person_report' (the People report's per-person narrative — digit-free prose per fixed
- *  section id over the person vector + its evidence rows; see SynthesisSectionItem). Every
- *  widening here was additive — no version change (exactly the growth path the P2.1 comment
- *  promised). (REMOVED: the 'brief' / 'rollup' ordering grains; their stored rows are DORMANT.) */
+/** The P2.1 drill-down grains. (REMOVED: the 'brief' / 'rollup' ordering grains, and on
+ *  2026-10-22 the 'person' (1:1 prep) and 'person_report' (People report) grains, with the
+ *  ordering and sections output modes they alone used. Their stored `pro_synthesis` rows are
+ *  DORMANT.) */
 export type SynthesisScopeKind =
   | 'bot-flagging'
   | 'bot-threads'
   | 'bot-volume'
-  | 'workspace-bots'
-  | 'person'
-  | 'person_report';
+  | 'workspace-bots';
 
 /**
  * The flagging drill-down's population selector, as the synthesis descriptor spells it.
@@ -12362,14 +12220,6 @@ export type SynthesisFlaggingSelect = 'findings' | 'summaries' | 'severity' | 'c
  *     requires select='category').
  * `window` is ignored — and canonicalised out of the cache key — for 'bot-threads': the resolve
  * backlog is a CURRENT-STATE set, not a windowed one (its drill-down takes no window either).
- *
- * The PERSON grains — 'person' (ORDERING, N4) and 'person_report' (SECTIONS, the People
- * report) — carry their OWN three fields and nothing else: `userId` is the SUBJECT (a person,
- * resolved through the lane resolver core-side — never `botUserId`, which is a bot-population
- * narrowing) and `fromMs`/`toMs` are the REAL period bounds off the cadence grid (the enum
- * `window` slot is canonicalised out for them, exactly like the other ordering grains — an
- * arbitrary-bounds period has no BotWindowKind spelling). All three name a POPULATION: garbage
- * 400s, it never degrades to a different person or period.
  */
 export interface SynthesisScope {
   kind: SynthesisScopeKind;
@@ -12381,29 +12231,15 @@ export interface SynthesisScope {
   select?: SynthesisFlaggingSelect;
   severities?: MlSeverity[];
   category?: MlCategory;
-  /** 'person' / 'person_report' only: the subject's user id. */
-  userId?: number;
-  /** 'person' / 'person_report' only: the period's real bounds (epoch ms, half-open
-   *  `[fromMs, toMs)`). */
-  fromMs?: number;
-  toMs?: number;
 }
 
-/** The item family a synthesis row belongs to — the prefix of its `id` ref. `brief_line` is a
- *  figure line whose id ENCODES its computed counts (the person_report grain's figure lines). `person_metric` is the 'person' grain's family: one non-null line of the 1:1 person
- *  vector, its id encoding the metric key + computed value + PERSON_METRICS_SCHEMA_VERSION for
- *  the same content-hash reason. `path_area` is the 'person_report' grain's path-area family:
- *  one top directory bucket of the subject's windowed commits, its id encoding
- *  bucket + file count (content hash — an area-mix change changes the id changes the hash). */
+/** The item family a synthesis row belongs to — the prefix of its `id` ref. */
 export type SynthesisItemKind =
   | 'review_comment'
   | 'pr_comment'
   | 'review'
   | 'thread'
-  | 'pr'
-  | 'brief_line'
-  | 'person_metric'
-  | 'path_area';
+  | 'pr';
 
 /**
  * One row of the model's input — the EXACT row the drill-down lists, reduced to what a grouping
@@ -12452,34 +12288,6 @@ export interface SynthesisCluster {
   configFixable?: boolean;
 }
 
-/** An ordering-mode item ('person'): a ref from the input set plus a DIGIT-FREE
- *  phrase (regex-validated server-side; a digit or unknown ref rejects the item and the caller
- *  falls back to its templated line). Numbers are appended by the CALLER from computed values. */
-export interface SynthesisOrderingItem {
-  ref: string;
-  phrase: string;
-}
-
-/** The 'person_report' SECTIONS mode's fixed vocabulary — the only section ids the server
- *  accepts (an unknown or duplicate id drops the item, plugin-side). Deliberately a CLOSED set:
- *  the model picks which of these to write, never invents its own headings. */
-export type PersonReportSectionId =
-  | 'worked_on'            // what they worked on (from PR titles + path areas)
-  | 'nature_of_changes'    // the semantic read: what kind of changes these were
-  | 'collaboration'        // review flow: giving/receiving, thread back-and-forth
-  | 'waiting_and_risk';    // what's waiting on them / on their PRs, loose ends
-
-/** A Phase-3 SECTIONS-mode item ('person_report'): at most one per PersonReportSectionId, a
- *  DIGIT-FREE paragraph (regex-validated + length-capped server-side) grounded in the input
- *  items it cites via `refs` (⊆ the input set; strays dropped; a section left with zero valid
- *  refs is dropped — evidence-based or absent). Every figure near this prose is code-rendered
- *  from the vector/evidence wire fields, never model-authored (D4). */
-export interface SynthesisSectionItem {
-  id: PersonReportSectionId;
-  prose: string;           // DIGIT-FREE, server-validated, length-capped
-  refs: string[];          // ⊆ input ids — the citations the UI renders as chips
-}
-
 /** The stored, validated synthesis — what the GET serves and the card renders. */
 export interface StoredSynthesis {
   kind: SynthesisScopeKind;
@@ -12487,15 +12295,6 @@ export interface StoredSynthesis {
    *  mutation-key segment, so two mounts of one scope share in-flight state). */
   scopeKey: string;
   clusters: SynthesisCluster[];
-  /** ORDERING mode only ('person'): the validated {ref, phrase} list, model order.
-   *  Every ref ∈ the input set, every phrase digit-free (server-validated; a rejected item is
-   *  simply absent — the caller renders its templated line). Empty/absent for cluster kinds. */
-  ordering?: SynthesisOrderingItem[];
-  /** SECTIONS mode only ('person_report'): the validated section list, fixed-vocabulary ids,
-   *  digit-free prose, refs ⊆ the input set (zero-ref sections dropped server-side). Absent for
-   *  every other kind; `[]` is a stored-but-unparseable generation (the deterministic vector +
-   *  evidence cards stay primary, and storing the row stops a click from loop-billing). */
-  sections?: SynthesisSectionItem[];
   /** Input items the model left unclustered — recomputed server-side as input − clustered. */
   remainderIds: string[];
   remainderCount: number;
@@ -12794,105 +12593,6 @@ export interface PersonPeriod {
   /** The receipt rows under the vector (see PersonPeriodEvidence) — ABSENT unless requested
    *  (`?evidence=1`); an older host answering an evidence-asking plugin simply omits it. */
   evidence?: PersonPeriodEvidence;
-}
-
-/** GET /api/pro/insights/person/:userId — Pro `periodReports`. `person: null` covers every
- *  degrade in ONE shape (unknown/foreign user, a bot, no activity in this workspace, a period
- *  key off the grid) so the route is never an existence oracle. Narration is NOT here — it rides
- *  the synthesis seam's own GET/POST (kind 'person'), one seam per datum. */
-export interface PersonPeriodResponse {
-  enabled: boolean;
-  workspaceId: number;
-  /** False = no sprint cadence configured — same refusal (and same setup prompt) as Reports. */
-  cadenceConfigured: boolean;
-  /** Echo of the resolved period, so the client can build the synthesis descriptor without
-   *  re-deriving grid maths. Absent when `person` is null. */
-  periodKey?: string;
-  periodStart?: string; // ISO
-  periodEnd?: string; // ISO (exclusive, matching the half-open window)
-  person: PersonPeriod | null;
-}
-
-// ── AUTHORING AUTOMATION: the output vector for a bot that writes PRs ────────────────────────
-//
-// The People report's bot sections answer "what did this automation produce?" from
-// `getBotAnalytics` — threads, comments, acted-on. That is REVIEW output, and it is the whole
-// story only for the `review` and `quality_check` roles. The picker also offers `dependency`,
-// `code_agent`, `release` and `housekeeping` automation, whose real output is PRs they AUTHORED:
-// for those, every review column is legitimately zero and a wall of zeros reads as "it did
-// nothing" when the truth is "it did a different thing". This vector is that different thing.
-//
-// ⚠ It is NOT a second spelling of the person vector. A person's numbers answer "how is this
-// teammate doing"; an automation's answer "what is this thing costing us" — hence
-// `prs_merged_without_human_review` (the cheap ones) and `human_review_comments_received` (the
-// expensive ones) rather than response times and review load. Do not add a metric here just
-// because PersonPeriod has it.
-export type AutomationMetricKey =
-  | 'prs_opened'
-  | 'prs_merged'
-  | 'prs_closed_unmerged'
-  | 'merge_rate_pct'
-  | 'median_hours_to_merge'
-  | 'median_pr_size_lines'
-  | 'prs_merged_without_human_review'
-  | 'human_review_comments_received'
-  | 'repos_touched';
-
-export const AUTOMATION_METRIC_KEYS: AutomationMetricKey[] = [
-  'prs_opened',
-  'prs_merged',
-  'prs_closed_unmerged',
-  'merge_rate_pct',
-  'median_hours_to_merge',
-  'median_pr_size_lines',
-  'prs_merged_without_human_review',
-  'human_review_comments_received',
-  'repos_touched',
-];
-
-/** `value: null` is "no sample", NEVER 0 — the period-metrics rule. `sampleSize` is the row
- *  count the figure was folded over, so a median over two PRs can be captioned as such. */
-export interface AutomationMetricValue {
-  key: AutomationMetricKey;
-  value: number | null;
-  sampleSize: number;
-}
-
-/** Receipt rows under the vector — the PRs themselves, capped like the person evidence
- *  (PERSON_EVIDENCE_CAP) with an honest `…More` remainder per group. */
-export interface AutomationOutputEvidence {
-  /** Merged inside the window, newest first. */
-  merged: DigestPrRef[];
-  mergedMore: number;
-  /** Closed inside the window WITHOUT merging — the automation's wasted churn. */
-  closedUnmerged: DigestPrRef[];
-  closedUnmergedMore: number;
-  /** Its PRs that pulled human review comments in the window — where it cost people time. */
-  humanReviewed: DigestPrRef[];
-  humanReviewedMore: number;
-}
-
-export interface AutomationOutput {
-  userId: number;
-  login: string | null;
-  displayName: string | null;
-  /** What the workspace says this automation DOES; null when unclassified. Drives the caption,
-   *  never the maths — the vector is identical whatever the role. */
-  role: ReviewerRole | null;
-  /** Repos it touched in the window, by PR count, descending. Capped for rendering. */
-  repos: Array<{ repoId: number; repoFullName: string; prs: number }>;
-  metrics: AutomationMetricValue[];
-  /** ABSENT unless requested (`?evidence=1`), matching the person route's shape. */
-  evidence?: AutomationOutputEvidence;
-}
-
-/** GET /api/bot-authoring — CORE, free, deterministic, no AI. `output: null` covers every
- *  degrade in ONE shape (unknown/foreign user, a HUMAN, no authored PRs in this workspace) so
- *  the route is not an existence oracle — the same posture as the person route. */
-export interface AutomationOutputResponse {
-  workspaceId: number;
-  window: { fromMs: number; toMs: number };
-  output: AutomationOutput | null;
 }
 
 // ---- The work plan (Pro): "what should I work on today" ----------------------------------

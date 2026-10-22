@@ -126,11 +126,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             <strong>Flow metrics</strong> for the selected Workspace — throughput, lead time,
             time-to-first-review, CI success &amp; recovery — are free and sit at the top of this
             pane. Below them, Pro adds the period-over-period report.{' '}
-            <strong>Ask about the sprint</strong> answers a question from that Workspace&rsquo;s own
-            sprint data — pick a quick-question pill (sprint report, retro, bottlenecks,
-            biggest changes, …) or type your own, <Code>@</Code>-mention a contributor, and
-            optionally attach a chart. PR mentions in an answer are clickable, and answers can
-            be pinned. <strong>Track&nbsp;usage</strong> shows your month-to-date AI credits.
+            <strong>Track&nbsp;usage</strong> shows your month-to-date AI credits.
             The attention cards are not here — they are free, and live on{' '}
             <strong>Pending</strong>.
           </Section>

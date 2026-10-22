@@ -299,9 +299,7 @@ export default function ForManagers(): JSX.Element {
         </p>
         <p>
           No person is named anywhere in it, and the server sends no actor ids at all — that
-          is structural, not a setting. The People report, for one-to-ones, is the opposite by
-          design: you pick who, the sections are alphabetical, and there is no ranking and no
-          comparison table in it.
+          is structural, not a setting.
         </p>
       </FeatureShot>
 

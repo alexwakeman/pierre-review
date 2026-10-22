@@ -10,24 +10,19 @@ import { useMe } from '../hooks/useTriage.js';
 //
 // ── WHAT CHANGED, AND WHY THIS FILE EXISTS AT ALL ────────────────────────────────────────────
 // The app's older posture on a capability the account does not have is ABSENCE: the control is
-// simply not rendered (`WorkspaceBotCharts` returns null; `AskAboutPeriod` in PeriodReportsPanel
-// and `NarrativePanel` in PeopleReportDetail — both `activityDigest` — render nothing; the
-// "Depth →" pill is omitted). That posture is deliberate and STAYS on those surfaces — a nudge on
-// every hidden control turns a product into a billboard.
-//
-// ⚠ DO NOT cite `PersonPeriodSection` as an example of it. It USED to be one and is now the
-// opposite: it renders a `ProLockPanel` on the contributor-activity tab, because that tab is the
-// only place an unentitled reader can meet the People report at all.
+// simply not rendered (`WorkspaceBotCharts` returns null; the "Depth →" pill is omitted). That
+// posture is deliberate and STAYS on those surfaces — a nudge on every hidden control turns a
+// product into a billboard.
 //
 // TWO WHOLE RAIL ENTRIES now do the opposite, and are VISIBLE-BUT-LOCKED AS A WHOLE: **Bots
 // Monitoring** (`botDepth`; BotsView) and **Reports** (`periodReports`; InsightsView — flow
 // metrics, the "where the work is happening" cards, period reports, Chronology, everything). Each
 // rail entry wears ONE badge and the whole pane renders ONE `ProLockPanel`; nothing inside carries
-// a badge of its own. The six surfaces that used to be locked one by one (Chronology, period
-// reports, the People report, the by-workspace comparison, the Bots ROI panel and the Bots PEER
+// a badge of its own. The surfaces that used to be locked one by one (Chronology, period
+// reports, the by-workspace comparison, the Bots ROI panel and the Bots PEER
 // BENCHMARK) all live inside those two panes; their inner locks stay as defence in depth. Outside
-// those two entries the reversal does not apply (PersonPeriodSection aside, below); do not "make it
-// consistent" by converting the absent ones.
+// those two entries the reversal does not apply; do not "make it consistent" by converting the
+// absent ones.
 //
 // ⚠ WHY WHOLE ENTRIES: the product decision (2026-10) is that Bots Monitoring and Reports are org
 // features, Pro in full, and a locked entry that names the question is rule 2 below. A THIRD

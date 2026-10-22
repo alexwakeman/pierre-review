@@ -47,7 +47,6 @@ export type TabKind =
   | 'search'
   | 'user-activity'
   | 'bot-detail'
-  | 'people-report'
   | 'ticket';
 
 // The label metadata a user-activity tab carries, so its chip renders without a lookup
@@ -147,13 +146,6 @@ export const THEME_THREADS_TAB_KEY = 'theme-threads';
 // The cross-repo search results drill-down is a SINGLETON, non-PR tab. The query it shows is the
 // transient seed (store/filters.ts `searchSeed`), not the key. EPHEMERAL like the others.
 export const SEARCH_TAB_KEY = 'search';
-// The People report (Reports → People → "Begin report") is likewise a SINGLETON, non-PR tab.
-// WHICH period + selection set it renders is the transient `peopleReportSeed` signal
-// (store/filters.ts), not the key — so a second Begin RE-SEEDS this one tab in place rather
-// than opening another. EPHEMERAL: excluded from persistence (see `persist`) + not matched by
-// parseTabKey, so a reload drops it — which it must, since the seed it renders from lives only
-// in memory.
-export const PEOPLE_REPORT_TAB_KEY = 'people-report';
 // The per-contributor activity feed is keyed PER USER (not a singleton) — two people's feeds
 // can sit side by side, and re-clicking the same handle re-focuses their existing tab rather
 // than replacing it. Still EPHEMERAL: `persist` whitelists only the two PR kinds and
@@ -258,7 +250,6 @@ interface TabsState {
   openBotVolumeTab: (opts?: OpenOpts) => void; // ensure the singleton bot-volume PR drill-down + activate
   openThemeThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton theme-threads drill-down + activate
   openSearchTab: (opts?: OpenOpts) => void; // ensure the singleton search-results drill-down + activate
-  openPeopleReportTab: (opts?: OpenOpts) => void; // ensure the singleton People-report drill-down + activate
   // Ensure (and activate) one contributor's activity-feed tab. Keyed per user; `user` is the
   // chip's label metadata, captured at open time from whatever the caller already had.
   openUserActivityTab: (userId: number, user: TabUserMeta | null, opts?: OpenOpts) => void;
@@ -457,8 +448,6 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       openTab({ key: THEME_THREADS_TAB_KEY, kind: 'theme-threads', prId: 0, meta: null }, opts),
     openSearchTab: (opts) =>
       openTab({ key: SEARCH_TAB_KEY, kind: 'search', prId: 0, meta: null }, opts),
-    openPeopleReportTab: (opts) =>
-      openTab({ key: PEOPLE_REPORT_TAB_KEY, kind: 'people-report', prId: 0, meta: null }, opts),
     openUserActivityTab: (userId, user, opts) =>
       openTab(
         {

@@ -639,10 +639,6 @@ Landmines that cost real bugs — read [docs/FRONTEND.md](docs/FRONTEND.md) befo
   `ai.enabled` alone; a missing runtime/credential swaps only the Run button, via the ONE
   `AiRunGate` (`components/AiSetup.tsx`). Cloud prints `AiCloudNote`, never a ProBadge. Local runs
   show US$, never credits. [docs/FRONTEND.md](docs/FRONTEND.md) § The agentic AI surfaces.
-- **The Insights chat is multi-turn and the cap is SERVER-side.** ⚠ **The completed turn is
-  appended in `useSprintChat`'s HOOK-level `onSuccess`, never a `mutate()` callback** (observer
-  teardown kills mutate-scoped callbacks, losing a billed answer). ⚠ The chart pass gets the
-  grounding MINUS `conversation`, or prior model prose launders hallucinated figures into data.
 - **The Changes tab's thread fold is RENAME-AWARE**: `indexThreadsByPath` is built ONCE per PR
   (never a per-row filter), keys on the RENDERED path and re-homes a pre-rename thread onto the
   file's current path; a thread anchoring to no row degrades to a FILE-level chip. ⚠ The BLOCK
@@ -1035,7 +1031,7 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   Inflation, ML flagging, volume, seat prices, Benchmark, triage — NOT classification, which is free
   on Feed → Bot classification), `activityDigest`,
   `periodReports` (the WHOLE **Reports** entry — flow metrics, reach cards, period reports,
-  by-workspace axis, the People report, **Chronology**), and `prSummary` — now the blast impact note
+  by-workspace axis, **Chronology**), and `prSummary` — now the blast impact note
   ONLY. ⚠ **REMOVED 2026-10-18** (plugin code + routes gone, tables DORMANT — DATA-MODEL.md § Dormant
   Pro plugin tables): the AI PR summary, the per-comment "Check review" (validity/addressed/simplify),
   the single-thread assess / addressed checks, the per-hunk conflict "Ask Claude", the per-repo
@@ -1068,7 +1064,7 @@ contract (`src/pro/contract.ts`), a **path-based** guarded import (`src/pro/bind
   makes the GET and the run disagree forever — every judgement permanently `stale`, re-billed
   on every click. Both writers of a shared row must hash the SAME fields, and a GitHub fetch
   belongs INSIDE the batch loop AFTER the hash-cache filter.
-- ⚠ **The D4 digit gate rejects UNICODE numerals, not `[0-9]`** — the synthesis prompt's input
+- ⚠ **The D4 digit gate rejects UNICODE numerals, not `[0-9]`** — a model's input
   is attacker-authored. It is `/^[^\p{Nd}\p{No}\p{Nl}]*$/u`; spelled-out counts stay a
   prompt-only rule.
 - ⚠ **A model-derived figure and a code-derived figure must be LABELLED APART** in a panel that
@@ -1306,23 +1302,14 @@ review's result, else the CURRENT brief (`GET /api/ticket-story`, lean, DB only)
 against code" are REMOVED (`sprint_assessments` / `sprint_ticket_repos` DORMANT, never dropped).
 [docs/FRONTEND.md](docs/FRONTEND.md) § This Sprint, § The story view · [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) § Sprint briefs / paths.
 
-**The People report** (Reports → People) — a multi-select picker of humans AND bots, one report
-with a SECTION per pick; contract in
-[docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) § "The People report".
-
-- **PREP, NOT SCORING.** The multi-select is sanctioned; a cross-person SHAPE is not — sections
-  ALPHABETICAL by label, no ranking, no cross-person sort, no comparison table, and
-  `getPersonPeriod` KEEPS its one-person-per-request shape (the CLIENT loops; no batch/list
-  spelling anywhere). The guardrail comments in `db/person-period.ts`, `person-routes.ts` and
-  `PeriodPeopleSection.tsx` stay.
-- **A bot section renders TWO vectors and the DATA decides which appear**, never the stored
-  role (that would be the login heuristic at one remove).
-- ⚠ **The picker must NOT read `useSearchTimeline`/`useSearchOpenPrs`** — both carry TIMELINE
-  BOARD state whose controls aren't mounted on Reports. Use `useRosterTimeline` +
-  `useWorkspaceOpenPrs` and the ONE roster builder `hooks/useMemberSections.ts`.
-- Two cost landmines are in the doc: **evidence (`?evidence=1`) is ADDITIVE ON THE SAME FOLD**,
-  never a sibling scan; **`PERSON_REPORT_VERSION` is KIND-SCOPED staleness** reaching the hash
-  only through an evidence id that EXISTS.
+**REMOVED 2026-10-22: "Ask about this period" (the Reports chat, pins, history, `@`-mentions), the
+People report (Reports → People), the contributor tab's 1:1 prep and the popover's "1:1 prep →".**
+Routes gone too (`/api/pro/insights/ask|chat-history|pinned*|person/:id`, `…/reports/:key/chat`, the
+`person`/`person_report` synthesis kinds, core `/api/bot-authoring` + `/api/mention-candidates`);
+`pinned_prompts`, `sprint_chat_history` and the person `pro_synthesis` rows are DORMANT (kept, still
+erased). ⚠ `ProHostQueries.getPersonPeriod` stays a REQUIRED, now caller-less seam — removing it is
+the four-literal apiVersion bump. [docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md)
+§ The People report.
 
 ---
 

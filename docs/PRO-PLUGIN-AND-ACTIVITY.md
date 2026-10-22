@@ -265,7 +265,7 @@ tab exists only where it means something):
   `showThemes` is `activityDigest` alone, never `repoId == null && activityDigest`.
 - **Insights** — the whole sub-tab apparatus is GONE (`InsightsSubTab`, `insightsSubTab`,
   `normalizeSubTab`, the guarded bar): the pane is Reports-FIRST — `PeriodReportsPanel` is its only
-  body and the ad-hoc chat lives inside the report as "Ask about this period". Safe to delete
+  body (the ad-hoc chat that lived inside it as "Ask about this period" was REMOVED 2026-10-22). Safe to delete
   outright because the field was transient and never URL-emitted (`?report=` reads into
   `insightsReportKey` alone), so no blob or link can carry a stale value.
 
@@ -859,6 +859,10 @@ What 20 → 21 changed:
   plugin mirror moving in the same task — **because the plugin's payload hashes fold those very
   values**, and a cast-and-hope seam is exactly where a hash formula drifts.
 
+> ⚠ **REMOVED 2026-10-22.** The People report and its routes are gone; this paragraph is kept for its
+> argument about what "additive" means. `getPersonPeriod` stays a REQUIRED member with no plugin
+> caller, because removing it is a four-literal bump.
+
 **apiVersion STAYED 21 for the People report** — and "additive" is a NARROW test, not a mood.
 What qualified: a TRAILING optional argument on an existing member (`getPersonPeriod(…, opts?:
 {evidence?: boolean})` — an older plugin calls with four args and type-checks; an older HOST
@@ -877,6 +881,10 @@ set" grain — per-feature endpoints are exactly what the plan's D3 forbids. The
 `/api/pro/*` stack (registration only when the plugin loads; `DIGEST_ENABLED` self-gate — the
 `activityDigest` capability; the host's automatic cloud 402). The contract:
 
+- ⚠ **Since 2026-10-22 only the four CLUSTERS kinds remain** — `'brief'`/`'rollup'` went on
+  2026-10-18 and `'person'`/`'person_report'` with the People report; the ORDERING and SECTIONS
+  modes (their prompts, parsers and `StoredSynthesis.ordering`/`sections`) are deleted. The text
+  below is the history of how those grains were built; their stored rows are DORMANT.
 - **Seven `SynthesisScopeKind`s in two modes.** Four CLUSTERS grains — `'bot-flagging'`,
   `'bot-threads'` (windowless — a current-state backlog), `'bot-volume'`, `'workspace-bots'`
   (the workspace-grain bots question, still serving the three drill-down cards) — three ORDERING
@@ -1106,6 +1114,11 @@ card. **TWO ARMS, carried on one kind by `CiFailingCard.arm`:**
   sprint-report payload loop an explicit `continue`. ⚠ That `continue` is load-bearing — falling
   through would count the card into the repo's importance ranking (`cards × 3`) and add a PR ref
   for an issue the report never lists.
+
+> ⚠ **REMOVED 2026-10-22.** The route `GET /api/pro/insights/person/:userId` and both narration kinds are
+> gone. `db/person-period.ts` stays, wired to the caller-less `ProHostQueries.getPersonPeriod` seam
+> (and pinned by `person-period.test.ts` + `verify:isolation`), so the description below still
+> describes what that fold returns.
 
 **The person vector (`GET /api/pro/insights/person/:userId`, `db/person-period.ts`).** The 1:1
 prep read: a small fixed vector for one person in one workspace over one cadence period, with
@@ -1467,8 +1480,9 @@ open). Two predicates in `api/routes/bot-triage.ts` say which is which:
 - `botDepthEntitled` → **402** on `…/volume`, `…/volume/prs`, `…/volume/scatter`, `…/flagging`,
   `…/vendor/:key/prs`. Each is ROI-only, so a 402 is honest where an empty list would read as
   "this bot did nothing".
-- `botAnalyticsEntitled` = `botDepth || periodReports` → the **three** routes the ROI panel SHARES
-  with the People report's bot sections. `…/vendor/:key/comments` and **`/api/bot-authoring`**
+- `botAnalyticsEntitled` = `botDepth || periodReports` → the routes the ROI panel SHARED with the
+  People report's bot sections (`/api/bot-authoring` was REMOVED with the report 2026-10-22; the
+  other two keep the union so no account loses data it can read today). `…/vendor/:key/comments` and **`/api/bot-authoring`**
   (the report's per-bot AUTHORING vector plus its `?evidence=1` receipt cards) **402** on the union;
   **`GET /api/bot-analytics` NARROWS instead of refusing** — it is also the source of the FREE
   governance caution and the hoisted suggestions, so it keeps `totals.botOnlyPrs`,
@@ -2113,6 +2127,17 @@ SENTENCE 2, what-if    = effectiveMonthlyUsd × (actedOnRate(COHORT p50) − you
 
 ### The People report — `?evidence=1`, `person_report`, and the bot half
 
+> ⚠ **REMOVED 2026-10-22.** The People report (Reports → People: the picker, the report tab), the
+> contributor tab's **1:1 prep** section and the user popover's "1:1 prep →" link are gone, with every
+> route only they called: `GET /api/pro/insights/person/:userId`, the synthesis kinds `person` /
+> `person_report` (and the ORDERING/SECTIONS output modes), core `GET /api/bot-authoring` (and
+> `db/automation-output.ts`). Stored `pro_synthesis` rows of those two kinds are DORMANT (DATA-MODEL.md
+> § Dormant Pro plugin tables). `ProHostQueries.getPersonPeriod` stays REQUIRED and wired to
+> `db/person-period.ts` with no caller — removing it is the four-literal apiVersion bump, which a
+> half-done edit turns into a silent drop to OSS mode. The tab was ephemeral and had no URL value,
+> so no link needs migrating (a hand-typed `?insightsTab=people` lands on Reports → Overview, pinned
+> in `test/urlHistory.test.ts`). The section below is the record of how it was built.
+
 **It is VISIBLE-BUT-LOCKED on `periodReports`, not absent** — one of the six surfaces that reverse
 this codebase's "hidden, never upsold" posture (`components/ProGate.tsx` enumerates them; the
 reversal is scoped to those six and nothing else converts). Three locked panes, each with a testid
@@ -2327,6 +2352,15 @@ severity mix it shows is over that same loaded sample, not a population figure.
   GET refetch resurrected — a flicker whose CTA invited repeating the same no-op.
 
 ### The Insights chat is multi-turn, and it runs on the REPORT model
+
+> ⚠ **REMOVED 2026-10-22.** "Ask about this period" (the Reports chat) is gone with its routes —
+> `POST /api/pro/insights/ask`, `GET /api/pro/insights/chat-history`, `GET|POST|DELETE
+> /api/pro/insights/pinned*` — and with the unused `POST /api/pro/insights/reports/:key/chat` (its
+> rate-limit arm removed too). Core's `GET /api/mention-candidates` (its `@` box) is gone; the PR-scoped
+> `GET /api/prs/:id/mention-candidates` stays. `sprint_chat_history` and `pinned_prompts` are
+> DORMANT: kept, still re-keyed by migration 0020, still erased. A stored report's `suggested`
+> questions are still served, unread. This Sprint's "Ask Claude" (`/api/sprint-graph/ask`) is a
+> different, CORE feature and is untouched. The section below is history.
 
 "Ask about this period" is a real conversation: the client sends prior turns as
 `SprintChatBody.history` (strings only — grounding is REBUILT fresh every turn, so what carries

@@ -18,8 +18,9 @@
 //    group is the counting predicate's own rows (window-pure where the metric is), caps at
 //    PERSON_EVIDENCE_CAP with the remainder in `more`, and the global `commitFiles` table is
 //    reached only through the subject's own evidence-set shas.
-//  • THE 'person_report' SYNTHESIS INPUT rides the SAME fold: `pm…` items byte-identical to the
-//    'person' grain, `pe2:`-prefixed evidence ids, every hash-relevant field a plain DB read.
+//  (The fold has NO caller since 2026-10-22 — the 1:1 prep section, the People report and their
+//   synthesis grains were removed. It stays as the inert `ProHostQueries.getPersonPeriod` seam, so
+//   these tests still pin what it returns.)
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
@@ -39,7 +40,6 @@ let db: any;
 let schema: any;
 let closeDb: (() => void) | undefined;
 let pp: any;
-let si: any; // synthesis-input (the 'person_report' grain reads the same fixture)
 let workspaceId = 0;
 let wsRepoIds: number[] = [];
 let repoA = 0;
@@ -66,7 +66,6 @@ beforeAll(async () => {
   closeDb = client.closeDb;
   const q = await import('./queries.js');
   pp = await import('./person-period.js');
-  si = await import('./synthesis-input.js');
   await runMigrations();
 
   const {
@@ -480,76 +479,5 @@ describe('getPersonPeriod evidence (the People report)', () => {
   it('degrades exactly like the plain fold for bots and strangers', async () => {
     expect(await pp.getPersonPeriod(1, workspaceId, botCr, WIN, { evidence: true })).toBeNull();
     expect(await pp.getPersonPeriod(1, workspaceId, 999_999, WIN, { evidence: true })).toBeNull();
-  });
-});
-
-describe("getSynthesisInput kind 'person_report'", () => {
-  const repScope = () => ({
-    kind: 'person_report',
-    workspaceId,
-    repoIds: wsRepoIds,
-    window: 'rolling_14',
-    userId: alice,
-    fromMs: FROM,
-    toMs: TO,
-  });
-
-  it("carries the 'person' grain's pm items with only the AUTHOR LABEL re-spelled, plus pe2: evidence ids only", async () => {
-    const rep = await si.getSynthesisInput(1, repScope());
-    const per = await si.getSynthesisInput(1, { ...repScope(), kind: 'person' });
-    expect(rep.kind).toBe('person_report');
-    const pmItems = rep.items.filter((i: any) => i.id.startsWith('pm'));
-    // The HASHED half (id + createdAt) and the bodies stay byte-identical — two kinds must not
-    // describe two vectors — and `authorLabel` is not hashed.
-    const sansAuthor = (xs: any[]) => xs.map((i) => ({ ...i, authorLabel: null }));
-    expect(sansAuthor(pmItems)).toEqual(sansAuthor(per.items));
-    // …but a dashboard figure line is a BRIEF line here, which is the person_report legend's own
-    // word for it; the 1:1 'person' kind keeps the login ITS prompt defines author as.
-    expect(pmItems.every((i: any) => i.authorLabel === 'brief')).toBe(true);
-    expect(per.items.every((i: any) => i.authorLabel === 'alice')).toBe(true);
-    for (const i of rep.items) {
-      if (!i.id.startsWith('pm')) expect(i.id.startsWith('pe2:')).toBe(true);
-    }
-  });
-
-  it('items are the evidence rows: authored PRs, own comments (two id spaces), thread roots, areas', async () => {
-    const rep = await si.getSynthesisInput(1, repScope());
-    const byId = new Map(rep.items.map((i: any) => [i.id, i]));
-    // Authored-PR titles at their REAL openedAt (a hash-stable DB read).
-    const pr = byId.get(`pe2:pr:${prIdOf.get('a_mid')}`) as any;
-    expect(pr.kind).toBe('pr');
-    expect(pr.body).toBe('fixture a_mid');
-    expect(pr.createdAt).toBe(new Date(FROM + 2 * DAY).toISOString());
-    // Their own comments, rc:/pc: namespaced by target kind.
-    expect(rep.items.some((i: any) => i.id.startsWith('pe2:rc:') && i.kind === 'review_comment')).toBe(true);
-    expect(rep.items.some((i: any) => i.id.startsWith('pe2:pc:') && i.kind === 'pr_comment')).toBe(true);
-    // Thread roots — feedback RECEIVED, never labelled with the subject's login.
-    const th = byId.get(`pe2:th:${threadIdOf.get('t2')}`) as any;
-    expect(th.kind).toBe('thread');
-    expect(th.authorLabel).toBe('reviewer');
-    expect(th.body).toBe('root');
-    // Path areas: count-encoded id, epoch-zero createdAt (content hash, never a date hash).
-    const area = byId.get('pe2:area:apps/backend/**:3') as any;
-    expect(area.kind).toBe('path_area');
-    expect(area.createdAt).toBe(new Date(0).toISOString());
-    // The capped comments group discloses through `truncated`.
-    expect(rep.truncated).toBe(true);
-  });
-
-  it('is deterministic across calls (the free GET recomputes the hash from these ids)', async () => {
-    const a = await si.getSynthesisInput(1, repScope());
-    const b = await si.getSynthesisInput(1, repScope());
-    expect(a.items.map((i: any) => `${i.id}@${i.createdAt}`)).toEqual(
-      b.items.map((i: any) => `${i.id}@${i.createdAt}`),
-    );
-  });
-
-  it('answers EMPTY for a stranger and throws on a missing required triple', async () => {
-    const empty = await si.getSynthesisInput(1, { ...repScope(), userId: 999_999 });
-    expect(empty.items).toEqual([]);
-    expect(empty.totalCount).toBe(0);
-    await expect(
-      si.getSynthesisInput(1, { ...repScope(), userId: undefined }),
-    ).rejects.toThrow(/person_report/);
   });
 });

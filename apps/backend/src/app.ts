@@ -43,7 +43,6 @@ import { openPrsRoutes } from './api/routes/open-prs.js';
 import { mergersRoutes } from './api/routes/mergers.js';
 import { insightsRoutes } from './api/routes/insights.js';
 import { activityRoutes } from './api/routes/activity.js';
-import { mentionsRoutes } from './api/routes/mentions.js';
 import { searchRoutes } from './api/routes/search.js';
 import { dailyBriefRoutes } from './api/routes/daily-brief.js';
 import { dependencyMergeRoutes } from './api/routes/dependency-merge.js';
@@ -255,7 +254,6 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(mergersRoutes);
   await app.register(insightsRoutes);
   await app.register(activityRoutes);
-  await app.register(mentionsRoutes);
   await app.register(searchRoutes);
   // The daily brief + cross-workspace roll-up (CORE, FREE, counts only — plan P3.1/P3.3). Pure
   // DB reads over the owning surfaces' own folds, TTL-cached; the Pro narration is the plugin's

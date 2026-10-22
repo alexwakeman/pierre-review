@@ -1,8 +1,9 @@
 import type { User } from '@pierre-review/shared';
 import type { MemberSection } from '../components/UserSelectPanel.js';
 
-// The Members-dropdown section builder, extracted from FilterBar's useMemo so the Reports
-// People picker can reuse it with a different SCOPE and a different BOT VERDICT without a
+// The Members-dropdown section builder, extracted from FilterBar's useMemo so a workspace-scoped
+// picker (the Reports People picker, REMOVED 2026-10-22; its inputs stay pinned by the test) could
+// reuse it with a different SCOPE and a different BOT VERDICT without a
 // second spelling of the fold (a sibling fold is a second predicate that can drift — the
 // tile-number-vs-hydration lesson, applied to a member list).
 //
@@ -45,7 +46,7 @@ export interface MemberSectionsInput {
   allowedBotIds: number[];
   /** The bot verdict. FilterBar passes `(u) => u.isBot` (today's behaviour, byte-identical);
    *  the picker passes the UNION predicate (workspace `automated` ∪ users.isBot, a manual
-   *  "human" winning both ways — the PeriodPeopleSection/Feed rule). The two cohorts partition:
+   *  "human" winning both ways — the Feed rule). The two cohorts partition:
    *  whatever this rejects from the member sections is exactly what botSections may hold. */
   isBot: (u: User) => boolean;
   /** FilterBar: true (the full non-bot roster becomes the remainder when unscoped). Picker:

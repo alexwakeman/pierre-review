@@ -45,7 +45,6 @@ import {
   SCOPE_RESOLVE_THREAD_CAP,
 } from '../../db/queries.js';
 import { resolveThreadsOnGitHub } from '../../bot-triage/resolve.js';
-import { getAutomationOutput } from '../../db/automation-output.js';
 import { accountIdOf } from '../plugins/auth.js';
 import { entitledProCapabilities } from '../../pro/contract.js';
 
@@ -84,20 +83,11 @@ function parseIntList(raw?: string): number[] | null {
        whose ENTIRE population is that panel: the volume family, the flagging drill-down, the
        per-vendor PR list, and the seat PRICES on the reviewer listing.
 
-     • `botAnalyticsEntitled` — the UNION `botDepth || periodReports`, for the THREE routes the ROI
-       panel SHARES with the People report's bot sections (`GET /api/bot-analytics`,
-       `…/vendor/:key/comments` and `GET /api/bot-authoring`, all three read by PeopleReportDetail).
-       Gating those on `botDepth` alone would dark a surface someone had already bought under a
-       different capability. They are genuinely two products over one fold, so the predicate says
-       so rather than pretending one flag covers both.
-
-   ⚠ ALL THREE UNION ROUTES MUST USE **THE SAME PREDICATE**, not "the union where it was convenient".
-   `/api/bot-authoring` shipped ungated in the first cut of this change precisely because it does
-   not live under `/api/pro/` and reads as a plain core route — and it is the People report's bot
-   AUTHORING vector plus its evidence cards, i.e. exactly the paid population the locked pane
-   promises. A free cloud account could collect bot user ids from the (deliberately free) reviewer
-   listing and read the whole vector by URL. If a fourth surface ever shares this fold, add it here
-   rather than inventing a third predicate.
+     • `botAnalyticsEntitled` — the UNION `botDepth || periodReports`, for the TWO routes the ROI
+       panel shared with the People report's bot sections (`GET /api/bot-analytics` and
+       `…/vendor/:key/comments`). The People report — and its third route, `GET /api/bot-authoring`
+       — was REMOVED 2026-10-22; the union stays so no account that could read these loses them.
+       Both routes use THE SAME predicate; never a third one.
 
    Since the whole Bots Monitoring screen went Pro, `…/bot-only-prs` and the resolvable-thread
    read/resolve pair are `botDepth` too (their caption, banner and list live only there).
@@ -382,28 +372,6 @@ const listReviewersSchema = {
 // 4-value set, safe to enum + default; the optional bounds pair refines it to a REAL period (the
 // People report's bot sections) and is validated by `parseWindowBounds` (only-together, ordered,
 // span-capped ⇒ 400 — a bad bound is a client bug, not a stale bookmark).
-// GET /api/bot-authoring — the AUTHORING half of "what did this automation do" (plan follow-up).
-// Bounds are REQUIRED here, unlike the two routes above: this endpoint exists to serve the People
-// report's bot sections, which always know their period, and a vector whose window silently
-// defaulted to a rolling enum would be captioned with the report's dates while measuring
-// something else. Same digits-only ajv shape and the same `parseWindowBounds` rules otherwise.
-const authoringSchema = {
-  querystring: {
-    type: 'object',
-    additionalProperties: false,
-    required: ['userId', 'fromMs', 'toMs'],
-    properties: {
-      userId: { type: 'string', pattern: '^[0-9]+$' },
-      workspace: { type: 'string' },
-      repoIds: { type: 'string' },
-      fromMs: { type: 'string', pattern: '^[0-9]+$' },
-      toMs: { type: 'string', pattern: '^[0-9]+$' },
-      // `1` adds the receipt rows under the vector, mirroring the person route's `?evidence=1`.
-      evidence: { type: 'string' },
-    },
-  },
-} as const;
-
 const analyticsSchema = {
   querystring: {
     type: 'object',
@@ -897,54 +865,7 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // the workspace row — a null here is FINAL.
   //
   // ⚠ Never sum the price across workspaces. Within this one workspace's rows it is a plain sum.
-  // The authoring-automation vector: deterministic, no AI. `output: null` is the ONE degrade shape
-  // (unknown/foreign id, a HUMAN, or an automation that has never authored a PR in this workspace)
-  // so the route is not an existence oracle — the person route's posture.
   //
-  // PAID ON THE UNION (`botDepth || periodReports`), like its two siblings. Its ONE consumer is the
-  // People report's bot sections (PeopleReportDetail's `useReportBotAuthoring` — the only call site
-  // in the SPA), which is now a locked pane without `periodReports`; and `?evidence=1` adds the
-  // receipt PR cards on top of the vector. `botDepth` alone would blank the bot half of a report a
-  // `periodReports` customer already paid for.
-  //
-  // The gate goes FIRST, ahead of `parseWindowBounds`, so the 400/402 split cannot be read as an
-  // oracle over which bounds the fold would have accepted.
-  app.get('/api/bot-authoring', { schema: authoringSchema }, async (req, reply) => {
-    if (!botAnalyticsEntitled(req)) {
-      reply.status(402);
-      return PRO_REQUIRED;
-    }
-    const { userId, workspace, repoIds, fromMs, toMs, evidence } = req.query as {
-      userId: string;
-      workspace?: string;
-      repoIds?: string;
-      fromMs: string;
-      toMs: string;
-      evidence?: string;
-    };
-    // Reuse the shared validator so the bounds rules (ordered, span-capped) have ONE spelling
-    // across all three routes. The enum it refines is irrelevant here — the fold takes the pair.
-    const bounds = parseWindowBounds('rolling_14', fromMs, toMs);
-    if ('error' in bounds) {
-      reply.status(400);
-      return { error: 'BadRequest', message: bounds.error };
-    }
-    const accountId = accountIdOf(req);
-    const scope = await resolveWorkspaceScope(accountId, workspace, parseIntList(repoIds));
-    const output = await getAutomationOutput(
-      accountId,
-      scope,
-      Number(userId),
-      { fromMs: Number(fromMs), toMs: Number(toMs) },
-      { evidence: evidence === '1' },
-    );
-    return {
-      workspaceId: scope.workspaceId,
-      window: { fromMs: Number(fromMs), toMs: Number(toMs) },
-      output,
-    };
-  });
-
   // PAID ON THE UNION (`botDepth || periodReports`): the Bots Monitoring screens and the People
   // report's bot sections are its only consumers, and both are Pro surfaces. The gate goes FIRST,
   // ahead of `parseWindowBounds`, so the 400/402 split cannot be read as an oracle.

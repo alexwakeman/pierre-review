@@ -2204,8 +2204,8 @@ COUNTS EVERY NUMBER; the model picks and words, with NO digit anywhere in its te
   through the ONE assignee → GitHub mapping, shared `sprintMembers` (`sprint-members.ts` — the Members
   filter's: an exact name match after case, accents and `. _ -`, or the name run together; a login matching
   two assignees joins neither). `reviewsWaiting` = open PRs in this workspace's repos with an outstanding
-  `review_requests` row for any mapped login (`reviewsWaitingByLogin` — the People report's "reviews waiting"
-  population). ⚠ No mapped login → `null`, never 0. GitHub-only members are not assignees and are left out.
+  `review_requests` row for any mapped login (`reviewsWaitingByLogin` — the same "reviews waiting" population the removed
+  People report used). ⚠ No mapped login → `null`, never 0. GitHub-only members are not assignees and are left out.
 - **THE CODE CARDS** (`SprintGraphResponse.signals`, `db/sprint-signals.ts`; shared `SprintSignal`,
   `SPRINT_SIGNAL_LABEL`): FREE on every tier, NO model, templated sentences in digits over counts taken from
   the SAME folded graph, computed on every GET from the DB only (never a tracker or GitHub call), shown with

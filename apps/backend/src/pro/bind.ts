@@ -229,6 +229,8 @@ export async function bindProPlugin(app: FastifyInstance): Promise<void> {
       // cache). No contract change — exactly the swap D2's single bump paid for.
       getDailyBriefCounts: (accountId, workspaceId) =>
         getDailyBriefCounts(accountId, workspaceId),
+      // INERT since 2026-10-22: no plugin calls it (the 1:1 prep / People report are removed); kept
+      // wired because the contract member is required (no apiVersion bump).
       // The 1:1-prep person vector (P4.2 — LIVE: the declared-inert throw swapped for core
       // db/person-period.ts, exactly the swap D2's single bump paid for — no contract change).
       // The fold resolves the workspace scope itself (resolveWorkspaceScope — a foreign id

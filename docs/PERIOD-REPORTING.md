@@ -27,11 +27,15 @@ table:
 | The **metric vector** (15 keys), coverage, the lane breakdown | `db/period-metrics.ts` | CORE |
 | The **forecast estimator** (pure, no I/O, no db import) | `db/forecast.ts` | CORE |
 | **Who did the work** — the seven-lane actor resolver | `db/actor-lanes.ts` | CORE |
-| The **1:1 person vector** (People report sections) | `db/person-period.ts` | CORE |
+| The **1:1 person vector** (no caller since 2026-10-22 — the People report is removed; kept behind the required `getPersonPeriod` seam) | `db/person-period.ts` | CORE |
 | **Storage, narration, routes, hashing, backfill** | `packages/pro/src/insights/period-report.ts` (+ pro migrations `0025`/`0026`) | Pro `periodReports` |
 
+> ⚠ **REMOVED 2026-10-22:** "Ask about this period" (the chat under a report), the People report
+> and 1:1 prep, with their routes. Rules below that mention them are history; what they protected
+> (one-person-per-request, the union gate on the bot routes) is described where it still applies.
+
 The plugin half — the stored rows, the Haiku narration, `/api/pro/insights/period*`, the
-`payloadHashFor` cache key, the "By workspace" axis and the People-report contract — is
+`payloadHashFor` cache key, the "By workspace" axis and the (removed) People-report contract — is
 documented in [PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) (§ apiVersion 21,
 § The People report). This doc is the core side: the definitions, why they are shaped this
 way, and what will bite you.
@@ -54,7 +58,7 @@ The app's older posture on a capability the account does not have is **absence**
 is simply not rendered, and there is no nudge (`WorkspaceBotCharts` returns null, the "Depth →"
 pill is omitted). That posture is deliberate and still correct for most controls.
 
-**Period reports, the People report and the by-workspace axis are exceptions**, along with
+**Period reports and the by-workspace axis are exceptions**, along with
 Chronology and the Bots ROI panel: they are **VISIBLE-BUT-LOCKED**. The pane exists, it carries a
 `Pro` badge, and an unentitled reader lands on a calm statement of what the view answers plus one
 link. Everything renders through the one shared component — **`components/ProGate.tsx`**
@@ -63,8 +67,6 @@ link. Everything renders through the one shared component — **`components/ProG
 | Surface | Locked pane lives in | `data-testid` |
 |---|---|---|
 | Period reports | `PeriodReportsPanel` (replaces the whole panel) | `period-reports-locked` |
-| The People report — 1:1 prep | `PersonPeriodSection`, on the contributor-activity tab | `person-period-locked` |
-| The People report — the report | `PeopleReportDetail`, before the seed check | `people-report-locked` |
 | By workspace | *(none — transitively gated, see below)* | — |
 
 Four rules, each of which has a matching comment in the code:
@@ -104,9 +106,10 @@ flag; the ordinary dev loop does not. Set `PRO_DIGEST_ENABLED=true` to work on t
 the routes are `/api/pro/*`, so a free cloud account is 402'd by the blanket gate in
 `api/plugins/auth.ts`; in OSS the routes are never registered; and the plugin self-gates on
 `DIGEST_ENABLED`. Every hook already takes the capability as its `enabled`
-(`usePeriodReportsList`, `usePeriodReport`, `usePersonPeriod`), so nothing polls a paywall.
+(`usePeriodReportsList`, `usePeriodReport`), so nothing polls a paywall.
 
-⚠ **The People report's BOT sections read three routes it does not own** — `/api/bot-analytics`,
+⚠ (History — the People report and `/api/bot-authoring` were removed 2026-10-22; the two
+`/api/bot-analytics` routes keep the union.) **The People report's BOT sections read three routes it does not own** — `/api/bot-analytics`,
 `/api/bot-analytics/vendor/:key/comments` and `/api/bot-authoring`, all core and all shared with
 the Bots ROI panel, which gates on **`botDepth`**. **All three now carry an entitlement check, and
 all three take the UNION `botDepth || periodReports`** (`botAnalyticsEntitled`, one predicate in
@@ -1069,10 +1072,8 @@ exactly one period. Pinned by `db/bot-analytics-window-bounds.test.ts`.
 
 - [PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) — the plugin half: stored rows,
   `payloadHashFor`, the Haiku narration + the D4 digit gate, the "By workspace" axis
-  (`getPeriodMetricsForWorkspaces`), and the **People report** (`?evidence=1`,
-  `PERSON_REPORT_VERSION`, the bot section's two vectors).
-- [API.md](API.md) — `/api/pro/insights/period*`, `/api/bot-analytics` (`fromMs`/`toMs`),
-  `/api/bot-authoring`.
+  (`getPeriodMetricsForWorkspaces`), and the removed **People report** (history).
+- [API.md](API.md) — `/api/pro/insights/period*`, `/api/bot-analytics` (`fromMs`/`toMs`).
 - [DATA-MODEL.md](DATA-MODEL.md) — `repos.createdAt`, `workspaceReviewers` (the bot object),
   `ReviewerRole`.
-- [FRONTEND.md](FRONTEND.md) — `PeriodReportsPanel`, the Reports People picker's scoping rule.
+- [FRONTEND.md](FRONTEND.md) — `PeriodReportsPanel`.

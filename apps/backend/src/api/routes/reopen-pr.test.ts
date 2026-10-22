@@ -10,8 +10,9 @@
 //   2. TWO 409s, NOT ONE. 'already open' and 'merged' are different facts and the merged one is
 //      permanent, so they carry different error codes and different sentences — and in both cases
 //      GitHub is never called.
-//   3. ⚠ `closedAt` MUST BE NULLED. `db/automation-output.ts` counts `prs_closed_unmerged` as
-//      `mergedAt IS NULL` inside a `closedAt` window and NEVER consults `state`, so a reopened PR
+//   3. ⚠ `closedAt` MUST BE NULLED. A fold that counts "closed unmerged" as `mergedAt IS NULL`
+//      inside a `closedAt` window and never consults `state` (the removed
+//      `db/automation-output.ts` did exactly that) would report a reopened PR
 //      carrying its old close stamp is reported as abandoned churn until a full walk rewrites the
 //      column. A one-line inverse of the close stamp leaves it behind and nothing errors.
 //   4. ⚠ THE `pr_reopened` EVENT IS WRITTEN HERE OR NOWHERE. `sync/upsert.ts`'s

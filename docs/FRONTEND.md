@@ -90,7 +90,7 @@ Three layers, deliberately separated:
      the address bar without moving the screen). The pop is **TOTAL**: `readFromUrl` is partial by
      design, so `applyUrlToStores` resets `freshFilterDefaults()` + `freshUrlOwnedDefaults()`
      first, or Back off a narrowed board leaves the narrowing standing. Never `freshDefaults()` —
-     that wipes `sprintChatThreads`, `syncRound`, `repoConsoleTabs` and every drill-down seed,
+     that wipes `syncRound`, `repoConsoleTabs` and every drill-down seed,
      which the URL never serialized and cannot restore. `workspaceId` is exempt: `null` means "not
      resolved yet", so a URL naming none keeps the live one. The write subscriptions check
      `applyingUrl` **synchronously**, or a pop re-serializes the entry it just landed on.
@@ -1891,8 +1891,9 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
   either way — `useSynthesis` gates on `activityDigest`). Mutation keys share the canonical
   scope-key segment so two mounts of one scope share in-flight state.
 - **Reports pane (`PeriodReportsPanel`)**: Reports-FIRST — `InsightsSubTab` and the whole
-  sub-tab apparatus are deleted; the ad-hoc chat lives INSIDE the report ("Ask about this
-  period", window-bound to the viewed period). New: the "**By workspace**" axis (the folded
+  sub-tab apparatus are deleted. (The ad-hoc chat that lived INSIDE the report, "Ask about this
+  period", was REMOVED 2026-10-22 with its routes, hooks and store slices — `sprintChatDraft` /
+  `sprintChatThreads` were transient, so no storage bump.) New: the "**By workspace**" axis (the folded
   Compare — a per-metric expansion showing every workspace's current + prior figures from the
   window-pure per-workspace vectors; ⚠ one population per row, low-coverage annotated, NO money
   ever), "**Copy as Markdown**" (`periodReportMarkdown.ts` — ONE deterministic exporter serving
@@ -1912,32 +1913,13 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
   `usePeriodMonthToDate` — a LIVE read with no stored row, so **Generate is ABSENT (not disabled)**
   and no staleness badge is possible. Full contract:
   [PERIOD-REPORTING.md](PERIOD-REPORTING.md) § The CALENDAR-MONTH grain.
-- **People / 1:1 prep** (Pro `periodReports`): `PeriodPeopleSection` in Reports lists the
-  workspace's humans (roster minus the UNION bot verdict) — ⚠ ALPHABETICAL, no metrics on the
-  row, deliberately un-rankable ("prep, not scoring"); each row opens the EXISTING
-  `user-activity` tab, whose header now mounts **`PersonPeriodSection`** (the person-period
-  vector in the period table's idiom: null renders "—" never 0, `lowSample` flagged, the three
-  `basis:'live'` keys labelled "now", coverage annotations; period selector defaults to the
-  report being read via `insightsReportKey`; Pro narration phrases via synthesis kind
-  `'person'`). ⚠ **`PeriodPeopleSection` must read the SAME `insightsReportGrain` the panel does** —
-  it holds its own `usePeriodReportsList` call and that key is grain-scoped, so the default would
-  land on a different cache entry, fail to resolve a `month-…` key, and silently seat the newest
-  FORTNIGHT under a month heading. It also drops `inProgress` periods from the "Begin report" seed
-  (the person route resolves against the grid, which refuses an open period) and clamps an open
-  period's roster window to `now`. `UserProfilePopover` gains a second, capability-gated "1:1 prep →" entry beside
-  "View activity →" — same tab, named entry point; **still absent (never a nudge) when the
-  capability is off**, and that is now a deliberate asymmetry rather than the default: its sibling
-  "View activity →" reaches the same tab, which DOES carry the lock, so hiding one of two entry
-  points costs the reader nothing.
-- ⚠ **`PersonPeriodSection` NO LONGER RENDERS NOTHING.** It was the codebase's stock example of the
-  absent-not-upsold posture and is now one of the six VISIBLE-BUT-LOCKED surfaces: on the
-  contributor-activity tab it renders `ProLockPanel` (`testId="person-period-locked"`) — the ONLY
-  place an unentitled reader can meet the People report at all, since the picker lives inside the
-  Reports Pro half and the report tab opens only from that picker. ⚠ Its lock heads **"1:1 prep"**
-  and describes ONE person's period vector, which is what the entitled body renders here; an
-  earlier draft advertised the multi-pick report, which lives on a different rail entry and would
-  not have been there after upgrading. Cite `AskAboutPeriod` or `NarrativePanel` (both
-  `activityDigest`, both deliberately silent) as the absence example instead.
+- **People / 1:1 prep — REMOVED 2026-10-22.** `PeriodPeopleSection` (the Reports People picker),
+  `PeopleReportDetail` (the ephemeral `people-report` tab, never persisted and never in the URL),
+  `PersonPeriodSection` (the contributor tab's 1:1 prep) and the popover's "1:1 prep →" are deleted,
+  with `usePersonPeriod`, `lib/peopleReport.ts`, the `peopleReportSeed` slice and the client's
+  `personPeriod` / `botAuthoring` methods. `hooks/useMemberSections.ts` STAYS — FilterBar's Members
+  dropdown builds from it. A hand-typed `?insightsTab=people` lands on Reports → Overview
+  (`test/urlHistory.test.ts`). The `user-activity` tab is the contributor's feed only.
 - ⚠ The gate on the picker is now INTRINSIC, not positional: `PeriodPeopleSection` carries its own
   `if (!periodReports) return null` above the eight roster/repo/workspace/reviewer queries it
   fires, rather than relying on where it happens to be mounted. `PeopleReportDetail`'s check sits
@@ -2008,6 +1990,8 @@ the next refetch.
 
 ### The ad-hoc chat is a transcript (`AdHocChatPanel` + `adHocChatModel.ts`)
 
+> ⚠ **REMOVED 2026-10-22** — the chat, these files and its store slices are deleted; kept as history.
+
 Expanded by DEFAULT, completed turns rendered oldest→newest ABOVE the input, each turn keeping
 its OWN caption (window · generated time · answering model) so a transcript that legitimately
 spans two report periods stays honest. State is `sprintChatThreads: Record<string,
@@ -2050,6 +2034,8 @@ server-side as its own history row at answer time.
   no error anywhere (pinned by `test/sprintChatThread.test.ts`).
 
 ### The Reports People picker + the People report tab
+
+> ⚠ **REMOVED 2026-10-22** — the picker, the tab and every file named here except `hooks/useMemberSections.ts` (FilterBar still uses it) are deleted; kept as history.
 
 `PeriodPeopleSection` is a PICKER: a row of maintainer shortcut pills, then a text field with
 "Begin report" beside it, opening `UserSelectPanel`'s extracted `MemberSectionList` (same

@@ -190,8 +190,8 @@ export function FilterBar(): JSX.Element {
   // maintainerIds (merge rights in the relevant repo(s)) drives both the per-row
   // shields and the panel's "Maintainers" quick-select — it is no longer a section.
   //
-  // The FOLD lives in buildMemberSections (hooks/useMemberSections.ts) so the Reports People
-  // picker reuses it at workspace scope; this call site passes exactly the inputs the old
+  // The FOLD lives in buildMemberSections (hooks/useMemberSections.ts) (pure, so it is a
+  // test); this call site passes exactly the inputs the old
   // inline fold read, so the output stays byte-identical (pinned by test/memberSections.test.ts).
   const {
     sections: memberSections,

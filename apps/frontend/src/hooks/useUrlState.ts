@@ -221,8 +221,8 @@ function namesId(p: URLSearchParams, key: string): boolean {
  * (`pr-detail:123`, `pr-focus:123`, `user-activity:45`, `bot-detail:45`) — one vocabulary, not a
  * URL dialect that has to be kept in sync with the store's. Those four kinds are SELF-DESCRIBING:
  * the key alone reconstructs the tab, so a link to one works in a browser that has never seen it
- * (`applyUrlTab` re-creates it). The seed-backed drill-downs (`bot-flagging`, `people-report`,
- * `search`, …) are NOT named by any URL: their identity lives in transient in-memory seeds, and a
+ * (`applyUrlTab` re-creates it). The seed-backed drill-downs (`bot-flagging`, `search`,
+ * `theme-threads`, …) are NOT named by any URL: their identity lives in transient in-memory seeds, and a
  * restored seed could name a tile the strip no longer shows or people this workspace no longer
  * has. They stay ephemeral, and a URL landing on one resolves to Activity — which is exactly what
  * the unknown-value rule below already does.
@@ -738,8 +738,8 @@ export function writeToUrl(s: FilterState): void {
       p.set('prTab', s.prDetailTab.tab);
     }
   }
-  // Every remaining `activeTab` is a SEED-BACKED drill-down — the ML-strip flagging list, the
-  // People report, a search — whose identity lives in an in-memory seed that is deliberately
+  // Every remaining `activeTab` is a SEED-BACKED drill-down — the ML-strip flagging list, a
+  // search — whose identity lives in an in-memory seed that is deliberately
   // never persisted (a restored one could name a tile the strip no longer shows). So `view` is
   // omitted, which is itself a distinct URL, and both a refresh and a Forward onto it resolve to
   // Activity rather than to a broken drill-down. The tab is still in the tab bar; it just isn't
@@ -953,7 +953,7 @@ function persistScope(s: FilterState): void {
  * and the reader would watch Back change the address bar without changing the screen. So every
  * key the URL OWNS is reset to its default first, and the patch is laid over it.
  *
- * ⚠ …but only those keys. Never `freshDefaults()`: that would also wipe `sprintChatThreads`,
+ * ⚠ …but only those keys. Never `freshDefaults()`: that would also wipe
  * `syncRound`, `repoConsoleTabs` and every drill-down seed — transient state the URL never
  * serialized, so a "reset" of it is pure loss.
  *

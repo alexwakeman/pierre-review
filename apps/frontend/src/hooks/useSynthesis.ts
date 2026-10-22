@@ -1,10 +1,8 @@
-import { useEffect, useRef } from 'react';
 import { skipToken, useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   BotWindowKind,
   MlCategory,
   MlSeverity,
-  StoredSynthesis,
   SynthesisFlaggingSelect,
   SynthesisResponse,
   SynthesisScopeKind,
@@ -41,13 +39,6 @@ export interface SynthesisDescriptor {
   select?: SynthesisFlaggingSelect | null;
   severities?: MlSeverity[] | null;
   category?: MlCategory | null;
-  /** The person grains only — 'person' (the 1:1 narration, plan P4.2) and 'person_report' (the
-   *  People report's sections): the subject + the period's REAL epoch-ms bounds — never
-   *  `botUserId` (a bot-population narrowing) and never the enum `window` (canonicalised out
-   *  for the ordering/sections grains). */
-  userId?: number | null;
-  fromMs?: number | null;
-  toMs?: number | null;
 }
 
 /** The canonical client-side key segments for one synthesis scope. Mirrors the server's
@@ -58,31 +49,20 @@ export function synthesisKeySlots(
   d: SynthesisDescriptor,
 ): (string | number)[] {
   const flagging = d.kind === 'bot-flagging';
-  // BOTH person grains — 'person' (the 1:1 ordering narration) and 'person_report' (the People
-  // report's SECTIONS narrative) — share the subject + period tail below; the `d.kind` slot at
-  // the head is what keeps their cache rows (and shared mutation keys) apart, mirroring the
-  // server key's `k:` slot.
-  const person = d.kind === 'person' || d.kind === 'person_report';
   const select = flagging ? (d.select ?? 'findings') : null;
-  // The windowless kinds mirror the server's canonicalisation: 'bot-threads' (current-state
-  // backlog) and the person grains, which carry REAL bounds in their own slot below (P4.2) and
-  // take the whole workspace (no repo narrowing slot variation).
-  const windowless = d.kind === 'bot-threads' || person;
-  const ordering = person;
+  // The windowless kind mirrors the server's canonicalisation: 'bot-threads' (a current-state
+  // backlog) carries no window.
+  const windowless = d.kind === 'bot-threads';
   return [
     d.kind,
     windowless ? 'w:-' : `w:${d.window}`,
     workspaceKey(workspaceId),
-    ordering ? 'r:-' : repoKeySlot(d.repoIds ?? null),
+    repoKeySlot(d.repoIds ?? null),
     d.botUserId != null && (flagging || d.kind === 'bot-volume') ? `bot:${d.botUserId}` : 'bot:-',
     `dir:${(flagging ? d.direction : null) ?? '-'}`,
     `sel:${select ?? '-'}`,
     `sev:${select === 'severity' && d.severities ? [...d.severities].sort().join(',') : '-'}`,
     `cat:${(select === 'category' ? d.category : null) ?? '-'}`,
-    // The person grain's subject + period (mirrors the server key's conditional tail; constant
-    // '-' slots for every other kind so existing keys keep their identity).
-    `u:${(person ? d.userId : null) ?? '-'}`,
-    `pw:${person && d.fromMs != null && d.toMs != null ? `${d.fromMs}-${d.toMs}` : '-'}`,
   ];
 }
 
@@ -97,9 +77,6 @@ function requestParams(workspaceId: number, d: SynthesisDescriptor): SynthesisRe
     select: d.select ?? null,
     severities: d.severities ?? null,
     category: d.category ?? null,
-    userId: d.userId ?? null,
-    fromMs: d.fromMs ?? null,
-    toMs: d.toMs ?? null,
   };
 }
 
@@ -153,52 +130,4 @@ export function useSynthesisGenerating(
     useIsMutating({ mutationKey: ['synthesis-generate', ...synthesisKeySlots(workspaceId, d)] }) >
     0
   );
-}
-
-/**
- * LAZY-ON-READ narration for the ORDERING grain ('person'): the cached
- * synthesis when present, plus at most ONE auto-generation attempt per (scope identity +
- * staleness observation). (Written for the deleted daily-brief strip; the 1:1 section reuses the
- * exact same guard rather than a second spelling of it — the digest pattern, per-scope.)
- *
- * The guard ref keys on the stored generatedAt: a served cache hit doesn't re-fire, while a NEW
- * staleness (the content hash moved) allows exactly one fresh attempt. Silent about failure by
- * design (§8.20) — the caller renders its templated/deterministic surface either way.
- */
-export function useAutoNarration(
-  workspaceId: number | null,
-  d: SynthesisDescriptor,
-  wanted: boolean,
-): StoredSynthesis | null {
-  const { activityDigest } = useProCapabilities();
-  const enabled = wanted && activityDigest;
-  const { data } = useSynthesis(workspaceId, d, enabled);
-  const generate = useGenerateSynthesis(workspaceId, d);
-  const generating = useSynthesisGenerating(workspaceId, d);
-  const attemptedRef = useRef<string | null>(null);
-  const needsGeneration =
-    enabled && data?.enabled === true && (data.synthesis == null || data.stale === true);
-  useEffect(() => {
-    if (!needsGeneration || generating || workspaceId == null) return;
-    // The person grain's identity varies by subject + period, so those join the attempt key —
-    // switching periods (or people) allows a fresh attempt while re-renders of one never do.
-    const attemptKey = `${workspaceId}|${d.kind}|${d.userId ?? '-'}|${d.fromMs ?? '-'}|${
-      d.toMs ?? '-'
-    }|${data?.synthesis?.generatedAt ?? '-'}`;
-    if (attemptedRef.current === attemptKey) return;
-    attemptedRef.current = attemptKey;
-    generate.mutate();
-    // `generate` is identity-stable enough for this once-per-key guard; the ref is the gate.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    needsGeneration,
-    generating,
-    workspaceId,
-    d.kind,
-    d.userId,
-    d.fromMs,
-    d.toMs,
-    data?.synthesis?.generatedAt,
-  ]);
-  return data?.synthesis ?? null;
 }

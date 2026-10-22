@@ -34,7 +34,7 @@ reader's Claude Code login, else the environment's `ANTHROPIC_API_KEY`. Core cal
 plugin marks those three calls `localRoute: 'agent'` (its `localLlm` client, an OPTIONAL field on
 `ctx.llm.complete` — no apiVersion bump), so a passed `apiKey` (`SUMMARY_ANTHROPIC_API_KEY`) is
 IGNORED for them (`cheapRoute`, pinned by `llm.test.ts` + `llm-local-route.test.ts`). ⚠ The Pro
-**Reports** and **Bots Monitoring** clients (period-report narration, the insights chat, syntheses,
+**Reports** and **Bots Monitoring** clients (period-report narration, syntheses,
 bot themes, the advisor refine, Chronology pointers) leave it unmarked and keep the key locally too.
 The Agent-SDK route throws "Claude is switched off here." under `LIMN_AI_DISABLED`. CLOUD ignores
 `localRoute` and keeps the metered key route. Same model (Haiku 5.5) both ways.

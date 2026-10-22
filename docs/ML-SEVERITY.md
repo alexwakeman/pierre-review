@@ -281,7 +281,8 @@ ever called by the background worker, so no request can spend anything.
 
 `getMlWindowAggregates` and `countBotText`/`countUnlabelledBotText` gained a `to: Date | null`
 parameter alongside `from`, threaded from `getBotAnalytics`. **It is a `Date` ONLY when the
-caller holds EXPLICIT bounds** (the People report's completed period), and is then applied
+caller holds EXPLICIT bounds** (the People report's completed period — that report was removed
+2026-10-22, so no SPA screen sends bounds today; the route still accepts them), and is then applied
 half-open (`lt`, the routes' stated `[fromMs, toMs)` contract, matching `person-period.ts`'s
 spelling so a boundary-ms row lands in exactly one period). Under the ENUM window form it is
 `null` and the scan carries **no upper predicate at all**.

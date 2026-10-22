@@ -683,7 +683,7 @@ export function PersonIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
-// Two overlapping figures — a group of people (the People report, the members picker).
+// Two overlapping figures — a group of people (the members picker).
 export function PeopleIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   return (
     <IconShell size={size} strokeWidth={1.8} {...rest}>
