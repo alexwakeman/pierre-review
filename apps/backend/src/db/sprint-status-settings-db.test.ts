@@ -1,6 +1,8 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SPRINT_STATUS_SETTINGS_VERSION } from '@pierre-review/shared';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // Activity → This Sprint — the status layout's DB half on a SCRATCH SQLite (never apps/backend/data):
 //   • parseSprintStatusSettings: strict on a post (each refusal's plain message: no buckets, too many,
@@ -12,7 +14,7 @@ import { SPRINT_STATUS_SETTINGS_VERSION } from '@pierre-review/shared';
 //     tenant's PRs never joined; sprintLayoutFor reads the stored override (a RETIRED
 //     {order, deliveredFrom} value too) and the automatic order.
 
-const DB_PATH = '/private/tmp/claude-501/pierre-sprint-status-settings-test.sqlite';
+const DB_PATH = join(tmpdir(), 'pierre-sprint-status-settings-test.sqlite');
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 process.env.DEPLOYMENT_MODE = 'local';

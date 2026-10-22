@@ -1,0 +1,29 @@
+2026-10-01T10:00:00.0000000Z ##[group]Run actions/checkout@v4
+2026-10-01T10:00:00.1000000Z with:
+2026-10-01T10:00:00.2000000Z   repository: acme/api
+2026-10-01T10:00:01.0000000Z ##[endgroup]
+@@INSTALL_NOISE@@
+2026-10-01T10:01:00.0000000Z ##[group]Run npm audit --audit-level=high
+2026-10-01T10:01:00.1000000Z npm audit --audit-level=high
+2026-10-01T10:01:00.2000000Z shell: /usr/bin/bash -e {0}
+2026-10-01T10:01:00.3000000Z ##[endgroup]
+2026-10-01T10:01:03.0000000Z # npm audit report
+2026-10-01T10:01:03.0000000Z 
+2026-10-01T10:01:03.0000000Z braces  <3.0.3
+2026-10-01T10:01:03.0000000Z Severity: high
+2026-10-01T10:01:03.0000000Z Uncontrolled resource consumption in braces - https://github.com/advisories/GHSA-grv7-fg5c-xmjg
+2026-10-01T10:01:03.0000000Z fix available via `npm audit fix`
+2026-10-01T10:01:03.0000000Z node_modules/braces
+2026-10-01T10:01:03.0000000Z 
+2026-10-01T10:01:03.0000000Z semver  7.0.0 - 7.5.1
+2026-10-01T10:01:03.0000000Z Severity: moderate
+2026-10-01T10:01:03.0000000Z semver vulnerable to Regular Expression Denial of Service - https://github.com/advisories/GHSA-c2qf-rxjj-qqgw
+2026-10-01T10:01:03.0000000Z fix available via `npm audit fix`
+2026-10-01T10:01:03.0000000Z node_modules/semver
+2026-10-01T10:01:03.0000000Z 
+2026-10-01T10:01:03.0000000Z 2 vulnerabilities (1 moderate, 1 high)
+2026-10-01T10:01:03.0000000Z 
+2026-10-01T10:01:03.0000000Z To address all issues, run:
+2026-10-01T10:01:03.0000000Z   npm audit fix
+2026-10-01T10:01:03.1000000Z ##[error]Process completed with exit code 1.
+@@POST_NOISE@@

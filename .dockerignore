@@ -21,5 +21,7 @@ apps/backend/.env
 docs
 *.md
 !apps/landing/README.md
+# build-release.mjs ships it in the package (vendored MIT icons' notice) and fails without it.
+!THIRD_PARTY_NOTICES.md
 .DS_Store
 **/.DS_Store

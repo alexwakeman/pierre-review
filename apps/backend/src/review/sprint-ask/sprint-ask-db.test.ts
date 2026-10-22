@@ -7,8 +7,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { SPRINT_ASK_MAX_TURNS, SPRINT_ASK_QUESTION_MAX } from '@pierre-review/shared';
 import { capAskHistory, sprintAskPrompt } from './prompt.js';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-const DB_PATH = '/private/tmp/claude-501/pierre-sprint-ask-test.sqlite';
+const DB_PATH = join(tmpdir(), 'pierre-sprint-ask-test.sqlite');
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 process.env.DEPLOYMENT_MODE = 'local';

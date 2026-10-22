@@ -1,12 +1,14 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SPRINT_THEME_VERSION } from '@pierre-review/shared';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // The sprint THEMES store (db/sprint-themes.ts) on a SCRATCH SQLite — never apps/backend/data. Pins: one
 // row per (account, workspace) replaced by each pass, currency by hash + version, the tenant scope of
 // the read, and the STRUCTURAL tenancy (a cross-account (workspace, account) pair fails in the DB).
 
-const DB_PATH = '/private/tmp/claude-501/pierre-sprint-themes-test.sqlite';
+const DB_PATH = join(tmpdir(), 'pierre-sprint-themes-test.sqlite');
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 process.env.DEPLOYMENT_MODE = 'local';

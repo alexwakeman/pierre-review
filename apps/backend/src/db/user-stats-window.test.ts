@@ -5,9 +5,11 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { USER_STATS_WINDOW_DAYS, type UserContributionStats } from '@pierre-review/shared';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // ⚠ Every runtime import reaching db/client.ts is DYNAMIC, after the env is set.
-const DB_PATH = `/private/tmp/pierre-user-stats-${process.pid}-${Date.now()}.sqlite`;
+const DB_PATH = join(tmpdir(), `pierre-user-stats-${process.pid}-${Date.now()}.sqlite`);
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

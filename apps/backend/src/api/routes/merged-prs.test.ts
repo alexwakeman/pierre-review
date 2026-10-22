@@ -12,8 +12,10 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-const DB_PATH = '/private/tmp/pierre-merged-prs-route-test.sqlite';
+const DB_PATH = join(tmpdir(), 'pierre-merged-prs-route-test.sqlite');
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 process.env.DEPLOYMENT_MODE = 'local';

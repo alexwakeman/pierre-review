@@ -3,6 +3,8 @@ dist/
 build/
 release/
 *.log
+# Test fixtures that ARE CI logs (ci-failures-excerpt.test.ts reads them).
+!apps/backend/src/review/claude-review/__fixtures__/ci-logs/*.log
 *.tsbuildinfo
 
 # Local DB + env

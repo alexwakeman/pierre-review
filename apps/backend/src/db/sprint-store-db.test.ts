@@ -1,11 +1,13 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // The This-sprint foundation store (db/sprint-store.ts) on a SCRATCH SQLite — never apps/backend/data.
 // Pins: the demand-gate upsert and the
 // STRUCTURAL tenancy of sprint_ticket_repos (a cross-account (repo, account) pair fails in the DB).
 
-const DB_PATH = '/private/tmp/claude-501/pierre-sprint-store-test.sqlite';
+const DB_PATH = join(tmpdir(), 'pierre-sprint-store-test.sqlite');
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 process.env.DEPLOYMENT_MODE = 'local';

@@ -12,8 +12,10 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { jiraApiRoot, trackerTicketIdent } from '@pierre-review/shared';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-const DB_PATH = '/private/tmp/claude-501/pierre-stories-test.sqlite';
+const DB_PATH = join(tmpdir(), 'pierre-stories-test.sqlite');
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

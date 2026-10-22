@@ -1,0 +1,23 @@
+2026-10-01T10:00:00.0000000Z ##[group]Run npm test -- --ci
+2026-10-01T10:00:00.1000000Z npm test -- --ci
+2026-10-01T10:00:01.0000000Z ##[endgroup]
+@@TEST_NOISE@@
+2026-10-01T10:03:00.0000000Z FAIL src/cart/total.test.ts
+2026-10-01T10:03:00.0000000Z   ● cart total › applies the discount once
+2026-10-01T10:03:00.0000000Z 
+2026-10-01T10:03:00.0000000Z     expect(received).toBe(expected) // Object.is equality
+2026-10-01T10:03:00.0000000Z 
+2026-10-01T10:03:00.0000000Z     Expected: 90
+2026-10-01T10:03:00.0000000Z     Received: 81
+2026-10-01T10:03:00.0000000Z 
+2026-10-01T10:03:00.0000000Z       12 |   const cart = makeCart([item(100)]);
+2026-10-01T10:03:00.0000000Z       13 |   applyDiscount(cart, 0.1);
+2026-10-01T10:03:00.0000000Z     > 14 |   expect(total(cart)).toBe(90);
+2026-10-01T10:03:00.0000000Z          |                       ^
+2026-10-01T10:03:00.0000000Z 
+2026-10-01T10:03:00.0000000Z       at Object.<anonymous> (src/cart/total.test.ts:14:23)
+@@TEST_NOISE@@
+2026-10-01T10:04:00.0000000Z Test Suites: 1 failed, 213 passed, 214 total
+2026-10-01T10:04:00.0000000Z Tests:       1 failed, 1840 passed, 1841 total
+2026-10-01T10:04:00.0000000Z ##[error]Process completed with exit code 1.
+@@POST_NOISE@@

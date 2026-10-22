@@ -9,8 +9,10 @@ import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { SPRINT_STATUS_SETTINGS_VERSION } from '@pierre-review/shared';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-const DB_PATH = '/private/tmp/claude-501/pierre-sprint-statuses-route-test.sqlite';
+const DB_PATH = join(tmpdir(), 'pierre-sprint-statuses-route-test.sqlite');
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 process.env.DEPLOYMENT_MODE = 'local';

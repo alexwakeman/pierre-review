@@ -1,0 +1,14 @@
+2026-10-01T10:00:00.0000000Z ##[group]Run pnpm install --frozen-lockfile
+2026-10-01T10:00:00.1000000Z pnpm install --frozen-lockfile
+2026-10-01T10:00:01.0000000Z ##[endgroup]
+@@INSTALL_NOISE@@
+2026-10-01T10:02:00.0000000Z ##[group]Run pnpm typecheck
+2026-10-01T10:02:00.1000000Z pnpm typecheck
+2026-10-01T10:02:00.3000000Z ##[endgroup]
+2026-10-01T10:02:01.0000000Z > @acme/api@1.0.0 typecheck /home/runner/work/api/api
+2026-10-01T10:02:01.0000000Z > tsc --noEmit
+2026-10-01T10:02:09.0000000Z src/billing/invoice.ts(42,7): error TS2322: Type 'string' is not assignable to type 'number'.
+2026-10-01T10:02:09.0000000Z src/billing/invoice.ts(88,19): error TS2339: Property 'totalCents' does not exist on type 'Invoice'.
+2026-10-01T10:02:09.1000000Z  ELIFECYCLE  Command failed with exit code 2.
+2026-10-01T10:02:09.2000000Z ##[error]Process completed with exit code 2.
+@@POST_NOISE@@

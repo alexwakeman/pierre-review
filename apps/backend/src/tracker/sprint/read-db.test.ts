@@ -1,6 +1,8 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { SprintSource } from '@pierre-review/shared';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // The sprint list read (./read.ts) on a SCRATCH SQLite — never apps/backend/data. Pins:
 //   • THE DEMAND GATE: a workspace whose tab was not opened in SPRINT_VIEW_TTL_DAYS is not read; a
@@ -18,7 +20,7 @@ import type { SprintSource } from '@pierre-review/shared';
 //   • REFERENCED TICKETS: one lookup per read for keys the sprint names that no stored row knows,
 //     stored in `sprint_ref_tickets`, replaced next read, kept when the lookup fails, per tenant.
 
-const DB_PATH = '/private/tmp/claude-501/pierre-sprint-read-test.sqlite';
+const DB_PATH = join(tmpdir(), 'pierre-sprint-read-test.sqlite');
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 process.env.DEPLOYMENT_MODE = 'local';
