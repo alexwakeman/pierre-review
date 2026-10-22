@@ -164,7 +164,7 @@ const FOCUS =
   'focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
 const FADE = 'transition-colors duration-hover ease-standard';
 
-/** The primary action: ink fill, paper text. "Sign in with GitHub". */
+/** The primary action: ink fill, paper text. "Try the demo". */
 export function InkButton({
   to,
   children,
@@ -185,7 +185,7 @@ export function InkButton({
 }
 
 /**
- * The paid action: vermilion fill, paper text. "Get Pro".
+ * The signal action: vermilion fill, paper text.
  *
  * Note the fill is `signal-text` (#C13A20), NOT `signal-fill` (#E2492C) — this
  * button carries text, and #E2492C is 3.85:1 on paper. Any vermilion that sits
@@ -210,7 +210,7 @@ export function SignalButton({
   );
 }
 
-/** The secondary action on the pricing CTA: a 1px ink outline, no fill. */
+/** A secondary action: a 1px ink outline, no fill. */
 export function OutlineButton({
   to,
   children,

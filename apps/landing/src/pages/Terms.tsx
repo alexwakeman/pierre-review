@@ -1,7 +1,7 @@
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
 import { Link } from '../router';
-import { SITE_NAME } from '../lib/site';
+import { DEMO_PATH, FREE_TEAM_SIZE, INSTALL_COMMAND, LICENSE_URL, SITE_NAME } from '../lib/site';
 import {
   LEGAL_CONTROLLER,
   LegalNote,
@@ -13,162 +13,135 @@ import {
   UL,
 } from '../components/legal';
 
-// Terms of service for the hosted app. Kept deliberately short and readable — this
-// is a £4/month developer tool run by one person, and a twelve-page indemnity clause
-// would be both unenforceable and dishonest about the scale of the thing.
+// Terms of use. Kept short and readable.
 //
-// The two clauses that genuinely matter here are §5 (you are responsible for what you
-// point Limn at, because it reads other people's repositories with your token) and
-// §7 (AI output is a suggestion, not a review you can rely on).
+// There is no hosted service any more, so there are no accounts, no billing and no
+// service levels to describe. What is left: this website (marketing pages, the demo,
+// the contact form), and the software itself — which is governed by the Limn License
+// at the repository root, NOT by this page. §3 summarises that licence and says the
+// licence wins; FREE_TEAM_SIZE mirrors it.
+//
+// The two clauses that genuinely matter are §4 (you are responsible for what you point
+// Limn at, because it reads repositories with your token) and §5 (AI output is a
+// suggestion, not a review you can rely on).
+
+const LINK =
+  'border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text';
 
 export default function Terms(): JSX.Element {
   useSeo(seoFor('/terms'));
 
   return (
     <LegalPage
-      title="Terms of service"
+      title="Terms of use"
       intro={
         <>
           <p>
-            These terms cover the hosted service at{' '}
-            <span className="font-mono text-ink">pierre-review.com</span>. By signing
-            in you agree to them.
+            These terms cover this website, <span className="font-mono text-ink">pierre-review.com</span>,
+            and the {SITE_NAME} software you install from npm. There is no hosted version of{' '}
+            {SITE_NAME} and no account to sign up for.
           </p>
           <div className="mt-5">
-            <LegalNote title="The self-hosted code is under a different licence, not these terms">
+            <LegalNote title="The software is licensed under the Limn License">
               <p>
-                {SITE_NAME}&apos;s source is published under the Functional Source Licence
-                (FSL-1.1-MIT), which converts to MIT two years after each release. If you
-                clone the repository and run it yourself, that licence governs — not this
-                document. These terms only apply to the version we host for you.
+                Your right to use the software comes from the{' '}
+                <a href={LICENSE_URL} target="_blank" rel="noreferrer noopener" className={LINK}>
+                  Limn License
+                </a>
+                , published with the source. It is free for individuals and for organisations
+                where no more than {FREE_TEAM_SIZE} people use it. Above that, the organisation
+                needs a commercial licence. §3 summarises it; where the two differ, the licence
+                wins.
               </p>
             </LegalNote>
           </div>
         </>
       }
     >
-      <LegalSection id="who" heading="1. Who you are contracting with">
+      <LegalSection id="who" heading="1. Who you are dealing with">
         <P>
-          The service is provided by <T>{LEGAL_CONTROLLER}</T>, a sole trader in the United
+          {SITE_NAME} is made by <T>{LEGAL_CONTROLLER}</T>, a sole trader in the United
           Kingdom, contactable at <Mail />. These terms are governed by the laws of England
           and Wales, and the courts of England and Wales have exclusive jurisdiction.
         </P>
-        <P>
-          You must be at least 16 years old and have a GitHub account to use the service.
-        </P>
       </LegalSection>
 
-      <LegalSection id="service" heading="2. What the service does">
+      <LegalSection id="what" heading="2. What Limn is">
         <P>
-          {SITE_NAME} reads pull-request activity from GitHub repositories you nominate and
-          presents it as a dashboard. Some features send content to an AI model to produce
-          summaries or reviews. The{' '}
-          <Link to="/features" className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text">
-            features
+          {SITE_NAME} is software that runs on your own computer. You install and start it with{' '}
+          <span className="font-mono text-ink">{INSTALL_COMMAND}</span>. It reads pull-request
+          activity from the GitHub repositories you choose, using your own GitHub login, and
+          stores it in a file on your machine. We do not run a server for it and we receive
+          none of that data.
+        </P>
+        <P>
+          This website has three parts: the pages describing {SITE_NAME}, a{' '}
+          <Link to={DEMO_PATH} className={LINK}>
+            demo
           </Link>{' '}
-          and{' '}
-          <Link to="/pricing" className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text">
-            pricing
-          </Link>{' '}
-          pages describe what is included at each tier.
-        </P>
-        <P>
-          We may change, add or remove features. If a change materially reduces what a paid
-          plan provides, we will tell paying users before it takes effect.
-        </P>
-      </LegalSection>
-
-      <LegalSection id="account" heading="3. Your account">
-        <P>
-          You are responsible for activity under your account, and for keeping your GitHub
-          account secure — anyone who controls your GitHub login can sign in to {SITE_NAME} as
-          you. Tell us at <Mail /> if you believe your account has been misused.
-        </P>
-        <P>
-          You can delete your account at any time from Settings → Your data. Deletion is
-          immediate and irreversible.
-        </P>
-      </LegalSection>
-
-      <LegalSection id="billing" heading="4. Paying for Pro">
-        <UL>
-          <li>
-            Pro is billed monthly in advance through <T>Stripe</T>, which handles all
-            payment details. We never see your card number.
-          </li>
-          <li>
-            AI features carry a monthly allowance. When it is used up, AI generation stops
-            until the allowance resets at the start of the next month — it does not
-            silently keep spending, and you are never billed for overage without asking.
-          </li>
-          <li>
-            <T>Cancel any time.</T> Cancellation takes effect at the end of the period you
-            have already paid for; there is no lock-in and no cancellation fee.
-          </li>
-          <li>
-            We do not offer pro-rata refunds for a partial month, but if something went
-            genuinely wrong, email <Mail /> and we will sort it out.
-          </li>
-          <li>
-            If a payment fails, Pro features stop and the account falls back to the free
-            tier. Your data is not deleted.
-          </li>
-          <li>
-            Prices may change with at least 30 days&apos; notice; the new price applies from
-            your next renewal.
-          </li>
-        </UL>
-      </LegalSection>
-
-      <LegalSection id="acceptable" heading="5. What you must not do">
-        <P>
-          The important one first: {SITE_NAME} reads GitHub using <em>your</em> access token, so
-          it can reach whatever you can reach.{' '}
-          <T>
-            You are responsible for having the right to access every repository you add
-          </T>
-          , and for complying with your employer&apos;s or client&apos;s policies about where
-          that data may be copied and whether it may be sent to an AI model. Adding a
-          repository you are not authorised to export is your breach, not ours.
-        </P>
-        <P>You also agree not to:</P>
-        <UL>
-          <li>
-            attempt to access another account&apos;s data, or probe, scan or overload the
-            service (security research is welcome — see §9);
-          </li>
-          <li>
-            circumvent the plan limits, credit allowances or rate limits, or automate the
-            AI features to consume allowance in bulk;
-          </li>
-          <li>use the service to break the law, or in breach of GitHub&apos;s own terms;</li>
-          <li>resell the hosted service as your own.</li>
-        </UL>
-        <P>
-          We may suspend an account that is causing harm to the service or to others. Where
-          it is reasonable to do so, we will contact you first.
-        </P>
-      </LegalSection>
-
-      <LegalSection id="your-data" heading="6. Your data">
-        <P>
-          You keep all rights in your code and your repository content. We claim no
-          ownership and no licence beyond what is needed to run the features you use — store
-          it, display it back to you, and pass it to the processors listed in the{' '}
-          <Link to="/privacy" className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text">
-            privacy policy
+          that runs in your browser on invented sample data, and a{' '}
+          <Link to="/contact" className={LINK}>
+            contact form
           </Link>
-          . We do not use your code or comments to train any model.
+          .
         </P>
       </LegalSection>
 
-      <LegalSection id="ai" heading="7. AI output — read this one">
+      <LegalSection id="licence" heading="3. The licence, in short">
+        <UL>
+          <li>
+            <T>Free for individuals</T>, and for any organisation where no more than{' '}
+            {FREE_TEAM_SIZE} people use {SITE_NAME}.
+          </li>
+          <li>
+            <T>More than {FREE_TEAM_SIZE} people in one organisation</T> need a commercial
+            licence. Ask through the{' '}
+            <Link to="/contact?topic=licence" className={LINK}>
+              contact form
+            </Link>
+            .
+          </li>
+          <li>
+            <T>No competing product.</T> You may not use {SITE_NAME}, or its source, to build or
+            offer a product that competes with it.
+          </li>
+        </UL>
         <P>
-          AI-generated summaries, insights and reviews are <T>suggestions produced by a
-          language model</T>. They can be confidently wrong: they miss real bugs, invent
-          problems that do not exist, and misread intent. Nothing {SITE_NAME} generates is a
-          substitute for human review, and no AI review is ever posted to GitHub without you
-          reading it and pressing the button.
+          This is a summary for convenience. The{' '}
+          <a href={LICENSE_URL} target="_blank" rel="noreferrer noopener" className={LINK}>
+            Limn License
+          </a>{' '}
+          is the binding text.
+        </P>
+      </LegalSection>
+
+      <LegalSection id="responsibility" heading="4. What you are responsible for">
+        <P>
+          {SITE_NAME} reads GitHub using <em>your</em> access token, so it can reach whatever you
+          can reach.{' '}
+          <T>You are responsible for having the right to access every repository you add</T>,
+          and for following your employer&apos;s or client&apos;s rules about where that data
+          may be copied and whether it may be sent to an AI model.
+        </P>
+        <P>
+          The AI features run on your own Claude Code login or Anthropic API key. Content they
+          send goes from your machine to Anthropic under your own agreement with Anthropic. We
+          are not in that path.
+        </P>
+        <P>On this website, you agree not to:</P>
+        <UL>
+          <li>probe, scan or overload the site (security research is welcome — see §7);</li>
+          <li>use the contact form to send spam or anything unlawful.</li>
+        </UL>
+      </LegalSection>
+
+      <LegalSection id="ai" heading="5. AI output — read this one">
+        <P>
+          AI-written reviews, fixes, notes and plans are <T>suggestions produced by a language
+          model</T>. They can be confidently wrong: they miss real bugs, invent problems that
+          do not exist, and misread intent. Nothing {SITE_NAME} generates replaces human
+          review. A review is posted, and a fix pushed, only when you press the button or
+          switch on the automatic setting yourself.
         </P>
         <P>
           You are responsible for anything you post, merge or act on. We accept no liability
@@ -177,52 +150,34 @@ export default function Terms(): JSX.Element {
         </P>
       </LegalSection>
 
-      <LegalSection id="availability" heading="8. Availability">
+      <LegalSection id="liability" heading="6. No warranty, and liability">
         <P>
-          The service is provided on an <T>as-is, as-available</T> basis, with no uptime
-          guarantee and no service-level agreement. It is a small independent product: there
-          will be maintenance, and occasionally there will be outages. Data is stored
-          durably by our hosting provider, but <T>you should not treat {SITE_NAME} as the system
-          of record</T> — GitHub is. Everything {SITE_NAME} holds can be re-synced from there.
-        </P>
-      </LegalSection>
-
-      <LegalSection id="liability" heading="9. Liability">
-        <P>
-          To the fullest extent the law allows, we exclude the implied warranties of
-          merchantability, fitness for a particular purpose and non-infringement. We are not
-          liable for indirect or consequential loss, lost profits, lost data or business
-          interruption.
+          {SITE_NAME} and this website are provided <T>as is</T>, with no warranty of any kind,
+          including merchantability, fitness for a particular purpose and non-infringement.
+          GitHub is the system of record; everything {SITE_NAME} holds can be synced again from
+          there.
         </P>
         <P>
-          Where liability cannot be excluded, it is capped at the greater of the amount you
-          paid us in the twelve months before the claim, or £50. Nothing here limits
-          liability for death or personal injury caused by negligence, for fraud, or for
-          anything else that cannot lawfully be limited — and if you are a consumer, your
+          To the fullest extent the law allows, we are not liable for indirect or
+          consequential loss, lost profits, lost data or business interruption. Nothing here
+          limits liability for death or personal injury caused by negligence, for fraud, or
+          for anything else that cannot lawfully be limited — and if you are a consumer, your
           statutory rights are unaffected.
         </P>
+      </LegalSection>
+
+      <LegalSection id="security" heading="7. Security reports">
         <P>
-          Found a security problem? Report it privately to <Mail /> and we will not pursue
-          you for good-faith testing that respects other users&apos; data and does not
-          degrade the service.
+          Found a security problem? Report it privately to <Mail /> rather than opening a
+          public issue. We will not pursue good-faith testing that does not degrade the site
+          or touch anyone else&apos;s data.
         </P>
       </LegalSection>
 
-      <LegalSection id="termination" heading="10. Ending it">
+      <LegalSection id="changes" heading="8. Changes to these terms">
         <P>
-          You may stop using the service and delete your account at any time. We may
-          terminate or suspend access for a material breach of these terms, or with 30
-          days&apos; notice if we discontinue the hosted service — in which case we will
-          refund any period you have paid for in advance and give you time to export your
-          data.
-        </P>
-      </LegalSection>
-
-      <LegalSection id="changes" heading="11. Changes to these terms">
-        <P>
-          We will update the date at the top when these terms change, and give paying users
-          notice of anything material. Continuing to use the service after a change means
-          you accept it. Every revision is in the public git history.
+          We will update the date at the top when these terms change. Every revision is in the
+          public git history.
         </P>
       </LegalSection>
     </LegalPage>

@@ -1,14 +1,18 @@
 import { Link, useRoute } from '../router';
 import { Wordmark } from './feint/Wordmark';
+import { DEMO_PATH } from '../lib/site';
 
 // ---------------------------------------------------------------------------
-// The header: a wordmark, four mono links plus "Sign in". No button, no icon,
+// The header: a wordmark, four mono links plus "Try the demo". No button, no icon,
 // no logo, no sticky backdrop-blur — just a rule under it.
 //
 // The active page is marked by a 2px vermilion underline on its link, which is
 // the one navigational use of the signal colour. When no nav item matches the
-// current path (the home page, the legal pages) the underline falls to "Sign
-// in", so the header always carries exactly one marker — matching both mocks.
+// current path (the home page, the legal pages) the underline falls to "Try the
+// demo", so the header always carries exactly one marker — matching both mocks.
+//
+// There is no sign-in. Limn has no hosted app and no accounts; the demo (a static
+// build of the real app on sample data) is the only thing a visitor can open here.
 //
 // NO MOBILE DRAWER. The previous header had a hamburger opening a full-screen
 // menu; five mono links at 13px wrap onto a second line well before they need
@@ -19,14 +23,14 @@ const NAV_LINKS = [
   { to: '/for-developers', label: 'For developers' },
   { to: '/for-managers', label: 'For managers' },
   { to: '/how-we-measure', label: 'How we measure' },
-  // Contact is in the header, not only the footer, because it is currently the way
-  // Pro is obtained — a purchase path in a footer is a purchase path nobody takes.
+  // Contact is in the header, not only the footer, because it is how an organisation
+  // with more than three people gets a licence — a path in a footer is one nobody takes.
   { to: '/contact', label: 'Contact' },
 ];
 
 // The legacy aliases render a surviving page (App.tsx), so the header has to light up
 // the link that page belongs to — otherwise a visitor on /pricing sees a page with no
-// nav item marked and the underline falls through to "Sign in", which is the wrong
+// nav item marked and the underline falls through to "Try the demo", which is the wrong
 // claim about where they are.
 //
 // ⚠ THIS TABLE MUST TRACK THE ALIASES IN App.tsx. It previously mapped /insights and
@@ -80,10 +84,10 @@ export default function Nav(): JSX.Element {
             );
           })}
           <Link
-            to="/api/auth/login"
+            to={DEMO_PATH}
             className={`text-ink ${navMatched ? '' : ACTIVE} ${FADE} ${FOCUS}`}
           >
-            Sign in
+            Try the demo
           </Link>
         </div>
       </nav>

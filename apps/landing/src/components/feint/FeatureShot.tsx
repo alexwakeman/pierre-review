@@ -38,7 +38,7 @@ export function FeatureShot({
   rail: { n?: string; word: string };
   tone?: 'paper' | 'alt';
   divider?: 'rule' | 'ink' | 'none';
-  /** An optional tier line above the heading, e.g. "Pro · $25 per user". */
+  /** An optional mono line above the heading. */
   label?: string;
   heading: string;
   /** The section's copy. Rendered in the rail column, above the frame. */

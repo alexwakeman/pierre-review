@@ -1,6 +1,6 @@
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
-import { INSTALL_COMMAND, SITE_NAME } from '../lib/site';
+import { DEMO_PATH, INSTALL_COMMAND, SITE_NAME } from '../lib/site';
 import {
   DashItem,
   InkButton,
@@ -12,16 +12,14 @@ import {
 } from '../components/feint/primitives';
 import { FeatureShot } from '../components/feint/FeatureShot';
 import { ShotFrame } from '../components/feint/ShotFrame';
-import { TierTable } from '../components/feint/TierTable';
+import { GetStarted } from '../components/feint/GetStarted';
 
 // ---------------------------------------------------------------------------
 // For developers — one of the site's two role pages.
 //
-// THE SHAPE IS FIXED AND SHARED WITH /for-managers: everything free, in full,
-// first; then what Pro adds and why; then the comparison table and the sign-up.
-// The order is the argument. A page that leads with the paid tier asks for a
-// decision the reader has no basis for yet, and here the free tier is genuinely
-// the thing that gets used every day.
+// THE SHAPE IS SHARED WITH /for-managers: the problem, the screens that answer it,
+// then <GetStarted/> (the npm command, the demo and the licence line). Everything
+// on this page is free — there is no paid tier — so no section is labelled by price.
 //
 // The developer's claim is narrow and concrete: your work is scattered across
 // repositories you cannot all watch, and the review bots piled more on top.
@@ -46,9 +44,9 @@ import { TierTable } from '../components/feint/TierTable';
 // ⚠ THE PROMISE IS NOW SPELLED "PLAN YOUR DAY", AND THE RULES ARE HALF OF IT.
 // The app opens on Pending, so the page leads with it: 01 the day (the problem),
 // 02 Pending (the plan), 03 your rules (what counts as your turn, the order, the
-// mute — all free settings), 04 review and fix (Claude Review, Ask Claude and AI
-// Fix — free, local only, on the reader's own Claude), 05 act in place (finishing
-// the plan), then the threads, the bots, the rest of the free tier and Pro. The rules are a section of
+// mute — all settings), 04 review and fix (Claude Review, Ask Claude and AI
+// Fix — on the reader's own Claude), 05 act in place (finishing the plan), then the
+// threads, the bots, the rest of it and the writing. The rules are a section of
 // their own because a ranked list whose idea of "your turn" you cannot change is
 // somebody else's list. The Story clock times run in page order; keep them so.
 //
@@ -88,16 +86,16 @@ export default function ForDevelopers(): JSX.Element {
           to land. {SITE_NAME} puts all of it on one board across every repository you work
           in, ranked, with what to do next at the top. You decide what counts as your turn
           and how it is ordered — and you finish the work without leaving the page. Claude
-          reviews and fixes pull requests too, on your own Claude, free.
+          reviews and fixes pull requests too, on your own Claude login.
         </p>
         <div className="mb-4 flex flex-wrap items-center gap-3.5">
-          <InkButton to="/api/auth/login">Sign in with GitHub</InkButton>
+          <InkButton to={DEMO_PATH}>Try the demo</InkButton>
           <UnderlineLink to="/for-managers">If you run the team →</UnderlineLink>
         </div>
         <p className="mb-11 max-w-reassure font-mono text-mono-nav text-secondary">
-          Everything in the next eight sections is free, with no repository limit. Run it on
-          your own machine with <span className="text-ink">{INSTALL_COMMAND}</span> and it
-          keeps no credentials at all. Review and fix run only there.
+          100% free, with no repository limit. Run it on your own machine with{' '}
+          <span className="text-ink">{INSTALL_COMMAND}</span> and it keeps no credentials at
+          all. Built for Claude users; Codex support is coming soon.
         </p>
       </header>
 
@@ -134,8 +132,8 @@ export default function ForDevelopers(): JSX.Element {
                     <DashItem key={d}>{d}</DashItem>
                   ))}
                 </ul>
-                <Story moment="Free, always">
-                  everything in sections 01 to 08 is in the open-core tier.
+                <Story moment="Free">
+                  everything on this page, with no account and no repository limit.
                 </Story>
               </div>
             </div>
@@ -144,9 +142,8 @@ export default function ForDevelopers(): JSX.Element {
       </Section>
 
       {/* ---------- 02 · Pending ---------- */}
-      {/* ⚠ "PLAN MY DAY" IN THE SCREENSHOT IS THE PRO BUTTON; the plan it sits above
-          is free. The copy says which is which (last paragraph) so the page's promise
-          and the shot's button cannot be read as the same paid thing. Every weight below
+      {/* ⚠ "PLAN MY DAY" IN THE SCREENSHOT writes sentences on top of the plan and never
+          changes its order (§09 says so). Every weight below
           is a DEFAULT from `packages/shared/src/pending-rules.ts` (Balanced); §03 is
           where the reader changes them. */}
       <FeatureShot
@@ -192,9 +189,8 @@ export default function ForDevelopers(): JSX.Element {
           stranger&rsquo;s pull request is yours.
         </p>
         <p>
-          The tabs and the order are free on every tier. The{' '}
-          <span className="text-ink">Plan my day</span> button in the corner is Pro: it adds
-          the written sentences on top (§09).
+          The <span className="text-ink">Plan my day</span> button in the corner adds written
+          sentences on top (§09). It never changes the order.
         </p>
         <Story moment="09:04">
           sixty-one items across five repositories, and the first three are the ones you can
@@ -203,7 +199,7 @@ export default function ForDevelopers(): JSX.Element {
       </FeatureShot>
 
       {/* ---------- 03 · your rules ---------- */}
-      {/* ⚠ A PRIMARY OFFERING, NOT A FOOTNOTE — and every claim here is a real, free
+      {/* ⚠ A PRIMARY OFFERING, NOT A FOOTNOTE — and every claim here is a real
           control: Settings → My Turn (account-wide: `MyTurnSection.tsx`, labels from
           `MY_TURN_SETTING_LABEL` / `PRESET_LABEL`, defaults from
           `MY_TURN_SHOW_DEFAULTS`) and Settings → Pending mute (per workspace or per
@@ -272,19 +268,18 @@ export default function ForDevelopers(): JSX.Element {
                 </p>
               </div>
             </div>
-            <Story moment="Free">
-              every one of these, on every tier, running locally or hosted.
+            <Story moment="Yours">
+              every one of these is a setting, and the board explains its order with them.
             </Story>
           </div>
         </RailGrid>
       </Section>
 
       {/* ---------- 04 · review and fix ---------- */}
-      {/* ⚠ FREE, LOCAL ONLY, ON THE READER'S OWN CLAUDE. Claude Review, its chat and AI
-          Fix are core and run through `review/auth.ts`'s two-rung ladder (an ambient
-          Claude Code session, else ANTHROPIC_API_KEY); the hosted app does not register
-          them. Never promise subscription billing or "free AI": the reader's own Claude
-          or key pays, and Limn charges nothing for it.
+      {/* ⚠ ON THE READER'S OWN CLAUDE. Claude Review, its chat and AI Fix run through a
+          two-rung ladder (an ambient Claude Code session, else ANTHROPIC_API_KEY). Never
+          promise subscription billing or "free AI": the reader's own Claude or key pays,
+          and Limn charges nothing for it. Codex is "coming soon" — never claim it works.
 
           ⚠ THE SAFETY LINES ARE TOOL LISTS, NOT ADJECTIVES. The reviewer and the chat
           deny Write/Edit/Bash/WebFetch/WebSearch (`review/agent.ts`, `chat-agent.ts`);
@@ -293,13 +288,12 @@ export default function ForDevelopers(): JSX.Element {
           check it" (many repositories have no CI at all).
 
           No screenshot yet: no capture of the Claude tab, the chat or the fix diff
-          exists. Add a FeatureShot when one is taken — never borrow another screen.
-          The CI-failure read is NOT here: it stays Pro (§09). */}
+          exists. Add a FeatureShot when one is taken — never borrow another screen. */}
       <Section>
         <RailGrid rail={{ n: '04', word: 'Review and fix' }}>
           <div className="rail:col-span-2">
             <h2 className="mb-6 max-w-[28ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
-              Claude reviews it and fixes it. On your own Claude, free.
+              Claude reviews it and fixes it. On your own Claude.
             </h2>
             <p className="mb-[30px] max-w-[62ch] text-pretty">
               Every pull request has a Claude tab. Claude reads the change and writes up what
@@ -346,7 +340,8 @@ export default function ForDevelopers(): JSX.Element {
                   you are signed in to, or <span className="text-ink">ANTHROPIC_API_KEY</span>.{' '}
                   {SITE_NAME} stores no key and charges nothing for it. The first time, it asks
                   for a one-time download of about 110 MB. It runs on your machine, with{' '}
-                  <span className="text-ink">{INSTALL_COMMAND}</span>.
+                  <span className="text-ink">{INSTALL_COMMAND}</span>. Codex support is coming
+                  soon.
                 </p>
               </div>
               <div>
@@ -398,7 +393,7 @@ export default function ForDevelopers(): JSX.Element {
         </p>
         <p className="mb-6">
           Conflicts are resolved in the app, hunk by hunk: take a side, or edit the result
-          yourself. Free, running locally or hosted.
+          yourself.
         </p>
         <p>
           The header carries how far the change reaches — low, medium or high, with the
@@ -433,7 +428,7 @@ export default function ForDevelopers(): JSX.Element {
         </p>
         <p>
           Bot comments also arrive already graded for severity, by a classifier trained for
-          this one job — free, and never the vendor&rsquo;s own badge, which is stored to be
+          this one job — never the vendor&rsquo;s own badge, which is stored to be
           shown and not to be believed.
         </p>
         <Story moment="09:19">
@@ -490,12 +485,12 @@ export default function ForDevelopers(): JSX.Element {
         </Story>
       </FeatureShot>
 
-      {/* ---------- 08 · the rest of the free tier ---------- */}
+      {/* ---------- 08 · the rest of it ---------- */}
       <Section>
-        <RailGrid rail={{ n: '08', word: 'Also free' }}>
+        <RailGrid rail={{ n: '08', word: 'And more' }}>
           <div className="rail:col-span-2">
             <h2 className="mb-[30px] max-w-[30ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
-              And the rest of it, still without paying.
+              And the rest of it.
             </h2>
             <div className="grid gap-grid-gutter rail:grid-cols-3">
               <div>
@@ -520,7 +515,7 @@ export default function ForDevelopers(): JSX.Element {
               </div>
               <div>
                 {/* This column was "Quiet by default" (notifications + the mute). Both moved up
-                    into §03, where the rules live, so it now carries the one free screen the
+                    into §03, where the rules live, so it now carries the one screen the
                     page did not name: trunk status (`BranchStatusPanel`). */}
                 <h3 className="mb-3 font-display text-h4 font-semibold text-ink">
                   Trunk health
@@ -544,26 +539,21 @@ export default function ForDevelopers(): JSX.Element {
         />
       </Section>
 
-      {/* ---------- 09 · what Pro adds ---------- */}
+      {/* ---------- 09 · the writing ---------- */}
+      {/* What used to be the paid section. Everything here is free now, and still runs on
+          the reader's own Claude; the sentences sit on top of the code's ranking and
+          never change it. */}
       <Section divider="ink" tone="alt">
-        <RailGrid rail={{ n: '09', word: 'Pro' }}>
+        <RailGrid rail={{ n: '09', word: 'The writing' }}>
           <div>
-            <MonoLabel className="mb-4 text-signal-text">Pro · $25 per user</MonoLabel>
             <h2 className="mb-6 max-w-[26ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
               The reading, when the list gets long.
             </h2>
             <p className="mb-6 max-w-[58ch] text-pretty">
-              Pro does not unlock an action. Everything you can do to a pull request,
-              Claude&rsquo;s review and fix included, and every rule behind Pending, you already
-              get for nothing, and that is deliberate — a tool that held back the
-              merge button would be holding your work hostage.
-            </p>
-            <p className="mb-6 max-w-[58ch] text-pretty">
-              What it adds is writing. On Pending, <span className="text-ink">Plan my day</span>{' '}
-              writes a headline for the day, a line on what can wait, and one line on each
-              planned card saying why it comes now — it never changes the order. And on a
-              pull request, a short note on what the change could break and what to read
-              first.
+              On Pending, <span className="text-ink">Plan my day</span> writes a headline for
+              the day, a line on what can wait, and one line on each planned card saying why it
+              comes now. It never changes the order. On a pull request, a short note says what
+              the change could break and what to read first.
             </p>
             <p className="max-w-[58ch] text-pretty">
               On a quiet week you will not miss it. On the week you come back to two hundred
@@ -577,12 +567,12 @@ export default function ForDevelopers(): JSX.Element {
             height={300}
             fit="contain"
             strong
-            note="Free ranks the list. Pro writes the reason on it."
+            note="The code ranks the list. Claude writes the reason on it."
           />
         </RailGrid>
       </Section>
 
-      <TierTable />
+      <GetStarted />
     </>
   );
 }

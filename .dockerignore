@@ -1,27 +1,25 @@
 # Build context excludes — keep the image small and never ship local state/secrets.
 #
-# packages/ml is the pierre-ml submodule (the severity-api). It is a SEPARATE service with its
-# own deployment and is consumed over HTTP, so nothing in this image references it — but it
-# carries ~300 MB of Git-LFS model weights under serving_assets/, which would otherwise be
-# uploaded as build context on every local `docker build`. CI never checked it out, so this
-# cost only ever landed on whoever built the image by hand.
+# The image is the website only (apps/site + the landing + the demo build), so the
+# submodules are never needed: packages/ml carries ~300 MB of Git-LFS model weights and
+# packages/pro is private. Both stay out of the context.
 packages/ml
+packages/pro
 **/node_modules
 **/dist
+**/dist-demo
+**/.ssr-build
 **/.turbo
 release
 apps/backend/data
 apps/backend/.env
 .env
 .env.*
-!.env.cloud.example
 **/*.log
 .git
 .github
+.claude
 docs
 *.md
-!apps/landing/README.md
-# build-release.mjs ships it in the package (vendored MIT icons' notice) and fails without it.
-!THIRD_PARTY_NOTICES.md
 .DS_Store
 **/.DS_Store

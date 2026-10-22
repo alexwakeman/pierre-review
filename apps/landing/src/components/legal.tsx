@@ -18,8 +18,8 @@ import type { ReactNode } from 'react';
  * that HAS changed is a compliance problem, and three separately-maintained dates
  * is the shape in which one of them gets forgotten.
  *
- * Last moved for the contact form (Privacy §2, §5 and §6). */
-export const LEGAL_LAST_UPDATED = '13 September 2026';
+ * Last moved when Limn became local-only and free (all three rewritten). */
+export const LEGAL_LAST_UPDATED = '22 October 2026';
 
 /** The controller's contact point, referenced from all three documents. */
 export const LEGAL_CONTACT_EMAIL = 'wakemana@gmail.com';
@@ -120,7 +120,7 @@ export function LegalTable({
   );
 }
 
-/** A callout for the local-vs-cloud distinction, which every page has to make. */
+/** A callout for the one fact each page leads with. */
 export function LegalNote({
   title,
   children,

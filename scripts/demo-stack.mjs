@@ -10,7 +10,7 @@
 //   pnpm demo:video         seed → boot Pro → film the walkthrough → teardown.
 //                           Masters land in $HOME (mp4 + poster + cues.json);
 //                           add --publish to also write the copies under
-//                           apps/landing/public/demo/. `--scenario <name>`
+//                           apps/landing/public/media/. `--scenario <name>`
 //                           films a different scenario file instead.
 //   pnpm shots              the WHOLE screenshot pipeline: seed → boot Pro →
 //                           capture-shots.mjs (pro set) → restart backend in

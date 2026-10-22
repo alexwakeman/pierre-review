@@ -22,9 +22,8 @@ const ROUTES: Record<string, () => JSX.Element> = {
   '/for-developers': ForDevelopers,
   '/for-managers': ForManagers,
   '/how-we-measure': HowWeMeasure,
-  // Contact. Until Stripe exists this is also the PURCHASE path — every Pro
-  // call-to-action on the site points here, which is why /pricing aliases to it
-  // below rather than to the manager page it used to land on.
+  // Contact. Also where an organisation with more than three people asks for a
+  // licence, which is why /pricing aliases to it below.
   '/contact': Contact,
   // Legal. Required before the site can lawfully collect anything in the EU/UK, and
   // linked from the footer on every page + from the consent banner.
@@ -40,8 +39,8 @@ const ROUTES: Record<string, () => JSX.Element> = {
   '/how-it-works': HowWeMeasure,
   '/bots': ForManagers,
   '/pro': ForManagers,
-  // /pricing goes to CONTACT, not to a page describing a price nobody can pay yet.
-  // Somebody typing /pricing is asking how to buy it, and the answer is "ask us".
+  // /pricing goes to CONTACT: its first two lines say what it costs (nothing, unless
+  // the organisation has more than three users) and how to get a licence.
   '/pricing': Contact,
   '/insights': ForManagers,
   '/reviews': ForManagers,

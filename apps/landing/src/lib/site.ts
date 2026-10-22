@@ -16,9 +16,7 @@
 //          data dir ~/.pierre-review → ~/.limn (moved once, on first boot).
 //   OUT  — identifiers that are migrations rather than text edits:
 //           · the domain pierre-review.com (Safe Browsing + Search Console
-//             verification is per-domain and non-transferable, and both OAuth
-//             callback URLs are registered against it)
-//           · the `pierre_session` / `pierre_oauth_state` cookies
+//             verification is per-domain and non-transferable)
 //           · the ~20 `pierre:*` localStorage keys, one of which is shared with
 //             the SPA bundle to carry cookie consent across the two apps
 //           · the AutomatedReviewerKind `'pierre'` — a persisted DB value AND a
@@ -44,6 +42,18 @@ export const INSTALL_COMMAND = `npx ${NPM_PACKAGE}`;
 
 /** The public source repository. */
 export const REPO_URL = 'https://github.com/alexwakeman/pierre-review';
+
+/** The live demo: a static build with sample data, served by apps/site at this path. */
+export const DEMO_PATH = '/demo/';
+
+/**
+ * How many people in one organisation may use Limn without a licence. Mirrors the
+ * Limn License at the repository root — change both together.
+ */
+export const FREE_TEAM_SIZE = 3;
+
+/** The licence file, as published in the repository. */
+export const LICENSE_URL = `${REPO_URL}/blob/main/LICENSE`;
 
 // The arcade game ("Inbox Invaders") was removed with the site restructure — the
 // route, the page, src/game/ and the hero game bar all went together. It was the

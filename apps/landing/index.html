@@ -7,7 +7,7 @@
 
     <!-- Primary SEO. Everything between the seo:start/seo:end markers is REPLACED
          per route at build time by prerender.mjs, from the ROUTE_SEO table in
-         src/lib/routes.ts — so /pricing ships its own title, description and
+         src/lib/routes.ts — so /contact ships its own title, description and
          canonical in the HTML rather than inheriting the home page's. What is
          written here is the home-page copy and the dev-server fallback; keep the
          markers, and keep the copy in sync with ROUTE_SEO['/']. -->
@@ -15,7 +15,7 @@
     <title>Limn — plan your day across every repository</title>
     <meta
       name="description"
-      content="Limn opens on one board that answers what to work on today: review requests, replies, red builds, conflicts and pull requests ready to land, from every repository, ranked. You decide what counts as your turn and in what order. It also measures what the review bots on top are worth. Free and open core."
+      content="Limn opens on one board that answers what to work on today: review requests, replies, red builds, conflicts and pull requests ready to land, from every repository, ranked. You decide what counts as your turn and in what order. Claude reviews and fixes pull requests on your own Claude login. 100% free, runs on your machine: npx limn-review."
     />
     <meta name="robots" content="index, follow" />
 
@@ -25,7 +25,7 @@
     <meta property="og:title" content="Limn — plan your day across every repository" />
     <meta
       property="og:description"
-      content="Limn opens on one board that answers what to work on today: review requests, replies, red builds, conflicts and pull requests ready to land, from every repository, ranked. You decide what counts as your turn and in what order. It also measures what the review bots on top are worth. Free and open core."
+      content="Limn opens on one board that answers what to work on today: review requests, replies, red builds, conflicts and pull requests ready to land, from every repository, ranked. You decide what counts as your turn and in what order. Claude reviews and fixes pull requests on your own Claude login. 100% free, runs on your machine: npx limn-review."
     />
     <meta property="og:image" content="https://pierre-review.com/og-image.png" />
     <meta property="og:image:width" content="1200" />
@@ -38,7 +38,7 @@
     <meta name="twitter:title" content="Limn — plan your day across every repository" />
     <meta
       name="twitter:description"
-      content="Limn opens on one board that answers what to work on today: review requests, replies, red builds, conflicts and pull requests ready to land, from every repository, ranked. You decide what counts as your turn and in what order. It also measures what the review bots on top are worth. Free and open core."
+      content="Limn opens on one board that answers what to work on today: review requests, replies, red builds, conflicts and pull requests ready to land, from every repository, ranked. You decide what counts as your turn and in what order. Claude reviews and fixes pull requests on your own Claude login. 100% free, runs on your machine: npx limn-review."
     />
     <meta name="twitter:image" content="https://pierre-review.com/og-image.png" />
     <meta
@@ -63,18 +63,12 @@
 
     <!-- Structured data: helps search engines understand what Limn is.
          LANDMINE: this block sits OUTSIDE the seo:start/end markers, so the
-         prerenderer copies it verbatim into EVERY route — /privacy and /terms ship
-         this price too. It is a second, site-wide copy of both the product name
-         and the price; when either changes it must change here as well as in
-         src/lib/routes.ts, src/lib/site.ts and src/components/feint/TierTable.tsx.
-         ⚠ IT WENT STALE ONCE ALREADY: it advertised Pro at $15 and a Pro+ tier at
-         $29 for as long as those were true on a pricing page that no longer
-         exists, which is exactly the failure a second copy invites.
-         Claude Review and AI Fix are FREE and local-only — they belong in the Free
-         offer, never the Pro one (they were "Pro+" once; that tier is gone).
-         The $25 stays because it is the real LIST price and the tier table says so;
-         the free month is described in the offer text rather than by writing "0",
-         which would be a different and wrong claim about what Pro costs. -->
+         prerenderer copies it verbatim into EVERY route. It is a second, site-wide
+         copy of the product name and the price (0), so when either changes it must
+         change here as well as in src/lib/routes.ts and src/lib/site.ts.
+         There is one offer and it is free: Limn is local-only, installed from npm,
+         with no hosted tier. The licence limit (organisations with more than three
+         users need a commercial licence) is described in words, not as a price. -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -98,39 +92,18 @@
             "@type": "SoftwareApplication",
             "name": "Limn",
             "applicationCategory": "DeveloperApplication",
-            "operatingSystem": "Web, macOS, Linux, Windows",
-            "description": "Plans your day across every repository a team works in: one ranked board of what is waiting and on whom, by rules each person sets — plus how the work moved over a sprint, and an independent grade on every AI review bot comment.",
+            "operatingSystem": "macOS, Linux, Windows",
+            "softwareRequirements": "Node.js 20 or later",
+            "downloadUrl": "https://www.npmjs.com/package/limn-review",
+            "description": "Plans your day across every repository a team works in: one ranked board of what is waiting and on whom, by rules each person sets — plus how the work moved over a sprint, an independent grade on every AI review bot comment, and Claude reviews and fixes on your own Claude login. Runs on your machine; install with npx limn-review.",
             "url": "https://pierre-review.com/",
             "publisher": { "@id": "https://pierre-review.com/#org" },
             "offers": {
-              "@type": "AggregateOffer",
-              "priceCurrency": "USD",
-              "lowPrice": "0",
-              "highPrice": "25",
-              "offerCount": "2",
-              "offers": [
-                {
-                  "@type": "Offer",
-                  "name": "Free",
-                  "description": "The open-core product: the ranked cross-repo Pending board and every setting behind it, triaged review threads, merge and conflict resolution in place, flow metrics per workspace, an independent grade on every bot comment, and — run locally — Claude Review and AI Fix on your own Claude Code or Anthropic API key, with no charge from Limn. No repository limit, no user limit, no expiry.",
-                  "price": "0",
-                  "priceCurrency": "USD"
-                },
-                {
-                  "@type": "Offer",
-                  "name": "Pro",
-                  "description": "The roll-up across repositories, people and periods: a forwardable report per sprint, Chronology, the per-bot keep / tune / rarely used scoreboard and the peer benchmark, plus written summaries on pull requests, a read on a failed build and a written plan for the day. Claude Review and AI Fix are not part of it: they are free. Lists at $25 per user per month; currently free for a month to anyone who asks via the contact form.",
-                  "price": "25",
-                  "priceCurrency": "USD",
-                  "priceSpecification": {
-                    "@type": "UnitPriceSpecification",
-                    "price": "25",
-                    "priceCurrency": "USD",
-                    "billingIncrement": 1,
-                    "unitText": "MONTH"
-                  }
-                }
-              ]
+              "@type": "Offer",
+              "name": "Free",
+              "description": "Every feature, free. Free for individuals and for organisations where no more than three people use it; larger organisations need a commercial licence via the contact form.",
+              "price": "0",
+              "priceCurrency": "USD"
             },
             "softwareHelp": "https://github.com/alexwakeman/pierre-review"
           }
@@ -143,13 +116,13 @@
          src/fonts/. They are never fetched from Google, for three independent
          reasons — `font-src 'self'` in the landing CSP blocks fonts.gstatic.com,
          `style-src 'self' 'unsafe-inline'` does not permit a <link> to
-         fonts.googleapis.com, and a test pins that directive so it fails CI before
-         a browser ever sees it. On top of that it is a GDPR requirement: a gstatic
+         fonts.googleapis.com, and a test in apps/site pins that directive so it
+         fails CI before a browser ever sees it. On top of that it is a GDPR requirement: a gstatic
          request discloses every visitor's IP to Google before consent, and Google
          Fonts' recommended <link ... onload="this.media='all'"> would force
          script-src 'unsafe-inline'. Same-origin + font-display:swap keeps them off
          the critical path with no inline handler.
-         See apps/backend/src/api/plugins/security.ts. -->
+         See apps/site/src/security.ts. -->
   </head>
   <body>
     <!-- Everything between app:start/app:end is REPLACED at build time by

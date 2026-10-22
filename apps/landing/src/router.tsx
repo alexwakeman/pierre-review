@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import type { AnchorHTMLAttributes, MouseEvent, ReactNode } from 'react';
 
 // A tiny dependency-free client router for the marketing site. Real (clean) URLs
-// — the Fastify server serves the landing index.html for any non-/api, non-/app
-// path, so deep-links and reloads of /features, /insights, … all work. Crawlers
+// — apps/site serves each route's prerendered page, so deep-links and reloads of
+// /for-developers, /contact, … all work. Crawlers
 // follow the real <a href> links; per-route <title>/meta are set by useSeo().
 
 const ROUTE_EVENT = 'pierre:route';
@@ -69,12 +69,13 @@ export function useRoute(): string {
   return path;
 }
 
-/** True for links that must do a full browser navigation (app, API, external). */
+/** True for links that must do a full browser navigation (demo, API, external). */
 function isExternal(to: string): boolean {
   return (
     /^https?:\/\//.test(to) ||
     to.startsWith('/api') ||
-    to.startsWith('/app') ||
+    // The demo is a separate app (a static build of the real SPA), not a landing route.
+    to.startsWith('/demo') ||
     to.startsWith('mailto:')
   );
 }

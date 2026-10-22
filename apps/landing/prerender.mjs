@@ -19,8 +19,8 @@
 // WHY NOT HYDRATE
 // main.tsx keeps using createRoot(), not hydrateRoot(). Hydration would save a
 // re-render but demands the server and client trees match exactly — and several
-// components here deliberately differ: CookieBanner and GameBar both render
-// nothing until they have read localStorage, so the static HTML omits them and the
+// components here deliberately differ: CookieBanner renders nothing until it has
+// read localStorage, so the static HTML omits them and the
 // browser tree includes them. A mismatch degrades to a client render anyway, but
 // noisily. Static markup + a fresh client render is the same end state with no
 // failure mode.
@@ -108,7 +108,7 @@ execFileSync(
   { cwd: here, stdio: 'inherit' },
 );
 
-const { render, ROUTE_SEO, PRERENDER_PATHS, SITE_URL, OG_IMAGE, SITE_NAME } = await import(
+const { render, ROUTE_SEO, NOT_FOUND_SEO, PRERENDER_PATHS, SITE_URL, OG_IMAGE, SITE_NAME } = await import(
   join(ssrDir, 'entry-server.js')
 );
 
@@ -143,9 +143,8 @@ for (const path of PRERENDER_PATHS) {
   );
   html = replaceBetween(html, APP_MARKERS, body, 'app');
 
-  // '/' is dist/index.html; '/pricing' is dist/pricing/index.html — the layout
-  // @fastify/static resolves directory indexes from, and what the backend's
-  // not-found handler looks for when the URL has no trailing slash.
+  // '/' is dist/index.html; '/contact' is dist/contact/index.html — the layout
+  // apps/site resolves a route from, with or without a trailing slash.
   const outFile = path === '/' ? join(dist, 'index.html') : join(dist, path.slice(1), 'index.html');
   mkdirSync(dirname(outFile), { recursive: true });
   writeFileSync(outFile, html);
@@ -206,8 +205,9 @@ const ALIASES = {
   bots: 'for-managers',
   pro: 'for-managers',
   // ⚠ /pricing goes to CONTACT, not to for-managers like its five siblings. Somebody
-  // arriving on /pricing is asking how to buy it; until Stripe exists the answer is the
-  // contact form, so that is what the URL resolves to. Mirrors the alias table in App.tsx.
+  // arriving on /pricing is asking what it costs; the contact page answers that in its
+  // first two lines (free, unless the organisation is bigger than three people) and is
+  // where a licence is asked for. Mirrors the alias table in App.tsx.
   pricing: 'contact',
   insights: 'for-managers',
   reviews: 'for-managers',
@@ -218,5 +218,22 @@ for (const [alias, target] of Object.entries(ALIASES)) {
 }
 log(`aliased ${Object.keys(ALIASES).length} legacy routes → the surviving pages`);
 
+// The not-found page. apps/site answers an unknown path with dist/404.html and a 404
+// status, so a dead link gets the real "page not found" content (noindex) rather than
+// the home page's HTML under a 404. Rendered from a path no route claims, which is
+// exactly how App.tsx falls through to its NotFound component.
+{
+  const body = render('/__not-found__');
+  let html = replaceBetween(
+    template,
+    SEO_MARKERS,
+    seoBlock({ ...NOT_FOUND_SEO, url: `${SITE_URL}/`, image: OG_IMAGE, imageAlt: IMAGE_ALT, siteName: SITE_NAME }),
+    'seo',
+  );
+  html = replaceBetween(html, APP_MARKERS, body, 'app');
+  writeFileSync(join(dist, '404.html'), html);
+  log(`404 page        → ${(html.length / 1024).toFixed(1)} KB`);
+}
+
 rmSync(ssrDir, { recursive: true, force: true });
-log(`done — ${written.length} routes + ${Object.keys(ALIASES).length} aliases`);
+log(`done — ${written.length} routes + ${Object.keys(ALIASES).length} aliases + 404`);

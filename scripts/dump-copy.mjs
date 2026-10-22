@@ -1,7 +1,7 @@
 // Dump every word the landing site renders, in page order, as one markdown file.
 //
 // WHY IT READS THE BUILD, NOT THE JSX. The copy is spread across three page
-// components, a shared tier table and the SEO table, and a good half of it is
+// components, a shared closing block and the SEO table, and a good half of it is
 // interleaved with layout. Transcribing that by hand to review it is how a
 // proofread and the live site drift apart. This reads `apps/landing/dist`, so
 // what comes out is exactly what a reader gets — including the per-route <title>
@@ -13,9 +13,7 @@
 // Three shapes the generic HTML walk cannot get right on its own, all handled
 // below: a stat tile (a big number in one box, its sentence in the next), the
 // vendor rail (a column of one-word rows), and a call-to-action anchor (a block
-// in the layout that is still an <a>). The comparison table is not walked at all
-// — it is a CSS grid whose mobile-only "Free"/"Pro" markers interleave with the
-// cells, so its rows are read from TierTable.tsx and rendered as a real table.
+// in the layout that is still an <a>).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,26 +38,7 @@ const ENT = (s) =>
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#x27;|&apos;/g, "'")
     .replace(/&quot;/g, '"').replace(/&times;/g, '×');
 
-function tierRows() {
-  const src = readFileSync(
-    join(ROOT, 'apps', 'landing', 'src', 'components', 'feint', 'TierTable.tsx'),
-    'utf8',
-  );
-  const body = src.slice(src.indexOf('const ROWS: Row[] = ['), src.indexOf('\n];'));
-  const rows = [];
-  const re =
-    /\{\s*q:\s*'((?:[^'\\]|\\.)*)',\s*free:\s*(?:'((?:[^'\\]|\\.)*)'|`([^`]*)`),\s*pro:\s*'((?:[^'\\]|\\.)*)',\s*\}/g;
-  let m;
-  while ((m = re.exec(body))) {
-    const u = (s) =>
-      (s ?? '').replace(/\\'/g, "'").replace(/\$\{INSTALL_COMMAND\}/g, 'npx limn-review');
-    rows.push({ q: u(m[1]), free: u(m[2] ?? m[3]), pro: u(m[4]) });
-  }
-  if (rows.length === 0) throw new Error('no tier rows parsed — did ROWS change shape?');
-  return rows;
-}
-
-const DROP = new Set(['Enlarge', '—', '·', 'Free', 'Pro', 'Question', '']);
+const DROP = new Set(['Enlarge', '—', '·', '']);
 
 function copyOf(html) {
   const m = html.match(/<!-- app:start -->([\s\S]*?)<!-- app:end -->/);
@@ -70,11 +49,6 @@ function copyOf(html) {
     .replace(/<svg[\s\S]*?<\/svg>/g, '')
     .replace(/<nav[\s\S]*?<\/nav>/g, '')
     .replace(/<footer[\s\S]*?<\/footer>/g, '');
-
-  // Everything from the comparison table down is emitted from source, so cut it.
-  const cut = body.indexOf('Free answers one pull request');
-  const tail = cut > -1 ? body.slice(cut) : '';
-  if (cut > -1) body = body.slice(0, cut);
 
   const walk = (chunk) => {
     let b = chunk
@@ -123,7 +97,7 @@ function copyOf(html) {
     return joined;
   };
 
-  return { main: walk(body), tail: walk(tail) };
+  return { main: walk(body) };
 }
 
 let md = `# Limn — the copy on the site
@@ -135,13 +109,11 @@ where each section sits.
 Regenerate with \`node scripts/dump-copy.mjs\` after a landing build.
 `;
 
-const rows = tierRows();
-
 for (const [name, path, file] of PAGES) {
   const html = readFileSync(join(DIST, file), 'utf8');
   const title = (html.match(/<title>([^<]*)<\/title>/) ?? [])[1] ?? '';
   const desc = (html.match(/<meta name="description" content="([^"]*)"/) ?? [])[1] ?? '';
-  const { main, tail } = copyOf(html);
+  const { main } = copyOf(html);
 
   md += `\n\n---\n\n# ${name} — \`${path}\`\n\n`;
   md += `**Browser tab / search result title**\n> ${ENT(title)}\n\n`;
@@ -160,20 +132,7 @@ for (const [name, path, file] of PAGES) {
     else if (n.k === 'x' && n.t.length < 90) md += `\n*(label: ${n.t})*\n\n`;
     else md += `${n.t}\n\n`;
   }
-
-  md += `\n### Free answers one pull request. Pro answers the fortnight.\n\n`;
-  md += `Limn is open core. The free tier is the product, not a trial — it has no repository limit, no user limit and no expiry, and every action you take on a pull request lives in it. Pro is what happens when you need the same truth one grain up: across repositories, across people, across a period.\n\n`;
-  md += `| Question | Free · open core | Pro · $25 per user |\n|---|---|---|\n`;
-  for (const r of rows) md += `| **${r.q}** | ${r.free} | ${r.pro} |\n`;
-  md += `\nA user is someone who signs in. Bots never count, and there is no per-repository charge.\n\n`;
-  for (const n of tail) {
-    if (n.k === 'C') md += `\n\`[ screenshot — ${n.t} ]\`\n\n`;
-    else if (n.k === '2') md += `\n### ${n.t}\n\n`;
-  }
-  md += `Sign in with GitHub and the first repositories are on screen in a couple of minutes, or run the whole free tier on your own machine and keep the data there.\n\n`;
-  md += `\`[Sign in with GitHub]\`  \`[Get Pro — $25 per user]\`\n\n`;
-  md += `Checkout is not live yet — Pro is rolling out, and both buttons sign you into the free tier today. Or run it locally: \`npx pierre-review\`\n`;
 }
 
 writeFileSync(OUT, md);
-console.log(`${OUT} — ${md.length} chars, ${rows.length} comparison rows`);
+console.log(`${OUT} — ${md.length} chars`);

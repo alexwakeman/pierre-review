@@ -129,7 +129,7 @@ export function VideoFrame({
   cues,
   className = '',
 }: {
-  /** The .mp4, from `public/demo/`. */
+  /** The .mp4, from `public/media/`. */
   src: string;
   /** The still shown before play, and instead of play under reduced motion. */
   poster: string;

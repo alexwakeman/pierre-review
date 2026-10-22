@@ -1,4 +1,4 @@
-import { SITE_NAME } from './site';
+import { FREE_TEAM_SIZE, NPM_PACKAGE, SITE_NAME } from './site';
 
 // The landing site's route table and its per-route SEO copy — ONE source of truth,
 // read by two consumers that must never disagree:
@@ -18,8 +18,7 @@ import { SITE_NAME } from './site';
 //
 // THE DOMAIN IS DELIBERATELY UNCHANGED. The rename is staged: the brand is Limn,
 // but pierre-review.com stays until the identifier tranche ships, because Safe
-// Browsing and Search Console verification are per-domain and non-transferable and
-// both GitHub OAuth callback URLs are registered against it.
+// Browsing and Search Console verification are per-domain and non-transferable.
 
 export const SITE_URL = 'https://pierre-review.com';
 export const OG_IMAGE = `${SITE_URL}/og-image.png`;
@@ -38,12 +37,14 @@ export type RouteSeo = {
  * /pro, /pricing, /how-it-works and /arcade were removed together: the product
  * pages were organised by FEATURE AREA, which meant a developer and a manager
  * read the same five pages and neither found the half addressed to them. The
- * content now sits on one page per reader, each of which carries the free tier
- * in full first, then Pro, then the comparison table and the sign-up.
+ * content now sits on one page per reader.
  *
- * /contact is the fourth, and it is load-bearing rather than courtesy: until
- * Stripe exists it IS the purchase path, so every Pro call-to-action on the site
- * points at it. See src/pages/Contact.tsx.
+ * /contact is the fourth, and it is load-bearing rather than courtesy: an
+ * organisation with more than FREE_TEAM_SIZE people needs a licence, and this
+ * is where it asks. See src/pages/Contact.tsx.
+ *
+ * /demo/ is NOT a landing route. It is a separate static build of the app with
+ * sample data, served by apps/site — so it is absent here and from the sitemap.
  *
  * Legacy aliases for the removed routes are handled in App.tsx and by the
  * prerenderer, which copies the nearest surviving page's HTML so an old inbound
@@ -54,19 +55,19 @@ export type RouteSeo = {
 export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/': {
     title: `${SITE_NAME} — plan your day across every repository`,
-    description: `${SITE_NAME} opens on one board that answers what to work on today: review requests, replies, red builds, conflicts and pull requests ready to land, from every repository, ranked. You decide what counts as your turn and in what order. It also measures what the review bots on top are worth. Free and open core, and on your machine Claude reviews and fixes pull requests on your own Claude.`,
+    description: `${SITE_NAME} opens on one board that answers what to work on today: review requests, replies, red builds, conflicts and pull requests ready to land, from every repository, ranked. You decide what counts as your turn and in what order. Claude reviews and fixes pull requests on your own Claude login. 100% free, runs on your machine: npx ${NPM_PACKAGE}.`,
   },
   '/for-developers': {
     title: 'For developers — plan your day, by your own rules',
-    description: `A red build, two reviews waiting, a reply on a thread you had moved on from, a conflict that appeared overnight. ${SITE_NAME} puts all of it on one board across every repository, ranked, with what to do next at the top. You decide what counts as your turn and how it is ordered, then finish the work in place — reply, approve, merge, resolve the conflict. Claude reviews and fixes pull requests on your own Claude Code or Anthropic API key, on your machine. Free, with no repository limit.`,
+    description: `A red build, two reviews waiting, a reply on a thread you had moved on from, a conflict that appeared overnight. ${SITE_NAME} puts all of it on one board across every repository, ranked, with what to do next at the top. You decide what counts as your turn and how it is ordered, then finish the work in place — reply, approve, merge, resolve the conflict. Claude reviews and fixes pull requests on your own Claude Code login or Anthropic API key, on your machine; Codex support is coming soon. Free, with no repository limit.`,
   },
   '/for-managers': {
     title: 'For engineering managers — see the whole review loop, people and bots',
-    description: `Throughput, lead time and where the waiting happens across every repository you own, with people counted apart from automation — free. Then a forwardable report per sprint, an hour-by-hour account of who was holding each pull request, and a keep / tune / rarely used verdict on every review bot you pay for.`,
+    description: `Throughput, lead time and where the waiting happens across every repository you own, with people counted apart from automation. A forwardable report per sprint, an hour-by-hour account of who was holding each pull request, and a keep / tune / rarely used verdict on every review bot you pay for. Free, on your own machine.`,
   },
   '/contact': {
-    title: `Contact — a free month of Pro, for asking`,
-    description: `Card payments are not switched on yet, so Pro is free for a month to anyone who asks for it: every paid surface, no card, nothing to cancel. Send a message and it is enabled on your account. The free tier needs none of this — it works today.`,
+    title: `Contact — licences for bigger teams, questions and bug reports`,
+    description: `${SITE_NAME} is free for individuals and for teams of up to ${FREE_TEAM_SIZE} people in one organisation. If more than ${FREE_TEAM_SIZE} people in your organisation use it, ask for a licence here. Questions and bug reports are welcome too.`,
   },
   '/how-we-measure': {
     title: 'How we measure — the two models, in plain English',
@@ -74,15 +75,15 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   },
   '/privacy': {
     title: `Privacy policy — ${SITE_NAME}`,
-    description: `What ${SITE_NAME} collects, why, who processes it, how long it is kept, and how to get it deleted or exported. Run locally, ${SITE_NAME} collects nothing at all.`,
+    description: `What this website collects — the contact form and, if you accept them, analytics — why, who processes it, and how long it is kept. The ${SITE_NAME} app runs on your machine and sends nothing to us.`,
   },
   '/cookies': {
     title: `Cookie policy — ${SITE_NAME}`,
-    description: `Every cookie ${SITE_NAME} sets, what it does, how long it lasts, and a one-click control to change your analytics choice.`,
+    description: `The two analytics cookies this site sets if you agree to them, what they do, how long they last, and a one-click control to change your choice.`,
   },
   '/terms': {
-    title: `Terms of service — ${SITE_NAME}`,
-    description: `The terms for using the hosted ${SITE_NAME} service: what you get, what you are responsible for, billing and cancellation, and the limits of liability.`,
+    title: `Terms of use — ${SITE_NAME}`,
+    description: `The terms for this website and the ${SITE_NAME} software, a summary of the Limn License — free for individuals and teams of up to ${FREE_TEAM_SIZE} people — and the limits of liability.`,
   },
 };
 

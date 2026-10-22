@@ -1,9 +1,10 @@
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
-import { INSTALL_COMMAND, SITE_NAME } from '../lib/site';
+import { DEMO_PATH, FREE_TEAM_SIZE, INSTALL_COMMAND, SITE_NAME } from '../lib/site';
 import {
   DashItem,
   InkButton,
+  InlineLink,
   MonoLabel,
   RailGrid,
   Section,
@@ -12,15 +13,14 @@ import {
 } from '../components/feint/primitives';
 import { FeatureShot } from '../components/feint/FeatureShot';
 import { ShotFrame } from '../components/feint/ShotFrame';
-import { TierTable } from '../components/feint/TierTable';
+import { GetStarted } from '../components/feint/GetStarted';
 
 // ---------------------------------------------------------------------------
 // For engineering managers — one of the site's two role pages.
 //
-// SAME SHAPE AS /for-developers: the free tier in full first, then what Pro
-// adds, then the comparison table and the sign-up. The order is the argument —
-// this product's free tier is genuinely used every day, and a page that leads
-// with the paid one asks for a decision the reader has no basis for yet.
+// SAME SHAPE AS /for-developers: the questions, the screens that answer them, then
+// <GetStarted/>. Everything here is free; there is no paid tier. A manager's team of
+// more than FREE_TEAM_SIZE people needs a licence, and the hero says so once.
 //
 // ⚠ WITHIN EACH HALF, THE HUMAN WORK COMES FIRST AND AUTOMATION IS A PEER.
 // An earlier cut ran flow metrics → repositories → bots → bot ROI → benchmark →
@@ -28,8 +28,8 @@ import { TierTable } from '../components/feint/TierTable';
 // page and left the reporting — the thing most managers actually arrive
 // wanting — reading like an afterthought at the end. The running order is now:
 //
-//   FREE  02 flow metrics · 03 per repository · 04 reach · 05 your bots
-//   PRO   06 period report · 07 chronology · 08 bot ROI · 09 benchmark
+//   NOW     02 flow metrics · 03 per repository · 04 reach · 05 your bots
+//   PERIOD  06 period report · 07 chronology · 08 bot ROI · 09 benchmark
 //
 // Three human sections then one on automation, twice. If a future edit floats a
 // bot section back above the human ones, it is re-making a decision that was
@@ -71,12 +71,17 @@ export default function ForManagers(): JSX.Element {
           data can carry and refuses the rest, which is most of what this category sells.
         </p>
         <div className="mb-4 flex flex-wrap items-center gap-3.5">
-          <InkButton to="/api/auth/login">Sign in with GitHub</InkButton>
+          <InkButton to={DEMO_PATH}>Try the demo</InkButton>
           <UnderlineLink to="/for-developers">If you write the code →</UnderlineLink>
         </div>
+        <p className="mb-3 max-w-reassure font-mono text-mono-nav text-secondary">
+          All of it is free, and it runs on your own machine:{' '}
+          <span className="text-ink">{INSTALL_COMMAND}</span>.
+        </p>
         <p className="mb-11 max-w-reassure font-mono text-mono-nav text-secondary">
-          Sections 02 to 05 are free on every tier. Run the whole free product on your own
-          machine with <span className="text-ink">{INSTALL_COMMAND}</span>.
+          Free for teams of up to {FREE_TEAM_SIZE} people in one organisation. A bigger
+          organisation needs a licence —{' '}
+          <InlineLink to="/contact?topic=licence">use the contact form</InlineLink>.
         </p>
       </header>
 
@@ -104,9 +109,9 @@ export default function ForManagers(): JSX.Element {
                 {/* ⚠ The ONE place this page describes the board, and it is worded to match
                     the other two pages' lead ("plan your day", rules each reader sets). The
                     page itself stays about reporting — this line only says where the
-                    team's morning happens, and that it is free. */}
+                    team's morning happens. */}
                 <p>
-                  Your team plans its day on the free Pending board — everything waiting on
+                  Your team plans its day on the Pending board — everything waiting on
                   them or on the workspace, in six ranked tabs, by rules each person sets.
                   This page is the same work one grain up: the fortnight, not the morning.
                 </p>
@@ -126,11 +131,11 @@ export default function ForManagers(): JSX.Element {
         </RailGrid>
       </Section>
 
-      {/* ---------- 02 · free metrics ---------- */}
+      {/* ---------- 02 · flow metrics ---------- */}
       <FeatureShot
-        rail={{ n: '02', word: 'Free' }}
+        rail={{ n: '02', word: 'Flow' }}
         tone="alt"
-        heading="The state of play, at no charge."
+        heading="The state of play, across every repository."
         src="/shots/flow-metrics.png"
         alt="Workspace flow metrics — throughput, lead time, time to a first human review and merge-time build health — with people counted apart from automation, above per-repository activity rows"
         caption="limn · flow metrics"
@@ -151,9 +156,6 @@ export default function ForManagers(): JSX.Element {
           where a pull request&rsquo;s size was never observed it says &ldquo;size
           unknown&rdquo; rather than counting it as zero.
         </p>
-        <Story moment="Free, on every tier">
-          this whole section, and the two that follow it.
-        </Story>
       </FeatureShot>
 
       {/* ---------- 03 · repo rows ---------- */}
@@ -215,10 +217,10 @@ export default function ForManagers(): JSX.Element {
         </RailGrid>
       </Section>
 
-      {/* ---------- 05 · bots, the free half ---------- */}
+      {/* ---------- 05 · bots ---------- */}
       <FeatureShot
         rail={{ n: '05', word: 'Your bots' }}
-        heading="Find every bot. Name it. Price it. Free."
+        heading="Find every bot. Name it. Price it."
         src="/shots/bot-settings.png"
         alt="The bot settings table: every detected automated account with its vendor, its role, the confidence behind the call and the monthly price you typed in"
         caption="limn · bot settings"
@@ -237,20 +239,19 @@ export default function ForManagers(): JSX.Element {
           from 142 lines to 68.
         </p>
         <p>
-          Type in what each one costs a month and the figure is stored per workspace. The
-          grade on every bot comment is free too — a purpose-trained ModernBERT classifier,
-          served as int8 ONNX on ordinary CPU, which — graded blind against a human expert —
-          picked the same severity seven times in ten, where the vendor&rsquo;s own badge
-          managed fewer than five. The ruler is never the paid part.
+          Type in what each one costs a month and the figure is stored per workspace. Every
+          bot comment is graded too — by a purpose-trained ModernBERT classifier, served as
+          int8 ONNX on ordinary CPU, which — graded blind against a human expert — picked the
+          same severity seven times in ten, where the vendor&rsquo;s own badge managed fewer
+          than five.
         </p>
       </FeatureShot>
 
-      {/* ---------- 06 · Pro: the period report ---------- */}
+      {/* ---------- 06 · the period report ---------- */}
       <FeatureShot
-        rail={{ n: '06', word: 'Pro' }}
+        rail={{ n: '06', word: 'The report' }}
         tone="alt"
         divider="ink"
-        label="Pro · $25 per user"
         heading="A report per sprint, that you can forward."
         src="/shots/period-report.png"
         alt="A stored sprint report: the effort-versus-automation split, the biggest movers, and fifteen metrics each with this period, the prior period, the change and a forecast column"
@@ -275,9 +276,9 @@ export default function ForManagers(): JSX.Element {
         </p>
       </FeatureShot>
 
-      {/* ---------- 07 · Pro: chronology ---------- */}
+      {/* ---------- 07 · chronology ---------- */}
       <FeatureShot
-        rail={{ n: '07', word: 'Pro' }}
+        rail={{ n: '07', word: 'Chronology' }}
         heading="Where the waiting happens — without naming anyone."
         src="/shots/chronology.png"
         alt="The Chronology panel: reviewer, author and landing courts with their share and their magnitude, plus the per-repository rows underneath"
@@ -303,9 +304,9 @@ export default function ForManagers(): JSX.Element {
         </p>
       </FeatureShot>
 
-      {/* ---------- 08 · Pro: the bot scoreboard ---------- */}
+      {/* ---------- 08 · the bot scoreboard ---------- */}
       <FeatureShot
-        rail={{ n: '08', word: 'Pro' }}
+        rail={{ n: '08', word: 'Bot ROI' }}
         tone="alt"
         heading="What the bots cost, and what they returned."
         src="/shots/bot-roi.png"
@@ -334,9 +335,9 @@ export default function ForManagers(): JSX.Element {
         </Story>
       </FeatureShot>
 
-      {/* ---------- 09 · Pro: the benchmark ---------- */}
+      {/* ---------- 09 · the benchmark ---------- */}
       <FeatureShot
-        rail={{ n: '09', word: 'Pro' }}
+        rail={{ n: '09', word: 'Benchmark' }}
         heading="And how that compares to everyone else."
         src="/shots/benchmark.png"
         alt="The peer benchmark panel placing each vendor against a cohort of repositories, with per-metric percentiles carrying their cohort size and written refusals where the cohort is too thin"
@@ -355,7 +356,7 @@ export default function ForManagers(): JSX.Element {
         </p>
       </FeatureShot>
 
-      <TierTable />
+      <GetStarted />
     </>
   );
 }

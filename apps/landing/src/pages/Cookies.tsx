@@ -17,8 +17,9 @@ import {
 } from '../components/legal';
 
 // The cookie policy. Short, specific, and — importantly — it carries a working
-// control rather than telling you to go and edit your browser settings. The whole
-// list is four cookies, two of which only exist during a sign-in.
+// control rather than telling you to go and edit your browser settings. There is no
+// sign-in any more, so the whole list is the two analytics cookies, and they only
+// exist if the visitor agreed to them.
 
 export default function Cookies(): JSX.Element {
   useSeo(seoFor('/cookies'));
@@ -39,9 +40,8 @@ export default function Cookies(): JSX.Element {
       intro={
         <>
           <p>
-            {SITE_NAME} sets four cookies in total. Two are needed to keep you signed in, one
-            exists for ten minutes during a GitHub sign-in, and one is analytics — which
-            only ever appears if you agreed to it.
+            This site sets two cookies, both for analytics, and only if you agreed to them.
+            There is no sign-in, so there is no session cookie.
           </p>
           <div className="mt-5">
             <LegalNote title="Your current choice">
@@ -69,18 +69,6 @@ export default function Cookies(): JSX.Element {
           columns={['Name', 'Type', 'Purpose', 'Lifetime']}
           rows={[
             [
-              <span className="font-mono text-xs">pierre_session</span>,
-              'Strictly necessary',
-              'Keeps you signed in to the hosted app. Cryptographically sealed and HTTP-only, so page scripts cannot read it. Contains only your internal account id.',
-              '30 days',
-            ],
-            [
-              <span className="font-mono text-xs">pierre_oauth_state</span>,
-              'Strictly necessary',
-              'A one-time random value that proves a GitHub sign-in was started by you and not by another site. Set when you click Sign in, deleted the moment you come back.',
-              '10 minutes',
-            ],
-            [
               <span className="font-mono text-xs">_ga</span>,
               'Analytics — consent required',
               'Google Analytics: distinguishes one visitor from another so page views can be counted.',
@@ -95,25 +83,9 @@ export default function Cookies(): JSX.Element {
           ]}
         />
         <P>
-          {SITE_NAME} also uses your browser&apos;s <T>local storage</T> — not cookies — to
-          remember interface preferences (which rows you collapsed, how tall the detail
-          pane is, your cookie choice itself) and to cache pull-request detail so the app
-          feels fast. None of it is transmitted anywhere and it never leaves your device.
-        </P>
-      </LegalSection>
-
-      <LegalSection id="necessary" heading="Why two of them can't be declined">
-        <P>
-          The two <span className="font-mono text-xs">pierre_*</span> cookies are what the
-          law calls strictly necessary: they exist solely to deliver something you
-          explicitly asked for (being signed in, and being signed in <em>safely</em>).
-          There is no version of the hosted app that works without them, and they carry no
-          tracking value — one holds an account number, the other a random string that is
-          thrown away seconds later. That is why they are set without asking.
-        </P>
-        <P>
-          If you would rather not have them at all, run {SITE_NAME} locally instead. There is no
-          session, no sign-in and no server.
+          The site also uses your browser&apos;s <T>local storage</T> — not a cookie — to
+          remember your cookie choice itself. The demo uses local storage the same way the app
+          does, for interface preferences. None of it is sent anywhere.
         </P>
       </LegalSection>
 
@@ -142,7 +114,7 @@ export default function Cookies(): JSX.Element {
         </UL>
         <P>
           Google is the recipient of this data and acts as our processor; the transfer is to
-          the United States. See §§2 and 5 of the{' '}
+          the United States. See §§2 and 4 of the{' '}
           <Link to="/privacy" className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text">
             privacy policy
           </Link>{' '}
@@ -150,12 +122,10 @@ export default function Cookies(): JSX.Element {
         </P>
       </LegalSection>
 
-      <LegalSection id="self-hosted" heading="Self-hosted and local installs">
+      <LegalSection id="app" heading="The app on your machine">
         <P>
-          If you run {SITE_NAME} yourself, analytics is not configured at all unless you supply
-          your own measurement id at build time — so the banner never appears and no
-          analytics cookie is ever set. The local desktop mode has no sign-in, so it sets
-          neither session cookie either. A local install sets <T>no cookies whatsoever</T>.
+          {SITE_NAME} itself runs on your computer. It has no sign-in and no analytics, and it
+          sets <T>no cookies whatsoever</T>.
         </P>
       </LegalSection>
 
@@ -171,7 +141,7 @@ export default function Cookies(): JSX.Element {
           >
             Analytics opt-out extension
           </a>
-          . Blocking the two necessary cookies will sign you out of the hosted app.
+          .
         </P>
         <P>
           Questions about any of this: <Mail />.

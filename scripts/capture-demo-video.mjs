@@ -144,7 +144,7 @@
 // one-command wrapper which boots and tears it down: `pnpm demo:video`.
 //
 // `--out` DEFAULTS TO THE HOME DIRECTORY (the masters). The copies under
-// apps/landing/public/demo/ are written by `--publish`.
+// apps/landing/public/media/ are written by `--publish`.
 // ===========================================================================
 import { createServer } from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -155,7 +155,7 @@ import { ctx, launch, open, watchPage } from './lib/demo-browser.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
-const PUBLIC_DEMO = join(ROOT, 'apps', 'landing', 'public', 'demo');
+const PUBLIC_DEMO = join(ROOT, 'apps', 'landing', 'public', 'media');
 
 // ---------------------------------------------------------------------------
 // Output geometry. See the header's display arithmetic — these three constants
