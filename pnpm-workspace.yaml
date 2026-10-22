@@ -1,3 +1,5 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+  # The retired Pro submodule's old checkout may linger on disk; it is not a workspace.
+  - '!packages/pro'

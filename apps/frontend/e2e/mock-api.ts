@@ -286,25 +286,9 @@ const ME_RESPONSE: MeResponse = {
   largePrCodeLocThreshold: LARGE_PR_CODE_LOC_DEFAULT,
   largePrCodeLocThresholdIsDefault: true,
   blastRadius: null,
-  // ⚠ UNREAD BY THE SPA, which no longer reads `me.pro` or `me.aiUsage` (nothing is gated). They
-  // stay only while `MeResponse` still declares them; delete both keys when the shared type drops
-  // them.
-  pro: {
-    activityDigest: false,
-    botAdvisor: false,
-    periodReports: false,
-    botDepth: false,
-    workPlan: false,
-    prSummary: false,
-    workspaceInsights: false,
-    slackDigest: false,
-    botTriage: false,
-  },
-  benchmarkOptIn: false,
   // No My Turn overrides — the product defaults, resolved by the SPA through the shared resolver.
   myTurnSettings: null,
   authNotices: [],
-  aiUsage: null,
 };
 
 // The workspace's bot listing — ONE `WorkspaceReviewer` row per actor, judgement + identity +

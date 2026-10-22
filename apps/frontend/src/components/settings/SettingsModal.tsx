@@ -5,7 +5,6 @@ import { SprintSection } from './SprintSection.js';
 import { SlackSection } from './SlackSection.js';
 import { IssueLinksSection, ISSUE_TRACKER_SECTION_HEADING_ID } from './IssueLinksSection.js';
 import { AutoReviewSection } from './AutoReviewSection.js';
-import { BenchmarkConsentSection } from './BenchmarkConsentSection.js';
 import { LargePrThresholdSection } from './LargePrThresholdSection.js';
 import { BlastRadiusSection } from './BlastRadiusSection.js';
 import { MyTurnSection, MY_TURN_SECTION_HEADING_ID } from './MyTurnSection.js';
@@ -193,7 +192,6 @@ export function SettingsModal({
               configured. */}
           {isCloud && <GithubAppInstallSection />}
           {/* Cross-org benchmark consent — CORE/free, cloud-only, a plain /api/me flag. */}
-          {isCloud && <BenchmarkConsentSection />}
           {/* Large-PR threshold — CORE/free and in BOTH modes (no `isCloud` gate: an
               `npx pierre-review` user gets the flag, so they get its setting). */}
           <LargePrThresholdSection />
