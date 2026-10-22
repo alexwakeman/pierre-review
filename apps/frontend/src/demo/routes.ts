@@ -59,7 +59,9 @@ export function meBody(srv: DemoServer): Record<string, unknown> {
     deploymentMode: 'local',
     mlSeverity: true,
     ml: { state: 'ready', message: null },
-    conflictResolver: true,
+    // The in-app conflict resolver has no simulation here (its routes would answer "Not available
+    // in the demo."), so the demo hides every door to it.
+    conflictResolver: false,
     ai: { enabled: true, runtime: 'ready', runtimeMessage: null, auth: 'ok', authMessage: null },
     authNotices: [],
   };
@@ -495,6 +497,14 @@ export const ROUTES: DemoRoute[] = [
     re: /^\/api\/prs\/(\d+)\/merge$/,
     run: (_req, m, srv) => {
       const prId = Number(m[1]);
+      const state = prDetail(srv, prId)?.state ?? srv.overlay.prFields.get(prId)?.state;
+      if (state === 'merged' || state === 'closed') {
+        // GitHub refuses a merge of a PR that is no longer open; the route passes that on as 409.
+        return {
+          status: 409,
+          body: { error: 'NotMergeable', message: state === 'merged' ? 'This pull request is already merged.' : 'This pull request is closed.' },
+        };
+      }
       const now = srv.nowIso();
       srv.overlay.patchPr(prId, { state: 'merged', mergedAt: now, closedAt: now, mergedById: meUserId(srv), updatedAt: now, inMergeQueue: false });
       srv.overlay.armed.set(prId, null);
@@ -904,6 +914,10 @@ export const GET_FALLBACKS: DemoRoute[] = [
   { method: 'GET', re: /^\/api\/claude-reviews\/active$/, run: () => OK({ reviews: [] }) },
   { method: 'GET', re: /^\/api\/mergers$/, run: () => OK([]) },
   { method: 'GET', re: /^\/api\/auth\/providers$/, run: () => OK({ providers: [] }) },
+  // A search the recorder never typed finds nothing — never another query's hits.
+  { method: 'GET', re: /^\/api\/search$/, run: (req) => OK({ query: req.query.get('q') ?? '', hits: [], people: [], stories: [], total: 0 }) },
+  // A written summary nobody generated for this bot / selection: the "not written yet" answer.
+  { method: 'GET', re: /^\/api\/pro\/synthesis$/, run: () => OK({ enabled: true, synthesis: null }) },
 ];
 
 // ── the overlay, folded into recorded reads ───────────────────────────────────────────────────
@@ -926,6 +940,11 @@ export function patchRecordedGet(req: DemoRequest, body: unknown, srv: DemoServe
       .map((x) => (isRecord(x) && typeof x.id === 'number' && o.prFields.has(x.id) ? patchListPr(x, o.prFields.get(x.id) ?? {}) : x));
     return { ...body, prs };
   }
+
+  if (p === '/api/attention' && isRecord(body)) return patchAttention(srv, body).body;
+  if (p === '/api/my-turn' && isRecord(body)) return patchMyTurn(srv, body);
+  if (p === '/api/daily-brief' && isRecord(body)) return patchDailyBrief(srv, body);
+  if (p === '/api/pro/work-plan' && isRecord(body)) return patchWorkPlan(srv, body);
 
   if (p === '/api/auto-merge' && isRecord(body)) {
     const requests = Array.isArray(body.requests) ? body.requests.filter(isRecord) : [];
@@ -950,5 +969,248 @@ export function patchRecordedGet(req: DemoRequest, body: unknown, srv: DemoServe
 function patchListPr(row: Record<string, unknown>, fields: Record<string, unknown>): Record<string, unknown> {
   const out = { ...row };
   for (const [k, v] of Object.entries(fields)) if (k in row && !Array.isArray(v)) out[k] = v;
+  return out;
+}
+
+// ── the Pending reads ─────────────────────────────────────────────────────────────────────────
+//
+// /api/attention, /api/my-turn, /api/daily-brief and /api/pro/work-plan are four views of ONE
+// fold on the server, so the overlay reaches all four the same way: a card of a PR merged or closed
+// here leaves the board, a My Turn entry whose subject was dismissed here moves to "Dismissed", and
+// every count that included a removed card loses it — a tab's total, its kind and lens splits, the
+// brief's lines and the work plan's totals — so a count still matches the list it opens.
+
+type Rec = Record<string, unknown>;
+
+/** The My Turn type a `/api/my-turn` section holds (`MyTurnCardReason`). */
+const MY_TURN_SECTIONS: Record<string, string> = {
+  awaitingReview: 'review_request',
+  mentions: 'mention',
+  threadsAwaiting: 'thread',
+  threadReplies: 'thread_reply',
+  commentReplies: 'comment_reply',
+  pushedSince: 'pushed_since',
+  ownCiRed: 'own_ci_red',
+  ownConflicts: 'own_conflicts',
+  redTrunks: 'trunk_red',
+  approvedPrs: 'pr_approved',
+  ownReady: 'own_ready',
+  yourPrs: 'your_pr',
+  ownThreads: 'own_thread',
+  claudeReviewsToAction: 'claude_review',
+  watchedRepoPrs: 'watched_repo_pr',
+};
+
+/** The dismissal subject of a My Turn entry: its PR, or its repo for a red default branch. */
+function myTurnSubject(reason: unknown, prId: unknown, repoId: unknown): string | null {
+  if (reason === 'trunk_red') return typeof repoId === 'number' ? `repo:${repoId}` : null;
+  return typeof prId === 'number' ? `pr:${prId}` : null;
+}
+
+/** Why the overlay takes a card off the board, or null when it stays. */
+function cardRemoval(srv: DemoServer, card: Rec, gone: Set<number>): 'closed' | 'dismissed' | null {
+  // A red trunk names the PR that LANDED its head — already merged — and review load names no PR.
+  const aboutPr = typeof card.prId === 'number' && card.arm !== 'trunk' && card.kind !== 'reviewer_load';
+  if (aboutPr && gone.has(card.prId as number)) return 'closed';
+  if (card.kind === 'my_turn') {
+    const subject = myTurnSubject(card.reason, card.prId, card.repoId);
+    if (subject && srv.overlay.dismissed.has(subject)) return 'dismissed';
+  }
+  return null;
+}
+
+function dismissedItem(srv: DemoServer, subject: string, reason: unknown, row: Rec): Rec {
+  const [kind, id] = subject.split(':');
+  return {
+    target: { kind, id: Number(id) },
+    repoFullName: row.repoFullName ?? '',
+    prNumber: kind === 'pr' ? (row.prNumber ?? row.number ?? null) : null,
+    title: row.prTitle ?? row.title ?? row.branch ?? null,
+    reason,
+    githubUrl: row.githubUrl ?? '',
+    dismissedAt: srv.nowIso(),
+  };
+}
+
+function appendDismissed(existing: unknown, added: Rec[]): Rec[] {
+  const list = Array.isArray(existing) ? existing.filter(isRecord) : [];
+  const key = (d: Rec): string => (isRecord(d.target) ? `${String(d.target.kind)}:${String(d.target.id)}` : '');
+  const seen = new Set(list.map(key));
+  for (const d of added) if (!seen.has(key(d))) (seen.add(key(d)), list.push(d));
+  return list;
+}
+
+function dec(o: unknown, k: string, by = 1): void {
+  if (isRecord(o) && typeof o[k] === 'number') o[k] = Math.max(0, (o[k] as number) - by);
+}
+
+function relevanceSide(card: Rec, scores: unknown): 'mine' | 'others' {
+  const s = isRecord(scores) && typeof card.id === 'string' ? scores[card.id] : undefined;
+  const rel = card.relevance ?? (isRecord(s) ? s.relevance : undefined);
+  return rel === 'direct' || rel === 'maintained' ? 'mine' : 'others';
+}
+
+/** `pendingAuthorSideOf`, on a card as it arrives on the wire. */
+function authorSide(card: Rec): 'people' | 'automation' {
+  return card.automation != null ? 'automation' : 'people';
+}
+
+/** `/api/attention` with the overlay applied, and the cards it took off. */
+function patchAttention(srv: DemoServer, body: Rec): { body: Rec; removed: Rec[] } {
+  const o = srv.overlay;
+  const gone = o.closedPrIds();
+  const cards = Array.isArray(body.cards) ? body.cards.filter(isRecord) : [];
+  const removed: Rec[] = [];
+  const dismissed: Rec[] = [];
+  const kept: Rec[] = [];
+  for (const c of cards) {
+    const why = cardRemoval(srv, c, gone);
+    if (why == null) {
+      const fields = typeof c.prId === 'number' && c.arm !== 'trunk' ? o.prFields.get(c.prId) : undefined;
+      kept.push(fields ? patchListPr(c, fields) : c);
+      continue;
+    }
+    removed.push(c);
+    if (why === 'dismissed') {
+      const subject = myTurnSubject(c.reason, c.prId, c.repoId);
+      if (subject) dismissed.push(dismissedItem(srv, subject, c.reason, c));
+    }
+  }
+  if (removed.length === 0) return { body: { ...body, cards: kept }, removed };
+
+  const byId = new Map(removed.map((c) => [String(c.id), c]));
+  const tabs = Array.isArray(body.tabs)
+    ? body.tabs.map((t) => {
+        if (!isRecord(t) || !Array.isArray(t.cardIds)) return t;
+        const out: Rec = structuredClone(t);
+        const hit = (t.cardIds as unknown[]).map(String).filter((id) => byId.has(id));
+        if (hit.length === 0) return t;
+        out.cardIds = (t.cardIds as unknown[]).filter((id) => !byId.has(String(id)));
+        if (Array.isArray(t.peopleCardIds)) out.peopleCardIds = t.peopleCardIds.filter((id) => !byId.has(String(id)));
+        for (const id of hit) {
+          const c = byId.get(id)!;
+          const kind = String(c.kind);
+          const side = authorSide(c);
+          dec(out, 'total');
+          dec(out.kindTotals, kind);
+          dec(out.authorTotals, side);
+          if (isRecord(out.kindAuthorTotals)) dec(out.kindAuthorTotals[kind], side);
+          if (t.key === 'my_turn') {
+            const rel = relevanceSide(c, body.scores);
+            dec(out.relevanceTotals, rel);
+            if (isRecord(out.relevanceAuthorTotals)) dec(out.relevanceAuthorTotals[rel], side);
+          }
+        }
+        return out;
+      })
+    : body.tabs;
+  const scores = isRecord(body.scores) ? Object.fromEntries(Object.entries(body.scores).filter(([id]) => !byId.has(id))) : body.scores;
+  return {
+    body: { ...body, cards: kept, tabs, scores, myTurnDismissed: appendDismissed(body.myTurnDismissed, dismissed) },
+    removed,
+  };
+}
+
+/** The cards the overlay removes from one workspace's board (empty when it was not recorded). */
+function removedFromBoard(srv: DemoServer, workspaceId: unknown): Rec[] {
+  const ws = typeof workspaceId === 'number' ? `?workspace=${workspaceId}` : '';
+  const board = srv.recorded('GET', `/api/attention${ws}`);
+  return isRecord(board) ? patchAttention(srv, board).removed : [];
+}
+
+/** Take the removed cards off a `DailyBriefCounts` (or the work plan's `counts`). */
+function decBriefCounts(counts: unknown, removed: Rec[]): void {
+  if (!isRecord(counts)) return;
+  const both = (k: string): void => {
+    dec(counts, k);
+    dec(counts, `${k}Total`);
+  };
+  for (const c of removed) {
+    switch (c.kind) {
+      case 'my_turn': {
+        if (c.reason === 'claude_review') break; // the Claude reviews tab: never in a my_turn figure
+        both('myTurn');
+        const rel = c.relevance;
+        if (rel === 'direct' || rel === 'maintained') both('myTurnPersonal');
+        if (rel === 'direct') both('myTurnDirect');
+        else if (rel === 'maintained') both('myTurnMaintained');
+        else both('myTurnOther');
+        break;
+      }
+      case 'ci_failing':
+        both('ciFailing');
+        break;
+      case 'security':
+        dec(counts, 'security');
+        break;
+      case 'stalled_review':
+        dec(counts, 'stalled');
+        break;
+      case 'untouched_thread':
+        dec(counts, 'untouchedThreads');
+        break;
+      case 'reviewer_routing':
+        dec(counts, 'needsReviewer');
+        break;
+    }
+  }
+}
+
+function patchDailyBrief(srv: DemoServer, body: Rec): Rec {
+  const out: Rec = structuredClone(body);
+  decBriefCounts(out.counts, removedFromBoard(srv, out.workspaceId));
+  if (Array.isArray(out.rollup)) for (const line of out.rollup) if (isRecord(line)) decBriefCounts(line.counts, removedFromBoard(srv, line.workspaceId));
+  return out;
+}
+
+function patchMyTurn(srv: DemoServer, body: Rec): Rec {
+  const o = srv.overlay;
+  const gone = o.closedPrIds();
+  const out: Rec = { ...body };
+  const dismissed: Rec[] = [];
+  for (const [section, reason] of Object.entries(MY_TURN_SECTIONS)) {
+    const rows = body[section];
+    if (!Array.isArray(rows)) continue;
+    out[section] = rows.filter((r) => {
+      if (!isRecord(r)) return true;
+      if (reason !== 'trunk_red' && typeof r.prId === 'number' && gone.has(r.prId)) return false;
+      const subject = myTurnSubject(reason, r.prId, r.repoId);
+      if (subject && o.dismissed.has(subject)) {
+        dismissed.push(dismissedItem(srv, subject, reason, r));
+        return false;
+      }
+      return true;
+    });
+  }
+  if (dismissed.length > 0) out.dismissed = appendDismissed(body.dismissed, dismissed);
+  return out;
+}
+
+function patchWorkPlan(srv: DemoServer, body: Rec): Rec {
+  if (!isRecord(body.evidence)) return body;
+  const o = srv.overlay;
+  const gone = o.closedPrIds();
+  const out: Rec = structuredClone(body);
+  const ev = out.evidence as Rec;
+  const removed = removedFromBoard(srv, ev.workspaceId);
+  const removedIds = new Set(removed.map((c) => String(c.id)));
+  const items = Array.isArray(ev.items) ? ev.items.filter(isRecord) : [];
+  const keep: Rec[] = [];
+  for (const it of items) {
+    const closed = it.subject === 'pr' && typeof it.prId === 'number' && gone.has(it.prId);
+    if (closed || removedIds.has(String(it.cardId ?? it.id))) {
+      dec(ev.totals, String(it.kind));
+      continue;
+    }
+    const fields = it.subject === 'pr' && typeof it.prId === 'number' ? o.prFields.get(it.prId) : undefined;
+    if (fields && isRecord(it.facts)) it.facts = patchListPr(it.facts, fields);
+    keep.push(it);
+  }
+  ev.items = keep;
+  decBriefCounts(ev.counts, removed);
+  if (isRecord(out.plan) && Array.isArray(out.plan.steps)) {
+    const ids = new Set(keep.map((it) => String(it.id)));
+    out.plan.steps = out.plan.steps.filter((s) => isRecord(s) && ids.has(String(s.id)));
+  }
   return out;
 }

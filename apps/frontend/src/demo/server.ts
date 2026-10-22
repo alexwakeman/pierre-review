@@ -4,8 +4,9 @@
 //   1. the agentic run simulator (./runs.ts) — starts, reads and streams of a run started here;
 //   2. the hand-written routes (./routes.ts) — /api/me, "nothing changed" sync answers, batched
 //      read POSTs, and every write the SPA can make (simulated into the in-memory overlay);
-//   3. the recording (exact method + path, then the path with its query ignored), with the
-//      overlay's patches applied;
+//   3. the recording (exact method + path, then the path with its query ignored EXCEPT its
+//      identity parameters — workspace, bot, person, ticket; recording.ts), with the overlay's
+//      patches applied;
 //   4. the per-route fallback table (./routes.ts `GET_FALLBACKS`);
 //   5. a 404 `{ error: 'NotInDemo' }` for a GET, a 409 with the same body for a write.
 // Nothing here touches the network. Every body leaves as a fresh JSON string, so a caller can
@@ -154,6 +155,7 @@ export class DemoServer {
       let out = this.bodyOf(hit.entry);
       if (req.method === 'GET') {
         out = clampPagedTotal(out, req, this);
+        out = endCursorPages(out, req, hit.how, this);
         out = patchRecordedGet(req, out, this);
       }
       return { status: hit.entry.status, body: out };
@@ -216,4 +218,24 @@ function clampPagedTotal(body: unknown, req: DemoRequest, srv: DemoServer): unkn
   const next = srv.index.match(req.method, nextUrl.pathname + nextUrl.search);
   if (next?.how === 'exact') return body;
   return { ...b, total: nextOffset };
+}
+
+/**
+ * A cursor-paged list (`{ items, nextCursor }`) ends where the recording ends. A page answered by
+ * the query-less match is a repeat of another page, so a request carrying a `cursor` that was not
+ * recorded gets no items; and a `nextCursor` is handed out only when the page it names was
+ * recorded under that exact query — otherwise the SPA would follow it to a repeat for ever.
+ */
+function endCursorPages(body: unknown, req: DemoRequest, how: 'exact' | 'path', srv: DemoServer): unknown {
+  if (body == null || typeof body !== 'object' || !('nextCursor' in body)) return body;
+  const b = body as { items?: unknown; nextCursor?: unknown };
+  if (how !== 'exact' && req.query.has('cursor')) {
+    return { ...b, ...(Array.isArray(b.items) ? { items: [] } : {}), nextCursor: null };
+  }
+  if (b.nextCursor == null) return body;
+  if (how !== 'exact') return { ...b, nextCursor: null };
+  const nextUrl = new URL(req.url, 'http://demo.invalid');
+  nextUrl.searchParams.set('cursor', String(b.nextCursor));
+  const next = srv.index.match(req.method, nextUrl.pathname + nextUrl.search);
+  return next?.how === 'exact' ? body : { ...b, nextCursor: null };
 }

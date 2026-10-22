@@ -6,15 +6,19 @@
 //   2. every NUMBER under a key ending in `At` or `Ms` (`createdAt`, `resumeAtMs`, `fromMs`) that
 //      lies within ±3 years of capturedAt is read as epoch milliseconds and shifted by delta.
 //
-// CALENDAR VALUES MOVE BY WHOLE DAYS (or whole months), so they stay calendar values:
-//   3. a timestamp at exactly UTC MIDNIGHT is a calendar boundary (a period's start, a sprint's
-//      dates, a week): it moves by `days` = delta rounded to whole days, so it is still a midnight;
+// CALENDAR VALUES MOVE BY WHOLE WEEKS (or whole months), so they stay calendar values AND keep
+// their weekday — a Monday week is still a Monday week, a sprint still starts on its weekday:
+//   3. a timestamp on an EXACT HOUR (zero minutes, seconds and milliseconds) is a calendar
+//      boundary — a period's start, a sprint's dates, a week bucket, at UTC midnight or at a local
+//      midnight such as Europe/London's T23:00Z. It moves by `days` = delta rounded to whole WEEKS,
+//      so it stays on the same hour and weekday. Recorded event times are almost never on the hour;
 //   4. a date with no time (`2026-10-20`) and a sprint period key (`sprint-2026-10-06`) move by the
 //      same `days`;
 //   5. a month period key (`month-2026-09`) moves by `months`, the whole calendar months between
 //      capturedAt and now — so the month that was in progress when the data was captured is the
 //      month in progress now. An object carrying a month `periodKey` gets its `periodStart` /
-//      `periodEnd` / `cadenceDays` rewritten to the shifted month, so the key and its dates agree.
+//      `periodEnd` / `cadenceDays` rewritten to the shifted month, so the key and its dates agree,
+//      and an in-progress month's `elapsedDays` is recomputed from its shifted start and now.
 // Nothing else moves. A duration (`waitMs: 5400000`) is nowhere near capturedAt as an epoch, so
 // rule 2 leaves it alone.
 //
@@ -28,11 +32,12 @@ const SPRINT_KEY = /^sprint-(\d{4}-\d{2}-\d{2})$/;
 const MONTH_KEY = /^month-(\d{4})-(\d{2})$/;
 const THREE_YEARS_MS = 3 * 366 * 86_400_000;
 const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
 const EPOCH_KEY = /(At|Ms)$/;
 
 export interface Rebaser {
   readonly deltaMs: number;
-  /** Whole days calendar values move by. */
+  /** The days calendar values move by — always a whole number of weeks. */
   readonly days: number;
   /** Whole calendar months a month key moves by. */
   readonly months: number;
@@ -68,7 +73,7 @@ function shiftMonthKey(key: string, months: number): string {
 export function makeRebaser(capturedAt: string, nowMs: number): Rebaser {
   const capturedMs = Date.parse(capturedAt);
   const deltaMs = Number.isFinite(capturedMs) ? nowMs - capturedMs : 0;
-  const days = Math.round(deltaMs / DAY_MS);
+  const days = 7 * Math.round(deltaMs / (7 * DAY_MS));
   const months = (() => {
     if (!Number.isFinite(capturedMs)) return 0;
     const a = new Date(capturedMs);
@@ -78,7 +83,8 @@ export function makeRebaser(capturedAt: string, nowMs: number): Rebaser {
   const lo = capturedMs - THREE_YEARS_MS;
   const hi = capturedMs + THREE_YEARS_MS;
 
-  const shiftEpoch = (t: number): number => (t % DAY_MS === 0 ? t + days * DAY_MS : t + deltaMs);
+  /** Rule 3: an exact-hour instant is a calendar boundary and moves by whole weeks. */
+  const shiftEpoch = (t: number): number => (t % HOUR_MS === 0 ? t + days * DAY_MS : t + deltaMs);
 
   const shiftIso = (s: string): string => {
     if (deltaMs === 0 || !ISO_TIMESTAMP.test(s)) return s;
@@ -110,6 +116,10 @@ export function makeRebaser(capturedAt: string, nowMs: number): Rebaser {
     if (typeof o.periodStart === 'string') o.periodStart = new Date(start).toISOString();
     if (typeof o.periodEnd === 'string') o.periodEnd = new Date(end).toISOString();
     if (typeof o.cadenceDays === 'number') o.cadenceDays = Math.round((end - start) / DAY_MS);
+    // The recorded count is days into the CAPTURE month; the shifted month started elsewhere.
+    if (o.inProgress === true && typeof o.elapsedDays === 'number') {
+      o.elapsedDays = Math.max(0, Math.min(Math.round((end - start) / DAY_MS), Math.floor((nowMs - start) / DAY_MS)));
+    }
   };
 
   const walk = (v: unknown, key: string | null): unknown => {

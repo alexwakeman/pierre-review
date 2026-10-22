@@ -33,32 +33,54 @@ describe('time rebase', () => {
   const r = makeRebaser(CAPTURED, CAPTURED_MS + 10 * DAY);
 
   it('shifts every ISO timestamp by now − capturedAt', () => {
-    const out = r.rebase({ a: '2026-01-09T08:30:00.000Z', nested: [{ at: '2026-01-10T12:00:00Z' }] });
-    expect(out).toEqual({ a: '2026-01-19T08:30:00.000Z', nested: [{ at: '2026-01-20T12:00:00.000Z' }] });
+    const out = r.rebase({ a: '2026-01-09T08:30:00.000Z', nested: [{ at: '2026-01-10T12:00:07Z' }] });
+    expect(out).toEqual({ a: '2026-01-19T08:30:00.000Z', nested: [{ at: '2026-01-20T12:00:07.000Z' }] });
   });
 
   it('shifts epoch milliseconds only under *At / *Ms keys and only near capturedAt', () => {
-    const out = r.rebase({ createdAt: CAPTURED_MS, resumeAtMs: CAPTURED_MS - DAY, waitMs: 5_400_000, count: CAPTURED_MS });
-    expect(out.createdAt).toBe(CAPTURED_MS + 10 * DAY);
-    expect(out.resumeAtMs).toBe(CAPTURED_MS + 9 * DAY);
+    const event = CAPTURED_MS + 61_000; // an event time, off the hour
+    const out = r.rebase({ createdAt: event, resumeAtMs: event - DAY, waitMs: 5_400_000, count: event });
+    expect(out.createdAt).toBe(event + 10 * DAY);
+    expect(out.resumeAtMs).toBe(event + 9 * DAY);
     expect(out.waitMs).toBe(5_400_000); // a duration, not a moment
-    expect(out.count).toBe(CAPTURED_MS); // not an *At / *Ms key
+    expect(out.count).toBe(event); // not an *At / *Ms key
   });
 
-  it('moves calendar values by whole days: midnights, dates and sprint keys together', () => {
+  it('moves calendar values by whole WEEKS: midnights, local midnights, dates and sprint keys together', () => {
     const late = makeRebaser(CAPTURED, CAPTURED_MS + 10 * DAY + 5 * 3_600_000); // 10 days 5 hours
+    expect(late.days).toBe(7); // the nearest whole week
     const out = late.rebase({
-      start: '2026-01-05T00:00:00.000Z',
+      start: '2026-01-05T00:00:00.000Z', // a Monday, UTC midnight
+      londonWeek: '2026-05-03T23:00:00.000Z', // a Monday, Europe/London midnight (BST)
+      startMs: Date.parse('2026-05-03T23:00:00.000Z'),
       at: '2026-01-09T08:30:00.000Z',
-      day: '2026-01-09',
+      day: '2026-01-05',
       key: 'sprint-2026-01-05',
       title: 'Fix 2026-01-09T08:30:00Z parsing',
     });
-    expect(out.start).toBe('2026-01-15T00:00:00.000Z'); // still a midnight
-    expect(out.at).toBe('2026-01-19T13:30:00.000Z'); // the exact delta
-    expect(out.day).toBe('2026-01-19');
-    expect(out.key).toBe('sprint-2026-01-15'); // the same days as `start`
+    expect(out.start).toBe('2026-01-12T00:00:00.000Z'); // still a Monday midnight
+    expect(new Date(out.start).getUTCDay()).toBe(1);
+    expect(out.londonWeek).toBe('2026-05-10T23:00:00.000Z'); // still the same local midnight
+    expect(out.startMs).toBe(Date.parse('2026-05-10T23:00:00.000Z'));
+    expect(out.at).toBe('2026-01-19T13:30:00.000Z'); // an event: the exact delta
+    expect(out.day).toBe('2026-01-12'); // the same days as `start`
+    expect(out.key).toBe('sprint-2026-01-12');
     expect(out.title).toBe('Fix 2026-01-09T08:30:00Z parsing'); // prose is left alone
+  });
+
+  it("recomputes an in-progress month's elapsed days from its shifted start", () => {
+    const r2 = makeRebaser('2026-10-22T20:51:21.000Z', Date.parse('2026-11-03T10:00:00.000Z'));
+    const out = r2.rebase({
+      periodKey: 'month-2026-10',
+      periodStart: '2026-10-01T00:00:00.000Z',
+      periodEnd: '2026-11-01T00:00:00.000Z',
+      cadenceDays: 31,
+      inProgress: true,
+      elapsedDays: 21,
+    });
+    expect(out).toMatchObject({ periodKey: 'month-2026-11', periodStart: '2026-11-01T00:00:00.000Z', cadenceDays: 30, elapsedDays: 2 });
+    // A finished month keeps its recorded count.
+    expect(r2.rebase({ periodKey: 'month-2026-09', periodStart: '2026-09-01T00:00:00.000Z', inProgress: false, elapsedDays: 30 }).elapsedDays).toBe(30);
   });
 
   it("moves month keys by calendar months and rewrites that period's dates", () => {
@@ -89,18 +111,19 @@ describe('time rebase', () => {
       recording([{ method: 'GET', path: '/api/pro/insights/reports/sprint-2026-01-05?workspace=1', status: 200, body: { report: { periodKey: 'sprint-2026-01-05' } } }]),
       { now: () => CAPTURED_MS + 30 * DAY },
     );
-    const res = await srv.handle('GET', '/api/pro/insights/reports/sprint-2026-02-04?workspace=1', null, null);
+    // 30 days on is four whole weeks for calendar values.
+    const res = await srv.handle('GET', '/api/pro/insights/reports/sprint-2026-02-02?workspace=1', null, null);
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { report: { periodKey: string } }).report.periodKey).toBe('sprint-2026-02-04');
+    expect(((await res.json()) as { report: { periodKey: string } }).report.periodKey).toBe('sprint-2026-02-02');
   });
 
   it('serves rebased bodies from the server, and the same answer twice', async () => {
-    const srv = new DemoServer(recording([{ method: 'GET', path: '/api/x', status: 200, body: { at: '2026-01-10T00:00:00.000Z' } }]), {
+    const srv = new DemoServer(recording([{ method: 'GET', path: '/api/x', status: 200, body: { at: '2026-01-10T08:15:30.000Z' } }]), {
       now: () => CAPTURED_MS + DAY,
     });
     const one = (await (await srv.handle('GET', '/api/x', null, null)).json()) as { at: string };
     const two = (await (await srv.handle('GET', '/api/x', null, null)).json()) as { at: string };
-    expect(one.at).toBe('2026-01-11T00:00:00.000Z');
+    expect(one.at).toBe('2026-01-11T08:15:30.000Z');
     expect(two).toEqual(one);
   });
 });
@@ -124,9 +147,51 @@ describe('matching', () => {
   });
 
   it('falls back to the path with its query ignored, first recorded wins', () => {
-    const hit = index.match('GET', '/api/open-prs?workspace=9&from=2026-01-01T00:00:00Z');
+    const hit = index.match('GET', '/api/open-prs?workspace=1&sort=age&from=2026-01-01T00:00:00Z');
     expect(hit?.how).toBe('path');
     expect(hit?.entry.body).toEqual({ which: 'ws1' });
+  });
+
+  it("never answers one workspace, bot or person with another's recorded data", () => {
+    const idx = new RecordingIndex([
+      { method: 'GET', path: '/api/workspaces', status: 200, body: { workspaces: [{ id: 1, isDefault: true }, { id: 2, isDefault: false }] } },
+      { method: 'GET', path: '/api/attention?workspace=1', status: 200, body: { which: 'ws1' } },
+      { method: 'GET', path: '/api/my-turn', status: 200, body: { which: 'default' } },
+      { method: 'GET', path: '/api/bot-analytics/flagging?authorUserIds=8&disagree=over&limit=20&workspace=1', status: 200, body: { which: 'bot8-over' } },
+      { method: 'GET', path: '/api/pro/bot-behaviour?botUserId=8&workspace=1', status: 200, body: { which: 'bot8' } },
+    ]);
+    // Workspace 2 is a recorded workspace with no attention recorded: nothing, never workspace 1.
+    expect(idx.match('GET', '/api/attention?workspace=2')).toBeNull();
+    // Absent or unknown is the DEFAULT workspace, as on the server.
+    expect(idx.match('GET', '/api/attention')?.entry.body).toEqual({ which: 'ws1' });
+    expect(idx.match('GET', '/api/attention?workspace=77')?.entry.body).toEqual({ which: 'ws1' });
+    expect(idx.match('GET', '/api/my-turn?workspace=1')?.entry.body).toEqual({ which: 'default' });
+    expect(idx.match('GET', '/api/my-turn?workspace=2')).toBeNull();
+    // Another bot, the other disagreement direction, or no bot at all: nothing.
+    expect(idx.match('GET', '/api/bot-analytics/flagging?authorUserIds=9&disagree=over&limit=20&workspace=1')).toBeNull();
+    expect(idx.match('GET', '/api/bot-analytics/flagging?authorUserIds=8&disagree=under&limit=20&workspace=1')).toBeNull();
+    expect(idx.match('GET', '/api/bot-analytics/flagging?authorUserIds=8&disagree=over&limit=50&workspace=1')?.entry.body).toEqual({ which: 'bot8-over' });
+    expect(idx.match('GET', '/api/pro/bot-behaviour?botUserId=20&workspace=1')).toBeNull();
+  });
+
+  it('a cursor-paged list ends where the recording ends', async () => {
+    const page = (n: number, next: string | null) => ({ items: [n], nextCursor: next, total: 99 });
+    const srv = new DemoServer(
+      recording([
+        { method: 'GET', path: '/api/bot-analytics/flagging?authorUserIds=8&limit=20&workspace=1', status: 200, body: page(1, 'o:20') },
+        { method: 'GET', path: '/api/bot-analytics/flagging?authorUserIds=8&cursor=o%3A20&limit=20&workspace=1', status: 200, body: page(2, 'o:40') },
+        { method: 'GET', path: '/api/bot-analytics/flagging?authorUserIds=9&limit=20&workspace=1', status: 200, body: page(9, 'o:20') },
+      ]),
+    );
+    const get = async (url: string) => (await (await srv.handle('GET', url, null, null)).json()) as { items: number[]; nextCursor: string | null };
+    // Page one names page two, which was recorded: kept.
+    expect((await get('/api/bot-analytics/flagging?workspace=1&authorUserIds=8&limit=20')).nextCursor).toBe('o:20');
+    // Page two names page three, which was not: the list ends here.
+    expect(await get('/api/bot-analytics/flagging?workspace=1&authorUserIds=8&limit=20&cursor=o:20')).toMatchObject({ items: [2], nextCursor: null });
+    // An unrecorded cursor is never page one again.
+    expect(await get('/api/bot-analytics/flagging?workspace=1&authorUserIds=8&limit=20&cursor=o:40')).toMatchObject({ items: [], nextCursor: null });
+    // Bot 9's page two was never recorded under its own query.
+    expect((await get('/api/bot-analytics/flagging?workspace=1&authorUserIds=9&limit=20')).nextCursor).toBeNull();
   });
 
   it('matches timestamp windows the SPA computes at a different moment', () => {
@@ -249,8 +314,153 @@ describe('the write overlay', () => {
     expect(await res.json()).toEqual({ error: 'NotInDemo', message: 'Not available in the demo.' });
   });
 
+  it('a second merge of a merged PR is refused like the server refuses it', async () => {
+    const srv = base();
+    await json(srv, 'POST', '/api/prs/5/merge', { method: 'squash' });
+    const again = await srv.handle('POST', '/api/prs/5/merge', JSON.stringify({ method: 'squash' }), null);
+    expect(again.status).toBe(409);
+    expect(await again.json()).toMatchObject({ error: 'NotMergeable' });
+  });
+
+  it('the demo never offers the conflict resolver it cannot run', async () => {
+    expect((await json(base(), 'GET', '/api/me')).conflictResolver).toBe(false);
+  });
+
   it('mergeSettings writes each key where it already lives', () => {
     expect(mergeSettings({ a: 1, inner: { b: 2 } }, { b: 3, c: 4 })).toEqual({ a: 1, inner: { b: 3 }, c: 4 });
+  });
+});
+
+describe('the write overlay on the Pending reads', () => {
+  const ref = (prId: number) => ({ prId, repoId: 1, repoFullName: 'acme/web', prNumber: prId, prTitle: `PR ${prId}`, githubUrl: `https://github.com/acme/web/pull/${prId}` });
+  const people = { people: 1, automation: 0 };
+  const cards = [
+    { id: 'myturn:review_request:5', kind: 'my_turn', reason: 'review_request', relevance: 'direct', automation: null, ...ref(5) },
+    { id: 'myturn:thread:6', kind: 'my_turn', reason: 'thread', relevance: 'none', automation: null, ...ref(6) },
+    { id: 'wp:merge:5', kind: 'merge', automation: null, mergeStateStatus: 'clean', ...ref(5) },
+    { id: 'stalled:6', kind: 'stalled_review', automation: { role: 'dependency' }, mergeStateStatus: 'behind', ...ref(6) },
+    // A red trunk names the PR that landed its head — merged long ago. It is about the repo.
+    { id: 'cifail:trunk:1', kind: 'ci_failing', arm: 'trunk', prId: 5, repoId: 1, headSha: 'a'.repeat(40) },
+  ];
+  const attention = {
+    cards,
+    users: [],
+    tabs: [
+      {
+        key: 'my_turn',
+        total: 2,
+        kindTotals: { my_turn: 2 },
+        cardIds: ['myturn:review_request:5', 'myturn:thread:6'],
+        authorTotals: { people: 2, automation: 0 },
+        kindAuthorTotals: { my_turn: { people: 2, automation: 0 } },
+        relevanceTotals: { mine: 1, others: 1 },
+        relevanceAuthorTotals: { mine: people, others: people },
+      },
+      { key: 'land', total: 1, kindTotals: { merge: 1 }, cardIds: ['wp:merge:5'], authorTotals: people, kindAuthorTotals: { merge: people } },
+      { key: 'review', total: 3, kindTotals: { stalled_review: 3 }, cardIds: ['stalled:6'], authorTotals: { people: 2, automation: 1 } },
+      { key: 'fixing', total: 1, kindTotals: { ci_failing: 1 }, cardIds: ['cifail:trunk:1'], authorTotals: people },
+    ],
+    scores: { 'myturn:review_request:5': { relevance: 'direct' }, 'myturn:thread:6': { relevance: 'none' }, 'wp:merge:5': {}, 'stalled:6': {} },
+    myTurnDismissed: [],
+  };
+  const counts = { myTurn: 2, myTurnTotal: 2, myTurnPersonal: 1, myTurnPersonalTotal: 1, myTurnDirect: 1, myTurnDirectTotal: 1, myTurnOther: 1, myTurnOtherTotal: 1, ciFailing: 1, stalled: 3, untouchedThreads: 0, needsReviewer: 0, resolveBacklog: 0, botAnomalies: [], trunkRed: [] };
+  const srv = (): DemoServer =>
+    new DemoServer(
+      recording([
+        { method: 'GET', path: '/api/workspaces', status: 200, body: { workspaces: [{ id: 1, name: 'Default', repoIds: [1], isDefault: true }] } },
+        { method: 'GET', path: '/api/prs/5', status: 200, body: { id: 5, state: 'open', mergeStateStatus: 'clean', threads: [], reviews: [], comments: [] } },
+        { method: 'GET', path: '/api/prs/6', status: 200, body: { id: 6, state: 'open', mergeStateStatus: 'behind', threads: [], reviews: [], comments: [] } },
+        { method: 'GET', path: '/api/attention?workspace=1', status: 200, body: attention },
+        {
+          method: 'GET',
+          path: '/api/my-turn',
+          status: 200,
+          body: { awaitingReview: [{ prId: 5, number: 5, title: 'PR 5', repoFullName: 'acme/web', githubUrl: 'u5' }], threadsAwaiting: [{ prId: 6, prNumber: 6, threadId: 60, repoFullName: 'acme/web' }], redTrunks: [], dismissed: [] },
+        },
+        { method: 'GET', path: '/api/daily-brief?rollup=1&workspace=1', status: 200, body: { workspaceId: 1, counts, generatedAt: CAPTURED } },
+        {
+          method: 'GET',
+          path: '/api/pro/work-plan?workspace=1',
+          status: 200,
+          body: {
+            enabled: true,
+            evidence: {
+              workspaceId: 1,
+              generatedAt: CAPTURED,
+              items: [
+                { id: 'wp:merge:5', kind: 'merge', subject: 'pr', prId: 5, cardId: 'wp:merge:5', facts: { mergeStateStatus: 'clean' } },
+                { id: 'wp:review:6', kind: 'review', subject: 'pr', prId: 6, cardId: 'stalled:6', facts: { mergeStateStatus: 'behind' } },
+              ],
+              totals: { merge: 1, review: 1 },
+              counts: { myTurn: 2, myTurnPersonal: 1, stalled: 3, untouchedThreads: 0, needsReviewer: 0 },
+            },
+            plan: { headline: 'h', steps: [{ id: 'wp:merge:5', why: 'a' }, { id: 'wp:review:6', why: 'b' }], parked: null },
+          },
+        },
+      ]),
+      { now: () => CAPTURED_MS },
+    );
+  const json = async (s: DemoServer, method: string, url: string, body?: unknown): Promise<any> =>
+    (await s.handle(method, url, body === undefined ? null : JSON.stringify(body), null)).json();
+  const tab = (a: any, key: string) => a.tabs.find((t: { key: string }) => t.key === key);
+
+  it('a merged PR leaves every Pending list, and every count that held it', async () => {
+    const s = srv();
+    await json(s, 'POST', '/api/prs/5/merge', { method: 'squash' });
+
+    const a = await json(s, 'GET', '/api/attention?workspace=1');
+    expect(a.cards.map((c: { id: string }) => c.id)).toEqual(['myturn:thread:6', 'stalled:6', 'cifail:trunk:1']);
+    expect(tab(a, 'my_turn')).toMatchObject({
+      total: 1,
+      kindTotals: { my_turn: 1 },
+      cardIds: ['myturn:thread:6'],
+      authorTotals: { people: 1, automation: 0 },
+      kindAuthorTotals: { my_turn: { people: 1, automation: 0 } },
+      relevanceTotals: { mine: 0, others: 1 },
+      relevanceAuthorTotals: { mine: { people: 0, automation: 0 }, others: people },
+    });
+    expect(tab(a, 'land')).toMatchObject({ total: 0, kindTotals: { merge: 0 }, cardIds: [], authorTotals: { people: 0, automation: 0 } });
+    expect(tab(a, 'fixing')).toMatchObject({ total: 1, cardIds: ['cifail:trunk:1'] }); // the trunk is not the PR
+    expect(Object.keys(a.scores)).toEqual(['myturn:thread:6', 'stalled:6']);
+
+    expect((await json(s, 'GET', '/api/my-turn')).awaitingReview).toEqual([]);
+    const brief = await json(s, 'GET', '/api/daily-brief?workspace=1&rollup=1');
+    expect(brief.counts).toMatchObject({ myTurn: 1, myTurnTotal: 1, myTurnPersonal: 0, myTurnDirect: 0, myTurnOther: 1, stalled: 3, ciFailing: 1 });
+
+    const plan = await json(s, 'GET', '/api/pro/work-plan?workspace=1');
+    expect(plan.evidence.items.map((i: { id: string }) => i.id)).toEqual(['wp:review:6']);
+    expect(plan.evidence.totals).toEqual({ merge: 0, review: 1 });
+    expect(plan.evidence.counts).toMatchObject({ myTurn: 1, myTurnPersonal: 0 });
+    expect(plan.plan.steps.map((st: { id: string }) => st.id)).toEqual(['wp:review:6']);
+  });
+
+  it('a dismissed My Turn entry moves to Dismissed until it is brought back', async () => {
+    const s = srv();
+    await json(s, 'PUT', '/api/my-turn/dismissals/pr/6');
+    const a = await json(s, 'GET', '/api/attention?workspace=1');
+    expect(a.cards.map((c: { id: string }) => c.id)).toEqual(['myturn:review_request:5', 'wp:merge:5', 'stalled:6', 'cifail:trunk:1']);
+    expect(tab(a, 'my_turn')).toMatchObject({ total: 1, relevanceTotals: { mine: 1, others: 0 } });
+    expect(tab(a, 'review').total).toBe(3); // dismissing is about My Turn only
+    expect(a.myTurnDismissed).toMatchObject([{ target: { kind: 'pr', id: 6 }, reason: 'thread', prNumber: 6 }]);
+    const mt = await json(s, 'GET', '/api/my-turn');
+    expect(mt.threadsAwaiting).toEqual([]);
+    expect(mt.dismissed).toMatchObject([{ target: { kind: 'pr', id: 6 }, reason: 'thread' }]);
+    expect((await json(s, 'GET', '/api/daily-brief?workspace=1&rollup=1')).counts).toMatchObject({ myTurn: 1, myTurnOther: 0, myTurnPersonal: 1 });
+
+    await s.handle('DELETE', '/api/my-turn/dismissals/pr/6', null, null);
+    const back = await json(s, 'GET', '/api/attention?workspace=1');
+    expect(tab(back, 'my_turn').total).toBe(2);
+    expect(back.myTurnDismissed).toEqual([]);
+  });
+
+  it("the cards that stay carry the overlay's PR fields", async () => {
+    const s = srv();
+    await json(s, 'POST', '/api/prs/6/update-branch', {});
+    const a = await json(s, 'GET', '/api/attention?workspace=1');
+    expect(a.cards.find((c: { id: string }) => c.id === 'stalled:6').mergeStateStatus).toBe('clean');
+    expect(a.cards.find((c: { id: string }) => c.id === 'cifail:trunk:1').headSha).toBe('a'.repeat(40));
+    const plan = await json(s, 'GET', '/api/pro/work-plan?workspace=1');
+    expect(plan.evidence.items[1].facts.mergeStateStatus).toBe('clean');
   });
 });
 
@@ -301,5 +511,24 @@ describe('stream replay', () => {
     const res = await srv.handle('POST', '/api/prs/9/claude-review', '{}', null);
     expect(res.status).toBe(409);
     expect(((await res.json()) as { message: string }).message).toBe('Not available in the demo.');
+  });
+
+  it('a pushed AI Fix reads pushed afterwards', async () => {
+    let now = CAPTURED_MS;
+    const finished = { id: 80, prId: 2, headSha: 'a'.repeat(40), status: 'succeeded', summary: 'fixed', pushedAt: '2026-01-09T10:00:00.000Z', pushedBranch: 'old-branch', createdAt: CAPTURED, finishedAt: CAPTURED };
+    const srv = new DemoServer(
+      recording([
+        { method: 'GET', path: '/api/pro/prs/2/ai-fix', status: 200, body: { enabled: true, auth: 'ok', viewerCanPush: true, headInfo: null, fix: finished, history: [] } },
+        { method: 'GET', path: '/api/prs/9', status: 200, body: { id: 9, headSha: 'b'.repeat(40), headRefName: 'feature/nine' } },
+      ]),
+      { now: () => now },
+    );
+    const start = (await (await srv.handle('POST', '/api/pro/prs/9/ai-fix', '{}', null)).json()) as { fixId: number };
+    now += 60_000;
+    const read = async () => ((await (await srv.handle('GET', '/api/pro/prs/9/ai-fix', null, null)).json()) as { fix: { pushedBranch: string | null; pushedAt: string | null } }).fix;
+    expect(await read()).toMatchObject({ pushedBranch: null, pushedAt: null }); // the template's push was another run's
+    const push = await srv.handle('POST', `/api/pro/ai-fixes/${start.fixId}/push`, '{}', null);
+    expect(await push.json()).toMatchObject({ pushedBranch: 'feature/nine' });
+    expect(await read()).toMatchObject({ pushedBranch: 'feature/nine', pushedAt: new Date(now).toISOString() });
   });
 });
