@@ -13,7 +13,7 @@
 //   pnpm --filter @pierre-review/backend test claude-review-chat
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ReviewChatArgs, ReviewChatResult } from '../../pro/contract.js';
+import type { ReviewChatArgs, ReviewChatResult } from '../../platform/contract.js';
 import type { AgentContext as ProContext } from '../agent-context.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -244,14 +244,6 @@ describe('answerReviewChat', () => {
     // A pre-routing review (null mode) ran with a worktree; a retired model falls back.
     expect(chatCalls[0]!.mode).toBe('worktree');
     expect(chatCalls[0]!.model).toBe('claude-opus-5-5');
-  });
-
-  it('refuses with 402 when agent credits are spent, before any agent call', async () => {
-    blocked = true;
-    const out = await chat.answerReviewChat(ctx, 1, reviewId, { question: 'x' });
-    expect(out).toMatchObject({ ok: false, status: 402 });
-    expect(chatCalls).toHaveLength(0);
-    expect(chat.chatInFlightFor(1)).toBeNull();
   });
 
   it('meters a failed turn and stores nothing', async () => {

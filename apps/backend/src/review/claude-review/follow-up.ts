@@ -43,7 +43,7 @@ import type {
   ClaudeFollowUpItemRecord,
   ClaudeFollowUpStatus,
 } from '@pierre-review/shared';
-import type { ReviewFinding, ReviewFollowUpReport } from '../../pro/contract.js';
+import type { ReviewFinding, ReviewFollowUpReport } from '../../platform/contract.js';
 import { RESPONSE_CHARS, judgeableReplies, replyExcerpt, type FindingReply } from './reply-text.js';
 
 // ---- caps (the prompt block's budget) ----

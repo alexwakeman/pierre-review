@@ -1,6 +1,6 @@
 import { PRODUCT_NAME } from '@pierre-review/shared';
 import type { AiFixPushResult } from '@pierre-review/shared';
-import type { ApplyAndPushTarget } from '../../pro/contract.js';
+import type { ApplyAndPushTarget } from '../../platform/contract.js';
 import type { AgentContext } from '../../review/agent-context.js';
 import { getFixPrContext, getViewerCanPush } from './pr-context.js';
 import { getFixById, markFixPushed } from './persist.js';

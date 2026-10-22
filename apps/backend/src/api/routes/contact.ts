@@ -6,7 +6,7 @@
 // message even has a chance. A webhook POST either returns 2xx or throws, and the
 // failure is visible in this process's logs at the moment it happens. There is also
 // precedent and a working shape already in the repo — the Pro plugin's per-workspace
-// digest delivery (packages/pro/src/slack/) — though core cannot import from the
+// digest delivery (apps/backend/src/platform/slack/) — though core cannot import from the
 // plugin, so the URL validation below is a deliberate small copy rather than a shared
 // helper. Email can be added later as a SECOND sink; it should never be the only one.
 //

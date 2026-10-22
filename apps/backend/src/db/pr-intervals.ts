@@ -22,7 +22,7 @@
 //
 // ⚠ EVERY SENTENCE IN THIS FILE IS TEMPLATED. No model, no plugin, no AI import. An EM makes
 // staffing decisions off this screen, so a generated sentence would launder an unverified figure
-// into it. Same discipline `packages/pro/test/llm-isolation.test.ts` pins for the bot advisor.
+// into it. Same discipline `apps/backend/src/platform/test/llm-isolation.test.ts` pins for the bot advisor.
 //
 // ── THE STATE MACHINE, and the three decisions inside it ─────────────────────────────────────
 //

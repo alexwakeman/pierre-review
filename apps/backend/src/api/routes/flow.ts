@@ -5,32 +5,11 @@ import { getFlowTrend } from '../../db/flow-trend.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
 import { getReportingWindow } from '../../db/reporting-window.js';
 import { accountIdOf } from '../plugins/auth.js';
-import { entitledProCapabilities } from '../../pro/contract.js';
 
 // GET /api/flow-findings — "Chronology": the COURT LEDGER for a workspace.
 //
-// PAID, on the `periodReports` capability. Deterministic all the same — no model, no plugin call,
-// no GitHub call — and every sentence it returns is still templated in db/pr-intervals.ts; what it
-// costs is DB work, not tokens.
-//
-// ⚠ IT RIDES `periodReports` RATHER THAN A CAPABILITY OF ITS OWN, deliberately. Chronology and the
-// period report answer the same question at two grains — "where did a completed stretch of work
-// actually go" — and a fifteenth member on `ProCapabilities` would mean bumping `apiVersion` across
-// four literals in two repositories (host contract, plugin index, plugin contract-types, the
-// runtime gate in pro/bind.ts) to gate one route. One flag, no wire change, no plugin edit.
-//
-// ⚠ THE GATE IS A ROUTING DECISION AND MUST STAY ONE. `getFlowCourts` reads no capability and takes
-// no flag: `verify:isolation` calls that fold DIRECTLY — no request, no account row, just the ids
-// it is handed — and the day entitlement is threaded into the engine is the day every one of those
-// cross-tenant assertions needs an account to run. (The `[7, 90]` window clamp is the mirror case:
-// it lives in the ENGINE so a second caller cannot skip it, while this check lives HERE so the
-// engine stays testable.)
-//
-// ⚠ THE SPA MUST GATE `useFlowFindings`' `enabled` ON THE SAME FLAG (it does). This route is
-// POLLED — the panel refetches every five minutes — so an ungated hook against a 402 is a request
-// every five minutes, per mounted pane, forever, and the panel renders "Could not load this
-// workspace's flow.": an ERROR where the truth is a paywall, which is the worst of both. The
-// unentitled SPA issues no request at all and paints the locked pane instead.
+// Deterministic — no model, no GitHub call — and every sentence it returns is templated in
+// db/pr-intervals.ts.
 //
 // `?workspace=<int>` is THE scope parameter and goes through `resolveWorkspaceScope`: absent,
 // unparseable, unknown or ANOTHER TENANT'S id all resolve to the account's DEFAULT workspace —
@@ -55,20 +34,7 @@ import { entitledProCapabilities } from '../../pro/contract.js';
 // conversation comments, commits) across every pull request merged in the window — the same shape
 // of cost that put `GET /api/attention` and `GET /api/daily-brief` on this bucket.
 export async function flowRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/flow-findings', async (req, reply): Promise<FlowResponse | { error: string }> => {
-    // The same entitlement view /api/me hands the SPA and the /api/pro/* 402 gate mirrors, so the
-    // tab's locked pane and this status code can never disagree about one account: a local account
-    // is entitled whenever the bound plugin advertises the capability, a free cloud account gets
-    // the 402. `!req.account` cannot happen in the running app (local synthesizes one, cloud 401s
-    // first) — it is here so a bare test harness fails closed rather than open.
-    //
-    // Ahead of `resolveWorkspaceScope` on purpose: an unentitled caller does no DB work, and the
-    // 402 is identical for every `?workspace=` value, so the gate cannot be read as an oracle for
-    // which workspaces exist.
-    if (!req.account || !entitledProCapabilities(req.account).periodReports) {
-      reply.status(402);
-      return { error: 'pro required' };
-    }
+  app.get('/api/flow-findings', async (req): Promise<FlowResponse> => {
     const q = req.query as { workspace?: string; days?: string; window?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
@@ -90,15 +56,11 @@ export async function flowRoutes(app: FastifyInstance): Promise<void> {
   // merge week, plus the event markers (bots and people first seen, repos joining, setting changes,
   // detected shifts) and a before/after lens per marked week. docs/BOTTLENECKS.md § Over time.
   //
-  // Same gate, same scope rule, same tier (`search`) as /api/flow-findings above. ⚠ THE 26 WEEKS ARE
+  // Same scope rule, same tier (`search`) as /api/flow-findings above. ⚠ THE 26 WEEKS ARE
   // THE LABELLED EXCEPTION TO THE 90-DAY CAP — the response carries per-week coverage, repo-joined
   // markers and a thin-week flag so the coverage bias the cap guards against stays on screen. No
   // `?days=`: the span is fixed.
-  app.get('/api/flow-trend', async (req, reply): Promise<FlowTrendResponse | { error: string }> => {
-    if (!req.account || !entitledProCapabilities(req.account).periodReports) {
-      reply.status(402);
-      return { error: 'pro required' };
-    }
+  app.get('/api/flow-trend', async (req): Promise<FlowTrendResponse> => {
     const q = req.query as { workspace?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);

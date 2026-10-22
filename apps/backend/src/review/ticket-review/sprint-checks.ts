@@ -21,8 +21,7 @@ import { jiraMemberIds, jiraStoryFor } from './prepare.js';
 //   • HOW: `startTicketReview(…, trigger: 'manual')` — the ticket review's ONE door, its lane, its
 //     shared REVIEW_CONCURRENCY slots. 'manual' because a person pressed the button: it goes ahead of
 //     automatic items and does NOT count against TICKET_REVIEW_DAILY_CAP (auto / cascade only).
-//   • Pre-checks are the start route's: no Claude credential → 'no_credential'; out of agentic credits
-//     → 'credits'; in both cases nothing starts.
+//   • Pre-check is the start route's: no Claude credential → 'no_credential'; nothing starts.
 //
 // The selection is DB + local reads only, done inline so the 202 can say how many started.
 
@@ -128,7 +127,6 @@ export async function runSprintTicketChecks(
   const deps = opts.deps ?? DEFAULT_DEPS(ctx);
   try {
     if (ctx.llm.detectAuth().status === 'none') return { started: 0, skipped: 'no_credential' };
-    if ((await ctx.aiCredits.check(accountId)).agentBlocked) return { started: 0, skipped: 'credits' };
     const all = (await deps.candidates(accountId, workspaceId)).filter(hasLivePr).filter((c) => !deps.held(accountId, c.ident));
     if (all.length === 0) return { started: 0, skipped: null };
     const states = await deps.states(

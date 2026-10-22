@@ -106,7 +106,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   const mutating = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
 
   // Signed server-to-server posts.
-  if (path === '/api/webhooks/github' || path === '/api/billing/webhook') {
+  if (path === '/api/webhooks/github') {
     return [TIERS.webhook];
   }
   if (path.startsWith('/api/auth/')) return [TIERS.auth];
@@ -188,9 +188,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // following the token, there is no token. `read` is the same answer the fall-through at the
   // bottom of this function would give, and it is spelled out anyway for this file's stated
   // reason — the two documented mistakes here were both a route whose tier was never decided,
-  // only inherited. Its sibling POST /api/me/benchmark-consent still takes the fall-through
-  // because it DOES have a leg worth thinking about (a fire-and-forget rollup on opt-in), and
-  // pinning it here would hide that.
+  // only inherited.
   //
   // EXACT `===`. `/api/me` is a family with an export, an account deletion and a data-subject
   // GET in it, so a `startsWith('/api/me/')` would sweep all of them into one bucket — and a
@@ -222,7 +220,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // throttle a plain `dismiss` like an LLM call, while the three GitHub-writing outputs
   // (config-pr / manifest-pr / issue) genuinely spend GitHub quota and the one LLM route
   // (refine) genuinely spends model dollars. Each path family is spelled exactly and pinned
-  // in rate-limit.test.ts. Staying under /api/pro/ keeps the automatic 402 entitlement gate.
+  // in rate-limit.test.ts.
   if (path.startsWith('/api/pro/advisor/')) {
     if (mutating && path.endsWith('/config-pr')) return [TIERS.githubWrite];
     if (mutating && path.endsWith('/manifest-pr')) return [TIERS.githubWrite];
@@ -699,10 +697,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // (`githubWrite` would also be the wrong bucket regardless: this route writes nothing to
   // GitHub, it reads.)
   if (mutating && path === '/api/attention/liveness') return [TIERS.prDetail, TIERS.read];
-  // GET /api/flow-findings — the Chronology tab (PAID `periodReports`, deterministic, no model and
-  // no GitHub — the route 402s before it touches the DB). The TIER is unaffected by that gate and
-  // must stay where it is: an entitled account still runs the whole fold, and the tier answers
-  // "what does one accepted request cost", never "who may make it". DECIDED, not inherited: "this
+  // GET /api/flow-findings — the Chronology tab (deterministic, no model and no GitHub). DECIDED,
+  // not inherited: "this
   // route is DB-only" is the sentence this file exists to distrust, and one call here runs the
   // lane resolver, the shared first-human-review fold (two
   // capped candidate walks), a thread-path scan, an in-window review scan, a merged-PR walk plus

@@ -4,7 +4,7 @@ import type { ClaudeReviewModel } from '@pierre-review/shared';
 import { claudeExecutableOptions, loadAgentSdk, loadZod } from '../../ai/runtime.js';
 import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
 import { config } from '../../config.js';
-import type { ReviewThreadReport } from '../../pro/contract.js';
+import type { ReviewThreadReport } from '../../platform/contract.js';
 import { DISALLOWED_TOOLS, describeAssistantBlocks } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { sdkModelOptions } from '../model-options.js';

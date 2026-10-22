@@ -4,7 +4,7 @@
 // model knows: the same `getFlowCourts` pass the panel renders (so a pointer cannot describe a
 // different population from the charts beside it), trimmed to a bounded set of rows, plus a few
 // EXEMPLARS — the slowest and the quickest pull request in each size band, with the first thing a
-// reviewer said on each. The plugin (packages/pro/src/flow-pointers/) validates every citation
+// reviewer said on each. The plugin (apps/backend/src/platform/flow-pointers/) validates every citation
 // against `rows ∪ exemplars` and drops the rest, counted.
 //
 // ⚠ NO PERSON CROSSES THIS SEAM. `FlowPrRow` already carries no actor, and the exemplar text has

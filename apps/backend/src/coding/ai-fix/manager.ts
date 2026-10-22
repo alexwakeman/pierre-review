@@ -13,7 +13,7 @@ import type {
   AutoFixInclude,
   ClaudeReview,
 } from '@pierre-review/shared';
-import type { CodingProgress } from '../../pro/contract.js';
+import type { CodingProgress } from '../../platform/contract.js';
 import type { AgentContext } from '../../review/agent-context.js';
 import { getFixPrContext } from './pr-context.js';
 import { getClaudeReviewById } from '../../review/claude-review/persist.js';
@@ -161,7 +161,6 @@ export type StartFixResult =
   | { status: 'busy' }
   | { status: 'not_found' }
   | { status: 'no_auth'; message?: string }
-  | { status: 'credits_exhausted' }
   | { status: 'no_head' }
   // seed === 'review': the named review is missing, another PR's / account's, or not succeeded.
   | { status: 'review_unavailable' }
@@ -358,7 +357,6 @@ async function startRun(
 
   // Hard agentic cap: refuse a run once the account's monthly agent credit allowance is spent
   // (metered per calendar month; local accounts are unmetered → never blocked).
-  if ((await ctx.aiCredits.check(accountId)).agentBlocked) return { status: 'credits_exhausted' };
 
   const instruction = (input.instruction ?? '').trim();
   if (input.seed === 'plain' && instruction === '') return { status: 'no_instruction' };
@@ -736,7 +734,6 @@ export type PlanActionResult =
   | { status: 'already_running' }
   | { status: 'busy' }
   | { status: 'no_auth'; message?: string }
-  | { status: 'credits_exhausted' }
   | { status: 'no_head' }
   | { status: 'revision_cap' }
   | { status: 'budget_spent' };
@@ -766,7 +763,6 @@ export async function sendPlanMessage(
 
   const auth = ctx.llm.detectAuth();
   if (auth.status !== 'ok') return { status: 'no_auth', message: auth.message };
-  if ((await ctx.aiCredits.check(input.accountId)).agentBlocked) return { status: 'credits_exhausted' };
 
   const prId = row.prId;
   if (claimed.has(prId)) return { status: 'already_running' };
@@ -862,7 +858,6 @@ export async function approvePlan(
 
   const auth = ctx.llm.detectAuth();
   if (auth.status !== 'ok') return { status: 'no_auth', message: auth.message };
-  if ((await ctx.aiCredits.check(input.accountId)).agentBlocked) return { status: 'credits_exhausted' };
 
   const prId = row.prId;
   if (claimed.has(prId)) return { status: 'already_running' };

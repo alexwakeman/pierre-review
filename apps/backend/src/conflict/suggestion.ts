@@ -9,7 +9,7 @@ import { hasConflictMarkers } from '../coding/merge.js';
  *
  * THE PRO PER-HUNK SUGGESTION'S VALIDATORS — and they live in CORE, deliberately.
  *
- * ⚠ WHY THEY ARE NOT IN THE PLUGIN. `packages/pro/test/` does not run in CI and is not
+ * ⚠ WHY THEY ARE NOT IN THE PLUGIN. `apps/backend/src/platform/test/` does not run in CI and is not
  * typechecked (`pnpm test` is recursive vitest and the plugin's tsconfig includes only `src`).
  * These functions are the only thing standing between attacker-authored conflict text and a
  * blob in somebody's repository, and they have to agree byte-for-byte with the model the host

@@ -48,7 +48,6 @@ import { dailyBriefRoutes } from './api/routes/daily-brief.js';
 import { dependencyMergeRoutes } from './api/routes/dependency-merge.js';
 import { flowRoutes } from './api/routes/flow.js';
 import { sprintStoriesRoutes } from './api/routes/sprint-stories.js';
-import { billingRoutes } from './api/routes/billing.js';
 import { contactRoutes } from './api/routes/contact.js';
 import { botTriageRoutes } from './api/routes/bot-triage.js';
 import { mlLabelRoutes } from './api/routes/ml-labels.js';
@@ -101,7 +100,6 @@ export async function buildApp(): Promise<FastifyInstance> {
           'req.headers.authorization',
           'req.headers.cookie',
           'req.headers["x-hub-signature-256"]',
-          'req.headers["stripe-signature"]',
           'res.headers["set-cookie"]',
           'err.config.headers',
           'err.request.headers',
@@ -261,13 +259,12 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(dailyBriefRoutes);
   // Dependency auto-merge: Pending → Dependencies' "Merge or arm all" + the per-workspace setting.
   await app.register(dependencyMergeRoutes);
-  // Chronology (PAID on `periodReports`, no AI, no GitHub): the Bot Tuning Advisor's evidence-
+  // Chronology (no AI, no GitHub): the Bot Tuning Advisor's evidence-
   // cell machinery aimed at the HUMAN lane — where review time goes, with sample floors and a
   // NAMED refusal for anything that cannot clear one. Every sentence it returns is templated in
-  // db/pr-intervals.ts; there is no narration seam and no plugin half. The route carries the 402
-  // itself (the ENGINE stays capability-blind — verify:isolation calls that fold directly).
+  // db/pr-intervals.ts.
   await app.register(flowRoutes);
-  // THIS SPRINT (its own rail line; core, both modes, FREE — no 402): the sprint GRAPH, the
+  // THIS SPRINT (its own rail line): the sprint GRAPH, the
   // drawer's ticket detail, candidate repos and the status layout — all DB only. "Check against
   // code" and "Ask Claude about this sprint" are agentic and register in `registerAgenticRoutes`; the
   // refresh route registers with the tracker (`registerTracker`). Nothing here writes to a tracker.
@@ -286,9 +283,6 @@ export async function buildApp(): Promise<FastifyInstance> {
   // authoritative post-write groups. Registered in both modes; their rate-limit tiers are
   // spelled out explicitly in api/plugins/rate-limit.ts.
   await app.register(reactionRoutes);
-  // Stripe billing seam (checkout redirect + webhook). Registered in both modes;
-  // inert until the STRIPE_* env vars are set (webhook 501s unconfigured).
-  await app.register(billingRoutes);
   // The public contact form (POST /api/contact + its ticket mint). Registered in both
   // modes for symmetry, but it is a CLOUD feature: local mode never serves the landing
   // page at all (`/` 302s to /app). Inert until CONTACT_SLACK_WEBHOOK_URL is set — both

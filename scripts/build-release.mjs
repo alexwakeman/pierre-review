@@ -38,15 +38,12 @@ const sharedDir = join(repoRoot, 'packages', 'shared');
 const sharedDist = join(sharedDir, 'dist');
 const migrationsSrc = join(backendDir, 'src', 'db', 'migrations');
 const migrationsPgSrc = join(backendDir, 'src', 'db', 'migrations-pg');
+// The platform modules' own migrations (bookkept in `pro_migrations`) and the bundled peer-benchmark
+// corpus. Both are read relative to the compiled module (`new URL('./migrations', import.meta.url)`
+// in platform/index.js, `../../data/benchmark/…` from platform/bots/benchmark/artifact.js), so
+// they are copied to the SAME place under release/dist/platform.
+const platformSrc = join(backendDir, 'src', 'platform');
 const releaseDir = join(repoRoot, 'release');
-
-// --with-pro (cloud image ONLY): additionally build the private @pierre/pro plugin into the
-// release + ship the one SUMMARY-AI dep (@anthropic-ai/sdk) the paid reporting plugin's metered
-// path needs. The public npm publish (release.yml) NEVER passes this, so its no-AI-SDK-in-the-
-// manifest guarantee is unchanged.
-const withPro = process.argv.includes('--with-pro');
-const proDir = join(repoRoot, 'packages', 'pro');
-const proDist = join(proDir, 'dist');
 
 const log = (msg) => console.log(`\x1b[36m▸\x1b[0m ${msg}`);
 const fail = (msg) => {
@@ -159,31 +156,13 @@ cpSync(frontendDist, join(releaseDir, 'public'), { recursive: true });
 log('copying landing → release/public-landing');
 cpSync(landingDist, join(releaseDir, 'public-landing'), { recursive: true });
 
-// 6c. (cloud image only) Copy the built @pierre/pro plugin + its migrations → release/pro,
-//     PRESERVING the dist↔migrations sibling layout so the plugin's `new URL('../migrations',
-//     import.meta.url)` resolves to /app/pro/migrations at runtime. The image sets
-//     PRO_PLUGIN_PATH=/app/pro/dist/index.js so bind.ts loads it directly (the repo-relative
-//     fallback paths don't exist in the flattened release layout).
-if (withPro) {
-  if (!existsSync(proDist)) {
-    fail(
-      '--with-pro: packages/pro/dist missing — run `pnpm --filter @pierre/pro build` first ' +
-        '(and check the submodule is initialized: `git submodule update --init`).',
-    );
-  }
-  log('copying @pierre/pro (dist + migrations + data) → release/pro');
-  cpSync(proDist, join(releaseDir, 'pro', 'dist'), { recursive: true });
-  // `data` joins the list for the SAME reason `migrations` is on it: the plugin resolves it as a
-  // SIBLING of dist (`new URL('../../../data/benchmark/…', import.meta.url)`), so the layout has
-  // to survive the flattening. It holds the peer-benchmark corpus
-  // (`data/benchmark/benchmark-fit.json`, ~200 KB today) — identical for every tenant, no
-  // repository and no actor named in it. ⚠ Forgetting it fails ONLY IN PRODUCTION: local dev and
-  // `pnpm demo` read the file straight out of the workspace and look perfect, while the cloud
-  // image reports `available:false`. Hence the mustExist assert below as well.
-  for (const sub of ['migrations', 'migrations-pg', 'data']) {
-    const src = join(proDir, sub);
-    if (existsSync(src)) cpSync(src, join(releaseDir, 'pro', sub), { recursive: true });
-  }
+// 6c. Copy the platform's migrations + bundled data → release/dist/platform/{migrations,
+//     migrations-pg,data}, beside the compiled platform modules that read them. ⚠ Forgetting
+//     `data` fails ONLY IN THE RELEASE: dev reads the file straight out of src/ and looks perfect,
+//     while the package answers the benchmark with `available:false`. Hence the mustExist below.
+log('copying platform migrations + data → release/dist/platform');
+for (const sub of ['migrations', 'migrations-pg', 'data']) {
+  cpSync(join(platformSrc, sub), join(releaseDir, 'dist', 'platform', sub), { recursive: true });
 }
 
 // 7. Generate release/package.json (version copied from backend; curated deps).
@@ -348,6 +327,8 @@ const manifest = {
     'node-cron': backendPkg.dependencies['node-cron'],
     // Postgres driver — only loaded in cloud mode (dynamic import in client.ts).
     pg: backendPkg.dependencies['pg'],
+    // The advisor's config emitters (platform/advisor/emitters) parse and write YAML.
+    yaml: backendPkg.dependencies['yaml'],
   },
   keywords: [
     'github',
@@ -368,25 +349,6 @@ const manifest = {
   [ML_RUNTIME_FIELD]: mlRuntimePins,
   ...(mlModels ? { [ML_MODELS_FIELD]: mlModels } : {}),
 };
-
-// --with-pro: the cloud image runs the @pierre/pro summary-AI plugin, so it needs the runtime
-// deps the OSS package omits. The plugin itself only imports drizzle-orm (already present); the
-// ONE genuinely-new dep is @anthropic-ai/sdk — CORE's review/llm.ts uses it on the raw metered
-// path (SUMMARY_ANTHROPIC_API_KEY, always set in cloud). The AGENTIC SDKs stay out (agentic AI
-// is off in cloud). Pro's declared `dependencies` are merged dynamically (no Pro internals are
-// hardcoded here), minus any unpublishable workspace specifier.
-if (withPro) {
-  const proPkg = JSON.parse(readFileSync(join(proDir, 'package.json'), 'utf8'));
-  // The SAME exact version the local runtime pins, so the cloud image and a local install run one
-  // SDK. ai/runtime.ts's loader falls through to this ordinary dependency when there is no runtime
-  // directory (the cloud image has none: agentic AI is off there).
-  manifest.dependencies['@anthropic-ai/sdk'] = aiRuntimePins['@anthropic-ai/sdk'];
-  for (const [name, version] of Object.entries(proPkg.dependencies ?? {})) {
-    if (String(version).startsWith('workspace:')) continue; // @pierre-review/shared etc.
-    manifest.dependencies[name] = version;
-  }
-  manifest.files = [...manifest.files, 'pro'];
-}
 
 writeFileSync(
   join(releaseDir, 'package.json'),
@@ -437,12 +399,13 @@ const mustExist = [
 for (const route of ['features', 'pro', 'pricing', 'how-it-works', 'privacy', 'cookies', 'terms']) {
   mustExist.push(`public-landing/${route}/index.html`);
 }
-// The cloud image must actually contain the plugin entry it points PRO_PLUGIN_PATH at…
-if (withPro) mustExist.push('pro/dist/index.js');
-// …and the peer-benchmark corpus the plugin reads as a sibling of that entry. A missing copy step
-// is silent everywhere else: the route answers 200 with `available:false`, which is
-// indistinguishable from a deliberate OSS build until someone opens the tab in production.
-if (withPro) mustExist.push('pro/data/benchmark/benchmark-fit.json');
+// The platform entry, its first migration and the peer-benchmark corpus it reads. A missing copy
+// step is silent everywhere else: the route answers 200 with `available:false`.
+mustExist.push(
+  'dist/platform/index.js',
+  'dist/platform/migrations/0001_init.sql',
+  'dist/platform/data/benchmark/benchmark-fit.json',
+);
 for (const rel of mustExist) {
   if (!existsSync(join(releaseDir, rel))) fail(`missing required file: ${rel}`);
 }
@@ -506,7 +469,6 @@ function rewriteSharedSpecifiers(dir) {
 
 log('rewriting @pierre-review/shared imports → ./dist/shared');
 let rewrittenFiles = rewriteSharedSpecifiers(releaseDist);
-if (withPro) rewrittenFiles += rewriteSharedSpecifiers(join(releaseDir, 'pro'));
 log(`  ${rewrittenFiles} file(s) repointed at the vendored shared`);
 
 // Nothing may still reach the shared package BY NAME — every specifier should have been
@@ -532,9 +494,6 @@ function grepSharedImports(dir) {
   return hits;
 }
 const sharedHits = grepSharedImports(join(releaseDir, 'dist'));
-// The copied-in plugin gets the same treatment and the same check — it has its own value
-// imports of shared, and its relative path back to dist/shared is a longer one.
-if (withPro) sharedHits.push(...grepSharedImports(join(releaseDir, 'pro')));
 if (sharedHits.length > 0) {
   console.error('Unrewritten @pierre-review/shared import left in the release:');
   for (const h of sharedHits) console.error(`  ${h}`);
@@ -546,12 +505,8 @@ if (sharedHits.length > 0) {
 // The npm package must carry ZERO AI SDKs in anything npm installs (`dependencies`,
 // `optionalDependencies` — npm installs optional ones by default, and a dependent package cannot
 // switch off its dependency's platform binary under `npx`). They arrive on first use instead, at
-// the pins in `limnAiRuntime`. Under --with-pro (cloud image ONLY) @anthropic-ai/sdk is a
-// deliberate dependency for the paid plugin's metered summary path; the AGENTIC SDKs and zod stay
-// forbidden even there, since agentic AI is off in cloud.
-const AI_DEPS = withPro
-  ? ['@anthropic-ai/claude-agent-sdk', '@modelcontextprotocol/sdk', 'zod', ...DOC_CONVERTERS]
-  : ['@anthropic-ai/claude-agent-sdk', '@anthropic-ai/sdk', '@modelcontextprotocol/sdk', 'zod', ...DOC_CONVERTERS];
+// the pins in `limnAiRuntime`.
+const AI_DEPS = ['@anthropic-ai/claude-agent-sdk', '@anthropic-ai/sdk', '@modelcontextprotocol/sdk', 'zod', ...DOC_CONVERTERS];
 for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
   const leaked = AI_DEPS.filter((d) => d in (manifest[field] ?? {}));
   if (leaked.length > 0) fail(`AI SDK(s) leaked into release/package.json ${field}: ${leaked.join(', ')}`);

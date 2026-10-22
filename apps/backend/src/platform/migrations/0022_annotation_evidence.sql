@@ -1,0 +1,32 @@
+-- @pierre/pro plugin migration (SQLite / local mode). Run once by the host's runPluginMigrations
+-- (tracked in pro_migrations — plugin migrations are discovered by FILENAME SORT and have NO
+-- meta/_journal.json; that requirement is CORE-only). Carries no statement-breakpoint markers
+-- either: the plugin migrator execs the whole file as one blob. Postgres twin:
+-- migrations-pg/0022_annotation_evidence.sql.
+--
+-- Adds the grounding-diff column behind "Check addressed".
+--
+-- WHAT GOES IN IT. JSON, written by annotations/evidence.ts#encodeEvidence:
+--   {"v":1,"baseSha":…,"headSha":…,"path":…,"outcome":"changed"|"untouched"|"unavailable",
+--    "patch":…|null,"previousPath":…|null,"note":…|null}
+-- It is the REAL unified diff of the thread's file between the commit the thread was last
+-- discussed at and the pull request's head — the evidence the verdict was actually based on.
+-- `addressed` rows with target_kind='thread' carry one; every other row stores NULL (a PR-level
+-- comment has no file anchor, and simplify/validity judge the comment, not the later code).
+--
+-- WHY IT IS STORED AND NOT RE-DERIVED. The annotations GET is a PURE CACHED READ fired on every
+-- PR open, and it is what renders a stored verdict. Re-fetching the compare to draw the evidence
+-- panel would put a GitHub call on every PR open of every bot-flooded PR — the same trap the
+-- payload hash exists to avoid (which is also why the hash carries the (base, head) PAIR and
+-- never the diff text).
+--
+-- NULLABLE AND ADDITIVE, so every existing row stays readable exactly as it is. Rows written
+-- before this ships simply have no evidence to show; the panel renders nothing for them, and the
+-- next press of "Check review" fills it in — which those rows are due anyway, because the
+-- addressed payload-hash prefix moved `t1|…` → `t2|…` in the same change and marks them stale
+-- once.
+--
+-- SQLite has no `ADD COLUMN IF NOT EXISTS`, but this file is applied exactly once
+-- (pro_migrations-gated), so a plain ALTER is correct here.
+
+ALTER TABLE pr_comment_annotations ADD COLUMN evidence text;

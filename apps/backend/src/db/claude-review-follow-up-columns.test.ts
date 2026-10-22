@@ -4,7 +4,7 @@
 // WHAT THIS PINS: migration 0070 is REGISTERED in the sqlite journal and actually adds the four
 // columns (an unregistered file SILENTLY SKIPS — the boot looks perfect and every write of these
 // columns fails), and the three JSON columns round-trip deep-equal through drizzle's json mode.
-// The plugin-side persist round-trip (packages/pro/test/claude-review-persist.test.ts) runs over
+// The plugin-side persist round-trip (apps/backend/src/platform/test/claude-review-persist.test.ts) runs over
 // the same real client but is not in CI; this one is.
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load),

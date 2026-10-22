@@ -46,10 +46,6 @@ export function registerAccountContext(app: FastifyInstance): void {
           displayName: null,
           avatarUrl: null,
           isLocal: true,
-          plan: 'free',
-          stripeCustomerId: null,
-          aiCreditAllowance: null,
-          benchmarkOptIn: false,
           largePrCodeLocThreshold: null,
           blastRadiusConfig: null,
         };
@@ -90,28 +86,19 @@ export async function registerSession(app: FastifyInstance): Promise<void> {
 }
 
 // Cloud only: 401 any unauthenticated /api data route. Skips /api/health,
-// /api/auth/* (sign-in itself), /api/billing/webhook (Stripe posts
-// unauthenticated — verified by signature instead), /api/contact* (the public
-// contact form, whose visitors have no account by definition) and all non-/api requests
-// (the SPA + landing are served openly; the frontend gate handles the signed-out
-// UI). MUST be registered AFTER registerAccountContext so req.account is already
-// resolved. Also the cloud-only ENTITLEMENT gate: an authenticated free-plan
-// account gets 402 on the Pro plugin's /api/pro/* routes (local accounts are
-// always entitled — isLocal never reaches the cloud gate anyway).
+// /api/auth/* (sign-in itself), /api/contact* (the public contact form, whose
+// visitors have no account by definition) and all non-/api requests (the SPA +
+// landing are served openly; the frontend gate handles the signed-out UI). MUST be
+// registered AFTER registerAccountContext so req.account is already resolved.
 export function registerAuthGate(app: FastifyInstance): void {
   app.addHook('onRequest', async (req, reply) => {
     const path = req.url.split('?')[0] ?? req.url;
     if (!path.startsWith('/api/')) return;
     if (path === '/api/health') return;
     if (path.startsWith('/api/auth/')) return;
-    if (path === '/api/billing/webhook') return;
     // GitHub App webhook: GitHub posts unauthenticated — authenticity is the
     // X-Hub-Signature-256 HMAC, verified in the route (see api/routes/webhooks.ts).
     if (path === '/api/webhooks/github') return;
-    // The pricing page's "Get Pro" is a plain browser navigation from the public
-    // landing; the route itself bounces anonymous visitors to sign-in instead of
-    // dead-ending them on a JSON 401.
-    if (path === '/api/billing/checkout') return;
     // The public contact form. It exists FOR people who are not signed in — someone
     // asking for a Pro trial does not have an account yet, and someone reporting that
     // sign-in is broken cannot sign in to say so. Spam control is the honeypot, the
@@ -125,32 +112,7 @@ export function registerAuthGate(app: FastifyInstance): void {
       });
       return;
     }
-    if (isProPath(path) && !req.account.isLocal && req.account.plan === 'free') {
-      await reply.code(402).send({ error: 'pro required' });
-    }
   });
-}
-
-// Which paths the free-plan 402 gate covers.
-//
-// `/api/pro/*` is the convention, but it is NOT the whole surface: Claude Review has always kept
-// its pre-plugin URLs — `/api/prs/:id/claude-review*`, `/api/claude-reviews/*`,
-// `/api/claude-findings/*`, `/api/claude-review/*` — and AI Fix's fixer kept its
-// `/api/pro/prs/:id/ai-fix*` / `/api/pro/ai-fixes/*` paths when both moved to core.
-//
-// ⚠ THIS IS NOW THE SECOND GUARD, NOT THE FIRST. Claude Review, review memory and AI Fix are core,
-// free and LOCAL ONLY: `registerAgenticRoutes` (review/agentic.ts) registers none of them in cloud
-// — an explicit `isCloud` check — so in cloud they 404 before this matters. The entries stay so a
-// future change that registers one in cloud does not hand it to every free account by default.
-// Enumerated explicitly so adding a route outside /api/pro/ is a visible decision.
-function isProPath(path: string): boolean {
-  if (path.startsWith('/api/pro/')) return true;
-  if (path.startsWith('/api/claude-reviews')) return true;
-  if (path.startsWith('/api/claude-findings/')) return true;
-  if (path.startsWith('/api/claude-review/')) return true;
-  // /api/prs/<id>/claude-review, …/status, …/stream, …/cancel
-  if (/^\/api\/prs\/\d+\/claude-review/.test(path)) return true;
-  return false;
 }
 
 // preHandler that rejects unauthenticated requests in cloud mode. A no-op in

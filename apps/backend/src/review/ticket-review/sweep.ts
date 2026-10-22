@@ -224,7 +224,6 @@ export async function runTicketReviewSweep(
 
     for (const [accountId, enabled] of byAccount) {
       if (result.stopped) break;
-      if ((await ctx.aiCredits.check(accountId)).agentBlocked) continue;
 
       // ---- 1. what changed since the last tick ----
       const open = await openPrsIn(ctx, accountId, [...enabled.keys()]);

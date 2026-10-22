@@ -1871,7 +1871,7 @@ export interface BotTuningSuggestion {
 //
 // The nine intent kinds the plugin derives from these cells. Core never decides an intent —
 // it only reports what happened; the thresholds that turn a cell into a recommendation live in
-// the plugin (packages/pro/src/advisor/intents.ts). QUIET_PATH_NITS is the noise-focused
+// the plugin (apps/backend/src/platform/advisor/intents.ts). QUIET_PATH_NITS is the noise-focused
 // middle ground between SUPPRESS_PATH and nothing: keep the path, stop nit-level comments
 // there — the shape a cell earns when full suppression is vetoed (acted-on high-severity
 // present) but the path is still nit-dominated and ignored.
@@ -3773,55 +3773,6 @@ export interface LocalUser {
   displayName: string | null;
 }
 
-// Premium (@pierre/pro) capability map, mirrored from a backend singleton the
-// plugin populates at boot. All-false in OSS mode (plugin absent). Flows to the
-// frontend through /api/me exactly like claudeReviewEnabled.
-export interface ProCapabilities {
-  activityDigest: boolean; // per-repo LLM headlines digest (Activity)
-  // apiVersion 22: `reviewMemory`, `aiAnalysis`, `aiFix` and `claudeReview` LEFT this map. Claude
-  // Review and AI Fix are CORE (free, local-only, on the user's own Claude); gate
-  // them on the top-level `MeResponse.ai`, never on `pro`.
-  // Per-PR AI summary + the CI-failure analysis card (Pro, cheap one-shot Haiku, read-only). On
-  // wherever the paid summary tier is (cloud credit-metered).
-  prSummary: boolean;
-  workspaceInsights: boolean; // workspace review-intelligence "Insights" (no AI; pure reads)
-  // Slack digest delivery (Pro): a per-account webhook receives the freshly-generated sprint +
-  // repo digest on a cadence. The report is AI-generated (Haiku), so this mirrors activityDigest.
-  slackDigest: boolean;
-  // (apiVersion 23: `issueLinks` LEFT this map. The issue tracker — ticket links, the stored tickets,
-  // the story panel, the Open PRs ticket stacks — is CORE and FREE on every tier and in both modes
-  // (apps/backend/src/tracker/, docs/TRACKERS.md). Nothing gates it on `pro`.)
-  // Review-bot triage tier — CORE/FREE. The Bots rail view reads the core bot routes and shows
-  // regardless; this flag is true whenever the plugin is LOADED (independent of the paid PRO_*
-  // flags) so the free bot Settings section (pro_settings-backed) stays reachable. All-false only
-  // when the plugin is absent.
-  //
-  // ⚠ IT NO LONGER COVERS THE ROI COST OVERLAY, OR THE ROI TABLE AT ALL. That whole panel moved to
-  // the paid `botDepth` flag below; what `botTriage` still buys is classification, identity, the
-  // bot-only governance caution, the tuning suggestions and the thread-resolve flows.
-  botTriage: boolean;
-  // Bot Tuning Advisor (paid, gated like workspaceInsights): the Bots "Advisor" inner tab,
-  // the per-row Tune/Drop pills, findings → config-PR/brief/issue outputs, the effect panel.
-  // The free amber TuningSuggestions box renders regardless of this flag.
-  botAdvisor: boolean;
-  // Period-over-period reporting (paid, gated like workspaceInsights): the Insights "Reports"
-  // sub-tab — a stored, forwardable artifact per sprint with a coverage-honest comparison, a
-  // refusable forecast and a narrated summary. Gates the sub-tab itself; the metrics behind it
-  // are CORE compute, but there is no free surface for them.
-  periodReports: boolean;
-  // Non-AI paid DEPTH tier (paid, gated like workspaceInsights — NOT like botTriage, which is
-  // true whenever the plugin is merely loaded): behaviour trends/anomalies, the per-bot
-  // drill-down, overlap, where-bots-work, the inflation sparkline/history, and the per-seat
-  // ROI cost overlay. The compute behind these surfaces is CORE; this flag gates the surfaces.
-  botDepth: boolean;
-  // The work plan (paid, gated like workspaceInsights/periodReports): the prioritised
-  // "what should I work on today" worklist over the Pending tabs, plus its
-  // optional Haiku narration. Gates the WHOLE panel, both halves — the deterministic worklist is
-  // CORE compute (db/work-plan.ts) but has no free surface, and the narration is the billed POST.
-  // The ranked rows render with or without a plan, so this flag is the panel's only gate.
-  workPlan: boolean;
-}
-
 // Which GitHub sign-in methods this (cloud) deployment offers — GET /api/auth/providers.
 // Read UNAUTHENTICATED by the SignInGate to render the right button(s), and SIGNED-IN by the
 // Settings "GitHub App" section, which needs `appSlug` to build the install link. The two
@@ -4170,11 +4121,7 @@ export interface MeResponse {
   // Deployment mode. 'cloud' tells the SPA to show a sign-out control and treat a
   // 401 from /api/me as "signed out" (vs local, where /api/me never 401s).
   deploymentMode: 'local' | 'cloud';
-  // Premium capability flags (all-false in OSS mode).
-  pro: ProCapabilities;
-  // Is ML severity/category enrichment of bot comments live on this deployment? FREE TIER, so
-  // it deliberately does NOT live inside `pro` — `entitledProCapabilities` zeroes that whole
-  // object for a cloud account on the free plan, which is exactly this feature's audience.
+  // Is ML severity/category enrichment of bot comments live on this deployment?
   // True iff something can score bot comments RIGHT NOW: the local model once it is set up, or
   // a configured severity-api. Gates every ML query the SPA makes.
   mlSeverity: boolean;
@@ -4186,9 +4133,7 @@ export interface MeResponse {
     message: string | null;
   };
   // Can this deployment resolve merge conflicts in-app? True in local mode; false in cloud,
-  // where the routes are not registered at all. FREE/CORE, so TOP-LEVEL and NOT inside `pro`
-  // — `entitledProCapabilities` zeroes that object for a free cloud account (the same
-  // argument as `mlSeverity` above, verbatim).
+  // where the routes are not registered at all.
   //
   // ⚠ IT IS NOT A GIT-VERSION PROBE. `merge-tree --write-tree` needs git 2.38+, which
   // /api/me will not shell out to learn on every SPA boot; a too-old git is refused by the
@@ -4197,8 +4142,7 @@ export interface MeResponse {
   conflictResolver: boolean;
   // The agentic AI surfaces — Claude Review (run, follow-up, ticket check, auto review, the review
   // chat) and AI Fix. FREE and LOCAL-ONLY; they run on the user's own Claude Code
-  // session or ANTHROPIC_API_KEY. TOP-LEVEL and NOT inside `pro`, so `entitledProCapabilities` can
-  // never zero it (the `mlSeverity` argument).
+  // session or ANTHROPIC_API_KEY.
   //  - `enabled`: `!isCloud && !LIMN_AI_DISABLED`. False ⇒ no agentic surface renders (cloud shows
   //    one "runs on your machine" line instead).
   //  - `runtime`: the one-time AI runtime download (the SDKs are not in the npm package). 'absent'
@@ -4217,18 +4161,10 @@ export interface MeResponse {
   // shows it as the "default" beside a workspace's zone. Optional: an older server omits it and
   // the form falls back to the browser's zone.
   workTimeZone?: string;
-  // CLOUD-ONLY: whether this account has consented to contribute aggregate, de-identified
-  // weekly review-bot stats to the cross-org benchmark network (opt-in, default false). Drives
-  // the Settings consent toggle. Always false in local mode (local never contributes).
-  benchmarkOptIn: boolean;
   // The RESOLVED large-PR threshold for this account, in lines of CODE churn — the stored
   // per-account value, or LARGE_PR_CODE_LOC_DEFAULT when the user has never set one. Always a
   // positive integer, so every renderer compares against a number and never has to know about
   // the null.
-  //
-  // TOP-LEVEL, and deliberately NOT inside `pro`: the large-PR flag is a FREE feature, and
-  // `entitledProCapabilities` zeroes that whole object for a cloud account on the free plan —
-  // which is exactly this feature's audience (the same argument as `mlSeverity` above).
   largePrCodeLocThreshold: number;
   // True when nothing is stored and the number above IS the product default. The one thing the
   // resolved figure can't say on its own, and the Settings field needs it to show an empty input
@@ -4236,10 +4172,7 @@ export interface MeResponse {
   largePrCodeLocThresholdIsDefault: boolean;
   // The RESOLVED blast-radius reading settings for this account — the dial applied and the
   // thresholds it selects, so no renderer has to know about the null-config or the override
-  // merge. TOP-LEVEL and deliberately NOT inside `pro`, for the same reason as the two fields
-  // above and `mlSeverity`: blast radius is a FREE feature, and `entitledProCapabilities` zeroes
-  // the whole `pro` object for a cloud account on the free plan — exactly this feature's
-  // audience. (The Pro half is only the Haiku impact NOTE, which gates on `pro.prSummary`.)
+  // merge.
   //
   // ⚠ THE RAW STORED CONFIG, NOT A RESOLVED ONE, and `null` means "this account has never
   // chosen". The ONE `resolveBlastConfig()` + `blastRadius()` live in `shared/blast-radius.ts`
@@ -4250,15 +4183,9 @@ export interface MeResponse {
   // SAML SSO (cloud). Populated by the sync when it hits the SAML wall; drives the global
   // "Reconnect GitHub for <org>" banner. Empty in the normal case + always empty in local mode.
   authNotices: AuthNotice[];
-  // Month-to-date AI balances (summary turns + agent credits), fetched on login so the SPA has
-  // the spend baseline from the first authenticated call (seeds the Track-usage panel + any
-  // meter). null when unavailable. A null limit/allowance inside means that seam is unmetered.
-  aiUsage: AiUsageResponse | null;
   // The reader's My Turn settings (Settings → My Turn): which card types show, the type order and
   // the Do next weights. RAW STORED OVERRIDES — `null` means "never changed anything", and the SPA
   // resolves through the ONE `resolveMyTurnSettings` (the `blastRadius` precedent above).
-  // TOP-LEVEL and NOT inside `pro`: a free feature, and `entitledProCapabilities` zeroes `pro` for
-  // a free cloud account (the `mlSeverity` argument).
   myTurnSettings: MyTurnSettings | null;
 }
 
@@ -11099,38 +11026,12 @@ export interface PeriodReportModelInfo {
 // (REMOVED: the single-thread validity check and the "was this addressed" check — their wire
 // types went with their routes. Claude Review's thread judgements replaced both.)
 
-// ---- AI usage tracking (Pro; transparency) ----
-// The two AI seams are metered DIFFERENTLY:
-//  - SUMMARY (cheap one-shot Haiku completions — digests, sprint report, insights chat, PR
-//    summary, CI analysis, themes) is metered by a monthly TURN COUNT: N summaries/month,
-//    reset at the UTC month boundary. Each real (billed) completion is one turn; a $0 cache
-//    hit doesn't count. The paid plan default is 500 turns/mo (~$5 of Haiku).
-//  - AGENTIC (Agent-SDK runs — Claude Review, AI Fix) is metered by CREDITS ($ cost), because a
-//    single run's cost varies wildly. Cost is tracked in USD server-side but NEVER surfaced as
-//    dollars — only as CREDITS (conversion below). The paid plan default is a $15/mo allowance.
-// Covers ALL usage on the account, including work outside the active workspace.
-export const AI_CREDITS_PER_USD = 1250; // $1 of model cost = 1250 credits (1 credit ≈ $0.0008)
+// USD → credits, for the cost ESTIMATES a few generate buttons still show (period reports, the
+// synthesis seam). There is no credit allowance or meter any more; this is display arithmetic only.
+// $1 of model cost = 1250 credits. Mirrored in apps/backend/src/platform/llm/seam.ts.
+export const AI_CREDITS_PER_USD = 1250;
 
-// The per-seam month-to-date balances. A null limit/allowance = unmetered (local / unlimited);
-// the UI shows no meter for that seam. Shared by AiUsageResponse and MeResponse.aiUsage so the
-// login fetch and the Track-usage panel agree on the same numbers.
-export interface AiUsageBalances {
-  // SUMMARY seam — monthly TURN budget.
-  summaryTurnsUsed: number;
-  summaryTurnLimit: number | null;
-  summaryTurnsRemaining: number | null;
-  // AGENTIC seam — monthly CREDIT budget.
-  agentCreditsUsed: number;
-  agentAllowanceCredits: number | null;
-  agentCreditsRemaining: number | null;
-}
-
-export interface AiUsageResponse extends AiUsageBalances {
-  enabled: boolean;
-  monthStart: string; // ISO-8601 — start of the current calendar month (the MTD window)
-}
-
-// ---- Sprint report (Pro; Haiku summary of the Insights, gated on activityDigest) ----
+// ---- Sprint report (Haiku summary of the Insights) ----
 // A single cross-repo report generated from the current Insights state: headline
 // metrics + prioritised, PR-linked issues, with repos ranked by activity + code volume.
 // Tied to the Insights via `stale` (the Insights changed since it was generated →

@@ -1,0 +1,972 @@
+{
+  "absent_metrics": [
+    {
+      "definition": "Share of this vendor's findings the severity model rates major or critical. major+critical are bucketed as 'high' because CRITICAL is under-recalled and nothing auto-acts on a single label.",
+      "derivation": "model",
+      "direction": "neutral",
+      "name": "high_severity_share",
+      "note": "STRUCTURALLY ABSENT, not empty and not zero: no cell contains this key, so a consumer cannot render a model-derived figure beside a code-derived one without knowing which it holds.",
+      "reason": "not_scored",
+      "requires": {
+        "corpus column": "comment.severity",
+        "scoring.model_version": "not null",
+        "scoring.scored_comments": "> 0"
+      },
+      "unit": "rate"
+    },
+    {
+      "definition": "Share of this vendor's findings the severity model rates nit.",
+      "derivation": "model",
+      "direction": "neutral",
+      "name": "nit_share",
+      "note": "STRUCTURALLY ABSENT, not empty and not zero: no cell contains this key, so a consumer cannot render a model-derived figure beside a code-derived one without knowing which it holds.",
+      "reason": "not_scored",
+      "requires": {
+        "corpus column": "comment.severity",
+        "scoring.model_version": "not null",
+        "scoring.scored_comments": "> 0"
+      },
+      "unit": "rate"
+    },
+    {
+      "definition": "Distinct categories this vendor emitted in a repository — the breadth half of the 'is this bot only doing one thing' question.",
+      "derivation": "model",
+      "direction": "neutral",
+      "name": "distinct_category_count",
+      "note": "STRUCTURALLY ABSENT, not empty and not zero: no cell contains this key, so a consumer cannot render a model-derived figure beside a code-derived one without knowing which it holds.",
+      "reason": "not_scored",
+      "requires": {
+        "corpus column": "comment.categories",
+        "scoring.model_version": "not null",
+        "scoring.scored_comments": "> 0"
+      },
+      "unit": "count"
+    }
+  ],
+  "activity_bands": {
+    "0": {
+      "panel_prs_per_period": [
+        2,
+        2
+      ],
+      "repos": 1
+    },
+    "1": {
+      "panel_prs_per_period": [
+        3,
+        3
+      ],
+      "repos": 1
+    },
+    "3": {
+      "panel_prs_per_period": [
+        5,
+        5
+      ],
+      "repos": 1
+    },
+    "4": {
+      "panel_prs_per_period": [
+        7,
+        7
+      ],
+      "repos": 1
+    },
+    "5": {
+      "panel_prs_per_period": [
+        9,
+        9
+      ],
+      "repos": 1
+    },
+    "6": {
+      "panel_prs_per_period": [
+        10,
+        10
+      ],
+      "repos": 1
+    },
+    "8": {
+      "panel_prs_per_period": [
+        17,
+        17
+      ],
+      "repos": 1
+    },
+    "9": {
+      "panel_prs_per_period": [
+        46,
+        46
+      ],
+      "repos": 1
+    }
+  },
+  "artifact": "bot_monitor.benchmark_fit",
+  "cells": {
+    "coderabbit": {
+      "1": {
+        "activity_band": 1,
+        "cohort": {
+          "activity_band": 1,
+          "pooled_over": null,
+          "vendor": "coderabbit",
+          "widened_from": null
+        },
+        "coverage": {
+          "empty_body_comments_excluded": 0,
+          "findings": 29,
+          "merged_prs_eligible": 8,
+          "merged_prs_machine_authored_excluded": 1,
+          "observed_at": {
+            "max": "2026-08-30T17:37:09+00:00",
+            "min": "2026-08-30T17:37:09+00:00"
+          },
+          "pull_requests_detail_unobserved": 0,
+          "pull_requests_observed": 19,
+          "repos_in_cell": 1,
+          "repos_in_panel_stratum": 1,
+          "repos_not_walked": 0,
+          "repos_off_stratum": 0,
+          "repos_pr_list_truncated": 1,
+          "repos_stratum_silent": 0,
+          "repos_vendor_live_no_findings": 0,
+          "repos_with_vendor_observed": 1,
+          "repos_with_vendor_on_merged_prs": 1,
+          "threads_settled": 25,
+          "threads_truncated_excluded": 0
+        },
+        "metrics": {
+          "acted_on_rate": {
+            "derivation": "code",
+            "excluded": {},
+            "population": "outcome",
+            "refusal": {
+              "message": "1 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 1
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 1,
+            "status": "refused"
+          },
+          "acted_on_rate_with_outdated": {
+            "derivation": "code",
+            "excluded": {},
+            "population": "outcome",
+            "refusal": {
+              "message": "1 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 1
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 1,
+            "status": "refused"
+          },
+          "cross_bot_overlap_rate": {
+            "derivation": "code",
+            "excluded": {},
+            "population": "outcome",
+            "refusal": {
+              "message": "1 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 1
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 1,
+            "status": "refused"
+          },
+          "findings_per_merged_pr": {
+            "derivation": "code",
+            "excluded": {},
+            "population": "volume",
+            "refusal": {
+              "message": "1 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 1
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 1,
+            "status": "refused"
+          },
+          "human_followed_last_bot_rate": {
+            "derivation": "code",
+            "excluded": {},
+            "population": "outcome",
+            "refusal": {
+              "message": "1 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 1
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 1,
+            "status": "refused"
+          },
+          "human_reply_rate": {
+            "derivation": "code",
+            "excluded": {},
+            "population": "outcome",
+            "refusal": {
+              "message": "1 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 1
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 1,
+            "status": "refused"
+          },
+          "median_hours_to_first_human_reply": {
+            "derivation": "code",
+            "excluded": {
+              "denominator_empty": 1
+            },
+            "population": "outcome",
+            "refusal": {
+              "message": "0 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 0
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 1,
+            "status": "refused"
+          },
+          "overdue_untouched_rate_168h": {
+            "derivation": "code",
+            "excluded": {},
+            "population": "outcome",
+            "refusal": {
+              "message": "1 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 1
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 1,
+            "status": "refused"
+          },
+          "overdue_untouched_rate_72h": {
+            "derivation": "code",
+            "excluded": {},
+            "population": "outcome",
+            "refusal": {
+              "message": "1 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 1
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 1,
+            "status": "refused"
+          },
+          "pr_comment_coverage": {
+            "derivation": "code",
+            "excluded": {},
+            "population": "volume",
+            "refusal": {
+              "message": "1 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 1
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 1,
+            "status": "refused"
+          },
+          "thread_outdated_rate": {
+            "derivation": "code",
+            "excluded": {},
+            "population": "outcome",
+            "refusal": {
+              "message": "1 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 1
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 1,
+            "status": "refused"
+          },
+          "thread_resolved_rate": {
+            "derivation": "code",
+            "excluded": {},
+            "population": "outcome",
+            "refusal": {
+              "message": "1 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 1
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 1,
+            "status": "refused"
+          },
+          "threads_per_merged_pr": {
+            "derivation": "code",
+            "excluded": {},
+            "population": "volume",
+            "refusal": {
+              "message": "1 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 1
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 1,
+            "status": "refused"
+          }
+        },
+        "metrics_fitted": 0,
+        "metrics_refused": 13,
+        "metrics_total": 13,
+        "refusal": {
+          "message": "no metric in this cell cleared the repository floor; see each metric's own refusal and the coverage exclusions for which rule dropped which repository",
+          "rule": "cell_floor"
+        },
+        "status": "refused",
+        "vendor": "coderabbit"
+      },
+      "5": {
+        "activity_band": 5,
+        "cohort": {
+          "activity_band": 5,
+          "pooled_over": null,
+          "vendor": "coderabbit",
+          "widened_from": null
+        },
+        "coverage": {
+          "empty_body_comments_excluded": 0,
+          "findings": 29,
+          "merged_prs_eligible": 8,
+          "merged_prs_machine_authored_excluded": 1,
+          "observed_at": {
+            "max": "2026-08-30T17:37:09+00:00",
+            "min": "2026-08-30T17:37:09+00:00"
+          },
+          "pull_requests_detail_unobserved": 0,
+          "pull_requests_observed": 19,
+          "repos_in_cell": 30,
+          "repos_in_panel_stratum": 1,
+          "repos_not_walked": 0,
+          "repos_off_stratum": 0,
+          "repos_pr_list_truncated": 1,
+          "repos_stratum_silent": 0,
+          "repos_vendor_live_no_findings": 0,
+          "repos_with_vendor_observed": 1,
+          "repos_with_vendor_on_merged_prs": 1,
+          "threads_settled": 25,
+          "threads_truncated_excluded": 0
+        },
+        "metrics": {
+          "acted_on_rate": {
+            "ci_median_95": [
+              0.05,
+              0.25
+            ],
+            "derivation": "code",
+            "excluded": {},
+            "grid": {
+              "p": [
+                0,
+                5,
+                10,
+                15,
+                20,
+                25,
+                30,
+                35,
+                40,
+                45,
+                50,
+                55,
+                60,
+                65,
+                70,
+                75,
+                80,
+                85,
+                90,
+                95,
+                100
+              ],
+              "v": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.005,
+                0.034,
+                0.063,
+                0.092,
+                0.121,
+                0.15,
+                0.179,
+                0.208,
+                0.237,
+                0.266,
+                0.295,
+                0.324,
+                0.353,
+                0.382,
+                0.411,
+                0.44
+              ]
+            },
+            "max": 0.44,
+            "mean": 0.168667,
+            "min": 0.0,
+            "n_repos": 30,
+            "population": "outcome",
+            "quantiles": {
+              "p10": 0.0,
+              "p25": 0.005,
+              "p50": 0.15,
+              "p75": 0.295,
+              "p90": 0.382
+            },
+            "repos_considered": 30,
+            "sd": 0.151378,
+            "shape": {
+              "excess_kurtosis": -1.300579,
+              "family": null,
+              "family_reason": "not attempted: n=30 < shape_min_n=200",
+              "iqr_over_median": 1.933333,
+              "n": 30,
+              "skew": 0.322143,
+              "zero_share": 0.266667
+            },
+            "status": "fitted"
+          },
+          "acted_on_rate_with_outdated": {
+            "derivation": "code",
+            "excluded": {
+              "vendor_silent": 26
+            },
+            "population": "outcome",
+            "refusal": {
+              "message": "4 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 4
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 30,
+            "status": "refused"
+          },
+          "cross_bot_overlap_rate": {
+            "derivation": "code",
+            "excluded": {
+              "vendor_silent": 26
+            },
+            "population": "outcome",
+            "refusal": {
+              "message": "4 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 4
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 30,
+            "status": "refused"
+          },
+          "findings_per_merged_pr": {
+            "derivation": "code",
+            "excluded": {
+              "vendor_silent": 26
+            },
+            "population": "outcome",
+            "refusal": {
+              "message": "4 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 4
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 30,
+            "status": "refused"
+          },
+          "human_followed_last_bot_rate": {
+            "derivation": "code",
+            "excluded": {
+              "vendor_silent": 26
+            },
+            "population": "outcome",
+            "refusal": {
+              "message": "4 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 4
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 30,
+            "status": "refused"
+          },
+          "human_reply_rate": {
+            "derivation": "code",
+            "excluded": {
+              "vendor_silent": 26
+            },
+            "population": "outcome",
+            "refusal": {
+              "message": "4 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 4
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 30,
+            "status": "refused"
+          },
+          "median_hours_to_first_human_reply": {
+            "derivation": "code",
+            "excluded": {
+              "vendor_silent": 26
+            },
+            "population": "outcome",
+            "refusal": {
+              "message": "4 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 4
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 30,
+            "status": "refused"
+          },
+          "overdue_untouched_rate_168h": {
+            "derivation": "code",
+            "excluded": {
+              "vendor_silent": 26
+            },
+            "population": "outcome",
+            "refusal": {
+              "message": "4 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 4
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 30,
+            "status": "refused"
+          },
+          "overdue_untouched_rate_72h": {
+            "derivation": "code",
+            "excluded": {
+              "vendor_silent": 26
+            },
+            "population": "outcome",
+            "refusal": {
+              "message": "4 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 4
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 30,
+            "status": "refused"
+          },
+          "pr_comment_coverage": {
+            "derivation": "code",
+            "excluded": {
+              "vendor_silent": 26
+            },
+            "population": "outcome",
+            "refusal": {
+              "message": "4 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 4
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 30,
+            "status": "refused"
+          },
+          "thread_outdated_rate": {
+            "derivation": "code",
+            "excluded": {
+              "vendor_silent": 26
+            },
+            "population": "outcome",
+            "refusal": {
+              "message": "4 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 4
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 30,
+            "status": "refused"
+          },
+          "thread_resolved_rate": {
+            "derivation": "code",
+            "excluded": {
+              "vendor_silent": 26
+            },
+            "population": "outcome",
+            "refusal": {
+              "message": "4 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 4
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 30,
+            "status": "refused"
+          },
+          "threads_per_merged_pr": {
+            "derivation": "code",
+            "excluded": {
+              "vendor_silent": 26
+            },
+            "population": "outcome",
+            "refusal": {
+              "message": "4 contributing repositories is below the floor of 30. No distribution is emitted: a percentile drawn from this many repositories is noise, and widening the cohort to reach the floor would answer a question about a different population without saying so.",
+              "observed": {
+                "contributing_repos": 4
+              },
+              "required": {
+                "contributing_repos": 30
+              },
+              "rule": "cell_floor"
+            },
+            "repos_considered": 30,
+            "status": "refused"
+          }
+        },
+        "metrics_fitted": 1,
+        "metrics_refused": 12,
+        "metrics_total": 13,
+        "status": "fitted",
+        "vendor": "coderabbit"
+      }
+    }
+  },
+  "cohort_axes": {
+    "activity_band": "rank decile of panel_prs_per_period — MERGED pull requests in the FRAME's window (14 days for frame_2026-02-05_14d), copied from the panel row. Not a 90-day count and not recomputed from the walk, whose per-repo merge count is capped by walk_budget.",
+    "vendor": "mandatory; no cell pools two vendors, at any n. A headline never compares across vendors. Catch-all vendor strings that name no product form no cell at all — see unfittable_vendors."
+  },
+  "corpus": {
+    "benchmark_corpus_version": 3,
+    "corpus_version": "corpus-v3+panel-ff4d8b1d17c9",
+    "observed_at_max": "2026-08-30T17:37:16+00:00",
+    "observed_at_min": "2026-08-30T17:37:09+00:00",
+    "panel_sha256": "ff4d8b1d17c9e0abeefdc4475408ced29820f667b5bc59b41eebe94e32597bd5",
+    "repos_absent": {},
+    "repos_ok": 8,
+    "repos_total": 8,
+    "rows": {
+      "comment": 3298,
+      "pull": 472,
+      "repo": 8,
+      "thread": 674
+    },
+    "walk_ids": [
+      "83f2d6fdf7fa45e7"
+    ]
+  },
+  "coverage_note": "coverage figures are PER CELL and cells overlap — one repository belongs to one cell per vendor it runs. Never sum coverage across cells; use corpus.* for totals.",
+  "exclusion_reasons": {
+    "below_min_units": "live, with a non-empty population smaller than the metric's min_units. A per-repository rate over two threads is noise wearing a percentage sign.",
+    "denominator_empty": "the vendor is live in this repository but this metric's population is empty — a summariser that opens no review threads has no thread-outcome rate.",
+    "repo_not_walked": "the repository row is not_found or error — it was deleted, renamed or made private between the frame window and the walk. A survivorship loss, not a zero.",
+    "vendor_absent_from_population": "the vendor IS live in this repository but emitted nothing inside this metric's population — typically a reviewer whose comments all sit on pull requests that had not merged when the walk read them, which leaves its per-merged-PR figures undefined while its thread-outcome figures are perfectly good. A DIFFERENT claim from vendor_silent: the bot is demonstrably installed and reviewing. Reporting either as 0.0 manufactures the 'this bot finds nothing' blind spot.",
+    "vendor_silent": "the walk read no comment from this vendor on any human-authored pull request in this repository. Every rate for it is UNDEFINED — uninstalled, path-scoped and category-suppressed are indistinguishable from here, and all three are different from 'commented and was ignored'."
+  },
+  "fit_key": "fit-v1+corpus-v3+panel-ff4d8b1d17c9+model-unscored+params-00a5b1c22ed4",
+  "fit_version": 1,
+  "generated_at": "2026-08-30T17:41:45+00:00",
+  "metric_specs": {
+    "acted_on_rate": {
+      "definition": "Share of settled, fully-read vendor threads that were resolved OR followed by a human after the vendor's last comment. Deliberately EXCLUDES is_outdated — see acted_on_rate_with_outdated for the other reading; the two are emitted side by side so the sensitivity is visible rather than argued about.",
+      "denominator": "settled, fully-read vendor threads",
+      "derivation": "code",
+      "direction": "higher_is_better",
+      "min_units": 5,
+      "numerator": "settled complete vendor threads: is_resolved OR human_followed_last_review_bot",
+      "population": "outcome",
+      "unit": "rate"
+    },
+    "acted_on_rate_with_outdated": {
+      "definition": "acted_on_rate widened by GitHub's is_outdated flag. A SEPARATE METRIC, never a redefinition of the one above: the two answer 'was this dealt with' under two different beliefs about whether a changed line proves it.",
+      "denominator": "settled, fully-read vendor threads",
+      "derivation": "code",
+      "direction": "higher_is_better",
+      "min_units": 5,
+      "numerator": "settled complete vendor threads: resolved OR outdated OR followed",
+      "population": "outcome",
+      "unit": "rate"
+    },
+    "cross_bot_overlap_rate": {
+      "definition": "Share of this vendor's anchored settled threads whose (path, line) anchor also carries a DIFFERENT vendor's thread on the same pull request — how often two bots say something about the same line. A thread that lost its line (outdated, no line) has no anchor and is excluded from both halves rather than counted as non-overlapping.",
+      "denominator": "settled vendor threads with a (path, line) anchor",
+      "derivation": "code",
+      "direction": "neutral",
+      "min_units": 5,
+      "numerator": "anchored vendor threads sharing (path, line) with another vendor on the same PR",
+      "population": "outcome",
+      "unit": "rate"
+    },
+    "findings_per_merged_pr": {
+      "definition": "Non-empty comment bodies this vendor left, per merged human-authored pull request. An empty-body review (a silent approval) is NOT a finding — 89 of 1,204 bot comment rows in the smoke walk were exactly that, and counting them would score a bot that approves without words above one that writes.",
+      "denominator": "merged, human-authored, detail-observed pull requests",
+      "derivation": "code",
+      "direction": "neutral",
+      "min_units": 5,
+      "numerator": "bot comments, vendor-attributed, body_chars > 0",
+      "population": "volume",
+      "unit": "count_per_pr"
+    },
+    "human_followed_last_bot_rate": {
+      "definition": "Share of settled, fully-read vendor threads where a human commented strictly after the vendor's LAST comment — engagement that survived the bot's final word rather than a reply that preceded it.",
+      "denominator": "settled, fully-read vendor threads",
+      "derivation": "code",
+      "direction": "higher_is_better",
+      "min_units": 5,
+      "numerator": "settled complete vendor threads with human_followed_last_review_bot",
+      "population": "outcome",
+      "unit": "rate"
+    },
+    "human_reply_rate": {
+      "definition": "Share of this vendor's settled, fully-read review threads where a human commented after the vendor's first comment. ⚠ Threads whose comment tail was truncated are EXCLUDED: 'nobody answered' and 'we did not read far enough to know' are different claims, and the corpus nulls the fact rather than defaulting it to False.",
+      "denominator": "settled, fully-read vendor threads",
+      "derivation": "code",
+      "direction": "higher_is_better",
+      "min_units": 5,
+      "numerator": "settled complete vendor threads with human_replied",
+      "population": "outcome",
+      "unit": "rate"
+    },
+    "median_hours_to_first_human_reply": {
+      "definition": "Per-repository median of the time from this vendor's FIRST comment on a thread to the first human comment after it, over settled threads that got one. The clock starts at the first BOT comment rather than the thread root, because a thread a human opened and a bot joined has a root that is not a bot finding at all.",
+      "denominator": "settled complete vendor threads that received a human reply",
+      "derivation": "code",
+      "direction": "lower_is_better",
+      "min_units": 3,
+      "numerator": "median over seconds_to_first_human_reply / 3600",
+      "population": "outcome",
+      "unit": "hours"
+    },
+    "overdue_untouched_rate_168h": {
+      "definition": "Of this vendor's review threads that were at least 168h old at observation and whose comment tail was fully read, the share that are neither resolved nor answered by a human. Threads younger than the grace window are EXCLUDED from the denominator, not counted as answered: they have not had the chance to be overdue.",
+      "denominator": "threads age>=168h, complete",
+      "derivation": "code",
+      "direction": "lower_is_better",
+      "min_units": 5,
+      "numerator": "threads age>=168h, complete, not resolved, no human reply",
+      "population": "outcome",
+      "unit": "rate"
+    },
+    "overdue_untouched_rate_72h": {
+      "definition": "Of this vendor's review threads that were at least 72h old at observation and whose comment tail was fully read, the share that are neither resolved nor answered by a human. Threads younger than the grace window are EXCLUDED from the denominator, not counted as answered: they have not had the chance to be overdue.",
+      "denominator": "threads age>=72h, complete",
+      "derivation": "code",
+      "direction": "lower_is_better",
+      "min_units": 5,
+      "numerator": "threads age>=72h, complete, not resolved, no human reply",
+      "population": "outcome",
+      "unit": "rate"
+    },
+    "pr_comment_coverage": {
+      "definition": "Share of merged human-authored pull requests on which this vendor said anything. ⚠ CONDITIONED ON THE VENDOR BEING LIVE IN THIS POPULATION: a repo where it emitted nothing on any merged pull request is UNDEFINED here, not 0.0 — counted under vendor_silent when there is no trace of it in the repository at all, and under vendor_absent_from_population when it reviewed only pull requests that had not merged. The floor of this metric is therefore 1/N, and that is the honest reading — 'the bot is installed but never fires' is a different claim from 'the bot is not installed', and this corpus cannot tell them apart.",
+      "denominator": "merged, human-authored, detail-observed pull requests",
+      "derivation": "code",
+      "direction": "neutral",
+      "min_units": 5,
+      "numerator": "merged human-authored PRs with >= 1 vendor finding",
+      "population": "volume",
+      "unit": "rate"
+    },
+    "thread_outdated_rate": {
+      "definition": "Share of this vendor's settled review threads GitHub marks outdated — the anchored lines changed after the comment. ⚠ THIS IS NOT 'likely addressed'. The host product's likely_addressed asks whether a commit touched the thread's FILE after its last comment, computed from commit file lists this walk does not fetch. The two are close enough to be confused and differ by percentage points, so they have different names and this corpus carries only the one it observed.",
+      "denominator": "settled vendor threads",
+      "derivation": "code",
+      "direction": "neutral",
+      "min_units": 5,
+      "numerator": "settled vendor threads with is_outdated",
+      "population": "outcome",
+      "unit": "rate"
+    },
+    "thread_resolved_rate": {
+      "definition": "Share of this vendor's settled review threads marked resolved on GitHub. isResolved is a thread-level scalar the walk observes even under comment truncation, so this metric's denominator is all settled threads rather than only complete ones.",
+      "denominator": "settled vendor threads",
+      "derivation": "code",
+      "direction": "higher_is_better",
+      "min_units": 5,
+      "numerator": "settled vendor threads with is_resolved",
+      "population": "outcome",
+      "unit": "rate"
+    },
+    "threads_per_merged_pr": {
+      "definition": "Review threads carrying at least one comment from this vendor, per merged human-authored pull request. A thread two vendors both commented on counts for both — the question is what each vendor generated, not how the work was divided.",
+      "denominator": "merged, human-authored, detail-observed pull requests",
+      "derivation": "code",
+      "direction": "neutral",
+      "min_units": 5,
+      "numerator": "review threads with this vendor in review_bot_vendors",
+      "population": "volume",
+      "unit": "count_per_pr"
+    }
+  },
+  "params": {
+    "bootstrap_samples": 2000,
+    "bootstrap_seed": 7,
+    "min_repos_per_cell": 30,
+    "overdue_grace_hours": [
+      72,
+      168
+    ],
+    "quantile_grid": [
+      0,
+      5,
+      10,
+      15,
+      20,
+      25,
+      30,
+      35,
+      40,
+      45,
+      50,
+      55,
+      60,
+      65,
+      70,
+      75,
+      80,
+      85,
+      90,
+      95,
+      100
+    ],
+    "quantile_method": "linear",
+    "settle_hours": 72,
+    "shape_min_n": 200,
+    "staleness_thresholds_days": {
+      "aging": 30,
+      "expired": 180,
+      "stale": 90
+    }
+  },
+  "populations": {
+    "outcome": "human-authored, detail-observed pull requests, MERGED OR NOT. Conditioning a thread outcome on the merge selects on the dependent variable; the censoring problem merging solves for volume is solved here by settle_hours instead.",
+    "volume": "merged, human-authored, detail-observed pull requests. Merged because an open pull request is still accumulating comments — its count is right-censored and averaging it in understates every vendor."
+  },
+  "scoring": {
+    "backend": null,
+    "model_version": null,
+    "note": "While state != 'scored' no cell contains a model-derived metric at all — see absent_metrics. Every per-cell metric entry carries its own 'derivation' as well, so a model-derived figure and a code-derived figure are never renderable without knowing which is which — including after fit v2 starts emitting model metrics, when structural absence no longer protects anything.",
+    "scored_comments": 0,
+    "state": "unscored"
+  },
+  "staleness": {
+    "as_of": "2026-08-30T17:41:45+00:00",
+    "corpus_age_days": 0.003124,
+    "corpus_observed_at_max": "2026-08-30T17:37:16+00:00",
+    "note": "corpus_age_days is AS OF generated_at and decays on disk. Recompute it against corpus.observed_at_max at read time; do not render this artifact as current.",
+    "state": "fresh",
+    "thresholds_days": {
+      "aging": 30,
+      "expired": 180,
+      "stale": 90
+    }
+  },
+  "summary": {
+    "cells_fitted": 1,
+    "cells_refused": 1,
+    "cells_total": 2,
+    "metric_cells_fitted": 1,
+    "metric_cells_refused_by_rule": {
+      "cell_floor": 25
+    },
+    "metric_cells_total": 26,
+    "units": 2,
+    "vendors": [
+      "coderabbit"
+    ]
+  },
+  "unfittable_vendors": {
+    "in_house": {
+      "reason": "a catch-all for three unrelated in-house reviewers (github-actions, claude, chatgpt-codex-connector) plus every unrecognised bot fronted by github-actions[bot]. It is a cross-vendor cohort by construction, and within one repository the fold sums the products into a single unit, so even the numerator is a blend. Benchmarking a customer's in-house bot against it is the comparison rule 1 forbids.",
+      "repos": 5,
+      "review_bot_comments": 641
+    }
+  }
+}

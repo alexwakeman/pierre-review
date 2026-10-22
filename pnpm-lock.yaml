@@ -89,6 +89,9 @@ importers:
       turndown-plugin-gfm:
         specifier: ^1.0.2
         version: 1.0.2
+      yaml:
+        specifier: ^2.8.0
+        version: 2.9.0
       zod:
         specifier: ^4
         version: 4.4.3
@@ -236,34 +239,6 @@ importers:
       vite:
         specifier: ^6.0.7
         version: 6.4.2(@types/node@22.19.19)(jiti@1.21.7)(tsx@4.22.3)(yaml@2.9.0)
-
-  packages/pro:
-    dependencies:
-      yaml:
-        specifier: ^2.8.0
-        version: 2.9.0
-    devDependencies:
-      '@anthropic-ai/sdk':
-        specifier: ^0.132.1
-        version: 0.132.1(zod@4.4.3)
-      '@pierre-review/shared':
-        specifier: workspace:*
-        version: link:../shared
-      '@types/node':
-        specifier: ^22.10.5
-        version: 22.19.19
-      drizzle-orm:
-        specifier: ^0.45.2
-        version: 0.45.2(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@11.10.0)(gel@2.2.0)(pg@8.21.0)
-      fastify:
-        specifier: ^5.10.0
-        version: 5.10.0
-      typescript:
-        specifier: ^5
-        version: 5.9.3
-      zod:
-        specifier: ^4
-        version: 4.4.3
 
   packages/shared: {}
 

@@ -103,9 +103,6 @@ async function workspaceOf(accountId: number, raw: unknown): Promise<number> {
 async function preflight(ctx: AgentContext, accountId: number, reply: FastifyReply): Promise<ErrorBody | null> {
   const auth = ctx.llm.detectAuth();
   if (auth.status === 'none') return fail(reply, 400, 'NoClaudeAuth', auth.message ?? 'No Claude credential found.');
-  if ((await ctx.aiCredits.check(accountId)).agentBlocked) {
-    return fail(reply, 402, 'CreditsExhausted', 'Out of monthly agentic AI credits — resets on the 1st.');
-  }
   return null;
 }
 

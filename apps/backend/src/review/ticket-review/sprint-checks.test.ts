@@ -124,12 +124,10 @@ describe('runSprintTicketChecks', () => {
     expect(n).toBe(2);
   });
 
-  it('no credential or no credits: nothing starts, and it says why', async () => {
+  it('no credential: nothing starts, and it says why', async () => {
     const a = deps();
     expect(await runSprintTicketChecks(ctx('none'), 1, 5, { deps: a })).toEqual({ started: 0, skipped: 'no_credential' });
-    const b = deps();
-    expect(await runSprintTicketChecks(ctx('ok', true), 1, 5, { deps: b })).toEqual({ started: 0, skipped: 'credits' });
-    expect([...a.started, ...b.started]).toEqual([]);
+    expect(a.started).toEqual([]);
   });
 
   it('never throws', async () => {

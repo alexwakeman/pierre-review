@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW, type ClaudeFindingLens } from '@pierre-review/shared';
 import { claudeExecutableOptions, loadAgentSdk } from '../ai/runtime.js';
-import type { RunReviewArgs, RunReviewResult } from '../pro/contract.js';
+import type { RunReviewArgs, RunReviewResult } from '../platform/contract.js';
 import { config } from '../config.js';
 import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
 import { applyClaudeReviewAuth } from './auth.js';

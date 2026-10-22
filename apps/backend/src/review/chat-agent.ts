@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { claudeExecutableOptions, loadAgentSdk } from '../ai/runtime.js';
-import type { ReviewChatArgs, ReviewChatResult } from '../pro/contract.js';
+import type { ReviewChatArgs, ReviewChatResult } from '../platform/contract.js';
 import { config } from '../config.js';
 import { applyClaudeReviewAuth } from './auth.js';
 import { cleanupCloneCache, prepWorktree, removeWorktreeLocked } from './clone-manager.js';

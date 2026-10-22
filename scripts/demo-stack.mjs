@@ -2,21 +2,19 @@
 // ISOLATED demo servers used for the landing-page screenshots (never touching
 // your real :4000/:5173 dev stack or your real DB).
 //
-//   pnpm demo               seed /tmp/pierre-demo.sqlite + boot the full Pro
+//   pnpm demo               seed /tmp/pierre-demo.sqlite + boot the full
 //                           stack (backend :4100, frontend :5273), keep running
 //                           for manual browsing / ad-hoc captures. Ctrl-C stops.
-//   pnpm demo --free        same, but boot in pure-OSS mode (PRO_DISABLED=true)
 //   pnpm demo --no-seed     reuse the existing demo DB (skip reseeding)
-//   pnpm demo:video         seed → boot Pro → film the walkthrough → teardown.
+//   pnpm demo:video         seed → boot → film the walkthrough → teardown.
 //                           Masters land in $HOME (mp4 + poster + cues.json);
 //                           add --publish to also write the copies under
 //                           apps/landing/public/demo/. `--scenario <name>`
 //                           films a different scenario file instead.
-//   pnpm shots              the WHOLE screenshot pipeline: seed → boot Pro →
-//                           capture-shots.mjs (pro set) → restart backend in
-//                           OSS mode → capture-shots.mjs (free set) → teardown.
+//   pnpm shots              the WHOLE screenshot pipeline: seed → boot →
+//                           capture-shots.mjs → teardown.
 //                           Pass a shot filename to capture just that one, e.g.
-//                           `pnpm shots claude-review.png` (pro set only).
+//                           `pnpm shots claude-review.png`.
 //
 // Why the backend runs with `gh` OFF the PATH: ensureLocalAccount() shells out
 // to `gh api user` at boot and would overwrite the seeded "Morgan Diaz" local
@@ -38,13 +36,12 @@ const FRONTEND_PORT = 5273;
 
 const args = process.argv.slice(2);
 const MODE = args.includes('--shots') ? 'shots' : args.includes('--video') ? 'video' : 'serve';
-const FREE = args.includes('--free');
 const RESEED = !args.includes('--no-seed');
 const ONLY_SHOT = args.find((a) => a.endsWith('.png'));
 // This wrapper's OWN flags, and nothing else. Everything left over is forwarded
 // verbatim to capture-demo-video.mjs (`--out`, `--publish`, `--scenario`,
 // `--keep-frames`), so the wrapper never grows a second copy of its flag list.
-const WRAPPER_FLAGS = new Set(['--video', '--shots', '--free', '--no-seed']);
+const WRAPPER_FLAGS = new Set(['--video', '--shots', '--no-seed']);
 const VIDEO_ARGS = args.filter((a) => !WRAPPER_FLAGS.has(a) && !a.endsWith('.png'));
 
 // --- a gh-free PATH the children can still find node on -----------------------
@@ -66,8 +63,6 @@ const baseEnv = {
   SEVERITY_API_URL: 'http://127.0.0.1:8799',
 };
 // (The agentic features are core and on by default locally — no flag; PRO_ADVANCED_AI_ENABLED is gone.)
-const proEnv = { PRO_DIGEST_ENABLED: 'true' };
-const freeEnv = { PRO_DISABLED: 'true' };
 
 // --- helpers -------------------------------------------------------------------
 function freePort(port) {
@@ -138,8 +133,8 @@ function seed() {
   }
 }
 
-async function startBackend(tier) {
-  console.log(`\n▸ starting demo backend :${BACKEND_PORT} (${tier} tier, gh off PATH)`);
+async function startBackend() {
+  console.log(`\n▸ starting demo backend :${BACKEND_PORT} (gh off PATH)`);
   const child = run(join(BACKEND, 'node_modules', '.bin', 'tsx'), ['src/index.ts'], {
     cwd: BACKEND,
     // FRONTEND_PORT so the backend's `appWebUrl` (the base for app deep links, e.g. in the Slack
@@ -148,7 +143,6 @@ async function startBackend(tier) {
       ...baseEnv,
       PORT: String(BACKEND_PORT),
       FRONTEND_PORT: String(FRONTEND_PORT),
-      ...(tier === 'free' ? freeEnv : proEnv),
     },
   });
   await waitFor(`http://localhost:${BACKEND_PORT}/api/health`, 'backend');
@@ -192,10 +186,10 @@ freePort(FRONTEND_PORT);
 if (RESEED) seed();
 
 if (MODE === 'serve') {
-  await startBackend(FREE ? 'free' : 'pro');
+  await startBackend();
   await startFrontend();
   console.log(`
-✅ demo stack up (${FREE ? 'FREE / pure-OSS' : 'PRO'} tier)
+✅ demo stack up
 
    App        http://localhost:${FRONTEND_PORT}/app/?view=activity
    Timeline   http://localhost:${FRONTEND_PORT}/app/?preset=30d&view=timeline
@@ -208,32 +202,20 @@ if (MODE === 'serve') {
   // keep the process alive while the children run
   await new Promise(() => {});
 } else if (MODE === 'video') {
-  // ⚠ PRO TIER ONLY, and there is no free pass here. Most of what the clip films
-  // is free on every tier (the feed, the timeline, a pull request, flow metrics)
-  // — but the app around them is the Pro build, which is what a visitor
-  // evaluating the product sees, and two of the six scenes (the Bots ROI vendor
-  // table, the addressed check) exist only there.
-  //
   // ⚠ ONE CLIP, NOT TWO. The hero loop is gone: it autoplayed an eight-second
   // pass down the Pending board, which is the one screen that says nothing
   // without context. The walkthrough IS the hero now — it autoplays once and
   // does not repeat.
-  await startBackend('pro');
+  await startBackend();
   await startFrontend();
   film(VIDEO_ARGS.includes('--scenario') ? VIDEO_ARGS : ['--scenario', 'walkthrough', ...VIDEO_ARGS]);
   teardown();
   console.log('\n✅ demo video filmed');
   process.exit(0);
 } else {
-  let backend = await startBackend('pro');
+  await startBackend();
   await startFrontend();
   capture('pro', ONLY_SHOT);
-  if (!ONLY_SHOT) {
-    stop(backend);
-    await new Promise((r) => setTimeout(r, 1500)); // port release
-    backend = await startBackend('free');
-    capture('free');
-  }
   teardown();
   console.log('\n✅ all shots captured → apps/landing/public/shots/');
   process.exit(0);

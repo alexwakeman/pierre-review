@@ -29,7 +29,7 @@ import type {
   ClaudeThreadValidity,
 } from '@pierre-review/shared';
 import type { ReviewThreadForReview } from '../../db/review-threads-for-review.js';
-import type { ReviewThreadReport } from '../../pro/contract.js';
+import type { ReviewThreadReport } from '../../platform/contract.js';
 
 // ---- caps (the prompt block's budget) ----
 export const THREADS_MAX = 40;

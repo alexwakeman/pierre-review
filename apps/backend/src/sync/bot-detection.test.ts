@@ -23,7 +23,6 @@ import {
   roleForVendorKind,
   vendorKindsForRole,
 } from '@pierre-review/shared';
-import { BENCHMARKABLE_VENDOR_KINDS } from '../db/queries.js';
 import {
   automationVendorFor,
   automationVendorKind,
@@ -415,13 +414,6 @@ describe('the benchmark allow-list', () => {
     }
     expect(isBenchmarkableVendorKind(null)).toBe(false);
     expect(isBenchmarkableVendorKind(undefined)).toBe(false);
-  });
-
-  it('matches the copy the query layer actually runs', () => {
-    // queries.ts keeps its own mirrored Set for the release-guard reason. A drift here is a
-    // governance failure, not a lint issue: the two lists deciding differently means the code
-    // that ships data disagrees with the code that documents what ships.
-    expect([...BENCHMARKABLE_VENDOR_KINDS].sort()).toEqual([...REVIEW_BOT_KINDS].sort());
   });
 });
 

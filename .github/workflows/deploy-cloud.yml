@@ -1,17 +1,11 @@
 name: Deploy cloud image
 
-# Builds the PRIVATE cloud image (the OSS app + the @pierre/pro summary-AI plugin) and pushes it
-# to GitHub Container Registry, from where Railway deploys it. This workflow is deliberately
-# GENERIC — it checks out the private `packages/pro` submodule via a read-only deploy key and runs
-# a standard docker build/push. It never prints Pro source; only dependency names (already public)
-# ever surface. The PUBLIC npm publish (release.yml) does NOT check out the submodule and never
-# passes --with-pro, so its zero-AI-deps guarantee is untouched.
+# Builds the cloud image and pushes it to GitHub Container Registry, from where Railway deploys it.
 #
 # Runs on every push to main (skipping doc/CI-only pushes and the release bump commit) AND on
 # manual dispatch. It builds the image + pushes to GHCR; the last step redeploys Railway.
 #
 # Required repo secrets:
-#   PRO_DEPLOY_KEY  — an SSH read-only deploy key on alexwakeman/pierre-pro (fetches the submodule)
 #   (optional) VITE_GA_ID       — build-time Google Analytics id inlined into the SPA/landing
 #   (optional) RAILWAY_TOKEN    — a Railway token to redeploy after the image is pushed
 #                                 (else enable Railway's own "redeploy on image change")
@@ -21,11 +15,8 @@ name: Deploy cloud image
 # Railway service (configured once, in the dashboard — see docs/DEPLOY-RAILWAY.md):
 #   - Source: deploy from the GHCR image ghcr.io/<owner>/pierre-review-cloud:latest (+ a GHCR
 #     pull credential), NOT the Dockerfile.
-#   - Variables: PRO_CLOUD_ENABLED=true, PRO_DIGEST_ENABLED=true, SUMMARY_ANTHROPIC_API_KEY=...,
-#     STRIPE_PAYMENT_LINK_URL, STRIPE_WEBHOOK_SECRET, plus the existing cloud vars (DATABASE_URL,
-#     APP_BASE_URL, GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET, SESSION_SECRET,
-#     ENCRYPTION_KEY). Leave PRO_ADVANCED_AI_ENABLED
-#     UNSET so agentic AI (Claude Review / AI Fix) stays off in cloud.
+#   - Variables: SUMMARY_ANTHROPIC_API_KEY=..., plus the cloud vars (DATABASE_URL, APP_BASE_URL,
+#     GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET, SESSION_SECRET, ENCRYPTION_KEY).
 
 on:
   workflow_dispatch: {}
@@ -62,47 +53,7 @@ jobs:
     # rebuild the image (a manual dispatch always runs).
     if: ${{ github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release):') }}
     steps:
-      # Check out the public repo AND the private packages/pro submodule (SSH via the read-only
-      # deploy key). The submodule MUST be on disk before `docker build` — .dockerignore strips
-      # .git, so it cannot self-init inside the image.
-      #
-      # ⚠ NOT `submodules: recursive`, and this is not a style choice. PRO_DEPLOY_KEY is a
-      # deploy key on alexwakeman/pierre-pro and grants access to NOTHING else, so the moment a
-      # second submodule appeared in .gitmodules (packages/ml) recursion tried to clone it too,
-      # got "Repository not found", and failed the whole job at the checkout step — before a
-      # single line of the image was built. Naming the one submodule we need keeps this job
-      # working no matter what else gets vendored into packages/.
-      #
-      # The cloud image genuinely does not want packages/ml: the severity-api is a SEPARATE
-      # Railway service deployed from its own repo and consumed over HTTP, and its serving
-      # assets are ~300 MB of Git-LFS model weights that would land in the build context.
       - uses: actions/checkout@v4
-
-      # ⚠ THE KEY MUST REACH THE CLONE VIA GIT_SSH_COMMAND — AN ENVIRONMENT VARIABLE.
-      #
-      # `actions/checkout`'s `ssh-key` input leaves `core.sshCommand` in the SUPERPROJECT's git
-      # config, and `git submodule update` in a LATER step does not pass that down to the child
-      # `git clone` it spawns. Relying on it failed with `Permission denied (publickey)` for
-      # pierre-pro — a real, observed failure, not a theoretical one. Environment variables ARE
-      # inherited by child processes, so this is the mechanism that actually arrives.
-      #
-      # (It only ever worked before because `submodules: recursive` had checkout itself do the
-      # cloning, inside the step that owns the key.)
-      - name: Check out the private @pierre/pro submodule (and only that one)
-        env:
-          PRO_DEPLOY_KEY: ${{ secrets.PRO_DEPLOY_KEY }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$PRO_DEPLOY_KEY" > ~/.ssh/pro_deploy_key
-          chmod 600 ~/.ssh/pro_deploy_key
-          ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
-          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/pro_deploy_key -o IdentitiesOnly=yes"
-          git submodule update --init --depth=1 packages/pro
-
-      # Fail loud early if the submodule didn't check out (wrong/absent deploy key), rather than
-      # silently building the OSS variant.
-      - name: Verify @pierre/pro submodule is present
-        run: test -f packages/pro/src/index.ts || (echo "packages/pro not checked out — is PRO_DEPLOY_KEY set?" && exit 1)
 
       - uses: docker/setup-buildx-action@v3
 
@@ -113,13 +64,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push the cloud image (WITH_PRO=true)
+      - name: Build and push the cloud image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           build-args: |
-            WITH_PRO=true
             VITE_GA_ID=${{ secrets.VITE_GA_ID }}
           tags: |
             ${{ env.IMAGE }}:latest

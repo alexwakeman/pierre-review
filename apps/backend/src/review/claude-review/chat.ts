@@ -19,7 +19,7 @@ import {
   type ClaudeReviewChatResponse,
   type ClaudeReviewModel,
 } from '@pierre-review/shared';
-import type { PreparedReview } from '../../pro/contract.js';
+import type { PreparedReview } from '../../platform/contract.js';
 import type { AgentContext } from '../agent-context.js';
 import { AGENTIC_AI_ENABLED, chatMayApplyAuthEnv } from './manager.js';
 import { getClaudeReviewById, getReviewPrContext, type ReviewPrContext } from './persist.js';
@@ -548,14 +548,6 @@ export async function answerReviewChat(
   }
   inFlight.set(accountId, reviewId);
   try {
-    if ((await ctx.aiCredits.check(accountId)).agentBlocked) {
-      return {
-        ok: false,
-        status: 402,
-        error: 'CreditsExhausted',
-        message: 'Out of monthly agentic AI credits — resets on the 1st.',
-      };
-    }
     const review = await getClaudeReviewById(ctx, reviewId, accountId);
     if (!review) {
       return { ok: false, status: 404, error: 'NotFound', message: `Review ${reviewId} not found` };

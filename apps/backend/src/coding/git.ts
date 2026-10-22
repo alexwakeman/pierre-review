@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { CodingErrorCode } from '../pro/contract.js';
+import type { CodingErrorCode } from '../platform/contract.js';
 
 const execFileAsync = promisify(execFile);
 

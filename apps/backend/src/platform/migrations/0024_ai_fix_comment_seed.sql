@@ -1,0 +1,44 @@
+-- ⚠ EMPTIED — COMMENT ONLY. ai_fixes moved to core with AI Fix's agentic fixer (core migration
+-- sqlite 0074 / pg 0061 creates the table in its FINAL shape, or adopts an existing one). Left as
+-- statements, this file would hit "duplicate column" on a FRESH SQLite install — core runs first —
+-- and the plugin migrator THROWS on any failure, dropping the whole plugin to OSS mode silently.
+-- The file stays so pro_migrations' history keeps its name. The original statements, for the record:
+-- @pierre/pro plugin migration (SQLite / local mode). Run once by the host's runPluginMigrations
+-- (tracked in pro_migrations — plugin migrations are discovered by FILENAME SORT and have NO
+-- meta/_journal.json; that requirement is CORE-only). Carries no statement-breakpoint markers
+-- either: the plugin migrator execs the whole file as one blob. Postgres twin:
+-- migrations-pg/0024_ai_fix_comment_seed.sql.
+--
+-- Adds the two columns behind the "fix from comments" seed (AiFixSeed 'comments').
+--
+-- WHAT GOES IN THEM. JSON, both nullable, both NULL on every other seed:
+--   comment_targets   AiFixCommentTarget[] — the comments the user dragged into the basket, AS
+--                     RESOLVED SERVER-SIDE (ref label, author + isBot, file anchor, thread id,
+--                     permalink, short excerpt), in the order the prompt listed them. Written at
+--                     insert time, i.e. the run always knows what it was asked to do.
+--   comment_verdicts  AiFixCommentVerdict[] — what the agent concluded per ref (disposition,
+--                     validity, reasoning, pushback, learning, self-reported files). Written on
+--                     success only.
+--
+-- WHY THE TARGETS ARE STORED AND NOT RE-DERIVED FROM THE CLIENT'S SELECTION. Selection is
+-- in-session (a client store, cleared on reload) — so by the time anyone reads the report the
+-- selection is gone. The stored list is also what keeps the report HONEST: it is the set the
+-- prompt actually contained, which is not the same as the set the user ticked (a forged or
+-- deleted id is dropped, and an over-budget tail is named rather than silently included).
+--
+-- WHY THE VERDICTS ARE A JSON BLOB RATHER THAN A TABLE. They are commentary on ONE run, read
+-- only with that run, never aggregated, never queried by ref — the same shape as
+-- `files_changed` and `resolved_conflict_files` beside them. A child table would buy a join and
+-- an isolation surface for nothing.
+--
+-- The agent's report is a SELF-REPORT: `files_touched` inside it is advisory and the
+-- authoritative changeset is still the captured git diff (`patch`), exactly as for `summary`.
+--
+-- NULLABLE AND ADDITIVE with no default, so every existing row stays readable as it is and the
+-- fixed-column INSERT in packages/pro/test/isolation.test.ts keeps working.
+--
+-- SQLite has no `ADD COLUMN IF NOT EXISTS`, but this file is applied exactly once
+-- (pro_migrations-gated), so plain ALTERs are correct here.
+
+-- (moved to core) ALTER TABLE ai_fixes ADD COLUMN comment_targets text;
+-- (moved to core) ALTER TABLE ai_fixes ADD COLUMN comment_verdicts text;

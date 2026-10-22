@@ -11,7 +11,7 @@ import {
   type ReferenceDocCitation,
   type ReviewDocReference,
 } from '@pierre-review/shared';
-import type { RunReviewResult } from '../../pro/contract.js';
+import type { RunReviewResult } from '../../platform/contract.js';
 import type { CompareDiffResult } from '../../github/compare.js';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
@@ -60,7 +60,7 @@ import {
   saveReviewSuccess,
   type ReviewPrContext,
 } from './persist.js';
-import { emitClaudeReviewCompleted } from '../../pro/event-hooks.js';
+import { emitClaudeReviewCompleted } from '../../platform/event-hooks.js';
 import { ensureSonarSnapshot } from '../../sonar/snapshot.js';
 
 // The Claude Review queue/concurrency/SSE manager (CORE, free, local-only) — the analog of the
@@ -215,7 +215,7 @@ export type StartReviewResult =
   | { ok: true; reviewId: number; queued: boolean }
   | {
       ok: false;
-      reason: 'disabled' | 'already_running' | 'busy' | 'not_found' | 'no_head' | 'credits_exhausted';
+      reason: 'disabled' | 'already_running' | 'busy' | 'not_found' | 'no_head';
     }
   // An auto review holds this PR (waiting in the auto lane, or running): manual start is locked
   // until it ends. The route answers 409 AutoReviewInProgress.
@@ -242,11 +242,7 @@ export async function startReview(
   // ⚠ NO STORIES. A PR review judges code, tests and threads; a story is checked by the ticket
   // review (review/ticket-review/), a separate run with its own row, claim and lane.
   if (!AGENTIC_AI_ENABLED) return { ok: false, reason: 'disabled' };
-  // Hard agentic cap: refuse a run once the account's monthly agent credit allowance is spent
-  // (metered per calendar month; local accounts are unmetered → never blocked).
-  if ((await ctx.aiCredits.check(accountId)).agentBlocked)
-    return { ok: false, reason: 'credits_exhausted' };
-  // ⚠ Checked AFTER the credits await and BEFORE `claimed`: a running auto run is also in
+  // ⚠ Checked BEFORE `claimed`: a running auto run is also in
   // `claimed`, and must answer the auto lock, not 'already_running'.
   const hold = autoReviewHold(prId, accountId);
   if (hold) return { ok: false, reason: 'auto_in_progress', auto: hold };
@@ -349,7 +345,7 @@ export function _autoLaneForTest(): Array<{ accountId: number; prId: number }> {
 }
 
 // A slot opened and the manual queue is empty: write the auto run's row and launch it. Mirrors
-// `startReview` step for step (credits → claim → PR context → row → launch), with the
+// `startReview` step for step (claim → PR context → row → launch), with the
 // trigger stamped 'auto'. Any refusal simply drops the item: the PR has no row, so the next tick
 // finds it again if it still qualifies.
 async function startAutoItem(a: AutoItem): Promise<void> {
@@ -360,7 +356,6 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     // AI went away since the sweep (runtime removed, signed out): drop the item BEFORE its row
     // exists, or the PR's one automatic review is spent on a failure (ai-ready.ts).
     if (!agenticRunReady(ctx)) return;
-    if ((await ctx.aiCredits.check(accountId)).agentBlocked) return;
     const prCtx = await getReviewPrContext(ctx, prId, accountId);
     if (!prCtx?.headSha) return;
     // ONE RUN PER KEY: a person may have reviewed this head (and, for a comment-triggered

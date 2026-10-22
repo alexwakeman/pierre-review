@@ -110,9 +110,6 @@ export function registerStoryDocsRoutes(app: FastifyInstance, ctx: AgentContext)
       if (live.inputs == null || live.inputs.empty) return { outcome: 'refused', runId: null, refusal: 'no_story' };
       const auth = ctx.llm.detectAuth();
       if (auth.status === 'none') return fail(reply, 400, 'NoClaudeAuth', auth.message ?? 'No Claude credential found.');
-      if ((await ctx.aiCredits.check(accountId)).agentBlocked) {
-        return fail(reply, 402, 'CreditsExhausted', 'Out of monthly agentic AI credits — resets on the 1st.');
-      }
       if ((await countStoryDocsRunsSince(ctx, accountId, utcDayStartMs(Date.now()))) >= config.storyDocsDailyCap) {
         return { outcome: 'refused', runId: null, refusal: 'daily_cap' };
       }

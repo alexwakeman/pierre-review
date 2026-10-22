@@ -226,16 +226,6 @@ describe('the auto lane', () => {
     expect(inserted.filter((x) => x.prId === 20).map((x) => x.trigger)).toEqual(['auto', 'manual']);
   });
 
-  it('an account whose credits ran out mid-wait is skipped at launch, with no row', async () => {
-    await m.startReview(ctx, 1, 10, 'claude-opus-5-5');
-    await flush();
-    m.enqueueAutoReview(ctx, 2, 40);
-    (ctx as any).aiCredits.check = async (a: number) => ({ agentBlocked: a === 2 });
-    await releaseFirst();
-    expect(inserted.some((r) => r.prId === 40)).toBe(false);
-    expect(m.autoPendingPrIds().size).toBe(0);
-  });
-
   it('⚠ an auto run stores NO story, even where Jira has one, and never asks for it', async () => {
     m.enqueueAutoReview(ctx, 1, 60);
     await flush();

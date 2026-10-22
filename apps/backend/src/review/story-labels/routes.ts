@@ -8,7 +8,6 @@ import { config } from '../../config.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
 import { loadStoryHealthInputs } from '../../db/story-health.js';
 import { storiesToLabel } from '../../db/story-health-fold.js';
-import { reportsEntitled } from '../../api/routes/insights.js';
 import type { AgentContext } from '../agent-context.js';
 import {
   cancelStoryLabelRun,
@@ -21,24 +20,17 @@ import {
 
 // THE STORY LABEL RUN'S ROUTES (docs/API.md § Story labels; docs/CLAUDE-REVIEW.md § Story labels). The
 // paths keep the retired Story health prefix. Registered ONLY through `registerAgenticRoutes` — its
-// explicit `isCloud` check is the cloud guarantee (these 404 there). Pro with the rest
-// of Reports: `reportsEntitled` false → 402 BEFORE any DB work. The body's workspace goes through
+// explicit `isCloud` check is the cloud guarantee (these 404 there). The body's workspace goes through
 // `resolveWorkspaceScope`: an unknown or another tenant's id falls to the caller's Default, never 404.
 //
 //   POST /api/story-health/label {workspaceId}  label up to STORY_LABEL_RUN_CAP stories → ai + ai_hourly
 //   GET  /api/story-health/label                 the account's run (or its last one)    → read
 //   POST /api/story-health/label/cancel          stop starting calls; spends nothing    → read
 
-const PRO_REQUIRED = { error: 'pro required' } as const;
-
 export function registerStoryLabelRoutes(app: FastifyInstance, ctx: AgentContext): void {
   app.post(
     '/api/story-health/label',
     async (req, reply): Promise<StoryLabelRunResponse | StoryLabelRunErrorBody | { error: string }> => {
-      if (!reportsEntitled(req)) {
-        reply.status(402);
-        return PRO_REQUIRED;
-      }
       const body = (req.body ?? {}) as { workspaceId?: unknown };
       if (typeof body.workspaceId !== 'number' || !Number.isSafeInteger(body.workspaceId)) {
         reply.status(400);
@@ -85,19 +77,11 @@ export function registerStoryLabelRoutes(app: FastifyInstance, ctx: AgentContext
     },
   );
 
-  app.get('/api/story-health/label', async (req, reply): Promise<StoryLabelRunResponse | { error: string }> => {
-    if (!reportsEntitled(req)) {
-      reply.status(402);
-      return PRO_REQUIRED;
-    }
+  app.get('/api/story-health/label', async (req): Promise<StoryLabelRunResponse> => {
     return { run: storyLabelRunOf(ctx.accountIdOf(req)) };
   });
 
-  app.post('/api/story-health/label/cancel', async (req, reply): Promise<StoryLabelRunResponse | { error: string }> => {
-    if (!reportsEntitled(req)) {
-      reply.status(402);
-      return PRO_REQUIRED;
-    }
+  app.post('/api/story-health/label/cancel', async (req): Promise<StoryLabelRunResponse> => {
     return { run: cancelStoryLabelRun(ctx.accountIdOf(req)) };
   });
 }

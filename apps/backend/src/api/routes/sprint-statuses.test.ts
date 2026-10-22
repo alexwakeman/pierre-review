@@ -22,9 +22,6 @@ let app: FastifyInstance;
 let closeDb: (() => Promise<void> | void) | undefined;
 let db: any;
 let schema: any;
-let setCaps: ((c: any) => void) | undefined;
-let emptyCaps: any;
-let fullCaps: any;
 let ownWs = 0;
 let foreignWs = 0;
 const ROOT = 'https://acme.atlassian.net';
@@ -90,11 +87,6 @@ beforeAll(async () => {
       nextCheckAt: NOW,
     })
     .execute();
-  const contract = await import('../../pro/contract.js');
-  emptyCaps = contract.EMPTY_CAPABILITIES;
-  fullCaps = { ...contract.EMPTY_CAPABILITIES, periodReports: true };
-  contract.setProCapabilities(fullCaps);
-  setCaps = contract.setProCapabilities;
   const { sprintStoriesRoutes } = await import('./sprint-stories.js');
   const { registerAccountContext } = await import('../plugins/auth.js');
   const { default: Fastify } = await import('fastify');
@@ -105,7 +97,6 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  setCaps?.(emptyCaps);
   await app?.close();
   await closeDb?.();
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
@@ -118,9 +109,7 @@ const buckets = (...bs: unknown[]) => ({ buckets: bs, mergedColumn: true });
 
 describe('PUT /api/sprint-stories/statuses', () => {
   it('is FREE: no 402 without Reports', async () => {
-    setCaps?.(emptyCaps);
     const res = await put({ workspaceId: ownWs, settings: { bogus: true } });
-    setCaps?.(fullCaps);
     expect(res.statusCode).toBe(400);
     expect(await stored(ownWs)).toBeNull();
   });

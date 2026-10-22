@@ -3,7 +3,7 @@ import type {
   ReviewFinding,
   ReviewFollowUpReport,
   ReviewThreadReport,
-} from '../pro/contract.js';
+} from '../platform/contract.js';
 // ⚠ `import type` ONLY — the payload type is zod-inferred, and a value import would pull zod in
 // wherever this module is loaded. It is reached only from the dynamically imported agent anyway.
 import type { SubmitReviewPayload } from './schema.js';

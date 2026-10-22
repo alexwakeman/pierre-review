@@ -33,9 +33,6 @@ let app: FastifyInstance;
 let closeDb: (() => Promise<void> | void) | undefined;
 let db: any;
 let schema: any;
-let setCaps: ((c: any) => void) | undefined;
-let emptyCaps: any;
-let fullCaps: any;
 let store: typeof import('../../db/sprint-store.js');
 let graph: typeof import('../../db/sprint-graph.js');
 let ownWs = 0;
@@ -196,11 +193,6 @@ beforeAll(async () => {
   store = await import('../../db/sprint-store.js');
   store.setSprintReadKicker((a, w) => kicks.push([a, w]));
   graph = await import('../../db/sprint-graph.js');
-  const contract = await import('../../pro/contract.js');
-  emptyCaps = contract.EMPTY_CAPABILITIES;
-  fullCaps = { ...contract.EMPTY_CAPABILITIES, periodReports: true };
-  contract.setProCapabilities(fullCaps);
-  setCaps = contract.setProCapabilities;
   const { sprintStoriesRoutes } = await import('./sprint-stories.js');
   const { registerAccountContext } = await import('../plugins/auth.js');
   const { default: Fastify } = await import('fastify');
@@ -212,7 +204,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   store?.setSprintReadKicker(null);
-  setCaps?.(emptyCaps);
   await app?.close();
   await closeDb?.();
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
@@ -220,7 +211,6 @@ afterAll(async () => {
 
 describe('no Pro gate (This Sprint is free)', () => {
   it('answers without periodReports', async () => {
-    setCaps?.(emptyCaps);
     try {
       for (const r of [
         { method: 'GET' as const, url: '/api/sprint-graph' },
@@ -230,7 +220,6 @@ describe('no Pro gate (This Sprint is free)', () => {
         expect(res.statusCode).toBe(200);
       }
     } finally {
-      setCaps?.(fullCaps);
     }
   });
 });

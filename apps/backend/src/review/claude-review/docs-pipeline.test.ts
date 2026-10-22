@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ClaudeReview } from '@pierre-review/shared';
-import type { RunReviewArgs, RunReviewResult } from '../../pro/contract.js';
+import type { RunReviewArgs, RunReviewResult } from '../../platform/contract.js';
 import type { AgentContext } from '../agent-context.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */

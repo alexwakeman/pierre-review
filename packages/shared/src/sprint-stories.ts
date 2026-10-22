@@ -363,13 +363,13 @@ export interface SprintRefreshResponse {
   read: SprintReadState;
   /** Ticket checks (the ticket review) this refresh started — local with AI on only; ABSENT in cloud
    *  and with AI off. `started` ≤ SPRINT_REFRESH_TICKET_CHECKS. `skipped` says why none could start
-   *  ('no_credential': no Claude login or API key; 'credits': out of agentic credits); null otherwise
+   *  ('no_credential': no Claude login or API key); null otherwise
    *  (including "nothing needed a check"). */
   ticketChecks?: SprintRefreshTicketChecks;
 }
 
 export interface SprintRefreshTicketChecks {
   started: number;
-  skipped: 'no_credential' | 'credits' | null;
+  skipped: 'no_credential' | null;
 }
 

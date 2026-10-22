@@ -47,8 +47,7 @@ export type StartAiResolveResult =
   | { status: 'busy_pr' }
   | { status: 'busy_service' }
   | { status: 'no_conflicts'; baseRef: string }
-  | { status: 'no_auth'; message?: string }
-  | { status: 'credits_exhausted' };
+  | { status: 'no_auth'; message?: string };
 
 export interface StartAiResolveInput {
   accountId: number;
@@ -93,7 +92,6 @@ export async function startAiResolve(
   if (auth.status !== 'ok') return { status: 'no_auth', message: auth.message };
   // Local accounts are unmetered, so this never refuses there; it is here so the rule cannot be
   // forgotten if the feature ever leaves local.
-  if ((await ctx.aiCredits.check(accountId)).agentBlocked) return { status: 'credits_exhausted' };
 
   // ── THE SYNCHRONOUS CLAIM WINDOW. No `await` from here to `runningAccounts.add`. ──
   const live = peekSession(accountId, prId);

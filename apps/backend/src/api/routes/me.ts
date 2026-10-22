@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify';
 import type {
-  AiUsageResponse,
   BlastRadiusConfigBody,
   BlastRadiusConfigResponse,
   LargePrThresholdBody,
@@ -15,21 +14,14 @@ import { MY_TURN_TOGGLES, validateMyTurnSettings } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import {
   accountToLocalUser,
-  setBenchmarkConsent,
   setBlastRadiusConfig,
   setLargePrCodeLocThreshold,
   setMyTurnSettings,
 } from '../../auth/account.js';
 import { resolveLargePrThreshold } from '../../db/code-loc.js';
-import { aiCreditStatus, monthStartMs } from '../../db/credits.js';
 import { eraseAccountData } from '../../db/erase-account.js';
 import { exportAccountData } from '../../db/export-account.js';
-import { runBenchmarkRollupForAccount } from '../../sync/benchmark-rollup.js';
 import { accountIdOf } from '../plugins/auth.js';
-import {
-  EMPTY_CAPABILITIES,
-  entitledProCapabilities,
-} from '../../pro/contract.js';
 import { getAuthNotices } from '../../sync/auth-notices.js';
 import { isMlScoringAvailable } from '../../ml/scorer.js';
 import { getMlStatus } from '../../ml/runtime.js';
@@ -38,15 +30,6 @@ import { detectClaudeAuth, NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
 import { getMyTurn } from '../../db/queries.js';
 import { clearDailyBriefCountsFor } from '../../db/daily-brief.js';
 import { dismissMyTurn, restoreMyTurn } from '../../db/my-turn-dismissals.js';
-
-const benchmarkConsentSchema = {
-  body: {
-    type: 'object',
-    required: ['optIn'],
-    additionalProperties: false,
-    properties: { optIn: { type: 'boolean' } },
-  },
-};
 
 // The LARGE-PR FLAG's threshold. `null` is a first-class value meaning "reset to the product
 // default", so the type is the union — NOT an optional key, which would make "clear it" and
@@ -200,29 +183,6 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/me', async (req): Promise<MeResponse> => {
     const accountId = accountIdOf(req);
     const user = accountToLocalUser(req.account);
-    // Per-account entitlement: local = full capabilities; cloud = full only when the
-    // account's plan isn't 'free' (Stripe billing seam) — used for the `pro` passthrough.
-    const entitled = req.account
-      ? entitledProCapabilities(req.account)
-      : EMPTY_CAPABILITIES;
-    // Month-to-date AI balances, computed CORE-side (the plan/allowance rules live in db/credits)
-    // so the SPA has the spend baseline on the very first authenticated call — no separate Pro
-    // fetch needed on login. Split by seam: summary is metered by TURN count, agent by CREDITS.
-    let aiUsage: AiUsageResponse | null = null;
-    if (req.account) {
-      const nowMs = Date.now();
-      const c = await aiCreditStatus(req.account, nowMs);
-      aiUsage = {
-        enabled: true,
-        monthStart: new Date(monthStartMs(nowMs)).toISOString(),
-        summaryTurnsUsed: c.summaryTurnsUsed,
-        summaryTurnLimit: c.summaryTurnLimit,
-        summaryTurnsRemaining: c.summaryTurnsRemaining,
-        agentCreditsUsed: c.agentCreditsUsed,
-        agentAllowanceCredits: c.agentAllowanceCredits,
-        agentCreditsRemaining: c.agentCreditsRemaining,
-      };
-    }
     const mlStatus = getMlStatus();
     return {
       user,
@@ -233,15 +193,10 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       // three had no reader left and were pure per-request work on the SPA's first call.
       // If you need a count here again, prefer the brief's fold over re-adding one.
       deploymentMode: config.deploymentMode,
-      pro: entitled,
       // THE AGENTIC FEATURES — Claude Review (+ chat, follow-up, ticket check, auto review),
-      // review memory, AI Fix. CORE, FREE, LOCAL ONLY. TOP-LEVEL and NOT inside `pro`, so
-      // `entitledProCapabilities` can never zero it (the `mlSeverity` argument).
+      // AI Fix. LOCAL ONLY.
       ai: agenticAiStatus(),
-      // ML severity/category enrichment of bot comments — FREE TIER, so a TOP-LEVEL field and
-      // NOT part of `pro` above: `entitledProCapabilities` returns all-false for a cloud
-      // account on the free plan, which would hide this from exactly the users it is for.
-      // True iff something can score bot comments right now: the local model once it is set
+      // ML severity/category enrichment of bot comments. True iff something can score bot comments right now: the local model once it is set
       // up, or a configured severity-api.
       mlSeverity: isMlScoringAvailable(),
       // The local scorer's one-time download, when this deployment can run one at all.
@@ -254,12 +209,8 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       conflictResolver: true,
       // Chronology's default working-hours zone for a workspace that never set one.
       workTimeZone: config.defaultWorkTimezone,
-      // Cross-org benchmark consent (cloud-only; always false in local). Drives the Settings toggle.
-      benchmarkOptIn: config.isCloud ? req.account?.benchmarkOptIn ?? false : false,
       // The LARGE-PR FLAG's threshold, RESOLVED (stored value, else the product default) so no
-      // renderer has to know about the null. TOP-LEVEL and not inside `pro` above: the flag is
-      // free, and `entitledProCapabilities` zeroes that object for free cloud accounts — exactly
-      // this feature's audience (the `mlSeverity` argument, verbatim).
+      // renderer has to know about the null.
       largePrCodeLocThreshold: resolveLargePrThreshold(
         req.account?.largePrCodeLocThreshold ?? null,
       ),
@@ -269,37 +220,14 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       // three dial positions living in `packages/shared`, which is types-only on this side
       // (PACKAGING); resolving here would mean hand-mirroring it forever. The SPA's one
       // `resolveBlastConfig()` imports that table as a real value instead, so `null` travels and
-      // nothing is duplicated. Free feature → top-level, not inside `pro` (the `mlSeverity`
-      // argument again).
+      // nothing is duplicated.
       blastRadius: req.account?.blastRadiusConfig ?? null,
       // The MY TURN settings, RAW and nullable (the stored overrides) — the `blastRadius` rule: the
       // SPA resolves them through the ONE `resolveMyTurnSettings`, so nothing is duplicated here.
-      // Free feature → top-level, not inside `pro` (the `mlSeverity` argument).
       myTurnSettings: req.account?.myTurnSettings ?? null,
       // Orgs currently SAML-blocked for this account (empty in the normal case + in local).
       authNotices: getAuthNotices(accountId),
-      aiUsage,
     };
-  });
-
-  // Cross-org benchmark consent (CLOUD-ONLY, opt-in). Setting it true seeds the account's
-  // contributions immediately (best-effort, in the background); false withdraws + deletes them
-  // (handled in setBenchmarkConsent). Available to every cloud account — free or paid — because
-  // the network needs volume to be worth anything (viewing the benchmark is the paid part, later).
-  app.post('/api/me/benchmark-consent', { schema: benchmarkConsentSchema }, async (req, reply) => {
-    if (!config.isCloud) {
-      return reply.code(400).send({ error: 'BadRequest', message: 'Benchmark is cloud-only' });
-    }
-    const accountId = accountIdOf(req);
-    const { optIn } = req.body as { optIn: boolean };
-    await setBenchmarkConsent(accountId, optIn);
-    if (optIn) {
-      // Fire-and-forget: don't block the response on the rollup; a failure is logged, not fatal.
-      void runBenchmarkRollupForAccount(accountId, req.log).catch((err) =>
-        req.log.error({ err, accountId }, 'benchmark seed after opt-in failed'),
-      );
-    }
-    return { status: 'ok', benchmarkOptIn: optIn };
   });
 
   // The LARGE-PR FLAG's threshold — ONE PER-ACCOUNT SETTING, in lines of CODE churn (the
@@ -311,10 +239,9 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
   // "the user has an opinion" and "the user does not", so a future change to the default still
   // reaches everyone who never overrode it.
   //
-  // Available in BOTH modes and on every tier: the flag is free, so its setting must be too.
   // Rate tier: the schema-validated single-column UPDATE falls through `tierFor` to the blanket
   // `read` bucket, which is DECIDED (and pinned in rate-limit.test.ts), not inherited — it reaches
-  // no GitHub API and no model, exactly like POST /api/me/benchmark-consent beside it.
+  // no GitHub API and no model.
   app.post(
     '/api/me/large-pr-threshold',
     { schema: largePrThresholdSchema },

@@ -1,0 +1,4428 @@
+{
+  "artifact": "bot_monitor.metric_contract_fixture",
+  "band_placement": {
+    "customer_value": "merged pull requests the repository landed in a 14-day window, ANY AUTHOR. The cohort's axis is frame.py's count(DISTINCT pr) of merged PullRequestEvents with no author predicate, so excluding machine-authored merges here would place a bump-heavy repository one or more bands too low.",
+    "derivation": "The fitter places a repository that did not define the cut by RANK, not by interval: fit._place_unbanded does bands[bisect_left(keys, (value, repo))] over the support units' (panel_prs_per_period, repo) order. A customer is not in that order, and its repository name must not decide its cohort, so the customer's key is (value, '') — the empty string sorts below every repository name, which is bisect_left's own tie behaviour taken to its limit. bisect_left then returns the FIRST index whose value is >= the customer's, whose band b* therefore satisfies value <= high(b*); and every band below b* holds only values strictly below the customer's, so high(b) < value there. b* is exactly min{b : value <= high(b)}. The high edges are monotone non-decreasing because the cut is a rank cut over a sorted list, so the scan is well defined. Ranges OVERLAP at ties (coderabbit band 0 is 2..2 and band 1 is 2..3) which is why 'the band whose interval contains the value' is not a function and this rule reads one edge only.",
+    "rule": "band = the LOWEST index b whose published panel_prs_per_period HIGH edge is at least the customer's value; when the value exceeds every high edge, the LAST band. The LOW edges are never read.",
+    "vendors": {
+      "coderabbit": {
+        "band_high_edges": [
+          2,
+          3,
+          4,
+          6,
+          7,
+          9,
+          12,
+          16,
+          23,
+          258
+        ],
+        "band_low_edges_not_read": [
+          2,
+          2,
+          3,
+          4,
+          6,
+          7,
+          9,
+          12,
+          16,
+          23
+        ],
+        "cases": [
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 0
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 1
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 2
+          },
+          {
+            "activity_band": 1,
+            "panel_prs_per_period": 3
+          },
+          {
+            "activity_band": 2,
+            "panel_prs_per_period": 4
+          },
+          {
+            "activity_band": 3,
+            "panel_prs_per_period": 5
+          },
+          {
+            "activity_band": 3,
+            "panel_prs_per_period": 6
+          },
+          {
+            "activity_band": 4,
+            "panel_prs_per_period": 7
+          },
+          {
+            "activity_band": 5,
+            "panel_prs_per_period": 8
+          },
+          {
+            "activity_band": 5,
+            "panel_prs_per_period": 9
+          },
+          {
+            "activity_band": 6,
+            "panel_prs_per_period": 10
+          },
+          {
+            "activity_band": 6,
+            "panel_prs_per_period": 11
+          },
+          {
+            "activity_band": 6,
+            "panel_prs_per_period": 12
+          },
+          {
+            "activity_band": 7,
+            "panel_prs_per_period": 13
+          },
+          {
+            "activity_band": 7,
+            "panel_prs_per_period": 15
+          },
+          {
+            "activity_band": 7,
+            "panel_prs_per_period": 16
+          },
+          {
+            "activity_band": 8,
+            "panel_prs_per_period": 17
+          },
+          {
+            "activity_band": 8,
+            "panel_prs_per_period": 22
+          },
+          {
+            "activity_band": 8,
+            "panel_prs_per_period": 23
+          },
+          {
+            "activity_band": 9,
+            "panel_prs_per_period": 24
+          },
+          {
+            "activity_band": 9,
+            "panel_prs_per_period": 258
+          },
+          {
+            "activity_band": 9,
+            "panel_prs_per_period": 259
+          },
+          {
+            "activity_band": 9,
+            "panel_prs_per_period": 1258
+          }
+        ],
+        "n_bands": 10
+      },
+      "copilot": {
+        "band_high_edges": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          10,
+          13,
+          18,
+          26,
+          273
+        ],
+        "band_low_edges_not_read": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          10,
+          13,
+          18,
+          26
+        ],
+        "cases": [
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 0
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 1
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 2
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 3
+          },
+          {
+            "activity_band": 1,
+            "panel_prs_per_period": 4
+          },
+          {
+            "activity_band": 2,
+            "panel_prs_per_period": 5
+          },
+          {
+            "activity_band": 3,
+            "panel_prs_per_period": 6
+          },
+          {
+            "activity_band": 4,
+            "panel_prs_per_period": 7
+          },
+          {
+            "activity_band": 5,
+            "panel_prs_per_period": 8
+          },
+          {
+            "activity_band": 5,
+            "panel_prs_per_period": 9
+          },
+          {
+            "activity_band": 5,
+            "panel_prs_per_period": 10
+          },
+          {
+            "activity_band": 6,
+            "panel_prs_per_period": 11
+          },
+          {
+            "activity_band": 6,
+            "panel_prs_per_period": 12
+          },
+          {
+            "activity_band": 6,
+            "panel_prs_per_period": 13
+          },
+          {
+            "activity_band": 7,
+            "panel_prs_per_period": 14
+          },
+          {
+            "activity_band": 7,
+            "panel_prs_per_period": 17
+          },
+          {
+            "activity_band": 7,
+            "panel_prs_per_period": 18
+          },
+          {
+            "activity_band": 8,
+            "panel_prs_per_period": 19
+          },
+          {
+            "activity_band": 8,
+            "panel_prs_per_period": 25
+          },
+          {
+            "activity_band": 8,
+            "panel_prs_per_period": 26
+          },
+          {
+            "activity_band": 9,
+            "panel_prs_per_period": 27
+          },
+          {
+            "activity_band": 9,
+            "panel_prs_per_period": 273
+          },
+          {
+            "activity_band": 9,
+            "panel_prs_per_period": 274
+          },
+          {
+            "activity_band": 9,
+            "panel_prs_per_period": 1273
+          }
+        ],
+        "n_bands": 10
+      },
+      "cursor": {
+        "band_high_edges": [
+          3,
+          4,
+          5,
+          7,
+          9,
+          12,
+          18,
+          31,
+          695
+        ],
+        "band_low_edges_not_read": [
+          2,
+          3,
+          4,
+          5,
+          7,
+          9,
+          12,
+          18,
+          31
+        ],
+        "cases": [
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 0
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 1
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 2
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 3
+          },
+          {
+            "activity_band": 1,
+            "panel_prs_per_period": 4
+          },
+          {
+            "activity_band": 2,
+            "panel_prs_per_period": 5
+          },
+          {
+            "activity_band": 3,
+            "panel_prs_per_period": 6
+          },
+          {
+            "activity_band": 3,
+            "panel_prs_per_period": 7
+          },
+          {
+            "activity_band": 4,
+            "panel_prs_per_period": 8
+          },
+          {
+            "activity_band": 4,
+            "panel_prs_per_period": 9
+          },
+          {
+            "activity_band": 5,
+            "panel_prs_per_period": 10
+          },
+          {
+            "activity_band": 5,
+            "panel_prs_per_period": 11
+          },
+          {
+            "activity_band": 5,
+            "panel_prs_per_period": 12
+          },
+          {
+            "activity_band": 6,
+            "panel_prs_per_period": 13
+          },
+          {
+            "activity_band": 6,
+            "panel_prs_per_period": 17
+          },
+          {
+            "activity_band": 6,
+            "panel_prs_per_period": 18
+          },
+          {
+            "activity_band": 7,
+            "panel_prs_per_period": 19
+          },
+          {
+            "activity_band": 7,
+            "panel_prs_per_period": 30
+          },
+          {
+            "activity_band": 7,
+            "panel_prs_per_period": 31
+          },
+          {
+            "activity_band": 8,
+            "panel_prs_per_period": 32
+          },
+          {
+            "activity_band": 8,
+            "panel_prs_per_period": 695
+          },
+          {
+            "activity_band": 8,
+            "panel_prs_per_period": 696
+          },
+          {
+            "activity_band": 8,
+            "panel_prs_per_period": 1695
+          }
+        ],
+        "n_bands": 9
+      },
+      "devin": {
+        "band_high_edges": [
+          8,
+          139
+        ],
+        "band_low_edges_not_read": [
+          2,
+          9
+        ],
+        "cases": [
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 0
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 1
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 2
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 8
+          },
+          {
+            "activity_band": 1,
+            "panel_prs_per_period": 9
+          },
+          {
+            "activity_band": 1,
+            "panel_prs_per_period": 139
+          },
+          {
+            "activity_band": 1,
+            "panel_prs_per_period": 140
+          },
+          {
+            "activity_band": 1,
+            "panel_prs_per_period": 1139
+          }
+        ],
+        "n_bands": 2
+      },
+      "greptile": {
+        "band_high_edges": [
+          3,
+          4,
+          6,
+          9,
+          14,
+          24,
+          240
+        ],
+        "band_low_edges_not_read": [
+          2,
+          3,
+          4,
+          6,
+          10,
+          14,
+          24
+        ],
+        "cases": [
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 0
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 1
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 2
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 3
+          },
+          {
+            "activity_band": 1,
+            "panel_prs_per_period": 4
+          },
+          {
+            "activity_band": 2,
+            "panel_prs_per_period": 5
+          },
+          {
+            "activity_band": 2,
+            "panel_prs_per_period": 6
+          },
+          {
+            "activity_band": 3,
+            "panel_prs_per_period": 7
+          },
+          {
+            "activity_band": 3,
+            "panel_prs_per_period": 9
+          },
+          {
+            "activity_band": 4,
+            "panel_prs_per_period": 10
+          },
+          {
+            "activity_band": 4,
+            "panel_prs_per_period": 13
+          },
+          {
+            "activity_band": 4,
+            "panel_prs_per_period": 14
+          },
+          {
+            "activity_band": 5,
+            "panel_prs_per_period": 15
+          },
+          {
+            "activity_band": 5,
+            "panel_prs_per_period": 23
+          },
+          {
+            "activity_band": 5,
+            "panel_prs_per_period": 24
+          },
+          {
+            "activity_band": 6,
+            "panel_prs_per_period": 25
+          },
+          {
+            "activity_band": 6,
+            "panel_prs_per_period": 240
+          },
+          {
+            "activity_band": 6,
+            "panel_prs_per_period": 241
+          },
+          {
+            "activity_band": 6,
+            "panel_prs_per_period": 1240
+          }
+        ],
+        "n_bands": 7
+      },
+      "qodo": {
+        "band_high_edges": [
+          4,
+          6,
+          48
+        ],
+        "band_low_edges_not_read": [
+          2,
+          4,
+          7
+        ],
+        "cases": [
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 0
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 1
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 2
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 3
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 4
+          },
+          {
+            "activity_band": 1,
+            "panel_prs_per_period": 5
+          },
+          {
+            "activity_band": 1,
+            "panel_prs_per_period": 6
+          },
+          {
+            "activity_band": 2,
+            "panel_prs_per_period": 7
+          },
+          {
+            "activity_band": 2,
+            "panel_prs_per_period": 48
+          },
+          {
+            "activity_band": 2,
+            "panel_prs_per_period": 49
+          },
+          {
+            "activity_band": 2,
+            "panel_prs_per_period": 1048
+          }
+        ],
+        "n_bands": 3
+      },
+      "sourcery": {
+        "band_high_edges": [
+          3,
+          6,
+          10,
+          62
+        ],
+        "band_low_edges_not_read": [
+          2,
+          3,
+          6,
+          10
+        ],
+        "cases": [
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 0
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 1
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 2
+          },
+          {
+            "activity_band": 0,
+            "panel_prs_per_period": 3
+          },
+          {
+            "activity_band": 1,
+            "panel_prs_per_period": 4
+          },
+          {
+            "activity_band": 1,
+            "panel_prs_per_period": 5
+          },
+          {
+            "activity_band": 1,
+            "panel_prs_per_period": 6
+          },
+          {
+            "activity_band": 2,
+            "panel_prs_per_period": 7
+          },
+          {
+            "activity_band": 2,
+            "panel_prs_per_period": 9
+          },
+          {
+            "activity_band": 2,
+            "panel_prs_per_period": 10
+          },
+          {
+            "activity_band": 3,
+            "panel_prs_per_period": 11
+          },
+          {
+            "activity_band": 3,
+            "panel_prs_per_period": 62
+          },
+          {
+            "activity_band": 3,
+            "panel_prs_per_period": 63
+          },
+          {
+            "activity_band": 3,
+            "panel_prs_per_period": 1062
+          }
+        ],
+        "n_bands": 4
+      }
+    },
+    "walk_budget_rule": "min(150, round(panel_prs_per_period * 90 / 14)) — the per-repository pull-request population cap the walk enforced, reproduced exactly on all 2,204 corpus repo rows. The customer's population is the walk_budget most-recently-updated pull requests in the repository, filtered afterwards."
+  },
+  "contract_version": 1,
+  "expected": {
+    "note": "one entry per (repository, vendor) unit, in the fold's own stable order. Compare counters FIRST: a metric value alone says something is wrong, a counter says which population and which gate. Every value is an IEEE-754 double produced by one division of the two integers in `counters`, so agreement is EXACT — compare with === and never with a tolerance.",
+    "units": [
+      {
+        "counters": {
+          "outcome": {
+            "anchored_overlapping": 0,
+            "anchored_threads": 5,
+            "comments_observed": 1,
+            "overdue_eligible": {
+              "168": 5,
+              "72": 5
+            },
+            "overdue_untouched": {
+              "168": 2,
+              "72": 2
+            },
+            "reply_hours": [],
+            "threads_settled": 5,
+            "threads_settled_complete": 5,
+            "threads_settled_complete_acted": 3,
+            "threads_settled_complete_acted_outdated": 3,
+            "threads_settled_complete_followed": 0,
+            "threads_settled_complete_replied": 0,
+            "threads_settled_outdated": 0,
+            "threads_settled_resolved": 3,
+            "threads_truncated": 0
+          },
+          "repository_disclosure": {
+            "merged_machine_authored": 0,
+            "prs_detail_unobserved": 2,
+            "prs_observed": 7
+          },
+          "volume": {
+            "comments_observed": 1,
+            "empty_body_comments": 0,
+            "finding_comments": 1,
+            "merged_eligible": 5,
+            "prs_with_finding": 1,
+            "threads": 5
+          }
+        },
+        "has_band_support": true,
+        "metrics": {
+          "acted_on_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.6
+          },
+          "acted_on_rate_with_outdated": {
+            "status": "value",
+            "units": 5,
+            "value": 0.6
+          },
+          "cross_bot_overlap_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.0
+          },
+          "findings_per_merged_pr": {
+            "status": "value",
+            "units": 5,
+            "value": 0.2
+          },
+          "human_followed_last_bot_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.0
+          },
+          "human_reply_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.0
+          },
+          "median_hours_to_first_human_reply": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_168h": {
+            "status": "value",
+            "units": 5,
+            "value": 0.4
+          },
+          "overdue_untouched_rate_72h": {
+            "status": "value",
+            "units": 5,
+            "value": 0.4
+          },
+          "pr_comment_coverage": {
+            "status": "value",
+            "units": 5,
+            "value": 0.2
+          },
+          "thread_outdated_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.0
+          },
+          "thread_resolved_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.6
+          },
+          "threads_per_merged_pr": {
+            "status": "value",
+            "units": 5,
+            "value": 1.0
+          }
+        },
+        "repo": "acme/detail-unobserved",
+        "vendor": "coderabbit",
+        "walk_status": "ok"
+      },
+      {
+        "counters": {
+          "outcome": {
+            "anchored_overlapping": 0,
+            "anchored_threads": 5,
+            "comments_observed": 2,
+            "overdue_eligible": {
+              "168": 5,
+              "72": 5
+            },
+            "overdue_untouched": {
+              "168": 1,
+              "72": 1
+            },
+            "reply_hours": [
+              1.0,
+              3.0,
+              4.0,
+              10.0
+            ],
+            "threads_settled": 5,
+            "threads_settled_complete": 5,
+            "threads_settled_complete_acted": 4,
+            "threads_settled_complete_acted_outdated": 4,
+            "threads_settled_complete_followed": 4,
+            "threads_settled_complete_replied": 4,
+            "threads_settled_outdated": 0,
+            "threads_settled_resolved": 0,
+            "threads_truncated": 0
+          },
+          "repository_disclosure": {
+            "merged_machine_authored": 0,
+            "prs_detail_unobserved": 0,
+            "prs_observed": 7
+          },
+          "volume": {
+            "comments_observed": 2,
+            "empty_body_comments": 0,
+            "finding_comments": 2,
+            "merged_eligible": 7,
+            "prs_with_finding": 2,
+            "threads": 5
+          }
+        },
+        "has_band_support": true,
+        "metrics": {
+          "acted_on_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.8
+          },
+          "acted_on_rate_with_outdated": {
+            "status": "value",
+            "units": 5,
+            "value": 0.8
+          },
+          "cross_bot_overlap_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.0
+          },
+          "findings_per_merged_pr": {
+            "status": "value",
+            "units": 7,
+            "value": 0.2857142857142857
+          },
+          "human_followed_last_bot_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.8
+          },
+          "human_reply_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.8
+          },
+          "median_hours_to_first_human_reply": {
+            "status": "value",
+            "units": 4,
+            "value": 3.5
+          },
+          "overdue_untouched_rate_168h": {
+            "status": "value",
+            "units": 5,
+            "value": 0.2
+          },
+          "overdue_untouched_rate_72h": {
+            "status": "value",
+            "units": 5,
+            "value": 0.2
+          },
+          "pr_comment_coverage": {
+            "status": "value",
+            "units": 7,
+            "value": 0.2857142857142857
+          },
+          "thread_outdated_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.0
+          },
+          "thread_resolved_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.0
+          },
+          "threads_per_merged_pr": {
+            "status": "value",
+            "units": 7,
+            "value": 0.7142857142857143
+          }
+        },
+        "repo": "acme/even-replies",
+        "vendor": "devin",
+        "walk_status": "ok"
+      },
+      {
+        "counters": {
+          "outcome": {
+            "anchored_overlapping": 0,
+            "anchored_threads": 0,
+            "comments_observed": 1,
+            "overdue_eligible": {
+              "168": 0,
+              "72": 0
+            },
+            "overdue_untouched": {
+              "168": 0,
+              "72": 0
+            },
+            "reply_hours": [],
+            "threads_settled": 0,
+            "threads_settled_complete": 0,
+            "threads_settled_complete_acted": 0,
+            "threads_settled_complete_acted_outdated": 0,
+            "threads_settled_complete_followed": 0,
+            "threads_settled_complete_replied": 0,
+            "threads_settled_outdated": 0,
+            "threads_settled_resolved": 0,
+            "threads_truncated": 0
+          },
+          "repository_disclosure": {
+            "merged_machine_authored": 0,
+            "prs_detail_unobserved": 0,
+            "prs_observed": 6
+          },
+          "volume": {
+            "comments_observed": 1,
+            "empty_body_comments": 0,
+            "finding_comments": 1,
+            "merged_eligible": 6,
+            "prs_with_finding": 1,
+            "threads": 0
+          }
+        },
+        "has_band_support": false,
+        "metrics": {
+          "acted_on_rate": {
+            "reason": "repo_not_walked",
+            "status": "excluded"
+          },
+          "acted_on_rate_with_outdated": {
+            "reason": "repo_not_walked",
+            "status": "excluded"
+          },
+          "cross_bot_overlap_rate": {
+            "reason": "repo_not_walked",
+            "status": "excluded"
+          },
+          "findings_per_merged_pr": {
+            "reason": "repo_not_walked",
+            "status": "excluded"
+          },
+          "human_followed_last_bot_rate": {
+            "reason": "repo_not_walked",
+            "status": "excluded"
+          },
+          "human_reply_rate": {
+            "reason": "repo_not_walked",
+            "status": "excluded"
+          },
+          "median_hours_to_first_human_reply": {
+            "reason": "repo_not_walked",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_168h": {
+            "reason": "repo_not_walked",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_72h": {
+            "reason": "repo_not_walked",
+            "status": "excluded"
+          },
+          "pr_comment_coverage": {
+            "reason": "repo_not_walked",
+            "status": "excluded"
+          },
+          "thread_outdated_rate": {
+            "reason": "repo_not_walked",
+            "status": "excluded"
+          },
+          "thread_resolved_rate": {
+            "reason": "repo_not_walked",
+            "status": "excluded"
+          },
+          "threads_per_merged_pr": {
+            "reason": "repo_not_walked",
+            "status": "excluded"
+          }
+        },
+        "repo": "acme/gone",
+        "vendor": "coderabbit",
+        "walk_status": "not_found"
+      },
+      {
+        "counters": {
+          "outcome": {
+            "anchored_overlapping": 0,
+            "anchored_threads": 5,
+            "comments_observed": 5,
+            "overdue_eligible": {
+              "168": 5,
+              "72": 5
+            },
+            "overdue_untouched": {
+              "168": 0,
+              "72": 0
+            },
+            "reply_hours": [],
+            "threads_settled": 5,
+            "threads_settled_complete": 5,
+            "threads_settled_complete_acted": 5,
+            "threads_settled_complete_acted_outdated": 5,
+            "threads_settled_complete_followed": 0,
+            "threads_settled_complete_replied": 0,
+            "threads_settled_outdated": 0,
+            "threads_settled_resolved": 5,
+            "threads_truncated": 0
+          },
+          "repository_disclosure": {
+            "merged_machine_authored": 6,
+            "prs_detail_unobserved": 0,
+            "prs_observed": 7
+          },
+          "volume": {
+            "comments_observed": 0,
+            "empty_body_comments": 0,
+            "finding_comments": 0,
+            "merged_eligible": 0,
+            "prs_with_finding": 0,
+            "threads": 0
+          }
+        },
+        "has_band_support": false,
+        "metrics": {
+          "acted_on_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 1.0
+          },
+          "acted_on_rate_with_outdated": {
+            "status": "value",
+            "units": 5,
+            "value": 1.0
+          },
+          "cross_bot_overlap_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.0
+          },
+          "findings_per_merged_pr": {
+            "reason": "vendor_absent_from_population",
+            "status": "excluded"
+          },
+          "human_followed_last_bot_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.0
+          },
+          "human_reply_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.0
+          },
+          "median_hours_to_first_human_reply": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_168h": {
+            "status": "value",
+            "units": 5,
+            "value": 0.0
+          },
+          "overdue_untouched_rate_72h": {
+            "status": "value",
+            "units": 5,
+            "value": 0.0
+          },
+          "pr_comment_coverage": {
+            "reason": "vendor_absent_from_population",
+            "status": "excluded"
+          },
+          "thread_outdated_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.0
+          },
+          "thread_resolved_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 1.0
+          },
+          "threads_per_merged_pr": {
+            "reason": "vendor_absent_from_population",
+            "status": "excluded"
+          }
+        },
+        "repo": "acme/machine-merges-only",
+        "vendor": "coderabbit",
+        "walk_status": "ok"
+      },
+      {
+        "counters": {
+          "outcome": {
+            "anchored_overlapping": 0,
+            "anchored_threads": 7,
+            "comments_observed": 4,
+            "overdue_eligible": {
+              "168": 5,
+              "72": 6
+            },
+            "overdue_untouched": {
+              "168": 3,
+              "72": 4
+            },
+            "reply_hours": [
+              30.0
+            ],
+            "threads_settled": 7,
+            "threads_settled_complete": 6,
+            "threads_settled_complete_acted": 1,
+            "threads_settled_complete_acted_outdated": 1,
+            "threads_settled_complete_followed": 0,
+            "threads_settled_complete_replied": 1,
+            "threads_settled_outdated": 0,
+            "threads_settled_resolved": 1,
+            "threads_truncated": 1
+          },
+          "repository_disclosure": {
+            "merged_machine_authored": 0,
+            "prs_detail_unobserved": 0,
+            "prs_observed": 8
+          },
+          "volume": {
+            "comments_observed": 4,
+            "empty_body_comments": 0,
+            "finding_comments": 4,
+            "merged_eligible": 8,
+            "prs_with_finding": 4,
+            "threads": 8
+          }
+        },
+        "has_band_support": true,
+        "metrics": {
+          "acted_on_rate": {
+            "status": "value",
+            "units": 6,
+            "value": 0.16666666666666666
+          },
+          "acted_on_rate_with_outdated": {
+            "status": "value",
+            "units": 6,
+            "value": 0.16666666666666666
+          },
+          "cross_bot_overlap_rate": {
+            "status": "value",
+            "units": 7,
+            "value": 0.0
+          },
+          "findings_per_merged_pr": {
+            "status": "value",
+            "units": 8,
+            "value": 0.5
+          },
+          "human_followed_last_bot_rate": {
+            "status": "value",
+            "units": 6,
+            "value": 0.0
+          },
+          "human_reply_rate": {
+            "status": "value",
+            "units": 6,
+            "value": 0.16666666666666666
+          },
+          "median_hours_to_first_human_reply": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_168h": {
+            "status": "value",
+            "units": 5,
+            "value": 0.6
+          },
+          "overdue_untouched_rate_72h": {
+            "status": "value",
+            "units": 6,
+            "value": 0.6666666666666666
+          },
+          "pr_comment_coverage": {
+            "status": "value",
+            "units": 8,
+            "value": 0.5
+          },
+          "thread_outdated_rate": {
+            "status": "value",
+            "units": 7,
+            "value": 0.0
+          },
+          "thread_resolved_rate": {
+            "status": "value",
+            "units": 7,
+            "value": 0.14285714285714285
+          },
+          "threads_per_merged_pr": {
+            "status": "value",
+            "units": 8,
+            "value": 1.0
+          }
+        },
+        "repo": "acme/overdue-edges",
+        "vendor": "qodo",
+        "walk_status": "ok"
+      },
+      {
+        "counters": {
+          "outcome": {
+            "anchored_overlapping": 0,
+            "anchored_threads": 0,
+            "comments_observed": 0,
+            "overdue_eligible": {
+              "168": 0,
+              "72": 0
+            },
+            "overdue_untouched": {
+              "168": 0,
+              "72": 0
+            },
+            "reply_hours": [],
+            "threads_settled": 0,
+            "threads_settled_complete": 0,
+            "threads_settled_complete_acted": 0,
+            "threads_settled_complete_acted_outdated": 0,
+            "threads_settled_complete_followed": 0,
+            "threads_settled_complete_replied": 0,
+            "threads_settled_outdated": 0,
+            "threads_settled_resolved": 0,
+            "threads_truncated": 0
+          },
+          "repository_disclosure": {
+            "merged_machine_authored": 0,
+            "prs_detail_unobserved": 0,
+            "prs_observed": 8
+          },
+          "volume": {
+            "comments_observed": 0,
+            "empty_body_comments": 0,
+            "finding_comments": 0,
+            "merged_eligible": 8,
+            "prs_with_finding": 0,
+            "threads": 0
+          }
+        },
+        "has_band_support": false,
+        "metrics": {
+          "acted_on_rate": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "acted_on_rate_with_outdated": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "cross_bot_overlap_rate": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "findings_per_merged_pr": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "human_followed_last_bot_rate": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "human_reply_rate": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "median_hours_to_first_human_reply": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_168h": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_72h": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "pr_comment_coverage": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "thread_outdated_rate": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "thread_resolved_rate": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "threads_per_merged_pr": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          }
+        },
+        "repo": "acme/silent",
+        "vendor": "coderabbit",
+        "walk_status": "ok"
+      },
+      {
+        "counters": {
+          "outcome": {
+            "anchored_overlapping": 0,
+            "anchored_threads": 0,
+            "comments_observed": 4,
+            "overdue_eligible": {
+              "168": 0,
+              "72": 0
+            },
+            "overdue_untouched": {
+              "168": 0,
+              "72": 0
+            },
+            "reply_hours": [],
+            "threads_settled": 0,
+            "threads_settled_complete": 0,
+            "threads_settled_complete_acted": 0,
+            "threads_settled_complete_acted_outdated": 0,
+            "threads_settled_complete_followed": 0,
+            "threads_settled_complete_replied": 0,
+            "threads_settled_outdated": 0,
+            "threads_settled_resolved": 0,
+            "threads_truncated": 0
+          },
+          "repository_disclosure": {
+            "merged_machine_authored": 0,
+            "prs_detail_unobserved": 0,
+            "prs_observed": 7
+          },
+          "volume": {
+            "comments_observed": 4,
+            "empty_body_comments": 4,
+            "finding_comments": 0,
+            "merged_eligible": 7,
+            "prs_with_finding": 0,
+            "threads": 0
+          }
+        },
+        "has_band_support": true,
+        "metrics": {
+          "acted_on_rate": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "acted_on_rate_with_outdated": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "cross_bot_overlap_rate": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "findings_per_merged_pr": {
+            "status": "value",
+            "units": 7,
+            "value": 0.0
+          },
+          "human_followed_last_bot_rate": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "human_reply_rate": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "median_hours_to_first_human_reply": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_168h": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_72h": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "pr_comment_coverage": {
+            "status": "value",
+            "units": 7,
+            "value": 0.0
+          },
+          "thread_outdated_rate": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "thread_resolved_rate": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "threads_per_merged_pr": {
+            "status": "value",
+            "units": 7,
+            "value": 0.0
+          }
+        },
+        "repo": "acme/silent-approver",
+        "vendor": "sourcery",
+        "walk_status": "ok"
+      },
+      {
+        "counters": {
+          "outcome": {
+            "anchored_overlapping": 0,
+            "anchored_threads": 0,
+            "comments_observed": 5,
+            "overdue_eligible": {
+              "168": 0,
+              "72": 0
+            },
+            "overdue_untouched": {
+              "168": 0,
+              "72": 0
+            },
+            "reply_hours": [],
+            "threads_settled": 0,
+            "threads_settled_complete": 0,
+            "threads_settled_complete_acted": 0,
+            "threads_settled_complete_acted_outdated": 0,
+            "threads_settled_complete_followed": 0,
+            "threads_settled_complete_replied": 0,
+            "threads_settled_outdated": 0,
+            "threads_settled_resolved": 0,
+            "threads_truncated": 0
+          },
+          "repository_disclosure": {
+            "merged_machine_authored": 0,
+            "prs_detail_unobserved": 0,
+            "prs_observed": 8
+          },
+          "volume": {
+            "comments_observed": 5,
+            "empty_body_comments": 0,
+            "finding_comments": 5,
+            "merged_eligible": 8,
+            "prs_with_finding": 5,
+            "threads": 0
+          }
+        },
+        "has_band_support": true,
+        "metrics": {
+          "acted_on_rate": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "acted_on_rate_with_outdated": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "cross_bot_overlap_rate": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "findings_per_merged_pr": {
+            "status": "value",
+            "units": 8,
+            "value": 0.625
+          },
+          "human_followed_last_bot_rate": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "human_reply_rate": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "median_hours_to_first_human_reply": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_168h": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_72h": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "pr_comment_coverage": {
+            "status": "value",
+            "units": 8,
+            "value": 0.625
+          },
+          "thread_outdated_rate": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "thread_resolved_rate": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "threads_per_merged_pr": {
+            "status": "value",
+            "units": 8,
+            "value": 0.0
+          }
+        },
+        "repo": "acme/summariser",
+        "vendor": "copilot",
+        "walk_status": "ok"
+      },
+      {
+        "counters": {
+          "outcome": {
+            "anchored_overlapping": 0,
+            "anchored_threads": 3,
+            "comments_observed": 2,
+            "overdue_eligible": {
+              "168": 3,
+              "72": 3
+            },
+            "overdue_untouched": {
+              "168": 0,
+              "72": 0
+            },
+            "reply_hours": [
+              1.0,
+              3.0,
+              9.0
+            ],
+            "threads_settled": 3,
+            "threads_settled_complete": 3,
+            "threads_settled_complete_acted": 1,
+            "threads_settled_complete_acted_outdated": 1,
+            "threads_settled_complete_followed": 1,
+            "threads_settled_complete_replied": 3,
+            "threads_settled_outdated": 0,
+            "threads_settled_resolved": 1,
+            "threads_truncated": 0
+          },
+          "repository_disclosure": {
+            "merged_machine_authored": 0,
+            "prs_detail_unobserved": 0,
+            "prs_observed": 6
+          },
+          "volume": {
+            "comments_observed": 2,
+            "empty_body_comments": 0,
+            "finding_comments": 2,
+            "merged_eligible": 6,
+            "prs_with_finding": 2,
+            "threads": 3
+          }
+        },
+        "has_band_support": true,
+        "metrics": {
+          "acted_on_rate": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "acted_on_rate_with_outdated": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "cross_bot_overlap_rate": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "findings_per_merged_pr": {
+            "status": "value",
+            "units": 6,
+            "value": 0.3333333333333333
+          },
+          "human_followed_last_bot_rate": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "human_reply_rate": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "median_hours_to_first_human_reply": {
+            "status": "value",
+            "units": 3,
+            "value": 3.0
+          },
+          "overdue_untouched_rate_168h": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_72h": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "pr_comment_coverage": {
+            "status": "value",
+            "units": 6,
+            "value": 0.3333333333333333
+          },
+          "thread_outdated_rate": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "thread_resolved_rate": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "threads_per_merged_pr": {
+            "status": "value",
+            "units": 6,
+            "value": 0.5
+          }
+        },
+        "repo": "acme/thin",
+        "vendor": "greptile",
+        "walk_status": "ok"
+      },
+      {
+        "counters": {
+          "outcome": {
+            "anchored_overlapping": 0,
+            "anchored_threads": 6,
+            "comments_observed": 0,
+            "overdue_eligible": {
+              "168": 6,
+              "72": 6
+            },
+            "overdue_untouched": {
+              "168": 0,
+              "72": 0
+            },
+            "reply_hours": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0
+            ],
+            "threads_settled": 6,
+            "threads_settled_complete": 6,
+            "threads_settled_complete_acted": 6,
+            "threads_settled_complete_acted_outdated": 6,
+            "threads_settled_complete_followed": 6,
+            "threads_settled_complete_replied": 6,
+            "threads_settled_outdated": 0,
+            "threads_settled_resolved": 6,
+            "threads_truncated": 0
+          },
+          "repository_disclosure": {
+            "merged_machine_authored": 0,
+            "prs_detail_unobserved": 0,
+            "prs_observed": 7
+          },
+          "volume": {
+            "comments_observed": 0,
+            "empty_body_comments": 0,
+            "finding_comments": 0,
+            "merged_eligible": 7,
+            "prs_with_finding": 0,
+            "threads": 6
+          }
+        },
+        "has_band_support": false,
+        "metrics": {
+          "acted_on_rate": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "acted_on_rate_with_outdated": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "cross_bot_overlap_rate": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "findings_per_merged_pr": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "human_followed_last_bot_rate": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "human_reply_rate": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "median_hours_to_first_human_reply": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_168h": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_72h": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "pr_comment_coverage": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "thread_outdated_rate": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "thread_resolved_rate": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          },
+          "threads_per_merged_pr": {
+            "reason": "vendor_silent",
+            "status": "excluded"
+          }
+        },
+        "repo": "acme/threads-without-comments",
+        "vendor": "coderabbit",
+        "walk_status": "ok"
+      },
+      {
+        "counters": {
+          "outcome": {
+            "anchored_overlapping": 1,
+            "anchored_threads": 5,
+            "comments_observed": 4,
+            "overdue_eligible": {
+              "168": 6,
+              "72": 6
+            },
+            "overdue_untouched": {
+              "168": 6,
+              "72": 6
+            },
+            "reply_hours": [],
+            "threads_settled": 6,
+            "threads_settled_complete": 6,
+            "threads_settled_complete_acted": 0,
+            "threads_settled_complete_acted_outdated": 1,
+            "threads_settled_complete_followed": 0,
+            "threads_settled_complete_replied": 0,
+            "threads_settled_outdated": 1,
+            "threads_settled_resolved": 0,
+            "threads_truncated": 0
+          },
+          "repository_disclosure": {
+            "merged_machine_authored": 0,
+            "prs_detail_unobserved": 0,
+            "prs_observed": 8
+          },
+          "volume": {
+            "comments_observed": 4,
+            "empty_body_comments": 0,
+            "finding_comments": 4,
+            "merged_eligible": 8,
+            "prs_with_finding": 4,
+            "threads": 6
+          }
+        },
+        "has_band_support": true,
+        "metrics": {
+          "acted_on_rate": {
+            "status": "value",
+            "units": 6,
+            "value": 0.0
+          },
+          "acted_on_rate_with_outdated": {
+            "status": "value",
+            "units": 6,
+            "value": 0.16666666666666666
+          },
+          "cross_bot_overlap_rate": {
+            "status": "value",
+            "units": 5,
+            "value": 0.2
+          },
+          "findings_per_merged_pr": {
+            "status": "value",
+            "units": 8,
+            "value": 0.5
+          },
+          "human_followed_last_bot_rate": {
+            "status": "value",
+            "units": 6,
+            "value": 0.0
+          },
+          "human_reply_rate": {
+            "status": "value",
+            "units": 6,
+            "value": 0.0
+          },
+          "median_hours_to_first_human_reply": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_168h": {
+            "status": "value",
+            "units": 6,
+            "value": 1.0
+          },
+          "overdue_untouched_rate_72h": {
+            "status": "value",
+            "units": 6,
+            "value": 1.0
+          },
+          "pr_comment_coverage": {
+            "status": "value",
+            "units": 8,
+            "value": 0.5
+          },
+          "thread_outdated_rate": {
+            "status": "value",
+            "units": 6,
+            "value": 0.16666666666666666
+          },
+          "thread_resolved_rate": {
+            "status": "value",
+            "units": 6,
+            "value": 0.0
+          },
+          "threads_per_merged_pr": {
+            "status": "value",
+            "units": 8,
+            "value": 0.75
+          }
+        },
+        "repo": "acme/two-bots",
+        "vendor": "coderabbit",
+        "walk_status": "ok"
+      },
+      {
+        "counters": {
+          "outcome": {
+            "anchored_overlapping": 1,
+            "anchored_threads": 1,
+            "comments_observed": 1,
+            "overdue_eligible": {
+              "168": 1,
+              "72": 1
+            },
+            "overdue_untouched": {
+              "168": 1,
+              "72": 1
+            },
+            "reply_hours": [],
+            "threads_settled": 1,
+            "threads_settled_complete": 1,
+            "threads_settled_complete_acted": 0,
+            "threads_settled_complete_acted_outdated": 0,
+            "threads_settled_complete_followed": 0,
+            "threads_settled_complete_replied": 0,
+            "threads_settled_outdated": 0,
+            "threads_settled_resolved": 0,
+            "threads_truncated": 0
+          },
+          "repository_disclosure": {
+            "merged_machine_authored": 0,
+            "prs_detail_unobserved": 0,
+            "prs_observed": 8
+          },
+          "volume": {
+            "comments_observed": 1,
+            "empty_body_comments": 0,
+            "finding_comments": 1,
+            "merged_eligible": 8,
+            "prs_with_finding": 1,
+            "threads": 1
+          }
+        },
+        "has_band_support": true,
+        "metrics": {
+          "acted_on_rate": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "acted_on_rate_with_outdated": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "cross_bot_overlap_rate": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "findings_per_merged_pr": {
+            "status": "value",
+            "units": 8,
+            "value": 0.125
+          },
+          "human_followed_last_bot_rate": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "human_reply_rate": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "median_hours_to_first_human_reply": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_168h": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_72h": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "pr_comment_coverage": {
+            "status": "value",
+            "units": 8,
+            "value": 0.125
+          },
+          "thread_outdated_rate": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "thread_resolved_rate": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "threads_per_merged_pr": {
+            "status": "value",
+            "units": 8,
+            "value": 0.125
+          }
+        },
+        "repo": "acme/two-bots",
+        "vendor": "cursor",
+        "walk_status": "ok"
+      },
+      {
+        "counters": {
+          "outcome": {
+            "anchored_overlapping": 0,
+            "anchored_threads": 10,
+            "comments_observed": 8,
+            "overdue_eligible": {
+              "168": 9,
+              "72": 9
+            },
+            "overdue_untouched": {
+              "168": 5,
+              "72": 5
+            },
+            "reply_hours": [
+              2.0,
+              6.0
+            ],
+            "threads_settled": 10,
+            "threads_settled_complete": 9,
+            "threads_settled_complete_acted": 3,
+            "threads_settled_complete_acted_outdated": 4,
+            "threads_settled_complete_followed": 1,
+            "threads_settled_complete_replied": 2,
+            "threads_settled_outdated": 1,
+            "threads_settled_resolved": 2,
+            "threads_truncated": 1
+          },
+          "repository_disclosure": {
+            "merged_machine_authored": 2,
+            "prs_detail_unobserved": 0,
+            "prs_observed": 13
+          },
+          "volume": {
+            "comments_observed": 7,
+            "empty_body_comments": 1,
+            "finding_comments": 6,
+            "merged_eligible": 10,
+            "prs_with_finding": 3,
+            "threads": 10
+          }
+        },
+        "has_band_support": true,
+        "metrics": {
+          "acted_on_rate": {
+            "status": "value",
+            "units": 9,
+            "value": 0.3333333333333333
+          },
+          "acted_on_rate_with_outdated": {
+            "status": "value",
+            "units": 9,
+            "value": 0.4444444444444444
+          },
+          "cross_bot_overlap_rate": {
+            "status": "value",
+            "units": 10,
+            "value": 0.0
+          },
+          "findings_per_merged_pr": {
+            "status": "value",
+            "units": 10,
+            "value": 0.6
+          },
+          "human_followed_last_bot_rate": {
+            "status": "value",
+            "units": 9,
+            "value": 0.1111111111111111
+          },
+          "human_reply_rate": {
+            "status": "value",
+            "units": 9,
+            "value": 0.2222222222222222
+          },
+          "median_hours_to_first_human_reply": {
+            "reason": "below_min_units",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_168h": {
+            "status": "value",
+            "units": 9,
+            "value": 0.5555555555555556
+          },
+          "overdue_untouched_rate_72h": {
+            "status": "value",
+            "units": 9,
+            "value": 0.5555555555555556
+          },
+          "pr_comment_coverage": {
+            "status": "value",
+            "units": 10,
+            "value": 0.3
+          },
+          "thread_outdated_rate": {
+            "status": "value",
+            "units": 10,
+            "value": 0.1
+          },
+          "thread_resolved_rate": {
+            "status": "value",
+            "units": 10,
+            "value": 0.2
+          },
+          "threads_per_merged_pr": {
+            "status": "value",
+            "units": 10,
+            "value": 1.0
+          }
+        },
+        "repo": "acme/typical",
+        "vendor": "coderabbit",
+        "walk_status": "ok"
+      },
+      {
+        "counters": {
+          "outcome": {
+            "anchored_overlapping": 0,
+            "anchored_threads": 6,
+            "comments_observed": 6,
+            "overdue_eligible": {
+              "168": 6,
+              "72": 6
+            },
+            "overdue_untouched": {
+              "168": 3,
+              "72": 3
+            },
+            "reply_hours": [],
+            "threads_settled": 6,
+            "threads_settled_complete": 6,
+            "threads_settled_complete_acted": 3,
+            "threads_settled_complete_acted_outdated": 3,
+            "threads_settled_complete_followed": 0,
+            "threads_settled_complete_replied": 0,
+            "threads_settled_outdated": 0,
+            "threads_settled_resolved": 3,
+            "threads_truncated": 0
+          },
+          "repository_disclosure": {
+            "merged_machine_authored": 0,
+            "prs_detail_unobserved": 0,
+            "prs_observed": 11
+          },
+          "volume": {
+            "comments_observed": 0,
+            "empty_body_comments": 0,
+            "finding_comments": 0,
+            "merged_eligible": 8,
+            "prs_with_finding": 0,
+            "threads": 0
+          }
+        },
+        "has_band_support": false,
+        "metrics": {
+          "acted_on_rate": {
+            "status": "value",
+            "units": 6,
+            "value": 0.5
+          },
+          "acted_on_rate_with_outdated": {
+            "status": "value",
+            "units": 6,
+            "value": 0.5
+          },
+          "cross_bot_overlap_rate": {
+            "status": "value",
+            "units": 6,
+            "value": 0.0
+          },
+          "findings_per_merged_pr": {
+            "reason": "vendor_absent_from_population",
+            "status": "excluded"
+          },
+          "human_followed_last_bot_rate": {
+            "status": "value",
+            "units": 6,
+            "value": 0.0
+          },
+          "human_reply_rate": {
+            "status": "value",
+            "units": 6,
+            "value": 0.0
+          },
+          "median_hours_to_first_human_reply": {
+            "reason": "denominator_empty",
+            "status": "excluded"
+          },
+          "overdue_untouched_rate_168h": {
+            "status": "value",
+            "units": 6,
+            "value": 0.5
+          },
+          "overdue_untouched_rate_72h": {
+            "status": "value",
+            "units": 6,
+            "value": 0.5
+          },
+          "pr_comment_coverage": {
+            "reason": "vendor_absent_from_population",
+            "status": "excluded"
+          },
+          "thread_outdated_rate": {
+            "status": "value",
+            "units": 6,
+            "value": 0.0
+          },
+          "thread_resolved_rate": {
+            "status": "value",
+            "units": 6,
+            "value": 0.5
+          },
+          "threads_per_merged_pr": {
+            "reason": "vendor_absent_from_population",
+            "status": "excluded"
+          }
+        },
+        "repo": "acme/unmerged-only",
+        "vendor": "coderabbit",
+        "walk_status": "ok"
+      }
+    ]
+  },
+  "fit": {
+    "benchmark_corpus_version": 3,
+    "benchmark_fit_version": 2,
+    "metric_specs": {
+      "acted_on_rate": {
+        "definition": "Share of settled, fully-read vendor threads that were resolved OR followed by a human after the vendor's last comment. Deliberately EXCLUDES is_outdated — see acted_on_rate_with_outdated for the other reading; the two are emitted side by side so the sensitivity is visible rather than argued about.",
+        "denominator": "settled, fully-read vendor threads",
+        "derivation": "code",
+        "direction": "higher_is_better",
+        "min_units": 5,
+        "numerator": "settled complete vendor threads: is_resolved OR human_followed_last_review_bot",
+        "population": "outcome",
+        "unit": "rate"
+      },
+      "acted_on_rate_with_outdated": {
+        "definition": "acted_on_rate widened by GitHub's is_outdated flag. A SEPARATE METRIC, never a redefinition of the one above: the two answer 'was this dealt with' under two different beliefs about whether a changed line proves it.",
+        "denominator": "settled, fully-read vendor threads",
+        "derivation": "code",
+        "direction": "higher_is_better",
+        "min_units": 5,
+        "numerator": "settled complete vendor threads: resolved OR outdated OR followed",
+        "population": "outcome",
+        "unit": "rate"
+      },
+      "cross_bot_overlap_rate": {
+        "definition": "Share of this vendor's anchored settled threads whose (path, line) anchor also carries a DIFFERENT vendor's thread on the same pull request — how often two bots say something about the same line. A thread that lost its line (outdated, no line) has no anchor and is excluded from both halves rather than counted as non-overlapping.",
+        "denominator": "settled vendor threads with a (path, line) anchor",
+        "derivation": "code",
+        "direction": "neutral",
+        "min_units": 5,
+        "numerator": "anchored vendor threads sharing (path, line) with another vendor on the same PR",
+        "population": "outcome",
+        "unit": "rate"
+      },
+      "findings_per_merged_pr": {
+        "definition": "Non-empty comment bodies this vendor left, per merged human-authored pull request. An empty-body review (a silent approval) is NOT a finding — 89 of 1,204 bot comment rows in the smoke walk were exactly that, and counting them would score a bot that approves without words above one that writes.",
+        "denominator": "merged, human-authored, detail-observed pull requests",
+        "derivation": "code",
+        "direction": "neutral",
+        "min_units": 5,
+        "numerator": "bot comments, vendor-attributed, body_chars > 0",
+        "population": "volume",
+        "unit": "count_per_pr"
+      },
+      "human_followed_last_bot_rate": {
+        "definition": "Share of settled, fully-read vendor threads where a human commented strictly after the vendor's LAST comment — engagement that survived the bot's final word rather than a reply that preceded it.",
+        "denominator": "settled, fully-read vendor threads",
+        "derivation": "code",
+        "direction": "higher_is_better",
+        "min_units": 5,
+        "numerator": "settled complete vendor threads with human_followed_last_review_bot",
+        "population": "outcome",
+        "unit": "rate"
+      },
+      "human_reply_rate": {
+        "definition": "Share of this vendor's settled, fully-read review threads where a human commented after the vendor's first comment. ⚠ Threads whose comment tail was truncated are EXCLUDED: 'nobody answered' and 'we did not read far enough to know' are different claims, and the corpus nulls the fact rather than defaulting it to False.",
+        "denominator": "settled, fully-read vendor threads",
+        "derivation": "code",
+        "direction": "higher_is_better",
+        "min_units": 5,
+        "numerator": "settled complete vendor threads with human_replied",
+        "population": "outcome",
+        "unit": "rate"
+      },
+      "median_hours_to_first_human_reply": {
+        "definition": "Per-repository median of the time from this vendor's FIRST comment on a thread to the first human comment after it, over settled threads that got one. The clock starts at the first BOT comment rather than the thread root, because a thread a human opened and a bot joined has a root that is not a bot finding at all.",
+        "denominator": "settled complete vendor threads that received a human reply",
+        "derivation": "code",
+        "direction": "lower_is_better",
+        "min_units": 3,
+        "numerator": "median over seconds_to_first_human_reply / 3600",
+        "population": "outcome",
+        "unit": "hours"
+      },
+      "overdue_untouched_rate_168h": {
+        "definition": "Of this vendor's review threads that were at least 168h old at observation and whose comment tail was fully read, the share that are neither resolved nor answered by a human. Threads younger than the grace window are EXCLUDED from the denominator, not counted as answered: they have not had the chance to be overdue.",
+        "denominator": "threads age>=168h, complete",
+        "derivation": "code",
+        "direction": "lower_is_better",
+        "min_units": 5,
+        "numerator": "threads age>=168h, complete, not resolved, no human reply",
+        "population": "outcome",
+        "unit": "rate"
+      },
+      "overdue_untouched_rate_72h": {
+        "definition": "Of this vendor's review threads that were at least 72h old at observation and whose comment tail was fully read, the share that are neither resolved nor answered by a human. Threads younger than the grace window are EXCLUDED from the denominator, not counted as answered: they have not had the chance to be overdue.",
+        "denominator": "threads age>=72h, complete",
+        "derivation": "code",
+        "direction": "lower_is_better",
+        "min_units": 5,
+        "numerator": "threads age>=72h, complete, not resolved, no human reply",
+        "population": "outcome",
+        "unit": "rate"
+      },
+      "pr_comment_coverage": {
+        "definition": "Share of merged human-authored pull requests on which this vendor said anything. ⚠ CONDITIONED ON THE VENDOR BEING LIVE IN THIS POPULATION: a repo where it emitted nothing on any merged pull request is UNDEFINED here, not 0.0 — counted under vendor_silent when there is no trace of it in the repository at all, and under vendor_absent_from_population when it reviewed only pull requests that had not merged. The floor of this metric is therefore 1/N, and that is the honest reading — 'the bot is installed but never fires' is a different claim from 'the bot is not installed', and this corpus cannot tell them apart.",
+        "denominator": "merged, human-authored, detail-observed pull requests",
+        "derivation": "code",
+        "direction": "neutral",
+        "min_units": 5,
+        "numerator": "merged human-authored PRs with >= 1 vendor finding",
+        "population": "volume",
+        "unit": "rate"
+      },
+      "thread_outdated_rate": {
+        "definition": "Share of this vendor's settled review threads GitHub marks outdated — the anchored lines changed after the comment. ⚠ THIS IS NOT 'likely addressed'. The host product's likely_addressed asks whether a commit touched the thread's FILE after its last comment, computed from commit file lists this walk does not fetch. The two are close enough to be confused and differ by percentage points, so they have different names and this corpus carries only the one it observed.",
+        "denominator": "settled vendor threads",
+        "derivation": "code",
+        "direction": "neutral",
+        "min_units": 5,
+        "numerator": "settled vendor threads with is_outdated",
+        "population": "outcome",
+        "unit": "rate"
+      },
+      "thread_resolved_rate": {
+        "definition": "Share of this vendor's settled review threads marked resolved on GitHub. isResolved is a thread-level scalar the walk observes even under comment truncation, so this metric's denominator is all settled threads rather than only complete ones.",
+        "denominator": "settled vendor threads",
+        "derivation": "code",
+        "direction": "higher_is_better",
+        "min_units": 5,
+        "numerator": "settled vendor threads with is_resolved",
+        "population": "outcome",
+        "unit": "rate"
+      },
+      "threads_per_merged_pr": {
+        "definition": "Review threads carrying at least one comment from this vendor, per merged human-authored pull request. A thread two vendors both commented on counts for both — the question is what each vendor generated, not how the work was divided.",
+        "denominator": "merged, human-authored, detail-observed pull requests",
+        "derivation": "code",
+        "direction": "neutral",
+        "min_units": 5,
+        "numerator": "review threads with this vendor in review_bot_vendors",
+        "population": "volume",
+        "unit": "count_per_pr"
+      }
+    },
+    "params": {
+      "bootstrap_samples": 2000,
+      "bootstrap_seed": 7,
+      "max_bands": 10,
+      "min_bands": 2,
+      "min_repos_per_cell": 30,
+      "overdue_grace_hours": [
+        72,
+        168
+      ],
+      "quantile_grid": [
+        0,
+        5,
+        10,
+        15,
+        20,
+        25,
+        30,
+        35,
+        40,
+        45,
+        50,
+        55,
+        60,
+        65,
+        70,
+        75,
+        80,
+        85,
+        90,
+        95,
+        100
+      ],
+      "quantile_method": "linear",
+      "settle_hours": 72,
+      "shape_min_n": 200,
+      "staleness_thresholds_days": {
+        "aging": 30,
+        "expired": 180,
+        "stale": 90
+      }
+    },
+    "populations": {
+      "outcome": "human-authored, detail-observed pull requests, MERGED OR NOT. Conditioning a thread outcome on the merge selects on the dependent variable; the censoring problem merging solves for volume is solved here by settle_hours instead.",
+      "volume": "merged, human-authored, detail-observed pull requests. Merged because an open pull request is still accumulating comments — its count is right-censored and averaging it in understates every vendor."
+    }
+  },
+  "input": {
+    "note": "a NEUTRAL schema: it names no column of either side. Each field's mapping onto the corpus and onto the host's tables is in the contract document.",
+    "repos": [
+      {
+        "comments": [
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 1,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 1,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 2,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 2,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "pr_comment",
+            "pr": 3,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 3,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 0,
+            "kind": "review",
+            "pr": 4,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 900,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 500,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "human",
+            "body_chars": 25,
+            "kind": "review_comment",
+            "pr": 1,
+            "vendor": null
+          },
+          {
+            "author": "machine_other",
+            "body_chars": 25,
+            "kind": "pr_comment",
+            "pr": 1,
+            "vendor": "unknown"
+          }
+        ],
+        "host_representable": true,
+        "panel_prs_per_period": 9,
+        "panel_vendors": [
+          "coderabbit"
+        ],
+        "pulls": [
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 1
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 2
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 3
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 4
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 5
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 6
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 7
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 8
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 9
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 10
+          },
+          {
+            "author_is_machine": true,
+            "detail_observed": true,
+            "merged": true,
+            "number": 500
+          },
+          {
+            "author_is_machine": true,
+            "detail_observed": true,
+            "merged": true,
+            "number": 501
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": false,
+            "number": 900
+          }
+        ],
+        "purpose": "the happy path: every metric fitted with a non-trivial, non-degenerate value. Ten merged human pull requests, two merged machine-authored ones (excluded from the volume denominator, counted in the machine disclosure), one open one.",
+        "repo": "acme/typical",
+        "threads": [
+          {
+            "age_seconds": 2592000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "t1",
+            "line": 10,
+            "outdated": false,
+            "path": "src/a.py",
+            "pr": 1,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 2592000,
+            "human_followed_last_bot": true,
+            "human_replied": true,
+            "id": "t2",
+            "line": 20,
+            "outdated": false,
+            "path": "src/a.py",
+            "pr": 1,
+            "resolved": false,
+            "seconds_to_first_human_reply": 7200,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 2592000,
+            "human_followed_last_bot": false,
+            "human_replied": true,
+            "id": "t3",
+            "line": 30,
+            "outdated": false,
+            "path": "src/b.py",
+            "pr": 2,
+            "resolved": false,
+            "seconds_to_first_human_reply": 21600,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 2592000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "t4",
+            "line": 40,
+            "outdated": true,
+            "path": "src/b.py",
+            "pr": 2,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 2592000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "t5",
+            "line": 50,
+            "outdated": false,
+            "path": "src/c.py",
+            "pr": 3,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 2592000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "t6",
+            "line": 60,
+            "outdated": false,
+            "path": "src/c.py",
+            "pr": 3,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 2592000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "t7",
+            "line": 70,
+            "outdated": false,
+            "path": "src/d.py",
+            "pr": 4,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 2592000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "t8",
+            "line": 80,
+            "outdated": false,
+            "path": "src/d.py",
+            "pr": 4,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 7200,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "t9",
+            "line": 90,
+            "outdated": false,
+            "path": "src/e.py",
+            "pr": 5,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 2592000,
+            "human_followed_last_bot": null,
+            "human_replied": null,
+            "id": "t10",
+            "line": 100,
+            "outdated": false,
+            "path": "src/e.py",
+            "pr": 5,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": false,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 2592000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "t11",
+            "line": 110,
+            "outdated": false,
+            "path": "src/f.py",
+            "pr": 900,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 2592000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "t12",
+            "line": 120,
+            "outdated": false,
+            "path": "src/g.py",
+            "pr": 500,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          }
+        ],
+        "walk_status": "ok"
+      },
+      {
+        "comments": [
+          {
+            "author": "human",
+            "body_chars": 25,
+            "kind": "review_comment",
+            "pr": 1,
+            "vendor": null
+          }
+        ],
+        "host_representable": true,
+        "panel_prs_per_period": 6,
+        "panel_vendors": [
+          "coderabbit"
+        ],
+        "pulls": [
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 1
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 2
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 3
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 4
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 5
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 6
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 7
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 8
+          }
+        ],
+        "purpose": "RULE 4. The panel says coderabbit runs here; the walk read the repository and saw nothing from it. Every metric is vendor_silent — UNDEFINED, never 0.0. Uninstalled, path-scoped and category-suppressed are indistinguishable from here and all three differ from 'commented and was ignored'.",
+        "repo": "acme/silent",
+        "threads": [],
+        "walk_status": "ok"
+      },
+      {
+        "comments": [
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 900,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 900,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 900,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 900,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 900,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 900,
+            "vendor": "coderabbit"
+          }
+        ],
+        "host_representable": true,
+        "panel_prs_per_period": 5,
+        "panel_vendors": [
+          "coderabbit"
+        ],
+        "pulls": [
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 1
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 2
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 3
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 4
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 5
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 6
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 7
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 8
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": false,
+            "number": 900
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": false,
+            "number": 901
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": false,
+            "number": 902
+          }
+        ],
+        "purpose": "RULE 4's own failure mode, wearing a gate's clothes. The vendor is demonstrably live — busy on pull requests that had not merged — so the OUTCOME metrics are perfectly good, while the three VOLUME metrics are vendor_absent_from_population rather than a measured 0.0. Fitting this as a hard zero is what manufactures 'this bot finds nothing'.",
+        "repo": "acme/unmerged-only",
+        "threads": [
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "u0",
+            "line": 10,
+            "outdated": false,
+            "path": "src/u.py",
+            "pr": 900,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "u1",
+            "line": 11,
+            "outdated": false,
+            "path": "src/u.py",
+            "pr": 900,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "u2",
+            "line": 12,
+            "outdated": false,
+            "path": "src/u.py",
+            "pr": 900,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "u3",
+            "line": 13,
+            "outdated": false,
+            "path": "src/u.py",
+            "pr": 900,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "u4",
+            "line": 14,
+            "outdated": false,
+            "path": "src/u.py",
+            "pr": 900,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "u5",
+            "line": 15,
+            "outdated": false,
+            "path": "src/u.py",
+            "pr": 900,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          }
+        ],
+        "walk_status": "ok"
+      },
+      {
+        "comments": [
+          {
+            "author": "vendor",
+            "body_chars": 300,
+            "kind": "pr_comment",
+            "pr": 1,
+            "vendor": "copilot"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 300,
+            "kind": "pr_comment",
+            "pr": 2,
+            "vendor": "copilot"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 300,
+            "kind": "pr_comment",
+            "pr": 3,
+            "vendor": "copilot"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 300,
+            "kind": "pr_comment",
+            "pr": 4,
+            "vendor": "copilot"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 300,
+            "kind": "pr_comment",
+            "pr": 5,
+            "vendor": "copilot"
+          }
+        ],
+        "host_representable": true,
+        "panel_prs_per_period": 7,
+        "panel_vendors": [
+          "copilot"
+        ],
+        "pulls": [
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 1
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 2
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 3
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 4
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 5
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 6
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 7
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 8
+          }
+        ],
+        "purpose": "DENOMINATOR_EMPTY, and why it is not a zero. A summariser posts PR-level comments and opens no review threads at all: its volume metrics fit, and every thread-outcome metric has an EMPTY population. 0.0 there would be a lie about its behaviour.",
+        "repo": "acme/summariser",
+        "threads": [],
+        "walk_status": "ok"
+      },
+      {
+        "comments": [
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 1,
+            "vendor": "greptile"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 2,
+            "vendor": "greptile"
+          }
+        ],
+        "host_representable": true,
+        "panel_prs_per_period": 4,
+        "panel_vendors": [
+          "greptile"
+        ],
+        "pulls": [
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 1
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 2
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 3
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 4
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 5
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 6
+          }
+        ],
+        "purpose": "BELOW_MIN_UNITS, and the split between the two floors. Three settled complete threads: the ten metrics at min_units=5 refuse, and median_hours_to_first_human_reply (min_units=3) FITS on the same repository. A per-repository rate over two threads is noise wearing a percentage sign; a fixture with one floor would not notice the other.",
+        "repo": "acme/thin",
+        "threads": [
+          {
+            "age_seconds": 864000,
+            "human_followed_last_bot": true,
+            "human_replied": true,
+            "id": "n1",
+            "line": 10,
+            "outdated": false,
+            "path": "src/n.py",
+            "pr": 1,
+            "resolved": true,
+            "seconds_to_first_human_reply": 3600,
+            "tail_complete": true,
+            "vendors": [
+              "greptile"
+            ]
+          },
+          {
+            "age_seconds": 864000,
+            "human_followed_last_bot": false,
+            "human_replied": true,
+            "id": "n2",
+            "line": 20,
+            "outdated": false,
+            "path": "src/n.py",
+            "pr": 1,
+            "resolved": false,
+            "seconds_to_first_human_reply": 10800,
+            "tail_complete": true,
+            "vendors": [
+              "greptile"
+            ]
+          },
+          {
+            "age_seconds": 864000,
+            "human_followed_last_bot": false,
+            "human_replied": true,
+            "id": "n3",
+            "line": 30,
+            "outdated": false,
+            "path": "src/n.py",
+            "pr": 2,
+            "resolved": false,
+            "seconds_to_first_human_reply": 32400,
+            "tail_complete": true,
+            "vendors": [
+              "greptile"
+            ]
+          }
+        ],
+        "walk_status": "ok"
+      },
+      {
+        "comments": [
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 1,
+            "vendor": "coderabbit"
+          }
+        ],
+        "host_note": "the host has no equivalent: a repository it cannot read has no rows at all, so this exclusion can never fire customer-side. It ships to pin the corpus-side guard ORDER — repo_not_walked is tested BEFORE vendor_silent, and a repository with partial rows under a failed walk must not be read as a quiet vendor.",
+        "host_representable": false,
+        "panel_prs_per_period": 12,
+        "panel_vendors": [
+          "coderabbit"
+        ],
+        "pulls": [
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 1
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 2
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 3
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 4
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 5
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 6
+          }
+        ],
+        "purpose": "REPO_NOT_WALKED — a survivorship loss, not a silence and not a zero. The repository was deleted, renamed or made private between the frame window and the walk. It is a member of its cell and of nothing else.",
+        "repo": "acme/gone",
+        "threads": [],
+        "walk_status": "not_found"
+      },
+      {
+        "comments": [
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 900,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 900,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 900,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 900,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 900,
+            "vendor": "coderabbit"
+          }
+        ],
+        "host_representable": true,
+        "panel_prs_per_period": 8,
+        "panel_vendors": [
+          "coderabbit"
+        ],
+        "pulls": [
+          {
+            "author_is_machine": true,
+            "detail_observed": true,
+            "merged": true,
+            "number": 500
+          },
+          {
+            "author_is_machine": true,
+            "detail_observed": true,
+            "merged": true,
+            "number": 501
+          },
+          {
+            "author_is_machine": true,
+            "detail_observed": true,
+            "merged": true,
+            "number": 502
+          },
+          {
+            "author_is_machine": true,
+            "detail_observed": true,
+            "merged": true,
+            "number": 503
+          },
+          {
+            "author_is_machine": true,
+            "detail_observed": true,
+            "merged": true,
+            "number": 504
+          },
+          {
+            "author_is_machine": true,
+            "detail_observed": true,
+            "merged": true,
+            "number": 505
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": false,
+            "number": 900
+          }
+        ],
+        "purpose": "EVERY MERGE IS MACHINE-AUTHORED, so the volume population is empty — and the exclusion is vendor_absent_from_population, NOT denominator_empty, because a vendor with no merged human pull request to comment on cannot have been observed in that population either. ⚠ A VOLUME denominator_empty IS UNREACHABLE BY CONSTRUCTION: a comment only enters the volume population from a pull request that is merged, human-authored and detail-observed, which is itself a member of merged_eligible. The TypeScript side must model it as unreachable rather than as an untested branch. Dependency bumps are 30-40% of merges in the wild and their review dynamics are nothing like human work.",
+        "repo": "acme/machine-merges-only",
+        "threads": [
+          {
+            "age_seconds": 1296000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "m0",
+            "line": 10,
+            "outdated": false,
+            "path": "src/m.py",
+            "pr": 900,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1296000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "m1",
+            "line": 11,
+            "outdated": false,
+            "path": "src/m.py",
+            "pr": 900,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1296000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "m2",
+            "line": 12,
+            "outdated": false,
+            "path": "src/m.py",
+            "pr": 900,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1296000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "m3",
+            "line": 13,
+            "outdated": false,
+            "path": "src/m.py",
+            "pr": 900,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1296000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "m4",
+            "line": 14,
+            "outdated": false,
+            "path": "src/m.py",
+            "pr": 900,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          }
+        ],
+        "walk_status": "ok"
+      },
+      {
+        "comments": [
+          {
+            "author": "vendor",
+            "body_chars": 0,
+            "kind": "review",
+            "pr": 1,
+            "vendor": "sourcery"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 0,
+            "kind": "review",
+            "pr": 2,
+            "vendor": "sourcery"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 0,
+            "kind": "review",
+            "pr": 3,
+            "vendor": "sourcery"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 0,
+            "kind": "review",
+            "pr": 4,
+            "vendor": "sourcery"
+          }
+        ],
+        "host_representable": true,
+        "panel_prs_per_period": 6,
+        "panel_vendors": [
+          "sourcery"
+        ],
+        "pulls": [
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 1
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 2
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 3
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 4
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 5
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 6
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 7
+          }
+        ],
+        "purpose": "THE REAL ZERO rule 4 exists to protect. The vendor is live on merged pull requests and said nothing worth counting — every one of its comments is an empty-body review. findings_per_merged_pr and pr_comment_coverage are a MEASURED 0.0 with full weight, structurally distinct from the undefined zeros above.",
+        "repo": "acme/silent-approver",
+        "threads": [],
+        "walk_status": "ok"
+      },
+      {
+        "comments": [
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 1,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 1,
+            "vendor": "cursor"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 2,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 3,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 4,
+            "vendor": "coderabbit"
+          }
+        ],
+        "host_representable": true,
+        "panel_prs_per_period": 11,
+        "panel_vendors": [
+          "coderabbit",
+          "cursor"
+        ],
+        "pulls": [
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 1
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 2
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 3
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 4
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 5
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 6
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 7
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 8
+          }
+        ],
+        "purpose": "CROSS_BOT_OVERLAP_RATE and the anchor rule. Two vendors on the same (path, line) of the same pull request overlap; a thread that lost its line has NO anchor and is excluded from BOTH halves rather than counted as non-overlapping. A thread two vendors both commented on counts for both — the question is what each generated.",
+        "repo": "acme/two-bots",
+        "threads": [
+          {
+            "age_seconds": 1036800,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "o1",
+            "line": 10,
+            "outdated": false,
+            "path": "src/o.py",
+            "pr": 1,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1036800,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "o2",
+            "line": 10,
+            "outdated": false,
+            "path": "src/o.py",
+            "pr": 1,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "cursor"
+            ]
+          },
+          {
+            "age_seconds": 1036800,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "o3",
+            "line": 10,
+            "outdated": false,
+            "path": "src/o.py",
+            "pr": 2,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1036800,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "o4",
+            "line": null,
+            "outdated": true,
+            "path": "src/o.py",
+            "pr": 1,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1036800,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "o5",
+            "line": 20,
+            "outdated": false,
+            "path": "src/p.py",
+            "pr": 3,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1036800,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "o6",
+            "line": 30,
+            "outdated": false,
+            "path": "src/p.py",
+            "pr": 3,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1036800,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "o7",
+            "line": 40,
+            "outdated": false,
+            "path": "src/p.py",
+            "pr": 4,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          }
+        ],
+        "walk_status": "ok"
+      },
+      {
+        "comments": [
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 1,
+            "vendor": "qodo"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 2,
+            "vendor": "qodo"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 3,
+            "vendor": "qodo"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 4,
+            "vendor": "qodo"
+          }
+        ],
+        "host_representable": true,
+        "panel_prs_per_period": 10,
+        "panel_vendors": [
+          "qodo"
+        ],
+        "pulls": [
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 1
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 2
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 3
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 4
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 5
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 6
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 7
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 8
+          }
+        ],
+        "purpose": "THE GRACE BOUNDARIES, both of them, and the fact that the overdue family does NOT chain through settle_hours. Threads at exactly 72h and exactly 168h ARE eligible (>=); one second under is not. A truncated thread is out of the overdue denominator entirely, because 'nobody answered' and 'we did not read far enough to know' are different claims and only the second is true of it.",
+        "repo": "acme/overdue-edges",
+        "threads": [
+          {
+            "age_seconds": 259200,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "g1",
+            "line": 10,
+            "outdated": false,
+            "path": "src/g.py",
+            "pr": 1,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "qodo"
+            ]
+          },
+          {
+            "age_seconds": 259199,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "g2",
+            "line": 20,
+            "outdated": false,
+            "path": "src/g.py",
+            "pr": 1,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "qodo"
+            ]
+          },
+          {
+            "age_seconds": 604800,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "g3",
+            "line": 30,
+            "outdated": false,
+            "path": "src/g.py",
+            "pr": 2,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "qodo"
+            ]
+          },
+          {
+            "age_seconds": 3456000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "g4",
+            "line": 40,
+            "outdated": false,
+            "path": "src/g.py",
+            "pr": 2,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "qodo"
+            ]
+          },
+          {
+            "age_seconds": 3456000,
+            "human_followed_last_bot": false,
+            "human_replied": true,
+            "id": "g5",
+            "line": 50,
+            "outdated": false,
+            "path": "src/g.py",
+            "pr": 3,
+            "resolved": false,
+            "seconds_to_first_human_reply": 108000,
+            "tail_complete": true,
+            "vendors": [
+              "qodo"
+            ]
+          },
+          {
+            "age_seconds": 3456000,
+            "human_followed_last_bot": null,
+            "human_replied": null,
+            "id": "g6",
+            "line": 60,
+            "outdated": false,
+            "path": "src/g.py",
+            "pr": 3,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": false,
+            "vendors": [
+              "qodo"
+            ]
+          },
+          {
+            "age_seconds": 3456000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "g7",
+            "line": 70,
+            "outdated": false,
+            "path": "src/g.py",
+            "pr": 4,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "qodo"
+            ]
+          },
+          {
+            "age_seconds": 3456000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "g8",
+            "line": 80,
+            "outdated": false,
+            "path": "src/g.py",
+            "pr": 4,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "qodo"
+            ]
+          }
+        ],
+        "walk_status": "ok"
+      },
+      {
+        "comments": [
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 1,
+            "vendor": "devin"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 2,
+            "vendor": "devin"
+          }
+        ],
+        "host_representable": true,
+        "panel_prs_per_period": 5,
+        "panel_vendors": [
+          "devin"
+        ],
+        "pulls": [
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 1
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 2
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 3
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 4
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 5
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 6
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 7
+          }
+        ],
+        "purpose": "THE MEDIAN'S TIE CONVENTION. Four reply times, so the median is the MEAN OF THE TWO MIDDLE VALUES and not the lower of them — the one place where a reimplementation silently disagrees on an even sample. The clock starts at the vendor's FIRST comment on the thread, never at the thread root.",
+        "repo": "acme/even-replies",
+        "threads": [
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": true,
+            "human_replied": true,
+            "id": "r0",
+            "line": 10,
+            "outdated": false,
+            "path": "src/r.py",
+            "pr": 1,
+            "resolved": false,
+            "seconds_to_first_human_reply": 3600,
+            "tail_complete": true,
+            "vendors": [
+              "devin"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": true,
+            "human_replied": true,
+            "id": "r1",
+            "line": 11,
+            "outdated": false,
+            "path": "src/r.py",
+            "pr": 1,
+            "resolved": false,
+            "seconds_to_first_human_reply": 10800,
+            "tail_complete": true,
+            "vendors": [
+              "devin"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": true,
+            "human_replied": true,
+            "id": "r2",
+            "line": 12,
+            "outdated": false,
+            "path": "src/r.py",
+            "pr": 1,
+            "resolved": false,
+            "seconds_to_first_human_reply": 14400,
+            "tail_complete": true,
+            "vendors": [
+              "devin"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": true,
+            "human_replied": true,
+            "id": "r3",
+            "line": 13,
+            "outdated": false,
+            "path": "src/r.py",
+            "pr": 1,
+            "resolved": false,
+            "seconds_to_first_human_reply": 36000,
+            "tail_complete": true,
+            "vendors": [
+              "devin"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "r4",
+            "line": 90,
+            "outdated": false,
+            "path": "src/r.py",
+            "pr": 2,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "devin"
+            ]
+          }
+        ],
+        "walk_status": "ok"
+      },
+      {
+        "comments": [
+          {
+            "author": "human",
+            "body_chars": 25,
+            "kind": "review_comment",
+            "pr": 1,
+            "vendor": null
+          }
+        ],
+        "host_note": "not constructible host-side: the host DERIVES a thread's vendor set from its comments' authors, so a thread cannot name a vendor that wrote nothing on it. It ships to pin the gate's identity on the corpus side.",
+        "host_representable": false,
+        "panel_prs_per_period": 3,
+        "panel_vendors": [
+          "coderabbit"
+        ],
+        "pulls": [
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 1
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 2
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 3
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 4
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 5
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 6
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 7
+          }
+        ],
+        "purpose": "THE LIVE GATE IS comments_observed, NOT THE THREAD COUNTERS. This repository's threads name the vendor in review_bot_vendors while no comment row carries it, so every counter it feeds is non-zero and every metric is still vendor_silent. Reading the gate off the thread counters instead would fit a distribution nobody observed.",
+        "repo": "acme/threads-without-comments",
+        "threads": [
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": true,
+            "human_replied": true,
+            "id": "s0",
+            "line": 10,
+            "outdated": false,
+            "path": "src/s.py",
+            "pr": 1,
+            "resolved": true,
+            "seconds_to_first_human_reply": 7200,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": true,
+            "human_replied": true,
+            "id": "s1",
+            "line": 11,
+            "outdated": false,
+            "path": "src/s.py",
+            "pr": 1,
+            "resolved": true,
+            "seconds_to_first_human_reply": 7200,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": true,
+            "human_replied": true,
+            "id": "s2",
+            "line": 12,
+            "outdated": false,
+            "path": "src/s.py",
+            "pr": 1,
+            "resolved": true,
+            "seconds_to_first_human_reply": 7200,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": true,
+            "human_replied": true,
+            "id": "s3",
+            "line": 13,
+            "outdated": false,
+            "path": "src/s.py",
+            "pr": 1,
+            "resolved": true,
+            "seconds_to_first_human_reply": 7200,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": true,
+            "human_replied": true,
+            "id": "s4",
+            "line": 14,
+            "outdated": false,
+            "path": "src/s.py",
+            "pr": 1,
+            "resolved": true,
+            "seconds_to_first_human_reply": 7200,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": true,
+            "human_replied": true,
+            "id": "s5",
+            "line": 15,
+            "outdated": false,
+            "path": "src/s.py",
+            "pr": 1,
+            "resolved": true,
+            "seconds_to_first_human_reply": 7200,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          }
+        ],
+        "walk_status": "ok"
+      },
+      {
+        "comments": [
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 1,
+            "vendor": "coderabbit"
+          },
+          {
+            "author": "vendor",
+            "body_chars": 40,
+            "kind": "review_comment",
+            "pr": 6,
+            "vendor": "coderabbit"
+          }
+        ],
+        "host_note": "the host syncs detail for every pull request it holds, so customer-side EVERY pull request in the population is detail-observed. The TypeScript reference implementation hard-codes that and says so; the case ships so the corpus-side gate stays pinned.",
+        "host_representable": false,
+        "panel_prs_per_period": 4,
+        "panel_vendors": [
+          "coderabbit"
+        ],
+        "pulls": [
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 1
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 2
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 3
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 4
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": true,
+            "merged": true,
+            "number": 5
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": false,
+            "merged": true,
+            "number": 6
+          },
+          {
+            "author_is_machine": false,
+            "detail_observed": false,
+            "merged": true,
+            "number": 7
+          }
+        ],
+        "purpose": "A pull request the walk ENUMERATED and never READ. Its detail never landed, so its threads and comments are ABSENT rather than zero and it is out of BOTH populations — the survivorship claim repo_not_walked makes one level up, made per pull request.",
+        "repo": "acme/detail-unobserved",
+        "threads": [
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "d0",
+            "line": 10,
+            "outdated": false,
+            "path": "src/d.py",
+            "pr": 1,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "d1",
+            "line": 11,
+            "outdated": false,
+            "path": "src/d.py",
+            "pr": 1,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "d2",
+            "line": 12,
+            "outdated": false,
+            "path": "src/d.py",
+            "pr": 1,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "d3",
+            "line": 13,
+            "outdated": false,
+            "path": "src/d.py",
+            "pr": 1,
+            "resolved": false,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": false,
+            "human_replied": false,
+            "id": "d4",
+            "line": 14,
+            "outdated": false,
+            "path": "src/d.py",
+            "pr": 1,
+            "resolved": true,
+            "seconds_to_first_human_reply": null,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          },
+          {
+            "age_seconds": 1728000,
+            "human_followed_last_bot": true,
+            "human_replied": true,
+            "id": "d9",
+            "line": 99,
+            "outdated": false,
+            "path": "src/d.py",
+            "pr": 6,
+            "resolved": true,
+            "seconds_to_first_human_reply": 3600,
+            "tail_complete": true,
+            "vendors": [
+              "coderabbit"
+            ]
+          }
+        ],
+        "walk_status": "ok"
+      }
+    ]
+  },
+  "sha256": "cfbfc0f441b5c2989a86f66ed973c90a7e07a7ec2e32fbf87ee636852c11267f"
+}

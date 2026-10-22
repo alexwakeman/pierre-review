@@ -18,8 +18,7 @@
 //
 // THE COST GUARD is the workspace's daily cap (`workspaces.auto_review_daily_cap`, default
 // `AUTO_REVIEW_DAILY_CAP` = 20, set in Settings) auto runs per workspace per UTC day, counting rows
-// already started today plus items still waiting in the lane. Past it, PRs wait for tomorrow. An
-// account whose agent credits are spent is skipped for the rest of the tick.
+// already started today plus items still waiting in the lane. Past it, PRs wait for tomorrow.
 //
 // RE-REVIEW ON NEW COMMITS. A PR already reviewed (a SUCCEEDED run, manual or auto — opened at or
 // after the switch-on, like every auto candidate) whose synced head moves past every run — new
@@ -242,7 +241,6 @@ export async function runAutoReviewSweep(
   sweeping = true;
   try {
     const dayStartMs = utcDayStartMs(nowMs);
-    const creditsOk = new Map<number, boolean>();
     const liveHeads = new Set<string>();
     const livePrs = new Set<string>();
     const roster = await listAutoReviewWorkspaces(ctx);
@@ -255,13 +253,6 @@ export async function runAutoReviewSweep(
         result.stopped = 'lane_full';
         break;
       }
-      let ok = creditsOk.get(ws.accountId);
-      if (ok === undefined) {
-        ok = !(await ctx.aiCredits.check(ws.accountId)).agentBlocked;
-        creditsOk.set(ws.accountId, ok);
-      }
-      if (!ok) continue; // credits_exhausted: this account sits the tick out
-
       const waiting = autoPendingPrIds();
       const res = await candidatesOf(ws.accountId, ws.workspaceId, {
         openedSinceMs: ws.enabledAtMs,

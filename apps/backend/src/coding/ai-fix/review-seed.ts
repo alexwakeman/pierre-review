@@ -16,7 +16,7 @@ import type {
   SonarSeverity,
   TicketReviewItem,
 } from '@pierre-review/shared';
-import type { FixAgentReport } from '../../pro/contract.js';
+import type { FixAgentReport } from '../../platform/contract.js';
 
 // THE 'review' SEED: one fix that takes the WHOLE Claude review into account, except praise and
 // questions (`NOT_FOR_FIX`): a question asks the AUTHOR something — answering it is a reply, not

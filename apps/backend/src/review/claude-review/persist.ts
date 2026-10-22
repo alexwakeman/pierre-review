@@ -36,7 +36,7 @@ import { storedList, stripStoredStoryLead } from '@pierre-review/shared';
 import { referenceDocCitationsFromStored, reviewDocReferencesFromStored } from '@pierre-review/shared';
 import type { ReferenceDocCitation, ReviewDocReference } from '@pierre-review/shared';
 import type { ClaudeSettledFinding, FindingAutoResolveRecord, FindingPushbackRecord } from '@pierre-review/shared';
-import type { ReviewFinding } from '../../pro/contract.js';
+import type { ReviewFinding } from '../../platform/contract.js';
 import { ticketEntriesOf } from './ticket.js';
 import { findFindingThread, type ThreadComment } from './finding-thread.js';
 import { earlierPostsFor, landedAutoPosts, stampsFor, type PostedStateInput } from './posted-state.js';

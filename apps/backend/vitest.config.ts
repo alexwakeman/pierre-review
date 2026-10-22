@@ -1,5 +1,3 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 // Backend test config.
@@ -30,23 +28,8 @@ import { defineConfig } from 'vitest/config';
 // migration or a `git` call waiting on a lock still fails the run rather than sitting
 // there. Raising a ceiling cannot turn a failing assertion green.
 //
-// The private `@pierre/pro` plugin ships NO vitest/better-sqlite3 devDeps (by design,
-// so a pure-OSS install can't break on its native build) and its tests live OUTSIDE
-// this workspace root, so vitest can neither discover nor resolve them by default.
-// When the CLI is explicitly pointed at a `packages/pro` test path — e.g.
-//   pnpm --filter @pierre-review/backend exec vitest run ../../packages/pro/test/isolation.test.ts
-// — switch into a repo-rooted mode and alias `better-sqlite3` to this workspace's
-// already-built copy so the plugin's throwaway-SQLite tests run from here.
-const dir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(dir, '../..');
-const proRun = process.argv.some((a) => a.includes('packages/pro'));
-
-// Shared by both branches so the two can never drift: the plugin's isolation suite
-// migrates a throwaway DB in `beforeAll` for the same reason core's do.
 const HOOK_TIMEOUT_MS = 30_000;
-// Same argument, applied to test bodies (see above) — the git-shelling suites are the
-// ones that need it, and they are core-only, but keeping it shared is what stops the
-// two branches drifting the way hookTimeout/testTimeout already did.
+// Same argument, applied to test bodies (see above).
 //
 // ⚠ RAISED 20s → 90s FOR `src/conflict/`, AND THE REASON IS MEASURED, NOT A GUESS.
 // `land.test.ts` and `model.test.ts` prove claims about what git does with a tree nobody
@@ -72,20 +55,6 @@ const HOOK_TIMEOUT_MS = 30_000;
 // there, and — as above — raising a ceiling cannot turn a failing assertion green.
 const TEST_TIMEOUT_MS = 90_000;
 
-export default defineConfig(
-  proRun
-    ? {
-        test: {
-          root: repoRoot,
-          include: ['packages/pro/test/**/*.{test,spec}.?(c|m)[jt]s?(x)'],
-          hookTimeout: HOOK_TIMEOUT_MS,
-          testTimeout: TEST_TIMEOUT_MS,
-        },
-        resolve: {
-          alias: {
-            'better-sqlite3': path.join(dir, 'node_modules/better-sqlite3/lib/index.js'),
-          },
-        },
-      }
-    : { test: { hookTimeout: HOOK_TIMEOUT_MS, testTimeout: TEST_TIMEOUT_MS } },
-);
+export default defineConfig({
+  test: { hookTimeout: HOOK_TIMEOUT_MS, testTimeout: TEST_TIMEOUT_MS },
+});

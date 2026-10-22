@@ -4,6 +4,7 @@ import { buildApp } from './app.js';
 import { assertCloudConfig, config } from './config.js';
 import { cleanupRedundantReviewEvents } from './db/cleanup.js';
 import { runMigrations } from './db/run-migrations.js';
+import { bindPlatform } from './platform/context.js';
 import { sweepCloneCache } from './review/clone-hygiene.js';
 
 // Boot the server: migrate → cache the local user → build the Fastify app →
@@ -25,7 +26,7 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
 
   // Repair the clone cache before anything can hand a clone out: strip credentials an older
   // build left in `.git/config`, tighten permissions, and collect orphaned worktrees. AWAITED
-  // — bindProPlugin can start a fix that reuses a clone — but BOUNDED: a sweep that cannot
+  // — bindPlatform can start a fix that reuses a clone — but BOUNDED: a sweep that cannot
   // finish must not be the reason the server never listens.
   await Promise.race([
     sweepCloneCache().then((r) => {
@@ -75,12 +76,9 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
     await startAgenticBackground(app);
   }
 
-  // Bind the optional Pro plugin (dynamic import; no-ops in OSS mode). Same
-  // "optional subsystem, degrade gracefully" posture as the scheduler below.
-  {
-    const { bindProPlugin } = await import('./pro/bind.js');
-    await bindProPlugin(app);
-  }
+  // Register the platform (reporting, Bots Monitoring, Slack, settings — src/platform/). Static,
+  // always on; its own migrations run here, after core's.
+  await bindPlatform(app);
 
   // The issue tracker's process half (CORE, both modes): the one-time move of the plugin-era tracker
   // data into core — AFTER the plugin's own migrations ran — then the ticket worker and its

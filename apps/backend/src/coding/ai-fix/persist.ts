@@ -7,7 +7,7 @@ import type {
   AiFixStoredSeed,
   AiFixTrigger,
 } from '@pierre-review/shared';
-import type { GenerateFixResult } from '../../pro/contract.js';
+import type { GenerateFixResult } from '../../platform/contract.js';
 import type { AgentContext } from '../../review/agent-context.js';
 import { normalizeChangeReport } from './review-seed.js';
 import type { AiFixPlan, AiFixPlanMessage } from '@pierre-review/shared';

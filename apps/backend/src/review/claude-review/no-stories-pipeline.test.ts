@@ -12,7 +12,7 @@ import { rmSync } from 'node:fs';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW, type ClaudeReview } from '@pierre-review/shared';
-import type { RunReviewArgs, RunReviewResult } from '../../pro/contract.js';
+import type { RunReviewArgs, RunReviewResult } from '../../platform/contract.js';
 import type { AgentContext } from '../agent-context.js';
 import { _resetTicketSourceForTest, _overrideTicketSourceForTest } from '../../tracker/ticket-source.js';
 

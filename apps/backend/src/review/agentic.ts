@@ -37,8 +37,7 @@ import { reconcileStoryDocsOnStartup } from './story-docs/manager.js';
 // ⚠ THE CLOUD GUARANTEE IS THIS `isCloud` CHECK, EXPLICITLY. It used to rest on an env var being
 // unset (the plugin's PRO_ADVANCED_AI_ENABLED), so one Railway variable stood between a paid cloud
 // account and routes with no SDK and no credential behind them. Now nothing agentic registers in
-// cloud — the routes 404 — and the auth plugin's `isProPath` 402 (which still lists the Claude
-// Review URLs and covers the `/api/pro/` AI Fix paths) is a SECOND guard, not the first.
+// cloud — the routes 404.
 // `config.aiEnabled` is also false in cloud; it is checked separately so the two never collapse
 // into one flag again. LIMN_AI_DISABLED=true (the kill switch) turns `aiEnabled` off locally.
 

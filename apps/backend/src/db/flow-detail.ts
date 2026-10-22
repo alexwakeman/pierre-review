@@ -809,7 +809,7 @@ export function buildFlowDetail(
 // ── Ticket keys ─────────────────────────────────────────────────────────────────────────────
 //
 // A Jira/Linear key (PROJ-123) from the title, then the branch name. The Pro issue-links
-// extractor (packages/pro/src/issue-links/extract.ts) is the full version, with per-workspace
+// extractor (apps/backend/src/platform/issue-links/extract.ts) is the full version, with per-workspace
 // allow-lists; core cannot import the plugin, so this is its NO-ALLOWLIST fallback only — the same
 // boundary rules and the same deny-list floor. It is used for ONE thing: noticing that two PRs in
 // DIFFERENT repositories share a ticket. A false positive costs a wrong "may have been held for

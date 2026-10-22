@@ -261,13 +261,6 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
         reply.status(400);
         return { error: 'NoHead', message: 'PR has no head commit to review yet.' };
       }
-      if (result.reason === 'credits_exhausted') {
-        reply.status(402);
-        return {
-          error: 'CreditsExhausted',
-          message: 'Out of monthly agentic AI credits — resets on the 1st.',
-        };
-      }
       if (result.reason === 'disabled') return featureOff(reply);
       // An auto review is queued or running on this PR: manual start is locked until it ends.
       if (result.reason === 'auto_in_progress') {

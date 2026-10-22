@@ -1,0 +1,30 @@
+-- @pierre/pro plugin migration (SQLite / local mode). Run once by the host's runPluginMigrations
+-- (tracked in pro_migrations — plugin migrations are discovered by FILENAME SORT and have NO
+-- meta/_journal.json; that requirement is CORE-only). Carries no statement-breakpoint markers
+-- either: the plugin migrator execs the whole file as one blob. Postgres twin:
+-- migrations-pg/0023_chat_answer_window.sql.
+--
+-- Records which time window each Insights chat answer covered.
+--
+-- WHAT GOES IN IT. JSON, the shared `InsightsAnswerWindow`:
+--   {"kind":"sprint"|"7d"|"14d"|"30d"|"90d","from":<ISO>,"to":<ISO>,"requested"?:<kind>}
+-- `kind` is the range the answer was ACTUALLY computed over; `requested` appears only when it
+-- differs — i.e. "Sprint to date" was asked for with no cadence+start configured, so the window
+-- fell back to a rolling fortnight and the UI must not caption it as a sprint.
+--
+-- WHY IT IS STORED. The range is now a per-question choice (the FilterBar Range chips), so two
+-- rows with the same question text can be answers about different periods. The History panel
+-- re-opens a stored answer verbatim; without this column a 7-day answer and a 90-day answer are
+-- indistinguishable, and the prose rarely states its own window.
+--
+-- NULLABLE, ADDITIVE, AND DELIBERATELY NOT BACKFILLED. Every pre-existing row was answered over
+-- whatever the account's configured window was AT THE TIME, which is not recoverable — stamping
+-- today's default on them would invent a caption. Null renders as "window not recorded".
+--
+-- Named `answer_window`, not `window`: WINDOW is a reserved word in Postgres and the two dialects
+-- keep identical column names.
+--
+-- SQLite has no `ADD COLUMN IF NOT EXISTS`, but this file is applied exactly once
+-- (pro_migrations-gated), so a plain ALTER is correct here.
+
+ALTER TABLE sprint_chat_history ADD COLUMN answer_window text;

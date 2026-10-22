@@ -22,7 +22,7 @@ import type {
   ApplyAndPushResult,
   CommitFilesAndOpenPrArgs,
   CommitFilesAndOpenPrResult,
-} from '../pro/contract.js';
+} from '../platform/contract.js';
 import {
   applyPatchToWorktree,
   codedError,

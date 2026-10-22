@@ -14,7 +14,7 @@ import {
 } from './suggestion.js';
 
 // THE VALIDATORS' TEST, AND IT RUNS IN CI — which is the entire reason these functions live in
-// core rather than in the plugin (`packages/pro/test/` is neither run by `pnpm test` nor
+// core rather than in the plugin (`apps/backend/src/platform/test/` is neither run by `pnpm test` nor
 // typechecked). They are what stands between an attacker-authored conflict hunk, a model's
 // answer, and a blob in somebody's repository.
 //

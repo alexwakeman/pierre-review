@@ -33,7 +33,7 @@ export function botWindowMs(window: BotWindowKind): number {
 /**
  * 365.25 ÷ 12. The ONE factor that turns a rate measured over a window into a rate per month.
  *
- * ⚠ IT MUST EQUAL `DAYS_PER_MONTH` IN `packages/pro/src/bots/benchmark/cost.ts`, which the plugin
+ * ⚠ IT MUST EQUAL `DAYS_PER_MONTH` IN `apps/backend/src/platform/bots/benchmark/cost.ts`, which the plugin
  * declares separately because production plugin code may only `import type` from `shared` and may
  * not import from core at all. Two numbers, one fact: if these ever diverge, the Bots → ROI table
  * and the Bots → Benchmark rollup will quote different money for the same bot at the same price,

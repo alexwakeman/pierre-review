@@ -23,17 +23,6 @@ export interface Account {
   displayName: string | null;
   avatarUrl: string | null;
   isLocal: boolean;
-  // Billing plan, set only by the Stripe webhook (never by the OAuth upsert).
-  // Local accounts are always fully entitled regardless of this value.
-  plan: AccountPlan;
-  // Stripe customer id (cus_…) from checkout; the join key for subscription webhooks.
-  stripeCustomerId: string | null;
-  // Per-account monthly SUMMARY-AI credit-allowance override (metered cloud plan). null =
-  // plan default (2,500 for paid cloud); local accounts are unmetered regardless.
-  aiCreditAllowance: number | null;
-  // CLOUD-ONLY consent (default false): contribute aggregate weekly bot stats to the cross-org
-  // benchmark. Local accounts never contribute (always false).
-  benchmarkOptIn: boolean;
   // The LARGE-PR FLAG's threshold in lines of CODE churn, or null when the user has never set
   // one (→ the 1,500-line product default; resolve through `resolveLargePrThreshold`). ONE
   // per-account setting — no workspace or repo grain, so nothing here needs a resolver.
@@ -50,8 +39,6 @@ export interface Account {
   // (api/plugins/auth.ts) needs no entry: absent reads exactly as null.
   myTurnSettings?: MyTurnSettings | null;
 }
-
-export type AccountPlan = 'free' | 'pro';
 
 const STALE_MS = 24 * 60 * 60 * 1000; // re-fetch the local identity once a day
 
@@ -90,10 +77,6 @@ function rowToAccount(row: typeof schema.accounts.$inferSelect): Account {
     displayName: row.displayName,
     avatarUrl: row.avatarUrl,
     isLocal: row.isLocal,
-    plan: row.plan === 'pro' ? 'pro' : 'free',
-    stripeCustomerId: row.stripeCustomerId,
-    aiCreditAllowance: row.aiCreditAllowance ?? null,
-    benchmarkOptIn: row.benchmarkOptIn ?? false,
     largePrCodeLocThreshold: row.largePrCodeLocThreshold ?? null,
     blastRadiusConfig: row.blastRadiusConfig ?? null,
     myTurnSettings: row.myTurnSettings ?? null,
@@ -115,8 +98,8 @@ let cachedLocalAccount: Account | null = null;
  * created afterwards, which in cloud is all of them.
  *
  * `db/queries.ts` STATICALLY imports `getAccountUserId` from this file, so the import here is
- * DYNAMIC to avoid closing that cycle — the same shape `setBenchmarkConsent` below already uses
- * for the same reason. It costs nothing: both callers are cold (process startup / an OAuth
+ * DYNAMIC to avoid closing that cycle for the same
+ * reason. It costs nothing: both callers are cold (process startup / an OAuth
  * callback) and the module is cached after the first call.
  *
  * It is deliberately NOT swallowed. `ensureDefaultWorkspace` only throws when the partial unique
@@ -323,42 +306,6 @@ export async function getAccountById(id: number): Promise<Account | null> {
 }
 
 /**
- * Set an account's billing plan (and, when known, its Stripe customer id).
- * Called only by the Stripe webhook handler (api/routes/billing.ts).
- */
-export async function setAccountPlan(
-  accountId: number,
-  plan: AccountPlan,
-  stripeCustomerId?: string | null,
-): Promise<void> {
-  const { accounts } = schema;
-  const set: { plan: AccountPlan; stripeCustomerId?: string } = { plan };
-  if (stripeCustomerId != null) set.stripeCustomerId = stripeCustomerId;
-  await db.update(accounts).set(set).where(eq(accounts.id, accountId)).execute();
-}
-
-/**
- * Set an account's cross-org benchmark consent (cloud-only feature). Withdrawing (optIn=false)
- * DELETES the account's contributions — one-click, complete removal, honouring the consent
- * promise. The caller (the /api/me/benchmark-consent route) seeds contributions on opt-in.
- */
-export async function setBenchmarkConsent(
-  accountId: number,
-  optIn: boolean,
-): Promise<void> {
-  const { accounts } = schema;
-  await db
-    .update(accounts)
-    .set({ benchmarkOptIn: optIn })
-    .where(eq(accounts.id, accountId))
-    .execute();
-  if (!optIn) {
-    const { deleteBenchmarkContributions } = await import('../db/queries.js');
-    await deleteBenchmarkContributions(accountId);
-  }
-}
-
-/**
  * Set (or clear) an account's LARGE-PR FLAG threshold, in lines of CODE churn.
  *
  * `null` CLEARS it — back to the two-state "no opinion → product default", which is what makes a
@@ -504,20 +451,6 @@ export async function setMyTurnSettings(
   // then `/api/me` would hand the old value back and revert the form.
   await refreshLocalAccountCache(accountId);
   return value;
-}
-
-/** Resolve an account by its Stripe customer id (subscription webhooks). */
-export async function getAccountByStripeCustomerId(
-  customerId: string,
-): Promise<Account | null> {
-  const { accounts } = schema;
-  const rows = await db
-    .select()
-    .from(accounts)
-    .where(eq(accounts.stripeCustomerId, customerId))
-    .limit(1)
-    .execute();
-  return rows[0] ? rowToAccount(rows[0]) : null;
 }
 
 /**

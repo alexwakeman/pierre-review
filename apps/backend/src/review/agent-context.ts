@@ -4,8 +4,7 @@ import { accountIdOf } from '../api/plugins/auth.js';
 import { db, schema, runTransaction, isPg } from '../db/client.js';
 import * as hostQueries from '../db/queries.js';
 import { recordAiUsage, type AiUsageRecord } from '../db/usage.js';
-import { aiCreditStatus, type AiCreditStatus } from '../db/credits.js';
-import { getAccessToken, getAccountById } from '../auth/account.js';
+import { getAccessToken } from '../auth/account.js';
 import { fetchPrHeadInfo, fetchPrUnifiedDiff } from '../github/mutations.js';
 import { fetchCompareDiff } from '../github/compare.js';
 import { fetchActionsJobLog } from '../github/actions-logs.js';
@@ -31,7 +30,7 @@ import type {
   GenerateFixResult,
   GithubSeam,
   ReviewSeam,
-} from '../pro/contract.js';
+} from '../platform/contract.js';
 
 // THE AGENTIC FEATURES' ONE CONTEXT OBJECT — Claude Review (+ chat, follow-up, ticket check, auto
 // review) and AI Fix's fixer, all CORE since they left the private plugin.
@@ -64,7 +63,6 @@ export interface AgentContext {
   runTransaction: typeof runTransaction;
   isPg: boolean;
   llm: { detectAuth(): DetectAuthResult };
-  aiCredits: { check(accountId: number): Promise<AiCreditStatus> };
   recordAiUsage(row: AiUsageRecord): Promise<void>;
   github: Pick<
     GithubSeam,
@@ -146,27 +144,6 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
       detectAuth: () => {
         const r = detectClaudeAuth();
         return r.status === 'ok' ? { status: 'ok' } : { status: 'none', message: r.message };
-      },
-    },
-    aiCredits: {
-      check: async (accountId) => {
-        const account = await getAccountById(accountId);
-        // Fail closed on a missing account (never happens for a live request).
-        if (!account)
-          return {
-            summaryTurnsUsed: 0,
-            summaryTurnLimit: 0,
-            summaryTurnsRemaining: 0,
-            summaryBlocked: true,
-            agentCreditsUsed: 0,
-            agentAllowanceCredits: 0,
-            agentCreditsRemaining: 0,
-            agentBlocked: true,
-            blocked: true,
-          };
-        // Local accounts are UNMETERED (null limits → never blocked). The ledger still records
-        // spend for the local usage display; it is the user's own money, not ours.
-        return aiCreditStatus(account, Date.now());
       },
     },
     recordAiUsage: (row) => recordAiUsage(row),

@@ -276,9 +276,6 @@ export const config = {
   // When the retention sweep runs (node-cron). Daily at 03:00 by default; off-peak so a
   // large delete doesn't contend with the 5-minute sync. RETENTION_CRON overrides.
   retentionCron: process.env.RETENTION_CRON ?? '0 3 * * *',
-  // Cross-org benchmark rollup (CLOUD-ONLY; inert unless an account has opted in). Weekly,
-  // Monday 04:00 UTC — after a fresh ISO week starts, off-peak. BENCHMARK_ROLLUP_CRON overrides.
-  benchmarkRollupCron: process.env.BENCHMARK_ROLLUP_CRON ?? '0 4 * * 1',
   // Disable the periodic scheduler (used by scripts/tests).
   disableScheduler: process.env.DISABLE_SCHEDULER === 'true',
 
@@ -425,14 +422,6 @@ export const config = {
   // hard to undo; opt in manually once the domain is proven.
   hstsMaxAge: intFromEnv('HSTS_MAX_AGE', 31536000),
 
-  // ---- Stripe billing (optional; NOT required by assertCloudConfig) ----
-  // Payment Link URL for the Pro plan — GET /api/billing/checkout 302s to it with
-  // client_reference_id=<accountId> appended. Empty = checkout unavailable.
-  stripePaymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_URL ?? '',
-  // Webhook signing secret (whsec_…) for POST /api/billing/webhook. Empty = the
-  // webhook replies 501 and no billing state ever changes.
-  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
-
   // ---- The public contact form (cloud only in practice; the landing is never served
   // in local mode) ----
   // A Slack incoming-webhook URL. Empty = GET /api/contact/ticket and POST /api/contact
@@ -441,46 +430,6 @@ export const config = {
   // than here, so a bad value is a failed request with a log line rather than a boot
   // failure on an otherwise healthy deploy.
   contactSlackWebhookUrl: process.env.CONTACT_SLACK_WEBHOOK_URL ?? '',
-
-  // Pro plugin master gate. bind.ts skips the dynamic import entirely when false.
-  // PRO_DISABLED=true forces pure-OSS mode even when the submodule is checked out (used to
-  // exercise/capture the free tier). Local defaults ON. In CLOUD it stays OFF unless
-  // PRO_CLOUD_ENABLED=true (the paid summary-AI tier — set on the Railway image), so the
-  // public Dockerfile / OSS npm path is byte-identical to before. Even when true in cloud,
-  // per-account entitlement (plan !== 'free') + the /api/pro/* 402 gate decide who actually
-  // gets Pro. The agentic features are core and gated separately (`aiEnabled` below; off in cloud).
-  proEnabled:
-    process.env.PRO_DISABLED !== 'true' &&
-    (!isCloud || process.env.PRO_CLOUD_ENABLED === 'true'),
-  // Per-repo digest (Pro, Workstream 2) config — consumed by @pierre/pro, kept in
-  // core so the model id / budgets live in one place and aren't hardcoded at call
-  // sites. Inert until the plugin is present AND digestEnabled.
-  pro: {
-    digestModel: process.env.PRO_DIGEST_MODEL ?? 'claude-haiku-5-5',
-    // The period-report narration's default model. Reaches the plugin the same way digestModel
-    // does — the env var itself (@pierre/pro reads PRO_REPORT_MODEL in llm/seam.ts's
-    // DEFAULT_REPORT_MODEL); this entry keeps the model ids in the one place they are all
-    // documented. The plugin validates the value against its REPORT_MODELS allowlist — an
-    // unselectable id here silently falls back to the plugin's default rather than reaching a
-    // meter. Per-account override: pro_settings.report_model; per-run override: the generate
-    // call's `model` body field.
-    //
-    // ⚠ THE TWO SPELLINGS MUST AGREE. This literal and `DEFAULT_REPORT_MODEL`'s fallback in
-    // packages/pro/src/llm/seam.ts are the same default written twice (the plugin cannot import
-    // host config, and this line is where the model ids are documented); a half-edit makes this
-    // comment lie about what actually narrates. Both now say claude-haiku-5-5.
-    //
-    // It was claude-sonnet-5 — plan P4.1's "a forwarded sprint retro is worth more prose care
-    // than a per-repo digest". Retired: Haiku narrates every summary surface now, so a report
-    // cannot differ from the one a colleague forwarded by model. The model id is folded into the
-    // narration's payload hash (and the stored row's key), so this flip is a deliberate one-off
-    // re-bill: the next generate of each period is a cache miss.
-    reportModel: process.env.PRO_REPORT_MODEL ?? 'claude-haiku-5-5',
-    digestEnabled: process.env.PRO_DIGEST_ENABLED === 'true',
-    digestMaxUsdPerRefresh: floatFromEnv('PRO_DIGEST_MAX_USD', 0.5),
-    digestMaxReposPerRefresh: intFromEnv('PRO_DIGEST_MAX_REPOS', 30),
-    digestMinIntervalSec: intFromEnv('PRO_DIGEST_MIN_INTERVAL_SEC', 60),
-  },
 
   // ---- The agentic features: Claude Review, review memory, AI Fix (CORE, free, LOCAL ONLY) ----
   // ONE switch, and it is NOT an opt-in: locally they are on and always visible (a missing Claude
@@ -763,15 +712,5 @@ export function assertCloudConfig(): void {
           'would send the session cookie unencrypted. Use http:// only for localhost testing.',
       );
     }
-  }
-  // When Pro is cloud-enabled the SUMMARY seam needs its OWN metered credential: there is no
-  // ambient logged-in `claude` session on Railway, so without SUMMARY_ANTHROPIC_API_KEY every
-  // summary completion has no credential and silently fails. Fail loud instead.
-  if (config.proEnabled && !process.env.SUMMARY_ANTHROPIC_API_KEY) {
-    throw new Error(
-      'Cloud Pro (PRO_CLOUD_ENABLED=true) requires SUMMARY_ANTHROPIC_API_KEY — the metered ' +
-        'Anthropic key the summary seam spends against (no ambient Claude session exists in cloud). ' +
-        'Set it or unset PRO_CLOUD_ENABLED. See docs/DEPLOY-RAILWAY.md.',
-    );
   }
 }

@@ -21,9 +21,8 @@
 //     reach at all.
 //
 // Lives in the backend because `pnpm test` (recursive vitest) runs ONLY the backend — the
-// frontend's and the plugin's own suites are hand-run. The plugin is a submodule, so its files
-// are scanned only when they are checked out.
-import { existsSync, readFileSync } from 'node:fs';
+// frontend's suite is hand-run.
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { GENERIC_REVIEWER_LABELS, PRODUCT_NAME } from '@pierre-review/shared';
@@ -32,20 +31,6 @@ import { fingerprintReview } from './sync/review-fingerprint.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const read = (rel: string): string => readFileSync(REPO_ROOT + rel, 'utf8');
-
-/**
- * Is the private plugin checked out AT ALL? Decided ONCE, off its entry point.
- *
- * ⚠ IT IS ONE QUESTION, NOT ONE PER FILE, AND THAT IS THE WHOLE POINT. The four plugin scans used
- * to open with `if (!present(rel)) return;`, and vitest reports a test body that returns without
- * asserting as PASSED, never as skipped. So in CI — where `.github/workflows/ci.yml` checks out
- * with a bare `actions/checkout@v4` and no `submodules:` — those four reported green with zero
- * assertions, over exactly the three surfaces this file's header says had already rotted. Worse,
- * the guard was keyed on each FILE's path: moving `src/ai-fix/prompts.ts` would have disabled two
- * of them silently for a developer with the submodule fully checked out. `describe.skipIf` reports
- * SKIPPED, and `read()` inside throws on a path that has moved.
- */
-const hasPlugin = existsSync(REPO_ROOT + 'packages/pro/src/index.ts');
 
 /** The old brand as a WORD. Case-sensitive and refusing a following `-`, `:` or `/`, exactly like
  *  the read-time patch in the plugin: every identifier that keeps the old spelling is lowercase
@@ -82,13 +67,12 @@ describe('the product name is Limn', () => {
   });
 });
 
-// ⚠ SKIPPED, NOT SILENTLY PASSED, when the submodule is absent — and every scan inside uses
-// `read()`, which THROWS on a path that has moved. See `hasPlugin`.
-describe.skipIf(!hasPlugin)('no user-visible "Pierre" in the plugin\'s rendered strings', () => {
+// Every scan inside uses `read()`, which THROWS on a path that has moved.
+describe('no user-visible "Pierre" in the platform\'s rendered strings', () => {
   // The plugin's one-shot prompts — the impact note's, the one per-PR prompt left. (The CI-analysis
   // and PR-summary prompts in `ai-fix/prompts.ts` are gone.)
   it('the plugin prompts carry no old brand outside comments', () => {
-    const src = read('packages/pro/src/annotations/prompts.ts');
+    const src = read('apps/backend/src/platform/annotations/prompts.ts');
     const emitted = src.split('\n').filter((l) => !l.trimStart().startsWith('//'));
     expect(emitted.length).toBeGreaterThan(0); // the scan found the file, not an empty one
     for (const l of emitted) expect(l).not.toMatch(OLD_BRAND);
@@ -97,7 +81,7 @@ describe.skipIf(!hasPlugin)('no user-visible "Pierre" in the plugin\'s rendered 
   // The Slack digest was the copy that rotted, because a digest bullet is the one place nobody
   // looks. Structural: it must spread the shared map rather than restate its keys.
   it('the Slack digest label map spreads the shared unbranded labels', () => {
-    const src = read('packages/pro/src/slack/report.ts');
+    const src = read('apps/backend/src/platform/slack/report.ts');
     expect(src).toContain('...GENERIC_REVIEWER_LABELS');
     expect(src).not.toMatch(/^\s*pierre:\s*['"`]/m);
     expect(src).not.toMatch(/^\s*in_house:\s*['"`]/m);

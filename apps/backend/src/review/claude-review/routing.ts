@@ -1,5 +1,5 @@
 import type { ReviewMode, ReviewRouteReason } from '@pierre-review/shared';
-import type { ReviewFileMetric } from '../../pro/contract.js';
+import type { ReviewFileMetric } from '../../platform/contract.js';
 
 // The deterministic review router (Pro): decide, BEFORE the agent runs, whether a PR can be
 // reviewed from its diff alone (fast, tool-less, no worktree), needs the full cloned worktree,

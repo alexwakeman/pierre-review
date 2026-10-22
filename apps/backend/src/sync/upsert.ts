@@ -1,6 +1,6 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, schema, runTransaction, type Executor } from '../db/client.js';
-import { emitPullRequestMerged } from '../pro/event-hooks.js';
+import { emitPullRequestMerged } from '../platform/event-hooks.js';
 import { isLiveMergeObservation } from './merge-notice.js';
 import { searchText } from '../db/search.js';
 // The single owner of "which workspace is this account's Default" — concurrent-safe (INSERT …

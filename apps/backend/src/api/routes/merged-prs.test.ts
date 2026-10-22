@@ -26,8 +26,6 @@ let closeDb: (() => Promise<void> | void) | undefined;
 let rw: any;
 let ownWs = 0;
 let foreignWs = 0;
-let setCaps: ((c: any) => void) | undefined;
-let emptyCaps: any;
 const ids: Record<string, number> = {};
 
 const DAY = 86_400_000;
@@ -113,10 +111,6 @@ beforeAll(async () => {
   await mkPr('closed', mine, 1, 'closed', FROM + DAY);
   await mkPr('foreign', theirs, 2, 'merged', FROM + DAY);
 
-  const contract = await import('../../pro/contract.js');
-  contract.setProCapabilities({ ...contract.EMPTY_CAPABILITIES, periodReports: true });
-  setCaps = contract.setProCapabilities;
-  emptyCaps = contract.EMPTY_CAPABILITIES;
   const { insightsRoutes } = await import('./insights.js');
   const { registerAccountContext } = await import('../plugins/auth.js');
   const { default: Fastify } = await import('fastify');
@@ -127,7 +121,6 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  setCaps?.(emptyCaps);
   rw?.registerReportingWindowResolver(null);
   await app?.close();
   await closeDb?.();
@@ -173,9 +166,7 @@ describe('GET /api/merged-prs — the reporting window', () => {
   });
 
   it('is FREE: answers without periodReports (This Sprint → Merged so far)', async () => {
-    setCaps?.(emptyCaps);
     const res = await app.inject({ method: 'GET', url: '/api/merged-prs' });
-    setCaps?.({ ...emptyCaps, periodReports: true });
     expect(res.statusCode).toBe(200);
     expect(res.json().workspaceId).toBe(ownWs);
   });

@@ -4,7 +4,7 @@
 //   pnpm --filter @pierre-review/backend test finding-replies
 import { describe, expect, it } from 'vitest';
 import type { ClaudeFindingSeverity } from '@pierre-review/shared';
-import type { ReviewFinding, ReviewFollowUpReport } from '../../pro/contract.js';
+import type { ReviewFinding, ReviewFollowUpReport } from '../../platform/contract.js';
 import {
   BLOCKER_DEFERRAL_TEXT,
   DISPUTE_TEXT,

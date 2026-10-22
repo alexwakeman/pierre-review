@@ -9,9 +9,8 @@ import { isMlScoringAvailable } from '../../ml/scorer.js';
 import { getMlEnrichmentState } from '../../sync/ml-enrichment.js';
 import { accountIdOf } from '../plugins/auth.js';
 
-// ML severity/category labels on BOT-authored text (CORE, FREE TIER — not a Pro capability, so
-// deliberately NOT under /api/pro/, which is 402'd for free cloud accounts and auto-tiered as
-// AI for any mutating verb).
+// ML severity/category labels on BOT-authored text. Deliberately NOT under /api/pro/, which is
+// auto-tiered as AI for any mutating verb.
 //
 // BOTH ROUTES ARE PURE DB READS. Nothing here calls the model, spends money or touches GitHub —
 // generation is the background worker's job (sync/ml-enrichment.ts). That is why they are

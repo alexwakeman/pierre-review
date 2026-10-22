@@ -21,7 +21,7 @@ import type { ClaudeReviewModel } from '@pierre-review/shared';
 import type {
   GenerateFixArgs,
   GenerateFixResult,
-} from '../pro/contract.js';
+} from '../platform/contract.js';
 import { submitFixShape, submitPlanShape, type SubmitFixPayload } from './schema.js';
 import {
   checkPlanSubmission,
@@ -63,7 +63,7 @@ import { withPartialSpend } from './partial-spend.js';
 // `aiFixPatchMaxBytes`, and no column on the fix row records whether anything was verified. The
 // cost was real: a suite runs against `aiFixMaxTurns` (40) and `aiFixBudgetUsd` ($5) with NO
 // wall-clock limit, returns its output as a tool_result billed as input on the next turn, and
-// holds the single global job slot (MAX_CONCURRENT = 1, packages/pro/src/ai-fix/manager.ts) that
+// holds the single global job slot (MAX_CONCURRENT = 1, apps/backend/src/platform/ai-fix/manager.ts) that
 // every other account's fix queues behind.
 //
 // ⚠ What this costs, stated plainly: a fix that wanted a codegen step, a formatter, or `git log`

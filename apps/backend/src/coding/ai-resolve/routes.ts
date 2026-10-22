@@ -110,8 +110,6 @@ export function registerAiResolveRoutes(
           return refuse(reply, 503, 'Busy', 'The service is busy. Try again in a moment.');
         case 'no_auth':
           return refuse(reply, 400, 'NoClaudeAuth', res.message ?? 'No Claude credential was found.');
-        case 'credits_exhausted':
-          return refuse(reply, 402, 'CreditsExhausted', 'Out of monthly agentic AI credits — resets on the 1st.');
       }
     },
   );

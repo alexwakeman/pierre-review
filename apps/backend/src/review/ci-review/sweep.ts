@@ -126,7 +126,6 @@ export async function runCiReviewSweep(
 
     for (const [accountId, enabled] of byAccount) {
       if (result.stopped) break;
-      if ((await ctx.aiCredits.check(accountId)).agentBlocked) continue;
       const red = (await redOpenPrs(ctx, accountId, [...enabled.keys()]))
         .filter((p) => p.authorId == null || !automation.has(p.authorId))
         .sort((a, b) => a.prId - b.prId)

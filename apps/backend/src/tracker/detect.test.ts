@@ -1,7 +1,7 @@
 // Ticket-key detection precision tests (Pro issue-links). Like isolation.test.ts this file is
 // NOT in the plugin's `typecheck` include (src only) and the package ships no test script; run it
 // from a workspace that has vitest, e.g.:
-//   pnpm --filter @pierre-review/backend exec vitest run ../../packages/pro/test/extract.test.ts
+//   pnpm --filter @pierre-review/backend exec vitest run ../../apps/backend/src/platform/test/extract.test.ts
 // extractTicketKeys / parseProjectKeys are pure (no DB, type-only shared import), so no native deps.
 import { describe, expect, it } from 'vitest';
 import { extractTicketKeys, parseProjectKeys } from './detect.js';

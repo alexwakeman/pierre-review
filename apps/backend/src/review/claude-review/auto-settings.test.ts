@@ -1,6 +1,6 @@
 // AUTO CLAUDE REVIEW — THE PER-WORKSPACE SWITCH (core `workspaces.auto_review_enabled[_at]`,
 // migration 0074). Moved from the plugin's pro_workspace_settings with Claude Review; these cases
-// moved with it (packages/pro/test/workspace-settings.test.ts §7). What is pinned:
+// moved with it (apps/backend/src/platform/test/workspace-settings.test.ts §7). What is pinned:
 //
 //   1. OFF until someone switches it on — a fresh workspace reads off with no floor.
 //   2. ⚠ THE FLOOR MOVES ONLY ON AN OFF → ON FLIP. Re-saving "on" keeps it (or every PR opened in

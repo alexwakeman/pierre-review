@@ -8,7 +8,7 @@ import type {
   PostFindingOutcome,
   PostReviewArgs,
   PostReviewOutcome,
-} from '../pro/contract.js';
+} from '../platform/contract.js';
 import { isNoiseFile } from './prepare.js';
 import {
   buildAnchorIndex,

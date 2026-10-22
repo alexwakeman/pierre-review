@@ -235,18 +235,14 @@ export function corsOriginDelegate(
 }
 
 // Server-to-server POSTs authenticated by an HMAC signature instead of an origin.
-// GitHub and Stripe send no Origin and no Sec-Fetch-* headers, so they would pass
-// the guard regardless — listed explicitly so that stays true by intent, not luck.
-const GUARD_EXEMPT_PATHS = new Set([
-  '/api/webhooks/github',
-  '/api/billing/webhook',
-]);
+// GitHub sends no Origin and no Sec-Fetch-* headers, so it would pass the guard
+// regardless — listed explicitly so that stays true by intent, not luck.
+const GUARD_EXEMPT_PATHS = new Set(['/api/webhooks/github']);
 
 // GET routes that change server state and so need the same protection as a POST.
 // /api/auth/reconnect revokes the GitHub grant and drops the session; the frontend
 // reaches it as a same-origin <a href> navigation, so guarding it is free.
-// NOT guarded: /api/auth/login and /api/billing/checkout — those are legitimately
-// entered as cross-site top-level navigations (a link from the README, a bookmark).
+// NOT guarded: /api/auth/login — it is legitimately entered as a cross-site top-level navigation (a link from the README, a bookmark).
 const GUARDED_GET_PATHS = new Set(['/api/auth/reconnect']);
 
 /**

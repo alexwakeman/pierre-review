@@ -34,7 +34,7 @@ import type {
   ClaudeReviewCiStateKind,
 } from '@pierre-review/shared';
 import { CLAUDE_CI_FAILURE_CATEGORIES } from '@pierre-review/shared';
-import type { ReviewCiFailureReport } from '../../pro/contract.js';
+import type { ReviewCiFailureReport } from '../../platform/contract.js';
 
 // ---- caps ----
 // Failing checks whose logs one review reads (and shows Claude). The rest are 'over_cap'.

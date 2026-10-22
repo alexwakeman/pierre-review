@@ -18,7 +18,7 @@ import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import type { ClaudeReview } from '@pierre-review/shared';
-import type { RunReviewArgs, RunReviewResult } from '../../pro/contract.js';
+import type { RunReviewArgs, RunReviewResult } from '../../platform/contract.js';
 import type { AgentContext } from '../agent-context.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */

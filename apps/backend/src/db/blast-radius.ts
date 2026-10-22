@@ -13,7 +13,7 @@ import { codeLocFor, isNonCodeFile, PR_FILES_PAGE_CAP } from './code-loc.js';
 //
 // ---- WHY THIS IS NOT THE CLAUDE REVIEW ROUTER ------------------------------
 //
-// `decideReviewMode` (packages/pro/src/claude-review/routing.ts) asks a genuinely similar
+// `decideReviewMode` (apps/backend/src/platform/claude-review/routing.ts) asks a genuinely similar
 // question — "can this be reviewed from the diff alone?" — and its SHAPE is the ancestor of the
 // arms below (file / line / directory / subsystem ceilings, a contract-touch signal,
 // `allFilesNew`). It cannot be CALLED here, for three structural reasons:

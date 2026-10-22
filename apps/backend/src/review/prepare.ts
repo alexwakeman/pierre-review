@@ -1,4 +1,4 @@
-import type { PreparedReview, ReviewFileMetric } from '../pro/contract.js';
+import type { PreparedReview, ReviewFileMetric } from '../platform/contract.js';
 import { config } from '../config.js';
 import {
   capDiff,

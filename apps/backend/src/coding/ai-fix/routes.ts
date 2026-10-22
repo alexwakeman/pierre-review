@@ -54,8 +54,7 @@ import {
 // Review). ⚠ THE PATHS KEEP THEIR HISTORICAL `/api/pro/` PREFIX (`/api/pro/prs/:id/ai-fix*`,
 // `/api/pro/ai-fixes/:fixId*`) so the SPA client did not move; nothing about them is paid. They
 // are registered only by `registerAgenticRoutes` (review/agentic.ts), which refuses in cloud and
-// under LIMN_AI_DISABLED — and in cloud the auth plugin's `isProPath` 402 is a second guard on the
-// prefix anyway. The PR summary (`/api/pro/prs/:id/summary*`) is Pro and STAYED in the plugin.
+// under LIMN_AI_DISABLED.
 // Every handler resolves accountId =
 // ctx.accountIdOf(req) and verifies PR ownership.
 
@@ -209,11 +208,6 @@ function sendPlanResult(reply: FastifyReply, res: PlanActionResult) {
       return reply.code(409).send({ error: 'Busy' });
     case 'no_auth':
       return reply.code(400).send({ error: 'NoClaudeAuth', message: res.message });
-    case 'credits_exhausted':
-      return reply.code(402).send({
-        error: 'CreditsExhausted',
-        message: 'Out of monthly agentic AI credits — resets on the 1st.',
-      });
     case 'no_head':
       return reply.code(400).send({ error: 'NoHead' });
     case 'revision_cap':
@@ -334,11 +328,6 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
             return reply.code(409).send({ error: 'Busy' });
           case 'no_auth':
             return reply.code(400).send({ error: 'NoClaudeAuth', message: res.message });
-          case 'credits_exhausted':
-            return reply.code(402).send({
-              error: 'CreditsExhausted',
-              message: 'Out of monthly agentic AI credits — resets on the 1st.',
-            });
           case 'no_head':
             return reply.code(400).send({ error: 'NoHead' });
           case 'no_instruction':

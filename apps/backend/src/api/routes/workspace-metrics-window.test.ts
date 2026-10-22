@@ -37,8 +37,6 @@ const get = async (url: string) => {
   return { status: res.statusCode, body: res.json() as any };
 };
 
-let setCaps: ((c: any) => void) | undefined;
-let emptyCaps: any;
 
 beforeAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
@@ -108,12 +106,6 @@ beforeAll(async () => {
   beforeSprint = await mkMerged(mine, 1, NOW - 6 * DAY); // inside a rolling 14, before the sprint
   foreignPr = await mkMerged(theirs, 2, NOW - DAY);
 
-  // Reports (flow metrics included) is Pro on `periodReports`; entitle the process so the window
-  // assertions reach the handler. The 402 itself is pinned in the describe below.
-  const contract = await import('../../pro/contract.js');
-  contract.setProCapabilities({ ...contract.EMPTY_CAPABILITIES, periodReports: true });
-  setCaps = contract.setProCapabilities;
-  emptyCaps = contract.EMPTY_CAPABILITIES;
   const { insightsRoutes } = await import('./insights.js');
   const { registerAccountContext } = await import('../plugins/auth.js');
   const { default: Fastify } = await import('fastify');
@@ -124,7 +116,6 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  setCaps?.(emptyCaps);
   rw?.registerReportingWindowResolver(null);
   await app?.close();
   await closeDb?.();
@@ -175,15 +166,10 @@ describe('GET /api/workspace-metrics — the reporting window', () => {
   });
 });
 
-describe('GET /api/workspace-metrics — Pro on periodReports', () => {
-  it('402s both flow-metric routes without periodReports, and serves them with it', async () => {
-    setCaps?.(emptyCaps);
+describe('GET /api/workspace-metrics — no gate', () => {
+  it('serves both flow-metric routes', async () => {
     for (const url of ['/api/workspace-metrics', '/api/workspace-metrics/detail']) {
-      const res = await app.inject({ method: 'GET', url });
-      expect(res.statusCode, url).toBe(402);
-      expect(res.json(), url).toEqual({ error: 'pro required' });
+      expect((await app.inject({ method: 'GET', url })).statusCode, url).toBe(200);
     }
-    setCaps?.({ ...emptyCaps, periodReports: true });
-    expect((await app.inject({ method: 'GET', url: '/api/workspace-metrics' })).statusCode).toBe(200);
   });
 });

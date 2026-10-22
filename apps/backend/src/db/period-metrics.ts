@@ -66,8 +66,7 @@ const ACTOR_LANE_ORDER: ActorLane[] = [
 const { prComments, pullRequests, repos, reviewComments, reviews, reviewThreads } = schema;
 
 // MIRRORED from @pierre-review/shared (PERIOD_METRICS_SCHEMA_VERSION / PERIOD_METRIC_KEYS).
-// Inlined rather than imported for the same reason `AI_CREDITS_PER_USD` is inlined in
-// db/credits.ts: the shared package is TYPES ONLY and is not shipped, so `build-release.mjs`
+// Inlined rather than imported: the shared package is TYPES ONLY and is not shipped, so `build-release.mjs`
 // greps `release/dist` and FAILS the build on a real runtime import of it. Two spellings, kept
 // in lockstep — and `period-metrics.test.ts` imports the shared originals (a test is not in
 // release/dist) and asserts the two arrays are identical, so the drift is caught in CI rather

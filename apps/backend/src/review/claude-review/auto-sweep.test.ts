@@ -158,19 +158,6 @@ describe('runAutoReviewSweep', () => {
     expect(enqueued.map(([, p]) => p)).toEqual([1, 2, 100, 101, 102, 103, 104]);
   });
 
-  it('skips an account whose credits are spent, without reading its candidates', async () => {
-    roster = [
-      { accountId: 1, workspaceId: 7, enabledAtMs: 0, dailyCap: 20 },
-      { accountId: 2, workspaceId: 8, enabledAtMs: 0, dailyCap: 20 },
-    ];
-    blocked = new Set([1]);
-    answers.set(7, { prIds: [1], autoToday: 0 });
-    answers.set(8, { prIds: [2], autoToday: 0 });
-    await runAutoReviewSweep(makeCtx(), NOW);
-    expect(calls.map((c) => c.workspaceId)).toEqual([8]);
-    expect(enqueued).toEqual([[2, 2]]);
-  });
-
   it('a full lane stops the tick', async () => {
     laneRoom = 1;
     roster = [

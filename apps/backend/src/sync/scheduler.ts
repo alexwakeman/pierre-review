@@ -4,7 +4,6 @@ import { config } from '../config.js';
 import { syncAllRepos } from './sync-manager.js';
 import { pruneOldData } from '../db/retention.js';
 import { getScheduledJobs } from './scheduled-jobs.js';
-import { runBenchmarkRollup } from './benchmark-rollup.js';
 import { AUTO_MERGE_CRON, runAutoMergeTick } from '../merge/auto-merge-runner.js';
 import { runDependencyPolicyTick } from '../merge/dependency-policy.js';
 import { runMlEnrichmentTick } from './ml-enrichment.js';
@@ -17,7 +16,6 @@ import type { Logger } from './sync-repo.js';
 
 let task: ScheduledTask | null = null;
 let retentionTask: ScheduledTask | null = null;
-let benchmarkTask: ScheduledTask | null = null;
 let autoMergeTask: ScheduledTask | null = null;
 let mlEnrichmentTask: ScheduledTask | null = null;
 let mentionScanTask: ScheduledTask | null = null;
@@ -61,19 +59,6 @@ export function startScheduler(log: FastifyBaseLogger): void {
     } else {
       log.warn(`invalid RETENTION_CRON "${config.retentionCron}"; retention disabled`);
     }
-  }
-
-  // Cross-org benchmark rollup (CORE, CLOUD-ONLY, opt-in). Weekly; INERT unless an account has
-  // consented (accounts.benchmark_opt_in) — the sweep returns early with zero opted-in accounts,
-  // and never runs at all in local mode (runBenchmarkRollup gates on config.isCloud). Rides the
-  // same disableScheduler gate. A throw in a tick is caught so a bad tenant never crashes the loop.
-  if (config.isCloud && cron.validate(config.benchmarkRollupCron)) {
-    benchmarkTask = cron.schedule(config.benchmarkRollupCron, () => {
-      void runBenchmarkRollup(log).catch((err) =>
-        log.error({ err }, 'benchmark rollup sweep failed'),
-      );
-    });
-    log.info(`benchmark rollup started (cron "${config.benchmarkRollupCron}")`);
   }
 
   // Armed-merge watcher ("merge when ready"). Rides the same disableScheduler gate as sync —
@@ -185,8 +170,6 @@ export function stopScheduler(): void {
   task = null;
   retentionTask?.stop();
   retentionTask = null;
-  benchmarkTask?.stop();
-  benchmarkTask = null;
   autoMergeTask?.stop();
   autoMergeTask = null;
   mlEnrichmentTask?.stop();

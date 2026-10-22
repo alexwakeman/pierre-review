@@ -23,7 +23,7 @@ import type {
   ClaudeFindingStory,
 } from '@pierre-review/shared';
 import { CLAUDE_REVIEW_TICKET_MAX_CRITERIA, storedList, ticketRef } from '@pierre-review/shared';
-import type { ReviewTicketGapReport, ReviewTicketReport } from '../../pro/contract.js';
+import type { ReviewTicketGapReport, ReviewTicketReport } from '../../platform/contract.js';
 
 export const TICKET_SUMMARY_CHARS = 1_000;
 export const TICKET_EXPLANATION_CHARS = 1_000;

@@ -78,9 +78,6 @@ export async function askDocs(ctx: AgentContext, a: AskArgs): Promise<ReferenceD
   try {
     const auth = ctx.llm.detectAuth();
     if (auth.status === 'none') throw new DocsChatError(400, 'NoClaudeAuth', auth.message ?? 'No Claude credential found.');
-    if ((await ctx.aiCredits.check(a.accountId)).agentBlocked) {
-      throw new DocsChatError(402, 'CreditsExhausted', 'Out of monthly agentic AI credits — resets on the 1st.');
-    }
     const library = await docsContextFor(a.accountId, a.workspaceId);
     if (!library.hasDocs) throw new DocsChatError(409, 'EmptyLibrary', 'There are no documents to ask about yet.');
     const conversationId = a.conversationId ?? randomBytes(12).toString('hex');

@@ -73,7 +73,7 @@ import {
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import type { AutoResolveDeps } from './auto-resolve.js';
-import type { PostReviewFinding } from '../../pro/contract.js';
+import type { PostReviewFinding } from '../../platform/contract.js';
 import { readWorkspaceAutoPostForPr } from './auto-settings.js';
 import { similarTitles } from './settled-by-reply.js';
 import { prAuthorIsAccount } from '../../coding/ai-fix/auto-fix.js';

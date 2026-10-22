@@ -958,31 +958,6 @@ check(
 );
 
 
-// Cross-org benchmark contributions (Phase 0): the consent roster respects the opt-in flag +
-// excludes local accounts, and WITHDRAWAL (delete) is account-scoped — it must never touch
-// another tenant's contributions.
-await db
-  .update(accounts)
-  .set({ benchmarkOptIn: true })
-  .where(eq(accounts.id, 2))
-  .execute();
-const optedIds = await q.getBenchmarkOptedInAccountIds();
-check('getBenchmarkOptedInAccountIds includes opted-in non-local (B)', optedIds.includes(2));
-check('getBenchmarkOptedInAccountIds excludes non-opted (A)', !optedIds.includes(1));
-await db
-  .insert(schema.benchmarkContributions)
-  .values([
-    { accountId: 1, vendorKind: 'coderabbit', weekStart: now, orgSizeBucket: '1' },
-    { accountId: 2, vendorKind: 'coderabbit', weekStart: now, orgSizeBucket: '1' },
-  ])
-  .execute();
-await q.deleteBenchmarkContributions(1);
-const remainingContrib = await db.select().from(schema.benchmarkContributions).execute();
-check(
-  "deleteBenchmarkContributions(A) leaves B's contributions untouched (IDOR blocked)",
-  remainingContrib.length === 1 && remainingContrib[0]!.accountId === 2,
-);
-
 // ── Cross-team text search (search_index is accountId-denormalized) ─────────────
 // Seed a search row for each account's PR sharing a common token; searchPrs must return only the
 // caller's rows and leak nothing even when B is handed A's repo id.
@@ -3070,7 +3045,7 @@ check(
 
 // ── THE AGENTIC TABLES (core since migration 0074 / pg 0061) ─────────────────────────────────────
 // ai_fixes (AI Fix's runs) moved from the plugin with its feature; its cases moved from
-// packages/pro/test/isolation.test.ts. (review_learnings, review memory's table, sat beside it until
+// apps/backend/src/platform/test/isolation.test.ts. (review_learnings, review memory's table, sat beside it until
 // migration 0075 / pg 0062 dropped it.) It has no foreign key, so the account predicate in every
 // getter is the WHOLE guarantee. Both accounts get a row on the SAME source review id, so a dropped
 // predicate would have something to leak — and the MUTATION check below proves the seed is not
@@ -4044,10 +4019,7 @@ check(
       (await bReview()) === 'Doing',
   );
   check("getSprintStatusSettings(A, B's workspace) never reads B's order", (await statusSettings.getSprintStatusSettings(1, defaultB)).buckets == null);
-  const contract = await import('../src/pro/contract.js');
-  const savedCaps = contract.getProCapabilities();
-  contract.setProCapabilities({ ...contract.EMPTY_CAPABILITIES, periodReports: true });
-  try {
+  {
     const Fastify = (await import('fastify')).default;
     const { sprintStoriesRoutes } = await import('../src/api/routes/sprint-stories.js');
     const [acctA] = await db.select().from(schema.accounts).where(eq(schema.accounts.id, 1)).execute();
@@ -4068,8 +4040,6 @@ check(
       res.statusCode === 400 && (await bReview()) === 'Doing',
     );
     await sapp.close();
-  } finally {
-    contract.setProCapabilities(savedCaps);
   }
 }
 

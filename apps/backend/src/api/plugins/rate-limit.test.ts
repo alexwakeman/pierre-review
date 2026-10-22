@@ -870,7 +870,6 @@ describe('tierFor — unauthenticated surface', () => {
   // an absent one, since each delivery can enqueue a sync.
   it('gives signed webhooks a high but finite ceiling', () => {
     expect(tiers('POST', '/api/webhooks/github')).toEqual(['webhook']);
-    expect(tiers('POST', '/api/billing/webhook')).toEqual(['webhook']);
     expect(TIERS.webhook.limit).toBeGreaterThan(TIERS.ai.limit);
   });
 

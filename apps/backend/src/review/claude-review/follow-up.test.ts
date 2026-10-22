@@ -8,7 +8,7 @@
 //   pnpm --filter @pierre-review/backend test claude-review-follow-up
 import { describe, expect, it } from 'vitest';
 import type { ClaudeFindingSeverity } from '@pierre-review/shared';
-import type { ReviewFinding } from '../../pro/contract.js';
+import type { ReviewFinding } from '../../platform/contract.js';
 import {
   PRIOR_FINDINGS_MAX,
   findingHeadMoved,

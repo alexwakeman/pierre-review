@@ -1,0 +1,19 @@
+-- @pierre/pro plugin migration (SQLite / local mode). Run once by the host's runPluginMigrations
+-- (tracked in pro_migrations — plugin migrations are discovered by FILENAME SORT and have NO
+-- meta/_journal.json; do not add one). No `--> statement-breakpoint` in plugin migrations.
+--
+-- EFFORT vs AUTOMATION on a stored period report.
+--
+-- The twelve-metric vector says WHAT happened; this column says how much of it was a person.
+-- Measured on a real workspace before it existed: 117 merged PRs in one fortnight, 46 of them
+-- Dependabot, and because dependency PRs are tiny and fast the reported median PR size was 68
+-- lines — a blend of Dependabot's 14 and the humans' 142, describing no pull request anyone in
+-- that team had written, and understating real human PR size by 2.1×.
+--
+-- Stored rather than recomputed because a period report is IMMUTABLE once generated and has to
+-- outlive its source data: core's retention sweep hard-deletes PR subtrees past ~180 days, so a
+-- lane breakdown that were recomputed on read would silently empty out as the window aged.
+--
+-- Nullable and additive: every row written before this migration simply carries no breakdown,
+-- which the SPA renders as an absent panel rather than as a confident 0% automation.
+ALTER TABLE workspace_period_reports ADD COLUMN lanes_json text;

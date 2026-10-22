@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW } from '@pierre-review/shared';
-import type { RunReviewArgs } from '../pro/contract.js';
+import type { RunReviewArgs } from '../platform/contract.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 

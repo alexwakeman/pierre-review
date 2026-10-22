@@ -69,10 +69,6 @@ export function registerThreadCheckRoutes(app: FastifyInstance, ctx: AgentContex
       reply.status(400);
       return { error: 'NoClaudeAuth', message: auth.message };
     }
-    if ((await ctx.aiCredits.check(accountId)).agentBlocked) {
-      reply.status(402);
-      return { error: 'CreditsExhausted', message: 'Out of monthly agentic AI credits — resets on the 1st.' };
-    }
     const r = await startThreadCheck(ctx, {
       accountId,
       workspaceId: pr.workspaceId ?? (await defaultWorkspaceId(ctx, accountId)) ?? 0,

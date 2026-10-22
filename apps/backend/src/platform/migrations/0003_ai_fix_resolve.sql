@@ -1,0 +1,19 @@
+-- ⚠ EMPTIED — COMMENT ONLY. ai_fixes moved to core with AI Fix's agentic fixer (core migration
+-- sqlite 0074 / pg 0061 creates the table in its FINAL shape, or adopts an existing one). Left as
+-- statements, this file would hit "duplicate column" on a FRESH SQLite install — core runs first —
+-- and the plugin migrator THROWS on any failure, dropping the whole plugin to OSS mode silently.
+-- The file stays so pro_migrations' history keeps its name. The original statements, for the record:
+-- @pierre/pro plugin migration (SQLite / local mode). Run once by the host's
+-- runPluginMigrations (tracked in pro_migrations). Adds the stored, reviewable
+-- trunk-reconciliation (rebase) artifact columns to ai_fixes. Column names match the
+-- drizzle `name` args in src/ai-fix/schema.sqlite.ts. SQLite ADD COLUMN has no
+-- IF NOT EXISTS, but this file is applied exactly once (bookkeeping-gated).
+
+-- (moved to core) ALTER TABLE ai_fixes ADD COLUMN resolved_strategy text;
+-- (moved to core) ALTER TABLE ai_fixes ADD COLUMN resolved_patch text;
+-- (moved to core) ALTER TABLE ai_fixes ADD COLUMN resolved_diff text;
+-- (moved to core) ALTER TABLE ai_fixes ADD COLUMN resolved_base_sha text;
+-- (moved to core) ALTER TABLE ai_fixes ADD COLUMN resolved_files_changed text;
+-- (moved to core) ALTER TABLE ai_fixes ADD COLUMN resolved_conflict_files text;
+-- (moved to core) ALTER TABLE ai_fixes ADD COLUMN resolved_at integer;
+-- (moved to core) ALTER TABLE ai_fixes ADD COLUMN resolve_error text;

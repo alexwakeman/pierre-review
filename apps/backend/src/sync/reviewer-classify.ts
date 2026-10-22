@@ -101,7 +101,7 @@ export type ClassifyOpts = PersistOpts;
 // source of truth for rendering; this is what lands in the persisted `label` column.
 //
 // ⚠ TWO SIBLINGS, HAND-KEPT: `BOT_VENDOR_META` (apps/frontend/src/lib/ui.ts) and the Pro
-// plugin's Slack `BOT_LABELS` (packages/pro/src/slack/report.ts). Change one branded label,
+// plugin's Slack `BOT_LABELS` (apps/backend/src/platform/slack/report.ts). Change one branded label,
 // change all three. The three UNBRANDED kinds are no longer restated here — `labelFor` reads
 // them from `GENERIC_REVIEWER_LABELS` in shared, because those were exactly the keys the three
 // copies had drifted apart on.

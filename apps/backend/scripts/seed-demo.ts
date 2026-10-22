@@ -20,11 +20,9 @@
 // workspaces, is reachable. See the "workspaces" block for why the split falls
 // where it does.
 //
-// When the PRIVATE @pierre/pro submodule is checked out (packages/pro), the
-// seeder also applies the plugin's own migrations (with pro_migrations
-// bookkeeping, so the backend's boot-time plugin migration is a no-op) and
-// seeds the Pro tables: sprint_reports, pro_settings, ai_fixes. Without the submodule those steps
-// are skipped cleanly.
+// The seeder also applies the platform's own migrations (src/platform/migrations, with
+// pro_migrations bookkeeping, so the backend's boot-time run is a no-op) and seeds the platform
+// tables: sprint_reports, pro_settings, ai_fixes.
 //
 // It also seeds ONE stored "Check review" result — an `addressed` verdict on a
 // real estate thread, written by hand but hashed by the plugin's own reader, so
@@ -46,9 +44,9 @@
 // `gh` OFF its PATH so ensureLocalAccount() can't overwrite the seeded "Morgan
 // Diaz" identity with your real GitHub user (which empties the My Turn triage).
 // Full recipe + the shot list in apps/landing/README.md ("Product screenshots"):
-//   1. backend  : (gh off PATH, pro submodule checked out) \
+//   1. backend  : (gh off PATH) \
 //                 DATABASE_URL=/tmp/pierre-demo.sqlite PORT=4100 DISABLE_SCHEDULER=true \
-//                 PRO_DIGEST_ENABLED=true PRO_ADVANCED_AI_ENABLED=true ANTHROPIC_API_KEY=dummy \
+//                 ANTHROPIC_API_KEY=dummy \
 //                 node_modules/.bin/tsx src/index.ts   (from apps/backend)
 //   2. frontend : BACKEND_PORT=4100 node_modules/.bin/vite --port 5273  (from apps/frontend)
 //   3. capture  : node scripts/capture-shots.mjs       (all shots → apps/landing/public/shots/)
@@ -2003,20 +2001,19 @@ console.log(
 );
 
 // ===========================================================================
-// PRO-TABLE SEEDING (only when the PRIVATE @pierre/pro submodule is checked out).
-// Applies the plugin's own migrations EXACTLY the way the backend boot does
-// (src/pro/migrate.ts, incl. the pro_migrations bookkeeping — so the boot-time
-// plugin migration is a no-op), then seeds demo-quality rows into the plugin
-// tables so the marketing shots show rich Pro state: sprint_reports, pro_settings, ai_fixes (#114).
+// PLATFORM-TABLE SEEDING. Applies the platform's own migrations EXACTLY the way the backend
+// boot does (src/platform/migrate.ts, incl. the pro_migrations bookkeeping — so the boot-time
+// migration is a no-op), then seeds demo-quality rows into those tables so the marketing
+// shots show rich state: sprint_reports, pro_settings, ai_fixes (#114).
 // ===========================================================================
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const PRO_DIR = join(REPO_ROOT, 'packages', 'pro');
+const PRO_DIR = join(REPO_ROOT, 'apps', 'backend', 'src', 'platform');
 let proSeeded = false;
 
 if (existsSync(join(PRO_DIR, 'migrations'))) {
   // 1. The plugin's migrations, via the REAL core migrator (pro_migrations bookkeeping
   //    included). This is the one sanctioned raw-$client DDL path.
-  const { runPluginMigrations } = await import('../src/pro/migrate.js');
+  const { runPluginMigrations } = await import('../src/platform/migrate.js');
   await runPluginMigrations(join(PRO_DIR, 'migrations'), join(PRO_DIR, 'migrations-pg'));
 
   // The plugin tables aren't in the core drizzle schema, so seed them through the raw
@@ -2075,10 +2072,10 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
 
   // 4. sprint_reports — ONE cross-repo report. The stored insights_hash must match
   //    what the live GET recomputes (structural hash of the current Insight cards +
-  //    the day-quantized sprint window — see packages/pro/src/insights/sprint-report.ts
+  //    the day-quantized sprint window — see src/platform/insights/sprint-report.ts
   //    insightsHash/windowKey; replicated here so the report is NOT flagged stale).
   const { getWorkspaceInsights, resolveWorkspaceScope } = await import('../src/db/queries.js');
-  // Replicate packages/pro/src/settings/store.ts `currentSprintWindow` EXACTLY so the
+  // Replicate src/platform/settings/store.ts `currentSprintWindow` EXACTLY so the
   // stored insights_hash matches what the plugin recomputes live (else a stale chip):
   // the auto-rolling window [start + k·cadence, +cadence) that contains `now`.
   const cadenceMs = 14 * DAY_MS;
@@ -2212,7 +2209,7 @@ console.log('  stale open PRs (one per repo): 140 (web), 141 (api), 142 (infra)'
 console.log(
   proSeeded
     ? '  pro tables: sprint_reports (1), pro_settings (1), ai fix on #114'
-    : '  pro tables: SKIPPED (packages/pro submodule not checked out)',
+    : '  pro tables: SKIPPED (src/platform/migrations not found)',
 );
 console.log(
   `  history: ${histPrs.length} PRs (ids ${histPrs[0]?.id}–${histPrs[histPrs.length - 1]?.id}),`,

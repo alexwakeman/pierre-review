@@ -18,7 +18,7 @@ import type {
   ClaudeReviewTicket,
   ClaudeTicketAssessment,
 } from '@pierre-review/shared';
-import type { ReviewFinding } from '../../pro/contract.js';
+import type { ReviewFinding } from '../../platform/contract.js';
 import type { AgentContext as ProContext } from '../agent-context.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */

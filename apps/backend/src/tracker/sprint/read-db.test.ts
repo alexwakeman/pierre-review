@@ -299,11 +299,9 @@ describe('a workspace the ticket worker backed off', () => {
 describe('POST /api/sprint-stories/refresh', () => {
   it('is free (no Reports needed): stamps, marks due, kicks, 202s', async () => {
     const Fastify = (await import('fastify')).default;
-    const contract = await import('../../pro/contract.js');
     const { registerSprintReadRoutes } = await import('./routes.js');
-    const before = contract.getProCapabilities();
     const app = Fastify();
-    let account: { isLocal: boolean; plan: string } | null = null;
+    let account: { isLocal: boolean } | null = null;
     app.decorateRequest('account', null);
     app.addHook('onRequest', async (req) => {
       (req as any).account = account;
@@ -312,9 +310,7 @@ describe('POST /api/sprint-stories/refresh', () => {
     const kicks: Array<[number, number]> = [];
     store.setSprintReadKicker((a, w) => kicks.push([a, w]));
     try {
-      // A free cloud account, no Pro capabilities at all — still allowed.
-      contract.setProCapabilities({ ...before, periodReports: false });
-      account = { isLocal: false, plan: 'free' };
+      account = { isLocal: false };
       await db.update(schema.sprintReads).set({ nextReadAt: new Date(T0 + 365 * DAY) }).where(eq(schema.sprintReads.workspaceId, wsA)).execute();
       // Another tenant's workspace id falls to the caller's Default — never a 404.
       const ok = await app.inject({ method: 'POST', url: '/api/sprint-stories/refresh', payload: { workspaceId: wsB } });
@@ -346,7 +342,6 @@ describe('POST /api/sprint-stories/refresh', () => {
       expect(threw.json().ticketChecks).toEqual({ started: 0, skipped: null });
     } finally {
       hooks.setSprintTicketChecks(null);
-      contract.setProCapabilities(before);
       store.setSprintReadKicker(null);
       await app.close();
     }
