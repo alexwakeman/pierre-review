@@ -25,7 +25,7 @@ import type {
 import type { CompareDiffResult } from '../github/compare.js';
 import type { PrReviewCommentHunks } from '../sync/hydrate-detail.js';
 import type { AiUsageRecord } from '../db/usage.js';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { ConflictSeam } from '../conflict/seam.js';
 
 // THE PLATFORM CONTEXT — the one context type handed to the reporting / bots / Slack / settings
@@ -35,10 +35,9 @@ import type { ConflictSeam } from '../conflict/seam.js';
 // The agentic types below (review, fix, post) are shared with core's review/ and coding/ modules.
 
 // The platform modules reach their OWN tables via `proSchemaFor()` and core tables via the
-// `schema` value below, typed loosely: a node-postgres-TYPED drizzle instance with an empty
-// schema generic (so a stray .get()/.all()/.run() is still a compile error), and the
-// mode-selected core schema object accessed by table name.
-export type ProDb = NodePgDatabase<Record<string, never>>;
+// `schema` value below, typed loosely: the drizzle instance with an empty schema generic, and the
+// core schema object accessed by table name.
+export type ProDb = BetterSQLite3Database<Record<string, never>>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ProCoreSchema = Record<string, any>;
 
@@ -1101,8 +1100,6 @@ export interface ProContext {
   log: FastifyBaseLogger;
   host: {
     version: string;
-    deploymentMode: 'local' | 'cloud';
-    isCloud: boolean;
     // WHERE A HUMAN'S BROWSER REACHES THE SPA, no trailing slash (core config.ts `appWebUrl`).
     // The plugin builds DEEP LINKS back into the SPA from it — today, EVERY link in the Slack
     // digest and sprint report: the workspace, each repo heading and each PR.
@@ -1132,15 +1129,12 @@ export interface ProContext {
     // plugin stores a secret any more.)
   };
   accountIdOf(req: FastifyRequest): number; // the single scoping seam
-  // node-postgres-TYPED drizzle instance → a stray .get()/.all()/.run() is a
-  // compile error in the plugin too.
   db: ProDb;
   schema: ProCoreSchema;
   runTransaction: <T>(fn: (tx: ProDb) => Promise<T>) => Promise<T>;
-  isPg: boolean;
-  // Plugin-owned dual-dialect migrator hook (CREATE TABLE IF NOT EXISTS + its own
-  // pro_migrations bookkeeping; see pro/migrate.ts).
-  registerMigrations(sqliteFolder: string, pgFolder: string): Promise<void>;
+  // The platform's own migrator (CREATE TABLE IF NOT EXISTS + its own pro_migrations
+  // bookkeeping; see platform/migrate.ts).
+  registerMigrations(folder: string): Promise<void>;
   // Retention hook: the core TTL sweep (db/retention.ts) deletes core PR subtrees; the
   // plugin registers a handler here to prune ITS OWN tables (e.g. ai_pr_analyses) for the same
   // PR ids — core can't name plugin tables (open-core
@@ -1149,7 +1143,7 @@ export interface ProContext {
     handler: (args: { prIds: number[] }) => Promise<void> | void,
   ): void;
   // Erasure hook (GDPR Art. 17), the account-scoped twin of registerRetention. Core's
-  // DELETE /api/me/account removes the account and every core-owned row, then calls each
+  // Account erasure (db/erase-account.ts) removes the account and every core-owned row, then calls each
   // registered handler so the plugin can delete ITS OWN account-scoped tables (pro_settings,
   // sprint_reports, repo_digests, …). Core can't name them across the open-core boundary, and
   // an "account deleted" that quietly left them behind would make the privacy policy untrue.
@@ -1238,14 +1232,6 @@ export interface ProContext {
   // conflict-assist route at all; nothing else degrades. A REQUIRED member here would be the case
   // that demands a bump, and a bump is four literals across TWO REPOS whose half-application
   // degrades the ENTIRE plugin to OSS mode with nothing thrown.
-  //
-  // ⚠ IT IS ALSO `undefined` IN CLOUD (`bind.ts`), AND THE REASON THAT USED TO BE GIVEN HERE IS
-  // NO LONGER TRUE. This said the seam was withheld because "the resolver routes are registered
-  // only when `!config.isCloud`, so a hunk seam there would address sessions that cannot exist".
-  // The resolver is registered UNCONDITIONALLY now and its sessions exist in both modes
-  // (docs/MERGE-CI-TRUNK.md § Resolving conflicts in the app), so what remains is a standing
-  // decision not to offer the PAID per-hunk suggestion on the cloud resolver — not a structural
-  // impossibility. Whoever revisits it changes `bind.ts`; nothing here has to move.
   conflicts?: ConflictSeam;
 }
 

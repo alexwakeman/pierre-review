@@ -41,7 +41,6 @@ import { postSonarSnapshot, defaultSonarPostDeps, type SonarPostDeps } from './p
 export interface SonarRouteCtx extends SonarDb {
   accountIdOf: (req: FastifyRequest) => number;
   log: AgentContext['log'];
-  isCloud: boolean;
   transport?: JiraTransport;
   postDeps?: SonarPostDeps;
   /** Test seam: is SonarCloud's analysed sha GitHub's test merge commit of the head? */
@@ -238,46 +237,44 @@ export function registerSonarRoutes(app: FastifyInstance, ctx: SonarRouteCtx): v
     },
   );
 
-  // Posting rides the reader's `gh` session (review/post-review.ts), which exists locally only.
-  if (!ctx.isCloud) {
-    app.post<{ Params: { id: number }; Body: { headSha: string } }>(
-      '/api/prs/:id/sonar/post',
-      {
-        schema: {
-          params: idParam,
-          body: { ...headBody, required: ['headSha'] },
-        },
+  // Posting rides the reader's `gh` session (review/post-review.ts).
+  app.post<{ Params: { id: number }; Body: { headSha: string } }>(
+    '/api/prs/:id/sonar/post',
+    {
+      schema: {
+        params: idParam,
+        body: { ...headBody, required: ['headSha'] },
       },
-      async (req, reply): Promise<SonarPostResponse | FastifyReply> => {
-        const accountId = ctx.accountIdOf(req);
-        const pr = await ownedPrHead(ctx, accountId, req.params.id);
-        if (!pr) return notFound(reply, `PR ${req.params.id}`);
-        let out;
-        try {
-          out = await postSonarSnapshot(
-            ctx,
-            { accountId, prId: req.params.id, headSha: req.body.headSha, trigger: 'manual' },
-            ctx.postDeps ?? defaultSonarPostDeps,
-          );
-        } catch (err) {
-          ctx.log.warn(`sonar post pr ${req.params.id}: ${err instanceof Error ? err.message : String(err)}`);
-          return reply.code(502).send({ error: 'GithubError', message: 'GitHub could not be reached. Nothing was posted.' });
-        }
-        switch (out.kind) {
-          case 'not_found':
-            return notFound(reply, 'SonarCloud snapshot');
-          case 'nothing_to_post':
-            return reply.code(409).send({ error: 'NothingToPost', message: 'Nothing new to post on this commit: every issue is already on GitHub, or there are none.' });
-          case 'already_posted':
-            return reply.code(409).send({ error: 'AlreadyPosted', message: 'These SonarCloud findings were already posted for this commit.' });
-          case 'head_moved':
-            return reply.code(409).send({ error: 'HeadMoved', message: 'The PR has new commits. Refresh SonarCloud first.' });
-          case 'not_open':
-            return reply.code(409).send({ error: 'NotOpen', message: 'The PR is no longer open.' });
-          case 'done':
-            return { snapshot: out.snapshot, visible: out.visible };
-        }
-      },
-    );
-  }
+    },
+    async (req, reply): Promise<SonarPostResponse | FastifyReply> => {
+      const accountId = ctx.accountIdOf(req);
+      const pr = await ownedPrHead(ctx, accountId, req.params.id);
+      if (!pr) return notFound(reply, `PR ${req.params.id}`);
+      let out;
+      try {
+        out = await postSonarSnapshot(
+          ctx,
+          { accountId, prId: req.params.id, headSha: req.body.headSha, trigger: 'manual' },
+          ctx.postDeps ?? defaultSonarPostDeps,
+        );
+      } catch (err) {
+        ctx.log.warn(`sonar post pr ${req.params.id}: ${err instanceof Error ? err.message : String(err)}`);
+        return reply.code(502).send({ error: 'GithubError', message: 'GitHub could not be reached. Nothing was posted.' });
+      }
+      switch (out.kind) {
+        case 'not_found':
+          return notFound(reply, 'SonarCloud snapshot');
+        case 'nothing_to_post':
+          return reply.code(409).send({ error: 'NothingToPost', message: 'Nothing new to post on this commit: every issue is already on GitHub, or there are none.' });
+        case 'already_posted':
+          return reply.code(409).send({ error: 'AlreadyPosted', message: 'These SonarCloud findings were already posted for this commit.' });
+        case 'head_moved':
+          return reply.code(409).send({ error: 'HeadMoved', message: 'The PR has new commits. Refresh SonarCloud first.' });
+        case 'not_open':
+          return reply.code(409).send({ error: 'NotOpen', message: 'The PR is no longer open.' });
+        case 'done':
+          return { snapshot: out.snapshot, visible: out.visible };
+      }
+    },
+  );
 }

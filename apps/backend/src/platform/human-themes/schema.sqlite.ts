@@ -1,7 +1,7 @@
 // ⚠ DORMANT: human_theme_reports (the Feed "Discussion themes", REMOVED). Nothing reads or writes this table any more; it stays declared so the
 // account erasure, retention prune and isolation test still cover it. Never drop it.
 // Plugin-owned SQLite schema (local mode) for the Feed "Discussion themes" AI summary — the human
-// sibling of bot_theme_reports. Structural twin: `schema.pg.ts`. Migrated by the host via
+// sibling of bot_theme_reports. Migrated by the host via
 // ctx.registerMigrations; this module is ONLY the typed query surface.
 import { sql } from 'drizzle-orm';
 import { integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';

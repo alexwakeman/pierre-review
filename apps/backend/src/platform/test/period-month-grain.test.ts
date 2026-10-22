@@ -335,7 +335,6 @@ describe('a month report through the database', () => {
     for (const sql of MIGRATIONS) sqlite.exec(sql);
     ctx = {
       db: drizzle(sqlite, { schema: { ...periodSchema } }),
-      isPg: false,
       recordAiUsage: async () => {},
       queries: {
         getPeriodMetrics: async (

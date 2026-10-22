@@ -67,7 +67,6 @@ vi.mock('../coding/merge.js', () => ({
 const DB_PATH = '/tmp/pierre-auto-merge-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let db: any;

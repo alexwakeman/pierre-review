@@ -3,20 +3,13 @@ import { useClickOutside } from '../hooks/useClickOutside.js';
 import { profileUrl } from '../lib/ui.js';
 import { CaretIcon, ExternalLinkIcon } from './Icons.js';
 
-// The signed-in user chip at the far right of the header: a subtle button (avatar + name)
-// that opens a small dropdown menu — "Open Profile on GitHub" and (cloud only) "Sign Out".
-// Replaces the old plain profile link + the standalone header sign-out button.
+// The user chip at the far right of the header: a subtle button (avatar + name) that opens a
+// small dropdown menu — Settings and "Open Profile on GitHub".
 export function UserMenu({
   user,
-  canSignOut,
-  onSignOut,
   onOpenSettings,
 }: {
   user: { login: string; displayName: string | null; avatarUrl: string | null };
-  // Sign-out only works in cloud (local has no session / no /api/auth/logout route), so the
-  // entry is shown only when true.
-  canSignOut: boolean;
-  onSignOut: () => void;
   // Opens the user-configuration modal.
   onOpenSettings: (() => void) | null;
 }): JSX.Element {
@@ -125,34 +118,6 @@ export function UserMenu({
             <ExternalLinkIcon size={13} />
             Open Profile on GitHub
           </a>
-          {canSignOut && (
-            <button
-              role="menuitem"
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                onSignOut();
-              }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="13"
-                height="13"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                <polyline points="16 17 21 12 16 7" />
-                <line x1="21" y1="12" x2="9" y2="12" />
-              </svg>
-              Sign Out
-            </button>
-          )}
         </div>
       )}
     </div>

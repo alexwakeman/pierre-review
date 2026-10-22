@@ -150,7 +150,7 @@ export async function loadReport(
   scopeKey: string,
   window: BotWindowKind,
 ): Promise<BotThemesResult | null> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const rows = (await ctx.db
     .select({ resultJson: pro.botThemeReports.resultJson })
     .from(pro.botThemeReports)
@@ -189,7 +189,7 @@ async function generateReport(
   const build = await buildBotThemes(ctx, accountId, scope, window, scopeKey);
   if (build == null || build.empty) return { result: null, empty: true };
 
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   // $0-on-unchanged: a stored report whose payload hash matches → return it unbilled.
   const existing = (await ctx.db
     .select({

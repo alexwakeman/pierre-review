@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from './app.js';
-import { assertCloudConfig, config } from './config.js';
+import { config } from './config.js';
 import { cleanupRedundantReviewEvents } from './db/cleanup.js';
 import { runMigrations } from './db/run-migrations.js';
 import { bindPlatform } from './platform/context.js';
@@ -11,9 +11,6 @@ import { sweepCloneCache } from './review/clone-hygiene.js';
 // start the scheduler → listen. Returns the listening Fastify instance and the
 // resolved port so a caller (the CLI) can print the URL / open the browser.
 export async function start(): Promise<{ app: FastifyInstance; port: number }> {
-  // Cloud mode: fail loud if required env vars are missing/invalid before serving.
-  if (config.isCloud) assertCloudConfig();
-
   // The one-time ~/.pierre-review → ~/.limn move already ran: config.ts does it on import, before it
   // resolves any path inside the data directory (data-dir.ts).
 
@@ -46,10 +43,9 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
     /* the sweep is repair, not a precondition — never block the boot on it */
   });
 
-  // Local mode only: synthesize/refresh the single local account from `gh api
-  // user` so triage ("my turn") knows who "you" are. Non-fatal if gh is missing.
-  // In cloud mode accounts are created via OAuth sign-in instead.
-  if (!config.isCloud) {
+  // Synthesize/refresh the single local account from `gh api user` so triage ("my turn") knows
+  // who "you" are. Non-fatal if gh is missing.
+  {
     const { ensureLocalAccount } = await import('./auth/account.js');
     const me = await ensureLocalAccount();
     if (me?.githubLogin) console.log(`local user: ${me.githubLogin}`);
@@ -68,9 +64,9 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
     })
     .catch((err) => app.log.warn({ err }, 'search index backfill failed'));
 
-  // The agentic features' process-level half (local only): review-memory capture, the auto-review
-  // sweeper (scheduled below with every other job) and the crash-orphan reconciles for Claude
-  // Review and AI Fix runs. A no-op in cloud or under LIMN_AI_DISABLED.
+  // The agentic features' process-level half: the auto-review sweeper (scheduled below with every
+  // other job) and the crash-orphan reconciles for Claude Review and AI Fix runs. A no-op under
+  // LIMN_AI_DISABLED.
   {
     const { startAgenticBackground } = await import('./review/agentic.js');
     await startAgenticBackground(app);
@@ -80,7 +76,7 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   // always on; its own migrations run here, after core's.
   await bindPlatform(app);
 
-  // The issue tracker's process half (CORE, both modes): the one-time move of the plugin-era tracker
+  // The issue tracker's process half: the one-time move of the plugin-era tracker
   // data into core — AFTER the plugin's own migrations ran — then the ticket worker and its
   // post-walk kick. Its `*/2` tick is scheduled with every other job below.
   {

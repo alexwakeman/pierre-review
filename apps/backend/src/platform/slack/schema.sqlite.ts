@@ -10,7 +10,7 @@ import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core
 // post is logged and NOT retried: a retry would double-post when Slack accepted but answered late.
 //
 // No FK onto core tables (the open-core boundary); account-scoped, so it is in the erasure hook
-// (retention.ts). Twin: schema.pg.ts.
+// (retention.ts).
 export const slackSignalNotices = sqliteTable(
   'slack_signal_notices',
   {

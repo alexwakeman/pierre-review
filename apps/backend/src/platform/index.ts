@@ -29,12 +29,10 @@ import { eraseProByAccountId, pruneProByPrIds } from './retention.js';
 // the SPA calls those paths, and existing databases hold those tables.
 
 export async function registerPlatform(app: FastifyInstance, ctx: ProContext): Promise<void> {
-  // The platform's own tables (dual-dialect; each file runs once, tracked in `pro_migrations` —
+  // The platform's own tables (each file runs once, tracked in `pro_migrations` —
   // the bookkeeping existing installs already carry, so nothing re-runs). The folders sit beside
   // this module in src/ and in the release build's dist/ alike.
-  const sqliteFolder = fileURLToPath(new URL('./migrations', import.meta.url));
-  const pgFolder = fileURLToPath(new URL('./migrations-pg', import.meta.url));
-  await ctx.registerMigrations(sqliteFolder, pgFolder);
+  await ctx.registerMigrations(fileURLToPath(new URL('./migrations', import.meta.url)));
 
   // Prune the platform's own tables whenever the core TTL sweep deletes a batch of PRs.
   ctx.registerRetention(({ prIds }) => pruneProByPrIds(ctx, prIds));

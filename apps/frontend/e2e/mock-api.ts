@@ -265,7 +265,6 @@ const ME_RESPONSE: MeResponse = {
     avatarUrl: null,
     displayName: null,
   },
-  deploymentMode: 'local',
   // CORE/free surfaces that gate on their own top-level flag, all dark in these fixtures: the
   // severity badges need a severity-api, and the conflict resolver's six routes are local-only
   // and not exercised here. `blastRadius: null` = no account override, so the reach chip falls

@@ -34,20 +34,15 @@ import { reconcileStoryDocsOnStartup } from './story-docs/manager.js';
 // since apiVersion 22 (they were the plugin's "pro+" tier); they run on the user's OWN Claude Code session or
 // ANTHROPIC_API_KEY (review/auth.ts), and Limn stores no key and charges nothing for them.
 //
-// ⚠ THE CLOUD GUARANTEE IS THIS `isCloud` CHECK, EXPLICITLY. It used to rest on an env var being
-// unset (the plugin's PRO_ADVANCED_AI_ENABLED), so one Railway variable stood between a paid cloud
-// account and routes with no SDK and no credential behind them. Now nothing agentic registers in
-// cloud — the routes 404.
-// `config.aiEnabled` is also false in cloud; it is checked separately so the two never collapse
-// into one flag again. LIMN_AI_DISABLED=true (the kill switch) turns `aiEnabled` off locally.
+// LIMN_AI_DISABLED=true (the kill switch) turns `aiEnabled` off, and then nothing agentic
+// registers — the routes 404.
 
 /** Is any agentic surface allowed in this process? */
 export function agenticAllowed(): boolean {
-  if (config.isCloud) return false;
   return config.aiEnabled;
 }
 
-/** Register every agentic ROUTE. Called from buildApp; a no-op in cloud or under the kill switch. */
+/** Register every agentic ROUTE. Called from buildApp; a no-op under the kill switch. */
 export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null {
   if (!agenticAllowed()) return null;
   const ctx = buildAgentContext(app.log);

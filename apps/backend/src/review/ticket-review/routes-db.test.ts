@@ -17,7 +17,6 @@ import type { AgentContext } from '../agent-context.js';
 const DB_PATH = '/tmp/pierre-ticket-review-routes-db.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 const startTicketReview = vi.fn(async () => ({ outcome: 'queued' as const, runId: 999 }));
 vi.mock('./manager.js', () => ({
@@ -114,11 +113,10 @@ beforeAll(async () => {
   ctx = {
     db,
     schema,
-    isPg: false,
     runTransaction: client.runTransaction,
     recordAiUsage: async () => {},
     accountIdOf: () => 1,
-    host: { isCloud: false },
+    host: {},
     llm: { detectAuth: () => ({ status: 'ok' }) },
     aiCredits: { check: async () => ({ agentBlocked: false }) },
     review: { postFinding },

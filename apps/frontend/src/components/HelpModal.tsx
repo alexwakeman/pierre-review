@@ -58,8 +58,8 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             built for sprint situational-awareness: who’s doing what, which PRs are
             stalled, which review threads sit untouched, and what needs <em>you</em>. It
             opens on <strong>Pending</strong>, in the <strong>Activity</strong> console; the{' '}
-            <strong>Timeline</strong> is a second lens. Runs locally off your <Code>gh</Code>{' '}
-            login (or hosted, with GitHub sign-in).
+            <strong>Timeline</strong> is a second lens. Runs on your machine off your{' '}
+            <Code>gh</Code> login.
           </p>
 
           <Section title="Add repos & scope with Workspaces">
@@ -148,8 +148,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             Both run on your own Claude Code or Anthropic API key — Limn stores no key and charges
             nothing. The reviewer reads code; it cannot edit files, run commands or reach the web.
             The fixer edits files but has no shell, and builds and tests nothing. Nothing is posted
-            or pushed until you press the button. The hosted app does not run them: use{' '}
-            <code>npx limn-review</code>.
+            or pushed until you press the button.
           </Section>
 
           <Section title="Bot comment scoring (on your machine)">
@@ -163,8 +162,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             battery, so a large backlog of old comments takes a while. To score faster, start Limn
             with <Code>LIMN_ML_CPU_SHARE=1</Code>; to keep scoring on battery,{' '}
             <Code>LIMN_ML_ON_BATTERY=run</Code>; to turn it off, <Code>LIMN_ML_DISABLED=true</Code>.
-            Check it with <Code>npx limn-review ml status</Code>. The hosted app scores comments for
-            you, with nothing to set up.
+            Check it with <Code>npx limn-review ml status</Code>.
           </Section>
 
           <Section title="Keyboard">

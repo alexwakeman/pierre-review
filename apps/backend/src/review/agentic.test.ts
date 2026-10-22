@@ -1,10 +1,8 @@
 // THE AGENTIC FEATURES' REGISTRATION GATE (review/agentic.ts). Claude Review and AI Fix are core,
-// free and LOCAL ONLY. What is pinned:
+// free. What is pinned:
 //
-//   1. ⚠ CLOUD REGISTERS NOTHING — an explicit `isCloud` check, so the guarantee never rests on an
-//      env var being unset (it used to: the plugin's PRO_ADVANCED_AI_ENABLED).
-//   2. LIMN_AI_DISABLED=true (the kill switch) registers nothing locally either.
-//   3. Locally, with neither, every agentic route family is there — no opt-in flag.
+//   1. LIMN_AI_DISABLED=true (the kill switch) registers nothing.
+//   2. Without it, every agentic route family is there — no opt-in flag.
 //
 // `config` is read at import, so each case resets the module graph and sets env first.
 //
@@ -50,18 +48,13 @@ async function registered(env: Record<string, string | undefined>): Promise<bool
 }
 
 describe('registerAgenticRoutes', () => {
-  it('locally, with no flag at all, registers every agentic route', async () => {
-    const got = await registered({ DEPLOYMENT_MODE: 'local', LIMN_AI_DISABLED: undefined });
+  it('with no flag at all, registers every agentic route', async () => {
+    const got = await registered({ LIMN_AI_DISABLED: undefined });
     expect(got).toEqual(ROUTES.map(() => true));
   });
 
-  it('⚠ in cloud registers NOTHING', async () => {
-    const got = await registered({ DEPLOYMENT_MODE: 'cloud', LIMN_AI_DISABLED: undefined });
-    expect(got).toEqual(ROUTES.map(() => false));
-  });
-
-  it('LIMN_AI_DISABLED=true registers nothing locally', async () => {
-    const got = await registered({ DEPLOYMENT_MODE: 'local', LIMN_AI_DISABLED: 'true' });
+  it('LIMN_AI_DISABLED=true registers nothing', async () => {
+    const got = await registered({ LIMN_AI_DISABLED: 'true' });
     expect(got).toEqual(ROUTES.map(() => false));
   });
 });

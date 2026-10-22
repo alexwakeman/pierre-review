@@ -3,20 +3,16 @@
 // format 'prose' — structured formats (yaml/json) have NO LLM code path at all, not a
 // guarded one.
 //
-// Key ladder (decision 2):
-//   cloud → the host SUMMARY_ANTHROPIC_API_KEY + recordAiUsage({seam:'summary',
-//           feature:'advisor_refine'}) — exactly the bot-themes pattern;
-//   local → ctx.llm.complete() with NO credential: the host's ambient agent-SDK path, which
-//           resolves the creator's logged-in Claude session and otherwise the environment's
-//           ANTHROPIC_API_KEY ($0 ⇒ recordAiUsage drops the row ⇒ unmetered by existing
-//           design). ⚠ It used to pass `credential:'local-review-key'` for a BYO key stored
+// Credential: ctx.llm.complete() with NO credential — the host's ambient agent-SDK path, which
+// resolves the creator's logged-in Claude session and otherwise the environment's
+// ANTHROPIC_API_KEY. ⚠ It used to pass `credential:'local-review-key'` for a BYO key stored
 //           in ~/.pierre-review/config.json; that key is RETIRED and the option is inert, so
 //           the ladder is two rungs and this call names neither.
 // Every output passes the DETERMINISTIC diff-guard; a rejected rewording returns the
 // templated version with the reason, never a failure.
 import type { ProContext } from '../../contract.js';
 import { guardRefinedBlock } from './diff-guard.js';
-import { HAIKU_MODEL, haikuCostUsd } from '../../llm/seam.js';
+import { HAIKU_MODEL } from '../../llm/seam.js';
 
 const REFINE_MODEL = HAIKU_MODEL;
 const REFINE_MAX_TOKENS = 700;
@@ -41,42 +37,6 @@ export async function refineManagedBlock(
   templated: string,
   opts?: { charBudget?: number },
 ): Promise<RefineOutcome> {
-  if (ctx.host.isCloud) {
-    const apiKey = process.env.SUMMARY_ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return { templated, refined: null, guardRejected: 'no summary key configured' };
-    }
-    try {
-      const out = await ctx.llm.complete({
-        model: REFINE_MODEL,
-        system: SYSTEM,
-        prompt: templated,
-        maxTokens: REFINE_MAX_TOKENS,
-        apiKey,
-      });
-      const inputTokens = out.usage?.inputTokens ?? 0;
-      const outputTokens = out.usage?.outputTokens ?? 0;
-      const costUsd = haikuCostUsd(inputTokens, outputTokens);
-      await ctx
-        .recordAiUsage({
-          accountId,
-          seam: 'summary',
-          feature: 'advisor_refine',
-          model: REFINE_MODEL,
-          costUsd,
-          inputTokens,
-          outputTokens,
-        })
-        .catch(() => {});
-      return applyGuard(templated, out.text, opts);
-    } catch (err) {
-      return {
-        templated,
-        refined: null,
-        guardRejected: err instanceof Error ? err.message : String(err),
-      };
-    }
-  }
   try {
     const out = await ctx.llm.complete({
       model: REFINE_MODEL,

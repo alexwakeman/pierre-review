@@ -16,7 +16,6 @@ const DB_PATH = process.env.DATABASE_URL?.endsWith('.db')
   : join(tmpdir(), `pierre-persist-thread-id-${process.pid}.sqlite`);
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 let db: any;
 let schema: any;
@@ -87,7 +86,6 @@ beforeAll(async () => {
   ctx = {
     db,
     schema,
-    isPg: false,
     runTransaction: client.runTransaction,
     log: { warn: () => {}, info: () => {}, error: () => {} },
     recordAiUsage: async () => {},

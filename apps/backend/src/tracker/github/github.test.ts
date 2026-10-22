@@ -342,8 +342,7 @@ beforeAll(async () => {
   sqlite.exec('ALTER TABLE tracker_tickets ADD blocked_by_json text; ALTER TABLE tracker_tickets ADD status_id text;');
   ctx = {
     db: drizzle(sqlite),
-    isPg: false,
-    host: { isCloud: false },
+    host: {},
     accountIdOf: () => accountOfRequest,
     defaultWorkspaceId: async (accountId: number) => (accountId === A ? 1 : 90),
     log: { warn: () => {}, info: () => {}, error: () => {} },

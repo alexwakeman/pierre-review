@@ -259,9 +259,9 @@ beforeAll(() => {
       ...proSettingsSchema,
     },
   });
-  // A minimal ctx — the readers below touch ctx.isPg + ctx.db; ctx.schema.repos is how the
+  // A minimal ctx — the readers below touch ctx.db; ctx.schema.repos is how the
   // plugin sees core's tables.
-  ctx = { db, isPg: false, schema: { repos: coreRepos } } as unknown as ProContext;
+  ctx = { db, schema: { repos: coreRepos } } as unknown as ProContext;
 
   const now = new Date();
   // (review_learnings + ai_fixes seeds left with the tables: core since migration 0074, their
@@ -1596,7 +1596,7 @@ beforeAll(() => {
   }
 
   mDb = drizzle(mSqlite, { schema: { ...insightsSchema } });
-  mCtx = { db: mDb, isPg: false } as unknown as ProContext;
+  mCtx = { db: mDb } as unknown as ProContext;
 });
 
 afterAll(() => {

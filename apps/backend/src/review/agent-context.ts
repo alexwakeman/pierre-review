@@ -1,7 +1,7 @@
 import type { FastifyBaseLogger, FastifyRequest } from 'fastify';
 import { config } from '../config.js';
 import { accountIdOf } from '../api/plugins/auth.js';
-import { db, schema, runTransaction, isPg } from '../db/client.js';
+import { db, schema, runTransaction } from '../db/client.js';
 import * as hostQueries from '../db/queries.js';
 import { recordAiUsage, type AiUsageRecord } from '../db/usage.js';
 import { getAccessToken } from '../auth/account.js';
@@ -52,7 +52,6 @@ export type DetectAuthResult = { status: 'ok' | 'none'; message?: string };
 
 export interface AgentContext {
   log: FastifyBaseLogger;
-  host: { isCloud: boolean };
   accountIdOf(req: FastifyRequest): number;
   // Loosely typed exactly as the plugin saw them: the moved code reads core tables through
   // `ctx.schema.<table>` and casts its rows, so it compiles identically against either dialect.
@@ -61,7 +60,6 @@ export interface AgentContext {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schema: Record<string, any>;
   runTransaction: typeof runTransaction;
-  isPg: boolean;
   llm: { detectAuth(): DetectAuthResult };
   recordAiUsage(row: AiUsageRecord): Promise<void>;
   github: Pick<
@@ -134,12 +132,10 @@ export interface AgentContext {
 export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
   return {
     log,
-    host: { isCloud: config.isCloud },
     accountIdOf,
     db,
     schema: schema as unknown as Record<string, unknown> as AgentContext['schema'],
     runTransaction,
-    isPg,
     llm: {
       detectAuth: () => {
         const r = detectClaudeAuth();

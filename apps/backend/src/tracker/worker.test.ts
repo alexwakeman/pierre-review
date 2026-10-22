@@ -106,8 +106,6 @@ const coreWorkspaces = sqliteTable('workspaces', {
 
 const host = {
   version: 'test',
-  deploymentMode: 'local' as const,
-  isCloud: false,
   sealSecret: (p: string) => `enc(${Buffer.from(p).toString('hex')})`,
   openSecret: (s: string) => Buffer.from(/^enc\((.*)\)$/.exec(s)?.[1] ?? '', 'hex').toString('utf8'),
 };
@@ -210,7 +208,6 @@ beforeAll(async () => {
 
   ctx = {
     db: drizzle(sqlite),
-    isPg: false,
     host,
     accountIdOf: () => accountOfRequest,
     defaultWorkspaceId: async () => 1,

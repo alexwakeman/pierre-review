@@ -39,7 +39,7 @@ import {
 } from '../lib/autoPost.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
-import { AiCloudNote, AiRunGate } from './AiSetup.js';
+import { AiRunGate } from './AiSetup.js';
 import { useFilters } from '../store/filters.js';
 import { PrActionControls, usePrActionsVisible } from './pr/PrActionsRow.js';
 import { ReviewsChips, reviewsRowVisible } from './pr/ReviewsRow.js';
@@ -1701,15 +1701,9 @@ export function ClaudeReviewTab({
     return <div className="px-4 py-3 text-sm text-gray-400">Loading…</div>;
   }
 
-  // Off here: the hosted app (one line saying where it runs) or a local kill switch (nothing to
-  // run, nothing to say — the tab is not even listed then; this covers a stale deep link).
-  if (!ai.enabled || data?.enabled === false) {
-    return (
-      <div className="px-4 py-3">
-        <AiCloudNote />
-      </div>
-    );
-  }
+  // Off here: the kill switch (nothing to run, nothing to say — the tab is not even listed then;
+  // this covers a stale deep link).
+  if (!ai.enabled || data?.enabled === false) return <></>;
 
   const alreadyReviewed =
     review?.status === 'succeeded' && review.headSha === pr.headSha;

@@ -34,7 +34,6 @@ import type {
 const DB_PATH = '/tmp/pierre-pending-deps-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 // The routing suggester's NETWORK half (CODEOWNERS + team history) — no suggestion, no request.
 vi.mock('../github/reviewer-suggest.js', async (orig) => {

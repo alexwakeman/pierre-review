@@ -117,8 +117,7 @@ export function useScopedOpenPrs(repoIds: number[] | null) {
 }
 
 export function useMe() {
-  // `retry: false` so a cloud-mode 401 (signed out) surfaces immediately to the
-  // App auth gate instead of being retried.
+  // `retry: false` so a failure surfaces immediately instead of being retried.
   //
   // ACCOUNT-GRAINED KEY, deliberately: `['me']` carries no `ws:<id>` segment because nothing on
   // this response is workspace-scoped — the large-PR threshold included (it is one number per

@@ -32,7 +32,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 const DB_PATH = '/tmp/pierre-pr-mentions-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let db: any;

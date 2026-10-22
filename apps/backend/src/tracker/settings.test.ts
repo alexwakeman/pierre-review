@@ -56,8 +56,7 @@ beforeEach(() => {
   sqlite.exec(migration);
   ctx = {
     db: drizzle(sqlite),
-    isPg: false,
-    host: { isCloud: false },
+    host: {},
     accountIdOf: () => 1,
     defaultWorkspaceId: async () => 1,
     log: { warn: () => {}, info: () => {}, error: () => {} },

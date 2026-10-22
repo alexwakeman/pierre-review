@@ -31,7 +31,6 @@ import { ConflictResolverOverlay } from './components/conflicts/ConflictResolver
 import { ClosedResolverToast } from './components/conflicts/ClosedResolverToast.js';
 import { MyTurnDismissToast } from './components/Activity/MyTurnDismissToast.js';
 import { DependencyMergeToast } from './components/Activity/DependencyMergeAll.js';
-import { SignInGate } from './components/SignInGate.js';
 import { AuthNoticeBanner } from './components/AuthNoticeBanner.js';
 import { UserMenu } from './components/UserMenu.js';
 import { useUrlState } from './hooks/useUrlState.js';
@@ -45,8 +44,6 @@ import { useMe } from './hooks/useTriage.js';
 import { useFilters } from './store/filters.js';
 import { boardSlotMode, isFixedView, usePinnedTabs, type TimelineMode } from './store/pinnedTabs.js';
 import { ApiError, api } from './api/client.js';
-import { initAnalytics, trackPageView } from './lib/analytics.js';
-import { CookieBanner } from './components/CookieBanner.js';
 import { Wordmark } from './components/Wordmark';
 import { MoonIcon, SunIcon } from './components/Icons.js';
 
@@ -62,16 +59,14 @@ function useDarkMode(): [boolean, () => void] {
 }
 
 export default function App(): JSX.Element {
-  // Auth gate (cloud mode only). In local mode /api/me never 401s, so `me` just
-  // resolves to a `deploymentMode: 'local'` payload and the branches below are
-  // inert — the app renders exactly as before. All hooks run unconditionally
-  // (rules-of-hooks) before we branch on the me state for the return value.
+  // All hooks run unconditionally (rules-of-hooks) before we branch on the me state for the
+  // return value.
   const me = useMe();
   useUrlState();
   useKeyboard();
   // Invalidate persisted PR/thread detail when the lean feed shows a newer
-  // updatedAt, so cloud-hydrated text refetches exactly once on change (no-op for
-  // unchanged PRs). Harmless in local mode.
+  // updatedAt, so hydrated text refetches exactly once on change (no-op for
+  // unchanged PRs).
   useDetailCacheReconciler();
   // A Claude review that starts or ends anywhere refetches that PR's review (the tab pill). ONE
   // passive observer of the polled active list; it fetches nothing itself.
@@ -106,16 +101,9 @@ export default function App(): JSX.Element {
     }
   };
 
-  const isCloud = me.data?.deploymentMode === 'cloud';
-  // The signed-in GitHub user (local: synthesized from `gh api user`; cloud: the
-  // OAuth user). Can be null even when authenticated (e.g. local + offline), so
-  // every read below is guarded.
+  // The GitHub user, synthesized from `gh api user`. Can be null (e.g. offline), so every read
+  // below is guarded.
   const meUser = me.data?.user ?? null;
-  const onSignOut = (): void => {
-    // Drop pinned tabs so they don't leak to the next user on a shared browser.
-    usePinnedTabs.getState().clear();
-    void api.logout().finally(() => window.location.assign('/'));
-  };
   // Item 7: the detail pane exists only once a PR is selected on the board; no
   // selection → the Timeline takes the full height.
   const selectedPrId = useFilters((s) => s.selectedPrId);
@@ -230,42 +218,7 @@ export default function App(): JSX.Element {
     setPaneH(paneRef.current.offsetHeight); // commit + persist
   };
 
-  // Cloud only: keep this tenant "active" so the backend scheduler keeps syncing
-  // their repos while a tab is open (the server stamps accounts.lastActiveAt on this
-  // request; the cron only syncs accounts active within syncActiveWindowMinutes). The
-  // user chose "any open tab", so this fires on a plain interval rather than gating on
-  // visibility — a backgrounded tab's timer is throttled to ≥1/min by the browser,
-  // still well inside the ~15-min window. This covers an idle-but-open tab whose React
-  // Query polling has paused; normal traffic already stamps. No-op in local mode.
-  useEffect(() => {
-    if (!isCloud) return;
-    const ping = (): void => {
-      // Raw fetch (not React Query) so it always hits the network and re-stamps.
-      void api.me().catch(() => {
-        /* transient / offline / expired session — the next tick retries */
-      });
-    };
-    const id = window.setInterval(ping, 3 * 60 * 1000);
-    return () => window.clearInterval(id);
-  }, [isCloud]);
-
-  // Google Analytics — CLOUD ONLY, and CONSENT-GATED. Gated on isCloud so local installs never
-  // load gtag or phone home; `initAnalytics` additionally no-ops without a build-time VITE_GA_ID
-  // AND a stored consent grant, so this call is safe to make unconditionally here (it re-arms
-  // analytics for someone who consented on a previous visit, and does nothing otherwise). The
-  // first-time grant is wired straight from CookieBanner. See lib/analytics.ts + lib/consent.ts.
-  useEffect(() => {
-    if (!isCloud) return;
-    initAnalytics();
-    trackPageView();
-  }, [isCloud]);
-
-  // Signed-out cloud visitor → show the sign-in gate; never mount the timeline.
-  if (me.error instanceof ApiError && me.error.status === 401) {
-    return <SignInGate />;
-  }
-  // Initial load: minimal centered dark splash until /api/me settles. Once it
-  // has data (local always; cloud when signed in) we fall through to the app.
+  // Initial load: minimal centered dark splash until /api/me settles.
   if (me.isLoading && !me.data) {
     return (
       <div className="flex h-full min-h-screen items-center justify-center bg-gray-950">
@@ -364,14 +317,11 @@ export default function App(): JSX.Element {
               <MoonIcon className="inline-block align-[-0.15em]" />
             )}
           </button>
-          {/* Signed-in user — a subtle button at the far right opening an account menu
-              (Open Profile on GitHub · Sign Out). Sign Out is cloud-only (local has no
-              session), so the standalone header sign-out button is gone. */}
+          {/* The GitHub user — a subtle button at the far right opening an account menu
+              (Settings · Open Profile on GitHub). */}
           {meUser != null && (
             <UserMenu
               user={meUser}
-              canSignOut={isCloud}
-              onSignOut={onSignOut}
               // ⚠ UNGATED: the modal always has sections to show (the large-PR threshold among
               // them), so the entry point needs no gate.
               onOpenSettings={() => openSettings()}
@@ -592,9 +542,6 @@ export default function App(): JSX.Element {
           </div>
         )}
       </main>
-      {/* Analytics consent. Renders only in cloud, only when a GA4 id was configured at build
-          time, and only until the user has chosen — see components/CookieBanner.tsx. */}
-      <CookieBanner enabled={isCloud} />
     </div>
   );
 }

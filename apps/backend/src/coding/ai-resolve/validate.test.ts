@@ -6,7 +6,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 process.env.DATABASE_URL = '/tmp/pierre-ai-resolve-validate-test.sqlite';
-process.env.DEPLOYMENT_MODE = 'local';
 process.env.DISABLE_SCHEDULER = 'true';
 
 import type { ConflictAiChoice } from '@pierre-review/shared';

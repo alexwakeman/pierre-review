@@ -12,7 +12,6 @@ import type { StoredPrFile } from '@pierre-review/shared';
 const DB_PATH = '/tmp/pierre-blast-radius-query.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let closeDb: (() => void) | undefined;

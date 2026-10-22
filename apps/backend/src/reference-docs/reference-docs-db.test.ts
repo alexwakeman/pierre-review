@@ -20,7 +20,6 @@ import type { FastifyInstance } from 'fastify';
 const DB_PATH = `${process.env.DATABASE_URL ?? '/tmp/pierre-refdocs'}.refdocs-db.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 vi.mock('./agent.js', async () => {
   const judge = await import('./build-judge.js');

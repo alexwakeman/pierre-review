@@ -14,7 +14,6 @@ const ROOT = mkdtempSync(join(tmpdir(), 'pierre-janitor-'));
 const CLONE_DIR = join(ROOT, 'clones');
 process.env.CLONE_DIR = CLONE_DIR;
 process.env.DATABASE_URL = '/tmp/pierre-conflict-janitor-test.sqlite';
-process.env.DEPLOYMENT_MODE = 'local';
 process.env.DISABLE_SCHEDULER = 'true';
 
 // ⚠ DYNAMIC, IN `beforeAll`, AND THIS IS NOT A STYLE CHOICE. A static `import` is HOISTED above

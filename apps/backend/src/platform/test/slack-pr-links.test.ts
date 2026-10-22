@@ -66,8 +66,6 @@ const ctxWith = (appWebUrl?: string): ProContext =>
   ({
     host: {
       version: '0.0.0',
-      deploymentMode: 'local' as const,
-      isCloud: false,
       ...(appWebUrl === undefined ? {} : { appWebUrl }),
     },
   }) as unknown as ProContext;

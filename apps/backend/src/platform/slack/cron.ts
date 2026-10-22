@@ -195,7 +195,7 @@ export async function sweepTargets(
 // not a request), and each row carries its own accountId, which is what every downstream call is
 // scoped by.
 async function readAllTargetRows(ctx: ProContext): Promise<SlackTargetRow[]> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   return (await ctx.db
     .select({
       accountId: pro.workspaceSlackTargets.accountId,

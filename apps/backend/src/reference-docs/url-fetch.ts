@@ -58,11 +58,11 @@ export class UrlFetchError extends Error {
 }
 
 export interface PagePolicy {
-  /** Local: private networks + intranet names allowed. Cloud: public addresses only. */
+  /** Private networks + intranet names allowed (the server runs on the reader's own machine). */
   privateNetwork: boolean;
 }
 
-export const defaultPagePolicy = (): PagePolicy => ({ privateNetwork: !config.isCloud });
+export const defaultPagePolicy = (): PagePolicy => ({ privateNetwork: true });
 
 function blockedFor(policy: PagePolicy): (ip: string) => boolean {
   return (ip) => isBlockedAddress(ip) && !(policy.privateNetwork && isPrivateNetworkAddress(ip));

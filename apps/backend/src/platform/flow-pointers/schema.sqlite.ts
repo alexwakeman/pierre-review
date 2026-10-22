@@ -1,6 +1,5 @@
 // Plugin-owned SQLite schema for the CHRONOLOGY POINTERS cache — the credit-metered Haiku
-// narration beside Reports → Chronology. Structural twin: `schema.pg.ts` (kept in step by eye —
-// this package has no schema-parity test). Migrated via ../../migrations/0034_flow_pointers.sql.
+// narration beside Reports → Chronology. Migrated via ../../migrations/0034_flow_pointers.sql.
 //
 // ── WHAT IS AND IS NOT IN THIS ROW ──────────────────────────────────────────────────────────
 // The EVIDENCE is not stored: core `getFlowPointerEvidence` folds it fresh from the same pass the

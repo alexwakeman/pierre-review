@@ -21,7 +21,6 @@ import type { AgentContext } from '../../review/agent-context.js';
 const DB_PATH = '/tmp/pierre-auto-fix-db.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let db: any;
@@ -146,7 +145,6 @@ beforeAll(async () => {
   ctx = {
     db,
     schema,
-    isPg: false,
     log: { info: () => {}, warn: () => {}, error: () => {} },
   } as any as AgentContext;
   await db

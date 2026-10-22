@@ -337,20 +337,9 @@ function toWrite(
   };
 }
 
-/** Which accounts are worth working on this tick. Mirrors the sync loop's activity gate. */
+/** Which accounts to work on this tick: every account. */
 async function activeAccountIds(): Promise<number[]> {
-  const rows = config.isCloud
-    ? await db
-        .select({ id: accounts.id })
-        .from(accounts)
-        .where(
-          gte(
-            accounts.lastActiveAt,
-            new Date(Date.now() - config.syncActiveWindowMinutes * 60_000),
-          ),
-        )
-        .execute()
-    : await db.select({ id: accounts.id }).from(accounts).execute();
+  const rows = await db.select({ id: accounts.id }).from(accounts).execute();
   return rows.map((r) => r.id);
 }
 

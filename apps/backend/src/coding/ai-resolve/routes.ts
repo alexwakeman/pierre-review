@@ -16,9 +16,9 @@ import { cancelAiResolve, getAiResolution, startAiResolve } from './run.js';
  *   GET    /api/prs/:id/conflicts/ai-resolve   this account's latest answer for the PR, polled
  *   DELETE /api/prs/:id/conflicts/ai-resolve   cancel the run
  *
- * ⚠ REGISTERED ONLY BY `registerAgenticRoutes` (review/agentic.ts), whose explicit `isCloud` check
- * keeps every agentic route out of the cloud process: there they 404. The resolver's own seven
- * routes stay in both modes; this one is the agentic half and follows the agentic rule.
+ * ⚠ REGISTERED ONLY BY `registerAgenticRoutes` (review/agentic.ts), which registers nothing under
+ * LIMN_AI_DISABLED: there they 404. The resolver's own seven routes are always registered; this
+ * one is the agentic half and follows the agentic rule.
  *
  * ⚠ OWNERSHIP AND WRITE PERMISSION ON ALL THREE, the resolver's own rule (→ 404 / 403): a run
  * builds a conflict session the reader will commit from, so a reader who cannot push has nothing

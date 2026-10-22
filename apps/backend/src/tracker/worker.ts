@@ -266,7 +266,7 @@ export async function workspaceCallsFor(
     const access = trackerAccessOf(ctx.host, await readWorkspaceTrackerRow(ctx, accountId, wsId));
     let call: TrackerCall | null = null;
     if (maybeAdapterFor(access.issue.provider)?.reader != null) {
-      const prepared = prepareTrackerCall(access, { cloud: ctx.host.isCloud, transport, github });
+      const prepared = prepareTrackerCall(access, { transport, github });
       if (prepared.ok) call = prepared.call;
     }
     calls.set(wsId, { access, call, apiRoot: call?.apiRoot ?? null, fp: call != null ? accessFingerprint(call) : null });

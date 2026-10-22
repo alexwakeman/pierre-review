@@ -20,7 +20,6 @@ import type {
 const DB_PATH = '/tmp/pierre-claude-review-follow-up-columns-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let db: any;

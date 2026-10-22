@@ -66,7 +66,6 @@ export async function ctx(
   await c.addInitScript((h) => {
     // Never show the first-run tour in a capture.
     localStorage.setItem('pierre:onboarded', '1');
-    localStorage.setItem('pierre:cookieConsent', 'granted');
     if (h) localStorage.setItem('pierre:detailPaneHeight', String(h));
   }, pane);
   // ⚠ AN INIT SCRIPT, NOT `page.addStyleTag`. A style tag has to be added AFTER

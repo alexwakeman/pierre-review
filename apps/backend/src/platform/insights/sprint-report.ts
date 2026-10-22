@@ -464,7 +464,7 @@ async function generateReport(
   // $0-on-unchanged gate: if the stored report already matches this Insights state, return it
   // without re-billing (mirrors the per-repo digest's payload-hash cache). Scheduled AI-update
   // policies + Slack sends rely on this so an unchanged sprint costs nothing per tick/send.
-  const pro0 = proSchemaFor(ctx.isPg);
+  const pro0 = proSchemaFor();
   const existing = (await ctx.db
     .select()
     .from(pro0.sprintReports)
@@ -512,7 +512,7 @@ async function generateReport(
       outputTokens: out.outputTokens,
     })
     .catch(() => {});
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   await ctx.runTransaction(async (tx) => {
     await tx
       .insert(pro.sprintReports)
@@ -570,7 +570,7 @@ async function loadReport(
   scope: BotScopeWire,
 ): Promise<SprintReport | null> {
   const scopeKey = scopeKeyFor(scope.workspaceId);
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const rows = (await ctx.db
     .select()
     .from(pro.sprintReports)

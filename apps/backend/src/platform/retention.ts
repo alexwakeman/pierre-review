@@ -37,7 +37,7 @@ export async function pruneProByPrIds(
   prIds: number[],
 ): Promise<void> {
   if (prIds.length === 0) return;
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   await ctx.db
     .delete(pro.aiPrAnalyses)
     .where(inArray(pro.aiPrAnalyses.prId, prIds))
@@ -55,7 +55,7 @@ export async function pruneProByPrIds(
 }
 
 // ---------------------------------------------------------------------------
-// Plugin-side ERASURE (GDPR Art. 17). Core's `DELETE /api/me/account` deletes the account and
+// Plugin-side ERASURE (GDPR Art. 17). Core's account erasure (db/erase-account.ts) deletes the account and
 // every core-owned row, then calls this via ctx.registerAccountErasure — it cannot name these
 // tables itself (open-core boundary), and an account deletion that silently left the plugin's
 // copies of the same content behind would make the promise in the privacy policy false.
@@ -72,7 +72,7 @@ export async function eraseProByAccountId(
   ctx: ProContext,
   accountId: number,
 ): Promise<void> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   // Ordered only for readability — none of these FK each other.
   const tables = [
     // (ai_fixes + review_learnings: core-owned since core migration 0074 — eraseAccountData.)

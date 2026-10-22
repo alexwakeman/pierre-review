@@ -29,7 +29,6 @@ vi.mock('../auth/account.js', () => ({
 const DIR = mkdtempSync(join(tmpdir(), 'pierre-dep-policy-'));
 process.env.DATABASE_URL = join(DIR, 't.sqlite');
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let db: any;

@@ -1,6 +1,6 @@
-// On-demand text hydration for cloud "lean storage" mode.
+// On-demand text hydration for "lean storage" mode.
 //
-// In cloud mode the sync pipeline does NOT persist bulky user-authored text
+// By default the sync pipeline does NOT persist bulky user-authored text
 // (comment/review/PR bodies, review-comment diff hunks, commit messages, the
 // per-job checkRuns JSON) — see config.persistBodies and sync/upsert.ts. That text
 // is regenerable from GitHub, so it's fetched on demand when a PR/thread detail is

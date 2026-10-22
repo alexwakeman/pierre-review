@@ -21,7 +21,7 @@ import { anyTicketRunning, statesRequestIdents } from '../lib/ticketReview.js';
 // every PR on it, so one run's result lives in SEVERAL PRs' caches: `done` invalidates
 // `['ticket-reviews', prId]` for EVERY member, plus the Open PRs states key.
 //
-// Gated by the caller on `me.ai.enabled` (local, free) — the routes are absent in the cloud.
+// Gated by the caller on `me.ai.enabled` (local, free) — the routes are absent under LIMN_AI_DISABLED.
 
 export const ticketReviewsKey = (prId: number): readonly unknown[] => ['ticket-reviews', prId];
 // The Open PRs stacks' query-key PREFIX (the full key appends the sorted ident list).

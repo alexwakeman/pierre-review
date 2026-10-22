@@ -2,9 +2,9 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { config } from '../../config.js';
 
 // ---------------------------------------------------------------------------
-// Per-account (cloud) / per-instance (local) request rate limiting.
+// Per-instance request rate limiting.
 //
-// The point is NOT generic DoS protection — Railway sits in front of this — it is
+// The point is NOT generic DoS protection — the server listens on loopback — it is
 // COST. Several routes here spend real money on someone else's meter on every call:
 // an Anthropic completion, an agentic review, a GitHub GraphQL backfill. Those are
 // already individually capped (a per-run USD ceiling, a concurrency gate, a credit
@@ -14,11 +14,8 @@ import { config } from '../../config.js';
 // Hand-rolled rather than @fastify/rate-limit for the same reason as the security
 // headers: a new runtime dependency would have to be added to the curated release
 // manifest (scripts/build-release.mjs) and the pinned lockfile, and the useful part
-// of that plugin is ~40 lines. There is no Redis here and no need for one: local
-// mode is a single process, and the cloud deployment is a single Railway service.
-// If it is ever scaled horizontally these buckets become per-instance — i.e. the
-// effective limit multiplies by the instance count, which is a soft failure, not a
-// hole. The per-run USD caps and the credit meter remain the hard ceilings.
+// of that plugin is ~40 lines. There is no Redis here and no need for one: the app is
+// a single process. The per-run USD caps remain the hard ceilings.
 // ---------------------------------------------------------------------------
 
 interface Bucket {
@@ -83,18 +80,6 @@ const TIERS = {
   // Everything else under /api. A generous blanket backstop that also catches a
   // runaway polling loop in the frontend before it becomes a support ticket.
   read: tier('read', 600, MINUTE),
-  // Sign-in. Unauthenticated, so keyed by IP; the callback makes two GitHub calls.
-  auth: tier('auth', 30, MINUTE),
-  // The public contact form. Unauthenticated, so keyed by IP — and the tightest bucket
-  // in the file, because this is the ONE route whose cost is a HUMAN's attention: every
-  // accepted request puts a message in front of somebody. Five an hour is more messages
-  // than any real visitor sends and few enough that a bot which gets past the honeypot
-  // and the signed fill-time ticket still cannot fill a channel. The ticket mint shares
-  // it: minting is what a bot has to do first, so limiting it limits the attempts.
-  contact: tier('contact', 5, HOUR),
-  // Signed webhooks. Legitimately bursty (a busy org pushing), so high — but not
-  // unbounded, since each delivery can enqueue a sync.
-  webhook: tier('webhook', 600, MINUTE),
 } as const;
 
 // ---- Route → tier classification ----
@@ -104,29 +89,6 @@ const TIERS = {
 // it refers to.
 function tierFor(method: string, path: string): readonly Tier[] {
   const mutating = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
-
-  // Signed server-to-server posts.
-  if (path === '/api/webhooks/github') {
-    return [TIERS.webhook];
-  }
-  if (path.startsWith('/api/auth/')) return [TIERS.auth];
-
-  // ---- The public contact form ----
-  // ANONYMOUS in the only mode it runs in, so `keyFor` falls through to the IP — which is
-  // the whole reason this tier exists as its own bucket rather than inheriting anything: every other unauthenticated
-  // surface here is either signature-verified (the two webhooks) or bounded by GitHub's
-  // own sign-in flow. FOLLOWING THE TOKEN gives an unusual answer: the route spends no
-  // GitHub quota, no model dollars and barely any database — one outbound webhook POST —
-  // and yet it belongs in the strictest bucket in the file, because what it actually
-  // spends is a PERSON READING A MESSAGE. The blanket 600/min `read` fall-through would
-  // be 600 notifications a minute.
-  //
-  // BOTH paths, and the mint deliberately shares the submit bucket: a bot must fetch a
-  // ticket before it can post one, so rationing the mint rations the attempts. Written as
-  // an exact match plus the one child, never `startsWith('/api/contact')` — that is one
-  // sibling vocabulary away from swallowing a future `/api/contacts`, which is this
-  // file's recorded near-miss failure.
-  if (path === '/api/contact' || path === '/api/contact/ticket') return [TIERS.contact];
 
   // ---- "Set up AI": POST /api/ai/runtime/install (LOCAL ONLY) ----
   // FOLLOWING THE TOKEN: no model dollars and no GitHub quota — it runs `npm install` of the pinned
@@ -942,14 +904,8 @@ function consume(key: string, t: Tier, now: number): number | null {
 }
 
 /**
- * The bucket key. Prefer the account id: it is the thing that spends money, it
- * survives a changing IP, and it cannot be spoofed. Fall back to the client IP for
- * unauthenticated routes (sign-in, webhooks).
- *
- * NOTE the IP fallback only works in cloud because `trustProxy` is enabled there
- * (app.ts) — Railway terminates TLS and forwards, so without it every request would
- * share the proxy's IP and collapse into one bucket. In local mode there is no proxy
- * and exactly one account, so this is always the account key in practice.
+ * The bucket key: the account id (there is exactly one local account, so this is always the
+ * account key in practice). The client IP is the fallback for a request with no account.
  */
 function keyFor(req: FastifyRequest, t: Tier): string {
   const accountId = req.account?.id;
@@ -975,7 +931,7 @@ export function registerRateLimit(app: FastifyInstance): void {
   app.addHook('onRequest', async (req, reply) => {
     const path = req.url.split('?')[0] ?? req.url;
     if (!path.startsWith('/api/')) return;
-    // The health probe must never 429 — Railway uses it to decide the deploy is up.
+    // The health probe must never 429.
     if (path === '/api/health') return;
 
     const now = Date.now();
@@ -994,9 +950,8 @@ export function registerRateLimit(app: FastifyInstance): void {
         reply.header('Retry-After', String(retryAfter));
         // ⚠ THE UNIT COMES FROM THE TIER, NOT FROM A LITERAL. The generic arm used to be
         // hard-coded `${t.limit}/min`, which was true of every tier at the time and stopped
-        // being true the moment one took an hour window: the `contact` bucket is 5 an HOUR
-        // and the message said "limit 5/min … try again in 3597s", which is a self-
-        // contradicting sentence in front of a member of the public.
+        // being true the moment one took an hour window (`ai_hourly`), which made a self-
+        // contradicting sentence ("limit 120/min … try again in 3597s").
         const per = t.windowMs >= HOUR ? 'hour' : 'minute';
         await reply.code(429).send({
           error: 'TooManyRequests',
@@ -1012,7 +967,7 @@ export function registerRateLimit(app: FastifyInstance): void {
   });
 
   app.log.info(
-    { mode: config.deploymentMode, ai: TIERS.ai.limit, read: TIERS.read.limit },
+    { ai: TIERS.ai.limit, read: TIERS.read.limit },
     'rate limiting active',
   );
 }

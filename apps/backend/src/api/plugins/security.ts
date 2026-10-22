@@ -9,27 +9,15 @@ import { config } from '../../config.js';
 // manifest (scripts/build-release.mjs) and the pinned lockfile, and its default
 // CSP is wrong for this app in three ways anyway (it forbids the inline styles
 // vis-timeline and React both emit, it forbids the `https:` images every GitHub
-// markdown body embeds, and it knows nothing about the local/cloud split). The
-// header set below is the same posture, sized to this app.
+// markdown body embeds). The header set below is the same posture, sized to this app.
 //
 // Everything here is computed ONCE at module load — the per-request hook only
 // does a couple of string comparisons and reply.header() calls.
 // ---------------------------------------------------------------------------
 
-// Google Tag Manager / GA4 endpoints. Analytics is CLOUD-ONLY (both analytics.ts
-// callers gate on it) and now additionally consent-gated in the browser, so these
-// only enter the CSP in cloud mode — a local install's CSP names no third party.
-const GA_SCRIPT = 'https://www.googletagmanager.com';
-const GA_CONNECT = [
-  'https://www.google-analytics.com',
-  'https://*.google-analytics.com',
-  'https://*.analytics.google.com',
-  'https://*.googletagmanager.com',
-].join(' ');
-
 // `style-src 'unsafe-inline'` is unavoidable and accepted: React writes inline
 // `style` attributes, vis-timeline positions every item by mutating element.style,
-// and the landing's splash-caret keyframes are an inline <style>. CSS injection is
+// and some components inject an inline <style>. CSS injection is
 // a far weaker primitive than script injection, and script-src stays strict — no
 // 'unsafe-inline', no 'unsafe-eval' (verified: neither vis-timeline, vis-data nor
 // vis-util contains eval/new Function, so the timeline runs under this policy).
@@ -40,29 +28,14 @@ const GA_CONNECT = [
 // rehype-sanitize, so the residual risk is a tracking pixel, not code execution.
 const SPA_CSP = [
   "default-src 'self'",
-  `script-src 'self'${config.isCloud ? ` ${GA_SCRIPT}` : ''}`,
+  "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self'",
   "img-src 'self' data: blob: https:",
   "media-src 'self' https:",
-  `connect-src 'self'${config.isCloud ? ` ${GA_CONNECT}` : ''}`,
+  "connect-src 'self'",
   "worker-src 'self' blob:",
   "frame-src 'none'",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-].join('; ');
-
-// The landing is a plain marketing page: no third-party images beyond its own
-// assets, no embedded frames. Tighter than the SPA on purpose.
-const LANDING_CSP = [
-  "default-src 'self'",
-  `script-src 'self' ${GA_SCRIPT}`,
-  "style-src 'self' 'unsafe-inline'",
-  "font-src 'self'",
-  "img-src 'self' data:",
-  `connect-src 'self' ${GA_CONNECT}`,
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -96,57 +69,16 @@ const PERMISSIONS_POLICY = [
 ].join(', ');
 
 /**
- * Sets the response security headers on every request, plus (cloud only) HSTS and
- * the www → apex canonical redirect. Registered FIRST in app.ts so the headers ride
- * on every response including redirects, 404s and error bodies.
+ * Sets the response security headers on every request. Registered FIRST in app.ts so the
+ * headers ride on every response including redirects, 404s and error bodies.
  */
 export function registerSecurityHeaders(app: FastifyInstance): void {
-  // Cloud only: the canonical host, for the www redirect. hostname (not host) so a
-  // configured port never enters the comparison.
-  let canonicalHost = '';
-  if (config.isCloud) {
-    try {
-      canonicalHost = new URL(config.appBaseUrl).hostname.toLowerCase();
-    } catch {
-      canonicalHost = '';
-    }
-  }
-
   app.addHook('onRequest', async (req, reply) => {
     const path = pathOf(req);
     const isApi = path.startsWith('/api');
 
-    // ---- HSTS + canonical host (cloud only) ----
-    // Local mode runs on http://127.0.0.1, where HSTS would wrongly pin localhost
-    // to HTTPS and a www redirect is meaningless — so both stay cloud-gated.
-    if (config.isCloud) {
-      // Honored only over HTTPS (Railway terminates TLS); ignored on plain HTTP.
-      // `includeSubDomains` also covers www. No `preload` — it is hard to undo.
-      // HSTS_MAX_AGE=0 disables it.
-      if (config.hstsMaxAge > 0) {
-        reply.header(
-          'Strict-Transport-Security',
-          `max-age=${config.hstsMaxAge}; includeSubDomains`,
-        );
-      }
-      // 301 www.<apex> → <apex> so the OAuth round-trip and the session cookie stay
-      // on a single origin (and crawlers see one canonical URL).
-      if (canonicalHost) {
-        const host = (req.headers.host ?? '').toLowerCase().split(':')[0] ?? '';
-        if (
-          host !== canonicalHost &&
-          host.replace(/^www\./, '') === canonicalHost
-        ) {
-          return reply.redirect(`${config.appBaseUrl}${req.url}`, 301);
-        }
-      }
-    }
-
     // ---- Content-Security-Policy, per surface ----
-    reply.header(
-      'Content-Security-Policy',
-      isApi ? API_CSP : path === '/app' || path.startsWith('/app/') ? SPA_CSP : LANDING_CSP,
-    );
+    reply.header('Content-Security-Policy', isApi ? API_CSP : SPA_CSP);
 
     // ---- The rest, everywhere ----
     // nosniff: stops a browser deciding a JSON error body is HTML and rendering it.
@@ -159,13 +91,11 @@ export function registerSecurityHeaders(app: FastifyInstance): void {
     reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
     reply.header('Permissions-Policy', PERMISSIONS_POLICY);
     // Isolate the browsing context from anything this app opens (and vice-versa).
-    // Safe here: OAuth is a top-level redirect, not a popup+postMessage handshake.
     reply.header('Cross-Origin-Opener-Policy', 'same-origin');
 
     if (isApi) {
       // Block cross-origin no-cors embedding of API JSON (a <script src> / <img src>
-      // side-channel). Applied to /api ONLY — the landing's og-image.png must stay
-      // embeddable for link previews.
+      // side-channel). Applied to /api ONLY.
       reply.header('Cross-Origin-Resource-Policy', 'same-origin');
       // Never let PR data, feeds or account state land in a browser or proxy cache.
       // Nothing in the app relies on HTTP caching (React Query + IndexedDB do their
@@ -187,11 +117,9 @@ function pathOf(req: FastifyRequest): string {
 /**
  * Origins allowed to make credentialed / state-changing calls to this instance.
  *
- * CLOUD: exactly the deployment's own origin.
- *
- * LOCAL: any loopback origin, on any port. This is deliberately a set of PATTERNS
- * rather than a fixed list, because local mode is reached from several ports that
- * are not knowable here — the Vite dev server (5173), the landing dev server (5174),
+ * Any loopback origin, on any port. This is deliberately a set of PATTERNS rather than a
+ * fixed list, because the app is reached from several ports that are not knowable here —
+ * the Vite dev server (5173),
  * the isolated demo stack (5273), the packaged CLI serving the SPA from the API port
  * itself, and whatever PORT/BACKEND_PORT a user overrides. What it does NOT match is
  * the case that matters: a page on a real website (https://evil.example) that the
@@ -219,31 +147,20 @@ function isLoopbackOrigin(origin: string): boolean {
 export function isAllowedOrigin(origin: string): boolean {
   const o = origin.replace(/\/$/, '');
   if (EXTRA_ORIGINS.includes(o)) return true;
-  return config.isCloud ? o === config.appBaseUrl : isLoopbackOrigin(o);
+  return isLoopbackOrigin(o);
 }
 
-/** The @fastify/cors `origin` option: an allowlist in BOTH modes (was `true` locally). */
+/** The @fastify/cors `origin` option: the loopback allowlist. */
 export function corsOriginDelegate(
   origin: string | undefined,
   cb: (err: Error | null, allow: boolean) => void,
 ): void {
   // No Origin header = a same-origin navigation or a non-browser client (curl, the
-  // CLI, a webhook). CORS has nothing to decide; the guard below handles the
+  // CLI). CORS has nothing to decide; the guard below handles the
   // state-changing case.
   if (!origin) return cb(null, true);
   cb(null, isAllowedOrigin(origin));
 }
-
-// Server-to-server POSTs authenticated by an HMAC signature instead of an origin.
-// GitHub sends no Origin and no Sec-Fetch-* headers, so it would pass the guard
-// regardless — listed explicitly so that stays true by intent, not luck.
-const GUARD_EXEMPT_PATHS = new Set(['/api/webhooks/github']);
-
-// GET routes that change server state and so need the same protection as a POST.
-// /api/auth/reconnect revokes the GitHub grant and drops the session; the frontend
-// reaches it as a same-origin <a href> navigation, so guarding it is free.
-// NOT guarded: /api/auth/login — it is legitimately entered as a cross-site top-level navigation (a link from the README, a bookmark).
-const GUARDED_GET_PATHS = new Set(['/api/auth/reconnect']);
 
 /**
  * Rejects state-changing /api requests that arrive from a foreign origin.
@@ -255,24 +172,21 @@ const GUARDED_GET_PATHS = new Set(['/api/auth/reconnect']);
  * great deal, because there is no session cookie to miss: every request resolves to
  * the single local account, so a drive-by POST from any page the developer has open
  * would run as them — resolve review threads, trigger a paid AI run, add a repo.
- * SameSite=Lax covers the cloud cookie case, but this closes the local hole and
- * gives cloud a second, independent layer.
  *
  * Detection prefers `Sec-Fetch-Site`, which every current browser sends and no page
- * can forge, and falls back to `Origin`. A request with neither (curl, a CI script,
- * a webhook) is allowed: CSRF requires a browser, and blocking header-less clients
+ * can forge, and falls back to `Origin`. A request with neither (curl, a CI script)
+ * is allowed: CSRF requires a browser, and blocking header-less clients
  * would break the CLI and every integration.
  */
 export function registerCrossOriginGuard(app: FastifyInstance): void {
   app.addHook('onRequest', async (req, reply) => {
     const path = pathOf(req);
     if (!path.startsWith('/api/')) return;
-    if (GUARD_EXEMPT_PATHS.has(path)) return;
 
     const method = req.method.toUpperCase();
     const mutating =
       method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
-    if (!mutating && !GUARDED_GET_PATHS.has(path)) return;
+    if (!mutating) return;
 
     // `Sec-Fetch-Site` is set by the browser, unforgeable by page script:
     //   same-origin / same-site → our own UI
@@ -311,11 +225,11 @@ async function deny(
 }
 
 // ---------------------------------------------------------------------------
-// Host guard (local mode): DNS-rebinding defence
+// Host guard: DNS-rebinding defence
 // ---------------------------------------------------------------------------
 
 /**
- * Local mode binds 127.0.0.1, so nothing on the network can reach it directly — but
+ * The server binds 127.0.0.1, so nothing on the network can reach it directly — but
  * a hostname an attacker controls can be made to RESOLVE to 127.0.0.1 (DNS
  * rebinding), at which point their page is same-origin with the app and every
  * same-origin protection above evaporates. The defence is to check the Host header:
@@ -332,7 +246,6 @@ const EXTRA_HOSTS: readonly string[] = (process.env.ALLOWED_HOSTS ?? '')
   .filter(Boolean);
 
 export function registerHostGuard(app: FastifyInstance): void {
-  if (config.isCloud) return;
   const boundToLoopback = LOOPBACK_HOSTNAMES.has(config.host.toLowerCase());
   if (!boundToLoopback && EXTRA_HOSTS.length === 0) return;
 

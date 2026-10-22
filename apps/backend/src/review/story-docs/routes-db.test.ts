@@ -18,7 +18,6 @@ import type { FastifyInstance } from 'fastify';
 const DB_PATH = `${process.env.DATABASE_URL ?? '/tmp/pierre-storydocs'}.storydocs-db.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 delete process.env.LIMN_AI_DISABLED;
 
 const IDENT = 'jira:https://acme.atlassian.net#ABC-1';

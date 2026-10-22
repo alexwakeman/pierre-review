@@ -14,7 +14,6 @@ import type { AgentContext } from '../agent-context.js';
 const DB_PATH = '/tmp/pierre-claude-thread-judgements.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 vi.mock('./manager.js', () => ({
   AGENTIC_AI_ENABLED: true,
@@ -83,7 +82,6 @@ beforeAll(async () => {
   const ctx = {
     db,
     schema,
-    isPg: false,
     runTransaction: client.runTransaction,
     log: { warn: () => {}, info: () => {}, error: () => {} },
     accountIdOf: (req: any) => Number(req.headers['x-account'] ?? 1),

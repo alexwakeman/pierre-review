@@ -11,7 +11,6 @@ import { aiCapabilitiesOf, type AiCapabilities } from '../lib/aiCapabilities.js'
 // so tests can import it without React Query.
 export {
   AI_AUTH_LINE,
-  AI_CLOUD_NOTE,
   AI_SETUP_LABEL,
   aiCapabilitiesOf,
   type AiCapabilities,

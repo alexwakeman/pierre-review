@@ -34,7 +34,6 @@ describe('cheapComplete locally', () => {
   });
 
   it("ignores a passed key on a call marked localRoute 'agent' and answers through the Agent SDK", async () => {
-    expect(config.isCloud).toBe(false);
     const res = await cheapComplete({ prompt: 'hi', apiKey: 'sk-ant-summary', localRoute: 'agent' });
     expect(res.text).toBe('hello');
     expect(query).toHaveBeenCalledTimes(1);

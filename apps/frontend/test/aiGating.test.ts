@@ -4,16 +4,14 @@ import { describe, expect, it } from 'vitest';
 import type { MeResponse } from '@pierre-review/shared';
 import {
   AI_AUTH_LINE,
-  AI_CLOUD_NOTE,
   aiCapabilitiesOf,
 } from '../src/lib/aiCapabilities.js';
 import { formatUsd } from '../src/lib/ui.js';
 
-// The agentic AI surfaces (Claude Review, review chat, review memory, AI Fix) are local-only.
-// They gate on the TOP-LEVEL `me.ai`.
+// The agentic AI surfaces (Claude Review, review chat, AI Fix) gate on the TOP-LEVEL `me.ai`.
 
-function me(ai: MeResponse['ai'] | undefined, deploymentMode: 'local' | 'cloud' = 'local'): MeResponse {
-  return { deploymentMode, ai } as unknown as MeResponse;
+function me(ai: MeResponse['ai'] | undefined): MeResponse {
+  return { ai } as unknown as MeResponse;
 }
 
 const READY: MeResponse['ai'] = {
@@ -25,9 +23,9 @@ const READY: MeResponse['ai'] = {
 };
 
 describe('aiCapabilitiesOf', () => {
-  it('local, set up and signed in ⇒ visible and ready', () => {
+  it('set up and signed in ⇒ visible and ready', () => {
     const ai = aiCapabilitiesOf(me(READY));
-    expect(ai).toMatchObject({ enabled: true, cloud: false, ready: true });
+    expect(ai).toMatchObject({ enabled: true, ready: true });
   });
 
   it('a missing runtime or credential keeps the surface VISIBLE, only not ready', () => {
@@ -41,14 +39,9 @@ describe('aiCapabilitiesOf', () => {
     });
   });
 
-  it('cloud ⇒ off, and flagged so the "runs on your machine" line shows', () => {
-    const ai = aiCapabilitiesOf(me({ ...READY, enabled: false }, 'cloud'));
-    expect(ai).toMatchObject({ enabled: false, cloud: true, ready: false });
-  });
-
-  it('a local kill switch ⇒ off and NOT cloud (nothing renders)', () => {
+  it('the kill switch ⇒ off (nothing renders)', () => {
     const ai = aiCapabilitiesOf(me({ ...READY, enabled: false }));
-    expect(ai).toMatchObject({ enabled: false, cloud: false });
+    expect(ai).toMatchObject({ enabled: false, ready: false });
   });
 
   it('no /api/me yet, or an older server with no `ai` block ⇒ off', () => {
@@ -58,7 +51,6 @@ describe('aiCapabilitiesOf', () => {
 
   it('the copy is the owner-approved wording', () => {
     expect(AI_AUTH_LINE).toBe('Sign in to Claude Code or set ANTHROPIC_API_KEY');
-    expect(AI_CLOUD_NOTE).toBe('Review and fix run on your machine: npx limn-review');
   });
 });
 

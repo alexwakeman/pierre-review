@@ -17,7 +17,6 @@ import type { ReviewThreadForReview } from '../../db/review-threads-for-review.j
 const DB_PATH = '/tmp/pierre-thread-check.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 const slot = vi.hoisted(() => ({ free: false }));
 vi.mock('./manager.js', () => ({
@@ -152,7 +151,6 @@ beforeAll(async () => {
   ctx = {
     db,
     schema,
-    isPg: false,
     runTransaction: client.runTransaction,
     log: { warn: () => {}, info: () => {}, error: () => {} },
     recordAiUsage: async () => {},

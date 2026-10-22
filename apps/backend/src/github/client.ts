@@ -27,7 +27,7 @@ export function isSamlBlock(errors: unknown): boolean {
 // deleted/inaccessible PR — isn't mislabelled). Empty otherwise (the raw errors still get logged).
 export function graphqlChecksHint(errors: unknown): string {
   if (isSamlBlock(errors)) {
-    return " — the sign-in token isn't authorized for this org's SAML SSO; re-authorize it inside an active SAML session for the org (see docs/GITHUB-AUTH-SETUP.md)";
+    return " — the gh token isn't authorized for this org's SAML SSO; run `gh auth refresh` and authorize the org";
   }
   const mentionsChecks =
     Array.isArray(errors) &&
@@ -39,7 +39,7 @@ export function graphqlChecksHint(errors: unknown): string {
       return inPath || inMsg;
     });
   return mentionsChecks
-    ? " — the sign-in token can't read CI checks here (GitHub App: install on this org with Checks read; OAuth App: re-authorize; or it's a private repo)"
+    ? " — the gh token can't read CI checks here (re-authorize with `gh auth refresh`, or it's a private repo)"
     : '';
 }
 

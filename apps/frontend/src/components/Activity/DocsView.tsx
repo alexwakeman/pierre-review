@@ -626,7 +626,7 @@ export function DocsView(): JSX.Element | null {
   if (!ai.enabled) {
     return (
       <p className={`px-6 py-10 text-center text-sm ${MUTED}`}>
-        {ai.cloud ? 'Reference docs run on your machine: npx limn-review' : 'Reference docs need Claude, which is switched off here.'}
+        Reference docs need Claude, which is switched off here.
       </p>
     );
   }

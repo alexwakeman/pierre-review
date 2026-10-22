@@ -772,7 +772,7 @@ function notFound(reply: FastifyReply, what: string): { error: string; message: 
  * Rate tier: matched explicitly in core's `tierFor` (POST = ai, GET = read).
  */
 export function registerClaudeReviewChatRoutes(app: FastifyInstance, ctx: AgentContext): void {
-  if (!AGENTIC_AI_ENABLED || ctx.host.isCloud || !ctx.review.chat) return;
+  if (!AGENTIC_AI_ENABLED || !ctx.review.chat) return;
 
   app.get(
     '/api/claude-reviews/:reviewId/chat',

@@ -46,7 +46,7 @@ export async function upsertRecommendation(
   seed: RecommendationSeed,
   patch: RecommendationPatch,
 ): Promise<void> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const t = pro.advisorRecommendations;
   const now = new Date();
   // SPREAD the observed keys — `undefined` must mean "leave the stored value alone" in the
@@ -112,7 +112,7 @@ export async function listRecommendations(
   accountId: number,
   workspaceId: number,
 ): Promise<AdvisorRecommendationWire[]> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const t = pro.advisorRecommendations;
   const rows = (await ctx.db
     .select({
@@ -155,7 +155,7 @@ export async function promoteMergedPrs(
   accountId: number,
   workspaceId: number,
 ): Promise<void> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const t = pro.advisorRecommendations;
   const rows = (await ctx.db
     .select({
@@ -254,7 +254,7 @@ export async function listProfiles(
   accountId: number,
   workspaceId: number,
 ): Promise<(AdvisorBotProfileWire & { manifestJson: string | null })[]> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const t = pro.advisorBotProfiles;
   const rows = (await ctx.db
     .select({
@@ -280,7 +280,7 @@ export async function getProfileRow(
   workspaceId: number,
   botUserId: number,
 ): Promise<(AdvisorBotProfileWire & { manifestJson: string | null }) | null> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const t = pro.advisorBotProfiles;
   const rows = (await ctx.db
     .select({
@@ -320,7 +320,7 @@ export async function putProfileT1(
   botUserId: number,
   patch: ProfileT1Patch,
 ): Promise<void> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const t = pro.advisorBotProfiles;
   const now = new Date();
   const observed = {
@@ -361,7 +361,7 @@ export async function putProfileManifest(
   botUserId: number,
   manifestJson: string,
 ): Promise<void> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const t = pro.advisorBotProfiles;
   const now = new Date();
   await ctx.db
@@ -403,7 +403,7 @@ export async function insertConfigEvent(
   workspaceId: number,
   seed: ConfigEventSeed,
 ): Promise<void> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   await ctx.db
     .insert(pro.advisorConfigEvents)
     .values({
@@ -429,7 +429,7 @@ export async function listConfigEvents(
   workspaceId: number,
   botUserId?: number,
 ): Promise<(AdvisorConfigEventWire & { occurredAtMs: number })[]> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const t = pro.advisorConfigEvents;
   const where = botUserId
     ? and(eq(t.accountId, accountId), eq(t.workspaceId, workspaceId), eq(t.botUserId, botUserId))

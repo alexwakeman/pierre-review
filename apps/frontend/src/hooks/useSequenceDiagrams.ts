@@ -10,7 +10,7 @@ import { DIAGRAM_POLL_MS, prDiagramsPollMs, slotDrawing } from '../lib/sequenceD
 export { slotDrawing };
 
 // DESIGN DIAGRAMS' server state (docs/API.md § Design diagrams; the routes keep "sequence-diagrams").
-// Gated by the caller on `me.ai.enabled` (local, free) — the routes are absent in the cloud. Both reads are STORED rows.
+// Gated by the caller on `me.ai.enabled` (local, free) — the routes are absent under LIMN_AI_DISABLED. Both reads are STORED rows.
 //
 // POLLING. A diagram is queued by the server a moment AFTER a review finishes, so the PR read polls
 // (5 s) while a run is queued or running AND for a short window after the review's `finishedAt`

@@ -1,7 +1,6 @@
 // Plugin-owned SQLite schema (local mode) for the WORK PLAN cache — the credit-metered Haiku
 // narration of the Activity feed's prioritised worklist ("what should I work on today", the panel
-// directly under the daily-brief strip). Structural twin: `schema.pg.ts` (same table + column
-// names + nullability, kept in step BY EYE — this package has no schema-parity test). Migrated by
+// directly under the daily-brief strip). Migrated by
 // the host via ctx.registerMigrations (../../migrations/0028_work_plan.sql); this module is ONLY
 // the typed query surface.
 //

@@ -1,1 +1,0 @@
-ALTER TABLE "claude_review_findings" ADD COLUMN "file_in_diff" boolean DEFAULT true NOT NULL;

@@ -3,10 +3,7 @@
 // The per-repo LLM headline digest cache (Pro). Lived in review-memory/schema.*.ts beside
 // review_learnings until Claude Review's memory moved to core (core migration 0074 / pg 0061);
 // repo_digests stayed, so it moved here, beside the feature that owns it.
-// Plugin-owned SQLite schema (local mode). The structural twin lives in
-// `schema.pg.ts` and MUST stay identical (same table + column names, same
-// nullability) — `db.ts` casts the active driver+schema to the pg types, exactly
-// like the host's client.ts. These tables are migrated by the host's
+// Platform-owned SQLite schema. These tables are migrated by the host's
 // runPluginMigrations via ctx.registerMigrations (the .sql under ../migrations);
 // this module is ONLY the typed query surface, not a DDL source.
 //

@@ -796,8 +796,8 @@ export async function listAllClaudeReviews(
 ): Promise<ClaudeReviewListItem[]> {
   const { cr, prs, repos } = tables(ctx);
   const cutoff = new Date(Date.now() - LIST_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  // sqlite timestamps are unix SECONDS; pg is a Date. Bind the dialect-appropriate value.
-  const tsBound = ctx.isPg ? cutoff : Math.floor(cutoff.getTime() / 1000);
+  // sqlite timestamps are unix SECONDS.
+  const tsBound = Math.floor(cutoff.getTime() / 1000);
   const rows = (await ctx.db
     .select({
       reviewId: cr.id,

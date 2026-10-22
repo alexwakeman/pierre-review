@@ -7,8 +7,8 @@ import { getAiRuntimeStatus, installAiRuntime } from '../../ai/runtime.js';
 // three peers, ~110 MB) into `<dataDir>/ai-runtime`, streaming npm's progress as SSE.
 // ai/runtime.ts owns the work; this route only relays it.
 //
-// LOCAL ONLY, STRUCTURALLY: registered only when `config.aiEnabled` (which is false in cloud and
-// under LIMN_AI_DISABLED), and it refuses again on its own if ever reached in cloud.
+// Registered only when `config.aiEnabled` (false under LIMN_AI_DISABLED), and it refuses again on
+// its own if ever reached with AI switched off.
 //
 // ⚠ IT IS A POST, SO THE DISCONNECT SIGNAL IS THE REPLY SOCKET (`reply.raw`), never
 // `req.raw.on('close')` — a POST's request `close` fires as soon as the body is read (CLAUDE.md,
@@ -16,7 +16,7 @@ import { getAiRuntimeStatus, installAiRuntime } from '../../ai/runtime.js';
 // so a reload re-POSTs and joins the same run instead of starting a second one.
 export async function aiRuntimeRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/ai/runtime/install', async (_req, reply) => {
-    if (config.isCloud || !config.aiEnabled) {
+    if (!config.aiEnabled) {
       return reply.code(404).send({ error: 'NotFound', message: 'Not available here.' });
     }
     const before = getAiRuntimeStatus();

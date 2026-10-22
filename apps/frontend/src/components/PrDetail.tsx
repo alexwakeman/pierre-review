@@ -19,7 +19,6 @@ import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { useClaudeReviewTabPill } from '../hooks/useClaudeReview.js';
 import { SEVERITY_CLASS, VERDICT_CLASS } from '../lib/claudeReviewFollowUp.js';
 import type { ReviewTabPill } from '../lib/claudeReviewColumn.js';
-import { AiCloudNote } from './AiSetup.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { api } from '../api/client.js';
@@ -1438,8 +1437,6 @@ export function PrDetail({
             </button>
           );
         })}
-        {/* Hosted app: the agentic tabs are not listed — one line says where they run. */}
-        <AiCloudNote className="ml-auto self-center" />
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">

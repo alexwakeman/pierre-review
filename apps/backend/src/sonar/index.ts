@@ -14,6 +14,5 @@ export function registerSonar(app: FastifyInstance): void {
     schema: schema as unknown as Record<string, unknown> as Parameters<typeof registerSonarRoutes>[1]['schema'],
     accountIdOf,
     log: app.log,
-    isCloud: config.isCloud,
   });
 }

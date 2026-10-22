@@ -1,7 +1,6 @@
 // ⚠ DORMANT: ai_pr_analyses (the AI PR summary + CI analysis, REMOVED). Nothing reads or writes this table any more; it stays declared so the
 // account erasure, retention prune and isolation test still cover it. Never drop it.
-// Plugin-owned SQLite schema for AI Fix (local mode). Structural twin of
-// `schema.pg.ts` (identical table + column names + nullability). Migrated by the
+// Platform-owned SQLite schema for AI Fix. Migrated by the
 // host's runPluginMigrations via ../migrations/0002_ai_fix.sql; this module is ONLY
 // the typed query surface. accountId is denormalized onto every row (the plugin's own
 // verify:isolation guarantee); every query filters it.

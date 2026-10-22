@@ -19,8 +19,8 @@ import {
 } from './manager.js';
 
 // THE STORY LABEL RUN'S ROUTES (docs/API.md § Story labels; docs/CLAUDE-REVIEW.md § Story labels). The
-// paths keep the retired Story health prefix. Registered ONLY through `registerAgenticRoutes` — its
-// explicit `isCloud` check is the cloud guarantee (these 404 there). The body's workspace goes through
+// paths keep the retired Story health prefix. Registered ONLY through `registerAgenticRoutes` (these
+// 404 under LIMN_AI_DISABLED). The body's workspace goes through
 // `resolveWorkspaceScope`: an unknown or another tenant's id falls to the caller's Default, never 404.
 //
 //   POST /api/story-health/label {workspaceId}  label up to STORY_LABEL_RUN_CAP stories → ai + ai_hourly

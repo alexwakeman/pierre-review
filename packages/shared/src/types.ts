@@ -3773,19 +3773,6 @@ export interface LocalUser {
   displayName: string | null;
 }
 
-// Which GitHub sign-in methods this (cloud) deployment offers — GET /api/auth/providers.
-// Read UNAUTHENTICATED by the SignInGate to render the right button(s), and SIGNED-IN by the
-// Settings "GitHub App" section, which needs `appSlug` to build the install link. The two
-// GitHub App flows are distinct and neither implies the other: /login/oauth/authorize mints a
-// user token (sign-in), while /apps/<slug>/installations/new grants repo access — and ONLY an
-// installation produces webhook deliveries (see docs/REALTIME-SYNC.md).
-export interface AuthProvidersResponse {
-  oauth: boolean;
-  app: boolean;
-  // Empty unless the GitHub App provider is enabled.
-  appSlug: string;
-}
-
 // ---- the LARGE-PR FLAG (CORE, free, no AI) ----------------------------------------------
 //
 // A subtle warning on a pull request whose CODE churn is big enough that reviewing it well is
@@ -4117,34 +4104,27 @@ export type MlInstallEvent =
 
 export interface MeResponse {
   user: LocalUser | null;
-  // (Claude Review and AI Fix are gated on `ai` below — core, free, local-only.)
-  // Deployment mode. 'cloud' tells the SPA to show a sign-out control and treat a
-  // 401 from /api/me as "signed out" (vs local, where /api/me never 401s).
-  deploymentMode: 'local' | 'cloud';
+  // (Claude Review and AI Fix are gated on `ai` below.)
   // Is ML severity/category enrichment of bot comments live on this deployment?
   // True iff something can score bot comments RIGHT NOW: the local model once it is set up, or
   // a configured severity-api. Gates every ML query the SPA makes.
   mlSeverity: boolean;
-  // LOCAL bot-comment scoring's one-time download (docs/ML-NODE-PORT.md). Absent in cloud and
-  // under LIMN_ML_DISABLED, where there is nothing to set up. 'absent' ⇒ the SPA offers "Set up";
+  // LOCAL bot-comment scoring's one-time download (docs/ML-NODE-PORT.md). Absent under
+  // LIMN_ML_DISABLED, where there is nothing to set up. 'absent' ⇒ the SPA offers "Set up";
   // 'failed' carries `message`. Top-level for the `mlSeverity` reason.
   ml?: {
     state: 'ready' | 'absent' | 'installing' | 'failed';
     message: string | null;
   };
-  // Can this deployment resolve merge conflicts in-app? True in local mode; false in cloud,
-  // where the routes are not registered at all.
+  // Can this server resolve merge conflicts in-app? Always true (kept on the wire for the SPA's gate).
   //
   // ⚠ IT IS NOT A GIT-VERSION PROBE. `merge-tree --write-tree` needs git 2.38+, which
   // /api/me will not shell out to learn on every SPA boot; a too-old git is refused by the
   // OPEN route with `git_too_old` and the overlay prints it once.
-  // ⚠ Gate the SPA on THIS, never on `deploymentMode === 'cloud'`.
   conflictResolver: boolean;
   // The agentic AI surfaces — Claude Review (run, follow-up, ticket check, auto review, the review
-  // chat) and AI Fix. FREE and LOCAL-ONLY; they run on the user's own Claude Code
-  // session or ANTHROPIC_API_KEY.
-  //  - `enabled`: `!isCloud && !LIMN_AI_DISABLED`. False ⇒ no agentic surface renders (cloud shows
-  //    one "runs on your machine" line instead).
+  // chat) and AI Fix. Free; they run on the user's own Claude Code session or ANTHROPIC_API_KEY.
+  //  - `enabled`: `!LIMN_AI_DISABLED`. False ⇒ no agentic surface renders.
   //  - `runtime`: the one-time AI runtime download (the SDKs are not in the npm package). 'absent'
   //    ⇒ the SPA offers "Set up AI"; 'failed' carries `runtimeMessage`.
   //  - `auth`: whether a Claude credential was detected (a heuristic — the run itself is the real
@@ -4157,7 +4137,7 @@ export interface MeResponse {
     authMessage: string | null;
   };
   // The time zone Chronology counts working hours in for a workspace that never set one — the
-  // machine's own zone locally, UTC in the cloud, `WORK_TIMEZONE` over both. The Settings form
+  // machine's own zone, `WORK_TIMEZONE` over it. The Settings form
   // shows it as the "default" beside a workspace's zone. Optional: an older server omits it and
   // the form falls back to the browser's zone.
   workTimeZone?: string;
@@ -4179,9 +4159,9 @@ export interface MeResponse {
   // (real code, vendored at release): the SPA applies them per chip, and the server applies the
   // same pair for the auto-approve impact gate. Nothing is mirrored.
   blastRadius: BlastRadiusConfig | null;
-  // Orgs whose sync is currently BLOCKED because the sign-in token isn't authorized for their
-  // SAML SSO (cloud). Populated by the sync when it hits the SAML wall; drives the global
-  // "Reconnect GitHub for <org>" banner. Empty in the normal case + always empty in local mode.
+  // Orgs whose sync is currently BLOCKED because the GitHub token isn't authorized for their
+  // SAML SSO. Populated by the sync when it hits the SAML wall; drives the global banner. Empty
+  // in the normal case.
   authNotices: AuthNotice[];
   // The reader's My Turn settings (Settings → My Turn): which card types show, the type order and
   // the Do next weights. RAW STORED OVERRIDES — `null` means "never changed anything", and the SPA
@@ -5868,14 +5848,14 @@ export interface PrDetail {
   // happened since (null when never viewed or the PR is closed/merged).
   lastViewedAt: string | null;
   newSinceLastViewed: NewSinceLastViewed | null;
-  // Set (cloud) when on-demand hydration was BLOCKED by the repo owner's org policy — the
+  // Set when on-demand hydration was BLOCKED by the repo owner's org policy — the
   // GitHub token authenticates but isn't authorized for that org, so the description, CI
   // jobs, comment bodies etc. couldn't be fetched. The SPA renders a "why is this blank +
   // how to fix" banner. null when hydration succeeded (the normal case).
   authNotice?: AuthNotice | null;
 }
 
-// Why a PR's on-demand detail couldn't be fully hydrated in cloud (an org authorization
+// Why a PR's on-demand detail couldn't be fully hydrated (an org authorization
 // wall, not a bug). `org` is the repo owner whose policy blocked the token.
 export interface AuthNotice {
   kind: 'saml_sso';

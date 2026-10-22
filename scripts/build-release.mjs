@@ -30,14 +30,11 @@ const repoRoot = resolve(scriptDir, '..');
 
 const backendDir = join(repoRoot, 'apps', 'backend');
 const frontendDir = join(repoRoot, 'apps', 'frontend');
-const landingDir = join(repoRoot, 'apps', 'landing');
 const backendDist = join(backendDir, 'dist');
 const frontendDist = join(frontendDir, 'dist');
-const landingDist = join(landingDir, 'dist');
 const sharedDir = join(repoRoot, 'packages', 'shared');
 const sharedDist = join(sharedDir, 'dist');
 const migrationsSrc = join(backendDir, 'src', 'db', 'migrations');
-const migrationsPgSrc = join(backendDir, 'src', 'db', 'migrations-pg');
 // The platform modules' own migrations (bookkept in `pro_migrations`) and the bundled peer-benchmark
 // corpus. Both are read relative to the compiled module (`new URL('./migrations', import.meta.url)`
 // in platform/index.js, `../../data/benchmark/…` from platform/bots/benchmark/artifact.js), so
@@ -64,9 +61,6 @@ mkdirSync(releaseDir, { recursive: true });
 // 2. Build frontend (Vite → apps/frontend/dist).
 run('pnpm', ['--filter', '@pierre-review/frontend', 'build']);
 
-// 2b. Build the landing page (Vite → apps/landing/dist) — served at / in cloud.
-run('pnpm', ['--filter', '@pierre-review/landing', 'build']);
-
 // 3. Build backend (tsc → apps/backend/dist; picks up cli.ts via tsconfig.build).
 run('pnpm', ['--filter', '@pierre-review/backend', 'build']);
 
@@ -88,7 +82,6 @@ run('pnpm', ['--filter', '@pierre-review/shared', 'build']);
 if (!existsSync(backendDist)) fail('backend dist/ missing after build');
 if (!existsSync(sharedDist)) fail('shared dist/ missing after build');
 if (!existsSync(frontendDist)) fail('frontend dist/ missing after build');
-if (!existsSync(landingDist)) fail('landing dist/ missing after build');
 
 // 4. Copy compiled backend → release/dist, then prune non-artifact files
 //    (sourcemaps + any stray compiled tests) so only production JS ships.
@@ -108,8 +101,8 @@ function pruneDist(dir) {
 }
 
 // 4b. Vendor the compiled shared package → release/dist/shared. It lives UNDER `dist`, which is
-//     already in the manifest's `files`, so it ships with the npm package and lands at
-//     /app/dist/shared in the cloud image without either list having to learn about it.
+//     already in the manifest's `files`, so it ships with the npm package without the list
+//     having to learn about it.
 log('vendoring shared → release/dist/shared');
 const sharedReleaseDir = join(releaseDist, 'shared');
 cpSync(sharedDist, sharedReleaseDir, { recursive: true });
@@ -133,35 +126,17 @@ for (const entry of readdirSync(metaSrc)) {
   }
 }
 
-// 5b. Copy pg migrations (.sql + meta/*.json) → release/dist/db/migrations-pg.
-log('copying pg migrations → release/dist/db/migrations-pg');
-const migrationsPgDst = join(releaseDir, 'dist', 'db', 'migrations-pg');
-mkdirSync(join(migrationsPgDst, 'meta'), { recursive: true });
-for (const entry of readdirSync(migrationsPgSrc)) {
-  if (entry.endsWith('.sql')) {
-    cpSync(join(migrationsPgSrc, entry), join(migrationsPgDst, entry));
-  }
-}
-const metaPgSrc = join(migrationsPgSrc, 'meta');
-for (const entry of readdirSync(metaPgSrc)) {
-  if (entry.endsWith('.json')) {
-    cpSync(join(metaPgSrc, entry), join(migrationsPgDst, 'meta', entry));
-  }
-}
-
-// 6. Copy built SPA → release/public (served under /app), and the landing page
-//    → release/public-landing (served at / in cloud).
+// 6. Copy built SPA → release/public (served under /app). The npm package ships the app only;
+//    the marketing site is a separate static service (apps/site).
 log('copying SPA → release/public');
 cpSync(frontendDist, join(releaseDir, 'public'), { recursive: true });
-log('copying landing → release/public-landing');
-cpSync(landingDist, join(releaseDir, 'public-landing'), { recursive: true });
 
-// 6c. Copy the platform's migrations + bundled data → release/dist/platform/{migrations,
-//     migrations-pg,data}, beside the compiled platform modules that read them. ⚠ Forgetting
+// 6c. Copy the platform's migrations + bundled data → release/dist/platform/{migrations,data},
+//     beside the compiled platform modules that read them. ⚠ Forgetting
 //     `data` fails ONLY IN THE RELEASE: dev reads the file straight out of src/ and looks perfect,
 //     while the package answers the benchmark with `available:false`. Hence the mustExist below.
 log('copying platform migrations + data → release/dist/platform');
-for (const sub of ['migrations', 'migrations-pg', 'data']) {
+for (const sub of ['migrations', 'data']) {
   cpSync(join(platformSrc, sub), join(releaseDir, 'dist', 'platform', sub), { recursive: true });
 }
 
@@ -287,7 +262,7 @@ const manifest = {
   name: 'limn-review',
   version: backendPkg.version,
   description:
-    "Dashboard for tracking your team's GitHub PR activity across repos — local (SQLite + gh) or self-hosted multi-tenant cloud (Postgres + GitHub App).",
+    "Dashboard for tracking your team's GitHub PR activity across repos. Runs on your machine with your gh login.",
   type: 'module',
   author: 'Alex Wakeman',
   repository: {
@@ -300,7 +275,7 @@ const manifest = {
     limn: 'dist/cli.js',
     // ⚠ LOAD-BEARING FOR `npx limn-review`. With more than one bin, npx runs the one named after
     // the PACKAGE and errors ("could not determine executable to run") when none is — so the
-    // README's and the landing's `npx limn-review` needs this entry, not just `limn`.
+    // README's `npx limn-review` needs this entry, not just `limn`.
     'limn-review': 'dist/cli.js',
     // ⚠ NO `pierre-review` BIN HERE. The deprecated alias lives in the forwarding stub
     // (scripts/deprecated-pierre-review/), which still owns that name. Declaring it here too made
@@ -308,7 +283,7 @@ const manifest = {
     // globally: npm refuses to link a global bin another package owns. The CLI still prints the
     // rename notice when the stub starts it under the old name.
   },
-  files: ['dist', 'public', 'public-landing', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md'],
+  files: ['dist', 'public', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md'],
   engines: { node: '>=20' },
   // NO AI SDK IS A DEPENDENCY. The agentic features ship as code, but the four SDKs they run on
   // (@anthropic-ai/claude-agent-sdk, @anthropic-ai/sdk, @modelcontextprotocol/sdk, zod) are
@@ -316,17 +291,13 @@ const manifest = {
   // below, and loaded ONLY through dist/ai/runtime.js. See the AI_DEPS and dist-grep guardrails
   // at the bottom of this file and CLAUDE.md "Packaging & publishing".
   dependencies: {
-    '@fastify/cookie': backendPkg.dependencies['@fastify/cookie'],
     '@fastify/cors': backendPkg.dependencies['@fastify/cors'],
-    '@fastify/secure-session': backendPkg.dependencies['@fastify/secure-session'],
     '@fastify/static': staticVersion,
     '@octokit/graphql': backendPkg.dependencies['@octokit/graphql'],
     'better-sqlite3': backendPkg.dependencies['better-sqlite3'],
     'drizzle-orm': backendPkg.dependencies['drizzle-orm'],
     fastify: backendPkg.dependencies['fastify'],
     'node-cron': backendPkg.dependencies['node-cron'],
-    // Postgres driver — only loaded in cloud mode (dynamic import in client.ts).
-    pg: backendPkg.dependencies['pg'],
     // The advisor's config emitters (platform/advisor/emitters) parse and write YAML.
     yaml: backendPkg.dependencies['yaml'],
   },
@@ -377,28 +348,15 @@ const mustExist = [
   'dist/config.js',
   'dist/db/client.js',
   'dist/db/schema.sqlite.js',
-  'dist/db/schema.pg.js',
   'dist/db/migrations/meta/_journal.json',
   'dist/db/migrations/0008_multitenant_accounts.sql',
-  'dist/db/migrations-pg/meta/_journal.json',
   'dist/auth/account.js',
   'dist/auth/crypto.js',
-  'dist/api/routes/auth.js',
   'dist/review/agent.js',
   'dist/ai/runtime.js',
   'dist/data-dir.js',
   'public/index.html',
-  'public-landing/index.html',
 ];
-// Every landing route must ship as its own PRERENDERED page (apps/landing/
-// prerender.mjs). This is a guardrail against a silent regression: if prerendering
-// breaks, the site still looks perfect in a browser — JavaScript fills it in — and
-// the only visible symptom is that crawlers, link unfurlers, AI agents and no-JS
-// visitors go back to receiving an empty shell on every URL. That is exactly the
-// class of bug nobody notices for months, so it fails the build instead.
-for (const route of ['features', 'pro', 'pricing', 'how-it-works', 'privacy', 'cookies', 'terms']) {
-  mustExist.push(`public-landing/${route}/index.html`);
-}
 // The platform entry, its first migration and the peer-benchmark corpus it reads. A missing copy
 // step is silent everywhere else: the route answers 200 with `available:false`.
 mustExist.push(
@@ -408,15 +366,6 @@ mustExist.push(
 );
 for (const rel of mustExist) {
   if (!existsSync(join(releaseDir, rel))) fail(`missing required file: ${rel}`);
-}
-
-// …and they must contain real content, not just exist. A prerender that renders an
-// empty tree writes a well-formed file of the right name.
-for (const rel of ['public-landing/index.html', 'public-landing/pricing/index.html']) {
-  const html = readFileSync(join(releaseDir, rel), 'utf8');
-  if (html.length < 8000 || !html.includes('<h1')) {
-    fail(`${rel} looks unrendered (${html.length} bytes) — prerendering produced an empty shell`);
-  }
 }
 
 // No .ts files anywhere under release/.

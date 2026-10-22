@@ -1,9 +1,10 @@
-// Cross-account IDOR isolation check (query-layer; no HTTP/OAuth needed).
+// Cross-account IDOR isolation check (query-layer; no HTTP needed).
 //
 // Seeds TWO accounts each owning a repo + PR + event, then asserts every
 // account-scoped reader only returns the caller's data and every id-addressed
-// getter returns null/false for another account's resources. This is the
-// load-bearing multi-tenancy guarantee for cloud mode.
+// getter returns null/false for another account's resources. The app runs one local
+// account now, but every table still carries accountId and every query still scopes
+// by it; this keeps that scoping honest for a database with more than one account.
 //
 // Run against a throwaway sqlite DB (never your real one):
 //   DATABASE_URL=/tmp/pierre-iso.sqlite DISABLE_SCHEDULER=true \
@@ -4096,7 +4097,6 @@ check(
     ...sc,
     accountIdOf: () => 1,
     log: { info() {}, warn() {}, error() {} } as any,
-    isCloud: false,
     transport: async () => {
       throw new Error('no SonarCloud call may be made by an isolation check');
     },

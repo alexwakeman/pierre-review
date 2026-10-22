@@ -1,5 +1,4 @@
-// Plugin-owned SQLite schema for the comment-ANNOTATIONS platform (local mode). Structural twin
-// of `schema.pg.ts` (identical table + column names + nullability). Migrated by the host's
+// Platform-owned SQLite schema for the comment-ANNOTATIONS platform. Migrated by the host's
 // runPluginMigrations via ../migrations/0017_pr_comment_annotations.sql; this module is ONLY the
 // typed query surface. accountId is denormalized onto every row (the plugin's verify:isolation
 // guarantee); every query filters it.

@@ -690,32 +690,13 @@ export async function syncAllRepos(log: Logger): Promise<void> {
     );
     return;
   }
-  // CLOUD: only sync repos whose owning account has a loaded frontend (active within
-  // config.syncActiveWindowMinutes). With no open tab a tenant's repos stop being
-  // re-synced — periodic sync follows the user, not the server clock. LOCAL: one
-  // always-on account, so sync every repo unconditionally (unchanged behaviour).
-  const all = config.isCloud
-    ? await db
-        .select({ id: repos.id })
-        .from(repos)
-        .innerJoin(accounts, eq(repos.accountId, accounts.id))
-        .where(
-          gte(
-            accounts.lastActiveAt,
-            new Date(Date.now() - config.syncActiveWindowMinutes * 60_000),
-          ),
-        )
-        .execute()
-    : await db.select({ id: repos.id }).from(repos).execute();
-  if (config.isCloud && all.length === 0) {
-    log.info('scheduled sync skipped: no accounts with a loaded frontend');
-    return;
-  }
+  // Every repo, every tick (the adaptive due-check below decides which actually walk).
+  const all = await db.select({ id: repos.id }).from(repos).execute();
   for (const r of all) {
     // Skip repos mid-sync AND repos waiting in the API queue — the queue will run them,
     // and a scheduler-started incremental would reset their honest 'queued' row.
     if (running.has(r.id) || queuedRepos.has(r.id)) continue;
-    // Adaptive (config.syncAdaptive, ON BY DEFAULT IN BOTH MODES — the tick is every
+    // Adaptive (config.syncAdaptive, ON BY DEFAULT — the tick is every
     // MINUTE, so this due-check is the only thing between a repo and 60 walks an hour):
     // skip repos not yet due for their activity bucket, widened by the health backoff after
     // consecutive failures. Cheap, no I/O — before reserving the slot or fetching a token.

@@ -116,7 +116,7 @@ export async function loadFlowPointers(
   accountId: number,
   scopeKey: string,
 ): Promise<StoredRow | null> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const rows = (await ctx.db
     .select()
     .from(pro.proFlowPointers)
@@ -293,7 +293,7 @@ export function registerFlowPointerRoutes(
             };
       const outputJson = JSON.stringify(output);
       const now = new Date();
-      const pro = proSchemaFor(ctx.isPg);
+      const pro = proSchemaFor();
       await ctx.runTransaction(async (tx) => {
         await tx
           .insert(pro.proFlowPointers)

@@ -47,7 +47,7 @@ export async function docsContextFor(accountId: number, workspaceId: number): Pr
     hasDocs,
     docCount,
     enabledInReview,
-    usable: hasDocs && enabledInReview && config.aiEnabled && !config.isCloud,
+    usable: hasDocs && enabledInReview && config.aiEnabled,
   };
 }
 

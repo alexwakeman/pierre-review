@@ -176,7 +176,6 @@ describe('the per-workspace Slack digest', () => {
   const makeCtx = (appWebUrl?: string): ProContext =>
     ({
       db: drizzle(sqlite, { schema: { ...settingsSchema } }),
-      isPg: false,
       log: {
         warn: () => {
           warnings += 1;
@@ -186,8 +185,6 @@ describe('the per-workspace Slack digest', () => {
       },
       host: {
         version: '0.0.0',
-        deploymentMode: 'local' as const,
-        isCloud: false,
         ...(appWebUrl === undefined ? {} : { appWebUrl }),
       },
       schema: { workspaces: coreWorkspaces },
@@ -691,7 +688,7 @@ describe('the per-workspace Slack digest', () => {
 describe('deep links back into the app', () => {
   const withBase = (appWebUrl?: string): ProContext =>
     ({
-      host: { version: '0', deploymentMode: 'local', isCloud: false, ...(appWebUrl === undefined ? {} : { appWebUrl }) },
+      host: { version: '0', ...(appWebUrl === undefined ? {} : { appWebUrl }) },
     }) as unknown as ProContext;
 
   it('⚠ WORKS ON A LOCAL INSTALL — the mode the feature was asked for', () => {

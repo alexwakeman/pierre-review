@@ -21,7 +21,6 @@ import { _resetTicketSourceForTest, _overrideTicketSourceForTest } from '../../t
 const DB_PATH = '/tmp/pierre-claude-review-no-stories.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 delete process.env.LIMN_AI_DISABLED;
 
 const HEAD = 'a'.repeat(40);
@@ -87,7 +86,6 @@ beforeAll(async () => {
   ctx = {
     db,
     schema,
-    isPg: false,
     runTransaction: client.runTransaction,
     log: { warn: () => {}, info: () => {}, error: () => {} },
     recordAiUsage: async () => {},

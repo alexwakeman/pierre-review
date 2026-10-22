@@ -52,21 +52,12 @@ function effortFromEnv(key: string, fallback: ReviewEffort): ReviewEffort {
     : fallback;
 }
 
-// ---- Deployment mode (the master switch) ----
-// `local` (default): SQLite via better-sqlite3, `gh auth token` auth, one
-// implicit account, no landing page — the unchanged zero-config experience.
-// `cloud`: Postgres, GitHub sign-in (OAuth App and/or GitHub App), many accounts, landing page.
-// Everything dialect/tenancy-specific branches off `deploymentMode`.
-const deploymentMode: 'local' | 'cloud' =
-  process.env.DEPLOYMENT_MODE === 'cloud' ? 'cloud' : 'local';
-const isCloud = deploymentMode === 'cloud';
-
 // Local: move a pre-rename ~/.pierre-review to ~/.limn, once, BEFORE anything below resolves a path
 // inside the data directory (data-dir.ts). Here, not in index.ts's start(): `pnpm dev` imports this
 // module first, so a later call would move the directory out from under `dataDir`/`cloneDir`. The
 // .env files are loaded by now, so a DATABASE_URL/CLONE_DIR pinned inside the old directory is seen.
 // The CLI already ran it before choosing the DB path; a second call is a no-op. Never under test.
-if (!isCloud && !process.env.VITEST) {
+if (!process.env.VITEST) {
   migrateLegacyDataDir({
     log: (msg) => console.log(msg),
     resolvePath: (p) => (isAbsolute(p) ? p : resolve(backendRoot, p)),
@@ -80,24 +71,13 @@ if (!isCloud && !process.env.VITEST) {
 // in-memory "is-syncing" guard, so two of them double-sync every repo against the
 // GitHub rate limit and contend on the SQLite write lock. DATABASE_URL / --db
 // override this; a relative override resolves under apps/backend.
-//
-// In cloud mode DATABASE_URL is a `postgres://…` connection string (not a path),
-// so dbPath is irrelevant there and left as the connection string verbatim.
-const rawDbUrl =
-  process.env.DATABASE_URL ?? (isCloud ? '' : './data/pierre-review.sqlite');
+const rawDbUrl = process.env.DATABASE_URL ?? './data/pierre-review.sqlite';
 
 // ---- Phase 2 real-time sync: adaptive polling (see docs/REALTIME-SYNC.md) ----
-// DEFAULT ON IN BOTH MODES. This is the PRIMARY sync strategy everywhere, because it's the
-// only one that needs no cooperation from the repo's owner: webhooks require the GitHub App
-// to be INSTALLED on each repo, and most watched repos are third-party public ones nobody
-// here can install on. Adaptive works on all of them — cadence by activity bucket, plus a
+// DEFAULT ON. This is the PRIMARY sync strategy: cadence by activity bucket, plus a
 // conditional REST probe whose 304 costs no rate limit, so it's both fresher on active repos
 // and cheaper on quiet ones than the fixed-clock re-walk.
-//
-// Webhooks stay strictly ADDITIVE on top (cloud, installed repos only): a delivery fires a
-// targeted syncOnePr in seconds, and adaptive keeps reconciling everything else. The two
-// compose — nothing double-syncs, since both funnel into the idempotent persistPr.
-// `SYNC_ADAPTIVE=false` restores the classic fixed-clock re-walk in either mode.
+// `SYNC_ADAPTIVE=false` restores the classic fixed-clock re-walk.
 // Hoisted above `config` because the syncCron default below keys off it.
 const syncAdaptive = process.env.SYNC_ADAPTIVE
   ? process.env.SYNC_ADAPTIVE === 'true'
@@ -110,7 +90,7 @@ const syncAdaptive = process.env.SYNC_ADAPTIVE
 // deep link handed to a person should point here at all.
 //
 // The SPA ships next to the compiled server (release/dist → release/public), so its presence on
-// disk IS the answer: true for the packaged release and for cloud on Railway, false under
+// disk IS the answer: true for the packaged release, false under
 // `pnpm dev`, where there is no sibling public/ dir and Vite serves the UI while proxying /api
 // back to this process.
 //
@@ -120,30 +100,14 @@ const syncAdaptive = process.env.SYNC_ADAPTIVE
 // never registers.
 // ---- Where git clones live ----
 //
-// ⚠ TWO DEFAULTS, ONE CODE PATH. The clone cache is the same shared, LRU-evicted,
-// credential-free cache in both modes (review/clone-manager.ts); only its ROOT differs.
-//
-//   local  — under the user's home, so a clone survives a restart and a cold re-clone of a
-//            large repository (measured 3.6s to 13.7s) is paid once.
-//   cloud  — the container's EPHEMERAL filesystem. Deliberately NOT a mounted volume: a
-//            volume buys only that cold clone, and costs replicas (a Railway volume attaches
-//            to exactly one), downtime on every unattended deploy, and running as root, which
-//            reverses the Dockerfile's drop-root hardening. A clone is a rebuildable cache —
-//            losing one on a redeploy costs seconds, so it is the right thing to lose.
-//
-// CLONE_DIR overrides either. The janitor (conflict/janitor.ts) is what keeps the cloud disk
-// bounded between deploys; nothing here assumes the directory survives one.
+// The shared, LRU-evicted, credential-free clone cache (review/clone-manager.ts) lives under the
+// user's home, so a clone survives a restart and a cold re-clone of a large repository (measured
+// 3.6s to 13.7s) is paid once. CLONE_DIR overrides it.
 function defaultCloneDir(): string {
-  // ⚠ TWO LEVELS, NOT ONE. `tightenCloneRoot()` chmods the clone root AND ITS PARENT to 0700, so a
-  // bare `/tmp/pierre-clones` would aim that at `/tmp` itself — a chmod this process does not own,
-  // which fails silently and leaves the root un-tightened. `/tmp/pierre-review` is ours, created by
-  // the same `mkdirSync(..., {recursive: true})`, and mirrors the local `~/.limn/clones`.
-  if (isCloud) return '/tmp/pierre-review/clones';
   return join(resolveDataDir(), 'clones');
 }
 
 export const spaPublicDir = resolve(backendRoot, 'public');
-export const spaLandingDir = resolve(backendRoot, 'public-landing');
 export const serverServesSpa = existsSync(resolve(spaPublicDir, 'index.html'));
 
 // The browser-facing base for deep links. See `appWebUrl` on the config object for the full
@@ -161,10 +125,8 @@ function resolveAppWebUrl(): string {
   return `http://localhost:${intFromEnv('FRONTEND_PORT', 5173)}`;
 }
 
-// Chronology's working hours need a time zone before anyone has set one for a workspace. Locally
-// the machine's own zone is the honest answer (it is the reader's); in the cloud the server's zone
-// is an accident of hosting, so it is UTC and the Settings screen says "default" beside it.
-// WORK_TIMEZONE overrides both. An unrecognised value falls back rather than throwing at boot.
+// Chronology's working hours need a time zone before anyone has set one for a workspace. The
+// machine's own zone is the honest answer (it is the reader's). WORK_TIMEZONE overrides it. An unrecognised value falls back rather than throwing at boot.
 function resolveDefaultWorkTimezone(): string {
   const valid = (tz: string | undefined): tz is string => {
     if (!tz) return false;
@@ -177,36 +139,25 @@ function resolveDefaultWorkTimezone(): string {
   };
   const explicit = process.env.WORK_TIMEZONE?.trim();
   if (valid(explicit)) return explicit;
-  if (isCloud) return 'UTC';
   const machine = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return valid(machine) ? machine : 'UTC';
 }
 
 export const config = {
-  deploymentMode,
-  isCloud,
-  // Drives the DB driver + schema selection in client.ts.
-  dbDialect: (isCloud ? 'postgres' : 'sqlite') as 'sqlite' | 'postgres',
-
   // ---- Lean storage (both modes by default) ----
   // When false (the default), sync does NOT persist bulky user-authored text —
   // comment / review / PR bodies, review-comment diff hunks, commit messages, and
   // the per-job checkRuns JSON (the ci_status summary enum is kept). That text is
-  // regenerable from GitHub (and duplicated per tenant in cloud), so it's the
-  // dominant storage cost; it's hydrated on demand when a PR/thread is opened
-  // (sync/hydrate-detail.ts, via the gh-CLI token locally or the OAuth token in
-  // cloud) and cached in the browser. Not storing it also shrinks the DB and the
+  // regenerable from GitHub, so it's the dominant storage cost; it's hydrated on
+  // demand when a PR/thread is opened (sync/hydrate-detail.ts, via the gh-CLI token)
+  // and cached in the browser. Not storing it also shrinks the DB and the
   // sync payload, speeding up an initial backfill. Set PERSIST_BODIES=true to store
   // full bodies instead — instant, fully-offline detail at the cost of a larger DB
   // (e.g. a local instance used without network).
   persistBodies: process.env.PERSIST_BODIES === 'true',
-  // Postgres connection string (cloud only). Empty in local mode.
-  databaseUrl: process.env.DATABASE_URL ?? '',
-
   port: intFromEnv('PORT', 4000),
-  host: process.env.HOST ?? (isCloud ? '0.0.0.0' : '127.0.0.1'),
-  dbPath:
-    isCloud || isAbsolute(rawDbUrl) ? rawDbUrl : resolve(backendRoot, rawDbUrl),
+  host: process.env.HOST ?? '127.0.0.1',
+  dbPath: isAbsolute(rawDbUrl) ? rawDbUrl : resolve(backendRoot, rawDbUrl),
   backfillDays: intFromEnv('BACKFILL_DAYS', 90),
   // First sync runs in two phases: a fast "foreground" window (matching the
   // default timeline range) so the board is usable in seconds, then the rest of
@@ -238,16 +189,13 @@ export const config = {
   // Phase 0 real-time sync (see docs/REALTIME-SYNC.md). enqueuePrSync coalesces a burst
   // of change signals for the SAME PR — a push emits push + synchronize + check_run
   // within seconds — into ONE targeted syncOnePr fired this many ms after the burst
-  // settles. Fed by webhooks (cloud) / the adaptive scheduler (local); unused until
-  // those land. WEBHOOK_DEBOUNCE_MS overrides.
+  // settles. WEBHOOK_DEBOUNCE_MS overrides (the name is historical).
   webhookDebounceMs: intFromEnv('WEBHOOK_DEBOUNCE_MS', 4000),
 
-  // Resolved above (default ON in BOTH modes). When on, the scheduler's per-repo pass
+  // Resolved above (default ON). When on, the scheduler's per-repo pass
   // becomes adaptive: the tick runs every minute but a repo only syncs when it's DUE for
   // its activity bucket, and — for incremental syncs — a cheap conditional REST probe runs
   // first, skipping the fat GraphQL walk when nothing changed (a 304 costs no rate limit).
-  // In cloud it composes with the activity-gate (idle tenants are skipped first) and with
-  // webhooks (which bypass the cadence entirely for installed repos).
   syncAdaptive,
   // Per-bucket minimum seconds between sync attempts. A repo is "hot" when a PR changed
   // within the last hour, "warm" within 6h, else "cold" (windows are constants in
@@ -259,19 +207,13 @@ export const config = {
   // updatedAt), so force a full re-walk at least this often even when the probe says
   // "unchanged" — the floor that keeps those signals fresh. SYNC_FLOOR_INTERVAL_SEC.
   syncFloorIntervalSec: intFromEnv('SYNC_FLOOR_INTERVAL_SEC', 1800),
-  // CLOUD ONLY: the scheduled sync skips any account whose loaded frontend hasn't
-  // been seen within this many minutes (accounts.lastActiveAt), so a tenant with no
-  // open tab is not re-synced every 5 min. Comfortably exceeds the cron period so a
-  // user active a few minutes ago isn't dropped between ticks. Local mode ignores
-  // this entirely (one always-on account). SYNC_ACTIVE_WINDOW_MINUTES overrides.
-  syncActiveWindowMinutes: intFromEnv('SYNC_ACTIVE_WINDOW_MINUTES', 15),
   stallThresholdDays: intFromEnv('STALL_THRESHOLD_DAYS', 3),
   // ---- Retention / TTL ----
   // Per-account server data doesn't grow forever: a periodic sweep prunes PRs (and their
   // whole subtree) whose `updatedAt` is older than this many days. 0 disables it. The
   // effective cutoff is clamped to at least `backfillDays`, so a forced full sync (which
   // re-walks `now − backfillDays`) can never re-fetch (resurrect) a just-deleted PR.
-  // Runs in BOTH modes (local + cloud). RETENTION_DAYS overrides.
+  // RETENTION_DAYS overrides.
   retentionDays: intFromEnv('RETENTION_DAYS', 180),
   // When the retention sweep runs (node-cron). Daily at 03:00 by default; off-peak so a
   // large delete doesn't contend with the 5-minute sync. RETENTION_CRON overrides.
@@ -290,7 +232,7 @@ export const config = {
   // That is deliberately the same switch that makes the feature UNAVAILABLE under
   // `npx pierre-review` — the published package ships no model and config.ts's .env search
   // paths resolve against the INSTALL directory, so an npx user has nowhere to put the var.
-  // Cloud sets it to the Railway private-DNS name; local dev to the sibling repo's port.
+  // Local dev points it at the sibling repo's port.
   // ML_SEVERITY_DISABLED=true is the kill switch for a deployment that has the URL set.
   //
   // SEVERITY_API_DEFAULT_URL is a DEV-LOOP FALLBACK, never a deployment knob: `pnpm dev`
@@ -309,14 +251,14 @@ export const config = {
         ),
   // LOCAL SCORING (docs/ML-NODE-PORT.md): the same model, run in this process's own worker thread
   // by onnxruntime-node — no Python, no second process. On by default locally (it still needs its
-  // first-use download, "Set up" in the app); never in cloud, which keeps the Railway service.
+  // first-use download, "Set up" in the app).
   // LIMN_ML_DISABLED=true turns it off. LIMN_ML_SCORER picks the scorer: `auto` (the default:
   // local when it is set up, else the HTTP service above when configured), `local` or `http`.
-  mlLocalEnabled: !isCloud && process.env.LIMN_ML_DISABLED !== 'true',
+  mlLocalEnabled: process.env.LIMN_ML_DISABLED !== 'true',
   mlScorer: (['local', 'http'] as const).find((v) => v === process.env.LIMN_ML_SCORER) ?? ('auto' as const),
   // Extra headers for every severity-api call, as a JSON object string — e.g.
-  // `SEVERITY_API_HEADERS='{"X-Severity-Token":"…"}'`. Empty in both shipped deployments, which
-  // reach the service over private DNS (cloud) or loopback (local) and need no credential. It
+  // `SEVERITY_API_HEADERS='{"X-Severity-Token":"…"}'`. Empty by default (a loopback service
+  // needs no credential). It
   // exists so a RENTED endpoint can be used without a code change — draining a large backlog on
   // hired CPUs is far faster than a dev box, and that endpoint must not be open to the internet.
   // Parsing is deliberately forgiving; see `extraHeaders()` in ml/severity-client.ts for why a
@@ -346,9 +288,7 @@ export const config = {
   // Trimming client-side bounds the request payload without changing what the model sees.
   mlBodyMaxChars: intFromEnv('ML_BODY_MAX_CHARS', 6_000),
 
-  // ---- Cloud (Railway) — GitHub sign-in + sessions + token encryption ----
-  // Public base URL of the deployment (no trailing slash); used to build the
-  // OAuth redirect_uri and absolute links. Locally http://localhost:<port>.
+  // This server's own origin (no trailing slash). Locally http://localhost:<port>.
   appBaseUrl:
     process.env.APP_BASE_URL?.replace(/\/$/, '') ??
     `http://localhost:${intFromEnv('PORT', 4000)}`,
@@ -356,114 +296,39 @@ export const config = {
   // Where a HUMAN'S BROWSER reaches the SPA — the base for deep links we hand to a person
   // (today: the workspace + per-repo links in the Slack digest).
   //
-  // ⚠ THIS IS NOT `appBaseUrl` AND THE TWO MUST NOT BE MERGED. `appBaseUrl` is THIS SERVER's own
-  // public origin: it builds the OAuth `redirect_uri` and is the EXACT CORS allowlist entry in
-  // cloud, so it must keep naming the API origin whatever the SPA is served from. `appWebUrl`
-  // answers a different question — "where do I send someone to open the app?" — and the two
-  // diverge in exactly one deployment: `pnpm dev`, where this server runs on :4000 and NEVER
-  // serves the SPA (see `serverServesSpa` below), while Vite serves it on :5173. A deep link
-  // built on `appBaseUrl` 404s there. That is the bug this exists to fix.
+  // ⚠ THIS IS NOT `appBaseUrl` AND THE TWO MUST NOT BE MERGED. They diverge under `pnpm dev`,
+  // where this server runs on :4000 and NEVER serves the SPA (see `serverServesSpa` above),
+  // while Vite serves it on :5173. A deep link built on `appBaseUrl` 404s there.
   //
   // Resolution, in order:
-  //   1. APP_WEB_URL — an explicit override, for any split deployment (SPA on a CDN or a
-  //      separate host). Always wins.
-  //   2. This server serves the SPA itself ⇒ `appBaseUrl`. True for the packaged release
-  //      (`npx pierre-review`) and for cloud on Railway — one origin, one answer.
-  //   3. Otherwise this server does NOT serve the SPA, so something else does: the Vite dev
-  //      origin, `http://localhost:${FRONTEND_PORT ?? 5173}`.
-  //
-  // ⚠ STEP 2 KEYS ON WHETHER THE SPA IS ACTUALLY ON DISK, NOT ON `isCloud` AND NOT ON WHETHER
-  // APP_BASE_URL IS SET. docs/LOCAL-CLOUD-TESTING.md § Option A runs `DEPLOYMENT_MODE=cloud
-  // pnpm dev` WITH `APP_BASE_URL=http://localhost:4000` (the OAuth callback needs it) while Vite
-  // still serves the SPA on :5173 — so keying on either of those would put that mode back on the
-  // 404. Serving the files is the only ground truth.
+  //   1. APP_WEB_URL — an explicit override. Always wins.
+  //   2. This server serves the SPA itself ⇒ `appBaseUrl` (the packaged release).
+  //   3. Otherwise the Vite dev origin, `http://localhost:${FRONTEND_PORT ?? 5173}`.
   appWebUrl: resolveAppWebUrl(),
-  // Cloud supports TWO sign-in providers side by side; a deployment configures either or both
-  // and the SignInGate offers whatever's set. They are SEPARATE GitHub registrations (distinct
-  // client id/secret) but share the same authorize/token endpoints — the flow only differs in
-  // which credential it uses and whether it requests `oauthScope` (see api/routes/auth.ts).
-  //
-  //  • OAuth App  — user-scoped token, NO installation. `public_repo` reads public repos incl.
-  //    CI checks/statuses (what an unscoped token can't) + enables the interactive PR actions.
-  //  • GitHub App — user-to-server token; for PRIVATE repos the App must be INSTALLED where they
-  //    live (public repos work without install, but reading CI Checks/Actions needs install).
-  githubOAuthClientId: process.env.GITHUB_OAUTH_CLIENT_ID ?? '',
-  githubOAuthClientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET ?? '',
-  // Scopes requested by the OAuth App at authorize time. Default = public repos only (widen to
-  // `repo read:org` for private-repo access via OAuth).
-  oauthScope: process.env.GITHUB_OAUTH_SCOPE ?? 'public_repo read:org',
-  githubAppClientId: process.env.GITHUB_APP_CLIENT_ID ?? '',
-  githubAppClientSecret: process.env.GITHUB_APP_CLIENT_SECRET ?? '',
-  // The GitHub App's URL slug — builds the private-repo install link
-  // (github.com/apps/<slug>/installations/new), shown on the sign-in gate.
-  githubAppSlug: process.env.GITHUB_APP_SLUG ?? '',
-  // GitHub App webhook shared secret (real-time sync Phase 1 — see docs/REALTIME-SYNC.md).
-  // The App POSTs events to /api/webhooks/github; we verify X-Hub-Signature-256
-  // (HMAC-SHA256 over the raw body) against this. Empty = the route replies 501
-  // (unconfigured), so webhook-driven sync is INERT until it's set — a deployment opts
-  // in additively without weakening the periodic poll. Optional (NOT required by
-  // assertCloudConfig). GITHUB_APP_WEBHOOK_SECRET.
-  githubAppWebhookSecret: process.env.GITHUB_APP_WEBHOOK_SECRET ?? '',
-  // Derived: is each provider fully configured? (Both are optional; assertCloudConfig requires
-  // at least one.) The auth routes + SignInGate gate on these.
-  oauthProviderEnabled: !!(
-    process.env.GITHUB_OAUTH_CLIENT_ID && process.env.GITHUB_OAUTH_CLIENT_SECRET
-  ),
-  appProviderEnabled: !!(
-    process.env.GITHUB_APP_CLIENT_ID && process.env.GITHUB_APP_CLIENT_SECRET
-  ),
-  // Seals the session cookie ({accountId}). Rotate to invalidate all sessions.
-  sessionSecret: process.env.SESSION_SECRET ?? '',
-  // 32-byte (64-hex) key for AES-256-GCM encryption of stored access tokens.
+  // 32-byte (64-hex) key for AES-256-GCM sealing of stored secrets (the tracker and SonarCloud
+  // tokens). Optional: without it those tokens are stored plain, like the machine's `gh` token.
   encryptionKey: process.env.ENCRYPTION_KEY ?? '',
-  // HSTS max-age (seconds) for the cloud public origin. Sent only in cloud mode
-  // and honored only over HTTPS (Railway terminates TLS). Default 1 year. Set
-  // HSTS_MAX_AGE=0 as a kill switch. `preload` is intentionally NOT sent — it is
-  // hard to undo; opt in manually once the domain is proven.
-  hstsMaxAge: intFromEnv('HSTS_MAX_AGE', 31536000),
-
-  // ---- The public contact form (cloud only in practice; the landing is never served
-  // in local mode) ----
-  // A Slack incoming-webhook URL. Empty = GET /api/contact/ticket and POST /api/contact
-  // both 503, and the form on the landing page says so instead of accepting a message
-  // it cannot deliver. Validated at the point of use (api/routes/contact.ts) rather
-  // than here, so a bad value is a failed request with a log line rather than a boot
-  // failure on an otherwise healthy deploy.
-  contactSlackWebhookUrl: process.env.CONTACT_SLACK_WEBHOOK_URL ?? '',
 
   // ---- The agentic features: Claude Review, review memory, AI Fix (CORE, free, LOCAL ONLY) ----
-  // ONE switch, and it is NOT an opt-in: locally they are on and always visible (a missing Claude
+  // ONE switch, and it is NOT an opt-in: they are on and always visible (a missing Claude
   // credential replaces the Run button with one line; it never hides the feature). They run on
   // the user's own Claude Code session or ANTHROPIC_API_KEY (review/auth.ts).
-  //   • CLOUD: off, STRUCTURALLY — `registerAgenticRoutes` refuses to register anything when
-  //     `isCloud`, so the guarantee never rests on an env var being unset (it used to: the plugin's
-  //     PRO_ADVANCED_AI_ENABLED, now deleted along with ENABLE_CLAUDE_REVIEW / CLAUDE_REVIEW_ENABLED).
-  //   • LIMN_AI_DISABLED=true: the kill switch for a team that forbids AI tooling — hides every
-  //     agentic surface (`MeResponse.ai.enabled` false) and registers no agentic route.
-  aiEnabled: !isCloud && process.env.LIMN_AI_DISABLED !== 'true',
+  // LIMN_AI_DISABLED=true is the kill switch for a team that forbids AI tooling — hides every
+  // agentic surface (`MeResponse.ai.enabled` false) and registers no agentic route.
+  aiEnabled: process.env.LIMN_AI_DISABLED !== 'true',
   // ---- Claude Review — infra knobs ----
   // The routing thresholds, concurrency + queue caps keep their historical PRO_REVIEW_* env names.
   // Partial clones + ephemeral worktrees live here (a user-writable home path,
-  // never the read-only install dir). CLONE_DIR overrides. See `defaultCloneDir`
-  // above for why cloud puts them somewhere else.
+  // never the read-only install dir). CLONE_DIR overrides.
   cloneDir: process.env.CLONE_DIR ?? defaultCloneDir(),
   // The local data directory: `~/.limn` (LIMN_DATA_DIR overrides). Holds the installed CLI's
   // database, the clone cache, config.json and the AI runtime downloaded on first use. An existing
   // `~/.pierre-review` (the pre-rename name) is moved here ONCE on first boot — data-dir.ts.
   dataDir: resolveDataDir(),
-  // Soft cap on the clone cache before LRU cleanup evicts idle repos.
-  //
-  // 2 GiB locally, where the disk is the developer's own and a clone kept warm saves a cold
-  // re-clone. 1 GiB in cloud: that disk is the container's ephemeral filesystem, shared with
-  // everything else the process writes, and the measured worst case for one clone of a large
-  // repository is 111 MB — so 1 GiB still holds roughly nine of the worst ones at once, and
-  // the janitor evicts by least-recently-used before it is reached.
-  cloneCacheMaxBytes: intFromEnv(
-    'CLONE_CACHE_MAX_BYTES',
-    (isCloud ? 1 : 2) * 1024 * 1024 * 1024,
-  ),
+  // Soft cap on the clone cache before LRU cleanup evicts idle repos (2 GiB).
+  cloneCacheMaxBytes: intFromEnv('CLONE_CACHE_MAX_BYTES', 2 * 1024 * 1024 * 1024),
 
-  // ---- Merge conflict resolver (CORE / free, BOTH MODES) ----
+  // ---- Merge conflict resolver ----
   // Bounds on ONE resolver session. Every one of these is a REFUSAL boundary, not a
   // truncation: past the cap the file is listed as unsupported with a reason, never
   // silently shortened. A shortened file would commit bytes nobody saw.
@@ -633,84 +498,3 @@ export const config = {
 } as const;
 
 export type Config = typeof config;
-
-// Fail loud at startup if a required cloud var is missing — mirrors the
-// gh-auth loud failure. Called from index.ts only when deploymentMode==='cloud'.
-export function assertCloudConfig(): void {
-  const required: Array<[string, string]> = [
-    ['DATABASE_URL', config.databaseUrl],
-    ['APP_BASE_URL', process.env.APP_BASE_URL ?? ''],
-    ['SESSION_SECRET', config.sessionSecret],
-    ['ENCRYPTION_KEY', config.encryptionKey],
-  ];
-  // At least ONE sign-in provider must be fully configured; a deployment may enable either or
-  // both. A GitHub App with no OAuth App (or vice-versa) is fine.
-  if (!config.oauthProviderEnabled && !config.appProviderEnabled) {
-    throw new Error(
-      'Cloud mode needs at least one GitHub sign-in method configured: set ' +
-        'GITHUB_OAUTH_CLIENT_ID + GITHUB_OAUTH_CLIENT_SECRET (OAuth App, public repos) and/or ' +
-        'GITHUB_APP_CLIENT_ID + GITHUB_APP_CLIENT_SECRET (GitHub App, adds private org repos via ' +
-        'install). See docs/GITHUB-AUTH-SETUP.md.',
-    );
-  }
-  const missing = required.filter(([, v]) => !v).map(([k]) => k);
-  if (missing.length > 0) {
-    throw new Error(
-      `Cloud mode (DEPLOYMENT_MODE=cloud) requires these env vars: ${missing.join(
-        ', ',
-      )}. See .env.cloud.example and docs/DEPLOY-RAILWAY.md.`,
-    );
-  }
-  if (Buffer.from(config.encryptionKey, 'hex').length !== 32) {
-    throw new Error(
-      'ENCRYPTION_KEY must be 32 bytes as 64 hex chars (generate with `openssl rand -hex 32`).',
-    );
-  }
-  // SESSION_SECRET needs the SAME rigour as ENCRYPTION_KEY, and previously got none — it was
-  // only checked for being non-empty. It is not a "secret" in the guessable-password sense:
-  // api/plugins/auth.ts derives the sealing key as sha256(SESSION_SECRET) and hands that to
-  // @fastify/secure-session as a raw `key`, which BYPASSES that library's own 32-byte
-  // minimum and its deliberately-slow crypto_pwhash KDF. A single SHA-256 per candidate makes
-  // a short secret brute-forceable offline, and whoever recovers it can mint a valid
-  // `pierre_session` cookie for accountId = 1..N — i.e. read and write every tenant's data
-  // and spend every tenant's stored GitHub token. That makes it the single highest-value
-  // secret in the deployment, so a weak one must fail the boot, not merely be discouraged.
-  if (Buffer.byteLength(config.sessionSecret, 'utf8') < 32) {
-    throw new Error(
-      'SESSION_SECRET must be at least 32 bytes. It is stretched with a single SHA-256 into ' +
-        'the session sealing key, so a short or guessable value is brute-forceable offline ' +
-        'and lets an attacker forge a session for ANY account. Generate one with ' +
-        '`openssl rand -hex 32`.',
-    );
-  }
-  // Reject the obvious placeholders outright — length alone would pass 'changeme-changeme-…'.
-  const weakSecrets = ['changeme', 'change-me', 'secret', 'password', 'pierre', 'test'];
-  const lowered = config.sessionSecret.toLowerCase();
-  if (weakSecrets.some((w) => lowered.startsWith(w) || lowered === w.repeat(4))) {
-    throw new Error(
-      'SESSION_SECRET looks like a placeholder. Generate a real one: `openssl rand -hex 32`.',
-    );
-  }
-  // A cookie marked `secure` is only sent over HTTPS, and that flag is derived from
-  // APP_BASE_URL's scheme (api/plugins/auth.ts). An https deployment configured with an
-  // http:// base URL therefore ships its session cookie in the clear over the public
-  // internet — a silent, total session-hijack exposure from a one-character typo. Refuse to
-  // boot a non-localhost cloud deployment on plain http.
-  if (!config.appBaseUrl.startsWith('https://')) {
-    const host = (() => {
-      try {
-        return new URL(config.appBaseUrl).hostname;
-      } catch {
-        return '';
-      }
-    })();
-    const isLocalTest = host === 'localhost' || host === '127.0.0.1' || host === '::1';
-    if (!isLocalTest) {
-      throw new Error(
-        `APP_BASE_URL must be https:// in cloud mode (got "${config.appBaseUrl}"). The ` +
-          'session cookie\'s `secure` flag is derived from this scheme, so an http:// value ' +
-          'would send the session cookie unencrypted. Use http:// only for localhost testing.',
-      );
-    }
-  }
-}

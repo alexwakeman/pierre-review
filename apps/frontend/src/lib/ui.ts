@@ -1145,8 +1145,8 @@ export interface ConflictResolverEntry {
   /** `repos.viewerPermission`, synced. A VISIBILITY gate only: the routes re-check permission,
    *  the head oid and the live merge state before anything irreversible happens. */
   viewerCanPush: boolean;
-  /** `MeResponse.conflictResolver` — `!config.isCloud`. In cloud the routes are not registered
-   *  at all, so an offered button would 404 on the first click. */
+  /** `MeResponse.conflictResolver` — always true from this server; kept as a gate so a server that
+   *  does not register the routes never offers a button that would 404 on the first click. */
   resolverAvailable: boolean;
 }
 

@@ -84,7 +84,7 @@ let answers: Map<
 let blocked: Set<number>;
 const makeCtx = (over: Record<string, unknown> = {}): ProContext =>
   ({
-    host: { isCloud: false },
+    host: {},
     log: { info: () => {}, warn: () => {}, error: () => {} },
     aiCredits: { check: async (a: number) => ({ agentBlocked: blocked.has(a) }) },
     queries: {
@@ -178,13 +178,6 @@ describe('runAutoReviewSweep', () => {
     enqueueAnswer = (p) => (p === 1 ? 'already' : 'queued');
     await runAutoReviewSweep(makeCtx(), NOW);
     expect(enqueued.map(([, p]) => p)).toEqual([2]);
-  });
-
-  it('⚠ does nothing in cloud', async () => {
-    answers.set(7, { prIds: [1], autoToday: 0 });
-    await runAutoReviewSweep(makeCtx({ host: { isCloud: true } }), NOW);
-    expect(calls).toEqual([]);
-    expect(enqueued).toEqual([]);
   });
 
   it('⚠ queues nothing while AI is not set up — those PRs still qualify later', async () => {

@@ -212,7 +212,7 @@ const REASON_PRIORITY: ReasonTag[] = [
   'untouched_threads',
   'in_progress',
 ];
-import { db, schema, isPg } from './client.js';
+import { db, schema } from './client.js';
 import { runTransaction } from './client.js';
 import { enrichMyTurn } from '../feed/my-turn.js';
 import { resolvePrTickets } from '../pr/detail-enricher.js';
@@ -314,11 +314,9 @@ import {
   yourPrNewActors,
 } from './my-turn-card-facts.js';
 
-// Bind a JS Date into a raw-`sql` epoch comparison portably: Postgres columns are
-// timestamptz (drizzle binds the Date through the codec), whereas SQLite columns
-// are integer unix-epoch seconds (`mode:'timestamp'`), so we hand it the int.
-const tsBound = (d: Date): Date | number =>
-  isPg ? d : Math.floor(d.getTime() / 1000);
+// Bind a JS Date into a raw-`sql` epoch comparison: SQLite columns are integer unix-epoch
+// seconds (`mode:'timestamp'`), so we hand it the int.
+const tsBound = (d: Date): number => Math.floor(d.getTime() / 1000);
 
 const {
   accounts,

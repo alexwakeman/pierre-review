@@ -23,7 +23,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const DB_PATH = '/tmp/pierre-conflicts-route-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 import type {
   ConflictCommitBody,
@@ -313,7 +312,7 @@ describe('the family is registered in local mode', () => {
   });
 
   it('⚠ /api/me says the resolver is here — the ONE fact the entry button gates on', async () => {
-    // `MeResponse.conflictResolver` is `!config.isCloud` and nothing else: no git probe, no
+    // `MeResponse.conflictResolver` is a constant `true` and nothing else: no git probe, no
     // capability, no env var. The SPA's `conflictResolverEntryVisible` reads it as its fourth
     // arm, so a route family registered here with the flag reporting false would hide the only
     // entry into a working feature — built, gated and unreachable.
