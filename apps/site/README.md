@@ -16,7 +16,9 @@ nothing else:
 Ported from the old backend route with the same env var names and wire shapes. Three spam
 layers, no third party: a honeypot field (answered 200 and dropped), a server-signed
 minimum fill time (`GET /api/contact/ticket` mints `<ms>.<hmac>`; the POST needs it to be
-3 s to 6 h old), and a rate limit of 5 an hour per IP shared by the mint and the submit.
+3 s to 6 h old), and a rate limit of 5 submits an hour per IP. The ticket mint has its own,
+looser bucket (60 an hour), so reloading the page cannot lock the form; its 429 shows "busy,
+try again later", never "unavailable".
 With no webhook configured the ticket route 503s, so the form says it is unavailable
 before anyone writes a message. A failed delivery is logged in full (the message exists
 nowhere else) and answered 502.
@@ -33,6 +35,15 @@ www → apex 301 (`SITE_URL`), nosniff, frame denial, a referrer policy, a permi
 and COOP. Hashed assets under `/assets/` and `/demo/assets/` are cached for a year; HTML is
 `no-cache`; text is sent brotli/gzip; byte ranges are honoured so the walkthrough video can
 seek.
+
+Compression is done at BUILD time: the Dockerfile runs `node dist/precompress.js` over the
+landing and demo folders, writing `<file>.br` and `<file>.gz` at maximum quality, and the
+server streams those. A file without a sidecar (a local build) is compressed on demand,
+asynchronously, at a modest quality, once per file per encoding. ⚠ Never synchronous zlib
+on the request path — it blocks every other request.
+
+Idle connections are kept for 72 s (`keepAliveTimeout`, longer than an edge proxy's idle
+pool), `headersTimeout` is 75 s, and `requestTimeout` (30 s) is the slow-loris guard.
 
 ## Environment
 
@@ -56,6 +67,7 @@ pnpm --filter @pierre-review/frontend build:demo   # the demo → apps/frontend/
 pnpm --filter @pierre-review/site dev        # tsx watch, on :4300
 pnpm --filter @pierre-review/site test       # vitest
 pnpm --filter @pierre-review/site build      # → dist/, run with `node dist/server.js`
+pnpm --filter @pierre-review/site precompress <dir>...   # write .br/.gz sidecars (after build)
 ```
 
 Deployed by `.github/workflows/deploy-site.yml` from the root `Dockerfile`.

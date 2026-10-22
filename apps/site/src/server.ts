@@ -54,9 +54,14 @@ const handler = createSiteHandler({
 });
 
 const server = createServer(handler);
-// Slow-loris guards: a request has 30 s to finish, its headers 10 s.
+// Keep idle connections open for 72 s (the old Fastify default). Node's own default is
+// 5 s, shorter than an edge proxy's idle pool timeout, so the proxy would reuse sockets
+// we had just closed and the visitor would see a 502.
+server.keepAliveTimeout = 72_000;
+// headersTimeout stays above keepAliveTimeout, as Node expects.
+server.headersTimeout = 75_000;
+// The slow-loris guard: a whole request, headers included, has 30 s to arrive.
 server.requestTimeout = 30_000;
-server.headersTimeout = 10_000;
 
 const port = intFromEnv('PORT', 4300);
 const host = process.env.HOST ?? '0.0.0.0';

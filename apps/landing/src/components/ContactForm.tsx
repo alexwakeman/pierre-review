@@ -35,13 +35,15 @@ import { MonoLabel } from './feint/primitives';
 // ---------------------------------------------------------------------------
 
 const TOPICS: { value: string; label: string }[] = [
-  { value: 'licence', label: 'A licence for a bigger team' },
+  { value: 'licence', label: 'A licence for more users' },
   { value: 'question', label: 'A question about the product' },
   { value: 'problem', label: 'Something is broken' },
   { value: 'other', label: 'Something else' },
 ];
 
-type Ready = 'checking' | 'ready' | 'unavailable';
+// `busy`: the ticket was rate-limited (429). The form works; this address has asked
+// too often. Kept apart from `unavailable` (no webhook, or a broken answer).
+type Ready = 'checking' | 'ready' | 'unavailable' | 'busy';
 type Phase = 'idle' | 'sending' | 'sent';
 
 const FOCUS =
@@ -87,7 +89,7 @@ export function ContactForm(): JSX.Element {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [website, setWebsite] = useState(''); // honeypot
-  // `?topic=licence` is what every "bigger team" link on the site points at, so that
+  // `?topic=licence` is what every licence link on the site points at, so that
   // reader arrives with the right thing already selected. Everyone else starts on a
   // question — most messages are not about a licence.
   const [topic, setTopic] = useState('question');
@@ -105,11 +107,16 @@ export function ContactForm(): JSX.Element {
     let live = true;
     fetch('/api/contact/ticket', { headers: { accept: 'application/json' } })
       .then(async (res) => {
+        if (res.status === 429) return 'busy' as const;
         if (!res.ok) throw new Error(String(res.status));
         return (await res.json()) as { ticket?: string };
       })
       .then((data) => {
         if (!live) return;
+        if (data === 'busy') {
+          setReady('busy');
+          return;
+        }
         if (typeof data.ticket === 'string' && data.ticket !== '') {
           setTicket(data.ticket);
           setReady('ready');
@@ -170,6 +177,17 @@ export function ContactForm(): JSX.Element {
         </p>
         <p className="font-mono text-mono-caption text-secondary">
           If you asked about a licence, the reply says what it covers and what it costs.
+        </p>
+      </div>
+    );
+  }
+
+  if (ready === 'busy') {
+    return (
+      <div className="max-w-answer border-t border-ink pt-8">
+        <h2 className="mb-4 font-display text-h3 font-semibold text-ink">The form is busy.</h2>
+        <p className="text-body-sm text-ink-body">
+          It has had a lot of requests from your address. Try again later.
         </p>
       </div>
     );

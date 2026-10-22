@@ -51,6 +51,11 @@ RUN mkdir -p /out/site /out/demo \
   && cp -r apps/landing/dist /out/landing \
   && if [ -f apps/frontend/dist-demo/index.html ]; then cp -r apps/frontend/dist-demo/. /out/demo/; fi
 
+# 4. Precompress: write .br and .gz beside every text file, at maximum quality, so the
+#    server streams them as they are and never compresses a multi-megabyte demo bundle
+#    while a visitor waits (apps/site/src/static.ts).
+RUN node apps/site/dist/precompress.js /out/landing /out/demo
+
 # ---- runtime stage ----
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /app

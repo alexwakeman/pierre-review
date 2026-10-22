@@ -1,5 +1,5 @@
 import { DEMO_PATH, FREE_TEAM_SIZE, INSTALL_COMMAND, SITE_NAME } from '../../lib/site';
-import { DashItem, InkButton, RailGrid, Section, UnderlineLink } from './primitives';
+import { DashItem, InkButton, InlineLink, RailGrid, Section, UnderlineLink } from './primitives';
 
 // ---------------------------------------------------------------------------
 // The closing block, rendered at the bottom of every content page.
@@ -30,7 +30,7 @@ export function GetStarted(): JSX.Element {
           <p className="mb-9 font-mono text-mono-row text-ink">{INSTALL_COMMAND}</p>
           <div className="flex flex-wrap items-center gap-3.5">
             <InkButton to={DEMO_PATH}>Try the demo</InkButton>
-            <UnderlineLink to="/contact?topic=licence">Using it in a bigger team? →</UnderlineLink>
+            <UnderlineLink to="/contact?topic=licence">More than {FREE_TEAM_SIZE} users in your organisation? →</UnderlineLink>
           </div>
         </div>
         <ul className="flex flex-col gap-3.5">
@@ -44,9 +44,9 @@ export function GetStarted(): JSX.Element {
             Anthropic API key. Codex support is coming soon.
           </DashItem>
           <DashItem>
-            Free for individuals, and for teams of up to {FREE_TEAM_SIZE} people in one
-            organisation. More than {FREE_TEAM_SIZE}? Your organisation needs a licence — ask
-            through the contact form.
+            Free for individuals, and for organisations where no more than {FREE_TEAM_SIZE}{' '}
+            people use it. More users than that need a licence —{' '}
+            <InlineLink to="/contact?topic=licence">ask through the contact form</InlineLink>.
           </DashItem>
           <DashItem>
             The demo runs in your browser on sample data. No install, no sign-in.

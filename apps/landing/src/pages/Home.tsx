@@ -56,8 +56,8 @@ import { GetStarted } from '../components/feint/GetStarted';
 //
 // ⚠ EVERYTHING IS FREE. There is no paid tier, no hosted app and no sign-in: the
 // calls to action are the demo (a static build of the real app on sample data, at
-// /demo/) and the npm command. The one limit — organisations with more than
-// FREE_TEAM_SIZE people need a licence — is stated in the hero and in <GetStarted/>.
+// /demo/) and the npm command. The one limit — organisations where more than
+// FREE_TEAM_SIZE people use Limn need a licence — is stated in the hero and in <GetStarted/>.
 //
 // The walkthrough dropped below the plan because it does not show Pending (see
 // the board section's note) — leading with it would lead with everything BUT
@@ -145,8 +145,8 @@ export default function Home(): JSX.Element {
             Claude users today; Codex support is coming soon.
           </p>
           <p className="mb-11 max-w-reassure font-mono text-mono-nav text-secondary">
-            Free for individuals and for teams of up to {FREE_TEAM_SIZE} people. A bigger
-            organisation needs a licence —{' '}
+            Free for individuals, and for organisations where no more than {FREE_TEAM_SIZE}{' '}
+            people use it. More users than that need a licence —{' '}
             <InlineLink to="/contact?topic=licence">ask through the contact form</InlineLink>
             .
           </p>

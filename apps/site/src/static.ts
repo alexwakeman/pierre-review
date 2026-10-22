@@ -6,9 +6,13 @@
 //   · CACHING. Vite's hashed bundles under assets/ never change, so they are cached for
 //     a year and marked immutable. HTML is `no-cache` (revalidated every time, so a
 //     deploy shows at once). Everything else gets an hour.
-//   · COMPRESSION. Text types are sent brotli or gzip when the browser asks, compressed
-//     once per file per encoding and kept in memory — the files cannot change while the
-//     process runs.
+//   · COMPRESSION. Text types are sent brotli or gzip when the browser asks. The build
+//     writes `<file>.br` and `<file>.gz` beside each one (precompress.ts, at maximum
+//     quality), and those are streamed as they are. A file with no such sidecar is
+//     compressed on demand — ASYNCHRONOUSLY, at a modest quality, once per file per
+//     encoding (concurrent first requests share the one job) and kept in memory.
+//     ⚠ Never synchronous zlib here: brotli at a high quality on a multi-megabyte demo
+//     bundle blocks the event loop for seconds, and every other request waits on it.
 //   · RANGES. The walkthrough video is seeked by chapter, and a player can only seek
 //     when the server answers `Range` with 206. Ranges are served for uncompressed
 //     responses only, which is every binary type here.
@@ -16,7 +20,8 @@ import { createReadStream, statSync, type Stats } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { extname, join, normalize, sep } from 'node:path';
-import { brotliCompressSync, constants as zlib, gzipSync } from 'node:zlib';
+import { promisify } from 'node:util';
+import { brotliCompress, constants as zlib, gzip } from 'node:zlib';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -43,11 +48,14 @@ const TYPES: Record<string, string> = {
   '.wasm': 'application/wasm',
 };
 
-const COMPRESSIBLE = new Set([
+export const COMPRESSIBLE = new Set([
   '.html', '.css', '.js', '.mjs', '.json', '.map', '.webmanifest', '.xml', '.txt', '.svg',
 ]);
 
-/** Files above this are streamed and never compressed or held in memory. */
+/** Text files at or below this size are worth compressing. */
+export const MIN_COMPRESS_BYTES = 1024;
+
+/** Above this, a file with no precompressed sidecar is streamed as it is, never held in memory. */
 const MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
 
 export function contentTypeFor(file: string): string {
@@ -102,7 +110,10 @@ export function cachePolicyFor(urlPath: string, file: string): CachePolicy {
   return 'short';
 }
 
-type Encoding = 'br' | 'gzip';
+export type Encoding = 'br' | 'gzip';
+
+/** The sidecar suffix the build writes for each encoding. */
+export const SIDECAR_EXT: Record<Encoding, string> = { br: '.br', gzip: '.gz' };
 
 function pickEncoding(header: string | string[] | undefined): Encoding | null {
   const v = (Array.isArray(header) ? header.join(',') : header ?? '').toLowerCase();
@@ -118,24 +129,58 @@ function pickEncoding(header: string | string[] | undefined): Encoding | null {
   return null;
 }
 
-const compressedCache = new Map<string, Buffer>();
+const brotliAsync = promisify(brotliCompress);
+const gzipAsync = promisify(gzip);
 
-function compressed(file: string, st: Stats, body: Buffer, enc: Encoding): Buffer {
+/**
+ * One promise per (file, version, encoding). A second request for the same file while
+ * the first is still compressing waits on the same job instead of starting another.
+ */
+const compressedCache = new Map<string, Promise<Buffer>>();
+
+/** On-demand compression, for a file the build did not precompress. Quality is modest on purpose. */
+export function compressedOnDemand(file: string, st: Stats, enc: Encoding): Promise<Buffer> {
   const key = `${file}\0${st.mtimeMs}\0${st.size}\0${enc}`;
-  let out = compressedCache.get(key);
-  if (!out) {
-    out =
+  let job = compressedCache.get(key);
+  if (!job) {
+    job = readFile(file).then((body) =>
       enc === 'br'
-        ? brotliCompressSync(body, {
+        ? brotliAsync(body, {
             params: {
-              [zlib.BROTLI_PARAM_QUALITY]: 10,
+              [zlib.BROTLI_PARAM_QUALITY]: 5,
               [zlib.BROTLI_PARAM_SIZE_HINT]: body.length,
             },
           })
-        : gzipSync(body, { level: 9 });
-    compressedCache.set(key, out);
+        : gzipAsync(body, { level: 6 }),
+    );
+    // A failed job must not be remembered, or the file is broken until a restart.
+    job.catch(() => compressedCache.delete(key));
+    compressedCache.set(key, job);
   }
-  return out;
+  return job;
+}
+
+/** The build's precompressed sidecar for `file`, when there is one at least as new as the file. */
+function sidecarFor(file: string, st: Stats, enc: Encoding): { path: string; st: Stats } | null {
+  const path = file + SIDECAR_EXT[enc];
+  const side = fileAt(path);
+  return side && side.mtimeMs >= st.mtimeMs ? { path, st: side } : null;
+}
+
+function streamFile(res: ServerResponse, file: string, start?: number, end?: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const stream = createReadStream(file, { start, end });
+    stream.on('error', () => {
+      res.destroy();
+      resolve();
+    });
+    stream.on('end', resolve);
+    res.on('close', () => {
+      stream.destroy();
+      resolve();
+    });
+    stream.pipe(res);
+  });
 }
 
 /** Parse a single `bytes=` range. Multi-range requests are answered in full. */
@@ -194,18 +239,32 @@ export async function sendFile(
   }
 
   const head = req.method === 'HEAD';
-  const canCompress = COMPRESSIBLE.has(ext) && st.size > 1024 && st.size <= MAX_BUFFERED_BYTES;
 
-  if (canCompress) {
+  if (COMPRESSIBLE.has(ext) && st.size > MIN_COMPRESS_BYTES) {
     res.setHeader('Vary', 'Accept-Encoding');
     const enc = pickEncoding(req.headers['accept-encoding']);
-    const body = await readFile(file);
-    const out = enc ? compressed(file, st, body, enc) : body;
-    res.statusCode = status;
-    if (enc) res.setHeader('Content-Encoding', enc);
-    res.setHeader('Content-Length', out.length);
-    res.end(head ? undefined : out);
-    return;
+    if (enc) {
+      const side = sidecarFor(file, st, enc);
+      if (side) {
+        res.statusCode = status;
+        res.setHeader('Content-Encoding', enc);
+        res.setHeader('Content-Length', side.st.size);
+        if (head) {
+          res.end();
+          return;
+        }
+        await streamFile(res, side.path);
+        return;
+      }
+      if (st.size <= MAX_BUFFERED_BYTES) {
+        const out = await compressedOnDemand(file, st, enc);
+        res.statusCode = status;
+        res.setHeader('Content-Encoding', enc);
+        res.setHeader('Content-Length', out.length);
+        res.end(head ? undefined : out);
+        return;
+      }
+    }
   }
 
   // Uncompressed: the bytes as they are on disk, ranges allowed.
@@ -226,17 +285,5 @@ export async function sendFile(
     res.end();
     return;
   }
-  await new Promise<void>((resolve) => {
-    const stream = createReadStream(file, { start, end });
-    stream.on('error', () => {
-      res.destroy();
-      resolve();
-    });
-    stream.on('end', resolve);
-    res.on('close', () => {
-      stream.destroy();
-      resolve();
-    });
-    stream.pipe(res);
-  });
+  await streamFile(res, file, start, end);
 }

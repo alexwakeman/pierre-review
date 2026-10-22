@@ -94,7 +94,7 @@ export default function Terms(): JSX.Element {
             {FREE_TEAM_SIZE} people use {SITE_NAME}.
           </li>
           <li>
-            <T>More than {FREE_TEAM_SIZE} people in one organisation</T> need a commercial
+            <T>More users than that</T> (affiliates count together) need a commercial
             licence. Ask through the{' '}
             <Link to="/contact?topic=licence" className={LINK}>
               contact form

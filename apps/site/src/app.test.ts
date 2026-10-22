@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CONTACT_LIMIT, createSiteHandler, type Logger, type SiteOptions } from './app.js';
+import { CONTACT_LIMIT, TICKET_LIMIT, createSiteHandler, type Logger, type SiteOptions } from './app.js';
 import { MIN_FILL_MS } from './contact.js';
 import { DEMO_CSP, LANDING_CSP } from './security.js';
 
@@ -358,17 +358,49 @@ describe('the API', () => {
   it('rate-limits by the address our proxy saw, not the one the client wrote', async () => {
     const r = await start();
     try {
-      const get = (xff: string): Promise<Response> =>
-        fetch(`${r.base}/api/contact/ticket`, { headers: { 'x-forwarded-for': xff } });
+      const post = (xff: string): Promise<Response> =>
+        fetch(`${r.base}/api/contact`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-forwarded-for': xff },
+          body: JSON.stringify({ name: 'A', email: 'a@example.com', message: 'hi', ticket: 'x' }),
+        });
       // A bot rotating the leftmost entry is still one client to us.
       for (let i = 0; i < CONTACT_LIMIT; i++) {
-        expect((await get(`10.0.0.${i}, 203.0.113.9`)).status).toBe(200);
+        expect((await post(`10.0.0.${i}, 203.0.113.9`)).status).toBe(400);
       }
-      const over = await get('10.0.0.99, 203.0.113.9');
+      const over = await post('10.0.0.99, 203.0.113.9');
       expect(over.status).toBe(429);
       expect(over.headers.get('retry-after')).toBeTruthy();
       // A different real client is unaffected.
-      expect((await get('203.0.113.10')).status).toBe(200);
+      expect((await post('203.0.113.10')).status).toBe(400);
+    } finally {
+      await stop(r);
+    }
+  });
+
+  it('gives the ticket its own, looser limit, so reloading the page cannot lock the form', async () => {
+    const r = await start();
+    try {
+      const get = (): Promise<Response> =>
+        fetch(`${r.base}/api/contact/ticket`, { headers: { 'x-forwarded-for': '203.0.113.20' } });
+      // Well past the submit limit, the ticket still mints...
+      for (let i = 0; i < TICKET_LIMIT; i++) expect((await get()).status).toBe(200);
+      // ...until its own bucket runs out.
+      const over = await get();
+      expect(over.status).toBe(429);
+      expect(over.headers.get('retry-after')).toBeTruthy();
+
+      // And fetching tickets spent none of the submit bucket.
+      const { ticket } = (await (
+        await fetch(`${r.base}/api/contact/ticket`, { headers: { 'x-forwarded-for': '203.0.113.21' } })
+      ).json()) as { ticket: string };
+      r.clock.t += MIN_FILL_MS + 1;
+      const sent = await fetch(`${r.base}/api/contact`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.20' },
+        body: JSON.stringify({ name: 'Sam', email: 'sam@example.com', message: 'Hello.', ticket }),
+      });
+      expect(sent.status).toBe(200);
     } finally {
       await stop(r);
     }

@@ -19,8 +19,8 @@ import { GetStarted } from '../components/feint/GetStarted';
 // For engineering managers — one of the site's two role pages.
 //
 // SAME SHAPE AS /for-developers: the questions, the screens that answer them, then
-// <GetStarted/>. Everything here is free; there is no paid tier. A manager's team of
-// more than FREE_TEAM_SIZE people needs a licence, and the hero says so once.
+// <GetStarted/>. Everything here is free; there is no paid tier. An organisation where
+// more than FREE_TEAM_SIZE people use it needs a licence, and the hero says so once.
 //
 // ⚠ WITHIN EACH HALF, THE HUMAN WORK COMES FIRST AND AUTOMATION IS A PEER.
 // An earlier cut ran flow metrics → repositories → bots → bot ROI → benchmark →
@@ -79,8 +79,8 @@ export default function ForManagers(): JSX.Element {
           <span className="text-ink">{INSTALL_COMMAND}</span>.
         </p>
         <p className="mb-11 max-w-reassure font-mono text-mono-nav text-secondary">
-          Free for teams of up to {FREE_TEAM_SIZE} people in one organisation. A bigger
-          organisation needs a licence —{' '}
+          Free for individuals, and for organisations where no more than {FREE_TEAM_SIZE}{' '}
+          people use it. More users than that need a licence —{' '}
           <InlineLink to="/contact?topic=licence">use the contact form</InlineLink>.
         </p>
       </header>
