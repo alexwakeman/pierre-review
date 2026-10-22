@@ -36,7 +36,7 @@ The website (landing, a static demo at `/demo/`, the contact form) is a separate
 | [REFERENCE-DOCS](docs/REFERENCE-DOCS.md) | the workspace reference library: ingest, the INDEX → CONTENTS → section tree, `docsContextFor` |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) · [ML-NODE-PORT](docs/ML-NODE-PORT.md) | ML severity/category of bot comments · the in-process scorer (`ml/`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
-| [PRO-PLUGIN-AND-ACTIVITY](docs/PRO-PLUGIN-AND-ACTIVITY.md) · [PRO-PLATFORM](docs/PRO-PLATFORM.md) | the platform features (formerly Pro): Activity, Feed, Bots Monitoring, the peer benchmark, the impact note, the work plan, Slack |
+| [PLATFORM](docs/PLATFORM.md) · [DEMO](docs/DEMO.md) | the platform features (formerly Pro): Activity, Feed, Bots Monitoring, the peer benchmark, the impact note, the work plan, Slack |
 | [SECURITY](docs/SECURITY.md) | app.ts, CORS/CSP, host guard, rate limits, data export, dependency posture |
 | [PACKAGING](docs/PACKAGING.md) · [RELEASE](docs/RELEASE.md) | build-release, CLI, the AI/ML runtimes · CI publishing |
 | [MIGRATIONS](docs/MIGRATIONS.md) | any migration; history and fold rules |
@@ -142,6 +142,7 @@ All from the repo root unless noted.
 | `pnpm --filter @pierre-review/backend verify:isolation` | query-layer cross-account IDOR check |
 | `pnpm demo` | seed `acme/*` + boot the ISOLATED screenshot stack (`:4100`/`:5273`, gh off PATH); `--no-seed` reuses the DB |
 | `pnpm shots` · `pnpm demo:video` | landing screenshots · the walkthrough clip (`--publish` writes `apps/landing/public/media/`) |
+| `pnpm demo:record` · `demo:verify` | re-seed and record `apps/frontend/src/demo/data/recording.json` · check every demo view ([docs/DEMO.md](docs/DEMO.md)) |
 | `pnpm --filter @pierre-review/frontend build:demo` · `dev:demo` | the static demo → `apps/frontend/dist-demo/` (base `/demo/`) · same on Vite |
 | `pnpm test:e2e` · `pnpm verify:ui` | Playwright suite · UI smoke |
 | `pnpm package` | assemble `./release` for publishing |
@@ -465,8 +466,7 @@ The old `@pierre/pro` plugin is core code at **`apps/backend/src/platform/`** �
 (Reports, period reports, synthesis, Chronology pointers), Bots Monitoring (ROI, behaviour, the
 bundled peer benchmark, the Tuning Advisor, bot themes), the work-plan wording, the blast impact
 note, Slack and the settings behind them. Free, always on. Deep-dives:
-[docs/PRO-PLUGIN-AND-ACTIVITY.md](docs/PRO-PLUGIN-AND-ACTIVITY.md) ·
-[docs/PRO-PLATFORM.md](docs/PRO-PLATFORM.md).
+[docs/PLATFORM.md](docs/PLATFORM.md).
 
 - **Bound statically at boot**: `platform/context.ts` `bindPlatform` builds ONE context
   (`platform/contract.ts` `ProContext`: db, host queries, GitHub helpers, `cheapComplete`,

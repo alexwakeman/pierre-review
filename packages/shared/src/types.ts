@@ -539,7 +539,7 @@ export interface PeriodLanes {
 // ── Bot-Triage Platform (WS1–WS6) ──────────────────────────────────────────────
 // The neutral measurement + triage layer above ALL automated reviewers — the known
 // vendors (ReviewBotKind), an account's own in-house AI reviewer, and Pierre's own Claude
-// Review. See docs/PRO-PLATFORM.md / the bot-triage plan.
+// Review. See docs/PLATFORM.md / the bot-triage plan.
 
 // ── WS1 automated-reviewer classification ────────────────────────────
 // `vendor` = a generic PROPRIETARY third-party reviewer a user manually classifies when it

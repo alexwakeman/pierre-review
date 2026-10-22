@@ -901,7 +901,7 @@ export interface ProHostQueries {
   // every surface displays and the only one a narration may be grounded in, so nothing here
   // should start phrasing lines from `myTurnTotal` (D4 keeps digits out of the phrasing anyway).
   // ⚠ Same again for the NARROW my_turn pair, `myTurnPersonal` / `myTurnPersonalTotal` (the
-  // `MyTurnCard.personal` subset — see PRO-PLUGIN-AND-ACTIVITY.md): both OPTIONAL and TRAILING,
+  // `MyTurnCard.personal` subset — see PLATFORM.md): both OPTIONAL and TRAILING,
   // both additive, apiVersion still 21. They exist for the surfaces that INTERRUPT the viewer,
   // not for narration; `myTurn` remains this seam's grounded figure, and the two totals only
   // ever qualify the count they were folded from — never each other's.
@@ -917,7 +917,7 @@ export interface ProHostQueries {
   // 'person' / 'person_report' synthesis grains that read it were removed. It stays a REQUIRED
   // member (still wired to core db/person-period.ts) because removing it means bumping apiVersion
   // across four literals in two repos, and a half-bump silently drops the plugin to OSS mode.
-  // Do not build on it without reading docs/PRO-PLUGIN-AND-ACTIVITY.md § The People report.
+  // Do not build on it without reading docs/PLATFORM.md § The People report.
   //
   // The 1:1-prep person vector (P4.2 — core db/person-period.ts): a small fixed
   // vector for one person in one workspace — merged/opened authored · reviews given · review

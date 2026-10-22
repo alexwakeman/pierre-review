@@ -137,7 +137,7 @@ beforeAll(async () => {
     // ⚠ RESOLVED ON BOTH SIDES OF THE VOCABULARY GAP, deliberately. The two folds do NOT share a
     // definition of "acted on" — the ROI table folds the `likely_addressed` commit heuristic into
     // its numerator and divides by every in-window thread, while `acted_on_rate` divides by the
-    // SETTLED ones (docs/PRO-PLUGIN-AND-ACTIVITY.md is explicit that these are different columns
+    // SETTLED ones (docs/PLATFORM.md is explicit that these are different columns
     // that must never be reconciled). A RESOLVED thread is acted-on under BOTH, which is what lets
     // this fixture isolate the ARITHMETIC. It is not a claim that the two counts agree in general.
     const [thread] = await db
