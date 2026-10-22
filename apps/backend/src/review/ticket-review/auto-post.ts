@@ -16,15 +16,17 @@
 //     postings live on the run's record (`ticket_reviews.auto_post.notRequested`, keyed by PR +
 //     folded title) and an earlier run's entry is CARRIED, never re-posted. A run cut off mid-post
 //     (`status: 'posting'`) counts everything it tried as possibly posted.
+//   • ONE COMMENT PER TARGET PR: its gaps collated, then its "Not asked for" entries under their own
+//     heading (`postStoryGapsComment`), never one comment per item.
 //   • THE CLAIM: a compare-and-set of `ticket_reviews.auto_post` from NULL BEFORE any GitHub write;
-//     each item then goes through `postTicketItem`, the manual route's own claim + re-read.
+//     each comment then goes through `postStoryGapsComment`, the manual route's own claim + re-read,
+//     and every item in it is stamped with the one comment id.
 //   • Only the ticket's LATEST succeeded run posts (`not_latest` otherwise).
 // ⚠ Once GitHub 201s there is no retry; failures are recorded and shown in Story check
 // ("Couldn't post automatically: …") with the Post button still there. Never throws.
 import { and, eq, inArray, isNull, lt } from 'drizzle-orm';
 import {
   AUTO_POST_FOOTER,
-  storyOneLine,
   type AutoPostSkipReason,
   type TicketAutoPostNotRequested,
   type TicketAutoPostRecord,
@@ -41,7 +43,7 @@ import {
   type AutoPostDeps,
 } from '../claude-review/auto-post.js';
 import { getTicketReviewById, getTicketStateInputs, ticketItemMatchKey } from './persist.js';
-import { postStoryComment, postTicketItem, postedInChain } from './post-item.js';
+import { postStoryGapsComment, postedInChain } from './post-item.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const s = (ctx: AgentContext): any => ctx.schema as any;
@@ -264,41 +266,33 @@ async function autoPostTicket(
   // ⚠ THE CLAIM, BEFORE ANY WRITE.
   if (!(await claimRun(ctx, runId, record))) return { kind: 'already_claimed' };
 
+  // ONE collated comment per target PR: its gaps, then its "Not asked for" entries.
   const errors: string[] = [];
   const posted: number[] = [];
-  for (const itemId of liveItems) {
-    const out = await postTicketItem(ctx, { accountId, runId, itemId, viewedPrId: null, auto: true, footer: AUTO_POST_FOOTER });
-    if (out.kind === 'posted') posted.push(itemId);
-    else if (out.kind === 'github_error') errors.push(out.message);
+  const targetIds = [...new Set([...liveItems.map((id) => ownerOf.get(id)!), ...liveNr.map((n) => n.entry.prId)])];
+  for (const prId of targetIds) {
+    const nrHere = liveNr.filter((n) => n.entry.prId === prId);
+    const out = await postStoryGapsComment(ctx, {
+      accountId,
+      runId,
+      targetPrId: prId,
+      viewedPrId: null,
+      itemIds: liveItems.filter((id) => ownerOf.get(id) === prId),
+      notAsked: nrHere.map((n) => ({ title: n.title, body: n.body, path: n.path || null, line: n.line })),
+      auto: true,
+      footer: AUTO_POST_FOOTER,
+    });
+    if (out.kind === 'posted') {
+      posted.push(...out.postedItemIds);
+      for (const n of nrHere.slice(0, out.notAskedPosted)) {
+        n.entry.commentId = out.commentId;
+        n.entry.postedAt = nowIso();
+      }
+    } else if (out.kind === 'github_error') errors.push(errText(out.message));
     else if (out.kind === 'head_moved') errors.push('A PR changed since the story check.');
     else if (out.kind === 'superseded') errors.push('A newer story check replaced this one.');
+    else if (out.kind === 'not_found') errors.push(out.message);
     // already_posted: someone (a click) got there first — nothing to do.
-  }
-  const settleIds = new Set<number>();
-  const name = run.ticketKey ?? 'Story';
-  for (const n of liveNr) {
-    const pr = livePrs.get(n.entry.prId)!;
-    const member = run.members.find((m) => m.prId === n.entry.prId)!;
-    try {
-      const out = await postStoryComment(ctx, pr, {
-        id: -(n.entry.index + 1),
-        headSha: member.headSha,
-        path: n.path,
-        line: n.line,
-        body: n.body,
-        lead: `${name} · Not asked for: ${storyOneLine(n.title)}`,
-        footer: AUTO_POST_FOOTER,
-      });
-      if (out.headMoved) {
-        errors.push('A PR changed since the story check.');
-        continue;
-      }
-      n.entry.commentId = out.commentId;
-      n.entry.postedAt = nowIso();
-      settleIds.add(n.entry.prId);
-    } catch (err) {
-      errors.push(errText(err));
-    }
   }
   const nrPosted = liveNr.filter((n) => n.entry.commentId != null).length;
   const any = posted.length + nrPosted > 0;
@@ -314,7 +308,6 @@ async function autoPostTicket(
   await writeRecord(ctx, runId, final).catch((err) =>
     ctx.log.warn(`auto post ticket review ${runId}: could not record the result: ${errText(err)}`),
   );
-  // Items settle inside postTicketItem; the "Not asked for" comments settle here.
-  for (const prId of settleIds) await deps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
+  // Each comment settled its PR inside postStoryGapsComment.
   return { kind: 'done', record: final };
 }

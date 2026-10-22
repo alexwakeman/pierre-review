@@ -891,7 +891,9 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   `auto_post` record is CLAIMED (compare-and-set from NULL, `status:'posting'`) BEFORE any GitHub
   write; a failure is recorded and shown, NEVER retried, and a run cut off mid-post counts as
   possibly posted forever. Dedupe is the follow-up chain + `similarTitles` over every earlier run;
-  story gaps post only on the owner PR (no owner ⇒ not posted). § Auto-posting.
+  story gaps post only on the owner PR (no owner ⇒ not posted), as ONE collated PR comment per (run,
+  target PR) — by hand too (one "Post N gaps to …" per PR, no per-item Post), every item stamped with
+  that one comment id, a later check posting only the new gaps. § Auto-posting.
 - **FAILED CI IS A SEPARATE PROCESS, THE CI REVIEW** (`src/review/ci-review/`; sqlite `0082` / pg
   `0069`): one run per (PR, head, sorted failing check names), never inside a PR review — new PR-review
   runs read no logs and store no `ci_failures` (old rows read as history). The head's checks by COMMIT

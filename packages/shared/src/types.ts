@@ -8291,17 +8291,21 @@ export type TicketReviewStreamEvent =
       memberPrIds: number[];
     };
 
-// POST /api/ticket-reviews/:id/items/:itemId/post — post one item as a PR comment. The target is
-// the item's `ownerPrId`, else `viewedPrId` (which must be a member of that run).
-export interface PostTicketItemBody {
+// POST /api/ticket-reviews/:id/post — post the run's not-yet-posted story gaps whose target is
+// `targetPrId` as ONE collated PR comment. An item's target is its `ownerPrId`, else `viewedPrId`;
+// `targetPrId` must be a member of that run.
+export interface PostStoryGapsBody {
   viewedPrId: number;
+  targetPrId: number;
 }
-export interface PostTicketItemResponse {
-  item: TicketReviewItem;
+export interface PostStoryGapsResponse {
+  // The items the comment carried, each now posted with `commentId`.
+  items: TicketReviewItem[];
   // false with a non-null commentId = the comment IS on GitHub and only local confirmation lagged.
   // Never retry: a retry double-posts.
   visible: boolean;
   commentId: string | null;
+  postedCount: number;
 }
 
 // ---- CI review (CORE, free, LOCAL ONLY — review/ci-review/, docs/CLAUDE-REVIEW.md § CI review) ----

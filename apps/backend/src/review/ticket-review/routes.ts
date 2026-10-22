@@ -9,8 +9,8 @@ import {
   trackerTicketRow,
   parseTicketIdent,
   type ClaudeReviewTicket,
-  type PostTicketItemBody,
-  type PostTicketItemResponse,
+  type PostStoryGapsBody,
+  type PostStoryGapsResponse,
   type PrTicketReviewsResponse,
   type StartTicketReviewResponse,
   type TicketReviewState,
@@ -21,12 +21,11 @@ import type { AgentContext } from '../agent-context.js';
 import { AGENTIC_AI_ENABLED } from '../claude-review/manager.js';
 import { getTicketSource } from '../../tracker/ticket-source.js';
 import { getReviewPrContext } from '../claude-review/persist.js';
-import { postTicketItem } from './post-item.js';
+import { postStoryGapsComment } from './post-item.js';
 import { deriveTicketReviewState, manualTicketIdent, readLiveMembers, ticketHash } from './fingerprint.js';
 import {
   getLatestTicketReview,
   getTicketIdentsForPr,
-  getTicketItemPostContext,
   getTicketReviewById,
   getTicketReviewRow,
   getTicketStateInputs,
@@ -86,14 +85,14 @@ const statesSchema = {
 const postSchema = {
   params: {
     type: 'object',
-    required: ['id', 'itemId'],
-    properties: { id: { type: 'integer' }, itemId: { type: 'integer' } },
+    required: ['id'],
+    properties: { id: { type: 'integer' } },
   },
   body: {
     type: 'object',
-    required: ['viewedPrId'],
+    required: ['viewedPrId', 'targetPrId'],
     additionalProperties: false,
-    properties: { viewedPrId: { type: 'integer' } },
+    properties: { viewedPrId: { type: 'integer' }, targetPrId: { type: 'integer' } },
   },
 };
 
@@ -381,19 +380,19 @@ export function registerTicketReviewRoutes(app: FastifyInstance, ctx: AgentConte
     return { states: idents.map((i) => states.get(i)!) };
   });
 
-  // ---- post one item to GitHub ----
-  app.post('/api/ticket-reviews/:id/items/:itemId/post', { schema: postSchema }, async (req, reply) => {
+  // ---- post the run's story gaps for one PR, as ONE comment ----
+  app.post('/api/ticket-reviews/:id/post', { schema: postSchema }, async (req, reply) => {
     if (!AGENTIC_AI_ENABLED) return featureOff(reply);
-    const { id, itemId } = req.params as { id: number; itemId: number };
-    const { viewedPrId } = req.body as PostTicketItemBody;
+    const { id } = req.params as { id: number };
+    const { viewedPrId, targetPrId } = req.body as PostStoryGapsBody;
     const accountId = ctx.accountIdOf(req);
     // Ownership first (an id is only claimed for its own account), then the claim, synchronously
-    // (inside `postTicketItem`, shared with auto-posting).
-    if (!(await getTicketItemPostContext(ctx, accountId, id, itemId))) {
+    // (inside `postStoryGapsComment`, shared with auto-posting).
+    if (!(await getTicketReviewRow(ctx, accountId, id))) {
       reply.status(404);
-      return { error: 'NotFound', message: 'Item not found' };
+      return { error: 'NotFound', message: 'Story check not found' };
     }
-    const out = await postTicketItem(ctx, { accountId, runId: id, itemId, viewedPrId });
+    const out = await postStoryGapsComment(ctx, { accountId, runId: id, targetPrId, viewedPrId });
     switch (out.kind) {
       case 'not_found':
         reply.status(404);
@@ -414,7 +413,12 @@ export function registerTicketReviewRoutes(app: FastifyInstance, ctx: AgentConte
         reply.status(409);
         return { error: 'HeadMoved', message: 'This PR changed since the story check. Check the story again first.' };
       case 'posted': {
-        const res: PostTicketItemResponse = { item: out.item, visible: out.visible, commentId: out.commentId };
+        const res: PostStoryGapsResponse = {
+          items: out.items,
+          visible: out.visible,
+          commentId: out.commentId,
+          postedCount: out.postedItemIds.length,
+        };
         return res;
       }
     }

@@ -4,11 +4,11 @@
 //
 // A ticket review judges the ticket across EVERY PR that names it. The PR pane shows only the part
 // that is this PR's: the criteria it delivers, and the unmet criteria / missing items that belong in
-// it — each with its Post button. The whole story lives once, in the story view.
+// it — under ONE "Post N gaps to this PR" button. The whole story lives once, in the story view.
 //
 // Ownership of an unmet item, in order: the item's `ownerPrId`, else the criterion's
 // `expectedIn.prId`, else `expectedIn.repoId` against this PR's repo. An item that names NO owner is
-// this PR's too: its Post already lands on the PR being viewed (`postTargetOf`), and leaving it out
+// this PR's too: its post already lands on the PR being viewed (`postTargetOf`), and leaving it out
 // would leave it postable nowhere (the stack view has no Post buttons).
 import type {
   ReviewDocReference,

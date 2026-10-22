@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useIsMutating, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type {
   ClaudeReviewTicketInput,
-  PostTicketItemResponse,
+  PostStoryGapsResponse,
   PrTicketReviewsResponse,
   StartTicketReviewBody,
   StartTicketReviewResponse,
@@ -179,24 +179,25 @@ export function useTicketReviewStream(
   return state;
 }
 
+/** The shared key of one (run, target PR) gaps post, so every mount shows the same "Posting…". */
+export const storyGapsPostKey = (ticketReviewId: number, targetPrId: number) => ['story-gaps-post', ticketReviewId, targetPrId] as const;
+
 /**
- * Post ONE item as a PR comment. ⚠ NO RETRY after a non-null `commentId`: the comment is on GitHub
- * even when `visible` is false, and a second POST would double-post (the server answers 409).
+ * Post a run's story gaps for ONE target PR as one collated PR comment. ⚠ NO RETRY after a non-null
+ * `commentId`: the comment is on GitHub even when `visible` is false, and a second POST would
+ * double-post (the server answers 409).
  */
-export function usePostTicketItem(viewedPrId: number) {
+export function usePostStoryGaps(viewedPrId: number, ticketReviewId: number, targetPrId: number) {
   const qc = useQueryClient();
-  return useMutation<
-    PostTicketItemResponse,
-    Error,
-    { ticketReviewId: number; itemId: number; targetPrId: number; memberPrIds: readonly number[] }
-  >({
-    mutationFn: (v) => api.postTicketItem(v.ticketReviewId, v.itemId, viewedPrId),
+  return useMutation<PostStoryGapsResponse, Error, { memberPrIds: readonly number[] }>({
+    mutationKey: storyGapsPostKey(ticketReviewId, targetPrId),
+    mutationFn: () => api.postStoryGaps(ticketReviewId, viewedPrId, targetPrId),
     onSuccess: (_res, v) => {
       void refreshAfter(qc, [viewedPrId, ...v.memberPrIds]);
       // A comment on GitHub like any other: THE ONE WRITE SET (prCacheSync.ts).
-      void invalidateAfterPrWrite(qc, v.targetPrId);
+      void invalidateAfterPrWrite(qc, targetPrId);
     },
-    // 409 AlreadyPosted: the reading was stale — re-read it so the item shows as posted.
-    onError: () => void refreshAfter(qc, [viewedPrId]),
+    // 409 AlreadyPosted: the reading was stale — re-read it so the items show as posted.
+    onError: (_err, v) => void refreshAfter(qc, [viewedPrId, ...v.memberPrIds]),
   });
 }

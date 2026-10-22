@@ -1,7 +1,7 @@
 // THE TICKET REVIEW ROUTES over the REAL core client, a real Fastify and a fake GitHub seam. What
 // this pins:
-//   1. Posting an item goes to its OWNER PR (else the viewed PR, which must be a member), at the
-//      head the run judged, with the story lead; a second post is 409 AlreadyPosted.
+//   1. Posting collates the gaps whose target (OWNER PR, else the viewed PR) is the named member PR
+//      into ONE comment at the head the run judged; a second post is 409 AlreadyPosted.
 //   2. ⚠ A re-raised item is never posted twice: the newer run's copy inherits the posting, and an
 //      older run's item is refused once a newer check exists.
 //   3. Pasted stories start one-PR 'manual:' runs; the states route refuses over-cap and malformed
@@ -76,8 +76,8 @@ async function run(items: Array<{ ref: string; ownerPrId: number | null; title: 
   return id;
 }
 
-const postItem = (runId: number, itemId: number, viewedPrId: number) =>
-  app.inject({ method: 'POST', url: `/api/ticket-reviews/${runId}/items/${itemId}/post`, payload: { viewedPrId } });
+const postGaps = (runId: number, viewedPrId: number, targetPrId: number) =>
+  app.inject({ method: 'POST', url: `/api/ticket-reviews/${runId}/post`, payload: { viewedPrId, targetPrId } });
 
 beforeAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
@@ -142,49 +142,61 @@ beforeEach(() => {
   startTicketReview.mockClear();
 });
 
-describe('POST /api/ticket-reviews/:id/items/:itemId/post', () => {
+describe('POST /api/ticket-reviews/:id/post', () => {
   let first = 0;
-  let firstItems: number[] = [];
 
-  it('posts to the owner PR at the judged head, once', async () => {
+  it('posts the gaps that belong on the target PR as ONE comment, at the judged head, once', async () => {
     first = await run([
       { ref: 'AC1', ownerPrId: null, title: 'CSV' },
       { ref: 'AC2', ownerPrId: pr.web!, title: 'PDF' },
+      { ref: 'AC3', ownerPrId: pr.web!, title: 'XLS' },
     ]);
-    firstItems = (await persist.getTicketReviewById(ctx, 1, first))!.items.map((i) => i.id);
-
-    const res = await postItem(first, firstItems[1]!, pr.api!);
+    const res = await postGaps(first, pr.api!, pr.web!);
     expect(res.statusCode).toBe(200);
+    expect(postFinding).toHaveBeenCalledTimes(1);
     const call = (postFinding.mock.calls[0] as unknown[])[0] as any;
     expect(call.prNumber).toBe(2);
     expect(call.reviewHeadSha).toBe('h_web');
-    expect(call.finding.storyLead).toBe('BMD-7 · AC2 (not met): PDF');
-    expect(res.json().item.posted.commentId).toBe('gh-1');
-    const again = await postItem(first, firstItems[1]!, pr.api!);
+    expect(call.prLevel).toBe(true);
+    expect(call.finding.body).toContain('**BMD-7 story check** on h_web: 2 gaps.');
+    expect(call.finding.body).toContain('**AC2 · Not met:** PDF');
+    expect(call.finding.body).toContain('**AC3 · Not met:** XLS');
+    // AC1 has no owner: it targets the VIEWED PR (api), not this one.
+    expect(call.finding.body).not.toContain('CSV');
+    expect(res.json()).toMatchObject({ postedCount: 2, commentId: 'gh-1', visible: true });
+    expect(res.json().items.map((i: any) => i.posted.commentId)).toEqual(['gh-1', 'gh-1']);
+    const again = await postGaps(first, pr.api!, pr.web!);
     expect(again.statusCode).toBe(409);
     expect(again.json().error).toBe('AlreadyPosted');
   });
 
-  it('an unowned item goes to the viewed PR, which must be a member', async () => {
-    const outside = await postItem(first, firstItems[0]!, pr.other!);
+  it('the target must be a member of the run', async () => {
+    const outside = await postGaps(first, pr.other!, pr.other!);
     expect(outside.statusCode).toBe(400);
     expect(outside.json().error).toBe('NotAMember');
     expect(postFinding).not.toHaveBeenCalled();
   });
 
-  it('⚠ a re-raise inherits the posting, and an older run is superseded', async () => {
+  it('another account’s run is a 404', async () => {
+    expect((await postGaps(999_999, pr.api!, pr.api!)).statusCode).toBe(404);
+  });
+
+  it('⚠ a re-raise inherits the posting (only the new gap posts), and an older run is superseded', async () => {
     const second = await run([
       { ref: 'AC1', ownerPrId: null, title: 'CSV' },
       { ref: 'AC2', ownerPrId: null, title: 'PDF' },
     ]);
     const items = (await persist.getTicketReviewById(ctx, 1, second))!.items;
-    const reraised = items.find((i) => i.title === 'PDF')!;
-    expect(reraised.posted?.commentId).toBe('gh-1');
-    expect((await postItem(second, reraised.id, pr.api!)).json().error).toBe('AlreadyPosted');
-    const old = await postItem(first, firstItems[0]!, pr.api!);
+    expect(items.find((i) => i.title === 'PDF')!.posted?.commentId).toBe('gh-1');
+    const old = await postGaps(first, pr.api!, pr.api!);
     expect(old.statusCode).toBe(409);
     expect(old.json().error).toBe('Superseded');
     expect(postFinding).not.toHaveBeenCalled();
+    const res = await postGaps(second, pr.api!, pr.api!);
+    expect(res.json().postedCount).toBe(1);
+    const body = ((postFinding.mock.calls[0] as unknown[])[0] as any).finding.body as string;
+    expect(body).toContain('**AC1 · Not met:** CSV');
+    expect(body).not.toContain('PDF');
   });
 });
 

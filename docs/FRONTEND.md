@@ -1272,7 +1272,9 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
     null`, the PR's own workspace has a tracker, no extra request — an open PR on the ticket): alignment + currency + reviewed-ago + Re-check, then only `prTicketShare` — criteria
     this PR delivers, unmet criteria / missing items owned by it (item `ownerPrId`, else
     `expectedIn.prId`, else `expectedIn.repoId` against its repo; an item naming NO owner stays here,
-    since its Post lands on the viewed PR and the story view has none), its not-asked-for work — a
+    since its post lands on the viewed PR and the story view has none), ONE "Post N gaps to this PR"
+    (`StoryGapsPost onlyThisPr`; the full view shows one per target PR, `storyGapGroups` — the gaps go
+    as ONE collated comment, there is no per-item Post), its not-asked-for work — a
     count of the rest (`shareRestLine`) and "See the whole story", which opens the ticket's story
     view tab (`useOpenStory` with the block's ident, key and title). A pasted `manual:` story keeps
     the full view in the pane.

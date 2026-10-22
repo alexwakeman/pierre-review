@@ -1,33 +1,36 @@
-// POSTING ONE TICKET-REVIEW ITEM TO GITHUB — shared by the manual Post route (routes.ts) and
-// auto-posting (./auto-post.ts), so both take the SAME claim, run the SAME "already posted?" check
-// and build the SAME comment. The route maps each outcome to its HTTP status; auto-posting records it.
+// POSTING A TICKET REVIEW'S STORY GAPS TO GITHUB — ONE PR-LEVEL COMMENT per (run, target PR), shared
+// by the manual "Post N gaps to …" route (routes.ts) and auto-posting (./auto-post.ts), so both take
+// the SAME claim, run the SAME "already posted?" check and build the SAME comment. The route maps
+// each outcome to its HTTP status; auto-posting records it. docs/CLAUDE-REVIEW.md § Ticket review.
 //
-// ⚠ THE CLAIM COMES FIRST and the item is re-read INSIDE it: a check made before the claim can be
-// answered by a request that has since posted and released it. A click and an auto post of the same
-// item therefore cannot both reach GitHub — the loser gets `already_posted`.
-// ⚠ Once GitHub 201s nothing here fails or retries: the stamp and the settle are best-effort.
+// The comment collates every not-yet-posted gap of the run whose target is that PR (the item's owner
+// PR, else the PR the reader is looking at), plus — auto-posting only, when that kind is on — the
+// "Not asked for" entries done in that PR, under their own heading. A later check posts a NEW
+// collated comment listing only the gaps not yet posted; nothing is ever edited.
+//
+// ⚠ THE CLAIM COMES FIRST and the run is re-read INSIDE it: a check made before the claim can be
+// answered by a request that has since posted and released it. Two clicks, or a click and an auto
+// post, therefore cannot both reach GitHub — the loser gets `already_posted`. The claim is keyed by
+// (run, target PR) AND holds every item id it may post.
+// ⚠ "Never twice" is still PER ITEM (the posted_* columns): after GitHub 201s, EVERY item in the
+// comment is stamped with the one comment id. From there nothing fails or retries: the stamps and
+// the settle are best-effort.
 import { and, eq } from 'drizzle-orm';
-import { storyOneLine, type TicketReviewItem } from '@pierre-review/shared';
+import { storyOneLine, type TicketReview, type TicketReviewItem } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { getReviewPrContext } from '../claude-review/persist.js';
-import { buildAnchorIndex, fetchPrDiff, isFindingAnchored, stripNoiseFromDiff } from '../post-review.js';
-import { isNoiseFile } from '../prepare.js';
 import { settlePrAfterWrite } from '../../sync/resync-after-write.js';
-import { getTicketItemPostContext, getTicketStateInputs, markTicketItemPosted } from './persist.js';
+import { getTicketReviewById, getTicketStateInputs, markTicketItemPosted } from './persist.js';
 import { statusWords } from './prompts.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const s = (ctx: AgentContext): any => ctx.schema as any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-// Items being posted right now, by id — the synchronous claim that keeps two posts (two clicks, or
-// a click and an auto post) from both passing the "already posted?" check.
+// Items being posted right now, by id, and the (run, target PR) comments being posted — the
+// synchronous claim that keeps two posts from both passing the "already posted?" check.
 const posting = new Set<number>();
-
-/** Is this item being posted right now? (The route answers 409 AlreadyPosted.) */
-export function isItemBeingPosted(itemId: number): boolean {
-  return posting.has(itemId);
-}
+const postingComments = new Set<string>();
 
 /**
  * Has this item, or any earlier item it re-raises (`prior_item_id`, followed back), reached GitHub?
@@ -52,153 +55,267 @@ export async function postedInChain(ctx: AgentContext, accountId: number, priorI
   return false;
 }
 
-export type PostTicketItemOutcome =
+/** The target an item posts on: its owner PR, else the PR the reader is looking at. */
+export function storyGapTarget(item: Pick<TicketReviewItem, 'ownerPrId'>, viewedPrId: number | null): number | null {
+  return item.ownerPrId ?? viewedPrId;
+}
+
+// ---- the body (pure) ----
+
+export const STORY_GAPS_BUDGET = 60_000;
+
+/** A model-written string made safe for our comment: no HTML comment (a forged marker). */
+const noMarker = (t: string): string => t.replace(/<!--/g, '&lt;!--');
+
+export interface StoryGapEntry {
+  ref: string;
+  status: TicketReviewItem['status'];
+  title: string;
+  body: string;
+  path: string | null;
+  line: number | null;
+}
+export interface StoryNotAskedEntry {
+  title: string;
+  body: string;
+  path: string | null;
+  line: number | null;
+}
+
+function placeLine(path: string | null, line: number | null): string | null {
+  if (path == null || path.trim() === '') return null;
+  return `\`${(line != null ? `${path}:${line}` : path).replace(/`/g, "'")}\``;
+}
+
+function block(head: string, path: string | null, line: number | null, body: string): string {
+  const parts = [head];
+  const where = placeLine(path, line);
+  if (where) parts.push(where);
+  if (body.trim() !== '') parts.push(noMarker(body.trim()));
+  return parts.join('\n');
+}
+
+/**
+ * The collated comment: a lead line, one block per gap, then the "Not asked for" entries under their
+ * own heading. Built under STORY_GAPS_BUDGET; what does not fit is COUNTED and left unposted (only the
+ * entries returned in `gaps` / `notAsked` are in the comment). The seam appends the footer + marker.
+ */
+export function storyGapsCommentBody(
+  a: { ticketName: string; headSha: string; gaps: readonly StoryGapEntry[]; notAsked: readonly StoryNotAskedEntry[]; budget?: number },
+): { body: string; gaps: number; notAsked: number } {
+  const budget = a.budget ?? STORY_GAPS_BUDGET;
+  const counts: string[] = [];
+  if (a.gaps.length > 0) counts.push(`${a.gaps.length} ${a.gaps.length === 1 ? 'gap' : 'gaps'}`);
+  if (a.notAsked.length > 0) counts.push(`${a.notAsked.length} not asked for`);
+  const lead = `**${noMarker(a.ticketName)} story check** on ${a.headSha.slice(0, 7)}: ${counts.join(', ')}.`;
+  const out: string[] = [lead];
+  let used = lead.length + 400;
+  let gaps = 0;
+  for (const g of a.gaps) {
+    const words = statusWords(g.status);
+    const b = block(`**${noMarker(g.ref)} · ${words[0]!.toUpperCase()}${words.slice(1)}:** ${noMarker(storyOneLine(g.title))}`, g.path, g.line, g.body);
+    if (gaps > 0 && used + b.length + 2 > budget) break;
+    out.push(b);
+    used += b.length + 2;
+    gaps += 1;
+  }
+  let notAsked = 0;
+  if (gaps === a.gaps.length && a.notAsked.length > 0) {
+    const heading = '#### Not asked for';
+    const blocks: string[] = [];
+    for (const n of a.notAsked) {
+      const b = block(`**${noMarker(storyOneLine(n.title))}**`, n.path, n.line, n.body);
+      if (gaps + notAsked > 0 && used + heading.length + b.length + 4 > budget) break;
+      blocks.push(b);
+      used += b.length + 2;
+      notAsked += 1;
+    }
+    if (blocks.length > 0) out.push(heading, ...blocks);
+  }
+  const left = a.gaps.length - gaps + (a.notAsked.length - notAsked);
+  if (left > 0) out.push(`${left} more did not fit in this comment.`);
+  return { body: out.join('\n\n'), gaps, notAsked };
+}
+
+// ---- posting ----
+
+export type PostStoryGapsOutcome =
   | { kind: 'not_found'; message: string }
   | { kind: 'superseded' }
   | { kind: 'already_posted' }
   | { kind: 'not_a_member' }
   | { kind: 'github_error'; message: string }
   | { kind: 'head_moved' }
-  | { kind: 'posted'; item: TicketReviewItem; visible: boolean; commentId: string; prId: number };
+  | {
+      kind: 'posted';
+      // The items the comment carried (each stamped with `commentId`), and how many "Not asked for"
+      // entries rode along (the first `notAskedPosted` of those passed in).
+      postedItemIds: number[];
+      notAskedPosted: number;
+      items: TicketReviewItem[];
+      visible: boolean;
+      commentId: string;
+      prId: number;
+    };
 
 /**
- * Post a story comment (an item, or auto-posting's "Not asked for" entry) on one PR, at the head
- * the run judged. Anchored inline when its path/line is in the PR's diff, else a PR-level comment.
- * Throws on a GitHub error; `{ headMoved: true }` when the PR moved since.
+ * Post ONE collated comment of a run's story gaps on `targetPrId`. `viewedPrId` = the PR the reader
+ * is looking at (an item with no owner targets it); auto-posting passes null (owners only) and its
+ * own `itemIds` + `notAsked`. Never throws.
  */
-export async function postStoryComment(
-  ctx: AgentContext,
-  pr: { owner: string; name: string; number: number },
-  a: { id: number; headSha: string; path: string; line: number | null; body: string; lead: string; footer?: string | null },
-): Promise<{ headMoved: true } | { headMoved?: false; commentId: string }> {
-  let anchored = false;
-  let fileInDiff = false;
-  if (a.path) {
-    try {
-      const { diff } = stripNoiseFromDiff(await fetchPrDiff(pr.owner, pr.name, pr.number), isNoiseFile);
-      const index = buildAnchorIndex(diff);
-      fileInDiff = index.has(a.path);
-      anchored = a.line != null && isFindingAnchored(index, a.path, a.line, 'RIGHT');
-    } catch {
-      /* postFinding re-reads the diff itself when not anchored */
-    }
-  }
-  const outcome = await ctx.review.postFinding({
-    owner: pr.owner,
-    name: pr.name,
-    prNumber: pr.number,
-    // The head this run judged: a PR pushed since gets headMoved, so a stale verdict is never posted.
-    reviewHeadSha: a.headSha,
-    finding: {
-      id: a.id,
-      path: a.path,
-      line: a.path ? a.line : null,
-      side: 'RIGHT',
-      anchored,
-      fileInDiff,
-      body: a.body,
-      suggestion: null,
-      // Carries the finding marker `<!-- pierre:claude-review-finding v=1 -->`, so
-      // `isLimnPostedComment` never lets it trigger an auto PR review.
-      storyLead: a.lead,
-      footer: a.footer ?? null,
-    },
-  });
-  if (outcome.headMoved) return { headMoved: true };
-  return { commentId: outcome.commentId };
-}
-
-/**
- * Post ONE item of a run. `targetPrId` null = the item's owner PR, else the viewed PR (the route);
- * auto-posting always passes the owner. Never throws.
- */
-export async function postTicketItem(
+export async function postStoryGapsComment(
   ctx: AgentContext,
   a: {
     accountId: number;
     runId: number;
-    itemId: number;
+    targetPrId: number;
     viewedPrId: number | null;
+    itemIds?: readonly number[];
+    notAsked?: readonly StoryNotAskedEntry[];
     auto?: boolean;
     footer?: string | null;
   },
-): Promise<PostTicketItemOutcome> {
-  if (posting.has(a.itemId)) return { kind: 'already_posted' };
-  posting.add(a.itemId);
+): Promise<PostStoryGapsOutcome> {
+  const key = `${a.runId}:${a.targetPrId}`;
+  if (postingComments.has(key)) return { kind: 'already_posted' };
+  postingComments.add(key);
+  const held: number[] = [];
   try {
-    return await postInsideClaim(ctx, a);
+    return await postInsideClaim(ctx, a, held);
   } catch (err) {
     return { kind: 'github_error', message: err instanceof Error ? err.message : String(err) };
   } finally {
-    posting.delete(a.itemId);
+    postingComments.delete(key);
+    for (const id of held) posting.delete(id);
   }
+}
+
+/** The gaps a post would carry now: target this PR, not posted (nor any earlier raise), not in flight. */
+async function selectGaps(
+  ctx: AgentContext,
+  accountId: number,
+  run: TicketReview,
+  targetPrId: number,
+  viewedPrId: number | null,
+  only: ReadonlySet<number> | null,
+): Promise<TicketReviewItem[]> {
+  const out: TicketReviewItem[] = [];
+  for (const item of run.items) {
+    if (only != null && !only.has(item.id)) continue;
+    if (storyGapTarget(item, viewedPrId) !== targetPrId) continue;
+    if (item.posted != null || posting.has(item.id)) continue;
+    if (await postedInChain(ctx, accountId, item.priorItemId)) continue;
+    out.push(item);
+  }
+  return out;
 }
 
 async function postInsideClaim(
   ctx: AgentContext,
-  a: { accountId: number; runId: number; itemId: number; viewedPrId: number | null; auto?: boolean; footer?: string | null },
-): Promise<PostTicketItemOutcome> {
-  const { accountId, runId, itemId } = a;
+  a: {
+    accountId: number;
+    runId: number;
+    targetPrId: number;
+    viewedPrId: number | null;
+    itemIds?: readonly number[];
+    notAsked?: readonly StoryNotAskedEntry[];
+    auto?: boolean;
+    footer?: string | null;
+  },
+  held: number[],
+): Promise<PostStoryGapsOutcome> {
+  const { accountId, runId, targetPrId } = a;
   // Re-read INSIDE the claim: this is the read the "already posted?" check trusts.
-  const pctx = await getTicketItemPostContext(ctx, accountId, runId, itemId);
-  if (!pctx) return { kind: 'not_found', message: 'Item not found' };
-  const { run, item } = pctx;
-  // Only the ticket's LATEST check speaks for it: posting an older run's item could repeat what
-  // the newer run's copy already posted.
+  const run = await getTicketReviewById(ctx, accountId, runId);
+  if (!run) return { kind: 'not_found', message: 'Story check not found' };
+  // Only the ticket's LATEST check speaks for it: posting an older run's items could repeat what the
+  // newer run's copies already posted.
   const latest = (await getTicketStateInputs(ctx, accountId, [run.ident])).get(run.ident)?.latest;
   if (run.status !== 'succeeded' || latest?.id !== run.id) return { kind: 'superseded' };
-  if (item.posted != null || (await postedInChain(ctx, accountId, item.priorItemId))) return { kind: 'already_posted' };
-  const targetPrId = item.ownerPrId ?? a.viewedPrId;
-  if (targetPrId == null) return { kind: 'not_a_member' };
   const member = run.members.find((m) => m.prId === targetPrId);
   if (!member) return { kind: 'not_a_member' };
+  const gaps = await selectGaps(ctx, accountId, run, targetPrId, a.viewedPrId, a.itemIds ? new Set(a.itemIds) : null);
+  const notAsked = a.notAsked ?? [];
+  if (gaps.length === 0 && notAsked.length === 0) return { kind: 'already_posted' };
+  for (const g of gaps) {
+    posting.add(g.id);
+    held.push(g.id);
+  }
   const pr = await getReviewPrContext(ctx, targetPrId, accountId);
   if (!pr) return { kind: 'not_found', message: `PR ${targetPrId} not found` };
-  const name = run.ticketKey ?? 'Story';
-  const lead = `${name} · ${item.ref} (${statusWords(item.status)}): ${storyOneLine(item.title)}`;
-  const path = item.ownerPrId === targetPrId && item.path ? item.path : '';
+
+  const built = storyGapsCommentBody({
+    ticketName: run.ticketKey ?? 'Story',
+    headSha: member.headSha,
+    // A file reference only where the gap belongs in THIS PR.
+    gaps: gaps.map((g) => ({
+      ref: g.ref,
+      status: g.status,
+      title: g.title,
+      body: g.body,
+      path: g.ownerPrId === targetPrId ? g.path : null,
+      line: g.ownerPrId === targetPrId ? g.line : null,
+    })),
+    notAsked,
+  });
+  const included = gaps.slice(0, built.gaps);
+
   let outcome;
   try {
-    outcome = await postStoryComment(ctx, pr, {
-      id: item.id,
-      headSha: member.headSha,
-      path,
-      line: path ? item.line : null,
-      body: item.body,
-      lead,
-      footer: a.footer ?? null,
+    outcome = await ctx.review.postFinding({
+      owner: pr.owner,
+      name: pr.name,
+      prNumber: pr.number,
+      // The head this run judged: a PR pushed since gets headMoved, so a stale verdict is never posted.
+      reviewHeadSha: member.headSha,
+      // ONE PR-level comment, never inline.
+      prLevel: true,
+      finding: {
+        id: included[0]?.id ?? -1,
+        path: '',
+        line: null,
+        side: 'RIGHT',
+        anchored: false,
+        fileInDiff: false,
+        body: built.body,
+        suggestion: null,
+        storyLead: null,
+        // The seam appends the footer and the finding marker `<!-- pierre:claude-review-finding v=1 -->`,
+        // so `isLimnPostedComment` never lets it trigger an auto PR review.
+        footer: a.footer ?? null,
+      },
     });
   } catch (err) {
     return { kind: 'github_error', message: err instanceof Error ? err.message : String(err) };
   }
   if (outcome.headMoved) return { kind: 'head_moved' };
-  // GitHub has 201'd: from here nothing may fail.
-  await markTicketItemPosted(ctx, accountId, item.id, {
-    prId: targetPrId,
-    commentId: outcome.commentId,
-    auto: a.auto === true,
-  }).catch(() => false);
+  // GitHub has 201'd: from here nothing may fail. EVERY item in the comment carries its id.
+  const commentId = outcome.commentId;
+  for (const g of included) {
+    await markTicketItemPosted(ctx, accountId, g.id, { prId: targetPrId, commentId, auto: a.auto === true }).catch(() => false);
+  }
   let visible = false;
   try {
     visible = (await settlePrAfterWrite({ accountId, prId: targetPrId, log: ctx.log })).visible;
   } catch {
     visible = false;
   }
-  const fresh = await getTicketItemPostContext(ctx, accountId, runId, itemId).catch(() => null);
+  const fresh = await getTicketReviewById(ctx, accountId, runId).catch(() => null);
+  const ids = new Set(included.map((g) => g.id));
+  const now = new Date().toISOString();
+  const items =
+    fresh?.items.filter((i) => ids.has(i.id)) ??
+    included.map((g) => ({
+      ...g,
+      posted: { prId: targetPrId, commentId, postedAt: now, carried: false, ...(a.auto === true ? { auto: true } : {}) },
+    }));
   return {
     kind: 'posted',
-    item: fresh?.item ?? {
-      ...item,
-      posted: {
-        prId: targetPrId,
-        commentId: outcome.commentId,
-        postedAt: new Date().toISOString(),
-        carried: false,
-        ...(a.auto === true ? { auto: true } : {}),
-      },
-    },
+    postedItemIds: included.map((g) => g.id),
+    notAskedPosted: built.notAsked,
+    items,
     visible,
-    commentId: outcome.commentId,
+    commentId,
     prId: targetPrId,
   };
 }

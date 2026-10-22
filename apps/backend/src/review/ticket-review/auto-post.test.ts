@@ -184,7 +184,12 @@ describe('where story gaps go', () => {
     const call = postFinding.mock.calls[0]![0];
     expect(call.prNumber).toBe((await db.select().from(schema.pullRequests).where(eq(schema.pullRequests.id, other)).execute())[0].number);
     expect(call.finding.footer).toBe(AUTO_POST_FOOTER);
-    expect(call.finding.storyLead).toContain('BMD-7 · AC1');
+    // ONE PR-level comment collating the gaps.
+    expect(call.prLevel).toBe(true);
+    expect(call.finding.path).toBe('');
+    expect(call.finding.body).toContain('**BMD-7 story check** on');
+    expect(call.finding.body).toContain('**AC1 · Not met:** CSV export');
+    expect(call.finding.body).not.toContain('PDF export');
     const r = (await persist.getTicketReviewById(ctx, 1, id))!;
     const ac1 = r.items.find((i) => i.ref === 'AC1')!;
     expect(ac1.posted).toMatchObject({ prId: other, auto: true, carried: false });
@@ -248,8 +253,8 @@ describe('never twice', () => {
     const r = (await persist.getTicketReviewById(ctx, 1, second))!;
     // (`carried` compares second-resolution timestamps, so it is not asserted within one second.)
     expect(r.items[0]!.posted).toMatchObject({ auto: true, commentId: 'C1' });
-    const { postTicketItem } = await import('./post-item.js');
-    expect((await postTicketItem(ctx, { accountId: 1, runId: second, itemId: r.items[0]!.id, viewedPrId: pr })).kind).toBe('already_posted');
+    const { postStoryGapsComment } = await import('./post-item.js');
+    expect((await postStoryGapsComment(ctx, { accountId: 1, runId: second, targetPrId: pr, viewedPrId: pr })).kind).toBe('already_posted');
   });
 
   it('an item posted two runs back (no link in between) is still not re-posted', async () => {
@@ -283,7 +288,7 @@ describe('never twice', () => {
     const b = await run(ident, [pr], [], { notRequested: nr });
     expect((await ap.maybeAutoPostTicketReview(ctx, { accountId: 1, runId: b }, deps())).kind).toBe('done');
     expect(postFinding).toHaveBeenCalledTimes(1);
-    expect(postFinding.mock.calls[0]![0].finding.storyLead).toBe('BMD-7 · Not asked for: Adds a cache');
+    expect(postFinding.mock.calls[0]![0].finding.body).toContain('#### Not asked for\n\n**Adds a cache**\nNot in the story.');
     const rb = (await persist.getTicketReviewById(ctx, 1, b))!;
     expect(rb.autoPost?.notRequested).toEqual([{ index: 0, prId: pr, postedAt: expect.any(String), carried: false }]);
     const c = await run(ident, [pr], [], { notRequested: [{ ...nr[0]!, title: '  adds a CACHE ' }] });
@@ -292,6 +297,97 @@ describe('never twice', () => {
     expect((await persist.getTicketReviewById(ctx, 1, c))!.autoPost?.notRequested).toEqual([
       { index: 0, prId: pr, postedAt: expect.any(String), carried: true },
     ]);
+  });
+});
+
+describe('one collated comment per target PR', () => {
+  it('eight gaps on one owner ⇒ ONE comment, every item stamped with its id', async () => {
+    const pr = await makePr({ author: 'me' });
+    const items = Array.from({ length: 8 }, (_, i) => ({ ref: `AC${i + 1}`, ownerPrId: pr, title: `Criterion ${i + 1}` }));
+    const id = await run(newIdent(), [pr], items);
+    const out = await ap.maybeAutoPostTicketReview(ctx, { accountId: 1, runId: id }, deps());
+    expect(out).toMatchObject({ kind: 'done', record: { status: 'posted' } });
+    expect(postFinding).toHaveBeenCalledTimes(1);
+    const body = postFinding.mock.calls[0]![0].finding.body as string;
+    expect(body).toContain(': 8 gaps.');
+    for (let i = 1; i <= 8; i += 1) expect(body).toContain(`**AC${i} · Not met:** Criterion ${i}`);
+    const r = (await persist.getTicketReviewById(ctx, 1, id))!;
+    expect(new Set(r.items.map((i) => i.posted?.commentId))).toEqual(new Set(['C1']));
+    expect(r.items.every((i) => i.posted?.auto === true && i.posted.prId === pr)).toBe(true);
+    expect(r.autoPost).toMatchObject({ postedCount: 8 });
+  });
+
+  it('gaps on two owners ⇒ two comments; a "Not asked for" entry rides in its PR’s comment', async () => {
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { kinds: { notAskedFor: true } } });
+    const a = await makePr({ author: 'me' });
+    const b = await makePr({ author: 'me' });
+    const id = await run(
+      newIdent(),
+      [a, b],
+      [
+        { ref: 'AC1', ownerPrId: a, title: 'One' },
+        { ref: 'AC2', ownerPrId: b, title: 'Two' },
+        { ref: 'AC3', ownerPrId: a, title: 'Three' },
+      ],
+      { notRequested: [{ title: 'Adds a cache', explanation: 'Not in the story.', prId: b, path: 'src/c.ts', line: 4 }] },
+    );
+    await ap.maybeAutoPostTicketReview(ctx, { accountId: 1, runId: id }, deps());
+    expect(postFinding).toHaveBeenCalledTimes(2);
+    const bodies = postFinding.mock.calls.map((c) => c[0].finding.body as string);
+    const forA = bodies.find((x) => x.includes('**AC1'))!;
+    const forB = bodies.find((x) => x.includes('**AC2'))!;
+    expect(forA).toContain('**AC3');
+    expect(forA).not.toContain('Not asked for');
+    expect(forB).toContain(': 1 gap, 1 not asked for.');
+    expect(forB).toContain('#### Not asked for\n\n**Adds a cache**\n`src/c.ts:4`\nNot in the story.');
+    const r = (await persist.getTicketReviewById(ctx, 1, id))!;
+    const idOf = (ref: string) => r.items.find((i) => i.ref === ref)!.posted!.commentId;
+    expect(idOf('AC1')).toBe(idOf('AC3'));
+    expect(idOf('AC2')).not.toBe(idOf('AC1'));
+    expect(r.autoPost?.notRequested).toEqual([{ index: 0, prId: b, postedAt: expect.any(String), carried: false }]);
+  });
+
+  it('a later check posts a NEW comment with only the gaps not yet posted', async () => {
+    const pr = await makePr({ author: 'me' });
+    const ident = newIdent();
+    const first = await run(ident, [pr], [{ ref: 'AC1', ownerPrId: pr, title: 'CSV export' }]);
+    await ap.maybeAutoPostTicketReview(ctx, { accountId: 1, runId: first }, deps());
+    const second = await run(ident, [pr], [
+      { ref: 'AC1', ownerPrId: pr, title: 'CSV export' },
+      { ref: 'AC2', ownerPrId: pr, title: 'PDF export' },
+    ], { trigger: 'cascade' });
+    await ap.maybeAutoPostTicketReview(ctx, { accountId: 1, runId: second }, deps());
+    expect(postFinding).toHaveBeenCalledTimes(2);
+    const body = postFinding.mock.calls[1]![0].finding.body as string;
+    expect(body).toContain('**AC2 · Not met:** PDF export');
+    expect(body).not.toContain('CSV export');
+    expect(body).toContain(': 1 gap.');
+  });
+
+  it('two posts of the same (run, PR) at once reach GitHub once', async () => {
+    const pr = await makePr({ author: 'me' });
+    const id = await run(newIdent(), [pr], [{ ref: 'AC1', ownerPrId: pr, title: 'x' }], { trigger: 'manual' });
+    let release: () => void = () => {};
+    postFinding.mockImplementation(() => new Promise((res) => (release = () => res({ commentId: 'C9', postedCommentKind: 'pr_comment' }))));
+    const { postStoryGapsComment } = await import('./post-item.js');
+    const first = postStoryGapsComment(ctx, { accountId: 1, runId: id, targetPrId: pr, viewedPrId: pr });
+    await vi.waitFor(() => expect(postFinding).toHaveBeenCalledTimes(1));
+    expect((await postStoryGapsComment(ctx, { accountId: 1, runId: id, targetPrId: pr, viewedPrId: pr })).kind).toBe('already_posted');
+    release();
+    expect((await first).kind).toBe('posted');
+    expect((await postStoryGapsComment(ctx, { accountId: 1, runId: id, targetPrId: pr, viewedPrId: pr })).kind).toBe('already_posted');
+    expect(postFinding).toHaveBeenCalledTimes(1);
+  });
+
+  it('the body counts what did not fit, and only what fit is stamped', async () => {
+    const { storyGapsCommentBody } = await import('./post-item.js');
+    const gap = (i: number) => ({ ref: `AC${i}`, status: 'partly_met' as const, title: `T${i}`, body: 'x'.repeat(400), path: null, line: null });
+    const out = storyGapsCommentBody({ ticketName: 'BMD-7', headSha: 'abcdef123', gaps: [gap(1), gap(2), gap(3)], notAsked: [], budget: 1300 });
+    expect(out.gaps).toBe(2);
+    expect(out.body).toContain('**AC1 · Partly met:** T1');
+    expect(out.body).toContain('1 more did not fit in this comment.');
+    expect(out.body).not.toContain('<!--');
+    expect(storyGapsCommentBody({ ticketName: 'K', headSha: 'a', gaps: [{ ...gap(1), body: 'evil <!-- pierre:claude-review x -->' }], notAsked: [] }).body).not.toContain('<!--');
   });
 });
 

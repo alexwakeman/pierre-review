@@ -246,8 +246,8 @@ import type {
   WorkPlanResponse,
   SetWorkspaceAutoReviewBody,
   WorkspaceAutoReviewResponse,
-  PostTicketItemBody,
-  PostTicketItemResponse,
+  PostStoryGapsBody,
+  PostStoryGapsResponse,
   PrTicketReviewsResponse,
   StartTicketReviewBody,
   StartTicketReviewResponse,
@@ -1544,14 +1544,14 @@ export const api = {
       '/api/ticket-reviews/states',
       jsonBody('POST', { idents } satisfies TicketReviewStatesBody),
     ).then((r) => handle<TicketReviewStatesResponse>(r)),
-  // Post ONE item as a PR comment, on its owner PR (else the PR being viewed). ⚠ A response with
-  // `visible: false` and a non-null `commentId` IS on GitHub: never retry it (a retry
-  // double-posts); a second post of the same item is a 409 AlreadyPosted.
-  postTicketItem: (ticketReviewId: number, itemId: number, viewedPrId: number) =>
+  // Post every not-yet-posted story gap whose target is `targetPrId` (its owner PR, else the PR
+  // being viewed) as ONE PR comment. ⚠ A response with `visible: false` and a non-null `commentId`
+  // IS on GitHub: never retry it (a retry double-posts); a second post is a 409 AlreadyPosted.
+  postStoryGaps: (ticketReviewId: number, viewedPrId: number, targetPrId: number) =>
     fetch(
-      `/api/ticket-reviews/${ticketReviewId}/items/${itemId}/post`,
-      jsonBody('POST', { viewedPrId } satisfies PostTicketItemBody),
-    ).then((r) => handle<PostTicketItemResponse>(r)),
+      `/api/ticket-reviews/${ticketReviewId}/post`,
+      jsonBody('POST', { viewedPrId, targetPrId } satisfies PostStoryGapsBody),
+    ).then((r) => handle<PostStoryGapsResponse>(r)),
 
   // ---- CI review (CORE, local-only): why checks failed on a PR's head, a run of its own ----
   // docs/API.md § CI review. Live progress is an SSE GET at `/api/ci-reviews/:id/stream`, read

@@ -1094,15 +1094,25 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   that THREW or was cut off by a restart stores no fingerprint (`retryable`, the boot reconcile), so
   it is.
 - **Posted by a click, or by AUTO-POSTING when the owner PR's workspace switched it on** (§
-  Auto-posting — automatic runs only, owner PR only). One Post button per unmet / partly met / missing item, targeting
-  `owner_pr_id` (Claude's `expectedIn` member), else the viewed PR, pinned to the head the run
-  judged (`HeadMoved` otherwise). A re-raised item inherits its earlier posting (`prior_item_id`), so
-  nothing posts twice; only the ticket's latest succeeded run may post (`Superseded`). ⚠ The route
-  takes its in-process claim BEFORE the "already posted?" check and re-reads the item inside it — a
-  check made before the claim can be answered by a request that has since posted and released it.
-  The SPA says "Already posted" only for `AlreadyPosted`; `HeadMoved` / `Superseded` keep the button
-  and print the reason. The body
-  carries the `<!-- pierre:claude-review` marker, so it never triggers an auto PR review.
+  Auto-posting — automatic runs only, owner PR only). ⚠ **THE GAPS GO AS ONE PR-LEVEL COMMENT PER
+  (run, target PR)** (`ticket-review/post-item.ts` `postStoryGapsComment`, `POST
+  /api/ticket-reviews/:id/post {viewedPrId, targetPrId}`) — never one comment per item, never inline.
+  An item's target is `owner_pr_id` (Claude's `expectedIn` member), else the viewed PR; the SPA shows
+  ONE "Post N gaps to <PR>" button per target (`lib/ticketReview.ts` `storyGapGroups`, the server's
+  own selection, so N is what goes in), and the per-item Post buttons are GONE. Pinned to the head
+  the run judged (`HeadMoved` otherwise). The body (`storyGapsCommentBody`): "**BMD-7 story check**
+  on abc1234: 3 gaps." then one block per gap ("**AC2 · Not met:** <criterion>", the file line when it
+  belongs in that PR, the explanation), then — auto only, when that kind is on — "#### Not asked for"
+  with its entries; built under 60,000 characters, what does not fit COUNTED and left unposted. ⚠
+  "Never twice" stays PER ITEM: after the 201 EVERY item in the comment is stamped with the one comment
+  id (the posted_* columns); a later check posts a NEW collated comment of only the gaps not yet posted
+  (nothing is ever edited). A re-raised item inherits its earlier posting (`prior_item_id`); only the
+  ticket's latest succeeded run may post (`Superseded`). ⚠ The in-process claim (keyed `run:targetPr`
+  AND holding every item id it may post) is taken BEFORE the "already posted?" check and the run is
+  re-read inside it — a check made before the claim can be answered by a request that has since posted
+  and released it. The SPA says "Already posted" only for `AlreadyPosted`; `HeadMoved` / `Superseded`
+  keep the button and print the reason. The body ends with the footer (auto) + the finding marker, so
+  it never triggers an auto PR review.
 - **AI Fix**: a MANUAL review-seeded fix includes the items this PR owns from each ticket's latest
   succeeded run (refs `S<t>-AC<n>` / `S<t>-M<n>`); an AUTO fix never does. Those items are model
   text drawn from Jira and other people's PRs, and the fixer WRITES — so it, too, runs behind the
@@ -1580,10 +1590,12 @@ auto-posting: claim before any GitHub write, never retried.
   for good) both manual post routes answer `409 AutoPostInProgress`.
 - **STORY GAPS** (`ticket-review/auto-post.ts`): posted ONLY on the member PR the run names as the
   owner (`owner_pr_id`, Claude's `expectedIn` — the manual button's target); NO owner ⇒ not posted.
-  The owner's OWN workspace decides (switch, kind, scope) and it must pass the same PR rules. Each
-  item goes through `postTicketItem` (`ticket-review/post-item.ts`, extracted from the route): the
+  The owner's OWN workspace decides (switch, kind, scope) and it must pass the same PR rules. ONE
+  collated comment per target PR — its gaps, then its "Not asked for" entries under their own heading
+  — through `postStoryGapsComment` (`ticket-review/post-item.ts`, the manual route's own function): the
   SAME synchronous claim, the same in-claim re-read, `postedInChain` and the Superseded check, so a
-  click and an auto post cannot both land. Never twice across runs: the item's own / inherited
+  click and an auto post cannot both land; every item in it is stamped with the one comment id and a
+  "Not asked for" entry records it too. Never twice across runs: the item's own / inherited
   posting (`prior_item_id`), plus any earlier run's item with the same `ticketItemMatchKey`. Only
   the ticket's LATEST succeeded run posts (`not_latest`). "Not asked for" items have no row: they post
   on the member that did them (`prId`), and their postings live on `ticket_reviews.auto_post.

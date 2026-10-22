@@ -9,10 +9,11 @@
 //     Check / Re-check (mutation key `['ticket-review-start', ident]`, shared with Open PRs);
 //   - a currency pill the SERVER computed ("Checked against 3 PRs", "web#412 pushed since"), and
 //     how long ago the shown run finished ("reviewed 2 hours ago");
-//   - criteria with status and attribution; one Post per unmet item, on the PR it belongs to;
+//   - criteria with status and attribution; ONE "Post N gaps to …" per PR the unmet items belong
+//     on, each posting its gaps as one collated comment;
 //   - SLIM where the story view holds the whole story (`slimStoryCheck`: a tracker ticket,
 //     tracker on, an open PR on it): only THIS PR's share (`prTicketShare`, lib/ticketShare.ts) —
-//     what it delivers, what belongs in it, each with its Post — "What this PR adds" (its contribution
+//     what it delivers, what belongs in it, one "Post N gaps to this PR" — "What this PR adds" (its contribution
 //     card at its current head, when it has one), a count of the rest, and "See the
 //     whole story", which opens the ticket's STORY VIEW tab (`useOpenStory`). A pasted (`manual:`) story keeps the full
 //     view: no stack exists for it. The result pieces are shared with the stack
@@ -91,6 +92,7 @@ import {
   MissingList,
   NotRequestedList,
   PrCardDisclosure,
+  StoryGapsPost,
   TicketResults,
   type OpenInChanges,
 } from './TicketReviewParts.js';
@@ -108,7 +110,7 @@ const storyDrafts = createTicketDraftStore<TicketDraft[]>();
 
 /**
  * THIS PR's share of a ticket review (the slim block): the criteria it delivers, the unmet
- * criteria and missing items that belong in it (each with its Post), what it does that was not
+ * criteria and missing items that belong in it (ONE "Post N gaps to this PR" for them), what it does that was not
  * asked for, a count of the rest, and the link that opens the whole story (the story view tab).
  */
 function TicketShare({
@@ -143,6 +145,7 @@ function TicketShare({
   return (
     <div className="space-y-3">
       {empty && <p className={`text-xs ${MUTED}`}>No criteria are this PR’s.</p>}
+      <StoryGapsPost review={review} viewedPrId={pr.id} onlyThisPr />
       {share.criteria.length > 0 && (
         <ul className="space-y-1.5">
           {share.criteria.map((c) => (
@@ -484,7 +487,8 @@ export function TicketCoverageSection({
           </p>
           <p className="mt-2">
             When auto review is on, a ticket is checked again on its own once one of its PRs is
-            pushed, joins or leaves. Nothing is posted until you press Post.
+            pushed, joins or leaves. Nothing is posted until you press Post: the gaps that belong on
+            a PR go to it as one comment.
           </p>
           <p className="mt-2">
             A story marked “Checked on this PR only” was judged by an earlier PR review against
