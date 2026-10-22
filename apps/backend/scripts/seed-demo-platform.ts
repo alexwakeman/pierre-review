@@ -8,9 +8,11 @@
 //     Dependencies.
 //   • THE WRITTEN SUMMARIES (bot themes, Chronology pointers, a drill-down's clusters) through their
 //     real POST routes, with the model answered by a FAKE Anthropic Messages endpoint in this process
-//     (127.0.0.1, an ephemeral port): `SUMMARY_ANTHROPIC_API_KEY` sends those calls down the raw API
-//     path, and `ANTHROPIC_BASE_URL` points that path here. Each answer is built from the request's
-//     own JSON (the ids it may cite), so the product's validators accept it.
+//     (127.0.0.1, an ephemeral port): a placeholder `ANTHROPIC_API_KEY` with `LIMN_AI_USE_API_KEY=true`
+//     sends those calls down the ladder's raw API-key rung even when a Claude login exists (never the
+//     developer's real login), and `ANTHROPIC_BASE_URL` points that rung here. All three are restored
+//     afterwards. Each answer is built from the request's own JSON (the ids it may cite), so the
+//     product's validators accept it.
 //   • THE WORK-PLAN WORDING and the IMPACT NOTES run on the local Claude route in the product, so
 //     they are stored through their own exported pieces (the evidence fold, the payload hash, the
 //     output parser, the runner) with a written answer.
@@ -207,8 +209,15 @@ export async function seedDemoPlatform(c: PlatformSeedCtx): Promise<Record<strin
     { match: FLOW_POINTERS_SYSTEM, answer: flowPointersAnswer },
     { match: SYNTHESIS_SYSTEM, answer: synthesisAnswer },
   ]);
+  // The API-key rung, FIRST even over a Claude login (ai/credentials.ts), pointed at the fake server.
+  const prevEnv = {
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+    LIMN_AI_USE_API_KEY: process.env.LIMN_AI_USE_API_KEY,
+    ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+  };
   process.env.ANTHROPIC_BASE_URL = fake2.url;
-  process.env.SUMMARY_ANTHROPIC_API_KEY = 'sk-ant-demo-not-a-key';
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-demo-not-a-key';
+  process.env.LIMN_AI_USE_API_KEY = 'true';
 
   const { buildApp } = await import('../src/app.js');
   const { bindPlatform } = await import('../src/platform/context.js');
@@ -272,7 +281,10 @@ export async function seedDemoPlatform(c: PlatformSeedCtx): Promise<Record<strin
   } finally {
     await app.close();
     fake2.server.close();
-    delete process.env.SUMMARY_ANTHROPIC_API_KEY;
+    for (const [k, v] of Object.entries(prevEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
   }
 
   // ---- 5. the work-plan wording (stored as the route stores it) ----
