@@ -95,6 +95,7 @@ async function run(
   findings: F[],
   trigger: 'auto' | 'manual' = 'auto',
   verdict: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES' = 'COMMENT',
+  followUp: any = null,
 ): Promise<number> {
   const id = await persist.insertQueuedReview(ctx, prId, 'HEAD', 'claude-opus-5-5' as any, 1, [], trigger);
   await persist.saveReviewSuccess(ctx, id, {
@@ -106,6 +107,7 @@ async function run(
     outputTokens: null,
     numTurns: 1,
     excludedFiles: [],
+    ...(followUp ? { followUp } : {}),
     findings: findings.map((f, i) => ({
       path: f.path ?? 'src/a.ts',
       line: 10 + i,
@@ -1014,6 +1016,86 @@ describe("lifting Limn's own automatic request for changes", () => {
     const b = await run(pr, [], 'auto', 'APPROVE');
     expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps())).toEqual({ kind: 'skipped', reason: 'nothing_new' });
     expect(dismissReview).not.toHaveBeenCalled();
+  });
+
+  /** A follow-up record judging earlier findings (blockers) with the given statuses. */
+  const followUpOf = (items: Array<{ id: number; status: string }>) => ({
+    priorReviewId: 0,
+    priorHeadSha: 'HEAD',
+    headMoved: false,
+    changesSinceShown: false,
+    items: items.map((it, i) => ({
+      ref: it.status === 'not_checked' ? null : `P${i + 1}`,
+      priorFindingId: it.id,
+      sent: it.status !== 'not_checked',
+      carried: false,
+      status: it.status,
+      explanation: null,
+      path: 'src/a.ts',
+      line: 10,
+      side: 'RIGHT',
+      severity: 'blocker',
+      title: 'Null deref',
+    })),
+  });
+
+  it('an earlier blocker left NOT CHECKED holds the lift: no dismissal, no APPROVE over it', async () => {
+    const pr = await blockedPr();
+    const [blocker] = await findingsOf((await db.select().from(schema.claudeReviews).where((await import('drizzle-orm')).eq(schema.claudeReviews.prId, pr)).execute())[0].id);
+    // Verdict switched off: a clean run would dismiss — but the blocker was never judged.
+    await setPost(true, { autoVerdict: false });
+    const b = await run(pr, [{ severity: 'warning', title: 'Slow loop' }], 'auto', 'COMMENT', followUpOf([{ id: blocker.id, status: 'not_checked' }]));
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps());
+    expect(postReview.mock.calls[0]![0].verdict).toBe('COMMENT');
+    expect(dismissReview).not.toHaveBeenCalled();
+    expect((await rec(b)).liftedBlock).toBeUndefined();
+    // Verdict on, Claude approves: the APPROVE would supersede the block, so it is held too.
+    await setPost(true, { autoVerdict: true });
+    const c = await run(pr, [], 'auto', 'APPROVE', followUpOf([{ id: blocker.id, status: 'not_checked' }]));
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: c }, liftDeps());
+    expect(postReview.mock.calls.filter((call) => call[0].verdict === 'APPROVE')).toHaveLength(0);
+    expect(dismissReview).not.toHaveBeenCalled();
+    const r = await rec(c);
+    expect(r.verdict).toMatchObject({ wanted: 'APPROVE', submitted: 'COMMENT', heldReason: 'already_requested' });
+    expect(r.liftedBlock).toBeUndefined();
+    // Once a later run judges it addressed, the block lifts.
+    const d = await run(pr, [], 'auto', 'APPROVE', followUpOf([{ id: blocker.id, status: 'addressed' }]));
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: d }, liftDeps());
+    expect(await rec(d)).toMatchObject({ verdict: { submitted: 'APPROVE' }, liftedBlock: { how: 'superseded' } });
+  });
+
+  it('a blocker of the blocking run that never reached GitHub holds the lift', async () => {
+    await setPost(true, { scope: 'all', autoVerdict: true });
+    const pr = await makePr({ author: 'alice' });
+    // GitHub takes only the FIRST finding: the second blocker is never posted, so never followed up.
+    postReview.mockImplementation(async (a: any) => ({
+      postedReviewId: 'R1',
+      inlineFindingIds: [a.includedFindings[0].id],
+      prComments: [],
+      commentCount: 1,
+      prCommentCount: 0,
+    }));
+    const a = await run(pr, [
+      { severity: 'blocker', title: 'Null deref' },
+      { severity: 'blocker', title: 'Race in the cache', path: 'src/cache.ts' },
+    ]);
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: a }, liftDeps());
+    expect(await rec(a)).toMatchObject({ githubReviewId: 'R1', status: 'partial', verdict: { submitted: 'REQUEST_CHANGES' } });
+    const [posted] = (await findingsOf(a)).filter((f: any) => f.postedAt != null);
+    githubTakesAll();
+    postReview.mockClear();
+    liveReviewList = [{ id: 'R1', login: 'me', state: 'CHANGES_REQUESTED' } as any];
+    // The posted blocker is judged addressed; the unposted one was never judged.
+    await setPost(true, { autoVerdict: false });
+    const b = await run(pr, [], 'auto', 'APPROVE', followUpOf([{ id: posted.id, status: 'addressed' }]));
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps());
+    expect(dismissReview).not.toHaveBeenCalled();
+    await setPost(true, { autoVerdict: true });
+    const c = await run(pr, [], 'auto', 'APPROVE', followUpOf([{ id: posted.id, status: 'addressed' }]));
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: c }, liftDeps());
+    expect(postReview.mock.calls.filter((call) => call[0].verdict === 'APPROVE')).toHaveLength(0);
+    expect(dismissReview).not.toHaveBeenCalled();
+    expect((await rec(c)).verdict).toMatchObject({ wanted: 'APPROVE', heldReason: 'already_requested' });
   });
 
   it('with no automatic block on record, a clean run reads no reviews at all', async () => {

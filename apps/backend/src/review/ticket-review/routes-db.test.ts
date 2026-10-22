@@ -198,6 +198,22 @@ describe('POST /api/ticket-reviews/:id/post', () => {
     expect(body).toContain('**AC1 · Not met:** CSV');
     expect(body).not.toContain('PDF');
   });
+
+  it('⚠ two posts to DIFFERENT target PRs at once never both carry the same un-owned gap', async () => {
+    const third = await run([{ ref: 'AC5', ownerPrId: null, title: 'JSON' }]);
+    let n = 0;
+    postFinding.mockImplementation(async () => ({ commentId: `gh-c${(n += 1)}`, postedCommentKind: 'pr_comment' as const }));
+    const { postStoryGapsComment } = await import('./post-item.js');
+    // Two readers, each looking at a different member PR: (run, api) and (run, web) are two claims.
+    const outs = await Promise.all([
+      postStoryGapsComment(ctx, { accountId: 1, runId: third, targetPrId: pr.api!, viewedPrId: pr.api! }),
+      postStoryGapsComment(ctx, { accountId: 1, runId: third, targetPrId: pr.web!, viewedPrId: pr.web! }),
+    ]);
+    const bodies = postFinding.mock.calls.map((c) => ((c as unknown[])[0] as any).finding.body as string);
+    expect(bodies.filter((b) => b.includes('JSON'))).toHaveLength(1);
+    expect(outs.map((o) => o.kind).sort()).toEqual(['already_posted', 'posted']);
+    postFinding.mockImplementation(async () => ({ commentId: 'gh-1', postedCommentKind: 'pr_comment' as const }));
+  });
 });
 
 describe('POST /api/ticket-reviews', () => {
