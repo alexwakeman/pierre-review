@@ -267,7 +267,7 @@ export function registerSonarRoutes(app: FastifyInstance, ctx: SonarRouteCtx): v
           case 'not_found':
             return notFound(reply, 'SonarCloud snapshot');
           case 'nothing_to_post':
-            return reply.code(409).send({ error: 'NothingToPost', message: 'SonarCloud found nothing to post on this commit.' });
+            return reply.code(409).send({ error: 'NothingToPost', message: 'Nothing new to post on this commit: every issue is already on GitHub, or there are none.' });
           case 'already_posted':
             return reply.code(409).send({ error: 'AlreadyPosted', message: 'These SonarCloud findings were already posted for this commit.' });
           case 'head_moved':
