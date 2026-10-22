@@ -7,8 +7,8 @@ contact form's API.
 
 **Limn is local-only and 100% free.** There is no hosted app, no sign-in and no paid tier,
 so the site's calls to action are **Try the demo** (`/demo/`, a static build of the app on
-sample data) and the npm command (`npx limn-review`). The one limit — an organisation with
-more than three people using it needs a licence — is stated in the hero, in the closing
+sample data) and the npm command (`npx limn-review`). The one limit — free for individuals and for
+organisations where no more than three people use it; more users than that need a licence — is stated in the hero, in the closing
 block on every page, on `/contact` and in `/terms`, always from `FREE_TEAM_SIZE` in
 `src/lib/site.ts` (which mirrors the Limn License at the repository root).
 

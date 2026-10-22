@@ -1,8 +1,8 @@
 // A fixed-window rate limiter, in memory, keyed by client IP.
 //
 // The site runs as ONE process, so a Map is the whole store. The contact form is the
-// only limited surface: its cost is a PERSON READING A MESSAGE, so the bucket is tight
-// (five an hour, shared by the ticket mint and the submit).
+// only limited surface: its cost is a PERSON READING A MESSAGE, so the submit bucket is
+// tight (five an hour). The ticket mint has its own, looser bucket.
 
 export class FixedWindowLimiter {
   private readonly hits = new Map<string, { count: number; resetAt: number }>();

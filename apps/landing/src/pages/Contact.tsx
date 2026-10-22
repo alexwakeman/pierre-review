@@ -14,19 +14,19 @@ import { ContactForm } from '../components/ContactForm';
 // ---------------------------------------------------------------------------
 // Contact — and the way an organisation gets a licence.
 //
-// Limn is free for individuals and for teams of up to FREE_TEAM_SIZE people in one
-// organisation (the Limn License at the repository root). An organisation with more
-// people than that needs a commercial licence, and there is no checkout: it starts
+// Limn is free for individuals, and for organisations where no more than FREE_TEAM_SIZE
+// people use it (the Limn License at the repository root). More users than that need a
+// commercial licence, and there is no checkout: it starts
 // with a message here. So the first sentence says who this page is for, and the
-// form opens on the licence topic when the visitor arrives from a "bigger team" link
+// form opens on the licence topic when the visitor arrives from a licence link
 // (`?topic=licence`).
 //
 // NO PHONE NUMBER, NO ADDRESS, NO "our team". It is one person answering, the
 // page says so, and that is the most useful true thing on it.
 //
 // /pricing RESOLVES TO THIS PAGE (App.tsx and prerender.mjs): somebody asking what it
-// costs finds the answer in the first two lines — nothing, unless the organisation
-// is bigger than FREE_TEAM_SIZE people.
+// costs finds the answer in the first two lines — nothing, unless more than
+// FREE_TEAM_SIZE people in the organisation use it.
 // ---------------------------------------------------------------------------
 
 export default function Contact(): JSX.Element {
@@ -39,12 +39,11 @@ export default function Contact(): JSX.Element {
           Contact
         </MonoLabel>
         <h1 className="mb-6 max-w-[19ch] text-pretty font-display text-hero-sm font-semibold text-ink type:text-page-title">
-          A bigger team? Ask for a licence here.
+          More than {FREE_TEAM_SIZE} users? Ask for a licence here.
         </h1>
         <p className="mb-[34px] max-w-lede text-pretty text-lede text-ink-soft">
-          {SITE_NAME} is free for individuals and for teams of up to {FREE_TEAM_SIZE} people in
-          one organisation. If more than {FREE_TEAM_SIZE} people in your organisation use it,
-          you need a licence. Send a message and we will sort one out. Questions and bug
+          {SITE_NAME} is free for individuals, and for organisations where no more than{' '}
+          {FREE_TEAM_SIZE} people use it. More users than that need a licence. Send a message and we will sort one out. Questions and bug
           reports are welcome here too.
         </p>
         <div className="mb-4 flex flex-wrap items-center gap-3.5">
@@ -52,7 +51,8 @@ export default function Contact(): JSX.Element {
           <UnderlineLink to={LICENSE_URL}>Read the licence →</UnderlineLink>
         </div>
         <p className="mb-11 max-w-reassure font-mono text-mono-nav text-secondary">
-          Using it on your own, or with up to {FREE_TEAM_SIZE} people? You need none of this —
+          Using it on your own, or no more than {FREE_TEAM_SIZE} people in your organisation use
+          it? You need none of this —
           run <span className="text-ink">{INSTALL_COMMAND}</span> and it works today.
         </p>
       </header>

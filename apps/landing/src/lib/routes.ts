@@ -40,8 +40,8 @@ export type RouteSeo = {
  * content now sits on one page per reader.
  *
  * /contact is the fourth, and it is load-bearing rather than courtesy: an
- * organisation with more than FREE_TEAM_SIZE people needs a licence, and this
- * is where it asks. See src/pages/Contact.tsx.
+ * organisation where more than FREE_TEAM_SIZE people use Limn needs a licence,
+ * and this is where it asks. See src/pages/Contact.tsx.
  *
  * /demo/ is NOT a landing route. It is a separate static build of the app with
  * sample data, served by apps/site — so it is absent here and from the sitemap.
@@ -66,8 +66,8 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
     description: `Throughput, lead time and where the waiting happens across every repository you own, with people counted apart from automation. A forwardable report per sprint, an hour-by-hour account of who was holding each pull request, and a keep / tune / rarely used verdict on every review bot you pay for. Free, on your own machine.`,
   },
   '/contact': {
-    title: `Contact — licences for bigger teams, questions and bug reports`,
-    description: `${SITE_NAME} is free for individuals and for teams of up to ${FREE_TEAM_SIZE} people in one organisation. If more than ${FREE_TEAM_SIZE} people in your organisation use it, ask for a licence here. Questions and bug reports are welcome too.`,
+    title: `Contact — licences, questions and bug reports`,
+    description: `${SITE_NAME} is free for individuals, and for organisations where no more than ${FREE_TEAM_SIZE} people use it. More users than that need a licence: ask for one here. Questions and bug reports are welcome too.`,
   },
   '/how-we-measure': {
     title: 'How we measure — the two models, in plain English',
@@ -83,7 +83,7 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   },
   '/terms': {
     title: `Terms of use — ${SITE_NAME}`,
-    description: `The terms for this website and the ${SITE_NAME} software, a summary of the Limn License — free for individuals and teams of up to ${FREE_TEAM_SIZE} people — and the limits of liability.`,
+    description: `The terms for this website and the ${SITE_NAME} software, a summary of the Limn License — free for individuals, and for organisations where no more than ${FREE_TEAM_SIZE} people use it — and the limits of liability.`,
   },
 };
 

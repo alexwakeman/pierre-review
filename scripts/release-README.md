@@ -9,6 +9,12 @@ There's no hosted backend, no database server, and no stored credentials. It
 authenticates by shelling out to your already-logged-in `gh` CLI, syncs activity
 into a local SQLite file, and serves the dashboard from a single local process.
 
+**100% free.** Every feature, no paid tier, no sign-up (see [License](#license)
+for the one limit, on large organisations).
+
+**Try it first:** the [live demo](https://pierre-review.com/demo/) is the real
+app on sample data, in your browser. No install, no sign-in.
+
 > **Renamed.** This package used to be `pierre-review`. The command is now `limn`
 > (the `pierre-review` package now only forwards to this one, and says so). On first start, an existing
 > `~/.pierre-review` is moved to `~/.limn` — your database, settings and clones
@@ -32,9 +38,11 @@ limn
 ## Review and fix with Claude — free, on your own Claude
 
 Claude Review (a code review of any PR, follow-ups, a check against a user
-story you paste, and a chat about the review) and AI Fix are free. They run on
-your own Claude Code login or Anthropic API key: sign in to Claude Code, or set
-`ANTHROPIC_API_KEY`. Limn stores no key and charges nothing for it.
+story you paste, and a chat about the review) and AI Fix are free. By default
+they use your local Claude Code login: if you are signed in to Claude Code,
+there is nothing to set up. An Anthropic API key is the alternative: set
+`ANTHROPIC_API_KEY`. Limn stores no key and charges nothing for it. Codex
+support is coming soon.
 
 - **First use downloads the AI runtime, once (about 110 MB).** Press
   **Set up AI** in the app, or run `limn ai install`. It goes to
@@ -48,7 +56,6 @@ your own Claude Code login or Anthropic API key: sign in to Claude Code, or set
 - `LIMN_AI_USE_API_KEY=true` uses `ANTHROPIC_API_KEY` even when you are signed
   in to Claude Code.
 - `LIMN_AI_DISABLED=true` turns every AI feature off.
-- Today it targets Claude users. Codex support is coming soon.
 
 ## Prerequisites
 
@@ -129,9 +136,9 @@ locally instead — a larger database, but PR detail then works fully offline.
 ## License
 
 Source-available under the **Limn License 1.0** — see [LICENSE](./LICENSE).
-Limn is free for individuals and for any team or organisation where 3 people or
-fewer use it. More than 3 people in one organisation need a commercial licence —
-ask through the [contact form](https://pierre-review.com/contact). You may
+Limn is free for individuals, and for organisations where no more than 3 people
+use it (affiliates count together). More users than that need a licence — ask
+through the [contact form](https://pierre-review.com/contact?topic=licence). You may
 **not** offer Limn, or a product built from it, as a competing commercial
 product or service.
 The AI runtime Limn downloads on first use is Anthropic's, under Anthropic's own

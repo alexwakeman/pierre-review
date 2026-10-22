@@ -49,8 +49,14 @@ export interface SiteOptions {
   now?: () => number;
 }
 
-/** Contact submissions and ticket mints per IP per hour. */
+/** Contact submissions per IP per hour. Only POST /api/contact counts against it. */
 export const CONTACT_LIMIT = 5;
+/**
+ * Ticket mints per IP per hour. Looser than CONTACT_LIMIT: a ticket is fetched on every
+ * page load of /contact and costs nothing, and sending still needs the POST, which is
+ * the tight bucket. Sharing one bucket meant five reloads locked the form for an hour.
+ */
+export const TICKET_LIMIT = 60;
 const HOUR = 60 * 60 * 1000;
 /** A contact message is at most a few kB; anything larger is not one. */
 const MAX_BODY_BYTES = 16 * 1024;
@@ -128,11 +134,12 @@ export function createSiteHandler(opts: SiteOptions): (req: IncomingMessage, res
   const signer = new TicketSigner(opts.ticketSecret);
   const contactConfigured = normalizeContactWebhookUrl(opts.contactWebhookUrl) != null;
   const contactLimiter = new FixedWindowLimiter(CONTACT_LIMIT, HOUR);
+  const ticketLimiter = new FixedWindowLimiter(TICKET_LIMIT, HOUR);
   const log = opts.logger;
 
-  function limited(req: IncomingMessage, res: ServerResponse): boolean {
+  function limited(req: IncomingMessage, res: ServerResponse, limiter: FixedWindowLimiter): boolean {
     const ip = clientIp(req.headers['x-forwarded-for'], req.socket.remoteAddress, opts.trustProxyHops);
-    const retryAfter = contactLimiter.consume(ip, now());
+    const retryAfter = limiter.consume(ip, now());
     if (retryAfter == null) return false;
     res.setHeader('Retry-After', String(retryAfter));
     sendJson(res, 429, {
@@ -148,7 +155,7 @@ export function createSiteHandler(opts: SiteOptions): (req: IncomingMessage, res
       sendJson(res, 403, { error: 'Forbidden', message: 'Cross-origin request blocked.' });
       return;
     }
-    if (limited(req, res)) return;
+    if (limited(req, res, contactLimiter)) return;
     if (!contactConfigured) {
       sendJson(res, 503, {
         error: 'contact_unavailable',
@@ -251,7 +258,7 @@ export function createSiteHandler(opts: SiteOptions): (req: IncomingMessage, res
     }
     if (path === '/api/contact/ticket') {
       if (method !== 'GET') return methodNotAllowed(res, 'GET');
-      if (limited(req, res)) return;
+      if (limited(req, res, ticketLimiter)) return;
       // With no webhook configured it 503s here, so the page can say so BEFORE someone
       // writes two hundred words into a form with nowhere to send them.
       if (!contactConfigured) {

@@ -47,7 +47,8 @@ export const REPO_URL = 'https://github.com/alexwakeman/pierre-review';
 export const DEMO_PATH = '/demo/';
 
 /**
- * How many people in one organisation may use Limn without a licence. Mirrors the
+ * How many people in one organisation (affiliates counted together) may use Limn
+ * without a licence. Mirrors the
  * Limn License at the repository root — change both together.
  */
 export const FREE_TEAM_SIZE = 3;
