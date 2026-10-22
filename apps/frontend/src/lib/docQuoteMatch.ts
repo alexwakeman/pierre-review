@@ -82,3 +82,33 @@ export function findQuoteRanges(
   }
   return tryFrom(body);
 }
+
+/** The bit of an element the header skip reads — a real `Element` satisfies it; a test passes a fake. */
+export interface HeaderSibling {
+  tagName: string;
+  nextElementSibling: HeaderSibling | null;
+}
+
+/**
+ * The last element of a section's SERVER-WRITTEN header, given its title (the H1): the ONE
+ * crumbs-and-nav blockquote right after it, else the title itself. ⚠ Exactly what the server's
+ * `sectionBodyOf` (backend reference-docs/review-refs.ts) leaves off — a body that OPENS with its own
+ * blockquote is body, so a quote the server checked inside it must be findable here.
+ */
+export function sectionHeaderEnd<T extends HeaderSibling>(title: T): T {
+  const next = title.nextElementSibling;
+  return next != null && next.tagName === 'BLOCKQUOTE' ? (next as T) : title;
+}
+
+/**
+ * What the viewer did with a quote: found AND painted, found but not painted (this browser has no CSS
+ * Custom Highlight API — the passage is scrolled to, nothing is drawn), or not there.
+ */
+export type QuoteOutcome = 'painted' | 'found' | 'missing';
+
+/** The strip's sentence for an outcome — it never claims a highlight that was not drawn. */
+export function quoteStripText(outcome: QuoteOutcome): string {
+  if (outcome === 'painted') return 'The quoted passage is highlighted.';
+  if (outcome === 'found') return 'Scrolled to the quoted passage.';
+  return 'The quoted words are no longer in this section.';
+}

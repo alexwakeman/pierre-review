@@ -5,7 +5,17 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend docQuoteMatch
 import { describe, expect, it } from 'vitest';
 import { foldForQuote, foldRenderedText } from '@pierre-review/shared';
-import { findQuoteRanges, type QuoteMatchRange, type QuoteTextSegment } from '../src/lib/docQuoteMatch.js';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  findQuoteRanges,
+  quoteStripText,
+  sectionHeaderEnd,
+  type HeaderSibling,
+  type QuoteMatchRange,
+  type QuoteTextSegment,
+} from '../src/lib/docQuoteMatch.js';
 import { borrowedQuote } from '../src/lib/docReferences.js';
 
 const seg = (text: string, block: number): QuoteTextSegment => ({ text, block });
@@ -127,4 +137,53 @@ describe('borrowedQuote', () => {
     expect(borrowedQuote(c, null)).toBeNull();
     expect(borrowedQuote(c, [ref('h/sections/09-z.md', null, 'x')])).toBeNull();
   });
+});
+
+describe('sectionHeaderEnd — the same header the server’s sectionBodyOf leaves off', () => {
+  // A rendered section: H1, the ONE crumbs-and-nav blockquote (render.ts writes `> crumbs` and
+  // `> nav` as adjacent lines, so one blockquote), then the body.
+  const chain = (...tags: string[]): HeaderSibling[] => {
+    const els: HeaderSibling[] = tags.map((tagName) => ({ tagName, nextElementSibling: null }));
+    for (let i = 0; i + 1 < els.length; i += 1) els[i]!.nextElementSibling = els[i + 1]!;
+    return els;
+  };
+
+  it('skips the header blockquote', () => {
+    const [h1, header] = chain('H1', 'BLOCKQUOTE', 'P');
+    expect(sectionHeaderEnd(h1!)).toBe(header);
+  });
+
+  it('a body that OPENS with its own blockquote keeps it as body', () => {
+    const [h1, header, bodyQuote] = chain('H1', 'BLOCKQUOTE', 'BLOCKQUOTE', 'P');
+    expect(sectionHeaderEnd(h1!)).toBe(header);
+    expect(sectionHeaderEnd(h1!)).not.toBe(bodyQuote);
+  });
+
+  it('no header blockquote: the title alone', () => {
+    const [h1] = chain('H1', 'P');
+    expect(sectionHeaderEnd(h1!)).toBe(h1);
+  });
+});
+
+describe('quoteStripText', () => {
+  it('claims a highlight only when one was painted', () => {
+    expect(quoteStripText('painted')).toBe('The quoted passage is highlighted.');
+    expect(quoteStripText('found')).not.toMatch(/highlight/i);
+    expect(quoteStripText('missing')).toBe('The quoted words are no longer in this section.');
+  });
+});
+
+describe('every FindingRow mount passes the review’s docReferences', () => {
+  // A finding's citation borrows its quote from the review's references; a mount without them
+  // opens the section with no highlight (the AI Fix picker shipped that way).
+  const here = dirname(fileURLToPath(import.meta.url));
+  const files = ['components/ClaudeReviewTab.tsx', 'components/AiFix/FixPicker.tsx'];
+  for (const f of files) {
+    it(f, () => {
+      const text = readFileSync(join(here, '../src', f), 'utf8');
+      const mounts = text.split('<FindingRow').slice(1).map((s) => s.slice(0, s.indexOf('/>')));
+      expect(mounts.length).toBeGreaterThan(0);
+      for (const m of mounts) expect(m).toContain('docReferences=');
+    });
+  }
 });

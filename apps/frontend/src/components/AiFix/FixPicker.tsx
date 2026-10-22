@@ -253,6 +253,7 @@ export function FixPicker({
             alreadyPosted={alreadyPostedIds.has(f.id)}
             actions={false}
             selection={selection}
+            docReferences={source?.docReferences ?? null}
           />
         );
       }
