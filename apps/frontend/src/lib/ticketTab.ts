@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { createContext, useCallback, useContext } from 'react';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
 
 // THE ONE WAY TO OPEN A STORY (docs/FRONTEND.md § The story view). The story view is the ticket tab:
@@ -25,6 +25,22 @@ export interface OpenStoryArgs {
 export function useOpenStory(): (t: OpenStoryArgs) => void {
   const open = usePinnedTabs((s) => s.openTicketTab);
   return useCallback((t: OpenStoryArgs) => open({ ident: t.ident, key: t.key, title: t.title }, { fromActivity: true }), [open]);
+}
+
+/**
+ * A PAGE'S OWN WAY TO SHOW A STORY, for the ticket links drawn inside it. This Sprint provides one (its
+ * story TRAY beside the board), so a ticket key in a call-out or an Ask Claude answer opens the tray
+ * there; everywhere else nothing is provided and a link opens the story TAB. ⚠ `useOpenStory` stays the
+ * ONLY way to open the TAB — this override never opens a tab, and a page that wants the tab (the tray's
+ * own "Open story tab", the card's corner arrow) calls `useOpenStory` directly.
+ */
+export const StoryOpenOverride = createContext<((t: OpenStoryArgs) => void) | null>(null);
+
+/** What a ticket LINK does on click: the page's override when there is one, else the story tab. */
+export function useStoryLinkOpener(): (t: OpenStoryArgs) => void {
+  const override = useContext(StoryOpenOverride);
+  const tab = useOpenStory();
+  return override ?? tab;
 }
 
 /** The story tab's words: the chip, the chip's tooltip / accessible name, and its close button. Pure

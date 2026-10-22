@@ -11,6 +11,7 @@ import {
   BOTS_INNER_TABS,
   FEED_INNER_TABS,
   INSIGHTS_INNER_TABS,
+  sprintStoryFromUrl,
   sprintTabFromUrl,
   PR_DETAIL_TABS,
   freshFilterDefaults,
@@ -126,6 +127,9 @@ const NAV_KEYS = [
   // The This Sprint tab's Theme | Critical path | People | Merged so far strip — same reason as its
   // siblings.
   'sprintTab',
+  // The This Sprint story TRAY (`sprintStoryIdent`): opening a ticket beside the board is a
+  // navigation, so Back closes it.
+  'sprintStory',
   'prTab',
 ] as const;
 
@@ -472,6 +476,10 @@ export function readFromUrl(): Partial<FilterState> {
   // The retired `graph` (the force graph) lands on the Theme view, the landing view (`sprintTabFromUrl`).
   const sprintTab = sprintTabFromUrl(p.get('sprintTab'));
   if (sprintTab != null) out.sprintInnerTab = sprintTab;
+  // The story tray beside the board. Any non-blank ident is seated (the tray reads it like the story
+  // tab reads its own; an unknown one says so there); the serializer emits it on a board only.
+  const sprintStory = sprintStoryFromUrl(p.get('sprintStory'));
+  if (sprintStory != null) out.sprintStoryIdent = sprintStory;
   // PrDetail's inner tab, and it is only meaningful PAIRED with the PR tab `view=` names — the
   // store field is a {prId, tab} pair precisely so one PR's tab cannot be read on another's
   // screen. A `?prTab=` with no PR view (or on a `pr-focus`, which renders a timeline) seats
@@ -644,6 +652,8 @@ export function writeToUrl(s: FilterState): void {
     // The tab's sub-tab. ⚠ THE OMITTED VALUE IS THE CURRENT DEFAULT ('themes') — a bare
     // `?view=sprint` means it.
     if (s.sprintInnerTab !== 'themes') p.set('sprintTab', s.sprintInnerTab);
+    // The story tray, on the three boards only ("Merged so far" draws none).
+    if (s.sprintStoryIdent != null && s.sprintInnerTab !== 'merged') p.set('sprintStory', s.sprintStoryIdent);
   } else if (activeTab === 'activity') {
     p.set('view', 'activity');
     // The board's own narrowings, each emitted ONLY on the rail entry that renders it — a lens

@@ -14,7 +14,8 @@
 //            layer, the key and the list are the LANE BOARD's (components/LaneBoard.tsx), shared so
 //            This Sprint's boards and this grid draw one way.
 //   CHANGE   new / changed / unchanged is a WORD + icon on the card AND a border style (solid, dashed,
-//            plain) — never colour alone.
+//            plain) — never colour alone. A VISIBLE key under the grid names each border it draws (the
+//            lane board's shared `BorderKey`, swatches from CARD_CHANGE itself).
 //   CLICK    a card with files is a button: one file opens it in the Changes tab; several open a small
 //            list, each row opening its file. Which PR's Changes tab is the caller's `openFile`.
 //
@@ -33,8 +34,8 @@ import {
 } from '@floating-ui/react';
 import type { DesignCell, DesignDiagram, SequenceDiagramMember } from '@pierre-review/shared';
 import { claimActivePopover } from '../lib/activePopover.js';
-import { CHANGE_WORD, layoutDesign, memberForRef, prBadgeTexts } from '../lib/designGrid.js';
-import { ArrowKey, ArrowLayer, ArrowList, useRoutedArrows } from './LaneBoard.js';
+import { CHANGE_KEY_LABEL, CHANGE_WORD, changesPresent, layoutDesign, memberForRef, prBadgeTexts } from '../lib/designGrid.js';
+import { ArrowKey, ArrowLayer, ArrowList, BorderKey, useRoutedArrows } from './LaneBoard.js';
 import { PencilIcon, PlusIcon } from './Icons.js';
 
 export type OpenDesignFile = (cell: DesignCell, path: string) => void;
@@ -147,6 +148,12 @@ export function DesignGrid({
           </Fragment>
         ))}
       </div>
+      {/* The card borders, named on the surface (each swatch is the card's own classes); how the
+          design was drawn stays behind the heading's ⓘ. */}
+      <BorderKey
+        testId="design-border-key"
+        items={changesPresent(layout).map((k) => ({ key: k, label: CHANGE_KEY_LABEL[k], swatch: CARD_CHANGE[k] }))}
+      />
       <ArrowKey items={keyItems} />
       <ArrowList label="Hand-offs" items={layout.arrows.map((a) => ({ key: `${a.from}>${a.to}`, text: a.text }))} />
     </div>

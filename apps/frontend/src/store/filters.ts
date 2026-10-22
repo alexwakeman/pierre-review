@@ -94,6 +94,14 @@ export type SprintInnerTab = 'paths' | 'themes' | 'people' | 'merged';
 export const SPRINT_INNER_TABS: readonly SprintInnerTab[] = ['themes', 'paths', 'people', 'merged'];
 /** The `?sprintTab=` value a link carries, as a tab to SEAT: a member as itself, the retired `graph`
  *  as the Theme view, anything else nothing (the store keeps what it has). Pure. */
+/** The `?sprintStory=` value a link carries, as the tray's ticket ident: any non-blank string up to
+ *  SPRINT_STORY_IDENT_MAX characters, else nothing (the store keeps what it has). Pure. */
+export const SPRINT_STORY_IDENT_MAX = 600;
+export function sprintStoryFromUrl(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const t = raw.trim();
+  return t !== '' && t.length <= SPRINT_STORY_IDENT_MAX ? t : null;
+}
 export function sprintTabFromUrl(raw: string | null | undefined): SprintInnerTab | null {
   if (raw === 'graph') return 'themes';
   return (SPRINT_INNER_TABS as readonly string[]).includes(raw ?? '') ? (raw as SprintInnerTab) : null;
@@ -596,6 +604,12 @@ export interface FilterState {
   // Which inner sub-tab the This Sprint tab shows (see SprintInnerTab). Transient,
   // URL-serialized (`?sprintTab=paths`) only alongside `view=sprint`.
   sprintInnerTab: SprintInnerTab;
+  // The ticket whose story the This Sprint TRAY shows beside the board (Sprint/SprintStoryTray.tsx),
+  // as shared `trackerTicketIdent`; null = no tray. Transient (freshDefaults only, never in
+  // FilterDefaults — "Clear filters" must not close it, persistence must not reopen it), and a
+  // NAVIGATION key: `?sprintStory=<ident>`, emitted ONLY alongside `view=sprint` on a board sub-tab, so
+  // Back closes the tray. Cleared by `setWorkspace` (another workspace's ticket must not open there).
+  sprintStoryIdent: string | null;
   // Which inner tab the PR-detail overlay shows (see PrDetailTab), PAIRED WITH THE PR IT BELONGS
   // TO. null = nothing chosen yet → 'overview'.
   //
@@ -1032,6 +1046,7 @@ export interface FilterState {
   setInsightsInnerTab: (v: InsightsInnerTab) => void;
   // Switch the This Sprint rail line's sub-tab (graph / Merged so far). Seats the CHOICE.
   setSprintInnerTab: (v: SprintInnerTab) => void;
+  setSprintStory: (ident: string | null) => void;
   /**
    * Seat PrDetail's inner tab FOR ONE PR (see prDetailTab). Always call it with the prId the
    * component is rendering — the pair is what keeps one PR's tab out of another's.
@@ -1465,6 +1480,7 @@ function freshDefaults(): FilterData {
     insightsInnerTab: 'overview',
     // The This Sprint rail line opens on the graph.
     sprintInnerTab: 'themes',
+    sprintStoryIdent: null,
     prDetailTab: null,
     sprintChatDraft: { question: '', wantChart: false, wantBots: false },
     sprintChatThreads: {},
@@ -1552,6 +1568,7 @@ export type UrlOwnedState = Pick<
   | 'botsInnerTab'
   | 'insightsInnerTab'
   | 'sprintInnerTab'
+  | 'sprintStoryIdent'
 >;
 
 /** The fresh values of the URL-owned keys — read off freshDefaults() so the two cannot drift. */
@@ -1573,6 +1590,7 @@ export function freshUrlOwnedDefaults(): UrlOwnedState {
     botsInnerTab: d.botsInnerTab,
     insightsInnerTab: d.insightsInnerTab,
     sprintInnerTab: d.sprintInnerTab,
+    sprintStoryIdent: d.sprintStoryIdent,
   };
 }
 
@@ -1596,6 +1614,8 @@ export const useFilters = create<FilterState>((set, get) => ({
       attentionRelevance: null,
       // …and so does the author lens: the new workspace's board may hold nothing on that side.
       attentionAuthorLens: null,
+      // …and the sprint's story tray: its ticket belongs to the workspace being left.
+      sprintStoryIdent: null,
     }),
   toggleRepo: (id) =>
     set((s) => ({ repoIds: toggle(s.repoIds ?? [], id) })),
@@ -1719,6 +1739,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   setFeedInnerTab: (v) => set({ feedInnerTab: v }),
   setInsightsInnerTab: (v) => set({ insightsInnerTab: v }),
   setSprintInnerTab: (v) => set({ sprintInnerTab: v }),
+  setSprintStory: (ident) => set((s) => (s.sprintStoryIdent === ident ? {} : { sprintStoryIdent: ident })),
   setPrDetailTab: (prId, tab) =>
     set((s) =>
       s.prDetailTab?.prId === prId && s.prDetailTab.tab === tab

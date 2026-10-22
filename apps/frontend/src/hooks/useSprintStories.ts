@@ -41,10 +41,11 @@ export function useSprintGraph(workspaceId: number | null) {
     queryKey: sprintGraphKey(workspaceId),
     queryFn: workspaceId == null ? skipToken : () => api.sprintGraph(workspaceId),
     staleTime: 30_000,
-    // ⚠ IN STEADY STATE THE BOARD DOES NOT REDRAW ITSELF: cards never move under the reader. A cheap
-    // change token is polled instead (`useSprintChangeToken`) and a difference SUGGESTS a Refresh.
-    // Only while something the reader started is still landing does the graph poll: the first read
-    // ("Reading…"), the critical paths being written, pending briefs, a ticket check running.
+    // ⚠ IN STEADY STATE THE GRAPH ITSELF IS NOT POLLED: a cheap change token is (`useSprintChangeToken`,
+    // every minute), and SprintView re-fetches the graph AUTOMATICALLY when it differs — so the board
+    // updates itself within a minute of a change and never re-lays out when nothing changed. Only while
+    // something is still landing does the graph poll directly: the first read ("Reading…"), the
+    // critical paths being written, pending briefs, a ticket check running.
     refetchInterval: (q) => {
       const d = q.state.data;
       if (d != null && d.trackerOn && d.read.readAt == null && d.read.error == null) return 5_000;
@@ -70,7 +71,8 @@ export function sprintTokenKey(workspaceId: number | null): [string, string] {
  * at the graph's fetch — on first mount (`initialData`) AND every time the graph's data changes (the
  * effect below, so a remount within gcTime holding an older cached token is re-seeded too) — and
  * `refetchOnMount: false`, so the only request is the interval poll, one interval later.
- * `changed` is the pure `sprintTokenChanged` rule (lib/sprintChangeToken.ts).
+ * `changed` is the pure `sprintTokenChanged` rule (lib/sprintChangeToken.ts); SprintView re-fetches the
+ * graph when it turns true (the board updates itself — no hint line, no button).
  */
 export function useSprintChangeToken(
   workspaceId: number | null,

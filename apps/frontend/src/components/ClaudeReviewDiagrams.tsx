@@ -47,8 +47,8 @@ export function DesignLegend({ story }: { story: boolean }): JSX.Element {
         layers down, one card per job, with the pattern it uses.
       </p>
       <p>
-        <strong>New</strong> cards (solid border) are added by the change, <strong>Changed</strong> cards (dashed) alter
-        existing code, and plain cards are existing code the design relies on. Arrows show the hand-offs that matter.
+        The key under the grid names each card border. Grey arrows are the hand-offs that matter; a numbered one is
+        named in the key too.
       </p>
       {story && <p>Each card names the pull request that does it.</p>}
       <p>Click a card to open its file in the Changes tab. Empty cells are expected.</p>

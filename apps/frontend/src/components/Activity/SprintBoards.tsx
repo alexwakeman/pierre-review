@@ -19,6 +19,8 @@ import {
   peopleBoard,
   themesBoard,
   hasLivePr,
+  assigneeLabel,
+  personIndex,
   ticketCardBorder,
   type BoardLayout,
   type LaneSegment,
@@ -30,7 +32,7 @@ import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { AiRunGate } from '../AiSetup.js';
 import { InfoButton } from '../InfoModal.js';
 import { HoverPopover } from '../HoverPopover.js';
-import { LaneBoard, useBoardObstacles } from '../LaneBoard.js';
+import { BorderKey, LaneBoard, useBoardObstacles, type BorderKeyItem } from '../LaneBoard.js';
 import { TicketCard } from '../TicketCard.js';
 import { SprintProgressBar } from './SprintProgressBar.js';
 import { sprintPathsView } from './sprintPathsModel.js';
@@ -45,8 +47,9 @@ import { sprintPathsView } from './sprintPathsModel.js';
 //     work involves (the themes pass), then CODE's line: tickets by column and pull-request presence.
 //   • PEOPLE — one lane per assignee, alphabetical, Unassigned last; each header carries CODE's line.
 // Theme and People lanes draw a colour bar of their tickets by column; hovering (or focusing) it shows
-// the key. Under each board, a key to the card borders. Every card is a TicketCard: a click shows its
-// story in place; its corner arrow opens the ticket's story view (`onOpen`). A Complete column's
+// the key. Under each board, a key to the card borders (the shared `BorderKey`). Every card is a
+// TicketCard: a click shows its story in the TRAY beside the board (`actions.onSelect`, as does a
+// call-out's ticket key); its corner arrow opens the ticket's story tab (`actions.onOpen`). A Complete column's
 // "n tickets" opens that lane's cell only.
 //
 // ⚠ PREP, NOT SCORING. The People view lists people ALPHABETICALLY — never by tickets, load or reviews
@@ -55,6 +58,18 @@ import { sprintPathsView } from './sprintPathsModel.js';
 const MUTED = 'text-gray-600 dark:text-gray-300';
 
 type OpenTicket = (node: SprintGraphNode) => void;
+
+/** What a card click and its corner arrow do, and which card's story the tray shows. */
+export interface SprintCardActions {
+  /** Show the ticket's story in the tray beside the board (a card click, a call-out key). */
+  onSelect: OpenTicket;
+  /** Open the ticket's story TAB (the card's corner arrow). */
+  onOpen: OpenTicket;
+  /** The ticket whose story the tray shows; null = no tray. */
+  selectedIdent: string | null;
+  /** The tray's element id, for the open card's `aria-controls`. */
+  trayId: string;
+}
 
 /** The Complete columns the reader opened (each view keeps its own). */
 function useToggleSet(): [Set<string>, (id: string) => void] {
@@ -75,14 +90,18 @@ function SprintLaneBoard({
   label,
   laneWidth,
   show,
-  onOpen,
+  people,
+  actions,
 }: {
   board: SprintBoard;
   label: string;
   laneWidth: string;
-  show: 'initials' | 'theme';
-  onOpen: OpenTicket;
+  show: 'person' | 'theme';
+  people: SprintGraphResponse['people'];
+  actions: SprintCardActions;
 }): JSX.Element {
+  // ONE spelling per person on the page: the People lane's (lib/laneBoard.ts `assigneeLabel`).
+  const personOfName = useMemo(() => personIndex(people ?? []), [people]);
   // The Complete columns the reader opened, and the single lane cells ("n tickets") opened in one.
   const [shown, toggle] = useToggleSet();
   const [cells, toggleCellKey] = useToggleSet();
@@ -108,10 +127,21 @@ function SprintLaneBoard({
       laneWidth={laneWidth}
       onToggleColumn={toggle}
       onToggleCell={toggleCell}
-      legend={<CardBorderKey present={borders} />}
+      legend={<BorderKey items={sprintBorderKeyItems(borders)} testId="card-border-key" />}
       renderLane={(l) => <LaneHeader lane={l} />}
       renderCard={(c, ref) => (
-        <TicketCard node={c.data.node} critical={c.data.critical} waiting={c.data.waiting} show={show} onOpen={onOpen} cardRef={ref} />
+        <TicketCard
+          node={c.data.node}
+          critical={c.data.critical}
+          waiting={c.data.waiting}
+          show={show}
+          person={assigneeLabel(c.data.node, personOfName)}
+          selected={actions.selectedIdent === c.data.node.ident}
+          trayId={actions.trayId}
+          onSelect={actions.onSelect}
+          onOpen={actions.onOpen}
+          cardRef={ref}
+        />
       )}
     />
   );
@@ -234,36 +264,22 @@ const BORDER_KEY: ReadonlyArray<{ key: string; label: string; critical: boolean;
   { key: 'gc', label: 'Outside the sprint, on a path', critical: true, waiting: false, ghost: true },
 ];
 
-/** The key to the card borders, under a board: exactly the styles the board draws. */
-function CardBorderKey({ present }: { present: ReadonlySet<string> }): JSX.Element | null {
-  const items = BORDER_KEY.filter((k) => present.has(k.key)).map((k) => ({
-    key: k.key,
-    label: k.label,
-    swatch: ticketCardBorder({ critical: k.critical, waiting: k.waiting, ghost: k.ghost }),
-  }));
-  const dot = present.has(PR_DOT_KEY);
-  if (items.length === 0 && !dot) return null;
-  return (
-    <ul aria-label="Card borders" data-testid="card-border-key" className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-gray-700 dark:text-gray-300">
-      {items.map((it) => (
-        <li key={it.key} className="inline-flex items-center gap-1.5">
-          <span aria-hidden className={`inline-block h-3.5 w-6 rounded ${it.swatch}`} />
-          {it.label}
-        </li>
-      ))}
-      {dot && (
-        <li className="inline-flex items-center gap-1.5">
-          <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-violet-500 dark:bg-violet-400" />
-          Has a pull request
-        </li>
-      )}
-    </ul>
-  );
+/** The key to the card borders, under a board: exactly the styles the board draws (the shared
+ *  `BorderKey`, each swatch from `ticketCardBorder` itself). */
+function sprintBorderKeyItems(present: ReadonlySet<string>): BorderKeyItem[] {
+  return [
+    ...BORDER_KEY.filter((k) => present.has(k.key)).map((k) => ({
+      key: k.key,
+      label: k.label,
+      swatch: ticketCardBorder({ critical: k.critical, waiting: k.waiting, ghost: k.ghost }),
+    })),
+    ...(present.has(PR_DOT_KEY) ? [{ key: PR_DOT_KEY, label: 'Has a pull request', dot: 'bg-violet-500 dark:bg-violet-400' }] : []),
+  ];
 }
 
 // ── Critical path ────────────────────────────────────────────────────────────────────────────────
 
-export function SprintPathsView({ data, onOpen }: { data: SprintGraphResponse; onOpen: OpenTicket }): JSX.Element {
+export function SprintPathsView({ data, actions }: { data: SprintGraphResponse; actions: SprintCardActions }): JSX.Element {
   const view = sprintPathsView({
     aiEnabled: data.aiEnabled,
     paths: data.paths,
@@ -306,8 +322,8 @@ export function SprintPathsView({ data, onOpen }: { data: SprintGraphResponse; o
         </div>
       )}
       {view.kind === 'paths' && view.note?.kind === 'failed' && <p className={`text-xs ${MUTED}`}>{view.note.text}</p>}
-      {board.cards.length > 0 && <SprintLaneBoard board={board} label="Critical paths" laneWidth="minmax(9rem, 13rem)" show="initials" onOpen={onOpen} />}
-      <Callouts data={data} onOpen={onOpen} />
+      {board.cards.length > 0 && <SprintLaneBoard board={board} label="Critical paths" laneWidth="minmax(9rem, 13rem)" show="person" people={data.people} actions={actions} />}
+      <Callouts data={data} onOpen={actions.onSelect} />
       <CountTableView data={data} />
     </section>
   );
@@ -407,7 +423,7 @@ function Callouts({ data, onOpen }: { data: SprintGraphResponse; onOpen: OpenTic
                     key={n.ident}
                     type="button"
                     onClick={() => onOpen(n)}
-                    aria-label={`${n.key}${n.title !== '' ? `: ${n.title}` : ''}, opens its story`}
+                    aria-label={`${n.key}${n.title !== '' ? `: ${n.title}` : ''}, shows its story beside the board`}
                     className="rounded border border-gray-300 px-1 font-mono text-[11px] text-gray-800 hover:border-gray-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:border-gray-700 dark:text-gray-100"
                   >
                     {n.key}
@@ -480,7 +496,7 @@ function CountTableView({ data }: { data: SprintGraphResponse }): JSX.Element | 
 
 // ── Theme ────────────────────────────────────────────────────────────────────────────────────────
 
-export function SprintThemesView({ data, onOpen }: { data: SprintGraphResponse; onOpen: OpenTicket }): JSX.Element {
+export function SprintThemesView({ data, actions }: { data: SprintGraphResponse; actions: SprintCardActions }): JSX.Element {
   const columns = data.statusLayout?.columns ?? null;
   const board = useMemo(
     () => themesBoard({ nodes: data.nodes, edges: data.edges, paths: data.paths, columns, themes: data.themes }),
@@ -494,14 +510,14 @@ export function SprintThemesView({ data, onOpen }: { data: SprintGraphResponse; 
           {data.aiEnabled ? 'Themes appear after Claude reads the sprint.' : 'Claude is off here, so the sprint has no themes.'}
         </p>
       )}
-      <SprintLaneBoard board={board} label="Tickets by theme" laneWidth="minmax(8rem, 12rem)" show="initials" onOpen={onOpen} />
+      <SprintLaneBoard board={board} label="Tickets by theme" laneWidth="minmax(8rem, 12rem)" show="person" people={data.people} actions={actions} />
     </section>
   );
 }
 
 // ── People ───────────────────────────────────────────────────────────────────────────────────────
 
-export function SprintPeopleView({ data, onOpen }: { data: SprintGraphResponse; onOpen: OpenTicket }): JSX.Element {
+export function SprintPeopleView({ data, actions }: { data: SprintGraphResponse; actions: SprintCardActions }): JSX.Element {
   const columns = data.statusLayout?.columns ?? null;
   // ⚠ Alphabetical, Unassigned last (lib/laneBoard.ts `peopleBoard`) — never sorted by load.
   const board = useMemo(
@@ -510,7 +526,7 @@ export function SprintPeopleView({ data, onOpen }: { data: SprintGraphResponse; 
   );
   return (
     <section aria-label="By person" className="space-y-2" data-testid="sprint-people">
-      <SprintLaneBoard board={board} label="Tickets by person" laneWidth="minmax(8rem, 11rem)" show="theme" onOpen={onOpen} />
+      <SprintLaneBoard board={board} label="Tickets by person" laneWidth="minmax(8rem, 11rem)" show="theme" people={data.people} actions={actions} />
     </section>
   );
 }

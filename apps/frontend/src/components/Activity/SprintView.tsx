@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import {
   SPRINT_GHOST_MAX,
   SPRINT_TICKETS_MAX,
@@ -8,30 +8,34 @@ import {
   type SprintRefreshTicketChecks,
 } from '@pierre-review/shared';
 import { useSprintAiOn, useSprintChangeToken, useSprintGraph, useSprintRefresh, useSprintRefreshing } from '../../hooks/useSprintStories.js';
-import { useOpenStory } from '../../lib/ticketTab.js';
+import { StoryOpenOverride, useOpenStory, type OpenStoryArgs } from '../../lib/ticketTab.js';
+import { ticketKeyOfIdent } from '../../store/pinnedTabs.js';
 import type { SprintBoardView } from '../../lib/laneBoard.js';
 import { useFilters } from '../../store/filters.js';
 import { GearIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { AiStatusLine } from '../AiStatusLine.js';
 import { SprintAskPanel } from './SprintAskPanel.js';
-import { SprintPathsView, SprintPeopleView, SprintThemesView } from './SprintBoards.js';
+import { SprintPathsView, SprintPeopleView, SprintThemesView, type SprintCardActions } from './SprintBoards.js';
 import { SprintProgressBar } from './SprintProgressBar.js';
 import { pathsWriting, sprintDatesLine, sprintProgress } from './sprintPathsModel.js';
 import { SprintStatusSettings } from './SprintStatusSettings.js';
 import { SprintTrackerSetup } from '../Sprint/SprintTrackerSetup.js';
+import { SprintStoryTray } from '../Sprint/SprintStoryTray.js';
 
 // This Sprint (a fixed tab, FREE) — THE SPRINT (GET /api/sprint-graph; the route keeps its name):
 // the toolbar (title + ⓘ, dates, Ask Claude, the status buckets behind the gear, Refresh), the page's
 // progress bar, and ONE of three views on the lane board (SprintBoards.tsx): Critical path, Theme or
-// People — `view`, the tab's DERIVED sub-tab. A ticket clicked anywhere opens its STORY VIEW
-// (`useOpenStory`, the ticket tab with its Story section open). Every state of the page is one short
-// sentence. ⚠ Nothing here ranks tickets or people.
+// People — `view`, the tab's DERIVED sub-tab. A ticket clicked on this page (a card, a call-out key, a
+// ticket key in an Ask Claude answer — `StoryOpenOverride`) shows its story in the STORY TRAY on the
+// right (Sprint/SprintStoryTray.tsx: the story tab's own body); a card's corner arrow and the tray's
+// "Open story tab" open the TAB (`useOpenStory`). Every state of the page is one short sentence.
+// ⚠ Nothing here ranks tickets or people.
 //
-//   CHANGED SINCE LOADED  the board does not redraw itself in steady state; the cards' change token is
-//            polled (`useSprintChangeToken`, only while this tab is mounted and the page visible) and a
-//            difference shows ONE quiet line, "The sprint has changed since you loaded it.", with a
-//            Refresh that only re-fetches the board (no tracker read, no ticket checks).
+//   AUTO-REFRESH  the cards' change token is polled (`useSprintChangeToken`, every minute, only while
+//            this tab is mounted and the page visible — DB only) and when it differs the board is
+//            re-fetched AUTOMATICALLY (no tracker read, no ticket checks). Nothing changed ⇒ no graph
+//            read and no re-layout.
 //   TOOLBAR REFRESH  reads the sprint from the tracker now AND (local, AI on) starts up to
 //            SPRINT_REFRESH_TICKET_CHECKS ticket checks; the count started is said briefly after.
 
@@ -102,6 +106,11 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
   }, [awaitRead, readDone, refresh.isError, refetch]);
   const fetchingSlow = useLingering(isFetching && !isLoading, FETCH_SHOW_AFTER_MS);
   const askOn = useSprintAiOn();
+  // The sprint changed since the board was loaded: re-fetch it now (the board only, no tracker read).
+  // Not while the reader's own Refresh is landing — that already re-reads the board.
+  useEffect(() => {
+    if (changed && !refreshing && awaitRead == null) void refetch();
+  }, [changed, refreshing, awaitRead, refetch]);
   const openStory = useOpenStory();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
@@ -109,6 +118,17 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
     (n: SprintGraphNode): void => openStory({ ident: n.ident, key: n.key, title: n.title !== '' ? n.title : null }),
     [openStory],
   );
+  // THE STORY TRAY: `?sprintStory=<ident>` (filters store, a navigation key — Back closes it).
+  const trayIdent = useFilters((s) => s.sprintStoryIdent);
+  const setTray = useFilters((s) => s.setSprintStory);
+  const trayId = useId();
+  const showInTray = useCallback((t: OpenStoryArgs): void => setTray(t.ident), [setTray]);
+  const select = useCallback((n: SprintGraphNode): void => setTray(n.ident), [setTray]);
+  const actions = useMemo<SprintCardActions>(
+    () => ({ onSelect: select, onOpen: open, selectedIdent: trayIdent, trayId }),
+    [select, open, trayIdent, trayId],
+  );
+  const trayNode = trayIdent != null ? data?.nodes.find((n) => n.ident === trayIdent) : undefined;
 
   if (isError) return <p className="text-sm text-rose-700 dark:text-rose-400">Could not load this sprint.</p>;
   if (isLoading || data == null || workspaceId == null) return <p className={`text-xs ${MUTED}`}>Loading…</p>;
@@ -134,7 +154,9 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
   };
 
   return (
-    <div data-testid="sprint-view" data-view={view} className="space-y-3">
+    <StoryOpenOverride.Provider value={showInTray}>
+    <div className="flex items-start gap-3">
+    <div data-testid="sprint-view" data-view={view} className="min-w-0 flex-1 space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-800 dark:text-gray-100">
           {title}
@@ -172,15 +194,6 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
       </div>
       {progress != null && <SprintProgressBar progress={progress} className="h-[3px] w-full rounded-full" />}
       {settingsOpen && data.statusLayout != null && <SprintStatusSettings workspaceId={data.workspaceId} layout={data.statusLayout} />}
-      {changed && !refreshing && awaitRead == null && (
-        <p data-testid="sprint-changed" role="status" className={`flex flex-wrap items-center gap-2 text-xs ${MUTED}`}>
-          The sprint has changed since you loaded it.
-          <button type="button" onClick={() => void refetch()} disabled={isFetching} className={TOOL_BUTTON}>
-            <RefreshIcon size={12} />
-            Refresh
-          </button>
-        </p>
-      )}
       {checksNote != null && (
         <p data-testid="sprint-checks-note" role="status" className={`text-xs ${MUTED}`}>
           {checksNote}
@@ -205,13 +218,24 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
       {sprintCount === 0 ? (
         !reading && <p className={`text-sm ${MUTED}`}>No tickets in this sprint.</p>
       ) : view === 'themes' ? (
-        <SprintThemesView data={data} onOpen={open} />
+        <SprintThemesView data={data} actions={actions} />
       ) : view === 'people' ? (
-        <SprintPeopleView data={data} onOpen={open} />
+        <SprintPeopleView data={data} actions={actions} />
       ) : (
-        <SprintPathsView data={data} onOpen={open} />
+        <SprintPathsView data={data} actions={actions} />
       )}
     </div>
+    {trayIdent != null && (
+      <SprintStoryTray
+        id={trayId}
+        ident={trayIdent}
+        ticketKey={trayNode?.key ?? ticketKeyOfIdent(trayIdent)}
+        title={trayNode != null && trayNode.title !== '' ? trayNode.title : null}
+        onClose={() => setTray(null)}
+      />
+    )}
+    </div>
+    </StoryOpenOverride.Provider>
   );
 }
 
@@ -219,8 +243,8 @@ function BoardInfo(): JSX.Element {
   return (
     <>
       <p>
-        Three ways to read the same sprint. Click a ticket to see its summary and acceptance criteria here; its corner arrow
-        opens the full story.
+        Three ways to read the same sprint. Click a ticket to see its story beside the board; its corner arrow opens the
+        story in its own tab.
       </p>
       <ul className="list-disc space-y-1 pl-5">
         <li>
@@ -247,10 +271,13 @@ function BoardInfo(): JSX.Element {
           Show opens the column, and a row&rsquo;s own count opens that row only.
         </li>
         <li>
-          <strong>Borders</strong>: a violet border with a soft glow is a ticket with an open or merged pull request, and those
-          tickets come first in each cell; a thick orange border is a ticket on a critical path (it keeps the glow when it has a
-          pull request); a dashed one is waiting on another unfinished
-          ticket; a faint dashed one on a grey ground is outside the sprint. The key under each board names them.
+          <strong>Borders</strong>: a thick orange border is a ticket on a critical path; a dashed one is waiting on another
+          unfinished ticket; a faint dashed one on a grey ground is outside the sprint. A violet dot before the key is a ticket
+          with an open or merged pull request, and those tickets come first in each cell. The key under each board names them.
+        </li>
+        <li>
+          <strong>Names</strong>: Critical path and Theme show who each ticket is assigned to; People shows its theme there
+          instead.
         </li>
         <li>
           <strong>Under the title</strong>: Claude&rsquo;s one-line summary of the ticket, then its acceptance criteria.
@@ -261,8 +288,8 @@ function BoardInfo(): JSX.Element {
         </li>
         <li>
           <strong>Refresh</strong> reads the sprint from your tracker now. It also checks up to three tickets that have pull
-          requests and no current check, on your own Claude. When the board changes after you load it, a line under the toolbar
-          offers to redraw it.
+          requests and no current check, on your own Claude. The board also updates itself within a minute when the sprint
+          changes, while it is open.
         </li>
         <li>
           <strong>Arrows</strong> run from the ticket waited on to the one that waits. Hover an arrow or its number to see why. A

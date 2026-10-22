@@ -1,4 +1,5 @@
-// THE "SPRINT HAS CHANGED" RULE (This Sprint, the quiet Refresh line). Pure, so it is pinned by
+// THE "SPRINT HAS CHANGED" RULE (This Sprint's auto-refresh: SprintView re-fetches the board when it
+// holds). Pure, so it is pinned by
 // test/sprintChangeToken.test.ts; `useSprintChangeToken` is its only caller.
 //
 // True only when ALL of these hold:
@@ -6,7 +7,7 @@
 //   • the token was read AFTER the graph on screen was loaded (a token older than a refetched graph,
 //     e.g. right after the reader's own Refresh, describes a board that is no longer there);
 //   • the graph is not being refetched right now (its answer is about to replace the board, so the
-//     line would flash and vanish on its own);
+//     refetch is already on its way — never a second one);
 //   • the two differ.
 
 export interface SprintTokenInput {

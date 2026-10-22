@@ -11,6 +11,8 @@ import {
   paceItems,
   pathsBoard,
   peopleBoard,
+  assigneeLabel,
+  personIndex,
   sprintColumns,
   themesBoard,
   hasLivePr,
@@ -205,6 +207,32 @@ describe('lanes per view', () => {
     ]);
     // CODE's row line and bar: what the data shows, nothing about the person.
     expect(b.lanes[2]!.data).toMatchObject({ progress: '3 Doing', code: 'None has a pull request', segments: [{ column: 'doing', count: 3 }] });
+  });
+});
+
+describe("a card's person pill spells the person as the People lane does", () => {
+  const people: SprintPerson[] = [
+    { name: 'Colin Ames', names: ['colin.ames', 'Colin A'], reviewsWaiting: null },
+    { name: '  ', names: ['ghost.name'], reviewsWaiting: null },
+  ];
+  const index = personIndex(people);
+  it('a matched tracker spelling prints the person, an unmatched one the tracker spelling, nobody null', () => {
+    expect(assigneeLabel(node('A-1', { assignee: { name: 'colin.ames', avatarUrl: null } }), index)).toBe('Colin Ames');
+    expect(assigneeLabel(node('A-2', { assignee: { name: 'Colin A', avatarUrl: null } }), index)).toBe('Colin Ames');
+    expect(assigneeLabel(node('A-3', { assignee: { name: ' david buckley ', avatarUrl: null } }), index)).toBe('david buckley');
+    expect(assigneeLabel(node('A-4', { assignee: null }), index)).toBeNull();
+    expect(assigneeLabel(node('A-5', { assignee: { name: '   ', avatarUrl: null } }), index)).toBeNull();
+    // A person with a blank label falls back to the tracker spelling, never an empty pill.
+    expect(assigneeLabel(node('A-6', { assignee: { name: 'ghost.name', avatarUrl: null } }), index)).toBe('ghost.name');
+  });
+
+  it('the pill and the People lane agree on every card', () => {
+    const nodes = [node('A-1', { assignee: { name: 'colin.ames', avatarUrl: null } }), node('A-2', { assignee: { name: 'Bea', avatarUrl: null } })];
+    const b = peopleBoard({ nodes, edges: [], paths: null, columns: COLUMNS, people });
+    for (const c of b.cards) {
+      const lane = b.lanes.find((l) => l.id === c.lane)!;
+      expect(assigneeLabel(c.data.node, index)).toBe(lane.label);
+    }
   });
 });
 
