@@ -1,10 +1,11 @@
 import type { MouseEvent, ReactNode } from 'react';
-import { useOpenStory } from '../lib/ticketTab.js';
+import { useStoryLinkOpener } from '../lib/ticketTab.js';
 import { safeExternalUrl } from '../lib/ui.js';
 import { ExternalLinkIcon } from './Icons.js';
 
 // A ticket named in a ticket's text (lib/ticketLinks.ts marks it): the words open the ticket's story
-// view in Limn (`useOpenStory`); the small icon beside them still opens it in the tracker. Both stop
+// view in Limn (`useStoryLinkOpener`: the page's own opener, e.g. This Sprint's tray, else the story
+// tab); the small icon beside them still opens it in the tracker. Both stop
 // the click there, so a highlighted passage around the link is not selected as well.
 
 export function TicketRefLink({
@@ -20,7 +21,7 @@ export function TicketRefLink({
   href: string | null;
   children: ReactNode;
 }): JSX.Element {
-  const open = useOpenStory();
+  const open = useStoryLinkOpener();
   const external = href != null ? safeExternalUrl(href) : undefined;
   const stop = (e: MouseEvent): void => e.stopPropagation();
   return (

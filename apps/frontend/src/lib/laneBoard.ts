@@ -604,6 +604,23 @@ export function themesBoard(i: BoardInput & { themes: ReadonlyArray<SprintTheme>
 
 export const UNASSIGNED_LABEL = 'Unassigned';
 
+/** Every tracker spelling → its person (`SprintGraphResponse.people`, the shared Members identity). */
+export function personIndex(people: ReadonlyArray<SprintPerson>): Map<string, SprintPerson> {
+  const m = new Map<string, SprintPerson>();
+  for (const p of people) for (const name of p.names) m.set(name, p);
+  return m;
+}
+
+/** The name a card's person pill prints: the People lane's label (the matched person's name — a real
+ *  name where Limn matched a GitHub author), else the tracker's own spelling; null = nobody assigned.
+ *  ONE spelling per person on the page, so the pill and the People lane never disagree. Pure. */
+export function assigneeLabel(node: Pick<SprintGraphNode, 'assignee'>, personOfName: ReadonlyMap<string, SprintPerson>): string | null {
+  const raw = node.assignee?.name ?? '';
+  if (raw.trim() === '') return null;
+  const p = personOfName.get(raw);
+  return p != null && p.name.trim() !== '' ? p.name : raw.trim();
+}
+
 /** PEOPLE: one lane per assignee, ALPHABETICAL, Unassigned last — ⚠ never ordered by load. A person is
  *  `SprintGraphResponse.people`'s (the shared Members identity), matched on the tracker spelling; an
  *  assignee it does not list gets a lane under the tracker's name. An arrow between two people's lanes
@@ -612,8 +629,7 @@ export function peopleBoard(i: BoardInput & { people: ReadonlyArray<SprintPerson
   const nodes = sprintOnly(i.nodes);
   const critical = criticalIdents(i.paths);
   const waiting = waitingIdents(i.nodes, i.edges);
-  const personOfName = new Map<string, SprintPerson>();
-  for (const p of i.people) for (const name of p.names) personOfName.set(name, p);
+  const personOfName = personIndex(i.people);
   const lanesById = new Map<string, { id: string; label: string; person: SprintPerson | null; unassigned: boolean }>();
   const laneOf = new Map<string, string>();
   for (const n of nodes) {

@@ -14,7 +14,8 @@ import { effectiveSprintTab, SPRINT_RAIL_TABS } from '../Activity/sprintRailMode
 //     /api/sprint-graph). Theme is the landing panel. The scroll position is remembered per tab
 //     (useRememberedScroll). Viewing any of them stamps `sprint_reads.viewed_at`, which is what lets
 //     the worker read the sprint at all. "Ask Claude" inside is agentic and LOCAL-ONLY, gated on
-//     `me.ai` (useSprintAiOn), never on a Pro capability. A ticket opens in its story view.
+//     `me.ai` (useSprintAiOn), never on a Pro capability. A ticket shows its story in the tray beside
+//     the board (Sprint/SprintStoryTray.tsx, `?sprintStory=`).
 //   • Merged so far — every PR merged in the reporting window (MergedPrsView, GET /api/merged-prs).
 //     It needs no tracker.
 // ⚠ NO TRACKER ⇒ THE THREE BOARDS SHOW THE SETUP LINE (`SprintTrackerSetup`, drawn by SprintView on

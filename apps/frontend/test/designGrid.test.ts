@@ -4,7 +4,7 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/designGrid.test.ts
 import { describe, expect, it } from 'vitest';
 import type { DesignDiagram, SequenceDiagramMember } from '@pierre-review/shared';
-import { ARROW_TRACK_PX, CHANGE_WORD, crossings, layoutDesign, memberForRef, placeArrowLabels, prBadgeTexts, routeArrow, separateArrowRuns } from '../src/lib/designGrid.js';
+import { ARROW_TRACK_PX, CHANGE_KEY_LABEL, CHANGE_WORD, changesPresent, crossings, layoutDesign, memberForRef, placeArrowLabels, prBadgeTexts, routeArrow, separateArrowRuns } from '../src/lib/designGrid.js';
 
 const design = (over: Partial<DesignDiagram> = {}): DesignDiagram => ({
   acts: [
@@ -24,6 +24,22 @@ const design = (over: Partial<DesignDiagram> = {}): DesignDiagram => ({
     { from: 'c2', to: 'c3', label: null },
   ],
   ...over,
+});
+
+describe('changesPresent (the border key under the grid)', () => {
+  it('lists only the change kinds the grid draws, in New, Changed, Unchanged order', () => {
+    expect(changesPresent(layoutDesign(design()))).toEqual(['new', 'changed', 'unchanged']);
+    const onlyChanged = design({
+      cells: [{ id: 'c2', act: 'chk', layer: 'domain', label: 'Reject bad rows', pattern: null, change: 'changed', pr: null, files: [] }],
+      arrows: [],
+    });
+    expect(changesPresent(layoutDesign(onlyChanged))).toEqual(['changed']);
+    expect(changesPresent({ cells: [] })).toEqual([]);
+  });
+
+  it('names every kind in words', () => {
+    expect(Object.values(CHANGE_KEY_LABEL).every((l) => l.trim() !== '')).toBe(true);
+  });
 });
 
 describe('layoutDesign', () => {

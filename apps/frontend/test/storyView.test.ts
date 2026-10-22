@@ -197,10 +197,34 @@ describe('what was removed stays removed', () => {
   });
 
   it('the story view draws the Open PRs stack, never a copy', () => {
-    const view = readFileSync(join(root, 'components/Ticket/TicketTabView.tsx'), 'utf8');
-    expect(view).toMatch(/<OpenPrsCards[^>]*story=\{story\}/);
-    // Every opener goes through the one hook.
+    const body = readFileSync(join(root, 'components/Ticket/StoryViewBody.tsx'), 'utf8');
+    expect(body).toMatch(/<OpenPrsCards[^>]*story=\{story\}/);
+    // TWO hosts — the story tab and This Sprint's tray — mount the ONE body, never a copy.
+    const tab = readFileSync(join(root, 'components/Ticket/TicketTabView.tsx'), 'utf8');
+    const tray = readFileSync(join(root, 'components/Sprint/SprintStoryTray.tsx'), 'utf8');
+    for (const host of [tab, tray]) {
+      expect(host).toMatch(/<StoryViewBody\b/);
+      expect(host).not.toMatch(/<OpenPrsCards\b/);
+    }
+    // The tray's body reads nothing about the active tab (it would draw the wrong ticket).
+    expect(body).not.toMatch(/activeTab/);
+    // Every TAB opener goes through the one hook.
     const sprint = readFileSync(join(root, 'components/Activity/SprintView.tsx'), 'utf8');
     expect(sprint).toMatch(/useOpenStory\(\)/);
+    expect(tray).toMatch(/useOpenStory\(\)/);
+  });
+
+  it('StoryPeek is gone: a card click opens the tray, never a popover copy of the story', () => {
+    const card = readFileSync(join(root, 'components/TicketCard.tsx'), 'utf8');
+    expect(card).not.toMatch(/StoryPeek|FloatingPortal/);
+    expect(() => readFileSync(join(root, 'components/Activity/StoryPeek.tsx'), 'utf8')).toThrow();
+  });
+
+  it('the sprint board and the design grid draw ONE border key', () => {
+    const boards = readFileSync(join(root, 'components/Activity/SprintBoards.tsx'), 'utf8');
+    const grid = readFileSync(join(root, 'components/DesignGrid.tsx'), 'utf8');
+    expect(boards).toMatch(/<BorderKey\b/);
+    expect(grid).toMatch(/<BorderKey\b/);
+    expect(boards).not.toMatch(/CardBorderKey/);
   });
 });

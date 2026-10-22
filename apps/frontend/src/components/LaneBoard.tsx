@@ -395,6 +395,51 @@ export function ArrowKey({ items }: { items: ReadonlyArray<{ n: number; label: s
   );
 }
 
+/** One entry of a `BorderKey`: a swatch drawn from the CARD'S OWN border classes (so the key can never
+ *  drift from the cards), or a dot, and its words. */
+export interface BorderKeyItem {
+  key: string;
+  label: string;
+  /** The card's own border classes, for a card-shaped swatch. */
+  swatch?: string;
+  /** Classes for a small round dot instead (e.g. "Has a pull request"). */
+  dot?: string;
+}
+
+/**
+ * THE KEY TO THE CARD BORDERS, under a grid — ONE component for This Sprint's lane boards and the
+ * design grid (components/DesignGrid.tsx), beside `ArrowKey`, so the two draw their keys one way. The
+ * caller lists ONLY the styles its cards actually draw. A real labelled list (the swatches are
+ * decorative): it is visible on the surface because it NAMES marks; the explanation stays behind the
+ * heading's ⓘ. ⚠ The same border means different things on the two surfaces (dashed accent = waiting
+ * on the sprint board, Changed on the design grid), which is why each draws its own key.
+ */
+export function BorderKey({
+  items,
+  label = 'Card borders',
+  testId,
+}: {
+  items: ReadonlyArray<BorderKeyItem>;
+  label?: string;
+  testId?: string;
+}): JSX.Element | null {
+  if (items.length === 0) return null;
+  return (
+    <ul aria-label={label} data-testid={testId} className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-gray-700 dark:text-gray-300">
+      {items.map((it) => (
+        <li key={it.key} className="inline-flex items-center gap-1.5">
+          {it.dot != null ? (
+            <span aria-hidden className={`inline-block h-2 w-2 rounded-full ${it.dot}`} />
+          ) : (
+            <span aria-hidden className={`inline-block h-3.5 w-6 shrink-0 rounded ${it.swatch ?? ''}`} />
+          )}
+          {it.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** The arrows as words, for assistive tech. */
 export function ArrowList({ label, items }: { label: string; items: ReadonlyArray<{ key: string; text: string }> }): JSX.Element | null {
   if (items.length === 0) return null;

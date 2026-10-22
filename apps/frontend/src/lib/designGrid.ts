@@ -8,6 +8,7 @@
 //            never stacked. A cell naming an act or layer that is not drawn is dropped too.
 //   ARROWS   only between two drawn cells, never a self-loop; anything else is dropped.
 import {
+  DESIGN_CHANGES,
   DESIGN_LAYERS,
   DESIGN_LAYER_ORDER,
   type DesignArrow,
@@ -77,6 +78,20 @@ export const CHANGE_WORD: Record<DesignCell['change'], string | null> = {
   changed: 'Changed',
   unchanged: null,
 };
+
+/** The card-border key under the grid (components/DesignGrid.tsx, the shared `BorderKey`): one entry
+ *  per change kind, in plain words. */
+export const CHANGE_KEY_LABEL: Record<DesignCell['change'], string> = {
+  new: 'New: added by the change',
+  changed: 'Changed: existing code it edits',
+  unchanged: 'Existing code it relies on',
+};
+
+/** The change kinds the grid actually draws, in DESIGN_CHANGES order — the key lists only these. */
+export function changesPresent(layout: Pick<GridLayout, 'cells'>): Array<DesignCell['change']> {
+  const seen = new Set(layout.cells.map((c) => c.cell.change));
+  return DESIGN_CHANGES.filter((k) => seen.has(k));
+}
 
 export interface ArrowGeometry {
   d: string;

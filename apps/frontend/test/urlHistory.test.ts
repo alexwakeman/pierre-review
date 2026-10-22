@@ -957,6 +957,42 @@ describe('the Activity sub-tab strips', () => {
     expect(location.search).not.toContain('sprintTab');
   });
 
+  // The story TRAY beside the board: `?sprintStory=<ident>`, a navigation (Back closes it), emitted
+  // only on This Sprint's boards.
+  it('opening the story tray is a navigation: its link reloads onto it, and Back closes it', () => {
+    gesture(() => usePinnedTabs.getState().showSprint());
+    gesture(() => useFilters.getState().setSprintInnerTab('paths'));
+    const before = entries.length;
+    gesture(() => useFilters.getState().setSprintStory('jira:R#ABC-12'));
+    expect(entries).toHaveLength(before + 1);
+    expect(new URLSearchParams(location.search).get('sprintStory')).toBe('jira:R#ABC-12');
+    back();
+    expect(useFilters.getState().sprintStoryIdent).toBeNull();
+    expect(location.search).not.toContain('sprintStory');
+    forward();
+    expect(useFilters.getState().sprintStoryIdent).toBe('jira:R#ABC-12');
+    expect(usePinnedTabs.getState().activeTab).toBe('sprint');
+  });
+
+  it('does not emit sprintStory off This Sprint or on Merged so far, and a workspace switch closes it', () => {
+    gesture(() => usePinnedTabs.getState().showSprint());
+    gesture(() => useFilters.getState().setSprintStory('jira:R#ABC-12'));
+    gesture(() => useFilters.getState().setSprintInnerTab('merged'));
+    expect(location.search).not.toContain('sprintStory');
+    gesture(() => useFilters.getState().setSprintInnerTab('themes'));
+    expect(location.search).toContain('sprintStory=');
+    gesture(() => usePinnedTabs.getState().showActivity());
+    expect(location.search).not.toContain('sprintStory');
+    useFilters.getState().setWorkspace(7, []);
+    expect(useFilters.getState().sprintStoryIdent).toBeNull();
+  });
+
+  it('a blank ?sprintStory= seats no tray', () => {
+    seat('/app/?workspace=5&view=sprint&sprintStory=%20');
+    applyUrlToStores({ fromPop: true });
+    expect(useFilters.getState().sprintStoryIdent).toBeNull();
+  });
+
   it('a retired ?sprintTab=graph link lands on Theme', () => {
     useFilters.getState().setSprintInnerTab('people');
     seat('/app/?workspace=5&view=sprint&sprintTab=graph');

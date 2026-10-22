@@ -26,6 +26,11 @@ export function claimActivePopover(close: () => void): () => void {
   };
 }
 
+/** True while a popover holds the slot (an Escape then belongs to it, not to a panel around it). */
+export function hasActivePopover(): boolean {
+  return active != null;
+}
+
 /** Close whichever popover is open. A modal calls it once, on mount. */
 export function closeActivePopover(): void {
   active?.();

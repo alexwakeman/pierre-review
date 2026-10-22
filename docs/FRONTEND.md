@@ -2188,23 +2188,31 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
     labelled arrow carries a number keyed in ONE line under the board (`ArrowKey`); arrows with the SAME
     words share a number. An sr-only list ("Dependencies") reads every arrow as "B waits on A: why".
     Hovering a line or its number shows the popover — HOVER / FOCUS ONLY, no pin (§ Design diagrams →
-    Arrow popovers). Above the arrow key, `CardBorderKey` names each card border style the board draws.
-    ⚠ `useRoutedArrows`, `ArrowLayer`, `ArrowKey` and `ArrowList` are SHARED with `DesignGrid`, which
-    kept its look; change them for both or neither.
+    Arrow popovers). Above the arrow key, `BorderKey` (`components/LaneBoard.tsx`, the SAME component the
+    design grid's key uses) names each card border style the board draws, each swatch built from
+    `ticketCardBorder` itself (`sprintBorderKeyItems`). ⚠ `useRoutedArrows`, `ArrowLayer`, `ArrowKey`,
+    `BorderKey` and `ArrowList` are SHARED with `DesignGrid`, which kept its look; change them for both or
+    neither. ⚠ The SAME border means different things on the two surfaces (dashed accent = waiting here,
+    "Changed" on the design grid) — which is why each surface draws its own visible key.
   - **ONE CARD, `TicketCard`** (`components/TicketCard.tsx`), for every view, ⚠ **ONE HEIGHT whatever
-    it carries** (the title reserves two lines, the one-liner, the criteria line and the theme one each —
-    an EMPTY SLOT IS HELD OPEN —, the tag row is one 20px line — a tag that
-    does not fit is cut on the face and stays in the accessible name — and the initials' slot is held open
-    with no assignee; a 2px border gives back 1px of padding): the key (mono), the title, the brief's
+    it carries** (the title reserves two lines, the one-liner, the criteria line and the person-or-theme
+    line one each — an EMPTY SLOT IS HELD OPEN —, the tag row is one 20px line — a tag that
+    does not fit is cut on the face and stays in the accessible name; a 2px border gives back 1px of
+    padding): the key (mono), the title, the brief's
     **ONE-LINER** (`brief.oneLiner`, ≤ 90 chars from the brief pass v5; one line, truncated, the full
-    line in the accessible name, the `title` and the peek), the **CRITERIA LINE** (`ticketCardCriteria`:
+    line in the accessible name and the `title`), the **CRITERIA LINE** (`ticketCardCriteria`:
     "3 of 4 criteria met" from the latest SUCCEEDED ticket check, `node.check`, whose own criteria list
     is the denominator; else "4 criteria" / "1 criterion" from the current brief; else empty; ITALIC when
-    `check.stale` — the accessible name and the peek say "checked before the latest changes" in words; a
-    small spinner while `checkRunning`), the theme
-    (People), then the tags as WORDS (`ticketCardTags`: "CI failing" on an open
-    PR's red checks, "No PR" or "n PRs · m open" — closed unmerged ones ignored —, "No owner") and the
-    assignee's initials (Critical path, Theme). The BORDER marks state by style (`ticketCardBorder`): 2px
+    `check.stale` — the accessible name says "checked before the latest changes" in words; a
+    small spinner while `checkRunning`), the **PERSON-OR-THEME LINE** — on Critical path and Theme the
+    assignee's name in a PILL on its own line, full width, truncated with an ellipsis (full name in the
+    accessible name and the pill's `title`); ⚠ spelled as the People lane spells them (`assigneeLabel` over
+    `personIndex(people)`: the matched `SprintPerson.name`, else the tracker's spelling), so one person
+    never reads two ways on the page; nobody assigned holds the line open with "Unassigned" (and the
+    "No owner" tag is dropped there, never said twice). On People (the lane IS the person) the same line
+    carries the ticket's theme, so every card on every view keeps one height —, then the tags as WORDS
+    (`ticketCardTags`: "CI failing" on an open PR's red checks, "No PR" or "n PRs · m open" — closed
+    unmerged ones ignored —, "No owner"). The BORDER marks state by style (`ticketCardBorder`): 2px
     solid accent = on a stored critical path; dashed = waiting on another unfinished ticket
     (`waitingIdents`); both = dashed accent; outside the sprint = FAINT, 1px dashed on a tinted ground,
     whatever else it is. ⚠ **A CARD WITH A PULL REQUEST** (`hasLivePr`: an open or merged one — the PR
@@ -2213,18 +2221,26 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
     hid. ⚠ **PR cards are GROUPED FIRST in every cell** (`BoardCardDef.group`, 0 = has a PR):
     `layoutBoard` partitions stably, and `orderByLinks` sorts on (group, barycentre, place) so the
     link ordering works WITHIN a group and never lifts a card without a PR above one with a PR — on
-    Critical path too, where a cell's PR cards come first and path order follows. `CardBorderKey` names
-    the dot "Has a pull request" when any card wears it. Its accessible name says all of it. ⚠ **A click opens the STORY PEEK IN PLACE**
-    (`Activity/StoryPeek.tsx`, a floating-ui popover anchored to the card, one open at a time via
-    `claimActivePopover`, closed by an outside click or Escape): the brief's one-liner in full and the card's criteria line with "checked <date>" (only when the count IS the check's), "before the latest pull-request changes" when stale and "checking now" while one runs — from the node, no read; then the ticket review's summary and each
-    criterion with its status chip (Met / Partly met / Not met / …, currency pill when not current), else
-    the CURRENT brief's summary and numbered criteria ("Not checked against the code yet."), else
-    "Reading this ticket…", else the start of the ticket's text. NO docs check, NO design, NO PRs. Its
-    reads (`useTicketReviewStates` — agentic only — then `useTicketReviewById`, and `useTicketStory`) run
-    only while it is open: nothing on the board fetches on mount. **The card's corner arrow** and the
-    peek's "Open story" open the STORY VIEW (`useOpenStory`, § The story view); beside it, "Open in
-    Jira / Linear / GitHub" (`components/TrackerLinkOut.tsx`: `TRACKER_PROVIDER_LABEL`, the node's url
-    through `safeExternalUrl`, new tab) goes to the ticket itself — absent when there is no url.
+    Critical path too, where a cell's PR cards come first and path order follows. `BorderKey` names
+    the dot "Has a pull request" when any card wears it. Its accessible name says all of it. ⚠ **A click
+    opens the STORY TRAY beside the board** (`Sprint/SprintStoryTray.tsx`; the StoryPeek popover is
+    DELETED): an `<aside>` on the RIGHT rendering EXACTLY the story tab's content — the ONE
+    `Ticket/StoryViewBody.tsx` the tab mounts too (§ The story view), never a copy — under a header with
+    the key, **"Open story tab"** (`useOpenStory`) and a close X. The open card wears a sky RING
+    (`aria-pressed`, `aria-controls` = the tray; never the border, which carries meaning). ⚠ **STATE IS
+    `sprintStoryIdent`**, a transient filter-store field (never in `FilterDefaults`), mirrored to
+    `?sprintStory=<ident>` — a NAV key, emitted only with `view=sprint` on a board sub-tab (not Merged so
+    far), so Back closes it and the link reopens it; `setWorkspace` clears it. Escape closes it (capture
+    phase, stepping aside for a typing target, an open popover — `hasActivePopover` —, a modal or an
+    `ESCAPE_OWNER_ATTR` control) and focus returns to the card. Wide (`lg`): a sticky column beside the
+    board, its own scroll; the board narrows and scrolls sideways in its own box (the arrows re-route on
+    resize). Below `lg`: a sheet over the right of the page. Its reads are the story view's own, and it
+    mounts only after a click — nothing on the board fetches on mount. ⚠ **Other ticket links ON THIS
+    PAGE open the tray too** — call-out keys (`actions.onSelect`) and `TicketRefLink` in an Ask Claude
+    answer (or in the tray's own ticket text) through `StoryOpenOverride` (`lib/ticketTab.ts`, read by
+    `useStoryLinkOpener`), which SprintView provides; elsewhere nothing is provided and a link opens the
+    TAB. `useOpenStory` stays the ONLY way to open the tab. **The card's corner arrow** opens the story
+    TAB directly.
 
 - **CRITICAL PATH** (`SprintPathsView`, `Activity/SprintBoards.tsx`; state fold `sprintPathsModel.ts`):
   1. **The pace strip** — CODE's `pace` (`paceItems`), every figure with its denominator: "Day 4 of 14"
@@ -2283,15 +2299,17 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   2.5 s, 90 s cap), during the first read and a refetch slower than 400 ms; FILLING with the summarised
   share while briefs run; "Working out the critical paths" while the builder runs; still under reduced
   motion. Truncation and "Summarising n tickets…" are one muted line.
-- ⚠ **THE BOARD DOES NOT REDRAW ITSELF IN STEADY STATE** (`useSprintGraph`'s `refetchInterval` is
-  `false` once nothing is landing; it still polls during the first read, paths writing/queued, pending
-  briefs and a running ticket check). Instead `useSprintChangeToken` polls `GET /api/sprint-graph/token`
-  every `SPRINT_CHANGE_TOKEN_POLL_MS` (60 s), only while the This Sprint tab is mounted and the page is
-  visible (`refetchIntervalInBackground: false`). Its first answer is SEEDED from the loaded graph's own
-  `changeToken` (`initialData`, timed at the graph's fetch), so nothing fetches on mount. A token read
-  AFTER the graph loaded that differs shows ONE quiet line under the toolbar, "The sprint has changed
-  since you loaded it.", with a Refresh that only re-fetches the graph (no tracker read, no ticket
-  checks); an absent token (an older server, the e2e catch-all) never shows it.
+- ⚠ **THE BOARD REFRESHES ITSELF ON CHANGE, AND ONLY ON CHANGE** (owner decision 2026-10-22, "refetch
+  on change"; the "The sprint has changed since you loaded it." line is DELETED). `useSprintGraph`'s
+  `refetchInterval` is `false` once nothing is landing (it still polls during the first read, paths
+  writing/queued, pending briefs and a running ticket check). `useSprintChangeToken` polls
+  `GET /api/sprint-graph/token` (DB only) every `SPRINT_CHANGE_TOKEN_POLL_MS` (60 s), only while the This
+  Sprint tab is mounted and the page is visible (`refetchIntervalInBackground: false`). Its first answer
+  is SEEDED from the loaded graph's own `changeToken` (`initialData`, timed at the graph's fetch), so
+  nothing fetches on mount. When a token read AFTER the graph loaded differs (`sprintTokenChanged`),
+  SprintView re-fetches the graph AUTOMATICALLY (no tracker read, no ticket checks) — not while the
+  reader's own Refresh is landing. Nothing changed ⇒ no graph read and no re-layout; an absent token (an
+  older server, the e2e catch-all) never triggers one.
 - **The toolbar's Refresh** reads the sprint from the tracker AND, local with AI on, starts up to
   `SPRINT_REFRESH_TICKET_CHECKS` (3) ticket checks server-side; the response's `ticketChecks` is said
   for 10 s under the toolbar (`ticketChecksNote`: "Checking 2 tickets against their pull requests.", or
@@ -3277,7 +3295,7 @@ phrase it two ways.
 
 ## The story view (the ticket tab, `kind: 'ticket'`, CORE/free)
 
-ONE ticket, Open PRs style: `Ticket/TicketTabView.tsx` renders the SAME ticket stack the Open PRs board
+ONE ticket, Open PRs style: `Ticket/StoryViewBody.tsx` renders the SAME ticket stack the Open PRs board
 draws — `OpenPrsCards` with `story={{ticket, merged}}` (`storyStack`, `lib/openPrsStacks.ts`) — never a
 copy. In order: the stack header (key — on the board it opens this story view in a tab, else the tracker link; in the story view itself it is plain text —, title, status, type,
 assignee, "Open in <tracker>" (`TrackerLinkOut`, story view only, absent with no url), PR count, the ticket review's coverage pill + Re-check), the **Story section, ALWAYS OPEN**
@@ -3286,6 +3304,10 @@ the stack "Closed without merging (n)", collapsed. It works for a ticket with NO
 is drawn with no rows; "No pull requests for this ticket yet."). Stacks never collapse, here or on the
 board.
 
+- ⚠ **TWO HOSTS, ONE BODY.** The ticket TAB (`Ticket/TicketTabView.tsx`, which parses the active tab's
+  ident and meta) and This Sprint's story TRAY (`Sprint/SprintStoryTray.tsx`, ident from
+  `?sprintStory=`) both mount `StoryViewBody({ident, meta})`. The body reads nothing about where it is
+  mounted (never `activeTab`, or the tray draws the wrong ticket); pinned by test/storyView.test.ts.
 - **Tab words** (`storyTabLabels`, `lib/ticketTab.ts`): chip "KEY · Story", tooltip "KEY: story and
   pull requests", close "Close story tab". Internally it stays `kind: 'ticket'` with key
   `ticket:<ident>` (`TICKET_TAB_PREFIX`; the ident verbatim, `URLSearchParams` escapes it in `view=`)
@@ -3297,6 +3319,8 @@ board.
   by the server's `prTicketView`, else the chip only links out), and a search's **Stories** facet (dropdown
   and results tab, listed FIRST; `openSearchStory` in Search/searchNav.ts, the one non-hook caller of
   `openTicketTab`). Never call the store action from a component. The sprint drawer and its reference cards are GONE.
+  On This Sprint a ticket LINK opens the page's tray instead (`StoryOpenOverride` / `useStoryLinkOpener`);
+  the override never opens a tab, and the tray's "Open story tab" calls `useOpenStory`.
 - **Two DB-only reads, both free**: `GET /api/ticket-prs` (`useTicketPrs`, key
   `['ticket-prs','ws:<id>',ident]`: the PRs + the freshest tracker row) and `GET /api/ticket-story`
   (`useTicketStory`, key `['ticket-story','ws:<id>',ident]`: the sprint read's row — type, assignee,
@@ -4616,7 +4640,15 @@ test/designGrid.test.ts).
   the focus). ANOTHER PR's (a story card, or any card in the Story section) → the store's `openPrChangesAt`
   (mounts that PR's pane like `openClaudeReview`, and sets the transient `prChangesFocus`), which
   PrDetail consumes through the same `openInChanges` as a URL correction.
-- The legend lives behind the heading's ⓘ (`DesignLegend`), never on the surface.
+- **A VISIBLE KEY under the grid names each card border it draws** (`BorderKey` from
+  `components/LaneBoard.tsx`, the SAME component under This Sprint's boards; `data-testid=
+  "design-border-key"`), above the arrow key: "New: added by the change" (solid accent), "Changed:
+  existing code it edits" (dashed accent), "Existing code it relies on" (thin grey) — `CHANGE_KEY_LABEL`,
+  only the kinds present (`changesPresent`, DESIGN_CHANGES order, lib/designGrid.ts), each swatch the
+  card's own `CARD_CHANGE` classes. ⚠ This REVERSES the old "legend only behind the ⓘ" rule: a key NAMES
+  marks, so it is a label, not an explanation. The explanation (how Claude draws it, empty cells,
+  click-through, when it redraws, check it before relying on it) stays behind the heading's ⓘ
+  (`DesignLegend`).
 
 `components/ClaudeReviewDiagrams.tsx` — `ClaudeReviewDiagramsSection` ("Design", mounted in
 `ClaudesReview` after SonarCloud, absent without `me.ai`) shows the PR's slot and each multi-PR
