@@ -1,6 +1,6 @@
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
-import { INSTALL_COMMAND, SITE_NAME } from '../lib/site';
+import { DEMO_PATH, FREE_TEAM_SIZE, INSTALL_COMMAND, LICENSE_URL, SITE_NAME } from '../lib/site';
 import {
   DashItem,
   MonoLabel,
@@ -8,34 +8,25 @@ import {
   Section,
   UnderlineLink,
 } from '../components/feint/primitives';
-import { TierTable } from '../components/feint/TierTable';
+import { GetStarted } from '../components/feint/GetStarted';
 import { ContactForm } from '../components/ContactForm';
 
 // ---------------------------------------------------------------------------
-// Contact — and, until checkout exists, the way Pro is actually bought.
+// Contact — and the way an organisation gets a licence.
 //
-// ⚠ THIS PAGE IS THE PAYMENT PATH. There is no Stripe integration, so every Pro
-// call-to-action on the site points here rather than at a checkout that would
-// take a card it cannot charge. The offer is genuine and it is stated in the
-// first sentence: ask, and Pro is switched on free for a month.
-//
-// THAT IS A DELIBERATE TRADE AND THE PAGE SAYS WHY. A form is a worse conversion
-// step than a card field — but the thing being optimised for right now is
-// FEEDBACK from people actually running the product, not revenue, and a
-// conversation started by a message is a better start on that than a silent
-// subscription. Written as an invitation rather than as an apology for missing
-// billing: a reader who has to be told twice that checkout is unfinished stops
-// reading.
+// Limn is free for individuals and for teams of up to FREE_TEAM_SIZE people in one
+// organisation (the Limn License at the repository root). An organisation with more
+// people than that needs a commercial licence, and there is no checkout: it starts
+// with a message here. So the first sentence says who this page is for, and the
+// form opens on the licence topic when the visitor arrives from a "bigger team" link
+// (`?topic=licence`).
 //
 // NO PHONE NUMBER, NO ADDRESS, NO "our team". It is one person answering, the
 // page says so, and that is the most useful true thing on it.
 //
-// ⚠ IT CARRIES THE TIER TABLE, like every other content page, and here that is
-// load-bearing rather than consistency: /pricing now RESOLVES TO THIS PAGE (see
-// App.tsx and prerender.mjs), so somebody searching for what it costs arrives
-// here — and without the table they would find a form and no answer. The table's
-// own closing button points back at /contact?topic=pro, which on this page means
-// "back to the top, where the form is". That is a return path, not a loop.
+// /pricing RESOLVES TO THIS PAGE (App.tsx and prerender.mjs): somebody asking what it
+// costs finds the answer in the first two lines — nothing, unless the organisation
+// is bigger than FREE_TEAM_SIZE people.
 // ---------------------------------------------------------------------------
 
 export default function Contact(): JSX.Element {
@@ -48,21 +39,21 @@ export default function Contact(): JSX.Element {
           Contact
         </MonoLabel>
         <h1 className="mb-6 max-w-[19ch] text-pretty font-display text-hero-sm font-semibold text-ink type:text-page-title">
-          Ask, and Pro is on us for a month.
+          A bigger team? Ask for a licence here.
         </h1>
         <p className="mb-[34px] max-w-lede text-pretty text-lede text-ink-soft">
-          Card payments are not switched on yet, and rather than hold Pro back until they
-          are, we are giving it away for a month to anyone who asks. Send a message, and
-          Pro is enabled on your account — every paid surface, no card, nothing to cancel.
+          {SITE_NAME} is free for individuals and for teams of up to {FREE_TEAM_SIZE} people in
+          one organisation. If more than {FREE_TEAM_SIZE} people in your organisation use it,
+          you need a licence. Send a message and we will sort one out. Questions and bug
+          reports are welcome here too.
         </p>
         <div className="mb-4 flex flex-wrap items-center gap-3.5">
-          <UnderlineLink to="/for-developers">What you get, for developers →</UnderlineLink>
-          <UnderlineLink to="/for-managers">And for managers →</UnderlineLink>
+          <UnderlineLink to={DEMO_PATH}>Try the demo first →</UnderlineLink>
+          <UnderlineLink to={LICENSE_URL}>Read the licence →</UnderlineLink>
         </div>
         <p className="mb-11 max-w-reassure font-mono text-mono-nav text-secondary">
-          The free tier needs none of this — sign in, or run{' '}
-          <span className="text-ink">{INSTALL_COMMAND}</span> on your own machine, and it
-          works today.
+          Using it on your own, or with up to {FREE_TEAM_SIZE} people? You need none of this —
+          run <span className="text-ink">{INSTALL_COMMAND}</span> and it works today.
         </p>
       </header>
 
@@ -84,8 +75,8 @@ export default function Contact(): JSX.Element {
                   within two working days.
                 </DashItem>
                 <DashItem>
-                  If you asked for the Pro month, the reply says how it is turned on. There
-                  is no card, no invoice and no auto-renewal at the end of it.
+                  If you asked about a licence, the reply says what it covers and what it
+                  costs for the size of your organisation.
                 </DashItem>
                 <DashItem>
                   If you found something broken, the reply comes from the person who will
@@ -98,19 +89,15 @@ export default function Contact(): JSX.Element {
               </ul>
 
               <h2 className="mb-5 max-w-[24ch] text-pretty font-display text-h3 font-semibold text-ink">
-                Why a month, free
+                Who needs a licence
               </h2>
               <p className="mb-4 max-w-answer text-body-sm text-ink-body">
-                {SITE_NAME} measures things most teams have never had measured — what a
-                fortnight of review actually cost, and what the bots on top of it returned.
-                Those readings get better the more estates they are run against, and the
-                fastest way to make them better is for people to run them and say what was
-                wrong.
+                Count the people in your organisation who use {SITE_NAME}. Up to{' '}
+                {FREE_TEAM_SIZE}, it is free. More than {FREE_TEAM_SIZE}, the organisation needs
+                a licence.
               </p>
               <p className="max-w-answer text-body-sm text-ink-body">
-                So the month is not a discount waiting to convert. It buys the one thing
-                that cannot be bought later: being told what the report got wrong by someone
-                who knows their own team.
+                The full terms are in the Limn License, published with the source.
               </p>
             </div>
           </div>
@@ -125,8 +112,7 @@ export default function Contact(): JSX.Element {
               Or skip the form entirely.
             </h2>
             <p className="mb-4 max-w-answer text-body-sm text-ink-body">
-              The whole free tier is open core and it installs in one command. Nothing on
-              this page is a gate in front of it —{' '}
+              Nothing on this page is a gate in front of the app.{' '}
               <span className="font-mono text-mono-row text-ink">{INSTALL_COMMAND}</span>{' '}
               runs it against your own repositories using your existing{' '}
               <span className="font-mono text-mono-row text-ink">gh</span> login, stores no
@@ -141,7 +127,7 @@ export default function Contact(): JSX.Element {
         </RailGrid>
       </Section>
 
-      <TierTable />
+      <GetStarted />
     </>
   );
 }

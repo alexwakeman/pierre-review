@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { Link } from '../router';
 import { resetConsent } from '../lib/consent';
 import { analyticsConfigured, revokeAnalytics } from '../lib/analytics';
-import { REPO_URL, SITE_NAME } from '../lib/site';
+import { DEMO_PATH, LICENSE_URL, REPO_URL, SITE_NAME } from '../lib/site';
 
 // ---------------------------------------------------------------------------
 // The footer, condensed to two mono lines — a © line with a link row, and the
@@ -54,6 +54,9 @@ export default function Footer(): JSX.Element {
           <Link to="/contact" className={LINK}>
             Contact
           </Link>
+          <Link to={DEMO_PATH} className={LINK}>
+            Demo
+          </Link>
           <a
             href={REPO_URL}
             target="_blank"
@@ -61,6 +64,9 @@ export default function Footer(): JSX.Element {
             className={LINK}
           >
             GitHub
+          </a>
+          <a href={LICENSE_URL} target="_blank" rel="noreferrer noopener" className={LINK}>
+            Licence
           </a>
           <Link to="/privacy" className={LINK}>
             Privacy
@@ -80,7 +86,7 @@ export default function Footer(): JSX.Element {
       </div>
 
       {/* The roadmap link went with /how-it-works. The fact it carried is still worth
-          stating — a phone visitor should know before they sign in — so it stays as
+          stating — a phone visitor should know before they install it — so it stays as
           plain text rather than pointing at a page that no longer exists. */}
       <p className="mt-4 max-w-caption">
         {SITE_NAME} is a desktop experience today. A phone-friendly build is planned.

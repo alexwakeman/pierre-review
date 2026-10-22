@@ -14,15 +14,20 @@ import {
   UL,
 } from '../components/legal';
 
-// The privacy notice. Two things make Limn's version unusual and both are stated
-// up front rather than buried:
-//   1. There are TWO products here. Run locally, nothing is collected by anyone —
-//      there is no server to collect it. The notice below is almost entirely about
-//      the hosted cloud version.
-//   2. The data Limn syncs includes personal data about people who are NOT its
-//      users — the other GitHub accounts whose pull requests and comments appear on
-//      your team's board. Pretending otherwise would be the dishonest thing to do,
-//      so §4 says so explicitly and explains the legal basis.
+// The privacy notice.
+//
+// Limn is local-only: there is no hosted app, no account and no server of ours in
+// the path of anything the app does. So this notice is mostly about THIS WEBSITE,
+// where exactly two things are collected — what someone types into the contact form,
+// and consented analytics — plus the request logs any web server keeps.
+//
+// §3 still says plainly what the app does on the reader's own machine (it copies
+// other people's GitHub activity into a local file, and the AI features send content
+// to Anthropic on the reader's own credentials), because that is true and a reader
+// deploying it for a team needs to know.
+
+const LINK =
+  'border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text';
 
 export default function Privacy(): JSX.Element {
   useSeo(seoFor('/privacy'));
@@ -33,21 +38,15 @@ export default function Privacy(): JSX.Element {
       intro={
         <>
           <p>
-            This notice explains what personal data {SITE_NAME} processes, why, and what you
-            can do about it. It covers the hosted service at{' '}
-            <span className="font-mono text-ink">pierre-review.com</span>.
+            This notice explains what personal data this website collects, why, and what you
+            can do about it. It also says what the {SITE_NAME} app does on your own machine.
           </p>
           <div className="mt-5">
-            <LegalNote title={`If you run ${SITE_NAME} on your own machine, this notice barely applies to you`}>
+            <LegalNote title="The short version">
               <p>
-                {SITE_NAME}&apos;s default mode is local: it runs on your computer, stores
-                everything in a SQLite file under your home directory, authenticates with
-                your own <span className="font-mono">gh</span> CLI token, and sends
-                nothing to us. We have no server in that path and receive no data — not
-                telemetry, not crash reports, not analytics. The rest of this notice is
-                about the hosted cloud version, where there is a server and we do process
-                data. Sections 2 (analytics) and 7 (AI features) are the only ones with
-                anything to say about local installs, and both are opt-in.
+                There are no accounts. On this site we collect only what you type into the
+                contact form, and analytics if you accept them. The app runs on your computer
+                and sends nothing to us — no telemetry, no crash reports, no analytics.
               </p>
             </LegalNote>
           </div>
@@ -56,173 +55,113 @@ export default function Privacy(): JSX.Element {
     >
       <LegalSection id="controller" heading="1. Who is responsible">
         <P>
-          The data controller for the hosted service is <T>{LEGAL_CONTROLLER}</T>, an
-          individual sole trader based in the United Kingdom, contactable at <Mail />.
-          {SITE_NAME} is a small independent project, not a company with a privacy department:
-          the same person who wrote the code answers the email.
+          The data controller is <T>{LEGAL_CONTROLLER}</T>, a sole trader based in the United
+          Kingdom, contactable at <Mail />. The same person who wrote the code answers the
+          email.
         </P>
         <P>
-          Because the controller is UK-based, the UK GDPR and the Data Protection Act 2018
-          apply, and the EU GDPR applies to visitors and users in the EEA. If you are in
-          California, see §11.
+          The UK GDPR and the Data Protection Act 2018 apply, and the EU GDPR applies to
+          visitors in the EEA. If you are in California, see §8.
         </P>
       </LegalSection>
 
-      <LegalSection id="website" heading="2. The website and analytics">
+      <LegalSection id="website" heading="2. This website">
         <P>
-          The marketing pages you are reading now are static. They set no cookies and run
-          no third-party scripts <em>until you agree to them</em>. Specifically:
+          The pages are static. They set no cookies and run no third-party scripts{' '}
+          <em>until you agree to them</em>. What the site does collect:
         </P>
         <UL>
           <li>
-            <T>Google Analytics 4</T> — used to count page views and see which pages are
-            useful. It writes a first-party <span className="font-mono">_ga</span> cookie
-            and sends your IP address, approximate location, device/browser details and the
-            pages you view to Google. It runs <em>only</em> if you press Accept on the
-            cookie banner. Decline and the script is never even downloaded. Google Signals
-            and ad personalisation are switched off, so the data is never joined to an
-            advertising profile. Full detail, including how to change your mind, is in the{' '}
-            <Link to="/cookies" className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text">
+            <T>The contact form</T> — the name, email address, subject and message you type.
+            They are delivered to a private Slack channel that one person reads. Nothing else
+            is collected with them: no fingerprint, no tracking identifier, and no third-party
+            anti-spam service (the form is protected by a hidden field, a signed minimum fill
+            time and a rate limit, all on our own server). Your email address is used to reply
+            to you and for nothing else.
+          </li>
+          <li>
+            <T>Google Analytics 4</T>, only if you press Accept on the cookie banner. It counts
+            page views and sends your IP address, approximate location, device and browser
+            details and the pages you view to Google. Decline and the script is never
+            downloaded. Google Signals and ad personalisation are off. Details, and how to
+            change your mind, are in the{' '}
+            <Link to="/cookies" className={LINK}>
               cookie policy
             </Link>
             .
           </li>
           <li>
-            <T>Fonts and assets</T> — the brand typeface and every image are served from
-            this domain. There is no Google Fonts request, no CDN and no tracking pixel, so
-            loading a page discloses nothing to a third party.
-          </li>
-          <li>
-            <T>The contact form</T> — if you send one, the name, email address, subject and
-            message you type are delivered to a private Slack channel that one person
-            reads. Nothing else is collected with it: no fingerprint, no tracking
-            identifier, and no third-party anti-spam service (the form is protected by a
-            hidden field, a signed minimum fill time and a rate limit, all of which run on
-            our own server). Your email address is used to reply to you and for nothing
-            else — it is not added to any mailing list. See §5 and §6.
-          </li>
-          <li>
-            <T>Server logs</T> — the hosting provider records request metadata including
-            your IP address, for security and debugging. See §6.
+            <T>Server logs</T> — the hosting provider records request details, including your
+            IP address, for security and debugging.
           </li>
         </UL>
         <P>
+          Fonts and images are served from this domain: no Google Fonts, no CDN, no tracking
+          pixel.
+        </P>
+        <P>
+          <T>The demo</T> runs in your browser on invented sample data. Nothing you type or
+          click in it is sent to us, beyond the consented analytics above.
+        </P>
+        <P>
           <T>Legal basis:</T> consent (UK/EU GDPR Art. 6(1)(a)) for analytics; legitimate
-          interests (Art. 6(1)(f)) for keeping the service secure and available, and for
-          answering a message you chose to send us.
+          interests (Art. 6(1)(f)) for keeping the site secure and for answering a message you
+          chose to send.
         </P>
       </LegalSection>
 
-      <LegalSection id="account" heading="3. If you sign in to the hosted app">
+      <LegalSection id="app" heading="3. The app, on your machine">
         <P>
-          Signing in uses GitHub OAuth. We never see or store a password. What we do store:
-        </P>
-        <LegalTable
-          columns={['Data', 'Why', 'Notes']}
-          rows={[
-            [
-              'Your GitHub id, username, display name and avatar URL',
-              'To identify your account and show who you are in the UI',
-              'Read from GitHub at sign-in and refreshed periodically',
-            ],
-            [
-              'A GitHub access token',
-              `To read the repositories you ask ${SITE_NAME} to watch, and to perform actions you initiate (posting a review, resolving a thread)`,
-              'Encrypted at rest with AES-256-GCM. Never sent to your browser, never logged.',
-            ],
-            [
-              'A session cookie',
-              'To keep you signed in',
-              'Named pierre_session, cryptographically sealed, HTTP-only, 30 days. Strictly necessary — no consent needed, and it cannot be declined without signing out.',
-            ],
-            [
-              'Timestamp of your last activity',
-              'So we only sync repositories for accounts that are actually being used',
-              'A single timestamp; no history is kept',
-            ],
-            [
-              'Your plan, and a Stripe customer id if you buy Pro',
-              'To know what you are entitled to',
-              'See §5 — card details never reach our server',
-            ],
-          ]}
-        />
-        <P>
-          <T>Legal basis:</T> performance of a contract (Art. 6(1)(b)) — this is the data
-          required to provide the service you asked for.
-        </P>
-      </LegalSection>
-
-      <LegalSection id="repo-data" heading="4. Repository data — including other people's">
-        <P>
-          {SITE_NAME}&apos;s purpose is to show a team&apos;s pull-request activity. When you add
-          a repository, {SITE_NAME} copies recent activity from GitHub into its database so it
-          can be searched, filtered and charted. That includes:
+          {SITE_NAME} runs on your computer and keeps everything in a file under your home
+          directory. We have no server in that path and receive none of it. What the app does,
+          so you can decide where to run it:
         </P>
         <UL>
           <li>
-            pull request titles, descriptions, state, timestamps, labels and CI results;
+            <T>It copies GitHub activity into that file</T> — pull requests, review comments,
+            commits, and the usernames and avatars of everyone involved. That includes people
+            who never chose to use {SITE_NAME}: your colleagues and any outside contributor. It
+            only reads what your own GitHub login can already read.
           </li>
           <li>
-            review comments, review bodies and issue comments — the actual text people
-            wrote;
+            <T>AI features send content to Anthropic</T> — diffs, comments and ticket text for
+            the pull request being reviewed or fixed. They use your own Claude Code login or
+            Anthropic API key, so the content goes from your machine to Anthropic under your
+            agreement with them. We never see it.
           </li>
-          <li>commit SHAs, messages and the file paths each commit touched;</li>
           <li>
-            the GitHub username, display name and avatar of everyone who authored, reviewed
-            or commented on any of it;
+            <T>Optional integrations</T> you set up yourself — a Slack webhook, an issue
+            tracker, SonarCloud — receive or send only what those features need, directly
+            from your machine.
           </li>
-          <li>metrics derived from the above (review turnaround, bot activity, and so on).</li>
+          <li>
+            <T>First-use downloads</T> — the AI runtime and the comment-grading model are
+            downloaded the first time you ask for them, from npm and the model host. Those
+            services see the request, as with any download.
+          </li>
         </UL>
         <P>
-          <T>
-            This means {SITE_NAME} processes personal data about people who never signed up for
-            it
-          </T>{' '}
-          — your colleagues, and any outside contributor to a repository you watch. We are
-          stating that plainly because it is true of every tool in this category and is
-          rarely admitted.
-        </P>
-        <P>
-          Two things limit it. First, {SITE_NAME} only ever reads what the connected GitHub
-          token can already read, so it can never surface anything the account holder was
-          not already entitled to see. Second, by default {SITE_NAME} stores <em>less</em> than
-          it could: pull-request descriptions, diff hunks and commit messages are not
-          persisted at all unless the operator turns that on — they are fetched from GitHub
-          on demand when you open a pull request, and cached in your browser rather than on
-          the server.
-        </P>
-        <P>
-          <T>Legal basis:</T> legitimate interests (Art. 6(1)(f)) — the interest being a
-          development team&apos;s ability to see and manage its own review workload. The data
-          is professional activity that the individuals concerned published in a
-          collaborative workspace, the processing is limited to what the team&apos;s existing
-          access already permits, and it is not used for profiling, advertising or any
-          decision about the individual. If you are deploying {SITE_NAME} for a team, you are
-          likely a joint or independent controller for this data under your own privacy
-          notice; contact us at <Mail /> if you need a data processing agreement.
+          If you run {SITE_NAME} for a team, you are the controller for the data it holds, under
+          your own privacy notice.
         </P>
       </LegalSection>
 
-      <LegalSection id="processors" heading="5. Who else the data reaches">
-        <P>
-          We use a small number of processors. No data is sold, and there are no
-          advertising or data-broker relationships.
-        </P>
+      <LegalSection id="processors" heading="4. Who else the website data reaches">
+        <P>No data is sold, and there are no advertising or data-broker relationships.</P>
         <LegalTable
           columns={['Recipient', 'What they receive', 'Where', 'When']}
           rows={[
             [
-              'GitHub (Microsoft)',
-              'Your token is used to read repository activity; actions you take (a review, a comment, a resolved thread) are written back',
-              'USA / global',
-              'Always — it is the data source',
-            ],
-            [
               'Railway',
-              'Hosting: the application, its database and its request logs',
+              'Hosting for this website, and its request logs',
               'USA / EU region',
               'Always',
+            ],
+            [
+              'Slack',
+              'The name, email address, subject and message you typed into the contact form, delivered to a private channel of ours',
+              'USA',
+              'Only when you submit the contact form',
             ],
             [
               'Google (Analytics)',
@@ -230,159 +169,51 @@ export default function Privacy(): JSX.Element {
               'USA',
               'Only with your consent (§2)',
             ],
-            [
-              'Anthropic',
-              'The content sent to the model: diffs, comment text and metrics for the pull requests being summarised or analysed',
-              'USA',
-              'Only when you use a Pro AI feature (§7)',
-            ],
-            [
-              'Stripe',
-              'Your payment details, name and billing address',
-              'USA / EU',
-              'Only if you buy Pro. Collected by Stripe directly — card data never touches our server.',
-            ],
-            [
-              'Slack',
-              // ⚠ THIS ROW IS A PUBLISHED CLAIM ABOUT WHAT LEAVES THE SERVICE, AND IT WAS
-              // RE-CHECKED WHEN THE DIGEST BECAME PER-WORKSPACE. "The digest content you
-              // configured" was true when the message was prose plus GitHub links; it now also
-              // carries the workspace's NAME (in the header, so a reader can tell whose figures
-              // they are) and LINKS BACK INTO THE APP whose query strings contain workspace and
-              // repository ids. Those are tenant identifiers, not prose, so the sentence had to
-              // widen. If a future change puts anything else in that message — a person's name,
-              // an author login — this row widens again, in the same change.
-              'The digest content: the summary prose, the repository names it covers, the name of the workspace it is for, and links back into the app (which contain workspace and repository ids). It is sent to the channel behind the webhook URL you supply, per workspace.',
-              'USA',
-              'Only if you set up a Slack digest webhook yourself, and only for the workspaces you select',
-            ],
-            [
-              'Slack (contact form)',
-              // A SEPARATE ROW, NOT A WIDENING OF THE ONE ABOVE. Same recipient company,
-              // but a different trigger (you submit a form vs you configure a digest), a
-              // different channel (ours vs yours) and a different payload (what you typed vs
-              // your workspace's figures). Folding them together would make each sentence
-              // untrue of half the traffic it described.
-              'The name, email address, subject and message you typed into the contact form. It is delivered to a private channel belonging to us, which one person reads.',
-              'USA',
-              'Only when you submit the contact form',
-            ],
           ]}
         />
         <P>
-          Transfers outside the UK/EEA rely on the UK International Data Transfer Addendum
-          and the EU Standard Contractual Clauses, as incorporated in each provider&apos;s
-          data processing terms. We may also disclose data where legally required, or to
-          protect the service against abuse.
+          Transfers outside the UK/EEA rely on the UK International Data Transfer Addendum and
+          the EU Standard Contractual Clauses, as incorporated in each provider&apos;s data
+          processing terms. We may also disclose data where the law requires it.
         </P>
       </LegalSection>
 
-      <LegalSection id="retention" heading="6. How long data is kept">
+      <LegalSection id="retention" heading="5. How long it is kept">
         <UL>
           <li>
-            <T>Repository activity</T> — pull requests and everything attached to them are
-            deleted automatically once they have been inactive for 180 days. This runs
-            nightly; nothing accumulates indefinitely.
+            <T>Contact-form messages</T> — kept in the Slack channel for as long as the
+            conversation is useful, and deleted on request. The site keeps no copy of its own.
+            The one exception is a failed delivery, which is written to the server log so the
+            message is not lost.
           </li>
           <li>
-            <T>Your account</T> — kept until you delete it. Deleting removes the account
-            row, your encrypted token, every repository you added and all the activity
-            synced for them.
+            <T>Server logs</T> — kept by the hosting provider for a short window (days, not
+            months).
           </li>
           <li>
-            <T>Contact-form messages</T> — kept in the Slack channel they are delivered to
-            for as long as the conversation is useful, and deleted on request. The
-            application stores no copy of its own: the message is passed straight through
-            to Slack and never written to our database. The one exception is a failed
-            delivery, which is written to the server log so the message is not simply lost
-            — those logs are short-lived, as above.
-          </li>
-          <li>
-            <T>Server logs</T> — retained by the hosting provider for a short operational
-            window (days, not months). Credentials are redacted before anything is written.
-          </li>
-          <li>
-            <T>AI usage records</T> — a running count of tokens and credits used per month,
-            for billing and quota. The prompts themselves are not stored by us.
-          </li>
-          <li>
-            <T>Billing records</T> — held by Stripe for as long as UK tax law requires
-            (currently six years).
+            <T>Analytics</T> — kept by Google under the property&apos;s data-retention
+            setting.
           </li>
         </UL>
       </LegalSection>
 
-      <LegalSection id="ai" heading="7. AI features">
+      <LegalSection id="rights" heading="6. Your rights">
         <P>
-          {SITE_NAME}&apos;s AI features are opt-in and clearly labelled. When you use one — a
-          repository digest, a pull-request summary, a read on a failed build, team
-          insights — the
-          relevant content is sent to <T>Anthropic</T> to generate the result. That content
-          can include source-code diffs, review comments and the names of the people
-          involved.
+          Under UK/EU GDPR you can ask us to give you a copy of your data, correct it, delete
+          it, restrict or object to how we use it, and withdraw any consent you have given.
+          Email <Mail /> and we will respond within one month. It never costs anything.
         </P>
         <P>
-          Anthropic acts as our processor and, under its commercial terms, does not use
-          this content to train its models. Even so: treat an AI feature as a decision to
-          share that code and those comments with a third party, and do not enable it on a
-          repository where that would be inappropriate. Nothing is sent unless you press
-          the button.
+          If your GitHub activity appears in someone else&apos;s {SITE_NAME}, that copy is on
+          their machine, not ours — ask them.
         </P>
         <P>
-          On a local install, AI features use <em>your own</em> Claude Code session or
-          Anthropic API key, and the content goes from your machine to Anthropic directly —
-          we are not in the path, never see it, and store no key. Claude review and fix run
-          only there. They send nothing until you press the button, or until you switch on
-          auto review for a workspace.
-        </P>
-      </LegalSection>
-
-      <LegalSection id="benchmark" heading="8. The cross-organisation benchmark (off by default)">
-        <P>
-          The hosted app offers an optional benchmark that compares your review-bot metrics
-          against an aggregate of other organisations. It is <T>off unless you switch it
-          on</T>. When enabled, aggregate, non-identifying counts are contributed to that
-          pool — never repository names, pull-request contents or usernames. You can turn it
-          off at any time in settings, which stops further contribution.
-        </P>
-        <P>
-          <T>Legal basis:</T> consent (Art. 6(1)(a)), withdrawable at any time.
-        </P>
-      </LegalSection>
-
-      <LegalSection id="rights" heading="9. Your rights">
-        <P>
-          Under UK/EU GDPR you can ask us to: give you a copy of your data (access and
-          portability), correct it, delete it, restrict or object to how we use it, and
-          withdraw any consent you have given. Exercising a right never costs you anything
-          and never degrades the service.
-        </P>
-        <P>Two of these are self-service in the hosted app, under Settings → Your data:</P>
-        <UL>
-          <li>
-            <T>Export</T> — downloads everything associated with your account as a single
-            JSON file.
-          </li>
-          <li>
-            <T>Delete account</T> — irreversibly removes your account, your encrypted
-            GitHub token, your repositories and all synced activity. It also revokes
-            {SITE_NAME}&apos;s access to your GitHub account.
-          </li>
-        </UL>
-        <P>
-          For anything else, or if you are not a user but your GitHub activity appears in
-          someone&apos;s {SITE_NAME} instance, email <Mail /> and we will respond within one
-          month. To help with the second case: we hold that data on behalf of whichever
-          account added the repository, so we may need to put you in touch with them —
-          include the repository name if you can.
-        </P>
-        <P>
-          If you are unhappy with how we handle it, you can complain to the UK{' '}
+          If you are unhappy with how we handle your data, you can complain to the UK{' '}
           <a
             href="https://ico.org.uk/make-a-complaint/"
             target="_blank"
             rel="noreferrer noopener"
-            className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text"
+            className={LINK}
           >
             Information Commissioner&apos;s Office
           </a>
@@ -390,36 +221,28 @@ export default function Privacy(): JSX.Element {
         </P>
       </LegalSection>
 
-      <LegalSection id="security" heading="10. Security">
+      <LegalSection id="security" heading="7. Security">
         <P>
-          GitHub tokens are encrypted at rest with AES-256-GCM under a key held only in the
-          server environment. Session cookies are sealed, HTTP-only and same-site. All
-          traffic is HTTPS with HSTS. Every database query is scoped to the owning account,
-          and that isolation is enforced by an automated check in the build. Credentials are
-          redacted from logs. The application is open source, so you can verify all of this
-          rather than take our word for it.
-        </P>
-        <P>
-          No system is perfect. If you find a vulnerability, please report it privately to{' '}
-          <Mail /> rather than opening a public issue.
+          The site is served over HTTPS with HSTS and a strict content security policy. If you
+          find a vulnerability, report it privately to <Mail /> rather than opening a public
+          issue.
         </P>
       </LegalSection>
 
-      <LegalSection id="california" heading="11. California residents">
+      <LegalSection id="california" heading="8. California residents">
         <P>
           We do not sell personal information and do not share it for cross-context
-          behavioural advertising, as those terms are defined by the CCPA/CPRA. You have
-          the right to know what we collect (§§2–4), to delete it, to correct it, and not to
-          be discriminated against for asking. Use the self-service controls in §9 or email{' '}
-          <Mail />. We do not knowingly collect data from anyone under 16.
+          behavioural advertising, as the CCPA/CPRA define those terms. You have the right to
+          know what we collect (§2), to delete it, to correct it, and not to be discriminated
+          against for asking. Email <Mail />. We do not knowingly collect data from anyone
+          under 16.
         </P>
       </LegalSection>
 
-      <LegalSection id="changes" heading="12. Changes">
+      <LegalSection id="changes" heading="9. Changes">
         <P>
-          If this notice changes materially we will update the date at the top and, where
-          the change affects consent, re-ask for it. The full history is in the public git
-          repository, so you can diff any version against any other.
+          If this notice changes materially we will update the date at the top and, where the
+          change affects consent, ask again. The full history is in the public git repository.
         </P>
       </LegalSection>
     </LegalPage>

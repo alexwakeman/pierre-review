@@ -8,7 +8,7 @@ import { MonoLabel } from './feint/primitives';
 // ⚠ IT IS PART OF THE DESIGN SYSTEM, WHICH HAS NO FORM PRIMITIVES because until
 // now the site had no form. What is here follows the same rules as everything
 // else: square corners, 1px hairlines, no shadow, no fill on a resting input, no
-// icons. An input is a line of type on a rule — the same object the tier table's
+// icons. An input is a line of type on a rule — the same object the ruled lists'
 // rows are.
 //
 // ---- Three things a marketing form usually gets wrong, and how this one does not
@@ -30,12 +30,12 @@ import { MonoLabel } from './feint/primitives';
 //    message somebody spent five minutes writing.
 //
 // The fourth spam layer — a signed minimum fill time — is invisible here on
-// purpose. See apps/backend/src/api/routes/contact.ts for what the ticket is and
+// purpose. See apps/site/src/contact.ts for what the ticket is and
 // why the age is signed rather than sent by the client.
 // ---------------------------------------------------------------------------
 
 const TOPICS: { value: string; label: string }[] = [
-  { value: 'pro_trial', label: 'Start a free month of Pro' },
+  { value: 'licence', label: 'A licence for a bigger team' },
   { value: 'question', label: 'A question about the product' },
   { value: 'problem', label: 'Something is broken' },
   { value: 'other', label: 'Something else' },
@@ -87,14 +87,16 @@ export function ContactForm(): JSX.Element {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [website, setWebsite] = useState(''); // honeypot
-  // `?topic=pro` is what every Pro call-to-action on the site links to, so the
-  // reader arrives with the right thing already selected and one less decision.
-  const [topic, setTopic] = useState('pro_trial');
+  // `?topic=licence` is what every "bigger team" link on the site points at, so that
+  // reader arrives with the right thing already selected. Everyone else starts on a
+  // question — most messages are not about a licence.
+  const [topic, setTopic] = useState('question');
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get('topic');
-    if (t === 'pro') setTopic('pro_trial');
+    // `pro` is the retired Pro-month link; old bookmarks land on the licence topic.
+    if (t === 'pro') setTopic('licence');
     else if (t && TOPICS.some((o) => o.value === t)) setTopic(t);
   }, []);
 
@@ -167,8 +169,7 @@ export function ContactForm(): JSX.Element {
           day.
         </p>
         <p className="font-mono text-mono-caption text-secondary">
-          If you asked for a Pro month, the reply carries the details of how it is switched
-          on for your account.
+          If you asked about a licence, the reply says what it covers and what it costs.
         </p>
       </div>
     );

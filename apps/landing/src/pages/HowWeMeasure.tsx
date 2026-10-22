@@ -1,6 +1,6 @@
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
-import { SITE_NAME } from '../lib/site';
+import { DEMO_PATH, SITE_NAME } from '../lib/site';
 import {
   DashItem,
   InkButton,
@@ -11,7 +11,7 @@ import {
   UnderlineLink,
 } from '../components/feint/primitives';
 import { FeatureShot } from '../components/feint/FeatureShot';
-import { TierTable } from '../components/feint/TierTable';
+import { GetStarted } from '../components/feint/GetStarted';
 
 // ---------------------------------------------------------------------------
 // How we measure — the two machine-learning models, for a general reader.
@@ -72,7 +72,7 @@ export default function HowWeMeasure(): JSX.Element {
           is this comment, and is that good compared to everybody else?
         </p>
         <div className="mb-4 flex flex-wrap items-center gap-3.5">
-          <InkButton to="/api/auth/login">Sign in with GitHub</InkButton>
+          <InkButton to={DEMO_PATH}>Try the demo</InkButton>
           <UnderlineLink to="/for-managers">See what it produces →</UnderlineLink>
         </div>
         <p className="mb-11 max-w-reassure font-mono text-mono-nav text-secondary">
@@ -147,8 +147,8 @@ export default function HowWeMeasure(): JSX.Element {
             <DashItem key={u}>{u}</DashItem>
           ))}
         </ul>
-        <Story moment="Free on every tier">
-          the grade, everywhere it appears. The ruler is never the paid part.
+        <Story moment="On your machine">
+          the grade runs on your own CPU. No comment leaves it to be graded.
         </Story>
       </FeatureShot>
 
@@ -216,8 +216,8 @@ export default function HowWeMeasure(): JSX.Element {
             <DashItem key={u}>{u}</DashItem>
           ))}
         </ul>
-        <Story moment="Pro">
-          the comparison. The independent grade underneath it stays free.
+        <Story moment="Bundled">
+          the cohort ships with the app, so placing your bots sends nothing anywhere.
         </Story>
       </FeatureShot>
 
@@ -263,7 +263,7 @@ export default function HowWeMeasure(): JSX.Element {
         </RailGrid>
       </Section>
 
-      <TierTable />
+      <GetStarted />
     </>
   );
 }

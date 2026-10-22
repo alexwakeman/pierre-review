@@ -1,9 +1,16 @@
 # @pierre-review/landing
 
-Public marketing landing page for pierre-review (cloud mode). Built independently — it
-shares no runtime code with the timeline SPA — and is served at `/` by the Fastify server
-in cloud mode for anonymous visitors. The primary call to action is **Sign in with GitHub**
-(`/api/auth/login`).
+Public marketing site for Limn (pierre-review.com). Built independently — it shares no
+runtime code with the timeline SPA — and served at `/` by the small site service in
+[`apps/site`](../site/README.md), which also serves the static demo at `/demo/` and the
+contact form's API.
+
+**Limn is local-only and 100% free.** There is no hosted app, no sign-in and no paid tier,
+so the site's calls to action are **Try the demo** (`/demo/`, a static build of the app on
+sample data) and the npm command (`npx limn-review`). The one limit — an organisation with
+more than three people using it needs a licence — is stated in the hero, in the closing
+block on every page, on `/contact` and in `/terms`, always from `FREE_TEAM_SIZE` in
+`src/lib/site.ts` (which mirrors the Limn License at the repository root).
 
 ## Structure
 
@@ -13,31 +20,37 @@ plus the three legal ones:
 | Route | Page | Focus |
 |---|---|---|
 | `/` | `pages/Home.tsx` | "Plan your day": the Pending board and the rules behind it first, then the walkthrough, the numbers, and the split to the two role pages |
-| `/for-developers` | `pages/ForDevelopers.tsx` | The free tier in full — led by Pending and its settings — then what Pro adds for an IC |
-| `/for-managers` | `pages/ForManagers.tsx` | The free metrics, then the paid scoreboard and reports |
+| `/for-developers` | `pages/ForDevelopers.tsx` | Led by Pending and its settings, then Claude review and fix, acting in place, the threads, the bots |
+| `/for-managers` | `pages/ForManagers.tsx` | Flow metrics, repositories, reach and bots, then the period report, Chronology, bot ROI and the benchmark |
 | `/how-we-measure` | `pages/HowWeMeasure.tsx` | The two ML models in plain English — what each is for, how it was built, how we know it works |
-| `/contact` | `pages/Contact.tsx` | **Also the purchase path.** Checkout is unwired, so Pro is given free for a month to anyone who asks — every Pro call-to-action on the site points here, and `/pricing` resolves to it. The only page that talks to the backend (`POST /api/contact` → a Slack webhook) |
-| `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer and the consent banner |
+| `/contact` | `pages/Contact.tsx` | **Also the licence path** for organisations with more than three users, and where `/pricing` resolves. The only page that talks to a server (`POST /api/contact` → a Slack webhook) |
+| `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer and the consent banner. Terms summarise the Limn License and defer to it |
+
+Every content page ends with the same closing block, `components/feint/GetStarted.tsx`: the
+npm command, Try the demo, and four facts — free, npm only, built for Claude (Codex coming
+soon), and the three-person licence rule. It replaced the free-vs-Pro comparison table.
 
 **THE SITE WAS FIVE FEATURE-AREA PAGES** (`/features`, `/bots`, `/pro`, `/pricing`,
 `/how-it-works`) plus an arcade game, and they were removed together. Organising by feature
 area meant a developer and an engineering manager read the same five pages and neither found
-the half addressed to them. One page per reader, each of which leads with the free tier in
-full, then Pro, then the shared comparison table and sign-up block
-(`components/feint/TierTable.tsx` — rendered at the bottom of every content page, `/contact`
-included, because `/pricing` now lands there and a visitor asking what it costs must find an
-answer rather than only a form).
+the half addressed to them.
 
-⚠ **`pnpm dev` here needs the backend for the contact form.** Vite proxies `/api` to
-`http://127.0.0.1:4000` (`LANDING_API_TARGET` overrides it). Without the proxy a bare
+⚠ **`pnpm dev` here needs the site service for the contact form.** Vite proxies `/api` to
+`http://127.0.0.1:4300` (`LANDING_API_TARGET` overrides it) — run
+`pnpm --filter @pierre-review/site dev` beside it. Without the proxy a bare
 `fetch('/api/contact/ticket')` hits Vite's SPA fallback — 200, with HTML — and the form reads
 that as "not configured" and renders its unavailable state, which looks exactly like a working
-failure path rather than a missing backend.
+failure path rather than a missing server.
+
+⚠ **`/demo/` is not a landing route.** The router treats it as external (a full navigation),
+`ROUTE_SEO` and the sitemap leave it out, and the walkthrough video moved from `/demo/` to
+`/media/` so the two cannot collide.
 
 ⚠ **The old URLs are aliased, not deleted.** `App.tsx` maps each of them to whichever page
 now carries its content — `/pricing` to `/contact`, the rest to a role page — and `prerender.mjs` writes the same mapping to disk so an old
 inbound link gets real HTML with a canonical pointing at the surviving page. Change both
-tables together.
+tables together. `prerender.mjs` also writes `dist/404.html`, which `apps/site` serves with a
+404 status for any unknown path.
 
 ⚠ **`components/feint/FeatureShot.tsx` exists because a screenshot in the two-column rail
 renders at roughly half size.** Captures are taken at a 1180px viewport; in a ~500px column
@@ -46,9 +59,9 @@ panel goes through `FeatureShot` (full canvas width, ~1:1); only genuinely narro
 the two-column `ShotFrame`.
 
 - **Routing** (`src/router.tsx`): a ~80-line client router (`useRoute`, `navigate`, `Link`)
-  — no router dependency. The Fastify not-found handler serves the landing `index.html` for
-  any non-`/api`, non-`/app` path, so deep-links / reloads of every route work. `Link`
-  full-navigates app/API/external URLs and client-routes the rest.
+  — no router dependency. `apps/site` serves each route's prerendered page, so deep-links /
+  reloads of every route work. `Link` full-navigates demo/API/external URLs and
+  client-routes the rest.
 - **Shared UI** (`src/components/ui.tsx`): `Shot` (responsive macOS-window screenshot frame),
   `Section`, `SectionHeading`, `FeatureRow`, `Stat`, `Pill`, `Glow`. `Nav.tsx` is the sticky
   header + mobile hamburger drawer; `Footer.tsx` the site footer.
@@ -87,10 +100,10 @@ for s in 16 32 48 180 192 512; do sips -z $s $s /tmp/sq.png --out public/icon-$s
 
 The shots in `public/shots/` come from a **throwaway seeded demo DB** (fictional `acme/*`
 team — no real GitHub data, no PII), captured by `scripts/capture-shots.mjs` from the repo
-root. The Pro shots (flow metrics, the period report, Chronology, the bot ROI table and the
-benchmark) need the **private `packages/pro` submodule checked out**
-(`git submodule update --init`) — the seeder then also populates the plugin tables
-(`repo_digests`, `sprint_reports`, `pro_settings`, AI analyses/fixes).
+root. ⚠ The capture pipeline below predates Limn going local-only and free: it still
+describes a Pro pass and a FREE pass (the locked Reports pane). The free pass and
+`free-reports.png` are obsolete — the shot was deleted from `public/shots/` — and the scripts
+need updating once Pro is folded into core.
 
 Capture is **TWO PASSES against the same seeded DB**, selected by `SHOT_SET` (default
 `pro`). The FREE pass restarts the backend with **`PRO_DISABLED=true`** — which forces
@@ -176,9 +189,9 @@ silent, it has no audio track at all, and it **plays once**: nothing on this sit
 
 | File | Bytes | What it is |
 |---|---|---|
-| `public/demo/limn-walkthrough.mp4` | 2,186,482 | 28.013 s, 1770×996. Six screens, hard cuts, hold → short push-in → hold. No scrolls |
-| `public/demo/limn-walkthrough-poster.jpg` | 210,099 | **Frame 0 of the clip itself**, so pressing play does not make the picture jump and the reduced-motion reader sees the same first frame everyone else does |
-| `public/demo/limn-walkthrough.cues.json` | 1,198 | The six chapters — `{ id, startMs, endMs, title, text }`, integer milliseconds, contiguous, `startMs[0] === 0` |
+| `public/media/limn-walkthrough.mp4` | 2,186,482 | 28.013 s, 1770×996. Six screens, hard cuts, hold → short push-in → hold. No scrolls |
+| `public/media/limn-walkthrough-poster.jpg` | 210,099 | **Frame 0 of the clip itself**, so pressing play does not make the picture jump and the reduced-motion reader sees the same first frame everyone else does |
+| `public/media/limn-walkthrough.cues.json` | 1,198 | The six chapters — `{ id, startMs, endMs, title, text }`, integer milliseconds, contiguous, `startMs[0] === 0` |
 
 It renders under the home-page headline (`pages/Home.tsx`, `components/feint/VideoFrame.tsx`),
 autoplaying, with the chapters beside it as a list.
@@ -210,10 +223,10 @@ selected, translated, searched, read by a screen reader or restyled, and it pins
 language and one column width forever. So phase 2 now writes `limn-walkthrough.cues.json` beside
 the video and `VideoFrame.tsx` renders it as a chapter list.
 
-`Home.tsx` **imports that JSON file directly** (`../../public/demo/limn-walkthrough.cues.json`)
+`Home.tsx` **imports that JSON file directly** (`../../public/media/limn-walkthrough.cues.json`)
 rather than retyping the strings — the capture pipeline's output IS the source, so the words on
 the page cannot drift out of step with the frames they describe. It costs ~1.2 kB in the bundle.
-The same file is also served at `/demo/limn-walkthrough.cues.json`.
+The same file is also served at `/media/limn-walkthrough.cues.json`.
 
 Four things the player has to get right, each with a reason:
 
@@ -230,9 +243,9 @@ Four things the player has to get right, each with a reason:
   the last one whose `startMs` has been passed, which makes the final cue "until the end" by
   construction and means nothing can seek to an `endMs`.
 - ⚠ **Seeking needs HTTP Range, and `seekable.length === 0` is NOT the tell.** Through
-  `@fastify/static` (what `app.ts` serves this site with) the file answers `accept-ranges: bytes`
-  and a ranged GET returns `206` with a correct `content-range`, so the chapter list seeks —
-  MEASURED. Behind a server that ignores Range, MEASURED in Chromium: `seekable.length` is **1**,
+  `apps/site` (`src/static.ts`) the file answers `accept-ranges: bytes` and a ranged GET
+  returns `206` with a correct `content-range`, so the chapter list seeks — pinned by
+  `apps/site/src/app.test.ts`. Behind a server that ignores Range, MEASURED in Chromium: `seekable.length` is **1**,
   not 0; it simply ends at 8.32 s of a 28 s clip, `duration` reports that same wrong 8.32 s, no
   error is raised anywhere, and clicking a later chapter moves the playhead *backwards*. So the
   player VERIFIES after the fact that the playhead landed where it was sent, and a control that
@@ -302,7 +315,7 @@ that copy is what has to earn its place beside it.
 
 ```sh
 pnpm demo:video                 # seed → boot the Pro stack → film → teardown
-pnpm demo:video --publish       #   … and also write the copies under apps/landing/public/demo/
+pnpm demo:video --publish       #   … and also write the copies under apps/landing/public/media/
 
 # or, against a stack you already have up (`pnpm demo --no-seed`):
 node scripts/capture-demo-video.mjs --out ~/ --publish
@@ -312,7 +325,7 @@ node scripts/capture-demo-video.mjs --bpp 0.13      # the ONE size knob (see bel
 ```
 
 `--out` defaults to your home directory (the masters). `--publish` additionally writes
-`apps/landing/public/demo/`, which is what the site serves — all three files, video, poster and
+`apps/landing/public/media/`, which is what the site serves — all three files, video, poster and
 cues. **Publishing all three together is the point:** a cue file that does not match the video
 beside it lights the wrong chapter with no error anywhere.
 
@@ -408,8 +421,8 @@ Play has asked.
 ⚠ **Do not reach for a header instead.** MEASURED in Chromium: a script-initiated `play()` on a
 muted video succeeds under `Permissions-Policy: autoplay=()` exactly as it does with no policy —
 and a header says what is ALLOWED, never what the reader asked for. (For the same reason nothing
-in `apps/backend/src/api/plugins/security.ts` needed changing for these clips: the landing CSP
-has no `media-src`, so it inherits `default-src 'self'`, which a same-origin `/demo/*.mp4`
+in `apps/site/src/security.ts` needed changing for these clips: the landing CSP
+has no `media-src`, so it inherits `default-src 'self'`, which a same-origin `/media/*.mp4`
 already satisfies.)
 
 ## Reading the copy
@@ -418,10 +431,6 @@ already satisfies.)
 order, with the per-route `<title>` and meta description — to one markdown file, for
 proofreading. It reads `apps/landing/dist`, so **build first**; what comes out is what a
 reader actually gets rather than a hand transcription that drifts from it.
-
-The comparison table is the one thing it does not walk: it is a CSS grid whose
-mobile-only "Free" / "Pro" markers interleave with the cells, so its rows are read
-straight from `TierTable.tsx` and rendered as a real table.
 
 `scripts/capture-landing.mjs` screenshots the built landing pages at desktop + mobile widths
 (into `scripts/.ui-artifacts/landing/`) and reports horizontal-overflow — handy for checking

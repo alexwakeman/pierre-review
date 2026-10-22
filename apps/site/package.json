@@ -1,0 +1,20 @@
+{
+  "name": "@pierre-review/site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The tiny service behind pierre-review.com: the landing pages, the static demo at /demo/, and the contact form.",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,126 @@
+name: Deploy site
+
+# Builds the image behind pierre-review.com — the landing pages, the static demo at
+# /demo/ and the contact form, served by apps/site — pushes it to GitHub Container
+# Registry, and asks Railway to redeploy it.
+#
+# Limn itself is local-only (`npx limn-review`), so there is no app server, no database
+# and no private code in this image. It replaced deploy-cloud.yml, which built the old
+# hosted app with the private Pro plugin.
+#
+# Runs on pushes to main that touch the site (see `paths`) and on manual dispatch.
+#
+# Repo secrets (all optional):
+#   VITE_GA_ID       build-time Google Analytics id, inlined into the landing and demo
+#                    bundles. Unset = no analytics.
+#   RAILWAY_TOKEN    a Railway token, to redeploy after the image is pushed (else turn on
+#                    Railway's own "redeploy on image change").
+#   RAILWAY_SERVICE  the service name; set alongside a PROJECT-scoped RAILWAY_TOKEN.
+#
+# Railway service variables (runtime; set in the Railway dashboard):
+#   CONTACT_SLACK_WEBHOOK_URL  Slack incoming webhook the contact form posts to. Unset =
+#                              the form says it is unavailable.
+#   CONTACT_TICKET_SECRET      signs the form's fill-time ticket (SESSION_SECRET, its old
+#                              name, is still read). Unset = a random key per process.
+#   SITE_URL                   https://pierre-review.com — turns on the www → apex 301
+#                              (APP_BASE_URL, its old name, is still read).
+#   HSTS_MAX_AGE               seconds, default 31536000; 0 disables.
+#   PORT                       injected by Railway.
+#   TRUST_PROXY_HOPS           set to 1 in the image; leave it.
+#
+# Railway service source: the GHCR image ghcr.io/<owner>/limn-site:latest (with a GHCR
+# pull credential), or point Railway at this repository and it builds the Dockerfile
+# itself using railway.json — either works; this workflow serves the first.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - 'apps/landing/**'
+      - 'apps/site/**'
+      - 'apps/frontend/**'
+      - 'packages/shared/**'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'railway.json'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - '.github/workflows/deploy-site.yml'
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/limn-site
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # The release workflow's `chore(release): bump … [skip ci]` commits never redeploy.
+    if: ${{ github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @pierre-review/landing... --filter @pierre-review/site...
+      - name: Site service tests
+        run: pnpm --filter @pierre-review/site test
+      - name: Landing build (prerender guardrails)
+        run: pnpm --filter @pierre-review/landing build
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the site image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            VITE_GA_ID=${{ secrets.VITE_GA_ID }}
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Nudge Railway to pull the new :latest. No-op without a token. Best-effort — a
+      # failed redeploy never fails the build.
+      - name: Trigger Railway redeploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVICE }}
+        continue-on-error: true
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "No RAILWAY_TOKEN — skipping (or enable Railway's redeploy-on-image-change)."
+            exit 0
+          fi
+          if [ -n "$RAILWAY_SERVICE" ]; then
+            npx -y @railway/cli@latest redeploy --service "$RAILWAY_SERVICE" --yes \
+              || echo "Railway redeploy failed — check the token/service and that it pulls the GHCR image"
+          else
+            npx -y @railway/cli@latest redeploy --yes \
+              || echo "Railway redeploy failed — a PROJECT token may need RAILWAY_SERVICE set"
+          fi

@@ -1,9 +1,10 @@
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
-import { INSTALL_COMMAND, SITE_NAME } from '../lib/site';
+import { DEMO_PATH, FREE_TEAM_SIZE, INSTALL_COMMAND, SITE_NAME } from '../lib/site';
 import {
   DashItem,
   InkButton,
+  InlineLink,
   MonoLabel,
   MonoLink,
   RailGrid,
@@ -15,10 +16,10 @@ import { VideoFrame, type VideoCue } from '../components/feint/VideoFrame';
 // The clip's chapters, imported from the capture pipeline's own output rather than
 // retyped here — the file beside the .mp4 IS the source, so the words on the page
 // cannot drift out of step with the frames they describe. It is ~1.2 kB.
-import walkthroughCues from '../../public/demo/limn-walkthrough.cues.json';
+import walkthroughCues from '../../public/media/limn-walkthrough.cues.json';
 import { Sprite } from '../components/feint/Sprite';
 import { Rain } from '../components/feint/Rain';
-import { TierTable } from '../components/feint/TierTable';
+import { GetStarted } from '../components/feint/GetStarted';
 
 // ---------------------------------------------------------------------------
 // The home page.
@@ -51,7 +52,12 @@ import { TierTable } from '../components/feint/TierTable';
 // tune is one whose idea of "your turn" is somebody else's. Running order now:
 //
 //   hero · 01 your day · 02 your rules · walkthrough · numbers · why ·
-//   03 the split · 04 the week · 05 the bots · 06 local · tier table
+//   03 the split · 04 the week · 05 the bots · 06 local · start
+//
+// ⚠ EVERYTHING IS FREE. There is no paid tier, no hosted app and no sign-in: the
+// calls to action are the demo (a static build of the real app on sample data, at
+// /demo/) and the npm command. The one limit — organisations with more than
+// FREE_TEAM_SIZE people need a licence — is stated in the hero and in <GetStarted/>.
 //
 // The walkthrough dropped below the plan because it does not show Pending (see
 // the board section's note) — leading with it would lead with everything BUT
@@ -90,7 +96,7 @@ const RULE_POINTS = [
 ];
 
 const EM_POINTS = [
-  'Throughput, lead time and reach per repository, with people counted apart from automation. Free.',
+  'Throughput, lead time and reach per repository, with people counted apart from automation.',
   'A forwardable report per sprint, and an hour-by-hour account of who was holding each pull request.',
   'And a keep / tune / rarely used verdict on every review bot you pay for, priced per comment your team used.',
 ];
@@ -125,18 +131,24 @@ export default function Home(): JSX.Element {
             requests, replies, red builds, conflicts and pull requests ready to land, from
             every repository, ranked, with the next thing at the top. You decide what counts
             as your turn and in what order. It also measures what the review bots on top are
-            worth. Free and open core. Run it on your machine and Claude reviews and fixes
-            pull requests too, on your own Claude.
+            worth, and Claude reviews and fixes pull requests on your own Claude login. It
+            runs on your machine, and it is 100% free.
           </p>
 
           <div className="mb-4 flex flex-wrap items-center gap-3.5">
-            <InkButton to="/api/auth/login">Sign in with GitHub</InkButton>
+            <InkButton to={DEMO_PATH}>Try the demo</InkButton>
             <UnderlineLink to="/for-developers">See it for developers</UnderlineLink>
           </div>
 
+          <p className="mb-3 max-w-reassure font-mono text-mono-nav text-secondary">
+            Install it from npm: <span className="text-ink">{INSTALL_COMMAND}</span>. Built for
+            Claude users today; Codex support is coming soon.
+          </p>
           <p className="mb-11 max-w-reassure font-mono text-mono-nav text-secondary">
-            Or run it entirely on your machine — local mode uses your gh login and keeps no
-            stored credentials.
+            Free for individuals and for teams of up to {FREE_TEAM_SIZE} people. A bigger
+            organisation needs a licence —{' '}
+            <InlineLink to="/contact?topic=licence">ask through the contact form</InlineLink>
+            .
           </p>
         </div>
 
@@ -178,11 +190,9 @@ export default function Home(): JSX.Element {
           each reader re-weight them (§02 below), so "half the weight" is true of
           Balanced, not of every account.
 
-          ⚠ "PLAN MY DAY" IN THE SCREENSHOT IS THE PRO BUTTON. The site's promise is
-          "plan your day", and the plan — the tabs, the order, Do next — is free. The
-          button of the same name writes sentences on top of it. The last paragraph names
-          the button so a reader who spots it in the shot is not left thinking the plan
-          itself is paid. */}
+          ⚠ "PLAN MY DAY" IN THE SCREENSHOT writes sentences on top of the plan; it never
+          changes the order. The last paragraph names the button so a reader who spots it
+          in the shot knows which is which. */}
       <FeatureShot
         rail={{ n: '01', word: 'Your day' }}
         tone="alt"
@@ -222,16 +232,15 @@ export default function Home(): JSX.Element {
           shows as one card.
         </p>
         <p>
-          No model decides any of it. The tabs and the order are free on every tier. The{' '}
-          <span className="text-ink">Plan my day</span> button in the corner is Pro: it writes
-          a headline, a line on what can wait, and one line on each planned card saying why it
-          comes now.
+          No model decides any of it. The <span className="text-ink">Plan my day</span> button
+          in the corner adds writing on top: a headline, a line on what can wait, and one line
+          on each planned card saying why it comes now. It never changes the order.
         </p>
       </FeatureShot>
 
       {/* ---------- 02 · your rules ---------- */}
-      {/* ⚠ A HEADLINE CAPABILITY, NOT A FOOTNOTE. Every line in RULE_POINTS is a free
-          setting (CORE, both modes, every tier): Settings → My Turn is account-wide,
+      {/* ⚠ A HEADLINE CAPABILITY, NOT A FOOTNOTE. Every line in RULE_POINTS is a
+          setting: Settings → My Turn is account-wide,
           the Pending mute is per workspace or per repository. No screenshot, because
           no capture of Settings exists — the board shot above shows the result, and
           words are the honest way to show the controls. Do not borrow an unrelated
@@ -243,7 +252,7 @@ export default function Home(): JSX.Element {
               You decide what counts as your turn.
             </h2>
             <p className="mb-6 max-w-[52ch] text-pretty">
-              The rules behind the board are settings, and they are free. Change them and the
+              The rules behind the board are settings. Change them and the
               tabs, the counts and the notifications move together &mdash; and the board
               explains its order with the rules you set.
             </p>
@@ -274,8 +283,8 @@ export default function Home(): JSX.Element {
           the stills. */}
       <Section pad="none" className="py-14">
         <VideoFrame
-          src="/demo/limn-walkthrough.mp4"
-          poster="/demo/limn-walkthrough-poster.jpg"
+          src="/media/limn-walkthrough.mp4"
+          poster="/media/limn-walkthrough-poster.jpg"
           alt="A screen recording moving through six screens: the activity feed, the timeline, one pull request, the addressed check on a bot thread, the bot ROI table, and the period report"
           caption={`${SITE_NAME.toLowerCase()} · the walkthrough`}
           meta="28 seconds · no sound"
@@ -285,7 +294,9 @@ export default function Home(): JSX.Element {
         />
         <p className="mt-[18px] max-w-caption text-list text-muted">
           A seeded eight-repository workspace, so the names and the numbers are invented. The
-          software is not.
+          software is not — and you can{' '}
+          <InlineLink to={DEMO_PATH}>open the same kind of workspace yourself</InlineLink>
+          .
         </p>
       </Section>
 
@@ -403,9 +414,9 @@ export default function Home(): JSX.Element {
           automation, because a blended median describes no pull request anyone wrote.
         </p>
         <p>
-          Free on every tier. Pro turns the same numbers into a stored report per sprint you
-          can forward, and an hour-by-hour account of whether the waiting sat with a reviewer
-          or with the author — with nobody named.
+          Then it turns the same numbers into a stored report per sprint you can forward, and
+          an hour-by-hour account of whether the waiting sat with a reviewer or with the
+          author — with nobody named.
         </p>
       </FeatureShot>
 
@@ -424,40 +435,36 @@ export default function Home(): JSX.Element {
           on itself. {SITE_NAME} grades every bot comment independently, with a
           purpose-trained classifier that, graded blind against a human expert, picked the
           same severity seven times in ten — where the vendors&rsquo; own badges managed fewer
-          than five. Free, on every tier.
+          than five.
         </p>
         <p>
-          Pro turns those grades into a scoreboard: how much of what each vendor said your
+          Then it turns those grades into a scoreboard: how much of what each vendor said your
           team acted on, what that came to per comment, how often it called something major
           that was not — and where all of it sits against a cohort of 2,204 repositories.
         </p>
       </FeatureShot>
 
       {/* ---------- 06 · local ---------- */}
-      {/* ⚠ The conflict resolver is NOT local-only any more — it is CORE in both
-          modes (app.ts registers its routes unconditionally), so this section no
-          longer says it "only exists in this mode". Claude Review, its chat and AI Fix
-          ARE local-only (the hosted app does not register them), so "the free tier is
-          identical either way" and "nothing leaving the machine" were cut: the first is
-          false and the second is false the moment Claude reads a diff. */}
+      {/* Limn is local-only: there is no hosted app. The AI line names the two ways it
+          runs (a Claude Code login, else ANTHROPIC_API_KEY) and the one that is coming. */}
       <Section>
         <RailGrid rail={{ n: '06', word: 'Local' }} cols="one">
           <div>
             <h2 className="mb-6 max-w-[28ch] text-pretty font-display text-h2-sm font-semibold text-ink type:text-h2">
-              Or run the whole thing on your own machine.
+              The whole thing runs on your own machine.
             </h2>
             <p className="mb-6 max-w-[62ch] text-pretty">
               One command, your existing <span className="text-ink">gh</span> login, a SQLite
-              file on your disk. No hosted backend and no stored credentials. Claude review and
-              fix run only here, on your own Claude Code or Anthropic API key; the hosted app
-              has everything else.
+              file on your disk. No hosted backend, no account and no stored credentials.
+              Claude reviews and fixes pull requests on your Claude Code login or an Anthropic
+              API key. Codex support is coming soon.
             </p>
             <p className="max-w-[62ch] font-mono text-mono-row text-ink">{INSTALL_COMMAND}</p>
           </div>
         </RailGrid>
       </Section>
 
-      <TierTable />
+      <GetStarted />
     </>
   );
 }

@@ -13,6 +13,7 @@
     "dev:backend": "pnpm --filter @pierre-review/backend dev",
     "dev:frontend": "pnpm --filter @pierre-review/frontend dev",
     "dev:ml": "node scripts/dev-ml.mjs",
+    "dev:site": "pnpm --filter @pierre-review/site dev",
     "build": "pnpm -r build",
     "package": "node scripts/build-release.mjs",
     "typecheck": "pnpm -r typecheck",
