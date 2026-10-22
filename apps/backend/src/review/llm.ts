@@ -1,7 +1,7 @@
-// The cheap-tier ("Haiku") completion seam. Core-owned so the optional @pierre/pro
-// plugin can do a single-shot LLM call (e.g. the per-repo digest) through ctx.llm
-// WITHOUT adding its own Anthropic dependency. Non-agentic: one completion, no
-// tools.
+// The cheap-tier ("Haiku") completion seam: every one-shot model call in Limn — core's (sprint
+// briefs/themes, story labels, docs ranking, sprint Ask Claude…) and the platform's through
+// ctx.llm (reports, synthesis, work-plan wording, pointers, bot themes, the impact note, the
+// advisor's refine, the Slack report). Non-agentic: one completion, no tools.
 //
 // ⚠ THE DEFAULT MODEL THINKS UNLESS TOLD OTHERWISE. Its adaptive thinking is on by default and its
 // thinking tokens count toward `max_tokens`, so a small cap tuned for the previous Haiku could stop
@@ -9,51 +9,28 @@
 // (it may skip thinking entirely on a simple prompt) with THINKING_HEADROOM added to the cap. It
 // also 400s on a non-default temperature/top_p/top_k and on an assistant prefill: send neither.
 //
-// ⚠ ONE LOCAL ROUTE FOR THE ONE-SHOT FEATURES. LOCALLY (not cloud) a call with no key, or one
-// marked `localRoute: 'agent'` (the impact note, the work-plan wording, the Slack sprint report —
-// and every core caller, none of which passes a key), goes through the Agent SDK: the reader's own
-// Claude Code login, else the environment's ANTHROPIC_API_KEY, with `opts.apiKey` IGNORED. ⚠ The
-// Pro Reports and Bots Monitoring clients do NOT mark it, so they keep SUMMARY_ANTHROPIC_API_KEY
-// locally too. Cloud ignores `localRoute`.
-//
-// AUTH (otherwise) is CALLER-OWNED (this is deliberate — it keeps each feature's auth discrete):
-//   • `opts.apiKey` given → the raw, metered `@anthropic-ai/sdk` with THAT key. The
-//     key is passed EXPLICITLY and this seam never reads/writes process.env, so a
-//     summary key can never leak into (or force metering on) Claude Review, which
-//     resolves auth separately and prefers the ambient subscription.
-//   • no `apiKey` → the Claude Agent SDK's `query()` (the SAME runtime Claude Review
-//     uses), which resolves a CLAUDE_CODE_OAUTH_TOKEN / ambient logged-in session.
-// So the Pro summary passes its own dedicated key (fast, metered) while an OSS/dev
-// caller with no key still works via the ambient session.
+// ⚠ ONE CREDENTIAL LADDER (ai/credentials.ts), the same one every agent run uses:
+//   1. the reader's Claude Code login (default) → the Claude Agent SDK's `query()`, one tool-less
+//      turn, with ANTHROPIC_API_KEY hidden from it so the login pays rather than a meter;
+//   2. else ANTHROPIC_API_KEY from the environment → the Anthropic API directly (`@anthropic-ai/sdk`).
+// LIMN_AI_USE_API_KEY=true puts the key first. LIMN_AI_DISABLED=true refuses every call. No caller
+// chooses its own credential any more: there is no per-feature key and no "key-only" route.
 //
 // Both SDKs are LOADED LAZILY through ai/runtime.ts (the one module allowed to import them), so
-// merely importing this module needs nothing — only an actual caller pays. On an npm install the
-// Agent SDK exists only once the reader has set AI up; the cloud image ships @anthropic-ai/sdk as a
-// real dependency for the metered summary path, which the loader falls through to.
+// merely importing this module needs nothing — only an actual caller pays. On an npm install they
+// exist only once the reader has set AI up.
 
 import { claudeExecutableOptions, loadAgentSdk, loadAnthropicSdk } from '../ai/runtime.js';
 import { ISOLATED_MCP, ownToolsOnlyHook } from '../ai/agent-isolation.js';
+import { agentSdkEnv, resolveAiCredential, type AiCredential } from '../ai/credentials.js';
 import { config } from '../config.js';
+import { NO_CLAUDE_AUTH_MESSAGE } from './auth.js';
 
 export interface CheapCompleteOpts {
   model?: string;
   system?: string;
   prompt: string;
   maxTokens?: number;
-  // Explicit Anthropic API key → the raw metered path. Omitted → the ambient
-  // Claude session (Agent SDK). The seam NEVER falls back to process.env or the
-  // Claude Review key on its own — the caller decides its credential.
-  apiKey?: string;
-  // ⚠ RETIRED, AND KEPT ONLY SO THE ProContext SHAPE DOES NOT MOVE. It used to mean "CORE
-  // resolves the local BYO Anthropic key itself and uses it on the raw metered path". That
-  // stored key no longer exists — local advanced-AI auth is two rungs now (ambient Claude
-  // session, else the environment's ANTHROPIC_API_KEY), and the ambient path below already
-  // resolves BOTH through the Agent SDK. So this option resolves to exactly the same thing as
-  // omitting it. Do not re-add a resolver behind it; the ladder it named is gone.
-  credential?: 'local-review-key';
-  // 'agent' ⇒ LOCALLY this call takes the Agent SDK even when `apiKey` is passed (see the header).
-  // Ignored in cloud. Absent ⇒ the key decides, as before.
-  localRoute?: 'agent';
 }
 
 export interface CheapCompleteResult {
@@ -81,32 +58,24 @@ export function cheapRequestShape(
 export async function cheapComplete(
   opts: CheapCompleteOpts,
 ): Promise<CheapCompleteResult> {
+  if (!config.aiEnabled) throw new Error('Claude is switched off here.');
   const model = opts.model ?? DEFAULT_MODEL;
-
-  // An explicit key → the cheap, metered, exact-cost raw path. No key → the ambient session
-  // via the Agent SDK, which itself resolves an ambient login or the environment's
-  // ANTHROPIC_API_KEY. (No implicit env read here — the SDK owns that half.)
-  //
-  // ⚠ `opts.credential` IS NO LONGER BRANCHED ON. The stored BYO key it named is retired, so
-  // its rung would resolve to nothing; the two-rung ladder IS `agentComplete`.
-  // Locally the Agent SDK reaches the reader's own Claude, so the local off switch
-  // (LIMN_AI_DISABLED) must hold on that route: a one-shot call may not reach it behind the switch.
-  const route = cheapRoute(opts.apiKey, opts.localRoute);
-  if (route === 'agent' && !config.aiEnabled) throw new Error('Claude is switched off here.');
-  return route === 'api' ? rawComplete(opts.apiKey!, model, opts) : agentComplete(model, opts);
+  const credential = resolveAiCredential();
+  const route = cheapRoute(credential);
+  if (route === 'none') throw new Error(NO_CLAUDE_AUTH_MESSAGE);
+  return route === 'api' && credential.route === 'api_key'
+    ? rawComplete(credential.apiKey, model, opts)
+    : agentComplete(model, opts, credential);
 }
 
-/**
- * Which path one cheap completion takes (exported for the test). A passed key takes the API —
- * except on a call marked `localRoute: 'agent'`, which stays on the Agent SDK.
- */
-export function cheapRoute(apiKey: string | undefined, localRoute?: 'agent'): 'api' | 'agent' {
-  if (!apiKey) return 'agent';
-  if (localRoute === 'agent') return 'agent';
-  return 'api';
+/** Which path one cheap completion takes (exported for the test): the login → the Agent SDK. */
+export function cheapRoute(credential: AiCredential): 'agent' | 'api' | 'none' {
+  if (credential.route === 'login') return 'agent';
+  if (credential.route === 'api_key') return 'api';
+  return 'none';
 }
 
-// ---- raw @anthropic-ai/sdk path (explicit API key) ----------------------------
+// ---- raw @anthropic-ai/sdk path (the ANTHROPIC_API_KEY rung) ----------------------------
 async function rawComplete(
   apiKey: string,
   model: string,
@@ -140,10 +109,11 @@ async function rawComplete(
   };
 }
 
-// ---- Claude Agent SDK path (OAuth token / ambient session) --------------------
+// ---- Claude Agent SDK path (the Claude Code login) --------------------
 async function agentComplete(
   model: string,
   opts: CheapCompleteOpts,
+  credential: AiCredential,
 ): Promise<CheapCompleteResult> {
   const { query } = await loadAgentSdk();
 
@@ -171,6 +141,8 @@ async function agentComplete(
       ...ISOLATED_MCP,
       hooks: { PreToolUse: [ownToolsOnlyHook([])] },
       ...claudeExecutableOptions(),
+      // The login pays: any ANTHROPIC_API_KEY is hidden from this run (ai/credentials.ts).
+      env: agentSdkEnv(process.env, credential),
     },
   });
 
@@ -205,7 +177,7 @@ async function agentComplete(
   const trimmed = text.trim();
   if (!trimmed) {
     throw new Error(
-      `Agent SDK completion returned no text${errored ? ` (${errored})` : ''} — check Claude auth (ANTHROPIC_API_KEY, or run \`claude\` to sign in).`,
+      `Agent SDK completion returned no text${errored ? ` (${errored})` : ''} — check your Claude Code login (run \`claude\` to sign in) or set ANTHROPIC_API_KEY.`,
     );
   }
   return { text: trimmed, usage: { inputTokens, outputTokens } };

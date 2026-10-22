@@ -9,6 +9,7 @@ import {
 } from '../../hooks/useAnnotations.js';
 import { useBlastConfig } from '../../hooks/useBlastRadius.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { AiRunGate } from '../AiSetup.js';
 
 // ── THE IMPACT NOTE — blast radius's AI half ────────────────────────────────────────────────
 //
@@ -115,15 +116,17 @@ export function BlastImpactNote({
         <AiStatusLine stage="Reading the change" />
       )}
       {note == null && !state.running && (
-        <button
-          type="button"
-          onClick={() => run()}
-          disabled={state.running}
-          className="inline-flex items-center gap-1 rounded text-[11px] text-gray-500 hover:text-gray-700 disabled:opacity-60 dark:text-gray-400 dark:hover:text-gray-200"
-        >
-          <SparkleIcon size={11} />
-          What could this break?
-        </button>
+        <AiRunGate>
+          <button
+            type="button"
+            onClick={() => run()}
+            disabled={state.running}
+            className="inline-flex items-center gap-1 rounded text-[11px] text-gray-500 hover:text-gray-700 disabled:opacity-60 dark:text-gray-400 dark:hover:text-gray-200"
+          >
+            <SparkleIcon size={11} />
+            What could this break?
+          </button>
+        </AiRunGate>
       )}
 
       {/* COLLAPSED: a one-line stub that says what is folded away and unfolds on a click. It is
@@ -179,14 +182,16 @@ export function BlastImpactNote({
             {note.stale && !state.running && (
               // The pull request has changed since this was written. ⚠ The re-run is the SAME
               // billed path; it is offered, never taken automatically.
-              <button
-                type="button"
-                onClick={() => run()}
-                disabled={state.running}
-                className="underline hover:text-gray-600 disabled:opacity-60 dark:hover:text-gray-300"
-              >
-                Out of date — read again
-              </button>
+              <AiRunGate>
+                <button
+                  type="button"
+                  onClick={() => run()}
+                  disabled={state.running}
+                  className="underline hover:text-gray-600 disabled:opacity-60 dark:hover:text-gray-300"
+                >
+                  Out of date — read again
+                </button>
+              </AiRunGate>
             )}
           </div>
         </div>

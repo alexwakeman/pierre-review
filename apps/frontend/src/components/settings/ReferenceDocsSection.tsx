@@ -41,7 +41,7 @@ export function ReferenceDocsSection(): JSX.Element {
             It starts at the library&rsquo;s contents and reads only the sections that matter to the change, then says where
             the work or the story disagrees with them, citing each section.
           </p>
-          <p>It is off by default. It runs on your machine, on your own Claude Code or Anthropic API key.</p>
+          <p>It is off by default. It runs on your machine, on your own Claude Code login or Anthropic API key.</p>
         </InfoButton>
       }
     >

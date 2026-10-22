@@ -267,8 +267,9 @@ Usage:
   limn ai install   Download it (one time, about 110 MB) into ~/.limn/ai-runtime
   limn ai status    Say whether it is set up
 
-Claude Review and AI Fix are free. They run on your own Claude Code or
+Claude Review and AI Fix are free. They run on your own Claude Code login or
 Anthropic API key: sign in to Claude Code, or set ANTHROPIC_API_KEY.
+Set LIMN_AI_USE_API_KEY=true to use the key even when you are signed in.
 Set LIMN_CLAUDE_PATH to use your installed \`claude\` and skip its bundled copy.
 `);
     process.exit(sub === undefined || sub === '--help' || sub === '-h' ? 0 : 1);

@@ -342,6 +342,12 @@ describe('the visible Bots sub-tab is DERIVED, never written back', () => {
     expect(effectiveBotsTab('benchmark', { showAdvisor: true })).toBe('benchmark');
   });
 
+  it('shows ROI in place of Themes while AI is off, without forgetting the choice', () => {
+    expect(effectiveBotsTab('themes', { showAdvisor: true, showThemes: false })).toBe('roi');
+    expect(effectiveBotsTab('themes', { showAdvisor: true, showThemes: true })).toBe('themes');
+    expect(effectiveBotsTab('themes', { showAdvisor: true })).toBe('themes');
+  });
+
   // ⚠ AND THE MOUNT IS NOT AN INPUT EITHER — which matters MORE since the grain split, not less.
   // `benchmark` now renders on BOTH mounts with DIFFERENT BODIES: the rail draws per-vendor rollups
   // and a repository's Bots tab draws that repository's placements. That is exactly the shape that
@@ -353,10 +359,11 @@ describe('the visible Bots sub-tab is DERIVED, never written back', () => {
     const withRepo = { showAdvisor: false, repoId: 7 } as { showAdvisor: boolean };
     expect(effectiveBotsTab('benchmark', withRepo)).toBe('benchmark');
     expect(effectiveBotsTab('benchmark', { showAdvisor: false })).toBe('benchmark');
-    // Structural: two parameters, and the second's shape is the advisor flag alone.
+    // Structural: two parameters, and the second's shape is the advisor flag and the AI switch —
+    // never a mount.
     expect(effectiveBotsTab).toHaveLength(2);
     expect(sourceOf('components/Activity/benchmarkModel.ts')).toMatch(
-      /export function effectiveBotsTab\(\s*raw: BotsInnerTab,\s*opts: \{ showAdvisor: boolean \},?\s*\)/,
+      /export function effectiveBotsTab\(\s*raw: BotsInnerTab,\s*opts: \{ showAdvisor: boolean; showThemes\?: boolean \},?\s*\)/,
     );
   });
 
@@ -381,7 +388,7 @@ describe('the visible Bots sub-tab is DERIVED, never written back', () => {
 
   it('lists the themes tab on both mounts, with one panel mount', () => {
     const view = sourceOf('components/Activity/BotsView.tsx');
-    expect(view).toMatch(/\{ key: 'themes', label: 'Themes' \},/);
+    expect(view).toMatch(/\{ key: 'themes', label: 'Themes' \} as const/);
     // ⚠ ONE MOUNT, AND IT IS THE TAB'S. A panel left behind in the `roi` branch would render twice.
     expect((view.match(/<BotThemesPanel/g) ?? []).length).toBe(1);
     expect(view).toMatch(/effectiveTab === 'themes' \?/);

@@ -124,7 +124,7 @@ export function DocsChat({
           </p>
           <p>Each point links to the section it came from. When two documents disagree, it cites both.</p>
           <p>It remembers the earlier questions in a conversation, up to a limit. It changes nothing.</p>
-          <p>Each answer runs on your own Claude Code or Anthropic API key; its cost is shown under it.</p>
+          <p>Each answer runs on your own Claude Code login or Anthropic API key; its cost is shown under it.</p>
         </InfoButton>
         <span className="ml-auto" />
         {list.length > 0 && (

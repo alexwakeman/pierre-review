@@ -8,6 +8,7 @@ import { BotAdvisorPanel } from './BotAdvisorPanel.js';
 import { BenchmarkPanel } from './BenchmarkPanel.js';
 import { effectiveBotsTab } from './benchmarkModel.js';
 import { BotIcon } from '../Icons.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 
 // The Bots rail view — "the calm layer above your review bots". It composes:
 //   • the ROI / utilisation panel (per-bot signal-to-noise + trend + keep/tune/noisy verdicts).
@@ -50,7 +51,9 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   // genuinely per-repo (the panel takes `repoScope`), so it shows on both mounts.
   const showAdvisor = repoId == null;
   // DERIVE the visible tab; never write a correction back to the store (`benchmarkModel.ts`).
-  const effectiveTab = effectiveBotsTab(innerTab, { showAdvisor });
+  // Themes is written by a model, so it shows only while AI is on.
+  const showThemes = useAiCapabilities().enabled;
+  const effectiveTab = effectiveBotsTab(innerTab, { showAdvisor, showThemes });
 
   return (
     <div className="space-y-3" data-testid="bots-view">
@@ -72,7 +75,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
           // ⚠ SECOND, NOT LAST. The panel sat FIRST on the Measure surface until it moved here, so
           // second in the strip is what preserves its prominence — a report demoted to the far end
           // of the strip on the day it got its own tab would read as a downgrade.
-          { key: 'themes', label: 'Themes' },
+          ...(showThemes ? [{ key: 'themes', label: 'Themes' } as const] : []),
           ...(showAdvisor ? [{ key: 'advisor', label: 'Advisor' } as const] : []),
           { key: 'benchmark', label: 'Benchmark' },
           // (No Settings tab: bot classification is Feed → Bot classification.)

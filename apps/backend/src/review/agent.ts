@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW, type ClaudeFindingLens } from '@pierre-review/shared';
 import { claudeExecutableOptions, loadAgentSdk } from '../ai/runtime.js';
+import { agentAuthOptions } from '../ai/credentials.js';
 import type { RunReviewArgs, RunReviewResult } from '../platform/contract.js';
 import { config } from '../config.js';
 import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
@@ -314,6 +315,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
         abortController,
         // LIMN_CLAUDE_PATH → the user's own `claude` instead of the SDK's bundled binary.
         ...claudeExecutableOptions(),
+        ...agentAuthOptions(),
       },
     });
 

@@ -2863,10 +2863,8 @@ SCOPE_OFF is honestly **uncomputable → config-PR blocked, brief allowed**. Pat
 every evidence object and rendered in brief + PR body.
 
 **Refine (the ONE LLM touchpoint).** `POST …/refine`, prose targets only — structured formats have
-no LLM code path at all. Cloud: credit gate + `SUMMARY_ANTHROPIC_API_KEY` + `recordAiUsage(seam:
-'summary', feature:'advisor_refine')` (the bot-themes pattern). Local: a plain `cheapComplete` with
-NO credential — the ambient agent-SDK session, which resolves a logged-in `claude` session and
-otherwise the environment's `ANTHROPIC_API_KEY` ($0 ⇒ unmetered by existing design). ⚠ It used to
+no LLM code path at all. A plain `cheapComplete` on the ONE credential ladder (`ai/credentials.ts`):
+the reader's Claude Code login, else the environment's `ANTHROPIC_API_KEY`. ⚠ It used to
 pass `credential:'local-review-key'`, a BYOK→ambient ladder in which core resolved a key stored in
 `~/.pierre-review/config.json` (the key never crossed the plugin boundary). **That stored key is
 RETIRED** — form, routes and `ReviewSeam.setLocalKey` all deleted — so the ladder is two rungs and

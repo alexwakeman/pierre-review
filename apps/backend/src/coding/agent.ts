@@ -1,5 +1,6 @@
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { claudeExecutableOptions, loadAgentSdk, type AgentSdk } from '../ai/runtime.js';
+import { agentAuthOptions } from '../ai/credentials.js';
 import { config } from '../config.js';
 import { getAccessToken } from '../auth/account.js';
 import { applyClaudeReviewAuth } from '../review/auth.js';
@@ -167,7 +168,7 @@ export async function runAgentInWorktree(
   // 'worktree' ⇒ config.reviewEffort, exactly the effort this path always used.
   const modelOptions = sdkModelOptions(model, 'worktree');
 
-  // Advanced-AI credential: ambient session preferred, else the local BYO key. Restored below.
+  // The credential ladder (ai/credentials.ts): the Claude Code login, else ANTHROPIC_API_KEY. Restored below.
   const restoreEnv = applyClaudeReviewAuth(true);
   try {
   // From the AI runtime (ai/runtime.ts) — downloaded on first use for an npm install.
@@ -196,6 +197,7 @@ export async function runAgentInWorktree(
       hooks: { PreToolUse: [pathGuardHook(createPathGuard(opts.worktreePath)), ownToolsOnlyHook(Object.keys(opts.mcpServers))] },
       // LIMN_CLAUDE_PATH → the user's own `claude` instead of the SDK's bundled binary.
       ...claudeExecutableOptions(),
+      ...agentAuthOptions(),
     },
   });
 

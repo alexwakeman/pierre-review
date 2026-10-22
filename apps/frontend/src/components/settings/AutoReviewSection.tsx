@@ -200,7 +200,7 @@ export function AutoReviewSection(): JSX.Element {
   return (
     <SectionShell
       title="Auto Claude review"
-      desc="Claude reviews each new PR a person opens in this workspace, with the same model and budget as the Review button. It runs on your own Claude Code or Anthropic API key."
+      desc="Claude reviews each new PR a person opens in this workspace, with the same model and budget as the Review button. It runs on your own Claude Code login or Anthropic API key."
       info={
         <InfoButton title="Auto Claude review">
           <p>

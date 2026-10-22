@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { SPRINT_PATHS_CAPS, type ClaudeReviewModel } from '@pierre-review/shared';
 import { AiRuntimeMissingError, claudeExecutableOptions, loadAgentSdk, loadZod } from '../../ai/runtime.js';
+import { agentAuthOptions } from '../../ai/credentials.js';
 import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
 import type { SprintPathsInput, StoredPathsJson } from '../../db/sprint-paths.js';
 import { applyClaudeReviewAuth } from '../auth.js';
@@ -178,6 +179,7 @@ export const runSprintPathsAgent: SprintPathsAgentRunner = async (args) => {
         hooks: { PreToolUse: [pathGuardHook(createPathGuard(cwd)), ownToolsOnlyHook(['paths'])] },
         abortController: args.abortController,
         ...claudeExecutableOptions(),
+        ...agentAuthOptions(),
       },
     });
     for await (const message of q) {

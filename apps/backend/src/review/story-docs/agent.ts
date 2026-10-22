@@ -1,6 +1,7 @@
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { STORY_DOCS_ALIGNMENT_MODEL, type ClaudeReviewModel } from '@pierre-review/shared';
 import { claudeExecutableOptions, loadAgentSdk } from '../../ai/runtime.js';
+import { agentAuthOptions } from '../../ai/credentials.js';
 import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
 import { config } from '../../config.js';
 import { DISALLOWED_TOOLS } from '../agent.js';
@@ -157,6 +158,7 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
         mcpServers: { storydocs: server },
         abortController,
         ...claudeExecutableOptions(),
+        ...agentAuthOptions(),
       },
     });
 

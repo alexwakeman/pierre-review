@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { JSX } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
+import { AiRunGate } from '../AiSetup.js';
 import type {
   ActorLane,
   ActorLaneBand,
@@ -1160,34 +1161,38 @@ function GenerateControls({
             </select>
           </label>
         )}
-        <button
-          type="button"
-          onClick={() => generate.mutate(model != null ? { model } : {})}
-          disabled={blocked}
-          className="rounded border border-ai-border px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
-          title={
-            hasReport
-              ? 'Write this period up again. The stored figures are immutable; regenerating replaces the narrative for this model.'
-              : 'Compute this period and write it up. The first generation also backfills earlier periods (figures only, no AI) so the forecast has a series.'
-          }
-        >
-          {running
-            ? hasReport
-              ? 'Regenerating…'
-              : 'Generating…'
-            : reportLoading
-              ? 'Loading…'
-              : hasReport
-                ? stale
-                  ? (
-                      <span className="inline-flex items-center gap-1">
-                        <RefreshIcon size={11} />
-                        Regenerate
-                      </span>
-                    )
-                  : 'Regenerate'
-                : 'Generate'}
-        </button>
+        {/* The write-up is a model run: hidden when AI is off, swapped for the one setup or
+            sign-in line when it cannot run (AiRunGate). */}
+        <AiRunGate>
+          <button
+            type="button"
+            onClick={() => generate.mutate(model != null ? { model } : {})}
+            disabled={blocked}
+            className="rounded border border-ai-border px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
+            title={
+              hasReport
+                ? 'Write this period up again. The stored figures are immutable; regenerating replaces the narrative for this model.'
+                : 'Compute this period and write it up. The first generation also backfills earlier periods (figures only, no AI) so the forecast has a series.'
+            }
+          >
+            {running
+              ? hasReport
+                ? 'Regenerating…'
+                : 'Generating…'
+              : reportLoading
+                ? 'Loading…'
+                : hasReport
+                  ? stale
+                    ? (
+                        <span className="inline-flex items-center gap-1">
+                          <RefreshIcon size={11} />
+                          Regenerate
+                        </span>
+                      )
+                    : 'Regenerate'
+                  : 'Generate'}
+          </button>
+        </AiRunGate>
       </div>
 
       {generate.isError && (

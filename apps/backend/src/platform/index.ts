@@ -49,11 +49,9 @@ export async function registerPlatform(app: FastifyInstance, ctx: ProContext): P
   // Per-workspace config (sprint window / Slack / bots) for the settings modal.
   registerSettingsRoutes(app, ctx);
 
+  // ONE client for every one-shot feature here; the host's credential ladder picks the login or
+  // the API key (ai/credentials.ts).
   const llm = makeHaikuClient(ctx);
-  // The one-shot features that run LOCALLY on the reader's Claude Code login (the host's ONE local
-  // route): the impact note, the work-plan wording and the (Slack) sprint report. Reports and Bots
-  // Monitoring keep `llm` and the summary key.
-  const localLlm = makeHaikuClient(ctx, { localAgent: true });
 
   // Workspace review-intelligence "Insights" — no AI; the route reads existing data.
   registerInsightsRoutes(app, ctx);
@@ -70,7 +68,7 @@ export async function registerPlatform(app: FastifyInstance, ctx: ProContext): P
   registerBotBenchmarkPlacementRoutes(app, ctx);
 
   // Insights "Sprint report" — a summary OF the Insights (headline metrics + PR-linked issues).
-  registerSprintReportRoutes(app, ctx, localLlm);
+  registerSprintReportRoutes(app, ctx, llm);
 
   // Reports — period-over-period reporting: a stored, forwardable artifact per period, a
   // comparison over the coverage-stable repo subset, a refusable forecast and a narrated summary.
@@ -84,7 +82,7 @@ export async function registerPlatform(app: FastifyInstance, ctx: ProContext): P
   // The WORK PLAN's wording — the headline, the per-row "why" and the "what can wait" line on the
   // Pending board. ⚠ The RANKED WORKLIST is core's (db/work-plan.ts) and is not stored here; only
   // the model's prose is cached, joined back to the live rows by WorkPlanItem.id.
-  registerWorkPlanRoutes(app, ctx, localLlm);
+  registerWorkPlanRoutes(app, ctx, llm);
 
   // CHRONOLOGY POINTERS — evidence-led pointers beside Reports → Chronology, each citing the pull
   // requests behind it. Core folds the evidence (db/flow-pointers.ts) and sends no person.
@@ -100,10 +98,10 @@ export async function registerPlatform(app: FastifyInstance, ctx: ProContext): P
 
   // The blast-radius IMPACT NOTE — the one kind left on the annotations platform
   // (`pr_comment_annotations`). Older stored kinds are DORMANT (the read skips unknown kinds).
-  registerAnnotationRoutes(app, ctx, localLlm);
+  registerAnnotationRoutes(app, ctx, llm);
 
   // Slack digest delivery: a ticking cron sends the sprint report to a configured webhook at the
   // workspace's cadence, plus POST /api/pro/slack/test and the two per-workspace event signals
   // (slack/signals.ts — Claude Review ran, PR merged).
-  registerSlackFeature(app, ctx, localLlm);
+  registerSlackFeature(app, ctx, llm);
 }

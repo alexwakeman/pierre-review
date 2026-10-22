@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { claudeExecutableOptions, loadAgentSdk } from '../ai/runtime.js';
+import { agentAuthOptions } from '../ai/credentials.js';
 import type { ReviewChatArgs, ReviewChatResult } from '../platform/contract.js';
 import { config } from '../config.js';
 import { applyClaudeReviewAuth } from './auth.js';
@@ -165,6 +166,7 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
         ...(mcpServers ? { mcpServers } : {}),
         abortController,
         ...claudeExecutableOptions(),
+        ...agentAuthOptions(),
       },
     });
 

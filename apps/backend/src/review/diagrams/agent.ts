@@ -1,6 +1,7 @@
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
 import { claudeExecutableOptions, loadAgentSdk } from '../../ai/runtime.js';
+import { agentAuthOptions } from '../../ai/credentials.js';
 import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
 import { config } from '../../config.js';
 import { DISALLOWED_TOOLS, describeAssistantBlocks } from '../agent.js';
@@ -164,6 +165,7 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
         mcpServers: { diagram: server },
         abortController,
         ...claudeExecutableOptions(),
+        ...agentAuthOptions(),
       },
     });
 

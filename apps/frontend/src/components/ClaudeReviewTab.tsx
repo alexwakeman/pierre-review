@@ -1940,7 +1940,7 @@ export function ClaudeReviewTab({
               </span>
               <span
                 className="font-semibold text-gray-600 dark:text-gray-300"
-                title="Estimated cost so far, on your own Claude Code or Anthropic API key. Limn charges nothing. The figure recorded when the run finishes is authoritative."
+                title="Estimated cost so far, on your own Claude Code login or Anthropic API key. Limn charges nothing. The figure recorded when the run finishes is authoritative."
               >
                 ~{formatUsd(status.progress.usage.estCostUsd)}
               </span>

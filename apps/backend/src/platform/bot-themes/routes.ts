@@ -326,10 +326,8 @@ async function refreshReport(
   if (Date.now() - last < MIN_INTERVAL_SEC * 1000) return cached('throttled');
   inFlightAccounts.add(accountId);
   try {
-    // NB: no auth pre-check here — the summary uses its OWN explicit credential
-    // (SUMMARY_ANTHROPIC_API_KEY in cloud), which ctx.llm.detectAuth() (an AMBIENT-env probe)
-    // can't see; pre-checking would wrongly block a validly-keyed cloud run. A genuine local
-    // no-auth failure surfaces as the mutation error, exactly like the sprint report.
+    // NB: no auth pre-check here — a missing credential surfaces as the mutation error, exactly
+    // like the sprint report (the SPA swaps the button first, via AiRunGate).
     const { result, empty } = await generateReport(ctx, llm, accountId, scope, scopeKey, window);
     // A gone-quiet scope/window touches NOTHING server-side (the stored row survives), so answer
     // with the stored report — the cached(...) shape. Returning `result:null` here had the client

@@ -67,8 +67,13 @@ import { BOT_VENDOR_META } from '../../lib/ui.js';
  * Every other member — `'themes'` and `'benchmark'` included, which render on BOTH mounts — returns
  * itself.
  */
-export function effectiveBotsTab(raw: BotsInnerTab, opts: { showAdvisor: boolean }): BotsInnerTab {
+export function effectiveBotsTab(
+  raw: BotsInnerTab,
+  opts: { showAdvisor: boolean; showThemes?: boolean },
+): BotsInnerTab {
   if (raw === 'advisor' && !opts.showAdvisor) return 'roi';
+  // Themes is a model's read: absent while AI is off (`me.ai.enabled`).
+  if (raw === 'themes' && opts.showThemes === false) return 'roi';
   return raw;
 }
 

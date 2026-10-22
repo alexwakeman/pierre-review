@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import type { StoredSynthesis } from '@pierre-review/shared';
 import { RefreshIcon } from '../Icons.js';
+import { AiRunGate } from '../AiSetup.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import {
   useGenerateSynthesis,
   useSynthesis,
@@ -79,7 +81,9 @@ export function SynthesisCard({
   /** The host surface's receipt list — ALWAYS rendered, synthesis or not (§8.20). */
   children?: ReactNode;
 }): JSX.Element | null {
-  const query = useSynthesis(workspaceId, descriptor);
+  // An AI surface: visible only while AI is on (`me.ai.enabled`); the list below stays either way.
+  const aiEnabled = useAiCapabilities().enabled;
+  const query = useSynthesis(workspaceId, descriptor, aiEnabled);
   const generate = useGenerateSynthesis(workspaceId, descriptor);
   const busy = useSynthesisGenerating(workspaceId, descriptor);
 
@@ -87,7 +91,7 @@ export function SynthesisCard({
   const synthesis = resp?.enabled ? (resp.synthesis ?? null) : null;
   // The summary is off server-side (enabled:false), or the read failed: nothing extra — the
   // deterministic list stays primary (§8.20).
-  if (query.isError || (resp != null && !resp.enabled)) {
+  if (!aiEnabled || query.isError || (resp != null && !resp.enabled)) {
     return children == null ? null : <>{children}</>;
   }
 
@@ -113,24 +117,28 @@ export function SynthesisCard({
               stale
             </span>
           )}
-          <button
-            type="button"
-            onClick={() => generate.mutate()}
-            disabled={busy || workspaceId == null}
-            className="ml-auto rounded bg-ai-signal px-2.5 py-0.5 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
-            title="Group this list into recurring clusters (runs the Haiku model; unchanged items are not re-read)"
-          >
-            {busy ? (
-              'Summarising…'
-            ) : synthesis ? (
-              <span className="inline-flex items-center gap-1">
-                <RefreshIcon size={11} />
-                Regenerate
-              </span>
-            ) : (
-              'Summarise'
-            )}
-          </button>
+          <span className="ml-auto">
+            <AiRunGate>
+              <button
+                type="button"
+                onClick={() => generate.mutate()}
+                disabled={busy || workspaceId == null}
+                className="rounded bg-ai-signal px-2.5 py-0.5 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
+                title="Group this list into recurring clusters (runs the Haiku model; unchanged items are not re-read)"
+              >
+                {busy ? (
+                  'Summarising…'
+                ) : synthesis ? (
+                  <span className="inline-flex items-center gap-1">
+                    <RefreshIcon size={11} />
+                    Regenerate
+                  </span>
+                ) : (
+                  'Summarise'
+                )}
+              </button>
+            </AiRunGate>
+          </span>
         </div>
 
         {generate.isError && (

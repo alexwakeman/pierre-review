@@ -81,7 +81,7 @@ export function SprintAskPanel({
             requests. It reads nothing else and changes nothing.
           </p>
           <p>It remembers this conversation&rsquo;s earlier questions, up to a limit. The conversation is gone when you leave the page.</p>
-          <p>Each answer runs on your own Claude Code or Anthropic API key; its cost is shown under it.</p>
+          <p>Each answer runs on your own Claude Code login or Anthropic API key; its cost is shown under it.</p>
         </InfoButton>
         <span className="ml-auto" />
         {turns.length > 0 && (

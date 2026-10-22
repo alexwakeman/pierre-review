@@ -12,6 +12,7 @@ import {
   useAttentionLiveness,
 } from '../../hooks/useAttentionCards.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { AiRunGate } from '../AiSetup.js';
 import {
   useGenerateWorkPlan,
   useWorkPlan,
@@ -482,21 +483,23 @@ export function AttentionView(): JSX.Element {
             )}
             {busy && <AiStatusLine stage="Writing the plan" />}
             {!busy && (
-            <button
-              type="button"
-              onClick={() => generate.mutate()}
-              className="rounded bg-ai-signal px-2.5 py-0.5 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
-              title="Have the model say why some items are worth doing now. The tabs, figures and order are computed either way."
-            >
-              {plan != null ? (
-                <span className="inline-flex items-center gap-1">
-                  <RefreshIcon size={11} />
-                  Re-plan my day
-                </span>
-              ) : (
-                'Plan my day'
-              )}
-            </button>
+            <AiRunGate>
+              <button
+                type="button"
+                onClick={() => generate.mutate()}
+                className="rounded bg-ai-signal px-2.5 py-0.5 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
+                title="Have the model say why some items are worth doing now. The tabs, figures and order are computed either way."
+              >
+                {plan != null ? (
+                  <span className="inline-flex items-center gap-1">
+                    <RefreshIcon size={11} />
+                    Re-plan my day
+                  </span>
+                ) : (
+                  'Plan my day'
+                )}
+              </button>
+            </AiRunGate>
             )}
           </div>
         )}

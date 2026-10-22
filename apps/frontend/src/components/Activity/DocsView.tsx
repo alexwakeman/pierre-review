@@ -521,7 +521,7 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
                 Ask about the docs in the chat. To have Claude Review check stories against them, switch it on in Settings →
                 Workspace.
               </p>
-              <p>Everything stays on this machine. Building a document runs on your own Claude Code or Anthropic API key.</p>
+              <p>Everything stays on this machine. Building a document runs on your own Claude Code login or Anthropic API key.</p>
               <p>Drag the bars between the columns to resize them (or focus one and use the arrow keys). Double-click a bar to reset it.</p>
             </InfoButton>
             {wide && (

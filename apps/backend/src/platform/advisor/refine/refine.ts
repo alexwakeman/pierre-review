@@ -3,11 +3,8 @@
 // format 'prose' — structured formats (yaml/json) have NO LLM code path at all, not a
 // guarded one.
 //
-// Credential: ctx.llm.complete() with NO credential — the host's ambient agent-SDK path, which
-// resolves the creator's logged-in Claude session and otherwise the environment's
-// ANTHROPIC_API_KEY. ⚠ It used to pass `credential:'local-review-key'` for a BYO key stored
-//           in ~/.pierre-review/config.json; that key is RETIRED and the option is inert, so
-//           the ladder is two rungs and this call names neither.
+// Credential: ctx.llm.complete() — the host's one ladder: the reader's Claude Code login, else
+// the environment's ANTHROPIC_API_KEY (ai/credentials.ts).
 // Every output passes the DETERMINISTIC diff-guard; a rejected rewording returns the
 // templated version with the reason, never a failure.
 import type { ProContext } from '../../contract.js';

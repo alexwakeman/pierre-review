@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeReviewModel, ClaudeReviewTicket, TicketPrCardBody } from '@pierre-review/shared';
 import { claudeExecutableOptions, loadAgentSdk } from '../../ai/runtime.js';
+import { agentAuthOptions } from '../../ai/credentials.js';
 import { config } from '../../config.js';
 import { DISALLOWED_TOOLS } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
@@ -194,6 +195,7 @@ export const runCardAgent: RunCardAgent = async ({ input, ticket, nonce, signal,
         mcpServers: { card: server },
         abortController: controller,
         ...claudeExecutableOptions(),
+        ...agentAuthOptions(),
       },
     });
     for await (const message of q) {

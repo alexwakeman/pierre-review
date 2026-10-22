@@ -104,6 +104,36 @@ describe('the wiring', () => {
     expect(read(join(root, 'components', 'ClaudeReviewChat.tsx'))).toMatch(/<AiRunGate>/);
   });
 
+  it('every one-shot AI surface shows only while AI is on and runs behind the one gate', () => {
+    // Themes, synthesis cards, Chronology pointers, the period-report write-up, the impact note,
+    // the work-plan narration, sprint Ask Claude and the docs: one visibility rule (`me.ai.enabled`)
+    // and one Run-button swap (AiRunGate), the same as the agentic surfaces.
+    const activity = (n: string): string => read(join(root, 'components', 'Activity', n));
+    for (const n of [
+      'BotThemesPanel.tsx',
+      'SynthesisCard.tsx',
+      'FlowPointersPanel.tsx',
+      'BlastImpactNote.tsx',
+      'AttentionView.tsx',
+    ]) {
+      const s = activity(n);
+      expect(s, n).toMatch(/useAiCapabilities\(\)\.enabled/);
+      expect(s, n).toMatch(/<AiRunGate>/);
+    }
+    for (const n of ['PeriodReportsPanel.tsx', 'SprintAskPanel.tsx', 'DocsView.tsx', 'DocsChat.tsx']) {
+      expect(activity(n), n).toMatch(/<AiRunGate>/);
+    }
+    expect(read(join(root, 'components', 'Activity', 'BotsView.tsx'))).toMatch(
+      /showThemes = useAiCapabilities\(\)\.enabled/,
+    );
+  });
+
+  it('the AI copy names both credentials', () => {
+    for (const f of files) {
+      expect(read(f), f).not.toMatch(/own Claude Code or Anthropic API key/);
+    }
+  });
+
   it('the CI-failure card is gone: Claude Review owns why CI failed', () => {
     expect(existsSync(join(root, 'components', 'CiAnalysisCard.tsx'))).toBe(false);
     expect(read(join(root, 'components', 'ChecksTab.tsx'))).not.toMatch(/CiAnalysisCard/);

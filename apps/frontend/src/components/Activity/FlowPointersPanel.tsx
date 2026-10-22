@@ -5,6 +5,8 @@ import {
   useGenerateFlowPointers,
 } from '../../hooks/useFlowPointers.js';
 import { InfoButton } from '../InfoModal.js';
+import { AiRunGate } from '../AiSetup.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { SparkleIcon } from '../Icons.js';
 import { PointersInfo } from './chronologyInfo.js';
 import { PrLink } from './ChronologyTables.js';
@@ -43,11 +45,13 @@ export function FlowPointersPanel({
   workspaceId: number | null;
   days: number | 'reporting';
 }): JSX.Element | null {
-  const q = useFlowPointers(workspaceId, days);
+  // An AI surface: visible only while AI is on (`me.ai.enabled`), like every agentic one.
+  const aiEnabled = useAiCapabilities().enabled;
+  const q = useFlowPointers(workspaceId, days, aiEnabled);
   const generate = useGenerateFlowPointers(workspaceId, days);
   const generating = useFlowPointersGenerating(workspaceId, days);
   const data = q.data;
-  if (data == null || !data.enabled) return null;
+  if (!aiEnabled || data == null || !data.enabled) return null;
 
   const links = new Map<number, FlowPrLink>(data.links.map((l) => [l.prId, l]));
   const result = data.result;
@@ -74,14 +78,16 @@ export function FlowPointersPanel({
           )}
         </div>
         {!data.empty && (
-          <button
-            type="button"
-            disabled={generating}
-            onClick={() => generate.mutate()}
-            className="rounded border border-ai-border px-2.5 py-1 text-xs font-medium text-ai-ink hover:bg-ai-surface-2 disabled:opacity-50"
-          >
-            {generating ? 'Writing…' : result == null ? 'Write pointers' : 'Rewrite'}
-          </button>
+          <AiRunGate>
+            <button
+              type="button"
+              disabled={generating}
+              onClick={() => generate.mutate()}
+              className="rounded border border-ai-border px-2.5 py-1 text-xs font-medium text-ai-ink hover:bg-ai-surface-2 disabled:opacity-50"
+            >
+              {generating ? 'Writing…' : result == null ? 'Write pointers' : 'Rewrite'}
+            </button>
+          </AiRunGate>
         )}
       </div>
       <p className="mt-0.5 text-xs text-ai-ink">Written by AI from the pull requests on this page.</p>

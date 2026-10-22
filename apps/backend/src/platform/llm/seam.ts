@@ -6,12 +6,9 @@ import type { ProContext } from '../contract.js';
 // Anthropic dependency at runtime — the host owns the SDK wiring. A future
 // OpenAI-compatible client implements the same `LlmClient` interface.
 //
-// AUTH — the summary is a Pro feature with its OWN discrete credential (BYOK /
-// server-side key). It uses `SUMMARY_ANTHROPIC_API_KEY` when set — passed EXPLICITLY
-// to the host seam's raw metered path — so it's fast (no Agent SDK subprocess) and
-// completely independent of Claude Review, which keeps preferring the ambient
-// subscription. With no summary key set it falls back to the ambient session
-// (works out of the box in dev, just slower).
+// AUTH — none chosen here. Every call takes the host's ONE credential ladder (ai/credentials.ts):
+// the reader's Claude Code login first, else ANTHROPIC_API_KEY from the environment
+// (LIMN_AI_USE_API_KEY=true puts the key first). There is no per-feature key.
 export interface LlmClient {
   complete(req: { system: string; user: string; maxTokens: number }): Promise<{
     text: string;
@@ -40,17 +37,7 @@ export function haikuCostUsd(inputTokens: number, outputTokens: number): number 
   return priceTokens(REPORT_MODEL_PRICING[HAIKU_MODEL], inputTokens, outputTokens);
 }
 
-// The summary's dedicated Anthropic API key. Empty → the ambient fallback.
-function summaryApiKey(): string | undefined {
-  const k = process.env.SUMMARY_ANTHROPIC_API_KEY;
-  return k && k.trim().length > 0 ? k.trim() : undefined;
-}
-
-// `localAgent: true` ⇒ LOCALLY the host runs the call on the reader's Claude Code login (the Agent
-// SDK) even when the summary key is set — the ONE local route for the one-shot features (the impact
-// note, the work-plan wording, the Slack sprint report). The Reports and Bots Monitoring clients
-// leave it off and keep the key. Cloud ignores it.
-export function makeHaikuClient(ctx: ProContext, opts: { localAgent?: boolean } = {}): LlmClient {
+export function makeHaikuClient(ctx: ProContext): LlmClient {
   return {
     async complete(req) {
       const res = await ctx.llm.complete({
@@ -58,8 +45,6 @@ export function makeHaikuClient(ctx: ProContext, opts: { localAgent?: boolean } 
         system: req.system,
         prompt: req.user,
         maxTokens: req.maxTokens,
-        apiKey: summaryApiKey(),
-        ...(opts.localAgent ? { localRoute: 'agent' as const } : {}),
       });
       const inputTokens = res.usage?.inputTokens ?? 0;
       const outputTokens = res.usage?.outputTokens ?? 0;
@@ -211,8 +196,8 @@ export function estimateReportCost(
 }
 
 /**
- * A completion client pinned to ONE model. Same auth story as `makeHaikuClient` (the summary key,
- * falling back to the ambient session) — the only difference is that the model id is passed
+ * A completion client pinned to ONE model. Same auth story as `makeHaikuClient` (the host's one
+ * ladder) — the only difference is that the model id is passed
  * EXPLICITLY rather than left to the host default, and the cost is priced from that model's row
  * rather than the Haiku constants.
  *
@@ -233,7 +218,6 @@ export function makeReportClient(ctx: ProContext, model: ReportModel): LlmClient
         system: req.system,
         prompt: req.user,
         maxTokens: req.maxTokens,
-        apiKey: summaryApiKey(),
       });
       const inputTokens = res.usage?.inputTokens ?? 0;
       const outputTokens = res.usage?.outputTokens ?? 0;

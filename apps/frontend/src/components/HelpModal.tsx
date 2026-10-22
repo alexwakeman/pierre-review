@@ -145,7 +145,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           <Section title="Claude Review and AI Fix (on your machine)">
             The <strong>Claude Review</strong> tab reviews a PR into findings; you pick which to
             post as one GitHub review. <strong>AI Fix</strong> edits the branch for you to push.
-            Both run on your own Claude Code or Anthropic API key — Limn stores no key and charges
+            Both run on your own Claude Code login or Anthropic API key — Limn stores no key and charges
             nothing. The reviewer reads code; it cannot edit files, run commands or reach the web.
             The fixer edits files but has no shell, and builds and tests nothing. Nothing is posted
             or pushed until you press the button.

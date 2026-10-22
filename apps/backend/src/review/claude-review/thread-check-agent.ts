@@ -2,6 +2,7 @@ import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { z as Zod } from 'zod';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
 import { claudeExecutableOptions, loadAgentSdk, loadZod } from '../../ai/runtime.js';
+import { agentAuthOptions } from '../../ai/credentials.js';
 import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
 import { config } from '../../config.js';
 import type { ReviewThreadReport } from '../../platform/contract.js';
@@ -136,6 +137,7 @@ export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<Run
         mcpServers: { threads: server },
         abortController,
         ...claudeExecutableOptions(),
+        ...agentAuthOptions(),
       },
     });
 

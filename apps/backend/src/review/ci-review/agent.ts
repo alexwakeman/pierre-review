@@ -1,6 +1,7 @@
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
 import { claudeExecutableOptions, loadAgentSdk } from '../../ai/runtime.js';
+import { agentAuthOptions } from '../../ai/credentials.js';
 import { config } from '../../config.js';
 import { DISALLOWED_TOOLS, describeAssistantBlocks } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
@@ -127,6 +128,7 @@ export async function runCiReviewAgent(args: RunCiAgentArgs): Promise<RunCiAgent
         mcpServers: { ci: server },
         abortController,
         ...claudeExecutableOptions(),
+        ...agentAuthOptions(),
       },
     });
 

@@ -14,18 +14,13 @@ describe('cheapRequestShape', () => {
   });
 });
 
-// ONE LOCAL ROUTE for the one-shot features: locally a call marked `localRoute: 'agent'` never
-// reaches the metered API, even with SUMMARY_ANTHROPIC_API_KEY. Reports / Bots Monitoring (unmarked)
-// keep the key's route.
+// Which path the ladder's answer takes: the login → the Agent SDK, the key → the API, nothing →
+// refused. No caller passes a key of its own any more.
 describe('cheapRoute', () => {
-  it("takes the Agent SDK for a call marked localRoute 'agent', even with a key", () => {
-    expect(cheapRoute('sk-ant-summary', 'agent')).toBe('agent');
-    expect(cheapRoute(undefined, 'agent')).toBe('agent');
-  });
-
-  it('keeps the API for an unmarked call with a key; no key is always the Agent SDK', () => {
-    expect(cheapRoute('sk-ant-summary')).toBe('api');
-    expect(cheapRoute(undefined)).toBe('agent');
-    expect(cheapRoute('')).toBe('agent');
+  it('maps each rung of the ladder to its path', () => {
+    expect(cheapRoute({ route: 'login', method: 'ambient' })).toBe('agent');
+    expect(cheapRoute({ route: 'login', method: 'oauth_token' })).toBe('agent');
+    expect(cheapRoute({ route: 'api_key', method: 'api_key', apiKey: 'k' })).toBe('api');
+    expect(cheapRoute({ route: 'none' })).toBe('none');
   });
 });

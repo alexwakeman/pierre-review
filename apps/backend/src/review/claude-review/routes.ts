@@ -229,8 +229,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
   // form. `ctx.review.setLocalKey` went with them, so there is no seam left to write through, and
   // `getLocalKeyStatus` went later with the budget route (below).
   //
-  // Cloud never used any of this (it runs on `SUMMARY_ANTHROPIC_API_KEY` and the Settings section
-  // never rendered there). An already-stored key is left on disk untouched and simply never read:
+  // The ladder itself lives in ai/credentials.ts. An already-stored key is left on disk untouched and simply never read:
   // the decision was to stop reading it, not to destroy somebody's file — which is also why there
   // is no "clear it" route here. A route that writes the file is a write path back.
 

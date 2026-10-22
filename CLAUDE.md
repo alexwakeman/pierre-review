@@ -864,11 +864,13 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   checks, newer wins per thread) — cards, the tab, the next review's carry and AI Fix all read it.
   SPA: TWO pills (validity + state) + the one-line reason, words ONLY from
   `lib/claudeThreadMarker.ts`; every agentic pass shows ONE `components/AiStatusLine.tsx`.
-- **ONE LOCAL ROUTE FOR THE ONE-SHOT FEATURES**: locally `cheapComplete` (review/llm.ts) runs on the
-  Agent SDK (the reader's Claude login) for every core caller and for a plugin call marked
-  `localRoute: 'agent'` (impact note, work-plan wording, Slack sprint report — the plugin's
-  `localLlm`), IGNORING `SUMMARY_ANTHROPIC_API_KEY`; that route refuses under LIMN_AI_DISABLED.
-  ⚠ Reports and Bots Monitoring leave it unmarked and KEEP the key. Cloud keeps the key. Same model.
+- **ONE CREDENTIAL LADDER FOR EVERY MODEL CALL** (`ai/credentials.ts` `resolveAiCredential`): the
+  reader's Claude Code login first, else the environment's `ANTHROPIC_API_KEY`;
+  `LIMN_AI_USE_API_KEY=true` puts the key first. Agent runs pass the ladder's environment as the
+  query's `env` (`agentAuthOptions()`, beside `claudeExecutableOptions()`); one-shot `cheapComplete`
+  takes the Agent SDK on the login and the Anthropic API (via `loadAnthropicSdk`) on the key. No
+  caller picks its own credential: `SUMMARY_ANTHROPIC_API_KEY`, `apiKey`, `localRoute` and the
+  "key-only" Reports/Bots routes are DELETED. `LIMN_AI_DISABLED` refuses every call. Same models.
 - **AUTO-POSTING IS OFF BY DEFAULT, AUTO RUNS ONLY, NEVER TWICE** (`claude-review/
   auto-post.ts`, `ticket-review/auto-post.ts`; sqlite `0087` / pg `0074`): a per-workspace switch
   (`workspaces.auto_post_enabled`, NULL = off) + overrides-only scope/kinds on the auto-review route.
@@ -973,9 +975,11 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   button (the per-workspace auto-post / Push automatically switches, both OFF by default, are the
   only exceptions). **No AI SDK is in the npm manifest** — they are downloaded on first use and value-imported
   ONLY by `ai/runtime.ts`, which `build-release.mjs` asserts (see *Packaging & publishing*).
-  ⚠ **The credential ladder is TWO RUNGS and there is NO stored key**: an ambient Claude session
-  (the run STRIPS `ANTHROPIC_API_KEY`), else the environment's `ANTHROPIC_API_KEY`, untouched.
-  Product copy says "runs on your own Claude Code or Anthropic API key" and never promises
+  ⚠ **The credential ladder is TWO RUNGS and there is NO stored key**: the Claude Code login
+  (the run never sees `ANTHROPIC_API_KEY`), else the environment's `ANTHROPIC_API_KEY`
+  (`LIMN_AI_USE_API_KEY=true` reverses them). Every AI surface, one-shot ones included, gates
+  visibility on `me.ai.enabled` and its Run button on the ONE `AiRunGate`.
+  Product copy says "runs on your own Claude Code login or Anthropic API key" and never promises
   subscription billing. The BYO key in `config.json`, its form, `GET`/`PUT
   /api/claude-review/key` and `setLocalKey` are RETIRED; the per-review budget is the
   `REVIEW_BUDGET_USD` env var ALONE (default $6.75; no route, no stored override). Local spend is unmetered but still recorded (`recordAiUsage`).

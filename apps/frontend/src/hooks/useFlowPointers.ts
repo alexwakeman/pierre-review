@@ -13,10 +13,15 @@ export function flowPointersKeySlots(workspaceId: number | null, days: number | 
   return [workspaceKey(workspaceId), days];
 }
 
-export function useFlowPointers(workspaceId: number | null, days: number | 'reporting') {
+export function useFlowPointers(
+  workspaceId: number | null,
+  days: number | 'reporting',
+  enabled = true,
+) {
   return useQuery<FlowPointersResponse>({
     queryKey: ['flow-pointers', ...flowPointersKeySlots(workspaceId, days)],
     queryFn: workspaceId == null ? skipToken : () => api.flowPointers(workspaceId, days),
+    enabled,
     // Folded from synced rows; it can only move when a sync lands. The Chronology panel's cadence.
     staleTime: 60_000,
     refetchInterval: 5 * 60_000,

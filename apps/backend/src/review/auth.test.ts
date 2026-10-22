@@ -127,3 +127,36 @@ describe('applyClaudeReviewAuth — what it does to process.env', () => {
     expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBe('tok');
   });
 });
+
+describe('LIMN_AI_USE_API_KEY=true — the opt-in that puts the key first', () => {
+  let prevOptIn: string | undefined;
+  beforeEach(() => {
+    prevOptIn = process.env.LIMN_AI_USE_API_KEY;
+    process.env.LIMN_AI_USE_API_KEY = 'true';
+  });
+  afterEach(() => {
+    if (prevOptIn === undefined) delete process.env.LIMN_AI_USE_API_KEY;
+    else process.env.LIMN_AI_USE_API_KEY = prevOptIn;
+  });
+
+  it('reports the key even with a login', () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-env';
+    expect(detectClaudeAuth()).toEqual({ status: 'ok', method: 'api_key' });
+  });
+
+  it('keeps the key for the run and hides the OAuth token; restore puts it back', () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-env';
+    const restore = applyClaudeReviewAuth(true);
+    expect(process.env.ANTHROPIC_API_KEY).toBe('sk-ant-env');
+    expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    restore();
+    expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBe('tok');
+  });
+
+  it('without a key it changes nothing — the login is still used', () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
+    expect(detectClaudeAuth()).toEqual({ status: 'ok', method: 'oauth_token' });
+  });
+});

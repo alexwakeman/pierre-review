@@ -311,10 +311,17 @@ export const config = {
 
   // ---- The agentic features: Claude Review, review memory, AI Fix (CORE, free, LOCAL ONLY) ----
   // ONE switch, and it is NOT an opt-in: they are on and always visible (a missing Claude
-  // credential replaces the Run button with one line; it never hides the feature). They run on
-  // the user's own Claude Code session or ANTHROPIC_API_KEY (review/auth.ts).
+  // credential replaces the Run button with one line; it never hides the feature).
+  //
+  // EVERY model call — agent runs and one-shot completions alike — takes ONE credential ladder
+  // (ai/credentials.ts), read at call time:
+  //   1. the user's own Claude Code login (default; a `claude` sign-in on disk or
+  //      CLAUDE_CODE_OAUTH_TOKEN). Any ANTHROPIC_API_KEY is hidden from the run so the login pays;
+  //   2. else ANTHROPIC_API_KEY from the environment.
+  // LIMN_AI_USE_API_KEY=true — prefer ANTHROPIC_API_KEY over the login when both exist.
   // LIMN_AI_DISABLED=true is the kill switch for a team that forbids AI tooling — hides every
-  // agentic surface (`MeResponse.ai.enabled` false) and registers no agentic route.
+  // AI surface (`MeResponse.ai.enabled` false), registers no agentic route and refuses every
+  // one-shot completion.
   aiEnabled: process.env.LIMN_AI_DISABLED !== 'true',
   // ---- Claude Review — infra knobs ----
   // The routing thresholds, concurrency + queue caps keep their historical PRO_REVIEW_* env names.

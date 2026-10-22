@@ -1178,19 +1178,8 @@ export interface ProContext {
       system?: string;
       prompt: string;
       maxTokens?: number;
-      // Explicit API key → the raw metered path; omitted → the ambient Claude
-      // session. Lets the summary use its OWN discrete credential.
-      apiKey?: string;
-      // ⚠ RETIRED AND INERT — kept ONLY so this ProContext shape does not move (apiVersion
-      // stays 21). It used to mean "CORE resolves the local BYO Anthropic key itself"; that
-      // stored key no longer exists, local advanced-AI auth is ambient-session-then-env, and
-      // the ambient path resolves both. Passing it is identical to omitting it.
-      credential?: 'local-review-key';
-      // 'agent' ⇒ LOCALLY this call runs on the reader's Claude Code login (the Agent SDK) even
-      // with `apiKey` passed; cloud ignores it. OPTIONAL and additive — apiVersion stays 23. Set by
-      // the impact note, the work-plan wording and the Slack sprint report; Reports and Bots
-      // Monitoring leave it off and keep their key.
-      localRoute?: 'agent';
+      // No credential option: every call takes the ONE ladder (ai/credentials.ts) — the
+      // reader's Claude Code login, else ANTHROPIC_API_KEY (LIMN_AI_USE_API_KEY=true: key first).
     }): Promise<{
       text: string;
       usage?: { inputTokens: number; outputTokens: number };

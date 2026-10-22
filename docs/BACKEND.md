@@ -27,17 +27,22 @@ modes**):
 
 ### One-shot model calls (`review/llm.ts` `cheapComplete`)
 
-Every tool-less, one-shot model call (the plugin's impact note, work-plan wording and Slack report
-via `ctx.llm.complete`; core's sprint briefs, themes and Ask, story labels and the docs-check
-shortlist) goes through `cheapComplete`. ⚠ **LOCALLY THESE HAVE ONE ROUTE: the Agent SDK** — the
-reader's Claude Code login, else the environment's `ANTHROPIC_API_KEY`. Core callers pass no key; the
-plugin marks those three calls `localRoute: 'agent'` (its `localLlm` client, an OPTIONAL field on
-`ctx.llm.complete` — no apiVersion bump), so a passed `apiKey` (`SUMMARY_ANTHROPIC_API_KEY`) is
-IGNORED for them (`cheapRoute`, pinned by `llm.test.ts` + `llm-local-route.test.ts`). ⚠ The Pro
-**Reports** and **Bots Monitoring** clients (period-report narration, syntheses,
-bot themes, the advisor refine, Chronology pointers) leave it unmarked and keep the key locally too.
-The Agent-SDK route throws "Claude is switched off here." under `LIMN_AI_DISABLED`. CLOUD ignores
-`localRoute` and keeps the metered key route. Same model (Haiku 5.5) both ways.
+Every tool-less, one-shot model call (the platform's report narration, syntheses, bot themes,
+Chronology pointers, impact note, work-plan wording, advisor refine and Slack report via
+`ctx.llm.complete`; core's sprint briefs, themes and Ask, story labels, docs ranking and the
+docs-check shortlist) goes through `cheapComplete`, and every one takes THE ONE CREDENTIAL LADDER
+(`ai/credentials.ts`), the same as the agent runs:
+
+1. **the reader's Claude Code login** (default) → the Agent SDK, one tool-less turn, with
+   `ANTHROPIC_API_KEY` removed from the run's `env` so the login pays;
+2. else **`ANTHROPIC_API_KEY`** from the environment → the Anthropic API directly
+   (`@anthropic-ai/sdk`, loaded through `ai/runtime.ts` `loadAnthropicSdk`).
+
+`LIMN_AI_USE_API_KEY=true` puts the key first. No caller passes a key or a route
+(`SUMMARY_ANTHROPIC_API_KEY`, `apiKey`, `localRoute` are gone). With no credential the call throws
+the one auth line; under `LIMN_AI_DISABLED` it throws "Claude is switched off here." Pinned by
+`ai/credentials.test.ts`, `review/llm-ladder.test.ts` (incl. the platform clients) and
+`review/auth.test.ts`. Same model (Haiku 5.5) both ways.
 
 ### Status for the agentic passes
 

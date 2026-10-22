@@ -4,6 +4,8 @@ import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { useBotThemes, useRefreshBotThemes } from '../../hooks/useBotThemes.js';
 import { BotIcon, MagnifierIcon, RefreshIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
+import { AiRunGate } from '../AiSetup.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { ThemesReportBody, ThemesSkeleton } from './ThemesReportView.js';
 import { prRefToMeta } from './ThemeThreadsDetail.js';
 
@@ -73,7 +75,9 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const openThemeThreads = useFilters((s) => s.openThemeThreadsDetail);
 
-  const query = useBotThemes(window, true, workspaceId, repoIds);
+  // An AI surface: visible only while AI is on (`me.ai.enabled`), like every agentic one.
+  const aiEnabled = useAiCapabilities().enabled;
+  const query = useBotThemes(window, aiEnabled, workspaceId, repoIds);
   // Generation is the one BILLED path here, so it refuses outright while the workspace is
   // unresolved rather than spending on the account's Default (see useRefreshBotThemes).
   const refresh = useRefreshBotThemes(window, workspaceId, repoIds);
@@ -82,7 +86,7 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
   // body rather than an error box — this is a cached READ, and the Generate button it would be
   // hiding is the only thing a reader could do about it anyway.
   const resp = query.data;
-  if (query.isError || (resp != null && !resp.enabled)) return null;
+  if (!aiEnabled || query.isError || (resp != null && !resp.enabled)) return null;
 
   const result = resp?.result ?? null;
   // Shared-mutation-key read, never per-mount `isPending`: a board switch mid-run unmounts this
@@ -110,24 +114,28 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
           </p>
         </InfoButton>
         <span className="text-[11px] text-gray-500 dark:text-gray-400">AI read</span>
-        <button
-          type="button"
-          onClick={() => refresh.mutate()}
-          disabled={busy || workspaceId == null}
-          className="ml-auto rounded bg-ai-signal px-3 py-1 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
-          title="Summarise what the review bots are flagging in this scope (runs the Haiku model; unchanged comments are not re-read)"
-        >
-          {busy ? (
-            'Summarising…'
-          ) : result ? (
-            <>
-              <RefreshIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
-              Regenerate
-            </>
-          ) : (
-            'Generate'
-          )}
-        </button>
+        <span className="ml-auto">
+          <AiRunGate>
+            <button
+              type="button"
+              onClick={() => refresh.mutate()}
+              disabled={busy || workspaceId == null}
+              className="rounded bg-ai-signal px-3 py-1 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
+              title="Summarise what the review bots are flagging in this scope (runs the Haiku model; unchanged comments are not re-read)"
+            >
+              {busy ? (
+                'Summarising…'
+              ) : result ? (
+                <>
+                  <RefreshIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
+                  Regenerate
+                </>
+              ) : (
+                'Generate'
+              )}
+            </button>
+          </AiRunGate>
+        </span>
       </div>
 
       {refresh.isError && (

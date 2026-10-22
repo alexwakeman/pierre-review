@@ -7371,8 +7371,7 @@ export type ClaudeAutoFixOutcome =
 // `GET`/`PUT /api/claude-review/key`. The BYO Anthropic key that lived in
 // `~/.pierre-review/config.json` is retired: local Claude Review resolves credentials from an
 // ambient Claude session first (so a subscription pays) and otherwise leaves the environment's
-// `ANTHROPIC_API_KEY` in place — two rungs, no stored secret, no form. Cloud never used any of
-// this (it runs on `SUMMARY_ANTHROPIC_API_KEY` and the section never rendered there).
+// `ANTHROPIC_API_KEY` in place — two rungs, no stored secret, no form (backend ai/credentials.ts).
 //
 // An already-stored `anthropicApiKey` is left on disk untouched and simply never read: the
 // decision was to stop reading it, not to destroy somebody's file. Do not re-add a route "just to
